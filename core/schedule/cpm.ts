@@ -436,7 +436,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       if (a.status === 'CO' || a.type === 'TT_LOE' || !cstr(a).some(([t]) => t === 'CS_ALAP')) continue;
       let ef = BIG; // successors limit it, not the late finish (negative float stays negative)
       for (const r of a.succs) {
-        if (!r.succ || !isMain(r.succ) || r.succ.status === 'CO') continue;
+        if (!r.succ || !isMain(r.succ)) continue; // completed successors count with their propagated dates
         const s = r.succ;
         let t = lagSub(r.type === 'FS' || r.type === 'SS' ? s.es : s.ef, r);
         if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
