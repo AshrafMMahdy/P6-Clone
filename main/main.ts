@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { buildMenu } from './menu.ts';
+import { mppToXml, xmlToMpp } from './msproject.ts';
 
 const DB_FILE = () => join(app.getPath('userData'), 'p6clone-db.json');
 let win: BrowserWindow | null = null;
@@ -65,7 +67,33 @@ ipcMain.handle('startup:import', () => {
   return p && existsSync(p) ? { path: p, name: basename(p), bytes: new Uint8Array(readFileSync(p)) } : null;
 });
 
-ipcMain.handle('confirm', async (_e, message: string, detail?: string) => {
+// Microsoft Project .mpp bridge (needs an installed Microsoft Project, like P6). Temp files live in their own folder.
+async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+  const dir = mkdtempSync(join(tmpdir(), 'p6clone-msp-'));
+  try { return await fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+ipcMain.handle('msp:mppToXml', (_e, bytes: Uint8Array) => withTempDir(async (dir) => {
+  const mpp = join(dir, 'import.mpp'), xml = join(dir, 'import.xml');
+  writeFileSync(mpp, bytes);
+  await mppToXml(mpp, xml);
+  return new Uint8Array(readFileSync(xml));
+}));
+
+ipcMain.handle('msp:xmlToMpp', async (_e, defaultName: string, xmlBytes: Uint8Array) => {
+  const r = await dialog.showSaveDialog(win!, { defaultPath: defaultName, filters: [{ name: 'Microsoft Project (MPP)', extensions: ['mpp'] }] });
+  if (r.canceled || !r.filePath) return null;
+  const target = r.filePath;
+  await withTempDir(async (dir) => {
+    const xml = join(dir, 'export.xml'), mpp = join(dir, 'export.mpp');
+    writeFileSync(xml, xmlBytes);
+    await xmlToMpp(xml, mpp);
+    copyFileSync(mpp, target);
+  });
+  return target;
+});
+
+ipcMain.handle('confirm',async (_e, message: string, detail?: string) => {
   const r = await dialog.showMessageBox(win!, { type: 'question', buttons: ['Yes', 'No'], defaultId: 0, cancelId: 1, title: 'Primavera P6 Professional', message, detail });
   return r.response === 0;
 });

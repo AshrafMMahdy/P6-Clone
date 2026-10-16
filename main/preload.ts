@@ -13,6 +13,10 @@ const api = {
   pdf: (name: string, landscape: boolean): Promise<string | null> => ipcRenderer.invoke('pdf', name, landscape),
   startupImport: (): Promise<OpenedFile | null> => ipcRenderer.invoke('startup:import'),
   confirm: (message: string, detail?: string): Promise<boolean> => ipcRenderer.invoke('confirm', message, detail),
+  /** .mpp bytes -> Microsoft Project XML bytes, converted by the installed Microsoft Project. Rejects with the bridge error. */
+  mppToXml: (bytes: Uint8Array): Promise<Uint8Array> => ipcRenderer.invoke('msp:mppToXml', bytes),
+  /** Ask for an .mpp path and save Microsoft Project XML bytes there through Microsoft Project. Null when cancelled. */
+  xmlToMpp: (defaultName: string, xmlBytes: Uint8Array): Promise<string | null> => ipcRenderer.invoke('msp:xmlToMpp', defaultName, xmlBytes),
 };
 
 export type P6Api = typeof api;

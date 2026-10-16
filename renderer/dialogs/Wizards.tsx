@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dialog } from '../components/Layout.tsx';
 import { closeDialog, getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
-import { detectFormat, exportFile, parseFile, type Format, type ParsedFile } from '../io.ts';
+import { bridgeMessage, detectFormat, exportFile, FORMAT_INFO, isMspFormat, MSP_FORMATS, parseFile, parseFileAsync, type Format, type ParsedFile } from '../io.ts';
 import { importIntoDb, type ImportPlan, type ProjectAction, type DictAction } from '../../core/xer/import.ts';
 import { EXPORT_VERSIONS, verification } from '../../core/xer/schema.ts';
 import { worst } from '../../core/findings.ts';
@@ -28,6 +28,19 @@ function WizardFrame(p: { title: string; steps: string[]; step: number; children
   );
 }
 
+/** "Microsoft Project (MPP, MPX, XML)" radio with its file-type sub-choice, used by both wizards. */
+function MspFormatChoice(p: { format: Format; setFormat: (f: Format) => void; note?: string }) {
+  const on = isMspFormat(p.format);
+  return <>
+    <label style={{ display: 'block', margin: '6px 0' }}><input type="radio" checked={on} onChange={() => p.setFormat('mspdi')} /> Microsoft Project (MPP, MPX, XML)</label>
+    {on && <div style={{ margin: '2px 0 10px 24px' }}>
+      {MSP_FORMATS.map((f) => <label key={f} style={{ display: 'block', margin: '3px 0' }}><input type="radio" checked={p.format === f} onChange={() => p.setFormat(f)} /> {FORMAT_INFO[f].label}</label>)}
+      {p.format === 'mpp' && <div className="muted" style={{ marginTop: 4 }}>Like Primavera P6, .mpp files are converted by an installed Microsoft Project (it runs hidden in the background).</div>}
+      {p.note && <div className="muted" style={{ marginTop: 4 }}>{p.note}</div>}
+    </div>}
+  </>;
+}
+
 const DICTS: [string, string][] = [['CALENDAR', 'Calendars'], ['RSRC', 'Resources'], ['ROLES', 'Roles'], ['ACTVTYPE', 'Activity Codes'], ['UDFTYPE', 'User Defined Fields'], ['ACCOUNT', 'Cost Accounts']];
 
 /** File > Import wizard (P6 steps: format, type, file, projects, update options, finish). */
@@ -37,7 +50,10 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
   const [step, setStep] = useState(props.preload ? 2 : 0);
   const [format, setFormat] = useState<Format>(props.preload ? detectFormat(props.preload.name, props.preload.bytes) : 'xer');
   const [importType, setImportType] = useState('project');
-  const [file, setFile] = useState<{ name: string; parsed: ParsedFile } | null>(() => props.preload ? { name: props.preload.name, parsed: parseFile(props.preload.name, props.preload.bytes) } : null);
+  const preloadMpp = !!props.preload && detectFormat(props.preload.name, props.preload.bytes) === 'mpp';
+  const [file, setFile] = useState<{ name: string; parsed: ParsedFile } | null>(() => props.preload && !preloadMpp ? { name: props.preload.name, parsed: parseFile(props.preload.name, props.preload.bytes) } : null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
   const [plan, setPlan] = useState<ImportPlan['projects']>(() => file ? defaultRows(file.parsed) : []);
   const [dict, setDict] = useState<Record<string, DictAction>>({});
   const steps = ['Import Format', 'Import Type', 'Import File', 'Projects To Import', 'Update Project Options', 'Finish'];
@@ -49,12 +65,43 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
     });
   }
 
+  const load = async (path: string, name: string, bytes: Uint8Array, fmt: Format) => {
+    setBridgeError(null);
+    if (fmt !== 'mpp') {
+      const parsed = parseFile(name, bytes, fmt);
+      setFile({ name: path, parsed });
+      setPlan(defaultRows(parsed));
+      return;
+    }
+    setFile(null);
+    setBusy('Converting the .mpp file with Microsoft Project...');
+    try {
+      const parsed = await parseFileAsync(name, bytes, 'mpp', window.p6);
+      setFile({ name: path, parsed });
+      setPlan(defaultRows(parsed));
+    } catch (e) {
+      setBridgeError(bridgeMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  useEffect(() => {
+    if (preloadMpp && props.preload) void load(props.preload.name, props.preload.name, props.preload.bytes, 'mpp');
+  }, []);
+
   const browse = async () => {
-    const f = await window.p6.openFile(format === 'xml' ? [{ name: 'Primavera PM/EPPM XML', extensions: ['xml'] }, { name: 'All Files', extensions: ['*'] }] : [{ name: 'Primavera PM (XER)', extensions: ['xer'] }, { name: 'All Files', extensions: ['*'] }], 'Select Import File');
+    const msp = isMspFormat(format);
+    const filters = msp
+      ? [{ name: 'Microsoft Project (*.mpp, *.mpx, *.xml)', extensions: ['mpp', 'mpx', 'xml'] }, FORMAT_INFO[format].filter, { name: 'All Files', extensions: ['*'] }]
+      : [FORMAT_INFO[format].filter, { name: 'All Files', extensions: ['*'] }];
+    const f = await window.p6.openFile(filters, 'Select Import File');
     if (!f) return;
-    const parsed = parseFile(f.name, f.bytes, format);
-    setFile({ name: f.path, parsed });
-    setPlan(defaultRows(parsed));
+    // Within the Microsoft Project family the file decides (an .mpx picked while "XML" is selected is still read as MPX).
+    const detected = detectFormat(f.name, f.bytes);
+    const fmt = msp && isMspFormat(detected) ? detected : format;
+    if (fmt !== format) setFormat(fmt);
+    await load(f.path, f.name, f.bytes, fmt);
   };
 
   const verdict = file ? worst(file.parsed.findings) : null;
@@ -88,13 +135,13 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
     <WizardFrame title="Import" steps={steps} step={step}
       onBack={step > 0 ? () => setStep(step - 1) : undefined}
       onNext={step < 5 ? () => setStep(step + 1) : undefined}
-      nextDisabled={step === 2 && !file}
-      onFinish={file && step >= 3 ? finish : undefined}>
+      nextDisabled={(step === 2 && !file) || !!busy}
+      onFinish={file && step >= 3 && !busy ? finish : undefined}>
       {step === 0 && <>
         <h3>Select the format of the data you want to import</h3>
         <label style={{ display: 'block', margin: '6px 0' }}><input type="radio" checked={format === 'xer'} onChange={() => setFormat('xer')} /> Primavera PM - (XER)</label>
         <label style={{ display: 'block', margin: '6px 0' }}><input type="radio" checked={format === 'xml'} onChange={() => setFormat('xml')} /> Primavera PM/EPPM - (XML)</label>
-        <label style={{ display: 'block', margin: '6px 0', color: '#999' }}><input type="radio" disabled /> Microsoft Project (not available in this clone)</label>
+        <MspFormatChoice format={format} setFormat={setFormat} />
         <label style={{ display: 'block', margin: '6px 0', color: '#999' }}><input type="radio" disabled /> Spreadsheet - (XLS) (not available in this clone)</label>
       </>}
       {step === 1 && <>
@@ -107,10 +154,16 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
         <h3>Select the file to import</h3>
         <div style={{ display: 'flex', gap: 6 }}>
           <input readOnly value={file?.name ?? ''} style={{ flex: 1, border: '1px solid #7f9db9', height: 21 }} />
-          <button className="btn" onClick={browse}>Browse...</button>
+          <button className="btn" onClick={browse} disabled={!!busy}>Browse...</button>
         </div>
+        {busy && <div style={{ marginTop: 12, padding: 8, border: '1px solid #ccc', background: '#f4f4f4' }}>{busy}</div>}
+        {bridgeError && <div style={{ marginTop: 12, padding: 8, border: '1px solid #ccc', background: '#fde4e4' }}>
+          <b>The .mpp file could not be imported.</b>
+          <div style={{ marginTop: 4 }}>{bridgeError}</div>
+          <div className="muted" style={{ marginTop: 4 }}>You can save the file from Microsoft Project as XML or MPX and import that instead.</div>
+        </div>}
         {file && <div style={{ marginTop: 12 }}>
-          <div>Format: <b>{file.parsed.format.toUpperCase()}</b>{file.parsed.db.header && <> · ERMHDR version <b>{file.parsed.db.header.version}</b> · exported {file.parsed.db.header.exportDate} by {file.parsed.db.header.raw[5] ?? file.parsed.db.header.raw[4]}</>}</div>
+          <div>Format: <b>{isMspFormat(file.parsed.format) ? FORMAT_INFO[file.parsed.format].label : file.parsed.format.toUpperCase()}</b>{file.parsed.db.header && <> · ERMHDR version <b>{file.parsed.db.header.version}</b> · exported {file.parsed.db.header.exportDate} by {file.parsed.db.header.raw[5] ?? file.parsed.db.header.raw[4]}</>}</div>
           <div>Tables: {Object.keys(file.parsed.db.tables).length} · Projects: {rows(file.parsed.db, 'PROJECT').length} · Activities: {rows(file.parsed.db, 'TASK').length} · Relationships: {rows(file.parsed.db, 'TASKPRED').length}</div>
           <div style={{ marginTop: 8, padding: 8, border: '1px solid #ccc', background: verdict === 'fatal' ? '#fde4e4' : verdict === 'error' ? '#fff0e0' : '#e9f7e9' }}>
             <b>{verdict === 'fatal' ? 'P6 would REJECT this file.' : verdict === 'error' ? 'P6 import would FAIL or drop data.' : 'P6 would import this file.'}</b>
@@ -180,29 +233,49 @@ export function ExportWizard(props: { projIds?: string[] }) {
   const [format, setFormat] = useState<Format>('xer');
   const [version, setVersion] = useState('19.12');
   const [sel, setSel] = useState<string[]>(props.projIds ?? (ui.openProjects.length ? ui.openProjects : projects.slice(0, 1).map((p) => p.proj_id)));
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const steps = ['Export Format', 'Export Type', 'Projects To Export', 'File Name'];
+  const msp = isMspFormat(format);
   const finish = async () => {
-    const bytes = exportFile(getDb(), format, { version, projIds: sel });
-    const first = projects.find((p) => p.proj_id === sel[0]);
-    const path = await window.p6.saveFile(`${first?.proj_short_name ?? 'export'}.${format}`, bytes, format === 'xml' ? [{ name: 'P6 XML', extensions: ['xml'] }] : [{ name: 'Primavera PM (XER)', extensions: ['xer'] }]);
+    // A Microsoft Project file holds one project (P6 exports one project per MS Project file).
+    const ids = msp ? sel.slice(0, 1) : sel;
+    const bytes = exportFile(getDb(), format, { version, projIds: ids });
+    const first = projects.find((p) => p.proj_id === ids[0]);
+    const base = (first?.proj_short_name ?? 'export').replace(/[\\/:*?"<>|]/g, '_');
+    setError(null);
+    let path: string | null;
+    if (format === 'mpp') {
+      setBusy('Saving the .mpp file with Microsoft Project...');
+      try {
+        path = await window.p6.xmlToMpp(`${base}.mpp`, bytes);
+      } catch (e) {
+        setError(bridgeMessage(e));
+        return;
+      } finally {
+        setBusy(null);
+      }
+    } else {
+      path = await window.p6.saveFile(`${base}.${FORMAT_INFO[format].ext}`, bytes, [FORMAT_INFO[format].filter]);
+    }
     if (!path) return;
     closeDialog();
-    // self-check: re-import what was written
-    const check = parseFile(path, bytes, format);
+    // self-check: re-import what was written (for .mpp, the XML handed to Microsoft Project)
+    const check = parseFile(path, bytes, format === 'mpp' ? 'mspdi' : format);
     const w = worst(check.findings);
-    toast(`Exported ${sel.length} project(s) to ${path}. Self-check: ${w === 'fatal' || w === 'error' ? 'PROBLEMS (see Import Log)' : 'OK'}`);
+    toast(`Exported ${ids.length} project(s) to ${path}. Self-check: ${w === 'fatal' || w === 'error' ? 'PROBLEMS (see Import Log)' : 'OK'}`);
     if (w === 'fatal' || w === 'error') { setUi({ importLog: { file: path, findings: check.findings } }); openDialog('importLog', {}); }
   };
   return (
     <WizardFrame title="Export" steps={steps} step={step} onBack={step > 0 ? () => setStep(step - 1) : undefined} onNext={step < 3 ? () => setStep(step + 1) : undefined}
-      nextDisabled={step === 2 && !sel.length} onFinish={sel.length ? finish : undefined} finishLabel="Finish...">
+      nextDisabled={(step === 2 && !sel.length) || !!busy} onFinish={sel.length && !busy ? finish : undefined} finishLabel="Finish...">
       {step === 0 && <>
         <h3>Select the format of the export file</h3>
         <label style={{ display: 'block', margin: '6px 0' }}><input type="radio" checked={format === 'xer'} onChange={() => setFormat('xer')} /> Primavera PM - (XER)</label>
         {format === 'xer' && <div style={{ margin: '4px 0 10px 24px' }}>Version: <select value={version} onChange={(e) => setVersion(e.target.value)}>{EXPORT_VERSIONS.map((v) => <option key={v}>{v}</option>)}</select>
           <span className="muted" style={{ marginLeft: 8 }}>Field layout: {verification(version, 'TASK') === 'exact' ? 'verified against real P6 export' : verification(version, 'TASK') === 'modern-build' ? 'from a real modern P6 build' : 'best knowledge'}</span></div>}
         <label style={{ display: 'block', margin: '6px 0' }}><input type="radio" checked={format === 'xml'} onChange={() => setFormat('xml')} /> Primavera PM/EPPM - (XML)</label>
-        <label style={{ display: 'block', margin: '6px 0', color: '#999' }}><input type="radio" disabled /> Microsoft Project (not available)</label>
+        <MspFormatChoice format={format} setFormat={setFormat} note="A Microsoft Project file holds one project; with several selected, the first one is exported." />
       </>}
       {step === 1 && <>
         <h3>Select the type of data to export</h3>
@@ -219,8 +292,11 @@ export function ExportWizard(props: { projIds?: string[] }) {
       </>}
       {step === 3 && <>
         <h3>File name</h3>
-        <p>Click <b>Finish...</b> to choose where to save the {format.toUpperCase()} file{format === 'xer' ? ` (version ${version})` : ''}.</p>
+        <p>Click <b>Finish...</b> to choose where to save the {msp ? FORMAT_INFO[format].label : format.toUpperCase()} file{format === 'xer' ? ` (version ${version})` : ''}.</p>
+        {msp && sel.length > 1 && <p className="sev-warning">{sel.length} projects are selected; a Microsoft Project file holds one project, so only the first one is exported.</p>}
         <p className="muted">After writing, the clone re-reads the file and validates it the same way it validates imports.</p>
+        {busy && <div style={{ marginTop: 8, padding: 8, border: '1px solid #ccc', background: '#f4f4f4' }}>{busy}</div>}
+        {error && <div style={{ marginTop: 8, padding: 8, border: '1px solid #ccc', background: '#fde4e4' }}><b>The .mpp file could not be saved.</b><div style={{ marginTop: 4 }}>{error}</div><div className="muted" style={{ marginTop: 4 }}>Microsoft Project XML or MPX can be exported without Microsoft Project.</div></div>}
       </>}
     </WizardFrame>
   );

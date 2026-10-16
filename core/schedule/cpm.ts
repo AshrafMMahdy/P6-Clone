@@ -1,6 +1,6 @@
 // P6-style CPM scheduler (F9). Works on raw TASK/TASKPRED rows and writes dates back.
 import { addField, rows, table, type Db, type Row } from '../db.ts';
-import { formatP6Date, parseP6Date } from '../dates.ts';
+import { formatP6Date, parseP6Date, MIN_PER_DAY } from '../dates.ts';
 import type { Finding } from '../findings.ts';
 import { WorkCalendar, CalendarHorizonError } from '../calendar/calendar.ts';
 import { inheritExceptions, parseClndrData, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
@@ -400,7 +400,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         r.slack = relSlack(r);
         if (r.slack < ff) ff = r.slack;
       }
-      a.ff = ff === BIG ? a.cal.workBetween(a.ef, a.proj.finish) : ff;
+      // open end: free float to the project finish; P6 6.x builds measure it to the end of the Must Finish By day
+      const openEnd = a.proj.opts.legacyMilestones && a.proj.mfb != null ? a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY) : a.proj.finish;
+      a.ff = ff === BIG ? a.cal.workBetween(a.ef, openEnd) : ff;
     }
     // As Late As Possible: from the end of the network backwards, finish at the latest time that does not delay
     // any successor's early dates (successors already final), never past the activity's own late finish.
