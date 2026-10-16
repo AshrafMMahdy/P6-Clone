@@ -1,7 +1,7 @@
 import { useEffect, type JSX } from 'react';
 import { Icon } from './components/Icons.tsx';
 import { ContextMenuHost } from './components/Layout.tsx';
-import { closeDialog, doRedo, doUndo, getDb, getUi, loadFromDisk, openDialog, replaceDb, saveNow, setUi, toast, useStore, undoLabel, type ViewName } from './store.ts';
+import { closeDialog, doRedo, doUndo, getDb, getUi, loadFromDisk, mutate, openDialog, replaceDb, saveNow, setUi, toast, useStore, undoLabel, type ViewName } from './store.ts';
 import { activityCommands, handleEditKey, runSchedule, copyActivities, pasteActivities, renumberActivities } from './commands.ts';
 import { ActivitiesView } from './views/ActivitiesView.tsx';
 import { ProjectsView, openProjects } from './views/ProjectsView.tsx';
@@ -9,6 +9,10 @@ import { WbsView } from './views/WbsView.tsx';
 import { ResourcesView } from './views/ResourcesView.tsx';
 import { AssignmentsView } from './views/AssignmentsView.tsx';
 import { ReportsView } from './views/ReportsView.tsx';
+import { RiskView } from './views/RiskView.tsx';
+import { TimesheetsView } from './views/TimesheetsView.tsx';
+import { PortfoliosView } from './views/PortfoliosView.tsx';
+import { applyApprovedTimesheets, formatApplySummary, hasPendingActuals } from '../core/timesheet/timesheet.ts';
 import { ImportWizard, ExportWizard } from './dialogs/Wizards.tsx';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
@@ -29,7 +33,8 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
   ['projects', 'Projects', Icon.projects], ['wbs', 'WBS', Icon.wbs], ['activities', 'Activities', Icon.activities],
-  ['assignments', 'Assignments', Icon.assignments], ['resources', 'Resources', Icon.resources], ['reports', 'Reports', Icon.reports],
+  ['assignments', 'Assignments', Icon.assignments], ['resources', 'Resources', Icon.resources], ['timesheets', 'Timesheets', Icon.timesheets],
+  ['risk', 'Risks', Icon.risk], ['portfolios', 'Portfolios', Icon.portfolios], ['reports', 'Reports', Icon.reports],
 ];
 
 export function runMenu(id: string): void {
@@ -94,7 +99,16 @@ export function runMenu(id: string): void {
     case 'tools.schedule': return needProject() ? undefined : openDialog('schedule');
     case 'tools.level': return needProject() ? undefined : openDialog('level');
     case 'tools.progress': return needProject() ? undefined : openDialog('progress');
-    case 'tools.applyActuals': return needProject() ? undefined : openDialog('progress');
+    case 'tools.applyActuals': {
+      if (needProject()) return;
+      if (!hasPendingActuals(getDb(), ui.openProjects)) return toast('No approved timesheet hours to apply. Use Tools > Timesheet Approval.');
+      let msg = '';
+      mutate('Apply Actuals', (d) => { msg = formatApplySummary(applyApprovedTimesheets(d, ui.openProjects)); });
+      return toast(msg);
+    }
+    case 'tools.timesheets': return setUi({ view: 'timesheets' });
+    case 'project.risks': case 'tools.riskAnalysis': return setUi({ view: 'risk' });
+    case 'ent.portfolios': return setUi({ view: 'portfolios' });
     case 'tools.schedLog': return openDialog('log', { title: 'Schedule Log', text: ui.scheduleLog ?? '' });
     case 'tools.importLog': return openDialog('importLog', {});
     case 'tools.reports': return setUi({ view: 'reports' });
@@ -177,8 +191,8 @@ export function App() {
   }, []);
 
   const open = ui.openProjects.map((id) => rows(db, 'PROJECT').find((p) => p.proj_id === id)).filter((p) => p != null);
-  const title = { projects: 'Projects', wbs: 'WBS', activities: 'Activities', assignments: 'Resource Assignments', resources: 'Resources', reports: 'Reports' }[ui.view];
-  const View = { projects: ProjectsView, wbs: WbsView, activities: ActivitiesView, assignments: AssignmentsView, resources: ResourcesView, reports: ReportsView }[ui.view];
+  const title = { projects: 'Projects', wbs: 'WBS', activities: 'Activities', assignments: 'Resource Assignments', resources: 'Resources', reports: 'Reports', risk: 'Risks', timesheets: 'Timesheets', portfolios: 'Project Portfolios' }[ui.view];
+  const View = { projects: ProjectsView, wbs: WbsView, activities: ActivitiesView, assignments: AssignmentsView, resources: ResourcesView, reports: ReportsView, risk: RiskView, timesheets: TimesheetsView, portfolios: PortfoliosView }[ui.view];
   const p0 = open[0];
   const dlg = ui.dialogs[ui.dialogs.length - 1];
   const Dlg = dlg ? DIALOGS[dlg.kind] : null;

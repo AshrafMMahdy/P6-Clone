@@ -227,7 +227,7 @@ function Resources({ t, ctx }: { t: Row; ctx: Ctx }) {
       </div>
       <div className="tblwrap" style={{ flex: 1, margin: '0 6px 6px' }}>
         <table className="tbl">
-          <thead><tr><th>Resource ID</th><th>Resource Name</th><th>Type</th><th>Budgeted Units</th><th>Actual Units</th><th>Remaining Units</th><th>Units/Time</th><th>Price/Unit</th><th>Budgeted Cost</th><th>Actual Cost</th><th>Remaining Cost</th></tr></thead>
+          <thead><tr><th>Resource ID</th><th>Resource Name</th><th>Type</th><th>Budgeted Units</th><th>Actual Units</th><th>Remaining Units</th><th>Units/Time</th><th>Price/Unit</th><th>Curve</th><th>Budgeted Cost</th><th>Actual Cost</th><th>Remaining Cost</th></tr></thead>
           <tbody>
             {list.map((a) => {
               const r = ctx.rsrc.get(a.rsrc_id);
@@ -237,11 +237,13 @@ function Resources({ t, ctx }: { t: Row; ctx: Ctx }) {
                   <td>{r?.rsrc_short_name ?? a.rsrc_id}</td><td>{r?.rsrc_name}</td><td>{RSRC_TYPES[a.rsrc_type || r?.rsrc_type || ''] ?? ''}</td>
                   <td>{num('target_qty')}</td><td>{num('act_reg_qty')}</td><td>{num('remain_qty')}</td>
                   <td>{p6num(Number(a.target_qty_per_hr || 0) * 8)}/d</td><td>{p6num(priceOf(getDb(), a))}</td>
+                  <td><select value={a.curv_id || ''} onChange={(e) => mutate('Change Resource Curve', (db) => { const x = db.tables.TASKRSRC.rows.find((y) => y.taskrsrc_id === a.taskrsrc_id)!; addField(db.tables.TASKRSRC, 'curv_id'); x.curv_id = e.target.value; })}>
+                    <option value=''>Linear (default)</option>{rows(ctx.db, 'RSRCCURVDATA').map((c) => <option key={c.curv_id} value={c.curv_id}>{c.curv_name}</option>)}</select></td>
                   <td>{p6num(Number(a.target_cost || 0))}</td><td>{p6num(Number(a.act_reg_cost || 0) + Number(a.act_ot_cost || 0))}</td><td>{p6num(Number(a.remain_cost || 0))}</td>
                 </tr>
               );
             })}
-            {!list.length && <tr><td colSpan={11} className="muted">No resources assigned</td></tr>}
+            {!list.length && <tr><td colSpan={12} className="muted">No resources assigned</td></tr>}
           </tbody>
         </table>
       </div>

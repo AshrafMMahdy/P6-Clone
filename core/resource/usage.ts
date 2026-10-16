@@ -3,6 +3,7 @@ import { indexBy, rows, type Db, type Row } from '../db.ts';
 import { MIN_PER_DAY, parseP6Date } from '../dates.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
 import type { WorkCalendar } from '../calendar/calendar.ts';
+import { curveOf, shareBetween, type Curve } from './curve.ts';
 
 export type UsageBucket = 'day' | 'week' | 'month';
 
@@ -64,7 +65,9 @@ export function spreadUsage(db: Db, projIds: string[], opts: { start: number; en
     while (lo < hi) { const m = (lo + hi) >> 1; if (ends[m] <= t) lo = m + 1; else hi = m; }
     return lo;
   };
-  const spread = (into: number[], qty: number, a: number, b: number, cal: WorkCalendar) => {
+  const curves = new Map(rows(db, 'RSRCCURVDATA').map((c) => [c.curv_id, curveOf(c)]));
+  // Spread qty over the work time [a, b]: linearly, or along a P6 resource curve when one is given.
+  const spread = (into: number[], qty: number, a: number, b: number, cal: WorkCalendar, curve: Curve | null = null) => {
     if (!(qty > 0) || !n) return;
     const total = b > a ? cal.workBetween(a, b) : 0;
     if (total <= 0) {
@@ -72,9 +75,11 @@ export function spreadUsage(db: Db, projIds: string[], opts: { start: number; en
       if (i < n && a >= buckets[0]) into[i] += qty;
       return;
     }
+    let done = 0; // work minutes from a to the start of the current bucket
     for (let i = firstBucket(a); i < n && buckets[i] < b; i++) {
       const w = cal.workBetween(Math.max(a, buckets[i]), Math.min(b, ends[i]));
-      if (w > 0) into[i] += (qty * w) / total;
+      if (w > 0 || (curve && buckets[i] <= a)) into[i] += qty * shareBetween(curve, done === 0 && buckets[i] <= a ? 0 : done / total, (done + w) / total);
+      done += w;
     }
   };
 
@@ -103,7 +108,7 @@ export function spreadUsage(db: Db, projIds: string[], opts: { start: number; en
       let re = parseP6Date(a.reend_date || t?.reend_date || t?.early_end_date);
       if (rs != null) {
         if (re == null || re < rs) re = rs;
-        spread(r.remaining, rem, rs, re, cal);
+        spread(r.remaining, rem, rs, re, cal, a.curv_id ? curves.get(a.curv_id) ?? null : null);
       }
     }
   }

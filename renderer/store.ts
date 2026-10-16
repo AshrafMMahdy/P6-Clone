@@ -5,7 +5,7 @@ import type { Finding } from '../core/findings.ts';
 
 declare global { interface Window { p6: P6Api } }
 
-export type ViewName = 'projects' | 'wbs' | 'activities' | 'resources' | 'assignments' | 'reports';
+export type ViewName = 'projects' | 'wbs' | 'activities' | 'resources' | 'assignments' | 'reports' | 'risk' | 'timesheets' | 'portfolios';
 export type BottomPane = 'details' | 'profile' | 'spreadsheet' | 'none';
 
 export interface Prefs { hoursPerDay: number; dateFormat: 'dd-MMM-yy' | 'yyyy-mm-dd' | 'mm/dd/yy' | 'dd/mm/yy'; showTime: boolean; durationDecimals: number }
