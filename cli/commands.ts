@@ -3,6 +3,7 @@ import type { Db } from '../core/db.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { writeXer } from '../core/xer/write.ts';
+import { syncAssignmentDates } from '../core/resource/assign.ts';
 
 export interface ScheduleCmdOptions { dataDate?: string; out?: string; version?: string; json?: boolean }
 
@@ -18,6 +19,7 @@ export async function runScheduleCommand(cmd: string, db: Db, o: ScheduleCmdOpti
     for (const id of projIds) extra[id] = updateProgress(db, id, dd);
   }
   const res = scheduleProjects(db, projIds, dd != null ? { dataDate: dd } : {});
+  if (res.ok) syncAssignmentDates(db);
   if (cmd === 'level' && res.ok) {
     const { levelResources } = await import('../core/level/level.ts');
     extra.level = levelResources(db, projIds, {});

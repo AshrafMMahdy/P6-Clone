@@ -1,0 +1,183 @@
+import { useState } from 'react';
+import { Dialog, Tabs } from '../components/Layout.tsx';
+import { closeDialog, getDb, mutate, setUi, toast, useStore } from '../store.ts';
+import { rows } from '../../core/db.ts';
+import { formatP6Date, parseP6Date } from '../../core/dates.ts';
+import { deleteProject } from '../../core/xer/import.ts';
+import { saveBaseline, assignBaseline, deleteBaseline, restoreBaseline } from '../../core/progress/baseline.ts';
+import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, TASK_TYPES, ensureEps, fmtDate, newProject, projectName } from '../model.ts';
+import { openProjects } from '../views/ProjectsView.tsx';
+
+const dt = (s: string) => (s ? s.replace(' ', 'T').slice(0, 16) : '');
+const fromDt = (s: string) => (s ? formatP6Date(parseP6Date(s.replace('T', ' '))!) : '');
+void CSTR_TYPES;
+
+export function NewProjectDialog() {
+  const db = getDb();
+  const eps = db.tables.EPS?.rows ?? [];
+  const [id, setId] = useState(`PROJ-${rows(db, 'PROJECT').length + 1}`);
+  const [name, setName] = useState('New Project');
+  const [start, setStart] = useState(new Date().toISOString().slice(0, 10) + 'T08:00');
+  const [epsId, setEps] = useState(eps[0]?.eps_id ?? '1');
+  const create = () => {
+    if (!id.trim()) return toast('Project ID is required.');
+    if (rows(db, 'PROJECT').some((p) => p.proj_short_name === id.trim())) return toast(`Project ID ${id} already exists.`);
+    let pid = '';
+    mutate('New Project', (d) => { pid = newProject(d, { id: id.trim(), name, start: fromDt(start), epsId }); });
+    closeDialog();
+    openProjects([pid]);
+  };
+  return (
+    <Dialog title="Create a New Project" width={500} buttons={<><button className="btn primary" onClick={create}>Finish</button><button className="btn" onClick={closeDialog}>Cancel</button></>}>
+      <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
+        <label>EPS</label><select value={epsId} onChange={(e) => setEps(e.target.value)}>{(eps.length ? eps : [{ eps_id: '1', eps_short_name: 'Enterprise', eps_name: 'All Initiatives' }]).map((e) => <option key={e.eps_id} value={e.eps_id}>{e.eps_short_name} - {e.eps_name}</option>)}</select>
+        <label>Project ID</label><input value={id} onChange={(e) => setId(e.target.value)} />
+        <label>Project Name</label><input value={name} onChange={(e) => setName(e.target.value)} />
+        <label>Planned Start</label><input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+      </div>
+    </Dialog>
+  );
+}
+
+export function ProjectDetailsDialog(props: { projId?: string }) {
+  const ui = useStore((s) => s.ui);
+  const db = useStore((s) => s.db);
+  useStore((s) => s.dbVersion);
+  const pid = props.projId ?? ui.selProject ?? ui.openProjects[0];
+  const p = rows(db, 'PROJECT').find((x) => x.proj_id === pid);
+  const [tab, setTab] = useState('general');
+  if (!p) return <Dialog title="Project Details" buttons={<button className="btn" onClick={closeDialog}>Close</button>}><p>No project selected.</p></Dialog>;
+  const root = rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y');
+  const set = (field: string, v: string, label = 'Edit Project') => mutate(label, (d) => {
+    const r = d.tables.PROJECT.rows.find((x) => x.proj_id === pid)!;
+    if (!d.tables.PROJECT.fields.includes(field)) d.tables.PROJECT.fields.push(field);
+    r[field] = v;
+  });
+  const cals = rows(db, 'CALENDAR').filter((c) => !c.proj_id || c.proj_id === pid).filter((c) => c.clndr_type !== 'CA_Rsrc');
+  const eps = db.tables.EPS?.rows ?? [];
+  return (
+    <Dialog title={`Project Details - ${p.proj_short_name}`} width={720} height={430} buttons={<button className="btn" onClick={closeDialog}>Close</button>}>
+      <Tabs tabs={[['general', 'General'], ['dates', 'Dates'], ['defaults', 'Defaults'], ['settings', 'Settings']]} value={tab} onChange={setTab} />
+      <div style={{ padding: 10, border: '1px solid #a0a0a0', borderTop: 'none', background: '#f0f0f0' }}>
+        {tab === 'general' && <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
+          <label>Project ID</label><input defaultValue={p.proj_short_name} onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (!v || v === p.proj_short_name) return;
+            if (rows(db, 'PROJECT').some((x) => x.proj_id !== pid && x.proj_short_name === v)) return toast('Project ID already exists.');
+            mutate('Rename Project', (d) => { d.tables.PROJECT.rows.find((x) => x.proj_id === pid)!.proj_short_name = v; const w = d.tables.PROJWBS.rows.find((x) => x.proj_id === pid && x.proj_node_flag === 'Y'); if (w) w.wbs_short_name = v; });
+          }} />
+          <label>Project Name</label><input defaultValue={projectName(db, p)} onBlur={(e) => mutate('Rename Project', (d) => { const w = d.tables.PROJWBS.rows.find((x) => x.proj_id === pid && x.proj_node_flag === 'Y'); if (w) w.wbs_name = e.target.value; else d.tables.PROJECT.rows.find((x) => x.proj_id === pid)!._name = e.target.value; })} />
+          <label>EPS</label><select value={p._eps_id || eps[0]?.eps_id} onChange={(e) => set('_eps_id', e.target.value, 'Move Project')}>{eps.map((e) => <option key={e.eps_id} value={e.eps_id}>{e.eps_short_name} - {e.eps_name}</option>)}</select>
+          <label>Status</label><select value={root?.status_code || 'WS_Open'} onChange={(e) => mutate('Project Status', (d) => { const w = d.tables.PROJWBS.rows.find((x) => x.proj_id === pid && x.proj_node_flag === 'Y'); if (w) w.status_code = e.target.value; })}><option value="WS_Planned">Planned</option><option value="WS_Open">Active</option><option value="WS_Closed">Inactive</option><option value="WS_Whatif">What-If</option></select>
+          <label>Internal ID</label><input readOnly value={p.proj_id} />
+        </div>}
+        {tab === 'dates' && <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
+          <label>Project Planned Start</label><input type="datetime-local" value={dt(p.plan_start_date)} onChange={(e) => set('plan_start_date', fromDt(e.target.value))} />
+          <label>Must Finish By</label><input type="datetime-local" value={dt(p.plan_end_date)} onChange={(e) => set('plan_end_date', fromDt(e.target.value))} />
+          <label>Data Date</label><input type="datetime-local" value={dt(p.last_recalc_date)} onChange={(e) => set('last_recalc_date', fromDt(e.target.value))} />
+          <label>Scheduled Finish</label><input readOnly value={fmtDate(p.scd_end_date, ui.prefs, true)} />
+        </div>}
+        {tab === 'defaults' && <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
+          <label>Duration Type</label><select value={p.def_duration_type || 'DT_FixedDUR2'} onChange={(e) => set('def_duration_type', e.target.value)}>{Object.entries(DUR_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          <label>Percent Complete Type</label><select value={p.def_complete_pct_type || 'CP_Drtn'} onChange={(e) => set('def_complete_pct_type', e.target.value)}>{Object.entries(PCT_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          <label>Activity Type</label><select value={p.def_task_type || 'TT_Task'} onChange={(e) => set('def_task_type', e.target.value)}>{Object.entries(TASK_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          <label>Calendar</label><select value={p.clndr_id} onChange={(e) => set('clndr_id', e.target.value)}>{cals.map((c) => <option key={c.clndr_id} value={c.clndr_id}>{c.clndr_name}</option>)}</select>
+          <label>Activity ID Prefix</label><input defaultValue={p.task_code_prefix} onBlur={(e) => set('task_code_prefix', e.target.value)} />
+          <label>Activity ID Suffix</label><input type="number" defaultValue={p.task_code_base} onBlur={(e) => set('task_code_base', e.target.value)} />
+          <label>Increment</label><input type="number" defaultValue={p.task_code_step} onBlur={(e) => set('task_code_step', e.target.value)} />
+        </div>}
+        {tab === 'settings' && <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
+          <label>Define critical activities as</label>
+          <select value={p.critical_path_type || 'CT_TotFloat'} onChange={(e) => set('critical_path_type', e.target.value)}><option value="CT_TotFloat">Total Float less than or equal to</option><option value="CT_DrivPath">Longest Path</option></select>
+          <label>Critical float (hours)</label><input type="number" defaultValue={p.critical_drtn_hr_cnt || '0'} onBlur={(e) => set('critical_drtn_hr_cnt', e.target.value)} />
+        </div>}
+      </div>
+    </Dialog>
+  );
+}
+
+export function DeleteProjectDialog(props: { projId: string }) {
+  const db = getDb();
+  const p = rows(db, 'PROJECT').find((x) => x.proj_id === props.projId);
+  const n = rows(db, 'TASK').filter((t) => t.proj_id === props.projId).length;
+  return (
+    <Dialog title="Confirm" width={420} buttons={<>
+      <button className="btn" onClick={() => {
+        mutate(`Delete Project ${p?.proj_short_name}`, (d) => {
+          for (const b of rows(d, 'PROJECT').filter((x) => x._baseline_of === props.projId)) deleteProject(d, b.proj_id);
+          deleteProject(d, props.projId);
+        });
+        setUi((u) => ({ openProjects: u.openProjects.filter((x) => x !== props.projId), selProject: undefined }));
+        closeDialog();
+      }}>Yes</button>
+      <button className="btn primary" onClick={closeDialog}>No</button>
+    </>}>
+      <p>Delete project <b>{p?.proj_short_name}</b> and its {n} activities? (Edit &gt; Undo can restore it.)</p>
+    </Dialog>
+  );
+}
+
+export function BaselinesDialog(props: { projId?: string }) {
+  const ui = useStore((s) => s.ui);
+  const db = useStore((s) => s.db);
+  useStore((s) => s.dbVersion);
+  const pid = props.projId ?? ui.openProjects[0] ?? ui.selProject;
+  const p = rows(db, 'PROJECT').find((x) => x.proj_id === pid);
+  const [sel, setSel] = useState<string | null>(null);
+  if (!p) return <Dialog title="Maintain Baselines" buttons={<button className="btn" onClick={closeDialog}>Close</button>}><p>Open a project first.</p></Dialog>;
+  const bls = rows(db, 'PROJECT').filter((x) => x._baseline_of === pid);
+  return (
+    <Dialog title="Maintain Baselines" width={640} height={380} buttons={<>
+      <button className="btn" onClick={() => mutate('Add Baseline', (d) => { const id = saveBaseline(d, pid); if (!rows(d, 'PROJECT').find((x) => x.proj_id === pid)!.sum_base_proj_id) assignBaseline(d, pid, id); })}>Add</button>
+      <button className="btn" disabled={!sel} onClick={() => sel && mutate('Assign Baseline', (d) => assignBaseline(d, pid, sel))}>Assign as Project Baseline</button>
+      <button className="btn" disabled={!sel} onClick={() => sel && mutate('Restore Baseline', (d) => restoreBaseline(d, sel))}>Restore</button>
+      <button className="btn" disabled={!sel} onClick={() => { if (sel) { mutate('Delete Baseline', (d) => deleteBaseline(d, sel)); setSel(null); } }}>Delete</button>
+      <button className="btn" onClick={closeDialog}>Close</button>
+    </>}>
+      <p>Project: <b>{p.proj_short_name}</b> · Project baseline: <b>{bls.find((b) => b.proj_id === p.sum_base_proj_id)?.proj_short_name ?? '(none: current project)'}</b></p>
+      <div className="tblwrap" style={{ height: 250 }}>
+        <table className="tbl"><thead><tr><th>Baseline</th><th>Saved</th><th>Activities</th><th>Data Date</th></tr></thead><tbody>
+          {bls.map((b) => <tr key={b.proj_id} className={sel === b.proj_id ? 'sel' : ''} onMouseDown={() => setSel(b.proj_id)}><td>{b.proj_short_name}{p.sum_base_proj_id === b.proj_id ? ' (Project Baseline)' : ''}</td><td>{fmtDate(b._baseline_date, ui.prefs, true)}</td><td>{rows(db, 'TASK').filter((t) => t.proj_id === b.proj_id).length}</td><td>{fmtDate(b.last_recalc_date, ui.prefs)}</td></tr>)}
+          {!bls.length && <tr><td colSpan={4} className="muted">No baselines. Click Add to save a copy of the current schedule.</td></tr>}
+        </tbody></table>
+      </div>
+      <p className="muted">Baselines appear as yellow bars in the Gantt chart and in the BL Project Start/Finish columns.</p>
+    </Dialog>
+  );
+}
+
+export function EpsDialog() {
+  const db = useStore((s) => s.db);
+  useStore((s) => s.dbVersion);
+  const eps = db.tables.EPS?.rows ?? [];
+  const [sel, setSel] = useState<string | null>(null);
+  const depth = (e: (typeof eps)[number]): number => { let d = 0; for (let p = eps.find((x) => x.eps_id === e.parent_eps_id); p && d < 20; p = eps.find((x) => x.eps_id === p!.parent_eps_id)) d++; return d; };
+  const ordered: typeof eps = [];
+  const visit = (parent: string) => { for (const e of eps.filter((x) => x.parent_eps_id === parent)) { ordered.push(e); visit(e.eps_id); } };
+  visit('');
+  const edit = (id: string, f: string, v: string) => mutate('Edit EPS', (d) => { d.tables.EPS.rows.find((x) => x.eps_id === id)![f] = v; });
+  return (
+    <Dialog title="Enterprise Project Structure" width={640} height={420} buttons={<>
+      <button className="btn" onClick={() => mutate('Add EPS', (d) => { ensureEps(d); const E = d.tables.EPS; const id = String(Math.max(...E.rows.map((r) => Number(r.eps_id))) + 1); E.rows.push({ eps_id: id, parent_eps_id: sel ?? E.rows[0].eps_id, eps_short_name: `EPS${id}`, eps_name: 'New EPS Node', seq_num: id }); })}>Add</button>
+      <button className="btn" disabled={!sel} onClick={() => {
+        if (!sel) return;
+        const hasKids = eps.some((e) => e.parent_eps_id === sel) || rows(db, 'PROJECT').some((p) => p._eps_id === sel);
+        if (hasKids) return toast('Move or delete the projects and EPS nodes under this node first.');
+        if (!eps.find((e) => e.eps_id === sel)?.parent_eps_id) return toast('The root EPS node cannot be deleted.');
+        mutate('Delete EPS', (d) => { d.tables.EPS.rows = d.tables.EPS.rows.filter((e) => e.eps_id !== sel); });
+        setSel(null);
+      }}>Delete</button>
+      <button className="btn" onClick={closeDialog}>Close</button>
+    </>}>
+      <div className="tblwrap" style={{ height: 330 }}>
+        <table className="tbl"><thead><tr><th>EPS ID</th><th>EPS Name</th><th>Parent</th></tr></thead><tbody>
+          {ordered.map((e) => <tr key={e.eps_id} className={sel === e.eps_id ? 'sel' : ''} onMouseDown={() => setSel(e.eps_id)}>
+            <td style={{ paddingLeft: 4 + depth(e) * 14 }}><input defaultValue={e.eps_short_name} onBlur={(x) => x.target.value !== e.eps_short_name && edit(e.eps_id, 'eps_short_name', x.target.value)} /></td>
+            <td><input defaultValue={e.eps_name} onBlur={(x) => x.target.value !== e.eps_name && edit(e.eps_id, 'eps_name', x.target.value)} /></td>
+            <td><select value={e.parent_eps_id} disabled={!e.parent_eps_id} onChange={(x) => x.target.value !== e.eps_id && edit(e.eps_id, 'parent_eps_id', x.target.value)}>{eps.filter((o) => o.eps_id !== e.eps_id).map((o) => <option key={o.eps_id} value={o.eps_id}>{o.eps_short_name}</option>)}{!e.parent_eps_id && <option value="">(root)</option>}</select></td>
+          </tr>)}
+        </tbody></table>
+      </div>
+    </Dialog>
+  );
+}

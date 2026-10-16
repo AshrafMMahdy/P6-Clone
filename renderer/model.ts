@@ -1,0 +1,377 @@
+// Derived views of the raw P6 tables for the UI: formatting, columns, edit rules, structural edits.
+import { addField, groupBy, indexBy, nextId, rows, table, type Db, type Row } from '../core/db.ts';
+import { formatP6Date, parseP6Date } from '../core/dates.ts';
+import { p6num } from '../core/schedule/cpm.ts';
+import { durationPct } from '../core/progress/update.ts';
+import { ENUMS } from '../core/xer/schema.ts';
+import type { Prefs } from './store.ts';
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export function fmtDate(v: string | number | null | undefined, prefs: Prefs, withTime = prefs.showTime): string {
+  const t = typeof v === 'number' ? v : parseP6Date(v ?? '');
+  if (t == null) return '';
+  const s = formatP6Date(t);
+  const [y, mo, d] = [s.slice(0, 4), +s.slice(5, 7), s.slice(8, 10)];
+  let out: string;
+  switch (prefs.dateFormat) {
+    case 'yyyy-mm-dd': out = s.slice(0, 10); break;
+    case 'mm/dd/yy': out = `${s.slice(5, 7)}/${d}/${y.slice(2)}`; break;
+    case 'dd/mm/yy': out = `${d}/${s.slice(5, 7)}/${y.slice(2)}`; break;
+    default: out = `${d}-${MON[mo - 1]}-${y.slice(2)}`;
+  }
+  return withTime ? `${out} ${s.slice(11)}` : out;
+}
+
+export function fmtDur(hours: string | number | undefined, prefs: Prefs): string {
+  if (hours === '' || hours == null) return '';
+  const h = Number(hours);
+  if (!Number.isFinite(h)) return '';
+  const d = h / prefs.hoursPerDay;
+  return (Math.round(d * 10 ** prefs.durationDecimals) / 10 ** prefs.durationDecimals).toString();
+}
+export const daysToHours = (d: number, prefs: Prefs) => d * prefs.hoursPerDay;
+
+export const TASK_TYPES: Record<string, string> = { TT_Task: 'Task Dependent', TT_Rsrc: 'Resource Dependent', TT_LOE: 'Level of Effort', TT_Mile: 'Start Milestone', TT_FinMile: 'Finish Milestone', TT_WBS: 'WBS Summary' };
+export const DUR_TYPES: Record<string, string> = { DT_FixedDUR2: 'Fixed Duration and Units', DT_FixedDrtn: 'Fixed Duration and Units/Time', DT_FixedQty: 'Fixed Units', DT_FixedRate: 'Fixed Units/Time' };
+export const PCT_TYPES: Record<string, string> = { CP_Drtn: 'Duration', CP_Phys: 'Physical', CP_Units: 'Units' };
+export const CSTR_TYPES: Record<string, string> = { '': '<None>', CS_MSO: 'Start On', CS_MSOB: 'Start On or Before', CS_MSOA: 'Start On or After', CS_MEO: 'Finish On', CS_MEOB: 'Finish On or Before', CS_MEOA: 'Finish On or After', CS_ALAP: 'As Late As Possible', CS_MANDSTART: 'Mandatory Start', CS_MANDFIN: 'Mandatory Finish' };
+export const REL_TYPES: Record<string, string> = { PR_FS: 'FS', PR_SS: 'SS', PR_FF: 'FF', PR_SF: 'SF' };
+export const RSRC_TYPES: Record<string, string> = { RT_Labor: 'Labor', RT_Equip: 'Nonlabor', RT_Mat: 'Material' };
+export const STATUS: Record<string, string> = { TK_NotStart: 'Not Started', TK_Active: 'In Progress', TK_Complete: 'Completed' };
+
+export const isMilestone = (r: Row) => r.task_type === 'TT_Mile' || r.task_type === 'TT_FinMile';
+export const statusOf = (r: Row) => (r.act_end_date ? 'TK_Complete' : r.act_start_date ? 'TK_Active' : 'TK_NotStart');
+
+/** Activity % complete per its percent complete type. */
+export function activityPct(r: Row, ctx?: Ctx): number {
+  if (r.act_end_date) return 100;
+  if (r.complete_pct_type === 'CP_Phys') return Number(r.phys_complete_pct || 0);
+  if (r.complete_pct_type === 'CP_Units' && ctx) {
+    const as = ctx.rsrcByTask.get(r.task_id) ?? [];
+    const bud = as.reduce((a, x) => a + Number(x.target_qty || 0), 0), act = as.reduce((a, x) => a + Number(x.act_reg_qty || 0) + Number(x.act_ot_qty || 0), 0);
+    return bud ? (100 * act) / bud : 0;
+  }
+  return durationPct(r);
+}
+
+/** Context computed once per render for column getters. */
+export interface Ctx {
+  db: Db; prefs: Prefs;
+  proj: Map<string, Row>;
+  wbs: Map<string, Row>;
+  cal: Map<string, Row>;
+  rsrc: Map<string, Row>;
+  rsrcByTask: Map<string, Row[]>;
+  predsOf: Map<string, Row[]>;
+  succsOf: Map<string, Row[]>;
+  taskById: Map<string, Row>;
+  baseline: Map<string, Row>; // task_code|proj_id -> baseline task row
+  costByTask: Map<string, Row[]>;
+}
+
+export function makeCtx(db: Db, prefs: Prefs): Ctx {
+  const tasks = rows(db, 'TASK');
+  const baseline = new Map<string, Row>();
+  for (const p of rows(db, 'PROJECT')) {
+    const bl = p.sum_base_proj_id && p.sum_base_proj_id !== p.proj_id ? p.sum_base_proj_id : '';
+    if (!bl) continue;
+    for (const t of tasks) if (t.proj_id === bl) baseline.set(`${t.task_code}|${p.proj_id}`, t);
+  }
+  return {
+    db, prefs,
+    proj: indexBy(rows(db, 'PROJECT'), 'proj_id'),
+    wbs: indexBy(rows(db, 'PROJWBS'), 'wbs_id'),
+    cal: indexBy(rows(db, 'CALENDAR'), 'clndr_id'),
+    rsrc: indexBy(rows(db, 'RSRC'), 'rsrc_id'),
+    rsrcByTask: groupBy(rows(db, 'TASKRSRC'), 'task_id'),
+    predsOf: groupBy(rows(db, 'TASKPRED'), 'task_id'),
+    succsOf: groupBy(rows(db, 'TASKPRED'), 'pred_task_id'),
+    taskById: indexBy(tasks, 'task_id'),
+    baseline,
+    costByTask: groupBy(rows(db, 'PROJCOST'), 'task_id'),
+  };
+}
+
+export function isCritical(r: Row, ctx: Ctx): boolean {
+  if (r.act_end_date || r.total_float_hr_cnt === '' || r.total_float_hr_cnt == null) return false;
+  const p = ctx.proj.get(r.proj_id);
+  if (p?.critical_path_type === 'CT_DrivPath') return r.driving_path_flag === 'Y';
+  return Number(r.total_float_hr_cnt) <= Number(p?.critical_drtn_hr_cnt || 0);
+}
+
+export function wbsPath(wbsId: string, ctx: Ctx): string {
+  const parts: string[] = [];
+  for (let w = ctx.wbs.get(wbsId), n = 0; w && n < 50; w = ctx.wbs.get(w.parent_wbs_id), n++) {
+    if (w.proj_node_flag === 'Y') { parts.unshift(ctx.proj.get(w.proj_id)?.proj_short_name ?? w.wbs_short_name); break; }
+    parts.unshift(w.wbs_short_name);
+  }
+  return parts.join('.');
+}
+
+export interface Column {
+  id: string; title: string; width: number; align?: 'left' | 'right' | 'center';
+  get: (r: Row, ctx: Ctx) => string;
+  edit?: { type: 'text' | 'number' | 'date' | 'select'; options?: Record<string, string>; set: (db: Db, r: Row, v: string, ctx: Ctx) => string | void };
+}
+
+const sumBy = (rs: Row[] | undefined, f: string) => (rs ?? []).reduce((a, x) => a + Number(x[f] || 0), 0);
+const money = (n: number) => (n ? n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }) : '$0.00');
+const startOf = (r: Row, ctx: Ctx) => (r.act_start_date ? `${fmtDate(r.act_start_date, ctx.prefs)} A` : fmtDate(r.early_start_date || r.restart_date || r.target_start_date, ctx.prefs) + (r.cstr_type && /MSO|MANDSTART/.test(r.cstr_type) ? '*' : ''));
+const finishOf = (r: Row, ctx: Ctx) => (r.act_end_date ? `${fmtDate(r.act_end_date, ctx.prefs)} A` : fmtDate(r.early_end_date || r.reend_date || r.target_end_date, ctx.prefs) + (r.cstr_type && /MEO|MANDFIN/.test(r.cstr_type) ? '*' : ''));
+
+/** Activity table columns (View > Columns). */
+export const COLUMNS: Column[] = [
+  { id: 'task_code', title: 'Activity ID', width: 110, get: (r) => r.task_code, edit: { type: 'text', set: (db, r, v) => {
+    if (!v.trim()) return 'Activity ID cannot be blank.';
+    if (rows(db, 'TASK').some((t) => t !== r && t.proj_id === r.proj_id && t.task_code === v)) return `Activity ID ${v} already exists in this project.`;
+    r.task_code = v.trim();
+  } } },
+  { id: 'task_name', title: 'Activity Name', width: 260, get: (r) => r.task_name, edit: { type: 'text', set: (_db, r, v) => { r.task_name = v; } } },
+  { id: 'orig_dur', title: 'Original Duration', width: 62, align: 'right', get: (r, c) => fmtDur(r.target_drtn_hr_cnt, c.prefs), edit: { type: 'number', set: (_db, r, v, c) => {
+    const h = daysToHours(Number(v), c.prefs);
+    if (!(h >= 0)) return 'Duration must be zero or greater.';
+    if (isMilestone(r) && h > 0) return 'Milestones have zero duration.';
+    r.target_drtn_hr_cnt = p6num(h);
+    if (!r.act_start_date) r.remain_drtn_hr_cnt = p6num(h);
+  } } },
+  { id: 'rem_dur', title: 'Remaining Duration', width: 62, align: 'right', get: (r, c) => fmtDur(r.remain_drtn_hr_cnt, c.prefs), edit: { type: 'number', set: (_db, r, v, c) => {
+    if (r.act_end_date) return 'Completed activities have no remaining duration.';
+    const h = daysToHours(Number(v), c.prefs);
+    if (!(h >= 0)) return 'Duration must be zero or greater.';
+    r.remain_drtn_hr_cnt = p6num(h);
+    if (!r.act_start_date) r.target_drtn_hr_cnt = p6num(h);
+  } } },
+  { id: 'act_dur', title: 'Actual Duration', width: 56, align: 'right', get: (r, c) => (r.act_start_date ? fmtDur(Math.max(0, Number(r.target_drtn_hr_cnt || 0) - Number(r.remain_drtn_hr_cnt || 0)), c.prefs) : '0') },
+  { id: 'atc_dur', title: 'At Completion Duration', width: 70, align: 'right', get: (r, c) => fmtDur(r.act_end_date ? r.target_drtn_hr_cnt : Math.max(Number(r.target_drtn_hr_cnt || 0) - Number(r.remain_drtn_hr_cnt || 0), 0) + Number(r.remain_drtn_hr_cnt || 0), c.prefs) },
+  { id: 'pct', title: 'Activity % Complete', width: 62, align: 'right', get: (r, c) => `${Math.round(activityPct(r, c) * 10) / 10}%`, edit: { type: 'number', set: (_db, r, v) => setPercent(r, Number(v)) } },
+  { id: 'dur_pct', title: 'Duration % Complete', width: 62, align: 'right', get: (r) => `${Math.round(durationPct(r) * 10) / 10}%` },
+  { id: 'phys_pct', title: 'Physical % Complete', width: 62, align: 'right', get: (r) => `${Number(r.phys_complete_pct || 0)}%`, edit: { type: 'number', set: (_db, r, v) => { if (!(Number(v) >= 0 && Number(v) <= 100)) return 'Enter 0 to 100.'; r.phys_complete_pct = p6num(Number(v)); } } },
+  { id: 'start', title: 'Start', width: 82, get: startOf, edit: { type: 'date', set: (_db, r, v) => setStartLike(r, v) } },
+  { id: 'finish', title: 'Finish', width: 82, get: finishOf, edit: { type: 'date', set: (_db, r, v) => setFinishLike(r, v) } },
+  { id: 'early_start', title: 'Early Start', width: 82, get: (r, c) => (r.act_end_date ? '' : fmtDate(r.early_start_date, c.prefs)) },
+  { id: 'early_finish', title: 'Early Finish', width: 82, get: (r, c) => (r.act_end_date ? '' : fmtDate(r.early_end_date, c.prefs)) },
+  { id: 'late_start', title: 'Late Start', width: 82, get: (r, c) => (r.act_end_date ? '' : fmtDate(r.late_start_date, c.prefs)) },
+  { id: 'late_finish', title: 'Late Finish', width: 82, get: (r, c) => (r.act_end_date ? '' : fmtDate(r.late_end_date, c.prefs)) },
+  { id: 'act_start', title: 'Actual Start', width: 82, get: (r, c) => fmtDate(r.act_start_date, c.prefs), edit: { type: 'date', set: (_db, r, v) => setActual(r, 'start', v) } },
+  { id: 'act_finish', title: 'Actual Finish', width: 82, get: (r, c) => fmtDate(r.act_end_date, c.prefs), edit: { type: 'date', set: (_db, r, v) => setActual(r, 'finish', v) } },
+  { id: 'planned_start', title: 'Planned Start', width: 82, get: (r, c) => fmtDate(r.target_start_date, c.prefs) },
+  { id: 'planned_finish', title: 'Planned Finish', width: 82, get: (r, c) => fmtDate(r.target_end_date, c.prefs) },
+  { id: 'bl_start', title: 'BL Project Start', width: 82, get: (r, c) => { const b = c.baseline.get(`${r.task_code}|${r.proj_id}`); return b ? fmtDate(b.act_start_date || b.target_start_date, c.prefs) : ''; } },
+  { id: 'bl_finish', title: 'BL Project Finish', width: 82, get: (r, c) => { const b = c.baseline.get(`${r.task_code}|${r.proj_id}`); return b ? fmtDate(b.act_end_date || b.target_end_date, c.prefs) : ''; } },
+  { id: 'var_bl_finish', title: 'Variance - BL Project Finish Date', width: 80, align: 'right', get: (r, c) => {
+    const b = c.baseline.get(`${r.task_code}|${r.proj_id}`);
+    if (!b) return '';
+    const bf = parseP6Date(b.act_end_date || b.target_end_date), f = parseP6Date(r.act_end_date || r.early_end_date);
+    return bf == null || f == null ? '' : fmtDur((bf - f) / 60 * (c.prefs.hoursPerDay / 24), c.prefs);
+  } },
+  { id: 'total_float', title: 'Total Float', width: 56, align: 'right', get: (r, c) => fmtDur(r.total_float_hr_cnt, c.prefs) },
+  { id: 'free_float', title: 'Free Float', width: 56, align: 'right', get: (r, c) => fmtDur(r.free_float_hr_cnt, c.prefs) },
+  { id: 'status', title: 'Activity Status', width: 80, get: (r) => STATUS[statusOf(r)] },
+  { id: 'task_type', title: 'Activity Type', width: 110, get: (r) => TASK_TYPES[r.task_type] ?? r.task_type, edit: { type: 'select', options: TASK_TYPES, set: (_db, r, v) => { r.task_type = v; if (isMilestone(r)) { r.target_drtn_hr_cnt = '0'; r.remain_drtn_hr_cnt = '0'; } } } },
+  { id: 'duration_type', title: 'Duration Type', width: 130, get: (r) => DUR_TYPES[r.duration_type] ?? r.duration_type, edit: { type: 'select', options: DUR_TYPES, set: (_db, r, v) => { r.duration_type = v; } } },
+  { id: 'pct_type', title: '% Complete Type', width: 70, get: (r) => PCT_TYPES[r.complete_pct_type] ?? r.complete_pct_type, edit: { type: 'select', options: PCT_TYPES, set: (_db, r, v) => { r.complete_pct_type = v; } } },
+  { id: 'calendar', title: 'Calendar', width: 140, get: (r, c) => c.cal.get(r.clndr_id)?.clndr_name ?? '' },
+  { id: 'cstr_type', title: 'Primary Constraint', width: 110, get: (r) => (r.cstr_type ? CSTR_TYPES[r.cstr_type] : ''), edit: { type: 'select', options: CSTR_TYPES, set: (_db, r, v) => { r.cstr_type = v; if (!v) r.cstr_date = ''; } } },
+  { id: 'cstr_date', title: 'Primary Constraint Date', width: 82, get: (r, c) => fmtDate(r.cstr_date, c.prefs), edit: { type: 'date', set: (_db, r, v) => { r.cstr_date = v; } } },
+  { id: 'cstr_type2', title: 'Secondary Constraint', width: 110, get: (r) => (r.cstr_type2 ? CSTR_TYPES[r.cstr_type2] : '') },
+  { id: 'cstr_date2', title: 'Secondary Constraint Date', width: 82, get: (r, c) => fmtDate(r.cstr_date2, c.prefs) },
+  { id: 'wbs_code', title: 'WBS Code', width: 120, get: (r, c) => wbsPath(r.wbs_id, c) },
+  { id: 'wbs_name', title: 'WBS Name', width: 150, get: (r, c) => c.wbs.get(r.wbs_id)?.wbs_name ?? '' },
+  { id: 'critical', title: 'Critical', width: 46, align: 'center', get: (r, c) => (isCritical(r, c) ? 'Yes' : 'No') },
+  { id: 'longest', title: 'Longest Path', width: 50, align: 'center', get: (r) => (r.driving_path_flag === 'Y' ? 'Yes' : 'No') },
+  { id: 'resources', title: 'Resources', width: 140, get: (r, c) => (c.rsrcByTask.get(r.task_id) ?? []).map((a) => c.rsrc.get(a.rsrc_id)?.rsrc_short_name ?? '?').join(', ') },
+  { id: 'bud_units', title: 'Budgeted Labor Units', width: 70, align: 'right', get: (r, c) => p6num(sumBy(c.rsrcByTask.get(r.task_id)?.filter((a) => (a.rsrc_type || c.rsrc.get(a.rsrc_id)?.rsrc_type) === 'RT_Labor'), 'target_qty')) },
+  { id: 'act_units', title: 'Actual Labor Units', width: 70, align: 'right', get: (r, c) => p6num(sumBy(c.rsrcByTask.get(r.task_id)?.filter((a) => (a.rsrc_type || c.rsrc.get(a.rsrc_id)?.rsrc_type) === 'RT_Labor'), 'act_reg_qty')) },
+  { id: 'bud_cost', title: 'Budgeted Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'target_cost') + sumBy(c.costByTask.get(r.task_id), 'target_cost')) },
+  { id: 'act_cost', title: 'Actual Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'act_reg_cost') + sumBy(c.rsrcByTask.get(r.task_id), 'act_ot_cost') + sumBy(c.costByTask.get(r.task_id), 'act_cost')) },
+  { id: 'rem_cost', title: 'Remaining Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'remain_cost') + sumBy(c.costByTask.get(r.task_id), 'remain_cost')) },
+  { id: 'preds', title: 'Predecessors', width: 120, get: (r, c) => (c.predsOf.get(r.task_id) ?? []).map((p) => c.taskById.get(p.pred_task_id)?.task_code ?? `[${p.pred_task_id}]`).join(', ') },
+  { id: 'succs', title: 'Successors', width: 120, get: (r, c) => (c.succsOf.get(r.task_id) ?? []).map((p) => c.taskById.get(p.task_id)?.task_code ?? `[${p.task_id}]`).join(', ') },
+  { id: 'expect_end', title: 'Expected Finish', width: 82, get: (r, c) => fmtDate(r.expect_end_date, c.prefs) },
+  { id: 'proj', title: 'Project ID', width: 90, get: (r, c) => c.proj.get(r.proj_id)?.proj_short_name ?? '' },
+  { id: 'task_id', title: 'Activity (internal) ID', width: 70, align: 'right', get: (r) => r.task_id },
+];
+export const COLUMN_BY_ID = new Map(COLUMNS.map((c) => [c.id, c]));
+
+function normDate(v: string): string | null {
+  if (!v) return '';
+  const t = parseP6Date(v.replace('T', ' '));
+  return t == null ? null : formatP6Date(t);
+}
+
+/** Typing a start date on a not-started activity sets a Start On or After constraint (P6 behaviour). */
+function setStartLike(r: Row, v: string): string | void {
+  const d = normDate(v);
+  if (d == null) return 'Invalid date.';
+  if (r.act_start_date) return setActual(r, 'start', v);
+  r.cstr_type = d ? 'CS_MSOA' : '';
+  r.cstr_date = d ?? '';
+}
+function setFinishLike(r: Row, v: string): string | void {
+  const d = normDate(v);
+  if (d == null) return 'Invalid date.';
+  if (r.act_end_date) return setActual(r, 'finish', v);
+  r.cstr_type = d ? 'CS_MEOB' : '';
+  r.cstr_date = d ?? '';
+}
+
+export function setActual(r: Row, which: 'start' | 'finish', v: string): string | void {
+  const d = normDate(v);
+  if (d == null) return 'Invalid date.';
+  if (which === 'start') {
+    if (!d && r.act_end_date) return 'Clear the actual finish first.';
+    if (d && r.act_end_date && d > r.act_end_date) return 'Actual start must be on or before actual finish.';
+    r.act_start_date = d;
+  } else {
+    if (d && !r.act_start_date) return 'Set the actual start first.';
+    if (d && d < r.act_start_date) return 'Actual finish must be on or after actual start.';
+    r.act_end_date = d;
+    if (d) r.remain_drtn_hr_cnt = '0';
+    else if (Number(r.remain_drtn_hr_cnt || 0) === 0) r.remain_drtn_hr_cnt = r.target_drtn_hr_cnt;
+  }
+  r.status_code = statusOf(r);
+}
+
+/** Setting % complete (duration type) adjusts remaining duration; physical sets the physical %. */
+export function setPercent(r: Row, pct: number): string | void {
+  if (!(pct >= 0 && pct <= 100)) return 'Enter 0 to 100.';
+  if (pct > 0 && !r.act_start_date) return 'Mark the activity as started (actual start) before entering % complete.';
+  if (r.complete_pct_type === 'CP_Phys') { r.phys_complete_pct = p6num(pct); return; }
+  const orig = Number(r.target_drtn_hr_cnt || 0);
+  r.remain_drtn_hr_cnt = p6num(orig * (1 - pct / 100));
+}
+
+// ---- structural edits
+
+export function ensureEps(db: Db): Row {
+  const eps = table(db, 'EPS');
+  if (!eps.fields.length) eps.fields = ['eps_id', 'parent_eps_id', 'eps_short_name', 'eps_name', 'seq_num'];
+  if (!eps.rows.length) eps.rows.push({ eps_id: '1', parent_eps_id: '', eps_short_name: 'Enterprise', eps_name: 'All Initiatives', seq_num: '0' });
+  return eps.rows[0];
+}
+
+const STD_CAL = '(0||CalendarData()((0||DaysOfWeek()((0||1()())(0||2()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||3()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||4()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||5()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||6()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||7()())))(0||VIEW(ShowTotal|Y)())(0||Exceptions()())))';
+
+export function ensureDefaultCalendar(db: Db): Row {
+  const cal = table(db, 'CALENDAR');
+  for (const f of ['clndr_id', 'default_flag', 'clndr_name', 'proj_id', 'base_clndr_id', 'last_chng_date', 'clndr_type', 'day_hr_cnt', 'week_hr_cnt', 'month_hr_cnt', 'year_hr_cnt', 'rsrc_private', 'clndr_data']) addField(cal, f);
+  const def = cal.rows.find((c) => c.default_flag === 'Y') ?? cal.rows[0];
+  if (def) return def;
+  const r: Row = { clndr_id: String(nextId(db, 'CALENDAR')), default_flag: 'Y', clndr_name: 'Standard 5 Day Workweek', proj_id: '', base_clndr_id: '', last_chng_date: formatP6Date(Date.now() / 60000), clndr_type: 'CA_Base', day_hr_cnt: '8', week_hr_cnt: '40', month_hr_cnt: '172', year_hr_cnt: '2000', rsrc_private: 'N', clndr_data: STD_CAL };
+  cal.rows.push(r);
+  return r;
+}
+
+export function ensureCurrency(db: Db): void {
+  const c = table(db, 'CURRTYPE');
+  if (c.rows.length) return;
+  c.fields = ['curr_id', 'decimal_digit_cnt', 'curr_symbol', 'decimal_symbol', 'digit_group_symbol', 'pos_curr_fmt_type', 'neg_curr_fmt_type', 'curr_type', 'curr_short_name', 'group_digit_cnt', 'base_exch_rate'];
+  c.rows.push({ curr_id: '1', decimal_digit_cnt: '2', curr_symbol: '$', decimal_symbol: '.', digit_group_symbol: ',', pos_curr_fmt_type: '#1.1', neg_curr_fmt_type: '(#1.1)', curr_type: 'US Dollar', curr_short_name: 'USD', group_digit_cnt: '3', base_exch_rate: '1' });
+}
+
+export function newProject(db: Db, o: { id: string; name: string; start: string; epsId?: string }): string {
+  ensureEps(db); ensureCurrency(db);
+  const cal = ensureDefaultCalendar(db);
+  const P = table(db, 'PROJECT');
+  const pid = String(nextId(db, 'PROJECT'));
+  for (const f of ['proj_id', 'proj_short_name', 'clndr_id', 'plan_start_date', 'plan_end_date', 'scd_end_date', 'last_recalc_date', 'add_date', 'def_duration_type', 'def_complete_pct_type', 'def_task_type', 'task_code_prefix', 'task_code_base', 'task_code_step', 'critical_drtn_hr_cnt', 'critical_path_type', 'def_qty_type', 'def_rate_type', 'name_sep_char', 'sum_base_proj_id', 'guid', 'project_flag', '_eps_id', '_name']) addField(P, f);
+  P.rows.push({
+    proj_id: pid, proj_short_name: o.id, clndr_id: cal.clndr_id, plan_start_date: o.start, plan_end_date: '', scd_end_date: '', last_recalc_date: o.start,
+    add_date: formatP6Date(Date.now() / 60000), def_duration_type: 'DT_FixedDUR2', def_complete_pct_type: 'CP_Drtn', def_task_type: 'TT_Task',
+    task_code_prefix: 'A', task_code_base: '1000', task_code_step: '10', critical_drtn_hr_cnt: '0', critical_path_type: 'CT_TotFloat',
+    def_qty_type: 'QT_Hour', def_rate_type: 'COST_PER_QTY', name_sep_char: '.', sum_base_proj_id: '', guid: '', project_flag: 'Y', _eps_id: o.epsId ?? '1', _name: o.name,
+  });
+  const W = table(db, 'PROJWBS');
+  for (const f of ['wbs_id', 'proj_id', 'obs_id', 'seq_num', 'proj_node_flag', 'sum_data_flag', 'status_code', 'wbs_short_name', 'wbs_name', 'parent_wbs_id']) addField(W, f);
+  W.rows.push({ wbs_id: String(nextId(db, 'PROJWBS')), proj_id: pid, obs_id: '', seq_num: '0', proj_node_flag: 'Y', sum_data_flag: 'Y', status_code: 'WS_Open', wbs_short_name: o.id, wbs_name: o.name, parent_wbs_id: '' });
+  const S = table(db, 'SCHEDOPTIONS');
+  for (const f of ['schedoptions_id', 'proj_id', 'sched_outer_depend_type', 'sched_open_critical_flag', 'sched_lag_early_start_flag', 'sched_retained_logic', 'sched_setplantoforecast', 'sched_float_type', 'sched_calendar_on_relationship_lag', 'sched_use_expect_end_flag', 'sched_progress_override']) addField(S, f);
+  S.rows.push({ schedoptions_id: String(nextId(db, 'SCHEDOPTIONS')), proj_id: pid, sched_outer_depend_type: 'SD_Both', sched_open_critical_flag: 'N', sched_lag_early_start_flag: 'Y', sched_retained_logic: 'Y', sched_setplantoforecast: 'N', sched_float_type: 'FT_FF', sched_calendar_on_relationship_lag: 'rcal_Predecessor', sched_use_expect_end_flag: 'Y', sched_progress_override: 'N' });
+  return pid;
+}
+
+/** Project's display name: PROJECT has no name column in XER; P6 keeps it on the root WBS node. */
+export function projectName(db: Db, p: Row): string {
+  return rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y')?.wbs_name || p._name || p.proj_short_name;
+}
+
+export function nextTaskCode(db: Db, projId: string): string {
+  const p = rows(db, 'PROJECT').find((x) => x.proj_id === projId);
+  const prefix = p?.task_code_prefix ?? 'A';
+  const step = Number(p?.task_code_step || 10);
+  let n = Number(p?.task_code_base || 1000);
+  const used = new Set(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => t.task_code));
+  for (const t of used) {
+    if (!t.startsWith(prefix)) continue;
+    const k = Number(t.slice(prefix.length));
+    if (Number.isFinite(k) && k >= n) n = k + step;
+  }
+  while (used.has(prefix + n)) n += step;
+  return prefix + n;
+}
+
+export const TASK_FIELDS = ['task_id', 'proj_id', 'wbs_id', 'clndr_id', 'phys_complete_pct', 'complete_pct_type', 'task_type', 'duration_type', 'status_code', 'task_code', 'task_name', 'total_float_hr_cnt', 'free_float_hr_cnt', 'remain_drtn_hr_cnt', 'target_drtn_hr_cnt', 'cstr_date', 'act_start_date', 'act_end_date', 'late_start_date', 'late_end_date', 'expect_end_date', 'early_start_date', 'early_end_date', 'restart_date', 'reend_date', 'target_start_date', 'target_end_date', 'rem_late_start_date', 'rem_late_end_date', 'cstr_type', 'priority_type', 'suspend_date', 'resume_date', 'cstr_date2', 'cstr_type2', 'driving_path_flag', 'create_date', 'update_date', 'create_user', 'update_user'];
+
+export function addActivity(db: Db, projId: string, wbsId: string, hoursPerDay = 8): Row {
+  const p = rows(db, 'PROJECT').find((x) => x.proj_id === projId)!;
+  const T = table(db, 'TASK');
+  for (const f of TASK_FIELDS) addField(T, f);
+  const now = formatP6Date(Date.now() / 60000);
+  const start = p.last_recalc_date || p.plan_start_date;
+  const r: Row = {
+    task_id: String(nextId(db, 'TASK')), proj_id: projId, wbs_id: wbsId, clndr_id: p.clndr_id, phys_complete_pct: '0',
+    complete_pct_type: p.def_complete_pct_type || 'CP_Drtn', task_type: p.def_task_type || 'TT_Task', duration_type: p.def_duration_type || 'DT_FixedDUR2',
+    status_code: 'TK_NotStart', task_code: nextTaskCode(db, projId), task_name: 'New Activity', total_float_hr_cnt: '', free_float_hr_cnt: '',
+    remain_drtn_hr_cnt: String(5 * hoursPerDay), target_drtn_hr_cnt: String(5 * hoursPerDay), cstr_date: '', act_start_date: '', act_end_date: '',
+    late_start_date: '', late_end_date: '', expect_end_date: '', early_start_date: start, early_end_date: '', restart_date: '', reend_date: '',
+    target_start_date: start, target_end_date: '', rem_late_start_date: '', rem_late_end_date: '', cstr_type: '', priority_type: 'PT_Normal',
+    suspend_date: '', resume_date: '', cstr_date2: '', cstr_type2: '', driving_path_flag: 'N', create_date: now, update_date: now, create_user: 'admin', update_user: 'admin',
+  };
+  T.rows.push(r);
+  return r;
+}
+
+export function deleteActivities(db: Db, ids: string[]): void {
+  const s = new Set(ids);
+  table(db, 'TASK').rows = rows(db, 'TASK').filter((t) => !s.has(t.task_id));
+  table(db, 'TASKPRED').rows = rows(db, 'TASKPRED').filter((r) => !s.has(r.task_id) && !s.has(r.pred_task_id));
+  for (const t of Object.values(db.tables)) if (t.name !== 'TASK' && t.fields.includes('task_id')) t.rows = t.rows.filter((r) => !s.has(r.task_id));
+}
+
+/** Why P6 would refuse this relationship, or undefined if it is allowed. */
+export function checkRelationship(db: Db, predId: string, succId: string, type = 'PR_FS'): string | undefined {
+  if (predId === succId) return 'An activity cannot be related to itself.';
+  const P = rows(db, 'TASKPRED');
+  if (P.some((r) => r.task_id === succId && r.pred_task_id === predId && r.pred_type === type)) return 'This relationship already exists.';
+  // P6 refuses links that would create a loop
+  const succOf = groupBy(P, 'pred_task_id');
+  const stack = [succId], seen = new Set<string>();
+  while (stack.length) {
+    const x = stack.pop()!;
+    if (x === predId) return 'This relationship would create a loop (circular logic).';
+    if (seen.has(x)) continue;
+    seen.add(x);
+    for (const r of succOf.get(x) ?? []) stack.push(r.task_id);
+  }
+  return undefined;
+}
+
+export function addRelationship(db: Db, predId: string, succId: string, type = 'PR_FS', lagHrs = 0): string | void {
+  const err = checkRelationship(db, predId, succId, type);
+  if (err) return err;
+  const tasks = indexBy(rows(db, 'TASK'), 'task_id');
+  const P = table(db, 'TASKPRED');
+  for (const f of ['task_pred_id', 'task_id', 'pred_task_id', 'proj_id', 'pred_proj_id', 'pred_type', 'lag_hr_cnt']) addField(P, f);
+  P.rows.push({ task_pred_id: String(nextId(db, 'TASKPRED')), task_id: succId, pred_task_id: predId, proj_id: tasks.get(succId)!.proj_id, pred_proj_id: tasks.get(predId)!.proj_id, pred_type: type, lag_hr_cnt: p6num(lagHrs) });
+}
+
+export function addWbs(db: Db, projId: string, parentId: string): Row {
+  const W = table(db, 'PROJWBS');
+  const sibs = W.rows.filter((w) => w.parent_wbs_id === parentId);
+  const r: Row = { wbs_id: String(nextId(db, 'PROJWBS')), proj_id: projId, obs_id: '', seq_num: String(sibs.length * 10 + 10), proj_node_flag: 'N', sum_data_flag: 'N', status_code: 'WS_Open', wbs_short_name: `WBS${sibs.length + 1}`, wbs_name: 'New WBS Element', parent_wbs_id: parentId };
+  W.rows.push(r);
+  return r;
+}
+
+export const enumOk = (table: string, field: string, v: string) => !ENUMS[`${table}.${field}`] || ENUMS[`${table}.${field}`].includes(v);
