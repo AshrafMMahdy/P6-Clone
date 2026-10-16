@@ -14,7 +14,6 @@
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs && electron .",
     "package": "node scripts/package.mjs",
-    "package": "node scripts/package.mjs",
     "e2e": "node scripts/build.mjs && node --test \"tests/e2e/*.test.ts\""
   },
   "devDependencies": {

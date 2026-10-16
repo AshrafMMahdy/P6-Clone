@@ -31,6 +31,8 @@ const steps: [string, string][] = [
   ['ent.codes', 'dlg-codes'], ['ent.udfs', 'dlg-udfs'], ['ent.obs', 'dlg-obs'], ['ent.accounts', 'dlg-accounts'], ['ent.roles', 'dlg-roles'],
   ['ent.currencies', 'dlg-currencies'], ['tools.level', 'dlg-level'], ['tools.progress', 'dlg-progress'], ['edit.preferences', 'dlg-prefs'],
   ['file.pageSetup', 'dlg-pagesetup'], ['file.export', 'dlg-export'], ['file.new', 'dlg-new'], ['help.about', 'dlg-about'],
+  ['project.risks', 'view-risks'], ['tools.timesheets', 'view-timesheets'], ['ent.portfolios', 'view-portfolios'], ['tools.applyActuals', 'apply-actuals'],
+  ['tools.riskAnalysis', 'dlg-risk-analysis'], ['file.import', 'dlg-import'], ['tools.validate', 'dlg-validate'], ['project.expenses', 'view-expenses'],
 ];
 for (const [id, name] of steps) {
   const before = errors.length;
