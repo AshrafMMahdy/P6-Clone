@@ -18,6 +18,7 @@ import { BarsDialog } from './dialogs/BarsDialog.tsx';
 import { FindDialog } from './dialogs/FindDialog.tsx';
 import { AiSettingsDialog } from './dialogs/AiSettingsDialog.tsx';
 import { AssistantPanel } from './ai/AssistantPanel.tsx';
+import { initLive } from './ai/live.ts';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, AssignBaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
 import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
@@ -191,6 +192,7 @@ export function App() {
 
   useEffect(() => {
     window.p6.onMenu(runMenu);
+    void initLive(runMenu);
     loadFromDisk().then(async () => {
       const f = await window.p6.startupImport();
       if (f) openDialog('import', { preload: f });

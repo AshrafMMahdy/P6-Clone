@@ -39,6 +39,7 @@ const api = {
   confirm: (message: string, detail?: string): Promise<boolean> => ipcRenderer.invoke('confirm', message, detail),
   /** AI assistant (the API key stays in the main process) */
   aiGetConfig: (): Promise<AiPublicConfig> => ipcRenderer.invoke('ai:getConfig'),
+  menuTree: (): Promise<{ label: string; id?: string; accelerator?: string; submenu?: unknown[] }[]> => ipcRenderer.invoke('menu:tree'),
   aiSetConfig: (c: AiConfig, apiKey?: string): Promise<AiPublicConfig> => ipcRenderer.invoke('ai:setConfig', c, apiKey),
   aiChat: (id: string, req: ChatRequest): Promise<{ ok: true; reply: ChatReply } | { ok: false; error: string }> => ipcRenderer.invoke('ai:chat', id, req),
   aiCancel: (id: string): Promise<boolean> => ipcRenderer.invoke('ai:cancel', id),

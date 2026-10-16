@@ -185,3 +185,15 @@ pre.log { font: 11px Consolas, "Courier New", monospace; background: #fff; borde
 .ai-input { display: flex; gap: 6px; padding: 6px; border-top: 1px solid #d6dbe4; align-items: flex-end; }
 .ai-input textarea { flex: 1; resize: none; font: 12.5px Tahoma, Segoe UI, sans-serif; border: 1px solid #9fb0c8; padding: 4px; }
 .workspace.ai-on .winbody { margin-right: 22px; }
+/* the assistant operating the app: its cursor, click ripple, pressed control and on-screen menu */
+.ai-cursor { position: fixed; z-index: 1000; pointer-events: none; transition: left .5s cubic-bezier(.3,.7,.3,1), top .5s cubic-bezier(.3,.7,.3,1), opacity .4s; opacity: 0; filter: drop-shadow(1px 2px 2px rgba(0,0,0,.35)); }
+.ai-cursor.on { opacity: 1; }
+.ai-cursor span { position: absolute; left: 16px; top: 16px; background: #2a56c6; color: #fff; font: bold 9px Tahoma, sans-serif; padding: 1px 4px; border-radius: 3px; }
+.ai-ripple { position: fixed; z-index: 999; pointer-events: none; width: 10px; height: 10px; margin: -5px 0 0 -5px; border: 2px solid #2a56c6; border-radius: 50%; animation: ai-ripple .45s ease-out forwards; }
+@keyframes ai-ripple { to { width: 44px; height: 44px; margin: -22px 0 0 -22px; opacity: 0; } }
+.ai-press { box-shadow: 0 0 0 3px rgba(42,86,198,.55), 0 0 12px rgba(42,86,198,.6) !important; background: #dfe8fb !important; transition: box-shadow .15s; }
+.ai-menu { position: fixed; left: 0; top: 0; z-index: 998; pointer-events: none; font: 12px Tahoma, Segoe UI, sans-serif; }
+.ai-menu-bar { background: #fff; border-bottom: 1px solid #ccc; padding: 2px 4px; display: flex; box-shadow: 0 2px 6px rgba(42,86,198,.4); }
+.ai-menu-bar span { padding: 1px 8px; } .ai-menu-bar span.pick { background: var(--sel); color: #fff; }
+.ai-menu-col { position: absolute; top: 22px; min-width: 200px; background: #fff; border: 1px solid #979797; box-shadow: 2px 2px 6px rgba(0,0,0,.3); padding: 2px; }
+.ai-menu-col div { padding: 3px 18px; white-space: pre; } .ai-menu-col div.pick { background: var(--sel); color: #fff; }

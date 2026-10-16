@@ -121,6 +121,16 @@ ipcMain.handle('ai:chat', async (_e, id: string, req: ChatRequest) => {
 });
 ipcMain.handle('ai:cancel', (_e, id: string) => { aiCalls.get(id)?.abort(); return true; });
 
+// the menu bar as data (labels, command ids, shortcuts): the AI assistant uses it to explain and to operate menus
+export interface MenuNode { label: string; id?: string; accelerator?: string; submenu?: MenuNode[] }
+ipcMain.handle('menu:tree', () => {
+  const walk = (items: Electron.MenuItem[]): MenuNode[] => items.filter((i) => i.type !== 'separator' && i.label).map((i) => ({
+    label: i.label.replace(/&/g, ''), id: i.id || undefined, accelerator: (i.accelerator as string | undefined) || undefined,
+    submenu: i.submenu ? walk(i.submenu.items) : undefined,
+  }));
+  return walk(Menu.getApplicationMenu()?.items ?? []);
+});
+
 ipcMain.handle('startup:import', () => {
   const p = argVal('--import');
   return p && existsSync(p) ? { path: p, name: basename(p), bytes: new Uint8Array(readFileSync(p)) } : null;

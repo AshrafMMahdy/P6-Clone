@@ -27,7 +27,7 @@ export function AiSettingsDialog() {
   const save = async (close: boolean) => {
     setBusy(true);
     try {
-      const next = await window.p6.aiSetConfig({ enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model }, changingKey && key ? key : undefined);
+      const next = await window.p6.aiSetConfig({ enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, actions: cfg.actions }, changingKey && key ? key : undefined);
       setCfg(next); setKey(''); setChangingKey(!next.hasKey);
       if (close) { closeDialog(); toast(next.enabled ? 'AI assistant enabled (View > AI Assistant, Ctrl+Shift+A)' : 'AI assistant settings saved'); }
       return next;
@@ -39,7 +39,7 @@ export function AiSettingsDialog() {
     const r = await window.p6.aiChat(`test-${Date.now()}`, { system: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'Say OK' }], tools: [] });
     setTestMsg(r.ok ? `Connected. The model replied: "${r.reply.content.trim().slice(0, 80)}"` : `Failed: ${r.error}`);
   };
-  const removeKey = async () => { setBusy(true); try { const n = await window.p6.aiSetConfig({ enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model }, ''); setCfg(n); setChangingKey(true); toast('API key removed'); } finally { setBusy(false); } };
+  const removeKey = async () => { setBusy(true); try { const n = await window.p6.aiSetConfig({ enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, actions: cfg.actions }, ''); setCfg(n); setChangingKey(true); toast('API key removed'); } finally { setBusy(false); } };
 
   return (
     <Dialog title="AI Assistant Settings" width={620} height={430} buttons={<>
@@ -48,6 +48,7 @@ export function AiSettingsDialog() {
       <button className="btn" disabled={busy || !cfg.model} onClick={() => void test()}>Test Connection</button>
     </>}>
       <label style={{ display: 'block', margin: '4px 0 10px' }}><input type="checkbox" checked={cfg.enabled} onChange={(e) => set({ enabled: e.target.checked })} /> <b>Enable the AI assistant</b> (a panel on the right of the window that answers questions about the open project)</label>
+      <label style={{ display: 'block', margin: '0 0 10px 20px' }}><input type="checkbox" checked={cfg.actions !== false} onChange={(e) => set({ actions: e.target.checked })} /> Let the assistant operate the app when you ask it to (you see every step on screen; every change can be undone with Ctrl+Z; it asks before deleting)</label>
       <table className="form"><tbody>
         <tr><td>Provider</td><td><select value={preset.label} onChange={(e) => { const p = PRESETS.find((x) => x.label === e.target.value)!; set({ provider: p.provider, baseUrl: p.url || cfg.baseUrl }); }}>
           {PRESETS.map((p) => <option key={p.label}>{p.label}</option>)}

@@ -1,0 +1,206 @@
+// The assistant operating the app in front of the user, like remote control: a cursor glides to what it clicks,
+// menus open on screen with the chosen item highlighted, typing appears character by character. Every change goes
+// through the normal undoable edit path (Ctrl+Z), and deletions ask first.
+import type { ToolDef } from '../../core/query/tools.ts';
+import { applyOps } from '../../core/project/ops.ts';
+import { rows } from '../../core/db.ts';
+import { doUndo, getDb, getUi, mutate, setUi } from '../store.ts';
+
+export interface MenuNode { label: string; id?: string; accelerator?: string; submenu?: MenuNode[] }
+let menuTree: MenuNode[] = [];
+let run: (id: string) => void = () => {};
+/** App wiring: the menu tree (from the main process) and the command runner. */
+export async function initLive(runMenu: (id: string) => void): Promise<void> {
+  run = runMenu;
+  try { menuTree = (await window.p6.menuTree()) as MenuNode[]; } catch { menuTree = []; }
+}
+/** The menu bar as text, for the assistant's instructions ("Tools > Schedule... (F9)"). */
+export function menuGuide(): string {
+  const out: string[] = [];
+  const walk = (ns: MenuNode[], path: string[]) => { for (const n of ns) { const p = [...path, n.label]; if (n.submenu?.length) walk(n.submenu, p); else out.push(`${p.join(' > ')}${n.accelerator ? ` (${n.accelerator})` : ''}`); } };
+  walk(menuTree, []);
+  return out.join('\n');
+}
+
+export const LIVE_TOOLS: ToolDef[] = [
+  { name: 'ui_menu', description: 'Choose a menu command on screen, exactly as the user would (the menu opens visibly and the item is clicked). path like "Tools > Schedule..." or "View > Zoom > Zoom In". Use the menu list in your instructions.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
+  { name: 'ui_click', description: 'Click a visible button or tab by its text or tooltip (dialog buttons such as "Schedule" or "OK", toolbar buttons such as "Zoom In", window buttons on the left such as "Activities", detail tabs such as "Relationships"). The cursor moves there on screen.', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } },
+  { name: 'ui_type', description: 'Type text into a field of the open dialog, found by its label (e.g. "Current Data Date"). The text appears as if typed.', parameters: { type: 'object', properties: { field: { type: 'string' }, text: { type: 'string' } }, required: ['field', 'text'] } },
+  { name: 'ui_screen', description: 'What is on screen now: the window, the open dialog with its fields and buttons, the selected activity. Use it to decide the next click.', parameters: { type: 'object', properties: {} } },
+  { name: 'select_activity', description: 'Select an activity in the Activities window and scroll it into view.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
+  { name: 'edit_project', description: 'Change the open project with the same JSON operations as the headless CLI (add_activity, update_activity, add_relationship, assign_resource, ...; durations in days). Applied as one undoable step; changed activities are selected so the user sees them. Deleting asks the user first.', parameters: { type: 'object', properties: { operations: { type: 'array', items: { type: 'object', properties: { op: { type: 'string' } }, required: ['op'] } } }, required: ['operations'] } },
+  { name: 'undo', description: 'Undo the last change (Edit > Undo).', parameters: { type: 'object', properties: {} } },
+];
+
+// ---- on-screen cursor
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+let cursor: HTMLDivElement | null = null;
+function cur(): HTMLDivElement {
+  if (cursor && document.body.contains(cursor)) return cursor;
+  cursor = document.createElement('div');
+  cursor.className = 'ai-cursor';
+  cursor.innerHTML = '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M2 2 L2 18 L6.5 13.5 L10 20.5 L13 19 L9.5 12.5 L16 12.5 Z" fill="#fff" stroke="#1a3d7c" stroke-width="1.6"/></svg><span>AI</span>';
+  cursor.style.left = `${window.innerWidth - 300}px`; cursor.style.top = `${window.innerHeight - 120}px`;
+  document.body.appendChild(cursor);
+  return cursor;
+}
+async function moveTo(el: Element): Promise<void> {
+  const r = el.getBoundingClientRect(), c = cur();
+  c.classList.add('on');
+  c.style.left = `${r.left + Math.min(r.width / 2, 40)}px`; c.style.top = `${r.top + r.height / 2}px`;
+  await sleep(520);
+}
+async function clickEl(el: HTMLElement): Promise<void> {
+  el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  await moveTo(el);
+  el.classList.add('ai-press');
+  const ring = document.createElement('div'); ring.className = 'ai-ripple';
+  const c = cur(); ring.style.left = c.style.left; ring.style.top = c.style.top; document.body.appendChild(ring);
+  await sleep(180);
+  el.click();
+  setTimeout(() => { el.classList.remove('ai-press'); ring.remove(); }, 450);
+  await sleep(350);
+}
+const hideSoon = () => setTimeout(() => cursor?.classList.remove('on'), 2500);
+
+// ---- a menu shown on screen (native menus cannot be opened by a script, so the clone draws one)
+async function showMenu(path: string[]): Promise<void> {
+  const box = document.createElement('div'); box.className = 'ai-menu';
+  let x0 = 0; // left of the chosen top-level title
+  const layer = (items: MenuNode[], pick: string, depth: number) => {
+    const col = document.createElement('div'); col.className = 'ai-menu-col'; col.style.left = `${x0 + depth * 210}px`;
+    for (const n of items) { const d = document.createElement('div'); d.textContent = n.label + (n.submenu ? '  ›' : n.accelerator ? `   ${n.accelerator}` : ''); if (n.label === pick) d.className = 'pick'; col.appendChild(d); }
+    box.appendChild(col);
+  };
+  const bar = document.createElement('div'); bar.className = 'ai-menu-bar';
+  for (const m of menuTree) { const t = document.createElement('span'); t.textContent = m.label; if (m.label === path[0]) t.className = 'pick'; bar.appendChild(t); }
+  box.appendChild(bar);
+  document.body.appendChild(box);
+  let items = menuTree;
+  for (let i = 0; i < path.length; i++) {
+    const n = items.find((x) => x.label === path[i]);
+    if (!n) break;
+    if (i === 0) { const t = [...bar.children].find((c) => c.textContent === n.label) as HTMLElement | undefined; x0 = t?.offsetLeft ?? 0; await moveTo(t ?? bar); items = n.submenu ?? []; continue; }
+    layer(items, path[i], i - 1);
+    await sleep(380);
+    items = n.submenu ?? [];
+  }
+  if (path.length === 1) layer(menuTree.find((m) => m.label === path[0])?.submenu ?? [], '', 0);
+  await sleep(420);
+  box.remove();
+}
+
+// ---- finding things on screen
+const visible = (el: Element) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+const norm = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').replace(/[.…]+$/, '').trim().toLowerCase();
+function findClickable(target: string): HTMLElement | null {
+  const t = norm(target);
+  const dlgs = [...document.querySelectorAll<HTMLElement>('.dialog')];
+  const scope: ParentNode = dlgs.length ? dlgs[dlgs.length - 1] : document;
+  const pool = [...scope.querySelectorAll<HTMLElement>('button, .tab, .dirbtn, .tbtn, .ctxmenu > div, a, label')].filter(visible);
+  return pool.find((e) => norm(e.textContent) === t || norm(e.title) === t) ?? pool.find((e) => norm(e.textContent).startsWith(t) || norm(e.title).startsWith(t)) ?? null;
+}
+function findField(label: string): HTMLInputElement | HTMLSelectElement | null {
+  const t = norm(label);
+  const dlgs = [...document.querySelectorAll<HTMLElement>('.dialog')];
+  const scope: ParentNode = dlgs.length ? dlgs[dlgs.length - 1] : document;
+  for (const el of scope.querySelectorAll<HTMLElement>('label, td, th, span, div')) {
+    if (el.children.length > 3 || !norm(el.textContent).startsWith(t)) continue;
+    const input = el.querySelector<HTMLInputElement>('input, select') ?? (el.nextElementSibling?.querySelector?.('input, select') as HTMLInputElement | null) ?? (el.tagName === 'TD' ? (el.parentElement?.querySelector('td:nth-child(2) input, td:nth-child(2) select') as HTMLInputElement | null) : null);
+    if (input && visible(input)) return input;
+  }
+  return null;
+}
+function screen(): unknown {
+  const ui = getUi();
+  const dlgs = [...document.querySelectorAll<HTMLElement>('.dialog')];
+  const d = dlgs[dlgs.length - 1];
+  const sel = ui.selTask ? rows(getDb(), 'TASK').find((t) => t.task_id === ui.selTask) : undefined;
+  return {
+    window: ui.view, open_projects: ui.openProjects.length, selected_activity: sel ? `${sel.task_code} ${sel.task_name}` : null,
+    dialog: d ? {
+      title: d.querySelector('.dialog-title span')?.textContent,
+      buttons: [...d.querySelectorAll('button')].filter(visible).map((b) => b.textContent?.trim()).filter(Boolean),
+      tabs: [...d.querySelectorAll('.tab')].map((b) => b.textContent?.trim()),
+      fields: [...d.querySelectorAll('label, tr')].filter((l) => l.querySelector('input, select')).slice(0, 30).map((l) => ({ label: norm(l.textContent).slice(0, 60), value: (l.querySelector('input, select') as HTMLInputElement).type === 'checkbox' ? (l.querySelector('input') as HTMLInputElement).checked : (l.querySelector('input, select') as HTMLInputElement).value })),
+    } : null,
+    toolbar: [...document.querySelectorAll<HTMLElement>('.toolbar .tbtn, .tbar .tbtn')].map((b) => b.title).filter(Boolean),
+  };
+}
+
+/** Run one live tool. Returns what the model should know. */
+export async function runLive(name: string, args: Record<string, any>): Promise<unknown> {
+  try {
+    switch (name) {
+      case 'ui_screen': return screen();
+      case 'ui_menu': {
+        const path = String(args.path ?? '').split('>').map((s) => s.trim()).filter(Boolean);
+        let items = menuTree, node: MenuNode | undefined;
+        for (const p of path) { node = items.find((m) => norm(m.label) === norm(p)) ?? items.find((m) => norm(m.label).startsWith(norm(p))); if (!node) return { error: `No menu item "${p}" in ${path.join(' > ')}.` }; items = node.submenu ?? []; }
+        if (!node?.id) return { error: `"${path.join(' > ')}" is a submenu, not a command.` };
+        await showMenu(path.map((p, i) => { let it = menuTree; for (let k = 0; k < i; k++) it = it.find((m) => norm(m.label).startsWith(norm(path[k])))?.submenu ?? []; return it.find((m) => norm(m.label) === norm(p) || norm(m.label).startsWith(norm(p)))?.label ?? p; }));
+        run(node.id);
+        await sleep(400);
+        return { done: path.join(' > '), screen: screen() };
+      }
+      case 'ui_click': {
+        const el = findClickable(String(args.target ?? ''));
+        if (!el) return { error: `Nothing called "${args.target}" is visible.`, screen: screen() };
+        if ((el as HTMLButtonElement).disabled) return { error: `"${args.target}" is disabled right now.`, screen: screen() };
+        await clickEl(el);
+        await sleep(300);
+        return { clicked: args.target, screen: screen() };
+      }
+      case 'ui_type': {
+        const el = findField(String(args.field ?? ''));
+        if (!el) return { error: `No field labelled "${args.field}" in the open dialog.`, screen: screen() };
+        await clickEl(el as HTMLElement);
+        const text = String(args.text ?? '');
+        const setter = Object.getOwnPropertyDescriptor(el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value')!.set!;
+        if (el instanceof HTMLSelectElement || el.type === 'date' || el.type === 'datetime-local' || el.type === 'checkbox') {
+          if (el instanceof HTMLInputElement && el.type === 'checkbox') { if (String(el.checked) !== text) el.click(); }
+          else { const v = el instanceof HTMLSelectElement ? ([...el.options].find((o) => norm(o.text) === norm(text) || o.value === text)?.value ?? text) : text; setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
+        } else {
+          setter.call(el, ''); el.dispatchEvent(new Event('input', { bubbles: true }));
+          for (let i = 1; i <= text.length; i++) { setter.call(el, text.slice(0, i)); el.dispatchEvent(new Event('input', { bubbles: true })); await sleep(28); }
+        }
+        return { typed: text, into: args.field };
+      }
+      case 'select_activity': {
+        const t = rows(getDb(), 'TASK').find((x) => x.task_code === String(args.activity_id) && getUi().openProjects.includes(x.proj_id)) ?? rows(getDb(), 'TASK').find((x) => x.task_code === String(args.activity_id));
+        if (!t) return { error: `No activity "${args.activity_id}".` };
+        const btn = [...document.querySelectorAll<HTMLElement>('.dirbtn')].find((b) => norm(b.textContent) === 'activities');
+        if (getUi().view !== 'activities' && btn) await clickEl(btn);
+        setUi({ view: 'activities', selTasks: [t.task_id], selTask: t.task_id, revealTask: t.task_id });
+        await sleep(350);
+        const row = document.querySelector<HTMLElement>('.grid-row.sel');
+        if (row) await moveTo(row);
+        return { selected: `${t.task_code} ${t.task_name}` };
+      }
+      case 'edit_project': {
+        const ops = Array.isArray(args.operations) ? args.operations : [];
+        const dels = ops.filter((o: { op?: string }) => o?.op === 'delete_activity' || o?.op === 'dissolve_activity' || o?.op === 'delete_relationship');
+        if (dels.length && !(await window.p6.confirm(`The AI assistant wants to make ${ops.length} change(s), including ${dels.length} deletion(s).`, ops.map((o: Record<string, unknown>) => `${o.op} ${o.id ?? `${o.pred ?? ''} ${o.succ ?? ''}`}`).join('\n').slice(0, 800) + '\n\nAllow? (You can undo with Ctrl+Z.)'))) return { error: 'The user declined.' };
+        const projId = getUi().openProjects[0];
+        const proj = projId ? rows(getDb(), 'PROJECT').find((p) => p.proj_id === projId)?.proj_short_name : undefined;
+        // single open project: operations need not name it
+        const withProj = proj ? ops.map((o: Record<string, unknown>) => ({ project: proj, ...o })) : ops;
+        let r!: ReturnType<typeof applyOps>;
+        const before = new Set(rows(getDb(), 'TASK').map((t) => t.task_id));
+        mutate(`AI: ${ops.length} change(s)`, (d) => { r = applyOps(d, withProj, { hoursPerDay: getUi().prefs.hoursPerDay }); if (!r.ok) throw new Error(r.error!.message); });
+        const codes = new Set(ops.flatMap((o: Record<string, unknown>) => [o.id, o.activity, o.pred, o.succ].filter(Boolean).map(String)));
+        const touched = rows(getDb(), 'TASK').filter((t) => !before.has(t.task_id) || codes.has(t.task_code)).map((t) => t.task_id);
+        if (touched.length) setUi({ view: 'activities', selTasks: touched, selTask: touched[0], revealTask: touched[0] });
+        return { ...r, note: 'Applied as one step; the user can undo it with Ctrl+Z. Run Tools > Schedule (F9) to recalculate other activities.' };
+      }
+      case 'undo': {
+        const btn = document.querySelector<HTMLElement>('.tbtn[title="Undo"]');
+        if (btn) await clickEl(btn); else doUndo();
+        return { done: 'undo' };
+      }
+    }
+    return { error: `Unknown tool ${name}` };
+  } catch (e) {
+    return { error: (e as Error).message };
+  } finally { hideSoon(); }
+}

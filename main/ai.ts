@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 export type ProviderKind = 'anthropic' | 'openai';
-export interface AiConfig { enabled: boolean; provider: ProviderKind; baseUrl: string; model: string }
+export interface AiConfig { enabled: boolean; provider: ProviderKind; baseUrl: string; model: string; /** let the assistant operate the app (visibly, undoable) */ actions?: boolean }
 /** What the window may see: everything but the key. */
 export interface AiPublicConfig extends AiConfig { hasKey: boolean; keyHint: string; encrypted: boolean }
 
@@ -22,7 +22,7 @@ export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: strin
 interface Stored extends AiConfig { key?: string; keyEnc?: boolean; keyHint?: string }
 export interface KeyBox { available(): boolean; encrypt(s: string): string; decrypt(s: string): string }
 
-export const DEFAULTS: AiConfig = { enabled: false, provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: '' };
+export const DEFAULTS: AiConfig = { enabled: false, provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: '', actions: true };
 
 export class AiStore {
   private file: string; private box: KeyBox;
@@ -33,12 +33,12 @@ export class AiStore {
   }
   publicConfig(): AiPublicConfig {
     const s = this.read();
-    return { enabled: s.enabled, provider: s.provider, baseUrl: s.baseUrl, model: s.model, hasKey: !!s.key, keyHint: s.keyHint ?? '', encrypted: s.keyEnc !== false };
+    return { enabled: s.enabled, provider: s.provider, baseUrl: s.baseUrl, model: s.model, actions: s.actions !== false, hasKey: !!s.key, keyHint: s.keyHint ?? '', encrypted: s.keyEnc !== false };
   }
   /** apiKey: undefined keeps the saved key, '' removes it. */
   save(c: AiConfig, apiKey?: string): AiPublicConfig {
     const s = this.read();
-    const next: Stored = { ...s, enabled: !!c.enabled, provider: c.provider === 'openai' ? 'openai' : 'anthropic', baseUrl: String(c.baseUrl || '').trim(), model: String(c.model || '').trim() };
+    const next: Stored = { ...s, enabled: !!c.enabled, provider: c.provider === 'openai' ? 'openai' : 'anthropic', baseUrl: String(c.baseUrl || '').trim(), model: String(c.model || '').trim(), actions: c.actions !== false };
     if (apiKey !== undefined) {
       const k = apiKey.trim();
       if (!k) { delete next.key; delete next.keyHint; delete next.keyEnc; }

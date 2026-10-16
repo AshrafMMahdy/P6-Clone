@@ -6,13 +6,14 @@ import { getDb, getUi, setUi, useStore } from '../store.ts';
 import { makeCtx, projectName } from '../model.ts';
 import { rows } from '../../core/db.ts';
 import { TOOLS, runTool } from '../../core/query/tools.ts';
+import { LIVE_TOOLS, runLive, menuGuide } from './live.ts';
 import type { AiPublicConfig, ChatMsg } from '../../main/ai.ts';
 
 interface Line { who: 'user' | 'ai' | 'tool' | 'error'; text: string }
 const MAX_ROUNDS = 12;
-const LABEL: Record<string, string> = { project_summary: 'Read the project summary', find_activities: 'Searched activities', get_activity: 'Opened activity', list_wbs: 'Read the WBS', critical_path: 'Read the critical path', schedule_health: 'Ran the schedule health check', resource_summary: 'Read resource assignments' };
+const LABEL: Record<string, string> = { ui_menu: 'Menu', ui_click: 'Clicked', ui_type: 'Typed into', ui_screen: 'Looked at the screen', select_activity: 'Selected', edit_project: 'Changed the project', undo: 'Undo',  project_summary: 'Read the project summary', find_activities: 'Searched activities', get_activity: 'Opened activity', list_wbs: 'Read the WBS', critical_path: 'Read the critical path', schedule_health: 'Ran the schedule health check', resource_summary: 'Read resource assignments' };
 
-function systemPrompt(): string {
+function systemPrompt(actions: boolean): string {
   const db = getDb(), ui = getUi();
   const projs = ui.openProjects.map((id) => rows(db, 'PROJECT').find((p) => p.proj_id === id)).filter((p) => p != null);
   return [
@@ -21,6 +22,12 @@ function systemPrompt(): string {
     `Durations and floats are given in days of ${ui.prefs.hoursPerDay} hours. Today is ${new Date().toISOString().slice(0, 10)}.`,
     'Always use the tools to look facts up; never guess dates, durations or logic. Start with project_summary when you need context. For large projects, filter with find_activities rather than listing everything.',
     'Answer concisely and concretely, the way an experienced P6 planner would. Mention activity IDs exactly as written so the user can click them. Use short bullet lists or small tables when they help. Say plainly when the data cannot answer the question.',
+    'You also teach: when the user asks how to do something, give the exact steps in this application (menu paths, dialog names, buttons, keyboard shortcuts) and briefly explain the P6 concept behind it (for example what retained logic, total float or a Start On or After constraint means). The application mirrors P6 Professional; its menu bar is:',
+    menuGuide(),
+    'Windows (buttons on the left): Projects, WBS, Activities, Assignments, Resources, Timesheets, Risks, Portfolios, Reports. Activity Details tabs: General, Status, Resources, Relationships, Predecessors, Successors, Codes, Notebook, Expenses, Summary. Right-click in the table or Gantt for context menus; F9 schedules; Ctrl+F finds; Ctrl+Z undoes.',
+    actions
+      ? 'When the user asks you to DO something (not only explain), do it with the ui_* tools so they can watch each step: ui_menu for menu commands, ui_screen to see the open dialog, ui_type to fill its fields, ui_click for buttons (for example ui_menu "Tools > Schedule..." then ui_click "Schedule"). For changes to activities, relationships, resources or calendars use edit_project (one undoable step). Say briefly what you are doing. Never delete anything unless the user asked. After changing logic or durations, schedule (F9) so the dates update.'
+      : 'The user has not allowed you to operate the application; give the steps instead.',
   ].join('\n');
 }
 
@@ -55,7 +62,8 @@ export function AssistantPanel() {
       for (let round = 0; round < MAX_ROUNDS && !stopped.current; round++) {
         const id = `${Date.now()}-${round}`;
         callId.current = id;
-        const r = await window.p6.aiChat(id, { system: systemPrompt(), messages: history.current, tools: TOOLS });
+        const allow = cfg.actions !== false;
+        const r = await window.p6.aiChat(id, { system: systemPrompt(allow), messages: history.current, tools: allow ? [...TOOLS, ...LIVE_TOOLS] : TOOLS });
         if (!r.ok) { add({ who: 'error', text: r.error }); break; }
         const { content, toolCalls } = r.reply;
         history.current.push({ role: 'assistant', content, toolCalls });
@@ -65,10 +73,11 @@ export function AssistantPanel() {
         const db = getDb(), ui = getUi(), ctx = makeCtx(db, ui.prefs);
         for (const c of toolCalls) {
           let out: unknown;
-          try { out = runTool(c.name, c.args ?? {}, db, ctx, ui.openProjects, ui.prefs.hoursPerDay); } catch (e) { out = { error: (e as Error).message }; }
+          try { out = LIVE_TOOLS.some((t) => t.name === c.name) ? await runLive(c.name, c.args ?? {}) : runTool(c.name, c.args ?? {}, getDb(), makeCtx(getDb(), getUi().prefs), getUi().openProjects, ui.prefs.hoursPerDay); } catch (e) { out = { error: (e as Error).message }; }
           const json = JSON.stringify(out);
           history.current.push({ role: 'tool', toolCallId: c.id, name: c.name, content: json.length > 60000 ? json.slice(0, 60000) + '... (truncated)' : json });
-          add({ who: 'tool', text: `${LABEL[c.name] ?? c.name}${c.args?.activity_id ? ` ${c.args.activity_id}` : c.args?.text ? ` for "${c.args.text}"` : ''}` });
+          const err = (out as { error?: string })?.error;
+          add({ who: 'tool', text: `${LABEL[c.name] ?? c.name}${c.args?.path ? ` ${c.args.path}` : c.args?.target ? ` "${c.args.target}"` : c.args?.field ? ` "${c.args.field}"` : c.args?.activity_id ? ` ${c.args.activity_id}` : c.args?.text ? ` for "${c.args.text}"` : ''}${err ? ` (${err})` : ''}` });
         }
         if (round === MAX_ROUNDS - 1) add({ who: 'error', text: 'Stopped after many lookups. Try a narrower question.' });
       }
@@ -92,7 +101,7 @@ export function AssistantPanel() {
       <div className="ai-body">
         {!lines.length && <div className="muted" style={{ padding: 10 }}>
           Ask about the open project, for example:
-          <ul>{['What is driving the project finish?', 'Which activities have negative float, and why?', 'Summarise the schedule health problems.', 'What is planned for the next 4 weeks?'].map((s) => <li key={s}><a href="#" onClick={(e) => { e.preventDefault(); setInput(s); box.current?.focus(); }}>{s}</a></li>)}</ul>
+          <ul>{['What is driving the project finish?', 'Which activities have negative float, and why?', 'How do I add a Start On or After constraint?', cfg.actions !== false ? 'Schedule the project for me (F9) and show me the critical path.' : 'What is planned for the next 4 weeks?'].map((s) => <li key={s}><a href="#" onClick={(e) => { e.preventDefault(); setInput(s); box.current?.focus(); }}>{s}</a></li>)}</ul>
         </div>}
         {lines.map((l, i) => <div key={i} className={`ai-msg ${l.who}`}>{l.who === 'ai' ? <Rich text={l.text} /> : l.text}</div>)}
         {busy && <div className="ai-msg tool">Thinking...</div>}

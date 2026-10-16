@@ -5,7 +5,7 @@ type Item = MenuItemConstructorOptions;
 /** P6 Professional-style menu bar. Each command is forwarded to the renderer as a 'menu' event. */
 export function buildMenu(win: BrowserWindow): Menu {
   const cmd = (label: string, id: string, accelerator?: string, extra: Partial<Item> = {}): Item =>
-    ({ label, accelerator, click: () => win.webContents.send('menu', id), ...extra });
+    ({ label, id, accelerator, click: () => win.webContents.send('menu', id), ...extra });
   const sep: Item = { type: 'separator' };
 
   const template: Item[] = [
