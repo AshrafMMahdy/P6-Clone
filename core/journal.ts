@@ -3,6 +3,11 @@
 // MB per step on a 100 MB programme). Works on plain objects and arrays (the database is nothing else).
 type Obj = Record<PropertyKey, unknown>;
 
+/** Reading this key from a recording view gives the real object (for bulk work that records its own change). */
+export const RAW = Symbol('raw');
+/** The real object behind a recording view (or the value itself). */
+export const rawOf = <T>(v: T): T => ((v as { [RAW]?: T } | null)?.[RAW] ?? v);
+
 export interface Journal {
   /** object -> key -> value before the change (absent = the key did not exist) */
   fields: Map<object, Map<PropertyKey, { had: boolean; old: unknown }>>;
@@ -20,21 +25,23 @@ export function record<T extends object>(root: T, fn: (view: T) => void): Journa
     if (!m) j.fields.set(t, (m = new Map()));
     if (!m.has(k)) m.set(k, { had: Object.prototype.hasOwnProperty.call(t, k), old: (t as Obj)[k] });
   };
-  // values written must never be views: store the real objects (arrays/objects built from views are cleaned too)
-  const unwrap = (v: unknown, depth = 0): unknown => {
+  // values written must never be views: store the real objects. A new array or object built from views (a filtered
+  // row list, a new table) gets its view members replaced; rows themselves hold only text, so they are not walked.
+  const real = (x: unknown) => (x !== null && typeof x === 'object' ? targets.get(x) ?? x : x);
+  const cleanArray = (a: unknown[]) => { for (let i = 0; i < a.length; i++) { const x = a[i]; if (x !== null && typeof x === 'object') { const t = targets.get(x); if (t) a[i] = t; } } return a; };
+  const unwrap = (v: unknown): unknown => {
     if (v === null || typeof v !== 'object') return v;
     const t = targets.get(v);
     if (t) return t;
-    if (depth > 2) return v;
-    if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) { const x = v[i]; if (x !== null && typeof x === 'object') v[i] = unwrap(x, depth + 1); } return v; }
-    for (const k of Object.keys(v)) { const x = (v as Obj)[k]; if (x !== null && typeof x === 'object') (v as Obj)[k] = unwrap(x, depth + 1); }
+    if (Array.isArray(v)) return cleanArray(v);
+    for (const k in v) { const x = (v as Obj)[k]; if (x !== null && typeof x === 'object') (v as Obj)[k] = Array.isArray(real(x)) ? cleanArray(real(x) as unknown[]) : real(x); }
     return v;
   };
   const wrap = (t: object): object => {
     let p = proxies.get(t);
     if (p) return p;
     p = new Proxy(t, {
-      get(o, k) { const v = Reflect.get(o, k); return v !== null && typeof v === 'object' ? wrap(v) : v; },
+      get(o, k) { if (k === RAW) return o; const v = Reflect.get(o, k); return v !== null && typeof v === 'object' ? wrap(v) : v; },
       set(o, k, v) { note(o, k); return Reflect.set(o, k, unwrap(v)); },
       deleteProperty(o, k) { note(o, k); return Reflect.deleteProperty(o, k); },
       defineProperty(o, k, d) { note(o, k); if ('value' in d) d = { ...d, value: unwrap(d.value) }; return Reflect.defineProperty(o, k, d); },

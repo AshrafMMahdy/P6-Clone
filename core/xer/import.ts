@@ -1,4 +1,5 @@
 // Merge a parsed XER into the clone database the way P6's Import wizard does.
+import { rawOf } from '../journal.ts';
 import { KEYS, refTarget, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { isLegacyLayout } from '../schedule/cpm.ts';
@@ -138,6 +139,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
     const dst = table(db, t);
     for (const f of src.tables[t].fields) if (!dst.fields.includes(f)) dst.fields.push(f);
     const k = KEYS[t];
+    const add: Row[] = [];
     for (const r of src.tables[t].rows) {
       if (inSkipped(t, r)) continue;
       if (k && keepExisting.has(`${t}|${r[k]}`)) continue;
@@ -149,8 +151,10 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
         nr._legacy_ms = isLegacyLayout(src) ? 'Y' : 'N';
         nr._p6_ver = src.header?.version ?? '';
       }
-      dst.rows.push(nr);
+      add.push(nr);
     }
+    // attach in one step (one undo record instead of one per row on million-row tables)
+    if (add.length) dst.rows = rawOf(dst.rows).concat(add);
   }
   const projIds = plan.projects.filter((p) => p.action !== 'skip').map((p) => m('PROJECT')[p.srcProjId]);
   return { projIds, findings, map };

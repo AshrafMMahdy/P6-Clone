@@ -39,10 +39,10 @@ export function ActivitiesView() {
       return { key: r.key, kind: 'group', level: r.level, label: r.label, cells, hasChildren: r.hasChildren, collapsed: r.collapsed, style: { background: WBS_COLORS[Math.min(r.level, 4)] } } satisfies GridItem;
     }
     const t = r.task!;
-    const cells: Record<string, string> = {};
-    for (const c of cols) cells[c.id] = c.get(t, ctx);
     const crit = isCritical(t, ctx);
-    return { key: r.key, kind: 'row', level: r.level, cells, icon: <ActIcon t={t} crit={crit} />, className: crit ? 'crit' : '' } satisfies GridItem;
+    // cell text is worked out when the row is first drawn (only the visible rows of a 100k-activity project)
+    let cells: Record<string, string> | undefined;
+    return { key: r.key, kind: 'row', level: r.level, get cells() { if (!cells) { cells = {}; for (const c of cols) cells[c.id] = c.get(t, ctx); } return cells; }, icon: <ActIcon t={t} crit={crit} />, className: crit ? 'crit' : '' } satisfies GridItem;
   }), [rows, cols, ctx, cal]);
 
   const barLabel = ui.bars?.label ?? 'none';
