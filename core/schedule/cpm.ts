@@ -244,6 +244,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       // A finish can sit inside work time or at a period end. P6 never moves a finish milestone back across
       // a non-work gap: if it lands at a period start (or in a gap) it is placed one minute into the period.
       if (a.proj.opts.legacyMilestones) a.es = a.ef = a.cal.prevWorkEnd(raw) === raw ? raw : a.cal.nextWorkStart(raw) + 1;
+      else if (a.cal.prevWorkEnd(raw) === raw || a.cal.nextWorkStart(raw) === raw) a.es = a.ef = raw; // inside work or on a period boundary: stays
       else { const t = a.cal.prevWorkEnd(a.cal.nextWorkStart(raw)); a.es = a.ef = t < floor ? a.cal.nextWorkStart(raw) : t; }
     } else if (a.type === 'TT_Mile') {
       a.es = a.ef = a.cal.nextWorkStart(raw);
@@ -283,7 +284,11 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
           let t: number | null;
           if (!r.pred) { t = extStart(r); if (t == null) continue; t = lagAdd(t, r); }
           else t = predTime(r);
-          if (r.type === 'FF' || r.type === 'SF') t = a.dur ? a.cal.subWork(t, a.dur) : t;
+          if (r.type === 'FF' || r.type === 'SF') {
+            // P6 6.x: a required finish at a period start becomes one minute into that period
+            if (a.proj.opts.legacyMilestones && a.dur && a.cal.prevWorkEnd(t) !== t) t = a.cal.nextWorkStart(t) + 1;
+            t = a.dur ? a.cal.subWork(t, a.dur) : t;
+          }
           if (t > raw) raw = t;
         }
         const ext = parseP6Date(a.row.external_early_start_date);
@@ -343,7 +348,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
       raw = mand ?? raw;
       // Mirror rule: a start milestone's late date at a period end (or in a gap) is one minute before the end.
-      if (a.type === 'TT_Mile') a.ls = a.lf = a.proj.opts.legacyMilestones ? (a.cal.nextWorkStart(raw) === raw ? raw : a.cal.prevWorkEnd(raw) - 1) : a.cal.nextWorkStart(a.cal.prevWorkEnd(raw));
+      if (a.type === 'TT_Mile') a.ls = a.lf = a.proj.opts.legacyMilestones ? (a.cal.nextWorkStart(raw) === raw ? raw : a.cal.prevWorkEnd(raw) - 1) : a.cal.nextWorkStart(raw) === raw || a.cal.prevWorkEnd(raw) === raw ? raw : a.cal.nextWorkStart(a.cal.prevWorkEnd(raw));
       else if (a.type === 'TT_FinMile') a.ls = a.lf = a.cal.prevWorkEnd(raw);
       else {
         a.lf = mand ?? a.cal.prevWorkEnd(raw);
