@@ -24,6 +24,8 @@ export function repairStale(db: ReturnType<typeof parseXer>['db']): string[] {
       out.push(`${t.task_code}: remaining ${t.remain_drtn_hr_cnt} h, P6 dates imply ${Math.round(used * 100) / 100} h`);
       t.remain_drtn_hr_cnt = String(used);
       t.target_drtn_hr_cnt = String(used);
+      // the same edit stretched its rate-less assignments; put them back on the activity's dates
+      for (const r of db.tables.TASKRSRC?.rows ?? []) if (r.task_id === t.task_id && !(Number(r.remain_qty_per_hr) > 0)) { r.restart_date = t.early_start_date; r.reend_date = t.early_end_date; }
     }
   }
   return out;

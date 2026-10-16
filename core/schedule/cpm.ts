@@ -516,7 +516,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       if (ef === -BIG) { ef = a.dur ? a.cal.addWork(es, a.dur) : es; lf = a.dur ? a.cal.addWork(ls, a.dur) : ls; }
       ef = Math.max(es, a.cal.prevWorkEnd(ef));
       lf = Math.max(ls, a.cal.prevWorkEnd(lf));
-      if (a.status === 'IP') ls = a.as!; // P6 reports an in-progress LOE's late start as its actual start
+      if (a.status === 'IP') ls = a.cal.nextWorkStart(a.as!); // P6 reports an in-progress LOE's late start as its actual start (at work time)
       Object.assign(a, { es, ef, ls, lf });
       a.dur = a.cal.workBetween(es, ef);
       a.tf = a.cal.workBetween(ef, lf);
