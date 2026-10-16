@@ -75,6 +75,11 @@ export function parseXer(bytes: Uint8Array): ParseResult {
       cur.rows.push(r);
     } else if (tag === '%E') {
       meta.hasEnd = true;
+      const ignored = lines.slice(i + 1).filter((l) => l.startsWith('%T	')).map((l) => l.slice(3).trim());
+      if (ignored.length) findings.push({
+        severity: 'error', code: 'DATA_AFTER_END', message: `%E end marker at line ${i + 1}, but ${ignored.length} more table(s) follow and are ignored: ${ignored.slice(0, 8).join(', ')}${ignored.length > 8 ? ', …' : ''}.`,
+        p6: 'P6 stops reading at the first %E; everything after it is not imported.',
+      });
       break;
     } else if (line.trim() !== '') {
       findings.push({
