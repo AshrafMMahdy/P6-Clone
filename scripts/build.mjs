@@ -4,6 +4,8 @@ import { build as vite } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { writeFileSync } from 'node:fs';
+import { iconPng } from './icon.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron'], sourcemap: true, logLevel: 'warning' };
@@ -17,4 +19,5 @@ await vite({
   logLevel: 'warn',
   build: { minify: false /* local app; the minifier reorders module init and breaks it */, outDir: join(root, 'dist/renderer'), emptyOutDir: true, sourcemap: true, chunkSizeWarningLimit: 4000 },
 });
+writeFileSync(join(root, 'dist/icon.png'), iconPng());
 console.log('built dist/');

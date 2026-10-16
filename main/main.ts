@@ -19,6 +19,7 @@ function createWindow(): void {
     width: 1440, height: 900, minWidth: 900, minHeight: 600,
     title: 'Primavera P6 Professional (Clone)',
     backgroundColor: '#f0f0f0',
+    icon: join(__dirname, 'icon.png'),
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   Menu.setApplicationMenu(buildMenu(win));
