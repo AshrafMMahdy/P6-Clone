@@ -442,8 +442,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         r.slack = relSlack(r);
         if (r.slack < ff) ff = r.slack;
       }
-      // open end: free float to the project finish; P6 6.x builds measure it to the end of the Must Finish By day
-      const openEnd = a.proj.opts.legacyMilestones && a.proj.mfb != null ? a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY) : a.proj.finish;
+      // open end: free float to the project finish; P6 6.x builds stop at the end of the Must Finish By day if earlier
+      const openEnd = a.proj.opts.legacyMilestones && a.proj.mfb != null ? Math.min(a.proj.finish, a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY)) : a.proj.finish;
       a.ff = ff === BIG ? a.cal.workBetween(a.ef, openEnd) : ff;
       if (a.proj.opts.useExpectedFinish && a.row.expect_end_date) a.ff = 0; // P6: an expected finish pins the activity (no free float)
     }
@@ -529,15 +529,21 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     for (const a of acts.values()) {
       if (a.type !== 'TT_WBS') continue;
       const kids = [...acts.values()].filter((b) => b !== a && b.type !== 'TT_WBS' && b.status !== 'CO' && b.proj === a.proj && under(b.row.wbs_id, a.row.wbs_id));
-      if (!kids.length) { a.es = a.ef = a.ls = a.lf = a.cal.nextWorkStart(a.proj.dd); a.dur = 0; a.tf = 0; a.ff = a.cal.workBetween(a.es, a.proj.opts.legacyMilestones && a.proj.mfb != null ? a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY) : a.proj.finish); continue; }
-      a.es = kids.reduce((x, k) => Math.min(x, k.es), BIG); a.ef = kids.reduce((x, k) => Math.max(x, k.ef), -BIG);
-      a.ls = kids.reduce((x, k) => Math.min(x, k.ls), BIG); a.lf = kids.reduce((x, k) => Math.max(x, k.lf), -BIG);
-      a.dur = a.cal.workBetween(a.es, a.ef);
-      a.tf = a.cal.workBetween(a.ef, a.lf);
+      const openEnd = a.proj.finish;
+      if (!kids.length) { a.es = a.ef = a.ls = a.lf = a.cal.nextWorkStart(a.proj.dd); a.dur = 0; a.tf = 0; }
+      else {
+        a.es = kids.reduce((x, k) => Math.min(x, k.es), BIG); a.ef = kids.reduce((x, k) => Math.max(x, k.ef), -BIG);
+        a.ls = kids.reduce((x, k) => Math.min(x, k.ls), BIG); a.lf = kids.reduce((x, k) => Math.max(x, k.lf), -BIG);
+        a.dur = a.cal.workBetween(a.es, a.ef);
+        a.tf = a.cal.workBetween(a.ef, a.lf);
+      }
       // free float from its own successors, else open-end rule, like any other activity
       let wff = BIG;
-      for (const r of a.succs) if (r.succ && isMain(r.succ)) wff = Math.min(wff, a.cal.workBetween(lagAdd(r.type === 'FS' || r.type === 'FF' ? a.ef : a.es, r), r.type === 'FS' || r.type === 'SS' ? r.succ.es : r.succ.ef));
-      a.ff = wff === BIG ? a.cal.workBetween(a.ef, a.proj.finish) : wff;
+      for (const r of a.succs) if (r.succ && isMain(r.succ)) {
+        const w = a.cal.workBetween(lagAdd(r.type === 'FS' || r.type === 'FF' ? a.ef : a.es, r), r.type === 'FS' || r.type === 'SS' ? r.succ.es : r.succ.ef);
+        if (w >= 0) wff = Math.min(wff, w); // P6 skips links the summary's own span already overruns
+      }
+      a.ff = wff === BIG ? a.cal.workBetween(a.ef, a.proj.opts.legacyMilestones && a.proj.mfb != null && !kids.length ? a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY) : openEnd) : wff;
       if (a.status === 'CO') a.status = 'IP';
     }
 
