@@ -76,6 +76,7 @@ input, select, textarea, button { font: 11px var(--font); }
 .grid-cell { padding: 0 4px; border-right: 1px solid #e4e4e4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
 .grid-cell.num { text-align: right; }
 .grid-row.sel .grid-cell { background: var(--sel); color: var(--sel-text); }
+.grid-row.sel .grid-cell.cur { outline: 2px solid #1a1a1a; outline-offset: -2px; background: #fff; color: #000; }
 .grid-row.group .grid-cell { font-weight: bold; border-right-color: transparent; }
 .grid-row.crit:not(.sel) .grid-cell.c-name, .grid-row.crit:not(.sel) .grid-cell.c-id { color: #c00000; }
 .grid-cell input, .grid-cell select { width: 100%; height: 100%; border: 1px solid var(--sel); padding: 0 2px; outline: none; }

@@ -410,3 +410,49 @@ function UsageProfile({ buckets, row, bucket, prefs, dataDate }: { buckets: numb
 function Legend({ color, label }: { color: string; label: string }) {
   return <span><span style={{ display: 'inline-block', width: 10, height: 10, background: color, verticalAlign: -1, marginRight: 4 }} />{label}</span>;
 }
+
+/** View > Show on Bottom > Resource Usage Profile / Spreadsheet in the Activities window: the selected activity's resource. */
+export function ActivityUsagePane({ sheet }: { sheet: boolean }) {
+  const ui = useStore((s) => s.ui);
+  const ctx = useCtx();
+  const db = ctx.db;
+  const [bucket, setBucket] = useState<UsageBucket>('week');
+  const mine = useMemo(() => (ui.selTask ? rows(db, 'TASKRSRC').filter((a) => a.task_id === ui.selTask) : []), [db, ctx, ui.selTask]);
+  const [pick, setPick] = useState<string | null>(null);
+  const rsrcId = pick && mine.some((a) => a.rsrc_id === pick) ? pick : mine[0]?.rsrc_id ?? ui.selRsrc;
+  const range = useMemo(() => {
+    let s = Infinity, f = -Infinity;
+    for (const pid of ui.openProjects) {
+      const p = ctx.proj.get(pid);
+      for (const v of [parseP6Date(p?.plan_start_date), parseP6Date(p?.last_recalc_date)]) if (v != null) s = Math.min(s, v);
+      for (const v of [parseP6Date(p?.scd_end_date), parseP6Date(p?.plan_end_date)]) if (v != null) f = Math.max(f, v);
+    }
+    for (const a of mine) { const t = ctx.taskById.get(a.task_id); for (const v of [asgStart(a, t).t]) if (v != null) s = Math.min(s, v); for (const v of [asgFinish(a, t).t]) if (v != null) f = Math.max(f, v); }
+    if (!Number.isFinite(s)) return null;
+    if (!Number.isFinite(f) || f <= s) f = s + 30 * MIN_PER_DAY;
+    return { start: s, end: f + 1 };
+  }, [ctx, ui.openProjects, mine]);
+  const usage = useMemo(() => {
+    if (!range || !rsrcId) return null;
+    const u = spreadUsage(db, ui.openProjects, { start: range.start, end: range.end, bucket, rsrcId });
+    return { buckets: u.buckets, row: u.rows.find((r) => r.rsrcId === rsrcId) };
+  }, [ctx, db, ui.openProjects, range, bucket, rsrcId]);
+  const r = rsrcId ? ctx.rsrc.get(rsrcId) : undefined;
+  return (
+    <div className="details">
+      <div className="layoutbar" style={{ color: '#000' }}>
+        <b>{sheet ? 'Resource Usage Spreadsheet' : 'Resource Usage Profile'}</b>
+        {mine.length > 1 ? <select value={rsrcId ?? ''} onChange={(e) => setPick(e.target.value)}>{mine.map((a) => <option key={a.taskrsrc_id} value={a.rsrc_id}>{ctx.rsrc.get(a.rsrc_id)?.rsrc_short_name ?? a.rsrc_id}</option>)}</select>
+          : <span>{r ? `${r.rsrc_short_name} - ${r.rsrc_name}` : ''}</span>}
+        <span style={{ flex: 1 }} />
+        <label>Timescale <select value={bucket} onChange={(e) => setBucket(e.target.value as UsageBucket)}><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select></label>
+        <button className={`tbtn ${!sheet ? 'on' : ''}`} onClick={() => setUi({ bottom: 'profile' })}><span className="lbl">Profile</span></button>
+        <button className={`tbtn ${sheet ? 'on' : ''}`} onClick={() => setUi({ bottom: 'spreadsheet' })}><span className="lbl">Spreadsheet</span></button>
+        <button className="tbtn" onClick={() => setUi({ bottom: 'details' })}><span className="lbl">Activity Details</span></button>
+      </div>
+      {!usage?.row || !usage.buckets.length ? <div className="empty">{ui.selTask ? 'The selected activity has no resource assignments.' : 'Select an activity to see its resource usage.'}</div>
+        : sheet ? <UsageSheet buckets={usage.buckets} row={usage.row} bucket={bucket} />
+          : <UsageProfile buckets={usage.buckets} row={usage.row} bucket={bucket} prefs={ui.prefs} dataDate={parseP6Date(ctx.proj.get(ui.openProjects[0])?.last_recalc_date)} />}
+    </div>
+  );
+}

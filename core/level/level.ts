@@ -32,11 +32,17 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
 
   // capacity per resource (units per hour)
   const rsrcs = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r]));
-  const leveled = (id: string) => (opts.rsrcIds ? opts.rsrcIds.includes(id) : rsrcs.get(id)?.level_flag !== 'N' && rsrcs.get(id)?.rsrc_type !== 'RT_Mat');
+  // Max Units/Time: from the resource's price/unit rows (or the resource). A resource with no limit defined cannot be
+  // overallocated, so it is not leveled (it is listed in the report) rather than given an invented limit.
   const cap = new Map<string, number>();
-  for (const r of rsrcs.values()) cap.set(r.rsrc_id, Number(r.max_qty_per_hr || 0) || 0);
+  for (const r of rsrcs.values()) if (Number(r.max_qty_per_hr) > 0) cap.set(r.rsrc_id, Number(r.max_qty_per_hr));
   for (const rate of rows(db, 'RSRCRATE')) if (Number(rate.max_qty_per_hr) > 0) cap.set(rate.rsrc_id, Number(rate.max_qty_per_hr));
-  for (const [k, v] of cap) if (!v) cap.set(k, 1); // default: one unit (8 h/day for an 8 h calendar)
+  const noLimit = new Set<string>();
+  const leveled = (id: string) => {
+    const want = opts.rsrcIds ? opts.rsrcIds.includes(id) : rsrcs.get(id)?.level_flag !== 'N' && rsrcs.get(id)?.rsrc_type !== 'RT_Mat';
+    if (want && !cap.has(id)) { noLimit.add(id); return false; }
+    return want;
+  };
 
   const assigns = new Map<string, Row[]>();
   for (const a of rows(db, 'TASKRSRC')) if (byId.has(a.task_id) && leveled(a.rsrc_id)) { if (!assigns.has(a.task_id)) assigns.set(a.task_id, []); assigns.get(a.task_id)!.push(a); }
@@ -83,21 +89,35 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
   };
   const log: string[] = [];
   let delayed = 0;
+  const moved = new Set<string>(); // activities leveling delayed
+  // ready queue: an activity becomes ready when all its (non-LOE) predecessors are placed; the highest priority goes first
   const remaining = new Set(pending.map((t) => t.task_id));
+  const succs = new Map<string, string[]>();
+  const waiting = new Map<string, number>();
+  for (const t of pending) {
+    let n = 0;
+    for (const r of preds.get(t.task_id) ?? []) if (remaining.has(r.pred_task_id) && byId.get(r.pred_task_id)?.task_type !== 'TT_LOE') { n++; let l = succs.get(r.pred_task_id); if (!l) succs.set(r.pred_task_id, (l = [])); l.push(t.task_id); }
+    waiting.set(t.task_id, n);
+  }
+  const key = new Map(pending.map((t) => [t.task_id, order(t)]));
+  const before = (a: Row, b: Row) => { const x = key.get(a.task_id)!, y = key.get(b.task_id)!; return x[0] - y[0] || x[1] - y[1] || a.task_code.localeCompare(b.task_code); };
+  const heap: Row[] = [];
+  const push = (t: Row) => { heap.push(t); let i = heap.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (before(heap[i], heap[q]) >= 0) break; [heap[i], heap[q]] = [heap[q], heap[i]]; i = q; } };
+  const pop = (): Row => { const top = heap[0], last = heap.pop()!; if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && before(heap[l], heap[m]) < 0) m = l; if (r < heap.length && before(heap[r], heap[m]) < 0) m = r; if (m === i) break; [heap[i], heap[m]] = [heap[m], heap[i]]; i = m; } } return top; };
+  for (const t of pending) if (!waiting.get(t.task_id)) push(t);
   while (remaining.size) {
-    const ready = [...remaining].map((id) => byId.get(id)!).filter((t) => (preds.get(t.task_id) ?? []).every((r) => !remaining.has(r.pred_task_id) || byId.get(r.pred_task_id)?.task_type === 'TT_LOE'));
-    if (!ready.length) { findings.push({ severity: 'error', code: 'LEVEL_LOOP', message: 'Leveling stopped: relationship loop.', p6: 'P6 cannot level a network with loops.' }); break; }
-    ready.sort((a, b) => { const x = order(a), y = order(b); return x[0] - y[0] || x[1] - y[1] || a.task_code.localeCompare(b.task_code); });
-    const t = ready[0];
+    if (!heap.length) { findings.push({ severity: 'error', code: 'LEVEL_LOOP', message: 'Leveling stopped: relationship loop.', p6: 'P6 cannot level a network with loops.' }); break; }
+    const t = pop();
     remaining.delete(t.task_id);
+    for (const sid of succs.get(t.task_id) ?? []) { const n = waiting.get(sid)! - 1; waiting.set(sid, n); if (n === 0) push(byId.get(sid)!); }
     const cal = calOf(t);
     const dur = Math.round(Number(t.remain_drtn_hr_cnt || 0) * 60);
-    const es0 = parseP6Date(t.early_start_date) ?? 0;
-    // earliest start from leveled predecessors
+    const es0 = parseP6Date(t.early_start_date) ?? 0, ef0 = parseP6Date(t.early_end_date);
+    // The scheduler's dates already honour all logic; only a predecessor that leveling moved can push this one.
     let s = es0;
     for (const r of preds.get(t.task_id) ?? []) {
       const p = placed.get(r.pred_task_id);
-      if (!p) continue;
+      if (!p || !moved.has(r.pred_task_id)) continue;
       const lag = Math.round(Number(r.lag_hr_cnt || 0) * 60);
       const pc = calOf(byId.get(r.pred_task_id)!);
       const add = (x: number) => (lag ? pc.addWork(x, lag) : x);
@@ -105,23 +125,35 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
       if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_SF') v = dur ? cal.subWork(v, dur) : v;
       s = Math.max(s, v);
     }
-    s = cal.nextWorkStart(s);
+    const pushed = s > es0;
+    if (pushed) s = cal.nextWorkStart(s);
     const lf = parseP6Date(t.late_end_date);
     const as = assigns.get(t.task_id) ?? [];
-    let f = dur ? cal.addWork(s, dur) : s;
+    let f = !pushed && ef0 != null ? ef0 : dur ? cal.addWork(s, dur) : s; // unmoved: keep the scheduler's own finish
+    // Delay until no day of the activity adds to a resource beyond its limit. A day the resource is not yet using
+    // never conflicts: an activity that alone needs more than the limit cannot be fixed by delaying it (P6 places
+    // it and reports the overallocation). After a conflict, the next try starts the day after the conflicting day.
+    const limit = (opts.withinFloat && lf != null) ? lf : null;
     for (let n = 0; as.length && n < HORIZON_DAYS; n++) {
-      const conflict = as.some((a) => [...demand(t, a, s, f)].some(([d, h]) => (use(a.rsrc_id).get(d) ?? 0) + h > capOn(a.rsrc_id, d, cal) + 1e-6));
-      if (!conflict) break;
-      if (opts.withinFloat && lf != null && f > lf) break;
-      s = cal.nextWorkStart((Math.floor(s / MIN_PER_DAY) + 1) * MIN_PER_DAY);
-      f = dur ? cal.addWork(s, dur) : s;
+      let clash = -1;
+      for (const a of as) {
+        const u = use(a.rsrc_id);
+        for (const [d, h] of demand(t, a, s, f)) { const have = u.get(d) ?? 0; if (have > 1e-6 && have + h > capOn(a.rsrc_id, d, cal) + 1e-6) { clash = clash < 0 ? d : Math.min(clash, d); break; } }
+      }
+      if (clash < 0) break;
+      const ns = cal.nextWorkStart((Math.max(clash, Math.floor(s / MIN_PER_DAY)) + 1) * MIN_PER_DAY);
+      const nf = dur ? cal.addWork(ns, dur) : ns;
+      if (limit != null && nf > limit) break;
+      s = ns; f = nf;
     }
     for (const a of as) for (const [d, h] of demand(t, a, s, f)) use(a.rsrc_id).set(d, (use(a.rsrc_id).get(d) ?? 0) + h);
     placed.set(t.task_id, { s, f });
     if (s > es0 + 1) {
+      moved.add(t.task_id);
       delayed++;
       log.push(`  ${t.task_code.padEnd(20)} delayed from ${formatP6Date(es0)} to ${formatP6Date(s)}`);
     }
+    if (!moved.has(t.task_id)) continue; // unchanged activities keep every date the scheduler gave them
     const T = table(db, 'TASK');
     for (const fld of ['early_start_date', 'early_end_date', 'restart_date', 'reend_date', 'total_float_hr_cnt']) addField(T, fld);
     const fs = formatP6Date(s), ff = formatP6Date(f);
@@ -134,6 +166,8 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
     for (const [d, h] of u) { const c = cap.get(rid)! * 8 * tol; if (h - c > worst) { worst = h - c; day = d; } }
     if (worst > 0.01) log.push(`  Resource ${rsrcs.get(rid)?.rsrc_short_name ?? rid} still overallocated by ${p6num(worst)} h on ${formatP6Date(day * MIN_PER_DAY).slice(0, 10)}`);
   }
-  const text = ['Leveling Report', '', `Activities delayed .......... ${delayed}`, `Resources leveled ........... ${new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size}`, `Level within float .......... ${opts.withinFloat ? 'Yes' : 'No'}`, '', ...log, '', 'End of report'].join('\r\n');
+  const text = ['Leveling Report', '', `Activities delayed .......... ${delayed}`, `Resources leveled ........... ${new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size}`, `Level within float .......... ${opts.withinFloat ? 'Yes' : 'No'}`,
+    ...(noLimit.size ? ['', `Not leveled: ${noLimit.size} resource(s) have no Max Units/Time (set it in Enterprise > Resources > Units & Prices): ${[...noLimit].map((id) => rsrcs.get(id)?.rsrc_short_name ?? id).sort().slice(0, 40).join(', ')}${noLimit.size > 40 ? ', ...' : ''}`] : []),
+    '', ...log, '', 'End of report'].join('\r\n');
   return { log: text, delayed, findings };
 }

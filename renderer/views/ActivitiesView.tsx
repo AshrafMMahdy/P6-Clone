@@ -7,6 +7,7 @@ import { useCtx, useProjectCalendar } from '../hooks.ts';
 import { COLUMN_BY_ID, fmtDate, fmtDur, isCritical, isMilestone, addRelationship, checkRelationship, TASK_TYPES } from '../model.ts';
 import { buildActivityRows, FILTERS, taskStart, taskFinish } from './activityRows.ts';
 import { ActivityDetails } from './ActivityDetails.tsx';
+import { ActivityUsagePane } from './AssignmentsView.tsx';
 import { parseP6Date, formatP6Date } from '../../core/dates.ts';
 import type { Row } from '../../core/db.ts';
 import { activityCommands, copyActivities, pasteActivities } from '../commands.ts';
@@ -20,7 +21,8 @@ export function ActivitiesView() {
   const [search, setSearch] = useState('');
   const projIds = ui.openProjects;
   const rows = useMemo(() => buildActivityRows(ctx, projIds, ui.collapsed, ui.filter, ui.groupBy, ui.sortBy, search), [ctx, projIds, ui.collapsed, ui.filter, ui.groupBy, ui.sortBy, search]);
-  const cols = useMemo(() => ui.columns.map((id) => COLUMN_BY_ID.get(id)).filter((c) => c != null), [ui.columns]); // stable, or every scroll would rebuild every row
+  // stable, or every scroll would rebuild every row; widths you drag are kept (and saved)
+  const cols = useMemo(() => ui.columns.map((id) => { const c = COLUMN_BY_ID.get(id); return c && ui.colWidths?.[id] ? { ...c, width: ui.colWidths[id] } : c; }).filter((c) => c != null), [ui.columns, ui.colWidths]);
   const selected = useMemo(() => new Set([...ui.selTasks.map((t) => `t:${t}`), ...(ui.selWbs && !ui.selTasks.length ? [`w:${ui.selWbs}`] : [])]), [ui.selTasks, ui.selWbs]);
   const firstProj = ctx.proj.get(projIds[0]);
   const dataDate = parseP6Date(firstProj?.last_recalc_date);
@@ -198,21 +200,29 @@ export function ActivitiesView() {
         <input className="opt" placeholder="Find activity..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 150 }} />
         <span style={{ marginLeft: 'auto' }}>{rows.filter((r) => r.kind === 'task').length} activities · Data Date {fmtDate(dataDate, ctx.prefs, true)}</span>
       </div>
-      <Split dir="v" initial={Math.round(window.innerHeight * 0.52)} storeKey="act-v">
-        <Split dir="h" initial={Math.min(760, Math.round(window.innerWidth * 0.48))} storeKey="act-h">
+      {(() => {
+        const table = (
           <Grid cols={cols} items={items} selected={selected} onSelect={onSelect} treeCol={ui.columns.includes('task_code') ? 'task_code' : ui.columns[0]}
             onToggle={(k) => setUi((u) => ({ collapsed: { ...u.collapsed, [k]: !u.collapsed[k] } }))}
             getEditor={getEditor} onCommit={onCommit} onScroll={setScrollTop} scrollTop={scrollTop}
             onContextMenu={onContext} labelSpan={ui.columns[1] === 'task_name' ? 2 : 1}
+            onResize={(id, w) => setUi((u) => ({ colWidths: { ...u.colWidths, [id]: Math.round(w) } }))}
             sortCol={ui.sortBy.startsWith('col:') ? { id: ui.sortBy.split(':')[1], desc: ui.sortBy.endsWith(':desc') } : undefined}
             onHeaderClick={(id) => setUi({ sortBy: ui.sortBy === `col:${id}` ? `col:${id}:desc` : `col:${id}` })}
-            onActivate={(k) => k.startsWith('t:') && setUi({ detailTab: 'general' })} />
-          <Gantt entries={entries} links={links} dataDate={dataDate} pxPerDay={ui.pxPerDay} showLinks={ui.relLines} scrollTop={scrollTop} onScroll={setScrollTop}
+            onActivate={(k) => k.startsWith('t:') && setUi({ detailTab: 'general' })} />);
+        // Progress Spotlight: the next update period after the data date (a week, or a month when zoomed out)
+        const spot = ui.spotlight && dataDate != null ? { from: dataDate, to: dataDate + (ui.pxPerDay >= 2.5 ? 7 : 30) * 1440 } : undefined;
+        const gantt = (
+          <Gantt spotlight={spot} entries={entries} links={links} dataDate={dataDate} pxPerDay={ui.pxPerDay} showLinks={ui.relLines} scrollTop={scrollTop} onScroll={setScrollTop}
             selected={selected} onSelect={(k, m) => onSelect(k, m ?? { ctrlKey: false, shiftKey: false })} onLink={onLink} calendar={cal} showBaseline
-            styles={ui.bars} onContextMenu={onGanttContext} onZoom={(px) => setUi({ pxPerDay: px })} />
-        </Split>
-        <ActivityDetails />
-      </Split>
+            styles={ui.bars} onContextMenu={onGanttContext} onZoom={(px) => setUi({ pxPerDay: px })} />);
+        // View > Show on Top (table / Gantt) and Show on Bottom (details / usage / none)
+        const top = ui.hideTable ? gantt : ui.hideGantt ? table
+          : <Split dir="h" initial={Math.min(760, Math.round(window.innerWidth * 0.48))} storeKey="act-h">{table}{gantt}</Split>;
+        const bottom = ui.bottom === 'none' ? null : ui.bottom === 'profile' || ui.bottom === 'spreadsheet' ? <ActivityUsagePane sheet={ui.bottom === 'spreadsheet'} /> : <ActivityDetails />;
+        return bottom ? <Split dir="v" initial={Math.round(window.innerHeight * 0.52)} storeKey="act-v"><div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>{top}</div>{bottom}</Split>
+          : <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>{top}</div>;
+      })()}
     </>
   );
 }

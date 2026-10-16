@@ -14,7 +14,7 @@ export interface GridItem {
   className?: string;
   style?: React.CSSProperties;
 }
-export interface EditorSpec { type: 'text' | 'number' | 'date' | 'select'; value: string; options?: Record<string, string> }
+export interface EditorSpec { type: 'text' | 'number' | 'date' | 'select'; value: string; options?: Record<string, string>; /** editing started by typing: keep the typed text instead of selecting the old value */ typed?: boolean }
 
 export interface GridProps {
   cols: GridCol[];
@@ -50,6 +50,8 @@ export function Grid(p: GridProps) {
   const [view, setView] = useState({ top: 0, height: 400 });
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [editing, setEditing] = useState<{ key: string; col: string; spec: EditorSpec } | null>(null);
+  const [cur, setCur] = useState<string | null>(null); // cell cursor column (P6: a cell is current within the selected row)
+  const gridEl = useRef<HTMLDivElement>(null);
   const cols = p.cols.map((c) => ({ ...c, width: widths[c.id] ?? c.width }));
   const total = cols.reduce((a, c) => a + c.width, 0);
   const treeCol = p.treeCol ?? cols[0]?.id;
@@ -76,42 +78,66 @@ export function Grid(p: GridProps) {
     window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
   };
 
-  const beginEdit = (key: string, col: string) => {
+  const beginEdit = (key: string, col: string, typed?: string) => {
     const spec = p.getEditor?.(key, col);
-    if (spec) setEditing({ key, col, spec });
+    if (spec) { setCur(col); setEditing({ key, col, spec: typed != null && (spec.type === 'text' || spec.type === 'number') ? { ...spec, value: typed, typed: true } : spec }); }
   };
-  const commit = (value: string) => {
-    if (editing) p.onCommit?.(editing.key, editing.col, value);
+  const curCol = cur && cols.some((c) => c.id === cur) ? cur : cols[0]?.id;
+  const rowIdx = () => { const sel = p.selected ? [...p.selected] : []; return Math.max(0, p.items.findIndex((it) => it.key === sel[sel.length - 1])); };
+  const goRow = (n: number, shift = false) => {
+    if (n < 0 || n >= p.items.length) return;
+    p.onSelect?.(p.items[n].key, { ctrlKey: false, shiftKey: shift });
+    const el = scroll.current!;
+    if (n * rh < el.scrollTop) el.scrollTop = n * rh;
+    else if ((n + 1) * rh > el.scrollTop + el.clientHeight) el.scrollTop = (n + 1) * rh - el.clientHeight;
+  };
+  // after an edit the table keeps the keyboard (Enter: next row, Tab: next cell)
+  const commit = (value: string, move?: 'down' | 'right' | 'left') => {
+    const e = editing;
+    if (e) p.onCommit?.(e.key, e.col, value);
     setEditing(null);
+    if (e && move) {
+      const i = p.items.findIndex((it) => it.key === e.key), ci = cols.findIndex((c) => c.id === e.col);
+      if (move === 'down') goRow(i + 1);
+      else { const nc = ci + (move === 'right' ? 1 : -1); if (nc >= 0 && nc < cols.length) setCur(cols[nc].id); }
+    }
+    requestAnimationFrame(() => gridEl.current?.focus({ preventScroll: true }));
   };
+  const cancel = () => { setEditing(null); requestAnimationFrame(() => gridEl.current?.focus({ preventScroll: true })); };
 
   const onKey = (e: React.KeyboardEvent) => {
     if (editing || !p.items.length) return;
-    const sel = p.selected ? [...p.selected] : [];
-    const idx = Math.max(0, p.items.findIndex((it) => it.key === sel[sel.length - 1]));
+    const idx = rowIdx();
+    const it = p.items[idx];
     let n = -1;
+    const ci = Math.max(0, cols.findIndex((c) => c.id === curCol));
+    if (it.kind !== 'group' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || (e.key === 'Tab' && !e.ctrlKey))) {
+      const d = e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1;
+      if (cols[ci + d]) setCur(cols[ci + d].id);
+      e.preventDefault(); return;
+    }
+    if (e.key === 'Home' && !e.ctrlKey && it.kind !== 'group') { setCur(cols[0].id); e.preventDefault(); return; }
+    if (e.key === 'End' && !e.ctrlKey && it.kind !== 'group') { setCur(cols[cols.length - 1].id); e.preventDefault(); return; }
+    if (e.key === 'Enter' && !e.ctrlKey) { goRow(e.shiftKey ? idx - 1 : idx + 1); e.preventDefault(); return; }
+    // typing on a selected row starts editing the current cell with what you typed (like P6 and spreadsheets)
+    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey && it.kind !== 'group' && p.getEditor?.(it.key, curCol!)) { beginEdit(it.key, curCol!, e.key); e.preventDefault(); return; }
     if (e.key === 'ArrowDown') n = Math.min(p.items.length - 1, idx + 1);
     else if (e.key === 'ArrowUp') n = Math.max(0, idx - 1);
     else if (e.key === 'PageDown') n = Math.min(p.items.length - 1, idx + Math.floor(view.height / rh));
     else if (e.key === 'PageUp') n = Math.max(0, idx - Math.floor(view.height / rh));
     else if (e.key === 'Home' && e.ctrlKey) n = 0;
     else if (e.key === 'End' && e.ctrlKey) n = p.items.length - 1;
-    else if (e.key === 'F2') { const c = cols.find((c) => p.getEditor?.(p.items[idx].key, c.id)); if (c) beginEdit(p.items[idx].key, c.id); e.preventDefault(); return; }
+    else if (e.key === 'F2') { const c = p.getEditor?.(it.key, curCol!) ? curCol! : cols.find((c) => p.getEditor?.(it.key, c.id))?.id; if (c) beginEdit(it.key, c); e.preventDefault(); return; }
     else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && p.items[idx].kind === 'group' && p.items[idx].hasChildren) {
       if ((e.key === 'ArrowLeft') !== !!p.items[idx].collapsed) p.onToggle?.(p.items[idx].key);
       e.preventDefault(); return;
     }
-    if (n >= 0) {
-      e.preventDefault();
-      p.onSelect?.(p.items[n].key, { ctrlKey: false, shiftKey: e.shiftKey });
-      const el = scroll.current!;
-      if (n * rh < el.scrollTop) el.scrollTop = n * rh;
-      else if ((n + 1) * rh > el.scrollTop + el.clientHeight) el.scrollTop = (n + 1) * rh - el.clientHeight;
-    }
+    if (n >= 0) { e.preventDefault(); goRow(n, e.shiftKey); }
   };
 
-  const renderCell = (it: GridItem, c: GridCol & { width: number }, ci: number, spanW?: number) => {
+  const renderCell = (it: GridItem, c: GridCol & { width: number }, ci: number, spanW?: number, rowSel?: boolean) => {
     const isEdit = editing && editing.key === it.key && editing.col === c.id;
+    const isCur = rowSel && it.kind !== 'group' && c.id === curCol && !isEdit;
     const indent = c.id === treeCol ? it.level * 12 : 0;
     let content: ReactNode = it.kind === 'group' && ci === 0 ? it.label : it.cells[c.id];
     if (c.id === treeCol) {
@@ -121,16 +147,17 @@ export function Grid(p: GridProps) {
       </>;
     }
     return (
-      <div key={c.id} className={`grid-cell c-${c.id} ${c.align === 'right' ? 'num' : ''}`}
+      <div key={c.id} className={`grid-cell c-${c.id} ${c.align === 'right' ? 'num' : ''} ${isCur ? 'cur' : ''}`}
+        onMouseDown={() => setCur(c.id)}
         style={{ width: spanW ?? c.width, paddingLeft: 4 + indent, textAlign: c.align ?? 'left' }}
         onDoubleClick={(e) => { e.stopPropagation(); if (p.getEditor?.(it.key, c.id)) beginEdit(it.key, c.id); else p.onActivate?.(it.key); }}>
-        {isEdit ? <Editor spec={editing.spec} onDone={commit} onCancel={() => setEditing(null)} /> : content}
+        {isEdit ? <Editor spec={editing.spec} onDone={commit} onCancel={cancel} /> : content}
       </div>
     );
   };
 
   return (
-    <div className="grid" tabIndex={0} onKeyDown={onKey} onContextMenu={(e) => p.onContextMenu?.(null, e)}>
+    <div className="grid" ref={gridEl} tabIndex={0} onKeyDown={onKey} onContextMenu={(e) => p.onContextMenu?.(null, e)}>
       <div className="grid-header" ref={head}>
         <div style={{ display: 'flex', width: total, minHeight: 32 }}>
           {cols.map((c) => (
@@ -162,7 +189,7 @@ export function Grid(p: GridProps) {
                 onContextMenu={(e) => { e.stopPropagation(); p.onContextMenu?.(it.key, e); }}>
                 {it.kind === 'group'
                   ? [renderCell(it, cols[0], 0, spanW), ...cols.slice(span).map((c, j) => renderCell(it, c, j + span))]
-                  : cols.map((c, ci) => renderCell(it, c, ci))}
+                  : cols.map((c, ci) => renderCell(it, c, ci, undefined, sel))}
               </div>
             );
           })}
@@ -173,20 +200,27 @@ export function Grid(p: GridProps) {
   );
 }
 
-function Editor({ spec, onDone, onCancel }: { spec: EditorSpec; onDone: (v: string) => void; onCancel: () => void }) {
+function Editor({ spec, onDone, onCancel }: { spec: EditorSpec & { typed?: boolean }; onDone: (v: string, move?: 'down' | 'right' | 'left') => void; onCancel: () => void }) {
   const [v, setV] = useState(spec.type === 'date' ? spec.value.replace(' ', 'T').slice(0, 16) : spec.value);
   const ref = useRef<HTMLInputElement & HTMLSelectElement>(null);
-  useEffect(() => { ref.current?.focus(); if (spec.type === 'text' || spec.type === 'number') ref.current?.select(); }, [spec.type]);
+  const done = useRef(false); // Enter/Tab/Esc finish once; the blur that follows must not commit again
+  const finish = (fn: () => void) => { if (done.current) return; done.current = true; fn(); };
+  useEffect(() => {
+    ref.current?.focus();
+    if (spec.typed) { if (spec.type === 'text') ref.current?.setSelectionRange(v.length, v.length); }
+    else if (spec.type === 'text' || spec.type === 'number') ref.current?.select();
+  }, [spec.type]);
   const key = (e: React.KeyboardEvent) => {
     e.stopPropagation();
-    if (e.key === 'Enter') onDone(v);
-    if (e.key === 'Escape') onCancel();
+    if (e.key === 'Enter') { e.preventDefault(); finish(() => onDone(v, 'down')); }
+    else if (e.key === 'Tab') { e.preventDefault(); finish(() => onDone(v, e.shiftKey ? 'left' : 'right')); }
+    else if (e.key === 'Escape') finish(onCancel);
   };
   if (spec.type === 'select') {
-    return <select ref={ref} value={v} onChange={(e) => { setV(e.target.value); onDone(e.target.value); }} onBlur={() => onCancel()} onKeyDown={key}>
+    return <select ref={ref} value={v} onChange={(e) => { setV(e.target.value); finish(() => onDone(e.target.value)); }} onBlur={() => finish(onCancel)} onKeyDown={key}>
       {Object.entries(spec.options ?? {}).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
     </select>;
   }
   return <input ref={ref} type={spec.type === 'date' ? 'datetime-local' : spec.type === 'number' ? 'number' : 'text'} value={v}
-    onChange={(e) => setV(e.target.value)} onBlur={() => onDone(v)} onKeyDown={key} onMouseDown={(e) => e.stopPropagation()} />;
+    onChange={(e) => setV(e.target.value)} onBlur={() => finish(() => onDone(v))} onKeyDown={key} onMouseDown={(e) => e.stopPropagation()} />;
 }

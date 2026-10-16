@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Dialog, Tabs } from '../components/Layout.tsx';
-import { closeDialog, getDb, mutate, setUi, toast, useStore } from '../store.ts';
+import { closeDialog, getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
 import { rows } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { deleteProject } from '../../core/xer/import.ts';
@@ -117,6 +117,34 @@ export function DeleteProjectDialog(props: { projId: string }) {
   );
 }
 
+/** Project > Assign Baselines: which saved baseline is the project baseline (P6 also has user baselines). */
+export function AssignBaselinesDialog(props: { projId?: string }) {
+  const ui = useStore((s) => s.ui);
+  const db = useStore((s) => s.db);
+  useStore((s) => s.dbVersion);
+  const pid = props.projId ?? ui.openProjects[0] ?? ui.selProject;
+  const p = rows(db, 'PROJECT').find((x) => x.proj_id === pid);
+  const [sel, setSel] = useState(p?.sum_base_proj_id ?? '');
+  if (!p) return <Dialog title="Assign Baselines" buttons={<button className="btn" onClick={closeDialog}>Close</button>}><p>Open a project first.</p></Dialog>;
+  const bls = rows(db, 'PROJECT').filter((x) => x._baseline_of === pid);
+  return (
+    <Dialog title="Assign Baselines" width={520} height={240} buttons={<>
+      <button className="btn primary" onClick={() => { mutate('Assign Baseline', (d) => assignBaseline(d, pid!, sel)); closeDialog(); }}>OK</button>
+      <button className="btn" onClick={closeDialog}>Cancel</button>
+      <button className="btn" onClick={() => openDialog('baselines', { projId: pid })}>Maintain Baselines...</button>
+    </>}>
+      <p>Project: <b>{p.proj_short_name}</b></p>
+      <label style={{ display: 'block', margin: '8px 0' }}>Project Baseline{' '}
+        <select value={sel} onChange={(e) => setSel(e.target.value)} style={{ minWidth: 300 }}>
+          <option value="">&lt;Current Project&gt;</option>
+          {bls.map((b) => <option key={b.proj_id} value={b.proj_id}>{b.proj_short_name}</option>)}
+        </select>
+      </label>
+      {!bls.length && <p className="muted">The project has no saved baselines yet. Use Maintain Baselines to add one.</p>}
+    </Dialog>
+  );
+}
+
 export function BaselinesDialog(props: { projId?: string }) {
   const ui = useStore((s) => s.ui);
   const db = useStore((s) => s.db);
@@ -131,7 +159,7 @@ export function BaselinesDialog(props: { projId?: string }) {
       <button className="btn" onClick={() => mutate('Add Baseline', (d) => { const id = saveBaseline(d, pid); if (!rows(d, 'PROJECT').find((x) => x.proj_id === pid)!.sum_base_proj_id) assignBaseline(d, pid, id); })}>Add</button>
       <button className="btn" disabled={!sel} onClick={() => sel && mutate('Assign Baseline', (d) => assignBaseline(d, pid, sel))}>Assign as Project Baseline</button>
       <button className="btn" disabled={!sel} onClick={() => sel && mutate('Restore Baseline', (d) => restoreBaseline(d, sel))}>Restore</button>
-      <button className="btn" disabled={!sel} onClick={() => { if (sel) { mutate('Delete Baseline', (d) => deleteBaseline(d, sel)); setSel(null); } }}>Delete</button>
+      <button className="btn" disabled={!sel} onClick={async () => { if (sel && (await window.p6.confirm('Delete the selected baseline?', 'The baseline copy of the project is removed from the database.'))) { mutate('Delete Baseline', (d) => deleteBaseline(d, sel)); setSel(null); } }}>Delete</button>
       <button className="btn" onClick={closeDialog}>Close</button>
     </>}>
       <p>Project: <b>{p.proj_short_name}</b> · Project baseline: <b>{bls.find((b) => b.proj_id === p.sum_base_proj_id)?.proj_short_name ?? '(none: current project)'}</b></p>

@@ -75,8 +75,11 @@ export function ContextMenuHost() {
   useEffect(() => {
     if (!m) return;
     const off = () => setM(null);
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setM(null); } };
     window.addEventListener('mousedown', off);
-    return () => window.removeEventListener('mousedown', off);
+    window.addEventListener('keydown', key, true);
+    window.addEventListener('blur', off);
+    return () => { window.removeEventListener('mousedown', off); window.removeEventListener('keydown', key, true); window.removeEventListener('blur', off); };
   }, [m]);
   if (!m) return null;
   return (

@@ -1,6 +1,6 @@
 // Actions triggered from menus, toolbars and context menus.
 import { getDb, getUi, mutate, setUi, toast, openDialog, doUndo, doRedo, saveNow } from './store.ts';
-import { addActivity, addWbs, deleteActivities, nextTaskCode } from './model.ts';
+import { addActivity, addWbs, deleteActivities, dissolveActivities, nextTaskCode } from './model.ts';
 import { nextId, rows, table, type Row } from '../core/db.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
@@ -45,10 +45,30 @@ export function pasteActivities(): void {
   toast(`Pasted ${newIds.length} activit${newIds.length > 1 ? 'ies' : 'y'} (reschedule with F9)`);
 }
 
+/** Insert / Delete handlers registered by windows other than Activities (Resources, ...). */
+export const viewCommands: Record<string, { add?: () => void; del?: () => void }> = {};
+
+/** Edit > Dissolve on the selected activities. */
+export async function dissolveSelected(): Promise<void> {
+  const ui = getUi();
+  if (ui.view !== 'activities' || !ui.selTasks.length) return toast('Select the activities to dissolve.');
+  if (!(await window.p6.confirm(`Dissolve ${ui.selTasks.length} activit${ui.selTasks.length > 1 ? 'ies' : 'y'}?`, 'The activities are deleted and their predecessors are linked directly to their successors.'))) return;
+  let n = 0;
+  const ids = ui.selTasks;
+  mutate('Dissolve', (d) => { n = dissolveActivities(d, ids); });
+  setUi({ selTasks: [], selTask: undefined });
+  toast(`Dissolved ${ids.length} activit${ids.length > 1 ? 'ies' : 'y'}; ${n} relationship(s) added`);
+}
+
 export function activityCommands() {
   return {
     add: () => {
       const ui = getUi();
+      // Ins / Edit > Add act on the window you are in, like P6
+      if (ui.view === 'wbs') return activityCommands().addWbs();
+      if (ui.view === 'projects') return openDialog('newProject');
+      if (viewCommands[ui.view]?.add) return viewCommands[ui.view].add!();
+      if (ui.view !== 'activities') return toast('Nothing to add here.');
       const db = getDb();
       const projId = ui.openProjects[0];
       if (!projId) return toast('Open a project first.');
@@ -73,7 +93,8 @@ export function activityCommands() {
         openDialog('deleteProject', { projId: ui.selProject });
       } else if (ui.view === 'wbs' && ui.selWbs) {
         deleteWbs(ui.selWbs);
-      } else toast('Select something to delete.');
+      } else if (viewCommands[ui.view]?.del) viewCommands[ui.view].del!();
+      else toast('Select something to delete.');
     },
     addWbs: () => {
       const ui = getUi();

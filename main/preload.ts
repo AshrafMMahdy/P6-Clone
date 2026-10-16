@@ -32,6 +32,7 @@ const api = {
   loadDb,
   saveDb: (lines: string[]): Promise<boolean> => (saving = saving.then(() => writeDb(lines), () => writeDb(lines))),
   print: (landscape: boolean): Promise<boolean> => ipcRenderer.invoke('print', landscape),
+  printPreview: (landscape: boolean): Promise<boolean> => ipcRenderer.invoke('print:preview', landscape),
   pdf: (name: string, landscape: boolean): Promise<string | null> => ipcRenderer.invoke('pdf', name, landscape),
   startupImport: (): Promise<OpenedFile | null> => ipcRenderer.invoke('startup:import'),
   confirm: (message: string, detail?: string): Promise<boolean> => ipcRenderer.invoke('confirm', message, detail),

@@ -38,6 +38,7 @@ export function Gantt(p: {
   entries: GanttEntry[]; links: GanttLink[]; dataDate: number | null; pxPerDay: number; showLinks: boolean;
   scrollTop?: number; onScroll?: (top: number) => void; selected?: Set<string>; onSelect?: (key: string, mods?: { ctrlKey: boolean; shiftKey: boolean }) => void;
   onLink?: (from: string, to: string) => void; calendar?: WorkCalendar; showBaseline?: boolean;
+  spotlight?: { from: number; to: number };
   styles?: BarStyles; onContextMenu?: (key: string | null, e: React.MouseEvent, actions: GanttActions) => void; onZoom?: (pxPerDay: number) => void;
 }) {
   const st = p.styles ?? DEFAULT_BARS;
@@ -50,7 +51,13 @@ export function Gantt(p: {
   const [size, setSize] = useState({ w: 600, h: 300 });
   const [scroll, setScroll] = useState({ x: 0, y: 0 });
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
-  const drag = useRef<{ from: string; x: number; y: number; cx: number; cy: number } | null>(null);
+  const drag = useRef<{ from: string; x: number; y: number; cx: number; cy: number; cx0: number; cy0: number } | null>(null);
+  // a drag released outside the chart is cancelled
+  useEffect(() => {
+    const up = (ev: MouseEvent) => { if (drag.current && !body.current?.contains(ev.target as Node)) { drag.current = null; force((n) => n + 1); } };
+    window.addEventListener('mouseup', up, true);
+    return () => window.removeEventListener('mouseup', up, true);
+  }, []);
   const [, force] = useState(0);
 
   // time range
@@ -74,6 +81,13 @@ export function Gantt(p: {
   useEffect(() => {
     if (p.scrollTop != null && body.current && Math.abs(body.current.scrollTop - p.scrollTop) > 1) { echo.current = p.scrollTop; body.current.scrollTop = p.scrollTop; }
   }, [p.scrollTop]);
+  // zooming keeps the date at the middle of the view in place (Ctrl+wheel then re-anchors on the pointer)
+  const prevScale = useRef({ ppm, t0 });
+  useLayoutEffect(() => {
+    const el = body.current, pv = prevScale.current;
+    if (el && pv.ppm !== ppm) { const tc = pv.t0 + (el.scrollLeft + el.clientWidth / 2) / pv.ppm; el.scrollLeft = Math.max(0, (tc - t0) * ppm - el.clientWidth / 2); }
+    prevScale.current = { ppm, t0 };
+  }, [ppm, t0]);
   // keep data date in view when data changes the first time
   const centered = useRef(false);
   useEffect(() => {
@@ -124,11 +138,14 @@ export function Gantt(p: {
     const rowOf = new Map<string, number>();
     p.entries.forEach((e, i) => rowOf.set(e.key, i));
 
+    // Progress Spotlight band
+    if (p.spotlight) { g.fillStyle = 'rgba(255, 236, 140, 0.35)'; g.fillRect(X(p.spotlight.from) - sx, 0, (p.spotlight.to - p.spotlight.from) * ppm, size.h); }
     // rows
     for (let i = first; i < last; i++) {
       const e = p.entries[i];
       const y = i * RH - sy;
       if (p.selected?.has(e.key)) { g.fillStyle = '#dbe6f7'; g.fillRect(0, y, size.w, RH); }
+      else if (p.spotlight && e.kind === 'task' && e.af == null && (e.as ?? e.es) != null && (e.as ?? e.es)! < p.spotlight.to && (e.ef ?? e.es ?? 0) >= p.spotlight.from) { g.fillStyle = '#fff6c8'; g.fillRect(0, y, size.w, RH); }
       if (st.gridLines) { g.strokeStyle = '#eeeeee'; g.beginPath(); g.moveTo(0, y + RH - .5); g.lineTo(size.w, y + RH - .5); g.stroke(); }
       const mid = y + RH / 2;
       if (e.kind === 'group') {
@@ -262,11 +279,13 @@ export function Gantt(p: {
         <div className="gantt-body" ref={body} style={{ position: 'absolute', inset: 0 }}
           onScroll={(e) => { const t = e.currentTarget; setScroll({ x: t.scrollLeft, y: t.scrollTop }); if (echo.current != null && Math.abs(t.scrollTop - echo.current) <= 1) echo.current = null; else { echo.current = null; p.onScroll?.(t.scrollTop); } }}
           onMouseDown={(ev) => {
+            drag.current = null; // a new press always starts fresh (a drag released elsewhere must not linger)
+            if (ev.button !== 0) return;
             const { cx, cy } = local(ev);
             const h = hit(cx, cy);
-            if (!h) return;
+            if (!h) { const g = p.entries[Math.floor((cy + scroll.y) / RH)]; if (g?.kind === 'group') p.onSelect?.(g.key); return; }
             p.onSelect?.(h.e.key, { ctrlKey: ev.ctrlKey, shiftKey: ev.shiftKey });
-            if (h.onBar && !ev.ctrlKey && !ev.shiftKey && p.onLink && h.endX != null) drag.current = { from: h.e.key, x: h.endX, y: h.y!, cx, cy };
+            if (h.onBar && !ev.ctrlKey && !ev.shiftKey && p.onLink && h.endX != null) drag.current = { from: h.e.key, x: h.endX, y: h.y!, cx, cy, cx0: cx, cy0: cy };
           }}
           onMouseMove={(ev) => {
             const { cx, cy } = local(ev);
@@ -280,7 +299,8 @@ export function Gantt(p: {
             if (!d) return;
             const { cx, cy } = local(ev);
             const h = hit(cx, cy);
-            if (h && h.e.key !== d.from && Math.abs(cx + scroll.x - d.x) + Math.abs(cy + scroll.y - d.y) > 8) p.onLink?.(d.from, h.e.key);
+            // link only when released on another activity's bar after a real drag (P6 cancels anything else)
+            if (h?.onBar && h.e.key !== d.from && Math.abs(cx - d.cx0) + Math.abs(cy - d.cy0) > 12) p.onLink?.(d.from, h.e.key);
             force((n) => n + 1);
           }}
           onContextMenu={(ev) => { const { cx, cy } = local(ev); const i = Math.floor((cy + scroll.y) / RH); const e = p.entries[i]; if (e && e.kind === 'task' && !p.selected?.has(e.key)) p.onSelect?.(e.key); p.onContextMenu?.(e?.kind === 'task' ? e.key : null, ev, actions); }}

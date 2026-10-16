@@ -1151,10 +1151,10 @@ export function TimescaleDialog() {
 
 // ---------------------------------------------------------------- 11. Layouts
 
-interface LayoutData { columns: string[]; filter: string; groupBy: string; sortBy: string; pxPerDay: number; relLines: boolean }
-const BUILTIN_LAYOUT = 'Classic Schedule Layout';
-const builtinLayout = (): LayoutData => ({ columns: [...DEFAULT_COLUMNS], filter: 'all', groupBy: 'wbs', sortBy: '', pxPerDay: 6, relLines: true });
-const layoutFromUi = (u: UiState): LayoutData => ({ columns: [...u.columns], filter: u.filter, groupBy: u.groupBy, sortBy: u.sortBy, pxPerDay: u.pxPerDay, relLines: u.relLines });
+interface LayoutData { columns: string[]; filter: string; groupBy: string; sortBy: string; pxPerDay: number; relLines: boolean; colWidths?: Record<string, number>; bars?: UiState['bars'] }
+export const BUILTIN_LAYOUT = 'Classic Schedule Layout';
+const builtinLayout = (): LayoutData => ({ columns: [...DEFAULT_COLUMNS], filter: 'all', groupBy: 'wbs', sortBy: '', pxPerDay: 6, relLines: true, colWidths: {}, bars: undefined });
+export const layoutFromUi = (u: UiState): LayoutData => ({ columns: [...u.columns], filter: u.filter, groupBy: u.groupBy, sortBy: u.sortBy, pxPerDay: u.pxPerDay, relLines: u.relLines, colWidths: { ...u.colWidths }, bars: u.bars });
 
 function parseLayout(json: string): LayoutData | null {
   try {
@@ -1167,11 +1167,13 @@ function parseLayout(json: string): LayoutData | null {
       sortBy: typeof o.sortBy === 'string' ? o.sortBy : b.sortBy,
       pxPerDay: typeof o.pxPerDay === 'number' && o.pxPerDay > 0 ? o.pxPerDay : b.pxPerDay,
       relLines: typeof o.relLines === 'boolean' ? o.relLines : b.relLines,
+      colWidths: o.colWidths && typeof o.colWidths === 'object' ? o.colWidths : {},
+      bars: o.bars && typeof o.bars === 'object' ? o.bars : undefined,
     };
   } catch { return null; }
 }
 
-function saveLayout(name: string, data: LayoutData): void {
+export function saveLayout(name: string, data: LayoutData): void {
   mutate(`Save Layout ${name}`, (d) => {
     const t = ensureFields(d, '_LAYOUT', ['layout_id', 'name', 'json']);
     const json = JSON.stringify(data);

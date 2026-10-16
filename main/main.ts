@@ -91,6 +91,16 @@ ipcMain.handle('pdf', async (_e, defaultName: string, landscape: boolean) => {
   return r.filePath;
 });
 
+ipcMain.handle('print:preview', async (_e, landscape: boolean) => {
+  const data = await win!.webContents.printToPDF({ landscape, printBackground: true, pageSize: 'A3' });
+  const file = join(mkdtempSync(join(tmpdir(), 'p6clone-preview-')), 'Print Preview.pdf');
+  writeFileSync(file, data);
+  const pv = new BrowserWindow({ width: 1100, height: 850, title: 'Print Preview', parent: win!, icon: join(__dirname, 'icon.png'), webPreferences: { plugins: true } });
+  pv.setMenu(null);
+  await pv.loadFile(file);
+  return true;
+});
+
 ipcMain.handle('startup:import', () => {
   const p = argVal('--import');
   return p && existsSync(p) ? { path: p, name: basename(p), bytes: new Uint8Array(readFileSync(p)) } : null;

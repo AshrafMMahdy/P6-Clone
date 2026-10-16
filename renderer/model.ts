@@ -1,7 +1,7 @@
 // Derived views of the raw P6 tables for the UI: formatting, columns, edit rules, structural edits.
 import { addField, groupBy, indexBy, nextId, rows, table, type Db, type Row } from '../core/db.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
-import { p6num } from '../core/schedule/cpm.ts';
+import { p6num, calendarResolver } from '../core/schedule/cpm.ts';
 import { durationPct } from '../core/progress/update.ts';
 import { ENUMS } from '../core/xer/schema.ts';
 import type { Prefs } from './store.ts';
@@ -134,6 +134,7 @@ export const COLUMNS: Column[] = [
     if (isMilestone(r) && h > 0) return 'Milestones have zero duration.';
     r.target_drtn_hr_cnt = p6num(h);
     if (!r.act_start_date) r.remain_drtn_hr_cnt = p6num(h);
+    refreshOwnDates(_db, r);
   } } },
   { id: 'rem_dur', title: 'Remaining Duration', width: 62, align: 'right', get: (r, c) => fmtDur(r.remain_drtn_hr_cnt, c.prefs), edit: { type: 'number', set: (_db, r, v, c) => {
     if (r.act_end_date) return 'Completed activities have no remaining duration.';
@@ -141,14 +142,15 @@ export const COLUMNS: Column[] = [
     if (!(h >= 0)) return 'Duration must be zero or greater.';
     r.remain_drtn_hr_cnt = p6num(h);
     if (!r.act_start_date) r.target_drtn_hr_cnt = p6num(h);
+    refreshOwnDates(_db, r);
   } } },
   { id: 'act_dur', title: 'Actual Duration', width: 56, align: 'right', get: (r, c) => (r.act_start_date ? fmtDur(Math.max(0, Number(r.target_drtn_hr_cnt || 0) - Number(r.remain_drtn_hr_cnt || 0)), c.prefs) : '0') },
   { id: 'atc_dur', title: 'At Completion Duration', width: 70, align: 'right', get: (r, c) => fmtDur(r.act_end_date ? r.target_drtn_hr_cnt : Math.max(Number(r.target_drtn_hr_cnt || 0) - Number(r.remain_drtn_hr_cnt || 0), 0) + Number(r.remain_drtn_hr_cnt || 0), c.prefs) },
   { id: 'pct', title: 'Activity % Complete', width: 62, align: 'right', get: (r, c) => `${Math.round(activityPct(r, c) * 10) / 10}%`, edit: { type: 'number', set: (_db, r, v) => setPercent(r, Number(v)) } },
   { id: 'dur_pct', title: 'Duration % Complete', width: 62, align: 'right', get: (r) => `${Math.round(durationPct(r) * 10) / 10}%` },
   { id: 'phys_pct', title: 'Physical % Complete', width: 62, align: 'right', get: (r) => `${Number(r.phys_complete_pct || 0)}%`, edit: { type: 'number', set: (_db, r, v) => { if (!(Number(v) >= 0 && Number(v) <= 100)) return 'Enter 0 to 100.'; r.phys_complete_pct = p6num(Number(v)); } } },
-  { id: 'start', title: 'Start', width: 82, get: startOf, edit: { type: 'date', set: (_db, r, v) => setStartLike(r, v) } },
-  { id: 'finish', title: 'Finish', width: 82, get: finishOf, edit: { type: 'date', set: (_db, r, v) => setFinishLike(r, v) } },
+  { id: 'start', title: 'Start', width: 82, get: startOf, edit: { type: 'date', set: (db, r, v) => setStartLike(db, r, v) } },
+  { id: 'finish', title: 'Finish', width: 82, get: finishOf, edit: { type: 'date', set: (db, r, v) => setFinishLike(db, r, v) } },
   { id: 'early_start', title: 'Early Start', width: 82, get: (r, c) => (r.act_end_date ? '' : fmtDate(r.early_start_date, c.prefs)) },
   { id: 'early_finish', title: 'Early Finish', width: 82, get: (r, c) => (r.act_end_date ? '' : fmtDate(r.early_end_date, c.prefs)) },
   { id: 'late_start', title: 'Late Start', width: 82, get: (r, c) => (r.act_end_date ? '' : fmtDate(r.late_start_date, c.prefs)) },
@@ -200,20 +202,54 @@ function normDate(v: string): string | null {
   return t == null ? null : formatP6Date(t);
 }
 
-/** Typing a start date on a not-started activity sets a Start On or After constraint (P6 behaviour). */
-function setStartLike(r: Row, v: string): string | void {
+/** The activity's work calendar (its own, else the project's). */
+function calOf(db: Db, r: Row) {
+  const cals = calendarResolver(db, []);
+  return cals.get(r.clndr_id) ?? cals.fallback(rows(db, 'PROJECT').find((p) => p.proj_id === r.proj_id)?.clndr_id);
+}
+/**
+ * After an edit, P6 shows the activity's own new dates at once (other activities move on the next F9):
+ * the finish is the start plus the remaining duration on the activity's calendar.
+ */
+export function refreshOwnDates(db: Db, r: Row): void {
+  if (r.act_end_date) return;
+  const start = parseP6Date(r.act_start_date ? r.restart_date || r.early_start_date : r.early_start_date || r.restart_date || r.target_start_date);
+  if (start == null) return;
+  const cal = calOf(db, r);
+  const dur = Number(r.remain_drtn_hr_cnt || 0) * 60;
+  const s = r.task_type === 'TT_FinMile' ? start : cal.nextWorkStart(start);
+  const f = dur > 0 ? cal.addWork(s, dur) : s;
+  if (!r.act_start_date) { r.early_start_date = r.restart_date = r.target_start_date = formatP6Date(s); r.target_end_date = formatP6Date(f); }
+  r.early_end_date = r.reend_date = formatP6Date(f);
+}
+
+/** Typing a start date on a not-started activity moves it there with a Start On or After constraint (P6 behaviour). */
+function setStartLike(db: Db, r: Row, v: string): string | void {
   const d = normDate(v);
   if (d == null) return 'Invalid date.';
   if (r.act_start_date) return setActual(r, 'start', v);
   r.cstr_type = d ? 'CS_MSOA' : '';
   r.cstr_date = d ?? '';
+  if (d) { r.early_start_date = d; refreshOwnDates(db, r); }
 }
-function setFinishLike(r: Row, v: string): string | void {
+/** Typing a finish date on a not-started activity changes its duration to fit (P6 behaviour; no constraint). */
+function setFinishLike(db: Db, r: Row, v: string): string | void {
   const d = normDate(v);
   if (d == null) return 'Invalid date.';
   if (r.act_end_date) return setActual(r, 'finish', v);
-  r.cstr_type = d ? 'CS_MEOB' : '';
-  r.cstr_date = d ?? '';
+  if (!d) return;
+  const start = parseP6Date(r.act_start_date ? r.restart_date || r.early_start_date : r.early_start_date || r.target_start_date);
+  if (start == null) return 'The activity has no start date yet; schedule it first (F9).';
+  if (isMilestone(r)) return 'A milestone has no duration; change its start instead.';
+  const cal = calOf(db, r);
+  let fin = parseP6Date(d)!;
+  if (!/ dd:dd$/.test(v.trim())) fin = cal.prevWorkEnd(fin + 1440); // a date without a time means the end of that work day
+  const work = cal.workBetween(cal.nextWorkStart(start), fin);
+  if (!(work > 0)) return 'The finish must be after the start.';
+  const h = work / 60;
+  r.remain_drtn_hr_cnt = p6num(h);
+  if (!r.act_start_date) r.target_drtn_hr_cnt = p6num(h);
+  refreshOwnDates(db, r);
 }
 
 export function setActual(r: Row, which: 'start' | 'finish', v: string): string | void {
@@ -337,6 +373,25 @@ export function deleteActivities(db: Db, ids: string[]): void {
   table(db, 'TASK').rows = rows(db, 'TASK').filter((t) => !s.has(t.task_id));
   table(db, 'TASKPRED').rows = rows(db, 'TASKPRED').filter((r) => !s.has(r.task_id) && !s.has(r.pred_task_id));
   for (const t of Object.values(db.tables)) if (t.name !== 'TASK' && t.fields.includes('task_id')) t.rows = t.rows.filter((r) => !s.has(r.task_id));
+}
+
+/**
+ * Edit > Dissolve: delete activities but keep the chain: each predecessor is linked to each successor
+ * (with the predecessor link's type and lag), as P6 does.
+ */
+export function dissolveActivities(db: Db, ids: string[]): number {
+  const s = new Set(ids);
+  const P = rows(db, 'TASKPRED');
+  const add: [string, string, string, number][] = [];
+  for (const id of ids) {
+    const preds = P.filter((r) => r.task_id === id && !s.has(r.pred_task_id));
+    const succs = P.filter((r) => r.pred_task_id === id && !s.has(r.task_id));
+    for (const p of preds) for (const q of succs) add.push([p.pred_task_id, q.task_id, p.pred_type || 'PR_FS', Number(p.lag_hr_cnt || 0)]);
+  }
+  deleteActivities(db, ids);
+  let n = 0;
+  for (const [a, b, type, lag] of add) if (!addRelationship(db, a, b, type, lag)) n++;
+  return n;
 }
 
 /** Why P6 would refuse this relationship, or undefined if it is allowed. */

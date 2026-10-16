@@ -32,6 +32,12 @@ export interface UiState {
   sortBy: string;
   pxPerDay: number;
   relLines: boolean;
+  /** View > Show on Top: hide the activity table or the Gantt chart */
+  hideTable?: boolean; hideGantt?: boolean;
+  /** Activity table column widths you dragged */
+  colWidths?: Record<string, number>;
+  /** View > Progress Spotlight: highlight the next update period after the data date */
+  spotlight?: boolean;
   /** View > Bars (undefined = defaults) */
   bars?: BarStyles;
   importLog?: { file: string; findings: Finding[] };
@@ -67,7 +73,7 @@ export const getUi = () => state.ui;
 export function setUi(patch: Partial<UiState> | ((u: UiState) => Partial<UiState>)): void {
   state.ui = { ...state.ui, ...(typeof patch === 'function' ? patch(state.ui) : patch) };
   const p0 = typeof patch === 'function' ? {} : patch;
-  if ('prefs' in p0 || 'columns' in p0 || 'bars' in p0) scheduleSave();
+  if ('prefs' in p0 || 'columns' in p0 || 'bars' in p0 || 'colWidths' in p0 || 'openProjects' in p0) scheduleSave();
   emit();
 }
 
@@ -117,8 +123,8 @@ function scheduleSave(): void {
 }
 export async function saveNow(): Promise<void> {
   clearTimeout(saveTimer);
-  const { prefs, columns, layoutName, pxPerDay, bottom, bars, relLines } = state.ui;
-  await window.p6?.saveDb(dbToLines(state.db, { prefs, columns, layoutName, pxPerDay, bottom, bars, relLines }));
+  const { prefs, columns, layoutName, pxPerDay, bottom, bars, relLines, colWidths, hideTable, hideGantt, openProjects, view, groupBy, sortBy, filter } = state.ui;
+  await window.p6?.saveDb(dbToLines(state.db, { prefs, columns, layoutName, pxPerDay, bottom, bars, relLines, colWidths, hideTable, hideGantt, openProjects, view, groupBy, sortBy, filter }));
 }
 export async function loadFromDisk(): Promise<void> {
   const lines = await window.p6?.loadDb();
@@ -127,6 +133,10 @@ export async function loadFromDisk(): Promise<void> {
     const data = linesToDb(lines);
     state.db = data.db ?? emptyDb();
     if (data.ui) state.ui = { ...state.ui, ...(data.ui as object) };
+    // reopen the projects that were open last time (those that still exist)
+    const have = new Set((state.db.tables.PROJECT?.rows ?? []).map((p) => p.proj_id));
+    state.ui.openProjects = (state.ui.openProjects ?? []).filter((id) => have.has(id));
+    if (!state.ui.openProjects.length && state.ui.view !== 'resources') state.ui.view = 'projects';
     state.dbVersion++;
     emit();
   } catch (e) {

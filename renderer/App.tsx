@@ -2,7 +2,7 @@ import { useEffect, type JSX } from 'react';
 import { Icon } from './components/Icons.tsx';
 import { ContextMenuHost, DialogTop } from './components/Layout.tsx';
 import { closeDialog, doRedo, doUndo, getDb, getUi, loadFromDisk, mutate, openDialog, replaceDb, saveNow, setUi, toast, useStore, undoLabel, type ViewName } from './store.ts';
-import { activityCommands, handleEditKey, runSchedule, copyActivities, pasteActivities, renumberActivities } from './commands.ts';
+import { activityCommands, handleEditKey, runSchedule, copyActivities, pasteActivities, renumberActivities, dissolveSelected } from './commands.ts';
 import { ActivitiesView } from './views/ActivitiesView.tsx';
 import { ProjectsView, openProjects } from './views/ProjectsView.tsx';
 import { WbsView } from './views/WbsView.tsx';
@@ -16,9 +16,9 @@ import { applyApprovedTimesheets, formatApplySummary, hasPendingActuals } from '
 import { ImportWizard, ExportWizard } from './dialogs/Wizards.tsx';
 import { BarsDialog } from './dialogs/BarsDialog.tsx';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
-import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
+import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, AssignBaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
 import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
-import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, TimescaleDialog, LayoutDialog, PageSetupDialog } from './dialogs/EnterpriseDialogs.tsx';
+import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, TimescaleDialog, LayoutDialog, PageSetupDialog, BUILTIN_LAYOUT, saveLayout, layoutFromUi } from './dialogs/EnterpriseDialogs.tsx';
 import { emptyDb, rows } from '../core/db.ts';
 import { fmtDate, projectName } from './model.ts';
 import { printView } from './print.ts';
@@ -29,7 +29,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, bars: BarsDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
+  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, bars: BarsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
@@ -49,7 +49,8 @@ export function runMenu(id: string): void {
     case 'file.import': return openDialog('import');
     case 'file.export': return openDialog('export');
     case 'file.pageSetup': return openDialog('pageSetup');
-    case 'file.printPreview': case 'file.print': return void printView('print');
+    case 'file.printPreview': return void printView('preview');
+    case 'file.print': return void printView('print');
     case 'file.pdf': return void printView('pdf');
     case 'file.commit': return void saveNow().then(() => toast('Changes committed to the database'));
     case 'edit.undo': return doUndo();
@@ -57,7 +58,8 @@ export function runMenu(id: string): void {
     case 'edit.copy': return copyActivities();
     case 'edit.paste': return pasteActivities();
     case 'edit.cut': copyActivities(); return void cmds.del();
-    case 'edit.add': return ui.view === 'wbs' ? cmds.addWbs() : cmds.add();
+    case 'edit.dissolve': return void dissolveSelected();
+    case 'edit.add': return cmds.add();
     case 'edit.delete': return void cmds.del();
     case 'edit.assignPred': return openDialog('assign', { which: 'pred' });
     case 'edit.assignSucc': return openDialog('assign', { which: 'succ' });
@@ -72,22 +74,27 @@ export function runMenu(id: string): void {
     case 'view.groupSort': return openDialog('filters', { tab: 'group' });
     case 'view.timescale': return openDialog('timescale');
     case 'view.bars': return openDialog('bars');
-    case 'view.layout.open': case 'view.layout.save': case 'view.layout.saveAs': return openDialog('layout', { mode: id.split('.')[2] });
+    case 'view.layout.save':
+      if (ui.layoutName && ui.layoutName !== BUILTIN_LAYOUT) { saveLayout(ui.layoutName, layoutFromUi(getUi())); return toast(`Layout "${ui.layoutName}" saved`); }
+      return openDialog('layout', { mode: 'saveAs' });
+    case 'view.layout.open': case 'view.layout.saveAs': return openDialog('layout', { mode: id.split('.')[2] });
     case 'view.zoomIn': return setUi((u) => ({ pxPerDay: Math.min(60, u.pxPerDay * 1.6) }));
     case 'view.zoomOut': return setUi((u) => ({ pxPerDay: Math.max(0.15, u.pxPerDay / 1.6) }));
     case 'view.expandAll': return setUi({ collapsed: {} });
     case 'view.collapseAll': return setUi({ collapsed: Object.fromEntries(rows(getDb(), 'PROJWBS').filter((w) => w.proj_node_flag !== 'Y').map((w) => [`w:${w.wbs_id}`, true])) });
     case 'view.relLines': return setUi((u) => ({ relLines: !u.relLines }));
-    case 'view.spotlight': return setUi({ filter: 'open' });
+    case 'view.spotlight': return setUi((u) => ({ spotlight: !u.spotlight }));
     case 'view.bottom.details': return setUi({ bottom: 'details' });
-    case 'view.bottom.profile': case 'view.bottom.spreadsheet': return setUi({ view: 'assignments' });
+    case 'view.bottom.profile': return setUi({ bottom: 'profile', view: 'activities' });
+    case 'view.bottom.spreadsheet': return setUi({ bottom: 'spreadsheet', view: 'activities' });
     case 'view.bottom.none': return setUi({ bottom: 'none' });
     case 'project.wbs': return setUi({ view: 'wbs' });
     case 'project.activities': return setUi({ view: 'activities' });
     case 'project.assignments': return setUi({ view: 'assignments' });
     case 'project.expenses': return setUi({ view: 'activities', detailTab: 'expenses' });
     case 'project.details': return openDialog('projectDetails', {});
-    case 'project.baselines': case 'project.assignBaselines': return openDialog('baselines', {});
+    case 'project.baselines': return openDialog('baselines', {});
+    case 'project.assignBaselines': return openDialog('assignBaselines', {});
     case 'ent.eps': return openDialog('eps');
     case 'ent.resources': return setUi({ view: 'resources' });
     case 'ent.roles': return openDialog('roles');
@@ -119,7 +126,9 @@ export function runMenu(id: string): void {
     case 'help.about': return openDialog('about');
     default:
       if (id.startsWith('report.')) return setUi({ view: 'reports', detailTab: id.slice(7) });
-      if (id.startsWith('view.top.')) return setUi({ view: 'activities' });
+      if (id === 'view.top.table') return setUi((u) => ({ view: 'activities', hideTable: !u.hideTable, hideGantt: u.hideTable ? u.hideGantt : false }));
+      if (id === 'view.top.gantt') return setUi((u) => ({ view: 'activities', hideGantt: !u.hideGantt, hideTable: u.hideGantt ? u.hideTable : false }));
+      if (id === 'view.top.profile') return setUi({ view: 'activities', bottom: 'profile' });
   }
 }
 

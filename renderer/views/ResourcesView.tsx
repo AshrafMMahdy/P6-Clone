@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode, type MouseEvent as RME } from 'react';
 import { Grid, type EditorSpec, type GridItem } from '../components/Grid.tsx';
 import { Split, Tabs, showContextMenu } from '../components/Layout.tsx';
-import { getDb, mutate, setUi, toast, useStore } from '../store.ts';
+import { getDb, getUi, mutate, setUi, toast, useStore } from '../store.ts';
+import { viewCommands } from '../commands.ts';
 import { useCtx } from '../hooks.ts';
 import { RSRC_TYPES, ensureDefaultCalendar, fmtDate, type Ctx } from '../model.ts';
 import { addField, nextId, rows, table, type Db, type Row } from '../../core/db.ts';
@@ -120,6 +121,11 @@ function deleteResource(rsrcId: string): void {
   });
   setUi({ selRsrc: undefined });
 }
+
+viewCommands.resources = {
+  add: () => addResource(getUi().selRsrc ? (getDb().tables.RSRC?.rows.find((r) => r.rsrc_id === getUi().selRsrc)?.parent_rsrc_id ?? '') : ''),
+  del: () => { const id = getUi().selRsrc; if (id) deleteResource(id); else toast('Select a resource to delete.'); },
+};
 
 export function ResourcesView() {
   const ui = useStore((s) => s.ui);

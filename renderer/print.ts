@@ -14,7 +14,7 @@ export function pageSetup(): PageSetup {
   }
 }
 
-export async function printView(mode: 'print' | 'pdf'): Promise<void> {
+export async function printView(mode: 'print' | 'pdf' | 'preview'): Promise<void> {
   const ps = pageSetup();
   const ui = getUi();
   const p = rows(getDb(), 'PROJECT').find((x) => x.proj_id === ui.openProjects[0]);
@@ -30,7 +30,8 @@ export async function printView(mode: 'print' | 'pdf'): Promise<void> {
     if (mode === 'pdf') {
       const path = await window.p6.pdf(`${p?.proj_short_name ?? 'report'}.pdf`, ps.landscape);
       if (path) toast(`Saved ${path}`);
-    } else await window.p6.print(ps.landscape);
+    } else if (mode === 'preview') await window.p6.printPreview(ps.landscape);
+    else await window.p6.print(ps.landscape);
   } finally {
     head.remove();
     style.remove();
