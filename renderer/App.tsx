@@ -15,6 +15,7 @@ import { PortfoliosView } from './views/PortfoliosView.tsx';
 import { applyApprovedTimesheets, formatApplySummary, hasPendingActuals } from '../core/timesheet/timesheet.ts';
 import { ImportWizard, ExportWizard } from './dialogs/Wizards.tsx';
 import { BarsDialog } from './dialogs/BarsDialog.tsx';
+import { FindDialog } from './dialogs/FindDialog.tsx';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, AssignBaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
 import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
@@ -29,7 +30,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, bars: BarsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
+  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
@@ -68,7 +69,7 @@ export function runMenu(id: string): void {
     case 'edit.renumber': return void renumberActivities();
     case 'edit.preferences': return openDialog('prefs');
     case 'edit.selectAll': return void handleEditKey(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true }));
-    case 'edit.find': return document.querySelector<HTMLInputElement>('input[placeholder^="Find"]')?.focus();
+    case 'edit.find': return ui.openProjects.length ? openDialog('find') : toast('Open a project first.');
     case 'view.columns': return openDialog('columns');
     case 'view.filters': return openDialog('filters');
     case 'view.groupSort': return openDialog('filters', { tab: 'group' });

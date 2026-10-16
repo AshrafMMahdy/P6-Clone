@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Grid, type GridItem, type EditorSpec } from '../components/Grid.tsx';
 import { Gantt, DEFAULT_BARS, type GanttEntry, type GanttLink, type GanttActions } from '../components/Gantt.tsx';
 import { Split, showContextMenu } from '../components/Layout.tsx';
@@ -19,6 +19,7 @@ export function ActivitiesView() {
   const ctx = useCtx();
   const [scrollTop, setScrollTop] = useState(0);
   const [search, setSearch] = useState('');
+  const tableH = 400; // approximate table height for centring a revealed row
   const projIds = ui.openProjects;
   const rows = useMemo(() => buildActivityRows(ctx, projIds, ui.collapsed, ui.filter, ui.groupBy, ui.sortBy, search), [ctx, projIds, ui.collapsed, ui.filter, ui.groupBy, ui.sortBy, search]);
   // stable, or every scroll would rebuild every row; widths you drag are kept (and saved)
@@ -125,6 +126,14 @@ export function ActivitiesView() {
     toast('Relationship (FS) added');
   };
 
+  // Find / Go To: scroll the activity into view (rows are 19 px)
+  useEffect(() => {
+    if (!ui.revealTask) return;
+    const i = rows.findIndex((r) => r.key === `t:${ui.revealTask}`);
+    if (i >= 0) setScrollTop(Math.max(0, i * 19 - tableH / 2));
+    setUi({ revealTask: undefined });
+  }, [ui.revealTask, rows]);
+
   const cmds = activityCommands();
   const onContext = (key: string | null, e: React.MouseEvent) => {
     if (key && !selected.has(key)) onSelect(key, { ctrlKey: false, shiftKey: false }); // right-click inside a selection keeps it
@@ -197,7 +206,7 @@ export function ActivitiesView() {
           <option value="">Start</option><option value="task_code">Activity ID</option><option value="task_name">Activity Name</option><option value="total_float">Total Float</option><option value="finish">Finish</option>
           {ui.sortBy.startsWith('col:') && <option value={ui.sortBy}>{COLUMN_BY_ID.get(ui.sortBy.split(':')[1])?.title ?? ui.sortBy}{ui.sortBy.endsWith(':desc') ? ' ▼' : ' ▲'}</option>}
         </select>
-        <input className="opt" placeholder="Find activity..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 150 }} />
+        <input className="opt" placeholder="Filter activities..." title="Shows only activities whose ID or name contains this text (Esc clears). Edit > Find (Ctrl+F) finds without filtering." value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setSearch(''); } }} style={{ width: 150 }} />
         <span style={{ marginLeft: 'auto' }}>{rows.filter((r) => r.kind === 'task').length} activities · Data Date {fmtDate(dataDate, ctx.prefs, true)}</span>
       </div>
       {(() => {
