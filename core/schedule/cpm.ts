@@ -245,16 +245,14 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     if (p.status === 'NS') return lagAdd(fin ? finishOf(p) : startOf(p), r);
     if (p.status === 'IP') {
       if (fin) return lagAdd(finishOf(p), r);
-      // Start links from an in-progress predecessor: lag counts from its actual start, but under
-      // Retained Logic the successor also waits for the predecessor's remaining work to resume.
-      let base = lagAdd(p.as!, r);
-      if (p.proj.opts.logic === 'retained' && r.lag > 0) {
-        // Retained Logic: a started predecessor with no progress yet has its start-link lag run from the data date
-        const actualWork = Math.max(0, Math.round((Number(p.row.target_drtn_hr_cnt || 0) - Number(p.row.remain_drtn_hr_cnt || 0)) * H));
-        const left = r.lag - actualWork;
-        if (actualWork === 0 && left > 0) base = Math.max(base, lagCal(r).addWork(p.proj.dd, left));
-      }
-      return p.proj.opts.logic === 'retained' ? Math.max(base, p.es) : base;
+      // Start links from an in-progress predecessor.
+      if (p.proj.opts.logic !== 'retained') return lagAdd(p.as!, r);
+      // Retained Logic: the lag still to run is the lag minus the work time elapsed between the predecessor's
+      // actual start and the data date; it runs from the predecessor's remaining (resumed) start.
+      const lc = lagCal(r);
+      const elapsed = Math.max(0, lc.workBetween(Math.min(p.as!, p.proj.dd), p.proj.dd));
+      const left = r.lag - elapsed;
+      return left > 0 ? lc.addWork(p.es, left) : p.es;
     }
     // actual dates after the data date do not push successors past what the data date allows
     const base = lagAdd(Math.min(fin ? p.af! : p.as!, p.proj.dd), r);
