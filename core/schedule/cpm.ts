@@ -241,7 +241,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       const base = lagAdd(p.as!, r);
       return p.proj.opts.logic === 'retained' ? Math.max(base, p.es) : base;
     }
-    const base = lagAdd(fin ? p.af! : p.as!, r);
+    // actual dates after the data date do not push successors past what the data date allows
+    const base = lagAdd(Math.min(fin ? p.af! : p.as!, p.proj.dd), r);
     return p.ef > p.proj.dd ? Math.max(base, p.ef) : base;
   };
   const extStart = (r: Rel): number | null => {
