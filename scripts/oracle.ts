@@ -3,6 +3,7 @@
 import { parseXer } from '../core/xer/parse.ts';
 import { scheduleProjects, calendarResolver } from '../core/schedule/cpm.ts';
 import { parseP6Date } from '../core/dates.ts';
+import { parseClndrData, serializeClndrData } from '../core/calendar/clndr-data.ts';
 import { realSamples } from '../tests/helpers.ts';
 
 /**
@@ -35,12 +36,36 @@ export const FIELDS = ['early_start_date', 'early_end_date', 'late_start_date', 
 
 export interface OracleResult { file: string; n: number; match: Record<string, number>; overall: number; wrong: number; mismatches: string[]; repaired?: string[] }
 
+type Db = ReturnType<typeof parseXer>['db'];
+const ole = (d: string) => Math.round(parseP6Date(d)! / 1440) + 25569;
+
+/**
+ * Files proven to have been edited after P6 last scheduled them (docs/stale-sample-files.md), with the edit undone.
+ * Each is compared against P6's stored dates like the original file.
+ */
+export const CORRECTIONS: { file: string; label: string; apply: (db: Db) => void }[] = [
+  { file: 'badra oil.xer', label: 'A3890 back to the 40 h P6 used', apply: (db) => {
+    const t = db.tables.TASK.rows.find((r) => r.task_code === 'A3890')!;
+    t.remain_drtn_hr_cnt = t.target_drtn_hr_cnt = '40';
+    for (const r of db.tables.TASKRSRC?.rows ?? []) if (r.task_id === t.task_id) { r.restart_date = t.early_start_date; r.reend_date = t.early_end_date; }
+  } },
+  { file: 'Beyti plant baseline -b(fm-baseline).xer', label: '9-10 Nov 2011 back as holidays on calendar Beyti', apply: (db) => {
+    const c = db.tables.CALENDAR.rows.find((r) => r.clndr_name === 'Beyti')!;
+    const d = parseClndrData(c.clndr_data);
+    for (const x of ['2011-11-09', '2011-11-10']) d.exceptions.set(ole(x), []);
+    c.clndr_data = serializeClndrData(d);
+  } },
+];
+
 export function oracle(filter?: string, detail = 0, repair = false): OracleResult[] {
   const out: OracleResult[] = [];
-  for (const s of realSamples()) {
+  const cases = realSamples().flatMap((s) => [{ name: s.name, bytes: s.bytes, apply: undefined as ((db: Db) => void) | undefined },
+    ...CORRECTIONS.filter((c) => c.file === s.name).map((c) => ({ name: `${s.name} [corrected: ${c.label}]`, bytes: s.bytes, apply: c.apply }))]);
+  for (const s of cases) {
     if (filter && !s.name.toLowerCase().includes(filter.toLowerCase())) continue;
     const orig = parseXer(s.bytes).db;
     const db = parseXer(s.bytes).db;
+    s.apply?.(db);
     const projIds = (db.tables.PROJECT?.rows ?? []).map((p) => p.proj_id);
     const repaired = repair ? repairStale(db) : [];
     const res = scheduleProjects(db, projIds);
