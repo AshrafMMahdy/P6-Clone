@@ -15,7 +15,7 @@ const di = args.indexOf('--detail');
 const detail = di >= 0 ? Number(args[di + 1]) : 0;
 const walk = (d: string): string[] => readdirSync(d).flatMap((f) => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : /\.xer$/i.test(f) ? [p] : []; });
 
-for (const file of walk(dir)) {
+for (const file of statSync(dir).isFile() ? [dir] : walk(dir)) {
   const bytes = readFileSync(file);
   const ms = (t: number) => `${Date.now() - t} ms`;
   let t = Date.now();
@@ -27,7 +27,7 @@ for (const file of walk(dir)) {
   const all = validateXer(db, findings);
   const validate = ms(t);
   const verdict = worst(all) ?? 'clean';
-  console.log(`\n${relative(dir, file)}  ${(bytes.length / 1048576).toFixed(1)} MB  ERMHDR ${h?.version} ${h?.exportDate ?? ''} (${h?.raw?.slice(3, 6).join(" ") ?? ""})`);
+  console.log(`\n${(relative(dir, file) || file)}  ${(bytes.length / 1048576).toFixed(1)} MB  ERMHDR ${h?.version} ${h?.exportDate ?? ''} (${h?.raw?.slice(3, 6).join(" ") ?? ""})`);
   console.log(`  projects ${n('PROJECT')}, activities ${n('TASK')}, links ${n('TASKPRED')}, calendars ${n('CALENDAR')}, resources ${n('RSRC')}, assignments ${n('TASKRSRC')}, cost accounts ${n('ACCOUNT')}, activity codes ${n('TASKACTV')}, UDF values ${n('UDFVALUE')}`);
   console.log(`  parse ${parse}, validate ${validate}, verdict ${verdict}${verdict === 'fatal' || verdict === 'error' ? ': ' + all.filter((x) => x.severity === verdict).slice(0, 3).map((x) => x.code + ' ' + x.message.slice(0, 120)).join(' | ') : ''}`);
   if (verdict === 'fatal') continue;

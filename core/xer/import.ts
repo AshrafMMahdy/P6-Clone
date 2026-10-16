@@ -143,6 +143,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
         if (a?.epsId) nr._eps_id = a.epsId;
         // remember which P6 build wrote the file: 6.x builds place milestones differently
         nr._legacy_ms = isLegacyLayout(src) ? 'Y' : 'N';
+        nr._p6_ver = src.header?.version ?? '';
       }
       dst.rows.push(nr);
     }

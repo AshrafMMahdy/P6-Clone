@@ -24,6 +24,8 @@ export interface SchedOptions {
   criticalFloatHrs: number;
   /** P6 6.x builds place milestones one minute inside a work period instead of across a non-work gap. */
   legacyMilestones: boolean;
+  /** Written by P6 8.x or later (ERMHDR version): these builds differ in a few placement rules. */
+  modernBuild: boolean;
 }
 
 export interface ScheduleStats { activities: number; relationships: number; notStarted: number; inProgress: number; completed: number; finish: number | null; dataDate: number | null }
@@ -59,6 +61,7 @@ export function optionsFor(db: Db, proj: Row, over: Partial<SchedOptions> = {}):
     criticalBy: proj.critical_path_type === 'CT_DrivPath' ? 'longestPath' : 'float',
     criticalFloatHrs: Number(proj.critical_drtn_hr_cnt || 0),
     legacyMilestones: proj._legacy_ms != null && proj._legacy_ms !== '' ? proj._legacy_ms === 'Y' : isLegacyLayout(db),
+    modernBuild: Number((proj._p6_ver || db.header?.version || '0').split('.')[0]) >= 8,
   };
   return { ...base, ...over };
 }
@@ -353,8 +356,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (exp > st && st === a.cal.nextWorkStart(a.proj.dd)) a.dur = a.cal.workBetween(st, exp);
       }
       snapEarly(a, mand ?? raw, floor);
-      // P6 5.x/7.x builds keep a link-driven finish that falls on a period start as that time (same work instant)
-      if (!a.proj.opts.legacyMilestones && finDriver != null && mand == null && a.dur && a.type !== 'TT_FinMile' && finDriver > a.ef && a.cal.workBetween(a.ef, finDriver) === 0 && a.fcal.workBetween(a.ef, finDriver) === 0) a.ef = a.cal.nextWorkStart(finDriver);
+      // A link-required finish in a non-work gap is written as the next period start (same work instant) by P6 5-7
+      // builds; P6 8+ does that only when the required finish is that period start, otherwise keeps the period end.
+      if (!a.proj.opts.legacyMilestones && finDriver != null && mand == null && a.dur && a.type !== 'TT_FinMile' && finDriver > a.ef && (!a.proj.opts.modernBuild || a.cal.nextWorkStart(finDriver) === finDriver) && a.cal.workBetween(a.ef, finDriver) === 0 && a.fcal.workBetween(a.ef, finDriver) === 0) a.ef = a.cal.nextWorkStart(finDriver);
       if (mand != null) { a.es = mand; a.ef = a.dur ? a.cal.addWork(mand, a.dur) : mand; }
     }
 
@@ -429,7 +433,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       const from = predTime(r);
       const to = r.type === 'FS' || r.type === 'SS' ? (s.status === 'NS' ? s.es : s.es) : s.ef;
       const w = a.fcal.workBetween(from, to);
-      return w < 0 && s.type === 'TT_Rsrc' ? s.cal.workBetween(from, to) : w; // a resource-dependent successor is late only by its own work time
+      return w < 0 ? s.cal.workBetween(from, to) : w; // a successor is late only by its own work time
     };
     for (const a of order) {
       if (a.status === 'CO') continue;
@@ -460,10 +464,10 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
         if (t < ef) ef = t;
       }
-      if (ef === BIG) ef = a.lf;
+      if (ef === BIG) ef = Math.min(a.lf, a.proj.finish); // no successors: as late as the project's finish
       a.ff = 0; // ALAP uses up all free float
       if (ef <= a.ef || a.cal.workBetween(a.ef, ef) <= 0) continue;
-      a.ef = ef = a.dur ? a.cal.prevWorkEnd(ef) : ef; // a finish sits at the end of the last work period
+      a.ef = ef = a.dur || a.type === 'TT_FinMile' ? a.cal.prevWorkEnd(ef) : ef; // a finish sits at the end of the last work period
       a.es = a.dur ? a.cal.subWork(ef, a.dur) : ef;
       a.ff = 0;
       const fin = a.fcal.workBetween(a.ef, a.lf), st = a.fcal.workBetween(a.es, a.ls);

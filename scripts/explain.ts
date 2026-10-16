@@ -1,10 +1,12 @@
 // Explain one activity: node scripts/explain.ts <fileSubstring> <task_code>
 import { parseXer } from '../core/xer/parse.ts';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { realSamples, samples } from '../tests/helpers.ts';
 
 const [filt, code] = process.argv.slice(2);
-const s = [...realSamples(), ...samples()].find((x) => x.name.toLowerCase().includes(filt.toLowerCase()))!;
+// a sample name substring, or a path to any .xer
+const s = existsSync(filt) && statSync(filt).isFile() ? { name: filt, bytes: readFileSync(filt) } : [...realSamples(), ...samples()].find((x) => x.name.toLowerCase().includes(filt.toLowerCase()))!;
 const orig = parseXer(s.bytes).db;
 const db = parseXer(s.bytes).db;
 scheduleProjects(db, db.tables.PROJECT.rows.map((p) => p.proj_id));
