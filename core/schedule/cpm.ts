@@ -433,7 +433,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     // any successor's early dates (successors already final), never past the activity's own late finish.
     for (let i = order.length - 1; i >= 0; i--) {
       const a = order[i];
-      if (a.status !== 'NS' || a.type === 'TT_LOE' || !cstr(a).some(([t]) => t === 'CS_ALAP')) continue;
+      if (a.status === 'CO' || a.type === 'TT_LOE' || !cstr(a).some(([t]) => t === 'CS_ALAP')) continue;
       let ef = a.lf;
       for (const r of a.succs) {
         if (!r.succ || !isMain(r.succ) || r.succ.status === 'CO') continue;
