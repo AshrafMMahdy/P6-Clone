@@ -350,7 +350,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
       snapEarly(a, mand ?? raw, floor);
       // P6 5.x/7.x builds keep a link-driven finish that falls on a period start as that time (same work instant)
-      if (!a.proj.opts.legacyMilestones && finDriver != null && mand == null && a.dur && a.type !== 'TT_FinMile' && finDriver > a.ef && a.cal.workBetween(a.ef, finDriver) === 0) a.ef = a.cal.nextWorkStart(finDriver);
+      if (!a.proj.opts.legacyMilestones && finDriver != null && mand == null && a.dur && a.type !== 'TT_FinMile' && finDriver > a.ef && a.cal.workBetween(a.ef, finDriver) === 0 && a.fcal.workBetween(a.ef, finDriver) === 0) a.ef = a.cal.nextWorkStart(finDriver);
       if (mand != null) { a.es = mand; a.ef = a.dur ? a.cal.addWork(mand, a.dur) : mand; }
     }
 
