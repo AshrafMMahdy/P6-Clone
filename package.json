@@ -6,7 +6,8 @@
   "description": "Local Primavera P6 Professional clone for testing XER output",
   "main": "dist/main.cjs",
   "bin": {
-    "p6clone": "cli/p6clone.ts"
+    "p6clone": "cli/p6clone.ts",
+    "p6clone-mcp": "mcp/server.ts"
   },
   "scripts": {
     "test": "node --test --test-reporter=dot \"tests/*.test.ts\"",
@@ -14,7 +15,9 @@
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs && electron .",
     "package": "node scripts/package.mjs",
-    "e2e": "node scripts/build.mjs && node --test \"tests/e2e/*.test.ts\""
+    "e2e": "node scripts/build.mjs && node --test \"tests/e2e/*.test.ts\"",
+    "build:cli": "node scripts/build-cli.mjs",
+    "mcp": "node mcp/server.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

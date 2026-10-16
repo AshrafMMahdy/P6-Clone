@@ -38,9 +38,89 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
 - **AI assistant** (optional, off by default): Edit > AI Assistant Settings: provider (Anthropic, OpenAI, OpenRouter, LM Studio, Ollama or any OpenAI-compatible server), URL, model, API key. The key is encrypted with Windows' protection and kept by the app's background process (never in the project database). When enabled, a strip on the right edge (Ctrl+Shift+A) opens a chat over the Gantt; the assistant reads the open project through lookups (summary, activity search, activity details, WBS, critical path, schedule health, resources), so it works on very large programmes, and activity IDs in its answers jump to the activity. Project data goes to the provider you choose; use a local server to keep it on your computer.
 - **File > Export**: XER (choose P6 version 5.0 … 24.12) or P6 XML. After writing, the clone re-reads the file and validates it.
 
-## CLI (for your agent)
+## Headless P6 for your agent: CLI and MCP server
 
-Same engine as the app, no GUI:
+The same engine as the desktop app, with no window: an agent can create, open, edit, schedule, review and save real
+XER files the way a scheduler does in P6. Two front doors, one engine:
+
+- **CLI** (`cli/p6clone.ts`): one command per call; each call reads and writes files. Simplest when the agent can run shell commands.
+- **MCP server** (`mcp/server.ts`): projects stay **open in memory** between calls (a 70 MB XER is read once), every change can be **undone**, and nothing touches disk until `save`. Best for long editing sessions on big programmes, or agents that cannot run commands.
+
+Both run on Node 24 directly. For older Node (18+), or to copy into a sandbox without the repository, build single-file bundles:
+
+```bash
+node scripts/build-cli.mjs
+```
+
+That writes `dist-cli/p6clone.cjs` and `dist-cli/p6clone-mcp.cjs` (about 250 KB each, no dependencies).
+
+### CLI
+
+```bash
+node cli/p6clone.ts new --id TWR-A --name "Tower A" --start 2026-03-01 --out tower.xer
+```
+
+```bash
+node cli/p6clone.ts edit tower.xer --ops ops.json --schedule --out tower.xer
+```
+
+```bash
+node cli/p6clone.ts query tower.xer find --critical --starts-before 2026-06-30 --json
+```
+
+```bash
+node cli/p6clone.ts review tower.xer --json
+```
+
+| Command | What it does | Exit code |
+|---|---|---|
+| `new --id --name --start --out [--version]` | Empty project: WBS root, default calendar, P6 schedule options | 0 |
+| `edit <xer> --ops <file.json \| -> --out <xer> [--schedule] [--data-date] [--hours-per-day 8] [--json]` | Applies operations as **one transaction**; `--schedule` runs F9 after | 0 ok, 65 an operation failed (nothing written) |
+| `query <xer> summary \| find \| activity <ID> \| wbs [code] \| critical \| health \| resources [ID] [--json]` | Read-only lookups (`find` filters: `--text --status --critical --not-critical --wbs --resource --starts-after --starts-before --finishes-after --finishes-before --max-float --min-float --milestones --sort --limit`) | 0, 66 not found |
+| `review <xer> [--json]` | Planning-reviewer checks (DCMA-style thresholds) graded pass / warn / fail | 0 pass, 1 warnings, 3 failures |
+| `validate <xer> [--json]` | What real P6 would do on import, plus saved dates P6 would change on F9 | 0 imports, 1 P6 would fail or drop data, 2 P6 rejects |
+| `schedule`, `progress`, `level`, `export`, `diff` | F9, Update Progress, Level Resources, write XER/XML, compare two files | |
+
+**Operations** (`edit --ops`, and the MCP `edit` tool) are a JSON array. Activities are addressed by Activity ID, WBS by
+code (or `A.B` path), resources by resource ID, calendars by name, projects by project ID (only needed when the file has
+several). Durations and lags are in days (`--hours-per-day`, default 8). Dates are `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
+
+| op | Fields |
+|---|---|
+| `add_project` | `id, name, start, must_finish_by?, calendar?` |
+| `set_project` | `project?, name?, data_date?, planned_start?, must_finish_by?, calendar?` |
+| `add_calendar` | `name, work_week?: {sat: [["07:00","12:00"],["13:00","16:00"]], ...}, holidays?: [dates], work_exceptions?: {date: periods}` |
+| `add_holidays` | `calendar, dates` |
+| `add_wbs` | `code, name?, parent?` |
+| `add_activity` | `id?, name, wbs?, duration_days?, type?, calendar?, constraint?: {type, date}, secondary_constraint?, priority?, start?` |
+| `update_activity` | `id, new_id?, name?, wbs?, duration_days?, remaining_days?, type?, calendar?, constraint?, start?, finish?, actual_start?, actual_finish?, percent_complete?, expected_finish?, priority?` |
+| `delete_activity`, `dissolve_activity` | `id` (dissolve links its predecessors to its successors, like P6) |
+| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`) |
+| `add_resource` | `id, name?, type?: labor\|nonlabor\|material, units_per_day?, max_units_per_day?, price_per_unit?, calendar?` |
+| `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?` |
+
+Activity types: `task`, `resource_dependent`, `start_milestone`, `finish_milestone`, `level_of_effort`, `wbs_summary`.
+Constraints: `start_on`, `start_on_or_after`, `start_on_or_before`, `finish_on`, `finish_on_or_before`,
+`finish_on_or_after`, `mandatory_start`, `mandatory_finish`, `alap`, `none`. Edits behave like P6: a typed start sets a
+Start On or After constraint, a typed finish changes the duration, a new duration moves the activity's own finish at
+once, and relationships that would make a loop are refused.
+
+### MCP server
+
+Configure your agent with a stdio server:
+
+```json
+{ "mcpServers": { "p6-clone": { "command": "node", "args": ["/path/to/dist-cli/p6clone-mcp.cjs"] } } }
+```
+
+Tools: `open_file`, `new_project`, `list_open`, `edit`, `schedule`, `update_progress`, `level_resources`, `validate`,
+`review`, `project_summary`, `find_activities`, `get_activity`, `list_wbs`, `critical_path`, `schedule_health`,
+`resource_summary`, `undo`, `save` (XER in any version 5.0-24.12, or P6 XML for a `.xml` path), `close`.
+Every tool except `open_file`, `new_project` and `list_open` takes the `handle` they return. Results come back as JSON
+(`structuredContent` as well as text). The server reads and writes files where the agent runs, so run it inside the
+agent's sandbox.
+
+### Other commands
 
 ```bash
 node cli/p6clone.ts validate "Sample XERs/Tower-A.xer" --json
