@@ -2,6 +2,7 @@
 // Microsoft Project (COM automation, "MSProject.Application") to convert between .mpp and Microsoft Project XML.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { resolve as absolute } from 'node:path';
 
 export const MSP_REQUIRED = 'Microsoft Project must be installed to import/export .mpp files (Primavera P6 has the same requirement)';
 export const CONVERT_TIMEOUT_MS = 120_000;
@@ -66,7 +67,8 @@ function runConvert(direction: ConvertDirection, inPath: string, outPath: string
   return new Promise<void>((resolve, reject) => {
     if (process.platform !== 'win32') { reject(new Error(`${MSP_REQUIRED}. Microsoft Project only runs on Windows.`)); return; }
     if (!existsSync(inPath)) { reject(new Error(`Input file not found: ${inPath}`)); return; }
-    const script = buildConvertScript(direction, inPath, outPath);
+    // absolute paths: Microsoft Project resolves relative ones against its own folder
+    const script = buildConvertScript(direction, absolute(inPath), absolute(outPath));
     let stderr = '';
     let timedOut = false;
     let settled = false;

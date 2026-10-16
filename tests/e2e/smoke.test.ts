@@ -1,6 +1,7 @@
 // Drives the real Electron app: import an XER through the wizard, schedule (F9), commit, then
 // check the saved database and that its XER export passes the validator.
 // Run: npm run e2e   (builds first). Screenshots go to E2E_SHOTS dir if set.
+import { linesToDb } from '../../core/db-file.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright';
@@ -48,7 +49,7 @@ test('import, schedule, commit, export round trip in the desktop app', { timeout
     await win.waitForSelector('.toast:has-text("committed")');
     const dbFile = join(userData, 'p6clone-db.json');
     assert.ok(existsSync(dbFile));
-    const saved = JSON.parse(readFileSync(dbFile, 'utf8')).db;
+    const saved = linesToDb(readFileSync(dbFile, 'utf8').split('\n')).db;
     assert.ok(saved.tables.TASK.rows.length > 10);
     assert.ok(saved.tables.TASK.rows.every((r: Record<string, string>) => r.early_start_date), 'all activities scheduled');
     const xer = writeXer(saved, { version: '19.12' });

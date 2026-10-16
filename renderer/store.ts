@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { dbToLines, linesToDb } from '../core/db-file.ts';
 import type { P6Api } from '../main/preload.ts';
 import { emptyDb, type Db } from '../core/db.ts';
 import type { Finding } from '../core/findings.ts';
@@ -109,15 +110,15 @@ function scheduleSave(): void {
 export async function saveNow(): Promise<void> {
   clearTimeout(saveTimer);
   const { prefs, columns, layoutName, pxPerDay, bottom } = state.ui;
-  await window.p6?.saveDb(JSON.stringify({ version: 1, db: state.db, ui: { prefs, columns, layoutName, pxPerDay, bottom } }));
+  await window.p6?.saveDb(dbToLines(state.db, { prefs, columns, layoutName, pxPerDay, bottom }));
 }
 export async function loadFromDisk(): Promise<void> {
-  const json = await window.p6?.loadDb();
-  if (!json) return;
+  const lines = await window.p6?.loadDb();
+  if (!lines?.length) return;
   try {
-    const data = JSON.parse(json);
+    const data = linesToDb(lines);
     state.db = data.db ?? emptyDb();
-    if (data.ui) state.ui = { ...state.ui, ...data.ui };
+    if (data.ui) state.ui = { ...state.ui, ...(data.ui as object) };
     state.dbVersion++;
     emit();
   } catch (e) {

@@ -1,4 +1,5 @@
 // Builds a small schedule by hand in the desktop app and checks the saved database.
+import { linesToDb } from '../../core/db-file.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright';
@@ -53,8 +54,8 @@ test('create project, add and link activities, edit duration, schedule', { timeo
     await win.keyboard.press('Control+s');
     await win.waitForSelector('.toast:has-text("committed")');
 
-    const db = JSON.parse(readFileSync(join(userData, 'p6clone-db.json'), 'utf8')).db;
-    const t = (c: string) => db.tables.TASK.rows.find((r: Record<string, string>) => r.task_code === c);
+    const db = linesToDb(readFileSync(join(userData, 'p6clone-db.json'), 'utf8').split('\n')).db;
+    const t = (c: string) => db.tables.TASK.rows.find((r: Record<string, string>) => r.task_code === c)!;
     assert.equal(t('A1000').target_drtn_hr_cnt, '80');
     assert.equal(t('A1000').early_start_date, '2024-01-08 08:00');
     assert.equal(t('A1000').early_end_date, '2024-01-19 17:00');

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { buildMenu } from './menu.ts';
@@ -13,6 +13,8 @@ const argv = process.argv;
 const argVal = (name: string) => { const i = argv.indexOf(name); return i > 0 ? argv[i + 1] : undefined; };
 const userData = argVal('--user-data');
 if (userData) app.setPath('userData', userData);
+// Large programmes (100 MB XERs, 100k+ activities) are held in the window's memory: allow it more than V8's default.
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=12288');
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -25,6 +27,10 @@ function createWindow(): void {
   Menu.setApplicationMenu(buildMenu(win));
   win.loadFile(join(__dirname, 'renderer', 'index.html'));
   win.on('closed', () => { win = null; });
+  win.webContents.on('render-process-gone', (_e, d) => {
+    console.error(`window process ended: ${d.reason} (exit ${d.exitCode})`);
+    if (d.reason !== 'clean-exit') dialog.showErrorBox('P6 Clone', `The window stopped (${d.reason}). Your database file was not changed; reopen the app to continue.`);
+  });
 }
 
 ipcMain.handle('file:open', async (_e, filters: Electron.FileFilter[], title?: string) => {
@@ -41,13 +47,35 @@ ipcMain.handle('file:save', async (_e, defaultName: string, bytes: Uint8Array, f
   return r.filePath;
 });
 
-ipcMain.handle('db:load', () => (existsSync(DB_FILE()) ? readFileSync(DB_FILE(), 'utf8') : null));
+// The database file is JSON Lines (core/db-file.ts), read and written line by line so its size is not limited
+// by the largest possible single string.
+// Lines cross to the window in batches of about BATCH characters: one message between processes has a size cap.
+const BATCH = 32 * 1024 * 1024;
+let loadBatches: string[][] = [];
+ipcMain.handle('db:loadBegin', () => {
+  loadBatches = [];
+  if (!existsSync(DB_FILE())) return null;
+  const buf = readFileSync(DB_FILE());
+  let cur: string[] = [], size = 0;
+  for (let i = 0; i < buf.length;) {
+    let j = buf.indexOf(10, i); if (j < 0) j = buf.length;
+    cur.push(buf.toString('utf8', i, j)); size += j - i; i = j + 1;
+    if (size >= BATCH) { loadBatches.push(cur); cur = []; size = 0; }
+  }
+  if (cur.length) loadBatches.push(cur);
+  return loadBatches.length;
+});
+ipcMain.handle('db:loadBatch', (_e, i: number) => { const b = loadBatches[i]; if (i === loadBatches.length - 1) loadBatches = []; return b ?? []; });
 
-ipcMain.handle('db:save', (_e, json: string) => {
-  // atomic: write temp then rename, so a crash never leaves a half-written database
-  const tmp = DB_FILE() + '.tmp';
-  writeFileSync(tmp, json);
-  renameSync(tmp, DB_FILE());
+// atomic: write a temp file then rename, so a crash never leaves a half-written database
+let saveFd: number | null = null;
+const TMP = () => DB_FILE() + '.tmp';
+ipcMain.handle('db:saveBegin', () => { if (saveFd != null) closeSync(saveFd); saveFd = openSync(TMP(), 'w'); return true; });
+ipcMain.handle('db:saveLines', (_e, lines: string[]) => { if (saveFd == null) return false; for (const l of lines) writeSync(saveFd, l + '\n'); return true; });
+ipcMain.handle('db:saveEnd', () => {
+  if (saveFd == null) return false;
+  closeSync(saveFd); saveFd = null;
+  renameSync(TMP(), DB_FILE());
   return true;
 });
 
