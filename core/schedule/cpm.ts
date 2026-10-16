@@ -441,6 +441,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
         if (t < ef) ef = t;
       }
+      a.ff = 0; // ALAP uses up all free float
       if (ef <= a.ef || a.cal.workBetween(a.ef, ef) <= 0) continue;
       a.ef = ef;
       a.es = a.dur ? a.cal.subWork(ef, a.dur) : ef;
