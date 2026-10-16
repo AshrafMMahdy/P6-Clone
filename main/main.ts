@@ -27,6 +27,9 @@ function createWindow(): void {
   });
   Menu.setApplicationMenu(buildMenu(win));
   win.loadFile(join(__dirname, 'renderer', 'index.html'));
+  // --menu <command id> runs a menu command once the window is ready (e.g. --menu edit.aiSettings)
+  const startMenu = argVal('--menu');
+  if (startMenu) win.webContents.once('did-finish-load', () => setTimeout(() => win?.webContents.send('menu', startMenu), 1200));
   win.on('closed', () => { win = null; });
   win.webContents.on('render-process-gone', (_e, d) => {
     console.error(`window process ended: ${d.reason} (exit ${d.exitCode})`);
