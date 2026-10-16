@@ -132,3 +132,21 @@ test('external predecessor uses external early start', () => {
   db2.tables.TASKPRED.rows.push({ task_pred_id: '9', task_id: '100', pred_task_id: '999', proj_id: '1', pred_proj_id: '2', pred_type: 'PR_FS', lag_hr_cnt: '0' });
   assert.equal(run(db2, { ignoreExternal: true }).t('A').early_start_date, '2024-01-08 08:00');
 });
+
+test('multi-project: inter-project relationship drives the other project when scheduled together', () => {
+  const db = build([{ code: 'A', d: 5 }]);
+  db.tables.PROJECT.rows.push({ proj_id: '2', proj_short_name: 'Q', clndr_id: '1', plan_start_date: '2024-01-08 00:00', last_recalc_date: '2024-01-08 00:00', plan_end_date: '' });
+  db.tables.PROJWBS.rows.push({ wbs_id: '20', proj_id: '2', parent_wbs_id: '', proj_node_flag: 'Y' });
+  db.tables.TASK.rows.push({ ...db.tables.TASK.rows[0], task_id: '200', proj_id: '2', wbs_id: '20', task_code: 'B' });
+  db.tables.TASKPRED.rows.push({ task_pred_id: '9', task_id: '200', pred_task_id: '100', proj_id: '2', pred_proj_id: '1', pred_type: 'PR_FS', lag_hr_cnt: '0' });
+  const r = scheduleProjects(db, ['1', '2']);
+  assert.ok(r.ok);
+  const B = db.tables.TASK.rows.find((t) => t.task_code === 'B')!;
+  assert.equal(B.early_start_date, '2024-01-15 08:00');
+  const A = db.tables.TASK.rows.find((t) => t.task_code === 'A')!;
+  assert.equal(A.total_float_hr_cnt, '0', 'successor in the other project drives float');
+  // scheduling project 2 alone uses the predecessor's stored dates
+  A.early_end_date = '2024-01-19 16:00';
+  scheduleProjects(db, ['2']);
+  assert.equal(B.early_start_date, '2024-01-22 08:00');
+});
