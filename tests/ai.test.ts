@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildRequest, parseReply, AiStore, type ChatRequest } from '../main/ai.ts';
@@ -66,4 +66,27 @@ test('project lookup tools answer from the database', () => {
   assert.equal(typeof health.missing_predecessors.count, 'number');
   assert.ok((runTool('list_wbs', {}, db, ctx, ids, 8) as any).wbs.length > 0);
   assert.match((runTool('get_activity', { activity_id: 'NOPE' }, db, ctx, ids, 8) as any).error, /No activity/);
+});
+
+test('extra headers and request parameters are merged, validated, and headers stored encrypted', () => {
+  const cfg = { enabled: true, provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com', model: 'm', extraHeaders: 'anthropic-beta: tools-2026\n# comment\nX-Gateway: abc', extraBody: '{"temperature": 0.2, "top_p": 0.9, "max_tokens": 8000}' };
+  const r = buildRequest(cfg, 'k', req) as any;
+  assert.equal(r.headers['anthropic-beta'], 'tools-2026');
+  assert.equal(r.headers['X-Gateway'], 'abc');
+  assert.equal(r.headers['x-api-key'], 'k');
+  assert.equal(r.body.temperature, 0.2);
+  assert.equal(r.body.max_tokens, 8000); // overrides the default
+  assert.equal(r.body.messages.length, 3); // the assistant's own fields are kept
+  assert.throws(() => buildRequest({ ...cfg, extraBody: '{"messages": []}' }, 'k', req), /cannot set messages/);
+  assert.throws(() => buildRequest({ ...cfg, extraBody: '[1]' }, 'k', req), /JSON object/);
+  assert.throws(() => buildRequest({ ...cfg, extraHeaders: 'not a header' }, 'k', req), /line 1/);
+
+  const box = { available: () => true, encrypt: (s: string) => 'ENC:' + Buffer.from(s).toString('base64'), decrypt: (s: string) => Buffer.from(s.slice(4), 'base64').toString() };
+  const file = join(mkdtempSync(join(tmpdir(), 'ai-')), 'ai.json');
+  const store = new AiStore(file, box);
+  store.save({ ...cfg, extraHeaders: 'X-Gateway-Token: very-secret' });
+  assert.ok(!readFileSync(file, 'utf8').includes('very-secret'));
+  assert.equal(store.publicConfig().extraHeaders, 'X-Gateway-Token: very-secret');
+  assert.equal(store.config().extraBody, cfg.extraBody);
+  assert.throws(() => store.save({ ...cfg, extraBody: '{bad' }), /not valid JSON/);
 });

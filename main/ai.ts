@@ -2,9 +2,15 @@
 // The key is encrypted with the operating system's protection (Electron safeStorage: DPAPI on Windows).
 // Providers: Anthropic (Messages API) and anything OpenAI-compatible (OpenAI, OpenRouter, LM Studio, Ollama, ...).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { parseExtraBody, parseExtraHeaders, RESERVED_BODY } from './ai-extras.ts';
 
 export type ProviderKind = 'anthropic' | 'openai';
-export interface AiConfig { enabled: boolean; provider: ProviderKind; baseUrl: string; model: string; /** let the assistant operate the app (visibly, undoable) */ actions?: boolean }
+export interface AiConfig {
+  enabled: boolean; provider: ProviderKind; baseUrl: string; model: string;
+  /** let the assistant operate the app (visibly, undoable) */ actions?: boolean;
+  /** extra HTTP headers, "Name: value" per line (stored encrypted) */ extraHeaders?: string;
+  /** JSON object merged into every request (temperature, top_p, max_tokens, ...) */ extraBody?: string;
+}
 /** What the window may see: everything but the key. */
 export interface AiPublicConfig extends AiConfig { hasKey: boolean; keyHint: string; encrypted: boolean }
 
@@ -19,7 +25,7 @@ export type ChatMsg =
 export interface ChatRequest { system: string; messages: ChatMsg[]; tools: ToolDef[] }
 export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: string }
 
-interface Stored extends AiConfig { key?: string; keyEnc?: boolean; keyHint?: string }
+interface Stored extends AiConfig { key?: string; keyEnc?: boolean; keyHint?: string; headersEnc?: string }
 export interface KeyBox { available(): boolean; encrypt(s: string): string; decrypt(s: string): string }
 
 export const DEFAULTS: AiConfig = { enabled: false, provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: '', actions: true };
@@ -31,14 +37,23 @@ export class AiStore {
     if (!existsSync(this.file)) return { ...DEFAULTS };
     try { return { ...DEFAULTS, ...JSON.parse(readFileSync(this.file, 'utf8')) }; } catch { return { ...DEFAULTS }; }
   }
+  private headers(s: Stored): string {
+    if (s.headersEnc) { try { return s.keyEnc === false ? s.headersEnc : this.box.decrypt(s.headersEnc); } catch { return ''; } }
+    return s.extraHeaders ?? '';
+  }
   publicConfig(): AiPublicConfig {
     const s = this.read();
-    return { enabled: s.enabled, provider: s.provider, baseUrl: s.baseUrl, model: s.model, actions: s.actions !== false, hasKey: !!s.key, keyHint: s.keyHint ?? '', encrypted: s.keyEnc !== false };
+    return { enabled: s.enabled, provider: s.provider, baseUrl: s.baseUrl, model: s.model, actions: s.actions !== false, extraHeaders: this.headers(s), extraBody: s.extraBody ?? '', hasKey: !!s.key, keyHint: s.keyHint ?? '', encrypted: s.keyEnc !== false };
   }
   /** apiKey: undefined keeps the saved key, '' removes it. */
   save(c: AiConfig, apiKey?: string): AiPublicConfig {
     const s = this.read();
-    const next: Stored = { ...s, enabled: !!c.enabled, provider: c.provider === 'openai' ? 'openai' : 'anthropic', baseUrl: String(c.baseUrl || '').trim(), model: String(c.model || '').trim(), actions: c.actions !== false };
+    parseExtraHeaders(c.extraHeaders); parseExtraBody(c.extraBody); // refuse to save what would break every request
+    const next: Stored = { ...s, enabled: !!c.enabled, provider: c.provider === 'openai' ? 'openai' : 'anthropic', baseUrl: String(c.baseUrl || '').trim(), model: String(c.model || '').trim(), actions: c.actions !== false, extraBody: String(c.extraBody ?? '').trim() };
+    // extra headers can carry secrets (gateway tokens): encrypted like the key
+    delete next.extraHeaders;
+    const h = String(c.extraHeaders ?? '').trim();
+    if (h) next.headersEnc = this.box.available() ? this.box.encrypt(h) : h; else delete next.headersEnc;
     if (apiKey !== undefined) {
       const k = apiKey.trim();
       if (!k) { delete next.key; delete next.keyHint; delete next.keyEnc; }
@@ -57,13 +72,20 @@ export class AiStore {
     if (!s.key) return '';
     return s.keyEnc === false ? s.key : this.box.decrypt(s.key);
   }
-  config(): AiConfig { const s = this.read(); return { enabled: s.enabled, provider: s.provider, baseUrl: s.baseUrl, model: s.model }; }
+  config(): AiConfig { const s = this.read(); return { enabled: s.enabled, provider: s.provider, baseUrl: s.baseUrl, model: s.model, extraHeaders: this.headers(s), extraBody: s.extraBody }; }
 }
 
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 
-/** Build the HTTP request for a provider (pure, so it can be tested). */
+/** Build the HTTP request for a provider, with the user's extra headers and parameters (pure, so it can be tested). */
 export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
+  const r = baseRequest(cfg, key, req);
+  const extra = parseExtraBody(cfg.extraBody);
+  for (const k of RESERVED_BODY) delete extra[k];
+  return { url: r.url, headers: { ...r.headers, ...parseExtraHeaders(cfg.extraHeaders) }, body: { ...(r.body as object), ...extra } };
+}
+
+function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
   if (cfg.provider === 'anthropic') {
     const base = trimSlash(cfg.baseUrl || 'https://api.anthropic.com');
     const messages: unknown[] = [];

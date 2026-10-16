@@ -8,7 +8,7 @@ const ok = (c: boolean, m: string) => console.log((c ? 'PASS ' : 'FAIL ') + m);
 const seen: any[] = [];
 const srv = createServer((req, res) => {
   let body = ''; req.on('data', (d) => (body += d)); req.on('end', () => {
-    const j = JSON.parse(body); seen.push({ auth: req.headers.authorization, j });
+    const j = JSON.parse(body); seen.push({ auth: req.headers.authorization, xtest: req.headers['x-test'], j });
     const msgs = j.messages, last = msgs[msgs.length - 1];
     const tools = msgs.filter((m: any) => m.role === 'tool');
     let message: any;
@@ -34,12 +34,18 @@ await win.selectOption('.dialog select >> nth=0', 'LM Studio (local)');
 await win.fill('.dialog input[placeholder="https://..."]', `http://127.0.0.1:${port}/v1`);
 await win.fill('.dialog tr:has-text("Model") input', 'fake-model');
 await win.fill('.dialog input[type=password]', 'sk-test-abcdef123456');
+await win.fill('.dialog textarea[placeholder^="One per line"]', 'X-Test: hello');
+const jsonBox = win.locator('.dialog textarea').nth(1);
+await jsonBox.fill('{bad');
+ok(await win.locator('.dialog button:has-text("OK")').isDisabled(), 'invalid JSON parameters are flagged and OK is disabled');
+await jsonBox.fill('{"temperature": 0.3}');
 await win.click('.dialog button:has-text("Test Connection")'); await win.waitForSelector('text=Connected.', { timeout: 10000 });
 ok(true, 'Test Connection reaches the provider: ' + (await win.locator('text=Connected.').innerText()));
 await win.click('.dialog button:has-text("OK")'); await win.waitForTimeout(400);
 const cfgFile = readFileSync(join(ud, 'ai-assistant.json'), 'utf8');
 ok(!cfgFile.includes('sk-test-abcdef123456'), 'the key on disk is encrypted, not plain text');
 ok(seen[0]?.auth === 'Bearer sk-test-abcdef123456', 'the key is sent to the provider as a Bearer token');
+ok(seen[0]?.xtest === 'hello' && seen[0]?.j.temperature === 0.3, 'extra header and JSON parameters reach the provider');
 ok(await win.locator('.ai-strip').count() === 1, 'enabled: slim strip on the right');
 await win.click('.ai-strip'); await win.waitForSelector('.ai-panel');
 await win.fill('.ai-panel textarea', 'Which waterproofing activities are there?'); await win.keyboard.press('Enter');
