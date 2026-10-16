@@ -258,8 +258,12 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     // actual dates after the data date do not push successors past what the data date allows
     const base = lagAdd(Math.min(fin ? p.af! : p.as!, p.proj.dd), r);
     if (p.ef <= p.proj.dd) return base;
-    // completed with actuals after the data date: logic runs from its propagated date, lag included
-    return p.as! > p.proj.dd ? Math.max(base, lagAdd(p.ef, r)) : Math.max(base, p.ef);
+    // completed but pushed past the data date by its own predecessors: logic runs from its propagated date with
+    // only the lag still to run (the lag minus the work time elapsed between its actual date and the data date)
+    if (r.lag <= 0) return p.as! > p.proj.dd ? Math.max(base, lagAdd(p.ef, r)) : Math.max(base, p.ef);
+    const lc = lagCal(r);
+    const left = r.lag - Math.max(0, lc.workBetween(Math.min(fin ? p.af! : p.as!, p.proj.dd), p.proj.dd));
+    return Math.max(base, left > 0 ? lc.addWork(p.ef, left) : p.ef);
   };
   const extStart = (r: Rel): number | null => {
     // predecessor outside the scheduled set: its stored dates, else the successor's external early start
