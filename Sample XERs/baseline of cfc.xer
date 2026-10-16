@@ -1,0 +1,883 @@
+ERMHDR	6.0.0	2010-07-25	Project	admin	Adminstrator	dbxDatabaseNoName	Project Management	USD
+%T	CURRTYPE
+%F	curr_id	decimal_digit_cnt	curr_symbol	decimal_symbol	digit_group_symbol	pos_curr_fmt_type	neg_curr_fmt_type	curr_type	curr_short_name	group_digit_cnt	base_exch_rate
+%R	1	0	L.E	.	,	#1.1	(#1.1)	Egyption Pound1	USD	3	1
+%R	10	2	$	.	,	#1.1	(#1.1)	Argentine Peso	ARS	3	3.077
+%R	11	2	A$	.	,	#1.1	(#1.1)	Australian Dollar	AUST	3	1.208
+%R	13	2	R$	.	,	#1.1	(#1.1)	Brazilian Real	BRL	3	2.014
+%R	14	2	£	.	,	#1.1	(#1.1)	British Pound	U.K.£	3	0.685097
+%R	15	2	CA$	.	,	#1.1	(#1.1)	Canadian Dollar	CAD	3	1.10573
+%R	16	2	Y	.	,	#1.1	(#1.1)	Chinese Yuan	CNY	3	7.694
+%R	17	2	€	.	,	#1.1	(#1.1)	EURO	EUR	3	0.739088
+%R	20	2	HK$	.	,	#1.1	(#1.1)	Hong Kong Dollar	HKD	3	7.81967
+%R	21	2	Rs	.	,	#1.1	(#1.1)	Indian Rupee	INR	3	40.67
+%R	23	2	¥	.	,	#1.1	(#1.1)	Japanese Yen	JPY	3	120.167
+%R	24	2	K	.	,	#1.1	(#1.1)	Korean Won	KRW	3	924.743
+%R	25	2	N$	.	,	#1.1	(#1.1)	Mexican Peso	MXN	3	10.7938
+%R	26	2	R	.	,	#1.1	(#1.1)	Russian Rouble	RUB	3	25.8085
+%R	28	2	Sk	.	,	#1.1	(#1.1)	Swedish Krona	SEK	3	6.80579
+%R	29	2	kr	.	,	#1.1	(#1.1)	Swiss Franc	CHF	3	1.21864
+%R	30	2	NIS	.	,	#1.1	(#1.1)	Israel Shekel	ILS	3	3.96384
+%R	32	0	L.E	.	,	#1.1	(#1.1)	Egyption pound	EGY	3	30
+%T	OBS
+%F	obs_id	parent_obs_id	guid	seq_num	obs_name	obs_descr
+%R	565			0	Innovative GC	<HTML><BODY></BODY></HTML>
+%R	648	565	/YRRcu5g6UKVwrssEFeaUA	0	Eng_Ayman Moharram	<HTML><BODY></BODY></HTML>
+%T	PROJECT
+%F	proj_id	fy_start_month_num	chng_eff_cmp_pct_flag	rsrc_self_add_flag	allow_complete_flag	rsrc_multi_assign_flag	ts_rsrc_mark_act_finish_flag	ts_rsrc_vw_inact_actv_flag	checkout_flag	project_flag	step_complete_flag	cost_qty_recalc_flag	sum_only_flag	batch_sum_flag	name_sep_char	def_complete_pct_type	proj_short_name	acct_id	orig_proj_id	source_proj_id	base_type_id	clndr_id	sum_base_proj_id	task_code_base	task_code_step	priority_num	wbs_max_sum_level	risk_level	strgy_priority_num	last_checksum	critical_drtn_hr_cnt	def_cost_per_qty	last_recalc_date	plan_start_date	plan_end_date	scd_end_date	add_date	sum_data_date	last_tasksum_date	fcst_start_date	def_duration_type	task_code_prefix	guid	def_qty_type	add_by_name	web_local_root_path	proj_url	def_rate_type	add_act_remain_flag	act_this_per_link_flag	def_task_type	act_pct_link_flag	critical_path_type	task_code_prefix_flag	def_rollup_dates_flag	use_project_baseline_flag	rem_target_link_flag	reset_planned_flag	allow_neg_act_flag	sum_assign_level	last_fin_dates_id	last_baseline_update_date	loaded_scope_level	export_flag	new_fin_dates_id	next_data_date	close_period_flag	trsrcsum_loaded
+%R	771	1	N	Y	Y	Y	N	N	N	Y	N	N	N	Y	.	CP_Drtn	CFC					841	777	1000	10	10	2	3	500		0	0	2010-07-01 00:00	2010-07-01 00:00		2010-10-18 16:00	2010-07-12 00:00				DT_FixedDUR2	A	6YGYZnFBzU+L9PejMa8Vtg	QT_Hour	admin			COST_PER_QTY	N	Y	TT_Task	Y	CT_TotFloat	Y	Y	Y	Y	N	N	SL_Taskrsrc			7	Y				
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	last_chng_date	clndr_type	clndr_data
+%R	841	Y	Gama projects calender			2010-07-15 00:00	CA_Base	(0||()(  (0||DaysOfWeek()(    (0||1()(      (0||0(s|08:00|f|16:00)())))    (0||2()(      (0||0(s|08:00|f|16:00)())))    (0||3()(      (0||0(s|08:00|f|16:00)())))    (0||4()(      (0||0(s|08:00|f|16:00)())))    (0||5()(      (0||0(s|08:00|f|16:00)())))    (0||6()())    (0||7()(      (0||0(s|08:00|f|16:00)())))))  (0||Exceptions()(    (0||0(d|40497)())    (0||1(d|40498)())    (0||2(d|40499)())    (0||3(d|40500)())))))
+%T	PROJWBS
+%F	wbs_id	proj_id	obs_id	seq_num	est_wt	proj_node_flag	sum_data_flag	status_code	wbs_short_name	wbs_name	phase_id	parent_wbs_id	ev_user_pct	ev_etc_user_value	orig_cost	indep_remain_total_cost	ann_dscnt_rate_pct	dscnt_period_type	indep_remain_work_qty	anticip_start_date	anticip_end_date	ev_compute_type	ev_etc_compute_type	guid	tmpl_guid	plan_open_state
+%R	10847	771	648	100	1	Y	N	WS_Open	CFC	Office Building 14B01 Substructure Package		10170	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	tizeblKEBkyRORygtRvBPg		
+%R	10848	771	648	0	1	N	N	WS_Open	OFC	Office building		10857	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	srPjii+Kw0+Mrqm1D/MHqg		
+%R	10849	771	648	2	1	N	N	WS_Open	TANK	Tank		10857	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	nIjPJsM8ykKhK9svpM5Jsw		
+%R	10850	771	648	101	1	N	N	WS_Open	A2	Area 2		10860	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	fQHVDAGna02FFtF0xgOyJw		
+%R	10857	771	648	3	1	N	N	WS_Open	3	construction		10847	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	uVZzmqUjZEqkv2dv2lga4g		
+%R	10858	771	648	1	1	N	N	WS_Open	2	Engineering		10847	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	DxUZNusLeUW78e2p0QJ6HA		
+%R	10859	771	648	0	1	N	N	WS_Open	1	General		10847	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	jfhY/6a01EGaVCVxThjeBQ		
+%R	10860	771	648	1	1	N	N	WS_Open	P1	Part1		10848	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	sZNRo4GwMUKirHVlUxQj0Q		
+%R	10861	771	648	0	1	N	N	WS_Open	A1	Area 1		10860	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	yOk/wmInb0u9lye6fwABgA		
+%R	10862	771	648	101	1	N	N	WS_Open	A3	Area 3		10860	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	JtSvmx4EtUCC6SKVm1w9qQ		
+%R	10863	771	648	1	1	N	N	WS_Open	P2	Part 2		10848	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	DK5GiQCOX020+ccKgRF/og		
+%R	10864	771	648	2	1	N	N	WS_Open	1	Part 1		10858	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	buIRjDQGIUySXQjnmdwJmw		
+%R	10865	771	648	2	1	N	N	WS_Open	2	Part 2		10858	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	OVjrIf5lYEmMgN3RMpiILQ		
+%R	10866	771	648	2	1	N	N	WS_Open	3	Tank		10858	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	nBDIbhMHrUSjRIpFPcS3EQ		
+%R	10867	771	648	0	1	N	N	WS_Open	A1	Area 1		10863	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	9Iv+Rk5gnU2D7o2kbXZJHA	yOk/wmInb0u9lye6fwABgA	
+%R	10868	771	648	1	1	N	N	WS_Open	A2	Area 2		10863	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	8AsWDlEtJU+oARvK5k/t3Q	fQHVDAGna02FFtF0xgOyJw	
+%R	10869	771	648	2	1	N	N	WS_Open	A3	Area 3		10863	4	0.88	0	0						EC_Cmp_pct	EE_Rem_hr	EiKmpWI7cEmLQVqgaVeyBQ	JtSvmx4EtUCC6SKVm1w9qQ	
+%T	SCHEDOPTIONS
+%F	schedoptions_id	proj_id	sched_outer_depend_type	sched_open_critical_flag	sched_lag_early_start_flag	sched_retained_logic	sched_setplantoforecast	sched_float_type	sched_calendar_on_relationship_lag	sched_use_expect_end_flag	sched_progress_override	level_float_thrs_cnt	level_outer_assign_flag	level_outer_assign_priority	level_over_alloc_pct	level_within_float_flag	level_keep_sched_date_flag	level_all_rsrc_flag	LevelPriorityList
+%R	1	771	SD_None	N	Y	Y	N	FT_FF	rcal_Predecessor	Y	N	0	N	5	25	N	Y	Y	priority_type,ASC
+%T	ACTVTYPE
+%F	actv_code_type_id	actv_short_len	seq_num	actv_code_type	proj_id	wbs_id	actv_code_type_scope
+%R	7275	2	0	location	771		AS_Project
+%R	7276	2	100	type of work	771		AS_Project
+%R	7278	7	200	detailed work	771		AS_Project
+%T	RSRC
+%F	rsrc_id	parent_rsrc_id	clndr_id	role_id	shift_id	ts_approve_user_id	user_id	pobs_id	guid	rsrc_seq_num	email_addr	employee_code	office_phone	other_phone	rsrc_name	rsrc_short_name	rsrc_title_name	def_qty_per_hr	cost_qty_type	ot_factor	active_flag	auto_compute_act_flag	def_cost_qty_link_flag	ot_flag	timesheet_flag	xfer_complete_day_cnt	xfer_notstart_day_cnt	curr_id	unit_id	rsrc_type	rsrc_notes	load_tasks_flag	level_flag	last_checksum
+%R	2117		841						EB/Fzb2NdEqOTCI9qJdeEw	15160					labour	labours for cfc		0.125	QT_Hour		Y	Y	Y	N	N	60	60	32		RT_Labor				
+%T	ACTVCODE
+%F	actv_code_id	parent_actv_code_id	actv_code_type_id	actv_code_name	short_name	seq_num
+%R	12972		7275	Part 1	01	0
+%R	12973		7275	Part 2	02	100
+%R	12975		7276	earth works	01	0
+%R	12976		7276	concrete works	02	1
+%R	12977		7276	masonry works	03	100
+%R	12978		7276	insulation works	04	200
+%R	12979		7278	backfilling	01	0
+%R	12980		7278	R.C foundation	02	100
+%R	12981		7278	columns and walls	03	200
+%R	12982		7278	slab	04	300
+%R	12983		7276	electro mrchanical work	05	300
+%R	12984		7275	Tank	03	200
+%T	RSRCRATE
+%F	rsrc_rate_id	rsrc_id	max_qty_per_hr	cost_per_qty	start_date	shift_period_id	cost_per_qty2	cost_per_qty3	cost_per_qty4	cost_per_qty5
+%R	2430	2117	0.125	0	2010-01-01 00:00					
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	est_wt	phys_complete_pct	rev_fdbk_flag	lock_plan_flag	auto_compute_act_flag	complete_pct_type	task_type	duration_type	review_type	status_code	task_code	task_name	rsrc_id	total_float_hr_cnt	free_float_hr_cnt	remain_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	target_drtn_hr_cnt	target_equip_qty	act_equip_qty	remain_equip_qty	cstr_date	act_start_date	act_end_date	late_start_date	late_end_date	expect_end_date	early_start_date	early_end_date	restart_date	reend_date	target_start_date	target_end_date	review_end_date	rem_late_start_date	rem_late_end_date	cstr_type	priority_type	suspend_date	resume_date	float_path	float_path_order	guid	tmpl_guid	cstr_date2	cstr_type2	driving_path_flag	act_this_per_work_qty	act_this_per_equip_qty	external_early_start_date	external_late_end_date	create_date	update_date	create_user	update_user	old_restart_date	old_reend_date	old_remain_drtn_hr_cnt
+%R	84664	771	10859	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1000	Start project		0	0	0	0	0	0	0	0	0	0				2010-07-01 08:00	2010-07-01 08:00		2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00		2010-07-01 08:00	2010-07-01 08:00		PT_Normal					psEaPu3v2kSrMxghd3Af1g				Y	0	0			2010-07-12 10:25	2010-07-22 12:42	admin	admin	2010-07-01 08:00	2010-07-01 08:00	0
+%R	84665	771	10859	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1010	Finish project		0	0	0	0	0	0	0	0	0	0				2010-10-18 16:00	2010-10-18 16:00		2010-10-18 16:00	2010-10-18 16:00	2010-10-18 16:00	2010-10-18 16:00	2010-10-18 16:00	2010-10-18 16:00		2010-10-18 16:00	2010-10-18 16:00		PT_Normal					TWc5EvGXDEefFQUnpCXS6A				Y	0	0			2010-07-12 10:25	2010-07-22 12:42	admin	admin	2010-10-18 16:00	2010-10-18 16:00	0
+%R	84666	771	10859	841	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_Complete	A1020	Mobilization				0	0	0	0	160	0	0	0		2010-07-12 00:00	2010-07-20 00:00	2010-10-18 16:00	2010-10-18 16:00		2010-07-01 08:00	2010-07-01 08:00			2010-07-01 08:00	2010-07-24 16:00					PT_Normal					KW533pRGRESBt0xNFOzSeA				N	0	0			2010-07-12 10:26	2010-07-24 17:29	admin	admin			0
+%R	84667	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1030	Formwork For R.C raft	2117	0	0	64	0	288	288	64	0	0	0				2010-07-17 08:00	2010-07-25 16:00		2010-07-17 08:00	2010-07-25 16:00	2010-07-17 08:00	2010-07-25 16:00	2010-07-17 08:00	2010-07-25 16:00		2010-07-17 08:00	2010-07-25 16:00		PT_Normal					KSwE7YwUmUqqecUVkViLaA				Y	0	0			2010-07-12 10:42	2010-07-22 12:42	admin	admin	2010-07-17 08:00	2010-07-25 16:00	64
+%R	84668	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1040	Rebar For R.C raft	2117	0	0	48	0	2640	2640	48	0	0	0				2010-07-26 08:00	2010-08-01 16:00		2010-07-26 08:00	2010-08-01 16:00	2010-07-26 08:00	2010-08-01 16:00	2010-07-26 08:00	2010-08-01 16:00		2010-07-26 08:00	2010-08-01 16:00		PT_Normal					Uzrz/TT09UWE38N3bcBUZw				Y	0	0			2010-07-12 10:42	2010-07-25 10:07	admin	admin	2010-07-26 08:00	2010-08-01 16:00	48
+%R	84669	771	10850	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1050	M&E conduits For R.C raft (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-07-31 16:00	2010-07-31 16:00		2010-07-31 08:01	2010-07-31 08:01	2010-07-31 08:01	2010-07-31 08:01	2010-07-31 08:01	2010-07-31 08:01		2010-07-31 16:00	2010-07-31 16:00		PT_Normal					GqZinMri3E2y5aGgfjWpKw				N	0	0			2010-07-12 10:42	2010-07-22 12:42	admin	admin	2010-07-05 11:12	2010-07-05 11:12	0
+%R	84670	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1060	Pouring For R.C raft	2117	0	0	16	0	168	168	16	0	0	0				2010-08-02 08:00	2010-08-03 16:00		2010-08-02 08:00	2010-08-03 16:00	2010-08-02 08:00	2010-08-03 16:00	2010-08-02 08:00	2010-08-03 16:00		2010-08-02 08:00	2010-08-03 16:00		PT_Normal					Rp8pamtKdUy6B1Oj/YK8rQ				Y	0	0			2010-07-12 10:42	2010-07-22 12:42	admin	admin	2010-07-07 11:12	2010-07-10 11:12	16
+%R	84671	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1070	Formwork For basement walls & col.	2117	0	0	64	0	1440	1440	64	0	0	0				2010-08-08 08:00	2010-08-16 16:00		2010-08-08 08:00	2010-08-16 16:00	2010-08-08 08:00	2010-08-16 16:00	2010-08-08 08:00	2010-08-16 16:00		2010-08-08 08:00	2010-08-16 16:00		PT_Normal					4puRAphjvUerwsCJV9pKcA				Y	0	0			2010-07-12 10:42	2010-07-22 12:42	admin	admin	2010-07-13 11:12	2010-07-22 11:12	64
+%R	84672	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1080	Rebar For  basement walls & col.	2117	0	0	48	0	1440	1440	48	0	0	0				2010-08-10 08:00	2010-08-16 16:00		2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00		2010-08-10 08:00	2010-08-16 16:00		PT_Normal					T9nrabQ9F0GAUut/6Y1g+g				Y	0	0			2010-07-12 10:42	2010-07-22 12:42	admin	admin	2010-08-02 08:00	2010-08-08 16:00	48
+%R	84673	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1090	Pouring For  basement walls & col.	2117	0	0	8	0	96	96	8	0	0	0				2010-08-17 08:00	2010-08-17 16:00		2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00		2010-08-17 08:00	2010-08-17 16:00		PT_Normal					lCbRZJlYOUG01dCRKtOpJw				Y	0	0			2010-07-12 10:42	2010-07-22 12:42	admin	admin	2010-08-09 08:00	2010-08-09 16:00	8
+%R	84674	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1061	Isolation For Foundation	2117	112	40	48	0	240	240	48	0	0	0				2010-09-06 08:00	2010-09-12 16:00		2010-08-21 08:00	2010-08-26 16:00	2010-08-21 08:00	2010-08-26 16:00	2010-08-21 08:00	2010-08-26 16:00		2010-09-06 08:00	2010-09-12 16:00		PT_Normal					VGVXUApaM0OXbbDyK3pNNw				N	0	0			2010-07-12 10:58	2010-07-18 12:15	admin	admin	2010-08-12 08:00	2010-08-18 16:00	48
+%R	84675	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1062	Backfilling Around Foundation	2117	72	72	64	0	72	72	64	0	0	0				2010-10-10 08:00	2010-10-18 16:00		2010-09-29 08:00	2010-10-07 16:00	2010-09-29 08:00	2010-10-07 16:00	2010-09-29 08:00	2010-10-07 16:00		2010-10-10 08:00	2010-10-18 16:00		PT_Normal					sM6xkZ6s1k2egt1TBhqc7A				N	0	0			2010-07-12 10:59	2010-07-18 12:15	admin	admin	2010-09-21 08:00	2010-09-29 16:00	64
+%R	84676	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1100	Formwork For Ground Floor Slab	2117	0	0	80	0	2880	2880	80	0	0	0				2010-08-19 08:00	2010-08-30 16:00		2010-08-19 08:00	2010-08-30 16:00	2010-08-19 08:00	2010-08-30 16:00	2010-08-19 08:00	2010-08-30 16:00		2010-08-19 08:00	2010-08-30 16:00		PT_Normal					9f1vwk6UHk6Vi+TyTUGTGw				Y	0	0			2010-07-12 11:01	2010-07-22 12:42	admin	admin	2010-08-11 08:00	2010-08-22 16:00	80
+%R	84677	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1110	Rebar For Ground Floor Slab	2117	0	0	48	0	1080	1080	48	0	0	0				2010-08-29 08:00	2010-09-04 16:00		2010-08-29 08:00	2010-09-04 16:00	2010-08-29 08:00	2010-09-04 16:00	2010-08-29 08:00	2010-09-04 16:00		2010-08-29 08:00	2010-09-04 16:00		PT_Normal					roR73HuCP0mbbyAfyvuxQA				Y	0	0			2010-07-12 11:01	2010-07-22 12:42	admin	admin	2010-08-21 08:00	2010-08-26 16:00	48
+%R	84678	771	10850	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1120	M&E conduits For Ground Floor Slab (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-09-02 16:00	2010-09-02 16:00		2010-09-02 08:01	2010-09-02 08:01	2010-09-02 08:01	2010-09-02 08:01	2010-09-02 08:01	2010-09-02 08:01		2010-09-02 16:00	2010-09-02 16:00		PT_Normal					gs2xt8ylX0ajjcdGOgVDLA				N	0	0			2010-07-12 11:01	2010-07-22 12:42	admin	admin	2010-08-25 08:01	2010-08-25 08:01	0
+%R	84679	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1130	Pouring For Ground Floor Slab	2117	0	0	8	0	96	96	8	0	0	0				2010-09-05 08:00	2010-09-05 16:00		2010-09-05 08:00	2010-09-05 16:00	2010-09-05 08:00	2010-09-05 16:00	2010-09-05 08:00	2010-09-05 16:00		2010-09-05 08:00	2010-09-05 16:00		PT_Normal					/9tMymGiw0u2qjy6k2AT4g				Y	0	0			2010-07-12 11:01	2010-07-22 12:42	admin	admin	2010-08-28 08:00	2010-08-28 16:00	8
+%R	84680	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1063	Masonry works	2117	24	24	72	0	1680	1680	72	0	0	0				2010-10-09 08:00	2010-10-18 16:00		2010-10-05 08:00	2010-10-14 16:00	2010-10-05 08:00	2010-10-14 16:00	2010-10-05 08:00	2010-10-14 16:00		2010-10-09 08:00	2010-10-18 16:00		PT_Normal					xqykOFO1PEuSjT5TMh7D4g				N	0	0			2010-07-12 13:01	2010-07-18 12:15	admin	admin	2010-09-27 08:00	2010-10-06 16:00	72
+%R	84681	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1064	Water proofing membrane	2117	72	0	48	0	720	720	48	0	0	0				2010-08-30 08:00	2010-09-05 16:00		2010-08-19 08:00	2010-08-25 16:00	2010-08-19 08:00	2010-08-25 16:00	2010-08-19 08:00	2010-08-25 16:00		2010-08-30 08:00	2010-09-05 16:00		PT_Normal					dabcmXSoiU+1eupafA3y4Q				N	0	0			2010-07-12 13:11	2010-07-18 12:15	admin	admin	2010-08-11 08:00	2010-08-17 16:00	48
+%R	84682	771	10850	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1065	Water proofing protection layer		72	0	48	0	0	0	48	0	0	0				2010-09-06 08:00	2010-09-12 16:00		2010-08-26 08:00	2010-09-01 16:00	2010-08-26 08:00	2010-09-01 16:00	2010-08-26 08:00	2010-09-01 16:00		2010-09-06 08:00	2010-09-12 16:00		PT_Normal					6BZKnFa9LEOyu+rPOYfPfg				N	0	0			2010-07-12 13:11	2010-07-18 12:15	admin	admin	2010-08-18 08:00	2010-08-24 16:00	48
+%R	84683	771	10864	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1140	Submittal of basement slab concrete dimension		0	0	0	0	0	0	0	0	0	0				2010-07-01 08:00	2010-07-01 08:00		2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00		2010-07-01 08:00	2010-07-01 08:00		PT_Normal					TnE0Il9fMEmUAPp54M1FxQ				Y	0	0			2010-07-12 13:31	2010-07-22 12:42	admin	admin	2010-07-01 08:00	2010-07-01 08:00	0
+%R	84684	771	10864	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1150	Submittal of column layout		80	0	0	0	0	0	0	0	0	0				2010-07-13 08:00	2010-07-13 08:00		2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00		2010-07-13 08:00	2010-07-13 08:00		PT_Normal					Gp+LX5Ae4kObTifd8mF+VA				N	0	0			2010-07-12 13:31	2010-07-18 12:15	admin	admin	2010-07-01 08:00	2010-07-01 08:00	0
+%R	84685	771	10864	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1160	Submittal of basement slab RFT&starters		72	0	0	0	0	0	0	0	0	0				2010-07-22 08:00	2010-07-22 08:00		2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00		2010-07-22 08:00	2010-07-22 08:00		PT_Normal					xzvMiT8HoUauXhFY1S+PkA				N	0	0			2010-07-12 13:32	2010-07-18 12:15	admin	admin	2010-07-12 08:00	2010-07-12 08:00	0
+%R	84686	771	10864	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1170	Submittal of vertical element RFT		104	0	0	0	0	0	0	0	0	0				2010-08-07 08:00	2010-08-07 08:00		2010-07-22 08:00	2010-07-22 08:00	2010-07-22 08:00	2010-07-22 08:00	2010-07-22 08:00	2010-07-22 08:00		2010-08-07 08:00	2010-08-07 08:00		PT_Normal					vizYnfHl90u2hozwrJxUGA				N	0	0			2010-07-12 13:32	2010-07-18 12:15	admin	admin	2010-07-22 08:00	2010-07-22 08:00	0
+%R	84687	771	10864	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1180	Submittal of ground floor slab concrete dimension		112	0	0	0	0	0	0	0	0	0				2010-08-15 08:00	2010-08-15 08:00		2010-07-29 08:00	2010-07-29 08:00	2010-07-29 08:00	2010-07-29 08:00	2010-07-29 08:00	2010-07-29 08:00		2010-08-15 08:00	2010-08-15 08:00		PT_Normal					YjPP8Mnn70CflT1uK45yIg				N	0	0			2010-07-12 13:32	2010-07-18 12:15	admin	admin	2010-07-29 08:00	2010-07-29 08:00	0
+%R	84688	771	10864	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1190	Submittal of ground floor slab RFT		112	0	0	0	0	0	0	0	0	0				2010-08-22 08:00	2010-08-22 08:00		2010-08-05 08:00	2010-08-05 08:00	2010-08-05 08:00	2010-08-05 08:00	2010-08-05 08:00	2010-08-05 08:00		2010-08-22 08:00	2010-08-22 08:00		PT_Normal					dOxninhx50WjRMbSb0UpMw				N	0	0			2010-07-12 13:32	2010-07-18 12:15	admin	admin	2010-08-05 08:00	2010-08-05 08:00	0
+%R	84689	771	10865	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1200	Submittal of basement slab concrete dimension		248	0	0	0	0	0	0	0	0	0				2010-08-17 08:00	2010-08-17 08:00		2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00		2010-08-17 08:00	2010-08-17 08:00		PT_Normal					ABcWmJcv8kGCCu1yxi1XoA	TnE0Il9fMEmUAPp54M1FxQ			N	0	0			2010-07-12 13:35	2010-07-18 12:15	admin	admin	2010-07-12 08:00	2010-07-12 08:00	0
+%R	84690	771	10865	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1210	Submittal of column layout		144	0	0	0	0	0	0	0	0	0				2010-08-02 08:00	2010-08-02 08:00		2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00		2010-08-02 08:00	2010-08-02 08:00		PT_Normal					agXKtUlvd0+zUz2OxOah4A	Gp+LX5Ae4kObTifd8mF+VA			N	0	0			2010-07-12 13:35	2010-07-18 12:15	admin	admin	2010-07-12 08:00	2010-07-12 08:00	0
+%R	84691	771	10865	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1220	Submittal of basement slab RFT&starters		104	0	0	0	0	0	0	0	0	0				2010-08-07 08:00	2010-08-07 08:00		2010-07-22 08:00	2010-07-22 08:00	2010-07-22 08:00	2010-07-22 08:00	2010-07-22 08:00	2010-07-22 08:00		2010-08-07 08:00	2010-08-07 08:00		PT_Normal					P0kPROLGvkSaphWqsvcM9Q	xzvMiT8HoUauXhFY1S+PkA			N	0	0			2010-07-12 13:35	2010-07-18 12:15	admin	admin	2010-07-22 08:00	2010-07-22 08:00	0
+%R	84692	771	10865	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1230	Submittal of vertical element RFT		56	0	0	0	0	0	0	0	0	0				2010-08-07 08:00	2010-08-07 08:00		2010-07-29 08:00	2010-07-29 08:00	2010-07-29 08:00	2010-07-29 08:00	2010-07-29 08:00	2010-07-29 08:00		2010-08-07 08:00	2010-08-07 08:00		PT_Normal					Yy1CHQcFYk+JamwkzlFmWQ	vizYnfHl90u2hozwrJxUGA			N	0	0			2010-07-12 13:35	2010-07-18 12:15	admin	admin	2010-07-29 08:00	2010-07-29 08:00	0
+%R	84693	771	10865	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1240	Submittal of ground floor slab concrete dimension		256	0	0	0	0	0	0	0	0	0				2010-09-12 08:00	2010-09-12 08:00		2010-08-05 08:00	2010-08-05 08:00	2010-08-05 08:00	2010-08-05 08:00	2010-08-05 08:00	2010-08-05 08:00		2010-09-12 08:00	2010-09-12 08:00		PT_Normal					5I1MNjAcDEqCrOEpAcFVEA	YjPP8Mnn70CflT1uK45yIg			N	0	0			2010-07-12 13:35	2010-07-18 12:15	admin	admin	2010-08-05 08:00	2010-08-05 08:00	0
+%R	84694	771	10865	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1250	Submittal of ground floor slab RFT		248	0	0	0	0	0	0	0	0	0				2010-09-21 08:00	2010-09-21 08:00		2010-08-16 08:00	2010-08-16 08:00	2010-08-16 08:00	2010-08-16 08:00	2010-08-16 08:00	2010-08-16 08:00		2010-09-21 08:00	2010-09-21 08:00		PT_Normal					le3UQjjVJUWIJPxt84bNKg	dOxninhx50WjRMbSb0UpMw			N	0	0			2010-07-12 13:35	2010-07-18 12:15	admin	admin	2010-08-16 08:00	2010-08-16 08:00	0
+%R	84695	771	10866	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1260	submittals of tank's shop drawings		88	0	0	0	0	0	0	0	0	0				2010-07-21 08:00	2010-07-21 08:00		2010-07-08 08:00	2010-07-08 08:00	2010-07-08 08:00	2010-07-08 08:00	2010-07-08 08:00	2010-07-08 08:00		2010-07-21 08:00	2010-07-21 08:00		PT_Normal					XzMfEdFoHke3xn2FLrLURg				N	0	0			2010-07-12 13:35	2010-07-18 12:15	admin	admin	2010-07-08 08:00	2010-07-08 08:00	0
+%R	84696	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1270	Formwork For R.C raft	2117	8	0	48	0	96	96	48	0	0	0				2010-08-07 08:00	2010-08-12 16:00		2010-08-05 08:00	2010-08-11 16:00	2010-08-05 08:00	2010-08-11 16:00	2010-08-05 08:00	2010-08-11 16:00		2010-08-07 08:00	2010-08-12 16:00		PT_Normal					4x+kJ7KF7kuHSwWyUB3Urg	KSwE7YwUmUqqecUVkViLaA			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-08-05 08:00	2010-08-11 16:00	48
+%R	84697	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1280	Rebar For R.C raft	2117	8	0	32	0	880	880	32	0	0	0				2010-08-14 08:00	2010-08-17 16:00		2010-08-12 08:00	2010-08-16 16:00	2010-08-12 08:00	2010-08-16 16:00	2010-08-12 08:00	2010-08-16 16:00		2010-08-14 08:00	2010-08-17 16:00		PT_Normal					tVDQbqqwCkaPMIPI3Ku3Ig	Uzrz/TT09UWE38N3bcBUZw			N	0	0			2010-07-12 14:18	2010-07-25 10:06	admin	admin	2010-08-12 08:00	2010-08-16 16:00	32
+%R	84698	771	10861	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1290	M&E conduits For R.C raft (by others)		23.9833333333333	15.9833333333333	0	0	0	0	0	0	0	0				2010-08-16 16:00	2010-08-16 16:00		2010-08-14 08:01	2010-08-14 08:01	2010-08-14 08:01	2010-08-14 08:01	2010-08-14 08:01	2010-08-14 08:01		2010-08-16 16:00	2010-08-16 16:00		PT_Normal					KQNnTgfyDUuNo+Obe3s40g	GqZinMri3E2y5aGgfjWpKw			N	0	0			2010-07-12 14:18	2010-07-22 12:42	admin	admin	2010-07-01 12:48	2010-07-01 12:48	0
+%R	84699	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1300	Pouring For R.C raft	2117	8	0	8	0	56	56	8	0	0	0				2010-08-18 08:00	2010-08-18 16:00		2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00		2010-08-18 08:00	2010-08-18 16:00		PT_Normal					CvUGKg6UlE2iyPXobLVimQ	Rp8pamtKdUy6B1Oj/YK8rQ			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-07-05 12:48	2010-07-06 12:48	8
+%R	84700	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1360	Formwork For basement walls & col.	2117	56	0	64	0	480	480	64	0	0	0				2010-08-28 08:00	2010-09-05 16:00		2010-08-19 08:00	2010-08-28 16:00	2010-08-19 08:00	2010-08-28 16:00	2010-08-19 08:00	2010-08-28 16:00		2010-08-28 08:00	2010-09-05 16:00		PT_Normal					GOjZxpQv/Ei6kE0bDr6VKw	4puRAphjvUerwsCJV9pKcA			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-07-07 12:48	2010-07-17 12:48	64
+%R	84701	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1370	Rebar For  basement walls & col.	2117	72	16	32	0	480	480	32	0	0	0				2010-09-01 08:00	2010-09-05 16:00		2010-08-22 08:00	2010-08-25 16:00	2010-08-22 08:00	2010-08-25 16:00	2010-08-22 08:00	2010-08-25 16:00		2010-09-01 08:00	2010-09-05 16:00		PT_Normal					GQNf4uU1YESh4F3EqqXeAQ	T9nrabQ9F0GAUut/6Y1g+g			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-08-02 08:00	2010-08-05 16:00	32
+%R	84702	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1380	Pouring For  basement walls & col.	2117	56	0	8	0	32	32	8	0	0	0				2010-09-06 08:00	2010-09-06 16:00		2010-08-29 08:00	2010-08-29 16:00	2010-08-29 08:00	2010-08-29 16:00	2010-08-29 08:00	2010-08-29 16:00		2010-09-06 08:00	2010-09-06 16:00		PT_Normal					aJclw+JHeU6keFVbVTkSMg	lCbRZJlYOUG01dCRKtOpJw			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-08-07 08:00	2010-08-07 16:00	8
+%R	84703	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1310	Isolation For Foundation	2117	152	24	32	0	80	80	32	0	0	0				2010-09-23 08:00	2010-09-27 16:00		2010-09-01 08:00	2010-09-05 16:00	2010-09-01 08:00	2010-09-05 16:00	2010-09-01 08:00	2010-09-05 16:00		2010-09-23 08:00	2010-09-27 16:00		PT_Normal					+ba5kzKnEUCw2+JrB+ng1g	VGVXUApaM0OXbbDyK3pNNw			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-08-10 08:00	2010-08-14 16:00	32
+%R	84705	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1390	Formwork For Ground Floor Slab	2117	0	0	48	0	960	960	48	0	0	0				2010-09-08 08:00	2010-09-14 16:00		2010-09-08 08:00	2010-09-14 16:00	2010-09-08 08:00	2010-09-14 16:00	2010-09-08 08:00	2010-09-14 16:00		2010-09-08 08:00	2010-09-14 16:00		PT_Normal					AeysbMhBPE6+4sfTisnW6Q	9f1vwk6UHk6Vi+TyTUGTGw			Y	0	0			2010-07-12 14:18	2010-07-22 12:42	admin	admin	2010-09-08 08:00	2010-09-14 16:00	48
+%R	84706	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1400	Rebar For Ground Floor Slab	2117	0	0	24	0	360	360	24	0	0	0				2010-09-13 08:00	2010-09-15 16:00		2010-09-13 08:00	2010-09-15 16:00	2010-09-13 08:00	2010-09-15 16:00	2010-09-13 08:00	2010-09-15 16:00		2010-09-13 08:00	2010-09-15 16:00		PT_Normal					uI52fxSih0S/NfRVjzsNXQ	roR73HuCP0mbbyAfyvuxQA			Y	0	0			2010-07-12 14:18	2010-07-22 12:42	admin	admin	2010-09-13 08:00	2010-09-15 16:00	24
+%R	84707	771	10861	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1410	M&E conduits For Ground Floor Slab (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-09-14 16:00	2010-09-14 16:00		2010-09-14 08:01	2010-09-14 08:01	2010-09-14 08:01	2010-09-14 08:01	2010-09-14 08:01	2010-09-14 08:01		2010-09-14 16:00	2010-09-14 16:00		PT_Normal					UaOaQpa4w0yhgeGpfzihug	gs2xt8ylX0ajjcdGOgVDLA			N	0	0			2010-07-12 14:18	2010-07-22 12:42	admin	admin	2010-09-14 08:01	2010-09-14 08:01	0
+%R	84708	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1420	Pouring For Ground Floor Slab	2117	0	0	8	0	32	32	8	0	0	0				2010-09-16 08:00	2010-09-16 16:00		2010-09-16 08:00	2010-09-16 16:00	2010-09-16 08:00	2010-09-16 16:00	2010-09-16 08:00	2010-09-16 16:00		2010-09-16 08:00	2010-09-16 16:00		PT_Normal					jjls4hg4A0WUYN4Sr4NyfQ	/9tMymGiw0u2qjy6k2AT4g			Y	0	0			2010-07-12 14:18	2010-07-22 12:42	admin	admin	2010-09-16 08:00	2010-09-16 16:00	8
+%R	84709	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1330	Masonry works	2117	40	40	56	0	560	560	56	0	0	0				2010-10-11 08:00	2010-10-18 16:00		2010-10-05 08:00	2010-10-12 16:00	2010-10-05 08:00	2010-10-12 16:00	2010-10-05 08:00	2010-10-12 16:00		2010-10-11 08:00	2010-10-18 16:00		PT_Normal					tzkHGjycEUyR8AVsoD68bw	xqykOFO1PEuSjT5TMh7D4g			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-10-05 08:00	2010-10-12 16:00	56
+%R	84710	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1340	Water proofing membrane	2117	128	0	32	0	320	320	32	0	0	0				2010-09-19 08:00	2010-09-22 16:00		2010-08-31 08:00	2010-09-04 16:00	2010-08-31 08:00	2010-09-04 16:00	2010-08-31 08:00	2010-09-04 16:00		2010-09-19 08:00	2010-09-22 16:00		PT_Normal					gh9oZEFUmEGKAJswkDstcA	dabcmXSoiU+1eupafA3y4Q			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-08-09 08:00	2010-08-12 16:00	32
+%R	84711	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1350	Water proofing protection layer		128	0	32	0	0	0	32	0	0	0				2010-09-23 08:00	2010-09-27 16:00		2010-09-05 08:00	2010-09-08 16:00	2010-09-05 08:00	2010-09-08 16:00	2010-09-05 08:00	2010-09-08 16:00		2010-09-23 08:00	2010-09-27 16:00		PT_Normal					t2s639eVtUGDtSLqYBs9RA	6BZKnFa9LEOyu+rPOYfPfg			N	0	0			2010-07-12 14:18	2010-07-18 12:15	admin	admin	2010-08-14 08:00	2010-08-17 16:00	32
+%R	84712	771	10864	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1141	Approval of basement slab concrete dimension		0	0	0	0	0	0	0	0	0	0				2010-07-04 16:00	2010-07-04 16:00		2010-07-04 16:00	2010-07-04 16:00	2010-07-04 16:00	2010-07-04 16:00	2010-07-04 16:00	2010-07-04 16:00		2010-07-04 16:00	2010-07-04 16:00		PT_Normal					TQUwoveBKEO+M4EHNTWADA				Y	0	0			2010-07-12 14:42	2010-07-22 12:42	admin	admin	2010-07-04 16:00	2010-07-04 16:00	0
+%R	84713	771	10864	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1151	Approval of column layout		80	80	0	0	0	0	0	0	0	0				2010-07-15 16:00	2010-07-15 16:00		2010-07-04 16:00	2010-07-04 16:00	2010-07-04 16:00	2010-07-04 16:00	2010-07-04 16:00	2010-07-04 16:00		2010-07-15 16:00	2010-07-15 16:00		PT_Normal					ZHXePO0d70+Nlw1C97nwNQ				N	0	0			2010-07-12 14:42	2010-07-18 12:15	admin	admin	2010-07-04 16:00	2010-07-04 16:00	0
+%R	84714	771	10864	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1161	Approval of basement slab RFT&starters		72	72	0	0	0	0	0	0	0	0				2010-07-25 16:00	2010-07-25 16:00		2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00		2010-07-25 16:00	2010-07-25 16:00		PT_Normal					hEK1OTMaS023lip5X1r4aw				N	0	0			2010-07-12 14:42	2010-07-18 12:15	admin	admin	2010-07-14 16:00	2010-07-14 16:00	0
+%R	84715	771	10864	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1171	Approval of vertical element RFT		104	104	0	0	0	0	0	0	0	0				2010-08-09 16:00	2010-08-09 16:00		2010-07-25 16:00	2010-07-25 16:00	2010-07-25 16:00	2010-07-25 16:00	2010-07-25 16:00	2010-07-25 16:00		2010-08-09 16:00	2010-08-09 16:00		PT_Normal					FncT+B/w9ku+6p55HRGrYg				N	0	0			2010-07-12 14:43	2010-07-18 12:15	admin	admin	2010-07-25 16:00	2010-07-25 16:00	0
+%R	84716	771	10864	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1181	Approval of ground floor slab concrete dimension		112	112	0	0	0	0	0	0	0	0				2010-08-17 16:00	2010-08-17 16:00		2010-08-01 16:00	2010-08-01 16:00	2010-08-01 16:00	2010-08-01 16:00	2010-08-01 16:00	2010-08-01 16:00		2010-08-17 16:00	2010-08-17 16:00		PT_Normal					hfb3em5cr0aQv21tG6zahA				N	0	0			2010-07-12 14:43	2010-07-18 12:15	admin	admin	2010-08-01 16:00	2010-08-01 16:00	0
+%R	84717	771	10864	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1191	Approval of ground floor slab RFT		112	112	0	0	0	0	0	0	0	0				2010-08-24 16:00	2010-08-24 16:00		2010-08-08 16:00	2010-08-08 16:00	2010-08-08 16:00	2010-08-08 16:00	2010-08-08 16:00	2010-08-08 16:00		2010-08-24 16:00	2010-08-24 16:00		PT_Normal					UjuoEPoriEmi2KpzXdDJUQ				N	0	0			2010-07-12 14:43	2010-07-18 12:15	admin	admin	2010-08-08 16:00	2010-08-08 16:00	0
+%R	84718	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1430	Formwork For R.C raft	2117	0	0	48	0	96	96	48	0	0	0				2010-07-21 08:00	2010-07-27 16:00		2010-07-21 08:00	2010-07-27 16:00	2010-07-21 08:00	2010-07-27 16:00	2010-07-21 08:00	2010-07-27 16:00		2010-07-21 08:00	2010-07-27 16:00		PT_Normal					pwKzQlINnUaWjak4CBmtsw	4x+kJ7KF7kuHSwWyUB3Urg			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-07-21 08:00	2010-07-27 16:00	48
+%R	84719	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1440	Rebar For R.C raft	2117	0	0	32	0	880	880	32	0	0	0				2010-07-26 08:00	2010-07-29 16:00		2010-07-26 08:00	2010-07-29 16:00	2010-07-26 08:00	2010-07-29 16:00	2010-07-26 08:00	2010-07-29 16:00		2010-07-26 08:00	2010-07-29 16:00		PT_Normal					VO/puxJPz0i2xsaiSFFRVQ	tVDQbqqwCkaPMIPI3Ku3Ig			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-07-26 08:00	2010-07-29 16:00	32
+%R	84720	771	10862	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1450	M&E conduits For R.C raft (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-07-28 16:00	2010-07-28 16:00		2010-07-28 08:01	2010-07-28 08:01	2010-07-28 08:01	2010-07-28 08:01	2010-07-28 08:01	2010-07-28 08:01		2010-07-28 16:00	2010-07-28 16:00		PT_Normal					8KY6uzG7vEeX1E8Vf6h5Tg	KQNnTgfyDUuNo+Obe3s40g			N	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-07-28 08:01	2010-07-28 08:01	0
+%R	84721	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1460	Pouring For R.C raft	2117	0	0	8	0	56	56	8	0	0	0				2010-07-31 08:00	2010-07-31 16:00		2010-07-31 08:00	2010-07-31 16:00	2010-07-31 08:00	2010-07-31 16:00	2010-07-31 08:00	2010-07-31 16:00		2010-07-31 08:00	2010-07-31 16:00		PT_Normal					rLSQz9NAakuDDfeoZvrA9g	CvUGKg6UlE2iyPXobLVimQ			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-07-31 08:00	2010-07-31 16:00	8
+%R	84722	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1510	Formwork For basement walls & col.	2117	0	0	48	0	480	480	48	0	0	0				2010-08-08 08:00	2010-08-14 16:00		2010-08-08 08:00	2010-08-14 16:00	2010-08-08 08:00	2010-08-14 16:00	2010-08-08 08:00	2010-08-14 16:00		2010-08-08 08:00	2010-08-14 16:00		PT_Normal					vXjrqMAmckO62VNhJrqAhw	GOjZxpQv/Ei6kE0bDr6VKw			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-08-08 08:00	2010-08-14 16:00	48
+%R	84723	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1520	Rebar For  basement walls & col.	2117	0	0	32	0	480	480	32	0	0	0				2010-08-11 08:00	2010-08-15 16:00		2010-08-11 08:00	2010-08-15 16:00	2010-08-11 08:00	2010-08-15 16:00	2010-08-11 08:00	2010-08-15 16:00		2010-08-11 08:00	2010-08-15 16:00		PT_Normal					QSO3Cu327UilyYHOqai0Xw	GQNf4uU1YESh4F3EqqXeAQ			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-08-11 08:00	2010-08-15 16:00	32
+%R	84724	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1530	Pouring For  basement walls & col.	2117	0	0	8	0	32	32	8	0	0	0				2010-08-16 08:00	2010-08-16 16:00		2010-08-16 08:00	2010-08-16 16:00	2010-08-16 08:00	2010-08-16 16:00	2010-08-16 08:00	2010-08-16 16:00		2010-08-16 08:00	2010-08-16 16:00		PT_Normal					qXvHnIFKuUqapCF5qIO3HQ	aJclw+JHeU6keFVbVTkSMg			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-08-16 08:00	2010-08-16 16:00	8
+%R	84725	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1470	Isolation For Foundation	2117	48	32	64	0	80	80	64	0	0	0				2010-08-28 08:00	2010-09-05 16:00		2010-08-21 08:00	2010-08-29 16:00	2010-08-21 08:00	2010-08-29 16:00	2010-08-21 08:00	2010-08-29 16:00		2010-08-28 08:00	2010-09-05 16:00		PT_Normal					RZzdpcM5PU+Wrt7COe37mg	+ba5kzKnEUCw2+JrB+ng1g			N	0	0			2010-07-12 15:32	2010-07-18 12:15	admin	admin	2010-08-21 08:00	2010-08-29 16:00	64
+%R	84726	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1540	Formwork For Ground Floor Slab	2117	0	0	64	0	960	960	64	0	0	0				2010-08-18 08:00	2010-08-26 16:00		2010-08-18 08:00	2010-08-26 16:00	2010-08-18 08:00	2010-08-26 16:00	2010-08-18 08:00	2010-08-26 16:00		2010-08-18 08:00	2010-08-26 16:00		PT_Normal					4BMKnlq+ZEe7UKzAbpYRvw	AeysbMhBPE6+4sfTisnW6Q			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-08-18 08:00	2010-08-26 16:00	64
+%R	84727	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1550	Rebar For Ground Floor Slab	2117	0	0	24	0	360	360	24	0	0	0				2010-08-25 08:00	2010-08-28 16:00		2010-08-25 08:00	2010-08-28 16:00	2010-08-25 08:00	2010-08-28 16:00	2010-08-25 08:00	2010-08-28 16:00		2010-08-25 08:00	2010-08-28 16:00		PT_Normal					HFGjmfT3HUa9cwxyEs3S7w	uI52fxSih0S/NfRVjzsNXQ			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-08-25 08:00	2010-08-28 16:00	24
+%R	84728	771	10862	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1560	M&E conduits For Ground Floor Slab (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-08-26 16:00	2010-08-26 16:00		2010-08-26 08:01	2010-08-26 08:01	2010-08-26 08:01	2010-08-26 08:01	2010-08-26 08:01	2010-08-26 08:01		2010-08-26 16:00	2010-08-26 16:00		PT_Normal					NUnxBHbSWEKvqBp3IhSwsw	UaOaQpa4w0yhgeGpfzihug			N	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-08-26 08:01	2010-08-26 08:01	0
+%R	84729	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1570	Pouring For Ground Floor Slab	2117	0	0	8	0	32	32	8	0	0	0				2010-08-29 08:00	2010-08-29 16:00		2010-08-29 08:00	2010-08-29 16:00	2010-08-29 08:00	2010-08-29 16:00	2010-08-29 08:00	2010-08-29 16:00		2010-08-29 08:00	2010-08-29 16:00		PT_Normal					dgIfIWTUBUaGt4CMZI6uDw	jjls4hg4A0WUYN4Sr4NyfQ			Y	0	0			2010-07-12 15:32	2010-07-22 12:42	admin	admin	2010-08-29 08:00	2010-08-29 16:00	8
+%R	84730	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1480	Masonry works	2117	56	56	56	0	560	560	56	0	0	0				2010-10-11 08:00	2010-10-18 16:00		2010-10-03 08:00	2010-10-10 16:00	2010-10-03 08:00	2010-10-10 16:00	2010-10-03 08:00	2010-10-10 16:00		2010-10-11 08:00	2010-10-18 16:00		PT_Normal					yHTqx5JhC0aSfBV1H7hxTg	tzkHGjycEUyR8AVsoD68bw			N	0	0			2010-07-12 15:32	2010-07-18 12:15	admin	admin	2010-10-03 08:00	2010-10-10 16:00	56
+%R	84731	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1490	Water proofing membrane	2117	16	0	48	0	240	240	48	0	0	0				2010-08-21 08:00	2010-08-26 16:00		2010-08-18 08:00	2010-08-24 16:00	2010-08-18 08:00	2010-08-24 16:00	2010-08-18 08:00	2010-08-24 16:00		2010-08-21 08:00	2010-08-26 16:00		PT_Normal					6TSvgtzD4UqX5OboXK3X+g	gh9oZEFUmEGKAJswkDstcA			N	0	0			2010-07-12 15:32	2010-07-18 12:15	admin	admin	2010-08-18 08:00	2010-08-24 16:00	48
+%R	84732	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1500	Water proofing protection layer		16	0	64	0	0	0	64	0	0	0				2010-08-28 08:00	2010-09-05 16:00		2010-08-25 08:00	2010-09-02 16:00	2010-08-25 08:00	2010-09-02 16:00	2010-08-25 08:00	2010-09-02 16:00		2010-08-28 08:00	2010-09-05 16:00		PT_Normal					ON0kmrh7J0mMKRJOskdHVw	t2s639eVtUGDtSLqYBs9RA			N	0	0			2010-07-12 15:32	2010-07-18 12:15	admin	admin	2010-08-25 08:00	2010-09-02 16:00	64
+%R	84733	771	10857	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1580	Start construction		0	0	0	0	0	0	0	0	0	0				2010-07-12 08:00	2010-07-12 08:00		2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00	2010-07-12 08:00		2010-07-12 08:00	2010-07-12 08:00		PT_Normal					si39dKovf0GprcmLsay56w				Y	0	0			2010-07-12 15:45	2010-07-22 12:42	admin	admin	2010-07-12 08:00	2010-07-12 08:00	0
+%R	84734	771	10857	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1590	Finish construction		0	0	0	0	0	0	0	0	0	0				2010-10-18 16:00	2010-10-18 16:00		2010-10-18 16:00	2010-10-18 16:00	2010-10-18 16:00	2010-10-18 16:00	2010-10-18 16:00	2010-10-18 16:00		2010-10-18 16:00	2010-10-18 16:00		PT_Normal					KBpgDEFMM0GNB3kAbQo2mw				Y	0	0			2010-07-12 15:45	2010-07-22 12:42	admin	admin	2010-10-18 16:00	2010-10-18 16:00	0
+%R	84735	771	10859	841	0	0	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	A1320	Receive issue for construction drawings		0	0	0	0	0	0	0	0	0	0				2010-07-01 08:00	2010-07-01 08:00		2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00	2010-07-01 08:00		2010-07-01 08:00	2010-07-01 08:00		PT_Normal					uFy1rU+DHE2LOG0Ik8oU6w				Y	0	0			2010-07-12 16:03	2010-07-22 12:42	admin	admin	2010-07-01 08:00	2010-07-01 08:00	0
+%R	84736	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1600	Formwork For R.C raft	2117	0	0	64	0	288	288	64	0	0	0				2010-08-05 08:00	2010-08-14 16:00		2010-08-05 08:00	2010-08-14 16:00	2010-08-05 08:00	2010-08-14 16:00	2010-08-05 08:00	2010-08-14 16:00		2010-08-05 08:00	2010-08-14 16:00		PT_Normal					lNQEmIfdz0+rn0nrLc7pig	KSwE7YwUmUqqecUVkViLaA			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-07-15 08:00	2010-07-24 16:00	64
+%R	84737	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1610	Rebar For R.C raft	2117	0	0	48	0	2640	2640	48	0	0	0				2010-08-10 08:00	2010-08-16 16:00		2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00		2010-08-10 08:00	2010-08-16 16:00		PT_Normal					VNYTvpZqiUSCcO4hbOCxYA	Uzrz/TT09UWE38N3bcBUZw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-07-26 08:00	2010-08-01 16:00	48
+%R	84738	771	10868	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1620	M&E conduits For R.C raft (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-08-15 16:00	2010-08-15 16:00		2010-08-15 08:01	2010-08-15 08:01	2010-08-15 08:01	2010-08-15 08:01	2010-08-15 08:01	2010-08-15 08:01		2010-08-15 16:00	2010-08-15 16:00		PT_Normal					PMeLCoNChEadkZw6q6o03Q	GqZinMri3E2y5aGgfjWpKw			N	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-07-31 08:01	2010-07-31 08:01	0
+%R	84739	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1630	Pouring For R.C raft	2117	0	0	16	0	168	168	16	0	0	0				2010-08-17 08:00	2010-08-18 16:00		2010-08-17 08:00	2010-08-18 16:00	2010-08-17 08:00	2010-08-18 16:00	2010-08-17 08:00	2010-08-18 16:00		2010-08-17 08:00	2010-08-18 16:00		PT_Normal					gInRbN2HkkyNKG5T60kP7w	Rp8pamtKdUy6B1Oj/YK8rQ			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-02 08:00	2010-08-03 16:00	16
+%R	84740	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1640	Formwork For basement walls & col.	2117	16	0	80	0	1440	1440	80	0	0	0				2010-08-23 08:00	2010-09-02 16:00		2010-08-21 08:00	2010-08-31 16:00	2010-08-21 08:00	2010-08-31 16:00	2010-08-21 08:00	2010-08-31 16:00		2010-08-23 08:00	2010-09-02 16:00		PT_Normal					jEMiQ8SZok28t30En6blLg	4puRAphjvUerwsCJV9pKcA			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-05 08:00	2010-08-16 16:00	80
+%R	84741	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1650	Rebar For  basement walls & col.	2117	16	0	64	0	1440	1440	64	0	0	0				2010-08-25 08:00	2010-09-02 16:00		2010-08-23 08:00	2010-08-31 16:00	2010-08-23 08:00	2010-08-31 16:00	2010-08-23 08:00	2010-08-31 16:00		2010-08-25 08:00	2010-09-02 16:00		PT_Normal					gaCS6jHWxE2C5nYDVxll3g	T9nrabQ9F0GAUut/6Y1g+g			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-08 08:00	2010-08-16 16:00	64
+%R	84742	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1660	Pouring For  basement walls & col.	2117	16	0	8	0	96	96	8	0	0	0				2010-09-04 08:00	2010-09-04 16:00		2010-09-01 08:00	2010-09-01 16:00	2010-09-01 08:00	2010-09-01 16:00	2010-09-01 08:00	2010-09-01 16:00		2010-09-04 08:00	2010-09-04 16:00		PT_Normal					Oh60en6PaEWq241+WUEiSg	lCbRZJlYOUG01dCRKtOpJw			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-17 08:00	2010-08-17 16:00	8
+%R	84743	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1670	Isolation For Foundation	2117	40	24	64	0	240	240	64	0	0	0				2010-09-12 08:00	2010-09-20 16:00		2010-09-06 08:00	2010-09-14 16:00	2010-09-06 08:00	2010-09-14 16:00	2010-09-06 08:00	2010-09-14 16:00		2010-09-12 08:00	2010-09-20 16:00		PT_Normal					DofIZWOVzEaP/bK/DL6uMg	VGVXUApaM0OXbbDyK3pNNw			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-22 08:00	2010-08-30 16:00	64
+%R	84744	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1680	Backfilling Around Foundation	2117	16	16	80	0	72	72	80	0	0	0				2010-10-07 08:00	2010-10-18 16:00		2010-10-05 08:00	2010-10-16 16:00	2010-10-05 08:00	2010-10-16 16:00	2010-10-05 08:00	2010-10-16 16:00		2010-10-07 08:00	2010-10-18 16:00		PT_Normal					F4rEnPMFMk24M2ik3kdgOQ	sM6xkZ6s1k2egt1TBhqc7A			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-09-20 08:00	2010-09-30 16:00	80
+%R	84745	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1690	Formwork For Ground Floor Slab	2117	0	0	80	0	2880	2880	80	0	0	0				2010-09-15 08:00	2010-09-26 16:00		2010-09-15 08:00	2010-09-26 16:00	2010-09-15 08:00	2010-09-26 16:00	2010-09-15 08:00	2010-09-26 16:00		2010-09-15 08:00	2010-09-26 16:00		PT_Normal					EOy5bC/UHUiaVInpOKknGg	9f1vwk6UHk6Vi+TyTUGTGw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-07 08:00	2010-09-18 16:00	80
+%R	84746	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1700	Rebar For Ground Floor Slab	2117	0	0	48	0	1080	1080	48	0	0	0				2010-09-25 08:00	2010-09-30 16:00		2010-09-25 08:00	2010-09-30 16:00	2010-09-25 08:00	2010-09-30 16:00	2010-09-25 08:00	2010-09-30 16:00		2010-09-25 08:00	2010-09-30 16:00		PT_Normal					kvPWdFCq+EaXki938itJ1w	roR73HuCP0mbbyAfyvuxQA			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-16 08:00	2010-09-22 16:00	48
+%R	84747	771	10868	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1710	M&E conduits For Ground Floor Slab (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-09-29 16:00	2010-09-29 16:00		2010-09-29 08:01	2010-09-29 08:01	2010-09-29 08:01	2010-09-29 08:01	2010-09-29 08:01	2010-09-29 08:01		2010-09-29 16:00	2010-09-29 16:00		PT_Normal					+4Dr/7Aj1ka70rgX4hhoCg	gs2xt8ylX0ajjcdGOgVDLA			N	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-21 08:01	2010-09-21 08:01	0
+%R	84748	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1720	Pouring For Ground Floor Slab	2117	0	0	8	0	96	96	8	0	0	0				2010-10-02 08:00	2010-10-02 16:00		2010-10-02 08:00	2010-10-02 16:00	2010-10-02 08:00	2010-10-02 16:00	2010-10-02 08:00	2010-10-02 16:00		2010-10-02 08:00	2010-10-02 16:00		PT_Normal					WH6KUVJoFU66vrBFFML7Rw	/9tMymGiw0u2qjy6k2AT4g			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-23 08:00	2010-09-23 16:00	8
+%R	84749	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1730	Masonry works	2117	0	0	48	0	1680	1680	48	0	0	0				2010-10-12 08:00	2010-10-18 16:00		2010-10-12 08:00	2010-10-18 16:00	2010-10-12 08:00	2010-10-18 16:00	2010-10-12 08:00	2010-10-18 16:00		2010-10-12 08:00	2010-10-18 16:00		PT_Normal					8OI2PNfvvkaVjffSCLM0LQ	xqykOFO1PEuSjT5TMh7D4g			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-10-04 08:00	2010-10-10 16:00	48
+%R	84750	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1740	Water proofing membrane	2117	16	0	56	0	720	720	56	0	0	0				2010-09-06 08:00	2010-09-13 16:00		2010-09-04 08:00	2010-09-11 16:00	2010-09-04 08:00	2010-09-11 16:00	2010-09-04 08:00	2010-09-11 16:00		2010-09-06 08:00	2010-09-13 16:00		PT_Normal					wQfjJzRiTkGu5PpjaDkk1g	dabcmXSoiU+1eupafA3y4Q			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-19 08:00	2010-08-26 16:00	56
+%R	84751	771	10868	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1750	Water proofing protection layer		16	0	48	0	0	0	48	0	0	0				2010-09-14 08:00	2010-09-20 16:00		2010-09-12 08:00	2010-09-18 16:00	2010-09-12 08:00	2010-09-18 16:00	2010-09-12 08:00	2010-09-18 16:00		2010-09-14 08:00	2010-09-20 16:00		PT_Normal					2ki1UWwNO0Kcb8WV28GOjw	6BZKnFa9LEOyu+rPOYfPfg			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-28 08:00	2010-09-02 16:00	48
+%R	84752	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1760	Formwork For R.C raft	2117	8	0	48	0	96	96	48	0	0	0				2010-08-21 08:00	2010-08-26 16:00		2010-08-19 08:00	2010-08-25 16:00	2010-08-19 08:00	2010-08-25 16:00	2010-08-19 08:00	2010-08-25 16:00		2010-08-21 08:00	2010-08-26 16:00		PT_Normal					HKYvkRUFKkmTt5JWPXLA8Q	4x+kJ7KF7kuHSwWyUB3Urg			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-07-15 08:00	2010-07-21 16:00	48
+%R	84753	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1770	Rebar For R.C raft	2117	8	0	32	0	880	880	32	0	0	0				2010-08-28 08:00	2010-08-31 16:00		2010-08-26 08:00	2010-08-30 16:00	2010-08-26 08:00	2010-08-30 16:00	2010-08-26 08:00	2010-08-30 16:00		2010-08-28 08:00	2010-08-31 16:00		PT_Normal					KXBsLjaWwEC6MoN44yZvFg	tVDQbqqwCkaPMIPI3Ku3Ig			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-07-26 08:00	2010-07-29 16:00	32
+%R	84754	771	10867	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1780	M&E conduits For R.C raft (by others)		15.9833333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-08-30 16:00	2010-08-30 16:00		2010-08-29 08:01	2010-08-29 08:01	2010-08-29 08:01	2010-08-29 08:01	2010-08-29 08:01	2010-08-29 08:01		2010-08-30 16:00	2010-08-30 16:00		PT_Normal					1peMpFq/Q0OIM2mtF8WFxg	KQNnTgfyDUuNo+Obe3s40g			N	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-07-28 08:01	2010-07-28 08:01	0
+%R	84755	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1790	Pouring For R.C raft	2117	8	0	8	0	56	56	8	0	0	0				2010-09-01 08:00	2010-09-01 16:00		2010-08-31 08:00	2010-08-31 16:00	2010-08-31 08:00	2010-08-31 16:00	2010-08-31 08:00	2010-08-31 16:00		2010-09-01 08:00	2010-09-01 16:00		PT_Normal					276g1POO2keKh5S1LHR9Hw	CvUGKg6UlE2iyPXobLVimQ			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-07-31 08:00	2010-07-31 16:00	8
+%R	84756	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1800	Formwork For basement walls & col.	2117	8	0	64	0	480	480	64	0	0	0				2010-09-04 08:00	2010-09-12 16:00		2010-09-02 08:00	2010-09-11 16:00	2010-09-02 08:00	2010-09-11 16:00	2010-09-02 08:00	2010-09-11 16:00		2010-09-04 08:00	2010-09-12 16:00		PT_Normal					DG+KITFqW0m08ZjIVoSYSg	GOjZxpQv/Ei6kE0bDr6VKw			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-02 08:00	2010-08-10 16:00	64
+%R	84757	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1810	Rebar For  basement walls & col.	2117	24	16	32	0	480	480	32	0	0	0				2010-09-08 08:00	2010-09-12 16:00		2010-09-05 08:00	2010-09-08 16:00	2010-09-05 08:00	2010-09-08 16:00	2010-09-05 08:00	2010-09-08 16:00		2010-09-08 08:00	2010-09-12 16:00		PT_Normal					2VHBHrJN/k6NPYjYyv3oJQ	GQNf4uU1YESh4F3EqqXeAQ			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-04 08:00	2010-08-08 16:00	32
+%R	84758	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1820	Pouring For  basement walls & col.	2117	8	0	8	0	32	32	8	0	0	0				2010-09-13 08:00	2010-09-13 16:00		2010-09-12 08:00	2010-09-12 16:00	2010-09-12 08:00	2010-09-12 16:00	2010-09-12 08:00	2010-09-12 16:00		2010-09-13 08:00	2010-09-13 16:00		PT_Normal					qOr4JVXFD0e/u/GDAk3PiQ	aJclw+JHeU6keFVbVTkSMg			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-11 08:00	2010-08-11 16:00	8
+%R	84759	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1830	Isolation For Foundation	2117	8	0	48	0	80	80	48	0	0	0				2010-09-18 08:00	2010-09-23 16:00		2010-09-16 08:00	2010-09-22 16:00	2010-09-16 08:00	2010-09-22 16:00	2010-09-16 08:00	2010-09-22 16:00		2010-09-18 08:00	2010-09-23 16:00		PT_Normal					z0mkb8uG4UWILofhuBB8Xw	+ba5kzKnEUCw2+JrB+ng1g			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-16 08:00	2010-08-22 16:00	48
+%R	84760	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1840	Formwork For Ground Floor Slab	2117	0	0	48	0	960	960	48	0	0	0				2010-09-27 08:00	2010-10-03 16:00		2010-09-27 08:00	2010-10-03 16:00	2010-09-27 08:00	2010-10-03 16:00	2010-09-27 08:00	2010-10-03 16:00		2010-09-27 08:00	2010-10-03 16:00		PT_Normal					sdNnx/rnuUGQWSvu6im6FA	AeysbMhBPE6+4sfTisnW6Q			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-27 08:00	2010-10-03 16:00	48
+%R	84761	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1850	Rebar For Ground Floor Slab	2117	0	0	24	0	360	360	24	0	0	0				2010-10-02 08:00	2010-10-04 16:00		2010-10-02 08:00	2010-10-04 16:00	2010-10-02 08:00	2010-10-04 16:00	2010-10-02 08:00	2010-10-04 16:00		2010-10-02 08:00	2010-10-04 16:00		PT_Normal					jvjkcbPT6keH2XiM1otxXA	uI52fxSih0S/NfRVjzsNXQ			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-10-02 08:00	2010-10-04 16:00	24
+%R	84762	771	10867	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1860	M&E conduits For Ground Floor Slab (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-10-03 16:00	2010-10-03 16:00		2010-10-03 08:01	2010-10-03 08:01	2010-10-03 08:01	2010-10-03 08:01	2010-10-03 08:01	2010-10-03 08:01		2010-10-03 16:00	2010-10-03 16:00		PT_Normal					MW2vLwFpG0yGZQIpAbyGAg	UaOaQpa4w0yhgeGpfzihug			N	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-10-03 08:01	2010-10-03 08:01	0
+%R	84763	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1870	Pouring For Ground Floor Slab	2117	0	0	8	0	32	32	8	0	0	0				2010-10-05 08:00	2010-10-05 16:00		2010-10-05 08:00	2010-10-05 16:00	2010-10-05 08:00	2010-10-05 16:00	2010-10-05 08:00	2010-10-05 16:00		2010-10-05 08:00	2010-10-05 16:00		PT_Normal					byT4XYvMkkyVywt6ckwCtQ	jjls4hg4A0WUYN4Sr4NyfQ			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-10-05 08:00	2010-10-05 16:00	8
+%R	84764	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1880	Masonry works	2117	0	0	24	0	560	560	24	0	0	0				2010-10-16 08:00	2010-10-18 16:00		2010-10-16 08:00	2010-10-18 16:00	2010-10-16 08:00	2010-10-18 16:00	2010-10-16 08:00	2010-10-18 16:00		2010-10-16 08:00	2010-10-18 16:00		PT_Normal					xz00yumH+k2sgOXBL4XDow	tzkHGjycEUyR8AVsoD68bw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-10-16 08:00	2010-10-18 16:00	24
+%R	84765	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1890	Water proofing membrane	2117	16	0	32	0	240	240	32	0	0	0				2010-09-16 08:00	2010-09-20 16:00		2010-09-14 08:00	2010-09-18 16:00	2010-09-14 08:00	2010-09-18 16:00	2010-09-14 08:00	2010-09-18 16:00		2010-09-16 08:00	2010-09-20 16:00		PT_Normal					PX84mSbIf0CBcV73MyHHbg	gh9oZEFUmEGKAJswkDstcA			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-14 08:00	2010-08-17 16:00	32
+%R	84766	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1900	Water proofing protection layer		16	8	24	0	0	0	24	0	0	0				2010-09-21 08:00	2010-09-23 16:00		2010-09-19 08:00	2010-09-21 16:00	2010-09-19 08:00	2010-09-21 16:00	2010-09-19 08:00	2010-09-21 16:00		2010-09-21 08:00	2010-09-23 16:00		PT_Normal					VxfDAsPPUkeiU5moq4PR6Q	t2s639eVtUGDtSLqYBs9RA			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-08-18 08:00	2010-08-21 16:00	24
+%R	84767	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1910	Formwork For R.C raft	2117	0	0	72	0	96	96	72	0	0	0				2010-08-21 08:00	2010-08-30 16:00		2010-08-21 08:00	2010-08-30 16:00	2010-08-21 08:00	2010-08-30 16:00	2010-08-21 08:00	2010-08-30 16:00		2010-08-21 08:00	2010-08-30 16:00		PT_Normal					mv+mJsl5/kChgMNISaML0A	pwKzQlINnUaWjak4CBmtsw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-05 08:00	2010-08-15 16:00	72
+%R	84768	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1920	Rebar For R.C raft	2117	0	0	48	0	880	880	48	0	0	0				2010-08-23 08:00	2010-08-29 16:00		2010-08-23 08:00	2010-08-29 16:00	2010-08-23 08:00	2010-08-29 16:00	2010-08-23 08:00	2010-08-29 16:00		2010-08-23 08:00	2010-08-29 16:00		PT_Normal					wTSNGGxjg06+IVyQhQ0JGg	VO/puxJPz0i2xsaiSFFRVQ			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-08 08:00	2010-08-14 16:00	48
+%R	84769	771	10869	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1930	M&E conduits For R.C raft (by others)		7.98333333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-08-28 16:00	2010-08-28 16:00		2010-08-28 08:01	2010-08-28 08:01	2010-08-28 08:01	2010-08-28 08:01	2010-08-28 08:01	2010-08-28 08:01		2010-08-28 16:00	2010-08-28 16:00		PT_Normal					zCiCop+KsUSxHBTIkIW1Aw	8KY6uzG7vEeX1E8Vf6h5Tg			N	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-12 08:01	2010-08-12 08:01	0
+%R	84770	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1940	Pouring For R.C raft	2117	0	0	8	0	56	56	8	0	0	0				2010-08-30 08:00	2010-08-30 16:00		2010-08-30 08:00	2010-08-30 16:00	2010-08-30 08:00	2010-08-30 16:00	2010-08-30 08:00	2010-08-30 16:00		2010-08-30 08:00	2010-08-30 16:00		PT_Normal					z/F1A7ucZkSQuHRHNLthQg	rLSQz9NAakuDDfeoZvrA9g			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-15 08:00	2010-08-15 16:00	8
+%R	84771	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1950	Formwork For basement walls & col.	2117	0	0	80	0	480	480	80	0	0	0				2010-09-01 08:00	2010-09-12 16:00		2010-09-01 08:00	2010-09-12 16:00	2010-09-01 08:00	2010-09-12 16:00	2010-09-01 08:00	2010-09-12 16:00		2010-09-01 08:00	2010-09-12 16:00		PT_Normal					7pOiDd0gmEWnlp7IhKtndw	vXjrqMAmckO62VNhJrqAhw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-17 08:00	2010-08-28 16:00	80
+%R	84772	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1960	Rebar For  basement walls & col.	2117	0	0	64	0	480	480	64	0	0	0				2010-09-04 08:00	2010-09-12 16:00		2010-09-04 08:00	2010-09-12 16:00	2010-09-04 08:00	2010-09-12 16:00	2010-09-04 08:00	2010-09-12 16:00		2010-09-04 08:00	2010-09-12 16:00		PT_Normal					hz9AcoOcAke0araLl/H5Ng	QSO3Cu327UilyYHOqai0Xw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-19 08:00	2010-08-28 16:00	64
+%R	84773	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1970	Pouring For  basement walls & col.	2117	0	0	8	0	32	32	8	0	0	0				2010-09-13 08:00	2010-09-13 16:00		2010-09-13 08:00	2010-09-13 16:00	2010-09-13 08:00	2010-09-13 16:00	2010-09-13 08:00	2010-09-13 16:00		2010-09-13 08:00	2010-09-13 16:00		PT_Normal					YyA9POifhk+BFauzmpaKgw	qXvHnIFKuUqapCF5qIO3HQ			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-29 08:00	2010-08-29 16:00	8
+%R	84774	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1980	Isolation For Foundation	2117	32	32	48	0	80	80	48	0	0	0				2010-09-22 08:00	2010-09-28 16:00		2010-09-18 08:00	2010-09-23 16:00	2010-09-18 08:00	2010-09-23 16:00	2010-09-18 08:00	2010-09-23 16:00		2010-09-22 08:00	2010-09-28 16:00		PT_Normal					MXcXDuK6bkW+aJdoWV6b6A	RZzdpcM5PU+Wrt7COe37mg			N	0	0			2010-07-12 16:21	2010-07-18 12:15	admin	admin	2010-09-02 08:00	2010-09-08 16:00	48
+%R	84775	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A1990	Formwork For Ground Floor Slab	2117	0	0	48	0	960	960	48	0	0	0				2010-09-21 08:00	2010-09-27 16:00		2010-09-21 08:00	2010-09-27 16:00	2010-09-21 08:00	2010-09-27 16:00	2010-09-21 08:00	2010-09-27 16:00		2010-09-21 08:00	2010-09-27 16:00		PT_Normal					sQslSx/p8kOPNRIj5p5/CA	4BMKnlq+ZEe7UKzAbpYRvw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-13 08:00	2010-09-19 16:00	48
+%R	84776	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2000	Rebar For Ground Floor Slab	2117	0	0	24	0	360	360	24	0	0	0				2010-09-28 08:00	2010-09-30 16:00		2010-09-28 08:00	2010-09-30 16:00	2010-09-28 08:00	2010-09-30 16:00	2010-09-28 08:00	2010-09-30 16:00		2010-09-28 08:00	2010-09-30 16:00		PT_Normal					2CEXmDpeFU2adH5F7fEX3Q	HFGjmfT3HUa9cwxyEs3S7w			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-20 08:00	2010-09-22 16:00	24
+%R	84777	771	10869	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A2010	M&E conduits For Ground Floor Slab (by others)		23.9833333333333	23.9833333333333	0	0	0	0	0	0	0	0				2010-10-02 16:00	2010-10-02 16:00		2010-09-29 08:01	2010-09-29 08:01	2010-09-29 08:01	2010-09-29 08:01	2010-09-29 08:01	2010-09-29 08:01		2010-10-02 16:00	2010-10-02 16:00		PT_Normal					G1RR/HaB30Ge/dtLpIdWSQ	NUnxBHbSWEKvqBp3IhSwsw			N	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-21 08:01	2010-09-21 08:01	0
+%R	84778	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2020	Pouring For Ground Floor Slab	2117	0	0	8	0	32	32	8	0	0	0				2010-10-04 08:00	2010-10-04 16:00		2010-10-04 08:00	2010-10-04 16:00	2010-10-04 08:00	2010-10-04 16:00	2010-10-04 08:00	2010-10-04 16:00		2010-10-04 08:00	2010-10-04 16:00		PT_Normal					1ha3g+6uyEGzwsNcnE7WVQ	dgIfIWTUBUaGt4CMZI6uDw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-26 08:00	2010-09-26 16:00	8
+%R	84779	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2030	Masonry works	2117	0	0	32	0	560	560	32	0	0	0				2010-10-14 08:00	2010-10-18 16:00		2010-10-14 08:00	2010-10-18 16:00	2010-10-14 08:00	2010-10-18 16:00	2010-10-14 08:00	2010-10-18 16:00		2010-10-14 08:00	2010-10-18 16:00		PT_Normal					eR3szQm2DEaRlSHmu8pTWw	yHTqx5JhC0aSfBV1H7hxTg			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-10-06 08:00	2010-10-10 16:00	32
+%R	84780	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2040	Water proofing membrane	2117	0	0	48	0	240	240	48	0	0	0				2010-09-15 08:00	2010-09-21 16:00		2010-09-15 08:00	2010-09-21 16:00	2010-09-15 08:00	2010-09-21 16:00	2010-09-15 08:00	2010-09-21 16:00		2010-09-15 08:00	2010-09-21 16:00		PT_Normal					7BKOq2Ni2EKZ5t6IXR49RQ	6TSvgtzD4UqX5OboXK3X+g			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-08-31 08:00	2010-09-06 16:00	48
+%R	84781	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2050	Water proofing protection layer		0	0	48	0	0	0	48	0	0	0				2010-09-22 08:00	2010-09-28 16:00		2010-09-22 08:00	2010-09-28 16:00	2010-09-22 08:00	2010-09-28 16:00	2010-09-22 08:00	2010-09-28 16:00		2010-09-22 08:00	2010-09-28 16:00		PT_Normal					blxqjSTbm0+YfI247e+LZg	ON0kmrh7J0mMKRJOskdHVw			Y	0	0			2010-07-12 16:21	2010-07-22 12:42	admin	admin	2010-09-07 08:00	2010-09-13 16:00	48
+%R	84782	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2060	Formworks for R.C raft	2117	88	0	16	0	80	80	16	0	0	0				2010-08-07 08:00	2010-08-08 16:00		2010-07-25 08:00	2010-07-26 16:00	2010-07-25 08:00	2010-07-26 16:00	2010-07-25 08:00	2010-07-26 16:00		2010-08-07 08:00	2010-08-08 16:00		PT_Normal					EMVhFeP5xkqM8LgV8eKqoA				N	0	0			2010-07-12 16:37	2010-07-18 12:15	admin	admin	2010-07-25 08:00	2010-07-26 16:00	16
+%R	84783	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2070	Rebar for R.C raft	2117	88	0	24	0	120	120	24	0	0	0				2010-08-09 08:00	2010-08-11 16:00		2010-07-27 08:00	2010-07-29 16:00	2010-07-27 08:00	2010-07-29 16:00	2010-07-27 08:00	2010-07-29 16:00		2010-08-09 08:00	2010-08-11 16:00		PT_Normal					yqdQMJmRq0ugsD1/NH06Qg				N	0	0			2010-07-12 16:37	2010-07-18 12:15	admin	admin	2010-07-27 08:00	2010-07-29 16:00	24
+%R	84784	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2080	Pouring For R.C raft	2117	88	0	8	0	40	40	8	0	0	0				2010-08-12 08:00	2010-08-12 16:00		2010-07-31 08:00	2010-07-31 16:00	2010-07-31 08:00	2010-07-31 16:00	2010-07-31 08:00	2010-07-31 16:00		2010-08-12 08:00	2010-08-12 16:00		PT_Normal					C/H19ZfI7UGH2uSyDcIh7Q				N	0	0			2010-07-12 16:37	2010-07-18 12:15	admin	admin	2010-07-31 08:00	2010-07-31 16:00	8
+%R	84785	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2090	Formwork For Tank walls	2117	88	0	64	0	240	240	64	0	0	0				2010-08-14 08:00	2010-08-22 16:00		2010-08-01 08:00	2010-08-09 16:00	2010-08-01 08:00	2010-08-09 16:00	2010-08-01 08:00	2010-08-09 16:00		2010-08-14 08:00	2010-08-22 16:00		PT_Normal					Zkg5VbMwz02RV0I43reRfg				N	0	0			2010-07-12 16:37	2010-07-18 12:15	admin	admin	2010-08-01 08:00	2010-08-09 16:00	64
+%R	84786	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2100	Rebar For Tank walls	2117	88	0	48	0	120	120	48	0	0	0				2010-08-23 08:00	2010-08-29 16:00		2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00		2010-08-23 08:00	2010-08-29 16:00		PT_Normal					WC9fIkFthk6qQb7qwEpFXw				N	0	0			2010-07-12 16:37	2010-07-22 12:42	admin	admin	2010-08-10 08:00	2010-08-16 16:00	48
+%R	84787	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2110	Pouring For Tank walls	2117	88	0	8	0	40	40	8	0	0	0				2010-08-30 08:00	2010-08-30 16:00		2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00		2010-08-30 08:00	2010-08-30 16:00		PT_Normal					CZPeYPUp+Uilxxngd9KmSg				N	0	0			2010-07-12 16:37	2010-07-22 12:42	admin	admin	2010-08-17 08:00	2010-08-17 16:00	8
+%R	84788	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2120	Formwork For Tank Slab	2117	88	0	80	0	120	120	80	0	0	0				2010-08-31 08:00	2010-09-11 16:00		2010-08-18 08:00	2010-08-29 16:00	2010-08-18 08:00	2010-08-29 16:00	2010-08-18 08:00	2010-08-29 16:00		2010-08-31 08:00	2010-09-11 16:00		PT_Normal					1F4LpkXRtkKULlkh/ju3Nw				N	0	0			2010-07-12 16:37	2010-07-22 12:42	admin	admin	2010-08-18 08:00	2010-08-29 16:00	80
+%R	84789	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2130	Rebar For Tank Slab	2117	88	0	48	0	160	160	48	0	0	0				2010-09-12 08:00	2010-09-18 16:00		2010-08-30 08:00	2010-09-05 16:00	2010-08-30 08:00	2010-09-05 16:00	2010-08-30 08:00	2010-09-05 16:00		2010-09-12 08:00	2010-09-18 16:00		PT_Normal					YilMNkTut0iYIVKgI27u3w				N	0	0			2010-07-12 16:37	2010-07-22 12:42	admin	admin	2010-08-30 08:00	2010-09-05 16:00	48
+%R	84790	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2140	Pouring  For Tank slab	2117	88	0	8	0	40	40	8	0	0	0				2010-09-19 08:00	2010-09-19 16:00		2010-09-06 08:00	2010-09-06 16:00	2010-09-06 08:00	2010-09-06 16:00	2010-09-06 08:00	2010-09-06 16:00		2010-09-19 08:00	2010-09-19 16:00		PT_Normal					SJmobmXGyUmc0aCG63PECg				N	0	0			2010-07-12 16:37	2010-07-22 12:42	admin	admin	2010-09-06 08:00	2010-09-06 16:00	8
+%R	84791	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2150	Internal insulation		88	0	120	0	0	0	120	0	0	0				2010-09-20 08:00	2010-10-06 16:00		2010-09-07 08:00	2010-09-23 16:00	2010-09-07 08:00	2010-09-23 16:00	2010-09-07 08:00	2010-09-23 16:00		2010-09-20 08:00	2010-10-06 16:00		PT_Normal					umcfXAJ7/0CQ87Su+h5Clw				N	0	0			2010-07-12 16:37	2010-07-18 12:15	admin	admin	2010-09-07 08:00	2010-09-23 16:00	120
+%R	84792	771	10849	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2160	External insulation		88	88	80	0	0	0	80	0	0	0				2010-10-07 08:00	2010-10-18 16:00		2010-09-25 08:00	2010-10-05 16:00	2010-09-25 08:00	2010-10-05 16:00	2010-09-25 08:00	2010-10-05 16:00		2010-10-07 08:00	2010-10-18 16:00		PT_Normal					NQ8y6boUwkm1CoT3V29STw				N	0	0			2010-07-12 16:43	2010-07-18 12:15	admin	admin	2010-09-25 08:00	2010-10-05 16:00	80
+%R	84793	771	10865	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1201	Approval of basement slab concrete dimension		248	240	0	0	0	0	0	0	0	0				2010-08-19 16:00	2010-08-19 16:00		2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00		2010-08-19 16:00	2010-08-19 16:00		PT_Normal					LxgTGVYXTUKVmq7TBBjkTQ	TQUwoveBKEO+M4EHNTWADA			N	0	0			2010-07-12 16:59	2010-07-18 12:15	admin	admin	2010-07-14 16:00	2010-07-14 16:00	0
+%R	84794	771	10865	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1211	Approval of column layout		144	144	0	0	0	0	0	0	0	0				2010-08-04 16:00	2010-08-04 16:00		2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00	2010-07-14 16:00		2010-08-04 16:00	2010-08-04 16:00		PT_Normal					DMp4gBYY10+YF1Sf1qgGAg	ZHXePO0d70+Nlw1C97nwNQ			N	0	0			2010-07-12 16:59	2010-07-18 12:15	admin	admin	2010-07-14 16:00	2010-07-14 16:00	0
+%R	84795	771	10865	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1221	Approval of basement slab RFT&starters		104	104	0	0	0	0	0	0	0	0				2010-08-09 16:00	2010-08-09 16:00		2010-07-25 16:00	2010-07-25 16:00	2010-07-25 16:00	2010-07-25 16:00	2010-07-25 16:00	2010-07-25 16:00		2010-08-09 16:00	2010-08-09 16:00		PT_Normal					zrVMZn316kGr5aOTHxSnCg	hEK1OTMaS023lip5X1r4aw			N	0	0			2010-07-12 16:59	2010-07-18 12:15	admin	admin	2010-07-25 16:00	2010-07-25 16:00	0
+%R	84796	771	10865	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1231	Approval of vertical element RFT		56	56	0	0	0	0	0	0	0	0				2010-08-09 16:00	2010-08-09 16:00		2010-08-01 16:00	2010-08-01 16:00	2010-08-01 16:00	2010-08-01 16:00	2010-08-01 16:00	2010-08-01 16:00		2010-08-09 16:00	2010-08-09 16:00		PT_Normal					CQleMskBWESZNLAbbqkcsA	FncT+B/w9ku+6p55HRGrYg			N	0	0			2010-07-12 16:59	2010-07-18 12:15	admin	admin	2010-08-01 16:00	2010-08-01 16:00	0
+%R	84797	771	10865	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1241	Approval of ground floor slab concrete dimension		256	256	0	0	0	0	0	0	0	0				2010-09-14 16:00	2010-09-14 16:00		2010-08-08 16:00	2010-08-08 16:00	2010-08-08 16:00	2010-08-08 16:00	2010-08-08 16:00	2010-08-08 16:00		2010-09-14 16:00	2010-09-14 16:00		PT_Normal					/vnr01YvLkKXLX9AM+Yp9A	hfb3em5cr0aQv21tG6zahA			N	0	0			2010-07-12 16:59	2010-07-18 12:15	admin	admin	2010-08-08 16:00	2010-08-08 16:00	0
+%R	84798	771	10865	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A1251	Approval of ground floor slab RFT		248	248	0	0	0	0	0	0	0	0				2010-09-23 16:00	2010-09-23 16:00		2010-08-18 16:00	2010-08-18 16:00	2010-08-18 16:00	2010-08-18 16:00	2010-08-18 16:00	2010-08-18 16:00		2010-09-23 16:00	2010-09-23 16:00		PT_Normal					lDUWdHGkl0yZs9+z2717FA	UjuoEPoriEmi2KpzXdDJUQ			N	0	0			2010-07-12 16:59	2010-07-18 12:15	admin	admin	2010-08-18 16:00	2010-08-18 16:00	0
+%R	84799	771	10866	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A2170	Approval of tank's shop drawings		88	0	0	0	0	0	0	0	0	0				2010-07-24 16:00	2010-07-24 16:00		2010-07-11 16:00	2010-07-11 16:00	2010-07-11 16:00	2010-07-11 16:00	2010-07-11 16:00	2010-07-11 16:00		2010-07-24 16:00	2010-07-24 16:00		PT_Normal					1/Pn9YDIDUiYyidWEFR5kQ				N	0	0			2010-07-12 18:04	2010-07-18 12:15	admin	admin	2010-07-11 16:00	2010-07-11 16:00	0
+%R	84800	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	A1269	Cable ducts fixing		24	0	16	0	0	0	16	0	0	0				2010-07-28 08:00	2010-07-29 16:00		2010-07-25 08:00	2010-07-26 16:00	2010-07-25 08:00	2010-07-26 16:00	2010-07-25 08:00	2010-07-26 16:00		2010-07-28 08:00	2010-07-29 16:00		PT_Normal					Jonsl/tGRky8BqwyEJ2+sw				N	0	0			2010-07-12 21:12	2010-07-18 12:15	admin	admin	2010-07-25 08:00	2010-07-26 16:00	16
+%R	84801	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	A1268	Plain concrete foundation		24	16	48	0	0	0	48	0	0	0				2010-07-31 08:00	2010-08-05 16:00		2010-07-27 08:00	2010-08-02 16:00	2010-07-27 08:00	2010-08-02 16:00	2010-07-27 08:00	2010-08-02 16:00		2010-07-31 08:00	2010-08-05 16:00		PT_Normal					EOCo7f9zbkyTDc9ASdcSow				N	0	0			2010-07-12 21:13	2010-07-18 12:15	admin	admin	2010-07-27 08:00	2010-08-02 16:00	48
+%R	84802	771	10861	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2180	Backfilling Around Foundation	2117	128	128	64	0	24	24	64	0	0	0				2010-10-10 08:00	2010-10-18 16:00		2010-09-21 08:00	2010-09-29 16:00	2010-09-21 08:00	2010-09-29 16:00	2010-09-21 08:00	2010-09-29 16:00		2010-10-10 08:00	2010-10-18 16:00		PT_Normal					tMF3sB8sVEy555n0MtnJkQ	sM6xkZ6s1k2egt1TBhqc7A			N	0	0			2010-07-13 15:33	2010-07-18 12:15	admin	admin	2010-08-30 08:00	2010-09-07 16:00	64
+%R	84803	771	10862	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2190	Backfilling Around Foundation	2117	16	16	96	0	24	24	96	0	0	0				2010-10-05 08:00	2010-10-18 16:00		2010-10-03 08:00	2010-10-16 16:00	2010-10-03 08:00	2010-10-16 16:00	2010-10-03 08:00	2010-10-16 16:00		2010-10-05 08:00	2010-10-18 16:00		PT_Normal					0cWBxYR0zE+PYjPRXhQ4jg	tMF3sB8sVEy555n0MtnJkQ			N	0	0			2010-07-13 15:35	2010-07-18 12:15	admin	admin	2010-10-03 08:00	2010-10-16 16:00	96
+%R	84804	771	10867	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2200	Backfilling Around Foundation	2117	8	8	96	0	24	24	96	0	0	0				2010-10-05 08:00	2010-10-18 16:00		2010-10-04 08:00	2010-10-17 16:00	2010-10-04 08:00	2010-10-17 16:00	2010-10-04 08:00	2010-10-17 16:00		2010-10-05 08:00	2010-10-18 16:00		PT_Normal					pbFvsUkbZkSyzhP0zDLW6w	F4rEnPMFMk24M2ik3kdgOQ			N	0	0			2010-07-13 15:37	2010-07-18 12:15	admin	admin	2010-09-02 08:00	2010-09-15 16:00	96
+%R	84805	771	10869	841	1	0	N	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	RV_OK	TK_NotStart	A2210	Backfilling Around Foundation	2117	0	0	96	0	24	24	96	0	0	0				2010-10-05 08:00	2010-10-18 16:00		2010-10-05 08:00	2010-10-18 16:00	2010-10-05 08:00	2010-10-18 16:00	2010-10-05 08:00	2010-10-18 16:00		2010-10-05 08:00	2010-10-18 16:00		PT_Normal					SNfCNYSkKkudkxo4khO+wQ	pbFvsUkbZkSyzhP0zDLW6w			Y	0	0			2010-07-13 15:41	2010-07-22 12:42	admin	admin	2010-09-20 08:00	2010-10-03 16:00	96
+%R	84985	771	10861	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A1279	hammock for raft		8	0	96	0	0	0	96	0	0	0				2010-08-07 08:00	2010-08-19 16:00		2010-08-05 08:00	2010-08-18 16:00	2010-08-05 08:00	2010-08-18 16:00	2010-08-05 08:00	2010-08-18 16:00		2010-08-07 08:00	2010-08-19 16:00		PT_Normal					yrK5tfcX0EKc4CygI4OlUg				N	0	0			2010-07-17 16:42	2010-07-22 12:42	admin	admin	2010-08-05 08:00	2010-08-05 08:00	0
+%R	84986	771	10861	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A1289	hammock for basement columns & walls		56	0	80	0	0	0	80	0	0	0				2010-08-28 08:00	2010-09-07 16:00		2010-08-19 08:00	2010-08-30 16:00	2010-08-19 08:00	2010-08-30 16:00	2010-08-19 08:00	2010-08-30 16:00		2010-08-28 08:00	2010-09-07 16:00		PT_Normal					1yrXsXabwESY3d7XEfLF4g				N	0	0			2010-07-17 16:42	2010-07-22 12:42	admin	admin	2010-07-07 12:48	2010-08-08 16:00	219.2
+%R	84987	771	10861	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A1299	hammock for ground floorslab		0	0	128	0	0	0	128	0	0	0				2010-09-08 08:00	2010-09-26 16:00		2010-09-08 08:00	2010-09-26 16:00	2010-09-08 08:00	2010-09-26 16:00	2010-09-08 08:00	2010-09-26 16:00		2010-09-08 08:00	2010-09-26 16:00		PT_Normal					/151Z4a82k2k+LefYhz6vA				Y	0	0			2010-07-17 16:42	2010-07-22 12:42	admin	admin	2010-09-08 08:00	2010-09-26 16:00	128
+%R	84988	771	10850	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2220	hammock for raft		0	0	136	0	0	0	136	0	0	0				2010-07-17 08:00	2010-08-04 16:00		2010-07-17 08:00	2010-08-04 16:00	2010-07-17 08:00	2010-08-04 16:00	2010-07-17 08:00	2010-08-04 16:00		2010-07-17 08:00	2010-08-04 16:00		PT_Normal					nN7VyBdoKUuHdCS6FCsQdw	yrK5tfcX0EKc4CygI4OlUg			Y	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-07-17 08:00	2010-07-17 08:00	0
+%R	84989	771	10850	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2230	hammock for basement columns & walls		0	0	80	0	0	0	80	0	0	0				2010-08-08 08:00	2010-08-18 16:00		2010-08-08 08:00	2010-08-18 16:00	2010-08-08 08:00	2010-08-18 16:00	2010-08-08 08:00	2010-08-18 16:00		2010-08-08 08:00	2010-08-18 16:00		PT_Normal					K92u5IiJHUqGW4lRuQkCrA	1yrXsXabwESY3d7XEfLF4g			Y	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-07-13 11:12	2010-08-10 16:00	196.8
+%R	84990	771	10850	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2240	hammock for ground floorslab		0	0	184	0	0	0	184	0	0	0				2010-08-19 08:00	2010-09-14 16:00		2010-08-19 08:00	2010-09-14 16:00	2010-08-19 08:00	2010-09-14 16:00	2010-08-19 08:00	2010-09-14 16:00		2010-08-19 08:00	2010-09-14 16:00		PT_Normal					1VzzIIJ3u0u768TT0I+itQ	/151Z4a82k2k+LefYhz6vA			Y	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-08-11 08:00	2010-09-06 16:00	184
+%R	84991	771	10862	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2250	hammock for raft		0	0	80	0	0	0	80	0	0	0				2010-07-21 08:00	2010-08-01 16:00		2010-07-21 08:00	2010-08-01 16:00	2010-07-21 08:00	2010-08-01 16:00	2010-07-21 08:00	2010-08-01 16:00		2010-07-21 08:00	2010-08-01 16:00		PT_Normal					H2+7+cj48US3e/CAayyuvQ	yrK5tfcX0EKc4CygI4OlUg			Y	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-07-21 08:00	2010-08-01 16:00	80
+%R	84992	771	10862	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2260	hammock for basement columns & walls		0	0	72	0	0	0	72	0	0	0				2010-08-08 08:00	2010-08-17 16:00		2010-08-08 08:00	2010-08-17 16:00	2010-08-08 08:00	2010-08-17 16:00	2010-08-08 08:00	2010-08-17 16:00		2010-08-08 08:00	2010-08-17 16:00		PT_Normal					XsKmeLyLUUmbyTyTl8aL7Q	1yrXsXabwESY3d7XEfLF4g			Y	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-08-08 08:00	2010-08-17 16:00	72
+%R	84993	771	10862	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2270	hammock for ground floorslab		0	0	144	0	0	0	144	0	0	0				2010-08-18 08:00	2010-09-07 16:00		2010-08-18 08:00	2010-09-07 16:00	2010-08-18 08:00	2010-09-07 16:00	2010-08-18 08:00	2010-09-07 16:00		2010-08-18 08:00	2010-09-07 16:00		PT_Normal					/1Zt73SxIke6CBCbLoTFrA	/151Z4a82k2k+LefYhz6vA			Y	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-08-18 08:00	2010-09-07 16:00	144
+%R	84994	771	10867	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2280	hammock for raft		8	0	96	0	0	0	96	0	0	0				2010-08-21 08:00	2010-09-02 16:00		2010-08-19 08:00	2010-09-01 16:00	2010-08-19 08:00	2010-09-01 16:00	2010-08-19 08:00	2010-09-01 16:00		2010-08-21 08:00	2010-09-02 16:00		PT_Normal					DarSjI9WrUqgo+SyRO4Chg	yrK5tfcX0EKc4CygI4OlUg			N	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-07-15 08:00	2010-08-01 16:00	120
+%R	84995	771	10867	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2290	hammock for basement columns & walls		8	0	80	0	0	0	80	0	0	0				2010-09-04 08:00	2010-09-14 16:00		2010-09-02 08:00	2010-09-13 16:00	2010-09-02 08:00	2010-09-13 16:00	2010-09-02 08:00	2010-09-13 16:00		2010-09-04 08:00	2010-09-14 16:00		PT_Normal					z3Bz1dTdMkee6aqiNE3mVw	1yrXsXabwESY3d7XEfLF4g			N	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-08-02 08:00	2010-08-12 16:00	80
+%R	84996	771	10867	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2300	hammock for ground floorslab		0	0	128	0	0	0	128	0	0	0				2010-09-27 08:00	2010-10-14 16:00		2010-09-27 08:00	2010-10-14 16:00	2010-09-27 08:00	2010-10-14 16:00	2010-09-27 08:00	2010-10-14 16:00		2010-09-27 08:00	2010-10-14 16:00		PT_Normal					OjAiSM2hQEiCN3MyAcRTvg	/151Z4a82k2k+LefYhz6vA			Y	0	0			2010-07-17 16:43	2010-07-22 12:42	admin	admin	2010-09-27 08:00	2010-10-14 16:00	128
+%R	84997	771	10868	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2310	hammock for raft		0	0	104	0	0	0	104	0	0	0				2010-08-05 08:00	2010-08-19 16:00		2010-08-05 08:00	2010-08-19 16:00	2010-08-05 08:00	2010-08-19 16:00	2010-08-05 08:00	2010-08-19 16:00		2010-08-05 08:00	2010-08-19 16:00		PT_Normal					rB5W416rOEWNDO2BakE9VQ	yrK5tfcX0EKc4CygI4OlUg			Y	0	0			2010-07-17 16:44	2010-07-22 12:42	admin	admin	2010-07-15 08:00	2010-08-04 16:00	144
+%R	84998	771	10868	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2320	hammock for basement columns & walls		16	0	96	0	0	0	96	0	0	0				2010-08-23 08:00	2010-09-05 16:00		2010-08-21 08:00	2010-09-02 16:00	2010-08-21 08:00	2010-09-02 16:00	2010-08-21 08:00	2010-09-02 16:00		2010-08-23 08:00	2010-09-05 16:00		PT_Normal					DdeUPYdnp0SlfJdeOp8L3Q	1yrXsXabwESY3d7XEfLF4g			N	0	0			2010-07-17 16:44	2010-07-22 12:42	admin	admin	2010-08-05 08:00	2010-08-18 16:00	96
+%R	84999	771	10868	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2330	hammock for ground floorslab		0	0	184	0	0	0	184	0	0	0				2010-09-15 08:00	2010-10-11 16:00		2010-09-15 08:00	2010-10-11 16:00	2010-09-15 08:00	2010-10-11 16:00	2010-09-15 08:00	2010-10-11 16:00		2010-09-15 08:00	2010-10-11 16:00		PT_Normal					lcSmY//7GEemJ/XDcok1ig	/151Z4a82k2k+LefYhz6vA			Y	0	0			2010-07-17 16:44	2010-07-22 12:42	admin	admin	2010-09-07 08:00	2010-10-03 16:00	184
+%R	85000	771	10869	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2340	hammock for raft		0	0	80	0	0	0	80	0	0	0				2010-08-21 08:00	2010-08-31 16:00		2010-08-21 08:00	2010-08-31 16:00	2010-08-21 08:00	2010-08-31 16:00	2010-08-21 08:00	2010-08-31 16:00		2010-08-21 08:00	2010-08-31 16:00		PT_Normal					WpAVzMGuhkGiT2HnCN5y3Q	yrK5tfcX0EKc4CygI4OlUg			Y	0	0			2010-07-17 16:44	2010-07-22 12:42	admin	admin	2010-08-05 08:00	2010-08-16 16:00	80
+%R	85001	771	10869	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2350	hammock for basement columns & walls		0	0	96	0	0	0	96	0	0	0				2010-09-01 08:00	2010-09-14 16:00		2010-09-01 08:00	2010-09-14 16:00	2010-09-01 08:00	2010-09-14 16:00	2010-09-01 08:00	2010-09-14 16:00		2010-09-01 08:00	2010-09-14 16:00		PT_Normal					+roTTatfC0Gq5GiBuoq3mQ	1yrXsXabwESY3d7XEfLF4g			Y	0	0			2010-07-17 16:44	2010-07-22 12:42	admin	admin	2010-08-17 08:00	2010-08-30 16:00	96
+%R	85002	771	10869	841	1	0	N	N	N	CP_Drtn	TT_LOE	DT_FixedDUR2	RV_OK	TK_NotStart	A2360	hammock for ground floorslab		0	0	160	0	0	0	160	0	0	0				2010-09-21 08:00	2010-10-13 16:00		2010-09-21 08:00	2010-10-13 16:00	2010-09-21 08:00	2010-10-13 16:00	2010-09-21 08:00	2010-10-13 16:00		2010-09-21 08:00	2010-10-13 16:00		PT_Normal					c9hdnGSzFUaz+ymDi+p4FA	/151Z4a82k2k+LefYhz6vA			Y	0	0			2010-07-17 16:44	2010-07-22 12:42	admin	admin	2010-09-13 08:00	2010-10-05 16:00	160
+%R	85003	771	10849	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A2079	M&E conduits For R.C raft (by others)		95.9833333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-08-10 16:00	2010-08-10 16:00		2010-07-28 08:01	2010-07-28 08:01	2010-07-28 08:01	2010-07-28 08:01	2010-07-28 08:01	2010-07-28 08:01		2010-08-10 16:00	2010-08-10 16:00		PT_Normal					FOwagB4TZke6+aYF/kl63g				N	0	0			2010-07-17 17:49	2010-07-22 12:42	admin	admin	2010-07-28 08:01	2010-07-28 08:01	0
+%R	85004	771	10849	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A2119	M&E conduits For tank's slab (by others)		95.9833333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-09-16 16:00	2010-09-16 16:00		2010-09-04 08:01	2010-09-04 08:01	2010-09-04 08:01	2010-09-04 08:01	2010-09-04 08:01	2010-09-04 08:01		2010-09-16 16:00	2010-09-16 16:00		PT_Normal					pFwNXost+0eJvO+XP63wCQ				N	0	0			2010-07-17 17:49	2010-07-22 12:42	admin	admin	2010-09-04 08:01	2010-09-04 08:01	0
+%R	85005	771	10849	841	0	0	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	A2109	M&E conduits For R.C walls (by others)		95.9833333333333	7.98333333333333	0	0	0	0	0	0	0	0				2010-08-28 16:00	2010-08-28 16:00		2010-08-15 08:01	2010-08-15 08:01	2010-08-15 08:01	2010-08-15 08:01	2010-08-15 08:01	2010-08-15 08:01		2010-08-28 16:00	2010-08-28 16:00		PT_Normal					JvE7hndqvEKYd8qdN09Phw				N	0	0			2010-07-18 09:56	2010-07-22 12:42	admin	admin	2010-08-15 08:01	2010-08-15 08:01	0
+%T	TASKACTV
+%F	task_id	actv_code_type_id	actv_code_id	proj_id
+%R	84667	7275	12972	771
+%R	84667	7276	12976	771
+%R	84667	7278	12980	771
+%R	84668	7275	12972	771
+%R	84668	7276	12976	771
+%R	84668	7278	12980	771
+%R	84669	7275	12972	771
+%R	84669	7276	12983	771
+%R	84670	7275	12972	771
+%R	84670	7276	12976	771
+%R	84670	7278	12980	771
+%R	84671	7275	12972	771
+%R	84671	7276	12976	771
+%R	84671	7278	12981	771
+%R	84672	7275	12972	771
+%R	84672	7276	12976	771
+%R	84672	7278	12981	771
+%R	84673	7275	12972	771
+%R	84673	7276	12978	771
+%R	84673	7278	12981	771
+%R	84674	7275	12972	771
+%R	84674	7276	12978	771
+%R	84675	7275	12972	771
+%R	84675	7276	12975	771
+%R	84676	7275	12972	771
+%R	84676	7276	12976	771
+%R	84676	7278	12982	771
+%R	84677	7275	12972	771
+%R	84677	7276	12976	771
+%R	84677	7278	12982	771
+%R	84678	7275	12972	771
+%R	84678	7276	12983	771
+%R	84679	7275	12972	771
+%R	84679	7276	12976	771
+%R	84679	7278	12982	771
+%R	84680	7275	12972	771
+%R	84680	7276	12977	771
+%R	84681	7275	12972	771
+%R	84681	7276	12978	771
+%R	84682	7275	12972	771
+%R	84682	7276	12978	771
+%R	84696	7275	12972	771
+%R	84696	7276	12976	771
+%R	84696	7278	12980	771
+%R	84697	7275	12972	771
+%R	84697	7276	12976	771
+%R	84697	7278	12980	771
+%R	84698	7275	12972	771
+%R	84698	7276	12983	771
+%R	84699	7275	12972	771
+%R	84699	7276	12976	771
+%R	84699	7278	12980	771
+%R	84700	7275	12972	771
+%R	84700	7276	12976	771
+%R	84700	7278	12981	771
+%R	84701	7275	12972	771
+%R	84701	7276	12976	771
+%R	84701	7278	12981	771
+%R	84702	7275	12972	771
+%R	84702	7276	12976	771
+%R	84702	7278	12981	771
+%R	84703	7275	12972	771
+%R	84703	7276	12978	771
+%R	84705	7275	12972	771
+%R	84705	7276	12976	771
+%R	84705	7278	12982	771
+%R	84706	7275	12972	771
+%R	84706	7276	12976	771
+%R	84706	7278	12982	771
+%R	84707	7275	12972	771
+%R	84707	7276	12983	771
+%R	84708	7275	12972	771
+%R	84708	7276	12976	771
+%R	84708	7278	12982	771
+%R	84709	7275	12972	771
+%R	84709	7276	12977	771
+%R	84710	7275	12972	771
+%R	84710	7276	12978	771
+%R	84711	7275	12972	771
+%R	84711	7276	12978	771
+%R	84718	7275	12972	771
+%R	84718	7276	12976	771
+%R	84718	7278	12980	771
+%R	84719	7275	12972	771
+%R	84719	7276	12976	771
+%R	84719	7278	12980	771
+%R	84720	7275	12972	771
+%R	84720	7276	12983	771
+%R	84721	7275	12972	771
+%R	84721	7276	12976	771
+%R	84721	7278	12980	771
+%R	84722	7275	12972	771
+%R	84722	7276	12976	771
+%R	84722	7278	12981	771
+%R	84723	7275	12972	771
+%R	84723	7276	12976	771
+%R	84723	7278	12981	771
+%R	84724	7275	12972	771
+%R	84724	7276	12976	771
+%R	84724	7278	12981	771
+%R	84725	7275	12972	771
+%R	84725	7276	12978	771
+%R	84726	7275	12972	771
+%R	84726	7276	12976	771
+%R	84726	7278	12982	771
+%R	84727	7275	12972	771
+%R	84727	7276	12976	771
+%R	84727	7278	12982	771
+%R	84728	7275	12972	771
+%R	84728	7276	12983	771
+%R	84729	7275	12972	771
+%R	84729	7276	12976	771
+%R	84729	7278	12982	771
+%R	84730	7275	12972	771
+%R	84730	7276	12977	771
+%R	84731	7275	12972	771
+%R	84731	7276	12978	771
+%R	84732	7275	12972	771
+%R	84732	7276	12978	771
+%R	84736	7275	12973	771
+%R	84736	7276	12976	771
+%R	84736	7278	12980	771
+%R	84737	7275	12973	771
+%R	84737	7276	12976	771
+%R	84737	7278	12980	771
+%R	84738	7275	12973	771
+%R	84738	7276	12983	771
+%R	84739	7275	12973	771
+%R	84739	7276	12976	771
+%R	84739	7278	12980	771
+%R	84740	7275	12973	771
+%R	84740	7276	12976	771
+%R	84740	7278	12981	771
+%R	84741	7275	12973	771
+%R	84741	7276	12976	771
+%R	84741	7278	12981	771
+%R	84742	7275	12973	771
+%R	84742	7276	12976	771
+%R	84742	7278	12981	771
+%R	84743	7275	12973	771
+%R	84743	7276	12978	771
+%R	84744	7275	12973	771
+%R	84744	7276	12975	771
+%R	84745	7275	12973	771
+%R	84745	7276	12976	771
+%R	84745	7278	12982	771
+%R	84746	7275	12973	771
+%R	84746	7276	12976	771
+%R	84746	7278	12982	771
+%R	84747	7275	12973	771
+%R	84747	7276	12983	771
+%R	84748	7275	12973	771
+%R	84748	7276	12976	771
+%R	84748	7278	12982	771
+%R	84749	7275	12973	771
+%R	84749	7276	12977	771
+%R	84750	7275	12973	771
+%R	84750	7276	12978	771
+%R	84751	7275	12973	771
+%R	84751	7276	12978	771
+%R	84752	7275	12973	771
+%R	84752	7276	12976	771
+%R	84752	7278	12980	771
+%R	84753	7275	12973	771
+%R	84753	7276	12976	771
+%R	84753	7278	12980	771
+%R	84754	7275	12973	771
+%R	84754	7276	12983	771
+%R	84755	7275	12973	771
+%R	84755	7276	12976	771
+%R	84755	7278	12980	771
+%R	84756	7275	12973	771
+%R	84756	7276	12976	771
+%R	84756	7278	12981	771
+%R	84757	7275	12973	771
+%R	84757	7276	12976	771
+%R	84757	7278	12981	771
+%R	84758	7275	12973	771
+%R	84758	7276	12976	771
+%R	84758	7278	12981	771
+%R	84759	7275	12973	771
+%R	84759	7276	12978	771
+%R	84760	7275	12973	771
+%R	84760	7276	12976	771
+%R	84760	7278	12982	771
+%R	84761	7275	12973	771
+%R	84761	7276	12976	771
+%R	84761	7278	12982	771
+%R	84762	7275	12973	771
+%R	84762	7276	12983	771
+%R	84763	7275	12973	771
+%R	84763	7276	12976	771
+%R	84763	7278	12982	771
+%R	84764	7275	12973	771
+%R	84764	7276	12977	771
+%R	84765	7275	12973	771
+%R	84765	7276	12978	771
+%R	84766	7275	12973	771
+%R	84766	7276	12978	771
+%R	84767	7275	12973	771
+%R	84767	7276	12976	771
+%R	84767	7278	12980	771
+%R	84768	7275	12973	771
+%R	84768	7276	12976	771
+%R	84768	7278	12980	771
+%R	84769	7275	12973	771
+%R	84769	7276	12983	771
+%R	84770	7275	12973	771
+%R	84770	7276	12976	771
+%R	84770	7278	12980	771
+%R	84771	7275	12973	771
+%R	84771	7276	12976	771
+%R	84771	7278	12981	771
+%R	84772	7275	12973	771
+%R	84772	7276	12976	771
+%R	84772	7278	12981	771
+%R	84773	7275	12973	771
+%R	84773	7276	12976	771
+%R	84773	7278	12981	771
+%R	84774	7275	12973	771
+%R	84774	7276	12978	771
+%R	84775	7275	12973	771
+%R	84775	7276	12976	771
+%R	84775	7278	12982	771
+%R	84776	7275	12973	771
+%R	84776	7276	12976	771
+%R	84776	7278	12982	771
+%R	84777	7275	12973	771
+%R	84777	7276	12983	771
+%R	84778	7275	12973	771
+%R	84778	7276	12976	771
+%R	84778	7278	12982	771
+%R	84779	7275	12973	771
+%R	84779	7276	12977	771
+%R	84780	7275	12973	771
+%R	84780	7276	12978	771
+%R	84781	7275	12973	771
+%R	84781	7276	12978	771
+%R	84782	7275	12984	771
+%R	84782	7276	12976	771
+%R	84782	7278	12980	771
+%R	84783	7275	12984	771
+%R	84783	7276	12976	771
+%R	84783	7278	12980	771
+%R	84784	7275	12984	771
+%R	84784	7276	12976	771
+%R	84784	7278	12980	771
+%R	84785	7275	12984	771
+%R	84785	7276	12976	771
+%R	84785	7278	12981	771
+%R	84786	7275	12984	771
+%R	84786	7276	12976	771
+%R	84786	7278	12981	771
+%R	84787	7275	12984	771
+%R	84787	7276	12976	771
+%R	84787	7278	12981	771
+%R	84788	7275	12984	771
+%R	84788	7276	12976	771
+%R	84788	7278	12982	771
+%R	84789	7275	12984	771
+%R	84789	7276	12976	771
+%R	84789	7278	12982	771
+%R	84790	7275	12984	771
+%R	84790	7276	12976	771
+%R	84790	7278	12982	771
+%R	84791	7275	12984	771
+%R	84791	7276	12978	771
+%R	84792	7275	12984	771
+%R	84792	7276	12978	771
+%R	84802	7275	12972	771
+%R	84802	7276	12975	771
+%R	84803	7275	12972	771
+%R	84803	7276	12975	771
+%R	84804	7275	12973	771
+%R	84804	7276	12975	771
+%R	84805	7275	12973	771
+%R	84805	7276	12975	771
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt	float_path	aref	arls
+%R	72723	84668	84667	771	771	PR_FS	0		2010-07-25 16:00	2010-07-26 08:00
+%R	72724	84670	84668	771	771	PR_FS	0		2010-08-01 16:00	2010-08-02 08:00
+%R	72725	84670	84669	771	771	PR_FS	8		2010-08-01 08:01	2010-08-01 08:00
+%R	72726	84669	84668	771	771	PR_FS	-16		2010-07-31 08:00	2010-08-02 16:00
+%R	72727	84671	84670	771	771	PR_FS	24		2010-08-07 16:00	2010-08-04 08:00
+%R	72728	84672	84671	771	771	PR_SS	16		2010-08-09 16:00	2010-07-29 08:00
+%R	72730	84673	84672	771	771	PR_FS	0		2010-08-16 16:00	2010-08-17 08:00
+%R	72731	84674	84673	771	771	PR_FS	16		2010-08-19 16:00	2010-09-04 08:00
+%R	72732	84675	84674	771	771	PR_FS	184		2010-09-22 16:00	2010-09-13 08:00
+%R	72734	84677	84676	771	771	PR_FS	-16		2010-08-29 08:00	2010-08-30 16:00
+%R	72735	84679	84677	771	771	PR_FS	0		2010-09-04 16:00	2010-09-05 08:00
+%R	72736	84678	84677	771	771	PR_FS	-16		2010-09-02 08:00	2010-09-05 16:00
+%R	72738	84679	84678	771	771	PR_FS	8		2010-09-04 08:01	2010-09-04 08:00
+%R	72739	84680	84679	771	771	PR_FS	200		2010-10-04 16:00	2010-09-09 08:00
+%R	72741	84682	84681	771	771	PR_FS	0		2010-08-25 16:00	2010-09-06 08:00
+%R	72742	84675	84682	771	771	PR_FS	184		2010-09-28 16:00	2010-09-13 08:00
+%R	72743	84666	84664	771	771	PR_FS	0		2010-07-01 08:00	2010-10-18 16:00
+%R	72744	84683	84664	771	771	PR_FS	0		2010-07-01 08:00	2010-07-01 08:00
+%R	72745	84684	84664	771	771	PR_FS	0		2010-07-01 08:00	2010-07-13 08:00
+%R	72749	84685	84664	771	771	PR_FS	72		2010-07-11 16:00	2010-07-12 08:00
+%R	72750	84686	84664	771	771	PR_FS	144		2010-07-21 16:00	2010-07-17 08:00
+%R	72751	84687	84664	771	771	PR_FS	192		2010-07-28 16:00	2010-07-18 08:00
+%R	72752	84688	84664	771	771	PR_FS	240		2010-08-04 16:00	2010-07-18 08:00
+%R	72757	84697	84696	771	771	PR_FS	0		2010-08-11 16:00	2010-08-14 08:00
+%R	72758	84699	84697	771	771	PR_FS	0		2010-08-16 16:00	2010-08-18 08:00
+%R	72759	84699	84698	771	771	PR_FS	8		2010-08-15 08:01	2010-08-17 08:00
+%R	72760	84698	84697	771	771	PR_FS	-24		2010-08-14 08:00	2010-08-19 16:00
+%R	72761	84700	84699	771	771	PR_FS	8		2010-08-18 16:00	2010-08-26 08:00
+%R	72762	84701	84700	771	771	PR_SS	16		2010-08-21 16:00	2010-08-21 08:00
+%R	72764	84702	84701	771	771	PR_FS	0		2010-08-25 16:00	2010-09-06 08:00
+%R	72765	84703	84702	771	771	PR_FS	16		2010-08-31 16:00	2010-09-21 08:00
+%R	72768	84706	84705	771	771	PR_FS	-16		2010-09-13 08:00	2010-09-14 16:00
+%R	72769	84708	84706	771	771	PR_FS	0		2010-09-15 16:00	2010-09-16 08:00
+%R	72770	84707	84706	771	771	PR_FS	-16		2010-09-14 08:00	2010-09-16 16:00
+%R	72771	84708	84707	771	771	PR_FS	8		2010-09-15 08:01	2010-09-15 08:00
+%R	72772	84709	84708	771	771	PR_FS	120		2010-10-04 16:00	2010-09-23 08:00
+%R	72774	84711	84710	771	771	PR_FS	0		2010-09-04 16:00	2010-09-23 08:00
+%R	72791	84712	84683	771	771	PR_FS	24		2010-07-04 16:00	2010-07-01 08:00
+%R	72793	84696	84712	771	771	PR_FS	0		2010-07-04 16:00	2010-08-07 08:00
+%R	72794	84667	84712	771	771	PR_FS	0		2010-07-04 16:00	2010-07-17 08:00
+%R	72795	84713	84684	771	771	PR_FS	24		2010-07-04 16:00	2010-07-13 08:00
+%R	72796	84696	84713	771	771	PR_FS	0		2010-07-04 16:00	2010-08-07 08:00
+%R	72797	84667	84713	771	771	PR_FS	0		2010-07-04 16:00	2010-07-17 08:00
+%R	72798	84714	84685	771	771	PR_FS	24		2010-07-14 16:00	2010-07-22 08:00
+%R	72799	84697	84714	771	771	PR_FS	0		2010-07-14 16:00	2010-08-14 08:00
+%R	72800	84668	84714	771	771	PR_FS	0		2010-07-14 16:00	2010-07-26 08:00
+%R	72801	84715	84686	771	771	PR_FS	24		2010-07-25 16:00	2010-08-07 08:00
+%R	72804	84716	84687	771	771	PR_FS	24		2010-08-01 16:00	2010-08-15 08:00
+%R	72805	84705	84716	771	771	PR_FS	0		2010-08-01 16:00	2010-09-08 08:00
+%R	72806	84676	84716	771	771	PR_FS	0		2010-08-01 16:00	2010-08-19 08:00
+%R	72807	84717	84688	771	771	PR_FS	24		2010-08-08 16:00	2010-08-22 08:00
+%R	72808	84706	84717	771	771	PR_FS	0		2010-08-08 16:00	2010-09-13 08:00
+%R	72809	84677	84717	771	771	PR_FS	0		2010-08-08 16:00	2010-08-29 08:00
+%R	72810	84672	84715	771	771	PR_FS	0		2010-07-25 16:00	2010-08-10 08:00
+%R	72811	84701	84715	771	771	PR_FS	0		2010-07-25 16:00	2010-09-01 08:00
+%R	72812	84719	84718	771	771	PR_FF	16		2010-07-26 08:00	2010-07-28 08:00
+%R	72813	84721	84719	771	771	PR_FS	0		2010-07-29 16:00	2010-07-31 08:00
+%R	72814	84721	84720	771	771	PR_FS	8		2010-07-29 08:01	2010-07-29 08:00
+%R	72815	84720	84719	771	771	PR_FS	-16		2010-07-28 08:00	2010-07-31 16:00
+%R	72816	84722	84721	771	771	PR_FS	48		2010-08-07 16:00	2010-08-01 08:00
+%R	72817	84723	84722	771	771	PR_SS	24		2010-08-10 16:00	2010-08-01 08:00
+%R	72818	84724	84722	771	771	PR_FS	0		2010-08-14 16:00	2010-08-16 08:00
+%R	72819	84724	84723	771	771	PR_FS	0		2010-08-15 16:00	2010-08-16 08:00
+%R	72820	84725	84724	771	771	PR_FS	24		2010-08-19 16:00	2010-08-24 08:00
+%R	72822	84727	84726	771	771	PR_FS	-16		2010-08-25 08:00	2010-08-26 16:00
+%R	72823	84729	84727	771	771	PR_FS	0		2010-08-28 16:00	2010-08-29 08:00
+%R	72824	84728	84727	771	771	PR_FS	-16		2010-08-26 08:00	2010-08-29 16:00
+%R	72825	84729	84728	771	771	PR_FS	8		2010-08-28 08:01	2010-08-28 08:00
+%R	72826	84730	84729	771	771	PR_FS	232		2010-10-02 16:00	2010-09-07 08:00
+%R	72828	84732	84731	771	771	PR_FS	0		2010-08-24 16:00	2010-08-28 08:00
+%R	72830	84718	84712	771	771	PR_FS	0		2010-07-04 16:00	2010-07-21 08:00
+%R	72831	84718	84713	771	771	PR_FS	0		2010-07-04 16:00	2010-07-21 08:00
+%R	72832	84719	84714	771	771	PR_FS	0		2010-07-14 16:00	2010-07-26 08:00
+%R	72833	84723	84715	771	771	PR_FS	0		2010-07-25 16:00	2010-08-11 08:00
+%R	72834	84726	84716	771	771	PR_FS	0		2010-08-01 16:00	2010-08-18 08:00
+%R	72835	84727	84717	771	771	PR_FS	0		2010-08-08 16:00	2010-08-25 08:00
+%R	72836	84734	84730	771	771	PR_FS	0		2010-10-10 16:00	2010-10-18 16:00
+%R	72837	84734	84680	771	771	PR_FS	0		2010-10-14 16:00	2010-10-18 16:00
+%R	72838	84734	84709	771	771	PR_FS	0		2010-10-12 16:00	2010-10-18 16:00
+%R	72845	84735	84664	771	771	PR_FS	0		2010-07-01 08:00	2010-07-01 08:00
+%R	72846	84683	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-07-01 08:00
+%R	72847	84684	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-07-13 08:00
+%R	72848	84685	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-07-22 08:00
+%R	72849	84686	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-08-07 08:00
+%R	72850	84687	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-08-15 08:00
+%R	72851	84688	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-08-22 08:00
+%R	72852	84733	84712	771	771	PR_FS	48		2010-07-11 16:00	2010-07-05 08:00
+%R	72854	84667	84733	771	771	PR_FS	32		2010-07-15 16:00	2010-07-12 08:00
+%R	72855	84718	84733	771	771	PR_FS	64		2010-07-20 16:00	2010-07-12 08:00
+%R	72857	84739	84737	771	771	PR_FS	0		2010-08-16 16:00	2010-08-17 08:00
+%R	72858	84739	84738	771	771	PR_FS	8		2010-08-16 08:01	2010-08-16 08:00
+%R	72859	84738	84737	771	771	PR_FS	-16		2010-08-15 08:00	2010-08-17 16:00
+%R	72860	84740	84739	771	771	PR_FS	8		2010-08-19 16:00	2010-08-22 08:00
+%R	72861	84741	84740	771	771	PR_SS	16		2010-08-22 16:00	2010-08-11 08:00
+%R	72862	84742	84740	771	771	PR_FS	0		2010-08-31 16:00	2010-09-04 08:00
+%R	72863	84742	84741	771	771	PR_FS	0		2010-08-31 16:00	2010-09-04 08:00
+%R	72864	84743	84742	771	771	PR_FS	24		2010-09-05 16:00	2010-09-08 08:00
+%R	72865	84744	84743	771	771	PR_FS	112		2010-09-30 16:00	2010-09-21 08:00
+%R	72867	84746	84745	771	771	PR_FS	-16		2010-09-25 08:00	2010-09-26 16:00
+%R	72868	84748	84746	771	771	PR_FS	0		2010-09-30 16:00	2010-10-02 08:00
+%R	72869	84747	84746	771	771	PR_FS	-16		2010-09-29 08:00	2010-10-02 16:00
+%R	72870	84748	84747	771	771	PR_FS	8		2010-09-30 08:01	2010-09-30 08:00
+%R	72871	84749	84748	771	771	PR_FS	64		2010-10-11 16:00	2010-10-03 08:00
+%R	72872	84751	84750	771	771	PR_FS	0		2010-09-11 16:00	2010-09-14 08:00
+%R	72873	84744	84751	771	771	PR_FS	112		2010-10-04 16:00	2010-09-21 08:00
+%R	72874	84753	84752	771	771	PR_FS	0		2010-08-25 16:00	2010-08-28 08:00
+%R	72875	84755	84753	771	771	PR_FS	0		2010-08-30 16:00	2010-09-01 08:00
+%R	72876	84755	84754	771	771	PR_FS	8		2010-08-30 08:01	2010-08-31 08:00
+%R	72877	84754	84753	771	771	PR_FS	-16		2010-08-29 08:00	2010-09-01 16:00
+%R	72879	84757	84756	771	771	PR_SS	16		2010-09-04 16:00	2010-08-28 08:00
+%R	72880	84758	84756	771	771	PR_FS	0		2010-09-11 16:00	2010-09-13 08:00
+%R	72881	84758	84757	771	771	PR_FS	0		2010-09-08 16:00	2010-09-13 08:00
+%R	72882	84759	84758	771	771	PR_FS	24		2010-09-15 16:00	2010-09-14 08:00
+%R	72884	84761	84760	771	771	PR_FS	-16		2010-10-02 08:00	2010-10-03 16:00
+%R	72885	84763	84761	771	771	PR_FS	0		2010-10-04 16:00	2010-10-05 08:00
+%R	72886	84762	84761	771	771	PR_FS	-16		2010-10-03 08:00	2010-10-05 16:00
+%R	72887	84763	84762	771	771	PR_FS	8		2010-10-04 08:01	2010-10-04 08:00
+%R	72888	84764	84763	771	771	PR_FS	64		2010-10-14 16:00	2010-10-06 08:00
+%R	72889	84766	84765	771	771	PR_FS	0		2010-09-18 16:00	2010-09-21 08:00
+%R	72892	84768	84767	771	771	PR_SS	16		2010-08-22 16:00	2010-08-10 08:00
+%R	72893	84770	84768	771	771	PR_FS	0		2010-08-29 16:00	2010-08-30 08:00
+%R	72894	84770	84769	771	771	PR_FS	8		2010-08-29 08:01	2010-08-29 08:00
+%R	72895	84769	84768	771	771	PR_FS	-16		2010-08-28 08:00	2010-08-30 16:00
+%R	72896	84771	84770	771	771	PR_FS	8		2010-08-31 16:00	2010-08-31 08:00
+%R	72897	84772	84771	771	771	PR_SS	16		2010-09-02 16:00	2010-08-21 08:00
+%R	72898	84773	84771	771	771	PR_FS	0		2010-09-12 16:00	2010-09-13 08:00
+%R	72899	84773	84772	771	771	PR_FS	0		2010-09-12 16:00	2010-09-13 08:00
+%R	72900	84774	84773	771	771	PR_FS	24		2010-09-16 16:00	2010-09-19 08:00
+%R	72902	84776	84775	771	771	PR_FS	0		2010-09-27 16:00	2010-09-28 08:00
+%R	72903	84778	84776	771	771	PR_FS	16		2010-10-03 16:00	2010-10-02 08:00
+%R	72904	84777	84776	771	771	PR_FS	-16		2010-09-29 08:00	2010-10-04 16:00
+%R	72905	84778	84777	771	771	PR_FS	8		2010-09-30 08:01	2010-10-03 08:00
+%R	72906	84779	84778	771	771	PR_FS	64		2010-10-13 16:00	2010-10-05 08:00
+%R	72907	84781	84780	771	771	PR_FS	0		2010-09-21 16:00	2010-09-22 08:00
+%R	72913	84689	84664	771	771	PR_FS	72		2010-07-11 16:00	2010-08-07 08:00
+%R	72914	84689	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-08-17 08:00
+%R	72916	84793	84689	771	771	PR_FS	24		2010-07-14 16:00	2010-08-17 08:00
+%R	72920	84690	84664	771	771	PR_FS	72		2010-07-11 16:00	2010-07-22 08:00
+%R	72921	84690	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-08-02 08:00
+%R	72924	84794	84690	771	771	PR_FS	24		2010-07-14 16:00	2010-08-02 08:00
+%R	72926	84736	84794	771	771	PR_FS	0		2010-07-14 16:00	2010-08-05 08:00
+%R	72927	84767	84794	771	771	PR_FS	0		2010-07-14 16:00	2010-08-21 08:00
+%R	72930	84753	84795	771	771	PR_FS	0		2010-07-25 16:00	2010-08-28 08:00
+%R	72931	84737	84795	771	771	PR_FS	0		2010-07-25 16:00	2010-08-10 08:00
+%R	72932	84768	84795	771	771	PR_FS	0		2010-07-25 16:00	2010-08-23 08:00
+%R	72934	84795	84691	771	771	PR_FS	24		2010-07-25 16:00	2010-08-07 08:00
+%R	72935	84691	84664	771	771	PR_FS	144		2010-07-21 16:00	2010-07-17 08:00
+%R	72936	84691	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-08-07 08:00
+%R	72937	84692	84664	771	771	PR_FS	192		2010-07-28 16:00	2010-07-10 08:00
+%R	72938	84692	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-08-07 08:00
+%R	72939	84796	84692	771	771	PR_FS	24		2010-08-01 16:00	2010-08-07 08:00
+%R	72940	84701	84796	771	771	PR_FS	0		2010-08-01 16:00	2010-09-01 08:00
+%R	72941	84672	84796	771	771	PR_FS	0		2010-08-01 16:00	2010-08-10 08:00
+%R	72942	84723	84796	771	771	PR_FS	0		2010-08-01 16:00	2010-08-11 08:00
+%R	72943	84693	84664	771	771	PR_FS	240		2010-08-04 16:00	2010-08-08 08:00
+%R	72944	84693	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-09-12 08:00
+%R	72945	84797	84693	771	771	PR_FS	24		2010-08-08 16:00	2010-09-12 08:00
+%R	72946	84760	84797	771	771	PR_FS	0		2010-08-08 16:00	2010-09-27 08:00
+%R	72947	84745	84797	771	771	PR_FS	0		2010-08-08 16:00	2010-09-15 08:00
+%R	72948	84775	84797	771	771	PR_FS	0		2010-08-08 16:00	2010-09-21 08:00
+%R	72949	84694	84664	771	771	PR_FS	312		2010-08-15 16:00	2010-08-07 08:00
+%R	72950	84694	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-09-21 08:00
+%R	72951	84798	84694	771	771	PR_FS	24		2010-08-18 16:00	2010-09-21 08:00
+%R	72952	84761	84798	771	771	PR_FS	0		2010-08-18 16:00	2010-10-02 08:00
+%R	72953	84746	84798	771	771	PR_FS	0		2010-08-18 16:00	2010-09-25 08:00
+%R	72954	84776	84798	771	771	PR_FS	0		2010-08-18 16:00	2010-09-28 08:00
+%R	72955	84737	84736	771	771	PR_FF	16		2010-08-10 08:00	2010-08-15 08:00
+%R	72957	84734	84779	771	771	PR_FS	0		2010-10-18 16:00	2010-10-18 16:00
+%R	72958	84734	84749	771	771	PR_FS	0		2010-10-18 16:00	2010-10-18 16:00
+%R	72959	84734	84764	771	771	PR_FS	0		2010-10-18 16:00	2010-10-18 16:00
+%R	72960	84695	84664	771	771	PR_FS	48		2010-07-07 16:00	2010-07-14 08:00
+%R	72961	84695	84735	771	771	PR_FS	0		2010-07-01 08:00	2010-07-21 08:00
+%R	72962	84799	84695	771	771	PR_FS	24		2010-07-11 16:00	2010-07-21 08:00
+%R	72963	84782	84799	771	771	PR_FS	88		2010-07-24 16:00	2010-07-25 08:00
+%R	72965	84783	84782	771	771	PR_FS	0		2010-07-26 16:00	2010-08-09 08:00
+%R	72966	84784	84783	771	771	PR_FS	0		2010-07-29 16:00	2010-08-12 08:00
+%R	72967	84785	84784	771	771	PR_FS	0		2010-07-31 16:00	2010-08-14 08:00
+%R	72968	84786	84785	771	771	PR_FS	0		2010-08-09 16:00	2010-08-23 08:00
+%R	72969	84787	84786	771	771	PR_FS	0		2010-08-16 16:00	2010-08-30 08:00
+%R	72970	84788	84787	771	771	PR_FS	0		2010-08-17 16:00	2010-08-31 08:00
+%R	72971	84789	84788	771	771	PR_FS	0		2010-08-29 16:00	2010-09-12 08:00
+%R	72972	84790	84789	771	771	PR_FS	0		2010-09-05 16:00	2010-09-19 08:00
+%R	72973	84791	84790	771	771	PR_FS	0		2010-09-06 16:00	2010-09-20 08:00
+%R	72974	84792	84791	771	771	PR_FS	0		2010-09-23 16:00	2010-10-07 08:00
+%R	72975	84734	84792	771	771	PR_FS	0		2010-10-05 16:00	2010-10-18 16:00
+%R	72976	84665	84734	771	771	PR_FS	0		2010-10-18 16:00	2010-10-18 16:00
+%R	72980	84736	84670	771	771	PR_FS	8		2010-08-04 16:00	2010-08-04 08:00
+%R	72985	84767	84739	771	771	PR_FS	8		2010-08-19 16:00	2010-08-19 08:00
+%R	72986	84734	84675	771	771	PR_FS	0		2010-10-07 16:00	2010-10-18 16:00
+%R	72987	84734	84744	771	771	PR_FS	0		2010-10-16 16:00	2010-10-18 16:00
+%R	72989	84696	84801	771	771	PR_FS	0		2010-08-02 16:00	2010-08-07 08:00
+%R	72990	84800	84733	771	771	PR_FS	88		2010-07-24 16:00	2010-07-15 08:00
+%R	72998	84710	84702	771	771	PR_FS	8		2010-08-30 16:00	2010-09-18 08:00
+%R	72999	84681	84673	771	771	PR_FS	8		2010-08-18 16:00	2010-08-29 08:00
+%R	73000	84731	84724	771	771	PR_FS	8		2010-08-17 16:00	2010-08-19 08:00
+%R	73001	84765	84758	771	771	PR_FS	8		2010-09-13 16:00	2010-09-15 08:00
+%R	73002	84750	84742	771	771	PR_FS	8		2010-09-02 16:00	2010-09-05 08:00
+%R	73003	84780	84773	771	771	PR_FS	8		2010-09-14 16:00	2010-09-14 08:00
+%R	73004	84802	84711	771	771	PR_FS	80		2010-09-20 16:00	2010-09-28 08:00
+%R	73005	84802	84703	771	771	PR_FS	80		2010-09-16 16:00	2010-09-28 08:00
+%R	73006	84734	84803	771	771	PR_FS	0		2010-10-16 16:00	2010-10-18 16:00
+%R	73007	84803	84732	771	771	PR_FS	200		2010-10-02 16:00	2010-09-06 08:00
+%R	73008	84803	84725	771	771	PR_FS	200		2010-09-27 16:00	2010-09-06 08:00
+%R	73009	84734	84802	771	771	PR_FS	0		2010-09-29 16:00	2010-10-18 16:00
+%R	73010	84734	84804	771	771	PR_FS	0		2010-10-17 16:00	2010-10-18 16:00
+%R	73011	84804	84766	771	771	PR_FS	72		2010-10-02 16:00	2010-09-25 08:00
+%R	73012	84804	84759	771	771	PR_FS	72		2010-10-03 16:00	2010-09-25 08:00
+%R	73013	84734	84805	771	771	PR_FS	0		2010-10-18 16:00	2010-10-18 16:00
+%R	73014	84805	84781	771	771	PR_FS	40		2010-10-04 16:00	2010-09-29 08:00
+%R	73015	84805	84774	771	771	PR_FS	40		2010-09-29 16:00	2010-09-29 08:00
+%R	73016	84696	84721	771	771	PR_FS	32		2010-08-04 16:00	2010-08-02 08:00
+%R	73018	84705	84729	771	771	PR_FS	64		2010-09-07 16:00	2010-08-30 08:00
+%R	73042	84756	84755	771	771	PR_FS	8		2010-09-01 16:00	2010-09-02 08:00
+%R	73043	84752	84794	771	771	PR_FS	0		2010-07-14 16:00	2010-08-21 08:00
+%R	73044	84752	84793	771	771	PR_FS	0		2010-07-14 16:00	2010-08-21 08:00
+%R	73045	84752	84699	771	771	PR_FS	8		2010-08-18 16:00	2010-08-19 08:00
+%R	73067	84745	84679	771	771	PR_FS	64		2010-09-14 16:00	2010-09-06 08:00
+%R	73071	84673	84671	771	771	PR_FS	0		2010-08-16 16:00	2010-08-17 08:00
+%R	73073	84705	84702	771	771	PR_FS	8		2010-08-30 16:00	2010-09-07 08:00
+%R	73075	84676	84673	771	771	PR_FS	8		2010-08-18 16:00	2010-08-18 08:00
+%R	73076	84726	84724	771	771	PR_FS	8		2010-08-17 16:00	2010-08-17 08:00
+%R	73077	84760	84758	771	771	PR_FS	8		2010-09-13 16:00	2010-09-26 08:00
+%R	73078	84745	84742	771	771	PR_FS	8		2010-09-02 16:00	2010-09-14 08:00
+%R	73079	84775	84773	771	771	PR_FS	8		2010-09-14 16:00	2010-09-20 08:00
+%R	73080	84702	84700	771	771	PR_FS	0		2010-08-28 16:00	2010-09-06 08:00
+%R	73082	84760	84708	771	771	PR_FS	64		2010-09-26 16:00	2010-09-18 08:00
+%R	73083	84775	84745	771	771	PR_SS	40		2010-09-20 16:00	2010-09-04 08:00
+%R	73084	84801	84800	771	771	PR_FS	0		2010-07-26 16:00	2010-07-31 08:00
+%R	73086	84985	84696	771	771	PR_SS	0		2010-08-05 08:00	2010-07-31 08:00
+%R	73087	84699	84985	771	771	PR_FF	-8		2010-08-17 08:00	2010-08-19 16:00
+%R	73088	84986	84700	771	771	PR_SS	0		2010-08-19 08:00	2010-08-18 08:00
+%R	73089	84702	84986	771	771	PR_FF	-8		2010-08-29 08:00	2010-09-07 16:00
+%R	73090	84987	84705	771	771	PR_SS	0		2010-09-08 08:00	2010-09-01 08:00
+%R	73091	84708	84987	771	771	PR_FF	-64		2010-09-16 08:00	2010-09-26 16:00
+%R	73092	84988	84667	771	771	PR_SS	0		2010-07-17 08:00	2010-07-07 08:00
+%R	73093	84670	84988	771	771	PR_FF	-8		2010-08-02 08:00	2010-08-04 16:00
+%R	73094	84989	84671	771	771	PR_SS	0		2010-08-08 08:00	2010-07-29 08:00
+%R	73095	84673	84989	771	771	PR_FF	-8		2010-08-17 08:00	2010-08-18 16:00
+%R	73096	84990	84676	771	771	PR_SS	0		2010-08-19 08:00	2010-08-08 08:00
+%R	73097	84679	84990	771	771	PR_FF	-64		2010-09-05 08:00	2010-09-14 16:00
+%R	73098	84991	84718	771	771	PR_SS	0		2010-07-21 08:00	2010-07-14 08:00
+%R	73099	84721	84991	771	771	PR_FF	-8		2010-07-31 08:00	2010-08-01 16:00
+%R	73100	84992	84722	771	771	PR_SS	0		2010-08-08 08:00	2010-08-01 08:00
+%R	73101	84724	84992	771	771	PR_FF	-8		2010-08-16 08:00	2010-08-17 16:00
+%R	73102	84993	84726	771	771	PR_SS	0		2010-08-18 08:00	2010-08-09 08:00
+%R	73103	84729	84993	771	771	PR_FF	-64		2010-08-29 08:00	2010-09-07 16:00
+%R	73104	84994	84752	771	771	PR_SS	0		2010-08-19 08:00	2010-08-14 08:00
+%R	73105	84755	84994	771	771	PR_FF	-8		2010-08-31 08:00	2010-09-02 16:00
+%R	73106	84995	84756	771	771	PR_SS	0		2010-09-02 08:00	2010-08-25 08:00
+%R	73107	84758	84995	771	771	PR_FF	-8		2010-09-12 08:00	2010-09-14 16:00
+%R	73108	84996	84760	771	771	PR_SS	0		2010-09-27 08:00	2010-09-20 08:00
+%R	73109	84763	84996	771	771	PR_FF	-64		2010-10-05 08:00	2010-10-14 16:00
+%R	73110	84997	84736	771	771	PR_SS	0		2010-08-05 08:00	2010-07-27 08:00
+%R	73112	84739	84997	771	771	PR_FF	-8		2010-08-17 08:00	2010-08-19 16:00
+%R	73113	84998	84740	771	771	PR_SS	0		2010-08-21 08:00	2010-08-11 08:00
+%R	73114	84742	84998	771	771	PR_FF	-8		2010-09-01 08:00	2010-09-05 16:00
+%R	73115	84999	84745	771	771	PR_SS	0		2010-09-15 08:00	2010-09-04 08:00
+%R	73116	84748	84999	771	771	PR_FF	-64		2010-10-02 08:00	2010-10-11 16:00
+%R	73117	85000	84767	771	771	PR_SS	0		2010-08-21 08:00	2010-08-10 08:00
+%R	73118	84770	85000	771	771	PR_FF	-8		2010-08-30 08:00	2010-08-31 16:00
+%R	73119	85001	84771	771	771	PR_SS	0		2010-09-01 08:00	2010-08-21 08:00
+%R	73120	84773	85001	771	771	PR_FF	-8		2010-09-13 08:00	2010-09-14 16:00
+%R	73121	85002	84775	771	771	PR_SS	0		2010-09-21 08:00	2010-09-14 08:00
+%R	73122	84778	85002	771	771	PR_FF	-64		2010-10-04 08:00	2010-10-13 16:00
+%R	73123	85003	84783	771	771	PR_FS	-16		2010-07-28 08:00	2010-08-12 16:00
+%R	73124	84784	85003	771	771	PR_FS	8		2010-07-29 08:01	2010-08-11 08:00
+%R	73126	84790	85004	771	771	PR_FS	8		2010-09-05 08:01	2010-09-18 08:00
+%R	73127	85005	84786	771	771	PR_FS	-16		2010-08-15 08:00	2010-08-30 16:00
+%R	73128	84787	85005	771	771	PR_FS	8		2010-08-16 08:01	2010-08-29 08:00
+%R	73129	85004	84789	771	771	PR_FS	-16		2010-09-04 08:00	2010-09-19 16:00
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	proj_id	cost_qty_link_flag	role_id	acct_id	rsrc_id	pobs_id	skill_level	pend_complete_pct	remain_qty	pend_remain_qty	target_qty	remain_qty_per_hr	pend_act_reg_qty	target_lag_drtn_hr_cnt	target_qty_per_hr	act_ot_qty	pend_act_ot_qty	act_reg_qty	relag_drtn_hr_cnt	ot_factor	cost_per_qty	target_cost	act_reg_cost	act_ot_cost	remain_cost	act_start_date	act_end_date	restart_date	reend_date	target_start_date	target_end_date	rem_late_start_date	rem_late_end_date	rollup_dates_flag	target_crv	remain_crv	actual_crv	ts_pend_act_end_flag	guid	rate_type	act_this_per_cost	act_this_per_qty	curv_id	rsrc_type	cost_per_qty_source_type	create_user	create_date	old_restart_date	old_reend_date	old_remain_drtn_hr_cnt	has_rsrchours	taskrsrc_sum_id
+%R	54343	84696	771	Y			2117				96		96	2		0	2	0		0	0		0	0	0	0	0			2010-08-05 08:00	2010-08-11 16:00	2010-08-05 08:00	2010-08-11 16:00	2010-08-07 08:00	2010-08-12 16:00	Y				N	69LdQC/7TUexN9STM2Q1qQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:37	2010-08-05 08:00	2010-08-11 16:00	48		
+%R	54344	84697	771	Y			2117				880		880	27.5		0	27.5	0		0	0		0	0	0	0	0			2010-08-12 08:00	2010-08-16 16:00	2010-08-12 08:00	2010-08-16 16:00	2010-08-14 08:00	2010-08-17 16:00	Y				N	YezThRP0OkiNDr19xpDtHg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:37	2010-08-12 08:00	2010-08-16 16:00	32		
+%R	54345	84699	771	Y			2117				56		56	7		0	7	0		0	0		0	0	0	0	0			2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00	2010-08-18 08:00	2010-08-18 16:00	Y				N	iEgh6T2zrkiGF8UlQBDmDg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:37	2010-07-05 12:48	2010-07-06 12:48	8		
+%R	54346	84703	771	Y			2117				80		80	2.5		0	2.5	0		0	0		0	0	0	0	0			2010-09-01 08:00	2010-09-05 16:00	2010-09-01 08:00	2010-09-05 16:00	2010-09-23 08:00	2010-09-27 16:00	Y				N	ZHMldSaksUOsPShDy9oy6Q	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:37	2010-08-10 08:00	2010-08-14 16:00	32		
+%R	54347	84709	771	Y			2117				560		560	10		0	10	0		0	0		0	0	0	0	0			2010-10-05 08:00	2010-10-12 16:00	2010-10-05 08:00	2010-10-12 16:00	2010-10-11 08:00	2010-10-18 16:00	Y				N	2X3e74ahDEal36dGPXyPTA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:37	2010-10-05 08:00	2010-10-12 16:00	56		
+%R	54348	84710	771	Y			2117				320		320	10		0	10	0		0	0		0	0	0	0	0			2010-08-31 08:00	2010-09-04 16:00	2010-08-31 08:00	2010-09-04 16:00	2010-09-19 08:00	2010-09-22 16:00	Y				N	MCX2a5HmLkiu5AHnXb4PvQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:37	2010-08-09 08:00	2010-08-12 16:00	32		
+%R	54349	84700	771	Y			2117				480		480	7.5		0	7.5	0		0	0		0	0	0	0	0			2010-08-19 08:00	2010-08-28 16:00	2010-08-19 08:00	2010-08-28 16:00	2010-08-28 08:00	2010-09-05 16:00	Y				N	zG/xz4Nex0SC6EUfH8+6pQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-07-07 12:48	2010-07-17 12:48	64		
+%R	54350	84701	771	Y			2117				480		480	15		0	15	0		0	0		0	0	0	0	0			2010-08-22 08:00	2010-08-25 16:00	2010-08-22 08:00	2010-08-25 16:00	2010-09-01 08:00	2010-09-05 16:00	Y				N	TPEDwoLyH0CQheyR5KiZKw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-08-02 08:00	2010-08-05 16:00	32		
+%R	54351	84702	771	Y			2117				32		32	4		0	4	0		0	0		0	0	0	0	0			2010-08-29 08:00	2010-08-29 16:00	2010-08-29 08:00	2010-08-29 16:00	2010-09-06 08:00	2010-09-06 16:00	Y				N	Dli5xvMNG0SGfOWDWALMcA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-08-07 08:00	2010-08-07 16:00	8		
+%R	54352	84705	771	Y			2117				960		960	20		0	20	0		0	0		0	0	0	0	0			2010-09-08 08:00	2010-09-14 16:00	2010-09-08 08:00	2010-09-14 16:00	2010-09-08 08:00	2010-09-14 16:00	Y				N	ysgbLXvui0yQyPW0cpgdRA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-09-08 08:00	2010-09-14 16:00	48		
+%R	54353	84706	771	Y			2117				360		360	15		0	15	0		0	0		0	0	0	0	0			2010-09-13 08:00	2010-09-15 16:00	2010-09-13 08:00	2010-09-15 16:00	2010-09-13 08:00	2010-09-15 16:00	Y				N	shboes9Ksk+4cAInx0Al+Q	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-09-13 08:00	2010-09-15 16:00	24		
+%R	54354	84708	771	Y			2117				32		32	4		0	4	0		0	0		0	0	0	0	0			2010-09-16 08:00	2010-09-16 16:00	2010-09-16 08:00	2010-09-16 16:00	2010-09-16 08:00	2010-09-16 16:00	Y				N	PpgPKafQYkmeNA0dS+eKQw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-09-16 08:00	2010-09-16 16:00	8		
+%R	54355	84667	771	Y			2117				288		288	4.5		0	4.5	0		0	0		0	0	0	0	0			2010-07-17 08:00	2010-07-25 16:00	2010-07-17 08:00	2010-07-25 16:00	2010-07-17 08:00	2010-07-25 16:00	Y				N	hHWGd98580efNhBrnN/cpw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-07-17 08:00	2010-07-25 16:00	64		
+%R	54356	84668	771	Y			2117				2640		2640	55		0	55	0		0	0		0	0	0	0	0			2010-07-26 08:00	2010-08-01 16:00	2010-07-26 08:00	2010-08-01 16:00	2010-07-26 08:00	2010-08-01 16:00	Y				N	bgds+vEFck+A//6W9JPujg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-07-26 08:00	2010-08-01 16:00	48		
+%R	54357	84670	771	Y			2117				168		168	10.5		0	10.5	0		0	0		0	0	0	0	0			2010-08-02 08:00	2010-08-03 16:00	2010-08-02 08:00	2010-08-03 16:00	2010-08-02 08:00	2010-08-03 16:00	Y				N	SfFtoFBIZEOL6lMq3i6u3Q	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-07-07 11:12	2010-07-10 11:12	16		
+%R	54358	84674	771	Y			2117				240		240	5		0	5	0		0	0		0	0	0	0	0			2010-08-21 08:00	2010-08-26 16:00	2010-08-21 08:00	2010-08-26 16:00	2010-09-06 08:00	2010-09-12 16:00	Y				N	NeJBF0tFP0SbP2zEokBrKg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-08-12 08:00	2010-08-18 16:00	48		
+%R	54359	84675	771	Y			2117				72		72	1.125		0	1.125	0		0	0		0	0	0	0	0			2010-09-29 08:00	2010-10-07 16:00	2010-09-29 08:00	2010-10-07 16:00	2010-10-10 08:00	2010-10-18 16:00	Y				N	jXr5xnVT70mLA3zjML+LFw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-09-21 08:00	2010-09-29 16:00	64		
+%R	54360	84680	771	Y			2117				1680		1680	23.33333333		0	23.33333333	0		0	0		0	0	0	0	0			2010-10-05 08:00	2010-10-14 16:00	2010-10-05 08:00	2010-10-14 16:00	2010-10-09 08:00	2010-10-18 16:00	Y				N	ccHCmc3tiEyWgJnZapuxhA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-09-27 08:00	2010-10-06 16:00	72		
+%R	54361	84681	771	Y			2117				720		720	15		0	15	0		0	0		0	0	0	0	0			2010-08-19 08:00	2010-08-25 16:00	2010-08-19 08:00	2010-08-25 16:00	2010-08-30 08:00	2010-09-05 16:00	Y				N	ue9wOub7cEGAGDan/ANY3g	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-08-11 08:00	2010-08-17 16:00	48		
+%R	54362	84671	771	Y			2117				1440		1440	22.5		0	22.5	0		0	0		0	0	0	0	0			2010-08-08 08:00	2010-08-16 16:00	2010-08-08 08:00	2010-08-16 16:00	2010-08-08 08:00	2010-08-16 16:00	Y				N	jyCfQ0YX3kKaPMMk1/R8+g	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-07-13 11:12	2010-07-22 11:12	64		
+%R	54363	84672	771	Y			2117				1440		1440	30		0	30	0		0	0		0	0	0	0	0			2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00	Y				N	yFUbIiPJCE+xnZIVoCRkNg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-08-02 08:00	2010-08-08 16:00	48		
+%R	54364	84673	771	Y			2117				96		96	12		0	12	0		0	0		0	0	0	0	0			2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00	Y				N	wKaVLHfwqUiJ9JgU4mh2Fg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-08-09 08:00	2010-08-09 16:00	8		
+%R	54365	84676	771	Y			2117				2880		2880	36		0	36	0		0	0		0	0	0	0	0			2010-08-19 08:00	2010-08-30 16:00	2010-08-19 08:00	2010-08-30 16:00	2010-08-19 08:00	2010-08-30 16:00	Y				N	nwTTuQa+RUapFXJ2gG7zZA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-08-11 08:00	2010-08-22 16:00	80		
+%R	54366	84677	771	Y			2117				1080		1080	22.5		0	22.5	0		0	0		0	0	0	0	0			2010-08-29 08:00	2010-09-04 16:00	2010-08-29 08:00	2010-09-04 16:00	2010-08-29 08:00	2010-09-04 16:00	Y				N	UGDQSK6yO0uTsaK5f097SA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:38	2010-08-21 08:00	2010-08-26 16:00	48		
+%R	54367	84679	771	Y			2117				96		96	12		0	12	0		0	0		0	0	0	0	0			2010-09-05 08:00	2010-09-05 16:00	2010-09-05 08:00	2010-09-05 16:00	2010-09-05 08:00	2010-09-05 16:00	Y				N	EV60sD4rSk+Ok4FAQIznTg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-28 08:00	2010-08-28 16:00	8		
+%R	54368	84718	771	Y			2117				96		96	2		0	2	0		0	0		0	0	0	0	0			2010-07-21 08:00	2010-07-27 16:00	2010-07-21 08:00	2010-07-27 16:00	2010-07-21 08:00	2010-07-27 16:00	Y				N	Gxr0CNw7TEW30ZVvBGA7hw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-07-21 08:00	2010-07-27 16:00	48		
+%R	54369	84719	771	Y			2117				880		880	27.5		0	27.5	0		0	0		0	0	0	0	0			2010-07-26 08:00	2010-07-29 16:00	2010-07-26 08:00	2010-07-29 16:00	2010-07-26 08:00	2010-07-29 16:00	Y				N	aVVU5NKj10C/2zmuLR1qTQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-07-26 08:00	2010-07-29 16:00	32		
+%R	54370	84721	771	Y			2117				56		56	7		0	7	0		0	0		0	0	0	0	0			2010-07-31 08:00	2010-07-31 16:00	2010-07-31 08:00	2010-07-31 16:00	2010-07-31 08:00	2010-07-31 16:00	Y				N	vIWMDxVXBU+vF2xWwwYQqQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-07-31 08:00	2010-07-31 16:00	8		
+%R	54371	84725	771	Y			2117				80		80	1.25		0	1.25	0		0	0		0	0	0	0	0			2010-08-21 08:00	2010-08-29 16:00	2010-08-21 08:00	2010-08-29 16:00	2010-08-28 08:00	2010-09-05 16:00	Y				N	Yw9eImjHakmB55dganBMTQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-21 08:00	2010-08-29 16:00	64		
+%R	54372	84730	771	Y			2117				560		560	10		0	10	0		0	0		0	0	0	0	0			2010-10-03 08:00	2010-10-10 16:00	2010-10-03 08:00	2010-10-10 16:00	2010-10-11 08:00	2010-10-18 16:00	Y				N	H7ceOPcN/kSsh+q5aqv0mQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-10-03 08:00	2010-10-10 16:00	56		
+%R	54373	84731	771	Y			2117				240		240	5		0	5	0		0	0		0	0	0	0	0			2010-08-18 08:00	2010-08-24 16:00	2010-08-18 08:00	2010-08-24 16:00	2010-08-21 08:00	2010-08-26 16:00	Y				N	WEepJj+LjkG598gze0SpsA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-18 08:00	2010-08-24 16:00	48		
+%R	54374	84722	771	Y			2117				480		480	10		0	10	0		0	0		0	0	0	0	0			2010-08-08 08:00	2010-08-14 16:00	2010-08-08 08:00	2010-08-14 16:00	2010-08-08 08:00	2010-08-14 16:00	Y				N	2T7EGAqMcUqaZ3osgjzwuw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-08 08:00	2010-08-14 16:00	48		
+%R	54375	84723	771	Y			2117				480		480	15		0	15	0		0	0		0	0	0	0	0			2010-08-11 08:00	2010-08-15 16:00	2010-08-11 08:00	2010-08-15 16:00	2010-08-11 08:00	2010-08-15 16:00	Y				N	Nl6udPYVTkObKE/5bEhqRg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-11 08:00	2010-08-15 16:00	32		
+%R	54376	84724	771	Y			2117				32		32	4		0	4	0		0	0		0	0	0	0	0			2010-08-16 08:00	2010-08-16 16:00	2010-08-16 08:00	2010-08-16 16:00	2010-08-16 08:00	2010-08-16 16:00	Y				N	3YvUmE8OtUm8nBEWg1UFWw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-16 08:00	2010-08-16 16:00	8		
+%R	54377	84726	771	Y			2117				960		960	15		0	15	0		0	0		0	0	0	0	0			2010-08-18 08:00	2010-08-26 16:00	2010-08-18 08:00	2010-08-26 16:00	2010-08-18 08:00	2010-08-26 16:00	Y				N	ReUEQrXsC024LiZ/FkXmRA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-18 08:00	2010-08-26 16:00	64		
+%R	54378	84727	771	Y			2117				360		360	15		0	15	0		0	0		0	0	0	0	0			2010-08-25 08:00	2010-08-28 16:00	2010-08-25 08:00	2010-08-28 16:00	2010-08-25 08:00	2010-08-28 16:00	Y				N	aPW69Ns6RECG27ITR8Knpw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-25 08:00	2010-08-28 16:00	24		
+%R	54379	84729	771	Y			2117				32		32	4		0	4	0		0	0		0	0	0	0	0			2010-08-29 08:00	2010-08-29 16:00	2010-08-29 08:00	2010-08-29 16:00	2010-08-29 08:00	2010-08-29 16:00	Y				N	zY/xAXT6tUKoe0+7l7SxVw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-29 08:00	2010-08-29 16:00	8		
+%R	54380	84752	771	Y			2117				96		96	2		0	2	0		0	0		0	0	0	0	0			2010-08-19 08:00	2010-08-25 16:00	2010-08-19 08:00	2010-08-25 16:00	2010-08-21 08:00	2010-08-26 16:00	Y				N	54XfUwt76Uez0u/+zVmJ2A	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-07-15 08:00	2010-07-21 16:00	48		
+%R	54381	84753	771	Y			2117				880		880	27.5		0	27.5	0		0	0		0	0	0	0	0			2010-08-26 08:00	2010-08-30 16:00	2010-08-26 08:00	2010-08-30 16:00	2010-08-28 08:00	2010-08-31 16:00	Y				N	cfORR8GVZkmsRB9pSS42aw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-07-26 08:00	2010-07-29 16:00	32		
+%R	54382	84755	771	Y			2117				56		56	7		0	7	0		0	0		0	0	0	0	0			2010-08-31 08:00	2010-08-31 16:00	2010-08-31 08:00	2010-08-31 16:00	2010-09-01 08:00	2010-09-01 16:00	Y				N	Xsl8p9EMeU24JvTtxezucQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-07-31 08:00	2010-07-31 16:00	8		
+%R	54383	84756	771	Y			2117				480		480	7.5		0	7.5	0		0	0		0	0	0	0	0			2010-09-02 08:00	2010-09-11 16:00	2010-09-02 08:00	2010-09-11 16:00	2010-09-04 08:00	2010-09-12 16:00	Y				N	cJVwc/FmBkOp7jV/gtwDwA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-02 08:00	2010-08-10 16:00	64		
+%R	54384	84757	771	Y			2117				480		480	15		0	15	0		0	0		0	0	0	0	0			2010-09-05 08:00	2010-09-08 16:00	2010-09-05 08:00	2010-09-08 16:00	2010-09-08 08:00	2010-09-12 16:00	Y				N	/sWo0Ubrf0+rhPCTMLMwow	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-04 08:00	2010-08-08 16:00	32		
+%R	54385	84758	771	Y			2117				32		32	4		0	4	0		0	0		0	0	0	0	0			2010-09-12 08:00	2010-09-12 16:00	2010-09-12 08:00	2010-09-12 16:00	2010-09-13 08:00	2010-09-13 16:00	Y				N	scfTUkgEJ0ycsjZsQnSauQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-11 08:00	2010-08-11 16:00	8		
+%R	54386	84759	771	Y			2117				80		80	1.66666667		0	1.66666667	0		0	0		0	0	0	0	0			2010-09-16 08:00	2010-09-22 16:00	2010-09-16 08:00	2010-09-22 16:00	2010-09-18 08:00	2010-09-23 16:00	Y				N	mqDULX62BU+eCOANzf6n2w	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-08-16 08:00	2010-08-22 16:00	48		
+%R	54387	84760	771	Y			2117				960		960	20		0	20	0		0	0		0	0	0	0	0			2010-09-27 08:00	2010-10-03 16:00	2010-09-27 08:00	2010-10-03 16:00	2010-09-27 08:00	2010-10-03 16:00	Y				N	nsG03MTrWESiHJbKz4FwnQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:39	2010-09-27 08:00	2010-10-03 16:00	48		
+%R	54388	84761	771	Y			2117				360		360	15		0	15	0		0	0		0	0	0	0	0			2010-10-02 08:00	2010-10-04 16:00	2010-10-02 08:00	2010-10-04 16:00	2010-10-02 08:00	2010-10-04 16:00	Y				N	1Ksm8ym8EUeLb7mK+WEuzQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-10-02 08:00	2010-10-04 16:00	24		
+%R	54389	84763	771	Y			2117				32		32	4		0	4	0		0	0		0	0	0	0	0			2010-10-05 08:00	2010-10-05 16:00	2010-10-05 08:00	2010-10-05 16:00	2010-10-05 08:00	2010-10-05 16:00	Y				N	8uqBixe3uEKuTq7/StXFuA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-10-05 08:00	2010-10-05 16:00	8		
+%R	54390	84764	771	Y			2117				560		560	23.33333333		0	23.33333333	0		0	0		0	0	0	0	0			2010-10-16 08:00	2010-10-18 16:00	2010-10-16 08:00	2010-10-18 16:00	2010-10-16 08:00	2010-10-18 16:00	Y				N	CUG/Hs67A02nLefdsN/QDw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-10-16 08:00	2010-10-18 16:00	24		
+%R	54391	84765	771	Y			2117				240		240	7.5		0	7.5	0		0	0		0	0	0	0	0			2010-09-14 08:00	2010-09-18 16:00	2010-09-14 08:00	2010-09-18 16:00	2010-09-16 08:00	2010-09-20 16:00	Y				N	/BqL4wSo90SMq3cJ7saMqw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-08-14 08:00	2010-08-17 16:00	32		
+%R	54392	84736	771	Y			2117				288		288	4.5		0	4.5	0		0	0		0	0	0	0	0			2010-08-05 08:00	2010-08-14 16:00	2010-08-05 08:00	2010-08-14 16:00	2010-08-05 08:00	2010-08-14 16:00	Y				N	ESbkeVOq6021LQMufgvhEQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-07-15 08:00	2010-07-24 16:00	64		
+%R	54393	84737	771	Y			2117				2640		2640	55		0	55	0		0	0		0	0	0	0	0			2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00	Y				N	6DAYM8cE6keoJLJTLXnaEA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-07-26 08:00	2010-08-01 16:00	48		
+%R	54394	84739	771	Y			2117				168		168	10.5		0	10.5	0		0	0		0	0	0	0	0			2010-08-17 08:00	2010-08-18 16:00	2010-08-17 08:00	2010-08-18 16:00	2010-08-17 08:00	2010-08-18 16:00	Y				N	RGgK0RvQ70GfJnY/vbzxRg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-08-02 08:00	2010-08-03 16:00	16		
+%R	54395	84740	771	Y			2117				1440		1440	18		0	18	0		0	0		0	0	0	0	0			2010-08-21 08:00	2010-08-31 16:00	2010-08-21 08:00	2010-08-31 16:00	2010-08-23 08:00	2010-09-02 16:00	Y				N	qnMqCefxRESXxDUDI6p4ww	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-08-05 08:00	2010-08-16 16:00	80		
+%R	54396	84741	771	Y			2117				1440		1440	22.5		0	22.5	0		0	0		0	0	0	0	0			2010-08-23 08:00	2010-08-31 16:00	2010-08-23 08:00	2010-08-31 16:00	2010-08-25 08:00	2010-09-02 16:00	Y				N	Z0wZsTzg1UmOWHPqdJzC/g	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-08-08 08:00	2010-08-16 16:00	64		
+%R	54398	84743	771	Y			2117				240		240	3.75		0	3.75	0		0	0		0	0	0	0	0			2010-09-06 08:00	2010-09-14 16:00	2010-09-06 08:00	2010-09-14 16:00	2010-09-12 08:00	2010-09-20 16:00	Y				N	rkeHRSc5hEWDuP7jCHPiiA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-08-22 08:00	2010-08-30 16:00	64		
+%R	54399	84744	771	Y			2117				72		72	0.9		0	0.9	0		0	0		0	0	0	0	0			2010-10-05 08:00	2010-10-16 16:00	2010-10-05 08:00	2010-10-16 16:00	2010-10-07 08:00	2010-10-18 16:00	Y				N	4tCvIqsvpUevm9jAu44pVQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-09-20 08:00	2010-09-30 16:00	80		
+%R	54400	84745	771	Y			2117				2880		2880	36		0	36	0		0	0		0	0	0	0	0			2010-09-15 08:00	2010-09-26 16:00	2010-09-15 08:00	2010-09-26 16:00	2010-09-15 08:00	2010-09-26 16:00	Y				N	3DaANGs1uUGLpUaCmrJg3w	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-09-07 08:00	2010-09-18 16:00	80		
+%R	54401	84746	771	Y			2117				1080		1080	22.5		0	22.5	0		0	0		0	0	0	0	0			2010-09-25 08:00	2010-09-30 16:00	2010-09-25 08:00	2010-09-30 16:00	2010-09-25 08:00	2010-09-30 16:00	Y				N	92ywSPXii0+hd62ElEdYqQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:40	2010-09-16 08:00	2010-09-22 16:00	48		
+%R	54402	84748	771	Y			2117				96		96	12		0	12	0		0	0		0	0	0	0	0			2010-10-02 08:00	2010-10-02 16:00	2010-10-02 08:00	2010-10-02 16:00	2010-10-02 08:00	2010-10-02 16:00	Y				N	JGnEXXQjo0uvhxb2GShwKA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-09-23 08:00	2010-09-23 16:00	8		
+%R	54403	84749	771	Y			2117				1680		1680	35		0	35	0		0	0		0	0	0	0	0			2010-10-12 08:00	2010-10-18 16:00	2010-10-12 08:00	2010-10-18 16:00	2010-10-12 08:00	2010-10-18 16:00	Y				N	Je9hOVmhaUONgap9LqX94Q	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-10-04 08:00	2010-10-10 16:00	48		
+%R	54404	84750	771	Y			2117				720		720	12.85714286		0	12.85714286	0		0	0		0	0	0	0	0			2010-09-04 08:00	2010-09-11 16:00	2010-09-04 08:00	2010-09-11 16:00	2010-09-06 08:00	2010-09-13 16:00	Y				N	kUZUbSXW8UuGAK2DyaJv8A	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-08-19 08:00	2010-08-26 16:00	56		
+%R	54405	84767	771	Y			2117				96		96	1.33333333		0	1.33333333	0		0	0		0	0	0	0	0			2010-08-21 08:00	2010-08-30 16:00	2010-08-21 08:00	2010-08-30 16:00	2010-08-21 08:00	2010-08-30 16:00	Y				N	2z2yYBwOm0+se/Q2S5jYAA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-08-05 08:00	2010-08-15 16:00	72		
+%R	54406	84768	771	Y			2117				880		880	18.33333333		0	18.33333333	0		0	0		0	0	0	0	0			2010-08-23 08:00	2010-08-29 16:00	2010-08-23 08:00	2010-08-29 16:00	2010-08-23 08:00	2010-08-29 16:00	Y				N	5rTxGga0WUKR2C+N5vKhvA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-08-08 08:00	2010-08-14 16:00	48		
+%R	54407	84770	771	Y			2117				56		56	7		0	7	0		0	0		0	0	0	0	0			2010-08-30 08:00	2010-08-30 16:00	2010-08-30 08:00	2010-08-30 16:00	2010-08-30 08:00	2010-08-30 16:00	N				N	8GdII7hd8EabV5YFDcBlJw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-08-15 08:00	2010-08-15 16:00	8		
+%R	54408	84771	771	Y			2117				480		480	6		0	6	0		0	0		0	0	0	0	0			2010-09-01 08:00	2010-09-12 16:00	2010-09-01 08:00	2010-09-12 16:00	2010-09-01 08:00	2010-09-12 16:00	Y				N	MiiCdWxyUEK8ZLfJTZ645Q	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-08-17 08:00	2010-08-28 16:00	80		
+%R	54409	84772	771	Y			2117				480		480	7.5		0	7.5	0		0	0		0	0	0	0	0			2010-09-04 08:00	2010-09-12 16:00	2010-09-04 08:00	2010-09-12 16:00	2010-09-04 08:00	2010-09-12 16:00	Y				N	6sPmJj2V4Emc7lGwWAUArA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-08-19 08:00	2010-08-28 16:00	64		
+%R	54410	84773	771	Y			2117				32		32	4		0	4	0		0	0		0	0	0	0	0			2010-09-13 08:00	2010-09-13 16:00	2010-09-13 08:00	2010-09-13 16:00	2010-09-13 08:00	2010-09-13 16:00	Y				N	qeI/lhCGhECzzkAQIX2UAQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-08-29 08:00	2010-08-29 16:00	8		
+%R	54411	84774	771	Y			2117				80		80	1.66666667		0	1.66666667	0		0	0		0	0	0	0	0			2010-09-18 08:00	2010-09-23 16:00	2010-09-18 08:00	2010-09-23 16:00	2010-09-22 08:00	2010-09-28 16:00	Y				N	JwqojHagZE2KUz9GvMYIlQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-09-02 08:00	2010-09-08 16:00	48		
+%R	54412	84775	771	Y			2117				960		960	20		0	20	0		0	0		0	0	0	0	0			2010-09-21 08:00	2010-09-27 16:00	2010-09-21 08:00	2010-09-27 16:00	2010-09-21 08:00	2010-09-27 16:00	Y				N	XNx4+WTdDUC2Xdsc5/Xe6Q	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-09-13 08:00	2010-09-19 16:00	48		
+%R	54413	84776	771	Y			2117				360		360	15		0	15	0		0	0		0	0	0	0	0			2010-09-28 08:00	2010-09-30 16:00	2010-09-28 08:00	2010-09-30 16:00	2010-09-28 08:00	2010-09-30 16:00	Y				N	Q+kOgVsEuUa1SfMhOZSptw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-09-20 08:00	2010-09-22 16:00	24		
+%R	54414	84778	771	Y			2117				32		32	4		0	4	0		0	0		0	0	0	0	0			2010-10-04 08:00	2010-10-04 16:00	2010-10-04 08:00	2010-10-04 16:00	2010-10-04 08:00	2010-10-04 16:00	Y				N	P3QusUGF0ECXZ1S8JTu+LA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-09-26 08:00	2010-09-26 16:00	8		
+%R	54415	84779	771	Y			2117				560		560	17.5		0	17.5	0		0	0		0	0	0	0	0			2010-10-14 08:00	2010-10-18 16:00	2010-10-14 08:00	2010-10-18 16:00	2010-10-14 08:00	2010-10-18 16:00	Y				N	pUSPIknydU6FEB0E19KMVg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-10-06 08:00	2010-10-10 16:00	32		
+%R	54416	84780	771	Y			2117				240		240	5		0	5	0		0	0		0	0	0	0	0			2010-09-15 08:00	2010-09-21 16:00	2010-09-15 08:00	2010-09-21 16:00	2010-09-15 08:00	2010-09-21 16:00	Y				N	ROSOvucPgUWm9/0jPQyl/w	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-12 20:41	2010-08-31 08:00	2010-09-06 16:00	48		
+%R	54417	84802	771	Y			2117				24		24	0.375		0	0.375	0		0	0		0	0	0	0	0			2010-09-21 08:00	2010-09-29 16:00	2010-09-21 08:00	2010-09-29 16:00	2010-10-10 08:00	2010-10-18 16:00	Y				N	iOvjnz4FDEeZPIiPNKWPAw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-13 15:33	2010-08-30 08:00	2010-09-07 16:00	64		
+%R	54418	84803	771	Y			2117				24		24	0.25		0	0.25	0		0	0		0	0	0	0	0			2010-10-03 08:00	2010-10-16 16:00	2010-10-03 08:00	2010-10-16 16:00	2010-10-05 08:00	2010-10-18 16:00	Y				N	B8cU0MCTh06y+zmF6RrsLA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-13 15:35	2010-10-03 08:00	2010-10-16 16:00	96		
+%R	54419	84804	771	Y			2117				24		24	0.25		0	0.25	0		0	0		0	0	0	0	0			2010-10-04 08:00	2010-10-17 16:00	2010-10-04 08:00	2010-10-17 16:00	2010-10-05 08:00	2010-10-18 16:00	Y				N	zJsJtMmJwEW+DLEVuizlZQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-13 15:37	2010-09-02 08:00	2010-09-15 16:00	96		
+%R	54420	84805	771	Y			2117				24		24	0.25		0	0.25	0		0	0		0	0	0	0	0			2010-10-05 08:00	2010-10-18 16:00	2010-10-05 08:00	2010-10-18 16:00	2010-10-05 08:00	2010-10-18 16:00	Y				N	NqeZrtncCEOeojfpW3xpIw	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-13 15:41	2010-09-20 08:00	2010-10-03 16:00	96		
+%R	54499	84742	771	Y			2117				96		96	12		0	12	0		0	0		0	0	0	0	0			2010-09-01 08:00	2010-09-01 16:00	2010-09-01 08:00	2010-09-01 16:00	2010-09-04 08:00	2010-09-04 16:00	Y				N	B5EUjxVpdUmA7DAwlitw4g	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-15 13:07	2010-08-17 08:00	2010-08-17 16:00	8		
+%R	54500	84782	771	Y			2117				80		80	5		0	5	0		0	0		0	0	0	0	0			2010-07-25 08:00	2010-07-26 16:00	2010-07-25 08:00	2010-07-26 16:00	2010-08-07 08:00	2010-08-08 16:00	Y				N	nnluxq74mkGiCpjjGEo4DA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:23	2010-07-25 08:00	2010-07-26 16:00	16		
+%R	54501	84783	771	Y			2117				120		120	5		0	5	0		0	0		0	0	0	0	0			2010-07-27 08:00	2010-07-29 16:00	2010-07-27 08:00	2010-07-29 16:00	2010-08-09 08:00	2010-08-11 16:00	Y				N	9+W/WnKO0kmNRpp9wMtQRQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:23	2010-07-27 08:00	2010-07-29 16:00	24		
+%R	54502	84784	771	Y			2117				40		40	5		0	5	0		0	0		0	0	0	0	0			2010-07-31 08:00	2010-07-31 16:00	2010-07-31 08:00	2010-07-31 16:00	2010-08-12 08:00	2010-08-12 16:00	Y				N	WdvQdmE9zUK7nWN9jSAjow	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:23	2010-07-31 08:00	2010-07-31 16:00	8		
+%R	54503	84785	771	Y			2117				240		240	3.75		0	3.75	0		0	0		0	0	0	0	0			2010-08-01 08:00	2010-08-09 16:00	2010-08-01 08:00	2010-08-09 16:00	2010-08-14 08:00	2010-08-22 16:00	Y				N	wJd0GmEHD0as3G5fFCRyFA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:24	2010-08-01 08:00	2010-08-09 16:00	64		
+%R	54504	84786	771	Y			2117				120		120	2.5		0	2.5	0		0	0		0	0	0	0	0			2010-08-10 08:00	2010-08-16 16:00	2010-08-10 08:00	2010-08-16 16:00	2010-08-23 08:00	2010-08-29 16:00	Y				N	n2XlkLXEWUWwwYSdo4Lq5A	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:24	2010-08-10 08:00	2010-08-16 16:00	48		
+%R	54505	84787	771	Y			2117				40		40	5		0	5	0		0	0		0	0	0	0	0			2010-08-17 08:00	2010-08-17 16:00	2010-08-17 08:00	2010-08-17 16:00	2010-08-30 08:00	2010-08-30 16:00	Y				N	3DIZKqmeYU6DgbH/4nksbA	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:25	2010-08-17 08:00	2010-08-17 16:00	8		
+%R	54506	84788	771	Y			2117				120		120	1.5		0	1.5	0		0	0		0	0	0	0	0			2010-08-18 08:00	2010-08-29 16:00	2010-08-18 08:00	2010-08-29 16:00	2010-08-31 08:00	2010-09-11 16:00	Y				N	oT714ljXrkqq1p/3BovzoQ	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:25	2010-08-18 08:00	2010-08-29 16:00	80		
+%R	54507	84789	771	Y			2117				160		160	3.33333333		0	3.33333333	0		0	0		0	0	0	0	0			2010-08-30 08:00	2010-09-05 16:00	2010-08-30 08:00	2010-09-05 16:00	2010-09-12 08:00	2010-09-18 16:00	Y				N	kui9QpnSCkeOonA0LubMRg	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:25	2010-08-30 08:00	2010-09-05 16:00	48		
+%R	54508	84790	771	Y			2117				40		40	5		0	5	0		0	0		0	0	0	0	0			2010-09-06 08:00	2010-09-06 16:00	2010-09-06 08:00	2010-09-06 16:00	2010-09-19 08:00	2010-09-19 16:00	Y				N	YXHmcZsT10SsvKJRUCsO2Q	COST_PER_QTY	0	0		RT_Labor	ST_Rsrc	admin	2010-07-18 11:25	2010-09-06 08:00	2010-09-06 16:00	8		
+%E

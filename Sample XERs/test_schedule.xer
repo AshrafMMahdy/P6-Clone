@@ -1,0 +1,163 @@
+ERMHDR	8.1	2026-04-07	Project	admin	ECC-BK-CS	dbxDatabaseNoName	Project Management	EUR
+%T	CURRTYPE
+%F	curr_id	decimal_digit_cnt	curr_symbol	decimal_symbol	digit_group_symbol	pos_curr_fmt_type	neg_curr_fmt_type	curr_type	curr_short_name	group_digit_cnt	base_exch_rate
+%R	EUR	2	€	.	,	#1.1	(#1.1)	Euro	EUR	3	1.0
+%T	OBS
+%F	obs_id	parent_obs_id	guid	seq_num	obs_name	obs_descr
+%R	1		MoDn4YVYTXeUIYZwJGEFcA	0	Enterprise	
+%T	PROJECT
+%F	proj_id	fy_start_month_num	rsrc_self_add_flag	allow_complete_flag	rsrc_multi_assign_flag	checkout_flag	project_flag	step_complete_flag	cost_qty_recalc_flag	batch_sum_flag	name_sep_char	def_complete_pct_type	proj_short_name	acct_id	orig_proj_id	source_proj_id	base_type_id	clndr_id	sum_base_proj_id	task_code_base	task_code_step	priority_num	wbs_max_sum_level	strgy_priority_num	last_checksum	critical_drtn_hr_cnt	def_cost_per_qty	last_recalc_date	plan_start_date	plan_end_date	scd_end_date	add_date	last_tasksum_date	fcst_start_date	def_duration_type	task_code_prefix	guid	def_qty_type	add_by_name	web_local_root_path	proj_url	def_rate_type	add_act_remain_flag	act_this_per_link_flag	def_task_type	act_pct_link_flag	critical_path_type	task_code_prefix_flag	def_rollup_dates_flag	use_project_baseline_flag	rem_target_link_flag	reset_planned_flag	allow_neg_act_flag	sum_assign_level	last_fin_dates_id	last_baseline_update_date	cr_external_key	apply_actuals_date	location_id	loaded_scope_level	export_flag	new_fin_dates_id	baselines_to_export	baseline_names_to_export	next_data_date	close_period_flag	sum_refresh_date	trsrcsum_loaded
+%R	9000	1	Y	Y	Y	N	Y	N	N	Y	.	CP_Drtn	test_schedule					1000				1000	10	10	2	500	0.0000	2026-04-07 00:00	2026-03-24 00:00	2028-07-09 00:00	2028-07-09 00:00	2026-04-07 12:00			DT_FixedDUR2	A	GoiwGtbDRFOKb3G5RUf48w	QT_Hour	admin			COST_PER_QTY	N	Y	TT_Task	Y	CT_TotFloat	Y	Y	Y	N	N	N	SL_Taskrsrc						7	Y							
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	last_chng_date	clndr_type	day_hr_cnt	week_hr_cnt	month_hr_cnt	year_hr_cnt	rsrc_private	clndr_data
+%R	1000	Y	Standard 5-Day	9000		2026-04-07 00:00	CA_Project	8	40	172	2000	N	(0||CalendarData()(  (0||DaysOfWeek()(    (0||1()(      (0||0(s|08:00|f|16:00)())))    (0||2()(      (0||0(s|08:00|f|16:00)())))    (0||3()(      (0||0(s|08:00|f|16:00)())))    (0||4()(      (0||0(s|08:00|f|16:00)())))    (0||5()(      (0||0(s|08:00|f|16:00)())))    (0||6()())    (0||7()())))  (0||VIEW(ShowTotal|Y)())  (0||Exceptions()())))
+%T	SCHEDOPTIONS
+%F	schedoptions_id	proj_id	sched_outer_depend_type	sched_open_critical_flag	sched_lag_early_start_flag	sched_retained_logic	sched_setplantoforecast	sched_float_type	sched_calendar_on_relationship_lag	sched_use_expect_end_flag	sched_progress_override	level_float_thrs_cnt	level_outer_assign_flag	level_outer_assign_priority	level_over_alloc_pct	level_within_float_flag	level_keep_sched_date_flag	level_all_rsrc_flag	sched_use_project_end_date_for_float	enable_multiple_longest_path_calc	limit_multiple_longest_path_calc	max_multiple_longest_path	use_total_float_multiple_longest_paths	key_activity_for_multiple_longest_paths	LevelPriorityList
+%R	1	9000	SD_Both	N	Y	Y	N	FT_FF	rcal_Predecessor	Y	N	0	N	5	25	N	Y	Y	Y	N	Y	10			priority_type,ASC
+%T	PROJWBS
+%F	wbs_id	proj_id	obs_id	seq_num	est_wt	proj_node_flag	sum_data_flag	status_code	wbs_short_name	wbs_name	phase_id	parent_wbs_id	ev_user_pct	ev_etc_user_value	guid	plan_open_state
+%R	200009	9000	1	0	1	Y	N	WS_Open	test_sched	test_schedule			6	0.88	NHJQZcMoTJesYIpMOdvLew	
+%R	200000	9000	1	100	1	N	N	WS_Open	Milestones	Milestones		200009	6	0.88	KO9ukapcS3+gif9unyZ/jQ	
+%R	200001	9000	1	200	1	N	N	WS_Open	Substructu	Substructure		200009	6	0.88	kKruuS81SVyom0K87LlQsw	
+%R	200002	9000	1	300	1	N	N	WS_Open	Superstruc	Superstructure		200009	6	0.88	K6gJXd31QTOsiwXshUzcsQ	
+%R	200003	9000	1	400	1	N	N	WS_Open	Specialist	Specialist Works		200009	6	0.88	PB5H/pUwTUKU4HbHfXfz7w	
+%R	200004	9000	1	500	1	N	N	WS_Open	MEP Works	MEP Works		200009	6	0.88	mUNOmIIpQY21JgHHOd9GfQ	
+%R	200005	9000	1	600	1	N	N	WS_Open	Masonry & 	Masonry & Walls		200009	6	0.88	+KdWq+QgQLK3TJb0tl6PLA	
+%R	200006	9000	1	700	1	N	N	WS_Open	Plastering	Plastering & Rendering		200009	6	0.88	iqOqz4fJRhmwg/ML01CE6g	
+%R	200007	9000	1	800	1	N	N	WS_Open	Waterproof	Waterproofing & Insulation		200009	6	0.88	UEOUn/e/Sp23O7Qen3ROnA	
+%R	200008	9000	1	900	1	N	N	WS_Open	Finishing 	Finishing Works		200009	6	0.88	rKRmTlxWRZOvVlF0NzPCDQ	
+%T	RSRC
+%F	rsrc_id	parent_rsrc_id	clndr_id	role_id	shift_id	user_id	pobs_id	guid	rsrc_seq_num	email_addr	employee_code	office_phone	other_phone	rsrc_name	rsrc_short_name	rsrc_title_name	def_qty_per_hr	cost_qty_type	ot_factor	active_flag	auto_compute_act_flag	def_cost_qty_link_flag	ot_flag	curr_id	unit_id	rsrc_type	location_id	rsrc_notes	load_tasks_flag	level_flag	last_checksum
+%R	30000		1000					eAMCIYPyRfe6ALi+ekfFng	1					Project Management	Project Ma		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30001		1000					tmPp4s7HS2agpkmoegbyPA	2					Excavation Crew	Excavation		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30002		1000					vs+oywHeQhixvIwhvoRqmw	3					Concrete Crew	Concrete C		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30003		1000					lcanCJRfQv6n6gmZvWEmew	4					Specialist Crew	Specialist		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30004		1000					GQmG/TqiSdSO9EDUUpppKQ	5					Plumbing Crew	Plumbing C		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30005		1000					fZNAyqFqR2GIvJ8oE8+FkQ	6					Electrical Crew	Electrical		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30006		1000					AbilFRyiQ4uWzPLtmfbBbQ	7					Masonry Crew	Masonry Cr		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30007		1000					jpQUnqKiQ2mIDzlb/rBmuQ	8					Plastering Crew	Plastering		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30008		1000					liEWDf/OQBiROgmXEHPdnw	9					Waterproofing Crew	Waterproof		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30009		1000					wwLobkrPTCWAh1nW/sNJhg	10					Painting Crew	Painting C		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30010		1000					xg6cpR+RSvi7cXtn8hGzrg	11					Carpentry Crew	Carpentry 		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30011		1000					WkCeAN8RTNaUgCl6f0tP0g	12					Finishes Crew	Finishes C		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	30012		1000					I+L6we59Qzymt5w+YnJzHA	13					HVAC Crew	HVAC Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	phys_complete_pct	rev_fdbk_flag	est_wt	lock_plan_flag	auto_compute_act_flag	complete_pct_type	task_type	duration_type	status_code	task_code	task_name	rsrc_id	total_float_hr_cnt	free_float_hr_cnt	remain_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	target_drtn_hr_cnt	target_equip_qty	act_equip_qty	remain_equip_qty	cstr_date	act_start_date	act_end_date	late_start_date	late_end_date	expect_end_date	early_start_date	early_end_date	restart_date	reend_date	target_start_date	target_end_date	rem_late_start_date	rem_late_end_date	cstr_type	priority_type	suspend_date	resume_date	float_path	float_path_order	guid	tmpl_guid	cstr_date2	cstr_type2	driving_path_flag	act_this_per_work_qty	act_this_per_equip_qty	external_early_start_date	external_late_end_date	create_date	update_date	create_user	update_user	location_id
+%R	100000	9000	200000	1000	0	N	1	N	N	CP_Drtn	TT_Mile	DT_FixedDUR2	TK_NotStart	A-1	Project Start		0	0	0	0	0	0	0	0	0	0				2026-03-24 00:00	2026-03-24 00:00		2026-03-24 00:00	2026-03-24 00:00			2026-03-24 00:00	2026-03-24 00:00				PT_Normal					Kcoo49xLRgGq6Fte7JUUSw				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100001	9000	200000	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-2	Project Start Mobilization	30000	0	0	64	0	0	0	64	0	0	0				2026-03-25 00:00	2026-04-05 00:00		2026-03-25 00:00	2026-04-05 00:00			2026-03-25 00:00	2026-04-05 00:00				PT_Normal					sZhD0lHYSwuyKnEcFcz8vA				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100002	9000	200001	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-3	Earth Works in Clay Soil	30001	0	0	280	0	0	0	280	0	0	0				2026-04-06 00:00	2026-05-24 00:00		2026-04-06 00:00	2026-05-24 00:00			2026-04-06 00:00	2026-05-24 00:00				PT_Normal					TDNQw09ASEqxWvXNV8yZqw				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100003	9000	200002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-4	Concrete Skeleton Works	30002	0	0	1440	0	0	0	1440	0	0	0				2026-05-25 00:00	2027-01-31 00:00		2026-05-25 00:00	2027-01-31 00:00			2026-05-25 00:00	2027-01-31 00:00				PT_Normal					3f6KxTFpQuKYnKTOvRVw5A				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100004	9000	200003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-16	Elevator Installation	30003	2720	0	272	0	0	0	272	0	0	0				2027-02-01 00:00	2027-03-18 00:00		2027-02-01 00:00	2027-03-18 00:00			2027-02-01 00:00	2027-03-18 00:00				PT_Normal					gwGLolyAQ6upbygsbHrtQg				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100005	9000	200004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-5	Plumbing Water Supply First Fix	30004	552	0	256	0	0	0	256	0	0	0				2027-03-15 00:00	2027-04-27 00:00		2027-03-15 00:00	2027-04-27 00:00			2027-03-15 00:00	2027-04-27 00:00				PT_Normal					5yFjgpDGTYK5ePl10x7smg				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100006	9000	200004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-6	Plumbing Drainage First Fix	30004	576	0	232	0	0	0	232	0	0	0				2027-03-15 00:00	2027-04-22 00:00		2027-03-15 00:00	2027-04-22 00:00			2027-03-15 00:00	2027-04-22 00:00				PT_Normal					SA7Cbp4wT2ikv8Tz72fY0Q				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100007	9000	200004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-7	Electrical Wiring First Fix	30005	528	0	280	0	0	0	280	0	0	0				2027-03-15 00:00	2027-05-02 00:00		2027-03-15 00:00	2027-05-02 00:00			2027-03-15 00:00	2027-05-02 00:00				PT_Normal					VkcxfMJqRdS9fVja7SomaQ				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100008	9000	200005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-8	Exterior Walls Installation	30006	1080	0	712	0	0	0	712	0	0	0				2027-04-05 00:00	2027-08-05 00:00		2027-04-05 00:00	2027-08-05 00:00			2027-04-05 00:00	2027-08-05 00:00				PT_Normal					pMai4gx6Rd6w/nf9kIC1Cg				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100009	9000	200005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-10	Interior Walls Installation	30006	0	0	568	0	0	0	568	0	0	0				2027-04-26 00:00	2027-08-02 00:00		2027-04-26 00:00	2027-08-02 00:00			2027-04-26 00:00	2027-08-02 00:00				PT_Normal					8gXaF/QPSoektfMzqdcKvg				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100010	9000	200006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-11	Interior Plastering Works	30007	0	0	440	0	0	0	440	0	0	0				2027-08-03 00:00	2027-10-18 00:00		2027-08-03 00:00	2027-10-18 00:00			2027-08-03 00:00	2027-10-18 00:00				PT_Normal					ExLP0v97SfiK4swsBHnYNg				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100011	9000	200006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-9	Exterior Plastering Works	30007	1080	0	360	0	0	0	360	0	0	0				2027-08-08 00:00	2027-10-07 00:00		2027-08-08 00:00	2027-10-07 00:00			2027-08-08 00:00	2027-10-07 00:00				PT_Normal					+djXq4ZlQPKMN9JhVBApHg				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100012	9000	200007	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-12	Waterproofing for Wet Areas	30008	0	0	264	0	0	0	264	0	0	0				2027-10-19 00:00	2027-12-02 00:00		2027-10-19 00:00	2027-12-02 00:00			2027-10-19 00:00	2027-12-02 00:00				PT_Normal					nyiFjQysRhiPIYv0xqaRXw				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100013	9000	200008	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-14	Painting Works	30009	760	0	440	0	0	0	440	0	0	0				2027-10-19 00:00	2028-01-03 00:00		2027-10-19 00:00	2028-01-03 00:00			2027-10-19 00:00	2028-01-03 00:00				PT_Normal					ctgcH5L+T9emqiObBC4ZfQ				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100014	9000	200008	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-15	Doors and Windows Installation	30010	1024	0	480	0	0	0	480	0	0	0				2027-10-19 00:00	2028-01-10 00:00		2027-10-19 00:00	2028-01-10 00:00			2027-10-19 00:00	2028-01-10 00:00				PT_Normal					4JhGJRIARcmltdDPXqPEnw				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100015	9000	200008	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-13	Ceramic Tile Works	30011	0	0	840	0	0	0	840	0	0	0				2027-12-05 00:00	2028-04-27 00:00		2027-12-05 00:00	2028-04-27 00:00			2027-12-05 00:00	2028-04-27 00:00				PT_Normal					rdOu6fjfQy+9MMhVpEwCqw				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100016	9000	200004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-17	Electrical Wiring Second Fix	30005	760	0	224	0	0	0	224	0	0	0				2028-01-18 00:00	2028-02-24 00:00		2028-01-18 00:00	2028-02-24 00:00			2028-01-18 00:00	2028-02-24 00:00				PT_Normal					4WA3d05eTWCQkdjwMGmzYQ				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100017	9000	200004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-18	Plumbing Second Fix	30004	72	0	208	0	0	0	208	0	0	0				2028-05-21 00:00	2028-06-25 00:00		2028-05-21 00:00	2028-06-25 00:00			2028-05-21 00:00	2028-06-25 00:00				PT_Normal					0/pR+S5vSbSNwGuji/W2LA				N	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100018	9000	200004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A-19	Heating System Second Fix	30012	0	0	240	0	0	0	240	0	0	0				2028-05-28 00:00	2028-07-06 00:00		2028-05-28 00:00	2028-07-06 00:00			2028-05-28 00:00	2028-07-06 00:00				PT_Normal					INuqdyTeTVeuwCNDYsDG5g				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%R	100019	9000	200000	1000	0	N	1	N	N	CP_Drtn	TT_FinMile	DT_FixedDUR2	TK_NotStart	A-20	Project End		0	0	0	0	0	0	0	0	0	0				2028-07-09 00:00	2028-07-09 00:00		2028-07-09 00:00	2028-07-09 00:00			2028-07-09 00:00	2028-07-09 00:00				PT_Normal					DFJW6dHHS82TueKRNZDtZQ				Y	0	0			2026-04-07 12:00	2026-04-07 12:00	admin	admin	
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt	float_path	aref	arls
+%R	500000	100001	100000	9000	9000	PR_FS	0			
+%R	500001	100002	100001	9000	9000	PR_FS	0			
+%R	500002	100003	100002	9000	9000	PR_FS	0			
+%R	500003	100004	100003	9000	9000	PR_FS	0			
+%R	500004	100005	100003	9000	9000	PR_SS	240			
+%R	500005	100006	100003	9000	9000	PR_SS	240			
+%R	500006	100007	100003	9000	9000	PR_SS	240			
+%R	500007	100008	100003	9000	9000	PR_SS	360			
+%R	500008	100009	100003	9000	9000	PR_SS	480			
+%R	500009	100010	100009	9000	9000	PR_FS	0			
+%R	500010	100010	100005	9000	9000	PR_FS	0			
+%R	500011	100010	100006	9000	9000	PR_FS	0			
+%R	500012	100010	100007	9000	9000	PR_FS	0			
+%R	500013	100011	100008	9000	9000	PR_FS	0			
+%R	500014	100012	100010	9000	9000	PR_FS	0			
+%R	500015	100013	100010	9000	9000	PR_FS	0			
+%R	500016	100014	100011	9000	9000	PR_FS	0			
+%R	500017	100014	100010	9000	9000	PR_FS	0			
+%R	500018	100015	100012	9000	9000	PR_FS	0			
+%R	500019	100016	100013	9000	9000	PR_SS	80			
+%R	500020	100017	100015	9000	9000	PR_SS	120			
+%R	500021	100018	100015	9000	9000	PR_SS	160			
+%R	500022	100019	100015	9000	9000	PR_FS	0			
+%R	500023	100019	100013	9000	9000	PR_FS	0			
+%R	500024	100019	100014	9000	9000	PR_FS	0			
+%R	500025	100019	100004	9000	9000	PR_FS	0			
+%R	500026	100019	100016	9000	9000	PR_FS	0			
+%R	500027	100019	100017	9000	9000	PR_FS	0			
+%R	500028	100019	100018	9000	9000	PR_FS	0			
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	rsrc_id	proj_id	rsrc_type	target_qty	target_equip_qty	act_qty	act_equip_qty	remain_qty	remain_equip_qty	act_reg_qty	act_ot_qty	remain_reg_qty	remain_ot_qty	target_cost	act_reg_cost	act_ot_cost	remain_reg_cost	remain_ot_cost	target_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	cost_qty_type	guid
+%R	600000	100001	30000	9000	RT_Labor	2	0	0	0	2	0	0	0	2	0	0	0	0	0	0	64	0	64	64	QT_Hour	4jHq7VZYTb+4lPTAnmYZGg
+%R	600001	100002	30001	9000	RT_Labor	3	0	0	0	3	0	0	0	3	0	0	0	0	0	0	280	0	280	280	QT_Hour	s1B4k5f8Riykwq0eRlr/Vw
+%R	600002	100003	30002	9000	RT_Labor	15	0	0	0	15	0	0	0	15	0	0	0	0	0	0	1440	0	1440	1440	QT_Hour	deMy1hFySo+jylz6BuYrRQ
+%R	600003	100004	30003	9000	RT_Labor	4	0	0	0	4	0	0	0	4	0	0	0	0	0	0	272	0	272	272	QT_Hour	7szw8FLITK2UW6L63rC4+w
+%R	600004	100005	30004	9000	RT_Labor	2	0	0	0	2	0	0	0	2	0	0	0	0	0	0	256	0	256	256	QT_Hour	vmfalsOuS5q8Df6CAaI39Q
+%R	600005	100006	30004	9000	RT_Labor	2	0	0	0	2	0	0	0	2	0	0	0	0	0	0	232	0	232	232	QT_Hour	7lej7q0vRMCax3VL3OqNoQ
+%R	600006	100007	30005	9000	RT_Labor	4	0	0	0	4	0	0	0	4	0	0	0	0	0	0	280	0	280	280	QT_Hour	uc4ajQacTiShCv5zshnF9g
+%R	600007	100008	30006	9000	RT_Labor	12	0	0	0	12	0	0	0	12	0	0	0	0	0	0	712	0	712	712	QT_Hour	ajEh7yd2TYSlyKV2KbcujA
+%R	600008	100009	30006	9000	RT_Labor	12	0	0	0	12	0	0	0	12	0	0	0	0	0	0	568	0	568	568	QT_Hour	1pLroyz2RMS0xUkqZjvyMw
+%R	600009	100010	30007	9000	RT_Labor	6	0	0	0	6	0	0	0	6	0	0	0	0	0	0	440	0	440	440	QT_Hour	eJ/nlx7fQhCrLsXe5suzmA
+%R	600010	100011	30007	9000	RT_Labor	6	0	0	0	6	0	0	0	6	0	0	0	0	0	0	360	0	360	360	QT_Hour	XYe9UOSUTWK7dnsImz6hKA
+%R	600011	100012	30008	9000	RT_Labor	3	0	0	0	3	0	0	0	3	0	0	0	0	0	0	264	0	264	264	QT_Hour	tiqWhMsGTGamCd+rLOL/pg
+%R	600012	100013	30009	9000	RT_Labor	9	0	0	0	9	0	0	0	9	0	0	0	0	0	0	440	0	440	440	QT_Hour	FFDsU7ZgTnmpFjlV9HhJGw
+%R	600013	100014	30010	9000	RT_Labor	6	0	0	0	6	0	0	0	6	0	0	0	0	0	0	480	0	480	480	QT_Hour	lAPybQGeT5a/csPJ0cqjKg
+%R	600014	100015	30011	9000	RT_Labor	12	0	0	0	12	0	0	0	12	0	0	0	0	0	0	840	0	840	840	QT_Hour	WAKL984pRGGrvBJ/UQrsWw
+%R	600015	100016	30005	9000	RT_Labor	4	0	0	0	4	0	0	0	4	0	0	0	0	0	0	224	0	224	224	QT_Hour	rC4AcRN1T+ikI55vQKqPyw
+%R	600016	100017	30004	9000	RT_Labor	2	0	0	0	2	0	0	0	2	0	0	0	0	0	0	208	0	208	208	QT_Hour	EZsMHoWJRMmVjscu/jl3aA
+%R	600017	100018	30012	9000	RT_Labor	3	0	0	0	3	0	0	0	3	0	0	0	0	0	0	240	0	240	240	QT_Hour	UbwMF5iSTymp+PyuD1c85w
+%T	ACTVTYPE
+%F	actv_code_type_id	actv_short_len	seq_num	actv_code_type	proj_id	wbs_id	actv_code_type_scope
+%R	1	7	0	Phase	9000		AS_Project
+%T	ACTVCODE
+%F	actv_code_id	actv_code_type_id	actv_code_short_len	seq_num	actv_code_name	proj_id	wbs_id	guid
+%R	1	1	7	0	Milestones	9000		KpoC4vXpQIKi1755pPsSUQ
+%R	2	1	7	0	Milestones	9000		GB5ysAAVTum01m6IvRVZHQ
+%R	3	1	7	0	Substructure	9000		g28RjQy2RCa8jg+EeI1jng
+%R	4	1	7	0	Superstructure	9000		iJPVEHJVRaK/WRW2m96cdw
+%R	5	1	7	0	Specialist Works	9000		N9bnkyXDS5uUxlC1Fc/eLQ
+%R	6	1	7	0	MEP Works	9000		YvdSN1k6RGKi22SJ2SJtEg
+%R	7	1	7	0	MEP Works	9000		27ymi+USQ9m71dj2Vd4bYw
+%R	8	1	7	0	MEP Works	9000		JLPTR/cLT8KiKEG9e0ixPg
+%R	9	1	7	0	Masonry & Walls	9000		A/O/39z7TIOsAhmCxBU7BA
+%R	10	1	7	0	Masonry & Walls	9000		W5hQJCamQ020rfoXyEvRIg
+%R	11	1	7	0	Plastering & Rendering	9000		CI6hp/PjTfCKX2FACBCjmg
+%R	12	1	7	0	Plastering & Rendering	9000		GWwA2WLDQvaX7VDNtuq5BQ
+%R	13	1	7	0	Waterproofing & Insulation	9000		JesevB1bQXiLaP4+tg5MoQ
+%R	14	1	7	0	Finishing Works	9000		ymBlvtScR8K7gf5sUVBFXQ
+%R	15	1	7	0	Finishing Works	9000		nrKeml64Rc614ADw8+8dHQ
+%R	16	1	7	0	Finishing Works	9000		dyo7vrcUS/G0IING4umUcg
+%R	17	1	7	0	MEP Works	9000		21gAwx3ISxaGLrmtMU1ImA
+%R	18	1	7	0	MEP Works	9000		jfdjsteST2G54fk4KJX96g
+%R	19	1	7	0	MEP Works	9000		xyPCjqhDRtuEFMG85oauJQ
+%R	20	1	7	0	Milestones	9000		qwBna699TpuK9YPVtuxE0A
+%T	TASKACTV
+%F	taskactv_id	task_id	actv_code_id	proj_id
+%R	1	100000	1	9000
+%R	2	100001	2	9000
+%R	3	100002	3	9000
+%R	4	100003	4	9000
+%R	5	100004	5	9000
+%R	6	100005	6	9000
+%R	7	100006	7	9000
+%R	8	100007	8	9000
+%R	9	100008	9	9000
+%R	10	100009	10	9000
+%R	11	100010	11	9000
+%R	12	100011	12	9000
+%R	13	100012	13	9000
+%R	14	100013	14	9000
+%R	15	100014	15	9000
+%R	16	100015	16	9000
+%R	17	100016	17	9000
+%R	18	100017	18	9000
+%R	19	100018	19	9000
+%R	20	100019	20	9000

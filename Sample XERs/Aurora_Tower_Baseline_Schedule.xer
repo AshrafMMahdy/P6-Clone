@@ -1,0 +1,848 @@
+ERMHDR	12.0	2026-07-22	Project	WhiteHatIQ	White Hat IQ Scheduler	WhiteHatIQ	Project Management	USD
+
+%T	PROJECT
+%F	proj_id	proj_short_name	plan_start_date	plan_end_date
+%R	1	aurora_tower	2025-08-01 08:00	2028-10-02 08:00
+
+%T	CALENDAR
+%F	clndr_id	clndr_name	day_hr_cnt	week_hr_cnt
+%R	1	Standard 5-Day	8.0	40.0
+
+%T	PROJWBS
+%F	wbs_id	proj_id	parent_wbs_id	wbs_name	wbs_short_name	proj_node_flag
+%R	1	1		Aurora Tower	WBS-1	Y
+
+%T	TASK
+%F	task_id	proj_id	wbs_id	task_code	task_name	task_type	target_drtn_hr_cnt	remain_drtn_hr_cnt	total_float_hr_cnt	phys_complete_pct	target_start_date	target_end_date	early_start_date	early_end_date	status_code	clndr_id
+%R	1	1	1	1	Design Team Mobilization	TT_Task	80	80	0	0	2025-08-01 08:00	2025-08-14 08:00	2025-08-01 08:00	2025-08-14 08:00	TK_NotStart	1
+%R	303	1	1	303	PROJECT START - NTP & Commencement	TT_Mile	0	0	0	0	2025-08-01 08:00	2025-08-01 08:00	2025-08-01 08:00	2025-08-01 08:00	TK_NotStart	1
+%R	2	1	1	2	Pre-Application Meeting with City Planning Authority	TT_Task	24	24	96	0	2025-08-15 08:00	2025-08-19 08:00	2025-08-15 08:00	2025-08-19 08:00	TK_NotStart	1
+%R	3	1	1	3	Topographic Survey & Geotechnical Investigation	TT_Task	120	120	0	0	2025-08-15 08:00	2025-09-04 08:00	2025-08-15 08:00	2025-09-04 08:00	TK_NotStart	1
+%R	4	1	1	4	Foundation Recommendation Review & Confirmation	TT_Task	40	40	6288	0	2025-09-05 08:00	2025-09-11 08:00	2025-09-05 08:00	2025-09-11 08:00	TK_NotStart	1
+%R	5	1	1	5	Concept Design	TT_Task	120	120	0	0	2025-09-05 08:00	2025-09-25 08:00	2025-09-05 08:00	2025-09-25 08:00	TK_NotStart	1
+%R	6	1	1	6	Schematic Design	TT_Task	200	200	0	0	2025-09-26 08:00	2025-10-30 08:00	2025-09-26 08:00	2025-10-30 08:00	TK_NotStart	1
+%R	12	1	1	12	Structural System Concept & Selection	TT_Task	40	40	608	0	2025-09-26 08:00	2025-10-02 08:00	2025-09-26 08:00	2025-10-02 08:00	TK_NotStart	1
+%R	13	1	1	13	Foundation System Design	TT_Task	80	80	6168	0	2025-10-03 08:00	2025-10-16 08:00	2025-10-03 08:00	2025-10-16 08:00	TK_NotStart	1
+%R	15	1	1	15	Superstructure Framing Design	TT_Task	160	160	608	0	2025-10-03 08:00	2025-10-30 08:00	2025-10-03 08:00	2025-10-30 08:00	TK_NotStart	1
+%R	7	1	1	7	Design Development / Detailed Design	TT_Task	240	240	0	0	2025-10-31 08:00	2025-12-11 08:00	2025-10-31 08:00	2025-12-11 08:00	TK_NotStart	1
+%R	16	1	1	16	Precast Concrete & Prefab Element Specifications	TT_Task	64	64	848	0	2025-10-31 08:00	2025-11-11 08:00	2025-10-31 08:00	2025-11-11 08:00	TK_NotStart	1
+%R	17	1	1	17	Structural Calculations & FEM Analysis	TT_Task	120	120	792	0	2025-10-31 08:00	2025-11-20 08:00	2025-10-31 08:00	2025-11-20 08:00	TK_NotStart	1
+%R	46	1	1	46	Structural BIM Model Development	TT_Task	120	120	608	0	2025-10-31 08:00	2025-11-20 08:00	2025-10-31 08:00	2025-11-20 08:00	TK_NotStart	1
+%R	18	1	1	18	Structural IFC Package	TT_Task	64	64	792	0	2025-11-21 08:00	2025-12-02 08:00	2025-11-21 08:00	2025-12-02 08:00	TK_NotStart	1
+%R	8	1	1	8	Interior Space Planning & Layout	TT_Task	160	160	5568	0	2025-12-12 08:00	2026-01-08 08:00	2025-12-12 08:00	2026-01-08 08:00	TK_NotStart	1
+%R	19	1	1	19	Heating & Cooling Load Analysis	TT_Task	64	64	200	0	2025-12-12 08:00	2025-12-23 08:00	2025-12-12 08:00	2025-12-23 08:00	TK_NotStart	1
+%R	27	1	1	27	Power Demand Assessment & Utility Connection Design	TT_Task	40	40	0	0	2025-12-12 08:00	2025-12-18 08:00	2025-12-12 08:00	2025-12-18 08:00	TK_NotStart	1
+%R	35	1	1	35	Site Grading, Drainage & Stormwater Design	TT_Task	64	64	552	0	2025-12-12 08:00	2025-12-23 08:00	2025-12-12 08:00	2025-12-23 08:00	TK_NotStart	1
+%R	40	1	1	40	Fire Safety Engineering Report	TT_Task	80	80	472	0	2025-12-12 08:00	2025-12-25 08:00	2025-12-12 08:00	2025-12-25 08:00	TK_NotStart	1
+%R	42	1	1	42	Elevator Engineering & Specification	TT_Task	64	64	672	0	2025-12-12 08:00	2025-12-23 08:00	2025-12-12 08:00	2025-12-23 08:00	TK_NotStart	1
+%R	45	1	1	45	Architectural BIM Model Development	TT_Task	160	160	328	0	2025-12-12 08:00	2026-01-08 08:00	2025-12-12 08:00	2026-01-08 08:00	TK_NotStart	1
+%R	28	1	1	28	MV/LV Power Distribution Design	TT_Task	64	64	0	0	2025-12-19 08:00	2025-12-30 08:00	2025-12-19 08:00	2025-12-30 08:00	TK_NotStart	1
+%R	20	1	1	20	District Heating Connection Design	TT_Task	40	40	568	0	2025-12-24 08:00	2025-12-30 08:00	2025-12-24 08:00	2025-12-30 08:00	TK_NotStart	1
+%R	21	1	1	21	Mechanical Ventilation System Design	TT_Task	80	80	224	0	2025-12-24 08:00	2026-01-06 08:00	2025-12-24 08:00	2026-01-06 08:00	TK_NotStart	1
+%R	22	1	1	22	Cooling System Design	TT_Task	64	64	240	0	2025-12-24 08:00	2026-01-02 08:00	2025-12-24 08:00	2026-01-02 08:00	TK_NotStart	1
+%R	23	1	1	23	Plumbing & Domestic Water System Design	TT_Task	64	64	200	0	2025-12-24 08:00	2026-01-02 08:00	2025-12-24 08:00	2026-01-02 08:00	TK_NotStart	1
+%R	36	1	1	36	Parking, Driveways & Access Road Design	TT_Task	40	40	552	0	2025-12-24 08:00	2025-12-30 08:00	2025-12-24 08:00	2025-12-30 08:00	TK_NotStart	1
+%R	37	1	1	37	Underground Utilities Routing	TT_Task	40	40	552	0	2025-12-24 08:00	2025-12-30 08:00	2025-12-24 08:00	2025-12-30 08:00	TK_NotStart	1
+%R	41	1	1	41	Acoustic & Vibration Analysis	TT_Task	64	64	472	0	2025-12-26 08:00	2026-01-06 08:00	2025-12-26 08:00	2026-01-06 08:00	TK_NotStart	1
+%R	14	1	1	14	Basement & Retaining Structure Design	TT_Task	64	64	5680	0	2025-12-31 08:00	2026-01-09 08:00	2025-12-31 08:00	2026-01-09 08:00	TK_NotStart	1
+%R	29	1	1	29	Lighting Design	TT_Task	64	64	0	0	2025-12-31 08:00	2026-01-09 08:00	2025-12-31 08:00	2026-01-09 08:00	TK_NotStart	1
+%R	38	1	1	38	Landscaping & External Lighting Design	TT_Task	40	40	552	0	2025-12-31 08:00	2026-01-06 08:00	2025-12-31 08:00	2026-01-06 08:00	TK_NotStart	1
+%R	24	1	1	24	Drainage & Sanitary System Design	TT_Task	40	40	200	0	2026-01-05 08:00	2026-01-09 08:00	2026-01-05 08:00	2026-01-09 08:00	TK_NotStart	1
+%R	25	1	1	25	Energy Performance Analysis	TT_Task	40	40	432	0	2026-01-07 08:00	2026-01-13 08:00	2026-01-07 08:00	2026-01-13 08:00	TK_NotStart	1
+%R	39	1	1	39	Civil IFC Package	TT_Task	40	40	552	0	2026-01-07 08:00	2026-01-13 08:00	2026-01-07 08:00	2026-01-13 08:00	TK_NotStart	1
+%R	55	1	1	55	Fire Authority & Environmental Submissions	TT_Task	120	120	472	0	2026-01-07 08:00	2026-01-27 08:00	2026-01-07 08:00	2026-01-27 08:00	TK_NotStart	1
+%R	9	1	1	9	Material, Finish & Specification Schedule	TT_Task	80	80	5568	0	2026-01-09 08:00	2026-01-22 08:00	2026-01-09 08:00	2026-01-22 08:00	TK_NotStart	1
+%R	54	1	1	54	IFC Package Preparation — Architectural	TT_Task	80	80	496	0	2026-01-09 08:00	2026-01-22 08:00	2026-01-09 08:00	2026-01-22 08:00	TK_NotStart	1
+%R	30	1	1	30	Fire Alarm & Detection System Design	TT_Task	40	40	0	0	2026-01-12 08:00	2026-01-16 08:00	2026-01-12 08:00	2026-01-16 08:00	TK_NotStart	1
+%R	26	1	1	26	Mechanical IFC Package	TT_Task	64	64	488	0	2026-01-14 08:00	2026-01-23 08:00	2026-01-14 08:00	2026-01-23 08:00	TK_NotStart	1
+%R	43	1	1	43	Sustainability Assessment	TT_Task	80	80	432	0	2026-01-14 08:00	2026-01-27 08:00	2026-01-14 08:00	2026-01-27 08:00	TK_NotStart	1
+%R	31	1	1	31	Security, Access Control & CCTV Design	TT_Task	40	40	0	0	2026-01-19 08:00	2026-01-23 08:00	2026-01-19 08:00	2026-01-23 08:00	TK_NotStart	1
+%R	10	1	1	10	Wayfinding & Signage Design	TT_Task	40	40	5568	0	2026-01-23 08:00	2026-01-29 08:00	2026-01-23 08:00	2026-01-29 08:00	TK_NotStart	1
+%R	11	1	1	11	Interior IFC Package	TT_Task	40	40	5568	0	2026-01-23 08:00	2026-01-29 08:00	2026-01-23 08:00	2026-01-29 08:00	TK_NotStart	1
+%R	32	1	1	32	Data, Communications & AV Design	TT_Task	40	40	0	0	2026-01-26 08:00	2026-01-30 08:00	2026-01-26 08:00	2026-01-30 08:00	TK_NotStart	1
+%R	44	1	1	44	Solar PV & Green Roof Technical Specification	TT_Task	40	40	432	0	2026-01-28 08:00	2026-02-03 08:00	2026-01-28 08:00	2026-02-03 08:00	TK_NotStart	1
+%R	33	1	1	33	Building Automation & BMS Design	TT_Task	80	80	0	0	2026-02-02 08:00	2026-02-13 08:00	2026-02-02 08:00	2026-02-13 08:00	TK_NotStart	1
+%R	34	1	1	34	Electrical IFC Package	TT_Task	64	64	304	0	2026-02-16 08:00	2026-02-25 08:00	2026-02-16 08:00	2026-02-25 08:00	TK_NotStart	1
+%R	47	1	1	47	MEP BIM Model Development	TT_Task	120	120	0	0	2026-02-16 08:00	2026-03-06 08:00	2026-02-16 08:00	2026-03-06 08:00	TK_NotStart	1
+%R	48	1	1	48	Multi-Discipline Clash Detection & Coordination	TT_Task	80	80	0	0	2026-03-09 08:00	2026-03-20 08:00	2026-03-09 08:00	2026-03-20 08:00	TK_NotStart	1
+%R	49	1	1	49	4D BIM Schedule Integration	TT_Task	40	40	128	0	2026-03-23 08:00	2026-03-27 08:00	2026-03-23 08:00	2026-03-27 08:00	TK_NotStart	1
+%R	50	1	1	50	Model-Based Quantity Take-Off (MTO) for Procurement	TT_Task	64	64	0	0	2026-03-23 08:00	2026-04-01 08:00	2026-03-23 08:00	2026-04-01 08:00	TK_NotStart	1
+%R	51	1	1	51	MTO Finalization from BIM Model	TT_Task	40	40	0	0	2026-04-02 08:00	2026-04-08 08:00	2026-04-02 08:00	2026-04-08 08:00	TK_NotStart	1
+%R	52	1	1	52	Approved Vendor List Compilation	TT_Task	40	40	0	0	2026-04-09 08:00	2026-04-15 08:00	2026-04-09 08:00	2026-04-15 08:00	TK_NotStart	1
+%R	53	1	1	53	VDRL Compilation	TT_Task	24	24	0	0	2026-04-16 08:00	2026-04-20 08:00	2026-04-16 08:00	2026-04-20 08:00	TK_NotStart	1
+%R	56	1	1	56	Building Permit Application Preparation & Submission	TT_Task	160	160	0	0	2026-04-21 08:00	2026-05-18 08:00	2026-04-21 08:00	2026-05-18 08:00	TK_NotStart	1
+%R	57	1	1	57	Authority Review & Condition Response	TT_Task	320	320	0	0	2026-05-19 08:00	2026-07-13 08:00	2026-05-19 08:00	2026-07-13 08:00	TK_NotStart	1
+%R	58	1	1	58	Site Handover from Client & Boundary Survey	TT_Task	24	24	0	0	2026-07-14 08:00	2026-07-16 08:00	2026-07-14 08:00	2026-07-16 08:00	TK_NotStart	1
+%R	304	1	1	304	MILESTONE: Design & Approvals Complete	TT_Mile	0	0	0	0	2026-07-14 08:00	2026-07-14 08:00	2026-07-14 08:00	2026-07-14 08:00	TK_NotStart	1
+%R	59	1	1	59	Temporary Site Facilities Setup	TT_Task	40	40	0	0	2026-07-17 08:00	2026-07-23 08:00	2026-07-17 08:00	2026-07-23 08:00	TK_NotStart	1
+%R	62	1	1	62	Shipping & Logistics Coordination	TT_Task	80	80	0	0	2026-07-17 08:00	2026-07-30 08:00	2026-07-17 08:00	2026-07-30 08:00	TK_NotStart	1
+%R	60	1	1	60	Tower Crane Erection & Commissioning	TT_Task	80	80	4488	0	2026-07-24 08:00	2026-08-06 08:00	2026-07-24 08:00	2026-08-06 08:00	TK_NotStart	1
+%R	61	1	1	61	Key Subcontractor Mobilization	TT_Task	40	40	0	0	2026-07-24 08:00	2026-07-30 08:00	2026-07-24 08:00	2026-07-30 08:00	TK_NotStart	1
+%R	63	1	1	63	Site Receiving, Inspection & Storage	TT_Task	120	120	0	0	2026-07-31 08:00	2026-08-20 08:00	2026-07-31 08:00	2026-08-20 08:00	TK_NotStart	1
+%R	64	1	1	64	Piling Works	TT_Task	240	240	0	0	2026-08-21 08:00	2026-10-01 08:00	2026-08-21 08:00	2026-10-01 08:00	TK_NotStart	1
+%R	305	1	1	305	MILESTONE: Site Mobilization Complete	TT_Mile	0	0	0	0	2026-08-21 08:00	2026-08-21 08:00	2026-08-21 08:00	2026-08-21 08:00	TK_NotStart	1
+%R	65	1	1	65	Piling Load Testing & Inspection	TT_Task	40	40	0	0	2026-10-02 08:00	2026-10-08 08:00	2026-10-02 08:00	2026-10-08 08:00	TK_NotStart	1
+%R	66	1	1	66	Sheet Pile / Soldier Pile Shoring Installation	TT_Task	120	120	0	0	2026-10-07 08:00	2026-10-27 08:00	2026-10-07 08:00	2026-10-27 08:00	TK_NotStart	1
+%R	67	1	1	67	Dewatering System Installation	TT_Task	24	24	0	0	2026-10-12 08:00	2026-10-14 08:00	2026-10-12 08:00	2026-10-14 08:00	TK_NotStart	1
+%R	68	1	1	68	Stage 1 Excavation — to Basement Level 1 Formation	TT_Task	120	120	0	0	2026-10-15 08:00	2026-11-04 08:00	2026-10-15 08:00	2026-11-04 08:00	TK_NotStart	1
+%R	69	1	1	69	Stage 1 Propping — Level 1 Waler & Props	TT_Task	40	40	0	0	2026-10-20 08:00	2026-10-26 08:00	2026-10-20 08:00	2026-10-26 08:00	TK_NotStart	1
+%R	70	1	1	70	Stage 2 Excavation — to Basement Level 2 Formation	TT_Task	120	120	0	0	2026-10-27 08:00	2026-11-16 08:00	2026-10-27 08:00	2026-11-16 08:00	TK_NotStart	1
+%R	71	1	1	71	Stage 2 Propping — Level 2 Waler & Props	TT_Task	32	32	0	0	2026-11-17 08:00	2026-11-20 08:00	2026-11-17 08:00	2026-11-20 08:00	TK_NotStart	1
+%R	72	1	1	72	Formation Level Preparation & Blinding	TT_Task	32	32	0	0	2026-11-23 08:00	2026-11-26 08:00	2026-11-23 08:00	2026-11-26 08:00	TK_NotStart	1
+%R	73	1	1	73	Foundation Waterproofing & Drainage Layer	TT_Task	40	40	0	0	2026-11-27 08:00	2026-12-03 08:00	2026-11-27 08:00	2026-12-03 08:00	TK_NotStart	1
+%R	74	1	1	74	Pile Caps & Ground Beams	TT_Task	80	80	0	0	2026-12-04 08:00	2026-12-17 08:00	2026-12-04 08:00	2026-12-17 08:00	TK_NotStart	1
+%R	75	1	1	75	Basement Level 2 Slab — Formwork, Rebar & Concrete	TT_Task	80	80	0	0	2026-12-18 08:00	2026-12-31 08:00	2026-12-18 08:00	2026-12-31 08:00	TK_NotStart	1
+%R	76	1	1	76	Basement Level 2 RC Walls & Columns	TT_Task	96	96	0	0	2027-01-01 08:00	2027-01-18 08:00	2027-01-01 08:00	2027-01-18 08:00	TK_NotStart	1
+%R	77	1	1	77	Basement Level 2 Waterproofing — Slab & Walls	TT_Task	64	64	0	0	2027-01-19 08:00	2027-01-28 08:00	2027-01-19 08:00	2027-01-28 08:00	TK_NotStart	1
+%R	78	1	1	78	Basement Level 1 Slab — Formwork, Rebar & Concrete	TT_Task	96	96	0	0	2027-01-29 08:00	2027-02-15 08:00	2027-01-29 08:00	2027-02-15 08:00	TK_NotStart	1
+%R	79	1	1	79	Basement Level 1 RC Walls & Columns	TT_Task	80	80	0	0	2027-02-16 08:00	2027-03-01 08:00	2027-02-16 08:00	2027-03-01 08:00	TK_NotStart	1
+%R	80	1	1	80	Basement Level 1 Waterproofing — Slab & Walls	TT_Task	64	64	0	0	2027-03-02 08:00	2027-03-11 08:00	2027-03-02 08:00	2027-03-11 08:00	TK_NotStart	1
+%R	81	1	1	81	Ground Floor Slab (Substructure Interface)	TT_Task	64	64	0	0	2027-03-12 08:00	2027-03-23 08:00	2027-03-12 08:00	2027-03-23 08:00	TK_NotStart	1
+%R	82	1	1	82	Ground Floor Slab & Podium Structure	TT_Task	64	64	0	0	2027-03-24 08:00	2027-04-02 08:00	2027-03-24 08:00	2027-04-02 08:00	TK_NotStart	1
+%R	306	1	1	306	MILESTONE: Substructure Complete	TT_Mile	0	0	0	0	2027-03-24 08:00	2027-03-24 08:00	2027-03-24 08:00	2027-03-24 08:00	TK_NotStart	1
+%R	83	1	1	83	Concrete Core Walls – Progressive Floors	TT_Task	400	400	0	0	2027-04-05 08:00	2027-06-11 08:00	2027-04-05 08:00	2027-06-11 08:00	TK_NotStart	1
+%R	84	1	1	84	Structural Frame – Floors 1 to N (RC Columns & Precast Spine Beams)	TT_Task	360	360	0	0	2027-06-14 08:00	2027-08-13 08:00	2027-06-14 08:00	2027-08-13 08:00	TK_NotStart	1
+%R	294	1	1	294	Core Wall Construction - Floors 5-6	TT_Task	40	40	1720	0	2027-06-14 08:00	2027-06-18 08:00	2027-06-14 08:00	2027-06-18 08:00	TK_NotStart	1
+%R	295	1	1	295	Core Wall Construction - Floors 7-8	TT_Task	40	40	1720	0	2027-06-16 08:00	2027-06-22 08:00	2027-06-16 08:00	2027-06-22 08:00	TK_NotStart	1
+%R	296	1	1	296	Core Wall Construction - Floors 9-10	TT_Task	40	40	1720	0	2027-06-18 08:00	2027-06-24 08:00	2027-06-18 08:00	2027-06-24 08:00	TK_NotStart	1
+%R	297	1	1	297	Core Wall Construction - Floors 11-12	TT_Task	40	40	1720	0	2027-06-22 08:00	2027-06-28 08:00	2027-06-22 08:00	2027-06-28 08:00	TK_NotStart	1
+%R	85	1	1	85	Precast Floor Plank Installation – Typical Floors	TT_Task	240	240	0	0	2027-08-16 08:00	2027-09-24 08:00	2027-08-16 08:00	2027-09-24 08:00	TK_NotStart	1
+%R	111	1	1	111	Internal Doors, Frames & Hardware – Typical Floors (12 floors)	TT_Task	48	48	2312	0	2027-08-16 08:00	2027-08-23 08:00	2027-08-16 08:00	2027-08-23 08:00	TK_NotStart	1
+%R	114	1	1	114	Raised Access Flooring – Typical Floors (12 floors)	TT_Task	48	48	2312	0	2027-08-16 08:00	2027-08-23 08:00	2027-08-16 08:00	2027-08-23 08:00	TK_NotStart	1
+%R	298	1	1	298	Precast Frame Erection - Floors 5-6	TT_Task	48	48	1352	0	2027-08-16 08:00	2027-08-23 08:00	2027-08-16 08:00	2027-08-23 08:00	TK_NotStart	1
+%R	299	1	1	299	Precast Frame Erection - Floors 7-8	TT_Task	48	48	1352	0	2027-08-18 08:00	2027-08-25 08:00	2027-08-18 08:00	2027-08-25 08:00	TK_NotStart	1
+%R	300	1	1	300	Precast Frame Erection - Floors 9-10	TT_Task	48	48	1352	0	2027-08-20 08:00	2027-08-27 08:00	2027-08-20 08:00	2027-08-27 08:00	TK_NotStart	1
+%R	301	1	1	301	Precast Frame Erection - Floors 11-12	TT_Task	48	48	1352	0	2027-08-24 08:00	2027-08-31 08:00	2027-08-24 08:00	2027-08-31 08:00	TK_NotStart	1
+%R	87	1	1	87	Roof Structural Frame & Penthouse	TT_Task	80	80	1352	0	2027-09-01 08:00	2027-09-14 08:00	2027-09-01 08:00	2027-09-14 08:00	TK_NotStart	1
+%R	88	1	1	88	Roof Structural Slab Construction (concrete + precast elements)	TT_Task	80	80	1352	0	2027-09-15 08:00	2027-09-28 08:00	2027-09-15 08:00	2027-09-28 08:00	TK_NotStart	1
+%R	86	1	1	86	In-Situ Concrete Topping Pours – Typical Floors	TT_Task	200	200	0	0	2027-09-27 08:00	2027-10-29 08:00	2027-09-27 08:00	2027-10-29 08:00	TK_NotStart	1
+%R	89	1	1	89	Parapet Walls Construction (RC walls around roof perimeter)	TT_Task	80	80	1352	0	2027-09-29 08:00	2027-10-12 08:00	2027-09-29 08:00	2027-10-12 08:00	TK_NotStart	1
+%R	90	1	1	90	Roof Thermal Insulation Installation (rigid board insulation)	TT_Task	40	40	1392	0	2027-09-29 08:00	2027-10-05 08:00	2027-09-29 08:00	2027-10-05 08:00	TK_NotStart	1
+%R	91	1	1	91	Roof Waterproofing Membrane Installation (single-ply membrane system)	TT_Task	64	64	1352	0	2027-10-13 08:00	2027-10-22 08:00	2027-10-13 08:00	2027-10-22 08:00	TK_NotStart	1
+%R	92	1	1	92	Roof Drainage & Downspout Installation (gutters, downpipes, connections)	TT_Task	40	40	1352	0	2027-10-25 08:00	2027-10-29 08:00	2027-10-25 08:00	2027-10-29 08:00	TK_NotStart	1
+%R	93	1	1	93	Curtain Wall & Rain-Screen Cladding Installation — Ground Floor	TT_Task	32	32	0	0	2027-11-01 08:00	2027-11-04 08:00	2027-11-01 08:00	2027-11-04 08:00	TK_NotStart	1
+%R	106	1	1	106	Internal Partition Walls – Basement Common Areas	TT_Task	24	24	1296	0	2027-11-01 08:00	2027-11-03 08:00	2027-11-01 08:00	2027-11-03 08:00	TK_NotStart	1
+%R	307	1	1	307	MILESTONE: Roof Structure Complete	TT_Mile	0	0	1920	0	2027-11-01 08:00	2027-11-01 08:00	2027-11-01 08:00	2027-11-01 08:00	TK_NotStart	1
+%R	107	1	1	107	Internal Partition Walls – Ground Floor Lobby/Retail	TT_Task	32	32	1296	0	2027-11-04 08:00	2027-11-09 08:00	2027-11-04 08:00	2027-11-09 08:00	TK_NotStart	1
+%R	109	1	1	109	Internal Doors, Frames & Hardware – Basement Common Areas	TT_Task	16	16	1816	0	2027-11-04 08:00	2027-11-05 08:00	2027-11-04 08:00	2027-11-05 08:00	TK_NotStart	1
+%R	112	1	1	112	Raised Access Flooring – Basement Common Areas	TT_Task	16	16	1856	0	2027-11-04 08:00	2027-11-05 08:00	2027-11-04 08:00	2027-11-05 08:00	TK_NotStart	1
+%R	115	1	1	115	Floor Screeds & Substrate Preparation – Basement Common Areas	TT_Task	16	16	1808	0	2027-11-04 08:00	2027-11-05 08:00	2027-11-04 08:00	2027-11-05 08:00	TK_NotStart	1
+%R	122	1	1	122	Wall Finishes – Painting, Tiling & Feature Cladding – Basement Common Areas	TT_Task	24	24	1360	0	2027-11-04 08:00	2027-11-08 08:00	2027-11-04 08:00	2027-11-08 08:00	TK_NotStart	1
+%R	94	1	1	94	Curtain Wall & Rain-Screen Cladding Installation — Floor 1	TT_Task	24	24	0	0	2027-11-05 08:00	2027-11-09 08:00	2027-11-05 08:00	2027-11-09 08:00	TK_NotStart	1
+%R	118	1	1	118	Floor Finishes – Office Areas (Typical Floors only)	TT_Task	64	64	1816	0	2027-11-08 08:00	2027-11-17 08:00	2027-11-08 08:00	2027-11-17 08:00	TK_NotStart	1
+%R	119	1	1	119	Floor Finishes – Wet Areas, Lobby & Common Areas – Basement Common Areas	TT_Task	16	16	1840	0	2027-11-08 08:00	2027-11-09 08:00	2027-11-08 08:00	2027-11-09 08:00	TK_NotStart	1
+%R	95	1	1	95	Curtain Wall & Rain-Screen Cladding Installation — Floor 2	TT_Task	24	24	0	0	2027-11-09 08:00	2027-11-11 08:00	2027-11-09 08:00	2027-11-11 08:00	TK_NotStart	1
+%R	125	1	1	125	Suspended Ceiling Systems – Basement Common Areas	TT_Task	16	16	1416	0	2027-11-09 08:00	2027-11-10 08:00	2027-11-09 08:00	2027-11-10 08:00	TK_NotStart	1
+%R	108	1	1	108	Internal Partition Walls – Typical Floors (12 floors)	TT_Task	96	96	1296	0	2027-11-10 08:00	2027-11-25 08:00	2027-11-10 08:00	2027-11-25 08:00	TK_NotStart	1
+%R	110	1	1	110	Internal Doors, Frames & Hardware – Ground Floor Lobby/Retail	TT_Task	24	24	1808	0	2027-11-10 08:00	2027-11-12 08:00	2027-11-10 08:00	2027-11-12 08:00	TK_NotStart	1
+%R	113	1	1	113	Raised Access Flooring – Ground Floor Lobby/Retail	TT_Task	24	24	1840	0	2027-11-10 08:00	2027-11-12 08:00	2027-11-10 08:00	2027-11-12 08:00	TK_NotStart	1
+%R	116	1	1	116	Floor Screeds & Substrate Preparation – Ground Floor Lobby/Retail	TT_Task	24	24	1792	0	2027-11-10 08:00	2027-11-12 08:00	2027-11-10 08:00	2027-11-12 08:00	TK_NotStart	1
+%R	123	1	1	123	Wall Finishes – Painting, Tiling & Feature Cladding – Ground Floor Lobby/Retail	TT_Task	40	40	1352	0	2027-11-10 08:00	2027-11-16 08:00	2027-11-10 08:00	2027-11-16 08:00	TK_NotStart	1
+%R	96	1	1	96	Curtain Wall & Rain-Screen Cladding Installation — Floor 3	TT_Task	24	24	0	0	2027-11-11 08:00	2027-11-15 08:00	2027-11-11 08:00	2027-11-15 08:00	TK_NotStart	1
+%R	128	1	1	128	Toilet & Bathroom Fit-Out – Basement Common Areas	TT_Task	24	24	1456	0	2027-11-11 08:00	2027-11-15 08:00	2027-11-11 08:00	2027-11-15 08:00	TK_NotStart	1
+%R	97	1	1	97	Curtain Wall & Rain-Screen Cladding Installation — Floor 4	TT_Task	24	24	0	0	2027-11-15 08:00	2027-11-17 08:00	2027-11-15 08:00	2027-11-17 08:00	TK_NotStart	1
+%R	120	1	1	120	Floor Finishes – Wet Areas, Lobby & Common Areas – Ground Floor Lobby/Retail	TT_Task	24	24	1816	0	2027-11-15 08:00	2027-11-17 08:00	2027-11-15 08:00	2027-11-17 08:00	TK_NotStart	1
+%R	121	1	1	121	Floor Finishes – Wet Areas, Lobby & Common Areas – Typical Floors (12 floors)	TT_Task	32	32	1808	0	2027-11-15 08:00	2027-11-18 08:00	2027-11-15 08:00	2027-11-18 08:00	TK_NotStart	1
+%R	132	1	1	132	Joinery, Millwork & Built-In Furniture – Basement Common Areas	TT_Task	16	16	1488	0	2027-11-16 08:00	2027-11-17 08:00	2027-11-16 08:00	2027-11-17 08:00	TK_NotStart	1
+%R	98	1	1	98	Curtain Wall & Rain-Screen Cladding Installation — Floor 5	TT_Task	24	24	0	0	2027-11-17 08:00	2027-11-19 08:00	2027-11-17 08:00	2027-11-19 08:00	TK_NotStart	1
+%R	126	1	1	126	Suspended Ceiling Systems – Ground Floor Lobby/Retail	TT_Task	32	32	1384	0	2027-11-17 08:00	2027-11-22 08:00	2027-11-17 08:00	2027-11-22 08:00	TK_NotStart	1
+%R	135	1	1	135	Wayfinding & Signage Installation – Basement Common Areas	TT_Task	8	8	1536	0	2027-11-18 08:00	2027-11-18 08:00	2027-11-18 08:00	2027-11-18 08:00	TK_NotStart	1
+%R	99	1	1	99	Curtain Wall & Rain-Screen Cladding Installation — Floor 6	TT_Task	24	24	0	0	2027-11-19 08:00	2027-11-23 08:00	2027-11-19 08:00	2027-11-23 08:00	TK_NotStart	1
+%R	100	1	1	100	Curtain Wall & Rain-Screen Cladding Installation — Floor 7	TT_Task	24	24	0	0	2027-11-23 08:00	2027-11-25 08:00	2027-11-23 08:00	2027-11-25 08:00	TK_NotStart	1
+%R	129	1	1	129	Toilet & Bathroom Fit-Out – Ground Floor Lobby/Retail	TT_Task	32	32	1416	0	2027-11-23 08:00	2027-11-26 08:00	2027-11-23 08:00	2027-11-26 08:00	TK_NotStart	1
+%R	131	1	1	131	Reception, Lobby & Common Area Fit-Out – Ground Floor	TT_Task	80	80	1384	0	2027-11-23 08:00	2027-12-06 08:00	2027-11-23 08:00	2027-12-06 08:00	TK_NotStart	1
+%R	101	1	1	101	Curtain Wall & Rain-Screen Cladding Installation — Floor 8	TT_Task	24	24	0	0	2027-11-25 08:00	2027-11-29 08:00	2027-11-25 08:00	2027-11-29 08:00	TK_NotStart	1
+%R	117	1	1	117	Floor Screeds & Substrate Preparation – Typical Floors (12 floors)	TT_Task	48	48	1720	0	2027-11-26 08:00	2027-12-03 08:00	2027-11-26 08:00	2027-12-03 08:00	TK_NotStart	1
+%R	124	1	1	124	Wall Finishes – Painting, Tiling & Feature Cladding – Typical Floors (12 floors)	TT_Task	64	64	1296	0	2027-11-26 08:00	2027-12-07 08:00	2027-11-26 08:00	2027-12-07 08:00	TK_NotStart	1
+%R	102	1	1	102	Curtain Wall & Rain-Screen Cladding Installation — Floor 9	TT_Task	24	24	0	0	2027-11-29 08:00	2027-12-01 08:00	2027-11-29 08:00	2027-12-01 08:00	TK_NotStart	1
+%R	103	1	1	103	Curtain Wall & Rain-Screen Cladding Installation — Floor 10	TT_Task	24	24	0	0	2027-12-01 08:00	2027-12-03 08:00	2027-12-01 08:00	2027-12-03 08:00	TK_NotStart	1
+%R	104	1	1	104	Curtain Wall & Rain-Screen Cladding Installation — Floor 11	TT_Task	24	24	0	0	2027-12-03 08:00	2027-12-07 08:00	2027-12-03 08:00	2027-12-07 08:00	TK_NotStart	1
+%R	105	1	1	105	Curtain Wall & Rain-Screen Cladding Installation — Floor 12	TT_Task	24	24	0	0	2027-12-07 08:00	2027-12-09 08:00	2027-12-07 08:00	2027-12-09 08:00	TK_NotStart	1
+%R	133	1	1	133	Joinery, Millwork & Built-In Furniture – Ground Floor Lobby/Retail	TT_Task	32	32	1384	0	2027-12-07 08:00	2027-12-10 08:00	2027-12-07 08:00	2027-12-10 08:00	TK_NotStart	1
+%R	127	1	1	127	Suspended Ceiling Systems – Typical Floors (12 floors)	TT_Task	64	64	1296	0	2027-12-08 08:00	2027-12-17 08:00	2027-12-08 08:00	2027-12-17 08:00	TK_NotStart	1
+%R	138	1	1	138	Elevator Pit & Shaft Final Preparation	TT_Task	24	24	272	0	2027-12-10 08:00	2027-12-14 08:00	2027-12-10 08:00	2027-12-14 08:00	TK_NotStart	1
+%R	145	1	1	145	Fire Alarm Installation - Basement	TT_Task	160	160	1168	0	2027-12-10 08:00	2028-01-06 08:00	2027-12-10 08:00	2028-01-06 08:00	TK_NotStart	1
+%R	149	1	1	149	Sprinkler Installation - Basement	TT_Task	160	160	1168	0	2027-12-10 08:00	2028-01-06 08:00	2027-12-10 08:00	2028-01-06 08:00	TK_NotStart	1
+%R	153	1	1	153	Emergency Lighting Installation - Basement	TT_Task	120	120	1264	0	2027-12-10 08:00	2027-12-30 08:00	2027-12-10 08:00	2027-12-30 08:00	TK_NotStart	1
+%R	157	1	1	157	Smoke Control Ductwork Installation - Basement	TT_Task	160	160	0	0	2027-12-10 08:00	2028-01-06 08:00	2027-12-10 08:00	2028-01-06 08:00	TK_NotStart	1
+%R	308	1	1	308	MILESTONE: Building Weathertight	TT_Mile	0	0	272	0	2027-12-10 08:00	2027-12-10 08:00	2027-12-10 08:00	2027-12-10 08:00	TK_NotStart	1
+%R	136	1	1	136	Wayfinding & Signage Installation – Ground Floor Lobby/Retail	TT_Task	16	16	1408	0	2027-12-13 08:00	2027-12-14 08:00	2027-12-13 08:00	2027-12-14 08:00	TK_NotStart	1
+%R	139	1	1	139	Guide Rail & Counterweight Installation	TT_Task	80	80	272	0	2027-12-15 08:00	2027-12-28 08:00	2027-12-15 08:00	2027-12-28 08:00	TK_NotStart	1
+%R	130	1	1	130	Toilet & Bathroom Fit-Out – Typical Floors (12 floors)	TT_Task	48	48	1296	0	2027-12-20 08:00	2027-12-27 08:00	2027-12-20 08:00	2027-12-27 08:00	TK_NotStart	1
+%R	134	1	1	134	Joinery, Millwork & Built-In Furniture – Typical Floors (12 floors)	TT_Task	40	40	1296	0	2027-12-28 08:00	2028-01-03 08:00	2027-12-28 08:00	2028-01-03 08:00	TK_NotStart	1
+%R	140	1	1	140	MRL Equipment Installation	TT_Task	40	40	272	0	2027-12-29 08:00	2028-01-04 08:00	2027-12-29 08:00	2028-01-04 08:00	TK_NotStart	1
+%R	154	1	1	154	Emergency Lighting Installation - Ground & Lower Floors (1-6)	TT_Task	120	120	1264	0	2027-12-31 08:00	2028-01-20 08:00	2027-12-31 08:00	2028-01-20 08:00	TK_NotStart	1
+%R	137	1	1	137	Wayfinding & Signage Installation – Typical Floors (12 floors)	TT_Task	16	16	1296	0	2028-01-04 08:00	2028-01-05 08:00	2028-01-04 08:00	2028-01-05 08:00	TK_NotStart	1
+%R	141	1	1	141	Elevator Car & Door Installation	TT_Task	40	40	272	0	2028-01-05 08:00	2028-01-11 08:00	2028-01-05 08:00	2028-01-11 08:00	TK_NotStart	1
+%R	146	1	1	146	Fire Alarm Installation - Ground & Lower Floors (1-6)	TT_Task	160	160	1168	0	2028-01-07 08:00	2028-02-03 08:00	2028-01-07 08:00	2028-02-03 08:00	TK_NotStart	1
+%R	150	1	1	150	Sprinkler Installation - Ground & Lower Floors (1-6)	TT_Task	160	160	1168	0	2028-01-07 08:00	2028-02-03 08:00	2028-01-07 08:00	2028-02-03 08:00	TK_NotStart	1
+%R	158	1	1	158	Smoke Control Ductwork Installation - Ground & Lower Floors (1-6)	TT_Task	160	160	0	0	2028-01-07 08:00	2028-02-03 08:00	2028-01-07 08:00	2028-02-03 08:00	TK_NotStart	1
+%R	142	1	1	142	Elevator Wiring & Control Panel	TT_Task	40	40	272	0	2028-01-12 08:00	2028-01-18 08:00	2028-01-12 08:00	2028-01-18 08:00	TK_NotStart	1
+%R	311	1	1	311	MILESTONE: CONTRACTUAL DEADLINE (29 Months - 2027-12-31)	TT_Mile	0	0	1504	0	2028-01-12 08:00	2028-01-12 08:00	2028-01-12 08:00	2028-01-12 08:00	TK_NotStart	1
+%R	143	1	1	143	Elevator Testing & Authority Inspection	TT_Task	40	40	272	0	2028-01-19 08:00	2028-01-25 08:00	2028-01-19 08:00	2028-01-25 08:00	TK_NotStart	1
+%R	272	1	1	272	Elevator Final Commissioning & Witness Inspection	TT_Task	24	24	1440	0	2028-01-19 08:00	2028-01-21 08:00	2028-01-19 08:00	2028-01-21 08:00	TK_NotStart	1
+%R	155	1	1	155	Emergency Lighting Installation - Upper Floors (7-12)	TT_Task	120	120	1264	0	2028-01-21 08:00	2028-02-10 08:00	2028-01-21 08:00	2028-02-10 08:00	TK_NotStart	1
+%R	144	1	1	144	Elevator Final Commissioning & Witness Inspection	TT_Task	24	24	272	0	2028-01-26 08:00	2028-01-28 08:00	2028-01-26 08:00	2028-01-28 08:00	TK_NotStart	1
+%R	147	1	1	147	Fire Alarm Installation - Upper Floors (7-12)	TT_Task	160	160	1168	0	2028-02-04 08:00	2028-03-02 08:00	2028-02-04 08:00	2028-03-02 08:00	TK_NotStart	1
+%R	151	1	1	151	Sprinkler Installation - Upper Floors (7-12)	TT_Task	160	160	1168	0	2028-02-04 08:00	2028-03-02 08:00	2028-02-04 08:00	2028-03-02 08:00	TK_NotStart	1
+%R	159	1	1	159	Smoke Control Ductwork Installation - Upper Floors (7-12)	TT_Task	160	160	0	0	2028-02-04 08:00	2028-03-02 08:00	2028-02-04 08:00	2028-03-02 08:00	TK_NotStart	1
+%R	156	1	1	156	Emergency Lighting Testing & Functional Check	TT_Task	64	64	1264	0	2028-02-11 08:00	2028-02-22 08:00	2028-02-11 08:00	2028-02-22 08:00	TK_NotStart	1
+%R	160	1	1	160	Smoke Control System Testing	TT_Task	80	80	0	0	2028-03-03 08:00	2028-03-16 08:00	2028-03-03 08:00	2028-03-16 08:00	TK_NotStart	1
+%R	309	1	1	309	MILESTONE: Life Safety Systems Complete	TT_Mile	0	0	80	0	2028-03-03 08:00	2028-03-03 08:00	2028-03-03 08:00	2028-03-03 08:00	TK_NotStart	1
+%R	161	1	1	161	Pre-Commissioning Walkdown - B2	TT_Task	8	8	0	0	2028-03-17 08:00	2028-03-17 08:00	2028-03-17 08:00	2028-03-17 08:00	TK_NotStart	1
+%R	162	1	1	162	Pre-Commissioning Walkdown - B1	TT_Task	8	8	0	0	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	TK_NotStart	1
+%R	177	1	1	177	HVAC Commissioning - B2	TT_Task	8	8	1112	0	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	TK_NotStart	1
+%R	193	1	1	193	Electrical Systems Testing - B2	TT_Task	8	8	1112	0	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	TK_NotStart	1
+%R	209	1	1	209	Fire Alarm System Integrated Testing - B2	TT_Task	8	8	1112	0	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	TK_NotStart	1
+%R	225	1	1	225	Sprinkler System Commissioning - B2	TT_Task	8	8	1112	0	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	TK_NotStart	1
+%R	273	1	1	273	Acoustic & Indoor Environment Quality Testing - B2	TT_Task	8	8	1112	0	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	2028-03-20 08:00	TK_NotStart	1
+%R	163	1	1	163	Pre-Commissioning Walkdown - Ground	TT_Task	8	8	0	0	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	TK_NotStart	1
+%R	178	1	1	178	HVAC Commissioning - B1	TT_Task	8	8	1104	0	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	TK_NotStart	1
+%R	194	1	1	194	Electrical Systems Testing - B1	TT_Task	8	8	1104	0	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	TK_NotStart	1
+%R	210	1	1	210	Fire Alarm System Integrated Testing - B1	TT_Task	8	8	1104	0	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	TK_NotStart	1
+%R	226	1	1	226	Sprinkler System Commissioning - B1	TT_Task	8	8	1104	0	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	TK_NotStart	1
+%R	274	1	1	274	Acoustic & Indoor Environment Quality Testing - B1	TT_Task	8	8	1104	0	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	2028-03-21 08:00	TK_NotStart	1
+%R	164	1	1	164	Pre-Commissioning Walkdown - Floor 01	TT_Task	8	8	0	0	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	TK_NotStart	1
+%R	179	1	1	179	HVAC Commissioning - Ground	TT_Task	8	8	1096	0	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	TK_NotStart	1
+%R	195	1	1	195	Electrical Systems Testing - Ground	TT_Task	8	8	1096	0	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	TK_NotStart	1
+%R	211	1	1	211	Fire Alarm System Integrated Testing - Ground	TT_Task	8	8	1096	0	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	TK_NotStart	1
+%R	227	1	1	227	Sprinkler System Commissioning - Ground	TT_Task	8	8	1096	0	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	TK_NotStart	1
+%R	275	1	1	275	Acoustic & Indoor Environment Quality Testing - Ground	TT_Task	8	8	1096	0	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	2028-03-22 08:00	TK_NotStart	1
+%R	180	1	1	180	HVAC Commissioning - Floor 01	TT_Task	8	8	1088	0	2028-03-23 08:00	2028-03-23 08:00	2028-03-23 08:00	2028-03-23 08:00	TK_NotStart	1
+%R	196	1	1	196	Electrical Systems Testing - Floor 01	TT_Task	8	8	1088	0	2028-03-23 08:00	2028-03-23 08:00	2028-03-23 08:00	2028-03-23 08:00	TK_NotStart	1
+%R	212	1	1	212	Fire Alarm System Integrated Testing - Floor 01	TT_Task	8	8	1088	0	2028-03-23 08:00	2028-03-23 08:00	2028-03-23 08:00	2028-03-23 08:00	TK_NotStart	1
+%R	228	1	1	228	Sprinkler System Commissioning - Floor 01	TT_Task	8	8	1088	0	2028-03-23 08:00	2028-03-23 08:00	2028-03-23 08:00	2028-03-23 08:00	TK_NotStart	1
+%R	165	1	1	165	Pre-Commissioning Walkdown - Floor 02	TT_Task	8	8	0	0	2028-03-24 08:00	2028-03-24 08:00	2028-03-24 08:00	2028-03-24 08:00	TK_NotStart	1
+%R	229	1	1	229	Sprinkler System Commissioning - Floor 02	TT_Task	8	8	1072	0	2028-03-27 08:00	2028-03-27 08:00	2028-03-27 08:00	2028-03-27 08:00	TK_NotStart	1
+%R	166	1	1	166	Pre-Commissioning Walkdown - Floor 03	TT_Task	8	8	0	0	2028-03-28 08:00	2028-03-28 08:00	2028-03-28 08:00	2028-03-28 08:00	TK_NotStart	1
+%R	181	1	1	181	HVAC Commissioning - Floor 02	TT_Task	8	8	1064	0	2028-03-28 08:00	2028-03-28 08:00	2028-03-28 08:00	2028-03-28 08:00	TK_NotStart	1
+%R	197	1	1	197	Electrical Systems Testing - Floor 02	TT_Task	8	8	1064	0	2028-03-28 08:00	2028-03-28 08:00	2028-03-28 08:00	2028-03-28 08:00	TK_NotStart	1
+%R	213	1	1	213	Fire Alarm System Integrated Testing - Floor 02	TT_Task	8	8	1064	0	2028-03-28 08:00	2028-03-28 08:00	2028-03-28 08:00	2028-03-28 08:00	TK_NotStart	1
+%R	230	1	1	230	Sprinkler System Commissioning - Floor 03	TT_Task	8	8	1056	0	2028-03-29 08:00	2028-03-29 08:00	2028-03-29 08:00	2028-03-29 08:00	TK_NotStart	1
+%R	167	1	1	167	Pre-Commissioning Walkdown - Floor 04	TT_Task	8	8	0	0	2028-03-30 08:00	2028-03-30 08:00	2028-03-30 08:00	2028-03-30 08:00	TK_NotStart	1
+%R	182	1	1	182	HVAC Commissioning - Floor 03	TT_Task	8	8	1048	0	2028-03-30 08:00	2028-03-30 08:00	2028-03-30 08:00	2028-03-30 08:00	TK_NotStart	1
+%R	198	1	1	198	Electrical Systems Testing - Floor 03	TT_Task	8	8	1048	0	2028-03-30 08:00	2028-03-30 08:00	2028-03-30 08:00	2028-03-30 08:00	TK_NotStart	1
+%R	214	1	1	214	Fire Alarm System Integrated Testing - Floor 03	TT_Task	8	8	1048	0	2028-03-30 08:00	2028-03-30 08:00	2028-03-30 08:00	2028-03-30 08:00	TK_NotStart	1
+%R	231	1	1	231	Sprinkler System Commissioning - Floor 04	TT_Task	8	8	1040	0	2028-03-31 08:00	2028-03-31 08:00	2028-03-31 08:00	2028-03-31 08:00	TK_NotStart	1
+%R	168	1	1	168	Pre-Commissioning Walkdown - Floor 05	TT_Task	8	8	0	0	2028-04-03 08:00	2028-04-03 08:00	2028-04-03 08:00	2028-04-03 08:00	TK_NotStart	1
+%R	183	1	1	183	HVAC Commissioning - Floor 04	TT_Task	8	8	1032	0	2028-04-03 08:00	2028-04-03 08:00	2028-04-03 08:00	2028-04-03 08:00	TK_NotStart	1
+%R	199	1	1	199	Electrical Systems Testing - Floor 04	TT_Task	8	8	1032	0	2028-04-03 08:00	2028-04-03 08:00	2028-04-03 08:00	2028-04-03 08:00	TK_NotStart	1
+%R	215	1	1	215	Fire Alarm System Integrated Testing - Floor 04	TT_Task	8	8	1032	0	2028-04-03 08:00	2028-04-03 08:00	2028-04-03 08:00	2028-04-03 08:00	TK_NotStart	1
+%R	232	1	1	232	Sprinkler System Commissioning - Floor 05	TT_Task	8	8	1024	0	2028-04-04 08:00	2028-04-04 08:00	2028-04-04 08:00	2028-04-04 08:00	TK_NotStart	1
+%R	169	1	1	169	Pre-Commissioning Walkdown - Floor 06	TT_Task	8	8	0	0	2028-04-05 08:00	2028-04-05 08:00	2028-04-05 08:00	2028-04-05 08:00	TK_NotStart	1
+%R	184	1	1	184	HVAC Commissioning - Floor 05	TT_Task	8	8	1016	0	2028-04-05 08:00	2028-04-05 08:00	2028-04-05 08:00	2028-04-05 08:00	TK_NotStart	1
+%R	200	1	1	200	Electrical Systems Testing - Floor 05	TT_Task	8	8	1016	0	2028-04-05 08:00	2028-04-05 08:00	2028-04-05 08:00	2028-04-05 08:00	TK_NotStart	1
+%R	216	1	1	216	Fire Alarm System Integrated Testing - Floor 05	TT_Task	8	8	1016	0	2028-04-05 08:00	2028-04-05 08:00	2028-04-05 08:00	2028-04-05 08:00	TK_NotStart	1
+%R	233	1	1	233	Sprinkler System Commissioning - Floor 06	TT_Task	8	8	1008	0	2028-04-06 08:00	2028-04-06 08:00	2028-04-06 08:00	2028-04-06 08:00	TK_NotStart	1
+%R	170	1	1	170	Pre-Commissioning Walkdown - Floor 07	TT_Task	8	8	0	0	2028-04-07 08:00	2028-04-07 08:00	2028-04-07 08:00	2028-04-07 08:00	TK_NotStart	1
+%R	185	1	1	185	HVAC Commissioning - Floor 06	TT_Task	8	8	1000	0	2028-04-07 08:00	2028-04-07 08:00	2028-04-07 08:00	2028-04-07 08:00	TK_NotStart	1
+%R	201	1	1	201	Electrical Systems Testing - Floor 06	TT_Task	8	8	1000	0	2028-04-07 08:00	2028-04-07 08:00	2028-04-07 08:00	2028-04-07 08:00	TK_NotStart	1
+%R	217	1	1	217	Fire Alarm System Integrated Testing - Floor 06	TT_Task	8	8	1000	0	2028-04-07 08:00	2028-04-07 08:00	2028-04-07 08:00	2028-04-07 08:00	TK_NotStart	1
+%R	234	1	1	234	Sprinkler System Commissioning - Floor 07	TT_Task	8	8	992	0	2028-04-10 08:00	2028-04-10 08:00	2028-04-10 08:00	2028-04-10 08:00	TK_NotStart	1
+%R	171	1	1	171	Pre-Commissioning Walkdown - Floor 08	TT_Task	8	8	0	0	2028-04-11 08:00	2028-04-11 08:00	2028-04-11 08:00	2028-04-11 08:00	TK_NotStart	1
+%R	186	1	1	186	HVAC Commissioning - Floor 07	TT_Task	8	8	984	0	2028-04-11 08:00	2028-04-11 08:00	2028-04-11 08:00	2028-04-11 08:00	TK_NotStart	1
+%R	202	1	1	202	Electrical Systems Testing - Floor 07	TT_Task	8	8	984	0	2028-04-11 08:00	2028-04-11 08:00	2028-04-11 08:00	2028-04-11 08:00	TK_NotStart	1
+%R	218	1	1	218	Fire Alarm System Integrated Testing - Floor 07	TT_Task	8	8	984	0	2028-04-11 08:00	2028-04-11 08:00	2028-04-11 08:00	2028-04-11 08:00	TK_NotStart	1
+%R	235	1	1	235	Sprinkler System Commissioning - Floor 08	TT_Task	8	8	976	0	2028-04-12 08:00	2028-04-12 08:00	2028-04-12 08:00	2028-04-12 08:00	TK_NotStart	1
+%R	172	1	1	172	Pre-Commissioning Walkdown - Floor 09	TT_Task	8	8	0	0	2028-04-13 08:00	2028-04-13 08:00	2028-04-13 08:00	2028-04-13 08:00	TK_NotStart	1
+%R	187	1	1	187	HVAC Commissioning - Floor 08	TT_Task	8	8	968	0	2028-04-13 08:00	2028-04-13 08:00	2028-04-13 08:00	2028-04-13 08:00	TK_NotStart	1
+%R	203	1	1	203	Electrical Systems Testing - Floor 08	TT_Task	8	8	968	0	2028-04-13 08:00	2028-04-13 08:00	2028-04-13 08:00	2028-04-13 08:00	TK_NotStart	1
+%R	219	1	1	219	Fire Alarm System Integrated Testing - Floor 08	TT_Task	8	8	968	0	2028-04-13 08:00	2028-04-13 08:00	2028-04-13 08:00	2028-04-13 08:00	TK_NotStart	1
+%R	236	1	1	236	Sprinkler System Commissioning - Floor 09	TT_Task	8	8	960	0	2028-04-14 08:00	2028-04-14 08:00	2028-04-14 08:00	2028-04-14 08:00	TK_NotStart	1
+%R	267	1	1	267	BMS/BAS Integrated Functional Testing - Floor 09	TT_Task	8	8	328	0	2028-04-14 08:00	2028-04-14 08:00	2028-04-14 08:00	2028-04-14 08:00	TK_NotStart	1
+%R	173	1	1	173	Pre-Commissioning Walkdown - Floor 10	TT_Task	8	8	0	0	2028-04-17 08:00	2028-04-17 08:00	2028-04-17 08:00	2028-04-17 08:00	TK_NotStart	1
+%R	188	1	1	188	HVAC Commissioning - Floor 09	TT_Task	8	8	952	0	2028-04-17 08:00	2028-04-17 08:00	2028-04-17 08:00	2028-04-17 08:00	TK_NotStart	1
+%R	204	1	1	204	Electrical Systems Testing - Floor 09	TT_Task	8	8	952	0	2028-04-17 08:00	2028-04-17 08:00	2028-04-17 08:00	2028-04-17 08:00	TK_NotStart	1
+%R	220	1	1	220	Fire Alarm System Integrated Testing - Floor 09	TT_Task	8	8	952	0	2028-04-17 08:00	2028-04-17 08:00	2028-04-17 08:00	2028-04-17 08:00	TK_NotStart	1
+%R	237	1	1	237	Sprinkler System Commissioning - Floor 10	TT_Task	8	8	0	0	2028-04-18 08:00	2028-04-18 08:00	2028-04-18 08:00	2028-04-18 08:00	TK_NotStart	1
+%R	252	1	1	252	Heating System Pressure & Performance Testing - Floor 10	TT_Task	8	8	160	0	2028-04-18 08:00	2028-04-18 08:00	2028-04-18 08:00	2028-04-18 08:00	TK_NotStart	1
+%R	268	1	1	268	BMS/BAS Integrated Functional Testing - Floor 10	TT_Task	8	8	328	0	2028-04-18 08:00	2028-04-18 08:00	2028-04-18 08:00	2028-04-18 08:00	TK_NotStart	1
+%R	174	1	1	174	Pre-Commissioning Walkdown - Floor 11	TT_Task	8	8	80	0	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	TK_NotStart	1
+%R	189	1	1	189	HVAC Commissioning - Floor 10	TT_Task	8	8	936	0	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	TK_NotStart	1
+%R	205	1	1	205	Electrical Systems Testing - Floor 10	TT_Task	8	8	936	0	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	TK_NotStart	1
+%R	221	1	1	221	Fire Alarm System Integrated Testing - Floor 10	TT_Task	8	8	936	0	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	TK_NotStart	1
+%R	302	1	1	302	Sprinkler System Commissioning - Floor 11	TT_Task	8	8	0	0	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	2028-04-19 08:00	TK_NotStart	1
+%R	238	1	1	238	Sprinkler System Commissioning - Floor 12	TT_Task	8	8	0	0	2028-04-20 08:00	2028-04-20 08:00	2028-04-20 08:00	2028-04-20 08:00	TK_NotStart	1
+%R	253	1	1	253	Heating System Pressure & Performance Testing - Floor 11	TT_Task	8	8	160	0	2028-04-20 08:00	2028-04-20 08:00	2028-04-20 08:00	2028-04-20 08:00	TK_NotStart	1
+%R	269	1	1	269	BMS/BAS Integrated Functional Testing - Floor 11	TT_Task	8	8	328	0	2028-04-20 08:00	2028-04-20 08:00	2028-04-20 08:00	2028-04-20 08:00	TK_NotStart	1
+%R	175	1	1	175	Pre-Commissioning Walkdown - Floor 12	TT_Task	8	8	80	0	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	TK_NotStart	1
+%R	190	1	1	190	HVAC Commissioning - Floor 11	TT_Task	8	8	920	0	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	TK_NotStart	1
+%R	206	1	1	206	Electrical Systems Testing - Floor 11	TT_Task	8	8	920	0	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	TK_NotStart	1
+%R	222	1	1	222	Fire Alarm System Integrated Testing - Floor 11	TT_Task	8	8	920	0	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	TK_NotStart	1
+%R	239	1	1	239	Sprinkler System Commissioning - Roof	TT_Task	8	8	0	0	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	2028-04-21 08:00	TK_NotStart	1
+%R	240	1	1	240	Heating System Pressure & Performance Testing - B2	TT_Task	8	8	0	0	2028-04-24 08:00	2028-04-24 08:00	2028-04-24 08:00	2028-04-24 08:00	TK_NotStart	1
+%R	254	1	1	254	Heating System Pressure & Performance Testing - Floor 12	TT_Task	8	8	160	0	2028-04-24 08:00	2028-04-24 08:00	2028-04-24 08:00	2028-04-24 08:00	TK_NotStart	1
+%R	270	1	1	270	BMS/BAS Integrated Functional Testing - Floor 12	TT_Task	8	8	328	0	2028-04-24 08:00	2028-04-24 08:00	2028-04-24 08:00	2028-04-24 08:00	TK_NotStart	1
+%R	176	1	1	176	Pre-Commissioning Walkdown - Roof	TT_Task	8	8	80	0	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	TK_NotStart	1
+%R	191	1	1	191	HVAC Commissioning - Floor 12	TT_Task	8	8	904	0	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	TK_NotStart	1
+%R	207	1	1	207	Electrical Systems Testing - Floor 12	TT_Task	8	8	904	0	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	TK_NotStart	1
+%R	223	1	1	223	Fire Alarm System Integrated Testing - Floor 12	TT_Task	8	8	904	0	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	TK_NotStart	1
+%R	241	1	1	241	Heating System Pressure & Performance Testing - B1	TT_Task	8	8	0	0	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	2028-04-25 08:00	TK_NotStart	1
+%R	242	1	1	242	Heating System Pressure & Performance Testing - Ground	TT_Task	8	8	0	0	2028-04-26 08:00	2028-04-26 08:00	2028-04-26 08:00	2028-04-26 08:00	TK_NotStart	1
+%R	192	1	1	192	HVAC Commissioning - Roof	TT_Task	8	8	80	0	2028-04-27 08:00	2028-04-27 08:00	2028-04-27 08:00	2028-04-27 08:00	TK_NotStart	1
+%R	208	1	1	208	Electrical Systems Testing - Roof	TT_Task	8	8	80	0	2028-04-28 08:00	2028-04-28 08:00	2028-04-28 08:00	2028-04-28 08:00	TK_NotStart	1
+%R	243	1	1	243	Heating System Pressure & Performance Testing - Floor 01	TT_Task	8	8	0	0	2028-04-28 08:00	2028-04-28 08:00	2028-04-28 08:00	2028-04-28 08:00	TK_NotStart	1
+%R	148	1	1	148	Fire Alarm System Integrated Testing	TT_Task	40	40	840	0	2028-05-01 08:00	2028-05-05 08:00	2028-05-01 08:00	2028-05-05 08:00	TK_NotStart	1
+%R	224	1	1	224	Fire Alarm System Integrated Testing - Roof	TT_Task	8	8	80	0	2028-05-01 08:00	2028-05-01 08:00	2028-05-01 08:00	2028-05-01 08:00	TK_NotStart	1
+%R	152	1	1	152	Sprinkler System Commissioning & Hydraulic Testing	TT_Task	40	40	832	0	2028-05-02 08:00	2028-05-08 08:00	2028-05-02 08:00	2028-05-08 08:00	TK_NotStart	1
+%R	244	1	1	244	Heating System Pressure & Performance Testing - Floor 02	TT_Task	8	8	0	0	2028-05-02 08:00	2028-05-02 08:00	2028-05-02 08:00	2028-05-02 08:00	TK_NotStart	1
+%R	245	1	1	245	Heating System Pressure & Performance Testing - Floor 03	TT_Task	8	8	0	0	2028-05-04 08:00	2028-05-04 08:00	2028-05-04 08:00	2028-05-04 08:00	TK_NotStart	1
+%R	246	1	1	246	Heating System Pressure & Performance Testing - Floor 04	TT_Task	8	8	0	0	2028-05-08 08:00	2028-05-08 08:00	2028-05-08 08:00	2028-05-08 08:00	TK_NotStart	1
+%R	247	1	1	247	Heating System Pressure & Performance Testing - Floor 05	TT_Task	8	8	0	0	2028-05-10 08:00	2028-05-10 08:00	2028-05-10 08:00	2028-05-10 08:00	TK_NotStart	1
+%R	248	1	1	248	Heating System Pressure & Performance Testing - Floor 06	TT_Task	8	8	0	0	2028-05-12 08:00	2028-05-12 08:00	2028-05-12 08:00	2028-05-12 08:00	TK_NotStart	1
+%R	249	1	1	249	Heating System Pressure & Performance Testing - Floor 07	TT_Task	8	8	0	0	2028-05-16 08:00	2028-05-16 08:00	2028-05-16 08:00	2028-05-16 08:00	TK_NotStart	1
+%R	250	1	1	250	Heating System Pressure & Performance Testing - Floor 08	TT_Task	8	8	0	0	2028-05-18 08:00	2028-05-18 08:00	2028-05-18 08:00	2028-05-18 08:00	TK_NotStart	1
+%R	251	1	1	251	Heating System Pressure & Performance Testing - Floor 09	TT_Task	8	8	0	0	2028-05-22 08:00	2028-05-22 08:00	2028-05-22 08:00	2028-05-22 08:00	TK_NotStart	1
+%R	255	1	1	255	Heating System Pressure & Performance Testing - Roof	TT_Task	8	8	0	0	2028-05-23 08:00	2028-05-23 08:00	2028-05-23 08:00	2028-05-23 08:00	TK_NotStart	1
+%R	256	1	1	256	BMS/BAS Integrated Functional Testing - B2	TT_Task	8	8	0	0	2028-05-24 08:00	2028-05-24 08:00	2028-05-24 08:00	2028-05-24 08:00	TK_NotStart	1
+%R	257	1	1	257	BMS/BAS Integrated Functional Testing - B1	TT_Task	8	8	0	0	2028-05-25 08:00	2028-05-25 08:00	2028-05-25 08:00	2028-05-25 08:00	TK_NotStart	1
+%R	258	1	1	258	BMS/BAS Integrated Functional Testing - Ground	TT_Task	8	8	0	0	2028-05-26 08:00	2028-05-26 08:00	2028-05-26 08:00	2028-05-26 08:00	TK_NotStart	1
+%R	259	1	1	259	BMS/BAS Integrated Functional Testing - Floor 01	TT_Task	8	8	0	0	2028-05-30 08:00	2028-05-30 08:00	2028-05-30 08:00	2028-05-30 08:00	TK_NotStart	1
+%R	260	1	1	260	BMS/BAS Integrated Functional Testing - Floor 02	TT_Task	8	8	0	0	2028-06-01 08:00	2028-06-01 08:00	2028-06-01 08:00	2028-06-01 08:00	TK_NotStart	1
+%R	261	1	1	261	BMS/BAS Integrated Functional Testing - Floor 03	TT_Task	8	8	0	0	2028-06-05 08:00	2028-06-05 08:00	2028-06-05 08:00	2028-06-05 08:00	TK_NotStart	1
+%R	262	1	1	262	BMS/BAS Integrated Functional Testing - Floor 04	TT_Task	8	8	0	0	2028-06-07 08:00	2028-06-07 08:00	2028-06-07 08:00	2028-06-07 08:00	TK_NotStart	1
+%R	263	1	1	263	BMS/BAS Integrated Functional Testing - Floor 05	TT_Task	8	8	0	0	2028-06-09 08:00	2028-06-09 08:00	2028-06-09 08:00	2028-06-09 08:00	TK_NotStart	1
+%R	264	1	1	264	BMS/BAS Integrated Functional Testing - Floor 06	TT_Task	8	8	0	0	2028-06-13 08:00	2028-06-13 08:00	2028-06-13 08:00	2028-06-13 08:00	TK_NotStart	1
+%R	265	1	1	265	BMS/BAS Integrated Functional Testing - Floor 07	TT_Task	8	8	0	0	2028-06-15 08:00	2028-06-15 08:00	2028-06-15 08:00	2028-06-15 08:00	TK_NotStart	1
+%R	266	1	1	266	BMS/BAS Integrated Functional Testing - Floor 08	TT_Task	8	8	0	0	2028-06-19 08:00	2028-06-19 08:00	2028-06-19 08:00	2028-06-19 08:00	TK_NotStart	1
+%R	271	1	1	271	BMS/BAS Integrated Functional Testing - Roof	TT_Task	8	8	0	0	2028-06-21 08:00	2028-06-21 08:00	2028-06-21 08:00	2028-06-21 08:00	TK_NotStart	1
+%R	276	1	1	276	Acoustic & Indoor Environment Quality Testing - Floor 01	TT_Task	8	8	0	0	2028-06-22 08:00	2028-06-22 08:00	2028-06-22 08:00	2028-06-22 08:00	TK_NotStart	1
+%R	310	1	1	310	MILESTONE: All Commissioning Complete	TT_Mile	0	0	336	0	2028-06-22 08:00	2028-06-22 08:00	2028-06-22 08:00	2028-06-22 08:00	TK_NotStart	1
+%R	277	1	1	277	Underground Service Trenches	TT_Task	80	80	0	0	2028-06-23 08:00	2028-07-06 08:00	2028-06-23 08:00	2028-07-06 08:00	TK_NotStart	1
+%R	278	1	1	278	District Heating Connection to Building	TT_Task	40	40	0	0	2028-07-07 08:00	2028-07-13 08:00	2028-07-07 08:00	2028-07-13 08:00	TK_NotStart	1
+%R	279	1	1	279	Water & Sewer Connection to City Network	TT_Task	40	40	0	0	2028-07-07 08:00	2028-07-13 08:00	2028-07-07 08:00	2028-07-13 08:00	TK_NotStart	1
+%R	280	1	1	280	Stormwater Management System Installation	TT_Task	40	40	0	0	2028-07-07 08:00	2028-07-13 08:00	2028-07-07 08:00	2028-07-13 08:00	TK_NotStart	1
+%R	281	1	1	281	Parking Area Base Course, Paving & Markings	TT_Task	80	80	0	0	2028-07-14 08:00	2028-07-27 08:00	2028-07-14 08:00	2028-07-27 08:00	TK_NotStart	1
+%R	282	1	1	282	Access Roads & Pedestrian Paths	TT_Task	64	64	16	0	2028-07-14 08:00	2028-07-25 08:00	2028-07-14 08:00	2028-07-25 08:00	TK_NotStart	1
+%R	283	1	1	283	External Lighting Installation	TT_Task	40	40	0	0	2028-07-28 08:00	2028-08-03 08:00	2028-07-28 08:00	2028-08-03 08:00	TK_NotStart	1
+%R	284	1	1	284	Landscaping & Soft Landscaping	TT_Task	64	64	0	0	2028-08-04 08:00	2028-08-15 08:00	2028-08-04 08:00	2028-08-15 08:00	TK_NotStart	1
+%R	285	1	1	285	Wayfinding & Signage Installation	TT_Task	24	24	0	0	2028-08-16 08:00	2028-08-18 08:00	2028-08-16 08:00	2028-08-18 08:00	TK_NotStart	1
+%R	286	1	1	286	Final Punch List Rectification Works	TT_Task	80	80	0	0	2028-08-21 08:00	2028-09-01 08:00	2028-08-21 08:00	2028-09-01 08:00	TK_NotStart	1
+%R	287	1	1	287	As-Built Drawings & BIM Model Finalization	TT_Task	80	80	0	0	2028-09-04 08:00	2028-09-15 08:00	2028-09-04 08:00	2028-09-15 08:00	TK_NotStart	1
+%R	288	1	1	288	O&M Manuals Compilation	TT_Task	64	64	16	0	2028-09-04 08:00	2028-09-13 08:00	2028-09-04 08:00	2028-09-13 08:00	TK_NotStart	1
+%R	289	1	1	289	Spare Parts Delivery & Inventory	TT_Task	24	24	32	0	2028-09-14 08:00	2028-09-18 08:00	2028-09-14 08:00	2028-09-18 08:00	TK_NotStart	1
+%R	291	1	1	291	Authority Final Inspection	TT_Task	24	24	0	0	2028-09-18 08:00	2028-09-20 08:00	2028-09-18 08:00	2028-09-20 08:00	TK_NotStart	1
+%R	290	1	1	290	Client & FM Team Training	TT_Task	40	40	32	0	2028-09-19 08:00	2028-09-25 08:00	2028-09-19 08:00	2028-09-25 08:00	TK_NotStart	1
+%R	292	1	1	292	Occupancy Permit Receipt	TT_Task	40	40	0	0	2028-09-21 08:00	2028-09-27 08:00	2028-09-21 08:00	2028-09-27 08:00	TK_NotStart	1
+%R	293	1	1	293	Client Handover, Keys & Documentation Transfer	TT_Task	16	16	0	0	2028-09-28 08:00	2028-09-29 08:00	2028-09-28 08:00	2028-09-29 08:00	TK_NotStart	1
+%R	312	1	1	312	MILESTONE: PROJECT COMPLETE	TT_Mile	0	0	0	0	2028-10-02 08:00	2028-10-02 08:00	2028-10-02 08:00	2028-10-02 08:00	TK_NotStart	1
+
+%T	TASKPRED
+%F	taskpred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt
+%R	1	1	303	1	1	PR_FS	0
+%R	2	2	1	1	1	PR_FS	0
+%R	3	3	1	1	1	PR_FS	0
+%R	4	4	3	1	1	PR_FS	0
+%R	5	5	2	1	1	PR_FS	0
+%R	6	5	3	1	1	PR_FS	0
+%R	7	6	5	1	1	PR_FS	0
+%R	8	12	5	1	1	PR_FS	0
+%R	9	13	12	1	1	PR_FS	0
+%R	10	13	4	1	1	PR_FS	0
+%R	11	15	12	1	1	PR_FS	0
+%R	12	7	6	1	1	PR_FS	0
+%R	13	16	15	1	1	PR_FS	0
+%R	14	17	15	1	1	PR_FS	0
+%R	15	46	15	1	1	PR_FS	0
+%R	16	18	16	1	1	PR_FS	0
+%R	17	18	17	1	1	PR_FS	0
+%R	18	8	7	1	1	PR_FS	0
+%R	19	19	7	1	1	PR_FS	0
+%R	20	27	7	1	1	PR_FS	0
+%R	21	35	7	1	1	PR_FS	0
+%R	22	40	7	1	1	PR_FS	0
+%R	23	42	7	1	1	PR_FS	0
+%R	24	45	7	1	1	PR_FS	0
+%R	25	28	27	1	1	PR_FS	0
+%R	26	20	19	1	1	PR_FS	0
+%R	27	21	19	1	1	PR_FS	0
+%R	28	22	19	1	1	PR_FS	0
+%R	29	23	19	1	1	PR_FS	0
+%R	30	36	35	1	1	PR_FS	0
+%R	31	37	35	1	1	PR_FS	0
+%R	32	41	40	1	1	PR_FS	0
+%R	33	14	28	1	1	PR_FS	0
+%R	34	29	28	1	1	PR_FS	0
+%R	35	38	36	1	1	PR_FS	0
+%R	36	38	37	1	1	PR_FS	0
+%R	37	24	23	1	1	PR_FS	0
+%R	38	25	21	1	1	PR_FS	0
+%R	39	25	22	1	1	PR_FS	0
+%R	40	25	23	1	1	PR_FS	0
+%R	41	39	38	1	1	PR_FS	0
+%R	42	55	41	1	1	PR_FS	0
+%R	43	9	8	1	1	PR_FS	0
+%R	44	54	45	1	1	PR_FS	0
+%R	45	30	29	1	1	PR_FS	0
+%R	46	26	20	1	1	PR_FS	0
+%R	47	26	24	1	1	PR_FS	0
+%R	48	26	25	1	1	PR_FS	0
+%R	49	43	25	1	1	PR_FS	0
+%R	50	31	30	1	1	PR_FS	0
+%R	51	10	9	1	1	PR_FS	0
+%R	52	11	9	1	1	PR_FS	0
+%R	53	32	31	1	1	PR_FS	0
+%R	54	44	43	1	1	PR_FS	0
+%R	55	33	32	1	1	PR_FS	0
+%R	56	34	33	1	1	PR_FS	0
+%R	57	47	21	1	1	PR_FS	0
+%R	58	47	22	1	1	PR_FS	0
+%R	59	47	24	1	1	PR_FS	0
+%R	60	47	33	1	1	PR_FS	0
+%R	61	48	45	1	1	PR_FS	0
+%R	62	48	46	1	1	PR_FS	0
+%R	63	48	47	1	1	PR_FS	0
+%R	64	49	48	1	1	PR_FS	0
+%R	65	50	48	1	1	PR_FS	0
+%R	66	51	50	1	1	PR_FS	0
+%R	67	52	51	1	1	PR_FS	0
+%R	68	53	52	1	1	PR_FS	0
+%R	69	56	54	1	1	PR_FS	0
+%R	70	56	18	1	1	PR_FS	0
+%R	71	56	26	1	1	PR_FS	0
+%R	72	56	34	1	1	PR_FS	0
+%R	73	56	39	1	1	PR_FS	0
+%R	74	56	42	1	1	PR_FS	0
+%R	75	56	44	1	1	PR_FS	0
+%R	76	56	49	1	1	PR_FS	0
+%R	77	56	53	1	1	PR_FS	0
+%R	78	56	55	1	1	PR_FS	0
+%R	79	57	56	1	1	PR_FS	0
+%R	80	58	304	1	1	PR_FS	0
+%R	81	304	57	1	1	PR_FS	0
+%R	82	59	58	1	1	PR_FS	0
+%R	83	62	58	1	1	PR_FS	0
+%R	84	60	59	1	1	PR_FS	0
+%R	85	61	59	1	1	PR_FS	0
+%R	86	63	61	1	1	PR_FS	0
+%R	87	63	62	1	1	PR_FS	0
+%R	88	64	63	1	1	PR_FS	0
+%R	89	64	305	1	1	PR_FS	0
+%R	90	305	63	1	1	PR_FS	0
+%R	91	65	64	1	1	PR_FS	0
+%R	92	66	65	1	1	PR_SS	24
+%R	93	67	66	1	1	PR_SS	24
+%R	94	68	67	1	1	PR_SS	24
+%R	95	69	68	1	1	PR_SS	24
+%R	96	70	69	1	1	PR_FS	0
+%R	97	71	70	1	1	PR_FS	0
+%R	98	72	71	1	1	PR_FS	0
+%R	99	73	72	1	1	PR_FS	0
+%R	100	74	73	1	1	PR_FS	0
+%R	101	75	74	1	1	PR_FS	0
+%R	102	76	75	1	1	PR_FS	0
+%R	103	77	76	1	1	PR_FS	0
+%R	104	78	77	1	1	PR_FS	0
+%R	105	79	78	1	1	PR_FS	0
+%R	106	80	79	1	1	PR_FS	0
+%R	107	81	80	1	1	PR_FS	0
+%R	108	82	306	1	1	PR_FS	0
+%R	109	306	81	1	1	PR_FS	0
+%R	110	83	82	1	1	PR_FS	0
+%R	111	84	83	1	1	PR_FS	0
+%R	112	294	83	1	1	PR_FS	0
+%R	113	295	294	1	1	PR_SS	16
+%R	114	296	295	1	1	PR_SS	16
+%R	115	297	296	1	1	PR_SS	16
+%R	116	85	84	1	1	PR_FS	0
+%R	117	111	84	1	1	PR_FS	0
+%R	118	114	84	1	1	PR_FS	0
+%R	119	298	84	1	1	PR_FS	0
+%R	120	299	298	1	1	PR_SS	16
+%R	121	300	299	1	1	PR_SS	16
+%R	122	301	300	1	1	PR_SS	16
+%R	123	87	297	1	1	PR_FS	0
+%R	124	87	301	1	1	PR_FS	0
+%R	125	88	87	1	1	PR_FS	0
+%R	126	86	85	1	1	PR_FS	0
+%R	127	89	88	1	1	PR_FS	0
+%R	128	90	88	1	1	PR_FS	0
+%R	129	91	89	1	1	PR_FS	0
+%R	130	91	90	1	1	PR_FS	0
+%R	131	92	91	1	1	PR_FS	0
+%R	132	93	86	1	1	PR_FS	0
+%R	133	106	86	1	1	PR_FS	0
+%R	134	307	92	1	1	PR_FS	0
+%R	135	107	106	1	1	PR_FS	0
+%R	136	109	106	1	1	PR_FS	0
+%R	137	112	106	1	1	PR_FS	0
+%R	138	115	106	1	1	PR_FS	0
+%R	139	122	106	1	1	PR_FS	0
+%R	140	94	93	1	1	PR_FS	0
+%R	141	118	109	1	1	PR_FS	0
+%R	142	119	115	1	1	PR_FS	0
+%R	143	95	94	1	1	PR_SS	16
+%R	144	125	122	1	1	PR_FS	0
+%R	145	108	107	1	1	PR_FS	0
+%R	146	110	107	1	1	PR_FS	0
+%R	147	110	109	1	1	PR_FS	0
+%R	148	113	107	1	1	PR_FS	0
+%R	149	113	112	1	1	PR_FS	0
+%R	150	116	107	1	1	PR_FS	0
+%R	151	116	115	1	1	PR_FS	0
+%R	152	123	107	1	1	PR_FS	0
+%R	153	123	122	1	1	PR_FS	0
+%R	154	96	95	1	1	PR_SS	16
+%R	155	128	125	1	1	PR_FS	0
+%R	156	97	96	1	1	PR_SS	16
+%R	157	120	116	1	1	PR_FS	0
+%R	158	120	119	1	1	PR_FS	0
+%R	159	121	110	1	1	PR_FS	0
+%R	160	132	128	1	1	PR_FS	0
+%R	161	98	97	1	1	PR_SS	16
+%R	162	126	123	1	1	PR_FS	0
+%R	163	126	125	1	1	PR_FS	0
+%R	164	135	132	1	1	PR_FS	0
+%R	165	99	98	1	1	PR_SS	16
+%R	166	100	99	1	1	PR_SS	16
+%R	167	129	126	1	1	PR_FS	0
+%R	168	129	128	1	1	PR_FS	0
+%R	169	131	126	1	1	PR_FS	0
+%R	170	101	100	1	1	PR_SS	16
+%R	171	117	108	1	1	PR_FS	0
+%R	172	117	116	1	1	PR_FS	0
+%R	173	124	108	1	1	PR_FS	0
+%R	174	124	123	1	1	PR_FS	0
+%R	175	102	101	1	1	PR_SS	16
+%R	176	103	102	1	1	PR_SS	16
+%R	177	104	103	1	1	PR_SS	16
+%R	178	105	104	1	1	PR_SS	16
+%R	179	133	131	1	1	PR_FS	0
+%R	180	133	132	1	1	PR_FS	0
+%R	181	127	124	1	1	PR_FS	0
+%R	182	127	126	1	1	PR_FS	0
+%R	183	138	308	1	1	PR_FS	0
+%R	184	145	105	1	1	PR_FS	0
+%R	185	149	105	1	1	PR_FS	0
+%R	186	153	105	1	1	PR_FS	0
+%R	187	157	105	1	1	PR_FS	0
+%R	188	308	105	1	1	PR_FS	0
+%R	189	136	133	1	1	PR_FS	0
+%R	190	136	135	1	1	PR_FS	0
+%R	191	139	138	1	1	PR_FS	0
+%R	192	130	127	1	1	PR_FS	0
+%R	193	130	129	1	1	PR_FS	0
+%R	194	134	130	1	1	PR_FS	0
+%R	195	134	133	1	1	PR_FS	0
+%R	196	140	139	1	1	PR_FS	0
+%R	197	154	153	1	1	PR_FS	0
+%R	198	137	134	1	1	PR_FS	0
+%R	199	137	136	1	1	PR_FS	0
+%R	200	141	140	1	1	PR_FS	0
+%R	201	146	145	1	1	PR_FS	0
+%R	202	150	149	1	1	PR_FS	0
+%R	203	158	157	1	1	PR_FS	0
+%R	204	142	141	1	1	PR_FS	0
+%R	205	311	303	1	1	PR_FS	5104
+%R	206	143	142	1	1	PR_FS	0
+%R	207	272	142	1	1	PR_FS	0
+%R	208	155	154	1	1	PR_FS	0
+%R	209	144	143	1	1	PR_FS	0
+%R	210	147	146	1	1	PR_FS	0
+%R	211	151	150	1	1	PR_FS	0
+%R	212	159	158	1	1	PR_FS	0
+%R	213	156	155	1	1	PR_FS	0
+%R	214	160	159	1	1	PR_FS	0
+%R	215	309	159	1	1	PR_FS	0
+%R	216	161	144	1	1	PR_FS	0
+%R	217	161	160	1	1	PR_FS	0
+%R	218	161	309	1	1	PR_FS	0
+%R	219	162	161	1	1	PR_FS	0
+%R	220	177	161	1	1	PR_FS	0
+%R	221	193	161	1	1	PR_FS	0
+%R	222	209	161	1	1	PR_FS	0
+%R	223	225	161	1	1	PR_FS	0
+%R	224	273	161	1	1	PR_FS	0
+%R	225	163	162	1	1	PR_FS	0
+%R	226	178	162	1	1	PR_FS	0
+%R	227	194	162	1	1	PR_FS	0
+%R	228	210	162	1	1	PR_FS	0
+%R	229	226	162	1	1	PR_FS	0
+%R	230	274	162	1	1	PR_FS	0
+%R	231	164	163	1	1	PR_FS	0
+%R	232	179	163	1	1	PR_FS	0
+%R	233	195	163	1	1	PR_FS	0
+%R	234	211	163	1	1	PR_FS	0
+%R	235	227	163	1	1	PR_FS	0
+%R	236	275	163	1	1	PR_FS	0
+%R	237	180	164	1	1	PR_FS	0
+%R	238	196	164	1	1	PR_FS	0
+%R	239	212	164	1	1	PR_FS	0
+%R	240	228	164	1	1	PR_FS	0
+%R	241	165	164	1	1	PR_SS	16
+%R	242	229	165	1	1	PR_FS	0
+%R	243	166	165	1	1	PR_SS	16
+%R	244	181	165	1	1	PR_SS	16
+%R	245	197	165	1	1	PR_SS	16
+%R	246	213	165	1	1	PR_SS	16
+%R	247	230	166	1	1	PR_FS	0
+%R	248	167	166	1	1	PR_SS	16
+%R	249	182	166	1	1	PR_SS	16
+%R	250	198	166	1	1	PR_SS	16
+%R	251	214	166	1	1	PR_SS	16
+%R	252	231	167	1	1	PR_FS	0
+%R	253	168	167	1	1	PR_SS	16
+%R	254	183	167	1	1	PR_SS	16
+%R	255	199	167	1	1	PR_SS	16
+%R	256	215	167	1	1	PR_SS	16
+%R	257	232	168	1	1	PR_FS	0
+%R	258	169	168	1	1	PR_SS	16
+%R	259	184	168	1	1	PR_SS	16
+%R	260	200	168	1	1	PR_SS	16
+%R	261	216	168	1	1	PR_SS	16
+%R	262	233	169	1	1	PR_FS	0
+%R	263	170	169	1	1	PR_SS	16
+%R	264	185	169	1	1	PR_SS	16
+%R	265	201	169	1	1	PR_SS	16
+%R	266	217	169	1	1	PR_SS	16
+%R	267	234	170	1	1	PR_FS	0
+%R	268	171	170	1	1	PR_SS	16
+%R	269	186	170	1	1	PR_SS	16
+%R	270	202	170	1	1	PR_SS	16
+%R	271	218	170	1	1	PR_SS	16
+%R	272	235	171	1	1	PR_FS	0
+%R	273	172	171	1	1	PR_SS	16
+%R	274	187	171	1	1	PR_SS	16
+%R	275	203	171	1	1	PR_SS	16
+%R	276	219	171	1	1	PR_SS	16
+%R	277	236	172	1	1	PR_FS	0
+%R	278	267	172	1	1	PR_FS	0
+%R	279	173	172	1	1	PR_SS	16
+%R	280	188	172	1	1	PR_SS	16
+%R	281	204	172	1	1	PR_SS	16
+%R	282	220	172	1	1	PR_SS	16
+%R	283	237	173	1	1	PR_FS	0
+%R	284	252	173	1	1	PR_FS	0
+%R	285	268	267	1	1	PR_SS	16
+%R	286	174	173	1	1	PR_SS	16
+%R	287	189	173	1	1	PR_SS	16
+%R	288	205	173	1	1	PR_SS	16
+%R	289	221	173	1	1	PR_SS	16
+%R	290	302	237	1	1	PR_FS	0
+%R	291	238	302	1	1	PR_FS	0
+%R	292	253	252	1	1	PR_SS	16
+%R	293	269	268	1	1	PR_SS	16
+%R	294	175	174	1	1	PR_SS	16
+%R	295	190	174	1	1	PR_SS	16
+%R	296	206	174	1	1	PR_SS	16
+%R	297	222	174	1	1	PR_SS	16
+%R	298	239	238	1	1	PR_FS	0
+%R	299	240	239	1	1	PR_FS	0
+%R	300	254	253	1	1	PR_SS	16
+%R	301	270	269	1	1	PR_SS	16
+%R	302	176	175	1	1	PR_SS	16
+%R	303	191	175	1	1	PR_SS	16
+%R	304	207	175	1	1	PR_SS	16
+%R	305	223	175	1	1	PR_SS	16
+%R	306	241	240	1	1	PR_FS	0
+%R	307	242	241	1	1	PR_FS	0
+%R	308	192	176	1	1	PR_SS	16
+%R	309	208	176	1	1	PR_SS	16
+%R	310	208	192	1	1	PR_FS	0
+%R	311	243	242	1	1	PR_SS	16
+%R	312	148	147	1	1	PR_FS	0
+%R	313	148	208	1	1	PR_FS	0
+%R	314	224	176	1	1	PR_SS	16
+%R	315	224	208	1	1	PR_FS	0
+%R	316	152	151	1	1	PR_FS	0
+%R	317	152	224	1	1	PR_FS	0
+%R	318	244	243	1	1	PR_SS	16
+%R	319	245	244	1	1	PR_SS	16
+%R	320	246	245	1	1	PR_SS	16
+%R	321	247	246	1	1	PR_SS	16
+%R	322	248	247	1	1	PR_SS	16
+%R	323	249	248	1	1	PR_SS	16
+%R	324	250	249	1	1	PR_SS	16
+%R	325	251	250	1	1	PR_SS	16
+%R	326	251	224	1	1	PR_SS	40
+%R	327	255	254	1	1	PR_FS	0
+%R	328	255	251	1	1	PR_FS	0
+%R	329	256	255	1	1	PR_FS	0
+%R	330	257	256	1	1	PR_FS	0
+%R	331	258	257	1	1	PR_FS	0
+%R	332	259	258	1	1	PR_SS	16
+%R	333	260	259	1	1	PR_SS	16
+%R	334	261	260	1	1	PR_SS	16
+%R	335	262	261	1	1	PR_SS	16
+%R	336	263	262	1	1	PR_SS	16
+%R	337	264	263	1	1	PR_SS	16
+%R	338	265	264	1	1	PR_SS	16
+%R	339	266	265	1	1	PR_SS	16
+%R	340	266	255	1	1	PR_SS	40
+%R	341	271	270	1	1	PR_FS	0
+%R	342	271	266	1	1	PR_SS	16
+%R	343	276	271	1	1	PR_FS	0
+%R	344	310	271	1	1	PR_FS	0
+%R	345	277	92	1	1	PR_FS	0
+%R	346	277	276	1	1	PR_FS	0
+%R	347	278	277	1	1	PR_FS	0
+%R	348	279	277	1	1	PR_FS	0
+%R	349	280	277	1	1	PR_FS	0
+%R	350	281	278	1	1	PR_FS	0
+%R	351	281	279	1	1	PR_FS	0
+%R	352	281	280	1	1	PR_FS	0
+%R	353	282	278	1	1	PR_FS	0
+%R	354	282	279	1	1	PR_FS	0
+%R	355	282	280	1	1	PR_FS	0
+%R	356	283	281	1	1	PR_FS	0
+%R	357	283	282	1	1	PR_FS	0
+%R	358	284	283	1	1	PR_FS	0
+%R	359	285	284	1	1	PR_FS	0
+%R	360	286	137	1	1	PR_FS	0
+%R	361	286	144	1	1	PR_FS	0
+%R	362	286	160	1	1	PR_FS	0
+%R	363	286	285	1	1	PR_FS	0
+%R	364	286	310	1	1	PR_FS	0
+%R	365	287	286	1	1	PR_FS	0
+%R	366	288	286	1	1	PR_FS	0
+%R	367	289	288	1	1	PR_FS	0
+%R	368	291	287	1	1	PR_FS	0
+%R	369	291	288	1	1	PR_FS	0
+%R	370	290	289	1	1	PR_FS	0
+%R	371	292	291	1	1	PR_FS	0
+%R	372	293	292	1	1	PR_FS	0
+%R	373	312	292	1	1	PR_FS	0
+%R	374	312	293	1	1	PR_FS	0
+%R	375	312	304	1	1	PR_FS	0
+%R	376	312	305	1	1	PR_FS	0
+%R	377	312	306	1	1	PR_FS	0
+%R	378	312	307	1	1	PR_FS	0
+%R	379	312	308	1	1	PR_FS	0
+%R	380	312	309	1	1	PR_FS	0
+%R	381	312	310	1	1	PR_FS	0
+%R	382	312	161	1	1	PR_FS	0
+%R	383	312	177	1	1	PR_FS	0
+%R	384	312	178	1	1	PR_FS	0
+%R	385	312	179	1	1	PR_FS	0
+%R	386	312	180	1	1	PR_FS	0
+%R	387	312	181	1	1	PR_FS	0
+%R	388	312	182	1	1	PR_FS	0
+%R	389	312	183	1	1	PR_FS	0
+%R	390	312	184	1	1	PR_FS	0
+%R	391	312	185	1	1	PR_FS	0
+%R	392	312	186	1	1	PR_FS	0
+%R	393	312	187	1	1	PR_FS	0
+%R	394	312	188	1	1	PR_FS	0
+%R	395	312	189	1	1	PR_FS	0
+%R	396	312	190	1	1	PR_FS	0
+%R	397	312	191	1	1	PR_FS	0
+%R	398	312	192	1	1	PR_FS	0
+%R	399	312	193	1	1	PR_FS	0
+%R	400	312	194	1	1	PR_FS	0
+%R	401	312	195	1	1	PR_FS	0
+%R	402	312	196	1	1	PR_FS	0
+%R	403	312	197	1	1	PR_FS	0
+%R	404	312	198	1	1	PR_FS	0
+%R	405	312	199	1	1	PR_FS	0
+%R	406	312	200	1	1	PR_FS	0
+%R	407	312	201	1	1	PR_FS	0
+%R	408	312	202	1	1	PR_FS	0
+%R	409	312	203	1	1	PR_FS	0
+%R	410	312	204	1	1	PR_FS	0
+%R	411	312	205	1	1	PR_FS	0
+%R	412	312	206	1	1	PR_FS	0
+%R	413	312	207	1	1	PR_FS	0
+%R	414	312	208	1	1	PR_FS	0
+%R	415	312	209	1	1	PR_FS	0
+%R	416	312	210	1	1	PR_FS	0
+%R	417	312	211	1	1	PR_FS	0
+%R	418	312	212	1	1	PR_FS	0
+%R	419	312	213	1	1	PR_FS	0
+%R	420	312	214	1	1	PR_FS	0
+%R	421	312	215	1	1	PR_FS	0
+%R	422	312	216	1	1	PR_FS	0
+%R	423	312	217	1	1	PR_FS	0
+%R	424	312	218	1	1	PR_FS	0
+%R	425	312	219	1	1	PR_FS	0
+%R	426	312	220	1	1	PR_FS	0
+%R	427	312	221	1	1	PR_FS	0
+%R	428	312	222	1	1	PR_FS	0
+%R	429	312	223	1	1	PR_FS	0
+%R	430	312	224	1	1	PR_FS	0
+%R	431	312	225	1	1	PR_FS	0
+%R	432	312	226	1	1	PR_FS	0
+%R	433	312	227	1	1	PR_FS	0
+%R	434	312	228	1	1	PR_FS	0
+%R	435	312	229	1	1	PR_FS	0
+%R	436	312	230	1	1	PR_FS	0
+%R	437	312	231	1	1	PR_FS	0
+%R	438	312	232	1	1	PR_FS	0
+%R	439	312	233	1	1	PR_FS	0
+%R	440	312	234	1	1	PR_FS	0
+%R	441	312	235	1	1	PR_FS	0
+%R	442	312	236	1	1	PR_FS	0
+%R	443	312	237	1	1	PR_FS	0
+%R	444	312	238	1	1	PR_FS	0
+%R	445	312	302	1	1	PR_FS	0
+%R	446	312	239	1	1	PR_FS	0
+%R	447	312	240	1	1	PR_FS	0
+%R	448	312	241	1	1	PR_FS	0
+%R	449	312	242	1	1	PR_FS	0
+%R	450	312	243	1	1	PR_FS	0
+%R	451	312	244	1	1	PR_FS	0
+%R	452	312	245	1	1	PR_FS	0
+%R	453	312	246	1	1	PR_FS	0
+%R	454	312	247	1	1	PR_FS	0
+%R	455	312	248	1	1	PR_FS	0
+%R	456	312	249	1	1	PR_FS	0
+%R	457	312	250	1	1	PR_FS	0
+%R	458	312	251	1	1	PR_FS	0
+%R	459	312	252	1	1	PR_FS	0
+%R	460	312	253	1	1	PR_FS	0
+%R	461	312	254	1	1	PR_FS	0
+%R	462	312	255	1	1	PR_FS	0
+%R	463	312	256	1	1	PR_FS	0
+%R	464	312	257	1	1	PR_FS	0
+%R	465	312	258	1	1	PR_FS	0
+%R	466	312	259	1	1	PR_FS	0
+%R	467	312	260	1	1	PR_FS	0
+%R	468	312	261	1	1	PR_FS	0
+%R	469	312	262	1	1	PR_FS	0
+%R	470	312	263	1	1	PR_FS	0
+%R	471	312	264	1	1	PR_FS	0
+%R	472	312	265	1	1	PR_FS	0
+%R	473	312	266	1	1	PR_FS	0
+%R	474	312	267	1	1	PR_FS	0
+%R	475	312	268	1	1	PR_FS	0
+%R	476	312	269	1	1	PR_FS	0
+%R	477	312	270	1	1	PR_FS	0
+%R	478	312	271	1	1	PR_FS	0
+%R	479	312	272	1	1	PR_FS	0
+%R	480	312	273	1	1	PR_FS	0
+%R	481	312	274	1	1	PR_FS	0
+%R	482	312	275	1	1	PR_FS	0
+%R	483	312	276	1	1	PR_FS	0
+%R	484	312	277	1	1	PR_FS	0
+%R	485	312	278	1	1	PR_FS	0
+%R	486	312	279	1	1	PR_FS	0
+%R	487	312	280	1	1	PR_FS	0
+%R	488	312	281	1	1	PR_FS	0
+%R	489	312	282	1	1	PR_FS	0
+%R	490	312	283	1	1	PR_FS	0
+%R	491	312	284	1	1	PR_FS	0
+%R	492	312	285	1	1	PR_FS	0
+%R	493	312	286	1	1	PR_FS	0
+%R	494	312	287	1	1	PR_FS	0
+%R	495	312	288	1	1	PR_FS	0
+%R	496	312	289	1	1	PR_FS	0
+%R	497	312	290	1	1	PR_FS	0
+%R	498	312	291	1	1	PR_FS	0
+%R	499	312	293	1	1	PR_FS	0
+%R	500	312	303	1	1	PR_FS	0
+%R	501	312	13	1	1	PR_FS	0
+%R	502	312	14	1	1	PR_FS	0
+%R	503	312	10	1	1	PR_FS	0
+%R	504	312	11	1	1	PR_FS	0
+%R	505	312	60	1	1	PR_FS	0
+%R	506	312	111	1	1	PR_FS	0
+%R	507	312	113	1	1	PR_FS	0
+%R	508	312	114	1	1	PR_FS	0
+%R	509	312	117	1	1	PR_FS	0
+%R	510	312	118	1	1	PR_FS	0
+%R	511	312	120	1	1	PR_FS	0
+%R	512	312	121	1	1	PR_FS	0
+%R	513	312	148	1	1	PR_FS	0
+%R	514	312	152	1	1	PR_FS	0
+%R	515	312	156	1	1	PR_FS	0
+
+%E

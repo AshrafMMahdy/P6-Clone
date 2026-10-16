@@ -1,0 +1,207 @@
+ERMHDR	12.0	2026-08-19	Project	WhiteHatIQ	White Hat IQ Scheduler	WhiteHatIQ	Project Management	USD
+
+%T	PROJECT
+%F	proj_id	proj_short_name	plan_start_date	plan_end_date
+%R	1	3_storey_residential_block	2027-03-01 08:00	2027-11-08 08:00
+
+%T	CALENDAR
+%F	clndr_id	clndr_name	day_hr_cnt	week_hr_cnt
+%R	1	Standard 5-Day	8.0	40.0
+
+%T	PROJWBS
+%F	wbs_id	proj_id	parent_wbs_id	wbs_name	wbs_short_name	proj_node_flag
+%R	1	1		3-Storey Residential Block	WBS-1	Y
+
+%T	TASK
+%F	task_id	proj_id	wbs_id	task_code	task_name	task_type	target_drtn_hr_cnt	remain_drtn_hr_cnt	total_float_hr_cnt	phys_complete_pct	target_start_date	target_end_date	early_start_date	early_end_date	status_code	clndr_id
+%R	1	1	1	1	Mobilisation & Site Setup	TT_Task	80	80	0	0	2027-03-01 08:00	2027-03-12 08:00	2027-03-01 08:00	2027-03-12 08:00	TK_NotStart	1
+%R	2	1	1	2	Site Clearance & Demolition	TT_Task	64	64	0	0	2027-03-15 08:00	2027-03-24 08:00	2027-03-15 08:00	2027-03-24 08:00	TK_NotStart	1
+%R	38	1	1	38	Milestone: Start on Site	TT_Mile	0	0	1360	0	2027-03-15 08:00	2027-03-15 08:00	2027-03-15 08:00	2027-03-15 08:00	TK_NotStart	1
+%R	3	1	1	3	Setting Out	TT_Task	24	24	0	0	2027-03-25 08:00	2027-03-29 08:00	2027-03-25 08:00	2027-03-29 08:00	TK_NotStart	1
+%R	4	1	1	4	Excavation & Bulk Earthworks	TT_Task	96	96	0	0	2027-03-30 08:00	2027-04-14 08:00	2027-03-30 08:00	2027-04-14 08:00	TK_NotStart	1
+%R	5	1	1	5	Piling (if required)	TT_Mile	0	0	1176	0	2027-04-15 08:00	2027-04-15 08:00	2027-04-15 08:00	2027-04-15 08:00	TK_NotStart	1
+%R	6	1	1	6	Foundations — Strip/Pad Concrete	TT_Task	64	64	0	0	2027-04-15 08:00	2027-04-26 08:00	2027-04-15 08:00	2027-04-26 08:00	TK_NotStart	1
+%R	7	1	1	7	Substructure Walls & Plinth Beams	TT_Task	80	80	0	0	2027-04-27 08:00	2027-05-10 08:00	2027-04-27 08:00	2027-05-10 08:00	TK_NotStart	1
+%R	8	1	1	8	Ground Floor Slab	TT_Task	64	64	0	0	2027-05-11 08:00	2027-05-20 08:00	2027-05-11 08:00	2027-05-20 08:00	TK_NotStart	1
+%R	9	1	1	9	Ground Floor Columns & Core Walls	TT_Task	80	80	0	0	2027-05-21 08:00	2027-06-03 08:00	2027-05-21 08:00	2027-06-03 08:00	TK_NotStart	1
+%R	10	1	1	10	First Floor Slab	TT_Task	80	80	312	0	2027-06-04 08:00	2027-06-17 08:00	2027-06-04 08:00	2027-06-17 08:00	TK_NotStart	1
+%R	15	1	1	15	Brick Envelope — Ground Floor	TT_Task	120	120	0	0	2027-06-04 08:00	2027-06-24 08:00	2027-06-04 08:00	2027-06-24 08:00	TK_NotStart	1
+%R	21	1	1	21	Internal Partitions — GF	TT_Task	96	96	0	0	2027-06-09 08:00	2027-06-24 08:00	2027-06-09 08:00	2027-06-24 08:00	TK_NotStart	1
+%R	11	1	1	11	First Floor Columns & Core Walls	TT_Task	80	80	312	0	2027-06-18 08:00	2027-07-01 08:00	2027-06-18 08:00	2027-07-01 08:00	TK_NotStart	1
+%R	16	1	1	16	Brick Envelope — First Floor	TT_Task	120	120	312	0	2027-06-25 08:00	2027-07-15 08:00	2027-06-25 08:00	2027-07-15 08:00	TK_NotStart	1
+%R	22	1	1	22	Internal Partitions — FF	TT_Task	96	96	0	0	2027-06-25 08:00	2027-07-12 08:00	2027-06-25 08:00	2027-07-12 08:00	TK_NotStart	1
+%R	12	1	1	12	Second Floor Slab	TT_Task	80	80	312	0	2027-07-02 08:00	2027-07-15 08:00	2027-07-02 08:00	2027-07-15 08:00	TK_NotStart	1
+%R	23	1	1	23	Internal Partitions — SF	TT_Task	96	96	0	0	2027-07-13 08:00	2027-07-28 08:00	2027-07-13 08:00	2027-07-28 08:00	TK_NotStart	1
+%R	13	1	1	13	Second Floor Columns & Core Walls	TT_Task	80	80	344	0	2027-07-16 08:00	2027-07-29 08:00	2027-07-16 08:00	2027-07-29 08:00	TK_NotStart	1
+%R	17	1	1	17	Brick Envelope — Second Floor	TT_Task	120	120	312	0	2027-07-16 08:00	2027-08-05 08:00	2027-07-16 08:00	2027-08-05 08:00	TK_NotStart	1
+%R	24	1	1	24	MEP First Fix — All Floors	TT_Task	160	160	0	0	2027-07-29 08:00	2027-08-25 08:00	2027-07-29 08:00	2027-08-25 08:00	TK_NotStart	1
+%R	14	1	1	14	Roof Slab	TT_Task	64	64	344	0	2027-07-30 08:00	2027-08-10 08:00	2027-07-30 08:00	2027-08-10 08:00	TK_NotStart	1
+%R	25	1	1	25	Plastering — All Floors	TT_Task	144	144	0	0	2027-08-02 08:00	2027-08-25 08:00	2027-08-02 08:00	2027-08-25 08:00	TK_NotStart	1
+%R	19	1	1	19	External Windows & Door Frames	TT_Task	96	96	312	0	2027-08-06 08:00	2027-08-23 08:00	2027-08-06 08:00	2027-08-23 08:00	TK_NotStart	1
+%R	18	1	1	18	Roofing — Insulation & Waterproofing	TT_Task	80	80	344	0	2027-08-11 08:00	2027-08-24 08:00	2027-08-11 08:00	2027-08-24 08:00	TK_NotStart	1
+%R	20	1	1	20	External Doors — Aluminium/PVC	TT_Task	40	40	312	0	2027-08-24 08:00	2027-08-30 08:00	2027-08-24 08:00	2027-08-30 08:00	TK_NotStart	1
+%R	26	1	1	26	Floor Tiling — Wet Areas	TT_Task	96	96	0	0	2027-08-26 08:00	2027-09-10 08:00	2027-08-26 08:00	2027-09-10 08:00	TK_NotStart	1
+%R	27	1	1	27	Carpentry — Internal Doors & Skirting	TT_Task	80	80	16	0	2027-08-26 08:00	2027-09-08 08:00	2027-08-26 08:00	2027-09-08 08:00	TK_NotStart	1
+%R	32	1	1	32	External Works — Hard & Soft Landscape	TT_Task	120	120	312	0	2027-08-31 08:00	2027-09-20 08:00	2027-08-31 08:00	2027-09-20 08:00	TK_NotStart	1
+%R	33	1	1	33	Boundary Walls & Fencing	TT_Task	64	64	328	0	2027-08-31 08:00	2027-09-09 08:00	2027-08-31 08:00	2027-09-09 08:00	TK_NotStart	1
+%R	34	1	1	34	Utility Connections	TT_Task	80	80	312	0	2027-08-31 08:00	2027-09-13 08:00	2027-08-31 08:00	2027-09-13 08:00	TK_NotStart	1
+%R	28	1	1	28	MEP Second Fix — All Floors	TT_Task	96	96	0	0	2027-09-13 08:00	2027-09-28 08:00	2027-09-13 08:00	2027-09-28 08:00	TK_NotStart	1
+%R	29	1	1	29	Decoration & Painting — All Floors	TT_Task	120	120	0	0	2027-09-29 08:00	2027-10-19 08:00	2027-09-29 08:00	2027-10-19 08:00	TK_NotStart	1
+%R	30	1	1	30	Kitchen Installation	TT_Task	80	80	40	0	2027-09-29 08:00	2027-10-12 08:00	2027-09-29 08:00	2027-10-12 08:00	TK_NotStart	1
+%R	31	1	1	31	Flooring — Carpet/Laminate	TT_Task	64	64	40	0	2027-10-01 08:00	2027-10-12 08:00	2027-10-01 08:00	2027-10-12 08:00	TK_NotStart	1
+%R	35	1	1	35	Clean & Final Inspection	TT_Task	40	40	0	0	2027-10-20 08:00	2027-10-26 08:00	2027-10-20 08:00	2027-10-26 08:00	TK_NotStart	1
+%R	36	1	1	36	Snagging & Defect Rectification	TT_Task	64	64	0	0	2027-10-27 08:00	2027-11-05 08:00	2027-10-27 08:00	2027-11-05 08:00	TK_NotStart	1
+%R	37	1	1	37	Milestone: Practical Completion	TT_Mile	0	0	0	0	2027-11-08 08:00	2027-11-08 08:00	2027-11-08 08:00	2027-11-08 08:00	TK_NotStart	1
+
+%T	TASKPRED
+%F	taskpred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt
+%R	1	2	1	1	1	PR_FS	0
+%R	2	38	1	1	1	PR_FF	0
+%R	3	3	2	1	1	PR_FS	0
+%R	4	4	3	1	1	PR_FS	0
+%R	5	5	4	1	1	PR_FF	0
+%R	6	6	4	1	1	PR_FS	0
+%R	7	7	6	1	1	PR_FS	0
+%R	8	8	7	1	1	PR_FS	0
+%R	9	9	8	1	1	PR_FS	0
+%R	10	10	9	1	1	PR_FS	0
+%R	11	15	9	1	1	PR_FS	0
+%R	12	21	15	1	1	PR_FF	0
+%R	13	11	10	1	1	PR_FS	0
+%R	14	16	15	1	1	PR_FS	0
+%R	15	16	10	1	1	PR_FS	0
+%R	16	22	21	1	1	PR_FS	0
+%R	17	12	11	1	1	PR_FS	0
+%R	18	23	22	1	1	PR_FS	0
+%R	19	13	12	1	1	PR_FS	0
+%R	20	17	16	1	1	PR_FS	0
+%R	21	17	12	1	1	PR_FS	0
+%R	22	24	23	1	1	PR_FS	0
+%R	23	14	13	1	1	PR_FS	0
+%R	24	25	24	1	1	PR_SS	16
+%R	25	19	17	1	1	PR_FS	0
+%R	26	18	14	1	1	PR_FS	0
+%R	27	18	17	1	1	PR_FS	0
+%R	28	20	19	1	1	PR_FS	0
+%R	29	26	25	1	1	PR_FS	0
+%R	30	27	25	1	1	PR_FS	0
+%R	31	32	20	1	1	PR_FS	0
+%R	32	32	18	1	1	PR_FS	0
+%R	33	33	32	1	1	PR_SS	0
+%R	34	34	32	1	1	PR_SS	0
+%R	35	28	26	1	1	PR_FS	0
+%R	36	28	27	1	1	PR_FS	0
+%R	37	29	28	1	1	PR_FS	0
+%R	38	30	28	1	1	PR_FS	0
+%R	39	31	29	1	1	PR_SS	16
+%R	40	35	29	1	1	PR_FS	0
+%R	41	35	30	1	1	PR_FS	0
+%R	42	35	31	1	1	PR_FS	0
+%R	43	36	35	1	1	PR_FS	0
+%R	44	37	36	1	1	PR_FS	0
+%R	45	37	33	1	1	PR_FS	0
+%R	46	37	34	1	1	PR_FS	0
+
+%T	CURRTYPE
+%F	curr_id	curr_type	curr_short_name	decimal_digit_cnt	curr_symbol
+%R	1	USD	USD	2	$
+
+%T	RSRC
+%F	rsrc_id	rsrc_name	rsrc_short_name	rsrc_type	unit_id	def_qty_per_hr	max_qty_per_hr	cost_qty_link_flag	clndr_id	curr_id	active_flag	parent_rsrc_id
+%R	1	Preliminaries	Preliminaries	RT_Labor		1	5	N	1	1	Y	
+%R	2	Groundworks	Groundworks	RT_Labor		1	6	N	1	1	Y	
+%R	3	Survey	Survey	RT_Labor		1	2	N	1	1	Y	
+%R	4	Piling	Piling	RT_Labor		1	1	N	1	1	Y	
+%R	5	Concrete	Concrete	RT_Labor		1	6	N	1	1	Y	
+%R	6	Brickwork	Brickwork	RT_Labor		1	10	N	1	1	Y	
+%R	7	MEP	MEP	RT_Labor		1	10	N	1	1	Y	
+%R	8	Plastering	Plastering	RT_Labor		1	8	N	1	1	Y	
+%R	9	Joinery	Joinery	RT_Labor		1	6	N	1	1	Y	
+%R	10	Roofing	Roofing	RT_Labor		1	4	N	1	1	Y	
+%R	11	Tiling	Tiling	RT_Labor		1	4	N	1	1	Y	
+%R	12	External	External	RT_Labor		1	5	N	1	1	Y	
+%R	13	Decoration	Decoration	RT_Labor		1	8	N	1	1	Y	
+%R	14	Flooring	Flooring	RT_Labor		1	6	N	1	1	Y	
+
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	rsrc_id	proj_id	cost_qty_link_flag	cost_per_qty	target_qty	target_cost	target_qty_per_hr	remain_qty	remain_cost	act_reg_qty	act_reg_cost	target_start_date	target_end_date	rsrc_type
+%R	1	1	1	1	N	0.00	400.00	0.00	5	400.00	0.00	0.00	0.00	2027-03-01 08:00	2027-03-12 08:00	RT_Labor
+%R	2	2	2	1	N	0.00	256.00	0.00	4	256.00	0.00	0.00	0.00	2027-03-15 08:00	2027-03-24 08:00	RT_Labor
+%R	3	3	3	1	N	0.00	48.00	0.00	2	48.00	0.00	0.00	0.00	2027-03-25 08:00	2027-03-29 08:00	RT_Labor
+%R	4	4	2	1	N	0.00	576.00	0.00	6	576.00	0.00	0.00	0.00	2027-03-30 08:00	2027-04-14 08:00	RT_Labor
+%R	5	5	4	1	N	0.00	0.00	0.00	1	0.00	0.00	0.00	0.00	2027-04-15 08:00	2027-04-15 08:00	RT_Labor
+%R	6	6	5	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2027-04-15 08:00	2027-04-26 08:00	RT_Labor
+%R	7	7	6	1	N	0.00	320.00	0.00	4	320.00	0.00	0.00	0.00	2027-04-27 08:00	2027-05-10 08:00	RT_Labor
+%R	8	8	5	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2027-05-11 08:00	2027-05-20 08:00	RT_Labor
+%R	9	9	5	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2027-05-21 08:00	2027-06-03 08:00	RT_Labor
+%R	10	10	5	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2027-06-04 08:00	2027-06-17 08:00	RT_Labor
+%R	11	15	6	1	N	0.00	1200.00	0.00	10	1200.00	0.00	0.00	0.00	2027-06-04 08:00	2027-06-24 08:00	RT_Labor
+%R	12	21	6	1	N	0.00	384.00	0.00	4	384.00	0.00	0.00	0.00	2027-06-09 08:00	2027-06-24 08:00	RT_Labor
+%R	13	11	5	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2027-06-18 08:00	2027-07-01 08:00	RT_Labor
+%R	14	16	6	1	N	0.00	1200.00	0.00	10	1200.00	0.00	0.00	0.00	2027-06-25 08:00	2027-07-15 08:00	RT_Labor
+%R	15	22	6	1	N	0.00	384.00	0.00	4	384.00	0.00	0.00	0.00	2027-06-25 08:00	2027-07-12 08:00	RT_Labor
+%R	16	12	5	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2027-07-02 08:00	2027-07-15 08:00	RT_Labor
+%R	17	23	6	1	N	0.00	384.00	0.00	4	384.00	0.00	0.00	0.00	2027-07-13 08:00	2027-07-28 08:00	RT_Labor
+%R	18	13	5	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2027-07-16 08:00	2027-07-29 08:00	RT_Labor
+%R	19	17	6	1	N	0.00	1200.00	0.00	10	1200.00	0.00	0.00	0.00	2027-07-16 08:00	2027-08-05 08:00	RT_Labor
+%R	20	24	7	1	N	0.00	1600.00	0.00	10	1600.00	0.00	0.00	0.00	2027-07-29 08:00	2027-08-25 08:00	RT_Labor
+%R	21	14	5	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2027-07-30 08:00	2027-08-10 08:00	RT_Labor
+%R	22	25	8	1	N	0.00	1152.00	0.00	8	1152.00	0.00	0.00	0.00	2027-08-02 08:00	2027-08-25 08:00	RT_Labor
+%R	23	19	9	1	N	0.00	576.00	0.00	6	576.00	0.00	0.00	0.00	2027-08-06 08:00	2027-08-23 08:00	RT_Labor
+%R	24	18	10	1	N	0.00	320.00	0.00	4	320.00	0.00	0.00	0.00	2027-08-11 08:00	2027-08-24 08:00	RT_Labor
+%R	25	20	9	1	N	0.00	120.00	0.00	3	120.00	0.00	0.00	0.00	2027-08-24 08:00	2027-08-30 08:00	RT_Labor
+%R	26	26	11	1	N	0.00	384.00	0.00	4	384.00	0.00	0.00	0.00	2027-08-26 08:00	2027-09-10 08:00	RT_Labor
+%R	27	27	9	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2027-08-26 08:00	2027-09-08 08:00	RT_Labor
+%R	28	32	12	1	N	0.00	600.00	0.00	5	600.00	0.00	0.00	0.00	2027-08-31 08:00	2027-09-20 08:00	RT_Labor
+%R	29	33	12	1	N	0.00	256.00	0.00	4	256.00	0.00	0.00	0.00	2027-08-31 08:00	2027-09-09 08:00	RT_Labor
+%R	30	34	7	1	N	0.00	320.00	0.00	4	320.00	0.00	0.00	0.00	2027-08-31 08:00	2027-09-13 08:00	RT_Labor
+%R	31	28	7	1	N	0.00	960.00	0.00	10	960.00	0.00	0.00	0.00	2027-09-13 08:00	2027-09-28 08:00	RT_Labor
+%R	32	29	13	1	N	0.00	960.00	0.00	8	960.00	0.00	0.00	0.00	2027-09-29 08:00	2027-10-19 08:00	RT_Labor
+%R	33	30	9	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2027-09-29 08:00	2027-10-12 08:00	RT_Labor
+%R	34	31	14	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2027-10-01 08:00	2027-10-12 08:00	RT_Labor
+%R	35	35	1	1	N	0.00	160.00	0.00	4	160.00	0.00	0.00	0.00	2027-10-20 08:00	2027-10-26 08:00	RT_Labor
+%R	36	36	1	1	N	0.00	192.00	0.00	3	192.00	0.00	0.00	0.00	2027-10-27 08:00	2027-11-05 08:00	RT_Labor
+
+%T	ACCOUNT
+%F	acct_id	acct_short_name	acct_name	parent_acct_id
+%R	1	GEN	General	
+
+%T	PROJCOST
+%F	cost_item_id	proj_id	task_id	acct_id	cost_name	cost_type	target_cost	remain_cost	act_cost	auto_compute_act_flag
+%R	1	1	1	1	Mobilisation & Site Setup — Materials/Plant/Sublet	CT_Other	45000.00	45000.00	0.00	Y
+%R	2	1	2	1	Site Clearance & Demolition — Materials/Plant/Sublet	CT_Other	12000.00	12000.00	0.00	Y
+%R	3	1	3	1	Setting Out — Materials/Plant/Sublet	CT_Other	3500.00	3500.00	0.00	Y
+%R	4	1	4	1	Excavation & Bulk Earthworks — Materials/Plant/Sublet	CT_Other	28000.00	28000.00	0.00	Y
+%R	5	1	6	1	Foundations — Strip/Pad Concrete — Materials/Plant/Sublet	CT_Other	42000.00	42000.00	0.00	Y
+%R	6	1	7	1	Substructure Walls & Plinth Beams — Materials/Plant/Sublet	CT_Other	18000.00	18000.00	0.00	Y
+%R	7	1	8	1	Ground Floor Slab — Materials/Plant/Sublet	CT_Other	35000.00	35000.00	0.00	Y
+%R	8	1	9	1	Ground Floor Columns & Core Walls — Materials/Plant/Sublet	CT_Other	38000.00	38000.00	0.00	Y
+%R	9	1	10	1	First Floor Slab — Materials/Plant/Sublet	CT_Other	40000.00	40000.00	0.00	Y
+%R	10	1	11	1	First Floor Columns & Core Walls — Materials/Plant/Sublet	CT_Other	38000.00	38000.00	0.00	Y
+%R	11	1	12	1	Second Floor Slab — Materials/Plant/Sublet	CT_Other	40000.00	40000.00	0.00	Y
+%R	12	1	13	1	Second Floor Columns & Core Walls — Materials/Plant/Sublet	CT_Other	38000.00	38000.00	0.00	Y
+%R	13	1	14	1	Roof Slab — Materials/Plant/Sublet	CT_Other	42000.00	42000.00	0.00	Y
+%R	14	1	15	1	Brick Envelope — Ground Floor — Materials/Plant/Sublet	CT_Other	55000.00	55000.00	0.00	Y
+%R	15	1	16	1	Brick Envelope — First Floor — Materials/Plant/Sublet	CT_Other	55000.00	55000.00	0.00	Y
+%R	16	1	17	1	Brick Envelope — Second Floor — Materials/Plant/Sublet	CT_Other	55000.00	55000.00	0.00	Y
+%R	17	1	18	1	Roofing — Insulation & Waterproofing — Materials/Plant/Sublet	CT_Other	32000.00	32000.00	0.00	Y
+%R	18	1	19	1	External Windows & Door Frames — Materials/Plant/Sublet	CT_Other	48000.00	48000.00	0.00	Y
+%R	19	1	20	1	External Doors — Aluminium/PVC — Materials/Plant/Sublet	CT_Other	12000.00	12000.00	0.00	Y
+%R	20	1	21	1	Internal Partitions — GF — Materials/Plant/Sublet	CT_Other	22000.00	22000.00	0.00	Y
+%R	21	1	22	1	Internal Partitions — FF — Materials/Plant/Sublet	CT_Other	22000.00	22000.00	0.00	Y
+%R	22	1	23	1	Internal Partitions — SF — Materials/Plant/Sublet	CT_Other	22000.00	22000.00	0.00	Y
+%R	23	1	24	1	MEP First Fix — All Floors — Materials/Plant/Sublet	CT_Other	85000.00	85000.00	0.00	Y
+%R	24	1	25	1	Plastering — All Floors — Materials/Plant/Sublet	CT_Other	65000.00	65000.00	0.00	Y
+%R	25	1	26	1	Floor Tiling — Wet Areas — Materials/Plant/Sublet	CT_Other	36000.00	36000.00	0.00	Y
+%R	26	1	27	1	Carpentry — Internal Doors & Skirting — Materials/Plant/Sublet	CT_Other	30000.00	30000.00	0.00	Y
+%R	27	1	28	1	MEP Second Fix — All Floors — Materials/Plant/Sublet	CT_Other	55000.00	55000.00	0.00	Y
+%R	28	1	29	1	Decoration & Painting — All Floors — Materials/Plant/Sublet	CT_Other	45000.00	45000.00	0.00	Y
+%R	29	1	30	1	Kitchen Installation — Materials/Plant/Sublet	CT_Other	72000.00	72000.00	0.00	Y
+%R	30	1	31	1	Flooring — Carpet/Laminate — Materials/Plant/Sublet	CT_Other	36000.00	36000.00	0.00	Y
+%R	31	1	32	1	External Works — Hard & Soft Landscape — Materials/Plant/Sublet	CT_Other	45000.00	45000.00	0.00	Y
+%R	32	1	33	1	Boundary Walls & Fencing — Materials/Plant/Sublet	CT_Other	18000.00	18000.00	0.00	Y
+%R	33	1	34	1	Utility Connections — Materials/Plant/Sublet	CT_Other	25000.00	25000.00	0.00	Y
+%R	34	1	35	1	Clean & Final Inspection — Materials/Plant/Sublet	CT_Other	8000.00	8000.00	0.00	Y
+%R	35	1	36	1	Snagging & Defect Rectification — Materials/Plant/Sublet	CT_Other	5000.00	5000.00	0.00	Y
+
+%E

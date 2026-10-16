@@ -1,0 +1,573 @@
+ERMHDR	8.1	2026-09-16	Project	admin	ECC-BK-CS	dbxDatabaseNoName	Project Management	EUR
+%T	CURRTYPE
+%F	curr_id	decimal_digit_cnt	curr_symbol	decimal_symbol	digit_group_symbol	pos_curr_fmt_type	neg_curr_fmt_type	curr_type	curr_short_name	group_digit_cnt	base_exch_rate
+%R	EUR	2	€	.	,	#1.1	(#1.1)	Euro	EUR	3	1.0
+%T	OBS
+%F	obs_id	parent_obs_id	guid	seq_num	obs_name	obs_descr
+%R	1		vO+XXQUvTruCWeW97Fp6Yg	0	NordBuild Oy	
+%T	PROJECT
+%F	proj_id	fy_start_month_num	rsrc_self_add_flag	allow_complete_flag	rsrc_multi_assign_flag	checkout_flag	project_flag	step_complete_flag	cost_qty_recalc_flag	batch_sum_flag	name_sep_char	def_complete_pct_type	proj_short_name	acct_id	orig_proj_id	source_proj_id	base_type_id	clndr_id	sum_base_proj_id	task_code_base	task_code_step	priority_num	wbs_max_sum_level	strgy_priority_num	last_checksum	critical_drtn_hr_cnt	def_cost_per_qty	last_recalc_date	plan_start_date	plan_end_date	scd_end_date	add_date	last_tasksum_date	fcst_start_date	def_duration_type	task_code_prefix	guid	def_qty_type	add_by_name	web_local_root_path	proj_url	def_rate_type	add_act_remain_flag	act_this_per_link_flag	def_task_type	act_pct_link_flag	critical_path_type	task_code_prefix_flag	def_rollup_dates_flag	use_project_baseline_flag	rem_target_link_flag	reset_planned_flag	allow_neg_act_flag	sum_assign_level	last_fin_dates_id	last_baseline_update_date	cr_external_key	apply_actuals_date	location_id	loaded_scope_level	export_flag	new_fin_dates_id	baselines_to_export	baseline_names_to_export	next_data_date	close_period_flag	sum_refresh_date	trsrcsum_loaded
+%R	9000	1	Y	Y	Y	N	Y	N	N	Y	.	CP_Drtn	POLARIS-DC1					1000		1000	10	1000	10	10		0	0.0000	2026-09-16 00:00	2026-01-16 08:00	2028-02-23 08:00	2028-02-23 08:00	2026-09-16 12:00			DT_FixedDUR2	A	4/yfr94DQjymVomuV6DxHQ	QT_Hour	admin			COST_PER_QTY	N	Y	TT_Task	Y	CT_TotFloat	Y	Y	Y	N	N	N	SL_Taskrsrc						7	Y				2026-01-16 08:00			
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	last_chng_date	clndr_type	day_hr_cnt	week_hr_cnt	month_hr_cnt	year_hr_cnt	rsrc_private	clndr_data
+%R	1000	Y	Finland Site 5-Day + Public Holidays	9000		2026-09-16 00:00	CA_Project	8	40	172	2000	N	(0||CalendarData()(  (0||DaysOfWeek()(    (0||1()())    (0||2()(      (0||0(s|06:00|f|22:00)())))    (0||3()(      (0||0(s|06:00|f|22:00)())))    (0||4()(      (0||0(s|06:00|f|22:00)())))    (0||5()(      (0||0(s|06:00|f|22:00)())))    (0||6()(      (0||0(s|06:00|f|22:00)())))    (0||7()())))  (0||VIEW(ShowTotal|Y)())  (0||Exceptions()())))
+%T	SCHEDOPTIONS
+%F	schedoptions_id	proj_id	sched_outer_depend_type	sched_open_critical_flag	sched_lag_early_start_flag	sched_retained_logic	sched_setplantoforecast	sched_float_type	sched_calendar_on_relationship_lag	sched_use_expect_end_flag	sched_progress_override	level_float_thrs_cnt	level_outer_assign_flag	level_outer_assign_priority	level_over_alloc_pct	level_within_float_flag	level_keep_sched_date_flag	level_all_rsrc_flag	sched_use_project_end_date_for_float	enable_multiple_longest_path_calc	limit_multiple_longest_path_calc	max_multiple_longest_path	use_total_float_multiple_longest_paths	key_activity_for_multiple_longest_paths	LevelPriorityList
+%R	1	9000	SD_Both	N	Y	Y	N	FT_FF	rcal_Predecessor	Y	N	0	N	5	25	N	Y	Y	Y	N	Y	10			priority_type,ASC
+%T	PROJWBS
+%F	wbs_id	proj_id	obs_id	seq_num	est_wt	proj_node_flag	sum_data_flag	status_code	wbs_short_name	wbs_name	phase_id	parent_wbs_id	ev_user_pct	ev_etc_user_value	guid	plan_open_state
+%R	500000	9000	1	0	1	Y	N	WS_Open	POLARIS	Polaris DC-1 - Aviapolis Data Campus Phase 1			6	0.88	uBPGw/69Rd+cnclF5EIRBw	
+%R	500001	9000	1	100	1	N	N	WS_Open	00.Mobilis	Mobilisation		500000	6	0.88	Ncuv3TanSP2tQTaEiM8mpg	
+%R	500002	9000	1	200	1	N	N	WS_Open	01.Design	Design		500000	6	0.88	wlcIJ3jnTEKvcMTE7k4nPQ	
+%R	500003	9000	1	300	1	N	N	WS_Open	04.Section	Section1		500000	6	0.88	O0uYeXQOQbaBWjyof3uc/w	
+%R	500004	9000	1	400	1	N	N	WS_Open	05.Section	Section2		500000	6	0.88	XaApqmF0RGutEd1Z1IcBWQ	
+%R	500005	9000	1	500	1	N	N	WS_Open	06.Section	Section3		500000	6	0.88	or5Y2HS/R7O1NksYRtRcSA	
+%R	500006	9000	1	600	1	N	N	WS_Open	07.Section	Section4		500000	6	0.88	LXIXhxUaSZOXWIAFAECT/g	
+%R	500007	9000	1	700	1	N	N	WS_Open	09.Interfa	Interfaces		500000	6	0.88	QDANmBQlS/Wz5X+9Cxdc3A	
+%T	RSRC
+%F	rsrc_id	parent_rsrc_id	clndr_id	role_id	shift_id	user_id	pobs_id	guid	rsrc_seq_num	email_addr	employee_code	office_phone	other_phone	rsrc_name	rsrc_short_name	rsrc_title_name	def_qty_per_hr	cost_qty_type	ot_factor	active_flag	auto_compute_act_flag	def_cost_qty_link_flag	ot_flag	curr_id	unit_id	rsrc_type	location_id	rsrc_notes	load_tasks_flag	level_flag	last_checksum
+%R	40000		1000					RUxPb/lXSRWUUezfRAaOqA	1					Site Management	Site Management		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40001		1000					rV8HAE49TMCmlzv4uno2nA	2					Civil Crew	Civil Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40002		1000					4bORoF6fRNm/yHBUJAYt+g	3					Earthworks Crew	Earthworks Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40003		1000					gUfJ1whdTzqO46z6hq4TXA	4					Environmental Crew	Environmental Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40004		1000					lo9HA5QpSFKuIzyRJCb9FQ	5					Design Team	Design Team		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40005		1000					UdOOlyBWRYOELryPTtkAmg	6					Engineer (3rd party)	Engineer (3rd party)		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40006		1000					HRsTLXpFQNay6qU1kWo7dg	7					Blasting Crew	Blasting Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40007		1000					i9TPnm4HS52gR+cdYVHKnw	8					Concrete Crew	Concrete Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40008		1000					gpm/WG1rQ4SIdtlcIXjw0g	9					Piling Crew	Piling Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40009		1000					gRe+QeSCRwiKEQuuEIWnhw	10					Steel Fabricator (offsite)	Steel Fabricator (offsit		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40010		1000					Vhaiod1GSruwAu+qpRsvsQ	11					Precast Fabricator (offsite)	Precast Fabricator (offs		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40011		1000					9KKvsdi6T/GlGGTBBQ5R9A	12					Structural Steel Crew	Structural Steel Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40012		1000					QtxIk50WSsmbnevWS7hCDg	13					Precast Crew	Precast Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40013		1000					Ze8vK1jRTkSMj2n1xHirzw	14					Facade Crew	Facade Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40014		1000					vs5jp0V8TlyWDATpw+Eo8w	15					Electrical Crew	Electrical Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40015		1000					dvBDCWCRRlyiLdeO6ChniQ	16					Transformer Fabricator (offsite)	Transformer Fabricator (		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40016		1000					9uaDErkGQPa95W167bOPGg	17					Switchgear Fabricator (offsite)	Switchgear Fabricator (o		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40017		1000					hjy+BGE2R1uFKvzXhZnVBQ	18					Generator Fabricator (offsite)	Generator Fabricator (of		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40018		1000					16Fpd3EQRam/BE8JDPy13A	19					Mechanical Fabricator (offsite)	Mechanical Fabricator (o		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40019		1000					KVvvUKcPQLK8VHm1fqNZWQ	20					Mechanical Crew	Mechanical Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40020		1000					0w4ybfgtR+ugHqSSyAjB9g	21					UPS Fabricator (offsite)	UPS Fabricator (offsite)		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40021		1000					AVsbzc8jQEOIamZwKn0VFQ	22					Battery Fabricator (offsite)	Battery Fabricator (offs		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40022		1000					4405otaRSt6ckPbDgVJRZw	23					Busway Fabricator (offsite)	Busway Fabricator (offsi		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40023		1000					qmAfxnajQeWNIhexY3cDRw	24					Fit-Out Crew	Fit-Out Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40024		1000					d5SK10fHSTqLPAQL+eRYsQ	25					Fire Systems Fabricator (offsite)	Fire Systems Fabricator 		1	QT_Hour		Y	Y	Y	N	EUR		RT_Equip					
+%R	40025		1000					x0Xj474HTqaTnsl3aZJb9w	26					ELV Crew	ELV Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40026		1000					r0TGvwdeTb6jo/48gtkpIA	27					BMS Crew	BMS Crew		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%R	40027		1000					QDPo2CmYQCaoyjBdorbuhA	28					Commissioning Team	Commissioning Team		1	QT_Hour		Y	Y	Y	N	EUR		RT_Labor					
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	phys_complete_pct	rev_fdbk_flag	est_wt	lock_plan_flag	auto_compute_act_flag	complete_pct_type	task_type	duration_type	status_code	task_code	task_name	rsrc_id	total_float_hr_cnt	free_float_hr_cnt	remain_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	target_drtn_hr_cnt	target_equip_qty	act_equip_qty	remain_equip_qty	cstr_date	act_start_date	act_end_date	late_start_date	late_end_date	expect_end_date	early_start_date	early_end_date	restart_date	reend_date	target_start_date	target_end_date	rem_late_start_date	rem_late_end_date	cstr_type	priority_type	suspend_date	resume_date	float_path	float_path_order	guid	tmpl_guid	cstr_date2	cstr_type2	driving_path_flag	act_this_per_work_qty	act_this_per_equip_qty	external_early_start_date	external_late_end_date	create_date	update_date	create_user	update_user	location_id
+%R	100000	9000	500001	1000	0	N	1	N	N	CP_Drtn	TT_Mile	DT_FixedDUR2	TK_NotStart	A1000	Contract Award / Notice to Proceed			0	0	0	0	0	0	0	0	0				2026-03-02 08:00	2026-03-02 08:00		2026-03-02 08:00	2026-03-02 08:00			2026-03-02 08:00	2026-03-02 08:00	2026-03-02 08:00	2026-03-02 08:00		PT_Normal					lpWAs2PsQQ+P2g5IawmhzA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100001	9000	500001	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A1010	Statutory Supervisors Appointed & Approved (vastaava tyonjohtaja, KVV, IV)			0	120	0	0	0	120	0	0	0				2026-03-03 08:00	2026-03-23 08:00		2026-03-03 08:00	2026-03-23 08:00			2026-03-03 08:00	2026-03-23 08:00	2026-03-03 08:00	2026-03-23 08:00		PT_Normal					95CCZI7mRUqcWZIVy7NRtA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100002	9000	500001	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A1020	Site Establishment: Offices, Welfare, Hoarding			0	120	0	0	0	120	0	0	0				2026-03-03 08:00	2026-03-23 08:00		2026-03-03 08:00	2026-03-23 08:00			2026-03-03 08:00	2026-03-23 08:00	2026-03-03 08:00	2026-03-23 08:00		PT_Normal					kBVR4gzKTbyUQw/Xunfi+A				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100003	9000	500001	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A1030	Temporary Power, Water, Telecoms			0	80	0	0	0	80	0	0	0				2026-03-10 08:00	2026-03-23 08:00		2026-03-10 08:00	2026-03-23 08:00			2026-03-10 08:00	2026-03-23 08:00	2026-03-10 08:00	2026-03-23 08:00		PT_Normal					XPkvYyU2QZ2rJH+00VqQ5w				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100004	9000	500001	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A1040	Tower/Mobile Cranage, Hoisting & Access Mobilisation			0	80	0	0	0	80	0	0	0				2026-03-10 08:00	2026-03-23 08:00		2026-03-10 08:00	2026-03-23 08:00			2026-03-10 08:00	2026-03-23 08:00	2026-03-10 08:00	2026-03-23 08:00		PT_Normal					0hTPrNTjQAiEY/6h0ZJY7w				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100005	9000	500001	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A1050	Temporary Haul Road & Site Access (from Tikkurilantie)			0	80	0	0	0	80	0	0	0				2026-03-10 08:00	2026-03-23 08:00		2026-03-10 08:00	2026-03-23 08:00			2026-03-10 08:00	2026-03-23 08:00	2026-03-10 08:00	2026-03-23 08:00		PT_Normal					A3FYVKEIQ5aZWnO6+8VUyQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100006	9000	500001	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A1060	Environmental Controls: Vibration & Noise Monitoring Set-up			0	80	0	0	0	80	0	0	0				2026-03-10 08:00	2026-03-23 08:00		2026-03-10 08:00	2026-03-23 08:00			2026-03-10 08:00	2026-03-23 08:00	2026-03-10 08:00	2026-03-23 08:00		PT_Normal					1RAA18qyTnmX53CIpBr/MQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100007	9000	500001	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A1070	General Overheads & Site Management (running, whole programme)			0	3680	0	0	0	3680	0	0	0				2026-03-03 08:00	2028-02-23 08:00		2026-03-03 08:00	2028-02-23 08:00			2026-03-03 08:00	2028-02-23 08:00	2026-03-03 08:00	2028-02-23 08:00		PT_Normal					Wixm8TIDQS2Jr2KfNHZxUA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100008	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2000	Concept Design - Stage 1 (whole site)			0	160	0	0	0	160	0	0	0				2026-03-03 08:00	2026-03-30 08:00		2026-03-03 08:00	2026-03-30 08:00			2026-03-03 08:00	2026-03-30 08:00	2026-03-03 08:00	2026-03-30 08:00		PT_Normal					W9sCT3asTEKuCzTCFYn2mg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100009	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2010	Engineer Review - Stage 1 (14 days per SP-20)			0	80	0	0	0	80	0	0	0				2026-03-31 08:00	2026-04-15 08:00		2026-03-31 08:00	2026-04-15 08:00			2026-03-31 08:00	2026-04-15 08:00	2026-03-31 08:00	2026-04-15 08:00		PT_Normal					n0NhC6U5SByrC801DShtVg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100010	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2020	Detailed Design - Section 1 (Hall1/Substation/GenComp) - Stage 2			0	320	0	0	0	320	0	0	0				2026-04-16 08:00	2026-06-12 08:00		2026-04-16 08:00	2026-06-12 08:00			2026-04-16 08:00	2026-06-12 08:00	2026-04-16 08:00	2026-06-12 08:00		PT_Normal					Zo2CsvwrRJemBRJMI0tFcQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100011	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2030	Engineer Review - Section 1 Detailed Design (21 days per SP-20)			0	120	0	0	0	120	0	0	0				2026-06-15 08:00	2026-07-27 08:00		2026-06-15 08:00	2026-07-27 08:00			2026-06-15 08:00	2026-07-27 08:00	2026-06-15 08:00	2026-07-27 08:00		PT_Normal					wseo/jSnR/2onEOAbb8fqQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100012	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2040	Detailed Design - Sections 2-4 (rolling, staggered)			0	400	0	0	0	400	0	0	0				2026-05-08 08:00	2026-08-10 08:00		2026-05-08 08:00	2026-08-10 08:00			2026-05-08 08:00	2026-08-10 08:00	2026-05-08 08:00	2026-08-10 08:00		PT_Normal					MG8apLq3R9aQsMKZ6zeZ0Q				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100013	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2050	Construction Issue Documents - Stage 3, all Sections (14-day review)			0	160	0	0	0	160	0	0	0				2026-07-28 08:00	2026-08-24 08:00		2026-07-28 08:00	2026-08-24 08:00			2026-07-28 08:00	2026-08-24 08:00	2026-07-28 08:00	2026-08-24 08:00		PT_Normal					lD/ODzuuRouW/u5uc/0iIw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100014	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2060	Substation/Switchgear Design - DNO Compatibility Review Submission			0	80	0	0	0	80	0	0	0				2026-04-09 08:00	2026-04-22 08:00		2026-04-09 08:00	2026-04-22 08:00			2026-04-09 08:00	2026-04-22 08:00	2026-04-09 08:00	2026-04-22 08:00		PT_Normal					oGvwn6E9TIqSqUY7uwraxA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100015	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2070	DNO Compatibility Review (>=12wk before switchgear order, per Grid Offer 4.2)			0	120	0	0	0	120	0	0	0				2026-04-23 08:00	2026-05-15 08:00		2026-04-23 08:00	2026-05-15 08:00			2026-04-23 08:00	2026-05-15 08:00	2026-04-23 08:00	2026-05-15 08:00		PT_Normal					e8al03TkSgeLu09trChcAQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100016	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2080	Protection Coordination Study Submission (110/20kV)			0	120	0	0	0	120	0	0	0				2026-05-18 08:00	2026-06-05 08:00		2026-05-18 08:00	2026-06-05 08:00			2026-05-18 08:00	2026-06-05 08:00	2026-05-18 08:00	2026-06-05 08:00		PT_Normal					5UngvJXwQk+/CAvAS+mDKg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100017	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2090	DNO Protection Study Review & Approval (20 working days)			0	160	0	0	0	160	0	0	0				2026-06-08 08:00	2026-07-27 08:00		2026-06-08 08:00	2026-07-27 08:00			2026-06-08 08:00	2026-07-27 08:00	2026-06-08 08:00	2026-07-27 08:00		PT_Normal					6XGTlK+YTFOAf0pjwcy5Bw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100018	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2100	Fire Engineering Approval Submission - Data Hall Suppression (AHJ)			0	120	0	0	0	120	0	0	0				2026-04-09 08:00	2026-04-29 08:00		2026-04-09 08:00	2026-04-29 08:00			2026-04-09 08:00	2026-04-29 08:00	2026-04-09 08:00	2026-04-29 08:00		PT_Normal					pAEcqUsETaSve++gTPbLsw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100019	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2110	Fire Engineering / AHJ Approval - Data Hall Suppression System			0	240	0	0	0	240	0	0	0				2026-04-30 08:00	2026-06-12 08:00		2026-04-30 08:00	2026-06-12 08:00			2026-04-30 08:00	2026-06-12 08:00	2026-04-30 08:00	2026-06-12 08:00		PT_Normal					uWaC8NIzRCil+0ggGKwwEA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100020	9000	500002	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A2120	Blasting Design & Method Statement (Generator Compound + Hall 4 zones)			0	120	0	0	0	120	0	0	0				2026-04-23 08:00	2026-05-15 08:00		2026-04-23 08:00	2026-05-15 08:00			2026-04-23 08:00	2026-05-15 08:00	2026-04-23 08:00	2026-05-15 08:00		PT_Normal					A/k7qIV2RuCq4S4pnDAroQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100021	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4000	Sitewide Clearance & Topsoil Strip (26,565 m2)			0	120	0	0	0	120	0	0	0				2026-03-24 08:00	2026-04-15 08:00		2026-03-24 08:00	2026-04-15 08:00			2026-03-24 08:00	2026-04-15 08:00	2026-03-24 08:00	2026-04-15 08:00		PT_Normal					WQCSjCEyRbi87JNx5QD8EQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100022	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4010	Blasting Permit & Pre-Condition Survey - Generator Compound Zone			0	120	0	0	0	120	0	0	0				2026-05-18 08:00	2026-06-05 08:00		2026-05-18 08:00	2026-06-05 08:00			2026-05-18 08:00	2026-06-05 08:00	2026-05-18 08:00	2026-06-05 08:00		PT_Normal					8YXXRBBuR4CAgrgc5A+M5Q				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100023	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4020	Bulk Earthworks - Hall1/Substation Zone (till)			0	120	0	0	0	120	0	0	0				2026-04-16 08:00	2026-05-07 08:00		2026-04-16 08:00	2026-05-07 08:00			2026-04-16 08:00	2026-05-07 08:00	2026-04-16 08:00	2026-05-07 08:00		PT_Normal					N8eQ9JSqSEK4KwkAU/wuFQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100024	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4030	Rock Excavation by Blasting - Generator Compound (~1,139 m3)			0	80	0	0	0	80	0	0	0				2026-06-08 08:00	2026-06-22 08:00		2026-06-08 08:00	2026-06-22 08:00			2026-06-08 08:00	2026-06-22 08:00	2026-06-08 08:00	2026-06-22 08:00		PT_Normal					ikYh2HOiS22i16fwpTXHeQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100025	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4040	Foundations - Data Hall 1 (pad/strip on till)			0	120	0	0	0	120	0	0	0				2026-05-08 08:00	2026-05-29 08:00		2026-05-08 08:00	2026-05-29 08:00			2026-05-08 08:00	2026-05-29 08:00	2026-05-08 08:00	2026-05-29 08:00		PT_Normal					h7Q0/KiPT/+B/OtUQHAy+A				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100026	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4050	Foundations - Primary Substation Building (incl. cable basement waterproofing)			0	120	0	0	0	120	0	0	0				2026-05-08 08:00	2026-05-29 08:00		2026-05-08 08:00	2026-05-29 08:00			2026-05-08 08:00	2026-05-29 08:00	2026-05-08 08:00	2026-05-29 08:00		PT_Normal					5vzJv09XTUOPRtM2asyaiw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100027	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4060	Foundations - Generator Compound (rock-socketed piers)			0	80	0	0	0	80	0	0	0				2026-06-23 08:00	2026-07-27 08:00		2026-06-23 08:00	2026-07-27 08:00			2026-06-23 08:00	2026-07-27 08:00	2026-06-23 08:00	2026-07-27 08:00		PT_Normal					AgKDl/2XRKK1jOT2zA3Nfg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100028	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4070	Ground Beams, Slab & Sub-base - Hall1/Substation/GenComp			0	160	0	0	0	160	0	0	0				2026-07-28 08:00	2026-08-24 08:00		2026-07-28 08:00	2026-08-24 08:00			2026-07-28 08:00	2026-08-24 08:00	2026-07-28 08:00	2026-08-24 08:00		PT_Normal					hTflXDoLR2yrijYj3+5yhg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100029	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4080	Structural Steel Release & Fabrication - Hall1/Spine/Substation/GenComp (18wk lead)			0	720	0	0	0	720	0	0	0				2026-04-13 08:00	2026-08-14 08:00		2026-04-13 08:00	2026-08-14 08:00			2026-04-13 08:00	2026-08-14 08:00	2026-04-13 08:00	2026-08-14 08:00		PT_Normal					byFs48OzSICZxZTNUE1FaQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100030	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4090	Precast Wall Panel Manufacture - Hall1/Spine/Sub/GenComp (16wk lead)			0	640	0	0	0	640	0	0	0				2026-05-04 08:00	2026-08-21 08:00		2026-05-04 08:00	2026-08-21 08:00			2026-05-04 08:00	2026-08-21 08:00	2026-05-04 08:00	2026-08-21 08:00		PT_Normal					AZ8Qb0bgSdCDhVxHFXW69Q				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100031	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4100	Structural Steel Erection - Data Hall 1			0	80	0	0	0	80	0	0	0				2026-08-25 08:00	2026-09-07 08:00		2026-08-25 08:00	2026-09-07 08:00			2026-08-25 08:00	2026-09-07 08:00	2026-08-25 08:00	2026-09-07 08:00		PT_Normal					+O2q+YdsTISeaip19iIgQw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100032	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4110	Structural Steel Erection - Substation & Generator Compound Enclosure			0	80	0	0	0	80	0	0	0				2026-09-01 08:00	2026-09-14 08:00		2026-09-01 08:00	2026-09-14 08:00			2026-09-01 08:00	2026-09-14 08:00	2026-09-01 08:00	2026-09-14 08:00		PT_Normal					L7EIi3qzQiGM2L1040ZQCQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100033	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4120	Precast Panel Installation - Data Hall 1 (64 nr)			0	80	0	0	0	80	0	0	0				2026-09-08 08:00	2026-09-21 08:00		2026-09-08 08:00	2026-09-21 08:00			2026-09-08 08:00	2026-09-21 08:00	2026-09-08 08:00	2026-09-21 08:00		PT_Normal					XKUn0v6xQR+UKFVpPPO5Hg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100034	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4130	Precast Panel Installation - Substation/GenComp			0	80	0	0	0	80	0	0	0				2026-09-15 08:00	2026-09-28 08:00		2026-09-15 08:00	2026-09-28 08:00			2026-09-15 08:00	2026-09-28 08:00	2026-09-15 08:00	2026-09-28 08:00		PT_Normal					MwiyhxL8RqOR4AMaPFGcsA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100035	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4140	Metal Deck, Roof Purlins & Fire Protection - Hall1/Sub/GenComp			0	120	0	0	0	120	0	0	0				2026-09-29 08:00	2026-10-19 08:00		2026-09-29 08:00	2026-10-19 08:00			2026-09-29 08:00	2026-10-19 08:00	2026-09-29 08:00	2026-10-19 08:00		PT_Normal					bqGA1qXvR6W1TMR5L2xCwA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100036	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4150	Envelope - Cladding, Roofing & Airtightness - Data Hall 1			0	200	0	0	0	200	0	0	0				2026-10-20 08:00	2026-11-23 08:00		2026-10-20 08:00	2026-11-23 08:00			2026-10-20 08:00	2026-11-23 08:00	2026-10-20 08:00	2026-11-23 08:00		PT_Normal					EYhsC5erQaOFBcsbcmdAEw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100037	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4160	Envelope - Cladding - Substation/Generator Compound			0	120	0	0	0	120	0	0	0				2026-10-20 08:00	2026-11-09 08:00		2026-10-20 08:00	2026-11-09 08:00			2026-10-20 08:00	2026-11-09 08:00	2026-10-20 08:00	2026-11-09 08:00		PT_Normal					lcKsOZNcQLW1Xs/a9HRykA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100038	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4170	Acoustic Louvre Procurement (16wk) & Installation - Cooling Yard			0	680	0	0	0	680	0	0	0				2026-05-11 08:00	2026-09-29 08:00		2026-05-11 08:00	2026-09-29 08:00			2026-05-11 08:00	2026-09-29 08:00	2026-05-11 08:00	2026-09-29 08:00		PT_Normal					7PazUag/ShWQWlzpb5K0vA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100039	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4180	110kV Termination, Metering & Protection (DNO interface)			0	160	0	0	0	160	0	0	0				2026-06-01 08:00	2026-06-29 08:00		2026-06-01 08:00	2026-06-29 08:00			2026-06-01 08:00	2026-06-29 08:00	2026-06-01 08:00	2026-06-29 08:00		PT_Normal					cVpyWktPQ+OO9mvV2Qpd2Q				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100040	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4190	Advance Procurement - 110/20kV Transformers, 2x16MVA (52wk lead; ADVANCE ORDER pre-Commencement, see BOS Assumption 1)			0	2080	0	0	0	2080	0	0	0				2026-01-16 08:00	2027-01-14 08:00		2026-01-16 08:00	2027-01-14 08:00			2026-01-16 08:00	2027-01-14 08:00	2026-01-16 08:00	2027-01-14 08:00		PT_Normal					w0nxS1M3QJKj1WbJNr93TQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100041	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Mile	DT_FixedDUR2	TK_NotStart	A4200	MILESTONE: Transformers Delivered to Site			0	0	0	0	0	0	0	0	0				2027-01-15 08:00	2027-01-15 08:00		2027-01-15 08:00	2027-01-15 08:00			2027-01-15 08:00	2027-01-15 08:00	2027-01-15 08:00	2027-01-15 08:00		PT_Normal					9Y1ZISO5Q8aq/xNMTwRSkg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100042	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4210	Transformer Installation, Termination & Testing			0	240	0	0	0	240	0	0	0				2027-01-18 08:00	2027-02-26 08:00		2027-01-18 08:00	2027-02-26 08:00			2027-01-18 08:00	2027-02-26 08:00	2027-01-18 08:00	2027-02-26 08:00		PT_Normal					kbo+sGvVRZyZLiYdzzg0vQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100043	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4220	20kV Switchgear & Protection - Procurement (38wk)			0	1520	0	0	0	1520	0	0	0				2026-05-08 08:00	2027-01-28 08:00		2026-05-08 08:00	2027-01-28 08:00			2026-05-08 08:00	2027-01-28 08:00	2026-05-08 08:00	2027-01-28 08:00		PT_Normal					KXK3I/MMStOpboIDcwhShA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100044	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4230	20kV Ring Main Switchboard Installation & Protection Setting			0	120	0	0	0	120	0	0	0				2027-01-29 08:00	2027-02-18 08:00		2027-01-29 08:00	2027-02-18 08:00			2027-01-29 08:00	2027-02-18 08:00	2027-01-29 08:00	2027-02-18 08:00		PT_Normal					vwSNXwlYS3m5Ar69tXKBWg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100045	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4240	Standby Generators - Procurement, 8x2.5MVA (40wk)			0	1600	0	0	0	1600	0	0	0				2026-04-13 08:00	2027-01-15 08:00		2026-04-13 08:00	2027-01-15 08:00			2026-04-13 08:00	2027-01-15 08:00	2026-04-13 08:00	2027-01-15 08:00		PT_Normal					9bzLmGaoThim9/YW7UvqbA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100046	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4250	Generator Installation, Paralleling, ATS & Fuel System (48h storage)			0	240	0	0	0	240	0	0	0				2027-01-18 08:00	2027-02-26 08:00		2027-01-18 08:00	2027-02-26 08:00			2027-01-18 08:00	2027-02-26 08:00	2027-01-18 08:00	2027-02-26 08:00		PT_Normal					/ZMp/yEgRsiobC2y7ECr7w				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100047	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4260	Chillers - Procurement, 4nr N+1 (26wk)			0	1040	0	0	0	1040	0	0	0				2026-04-27 08:00	2026-10-23 08:00		2026-04-27 08:00	2026-10-23 08:00			2026-04-27 08:00	2026-10-23 08:00	2026-04-27 08:00	2026-10-23 08:00		PT_Normal					2+SOdkOcTmOzeKj4wubYTA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100048	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4270	Dry Coolers / Adiabatic Units - Procurement, 10nr (22wk)			0	880	0	0	0	880	0	0	0				2026-05-04 08:00	2026-10-02 08:00		2026-05-04 08:00	2026-10-02 08:00			2026-05-04 08:00	2026-10-02 08:00	2026-05-04 08:00	2026-10-02 08:00		PT_Normal					AWpJYUUmSSSWfQwnJzZKWg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100049	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4280	Mechanical Plant Installation - Chillers, Dry Coolers, Pumps, Pipework (shared spine)			0	320	0	0	0	320	0	0	0				2026-11-24 08:00	2027-01-29 08:00		2026-11-24 08:00	2027-01-29 08:00			2026-11-24 08:00	2027-01-29 08:00	2026-11-24 08:00	2027-01-29 08:00		PT_Normal					Gc2K/Gp1T6mPvl/VnHX9dQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100050	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4290	CRAH Units - Procurement, Hall1 batch 7nr (22wk)			0	880	0	0	0	880	0	0	0				2026-05-04 08:00	2026-10-02 08:00		2026-05-04 08:00	2026-10-02 08:00			2026-05-04 08:00	2026-10-02 08:00	2026-05-04 08:00	2026-10-02 08:00		PT_Normal					HYQd4Oj3TZm7hs2j/rvxcQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100051	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4300	CRAH Installation - Data Hall 1 (7 units)			0	80	0	0	0	80	0	0	0				2026-11-24 08:00	2026-12-07 08:00		2026-11-24 08:00	2026-12-07 08:00			2026-11-24 08:00	2026-12-07 08:00	2026-11-24 08:00	2026-12-07 08:00		PT_Normal					fx9rskelSfmHGqjZshST0g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100052	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4310	UPS Modules - Procurement, Hall1 batch 4nr (30wk)			0	1200	0	0	0	1200	0	0	0				2026-04-27 08:00	2026-11-20 08:00		2026-04-27 08:00	2026-11-20 08:00			2026-04-27 08:00	2026-11-20 08:00	2026-04-27 08:00	2026-11-20 08:00		PT_Normal					ToId6jycSPuiCTmyu2rHOQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100053	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4320	Battery Systems - Procurement, Hall1 batch (24wk)			0	960	0	0	0	960	0	0	0				2026-05-04 08:00	2026-10-16 08:00		2026-05-04 08:00	2026-10-16 08:00			2026-05-04 08:00	2026-10-16 08:00	2026-05-04 08:00	2026-10-16 08:00		PT_Normal					O/WvfLxBQOKbMLXGJCkYQw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100054	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4330	UPS & Battery Installation - Data Hall 1			0	120	0	0	0	120	0	0	0				2026-11-24 08:00	2026-12-14 08:00		2026-11-24 08:00	2026-12-14 08:00			2026-11-24 08:00	2026-12-14 08:00	2026-11-24 08:00	2026-12-14 08:00		PT_Normal					+fKK7XhLTkud1AZnRM7JQA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100055	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4340	Overhead Busway - Procurement, Hall1 batch (20wk)			0	800	0	0	0	800	0	0	0				2026-05-11 08:00	2026-09-25 08:00		2026-05-11 08:00	2026-09-25 08:00			2026-05-11 08:00	2026-09-25 08:00	2026-05-11 08:00	2026-09-25 08:00		PT_Normal					qkSsQ0drRQ6716GWSWLZ/A				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100056	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4350	LV Distribution, Busway & Containment Installation - Data Hall 1			0	160	0	0	0	160	0	0	0				2026-12-15 08:00	2027-01-22 08:00		2026-12-15 08:00	2027-01-22 08:00			2026-12-15 08:00	2027-01-22 08:00	2026-12-15 08:00	2027-01-22 08:00		PT_Normal					a86QEmMjRvOoykuw41KPRw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100057	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4360	Data Hall Floor Finish & Cold-Aisle Containment - Data Hall 1			0	120	0	0	0	120	0	0	0				2027-01-25 08:00	2027-02-12 08:00		2027-01-25 08:00	2027-02-12 08:00			2027-01-25 08:00	2027-02-12 08:00	2027-01-25 08:00	2027-02-12 08:00		PT_Normal					dKQT7T0dS6KCdxctD6OgAg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100058	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4370	Fire Suppression System - Procurement, Hall1 (20wk, contingent on AHJ approval)			0	800	0	0	0	800	0	0	0				2026-06-01 08:00	2026-10-16 08:00		2026-06-01 08:00	2026-10-16 08:00			2026-06-01 08:00	2026-10-16 08:00	2026-06-01 08:00	2026-10-16 08:00		PT_Normal					BMltvAxAQQWLcpzsErT5NA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100059	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4380	Fire Detection & Suppression Installation - Data Hall 1			0	80	0	0	0	80	0	0	0				2027-02-15 08:00	2027-02-26 08:00		2027-02-15 08:00	2027-02-26 08:00			2027-02-15 08:00	2027-02-26 08:00	2027-02-15 08:00	2027-02-26 08:00		PT_Normal					yA3xYY6zTuKFL0iHnr13LQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100060	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4390	BMS/DCIM Hardware - Procurement (16wk) & Integration - Data Hall 1			0	680	0	0	0	680	0	0	0				2026-05-18 08:00	2026-10-05 08:00		2026-05-18 08:00	2026-10-05 08:00			2026-05-18 08:00	2026-10-05 08:00	2026-05-18 08:00	2026-10-05 08:00		PT_Normal					R4DT8UsBSuumLZMY42j9DA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100061	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4400	Access Control, CCTV & Security Integration - Hall1 + Gatehouse			0	120	0	0	0	120	0	0	0				2027-02-15 08:00	2027-03-05 08:00		2027-02-15 08:00	2027-03-05 08:00			2027-02-15 08:00	2027-03-05 08:00	2027-02-15 08:00	2027-03-05 08:00		PT_Normal					9BKaTRNTRcyCiX8lLIc6TQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100062	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4410	Site Access Road, Gatehouse Structure & Fit-Out			0	200	0	0	0	200	0	0	0				2026-04-30 08:00	2026-06-05 08:00		2026-04-30 08:00	2026-06-05 08:00			2026-04-30 08:00	2026-06-05 08:00	2026-04-30 08:00	2026-06-05 08:00		PT_Normal					pbOwF0EVRXeeKI0nEJx3aQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100063	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4420	Perimeter Fencing & ANPR Gates (Section 1 portion)			0	80	0	0	0	80	0	0	0				2026-05-18 08:00	2026-05-29 08:00		2026-05-18 08:00	2026-05-29 08:00			2026-05-18 08:00	2026-05-29 08:00	2026-05-18 08:00	2026-05-29 08:00		PT_Normal					jTuIwJFxQVaMzaWVxIfdRQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100064	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4430	L1 Factory Acceptance Testing - HV, UPS, Generators, Chillers (witnessed)			0	80	0	0	0	80	0	0	0				2027-01-18 08:00	2027-01-29 08:00		2027-01-18 08:00	2027-01-29 08:00			2027-01-18 08:00	2027-01-29 08:00	2027-01-18 08:00	2027-01-29 08:00		PT_Normal					jtpgqZotS8a/LW9sBwPXUA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100065	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4440	L2/L3 Static Inspection & Component Start-Up - Section 1			0	80	0	0	0	80	0	0	0				2027-03-01 08:00	2027-03-12 08:00		2027-03-01 08:00	2027-03-12 08:00			2027-03-01 08:00	2027-03-12 08:00	2027-03-01 08:00	2027-03-12 08:00		PT_Normal					yAn389R5S5mf6Fx6Ho/sVg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100066	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Mile	DT_FixedDUR2	TK_NotStart	A4450	MILESTONE: Grid Energisation - Stage 1 (DNO firm date, seasonal outage window)			0	0	0	0	0	0	0	0	0				2027-03-12 08:00	2027-03-12 08:00		2027-03-12 08:00	2027-03-12 08:00			2027-03-12 08:00	2027-03-12 08:00	2027-03-12 08:00	2027-03-12 08:00		PT_Normal					eTy9Lm9NRuujvEpDPy9MFw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100067	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4460	L4 Integrated Systems Testing incl. Failure-Mode Demonstrations - Section 1			0	120	0	0	0	120	0	0	0				2027-03-15 08:00	2027-04-06 08:00		2027-03-15 08:00	2027-04-06 08:00			2027-03-15 08:00	2027-04-06 08:00	2027-03-15 08:00	2027-04-06 08:00		PT_Normal					2LgHVUpgQhuEuSjgyTrhZQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100068	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4470	L5 24-Hour Load-Bank Test @ Full 10MW (temporary load banks) - Section 1			0	40	0	0	0	40	0	0	0				2027-04-07 08:00	2027-04-13 08:00		2027-04-07 08:00	2027-04-13 08:00			2027-04-07 08:00	2027-04-13 08:00	2027-04-07 08:00	2027-04-13 08:00		PT_Normal					e4DdB0XbT26SG32JXtsdCQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100069	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A4480	Statutory Occupancy Inspection & Tenant Technical Acceptance - Section 1			0	40	0	0	0	40	0	0	0				2027-04-14 08:00	2027-04-20 08:00		2027-04-14 08:00	2027-04-20 08:00			2027-04-14 08:00	2027-04-20 08:00	2027-04-14 08:00	2027-04-20 08:00		PT_Normal					5Jcoa7heRqC8cVYPGFkG3g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100070	9000	500003	1000	0	N	1	N	N	CP_Drtn	TT_FinMile	DT_FixedDUR2	TK_NotStart	A4490	MILESTONE: SECTION 1 TAKING OVER (Data Hall 1, Substation, Generators, Cooling Spine, Access, Gatehouse)			0	0	0	0	0	0	0	0	0				2027-04-21 08:00	2027-04-21 08:00		2027-04-21 08:00	2027-04-21 08:00			2027-04-21 08:00	2027-04-21 08:00	2027-04-21 08:00	2027-04-21 08:00		PT_Normal					6z1xnF1eRu6XWknhAUbvDQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100071	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5000	Bulk Earthworks - Hall2 Zone (till)			0	80	0	0	0	80	0	0	0				2026-06-23 08:00	2026-07-27 08:00		2026-06-23 08:00	2026-07-27 08:00			2026-06-23 08:00	2026-07-27 08:00	2026-06-23 08:00	2026-07-27 08:00		PT_Normal					dZ0IEv2mQRGX7sr6HOVu6g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100072	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5010	Foundations - Data Hall 2			0	120	0	0	0	120	0	0	0				2026-07-28 08:00	2026-08-17 08:00		2026-07-28 08:00	2026-08-17 08:00			2026-07-28 08:00	2026-08-17 08:00	2026-07-28 08:00	2026-08-17 08:00		PT_Normal					zreImxJ9SuyFHkyqWx7HIQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100073	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5020	Structural Steel Erection - Data Hall 2 (crew relocates from Hall1)			0	80	0	0	0	80	0	0	0				2026-09-08 08:00	2026-09-21 08:00		2026-09-08 08:00	2026-09-21 08:00			2026-09-08 08:00	2026-09-21 08:00	2026-09-08 08:00	2026-09-21 08:00		PT_Normal					rSUowpMgTOKfYqhDE00nKw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100074	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5030	Precast Panel Installation - Data Hall 2			0	80	0	0	0	80	0	0	0				2026-09-29 08:00	2026-10-12 08:00		2026-09-29 08:00	2026-10-12 08:00			2026-09-29 08:00	2026-10-12 08:00	2026-09-29 08:00	2026-10-12 08:00		PT_Normal					NuA6ZCajRMOhBHR0s+0lmA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100075	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5040	Metal Deck & Roof - Data Hall 2			0	80	0	0	0	80	0	0	0				2026-10-13 08:00	2026-10-26 08:00		2026-10-13 08:00	2026-10-26 08:00			2026-10-13 08:00	2026-10-26 08:00	2026-10-13 08:00	2026-10-26 08:00		PT_Normal					LVBfrs33S+WazhLVsuMyVg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100076	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5050	Envelope - Cladding, Roofing & Airtightness - Data Hall 2			0	160	0	0	0	160	0	0	0				2026-10-27 08:00	2026-11-23 08:00		2026-10-27 08:00	2026-11-23 08:00			2026-10-27 08:00	2026-11-23 08:00	2026-10-27 08:00	2026-11-23 08:00		PT_Normal					4lICAlIrRUK8kUzkEqmPEw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100077	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5060	Hall Substation TX-H2 (20/0.4kV, 3.3MVA) Installation			0	80	0	0	0	80	0	0	0				2027-02-19 08:00	2027-03-04 08:00		2027-02-19 08:00	2027-03-04 08:00			2027-02-19 08:00	2027-03-04 08:00	2027-02-19 08:00	2027-03-04 08:00		PT_Normal					e4kYrHeaSGexQgO75WpDcQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100078	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5070	CRAH Units - Hall2 Call-Off & Installation (7nr)			0	80	0	0	0	80	0	0	0				2026-12-08 08:00	2026-12-21 08:00		2026-12-08 08:00	2026-12-21 08:00			2026-12-08 08:00	2026-12-21 08:00	2026-12-08 08:00	2026-12-21 08:00		PT_Normal					a+o4vVMHTjGdbs15e+o55A				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100079	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5080	UPS & Battery Installation - Data Hall 2			0	120	0	0	0	120	0	0	0				2026-12-21 08:00	2027-01-21 08:00		2026-12-21 08:00	2027-01-21 08:00			2026-12-21 08:00	2027-01-21 08:00	2026-12-21 08:00	2027-01-21 08:00		PT_Normal					CUsDrllbS2GE+F24mnQX4g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100080	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5090	LV Distribution, Busway & Containment - Data Hall 2			0	120	0	0	0	120	0	0	0				2027-03-05 08:00	2027-03-25 08:00		2027-03-05 08:00	2027-03-25 08:00			2027-03-05 08:00	2027-03-25 08:00	2027-03-05 08:00	2027-03-25 08:00		PT_Normal					3/fve4XSQ+OEbEf9yaTjsA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100081	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5100	Data Hall Floor Finish & Containment - Data Hall 2			0	80	0	0	0	80	0	0	0				2027-03-30 08:00	2027-04-12 08:00		2027-03-30 08:00	2027-04-12 08:00			2027-03-30 08:00	2027-04-12 08:00	2027-03-30 08:00	2027-04-12 08:00		PT_Normal					TsAP7baBSo2IjS0Qn96lDg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100082	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5110	Fire Detection & Suppression - Data Hall 2			0	80	0	0	0	80	0	0	0				2027-04-13 08:00	2027-04-26 08:00		2027-04-13 08:00	2027-04-26 08:00			2027-04-13 08:00	2027-04-26 08:00	2027-04-13 08:00	2027-04-26 08:00		PT_Normal					uAAbCDagSzm9M48OgaSYvA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100083	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5120	BMS/DCIM Integration & Access Control - Data Hall 2			0	80	0	0	0	80	0	0	0				2027-04-13 08:00	2027-04-26 08:00		2027-04-13 08:00	2027-04-26 08:00			2027-04-13 08:00	2027-04-26 08:00	2027-04-13 08:00	2027-04-26 08:00		PT_Normal					PjXXj5WNSDqLcB0xb9JAng				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100084	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5130	L1-L3 Testing & Component Start-Up - Section 2			0	80	0	0	0	80	0	0	0				2027-03-30 08:00	2027-04-12 08:00		2027-03-30 08:00	2027-04-12 08:00			2027-03-30 08:00	2027-04-12 08:00	2027-03-30 08:00	2027-04-12 08:00		PT_Normal					IW13pe8cR4OrpfNCS2FGRg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100085	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5140	L4 Integrated Systems Testing - Section 2 (incl. generator/utility failure-mode demo, shared plant)			0	80	0	0	0	80	0	0	0				2027-04-27 08:00	2027-05-11 08:00		2027-04-27 08:00	2027-05-11 08:00			2027-04-27 08:00	2027-05-11 08:00	2027-04-27 08:00	2027-05-11 08:00		PT_Normal					W0lqOjwTS3qbrTX87WQPBQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100086	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5150	L5 24-Hour Load-Bank Test @ 2.5MW - Section 2			0	40	0	0	0	40	0	0	0				2027-05-12 08:00	2027-05-18 08:00		2027-05-12 08:00	2027-05-18 08:00			2027-05-12 08:00	2027-05-18 08:00	2027-05-12 08:00	2027-05-18 08:00		PT_Normal					SitveYZaQE2qzAu3X8d73w				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100087	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A5160	Statutory & Tenant Technical Acceptance - Section 2 (Permit Cond.3.2b: shared infra clearance via Section1's first secti			0	40	0	0	0	40	0	0	0				2027-05-19 08:00	2027-05-25 08:00		2027-05-19 08:00	2027-05-25 08:00			2027-05-19 08:00	2027-05-25 08:00	2027-05-19 08:00	2027-05-25 08:00		PT_Normal					xLrLAMxIROmsbr5yPTWtHw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100088	9000	500004	1000	0	N	1	N	N	CP_Drtn	TT_FinMile	DT_FixedDUR2	TK_NotStart	A5170	MILESTONE: SECTION 2 TAKING OVER (Data Hall 2)			0	0	0	0	0	0	0	0	0				2027-05-26 08:00	2027-05-26 08:00		2027-05-26 08:00	2027-05-26 08:00			2027-05-26 08:00	2027-05-26 08:00	2027-05-26 08:00	2027-05-26 08:00		PT_Normal					787WxiU/S2KsaqHUeItH0g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100089	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6000	Bulk Earthworks - Hall3 Zone (till)			0	80	0	0	0	80	0	0	0				2026-09-01 08:00	2026-09-14 08:00		2026-09-01 08:00	2026-09-14 08:00			2026-09-01 08:00	2026-09-14 08:00	2026-09-01 08:00	2026-09-14 08:00		PT_Normal					a45hofgKRtmtFNl0sP/1nA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100090	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6010	Foundations - Data Hall 3			0	120	0	0	0	120	0	0	0				2026-09-15 08:00	2026-10-05 08:00		2026-09-15 08:00	2026-10-05 08:00			2026-09-15 08:00	2026-10-05 08:00	2026-09-15 08:00	2026-10-05 08:00		PT_Normal					dc/pLArzS9mGMmwG+nm7uQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100091	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6020	Structural Steel Erection - Data Hall 3 (crew relocates from Hall2)			0	80	0	0	0	80	0	0	0				2026-10-06 08:00	2026-10-19 08:00		2026-10-06 08:00	2026-10-19 08:00			2026-10-06 08:00	2026-10-19 08:00	2026-10-06 08:00	2026-10-19 08:00		PT_Normal					/A1FcZYyS/azLeYYR7sw3g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100092	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6030	Precast Panel Installation - Data Hall 3			0	80	0	0	0	80	0	0	0				2026-10-20 08:00	2026-11-02 08:00		2026-10-20 08:00	2026-11-02 08:00			2026-10-20 08:00	2026-11-02 08:00	2026-10-20 08:00	2026-11-02 08:00		PT_Normal					TiTDqasbTdaMYsA6s+GSVg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100093	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6040	Metal Deck & Roof - Data Hall 3			0	80	0	0	0	80	0	0	0				2026-11-03 08:00	2026-11-16 08:00		2026-11-03 08:00	2026-11-16 08:00			2026-11-03 08:00	2026-11-16 08:00	2026-11-03 08:00	2026-11-16 08:00		PT_Normal					c6W6JaTaSbKhWyJG/0iMww				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100094	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6050	Envelope - Cladding, Roofing & Airtightness - Data Hall 3			0	160	0	0	0	160	0	0	0				2026-11-17 08:00	2026-12-14 08:00		2026-11-17 08:00	2026-12-14 08:00			2026-11-17 08:00	2026-12-14 08:00	2026-11-17 08:00	2026-12-14 08:00		PT_Normal					+WRcEpxVTjiKqhnurZzisw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100095	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6060	Hall Substation TX-H3 (20/0.4kV, 3.3MVA) Installation			0	80	0	0	0	80	0	0	0				2027-03-30 08:00	2027-04-12 08:00		2027-03-30 08:00	2027-04-12 08:00			2027-03-30 08:00	2027-04-12 08:00	2027-03-30 08:00	2027-04-12 08:00		PT_Normal					aF51WhaeSx+aB2lGAhfxTw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100096	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6070	CRAH Units - Hall3 Call-Off & Installation (7nr)			0	80	0	0	0	80	0	0	0				2026-12-22 08:00	2027-01-15 08:00		2026-12-22 08:00	2027-01-15 08:00			2026-12-22 08:00	2027-01-15 08:00	2026-12-22 08:00	2027-01-15 08:00		PT_Normal					ylLF5GoFTFSmyKbWPNNJrw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100097	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6080	UPS & Battery Installation - Data Hall 3			0	120	0	0	0	120	0	0	0				2027-02-12 08:00	2027-03-04 08:00		2027-02-12 08:00	2027-03-04 08:00			2027-02-12 08:00	2027-03-04 08:00	2027-02-12 08:00	2027-03-04 08:00		PT_Normal					YjKrPhJtTASWQBD8l9Munw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100098	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6090	LV Distribution, Busway & Containment - Data Hall 3			0	120	0	0	0	120	0	0	0				2027-04-13 08:00	2027-05-03 08:00		2027-04-13 08:00	2027-05-03 08:00			2027-04-13 08:00	2027-05-03 08:00	2027-04-13 08:00	2027-05-03 08:00		PT_Normal					pt2mV2hDTkui+oB1+yvyuw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100099	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6100	Data Hall Floor Finish & Containment - Data Hall 3			0	80	0	0	0	80	0	0	0				2027-05-04 08:00	2027-05-18 08:00		2027-05-04 08:00	2027-05-18 08:00			2027-05-04 08:00	2027-05-18 08:00	2027-05-04 08:00	2027-05-18 08:00		PT_Normal					SLNhvT5XTnGrnWe8rpfQcQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100100	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6110	Fire Detection & Suppression - Data Hall 3			0	80	0	0	0	80	0	0	0				2027-05-19 08:00	2027-06-01 08:00		2027-05-19 08:00	2027-06-01 08:00			2027-05-19 08:00	2027-06-01 08:00	2027-05-19 08:00	2027-06-01 08:00		PT_Normal					CSMXxlI/RkeuWHgggP0VIw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100101	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6120	BMS/DCIM Integration & Access Control - Data Hall 3			0	80	0	0	0	80	0	0	0				2027-05-19 08:00	2027-06-01 08:00		2027-05-19 08:00	2027-06-01 08:00			2027-05-19 08:00	2027-06-01 08:00	2027-05-19 08:00	2027-06-01 08:00		PT_Normal					zegkRNVzRF29n0g8JQhPLg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100102	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6130	L1-L3 Testing & Component Start-Up - Section 3			0	80	0	0	0	80	0	0	0				2027-05-04 08:00	2027-05-18 08:00		2027-05-04 08:00	2027-05-18 08:00			2027-05-04 08:00	2027-05-18 08:00	2027-05-04 08:00	2027-05-18 08:00		PT_Normal					OHUn/U3oR2Su/pwGbAk3Kw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100103	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6140	L4 Integrated Systems Testing - Section 3 (incl. generator/utility failure-mode demo, shared plant)			0	80	0	0	0	80	0	0	0				2027-06-02 08:00	2027-06-15 08:00		2027-06-02 08:00	2027-06-15 08:00			2027-06-02 08:00	2027-06-15 08:00	2027-06-02 08:00	2027-06-15 08:00		PT_Normal					nfFgzM2tRDi7bizqVvxkEw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100104	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6150	L5 24-Hour Load-Bank Test @ 2.5MW - Section 3			0	40	0	0	0	40	0	0	0				2027-06-16 08:00	2027-06-22 08:00		2027-06-16 08:00	2027-06-22 08:00			2027-06-16 08:00	2027-06-22 08:00	2027-06-16 08:00	2027-06-22 08:00		PT_Normal					Rjw4ICAmTnKSmbjUU/pPBA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100105	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A6160	Statutory & Tenant Technical Acceptance - Section 3 (Permit Cond.3.2b: shared infra clearance via Section1's first secti			0	40	0	0	0	40	0	0	0				2027-06-23 08:00	2027-06-30 08:00		2027-06-23 08:00	2027-06-30 08:00			2027-06-23 08:00	2027-06-30 08:00	2027-06-23 08:00	2027-06-30 08:00		PT_Normal					xVBacCG1RGavoyNHt/Mc4A				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100106	9000	500005	1000	0	N	1	N	N	CP_Drtn	TT_FinMile	DT_FixedDUR2	TK_NotStart	A6170	MILESTONE: SECTION 3 TAKING OVER (Data Hall 3)			0	0	0	0	0	0	0	0	0				2027-07-01 08:00	2027-07-01 08:00		2027-07-01 08:00	2027-07-01 08:00			2027-07-01 08:00	2027-07-01 08:00	2027-07-01 08:00	2027-07-01 08:00		PT_Normal					vgGwQYTRToyUiqFhEOEkAQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100107	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7000	Blasting Permit & Pre-Condition Survey - Hall 4 Zone			0	120	0	0	0	120	0	0	0				2027-02-08 08:00	2027-02-26 08:00		2027-02-08 08:00	2027-02-26 08:00			2027-02-08 08:00	2027-02-26 08:00	2027-02-08 08:00	2027-02-26 08:00		PT_Normal					1KszGkd8RMuWlr/80wTkhw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100108	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7010	Rock Excavation by Blasting - Data Hall 4 (~2,075 m3)			0	120	0	0	0	120	0	0	0				2027-03-01 08:00	2027-03-19 08:00		2027-03-01 08:00	2027-03-19 08:00			2027-03-01 08:00	2027-03-19 08:00	2027-03-01 08:00	2027-03-19 08:00		PT_Normal					0AFZHFZ2RISf7QXRwC+SpA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100109	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7020	Foundations - Data Hall 4 (direct-to-rock / rock-socketed)			0	120	0	0	0	120	0	0	0				2027-03-22 08:00	2027-04-13 08:00		2027-03-22 08:00	2027-04-13 08:00			2027-03-22 08:00	2027-04-13 08:00	2027-03-22 08:00	2027-04-13 08:00		PT_Normal					LOYOw5ewRu+Li+ZV8VbHCg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100110	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7030	Structural Steel Erection - Data Hall 4 (crew relocates from Hall3)			0	80	0	0	0	80	0	0	0				2027-04-14 08:00	2027-04-27 08:00		2027-04-14 08:00	2027-04-27 08:00			2027-04-14 08:00	2027-04-27 08:00	2027-04-14 08:00	2027-04-27 08:00		PT_Normal					PBkDm2KUTHmgfp+e4mbeNA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100111	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7040	Precast Panel Installation - Data Hall 4			0	80	0	0	0	80	0	0	0				2027-04-28 08:00	2027-05-12 08:00		2027-04-28 08:00	2027-05-12 08:00			2027-04-28 08:00	2027-05-12 08:00	2027-04-28 08:00	2027-05-12 08:00		PT_Normal					85oW/tTKSjyB2MFDuNtFng				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100112	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7050	Metal Deck & Roof - Data Hall 4			0	80	0	0	0	80	0	0	0				2027-05-13 08:00	2027-05-26 08:00		2027-05-13 08:00	2027-05-26 08:00			2027-05-13 08:00	2027-05-26 08:00	2027-05-13 08:00	2027-05-26 08:00		PT_Normal					Pi9h+bfiTa6DtfsipPCznA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100113	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7060	Envelope - Cladding, Roofing & Airtightness - Data Hall 4			0	160	0	0	0	160	0	0	0				2027-05-27 08:00	2027-06-23 08:00		2027-05-27 08:00	2027-06-23 08:00			2027-05-27 08:00	2027-06-23 08:00	2027-05-27 08:00	2027-06-23 08:00		PT_Normal					MWp84bt2ScalFzt+e6oXPw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100114	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7070	Hall Substation TX-H4 (20/0.4kV, 3.3MVA) Installation			0	80	0	0	0	80	0	0	0				2027-06-24 08:00	2027-07-08 08:00		2027-06-24 08:00	2027-07-08 08:00			2027-06-24 08:00	2027-07-08 08:00	2027-06-24 08:00	2027-07-08 08:00		PT_Normal					+SmMJmFRSwioceHstQZywQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100115	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7080	CRAH Units - Hall4 Call-Off & Installation (7nr)			0	80	0	0	0	80	0	0	0				2027-06-24 08:00	2027-07-08 08:00		2027-06-24 08:00	2027-07-08 08:00			2027-06-24 08:00	2027-07-08 08:00	2027-06-24 08:00	2027-07-08 08:00		PT_Normal					07BeKxydQLWfpazk7xC9Bw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100116	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7090	UPS & Battery Installation - Data Hall 4			0	120	0	0	0	120	0	0	0				2027-06-24 08:00	2027-08-05 08:00		2027-06-24 08:00	2027-08-05 08:00			2027-06-24 08:00	2027-08-05 08:00	2027-06-24 08:00	2027-08-05 08:00		PT_Normal					jKWVIf3VQTW/QVe92LWOig				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100117	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7100	LV Distribution, Busway & Containment - Data Hall 4			0	120	0	0	0	120	0	0	0				2027-08-06 08:00	2027-08-26 08:00		2027-08-06 08:00	2027-08-26 08:00			2027-08-06 08:00	2027-08-26 08:00	2027-08-06 08:00	2027-08-26 08:00		PT_Normal					I6HDJyFIQS6q8Gk4fdiq4Q				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100118	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7110	Data Hall Floor Finish & Containment - Data Hall 4			0	80	0	0	0	80	0	0	0				2027-08-27 08:00	2027-09-09 08:00		2027-08-27 08:00	2027-09-09 08:00			2027-08-27 08:00	2027-09-09 08:00	2027-08-27 08:00	2027-09-09 08:00		PT_Normal					YRwk9XH2Th2XFyGMmLGUOQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100119	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7120	Fire Detection & Suppression - Data Hall 4			0	80	0	0	0	80	0	0	0				2027-09-10 08:00	2027-09-23 08:00		2027-09-10 08:00	2027-09-23 08:00			2027-09-10 08:00	2027-09-23 08:00	2027-09-10 08:00	2027-09-23 08:00		PT_Normal					HjIPdDLESWWrwuRIAu4ELQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100120	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7130	BMS/DCIM Integration & Access Control - Data Hall 4			0	80	0	0	0	80	0	0	0				2027-09-10 08:00	2027-09-23 08:00		2027-09-10 08:00	2027-09-23 08:00			2027-09-10 08:00	2027-09-23 08:00	2027-09-10 08:00	2027-09-23 08:00		PT_Normal					EIXkDwv6Q62Wh3b5EPV+NA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100121	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7140	Admin/NOC Block - Foundations & Structure			0	240	0	0	0	240	0	0	0				2027-04-22 08:00	2027-06-03 08:00		2027-04-22 08:00	2027-06-03 08:00			2027-04-22 08:00	2027-06-03 08:00	2027-04-22 08:00	2027-06-03 08:00		PT_Normal					1+vFRLvbRsu0pICEo2M1xw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100122	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7150	Admin/NOC Block - Envelope			0	120	0	0	0	120	0	0	0				2027-06-04 08:00	2027-06-24 08:00		2027-06-04 08:00	2027-06-24 08:00			2027-06-04 08:00	2027-06-24 08:00	2027-06-04 08:00	2027-06-24 08:00		PT_Normal					b9tow5fKTiqBYcJgwWm3vQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100123	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7160	Admin/NOC Block - Fit-Out (incl. joinery, sanitaryware)			0	200	0	0	0	200	0	0	0				2027-06-28 08:00	2027-08-20 08:00		2027-06-28 08:00	2027-08-20 08:00			2027-06-28 08:00	2027-08-20 08:00	2027-06-28 08:00	2027-08-20 08:00		PT_Normal					ufxOfK7JTlGlxjavWBLAow				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100124	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7170	External Works - Roads, Fencing, Stormwater, Utilities Completion			0	240	0	0	0	240	0	0	0				2026-06-08 08:00	2026-08-10 08:00		2026-06-08 08:00	2026-08-10 08:00			2026-06-08 08:00	2026-08-10 08:00	2026-06-08 08:00	2026-08-10 08:00		PT_Normal					RFHpHRf6Rbq91+p0xS1rZg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100125	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7180	Fibre Entry Routes - Two Diverse Ducts			0	120	0	0	0	120	0	0	0				2026-06-23 08:00	2026-08-03 08:00		2026-06-23 08:00	2026-08-03 08:00			2026-06-23 08:00	2026-08-03 08:00	2026-06-23 08:00	2026-08-03 08:00		PT_Normal					JLS0Xl6KRXahGYXKGZpjLA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100126	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7190	Waste-Heat Recovery Plant - Procurement (30wk)			0	1200	0	0	0	1200	0	0	0				2026-09-25 08:00	2027-04-22 08:00		2026-09-25 08:00	2027-04-22 08:00			2026-09-25 08:00	2027-04-22 08:00	2026-09-25 08:00	2027-04-22 08:00		PT_Normal					sYZAP6apQHSqzrQ4Hgc+7g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100127	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7200	Waste-Heat Recovery Plant Installation & Pipework to Boundary Chamber			0	240	0	0	0	240	0	0	0				2027-04-23 08:00	2027-06-04 08:00		2027-04-23 08:00	2027-06-04 08:00			2027-04-23 08:00	2027-06-04 08:00	2027-04-23 08:00	2027-06-04 08:00		PT_Normal					zujnoIlQQxeg2HJIhIebpg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100128	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7210	District Heating 72-Hour Witnessed Delivery Test (heating season Oct-Apr; needs IT load >40%)			0	40	0	0	0	40	0	0	0				2027-07-02 08:00	2027-07-08 08:00		2027-07-02 08:00	2027-07-08 08:00			2027-07-02 08:00	2027-07-08 08:00	2027-07-02 08:00	2027-07-08 08:00		PT_Normal					GV+bCjU0Rv+FD5nFpBOE0g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100129	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7220	Hard Landscaping, Grading & Tree Replacement (permit condition)			0	120	0	0	0	120	0	0	0				2026-08-11 08:00	2026-08-31 08:00		2026-08-11 08:00	2026-08-31 08:00			2026-08-11 08:00	2026-08-31 08:00	2026-08-11 08:00	2026-08-31 08:00		PT_Normal					Jlg4v4ikSxij/kj+oLbAig				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100130	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Mile	DT_FixedDUR2	TK_NotStart	A7225	Soft Landscaping / Planting - deferred to 2028 growing season (POST-TOC, see BOS flag)			0	0	0	0	0	0	0	0	0				2026-09-01 08:00	2026-09-01 08:00		2026-09-01 08:00	2026-09-01 08:00			2026-09-01 08:00	2026-09-01 08:00	2026-09-01 08:00	2026-09-01 08:00		PT_Normal					i3PX9rwPSryFylrlNfbc7g				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100131	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7230	L1-L3 Testing & Component Start-Up - Section 4			0	80	0	0	0	80	0	0	0				2027-08-27 08:00	2027-09-09 08:00		2027-08-27 08:00	2027-09-09 08:00			2027-08-27 08:00	2027-09-09 08:00	2027-08-27 08:00	2027-09-09 08:00		PT_Normal					FnluzFoDTDe3Kc10DGmmGg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100132	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7240	L4 Integrated Systems Testing - Section 4 (incl. generator/utility failure-mode demo, shared plant)			0	80	0	0	0	80	0	0	0				2027-09-24 08:00	2027-10-07 08:00		2027-09-24 08:00	2027-10-07 08:00			2027-09-24 08:00	2027-10-07 08:00	2027-09-24 08:00	2027-10-07 08:00		PT_Normal					2ptELQToTGyVLz5JGmiwnw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100133	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7250	L5 24-Hour Load-Bank Test @ 2.5MW - Section 4			0	40	0	0	0	40	0	0	0				2027-10-08 08:00	2027-10-14 08:00		2027-10-08 08:00	2027-10-14 08:00			2027-10-08 08:00	2027-10-14 08:00	2027-10-08 08:00	2027-10-14 08:00		PT_Normal					VuAHJo/vTqSisbYfRkqH2Q				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100134	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_Task	DT_FixedDUR2	TK_NotStart	A7260	Final Occupancy Inspection (whole scope, incl. DH connection demonstration per Permit Cond.23)			0	80	0	0	0	80	0	0	0				2027-10-15 08:00	2027-10-28 08:00		2027-10-15 08:00	2027-10-28 08:00			2027-10-15 08:00	2027-10-28 08:00	2027-10-15 08:00	2027-10-28 08:00		PT_Normal					WuGgJKXTQu2PJuLLRsUCIA				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100135	9000	500006	1000	0	N	1	N	N	CP_Drtn	TT_FinMile	DT_FixedDUR2	TK_NotStart	A7270	MILESTONE: SECTION 4 TAKING OVER / COMPLETION OF THE WORKS			0	0	0	0	0	0	0	0	0				2027-10-29 08:00	2027-10-29 08:00		2027-10-29 08:00	2027-10-29 08:00			2027-10-29 08:00	2027-10-29 08:00	2027-10-29 08:00	2027-10-29 08:00		PT_Normal					222hSdk5TXKnKI/V3G8Dpg				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100136	9000	500007	1000	0	N	1	N	N	CP_Drtn	TT_Mile	DT_FixedDUR2	TK_NotStart	A9000	MILESTONE: Grid Energisation - Stage 2 (Hall 2, DNO earliest 2027-06-30)			0	0	0	0	0	0	0	0	0				2027-03-05 08:00	2027-03-05 08:00		2027-03-05 08:00	2027-03-05 08:00			2027-03-05 08:00	2027-03-05 08:00	2027-03-05 08:00	2027-03-05 08:00		PT_Normal					1CE3lj+rSkmyVag3V2XHWQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100137	9000	500007	1000	0	N	1	N	N	CP_Drtn	TT_Mile	DT_FixedDUR2	TK_NotStart	A9010	MILESTONE: Grid Energisation - Stage 3 (Hall 3, DNO earliest 2027-10-31)			0	0	0	0	0	0	0	0	0				2027-04-13 08:00	2027-04-13 08:00		2027-04-13 08:00	2027-04-13 08:00			2027-04-13 08:00	2027-04-13 08:00	2027-04-13 08:00	2027-04-13 08:00		PT_Normal					86hgj5dyQfyNp8pUrtDQCQ				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%R	100138	9000	500007	1000	0	N	1	N	N	CP_Drtn	TT_Mile	DT_FixedDUR2	TK_NotStart	A9020	MILESTONE: Grid Energisation - Stage 4 (Hall 4, DNO earliest 2028-01-31)			0	0	0	0	0	0	0	0	0				2027-07-09 08:00	2027-07-09 08:00		2027-07-09 08:00	2027-07-09 08:00			2027-07-09 08:00	2027-07-09 08:00	2027-07-09 08:00	2027-07-09 08:00		PT_Normal					+fGAnGFoQeGVClyeR5j9Iw				N	0	0			2026-09-16 12:00	2026-09-16 12:00	admin	admin	
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt	float_path	aref	arls
+%R	700000	100001	100000	9000	9000	PR_FS	0			
+%R	700001	100002	100000	9000	9000	PR_FS	0			
+%R	700002	100003	100002	9000	9000	PR_SS	40			
+%R	700003	100004	100002	9000	9000	PR_SS	40			
+%R	700004	100005	100002	9000	9000	PR_SS	40			
+%R	700005	100006	100002	9000	9000	PR_SS	40			
+%R	700006	100007	100000	9000	9000	PR_FS	0			
+%R	700007	100008	100000	9000	9000	PR_FS	0			
+%R	700008	100009	100008	9000	9000	PR_FS	0			
+%R	700009	100010	100009	9000	9000	PR_FS	0			
+%R	700010	100011	100010	9000	9000	PR_FS	0			
+%R	700011	100012	100010	9000	9000	PR_SS	120			
+%R	700012	100013	100011	9000	9000	PR_FS	0			
+%R	700013	100013	100012	9000	9000	PR_SS	240			
+%R	700014	100014	100008	9000	9000	PR_FS	40			
+%R	700015	100015	100014	9000	9000	PR_FS	0			
+%R	700016	100016	100015	9000	9000	PR_FS	0			
+%R	700017	100017	100016	9000	9000	PR_FS	0			
+%R	700018	100018	100008	9000	9000	PR_FS	40			
+%R	700019	100019	100018	9000	9000	PR_FS	0			
+%R	700020	100020	100010	9000	9000	PR_SS	40			
+%R	700021	100021	100001	9000	9000	PR_FS	0			
+%R	700022	100021	100005	9000	9000	PR_FS	0			
+%R	700023	100022	100021	9000	9000	PR_SS	40			
+%R	700024	100022	100020	9000	9000	PR_FS	0			
+%R	700025	100023	100021	9000	9000	PR_FS	0			
+%R	700026	100024	100022	9000	9000	PR_FS	0			
+%R	700027	100025	100023	9000	9000	PR_FS	0			
+%R	700028	100026	100023	9000	9000	PR_FS	0			
+%R	700029	100027	100024	9000	9000	PR_FS	0			
+%R	700030	100028	100025	9000	9000	PR_FS	0			
+%R	700031	100028	100026	9000	9000	PR_FS	0			
+%R	700032	100028	100027	9000	9000	PR_FS	0			
+%R	700033	100029	100010	9000	9000	PR_FS	80			
+%R	700034	100030	100010	9000	9000	PR_FS	120			
+%R	700035	100031	100028	9000	9000	PR_FS	0			
+%R	700036	100031	100029	9000	9000	PR_FS	0			
+%R	700037	100032	100031	9000	9000	PR_SS	40			
+%R	700038	100032	100027	9000	9000	PR_FS	0			
+%R	700039	100033	100031	9000	9000	PR_FS	0			
+%R	700040	100033	100030	9000	9000	PR_FS	0			
+%R	700041	100034	100032	9000	9000	PR_FS	0			
+%R	700042	100034	100030	9000	9000	PR_FS	0			
+%R	700043	100035	100033	9000	9000	PR_FS	0			
+%R	700044	100035	100034	9000	9000	PR_FS	0			
+%R	700045	100036	100035	9000	9000	PR_FS	0			
+%R	700046	100037	100035	9000	9000	PR_FS	0			
+%R	700047	100038	100010	9000	9000	PR_FS	160			
+%R	700048	100039	100026	9000	9000	PR_FS	0			
+%R	700049	100041	100040	9000	9000	PR_FS	0			
+%R	700050	100042	100041	9000	9000	PR_FS	0			
+%R	700051	100042	100037	9000	9000	PR_FS	0			
+%R	700052	100042	100039	9000	9000	PR_FS	0			
+%R	700053	100043	100015	9000	9000	PR_FS	0			
+%R	700054	100044	100043	9000	9000	PR_FS	0			
+%R	700055	100044	100037	9000	9000	PR_FS	0			
+%R	700056	100045	100010	9000	9000	PR_FS	80			
+%R	700057	100046	100045	9000	9000	PR_FS	0			
+%R	700058	100046	100032	9000	9000	PR_FS	0			
+%R	700059	100047	100010	9000	9000	PR_FS	80			
+%R	700060	100048	100010	9000	9000	PR_FS	120			
+%R	700061	100049	100047	9000	9000	PR_FS	0			
+%R	700062	100049	100048	9000	9000	PR_FS	0			
+%R	700063	100049	100036	9000	9000	PR_FS	0			
+%R	700064	100050	100010	9000	9000	PR_FS	120			
+%R	700065	100051	100050	9000	9000	PR_FS	0			
+%R	700066	100051	100036	9000	9000	PR_FS	0			
+%R	700067	100052	100010	9000	9000	PR_FS	160			
+%R	700068	100053	100010	9000	9000	PR_FS	200			
+%R	700069	100054	100052	9000	9000	PR_FS	0			
+%R	700070	100054	100053	9000	9000	PR_FS	0			
+%R	700071	100054	100036	9000	9000	PR_FS	0			
+%R	700072	100055	100010	9000	9000	PR_FS	200			
+%R	700073	100056	100054	9000	9000	PR_FS	0			
+%R	700074	100056	100055	9000	9000	PR_FS	0			
+%R	700075	100057	100056	9000	9000	PR_FS	0			
+%R	700076	100058	100019	9000	9000	PR_FS	0			
+%R	700077	100059	100058	9000	9000	PR_FS	0			
+%R	700078	100059	100057	9000	9000	PR_FS	0			
+%R	700079	100060	100010	9000	9000	PR_FS	240			
+%R	700080	100061	100057	9000	9000	PR_FS	0			
+%R	700081	100062	100023	9000	9000	PR_SS	80			
+%R	700082	100063	100062	9000	9000	PR_SS	80			
+%R	700083	100064	100045	9000	9000	PR_FS	0			
+%R	700084	100064	100047	9000	9000	PR_FS	0			
+%R	700085	100064	100052	9000	9000	PR_FS	0			
+%R	700086	100064	100040	9000	9000	PR_FS	0			
+%R	700087	100065	100042	9000	9000	PR_FS	0			
+%R	700088	100065	100044	9000	9000	PR_FS	0			
+%R	700089	100065	100046	9000	9000	PR_FS	0			
+%R	700090	100065	100049	9000	9000	PR_FS	0			
+%R	700091	100065	100051	9000	9000	PR_FS	0			
+%R	700092	100065	100054	9000	9000	PR_FS	0			
+%R	700093	100065	100056	9000	9000	PR_FS	0			
+%R	700094	100065	100064	9000	9000	PR_FS	0			
+%R	700095	100066	100042	9000	9000	PR_FS	0			
+%R	700096	100066	100044	9000	9000	PR_FS	0			
+%R	700097	100066	100017	9000	9000	PR_FS	0			
+%R	700098	100067	100065	9000	9000	PR_FS	0			
+%R	700099	100067	100066	9000	9000	PR_FS	0			
+%R	700100	100068	100067	9000	9000	PR_FS	0			
+%R	700101	100069	100068	9000	9000	PR_FS	0			
+%R	700102	100069	100061	9000	9000	PR_FS	0			
+%R	700103	100069	100063	9000	9000	PR_FS	0			
+%R	700104	100069	100060	9000	9000	PR_FS	0			
+%R	700105	100069	100059	9000	9000	PR_FS	0			
+%R	700106	100070	100069	9000	9000	PR_FS	0			
+%R	700107	100071	100023	9000	9000	PR_SS	360			
+%R	700108	100072	100071	9000	9000	PR_FS	0			
+%R	700109	100073	100031	9000	9000	PR_FS	0			
+%R	700110	100073	100072	9000	9000	PR_FS	0			
+%R	700111	100073	100029	9000	9000	PR_FS	120			
+%R	700112	100074	100073	9000	9000	PR_FS	0			
+%R	700113	100074	100033	9000	9000	PR_FS	40			
+%R	700114	100075	100074	9000	9000	PR_FS	0			
+%R	700115	100076	100075	9000	9000	PR_FS	0			
+%R	700116	100077	100076	9000	9000	PR_FS	0			
+%R	700117	100077	100044	9000	9000	PR_FS	0			
+%R	700118	100077	100056	9000	9000	PR_FS	0			
+%R	700119	100078	100050	9000	9000	PR_FS	160			
+%R	700120	100078	100076	9000	9000	PR_FS	0			
+%R	700121	100078	100051	9000	9000	PR_FS	0			
+%R	700122	100079	100052	9000	9000	PR_FS	160			
+%R	700123	100079	100053	9000	9000	PR_FS	160			
+%R	700124	100079	100076	9000	9000	PR_FS	0			
+%R	700125	100080	100079	9000	9000	PR_FS	0			
+%R	700126	100080	100055	9000	9000	PR_FS	160			
+%R	700127	100080	100077	9000	9000	PR_FS	0			
+%R	700128	100081	100080	9000	9000	PR_FS	0			
+%R	700129	100081	100057	9000	9000	PR_FS	0			
+%R	700130	100082	100058	9000	9000	PR_FS	160			
+%R	700131	100082	100081	9000	9000	PR_FS	0			
+%R	700132	100082	100059	9000	9000	PR_FS	0			
+%R	700133	100083	100060	9000	9000	PR_FS	80			
+%R	700134	100083	100081	9000	9000	PR_FS	0			
+%R	700135	100083	100061	9000	9000	PR_FS	0			
+%R	700136	100084	100080	9000	9000	PR_FS	0			
+%R	700137	100084	100078	9000	9000	PR_FS	0			
+%R	700138	100085	100084	9000	9000	PR_FS	0			
+%R	700139	100085	100082	9000	9000	PR_FS	0			
+%R	700140	100085	100083	9000	9000	PR_FS	0			
+%R	700141	100085	100065	9000	9000	PR_FS	0			
+%R	700142	100086	100085	9000	9000	PR_FS	0			
+%R	700143	100087	100086	9000	9000	PR_FS	0			
+%R	700144	100087	100069	9000	9000	PR_FS	0			
+%R	700145	100088	100087	9000	9000	PR_FS	0			
+%R	700146	100089	100071	9000	9000	PR_SS	280			
+%R	700147	100090	100089	9000	9000	PR_FS	0			
+%R	700148	100091	100073	9000	9000	PR_FS	0			
+%R	700149	100091	100090	9000	9000	PR_FS	0			
+%R	700150	100092	100091	9000	9000	PR_FS	0			
+%R	700151	100092	100074	9000	9000	PR_FS	40			
+%R	700152	100093	100092	9000	9000	PR_FS	0			
+%R	700153	100094	100093	9000	9000	PR_FS	0			
+%R	700154	100095	100094	9000	9000	PR_FS	0			
+%R	700155	100095	100080	9000	9000	PR_FS	0			
+%R	700156	100096	100050	9000	9000	PR_FS	400			
+%R	700157	100096	100094	9000	9000	PR_FS	0			
+%R	700158	100096	100078	9000	9000	PR_FS	0			
+%R	700159	100097	100052	9000	9000	PR_FS	400			
+%R	700160	100097	100053	9000	9000	PR_FS	400			
+%R	700161	100097	100094	9000	9000	PR_FS	0			
+%R	700162	100098	100097	9000	9000	PR_FS	0			
+%R	700163	100098	100055	9000	9000	PR_FS	400			
+%R	700164	100098	100095	9000	9000	PR_FS	0			
+%R	700165	100099	100098	9000	9000	PR_FS	0			
+%R	700166	100099	100081	9000	9000	PR_FS	0			
+%R	700167	100100	100058	9000	9000	PR_FS	400			
+%R	700168	100100	100099	9000	9000	PR_FS	0			
+%R	700169	100100	100082	9000	9000	PR_FS	0			
+%R	700170	100101	100060	9000	9000	PR_FS	320			
+%R	700171	100101	100099	9000	9000	PR_FS	0			
+%R	700172	100101	100083	9000	9000	PR_FS	0			
+%R	700173	100102	100098	9000	9000	PR_FS	0			
+%R	700174	100102	100096	9000	9000	PR_FS	0			
+%R	700175	100103	100102	9000	9000	PR_FS	0			
+%R	700176	100103	100100	9000	9000	PR_FS	0			
+%R	700177	100103	100101	9000	9000	PR_FS	0			
+%R	700178	100103	100065	9000	9000	PR_FS	0			
+%R	700179	100104	100103	9000	9000	PR_FS	0			
+%R	700180	100105	100104	9000	9000	PR_FS	0			
+%R	700181	100105	100069	9000	9000	PR_FS	0			
+%R	700182	100106	100105	9000	9000	PR_FS	0			
+%R	700183	100107	100024	9000	9000	PR_SS	1200			
+%R	700184	100107	100020	9000	9000	PR_FS	0			
+%R	700185	100108	100107	9000	9000	PR_FS	0			
+%R	700186	100108	100089	9000	9000	PR_SS	240			
+%R	700187	100109	100108	9000	9000	PR_FS	0			
+%R	700188	100110	100091	9000	9000	PR_FS	0			
+%R	700189	100110	100109	9000	9000	PR_FS	0			
+%R	700190	100111	100110	9000	9000	PR_FS	0			
+%R	700191	100111	100092	9000	9000	PR_FS	40			
+%R	700192	100112	100111	9000	9000	PR_FS	0			
+%R	700193	100113	100112	9000	9000	PR_FS	0			
+%R	700194	100114	100113	9000	9000	PR_FS	0			
+%R	700195	100114	100098	9000	9000	PR_FS	0			
+%R	700196	100115	100050	9000	9000	PR_FS	640			
+%R	700197	100115	100113	9000	9000	PR_FS	0			
+%R	700198	100115	100096	9000	9000	PR_FS	0			
+%R	700199	100116	100052	9000	9000	PR_FS	640			
+%R	700200	100116	100053	9000	9000	PR_FS	640			
+%R	700201	100116	100113	9000	9000	PR_FS	0			
+%R	700202	100117	100116	9000	9000	PR_FS	0			
+%R	700203	100117	100055	9000	9000	PR_FS	640			
+%R	700204	100117	100114	9000	9000	PR_FS	0			
+%R	700205	100118	100117	9000	9000	PR_FS	0			
+%R	700206	100118	100099	9000	9000	PR_FS	0			
+%R	700207	100119	100058	9000	9000	PR_FS	640			
+%R	700208	100119	100118	9000	9000	PR_FS	0			
+%R	700209	100119	100100	9000	9000	PR_FS	0			
+%R	700210	100120	100060	9000	9000	PR_FS	480			
+%R	700211	100120	100118	9000	9000	PR_FS	0			
+%R	700212	100120	100101	9000	9000	PR_FS	0			
+%R	700213	100121	100070	9000	9000	PR_FS	0			
+%R	700214	100122	100121	9000	9000	PR_FS	0			
+%R	700215	100123	100122	9000	9000	PR_FS	0			
+%R	700216	100124	100062	9000	9000	PR_FS	0			
+%R	700217	100125	100124	9000	9000	PR_SS	80			
+%R	700218	100126	100010	9000	9000	PR_FS	160			
+%R	700219	100127	100126	9000	9000	PR_FS	0			
+%R	700220	100127	100049	9000	9000	PR_FS	0			
+%R	700221	100128	100127	9000	9000	PR_FS	0			
+%R	700222	100128	100106	9000	9000	PR_FS	0			
+%R	700223	100129	100124	9000	9000	PR_FS	0			
+%R	700224	100130	100129	9000	9000	PR_FS	0			
+%R	700225	100131	100117	9000	9000	PR_FS	0			
+%R	700226	100131	100115	9000	9000	PR_FS	0			
+%R	700227	100132	100131	9000	9000	PR_FS	0			
+%R	700228	100132	100119	9000	9000	PR_FS	0			
+%R	700229	100132	100120	9000	9000	PR_FS	0			
+%R	700230	100132	100065	9000	9000	PR_FS	0			
+%R	700231	100133	100132	9000	9000	PR_FS	0			
+%R	700232	100134	100133	9000	9000	PR_FS	0			
+%R	700233	100134	100123	9000	9000	PR_FS	0			
+%R	700234	100134	100128	9000	9000	PR_FS	0			
+%R	700235	100134	100129	9000	9000	PR_FS	0			
+%R	700236	100134	100069	9000	9000	PR_FS	0			
+%R	700237	100134	100125	9000	9000	PR_FS	0			
+%R	700238	100135	100134	9000	9000	PR_FS	0			
+%R	700239	100135	100106	9000	9000	PR_FS	0			
+%R	700240	100136	100077	9000	9000	PR_FS	0			
+%R	700241	100137	100095	9000	9000	PR_FS	0			
+%R	700242	100138	100114	9000	9000	PR_FS	0			
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	rsrc_id	proj_id	rsrc_type	target_qty	target_equip_qty	act_qty	act_equip_qty	remain_qty	remain_equip_qty	act_reg_qty	act_ot_qty	remain_reg_qty	remain_ot_qty	target_cost	act_reg_cost	act_ot_cost	remain_reg_cost	remain_ot_cost	target_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	cost_qty_type	guid
+%R	800000	100001	40000	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	215609.78	0	0	215609.78	0	120	0	120	120	QT_Hour	8qfKHZ16Tc6Bd0BXgOClKA
+%R	800001	100002	40000	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	1211520.77	0	0	1211520.77	0	120	0	120	120	QT_Hour	c5RKeDzcT4+kcwV0NIxvHQ
+%R	800002	100003	40001	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	349082.71	0	0	349082.71	0	80	0	80	80	QT_Hour	DKtD3oifQxKG1ecshOrKkQ
+%R	800003	100004	40000	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	1006177.57	0	0	1006177.57	0	80	0	80	80	QT_Hour	emvwDKI/T2OzRBkW6rSe2g
+%R	800004	100005	40002	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	0.00	0	0	0.00	0	80	0	80	80	QT_Hour	9lm6SequTT2wC5I5u14wDg
+%R	800005	100006	40003	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	272079.14	0	0	272079.14	0	80	0	80	80	QT_Hour	MSm4qnL/SPCnIUbgEJ3n9g
+%R	800006	100007	40000	9000	RT_Labor	5520	0	0	0	5520	0	0	0	5520	0	2495938.91	0	0	2495938.91	0	3680	0	3680	3680	QT_Hour	mzf0Hn4RSdG8R+Tpxvy0dA
+%R	800007	100008	40004	9000	RT_Labor	200	0	0	0	200	0	0	0	200	0	0.00	0	0	0.00	0	160	0	160	160	QT_Hour	bMMtD2qdRCWfQDFCNLp5Ng
+%R	800008	100009	40005	9000	RT_Labor	10	0	0	0	10	0	0	0	10	0	0.00	0	0	0.00	0	80	0	80	80	QT_Hour	CaFMIiUOSHCl3ENz8TWLEQ
+%R	800009	100010	40004	9000	RT_Labor	560	0	0	0	560	0	0	0	560	0	0.00	0	0	0.00	0	320	0	320	320	QT_Hour	b2/hXUvvRi6L0yvzJB1g9w
+%R	800010	100011	40005	9000	RT_Labor	15	0	0	0	15	0	0	0	15	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	0mzow/f0QRW/7tWTYNHd9A
+%R	800011	100012	40004	9000	RT_Labor	500	0	0	0	500	0	0	0	500	0	0.00	0	0	0.00	0	400	0	400	400	QT_Hour	1i1WMYG/QSuF999N7z1lgQ
+%R	800012	100013	40004	9000	RT_Labor	160	0	0	0	160	0	0	0	160	0	0.00	0	0	0.00	0	160	0	160	160	QT_Hour	PErXUY4gT6mAnnJ7eqf2PQ
+%R	800013	100014	40004	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	0.00	0	0	0.00	0	80	0	80	80	QT_Hour	y1G7Ek+aQhqHTtwvpe7H5Q
+%R	800014	100015	40005	9000	RT_Labor	15	0	0	0	15	0	0	0	15	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	jb5gAgpGRr2HD5CKNqHtHw
+%R	800015	100016	40004	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	vKGVQ2lgRRGdFlCa5XGojQ
+%R	800016	100017	40005	9000	RT_Labor	20	0	0	0	20	0	0	0	20	0	0.00	0	0	0.00	0	160	0	160	160	QT_Hour	iYqzSk/pQluBXGs0WbkYFQ
+%R	800017	100018	40004	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	++uuxr2ZRfC2oYEqXZq4fQ
+%R	800018	100019	40005	9000	RT_Labor	30	0	0	0	30	0	0	0	30	0	0.00	0	0	0.00	0	240	0	240	240	QT_Hour	R06hWeaSQr2hEVzKbTdiyw
+%R	800019	100020	40004	9000	RT_Labor	45	0	0	0	45	0	0	0	45	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	C2AxtGrWTpqb9XukWS75MQ
+%R	800020	100021	40002	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	226543.75	0	0	226543.75	0	120	0	120	120	QT_Hour	tztIZv42Qs2TDJ+Bi2JaDw
+%R	800021	100022	40001	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	ODRycaztQTWUYaTQ/vnWCQ
+%R	800022	100023	40002	9000	RT_Labor	240	0	0	0	240	0	0	0	240	0	199800.73	0	0	199800.73	0	120	0	120	120	QT_Hour	i7PoMKYVQWCvWyzaRVnGKA
+%R	800023	100024	40006	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	173034.79	0	0	173034.79	0	80	0	80	80	QT_Hour	qgo/Oa6nQ6qFMWA5r417oA
+%R	800024	100025	40007	9000	RT_Labor	240	0	0	0	240	0	0	0	240	0	158841.17	0	0	158841.17	0	120	0	120	120	QT_Hour	WRVt1cY/ToSqwL1y1n9HJQ
+%R	800025	100026	40007	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	247748.75	0	0	247748.75	0	120	0	120	120	QT_Hour	iOG7R7UBQhWeSECzm4L1uA
+%R	800026	100027	40008	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	117784.78	0	0	117784.78	0	80	0	80	80	QT_Hour	+nooC+XgSYO6Bc5zbj2pCA
+%R	800027	100028	40007	9000	RT_Labor	400	0	0	0	400	0	0	0	400	0	1238248.46	0	0	1238248.46	0	160	0	160	160	QT_Hour	tfRzObDdRSeecl8NjC7LzQ
+%R	800028	100029	40009	9000	RT_Labor	90	0	0	0	90	0	0	0	90	0	1323487.79	0	0	1323487.79	0	720	0	720	720	QT_Hour	qTTIrW9BQpu3kKoeKCp7Pg
+%R	800029	100030	40010	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	1160247.94	0	0	1160247.94	0	640	0	640	640	QT_Hour	/XUN7JwwT2CxBreuNdh/hw
+%R	800030	100031	40011	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	574855.61	0	0	574855.61	0	80	0	80	80	QT_Hour	vYRryknMS56ZSVelyqYQCA
+%R	800031	100032	40011	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	403718.80	0	0	403718.80	0	80	0	80	80	QT_Hour	odTcBT0UQYaDnfbQZbrCMg
+%R	800032	100033	40012	9000	RT_Labor	140	0	0	0	140	0	0	0	140	0	469624.26	0	0	469624.26	0	80	0	80	80	QT_Hour	zprHjOgTQsuZua/YGqkrqA
+%R	800033	100034	40012	9000	RT_Labor	140	0	0	0	140	0	0	0	140	0	408849.12	0	0	408849.12	0	80	0	80	80	QT_Hour	J8EQvMHXTfyWMeebfGfaLw
+%R	800034	100035	40011	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	555017.63	0	0	555017.63	0	120	0	120	120	QT_Hour	boqnRlZ/S7S151rpP8WFGg
+%R	800035	100036	40013	9000	RT_Labor	400	0	0	0	400	0	0	0	400	0	1855759.79	0	0	1855759.79	0	200	0	200	200	QT_Hour	38yUjlAWQbSKGXlX2eoWcw
+%R	800036	100037	40013	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	500401.18	0	0	500401.18	0	120	0	120	120	QT_Hour	5HqL7G+1QiWHOwiBXxhOOA
+%R	800037	100038	40013	9000	RT_Labor	510	0	0	0	510	0	0	0	510	0	610897.39	0	0	610897.39	0	680	0	680	680	QT_Hour	BIRrN4ISSQ+tvN3pmwmpvA
+%R	800038	100039	40014	9000	RT_Labor	160	0	0	0	160	0	0	0	160	0	1617973.65	0	0	1617973.65	0	160	0	160	160	QT_Hour	tnx7BQEFRF2y1ouYrYZoqQ
+%R	800039	100040	40015	9000	RT_Labor	260	0	0	0	260	0	0	0	260	0	2615354.18	0	0	2615354.18	0	2080	0	2080	2080	QT_Hour	Bh9PEzYaTvmp/fTyYWV49g
+%R	800040	100042	40014	9000	RT_Labor	300	0	0	0	300	0	0	0	300	0	0.00	0	0	0.00	0	240	0	240	240	QT_Hour	1J2UzcHOT4SWNeb5S7lT4w
+%R	800041	100043	40016	9000	RT_Labor	190	0	0	0	190	0	0	0	190	0	1489421.81	0	0	1489421.81	0	1520	0	1520	1520	QT_Hour	ihE7Pgg7TfGr16WS7N1FoA
+%R	800042	100044	40014	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	zT9mw97JQdSyf8X7Wug/wQ
+%R	800043	100045	40017	9000	RT_Labor	200	0	0	0	200	0	0	0	200	0	8732624.30	0	0	8732624.30	0	1600	0	1600	1600	QT_Hour	y/sHVDquSNWi2qcwb7Lczg
+%R	800044	100046	40014	9000	RT_Labor	300	0	0	0	300	0	0	0	300	0	2770502.99	0	0	2770502.99	0	240	0	240	240	QT_Hour	zWdfOK3TTcaccROYcRn/dQ
+%R	800045	100047	40018	9000	RT_Labor	130	0	0	0	130	0	0	0	130	0	2323611.94	0	0	2323611.94	0	1040	0	1040	1040	QT_Hour	lzjMd5OxTHKzDn1FEiywkQ
+%R	800046	100048	40018	9000	RT_Labor	110	0	0	0	110	0	0	0	110	0	3141990.52	0	0	3141990.52	0	880	0	880	880	QT_Hour	YG6oV1HcRTuf+kgRY4bCrw
+%R	800047	100049	40019	9000	RT_Labor	640	0	0	0	640	0	0	0	640	0	7852146.46	0	0	7852146.46	0	320	0	320	320	QT_Hour	VZvUfA0PR6aen07u4rrTag
+%R	800048	100050	40018	9000	RT_Labor	110	0	0	0	110	0	0	0	110	0	594603.60	0	0	594603.60	0	880	0	880	880	QT_Hour	dHzyQu3ARAieldpIF77bmg
+%R	800049	100051	40019	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	0.00	0	0	0.00	0	80	0	80	80	QT_Hour	bUCodXjOSZmZOruyVury9A
+%R	800050	100052	40020	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	824501.55	0	0	824501.55	0	1200	0	1200	1200	QT_Hour	DOzPVSEFRAu7J6aCeEbGuQ
+%R	800051	100053	40021	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	292565.07	0	0	292565.07	0	960	0	960	960	QT_Hour	anpJ2kv2R9e/Hia+ESQ6Cw
+%R	800052	100054	40014	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	L7gCeCWbSdu3qDrhbyRO/A
+%R	800053	100055	40022	9000	RT_Labor	100	0	0	0	100	0	0	0	100	0	164900.26	0	0	164900.26	0	800	0	800	800	QT_Hour	a0YpWv+/RzKInGsiaCiDlg
+%R	800054	100056	40014	9000	RT_Labor	240	0	0	0	240	0	0	0	240	0	1253375.16	0	0	1253375.16	0	160	0	160	160	QT_Hour	9uViiYyoSTmAqxwwMcVKHQ
+%R	800055	100057	40023	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	349008.43	0	0	349008.43	0	120	0	120	120	QT_Hour	Zjow64nQTpaD49Ms5rRRrw
+%R	800056	100058	40024	9000	RT_Labor	100	0	0	0	100	0	0	0	100	0	339548.24	0	0	339548.24	0	800	0	800	800	QT_Hour	ymYu//SlQ228lK3+/ACfxQ
+%R	800057	100059	40025	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	126762.67	0	0	126762.67	0	80	0	80	80	QT_Hour	vZ80bzOyQvKYxjlYcksDew
+%R	800058	100060	40026	9000	RT_Labor	510	0	0	0	510	0	0	0	510	0	401284.31	0	0	401284.31	0	680	0	680	680	QT_Hour	izY15YvXSBiZTdQZKUsnLQ
+%R	800059	100061	40025	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	465666.07	0	0	465666.07	0	120	0	120	120	QT_Hour	BII/TMnJTQqDdT4jmw4YWg
+%R	800060	100062	40001	9000	RT_Labor	250	0	0	0	250	0	0	0	250	0	757636.97	0	0	757636.97	0	200	0	200	200	QT_Hour	iF/pVFfdTjSugtCYXx3PJA
+%R	800061	100063	40001	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	200648.55	0	0	200648.55	0	80	0	80	80	QT_Hour	Fu1jem18QACptohHWEzRbw
+%R	800062	100064	40027	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	331696.58	0	0	331696.58	0	80	0	80	80	QT_Hour	069oc28IQ6mSMz8zcwbSoA
+%R	800063	100065	40027	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	361851.20	0	0	361851.20	0	80	0	80	80	QT_Hour	RAfjPli8Tq6kl3DJ7/LM+Q
+%R	800064	100067	40027	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	144740.06	0	0	144740.06	0	120	0	120	120	QT_Hour	FDpCKA0XRImV6rESIv8S2A
+%R	800065	100068	40027	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	232619.03	0	0	232619.03	0	40	0	40	40	QT_Hour	HuMuUK1rTl231rBiVbgxfA
+%R	800066	100069	40027	9000	RT_Labor	20	0	0	0	20	0	0	0	20	0	85509.36	0	0	85509.36	0	40	0	40	40	QT_Hour	pXbe4GnSQxKlVX+y2KmbTQ
+%R	800067	100071	40002	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	125589.03	0	0	125589.03	0	80	0	80	80	QT_Hour	NnFTjqt9REm2vLMbnI37hQ
+%R	800068	100072	40007	9000	RT_Labor	210	0	0	0	210	0	0	0	210	0	1047207.88	0	0	1047207.88	0	120	0	120	120	QT_Hour	znfRCRyyQdqiXSaBOIXgsQ
+%R	800069	100073	40011	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	574855.61	0	0	574855.61	0	80	0	80	80	QT_Hour	GfXwnujiTDOkUlP9vDXgRQ
+%R	800070	100074	40012	9000	RT_Labor	140	0	0	0	140	0	0	0	140	0	469624.26	0	0	469624.26	0	80	0	80	80	QT_Hour	p6QwnN8iQzOkKcebqhN3Aw
+%R	800071	100075	40011	9000	RT_Labor	100	0	0	0	100	0	0	0	100	0	324954.07	0	0	324954.07	0	80	0	80	80	QT_Hour	O85I66FVTjCNT5JQZuPz6w
+%R	800072	100076	40013	9000	RT_Labor	280	0	0	0	280	0	0	0	280	0	1737004.11	0	0	1737004.11	0	160	0	160	160	QT_Hour	TUQYxCjDT7uapIOSDH6P9A
+%R	800073	100077	40014	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	296997.81	0	0	296997.81	0	80	0	80	80	QT_Hour	IscnRh3VQFWISBLanjoRxg
+%R	800074	100078	40019	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	594603.60	0	0	594603.60	0	80	0	80	80	QT_Hour	wZNFfdwHS/+sYJLsFASMQg
+%R	800075	100079	40014	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	1117066.62	0	0	1117066.62	0	120	0	120	120	QT_Hour	fhOO7gBxRt++E2rk2n6XXA
+%R	800076	100080	40014	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	1418275.42	0	0	1418275.42	0	120	0	120	120	QT_Hour	tH8Kafw9QYSm9sczl/Hrqw
+%R	800077	100081	40023	9000	RT_Labor	100	0	0	0	100	0	0	0	100	0	349008.43	0	0	349008.43	0	80	0	80	80	QT_Hour	S50Ghyu2TJS2cC3fz6ZZUA
+%R	800078	100082	40025	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	466310.92	0	0	466310.92	0	80	0	80	80	QT_Hour	FlahJJDqRW6vFdhaqv5S/g
+%R	800079	100083	40026	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	758294.97	0	0	758294.97	0	80	0	80	80	QT_Hour	avousauaQ620Bs7bq6eWew
+%R	800080	100084	40027	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	173386.95	0	0	173386.95	0	80	0	80	80	QT_Hour	3ysUf0yBR4+frhQ22TiRWg
+%R	800081	100085	40027	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	144740.06	0	0	144740.06	0	80	0	80	80	QT_Hour	o0OQG3HLRLKov3lNJFbIaQ
+%R	800082	100086	40027	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	177479.78	0	0	177479.78	0	40	0	40	40	QT_Hour	rP7h/2ZXS0GsniH42gFBng
+%R	800083	100087	40027	9000	RT_Labor	20	0	0	0	20	0	0	0	20	0	85509.36	0	0	85509.36	0	40	0	40	40	QT_Hour	wpaw9M3QQTyqafzXHznFrQ
+%R	800084	100089	40002	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	125589.03	0	0	125589.03	0	80	0	80	80	QT_Hour	d+5bAU7TR7qwlYIE9ryWfw
+%R	800085	100090	40007	9000	RT_Labor	210	0	0	0	210	0	0	0	210	0	1047207.88	0	0	1047207.88	0	120	0	120	120	QT_Hour	SxDFjKaWT8SVnF7Fk5y2oQ
+%R	800086	100091	40011	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	574855.61	0	0	574855.61	0	80	0	80	80	QT_Hour	B2w9lTUYSsyoLLIqsK+EsA
+%R	800087	100092	40012	9000	RT_Labor	140	0	0	0	140	0	0	0	140	0	469624.26	0	0	469624.26	0	80	0	80	80	QT_Hour	ckbNUEX1RL2K1+1MP0QZhA
+%R	800088	100093	40011	9000	RT_Labor	100	0	0	0	100	0	0	0	100	0	324954.07	0	0	324954.07	0	80	0	80	80	QT_Hour	zT54Cjb/TsigQmudnRk5cQ
+%R	800089	100094	40013	9000	RT_Labor	280	0	0	0	280	0	0	0	280	0	1737004.11	0	0	1737004.11	0	160	0	160	160	QT_Hour	E3i4OFlFSleR8v6A6K8Z0A
+%R	800090	100095	40014	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	296997.81	0	0	296997.81	0	80	0	80	80	QT_Hour	apQkREV8SVmOrxCt6Fq4xA
+%R	800091	100096	40019	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	594603.60	0	0	594603.60	0	80	0	80	80	QT_Hour	t9HeUIBVTGWkq+BMet6+kw
+%R	800092	100097	40014	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	1117066.62	0	0	1117066.62	0	120	0	120	120	QT_Hour	mZ880ucDRxqLEQlCZOKIVw
+%R	800093	100098	40014	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	1418275.42	0	0	1418275.42	0	120	0	120	120	QT_Hour	UAqguXRHQROfG5SQBnNnJQ
+%R	800094	100099	40023	9000	RT_Labor	100	0	0	0	100	0	0	0	100	0	349008.43	0	0	349008.43	0	80	0	80	80	QT_Hour	v4rLJfTwQziK1UiW2bzf0A
+%R	800095	100100	40025	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	466310.92	0	0	466310.92	0	80	0	80	80	QT_Hour	eH44y428QAygvFwBvgtiMw
+%R	800096	100101	40026	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	758294.97	0	0	758294.97	0	80	0	80	80	QT_Hour	sAHQvMpgTQyuf/Ucwwlmtw
+%R	800097	100102	40027	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	173386.95	0	0	173386.95	0	80	0	80	80	QT_Hour	i3paOSbFT5KPQCOrFhPUAg
+%R	800098	100103	40027	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	144740.06	0	0	144740.06	0	80	0	80	80	QT_Hour	s/ZwbXuVSFelSmG+KgeWEw
+%R	800099	100104	40027	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	177479.78	0	0	177479.78	0	40	0	40	40	QT_Hour	7r2QKYg+RgCazoshiN05lQ
+%R	800100	100105	40027	9000	RT_Labor	20	0	0	0	20	0	0	0	20	0	85509.36	0	0	85509.36	0	40	0	40	40	QT_Hour	R9QxVa6VR36by2vhIe2sDw
+%R	800101	100107	40001	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	0.00	0	0	0.00	0	120	0	120	120	QT_Hour	ASBnF8HOQw+Fw8MsLcajSg
+%R	800102	100108	40006	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	321350.32	0	0	321350.32	0	120	0	120	120	QT_Hour	PH+SHRATRAuTw1xP6f6stA
+%R	800103	100109	40008	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	1418050.49	0	0	1418050.49	0	120	0	120	120	QT_Hour	sJ45VjA3TQKpY6WoNTbC2w
+%R	800104	100110	40011	9000	RT_Labor	180	0	0	0	180	0	0	0	180	0	574855.61	0	0	574855.61	0	80	0	80	80	QT_Hour	QjICZPR8STmh6J0sSjsTOA
+%R	800105	100111	40012	9000	RT_Labor	140	0	0	0	140	0	0	0	140	0	469624.26	0	0	469624.26	0	80	0	80	80	QT_Hour	cIcn9CfyQ8ufJNSkxM+2Hg
+%R	800106	100112	40011	9000	RT_Labor	100	0	0	0	100	0	0	0	100	0	413577.90	0	0	413577.90	0	80	0	80	80	QT_Hour	Cv/I6zVjSPSRCudMBAoH1Q
+%R	800107	100113	40013	9000	RT_Labor	280	0	0	0	280	0	0	0	280	0	1855759.79	0	0	1855759.79	0	160	0	160	160	QT_Hour	8Re81mRcSfWfh2/0KRYexA
+%R	800108	100114	40014	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	296997.81	0	0	296997.81	0	80	0	80	80	QT_Hour	94ykpWwdTG6I0q0iORT8LA
+%R	800109	100115	40019	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	594603.60	0	0	594603.60	0	80	0	80	80	QT_Hour	NM1kh+HRQgmndPSJhOrTiw
+%R	800110	100116	40014	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	1117066.62	0	0	1117066.62	0	120	0	120	120	QT_Hour	R1fRN8PmTd+xpkW2UhszKg
+%R	800111	100117	40014	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	1418275.42	0	0	1418275.42	0	120	0	120	120	QT_Hour	S32QAKFtRqCEJobCyeGwFA
+%R	800112	100118	40023	9000	RT_Labor	100	0	0	0	100	0	0	0	100	0	349008.43	0	0	349008.43	0	80	0	80	80	QT_Hour	o6VE1fOySlqXBZhBkSWwQA
+%R	800113	100119	40025	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	466310.92	0	0	466310.92	0	80	0	80	80	QT_Hour	NzkEB4uDSY+kNyTuwpqGEA
+%R	800114	100120	40026	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	773817.17	0	0	773817.17	0	80	0	80	80	QT_Hour	aicztxrlQb6779h6PfD/4A
+%R	800115	100121	40007	9000	RT_Labor	360	0	0	0	360	0	0	0	360	0	101028.38	0	0	101028.38	0	240	0	240	240	QT_Hour	eW+z4jucQlOEz6V3HjCBig
+%R	800116	100122	40013	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	500401.18	0	0	500401.18	0	120	0	120	120	QT_Hour	8EdPluMwQfae+Rht5wdIWA
+%R	800117	100123	40023	9000	RT_Labor	300	0	0	0	300	0	0	0	300	0	1604532.46	0	0	1604532.46	0	200	0	200	200	QT_Hour	A1mUjP7ATjieb25mIrQBHQ
+%R	800118	100124	40001	9000	RT_Labor	360	0	0	0	360	0	0	0	360	0	2306726.73	0	0	2306726.73	0	240	0	240	240	QT_Hour	iZTEcGcURzm8oYwI9LibKQ
+%R	800119	100125	40001	9000	RT_Labor	90	0	0	0	90	0	0	0	90	0	317082.95	0	0	317082.95	0	120	0	120	120	QT_Hour	Ouzu99KmTMe0OyPkcoOqag
+%R	800120	100126	40018	9000	RT_Labor	150	0	0	0	150	0	0	0	150	0	3384947.47	0	0	3384947.47	0	1200	0	1200	1200	QT_Hour	FHA+8hasRRGhZB3EFuX/DA
+%R	800121	100127	40019	9000	RT_Labor	300	0	0	0	300	0	0	0	300	0	341965.28	0	0	341965.28	0	240	0	240	240	QT_Hour	G9XF1Lj6TZOv55XigoBhzQ
+%R	800122	100128	40027	9000	RT_Labor	20	0	0	0	20	0	0	0	20	0	0.00	0	0	0.00	0	40	0	40	40	QT_Hour	DyJNySrgQ4iQfHVmrPgG0w
+%R	800123	100129	40001	9000	RT_Labor	120	0	0	0	120	0	0	0	120	0	225269.45	0	0	225269.45	0	120	0	120	120	QT_Hour	1bxMeWvxQ1K/DK8YdSbhag
+%R	800124	100131	40027	9000	RT_Labor	60	0	0	0	60	0	0	0	60	0	173386.95	0	0	173386.95	0	80	0	80	80	QT_Hour	z7aK8PDgStSADhR19l9xWg
+%R	800125	100132	40027	9000	RT_Labor	80	0	0	0	80	0	0	0	80	0	144740.06	0	0	144740.06	0	80	0	80	80	QT_Hour	rSpQWgTGRei47/XZxfuHjA
+%R	800126	100133	40027	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	177479.78	0	0	177479.78	0	40	0	40	40	QT_Hour	kV8H/2PvSXKkHnzDYmU30A
+%R	800127	100134	40027	9000	RT_Labor	40	0	0	0	40	0	0	0	40	0	85509.36	0	0	85509.36	0	80	0	80	80	QT_Hour	g+gntiLyTgeXcwNNQpK4zg
+%E

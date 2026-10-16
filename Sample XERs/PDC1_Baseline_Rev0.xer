@@ -1,0 +1,1823 @@
+ERMHDR	18.8	2026-09-24		Project	ADMIN	PDC1_BASELINE	NordBuild	P6 Professional		EUR
+%T	CURRTYPE
+%F	curr_id	decimal_digit_cnt	curr_symbol	decimal_symbol	digit_group_symbol	pos_curr_fmt_type	neg_curr_fmt_type	curr_type	curr_short_name	group_digit_cnt	base_exch_rate
+%R	EUR	2	€	.	,			Euro	EUR	3	1.0
+%E
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	clndr_type	day_hr_cnt	week_hr_cnt	month_hr_cnt	year_hr_cnt	rsrc_private
+%R	1	Y	FI-5D — Finnish 5-day + public holidays	1		CA_Base	8.0	40.0	0.0	0.0	N
+%E
+%T	PROJECT
+%F	proj_id	proj_short_name	proj_long_name	proj_status_code	plan_start_date	plan_end_date	clndr_id	sum_base_proj_id	def_duration_type	def_qty_type	p6_proj_me_id	p6_proj_act_id	last_recalc_date	cpm_driving_flag	add_act_calendar_flag	ignore_act_calendars	proj_short_name	export_flag	wbsset_id
+%R	1	PDC1-BASE	Polaris DC-1 — Aviapolis Data Campus Phase 1, Vantaa — Baseline CPM (Rev 0)	Active	2026-01-15 00:00	2028-06-05 00:00	1	-1	Fixed Duration & Units	Fixed Qty			2028-06-05 00:00	Y	Y	N	PDC1-BASE	Y	1
+%E
+%T	PROJWBS
+%F	wbs_id	proj_id	parent_wbs_id	wbs_short_name	wbs_name	seq_num	proj_node_flag	sum_data_flag	status_code	wbs_id_display
+%R	10	1	1	0.0	Project Start & Contract	1	N	Y	Active	0.0
+%E
+%R	11	1	1	1.0	Project Management, Design & Statutory	2	N	Y	Active	1.0
+%E
+%R	12	1	1	2.0	Procurement	3	N	Y	Active	2.0
+%E
+%R	13	1	1	3.0	Civils, Groundworks & Substructure	4	N	Y	Active	3.0
+%E
+%R	14	1	1	4.0	Structure	5	N	Y	Active	4.0
+%E
+%R	15	1	1	5.0	Building Envelope	6	N	Y	Active	5.0
+%E
+%R	16	1	1	6.0	Mechanical	7	N	Y	Active	6.0
+%E
+%R	17	1	1	7.0	Electrical & Power	8	N	Y	Active	7.0
+%E
+%R	18	1	1	8.0	ELV / BMS-DCIM / Fire	9	N	Y	Active	8.0
+%E
+%R	19	1	1	9.0	Fit-out & White Space	10	N	Y	Active	9.0
+%E
+%R	20	1	1	10.0	External Works & Security	11	N	Y	Active	10.0
+%E
+%R	21	1	1	11.0	Commissioning & Handover	12	N	Y	Active	11.0
+%E
+%R	22	1	1	12.0	Close-out	13	N	Y	Active	12.0
+%E
+%T	RSRC
+%F	rsrc_id	parent_rsrc_id	clndr_id	rsrc_short_name	rsrc_name	rsrc_type	unit_of_measure	rsrc_notes	def_qty_per_hr	ot_flag
+%R	51	0	1	BMS Crew	BMS Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	52	0	1	Civil Crew	Civil Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	53	0	1	Commissioning Team	Commissioning Team	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	54	0	1	Concrete Crew	Concrete Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	55	0	1	Design Management	Design Management	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	56	0	1	Earthworks Crew	Earthworks Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	57	0	1	Electrical Crew	Electrical Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	58	0	1	Envelope Crew	Envelope Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	59	0	1	Facade Crew	Facade Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	60	0	1	Facade Vendor	Facade Vendor	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	61	0	1	Fire Protection Crew	Fire Protection Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	62	0	1	Fit-Out Crew	Fit-Out Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	63	0	1	ICT Crew	ICT Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	64	0	1	Interior Design	Interior Design	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	65	0	1	Landscaping Crew	Landscaping Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	66	0	1	Logistics	Logistics	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	67	0	1	MEP Design	MEP Design	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	68	0	1	Mechanical Crew	Mechanical Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	69	0	1	Piling Crew	Piling Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	70	0	1	Plumbing Crew	Plumbing Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	71	0	1	Procurement	Procurement	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	72	0	1	Site Management	Site Management	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	73	0	1	Steel & Precast Crew	Steel & Precast Crew	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	74	0	1	Structural Design	Structural Design	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	75	0	1	Surveying Team	Surveying Team	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	76	0	1	Vendor (Precast Factory)	Vendor (Precast Factory)	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%R	77	0	1	Vendor (Steel Fabricator)	Vendor (Steel Fabricator)	RT_Labor	h	Manpower resource (crew)	1.0	N
+%E
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	task_code	task_name	task_type	duration_type	status_code	target_drtn_hr_cnt	early_start_date	early_end_date	late_start_date	late_end_date	target_start_date	target_end_date	act_start_date	act_end_date	cstr_type	cstr_date	cstr_type2	cstr_date2	total_float_hr_cnt	free_float_hr_cnt	driving_path_flag	sched_start_date	sched_end_date	float_path	is_longest_path	complete_pct_type
+%R	1	1	10	1	NB_0001	Contract award / Notice to Proceed (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-01-15 00:00	2026-01-15 00:00	2025-12-23 00:00	2025-12-23 00:00	2026-01-15 00:00	2026-01-15 00:00			CS_MSO	2026-01-15 00:00			-120	0	Y					CP_Start
+%E
+%R	2	1	10	1	NB_0002	COMMENCEMENT DATE (Cl. 8.1) (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-03-02 00:00	2026-03-02 00:00	2026-03-05 00:00	2026-03-05 00:00	2026-03-02 00:00	2026-03-02 00:00							24	0						CP_Start
+%E
+%R	3	1	11	1	NB_1000	Concept design (S1) and design management	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-01-15 00:00	2026-02-19 00:00	2027-09-23 00:00	2027-10-28 00:00	2026-01-15 00:00	2026-02-19 00:00							3416	0						CP_Start
+%E
+%R	4	1	11	1	NB_1200	Site establishment — compound, welfare, security	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-01-15 00:00	2026-02-12 00:00	2028-04-17 00:00	2028-05-15 00:00	2026-01-15 00:00	2026-02-12 00:00							4568	0						CP_Start
+%E
+%R	5	1	11	1	NB_1210	Temporary works — crane bases and hardstands	TT_Task	DT_FixedDrtn	TK_NotStart	120	2026-02-12 00:00	2026-03-05 00:00	2028-05-15 00:00	2028-06-05 00:00	2026-02-12 00:00	2026-03-05 00:00							4568	0						CP_Start
+%E
+%R	6	1	11	1	NB_1010	Employer's review — concept design S1 (14 d)	TT_Task	DT_FixedDrtn	TK_NotStart	112	2026-02-19 00:00	2026-03-11 00:00	2027-10-28 00:00	2027-11-17 00:00	2026-02-19 00:00	2026-03-11 00:00							3416	0						CP_Start
+%E
+%R	7	1	11	1	NB_1020	Detailed design (S2) and multidiscipline coordination	TT_Task	DT_FixedDrtn	TK_NotStart	480	2026-03-11 00:00	2026-06-09 00:00	2027-11-17 00:00	2028-02-14 00:00	2026-03-11 00:00	2026-06-09 00:00							3416	0						CP_Start
+%E
+%R	8	1	11	1	NB_1100	Building permit — application and grant	TT_Task	DT_FixedDrtn	TK_NotStart	440	2026-03-11 00:00	2026-06-02 00:00	2028-03-20 00:00	2028-06-05 00:00	2026-03-11 00:00	2026-06-02 00:00							4096	0						CP_Start
+%E
+%R	9	1	11	1	NB_1110	Statutory supervisors approved (MS-04)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-03-11 00:00	2026-03-11 00:00	2028-06-05 00:00	2028-06-05 00:00	2026-03-11 00:00	2026-03-11 00:00							4536	0						CP_Start
+%E
+%R	10	1	11	1	NB_1030	Employer's review — detailed design S2 (21 d)	TT_Task	DT_FixedDrtn	TK_NotStart	168	2026-06-09 00:00	2026-07-09 00:00	2028-02-14 00:00	2028-03-14 00:00	2026-06-09 00:00	2026-07-09 00:00							3416	0						CP_Start
+%E
+%R	11	1	11	1	NB_1040	Construction-issue design (S3)	TT_Task	DT_FixedDrtn	TK_NotStart	360	2026-07-09 00:00	2026-09-10 00:00	2028-03-14 00:00	2028-05-16 00:00	2026-07-09 00:00	2026-09-10 00:00							3416	0						CP_Start
+%E
+%R	12	1	11	1	NB_1050	Employer's review — construction design S3 (14 d)	TT_Task	DT_FixedDrtn	TK_NotStart	112	2026-09-10 00:00	2026-09-30 00:00	2028-05-16 00:00	2028-06-05 00:00	2026-09-10 00:00	2026-09-30 00:00							3416	0						CP_Start
+%E
+%R	13	1	11	1	NB_7006	Employer/tenant fit-out access to Hall 1 (MS-10)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-03-02 00:00	2027-03-02 00:00	2028-06-05 00:00	2028-06-05 00:00	2027-03-02 00:00	2027-03-02 00:00			CS_MSO	2027-03-02 00:00			2576	0						CP_Start
+%E
+%R	14	1	11	1	NB_7001	DNO Stage 1 capacity release — 6.5 MVA (external)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-03-12 00:00	2027-03-12 00:00	2027-02-03 00:00	2027-02-03 00:00	2027-03-12 00:00	2027-03-12 00:00			CS_MSO	2027-03-12 00:00			-216	0	Y					CP_Start
+%E
+%R	15	1	11	1	NB_7002	DNO Stage 2 capacity release — 3.5 MVA (external)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-06-30 00:00	2027-06-30 00:00	2027-04-07 00:00	2027-04-07 00:00	2027-06-30 00:00	2027-06-30 00:00			CS_MSO	2027-06-30 00:00			-464	0	Y					CP_Start
+%E
+%R	16	1	11	1	NB_7005	District-heating boundary works complete (Offtaker, external)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-08-31 00:00	2027-08-31 00:00	2027-11-01 00:00	2027-11-01 00:00	2027-08-31 00:00	2027-08-31 00:00			CS_MSO	2027-08-31 00:00			352	0						CP_Start
+%E
+%R	17	1	11	1	NB_7003	DNO Stage 3 capacity release — 3.0 MVA (external)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-11-01 00:00	2027-11-01 00:00	2027-07-09 00:00	2027-07-09 00:00	2027-11-01 00:00	2027-11-01 00:00			CS_MSO	2027-10-31 00:00			-648	0	Y					CP_Start
+%E
+%R	18	1	11	1	NB_7004	DNO Stage 4 capacity release — 3.0 MVA (external)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2028-01-31 00:00	2028-01-31 00:00	2027-10-06 00:00	2027-10-06 00:00	2028-01-31 00:00	2028-01-31 00:00			CS_MSO	2028-01-31 00:00			-640	0	Y					CP_Start
+%E
+%R	19	1	20	1	EX_1000	Instruction to proceed	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-03-16 00:00	2026-03-16 00:00	2027-08-04 00:00	2027-08-04 00:00	2026-03-16 00:00	2026-03-16 00:00							2792	0						CP_Start
+%E
+%R	20	1	20	1	EX_1010	Temporary site fencing and gate installation	TT_Task	DT_FixedDrtn	TK_NotStart	80	2026-03-16 00:00	2026-03-30 00:00	2027-08-04 00:00	2027-08-18 00:00	2026-03-16 00:00	2026-03-30 00:00							2792	0						CP_Start
+%E
+%R	21	1	20	1	EX_1100	Fibre entry — route A ducting and chambers	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-03-30 00:00	2026-05-15 00:00	2027-08-18 00:00	2027-09-29 00:00	2026-03-30 00:00	2026-05-15 00:00							2792	0						CP_Start
+%E
+%R	22	1	20	1	EX_1110	Fibre entry — route B ducting and chambers	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-05-15 00:00	2026-06-29 00:00	2027-09-29 00:00	2027-11-10 00:00	2026-05-15 00:00	2026-06-29 00:00							2792	0						CP_Start
+%E
+%R	23	1	20	1	EX_1200	Permanent site roads and hardstanding — phase 1	TT_Task	DT_FixedDrtn	TK_NotStart	280	2026-06-29 00:00	2026-08-17 00:00	2027-11-10 00:00	2027-12-31 00:00	2026-06-29 00:00	2026-08-17 00:00							2792	0						CP_Start
+%E
+%R	24	1	20	1	EX_1300	Perimeter security fence and gates	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-08-17 00:00	2026-09-28 00:00	2027-12-31 00:00	2028-02-14 00:00	2026-08-17 00:00	2026-09-28 00:00							2792	0						CP_Start
+%E
+%R	25	1	20	1	EX_1400	External lighting and CCTV columns	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-09-28 00:00	2026-11-02 00:00	2028-02-14 00:00	2028-03-20 00:00	2026-09-28 00:00	2026-11-02 00:00							2792	0						CP_Start
+%E
+%R	26	1	20	1	EX_1500	Car parking, footpaths and hardstanding — permanent	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-11-02 00:00	2026-12-14 00:00	2028-03-20 00:00	2028-05-01 00:00	2026-11-02 00:00	2026-12-14 00:00							2792	0						CP_Start
+%E
+%R	27	1	20	1	EX_1700	Gatehouse and weighbridge commissioning	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-11-02 00:00	2026-11-30 00:00	2028-05-08 00:00	2028-06-05 00:00	2026-11-02 00:00	2026-11-30 00:00							3072	0						CP_Start
+%E
+%R	28	1	20	1	EX_1600	Landscaping and reinstatement	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-12-14 00:00	2027-01-22 00:00	2028-05-01 00:00	2028-06-05 00:00	2026-12-14 00:00	2027-01-22 00:00							2792	0						CP_Start
+%E
+%R	29	1	20	1	EX_1900	External works complete	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-01-22 00:00	2027-01-22 00:00	2028-06-05 00:00	2028-06-05 00:00	2027-01-22 00:00	2027-01-22 00:00							2792	0						CP_Start
+%E
+%R	30	1	21	1	NB_4000	Integrated systems testing (L4) — Section 1	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-05-24 00:00	2027-06-14 00:00	2027-03-24 00:00	2027-04-16 00:00	2027-05-24 00:00	2027-06-14 00:00							-320	0	Y					CP_Start
+%E
+%R	31	1	21	1	NB_4001	Integrated load-bank test (L5, 24 h) — Section 1	TT_Task	DT_FixedDrtn	TK_NotStart	40	2027-06-14 00:00	2027-06-21 00:00	2027-04-16 00:00	2027-04-23 00:00	2027-06-14 00:00	2027-06-21 00:00							-320	0	Y					CP_Start
+%E
+%R	32	1	21	1	NB_4002	Occupancy inspection (käyttöönottotarkastus) — Section 1	TT_Task	DT_FixedDrtn	TK_NotStart	40	2027-06-21 00:00	2027-06-29 00:00	2027-04-23 00:00	2027-04-30 00:00	2027-06-21 00:00	2027-06-29 00:00							-320	0	Y					CP_Start
+%E
+%R	33	1	21	1	NB_4003	TAKING OVER — SECTION 1 (Cl. 10.1) (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-06-29 00:00	2027-06-29 00:00	2027-04-30 00:00	2027-05-02 00:00	2027-06-29 00:00	2027-06-29 00:00			CS_MEO	2027-05-02 00:00			-320	0	Y					CP_Start
+%E
+%R	34	1	21	1	NB_4100	Integrated systems testing (L4) — Section 2	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-08-18 00:00	2027-09-08 00:00	2027-05-27 00:00	2027-06-17 00:00	2027-08-18 00:00	2027-09-08 00:00							-464	0	Y					CP_Start
+%E
+%R	35	1	21	1	NB_4101	Integrated load-bank test (L5, 24 h) — Section 2	TT_Task	DT_FixedDrtn	TK_NotStart	40	2027-09-08 00:00	2027-09-15 00:00	2027-06-17 00:00	2027-06-24 00:00	2027-09-08 00:00	2027-09-15 00:00							-464	0	Y					CP_Start
+%E
+%R	36	1	21	1	NB_4102	Occupancy inspection (käyttöönottotarkastus) — Section 2	TT_Task	DT_FixedDrtn	TK_NotStart	40	2027-09-15 00:00	2027-09-22 00:00	2027-06-24 00:00	2027-07-02 00:00	2027-09-15 00:00	2027-09-22 00:00							-464	0	Y					CP_Start
+%E
+%R	37	1	21	1	NB_4103	TAKING OVER — SECTION 2 (Cl. 10.1) (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-09-22 00:00	2027-09-22 00:00	2027-07-02 00:00	2027-07-02 00:00	2027-09-22 00:00	2027-09-22 00:00			CS_MEO	2027-07-02 00:00			-464	0	Y					CP_Start
+%E
+%R	38	1	21	1	NB_4200	Integrated systems testing (L4) — Section 3	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-12-21 00:00	2028-01-13 00:00	2027-08-27 00:00	2027-09-17 00:00	2027-12-21 00:00	2028-01-13 00:00							-648	0	Y					CP_Start
+%E
+%R	39	1	21	1	NB_4201	Integrated load-bank test (L5, 24 h) — Section 3	TT_Task	DT_FixedDrtn	TK_NotStart	40	2028-01-13 00:00	2028-01-20 00:00	2027-09-17 00:00	2027-09-24 00:00	2028-01-13 00:00	2028-01-20 00:00							-648	0	Y					CP_Start
+%E
+%R	40	1	21	1	NB_4202	Occupancy inspection (käyttöönottotarkastus) — Section 3	TT_Task	DT_FixedDrtn	TK_NotStart	40	2028-01-20 00:00	2028-01-27 00:00	2027-09-24 00:00	2027-10-01 00:00	2028-01-20 00:00	2028-01-27 00:00							-648	0	Y					CP_Start
+%E
+%R	41	1	21	1	NB_4203	TAKING OVER — SECTION 3 (Cl. 10.1) (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2028-01-27 00:00	2028-01-27 00:00	2027-10-01 00:00	2027-10-02 00:00	2028-01-27 00:00	2028-01-27 00:00			CS_MEO	2027-10-02 00:00			-648	0	Y					CP_Start
+%E
+%R	42	1	21	1	NB_4300	Integrated systems testing (L4) — Section 4	TT_Task	DT_FixedDrtn	TK_NotStart	120	2028-03-20 00:00	2028-04-10 00:00	2027-11-24 00:00	2027-12-16 00:00	2028-03-20 00:00	2028-04-10 00:00							-640	0	Y					CP_Start
+%E
+%R	43	1	21	1	NB_4301	Integrated load-bank test (L5, 24 h) — Section 4	TT_Task	DT_FixedDrtn	TK_NotStart	40	2028-04-10 00:00	2028-04-17 00:00	2027-12-16 00:00	2027-12-23 00:00	2028-04-10 00:00	2028-04-17 00:00							-640	0	Y					CP_Start
+%E
+%R	44	1	21	1	NB_4302	Occupancy inspection (käyttöönottotarkastus) — Section 4	TT_Task	DT_FixedDrtn	TK_NotStart	40	2028-04-17 00:00	2028-04-24 00:00	2027-12-23 00:00	2027-12-31 00:00	2028-04-17 00:00	2028-04-24 00:00							-640	0	Y					CP_Start
+%E
+%R	45	1	21	1	NB_4303	TAKING OVER — SECTION 4 (Cl. 10.1) (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2028-04-24 00:00	2028-04-24 00:00	2027-12-31 00:00	2027-12-31 00:00	2028-04-24 00:00	2028-04-24 00:00			CS_MEO	2028-01-02 00:00			-640	0	Y					CP_Start
+%E
+%R	46	1	21	1	NB_5000	TIME FOR COMPLETION — whole of the Works (Cl. 8.2) (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2028-04-24 00:00	2028-04-24 00:00	2027-12-31 00:00	2028-01-02 00:00	2028-04-24 00:00	2028-04-24 00:00			CS_MEO	2028-01-02 00:00			-640	0	Y					CP_Start
+%E
+%R	47	1	22	1	NB_6000	As-built records, O&M and handover documentation	TT_Task	DT_FixedDrtn	TK_NotStart	240	2028-04-24 00:00	2028-06-05 00:00	2028-04-24 00:00	2028-06-05 00:00	2028-04-24 00:00	2028-06-05 00:00							0	0	Y					CP_Start
+%E
+%R	48	1	22	1	NB_6100	Final account, spares, warranties and close-out (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2028-06-05 00:00	2028-06-05 00:00	2028-06-05 00:00	2028-06-05 00:00	2028-06-05 00:00	2028-06-05 00:00							0	0	Y					CP_Start
+%E
+%R	49	1	22	1	NB_9999	PROJECT HANDOVER COMPLETE (MS)	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2028-06-05 00:00	2028-06-05 00:00	2028-06-05 00:00	2028-06-05 00:00	2028-06-05 00:00	2028-06-05 00:00							0	0	Y					CP_Start
+%E
+%R	50	1	12	1	NB_2000	Letting — TP-001 Groundworks & Substructure	TT_Task	DT_FixedDrtn	TK_NotStart	256	2026-01-15 00:00	2026-03-02 00:00	2026-01-20 00:00	2026-03-05 00:00	2026-01-15 00:00	2026-03-02 00:00							24	0						CP_Start
+%E
+%R	51	1	12	1	NB_2010	Letting — TP-002 Structure	TT_Task	DT_FixedDrtn	TK_NotStart	456	2026-01-15 00:00	2026-04-08 00:00	2026-11-16 00:00	2027-02-09 00:00	2026-01-15 00:00	2026-04-08 00:00							1696	0						CP_Start
+%E
+%R	52	1	12	1	NB_2020	Letting — TP-003 Building Envelope	TT_Task	DT_FixedDrtn	TK_NotStart	1120	2026-01-15 00:00	2026-08-06 00:00	2026-04-14 00:00	2026-10-30 00:00	2026-01-15 00:00	2026-08-06 00:00							488	0						CP_Start
+%E
+%R	53	1	12	1	NB_2030	Letting — TP-004 Fit-out & White Space (brought forward)	TT_Task	DT_FixedDrtn	TK_NotStart	1120	2026-01-15 00:00	2026-08-06 00:00	2026-03-17 00:00	2026-10-06 00:00	2026-01-15 00:00	2026-08-06 00:00							344	0						CP_Start
+%E
+%R	54	1	12	1	NB_2040	Letting — TP-005 Mechanical	TT_Task	DT_FixedDrtn	TK_NotStart	496	2026-01-15 00:00	2026-04-15 00:00	2026-01-22 00:00	2026-04-22 00:00	2026-01-15 00:00	2026-04-15 00:00							40	0						CP_Start
+%E
+%R	55	1	12	1	NB_2050	Letting — TP-006 Electrical & Power	TT_Task	DT_FixedDrtn	TK_NotStart	496	2026-01-15 00:00	2026-04-15 00:00	2026-01-30 00:00	2026-04-30 00:00	2026-01-15 00:00	2026-04-15 00:00							88	0						CP_Start
+%E
+%R	56	1	12	1	NB_2060	Letting — TP-007 ELV / BMS-DCIM / Fire (brought forward)	TT_Task	DT_FixedDrtn	TK_NotStart	1080	2026-01-15 00:00	2026-07-30 00:00	2026-01-29 00:00	2026-08-13 00:00	2026-01-15 00:00	2026-07-30 00:00							80	0						CP_Start
+%E
+%R	57	1	12	1	NB_2070	Letting — TP-008 External Works & Security	TT_Task	DT_FixedDrtn	TK_NotStart	336	2026-01-15 00:00	2026-03-16 00:00	2027-06-04 00:00	2027-08-04 00:00	2026-01-15 00:00	2026-03-16 00:00							2792	0						CP_Start
+%E
+%R	58	1	13	1	GW_1000	Instruction to proceed	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-03-02 00:00	2026-03-02 00:00	2026-03-05 00:00	2026-03-05 00:00	2026-03-02 00:00	2026-03-02 00:00							24	0						CP_Start
+%E
+%R	59	1	13	1	GW_1010	Mobilisation, site hoarding and temporary haul road	TT_Task	DT_FixedDrtn	TK_NotStart	120	2026-03-02 00:00	2026-03-23 00:00	2026-03-05 00:00	2026-03-26 00:00	2026-03-02 00:00	2026-03-23 00:00							24	0						CP_Start
+%E
+%R	60	1	13	1	GW_1030	Pre-condition survey and blasting permit discharge	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-03-02 00:00	2026-03-30 00:00	2027-12-23 00:00	2028-01-24 00:00	2026-03-02 00:00	2026-03-30 00:00							3672	0						CP_Start
+%E
+%R	61	1	13	1	GW_1020	Site compound base — offices, welfare and parking hardstanding	TT_Task	DT_FixedDrtn	TK_NotStart	96	2026-03-23 00:00	2026-04-10 00:00	2026-03-26 00:00	2026-04-15 00:00	2026-03-23 00:00	2026-04-10 00:00							24	0						CP_Start
+%E
+%R	62	1	13	1	GW_1100	Topsoil strip and bulk earthworks — western two-thirds	TT_Task	DT_FixedDrtn	TK_NotStart	320	2026-03-23 00:00	2026-05-22 00:00	2028-03-20 00:00	2028-05-15 00:00	2026-03-23 00:00	2026-05-22 00:00							4032	0						CP_Start
+%E
+%R	63	1	13	1	GW_1110	Rock excavation and blasting — eastern third	TT_Task	DT_FixedDrtn	TK_NotStart	440	2026-03-30 00:00	2026-06-22 00:00	2028-01-24 00:00	2028-04-10 00:00	2026-03-30 00:00	2026-06-22 00:00							3672	0						CP_Start
+%E
+%R	64	1	13	1	GW_1200	Piling — Hall 1 and Hall 2	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-04-10 00:00	2026-05-19 00:00	2026-08-24 00:00	2026-09-28 00:00	2026-04-10 00:00	2026-05-19 00:00							744	0						CP_Start
+%E
+%R	65	1	13	1	GW_1320	Substructure — shared MEP spine	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-04-10 00:00	2026-05-19 00:00	2026-04-15 00:00	2026-05-22 00:00	2026-04-10 00:00	2026-05-19 00:00							24	0						CP_Start
+%E
+%R	66	1	13	1	GW_1300	Pile caps and ground beams — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	120	2026-05-19 00:00	2026-06-09 00:00	2028-05-15 00:00	2028-06-05 00:00	2026-05-19 00:00	2026-06-09 00:00							4056	0						CP_Start
+%E
+%R	67	1	13	1	GW_1400	Ground-bearing slab — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-05-19 00:00	2026-06-16 00:00	2026-09-28 00:00	2026-10-26 00:00	2026-05-19 00:00	2026-06-16 00:00							744	0						CP_Start
+%E
+%R	68	1	13	1	GW_1420	Substructure — generator compound and fuel storage bunds	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-05-19 00:00	2026-06-16 00:00	2028-02-21 00:00	2028-03-20 00:00	2026-05-19 00:00	2026-06-16 00:00							3576	0						CP_Start
+%E
+%R	69	1	13	1	GW_1120	Made-ground remediation — north-west corner	TT_Task	DT_FixedDrtn	TK_NotStart	120	2026-05-22 00:00	2026-06-12 00:00	2028-05-15 00:00	2028-06-05 00:00	2026-05-22 00:00	2026-06-12 00:00							4032	0						CP_Start
+%E
+%R	70	1	13	1	GW_1410	Ground-bearing slab — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-06-16 00:00	2026-07-15 00:00	2028-03-20 00:00	2028-04-17 00:00	2026-06-16 00:00	2026-07-15 00:00							3576	0						CP_Start
+%E
+%R	71	1	13	1	GW_1210	Piling — Hall 3 and Hall 4	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-06-22 00:00	2026-07-27 00:00	2028-04-10 00:00	2028-05-15 00:00	2026-06-22 00:00	2026-07-27 00:00							3672	0						CP_Start
+%E
+%R	72	1	13	1	GW_1220	Piling — substation, switchgear and generator compound	TT_Task	DT_FixedDrtn	TK_NotStart	144	2026-06-22 00:00	2026-07-16 00:00	2028-05-10 00:00	2028-06-05 00:00	2026-06-22 00:00	2026-07-16 00:00							3848	0						CP_Start
+%E
+%R	73	1	13	1	GW_1500	External drainage and below-ground services	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-07-15 00:00	2026-08-26 00:00	2028-04-17 00:00	2028-05-29 00:00	2026-07-15 00:00	2026-08-26 00:00							3576	0						CP_Start
+%E
+%R	74	1	13	1	GW_1900	Substructure complete — handover to TP-002	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-07-15 00:00	2026-07-15 00:00	2028-04-17 00:00	2028-04-17 00:00	2026-07-15 00:00	2026-07-15 00:00							3576	0						CP_Start
+%E
+%R	75	1	13	1	GW_1310	Pile caps and ground beams — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	120	2026-07-27 00:00	2026-08-17 00:00	2028-05-15 00:00	2028-06-05 00:00	2026-07-27 00:00	2026-08-17 00:00							3672	0						CP_Start
+%E
+%R	76	1	13	1	GW_1950	Demobilise bulk earthworks plant	TT_Task	DT_FixedDrtn	TK_NotStart	40	2026-08-26 00:00	2026-09-02 00:00	2028-05-29 00:00	2028-06-05 00:00	2026-08-26 00:00	2026-09-02 00:00							3576	0						CP_Start
+%E
+%R	77	1	14	1	ST_1000	Instruction to proceed	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-04-08 00:00	2026-04-08 00:00	2027-02-09 00:00	2027-02-09 00:00	2026-04-08 00:00	2026-04-08 00:00							1696	0						CP_Start
+%E
+%R	78	1	14	1	ST_1010	Design development — steel frame and precast connections	TT_Task	DT_FixedDrtn	TK_NotStart	280	2026-04-08 00:00	2026-05-29 00:00	2027-02-09 00:00	2027-04-01 00:00	2026-04-08 00:00	2026-05-29 00:00							1696	0						CP_Start
+%E
+%R	79	1	14	1	ST_1020	Fabrication drawings and approval	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-05-29 00:00	2026-07-13 00:00	2027-04-01 00:00	2027-05-14 00:00	2026-05-29 00:00	2026-07-13 00:00							1696	0						CP_Start
+%E
+%R	80	1	14	1	ST_1100	Structural steel fabrication — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	440	2026-05-29 00:00	2026-08-17 00:00	2028-03-20 00:00	2028-06-05 00:00	2026-05-29 00:00	2026-08-17 00:00							3672	0						CP_Start
+%E
+%R	81	1	14	1	ST_1110	Structural steel fabrication — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	440	2026-05-29 00:00	2026-08-17 00:00	2028-01-24 00:00	2028-04-10 00:00	2026-05-29 00:00	2026-08-17 00:00							3352	0						CP_Start
+%E
+%R	82	1	14	1	ST_1120	Precast wall and floor unit manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	480	2026-05-29 00:00	2026-08-24 00:00	2028-01-11 00:00	2028-04-04 00:00	2026-05-29 00:00	2026-08-24 00:00							3280	0						CP_Start
+%E
+%R	83	1	14	1	ST_1200	Steel erection — Hall 1	TT_Task	DT_FixedDrtn	TK_NotStart	176	2026-07-13 00:00	2026-08-12 00:00	2027-05-14 00:00	2027-06-15 00:00	2026-07-13 00:00	2026-08-12 00:00							1696	0						CP_Start
+%E
+%R	84	1	14	1	ST_1210	Steel erection — Hall 2	TT_Task	DT_FixedDrtn	TK_NotStart	176	2026-08-12 00:00	2026-09-11 00:00	2028-04-10 00:00	2028-05-10 00:00	2026-08-12 00:00	2026-09-11 00:00							3376	0						CP_Start
+%E
+%R	85	1	14	1	ST_1300	Precast erection — shared MEP spine and mezzanine	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-08-12 00:00	2026-09-23 00:00	2027-06-15 00:00	2027-07-28 00:00	2026-08-12 00:00	2026-09-23 00:00							1696	0						CP_Start
+%E
+%R	86	1	14	1	ST_1400	Metal decking and structural topping — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-08-17 00:00	2026-09-14 00:00	2028-04-10 00:00	2028-05-08 00:00	2026-08-17 00:00	2026-09-14 00:00							3352	0						CP_Start
+%E
+%R	87	1	14	1	ST_1220	Steel erection — Hall 3	TT_Task	DT_FixedDrtn	TK_NotStart	176	2026-08-24 00:00	2026-09-23 00:00	2028-04-04 00:00	2028-05-04 00:00	2026-08-24 00:00	2026-09-23 00:00							3280	0						CP_Start
+%E
+%R	88	1	14	1	ST_1310	Precast erection — substation and switchgear building	TT_Task	DT_FixedDrtn	TK_NotStart	144	2026-09-11 00:00	2026-10-07 00:00	2028-05-10 00:00	2028-06-05 00:00	2026-09-11 00:00	2026-10-07 00:00							3376	0						CP_Start
+%E
+%R	89	1	14	1	ST_1410	Metal decking and structural topping — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-09-14 00:00	2026-10-12 00:00	2028-05-08 00:00	2028-06-05 00:00	2026-09-14 00:00	2026-10-12 00:00							3352	0						CP_Start
+%E
+%R	90	1	14	1	ST_1900	Structure complete — Halls 1-2	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-09-14 00:00	2026-09-14 00:00	2028-05-08 00:00	2028-05-08 00:00	2026-09-14 00:00	2026-09-14 00:00							3352	0						CP_Start
+%E
+%R	91	1	14	1	ST_1230	Steel erection — Hall 4	TT_Task	DT_FixedDrtn	TK_NotStart	176	2026-09-23 00:00	2026-10-23 00:00	2028-05-04 00:00	2028-06-05 00:00	2026-09-23 00:00	2026-10-23 00:00							3280	0						CP_Start
+%E
+%R	92	1	14	1	ST_1500	Roof steelwork and plant support frames	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-09-23 00:00	2026-10-28 00:00	2027-07-28 00:00	2027-09-01 00:00	2026-09-23 00:00	2026-10-28 00:00							1696	0						CP_Start
+%E
+%R	93	1	14	1	ST_1910	Structure complete — Halls 3-4	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-10-12 00:00	2026-10-12 00:00	2028-06-05 00:00	2028-06-05 00:00	2026-10-12 00:00	2026-10-12 00:00							3352	0						CP_Start
+%E
+%R	94	1	14	1	ST_1600	Fire protection to structural steel	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-10-28 00:00	2026-12-09 00:00	2028-04-17 00:00	2028-05-29 00:00	2026-10-28 00:00	2026-12-09 00:00							2976	0						CP_Start
+%E
+%R	95	1	14	1	ST_1950	Crane demobilisation	TT_Task	DT_FixedDrtn	TK_NotStart	40	2026-12-09 00:00	2026-12-16 00:00	2028-05-29 00:00	2028-06-05 00:00	2026-12-09 00:00	2026-12-16 00:00							2976	0						CP_Start
+%E
+%R	96	1	15	1	EN_1000	Instruction to proceed	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-08-06 00:00	2026-08-06 00:00	2026-10-30 00:00	2026-10-30 00:00	2026-08-06 00:00	2026-08-06 00:00							488	0						CP_Start
+%E
+%R	97	1	15	1	EN_1010	Design development — cladding, acoustic and fire-rated build-ups	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-08-06 00:00	2026-09-17 00:00	2026-10-30 00:00	2026-12-11 00:00	2026-08-06 00:00	2026-09-17 00:00							488	0						CP_Start
+%E
+%R	98	1	15	1	EN_1020	Cladding fabrication and delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	440	2026-08-06 00:00	2026-10-22 00:00	2027-02-12 00:00	2027-05-04 00:00	2026-08-06 00:00	2026-10-22 00:00							1056	0						CP_Start
+%E
+%R	99	1	15	1	EN_1100	Roofing — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-09-17 00:00	2026-10-29 00:00	2028-04-24 00:00	2028-06-05 00:00	2026-09-17 00:00	2026-10-29 00:00							3248	0						CP_Start
+%E
+%R	100	1	15	1	EN_1200	Wall cladding — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-09-17 00:00	2026-10-29 00:00	2026-12-11 00:00	2027-01-28 00:00	2026-09-17 00:00	2026-10-29 00:00							488	0						CP_Start
+%E
+%R	101	1	15	1	EN_1110	Roofing — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-10-22 00:00	2026-12-03 00:00	2028-03-20 00:00	2028-05-01 00:00	2026-10-22 00:00	2026-12-03 00:00							2848	0						CP_Start
+%E
+%R	102	1	15	1	EN_1210	Wall cladding — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-10-22 00:00	2026-12-03 00:00	2027-05-04 00:00	2027-06-16 00:00	2026-10-22 00:00	2026-12-03 00:00							1056	0						CP_Start
+%E
+%R	103	1	15	1	EN_1500	WEATHERTIGHT — Halls 1-2	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-10-29 00:00	2026-10-29 00:00	2027-01-28 00:00	2027-01-28 00:00	2026-10-29 00:00	2026-10-29 00:00							488	0						CP_Start
+%E
+%R	104	1	15	1	EN_1300	Louvres, doors and external openings	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-12-03 00:00	2027-01-20 00:00	2028-03-27 00:00	2028-05-08 00:00	2026-12-03 00:00	2027-01-20 00:00							2648	0						CP_Start
+%E
+%R	105	1	15	1	EN_1400	Roof plant screens and walkways	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-12-03 00:00	2027-01-13 00:00	2028-05-01 00:00	2028-06-05 00:00	2026-12-03 00:00	2027-01-13 00:00							2848	0						CP_Start
+%E
+%R	106	1	15	1	EN_1510	WEATHERTIGHT — Halls 3-4	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-12-03 00:00	2026-12-03 00:00	2027-06-16 00:00	2027-06-16 00:00	2026-12-03 00:00	2026-12-03 00:00							1056	0						CP_Start
+%E
+%R	107	1	15	1	EN_1600	Envelope snagging and sealant inspection	TT_Task	DT_FixedDrtn	TK_NotStart	160	2027-01-20 00:00	2027-02-17 00:00	2028-05-08 00:00	2028-06-05 00:00	2027-01-20 00:00	2027-02-17 00:00							2648	0						CP_Start
+%E
+%R	108	1	15	1	EN_1900	Envelope complete	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-02-17 00:00	2027-02-17 00:00	2028-06-05 00:00	2028-06-05 00:00	2027-02-17 00:00	2027-02-17 00:00							2648	0						CP_Start
+%E
+%R	109	1	16	1	IL_1200	Chillers — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	1040	2026-01-15 00:00	2026-07-23 00:00	2027-12-01 00:00	2028-06-05 00:00	2026-01-15 00:00	2026-07-23 00:00							3808	0						CP_Start
+%E
+%R	110	1	16	1	IL_1210	Chillers — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	56	2026-01-15 00:00	2026-01-26 00:00	2027-01-15 00:00	2027-01-26 00:00	2026-01-15 00:00	2026-01-26 00:00							2016	0						CP_Start
+%E
+%R	111	1	16	1	IL_1000	Instruction to proceed	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-04-15 00:00	2026-04-15 00:00	2026-04-22 00:00	2026-04-22 00:00	2026-04-15 00:00	2026-04-15 00:00							40	0						CP_Start
+%E
+%R	112	1	16	1	IL_1010	Contract award administration and bonds	TT_Task	DT_FixedDrtn	TK_NotStart	80	2026-04-15 00:00	2026-04-29 00:00	2026-05-28 00:00	2026-06-11 00:00	2026-04-15 00:00	2026-04-29 00:00							232	0						CP_Start
+%E
+%R	113	1	16	1	IL_1020	Performance security, guarantees and insurances in place	TT_Task	DT_FixedDrtn	TK_NotStart	80	2026-04-15 00:00	2026-04-29 00:00	2026-04-22 00:00	2026-05-07 00:00	2026-04-15 00:00	2026-04-29 00:00							40	0						CP_Start
+%E
+%R	114	1	16	1	IL_1100	Design development — chilled water system	TT_Task	DT_FixedDrtn	TK_NotStart	224	2026-04-29 00:00	2026-06-10 00:00	2026-06-11 00:00	2026-07-22 00:00	2026-04-29 00:00	2026-06-10 00:00							232	0						CP_Start
+%E
+%R	115	1	16	1	IL_1110	Design development — heat recovery plant	TT_Task	DT_FixedDrtn	TK_NotStart	192	2026-04-29 00:00	2026-06-04 00:00	2026-06-17 00:00	2026-07-22 00:00	2026-04-29 00:00	2026-06-04 00:00							264	0						CP_Start
+%E
+%R	116	1	16	1	IL_1120	Design development — ventilation and smoke extract	TT_Task	DT_FixedDrtn	TK_NotStart	176	2026-04-29 00:00	2026-06-02 00:00	2026-06-22 00:00	2026-07-22 00:00	2026-04-29 00:00	2026-06-02 00:00							280	0						CP_Start
+%E
+%R	117	1	16	1	IL_1125	Design development — water treatment and adiabatic make-up	TT_Task	DT_FixedDrtn	TK_NotStart	120	2026-04-29 00:00	2026-05-22 00:00	2026-07-01 00:00	2026-07-22 00:00	2026-04-29 00:00	2026-05-22 00:00							336	0						CP_Start
+%E
+%R	118	1	16	1	IL_1300	Site establishment and mechanical setting out	TT_Task	DT_FixedDrtn	TK_NotStart	80	2026-04-29 00:00	2026-05-15 00:00	2026-05-07 00:00	2026-05-22 00:00	2026-04-29 00:00	2026-05-15 00:00							40	0						CP_Start
+%E
+%R	119	1	16	1	IL_1311	Plantroom access — Data Hall 1	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-05-15 00:00	2026-05-15 00:00	2026-05-22 00:00	2026-05-22 00:00	2026-05-15 00:00	2026-05-15 00:00							40	0						CP_Start
+%E
+%R	120	1	16	1	IL_1312	Plantroom access — Data Hall 2	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-05-15 00:00	2026-05-15 00:00	2027-01-29 00:00	2027-01-29 00:00	2026-05-15 00:00	2026-05-15 00:00							1440	0						CP_Start
+%E
+%R	121	1	16	1	IL_1313	Plantroom access — Data Hall 3	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-05-15 00:00	2026-05-15 00:00	2027-05-04 00:00	2027-05-04 00:00	2026-05-15 00:00	2026-05-15 00:00							1960	0						CP_Start
+%E
+%R	122	1	16	1	IL_1314	Plantroom access — Data Hall 4	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-05-15 00:00	2026-05-15 00:00	2027-08-03 00:00	2027-08-03 00:00	2026-05-15 00:00	2026-05-15 00:00							2464	0						CP_Start
+%E
+%R	123	1	16	1	IL_1400	Chilled water pipework — primary spine	TT_Task	DT_FixedDrtn	TK_NotStart	560	2026-05-19 00:00	2026-08-26 00:00	2026-05-22 00:00	2026-08-31 00:00	2026-05-19 00:00	2026-08-26 00:00							24	0						CP_Start
+%E
+%R	124	1	16	1	IL_1130	Contractor and Engineer design review	TT_Task	DT_FixedDrtn	TK_NotStart	96	2026-06-10 00:00	2026-06-29 00:00	2026-07-22 00:00	2026-08-07 00:00	2026-06-10 00:00	2026-06-29 00:00							232	0						CP_Start
+%E
+%R	125	1	16	1	IL_1220	Dry coolers / adiabatic units — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	880	2026-06-29 00:00	2026-11-30 00:00	2027-03-16 00:00	2027-08-23 00:00	2026-06-29 00:00	2026-11-30 00:00							1456	0						CP_Start
+%E
+%R	126	1	16	1	IL_1240	CRAH units (28 nr) — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	880	2026-06-29 00:00	2026-11-30 00:00	2026-08-07 00:00	2027-01-14 00:00	2026-06-29 00:00	2026-11-30 00:00							232	0						CP_Start
+%E
+%R	127	1	16	1	IL_1260	Waste-heat recovery plant — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	1200	2026-06-29 00:00	2027-01-29 00:00	2027-02-05 00:00	2027-09-09 00:00	2026-06-29 00:00	2027-01-29 00:00							1240	0						CP_Start
+%E
+%R	128	1	16	1	IL_1410	Chilled water pipework — Hall 1 secondary	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-07-15 00:00	2026-08-26 00:00	2026-10-26 00:00	2026-12-07 00:00	2026-07-15 00:00	2026-08-26 00:00							584	0						CP_Start
+%E
+%R	129	1	16	1	IL_1420	Chilled water pipework — Hall 2 secondary	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-08-26 00:00	2026-10-07 00:00	2027-01-29 00:00	2027-03-12 00:00	2026-08-26 00:00	2026-10-07 00:00							864	0						CP_Start
+%E
+%R	130	1	16	1	IL_1430	Chilled water pipework — Hall 3 secondary	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-08-26 00:00	2026-10-07 00:00	2027-05-04 00:00	2027-06-16 00:00	2026-08-26 00:00	2026-10-07 00:00							1384	0						CP_Start
+%E
+%R	131	1	16	1	IL_1440	Chilled water pipework — Hall 4 secondary	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-08-26 00:00	2026-10-07 00:00	2027-08-03 00:00	2027-09-14 00:00	2026-08-26 00:00	2026-10-07 00:00							1888	0						CP_Start
+%E
+%R	132	1	16	1	IL_1500	Pumps, buffer vessels and glycol dosing	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-08-26 00:00	2026-09-30 00:00	2026-12-07 00:00	2027-01-15 00:00	2026-08-26 00:00	2026-09-30 00:00							584	0						CP_Start
+%E
+%R	133	1	16	1	IL_1510	Chiller installation and pipework connection	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-08-26 00:00	2026-09-23 00:00	2027-01-26 00:00	2027-02-23 00:00	2026-08-26 00:00	2026-09-23 00:00							840	0						CP_Start
+%E
+%R	134	1	16	1	IL_1600	Ventilation and smoke extract to ancillary areas	TT_Task	DT_FixedDrtn	TK_NotStart	280	2026-09-09 00:00	2026-10-28 00:00	2027-10-06 00:00	2027-11-24 00:00	2026-09-09 00:00	2026-10-28 00:00							2176	0						CP_Start
+%E
+%R	135	1	16	1	IL_1605	CHW system flushing — spine and secondary loops	TT_Task	DT_FixedDrtn	TK_NotStart	96	2026-09-30 00:00	2026-10-16 00:00	2027-01-15 00:00	2027-02-02 00:00	2026-09-30 00:00	2026-10-16 00:00							584	0						CP_Start
+%E
+%R	136	1	16	1	IL_1610	Water treatment and adiabatic make-up	TT_Task	DT_FixedDrtn	TK_NotStart	120	2026-10-16 00:00	2026-11-06 00:00	2027-02-02 00:00	2027-02-23 00:00	2026-10-16 00:00	2026-11-06 00:00							584	0						CP_Start
+%E
+%R	137	1	16	1	IL_1230	Dry coolers — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	56	2026-11-30 00:00	2026-12-09 00:00	2027-08-23 00:00	2027-09-01 00:00	2026-11-30 00:00	2026-12-09 00:00							1456	0						CP_Start
+%E
+%R	138	1	16	1	IL_1250	CRAH units — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	80	2026-11-30 00:00	2026-12-14 00:00	2027-01-14 00:00	2027-01-28 00:00	2026-11-30 00:00	2026-12-14 00:00							232	0						CP_Start
+%E
+%R	139	1	16	1	IL_1520	Dry cooler installation — external roof plant	TT_Task	DT_FixedDrtn	TK_NotStart	480	2026-12-09 00:00	2027-03-09 00:00	2027-09-01 00:00	2027-11-24 00:00	2026-12-09 00:00	2027-03-09 00:00							1456	0						CP_Start
+%E
+%R	140	1	16	1	IL_1531	CRAH installation — Hall 1 (7 nr)	TT_Task	DT_FixedDrtn	TK_NotStart	144	2026-12-14 00:00	2027-01-13 00:00	2027-01-28 00:00	2027-02-23 00:00	2026-12-14 00:00	2027-01-13 00:00							232	0						CP_Start
+%E
+%R	141	1	16	1	IL_1532	CRAH installation — Hall 2 (7 nr)	TT_Task	DT_FixedDrtn	TK_NotStart	144	2026-12-30 00:00	2027-01-27 00:00	2027-03-12 00:00	2027-04-09 00:00	2026-12-30 00:00	2027-01-27 00:00							400	0						CP_Start
+%E
+%R	142	1	16	1	IL_1700	Static completion and pressure testing — Section 1	TT_Task	DT_FixedDrtn	TK_NotStart	64	2027-01-13 00:00	2027-01-25 00:00	2027-02-23 00:00	2027-03-05 00:00	2027-01-13 00:00	2027-01-25 00:00							232	0						CP_Start
+%E
+%R	143	1	16	1	IL_1533	CRAH installation — Hall 3 (7 nr)	TT_Task	DT_FixedDrtn	TK_NotStart	144	2027-01-15 00:00	2027-02-10 00:00	2027-06-16 00:00	2027-07-13 00:00	2027-01-15 00:00	2027-02-10 00:00							840	0						CP_Start
+%E
+%R	144	1	16	1	IL_1710	Commissioning L4 — Hall 1	TT_Task	DT_FixedDrtn	TK_NotStart	64	2027-01-25 00:00	2027-02-04 00:00	2027-03-05 00:00	2027-03-17 00:00	2027-01-25 00:00	2027-02-04 00:00							232	0						CP_Start
+%E
+%R	145	1	16	1	IL_1701	Static completion and pressure testing — Section 2	TT_Task	DT_FixedDrtn	TK_NotStart	80	2027-01-27 00:00	2027-02-10 00:00	2027-04-09 00:00	2027-04-23 00:00	2027-01-27 00:00	2027-02-10 00:00							400	0						CP_Start
+%E
+%R	146	1	16	1	IL_1270	Waste-heat recovery plant — delivery	TT_Task	DT_FixedDrtn	TK_NotStart	56	2027-01-29 00:00	2027-02-09 00:00	2027-09-09 00:00	2027-09-20 00:00	2027-01-29 00:00	2027-02-09 00:00							1240	0						CP_Start
+%E
+%R	147	1	16	1	IL_1534	CRAH installation — Hall 4 (7 nr)	TT_Task	DT_FixedDrtn	TK_NotStart	144	2027-01-29 00:00	2027-02-24 00:00	2027-09-14 00:00	2027-10-08 00:00	2027-01-29 00:00	2027-02-24 00:00							1264	0						CP_Start
+%E
+%R	148	1	16	1	IL_1711	Commissioning L5 — Hall 1 (witnessed)	TT_Task	DT_FixedDrtn	TK_NotStart	40	2027-02-04 00:00	2027-02-11 00:00	2027-03-17 00:00	2027-03-24 00:00	2027-02-04 00:00	2027-02-11 00:00							232	0						CP_Start
+%E
+%R	149	1	16	1	IL_1540	Waste-heat recovery plant installation	TT_Task	DT_FixedDrtn	TK_NotStart	240	2027-02-09 00:00	2027-03-23 00:00	2027-09-20 00:00	2027-11-01 00:00	2027-02-09 00:00	2027-03-23 00:00							1240	0						CP_Start
+%E
+%R	150	1	16	1	IL_1702	Static completion and pressure testing — Section 3	TT_Task	DT_FixedDrtn	TK_NotStart	80	2027-02-10 00:00	2027-02-24 00:00	2027-07-13 00:00	2027-07-27 00:00	2027-02-10 00:00	2027-02-24 00:00							840	0						CP_Start
+%E
+%R	151	1	16	1	IL_1712	Commissioning L4 — Hall 2	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-02-10 00:00	2027-03-03 00:00	2027-04-23 00:00	2027-05-17 00:00	2027-02-10 00:00	2027-03-03 00:00							400	0						CP_Start
+%E
+%R	152	1	16	1	IL_1800	SECTIONAL COMPLETION 1 — Data Hall 1 mechanical	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-02-11 00:00	2027-02-11 00:00	2027-03-24 00:00	2027-03-24 00:00	2027-02-11 00:00	2027-02-11 00:00							232	0						CP_Start
+%E
+%R	153	1	16	1	IL_1703	Static completion and pressure testing — Section 4	TT_Task	DT_FixedDrtn	TK_NotStart	80	2027-02-24 00:00	2027-03-10 00:00	2027-10-08 00:00	2027-10-22 00:00	2027-02-24 00:00	2027-03-10 00:00							1264	0						CP_Start
+%E
+%R	154	1	16	1	IL_1714	Commissioning L4 — Hall 3	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-02-24 00:00	2027-03-17 00:00	2027-07-27 00:00	2027-08-17 00:00	2027-02-24 00:00	2027-03-17 00:00							840	0						CP_Start
+%E
+%R	155	1	16	1	IL_1713	Commissioning L5 — Hall 2 (witnessed)	TT_Task	DT_FixedDrtn	TK_NotStart	64	2027-03-03 00:00	2027-03-15 00:00	2027-05-17 00:00	2027-05-27 00:00	2027-03-03 00:00	2027-03-15 00:00							400	0						CP_Start
+%E
+%R	156	1	16	1	IL_1716	Commissioning L4 — Hall 4	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-03-10 00:00	2027-04-02 00:00	2027-10-22 00:00	2027-11-12 00:00	2027-03-10 00:00	2027-04-02 00:00							1264	0						CP_Start
+%E
+%R	157	1	16	1	IL_1810	SECTIONAL COMPLETION 2 — Data Hall 2 mechanical	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-03-15 00:00	2027-03-15 00:00	2027-05-27 00:00	2027-05-27 00:00	2027-03-15 00:00	2027-03-15 00:00							400	0						CP_Start
+%E
+%R	158	1	16	1	IL_1715	Commissioning L5 — Hall 3 (witnessed)	TT_Task	DT_FixedDrtn	TK_NotStart	64	2027-03-17 00:00	2027-03-31 00:00	2027-08-17 00:00	2027-08-27 00:00	2027-03-17 00:00	2027-03-31 00:00							840	0						CP_Start
+%E
+%R	159	1	16	1	IL_1820	SECTIONAL COMPLETION 3 — Data Hall 3 mechanical	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-03-31 00:00	2027-03-31 00:00	2027-08-27 00:00	2027-08-27 00:00	2027-03-31 00:00	2027-03-31 00:00							840	0						CP_Start
+%E
+%R	160	1	16	1	IL_1717	Commissioning L5 — Hall 4 (witnessed)	TT_Task	DT_FixedDrtn	TK_NotStart	64	2027-04-02 00:00	2027-04-14 00:00	2027-11-12 00:00	2027-11-24 00:00	2027-04-02 00:00	2027-04-14 00:00							1264	0						CP_Start
+%E
+%R	161	1	16	1	IL_1720	O&M manuals and as-built records	TT_Task	DT_FixedDrtn	TK_NotStart	96	2027-04-14 00:00	2027-04-30 00:00	2028-05-08 00:00	2028-05-24 00:00	2027-04-14 00:00	2027-04-30 00:00							2184	0						CP_Start
+%E
+%R	162	1	16	1	IL_1730	Warranties, spare parts and maintenance training handover	TT_Task	DT_FixedDrtn	TK_NotStart	64	2027-04-30 00:00	2027-05-13 00:00	2028-05-24 00:00	2028-06-05 00:00	2027-04-30 00:00	2027-05-13 00:00							2184	0						CP_Start
+%E
+%R	163	1	16	1	IL_1550	Waste-heat connection to boundary chamber	TT_Task	DT_FixedDrtn	TK_NotStart	96	2027-08-31 00:00	2027-09-16 00:00	2027-11-01 00:00	2027-11-17 00:00	2027-08-31 00:00	2027-09-16 00:00							352	0						CP_Start
+%E
+%R	164	1	16	1	IL_1560	Waste-heat 72-hour witnessed delivery test (4 MW at 70 C)	TT_Task	DT_FixedDrtn	TK_NotStart	40	2027-09-16 00:00	2027-09-23 00:00	2027-11-17 00:00	2027-11-24 00:00	2027-09-16 00:00	2027-09-23 00:00							352	0						CP_Start
+%E
+%R	165	1	16	1	IL_1740	Subcontract works complete	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-09-23 00:00	2027-09-23 00:00	2028-06-05 00:00	2028-06-05 00:00	2027-09-23 00:00	2027-09-23 00:00							1432	0						CP_Start
+%E
+%R	166	1	16	1	IL_1830	SECTIONAL COMPLETION 4 — Data Hall 4 mechanical	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-09-23 00:00	2027-09-23 00:00	2027-11-24 00:00	2027-11-24 00:00	2027-09-23 00:00	2027-09-23 00:00							352	0						CP_Start
+%E
+%R	167	1	17	1	VE_1200	110/20 kV transformers (2 nr) — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	2080	2026-01-15 00:00	2027-01-27 00:00	2028-12-19 00:00	2026-11-26 00:00	2026-01-15 00:00	2027-01-27 00:00							5976	0						CP_Start
+%E
+%R	168	1	17	1	VE_1220	20 kV ring main switchgear — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	1520	2026-01-15 00:00	2026-10-15 00:00	2027-07-19 00:00	2028-04-13 00:00	2026-01-15 00:00	2026-10-15 00:00							3032	0						CP_Start
+%E
+%R	169	1	17	1	VE_1240	Standby generators (8 nr) — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	1600	2026-01-15 00:00	2026-10-29 00:00	2025-12-23 00:00	2026-10-08 00:00	2026-01-15 00:00	2026-10-29 00:00							-120	0	Y					CP_Start
+%E
+%R	170	1	17	1	VE_1000	Instruction to proceed	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-04-15 00:00	2026-04-15 00:00	2026-04-30 00:00	2026-04-30 00:00	2026-04-15 00:00	2026-04-15 00:00							88	0						CP_Start
+%E
+%R	171	1	17	1	VE_1010	Contract award administration, bonds and securities	TT_Task	DT_FixedDrtn	TK_NotStart	80	2026-04-15 00:00	2026-04-29 00:00	2026-04-30 00:00	2026-05-18 00:00	2026-04-15 00:00	2026-04-29 00:00							88	0						CP_Start
+%E
+%R	172	1	17	1	VE_1100	Design development — HV/MV distribution	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-04-29 00:00	2026-06-12 00:00	2028-04-06 00:00	2028-05-18 00:00	2026-04-29 00:00	2026-06-12 00:00							3936	0						CP_Start
+%E
+%R	173	1	17	1	VE_1110	Design development — LV, busway and containment	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-04-29 00:00	2026-06-05 00:00	2026-06-15 00:00	2026-07-21 00:00	2026-04-29 00:00	2026-06-05 00:00							248	0						CP_Start
+%E
+%R	174	1	17	1	VE_1120	Design development — generators, UPS and battery systems	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-04-29 00:00	2026-06-05 00:00	2028-04-13 00:00	2028-05-18 00:00	2026-04-29 00:00	2026-06-05 00:00							3976	0						CP_Start
+%E
+%R	175	1	17	1	VE_1260	UPS modules (16 nr) — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	1200	2026-04-29 00:00	2026-11-30 00:00	2026-05-18 00:00	2026-12-15 00:00	2026-04-29 00:00	2026-11-30 00:00							88	0						CP_Start
+%E
+%R	176	1	17	1	VE_1280	Battery systems — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	960	2026-04-29 00:00	2026-10-19 00:00	2026-07-02 00:00	2026-12-17 00:00	2026-04-29 00:00	2026-10-19 00:00							344	0						CP_Start
+%E
+%R	177	1	17	1	VE_1400	Site establishment and electrical setting out	TT_Task	DT_FixedDrtn	TK_NotStart	80	2026-04-29 00:00	2026-05-15 00:00	2026-09-24 00:00	2026-10-08 00:00	2026-04-29 00:00	2026-05-15 00:00							824	0						CP_Start
+%E
+%R	178	1	17	1	VE_1500	110 kV termination, metering and protection to DNO interface	TT_Task	DT_FixedDrtn	TK_NotStart	360	2026-05-15 00:00	2026-07-20 00:00	2026-10-08 00:00	2026-12-10 00:00	2026-05-15 00:00	2026-07-20 00:00							824	0						CP_Start
+%E
+%R	179	1	17	1	VE_1600	Hall substation 20/0.4 kV — Hall 1	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-05-15 00:00	2026-06-22 00:00	2026-11-12 00:00	2026-12-17 00:00	2026-05-15 00:00	2026-06-22 00:00							1024	0						CP_Start
+%E
+%R	180	1	17	1	VE_1620	Containment and small power — shared MEP spine	TT_Task	DT_FixedDrtn	TK_NotStart	320	2026-05-15 00:00	2026-07-13 00:00	2028-04-10 00:00	2028-06-05 00:00	2026-05-15 00:00	2026-07-13 00:00							3872	0						CP_Start
+%E
+%R	181	1	17	1	VE_1300	Overhead busway — order and manufacture	TT_Task	DT_FixedDrtn	TK_NotStart	800	2026-06-05 00:00	2026-10-26 00:00	2026-07-21 00:00	2026-12-08 00:00	2026-06-05 00:00	2026-10-26 00:00							248	0						CP_Start
+%E
+%R	182	1	17	1	VE_1601	Hall substation 20/0.4 kV — Hall 2	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-06-05 00:00	2026-07-13 00:00	2027-01-18 00:00	2027-02-22 00:00	2026-06-05 00:00	2026-07-13 00:00							1248	0						CP_Start
+%E
+%R	183	1	17	1	VE_1130	Contractor and Engineer design review	TT_Task	DT_FixedDrtn	TK_NotStart	96	2026-06-12 00:00	2026-07-01 00:00	2028-05-18 00:00	2028-06-05 00:00	2026-06-12 00:00	2026-07-01 00:00							3936	0						CP_Start
+%E
+%R	184	1	17	1	VE_1602	Hall substation 20/0.4 kV — Hall 3	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-06-29 00:00	2026-08-03 00:00	2027-04-21 00:00	2027-05-27 00:00	2026-06-29 00:00	2026-08-03 00:00							1648	0						CP_Start
+%E
+%R	185	1	17	1	VE_1603	Hall substation 20/0.4 kV — Hall 4	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-07-20 00:00	2026-08-24 00:00	2027-07-21 00:00	2027-08-25 00:00	2026-07-20 00:00	2026-08-24 00:00							2032	0						CP_Start
+%E
+%R	186	1	17	1	VE_1230	Switchgear — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	56	2026-10-15 00:00	2026-10-26 00:00	2028-04-13 00:00	2028-04-24 00:00	2026-10-15 00:00	2026-10-26 00:00							3032	0						CP_Start
+%E
+%R	187	1	17	1	VE_1290	Battery systems — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	40	2026-10-19 00:00	2026-10-26 00:00	2026-12-17 00:00	2026-12-28 00:00	2026-10-19 00:00	2026-10-26 00:00							344	0						CP_Start
+%E
+%R	188	1	17	1	VE_1310	Busway — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	56	2026-10-26 00:00	2026-11-04 00:00	2026-12-08 00:00	2026-12-17 00:00	2026-10-26 00:00	2026-11-04 00:00							248	0						CP_Start
+%E
+%R	189	1	17	1	VE_1520	20 kV ring main switchboard installation	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-10-26 00:00	2026-12-07 00:00	2028-04-24 00:00	2028-06-05 00:00	2026-10-26 00:00	2026-12-07 00:00							3032	0						CP_Start
+%E
+%R	190	1	17	1	VE_1250	Generators — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	80	2026-10-29 00:00	2026-11-12 00:00	2026-10-08 00:00	2026-10-22 00:00	2026-10-29 00:00	2026-11-12 00:00							-120	0	Y					CP_Start
+%E
+%R	191	1	17	1	VE_1610	Overhead busway and containment — Hall 1	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-11-04 00:00	2026-12-16 00:00	2026-12-17 00:00	2027-02-03 00:00	2026-11-04 00:00	2026-12-16 00:00							248	0						CP_Start
+%E
+%R	192	1	17	1	VE_1611	Overhead busway and containment — Hall 2	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-11-04 00:00	2026-12-16 00:00	2027-02-22 00:00	2027-04-07 00:00	2026-11-04 00:00	2026-12-16 00:00							592	0						CP_Start
+%E
+%R	193	1	17	1	VE_1612	Overhead busway and containment — Hall 3	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-11-04 00:00	2026-12-16 00:00	2027-05-27 00:00	2027-07-09 00:00	2026-11-04 00:00	2026-12-16 00:00							1112	0						CP_Start
+%E
+%R	194	1	17	1	VE_1613	Overhead busway and containment — Hall 4	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-11-04 00:00	2026-12-16 00:00	2027-08-25 00:00	2027-10-06 00:00	2026-11-04 00:00	2026-12-16 00:00							1616	0						CP_Start
+%E
+%R	195	1	17	1	VE_1530	Standby generator installation (8 nr) and paralleling	TT_Task	DT_FixedDrtn	TK_NotStart	440	2026-11-12 00:00	2027-02-03 00:00	2026-10-22 00:00	2027-01-13 00:00	2026-11-12 00:00	2027-02-03 00:00							-120	0	Y					CP_Start
+%E
+%R	196	1	17	1	VE_1270	UPS — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	56	2026-11-30 00:00	2026-12-09 00:00	2026-12-15 00:00	2026-12-28 00:00	2026-11-30 00:00	2026-12-09 00:00							88	0						CP_Start
+%E
+%R	197	1	17	1	VE_1550	UPS and battery system installation	TT_Task	DT_FixedDrtn	TK_NotStart	320	2026-12-09 00:00	2027-02-09 00:00	2026-12-28 00:00	2027-02-24 00:00	2026-12-09 00:00	2027-02-09 00:00							88	0						CP_Start
+%E
+%R	198	1	17	1	VE_1210	Transformers — delivery to site	TT_Task	DT_FixedDrtn	TK_NotStart	80	2027-01-27 00:00	2027-02-10 00:00	2026-11-26 00:00	2026-12-10 00:00	2027-01-27 00:00	2027-02-10 00:00							-320	0	Y					CP_Start
+%E
+%R	199	1	17	1	VE_1540	Fuel storage, bunding and 48-hour fuel system	TT_Task	DT_FixedDrtn	TK_NotStart	240	2027-02-03 00:00	2027-03-17 00:00	2027-10-13 00:00	2027-11-24 00:00	2027-02-03 00:00	2027-03-17 00:00							1408	0						CP_Start
+%E
+%R	200	1	17	1	VE_1510	Transformer installation and HV terminations	TT_Task	DT_FixedDrtn	TK_NotStart	280	2027-02-10 00:00	2027-04-02 00:00	2026-12-10 00:00	2027-02-03 00:00	2027-02-10 00:00	2027-04-02 00:00							-320	0	Y					CP_Start
+%E
+%R	201	1	17	1	VE_1700	Earthing, bonding, lightning protection and metering	TT_Task	DT_FixedDrtn	TK_NotStart	400	2027-04-02 00:00	2027-06-14 00:00	2027-09-15 00:00	2027-11-24 00:00	2027-04-02 00:00	2027-06-14 00:00							928	0						CP_Start
+%E
+%R	202	1	17	1	VE_1800	Hall 1 substation energisation and LV distribution live	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-04-02 00:00	2027-04-23 00:00	2027-02-03 00:00	2027-02-24 00:00	2027-04-02 00:00	2027-04-23 00:00							-320	0	Y					CP_Start
+%E
+%R	203	1	17	1	VE_1900	Commissioning L4 and L5 — Hall 1 (witnessed)	TT_Task	DT_FixedDrtn	TK_NotStart	160	2027-04-23 00:00	2027-05-24 00:00	2027-02-24 00:00	2027-03-24 00:00	2027-04-23 00:00	2027-05-24 00:00							-320	0	Y					CP_Start
+%E
+%R	204	1	17	1	VE_1950	SECTIONAL COMPLETION 1 — Data Hall 1 electrical	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-05-24 00:00	2027-05-24 00:00	2027-03-24 00:00	2027-03-24 00:00	2027-05-24 00:00	2027-05-24 00:00							-320	0	Y					CP_Start
+%E
+%R	205	1	17	1	VE_1801	Hall 2 substation energisation and LV distribution live	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-06-30 00:00	2027-07-21 00:00	2027-04-07 00:00	2027-04-28 00:00	2027-06-30 00:00	2027-07-21 00:00							-464	0	Y					CP_Start
+%E
+%R	206	1	17	1	VE_1901	Commissioning L4 and L5 — Hall 2 (witnessed)	TT_Task	DT_FixedDrtn	TK_NotStart	160	2027-07-21 00:00	2027-08-18 00:00	2027-04-28 00:00	2027-05-27 00:00	2027-07-21 00:00	2027-08-18 00:00							-464	0	Y					CP_Start
+%E
+%R	207	1	17	1	VE_1951	SECTIONAL COMPLETION 2 — Data Hall 2 electrical	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-08-18 00:00	2027-08-18 00:00	2027-05-27 00:00	2027-05-27 00:00	2027-08-18 00:00	2027-08-18 00:00							-464	0	Y					CP_Start
+%E
+%R	208	1	17	1	VE_1802	Hall 3 substation energisation and LV distribution live	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-11-01 00:00	2027-11-22 00:00	2027-07-09 00:00	2027-07-30 00:00	2027-11-01 00:00	2027-11-22 00:00							-648	0	Y					CP_Start
+%E
+%R	209	1	17	1	VE_1902	Commissioning L4 and L5 — Hall 3 (witnessed)	TT_Task	DT_FixedDrtn	TK_NotStart	160	2027-11-22 00:00	2027-12-21 00:00	2027-07-30 00:00	2027-08-27 00:00	2027-11-22 00:00	2027-12-21 00:00							-648	0	Y					CP_Start
+%E
+%R	210	1	17	1	VE_1952	SECTIONAL COMPLETION 3 — Data Hall 3 electrical	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-12-21 00:00	2027-12-21 00:00	2027-08-27 00:00	2027-08-27 00:00	2027-12-21 00:00	2027-12-21 00:00							-648	0	Y					CP_Start
+%E
+%R	211	1	17	1	VE_1803	Hall 4 substation energisation and LV distribution live	TT_Task	DT_FixedDrtn	TK_NotStart	120	2028-01-31 00:00	2028-02-21 00:00	2027-10-06 00:00	2027-10-27 00:00	2028-01-31 00:00	2028-02-21 00:00							-640	0	Y					CP_Start
+%E
+%R	212	1	17	1	VE_1903	Commissioning L4 and L5 — Hall 4 (witnessed)	TT_Task	DT_FixedDrtn	TK_NotStart	160	2028-02-21 00:00	2028-03-20 00:00	2027-10-27 00:00	2027-11-24 00:00	2028-02-21 00:00	2028-03-20 00:00							-640	0	Y					CP_Start
+%E
+%R	213	1	17	1	VE_1953	SECTIONAL COMPLETION 4 — Data Hall 4 electrical	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2028-03-20 00:00	2028-03-20 00:00	2027-11-24 00:00	2027-11-24 00:00	2028-03-20 00:00	2028-03-20 00:00							-640	0	Y					CP_Start
+%E
+%R	214	1	17	1	VE_1960	O&M manuals, as-builts and warranties	TT_Task	DT_FixedDrtn	TK_NotStart	96	2028-03-20 00:00	2028-04-05 00:00	2028-05-18 00:00	2028-06-05 00:00	2028-03-20 00:00	2028-04-05 00:00							344	0						CP_Start
+%E
+%R	215	1	17	1	VE_1970	Subcontract works complete	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2028-04-05 00:00	2028-04-05 00:00	2028-06-05 00:00	2028-06-05 00:00	2028-04-05 00:00	2028-04-05 00:00							344	0						CP_Start
+%E
+%R	216	1	18	1	EL_1000	Instruction to proceed	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-07-30 00:00	2026-07-30 00:00	2026-08-13 00:00	2026-08-13 00:00	2026-07-30 00:00	2026-07-30 00:00							80	0						CP_Start
+%E
+%R	217	1	18	1	EL_1010	Design development — BMS/DCIM, fire detection and suppression	TT_Task	DT_FixedDrtn	TK_NotStart	320	2026-07-30 00:00	2026-09-24 00:00	2026-08-13 00:00	2026-10-08 00:00	2026-07-30 00:00	2026-09-24 00:00							80	0						CP_Start
+%E
+%R	218	1	18	1	EL_1100	Containment and cable pulling — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-09-24 00:00	2026-11-05 00:00	2026-10-08 00:00	2026-11-19 00:00	2026-09-24 00:00	2026-11-05 00:00							80	0						CP_Start
+%E
+%R	219	1	18	1	EL_1110	Containment and cable pulling — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-09-24 00:00	2026-11-05 00:00	2026-11-17 00:00	2026-12-31 00:00	2026-09-24 00:00	2026-11-05 00:00							304	0						CP_Start
+%E
+%R	220	1	18	1	EL_1200	Fire detection installation — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-11-05 00:00	2026-12-10 00:00	2026-11-19 00:00	2026-12-28 00:00	2026-11-05 00:00	2026-12-10 00:00							80	0						CP_Start
+%E
+%R	221	1	18	1	EL_1210	Fire detection installation — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-11-05 00:00	2026-12-10 00:00	2026-12-31 00:00	2027-02-08 00:00	2026-11-05 00:00	2026-12-10 00:00							304	0						CP_Start
+%E
+%R	222	1	18	1	EL_1400	BMS/DCIM head-end and field devices	TT_Task	DT_FixedDrtn	TK_NotStart	320	2026-11-05 00:00	2027-01-05 00:00	2028-02-28 00:00	2028-04-24 00:00	2026-11-05 00:00	2027-01-05 00:00							2648	0						CP_Start
+%E
+%R	223	1	18	1	EL_1300	Gas suppression installation — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-12-10 00:00	2027-01-20 00:00	2026-12-28 00:00	2027-02-03 00:00	2026-12-10 00:00	2027-01-20 00:00							80	0						CP_Start
+%E
+%R	224	1	18	1	EL_1310	Gas suppression installation — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-12-10 00:00	2027-01-20 00:00	2027-02-08 00:00	2027-03-15 00:00	2026-12-10 00:00	2027-01-20 00:00							304	0						CP_Start
+%E
+%R	225	1	18	1	EL_1500	Security, access control and CCTV — internal	TT_Task	DT_FixedDrtn	TK_NotStart	240	2027-01-05 00:00	2027-02-17 00:00	2028-04-24 00:00	2028-06-05 00:00	2027-01-05 00:00	2027-02-17 00:00							2648	0						CP_Start
+%E
+%R	226	1	18	1	EL_1600	L3 point-to-point testing — Section 1	TT_Task	DT_FixedDrtn	TK_NotStart	160	2027-01-20 00:00	2027-02-17 00:00	2027-02-03 00:00	2027-03-03 00:00	2027-01-20 00:00	2027-02-17 00:00							80	0						CP_Start
+%E
+%R	227	1	18	1	EL_1610	L3 point-to-point testing — Sections 2-4	TT_Task	DT_FixedDrtn	TK_NotStart	200	2027-01-20 00:00	2027-02-24 00:00	2027-03-15 00:00	2027-04-21 00:00	2027-01-20 00:00	2027-02-24 00:00							304	0						CP_Start
+%E
+%R	228	1	18	1	EL_1700	L4 integrated systems testing support — Section 1	TT_Task	DT_FixedDrtn	TK_NotStart	120	2027-02-17 00:00	2027-03-10 00:00	2027-03-03 00:00	2027-03-24 00:00	2027-02-17 00:00	2027-03-10 00:00							80	0						CP_Start
+%E
+%R	229	1	18	1	EL_1710	L4 integrated systems testing support — Sections 2-4	TT_Task	DT_FixedDrtn	TK_NotStart	200	2027-02-24 00:00	2027-04-02 00:00	2027-04-21 00:00	2027-05-27 00:00	2027-02-24 00:00	2027-04-02 00:00							304	0						CP_Start
+%E
+%R	230	1	18	1	EL_1900	ELV complete — Section 1	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-03-10 00:00	2027-03-10 00:00	2027-03-24 00:00	2027-03-24 00:00	2027-03-10 00:00	2027-03-10 00:00							80	0						CP_Start
+%E
+%R	231	1	18	1	EL_1910	ELV complete — Sections 2-4	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-04-02 00:00	2027-04-02 00:00	2027-05-27 00:00	2027-05-27 00:00	2027-04-02 00:00	2027-04-02 00:00							304	0						CP_Start
+%E
+%R	232	1	19	1	FI_1000	Instruction to proceed	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2026-08-06 00:00	2026-08-06 00:00	2026-10-06 00:00	2026-10-06 00:00	2026-08-06 00:00	2026-08-06 00:00							344	0						CP_Start
+%E
+%R	233	1	19	1	FI_1010	Design development — white-space containment and finishes	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-08-06 00:00	2026-09-17 00:00	2026-10-06 00:00	2026-11-17 00:00	2026-08-06 00:00	2026-09-17 00:00							344	0						CP_Start
+%E
+%R	234	1	19	1	FI_1100	Internal blockwork and partitions — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-09-17 00:00	2026-10-29 00:00	2028-04-24 00:00	2028-06-05 00:00	2026-09-17 00:00	2026-10-29 00:00							3248	0						CP_Start
+%E
+%R	235	1	19	1	FI_1110	Internal blockwork and partitions — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	240	2026-09-17 00:00	2026-10-29 00:00	2026-11-17 00:00	2026-12-31 00:00	2026-09-17 00:00	2026-10-29 00:00							344	0						CP_Start
+%E
+%R	236	1	19	1	FI_1200	Raised access floor — Hall 1	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-09-17 00:00	2026-10-15 00:00	2027-01-07 00:00	2027-02-04 00:00	2026-09-17 00:00	2026-10-15 00:00							608	0						CP_Start
+%E
+%R	237	1	19	1	FI_1220	Raised access floor — Hall 3	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-09-17 00:00	2026-10-15 00:00	2028-04-10 00:00	2028-05-08 00:00	2026-09-17 00:00	2026-10-15 00:00							3168	0						CP_Start
+%E
+%R	238	1	19	1	FI_1210	Raised access floor — Hall 2	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-10-15 00:00	2026-11-12 00:00	2027-02-04 00:00	2027-03-04 00:00	2026-10-15 00:00	2026-11-12 00:00							608	0						CP_Start
+%E
+%R	239	1	19	1	FI_1230	Raised access floor — Hall 4	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-10-15 00:00	2026-11-12 00:00	2028-05-08 00:00	2028-06-05 00:00	2026-10-15 00:00	2026-11-12 00:00							3168	0						CP_Start
+%E
+%R	240	1	19	1	FI_1300	Hot/cold aisle containment — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-10-29 00:00	2026-12-03 00:00	2026-12-31 00:00	2027-02-08 00:00	2026-10-29 00:00	2026-12-03 00:00							344	0						CP_Start
+%E
+%R	241	1	19	1	FI_1400	Administration and NOC block fit-out	TT_Task	DT_FixedDrtn	TK_NotStart	320	2026-10-29 00:00	2026-12-28 00:00	2028-04-10 00:00	2028-06-05 00:00	2026-10-29 00:00	2026-12-28 00:00							2928	0						CP_Start
+%E
+%R	242	1	19	1	FI_1310	Hot/cold aisle containment — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	200	2026-11-12 00:00	2026-12-17 00:00	2027-03-04 00:00	2027-04-12 00:00	2026-11-12 00:00	2026-12-17 00:00							608	0						CP_Start
+%E
+%R	243	1	19	1	FI_1500	Painting, sealing and final finishes — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-12-03 00:00	2027-01-05 00:00	2027-02-08 00:00	2027-03-08 00:00	2026-12-03 00:00	2027-01-05 00:00							344	0						CP_Start
+%E
+%R	244	1	19	1	FI_1510	Painting, sealing and final finishes — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	160	2026-12-17 00:00	2027-01-20 00:00	2027-04-12 00:00	2027-05-11 00:00	2026-12-17 00:00	2027-01-20 00:00							608	0						CP_Start
+%E
+%R	245	1	19	1	FI_1600	White-space cleaning to data-centre standard — Halls 1-2	TT_Task	DT_FixedDrtn	TK_NotStart	96	2027-01-05 00:00	2027-01-22 00:00	2027-03-08 00:00	2027-03-24 00:00	2027-01-05 00:00	2027-01-22 00:00							344	0						CP_Start
+%E
+%R	246	1	19	1	FI_1610	White-space cleaning to data-centre standard — Halls 3-4	TT_Task	DT_FixedDrtn	TK_NotStart	96	2027-01-20 00:00	2027-02-05 00:00	2027-05-11 00:00	2027-05-27 00:00	2027-01-20 00:00	2027-02-05 00:00							608	0						CP_Start
+%E
+%R	247	1	19	1	FI_1900	Finishes complete — Section 1	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-01-22 00:00	2027-01-22 00:00	2027-03-24 00:00	2027-03-24 00:00	2027-01-22 00:00	2027-01-22 00:00							344	0						CP_Start
+%E
+%R	248	1	19	1	FI_1910	Finishes complete — Sections 3-4	TT_Mile	DT_FixedDrtn	TK_NotStart	0	2027-02-05 00:00	2027-02-05 00:00	2027-08-27 00:00	2027-08-27 00:00	2027-02-05 00:00	2027-02-05 00:00							1128	0						CP_Start
+%E
+%T	TASKPRED
+%F	task_pred_id	proj_id	task_id	pred_proj_id	pred_task_id	pred_type	lag_hr_cnt
+%R	1	1	58	1	50	PR_FS	0
+%E
+%R	2	1	59	1	58	PR_FS	0
+%E
+%R	3	1	59	1	2	PR_FS	0
+%E
+%R	4	1	61	1	59	PR_FS	0
+%E
+%R	5	1	60	1	58	PR_FS	0
+%E
+%R	6	1	62	1	59	PR_FS	0
+%E
+%R	7	1	63	1	60	PR_FS	0
+%E
+%R	8	1	69	1	62	PR_FS	0
+%E
+%R	9	1	65	1	61	PR_FS	0
+%E
+%R	10	1	64	1	61	PR_FS	0
+%E
+%R	11	1	66	1	64	PR_FS	0
+%E
+%R	12	1	67	1	64	PR_FS	0
+%E
+%R	13	1	71	1	63	PR_FS	0
+%E
+%R	14	1	75	1	71	PR_FS	0
+%E
+%R	15	1	70	1	68	PR_FS	0
+%E
+%R	16	1	72	1	63	PR_FS	0
+%E
+%R	17	1	68	1	64	PR_FS	0
+%E
+%R	18	1	73	1	74	PR_FS	0
+%E
+%R	19	1	74	1	70	PR_FS	0
+%E
+%R	20	1	76	1	73	PR_FS	0
+%E
+%R	21	1	77	1	51	PR_FS	0
+%E
+%R	22	1	78	1	77	PR_FS	0
+%E
+%R	23	1	79	1	78	PR_FS	0
+%E
+%R	24	1	80	1	78	PR_FS	0
+%E
+%R	25	1	81	1	78	PR_FS	0
+%E
+%R	26	1	82	1	78	PR_FS	0
+%E
+%R	27	1	83	1	79	PR_FS	0
+%E
+%R	28	1	84	1	83	PR_FS	0
+%E
+%R	29	1	87	1	82	PR_FS	0
+%E
+%R	30	1	91	1	87	PR_FS	0
+%E
+%R	31	1	86	1	81	PR_FS	0
+%E
+%R	32	1	89	1	90	PR_FS	0
+%E
+%R	33	1	85	1	83	PR_FS	0
+%E
+%R	34	1	88	1	84	PR_FS	0
+%E
+%R	35	1	92	1	85	PR_FS	0
+%E
+%R	36	1	94	1	92	PR_FS	0
+%E
+%R	37	1	90	1	86	PR_FS	0
+%E
+%R	38	1	93	1	89	PR_FS	0
+%E
+%R	39	1	95	1	94	PR_FS	0
+%E
+%R	40	1	96	1	52	PR_FS	0
+%E
+%R	41	1	97	1	96	PR_FS	0
+%E
+%R	42	1	98	1	96	PR_FS	0
+%E
+%R	43	1	99	1	97	PR_FS	0
+%E
+%R	44	1	101	1	98	PR_FS	0
+%E
+%R	45	1	100	1	97	PR_FS	0
+%E
+%R	46	1	102	1	98	PR_FS	0
+%E
+%R	47	1	103	1	100	PR_FS	0
+%E
+%R	48	1	106	1	102	PR_FS	0
+%E
+%R	49	1	105	1	101	PR_FS	0
+%E
+%R	50	1	104	1	106	PR_FS	0
+%E
+%R	51	1	107	1	104	PR_FS	0
+%E
+%R	52	1	108	1	107	PR_FS	0
+%E
+%R	53	1	232	1	53	PR_FS	0
+%E
+%R	54	1	233	1	232	PR_FS	0
+%E
+%R	55	1	234	1	233	PR_FS	0
+%E
+%R	56	1	235	1	233	PR_FS	0
+%E
+%R	57	1	236	1	233	PR_FS	0
+%E
+%R	58	1	238	1	236	PR_FS	0
+%E
+%R	59	1	237	1	233	PR_FS	0
+%E
+%R	60	1	239	1	237	PR_FS	0
+%E
+%R	61	1	240	1	235	PR_FS	0
+%E
+%R	62	1	242	1	238	PR_FS	0
+%E
+%R	63	1	241	1	235	PR_FS	0
+%E
+%R	64	1	243	1	240	PR_FS	0
+%E
+%R	65	1	244	1	242	PR_FS	0
+%E
+%R	66	1	245	1	243	PR_FS	0
+%E
+%R	67	1	246	1	244	PR_FS	0
+%E
+%R	68	1	247	1	245	PR_FS	0
+%E
+%R	69	1	248	1	246	PR_FS	0
+%E
+%R	70	1	111	1	54	PR_FS	0
+%E
+%R	71	1	112	1	111	PR_FS	0
+%E
+%R	72	1	113	1	111	PR_FS	0
+%E
+%R	73	1	114	1	112	PR_FS	0
+%E
+%R	74	1	115	1	112	PR_FS	0
+%E
+%R	75	1	116	1	112	PR_FS	0
+%E
+%R	76	1	117	1	112	PR_FS	0
+%E
+%R	77	1	124	1	114	PR_FS	0
+%E
+%R	78	1	124	1	115	PR_FS	0
+%E
+%R	79	1	124	1	116	PR_FS	0
+%E
+%R	80	1	124	1	117	PR_FS	0
+%E
+%R	81	1	109	1	1	PR_FS	0
+%E
+%R	82	1	110	1	1	PR_FS	0
+%E
+%R	83	1	125	1	124	PR_FS	0
+%E
+%R	84	1	137	1	125	PR_FS	0
+%E
+%R	85	1	126	1	124	PR_FS	0
+%E
+%R	86	1	138	1	126	PR_FS	0
+%E
+%R	87	1	127	1	124	PR_FS	0
+%E
+%R	88	1	146	1	127	PR_FS	0
+%E
+%R	89	1	118	1	111	PR_FS	0
+%E
+%R	90	1	118	1	113	PR_FS	0
+%E
+%R	91	1	119	1	118	PR_FS	0
+%E
+%R	92	1	120	1	118	PR_FS	0
+%E
+%R	93	1	121	1	118	PR_FS	0
+%E
+%R	94	1	122	1	118	PR_FS	0
+%E
+%R	95	1	123	1	119	PR_FS	0
+%E
+%R	96	1	123	1	65	PR_FS	0
+%E
+%R	97	1	128	1	123	PR_SS	320
+%E
+%R	98	1	128	1	67	PR_FS	0
+%E
+%R	99	1	129	1	123	PR_FS	0
+%E
+%R	100	1	129	1	120	PR_FS	0
+%E
+%R	101	1	130	1	123	PR_FS	0
+%E
+%R	102	1	130	1	121	PR_FS	0
+%E
+%R	103	1	131	1	123	PR_FS	0
+%E
+%R	104	1	131	1	122	PR_FS	0
+%E
+%R	105	1	132	1	128	PR_FS	0
+%E
+%R	106	1	133	1	110	PR_FS	0
+%E
+%R	107	1	133	1	123	PR_FS	0
+%E
+%R	108	1	139	1	137	PR_FS	0
+%E
+%R	109	1	139	1	92	PR_FS	0
+%E
+%R	110	1	140	1	138	PR_FS	0
+%E
+%R	111	1	140	1	128	PR_FS	0
+%E
+%R	112	1	140	1	103	PR_FS	0
+%E
+%R	113	1	141	1	138	PR_FS	0
+%E
+%R	114	1	141	1	129	PR_FS	0
+%E
+%R	115	1	141	1	140	PR_SS	80
+%E
+%R	116	1	143	1	138	PR_FS	0
+%E
+%R	117	1	143	1	130	PR_FS	0
+%E
+%R	118	1	143	1	141	PR_SS	80
+%E
+%R	119	1	143	1	106	PR_FS	0
+%E
+%R	120	1	147	1	138	PR_FS	0
+%E
+%R	121	1	147	1	131	PR_FS	0
+%E
+%R	122	1	147	1	143	PR_SS	80
+%E
+%R	123	1	149	1	146	PR_FS	0
+%E
+%R	124	1	163	1	149	PR_FS	0
+%E
+%R	125	1	163	1	16	PR_FS	0
+%E
+%R	126	1	164	1	163	PR_FS	0
+%E
+%R	127	1	134	1	133	PR_SS	80
+%E
+%R	128	1	135	1	132	PR_FS	0
+%E
+%R	129	1	136	1	135	PR_FS	0
+%E
+%R	130	1	142	1	140	PR_FS	0
+%E
+%R	131	1	142	1	136	PR_FS	0
+%E
+%R	132	1	142	1	133	PR_FS	0
+%E
+%R	133	1	144	1	142	PR_FS	0
+%E
+%R	134	1	148	1	144	PR_FS	0
+%E
+%R	135	1	152	1	148	PR_FS	0
+%E
+%R	136	1	145	1	141	PR_FS	0
+%E
+%R	137	1	145	1	133	PR_FS	0
+%E
+%R	138	1	151	1	145	PR_FS	0
+%E
+%R	139	1	155	1	151	PR_FS	0
+%E
+%R	140	1	157	1	155	PR_FS	0
+%E
+%R	141	1	150	1	143	PR_FS	0
+%E
+%R	142	1	150	1	133	PR_FS	0
+%E
+%R	143	1	154	1	150	PR_FS	0
+%E
+%R	144	1	158	1	154	PR_FS	0
+%E
+%R	145	1	159	1	158	PR_FS	0
+%E
+%R	146	1	153	1	147	PR_FS	0
+%E
+%R	147	1	153	1	133	PR_FS	0
+%E
+%R	148	1	156	1	153	PR_FS	0
+%E
+%R	149	1	160	1	156	PR_FS	0
+%E
+%R	150	1	166	1	160	PR_FS	0
+%E
+%R	151	1	166	1	164	PR_FS	0
+%E
+%R	152	1	166	1	139	PR_FS	0
+%E
+%R	153	1	166	1	134	PR_FS	0
+%E
+%R	154	1	161	1	160	PR_FS	0
+%E
+%R	155	1	162	1	161	PR_FS	0
+%E
+%R	156	1	165	1	152	PR_FS	0
+%E
+%R	157	1	165	1	157	PR_FS	0
+%E
+%R	158	1	165	1	159	PR_FS	0
+%E
+%R	159	1	165	1	166	PR_FS	0
+%E
+%R	160	1	165	1	162	PR_FS	0
+%E
+%R	161	1	170	1	55	PR_FS	0
+%E
+%R	162	1	171	1	170	PR_FS	0
+%E
+%R	163	1	172	1	171	PR_FS	0
+%E
+%R	164	1	173	1	171	PR_FS	0
+%E
+%R	165	1	174	1	171	PR_FS	0
+%E
+%R	166	1	183	1	172	PR_FS	0
+%E
+%R	167	1	183	1	173	PR_FS	0
+%E
+%R	168	1	183	1	174	PR_FS	0
+%E
+%R	169	1	167	1	1	PR_FS	0
+%E
+%R	170	1	198	1	167	PR_FS	0
+%E
+%R	171	1	168	1	1	PR_FS	0
+%E
+%R	172	1	186	1	168	PR_FS	0
+%E
+%R	173	1	169	1	1	PR_FS	0
+%E
+%R	174	1	190	1	169	PR_FS	0
+%E
+%R	175	1	175	1	171	PR_FS	0
+%E
+%R	176	1	196	1	175	PR_FS	0
+%E
+%R	177	1	176	1	171	PR_FS	0
+%E
+%R	178	1	187	1	176	PR_FS	0
+%E
+%R	179	1	181	1	173	PR_FS	0
+%E
+%R	180	1	188	1	181	PR_FS	0
+%E
+%R	181	1	177	1	171	PR_FS	0
+%E
+%R	182	1	178	1	177	PR_FS	0
+%E
+%R	183	1	200	1	198	PR_FS	0
+%E
+%R	184	1	200	1	178	PR_FS	0
+%E
+%R	185	1	189	1	186	PR_FS	0
+%E
+%R	186	1	195	1	190	PR_FS	0
+%E
+%R	187	1	199	1	195	PR_FS	0
+%E
+%R	188	1	197	1	196	PR_FS	0
+%E
+%R	189	1	197	1	187	PR_FS	0
+%E
+%R	190	1	180	1	177	PR_FS	0
+%E
+%R	191	1	179	1	177	PR_FS	0
+%E
+%R	192	1	182	1	179	PR_SS	120
+%E
+%R	193	1	184	1	182	PR_SS	120
+%E
+%R	194	1	185	1	184	PR_SS	120
+%E
+%R	195	1	191	1	188	PR_FS	0
+%E
+%R	196	1	191	1	179	PR_FS	0
+%E
+%R	197	1	192	1	188	PR_FS	0
+%E
+%R	198	1	192	1	182	PR_FS	0
+%E
+%R	199	1	193	1	188	PR_FS	0
+%E
+%R	200	1	193	1	184	PR_FS	0
+%E
+%R	201	1	194	1	188	PR_FS	0
+%E
+%R	202	1	194	1	185	PR_FS	0
+%E
+%R	203	1	201	1	200	PR_FS	0
+%E
+%R	204	1	202	1	179	PR_FS	0
+%E
+%R	205	1	202	1	191	PR_FS	0
+%E
+%R	206	1	202	1	200	PR_FS	0
+%E
+%R	207	1	202	1	14	PR_FS	0
+%E
+%R	208	1	205	1	182	PR_FS	0
+%E
+%R	209	1	205	1	192	PR_FS	0
+%E
+%R	210	1	205	1	202	PR_FS	0
+%E
+%R	211	1	205	1	15	PR_FS	0
+%E
+%R	212	1	208	1	184	PR_FS	0
+%E
+%R	213	1	208	1	193	PR_FS	0
+%E
+%R	214	1	208	1	205	PR_FS	0
+%E
+%R	215	1	208	1	17	PR_FS	0
+%E
+%R	216	1	211	1	185	PR_FS	0
+%E
+%R	217	1	211	1	194	PR_FS	0
+%E
+%R	218	1	211	1	208	PR_FS	0
+%E
+%R	219	1	211	1	18	PR_FS	0
+%E
+%R	220	1	203	1	202	PR_FS	0
+%E
+%R	221	1	203	1	195	PR_SS	240
+%E
+%R	222	1	203	1	197	PR_FS	0
+%E
+%R	223	1	204	1	203	PR_FS	0
+%E
+%R	224	1	206	1	205	PR_FS	0
+%E
+%R	225	1	206	1	204	PR_FS	0
+%E
+%R	226	1	207	1	206	PR_FS	0
+%E
+%R	227	1	209	1	208	PR_FS	0
+%E
+%R	228	1	209	1	207	PR_FS	0
+%E
+%R	229	1	210	1	209	PR_FS	0
+%E
+%R	230	1	212	1	211	PR_FS	0
+%E
+%R	231	1	212	1	210	PR_FS	0
+%E
+%R	232	1	213	1	212	PR_FS	0
+%E
+%R	233	1	213	1	199	PR_FS	0
+%E
+%R	234	1	213	1	201	PR_FS	0
+%E
+%R	235	1	214	1	212	PR_FS	0
+%E
+%R	236	1	215	1	204	PR_FS	0
+%E
+%R	237	1	215	1	207	PR_FS	0
+%E
+%R	238	1	215	1	210	PR_FS	0
+%E
+%R	239	1	215	1	213	PR_FS	0
+%E
+%R	240	1	215	1	214	PR_FS	0
+%E
+%R	241	1	216	1	56	PR_FS	0
+%E
+%R	242	1	217	1	216	PR_FS	0
+%E
+%R	243	1	218	1	217	PR_FS	0
+%E
+%R	244	1	219	1	217	PR_FS	0
+%E
+%R	245	1	220	1	218	PR_FS	0
+%E
+%R	246	1	221	1	219	PR_FS	0
+%E
+%R	247	1	223	1	220	PR_FS	0
+%E
+%R	248	1	224	1	221	PR_FS	0
+%E
+%R	249	1	222	1	219	PR_FS	0
+%E
+%R	250	1	225	1	222	PR_FS	0
+%E
+%R	251	1	226	1	223	PR_FS	0
+%E
+%R	252	1	227	1	224	PR_FS	0
+%E
+%R	253	1	228	1	226	PR_FS	0
+%E
+%R	254	1	229	1	227	PR_FS	0
+%E
+%R	255	1	230	1	228	PR_FS	0
+%E
+%R	256	1	231	1	229	PR_FS	0
+%E
+%R	257	1	19	1	57	PR_FS	0
+%E
+%R	258	1	20	1	19	PR_FS	0
+%E
+%R	259	1	20	1	2	PR_FS	0
+%E
+%R	260	1	21	1	20	PR_FS	0
+%E
+%R	261	1	22	1	21	PR_FS	0
+%E
+%R	262	1	23	1	22	PR_FS	0
+%E
+%R	263	1	24	1	23	PR_FS	0
+%E
+%R	264	1	25	1	24	PR_FS	0
+%E
+%R	265	1	27	1	25	PR_FS	0
+%E
+%R	266	1	26	1	25	PR_FS	0
+%E
+%R	267	1	28	1	26	PR_FS	0
+%E
+%R	268	1	29	1	28	PR_FS	0
+%E
+%R	269	1	2	1	1	PR_FS	256
+%E
+%R	270	1	3	1	1	PR_FS	0
+%E
+%R	271	1	6	1	3	PR_FS	0
+%E
+%R	272	1	7	1	6	PR_FS	0
+%E
+%R	273	1	10	1	7	PR_FS	0
+%E
+%R	274	1	11	1	10	PR_FS	0
+%E
+%R	275	1	12	1	11	PR_FS	0
+%E
+%R	276	1	8	1	6	PR_FS	0
+%E
+%R	277	1	9	1	6	PR_FS	0
+%E
+%R	278	1	4	1	1	PR_FS	0
+%E
+%R	279	1	5	1	4	PR_FS	0
+%E
+%R	280	1	50	1	1	PR_FS	0
+%E
+%R	281	1	57	1	1	PR_FS	0
+%E
+%R	282	1	51	1	1	PR_FS	0
+%E
+%R	283	1	54	1	1	PR_FS	0
+%E
+%R	284	1	55	1	1	PR_FS	0
+%E
+%R	285	1	52	1	1	PR_FS	0
+%E
+%R	286	1	53	1	1	PR_FS	0
+%E
+%R	287	1	56	1	1	PR_FS	0
+%E
+%R	288	1	30	1	152	PR_FS	0
+%E
+%R	289	1	30	1	204	PR_FS	0
+%E
+%R	290	1	30	1	230	PR_FS	0
+%E
+%R	291	1	30	1	247	PR_FS	0
+%E
+%R	292	1	31	1	30	PR_FS	0
+%E
+%R	293	1	32	1	31	PR_FS	0
+%E
+%R	294	1	33	1	32	PR_FS	0
+%E
+%R	295	1	34	1	157	PR_FS	0
+%E
+%R	296	1	34	1	207	PR_FS	0
+%E
+%R	297	1	34	1	231	PR_FS	0
+%E
+%R	298	1	34	1	246	PR_FS	0
+%E
+%R	299	1	34	1	30	PR_SS	80
+%E
+%R	300	1	35	1	34	PR_FS	0
+%E
+%R	301	1	36	1	35	PR_FS	0
+%E
+%R	302	1	37	1	36	PR_FS	0
+%E
+%R	303	1	38	1	159	PR_FS	0
+%E
+%R	304	1	38	1	210	PR_FS	0
+%E
+%R	305	1	38	1	231	PR_FS	0
+%E
+%R	306	1	38	1	248	PR_FS	0
+%E
+%R	307	1	38	1	34	PR_SS	80
+%E
+%R	308	1	39	1	38	PR_FS	0
+%E
+%R	309	1	40	1	39	PR_FS	0
+%E
+%R	310	1	41	1	40	PR_FS	0
+%E
+%R	311	1	42	1	166	PR_FS	0
+%E
+%R	312	1	42	1	213	PR_FS	0
+%E
+%R	313	1	42	1	231	PR_FS	0
+%E
+%R	314	1	42	1	248	PR_FS	0
+%E
+%R	315	1	42	1	38	PR_SS	80
+%E
+%R	316	1	43	1	42	PR_FS	0
+%E
+%R	317	1	44	1	43	PR_FS	0
+%E
+%R	318	1	45	1	44	PR_FS	0
+%E
+%R	319	1	46	1	45	PR_FS	0
+%E
+%R	320	1	47	1	46	PR_FS	0
+%E
+%R	321	1	48	1	47	PR_FS	0
+%E
+%R	322	1	49	1	69	PR_FS	0
+%E
+%R	323	1	49	1	66	PR_FS	0
+%E
+%R	324	1	49	1	75	PR_FS	0
+%E
+%R	325	1	49	1	72	PR_FS	0
+%E
+%R	326	1	49	1	76	PR_FS	0
+%E
+%R	327	1	49	1	80	PR_FS	0
+%E
+%R	328	1	49	1	91	PR_FS	0
+%E
+%R	329	1	49	1	88	PR_FS	0
+%E
+%R	330	1	49	1	93	PR_FS	0
+%E
+%R	331	1	49	1	95	PR_FS	0
+%E
+%R	332	1	49	1	99	PR_FS	0
+%E
+%R	333	1	49	1	105	PR_FS	0
+%E
+%R	334	1	49	1	108	PR_FS	0
+%E
+%R	335	1	49	1	234	PR_FS	0
+%E
+%R	336	1	49	1	239	PR_FS	0
+%E
+%R	337	1	49	1	241	PR_FS	0
+%E
+%R	338	1	49	1	109	PR_FS	0
+%E
+%R	339	1	49	1	165	PR_FS	0
+%E
+%R	340	1	49	1	183	PR_FS	0
+%E
+%R	341	1	49	1	189	PR_FS	0
+%E
+%R	342	1	49	1	180	PR_FS	0
+%E
+%R	343	1	49	1	215	PR_FS	0
+%E
+%R	344	1	49	1	225	PR_FS	0
+%E
+%R	345	1	49	1	27	PR_FS	0
+%E
+%R	346	1	49	1	29	PR_FS	0
+%E
+%R	347	1	49	1	12	PR_FS	0
+%E
+%R	348	1	49	1	8	PR_FS	0
+%E
+%R	349	1	49	1	9	PR_FS	0
+%E
+%R	350	1	49	1	5	PR_FS	0
+%E
+%R	351	1	49	1	13	PR_FS	0
+%E
+%R	352	1	49	1	33	PR_FS	0
+%E
+%R	353	1	49	1	37	PR_FS	0
+%E
+%R	354	1	49	1	41	PR_FS	0
+%E
+%R	355	1	49	1	48	PR_FS	0
+%E
+%T	TASKRSRC
+%F	taskrsrc_id	proj_id	task_id	rsrc_id	target_qty	target_qty_per_hr	target_cost	remain_qty	remain_qty_per_hr	act_reg_qty	act_ot_qty	act_this_per_qty	cost_qty	rsrc_type	pobs_id
+%R	1	1	58	56	0	1.0	2668.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	2	1	59	56	90	1.0	240149.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	3	1	61	56	72	1.0	192119.0	0	0.0	0	0	0	72	RT_Labor	
+%E
+%R	4	1	60	75	60	1.0	160099.0	0	0.0	0	0	0	60	RT_Labor	
+%E
+%R	5	1	62	56	240	1.0	640396.0	0	0.0	0	0	0	240	RT_Labor	
+%E
+%R	6	1	63	56	330	1.0	880545.0	0	0.0	0	0	0	330	RT_Labor	
+%E
+%R	7	1	69	56	90	1.0	240149.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	8	1	65	54	250	1.0	667079.0	0	0.0	0	0	0	250	RT_Labor	
+%E
+%R	9	1	64	69	125	1.0	333540.0	0	0.0	0	0	0	125	RT_Labor	
+%E
+%R	10	1	66	54	150	1.0	400248.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	11	1	67	54	200	1.0	533663.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	12	1	71	69	125	1.0	333540.0	0	0.0	0	0	0	125	RT_Labor	
+%E
+%R	13	1	75	54	150	1.0	400248.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	14	1	70	54	200	1.0	533663.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	15	1	72	69	90	1.0	240149.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	16	1	68	54	200	1.0	533663.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	17	1	73	52	0	1.0	80050.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	18	1	74	54	0	1.0	2668.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	19	1	76	72	20	1.0	53366.0	0	0.0	0	0	0	20	RT_Labor	
+%E
+%R	20	1	77	73	0	1.0	4158.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	21	1	78	74	140	1.0	582151.0	0	0.0	0	0	0	140	RT_Labor	
+%E
+%R	22	1	79	74	0	1.0	124747.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	23	1	80	77	0	1.0	228702.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	24	1	81	77	0	1.0	228702.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	25	1	82	76	0	1.0	249493.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	26	1	83	73	176	1.0	731847.0	0	0.0	0	0	0	176	RT_Labor	
+%E
+%R	27	1	84	73	176	1.0	731847.0	0	0.0	0	0	0	176	RT_Labor	
+%E
+%R	28	1	87	73	176	1.0	731847.0	0	0.0	0	0	0	176	RT_Labor	
+%E
+%R	29	1	91	73	176	1.0	731847.0	0	0.0	0	0	0	176	RT_Labor	
+%E
+%R	30	1	86	73	160	1.0	665315.0	0	0.0	0	0	0	160	RT_Labor	
+%E
+%R	31	1	89	73	160	1.0	665315.0	0	0.0	0	0	0	160	RT_Labor	
+%E
+%R	32	1	85	73	240	1.0	997973.0	0	0.0	0	0	0	240	RT_Labor	
+%E
+%R	33	1	88	73	144	1.0	598784.0	0	0.0	0	0	0	144	RT_Labor	
+%E
+%R	34	1	92	73	200	1.0	831644.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	35	1	94	61	120	1.0	498986.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	36	1	90	73	0	1.0	4158.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	37	1	93	73	0	1.0	4158.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	38	1	95	73	40	1.0	166329.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	39	1	96	58	0	1.0	4110.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	40	1	97	60	120	1.0	493165.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	41	1	98	60	0	1.0	226034.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	42	1	99	58	180	1.0	739748.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	43	1	101	58	180	1.0	739748.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	44	1	100	59	180	1.0	739748.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	45	1	102	59	180	1.0	739748.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	46	1	103	58	0	1.0	4110.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	47	1	106	58	0	1.0	4110.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	48	1	105	59	150	1.0	616457.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	49	1	104	59	180	1.0	739748.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	50	1	107	58	120	1.0	493165.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	51	1	108	58	0	1.0	4110.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	52	1	232	62	0	1.0	1523.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	53	1	233	64	90	1.0	137092.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	54	1	234	62	300	1.0	456973.0	0	0.0	0	0	0	300	RT_Labor	
+%E
+%R	55	1	235	62	300	1.0	456973.0	0	0.0	0	0	0	300	RT_Labor	
+%E
+%R	56	1	236	62	200	1.0	304649.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	57	1	238	62	200	1.0	304649.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	58	1	237	62	200	1.0	304649.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	59	1	239	62	200	1.0	304649.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	60	1	240	62	250	1.0	380811.0	0	0.0	0	0	0	250	RT_Labor	
+%E
+%R	61	1	242	62	250	1.0	380811.0	0	0.0	0	0	0	250	RT_Labor	
+%E
+%R	62	1	241	62	400	1.0	609298.0	0	0.0	0	0	0	400	RT_Labor	
+%E
+%R	63	1	243	62	200	1.0	304649.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	64	1	244	62	200	1.0	304649.0	0	0.0	0	0	0	200	RT_Labor	
+%E
+%R	65	1	245	62	120	1.0	182789.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	66	1	246	62	120	1.0	182789.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	67	1	247	62	0	1.0	1523.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	68	1	248	62	0	1.0	1523.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	69	1	111	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	70	1	112	70	50	1.0	236822.0	0	0.0	0	0	0	50	RT_Labor	
+%E
+%R	71	1	113	70	50	1.0	236822.0	0	0.0	0	0	0	50	RT_Labor	
+%E
+%R	72	1	114	67	112	1.0	530481.0	0	0.0	0	0	0	112	RT_Labor	
+%E
+%R	73	1	115	67	96	1.0	454698.0	0	0.0	0	0	0	96	RT_Labor	
+%E
+%R	74	1	116	67	88	1.0	416806.0	0	0.0	0	0	0	88	RT_Labor	
+%E
+%R	75	1	117	67	60	1.0	284186.0	0	0.0	0	0	0	60	RT_Labor	
+%E
+%R	76	1	124	67	48	1.0	227349.0	0	0.0	0	0	0	48	RT_Labor	
+%E
+%R	77	1	109	66	0	1.0	615737.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	78	1	110	66	0	1.0	33155.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	79	1	125	66	0	1.0	521008.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	80	1	137	66	0	1.0	33155.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	81	1	126	66	0	1.0	521008.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	82	1	138	66	0	1.0	47364.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	83	1	127	66	0	1.0	710466.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	84	1	146	66	0	1.0	33155.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	85	1	118	70	50	1.0	236822.0	0	0.0	0	0	0	50	RT_Labor	
+%E
+%R	86	1	119	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	87	1	120	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	88	1	121	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	89	1	122	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	90	1	123	70	350	1.0	1657753.0	0	0.0	0	0	0	350	RT_Labor	
+%E
+%R	91	1	128	70	150	1.0	710466.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	92	1	129	70	150	1.0	710466.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	93	1	130	70	150	1.0	710466.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	94	1	131	70	150	1.0	710466.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	95	1	132	70	125	1.0	592055.0	0	0.0	0	0	0	125	RT_Labor	
+%E
+%R	96	1	133	70	100	1.0	473644.0	0	0.0	0	0	0	100	RT_Labor	
+%E
+%R	97	1	139	68	360	1.0	1705117.0	0	0.0	0	0	0	360	RT_Labor	
+%E
+%R	98	1	140	68	108	1.0	511535.0	0	0.0	0	0	0	108	RT_Labor	
+%E
+%R	99	1	141	68	108	1.0	511535.0	0	0.0	0	0	0	108	RT_Labor	
+%E
+%R	100	1	143	68	108	1.0	511535.0	0	0.0	0	0	0	108	RT_Labor	
+%E
+%R	101	1	147	68	108	1.0	511535.0	0	0.0	0	0	0	108	RT_Labor	
+%E
+%R	102	1	149	70	150	1.0	710466.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	103	1	163	70	60	1.0	284186.0	0	0.0	0	0	0	60	RT_Labor	
+%E
+%R	104	1	164	66	0	1.0	23682.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	105	1	134	68	210	1.0	994652.0	0	0.0	0	0	0	210	RT_Labor	
+%E
+%R	106	1	135	70	60	1.0	284186.0	0	0.0	0	0	0	60	RT_Labor	
+%E
+%R	107	1	136	70	75	1.0	355233.0	0	0.0	0	0	0	75	RT_Labor	
+%E
+%R	108	1	142	53	64	1.0	303132.0	0	0.0	0	0	0	64	RT_Labor	
+%E
+%R	109	1	144	53	64	1.0	303132.0	0	0.0	0	0	0	64	RT_Labor	
+%E
+%R	110	1	148	53	40	1.0	189457.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	111	1	152	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	112	1	145	53	80	1.0	378915.0	0	0.0	0	0	0	80	RT_Labor	
+%E
+%R	113	1	151	53	120	1.0	568372.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	114	1	155	53	64	1.0	303132.0	0	0.0	0	0	0	64	RT_Labor	
+%E
+%R	115	1	157	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	116	1	150	53	80	1.0	378915.0	0	0.0	0	0	0	80	RT_Labor	
+%E
+%R	117	1	154	53	120	1.0	568372.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	118	1	158	53	64	1.0	303132.0	0	0.0	0	0	0	64	RT_Labor	
+%E
+%R	119	1	159	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	120	1	153	53	80	1.0	378915.0	0	0.0	0	0	0	80	RT_Labor	
+%E
+%R	121	1	156	53	120	1.0	568372.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	122	1	160	53	64	1.0	303132.0	0	0.0	0	0	0	64	RT_Labor	
+%E
+%R	123	1	166	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	124	1	161	70	60	1.0	284186.0	0	0.0	0	0	0	60	RT_Labor	
+%E
+%R	125	1	162	70	40	1.0	189457.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	126	1	165	70	0	1.0	4736.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	127	1	170	57	0	1.0	4697.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	128	1	171	57	60	1.0	281803.0	0	0.0	0	0	0	60	RT_Labor	
+%E
+%R	129	1	172	67	120	1.0	563606.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	130	1	173	67	100	1.0	469671.0	0	0.0	0	0	0	100	RT_Labor	
+%E
+%R	131	1	174	67	100	1.0	469671.0	0	0.0	0	0	0	100	RT_Labor	
+%E
+%R	132	1	183	67	48	1.0	225442.0	0	0.0	0	0	0	48	RT_Labor	
+%E
+%R	133	1	167	67	0	1.0	1221145.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	134	1	198	66	0	1.0	46967.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	135	1	168	66	0	1.0	892375.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	136	1	186	66	0	1.0	32877.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	137	1	169	66	0	1.0	939343.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	138	1	190	66	0	1.0	46967.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	139	1	175	66	0	1.0	704507.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	140	1	196	66	0	1.0	32877.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	141	1	176	66	0	1.0	563606.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	142	1	187	66	0	1.0	23484.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	143	1	181	66	0	1.0	469671.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	144	1	188	66	0	1.0	32877.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	145	1	177	57	60	1.0	281803.0	0	0.0	0	0	0	60	RT_Labor	
+%E
+%R	146	1	178	57	270	1.0	1268113.0	0	0.0	0	0	0	270	RT_Labor	
+%E
+%R	147	1	200	57	210	1.0	986310.0	0	0.0	0	0	0	210	RT_Labor	
+%E
+%R	148	1	189	57	180	1.0	845408.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	149	1	195	57	330	1.0	1549915.0	0	0.0	0	0	0	330	RT_Labor	
+%E
+%R	150	1	199	57	180	1.0	845408.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	151	1	197	57	240	1.0	1127211.0	0	0.0	0	0	0	240	RT_Labor	
+%E
+%R	152	1	180	57	240	1.0	1127211.0	0	0.0	0	0	0	240	RT_Labor	
+%E
+%R	153	1	179	57	150	1.0	704507.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	154	1	182	57	150	1.0	704507.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	155	1	184	57	150	1.0	704507.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	156	1	185	57	150	1.0	704507.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	157	1	191	57	180	1.0	845408.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	158	1	192	57	180	1.0	845408.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	159	1	193	57	180	1.0	845408.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	160	1	194	57	180	1.0	845408.0	0	0.0	0	0	0	180	RT_Labor	
+%E
+%R	161	1	201	57	300	1.0	1409014.0	0	0.0	0	0	0	300	RT_Labor	
+%E
+%R	162	1	202	57	90	1.0	422704.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	163	1	205	57	90	1.0	422704.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	164	1	208	57	90	1.0	422704.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	165	1	211	57	90	1.0	422704.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	166	1	203	53	160	1.0	751474.0	0	0.0	0	0	0	160	RT_Labor	
+%E
+%R	167	1	204	57	0	1.0	4697.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	168	1	206	53	160	1.0	751474.0	0	0.0	0	0	0	160	RT_Labor	
+%E
+%R	169	1	207	57	0	1.0	4697.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	170	1	209	53	160	1.0	751474.0	0	0.0	0	0	0	160	RT_Labor	
+%E
+%R	171	1	210	57	0	1.0	4697.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	172	1	212	53	160	1.0	751474.0	0	0.0	0	0	0	160	RT_Labor	
+%E
+%R	173	1	213	57	0	1.0	4697.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	174	1	214	57	72	1.0	338163.0	0	0.0	0	0	0	72	RT_Labor	
+%E
+%R	175	1	215	57	0	1.0	4697.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	176	1	216	63	0	1.0	3534.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	177	1	217	67	120	1.0	424089.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	178	1	218	63	120	1.0	424089.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	179	1	219	63	120	1.0	424089.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	180	1	220	61	100	1.0	353408.0	0	0.0	0	0	0	100	RT_Labor	
+%E
+%R	181	1	221	61	100	1.0	353408.0	0	0.0	0	0	0	100	RT_Labor	
+%E
+%R	182	1	223	61	0	1.0	88352.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	183	1	224	61	100	1.0	353408.0	0	0.0	0	0	0	100	RT_Labor	
+%E
+%R	184	1	222	51	120	1.0	424089.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	185	1	225	63	120	1.0	424089.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	186	1	226	53	120	1.0	424089.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	187	1	227	53	150	1.0	530111.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	188	1	228	53	90	1.0	318067.0	0	0.0	0	0	0	90	RT_Labor	
+%E
+%R	189	1	229	53	150	1.0	530111.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	190	1	230	63	0	1.0	3534.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	191	1	231	63	0	1.0	3534.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	192	1	19	52	0	1.0	3652.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	193	1	20	52	50	1.0	182609.0	0	0.0	0	0	0	50	RT_Labor	
+%E
+%R	194	1	21	52	150	1.0	547826.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	195	1	22	52	150	1.0	547826.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	196	1	23	52	0	1.0	127826.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	197	1	24	52	150	1.0	547826.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	198	1	25	52	125	1.0	456522.0	0	0.0	0	0	0	125	RT_Labor	
+%E
+%R	199	1	27	52	100	1.0	365217.0	0	0.0	0	0	0	100	RT_Labor	
+%E
+%R	200	1	26	52	150	1.0	547826.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	201	1	28	65	100	1.0	365217.0	0	0.0	0	0	0	100	RT_Labor	
+%E
+%R	202	1	29	52	0	1.0	3652.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	203	1	1	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	204	1	2	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	205	1	3	55	150	1.0	252778.0	0	0.0	0	0	0	150	RT_Labor	
+%E
+%R	206	1	6	55	84	1.0	141556.0	0	0.0	0	0	0	84	RT_Labor	
+%E
+%R	207	1	7	55	360	1.0	606667.0	0	0.0	0	0	0	360	RT_Labor	
+%E
+%R	208	1	10	55	126	1.0	212333.0	0	0.0	0	0	0	126	RT_Labor	
+%E
+%R	209	1	11	55	270	1.0	455000.0	0	0.0	0	0	0	270	RT_Labor	
+%E
+%R	210	1	12	55	84	1.0	141556.0	0	0.0	0	0	0	84	RT_Labor	
+%E
+%R	211	1	8	55	330	1.0	556111.0	0	0.0	0	0	0	330	RT_Labor	
+%E
+%R	212	1	9	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	213	1	4	72	80	1.0	134815.0	0	0.0	0	0	0	80	RT_Labor	
+%E
+%R	214	1	5	72	60	1.0	101111.0	0	0.0	0	0	0	60	RT_Labor	
+%E
+%R	215	1	50	71	96	1.0	161778.0	0	0.0	0	0	0	96	RT_Labor	
+%E
+%R	216	1	57	71	126	1.0	212333.0	0	0.0	0	0	0	126	RT_Labor	
+%E
+%R	217	1	51	71	171	1.0	288167.0	0	0.0	0	0	0	171	RT_Labor	
+%E
+%R	218	1	54	71	186	1.0	313444.0	0	0.0	0	0	0	186	RT_Labor	
+%E
+%R	219	1	55	71	186	1.0	313444.0	0	0.0	0	0	0	186	RT_Labor	
+%E
+%R	220	1	52	71	420	1.0	707778.0	0	0.0	0	0	0	420	RT_Labor	
+%E
+%R	221	1	53	71	420	1.0	707778.0	0	0.0	0	0	0	420	RT_Labor	
+%E
+%R	222	1	56	71	405	1.0	682500.0	0	0.0	0	0	0	405	RT_Labor	
+%E
+%R	223	1	14	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	224	1	15	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	225	1	17	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	226	1	18	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	227	1	16	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	228	1	13	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	229	1	30	53	120	1.0	299352.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	230	1	31	53	40	1.0	99784.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	231	1	32	53	40	1.0	99784.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	232	1	33	72	0	1.0	2495.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	233	1	34	53	120	1.0	299352.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	234	1	35	53	40	1.0	99784.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	235	1	36	53	40	1.0	99784.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	236	1	37	72	0	1.0	2495.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	237	1	38	53	120	1.0	299352.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	238	1	39	53	40	1.0	99784.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	239	1	40	53	40	1.0	99784.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	240	1	41	72	0	1.0	2495.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	241	1	42	53	120	1.0	299352.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	242	1	43	53	40	1.0	99784.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	243	1	44	53	40	1.0	99784.0	0	0.0	0	0	0	40	RT_Labor	
+%E
+%R	244	1	45	72	0	1.0	2495.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	245	1	46	72	0	1.0	2495.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	246	1	47	72	120	1.0	299352.0	0	0.0	0	0	0	120	RT_Labor	
+%E
+%R	247	1	48	72	0	1.0	2495.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%R	248	1	49	72	0	1.0	1685.0	0	0.0	0	0	0	0	RT_Labor	
+%E
+%T	UDFTYPE
+%F	udf_type_id	table_name	udf_type_name	udf_type_label	logical_data_type	source_table_name	udf_type	super_flag	indicator_var_name	udf_type_label2
+%R	1	TASK	Contract Date	Contract Date	FT_DATE		UDFTYPE_DATE	N		Contract Date
+%E
+%T	UDFVALUE
+%F	udf_type_id	fk_id	proj_id	udf_date	udf_text	udf_number
+%R	1	2	1	2026-03-02 00:00
+%E
+%R	1	33	1	2027-05-02 00:00
+%E
+%R	1	37	1	2027-07-02 00:00
+%E
+%R	1	41	1	2027-10-02 00:00
+%E
+%R	1	45	1	2028-01-02 00:00
+%E
+%R	1	46	1	2028-01-02 00:00
+%E

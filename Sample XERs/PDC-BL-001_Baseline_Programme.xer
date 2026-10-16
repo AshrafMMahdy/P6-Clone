@@ -1,0 +1,1489 @@
+ERMHDR	19.12	2026-09-16 05:35	Project	NordBuild	NordBuild Oy	dbxDatabaseNoName	Project Management	EUR
+%T	CURRTYPE
+%F	curr_id	decimal_digit_cnt	curr_symbol	decimal_symbol	digit_group_symbol	pos_curr_fmt_type	neg_curr_fmt_type	curr_type	curr_short_name	group_digit_cnt	base_exch_rate
+%R	1	2	EUR	.	,	#1.1	(#1.1)	Euro	EUR	3	1.0
+%T	OBS
+%F	obs_id	parent_obs_id	guid	seq_num	obs_name	obs_descr
+%R	1			1	NordBuild Oy	Planning
+%T	PROJECT
+%F	proj_id	fy_start_month_num	rsrc_self_add_flag	allow_complete_flag	rsrc_multi_assign_flag	checkout_flag	project_flag	step_complete_flag	cost_qty_recalc_flag	batch_sum_flag	name_sep_char	def_complete_pct_type	proj_short_name	acct_id	orig_proj_id	source_proj_id	base_type_id	clndr_id	sum_base_proj_id	task_code_base	task_code_step	priority_num	wbs_max_sum_level	risk_level	strgy_priority_num	last_checksum	critical_drtn_hr_cnt	def_cost_per_qty	last_recalc_date	plan_start_date	plan_end_date	scd_end_date	add_date	last_tasksum_date	fcst_start_date	def_duration_type	task_code_prefix	guid	def_qty_type	add_by_name	web_local_root_path	proj_url	def_rate_type	add_act_remain_flag	act_this_per_link_flag	def_task_type	act_pct_link_flag	critical_path_type	task_code_prefix_flag	def_rollup_dates_flag	use_project_baseline_flag	rem_target_link_flag	reset_planned_flag	allow_neg_act_flag	sum_assign_level	last_fin_dates_id	fintmpl_id	last_baseline_update_date	cr_external_key	apply_actuals_date	location_id	loaded_scope_level	export_flag	new_fin_dates_id	baselines_to_export	baseline_names_to_export	next_data_date	close_period_flag	sum_refresh_date	trsrcsum_loaded
+%R	PDC1	1	N	Y	N	N	Y	N	N	N	.	CP_Drtn	PDC1					SITE		1000	10	10	4	0	100	0	0	0.0	2026-03-02 00:00	2025-12-12 00:00	2028-03-24 00:00	2028-03-24 00:00	2026-09-16 00:00			DT_FixedDrtn	A		QT_Hour	NordBuild			COST_PER_QTY	N	N	TT_Task	N	CT_TotFloat	Y	N	N	N	N	N	SL_Taskrsrc							7	Y					N		N
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	last_chng_date	clndr_type	day_hr_cnt	week_hr_cnt	month_hr_cnt	year_hr_cnt	rsrc_private	clndr_data
+%R	SITE	Y	NordBuild Site 5d (Fin hols + wk28-30 shutdown)				CA_Base	8	40	172	2000	N	(0||CalendarData()( (0||DaysOfWeek()((0||1()())(0||2()(0||0(s|08:00|f|16:00)))(0||3()(0||0(s|08:00|f|16:00)))(0||4()(0||0(s|08:00|f|16:00)))(0||5()(0||0(s|08:00|f|16:00)))(0||6()(0||0(s|08:00|f|16:00)))(0||7()()))) (0||Exceptions()((0||0(d|46023)())(0||0(d|46028)())(0||0(d|46115)())(0||0(d|46118)())(0||0(d|46143)())(0||0(d|46156)())(0||0(d|46192)())(0||0(d|46380)())(0||0(d|46381)())(0||0(d|46388)())(0||0(d|46393)())(0||0(d|46472)())(0||0(d|46475)())(0||0(d|46513)())(0||0(d|46563)())(0||0(d|46727)())(0||0(d|46745)())(0||0(d|46758)())(0||0(d|46209)())(0||0(d|46210)())(0||0(d|46211)())(0||0(d|46212)())(0||0(d|46213)())(0||0(d|46216)())(0||0(d|46217)())(0||0(d|46218)())(0||0(d|46219)())(0||0(d|46220)())(0||0(d|46223)())(0||0(d|46224)())(0||0(d|46225)())(0||0(d|46226)())(0||0(d|46227)())(0||0(d|46580)())(0||0(d|46581)())(0||0(d|46582)())(0||0(d|46583)())(0||0(d|46584)())(0||0(d|46587)())(0||0(d|46588)())(0||0(d|46589)())(0||0(d|46590)())(0||0(d|46591)())(0||0(d|46594)())(0||0(d|46595)())(0||0(d|46596)())(0||0(d|46597)())(0||0(d|46598)())(0||0(d|46944)())(0||0(d|46945)())(0||0(d|46946)())(0||0(d|46947)())(0||0(d|46948)())(0||0(d|46951)())(0||0(d|46952)())(0||0(d|46953)())(0||0(d|46954)())(0||0(d|46955)())(0||0(d|46958)())(0||0(d|46959)())(0||0(d|46960)())(0||0(d|46961)())(0||0(d|46962)()))) ))
+%R	OFF	N	Design / Procurement / Authority 5d (Fin hols)				CA_Base	8	40	172	2000	N	(0||CalendarData()( (0||DaysOfWeek()((0||1()())(0||2()(0||0(s|08:00|f|16:00)))(0||3()(0||0(s|08:00|f|16:00)))(0||4()(0||0(s|08:00|f|16:00)))(0||5()(0||0(s|08:00|f|16:00)))(0||6()(0||0(s|08:00|f|16:00)))(0||7()()))) (0||Exceptions()((0||0(d|46023)())(0||0(d|46028)())(0||0(d|46115)())(0||0(d|46118)())(0||0(d|46143)())(0||0(d|46156)())(0||0(d|46192)())(0||0(d|46380)())(0||0(d|46381)())(0||0(d|46388)())(0||0(d|46393)())(0||0(d|46472)())(0||0(d|46475)())(0||0(d|46513)())(0||0(d|46563)())(0||0(d|46727)())(0||0(d|46745)())(0||0(d|46758)()))) ))
+%R	CAL7	N	7-day elapsed (manufacture & third party)				CA_Base	8	40	172	2000	N	(0||CalendarData()( (0||DaysOfWeek()((0||1()(0||0(s|08:00|f|16:00)))(0||2()(0||0(s|08:00|f|16:00)))(0||3()(0||0(s|08:00|f|16:00)))(0||4()(0||0(s|08:00|f|16:00)))(0||5()(0||0(s|08:00|f|16:00)))(0||6()(0||0(s|08:00|f|16:00)))(0||7()(0||0(s|08:00|f|16:00))))) (0||Exceptions()()) ))
+%R	CX	N	Commissioning & handover 5d (Fin hols, works through wk28-30)				CA_Base	8	40	172	2000	N	(0||CalendarData()( (0||DaysOfWeek()((0||1()())(0||2()(0||0(s|08:00|f|16:00)))(0||3()(0||0(s|08:00|f|16:00)))(0||4()(0||0(s|08:00|f|16:00)))(0||5()(0||0(s|08:00|f|16:00)))(0||6()(0||0(s|08:00|f|16:00)))(0||7()()))) (0||Exceptions()((0||0(d|46023)())(0||0(d|46028)())(0||0(d|46115)())(0||0(d|46118)())(0||0(d|46143)())(0||0(d|46156)())(0||0(d|46192)())(0||0(d|46380)())(0||0(d|46381)())(0||0(d|46388)())(0||0(d|46393)())(0||0(d|46472)())(0||0(d|46475)())(0||0(d|46513)())(0||0(d|46563)())(0||0(d|46727)())(0||0(d|46745)())(0||0(d|46758)()))) ))
+%T	PROJWBS
+%F	wbs_id	proj_id	obs_id	seq_num	wbs_short_name	wbs_name	proj_node_flag	sum_data_flag	parent_wbs_id	status_code	est_wt	ev_user_pct	ev_etc_user_value	guid
+%R	PDC	PDC1	1	10	PDC	Polaris DC-1 - Aviapolis Data Campus Phase 1	Y	Y		WBS_Active	1.0	0.06	0.88	
+%R	PDC.1	PDC1	1	20	PDC.1	Project Management & Preliminaries	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.2	PDC1	1	30	PDC.2	Design & Engineering	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.3	PDC1	1	40	PDC.3	Statutory Approvals & Permits	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.4	PDC1	1	50	PDC.4	Procurement & Manufacture	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.5	PDC1	1	60	PDC.5	Enabling Works & Site Establishment	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.6	PDC1	1	70	PDC.6	Section 1 - Hall 1 & Shared Infrastructure	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.6.1	PDC1	1	80	PDC.6.1	S1 Substructure	N	Y	PDC.6	WBS_Active	1.0	0.06	0.88	
+%R	PDC.6.2	PDC1	1	90	PDC.6.2	S1 Superstructure & Envelope	N	Y	PDC.6	WBS_Active	1.0	0.06	0.88	
+%R	PDC.6.3	PDC1	1	100	PDC.6.3	S1 Primary Substation & HV	N	Y	PDC.6	WBS_Active	1.0	0.06	0.88	
+%R	PDC.6.4	PDC1	1	110	PDC.6.4	S1 Generator Compound	N	Y	PDC.6	WBS_Active	1.0	0.06	0.88	
+%R	PDC.6.5	PDC1	1	120	PDC.6.5	S1 Shared MEP Spine & Cooling Yard	N	Y	PDC.6	WBS_Active	1.0	0.06	0.88	
+%R	PDC.6.6	PDC1	1	130	PDC.6.6	S1 Hall 1 Fit-out	N	Y	PDC.6	WBS_Active	1.0	0.06	0.88	
+%R	PDC.6.7	PDC1	1	140	PDC.6.7	S1 Commissioning & Handover	N	Y	PDC.6	WBS_Active	1.0	0.06	0.88	
+%R	PDC.7	PDC1	1	150	PDC.7	Section 2 - Hall 2	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.7.1	PDC1	1	160	PDC.7.1	S2 Substructure & Structure	N	Y	PDC.7	WBS_Active	1.0	0.06	0.88	
+%R	PDC.7.2	PDC1	1	170	PDC.7.2	S2 Envelope	N	Y	PDC.7	WBS_Active	1.0	0.06	0.88	
+%R	PDC.7.3	PDC1	1	180	PDC.7.3	S2 Hall 2 MEP & Fit-out	N	Y	PDC.7	WBS_Active	1.0	0.06	0.88	
+%R	PDC.7.4	PDC1	1	190	PDC.7.4	S2 Commissioning & Handover	N	Y	PDC.7	WBS_Active	1.0	0.06	0.88	
+%R	PDC.8	PDC1	1	200	PDC.8	Section 3 - Hall 3	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.8.1	PDC1	1	210	PDC.8.1	S3 Substructure & Structure	N	Y	PDC.8	WBS_Active	1.0	0.06	0.88	
+%R	PDC.8.2	PDC1	1	220	PDC.8.2	S3 Envelope	N	Y	PDC.8	WBS_Active	1.0	0.06	0.88	
+%R	PDC.8.3	PDC1	1	230	PDC.8.3	S3 Hall 3 MEP & Fit-out	N	Y	PDC.8	WBS_Active	1.0	0.06	0.88	
+%R	PDC.8.4	PDC1	1	240	PDC.8.4	S3 Commissioning & Handover	N	Y	PDC.8	WBS_Active	1.0	0.06	0.88	
+%R	PDC.9	PDC1	1	250	PDC.9	Section 4 - Hall 4, Admin/NOC & External Works	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.9.1	PDC1	1	260	PDC.9.1	S4 Substructure & Structure	N	Y	PDC.9	WBS_Active	1.0	0.06	0.88	
+%R	PDC.9.2	PDC1	1	270	PDC.9.2	S4 Envelope	N	Y	PDC.9	WBS_Active	1.0	0.06	0.88	
+%R	PDC.9.3	PDC1	1	280	PDC.9.3	S4 Hall 4 MEP & Fit-out	N	Y	PDC.9	WBS_Active	1.0	0.06	0.88	
+%R	PDC.9.4	PDC1	1	290	PDC.9.4	S4 Administration & NOC Block	N	Y	PDC.9	WBS_Active	1.0	0.06	0.88	
+%R	PDC.9.5	PDC1	1	300	PDC.9.5	S4 External Works, Security & Landscaping	N	Y	PDC.9	WBS_Active	1.0	0.06	0.88	
+%R	PDC.9.6	PDC1	1	310	PDC.9.6	S4 Commissioning & Handover	N	Y	PDC.9	WBS_Active	1.0	0.06	0.88	
+%R	PDC.10	PDC1	1	320	PDC.10	District Heating / Waste-Heat Interface	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%R	PDC.11	PDC1	1	330	PDC.11	Contract Milestones	N	Y	PDC	WBS_Active	1.0	0.06	0.88	
+%T	RSRC
+%F	rsrc_id	parent_rsrc_id	clndr_id	role_id	shift_id	user_id	rsrc_seq_num	email_addr	employee_code	office_phone	other_phone	rsrc_name	rsrc_short_name	rsrc_title_name	def_qty_per_hr	cost_qty_type	ot_factor	active_flag	auto_compute_act_flag	def_cost_qty_link_flag	ot_flag	curr_id	unit_id	rsrc_type	location_id	rsrc_notes	load_tasks_flag	level_flag	last_checksum
+%R	DES		SITE				10					Design & Engineering Team	DES	Design & Engineering Team	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001/004 design groups combined	N	Y	
+%R	PM		SITE				20					Project & Site Management (incl. statutory supervisors)	PM	Project & Site Management (incl. statutory supervisors)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-004 Site Mgmt + Winter Safety Officer	N	Y	
+%R	PROC		SITE				30					Procurement & Expediting	PROC	Procurement & Expediting	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 Procurement 4 pkg/month	N	Y	
+%R	QAQC		SITE				40					QA/QC & Factory Inspection	QAQC	QA/QC & Factory Inspection	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-004 TPI + Weld Inspector	N	Y	
+%R	SEST		SITE				50					Site Establishment Crew	SEST	Site Establishment Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 500 m2/day	N	Y	
+%R	EARTH		SITE				60					Earthworks Crew (excavator gangs)	EARTH	Earthworks Crew (excavator gangs)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001/004 250 m3/day/crew	N	Y	
+%R	BLAST		SITE				70					Drill & Blast Crew (licensed)	BLAST	Drill & Blast Crew (licensed)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PDC-BID-TP-001-1: 2 blasts/week	N	Y	
+%R	PILE		SITE				80					Piling / Rock-Socket Crew	PILE	Piling / Rock-Socket Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001/004 3 piles/day/crew	N	Y	
+%R	CONC		SITE				90					Concrete Crew (form/rebar/pour)	CONC	Concrete Crew (form/rebar/pour)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 25 m3/day; PRJ-004 winter 22 m3/day	N	Y	
+%R	CIVIL		SITE				100					Civil Crew (trenching, drainage, roads)	CIVIL	Civil Crew (trenching, drainage, roads)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 30 lm/day/crew	N	Y	
+%R	STEEL		SITE				110					Structural Steel Erection Crew	STEEL	Structural Steel Erection Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-004 8 t/day winter, 10 t/day summer	N	Y	
+%R	PCAST		SITE				120					Precast Erection Crew	PCAST	Precast Erection Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 Steel & Precast Crew, de-rated for 21 m2 wall panels	N	Y	
+%R	ENV		SITE				130					Envelope / Cladding Crew	ENV	Envelope / Cladding Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001/004 80 m2/day/crew	N	Y	
+%R	ROOF		SITE				140					Roofing & Waterproofing Crew	ROOF	Roofing & Waterproofing Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 150 m2/day	N	Y	
+%R	FIREP		SITE				150					Passive Fire Protection Crew	FIREP	Passive Fire Protection Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-004 intumescent 50 m2/day/crew	N	Y	
+%R	MECH		SITE				160					Mechanical Crew (plant, ductwork)	MECH	Mechanical Crew (plant, ductwork)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 60 m2 duct/day/crew	N	Y	
+%R	PIPE		SITE				170					Pipefitting Crew (chilled water)	PIPE	Pipefitting Crew (chilled water)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 20 lm/day/crew	N	Y	
+%R	INSUL		SITE				180					Pipe & Duct Insulation Crew	INSUL	Pipe & Duct Insulation Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 30 lm/day	N	Y	
+%R	ELEC		SITE				190					Electrical Crew (LV/containment/cabling)	ELEC	Electrical Crew (LV/containment/cabling)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 40 points/day/crew	N	Y	
+%R	HV		SITE				200					HV / Specialist Electrical Crew	HV	HV / Specialist Electrical Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 Transformer & MV switchgear analogue	N	Y	
+%R	GEN		SITE				210					Generator & Fuel Systems Crew	GEN	Generator & Fuel Systems Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 Emergency generator & UPS analogue	N	Y	
+%R	ELV		SITE				220					ELV / Security / Data Crew	ELV	ELV / Security / Data Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 ICT 25 points/day	N	Y	
+%R	BMS		SITE				230					BMS / DCIM Crew	BMS	BMS / DCIM Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 2 controllers/day; PRJ-003 1.5/day	N	Y	
+%R	FIRE		SITE				240					Fire Detection & Suppression Crew	FIRE	Fire Detection & Suppression Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 30 heads/day/crew	N	Y	
+%R	FIT		SITE				250					Fit-Out Crew (partitions, finishes)	FIT	Fit-Out Crew (partitions, finishes)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 80 m2/day/crew	N	Y	
+%R	LAND		SITE				260					Landscaping Crew	LAND	Landscaping Crew	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 100 m2/day	N	Y	
+%R	CX		SITE				270					Commissioning Team (Mech + Elec + DC specialist)	CX	Commissioning Team (Mech + Elec + DC specialist)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		PRJ-001 0.5 systems/day, uplifted for DC scope	N	Y	
+%R	TP		SITE				280					Third Party (DNO / Offtaker / Authority)	TP	Third Party (DNO / Offtaker / Authority)	1.0	QT_Hour		Y	Y	Y	N	1		RT_Labor		Not a NordBuild resource - shown for interface visibility	N	Y	
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	status_code	complete_pct_type	task_type	duration_type	review_type	task_code	task_name	target_drtn_hr_cnt	remain_drtn_hr_cnt	act_work_qty	act_equip_qty	early_start_date	early_end_date	target_start_date	target_end_date	late_start_date	late_end_date	total_float_hr_cnt	free_float_hr_cnt	cstr_type	cstr_date	cstr_type2	cstr_date2	driving_path_flag	float_path	seq_num
+%R	1	PDC1	PDC.11	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS0000	M: Base Date (12 Dec 2025) - advance procurement release	0	0	0	0	2025-12-12 00:00	2025-12-12 16:00	2025-12-12 00:00	2025-12-12 16:00	2025-10-31 00:00	2025-10-31 16:00	-240	-240	CS_MSO	2025-12-12 00:00			Y	0	10
+%R	2	PDC1	PDC.11	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS0010	M: Commencement Date (2 Mar 2026)	0	0	0	0	2026-03-02 00:00	2026-03-02 16:00	2026-03-02 00:00	2026-03-02 16:00	2025-12-08 00:00	2025-12-08 16:00	-464	-464	CS_MSO	2026-03-02 00:00			Y	0	20
+%R	3	PDC1	PDC.1	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PM1000	Contract execution, bonds, insurances and PI cover	120	120	0	0	2026-03-03 00:00	2026-03-23 16:00	2026-03-03 00:00	2026-03-23 16:00	2026-02-20 00:00	2026-03-12 16:00	-56	-56					Y	0	30
+%R	4	PDC1	PDC.1	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PM1010	Mobilise project and site management team	80	80	0	0	2026-03-03 00:00	2026-03-16 16:00	2026-03-03 00:00	2026-03-16 16:00	2025-12-24 00:00	2026-01-08 16:00	-376	-376					Y	0	40
+%R	5	PDC1	PDC.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PM1020	Site management, supervision and QA/QC - S1 period	2320	2320	0	0	2026-03-17 00:00	2027-06-02 16:00	2026-03-17 00:00	2027-06-02 16:00	2026-01-09 00:00	2027-03-24 16:00	-376	-376					Y	0	50
+%R	6	PDC1	PDC.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PM1030	Site management, supervision and QA/QC - S2 to S4 period	1440	1440	0	0	2027-06-03 00:00	2028-03-07 16:00	2027-06-03 00:00	2028-03-07 16:00	2027-03-25 00:00	2027-12-30 16:00	-376	-376					Y	0	60
+%R	7	PDC1	PDC.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PM1040	Environmental controls, vibration and noise monitoring	3200	3200	0	0	2026-03-17 00:00	2027-11-25 16:00	2026-03-17 00:00	2027-11-25 16:00	2026-03-20 00:00	2027-11-30 16:00	24	24					N	0	70
+%R	8	PDC1	PDC.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PM1050	Site security during construction	3680	3680	0	0	2026-03-17 00:00	2028-02-22 16:00	2026-03-17 00:00	2028-02-22 16:00	2026-01-23 00:00	2027-12-30 16:00	-296	-296					Y	0	80
+%R	9	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2000	Mobilise design team and confirm Basis of Design (PDC-BOD-001 already issued)	40	40	0	0	2026-03-03 00:00	2026-03-09 16:00	2026-03-03 00:00	2026-03-09 16:00	2025-12-09 00:00	2025-12-15 16:00	-464	-464					Y	0	90
+%R	10	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2010	S1 Concept - architectural and structural (formalise BOD / permit drawings)	120	120	0	0	2026-03-10 00:00	2026-03-30 16:00	2026-03-10 00:00	2026-03-30 16:00	2025-12-16 00:00	2026-01-07 16:00	-464	-464					Y	0	100
+%R	11	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2015	S1 Concept - electrical topology and single-line diagrams	120	120	0	0	2026-03-10 00:00	2026-03-30 16:00	2026-03-10 00:00	2026-03-30 16:00	2025-12-16 00:00	2026-01-07 16:00	-464	-464					Y	0	110
+%R	12	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2020	S1 Concept - cooling strategy, free-cooling and PUE model	120	120	0	0	2026-03-10 00:00	2026-03-30 16:00	2026-03-10 00:00	2026-03-30 16:00	2025-12-16 00:00	2026-01-07 16:00	-464	-464					Y	0	120
+%R	13	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS2025	M: S1 Concept Design submitted to the Engineer (MS-02)	0	0	0	0	2026-03-31 00:00	2026-03-31 16:00	2026-03-31 00:00	2026-03-31 16:00	2026-01-08 00:00	2026-01-08 16:00	-464	-464					Y	0	130
+%R	14	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2030	Engineer review - S1 Concept (14 days, SP-20)	112	112	0	0	2026-04-01 00:00	2026-04-22 16:00	2026-04-01 00:00	2026-04-22 16:00	2026-01-09 00:00	2026-01-28 16:00	-464	-464					Y	0	140
+%R	15	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2040	S2 Detailed - architectural and envelope	320	320	0	0	2026-04-23 00:00	2026-06-22 16:00	2026-04-23 00:00	2026-06-22 16:00	2026-05-20 00:00	2026-07-15 16:00	136	136					N	0	150
+%R	16	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2045	S2 Detailed - structural and foundations	240	240	0	0	2026-04-23 00:00	2026-06-05 16:00	2026-04-23 00:00	2026-06-05 16:00	2026-01-29 00:00	2026-03-11 16:00	-464	-464					Y	0	160
+%R	17	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2050	S2 Detailed - electrical HV/MV/LV, UPS and generation	360	360	0	0	2026-04-23 00:00	2026-06-29 16:00	2026-04-23 00:00	2026-06-29 16:00	2026-05-12 00:00	2026-07-15 16:00	96	96					N	0	170
+%R	18	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2055	S2 Detailed - mechanical, cooling and heat recovery	360	360	0	0	2026-04-23 00:00	2026-06-29 16:00	2026-04-23 00:00	2026-06-29 16:00	2026-05-12 00:00	2026-07-15 16:00	96	96					N	0	180
+%R	19	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2060	S2 Detailed - fire engineering strategy (white-space suppression)	240	240	0	0	2026-04-23 00:00	2026-06-05 16:00	2026-04-23 00:00	2026-06-05 16:00	2026-04-17 00:00	2026-06-01 16:00	-32	-32					Y	0	190
+%R	20	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2065	S2 Detailed - ELV, BMS/DCIM and security	240	240	0	0	2026-04-23 00:00	2026-06-05 16:00	2026-04-23 00:00	2026-06-05 16:00	2026-06-03 00:00	2026-07-15 16:00	216	216					N	0	200
+%R	21	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS2070	M: S2 Detailed Design submitted to the Engineer (MS-03)	0	0	0	0	2026-06-30 00:00	2026-06-30 16:00	2026-06-30 00:00	2026-06-30 16:00	2026-07-16 00:00	2026-07-16 16:00	96	96					N	0	210
+%R	22	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2075	Engineer review - S2 Detailed (21 days, SP-20)	168	168	0	0	2026-07-01 00:00	2026-07-29 16:00	2026-07-01 00:00	2026-07-29 16:00	2026-07-17 00:00	2026-08-14 16:00	96	96					N	0	220
+%R	23	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2080	S3 Construction issue - substructure	120	120	0	0	2026-06-08 00:00	2026-06-29 16:00	2026-06-08 00:00	2026-06-29 16:00	2026-03-12 00:00	2026-04-01 16:00	-464	-464					Y	0	230
+%R	24	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2082	S3 Construction issue - steel and precast fabrication release	160	160	0	0	2026-05-18 00:00	2026-06-12 16:00	2026-05-18 00:00	2026-06-12 16:00	2026-02-25 00:00	2026-03-24 16:00	-432	-432					Y	0	240
+%R	25	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2084	Engineer review - steel and precast fabrication release (14 days)	112	112	0	0	2026-06-15 00:00	2026-07-03 16:00	2026-06-15 00:00	2026-07-03 16:00	2026-03-25 00:00	2026-04-15 16:00	-432	-432					Y	0	250
+%R	26	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2085	Engineer review - S3 substructure (14 days)	112	112	0	0	2026-06-30 00:00	2026-07-17 16:00	2026-06-30 00:00	2026-07-17 16:00	2026-04-02 00:00	2026-04-23 16:00	-464	-464					Y	0	260
+%R	27	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2090	S3 Construction issue - superstructure and envelope	200	200	0	0	2026-07-30 00:00	2026-09-02 16:00	2026-07-30 00:00	2026-09-02 16:00	2026-08-17 00:00	2026-09-18 16:00	96	96					N	0	270
+%R	28	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2095	Engineer review - S3 superstructure/envelope (14 days)	112	112	0	0	2026-09-03 00:00	2026-09-22 16:00	2026-09-03 00:00	2026-09-22 16:00	2026-09-21 00:00	2026-10-08 16:00	96	96					N	0	280
+%R	29	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2100	S3 Construction issue - MEP shop drawings and schedules	320	320	0	0	2026-07-30 00:00	2026-09-23 16:00	2026-07-30 00:00	2026-09-23 16:00	2027-07-29 00:00	2027-09-22 16:00	2016	2016					N	0	290
+%R	30	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2105	Engineer review - S3 MEP (14 days)	112	112	0	0	2026-09-24 00:00	2026-10-13 16:00	2026-09-24 00:00	2026-10-13 16:00	2027-09-23 00:00	2027-10-12 16:00	2016	2016					N	0	300
+%R	31	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2110	HV protection coordination study - Stage 1	160	160	0	0	2026-06-30 00:00	2026-07-27 16:00	2026-06-30 00:00	2026-07-27 16:00	2026-09-15 00:00	2026-10-12 16:00	440	440					N	0	310
+%R	32	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2115	DNO review and approval - protection study Stage 1 (20 wd, GC 6.3)	160	160	0	0	2026-07-28 00:00	2026-08-24 16:00	2026-07-28 00:00	2026-08-24 16:00	2026-10-13 00:00	2026-11-09 16:00	440	440					N	0	320
+%R	33	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2120	HV protection study - Stage 2 (Hall 2)	80	80	0	0	2026-08-25 00:00	2026-09-07 16:00	2026-08-25 00:00	2026-09-07 16:00	2027-04-22 00:00	2027-05-05 16:00	1328	1328					N	0	330
+%R	34	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2125	DNO review and approval - protection study Stage 2	160	160	0	0	2026-09-08 00:00	2026-10-05 16:00	2026-09-08 00:00	2026-10-05 16:00	2027-05-07 00:00	2027-06-03 16:00	1328	1328					N	0	340
+%R	35	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2130	HV protection study - Stage 3 (Hall 3)	80	80	0	0	2026-10-06 00:00	2026-10-19 16:00	2026-10-06 00:00	2026-10-19 16:00	2027-07-26 00:00	2027-08-06 16:00	1608	1608					N	0	350
+%R	36	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2135	DNO review and approval - protection study Stage 3	160	160	0	0	2026-10-20 00:00	2026-11-16 16:00	2026-10-20 00:00	2026-11-16 16:00	2027-08-09 00:00	2027-09-03 16:00	1608	1608					N	0	360
+%R	37	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2140	HV protection study - Stage 4 (Hall 4)	80	80	0	0	2026-11-17 00:00	2026-11-30 16:00	2026-11-17 00:00	2026-11-30 16:00	2027-09-23 00:00	2027-10-06 16:00	1712	1712					N	0	370
+%R	38	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2145	DNO review and approval - protection study Stage 4	160	160	0	0	2026-12-01 00:00	2026-12-30 16:00	2026-12-01 00:00	2026-12-30 16:00	2027-10-07 00:00	2027-11-03 16:00	1712	1712					N	0	380
+%R	39	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2150	Substation design submission to DNO for compatibility review (GC 4.2)	96	96	0	0	2026-03-10 00:00	2026-03-25 16:00	2026-03-10 00:00	2026-03-25 16:00	2026-01-22 00:00	2026-02-06 16:00	-264	-264					Y	0	390
+%R	40	PDC1	PDC.2	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DE2160	As-built documentation and BIM model - all Sections	320	320	0	0	2026-10-14 00:00	2026-12-08 16:00	2026-10-14 00:00	2026-12-08 16:00	2027-10-13 00:00	2027-12-08 16:00	2016	2016					N	0	400
+%R	41	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3000	Appoint and obtain approval of statutory supervisors (Cond 1-3)	120	120	0	0	2026-03-03 00:00	2026-03-23 16:00	2026-03-03 00:00	2026-03-23 16:00	2026-02-09 00:00	2026-02-27 16:00	-128	-128					Y	0	410
+%R	42	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3010	Lodge permit securities - landscaping and stormwater (Section 4 fees)	80	80	0	0	2026-03-03 00:00	2026-03-16 16:00	2026-03-03 00:00	2026-03-16 16:00	2026-02-23 00:00	2026-03-06 16:00	-48	-48					Y	0	420
+%R	43	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3020	Notice of commencement (aloitusilmoitus) - 7 days before site works	40	40	0	0	2026-03-24 00:00	2026-03-30 16:00	2026-03-24 00:00	2026-03-30 16:00	2026-03-02 00:00	2026-03-06 16:00	-128	-128					Y	0	430
+%R	44	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3030	Commencement inspection by Building Control (Cond 5)	24	24	0	0	2026-03-31 00:00	2026-04-02 16:00	2026-03-31 00:00	2026-04-02 16:00	2026-03-09 00:00	2026-03-11 16:00	-128	-128					Y	0	440
+%R	45	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS3035	M: Statutory supervisors approved - site works may commence (MS-04)	0	0	0	0	2026-04-07 00:00	2026-04-07 16:00	2026-04-07 00:00	2026-04-07 16:00	2026-03-12 00:00	2026-03-12 16:00	-128	-128					Y	0	450
+%R	46	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3040	Blasting plan, blast design and scaled-distance calculations	120	120	0	0	2026-05-08 00:00	2026-05-29 16:00	2026-05-08 00:00	2026-05-29 16:00	2026-03-10 00:00	2026-03-30 16:00	-320	-320					Y	0	460
+%R	47	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3050	Pre-condition survey (katselmus) of neighbours, photographic record (Cond 10)	80	80	0	0	2026-06-01 00:00	2026-06-12 16:00	2026-06-01 00:00	2026-06-12 16:00	2026-04-16 00:00	2026-04-29 16:00	-240	-240					Y	0	470
+%R	48	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3060	Blasting permit - Vantaa rescue authority (Cond 9) and louhintailmoitus	160	160	0	0	2026-06-01 00:00	2026-06-29 16:00	2026-06-01 00:00	2026-06-29 16:00	2026-03-31 00:00	2026-04-29 16:00	-320	-320					Y	0	480
+%R	49	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3070	Neighbour written notice - 7 days before blasting (Cond 12)	40	40	0	0	2026-06-30 00:00	2026-07-06 16:00	2026-06-30 00:00	2026-07-06 16:00	2026-04-30 00:00	2026-05-07 16:00	-320	-320					Y	0	490
+%R	50	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS3075	M: Blasting permit and pre-condition survey complete (MS-05)	0	0	0	0	2026-07-07 00:00	2026-07-07 16:00	2026-07-07 00:00	2026-07-07 16:00	2026-05-08 00:00	2026-05-08 16:00	-320	-320					Y	0	500
+%R	51	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3080	Aviation obstacle clearance for crane operations - Fintraffic/Finavia (Cond 18, 21 d)	168	168	0	0	2026-03-03 00:00	2026-03-31 16:00	2026-03-03 00:00	2026-03-31 16:00	2026-07-17 00:00	2026-08-14 16:00	744	744					N	0	510
+%R	52	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3090	Fire engineering submission and authority approval - white-space suppression	320	320	0	0	2026-06-08 00:00	2026-08-03 16:00	2026-06-08 00:00	2026-08-03 16:00	2026-06-02 00:00	2026-07-28 16:00	-32	-32					Y	0	520
+%R	53	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3100	Building Control exemption application - extended-hours commissioning (Cond 15)	240	240	0	0	2026-06-30 00:00	2026-08-10 16:00	2026-06-30 00:00	2026-08-10 16:00	2027-02-25 00:00	2027-04-09 16:00	1344	1344					N	0	530
+%R	54	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS3105	M: Extended-hours commissioning exemption obtained (enables 24 h L5 tests)	0	0	0	0	2026-08-11 00:00	2026-08-11 16:00	2026-08-11 00:00	2026-08-11 16:00	2027-04-12 00:00	2027-04-12 16:00	1344	1344					N	0	540
+%R	55	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3110	Foundation inspection - Building Control (Cond 5)	16	16	0	0	2026-10-15 00:00	2026-10-16 16:00	2026-10-15 00:00	2026-10-16 16:00	2026-08-10 00:00	2026-08-11 16:00	-384	-384					Y	0	550
+%R	56	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3120	Structural frame inspection - Building Control (Cond 5)	16	16	0	0	2026-12-09 00:00	2026-12-10 16:00	2026-12-09 00:00	2026-12-10 16:00	2026-10-07 00:00	2026-10-08 16:00	-360	-360					Y	0	560
+%R	57	PDC1	PDC.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		ST3130	Fire compartmentation inspection - Building Control (Cond 5)	16	16	0	0	2027-02-23 00:00	2027-02-24 16:00	2027-02-23 00:00	2027-02-24 16:00	2027-04-21 00:00	2027-04-22 16:00	312	312					N	0	570
+%R	58	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4000	ADVANCE PROCUREMENT INSTRUCTION - release 110/20 kV transformer order (LT-01)	80	80	0	0	2025-12-15 00:00	2025-12-26 16:00	2025-12-15 00:00	2025-12-26 16:00	2025-11-03 00:00	2025-11-14 16:00	-240	-240					Y	0	580
+%R	59	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4005	LT-01 110/20 kV transformers (2 nr, 16 MVA) - manufacture and delivery (52 weeks)	2912	2912	0	0	2025-12-27 00:00	2026-12-25 16:00	2025-12-27 00:00	2026-12-25 16:00	2025-11-17 00:00	2026-11-15 16:00	-320	-320					Y	0	590
+%R	60	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4010	L1 FAT - 110/20 kV transformers (witnessed)	80	80	0	0	2027-01-07 00:00	2027-01-20 16:00	2027-01-07 00:00	2027-01-20 16:00	2026-12-14 00:00	2026-12-29 16:00	-112	-112					Y	0	600
+%R	61	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4020	TP-001 Earthworks/blasting/substructure - tender, evaluation and award	160	160	0	0	2026-03-03 00:00	2026-03-30 16:00	2026-03-03 00:00	2026-03-30 16:00	2026-02-13 00:00	2026-03-12 16:00	-96	-96					Y	0	610
+%R	62	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4030	TP-002 Structure - tender, evaluation and award	160	160	0	0	2026-03-03 00:00	2026-03-30 16:00	2026-03-03 00:00	2026-03-30 16:00	2026-03-17 00:00	2026-04-15 16:00	80	80					N	0	620
+%R	63	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4035	LT-11 Steel fabrication batch 1 - Hall 1, substation, generator, spine (18 wk)	1008	1008	0	0	2026-07-04 00:00	2026-11-06 16:00	2026-07-04 00:00	2026-11-06 16:00	2026-04-16 00:00	2026-08-19 16:00	-632	-632					Y	0	630
+%R	64	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4036	LT-11 Steel fabrication batch 2 - Hall 2 (112 t at 15 t/week)	424	424	0	0	2026-11-07 00:00	2026-12-29 16:00	2026-11-07 00:00	2026-12-29 16:00	2026-08-20 00:00	2026-10-11 16:00	-632	-632					Y	0	640
+%R	65	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4037	LT-11 Steel fabrication batch 3 - Hall 3 (112 t at 15 t/week)	424	424	0	0	2026-12-30 00:00	2027-02-20 16:00	2026-12-30 00:00	2027-02-20 16:00	2026-10-18 00:00	2026-12-09 16:00	-584	-584					Y	0	650
+%R	66	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4038	LT-11 Steel fabrication batch 4 - Hall 4 and admin/NOC (162 t)	608	608	0	0	2027-02-21 00:00	2027-05-07 16:00	2027-02-21 00:00	2027-05-07 16:00	2026-12-10 00:00	2027-02-23 16:00	-584	-584					Y	0	660
+%R	67	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4040	LT-12 Precast batch 1 - Hall 1, substation, generator, spine (16 wk)	896	896	0	0	2026-07-04 00:00	2026-10-23 16:00	2026-07-04 00:00	2026-10-23 16:00	2026-05-26 00:00	2026-09-14 16:00	-312	-312					Y	0	670
+%R	68	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4041	LT-12 Precast batch 2 - Hall 2 (64 panels at 200 m2/day)	240	240	0	0	2026-10-24 00:00	2026-11-22 16:00	2026-10-24 00:00	2026-11-22 16:00	2026-09-29 00:00	2026-10-28 16:00	-200	-200					Y	0	680
+%R	69	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4042	LT-12 Precast batch 3 - Hall 3	240	240	0	0	2026-11-23 00:00	2026-12-22 16:00	2026-11-23 00:00	2026-12-22 16:00	2026-12-16 00:00	2027-01-14 16:00	184	184					N	0	690
+%R	70	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4043	LT-12 Precast batch 4 - Hall 4	240	240	0	0	2026-12-23 00:00	2027-01-21 16:00	2026-12-23 00:00	2027-01-21 16:00	2027-02-13 00:00	2027-03-14 16:00	416	416					N	0	700
+%R	71	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4050	TP-003 Envelope - tender, evaluation and award	160	160	0	0	2026-04-23 00:00	2026-05-22 16:00	2026-04-23 00:00	2026-05-22 16:00	2026-08-12 00:00	2026-09-08 16:00	608	608					N	0	710
+%R	72	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4055	LT-13 Acoustic louvres (16 weeks)	896	896	0	0	2026-05-23 00:00	2026-09-11 16:00	2026-05-23 00:00	2026-09-11 16:00	2026-09-09 00:00	2026-12-29 16:00	872	872					N	0	720
+%R	73	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4060	TP-004 Finishes and containment - tender, evaluation and award	160	160	0	0	2026-06-23 00:00	2026-07-20 16:00	2026-06-23 00:00	2026-07-20 16:00	2027-02-04 00:00	2027-03-03 16:00	1264	1264					N	0	730
+%R	74	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4070	TP-005 Mechanical - tender, evaluation and award	200	200	0	0	2026-03-03 00:00	2026-04-08 16:00	2026-03-03 00:00	2026-04-08 16:00	2026-04-17 00:00	2026-05-25 16:00	248	248					N	0	740
+%R	75	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4075	LT-07 Chillers, 4 nr (26 weeks)	1456	1456	0	0	2026-04-09 00:00	2026-10-07 16:00	2026-04-09 00:00	2026-10-07 16:00	2026-05-26 00:00	2026-11-23 16:00	376	376					N	0	750
+%R	76	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4080	LT-08 Dry coolers / adiabatic units, 10 nr (22 weeks)	1232	1232	0	0	2026-04-09 00:00	2026-09-09 16:00	2026-04-09 00:00	2026-09-09 16:00	2026-08-07 00:00	2027-01-07 16:00	960	960					N	0	760
+%R	77	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4085	LT-09 CRAH units, 28 nr (22 weeks)	1232	1232	0	0	2026-04-09 00:00	2026-09-09 16:00	2026-04-09 00:00	2026-09-09 16:00	2026-07-15 00:00	2026-12-15 16:00	776	776					N	0	770
+%R	78	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4090	LT-10 Waste-heat recovery plant, 4 MW (30 weeks)	1680	1680	0	0	2026-04-09 00:00	2026-11-04 16:00	2026-04-09 00:00	2026-11-04 16:00	2026-12-11 00:00	2027-07-08 16:00	1968	1968					N	0	780
+%R	79	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4095	L1 FAT - chillers (witnessed)	64	64	0	0	2026-10-12 00:00	2026-10-21 16:00	2026-10-12 00:00	2026-10-21 16:00	2026-12-16 00:00	2026-12-29 16:00	376	376					N	0	790
+%R	80	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4100	TP-006 Electrical - tender, evaluation and award (balance of package)	200	200	0	0	2026-03-03 00:00	2026-04-08 16:00	2026-03-03 00:00	2026-04-08 16:00	2026-01-02 00:00	2026-02-06 16:00	-328	-328					Y	0	800
+%R	81	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4105	LT-02 20 kV switchgear and protection (38 weeks)	2128	2128	0	0	2026-04-09 00:00	2026-12-30 16:00	2026-04-09 00:00	2026-12-30 16:00	2026-02-09 00:00	2026-11-01 16:00	-472	-472					Y	0	810
+%R	82	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4110	LT-03 Standby generators, 8 nr at 2.5 MVA (40 weeks)	2240	2240	0	0	2026-04-09 00:00	2027-01-13 16:00	2026-04-09 00:00	2027-01-13 16:00	2026-02-17 00:00	2026-11-23 16:00	-408	-408					Y	0	820
+%R	83	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4115	LT-04 UPS modules, 16 nr at 1000 kVA (30 weeks)	1680	1680	0	0	2026-04-09 00:00	2026-11-04 16:00	2026-04-09 00:00	2026-11-04 16:00	2026-05-18 00:00	2026-12-13 16:00	312	312					N	0	830
+%R	84	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4120	LT-05 Battery systems, lithium-ion (24 weeks)	1344	1344	0	0	2026-08-04 00:00	2027-01-18 16:00	2026-08-04 00:00	2027-01-18 16:00	2026-07-29 00:00	2027-01-12 16:00	-48	-48					Y	0	840
+%R	85	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4125	LT-06 Overhead busway (20 weeks)	1120	1120	0	0	2026-04-09 00:00	2026-08-26 16:00	2026-04-09 00:00	2026-08-26 16:00	2026-08-26 00:00	2027-01-12 16:00	1112	1112					N	0	850
+%R	86	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4130	L1 FAT - standby generators (witnessed)	80	80	0	0	2027-01-18 00:00	2027-01-29 16:00	2027-01-18 00:00	2027-01-29 16:00	2026-12-14 00:00	2026-12-29 16:00	-168	-168					Y	0	860
+%R	87	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4135	L1 FAT - UPS modules (witnessed)	64	64	0	0	2026-11-09 00:00	2026-11-18 16:00	2026-11-09 00:00	2026-11-18 16:00	2026-12-16 00:00	2026-12-29 16:00	216	216					N	0	870
+%R	88	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4140	L1 FAT - 20 kV switchgear (witnessed)	64	64	0	0	2027-01-05 00:00	2027-01-15 16:00	2027-01-05 00:00	2027-01-15 16:00	2026-12-16 00:00	2026-12-29 16:00	-88	-88					Y	0	880
+%R	89	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4150	TP-007 ELV/BMS/fire - tender, evaluation and award	160	160	0	0	2026-04-23 00:00	2026-05-22 16:00	2026-04-23 00:00	2026-05-22 16:00	2026-08-12 00:00	2026-09-08 16:00	608	608					N	0	890
+%R	90	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4155	LT-14 BMS/DCIM hardware and licences (16 weeks)	896	896	0	0	2026-05-23 00:00	2026-09-11 16:00	2026-05-23 00:00	2026-09-11 16:00	2026-09-18 00:00	2027-01-07 16:00	944	944					N	0	900
+%R	91	PDC1	PDC.4	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4160	LT-15 Suppression system, data halls (20 weeks)	1120	1120	0	0	2026-08-04 00:00	2026-12-21 16:00	2026-08-04 00:00	2026-12-21 16:00	2026-09-09 00:00	2027-01-26 16:00	288	288					N	0	910
+%R	92	PDC1	PDC.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		PR4170	TP-008 External works, security and fibre - tender, evaluation and award	160	160	0	0	2026-07-30 00:00	2026-08-26 16:00	2026-07-30 00:00	2026-08-26 16:00	2027-08-11 00:00	2027-09-07 16:00	2088	2088					N	0	920
+%R	93	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5000	Site establishment - offices, welfare, hoarding and site compound	120	120	0	0	2026-04-08 00:00	2026-04-28 16:00	2026-04-08 00:00	2026-04-28 16:00	2026-03-13 00:00	2026-04-02 16:00	-128	-128					Y	0	930
+%R	94	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5010	Temporary power, water and telecoms	80	80	0	0	2026-04-15 00:00	2026-04-28 16:00	2026-04-15 00:00	2026-04-28 16:00	2026-04-14 00:00	2026-04-27 16:00	-8	-8					Y	0	940
+%R	95	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5020	Site clearance and topsoil strip, full plot (26,565 m2 / 7,970 m3)	128	128	0	0	2026-04-15 00:00	2026-05-07 16:00	2026-04-15 00:00	2026-05-07 16:00	2026-03-20 00:00	2026-04-14 16:00	-128	-128					Y	0	950
+%R	96	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5030	Site access from Tikkurilantie, haul road and traffic management	120	120	0	0	2026-04-22 00:00	2026-05-13 16:00	2026-04-22 00:00	2026-05-13 16:00	2026-07-27 00:00	2026-08-14 16:00	400	400					N	0	960
+%R	97	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5040	Archaeological watching brief - NW corner made ground (Cond 24 / SS 7b)	80	80	0	0	2026-05-08 00:00	2026-05-22 16:00	2026-05-08 00:00	2026-05-22 16:00	2026-04-15 00:00	2026-04-28 16:00	-128	-128					Y	0	970
+%R	98	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5050	Excavate and remove unrecorded made ground, NW corner (1,620 m3, provisional)	56	56	0	0	2026-05-12 00:00	2026-05-21 16:00	2026-05-12 00:00	2026-05-21 16:00	2026-04-17 00:00	2026-04-27 16:00	-128	-128					Y	0	980
+%R	99	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5060	Sulphide-bearing material - confirmatory testing, segregation and waste routing (BH-12)	80	80	0	0	2026-05-08 00:00	2026-05-22 16:00	2026-05-08 00:00	2026-05-22 16:00	2026-10-07 00:00	2026-10-20 16:00	728	728					N	0	990
+%R	100	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5070	Erect tower and mobile cranes (aviation clearance held on site)	64	64	0	0	2026-05-15 00:00	2026-05-26 16:00	2026-05-15 00:00	2026-05-26 16:00	2026-08-17 00:00	2026-08-26 16:00	400	400					N	0	1000
+%R	101	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5080	Two diverse fibre entry routes and ducts (1,240 m)	120	120	0	0	2026-05-15 00:00	2026-06-04 16:00	2026-05-15 00:00	2026-06-04 16:00	2027-01-15 00:00	2027-02-04 16:00	1240	1240					N	0	1010
+%R	102	PDC1	PDC.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		EN5090	Perimeter fencing, detection and ANPR vehicle gate (1,070 m)	120	120	0	0	2026-05-15 00:00	2026-06-04 16:00	2026-05-15 00:00	2026-06-04 16:00	2027-01-07 00:00	2027-01-27 16:00	1192	1192					N	0	1020
+%R	103	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F000	Bulk excavation - primary substation zone (1,650 m3)	32	32	0	0	2026-07-27 00:00	2026-07-30 16:00	2026-07-27 00:00	2026-07-30 16:00	2026-04-28 00:00	2026-05-04 16:00	-368	-368					Y	0	1030
+%R	104	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F010	Bulk excavation - generator compound, till above rock (1,000 m3)	24	24	0	0	2026-07-27 00:00	2026-07-29 16:00	2026-07-27 00:00	2026-07-29 16:00	2026-05-06 00:00	2026-05-08 16:00	-328	-328					Y	0	1040
+%R	105	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F020	Controlled blasting - generator compound (1,141 m3 rock, 2 blasts/week)	120	120	0	0	2026-07-30 00:00	2026-08-19 16:00	2026-07-30 00:00	2026-08-19 16:00	2026-05-11 00:00	2026-06-01 16:00	-328	-328					Y	0	1050
+%R	106	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F030	Muck away and trim blasted rock - generator compound	64	64	0	0	2026-08-06 00:00	2026-08-17 16:00	2026-08-06 00:00	2026-08-17 16:00	2026-05-19 00:00	2026-05-28 16:00	-328	-328					Y	0	1060
+%R	107	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F040	Bulk excavation - Hall 1 (2,600 m3)	48	48	0	0	2026-07-27 00:00	2026-08-03 16:00	2026-07-27 00:00	2026-08-03 16:00	2026-04-24 00:00	2026-05-04 16:00	-384	-384					Y	0	1070
+%R	108	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F050	Bulk excavation - shared MEP spine, full length (4,350 m3)	72	72	0	0	2026-08-04 00:00	2026-08-14 16:00	2026-08-04 00:00	2026-08-14 16:00	2026-05-05 00:00	2026-05-18 16:00	-384	-384					Y	0	1080
+%R	109	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F060	Bulk excavation - gatehouse and site access structures (500 m3)	16	16	0	0	2026-08-17 00:00	2026-08-18 16:00	2026-08-17 00:00	2026-08-18 16:00	2026-09-17 00:00	2026-09-18 16:00	184	184					N	0	1090
+%R	110	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F070	Dewatering - well-points and sump pumping, perched water in till	40	40	0	0	2026-07-29 00:00	2026-08-04 16:00	2026-07-29 00:00	2026-08-04 16:00	2026-04-30 00:00	2026-05-07 16:00	-368	-368					Y	0	1100
+%R	111	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F080	Substation cable basement - excavation, waterproofing and drainage (1,100 m2)	80	80	0	0	2026-08-05 00:00	2026-08-18 16:00	2026-08-05 00:00	2026-08-18 16:00	2026-05-08 00:00	2026-05-22 16:00	-368	-368					Y	0	1110
+%R	112	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F090	Pad and strip foundations - primary substation	80	80	0	0	2026-08-19 00:00	2026-09-01 16:00	2026-08-19 00:00	2026-09-01 16:00	2026-05-25 00:00	2026-06-05 16:00	-368	-368					Y	0	1120
+%R	113	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F100	Direct-to-rock and rock-socketed piers - generator compound (10 nr)	48	48	0	0	2026-08-18 00:00	2026-08-25 16:00	2026-08-18 00:00	2026-08-25 16:00	2026-05-29 00:00	2026-06-05 16:00	-328	-328					Y	0	1130
+%R	114	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F110	Pad foundations - Hall 1 (grid E-H / 2-6)	96	96	0	0	2026-08-05 00:00	2026-08-20 16:00	2026-08-05 00:00	2026-08-20 16:00	2026-05-21 00:00	2026-06-05 16:00	-304	-304					Y	0	1140
+%R	115	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F120	Pad foundations - shared MEP spine	112	112	0	0	2026-08-17 00:00	2026-09-03 16:00	2026-08-17 00:00	2026-09-03 16:00	2026-05-19 00:00	2026-06-05 16:00	-384	-384					Y	0	1150
+%R	116	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F130	Ground beams and pile caps - Section 1 (793 m)	96	96	0	0	2026-09-04 00:00	2026-09-21 16:00	2026-09-04 00:00	2026-09-21 16:00	2026-06-08 00:00	2026-06-24 16:00	-384	-384					Y	0	1160
+%R	117	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F140	Underground services, drainage and service trenches - Section 1	120	120	0	0	2026-09-11 00:00	2026-10-01 16:00	2026-09-11 00:00	2026-10-01 16:00	2026-06-15 00:00	2026-07-27 16:00	-384	-384					Y	0	1170
+%R	118	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F150	Sub-base, capping and geotextile - Section 1 (7,028 m2)	80	80	0	0	2026-09-23 00:00	2026-10-06 16:00	2026-09-23 00:00	2026-10-06 16:00	2026-06-26 00:00	2026-07-30 16:00	-384	-384					Y	0	1180
+%R	119	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F160	Ground slab - primary substation (275 m3)	48	48	0	0	2026-10-07 00:00	2026-10-14 16:00	2026-10-07 00:00	2026-10-14 16:00	2026-07-31 00:00	2026-08-07 16:00	-384	-384					Y	0	1190
+%R	120	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F170	Ground slab - generator compound (238 m3)	40	40	0	0	2026-10-07 00:00	2026-10-13 16:00	2026-10-07 00:00	2026-10-13 16:00	2026-09-16 00:00	2026-09-22 16:00	-120	-120					Y	0	1200
+%R	121	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F180	Ground slab - Hall 1, FM2 flatness (432 m3)	80	80	0	0	2026-10-19 00:00	2026-10-30 16:00	2026-10-19 00:00	2026-10-30 16:00	2026-08-12 00:00	2026-08-25 16:00	-384	-384					Y	0	1210
+%R	122	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F190	Ground slab - shared MEP spine (725 m3)	120	120	0	0	2026-10-26 00:00	2026-11-13 16:00	2026-10-26 00:00	2026-11-13 16:00	2026-08-19 00:00	2026-09-08 16:00	-384	-384					Y	0	1220
+%R	123	PDC1	PDC.6.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1F200	Ground slab - gatehouse (88 m3)	24	24	0	0	2026-11-16 00:00	2026-11-18 16:00	2026-11-16 00:00	2026-11-18 16:00	2026-09-21 00:00	2026-09-23 16:00	-320	-320					Y	0	1230
+%R	124	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S000	Steel erection - primary substation and switchgear building (35 t)	48	48	0	0	2026-11-09 00:00	2026-11-16 16:00	2026-11-09 00:00	2026-11-16 16:00	2026-09-21 00:00	2026-09-28 16:00	-280	-280					Y	0	1240
+%R	125	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S010	Steel erection - generator compound enclosure (20 t)	32	32	0	0	2026-11-09 00:00	2026-11-12 16:00	2026-11-09 00:00	2026-11-12 16:00	2026-09-23 00:00	2026-09-28 16:00	-264	-264					Y	0	1250
+%R	126	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S020	Steel erection - Hall 1 frame, 18 m lattice trusses (112 t)	104	104	0	0	2026-11-09 00:00	2026-11-25 16:00	2026-11-09 00:00	2026-11-25 16:00	2026-08-27 00:00	2026-09-14 16:00	-416	-416					Y	0	1260
+%R	127	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S030	Steel erection - shared MEP spine and mezzanine (120 t)	112	112	0	0	2026-11-19 00:00	2026-12-08 16:00	2026-11-19 00:00	2026-12-08 16:00	2026-09-09 00:00	2026-09-28 16:00	-408	-408					Y	0	1270
+%R	128	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S040	Steel erection - gatehouse (11 t)	24	24	0	0	2026-11-19 00:00	2026-11-23 16:00	2026-11-19 00:00	2026-11-23 16:00	2026-09-24 00:00	2026-09-28 16:00	-320	-320					Y	0	1280
+%R	129	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S050	In-situ RC blast/fire separation walls - substation (640 m3)	144	144	0	0	2026-11-17 00:00	2026-12-10 16:00	2026-11-17 00:00	2026-12-10 16:00	2026-10-07 00:00	2026-10-30 16:00	-232	-232					Y	0	1290
+%R	130	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S060	Precast wall panels - Hall 1 (64 nr, EI 120 between halls)	104	104	0	0	2026-11-26 00:00	2026-12-14 16:00	2026-11-26 00:00	2026-12-14 16:00	2026-09-15 00:00	2026-10-01 16:00	-416	-416					Y	0	1300
+%R	131	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S070	Precast wall panels - primary substation (40 nr)	64	64	0	0	2026-11-17 00:00	2026-11-26 16:00	2026-11-17 00:00	2026-11-26 16:00	2026-10-14 00:00	2026-10-23 16:00	-192	-192					Y	0	1310
+%R	132	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S080	Precast wall panels - generator enclosure (38 nr, acoustic)	64	64	0	0	2026-11-13 00:00	2026-11-24 16:00	2026-11-13 00:00	2026-11-24 16:00	2026-10-14 00:00	2026-10-23 16:00	-176	-176					Y	0	1320
+%R	133	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S090	Precast wall panels - shared MEP spine (70 nr, 2nd crew)	112	112	0	0	2026-12-09 00:00	2026-12-30 16:00	2026-12-09 00:00	2026-12-30 16:00	2026-10-06 00:00	2026-10-23 16:00	-368	-368					Y	0	1330
+%R	134	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S100	Metal deck, purlins and side rails - Hall 1 (1,728 m2)	32	32	0	0	2026-11-26 00:00	2026-12-01 16:00	2026-11-26 00:00	2026-12-01 16:00	2026-09-28 00:00	2026-10-01 16:00	-344	-344					Y	0	1340
+%R	135	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S110	Metal deck, purlins and side rails - substation/generator/spine/gatehouse (5,300 m2)	88	88	0	0	2026-12-09 00:00	2026-12-23 16:00	2026-12-09 00:00	2026-12-23 16:00	2026-09-29 00:00	2026-10-13 16:00	-408	-408					Y	0	1350
+%R	136	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S120	Warm roof build-up - Hall 1 (1,728 m2, U=0.09)	96	96	0	0	2026-12-15 00:00	2027-01-04 16:00	2026-12-15 00:00	2027-01-04 16:00	2026-10-02 00:00	2026-10-19 16:00	-416	-416					Y	0	1360
+%R	137	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S130	Warm roof build-up - substation/generator/spine/gatehouse (5,300 m2)	144	144	0	0	2026-12-28 00:00	2027-01-22 16:00	2026-12-28 00:00	2027-01-22 16:00	2026-10-14 00:00	2026-11-06 16:00	-408	-408					Y	0	1370
+%R	138	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S140	Roof safety line, walkways, access hatches and obstacle lighting (Cond 17)	80	80	0	0	2027-01-25 00:00	2027-02-05 16:00	2027-01-25 00:00	2027-02-05 16:00	2027-01-07 00:00	2027-01-20 16:00	-96	-96					Y	0	1380
+%R	139	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S150	Insulated composite cladding - Hall 1 (1,651 m2, U=0.17)	168	168	0	0	2026-12-22 00:00	2027-01-25 16:00	2026-12-22 00:00	2027-01-25 16:00	2026-10-09 00:00	2026-11-06 16:00	-416	-416					Y	0	1390
+%R	140	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S160	Cladding - substation/generator/spine/gatehouse (4,300 m2)	216	216	0	0	2026-12-31 00:00	2027-02-09 16:00	2026-12-31 00:00	2027-02-09 16:00	2026-10-26 00:00	2026-12-01 16:00	-368	-368					Y	0	1400
+%R	141	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S170	Acoustic louvres - Hall 1 cooling intake/discharge (310 m2)	64	64	0	0	2027-01-26 00:00	2027-02-04 16:00	2027-01-26 00:00	2027-02-04 16:00	2026-12-30 00:00	2027-01-12 16:00	-136	-136					Y	0	1410
+%R	142	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S180	Personnel and equipment doors - Section 1 (18 nr incl. 3.0 x 3.5 m)	48	48	0	0	2027-02-10 00:00	2027-02-17 16:00	2027-02-10 00:00	2027-02-17 16:00	2027-01-04 00:00	2027-01-12 16:00	-208	-208					Y	0	1420
+%R	143	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S190	Rainwater goods, outlets and syphonic drainage - Section 1	80	80	0	0	2027-01-25 00:00	2027-02-05 16:00	2027-01-25 00:00	2027-02-05 16:00	2026-12-28 00:00	2027-01-12 16:00	-144	-144					Y	0	1430
+%R	144	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S200	Passive fire protection to steel - Hall 1 (2,000 m2 intumescent)	160	160	0	0	2027-01-26 00:00	2027-02-22 16:00	2027-01-26 00:00	2027-02-22 16:00	2026-11-09 00:00	2026-12-04 16:00	-416	-416					Y	0	1440
+%R	145	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S210	Passive fire protection to steel - spine and substation (2,800 m2)	224	224	0	0	2027-01-18 00:00	2027-02-24 16:00	2027-01-18 00:00	2027-02-24 16:00	2026-12-08 00:00	2027-01-20 16:00	-200	-200					Y	0	1450
+%R	146	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1S220	Airtightness works and q50 test - Hall 1	48	48	0	0	2027-02-18 00:00	2027-02-25 16:00	2027-02-18 00:00	2027-02-25 16:00	2027-01-13 00:00	2027-01-20 16:00	-208	-208					Y	0	1460
+%R	147	PDC1	PDC.6.2	SITE	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS1S230	M: Hall 1 and shared infrastructure weathertight, fire protection complete	0	0	0	0	2027-02-26 00:00	2027-02-26 16:00	2027-02-26 00:00	2027-02-26 16:00	2027-01-21 00:00	2027-01-21 16:00	-208	-208					Y	0	1470
+%R	148	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H000	110 kV termination structure, metering compound and protection enclosure	160	160	0	0	2026-12-11 00:00	2027-01-13 16:00	2026-12-11 00:00	2027-01-13 16:00	2027-02-03 00:00	2027-03-02 16:00	272	272					N	0	1480
+%R	149	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H010	Substation earthing system and common bonding network	80	80	0	0	2026-12-11 00:00	2026-12-28 16:00	2026-12-11 00:00	2026-12-28 16:00	2026-11-02 00:00	2026-11-13 16:00	-232	-232					Y	0	1490
+%R	150	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H020	Deliver, offload and set 110/20 kV transformers (2 nr, 16 MVA)	120	120	0	0	2026-12-29 00:00	2027-01-20 16:00	2026-12-29 00:00	2027-01-20 16:00	2026-11-16 00:00	2026-12-04 16:00	-232	-232					Y	0	1500
+%R	151	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H030	Transformer oil filling, drying out and site acceptance testing	80	80	0	0	2027-01-21 00:00	2027-02-03 16:00	2027-01-21 00:00	2027-02-03 16:00	2026-12-07 00:00	2026-12-18 16:00	-232	-232					Y	0	1510
+%R	152	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H040	20 kV ring main switchboard and protection relays (14 panels)	200	200	0	0	2026-12-31 00:00	2027-02-05 16:00	2026-12-31 00:00	2027-02-05 16:00	2026-11-02 00:00	2026-12-04 16:00	-328	-328					Y	0	1520
+%R	153	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H050	HV cabling and terminations - transformers to 20 kV ring	200	200	0	0	2027-02-08 00:00	2027-03-12 16:00	2027-02-08 00:00	2027-03-12 16:00	2026-12-21 00:00	2027-01-28 16:00	-248	-248					Y	0	1530
+%R	154	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H060	DNO revenue metering, telemetry and check metering commissioning	64	64	0	0	2027-03-15 00:00	2027-03-24 16:00	2027-03-15 00:00	2027-03-24 16:00	2027-03-03 00:00	2027-03-12 16:00	-64	-64					Y	0	1540
+%R	155	PDC1	PDC.6.3	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H070	Serve 16 weeks notice on the DNO for the Stage 1 outage window (GC 7.3)	40	40	0	0	2026-08-25 00:00	2026-08-31 16:00	2026-08-25 00:00	2026-08-31 16:00	2026-11-10 00:00	2026-11-16 16:00	440	440					N	0	1550
+%R	156	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS1H080	M: DNO Stage 1 energisation, 6.5 MVA (MS-09 / GC 7.4)	0	0	0	0	2027-03-25 00:00	2027-03-25 16:00	2027-03-25 00:00	2027-03-25 16:00	2027-03-15 00:00	2027-03-15 16:00	-64	-64	CS_MSO	2027-03-12 00:00			Y	0	1560
+%R	157	PDC1	PDC.6.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1H090	Post-energisation HV protection intertrip and discrimination proving	64	64	0	0	2027-03-30 00:00	2027-04-08 16:00	2027-03-30 00:00	2027-04-08 16:00	2027-03-16 00:00	2027-03-25 16:00	-64	-64					Y	0	1570
+%R	158	PDC1	PDC.6.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1G000	Deliver, set and align standby generators (8 nr, 2.5 MVA)	192	192	0	0	2027-01-14 00:00	2027-02-16 16:00	2027-01-14 00:00	2027-02-16 16:00	2026-11-24 00:00	2026-12-29 16:00	-264	-264					Y	0	1580
+%R	159	PDC1	PDC.6.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1G010	Acoustic enclosures, exhaust stacks and attenuation to 45 dB(A) boundary	120	120	0	0	2027-01-26 00:00	2027-02-15 16:00	2027-01-26 00:00	2027-02-15 16:00	2027-01-15 00:00	2027-02-04 16:00	-56	-56					Y	0	1590
+%R	160	PDC1	PDC.6.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1G020	Bulk fuel storage, bunding, fuel polishing and day tanks (48 h)	200	200	0	0	2026-11-13 00:00	2026-12-17 16:00	2026-11-13 00:00	2026-12-17 16:00	2026-12-30 00:00	2027-02-04 16:00	248	248					N	0	1600
+%R	161	PDC1	PDC.6.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1G030	Oil separators (class I) to generator compound drainage (Cond 20)	64	64	0	0	2026-11-27 00:00	2026-12-08 16:00	2026-11-27 00:00	2026-12-08 16:00	2027-01-26 00:00	2027-02-04 16:00	304	304					N	0	1610
+%R	162	PDC1	PDC.6.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1G040	Generator paralleling switchgear, ATS and control system	160	160	0	0	2027-02-17 00:00	2027-03-16 16:00	2027-02-17 00:00	2027-03-16 16:00	2026-12-30 00:00	2027-01-28 16:00	-264	-264					Y	0	1620
+%R	163	PDC1	PDC.6.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1G050	Generator LV cabling, containment and connection to the 20 kV ring	120	120	0	0	2027-02-24 00:00	2027-03-16 16:00	2027-02-24 00:00	2027-03-16 16:00	2027-01-08 00:00	2027-01-28 16:00	-264	-264					Y	0	1630
+%R	164	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M000	Chilled water pipework - shared spine primary distribution (1,250 m)	248	248	0	0	2027-01-25 00:00	2027-03-08 16:00	2027-01-25 00:00	2027-03-08 16:00	2026-11-09 00:00	2026-12-21 16:00	-408	-408					Y	0	1640
+%R	165	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M010	Install chillers, 4 nr (N+1) - shared backup-chiller zone	96	96	0	0	2026-11-16 00:00	2026-12-01 16:00	2026-11-16 00:00	2026-12-01 16:00	2026-11-24 00:00	2026-12-09 16:00	48	48					N	0	1650
+%R	166	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M020	Install dry coolers / adiabatic units - shared zone and Hall 1 (4 nr)	80	80	0	0	2026-11-16 00:00	2026-11-27 16:00	2026-11-16 00:00	2026-11-27 16:00	2027-01-08 00:00	2027-01-21 16:00	280	280					N	0	1660
+%R	167	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M030	Buffer vessels, pressurisation units and glycol dosing	96	96	0	0	2026-12-02 00:00	2026-12-17 16:00	2026-12-02 00:00	2026-12-17 16:00	2026-12-10 00:00	2026-12-29 16:00	48	48					N	0	1670
+%R	168	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M040	Primary and secondary pump sets with inverters (12 nr)	120	120	0	0	2027-02-08 00:00	2027-02-26 16:00	2027-02-08 00:00	2027-02-26 16:00	2026-12-14 00:00	2027-01-07 16:00	-288	-288					Y	0	1680
+%R	169	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M050	Valves, strainers, commissioning sets and instrumentation - spine	200	200	0	0	2027-02-15 00:00	2027-03-19 16:00	2027-02-15 00:00	2027-03-19 16:00	2026-11-30 00:00	2027-01-07 16:00	-408	-408					Y	0	1690
+%R	170	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M060	Water treatment and adiabatic make-up plant (WUE cap 12,000 m3/yr)	120	120	0	0	2026-12-18 00:00	2027-01-13 16:00	2026-12-18 00:00	2027-01-13 16:00	2026-12-30 00:00	2027-01-21 16:00	48	48					N	0	1700
+%R	171	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M070	Thermal insulation and identification - spine pipework	160	160	0	0	2027-03-01 00:00	2027-03-30 16:00	2027-03-01 00:00	2027-03-30 16:00	2026-12-21 00:00	2027-01-21 16:00	-368	-368					Y	0	1710
+%R	172	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M080	Pressure test, flush and chemically clean - shared spine	80	80	0	0	2027-03-22 00:00	2027-04-06 16:00	2027-03-22 00:00	2027-04-06 16:00	2027-01-08 00:00	2027-01-21 16:00	-408	-408					Y	0	1720
+%R	173	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1M090	Ventilation, smoke extract and comfort cooling - substation/spine/generator	200	200	0	0	2027-01-25 00:00	2027-02-26 16:00	2027-01-25 00:00	2027-02-26 16:00	2026-12-14 00:00	2027-01-21 16:00	-208	-208					Y	0	1730
+%R	174	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1E000	20 kV distribution along the shared spine and hall riser busway drops	200	200	0	0	2027-01-18 00:00	2027-02-19 16:00	2027-01-18 00:00	2027-02-19 16:00	2026-11-16 00:00	2026-12-18 16:00	-328	-328					Y	0	1740
+%R	175	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1E010	Spine containment, cabling, small power and lighting	240	240	0	0	2027-01-25 00:00	2027-03-05 16:00	2027-01-25 00:00	2027-03-05 16:00	2027-01-13 00:00	2027-02-23 16:00	-64	-64					Y	0	1750
+%R	176	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1E020	Site earthing, bonding and lightning protection	96	96	0	0	2027-01-25 00:00	2027-02-09 16:00	2027-01-25 00:00	2027-02-09 16:00	2027-01-13 00:00	2027-01-28 16:00	-64	-64					Y	0	1760
+%R	177	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1E030	Sprinkler installation and dry risers - spine, substation and ancillary	160	160	0	0	2027-02-01 00:00	2027-02-26 16:00	2027-02-01 00:00	2027-02-26 16:00	2027-01-20 00:00	2027-02-16 16:00	-64	-64					Y	0	1770
+%R	178	PDC1	PDC.6.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1E040	Addressable fire detection and alarm - shared areas	120	120	0	0	2027-02-08 00:00	2027-02-26 16:00	2027-02-08 00:00	2027-02-26 16:00	2027-01-27 00:00	2027-02-16 16:00	-64	-64					Y	0	1780
+%R	179	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I000	Hall 1 substation 20/0.4 kV, 3.3 MVA - install and terminate	80	80	0	0	2027-02-23 00:00	2027-03-08 16:00	2027-02-23 00:00	2027-03-08 16:00	2026-12-07 00:00	2026-12-18 16:00	-416	-416					Y	0	1790
+%R	180	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I010	Hall 1 UPS modules (4 nr at 1000 kVA, N+1)	80	80	0	0	2027-03-02 00:00	2027-03-15 16:00	2027-03-02 00:00	2027-03-15 16:00	2026-12-14 00:00	2026-12-29 16:00	-416	-416					Y	0	1800
+%R	181	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I020	Hall 1 lithium-ion battery system and fire-rated battery room	96	96	0	0	2027-03-16 00:00	2027-04-02 16:00	2027-03-16 00:00	2027-04-02 16:00	2027-01-13 00:00	2027-01-28 16:00	-352	-352					Y	0	1810
+%R	182	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I030	Hall 1 LV main switchboards and distribution	96	96	0	0	2027-03-09 00:00	2027-03-24 16:00	2027-03-09 00:00	2027-03-24 16:00	2026-12-21 00:00	2027-01-11 16:00	-416	-416					Y	0	1820
+%R	183	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I040	Hall 1 overhead busway to rack PDUs (240 m)	96	96	0	0	2027-03-25 00:00	2027-04-13 16:00	2027-03-25 00:00	2027-04-13 16:00	2027-01-13 00:00	2027-01-28 16:00	-408	-408					Y	0	1830
+%R	184	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I050	Hall 1 containment, cabling, small power and lighting	160	160	0	0	2027-02-23 00:00	2027-03-22 16:00	2027-02-23 00:00	2027-03-22 16:00	2026-12-07 00:00	2027-01-07 16:00	-416	-416					Y	0	1840
+%R	185	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I060	Hall 1 CRAH units (7 nr, N+1) - install and connect	64	64	0	0	2027-02-23 00:00	2027-03-04 16:00	2027-02-23 00:00	2027-03-04 16:00	2026-12-16 00:00	2026-12-29 16:00	-360	-360					Y	0	1850
+%R	186	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I070	Hall 1 chilled water connections and hall pipework (400 m)	160	160	0	0	2027-02-26 00:00	2027-03-25 16:00	2027-02-26 00:00	2027-03-25 16:00	2026-12-21 00:00	2027-01-21 16:00	-360	-360					Y	0	1860
+%R	187	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I080	Hall 1 internal partitions, linings and fire-rated boarding	96	96	0	0	2027-02-23 00:00	2027-03-10 16:00	2027-02-23 00:00	2027-03-10 16:00	2027-03-03 00:00	2027-03-18 16:00	48	48					N	0	1870
+%R	188	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I090	Hall 1 anti-static sealed screed floor finish (1,250 m2)	80	80	0	0	2027-03-11 00:00	2027-03-24 16:00	2027-03-11 00:00	2027-03-24 16:00	2027-03-19 00:00	2027-04-05 16:00	48	48					N	0	1880
+%R	189	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I100	Hall 1 cold-aisle containment framework and blanking (1,250 m2)	96	96	0	0	2027-04-14 00:00	2027-04-29 16:00	2027-04-14 00:00	2027-04-29 16:00	2027-04-06 00:00	2027-04-21 16:00	-48	-48					Y	0	1890
+%R	190	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I110	Hall 1 aspirating smoke detection to white space	80	80	0	0	2027-03-23 00:00	2027-04-07 16:00	2027-03-23 00:00	2027-04-07 16:00	2027-01-20 00:00	2027-02-02 16:00	-352	-352					Y	0	1900
+%R	191	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I120	Hall 1 gaseous / water-mist suppression system	120	120	0	0	2027-04-01 00:00	2027-04-21 16:00	2027-04-01 00:00	2027-04-21 16:00	2027-01-27 00:00	2027-02-16 16:00	-352	-352					Y	0	1910
+%R	192	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I130	Hall 1 energy metering per hall and per feed	48	48	0	0	2027-03-25 00:00	2027-04-05 16:00	2027-03-25 00:00	2027-04-05 16:00	2027-01-12 00:00	2027-01-19 16:00	-416	-416					Y	0	1920
+%R	193	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I140	BMS field devices, panels and BACnet/IP integration - Section 1	160	160	0	0	2027-03-23 00:00	2027-04-21 16:00	2027-03-23 00:00	2027-04-21 16:00	2027-01-08 00:00	2027-02-04 16:00	-416	-416					Y	0	1930
+%R	194	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I150	DCIM installation and per-hall reporting integration - Section 1	96	96	0	0	2027-04-06 00:00	2027-04-21 16:00	2027-04-06 00:00	2027-04-21 16:00	2027-01-20 00:00	2027-02-04 16:00	-416	-416					Y	0	1940
+%R	195	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I160	Access control (five layers), mantrap, ANPR and CCTV - Section 1	144	144	0	0	2027-03-23 00:00	2027-04-19 16:00	2027-03-23 00:00	2027-04-19 16:00	2027-01-28 00:00	2027-02-22 16:00	-304	-304					Y	0	1950
+%R	196	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I170	Structured cabling, meet-me room and containment - Section 1	96	96	0	0	2027-03-23 00:00	2027-04-09 16:00	2027-03-23 00:00	2027-04-09 16:00	2027-02-05 00:00	2027-02-22 16:00	-256	-256					Y	0	1960
+%R	197	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I180	Floor and wall finishes to plant rooms - Section 1	96	96	0	0	2027-03-23 00:00	2027-04-09 16:00	2027-03-23 00:00	2027-04-09 16:00	2027-03-08 00:00	2027-03-23 16:00	-88	-88					Y	0	1970
+%R	198	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I190	Signage, wayfinding and hall labelling - Section 1	40	40	0	0	2027-04-12 00:00	2027-04-16 16:00	2027-04-12 00:00	2027-04-16 16:00	2027-03-24 00:00	2027-04-01 16:00	-88	-88					Y	0	1980
+%R	199	PDC1	PDC.6.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1I200	Gatehouse fit-out, weighbridge and security console	80	80	0	0	2027-04-01 00:00	2027-04-14 16:00	2027-04-01 00:00	2027-04-14 16:00	2027-04-09 00:00	2027-04-22 16:00	48	48					N	0	1990
+%R	200	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C000	L2 site delivery and static inspection - Section 1 plant	120	120	0	0	2027-03-09 00:00	2027-03-31 16:00	2027-03-09 00:00	2027-03-31 16:00	2026-12-30 00:00	2027-01-21 16:00	-376	-376					Y	0	2000
+%R	201	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C010	L3 component start-up and functional test - mechanical (Section 1)	200	200	0	0	2027-04-07 00:00	2027-05-12 16:00	2027-04-07 00:00	2027-05-12 16:00	2027-01-22 00:00	2027-02-25 16:00	-408	-408					Y	0	2010
+%R	202	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C020	L3 component start-up and functional test - electrical (Section 1)	200	200	0	0	2027-04-14 00:00	2027-05-19 16:00	2027-04-14 00:00	2027-05-19 16:00	2027-01-29 00:00	2027-03-04 16:00	-408	-408					Y	0	2020
+%R	203	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C030	L3 generator start-up and individual load test (09:00-16:00, Cond 15)	160	160	0	0	2027-04-01 00:00	2027-04-28 16:00	2027-04-01 00:00	2027-04-28 16:00	2027-02-05 00:00	2027-03-04 16:00	-296	-296					Y	0	2030
+%R	204	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C040	L3 BMS/DCIM point-to-point, sequence and cause-and-effect proving	160	160	0	0	2027-04-22 00:00	2027-05-20 16:00	2027-04-22 00:00	2027-05-20 16:00	2027-02-05 00:00	2027-03-04 16:00	-416	-416					Y	0	2040
+%R	205	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C050	L3 fire detection, suppression and life-safety functional testing	96	96	0	0	2027-04-22 00:00	2027-05-10 16:00	2027-04-22 00:00	2027-05-10 16:00	2027-02-17 00:00	2027-03-04 16:00	-352	-352					Y	0	2050
+%R	206	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C060	L3 security, access control and CCTV functional testing	64	64	0	0	2027-04-20 00:00	2027-04-29 16:00	2027-04-20 00:00	2027-04-29 16:00	2027-02-23 00:00	2027-03-04 16:00	-304	-304					Y	0	2060
+%R	207	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C070	L4a Integrated systems testing - non-utility-dependent (generator-borne)	120	120	0	0	2027-05-21 00:00	2027-06-10 16:00	2027-05-21 00:00	2027-06-10 16:00	2027-03-05 00:00	2027-03-25 16:00	-416	-416					Y	0	2070
+%R	208	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C080	L4b Integrated systems testing - loss of utility, black building, failure modes	80	80	0	0	2027-06-11 00:00	2027-06-24 16:00	2027-06-11 00:00	2027-06-24 16:00	2027-03-30 00:00	2027-04-12 16:00	-416	-416					Y	0	2080
+%R	209	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C090	L5 24 h integrated load-bank test at full 10 MW shared capacity	64	64	0	0	2027-06-28 00:00	2027-07-07 16:00	2027-06-28 00:00	2027-07-07 16:00	2027-04-13 00:00	2027-04-22 16:00	-416	-416					Y	0	2090
+%R	210	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C100	Section 1 as-built drawings, O&M manuals, training and statutory certificates	120	120	0	0	2027-05-28 00:00	2027-06-17 16:00	2027-05-28 00:00	2027-06-17 16:00	2027-04-02 00:00	2027-04-22 16:00	-312	-312					Y	0	2100
+%R	211	PDC1	PDC.6.7	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C110	Sectional occupancy inspection - Section 1 (kayttoonottotarkastus, Cond 6)	40	40	0	0	2027-07-08 00:00	2027-07-14 16:00	2027-07-08 00:00	2027-07-14 16:00	2027-04-23 00:00	2027-04-29 16:00	-416	-416					Y	0	2110
+%R	212	PDC1	PDC.6.7	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S1C120	Tenant technical acceptance and sign-off - Hall 1 (PDC-TA-001 Section 4)	40	40	0	0	2027-07-08 00:00	2027-07-14 16:00	2027-07-08 00:00	2027-07-14 16:00	2027-04-23 00:00	2027-04-29 16:00	-416	-416					Y	0	2120
+%R	213	PDC1	PDC.6.7	SITE	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS1C130	M: Tenant fit-out access to Hall 1 (Month 12, MS-10)	0	0	0	0	2027-04-30 00:00	2027-04-30 16:00	2027-04-30 00:00	2027-04-30 16:00	2027-04-22 00:00	2027-04-22 16:00	-48	-48					Y	0	2130
+%R	214	PDC1	PDC.11	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS1C140	M: SECTION 1 TAKING OVER (contract date 2 May 2027)	0	0	0	0	2027-07-15 00:00	2027-07-15 16:00	2027-07-15 00:00	2027-07-15 16:00	2027-04-30 00:00	2027-04-30 16:00	-416	-416					Y	0	2140
+%R	215	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2F010	Bulk excavation - Hall 2 (2,592 m3)	48	48	0	0	2026-08-17 00:00	2026-08-24 16:00	2026-08-17 00:00	2026-08-24 16:00	2026-08-17 00:00	2026-08-24 16:00	0	0					Y	0	2150
+%R	216	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2F020	Pad foundations - Hall 2	96	96	0	0	2026-08-25 00:00	2026-09-09 16:00	2026-08-25 00:00	2026-09-09 16:00	2026-08-25 00:00	2026-09-09 16:00	0	0					Y	0	2160
+%R	217	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2F030	Ground beams and pile caps - Hall 2	48	48	0	0	2026-09-10 00:00	2026-09-17 16:00	2026-09-10 00:00	2026-09-17 16:00	2026-09-10 00:00	2026-09-17 16:00	0	0					Y	0	2170
+%R	218	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2F040	Underground services and drainage - Hall 2	64	64	0	0	2026-09-15 00:00	2026-09-24 16:00	2026-09-15 00:00	2026-09-24 16:00	2026-09-15 00:00	2026-09-24 16:00	0	0					Y	0	2180
+%R	219	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2F050	Sub-base, capping and geotextile - Hall 2	40	40	0	0	2026-09-21 00:00	2026-09-25 16:00	2026-09-21 00:00	2026-09-25 16:00	2026-09-21 00:00	2026-09-25 16:00	0	0					Y	0	2190
+%R	220	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2F060	Ground slab - Hall 2, FM2 flatness (432 m3)	80	80	0	0	2026-09-28 00:00	2026-10-09 16:00	2026-09-28 00:00	2026-10-09 16:00	2026-09-28 00:00	2026-10-09 16:00	0	0					Y	0	2200
+%R	221	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2S010	Steel erection - Hall 2 frame (112 t)	104	104	0	0	2026-12-30 00:00	2027-01-19 16:00	2026-12-30 00:00	2027-01-19 16:00	2026-10-12 00:00	2026-10-28 16:00	-440	-440					Y	0	2210
+%R	222	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2S020	Precast wall panels - Hall 2 (64 nr, EI 120)	104	104	0	0	2027-01-20 00:00	2027-02-05 16:00	2027-01-20 00:00	2027-02-05 16:00	2026-10-29 00:00	2026-11-16 16:00	-440	-440					Y	0	2220
+%R	223	PDC1	PDC.7.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2S030	Metal deck, purlins and side rails - Hall 2	32	32	0	0	2027-01-20 00:00	2027-01-25 16:00	2027-01-20 00:00	2027-01-25 16:00	2026-11-11 00:00	2026-11-16 16:00	-368	-368					Y	0	2230
+%R	224	PDC1	PDC.7.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2E010	Warm roof build-up - Hall 2 (1,728 m2)	96	96	0	0	2027-02-08 00:00	2027-02-23 16:00	2027-02-08 00:00	2027-02-23 16:00	2026-11-17 00:00	2026-12-02 16:00	-440	-440					Y	0	2240
+%R	225	PDC1	PDC.7.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2E020	Insulated composite cladding - Hall 2 (1,651 m2)	168	168	0	0	2027-02-15 00:00	2027-03-15 16:00	2027-02-15 00:00	2027-03-15 16:00	2026-11-24 00:00	2026-12-22 16:00	-440	-440					Y	0	2250
+%R	226	PDC1	PDC.7.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2E030	Acoustic louvres - Hall 2 (310 m2)	64	64	0	0	2027-03-16 00:00	2027-03-25 16:00	2027-03-16 00:00	2027-03-25 16:00	2027-01-05 00:00	2027-01-15 16:00	-392	-392					Y	0	2260
+%R	227	PDC1	PDC.7.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2E040	Doors, rainwater goods and roof access - Hall 2	64	64	0	0	2027-03-16 00:00	2027-03-25 16:00	2027-03-16 00:00	2027-03-25 16:00	2027-01-05 00:00	2027-01-15 16:00	-392	-392					Y	0	2270
+%R	228	PDC1	PDC.7.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2E050	Passive fire protection to steel - Hall 2 (2,000 m2)	160	160	0	0	2027-03-16 00:00	2027-04-14 16:00	2027-03-16 00:00	2027-04-14 16:00	2026-12-23 00:00	2027-01-25 16:00	-440	-440					Y	0	2280
+%R	229	PDC1	PDC.7.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2E060	Airtightness works and q50 test - Hall 2	48	48	0	0	2027-03-30 00:00	2027-04-06 16:00	2027-03-30 00:00	2027-04-06 16:00	2027-01-18 00:00	2027-01-25 16:00	-392	-392					Y	0	2290
+%R	230	PDC1	PDC.7.2	SITE	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MSS2E070	M: Hall 2 weathertight	0	0	0	0	2027-04-15 00:00	2027-04-15 16:00	2027-04-15 00:00	2027-04-15 16:00	2027-01-26 00:00	2027-01-26 16:00	-440	-440					Y	0	2300
+%R	231	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2M010	Extend shared spine services to Hall 2 (live-environment method statement)	96	96	0	0	2027-04-16 00:00	2027-05-03 16:00	2027-04-16 00:00	2027-05-03 16:00	2027-01-28 00:00	2027-02-12 16:00	-432	-432					Y	0	2310
+%R	232	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I010	Hall 2 substation 20/0.4 kV, 3.3 MVA	80	80	0	0	2027-04-16 00:00	2027-04-29 16:00	2027-04-16 00:00	2027-04-29 16:00	2027-01-27 00:00	2027-02-09 16:00	-440	-440					Y	0	2320
+%R	233	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I020	Hall 2 UPS modules (4 nr) and battery system	144	144	0	0	2027-04-30 00:00	2027-05-26 16:00	2027-04-30 00:00	2027-05-26 16:00	2027-02-10 00:00	2027-03-05 16:00	-440	-440					Y	0	2330
+%R	234	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I030	Hall 2 LV switchboards, distribution and busway (240 m)	160	160	0	0	2027-05-27 00:00	2027-06-23 16:00	2027-05-27 00:00	2027-06-23 16:00	2027-03-08 00:00	2027-04-06 16:00	-440	-440					Y	0	2340
+%R	235	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I040	Hall 2 containment, cabling, small power and lighting	160	160	0	0	2027-04-15 00:00	2027-05-13 16:00	2027-04-15 00:00	2027-05-13 16:00	2027-03-03 00:00	2027-04-01 16:00	-232	-232					Y	0	2350
+%R	236	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I050	Hall 2 CRAH units (7 nr) and dry coolers (2 nr)	96	96	0	0	2027-04-15 00:00	2027-04-30 16:00	2027-04-15 00:00	2027-04-30 16:00	2027-02-10 00:00	2027-02-25 16:00	-352	-352					Y	0	2360
+%R	237	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I060	Hall 2 chilled water connections and hall pipework (400 m)	160	160	0	0	2027-05-04 00:00	2027-06-01 16:00	2027-05-04 00:00	2027-06-01 16:00	2027-02-15 00:00	2027-03-12 16:00	-432	-432					Y	0	2370
+%R	238	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I065	Hall 2 pipework insulation, pressure test and flush	96	96	0	0	2027-06-02 00:00	2027-06-17 16:00	2027-06-02 00:00	2027-06-17 16:00	2027-03-15 00:00	2027-04-01 16:00	-432	-432					Y	0	2380
+%R	239	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I070	Hall 2 internal partitions, linings and fire-rated boarding	96	96	0	0	2027-04-15 00:00	2027-04-30 16:00	2027-04-15 00:00	2027-04-30 16:00	2027-03-04 00:00	2027-03-19 16:00	-224	-224					Y	0	2390
+%R	240	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I080	Hall 2 anti-static sealed screed floor finish (1,250 m2)	80	80	0	0	2027-05-03 00:00	2027-05-17 16:00	2027-05-03 00:00	2027-05-17 16:00	2027-03-22 00:00	2027-04-06 16:00	-224	-224					Y	0	2400
+%R	241	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I090	Hall 2 cold-aisle containment framework and blanking	96	96	0	0	2027-06-24 00:00	2027-08-02 16:00	2027-06-24 00:00	2027-08-02 16:00	2027-04-07 00:00	2027-04-22 16:00	-440	-440					Y	0	2410
+%R	242	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I100	Hall 2 aspirating smoke detection and suppression	144	144	0	0	2027-05-14 00:00	2027-06-08 16:00	2027-05-14 00:00	2027-06-08 16:00	2027-04-02 00:00	2027-04-27 16:00	-232	-232					Y	0	2420
+%R	243	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I110	Hall 2 BMS/DCIM extension, metering and integration	144	144	0	0	2027-06-18 00:00	2027-08-04 16:00	2027-06-18 00:00	2027-08-04 16:00	2027-04-02 00:00	2027-04-27 16:00	-432	-432					Y	0	2430
+%R	244	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I120	Hall 2 access control, CCTV and structured cabling	112	112	0	0	2027-05-14 00:00	2027-06-02 16:00	2027-05-14 00:00	2027-06-02 16:00	2027-04-08 00:00	2027-04-27 16:00	-200	-200					Y	0	2440
+%R	245	PDC1	PDC.7.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2I130	Hall 2 plant room finishes, signage and labelling	80	80	0	0	2027-05-14 00:00	2027-05-27 16:00	2027-05-14 00:00	2027-05-27 16:00	2027-06-10 00:00	2027-06-23 16:00	152	152					N	0	2450
+%R	246	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C000	L2 site delivery and static inspection - Section 2	80	80	0	0	2027-05-27 00:00	2027-06-09 16:00	2027-05-27 00:00	2027-06-09 16:00	2027-04-09 00:00	2027-04-22 16:00	-264	-264					Y	0	2460
+%R	247	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C010	L3 component start-up - mechanical (Section 2)	144	144	0	0	2027-06-18 00:00	2027-07-14 16:00	2027-06-18 00:00	2027-07-14 16:00	2027-04-23 00:00	2027-05-19 16:00	-312	-312					Y	0	2470
+%R	248	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C020	L3 component start-up - electrical (Section 2)	144	144	0	0	2027-08-03 00:00	2027-08-26 16:00	2027-08-03 00:00	2027-08-26 16:00	2027-04-23 00:00	2027-05-19 16:00	-560	-560					Y	0	2480
+%R	249	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C030	L3 BMS/DCIM, fire and security functional testing (Section 2)	120	120	0	0	2027-08-05 00:00	2027-08-25 16:00	2027-08-05 00:00	2027-08-25 16:00	2027-04-28 00:00	2027-05-19 16:00	-552	-552					Y	0	2490
+%R	250	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C040	L4a Integrated systems testing - non-utility-dependent (Section 2)	96	96	0	0	2027-08-27 00:00	2027-09-13 16:00	2027-08-27 00:00	2027-09-13 16:00	2027-05-20 00:00	2027-06-04 16:00	-560	-560					Y	0	2500
+%R	251	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MSS2C045	M: DNO Stage 2 capacity release (30 Jun 2027, GC 3.3)	0	0	0	0	2027-08-27 00:00	2027-08-27 16:00	2027-08-27 00:00	2027-08-27 16:00	2027-06-04 00:00	2027-06-04 16:00	-472	-472	CS_MSO	2027-06-30 00:00			Y	0	2510
+%R	252	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C050	L4b Integrated systems testing - loss of utility and failure modes (Section 2)	64	64	0	0	2027-09-14 00:00	2027-09-23 16:00	2027-09-14 00:00	2027-09-23 16:00	2027-06-07 00:00	2027-06-16 16:00	-560	-560					Y	0	2520
+%R	253	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C060	L5 24 h integrated load-bank test at full Section 2 load (2.5 MW)	40	40	0	0	2027-09-24 00:00	2027-09-30 16:00	2027-09-24 00:00	2027-09-30 16:00	2027-06-17 00:00	2027-06-23 16:00	-560	-560					Y	0	2530
+%R	254	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C070	Section 2 as-built drawings, O&M manuals, training and certificates	96	96	0	0	2027-09-03 00:00	2027-09-20 16:00	2027-09-03 00:00	2027-09-20 16:00	2027-06-08 00:00	2027-06-23 16:00	-496	-496					Y	0	2540
+%R	255	PDC1	PDC.7.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C080	Sectional occupancy inspection - Section 2 (kayttoonottotarkastus)	40	40	0	0	2027-10-01 00:00	2027-10-07 16:00	2027-10-01 00:00	2027-10-07 16:00	2027-06-24 00:00	2027-07-01 16:00	-560	-560					Y	0	2550
+%R	256	PDC1	PDC.7.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S2C090	Tenant technical acceptance and sign-off - Hall 2	40	40	0	0	2027-10-01 00:00	2027-10-07 16:00	2027-10-01 00:00	2027-10-07 16:00	2027-06-24 00:00	2027-07-01 16:00	-560	-560					Y	0	2560
+%R	257	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3F010	Bulk excavation - Hall 3 (2,592 m3)	48	48	0	0	2026-09-07 00:00	2026-09-14 16:00	2026-09-07 00:00	2026-09-14 16:00	2026-10-21 00:00	2026-10-28 16:00	256	256					N	0	2570
+%R	258	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3F020	Pad foundations - Hall 3	96	96	0	0	2026-09-15 00:00	2026-09-30 16:00	2026-09-15 00:00	2026-09-30 16:00	2026-11-05 00:00	2026-11-20 16:00	296	296					N	0	2580
+%R	259	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3F030	Ground beams and pile caps - Hall 3	48	48	0	0	2026-10-01 00:00	2026-10-08 16:00	2026-10-01 00:00	2026-10-08 16:00	2026-11-23 00:00	2026-11-30 16:00	296	296					N	0	2590
+%R	260	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3F040	Underground services and drainage - Hall 3	64	64	0	0	2026-10-06 00:00	2026-10-15 16:00	2026-10-06 00:00	2026-10-15 16:00	2026-11-26 00:00	2026-12-07 16:00	296	296					N	0	2600
+%R	261	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3F050	Sub-base, capping and geotextile - Hall 3	40	40	0	0	2026-10-12 00:00	2026-10-16 16:00	2026-10-12 00:00	2026-10-16 16:00	2026-12-02 00:00	2026-12-08 16:00	296	296					N	0	2610
+%R	262	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3F060	Ground slab - Hall 3, FM2 flatness (432 m3)	80	80	0	0	2026-10-19 00:00	2026-10-30 16:00	2026-10-19 00:00	2026-10-30 16:00	2026-12-09 00:00	2026-12-22 16:00	296	296					N	0	2620
+%R	263	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3S010	Steel erection - Hall 3 frame (112 t)	104	104	0	0	2027-02-22 00:00	2027-03-10 16:00	2027-02-22 00:00	2027-03-10 16:00	2026-12-23 00:00	2027-01-14 16:00	-312	-312					Y	0	2630
+%R	264	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3S020	Precast wall panels - Hall 3 (64 nr, EI 120)	104	104	0	0	2027-03-11 00:00	2027-03-31 16:00	2027-03-11 00:00	2027-03-31 16:00	2027-01-15 00:00	2027-02-02 16:00	-312	-312					Y	0	2640
+%R	265	PDC1	PDC.8.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3S030	Metal deck, purlins and side rails - Hall 3	32	32	0	0	2027-03-11 00:00	2027-03-16 16:00	2027-03-11 00:00	2027-03-16 16:00	2027-01-28 00:00	2027-02-02 16:00	-240	-240					Y	0	2650
+%R	266	PDC1	PDC.8.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3E010	Warm roof build-up - Hall 3 (1,728 m2)	96	96	0	0	2027-04-01 00:00	2027-04-16 16:00	2027-04-01 00:00	2027-04-16 16:00	2027-02-03 00:00	2027-02-18 16:00	-312	-312					Y	0	2660
+%R	267	PDC1	PDC.8.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3E020	Insulated composite cladding - Hall 3 (1,651 m2)	168	168	0	0	2027-04-08 00:00	2027-05-07 16:00	2027-04-08 00:00	2027-05-07 16:00	2027-02-10 00:00	2027-03-10 16:00	-312	-312					Y	0	2670
+%R	268	PDC1	PDC.8.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3E030	Acoustic louvres - Hall 3 (310 m2)	64	64	0	0	2027-05-10 00:00	2027-05-19 16:00	2027-05-10 00:00	2027-05-19 16:00	2027-03-19 00:00	2027-04-01 16:00	-264	-264					Y	0	2680
+%R	269	PDC1	PDC.8.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3E040	Doors, rainwater goods and roof access - Hall 3	64	64	0	0	2027-05-10 00:00	2027-05-19 16:00	2027-05-10 00:00	2027-05-19 16:00	2027-03-19 00:00	2027-04-01 16:00	-264	-264					Y	0	2690
+%R	270	PDC1	PDC.8.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3E050	Passive fire protection to steel - Hall 3 (2,000 m2)	160	160	0	0	2027-05-10 00:00	2027-06-04 16:00	2027-05-10 00:00	2027-06-04 16:00	2027-03-11 00:00	2027-04-09 16:00	-312	-312					Y	0	2700
+%R	271	PDC1	PDC.8.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3E060	Airtightness works and q50 test - Hall 3	48	48	0	0	2027-05-20 00:00	2027-05-27 16:00	2027-05-20 00:00	2027-05-27 16:00	2027-04-02 00:00	2027-04-09 16:00	-264	-264					Y	0	2710
+%R	272	PDC1	PDC.8.2	SITE	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MSS3E070	M: Hall 3 weathertight	0	0	0	0	2027-06-07 00:00	2027-06-07 16:00	2027-06-07 00:00	2027-06-07 16:00	2027-04-12 00:00	2027-04-12 16:00	-312	-312					Y	0	2720
+%R	273	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3M010	Extend shared spine services to Hall 3 (live-environment method statement)	96	96	0	0	2027-06-08 00:00	2027-06-23 16:00	2027-06-08 00:00	2027-06-23 16:00	2027-04-13 00:00	2027-04-28 16:00	-312	-312					Y	0	2730
+%R	274	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I010	Hall 3 substation 20/0.4 kV, 3.3 MVA	80	80	0	0	2027-06-08 00:00	2027-06-21 16:00	2027-06-08 00:00	2027-06-21 16:00	2027-04-15 00:00	2027-04-28 16:00	-296	-296					Y	0	2740
+%R	275	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I020	Hall 3 UPS modules (4 nr) and battery system	144	144	0	0	2027-06-22 00:00	2027-08-06 16:00	2027-06-22 00:00	2027-08-06 16:00	2027-04-29 00:00	2027-05-25 16:00	-296	-296					Y	0	2750
+%R	276	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I030	Hall 3 LV switchboards, distribution and busway (240 m)	160	160	0	0	2027-08-09 00:00	2027-09-03 16:00	2027-08-09 00:00	2027-09-03 16:00	2027-05-26 00:00	2027-06-22 16:00	-296	-296					Y	0	2760
+%R	277	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I040	Hall 3 containment, cabling, small power and lighting	160	160	0	0	2027-06-07 00:00	2027-07-05 16:00	2027-06-07 00:00	2027-07-05 16:00	2027-05-18 00:00	2027-06-14 16:00	-112	-112					Y	0	2770
+%R	278	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I050	Hall 3 CRAH units (7 nr) and dry coolers (2 nr)	96	96	0	0	2027-06-07 00:00	2027-06-22 16:00	2027-06-07 00:00	2027-06-22 16:00	2027-04-26 00:00	2027-05-12 16:00	-232	-232					Y	0	2780
+%R	279	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I060	Hall 3 chilled water connections and hall pipework (400 m)	160	160	0	0	2027-06-24 00:00	2027-08-12 16:00	2027-06-24 00:00	2027-08-12 16:00	2027-04-29 00:00	2027-05-27 16:00	-312	-312					Y	0	2790
+%R	280	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I065	Hall 3 pipework insulation, pressure test and flush	96	96	0	0	2027-08-13 00:00	2027-08-30 16:00	2027-08-13 00:00	2027-08-30 16:00	2027-05-28 00:00	2027-06-14 16:00	-312	-312					Y	0	2800
+%R	281	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I070	Hall 3 internal partitions, linings and fire-rated boarding	96	96	0	0	2027-06-07 00:00	2027-06-22 16:00	2027-06-07 00:00	2027-06-22 16:00	2027-05-24 00:00	2027-06-08 16:00	-80	-80					Y	0	2810
+%R	282	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I080	Hall 3 anti-static sealed screed floor finish (1,250 m2)	80	80	0	0	2027-06-23 00:00	2027-07-07 16:00	2027-06-23 00:00	2027-07-07 16:00	2027-06-09 00:00	2027-06-22 16:00	-80	-80					Y	0	2820
+%R	283	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I090	Hall 3 cold-aisle containment framework and blanking	96	96	0	0	2027-09-06 00:00	2027-09-21 16:00	2027-09-06 00:00	2027-09-21 16:00	2027-06-23 00:00	2027-07-09 16:00	-296	-296					Y	0	2830
+%R	284	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I100	Hall 3 aspirating smoke detection and suppression	144	144	0	0	2027-07-06 00:00	2027-08-19 16:00	2027-07-06 00:00	2027-08-19 16:00	2027-06-15 00:00	2027-07-09 16:00	-112	-112					Y	0	2840
+%R	285	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I110	Hall 3 BMS/DCIM extension, metering and integration	144	144	0	0	2027-08-31 00:00	2027-09-23 16:00	2027-08-31 00:00	2027-09-23 16:00	2027-06-15 00:00	2027-07-09 16:00	-312	-312					Y	0	2850
+%R	286	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I120	Hall 3 access control, CCTV and structured cabling	112	112	0	0	2027-07-06 00:00	2027-08-13 16:00	2027-07-06 00:00	2027-08-13 16:00	2027-06-21 00:00	2027-07-09 16:00	-80	-80					Y	0	2860
+%R	287	PDC1	PDC.8.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3I130	Hall 3 plant room finishes, signage and labelling	80	80	0	0	2027-07-06 00:00	2027-08-09 16:00	2027-07-06 00:00	2027-08-09 16:00	2027-09-10 00:00	2027-09-23 16:00	264	264					N	0	2870
+%R	288	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C000	L2 site delivery and static inspection - Section 3	80	80	0	0	2027-08-09 00:00	2027-08-20 16:00	2027-08-09 00:00	2027-08-20 16:00	2027-07-13 00:00	2027-07-26 16:00	-152	-152					Y	0	2880
+%R	289	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C010	L3 component start-up - mechanical (Section 3)	144	144	0	0	2027-08-31 00:00	2027-09-23 16:00	2027-08-31 00:00	2027-09-23 16:00	2027-07-27 00:00	2027-08-19 16:00	-200	-200					Y	0	2890
+%R	290	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C020	L3 component start-up - electrical (Section 3)	144	144	0	0	2027-09-22 00:00	2027-10-15 16:00	2027-09-22 00:00	2027-10-15 16:00	2027-07-27 00:00	2027-08-19 16:00	-328	-328					Y	0	2900
+%R	291	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C030	L3 BMS/DCIM, fire and security functional testing (Section 3)	120	120	0	0	2027-09-24 00:00	2027-10-14 16:00	2027-09-24 00:00	2027-10-14 16:00	2027-07-30 00:00	2027-08-19 16:00	-320	-320					Y	0	2910
+%R	292	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C040	L4a Integrated systems testing - non-utility-dependent (Section 3)	96	96	0	0	2027-10-18 00:00	2027-11-02 16:00	2027-10-18 00:00	2027-11-02 16:00	2027-08-20 00:00	2027-09-06 16:00	-328	-328					Y	0	2920
+%R	293	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MSS3C045	M: DNO Stage 3 capacity release (31 Oct 2027, GC 3.3)	0	0	0	0	2027-11-01 00:00	2027-11-01 16:00	2027-11-01 00:00	2027-11-01 16:00	2027-09-06 00:00	2027-09-06 16:00	-320	-320	CS_MSO	2027-10-31 00:00			Y	0	2930
+%R	294	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C050	L4b Integrated systems testing - loss of utility and failure modes (Section 3)	64	64	0	0	2027-11-03 00:00	2027-11-12 16:00	2027-11-03 00:00	2027-11-12 16:00	2027-09-07 00:00	2027-09-16 16:00	-328	-328					Y	0	2940
+%R	295	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C060	L5 24 h integrated load-bank test at full Section 3 load (2.5 MW)	40	40	0	0	2027-11-15 00:00	2027-11-19 16:00	2027-11-15 00:00	2027-11-19 16:00	2027-09-17 00:00	2027-09-23 16:00	-328	-328					Y	0	2950
+%R	296	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C070	Section 3 as-built drawings, O&M manuals, training and certificates	96	96	0	0	2027-10-25 00:00	2027-11-09 16:00	2027-10-25 00:00	2027-11-09 16:00	2027-09-08 00:00	2027-09-23 16:00	-264	-264					Y	0	2960
+%R	297	PDC1	PDC.8.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C080	Sectional occupancy inspection - Section 3 (kayttoonottotarkastus)	40	40	0	0	2027-11-22 00:00	2027-11-26 16:00	2027-11-22 00:00	2027-11-26 16:00	2027-09-24 00:00	2027-09-30 16:00	-328	-328					Y	0	2970
+%R	298	PDC1	PDC.8.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S3C090	Tenant technical acceptance and sign-off - Hall 3	40	40	0	0	2027-11-22 00:00	2027-11-26 16:00	2027-11-22 00:00	2027-11-26 16:00	2027-09-24 00:00	2027-09-30 16:00	-328	-328					Y	0	2980
+%R	299	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F005	Bulk excavation - Hall 4 till above rock (1,400 m3)	24	24	0	0	2026-09-28 00:00	2026-09-30 16:00	2026-09-28 00:00	2026-09-30 16:00	2026-11-11 00:00	2026-11-13 16:00	256	256					N	0	2990
+%R	300	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F007	Controlled blasting - Hall 4 (2,073 m3 rock, 2 blasts/week)	208	208	0	0	2026-10-01 00:00	2026-11-05 16:00	2026-10-01 00:00	2026-11-05 16:00	2026-11-16 00:00	2026-12-21 16:00	256	256					N	0	3000
+%R	301	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F008	Muck away and trim blasted rock - Hall 4	112	112	0	0	2026-10-13 00:00	2026-10-30 16:00	2026-10-13 00:00	2026-10-30 16:00	2026-11-26 00:00	2026-12-15 16:00	256	256					N	0	3010
+%R	302	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F009	Direct-to-rock / rock-socketed piers - Hall 4	64	64	0	0	2026-11-02 00:00	2026-11-11 16:00	2026-11-02 00:00	2026-11-11 16:00	2026-12-16 00:00	2026-12-29 16:00	256	256					N	0	3020
+%R	303	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F010	Trim and prepare formation - Hall 4	32	32	0	0	2026-11-12 00:00	2026-11-17 16:00	2026-11-12 00:00	2026-11-17 16:00	2026-12-30 00:00	2027-01-05 16:00	256	256					N	0	3030
+%R	304	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F020	Pad foundations - Hall 4	96	96	0	0	2026-11-18 00:00	2026-12-03 16:00	2026-11-18 00:00	2026-12-03 16:00	2027-01-07 00:00	2027-01-22 16:00	256	256					N	0	3040
+%R	305	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F030	Ground beams and pile caps - Hall 4	48	48	0	0	2026-12-04 00:00	2026-12-11 16:00	2026-12-04 00:00	2026-12-11 16:00	2027-01-25 00:00	2027-02-01 16:00	256	256					N	0	3050
+%R	306	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F040	Underground services and drainage - Hall 4	64	64	0	0	2026-12-09 00:00	2026-12-18 16:00	2026-12-09 00:00	2026-12-18 16:00	2027-01-28 00:00	2027-02-08 16:00	256	256					N	0	3060
+%R	307	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F050	Sub-base, capping and geotextile - Hall 4	40	40	0	0	2026-12-15 00:00	2026-12-21 16:00	2026-12-15 00:00	2026-12-21 16:00	2027-02-03 00:00	2027-02-09 16:00	256	256					N	0	3070
+%R	308	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4F060	Ground slab - Hall 4, FM2 flatness (432 m3)	80	80	0	0	2026-12-22 00:00	2027-01-08 16:00	2026-12-22 00:00	2027-01-08 16:00	2027-02-10 00:00	2027-02-23 16:00	256	256					N	0	3080
+%R	309	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4S010	Steel erection - Hall 4 frame (112 t)	104	104	0	0	2027-05-10 00:00	2027-05-26 16:00	2027-05-10 00:00	2027-05-26 16:00	2027-02-24 00:00	2027-03-12 16:00	-400	-400					Y	0	3090
+%R	310	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4S020	Precast wall panels - Hall 4 (64 nr, EI 120)	104	104	0	0	2027-05-27 00:00	2027-06-14 16:00	2027-05-27 00:00	2027-06-14 16:00	2027-03-15 00:00	2027-04-02 16:00	-400	-400					Y	0	3100
+%R	311	PDC1	PDC.9.1	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4S030	Metal deck, purlins and side rails - Hall 4	32	32	0	0	2027-05-27 00:00	2027-06-01 16:00	2027-05-27 00:00	2027-06-01 16:00	2027-03-30 00:00	2027-04-02 16:00	-328	-328					Y	0	3110
+%R	312	PDC1	PDC.9.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4E010	Warm roof build-up - Hall 4 (1,728 m2)	96	96	0	0	2027-06-15 00:00	2027-07-01 16:00	2027-06-15 00:00	2027-07-01 16:00	2027-04-05 00:00	2027-04-20 16:00	-400	-400					Y	0	3120
+%R	313	PDC1	PDC.9.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4E020	Insulated composite cladding - Hall 4 (1,651 m2)	168	168	0	0	2027-06-22 00:00	2027-08-11 16:00	2027-06-22 00:00	2027-08-11 16:00	2027-04-12 00:00	2027-05-11 16:00	-400	-400					Y	0	3130
+%R	314	PDC1	PDC.9.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4E030	Acoustic louvres - Hall 4 (310 m2)	64	64	0	0	2027-08-12 00:00	2027-08-23 16:00	2027-08-12 00:00	2027-08-23 16:00	2027-05-20 00:00	2027-05-31 16:00	-352	-352					Y	0	3140
+%R	315	PDC1	PDC.9.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4E040	Doors, rainwater goods and roof access - Hall 4	64	64	0	0	2027-08-12 00:00	2027-08-23 16:00	2027-08-12 00:00	2027-08-23 16:00	2027-05-20 00:00	2027-05-31 16:00	-352	-352					Y	0	3150
+%R	316	PDC1	PDC.9.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4E050	Passive fire protection to steel - Hall 4 (2,000 m2)	160	160	0	0	2027-08-12 00:00	2027-09-08 16:00	2027-08-12 00:00	2027-09-08 16:00	2027-05-12 00:00	2027-06-08 16:00	-400	-400					Y	0	3160
+%R	317	PDC1	PDC.9.2	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4E060	Airtightness works and q50 test - Hall 4	48	48	0	0	2027-08-24 00:00	2027-08-31 16:00	2027-08-24 00:00	2027-08-31 16:00	2027-06-01 00:00	2027-06-08 16:00	-352	-352					Y	0	3170
+%R	318	PDC1	PDC.9.2	SITE	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MSS4E070	M: Hall 4 weathertight	0	0	0	0	2027-09-09 00:00	2027-09-09 16:00	2027-09-09 00:00	2027-09-09 16:00	2027-06-09 00:00	2027-06-09 16:00	-400	-400					Y	0	3180
+%R	319	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4M010	Extend shared spine services to Hall 4 (live-environment method statement)	96	96	0	0	2027-09-10 00:00	2027-09-27 16:00	2027-09-10 00:00	2027-09-27 16:00	2027-06-11 00:00	2027-06-29 16:00	-392	-392					Y	0	3190
+%R	320	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I010	Hall 4 substation 20/0.4 kV, 3.3 MVA	80	80	0	0	2027-09-10 00:00	2027-09-23 16:00	2027-09-10 00:00	2027-09-23 16:00	2027-06-10 00:00	2027-06-23 16:00	-400	-400					Y	0	3200
+%R	321	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I020	Hall 4 UPS modules (4 nr) and battery system	144	144	0	0	2027-09-24 00:00	2027-10-19 16:00	2027-09-24 00:00	2027-10-19 16:00	2027-06-24 00:00	2027-08-10 16:00	-400	-400					Y	0	3210
+%R	322	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I030	Hall 4 LV switchboards, distribution and busway (240 m)	160	160	0	0	2027-10-20 00:00	2027-11-16 16:00	2027-10-20 00:00	2027-11-16 16:00	2027-08-11 00:00	2027-09-07 16:00	-400	-400					Y	0	3220
+%R	323	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I040	Hall 4 containment, cabling, small power and lighting	160	160	0	0	2027-09-09 00:00	2027-10-06 16:00	2027-09-09 00:00	2027-10-06 16:00	2027-08-06 00:00	2027-09-02 16:00	-192	-192					Y	0	3230
+%R	324	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I050	Hall 4 CRAH units (7 nr) and dry coolers (2 nr)	96	96	0	0	2027-09-09 00:00	2027-09-24 16:00	2027-09-09 00:00	2027-09-24 16:00	2027-06-24 00:00	2027-08-02 16:00	-312	-312					Y	0	3240
+%R	325	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I060	Hall 4 chilled water connections and hall pipework (400 m)	160	160	0	0	2027-09-28 00:00	2027-10-25 16:00	2027-09-28 00:00	2027-10-25 16:00	2027-06-30 00:00	2027-08-17 16:00	-392	-392					Y	0	3250
+%R	326	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I065	Hall 4 pipework insulation, pressure test and flush	96	96	0	0	2027-10-26 00:00	2027-11-10 16:00	2027-10-26 00:00	2027-11-10 16:00	2027-08-18 00:00	2027-09-02 16:00	-392	-392					Y	0	3260
+%R	327	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I070	Hall 4 internal partitions, linings and fire-rated boarding	96	96	0	0	2027-09-09 00:00	2027-09-24 16:00	2027-09-09 00:00	2027-09-24 16:00	2027-08-09 00:00	2027-08-24 16:00	-184	-184					Y	0	3270
+%R	328	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I080	Hall 4 anti-static sealed screed floor finish (1,250 m2)	80	80	0	0	2027-09-27 00:00	2027-10-08 16:00	2027-09-27 00:00	2027-10-08 16:00	2027-08-25 00:00	2027-09-07 16:00	-184	-184					Y	0	3280
+%R	329	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I090	Hall 4 cold-aisle containment framework and blanking	96	96	0	0	2027-11-17 00:00	2027-12-02 16:00	2027-11-17 00:00	2027-12-02 16:00	2027-09-08 00:00	2027-09-23 16:00	-400	-400					Y	0	3290
+%R	330	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I100	Hall 4 aspirating smoke detection and suppression	144	144	0	0	2027-10-07 00:00	2027-11-01 16:00	2027-10-07 00:00	2027-11-01 16:00	2027-09-03 00:00	2027-09-28 16:00	-192	-192					Y	0	3300
+%R	331	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I110	Hall 4 BMS/DCIM extension, metering and integration	144	144	0	0	2027-11-11 00:00	2027-12-07 16:00	2027-11-11 00:00	2027-12-07 16:00	2027-09-03 00:00	2027-09-28 16:00	-392	-392					Y	0	3310
+%R	332	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I120	Hall 4 access control, CCTV and structured cabling	112	112	0	0	2027-10-07 00:00	2027-10-26 16:00	2027-10-07 00:00	2027-10-26 16:00	2027-09-09 00:00	2027-09-28 16:00	-160	-160					Y	0	3320
+%R	333	PDC1	PDC.9.3	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4I130	Hall 4 plant room finishes, signage and labelling	80	80	0	0	2027-10-07 00:00	2027-10-20 16:00	2027-10-07 00:00	2027-10-20 16:00	2027-12-01 00:00	2027-12-15 16:00	312	312					N	0	3330
+%R	334	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C000	L2 site delivery and static inspection - Section 4	80	80	0	0	2027-10-20 00:00	2027-11-02 16:00	2027-10-20 00:00	2027-11-02 16:00	2027-09-10 00:00	2027-09-23 16:00	-224	-224					Y	0	3340
+%R	335	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C010	L3 component start-up - mechanical (Section 4)	144	144	0	0	2027-11-11 00:00	2027-12-07 16:00	2027-11-11 00:00	2027-12-07 16:00	2027-09-24 00:00	2027-10-19 16:00	-272	-272					Y	0	3350
+%R	336	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C020	L3 component start-up - electrical (Section 4)	144	144	0	0	2027-12-03 00:00	2027-12-30 16:00	2027-12-03 00:00	2027-12-30 16:00	2027-09-24 00:00	2027-10-19 16:00	-400	-400					Y	0	3360
+%R	337	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C030	L3 BMS/DCIM, fire and security functional testing (Section 4)	120	120	0	0	2027-12-08 00:00	2027-12-29 16:00	2027-12-08 00:00	2027-12-29 16:00	2027-09-29 00:00	2027-10-19 16:00	-392	-392					Y	0	3370
+%R	338	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C040	L4a Integrated systems testing - non-utility-dependent (Section 4)	96	96	0	0	2027-12-31 00:00	2028-01-18 16:00	2027-12-31 00:00	2028-01-18 16:00	2027-10-20 00:00	2027-11-04 16:00	-400	-400					Y	0	3380
+%R	339	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MSS4C045	M: DNO Stage 4 capacity release (31 Jan 2028, GC 3.3)	0	0	0	0	2028-01-31 00:00	2028-01-31 16:00	2028-01-31 00:00	2028-01-31 16:00	2027-11-04 00:00	2027-11-04 16:00	-472	-472	CS_MSO	2028-01-31 00:00			Y	0	3390
+%R	340	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C050	L4b Integrated systems testing - loss of utility and failure modes (Section 4)	64	64	0	0	2028-02-01 00:00	2028-02-10 16:00	2028-02-01 00:00	2028-02-10 16:00	2027-11-05 00:00	2027-11-16 16:00	-472	-472					Y	0	3400
+%R	341	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C060	L5 24 h integrated load-bank test at full Section 4 load (2.5 MW)	40	40	0	0	2028-02-11 00:00	2028-02-17 16:00	2028-02-11 00:00	2028-02-17 16:00	2027-11-17 00:00	2027-11-23 16:00	-472	-472					Y	0	3410
+%R	342	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C070	Section 4 as-built drawings, O&M manuals, training and certificates	96	96	0	0	2028-01-10 00:00	2028-01-25 16:00	2028-01-10 00:00	2028-01-25 16:00	2027-11-22 00:00	2027-12-08 16:00	-256	-256					Y	0	3420
+%R	343	PDC1	PDC.9.4	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C080	Sectional occupancy inspection - Section 4 (kayttoonottotarkastus)	40	40	0	0	2028-02-18 00:00	2028-02-24 16:00	2028-02-18 00:00	2028-02-24 16:00	2027-12-16 00:00	2027-12-22 16:00	-352	-352					Y	0	3430
+%R	344	PDC1	PDC.9.4	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4C090	Tenant technical acceptance and sign-off - Hall 4	40	40	0	0	2028-02-18 00:00	2028-02-24 16:00	2028-02-18 00:00	2028-02-24 16:00	2027-11-24 00:00	2027-11-30 16:00	-472	-472					Y	0	3440
+%R	345	PDC1	PDC.11	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS2C100	M: SECTION 2 TAKING OVER (contract date 2 Jul 2027)	0	0	0	0	2027-10-08 00:00	2027-10-08 16:00	2027-10-08 00:00	2027-10-08 16:00	2027-07-02 00:00	2027-07-02 16:00	-560	-560					Y	0	3450
+%R	346	PDC1	PDC.11	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS3C100	M: SECTION 3 TAKING OVER (contract date 2 Oct 2027)	0	0	0	0	2027-11-29 00:00	2027-11-29 16:00	2027-11-29 00:00	2027-11-29 16:00	2027-10-01 00:00	2027-10-01 16:00	-328	-328					Y	0	3460
+%R	347	PDC1	PDC.9.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4A000	Bulk excavation and foundations - administration / NOC block	96	96	0	0	2026-11-18 00:00	2026-12-03 16:00	2026-11-18 00:00	2026-12-03 16:00	2027-05-25 00:00	2027-06-09 16:00	1016	1016					N	0	3470
+%R	348	PDC1	PDC.9.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4A010	Ground slab and first-floor structure - administration / NOC block	112	112	0	0	2026-12-04 00:00	2026-12-23 16:00	2026-12-04 00:00	2026-12-23 16:00	2027-06-10 00:00	2027-06-30 16:00	1016	1016					N	0	3480
+%R	349	PDC1	PDC.9.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4A020	Steel frame and metal deck - administration / NOC block (50 t)	64	64	0	0	2026-12-28 00:00	2027-01-08 16:00	2026-12-28 00:00	2027-01-08 16:00	2027-07-01 00:00	2027-08-02 16:00	1016	1016					N	0	3490
+%R	350	PDC1	PDC.9.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4A030	Envelope, roof and cladding - administration / NOC block (1,100 m2)	128	128	0	0	2027-01-11 00:00	2027-02-01 16:00	2027-01-11 00:00	2027-02-01 16:00	2027-08-03 00:00	2027-08-24 16:00	1016	1016					N	0	3500
+%R	351	PDC1	PDC.9.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4A040	MEP first fix - administration / NOC block	160	160	0	0	2027-02-02 00:00	2027-03-01 16:00	2027-02-02 00:00	2027-03-01 16:00	2027-08-25 00:00	2027-09-21 16:00	1016	1016					N	0	3510
+%R	352	PDC1	PDC.9.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4A050	Suspended ceilings, partitions and painted finishes - admin / NOC	144	144	0	0	2027-03-02 00:00	2027-03-25 16:00	2027-03-02 00:00	2027-03-25 16:00	2027-09-22 00:00	2027-10-15 16:00	1016	1016					N	0	3520
+%R	353	PDC1	PDC.9.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4A060	Admin / NOC fit-out, joinery, sanitaryware and NOC raised floor	160	160	0	0	2027-03-30 00:00	2027-04-26 16:00	2027-03-30 00:00	2027-04-26 16:00	2027-10-18 00:00	2027-11-12 16:00	1016	1016					N	0	3530
+%R	354	PDC1	PDC.9.4	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4A070	NOC systems, DCIM workstations and security console integration	96	96	0	0	2027-12-08 00:00	2027-12-23 16:00	2027-12-08 00:00	2027-12-23 16:00	2027-11-15 00:00	2027-11-30 16:00	-128	-128					Y	0	3540
+%R	355	PDC1	PDC.9.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4X000	Stormwater attenuation, oil separators and discharge control (Cond 19/20)	160	160	0	0	2026-12-21 00:00	2027-01-21 16:00	2026-12-21 00:00	2027-01-21 16:00	2027-09-08 00:00	2027-10-05 16:00	1312	1312					N	0	3550
+%R	356	PDC1	PDC.9.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4X010	Foul, water and utility connections - SW corner chamber	120	120	0	0	2026-12-30 00:00	2027-01-21 16:00	2026-12-30 00:00	2027-01-21 16:00	2027-12-01 00:00	2027-12-22 16:00	1752	1752					N	0	3560
+%R	357	PDC1	PDC.9.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4X020	Roads, hardstanding and service yard (9,800 m2)	160	160	0	0	2027-02-02 00:00	2027-03-01 16:00	2027-02-02 00:00	2027-03-01 16:00	2027-10-06 00:00	2027-11-02 16:00	1256	1256					N	0	3570
+%R	358	PDC1	PDC.9.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4X030	External lighting and small power	80	80	0	0	2027-03-02 00:00	2027-03-15 16:00	2027-03-02 00:00	2027-03-15 16:00	2027-11-03 00:00	2027-11-16 16:00	1256	1256					N	0	3580
+%R	359	PDC1	PDC.9.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4X040	Landscaping and 2:1 tree replacement (Cond 21/22)	120	120	0	0	2027-03-09 00:00	2027-03-31 16:00	2027-03-09 00:00	2027-03-31 16:00	2027-11-10 00:00	2027-11-30 16:00	1256	1256					N	0	3590
+%R	360	PDC1	PDC.9.5	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4X050	Perimeter security completion, gates and final ANPR commissioning	80	80	0	0	2027-10-27 00:00	2027-11-09 16:00	2027-10-27 00:00	2027-11-09 16:00	2027-11-17 00:00	2027-11-30 16:00	120	120					N	0	3600
+%R	361	PDC1	PDC.10	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9000	Boundary chamber civil works, flanged connection and isolation valves	120	120	0	0	2026-10-02 00:00	2026-10-22 16:00	2026-10-02 00:00	2026-10-22 16:00	2027-08-03 00:00	2027-08-23 16:00	1552	1552					N	0	3610
+%R	362	PDC1	PDC.10	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9010	Heat recovery pipework - plant room to site boundary chamber (260 m)	104	104	0	0	2027-03-09 00:00	2027-03-25 16:00	2027-03-09 00:00	2027-03-25 16:00	2027-08-24 00:00	2027-09-09 16:00	808	808					N	0	3620
+%R	363	PDC1	PDC.10	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9020	Install waste-heat recovery plant, 4 MW at 70 C flow	240	240	0	0	2027-01-14 00:00	2027-02-24 16:00	2027-01-14 00:00	2027-02-24 16:00	2027-07-09 00:00	2027-09-09 16:00	976	976					N	0	3630
+%R	364	PDC1	PDC.10	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9030	Heat metering skid, calibration and remote read-out to the Offtaker	80	80	0	0	2027-03-30 00:00	2027-04-12 16:00	2027-03-30 00:00	2027-04-12 16:00	2027-09-10 00:00	2027-09-23 16:00	808	808					N	0	3640
+%R	365	PDC1	PDC.10	SITE	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS9040	M: Employer's boundary works ready for the Offtaker (DH 7.2, by 1 Jul 2027)	0	0	0	0	2027-04-13 00:00	2027-04-13 16:00	2027-04-13 00:00	2027-04-13 16:00	2027-09-24 00:00	2027-09-24 16:00	808	808					N	0	3650
+%R	366	PDC1	PDC.10	CAL7	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9050	Offtaker network-side boundary works and reinforcement (DH 7.1, by 31 Aug 2027)	360	360	0	0	2027-04-14 00:00	2027-05-28 16:00	2027-04-14 00:00	2027-05-28 16:00	2027-09-25 00:00	2027-11-08 16:00	1312	1312					N	0	3660
+%R	367	PDC1	PDC.10	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9060	Issue as-built heat plant documentation and cause-and-effect to the Offtaker (DH 2.4)	80	80	0	0	2027-04-13 00:00	2027-04-26 16:00	2027-04-13 00:00	2027-04-26 16:00	2027-10-26 00:00	2027-11-08 16:00	1104	1104					N	0	3670
+%R	368	PDC1	PDC.10	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9070	L3 commissioning of the waste-heat recovery plant	120	120	0	0	2027-05-13 00:00	2027-06-02 16:00	2027-05-13 00:00	2027-06-02 16:00	2027-10-19 00:00	2027-11-08 16:00	896	896					N	0	3680
+%R	369	PDC1	PDC.10	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9080	Serve 20 working days notice of the 72 h witnessed heat delivery test (DH 6.2)	160	160	0	0	2027-06-03 00:00	2027-07-01 16:00	2027-06-03 00:00	2027-07-01 16:00	2027-11-09 00:00	2027-12-07 16:00	896	896					N	0	3690
+%R	370	PDC1	PDC.10	CX	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9090	72 h witnessed waste-heat delivery test, 4 MW at 70 C (heating season only)	48	48	0	0	2027-11-30 00:00	2027-12-08 16:00	2027-11-30 00:00	2027-12-08 16:00	2027-12-08 00:00	2027-12-15 16:00	40	40	CS_MSO	2027-10-01 00:00			N	0	3700
+%R	371	PDC1	PDC.10	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		DH9100	Lodge district-heating demonstration evidence with Building Control (Cond 23)	40	40	0	0	2027-12-09 00:00	2027-12-15 16:00	2027-12-09 00:00	2027-12-15 16:00	2027-12-16 00:00	2027-12-22 16:00	40	40					N	0	3710
+%R	372	PDC1	PDC.9.6	SITE	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4Z000	Final punch list rectification - whole of the Works	120	120	0	0	2028-02-25 00:00	2028-03-16 16:00	2028-02-25 00:00	2028-03-16 16:00	2027-12-01 00:00	2027-12-22 16:00	-472	-472					Y	0	3720
+%R	373	PDC1	PDC.9.6	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4Z010	Lodge complete as-built set, statutory certificates and vibration record (Cond 8)	80	80	0	0	2028-03-03 00:00	2028-03-16 16:00	2028-03-03 00:00	2028-03-16 16:00	2027-12-09 00:00	2027-12-22 16:00	-472	-472					Y	0	3730
+%R	374	PDC1	PDC.9.6	OFF	TK_NotStart	PC_CompUnits	TT_Task	DT_FixedDrtn		S4Z020	Final occupancy inspection - whole permitted scope (Cond 7)	40	40	0	0	2028-03-17 00:00	2028-03-23 16:00	2028-03-17 00:00	2028-03-23 16:00	2027-12-23 00:00	2027-12-30 16:00	-472	-472					Y	0	3740
+%R	375	PDC1	PDC.11	OFF	TK_NotStart	PC_CompUnits	TT_Mile	DT_FixedDrtn		MS4C100	M: SECTION 4 TAKING OVER / WHOLE OF THE WORKS (contract date 2 Jan 2028)	0	0	0	0	2028-03-24 00:00	2028-03-24 16:00	2028-03-24 00:00	2028-03-24 16:00	2027-12-31 00:00	2027-12-31 16:00	-472	-472					Y	0	3750
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt	float_path	aref	arls
+%R	1	2	1	PDC1	PDC1	PR_FS	0	N		
+%R	2	3	2	PDC1	PDC1	PR_FS	0	N		
+%R	3	4	2	PDC1	PDC1	PR_FS	0	N		
+%R	4	5	4	PDC1	PDC1	PR_FS	0	N		
+%R	5	6	5	PDC1	PDC1	PR_FS	0	N		
+%R	6	7	4	PDC1	PDC1	PR_FS	0	N		
+%R	7	8	4	PDC1	PDC1	PR_FS	0	N		
+%R	8	9	2	PDC1	PDC1	PR_FS	0	N		
+%R	9	10	9	PDC1	PDC1	PR_FS	0	N		
+%R	10	11	9	PDC1	PDC1	PR_FS	0	N		
+%R	11	12	9	PDC1	PDC1	PR_FS	0	N		
+%R	12	13	10	PDC1	PDC1	PR_FS	0	N		
+%R	13	13	11	PDC1	PDC1	PR_FS	0	N		
+%R	14	13	12	PDC1	PDC1	PR_FS	0	N		
+%R	15	14	13	PDC1	PDC1	PR_FS	0	N		
+%R	16	15	14	PDC1	PDC1	PR_FS	0	N		
+%R	17	16	14	PDC1	PDC1	PR_FS	0	N		
+%R	18	17	14	PDC1	PDC1	PR_FS	0	N		
+%R	19	18	14	PDC1	PDC1	PR_FS	0	N		
+%R	20	19	14	PDC1	PDC1	PR_FS	0	N		
+%R	21	20	14	PDC1	PDC1	PR_FS	0	N		
+%R	22	21	15	PDC1	PDC1	PR_FS	0	N		
+%R	23	21	16	PDC1	PDC1	PR_FS	0	N		
+%R	24	21	17	PDC1	PDC1	PR_FS	0	N		
+%R	25	21	18	PDC1	PDC1	PR_FS	0	N		
+%R	26	21	19	PDC1	PDC1	PR_FS	0	N		
+%R	27	21	20	PDC1	PDC1	PR_FS	0	N		
+%R	28	22	21	PDC1	PDC1	PR_FS	0	N		
+%R	29	23	16	PDC1	PDC1	PR_FS	0	N		
+%R	30	24	16	PDC1	PDC1	PR_SS	120	N		
+%R	31	25	24	PDC1	PDC1	PR_FS	0	N		
+%R	32	26	23	PDC1	PDC1	PR_FS	0	N		
+%R	33	27	22	PDC1	PDC1	PR_FS	0	N		
+%R	34	28	27	PDC1	PDC1	PR_FS	0	N		
+%R	35	29	22	PDC1	PDC1	PR_FS	0	N		
+%R	36	30	29	PDC1	PDC1	PR_FS	0	N		
+%R	37	31	17	PDC1	PDC1	PR_FS	0	N		
+%R	38	32	31	PDC1	PDC1	PR_FS	0	N		
+%R	39	33	32	PDC1	PDC1	PR_FS	0	N		
+%R	40	34	33	PDC1	PDC1	PR_FS	0	N		
+%R	41	35	34	PDC1	PDC1	PR_FS	0	N		
+%R	42	36	35	PDC1	PDC1	PR_FS	0	N		
+%R	43	37	36	PDC1	PDC1	PR_FS	0	N		
+%R	44	38	37	PDC1	PDC1	PR_FS	0	N		
+%R	45	39	9	PDC1	PDC1	PR_FS	0	N		
+%R	46	40	30	PDC1	PDC1	PR_FS	0	N		
+%R	47	41	2	PDC1	PDC1	PR_FS	0	N		
+%R	48	42	2	PDC1	PDC1	PR_FS	0	N		
+%R	49	43	41	PDC1	PDC1	PR_FS	0	N		
+%R	50	44	43	PDC1	PDC1	PR_FS	0	N		
+%R	51	44	42	PDC1	PDC1	PR_FS	0	N		
+%R	52	45	44	PDC1	PDC1	PR_FS	0	N		
+%R	53	46	16	PDC1	PDC1	PR_SS	80	N		
+%R	54	47	46	PDC1	PDC1	PR_FS	0	N		
+%R	55	48	46	PDC1	PDC1	PR_FS	0	N		
+%R	56	49	47	PDC1	PDC1	PR_FS	0	N		
+%R	57	49	48	PDC1	PDC1	PR_FS	0	N		
+%R	58	50	49	PDC1	PDC1	PR_FS	0	N		
+%R	59	51	2	PDC1	PDC1	PR_FS	0	N		
+%R	60	52	19	PDC1	PDC1	PR_FS	0	N		
+%R	61	53	18	PDC1	PDC1	PR_FS	0	N		
+%R	62	54	53	PDC1	PDC1	PR_FS	0	N		
+%R	63	55	119	PDC1	PDC1	PR_FS	0	N		
+%R	64	56	127	PDC1	PDC1	PR_FS	0	N		
+%R	65	57	144	PDC1	PDC1	PR_FS	0	N		
+%R	66	58	1	PDC1	PDC1	PR_FS	0	N		
+%R	67	59	58	PDC1	PDC1	PR_FS	0	N		
+%R	68	60	59	PDC1	PDC1	PR_FF	120	N		
+%R	69	61	2	PDC1	PDC1	PR_FS	0	N		
+%R	70	62	2	PDC1	PDC1	PR_FS	0	N		
+%R	71	63	62	PDC1	PDC1	PR_FS	0	N		
+%R	72	63	25	PDC1	PDC1	PR_FS	0	N		
+%R	73	64	63	PDC1	PDC1	PR_FS	0	N		
+%R	74	65	64	PDC1	PDC1	PR_FS	0	N		
+%R	75	66	65	PDC1	PDC1	PR_FS	0	N		
+%R	76	67	62	PDC1	PDC1	PR_FS	0	N		
+%R	77	67	25	PDC1	PDC1	PR_FS	0	N		
+%R	78	68	67	PDC1	PDC1	PR_FS	0	N		
+%R	79	69	68	PDC1	PDC1	PR_FS	0	N		
+%R	80	70	69	PDC1	PDC1	PR_FS	0	N		
+%R	81	71	14	PDC1	PDC1	PR_FS	0	N		
+%R	82	72	71	PDC1	PDC1	PR_FS	0	N		
+%R	83	73	15	PDC1	PDC1	PR_FS	0	N		
+%R	84	74	2	PDC1	PDC1	PR_FS	0	N		
+%R	85	75	74	PDC1	PDC1	PR_FS	0	N		
+%R	86	76	74	PDC1	PDC1	PR_FS	0	N		
+%R	87	77	74	PDC1	PDC1	PR_FS	0	N		
+%R	88	78	74	PDC1	PDC1	PR_FS	0	N		
+%R	89	79	75	PDC1	PDC1	PR_FF	80	N		
+%R	90	80	2	PDC1	PDC1	PR_FS	0	N		
+%R	91	81	80	PDC1	PDC1	PR_FS	0	N		
+%R	92	81	39	PDC1	PDC1	PR_FS	0	N		
+%R	93	82	80	PDC1	PDC1	PR_FS	0	N		
+%R	94	83	80	PDC1	PDC1	PR_FS	0	N		
+%R	95	84	80	PDC1	PDC1	PR_FS	0	N		
+%R	96	84	52	PDC1	PDC1	PR_FS	0	N		
+%R	97	85	80	PDC1	PDC1	PR_FS	0	N		
+%R	98	86	82	PDC1	PDC1	PR_FF	96	N		
+%R	99	87	83	PDC1	PDC1	PR_FF	80	N		
+%R	100	88	81	PDC1	PDC1	PR_FF	80	N		
+%R	101	89	14	PDC1	PDC1	PR_FS	0	N		
+%R	102	90	89	PDC1	PDC1	PR_FS	0	N		
+%R	103	91	89	PDC1	PDC1	PR_FS	0	N		
+%R	104	91	52	PDC1	PDC1	PR_FS	0	N		
+%R	105	92	22	PDC1	PDC1	PR_FS	0	N		
+%R	106	93	45	PDC1	PDC1	PR_FS	0	N		
+%R	107	93	61	PDC1	PDC1	PR_FS	0	N		
+%R	108	93	3	PDC1	PDC1	PR_FS	0	N		
+%R	109	94	93	PDC1	PDC1	PR_SS	40	N		
+%R	110	95	93	PDC1	PDC1	PR_SS	40	N		
+%R	111	96	95	PDC1	PDC1	PR_SS	40	N		
+%R	112	97	95	PDC1	PDC1	PR_FS	0	N		
+%R	113	98	97	PDC1	PDC1	PR_SS	16	N		
+%R	114	99	95	PDC1	PDC1	PR_FS	0	N		
+%R	115	100	96	PDC1	PDC1	PR_FS	0	N		
+%R	116	100	51	PDC1	PDC1	PR_FS	0	N		
+%R	117	101	96	PDC1	PDC1	PR_FS	0	N		
+%R	118	102	96	PDC1	PDC1	PR_FS	0	N		
+%R	119	103	95	PDC1	PDC1	PR_FS	0	N		
+%R	120	103	26	PDC1	PDC1	PR_FS	0	N		
+%R	121	103	94	PDC1	PDC1	PR_FS	0	N		
+%R	122	103	98	PDC1	PDC1	PR_FS	0	N		
+%R	123	104	95	PDC1	PDC1	PR_FS	0	N		
+%R	124	104	26	PDC1	PDC1	PR_FS	0	N		
+%R	125	105	104	PDC1	PDC1	PR_FS	0	N		
+%R	126	105	50	PDC1	PDC1	PR_FS	0	N		
+%R	127	106	105	PDC1	PDC1	PR_SS	40	N		
+%R	128	107	95	PDC1	PDC1	PR_FS	0	N		
+%R	129	107	26	PDC1	PDC1	PR_FS	0	N		
+%R	130	108	107	PDC1	PDC1	PR_FS	0	N		
+%R	131	109	108	PDC1	PDC1	PR_FS	0	N		
+%R	132	110	103	PDC1	PDC1	PR_SS	16	N		
+%R	133	111	103	PDC1	PDC1	PR_FS	0	N		
+%R	134	111	110	PDC1	PDC1	PR_FS	0	N		
+%R	135	112	111	PDC1	PDC1	PR_FS	0	N		
+%R	136	113	106	PDC1	PDC1	PR_FS	0	N		
+%R	137	114	107	PDC1	PDC1	PR_FS	0	N		
+%R	138	114	110	PDC1	PDC1	PR_FS	0	N		
+%R	139	115	108	PDC1	PDC1	PR_FS	0	N		
+%R	140	116	112	PDC1	PDC1	PR_FS	0	N		
+%R	141	116	114	PDC1	PDC1	PR_FS	0	N		
+%R	142	116	113	PDC1	PDC1	PR_FS	0	N		
+%R	143	116	115	PDC1	PDC1	PR_FS	0	N		
+%R	144	117	116	PDC1	PDC1	PR_SS	40	N		
+%R	145	118	116	PDC1	PDC1	PR_FS	0	N		
+%R	146	118	117	PDC1	PDC1	PR_SS	64	N		
+%R	147	119	118	PDC1	PDC1	PR_FS	0	N		
+%R	148	120	113	PDC1	PDC1	PR_FS	0	N		
+%R	149	120	118	PDC1	PDC1	PR_FS	0	N		
+%R	150	121	118	PDC1	PDC1	PR_FS	0	N		
+%R	151	121	119	PDC1	PDC1	PR_FS	0	N		
+%R	152	121	55	PDC1	PDC1	PR_FS	0	N		
+%R	153	122	121	PDC1	PDC1	PR_SS	40	N		
+%R	154	123	122	PDC1	PDC1	PR_FS	0	N		
+%R	155	123	109	PDC1	PDC1	PR_FS	0	N		
+%R	156	124	119	PDC1	PDC1	PR_FS	0	N		
+%R	157	124	63	PDC1	PDC1	PR_FS	0	N		
+%R	158	124	100	PDC1	PDC1	PR_FS	0	N		
+%R	159	125	120	PDC1	PDC1	PR_FS	0	N		
+%R	160	125	63	PDC1	PDC1	PR_FS	0	N		
+%R	161	126	121	PDC1	PDC1	PR_FS	0	N		
+%R	162	126	63	PDC1	PDC1	PR_FS	0	N		
+%R	163	126	100	PDC1	PDC1	PR_FS	0	N		
+%R	164	127	122	PDC1	PDC1	PR_FS	0	N		
+%R	165	127	126	PDC1	PDC1	PR_SS	64	N		
+%R	166	128	123	PDC1	PDC1	PR_FS	0	N		
+%R	167	129	124	PDC1	PDC1	PR_FS	0	N		
+%R	168	130	126	PDC1	PDC1	PR_FS	0	N		
+%R	169	130	67	PDC1	PDC1	PR_FS	0	N		
+%R	170	131	124	PDC1	PDC1	PR_FS	0	N		
+%R	171	131	67	PDC1	PDC1	PR_FS	0	N		
+%R	172	132	125	PDC1	PDC1	PR_FS	0	N		
+%R	173	132	67	PDC1	PDC1	PR_FS	0	N		
+%R	174	133	127	PDC1	PDC1	PR_FS	0	N		
+%R	175	134	126	PDC1	PDC1	PR_FS	0	N		
+%R	176	135	127	PDC1	PDC1	PR_FS	0	N		
+%R	177	135	124	PDC1	PDC1	PR_FS	0	N		
+%R	178	135	125	PDC1	PDC1	PR_FS	0	N		
+%R	179	135	128	PDC1	PDC1	PR_FS	0	N		
+%R	180	136	134	PDC1	PDC1	PR_FS	0	N		
+%R	181	136	130	PDC1	PDC1	PR_FS	0	N		
+%R	182	137	135	PDC1	PDC1	PR_FS	0	N		
+%R	183	138	137	PDC1	PDC1	PR_FS	0	N		
+%R	184	138	136	PDC1	PDC1	PR_FS	0	N		
+%R	185	139	130	PDC1	PDC1	PR_FS	0	N		
+%R	186	139	136	PDC1	PDC1	PR_SS	40	N		
+%R	187	139	56	PDC1	PDC1	PR_FS	0	N		
+%R	188	139	28	PDC1	PDC1	PR_FS	0	N		
+%R	189	140	133	PDC1	PDC1	PR_FS	0	N		
+%R	190	140	131	PDC1	PDC1	PR_FS	0	N		
+%R	191	140	132	PDC1	PDC1	PR_FS	0	N		
+%R	192	141	139	PDC1	PDC1	PR_FS	0	N		
+%R	193	141	72	PDC1	PDC1	PR_FS	0	N		
+%R	194	142	139	PDC1	PDC1	PR_FS	0	N		
+%R	195	142	140	PDC1	PDC1	PR_FS	0	N		
+%R	196	143	137	PDC1	PDC1	PR_FS	0	N		
+%R	197	144	139	PDC1	PDC1	PR_FS	0	N		
+%R	198	145	140	PDC1	PDC1	PR_SS	80	N		
+%R	199	146	141	PDC1	PDC1	PR_FS	0	N		
+%R	200	146	142	PDC1	PDC1	PR_FS	0	N		
+%R	201	146	143	PDC1	PDC1	PR_FS	0	N		
+%R	202	147	146	PDC1	PDC1	PR_FS	0	N		
+%R	203	147	138	PDC1	PDC1	PR_FS	0	N		
+%R	204	147	140	PDC1	PDC1	PR_FS	0	N		
+%R	205	147	144	PDC1	PDC1	PR_FS	0	N		
+%R	206	147	145	PDC1	PDC1	PR_FS	0	N		
+%R	207	148	129	PDC1	PDC1	PR_FS	0	N		
+%R	208	148	131	PDC1	PDC1	PR_FS	0	N		
+%R	209	149	129	PDC1	PDC1	PR_FS	0	N		
+%R	210	150	59	PDC1	PDC1	PR_FS	0	N		
+%R	211	150	131	PDC1	PDC1	PR_FS	0	N		
+%R	212	150	149	PDC1	PDC1	PR_FS	0	N		
+%R	213	151	150	PDC1	PDC1	PR_FS	0	N		
+%R	214	152	81	PDC1	PDC1	PR_FS	0	N		
+%R	215	152	129	PDC1	PDC1	PR_FS	0	N		
+%R	216	153	151	PDC1	PDC1	PR_FS	0	N		
+%R	217	153	152	PDC1	PDC1	PR_FS	0	N		
+%R	218	154	148	PDC1	PDC1	PR_FS	0	N		
+%R	219	154	153	PDC1	PDC1	PR_FS	0	N		
+%R	220	155	32	PDC1	PDC1	PR_FS	0	N		
+%R	221	156	154	PDC1	PDC1	PR_FS	0	N		
+%R	222	156	32	PDC1	PDC1	PR_FS	0	N		
+%R	223	156	155	PDC1	PDC1	PR_FS	640	N		
+%R	224	157	156	PDC1	PDC1	PR_FS	0	N		
+%R	225	158	82	PDC1	PDC1	PR_FS	0	N		
+%R	226	158	132	PDC1	PDC1	PR_FS	0	N		
+%R	227	159	158	PDC1	PDC1	PR_SS	64	N		
+%R	228	160	120	PDC1	PDC1	PR_FS	0	N		
+%R	229	160	125	PDC1	PDC1	PR_FS	0	N		
+%R	230	161	160	PDC1	PDC1	PR_SS	80	N		
+%R	231	162	158	PDC1	PDC1	PR_FS	0	N		
+%R	232	162	152	PDC1	PDC1	PR_FS	0	N		
+%R	233	163	162	PDC1	PDC1	PR_SS	40	N		
+%R	234	164	140	PDC1	PDC1	PR_SS	80	N		
+%R	235	164	133	PDC1	PDC1	PR_FS	0	N		
+%R	236	164	137	PDC1	PDC1	PR_FS	0	N		
+%R	237	165	75	PDC1	PDC1	PR_FS	0	N		
+%R	238	165	122	PDC1	PDC1	PR_FS	0	N		
+%R	239	166	76	PDC1	PDC1	PR_FS	0	N		
+%R	240	166	122	PDC1	PDC1	PR_FS	0	N		
+%R	241	167	165	PDC1	PDC1	PR_FS	0	N		
+%R	242	168	164	PDC1	PDC1	PR_SS	80	N		
+%R	243	169	164	PDC1	PDC1	PR_SS	120	N		
+%R	244	170	167	PDC1	PDC1	PR_FS	0	N		
+%R	245	171	169	PDC1	PDC1	PR_SS	80	N		
+%R	246	172	169	PDC1	PDC1	PR_FS	0	N		
+%R	247	172	168	PDC1	PDC1	PR_FS	0	N		
+%R	248	173	140	PDC1	PDC1	PR_SS	120	N		
+%R	249	174	152	PDC1	PDC1	PR_SS	80	N		
+%R	250	174	133	PDC1	PDC1	PR_FS	0	N		
+%R	251	175	140	PDC1	PDC1	PR_SS	120	N		
+%R	252	176	137	PDC1	PDC1	PR_FS	0	N		
+%R	253	177	140	PDC1	PDC1	PR_SS	160	N		
+%R	254	178	175	PDC1	PDC1	PR_SS	80	N		
+%R	255	179	174	PDC1	PDC1	PR_SS	120	N		
+%R	256	179	144	PDC1	PDC1	PR_FS	0	N		
+%R	257	180	83	PDC1	PDC1	PR_FS	0	N		
+%R	258	180	179	PDC1	PDC1	PR_SS	40	N		
+%R	259	181	84	PDC1	PDC1	PR_FS	0	N		
+%R	260	181	180	PDC1	PDC1	PR_FS	0	N		
+%R	261	182	180	PDC1	PDC1	PR_SS	40	N		
+%R	262	183	85	PDC1	PDC1	PR_FS	0	N		
+%R	263	183	182	PDC1	PDC1	PR_FS	0	N		
+%R	264	184	144	PDC1	PDC1	PR_FS	0	N		
+%R	265	185	77	PDC1	PDC1	PR_FS	0	N		
+%R	266	185	144	PDC1	PDC1	PR_FS	0	N		
+%R	267	186	164	PDC1	PDC1	PR_SS	160	N		
+%R	268	186	185	PDC1	PDC1	PR_SS	24	N		
+%R	269	187	144	PDC1	PDC1	PR_FS	0	N		
+%R	270	188	187	PDC1	PDC1	PR_FS	0	N		
+%R	271	189	188	PDC1	PDC1	PR_FS	0	N		
+%R	272	189	183	PDC1	PDC1	PR_FS	0	N		
+%R	273	190	184	PDC1	PDC1	PR_FS	0	N		
+%R	274	191	91	PDC1	PDC1	PR_FS	0	N		
+%R	275	191	190	PDC1	PDC1	PR_SS	40	N		
+%R	276	192	182	PDC1	PDC1	PR_FS	0	N		
+%R	277	193	90	PDC1	PDC1	PR_FS	0	N		
+%R	278	193	184	PDC1	PDC1	PR_FS	0	N		
+%R	279	193	171	PDC1	PDC1	PR_SS	80	N		
+%R	280	194	193	PDC1	PDC1	PR_SS	64	N		
+%R	281	194	192	PDC1	PDC1	PR_FS	0	N		
+%R	282	195	184	PDC1	PDC1	PR_FS	0	N		
+%R	283	195	102	PDC1	PDC1	PR_FS	0	N		
+%R	284	196	184	PDC1	PDC1	PR_FS	0	N		
+%R	285	196	101	PDC1	PDC1	PR_FS	0	N		
+%R	286	197	184	PDC1	PDC1	PR_FS	0	N		
+%R	287	198	197	PDC1	PDC1	PR_FS	0	N		
+%R	288	199	140	PDC1	PDC1	PR_FS	0	N		
+%R	289	199	195	PDC1	PDC1	PR_SS	40	N		
+%R	290	200	158	PDC1	PDC1	PR_FS	0	N		
+%R	291	200	165	PDC1	PDC1	PR_FS	0	N		
+%R	292	200	180	PDC1	PDC1	PR_SS	40	N		
+%R	293	200	60	PDC1	PDC1	PR_FS	0	N		
+%R	294	200	86	PDC1	PDC1	PR_FS	0	N		
+%R	295	200	87	PDC1	PDC1	PR_FS	0	N		
+%R	296	200	88	PDC1	PDC1	PR_FS	0	N		
+%R	297	200	79	PDC1	PDC1	PR_FS	0	N		
+%R	298	201	200	PDC1	PDC1	PR_FS	0	N		
+%R	299	201	172	PDC1	PDC1	PR_FS	0	N		
+%R	300	201	186	PDC1	PDC1	PR_FS	0	N		
+%R	301	201	170	PDC1	PDC1	PR_FS	0	N		
+%R	302	201	166	PDC1	PDC1	PR_FS	0	N		
+%R	303	201	173	PDC1	PDC1	PR_FS	0	N		
+%R	304	201	147	PDC1	PDC1	PR_FS	0	N		
+%R	305	202	200	PDC1	PDC1	PR_FS	0	N		
+%R	306	202	183	PDC1	PDC1	PR_FS	0	N		
+%R	307	202	181	PDC1	PDC1	PR_FS	0	N		
+%R	308	202	163	PDC1	PDC1	PR_FS	0	N		
+%R	309	202	153	PDC1	PDC1	PR_FS	0	N		
+%R	310	202	176	PDC1	PDC1	PR_FS	0	N		
+%R	311	203	162	PDC1	PDC1	PR_FS	0	N		
+%R	312	203	160	PDC1	PDC1	PR_FS	0	N		
+%R	313	203	200	PDC1	PDC1	PR_FS	0	N		
+%R	314	203	159	PDC1	PDC1	PR_FS	0	N		
+%R	315	203	161	PDC1	PDC1	PR_FS	0	N		
+%R	316	204	194	PDC1	PDC1	PR_FS	0	N		
+%R	317	204	201	PDC1	PDC1	PR_SS	80	N		
+%R	318	205	191	PDC1	PDC1	PR_FS	0	N		
+%R	319	205	178	PDC1	PDC1	PR_FS	0	N		
+%R	320	205	177	PDC1	PDC1	PR_FS	0	N		
+%R	321	206	195	PDC1	PDC1	PR_FS	0	N		
+%R	322	206	196	PDC1	PDC1	PR_FS	0	N		
+%R	323	207	201	PDC1	PDC1	PR_FS	0	N		
+%R	324	207	202	PDC1	PDC1	PR_FS	0	N		
+%R	325	207	203	PDC1	PDC1	PR_FS	0	N		
+%R	326	207	204	PDC1	PDC1	PR_FS	0	N		
+%R	327	207	205	PDC1	PDC1	PR_FS	0	N		
+%R	328	207	206	PDC1	PDC1	PR_FS	0	N		
+%R	329	208	207	PDC1	PDC1	PR_FS	0	N		
+%R	330	208	157	PDC1	PDC1	PR_FS	0	N		
+%R	331	209	208	PDC1	PDC1	PR_FS	0	N		
+%R	332	209	54	PDC1	PDC1	PR_FS	0	N		
+%R	333	210	207	PDC1	PDC1	PR_SS	40	N		
+%R	334	210	198	PDC1	PDC1	PR_FS	0	N		
+%R	335	211	209	PDC1	PDC1	PR_FS	0	N		
+%R	336	211	210	PDC1	PDC1	PR_FS	0	N		
+%R	337	211	57	PDC1	PDC1	PR_FS	0	N		
+%R	338	211	199	PDC1	PDC1	PR_FS	0	N		
+%R	339	212	209	PDC1	PDC1	PR_FS	0	N		
+%R	340	212	213	PDC1	PDC1	PR_FS	0	N		
+%R	341	213	189	PDC1	PDC1	PR_FS	0	N		
+%R	342	214	211	PDC1	PDC1	PR_FS	0	N		
+%R	343	214	212	PDC1	PDC1	PR_FS	0	N		
+%R	344	215	95	PDC1	PDC1	PR_FS	0	N		
+%R	345	215	26	PDC1	PDC1	PR_FS	0	N		
+%R	346	215	107	PDC1	PDC1	PR_SS	120	N		
+%R	347	216	215	PDC1	PDC1	PR_FS	0	N		
+%R	348	216	114	PDC1	PDC1	PR_FS	0	N		
+%R	349	217	216	PDC1	PDC1	PR_FS	0	N		
+%R	350	218	217	PDC1	PDC1	PR_SS	24	N		
+%R	351	219	217	PDC1	PDC1	PR_FS	0	N		
+%R	352	219	218	PDC1	PDC1	PR_SS	32	N		
+%R	353	220	219	PDC1	PDC1	PR_FS	0	N		
+%R	354	221	220	PDC1	PDC1	PR_FS	0	N		
+%R	355	221	64	PDC1	PDC1	PR_FS	0	N		
+%R	356	221	126	PDC1	PDC1	PR_FS	0	N		
+%R	357	222	221	PDC1	PDC1	PR_FS	0	N		
+%R	358	222	68	PDC1	PDC1	PR_FS	0	N		
+%R	359	222	130	PDC1	PDC1	PR_FS	0	N		
+%R	360	223	221	PDC1	PDC1	PR_FS	0	N		
+%R	361	224	223	PDC1	PDC1	PR_FS	0	N		
+%R	362	224	222	PDC1	PDC1	PR_FS	0	N		
+%R	363	224	136	PDC1	PDC1	PR_FS	0	N		
+%R	364	225	222	PDC1	PDC1	PR_FS	0	N		
+%R	365	225	224	PDC1	PDC1	PR_SS	40	N		
+%R	366	225	139	PDC1	PDC1	PR_FS	0	N		
+%R	367	226	225	PDC1	PDC1	PR_FS	0	N		
+%R	368	226	72	PDC1	PDC1	PR_FS	0	N		
+%R	369	227	225	PDC1	PDC1	PR_FS	0	N		
+%R	370	227	224	PDC1	PDC1	PR_FS	0	N		
+%R	371	228	225	PDC1	PDC1	PR_FS	0	N		
+%R	372	229	226	PDC1	PDC1	PR_FS	0	N		
+%R	373	229	227	PDC1	PDC1	PR_FS	0	N		
+%R	374	230	229	PDC1	PDC1	PR_FS	0	N		
+%R	375	230	228	PDC1	PDC1	PR_FS	0	N		
+%R	376	231	230	PDC1	PDC1	PR_FS	0	N		
+%R	377	231	172	PDC1	PDC1	PR_FS	0	N		
+%R	378	232	230	PDC1	PDC1	PR_FS	0	N		
+%R	379	232	174	PDC1	PDC1	PR_FS	0	N		
+%R	380	233	232	PDC1	PDC1	PR_FS	0	N		
+%R	381	233	83	PDC1	PDC1	PR_FS	0	N		
+%R	382	233	84	PDC1	PDC1	PR_FS	0	N		
+%R	383	234	233	PDC1	PDC1	PR_FS	0	N		
+%R	384	234	85	PDC1	PDC1	PR_FS	0	N		
+%R	385	235	228	PDC1	PDC1	PR_FS	0	N		
+%R	386	236	228	PDC1	PDC1	PR_FS	0	N		
+%R	387	236	77	PDC1	PDC1	PR_FS	0	N		
+%R	388	236	76	PDC1	PDC1	PR_FS	0	N		
+%R	389	237	231	PDC1	PDC1	PR_FS	0	N		
+%R	390	237	236	PDC1	PDC1	PR_SS	24	N		
+%R	391	238	237	PDC1	PDC1	PR_FS	0	N		
+%R	392	239	228	PDC1	PDC1	PR_FS	0	N		
+%R	393	239	73	PDC1	PDC1	PR_FS	0	N		
+%R	394	240	239	PDC1	PDC1	PR_FS	0	N		
+%R	395	241	240	PDC1	PDC1	PR_FS	0	N		
+%R	396	241	234	PDC1	PDC1	PR_FS	0	N		
+%R	397	242	235	PDC1	PDC1	PR_FS	0	N		
+%R	398	242	91	PDC1	PDC1	PR_FS	0	N		
+%R	399	243	235	PDC1	PDC1	PR_FS	0	N		
+%R	400	243	238	PDC1	PDC1	PR_FS	0	N		
+%R	401	243	194	PDC1	PDC1	PR_FS	0	N		
+%R	402	244	235	PDC1	PDC1	PR_FS	0	N		
+%R	403	244	195	PDC1	PDC1	PR_FS	0	N		
+%R	404	245	235	PDC1	PDC1	PR_FS	0	N		
+%R	405	246	233	PDC1	PDC1	PR_FS	0	N		
+%R	406	246	236	PDC1	PDC1	PR_FS	0	N		
+%R	407	247	246	PDC1	PDC1	PR_FS	0	N		
+%R	408	247	238	PDC1	PDC1	PR_FS	0	N		
+%R	409	248	246	PDC1	PDC1	PR_FS	0	N		
+%R	410	248	234	PDC1	PDC1	PR_FS	0	N		
+%R	411	248	241	PDC1	PDC1	PR_FS	0	N		
+%R	412	249	243	PDC1	PDC1	PR_FS	0	N		
+%R	413	249	242	PDC1	PDC1	PR_FS	0	N		
+%R	414	249	244	PDC1	PDC1	PR_FS	0	N		
+%R	415	250	247	PDC1	PDC1	PR_FS	0	N		
+%R	416	250	248	PDC1	PDC1	PR_FS	0	N		
+%R	417	250	249	PDC1	PDC1	PR_FS	0	N		
+%R	418	250	208	PDC1	PDC1	PR_FS	0	N		
+%R	419	251	34	PDC1	PDC1	PR_FS	0	N		
+%R	420	251	248	PDC1	PDC1	PR_FS	0	N		
+%R	421	252	250	PDC1	PDC1	PR_FS	0	N		
+%R	422	252	251	PDC1	PDC1	PR_FS	0	N		
+%R	423	253	252	PDC1	PDC1	PR_FS	0	N		
+%R	424	253	54	PDC1	PDC1	PR_FS	0	N		
+%R	425	254	250	PDC1	PDC1	PR_SS	40	N		
+%R	426	255	253	PDC1	PDC1	PR_FS	0	N		
+%R	427	255	254	PDC1	PDC1	PR_FS	0	N		
+%R	428	255	245	PDC1	PDC1	PR_FS	0	N		
+%R	429	256	253	PDC1	PDC1	PR_FS	0	N		
+%R	430	257	95	PDC1	PDC1	PR_FS	0	N		
+%R	431	257	26	PDC1	PDC1	PR_FS	0	N		
+%R	432	257	215	PDC1	PDC1	PR_SS	120	N		
+%R	433	257	99	PDC1	PDC1	PR_FS	0	N		
+%R	434	258	257	PDC1	PDC1	PR_FS	0	N		
+%R	435	258	216	PDC1	PDC1	PR_FS	0	N		
+%R	436	259	258	PDC1	PDC1	PR_FS	0	N		
+%R	437	260	259	PDC1	PDC1	PR_SS	24	N		
+%R	438	261	259	PDC1	PDC1	PR_FS	0	N		
+%R	439	261	260	PDC1	PDC1	PR_SS	32	N		
+%R	440	262	261	PDC1	PDC1	PR_FS	0	N		
+%R	441	263	262	PDC1	PDC1	PR_FS	0	N		
+%R	442	263	65	PDC1	PDC1	PR_FS	0	N		
+%R	443	263	221	PDC1	PDC1	PR_FS	0	N		
+%R	444	264	263	PDC1	PDC1	PR_FS	0	N		
+%R	445	264	69	PDC1	PDC1	PR_FS	0	N		
+%R	446	264	222	PDC1	PDC1	PR_FS	0	N		
+%R	447	265	263	PDC1	PDC1	PR_FS	0	N		
+%R	448	266	265	PDC1	PDC1	PR_FS	0	N		
+%R	449	266	264	PDC1	PDC1	PR_FS	0	N		
+%R	450	266	224	PDC1	PDC1	PR_FS	0	N		
+%R	451	267	264	PDC1	PDC1	PR_FS	0	N		
+%R	452	267	266	PDC1	PDC1	PR_SS	40	N		
+%R	453	267	225	PDC1	PDC1	PR_FS	0	N		
+%R	454	268	267	PDC1	PDC1	PR_FS	0	N		
+%R	455	268	72	PDC1	PDC1	PR_FS	0	N		
+%R	456	269	267	PDC1	PDC1	PR_FS	0	N		
+%R	457	269	266	PDC1	PDC1	PR_FS	0	N		
+%R	458	270	267	PDC1	PDC1	PR_FS	0	N		
+%R	459	271	268	PDC1	PDC1	PR_FS	0	N		
+%R	460	271	269	PDC1	PDC1	PR_FS	0	N		
+%R	461	272	271	PDC1	PDC1	PR_FS	0	N		
+%R	462	272	270	PDC1	PDC1	PR_FS	0	N		
+%R	463	273	272	PDC1	PDC1	PR_FS	0	N		
+%R	464	273	172	PDC1	PDC1	PR_FS	0	N		
+%R	465	274	272	PDC1	PDC1	PR_FS	0	N		
+%R	466	274	174	PDC1	PDC1	PR_FS	0	N		
+%R	467	275	274	PDC1	PDC1	PR_FS	0	N		
+%R	468	275	83	PDC1	PDC1	PR_FS	0	N		
+%R	469	275	84	PDC1	PDC1	PR_FS	0	N		
+%R	470	276	275	PDC1	PDC1	PR_FS	0	N		
+%R	471	276	85	PDC1	PDC1	PR_FS	0	N		
+%R	472	277	270	PDC1	PDC1	PR_FS	0	N		
+%R	473	278	270	PDC1	PDC1	PR_FS	0	N		
+%R	474	278	77	PDC1	PDC1	PR_FS	0	N		
+%R	475	278	76	PDC1	PDC1	PR_FS	0	N		
+%R	476	279	273	PDC1	PDC1	PR_FS	0	N		
+%R	477	279	278	PDC1	PDC1	PR_SS	24	N		
+%R	478	280	279	PDC1	PDC1	PR_FS	0	N		
+%R	479	281	270	PDC1	PDC1	PR_FS	0	N		
+%R	480	281	73	PDC1	PDC1	PR_FS	0	N		
+%R	481	282	281	PDC1	PDC1	PR_FS	0	N		
+%R	482	283	282	PDC1	PDC1	PR_FS	0	N		
+%R	483	283	276	PDC1	PDC1	PR_FS	0	N		
+%R	484	284	277	PDC1	PDC1	PR_FS	0	N		
+%R	485	284	91	PDC1	PDC1	PR_FS	0	N		
+%R	486	285	277	PDC1	PDC1	PR_FS	0	N		
+%R	487	285	280	PDC1	PDC1	PR_FS	0	N		
+%R	488	285	194	PDC1	PDC1	PR_FS	0	N		
+%R	489	286	277	PDC1	PDC1	PR_FS	0	N		
+%R	490	286	195	PDC1	PDC1	PR_FS	0	N		
+%R	491	287	277	PDC1	PDC1	PR_FS	0	N		
+%R	492	288	275	PDC1	PDC1	PR_FS	0	N		
+%R	493	288	278	PDC1	PDC1	PR_FS	0	N		
+%R	494	289	288	PDC1	PDC1	PR_FS	0	N		
+%R	495	289	280	PDC1	PDC1	PR_FS	0	N		
+%R	496	290	288	PDC1	PDC1	PR_FS	0	N		
+%R	497	290	276	PDC1	PDC1	PR_FS	0	N		
+%R	498	290	283	PDC1	PDC1	PR_FS	0	N		
+%R	499	291	285	PDC1	PDC1	PR_FS	0	N		
+%R	500	291	284	PDC1	PDC1	PR_FS	0	N		
+%R	501	291	286	PDC1	PDC1	PR_FS	0	N		
+%R	502	292	289	PDC1	PDC1	PR_FS	0	N		
+%R	503	292	290	PDC1	PDC1	PR_FS	0	N		
+%R	504	292	291	PDC1	PDC1	PR_FS	0	N		
+%R	505	292	208	PDC1	PDC1	PR_FS	0	N		
+%R	506	293	36	PDC1	PDC1	PR_FS	0	N		
+%R	507	293	290	PDC1	PDC1	PR_FS	0	N		
+%R	508	294	292	PDC1	PDC1	PR_FS	0	N		
+%R	509	294	293	PDC1	PDC1	PR_FS	0	N		
+%R	510	295	294	PDC1	PDC1	PR_FS	0	N		
+%R	511	295	54	PDC1	PDC1	PR_FS	0	N		
+%R	512	296	292	PDC1	PDC1	PR_SS	40	N		
+%R	513	297	295	PDC1	PDC1	PR_FS	0	N		
+%R	514	297	296	PDC1	PDC1	PR_FS	0	N		
+%R	515	297	287	PDC1	PDC1	PR_FS	0	N		
+%R	516	298	295	PDC1	PDC1	PR_FS	0	N		
+%R	517	299	95	PDC1	PDC1	PR_FS	0	N		
+%R	518	299	26	PDC1	PDC1	PR_FS	0	N		
+%R	519	299	257	PDC1	PDC1	PR_SS	120	N		
+%R	520	300	299	PDC1	PDC1	PR_FS	0	N		
+%R	521	300	50	PDC1	PDC1	PR_FS	0	N		
+%R	522	300	105	PDC1	PDC1	PR_FS	0	N		
+%R	523	301	300	PDC1	PDC1	PR_SS	64	N		
+%R	524	302	301	PDC1	PDC1	PR_FS	0	N		
+%R	525	302	113	PDC1	PDC1	PR_FS	0	N		
+%R	526	303	302	PDC1	PDC1	PR_FS	0	N		
+%R	527	304	303	PDC1	PDC1	PR_FS	0	N		
+%R	528	304	258	PDC1	PDC1	PR_FS	0	N		
+%R	529	305	304	PDC1	PDC1	PR_FS	0	N		
+%R	530	306	305	PDC1	PDC1	PR_SS	24	N		
+%R	531	307	305	PDC1	PDC1	PR_FS	0	N		
+%R	532	307	306	PDC1	PDC1	PR_SS	32	N		
+%R	533	308	307	PDC1	PDC1	PR_FS	0	N		
+%R	534	309	308	PDC1	PDC1	PR_FS	0	N		
+%R	535	309	66	PDC1	PDC1	PR_FS	0	N		
+%R	536	309	263	PDC1	PDC1	PR_FS	0	N		
+%R	537	310	309	PDC1	PDC1	PR_FS	0	N		
+%R	538	310	70	PDC1	PDC1	PR_FS	0	N		
+%R	539	310	264	PDC1	PDC1	PR_FS	0	N		
+%R	540	311	309	PDC1	PDC1	PR_FS	0	N		
+%R	541	312	311	PDC1	PDC1	PR_FS	0	N		
+%R	542	312	310	PDC1	PDC1	PR_FS	0	N		
+%R	543	312	266	PDC1	PDC1	PR_FS	0	N		
+%R	544	313	310	PDC1	PDC1	PR_FS	0	N		
+%R	545	313	312	PDC1	PDC1	PR_SS	40	N		
+%R	546	313	267	PDC1	PDC1	PR_FS	0	N		
+%R	547	314	313	PDC1	PDC1	PR_FS	0	N		
+%R	548	314	72	PDC1	PDC1	PR_FS	0	N		
+%R	549	315	313	PDC1	PDC1	PR_FS	0	N		
+%R	550	315	312	PDC1	PDC1	PR_FS	0	N		
+%R	551	316	313	PDC1	PDC1	PR_FS	0	N		
+%R	552	317	314	PDC1	PDC1	PR_FS	0	N		
+%R	553	317	315	PDC1	PDC1	PR_FS	0	N		
+%R	554	318	317	PDC1	PDC1	PR_FS	0	N		
+%R	555	318	316	PDC1	PDC1	PR_FS	0	N		
+%R	556	319	318	PDC1	PDC1	PR_FS	0	N		
+%R	557	319	172	PDC1	PDC1	PR_FS	0	N		
+%R	558	320	318	PDC1	PDC1	PR_FS	0	N		
+%R	559	320	174	PDC1	PDC1	PR_FS	0	N		
+%R	560	321	320	PDC1	PDC1	PR_FS	0	N		
+%R	561	321	83	PDC1	PDC1	PR_FS	0	N		
+%R	562	321	84	PDC1	PDC1	PR_FS	0	N		
+%R	563	322	321	PDC1	PDC1	PR_FS	0	N		
+%R	564	322	85	PDC1	PDC1	PR_FS	0	N		
+%R	565	323	316	PDC1	PDC1	PR_FS	0	N		
+%R	566	324	316	PDC1	PDC1	PR_FS	0	N		
+%R	567	324	77	PDC1	PDC1	PR_FS	0	N		
+%R	568	324	76	PDC1	PDC1	PR_FS	0	N		
+%R	569	325	319	PDC1	PDC1	PR_FS	0	N		
+%R	570	325	324	PDC1	PDC1	PR_SS	24	N		
+%R	571	326	325	PDC1	PDC1	PR_FS	0	N		
+%R	572	327	316	PDC1	PDC1	PR_FS	0	N		
+%R	573	327	73	PDC1	PDC1	PR_FS	0	N		
+%R	574	328	327	PDC1	PDC1	PR_FS	0	N		
+%R	575	329	328	PDC1	PDC1	PR_FS	0	N		
+%R	576	329	322	PDC1	PDC1	PR_FS	0	N		
+%R	577	330	323	PDC1	PDC1	PR_FS	0	N		
+%R	578	330	91	PDC1	PDC1	PR_FS	0	N		
+%R	579	331	323	PDC1	PDC1	PR_FS	0	N		
+%R	580	331	326	PDC1	PDC1	PR_FS	0	N		
+%R	581	331	194	PDC1	PDC1	PR_FS	0	N		
+%R	582	332	323	PDC1	PDC1	PR_FS	0	N		
+%R	583	332	195	PDC1	PDC1	PR_FS	0	N		
+%R	584	333	323	PDC1	PDC1	PR_FS	0	N		
+%R	585	334	321	PDC1	PDC1	PR_FS	0	N		
+%R	586	334	324	PDC1	PDC1	PR_FS	0	N		
+%R	587	335	334	PDC1	PDC1	PR_FS	0	N		
+%R	588	335	326	PDC1	PDC1	PR_FS	0	N		
+%R	589	336	334	PDC1	PDC1	PR_FS	0	N		
+%R	590	336	322	PDC1	PDC1	PR_FS	0	N		
+%R	591	336	329	PDC1	PDC1	PR_FS	0	N		
+%R	592	337	331	PDC1	PDC1	PR_FS	0	N		
+%R	593	337	330	PDC1	PDC1	PR_FS	0	N		
+%R	594	337	332	PDC1	PDC1	PR_FS	0	N		
+%R	595	338	335	PDC1	PDC1	PR_FS	0	N		
+%R	596	338	336	PDC1	PDC1	PR_FS	0	N		
+%R	597	338	337	PDC1	PDC1	PR_FS	0	N		
+%R	598	338	208	PDC1	PDC1	PR_FS	0	N		
+%R	599	339	38	PDC1	PDC1	PR_FS	0	N		
+%R	600	339	336	PDC1	PDC1	PR_FS	0	N		
+%R	601	340	338	PDC1	PDC1	PR_FS	0	N		
+%R	602	340	339	PDC1	PDC1	PR_FS	0	N		
+%R	603	341	340	PDC1	PDC1	PR_FS	0	N		
+%R	604	341	54	PDC1	PDC1	PR_FS	0	N		
+%R	605	342	338	PDC1	PDC1	PR_SS	40	N		
+%R	606	343	341	PDC1	PDC1	PR_FS	0	N		
+%R	607	343	342	PDC1	PDC1	PR_FS	0	N		
+%R	608	343	333	PDC1	PDC1	PR_FS	0	N		
+%R	609	344	341	PDC1	PDC1	PR_FS	0	N		
+%R	610	345	255	PDC1	PDC1	PR_FS	0	N		
+%R	611	345	256	PDC1	PDC1	PR_FS	0	N		
+%R	612	346	297	PDC1	PDC1	PR_FS	0	N		
+%R	613	346	298	PDC1	PDC1	PR_FS	0	N		
+%R	614	347	303	PDC1	PDC1	PR_FS	0	N		
+%R	615	348	347	PDC1	PDC1	PR_FS	0	N		
+%R	616	349	348	PDC1	PDC1	PR_FS	0	N		
+%R	617	349	63	PDC1	PDC1	PR_FS	0	N		
+%R	618	350	349	PDC1	PDC1	PR_FS	0	N		
+%R	619	351	350	PDC1	PDC1	PR_FS	0	N		
+%R	620	352	351	PDC1	PDC1	PR_FS	0	N		
+%R	621	353	352	PDC1	PDC1	PR_FS	0	N		
+%R	622	354	353	PDC1	PDC1	PR_FS	0	N		
+%R	623	354	331	PDC1	PDC1	PR_FS	0	N		
+%R	624	355	306	PDC1	PDC1	PR_FS	0	N		
+%R	625	355	92	PDC1	PDC1	PR_FS	0	N		
+%R	626	356	355	PDC1	PDC1	PR_SS	40	N		
+%R	627	357	355	PDC1	PDC1	PR_FS	0	N		
+%R	628	357	350	PDC1	PDC1	PR_FS	0	N		
+%R	629	358	357	PDC1	PDC1	PR_FS	0	N		
+%R	630	359	357	PDC1	PDC1	PR_FS	0	N		
+%R	631	359	358	PDC1	PDC1	PR_SS	40	N		
+%R	632	360	357	PDC1	PDC1	PR_FS	0	N		
+%R	633	360	332	PDC1	PDC1	PR_FS	0	N		
+%R	634	361	117	PDC1	PDC1	PR_FS	0	N		
+%R	635	361	74	PDC1	PDC1	PR_FS	0	N		
+%R	636	362	361	PDC1	PDC1	PR_FS	0	N		
+%R	637	362	164	PDC1	PDC1	PR_FS	0	N		
+%R	638	363	78	PDC1	PDC1	PR_FS	0	N		
+%R	639	363	170	PDC1	PDC1	PR_FS	0	N		
+%R	640	364	362	PDC1	PDC1	PR_FS	0	N		
+%R	641	364	363	PDC1	PDC1	PR_FS	0	N		
+%R	642	365	364	PDC1	PDC1	PR_FS	0	N		
+%R	643	366	365	PDC1	PDC1	PR_FS	0	N		
+%R	644	367	364	PDC1	PDC1	PR_FS	0	N		
+%R	645	368	364	PDC1	PDC1	PR_FS	0	N		
+%R	646	368	201	PDC1	PDC1	PR_FS	0	N		
+%R	647	369	368	PDC1	PDC1	PR_FS	0	N		
+%R	648	369	367	PDC1	PDC1	PR_FS	0	N		
+%R	649	369	366	PDC1	PDC1	PR_FS	0	N		
+%R	650	370	369	PDC1	PDC1	PR_FS	0	N		
+%R	651	370	346	PDC1	PDC1	PR_FS	0	N		
+%R	652	371	370	PDC1	PDC1	PR_FS	0	N		
+%R	653	372	344	PDC1	PDC1	PR_FS	0	N		
+%R	654	372	354	PDC1	PDC1	PR_FS	0	N		
+%R	655	372	359	PDC1	PDC1	PR_FS	0	N		
+%R	656	372	360	PDC1	PDC1	PR_FS	0	N		
+%R	657	372	7	PDC1	PDC1	PR_FS	0	N		
+%R	658	373	40	PDC1	PDC1	PR_FS	0	N		
+%R	659	373	342	PDC1	PDC1	PR_FS	0	N		
+%R	660	373	372	PDC1	PDC1	PR_SS	40	N		
+%R	661	374	372	PDC1	PDC1	PR_FS	0	N		
+%R	662	374	373	PDC1	PDC1	PR_FS	0	N		
+%R	663	374	371	PDC1	PDC1	PR_FS	0	N		
+%R	664	374	343	PDC1	PDC1	PR_FS	0	N		
+%R	665	374	356	PDC1	PDC1	PR_FS	0	N		
+%R	666	375	374	PDC1	PDC1	PR_FS	0	N		
+%R	667	375	344	PDC1	PDC1	PR_FS	0	N		
+%R	668	375	214	PDC1	PDC1	PR_FS	0	N		
+%R	669	375	345	PDC1	PDC1	PR_FS	0	N		
+%R	670	375	346	PDC1	PDC1	PR_FS	0	N		
+%R	671	375	6	PDC1	PDC1	PR_FS	0	N		
+%R	672	375	8	PDC1	PDC1	PR_FS	0	N		
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	proj_id	rsrc_id	acct_id	role_id	cost_qty_link_flag	ot_flag	target_qty	remain_qty	act_reg_qty	target_cost	remain_cost	act_reg_cost	target_start_date	target_end_date	restart_date	reend_date	rsrc_type	target_qty_per_hr	rollup_dates_flag
+%R	1	3	PDC1	PM			N	N	1080	1080	0	599943.93	599943.93	0	2026-03-03 00:00	2026-03-23 16:00	2026-03-03 00:00	2026-03-23 16:00	RT_Labor	1.0	N
+%R	2	4	PDC1	PM			N	N	720	720	0	104959.224	104959.224	0	2026-03-03 00:00	2026-03-16 16:00	2026-03-03 00:00	2026-03-16 16:00	RT_Labor	1.0	N
+%R	3	5	PDC1	PM			N	N	20880	20880	0	1267081.5876	1267081.5876	0	2026-03-17 00:00	2027-06-02 16:00	2026-03-17 00:00	2027-06-02 16:00	RT_Labor	1.0	N
+%R	4	6	PDC1	PM			N	N	12960	12960	0	776598.3924	776598.3924	0	2027-06-03 00:00	2028-03-07 16:00	2027-06-03 00:00	2028-03-07 16:00	RT_Labor	1.0	N
+%R	5	7	PDC1	PM			N	N	28800	28800	0	256427.65	256427.65	0	2026-03-17 00:00	2027-11-25 16:00	2026-03-17 00:00	2027-11-25 16:00	RT_Labor	1.0	N
+%R	6	8	PDC1	PM			N	N	33120	33120	0	308680.83	308680.83	0	2026-03-17 00:00	2028-02-22 16:00	2026-03-17 00:00	2028-02-22 16:00	RT_Labor	1.0	N
+%R	7	9	PDC1	DES			N	N	560	560	0	69972.816	69972.816	0	2026-03-03 00:00	2026-03-09 16:00	2026-03-03 00:00	2026-03-09 16:00	RT_Labor	1.0	N
+%R	8	10	PDC1	DES			N	N	1680	1680	0	0.0	0.0	0	2026-03-10 00:00	2026-03-30 16:00	2026-03-10 00:00	2026-03-30 16:00	RT_Labor	1.0	N
+%R	9	11	PDC1	DES			N	N	1680	1680	0	0.0	0.0	0	2026-03-10 00:00	2026-03-30 16:00	2026-03-10 00:00	2026-03-30 16:00	RT_Labor	1.0	N
+%R	10	12	PDC1	DES			N	N	1680	1680	0	0.0	0.0	0	2026-03-10 00:00	2026-03-30 16:00	2026-03-10 00:00	2026-03-30 16:00	RT_Labor	1.0	N
+%R	11	14	PDC1	DES			N	N	1568	1568	0	0.0	0.0	0	2026-04-01 00:00	2026-04-22 16:00	2026-04-01 00:00	2026-04-22 16:00	RT_Labor	1.0	N
+%R	12	15	PDC1	DES			N	N	4480	4480	0	296038.83999999997	296038.83999999997	0	2026-04-23 00:00	2026-06-22 16:00	2026-04-23 00:00	2026-06-22 16:00	RT_Labor	1.0	N
+%R	13	16	PDC1	DES			N	N	3360	3360	0	0.0	0.0	0	2026-04-23 00:00	2026-06-05 16:00	2026-04-23 00:00	2026-06-05 16:00	RT_Labor	1.0	N
+%R	14	17	PDC1	DES			N	N	5040	5040	0	807378.64	807378.64	0	2026-04-23 00:00	2026-06-29 16:00	2026-04-23 00:00	2026-06-29 16:00	RT_Labor	1.0	N
+%R	15	18	PDC1	DES			N	N	5040	5040	0	645902.91	645902.91	0	2026-04-23 00:00	2026-06-29 16:00	2026-04-23 00:00	2026-06-29 16:00	RT_Labor	1.0	N
+%R	16	19	PDC1	DES			N	N	3360	3360	0	0.0	0.0	0	2026-04-23 00:00	2026-06-05 16:00	2026-04-23 00:00	2026-06-05 16:00	RT_Labor	1.0	N
+%R	17	20	PDC1	DES			N	N	3360	3360	0	148019.42	148019.42	0	2026-04-23 00:00	2026-06-05 16:00	2026-04-23 00:00	2026-06-05 16:00	RT_Labor	1.0	N
+%R	18	22	PDC1	DES			N	N	2352	2352	0	0.0	0.0	0	2026-07-01 00:00	2026-07-29 16:00	2026-07-01 00:00	2026-07-29 16:00	RT_Labor	1.0	N
+%R	19	23	PDC1	DES			N	N	1680	1680	0	188388.35	188388.35	0	2026-06-08 00:00	2026-06-29 16:00	2026-06-08 00:00	2026-06-29 16:00	RT_Labor	1.0	N
+%R	20	24	PDC1	DES			N	N	2240	2240	0	0.0	0.0	0	2026-05-18 00:00	2026-06-12 16:00	2026-05-18 00:00	2026-06-12 16:00	RT_Labor	1.0	N
+%R	21	25	PDC1	DES			N	N	1568	1568	0	0.0	0.0	0	2026-06-15 00:00	2026-07-03 16:00	2026-06-15 00:00	2026-07-03 16:00	RT_Labor	1.0	N
+%R	22	26	PDC1	DES			N	N	1568	1568	0	0.0	0.0	0	2026-06-30 00:00	2026-07-17 16:00	2026-06-30 00:00	2026-07-17 16:00	RT_Labor	1.0	N
+%R	23	27	PDC1	DES			N	N	2800	2800	0	255669.9	255669.9	0	2026-07-30 00:00	2026-09-02 16:00	2026-07-30 00:00	2026-09-02 16:00	RT_Labor	1.0	N
+%R	24	28	PDC1	DES			N	N	1568	1568	0	0.0	0.0	0	2026-09-03 00:00	2026-09-22 16:00	2026-09-03 00:00	2026-09-22 16:00	RT_Labor	1.0	N
+%R	25	29	PDC1	DES			N	N	4480	4480	0	107650.49	107650.49	0	2026-07-30 00:00	2026-09-23 16:00	2026-07-30 00:00	2026-09-23 16:00	RT_Labor	1.0	N
+%R	26	30	PDC1	DES			N	N	1568	1568	0	0.0	0.0	0	2026-09-24 00:00	2026-10-13 16:00	2026-09-24 00:00	2026-10-13 16:00	RT_Labor	1.0	N
+%R	27	31	PDC1	DES			N	N	2240	2240	0	0.0	0.0	0	2026-06-30 00:00	2026-07-27 16:00	2026-06-30 00:00	2026-07-27 16:00	RT_Labor	1.0	N
+%R	28	32	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-07-28 00:00	2026-08-24 16:00	2026-07-28 00:00	2026-08-24 16:00	RT_Labor	1.0	N
+%R	29	33	PDC1	DES			N	N	1120	1120	0	0.0	0.0	0	2026-08-25 00:00	2026-09-07 16:00	2026-08-25 00:00	2026-09-07 16:00	RT_Labor	1.0	N
+%R	30	34	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-09-08 00:00	2026-10-05 16:00	2026-09-08 00:00	2026-10-05 16:00	RT_Labor	1.0	N
+%R	31	35	PDC1	DES			N	N	1120	1120	0	0.0	0.0	0	2026-10-06 00:00	2026-10-19 16:00	2026-10-06 00:00	2026-10-19 16:00	RT_Labor	1.0	N
+%R	32	36	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-10-20 00:00	2026-11-16 16:00	2026-10-20 00:00	2026-11-16 16:00	RT_Labor	1.0	N
+%R	33	37	PDC1	DES			N	N	1120	1120	0	0.0	0.0	0	2026-11-17 00:00	2026-11-30 16:00	2026-11-17 00:00	2026-11-30 16:00	RT_Labor	1.0	N
+%R	34	38	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-12-01 00:00	2026-12-30 16:00	2026-12-01 00:00	2026-12-30 16:00	RT_Labor	1.0	N
+%R	35	39	PDC1	DES			N	N	1344	1344	0	0.0	0.0	0	2026-03-10 00:00	2026-03-25 16:00	2026-03-10 00:00	2026-03-25 16:00	RT_Labor	1.0	N
+%R	36	40	PDC1	DES			N	N	4480	4480	0	0.0	0.0	0	2026-10-14 00:00	2026-12-08 16:00	2026-10-14 00:00	2026-12-08 16:00	RT_Labor	1.0	N
+%R	37	41	PDC1	PM			N	N	1080	1080	0	101603.41	101603.41	0	2026-03-03 00:00	2026-03-23 16:00	2026-03-03 00:00	2026-03-23 16:00	RT_Labor	1.0	N
+%R	38	42	PDC1	PM			N	N	720	720	0	0.0	0.0	0	2026-03-03 00:00	2026-03-16 16:00	2026-03-03 00:00	2026-03-16 16:00	RT_Labor	1.0	N
+%R	39	43	PDC1	PM			N	N	360	360	0	0.0	0.0	0	2026-03-24 00:00	2026-03-30 16:00	2026-03-24 00:00	2026-03-30 16:00	RT_Labor	1.0	N
+%R	40	44	PDC1	PM			N	N	216	216	0	40641.364	40641.364	0	2026-03-31 00:00	2026-04-02 16:00	2026-03-31 00:00	2026-04-02 16:00	RT_Labor	1.0	N
+%R	41	46	PDC1	DES			N	N	1680	1680	0	0.0	0.0	0	2026-05-08 00:00	2026-05-29 16:00	2026-05-08 00:00	2026-05-29 16:00	RT_Labor	1.0	N
+%R	42	47	PDC1	PM			N	N	720	720	0	0.0	0.0	0	2026-06-01 00:00	2026-06-12 16:00	2026-06-01 00:00	2026-06-12 16:00	RT_Labor	1.0	N
+%R	43	48	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-06-01 00:00	2026-06-29 16:00	2026-06-01 00:00	2026-06-29 16:00	RT_Labor	1.0	N
+%R	44	49	PDC1	PM			N	N	360	360	0	0.0	0.0	0	2026-06-30 00:00	2026-07-06 16:00	2026-06-30 00:00	2026-07-06 16:00	RT_Labor	1.0	N
+%R	45	51	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-03-03 00:00	2026-03-31 16:00	2026-03-03 00:00	2026-03-31 16:00	RT_Labor	1.0	N
+%R	46	52	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-06-08 00:00	2026-08-03 16:00	2026-06-08 00:00	2026-08-03 16:00	RT_Labor	1.0	N
+%R	47	53	PDC1	PM			N	N	2160	2160	0	0.0	0.0	0	2026-06-30 00:00	2026-08-10 16:00	2026-06-30 00:00	2026-08-10 16:00	RT_Labor	1.0	N
+%R	48	55	PDC1	PM			N	N	144	144	0	20320.682	20320.682	0	2026-10-15 00:00	2026-10-16 16:00	2026-10-15 00:00	2026-10-16 16:00	RT_Labor	1.0	N
+%R	49	56	PDC1	PM			N	N	144	144	0	20320.682	20320.682	0	2026-12-09 00:00	2026-12-10 16:00	2026-12-09 00:00	2026-12-10 16:00	RT_Labor	1.0	N
+%R	50	57	PDC1	PM			N	N	144	144	0	20320.682	20320.682	0	2027-02-23 00:00	2027-02-24 16:00	2027-02-23 00:00	2027-02-24 16:00	RT_Labor	1.0	N
+%R	51	58	PDC1	PROC			N	N	240	240	0	0.0	0.0	0	2025-12-15 00:00	2025-12-26 16:00	2025-12-15 00:00	2025-12-26 16:00	RT_Labor	1.0	N
+%R	52	59	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2025-12-27 00:00	2026-12-25 16:00	2025-12-27 00:00	2026-12-25 16:00	RT_Labor	1.0	N
+%R	53	60	PDC1	QAQC			N	N	240	240	0	75027.94559999999	75027.94559999999	0	2027-01-07 00:00	2027-01-20 16:00	2027-01-07 00:00	2027-01-20 16:00	RT_Labor	1.0	N
+%R	54	61	PDC1	PROC			N	N	480	480	0	0.0	0.0	0	2026-03-03 00:00	2026-03-30 16:00	2026-03-03 00:00	2026-03-30 16:00	RT_Labor	1.0	N
+%R	55	62	PDC1	PROC			N	N	480	480	0	0.0	0.0	0	2026-03-03 00:00	2026-03-30 16:00	2026-03-03 00:00	2026-03-30 16:00	RT_Labor	1.0	N
+%R	56	63	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-07-04 00:00	2026-11-06 16:00	2026-07-04 00:00	2026-11-06 16:00	RT_Labor	1.0	N
+%R	57	64	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-11-07 00:00	2026-12-29 16:00	2026-11-07 00:00	2026-12-29 16:00	RT_Labor	1.0	N
+%R	58	65	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-12-30 00:00	2027-02-20 16:00	2026-12-30 00:00	2027-02-20 16:00	RT_Labor	1.0	N
+%R	59	66	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2027-02-21 00:00	2027-05-07 16:00	2027-02-21 00:00	2027-05-07 16:00	RT_Labor	1.0	N
+%R	60	67	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-07-04 00:00	2026-10-23 16:00	2026-07-04 00:00	2026-10-23 16:00	RT_Labor	1.0	N
+%R	61	68	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-10-24 00:00	2026-11-22 16:00	2026-10-24 00:00	2026-11-22 16:00	RT_Labor	1.0	N
+%R	62	69	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-11-23 00:00	2026-12-22 16:00	2026-11-23 00:00	2026-12-22 16:00	RT_Labor	1.0	N
+%R	63	70	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-12-23 00:00	2027-01-21 16:00	2026-12-23 00:00	2027-01-21 16:00	RT_Labor	1.0	N
+%R	64	71	PDC1	PROC			N	N	480	480	0	0.0	0.0	0	2026-04-23 00:00	2026-05-22 16:00	2026-04-23 00:00	2026-05-22 16:00	RT_Labor	1.0	N
+%R	65	72	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-05-23 00:00	2026-09-11 16:00	2026-05-23 00:00	2026-09-11 16:00	RT_Labor	1.0	N
+%R	66	73	PDC1	PROC			N	N	480	480	0	0.0	0.0	0	2026-06-23 00:00	2026-07-20 16:00	2026-06-23 00:00	2026-07-20 16:00	RT_Labor	1.0	N
+%R	67	74	PDC1	PROC			N	N	600	600	0	0.0	0.0	0	2026-03-03 00:00	2026-04-08 16:00	2026-03-03 00:00	2026-04-08 16:00	RT_Labor	1.0	N
+%R	68	75	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-04-09 00:00	2026-10-07 16:00	2026-04-09 00:00	2026-10-07 16:00	RT_Labor	1.0	N
+%R	69	76	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-04-09 00:00	2026-09-09 16:00	2026-04-09 00:00	2026-09-09 16:00	RT_Labor	1.0	N
+%R	70	77	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-04-09 00:00	2026-09-09 16:00	2026-04-09 00:00	2026-09-09 16:00	RT_Labor	1.0	N
+%R	71	78	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-04-09 00:00	2026-11-04 16:00	2026-04-09 00:00	2026-11-04 16:00	RT_Labor	1.0	N
+%R	72	79	PDC1	QAQC			N	N	192	192	0	37513.972799999996	37513.972799999996	0	2026-10-12 00:00	2026-10-21 16:00	2026-10-12 00:00	2026-10-21 16:00	RT_Labor	1.0	N
+%R	73	80	PDC1	PROC			N	N	600	600	0	0.0	0.0	0	2026-03-03 00:00	2026-04-08 16:00	2026-03-03 00:00	2026-04-08 16:00	RT_Labor	1.0	N
+%R	74	81	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-04-09 00:00	2026-12-30 16:00	2026-04-09 00:00	2026-12-30 16:00	RT_Labor	1.0	N
+%R	75	82	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-04-09 00:00	2027-01-13 16:00	2026-04-09 00:00	2027-01-13 16:00	RT_Labor	1.0	N
+%R	76	83	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-04-09 00:00	2026-11-04 16:00	2026-04-09 00:00	2026-11-04 16:00	RT_Labor	1.0	N
+%R	77	84	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-08-04 00:00	2027-01-18 16:00	2026-08-04 00:00	2027-01-18 16:00	RT_Labor	1.0	N
+%R	78	85	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-04-09 00:00	2026-08-26 16:00	2026-04-09 00:00	2026-08-26 16:00	RT_Labor	1.0	N
+%R	79	86	PDC1	QAQC			N	N	240	240	0	93784.932	93784.932	0	2027-01-18 00:00	2027-01-29 16:00	2027-01-18 00:00	2027-01-29 16:00	RT_Labor	1.0	N
+%R	80	87	PDC1	QAQC			N	N	192	192	0	56270.9592	56270.9592	0	2026-11-09 00:00	2026-11-18 16:00	2026-11-09 00:00	2026-11-18 16:00	RT_Labor	1.0	N
+%R	81	88	PDC1	QAQC			N	N	192	192	0	50018.6304	50018.6304	0	2027-01-05 00:00	2027-01-15 16:00	2027-01-05 00:00	2027-01-15 16:00	RT_Labor	1.0	N
+%R	82	89	PDC1	PROC			N	N	480	480	0	0.0	0.0	0	2026-04-23 00:00	2026-05-22 16:00	2026-04-23 00:00	2026-05-22 16:00	RT_Labor	1.0	N
+%R	83	90	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-05-23 00:00	2026-09-11 16:00	2026-05-23 00:00	2026-09-11 16:00	RT_Labor	1.0	N
+%R	84	91	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2026-08-04 00:00	2026-12-21 16:00	2026-08-04 00:00	2026-12-21 16:00	RT_Labor	1.0	N
+%R	85	92	PDC1	PROC			N	N	480	480	0	0.0	0.0	0	2026-07-30 00:00	2026-08-26 16:00	2026-07-30 00:00	2026-08-26 16:00	RT_Labor	1.0	N
+%R	86	93	PDC1	SEST			N	N	960	960	0	913463.0160000001	913463.0160000001	0	2026-04-08 00:00	2026-04-28 16:00	2026-04-08 00:00	2026-04-28 16:00	RT_Labor	1.0	N
+%R	87	94	PDC1	SEST			N	N	640	640	0	557367.264	557367.264	0	2026-04-15 00:00	2026-04-28 16:00	2026-04-15 00:00	2026-04-28 16:00	RT_Labor	1.0	N
+%R	88	95	PDC1	EARTH			N	N	2048	2048	0	168512.26	168512.26	0	2026-04-15 00:00	2026-05-07 16:00	2026-04-15 00:00	2026-05-07 16:00	RT_Labor	1.0	N
+%R	89	96	PDC1	CIVIL			N	N	1440	1440	0	263174.322	263174.322	0	2026-04-22 00:00	2026-05-13 16:00	2026-04-22 00:00	2026-05-13 16:00	RT_Labor	1.0	N
+%R	90	97	PDC1	TP			N	N	0	0	0	20552.596	20552.596	0	2026-05-08 00:00	2026-05-22 16:00	2026-05-08 00:00	2026-05-22 16:00	RT_Labor	1.0	N
+%R	91	98	PDC1	EARTH			N	N	448	448	0	82210.384	82210.384	0	2026-05-12 00:00	2026-05-21 16:00	2026-05-12 00:00	2026-05-21 16:00	RT_Labor	1.0	N
+%R	92	99	PDC1	EARTH			N	N	640	640	0	144991.86000000002	144991.86000000002	0	2026-05-08 00:00	2026-05-22 16:00	2026-05-08 00:00	2026-05-22 16:00	RT_Labor	1.0	N
+%R	93	100	PDC1	SEST			N	N	512	512	0	331904.46449999994	331904.46449999994	0	2026-05-15 00:00	2026-05-26 16:00	2026-05-15 00:00	2026-05-26 16:00	RT_Labor	1.0	N
+%R	94	101	PDC1	CIVIL			N	N	720	720	0	298842.64	298842.64	0	2026-05-15 00:00	2026-06-04 16:00	2026-05-15 00:00	2026-06-04 16:00	RT_Labor	1.0	N
+%R	95	102	PDC1	CIVIL			N	N	720	720	0	330936.088	330936.088	0	2026-05-15 00:00	2026-06-04 16:00	2026-05-15 00:00	2026-06-04 16:00	RT_Labor	1.0	N
+%R	96	103	PDC1	EARTH			N	N	512	512	0	45731.752700000005	45731.752700000005	0	2026-07-27 00:00	2026-07-30 16:00	2026-07-27 00:00	2026-07-30 16:00	RT_Labor	1.0	N
+%R	97	104	PDC1	EARTH			N	N	384	384	0	27977.072239999998	27977.072239999998	0	2026-07-27 00:00	2026-07-29 16:00	2026-07-27 00:00	2026-07-29 16:00	RT_Labor	1.0	N
+%R	98	105	PDC1	BLAST			N	N	720	720	0	165410.77675	165410.77675	0	2026-07-30 00:00	2026-08-19 16:00	2026-07-30 00:00	2026-08-19 16:00	RT_Labor	1.0	N
+%R	99	106	PDC1	EARTH			N	N	512	512	0	0.0	0.0	0	2026-08-06 00:00	2026-08-17 16:00	2026-08-06 00:00	2026-08-17 16:00	RT_Labor	1.0	N
+%R	100	107	PDC1	EARTH			N	N	768	768	0	72632.7837	72632.7837	0	2026-07-27 00:00	2026-08-03 16:00	2026-07-27 00:00	2026-08-03 16:00	RT_Labor	1.0	N
+%R	101	108	PDC1	EARTH			N	N	1152	1152	0	121592.66012	121592.66012	0	2026-08-04 00:00	2026-08-14 16:00	2026-08-04 00:00	2026-08-14 16:00	RT_Labor	1.0	N
+%R	102	109	PDC1	EARTH			N	N	128	128	0	13988.536119999999	13988.536119999999	0	2026-08-17 00:00	2026-08-18 16:00	2026-08-17 00:00	2026-08-18 16:00	RT_Labor	1.0	N
+%R	103	110	PDC1	CIVIL			N	N	240	240	0	217487.79	217487.79	0	2026-07-29 00:00	2026-08-04 16:00	2026-07-29 00:00	2026-08-04 16:00	RT_Labor	1.0	N
+%R	104	111	PDC1	CONC			N	N	800	800	0	159491.05	159491.05	0	2026-08-05 00:00	2026-08-18 16:00	2026-08-05 00:00	2026-08-18 16:00	RT_Labor	1.0	N
+%R	105	112	PDC1	CONC			N	N	1600	1600	0	90891.7733	90891.7733	0	2026-08-19 00:00	2026-09-01 16:00	2026-08-19 00:00	2026-09-01 16:00	RT_Labor	1.0	N
+%R	106	113	PDC1	PILE			N	N	576	576	0	166514.0895	166514.0895	0	2026-08-18 00:00	2026-08-25 16:00	2026-08-18 00:00	2026-08-25 16:00	RT_Labor	1.0	N
+%R	107	114	PDC1	CONC			N	N	1920	1920	0	106931.498	106931.498	0	2026-08-05 00:00	2026-08-20 16:00	2026-08-05 00:00	2026-08-20 16:00	RT_Labor	1.0	N
+%R	108	115	PDC1	CONC			N	N	2240	2240	0	122971.2227	122971.2227	0	2026-08-17 00:00	2026-09-03 16:00	2026-08-17 00:00	2026-09-03 16:00	RT_Labor	1.0	N
+%R	109	116	PDC1	CONC			N	N	1920	1920	0	346893.03	346893.03	0	2026-09-04 00:00	2026-09-21 16:00	2026-09-04 00:00	2026-09-21 16:00	RT_Labor	1.0	N
+%R	110	117	PDC1	CIVIL			N	N	1440	1440	0	0.0	0.0	0	2026-09-11 00:00	2026-10-01 16:00	2026-09-11 00:00	2026-10-01 16:00	RT_Labor	1.0	N
+%R	111	118	PDC1	CIVIL			N	N	960	960	0	360580.45268	360580.45268	0	2026-09-23 00:00	2026-10-06 16:00	2026-09-23 00:00	2026-10-06 16:00	RT_Labor	1.0	N
+%R	112	119	PDC1	CONC			N	N	960	960	0	196750.74839999998	196750.74839999998	0	2026-10-07 00:00	2026-10-14 16:00	2026-10-07 00:00	2026-10-14 16:00	RT_Labor	1.0	N
+%R	113	120	PDC1	CONC			N	N	800	800	0	169297.1556	169297.1556	0	2026-10-07 00:00	2026-10-13 16:00	2026-10-07 00:00	2026-10-13 16:00	RT_Labor	1.0	N
+%R	114	121	PDC1	CONC			N	N	1600	1600	0	308852.919	308852.919	0	2026-10-19 00:00	2026-10-30 16:00	2026-10-19 00:00	2026-10-30 16:00	RT_Labor	1.0	N
+%R	115	122	PDC1	CONC			N	N	2400	2400	0	517042.6644	517042.6644	0	2026-10-26 00:00	2026-11-13 16:00	2026-10-26 00:00	2026-11-13 16:00	RT_Labor	1.0	N
+%R	116	123	PDC1	CONC			N	N	240	240	0	61770.5838	61770.5838	0	2026-11-16 00:00	2026-11-18 16:00	2026-11-16 00:00	2026-11-18 16:00	RT_Labor	1.0	N
+%R	117	124	PDC1	STEEL			N	N	480	480	0	260934.9793	260934.9793	0	2026-11-09 00:00	2026-11-16 16:00	2026-11-09 00:00	2026-11-16 16:00	RT_Labor	1.0	N
+%R	118	125	PDC1	STEEL			N	N	320	320	0	184835.9177	184835.9177	0	2026-11-09 00:00	2026-11-12 16:00	2026-11-09 00:00	2026-11-12 16:00	RT_Labor	1.0	N
+%R	119	126	PDC1	STEEL			N	N	1040	1040	0	812351.6833	812351.6833	0	2026-11-09 00:00	2026-11-25 16:00	2026-11-09 00:00	2026-11-25 16:00	RT_Labor	1.0	N
+%R	120	127	PDC1	STEEL			N	N	1120	1120	0	718087.2602	718087.2602	0	2026-11-19 00:00	2026-12-08 16:00	2026-11-19 00:00	2026-12-08 16:00	RT_Labor	1.0	N
+%R	121	128	PDC1	STEEL			N	N	240	240	0	57074.2962	57074.2962	0	2026-11-19 00:00	2026-11-23 16:00	2026-11-19 00:00	2026-11-23 16:00	RT_Labor	1.0	N
+%R	122	129	PDC1	CONC			N	N	2880	2880	0	476084.06	476084.06	0	2026-11-17 00:00	2026-12-10 16:00	2026-11-17 00:00	2026-12-10 16:00	RT_Labor	1.0	N
+%R	123	130	PDC1	PCAST			N	N	624	624	0	442609.4	442609.4	0	2026-11-26 00:00	2026-12-14 16:00	2026-11-26 00:00	2026-12-14 16:00	RT_Labor	1.0	N
+%R	124	131	PDC1	PCAST			N	N	384	384	0	260098.1118	260098.1118	0	2026-11-17 00:00	2026-11-26 16:00	2026-11-17 00:00	2026-11-26 16:00	RT_Labor	1.0	N
+%R	125	132	PDC1	PCAST			N	N	384	384	0	250464.8484	250464.8484	0	2026-11-13 00:00	2026-11-24 16:00	2026-11-13 00:00	2026-11-24 16:00	RT_Labor	1.0	N
+%R	126	133	PDC1	PCAST			N	N	672	672	0	452763.37979999994	452763.37979999994	0	2026-12-09 00:00	2026-12-30 16:00	2026-12-09 00:00	2026-12-30 16:00	RT_Labor	1.0	N
+%R	127	134	PDC1	STEEL			N	N	320	320	0	124885.69470000001	124885.69470000001	0	2026-11-26 00:00	2026-12-01 16:00	2026-11-26 00:00	2026-12-01 16:00	RT_Labor	1.0	N
+%R	128	135	PDC1	STEEL			N	N	880	880	0	382057.71786	382057.71786	0	2026-12-09 00:00	2026-12-23 16:00	2026-12-09 00:00	2026-12-23 16:00	RT_Labor	1.0	N
+%R	129	136	PDC1	ROOF			N	N	384	384	0	183923.11575	183923.11575	0	2026-12-15 00:00	2027-01-04 16:00	2026-12-15 00:00	2027-01-04 16:00	RT_Labor	1.0	N
+%R	130	137	PDC1	ROOF			N	N	1152	1152	0	562668.4948499999	562668.4948499999	0	2026-12-28 00:00	2027-01-22 16:00	2026-12-28 00:00	2027-01-22 16:00	RT_Labor	1.0	N
+%R	131	138	PDC1	ROOF			N	N	320	320	0	270853.13	270853.13	0	2027-01-25 00:00	2027-02-05 16:00	2027-01-25 00:00	2027-02-05 16:00	RT_Labor	1.0	N
+%R	132	139	PDC1	ENV			N	N	1008	1008	0	306673.8425	306673.8425	0	2026-12-22 00:00	2027-01-25 16:00	2026-12-22 00:00	2027-01-25 16:00	RT_Labor	1.0	N
+%R	133	140	PDC1	ENV			N	N	2592	2592	0	750812.8312	750812.8312	0	2026-12-31 00:00	2027-02-09 16:00	2026-12-31 00:00	2027-02-09 16:00	RT_Labor	1.0	N
+%R	134	141	PDC1	ENV			N	N	384	384	0	143939.0925	143939.0925	0	2027-01-26 00:00	2027-02-04 16:00	2027-01-26 00:00	2027-02-04 16:00	RT_Labor	1.0	N
+%R	135	142	PDC1	ENV			N	N	288	288	0	138323.03600000002	138323.03600000002	0	2027-02-10 00:00	2027-02-17 16:00	2027-02-10 00:00	2027-02-17 16:00	RT_Labor	1.0	N
+%R	136	143	PDC1	ROOF			N	N	320	320	0	234094.4925	234094.4925	0	2027-01-25 00:00	2027-02-05 16:00	2027-01-25 00:00	2027-02-05 16:00	RT_Labor	1.0	N
+%R	137	144	PDC1	FIREP			N	N	960	960	0	95271.67404	95271.67404	0	2027-01-26 00:00	2027-02-22 16:00	2027-01-26 00:00	2027-02-22 16:00	RT_Labor	1.0	N
+%R	138	145	PDC1	FIREP			N	N	1344	1344	0	133567.15086	133567.15086	0	2027-01-18 00:00	2027-02-24 16:00	2027-01-18 00:00	2027-02-24 16:00	RT_Labor	1.0	N
+%R	139	146	PDC1	ENV			N	N	288	288	0	58039.955	58039.955	0	2027-02-18 00:00	2027-02-25 16:00	2027-02-18 00:00	2027-02-25 16:00	RT_Labor	1.0	N
+%R	140	148	PDC1	HV			N	N	960	960	0	1143675.6975	1143675.6975	0	2026-12-11 00:00	2027-01-13 16:00	2026-12-11 00:00	2027-01-13 16:00	RT_Labor	1.0	N
+%R	141	149	PDC1	HV			N	N	480	480	0	284091.132	284091.132	0	2026-12-11 00:00	2026-12-28 16:00	2026-12-11 00:00	2026-12-28 16:00	RT_Labor	1.0	N
+%R	142	150	PDC1	HV			N	N	720	720	0	1725435.845	1725435.845	0	2026-12-29 00:00	2027-01-20 16:00	2026-12-29 00:00	2027-01-20 16:00	RT_Labor	1.0	N
+%R	143	151	PDC1	HV			N	N	480	480	0	739472.505	739472.505	0	2027-01-21 00:00	2027-02-03 16:00	2027-01-21 00:00	2027-02-03 16:00	RT_Labor	1.0	N
+%R	144	152	PDC1	HV			N	N	1200	1200	0	982621.0939999999	982621.0939999999	0	2026-12-31 00:00	2027-02-05 16:00	2026-12-31 00:00	2027-02-05 16:00	RT_Labor	1.0	N
+%R	145	153	PDC1	HV			N	N	1200	1200	0	421123.32599999994	421123.32599999994	0	2027-02-08 00:00	2027-03-12 16:00	2027-02-08 00:00	2027-03-12 16:00	RT_Labor	1.0	N
+%R	146	154	PDC1	HV			N	N	384	384	0	381225.2325	381225.2325	0	2027-03-15 00:00	2027-03-24 16:00	2027-03-15 00:00	2027-03-24 16:00	RT_Labor	1.0	N
+%R	147	155	PDC1	PM			N	N	360	360	0	0.0	0.0	0	2026-08-25 00:00	2026-08-31 16:00	2026-08-25 00:00	2026-08-31 16:00	RT_Labor	1.0	N
+%R	148	157	PDC1	HV			N	N	384	384	0	60022.355800000005	60022.355800000005	0	2027-03-30 00:00	2027-04-08 16:00	2027-03-30 00:00	2027-04-08 16:00	RT_Labor	1.0	N
+%R	149	158	PDC1	GEN			N	N	1152	1152	0	6172715.4	6172715.4	0	2027-01-14 00:00	2027-02-16 16:00	2027-01-14 00:00	2027-02-16 16:00	RT_Labor	1.0	N
+%R	150	159	PDC1	GEN			N	N	720	720	0	2057571.8	2057571.8	0	2027-01-26 00:00	2027-02-15 16:00	2027-01-26 00:00	2027-02-15 16:00	RT_Labor	1.0	N
+%R	151	160	PDC1	GEN			N	N	1200	1200	0	1109208.753	1109208.753	0	2026-11-13 00:00	2026-12-17 16:00	2026-11-13 00:00	2026-12-17 16:00	RT_Labor	1.0	N
+%R	152	161	PDC1	CIVIL			N	N	384	384	0	229974.9305	229974.9305	0	2026-11-27 00:00	2026-12-08 16:00	2026-11-27 00:00	2026-12-08 16:00	RT_Labor	1.0	N
+%R	153	162	PDC1	GEN			N	N	960	960	0	965074.2849999999	965074.2849999999	0	2027-02-17 00:00	2027-03-16 16:00	2027-02-17 00:00	2027-03-16 16:00	RT_Labor	1.0	N
+%R	154	163	PDC1	ELEC			N	N	960	960	0	413603.265	413603.265	0	2027-02-24 00:00	2027-03-16 16:00	2027-02-24 00:00	2027-03-16 16:00	RT_Labor	1.0	N
+%R	155	164	PDC1	PIPE			N	N	2976	2976	0	831198.8432	831198.8432	0	2027-01-25 00:00	2027-03-08 16:00	2027-01-25 00:00	2027-03-08 16:00	RT_Labor	1.0	N
+%R	156	165	PDC1	MECH			N	N	768	768	0	2189947.86	2189947.86	0	2026-11-16 00:00	2026-12-01 16:00	2026-11-16 00:00	2026-12-01 16:00	RT_Labor	1.0	N
+%R	157	166	PDC1	MECH			N	N	640	640	0	1184500.1	1184500.1	0	2026-11-16 00:00	2026-11-27 16:00	2026-11-16 00:00	2026-11-27 16:00	RT_Labor	1.0	N
+%R	158	167	PDC1	MECH			N	N	768	768	0	800570.56	800570.56	0	2026-12-02 00:00	2026-12-17 16:00	2026-12-02 00:00	2026-12-17 16:00	RT_Labor	1.0	N
+%R	159	168	PDC1	MECH			N	N	960	960	0	795405.59	795405.59	0	2027-02-08 00:00	2027-02-26 16:00	2027-02-08 00:00	2027-02-26 16:00	RT_Labor	1.0	N
+%R	160	169	PDC1	PIPE			N	N	2400	2400	0	1174170.1565	1174170.1565	0	2027-02-15 00:00	2027-03-19 16:00	2027-02-15 00:00	2027-03-19 16:00	RT_Labor	1.0	N
+%R	161	170	PDC1	MECH			N	N	960	960	0	895261.7	895261.7	0	2026-12-18 00:00	2027-01-13 16:00	2026-12-18 00:00	2027-01-13 16:00	RT_Labor	1.0	N
+%R	162	171	PDC1	INSUL			N	N	640	640	0	420084.3400000001	420084.3400000001	0	2027-03-01 00:00	2027-03-30 16:00	2027-03-01 00:00	2027-03-30 16:00	RT_Labor	1.0	N
+%R	163	172	PDC1	PIPE			N	N	480	480	0	105021.08500000002	105021.08500000002	0	2027-03-22 00:00	2027-04-06 16:00	2027-03-22 00:00	2027-04-06 16:00	RT_Labor	1.0	N
+%R	164	173	PDC1	MECH			N	N	3200	3200	0	1373021.5565000002	1373021.5565000002	0	2027-01-25 00:00	2027-02-26 16:00	2027-01-25 00:00	2027-02-26 16:00	RT_Labor	1.0	N
+%R	165	174	PDC1	ELEC			N	N	3200	3200	0	0.0	0.0	0	2027-01-18 00:00	2027-02-19 16:00	2027-01-18 00:00	2027-02-19 16:00	RT_Labor	1.0	N
+%R	166	175	PDC1	ELEC			N	N	3840	3840	0	467914.806	467914.806	0	2027-01-25 00:00	2027-03-05 16:00	2027-01-25 00:00	2027-03-05 16:00	RT_Labor	1.0	N
+%R	167	176	PDC1	ELEC			N	N	768	768	0	426136.698	426136.698	0	2027-01-25 00:00	2027-02-09 16:00	2027-01-25 00:00	2027-02-09 16:00	RT_Labor	1.0	N
+%R	168	177	PDC1	FIRE			N	N	1920	1920	0	186947.481	186947.481	0	2027-02-01 00:00	2027-02-26 16:00	2027-02-01 00:00	2027-02-26 16:00	RT_Labor	1.0	N
+%R	169	178	PDC1	FIRE			N	N	720	720	0	120966.02100000001	120966.02100000001	0	2027-02-08 00:00	2027-02-26 16:00	2027-02-08 00:00	2027-02-26 16:00	RT_Labor	1.0	N
+%R	170	179	PDC1	ELEC			N	N	640	640	0	279913.32	279913.32	0	2027-02-23 00:00	2027-03-08 16:00	2027-02-23 00:00	2027-03-08 16:00	RT_Labor	1.0	N
+%R	171	180	PDC1	ELEC			N	N	640	640	0	777072.8025	777072.8025	0	2027-03-02 00:00	2027-03-15 16:00	2027-03-02 00:00	2027-03-15 16:00	RT_Labor	1.0	N
+%R	172	181	PDC1	ELEC			N	N	768	768	0	275735.51	275735.51	0	2027-03-16 00:00	2027-04-02 16:00	2027-03-16 00:00	2027-04-02 16:00	RT_Labor	1.0	N
+%R	173	182	PDC1	ELEC			N	N	768	768	0	309157.9975	309157.9975	0	2027-03-09 00:00	2027-03-24 16:00	2027-03-09 00:00	2027-03-24 16:00	RT_Labor	1.0	N
+%R	174	183	PDC1	ELEC			N	N	768	768	0	155414.56	155414.56	0	2027-03-25 00:00	2027-04-13 16:00	2027-03-25 00:00	2027-04-13 16:00	RT_Labor	1.0	N
+%R	175	184	PDC1	ELEC			N	N	2560	2560	0	467914.806	467914.806	0	2027-02-23 00:00	2027-03-22 16:00	2027-02-23 00:00	2027-03-22 16:00	RT_Labor	1.0	N
+%R	176	185	PDC1	MECH			N	N	512	512	0	560399.395	560399.395	0	2027-02-23 00:00	2027-03-04 16:00	2027-02-23 00:00	2027-03-04 16:00	RT_Labor	1.0	N
+%R	177	186	PDC1	PIPE			N	N	960	960	0	264472.3592	264472.3592	0	2027-02-26 00:00	2027-03-25 16:00	2027-02-26 00:00	2027-03-25 16:00	RT_Labor	1.0	N
+%R	178	187	PDC1	FIT			N	N	960	960	0	240590.2925	240590.2925	0	2027-02-23 00:00	2027-03-10 16:00	2027-02-23 00:00	2027-03-10 16:00	RT_Labor	1.0	N
+%R	179	188	PDC1	FIT			N	N	800	800	0	123883.495	123883.495	0	2027-03-11 00:00	2027-03-24 16:00	2027-03-11 00:00	2027-03-24 16:00	RT_Labor	1.0	N
+%R	180	189	PDC1	FIT			N	N	960	960	0	205048.5425	205048.5425	0	2027-04-14 00:00	2027-04-29 16:00	2027-04-14 00:00	2027-04-29 16:00	RT_Labor	1.0	N
+%R	181	190	PDC1	FIRE			N	N	480	480	0	47794.585	47794.585	0	2027-03-23 00:00	2027-04-07 16:00	2027-03-23 00:00	2027-04-07 16:00	RT_Labor	1.0	N
+%R	182	191	PDC1	FIRE			N	N	720	720	0	320015.925	320015.925	0	2027-04-01 00:00	2027-04-21 16:00	2027-04-01 00:00	2027-04-21 16:00	RT_Labor	1.0	N
+%R	183	192	PDC1	ELEC			N	N	384	384	0	109667.5325	109667.5325	0	2027-03-25 00:00	2027-04-05 16:00	2027-03-25 00:00	2027-04-05 16:00	RT_Labor	1.0	N
+%R	184	193	PDC1	BMS			N	N	640	640	0	392331.21200000006	392331.21200000006	0	2027-03-23 00:00	2027-04-21 16:00	2027-03-23 00:00	2027-04-21 16:00	RT_Labor	1.0	N
+%R	185	194	PDC1	BMS			N	N	384	384	0	212789.80800000002	212789.80800000002	0	2027-04-06 00:00	2027-04-21 16:00	2027-04-06 00:00	2027-04-21 16:00	RT_Labor	1.0	N
+%R	186	195	PDC1	ELV			N	N	576	576	0	365732.48600000003	365732.48600000003	0	2027-03-23 00:00	2027-04-19 16:00	2027-03-23 00:00	2027-04-19 16:00	RT_Labor	1.0	N
+%R	187	196	PDC1	ELV			N	N	384	384	0	159592.35600000003	159592.35600000003	0	2027-03-23 00:00	2027-04-09 16:00	2027-03-23 00:00	2027-04-09 16:00	RT_Labor	1.0	N
+%R	188	197	PDC1	FIT			N	N	960	960	0	165269.12800000003	165269.12800000003	0	2027-03-23 00:00	2027-04-09 16:00	2027-03-23 00:00	2027-04-09 16:00	RT_Labor	1.0	N
+%R	189	198	PDC1	FIT			N	N	400	400	0	112776.70000000001	112776.70000000001	0	2027-04-12 00:00	2027-04-16 16:00	2027-04-12 00:00	2027-04-16 16:00	RT_Labor	1.0	N
+%R	190	199	PDC1	FIT			N	N	800	800	0	335278.134	335278.134	0	2027-04-01 00:00	2027-04-14 16:00	2027-04-01 00:00	2027-04-14 16:00	RT_Labor	1.0	N
+%R	191	200	PDC1	CX			N	N	720	720	0	34103.611	34103.611	0	2027-03-09 00:00	2027-03-31 16:00	2027-03-09 00:00	2027-03-31 16:00	RT_Labor	1.0	N
+%R	192	201	PDC1	CX			N	N	1200	1200	0	40924.333199999994	40924.333199999994	0	2027-04-07 00:00	2027-05-12 16:00	2027-04-07 00:00	2027-05-12 16:00	RT_Labor	1.0	N
+%R	193	202	PDC1	CX			N	N	1200	1200	0	40924.333199999994	40924.333199999994	0	2027-04-14 00:00	2027-05-19 16:00	2027-04-14 00:00	2027-05-19 16:00	RT_Labor	1.0	N
+%R	194	203	PDC1	CX			N	N	960	960	0	27282.8888	27282.8888	0	2027-04-01 00:00	2027-04-28 16:00	2027-04-01 00:00	2027-04-28 16:00	RT_Labor	1.0	N
+%R	195	204	PDC1	CX			N	N	960	960	0	20462.166599999997	20462.166599999997	0	2027-04-22 00:00	2027-05-20 16:00	2027-04-22 00:00	2027-05-20 16:00	RT_Labor	1.0	N
+%R	196	205	PDC1	CX			N	N	576	576	0	13641.4444	13641.4444	0	2027-04-22 00:00	2027-05-10 16:00	2027-04-22 00:00	2027-05-10 16:00	RT_Labor	1.0	N
+%R	197	206	PDC1	CX			N	N	384	384	0	10231.083299999998	10231.083299999998	0	2027-04-20 00:00	2027-04-29 16:00	2027-04-20 00:00	2027-04-29 16:00	RT_Labor	1.0	N
+%R	198	207	PDC1	CX			N	N	720	720	0	120044.71160000001	120044.71160000001	0	2027-05-21 00:00	2027-06-10 16:00	2027-05-21 00:00	2027-06-10 16:00	RT_Labor	1.0	N
+%R	199	208	PDC1	CX			N	N	480	480	0	87305.2448	87305.2448	0	2027-06-11 00:00	2027-06-24 16:00	2027-06-11 00:00	2027-06-24 16:00	RT_Labor	1.0	N
+%R	200	209	PDC1	CX			N	N	384	384	0	288419.112	288419.112	0	2027-06-28 00:00	2027-07-07 16:00	2027-06-28 00:00	2027-07-07 16:00	RT_Labor	1.0	N
+%R	201	210	PDC1	CX			N	N	720	720	0	59681.319	59681.319	0	2027-05-28 00:00	2027-06-17 16:00	2027-05-28 00:00	2027-06-17 16:00	RT_Labor	1.0	N
+%R	202	211	PDC1	PM			N	N	360	360	0	27152.9698	27152.9698	0	2027-07-08 00:00	2027-07-14 16:00	2027-07-08 00:00	2027-07-14 16:00	RT_Labor	1.0	N
+%R	203	212	PDC1	CX			N	N	240	240	0	0.0	0.0	0	2027-07-08 00:00	2027-07-14 16:00	2027-07-08 00:00	2027-07-14 16:00	RT_Labor	1.0	N
+%R	204	215	PDC1	EARTH			N	N	768	768	0	72632.7837	72632.7837	0	2026-08-17 00:00	2026-08-24 16:00	2026-08-17 00:00	2026-08-24 16:00	RT_Labor	1.0	N
+%R	205	216	PDC1	CONC			N	N	1920	1920	0	69505.4737	69505.4737	0	2026-08-25 00:00	2026-09-09 16:00	2026-08-25 00:00	2026-09-09 16:00	RT_Labor	1.0	N
+%R	206	217	PDC1	CONC			N	N	960	960	0	91453.61699999998	91453.61699999998	0	2026-09-10 00:00	2026-09-17 16:00	2026-09-10 00:00	2026-09-17 16:00	RT_Labor	1.0	N
+%R	207	218	PDC1	CIVIL			N	N	384	384	0	0.0	0.0	0	2026-09-15 00:00	2026-09-24 16:00	2026-09-15 00:00	2026-09-24 16:00	RT_Labor	1.0	N
+%R	208	219	PDC1	CIVIL			N	N	480	480	0	88991.5194	88991.5194	0	2026-09-21 00:00	2026-09-25 16:00	2026-09-21 00:00	2026-09-25 16:00	RT_Labor	1.0	N
+%R	209	220	PDC1	CONC			N	N	1600	1600	0	308852.919	308852.919	0	2026-09-28 00:00	2026-10-09 16:00	2026-09-28 00:00	2026-10-09 16:00	RT_Labor	1.0	N
+%R	210	221	PDC1	STEEL			N	N	1040	1040	0	812351.6833	812351.6833	0	2026-12-30 00:00	2027-01-19 16:00	2026-12-30 00:00	2027-01-19 16:00	RT_Labor	1.0	N
+%R	211	222	PDC1	PCAST			N	N	624	624	0	442609.4	442609.4	0	2027-01-20 00:00	2027-02-05 16:00	2027-01-20 00:00	2027-02-05 16:00	RT_Labor	1.0	N
+%R	212	223	PDC1	STEEL			N	N	320	320	0	124885.69470000001	124885.69470000001	0	2027-01-20 00:00	2027-01-25 16:00	2027-01-20 00:00	2027-01-25 16:00	RT_Labor	1.0	N
+%R	213	224	PDC1	ROOF			N	N	384	384	0	183923.11575	183923.11575	0	2027-02-08 00:00	2027-02-23 16:00	2027-02-08 00:00	2027-02-23 16:00	RT_Labor	1.0	N
+%R	214	225	PDC1	ENV			N	N	1008	1008	0	306673.8425	306673.8425	0	2027-02-15 00:00	2027-03-15 16:00	2027-02-15 00:00	2027-03-15 16:00	RT_Labor	1.0	N
+%R	215	226	PDC1	ENV			N	N	384	384	0	143939.0925	143939.0925	0	2027-03-16 00:00	2027-03-25 16:00	2027-03-16 00:00	2027-03-25 16:00	RT_Labor	1.0	N
+%R	216	227	PDC1	ENV			N	N	384	384	0	126089.3187	126089.3187	0	2027-03-16 00:00	2027-03-25 16:00	2027-03-16 00:00	2027-03-25 16:00	RT_Labor	1.0	N
+%R	217	228	PDC1	FIREP			N	N	960	960	0	79393.0617	79393.0617	0	2027-03-16 00:00	2027-04-14 16:00	2027-03-16 00:00	2027-04-14 16:00	RT_Labor	1.0	N
+%R	218	229	PDC1	ENV			N	N	288	288	0	58039.955	58039.955	0	2027-03-30 00:00	2027-04-06 16:00	2027-03-30 00:00	2027-04-06 16:00	RT_Labor	1.0	N
+%R	219	231	PDC1	PIPE			N	N	576	576	0	0.0	0.0	0	2027-04-16 00:00	2027-05-03 16:00	2027-04-16 00:00	2027-05-03 16:00	RT_Labor	1.0	N
+%R	220	232	PDC1	ELEC			N	N	640	640	0	279913.32	279913.32	0	2027-04-16 00:00	2027-04-29 16:00	2027-04-16 00:00	2027-04-29 16:00	RT_Labor	1.0	N
+%R	221	233	PDC1	ELEC			N	N	1152	1152	0	1052808.3125	1052808.3125	0	2027-04-30 00:00	2027-05-26 16:00	2027-04-30 00:00	2027-05-26 16:00	RT_Labor	1.0	N
+%R	222	234	PDC1	ELEC			N	N	1280	1280	0	464572.5575	464572.5575	0	2027-05-27 00:00	2027-06-23 16:00	2027-05-27 00:00	2027-06-23 16:00	RT_Labor	1.0	N
+%R	223	235	PDC1	ELEC			N	N	2560	2560	0	467914.806	467914.806	0	2027-04-15 00:00	2027-05-13 16:00	2027-04-15 00:00	2027-05-13 16:00	RT_Labor	1.0	N
+%R	224	236	PDC1	MECH			N	N	768	768	0	1319908.43461	1319908.43461	0	2027-04-15 00:00	2027-04-30 16:00	2027-04-15 00:00	2027-04-30 16:00	RT_Labor	1.0	N
+%R	225	237	PDC1	PIPE			N	N	960	960	0	584700.5837000001	584700.5837000001	0	2027-05-04 00:00	2027-06-01 16:00	2027-05-04 00:00	2027-06-01 16:00	RT_Labor	1.0	N
+%R	226	238	PDC1	INSUL			N	N	384	384	0	175385.21195000003	175385.21195000003	0	2027-06-02 00:00	2027-06-17 16:00	2027-06-02 00:00	2027-06-17 16:00	RT_Labor	1.0	N
+%R	227	239	PDC1	FIT			N	N	960	960	0	240590.2925	240590.2925	0	2027-04-15 00:00	2027-04-30 16:00	2027-04-15 00:00	2027-04-30 16:00	RT_Labor	1.0	N
+%R	228	240	PDC1	FIT			N	N	800	800	0	123883.495	123883.495	0	2027-05-03 00:00	2027-05-17 16:00	2027-05-03 00:00	2027-05-17 16:00	RT_Labor	1.0	N
+%R	229	241	PDC1	FIT			N	N	960	960	0	205048.5425	205048.5425	0	2027-06-24 00:00	2027-08-02 16:00	2027-06-24 00:00	2027-08-02 16:00	RT_Labor	1.0	N
+%R	230	242	PDC1	FIRE			N	N	864	864	0	389804.332	389804.332	0	2027-05-14 00:00	2027-06-08 16:00	2027-05-14 00:00	2027-06-08 16:00	RT_Labor	1.0	N
+%R	231	243	PDC1	BMS			N	N	576	576	0	412228.0425	412228.0425	0	2027-06-18 00:00	2027-08-04 16:00	2027-06-18 00:00	2027-08-04 16:00	RT_Labor	1.0	N
+%R	232	244	PDC1	ELV			N	N	448	448	0	262662.42100000003	262662.42100000003	0	2027-05-14 00:00	2027-06-02 16:00	2027-05-14 00:00	2027-06-02 16:00	RT_Labor	1.0	N
+%R	233	245	PDC1	FIT			N	N	800	800	0	139022.91400000002	139022.91400000002	0	2027-05-14 00:00	2027-05-27 16:00	2027-05-14 00:00	2027-05-27 16:00	RT_Labor	1.0	N
+%R	234	246	PDC1	CX			N	N	480	480	0	13641.4444	13641.4444	0	2027-05-27 00:00	2027-06-09 16:00	2027-05-27 00:00	2027-06-09 16:00	RT_Labor	1.0	N
+%R	235	247	PDC1	CX			N	N	864	864	0	17051.8055	17051.8055	0	2027-06-18 00:00	2027-07-14 16:00	2027-06-18 00:00	2027-07-14 16:00	RT_Labor	1.0	N
+%R	236	248	PDC1	CX			N	N	864	864	0	17051.8055	17051.8055	0	2027-08-03 00:00	2027-08-26 16:00	2027-08-03 00:00	2027-08-26 16:00	RT_Labor	1.0	N
+%R	237	249	PDC1	CX			N	N	720	720	0	10231.083299999998	10231.083299999998	0	2027-08-05 00:00	2027-08-25 16:00	2027-08-05 00:00	2027-08-25 16:00	RT_Labor	1.0	N
+%R	238	250	PDC1	CX			N	N	576	576	0	54565.778000000006	54565.778000000006	0	2027-08-27 00:00	2027-09-13 16:00	2027-08-27 00:00	2027-09-13 16:00	RT_Labor	1.0	N
+%R	239	252	PDC1	CX			N	N	384	384	0	38196.04460000001	38196.04460000001	0	2027-09-14 00:00	2027-09-23 16:00	2027-09-14 00:00	2027-09-23 16:00	RT_Labor	1.0	N
+%R	240	253	PDC1	CX			N	N	240	240	0	131217.704	131217.704	0	2027-09-24 00:00	2027-09-30 16:00	2027-09-24 00:00	2027-09-30 16:00	RT_Labor	1.0	N
+%R	241	254	PDC1	CX			N	N	576	576	0	35808.7914	35808.7914	0	2027-09-03 00:00	2027-09-20 16:00	2027-09-03 00:00	2027-09-20 16:00	RT_Labor	1.0	N
+%R	242	255	PDC1	PM			N	N	360	360	0	22216.066199999997	22216.066199999997	0	2027-10-01 00:00	2027-10-07 16:00	2027-10-01 00:00	2027-10-07 16:00	RT_Labor	1.0	N
+%R	243	256	PDC1	CX			N	N	240	240	0	0.0	0.0	0	2027-10-01 00:00	2027-10-07 16:00	2027-10-01 00:00	2027-10-07 16:00	RT_Labor	1.0	N
+%R	244	257	PDC1	EARTH			N	N	768	768	0	72632.7837	72632.7837	0	2026-09-07 00:00	2026-09-14 16:00	2026-09-07 00:00	2026-09-14 16:00	RT_Labor	1.0	N
+%R	245	258	PDC1	CONC			N	N	1920	1920	0	69505.4737	69505.4737	0	2026-09-15 00:00	2026-09-30 16:00	2026-09-15 00:00	2026-09-30 16:00	RT_Labor	1.0	N
+%R	246	259	PDC1	CONC			N	N	960	960	0	91453.61699999998	91453.61699999998	0	2026-10-01 00:00	2026-10-08 16:00	2026-10-01 00:00	2026-10-08 16:00	RT_Labor	1.0	N
+%R	247	260	PDC1	CIVIL			N	N	384	384	0	0.0	0.0	0	2026-10-06 00:00	2026-10-15 16:00	2026-10-06 00:00	2026-10-15 16:00	RT_Labor	1.0	N
+%R	248	261	PDC1	CIVIL			N	N	480	480	0	88991.5194	88991.5194	0	2026-10-12 00:00	2026-10-16 16:00	2026-10-12 00:00	2026-10-16 16:00	RT_Labor	1.0	N
+%R	249	262	PDC1	CONC			N	N	1600	1600	0	308852.919	308852.919	0	2026-10-19 00:00	2026-10-30 16:00	2026-10-19 00:00	2026-10-30 16:00	RT_Labor	1.0	N
+%R	250	263	PDC1	STEEL			N	N	1040	1040	0	812351.6833	812351.6833	0	2027-02-22 00:00	2027-03-10 16:00	2027-02-22 00:00	2027-03-10 16:00	RT_Labor	1.0	N
+%R	251	264	PDC1	PCAST			N	N	624	624	0	442609.4	442609.4	0	2027-03-11 00:00	2027-03-31 16:00	2027-03-11 00:00	2027-03-31 16:00	RT_Labor	1.0	N
+%R	252	265	PDC1	STEEL			N	N	320	320	0	124885.69470000001	124885.69470000001	0	2027-03-11 00:00	2027-03-16 16:00	2027-03-11 00:00	2027-03-16 16:00	RT_Labor	1.0	N
+%R	253	266	PDC1	ROOF			N	N	384	384	0	183923.11575	183923.11575	0	2027-04-01 00:00	2027-04-16 16:00	2027-04-01 00:00	2027-04-16 16:00	RT_Labor	1.0	N
+%R	254	267	PDC1	ENV			N	N	1008	1008	0	306673.8425	306673.8425	0	2027-04-08 00:00	2027-05-07 16:00	2027-04-08 00:00	2027-05-07 16:00	RT_Labor	1.0	N
+%R	255	268	PDC1	ENV			N	N	384	384	0	143939.0925	143939.0925	0	2027-05-10 00:00	2027-05-19 16:00	2027-05-10 00:00	2027-05-19 16:00	RT_Labor	1.0	N
+%R	256	269	PDC1	ENV			N	N	384	384	0	126089.3187	126089.3187	0	2027-05-10 00:00	2027-05-19 16:00	2027-05-10 00:00	2027-05-19 16:00	RT_Labor	1.0	N
+%R	257	270	PDC1	FIREP			N	N	960	960	0	79393.0617	79393.0617	0	2027-05-10 00:00	2027-06-04 16:00	2027-05-10 00:00	2027-06-04 16:00	RT_Labor	1.0	N
+%R	258	271	PDC1	ENV			N	N	288	288	0	58039.955	58039.955	0	2027-05-20 00:00	2027-05-27 16:00	2027-05-20 00:00	2027-05-27 16:00	RT_Labor	1.0	N
+%R	259	273	PDC1	PIPE			N	N	576	576	0	0.0	0.0	0	2027-06-08 00:00	2027-06-23 16:00	2027-06-08 00:00	2027-06-23 16:00	RT_Labor	1.0	N
+%R	260	274	PDC1	ELEC			N	N	640	640	0	279913.32	279913.32	0	2027-06-08 00:00	2027-06-21 16:00	2027-06-08 00:00	2027-06-21 16:00	RT_Labor	1.0	N
+%R	261	275	PDC1	ELEC			N	N	1152	1152	0	1052808.3125	1052808.3125	0	2027-06-22 00:00	2027-08-06 16:00	2027-06-22 00:00	2027-08-06 16:00	RT_Labor	1.0	N
+%R	262	276	PDC1	ELEC			N	N	1280	1280	0	464572.5575	464572.5575	0	2027-08-09 00:00	2027-09-03 16:00	2027-08-09 00:00	2027-09-03 16:00	RT_Labor	1.0	N
+%R	263	277	PDC1	ELEC			N	N	2560	2560	0	467914.806	467914.806	0	2027-06-07 00:00	2027-07-05 16:00	2027-06-07 00:00	2027-07-05 16:00	RT_Labor	1.0	N
+%R	264	278	PDC1	MECH			N	N	768	768	0	1319908.43461	1319908.43461	0	2027-06-07 00:00	2027-06-22 16:00	2027-06-07 00:00	2027-06-22 16:00	RT_Labor	1.0	N
+%R	265	279	PDC1	PIPE			N	N	960	960	0	584700.5837000001	584700.5837000001	0	2027-06-24 00:00	2027-08-12 16:00	2027-06-24 00:00	2027-08-12 16:00	RT_Labor	1.0	N
+%R	266	280	PDC1	INSUL			N	N	384	384	0	175385.21195000003	175385.21195000003	0	2027-08-13 00:00	2027-08-30 16:00	2027-08-13 00:00	2027-08-30 16:00	RT_Labor	1.0	N
+%R	267	281	PDC1	FIT			N	N	960	960	0	240590.2925	240590.2925	0	2027-06-07 00:00	2027-06-22 16:00	2027-06-07 00:00	2027-06-22 16:00	RT_Labor	1.0	N
+%R	268	282	PDC1	FIT			N	N	800	800	0	123883.495	123883.495	0	2027-06-23 00:00	2027-07-07 16:00	2027-06-23 00:00	2027-07-07 16:00	RT_Labor	1.0	N
+%R	269	283	PDC1	FIT			N	N	960	960	0	205048.5425	205048.5425	0	2027-09-06 00:00	2027-09-21 16:00	2027-09-06 00:00	2027-09-21 16:00	RT_Labor	1.0	N
+%R	270	284	PDC1	FIRE			N	N	864	864	0	389804.332	389804.332	0	2027-07-06 00:00	2027-08-19 16:00	2027-07-06 00:00	2027-08-19 16:00	RT_Labor	1.0	N
+%R	271	285	PDC1	BMS			N	N	576	576	0	412228.0425	412228.0425	0	2027-08-31 00:00	2027-09-23 16:00	2027-08-31 00:00	2027-09-23 16:00	RT_Labor	1.0	N
+%R	272	286	PDC1	ELV			N	N	448	448	0	262662.42100000003	262662.42100000003	0	2027-07-06 00:00	2027-08-13 16:00	2027-07-06 00:00	2027-08-13 16:00	RT_Labor	1.0	N
+%R	273	287	PDC1	FIT			N	N	800	800	0	139022.91400000002	139022.91400000002	0	2027-07-06 00:00	2027-08-09 16:00	2027-07-06 00:00	2027-08-09 16:00	RT_Labor	1.0	N
+%R	274	288	PDC1	CX			N	N	480	480	0	13641.4444	13641.4444	0	2027-08-09 00:00	2027-08-20 16:00	2027-08-09 00:00	2027-08-20 16:00	RT_Labor	1.0	N
+%R	275	289	PDC1	CX			N	N	864	864	0	17051.8055	17051.8055	0	2027-08-31 00:00	2027-09-23 16:00	2027-08-31 00:00	2027-09-23 16:00	RT_Labor	1.0	N
+%R	276	290	PDC1	CX			N	N	864	864	0	17051.8055	17051.8055	0	2027-09-22 00:00	2027-10-15 16:00	2027-09-22 00:00	2027-10-15 16:00	RT_Labor	1.0	N
+%R	277	291	PDC1	CX			N	N	720	720	0	10231.083299999998	10231.083299999998	0	2027-09-24 00:00	2027-10-14 16:00	2027-09-24 00:00	2027-10-14 16:00	RT_Labor	1.0	N
+%R	278	292	PDC1	CX			N	N	576	576	0	54565.778000000006	54565.778000000006	0	2027-10-18 00:00	2027-11-02 16:00	2027-10-18 00:00	2027-11-02 16:00	RT_Labor	1.0	N
+%R	279	294	PDC1	CX			N	N	384	384	0	38196.04460000001	38196.04460000001	0	2027-11-03 00:00	2027-11-12 16:00	2027-11-03 00:00	2027-11-12 16:00	RT_Labor	1.0	N
+%R	280	295	PDC1	CX			N	N	240	240	0	131217.704	131217.704	0	2027-11-15 00:00	2027-11-19 16:00	2027-11-15 00:00	2027-11-19 16:00	RT_Labor	1.0	N
+%R	281	296	PDC1	CX			N	N	576	576	0	35808.7914	35808.7914	0	2027-10-25 00:00	2027-11-09 16:00	2027-10-25 00:00	2027-11-09 16:00	RT_Labor	1.0	N
+%R	282	297	PDC1	PM			N	N	360	360	0	22216.066199999997	22216.066199999997	0	2027-11-22 00:00	2027-11-26 16:00	2027-11-22 00:00	2027-11-26 16:00	RT_Labor	1.0	N
+%R	283	298	PDC1	CX			N	N	240	240	0	0.0	0.0	0	2027-11-22 00:00	2027-11-26 16:00	2027-11-22 00:00	2027-11-26 16:00	RT_Labor	1.0	N
+%R	284	299	PDC1	EARTH			N	N	384	384	0	39275.50526	39275.50526	0	2026-09-28 00:00	2026-09-30 16:00	2026-09-28 00:00	2026-09-30 16:00	RT_Labor	1.0	N
+%R	285	300	PDC1	BLAST			N	N	1248	1248	0	300535.07325	300535.07325	0	2026-10-01 00:00	2026-11-05 16:00	2026-10-01 00:00	2026-11-05 16:00	RT_Labor	1.0	N
+%R	286	301	PDC1	EARTH			N	N	896	896	0	0.0	0.0	0	2026-10-13 00:00	2026-10-30 16:00	2026-10-13 00:00	2026-10-30 16:00	RT_Labor	1.0	N
+%R	287	302	PDC1	PILE			N	N	768	768	0	203517.22050000002	203517.22050000002	0	2026-11-02 00:00	2026-11-11 16:00	2026-11-02 00:00	2026-11-11 16:00	RT_Labor	1.0	N
+%R	288	303	PDC1	EARTH			N	N	256	256	0	0.0	0.0	0	2026-11-12 00:00	2026-11-17 16:00	2026-11-12 00:00	2026-11-17 16:00	RT_Labor	1.0	N
+%R	289	304	PDC1	CONC			N	N	1920	1920	0	74852.04860000001	74852.04860000001	0	2026-11-18 00:00	2026-12-03 16:00	2026-11-18 00:00	2026-12-03 16:00	RT_Labor	1.0	N
+%R	290	305	PDC1	CONC			N	N	960	960	0	100914.336	100914.336	0	2026-12-04 00:00	2026-12-11 16:00	2026-12-04 00:00	2026-12-11 16:00	RT_Labor	1.0	N
+%R	291	306	PDC1	CIVIL			N	N	384	384	0	0.0	0.0	0	2026-12-09 00:00	2026-12-18 16:00	2026-12-09 00:00	2026-12-18 16:00	RT_Labor	1.0	N
+%R	292	307	PDC1	CIVIL			N	N	480	480	0	120632.94851999999	120632.94851999999	0	2026-12-15 00:00	2026-12-21 16:00	2026-12-15 00:00	2026-12-21 16:00	RT_Labor	1.0	N
+%R	293	308	PDC1	CONC			N	N	1600	1600	0	308852.919	308852.919	0	2026-12-22 00:00	2027-01-08 16:00	2026-12-22 00:00	2027-01-08 16:00	RT_Labor	1.0	N
+%R	294	309	PDC1	STEEL			N	N	1040	1040	0	859766.6068000001	859766.6068000001	0	2027-05-10 00:00	2027-05-26 16:00	2027-05-10 00:00	2027-05-26 16:00	RT_Labor	1.0	N
+%R	295	310	PDC1	PCAST			N	N	624	624	0	442609.4	442609.4	0	2027-05-27 00:00	2027-06-14 16:00	2027-05-27 00:00	2027-06-14 16:00	RT_Labor	1.0	N
+%R	296	311	PDC1	STEEL			N	N	320	320	0	124885.69470000001	124885.69470000001	0	2027-05-27 00:00	2027-06-01 16:00	2027-05-27 00:00	2027-06-01 16:00	RT_Labor	1.0	N
+%R	297	312	PDC1	ROOF			N	N	384	384	0	183923.11575	183923.11575	0	2027-06-15 00:00	2027-07-01 16:00	2027-06-15 00:00	2027-07-01 16:00	RT_Labor	1.0	N
+%R	298	313	PDC1	ENV			N	N	1008	1008	0	306673.8425	306673.8425	0	2027-06-22 00:00	2027-08-11 16:00	2027-06-22 00:00	2027-08-11 16:00	RT_Labor	1.0	N
+%R	299	314	PDC1	ENV			N	N	384	384	0	143939.0925	143939.0925	0	2027-08-12 00:00	2027-08-23 16:00	2027-08-12 00:00	2027-08-23 16:00	RT_Labor	1.0	N
+%R	300	315	PDC1	ENV			N	N	384	384	0	126089.3187	126089.3187	0	2027-08-12 00:00	2027-08-23 16:00	2027-08-12 00:00	2027-08-23 16:00	RT_Labor	1.0	N
+%R	301	316	PDC1	FIREP			N	N	960	960	0	79393.0617	79393.0617	0	2027-08-12 00:00	2027-09-08 16:00	2027-08-12 00:00	2027-09-08 16:00	RT_Labor	1.0	N
+%R	302	317	PDC1	ENV			N	N	288	288	0	58039.955	58039.955	0	2027-08-24 00:00	2027-08-31 16:00	2027-08-24 00:00	2027-08-31 16:00	RT_Labor	1.0	N
+%R	303	319	PDC1	PIPE			N	N	576	576	0	0.0	0.0	0	2027-09-10 00:00	2027-09-27 16:00	2027-09-10 00:00	2027-09-27 16:00	RT_Labor	1.0	N
+%R	304	320	PDC1	ELEC			N	N	640	640	0	279913.32	279913.32	0	2027-09-10 00:00	2027-09-23 16:00	2027-09-10 00:00	2027-09-23 16:00	RT_Labor	1.0	N
+%R	305	321	PDC1	ELEC			N	N	1152	1152	0	1052808.3125	1052808.3125	0	2027-09-24 00:00	2027-10-19 16:00	2027-09-24 00:00	2027-10-19 16:00	RT_Labor	1.0	N
+%R	306	322	PDC1	ELEC			N	N	1280	1280	0	464572.5575	464572.5575	0	2027-10-20 00:00	2027-11-16 16:00	2027-10-20 00:00	2027-11-16 16:00	RT_Labor	1.0	N
+%R	307	323	PDC1	ELEC			N	N	2560	2560	0	467914.806	467914.806	0	2027-09-09 00:00	2027-10-06 16:00	2027-09-09 00:00	2027-10-06 16:00	RT_Labor	1.0	N
+%R	308	324	PDC1	MECH			N	N	768	768	0	1317412.03178	1317412.03178	0	2027-09-09 00:00	2027-09-24 16:00	2027-09-09 00:00	2027-09-24 16:00	RT_Labor	1.0	N
+%R	309	325	PDC1	PIPE			N	N	960	960	0	584700.5837000001	584700.5837000001	0	2027-09-28 00:00	2027-10-25 16:00	2027-09-28 00:00	2027-10-25 16:00	RT_Labor	1.0	N
+%R	310	326	PDC1	INSUL			N	N	384	384	0	174335.00110000002	174335.00110000002	0	2027-10-26 00:00	2027-11-10 16:00	2027-10-26 00:00	2027-11-10 16:00	RT_Labor	1.0	N
+%R	311	327	PDC1	FIT			N	N	960	960	0	240590.2925	240590.2925	0	2027-09-09 00:00	2027-09-24 16:00	2027-09-09 00:00	2027-09-24 16:00	RT_Labor	1.0	N
+%R	312	328	PDC1	FIT			N	N	800	800	0	123883.495	123883.495	0	2027-09-27 00:00	2027-10-08 16:00	2027-09-27 00:00	2027-10-08 16:00	RT_Labor	1.0	N
+%R	313	329	PDC1	FIT			N	N	960	960	0	205048.5425	205048.5425	0	2027-11-17 00:00	2027-12-02 16:00	2027-11-17 00:00	2027-12-02 16:00	RT_Labor	1.0	N
+%R	314	330	PDC1	FIRE			N	N	864	864	0	389804.332	389804.332	0	2027-10-07 00:00	2027-11-01 16:00	2027-10-07 00:00	2027-11-01 16:00	RT_Labor	1.0	N
+%R	315	331	PDC1	BMS			N	N	576	576	0	305833.1385	305833.1385	0	2027-11-11 00:00	2027-12-07 16:00	2027-11-11 00:00	2027-12-07 16:00	RT_Labor	1.0	N
+%R	316	332	PDC1	ELV			N	N	448	448	0	262662.42100000003	262662.42100000003	0	2027-10-07 00:00	2027-10-26 16:00	2027-10-07 00:00	2027-10-26 16:00	RT_Labor	1.0	N
+%R	317	333	PDC1	FIT			N	N	800	800	0	139022.91400000002	139022.91400000002	0	2027-10-07 00:00	2027-10-20 16:00	2027-10-07 00:00	2027-10-20 16:00	RT_Labor	1.0	N
+%R	318	334	PDC1	CX			N	N	480	480	0	0.0	0.0	0	2027-10-20 00:00	2027-11-02 16:00	2027-10-20 00:00	2027-11-02 16:00	RT_Labor	1.0	N
+%R	319	335	PDC1	CX			N	N	864	864	0	10231.083299999998	10231.083299999998	0	2027-11-11 00:00	2027-12-07 16:00	2027-11-11 00:00	2027-12-07 16:00	RT_Labor	1.0	N
+%R	320	336	PDC1	CX			N	N	864	864	0	6820.7222	6820.7222	0	2027-12-03 00:00	2027-12-30 16:00	2027-12-03 00:00	2027-12-30 16:00	RT_Labor	1.0	N
+%R	321	337	PDC1	CX			N	N	720	720	0	3410.3611	3410.3611	0	2027-12-08 00:00	2027-12-29 16:00	2027-12-08 00:00	2027-12-29 16:00	RT_Labor	1.0	N
+%R	322	338	PDC1	CX			N	N	576	576	0	54565.778000000006	54565.778000000006	0	2027-12-31 00:00	2028-01-18 16:00	2027-12-31 00:00	2028-01-18 16:00	RT_Labor	1.0	N
+%R	323	340	PDC1	CX			N	N	384	384	0	38196.04460000001	38196.04460000001	0	2028-02-01 00:00	2028-02-10 16:00	2028-02-01 00:00	2028-02-10 16:00	RT_Labor	1.0	N
+%R	324	341	PDC1	CX			N	N	240	240	0	131217.704	131217.704	0	2028-02-11 00:00	2028-02-17 16:00	2028-02-11 00:00	2028-02-17 16:00	RT_Labor	1.0	N
+%R	325	342	PDC1	CX			N	N	576	576	0	35808.7914	35808.7914	0	2028-01-10 00:00	2028-01-25 16:00	2028-01-10 00:00	2028-01-25 16:00	RT_Labor	1.0	N
+%R	326	343	PDC1	PM			N	N	360	360	0	22216.066199999997	22216.066199999997	0	2028-02-18 00:00	2028-02-24 16:00	2028-02-18 00:00	2028-02-24 16:00	RT_Labor	1.0	N
+%R	327	344	PDC1	CX			N	N	240	240	0	0.0	0.0	0	2028-02-18 00:00	2028-02-24 16:00	2028-02-18 00:00	2028-02-24 16:00	RT_Labor	1.0	N
+%R	328	347	PDC1	CONC			N	N	960	960	0	71556.74246000001	71556.74246000001	0	2026-11-18 00:00	2026-12-03 16:00	2026-11-18 00:00	2026-12-03 16:00	RT_Labor	1.0	N
+%R	329	348	PDC1	CONC			N	N	2240	2240	0	107526.57179999999	107526.57179999999	0	2026-12-04 00:00	2026-12-23 16:00	2026-12-04 00:00	2026-12-23 16:00	RT_Labor	1.0	N
+%R	330	349	PDC1	STEEL			N	N	640	640	0	62503.48874	62503.48874	0	2026-12-28 00:00	2027-01-08 16:00	2026-12-28 00:00	2027-01-08 16:00	RT_Labor	1.0	N
+%R	331	350	PDC1	ENV			N	N	768	768	0	277200.31635	277200.31635	0	2027-01-11 00:00	2027-02-01 16:00	2027-01-11 00:00	2027-02-01 16:00	RT_Labor	1.0	N
+%R	332	351	PDC1	MECH			N	N	1280	1280	0	737211.7895000001	737211.7895000001	0	2027-02-02 00:00	2027-03-01 16:00	2027-02-02 00:00	2027-03-01 16:00	RT_Labor	1.0	N
+%R	333	352	PDC1	FIT			N	N	2880	2880	0	281941.75	281941.75	0	2027-03-02 00:00	2027-03-25 16:00	2027-03-02 00:00	2027-03-25 16:00	RT_Labor	1.0	N
+%R	334	353	PDC1	FIT			N	N	3200	3200	0	1045747.571	1045747.571	0	2027-03-30 00:00	2027-04-26 16:00	2027-03-30 00:00	2027-04-26 16:00	RT_Labor	1.0	N
+%R	335	354	PDC1	ELV			N	N	384	384	0	290938.593	290938.593	0	2027-12-08 00:00	2027-12-23 16:00	2027-12-08 00:00	2027-12-23 16:00	RT_Labor	1.0	N
+%R	336	355	PDC1	CIVIL			N	N	1920	1920	0	604800.5765	604800.5765	0	2026-12-21 00:00	2027-01-21 16:00	2026-12-21 00:00	2027-01-21 16:00	RT_Labor	1.0	N
+%R	337	356	PDC1	CIVIL			N	N	720	720	0	436099.09	436099.09	0	2026-12-30 00:00	2027-01-21 16:00	2026-12-30 00:00	2027-01-21 16:00	RT_Labor	1.0	N
+%R	338	357	PDC1	CIVIL			N	N	1920	1920	0	614073.418	614073.418	0	2027-02-02 00:00	2027-03-01 16:00	2027-02-02 00:00	2027-03-01 16:00	RT_Labor	1.0	N
+%R	339	358	PDC1	ELEC			N	N	640	640	0	304121.73	304121.73	0	2027-03-02 00:00	2027-03-15 16:00	2027-03-02 00:00	2027-03-15 16:00	RT_Labor	1.0	N
+%R	340	359	PDC1	LAND			N	N	480	480	0	212311.4	212311.4	0	2027-03-09 00:00	2027-03-31 16:00	2027-03-09 00:00	2027-03-31 16:00	RT_Labor	1.0	N
+%R	341	360	PDC1	ELV			N	N	320	320	0	231600.45299999998	231600.45299999998	0	2027-10-27 00:00	2027-11-09 16:00	2027-10-27 00:00	2027-11-09 16:00	RT_Labor	1.0	N
+%R	342	361	PDC1	CIVIL			N	N	720	720	0	96688.263	96688.263	0	2026-10-02 00:00	2026-10-22 16:00	2026-10-02 00:00	2026-10-22 16:00	RT_Labor	1.0	N
+%R	343	362	PDC1	PIPE			N	N	624	624	0	225605.94700000001	225605.94700000001	0	2027-03-09 00:00	2027-03-25 16:00	2027-03-09 00:00	2027-03-25 16:00	RT_Labor	1.0	N
+%R	344	363	PDC1	MECH			N	N	1920	1920	0	3753212.53	3753212.53	0	2027-01-14 00:00	2027-02-24 16:00	2027-01-14 00:00	2027-02-24 16:00	RT_Labor	1.0	N
+%R	345	364	PDC1	MECH			N	N	640	640	0	0.0	0.0	0	2027-03-30 00:00	2027-04-12 16:00	2027-03-30 00:00	2027-04-12 16:00	RT_Labor	1.0	N
+%R	346	366	PDC1	TP			N	N	0	0	0	0.0	0.0	0	2027-04-14 00:00	2027-05-28 16:00	2027-04-14 00:00	2027-05-28 16:00	RT_Labor	1.0	N
+%R	347	367	PDC1	DES			N	N	1120	1120	0	0.0	0.0	0	2027-04-13 00:00	2027-04-26 16:00	2027-04-13 00:00	2027-04-26 16:00	RT_Labor	1.0	N
+%R	348	368	PDC1	CX			N	N	720	720	0	17051.8055	17051.8055	0	2027-05-13 00:00	2027-06-02 16:00	2027-05-13 00:00	2027-06-02 16:00	RT_Labor	1.0	N
+%R	349	369	PDC1	PM			N	N	1440	1440	0	0.0	0.0	0	2027-06-03 00:00	2027-07-01 16:00	2027-06-03 00:00	2027-07-01 16:00	RT_Labor	1.0	N
+%R	350	370	PDC1	CX			N	N	288	288	0	38975.556	38975.556	0	2027-11-30 00:00	2027-12-08 16:00	2027-11-30 00:00	2027-12-08 16:00	RT_Labor	1.0	N
+%R	351	371	PDC1	PM			N	N	360	360	0	0.0	0.0	0	2027-12-09 00:00	2027-12-15 16:00	2027-12-09 00:00	2027-12-15 16:00	RT_Labor	1.0	N
+%R	352	372	PDC1	FIT			N	N	2400	2400	0	67281.55	67281.55	0	2028-02-25 00:00	2028-03-16 16:00	2028-02-25 00:00	2028-03-16 16:00	RT_Labor	1.0	N
+%R	353	373	PDC1	DES			N	N	1120	1120	0	31830.0368	31830.0368	0	2028-03-03 00:00	2028-03-16 16:00	2028-03-03 00:00	2028-03-16 16:00	RT_Labor	1.0	N
+%R	354	374	PDC1	PM			N	N	360	360	0	29621.421599999998	29621.421599999998	0	2028-03-17 00:00	2028-03-23 16:00	2028-03-17 00:00	2028-03-23 16:00	RT_Labor	1.0	N
+%E

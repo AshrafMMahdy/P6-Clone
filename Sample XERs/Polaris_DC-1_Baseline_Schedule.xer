@@ -1,0 +1,331 @@
+ERMHDR	12.0	2026-08-20	Project	WhiteHatIQ	White Hat IQ Scheduler	WhiteHatIQ	Project Management	USD
+
+%T	PROJECT
+%F	proj_id	proj_short_name	plan_start_date	plan_end_date
+%R	1	polaris_dc_1	2026-03-02 08:00	2027-01-21 08:00
+
+%T	CALENDAR
+%F	clndr_id	clndr_name	day_hr_cnt	week_hr_cnt
+%R	1	Standard 5-Day	8.0	40.0
+
+%T	PROJWBS
+%F	wbs_id	proj_id	parent_wbs_id	wbs_name	wbs_short_name	proj_node_flag
+%R	1	1		Polaris DC-1	WBS-1	Y
+
+%T	TASK
+%F	task_id	proj_id	wbs_id	task_code	task_name	task_type	target_drtn_hr_cnt	remain_drtn_hr_cnt	total_float_hr_cnt	phys_complete_pct	target_start_date	target_end_date	early_start_date	early_end_date	status_code	clndr_id
+%R	1	1	1	1	Mobilisation & Site Establishment	TT_Task	120	120	0	0	2026-03-02 08:00	2026-03-20 08:00	2026-03-02 08:00	2026-03-20 08:00	TK_NotStart	1
+%R	2	1	1	2	Early Procurement — Long-Lead Items	TT_Task	80	80	0	0	2026-03-23 08:00	2026-04-03 08:00	2026-03-23 08:00	2026-04-03 08:00	TK_NotStart	1
+%R	4	1	1	4	Site Clearance & Tree Removal	TT_Task	64	64	16	0	2026-03-23 08:00	2026-04-01 08:00	2026-03-23 08:00	2026-04-01 08:00	TK_NotStart	1
+%R	5	1	1	5	Earthworks & Excavation (All Halls)	TT_Task	160	160	16	0	2026-04-02 08:00	2026-04-29 08:00	2026-04-02 08:00	2026-04-29 08:00	TK_NotStart	1
+%R	19	1	1	19	Generator Compound — Foundations & Enclosure	TT_Task	120	120	1128	0	2026-04-02 08:00	2026-04-22 08:00	2026-04-02 08:00	2026-04-22 08:00	TK_NotStart	1
+%R	45	1	1	45	Hall 2 — Site Clearance & Earthworks (Zone 2)	TT_Task	120	120	696	0	2026-04-02 08:00	2026-04-22 08:00	2026-04-02 08:00	2026-04-22 08:00	TK_NotStart	1
+%R	56	1	1	56	Hall 3 — Site Clearance & Earthworks (Zone 3)	TT_Task	96	96	784	0	2026-04-02 08:00	2026-04-17 08:00	2026-04-02 08:00	2026-04-17 08:00	TK_NotStart	1
+%R	3	1	1	3	Design Submissions & Approvals	TT_Task	160	160	1504	0	2026-04-06 08:00	2026-05-01 08:00	2026-04-06 08:00	2026-05-01 08:00	TK_NotStart	1
+%R	14	1	1	14	Procurement — 110/20 kV Transformers (2×16 MVA)	TT_Task	1120	1120	0	0	2026-04-06 08:00	2026-10-16 08:00	2026-04-06 08:00	2026-10-16 08:00	TK_NotStart	1
+%R	20	1	1	20	Procurement — 8×2.5 MVA Generators	TT_Task	800	800	432	0	2026-04-06 08:00	2026-08-21 08:00	2026-04-06 08:00	2026-08-21 08:00	TK_NotStart	1
+%R	6	1	1	6	Rock Blasting (East Zone, Hall 4)	TT_Task	120	120	120	0	2026-04-09 08:00	2026-04-29 08:00	2026-04-09 08:00	2026-04-29 08:00	TK_NotStart	1
+%R	57	1	1	57	Hall 3 — Rock Pad Foundations	TT_Task	96	96	784	0	2026-04-20 08:00	2026-05-05 08:00	2026-04-20 08:00	2026-05-05 08:00	TK_NotStart	1
+%R	46	1	1	46	Hall 2 — Pad Foundations (Glacial Till)	TT_Task	160	160	696	0	2026-04-23 08:00	2026-05-20 08:00	2026-04-23 08:00	2026-05-20 08:00	TK_NotStart	1
+%R	7	1	1	7	Pad Foundations — Glacial Till (Halls 1&2)	TT_Task	200	200	16	0	2026-04-30 08:00	2026-06-03 08:00	2026-04-30 08:00	2026-06-03 08:00	TK_NotStart	1
+%R	8	1	1	8	Rock Pad Foundations (Hall 3)	TT_Task	120	120	96	0	2026-04-30 08:00	2026-05-20 08:00	2026-04-30 08:00	2026-05-20 08:00	TK_NotStart	1
+%R	9	1	1	9	Rock-Pier Foundations (Hall 4)	TT_Task	96	96	120	0	2026-04-30 08:00	2026-05-15 08:00	2026-04-30 08:00	2026-05-15 08:00	TK_NotStart	1
+%R	67	1	1	67	Hall 4 — Site Clearance & Earthworks (Zone 4)	TT_Task	80	80	712	0	2026-04-30 08:00	2026-05-13 08:00	2026-04-30 08:00	2026-05-13 08:00	TK_NotStart	1
+%R	58	1	1	58	Hall 3 — Steel Frame (112 t)	TT_Task	96	96	784	0	2026-05-06 08:00	2026-05-21 08:00	2026-05-06 08:00	2026-05-21 08:00	TK_NotStart	1
+%R	68	1	1	68	Hall 4 — Rock-Pier Foundations	TT_Task	80	80	712	0	2026-05-14 08:00	2026-05-27 08:00	2026-05-14 08:00	2026-05-27 08:00	TK_NotStart	1
+%R	69	1	1	69	Hall 4 — Admin Block Foundations	TT_Task	64	64	952	0	2026-05-14 08:00	2026-05-25 08:00	2026-05-14 08:00	2026-05-25 08:00	TK_NotStart	1
+%R	47	1	1	47	Hall 2 — Steel Frame (112 t)	TT_Task	96	96	696	0	2026-05-21 08:00	2026-06-05 08:00	2026-05-21 08:00	2026-06-05 08:00	TK_NotStart	1
+%R	59	1	1	59	Hall 3 — Metal Deck & Precast Panels	TT_Task	80	80	784	0	2026-05-22 08:00	2026-06-04 08:00	2026-05-22 08:00	2026-06-04 08:00	TK_NotStart	1
+%R	70	1	1	70	Hall 4 — Steel Frame & Precast Panels	TT_Task	144	144	712	0	2026-05-28 08:00	2026-06-22 08:00	2026-05-28 08:00	2026-06-22 08:00	TK_NotStart	1
+%R	10	1	1	10	Ground Beams & Ground-Bearing Slab (All Halls)	TT_Task	200	200	16	0	2026-06-04 08:00	2026-07-08 08:00	2026-06-04 08:00	2026-07-08 08:00	TK_NotStart	1
+%R	11	1	1	11	Primary Substation — Foundation & Cable Basement	TT_Task	120	120	456	0	2026-06-04 08:00	2026-06-24 08:00	2026-06-04 08:00	2026-06-24 08:00	TK_NotStart	1
+%R	60	1	1	60	Hall 3 — Roof & Cladding	TT_Task	80	80	784	0	2026-06-05 08:00	2026-06-18 08:00	2026-06-05 08:00	2026-06-18 08:00	TK_NotStart	1
+%R	48	1	1	48	Hall 2 — Metal Deck & Precast Panels	TT_Task	80	80	696	0	2026-06-08 08:00	2026-06-19 08:00	2026-06-08 08:00	2026-06-19 08:00	TK_NotStart	1
+%R	61	1	1	61	Hall 3 — MEP Rough-In (CRAH, UPS, Electrical)	TT_Task	200	200	784	0	2026-06-19 08:00	2026-07-23 08:00	2026-06-19 08:00	2026-07-23 08:00	TK_NotStart	1
+%R	49	1	1	49	Hall 2 — Roof & Cladding	TT_Task	80	80	696	0	2026-06-22 08:00	2026-07-03 08:00	2026-06-22 08:00	2026-07-03 08:00	TK_NotStart	1
+%R	71	1	1	71	Hall 4 — Roof, Cladding & Louvres	TT_Task	80	80	712	0	2026-06-23 08:00	2026-07-06 08:00	2026-06-23 08:00	2026-07-06 08:00	TK_NotStart	1
+%R	12	1	1	12	Primary Substation — Superstructure	TT_Task	120	120	456	0	2026-06-25 08:00	2026-07-15 08:00	2026-06-25 08:00	2026-07-15 08:00	TK_NotStart	1
+%R	63	1	1	63	Hall 3 — Fire Detection, Suppression, BMS	TT_Task	64	64	912	0	2026-07-02 08:00	2026-07-13 08:00	2026-07-02 08:00	2026-07-13 08:00	TK_NotStart	1
+%R	50	1	1	50	Hall 2 — MEP Rough-In (CRAH, UPS, Electrical)	TT_Task	200	200	696	0	2026-07-06 08:00	2026-08-07 08:00	2026-07-06 08:00	2026-08-07 08:00	TK_NotStart	1
+%R	72	1	1	72	External Works — Roads, Fencing, Gatehouse	TT_Task	160	160	712	0	2026-07-07 08:00	2026-08-03 08:00	2026-07-07 08:00	2026-08-03 08:00	TK_NotStart	1
+%R	73	1	1	73	Hall 4 — MEP & Architectural Finishes	TT_Task	200	200	752	0	2026-07-07 08:00	2026-08-10 08:00	2026-07-07 08:00	2026-08-10 08:00	TK_NotStart	1
+%R	24	1	1	24	Shared Spine — Foundations & Mezzanine	TT_Task	96	96	456	0	2026-07-09 08:00	2026-07-24 08:00	2026-07-09 08:00	2026-07-24 08:00	TK_NotStart	1
+%R	29	1	1	29	Hall 1 — Steel Frame (449 t)	TT_Task	160	160	16	0	2026-07-09 08:00	2026-08-05 08:00	2026-07-09 08:00	2026-08-05 08:00	TK_NotStart	1
+%R	13	1	1	13	Primary Substation — Switchgear Room & Cable Basement Finish	TT_Task	80	80	456	0	2026-07-16 08:00	2026-07-29 08:00	2026-07-16 08:00	2026-07-29 08:00	TK_NotStart	1
+%R	52	1	1	52	Hall 2 — Fire Detection, Suppression, BMS	TT_Task	64	64	824	0	2026-07-17 08:00	2026-07-28 08:00	2026-07-17 08:00	2026-07-28 08:00	TK_NotStart	1
+%R	75	1	1	75	Hall 4 — Fire Detection, Suppression, BMS	TT_Task	64	64	816	0	2026-07-20 08:00	2026-07-29 08:00	2026-07-20 08:00	2026-07-29 08:00	TK_NotStart	1
+%R	62	1	1	62	Hall 3 — Architectural Finishes	TT_Task	64	64	784	0	2026-07-24 08:00	2026-08-04 08:00	2026-07-24 08:00	2026-08-04 08:00	TK_NotStart	1
+%R	25	1	1	25	Shared Spine — Mechanical (Pipework, Pumps, Valves, Heat Recovery)	TT_Task	144	144	456	0	2026-07-27 08:00	2026-08-19 08:00	2026-07-27 08:00	2026-08-19 08:00	TK_NotStart	1
+%R	26	1	1	26	Shared Spine — Dry Coolers & Cooling Towers	TT_Task	80	80	592	0	2026-08-03 08:00	2026-08-14 08:00	2026-08-03 08:00	2026-08-14 08:00	TK_NotStart	1
+%R	74	1	1	74	External Works — Landscaping & Tree Replacement	TT_Task	80	80	712	0	2026-08-04 08:00	2026-08-17 08:00	2026-08-04 08:00	2026-08-17 08:00	TK_NotStart	1
+%R	30	1	1	30	Hall 1 — Metal Deck & Precast Panels (64+)	TT_Task	104	104	24	0	2026-08-06 08:00	2026-08-24 08:00	2026-08-06 08:00	2026-08-24 08:00	TK_NotStart	1
+%R	31	1	1	31	Hall 1 — Warm Roof (6,912 m²)	TT_Task	112	112	16	0	2026-08-06 08:00	2026-08-25 08:00	2026-08-06 08:00	2026-08-25 08:00	TK_NotStart	1
+%R	51	1	1	51	Hall 2 — Architectural Finishes	TT_Task	64	64	696	0	2026-08-10 08:00	2026-08-19 08:00	2026-08-10 08:00	2026-08-19 08:00	TK_NotStart	1
+%R	27	1	1	27	Shared Spine — Electrical Distribution & Switchgear	TT_Task	112	112	456	0	2026-08-20 08:00	2026-09-08 08:00	2026-08-20 08:00	2026-09-08 08:00	TK_NotStart	1
+%R	21	1	1	21	Generator Installation (8 Units)	TT_Task	80	80	432	0	2026-08-24 08:00	2026-09-04 08:00	2026-08-24 08:00	2026-09-04 08:00	TK_NotStart	1
+%R	32	1	1	32	Hall 1 — External Cladding & Acoustic Louvres	TT_Task	104	104	16	0	2026-08-26 08:00	2026-09-11 08:00	2026-08-26 08:00	2026-09-11 08:00	TK_NotStart	1
+%R	22	1	1	22	Fuel Systems, Bunding & Day Tanks	TT_Task	40	40	432	0	2026-09-07 08:00	2026-09-11 08:00	2026-09-07 08:00	2026-09-11 08:00	TK_NotStart	1
+%R	28	1	1	28	Spine Pre-Commissioning Checks	TT_Task	24	24	456	0	2026-09-09 08:00	2026-09-11 08:00	2026-09-09 08:00	2026-09-11 08:00	TK_NotStart	1
+%R	23	1	1	23	Generator Pre-Commissioning Checks	TT_Task	24	24	432	0	2026-09-14 08:00	2026-09-16 08:00	2026-09-14 08:00	2026-09-16 08:00	TK_NotStart	1
+%R	33	1	1	33	Hall 1 — MEP Rough-In (CRAH, UPS, Electrical)	TT_Task	360	360	16	0	2026-09-14 08:00	2026-11-13 08:00	2026-09-14 08:00	2026-11-13 08:00	TK_NotStart	1
+%R	15	1	1	15	Transformer Installation & Termination	TT_Task	80	80	0	0	2026-10-19 08:00	2026-10-30 08:00	2026-10-19 08:00	2026-10-30 08:00	TK_NotStart	1
+%R	35	1	1	35	Hall 1 — Fire Detection, Suppression, BMS/DCIM	TT_Task	80	80	176	0	2026-10-19 08:00	2026-10-30 08:00	2026-10-19 08:00	2026-10-30 08:00	TK_NotStart	1
+%R	16	1	1	16	110 kV Termination, Metering & Protection	TT_Task	80	80	0	0	2026-11-02 08:00	2026-11-13 08:00	2026-11-02 08:00	2026-11-13 08:00	TK_NotStart	1
+%R	17	1	1	17	20 kV Ring Main Switchboard (14 Panels)	TT_Task	64	64	16	0	2026-11-02 08:00	2026-11-11 08:00	2026-11-02 08:00	2026-11-11 08:00	TK_NotStart	1
+%R	18	1	1	18	Cable Pulling & Termination (Substation)	TT_Task	96	96	0	0	2026-11-16 08:00	2026-12-01 08:00	2026-11-16 08:00	2026-12-01 08:00	TK_NotStart	1
+%R	34	1	1	34	Hall 1 — Architectural Finishes (Screed, Containment, Partitions)	TT_Task	80	80	16	0	2026-11-16 08:00	2026-11-27 08:00	2026-11-16 08:00	2026-11-27 08:00	TK_NotStart	1
+%R	36	1	1	36	Pre-Commissioning Check — Section 1	TT_Task	24	24	0	0	2026-12-02 08:00	2026-12-04 08:00	2026-12-02 08:00	2026-12-04 08:00	TK_NotStart	1
+%R	44	1	1	44	TARGET: Section 1 Energised (Substation Live)	TT_Mile	0	0	104	0	2026-12-02 08:00	2026-12-02 08:00	2026-12-02 08:00	2026-12-02 08:00	TK_NotStart	1
+%R	53	1	1	53	Pre-Commissioning Check — Section 2	TT_Task	24	24	104	0	2026-12-02 08:00	2026-12-04 08:00	2026-12-02 08:00	2026-12-04 08:00	TK_NotStart	1
+%R	64	1	1	64	Pre-Commissioning Check — Section 3	TT_Task	24	24	104	0	2026-12-02 08:00	2026-12-04 08:00	2026-12-02 08:00	2026-12-04 08:00	TK_NotStart	1
+%R	76	1	1	76	Pre-Commissioning Check — Section 4	TT_Task	24	24	104	0	2026-12-02 08:00	2026-12-04 08:00	2026-12-02 08:00	2026-12-04 08:00	TK_NotStart	1
+%R	37	1	1	37	Commissioning — L1 Factory Acceptance Tests	TT_Task	40	40	0	0	2026-12-07 08:00	2026-12-11 08:00	2026-12-07 08:00	2026-12-11 08:00	TK_NotStart	1
+%R	54	1	1	54	Commissioning — Section 2 (L1-L5)	TT_Task	120	120	104	0	2026-12-07 08:00	2026-12-25 08:00	2026-12-07 08:00	2026-12-25 08:00	TK_NotStart	1
+%R	65	1	1	65	Commissioning — Section 3 (L1-L5)	TT_Task	120	120	104	0	2026-12-07 08:00	2026-12-25 08:00	2026-12-07 08:00	2026-12-25 08:00	TK_NotStart	1
+%R	77	1	1	77	Commissioning — Section 4 (L1-L5)	TT_Task	120	120	104	0	2026-12-07 08:00	2026-12-25 08:00	2026-12-07 08:00	2026-12-25 08:00	TK_NotStart	1
+%R	38	1	1	38	Commissioning — L2/L3 Static Inspection & Component Start-Up	TT_Task	64	64	0	0	2026-12-14 08:00	2026-12-23 08:00	2026-12-14 08:00	2026-12-23 08:00	TK_NotStart	1
+%R	39	1	1	39	Commissioning — L4 Integrated Systems Testing	TT_Task	96	96	0	0	2026-12-24 08:00	2027-01-08 08:00	2026-12-24 08:00	2027-01-08 08:00	TK_NotStart	1
+%R	55	1	1	55	Statutory Inspections & Handover — Section 2	TT_Task	40	40	104	0	2026-12-28 08:00	2027-01-01 08:00	2026-12-28 08:00	2027-01-01 08:00	TK_NotStart	1
+%R	66	1	1	66	Statutory Inspections & Handover — Section 3	TT_Task	40	40	104	0	2026-12-28 08:00	2027-01-01 08:00	2026-12-28 08:00	2027-01-01 08:00	TK_NotStart	1
+%R	78	1	1	78	Statutory Inspections & Handover — Section 4	TT_Task	40	40	104	0	2026-12-28 08:00	2027-01-01 08:00	2026-12-28 08:00	2027-01-01 08:00	TK_NotStart	1
+%R	79	1	1	79	As-Built Documentation & Training — All Sections	TT_Task	40	40	104	0	2026-12-28 08:00	2027-01-01 08:00	2026-12-28 08:00	2027-01-01 08:00	TK_NotStart	1
+%R	40	1	1	40	Commissioning — L5 24-hr Load Bank Test	TT_Task	24	24	0	0	2027-01-11 08:00	2027-01-13 08:00	2027-01-11 08:00	2027-01-13 08:00	TK_NotStart	1
+%R	41	1	1	41	Statutory Inspections & Occupancy — Section 1	TT_Task	24	24	16	0	2027-01-14 08:00	2027-01-18 08:00	2027-01-14 08:00	2027-01-18 08:00	TK_NotStart	1
+%R	42	1	1	42	As-Built Documentation & O&M Manuals — Section 1	TT_Task	40	40	0	0	2027-01-14 08:00	2027-01-20 08:00	2027-01-14 08:00	2027-01-20 08:00	TK_NotStart	1
+%R	43	1	1	43	Handover — Section 1 (Milestone)	TT_Mile	0	0	0	0	2027-01-21 08:00	2027-01-21 08:00	2027-01-21 08:00	2027-01-21 08:00	TK_NotStart	1
+%R	80	1	1	80	PROJECT COMPLETION (Milestone)	TT_Mile	0	0	0	0	2027-01-21 08:00	2027-01-21 08:00	2027-01-21 08:00	2027-01-21 08:00	TK_NotStart	1
+
+%T	TASKPRED
+%F	taskpred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt
+%R	1	2	1	1	1	PR_FS	0
+%R	2	4	1	1	1	PR_FS	0
+%R	3	5	4	1	1	PR_FS	0
+%R	4	19	4	1	1	PR_FS	0
+%R	5	45	4	1	1	PR_FS	0
+%R	6	56	4	1	1	PR_FS	0
+%R	7	3	2	1	1	PR_FS	0
+%R	8	14	2	1	1	PR_FS	0
+%R	9	20	2	1	1	PR_FS	0
+%R	10	6	4	1	1	PR_FS	40
+%R	11	57	56	1	1	PR_FS	0
+%R	12	46	45	1	1	PR_FS	0
+%R	13	7	5	1	1	PR_FS	0
+%R	14	8	5	1	1	PR_FS	0
+%R	15	9	6	1	1	PR_FS	0
+%R	16	67	6	1	1	PR_FS	0
+%R	17	58	57	1	1	PR_FS	0
+%R	18	68	67	1	1	PR_FS	0
+%R	19	69	67	1	1	PR_FS	0
+%R	20	47	46	1	1	PR_FS	0
+%R	21	59	58	1	1	PR_FS	0
+%R	22	70	68	1	1	PR_FS	0
+%R	23	10	7	1	1	PR_FS	0
+%R	24	10	8	1	1	PR_FS	0
+%R	25	10	9	1	1	PR_FS	0
+%R	26	11	7	1	1	PR_FS	0
+%R	27	60	59	1	1	PR_FS	0
+%R	28	48	47	1	1	PR_FS	0
+%R	29	61	60	1	1	PR_FS	0
+%R	30	49	48	1	1	PR_FS	0
+%R	31	71	70	1	1	PR_FS	0
+%R	32	12	11	1	1	PR_FS	0
+%R	33	63	61	1	1	PR_FF	-64
+%R	34	50	49	1	1	PR_FS	0
+%R	35	72	71	1	1	PR_FS	0
+%R	36	72	69	1	1	PR_FS	0
+%R	37	73	71	1	1	PR_FS	0
+%R	38	24	10	1	1	PR_FS	0
+%R	39	29	10	1	1	PR_FS	0
+%R	40	13	12	1	1	PR_FS	0
+%R	41	52	50	1	1	PR_FF	-64
+%R	42	75	73	1	1	PR_FF	-64
+%R	43	62	61	1	1	PR_FS	0
+%R	44	25	24	1	1	PR_FS	0
+%R	45	26	25	1	1	PR_SS	40
+%R	46	74	72	1	1	PR_FS	0
+%R	47	30	29	1	1	PR_FS	0
+%R	48	31	29	1	1	PR_FS	0
+%R	49	51	50	1	1	PR_FS	0
+%R	50	27	25	1	1	PR_FS	0
+%R	51	21	19	1	1	PR_FS	0
+%R	52	21	20	1	1	PR_FS	0
+%R	53	32	30	1	1	PR_FS	0
+%R	54	32	31	1	1	PR_FS	0
+%R	55	22	21	1	1	PR_FS	0
+%R	56	28	26	1	1	PR_FS	0
+%R	57	28	27	1	1	PR_FS	0
+%R	58	23	22	1	1	PR_FS	0
+%R	59	33	32	1	1	PR_FS	0
+%R	60	15	13	1	1	PR_FS	0
+%R	61	15	14	1	1	PR_FS	0
+%R	62	35	33	1	1	PR_FF	-80
+%R	63	16	15	1	1	PR_FS	0
+%R	64	17	15	1	1	PR_FS	0
+%R	65	18	16	1	1	PR_FS	0
+%R	66	18	17	1	1	PR_FS	0
+%R	67	34	33	1	1	PR_FS	0
+%R	68	36	18	1	1	PR_FS	0
+%R	69	36	23	1	1	PR_FS	0
+%R	70	36	28	1	1	PR_FS	0
+%R	71	36	34	1	1	PR_FS	0
+%R	72	36	35	1	1	PR_FS	0
+%R	73	44	18	1	1	PR_FS	0
+%R	74	44	23	1	1	PR_FS	0
+%R	75	44	28	1	1	PR_FS	0
+%R	76	53	44	1	1	PR_FS	0
+%R	77	53	51	1	1	PR_FS	0
+%R	78	53	52	1	1	PR_FS	0
+%R	79	64	44	1	1	PR_FS	0
+%R	80	64	62	1	1	PR_FS	0
+%R	81	64	63	1	1	PR_FS	0
+%R	82	76	44	1	1	PR_FS	0
+%R	83	76	73	1	1	PR_FS	0
+%R	84	76	74	1	1	PR_FS	0
+%R	85	76	75	1	1	PR_FS	0
+%R	86	37	36	1	1	PR_FS	0
+%R	87	54	53	1	1	PR_FS	0
+%R	88	65	64	1	1	PR_FS	0
+%R	89	77	76	1	1	PR_FS	0
+%R	90	38	37	1	1	PR_FS	0
+%R	91	39	38	1	1	PR_FS	0
+%R	92	55	54	1	1	PR_FS	0
+%R	93	66	65	1	1	PR_FS	0
+%R	94	78	77	1	1	PR_FS	0
+%R	95	79	77	1	1	PR_FS	0
+%R	96	40	39	1	1	PR_FS	0
+%R	97	41	40	1	1	PR_FS	0
+%R	98	42	40	1	1	PR_FS	0
+%R	99	43	41	1	1	PR_FS	0
+%R	100	43	42	1	1	PR_FS	0
+%R	101	80	43	1	1	PR_FS	0
+%R	102	80	55	1	1	PR_FS	0
+%R	103	80	66	1	1	PR_FS	0
+%R	104	80	78	1	1	PR_FS	0
+%R	105	80	79	1	1	PR_FS	0
+%R	106	80	3	1	1	PR_FS	0
+
+%T	CURRTYPE
+%F	curr_id	curr_type	curr_short_name	decimal_digit_cnt	curr_symbol
+%R	1	USD	USD	2	$
+
+%T	RSRC
+%F	rsrc_id	rsrc_name	rsrc_short_name	rsrc_type	unit_id	def_qty_per_hr	max_qty_per_hr	cost_qty_link_flag	clndr_id	curr_id	active_flag	parent_rsrc_id
+%R	1	Management	Management	RT_Labor		1	8	N	1	1	Y	
+%R	2	Civil	Civil	RT_Labor		1	16	N	1	1	Y	
+%R	3	Structural	Structural	RT_Labor		1	10	N	1	1	Y	
+%R	4	Envelope	Envelope	RT_Labor		1	8	N	1	1	Y	
+%R	5	Mechanical	Mechanical	RT_Labor		1	20	N	1	1	Y	
+%R	6	Commissioning	Commissioning	RT_Labor		1	6	N	1	1	Y	
+%R	7	Architectural	Architectural	RT_Labor		1	8	N	1	1	Y	
+%R	8	Electrical	Electrical	RT_Labor		1	6	N	1	1	Y	
+
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	rsrc_id	proj_id	cost_qty_link_flag	cost_per_qty	target_qty	target_cost	target_qty_per_hr	remain_qty	remain_cost	act_reg_qty	act_reg_cost	target_start_date	target_end_date	rsrc_type
+%R	1	1	1	1	N	0.00	960.00	0.00	8	960.00	0.00	0.00	0.00	2026-03-02 08:00	2026-03-20 08:00	RT_Labor
+%R	2	2	1	1	N	0.00	240.00	0.00	3	240.00	0.00	0.00	0.00	2026-03-23 08:00	2026-04-03 08:00	RT_Labor
+%R	3	4	2	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2026-03-23 08:00	2026-04-01 08:00	RT_Labor
+%R	4	5	2	1	N	0.00	800.00	0.00	5	800.00	0.00	0.00	0.00	2026-04-02 08:00	2026-04-29 08:00	RT_Labor
+%R	5	19	2	1	N	0.00	720.00	0.00	6	720.00	0.00	0.00	0.00	2026-04-02 08:00	2026-04-22 08:00	RT_Labor
+%R	6	45	2	1	N	0.00	600.00	0.00	5	600.00	0.00	0.00	0.00	2026-04-02 08:00	2026-04-22 08:00	RT_Labor
+%R	7	56	2	1	N	0.00	480.00	0.00	5	480.00	0.00	0.00	0.00	2026-04-02 08:00	2026-04-17 08:00	RT_Labor
+%R	8	3	1	1	N	0.00	640.00	0.00	4	640.00	0.00	0.00	0.00	2026-04-06 08:00	2026-05-01 08:00	RT_Labor
+%R	9	14	1	1	N	0.00	2240.00	0.00	2	2240.00	0.00	0.00	0.00	2026-04-06 08:00	2026-10-16 08:00	RT_Labor
+%R	10	20	1	1	N	0.00	1600.00	0.00	2	1600.00	0.00	0.00	0.00	2026-04-06 08:00	2026-08-21 08:00	RT_Labor
+%R	11	6	2	1	N	0.00	480.00	0.00	4	480.00	0.00	0.00	0.00	2026-04-09 08:00	2026-04-29 08:00	RT_Labor
+%R	12	57	2	1	N	0.00	576.00	0.00	6	576.00	0.00	0.00	0.00	2026-04-20 08:00	2026-05-05 08:00	RT_Labor
+%R	13	46	2	1	N	0.00	1280.00	0.00	8	1280.00	0.00	0.00	0.00	2026-04-23 08:00	2026-05-20 08:00	RT_Labor
+%R	14	7	2	1	N	0.00	3200.00	0.00	16	3200.00	0.00	0.00	0.00	2026-04-30 08:00	2026-06-03 08:00	RT_Labor
+%R	15	8	2	1	N	0.00	720.00	0.00	6	720.00	0.00	0.00	0.00	2026-04-30 08:00	2026-05-20 08:00	RT_Labor
+%R	16	9	2	1	N	0.00	576.00	0.00	6	576.00	0.00	0.00	0.00	2026-04-30 08:00	2026-05-15 08:00	RT_Labor
+%R	17	67	2	1	N	0.00	400.00	0.00	5	400.00	0.00	0.00	0.00	2026-04-30 08:00	2026-05-13 08:00	RT_Labor
+%R	18	58	3	1	N	0.00	960.00	0.00	10	960.00	0.00	0.00	0.00	2026-05-06 08:00	2026-05-21 08:00	RT_Labor
+%R	19	68	2	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2026-05-14 08:00	2026-05-27 08:00	RT_Labor
+%R	20	69	2	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2026-05-14 08:00	2026-05-25 08:00	RT_Labor
+%R	21	47	3	1	N	0.00	960.00	0.00	10	960.00	0.00	0.00	0.00	2026-05-21 08:00	2026-06-05 08:00	RT_Labor
+%R	22	59	3	1	N	0.00	640.00	0.00	8	640.00	0.00	0.00	0.00	2026-05-22 08:00	2026-06-04 08:00	RT_Labor
+%R	23	70	3	1	N	0.00	1440.00	0.00	10	1440.00	0.00	0.00	0.00	2026-05-28 08:00	2026-06-22 08:00	RT_Labor
+%R	24	10	2	1	N	0.00	2000.00	0.00	10	2000.00	0.00	0.00	0.00	2026-06-04 08:00	2026-07-08 08:00	RT_Labor
+%R	25	11	2	1	N	0.00	960.00	0.00	8	960.00	0.00	0.00	0.00	2026-06-04 08:00	2026-06-24 08:00	RT_Labor
+%R	26	60	4	1	N	0.00	640.00	0.00	8	640.00	0.00	0.00	0.00	2026-06-05 08:00	2026-06-18 08:00	RT_Labor
+%R	27	48	3	1	N	0.00	640.00	0.00	8	640.00	0.00	0.00	0.00	2026-06-08 08:00	2026-06-19 08:00	RT_Labor
+%R	28	61	5	1	N	0.00	1600.00	0.00	8	1600.00	0.00	0.00	0.00	2026-06-19 08:00	2026-07-23 08:00	RT_Labor
+%R	29	49	4	1	N	0.00	640.00	0.00	8	640.00	0.00	0.00	0.00	2026-06-22 08:00	2026-07-03 08:00	RT_Labor
+%R	30	71	4	1	N	0.00	640.00	0.00	8	640.00	0.00	0.00	0.00	2026-06-23 08:00	2026-07-06 08:00	RT_Labor
+%R	31	12	3	1	N	0.00	720.00	0.00	6	720.00	0.00	0.00	0.00	2026-06-25 08:00	2026-07-15 08:00	RT_Labor
+%R	32	63	6	1	N	0.00	256.00	0.00	4	256.00	0.00	0.00	0.00	2026-07-02 08:00	2026-07-13 08:00	RT_Labor
+%R	33	50	5	1	N	0.00	1600.00	0.00	8	1600.00	0.00	0.00	0.00	2026-07-06 08:00	2026-08-07 08:00	RT_Labor
+%R	34	72	2	1	N	0.00	1280.00	0.00	8	1280.00	0.00	0.00	0.00	2026-07-07 08:00	2026-08-03 08:00	RT_Labor
+%R	35	73	5	1	N	0.00	1600.00	0.00	8	1600.00	0.00	0.00	0.00	2026-07-07 08:00	2026-08-10 08:00	RT_Labor
+%R	36	24	2	1	N	0.00	768.00	0.00	8	768.00	0.00	0.00	0.00	2026-07-09 08:00	2026-07-24 08:00	RT_Labor
+%R	37	29	3	1	N	0.00	1600.00	0.00	10	1600.00	0.00	0.00	0.00	2026-07-09 08:00	2026-08-05 08:00	RT_Labor
+%R	38	13	2	1	N	0.00	320.00	0.00	4	320.00	0.00	0.00	0.00	2026-07-16 08:00	2026-07-29 08:00	RT_Labor
+%R	39	52	6	1	N	0.00	256.00	0.00	4	256.00	0.00	0.00	0.00	2026-07-17 08:00	2026-07-28 08:00	RT_Labor
+%R	40	75	6	1	N	0.00	256.00	0.00	4	256.00	0.00	0.00	0.00	2026-07-20 08:00	2026-07-29 08:00	RT_Labor
+%R	41	62	7	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2026-07-24 08:00	2026-08-04 08:00	RT_Labor
+%R	42	25	5	1	N	0.00	1152.00	0.00	8	1152.00	0.00	0.00	0.00	2026-07-27 08:00	2026-08-19 08:00	RT_Labor
+%R	43	26	5	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2026-08-03 08:00	2026-08-14 08:00	RT_Labor
+%R	44	74	2	1	N	0.00	320.00	0.00	4	320.00	0.00	0.00	0.00	2026-08-04 08:00	2026-08-17 08:00	RT_Labor
+%R	45	30	3	1	N	0.00	832.00	0.00	8	832.00	0.00	0.00	0.00	2026-08-06 08:00	2026-08-24 08:00	RT_Labor
+%R	46	31	4	1	N	0.00	896.00	0.00	8	896.00	0.00	0.00	0.00	2026-08-06 08:00	2026-08-25 08:00	RT_Labor
+%R	47	51	7	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2026-08-10 08:00	2026-08-19 08:00	RT_Labor
+%R	48	27	8	1	N	0.00	672.00	0.00	6	672.00	0.00	0.00	0.00	2026-08-20 08:00	2026-09-08 08:00	RT_Labor
+%R	49	21	8	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2026-08-24 08:00	2026-09-04 08:00	RT_Labor
+%R	50	32	4	1	N	0.00	832.00	0.00	8	832.00	0.00	0.00	0.00	2026-08-26 08:00	2026-09-11 08:00	RT_Labor
+%R	51	22	5	1	N	0.00	160.00	0.00	4	160.00	0.00	0.00	0.00	2026-09-07 08:00	2026-09-11 08:00	RT_Labor
+%R	52	28	6	1	N	0.00	96.00	0.00	4	96.00	0.00	0.00	0.00	2026-09-09 08:00	2026-09-11 08:00	RT_Labor
+%R	53	23	6	1	N	0.00	96.00	0.00	4	96.00	0.00	0.00	0.00	2026-09-14 08:00	2026-09-16 08:00	RT_Labor
+%R	54	33	5	1	N	0.00	7200.00	0.00	20	7200.00	0.00	0.00	0.00	2026-09-14 08:00	2026-11-13 08:00	RT_Labor
+%R	55	15	8	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2026-10-19 08:00	2026-10-30 08:00	RT_Labor
+%R	56	35	6	1	N	0.00	480.00	0.00	6	480.00	0.00	0.00	0.00	2026-10-19 08:00	2026-10-30 08:00	RT_Labor
+%R	57	16	8	1	N	0.00	320.00	0.00	4	320.00	0.00	0.00	0.00	2026-11-02 08:00	2026-11-13 08:00	RT_Labor
+%R	58	17	8	1	N	0.00	256.00	0.00	4	256.00	0.00	0.00	0.00	2026-11-02 08:00	2026-11-11 08:00	RT_Labor
+%R	59	18	8	1	N	0.00	576.00	0.00	6	576.00	0.00	0.00	0.00	2026-11-16 08:00	2026-12-01 08:00	RT_Labor
+%R	60	34	7	1	N	0.00	640.00	0.00	8	640.00	0.00	0.00	0.00	2026-11-16 08:00	2026-11-27 08:00	RT_Labor
+%R	61	36	6	1	N	0.00	96.00	0.00	4	96.00	0.00	0.00	0.00	2026-12-02 08:00	2026-12-04 08:00	RT_Labor
+%R	62	53	6	1	N	0.00	96.00	0.00	4	96.00	0.00	0.00	0.00	2026-12-02 08:00	2026-12-04 08:00	RT_Labor
+%R	63	64	6	1	N	0.00	96.00	0.00	4	96.00	0.00	0.00	0.00	2026-12-02 08:00	2026-12-04 08:00	RT_Labor
+%R	64	76	6	1	N	0.00	96.00	0.00	4	96.00	0.00	0.00	0.00	2026-12-02 08:00	2026-12-04 08:00	RT_Labor
+%R	65	37	6	1	N	0.00	160.00	0.00	4	160.00	0.00	0.00	0.00	2026-12-07 08:00	2026-12-11 08:00	RT_Labor
+%R	66	54	6	1	N	0.00	720.00	0.00	6	720.00	0.00	0.00	0.00	2026-12-07 08:00	2026-12-25 08:00	RT_Labor
+%R	67	65	6	1	N	0.00	720.00	0.00	6	720.00	0.00	0.00	0.00	2026-12-07 08:00	2026-12-25 08:00	RT_Labor
+%R	68	77	6	1	N	0.00	720.00	0.00	6	720.00	0.00	0.00	0.00	2026-12-07 08:00	2026-12-25 08:00	RT_Labor
+%R	69	38	6	1	N	0.00	384.00	0.00	6	384.00	0.00	0.00	0.00	2026-12-14 08:00	2026-12-23 08:00	RT_Labor
+%R	70	39	6	1	N	0.00	576.00	0.00	6	576.00	0.00	0.00	0.00	2026-12-24 08:00	2027-01-08 08:00	RT_Labor
+%R	71	55	6	1	N	0.00	160.00	0.00	4	160.00	0.00	0.00	0.00	2026-12-28 08:00	2027-01-01 08:00	RT_Labor
+%R	72	66	6	1	N	0.00	160.00	0.00	4	160.00	0.00	0.00	0.00	2026-12-28 08:00	2027-01-01 08:00	RT_Labor
+%R	73	78	6	1	N	0.00	160.00	0.00	4	160.00	0.00	0.00	0.00	2026-12-28 08:00	2027-01-01 08:00	RT_Labor
+%R	74	79	1	1	N	0.00	160.00	0.00	4	160.00	0.00	0.00	0.00	2026-12-28 08:00	2027-01-01 08:00	RT_Labor
+%R	75	40	6	1	N	0.00	144.00	0.00	6	144.00	0.00	0.00	0.00	2027-01-11 08:00	2027-01-13 08:00	RT_Labor
+%R	76	41	6	1	N	0.00	96.00	0.00	4	96.00	0.00	0.00	0.00	2027-01-14 08:00	2027-01-18 08:00	RT_Labor
+%R	77	42	1	1	N	0.00	160.00	0.00	4	160.00	0.00	0.00	0.00	2027-01-14 08:00	2027-01-20 08:00	RT_Labor
+
+%T	ACCOUNT
+%F	acct_id	acct_short_name	acct_name	parent_acct_id
+%R	1	GEN	General	
+
+%T	PROJCOST
+%F	cost_item_id	proj_id	task_id	acct_id	cost_name	cost_type	target_cost	remain_cost	act_cost	auto_compute_act_flag
+%R	1	1	7	1	Pad Foundations — Glacial Till (Halls 1&2) — Materials/Plant/Sublet	CT_Other	1140000.00	1140000.00	0.00	Y
+%R	2	1	8	1	Rock Pad Foundations (Hall 3) — Materials/Plant/Sublet	CT_Other	800000.00	800000.00	0.00	Y
+%R	3	1	9	1	Rock-Pier Foundations (Hall 4) — Materials/Plant/Sublet	CT_Other	950000.00	950000.00	0.00	Y
+%R	4	1	10	1	Ground Beams & Ground-Bearing Slab (All Halls) — Materials/Plant/Sublet	CT_Other	1560000.00	1560000.00	0.00	Y
+%R	5	1	17	1	20 kV Ring Main Switchboard (14 Panels) — Materials/Plant/Sublet	CT_Other	2650000.00	2650000.00	0.00	Y
+%R	6	1	21	1	Generator Installation (8 Units) — Materials/Plant/Sublet	CT_Other	1350000.00	1350000.00	0.00	Y
+%R	7	1	25	1	Shared Spine — Mechanical (Pipework, Pumps, Valves, Heat Recovery) — Materials/Plant/Sublet	CT_Other	3200000.00	3200000.00	0.00	Y
+%R	8	1	29	1	Hall 1 — Steel Frame (449 t) — Materials/Plant/Sublet	CT_Other	1100000.00	1100000.00	0.00	Y
+%R	9	1	30	1	Hall 1 — Metal Deck & Precast Panels (64+) — Materials/Plant/Sublet	CT_Other	780000.00	780000.00	0.00	Y
+%R	10	1	31	1	Hall 1 — Warm Roof (6,912 m²) — Materials/Plant/Sublet	CT_Other	1040000.00	1040000.00	0.00	Y
+%R	11	1	32	1	Hall 1 — External Cladding & Acoustic Louvres — Materials/Plant/Sublet	CT_Other	1760000.00	1760000.00	0.00	Y
+%R	12	1	33	1	Hall 1 — MEP Rough-In (CRAH, UPS, Electrical) — Materials/Plant/Sublet	CT_Other	4370000.00	4370000.00	0.00	Y
+%R	13	1	37	1	Commissioning — L1 Factory Acceptance Tests — Materials/Plant/Sublet	CT_Other	620000.00	620000.00	0.00	Y
+%R	14	1	39	1	Commissioning — L4 Integrated Systems Testing — Materials/Plant/Sublet	CT_Other	540000.00	540000.00	0.00	Y
+%R	15	1	40	1	Commissioning — L5 24-hr Load Bank Test — Materials/Plant/Sublet	CT_Other	350000.00	350000.00	0.00	Y
+%R	16	1	46	1	Hall 2 — Pad Foundations (Glacial Till) — Materials/Plant/Sublet	CT_Other	570000.00	570000.00	0.00	Y
+%R	17	1	47	1	Hall 2 — Steel Frame (112 t) — Materials/Plant/Sublet	CT_Other	275000.00	275000.00	0.00	Y
+%R	18	1	57	1	Hall 3 — Rock Pad Foundations — Materials/Plant/Sublet	CT_Other	800000.00	800000.00	0.00	Y
+%R	19	1	58	1	Hall 3 — Steel Frame (112 t) — Materials/Plant/Sublet	CT_Other	275000.00	275000.00	0.00	Y
+%R	20	1	68	1	Hall 4 — Rock-Pier Foundations — Materials/Plant/Sublet	CT_Other	950000.00	950000.00	0.00	Y
+%R	21	1	70	1	Hall 4 — Steel Frame & Precast Panels — Materials/Plant/Sublet	CT_Other	275000.00	275000.00	0.00	Y
+%R	22	1	72	1	External Works — Roads, Fencing, Gatehouse — Materials/Plant/Sublet	CT_Other	1850000.00	1850000.00	0.00	Y
+
+%E

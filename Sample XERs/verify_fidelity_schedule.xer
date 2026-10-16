@@ -1,0 +1,65 @@
+ERMHDR	12.0	2026-09-17	Project	WhiteHatIQ	White Hat IQ Scheduler	WhiteHatIQ	Project Management	USD
+
+%T	PROJECT
+%F	proj_id	proj_short_name	plan_start_date	plan_end_date	last_recalc_date	clndr_id
+%R	1	verify_fidelity	2026-03-02 08:00	2026-06-03 08:00	2026-09-17 08:00	1
+
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	clndr_type	day_hr_cnt	week_hr_cnt	clndr_data
+%R	1	Y	Project Calendar	CA_Base	8.0	40.0	(0||CalendarData()((0||DaysOfWeek()((0||1()())(0||2()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||3()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||4()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||5()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||6()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||7()())))(0||Exceptions()((0||0(d|46115)())(0||1(d|46118)())(0||2(d|46209)())(0||3(d|46210)())(0||4(d|46211)())(0||5(d|46212)())(0||6(d|46213)())(0||7(d|46214)())(0||8(d|46215)())(0||9(d|46216)())(0||10(d|46217)())(0||11(d|46218)())(0||12(d|46219)())(0||13(d|46220)())(0||14(d|46221)())(0||15(d|46222)())(0||16(d|46223)())(0||17(d|46224)())(0||18(d|46225)())(0||19(d|46226)())(0||20(d|46227)())))))
+
+%T	PROJWBS
+%F	wbs_id	proj_id	parent_wbs_id	wbs_name	wbs_short_name	proj_node_flag	seq_num	status_code
+%R	1	1		VERIFY fidelity	WBS-1	Y	0	WS_Open
+%R	2	1	1	Enabling	1	N	10	WS_Open
+%R	3	1	1	2	2	N	20	WS_Open
+%R	4	1	3	Power	2.1	N	30	WS_Open
+
+%T	TASK
+%F	task_id	proj_id	wbs_id	task_code	task_name	task_type	target_drtn_hr_cnt	remain_drtn_hr_cnt	total_float_hr_cnt	free_float_hr_cnt	phys_complete_pct	target_start_date	target_end_date	early_start_date	early_end_date	status_code	clndr_id	cstr_type	cstr_date
+%R	1	1	2	1	Mobilise	TT_Task	80	80	80	0	0	2026-03-02 08:00	2026-03-13 08:00	2026-03-02 08:00	2026-03-13 08:00	TK_NotStart	1		
+%R	6	1	2	6	Fencing	TT_Task	24	24	416	416	0	2026-03-16 08:00	2026-03-18 08:00	2026-03-16 08:00	2026-03-18 08:00	TK_NotStart	1		
+%R	2	1	4	2	Substation	TT_Task	160	160	-184	-184	0	2026-05-04 08:00	2026-05-29 08:00	2026-05-04 08:00	2026-05-29 08:00	TK_NotStart	1	CS_MSOA	2026-05-04 08:00
+%R	3	1	4	3	Cable pull	TT_Task	120	120	-184	-184	0	2026-05-11 08:00	2026-05-29 08:00	2026-05-11 08:00	2026-05-29 08:00	TK_NotStart	1		
+%R	4	1	4	4	Energise	TT_Task	40	40	-184	-184	0	2026-05-27 08:00	2026-06-02 08:00	2026-05-27 08:00	2026-06-02 08:00	TK_NotStart	1	CS_MEOB	2026-04-30 17:00
+%R	5	1	3	5	Section 1 taking over	TT_FinMile	0	0	0	0	0	2026-06-03 08:00	2026-06-03 08:00	2026-06-03 08:00	2026-06-03 08:00	TK_NotStart	1		
+
+%T	MEMOTYPE
+%F	memo_type_id	seq_num	memo_type
+%R	1	1	Duration Basis
+%R	2	2	Notes
+
+%T	TASKMEMO
+%F	memo_id	task_id	memo_type_id	proj_id	task_memo
+%R	1	2	2	1	DNO firm date
+
+%T	TASKPRED
+%F	taskpred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt
+%R	1	6	1	1	1	PR_FS	0
+%R	2	2	1	1	1	PR_FS	0
+%R	3	3	2	1	1	PR_SS	40
+%R	4	4	3	1	1	PR_FF	16
+%R	5	5	4	1	1	PR_FS	0
+
+%T	CURRTYPE
+%F	curr_id	curr_type	curr_short_name	decimal_digit_cnt	curr_symbol
+%R	1	USD	USD	2	$
+
+%T	RSRC
+%F	rsrc_id	rsrc_name	rsrc_short_name	rsrc_type	unit_id	def_qty_per_hr	max_qty_per_hr	cost_qty_link_flag	clndr_id	curr_id	active_flag	parent_rsrc_id
+%R	1	Electrical	Electrical	RT_Labor		1	1	N	1	1	Y	
+
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	rsrc_id	proj_id	cost_qty_link_flag	cost_per_qty	target_qty	target_cost	target_qty_per_hr	remain_qty	remain_cost	act_reg_qty	act_reg_cost	target_start_date	target_end_date	rsrc_type
+%R	1	2	1	1	N	0.00	160.00	0.00	1	160.00	0.00	0.00	0.00	2026-05-04 08:00	2026-05-29 08:00	RT_Labor
+
+%T	ACCOUNT
+%F	acct_id	acct_short_name	acct_name	parent_acct_id
+%R	1	GEN	General	
+%R	2	G_Electrical	G Electrical	
+
+%T	PROJCOST
+%F	cost_item_id	proj_id	task_id	acct_id	cost_name	cost_type	target_cost	remain_cost	act_cost	auto_compute_act_flag
+%R	1	1	2	2	Substation — Materials/Plant/Sublet	CT_Other	1000.00	1000.00	0.00	Y
+
+%E

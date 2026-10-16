@@ -1,0 +1,132 @@
+ERMHDR	12.0	2026-09-28	Project	WhiteHatIQ	White Hat IQ Scheduler	WhiteHatIQ	Project Management	EUR
+
+%T	PROJECT
+%F	proj_id	proj_short_name	plan_start_date	plan_end_date	last_recalc_date	clndr_id	orig_proj_id
+%R	1	tower_a	2026-03-02 08:00	2026-04-06 08:00	2026-04-01 08:00	1	
+%R	2	tower_a_bl1	2026-03-02 08:00	2026-04-06 08:00	2026-04-01 08:00	1	1
+
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	clndr_type	day_hr_cnt	week_hr_cnt	clndr_data
+%R	1	Y	Site 5-Day	CA_Project	8.0	40.0	(0||CalendarData()((0||DaysOfWeek()((0||1()())(0||2()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||3()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||4()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||5()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||6()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||7()())))(0||Exceptions()((0||0(d|46118)())(0||1(d|46143)())))))
+%R	2	N	Night Shift 7-Day	CA_Base	10.0	70.0	(0||CalendarData()((0||DaysOfWeek()((0||1()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||2()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||3()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||4()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||5()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||6()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))(0||7()((0||0(s|08:00|f|12:00)())(0||1(s|13:00|f|17:00)())))))(0||Exceptions()())))
+
+%T	OBS
+%F	obs_id	parent_obs_id	seq_num	obs_name	obs_descr
+%R	1		10	Construction Dept	
+
+%T	PROJWBS
+%F	wbs_id	proj_id	parent_wbs_id	wbs_name	wbs_short_name	proj_node_flag	seq_num	status_code	obs_id
+%R	1	1		TOWER-A	WBS-1	Y	0	WS_Open	1
+%R	2	1	1	Substructure	SUB	N	10	WS_Open	1
+%R	3	1	2	Piling	PIL	N	20	WS_Open	1
+
+%T	MEMOTYPE
+%F	memo_type_id	seq_num	memo_type
+%R	1	1	Duration Basis
+%R	2	2	Notes
+%R	3	3	EPS
+
+%T	WBSMEMO
+%F	wbs_memo_id	proj_id	wbs_id	memo_type_id	wbs_memo
+%R	1	1	1	3	EPS: Group / Middle East / Buildings
+
+%T	TASK
+%F	task_id	proj_id	wbs_id	task_code	task_name	task_type	target_drtn_hr_cnt	remain_drtn_hr_cnt	total_float_hr_cnt	free_float_hr_cnt	phys_complete_pct	target_start_date	target_end_date	early_start_date	early_end_date	act_start_date	act_end_date	status_code	clndr_id	cstr_type	cstr_date
+%R	1	1	3	A1010	Mobilise piling rig	TT_Task	40	0	80	0	100	2026-03-02 08:00	2026-03-06 08:00	2026-03-02 08:00	2026-03-06 08:00	2026-03-02 08:00	2026-03-06 08:00	TK_Complete	1		
+%R	2	1	3	A1020	Drive piles zone 1	TT_Task	100	60	140	100	40	2026-03-07 08:00	2026-04-06 08:00	2026-03-07 08:00	2026-04-06 08:00	2026-03-07 08:00		TK_Active	2		
+%R	3	1	2	A1030	Pile caps zone 1	TT_Task	80	80	16	0	0	2026-03-19 08:00	2026-04-01 08:00	2026-03-19 08:00	2026-04-01 08:00			TK_NotStart	1	CS_MSOA	2026-03-19 08:00
+%R	4	1	2	M1000	Substructure complete	TT_FinMile	0	0	16	16	0	2026-04-02 08:00	2026-04-02 08:00	2026-04-02 08:00	2026-04-02 08:00			TK_NotStart	1		
+%R	1005	2	3	A1010	Mobilise piling rig	TT_Task	40	0	80	0	100	2026-03-02 08:00	2026-03-06 08:00	2026-03-02 08:00	2026-03-06 08:00	2026-03-02 08:00	2026-03-06 08:00	TK_Complete	1		
+%R	1006	2	3	A1020	Drive piles zone 1	TT_Task	80	48	140	100	40	2026-03-07 08:00	2026-03-14 08:00	2026-03-07 08:00	2026-03-14 08:00	2026-03-07 08:00		TK_Active	2		
+
+%T	TASKMEMO
+%F	memo_id	task_id	memo_type_id	proj_id	task_memo
+%R	1	2	2	1	Night shift by permit 44/26
+
+%T	ACTVTYPE
+%F	actv_code_type_id	actv_short_len	seq_num	actv_code_type	proj_id	wbs_id	actv_code_type_scope
+%R	1	20	1	Phase	1		AS_Project
+
+%T	ACTVCODE
+%F	actv_code_id	parent_actv_code_id	actv_code_type_id	actv_code_name	short_name	seq_num	color	total_assignments
+%R	1		1	Enabling	Enabling	10		
+
+%T	TASKACTV
+%F	task_id	actv_code_type_id	actv_code_id	proj_id
+%R	1	1	1	1
+%R	2	1	1	1
+
+%T	UDFTYPE
+%F	udf_type_id	table_name	udf_type_name	udf_type_label	logical_data_type	super_flag	indicator_expression	summary_indicator_expression	export_flag
+%R	1	TASK	Contract_Ref	Contract Ref	FT_TEXT	N			Y
+%R	2	TASK	Permit_No	Permit No	FT_INT	N			Y
+
+%T	UDFVALUE
+%F	udf_type_id	fk_id	proj_id	udf_date	udf_number	udf_text	udf_code_id
+%R	1	2	1			CTR-0042	
+%R	2	2	1		44		
+
+%T	TASKPROC
+%F	proc_id	task_id	proj_id	seq_num	proc_name	complete_flag	proc_wt	complete_pct	proc_descr
+%R	1	2	1	10	Set out	Y	1	100	
+%R	2	2	1	20	Drive	N	4	25	
+
+%T	TASKPRED
+%F	taskpred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt
+%R	1	2	1	1	1	PR_FS	0
+%R	2	3	2	1	1	PR_SS	20
+%R	3	4	3	1	1	PR_FS	0
+
+%T	CURRTYPE
+%F	curr_id	curr_type	curr_short_name	decimal_digit_cnt	curr_symbol
+%R	1	EUR	EUR	2	€
+
+%T	ROLES
+%F	role_id	parent_role_id	seq_num	role_name	role_short_name	def_cost_qty_link_flag	cost_qty_type
+%R	1		10	Site Engineer	SE	Y	QT_Hour
+
+%T	ROLERATE
+%F	role_rate_id	role_id	cost_per_qty	start_date	max_qty_per_hr
+%R	1	1	55.00	2026-03-02 08:00	1
+
+%T	UMEASURE
+%F	unit_id	unit_abbrev	unit_name
+%R	1	m3	m3
+
+%T	RSRC
+%F	rsrc_id	rsrc_name	rsrc_short_name	rsrc_type	unit_id	def_qty_per_hr	max_qty_per_hr	cost_qty_link_flag	clndr_id	curr_id	active_flag	parent_rsrc_id	role_id
+%R	1	Piling Crew	PILE	RT_Labor		1	6	Y	2	1	Y		1
+%R	2	Concrete C35	C35	RT_Mat	1	1	100	Y	1	1	Y		
+%R	3	Piling Rig	RIG	RT_Equip		1	2	Y	2	1	Y		
+
+%T	RSRCRATE
+%F	rsrc_rate_id	rsrc_id	max_qty_per_hr	cost_per_qty	start_date	shift_period_id
+%R	1	1	6	48.00	2026-03-02 08:00	
+%R	2	2	100	95.00	2026-03-02 08:00	
+%R	3	3	2	180.00	2026-03-02 08:00	
+
+%T	RSRCROLE
+%F	rsrc_role_id	rsrc_id	role_id	skill_level	role_short_name	role_name	rsrc_short_name	rsrc_name	rsrc_type
+%R	1	1	1	3	SE	Site Engineer	PILE	Piling Crew	RT_Labor
+
+%T	RSRCCURVDATA
+%F	curv_id	curv_name	default_flag	pct_usage_0	pct_usage_1	pct_usage_2	pct_usage_3	pct_usage_4	pct_usage_5	pct_usage_6	pct_usage_7	pct_usage_8	pct_usage_9	pct_usage_10	pct_usage_11	pct_usage_12	pct_usage_13	pct_usage_14	pct_usage_15	pct_usage_16	pct_usage_17	pct_usage_18	pct_usage_19	pct_usage_20
+%R	1	Front Loaded	N	10.00	9.00	8.00	7.00	6.00	5.00	5.00	5.00	5.00	5.00	5.00	4.00	4.00	4.00	4.00	3.00	3.00	3.00	2.00	2.00	1.00
+
+%T	TASKRSRC
+%F	taskrsrc_id	task_id	rsrc_id	proj_id	cost_qty_link_flag	cost_per_qty	target_qty	target_cost	target_qty_per_hr	remain_qty	remain_cost	act_reg_qty	act_reg_cost	target_start_date	target_end_date	rsrc_type	role_id	curv_id	acct_id
+%R	1	2	1	1	Y	48.00	600.00	25500.00	6	360.00	15300.00	240.00	10200.00	2026-03-07 08:00	2026-04-06 08:00	RT_Labor	1	1	2
+%R	2	2	3	1	Y	180.00	100.00	18000.00	1	60.00	10800.00	40.00	7200.00	2026-03-07 08:00	2026-04-06 08:00	RT_Equip			2
+%R	3	3	2	1	Y	95.00	320.00	30400.00	4	320.00	30400.00	0.00	0.00	2026-03-19 08:00	2026-04-01 08:00	RT_Mat			2
+
+%T	ACCOUNT
+%F	acct_id	acct_short_name	acct_name	parent_acct_id
+%R	1	GEN	General	
+%R	2	SUB-01	Substructure Works	
+
+%T	PROJCOST
+%F	cost_item_id	proj_id	task_id	acct_id	cost_name	cost_type	target_cost	remain_cost	act_cost	auto_compute_act_flag
+%R	1	1	3	2	Formwork hire	CT_Other	12000.00	12000.00	0.00	Y
+%R	2	1	3	2	Crane hire	CT_Other	9500.00	9500.00	0.00	Y
+
+%E

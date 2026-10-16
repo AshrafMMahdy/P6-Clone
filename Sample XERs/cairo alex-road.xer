@@ -1,0 +1,300 @@
+ERMHDR	5.0	2011-08-06	Project	admin	Adminstrator	dbxDatabaseNoName	Project Management	USD
+%T	CURRTYPE
+%F	curr_id	decimal_digit_cnt	curr_symbol	decimal_symbol	digit_group_symbol	pos_curr_fmt_type	neg_curr_fmt_type	curr_type	curr_short_name	group_digit_cnt	base_exch_rate
+%R	1	0	$	.	,	#1.1	(#1.1)	Dollar	USD	3	1
+%R	10	2	$	.	,	#1.1	(#1.1)	Argentine Peso	ARS	3	3.077
+%R	11	2	A$	.	,	#1.1	(#1.1)	Australian Dollar	AUST	3	1.208
+%R	13	2	R$	.	,	#1.1	(#1.1)	Brazilian Real	BRL	3	2.014
+%R	14	2	£	.	,	#1.1	(#1.1)	British Pound	U.K.£	3	0.685097
+%R	15	2	CA$	.	,	#1.1	(#1.1)	Canadian Dollar	CAD	3	1.10573
+%R	16	2	Y	.	,	#1.1	(#1.1)	Chinese Yuan	CNY	3	7.694
+%R	17	2	€	.	,	#1.1	(#1.1)	EURO	EUR	3	0.739088
+%R	20	2	HK$	.	,	#1.1	(#1.1)	Hong Kong Dollar	HKD	3	7.81967
+%R	21	2	Rs	.	,	#1.1	(#1.1)	Indian Rupee	INR	3	40.67
+%R	23	2	¥	.	,	#1.1	(#1.1)	Japanese Yen	JPY	3	120.167
+%R	24	2	K	.	,	#1.1	(#1.1)	Korean Won	KRW	3	924.743
+%R	25	2	N$	.	,	#1.1	(#1.1)	Mexican Peso	MXN	3	10.7938
+%R	26	2	R	.	,	#1.1	(#1.1)	Russian Rouble	RUB	3	25.8085
+%R	28	2	Sk	.	,	#1.1	(#1.1)	Swedish Krona	SEK	3	6.80579
+%R	29	2	kr	.	,	#1.1	(#1.1)	Swiss Franc	CHF	3	1.21864
+%R	30	2	NIS	.	,	#1.1	(#1.1)	Israel Shekel	ILS	3	3.96384
+%T	FINDATES
+%F	fin_dates_id	fin_dates_name	start_date	end_date
+%R	144	2007-05-01	2007-05-01 00:00	2007-05-31 00:00
+%R	145	2007-04-01	2007-04-01 00:00	2007-04-30 00:00
+%R	146	2007-03-01	2007-03-01 00:00	2007-03-31 00:00
+%R	147	2007-02-01	2007-02-01 00:00	2007-02-28 00:00
+%R	148	2007-01-01	2007-01-01 00:00	2007-01-31 00:00
+%T	OBS
+%F	obs_id	parent_obs_id	guid	seq_num	obs_name	obs_descr
+%R	565			0	Innovative GC	<HTML><BODY></BODY></HTML>
+%T	PCATTYPE
+%F	proj_catg_type_id	seq_num	proj_catg_short_len	proj_catg_type	proj_catg_type_wt	max_proj_catg_wt
+%R	18	300	5	Division/Office	0	0
+%T	UDFTYPE
+%F	udf_type_id	table_name	udf_type_name	udf_type_label	logical_data_type	super_flag	indicator_expression	summary_indicator_expression
+%R	42	RSRC	user_text4	user_text4	FT_TEXT	N		
+%R	136	PROJECT	user_field_136	QA/QC	FT_STATICTYPE	N		
+%R	137	PROJECT	user_field_137	Safety	FT_STATICTYPE	N		
+%R	138	PROJECT	user_field_138	Change	FT_STATICTYPE	N		
+%T	PCATVAL
+%F	proj_catg_id	proj_catg_type_id	seq_num	proj_catg_short_name	parent_proj_catg_id	proj_catg_name	proj_catg_wt
+%R	188	18	0	AMER		Americas Division	0
+%R	196	18	400	SWR	188	Southwest Region	0
+%R	215	18	0	PHX	196	Pheonix, AZ Office	0
+%T	PROJECT
+%F	proj_id	fy_start_month_num	chng_eff_cmp_pct_flag	rsrc_self_add_flag	allow_complete_flag	rsrc_multi_assign_flag	ts_rsrc_mark_act_finish_flag	ts_rsrc_vw_inact_actv_flag	checkout_flag	project_flag	step_complete_flag	cost_qty_recalc_flag	sum_only_flag	batch_sum_flag	name_sep_char	def_complete_pct_type	proj_short_name	acct_id	orig_proj_id	source_proj_id	base_type_id	clndr_id	sum_base_proj_id	task_code_base	task_code_step	priority_num	wbs_max_sum_level	risk_level	strgy_priority_num	last_checksum	critical_drtn_hr_cnt	def_cost_per_qty	last_recalc_date	plan_start_date	plan_end_date	scd_end_date	add_date	sum_data_date	last_tasksum_date	fcst_start_date	def_duration_type	task_code_prefix	guid	def_qty_type	add_by_name	web_local_root_path	proj_url	def_rate_type	add_act_remain_flag	act_this_per_link_flag	def_task_type	act_pct_link_flag	critical_path_type	task_code_prefix_flag	def_rollup_dates_flag	use_project_baseline_flag	rem_target_link_flag	reset_planned_flag	allow_neg_act_flag	sum_assign_level	last_fin_dates_id	last_baseline_update_date	cr_external_key	apply_actuals_date	intg_proj_type	loaded_scope_level	export_flag	new_fin_dates_id	next_data_date	close_period_flag	trsrcsum_loaded
+%R	620	1	Y	Y	Y	Y	N	N	N	Y	N	N	N	Y	.	CP_Drtn	Architectural Design					597		1000	10	10	10	1	400		0	0.00	2007-07-01 00:00	2007-01-01 00:00		2007-08-29 17:00	2005-06-02 08:41		2007-04-19 13:27		DT_FixedDrtn	EN	AZk0Ieb9Rxid1rI43bMqUw	QT_Hour	admin			COST_PER_QTY	N	Y	TT_Task	Y	CT_TotFloat	N	Y	N	Y	Y	N	SL_Taskrsrc	144					7	Y				
+%T	APPLYACTOPTIONS
+%F	proj_id	respect_duration_type
+%R	620	N
+%T	CALENDAR
+%F	clndr_id	default_flag	clndr_name	proj_id	base_clndr_id	last_chng_date	clndr_type	day_hr_cnt	week_hr_cnt	month_hr_cnt	year_hr_cnt	clndr_data
+%R	597	N	Standard 5 Day Workweek			2000-04-26 14:11	CA_Base	8	40	172	2000	(0||CalendarData()(    (0||DaysOfWeek()(      (0||1()())      (0||2()(        (0||0(s|08:00|f|12:00)())        (0||1(s|13:00|f|17:00)())))      (0||3()(        (0||0(s|08:00|f|12:00)())        (0||1(s|13:00|f|17:00)())))      (0||4()(        (0||0(s|08:00|f|12:00)())        (0||1(s|13:00|f|17:00)())))      (0||5()(        (0||0(s|08:00|f|12:00)())        (0||1(s|13:00|f|17:00)())))      (0||6()(        (0||0(s|08:00|f|12:00)())        (0||1(s|13:00|f|17:00)())))      (0||7()())))    (0||Exceptions()())))
+%T	PROJPCAT
+%F	proj_id	proj_catg_type_id	proj_catg_id
+%R	620	18	215
+%T	SCHEDOPTIONS
+%F	schedoptions_id	proj_id	sched_outer_depend_type	sched_open_critical_flag	sched_lag_early_start_flag	sched_retained_logic	sched_setplantoforecast	sched_float_type	sched_calendar_on_relationship_lag	sched_use_expect_end_flag	sched_progress_override	level_float_thrs_cnt	level_outer_assign_flag	level_outer_assign_priority	level_over_alloc_pct	level_within_float_flag	level_keep_sched_date_flag	level_all_rsrc_flag	sched_use_project_end_date_for_float	enable_multiple_longest_path_calc	limit_multiple_longest_path_calc	max_multiple_longest_path	use_total_float_multiple_longest_paths	key_activity_for_multiple_longest_paths	LevelPriorityList
+%R	1	620	SD_Both	N	Y	Y	N	FT_SS	rcal_Successor	Y	N	0	N		0	N	Y	Y	Y	Y	Y	50	N		
+%T	PROJWBS
+%F	wbs_id	proj_id	obs_id	seq_num	est_wt	proj_node_flag	sum_data_flag	status_code	wbs_short_name	wbs_name	phase_id	parent_wbs_id	ev_user_pct	ev_etc_user_value	orig_cost	indep_remain_total_cost	ann_dscnt_rate_pct	dscnt_period_type	indep_remain_work_qty	anticip_start_date	anticip_end_date	ev_compute_type	ev_etc_compute_type	guid	tmpl_guid	plan_open_state
+%R	6923	620	565	501	1	Y	Y	WS_Open	Architectural Design	Architectural Design Template for Mid Rise Commercial Office		4356			0.00	0.00						EC_Cmp_pct	EE_Rem_hr	PP8b0NbgSnyX135NzdWzMg		
+%T	RSRC
+%F	rsrc_id	parent_rsrc_id	clndr_id	role_id	shift_id	ts_approve_user_id	user_id	pobs_id	guid	rsrc_seq_num	email_addr	employee_code	office_phone	other_phone	rsrc_name	rsrc_short_name	rsrc_title_name	def_qty_per_hr	cost_qty_type	ot_factor	active_flag	auto_compute_act_flag	def_cost_qty_link_flag	ot_flag	timesheet_flag	xfer_complete_day_cnt	xfer_notstart_day_cnt	curr_id	unit_id	rsrc_type	rsrc_notes	load_tasks_flag	level_flag	last_checksum
+%R	1749	1745	597						EnmmvSG3uEavV7SsNr3+Zx	508					Design Engineering Department	Design Engineers		1	QT_Hour		Y	Y	Y	N	N	30	30	1		RT_Labor				
+%R	1770	1749	597						RWK/HOOLSUu13J7hhefpZh	1002					Ed Wood	ED	Program Manager	1	QT_Hour		Y	Y	Y	N	N	30	30	1		RT_Labor	<HTML><BODY></BODY></HTML>			
+%R	1745		597						A1WwJc7JIEaBsvxBygW//R	0	systems@bankcorp.com		718-456-9021	203-121-2323	Innovative Construction Internal Resources	Innovative Resources		1	QT_Hour	1	Y	Y	Y	N	N	60	30	1		RT_Labor	<HTML><BODY></BODY></HTML>			
+%T	RSRCRATE
+%F	rsrc_rate_id	rsrc_id	max_qty_per_hr	cost_per_qty	start_date	shift_period_id	cost_per_qty2	cost_per_qty3	cost_per_qty4	cost_per_qty5
+%R	2092	1770	1.25	33.65	1999-07-04 00:00					
+%T	TASK
+%F	task_id	proj_id	wbs_id	clndr_id	est_wt	phys_complete_pct	rev_fdbk_flag	lock_plan_flag	auto_compute_act_flag	complete_pct_type	task_type	duration_type	review_type	status_code	task_code	task_name	rsrc_id	total_float_hr_cnt	free_float_hr_cnt	remain_drtn_hr_cnt	act_work_qty	remain_work_qty	target_work_qty	target_drtn_hr_cnt	target_equip_qty	act_equip_qty	remain_equip_qty	cstr_date	act_start_date	act_end_date	late_start_date	late_end_date	expect_end_date	early_start_date	early_end_date	restart_date	reend_date	target_start_date	target_end_date	review_end_date	rem_late_start_date	rem_late_end_date	cstr_type	priority_type	suspend_date	resume_date	float_path	float_path_order	guid	tmpl_guid	cstr_date2	cstr_type2	driving_path_flag	act_this_per_work_qty	act_this_per_equip_qty	external_early_start_date	external_late_end_date	create_date	update_date	create_user	update_user
+%R	58599	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_Complete	ENGENL0001	Notice to proceed for Design Contract				0	0	0	0	0	0	0	0		2007-01-01 08:00	2007-01-01 08:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-01 08:00	2007-01-01 08:00					PT_Normal					+XK4FqY5S4u2F7i2+rtsPg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58600	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	ENGENL0002	Design Phase completed		0	0	0	0	0	0	0	0	0	0				2007-08-29 17:00	2007-08-29 17:00		2007-08-29 17:00	2007-08-29 17:00	2007-08-29 17:00	2007-08-29 17:00	2007-08-29 17:00	2007-08-29 17:00		2007-08-29 17:00	2007-08-29 17:00		PT_Normal			11	9	ThOrG6edT+C/I9lva45jXA				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58601	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1BREP	Boring Report				0	0	0	0	40	0	0	0		2007-01-15 08:00	2007-01-24 00:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-15 08:00	2007-01-19 17:00					PT_Normal					tl5ZZVhLSY+d9TA5cbrWwA				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58602	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1BRNG	Borings in field				0	0	0	0	80	0	0	0		2007-01-01 08:00	2007-01-12 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-01 08:00	2007-01-12 17:00					PT_Normal					JVGFDbglS+if45Tou+d/mA				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58603	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1CEST	Preliminary Cost Estimate				0	0	0	0	80	0	0	0		2007-01-01 08:00	2007-01-12 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-01 08:00	2007-01-12 17:00					PT_Normal					z//DAFcaQGa1rUZ/Fy+99w				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58604	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1DESN	Schematic Architect. Design Analy.				0	0	0	0	120	0	0	0		2007-01-01 08:00	2007-01-19 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-01 08:00	2007-01-19 17:00					PT_Normal					wY1vcQq7Tvew/qiG1xbv7w				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58605	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1DRWG	Site Plans Drafting				0	0	0	0	40	0	0	0		2007-01-01 08:00	2007-01-05 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-01 08:00	2007-01-05 17:00					PT_Normal					HZVGI5aoRhGwF0NS23Yzvw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58606	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1ENER	Energy Analysis & Utility Data				0	0	0	0	80	0	0	0		2007-01-01 08:00	2007-01-19 00:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-01 08:00	2007-01-12 17:00					PT_Normal					O0zHJPm6R8aEEYsAF3qe6w				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58607	620	6923	597	1	100	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1FINS	Finish schematic Phase				0	0	0	0	0	0	0	0		2007-01-24 00:00	2007-01-24 00:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-19 17:00	2007-01-19 17:00					PT_Normal					nixpxdfrS/WNRkWgrTmSxg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58608	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1INVT	Site Investigation - Engineering				0	0	0	0	40	0	0	0		2007-01-01 08:00	2007-01-05 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-01 08:00	2007-01-05 17:00					PT_Normal					yzoPul8xROqgLpABLRr0Ug				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58609	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1MEET	Schematic Design meeting				0	0	0	0	16	0	0	0		2007-02-12 08:00	2007-02-13 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-12 08:00	2007-02-13 17:00					PT_Normal					7YYlyiCwSlGklHhpCj72aA				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58610	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1PRNT	Printing & reproduction for Schematic submission				0	0	0	0	40	0	0	0		2007-01-25 00:00	2007-02-02 00:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-22 08:00	2007-01-26 17:00					PT_Normal					JuU/n4/ARISWyKiFZOYg/w				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58611	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1REVW	Schematic Submission and Review				0	0	0	0	80	0	0	0		2007-01-29 08:00	2007-02-09 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-29 08:00	2007-02-09 17:00					PT_Normal					K6fTXSCGTAyRGEKiu5I2vg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58612	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS1STAR	Start schematic Phase				0	0	0	0	0	0	0	0		2007-01-01 08:00	2007-01-01 08:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-01-01 08:00	2007-01-01 08:00					PT_Normal					5DxMTwaIRmS2EyQQdi98hg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58613	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2CAD	CAD Time				0	0	0	0	120	0	0	0		2007-02-14 08:00	2007-03-06 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-03-06 17:00					PT_Normal					/rOsetanRn6b0yQC5z/rdw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58614	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2CALC	Engineering Calculations				0	0	0	0	80	0	0	0		2007-02-14 08:00	2007-02-27 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-02-27 17:00					PT_Normal					7mjUWBoPSX6qXO/2RDS83g				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58615	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2CEST	Detailed Cost Estimate				0	0	0	0	40	0	0	0		2007-02-14 08:00	2007-02-20 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-02-20 17:00					PT_Normal					Xaz2xFUAR8CXSROeZB46DQ				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58616	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2DRWG	Engineering Drawings - 35% cmplt				0	0	0	0	80	0	0	0		2007-02-14 08:00	2007-02-27 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-02-27 17:00					PT_Normal					VKUQaMQITHmAMZOOEDfSMg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58617	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2ENER	Computer Energy Analysis				0	0	0	0	24	0	0	0		2007-02-14 08:00	2007-02-16 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-02-16 17:00					PT_Normal					Bo85LUoTSGCa8yDYUoxUTw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58618	620	6923	597	1	100	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2FINS	Finish Development Phase				0	0	0	0	0	0	0	0		2007-03-06 17:00	2007-03-06 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-06 17:00	2007-03-06 17:00					PT_Normal					7KExu2s0Qz+7nJoqNAQ86A				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58619	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2MEET	Design Development meeting				0	0	0	0	8	0	0	0		2007-03-28 08:00	2007-03-28 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-28 08:00	2007-03-28 17:00					PT_Normal					W7dIZ3I6QRGii8WYV3cwmg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58620	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2OMSI	OMSI Report & Estimate				0	0	0	0	24	0	0	0		2007-02-14 08:00	2007-02-16 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-02-16 17:00					PT_Normal					5NfXLIzwSlOsIUD7Ev1Iwg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58621	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2PRNT	Printing & Reproduction for Design Development				0	0	0	0	40	0	0	0		2007-03-07 08:00	2007-03-13 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-07 08:00	2007-03-13 17:00					PT_Normal					QCzzjzN0RxqTVMaewcigIw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58622	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2REVW	Design Development Submission & Review				0	0	0	0	80	0	0	0		2007-03-14 08:00	2007-03-27 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-14 08:00	2007-03-27 17:00					PT_Normal					p59Ud/5LQNi2avvAYXHh+A				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58623	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2SPEC	Preliminary Specifications				0	0	0	0	80	0	0	0		2007-02-14 08:00	2007-02-27 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-02-27 17:00					PT_Normal					fzcM2bCkSiqxoVTg+ZPxmw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58624	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2STAR	Start Design Development Phase				0	0	0	0	0	0	0	0		2007-02-14 08:00	2007-02-14 08:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-02-14 08:00					PT_Normal					gB7JcnXeT6em9iMWMJOGyA				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58625	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS2VLUE	Value Engineering				0	0	0	0	120	0	0	0		2007-02-14 08:00	2007-03-06 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-02-14 08:00	2007-03-06 17:00					PT_Normal					f5vD/ZdTRh6Wunnzh9ml+A				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58626	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3CAD	Drawing preparation with CAD				0	0	0	0	40	0	0	0		2007-03-29 08:00	2007-04-04 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-29 08:00	2007-04-04 17:00					PT_Normal					KKdJs3r9Rqe5V43/oz7RCw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58627	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3CEST	Refined Cost Estimate				0	0	0	0	24	0	0	0		2007-03-29 08:00	2007-04-02 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-29 08:00	2007-04-02 17:00					PT_Normal					45wFZ3NCRkuvbp8mBayckQ				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58628	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3DESN	Completed Design Analysis				0	0	0	0	24	0	0	0		2007-03-29 08:00	2007-04-02 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-29 08:00	2007-04-02 17:00					PT_Normal					YsQXuv88TFSaAZHxTR2Iqg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58629	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3DRWG	Engineering Drawings 60% Cmplt.				0	0	0	0	120	0	0	0		2007-03-29 08:00	2007-04-18 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-29 08:00	2007-04-18 17:00					PT_Normal					YqgEBT6fR12wEimJP39udg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58630	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3FINS	Preliminary Building Finishes Pck.				0	0	0	0	40	0	0	0		2007-03-29 08:00	2007-04-04 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-29 08:00	2007-04-04 17:00					PT_Normal					VYYBRLpKTX+JRVC9/DR6PQ				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58631	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3MEET	Progress Design meeting				0	0	0	0	8	0	0	0		2007-05-15 08:00	2007-05-15 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-15 08:00	2007-05-15 17:00					PT_Normal					rndlIN/VSqGkQdKAHOev1w				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58632	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3PRNT	Printing & reproduction for Progress Submission				0	0	0	0	40	0	0	0		2007-04-19 08:00	2007-04-25 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-04-19 08:00	2007-04-25 17:00					PT_Normal					YCpyrszBQPWC9ZjIkeXHqw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58633	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3REVW	Progress Submission and Review				0	0	0	0	80	0	0	0		2007-04-26 08:00	2007-05-09 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-04-26 08:00	2007-05-09 17:00					PT_Normal					O4Ni51XdQ662Zx/Ib/rWdA				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58634	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS3STAR	Start Progress Phase				0	0	0	0	0	0	0	0		2007-03-29 08:00	2007-03-29 08:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-03-29 08:00	2007-03-29 08:00					PT_Normal					erc3jjWzR0GjjK4pmuJ8rA				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58635	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4CAD	CAD Time				0	0	0	0	80	0	0	0		2007-05-16 08:00	2007-05-29 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-05-29 17:00					PT_Normal					AVSkqhf5T3qpTheOLS0RSQ				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58636	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4CEST	Completed Cost Estimate w/Markups				0	0	0	0	40	0	0	0		2007-05-16 08:00	2007-05-22 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-05-22 17:00					PT_Normal					wtjRW42vS+uaItj/LCv+dg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58637	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4DESN	Final Design Analysis				0	0	0	0	24	0	0	0		2007-05-16 08:00	2007-05-18 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-05-18 17:00					PT_Normal					285MHRCHT+SGI6rBRUYmBw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58638	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4DRWG	Architectural Drawings - 100%				0	0	0	0	120	0	0	0		2007-05-16 08:00	2007-06-05 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-06-05 17:00					PT_Normal					zqCdeECCTq2OtUkCBh7vGA				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58639	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4FINS	Completed Building Finishes Pck.				0	0	0	0	80	0	0	0		2007-05-16 08:00	2007-05-29 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-05-29 17:00					PT_Normal					zDYfFm5DTwWBJcT69Y7YQw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58640	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4MDLS	Architectural Model				0	0	0	0	80	0	0	0		2007-05-16 08:00	2007-05-29 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-05-29 17:00					PT_Normal					/Si+n8B+SpCTTZ+D2Qcx				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58641	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS4MEET	Final Design Meeting		0	0	8	0	0	0	8	0	0	0				2007-07-18 08:00	2007-07-18 17:00		2007-07-18 08:00	2007-07-18 17:00	2007-07-18 08:00	2007-07-18 17:00	2007-07-18 08:00	2007-07-18 17:00		2007-07-18 08:00	2007-07-18 17:00		PT_Normal			11	3	+hvEWdIfR8GUo3vq5v+Fzg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58642	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Active	ENPHS4PRNT	Printing & Reproduction for Final Submission		0	0	16	0	0	0	40	0	0	0		2007-06-27 08:00		2007-07-02 08:00	2007-07-03 17:00		2007-07-02 08:00	2007-07-03 17:00	2007-07-02 08:00	2007-07-03 17:00	2007-06-27 08:00	2007-07-03 17:00		2007-07-02 08:00	2007-07-03 17:00		PT_Normal			11	1	CkSiB7BhTwm2SsQIIrPYDw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58643	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4REND	Rendering				0	0	0	0	80	0	0	0		2007-05-16 08:00	2007-05-29 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-05-29 17:00					PT_Normal					n/tJu5IYTJGjlGbpDaDZPQ				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58644	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS4REVW	Final Design Submission and Review		0	0	80	0	0	0	80	0	0	0				2007-07-04 08:00	2007-07-17 17:00		2007-07-04 08:00	2007-07-17 17:00	2007-07-04 08:00	2007-07-17 17:00	2007-07-04 08:00	2007-07-17 17:00		2007-07-04 08:00	2007-07-17 17:00		PT_Normal			11	2	pJXpaksaTIuo6yIG1oPYxw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58645	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4SPEC	Completed Contract Specifications				0	0	0	0	80	0	0	0		2007-05-16 08:00	2007-05-29 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-05-29 17:00					PT_Normal					7Xuj0fvoRDqiLeyHzHUVPg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58646	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_Complete	ENPHS4STAR	Start Final Design Phase				0	0	0	0	0	0	0	0		2007-05-16 08:00	2007-05-16 08:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-05-16 08:00	2007-05-16 08:00					PT_Normal					4OkLGzwBQzK8TSnGWJIvSg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58647	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS5CEST	Final Cost Estimate		40	40	40	0	0	0	40	0	0	0				2007-07-26 08:00	2007-08-01 17:00		2007-07-19 08:00	2007-07-25 17:00	2007-07-19 08:00	2007-07-25 17:00	2007-07-19 08:00	2007-07-25 17:00		2007-07-26 08:00	2007-08-01 17:00		PT_Normal			21	1	cfd+PDpZRMCQjuyQifsasw				N	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58648	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS5DRWG	Contract Bid Documents		0	0	80	0	0	0	80	0	0	0				2007-07-19 08:00	2007-08-01 17:00		2007-07-19 08:00	2007-08-01 17:00	2007-07-19 08:00	2007-08-01 17:00	2007-07-19 08:00	2007-08-01 17:00		2007-07-19 08:00	2007-08-01 17:00		PT_Normal			11	5	zi73qGxqRcCbV2fdxciKIQ				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58649	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS5FINS	Finish Bid Documents Phase		0	0	0	0	0	0	0	0	0	0				2007-08-01 17:00	2007-08-01 17:00		2007-08-01 17:00	2007-08-01 17:00	2007-08-01 17:00	2007-08-01 17:00	2007-08-01 17:00	2007-08-01 17:00		2007-08-01 17:00	2007-08-01 17:00		PT_Normal			11	6	ZbZ+vgTtTXOEfpoMN3FtMg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58650	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS5PRNT	Printing & reproduction for Bid documents		0	0	120	0	0	0	120	0	0	0				2007-08-02 08:00	2007-08-22 17:00		2007-08-02 08:00	2007-08-22 17:00	2007-08-02 08:00	2007-08-22 17:00	2007-08-02 08:00	2007-08-22 17:00		2007-08-02 08:00	2007-08-22 17:00		PT_Normal			11	7	zBVQsq6qQxqzaWeZpd8A/g				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58651	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS5SPEC	Reproduceable Specifications		40	40	40	0	0	0	40	0	0	0				2007-07-26 08:00	2007-08-01 17:00		2007-07-19 08:00	2007-07-25 17:00	2007-07-19 08:00	2007-07-25 17:00	2007-07-19 08:00	2007-07-25 17:00		2007-07-26 08:00	2007-08-01 17:00		PT_Normal			22	1	HlFqKoATTcaKukBrj+YDdw				N	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58652	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Mile	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS5STAR	Start Bidding Documents Phase		0	0	0	0	0	0	0	0	0	0				2007-07-19 08:00	2007-07-19 08:00		2007-07-19 08:00	2007-07-19 08:00	2007-07-19 08:00	2007-07-19 08:00	2007-07-19 08:00	2007-07-19 08:00		2007-07-19 08:00	2007-07-19 08:00		PT_Normal			11	4	5TzwDpbIR/qAWC03WTQsKw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58653	620	6923	597	1	0	N	N	Y	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_NotStart	ENPHS5SUBM	Bid Documents Submission & Approval		0	0	40	0	0	0	40	0	0	0				2007-08-23 08:00	2007-08-29 17:00		2007-08-23 08:00	2007-08-29 17:00	2007-08-23 08:00	2007-08-29 17:00	2007-08-23 08:00	2007-08-29 17:00		2007-08-23 08:00	2007-08-29 17:00		PT_Normal			11	8	V3UDVJBUS5ukM1zI6+8Fbg				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58654	620	6923	597	1	100	N	N	N	CP_Drtn	TT_FinMile	DT_FixedDrtn	RV_OK	TK_Complete	ENS3FINSH	Finish Progress Phase				0	0	0	0	0	0	0	0		2007-04-18 17:00	2007-04-18 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-04-18 17:00	2007-04-18 17:00					PT_Normal					g06oTggGSPKZaoGPrrmEww				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%R	58655	620	6923	597	1	100	N	N	N	CP_Drtn	TT_Task	DT_FixedDrtn	RV_OK	TK_Complete	ENS4FINSH	Finish Final Design Phase				0	0	0	0	120	0	0	0		2007-06-06 08:00	2007-06-26 17:00	2007-07-02 08:00	2007-07-02 08:00		2007-07-01 00:00	2007-07-01 00:00			2007-06-06 08:00	2007-06-26 17:00					PT_Normal					1aR+1kADSuGGLSNDBeNOtw				Y	0	0			2007-11-09 17:15	2007-11-09 17:15	tanya@TCRANMERXP	tanya@TCRANMERXP
+%T	WBSRSRC
+%F	wbsrsrc_id	wbs_id	rsrc_id	role_id	proj_id	start_date	end_date	committed_flag	auto_compute_dates_flag	rsrc_request_data
+%R	113	6923	1770		620	2007-01-01 08:00	2007-01-02 17:00	Y	N	
+%T	PROJCOST
+%F	cost_item_id	acct_id	pobs_id	cost_type_id	proj_id	task_id	cost_name	po_number	vendor_name	act_cost	cost_per_qty	remain_cost	target_cost	cost_load_type	auto_compute_act_flag	target_qty	qty_name	cost_descr	contract_manager_import
+%R	1665				620	58601	PHS1 BREP  S			2500.00	2500.00	0.00	2500.00	CL_Uniform	N	1			
+%R	1666				620	58602	PHS1 BRNG  S			3500.00	3500.00	0.00	3500.00	CL_Uniform	N	1			
+%R	1667				620	58603	PHS1 CEST  S			4000.00	4000.00	0.00	4000.00	CL_Uniform	N	1			
+%R	1668				620	58604	PHS1 DESN  A			1056.00	1056.00	0.00	1056.00	CL_Uniform	N	1			
+%R	1669				620	58605	PHS1 DRWG  A			800.00	800.00	0.00	800.00	CL_Uniform	N	1			
+%R	1670				620	58605	PHS1 DRWG  E			1200.00	1200.00	0.00	1200.00	CL_Uniform	N	1			
+%R	1671				620	58605	PHS1 DRWG  D			1000.00	1000.00	0.00	1000.00	CL_Uniform	N	1			
+%R	1672				620	58606	PHS1 ENER  E			450.00	450.00	0.00	450.00	CL_Uniform	N	1			
+%R	1673				620	58608	PHS1 INVT  S			1250.00	1250.00	0.00	1250.00	CL_Uniform	N	1			
+%R	1674				620	58608	PHS1 INVT  E			580.00	580.00	0.00	580.00	CL_Uniform	N	1			
+%R	1675				620	58613	PHS2 CAD   D			5000.00	5000.00	0.00	5000.00	CL_Uniform	N	1			
+%R	1676				620	58613	PHS2 CAD   C			5000.00	5000.00	0.00	5000.00	CL_Uniform	N	1			
+%R	1677				620	58614	PHS2 CALC  A			2000.00	2000.00	0.00	2000.00	CL_Uniform	N	1			
+%R	1678				620	58614	PHS2 CALC  E			5900.00	5900.00	0.00	5900.00	CL_Uniform	N	1			
+%R	1679				620	58615	PHS2 CEST  S			5500.00	5500.00	0.00	5500.00	CL_Uniform	N	1			
+%R	1680				620	58616	PHS2 DRWG  A			2500.00	2500.00	0.00	2500.00	CL_Uniform	N	1			
+%R	1681				620	58616	PHS2 DRWG  E			6000.00	6000.00	0.00	6000.00	CL_Uniform	N	1			
+%R	1682				620	58617	PHS2 ENER  E			500.00	500.00	0.00	500.00	CL_Uniform	N	1			
+%R	1683				620	58617	PHS2 ENER  C			1000.00	1000.00	0.00	1000.00	CL_Uniform	N	1			
+%R	1684				620	58620	PHS2 OMSI  E			800.00	800.00	0.00	800.00	CL_Uniform	N	1			
+%R	1685				620	58623	PHS2 SPEC  E			2000.00	2000.00	0.00	2000.00	CL_Uniform	N	1			
+%R	1686				620	58625	PHS2 VLUE  S			22000.00	22000.00	0.00	22000.00	CL_Uniform	N	1			
+%R	1687				620	58626	PHS3 CAD   C			12000.00	12000.00	0.00	12000.00	CL_Uniform	N	1			
+%R	1688				620	58626	PHS3 CAD   D			20000.00	20000.00	0.00	20000.00	CL_Uniform	N	1			
+%R	1689				620	58627	PHS3 CEST  S			7000.00	7000.00	0.00	7000.00	CL_Uniform	N	1			
+%R	1690				620	58628	PHS3 DESN  E			2000.00	2000.00	0.00	2000.00	CL_Uniform	N	1			
+%R	1691				620	58629	PHS3 DRWG  A			7000.00	7000.00	0.00	7000.00	CL_Uniform	N	1			
+%R	1692				620	58629	PHS3 DRWG  E			16000.00	16000.00	0.00	16000.00	CL_Uniform	N	1			
+%R	1693				620	58630	PHS3 FINS  S			12000.00	12000.00	0.00	12000.00	CL_Uniform	N	1			
+%R	1694				620	58635	PHS4 CAD   D			19900.00	19900.00	0.00	19900.00	CL_Uniform	N	1			
+%R	1695				620	58635	PHS4 CAD   C			25000.00	25000.00	0.00	25000.00	CL_Uniform	N	1			
+%R	1696				620	58636	PHS4 CEST  S			8000.00	8000.00	0.00	8000.00	CL_Uniform	N	1			
+%R	1697				620	58637	PHS4 DESN  E			1000.00	1000.00	0.00	1000.00	CL_Uniform	N	1			
+%R	1698				620	58638	PHS4 DRWG  E			5000.00	5000.00	0.00	5000.00	CL_Uniform	N	1			
+%R	1699				620	58638	PHS4 DRWG  A			3000.00	3000.00	0.00	3000.00	CL_Uniform	N	1			
+%R	1700				620	58639	PHS4 FINS  S			15200.00	15200.00	0.00	15200.00	CL_Uniform	N	1			
+%R	1701				620	58640	PHS4 MDLS  S			5000.00	5000.00	0.00	5000.00	CL_Uniform	N	1			
+%R	1702				620	58643	PHS4 REND  S			1500.00	1500.00	0.00	1500.00	CL_Uniform	N	1			
+%R	1703				620	58645	PHS4 SPEC  E			7600.00	7600.00	0.00	7600.00	CL_Uniform	N	1			
+%R	1704				620	58647	PHS5 CEST  S			0.00	10000.00	10000.00	10000.00	CL_Uniform	N	1			
+%R	1705				620	58648	PHS5 DRWG  A			0.00	500.00	500.00	500.00	CL_Uniform	N	1			
+%R	1706				620	58648	PHS5 DRWG  E			0.00	844.00	844.00	844.00	CL_Uniform	N	1			
+%R	1707				620	58651	PHS5 SPEC  E			0.00	200.00	200.00	200.00	CL_Uniform	N	1			
+%T	TASKFIN
+%F	fin_dates_id	task_id	proj_id	act_work_qty	act_work_cost	act_equip_qty	act_equip_cost	act_mat_cost	act_expense_cost	bcwp	perfm_work_qty	bcws	sched_work_qty
+%R	144	58638	620	0	0.00	0	0.00	0.00	1066.67	1066.67	0	1066.67	0
+%R	145	58635	620	0	0.00	0	0.00	0.00	44900.00	44900.00	0	44900.00	0
+%R	145	58636	620	0	0.00	0	0.00	0.00	8000.00	8000.00	0	8000.00	0
+%R	145	58637	620	0	0.00	0	0.00	0.00	1000.00	1000.00	0	1000.00	0
+%R	145	58638	620	0	0.00	0	0.00	0.00	6933.33	6933.33	0	6933.33	0
+%R	145	58639	620	0	0.00	0	0.00	0.00	15200.00	15200.00	0	15200.00	0
+%R	145	58640	620	0	0.00	0	0.00	0.00	5000.00	5000.00	0	5000.00	0
+%R	145	58643	620	0	0.00	0	0.00	0.00	1500.00	1500.00	0	1500.00	0
+%R	145	58645	620	0	0.00	0	0.00	0.00	7600.00	7600.00	0	7600.00	0
+%R	146	58613	620	0	0.00	0	0.00	0.00	1333.33	1333.33	0	1333.33	0
+%R	146	58625	620	0	0.00	0	0.00	0.00	2933.33	2933.33	0	2933.33	0
+%R	146	58626	620	0	0.00	0	0.00	0.00	32000.00	32000.00	0	32000.00	0
+%R	146	58627	620	0	0.00	0	0.00	0.00	7000.00	7000.00	0	7000.00	0
+%R	146	58628	620	0	0.00	0	0.00	0.00	2000.00	2000.00	0	2000.00	0
+%R	146	58629	620	0	0.00	0	0.00	0.00	23000.00	23000.00	0	23000.00	0
+%R	146	58630	620	0	0.00	0	0.00	0.00	12000.00	12000.00	0	12000.00	0
+%R	147	58613	620	0	0.00	0	0.00	0.00	8666.67	8666.67	0	8666.67	0
+%R	147	58614	620	0	0.00	0	0.00	0.00	7900.00	7900.00	0	7900.00	0
+%R	147	58615	620	0	0.00	0	0.00	0.00	5500.00	5500.00	0	5500.00	0
+%R	147	58616	620	0	0.00	0	0.00	0.00	8500.00	8500.00	0	8500.00	0
+%R	147	58617	620	0	0.00	0	0.00	0.00	1500.00	1500.00	0	1500.00	0
+%R	147	58620	620	0	0.00	0	0.00	0.00	800.00	800.00	0	800.00	0
+%R	147	58623	620	0	0.00	0	0.00	0.00	2000.00	2000.00	0	2000.00	0
+%R	147	58625	620	0	0.00	0	0.00	0.00	19066.67	19066.67	0	19066.67	0
+%R	148	58601	620	0	0.00	0	0.00	0.00	2500.00	2500.00	0	2500.00	0
+%R	148	58602	620	0	0.00	0	0.00	0.00	3500.00	3500.00	0	3500.00	0
+%R	148	58603	620	0	0.00	0	0.00	0.00	4000.00	4000.00	0	4000.00	0
+%R	148	58604	620	0	0.00	0	0.00	0.00	1056.00	1056.00	0	1056.00	0
+%R	148	58605	620	0	0.00	0	0.00	0.00	3000.00	3000.00	0	3000.00	0
+%R	148	58606	620	0	0.00	0	0.00	0.00	450.00	450.00	0	450.00	0
+%R	148	58608	620	0	0.00	0	0.00	0.00	1830.00	1830.00	0	1830.00	0
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	proj_id	pred_proj_id	pred_type	lag_hr_cnt	float_path	aref	arls
+%R	35367	58612	58599	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35368	58607	58601	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35369	58601	58602	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35370	58607	58603	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35371	58607	58604	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35372	58607	58605	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35373	58607	58606	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35374	58610	58607	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35375	58607	58608	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35376	58624	58609	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35377	58611	58610	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35378	58609	58611	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35379	58602	58612	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35380	58603	58612	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35381	58604	58612	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35382	58605	58612	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35383	58606	58612	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35384	58608	58612	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35385	58618	58613	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35386	58618	58614	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35387	58618	58615	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35388	58618	58616	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35389	58618	58617	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35390	58621	58618	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35391	58634	58619	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35392	58618	58620	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35393	58622	58621	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35394	58619	58622	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35395	58618	58623	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35396	58613	58624	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35397	58614	58624	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35398	58615	58624	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35399	58616	58624	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35400	58617	58624	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35401	58620	58624	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35402	58623	58624	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35403	58625	58624	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35404	58618	58625	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35405	58654	58626	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35406	58654	58627	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35407	58654	58628	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35408	58654	58629	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35409	58654	58630	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35410	58646	58631	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35411	58633	58632	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35412	58631	58633	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35413	58626	58634	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35414	58627	58634	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35415	58628	58634	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35416	58629	58634	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35417	58630	58634	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35418	58655	58635	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35419	58655	58636	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35420	58655	58637	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35421	58655	58638	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35422	58655	58639	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35423	58655	58640	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35424	58652	58641	620	620	PR_FS	0		2007-07-18 17:00	2007-07-19 08:00
+%R	35425	58644	58642	620	620	PR_FS	0		2007-07-03 17:00	2007-07-04 08:00
+%R	35426	58655	58643	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35427	58641	58644	620	620	PR_FS	0		2007-07-17 17:00	2007-07-18 08:00
+%R	35428	58655	58645	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35429	58635	58646	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35430	58636	58646	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35431	58637	58646	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35432	58638	58646	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35433	58639	58646	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35434	58640	58646	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35435	58643	58646	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35436	58645	58646	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35437	58649	58647	620	620	PR_FS	0		2007-07-25 17:00	2007-08-01 17:00
+%R	35438	58649	58648	620	620	PR_FS	0		2007-08-01 17:00	2007-08-01 17:00
+%R	35439	58650	58649	620	620	PR_FS	0		2007-08-01 17:00	2007-08-02 08:00
+%R	35440	58653	58650	620	620	PR_FS	0		2007-08-22 17:00	2007-08-23 08:00
+%R	35441	58649	58651	620	620	PR_FS	0		2007-07-25 17:00	2007-08-01 17:00
+%R	35442	58647	58652	620	620	PR_FS	0		2007-07-19 08:00	2007-07-26 08:00
+%R	35443	58648	58652	620	620	PR_FS	0		2007-07-19 08:00	2007-07-19 08:00
+%R	35444	58651	58652	620	620	PR_FS	0		2007-07-19 08:00	2007-07-26 08:00
+%R	35445	58600	58653	620	620	PR_FS	0		2007-08-29 17:00	2007-08-29 17:00
+%R	35446	58632	58654	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%R	35447	58642	58655	620	620	PR_FS	0		2007-07-01 00:00	2007-07-02 08:00
+%T	UDFVALUE
+%F	udf_type_id	fk_id	proj_id	udf_date	udf_number	udf_text	udf_code_id
+%R	42	1770				Hour	
+%R	136	620	620			UDF_G3	
+%R	137	620	620			UDF_G3	
+%R	138	620	620			UDF_G3	
+%E
