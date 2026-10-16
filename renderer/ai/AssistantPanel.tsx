@@ -5,7 +5,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getDb, getUi, setUi, useStore } from '../store.ts';
 import { makeCtx, projectName } from '../model.ts';
 import { rows } from '../../core/db.ts';
-import { TOOLS, runTool } from './tools.ts';
+import { TOOLS, runTool } from '../../core/query/tools.ts';
 import type { AiPublicConfig, ChatMsg } from '../../main/ai.ts';
 
 interface Line { who: 'user' | 'ai' | 'tool' | 'error'; text: string }

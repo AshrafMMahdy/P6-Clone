@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildRequest, parseReply, AiStore, type ChatRequest } from '../main/ai.ts';
-import { runTool, TOOLS } from '../renderer/ai/tools.ts';
+import { runTool, TOOLS } from '../core/query/tools.ts';
 import { parseXer } from '../core/xer/parse.ts';
 import { makeCtx } from '../renderer/model.ts';
 import { realSamples } from './helpers.ts';

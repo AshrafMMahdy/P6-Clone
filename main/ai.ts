@@ -8,7 +8,8 @@ export interface AiConfig { enabled: boolean; provider: ProviderKind; baseUrl: s
 /** What the window may see: everything but the key. */
 export interface AiPublicConfig extends AiConfig { hasKey: boolean; keyHint: string; encrypted: boolean }
 
-export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
+import type { ToolDef } from '../core/query/tools.ts';
+export type { ToolDef };
 export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
 /** Provider-neutral chat message. */
 export type ChatMsg =

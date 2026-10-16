@@ -1,11 +1,14 @@
-// What the AI assistant can look up in the open project(s). A 100k-activity programme does not fit in one prompt,
+// Read-only project lookups, used by the AI assistant (as tools) and by the command-line `query`/`review` commands. A 100k-activity programme does not fit in one prompt,
 // so the model asks for what it needs: a summary, filtered activity lists, one activity in full, the WBS, the critical
 // path, a schedule health check and resource usage. Read-only.
-import type { Db, Row } from '../../core/db.ts';
-import { rows } from '../../core/db.ts';
-import { parseP6Date } from '../../core/dates.ts';
-import type { ToolDef } from '../../main/ai.ts';
-import { isCritical, statusOf, projectName, type Ctx } from '../model.ts';
+import type { Db, Row } from '../db.ts';
+import { rows } from '../db.ts';
+import { parseP6Date } from '../dates.ts';
+import { isCritical, type Ctx } from '../project/ctx.ts';
+import { statusOf, projectName } from '../project/edit.ts';
+
+/** A lookup described for a language model (JSON Schema parameters). */
+export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
 
 const STATUS: Record<string, string> = { TK_NotStart: 'not started', TK_Active: 'in progress', TK_Complete: 'completed' };
 const TYPE: Record<string, string> = { TT_Task: 'task', TT_Rsrc: 'resource dependent', TT_Mile: 'start milestone', TT_FinMile: 'finish milestone', TT_LOE: 'level of effort', TT_WBS: 'WBS summary' };
@@ -35,7 +38,7 @@ export const TOOLS: ToolDef[] = [
 const d = (s?: string) => (s ? s.slice(0, 16) : '');
 const days = (h: string | number | undefined, hpd: number) => (h === '' || h == null ? null : Math.round((Number(h) / hpd) * 10) / 10);
 
-export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ctx, projIds: string[], hpd: number): unknown {
+export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ctx<unknown>, projIds: string[], hpd: number): unknown {
   const open = new Set(projIds.length ? projIds : rows(db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id));
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const wbsById = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
