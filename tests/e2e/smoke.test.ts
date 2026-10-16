@@ -23,6 +23,7 @@ test('import, schedule, commit, export round trip in the desktop app', { timeout
   try {
     const win = await app.firstWindow();
     await win.waitForSelector('.dialog .wizard-side', { timeout: 30_000 });
+    await win.waitForSelector('button:has-text("View Diagnostics...")', { timeout: 30_000 }); // the file is read and checked in stages
     if (SHOTS) await win.screenshot({ path: join(SHOTS, '01-import-wizard.png') });
     assert.match((await win.textContent('.dialog')) ?? '', /P6 would import this file/);
     await win.click('button:has-text("Next >")');

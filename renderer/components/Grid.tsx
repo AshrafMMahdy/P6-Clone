@@ -42,6 +42,7 @@ const RH = 19;
 export function Grid(p: GridProps) {
   const rh = p.rowHeight ?? RH;
   const scroll = useRef<HTMLDivElement>(null);
+  const echo = useRef<number | null>(null); // position we scrolled to on request (its scroll event is not reported back)
   const head = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ top: 0, height: 400 });
   const [widths, setWidths] = useState<Record<string, number>>({});
@@ -57,7 +58,7 @@ export function Grid(p: GridProps) {
     return () => ro.disconnect();
   }, []);
   useEffect(() => {
-    if (p.scrollTop != null && scroll.current && Math.abs(scroll.current.scrollTop - p.scrollTop) > 1) scroll.current.scrollTop = p.scrollTop;
+    if (p.scrollTop != null && scroll.current && Math.abs(scroll.current.scrollTop - p.scrollTop) > 1) { echo.current = p.scrollTop; scroll.current.scrollTop = p.scrollTop; }
   }, [p.scrollTop]);
 
   const first = Math.max(0, Math.floor(view.top / rh) - 5);
@@ -141,7 +142,8 @@ export function Grid(p: GridProps) {
         const t = e.currentTarget;
         head.current!.scrollLeft = t.scrollLeft;
         setView({ top: t.scrollTop, height: t.clientHeight });
-        p.onScroll?.(t.scrollTop);
+        // a scroll we were told to make (to follow the Gantt) is not reported back: that echo arrives late and would pull the Gantt back
+        if (echo.current != null && Math.abs(t.scrollTop - echo.current) <= 1) echo.current = null; else { echo.current = null; p.onScroll?.(t.scrollTop); }
       }}>
         <div style={{ height: Math.max(p.items.length * rh, 1), width: total, position: 'relative' }}>
           {p.items.slice(first, last).map((it, i) => {

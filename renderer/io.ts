@@ -74,7 +74,18 @@ export function parseFile(name: string, bytes: Uint8Array, format = detectFormat
 export interface MppBridge { mppToXml(bytes: Uint8Array): Promise<Uint8Array> }
 
 /** Like parseFile, but .mpp is first converted to Microsoft Project XML by Microsoft Project (rejects with the bridge error). */
-export async function parseFileAsync(name: string, bytes: Uint8Array, format = detectFormat(name, bytes), bridge?: MppBridge): Promise<ParsedFile> {
+export async function parseFileAsync(name: string, bytes: Uint8Array, format = detectFormat(name, bytes), bridge?: MppBridge, onStage?: (msg: string) => Promise<void>): Promise<ParsedFile> {
+  if (format === 'xer' || format === 'xml') {
+    // the same work as parseFile, in stages, so a 100 MB file shows what it is doing instead of freezing
+    const stage = onStage ?? (async () => {});
+    await stage(`Reading ${(bytes.length / 1048576).toFixed(1)} MB...`);
+    const r = format === 'xml' ? parseP6Xml(xmlText(bytes)) : parseXer(bytes);
+    await stage(`Checking ${(r.db.tables.TASK?.rows.length ?? 0).toLocaleString()} activities the way P6 would...`);
+    const f = validateXer(r.db, r.findings);
+    if (worst(f) === 'fatal') return { format, db: r.db, findings: f };
+    await stage('Comparing the saved dates with what P6 would calculate...');
+    return { format, db: r.db, findings: [...f, ...checkStoredDates(r.db)] };
+  }
   if (format !== 'mpp') return parseFile(name, bytes, format);
   const b = bridge ?? (globalThis as { p6?: MppBridge }).p6;
   if (!b?.mppToXml) throw new Error('Microsoft Project must be installed to import/export .mpp files (Primavera P6 has the same requirement).');

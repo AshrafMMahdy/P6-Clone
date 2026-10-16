@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from 'react';
+import type { BarStyles } from './components/Gantt.tsx';
+import { record, rollback, type Journal } from '../core/journal.ts';
 import { dbToLines, linesToDb } from '../core/db-file.ts';
 import type { P6Api } from '../main/preload.ts';
 import { emptyDb, type Db } from '../core/db.ts';
@@ -30,6 +32,8 @@ export interface UiState {
   sortBy: string;
   pxPerDay: number;
   relLines: boolean;
+  /** View > Bars (undefined = defaults) */
+  bars?: BarStyles;
   importLog?: { file: string; findings: Finding[] };
   scheduleLog?: string;
   levelLog?: string;
@@ -62,20 +66,24 @@ export const getUi = () => state.ui;
 
 export function setUi(patch: Partial<UiState> | ((u: UiState) => Partial<UiState>)): void {
   state.ui = { ...state.ui, ...(typeof patch === 'function' ? patch(state.ui) : patch) };
-  if ('prefs' in (typeof patch === 'function' ? {} : patch) || 'columns' in (typeof patch === 'function' ? {} : patch)) scheduleSave();
+  const p0 = typeof patch === 'function' ? {} : patch;
+  if ('prefs' in p0 || 'columns' in p0 || 'bars' in p0) scheduleSave();
   emit();
 }
 
 // ---- undo/redo + persistence
-const undo: { label: string; db: Db }[] = [];
-const redo: { label: string; db: Db }[] = [];
+// Each step keeps only the values its change overwrote (core/journal.ts), not a copy of the database.
+const undo: { label: string; j: Journal }[] = [];
+const redo: { label: string; j: Journal }[] = [];
 
 /** Change the database as one undoable action. */
 export function mutate(label: string, fn: (db: Db) => void): void {
-  undo.push({ label, db: structuredClone(state.db) });
+  const raw = state.db;
+  let j: Journal;
+  try { j = record(raw, (view) => { state.db = view; fn(view); }); } finally { state.db = raw; } // getDb() inside fn sees the recording view
+  undo.push({ label, j });
   if (undo.length > 30) undo.shift();
   redo.length = 0;
-  fn(state.db);
   state.dbVersion++;
   scheduleSave();
   emit();
@@ -91,14 +99,14 @@ export function replaceDb(db: Db): void {
 export function doUndo(): void {
   const u = undo.pop();
   if (!u) return toast('Nothing to undo');
-  redo.push({ label: u.label, db: state.db });
-  state.db = u.db; state.dbVersion++; scheduleSave(); emit(); toast(`Undo: ${u.label}`);
+  redo.push({ label: u.label, j: rollback(u.j) });
+  state.dbVersion++; scheduleSave(); emit(); toast(`Undo: ${u.label}`);
 }
 export function doRedo(): void {
   const r = redo.pop();
   if (!r) return toast('Nothing to redo');
-  undo.push({ label: r.label, db: state.db });
-  state.db = r.db; state.dbVersion++; scheduleSave(); emit(); toast(`Redo: ${r.label}`);
+  undo.push({ label: r.label, j: rollback(r.j) });
+  state.dbVersion++; scheduleSave(); emit(); toast(`Redo: ${r.label}`);
 }
 export const undoLabel = () => undo[undo.length - 1]?.label;
 
@@ -109,8 +117,8 @@ function scheduleSave(): void {
 }
 export async function saveNow(): Promise<void> {
   clearTimeout(saveTimer);
-  const { prefs, columns, layoutName, pxPerDay, bottom } = state.ui;
-  await window.p6?.saveDb(dbToLines(state.db, { prefs, columns, layoutName, pxPerDay, bottom }));
+  const { prefs, columns, layoutName, pxPerDay, bottom, bars, relLines } = state.ui;
+  await window.p6?.saveDb(dbToLines(state.db, { prefs, columns, layoutName, pxPerDay, bottom, bars, relLines }));
 }
 export async function loadFromDisk(): Promise<void> {
   const lines = await window.p6?.loadDb();

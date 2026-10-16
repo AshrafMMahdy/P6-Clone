@@ -1,6 +1,6 @@
 import { useEffect, type JSX } from 'react';
 import { Icon } from './components/Icons.tsx';
-import { ContextMenuHost } from './components/Layout.tsx';
+import { ContextMenuHost, DialogTop } from './components/Layout.tsx';
 import { closeDialog, doRedo, doUndo, getDb, getUi, loadFromDisk, mutate, openDialog, replaceDb, saveNow, setUi, toast, useStore, undoLabel, type ViewName } from './store.ts';
 import { activityCommands, handleEditKey, runSchedule, copyActivities, pasteActivities, renumberActivities } from './commands.ts';
 import { ActivitiesView } from './views/ActivitiesView.tsx';
@@ -14,6 +14,7 @@ import { TimesheetsView } from './views/TimesheetsView.tsx';
 import { PortfoliosView } from './views/PortfoliosView.tsx';
 import { applyApprovedTimesheets, formatApplySummary, hasPendingActuals } from '../core/timesheet/timesheet.ts';
 import { ImportWizard, ExportWizard } from './dialogs/Wizards.tsx';
+import { BarsDialog } from './dialogs/BarsDialog.tsx';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
 import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
@@ -28,7 +29,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
+  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, bars: BarsDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
@@ -70,7 +71,7 @@ export function runMenu(id: string): void {
     case 'view.filters': return openDialog('filters');
     case 'view.groupSort': return openDialog('filters', { tab: 'group' });
     case 'view.timescale': return openDialog('timescale');
-    case 'view.bars': return openDialog('timescale');
+    case 'view.bars': return openDialog('bars');
     case 'view.layout.open': case 'view.layout.save': case 'view.layout.saveAs': return openDialog('layout', { mode: id.split('.')[2] });
     case 'view.zoomIn': return setUi((u) => ({ pxPerDay: Math.min(60, u.pxPerDay * 1.6) }));
     case 'view.zoomOut': return setUi((u) => ({ pxPerDay: Math.max(0.15, u.pxPerDay / 1.6) }));
@@ -182,6 +183,12 @@ export function App() {
     });
     const k = (e: KeyboardEvent) => {
       if (e.key === 'F9' && !e.shiftKey) { e.preventDefault(); runMenu('tools.schedule'); return; }
+      // Ctrl + plus/minus (main keyboard or numpad): zoom the timescale; with Shift: expand/collapse all
+      if (e.ctrlKey && !e.altKey && !getUi().dialogs.length) {
+        const plus = e.key === '=' || e.key === '+' || e.code === 'NumpadAdd' || e.code === 'Equal';
+        const minus = e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract' || e.code === 'Minus';
+        if (plus || minus) { e.preventDefault(); runMenu(e.shiftKey && !e.code.startsWith('Numpad') ? (plus ? 'view.expandAll' : 'view.collapseAll') : (plus ? 'view.zoomIn' : 'view.zoomOut')); return; }
+      }
       if (handleEditKey(e)) e.preventDefault();
     };
     window.addEventListener('keydown', k);
@@ -194,8 +201,6 @@ export function App() {
   const title = { projects: 'Projects', wbs: 'WBS', activities: 'Activities', assignments: 'Resource Assignments', resources: 'Resources', reports: 'Reports', risk: 'Risks', timesheets: 'Timesheets', portfolios: 'Project Portfolios' }[ui.view];
   const View = { projects: ProjectsView, wbs: WbsView, activities: ActivitiesView, assignments: AssignmentsView, resources: ResourcesView, reports: ReportsView, risk: RiskView, timesheets: TimesheetsView, portfolios: PortfoliosView }[ui.view];
   const p0 = open[0];
-  const dlg = ui.dialogs[ui.dialogs.length - 1];
-  const Dlg = dlg ? DIALOGS[dlg.kind] : null;
   return (
     <div className="app">
       <Toolbar />
@@ -220,7 +225,8 @@ export function App() {
         <div>DB: P6CLONE (local)</div>
         <div style={{ flex: 1, borderRight: 'none' }}>{rows(db, 'PROJECT').filter((p) => !p._baseline_of).length} projects in database</div>
       </div>
-      {Dlg && <Dlg {...(dlg.props ?? {})} />}
+      {/* every dialog in the stack stays mounted (a wizard keeps its state under the dialog it opened); only the top one reacts to Esc */}
+      {ui.dialogs.map((d, i) => { const D = DIALOGS[d.kind]; return D ? <DialogTop.Provider key={i} value={i === ui.dialogs.length - 1}><D {...(d.props ?? {})} /></DialogTop.Provider> : null; })}
       {ui.toast && <div className="toast" onClick={() => setUi({ toast: undefined })}>{ui.toast}</div>}
       <ContextMenuHost />
     </div>

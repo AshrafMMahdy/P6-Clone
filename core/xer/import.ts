@@ -113,12 +113,16 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
 
   // Pass 2: copy rows with remapped references
   const udfTable = new Map(rows(src, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
+  const targetCache = new Map<string, string | undefined>(); // table|field -> referenced table (millions of lookups on big files)
   const remap = (t: string, r: Row): Row => {
     const out: Row = {};
-    for (const [f, v] of Object.entries(r)) {
-      const k = KEYS[t];
+    const k = KEYS[t];
+    for (const f in r) {
+      const v = r[f];
       if (f === k) { out[f] = (t === 'PROJECT' ? m('PROJECT')[v] : m(t)[v]) ?? v; continue; }
-      const target = refTarget(f, t);
+      const ck = t + '|' + f;
+      let target = targetCache.get(ck);
+      if (target === undefined && !targetCache.has(ck)) targetCache.set(ck, (target = refTarget(f, t)));
       if (t === 'UDFVALUE' && f === 'fk_id') { const ft = UDF_FK_TABLE[udfTable.get(r.udf_type_id) ?? ''] ?? ''; out[f] = map[ft]?.[v] ?? v; continue; }
       if (target && v) {
         const nv = map[target]?.[v];

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Grid, type GridItem, type EditorSpec } from '../components/Grid.tsx';
-import { Gantt, type GanttEntry, type GanttLink } from '../components/Gantt.tsx';
+import { Gantt, DEFAULT_BARS, type GanttEntry, type GanttLink, type GanttActions } from '../components/Gantt.tsx';
 import { Split, showContextMenu } from '../components/Layout.tsx';
 import { getDb, mutate, setUi, toast, useStore, openDialog } from '../store.ts';
 import { useCtx, useProjectCalendar } from '../hooks.ts';
@@ -20,7 +20,7 @@ export function ActivitiesView() {
   const [search, setSearch] = useState('');
   const projIds = ui.openProjects;
   const rows = useMemo(() => buildActivityRows(ctx, projIds, ui.collapsed, ui.filter, ui.groupBy, ui.sortBy, search), [ctx, projIds, ui.collapsed, ui.filter, ui.groupBy, ui.sortBy, search]);
-  const cols = ui.columns.map((id) => COLUMN_BY_ID.get(id)).filter((c) => c != null);
+  const cols = useMemo(() => ui.columns.map((id) => COLUMN_BY_ID.get(id)).filter((c) => c != null), [ui.columns]); // stable, or every scroll would rebuild every row
   const selected = useMemo(() => new Set([...ui.selTasks.map((t) => `t:${t}`), ...(ui.selWbs && !ui.selTasks.length ? [`w:${ui.selWbs}`] : [])]), [ui.selTasks, ui.selWbs]);
   const firstProj = ctx.proj.get(projIds[0]);
   const dataDate = parseP6Date(firstProj?.last_recalc_date);
@@ -45,6 +45,7 @@ export function ActivitiesView() {
     return { key: r.key, kind: 'row', level: r.level, cells, icon: <ActIcon t={t} crit={crit} />, className: crit ? 'crit' : '' } satisfies GridItem;
   }), [rows, cols, ctx, cal]);
 
+  const barLabel = ui.bars?.label ?? 'none';
   const entries: GanttEntry[] = useMemo(() => rows.map((r) => {
     if (r.kind === 'group') return { key: r.key, kind: 'group', level: r.level, es: r.es, ef: r.ef };
     const t = r.task!;
@@ -56,9 +57,10 @@ export function ActivitiesView() {
       as: parseP6Date(t.act_start_date), af: parseP6Date(t.act_end_date),
       bls: bl ? parseP6Date(bl.act_start_date || bl.target_start_date) : null, blf: bl ? parseP6Date(bl.act_end_date || bl.target_end_date) : null,
       critical: isCritical(t, ctx), milestone: t.task_type === 'TT_Mile' ? 'start' : t.task_type === 'TT_FinMile' ? 'finish' : null,
+      label: barLabel === 'name' ? t.task_name : barLabel === 'id' ? t.task_code : barLabel === 'id-name' ? `${t.task_code} - ${t.task_name}` : undefined,
       tip: `${t.task_code} - ${t.task_name}\n${TASK_TYPES[t.task_type] ?? ''}\nStart: ${s != null ? formatP6Date(s) : ''}${t.act_start_date ? ' A' : ''}\nFinish: ${f != null ? formatP6Date(f) : ''}${t.act_end_date ? ' A' : ''}\nTotal Float: ${fmtDur(t.total_float_hr_cnt, ctx.prefs)}d`,
     } satisfies GanttEntry;
-  }), [rows, ctx]);
+  }), [rows, ctx, barLabel]);
 
   const links: GanttLink[] = useMemo(() => {
     if (!ui.relLines) return [];
@@ -139,6 +141,35 @@ export function ActivitiesView() {
     ]);
   };
 
+  // right-click in the bar chart (P6: bar chart menu; Microsoft Project: bar styles and layout)
+  const onGanttContext = (key: string | null, e: React.MouseEvent, g: GanttActions) => {
+    const act = key ? [
+      { label: 'Activity Details', onClick: () => setUi({ bottom: 'details', detailTab: 'general' }) },
+      { label: 'Assign Predecessors...', onClick: () => openDialog('assign', { which: 'pred' }) },
+      { label: 'Assign Successors...', onClick: () => openDialog('assign', { which: 'succ' }) },
+      { label: 'Assign Resources...', onClick: () => openDialog('assignRsrc') },
+      { label: 'Delete Activity', onClick: cmds.del },
+      { sep: true, label: '' },
+    ] : [{ label: 'Add Activity', onClick: cmds.add }, { sep: true, label: '' }];
+    const b = { ...DEFAULT_BARS, ...ui.bars };
+    showContextMenu(e, [
+      ...act,
+      { label: 'Bars...', onClick: () => openDialog('bars') },
+      { label: 'Bar Chart Options...', onClick: () => openDialog('bars', { tab: 'options' }) },
+      { label: 'Timescale...', onClick: () => openDialog('timescale') },
+      { sep: true, label: '' },
+      { label: 'Relationship Lines', checked: ui.relLines, onClick: () => setUi({ relLines: !ui.relLines }) },
+      { label: 'Baseline Bars', checked: b.showBaseline, onClick: () => setUi({ bars: { ...b, showBaseline: !b.showBaseline } }) },
+      { label: 'Activity Labels on Bars', checked: b.label !== 'none', onClick: () => setUi({ bars: { ...b, label: b.label === 'none' ? 'name' : 'none' } }) },
+      { sep: true, label: '' },
+      { label: 'Zoom In', onClick: () => setUi((u) => ({ pxPerDay: Math.min(60, u.pxPerDay * 1.6) })) },
+      { label: 'Zoom Out', onClick: () => setUi((u) => ({ pxPerDay: Math.max(0.15, u.pxPerDay / 1.6) })) },
+      { label: 'Zoom to Fit Project', onClick: g.zoomToFit },
+      { label: 'Go To Data Date', onClick: g.goToDataDate },
+      { label: 'Go To Selected Activity', disabled: !ui.selTask, onClick: () => ui.selTask && g.goToKey(`t:${ui.selTask}`) },
+    ]);
+  };
+
   if (!projIds.length) return <div className="empty">No project is open. Open a project from the Projects window (double-click) or use File &gt; Import.</div>;
 
   return (
@@ -170,7 +201,8 @@ export function ActivitiesView() {
             onContextMenu={onContext} labelSpan={ui.columns[1] === 'task_name' ? 2 : 1}
             onActivate={(k) => k.startsWith('t:') && setUi({ detailTab: 'general' })} />
           <Gantt entries={entries} links={links} dataDate={dataDate} pxPerDay={ui.pxPerDay} showLinks={ui.relLines} scrollTop={scrollTop} onScroll={setScrollTop}
-            selected={selected} onSelect={(k) => onSelect(k, { ctrlKey: false, shiftKey: false })} onLink={onLink} calendar={cal} showBaseline />
+            selected={selected} onSelect={(k) => onSelect(k, { ctrlKey: false, shiftKey: false })} onLink={onLink} calendar={cal} showBaseline
+            styles={ui.bars} onContextMenu={onGanttContext} onZoom={(px) => setUi({ pxPerDay: px })} />
         </Split>
         <ActivityDetails />
       </Split>

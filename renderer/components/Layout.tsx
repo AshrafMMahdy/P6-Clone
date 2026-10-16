@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type MouseEvent as RME, useEffect } from 'react';
+import { useRef, useState, type ReactNode, type MouseEvent as RME, useEffect, createContext, useContext } from 'react';
 import { closeDialog } from '../store.ts';
 
 /** Two panes with a draggable splitter. dir 'v' stacks vertically. */
@@ -30,13 +30,18 @@ export function Split(p: { dir: 'h' | 'v'; initial: number; min?: number; childr
 }
 
 /** P6-style modal dialog. Buttons default to a right-hand vertical column. */
+/** False for dialogs lower in the stack: they stay mounted but ignore keys. */
+export const DialogTop = createContext(true);
+
 export function Dialog(p: { title: string; children: ReactNode; buttons?: ReactNode; width?: number; height?: number; bottomButtons?: boolean; className?: string; onClose?: () => void }) {
   const close = p.onClose ?? closeDialog;
+  const top = useContext(DialogTop);
   useEffect(() => {
+    if (!top) return;
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
     window.addEventListener('keydown', k, true);
     return () => window.removeEventListener('keydown', k, true);
-  }, [close]);
+  }, [close, top]);
   return (
     <div className="modal-back" onMouseDown={(e) => e.stopPropagation()}>
       <div className={`dialog ${p.className ?? ''}`} style={{ width: p.width, height: p.height }} role="dialog" aria-label={p.title}>
@@ -58,7 +63,7 @@ export function Tabs(p: { tabs: [string, string][]; value: string; onChange: (id
   );
 }
 
-export interface MenuItem { label: string; onClick?: () => void; sep?: boolean }
+export interface MenuItem { label: string; onClick?: () => void; sep?: boolean; checked?: boolean; disabled?: boolean }
 let ctxSet: ((m: { x: number; y: number; items: MenuItem[] } | null) => void) | null = null;
 export function showContextMenu(e: { clientX: number; clientY: number; preventDefault: () => void }, items: MenuItem[]): void {
   e.preventDefault();
@@ -75,8 +80,8 @@ export function ContextMenuHost() {
   }, [m]);
   if (!m) return null;
   return (
-    <div className="ctxmenu" style={{ left: m.x, top: m.y }} onMouseDown={(e) => e.stopPropagation()}>
-      {m.items.map((it, i) => (it.sep ? <hr key={i} /> : <div key={i} onClick={() => { setM(null); it.onClick?.(); }}>{it.label}</div>))}
+    <div className="ctxmenu" style={{ left: Math.min(m.x, window.innerWidth - 240), top: Math.min(m.y, window.innerHeight - 24 * m.items.length - 10) }} onMouseDown={(e) => e.stopPropagation()}>
+      {m.items.map((it, i) => (it.sep ? <hr key={i} /> : <div key={i} className={it.disabled ? 'disabled' : ''} onClick={() => { if (it.disabled) return; setM(null); it.onClick?.(); }}><span className="chk">{it.checked ? '✓' : ''}</span>{it.label}</div>))}
     </div>
   );
 }

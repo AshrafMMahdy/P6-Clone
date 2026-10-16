@@ -151,7 +151,10 @@ pre.log { font: 11px Consolas, "Courier New", monospace; background: #fff; borde
 
 /* Context menu */
 .ctxmenu { position: fixed; background: #fff; border: 1px solid #979797; box-shadow: 2px 2px 4px rgba(0,0,0,.3); padding: 2px; z-index: 300; min-width: 180px; }
-.ctxmenu div { padding: 3px 20px; }
+.ctxmenu div { padding: 3px 20px 3px 4px; display: flex; }
+.ctxmenu .chk { width: 18px; flex: none; text-align: center; }
+.ctxmenu div.disabled { color: #999; }
+.ctxmenu div.disabled:hover { background: none; color: #999; }
 .ctxmenu div:hover { background: var(--sel); color: #fff; }
 .ctxmenu hr { border: none; border-top: 1px solid #ddd; margin: 2px 0; }
 

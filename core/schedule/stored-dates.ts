@@ -5,6 +5,7 @@
 import type { Db } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { scheduleProjects } from './cpm.ts';
+import { record, rollback } from '../journal.ts';
 
 const FIELDS: [string, string][] = [
   ['early_start_date', 'early start'], ['early_end_date', 'early finish'], ['late_start_date', 'late start'],
@@ -17,14 +18,17 @@ export function checkStoredDates(db: Db): Finding[] {
   const open = tasks.filter((t) => t.status_code !== 'TK_Complete' && !t.act_end_date);
   if (!open.length) return [];
   if (!open.some((t) => t.early_start_date)) return [{ severity: 'info', code: 'DATES_NOT_STORED', message: 'The file has no early dates for its open activities; P6 calculates them when you schedule (F9).', p6: 'P6 imports the file and shows blank or planned dates until it is scheduled.', table: 'TASK' }];
-  const copy: Db = structuredClone(db);
-  const res = scheduleProjects(copy, (copy.tables.PROJECT?.rows ?? []).map((p) => p.proj_id));
-  if (!res.ok) return []; // the scheduler's own findings (loops etc.) are reported by Tools > Schedule
-  const after = new Map(copy.tables.TASK.rows.map((r) => [r.task_id, r]));
+  // schedule in place while recording, keep what it calculated, then put the file's own values back
+  const before = new Map(open.map((t) => [t.task_id, Object.fromEntries(FIELDS.map(([f]) => [f, t[f]]))]));
+  let ok = false;
+  const j = record(db, (d) => { ok = scheduleProjects(d, (d.tables.PROJECT?.rows ?? []).map((p) => p.proj_id)).ok; });
+  const after = new Map(open.map((t) => [t.task_id, Object.fromEntries(FIELDS.map(([f]) => [f, t[f]]))]));
+  rollback(j);
+  if (!ok) return []; // the scheduler's own findings (loops etc.) are reported by Tools > Schedule
   const out: Finding[] = [];
   let acts = 0, values = 0;
-  for (const t of open) {
-    const a = after.get(t.task_id);
+  for (const t0 of open) {
+    const t = { ...t0, ...before.get(t0.task_id) }, a = after.get(t0.task_id);
     if (!a || !t.early_start_date) continue;
     let differs = false;
     for (const [f, label] of FIELDS) {

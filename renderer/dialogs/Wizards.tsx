@@ -51,10 +51,12 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
   const [format, setFormat] = useState<Format>(props.preload ? detectFormat(props.preload.name, props.preload.bytes) : 'xer');
   const [importType, setImportType] = useState('project');
   const preloadMpp = !!props.preload && detectFormat(props.preload.name, props.preload.bytes) === 'mpp';
-  const [file, setFile] = useState<{ name: string; parsed: ParsedFile } | null>(() => props.preload && !preloadMpp ? { name: props.preload.name, parsed: parseFile(props.preload.name, props.preload.bytes) } : null);
+  const [file, setFile] = useState<{ name: string; parsed: ParsedFile } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [bridgeError, setBridgeError] = useState<string | null>(null);
-  const [plan, setPlan] = useState<ImportPlan['projects']>(() => file ? defaultRows(file.parsed) : []);
+  const [plan, setPlan] = useState<ImportPlan['projects']>([]);
+  // show each stage of reading a big file (the window repaints between stages)
+  const stage = async (msg: string) => { setBusy(msg); await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))); };
   const [dict, setDict] = useState<Record<string, DictAction>>({});
   const steps = ['Import Format', 'Import Type', 'Import File', 'Projects To Import', 'Update Project Options', 'Finish'];
 
@@ -68,9 +70,12 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
   const load = async (path: string, name: string, bytes: Uint8Array, fmt: Format) => {
     setBridgeError(null);
     if (fmt !== 'mpp') {
-      const parsed = parseFile(name, bytes, fmt);
-      setFile({ name: path, parsed });
-      setPlan(defaultRows(parsed));
+      setFile(null);
+      try {
+        const parsed = fmt === 'xer' || fmt === 'xml' ? await parseFileAsync(name, bytes, fmt, undefined, stage) : parseFile(name, bytes, fmt);
+        setFile({ name: path, parsed });
+        setPlan(defaultRows(parsed));
+      } finally { setBusy(null); }
       return;
     }
     setFile(null);
@@ -87,7 +92,7 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
   };
 
   useEffect(() => {
-    if (preloadMpp && props.preload) void load(props.preload.name, props.preload.name, props.preload.bytes, 'mpp');
+    if (props.preload) void load(props.preload.name, props.preload.name, props.preload.bytes, preloadMpp ? 'mpp' : detectFormat(props.preload.name, props.preload.bytes));
   }, []);
 
   const browse = async () => {
@@ -107,8 +112,9 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
   const verdict = file ? worst(file.parsed.findings) : null;
   const counts = file ? file.parsed.findings.reduce<Record<string, number>>((a, f) => ((a[f.severity] = (a[f.severity] ?? 0) + 1), a), {}) : {};
 
-  const finish = () => {
+  const finish = async () => {
     if (!file) return;
+    await stage(`Importing ${(file.parsed.db.tables.TASK?.rows.length ?? 0).toLocaleString()} activities...`);
     const fname = file.name.split(/[\\/]/).pop() ?? file.name;
     setUi({ importLog: { file: fname, findings: file.parsed.findings } });
     if (verdict === 'fatal') {
@@ -215,6 +221,7 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
       </>}
       {step === 5 && file && <>
         <h3>Ready to import</h3>
+        {busy && <div style={{ marginBottom: 8, padding: 8, border: '1px solid #ccc', background: '#f4f4f4' }}>{busy}</div>}
         <p>File: <b>{file.name}</b></p>
         <p>{plan.filter((p) => p.action !== 'skip').length} project(s) will be imported.</p>
         {verdict === 'fatal' && <p className="sev-error">This file has fatal problems; like P6, the import will be refused. The import log will explain why.</p>}
