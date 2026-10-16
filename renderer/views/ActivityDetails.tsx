@@ -148,7 +148,7 @@ function Status({ t, ctx }: { t: Row; ctx: Ctx }) {
         </fieldset>
         <fieldset style={{ width: 230 }}><legend>% Complete</legend>
           <div className="form" style={{ gridTemplateColumns: 'auto 70px' }}>
-            <Field label={`${PCT_TYPES[t.complete_pct_type] ?? 'Duration'} %`}><input type="number" min={0} max={100} defaultValue={Math.round(activityPct(t, ctx) * 10) / 10} key={t.task_id + t.remain_drtn_hr_cnt + t.phys_complete_pct}
+            <Field label={`Activity % (${PCT_TYPES[t.complete_pct_type] ?? 'Duration'})`}><input type="number" min={0} max={100} defaultValue={Math.round(activityPct(t, ctx) * 10) / 10} key={t.task_id + t.remain_drtn_hr_cnt + t.phys_complete_pct}
               onBlur={(e) => { const v = Number(e.target.value); if (Math.abs(v - activityPct(t, ctx)) > 0.01) updateTask(t.task_id, 'Edit % Complete', (r) => setPercent(r, v)); }} /></Field>
             <Field label="Duration %"><input readOnly value={`${Math.round(durationPct(t) * 10) / 10}%`} /></Field>
             <Field label="Status"><input readOnly value={STATUS[st]} /></Field>

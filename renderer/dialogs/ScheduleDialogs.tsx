@@ -6,6 +6,7 @@ import { addField, nextId, rows, table } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { optionsFor, type SchedOptions } from '../../core/schedule/cpm.ts';
 import { updateProgress } from '../../core/progress/update.ts';
+import { levelResources } from '../../core/level/level.ts';
 import { fmtDate } from '../model.ts';
 
 const dt = (s: string) => (s ? s.replace(' ', 'T').slice(0, 16) : '');
@@ -26,7 +27,6 @@ export function ScheduleDialog() {
     const r = runSchedule({ dataDate: t });
     if (r?.ok) {
       if (level) {
-        const { levelResources } = await import('../../core/level/level.ts');
         let log = '';
         mutate('Level Resources', (d) => { log = levelResources(d, ui.openProjects, {}).log; });
         setUi({ levelLog: log });

@@ -15,6 +15,6 @@ await vite({
   base: './',
   plugins: [react()],
   logLevel: 'warn',
-  build: { outDir: join(root, 'dist/renderer'), emptyOutDir: true, sourcemap: true, chunkSizeWarningLimit: 4000 },
+  build: { minify: false /* local app; the minifier reorders module init and breaks it */, outDir: join(root, 'dist/renderer'), emptyOutDir: true, sourcemap: true, chunkSizeWarningLimit: 4000 },
 });
 console.log('built dist/');

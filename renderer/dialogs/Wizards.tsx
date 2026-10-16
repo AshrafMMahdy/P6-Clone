@@ -32,14 +32,14 @@ const DICTS: [string, string][] = [['CALENDAR', 'Calendars'], ['RSRC', 'Resource
 
 /** File > Import wizard (P6 steps: format, type, file, projects, update options, finish). */
 export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Array } }) {
+  const existing = rows(getDb(), 'PROJECT').filter((p) => !p._baseline_of);
+  const eps = getDb().tables.EPS?.rows ?? [];
   const [step, setStep] = useState(props.preload ? 2 : 0);
   const [format, setFormat] = useState<Format>(props.preload ? detectFormat(props.preload.name, props.preload.bytes) : 'xer');
   const [importType, setImportType] = useState('project');
   const [file, setFile] = useState<{ name: string; parsed: ParsedFile } | null>(() => props.preload ? { name: props.preload.name, parsed: parseFile(props.preload.name, props.preload.bytes) } : null);
   const [plan, setPlan] = useState<ImportPlan['projects']>(() => file ? defaultRows(file.parsed) : []);
   const [dict, setDict] = useState<Record<string, DictAction>>({});
-  const existing = rows(getDb(), 'PROJECT').filter((p) => !p._baseline_of);
-  const eps = getDb().tables.EPS?.rows ?? [];
   const steps = ['Import Format', 'Import Type', 'Import File', 'Projects To Import', 'Update Project Options', 'Finish'];
 
   function defaultRows(pf: ParsedFile): ImportPlan['projects'] {
