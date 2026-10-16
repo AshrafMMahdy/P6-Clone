@@ -7,6 +7,7 @@ import { makeCtx, projectName } from '../model.ts';
 import { rows } from '../../core/db.ts';
 import { TOOLS, runTool } from '../../core/query/tools.ts';
 import { LIVE_TOOLS, runLive, menuGuide } from './live.ts';
+import { compactHistory } from './context.ts';
 import type { AiPublicConfig, ChatMsg } from '../../main/ai.ts';
 
 interface Line { who: 'user' | 'ai' | 'tool' | 'error'; text: string }
@@ -63,7 +64,7 @@ export function AssistantPanel() {
         const id = `${Date.now()}-${round}`;
         callId.current = id;
         const allow = cfg.actions !== false;
-        const r = await window.p6.aiChat(id, { system: systemPrompt(allow), messages: history.current, tools: allow ? [...TOOLS, ...LIVE_TOOLS] : TOOLS });
+        const r = await window.p6.aiChat(id, { system: systemPrompt(allow), messages: compactHistory(history.current), tools: allow ? [...TOOLS, ...LIVE_TOOLS] : TOOLS });
         if (!r.ok) { add({ who: 'error', text: r.error }); break; }
         const { content, toolCalls } = r.reply;
         history.current.push({ role: 'assistant', content, toolCalls });
@@ -84,7 +85,9 @@ export function AssistantPanel() {
     } finally { setBusy(false); callId.current = null; }
   };
   const stop = () => { stopped.current = true; if (callId.current) void window.p6.aiCancel(callId.current); };
-  const clear = () => { history.current = []; setLines([]); };
+  // Clear context: the assistant forgets the conversation (stops a running answer first)
+  const clear = () => { if (busy) stop(); history.current = []; setLines([]); };
+  const asked = lines.filter((l) => l.who === 'user').length;
 
   if (!open) return (
     <div className="ai-strip" title="AI Assistant (Ctrl+Shift+A)" onClick={() => setUi({ aiOpen: true })}><span>AI Assistant</span></div>
@@ -94,7 +97,8 @@ export function AssistantPanel() {
       <div className="ai-head">
         <b>AI Assistant</b><span className="muted">{cfg.model || 'no model set'}</span>
         <span style={{ flex: 1 }} />
-        <button className="tbtn" title="Clear the conversation" onClick={clear}><span className="lbl">Clear</span></button>
+        {asked > 0 && <span className="muted" title="Each new question includes the earlier ones, so you can ask follow-ups">remembers {asked} question{asked > 1 ? 's' : ''}</span>}
+        <button className="tbtn" title="Clear context: start a new conversation (the assistant forgets earlier questions)" disabled={!lines.length} onClick={clear}><span className="lbl">Clear context</span></button>
         <button className="tbtn" title={wide ? 'Narrow' : 'Widen'} onClick={() => setUi({ aiWide: !wide })}><span className="lbl">{wide ? '⇥' : '⇤'}</span></button>
         <button className="tbtn" title="Minimize (Ctrl+Shift+A)" onClick={() => setUi({ aiOpen: false })}><span className="lbl">—</span></button>
       </div>
@@ -109,7 +113,7 @@ export function AssistantPanel() {
       </div>
       <div className="ai-input">
         <textarea ref={box} rows={3} value={input} placeholder="Ask about this project (Enter to send, Shift+Enter for a new line)" onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask(); } if (e.key === 'Escape') setUi({ aiOpen: false }); }} />
+          onKeyDown={(e) => { e.stopPropagation(); if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); setUi({ aiOpen: false }); return; } if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask(); } if (e.key === 'Escape') setUi({ aiOpen: false }); }} />
         {busy ? <button className="btn" onClick={stop}>Stop</button> : <button className="btn primary" disabled={!input.trim()} onClick={() => void ask()}>Send</button>}
       </div>
     </div>

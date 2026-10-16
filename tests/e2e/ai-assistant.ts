@@ -49,6 +49,19 @@ const ans = await win.locator('.ai-msg.ai').innerText(); ok(/waterproofing activ
 const link = win.locator('.ai-msg.ai .ai-act').first(); const code = await link.innerText(); await link.click(); await win.waitForTimeout(400);
 ok((await win.locator('.grid-row.sel').innerText()).includes(code), `clicking ${code} selects that activity`);
 
+// follow-up question: the earlier conversation is sent along; Clear context forgets it
+const before = seen.length;
+await win.fill('.ai-panel textarea', 'And which of those is critical?'); await win.keyboard.press('Enter');
+await win.waitForFunction(() => document.querySelectorAll('.ai-msg.ai').length >= 2, null, { timeout: 15000 });
+const users = (n: number) => seen[n].j.messages.filter((m: any) => m.role === 'user').map((m: any) => m.content);
+ok(users(before).length === 2 && users(before)[0].includes('waterproofing'), 'a follow-up carries the earlier question: ' + JSON.stringify(users(before)));
+ok((await win.locator('.ai-head').innerText()).includes('remembers 2 questions'), 'the panel shows it remembers 2 questions');
+await win.click('.ai-head button:has-text("Clear context")');
+ok(await win.locator('.ai-msg').count() === 0, 'Clear context empties the conversation');
+const b2 = seen.length;
+await win.fill('.ai-panel textarea', 'Fresh question'); await win.keyboard.press('Enter');
+await win.waitForSelector('.ai-msg.ai', { timeout: 15000 });
+ok(users(b2).length === 1 && users(b2)[0] === 'Fresh question', 'after Clear context only the new question is sent');
 await win.keyboard.press('Control+Shift+A'); await win.waitForTimeout(300); ok(await win.locator('.ai-panel').count() === 0 && await win.locator('.ai-strip').count() === 1, 'Ctrl+Shift+A minimizes to the strip');
 console.log(errors.length ? 'ERRORS ' + errors.join(' | ') : 'no page errors');
 await app.close(); srv.close();
