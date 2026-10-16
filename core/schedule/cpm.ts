@@ -259,7 +259,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       return left > 0 ? lc.addWork(p.es, left) : p.es;
     }
     // actual dates after the data date do not push successors past what the data date allows
-    const base = lagAdd(Math.min(fin ? p.af! : p.as!, p.proj.dd), r);
+    const act = fin ? p.af! : p.as!;
+    // an actual date after the data date releases at the data date without the lag (P6 19.12, SSAC1511)
+    const base = act > p.proj.dd ? p.proj.dd : lagAdd(Math.min(act, p.proj.dd), r);
     if (p.ef <= p.proj.dd) return base;
     // completed but pushed past the data date by its own predecessors: logic runs from its propagated date with
     // only the lag still to run (the lag minus the work time elapsed between its actual date and the data date)
