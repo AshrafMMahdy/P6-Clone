@@ -8,9 +8,12 @@ const win = await app.firstWindow();
 await win.waitForSelector('.dialog .wizard-side', { timeout: 120000 });
 await win.waitForSelector('button:has-text("View Diagnostics...")', { timeout: 120000 }); await win.click('button:has-text("Next >")');
 const cdp = await win.context().newCDPSession(win);
-await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 500 }); await cdp.send('Profiler.start');
 await win.click('button:has-text("Finish")');
 await win.waitForSelector('.grid-row', { timeout: 300000 }); await win.waitForTimeout(3000);
+for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(100); }
+await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('menu', 'tools.schedule')); await win.waitForSelector('.dialog button:has-text("Schedule")');
+await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 500 }); await cdp.send('Profiler.start');
+const tS = Date.now(); await win.click('.dialog button:has-text("Schedule")'); await win.waitForFunction(() => !document.querySelector('.dialog-title')?.textContent?.includes('Schedule'), null, { timeout: 120000 }); await win.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))); console.log('F9 click to idle', Date.now() - tS, 'ms'); await win.waitForTimeout(2000);
 const { profile } = await cdp.send('Profiler.stop');
 const byId = new Map(profile.nodes.map((n: any) => [n.id, n])); const self = new Map<string, number>();
 profile.samples!.forEach((id: number, i: number) => { const n: any = byId.get(id); const k = `${n.callFrame.functionName || '(anon)'} ${n.callFrame.url.split('/').pop()}:${n.callFrame.lineNumber}`; self.set(k, (self.get(k) ?? 0) + (profile.timeDeltas![i] ?? 0)); });

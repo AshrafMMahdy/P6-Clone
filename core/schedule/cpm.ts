@@ -554,10 +554,15 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
     // WBS summary activities span their WBS subtree
     const wbsParent = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w.parent_wbs_id]));
-    const under = (wbs: string, root: string) => { for (let w: string | undefined = wbs, n = 0; w && n < 200; w = wbsParent.get(w), n++) if (w === root) return true; return false; };
+    // open non-summary activities filed under each WBS node (at any depth), built once instead of per summary activity
+    const byWbs = new Map<string, Act[]>();
+    if ([...acts.values()].some((a) => a.type === 'TT_WBS')) for (const b of acts.values()) {
+      if (b.type === 'TT_WBS' || b.status === 'CO') continue;
+      for (let w: string | undefined = b.row.wbs_id, n = 0; w && n < 200; w = wbsParent.get(w), n++) { let l = byWbs.get(w); if (!l) byWbs.set(w, (l = [])); l.push(b); }
+    }
     for (const a of acts.values()) {
       if (a.type !== 'TT_WBS') continue;
-      const kids = [...acts.values()].filter((b) => b !== a && b.type !== 'TT_WBS' && b.status !== 'CO' && b.proj === a.proj && under(b.row.wbs_id, a.row.wbs_id));
+      const kids = (byWbs.get(a.row.wbs_id) ?? []).filter((b) => b !== a && b.proj === a.proj);
       const openEnd = a.proj.floatEnd;
       if (!kids.length) { a.es = a.ef = a.ls = a.lf = a.cal.nextWorkStart(a.proj.dd); a.dur = 0; a.tf = 0; }
       else {
