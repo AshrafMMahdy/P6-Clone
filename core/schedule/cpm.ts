@@ -448,7 +448,15 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       a.ff = 0;
       const fin = a.cal.workBetween(a.ef, a.lf), st = a.cal.workBetween(a.es, a.ls);
       a.tf = a.proj.opts.floatType === 'finish' ? fin : a.proj.opts.floatType === 'start' ? st : Math.min(fin, st);
-      for (const r of a.preds) if (r.pred && isMain(r.pred) && r.pred.status !== 'CO') r.slack = relSlack(r);
+      for (const r of a.preds) {
+        if (!r.pred || !isMain(r.pred) || r.pred.status === 'CO') continue;
+        r.slack = relSlack(r);
+        const p = r.pred;
+        if (cstr(p).some(([t]) => t === 'CS_ALAP') || (p.proj.opts.useExpectedFinish && p.row.expect_end_date)) continue;
+        let ff = BIG;
+        for (const q of p.succs) if (q.succ && isMain(q.succ)) ff = Math.min(ff, q.slack === BIG ? relSlack(q) : q.slack);
+        if (ff !== BIG) p.ff = ff;
+      }
     }
 
     // Longest path: back from the latest-finishing activities along driving relationships
