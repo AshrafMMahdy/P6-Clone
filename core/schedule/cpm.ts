@@ -348,7 +348,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
       raw = mand ?? raw;
       // Mirror rule: a start milestone's late date at a period end (or in a gap) is one minute before the end.
-      if (a.type === 'TT_Mile') a.ls = a.lf = a.proj.opts.legacyMilestones ? (a.cal.nextWorkStart(raw) === raw ? raw : a.cal.prevWorkEnd(raw) - 1) : a.cal.nextWorkStart(raw) === raw || a.cal.prevWorkEnd(raw) === raw ? raw : a.cal.nextWorkStart(a.cal.prevWorkEnd(raw));
+      if (a.type === 'TT_Mile') a.ls = a.lf = a.proj.opts.legacyMilestones ? (a.cal.nextWorkStart(raw) === raw ? raw : a.cal.prevWorkEnd(raw) - 1) : a.cal.nextWorkStart(raw) === raw ? raw : a.cal.prevWorkEnd(raw);
       else if (a.type === 'TT_FinMile') a.ls = a.lf = a.cal.prevWorkEnd(raw);
       else {
         a.lf = mand ?? a.cal.prevWorkEnd(raw);
