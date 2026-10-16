@@ -403,6 +403,14 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       else {
         a.lf = mand ?? a.cal.prevWorkEnd(raw);
         a.ls = a.dur ? a.cal.subWork(a.lf, a.dur) : a.lf;
+        // P6: a task-dependent activity starts late no later than its longest assignment, and an assignment with
+        // no units rate keeps the duration of its stored dates (it does not follow the activity's).
+        if (a.type === 'TT_Task' && a.status === 'NS') for (const asg of asgByTask.get(a.row.task_id) ?? []) {
+          if (Number(asg.remain_qty_per_hr || 0) > 0 || Number(asg.relag_drtn_hr_cnt || 0)) continue;
+          const s0 = parseP6Date(asg.restart_date), f0 = parseP6Date(asg.reend_date);
+          const d = asg.remain_drtn_hr_cnt ? Number(asg.remain_drtn_hr_cnt) * H : s0 != null && f0 != null ? a.cal.workBetween(s0, f0) : 0;
+          if (d > a.dur) a.ls = Math.min(a.ls, a.cal.subWork(a.lf, d));
+        }
       }
     }
 
@@ -411,7 +419,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       const a = r.pred!, s = r.succ!;
       const from = predTime(r);
       const to = r.type === 'FS' || r.type === 'SS' ? (s.status === 'NS' ? s.es : s.es) : s.ef;
-      return a.fcal.workBetween(from, to);
+      const w = a.fcal.workBetween(from, to);
+      return w < 0 && s.type === 'TT_Rsrc' ? s.cal.workBetween(from, to) : w; // a resource-dependent successor is late only by its own work time
     };
     for (const a of order) {
       if (a.status === 'CO') continue;
