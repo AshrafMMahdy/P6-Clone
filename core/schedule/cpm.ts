@@ -299,7 +299,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
       let mand: number | null = null;
       if (a.status === 'NS') {
-        for (const [ty, c] of cstr(a)) {
+        for (const [ty, c0] of cstr(a)) {
+          // P6 6.x: a finish constraint on a period start means one minute into the period
+          const c = a.proj.opts.legacyMilestones && /MEO|MANDFIN/.test(ty) && a.dur && a.cal.prevWorkEnd(c0) !== c0 ? a.cal.nextWorkStart(c0) + 1 : c0;
           if (ty === 'CS_MSO' || ty === 'CS_MSOA') raw = Math.max(raw, c);
           else if (ty === 'CS_MEO' || ty === 'CS_MEOA') raw = Math.max(raw, a.dur ? a.cal.subWork(c, a.dur) : c);
           else if (ty === 'CS_MANDSTART') mand = c;
@@ -308,7 +310,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
       if (a.proj.opts.useExpectedFinish && a.row.expect_end_date) {
         const exp = parseP6Date(a.row.expect_end_date)!;
-        a.dur = Math.max(0, a.cal.workBetween(a.cal.nextWorkStart(mand ?? raw), exp));
+        const st = a.cal.nextWorkStart(mand ?? raw);
+        // an expected finish already behind the remaining start is ignored (stored remaining duration kept)
+        if (exp > st) a.dur = a.cal.workBetween(st, exp);
       }
       snapEarly(a, mand ?? raw, floor);
       // P6 5.x/7.x builds keep a link-driven finish that falls on a period start as that time (same work instant)
