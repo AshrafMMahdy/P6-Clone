@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseXer } from '../core/xer/parse.ts';
 import { validateXer } from '../core/xer/validate.ts';
+import { checkStoredDates } from '../core/schedule/stored-dates.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { diffDbs } from '../core/diff.ts';
 import { worst, type Finding } from '../core/findings.ts';
@@ -51,7 +52,8 @@ async function main(): Promise<number> {
   switch (cmd) {
     case 'validate': {
       const { db, findings } = load(positional[0]);
-      const all = validateXer(db, findings);
+      const pre = validateXer(db, findings);
+      const all = worst(pre) === 'fatal' ? pre : [...pre, ...checkStoredDates(db)];
       if (flag('json')) console.log(JSON.stringify({ file: positional[0], version: db.header?.version, verdict: worst(all) ?? 'clean', findings: all }, null, 2));
       else {
         printFindings(all);

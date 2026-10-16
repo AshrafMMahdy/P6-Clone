@@ -1,6 +1,11 @@
 // File-format plumbing shared by wizards and the CLI-like Validate tool.
 import { parseXer } from '../core/xer/parse.ts';
 import { validateXer } from '../core/xer/validate.ts';
+import { checkStoredDates } from '../core/schedule/stored-dates.ts';
+import { worst } from '../core/findings.ts';
+
+/** P6 files: also check whether the saved dates are the ones P6 would calculate (skipped when P6 would reject the file). */
+const withDateCheck = (db: Db, f: Finding[]): Finding[] => (worst(f) === 'fatal' ? f : [...f, ...checkStoredDates(db)]);
 import { writeXer } from '../core/xer/write.ts';
 import { parseP6Xml, writeP6Xml } from '../core/xml/p6xml.ts';
 import { parseMspdi, writeMspdi } from '../core/msp/mspdi.ts';
@@ -49,7 +54,7 @@ export function detectFormat(name: string, bytes: Uint8Array): Format {
 export function parseFile(name: string, bytes: Uint8Array, format = detectFormat(name, bytes)): ParsedFile {
   if (format === 'xml') {
     const r = parseP6Xml(xmlText(bytes));
-    return { format, db: r.db, findings: validateXer(r.db, r.findings) };
+    return { format, db: r.db, findings: withDateCheck(r.db, validateXer(r.db, r.findings)) };
   }
   if (format === 'mspdi') {
     const r = parseMspdi(xmlText(bytes));
@@ -63,7 +68,7 @@ export function parseFile(name: string, bytes: Uint8Array, format = detectFormat
     return { format, db: { tables: {} }, findings: [{ severity: 'fatal', code: 'MPP_NEEDS_PROJECT', message: '.mpp files are converted by Microsoft Project; open it with File > Import > Microsoft Project.', p6: 'P6 imports .mpp only through an installed Microsoft Project.' }] };
   }
   const r = parseXer(bytes);
-  return { format, db: r.db, findings: validateXer(r.db, r.findings) };
+  return { format, db: r.db, findings: withDateCheck(r.db, validateXer(r.db, r.findings)) };
 }
 
 export interface MppBridge { mppToXml(bytes: Uint8Array): Promise<Uint8Array> }
