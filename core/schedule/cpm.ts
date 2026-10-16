@@ -209,7 +209,14 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   const predTime = (r: Rel): number => {
     const p = r.pred!;
     const fin = r.type === 'FS' || r.type === 'FF';
-    if (p.status !== 'CO') return lagAdd(fin ? finishOf(p) : startOf(p), r);
+    if (p.status === 'NS') return lagAdd(fin ? finishOf(p) : startOf(p), r);
+    if (p.status === 'IP') {
+      if (fin) return lagAdd(finishOf(p), r);
+      // Start links from an in-progress predecessor: lag counts from its actual start, but under
+      // Retained Logic the successor also waits for the predecessor's remaining work to resume.
+      const base = lagAdd(p.as!, r);
+      return p.proj.opts.logic === 'retained' ? Math.max(base, p.es) : base;
+    }
     const base = lagAdd(fin ? p.af! : p.as!, r);
     return p.ef > p.proj.dd ? Math.max(base, p.ef) : base;
   };
