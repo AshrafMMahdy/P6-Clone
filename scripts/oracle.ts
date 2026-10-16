@@ -5,6 +5,20 @@ import { scheduleProjects, calendarResolver } from '../core/schedule/cpm.ts';
 import { parseP6Date } from '../core/dates.ts';
 import { parseClndrData, serializeClndrData } from '../core/calendar/clndr-data.ts';
 import { realSamples } from '../tests/helpers.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+/**
+ * Extra real P6 exports from public repositories, kept out of git (several have no license): used when present in
+ * "downloaded XERs/". See docs/stale-sample-files.md for the ones that are not exact.
+ */
+export const EXTRA_DIR = join(import.meta.dirname, '..', 'downloaded XERs');
+export const EXTRA = [
+  'chris-vaz_Primavera-Prodigy/C1511 Basline Schedule.xer', 'chris-vaz_Primavera-Prodigy/SSAC1511.UD-Sep.25.OK.xer',
+  'CodeVision3000_P6-Viewer/Hotel Project.xer', 'MurleKrishnan_xer_analyzer/HBTF-2.xer', 'CodeVision3000_P6-Viewer/TERMINAL BUILDING-AIRPORT.xer',
+  'bhatticoder_XER-Parser/Convention & Exhibition Center Project Roads & Utilities.xer', 'ibuilder_PHPSchedule/myschedule.xer',
+  'mannixcom_xer/plant.xer',
+];
 
 /**
  * Stale-data repair: where P6's own stored early dates contradict an activity's remaining duration (the file was
@@ -59,7 +73,8 @@ export const CORRECTIONS: { file: string; label: string; apply: (db: Db) => void
 
 export function oracle(filter?: string, detail = 0, repair = false): OracleResult[] {
   const out: OracleResult[] = [];
-  const cases = realSamples().flatMap((s) => [{ name: s.name, bytes: s.bytes, apply: undefined as ((db: Db) => void) | undefined },
+  const extra = process.env.ORACLE_NO_EXTRA ? [] : EXTRA.filter((p) => existsSync(join(EXTRA_DIR, p))).map((p) => ({ name: `downloaded/${p}`, bytes: new Uint8Array(readFileSync(join(EXTRA_DIR, p))) }));
+  const cases = [...realSamples(), ...extra].flatMap((s) => [{ name: s.name, bytes: s.bytes, apply: undefined as ((db: Db) => void) | undefined },
     ...CORRECTIONS.filter((c) => c.file === s.name).map((c) => ({ name: `${s.name} [corrected: ${c.label}]`, bytes: s.bytes, apply: c.apply }))]);
   for (const s of cases) {
     if (filter && !s.name.toLowerCase().includes(filter.toLowerCase())) continue;
@@ -76,6 +91,7 @@ export function oracle(filter?: string, detail = 0, repair = false): OracleResul
     let n = 0, wrong = 0;
     for (const o of orig.tables.TASK?.rows ?? []) {
       if (!process.env.ORACLE_ALL && (o.status_code === 'TK_Complete' || o.act_end_date)) continue;
+      if (!o.early_start_date) continue; // never scheduled in P6 (added after its last F9): nothing to compare
       const a = after.get(o.task_id)!;
       n++;
       for (const f of FIELDS) {
