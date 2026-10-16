@@ -375,6 +375,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
     // Level of effort: spans from its predecessors to its successors
     for (const a of acts.values()) {
+      if (!isMain(a) && a.status === 'CO') { a.es = a.ef = a.ls = a.lf = a.proj.dd; continue; }
       if (a.type !== 'TT_LOE' || a.status === 'CO') continue;
       let es = BIG, ef = -BIG, ls = BIG, lf = -BIG;
       for (const r of a.preds) {
