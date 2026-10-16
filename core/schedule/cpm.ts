@@ -278,7 +278,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       // a non-work gap: if it lands at a period start (or in a gap) it is placed one minute into the period.
       if (a.proj.opts.legacyMilestones) a.es = a.ef = a.cal.prevWorkEnd(raw) === raw ? raw : a.cal.nextWorkStart(raw) + 1;
       else if (a.cal.prevWorkEnd(raw) === raw || a.cal.nextWorkStart(raw) === raw) a.es = a.ef = raw; // inside work or on a period boundary: stays
-      else { const t = a.cal.prevWorkEnd(a.cal.nextWorkStart(raw)); a.es = a.ef = t < floor ? a.cal.nextWorkStart(raw) : t; }
+      else a.es = a.ef = a.cal.nextWorkStart(raw);
     } else if (a.type === 'TT_Mile') {
       a.es = a.ef = a.cal.nextWorkStart(raw);
     } else {
