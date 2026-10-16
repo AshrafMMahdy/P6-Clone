@@ -9,7 +9,7 @@ import { buildActivityRows, FILTERS, taskStart, taskFinish } from './activityRow
 import { ActivityDetails } from './ActivityDetails.tsx';
 import { parseP6Date, formatP6Date } from '../../core/dates.ts';
 import type { Row } from '../../core/db.ts';
-import { activityCommands } from '../commands.ts';
+import { activityCommands, copyActivities, pasteActivities } from '../commands.ts';
 
 const WBS_COLORS = ['var(--wbs0)', 'var(--wbs1)', 'var(--wbs2)', 'var(--wbs3)', 'var(--wbs4)'];
 
@@ -125,10 +125,14 @@ export function ActivitiesView() {
 
   const cmds = activityCommands();
   const onContext = (key: string | null, e: React.MouseEvent) => {
-    if (key) onSelect(key, { ctrlKey: false, shiftKey: false });
+    if (key && !selected.has(key)) onSelect(key, { ctrlKey: false, shiftKey: false }); // right-click inside a selection keeps it
     showContextMenu(e, [
       { label: 'Add Activity', onClick: cmds.add },
       { label: 'Delete', onClick: cmds.del },
+      { sep: true, label: '' },
+      { label: 'Cut', onClick: () => { copyActivities(); cmds.del(); } },
+      { label: 'Copy', onClick: copyActivities },
+      { label: 'Paste', onClick: pasteActivities },
       { sep: true, label: '' },
       { label: 'Assign Predecessors...', onClick: () => openDialog('assign', { which: 'pred' }) },
       { label: 'Assign Successors...', onClick: () => openDialog('assign', { which: 'succ' }) },
@@ -189,6 +193,7 @@ export function ActivitiesView() {
         <span>Sort:</span>
         <select className="opt" value={ui.sortBy} onChange={(e) => setUi({ sortBy: e.target.value })}>
           <option value="">Start</option><option value="task_code">Activity ID</option><option value="task_name">Activity Name</option><option value="total_float">Total Float</option><option value="finish">Finish</option>
+          {ui.sortBy.startsWith('col:') && <option value={ui.sortBy}>{COLUMN_BY_ID.get(ui.sortBy.split(':')[1])?.title ?? ui.sortBy}{ui.sortBy.endsWith(':desc') ? ' ▼' : ' ▲'}</option>}
         </select>
         <input className="opt" placeholder="Find activity..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 150 }} />
         <span style={{ marginLeft: 'auto' }}>{rows.filter((r) => r.kind === 'task').length} activities · Data Date {fmtDate(dataDate, ctx.prefs, true)}</span>
@@ -199,9 +204,11 @@ export function ActivitiesView() {
             onToggle={(k) => setUi((u) => ({ collapsed: { ...u.collapsed, [k]: !u.collapsed[k] } }))}
             getEditor={getEditor} onCommit={onCommit} onScroll={setScrollTop} scrollTop={scrollTop}
             onContextMenu={onContext} labelSpan={ui.columns[1] === 'task_name' ? 2 : 1}
+            sortCol={ui.sortBy.startsWith('col:') ? { id: ui.sortBy.split(':')[1], desc: ui.sortBy.endsWith(':desc') } : undefined}
+            onHeaderClick={(id) => setUi({ sortBy: ui.sortBy === `col:${id}` ? `col:${id}:desc` : `col:${id}` })}
             onActivate={(k) => k.startsWith('t:') && setUi({ detailTab: 'general' })} />
           <Gantt entries={entries} links={links} dataDate={dataDate} pxPerDay={ui.pxPerDay} showLinks={ui.relLines} scrollTop={scrollTop} onScroll={setScrollTop}
-            selected={selected} onSelect={(k) => onSelect(k, { ctrlKey: false, shiftKey: false })} onLink={onLink} calendar={cal} showBaseline
+            selected={selected} onSelect={(k, m) => onSelect(k, m ?? { ctrlKey: false, shiftKey: false })} onLink={onLink} calendar={cal} showBaseline
             styles={ui.bars} onContextMenu={onGanttContext} onZoom={(px) => setUi({ pxPerDay: px })} />
         </Split>
         <ActivityDetails />

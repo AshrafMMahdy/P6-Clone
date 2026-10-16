@@ -128,6 +128,7 @@ export function handleEditKey(e: KeyboardEvent): boolean {
   if (e.key === 'Insert') { c.add(); return true; }
   if (e.key === 'Delete') { c.del(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'c' && getUi().view === 'activities') { copyActivities(); return true; }
+  if (e.ctrlKey && e.key.toLowerCase() === 'x' && getUi().view === 'activities') { copyActivities(); c.del(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'v' && getUi().view === 'activities') { pasteActivities(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'z') { doUndo(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'y') { doRedo(); return true; }

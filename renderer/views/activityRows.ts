@@ -1,7 +1,7 @@
 // Builds the WBS-banded row list shared by the activity table and the Gantt chart.
 import { parseP6Date } from '../../core/dates.ts';
 import type { Row } from '../../core/db.ts';
-import { activityPct, isCritical, isMilestone, projectName, statusOf, type Ctx } from '../model.ts';
+import { activityPct, isCritical, isMilestone, projectName, statusOf, COLUMN_BY_ID, type Ctx } from '../model.ts';
 
 export interface ActRow {
   key: string;
@@ -39,11 +39,38 @@ const SORTS: Record<string, (a: Row, b: Row) => number> = {
   finish: (a, b) => (taskFinish(a) ?? 0) - (taskFinish(b) ?? 0),
 };
 
+// Column-header sort ("col:<id>" or "col:<id>:desc"): dates and numbers by value, text naturally; ties by start.
+const DATE_COL: Record<string, (r: Row) => number | null> = {
+  start: taskStart, finish: taskFinish,
+  early_start: (r) => parseP6Date(r.early_start_date), early_finish: (r) => parseP6Date(r.early_end_date),
+  late_start: (r) => parseP6Date(r.late_start_date), late_finish: (r) => parseP6Date(r.late_end_date),
+  act_start: (r) => parseP6Date(r.act_start_date), act_finish: (r) => parseP6Date(r.act_end_date),
+  planned_start: (r) => parseP6Date(r.target_start_date), planned_finish: (r) => parseP6Date(r.target_end_date),
+  cstr_date: (r) => parseP6Date(r.cstr_date), cstr_date2: (r) => parseP6Date(r.cstr_date2), expect_end: (r) => parseP6Date(r.expect_end_date),
+};
+const NUM_COL: Record<string, string> = { orig_dur: 'target_drtn_hr_cnt', rem_dur: 'remain_drtn_hr_cnt', total_float: 'total_float_hr_cnt', free_float: 'free_float_hr_cnt' };
+function sortFor(sortBy: string, ctx: Ctx): (a: Row, b: Row) => number {
+  if (!sortBy.startsWith('col:')) return SORTS[sortBy] ?? SORTS[''];
+  const [, id, dir] = sortBy.split(':');
+  const s = dir === 'desc' ? -1 : 1;
+  const col = COLUMN_BY_ID.get(id);
+  const key: (r: Row) => number | string | null = DATE_COL[id] ?? (NUM_COL[id] ? (r) => (r[NUM_COL[id]] === '' || r[NUM_COL[id]] == null ? null : Number(r[NUM_COL[id]])) : (r) => col?.get(r, ctx) ?? '');
+  const cache = new Map<Row, number | string | null>();
+  const k = (r: Row) => { let v = cache.get(r); if (v === undefined && !cache.has(r)) cache.set(r, (v = key(r))); return v ?? null; };
+  return (a, b) => {
+    const x = k(a), y = k(b);
+    if (x == null || x === '') return y == null || y === '' ? SORTS[''](a, b) : 1; // blanks last either way
+    if (y == null || y === '') return -1;
+    const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
+    return c ? s * c : SORTS[''](a, b);
+  };
+}
+
 export function buildActivityRows(ctx: Ctx, projIds: string[], collapsed: Record<string, boolean>, filter: string, groupBy: string, sortBy: string, search = ''): ActRow[] {
   const f = FILTERS[filter]?.[1] ?? FILTERS.all[1];
   const q = search.trim().toLowerCase();
   const tasks = [...ctx.taskById.values()].filter((t) => projIds.includes(t.proj_id) && f(t, ctx) && (!q || t.task_code.toLowerCase().includes(q) || t.task_name.toLowerCase().includes(q)));
-  const sort = SORTS[sortBy] ?? SORTS[''];
+  const sort = sortFor(sortBy, ctx);
   const out: ActRow[] = [];
 
   if (groupBy === 'none') {

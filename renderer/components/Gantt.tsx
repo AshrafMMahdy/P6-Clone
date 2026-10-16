@@ -36,7 +36,7 @@ const RH = 19;
 
 export function Gantt(p: {
   entries: GanttEntry[]; links: GanttLink[]; dataDate: number | null; pxPerDay: number; showLinks: boolean;
-  scrollTop?: number; onScroll?: (top: number) => void; selected?: Set<string>; onSelect?: (key: string) => void;
+  scrollTop?: number; onScroll?: (top: number) => void; selected?: Set<string>; onSelect?: (key: string, mods?: { ctrlKey: boolean; shiftKey: boolean }) => void;
   onLink?: (from: string, to: string) => void; calendar?: WorkCalendar; showBaseline?: boolean;
   styles?: BarStyles; onContextMenu?: (key: string | null, e: React.MouseEvent, actions: GanttActions) => void; onZoom?: (pxPerDay: number) => void;
 }) {
@@ -265,8 +265,8 @@ export function Gantt(p: {
             const { cx, cy } = local(ev);
             const h = hit(cx, cy);
             if (!h) return;
-            p.onSelect?.(h.e.key);
-            if (h.onBar && p.onLink && h.endX != null) drag.current = { from: h.e.key, x: h.endX, y: h.y!, cx, cy };
+            p.onSelect?.(h.e.key, { ctrlKey: ev.ctrlKey, shiftKey: ev.shiftKey });
+            if (h.onBar && !ev.ctrlKey && !ev.shiftKey && p.onLink && h.endX != null) drag.current = { from: h.e.key, x: h.endX, y: h.y!, cx, cy };
           }}
           onMouseMove={(ev) => {
             const { cx, cy } = local(ev);
@@ -283,7 +283,7 @@ export function Gantt(p: {
             if (h && h.e.key !== d.from && Math.abs(cx + scroll.x - d.x) + Math.abs(cy + scroll.y - d.y) > 8) p.onLink?.(d.from, h.e.key);
             force((n) => n + 1);
           }}
-          onContextMenu={(ev) => { const { cx, cy } = local(ev); const i = Math.floor((cy + scroll.y) / RH); const e = p.entries[i]; if (e && e.kind === 'task') p.onSelect?.(e.key); p.onContextMenu?.(e?.kind === 'task' ? e.key : null, ev, actions); }}
+          onContextMenu={(ev) => { const { cx, cy } = local(ev); const i = Math.floor((cy + scroll.y) / RH); const e = p.entries[i]; if (e && e.kind === 'task' && !p.selected?.has(e.key)) p.onSelect?.(e.key); p.onContextMenu?.(e?.kind === 'task' ? e.key : null, ev, actions); }}
           onMouseLeave={() => setTip(null)}>
           <div style={{ width, height: Math.max(height, 1) }} />
         </div>

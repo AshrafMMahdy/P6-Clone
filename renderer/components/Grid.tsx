@@ -28,6 +28,9 @@ export interface GridProps {
   onContextMenu?: (key: string | null, e: RME) => void;
   onScroll?: (top: number) => void;
   scrollTop?: number;
+  /** click a column header to sort by it (P6: ascending, then descending) */
+  onHeaderClick?: (colId: string) => void;
+  sortCol?: { id: string; desc: boolean };
   onResize?: (colId: string, width: number) => void;
   rowHeight?: number;
   /** column whose cells get the tree indent */
@@ -131,8 +134,9 @@ export function Grid(p: GridProps) {
       <div className="grid-header" ref={head}>
         <div style={{ display: 'flex', width: total, minHeight: 32 }}>
           {cols.map((c) => (
-            <div key={c.id} className="grid-hcell" style={{ width: c.width }}>
-              {c.title}
+            <div key={c.id} className="grid-hcell" style={{ width: c.width, cursor: p.onHeaderClick ? 'pointer' : undefined }}
+              onClick={(e) => { if (!(e.target as HTMLElement).classList.contains('rz')) p.onHeaderClick?.(c.id); }}>
+              {c.title}{p.sortCol?.id === c.id ? (p.sortCol.desc ? ' ▼' : ' ▲') : ''}
               <div className="rz" onMouseDown={(e) => startResize(e, c.id, c.width)} />
             </div>
           ))}

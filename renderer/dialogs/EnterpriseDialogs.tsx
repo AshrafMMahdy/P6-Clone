@@ -1106,6 +1106,7 @@ export function FiltersDialog(props: { tab?: 'filter' | 'group' }) {
               <label>Sort by</label>
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                 {SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                {sortBy.startsWith('col:') && <option value={sortBy}>Column: {sortBy.split(':')[1]}{sortBy.endsWith(':desc') ? ' (descending)' : ''}</option>}
               </select>
             </div>
           )}
