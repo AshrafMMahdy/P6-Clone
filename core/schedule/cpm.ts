@@ -481,7 +481,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     for (const a of acts.values()) {
       if (a.type !== 'TT_WBS') continue;
       const kids = [...acts.values()].filter((b) => b !== a && b.type !== 'TT_WBS' && b.status !== 'CO' && b.proj === a.proj && under(b.row.wbs_id, a.row.wbs_id));
-      if (!kids.length) { a.es = a.ef = a.ls = a.lf = a.proj.dd; a.dur = 0; continue; }
+      if (!kids.length) { a.es = a.ef = a.ls = a.lf = a.cal.nextWorkStart(a.proj.dd); a.dur = 0; a.tf = 0; a.ff = a.cal.workBetween(a.es, a.proj.opts.legacyMilestones && a.proj.mfb != null ? a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY) : a.proj.finish); continue; }
       a.es = kids.reduce((x, k) => Math.min(x, k.es), BIG); a.ef = kids.reduce((x, k) => Math.max(x, k.ef), -BIG);
       a.ls = kids.reduce((x, k) => Math.min(x, k.ls), BIG); a.lf = kids.reduce((x, k) => Math.max(x, k.lf), -BIG);
       a.dur = a.cal.workBetween(a.es, a.ef);
