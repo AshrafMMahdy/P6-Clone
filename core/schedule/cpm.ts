@@ -524,7 +524,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       ls = a.cal.nextWorkStart(Math.max(ls, floor));
       if (ef === -BIG) { ef = a.dur ? a.cal.addWork(es, a.dur) : es; lf = a.dur ? a.cal.addWork(ls, a.dur) : ls; }
       ef = Math.max(es, a.cal.prevWorkEnd(ef));
-      lf = Math.max(ls, a.cal.prevWorkEnd(lf));
+      lf = a.cal.prevWorkEnd(lf);
+      if (ls > lf) ls = lf; // a late start past the successor-driven late finish is pulled back to it
       if (a.status === 'IP') ls = a.cal.nextWorkStart(a.as!); // P6 reports an in-progress LOE's late start as its actual start (at work time)
       Object.assign(a, { es, ef, ls, lf });
       a.dur = a.cal.workBetween(es, ef);
@@ -550,7 +551,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       let wff = BIG;
       for (const r of a.succs) if (r.succ && isMain(r.succ)) {
         const w = a.cal.workBetween(lagAdd(r.type === 'FS' || r.type === 'FF' ? a.ef : a.es, r), r.type === 'FS' || r.type === 'SS' ? r.succ.es : r.succ.ef);
-        if (w >= 0) wff = Math.min(wff, w); // P6 skips links the summary's own span already overruns
+        if (w > 0) wff = Math.min(wff, w); // P6 skips links the summary's own span already reaches or overruns
       }
       a.ff = wff === BIG ? a.cal.workBetween(a.ef, a.proj.opts.legacyMilestones && a.proj.mfb != null && !kids.length ? a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY) : openEnd) : wff;
       if (a.status === 'CO') a.status = 'IP';

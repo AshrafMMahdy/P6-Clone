@@ -9,7 +9,8 @@ const o = parseXer(bytes).db, db = parseXer(bytes).db;
 scheduleProjects(db, db.tables.PROJECT.rows.map((p) => p.proj_id));
 const A = new Map(db.tables.TASK.rows.map((r) => [r.task_id, r]));
 const early = (t: Record<string, string>) => { const a = A.get(t.task_id)!; return t.early_start_date !== a.early_start_date || t.early_end_date !== a.early_end_date; };
-const open = o.tables.TASK.rows.filter((t) => (process.env.ALL || (t.status_code !== 'TK_Complete' && !t.act_end_date)) && t.early_start_date); // ALL=1: completed too
+const projOk = (t: Record<string, string>) => !process.env.PROJ || o.tables.PROJECT.rows.find((p) => p.proj_id === t.proj_id)?.proj_short_name === process.env.PROJ; // PROJ=<proj_short_name>
+const open = o.tables.TASK.rows.filter((t) => projOk(t) && (process.env.ALL || (t.status_code !== 'TK_Complete' && !t.act_end_date)) && t.early_start_date); // ALL=1: completed too
 const bad = new Set(open.filter(early).map((t) => t.task_id));
 const preds = new Map<string, string[]>();
 for (const r of o.tables.TASKPRED.rows) { let l = preds.get(r.task_id); if (!l) preds.set(r.task_id, (l = [])); l.push(r.pred_task_id); }

@@ -5,6 +5,7 @@
 // Usage: node scripts/reconstruct-calendar.ts <fileSubstring> [clndr_id ...]
 import { parseXer } from '../core/xer/parse.ts';
 import { realSamples } from '../tests/helpers.ts';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { parseClndrData, serializeClndrData, type CalendarDef, type Shift } from '../core/calendar/clndr-data.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
@@ -14,7 +15,8 @@ type Iv = [number, number]; // minutes within the day
 const D = 1440, EPOCH = 25569; // OLE serial day of 1970-01-01
 
 export function reconstruct(file: string, calIds?: string[]) {
-  const s = realSamples().find((x) => x.name.toLowerCase().includes(file.toLowerCase()))!;
+  // a sample name substring, or a path to any .xer
+  const s = existsSync(file) && statSync(file).isFile() ? { name: file, bytes: readFileSync(file) } : realSamples().find((x) => x.name.toLowerCase().includes(file.toLowerCase()))!;
   const orig = parseXer(s.bytes).db, db = parseXer(s.bytes).db;
   const tasks = orig.tables.TASK.rows.filter((t) => t.status_code === 'TK_NotStart' && t.task_type === 'TT_Task');
   const ids = calIds?.length ? calIds : [...new Set(tasks.map((t) => t.clndr_id))];
