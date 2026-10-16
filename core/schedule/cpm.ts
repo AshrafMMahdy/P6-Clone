@@ -311,8 +311,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       if (a.proj.opts.useExpectedFinish && a.row.expect_end_date) {
         const exp = parseP6Date(a.row.expect_end_date)!;
         const st = a.cal.nextWorkStart(mand ?? raw);
-        // an expected finish already behind the remaining start is ignored (stored remaining duration kept)
-        if (exp > st) a.dur = a.cal.workBetween(st, exp);
+        // P6 recomputes remaining duration from the expected finish only when the remaining work starts at the
+        // data date; otherwise the stored remaining duration (set when progress was last applied) is used.
+        if (exp > st && st === a.cal.nextWorkStart(a.proj.dd)) a.dur = a.cal.workBetween(st, exp);
       }
       snapEarly(a, mand ?? raw, floor);
       // P6 5.x/7.x builds keep a link-driven finish that falls on a period start as that time (same work instant)
@@ -444,6 +445,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       if (ef === -BIG) { ef = a.dur ? a.cal.addWork(es, a.dur) : es; lf = a.dur ? a.cal.addWork(ls, a.dur) : ls; }
       ef = Math.max(es, a.cal.prevWorkEnd(ef));
       lf = Math.max(ls, a.cal.prevWorkEnd(lf));
+      if (a.status === 'IP') ls = a.as!; // P6 reports an in-progress LOE's late start as its actual start
       Object.assign(a, { es, ef, ls, lf });
       a.dur = a.cal.workBetween(es, ef);
       a.tf = a.cal.workBetween(ef, lf);
