@@ -134,17 +134,33 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   const rsrcCal = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.clndr_id]));
   const firstRsrc = new Map<string, string>();
   for (const a of rows(db, 'TASKRSRC')) if (!firstRsrc.has(a.task_id)) firstRsrc.set(a.task_id, a.rsrc_id);
+  const asgByTask = new Map<string, Row[]>();
+  for (const a of rows(db, 'TASKRSRC')) { let l = asgByTask.get(a.task_id); if (!l) asgByTask.set(a.task_id, (l = [])); l.push(a); }
+  const rsrcType = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
 
   const acts = new Map<string, Act>();
   for (const row of rows(db, 'TASK')) {
     const proj = projects.get(row.proj_id);
     if (!proj) continue;
     let cal = cals.get(row.clndr_id) ?? proj.cal;
-    if (row.task_type === 'TT_Rsrc') cal = cals.get(rsrcCal.get(firstRsrc.get(row.task_id) ?? '')) ?? cal;
+    let hrs = row.remain_drtn_hr_cnt !== '' && row.remain_drtn_hr_cnt != null ? Number(row.remain_drtn_hr_cnt) : Number(row.target_drtn_hr_cnt || 0);
+    if (row.task_type === 'TT_Rsrc') {
+      // Resource dependent: the longest labor/nonlabor assignment drives, on its resource's calendar,
+      // for remaining units / remaining units per hour.
+      let best = -1, bestCal: WorkCalendar | undefined;
+      for (const a of asgByTask.get(row.task_id) ?? []) {
+        if ((a.rsrc_type || rsrcType.get(a.rsrc_id)) === 'RT_Mat') continue;
+        const rate = Number(a.remain_qty_per_hr || 0);
+        if (!(rate > 0)) continue;
+        const h = Number(a.remain_qty || 0) / rate;
+        if (h > best) { best = h; bestCal = cals.get(rsrcCal.get(a.rsrc_id) ?? ''); }
+      }
+      if (best >= 0) { hrs = best; cal = bestCal ?? cal; }
+      else cal = cals.get(rsrcCal.get(firstRsrc.get(row.task_id) ?? '')) ?? cal;
+    }
     const as = parseP6Date(row.act_start_date), af = parseP6Date(row.act_end_date);
     const status: Status = af != null ? 'CO' : as != null ? 'IP' : 'NS';
     const isMile = row.task_type === 'TT_Mile' || row.task_type === 'TT_FinMile';
-    const hrs = row.remain_drtn_hr_cnt !== '' && row.remain_drtn_hr_cnt != null ? Number(row.remain_drtn_hr_cnt) : Number(row.target_drtn_hr_cnt || 0);
     acts.set(row.task_id, {
       row, id: row.task_id, code: row.task_code || row.task_id, proj, cal, type: row.task_type || 'TT_Task', status,
       as: status === 'NS' ? null : (as ?? af), af: status === 'CO' ? af : null,
