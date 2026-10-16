@@ -360,8 +360,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         }
         const s = r.succ;
         if (!isMain(s)) continue;
-        // start links into in-progress successors constrain the predecessor too (retained logic)
-        let t = lagSub(r.type === 'FS' || r.type === 'SS' ? s.ls : s.lf, r);
+        // an in-progress predecessor has already used up the lag of its start links
+        const base = r.type === 'FS' || r.type === 'SS' ? s.ls : s.lf;
+        let t = a.status === 'IP' && (r.type === 'SS' || r.type === 'SF') ? base : lagSub(base, r);
         if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
         if (t < raw) raw = t;
       }
