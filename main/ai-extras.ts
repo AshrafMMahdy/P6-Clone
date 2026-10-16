@@ -11,7 +11,12 @@ export function parseExtraHeaders(text: string | undefined): Record<string, stri
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
     const m = /^([A-Za-z0-9!#$%&'*+.^_`|~-]+)\s*:\s*(.*)$/.exec(line);
-    if (!m) throw new Error(`Extra headers, line ${i + 1}: write it as "Header-Name: value".`);
+    if (!m) {
+      const name = line.split(':')[0].trim();
+      throw new Error(/\s/.test(name) && line.includes(':')
+        ? `Extra headers, line ${i + 1}: a header name cannot contain spaces ("${name}"); use dashes, e.g. "${name.replace(/\s+/g, '-')}: value".`
+        : `Extra headers, line ${i + 1}: write it as "Header-Name: value".`);
+    }
     out[m[1]] = m[2];
   }
   return out;
