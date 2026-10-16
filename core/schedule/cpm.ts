@@ -269,7 +269,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       if (applyLogic) {
         for (const r of a.preds) {
           if (r.pred && !isMain(r.pred)) continue;
-          if (a.status === 'IP' && (r.type === 'SS' || r.type === 'SF')) continue; // already started
+          // (Retained Logic applies start links to the remaining work of in-progress activities too.)
           let t: number | null;
           if (!r.pred) { t = extStart(r); if (t == null) continue; t = lagAdd(t, r); }
           else t = predTime(r);
@@ -316,7 +316,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         }
         const s = r.succ;
         if (!isMain(s)) continue;
-        if (s.status === 'IP' && (r.type === 'SS' || r.type === 'SF')) continue;
+        // start links into in-progress successors constrain the predecessor too (retained logic)
         let t = lagSub(r.type === 'FS' || r.type === 'SS' ? s.ls : s.lf, r);
         if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
         if (t < raw) raw = t;
