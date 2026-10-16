@@ -370,7 +370,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       a.tf = ef === 'finish' ? fin : ef === 'start' ? st : Math.min(fin, st);
       let ff = BIG;
       for (const r of a.succs) {
-        if (!r.succ || !isMain(r.succ) || r.succ.status === 'CO') continue;
+        if (!r.succ || !isMain(r.succ)) continue; // completed successors count too (zero-length at their date)
         r.slack = relSlack(r);
         if (r.slack < ff) ff = r.slack;
       }
