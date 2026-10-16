@@ -1,6 +1,7 @@
 // Merge a parsed XER into the clone database the way P6's Import wizard does.
 import { KEYS, refTarget, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
+import { isLegacyLayout } from '../schedule/cpm.ts';
 
 export type ProjectAction = 'new' | 'replace' | 'update' | 'skip';
 export type DictAction = 'keep' | 'update' | 'insert';
@@ -140,6 +141,8 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
       if (t === 'PROJECT') {
         const a = actions.get(r.proj_id);
         if (a?.epsId) nr._eps_id = a.epsId;
+        // remember which P6 build wrote the file: 6.x builds place milestones differently
+        nr._legacy_ms = isLegacyLayout(src) ? 'Y' : 'N';
       }
       dst.rows.push(nr);
     }

@@ -22,6 +22,8 @@ export interface SchedOptions {
   useExpectedFinish: boolean;
   criticalBy: 'float' | 'longestPath';
   criticalFloatHrs: number;
+  /** P6 6.x builds place milestones one minute inside a work period instead of across a non-work gap. */
+  legacyMilestones: boolean;
 }
 
 export interface ScheduleStats { activities: number; relationships: number; notStarted: number; inProgress: number; completed: number; finish: number | null; dataDate: number | null }
@@ -56,8 +58,14 @@ export function optionsFor(db: Db, proj: Row, over: Partial<SchedOptions> = {}):
     useExpectedFinish: so.sched_use_expect_end_flag === 'Y',
     criticalBy: proj.critical_path_type === 'CT_DrivPath' ? 'longestPath' : 'float',
     criticalFloatHrs: Number(proj.critical_drtn_hr_cnt || 0),
+    legacyMilestones: proj._legacy_ms != null && proj._legacy_ms !== '' ? proj._legacy_ms === 'Y' : isLegacyLayout(db),
   };
   return { ...base, ...over };
+}
+
+/** TASK layout written by P6 6.x builds (has the old_* restart fields). */
+export function isLegacyLayout(db: Db): boolean {
+  return !!db.tables.TASK?.fields.includes('old_restart_date');
 }
 
 /** Number as P6 writes it: up to 6 decimals, no trailing zeros. */
@@ -233,8 +241,10 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
   const snapEarly = (a: Act, raw: number, floor: number) => {
     if (a.type === 'TT_FinMile') {
-      const t = a.cal.prevWorkEnd(a.cal.nextWorkStart(raw));
-      a.es = a.ef = t < floor ? a.cal.nextWorkStart(raw) : t;
+      // A finish can sit inside work time or at a period end. P6 never moves a finish milestone back across
+      // a non-work gap: if it lands at a period start (or in a gap) it is placed one minute into the period.
+      if (a.proj.opts.legacyMilestones) a.es = a.ef = a.cal.prevWorkEnd(raw) === raw ? raw : a.cal.nextWorkStart(raw) + 1;
+      else { const t = a.cal.prevWorkEnd(a.cal.nextWorkStart(raw)); a.es = a.ef = t < floor ? a.cal.nextWorkStart(raw) : t; }
     } else if (a.type === 'TT_Mile') {
       a.es = a.ef = a.cal.nextWorkStart(raw);
     } else {
@@ -332,7 +342,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         }
       }
       raw = mand ?? raw;
-      if (a.type === 'TT_Mile') a.ls = a.lf = a.cal.nextWorkStart(a.cal.prevWorkEnd(raw));
+      // Mirror rule: a start milestone's late date at a period end (or in a gap) is one minute before the end.
+      if (a.type === 'TT_Mile') a.ls = a.lf = a.proj.opts.legacyMilestones ? (a.cal.nextWorkStart(raw) === raw ? raw : a.cal.prevWorkEnd(raw) - 1) : a.cal.nextWorkStart(a.cal.prevWorkEnd(raw));
       else if (a.type === 'TT_FinMile') a.ls = a.lf = a.cal.prevWorkEnd(raw);
       else {
         a.lf = mand ?? a.cal.prevWorkEnd(raw);
