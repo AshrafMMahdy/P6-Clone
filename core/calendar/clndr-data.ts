@@ -108,3 +108,8 @@ export function standardCalendar(): CalendarDef {
 export function hoursPerWeek(c: CalendarDef): number {
   return c.week.flat().reduce((a, x) => a + x.end - x.start, 0) / 60;
 }
+
+/** P6 project/resource calendars inherit holidays and exceptions from their base calendar; own exceptions win. */
+export function inheritExceptions(own: CalendarDef, base: CalendarDef): CalendarDef {
+  return { week: own.week, exceptions: new Map([...base.exceptions, ...own.exceptions]) };
+}
