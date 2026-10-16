@@ -22,17 +22,18 @@ const EXIT = { noProject: 3, open: 4, save: 5, missingOutput: 6 } as const;
  */
 export function buildConvertScript(direction: ConvertDirection, inPath: string, outPath: string): string {
   const toXml = direction === 'mppToXml';
+  // Named COM arguments: PowerShell cannot bind Project's long optional-parameter lists positionally.
   const open = toXml
-    ? '$ok = $app.FileOpenEx($in, $true)'
-    : "$ok = $app.FileOpenEx($in, $false, $m, $m, $m, $m, $m, $m, $m, 'MSProject.XML')";
+    ? "$ok = & $call 'FileOpenEx' @($in, $true) @('Name', 'ReadOnly')"
+    : "$ok = & $call 'FileOpenEx' @($in, $false, 'MSProject.XML') @('Name', 'ReadOnly', 'FormatID')";
   const save = toXml
-    ? "$app.FileSaveAs($out, $m, $m, $m, $m, $m, $m, $m, $m, 'MSProject.XML')"
-    : "$app.FileSaveAs($out, $m, $m, $m, $m, $m, $m, $m, $m, 'MSProject.MPP')";
+    ? "[void](& $call 'FileSaveAs' @($out, 'MSProject.XML') @('Name', 'FormatID'))"
+    : "[void](& $call 'FileSaveAs' @($out, 'MSProject.MPP') @('Name', 'FormatID'))";
   return [
     "$ErrorActionPreference = 'Stop'",
     `$in = ${psQuote(inPath)}`,
     `$out = ${psQuote(outPath)}`,
-    '$m = [Type]::Missing',
+    '$call = { param($name, [object[]]$vals, [string[]]$names) $app.GetType().InvokeMember($name, [Reflection.BindingFlags]::InvokeMethod, $null, $app, $vals, $null, $null, $names) }',
     '$app = $null',
     `try { $app = New-Object -ComObject MSProject.Application } catch { [Console]::Error.WriteLine('MSPROJECT_NOT_AVAILABLE: ' + $_.Exception.Message); exit ${EXIT.noProject} }`,
     'try {',

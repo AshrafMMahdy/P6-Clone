@@ -306,10 +306,10 @@ test('MPP bridge PowerShell script', () => {
   assert.ok(s.includes("$out = 'C:\\Temp\\out.xml'"));
   assert.ok(!s.includes('"'), 'no double quotes, so it survives -Command quoting');
   assert.ok(!/[\r\n]/.test(s), 'single line');
-  for (const part of ['New-Object -ComObject MSProject.Application', '$app.Visible = $false', '$app.DisplayAlerts = $false', '$app.FileOpenEx($in, $true)', "'MSProject.XML')", '$app.FileCloseEx(0)', '$app.Quit(0)', 'exit 3']) assert.ok(s.includes(part), part);
+  for (const part of ['New-Object -ComObject MSProject.Application', '$app.Visible = $false', '$app.DisplayAlerts = $false', "'FileOpenEx' @($in, $true)", "'MSProject.XML')", '$app.FileCloseEx(0)', '$app.Quit(0)', 'exit 3']) assert.ok(s.includes(part), part);
   const back = buildConvertScript('xmlToMpp', 'C:\\a.xml', 'D:\\b.mpp');
   assert.ok(back.includes("'MSProject.MPP')"));
-  assert.ok(back.includes("FileOpenEx($in, $false, $m, $m, $m, $m, $m, $m, $m, 'MSProject.XML')"));
+  assert.ok(back.includes("'FileOpenEx' @($in, $false, 'MSProject.XML') @('Name', 'ReadOnly', 'FormatID')"));
   assert.equal(psQuote("it's"), "'it''s'");
   assert.ok(convertError('mppToXml', 3, 'MSPROJECT_NOT_AVAILABLE: class not registered', false).startsWith(MSP_REQUIRED));
   assert.match(convertError('xmlToMpp', null, '', true), /did not finish within 120 s/);
