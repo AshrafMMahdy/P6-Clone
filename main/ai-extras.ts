@@ -8,16 +8,18 @@ export const RESERVED_BODY = ['messages', 'tools', 'system', 'tool_choice', 'str
 export function parseExtraHeaders(text: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [i, raw] of (text ?? '').split(/\r?\n/).entries()) {
-    const line = raw.trim();
+    // tolerate what copy-paste and keyboards produce: invisible characters, typographic dashes, a full-width colon,
+    // non-breaking spaces, "=" instead of ":", and spaces in the name (HTTP names cannot have them; they become dashes)
+    const line = raw.replace(/[​-‍⁠﻿]/g, '').replace(/[‐-―−]/g, '-')
+      .replace(/：/g, ':').replace(/[  -  　]/g, ' ').trim();
     if (!line || line.startsWith('#')) continue;
-    const m = /^([A-Za-z0-9!#$%&'*+.^_`|~-]+)\s*:\s*(.*)$/.exec(line);
-    if (!m) {
-      const name = line.split(':')[0].trim();
-      throw new Error(/\s/.test(name) && line.includes(':')
-        ? `Extra headers, line ${i + 1}: a header name cannot contain spaces ("${name}"); use dashes, e.g. "${name.replace(/\s+/g, '-')}: value".`
-        : `Extra headers, line ${i + 1}: write it as "Header-Name: value".`);
+    const sep = line.search(/[:=]/);
+    const name = sep > 0 ? line.slice(0, sep).trim().replace(/\s+/g, '-') : '';
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) {
+      const odd = [...(sep > 0 ? name : line)].find((c) => !/[A-Za-z0-9!#$%&'*+.^_`|~-]/.test(c));
+      throw new Error(`Extra headers, line ${i + 1}: write it as "Header-Name: value"${odd ? ` (the name contains "${odd}", U+${odd.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')})` : ''}.`);
     }
-    out[m[1]] = m[2];
+    out[name] = line.slice(sep + 1).trim();
   }
   return out;
 }

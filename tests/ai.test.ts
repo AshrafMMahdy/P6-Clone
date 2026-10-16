@@ -90,3 +90,13 @@ test('extra headers and request parameters are merged, validated, and headers st
   assert.equal(store.config().extraBody, cfg.extraBody);
   assert.throws(() => store.save({ ...cfg, extraBody: '{bad' }), /not valid JSON/);
 });
+
+test('extra headers tolerate pasted text: spaces in names, typographic dashes, invisible characters', async () => {
+  const { parseExtraHeaders } = await import('../main/ai-extras.ts');
+  for (const s of ['WORKSPACE ID: wrkspc_01ab', 'WORKSPACE-ID: wrkspc_01ab', 'WORKSPACE‑ID: wrkspc_01ab', 'WORKSPACE–ID : wrkspc_01ab',
+    '​WORKSPACE-ID: wrkspc_01ab', 'WORKSPACE-ID： wrkspc_01ab', 'WORKSPACE ID: wrkspc_01ab', 'WORKSPACE-ID = wrkspc_01ab'])
+    assert.deepEqual(parseExtraHeaders(s), { 'WORKSPACE-ID': 'wrkspc_01ab' }, JSON.stringify(s));
+  assert.deepEqual(parseExtraHeaders('X-A: b=c:d'), { 'X-A': 'b=c:d' });
+  assert.throws(() => parseExtraHeaders('X(A): b'), /contains "\("/);
+  assert.throws(() => parseExtraHeaders('no separator'), /line 1/);
+});
