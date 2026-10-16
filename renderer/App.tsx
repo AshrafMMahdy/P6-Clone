@@ -16,6 +16,8 @@ import { applyApprovedTimesheets, formatApplySummary, hasPendingActuals } from '
 import { ImportWizard, ExportWizard } from './dialogs/Wizards.tsx';
 import { BarsDialog } from './dialogs/BarsDialog.tsx';
 import { FindDialog } from './dialogs/FindDialog.tsx';
+import { AiSettingsDialog } from './dialogs/AiSettingsDialog.tsx';
+import { AssistantPanel } from './ai/AssistantPanel.tsx';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, AssignBaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
 import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
@@ -30,7 +32,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
+  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
@@ -69,6 +71,8 @@ export function runMenu(id: string): void {
     case 'edit.renumber': return void renumberActivities();
     case 'edit.preferences': return openDialog('prefs');
     case 'edit.selectAll': return void handleEditKey(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true }));
+    case 'edit.aiSettings': return openDialog('aiSettings');
+    case 'view.ai': return void window.p6.aiGetConfig().then((c) => (c.enabled ? setUi((u) => ({ aiOpen: !u.aiOpen })) : openDialog('aiSettings')));
     case 'edit.find': return ui.openProjects.length ? openDialog('find') : toast('Open a project first.');
     case 'view.columns': return openDialog('columns');
     case 'view.filters': return openDialog('filters');
@@ -193,6 +197,7 @@ export function App() {
     });
     const k = (e: KeyboardEvent) => {
       if (e.key === 'F9' && !e.shiftKey) { e.preventDefault(); runMenu('tools.schedule'); return; }
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); runMenu('view.ai'); return; }
       // Ctrl + plus/minus (main keyboard or numpad): zoom the timescale; with Shift: expand/collapse all
       if (e.ctrlKey && !e.altKey && !getUi().dialogs.length) {
         const plus = e.key === '=' || e.key === '+' || e.code === 'NumpadAdd' || e.code === 'Equal';
@@ -224,6 +229,7 @@ export function App() {
             {p0 && ui.view !== 'projects' && ui.view !== 'resources' && <span className="sub">{open.map((p) => `${p.proj_short_name} - ${projectName(db, p)}`).join('; ')}</span>}
           </div>
           <div className="winbody"><View /></div>
+          <AssistantPanel />
         </div>
       </div>
       <div className="statusbar">

@@ -35,6 +35,7 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
 - **Microsoft Project**: File > Import / Export also read and write MSPDI XML and MPX; .mpp goes through your installed Microsoft Project (it converts to/from XML in the background).
 - **Timesheets** window (periods, entry, submit/approve/reject) and **Tools > Apply Actuals**; **Risks** window (register, probability/impact matrix, Monte Carlo schedule risk analysis); **Enterprise > Project Portfolios**.
 - **Resource curves**: an assignment's curve (Resources tab, Curve column) shapes how its units are spread in usage profiles and spreadsheets.
+- **AI assistant** (optional, off by default): Edit > AI Assistant Settings: provider (Anthropic, OpenAI, OpenRouter, LM Studio, Ollama or any OpenAI-compatible server), URL, model, API key. The key is encrypted with Windows' protection and kept by the app's background process (never in the project database). When enabled, a strip on the right edge (Ctrl+Shift+A) opens a chat over the Gantt; the assistant reads the open project through lookups (summary, activity search, activity details, WBS, critical path, schedule health, resources), so it works on very large programmes, and activity IDs in its answers jump to the activity. Project data goes to the provider you choose; use a local server to keep it on your computer.
 - **File > Export**: XER (choose P6 version 5.0 … 24.12) or P6 XML. After writing, the clone re-reads the file and validates it.
 
 ## CLI (for your agent)

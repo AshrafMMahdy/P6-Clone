@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } from 'electron';
+import { AiStore, chat, type AiConfig, type ChatRequest } from './ai.ts';
 import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -100,6 +101,25 @@ ipcMain.handle('print:preview', async (_e, landscape: boolean) => {
   await pv.loadFile(file);
   return true;
 });
+
+// AI assistant: settings (key encrypted, never sent to the window) and chat calls
+let aiStore: AiStore | null = null;
+const ai = () => (aiStore ??= new AiStore(join(app.getPath('userData'), 'ai-assistant.json'), {
+  available: () => safeStorage.isEncryptionAvailable(),
+  encrypt: (s) => safeStorage.encryptString(s).toString('base64'),
+  decrypt: (s) => safeStorage.decryptString(Buffer.from(s, 'base64')),
+}));
+const aiCalls = new Map<string, AbortController>();
+ipcMain.handle('ai:getConfig', () => ai().publicConfig());
+ipcMain.handle('ai:setConfig', (_e, c: AiConfig, apiKey?: string) => { const r = ai().save(c, apiKey); win?.webContents.send('ai:config', r); return r; });
+ipcMain.handle('ai:chat', async (_e, id: string, req: ChatRequest) => {
+  const ctl = new AbortController();
+  aiCalls.set(id, ctl);
+  try { return { ok: true, reply: await chat(ai(), req, ctl.signal) }; }
+  catch (e) { return { ok: false, error: (e as Error).name === 'AbortError' ? 'Stopped.' : (e as Error).message }; }
+  finally { aiCalls.delete(id); }
+});
+ipcMain.handle('ai:cancel', (_e, id: string) => { aiCalls.get(id)?.abort(); return true; });
 
 ipcMain.handle('startup:import', () => {
   const p = argVal('--import');

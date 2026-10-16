@@ -34,6 +34,8 @@ export interface UiState {
   relLines: boolean;
   /** View > Show on Top: hide the activity table or the Gantt chart */
   hideTable?: boolean; hideGantt?: boolean;
+  /** AI assistant panel expanded / widened */
+  aiOpen?: boolean; aiWide?: boolean;
   /** scroll this activity into view once (Find, Go To) */
   revealTask?: string;
   /** Activity table column widths you dragged */

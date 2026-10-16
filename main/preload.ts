@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AiConfig, AiPublicConfig, ChatReply, ChatRequest } from './ai.ts';
 
 export interface OpenedFile { path: string; name: string; bytes: Uint8Array }
 export interface Filter { name: string; extensions: string[] }
@@ -36,6 +37,12 @@ const api = {
   pdf: (name: string, landscape: boolean): Promise<string | null> => ipcRenderer.invoke('pdf', name, landscape),
   startupImport: (): Promise<OpenedFile | null> => ipcRenderer.invoke('startup:import'),
   confirm: (message: string, detail?: string): Promise<boolean> => ipcRenderer.invoke('confirm', message, detail),
+  /** AI assistant (the API key stays in the main process) */
+  aiGetConfig: (): Promise<AiPublicConfig> => ipcRenderer.invoke('ai:getConfig'),
+  aiSetConfig: (c: AiConfig, apiKey?: string): Promise<AiPublicConfig> => ipcRenderer.invoke('ai:setConfig', c, apiKey),
+  aiChat: (id: string, req: ChatRequest): Promise<{ ok: true; reply: ChatReply } | { ok: false; error: string }> => ipcRenderer.invoke('ai:chat', id, req),
+  aiCancel: (id: string): Promise<boolean> => ipcRenderer.invoke('ai:cancel', id),
+  onAiConfig: (cb: (c: AiPublicConfig) => void) => { ipcRenderer.on('ai:config', (_e, c: AiPublicConfig) => cb(c)); },
   /** .mpp bytes -> Microsoft Project XML bytes, converted by the installed Microsoft Project. Rejects with the bridge error. */
   mppToXml: (bytes: Uint8Array): Promise<Uint8Array> => ipcRenderer.invoke('msp:mppToXml', bytes),
   /** Ask for an .mpp path and save Microsoft Project XML bytes there through Microsoft Project. Null when cancelled. */

@@ -48,6 +48,7 @@ export function buildMenu(win: BrowserWindow): Menu {
         cmd('Select &All', 'edit.selectAll', 'Ctrl+A', { registerAccelerator: false }),
         cmd('&Find...', 'edit.find', 'Ctrl+F'),
         cmd('User &Preferences...', 'edit.preferences'),
+        cmd('AI Assistant Se&ttings...', 'edit.aiSettings'),
       ],
     },
     {
@@ -69,6 +70,7 @@ export function buildMenu(win: BrowserWindow): Menu {
         sep,
         cmd('Relationship &Lines', 'view.relLines'),
         cmd('&Progress Spotlight', 'view.spotlight'),
+        cmd('AI &Assistant', 'view.ai', 'Ctrl+Shift+A', { registerAccelerator: false }),
         sep,
         { label: 'Reload', role: 'reload', accelerator: 'Ctrl+R' },
         { label: 'Developer Tools', role: 'toggleDevTools', accelerator: 'Ctrl+Shift+I' },
