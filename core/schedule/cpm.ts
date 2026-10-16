@@ -374,6 +374,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     for (let i = order.length - 1; i >= 0; i--) {
       const a = order[i];
       let raw = a.proj.lateFinish;
+      let startBound = BIG; // latest start allowed by start-to-start / start-to-finish successors
       for (const r of a.succs) {
         if (!r.succ) {
           const ext = parseP6Date(a.row.external_late_end_date);
@@ -396,7 +397,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
           const left = r.lag - Math.max(0, lc.workBetween(Math.min(a.as!, a.proj.dd), a.proj.dd));
           t = left > 0 ? lc.subWork(base, left) : base;
         } else t = lagSub(base, r);
-        if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
+        if (r.type === 'SS' || r.type === 'SF') { if (t < startBound) startBound = t; t = a.dur ? a.cal.addWork(t, a.dur) : t; }
         if (t < raw) raw = t;
       }
       if (a.status === 'CO') { a.ls = a.lf = raw; continue; }
@@ -416,6 +417,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       else {
         a.lf = mand ?? a.cal.prevWorkEnd(raw);
         a.ls = a.dur ? a.cal.subWork(a.lf, a.dur) : a.lf;
+        // a start link's limit at the end of a workday is kept as written (same work instant as the next start)
+        if (a.dur && startBound < a.ls && a.cal.workBetween(startBound, a.ls) === 0) a.ls = startBound;
         // P6: a task-dependent activity starts late no later than its longest assignment, and an assignment with
         // no units rate keeps the duration of its stored dates (it does not follow the activity's).
         if (a.type === 'TT_Task' && a.status === 'NS') for (const asg of asgByTask.get(a.row.task_id) ?? []) {

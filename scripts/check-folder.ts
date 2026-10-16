@@ -37,9 +37,10 @@ for (const file of statSync(dir).isFile() ? [dir] : walk(dir)) {
   const sched = ms(t);
   if (!res.ok) { console.log(`  schedule FAILED in ${sched}: ${res.findings.filter((x) => x.severity === 'error').slice(0, 3).map((x) => x.message).join(' | ')}`); continue; }
   const after = new Map(db.tables.TASK.rows.map((r) => [r.task_id, r]));
-  let acts = 0, wrong = 0, shown = 0;
+  let acts = 0, wrong = 0, shown = 0, unscheduled = 0;
   for (const o of orig.tables.TASK?.rows ?? []) {
     if (o.status_code === 'TK_Complete' || o.act_end_date) continue;
+    if (!o.early_start_date) { unscheduled++; continue; } // P6 never scheduled it (added after the last F9)
     acts++;
     const a = after.get(o.task_id)!;
     for (const f of FIELDS) {
@@ -48,5 +49,5 @@ for (const file of statSync(dir).isFile() ? [dir] : walk(dir)) {
     }
   }
   const mem = Math.round(process.memoryUsage().heapUsed / 1048576);
-  console.log(`  schedule ${sched}, heap ${mem} MB; open activities ${acts}: ${wrong ? `${wrong} values differ from the saved dates` : 'EXACT match with the saved dates'}`);
+  console.log(`  schedule ${sched}, heap ${mem} MB; open activities ${acts}${unscheduled ? ` (+${unscheduled} with no saved dates: never scheduled in P6)` : ''}: ${wrong ? `${wrong} values differ from the saved dates` : 'EXACT match with the saved dates'}`);
 }
