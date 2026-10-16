@@ -20,3 +20,14 @@ const by = new Map<string, number>();
 for (const t of roots) { const k = `${t.task_type} ${t.status_code}${t.cstr_type ? ' ' + t.cstr_type : ''}`; by.set(k, (by.get(k) ?? 0) + 1); }
 console.log('roots by kind:', JSON.stringify(Object.fromEntries(by)));
 for (const t of roots.slice(0, Number(n))) { const a = A.get(t.task_id)!; console.log(t.task_code, t.task_type, t.status_code, t.cstr_type || '', 'ES', t.early_start_date, a.early_start_date, 'EF', t.early_end_date, a.early_end_date, 'act', t.act_start_date || '-'); }
+
+// LATE=1: also list late-date roots (late dates differ, but no successor's late dates differ)
+if (process.env.LATE) {
+  const lateBad = (t: Record<string, string>) => { const a = A.get(t.task_id)!; return t.late_start_date !== a.late_start_date || t.late_end_date !== a.late_end_date; };
+  const lb = new Set(open.filter(lateBad).map((t) => t.task_id));
+  const succs = new Map<string, string[]>();
+  for (const r of o.tables.TASKPRED.rows) { let l = succs.get(r.pred_task_id); if (!l) succs.set(r.pred_task_id, (l = [])); l.push(r.task_id); }
+  const lroots = open.filter((t) => lb.has(t.task_id) && !(succs.get(t.task_id) ?? []).some((s) => lb.has(s)));
+  console.log(`late-date mismatches ${lb.size}, late roots ${lroots.length}`);
+  for (const t of lroots.slice(0, Number(n))) { const a = A.get(t.task_id)!; console.log(' ', t.task_code, t.task_type, t.cstr_type || '', 'LS', t.late_start_date, a.late_start_date, 'LF', t.late_end_date, a.late_end_date); }
+}

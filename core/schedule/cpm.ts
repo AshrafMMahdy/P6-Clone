@@ -26,6 +26,8 @@ export interface SchedOptions {
   legacyMilestones: boolean;
   /** Written by P6 8.x or later (ERMHDR version): these builds differ in a few placement rules. */
   modernBuild: boolean;
+  /** Floats and open ends measured to the latest finish of all projects scheduled together, not each project's own. */
+  floatOnOpenedProjects: boolean;
 }
 
 export interface ScheduleStats { activities: number; relationships: number; notStarted: number; inProgress: number; completed: number; finish: number | null; dataDate: number | null }
@@ -37,6 +39,8 @@ type Status = 'NS' | 'IP' | 'CO';
 interface Proj {
   row: Row; id: string; dd: number; floor: number; opts: SchedOptions; cal: WorkCalendar;
   mfb: number | null; finish: number; lateFinish: number;
+  /** Finish that floats and open ends are measured to: the project's own, or the latest of all projects scheduled together. */
+  floatEnd: number;
 }
 interface Act {
   row: Row; id: string; code: string; proj: Proj; cal: WorkCalendar; fcal: WorkCalendar; type: string; status: Status;
@@ -61,6 +65,7 @@ export function optionsFor(db: Db, proj: Row, over: Partial<SchedOptions> = {}):
     criticalBy: proj.critical_path_type === 'CT_DrivPath' ? 'longestPath' : 'float',
     criticalFloatHrs: Number(proj.critical_drtn_hr_cnt || 0),
     legacyMilestones: proj._legacy_ms != null && proj._legacy_ms !== '' ? proj._legacy_ms === 'Y' : isLegacyLayout(db),
+    floatOnOpenedProjects: so.sched_use_project_end_date_for_float === 'N',
     modernBuild: Number((proj._p6_ver || db.header?.version || '0').split('.')[0]) >= 8,
   };
   return { ...base, ...over };
@@ -125,7 +130,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     const dd = opts.dataDate ?? parseP6Date(row.last_recalc_date) ?? parseP6Date(row.plan_start_date) ?? Math.floor(Date.now() / 60000 / 1440) * 1440;
     // Not-started work cannot start before the data date or the project planned start.
     const ps = parseP6Date(row.plan_start_date);
-    projects.set(row.proj_id, { row, id: row.proj_id, dd, floor: ps != null && ps > dd ? ps : dd, opts, cal: cals.fallback(row.clndr_id), mfb: parseP6Date(row.plan_end_date), finish: dd, lateFinish: dd });
+    projects.set(row.proj_id, { row, id: row.proj_id, dd, floor: ps != null && ps > dd ? ps : dd, opts, cal: cals.fallback(row.clndr_id), mfb: parseP6Date(row.plan_end_date), finish: dd, lateFinish: dd, floatEnd: dd });
   }
   const emptyStats: ScheduleStats = { activities: 0, relationships: 0, notStarted: 0, inProgress: 0, completed: 0, finish: null, dataDate: null };
   if (!projects.size) {
@@ -369,7 +374,13 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       let f = p.dd;
       for (const a of main) if (a.proj === p && a.status !== 'CO' && a.ef > f) f = a.ef;
       p.finish = f;
-      p.lateFinish = p.mfb ?? f;
+    }
+    // P6 option "calculate float based on the finish date of: opened projects" (sched_use_project_end_date_for_float = N)
+    let opened = -BIG;
+    for (const p of projects.values()) if (p.opts.floatOnOpenedProjects && p.finish > opened) opened = p.finish;
+    for (const p of projects.values()) {
+      p.floatEnd = p.opts.floatOnOpenedProjects ? opened : p.finish;
+      p.lateFinish = p.mfb ?? p.floatEnd;
     }
 
     // Backward pass
@@ -402,6 +413,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (r.type === 'SS' || r.type === 'SF') { if (t < startBound) startBound = t; t = a.dur ? a.cal.addWork(t, a.dur) : t; }
         if (t < raw) raw = t;
       }
+      // links to projects outside the file: P6 stores their limit as the external late finish (often with no link row)
+      const extLate = a.proj.opts.ignoreExternal ? null : parseP6Date(a.row.external_late_end_date);
+      if (extLate != null && extLate < raw) raw = extLate;
       if (a.status === 'CO') { a.ls = a.lf = raw; continue; }
       let mand: number | null = null;
       if (a.status === 'NS') {
@@ -452,7 +466,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (r.slack < ff) ff = r.slack;
       }
       // open end: free float to the project finish; P6 6.x builds stop at the end of the Must Finish By day if earlier
-      const openEnd = a.proj.opts.legacyMilestones && a.proj.mfb != null ? Math.min(a.proj.finish, a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY)) : a.proj.finish;
+      const openEnd = a.proj.opts.legacyMilestones && a.proj.mfb != null ? Math.min(a.proj.floatEnd, a.cal.prevWorkEnd(Math.floor(a.proj.mfb / MIN_PER_DAY + 1) * MIN_PER_DAY)) : a.proj.floatEnd;
       a.ff = ff === BIG ? a.cal.workBetween(a.ef, openEnd) : ff;
       if (a.proj.opts.useExpectedFinish && a.row.expect_end_date) a.ff = 0; // P6: an expected finish pins the activity (no free float)
     }
@@ -469,7 +483,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
         if (t < ef) ef = t;
       }
-      if (ef === BIG) ef = Math.min(a.lf, a.proj.finish); // no successors: as late as the project's finish
+      if (ef === BIG) ef = Math.min(a.lf, a.proj.floatEnd); // no successors: as late as the project's finish
       a.ff = 0; // ALAP uses up all free float
       if (ef <= a.ef || a.cal.workBetween(a.ef, ef) <= 0) continue;
       a.ef = ef = a.dur || a.type === 'TT_FinMile' ? a.cal.prevWorkEnd(ef) : ef; // a finish sits at the end of the last work period
@@ -499,11 +513,14 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
     }
 
-    // Level of effort: spans from its predecessors to its successors
-    for (const a of acts.values()) {
+    // Level of effort: spans from its predecessors to its successors. Two passes, so an LOE whose successor is another
+    // LOE sees that LOE's dates.
+    const loeDur = new Map<Act, number>(), loeDone = new Set<Act>();
+    for (let pass = 0; pass < 2; pass++) for (const a of acts.values()) {
       if (!isMain(a) && a.status === 'CO') { a.es = a.ef = a.ls = a.lf = a.proj.dd; continue; }
       if (a.type !== 'TT_LOE' || a.status === 'CO') continue;
       let es = BIG, ef = -BIG, ls = BIG, lf = -BIG;
+      const dur0 = loeDur.get(a) ?? a.dur; loeDur.set(a, dur0);
       for (const r of a.preds) {
         if (!r.pred || r.pred.type === 'TT_LOE' || r.pred.type === 'TT_WBS') continue;
         const p = r.pred;
@@ -512,7 +529,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (r.type === 'SS' || r.type === 'FS') { es = Math.min(es, e); ls = Math.min(ls, l); } else { ef = Math.max(ef, e); lf = Math.max(lf, l); }
       }
       for (const r of a.succs) {
-        if (!r.succ || r.succ.type === 'TT_LOE' || r.succ.type === 'TT_WBS') continue;
+        if (!r.succ || r.succ.type === 'TT_WBS' || (r.succ.type === 'TT_LOE' && !loeDone.has(r.succ))) continue;
         const s = r.succ;
         const e = lagSub(r.type === 'FS' || r.type === 'SS' ? startOf(s) : finishOf(s), r);
         const l = lagSub(r.type === 'FS' || r.type === 'SS' ? (s.status === 'NS' ? s.ls : s.as!) : (s.status === 'CO' ? s.af! : s.lf), r);
@@ -522,8 +539,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       if (es === BIG) { es = floor; ls = floor; }
       es = a.cal.nextWorkStart(Math.max(es, floor));
       ls = a.cal.nextWorkStart(Math.max(ls, floor));
-      if (ef === -BIG) { ef = a.dur ? a.cal.addWork(es, a.dur) : es; lf = a.dur ? a.cal.addWork(ls, a.dur) : ls; }
-      ef = Math.max(es, a.cal.prevWorkEnd(ef));
+      if (ef === -BIG) { ef = dur0 ? a.cal.addWork(es, dur0) : es; lf = dur0 ? a.cal.addWork(ls, dur0) : ls; }
+      ef = a.cal.prevWorkEnd(ef);
+      if (ef <= es) ef = dur0 ? a.cal.addWork(es, dur0) : es; // successors finishing before it starts: P6 keeps its own duration
       lf = a.cal.prevWorkEnd(lf);
       if (ls > lf) ls = lf; // a late start past the successor-driven late finish is pulled back to it
       if (a.status === 'IP') ls = a.cal.nextWorkStart(a.as!); // P6 reports an in-progress LOE's late start as its actual start (at work time)
@@ -531,6 +549,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       a.dur = a.cal.workBetween(es, ef);
       a.tf = a.cal.workBetween(ef, lf);
       a.ff = 0;
+      loeDone.add(a);
     }
 
     // WBS summary activities span their WBS subtree
@@ -539,7 +558,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     for (const a of acts.values()) {
       if (a.type !== 'TT_WBS') continue;
       const kids = [...acts.values()].filter((b) => b !== a && b.type !== 'TT_WBS' && b.status !== 'CO' && b.proj === a.proj && under(b.row.wbs_id, a.row.wbs_id));
-      const openEnd = a.proj.finish;
+      const openEnd = a.proj.floatEnd;
       if (!kids.length) { a.es = a.ef = a.ls = a.lf = a.cal.nextWorkStart(a.proj.dd); a.dur = 0; a.tf = 0; }
       else {
         a.es = kids.reduce((x, k) => Math.min(x, k.es), BIG); a.ef = kids.reduce((x, k) => Math.max(x, k.ef), -BIG);
