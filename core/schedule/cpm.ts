@@ -37,7 +37,7 @@ interface Proj {
   mfb: number | null; finish: number; lateFinish: number;
 }
 interface Act {
-  row: Row; id: string; code: string; proj: Proj; cal: WorkCalendar; type: string; status: Status;
+  row: Row; id: string; code: string; proj: Proj; cal: WorkCalendar; fcal: WorkCalendar; type: string; status: Status;
   as: number | null; af: number | null; dur: number;
   es: number; ef: number; ls: number; lf: number;
   preds: Rel[]; succs: Rel[]; tf: number | null; ff: number | null; driving: boolean; done: boolean;
@@ -152,6 +152,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     const proj = projects.get(row.proj_id);
     if (!proj) continue;
     let cal = cals.get(sameNameProjectCal.get(row.proj_id + '|' + row.clndr_id) ?? row.clndr_id) ?? proj.cal;
+    const taskCal = cal; // floats are measured on the activity's own calendar (even for resource dependent)
     let hrs = row.remain_drtn_hr_cnt !== '' && row.remain_drtn_hr_cnt != null ? Number(row.remain_drtn_hr_cnt) : Number(row.target_drtn_hr_cnt || 0);
     if (row.task_type === 'TT_Rsrc') {
       // Resource dependent: the longest labor/nonlabor assignment drives, on its resource's calendar,
@@ -171,7 +172,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     const status: Status = af != null ? 'CO' : as != null ? 'IP' : 'NS';
     const isMile = row.task_type === 'TT_Mile' || row.task_type === 'TT_FinMile';
     acts.set(row.task_id, {
-      row, id: row.task_id, code: row.task_code || row.task_id, proj, cal, type: row.task_type || 'TT_Task', status,
+      row, id: row.task_id, code: row.task_code || row.task_id, proj, cal, fcal: taskCal, type: row.task_type || 'TT_Task', status,
       as: status === 'NS' ? null : (as ?? af), af: status === 'CO' ? af : null,
       dur: isMile || status === 'CO' ? 0 : Math.max(0, Math.round((Number.isFinite(hrs) ? hrs : 0) * H)),
       es: 0, ef: 0, ls: BIG, lf: BIG, preds: [], succs: [], tf: null, ff: null, driving: false, done: false,
@@ -410,12 +411,12 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       const a = r.pred!, s = r.succ!;
       const from = predTime(r);
       const to = r.type === 'FS' || r.type === 'SS' ? (s.status === 'NS' ? s.es : s.es) : s.ef;
-      return a.cal.workBetween(from, to);
+      return a.fcal.workBetween(from, to);
     };
     for (const a of order) {
       if (a.status === 'CO') continue;
       const ef = a.proj.opts.floatType;
-      const fin = a.cal.workBetween(a.ef, a.lf), st = a.cal.workBetween(a.es, a.ls);
+      const fin = a.fcal.workBetween(a.ef, a.lf), st = a.fcal.workBetween(a.es, a.ls);
       a.tf = ef === 'finish' ? fin : ef === 'start' ? st : Math.min(fin, st);
       let ff = BIG;
       for (const r of a.succs) {
@@ -446,7 +447,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       a.ef = ef;
       a.es = a.dur ? a.cal.subWork(ef, a.dur) : ef;
       a.ff = 0;
-      const fin = a.cal.workBetween(a.ef, a.lf), st = a.cal.workBetween(a.es, a.ls);
+      const fin = a.fcal.workBetween(a.ef, a.lf), st = a.fcal.workBetween(a.es, a.ls);
       a.tf = a.proj.opts.floatType === 'finish' ? fin : a.proj.opts.floatType === 'start' ? st : Math.min(fin, st);
       for (const r of a.preds) {
         if (!r.pred || !isMain(r.pred) || r.pred.status === 'CO') continue;
