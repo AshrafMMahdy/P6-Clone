@@ -444,7 +444,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
       a.ff = 0; // ALAP uses up all free float
       if (ef <= a.ef || a.cal.workBetween(a.ef, ef) <= 0) continue;
-      a.ef = ef;
+      a.ef = ef = a.dur ? a.cal.prevWorkEnd(ef) : ef; // a finish sits at the end of the last work period
       a.es = a.dur ? a.cal.subWork(ef, a.dur) : ef;
       a.ff = 0;
       const fin = a.fcal.workBetween(a.ef, a.lf), st = a.fcal.workBetween(a.es, a.ls);
