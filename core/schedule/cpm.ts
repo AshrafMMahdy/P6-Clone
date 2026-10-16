@@ -276,6 +276,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
       const floor = a.status === 'NS' ? a.proj.floor : a.proj.dd;
       let raw = floor;
+      let finDriver: number | null = null; // required finish from an FF/SF link, when it drives
       const applyLogic = a.status === 'NS' || a.proj.opts.logic !== 'override';
       if (applyLogic) {
         for (const r of a.preds) {
@@ -287,9 +288,11 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
           if (r.type === 'FF' || r.type === 'SF') {
             // P6 6.x: a required finish at a period start becomes one minute into that period
             if (a.proj.opts.legacyMilestones && a.dur && a.cal.prevWorkEnd(t) !== t) t = a.cal.nextWorkStart(t) + 1;
+            const rf = t;
             t = a.dur ? a.cal.subWork(t, a.dur) : t;
+            if (t > raw) { raw = t; finDriver = rf; continue; }
           }
-          if (t > raw) raw = t;
+          if (t > raw) { raw = t; finDriver = null; }
         }
         const ext = parseP6Date(a.row.external_early_start_date);
         if (ext != null && !a.proj.opts.ignoreExternal && !a.preds.some((r) => !r.pred) && ext > raw) raw = ext;
@@ -308,6 +311,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         a.dur = Math.max(0, a.cal.workBetween(a.cal.nextWorkStart(mand ?? raw), exp));
       }
       snapEarly(a, mand ?? raw, floor);
+      // P6 5.x/7.x builds keep a link-driven finish that falls on a period start as that time (same work instant)
+      if (!a.proj.opts.legacyMilestones && finDriver != null && mand == null && a.dur && a.type !== 'TT_FinMile' && finDriver > a.ef && a.cal.nextWorkStart(finDriver) === finDriver && a.cal.workBetween(a.ef, finDriver) === 0) a.ef = finDriver;
       if (mand != null) { a.es = mand; a.ef = a.dur ? a.cal.addWork(mand, a.dur) : mand; }
     }
 
@@ -376,13 +381,26 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       }
       a.ff = ff === BIG ? a.cal.workBetween(a.ef, a.proj.finish) : ff;
     }
-    for (const a of order) {
-      if (a.status !== 'NS' || !cstr(a).some(([t]) => t === 'CS_ALAP') || !a.ff || a.ff <= 0) continue;
-      const shift = a.ff;
-      a.es = a.cal.addWork(a.es, shift);
-      a.ef = a.dur ? a.cal.addWork(a.es, a.dur) : a.es;
+    // As Late As Possible: from the end of the network backwards, finish at the latest time that does not delay
+    // any successor's early dates (successors already final), never past the activity's own late finish.
+    for (let i = order.length - 1; i >= 0; i--) {
+      const a = order[i];
+      if (a.status !== 'NS' || a.type === 'TT_LOE' || !cstr(a).some(([t]) => t === 'CS_ALAP')) continue;
+      let ef = a.lf;
+      for (const r of a.succs) {
+        if (!r.succ || !isMain(r.succ) || r.succ.status === 'CO') continue;
+        const s = r.succ;
+        let t = lagSub(r.type === 'FS' || r.type === 'SS' ? s.es : s.ef, r);
+        if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
+        if (t < ef) ef = t;
+      }
+      if (ef <= a.ef || a.cal.workBetween(a.ef, ef) <= 0) continue;
+      a.ef = ef;
+      a.es = a.dur ? a.cal.subWork(ef, a.dur) : ef;
       a.ff = 0;
-      a.tf = (a.tf ?? 0) - shift;
+      const fin = a.cal.workBetween(a.ef, a.lf), st = a.cal.workBetween(a.es, a.ls);
+      a.tf = a.proj.opts.floatType === 'finish' ? fin : a.proj.opts.floatType === 'start' ? st : Math.min(fin, st);
+      for (const r of a.preds) if (r.pred && isMain(r.pred) && r.pred.status !== 'CO') r.slack = relSlack(r);
     }
 
     // Longest path: back from the latest-finishing activities along driving relationships
@@ -439,7 +457,10 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       a.ls = kids.reduce((x, k) => Math.min(x, k.ls), BIG); a.lf = kids.reduce((x, k) => Math.max(x, k.lf), -BIG);
       a.dur = a.cal.workBetween(a.es, a.ef);
       a.tf = a.cal.workBetween(a.ef, a.lf);
-      a.ff = 0;
+      // free float from its own successors, else open-end rule, like any other activity
+      let wff = BIG;
+      for (const r of a.succs) if (r.succ && isMain(r.succ)) wff = Math.min(wff, a.cal.workBetween(lagAdd(r.type === 'FS' || r.type === 'FF' ? a.ef : a.es, r), r.type === 'FS' || r.type === 'SS' ? r.succ.es : r.succ.ef));
+      a.ff = wff === BIG ? a.cal.workBetween(a.ef, a.proj.finish) : wff;
       if (a.status === 'CO') a.status = 'IP';
     }
 
