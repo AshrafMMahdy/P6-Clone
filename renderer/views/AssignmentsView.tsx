@@ -31,7 +31,8 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 
 const num = (s: string | undefined) => Number(s || 0) || 0;
 const fmtN = (n: number) => String(Math.round(n * 100) / 100);
-const money = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const USD = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }); // one formatter (creating one per cell is slow)
+const money = (n: number) => USD.format(n);
 const actQty = (a: Row) => num(a.act_reg_qty) + num(a.act_ot_qty);
 const actCost = (a: Row) => num(a.act_reg_cost) + num(a.act_ot_cost);
 

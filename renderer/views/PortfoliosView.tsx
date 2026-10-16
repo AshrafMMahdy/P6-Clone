@@ -13,7 +13,8 @@ import {
 } from '../../core/portfolio.ts';
 
 const ALL = '*';
-const money = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const USD = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }); // one formatter (creating one per cell is slow)
+const money = (n: number) => USD.format(n);
 const ratio = (n: number) => (n ? n.toFixed(2) : '');
 
 function edit(label: string, fn: (db: Db) => void): boolean {

@@ -3,11 +3,14 @@ import { rows, table, type Db } from '../db.ts';
 import { selectRows } from '../xer/write.ts';
 import { importIntoDb, deleteProject } from '../xer/import.ts';
 import { formatP6Date } from '../dates.ts';
+import { rawOf } from '../journal.ts';
 
 /** Copy a project as a baseline. Returns the baseline's proj_id. */
 export function saveBaseline(db: Db, projId: string, name?: string): string {
   const src: Db = { tables: {} };
-  for (const [t, rs] of selectRows(db, [projId])) src.tables[t] = { name: t, fields: [...(db.tables[t]?.fields ?? [])], rows: rs.map((r) => ({ ...r })) };
+  // read-only copy: read the real rows, not the undo journal's recording view
+  const rdb = rawOf(db);
+  for (const [t, rs] of selectRows(rdb, [projId])) src.tables[t] = { name: t, fields: [...(rdb.tables[t]?.fields ?? [])], rows: rs.map((r) => ({ ...r })) };
   const { projIds: [bid] } = importIntoDb(db, src, { projects: [{ srcProjId: projId, action: 'new' }] });
   const p = rows(db, 'PROJECT').find((x) => x.proj_id === projId)!;
   const b = rows(db, 'PROJECT').find((x) => x.proj_id === bid)!;

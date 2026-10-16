@@ -12,7 +12,8 @@ import { FILTERS } from '../views/activityRows.ts';
 // ---------------------------------------------------------------- shared helpers
 
 const num = (x: number) => String(Math.round(x * 100) / 100);
-const money = (x: number) => x.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const NUM2 = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (x: number) => NUM2.format(x);
 const nowStr = () => formatP6Date(Math.floor(Date.now() / 60000));
 
 function ensureFields(d: Db, name: string, fields: string[]): Table {

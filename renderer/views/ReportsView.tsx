@@ -1,15 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getUi, setUi, toast, useStore } from '../store.ts';
 import { REPORTS, reportCsv, nowStamp } from '../../core/report/reports.ts';
 import { fmtDate } from '../model.ts';
 import { printView } from '../print.ts';
 import { findingsText } from '../io.ts';
 
+const PAGE = 1000;
+
 export function ReportsView() {
   const ui = useStore((s) => s.ui);
   const db = useStore((s) => s.db);
   const v = useStore((s) => s.dbVersion);
   const [weeks, setWeeks] = useState(3);
+  const [showAll, setShowAll] = useState(false); // big reports draw the first PAGE rows until asked
+  useEffect(() => setShowAll(false), [ui.detailTab]);
   const id = REPORTS.some((r) => r.id === ui.detailTab) || ui.detailTab === 'schedLog' || ui.detailTab === 'importLog' ? ui.detailTab : 'schedule';
   const def = REPORTS.find((r) => r.id === id);
   const report = useMemo(() => def && ui.openProjects.length ? def.build(db, ui.openProjects, { hoursPerDay: ui.prefs.hoursPerDay, fmtDate: (s) => fmtDate(s, ui.prefs), weeks }) : null, [def, db, v, ui.openProjects, ui.prefs, weeks]);
@@ -39,9 +43,10 @@ export function ReportsView() {
             <div className="muted" style={{ marginBottom: 10 }}>{report.subtitle} · Run {nowStamp()} · Data date {fmtDate(db.tables.PROJECT?.rows.find((p) => p.proj_id === getUi().openProjects[0])?.last_recalc_date, ui.prefs)}</div>
             <table className="tbl" style={{ userSelect: 'text' }}>
               <thead><tr>{report.columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-              <tbody>{report.rows.map((r, i) => <tr key={i} style={{ fontWeight: r.bold ? 'bold' : undefined, background: r.bold ? '#eef2fa' : undefined }}>{r.cells.map((c, j) => <td key={j} style={{ paddingLeft: j === 0 ? 4 + (r.level ?? 0) * 12 : 4 }}>{c}</td>)}</tr>)}
+              <tbody>{(showAll ? report.rows : report.rows.slice(0, PAGE)).map((r, i) => <tr key={i} style={{ fontWeight: r.bold ? 'bold' : undefined, background: r.bold ? '#eef2fa' : undefined }}>{r.cells.map((c, j) => <td key={j} style={{ paddingLeft: j === 0 ? 4 + (r.level ?? 0) * 12 : 4 }}>{c}</td>)}</tr>)}
                 {!report.rows.length && <tr><td colSpan={report.columns.length} className="muted">No rows.</td></tr>}</tbody>
             </table>
+            {!showAll && report.rows.length > PAGE && <div style={{ padding: 8 }} className="muted">Showing {PAGE.toLocaleString()} of {report.rows.length.toLocaleString()} rows (Print, PDF and CSV include all). <button className="btn" onClick={() => setShowAll(true)}>Show All</button></div>}
           </>}
         </div>
       </div>

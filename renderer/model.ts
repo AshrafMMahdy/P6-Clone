@@ -116,7 +116,8 @@ export interface Column {
 }
 
 const sumBy = (rs: Row[] | undefined, f: string) => (rs ?? []).reduce((a, x) => a + Number(x[f] || 0), 0);
-const money = (n: number) => (n ? n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }) : '$0.00');
+const USD = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+const money = (n: number) => (n ? USD.format(n) : '$0.00');
 const startOf = (r: Row, ctx: Ctx) => (r.act_start_date ? `${fmtDate(r.act_start_date, ctx.prefs)} A` : fmtDate(r.early_start_date || r.restart_date || r.target_start_date, ctx.prefs) + (r.cstr_type && /MSO|MANDSTART/.test(r.cstr_type) ? '*' : ''));
 const finishOf = (r: Row, ctx: Ctx) => (r.act_end_date ? `${fmtDate(r.act_end_date, ctx.prefs)} A` : fmtDate(r.early_end_date || r.reend_date || r.target_end_date, ctx.prefs) + (r.cstr_type && /MEO|MANDFIN/.test(r.cstr_type) ? '*' : ''));
 

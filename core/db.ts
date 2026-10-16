@@ -44,7 +44,15 @@ const ALIASES: Record<string, string> = {
 const NOT_REFS = new Set(['user_id', 'shift_id', 'base_type_id', 'phase_id', 'fk_id', 'guid', 'tmpl_guid', 'pobs_id', 'rsrc_id@TASK']);
 
 /** Table a foreign-key field points to, e.g. pred_task_id -> TASK. Undefined for the table's own key. */
+const refCache = new Map<string, string | undefined>(); // called for every field of every row by the writer and importer
 export function refTarget(field: string, inTable?: string): string | undefined {
+  const ck = field + '@' + (inTable ?? '');
+  if (refCache.has(ck)) return refCache.get(ck);
+  const v = refTargetUncached(field, inTable);
+  refCache.set(ck, v);
+  return v;
+}
+function refTargetUncached(field: string, inTable?: string): string | undefined {
   if (NOT_REFS.has(field) || (inTable && NOT_REFS.has(`${field}@${inTable}`))) return undefined;
   if (inTable && KEYS[inTable] === field) return undefined;
   return ALIASES[field] ?? KEY_TO_TABLE[field];

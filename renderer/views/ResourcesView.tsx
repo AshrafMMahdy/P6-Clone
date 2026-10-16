@@ -28,7 +28,8 @@ export const RSRC_NEW_FIELDS = ['rsrc_id', 'parent_rsrc_id', 'clndr_id', 'rsrc_s
 
 const num = (s: string | undefined) => Number(s || 0) || 0;
 const fmtN = (n: number) => String(Math.round(n * 100) / 100);
-const money = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const USD = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }); // one formatter (creating one per cell is slow)
+const money = (n: number) => USD.format(n);
 const parseNum = (v: string) => Number(String(v).replace(/[^\d.\-eE]/g, ''));
 
 /** Rates of a resource, earliest effective date first. */
