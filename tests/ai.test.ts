@@ -100,3 +100,13 @@ test('extra headers tolerate pasted text: spaces in names, typographic dashes, i
   assert.throws(() => parseExtraHeaders('X(A): b'), /contains "\("/);
   assert.throws(() => parseExtraHeaders('no separator'), /line 1/);
 });
+
+test('Anthropic workspace header is sent as anthropic-workspace-id whatever the user called it', () => {
+  const base = { enabled: true, provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com', model: 'm' };
+  for (const name of ['WORKSPACE-ID', 'workspace_id', 'Workspace', 'Anthropic-Workspace-ID', 'anthropic-workspace-id']) {
+    const h = buildRequest({ ...base, extraHeaders: `${name}: wrkspc_01ab` }, 'k', req).headers;
+    assert.equal(h['anthropic-workspace-id'], 'wrkspc_01ab', name);
+    assert.equal(Object.keys(h).filter((k) => /workspace/i.test(k)).length, 1, name);
+  }
+  assert.equal(buildRequest({ ...base, provider: 'openai', extraHeaders: 'WORKSPACE-ID: w' }, 'k', req).headers['WORKSPACE-ID'], 'w');
+});

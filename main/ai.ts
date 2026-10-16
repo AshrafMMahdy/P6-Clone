@@ -82,7 +82,12 @@ export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { ur
   const r = baseRequest(cfg, key, req);
   const extra = parseExtraBody(cfg.extraBody);
   for (const k of RESERVED_BODY) delete extra[k];
-  return { url: r.url, headers: { ...r.headers, ...parseExtraHeaders(cfg.extraHeaders) }, body: { ...(r.body as object), ...extra } };
+  const headers = parseExtraHeaders(cfg.extraHeaders);
+  // Anthropic keys not scoped to a workspace need "anthropic-workspace-id"; accept the obvious spellings of it
+  if (cfg.provider === 'anthropic') for (const n of Object.keys(headers)) {
+    if (/^(anthropic)?workspace(id)?$/.test(n.toLowerCase().replace(/[^a-z]/g, '')) && n !== 'anthropic-workspace-id') { headers['anthropic-workspace-id'] = headers[n]; delete headers[n]; }
+  }
+  return { url: r.url, headers: { ...r.headers, ...headers }, body: { ...(r.body as object), ...extra } };
 }
 
 function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
