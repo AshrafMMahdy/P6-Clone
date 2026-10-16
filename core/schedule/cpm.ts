@@ -434,7 +434,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     for (let i = order.length - 1; i >= 0; i--) {
       const a = order[i];
       if (a.status === 'CO' || a.type === 'TT_LOE' || !cstr(a).some(([t]) => t === 'CS_ALAP')) continue;
-      let ef = a.lf;
+      let ef = BIG; // successors limit it, not the late finish (negative float stays negative)
       for (const r of a.succs) {
         if (!r.succ || !isMain(r.succ) || r.succ.status === 'CO') continue;
         const s = r.succ;
@@ -442,6 +442,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (r.type === 'SS' || r.type === 'SF') t = a.dur ? a.cal.addWork(t, a.dur) : t;
         if (t < ef) ef = t;
       }
+      if (ef === BIG) ef = a.lf;
       a.ff = 0; // ALAP uses up all free float
       if (ef <= a.ef || a.cal.workBetween(a.ef, ef) <= 0) continue;
       a.ef = ef = a.dur ? a.cal.prevWorkEnd(ef) : ef; // a finish sits at the end of the last work period
