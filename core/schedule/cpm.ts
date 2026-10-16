@@ -134,6 +134,15 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   const rsrcCal = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.clndr_id]));
   const firstRsrc = new Map<string, string>();
   for (const a of rows(db, 'TASKRSRC')) if (!firstRsrc.has(a.task_id)) firstRsrc.set(a.task_id, a.rsrc_id);
+  // P6 uses the project's own calendar when it has the same name as the global calendar an activity points to
+  const sameNameProjectCal = new Map<string, string>();
+  {
+    const calRows = rows(db, 'CALENDAR');
+    for (const g of calRows) {
+      if (g.proj_id) continue;
+      for (const pc of calRows) if (pc.proj_id && pc.clndr_id !== g.clndr_id && (pc.clndr_name || '').trim().toLowerCase() === (g.clndr_name || '').trim().toLowerCase()) sameNameProjectCal.set(pc.proj_id + '|' + g.clndr_id, pc.clndr_id);
+    }
+  }
   const asgByTask = new Map<string, Row[]>();
   for (const a of rows(db, 'TASKRSRC')) { let l = asgByTask.get(a.task_id); if (!l) asgByTask.set(a.task_id, (l = [])); l.push(a); }
   const rsrcType = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
@@ -142,7 +151,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   for (const row of rows(db, 'TASK')) {
     const proj = projects.get(row.proj_id);
     if (!proj) continue;
-    let cal = cals.get(row.clndr_id) ?? proj.cal;
+    let cal = cals.get(sameNameProjectCal.get(row.proj_id + '|' + row.clndr_id) ?? row.clndr_id) ?? proj.cal;
     let hrs = row.remain_drtn_hr_cnt !== '' && row.remain_drtn_hr_cnt != null ? Number(row.remain_drtn_hr_cnt) : Number(row.target_drtn_hr_cnt || 0);
     if (row.task_type === 'TT_Rsrc') {
       // Resource dependent: the longest labor/nonlabor assignment drives, on its resource's calendar,
