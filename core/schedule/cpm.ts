@@ -381,7 +381,12 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         // an in-progress predecessor has already used up the lag of its start links
         const base = r.type === 'FS' || r.type === 'SS' ? s.ls : s.lf;
         let t: number;
-        if (a.status === 'CO') t = base;
+        if (a.status === 'CO') {
+          // mirror of the forward pass: a completed activity pushed past the data date keeps the lag still to run
+          const lc = lagCal(r), fin = r.type === 'FS' || r.type === 'FF';
+          const left = a.ef > a.proj.dd && r.lag > 0 ? r.lag - Math.max(0, lc.workBetween(Math.min(fin ? a.af! : a.as!, a.proj.dd), a.proj.dd)) : 0;
+          t = left > 0 ? lc.subWork(base, left) : base;
+        }
         else if (a.status === 'IP' && (r.type === 'SS' || r.type === 'SF')) {
           const lc = lagCal(r);
           const left = r.lag - Math.max(0, lc.workBetween(Math.min(a.as!, a.proj.dd), a.proj.dd));
