@@ -146,3 +146,21 @@ test('MCP: an agent lists, creates and runs reports (data, PDF, Excel) and reads
     assert.ok(Array.isArray(ev.data.projects) && 'totals' in ev.data.projects[0]);
   } finally { c.close(); }
 });
+
+test('MCP: compare two revisions by Activity ID, and trace an activity\'s logic', { timeout: 60_000 }, async () => {
+  const c = client();
+  try {
+    await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const a = (await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') })).data.handle;
+    const b = (await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') })).data.handle;
+    await c.tool('edit', { handle: b, operations: [{ op: 'update_activity', id: 'A2410', duration_days: 30 }, { op: 'add_activity', id: 'NEW1', name: 'Added' }, { op: 'delete_activity', id: 'A1320' }] });
+    const cmp = await c.tool('compare', { handle: a, other_handle: b });
+    assert.equal(cmp.isError, false, cmp.content?.[0]?.text);
+    assert.deepEqual([cmp.data.summary.activity.added, cmp.data.summary.activity.deleted], [1, 1]);
+    assert.ok(cmp.data.summary.activity.changed >= 1 && cmp.data.changes.some((x: { id: string; field?: string }) => x.id === 'A2410'));
+    const same = await c.tool('compare', { handle: a, path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    assert.equal(same.data.changes.length, 0);
+    const tr = await c.tool('trace_logic', { handle: a, activity_id: 'A2410', predecessors: 2, successors: 1 });
+    assert.ok(tr.data.levels.some((l: { level: number }) => l.level === -1) && tr.data.links.some((x: { driving: boolean }) => x.driving));
+  } finally { c.close(); }
+});

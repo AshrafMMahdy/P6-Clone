@@ -20,6 +20,7 @@ import { record, rollback, type Journal } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { worst, type Finding } from '../core/findings.ts';
 import type { Db } from '../core/db.ts';
+import { compareSchedules } from '../core/diff.ts';
 import { printPages, printableColumns } from '../renderer/print/schedule.ts';
 import { pagesToHtml, pagesToPdf } from '../renderer/print/output.ts';
 import { PRINT_GUIDE } from '../renderer/print/layout.ts';
@@ -63,6 +64,7 @@ const TOOLS = [
   { name: 'export_pdf', description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML instead. Text outside Latin-1 prints as "?" in the PDF (use the desktop app for other scripts). ' + PRINT_GUIDE + ' Layout options: filter (all, critical, not_started, in_progress, completed, ...), group_by (wbs, none), sort_by (task_code, task_name, total_float, finish).', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK (activities), TASKPRED (relationships), RSRC (resources), TASKRSRC (assignments); row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
   { name: 'import_excel', description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities (name, WBS, type, durations, constraint, actual dates, % complete, calendar), relationships, resources and assignments; a "Y" in delete_record_flag deletes the row. Calculated columns (status, start, finish, float) are ignored. Applied as one undoable change; dry_run returns the plan without changing anything.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
+  { name: 'compare', description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type, so renumbered internal ids do not matter. Durations, lags and floats in days. Use it to see exactly what changed between two revisions.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against (XER, P6 XML, MSPDI, MPX)' }, max_changes: { type: 'number' } } }) },
   { name: 'list_reports', description: 'Reports available like P6 Tools > Reports: the standard reports by group (Schedule, Progress, Earned Value, Cost, Resources) and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'run_report', description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as a PDF (.pdf, same pages as printing, settings like export_pdf), HTML (.html), ASCII text/CSV (.csv or .txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number' } } }) },
   { name: 'create_report', description: 'Save a report definition like the P6 Report Wizard (name, subject, columns, filter, group_by, sort_by, sort_desc, title, group). Kept with this open project for run_report (not written into the XER). ' + "Subject areas: activities (columns: any activity column id, e.g. task_code, task_name, orig_dur, rem_dur, pct, start, finish, total_float, bl_finish, var_bl_finish, bud_cost, act_cost, ev_bac, ev_pv, ev_ev, ev_ac, ev_sv, ev_cv, ev_spi, ev_cpi, ev_eac, ev_vac; group_by wbs|none), assignments (task_code, task_name, rsrc_id, rsrc_name, target_qty, act_qty, remain_qty, target_cost, act_cost, remain_cost, start, finish; group_by resource|activity|none), wbs (wbs_code, wbs_name, activities, start, finish, total_float, budget, actual, remaining, ev_*), resources (rsrc_id, rsrc_name, rsrc_type, max_units, price, calendar, assignments, target_qty, act_qty, remain_qty, target_cost; group_by none|type), relationships (pred_code, pred_name, succ_code, succ_name, type, lag, free_float, driving; group_by none|pred). Filters: all, critical, longest, notstarted, inprogress, completed, open, milestones, negfloat, late, constrained, started30, finished30, starting30, finishing30, nopreds.", inputSchema: withHandle({ type: 'object', properties: { name: { type: 'string' }, subject: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' }, sort_desc: { type: 'boolean' }, title: { type: 'string' }, group: { type: 'string' } }, required: ['name', 'subject'] }) },
@@ -105,6 +107,24 @@ async function callAsync(name: string, a: Record<string, any>): Promise<unknown>
       const path = resolve(String(a.path ?? ''));
       writeFileSync(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd)));
       return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] };
+    }
+    case 'compare': {
+      const s = get(a.handle);
+      let other: Db;
+      if (a.other_handle) other = get(a.other_handle).db;
+      else if (a.path) {
+        const p = resolve(String(a.path));
+        let bytes: Uint8Array;
+        try { bytes = new Uint8Array(readFileSync(p)); } catch (e) { throw new UserError(`Cannot read ${p}: ${(e as Error).message}`); }
+        other = readRaw(bytes, detectFormat(p, bytes)).db;
+      } else throw new UserError('Give other_handle or path.');
+      const cs = compareSchedules(s.db, other, s.hpd);
+      const count = (o: string, k: string) => cs.filter((c) => c.object === o && c.kind === k).length;
+      const max = Math.min(5000, Number(a.max_changes) || 500);
+      return {
+        summary: Object.fromEntries(['project', 'wbs', 'activity', 'relationship'].map((o) => [o, { added: count(o, 'added'), deleted: count(o, 'deleted'), changed: new Set(cs.filter((c) => c.object === o && c.kind === 'changed').map((c) => c.id)).size }])),
+        changes: cs.slice(0, max), truncated: cs.length > max,
+      };
     }
     case 'list_reports': { const s = get(a.handle); return listReports(s.db).map((e) => ({ id: e.id, name: e.name, group: e.group, kind: e.kind, description: e.description })); }
     case 'create_report': {
@@ -187,7 +207,10 @@ function call(name: string, a: Record<string, any>): unknown {
     case 'update_progress': {
       const s = get(a.handle);
       const t = dd(a.data_date)!;
-      return change(s, 'Update Progress', (d) => { const by = Object.fromEntries(allIds(d).map((id) => [id, updateProgress(d, id, t)])); const x = scheduleProjects(d, allIds(d), { dataDate: t }); if (x.ok) syncAssignmentDates(d); return { ok: x.ok, finish: formatP6Date(x.stats.finish), progress: by }; });
+      const res = change(s, 'Update Progress', (d) => { const by = Object.fromEntries(allIds(d).map((id) => [id, updateProgress(d, id, t)])); const x = scheduleProjects(d, allIds(d), { dataDate: t }); if (x.ok) syncAssignmentDates(d); return { ok: x.ok, finish: formatP6Date(x.stats.finish), progress: by }; });
+      // scheduling failed: nothing is kept (progress without a valid schedule would leave the project inconsistent)
+      if (!(res as { ok: boolean }).ok) { rollback(s.undo.pop()!.j); return { ...(res as object), note: 'Scheduling failed, so the progress update was undone. Nothing changed.' }; }
+      return res;
     }
     case 'level_resources': {
       const s = get(a.handle);

@@ -4,7 +4,7 @@
 import type { Db, Row } from '../db.ts';
 import { rows } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
-import { isCritical, type Ctx } from '../project/ctx.ts';
+import { isCritical, traceLogic, type Ctx } from '../project/ctx.ts';
 import { relationshipFloat } from '../schedule/cpm.ts';
 import { statusOf, projectName } from '../project/edit.ts';
 import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
@@ -36,6 +36,7 @@ export const TOOLS: ToolDef[] = [
   { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: {} } },
   { name: 'list_projects', description: 'Every project in the database (not only the open one): ID, name, status, start and finish, activity count, WBS top-level names, calendar. Use it to find past projects similar to the one being planned or asked about; then read one with the other lookups by passing its ID as "project".', parameters: { type: 'object', properties: { text: { type: 'string', description: 'only projects whose ID or name contains this' } } } },
+  { name: 'trace_logic', description: 'Trace Logic (View > Show on Bottom > Trace Logic): an activity\'s predecessors and successors several levels deep, with each link\'s type, lag, relationship free float and whether it is driving. Use it to explain why an activity is where it is.', parameters: { type: 'object', properties: { activity_id: { type: 'string' }, predecessors: { type: 'number', description: 'levels back (default 3, max 10)' }, successors: { type: 'number', description: 'levels forward (default 3, max 10)' }, driving_only: { type: 'boolean' } }, required: ['activity_id'] } },
   { name: 'earned_value', description: 'Earned value as P6 calculates it (baseline budget, planned value at the data date, earned value from % complete, actual cost): project totals, each top-level WBS, and the activities with the worst cost and schedule performance (CPI/SPI). Money in the project currency.', parameters: { type: 'object', properties: { worst: { type: 'number', description: 'how many weakest activities to list (default 10)' } } } },
   { name: 'resource_summary', description: 'Resources with their assignments: total budgeted/remaining units and cost, first/last use. With `resource`, the activities that resource is assigned to.', parameters: { type: 'object', properties: { resource: { type: 'string' }, limit: { type: 'number' } } } },
 ];
@@ -212,6 +213,19 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         leads_negative_lag: leads.length, positive_lags: lags.length, relationship_types: types,
         started_out_of_sequence: ex(oos), not_started_but_dated_before_data_date: ex(stale),
         note: 'Thresholds follow the common DCMA 14-point guidance (44 working days, 5% limits).',
+      };
+    }
+    case 'trace_logic': {
+      const t = byCode(String(args.activity_id ?? ''));
+      if (!t) return { error: `No activity with ID "${args.activity_id}" in the open project(s).` };
+      const lv = (v: unknown) => Math.max(0, Math.min(10, Number.isFinite(Number(v)) && v != null ? Number(v) : 3));
+      const relFF = relationshipFloat(db, ctx);
+      const tr = traceLogic(ctx as never, t.task_id, { preds: lv(args.predecessors), succs: lv(args.successors), drivingOnly: !!args.driving_only, maxPerLevel: 40 }, relFF);
+      const code = (id: string) => ctx.taskById.get(id)?.task_code ?? id;
+      return {
+        activity: brief(t),
+        levels: [...tr.levels].sort((a, b) => a[0] - b[0]).filter(([l]) => l !== 0).map(([l, ids]) => ({ level: l, direction: l < 0 ? 'predecessors' : 'successors', activities: ids.map((id) => brief(ctx.taskById.get(id)!)), ...(tr.more.get(l) ? { more_not_listed: tr.more.get(l) } : {}) })),
+        links: tr.links.map((x) => ({ pred: code(x.from), succ: code(x.to), type: (x.rel.pred_type || 'PR_FS').slice(3), lag_days: days(x.rel.lag_hr_cnt || '0', hpd), free_float_days: x.ff == null ? null : days(x.ff, hpd), driving: x.ff === 0 })),
       };
     }
     case 'earned_value': {

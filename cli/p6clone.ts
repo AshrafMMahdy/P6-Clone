@@ -72,7 +72,7 @@ const args = process.argv.slice(2);
 const cmd = args[0];
 const opt = (name: string) => { const i = args.indexOf(`--${name}`); return i > 0 ? args[i + 1] : undefined; };
 const flag = (name: string) => args.includes(`--${name}`);
-const BOOL = new Set(['--json', '--schedule', '--critical', '--not-critical', '--milestones', '--links', '--portrait', '--dry-run', '--no-legend']);
+const BOOL = new Set(['--driving', '--json', '--schedule', '--critical', '--not-critical', '--milestones', '--links', '--portrait', '--dry-run', '--no-legend']);
 const positional: string[] = [];
 for (let i = 1; i < args.length; i++) {
   if (args[i].startsWith('--')) { if (!BOOL.has(args[i])) i++; }
@@ -276,10 +276,12 @@ async function main(): Promise<number> {
     case 'query': {
       const { db } = load(positional[0]);
       const what = positional[1] ?? 'summary';
-      const tool = ({ projects: 'list_projects', summary: 'project_summary', find: 'find_activities', activity: 'get_activity', wbs: 'list_wbs', critical: 'critical_path', health: 'schedule_health', resources: 'resource_summary' } as Record<string, string>)[what];
-      if (!tool) throw new Error(`unknown query "${what}" (projects, summary, find, activity, wbs, critical, health, resources)`);
+      const tool = ({ trace: 'trace_logic', ev: 'earned_value', projects: 'list_projects', summary: 'project_summary', find: 'find_activities', activity: 'get_activity', wbs: 'list_wbs', critical: 'critical_path', health: 'schedule_health', resources: 'resource_summary' } as Record<string, string>)[what];
+      if (!tool) throw new Error(`unknown query "${what}" (projects, trace, ev, summary, find, activity, wbs, critical, health, resources)`);
       const n = (k: string) => (opt(k) != null ? Number(opt(k)) : undefined);
       const qargs: Record<string, unknown> = what === 'projects' ? { text: positional[2] ?? opt('text') }
+        : what === 'trace' ? { activity_id: positional[2], predecessors: n('preds'), successors: n('succs'), driving_only: flag('driving') || undefined }
+        : what === 'ev' ? { worst: n('limit') }
         : what === 'activity' ? { activity_id: positional[2] }
         : what === 'resources' ? { resource: positional[2] ?? opt('resource'), limit: n('limit') }
         : what === 'wbs' ? { under: positional[2] ?? opt('under'), depth: n('depth') }
