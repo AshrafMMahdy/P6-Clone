@@ -1,7 +1,7 @@
 import { KEYS, refTarget, type Db, type Row } from '../db.ts';
 import { encodeCp1252 } from '../encoding.ts';
 import { formatDay } from '../dates.ts';
-import { fieldsFor, variantsFor, tableOrderFor } from './schema.ts';
+import { fieldsFor, variantsFor, tableOrderFor, knownFields, verification } from './schema.ts';
 
 export interface WriteOptions {
   version: string;
@@ -22,7 +22,12 @@ const CHILD_OF: Record<string, string> = {
   RSRCRATE: 'rsrc_id', ROLERATE: 'role_id', RSRCROLE: 'rsrc_id', ACTVCODE: 'actv_code_type_id',
   PCATVAL: 'proj_catg_type_id', RCATVAL: 'rsrc_catg_type_id', RSRCRCAT: 'rsrc_id', SHIFTPER: 'shift_id',
 };
-const ALWAYS = new Set(['CURRTYPE']);
+// P6 writes these dictionary tables whole in a project export (the real samples carry every POBS row)
+const ALWAYS = new Set(['CURRTYPE', 'POBS']);
+/** References kept out of refTarget (they often point outside a file) that still pull their row into an export. */
+const SOFT_REFS: [table: string, field: string, target: string][] = [['RSRC', 'shift_id', 'SHIFT'], ['RSRC', 'pobs_id', 'POBS'], ['TASKRSRC', 'pobs_id', 'POBS'], ['TASK', 'rsrc_id', 'RSRC']];
+/** UDFTYPE.table_name -> the table a UDF value's fk_id points into (values of non-project UDFs have no proj_id). */
+const UDF_TABLE: Record<string, string> = { RSRC: 'RSRC', ROLE: 'ROLES', ROLES: 'ROLES', TASKRSRC: 'TASKRSRC', PROJCOST: 'PROJCOST', PROJWBS: 'PROJWBS', TASK: 'TASK', PROJECT: 'PROJECT' };
 
 export function selectRows(db: Db, projIds?: string[]): Map<string, Row[]> {
   const out = new Map<string, Row[]>();
@@ -74,8 +79,24 @@ export function selectRows(db: Db, projIds?: string[]): Map<string, Row[]> {
         }
       }
     }
+    for (const [t, f, target] of SOFT_REFS) {
+      const tk = KEYS[target];
+      for (const r of out.get(t) ?? []) {
+        const v = r[f];
+        if (!v || isKept(target, v)) continue;
+        const hit = tk && db.tables[target]?.rows.find((x) => x[tk] === v);
+        if (hit && keep(target, hit)) changed = true;
+      }
+    }
+    // values of resource / role / ... UDFs (no proj_id) follow the rows they belong to
+    const udfTable = new Map((db.tables.UDFTYPE?.rows ?? []).map((u) => [u.udf_type_id, UDF_TABLE[u.table_name]]));
+    for (const v of db.tables.UDFVALUE?.rows ?? []) {
+      if (v.proj_id) continue;
+      const target = udfTable.get(v.udf_type_id);
+      if (target && isKept(target, v.fk_id) && keep('UDFVALUE', v)) changed = true;
+    }
     for (const [child, pf] of Object.entries(CHILD_OF)) {
-      const parent = refTarget(pf);
+      const parent = refTarget(pf) ?? (pf === 'shift_id' ? 'SHIFT' : undefined);
       for (const r of db.tables[child]?.rows ?? []) if (parent && isKept(parent, r[pf]) && keep(child, r)) changed = true;
     }
   }
@@ -102,7 +123,11 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
     if (!rs.length) continue;
     const src = db.tables[name]?.fields.filter((f) => !f.startsWith('_')) ?? [];
     const variant = variantsFor(opts.version, name).find((v) => v.join() === src.join());
-    const fields = variant ?? fieldsFor(opts.version, name) ?? src;
+    const base = variant ?? fieldsFor(opts.version, name) ?? src;
+    // where the version's layout is only approximated (no real export of that version seen), source fields that
+    // real P6 writes in some version are kept rather than dropped
+    const known = verification(opts.version, name) === 'exact' ? null : knownFields(name);
+    const fields = known ? [...base, ...src.filter((f) => !base.includes(f) && known.has(f))] : base;
     lines.push(`%T\t${name}`, `%F\t${fields.join('\t')}`);
     for (const r of rs) lines.push('%R\t' + fields.map((f) => clean(r[f])).join('\t'));
   }
