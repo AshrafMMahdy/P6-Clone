@@ -8,6 +8,7 @@ import { p6num } from '../schedule/cpm.ts';
 import { record, rollback } from '../journal.ts';
 import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
 import { assignResource, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
+import { copyProject } from './copy.ts';
 import {
   addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, ensureDefaultCalendar, newProject,
   enumOk, normDate, refreshOwnDates, setActual, setFinish, setPercent, setStart, statusOf,
@@ -24,12 +25,13 @@ const RTYPE: Record<string, string> = { labor: 'RT_Labor', nonlabor: 'RT_Equip',
 const PRIO: Record<string, string> = { top: 'PT_Top', high: 'PT_High', normal: 'PT_Normal', low: 'PT_Low', lowest: 'PT_Lowest' };
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
-export const OP_NAMES = ['add_project', 'set_project', 'add_calendar', 'add_holidays', 'add_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource'];
+export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'add_calendar', 'add_holidays', 'add_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource'];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
   'Operations (JSON objects with "op"; [x] = optional; durations and lags in days; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant):',
   `add_project: id, start, [name], [must_finish_by], [calendar]`,
+  `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
   `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar]`,
   `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
   `add_holidays: calendar, dates [dates]`,
@@ -109,6 +111,13 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       if (op.must_finish_by) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.plan_end_date = date(op.must_finish_by, 'must_finish_by');
       if (op.calendar) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.clndr_id = calendar(op.calendar).clndr_id;
       return { project: id };
+    }
+    case 'copy_project': {
+      const from = project(str(op.from, 'from'));
+      const id = str(op.id, 'id');
+      if (projects().some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase())) fail(`Project "${id}" already exists.`);
+      copyProject(db, from.proj_id, { id, name: typeof op.name === 'string' ? op.name : undefined, start: op.start != null ? date(op.start, 'start') : undefined, keepProgress: op.keep_progress === true });
+      return { project: id, copied_from: from.proj_short_name, activities: rows(db, 'TASK').filter((t) => t.proj_id === projects().find((p) => p.proj_short_name === id)?.proj_id).length };
     }
     case 'set_project': {
       const p = project(op.project);

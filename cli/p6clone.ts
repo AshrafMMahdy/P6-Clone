@@ -165,10 +165,11 @@ async function main(): Promise<number> {
     case 'query': {
       const { db } = load(positional[0]);
       const what = positional[1] ?? 'summary';
-      const tool = ({ summary: 'project_summary', find: 'find_activities', activity: 'get_activity', wbs: 'list_wbs', critical: 'critical_path', health: 'schedule_health', resources: 'resource_summary' } as Record<string, string>)[what];
-      if (!tool) throw new Error(`unknown query "${what}" (summary, find, activity, wbs, critical, health, resources)`);
+      const tool = ({ projects: 'list_projects', summary: 'project_summary', find: 'find_activities', activity: 'get_activity', wbs: 'list_wbs', critical: 'critical_path', health: 'schedule_health', resources: 'resource_summary' } as Record<string, string>)[what];
+      if (!tool) throw new Error(`unknown query "${what}" (projects, summary, find, activity, wbs, critical, health, resources)`);
       const n = (k: string) => (opt(k) != null ? Number(opt(k)) : undefined);
-      const qargs: Record<string, unknown> = what === 'activity' ? { activity_id: positional[2] }
+      const qargs: Record<string, unknown> = what === 'projects' ? { text: positional[2] ?? opt('text') }
+        : what === 'activity' ? { activity_id: positional[2] }
         : what === 'resources' ? { resource: positional[2] ?? opt('resource'), limit: n('limit') }
         : what === 'wbs' ? { under: positional[2] ?? opt('under'), depth: n('depth') }
         : what === 'critical' ? { limit: n('limit') }

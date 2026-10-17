@@ -34,14 +34,23 @@ export const TOOLS: ToolDef[] = [
   { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges. Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2' } } } },
   { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: {} } },
+  { name: 'list_projects', description: 'Every project in the database (not only the open one): ID, name, status, start and finish, activity count, WBS top-level names, calendar. Use it to find past projects similar to the one being planned or asked about; then read one with the other lookups by passing its ID as "project".', parameters: { type: 'object', properties: { text: { type: 'string', description: 'only projects whose ID or name contains this' } } } },
   { name: 'resource_summary', description: 'Resources with their assignments: total budgeted/remaining units and cost, first/last use. With `resource`, the activities that resource is assigned to.', parameters: { type: 'object', properties: { resource: { type: 'string' }, limit: { type: 'number' } } } },
 ];
+// every lookup can read a project other than the open one
+for (const t of TOOLS) if (t.name !== 'list_projects') (t.parameters as { properties: Record<string, unknown> }).properties.project = { type: 'string', description: 'project ID to read instead of the open project(s), e.g. a past project from list_projects' };
 
 const d = (s?: string) => (s ? s.slice(0, 16) : '');
 const days = (h: string | number | undefined, hpd: number) => (h === '' || h == null ? null : Math.round((Number(h) / hpd) * 10) / 10);
 
 export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ctx<unknown>, projIds: string[], hpd: number): unknown {
-  const open = new Set(projIds.length ? projIds : rows(db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id));
+  const all = rows(db, 'PROJECT').filter((p) => !p._baseline_of);
+  let open = new Set(projIds.length ? projIds : all.map((p) => p.proj_id));
+  if (args.project != null && args.project !== '') {
+    const p = all.find((x) => x.proj_short_name.toLowerCase() === String(args.project).toLowerCase());
+    if (!p) return { error: `No project "${args.project}". list_projects shows the IDs.` };
+    open = new Set([p.proj_id]);
+  }
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const wbsById = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
   const wbsPath = (id: string) => { const out: string[] = []; for (let w = wbsById.get(id), n = 0; w && n < 50; w = wbsById.get(w.parent_wbs_id), n++) if (w.proj_node_flag !== 'Y') out.unshift(w.wbs_short_name); return out.join('.'); };
@@ -51,6 +60,20 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
   const byCode = (code: string) => tasks.find((t) => t.task_code.toLowerCase() === String(code).toLowerCase());
 
   switch (name) {
+    case 'list_projects': {
+      const q = String(args.text ?? '').toLowerCase();
+      const count = new Map<string, number>();
+      for (const t of rows(db, 'TASK')) count.set(t.proj_id, (count.get(t.proj_id) ?? 0) + 1);
+      const W = rows(db, 'PROJWBS');
+      const roots = new Map(W.filter((w) => w.proj_node_flag === 'Y').map((w) => [w.proj_id, w.wbs_id]));
+      const out = all.filter((p) => !q || p.proj_short_name.toLowerCase().includes(q) || projectName(db, p).toLowerCase().includes(q)).map((p) => ({
+        id: p.proj_short_name, name: projectName(db, p), open: projIds.includes(p.proj_id), status: p.status_code?.replace(/^PS_/, '') || undefined,
+        start: d(p.plan_start_date), data_date: d(p.last_recalc_date), finish: d(p.scd_end_date || p.plan_end_date), activities: count.get(p.proj_id) ?? 0,
+        top_wbs: W.filter((w) => w.parent_wbs_id === roots.get(p.proj_id)).slice(0, 12).map((w) => w.wbs_name),
+        calendar: rows(db, 'CALENDAR').find((c) => c.clndr_id === p.clndr_id)?.clndr_name,
+      }));
+      return { projects: out.slice(0, 200), total: out.length };
+    }
     case 'project_summary': {
       const projs = [...open].map((id) => ctx.proj.get(id)).filter((p): p is Row => !!p);
       const count = (s: string) => tasks.filter((t) => statusOf(t) === s).length;

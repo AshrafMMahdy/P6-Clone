@@ -179,3 +179,39 @@ test('the operations guide given to the AI assistant covers every operation, and
   assert.equal(r.ok, true, r.error?.message ?? '');
   assert.equal(db.tables.TASK.rows.length, 4);
 });
+
+test('copy_project makes a clean, renumbered copy that can be trimmed; lookups read any project by ID', async () => {
+  const { applyOps } = await import('../core/project/ops.ts');
+  const { runTool } = await import('../core/query/tools.ts');
+  const { parseXer } = await import('../core/xer/parse.ts');
+  const { makeCtx } = await import('../core/project/ctx.ts');
+  const { rows } = await import('../core/db.ts');
+  const db = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, 'cairo festival city.xer')))).db;
+  const src = rows(db, 'PROJECT')[0];
+  const srcTasks = rows(db, 'TASK').filter((t) => t.proj_id === src.proj_id);
+  const srcRels = rows(db, 'TASKPRED').length;
+  const progressed = srcTasks.filter((t) => t.act_start_date).length;
+  const r = applyOps(db, [{ op: 'copy_project', from: src.proj_short_name, id: 'COPY1', name: 'Template copy', start: '2027-01-04' }]);
+  assert.equal(r.ok, true, r.error?.message ?? '');
+  const p = rows(db, 'PROJECT').find((x) => x.proj_short_name === 'COPY1')!;
+  const tasks = rows(db, 'TASK').filter((t) => t.proj_id === p.proj_id);
+  assert.equal(tasks.length, srcTasks.length);
+  assert.equal(rows(db, 'TASKPRED').length, srcRels * 2, 'relationships copied');
+  assert.ok(tasks.every((t) => !srcTasks.some((s) => s.task_id === t.task_id)), 'new internal ids');
+  assert.ok(tasks.every((t) => !t.act_start_date && !t.act_end_date && t.remain_drtn_hr_cnt === t.target_drtn_hr_cnt), 'progress cleared');
+  assert.ok(progressed === 0 || srcTasks.filter((t) => t.act_start_date).length === progressed, 'source untouched');
+  assert.equal(p.plan_start_date.slice(0, 10), '2027-01-04');
+  assert.ok(tasks.every((t) => !t.target_start_date || t.target_start_date >= '2027-01-04'), 'planned dates moved to the new start');
+  // the copy is edited like any project, by Activity ID, without touching the source
+  const victim = tasks.find((t) => t.task_type === 'TT_Task')!.task_code;
+  assert.equal(applyOps(db, [{ op: 'delete_activity', project: 'COPY1', id: victim }]).ok, true);
+  assert.ok(rows(db, 'TASK').some((t) => t.proj_id === src.proj_id && t.task_code === victim), 'source keeps the activity');
+  assert.match(applyOps(db, [{ op: 'copy_project', from: src.proj_short_name, id: 'copy1' }]).error?.message ?? '', /already exists/);
+  // lookups
+  const ctx = makeCtx(db, { hoursPerDay: 8 });
+  const list = runTool('list_projects', {}, db, ctx, [src.proj_id], 8) as { projects: { id: string; open: boolean; activities: number }[] };
+  assert.deepEqual(list.projects.map((x) => [x.id, x.open]), [[src.proj_short_name, true], ['COPY1', false]]);
+  const sum = runTool('project_summary', { project: 'COPY1' }, db, ctx, [src.proj_id], 8) as { activities: number };
+  assert.equal(sum.activities, srcTasks.length - 1);
+  assert.match((runTool('list_wbs', { project: 'NOPE' }, db, ctx, [], 8) as { error: string }).error, /No project "NOPE"/);
+});
