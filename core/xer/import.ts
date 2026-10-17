@@ -30,7 +30,9 @@ const CHILD: Record<string, { parent: string; name: (r: Row) => string }> = {
   RSRCRATE: { parent: 'rsrc_id', name: (r) => r.start_date ?? '' },
   ROLERATE: { parent: 'role_id', name: (r) => r.start_date ?? '' },
 };
-const UDF_FK_TABLE: Record<string, string> = { TASK: 'TASK', PROJWBS: 'PROJWBS', PROJECT: 'PROJECT', RSRC: 'RSRC', TASKRSRC: 'TASKRSRC', ROLE: 'ROLES' };
+const UDF_FK_TABLE: Record<string, string> = { TASK: 'TASK', PROJWBS: 'PROJWBS', PROJECT: 'PROJECT', RSRC: 'RSRC', TASKRSRC: 'TASKRSRC', ROLE: 'ROLES', PROJCOST: 'PROJCOST', TASKPROC: 'TASKPROC', PROJISSU: 'PROJISSU' };
+/** Fields kept out of refTarget (they often point outside the file, so they are not checked or pulled in on export) that still follow their row when it is renumbered. */
+const SOFT_REFS: Record<string, string> = { 'TASK|rsrc_id': 'RSRC', pobs_id: 'POBS', shift_id: 'SHIFT' };
 
 /** Default plan: every project in the file as a new project. */
 export function defaultPlan(src: Db): ImportPlan {
@@ -124,6 +126,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
       const ck = t + '|' + f;
       let target = targetCache.get(ck);
       if (target === undefined && !targetCache.has(ck)) targetCache.set(ck, (target = refTarget(f, t)));
+      if (!target && v) { const st = SOFT_REFS[ck] ?? SOFT_REFS[f]; const nv = st && map[st]?.[v]; if (nv) { out[f] = nv; continue; } }
       if (t === 'UDFVALUE' && f === 'fk_id') { const ft = UDF_FK_TABLE[udfTable.get(r.udf_type_id) ?? ''] ?? ''; out[f] = map[ft]?.[v] ?? v; continue; }
       if (target && v) {
         const nv = map[target]?.[v];

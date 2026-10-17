@@ -72,3 +72,25 @@ test('all samples import without throwing', () => {
   }
   assert.ok(db.tables.PROJECT.rows.length > 40);
 });
+
+test('renumbered resources, OBS and shifts keep their references (primary resource, pobs_id, shift_id)', () => {
+  const db = emptyDb();
+  const src = load('cairo festival city.xer');
+  importIntoDb(db, src, defaultPlan(src)); // takes the low ids, so the second file's rows are renumbered
+  const text = (name: string, fields: string[], rs: string[][]) => ({ name, fields, rows: rs.map((r) => Object.fromEntries(fields.map((f, i) => [f, r[i]]))) });
+  const two = load('cairo festival city.xer');
+  two.tables.SHIFT = text('SHIFT', ['shift_id', 'shift_name'], [['900', 'Night']]);
+  two.tables.POBS = text('POBS', ['pobs_id', 'pobs_name'], [['800', 'Site team']]);
+  const r0 = two.tables.RSRC.rows[0];
+  Object.assign(r0, { shift_id: '900', pobs_id: '800', rsrc_name: 'Renamed so it is not matched' , rsrc_short_name: 'NEW-RSRC' });
+  const t0 = two.tables.TASK.rows[0];
+  t0.rsrc_id = r0.rsrc_id;
+  if (!two.tables.TASK.fields.includes('rsrc_id')) two.tables.TASK.fields.push('rsrc_id');
+  for (const f of ['shift_id', 'pobs_id']) if (!two.tables.RSRC.fields.includes(f)) two.tables.RSRC.fields.push(f);
+  const res = importIntoDb(db, two, defaultPlan(two));
+  const newR = db.tables.RSRC.rows.find((r) => r.rsrc_short_name === 'NEW-RSRC')!;
+  const newT = db.tables.TASK.rows.find((t) => t.task_id === res.map.TASK[t0.task_id])!;
+  assert.equal(newT.rsrc_id, newR.rsrc_id);
+  assert.equal(newR.shift_id, db.tables.SHIFT.rows.find((r) => r.shift_name === 'Night')!.shift_id);
+  assert.equal(newR.pobs_id, db.tables.POBS.rows.find((r) => r.pobs_name === 'Site team')!.pobs_id);
+});
