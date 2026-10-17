@@ -108,3 +108,18 @@ test('trace logic walks levels and marks driving links', async () => {
   assert.deepEqual(traceLogic(ctx, c.task_id, { preds: 3, succs: 0, drivingOnly: true }, ff).levels.get(-1), [a.task_id]);
   assert.equal(traceLogic(ctx, c.task_id, { preds: 1, succs: 0, maxPerLevel: 1 }, ff).more.get(-1), 1);
 });
+
+test('Actual and At Completion Duration are working time from the actual start (P6), not Original minus Remaining', () => {
+  const db = emptyDb();
+  const pid = newProject(db, { id: 'AD', name: 'Actual durations', start: '2024-01-08 08:00' });
+  const root = db.tables.PROJWBS.rows[0].wbs_id;
+  const done = addActivity(db, pid, root), going = addActivity(db, pid, root), idle = addActivity(db, pid, root);
+  for (const t of [done, going, idle]) t.target_drtn_hr_cnt = t.remain_drtn_hr_cnt = '40';
+  db.tables.PROJECT.rows[0].last_recalc_date = '2024-01-15 08:00'; // Monday, one work week after the start
+  Object.assign(done, { act_start_date: '2024-01-08 08:00', act_end_date: '2024-01-10 17:00', remain_drtn_hr_cnt: '0' }); // took 3 days of a planned 5
+  Object.assign(going, { act_start_date: '2024-01-09 08:00', remain_drtn_hr_cnt: '40' }); // 4 days done, still 5 to go
+  const ctx = makeCtx(db, prefs), get = (id: string, t: typeof done) => COLUMN_BY_ID.get(id)!.get(t, ctx);
+  assert.deepEqual([get('act_dur', done), get('atc_dur', done)], ['3', '3']);
+  assert.deepEqual([get('act_dur', going), get('atc_dur', going)], ['4', '9']);
+  assert.deepEqual([get('act_dur', idle), get('atc_dur', idle)], ['0', '5']);
+});

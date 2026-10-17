@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Tabs } from '../components/Layout.tsx';
 import { getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
 import { useCtx } from '../hooks.ts';
-import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, REL_TYPES, RSRC_TYPES, TASK_TYPES, activityPct, daysToHours, fmtDate, fmtDur, isCritical, isMilestone, memoHtml, memoText, setActual, setPercent, statusOf, STATUS, wbsPath, type Ctx } from '../model.ts';
+import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, REL_TYPES, RSRC_TYPES, TASK_TYPES, activityPct, actualDurHours, atCompletionDurHours, daysToHours, fmtDate, fmtDur, isCritical, isMilestone, memoHtml, memoText, setActual, setPercent, statusOf, STATUS, wbsPath, type Ctx } from '../model.ts';
 import { addField, nextId, rows, table, type Row } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { p6num, relationshipFloat } from '../../core/schedule/cpm.ts';
@@ -123,9 +123,9 @@ function Status({ t, ctx }: { t: Row; ctx: Ctx }) {
         <fieldset style={{ width: 230 }}><legend>Duration</legend>
           <div className="form" style={{ gridTemplateColumns: 'auto 70px' }}>
             {durInput('target_drtn_hr_cnt', 'Original')}
-            <Field label="Actual"><input readOnly value={st === 'TK_NotStart' ? '0' : fmtDur(Math.max(0, Number(t.target_drtn_hr_cnt || 0) - Number(t.remain_drtn_hr_cnt || 0)), p)} /></Field>
+            <Field label="Actual"><input readOnly value={fmtDur(actualDurHours(t, ctx), p)} /></Field>
             {durInput('remain_drtn_hr_cnt', 'Remaining')}
-            <Field label="At Completion"><input readOnly value={fmtDur(st === 'TK_Complete' ? t.target_drtn_hr_cnt : Math.max(0, Number(t.target_drtn_hr_cnt || 0) - Number(t.remain_drtn_hr_cnt || 0)) + Number(t.remain_drtn_hr_cnt || 0), p)} /></Field>
+            <Field label="At Completion"><input readOnly value={fmtDur(atCompletionDurHours(t, ctx), p)} /></Field>
           </div>
         </fieldset>
         <fieldset style={{ width: 330 }}><legend>Status</legend>

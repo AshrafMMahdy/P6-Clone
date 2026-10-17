@@ -43,6 +43,21 @@ export function fmtDur(hours: string | number | undefined, prefs: Prefs): string
 }
 export const daysToHours = (d: number, prefs: Prefs) => d * prefs.hoursPerDay;
 
+const calsOf = new WeakMap<Ctx, ReturnType<typeof calendarResolver>>();
+/** P6 Actual Duration (hours): working time on the activity's calendar from its actual start to its actual finish, or to the data date while in progress. */
+export function actualDurHours(r: Row, ctx: Ctx): number {
+  const as = parseP6Date(r.act_start_date);
+  if (as == null) return 0;
+  const p = ctx.proj.get(r.proj_id);
+  const end = parseP6Date(r.act_end_date) ?? parseP6Date(p?.last_recalc_date);
+  if (end == null || end <= as) return 0;
+  let cals = calsOf.get(ctx);
+  if (!cals) calsOf.set(ctx, (cals = calendarResolver(ctx.db, [])));
+  return (cals.get(r.clndr_id) ?? cals.fallback(p?.clndr_id)).workBetween(as, end) / 60;
+}
+/** P6 At Completion Duration: Actual Duration + Remaining Duration. */
+export const atCompletionDurHours = (r: Row, ctx: Ctx) => actualDurHours(r, ctx) + (r.act_end_date ? 0 : Number(r.remain_drtn_hr_cnt || 0));
+
 export const TASK_TYPES: Record<string, string> = { TT_Task: 'Task Dependent', TT_Rsrc: 'Resource Dependent', TT_LOE: 'Level of Effort', TT_Mile: 'Start Milestone', TT_FinMile: 'Finish Milestone', TT_WBS: 'WBS Summary' };
 export const DUR_TYPES: Record<string, string> = { DT_FixedDUR2: 'Fixed Duration and Units', DT_FixedDrtn: 'Fixed Duration and Units/Time', DT_FixedQty: 'Fixed Units', DT_FixedRate: 'Fixed Units/Time' };
 export const PCT_TYPES: Record<string, string> = { CP_Drtn: 'Duration', CP_Phys: 'Physical', CP_Units: 'Units' };
@@ -111,8 +126,8 @@ export const COLUMNS: Column[] = [
     if (!r.act_start_date) r.target_drtn_hr_cnt = p6num(h);
     refreshOwnDates(_db, r);
   } } },
-  { id: 'act_dur', title: 'Actual Duration', width: 56, align: 'right', get: (r, c) => (r.act_start_date ? fmtDur(Math.max(0, Number(r.target_drtn_hr_cnt || 0) - Number(r.remain_drtn_hr_cnt || 0)), c.prefs) : '0') },
-  { id: 'atc_dur', title: 'At Completion Duration', width: 70, align: 'right', get: (r, c) => fmtDur(r.act_end_date ? r.target_drtn_hr_cnt : Math.max(Number(r.target_drtn_hr_cnt || 0) - Number(r.remain_drtn_hr_cnt || 0), 0) + Number(r.remain_drtn_hr_cnt || 0), c.prefs) },
+  { id: 'act_dur', title: 'Actual Duration', width: 56, align: 'right', get: (r, c) => fmtDur(actualDurHours(r, c), c.prefs) },
+  { id: 'atc_dur', title: 'At Completion Duration', width: 70, align: 'right', get: (r, c) => fmtDur(atCompletionDurHours(r, c), c.prefs) },
   { id: 'pct', title: 'Activity % Complete', width: 62, align: 'right', get: (r, c) => `${Math.round(activityPct(r, c) * 10) / 10}%`, edit: { type: 'number', set: (_db, r, v) => setPercent(r, Number(v)) } },
   { id: 'dur_pct', title: 'Duration % Complete', width: 62, align: 'right', get: (r) => `${Math.round(durationPct(r) * 10) / 10}%` },
   { id: 'phys_pct', title: 'Physical % Complete', width: 62, align: 'right', get: (r) => `${Number(r.phys_complete_pct || 0)}%`, edit: { type: 'number', set: (_db, r, v) => { if (!(Number(v) >= 0 && Number(v) <= 100)) return 'Enter 0 to 100.'; r.phys_complete_pct = p6num(Number(v)); } } },
