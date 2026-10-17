@@ -62,7 +62,7 @@ export function ScheduleOptionsDialog() {
     mutate('Schedule Options', (d) => {
       for (const pid of ui.openProjects) {
         const S = table(d, 'SCHEDOPTIONS');
-        const F = ['schedoptions_id', 'proj_id', 'sched_outer_depend_type', 'sched_open_critical_flag', 'sched_retained_logic', 'sched_float_type', 'sched_calendar_on_relationship_lag', 'sched_use_expect_end_flag', 'sched_progress_override'];
+        const F = ['schedoptions_id', 'proj_id', 'sched_outer_depend_type', 'sched_open_critical_flag', 'sched_retained_logic', 'sched_float_type', 'sched_calendar_on_relationship_lag', 'sched_use_expect_end_flag', 'sched_lag_early_start_flag', 'sched_progress_override'];
         for (const f of F) addField(S, f);
         let r = S.rows.find((x) => x.proj_id === pid);
         if (!r) { r = { schedoptions_id: String(nextId(d, 'SCHEDOPTIONS')), proj_id: pid }; S.rows.push(r); }
@@ -70,7 +70,7 @@ export function ScheduleOptionsDialog() {
           sched_retained_logic: o.logic === 'retained' ? 'Y' : 'N', sched_progress_override: o.logic === 'override' ? 'Y' : 'N',
           sched_float_type: { start: 'FT_SS', finish: 'FT_FF', smallest: 'FT_Min' }[o.floatType],
           sched_calendar_on_relationship_lag: { predecessor: 'rcal_Predecessor', successor: 'rcal_Successor', '24h': 'rcal_24Hour', project: 'rcal_ProjDefault' }[o.lagCalendar],
-          sched_open_critical_flag: o.openEndedCritical ? 'Y' : 'N', sched_outer_depend_type: o.ignoreExternal ? 'SD_None' : 'SD_Both', sched_use_expect_end_flag: o.useExpectedFinish ? 'Y' : 'N',
+          sched_open_critical_flag: o.openEndedCritical ? 'Y' : 'N', sched_outer_depend_type: o.ignoreExternal ? 'SD_None' : 'SD_Both', sched_use_expect_end_flag: o.useExpectedFinish ? 'Y' : 'N', sched_lag_early_start_flag: o.ssLagFromActualStart ? 'N' : 'Y',
         });
         const pr = d.tables.PROJECT.rows.find((x) => x.proj_id === pid)!;
         pr.critical_path_type = o.criticalBy === 'longestPath' ? 'CT_DrivPath' : 'CT_TotFloat';
@@ -90,6 +90,8 @@ export function ScheduleOptionsDialog() {
           <select value={o.logic} onChange={(e) => set({ logic: e.target.value as SchedOptions['logic'] })}><option value="retained">Retained Logic</option><option value="override">Progress Override</option><option value="actual">Actual Dates</option></select>
           <label>Calculate float based on</label>
           <select value={o.floatType} onChange={(e) => set({ floatType: e.target.value as SchedOptions['floatType'] })}><option value="finish">Finish Date (Finish Float = Late Finish - Early Finish)</option><option value="start">Start Date (Start Float = Late Start - Early Start)</option><option value="smallest">Smallest of Start Float and Finish Float</option></select>
+          <label>Calculate start-to-start lag from</label>
+          <select value={o.ssLagFromActualStart ? 'actual' : 'early'} onChange={(e) => set({ ssLagFromActualStart: e.target.value === 'actual' })}><option value="early">Early Start</option><option value="actual">Actual Start</option></select>
           <label>Calendar for scheduling relationship lag</label>
           <select value={o.lagCalendar} onChange={(e) => set({ lagCalendar: e.target.value as SchedOptions['lagCalendar'] })}><option value="predecessor">Predecessor Activity Calendar</option><option value="successor">Successor Activity Calendar</option><option value="24h">24 Hour Calendar</option><option value="project">Project Default Calendar</option></select>
         </div>

@@ -28,6 +28,9 @@ export interface SchedOptions {
   modernBuild: boolean;
   /** Floats and open ends measured to the latest finish of all projects scheduled together, not each project's own. */
   floatOnOpenedProjects: boolean;
+  /** Schedule Options "Calculate start-to-start lag from: Actual Start" (sched_lag_early_start_flag N). P6's default,
+   *  Early Start, runs the lag still to run from an in-progress predecessor's remaining start. */
+  ssLagFromActualStart: boolean;
 }
 
 export interface ScheduleStats { activities: number; relationships: number; notStarted: number; inProgress: number; completed: number; finish: number | null; dataDate: number | null }
@@ -66,6 +69,7 @@ export function optionsFor(db: Db, proj: Row, over: Partial<SchedOptions> = {}):
     criticalFloatHrs: Number(proj.critical_drtn_hr_cnt || 0),
     legacyMilestones: proj._legacy_ms != null && proj._legacy_ms !== '' ? proj._legacy_ms === 'Y' : isLegacyLayout(db),
     floatOnOpenedProjects: so.sched_use_project_end_date_for_float === 'N',
+    ssLagFromActualStart: so.sched_lag_early_start_flag === 'N',
     modernBuild: Number((proj._p6_ver || db.header?.version || '0').split('.')[0]) >= 8,
   };
   return { ...base, ...over };
@@ -258,7 +262,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     if (p.status === 'IP') {
       if (fin) return lagAdd(finishOf(p), r);
       // Start links from an in-progress predecessor.
-      if (p.proj.opts.logic !== 'retained') return lagAdd(p.as!, r);
+      if (p.proj.opts.logic !== 'retained' || p.proj.opts.ssLagFromActualStart) return lagAdd(p.as!, r);
       // Retained Logic: the lag still to run is the lag minus the work time elapsed between the predecessor's
       // actual start and the data date; it runs from the predecessor's remaining (resumed) start.
       const lc = lagCal(r);
