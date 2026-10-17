@@ -5,7 +5,7 @@ import { detectFormat, importChecks, readRaw, type Format } from '../renderer/io
 import { writeOut } from './commands.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { writeXer } from '../core/xer/write.ts';
-import { diffDbs } from '../core/diff.ts';
+import { diffDbs, compareSchedules, compareText } from '../core/diff.ts';
 import { worst, type Finding } from '../core/findings.ts';
 import type { Db } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
@@ -53,7 +53,10 @@ const USAGE = `p6clone <command> [options]
   progress <file.xer> --data-date YYYY-MM-DD --out out.xer [--version v]
   level    <file.xer> --out out.xer [--version v]
   export   <file.xer> --version <v> --out <path> [--format xer|xml]
-  diff     <a.xer> <b.xer> [--json]
+  diff     <a.xer> <b.xer> [--json]                   Table-level differences (rows keyed by internal ids). Exit 1 if any
+  compare  <old.xer> <new.xer> [--json] [--hours-per-day 8]
+           Schedule comparison like P6's Claim Digger: projects, WBS (code path), activities (Activity ID) and
+           relationships (pred -> succ type) added, deleted and changed; renumbered internal ids do not matter. Exit 1 if any
 `;
 
 const args = process.argv.slice(2);
@@ -193,6 +196,13 @@ async function main(): Promise<number> {
       else for (const e of d) console.log(e.kind === 'changed' ? `~ ${e.table}[${e.key}].${e.field}: ${e.a} -> ${e.b}` : `${e.kind === 'added' ? '+' : '-'} ${e.table}[${e.key}]`);
       if (!flag('json')) console.log(`${d.length} difference(s)`);
       return d.length ? 1 : 0;
+    }
+    case 'compare': {
+      const [a, b] = [load(positional[0]), load(positional[1])];
+      for (const [f, x] of [[positional[0], a], [positional[1], b]] as const) if (worst(x.findings) === 'fatal') { console.error(`${f}:`); printFindings(x.findings.filter((y) => y.severity === 'fatal')); return 2; }
+      const cs = compareSchedules(a.db, b.db, hpd());
+      console.log(flag('json') ? JSON.stringify(cs, null, 2) : `Compare ${positional[0]} -> ${positional[1]}\n${compareText(cs)}`);
+      return cs.length ? 1 : 0;
     }
     default:
       if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') { console.log(USAGE); return 0; }

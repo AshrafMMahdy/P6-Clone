@@ -131,3 +131,25 @@ test('edit operations refuse codes P6 does not have and keep P6 rules (milestone
   const t = db.tables.TASK.rows.find((r) => r.task_code === 'A1')!;
   assert.deepEqual([t.task_type, t.target_drtn_hr_cnt, t.remain_drtn_hr_cnt], ['TT_FinMile', '0', '0']);
 });
+
+test('compare matches activities by Activity ID, so renumbered internal ids are not differences', async () => {
+  const { compareSchedules } = await import('../core/diff.ts');
+  const { parseXer } = await import('../core/xer/parse.ts');
+  const a = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, 'cairo festival city.xer')))).db;
+  const b: typeof a = structuredClone(a);
+  const shift = (v: string) => (v ? String(Number(v) + 100000) : v);
+  for (const t of b.tables.TASK.rows) t.task_id = shift(t.task_id);
+  for (const r of b.tables.TASKPRED.rows) { r.task_id = shift(r.task_id); r.pred_task_id = shift(r.pred_task_id); r.task_pred_id = shift(r.task_pred_id); }
+  assert.deepEqual(compareSchedules(a, b), []);
+  const [t0, t1] = b.tables.TASK.rows;
+  t0.target_drtn_hr_cnt = String(Number(t0.target_drtn_hr_cnt) + 16);
+  b.tables.TASK.rows = b.tables.TASK.rows.filter((t) => t !== t1);
+  b.tables.TASKPRED.rows = b.tables.TASKPRED.rows.filter((r) => r.task_id !== t1.task_id && r.pred_task_id !== t1.task_id);
+  const cs = compareSchedules(a, b);
+  assert.deepEqual(cs.filter((c) => c.object === 'activity').map((c) => [c.kind, c.id, c.field ?? '']), [['changed', t0.task_code, 'original_duration'], ['deleted', t1.task_code, '']]);
+  const lost = a.tables.TASKPRED.rows.filter((r) => r.task_id === a.tables.TASK.rows[1].task_id || r.pred_task_id === a.tables.TASK.rows[1].task_id).length;
+  assert.equal(cs.filter((c) => c.object === 'relationship' && c.kind === 'deleted').length, lost);
+  const r = run('compare', join(SAMPLES_DIR, 'cairo festival city.xer'), join(SAMPLES_DIR, 'cairo festival city.xer'));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Activities: 0 added, 0 deleted, 0 changed/);
+});

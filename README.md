@@ -82,7 +82,8 @@ node cli/p6clone.ts review tower.xer --json
 | `query <xer> summary \| find \| activity <ID> \| wbs [code] \| critical \| health \| resources [ID] [--json]` | Read-only lookups (`find` filters: `--text --status --critical --not-critical --wbs --resource --starts-after --starts-before --finishes-after --finishes-before --code [TYPE=]value --max-float --min-float --milestones --sort --limit`; `activity` includes activity codes and UDFs) | 0, 66 not found |
 | `review <xer> [--json]` | Planning-reviewer checks (DCMA-style thresholds) graded pass / warn / fail | 0 pass, 1 warnings, 3 failures |
 | `validate <xer> [--json]` | What real P6 would do on import, plus saved dates P6 would change on F9 | 0 imports, 1 P6 would fail or drop data, 2 P6 rejects |
-| `schedule`, `progress`, `level`, `export`, `diff` | F9, Update Progress, Level Resources, write XER/XML, compare two files | |
+| `compare <old> <new> [--json]` | Schedule comparison like P6's Claim Digger: projects, WBS (by code path), activities (by Activity ID) and relationships (pred -> succ type) added, deleted or changed, so revisions whose internal ids were renumbered compare cleanly | 0 same, 1 differences, 2 a file P6 rejects |
+| `schedule`, `progress`, `level`, `export`, `diff` | F9, Update Progress, Level Resources, write XER/XML, table-level differences by internal id | |
 
 **Operations** (`edit --ops`, and the MCP `edit` tool) are a JSON array. Activities are addressed by Activity ID, WBS by
 code (or `A.B` path), resources by resource ID, calendars by name, projects by project ID (only needed when the file has
@@ -138,7 +139,7 @@ node cli/p6clone.ts progress my.xer --data-date 2026-12-01 --out progressed.xer
 ```
 
 ```bash
-node cli/p6clone.ts diff before.xer after.xer --json
+node cli/p6clone.ts compare Rev0.xer RevA.xer
 ```
 
 Also `level` and `export --format xer|xml --version <v>`. `validate` exits 0 (P6 would import), 1 (P6 import fails or drops data), 2 (P6 rejects the file).
