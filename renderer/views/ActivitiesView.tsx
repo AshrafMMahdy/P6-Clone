@@ -11,6 +11,7 @@ import { ActivityUsagePane } from './AssignmentsView.tsx';
 import { TraceLogic } from './TraceLogic.tsx';
 import { parseP6Date, formatP6Date } from '../../core/dates.ts';
 import type { Row } from '../../core/db.ts';
+import { relationshipFloat } from '../../core/schedule/cpm.ts';
 import { activityCommands, copyActivities, pasteActivities, linkSelected } from '../commands.ts';
 
 const WBS_COLORS = ['var(--wbs0)', 'var(--wbs1)', 'var(--wbs2)', 'var(--wbs3)', 'var(--wbs4)'];
@@ -69,11 +70,13 @@ export function ActivitiesView() {
   const links: GanttLink[] = useMemo(() => {
     if (!ui.relLines) return [];
     const vis = new Set(rows.filter((r) => r.kind === 'task').map((r) => r.task!.task_id));
-    const out: GanttLink[] = [];
+    const out: GanttLink[] = [], relFF = relationshipFloat(ctx.db, ctx);
     for (const p of ctx.db.tables.TASKPRED?.rows ?? []) {
       if (!vis.has(p.task_id) || !vis.has(p.pred_task_id)) continue;
       const a = ctx.taskById.get(p.pred_task_id)!, b = ctx.taskById.get(p.task_id)!;
-      out.push({ from: `t:${p.pred_task_id}`, to: `t:${p.task_id}`, type: p.pred_type, critical: isCritical(a, ctx) && isCritical(b, ctx), driving: isDriving(p, a, b) });
+      // driving (relationship free float 0) is worked out only for the links the Gantt draws (a few µs each)
+      let driving: boolean | undefined;
+      out.push({ from: `t:${p.pred_task_id}`, to: `t:${p.task_id}`, type: p.pred_type, critical: isCritical(a, ctx) && isCritical(b, ctx), get driving() { return driving ??= relFF(p) === 0; } });
     }
     return out;
   }, [rows, ctx, ui.relLines]);
@@ -267,16 +270,6 @@ export function fillDown(): void {
     }
   });
   toast(errs.length ? `Filled ${rest.length - errs.length} of ${rest.length}. ${errs[0]}` : `${col.title} filled down to ${rest.length} activit${rest.length > 1 ? 'ies' : 'y'}`);
-}
-
-function isDriving(p: Row, a: Row, b: Row): boolean {
-  // driving = relationship free float zero, judged from stored early dates
-  const ty = p.pred_type;
-  const from = parseP6Date(ty === 'PR_SS' || ty === 'PR_SF' ? (a.act_start_date || a.early_start_date) : (a.act_end_date || a.early_end_date));
-  const to = parseP6Date(ty === 'PR_FF' || ty === 'PR_SF' ? b.early_end_date : (b.early_start_date || b.restart_date));
-  if (from == null || to == null || b.act_end_date) return false;
-  const lag = Number(p.lag_hr_cnt || 0) * 60;
-  return to - from - lag <= 16 * 60 && to >= from; // within one non-work gap
 }
 
 function ActIcon({ t, crit }: { t: Row; crit: boolean }) {
