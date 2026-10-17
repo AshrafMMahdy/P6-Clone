@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Tabs } from '../components/Layout.tsx';
 import { getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
 import { useCtx } from '../hooks.ts';
-import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, REL_TYPES, RSRC_TYPES, TASK_TYPES, activityPct, daysToHours, fmtDate, fmtDur, isCritical, isMilestone, setActual, setPercent, statusOf, STATUS, wbsPath, type Ctx } from '../model.ts';
+import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, REL_TYPES, RSRC_TYPES, TASK_TYPES, activityPct, daysToHours, fmtDate, fmtDur, isCritical, isMilestone, memoHtml, memoText, setActual, setPercent, statusOf, STATUS, wbsPath, type Ctx } from '../model.ts';
 import { addField, nextId, rows, table, type Row } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { p6num, relationshipFloat } from '../../core/schedule/cpm.ts';
@@ -295,7 +295,6 @@ function Notebook({ t }: { t: Row }) {
   const memos = rows(db, 'TASKMEMO').filter((m) => m.task_id === t.task_id);
   const [sel, setSel] = useState<string | null>(memos[0]?.memo_id ?? null);
   const cur = memos.find((m) => m.memo_id === sel);
-  const strip = (h: string) => h.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
   return (
     <div className="tabbody flush" style={{ flexDirection: 'row' }}>
       <div style={{ width: 240, display: 'flex', flexDirection: 'column', padding: 6, gap: 4 }}>
@@ -317,8 +316,8 @@ function Notebook({ t }: { t: Row }) {
         })}>Add</button>
       </div>
       <div style={{ flex: 1, padding: 6, display: 'flex' }}>
-        {cur ? <textarea style={{ flex: 1, font: '11px Tahoma', border: '1px solid #7f9db9' }} key={cur.memo_id} defaultValue={strip(cur.task_memo)}
-          onBlur={(e) => { const html = `<HTML><BODY>${e.target.value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>')}</BODY></HTML>`; if (html !== cur.task_memo) mutate('Edit Notebook', (d) => { d.tables.TASKMEMO.rows.find((m) => m.memo_id === cur.memo_id)!.task_memo = html; }); }} />
+        {cur ? <textarea style={{ flex: 1, font: '11px Tahoma', border: '1px solid #7f9db9' }} key={cur.memo_id} defaultValue={memoText(cur.task_memo)}
+          onBlur={(e) => { const html = memoHtml(e.target.value); if (html !== cur.task_memo) mutate('Edit Notebook', (d) => { d.tables.TASKMEMO.rows.find((m) => m.memo_id === cur.memo_id)!.task_memo = html; }); }} />
           : <div className="muted">No notebook topics.</div>}
       </div>
     </div>

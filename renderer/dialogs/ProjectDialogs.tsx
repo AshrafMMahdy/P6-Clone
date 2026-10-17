@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Dialog, Tabs } from '../components/Layout.tsx';
 import { closeDialog, getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
-import { rows } from '../../core/db.ts';
+import { addField, nextId, rows, table } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { deleteProject } from '../../core/xer/import.ts';
 import { saveBaseline, assignBaseline, deleteBaseline, restoreBaseline } from '../../core/progress/baseline.ts';
-import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, TASK_TYPES, ensureEps, fmtDate, newProject, projectName } from '../model.ts';
+import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, TASK_TYPES, ensureEps, fmtDate, memoHtml, memoText, newProject, projectName } from '../model.ts';
 import { openProjects } from '../views/ProjectsView.tsx';
 
 const dt = (s: string) => (s ? s.replace(' ', 'T').slice(0, 16) : '');
@@ -57,7 +57,7 @@ export function ProjectDetailsDialog(props: { projId?: string }) {
   const eps = db.tables.EPS?.rows ?? [];
   return (
     <Dialog title={`Project Details - ${p.proj_short_name}`} width={720} height={430} buttons={<button className="btn" onClick={closeDialog}>Close</button>}>
-      <Tabs tabs={[['general', 'General'], ['dates', 'Dates'], ['defaults', 'Defaults'], ['settings', 'Settings']]} value={tab} onChange={setTab} />
+      <Tabs tabs={[['general', 'General'], ['notebook', 'Notebook'], ['dates', 'Dates'], ['defaults', 'Defaults'], ['settings', 'Settings'], ['codes', 'Codes']]} value={tab} onChange={setTab} />
       <div style={{ padding: 10, border: '1px solid #a0a0a0', borderTop: 'none', background: '#f0f0f0' }}>
         {tab === 'general' && <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
           <label>Project ID</label><input defaultValue={p.proj_short_name} onBlur={(e) => {
@@ -91,8 +91,73 @@ export function ProjectDetailsDialog(props: { projId?: string }) {
           <select value={p.critical_path_type || 'CT_TotFloat'} onChange={(e) => set('critical_path_type', e.target.value)}><option value="CT_TotFloat">Total Float less than or equal to</option><option value="CT_DrivPath">Longest Path</option></select>
           <label>Critical float (hours)</label><input type="number" defaultValue={p.critical_drtn_hr_cnt || '0'} onBlur={(e) => set('critical_drtn_hr_cnt', e.target.value)} />
         </div>}
+        {tab === 'notebook' && root && <ProjectNotebook pid={pid} wbsId={root.wbs_id} />}
+        {tab === 'codes' && <ProjectCodes pid={pid} />}
       </div>
     </Dialog>
+  );
+}
+
+/** Project notebook: P6 keeps project notebook topics as WBSMEMO rows on the project's root WBS node. */
+function ProjectNotebook({ pid, wbsId }: { pid: string; wbsId: string }) {
+  const db = getDb();
+  const types = rows(db, 'MEMOTYPE');
+  const memos = rows(db, 'WBSMEMO').filter((m) => m.wbs_id === wbsId);
+  const [sel, setSel] = useState<string | null>(memos[0]?.wbs_memo_id ?? null);
+  const cur = memos.find((m) => m.wbs_memo_id === sel);
+  const free = types.filter((x) => x.proj_flag === 'Y' && !memos.some((m) => m.memo_type_id === x.memo_type_id));
+  return (
+    <div style={{ display: 'flex', gap: 8, height: 300 }}>
+      <div style={{ width: 200, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div className="tblwrap" style={{ flex: 1, background: '#fff' }}>
+          <table className="tbl"><thead><tr><th>Notebook Topic</th></tr></thead><tbody>
+            {memos.map((m) => <tr key={m.wbs_memo_id} className={sel === m.wbs_memo_id ? 'sel' : ''} onMouseDown={() => setSel(m.wbs_memo_id)}><td>{types.find((x) => x.memo_type_id === m.memo_type_id)?.memo_type ?? `Topic ${m.memo_type_id}`}</td></tr>)}
+          </tbody></table>
+        </div>
+        <button className="btn" disabled={!free.length} title={free.length ? '' : 'No unused notebook topic for projects in the database (MEMOTYPE with proj_flag Y)'} onClick={() => mutate('Add Project Notebook Topic', (d) => {
+          const WM = table(d, 'WBSMEMO');
+          for (const f of ['wbs_memo_id', 'proj_id', 'memo_type_id', 'wbs_id', 'wbs_memo']) addField(WM, f);
+          const id = String(nextId(d, 'WBSMEMO'));
+          WM.rows.push({ wbs_memo_id: id, proj_id: pid, memo_type_id: free[0].memo_type_id, wbs_id: wbsId, wbs_memo: '' });
+          setSel(id);
+        })}>Add</button>
+      </div>
+      {cur ? <textarea style={{ flex: 1, font: '11px Tahoma', border: '1px solid #7f9db9' }} key={cur.wbs_memo_id} defaultValue={memoText(cur.wbs_memo)}
+        onBlur={(e) => { const html = memoHtml(e.target.value); if (memoText(html) !== memoText(cur.wbs_memo)) mutate('Edit Project Notebook', (d) => { d.tables.WBSMEMO.rows.find((m) => m.wbs_memo_id === cur.wbs_memo_id)!.wbs_memo = html; }); }} />
+        : <div className="muted">No notebook topics.</div>}
+    </div>
+  );
+}
+
+/** Project codes (PCATTYPE / PCATVAL, assigned in PROJPCAT). */
+function ProjectCodes({ pid }: { pid: string }) {
+  const db = getDb();
+  const types = rows(db, 'PCATTYPE'), vals = rows(db, 'PCATVAL'), assigned = rows(db, 'PROJPCAT').filter((a) => a.proj_id === pid);
+  const setCode = (typeId: string, valId: string) => mutate('Assign Project Code', (d) => {
+    const PA = table(d, 'PROJPCAT');
+    for (const f of ['proj_id', 'proj_catg_type_id', 'proj_catg_id']) addField(PA, f);
+    PA.rows = PA.rows.filter((a) => !(a.proj_id === pid && a.proj_catg_type_id === typeId));
+    if (valId) PA.rows.push({ proj_id: pid, proj_catg_type_id: typeId, proj_catg_id: valId });
+  });
+  if (!types.length) return <div className="muted">No project code types in the database.</div>;
+  return (
+    <table className="tbl" style={{ background: '#fff' }}>
+      <thead><tr><th>Project Code</th><th>Code Value</th><th>Description</th></tr></thead>
+      <tbody>
+        {types.map((ty) => {
+          const cur = assigned.find((a) => a.proj_catg_type_id === ty.proj_catg_type_id);
+          const mine = vals.filter((v) => v.proj_catg_type_id === ty.proj_catg_type_id);
+          return (
+            <tr key={ty.proj_catg_type_id}>
+              <td>{ty.proj_catg_type}</td>
+              <td><select value={cur?.proj_catg_id ?? ''} onChange={(e) => setCode(ty.proj_catg_type_id, e.target.value)}>
+                <option value="" />{mine.map((v) => <option key={v.proj_catg_id} value={v.proj_catg_id}>{v.proj_catg_short_name}</option>)}</select></td>
+              <td>{mine.find((v) => v.proj_catg_id === cur?.proj_catg_id)?.proj_catg_name ?? (cur ? `(missing value ${cur.proj_catg_id})` : '')}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 

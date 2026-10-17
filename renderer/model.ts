@@ -13,6 +13,10 @@ export { normDate, ensureEps, ensureDefaultCalendar, ensureCurrency, newProject,
 export type Ctx = CoreCtx<Prefs>;
 export const makeCtx = (db: Db, prefs: Prefs): Ctx => coreMakeCtx(db, prefs);
 
+/** Notebook (memo) HTML as plain text, and plain text back to the HTML P6 stores. */
+export const memoText = (h: string) => h.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+export const memoHtml = (t: string) => `<HTML><BODY>${t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>')}</BODY></HTML>`;
+
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function fmtDate(v: string | number | null | undefined, prefs: Prefs, withTime = prefs.showTime): string {
