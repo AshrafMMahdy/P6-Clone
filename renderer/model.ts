@@ -105,9 +105,10 @@ const finishOf = (r: Row, ctx: Ctx) => (r.act_end_date ? `${fmtDate(r.act_end_da
 /** Activity table columns (View > Columns). */
 export const COLUMNS: Column[] = [
   { id: 'task_code', title: 'Activity ID', width: 110, get: (r) => r.task_code, edit: { type: 'text', set: (db, r, v) => {
-    if (!v.trim()) return 'Activity ID cannot be blank.';
+    v = v.trim();
+    if (!v) return 'Activity ID cannot be blank.';
     if (rows(db, 'TASK').some((t) => t !== r && t.proj_id === r.proj_id && t.task_code === v)) return `Activity ID ${v} already exists in this project.`;
-    r.task_code = v.trim();
+    r.task_code = v;
   } } },
   { id: 'task_name', title: 'Activity Name', width: 260, get: (r) => r.task_name, edit: { type: 'text', set: (_db, r, v) => { r.task_name = v; } } },
   { id: 'orig_dur', title: 'Original Duration', width: 62, align: 'right', get: (r, c) => fmtDur(r.target_drtn_hr_cnt, c.prefs), edit: { type: 'number', set: (_db, r, v, c) => {
@@ -156,7 +157,12 @@ export const COLUMNS: Column[] = [
   { id: 'duration_type', title: 'Duration Type', width: 130, get: (r) => DUR_TYPES[r.duration_type] ?? r.duration_type, edit: { type: 'select', options: DUR_TYPES, set: (_db, r, v) => { r.duration_type = v; } } },
   { id: 'pct_type', title: '% Complete Type', width: 70, get: (r) => PCT_TYPES[r.complete_pct_type] ?? r.complete_pct_type, edit: { type: 'select', options: PCT_TYPES, set: (_db, r, v) => { r.complete_pct_type = v; } } },
   { id: 'calendar', title: 'Calendar', width: 140, get: (r, c) => c.cal.get(r.clndr_id)?.clndr_name ?? '' },
-  { id: 'cstr_type', title: 'Primary Constraint', width: 110, get: (r) => (r.cstr_type ? CSTR_TYPES[r.cstr_type] : ''), edit: { type: 'select', options: CSTR_TYPES, set: (_db, r, v) => { r.cstr_type = v; if (!v) r.cstr_date = ''; } } },
+  { id: 'cstr_type', title: 'Primary Constraint', width: 110, get: (r) => (r.cstr_type ? CSTR_TYPES[r.cstr_type] : ''), edit: { type: 'select', options: CSTR_TYPES, set: (_db, r, v) => {
+    r.cstr_type = v;
+    // like the Status tab: a new constraint starts on the activity's early start (finish constraints: early finish)
+    if (!v || v === 'CS_ALAP') r.cstr_date = '';
+    else if (!r.cstr_date) r.cstr_date = (/MEO|FIN/.test(v) ? r.early_end_date || r.target_end_date : r.early_start_date || r.target_start_date) ?? '';
+  } } },
   { id: 'cstr_date', title: 'Primary Constraint Date', width: 82, get: (r, c) => fmtDate(r.cstr_date, c.prefs), edit: { type: 'date', set: (_db, r, v) => { r.cstr_date = v; } } },
   { id: 'cstr_type2', title: 'Secondary Constraint', width: 110, get: (r) => (r.cstr_type2 ? CSTR_TYPES[r.cstr_type2] : '') },
   { id: 'cstr_date2', title: 'Secondary Constraint Date', width: 82, get: (r, c) => fmtDate(r.cstr_date2, c.prefs) },

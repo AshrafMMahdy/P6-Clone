@@ -123,3 +123,17 @@ test('Actual and At Completion Duration are working time from the actual start (
   assert.deepEqual([get('act_dur', going), get('atc_dur', going)], ['4', '9']);
   assert.deepEqual([get('act_dur', idle), get('atc_dur', idle)], ['0', '5']);
 });
+
+test('table edits: Activity ID is trimmed before the duplicate check; a new primary constraint gets a date', () => {
+  const db = emptyDb();
+  const pid = newProject(db, { id: 'TE', name: 'Table edits', start: '2024-01-08 08:00' });
+  const root = db.tables.PROJWBS.rows[0].wbs_id;
+  const a = addActivity(db, pid, root), b = addActivity(db, pid, root);
+  const ctx = makeCtx(db, prefs), set = (id: string, t: typeof a, v: string) => COLUMN_BY_ID.get(id)!.edit!.set(db, t, v, ctx);
+  assert.match(String(set('task_code', b, ` ${a.task_code} `)), /already exists/);
+  Object.assign(b, { early_start_date: '2024-01-09 08:00', early_end_date: '2024-01-12 17:00' });
+  set('cstr_type', b, 'CS_MEOB');
+  assert.deepEqual([b.cstr_type, b.cstr_date], ['CS_MEOB', '2024-01-12 17:00']);
+  set('cstr_type', b, 'CS_ALAP');
+  assert.deepEqual([b.cstr_type, b.cstr_date], ['CS_ALAP', '']);
+});
