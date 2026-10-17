@@ -32,7 +32,7 @@ const app = await electron.launch({ args: [root, '--user-data', profile], cwd: r
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 await win.waitForSelector('.ai-strip, .workspace');
 await win.evaluate(async (port) => { await (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake', actions: true }); }, port);
-await win.waitForSelector('.ai-strip'); await win.click('.ai-strip');
+await win.waitForSelector('.ai-strip'); await win.waitForTimeout(400); if (!(await win.locator('.ai-panel').count())) await win.click('.ai-strip');
 await win.fill('.ai-panel textarea', 'Create a schedule for a five-story building'); await win.keyboard.press('Enter');
 const t0 = Date.now();
 while (Date.now() - t0 < 60000 && !(await win.locator('.ai-msg.ai').count()) && !(await win.locator('.ai-msg.error').count())) await win.waitForTimeout(100);

@@ -92,7 +92,7 @@ const srv = createServer((req, res) => { let b = ''; req.on('data', (d) => (b +=
   res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ choices: [{ message }] }));
 }); }).listen(0);
 await win.evaluate(async (port) => { await (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake', actions: true }); }, (srv.address() as any).port);
-await win.waitForSelector('.ai-strip'); await win.click('.ai-strip');
+await win.waitForSelector('.ai-strip'); await win.waitForTimeout(400); if (!(await win.locator('.ai-panel').count())) await win.click('.ai-strip');
 await win.fill('.ai-panel textarea', 'Print just the activity list on A4'); await win.keyboard.press('Enter');
 for (let i = 0; i < 120 && !(await win.locator('.ai-msg.ai').count()); i++) await win.waitForTimeout(250);
 ok(results[0]?.settings?.content === 'table' && results[0]?.pages >= 1 && results[0]?.printable_columns?.includes('total_float'), 'set_print_options applied the settings and reported pages: ' + JSON.stringify({ c: results[0]?.settings?.content, p: results[0]?.pages }));

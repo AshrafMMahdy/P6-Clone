@@ -35,7 +35,7 @@ for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await wi
 const before = await win.locator('.grid-row').count();
 // the imported project is the "past project"
 await win.evaluate(async (port) => { await (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake', actions: true }); }, port);
-await win.waitForSelector('.ai-strip'); await win.click('.ai-strip');
+await win.waitForSelector('.ai-strip'); await win.waitForTimeout(400); if (!(await win.locator('.ai-panel').count())) await win.click('.ai-strip');
 // first ask only lists projects, to learn the past project's ID
 await win.fill('.ai-panel textarea', 'Plan a similar project'); await win.keyboard.press('Enter');
 const t0 = Date.now();

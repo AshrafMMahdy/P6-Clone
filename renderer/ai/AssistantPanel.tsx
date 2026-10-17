@@ -1,4 +1,5 @@
-// Right-hand AI assistant: a slim strip on the window's right edge that expands over the Gantt chart into a chat.
+// Right-hand AI assistant: a slim, softly glowing strip always on the window's right edge; clicking it (or Ctrl+Shift+A)
+// opens the chat beside it, and the windows make room for it.
 // The model looks things up with the tools in ./tools.ts (the conversation loop runs here; the provider call and the
 // API key stay in the main process). Activity IDs in answers are links that select the activity.
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -46,6 +47,10 @@ function systemPrompt(actions: boolean): string {
   ].filter(Boolean).join('\n');
 }
 
+// per-computer settings of the panel (not part of the project database); storage can be unavailable, so never fail
+const pref = (k: string) => { try { return localStorage.getItem(`p6clone.ai.${k}`); } catch { return null; } };
+const setPref = (k: string, v: string) => { try { localStorage.setItem(`p6clone.ai.${k}`, v); } catch { /* not kept */ } };
+
 export function AssistantPanel() {
   const open = useStore((s) => s.ui.aiOpen);
   const wide = useStore((s) => s.ui.aiWide);
@@ -58,12 +63,23 @@ export function AssistantPanel() {
   const stopped = useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const [autoOpen, setAutoOpen] = useState(() => pref('autoOpen') === '1');
+  const booted = useRef(false);
 
   useEffect(() => { void window.p6.aiGetConfig().then(setCfg); window.p6.onAiConfig(setCfg); }, []);
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [lines, open]);
   useEffect(() => { if (open) box.current?.focus(); }, [open]);
   // the closed strip takes its own room on the right (it must not cover the Gantt's scrollbar)
   useEffect(() => { document.querySelector('.workspace')?.classList.toggle('ai-on', !!cfg?.enabled); }, [cfg?.enabled]);
+  useEffect(() => { const w = document.querySelector('.workspace'); w?.classList.toggle('ai-open', !!(cfg?.enabled && open)); w?.classList.toggle('ai-wide', !!wide); }, [cfg?.enabled, open, wide]);
+  // opens by itself the very first time the assistant is available, then only if the user ticked the box
+  useEffect(() => {
+    if (!cfg?.enabled || booted.current) return;
+    booted.current = true;
+    const first = pref('booted') !== '1';
+    setPref('booted', '1');
+    if (first || pref('autoOpen') === '1') setUi({ aiOpen: true });
+  }, [cfg?.enabled]);
   if (!cfg?.enabled) return null;
 
   const add = (l: Line) => setLines((x) => [...x, l]);
@@ -105,15 +121,16 @@ export function AssistantPanel() {
   const clear = () => { if (busy) stop(); history.current = []; setLines([]); };
   const asked = lines.filter((l) => l.who === 'user').length;
 
-  if (!open) return (
-    <div className="ai-strip" title="AI Assistant (Ctrl+Shift+A)" onClick={() => setUi({ aiOpen: true })}><span>AI Assistant</span></div>
-  );
-  return (
+  const strip = <div className={`ai-strip ${open ? 'open' : ''}`} title={`${open ? 'Hide' : 'Open'} the AI Assistant (Ctrl+Shift+A)`} onClick={() => setUi({ aiOpen: !open })}><span>AI Assistant</span></div>;
+  if (!open) return strip;
+  return (<>
+    {strip}
     <div className={`ai-panel ${wide ? 'wide' : ''}`}>
       <div className="ai-head">
-        <b>AI Assistant</b><span className="muted">{cfg.model || 'no model set'}</span>
+        <b>AI Assistant</b><span className="muted ai-shrink" title={cfg.model || 'no model set'}>{cfg.model || 'no model set'}</span>
         <span style={{ flex: 1 }} />
-        {asked > 0 && <span className="muted" title="Each new question includes the earlier ones, so you can ask follow-ups">remembers {asked} question{asked > 1 ? 's' : ''}</span>}
+        <label className="ai-auto" title="Open the assistant by itself whenever the app starts"><input type="checkbox" checked={autoOpen} onChange={(e) => { setAutoOpen(e.target.checked); setPref('autoOpen', e.target.checked ? '1' : '0'); }} />Open on startup</label>
+        {asked > 0 && <span className="muted ai-shrink" title="Each new question includes the earlier ones, so you can ask follow-ups">remembers {asked} question{asked > 1 ? 's' : ''}</span>}
         <button className="tbtn" title="Clear context: start a new conversation (the assistant forgets earlier questions)" disabled={!lines.length} onClick={clear}><span className="lbl">Clear context</span></button>
         <button className="tbtn" title={wide ? 'Narrow' : 'Widen'} onClick={() => setUi({ aiWide: !wide })}><span className="lbl">{wide ? '⇥' : '⇤'}</span></button>
         <button className="tbtn" title="Minimize (Ctrl+Shift+A)" onClick={() => setUi({ aiOpen: false })}><span className="lbl">—</span></button>
@@ -128,11 +145,16 @@ export function AssistantPanel() {
         <div ref={bottom} />
       </div>
       <div className="ai-input">
+        <div className="ai-compose">
         <textarea ref={box} rows={3} value={input} placeholder="Ask about this project (Enter to send, Shift+Enter for a new line)" onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { e.stopPropagation(); if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); setUi({ aiOpen: false }); return; } if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask(); } if (e.key === 'Escape') setUi({ aiOpen: false }); }} />
-        {busy ? <button className="btn" onClick={stop}>Stop</button> : <button className="btn primary" disabled={!input.trim()} onClick={() => void ask()}>Send</button>}
+        {busy
+          ? <button className="ai-send stop" title="Stop" aria-label="Stop" onClick={stop}><svg viewBox="0 0 16 16" width="12" height="12"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor" /></svg></button>
+          : <button className="ai-send" title="Send (Enter)" aria-label="Send" disabled={!input.trim()} onClick={() => void ask()}><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></button>}
+        </div>
       </div>
     </div>
+  </>
   );
 }
 

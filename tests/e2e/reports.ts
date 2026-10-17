@@ -87,7 +87,7 @@ const srv = createServer((req, res) => { let b = ''; req.on('data', (d) => (b +=
   res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ choices: [{ message }] }));
 }); }).listen(0);
 await win.evaluate(async (port) => { await (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake', actions: true }); }, (srv.address() as any).port);
-await win.waitForSelector('.ai-strip'); await win.click('.ai-strip');
+await win.waitForSelector('.ai-strip'); await win.waitForTimeout(400); if (!(await win.locator('.ai-panel').count())) await win.click('.ai-strip');
 await win.fill('.ai-panel textarea', 'Make me a float report and show me the critical activities'); await win.keyboard.press('Enter');
 const seen = new Set<string>();
 for (let i = 0; i < 240 && !(await win.locator('.ai-msg.ai').count()); i++) {

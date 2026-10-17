@@ -26,7 +26,7 @@ if (past) {
   await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
   for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
 }
-await win.waitForSelector('.ai-strip'); await win.click('.ai-strip');
+await win.waitForSelector('.ai-strip'); await win.waitForTimeout(400); if (!(await win.locator('.ai-panel').count())) await win.click('.ai-strip');
 await win.fill('.ai-panel textarea', request); await win.keyboard.press('Enter');
 const t0 = Date.now();
 let seen = 0;

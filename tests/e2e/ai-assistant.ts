@@ -47,7 +47,7 @@ ok(!cfgFile.includes('sk-test-abcdef123456'), 'the key on disk is encrypted, not
 ok(seen[0]?.auth === 'Bearer sk-test-abcdef123456', 'the key is sent to the provider as a Bearer token');
 ok(seen[0]?.xtest === 'hello' && seen[0]?.j.temperature === 0.3, 'extra header and JSON parameters reach the provider');
 ok(await win.locator('.ai-strip').count() === 1, 'enabled: slim strip on the right');
-await win.click('.ai-strip'); await win.waitForSelector('.ai-panel');
+await win.waitForTimeout(400); if (!(await win.locator('.ai-panel').count())) await win.click('.ai-strip'); await win.waitForSelector('.ai-panel');
 await win.fill('.ai-panel textarea', 'Which waterproofing activities are there?'); await win.keyboard.press('Enter');
 await win.waitForSelector('.ai-msg.ai', { timeout: 15000 });
 const tools = await win.locator('.ai-msg.tool').allInnerTexts(); ok(tools.some((t) => t.includes('project summary')) && tools.some((t) => t.includes('Searched activities')), 'tool lookups shown: ' + tools.join(' / '));
