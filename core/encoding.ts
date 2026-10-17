@@ -57,22 +57,44 @@ export function detectCodepage(b: Uint8Array): TextEncodingName {
   return 'windows-1252';
 }
 
-export function decodeText(b: Uint8Array, force?: TextEncodingName | 'auto'): { text: string; encoding: TextEncodingName } {
-  if (force && force !== 'auto') {
-    const bom = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
-    return { text: new TextDecoder(force === 'utf-8-bom' ? 'utf-8' : force).decode(bom ? b.subarray(3) : b), encoding: force };
-  }
-  if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) {
-    return { text: new TextDecoder('utf-8').decode(b.subarray(3)), encoding: 'utf-8-bom' };
-  }
-  let high = false;
-  for (const x of b) if (x >= 0x80) { high = true; break; }
-  if (!high) return { text: new TextDecoder('windows-1252').decode(b), encoding: 'utf-8' };
+const SAMPLE = 4 * 1048576; // bytes of non-ASCII lines the code page is recognised from
+const CHUNK = 1048576;
+
+/** Encoding of a file without decoding it whole (a file can be larger than the longest possible string): BOM, else
+ *  ASCII, else valid UTF-8, else the code page recognised from its lines with non-ASCII bytes. `start` skips the BOM;
+ *  `decoder` is the TextDecoder label to read it with. */
+export function detectEncoding(b: Uint8Array, force?: TextEncodingName | 'auto'): { encoding: TextEncodingName; start: number; decoder: string } {
+  const bom = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
+  const of = (encoding: TextEncodingName, start = 0) => ({ encoding, start, decoder: encoding === 'utf-8-bom' ? 'utf-8' : encoding });
+  if (force && force !== 'auto') return of(force, bom ? 3 : 0);
+  if (bom) return of('utf-8-bom', 3);
+  let first = -1;
+  for (let i = 0; i < b.length; i++) if (b[i] >= 0x80) { first = i; break; }
+  if (first < 0) return of('utf-8'); // ASCII
   try {
-    return { text: new TextDecoder('utf-8', { fatal: true }).decode(b), encoding: 'utf-8' };
+    const d = new TextDecoder('utf-8', { fatal: true });
+    for (let i = first; i < b.length; i += CHUNK) d.decode(b.subarray(i, i + CHUNK), { stream: true });
+    d.decode();
+    return of('utf-8');
   } catch { /* not UTF-8 */ }
-  const enc = detectCodepage(b);
-  return { text: new TextDecoder(enc).decode(b), encoding: enc };
+  // the code page only shows in non-ASCII text: recognise it from those lines (all of them in all but huge files)
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (let s = b.lastIndexOf(10, first) + 1; s < b.length && size < SAMPLE;) {
+    let e = b.indexOf(10, s);
+    if (e < 0) e = b.length;
+    for (let i = s; i < e; i++) if (b[i] >= 0x80) { const p = b.subarray(s, e + 1); parts.push(p); size += p.length; break; }
+    s = e + 1;
+  }
+  const sample = new Uint8Array(size);
+  size = 0;
+  for (const p of parts) { sample.set(p, size); size += p.length; }
+  return of(detectCodepage(sample));
+}
+
+export function decodeText(b: Uint8Array, force?: TextEncodingName | 'auto'): { text: string; encoding: TextEncodingName } {
+  const { encoding, start, decoder } = detectEncoding(b, force);
+  return { text: new TextDecoder(decoder).decode(b.subarray(start)), encoding };
 }
 
 // ---------------------------------------------------------------- encoding (export)
@@ -120,7 +142,7 @@ export function encodeText(s: string, enc: TextEncodingName): Uint8Array {
     if (c < 0x80) { out[n++] = c; continue; }
     for (const x of t.get(c) ?? [0x3f]) out[n++] = x;
   }
-  return out.subarray(0, n);
+  return out.slice(0, n); // a copy, so the working buffer (twice the size) is not kept
 }
 
 export const encodeCp1252 = (s: string): Uint8Array => encodeText(s, 'windows-1252');

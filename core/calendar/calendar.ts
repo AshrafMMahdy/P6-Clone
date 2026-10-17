@@ -9,7 +9,6 @@ export class CalendarHorizonError extends Error {}
 /** Work-time arithmetic on a P6 calendar. Times are minutes (see core/dates.ts). */
 export class WorkCalendar {
   readonly def: CalendarDef;
-  private cache = new Map<number, Shift[]>();
 
   constructor(def: CalendarDef) {
     this.def = def;
@@ -20,14 +19,10 @@ export class WorkCalendar {
     return new WorkCalendar({ week: [all, all, all, all, all, all, all], exceptions: new Map() });
   }
 
-  /** Shifts on a day index (days since 1970-01-01). */
+  /** Shifts on a day index (days since 1970-01-01). Not cached: a cache is one more map lookup than it saves, and
+   *  float spans of years over many calendars filled it with millions of days. */
   shiftsOn(day: number): Shift[] {
-    let s = this.cache.get(day);
-    if (!s) {
-      s = this.def.exceptions.get(day + OLE_OFFSET) ?? this.def.week[(day + 4) % 7];
-      this.cache.set(day, s);
-    }
-    return s;
+    return this.def.exceptions.get(day + OLE_OFFSET) ?? this.def.week[(day + 4) % 7];
   }
 
   isWorkTime(t: number): boolean {

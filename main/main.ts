@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } from 'electron';
 import { AiStore, chat, type AiConfig, type ChatRequest } from './ai.ts';
-import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { buildMenu } from './menu.ts';
@@ -53,29 +53,38 @@ ipcMain.handle('file:save', async (_e, defaultName: string, bytes: Uint8Array, f
 
 // The database file is JSON Lines (core/db-file.ts), read and written line by line so its size is not limited
 // by the largest possible single string.
-// Lines cross to the window in batches of about BATCH characters: one message between processes has a size cap.
+// Lines cross to the window in batches of about BATCH bytes (one message between processes has a size cap), read
+// from the file as the window asks for them: neither the file nor all of its lines are ever in memory at once.
 const BATCH = 32 * 1024 * 1024;
-let loadBatches: string[][] = [];
+let loadFd: number | null = null;
+let loadRest = Buffer.alloc(0); // the start of a line that continues in the next batch
 ipcMain.handle('db:loadBegin', () => {
-  loadBatches = [];
-  if (!existsSync(DB_FILE())) return null;
-  const buf = readFileSync(DB_FILE());
-  let cur: string[] = [], size = 0;
-  for (let i = 0; i < buf.length;) {
-    let j = buf.indexOf(10, i); if (j < 0) j = buf.length;
-    cur.push(buf.toString('utf8', i, j)); size += j - i; i = j + 1;
-    if (size >= BATCH) { loadBatches.push(cur); cur = []; size = 0; }
-  }
-  if (cur.length) loadBatches.push(cur);
-  return loadBatches.length;
+  if (loadFd != null) closeSync(loadFd);
+  loadFd = null; loadRest = Buffer.alloc(0);
+  if (!existsSync(DB_FILE())) return false;
+  loadFd = openSync(DB_FILE(), 'r');
+  return true;
 });
-ipcMain.handle('db:loadBatch', (_e, i: number) => { const b = loadBatches[i]; if (i === loadBatches.length - 1) loadBatches = []; return b ?? []; });
+/** The next lines of the file, null at its end. */
+ipcMain.handle('db:loadBatch', () => {
+  if (loadFd == null) return null;
+  const buf = Buffer.allocUnsafe(BATCH);
+  const n = readSync(loadFd, buf, 0, BATCH, null);
+  const data = loadRest.length ? Buffer.concat([loadRest, buf.subarray(0, n)]) : buf.subarray(0, n);
+  if (n === 0) { closeSync(loadFd); loadFd = null; loadRest = Buffer.alloc(0); return data.length ? [data.toString('utf8')] : null; }
+  const end = data.lastIndexOf(10);
+  loadRest = Buffer.from(data.subarray(end + 1)); // a copy: the batch buffer is not kept
+  const out: string[] = [];
+  for (let i = 0; i <= end;) { const j = data.indexOf(10, i); out.push(data.toString('utf8', i, j)); i = j + 1; }
+  return out;
+});
 
 // atomic: write a temp file then rename, so a crash never leaves a half-written database
 let saveFd: number | null = null;
 const TMP = () => DB_FILE() + '.tmp';
 ipcMain.handle('db:saveBegin', () => { if (saveFd != null) closeSync(saveFd); saveFd = openSync(TMP(), 'w'); return true; });
 ipcMain.handle('db:saveLines', (_e, lines: string[]) => { if (saveFd == null) return false; for (const l of lines) writeSync(saveFd, l + '\n'); return true; });
+ipcMain.handle('db:saveAbort', () => { if (saveFd != null) { closeSync(saveFd); saveFd = null; rmSync(TMP(), { force: true }); } return true; });
 ipcMain.handle('db:saveEnd', () => {
   if (saveFd == null) return false;
   closeSync(saveFd); saveFd = null;

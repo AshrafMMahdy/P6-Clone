@@ -1,6 +1,6 @@
 // P6-style CPM scheduler (F9). Works on raw TASK/TASKPRED rows and writes dates back.
 import { addField, rows, table, type Db, type Row } from '../db.ts';
-import { formatP6Date, parseP6Date, MIN_PER_DAY } from '../dates.ts';
+import { formatP6Date, memo, parseP6Date, MIN_PER_DAY } from '../dates.ts';
 import type { Finding } from '../findings.ts';
 import { WorkCalendar, CalendarHorizonError } from '../calendar/calendar.ts';
 import { inheritExceptions, parseClndrData, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
@@ -81,10 +81,10 @@ export function isLegacyLayout(db: Db): boolean {
 }
 
 /** Number as P6 writes it: up to 6 decimals, no trailing zeros. */
-export function p6num(n: number): string {
+export const p6num = memo((n: number): string => {
   const s = (Math.round(n * 1e6) / 1e6).toFixed(6).replace(/\.?0+$/, '');
   return s === '-0' ? '0' : s;
-}
+});
 
 const relType = (s: string): RelType => (s?.slice(3, 5) as RelType) || 'FS';
 
@@ -135,7 +135,9 @@ function sameNameProjectCals(db: Db): Map<string, string> {
   return out;
 }
 
-export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedOptions> = {}): ScheduleResult {
+/** Schedule (F9) and write the dates into the TASK and PROJECT rows. With sink, nothing is written: each activity's
+ *  calculated values go to sink instead (a dry run, e.g. to compare with the saved dates without a copy or undo record). */
+export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedOptions> = {}, sink?: (row: Row, values: Row) => void): ScheduleResult {
   const findings: Finding[] = [];
   const cals = calendarResolver(db, findings);
   const projects = new Map<string, Proj>();
@@ -594,15 +596,18 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     return { ok: false, log: '', findings, stats: emptyStats, projects: {} };
   }
 
-  // Write back
-  const T = table(db, 'TASK');
-  for (const f of ['early_start_date', 'early_end_date', 'late_start_date', 'late_end_date', 'restart_date', 'reend_date', 'rem_late_start_date', 'rem_late_end_date', 'total_float_hr_cnt', 'free_float_hr_cnt', 'driving_path_flag', 'target_start_date', 'target_end_date', 'remain_drtn_hr_cnt']) addField(T, f);
+  // Write back (every change the scheduler makes to the database is in this block; a dry run skips it all)
+  const put = sink ?? ((r: Row, v: Row) => { Object.assign(r, v); });
+  if (!sink) {
+    const T = table(db, 'TASK');
+    for (const f of ['early_start_date', 'early_end_date', 'late_start_date', 'late_end_date', 'restart_date', 'reend_date', 'rem_late_start_date', 'rem_late_end_date', 'total_float_hr_cnt', 'free_float_hr_cnt', 'driving_path_flag', 'target_start_date', 'target_end_date', 'remain_drtn_hr_cnt']) addField(T, f);
+  }
   const stats: ScheduleStats = { activities: acts.size, relationships: rels.length, notStarted: 0, inProgress: 0, completed: 0, finish: null, dataDate: null };
   for (const a of acts.values()) {
     const r = a.row;
     if (a.status === 'CO') {
       stats.completed++;
-      Object.assign(r, {
+      put(r, {
         early_start_date: formatP6Date(a.es), early_end_date: formatP6Date(a.ef),
         late_start_date: formatP6Date(a.ls), late_end_date: formatP6Date(a.lf),
         restart_date: '', reend_date: '', rem_late_start_date: '', rem_late_end_date: '',
@@ -612,24 +617,25 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     }
     a.status === 'NS' ? stats.notStarted++ : stats.inProgress++;
     const es = formatP6Date(a.es), ef = formatP6Date(a.ef), ls = formatP6Date(a.ls), lf = formatP6Date(a.lf);
-    Object.assign(r, {
+    put(r, {
       early_start_date: es, early_end_date: ef, late_start_date: ls, late_end_date: lf,
       restart_date: es, reend_date: ef, rem_late_start_date: ls, rem_late_end_date: lf,
       total_float_hr_cnt: a.tf == null ? '' : p6num(a.tf / H), free_float_hr_cnt: a.ff == null ? '' : p6num(a.ff / H),
       driving_path_flag: a.driving ? 'Y' : 'N',
     });
-    if (a.status === 'NS') { r.target_start_date = es; r.target_end_date = ef; }
+    if (a.status === 'NS') put(r, { target_start_date: es, target_end_date: ef });
     if (a.type === 'TT_LOE' || a.type === 'TT_WBS') {
-      r.remain_drtn_hr_cnt = p6num(a.dur / H);
-      if (a.status === 'NS') r.target_drtn_hr_cnt = p6num(a.dur / H);
+      put(r, { remain_drtn_hr_cnt: p6num(a.dur / H) });
+      if (a.status === 'NS') put(r, { target_drtn_hr_cnt: p6num(a.dur / H) });
     }
   }
-  const P = table(db, 'PROJECT');
-  addField(P, 'scd_end_date'); addField(P, 'last_recalc_date');
+  if (!sink) { const P = table(db, 'PROJECT'); addField(P, 'scd_end_date'); addField(P, 'last_recalc_date'); }
   const out: ScheduleResult['projects'] = {};
   for (const p of projects.values()) {
-    p.row.scd_end_date = formatP6Date(p.finish);
-    p.row.last_recalc_date = formatP6Date(p.dd);
+    if (!sink) {
+      p.row.scd_end_date = formatP6Date(p.finish);
+      p.row.last_recalc_date = formatP6Date(p.dd);
+    }
     out[p.id] = { finish: p.finish, dataDate: p.dd };
     stats.finish = Math.max(stats.finish ?? 0, p.finish);
     stats.dataDate = stats.dataDate == null ? p.dd : Math.min(stats.dataDate, p.dd);
