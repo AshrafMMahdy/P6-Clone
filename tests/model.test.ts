@@ -88,3 +88,23 @@ test('user filters and database columns (activity codes, UDFs)', async () => {
   assert.deepEqual(ids({ any: true, rows: [{ col: 'code_7', op: 'eq', value: 'civ' }, { col: 'udf_9', op: 'ge', value: '12' }] }), [b.task_code, c.task_code]);
   assert.deepEqual(ids({ rows: [{ col: 'code_7', op: 'empty', value: '' }] }), [a.task_code, c.task_code]);
 });
+
+test('trace logic walks levels and marks driving links', async () => {
+  const { traceLogic } = await import('../core/project/ctx.ts');
+  const { relationshipFloat } = await import('../core/schedule/cpm.ts');
+  const db = emptyDb();
+  const pid = newProject(db, { id: 'TR', name: 'Trace', start: '2024-01-08 08:00' });
+  const root = db.tables.PROJWBS.rows[0].wbs_id;
+  const [a, b, c, d, e] = [0, 1, 2, 3, 4].map(() => addActivity(db, pid, root));
+  b.target_drtn_hr_cnt = b.remain_drtn_hr_cnt = '16'; // shorter, so B -> C is not driving
+  for (const [x, y] of [[a, c], [b, c], [c, d], [d, e]]) addRelationship(db, x.task_id, y.task_id);
+  assert.ok(scheduleProjects(db, [pid]).ok);
+  const ctx = makeCtx(db, prefs), ff = relationshipFloat(db, ctx);
+  const tr = traceLogic(ctx, c.task_id, { preds: 2, succs: 1 }, ff);
+  assert.deepEqual(tr.levels.get(-1)!.sort(), [a.task_id, b.task_id].sort());
+  assert.deepEqual(tr.levels.get(1), [d.task_id]);
+  assert.equal(tr.levels.has(2), false);
+  assert.deepEqual(tr.links.map((l) => [l.from, l.ff === 0]).sort(), [[a.task_id, true], [b.task_id, false], [c.task_id, true]].sort());
+  assert.deepEqual(traceLogic(ctx, c.task_id, { preds: 3, succs: 0, drivingOnly: true }, ff).levels.get(-1), [a.task_id]);
+  assert.equal(traceLogic(ctx, c.task_id, { preds: 1, succs: 0, maxPerLevel: 1 }, ff).more.get(-1), 1);
+});

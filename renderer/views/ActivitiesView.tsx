@@ -8,6 +8,7 @@ import { COLUMN_BY_ID, fmtDate, fmtDur, isCritical, isMilestone, addRelationship
 import { buildActivityRows, FILTERS, taskStart, taskFinish, userFilters } from './activityRows.ts';
 import { ActivityDetails } from './ActivityDetails.tsx';
 import { ActivityUsagePane } from './AssignmentsView.tsx';
+import { TraceLogic } from './TraceLogic.tsx';
 import { parseP6Date, formatP6Date } from '../../core/dates.ts';
 import type { Row } from '../../core/db.ts';
 import { activityCommands, copyActivities, pasteActivities, linkSelected } from '../commands.ts';
@@ -151,6 +152,7 @@ export function ActivitiesView() {
   const onGanttContext = (key: string | null, e: React.MouseEvent, g: GanttActions) => {
     const act = key ? [
       { label: 'Activity Details', onClick: () => setUi({ bottom: 'details', detailTab: 'general' }) },
+      { label: 'Trace Logic', onClick: () => setUi({ bottom: 'trace' }) },
       { label: 'Assign Predecessors...', onClick: () => openDialog('assign', { which: 'pred' }) },
       { label: 'Assign Successors...', onClick: () => openDialog('assign', { which: 'succ' }) },
       { label: 'Assign Resources...', onClick: () => openDialog('assignRsrc') },
@@ -220,7 +222,7 @@ export function ActivitiesView() {
         // View > Show on Top (table / Gantt) and Show on Bottom (details / usage / none)
         const top = ui.hideTable ? gantt : ui.hideGantt ? table
           : <Split dir="h" initial={Math.min(760, Math.round(window.innerWidth * 0.48))} storeKey="act-h">{table}{gantt}</Split>;
-        const bottom = ui.bottom === 'none' ? null : ui.bottom === 'profile' || ui.bottom === 'spreadsheet' ? <ActivityUsagePane sheet={ui.bottom === 'spreadsheet'} /> : <ActivityDetails />;
+        const bottom = ui.bottom === 'none' ? null : ui.bottom === 'profile' || ui.bottom === 'spreadsheet' ? <ActivityUsagePane sheet={ui.bottom === 'spreadsheet'} /> : ui.bottom === 'trace' ? <TraceLogic /> : <ActivityDetails />;
         return bottom ? <Split dir="v" initial={Math.round(window.innerHeight * 0.52)} storeKey="act-v"><div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>{top}</div>{bottom}</Split>
           : <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>{top}</div>;
       })()}
