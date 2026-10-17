@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // P6 Clone CLI — same core as the desktop app.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { parseXer } from '../core/xer/parse.ts';
+import { detectFormat, importChecks, readRaw, type Format } from '../renderer/io.ts';
+import { writeOut } from './commands.ts';
 import { validateXer } from '../core/xer/validate.ts';
-import { checkStoredDates } from '../core/schedule/stored-dates.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { diffDbs } from '../core/diff.ts';
 import { worst, type Finding } from '../core/findings.ts';
@@ -33,6 +33,9 @@ function queryText(v: unknown, indent = ''): string {
 
 
 const USAGE = `p6clone <command> [options]
+
+  Input files: XER, P6 XML, Microsoft Project XML or MPX (detected from the content). --out writes P6 XML
+  when the path ends in .xml, else XER.
 
   new      --id P1 --name "Tower A" --start 2026-03-01 --out p1.xer [--version 19.12]
   edit     <file.xer> --ops ops.json|- --out out.xer [--schedule] [--data-date D] [--hours-per-day 8] [--json]
@@ -65,9 +68,13 @@ for (let i = 1; i < args.length; i++) {
 }
 const hpd = () => Number(opt('hours-per-day') ?? 8);
 
-function load(path: string): { db: Db; findings: Finding[] } {
-  const r = parseXer(new Uint8Array(readFileSync(path)));
-  return { db: r.db, findings: r.findings };
+/** Read an XER, P6 XML, Microsoft Project XML or MPX file (by content and extension). */
+function load(path: string): { db: Db; findings: Finding[]; format: Format } {
+  if (!path) throw new Error('No file given.');
+  let bytes: Uint8Array;
+  try { bytes = new Uint8Array(readFileSync(path)); } catch (e) { throw new Error(`Cannot read ${path}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}`); }
+  const format = detectFormat(path, bytes);
+  return { ...readRaw(bytes, format), format };
 }
 
 function printFindings(f: Finding[]): void {
@@ -86,9 +93,8 @@ function exitCode(f: Finding[]): number {
 async function main(): Promise<number> {
   switch (cmd) {
     case 'validate': {
-      const { db, findings } = load(positional[0]);
-      const pre = validateXer(db, findings);
-      const all = worst(pre) === 'fatal' ? pre : [...pre, ...checkStoredDates(db)];
+      const { db, findings, format } = load(positional[0]);
+      const all = importChecks(db, findings, format);
       if (flag('json')) console.log(JSON.stringify({ file: positional[0], version: db.header?.version, verdict: worst(all) ?? 'clean', findings: all }, null, 2));
       else {
         printFindings(all);
@@ -123,7 +129,7 @@ async function main(): Promise<number> {
       const id = opt('id') ?? 'NEW';
       const r = applyOps(db, [{ op: 'add_project', id, name: opt('name') ?? id, start: opt('start') ?? new Date().toISOString().slice(0, 10) }]);
       if (!r.ok) { console.error(r.error!.message); return 65; }
-      writeFileSync(out, writeXer(db, { version: opt('version') ?? '19.12' }));
+      writeOut(out, db, opt('version'));
       if (flag('json')) console.log(JSON.stringify({ ok: true, project: id, out }));
       else console.log(`Created project ${id} in ${out}`);
       return 0;
@@ -147,7 +153,7 @@ async function main(): Promise<number> {
         if (!res.ok) { r.ok = false; r.error = { index: -1, op: null, message: `Scheduling failed: ${res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join('; ')}` }; }
       }
       const out = opt('out');
-      if (r.ok && out) writeFileSync(out, writeXer(db, { version: opt('version') ?? db.header?.version ?? '19.12' }));
+      if (r.ok && out) writeOut(out, db, opt('version'));
       if (flag('json')) console.log(JSON.stringify({ ...r, schedule: sched, out: r.ok ? out ?? null : null }, null, 2));
       else if (r.ok) console.log(`Applied ${r.applied} operation(s)${sched ? `, scheduled (finish ${sched.finish})` : ''}${out ? `; wrote ${out}` : ' (no --out: nothing written)'}`);
       else console.error(`${r.error!.index >= 0 ? `Operation ${r.error!.index + 1} failed` : 'Failed'}: ${r.error!.message}${r.error!.index >= 0 ? `\n  ${JSON.stringify(r.error!.op)}` : ''}\nNothing was changed.`);
@@ -189,8 +195,11 @@ async function main(): Promise<number> {
       return d.length ? 1 : 0;
     }
     default:
-      console.log(USAGE);
-      return cmd ? 64 : 0;
+      if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') { console.log(USAGE); return 0; }
+      console.error(`unknown command "${cmd}"
+
+${USAGE}`);
+      return 64;
   }
 }
 

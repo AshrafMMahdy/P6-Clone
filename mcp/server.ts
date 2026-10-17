@@ -5,7 +5,7 @@
 // Run: node mcp/server.ts   (or the bundled dist-cli/p6clone-mcp.cjs on older Node)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
-import { parseXer } from '../core/xer/parse.ts';
+import { detectFormat, importChecks, readRaw } from '../renderer/io.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
@@ -42,7 +42,7 @@ const OPS_DOC = `Operations (all optional fields omitted unless needed; duration
 - {op:"assign_resource", activity, resource, units_per_day?, units?}   - {op:"unassign_resource", activity, resource}`;
 
 const TOOLS = [
-  { name: 'open_file', description: 'Open an XER file into memory and get a handle. Returns P6 import diagnostics and a project summary. Nothing is written to the file until save.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number', description: 'Hours in a day for durations given in days (default 8)' } }, required: ['path'] } },
+  { name: 'open_file', description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file into memory and get a handle. Returns P6 import diagnostics and a project summary. Nothing is written to the file until save.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number', description: 'Hours in a day for durations given in days (default 8)' } }, required: ['path'] } },
   { name: 'new_project', description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options) and get a handle.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID, e.g. TWR-A' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start / data date, YYYY-MM-DD' }, hours_per_day: { type: 'number' } }, required: ['id', 'start'] } },
   { name: 'list_open', description: 'Projects currently open in memory.', inputSchema: { type: 'object', properties: {} } },
   { name: 'edit', description: `Change the project with a list of operations, applied as ONE transaction: if any fails nothing changes and the error names it. Undo with undo. ${OPS_DOC}`, inputSchema: withHandle({ type: 'object', properties: { operations: { type: 'array', items: { type: 'object', properties: { op: { type: 'string' } }, required: ['op'] } } }, required: ['operations'] }) },
@@ -77,13 +77,14 @@ function call(name: string, a: Record<string, any>): unknown {
       const path = resolve(String(a.path ?? ''));
       let bytes: Uint8Array;
       try { bytes = new Uint8Array(readFileSync(path)); } catch (e) { throw new UserError(`Cannot read ${path}: ${(e as Error).message}`); }
-      const r = parseXer(bytes);
-      const f = validateXer(r.db, r.findings);
+      const format = detectFormat(path, bytes);
+      const r = readRaw(bytes, format);
+      const f = importChecks(r.db, r.findings, format);
       if (worst(f) === 'fatal') return { opened: false, reason: 'P6 would reject this file', diagnostics: brief(f) };
       const handle = `p${++seq}`;
       const s: Session = { db: r.db, path, undo: [], dirty: false, hpd: Number(a.hours_per_day) || 8 };
       sessions.set(handle, s);
-      return { handle, file: basename(path), diagnostics: brief([...f, ...checkStoredDates(r.db)]), summary: summary(s) };
+      return { handle, file: basename(path), format, diagnostics: brief(f), summary: summary(s) };
     }
     case 'new_project': {
       const db: Db = { tables: {} };

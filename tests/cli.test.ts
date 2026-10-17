@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { SAMPLES_DIR } from './helpers.ts';
 
@@ -83,4 +83,23 @@ test('query and review on a real P6 file', () => {
   const rv = JSON.parse(r.stdout);
   assert.equal(rv.checks.find((c: { id: string }) => c.id === 'leads').grade, 'fail');
   assert.equal(rv.checks.find((c: { id: string }) => c.id === 'saved_dates').grade, 'pass');
+});
+
+test('P6 XML in and out: validate, query and schedule read .xml; --out *.xml writes P6 XML', () => {
+  const dir = tmp(), xml = join(dir, 'p.xml'), out = join(dir, 'out.xml');
+  assert.equal(run('export', join(SAMPLES_DIR, 'CfC.xer'), '--format', 'xml', '--out', xml).status, 0);
+  const v = run('validate', xml, '--json');
+  assert.equal(v.status, 0, v.stdout + v.stderr);
+  assert.ok(!JSON.parse(v.stdout).findings.some((f: { code: string }) => f.code === 'MISSING_FIELD'), 'XER field-list checks do not apply to XML');
+  assert.match(run('query', xml, 'summary').stdout, /activities: \d+/);
+  assert.equal(run('schedule', xml, '--out', out).status, 0);
+  assert.match(readFileSync(out, 'utf8'), /<APIBusinessObjects/);
+});
+
+test('unknown command and missing file are reported', () => {
+  const u = run('bogus');
+  assert.equal(u.status, 64);
+  assert.match(u.stderr, /unknown command "bogus"/);
+  assert.equal(run('--help').status, 0);
+  assert.match(run('query', 'no-such-file.xer', 'summary').stderr, /Cannot read no-such-file\.xer: no such file/);
 });

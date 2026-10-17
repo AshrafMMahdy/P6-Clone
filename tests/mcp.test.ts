@@ -66,3 +66,18 @@ test('MCP: an agent builds, schedules, reviews, undoes, saves and reopens a proj
     assert.equal((await c.tool('get_activity', { handle: 'nope', activity_id: 'x' })).isError, true);
   } finally { c.close(); }
 });
+
+test('MCP: open_file reads P6 XML', { timeout: 60_000 }, async () => {
+  const c = client();
+  try {
+    await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const xer = await c.tool('open_file', { path: join(SAMPLES_DIR, 'CfC.xer') });
+    const xml = join(mkdtempSync(join(tmpdir(), 'p6mcp-')), 'cfc.xml');
+    assert.equal((await c.tool('save', { handle: xer.data.handle, path: xml })).isError, false);
+    const o = await c.tool('open_file', { path: xml });
+    assert.equal(o.isError, false);
+    assert.equal(o.data.format, 'xml');
+    assert.ok(xer.data.summary.activities > 0);
+    assert.equal(o.data.summary.activities, xer.data.summary.activities);
+  } finally { c.close(); }
+});

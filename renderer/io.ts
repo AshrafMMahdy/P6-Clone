@@ -52,23 +52,26 @@ export function detectFormat(name: string, bytes: Uint8Array): Format {
 
 /** Parse and validate the way P6's import would. .mpp needs Microsoft Project: use parseFileAsync. */
 export function parseFile(name: string, bytes: Uint8Array, format = detectFormat(name, bytes)): ParsedFile {
-  if (format === 'xml') {
-    const r = parseP6Xml(xmlText(bytes));
-    return { format, db: r.db, findings: withDateCheck(r.db, validateXer(r.db, r.findings)) };
-  }
-  if (format === 'mspdi') {
-    const r = parseMspdi(xmlText(bytes));
-    return { format, db: r.db, findings: validateXer(r.db, r.findings) };
-  }
-  if (format === 'mpx') {
-    const r = parseMpx(decodeText(bytes).text);
-    return { format, db: r.db, findings: validateXer(r.db, r.findings) };
-  }
   if (format === 'mpp') {
     return { format, db: { tables: {} }, findings: [{ severity: 'fatal', code: 'MPP_NEEDS_PROJECT', message: '.mpp files are converted by Microsoft Project; open it with File > Import > Microsoft Project.', p6: 'P6 imports .mpp only through an installed Microsoft Project.' }] };
   }
-  const r = parseXer(bytes);
-  return { format, db: r.db, findings: withDateCheck(r.db, validateXer(r.db, r.findings)) };
+  const r = readRaw(bytes, format);
+  return { format, db: r.db, findings: importChecks(r.db, r.findings, format) };
+}
+
+/** P6's import checks for a parsed file: XER field lists only apply to XER, saved dates only to P6 files. */
+export function importChecks(db: Db, parsed: Finding[], format: Format, dates = true): Finding[] {
+  const f = validateXer(db, parsed).filter((x) => format === 'xer' || x.code !== 'MISSING_FIELD');
+  return dates && !isMspFormat(format) ? withDateCheck(db, f) : f;
+}
+
+/** Parse only (no P6 import checks) for any format but .mpp. Used by parseFile, the CLI and the MCP server. */
+export function readRaw(bytes: Uint8Array, format: Format): { db: Db; findings: Finding[] } {
+  if (format === 'mpp') throw new Error('.mpp files need Microsoft Project: save them as Microsoft Project XML (or import them in the desktop app).');
+  if (format === 'xml') return parseP6Xml(xmlText(bytes));
+  if (format === 'mspdi') return parseMspdi(xmlText(bytes));
+  if (format === 'mpx') return parseMpx(decodeText(bytes).text);
+  return parseXer(bytes);
 }
 
 export interface MppBridge { mppToXml(bytes: Uint8Array): Promise<Uint8Array> }
@@ -81,7 +84,7 @@ export async function parseFileAsync(name: string, bytes: Uint8Array, format = d
     await stage(`Reading ${(bytes.length / 1048576).toFixed(1)} MB...`);
     const r = format === 'xml' ? parseP6Xml(xmlText(bytes)) : parseXer(bytes);
     await stage(`Checking ${(r.db.tables.TASK?.rows.length ?? 0).toLocaleString()} activities the way P6 would...`);
-    const f = validateXer(r.db, r.findings);
+    const f = importChecks(r.db, r.findings, format, false);
     if (worst(f) === 'fatal') return { format, db: r.db, findings: f };
     await stage('Comparing the saved dates with what P6 would calculate...');
     return { format, db: r.db, findings: [...f, ...checkStoredDates(r.db)] };
