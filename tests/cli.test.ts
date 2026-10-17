@@ -115,3 +115,19 @@ test('query shows activity codes and UDFs and finds by code', () => {
   assert.equal(found.total_matches, 8);
   assert.ok(found.activities.some((x: { id: string }) => x.id === 'A160'));
 });
+
+test('edit operations refuse codes P6 does not have and keep P6 rules (milestone duration, one link per type)', async () => {
+  const { applyOps } = await import('../core/project/ops.ts');
+  const { emptyDb } = await import('../core/db.ts');
+  const db = emptyDb();
+  const ok = (ops: unknown[]) => { const r = applyOps(db, ops); assert.equal(r.ok, true, r.error?.message ?? ''); };
+  const err = (ops: unknown[]): string => applyOps(db, ops).error?.message ?? '';
+  ok([{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_activity', project: 'P', id: 'A1', name: 'a', duration_days: 5 }, { op: 'add_activity', project: 'P', id: 'A2', name: 'b', duration_days: 2 },
+    { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2' }, { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS' }]);
+  assert.match(err([{ op: 'update_activity', project: 'P', id: 'A1', constraint: { type: 'CS_START_ON', date: '2026-03-02' } }]), /Unknown constraint/);
+  assert.match(err([{ op: 'update_activity', project: 'P', id: 'A1', type: 'TT_Milestone' }]), /Unknown activity type/);
+  assert.match(err([{ op: 'update_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS', new_type: 'FS' }]), /already has a FS relationship/);
+  ok([{ op: 'update_activity', project: 'P', id: 'A1', type: 'TT_FinMile' }, { op: 'update_activity', project: 'P', id: 'A2', constraint: { type: 'CS_MSOA', date: '2026-03-09' } }]);
+  const t = db.tables.TASK.rows.find((r) => r.task_code === 'A1')!;
+  assert.deepEqual([t.task_type, t.target_drtn_hr_cnt, t.remain_drtn_hr_cnt], ['TT_FinMile', '0', '0']);
+});

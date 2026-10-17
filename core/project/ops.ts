@@ -10,7 +10,7 @@ import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from
 import { assignResource, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import {
   addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, ensureDefaultCalendar, newProject,
-  normDate, refreshOwnDates, setActual, setFinish, setPercent, setStart, statusOf,
+  enumOk, normDate, refreshOwnDates, setActual, setFinish, setPercent, setStart, statusOf,
 } from './edit.ts';
 
 export type Op = Record<string, unknown> & { op: string };
@@ -78,7 +78,7 @@ function apply(db: Db, op: Op, hpd: number): unknown {
     if (v == null || v === 'none' || v === '') return ['', ''];
     const c = v as { type?: unknown; date?: unknown };
     const t = typeof c === 'object' ? String(c.type ?? '') : String(v);
-    const code = CSTR[t.toLowerCase()] ?? (/^CS_/.test(t) ? t : fail(`Unknown constraint "${t}". Use one of: ${Object.keys(CSTR).join(', ')}.`));
+    const code = CSTR[t.toLowerCase()] ?? (/^CS_/.test(t) && enumOk('TASK', 'cstr_type', t) ? t : fail(`Unknown constraint "${t}". Use one of: ${Object.keys(CSTR).join(', ')}.`));
     return [code, code === 'CS_ALAP' || !code ? '' : date(c.date, 'constraint.date')];
   };
 
@@ -179,7 +179,11 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       if (!hits.length) fail(`No relationship ${a.task_code} -> ${b.task_code}${want ? ` (${want.slice(3)})` : ''}.`);
       if (hits.length > 1) fail(`Several relationships ${a.task_code} -> ${b.task_code}; give "type".`);
       if (op.op === 'delete_relationship') { P.rows = P.rows.filter((r) => r !== hits[0]); return { deleted: `${a.task_code} -> ${b.task_code}` }; }
-      if (op.new_type) hits[0].pred_type = REL[String(op.new_type).toUpperCase()] ?? fail('new_type must be FS, SS, FF or SF.');
+      if (op.new_type) {
+        const nt = REL[String(op.new_type).toUpperCase()] ?? fail('new_type must be FS, SS, FF or SF.');
+        if (P.rows.some((r) => r !== hits[0] && r.pred_task_id === a.task_id && r.task_id === b.task_id && r.pred_type === nt)) fail(`${a.task_code} -> ${b.task_code} already has a ${nt.slice(3)} relationship.`);
+        hits[0].pred_type = nt;
+      }
       if (op.lag_days != null) hits[0].lag_hr_cnt = p6num(num(op.lag_days, 'lag_days') * hpd);
       if (op.lag_hours != null) hits[0].lag_hr_cnt = p6num(num(op.lag_hours, 'lag_hours'));
       return { relationship: `${a.task_code} ${hits[0].pred_type.slice(3)} ${b.task_code}` };
@@ -220,7 +224,9 @@ function apply(db: Db, op: Op, hpd: number): unknown {
 
 function updateActivity(db: Db, t: Row, op: Op, hpd: number, calendar: (n: unknown) => Row, cstr: (v: unknown) => [string, string]): void {
   if (op.name != null) t.task_name = str(op.name, 'name');
-  if (op.type != null) t.task_type = TYPES[String(op.type).toLowerCase()] ?? (/^TT_/.test(String(op.type)) ? String(op.type) : fail(`Unknown activity type "${op.type}". Use: ${Object.keys(TYPES).join(', ')}.`));
+  if (op.type != null) t.task_type = TYPES[String(op.type).toLowerCase()] ?? (enumOk('TASK', 'task_type', String(op.type)) && /^TT_/.test(String(op.type)) ? String(op.type) : fail(`Unknown activity type "${op.type}". Use: ${Object.keys(TYPES).join(', ')}.`));
+  // P6 sets a milestone's durations to zero when the type changes
+  if (op.type != null && (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile') && op.duration_days == null && op.duration_hours == null) { t.target_drtn_hr_cnt = '0'; if (!t.act_end_date) t.remain_drtn_hr_cnt = '0'; refreshOwnDates(db, t); }
   if (op.calendar != null) t.clndr_id = calendar(op.calendar).clndr_id;
   if (op.priority != null) t.priority_type = PRIO[String(op.priority).toLowerCase()] ?? fail('priority: top, high, normal, low or lowest.');
   const durH = op.duration_days != null ? num(op.duration_days, 'duration_days') * hpd : op.duration_hours != null ? num(op.duration_hours, 'duration_hours') : null;
