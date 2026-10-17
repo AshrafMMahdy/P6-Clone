@@ -2,12 +2,12 @@
 import { getDb, getUi, mutate, setUi, toast, openDialog, doUndo, doRedo, saveNow } from './store.ts';
 import { addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, makeCtx, nextTaskCode } from './model.ts';
 import { buildActivityRows, toolbarSearch } from './views/activityRows.ts';
-import { nextId, rows, table, type Row } from '../core/db.ts';
+import { nextId, rows, table, type Db, type Row } from '../core/db.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 
 // Activity clipboard (Edit > Copy / Paste): activities, the relationships among them, and their assignments.
-let clipboard: { tasks: Row[]; preds: Row[]; asg: Row[] } | null = null;
+let clipboard: { tasks: Row[]; preds: Row[]; asg: Row[]; cut?: boolean } | null = null;
 
 export function copyActivities(): void {
   const ui = getUi(), db = getDb();
@@ -21,6 +21,39 @@ export function copyActivities(): void {
   toast(`Copied ${ids.size} activit${ids.size > 1 ? 'ies' : 'y'}`);
 }
 
+/** Edit > Cut: like P6, Paste then MOVES the activities (same IDs, all their relationships, assignments, codes,
+ *  steps, notes) to the WBS or project pasted into. Nothing is removed until the paste. */
+export function cutActivities(): void {
+  copyActivities();
+  if (clipboard) { clipboard.cut = true; toast(`Cut ${clipboard.tasks.length} activit${clipboard.tasks.length > 1 ? 'ies' : 'y'}: select a WBS or activity and Paste to move them`); }
+}
+
+/** Move activities to a WBS (another project too). Activity IDs are kept unless they clash in the target project. */
+export function moveActivities(d: Db, taskIds: string[], wbsRow: Row): number {
+  const ids = new Set(taskIds);
+  const target = wbsRow.proj_id;
+  let n = 0;
+  for (const t of rows(d, 'TASK')) {
+    if (!ids.has(t.task_id)) continue;
+    const from = t.proj_id;
+    t.wbs_id = wbsRow.wbs_id;
+    if (from !== target) {
+      if (rows(d, 'TASK').some((x) => x !== t && x.proj_id === target && x.task_code === t.task_code)) t.task_code = nextTaskCode(d, target);
+      t.proj_id = target;
+    }
+    n++;
+  }
+  // rows that belong to the moved activities follow them into the project
+  for (const tb of Object.values(d.tables)) {
+    if (tb.name === 'TASK' || tb.name === 'TASKPRED' || !tb.fields.includes('task_id') || !tb.fields.includes('proj_id')) continue;
+    for (const r of tb.rows) if (ids.has(r.task_id)) r.proj_id = target;
+  }
+  for (const p of rows(d, 'TASKPRED')) { if (ids.has(p.task_id)) p.proj_id = target; if (ids.has(p.pred_task_id)) p.pred_proj_id = target; }
+  const typeOf = new Map(rows(d, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
+  for (const u of rows(d, 'UDFVALUE')) if (typeOf.get(u.udf_type_id) === 'TASK' && ids.has(u.fk_id)) u.proj_id = target;
+  return n;
+}
+
 export function pasteActivities(): void {
   const ui = getUi(), db = getDb();
   if (!clipboard) return toast('Nothing to paste.');
@@ -30,6 +63,15 @@ export function pasteActivities(): void {
   const wbsRow = rows(db, 'PROJWBS').find((w) => w.wbs_id === wbs);
   if (!wbsRow) return toast('Select a WBS or activity to paste into.');
   const clip = clipboard;
+  if (clip.cut) {
+    const live = clip.tasks.map((t) => t.task_id).filter((id) => rows(db, 'TASK').some((x) => x.task_id === id));
+    if (!live.length) { clipboard = null; return toast('The cut activities no longer exist.'); }
+    let n = 0;
+    mutate('Move Activities', (d) => { n = moveActivities(d, live, rows(d, 'PROJWBS').find((w) => w.wbs_id === wbsRow.wbs_id)!); });
+    clipboard = null;
+    setUi({ selTasks: live, selTask: live[0] });
+    return toast(`Moved ${n} activit${n > 1 ? 'ies' : 'y'} to ${wbsRow.wbs_name} (relationships kept; F9 reschedules)`);
+  }
   const newIds: string[] = [];
   mutate('Paste Activities', (d) => {
     const map = new Map<string, string>();
@@ -165,7 +207,7 @@ export function handleEditKey(e: KeyboardEvent): boolean {
   if (e.key === 'Insert') { c.add(); return true; }
   if (e.key === 'Delete') { c.del(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'c' && getUi().view === 'activities') { copyActivities(); return true; }
-  if (e.ctrlKey && e.key.toLowerCase() === 'x' && getUi().view === 'activities') { copyActivities(); c.del(); return true; }
+  if (e.ctrlKey && e.key.toLowerCase() === 'x' && getUi().view === 'activities') { cutActivities(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'v' && getUi().view === 'activities') { pasteActivities(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'z') { doUndo(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'y') { doRedo(); return true; }

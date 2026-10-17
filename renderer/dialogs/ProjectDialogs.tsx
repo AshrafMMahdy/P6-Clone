@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Dialog, Tabs } from '../components/Layout.tsx';
 import { closeDialog, getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
-import { addField, nextId, rows, table } from '../../core/db.ts';
+import { addField, nextId, rows, table, type Row } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { deleteProject } from '../../core/xer/import.ts';
 import { saveBaseline, assignBaseline, deleteBaseline, restoreBaseline } from '../../core/progress/baseline.ts';
@@ -53,11 +53,12 @@ export function ProjectDetailsDialog(props: { projId?: string }) {
     if (!d.tables.PROJECT.fields.includes(field)) d.tables.PROJECT.fields.push(field);
     r[field] = v;
   });
+  const flag = (field: string, label: string) => <label style={{ display: 'block', margin: '3px 0' }}><input type="checkbox" checked={p[field] === 'Y'} onChange={(e) => set(field, e.target.checked ? 'Y' : 'N')} /> {label}</label>;
   const cals = rows(db, 'CALENDAR').filter((c) => !c.proj_id || c.proj_id === pid).filter((c) => c.clndr_type !== 'CA_Rsrc');
   const eps = db.tables.EPS?.rows ?? [];
   return (
     <Dialog title={`Project Details - ${p.proj_short_name}`} width={720} height={430} buttons={<button className="btn" onClick={closeDialog}>Close</button>}>
-      <Tabs tabs={[['general', 'General'], ['notebook', 'Notebook'], ['dates', 'Dates'], ['defaults', 'Defaults'], ['settings', 'Settings'], ['codes', 'Codes']]} value={tab} onChange={setTab} />
+      <Tabs tabs={[['general', 'General'], ['notebook', 'Notebook'], ['dates', 'Dates'], ['defaults', 'Defaults'], ['settings', 'Settings'], ['calculations', 'Calculations'], ['codes', 'Codes'], ['udfs', 'UDFs']]} value={tab} onChange={setTab} />
       <div style={{ padding: 10, border: '1px solid #a0a0a0', borderTop: 'none', background: '#f0f0f0' }}>
         {tab === 'general' && <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
           <label>Project ID</label><input defaultValue={p.proj_short_name} onBlur={(e) => {
@@ -93,6 +94,26 @@ export function ProjectDetailsDialog(props: { projId?: string }) {
         </div>}
         {tab === 'notebook' && root && <ProjectNotebook pid={pid} wbsId={root.wbs_id} />}
         {tab === 'codes' && <ProjectCodes pid={pid} />}
+        {tab === 'udfs' && <ProjectUdfs pid={pid} />}
+        {tab === 'calculations' && <div>
+          <fieldset><legend>Activities</legend>
+            <div className="form" style={{ gridTemplateColumns: 'auto 120px' }}>
+              <label>Default Price / Unit for activities without resource or role Price / Units</label><input type="number" min={0} defaultValue={p.def_cost_per_qty || '0'} onBlur={(e) => Number(e.target.value) >= 0 && set('def_cost_per_qty', String(Number(e.target.value)))} />
+            </div>
+            {flag('step_complete_flag', 'Activity percent complete based on activity steps')}
+            {flag('act_this_per_link_flag', 'Link actual to date and actual this period units and costs')}
+            {flag('act_pct_link_flag', 'Link percent complete with actuals')}
+            {flag('reset_planned_flag', 'Reset Original Duration and Units to Remaining')}
+          </fieldset>
+          <fieldset><legend>Resource Assignments</legend>
+            <div style={{ marginBottom: 4 }}>When updating actual units or costs:{' '}
+              <label style={{ marginRight: 10 }}><input type="radio" name="actrem" checked={p.add_act_remain_flag === 'Y'} onChange={() => set('add_act_remain_flag', 'Y')} /> Add Actual to Remaining</label>
+              <label><input type="radio" name="actrem" checked={p.add_act_remain_flag !== 'Y'} onChange={() => set('add_act_remain_flag', 'N')} /> Subtract Actual from At Completion</label></div>
+            {flag('cost_qty_recalc_flag', 'Recalculate Actual Units and Cost when duration % complete changes')}
+            {flag('rem_target_link_flag', 'Link Budget and At Completion for not started activities')}
+          </fieldset>
+          <p className="muted">Stored in the project's P6 fields (def_cost_per_qty, step_complete_flag, act_this_per_link_flag, act_pct_link_flag, reset_planned_flag, add_act_remain_flag, cost_qty_recalc_flag, rem_target_link_flag), so they travel with XER and P6 XML.</p>
+        </div>}
       </div>
     </Dialog>
   );
@@ -126,6 +147,28 @@ function ProjectNotebook({ pid, wbsId }: { pid: string; wbsId: string }) {
         onBlur={(e) => { const html = memoHtml(e.target.value); if (memoText(html) !== memoText(cur.wbs_memo)) mutate('Edit Project Notebook', (d) => { d.tables.WBSMEMO.rows.find((m) => m.wbs_memo_id === cur.wbs_memo_id)!.wbs_memo = html; }); }} />
         : <div className="muted">No notebook topics.</div>}
     </div>
+  );
+}
+
+/** Project UDFs (UDFTYPE with subject area Project; values in UDFVALUE keyed by the project). */
+function ProjectUdfs({ pid }: { pid: string }) {
+  const db = getDb();
+  const types = rows(db, 'UDFTYPE').filter((u) => u.table_name === 'PROJECT');
+  const vals = rows(db, 'UDFVALUE').filter((v) => v.fk_id === pid);
+  const fieldOf = (t: string) => (/DATE/.test(t) ? 'udf_date' : /INT|FLOAT|MONEY|NUM/.test(t) ? 'udf_number' : 'udf_text');
+  const setVal = (ty: Row, v: string) => mutate('Edit Project UDF', (d) => {
+    const T = table(d, 'UDFVALUE'); for (const f of ['udf_type_id', 'fk_id', 'proj_id', 'udf_date', 'udf_number', 'udf_text', 'udf_code_id']) addField(T, f);
+    const f = fieldOf(ty.logical_data_type);
+    T.rows = T.rows.filter((x) => !(x.udf_type_id === ty.udf_type_id && x.fk_id === pid));
+    if (v !== '') T.rows.push({ udf_type_id: ty.udf_type_id, fk_id: pid, proj_id: pid, udf_date: '', udf_number: '', udf_text: '', udf_code_id: '', [f]: f === 'udf_date' ? fromDt(v) : v });
+  });
+  if (!types.length) return <div className="muted">No project UDFs. Create them in Enterprise &gt; User Defined Fields (subject area Projects).</div>;
+  return (
+    <table className="tbl" style={{ background: '#fff' }}><thead><tr><th>User Defined Field</th><th>Type</th><th>Value</th></tr></thead><tbody>
+      {types.map((ty) => { const f = fieldOf(ty.logical_data_type), cur = vals.find((v) => v.udf_type_id === ty.udf_type_id)?.[f] ?? '';
+        return <tr key={ty.udf_type_id}><td>{ty.udf_type_label}</td><td>{(ty.logical_data_type || '').replace(/^FT_/, '')}</td>
+          <td>{f === 'udf_date' ? <input type="datetime-local" defaultValue={dt(cur)} onBlur={(e) => e.target.value !== dt(cur) && setVal(ty, e.target.value)} /> : <input type={f === 'udf_number' ? 'number' : 'text'} defaultValue={cur} onBlur={(e) => e.target.value !== cur && setVal(ty, e.target.value)} />}</td></tr>; })}
+    </tbody></table>
   );
 }
 

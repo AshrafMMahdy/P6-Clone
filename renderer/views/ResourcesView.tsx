@@ -8,6 +8,7 @@ import { RSRC_TYPES, ensureDefaultCalendar, fmtDate, type Ctx } from '../model.t
 import { addField, nextId, rows, table, type Db, type Row } from '../../core/db.ts';
 import { p6num } from '../../core/schedule/cpm.ts';
 import { recomputeCosts } from '../../core/resource/assign.ts';
+import { ResourceCodesTab } from '../dialogs/GlobalChangeDialogs.tsx';
 
 const COLS = [
   { id: 'id', title: 'Resource ID', width: 170 },
@@ -21,7 +22,7 @@ const COLS = [
   { id: 'active', title: 'Active', width: 46, align: 'center' as const },
 ];
 
-const TABS: [string, string][] = [['general', 'General'], ['units', 'Units & Prices'], ['roles', 'Roles'], ['assignments', 'Assignments']];
+const TABS: [string, string][] = [['general', 'General'], ['codes', 'Codes'], ['units', 'Units & Prices'], ['roles', 'Roles'], ['assignments', 'Assignments']];
 const SKILLS: Record<string, string> = { '1': '1 - Master', '2': '2 - Expert', '3': '3 - Skilled', '4': '4 - Proficient', '5': '5 - Inexperienced' };
 
 export const RSRC_NEW_FIELDS = ['rsrc_id', 'parent_rsrc_id', 'clndr_id', 'rsrc_seq_num', 'rsrc_name', 'rsrc_short_name', 'def_qty_per_hr', 'cost_qty_type', 'ot_factor', 'active_flag', 'rsrc_type', 'unit_id', 'curr_id', 'max_qty_per_hr', 'level_flag'];
@@ -293,6 +294,7 @@ function DetailBody({ tab, r, ctx }: { tab: string; r: Row; ctx: Ctx }) {
     case 'units': return <UnitsPrices r={r} ctx={ctx} />;
     case 'roles': return <Roles r={r} ctx={ctx} />;
     case 'assignments': return <Assignments r={r} ctx={ctx} />;
+    case 'codes': return <ResourceCodesTab r={r} />;
     default: return <General r={r} ctx={ctx} />;
   }
 }

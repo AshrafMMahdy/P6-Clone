@@ -12,7 +12,7 @@ import { TraceLogic } from './TraceLogic.tsx';
 import { parseP6Date, formatP6Date } from '../../core/dates.ts';
 import type { Row } from '../../core/db.ts';
 import { relationshipFloat } from '../../core/schedule/cpm.ts';
-import { activityCommands, copyActivities, pasteActivities, linkSelected } from '../commands.ts';
+import { activityCommands, copyActivities, cutActivities, pasteActivities, linkSelected, dissolveSelected, renumberActivities } from '../commands.ts';
 
 const WBS_COLORS = ['var(--wbs0)', 'var(--wbs1)', 'var(--wbs2)', 'var(--wbs3)', 'var(--wbs4)'];
 
@@ -135,15 +135,18 @@ export function ActivitiesView() {
       { label: 'Add Activity', onClick: cmds.add },
       { label: 'Delete', onClick: cmds.del },
       { sep: true, label: '' },
-      { label: 'Cut', onClick: () => { copyActivities(); cmds.del(); } },
+      { label: 'Cut', onClick: cutActivities },
       { label: 'Copy', onClick: copyActivities },
       { label: 'Paste', onClick: pasteActivities },
       { sep: true, label: '' },
       { label: 'Assign Predecessors...', onClick: () => openDialog('assign', { which: 'pred' }) },
       { label: 'Assign Successors...', onClick: () => openDialog('assign', { which: 'succ' }) },
       { label: 'Assign Resources...', onClick: () => openDialog('assignRsrc') },
+      { label: 'Assign Activity Codes...', disabled: !ui.selTask, onClick: () => setUi({ bottom: 'details', detailTab: 'codes' }) },
       { label: 'Link Activities', disabled: ui.selTasks.length < 2, onClick: linkSelected },
+      { label: 'Dissolve', disabled: !ui.selTasks.length, onClick: dissolveSelected },
       { label: 'Fill Down', disabled: ui.selTasks.length < 2, onClick: fillDown },
+      { label: 'Renumber Activity IDs...', onClick: () => void renumberActivities() },
       { sep: true, label: '' },
       { label: 'Add WBS Element', onClick: cmds.addWbs },
       { label: 'Columns...', onClick: () => openDialog('columns') },
@@ -162,7 +165,14 @@ export function ActivitiesView() {
       { label: 'Assign Resources...', onClick: () => openDialog('assignRsrc') },
       { label: 'Delete Activity', onClick: cmds.del },
       { sep: true, label: '' },
-    ] : [{ label: 'Add Activity', onClick: cmds.add }, { sep: true, label: '' }];
+      { label: 'Cut', onClick: cutActivities },
+      { label: 'Copy', onClick: copyActivities },
+      { label: 'Paste', onClick: pasteActivities },
+      { label: 'Link Activities', disabled: ui.selTasks.length < 2, onClick: linkSelected },
+      { label: 'Dissolve', onClick: dissolveSelected },
+      { label: 'Fill Down', disabled: ui.selTasks.length < 2, onClick: fillDown },
+      { sep: true, label: '' },
+    ] : [{ label: 'Add Activity', onClick: cmds.add }, { label: 'Paste', onClick: pasteActivities }, { sep: true, label: '' }];
     const b = { ...DEFAULT_BARS, ...ui.bars };
     showContextMenu(e, [
       ...act,

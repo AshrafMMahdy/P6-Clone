@@ -2,7 +2,7 @@ import { useEffect, type JSX } from 'react';
 import { Icon } from './components/Icons.tsx';
 import { ContextMenuHost, DialogTop } from './components/Layout.tsx';
 import { closeDialog, doRedo, doUndo, getDb, getUi, loadFromDisk, mutate, openDialog, replaceDb, saveNow, setUi, toast, useStore, undoLabel, type ViewName } from './store.ts';
-import { activityCommands, handleEditKey, runSchedule, copyActivities, pasteActivities, renumberActivities, dissolveSelected, linkSelected } from './commands.ts';
+import { activityCommands, handleEditKey, runSchedule, copyActivities, cutActivities, pasteActivities, renumberActivities, dissolveSelected, linkSelected } from './commands.ts';
 import { ActivitiesView, fillDown } from './views/ActivitiesView.tsx';
 import { ProjectsView, openProjects } from './views/ProjectsView.tsx';
 import { WbsView } from './views/WbsView.tsx';
@@ -29,6 +29,7 @@ import { printView } from './print.ts';
 import { exportExcel, importExcel } from './excel.ts';
 import { PageSetupDialog } from './dialogs/PageSetupDialog.tsx';
 import { RunReportDialog, ReportWizardDialog } from './dialogs/ReportDialogs.tsx';
+import { GlobalChangeDialog, GlobalChangeEditDialog, GlobalChangeReportDialog, CodeDictionaryDialog } from './dialogs/GlobalChangeDialogs.tsx';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const DIALOGS: Record<string, (p: any) => JSX.Element> = {
@@ -36,7 +37,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
+  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, globalChange: GlobalChangeDialog, globalChangeEdit: GlobalChangeEditDialog, globalChangeReport: GlobalChangeReportDialog, codeDictionary: CodeDictionaryDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
@@ -66,7 +67,7 @@ export function runMenu(id: string): void {
     case 'edit.redo': return doRedo();
     case 'edit.copy': return copyActivities();
     case 'edit.paste': return pasteActivities();
-    case 'edit.cut': copyActivities(); return void cmds.del();
+    case 'edit.cut': return void cutActivities();
     case 'edit.dissolve': return void dissolveSelected();
     case 'edit.add': return cmds.add();
     case 'edit.delete': return void cmds.del();
@@ -135,6 +136,9 @@ export function runMenu(id: string): void {
     case 'tools.schedLog': return openDialog('log', { title: 'Schedule Log', text: ui.scheduleLog ?? '' });
     case 'tools.importLog': return openDialog('importLog', {});
     case 'tools.reports': return setUi({ view: 'reports' });
+    case 'tools.globalChange': return openDialog('globalChange');
+    case 'ent.projectCodes': return openDialog('codeDictionary', { kind: 'project' });
+    case 'ent.resourceCodes': return openDialog('codeDictionary', { kind: 'resource' });
     case 'tools.reportWizard': setUi({ view: 'reports' }); return openDialog('reportWizard', {});
     case 'tools.validate': return void validateFileTool().then(() => getUi().importLog && openDialog('importLog', {}));
     case 'admin.preferences': return openDialog('prefs');
