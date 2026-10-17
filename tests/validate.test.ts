@@ -114,3 +114,10 @@ test('diagnostics snapshot over all samples', () => {
   }
   assert.deepEqual(snap, JSON.parse(readFileSync(file, 'utf8')));
 });
+
+test('SCHEDOPTIONS FT_Min (P6 code for smallest of start and finish float) is valid and scheduled as smallest float', async () => {
+  const { optionsFor } = await import('../core/schedule/cpm.ts');
+  const r = parseXer(xer(base({ SCHEDOPTIONS: ['schedoptions_id\tproj_id\tsched_float_type', '1\t1\tFT_Min'] })));
+  assert.deepEqual(validateXer(r.db, r.findings).filter((f) => f.code === 'BAD_ENUM'), []);
+  assert.equal(optionsFor(r.db, r.db.tables.PROJECT.rows[0]).floatType, 'smallest');
+});

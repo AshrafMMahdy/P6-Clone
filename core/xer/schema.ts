@@ -113,7 +113,7 @@ export const ENUMS: Record<string, string[]> = {
   'PROJECT.def_qty_type': ['', 'QT_Hour', 'QT_Day', 'QT_Week', 'QT_Month', 'QT_Year'],
   'PROJECT.def_rate_type': ['', 'COST_PER_QTY', 'COST_PER_QTY2', 'COST_PER_QTY3', 'COST_PER_QTY4', 'COST_PER_QTY5'],
   'TASKRSRC.rate_type': ['', 'COST_PER_QTY', 'COST_PER_QTY2', 'COST_PER_QTY3', 'COST_PER_QTY4', 'COST_PER_QTY5'],
-  'SCHEDOPTIONS.sched_float_type': ['FT_FF', 'FT_SS', 'FT_Smallest'],
+  'SCHEDOPTIONS.sched_float_type': ['FT_FF', 'FT_SS', 'FT_Min'],
   'SCHEDOPTIONS.sched_calendar_on_relationship_lag': ['rcal_Predecessor', 'rcal_Successor', 'rcal_24Hour', 'rcal_ProjDefault'],
   'SCHEDOPTIONS.sched_outer_depend_type': ['SD_Both', 'SD_None', 'SD_Pred', 'SD_Succ'],
   'UDFTYPE.logical_data_type': ['FT_TEXT', 'FT_START_DATE', 'FT_END_DATE', 'FT_DATE', 'FT_FLOAT_2_DECIMALS', 'FT_INT', 'FT_MONEY', 'FT_STATICTYPE', 'FT_CODE'],

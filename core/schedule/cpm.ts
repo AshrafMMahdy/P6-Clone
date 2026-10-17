@@ -57,7 +57,7 @@ export function optionsFor(db: Db, proj: Row, over: Partial<SchedOptions> = {}):
   const so = rows(db, 'SCHEDOPTIONS').find((r) => r.proj_id === proj.proj_id) ?? {};
   const base: SchedOptions = {
     logic: so.sched_progress_override === 'Y' ? 'override' : so.sched_retained_logic === 'N' ? 'actual' : 'retained',
-    floatType: so.sched_float_type === 'FT_SS' ? 'start' : so.sched_float_type === 'FT_Smallest' ? 'smallest' : 'finish',
+    floatType: so.sched_float_type === 'FT_SS' ? 'start' : so.sched_float_type === 'FT_Min' || so.sched_float_type === 'FT_Smallest' ? 'smallest' : 'finish',
     lagCalendar: ({ rcal_Successor: 'successor', rcal_24Hour: '24h', rcal_ProjDefault: 'project' } as Record<string, LagCalendar>)[so.sched_calendar_on_relationship_lag] ?? 'predecessor',
     openEndedCritical: so.sched_open_critical_flag === 'Y',
     ignoreExternal: so.sched_outer_depend_type === 'SD_None',

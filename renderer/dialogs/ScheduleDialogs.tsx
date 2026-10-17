@@ -68,7 +68,7 @@ export function ScheduleOptionsDialog() {
         if (!r) { r = { schedoptions_id: String(nextId(d, 'SCHEDOPTIONS')), proj_id: pid }; S.rows.push(r); }
         Object.assign(r, {
           sched_retained_logic: o.logic === 'retained' ? 'Y' : 'N', sched_progress_override: o.logic === 'override' ? 'Y' : 'N',
-          sched_float_type: { start: 'FT_SS', finish: 'FT_FF', smallest: 'FT_Smallest' }[o.floatType],
+          sched_float_type: { start: 'FT_SS', finish: 'FT_FF', smallest: 'FT_Min' }[o.floatType],
           sched_calendar_on_relationship_lag: { predecessor: 'rcal_Predecessor', successor: 'rcal_Successor', '24h': 'rcal_24Hour', project: 'rcal_ProjDefault' }[o.lagCalendar],
           sched_open_critical_flag: o.openEndedCritical ? 'Y' : 'N', sched_outer_depend_type: o.ignoreExternal ? 'SD_None' : 'SD_Both', sched_use_expect_end_flag: o.useExpectedFinish ? 'Y' : 'N',
         });
