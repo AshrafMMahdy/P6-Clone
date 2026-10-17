@@ -9,6 +9,7 @@ import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../
 import { levelResources, type LevelOptions, type LevelResult } from '../../core/level/level.ts';
 import { FILTERS, FILTER_OPS, parseUserFilter, userFilters, type UserFilter } from '../views/activityRows.ts';
 import { COLUMNS, extraColumns } from '../model.ts';
+import { DEFAULT_BARS } from '../components/Gantt.tsx';
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -1233,6 +1234,14 @@ export function TimescaleDialog() {
 interface LayoutData { columns: string[]; filter: string; groupBy: string; sortBy: string; pxPerDay: number; relLines: boolean; colWidths?: Record<string, number>; bars?: UiState['bars'] }
 export const BUILTIN_LAYOUT = 'Classic Schedule Layout';
 const builtinLayout = (): LayoutData => ({ columns: [...DEFAULT_COLUMNS], filter: 'all', groupBy: 'wbs', sortBy: '', pxPerDay: 6, relLines: true, colWidths: {}, bars: undefined });
+/** P6's standard layouts that come with the application (read-only; Save As makes an editable copy). */
+export const BUILTIN_LAYOUTS: Record<string, () => LayoutData> = {
+  [BUILTIN_LAYOUT]: builtinLayout,
+  'Earned Value Layout': () => ({ ...builtinLayout(), columns: ['task_code', 'task_name', 'ev_bac', 'ev_pv', 'ev_ev', 'ev_ac', 'ev_sv', 'ev_cv', 'ev_spi', 'ev_cpi', 'ev_eac', 'ev_vac'], bars: { ...DEFAULT_BARS, showBaseline: true } }),
+  'Baseline Comparison Layout': () => ({ ...builtinLayout(), columns: ['task_code', 'task_name', 'bl_start', 'start', 'bl_finish', 'finish', 'var_bl_finish', 'total_float'], bars: { ...DEFAULT_BARS, showBaseline: true } }),
+  'Cost Loading Layout': () => ({ ...builtinLayout(), columns: ['task_code', 'task_name', 'orig_dur', 'start', 'finish', 'bud_cost', 'act_cost', 'rem_cost', 'ev_eac'] }),
+};
+const isBuiltinName = (n: string | undefined) => !n || n in BUILTIN_LAYOUTS;
 export const layoutFromUi = (u: UiState): LayoutData => ({ columns: [...u.columns], filter: u.filter, groupBy: u.groupBy, sortBy: u.sortBy, pxPerDay: u.pxPerDay, relLines: u.relLines, colWidths: { ...u.colWidths }, bars: u.bars });
 
 function parseLayout(json: string): LayoutData | null {
@@ -1267,22 +1276,22 @@ export function LayoutDialog(props: { mode: 'open' | 'save' | 'saveAs' }) {
   const ui = useStore((s) => s.ui);
   const db = useStore((s) => s.db);
   useStore((s) => s.dbVersion);
-  const isBuiltin = !ui.layoutName || ui.layoutName === BUILTIN_LAYOUT;
+  const isBuiltin = isBuiltinName(ui.layoutName);
   const [mode] = useState<'open' | 'save' | 'saveAs'>(props.mode === 'save' && isBuiltin ? 'saveAs' : props.mode);
   const saved = [...rows(db, '_LAYOUT')].sort((a, b) => a.name.localeCompare(b.name));
   const [sel, setSel] = useState<string>(ui.layoutName || BUILTIN_LAYOUT);
   const [name, setName] = useState(isBuiltin ? uniqueName('My Layout', saved.map((r) => r.name)) : ui.layoutName);
-  const all = [BUILTIN_LAYOUT, ...saved.map((r) => r.name).filter((n) => n !== BUILTIN_LAYOUT)];
+  const all = [...Object.keys(BUILTIN_LAYOUTS), ...saved.map((r) => r.name).filter((n) => !isBuiltinName(n))];
 
   const open = (n: string) => {
-    const data = n === BUILTIN_LAYOUT ? builtinLayout() : parseLayout(saved.find((r) => r.name === n)?.json ?? '');
+    const data = BUILTIN_LAYOUTS[n] ? BUILTIN_LAYOUTS[n]() : parseLayout(saved.find((r) => r.name === n)?.json ?? '');
     if (!data) return toast(`Layout "${n}" is damaged and cannot be opened.`);
     setUi({ ...data, layoutName: n });
     closeDialog();
     toast(`Layout "${n}" applied`);
   };
   const del = () => {
-    if (sel === BUILTIN_LAYOUT) return toast('The built-in layout cannot be deleted.');
+    if (isBuiltinName(sel)) return toast('Built-in layouts cannot be deleted.');
     mutate(`Delete Layout ${sel}`, (d) => { table(d, '_LAYOUT').rows = rows(d, '_LAYOUT').filter((r) => r.name !== sel); });
     if (ui.layoutName === sel) setUi({ layoutName: BUILTIN_LAYOUT });
     setSel(BUILTIN_LAYOUT);
@@ -1290,7 +1299,7 @@ export function LayoutDialog(props: { mode: 'open' | 'save' | 'saveAs' }) {
   const saveAs = () => {
     const n = name.trim();
     if (!n) return toast('Enter a layout name.');
-    if (n.toLowerCase() === BUILTIN_LAYOUT.toLowerCase()) return toast('The built-in layout cannot be overwritten. Choose another name.');
+    if (Object.keys(BUILTIN_LAYOUTS).some((b) => b.toLowerCase() === n.toLowerCase())) return toast('A built-in layout cannot be overwritten. Choose another name.');
     const replaced = saved.some((r) => r.name === n);
     saveLayout(n, layoutFromUi(getUi()));
     closeDialog();
@@ -1332,14 +1341,14 @@ export function LayoutDialog(props: { mode: 'open' | 'save' | 'saveAs' }) {
   return (
     <Dialog title="Open Layout" width={480} height={380} buttons={<>
       <button className="btn primary" onClick={() => open(sel)}>Open</button>
-      <button className="btn" disabled={sel === BUILTIN_LAYOUT} onClick={del}>Delete</button>
+      <button className="btn" disabled={isBuiltinName(sel)} onClick={del}>Delete</button>
       <button className="btn" onClick={closeDialog}>Close</button>
     </>}>
       <div className="tblwrap" style={{ height: 'calc(100% - 20px)' }}>
         <table className="tbl"><thead><tr><th>Layout Name</th><th style={{ width: 80 }}>Type</th></tr></thead><tbody>
           {all.map((n) => (
             <tr key={n} className={sel === n ? 'sel' : ''} onMouseDown={() => setSel(n)} onDoubleClick={() => open(n)}>
-              <td>{n}{ui.layoutName === n ? ' (current)' : ''}</td><td>{n === BUILTIN_LAYOUT ? 'Built-in' : 'User'}</td>
+              <td>{n}{ui.layoutName === n ? ' (current)' : ''}</td><td>{isBuiltinName(n) ? 'Built-in' : 'User'}</td>
             </tr>
           ))}
         </tbody></table>

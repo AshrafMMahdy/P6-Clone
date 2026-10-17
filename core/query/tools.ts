@@ -7,6 +7,7 @@ import { parseP6Date } from '../dates.ts';
 import { isCritical, type Ctx } from '../project/ctx.ts';
 import { relationshipFloat } from '../schedule/cpm.ts';
 import { statusOf, projectName } from '../project/edit.ts';
+import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
 
 /** A lookup described for a language model (JSON Schema parameters). */
 export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
@@ -35,6 +36,7 @@ export const TOOLS: ToolDef[] = [
   { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: {} } },
   { name: 'list_projects', description: 'Every project in the database (not only the open one): ID, name, status, start and finish, activity count, WBS top-level names, calendar. Use it to find past projects similar to the one being planned or asked about; then read one with the other lookups by passing its ID as "project".', parameters: { type: 'object', properties: { text: { type: 'string', description: 'only projects whose ID or name contains this' } } } },
+  { name: 'earned_value', description: 'Earned value as P6 calculates it (baseline budget, planned value at the data date, earned value from % complete, actual cost): project totals, each top-level WBS, and the activities with the worst cost and schedule performance (CPI/SPI). Money in the project currency.', parameters: { type: 'object', properties: { worst: { type: 'number', description: 'how many weakest activities to list (default 10)' } } } },
   { name: 'resource_summary', description: 'Resources with their assignments: total budgeted/remaining units and cost, first/last use. With `resource`, the activities that resource is assigned to.', parameters: { type: 'object', properties: { resource: { type: 'string' }, limit: { type: 'number' } } } },
 ];
 // every lookup can read a project other than the open one
@@ -210,6 +212,30 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         leads_negative_lag: leads.length, positive_lags: lags.length, relationship_types: types,
         started_out_of_sequence: ex(oos), not_started_but_dated_before_data_date: ex(stale),
         note: 'Thresholds follow the common DCMA 14-point guidance (44 working days, 5% limits).',
+      };
+    }
+    case 'earned_value': {
+      const costs = activityCosts(db, [...open]);
+      const round = (v: number) => Math.round(v * 100) / 100;
+      const pack = (l: ReturnType<typeof sumLines>) => { const e = earnedValue(l); return { bac: round(e.bac), pv: round(e.pv), ev: round(e.ev), ac: round(e.ac), sv: round(e.sv), cv: round(e.cv), spi: round(e.spi), cpi: round(e.cpi), etc: round(e.etc), eac: round(e.eac), vac: round(e.vac), schedule_pct: round(e.schedulePct), performance_pct: round(e.performancePct) }; };
+      const kids = new Map<string, Row[]>(); for (const w of rows(db, 'PROJWBS')) { const l = kids.get(w.parent_wbs_id); if (l) l.push(w); else kids.set(w.parent_wbs_id, [w]); }
+      const under = (id: string): string[] => [id, ...(kids.get(id) ?? []).flatMap((k) => under(k.wbs_id))];
+      const projects = [...open].map((pid) => {
+        const root = rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y');
+        const top = root ? (kids.get(root.wbs_id) ?? []).filter((w) => w.proj_id === pid) : [];
+        return {
+          project: ctx.proj.get(pid)?.proj_short_name, data_date: d(ctx.proj.get(pid)?.last_recalc_date), has_baseline: !!ctx.proj.get(pid)?.sum_base_proj_id,
+          totals: pack(sumLines(tasks.filter((t) => t.proj_id === pid).map((t) => costs.get(t.task_id)!).filter(Boolean))),
+          by_wbs: top.map((w) => { const ids = new Set(under(w.wbs_id)); return { wbs: w.wbs_short_name, name: w.wbs_name, ...pack(sumLines(tasks.filter((t) => ids.has(t.wbs_id)).map((t) => costs.get(t.task_id)!).filter(Boolean))) }; }),
+        };
+      });
+      const scored = tasks.map((t) => ({ t, e: earnedValue(costs.get(t.task_id)!) })).filter((x) => x.e.bac > 0 && (x.e.ac > 0 || x.e.pv > 0));
+      const n = Math.min(50, Number(args.worst) || 10);
+      return {
+        projects,
+        worst_cost_performance: scored.filter((x) => x.e.ac > 0).sort((a, b) => a.e.cpi - b.e.cpi).slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, cpi: round(x.e.cpi), cv: round(x.e.cv) })),
+        worst_schedule_performance: scored.filter((x) => x.e.pv > 0).sort((a, b) => a.e.spi - b.e.spi).slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, spi: round(x.e.spi), sv: round(x.e.sv) })),
+        note: 'BAC = baseline budget (current budget when no baseline is assigned). PV = BAC x baseline time elapsed at the data date. EV = BAC x % complete. SPI = EV/PV, CPI = EV/AC, EAC = AC + remaining cost, VAC = BAC - EAC.',
       };
     }
     case 'resource_summary': {

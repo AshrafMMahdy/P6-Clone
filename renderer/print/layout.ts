@@ -147,7 +147,7 @@ export function layoutSchedule(p: LayoutInput): Page[] {
     const bandText = (b: Band, y: number) => {
       if (!b.show) return;
       const third = cw / 3;
-      if (b.left) P.push({ t: 'text', x: x0, y, s: fit(fill(b.left), third * 1.4, pt, true), pt, bold: true, align: 'l' });
+      if (b.left) P.push({ t: 'text', x: x0, y, s: fit(fill(b.left), third - 2, pt, true), pt, bold: true, align: 'l' });
       if (b.center) P.push({ t: 'text', x: x0 + cw / 2, y, s: fit(fill(b.center), third, pt), pt, align: 'c' });
       if (b.right) P.push({ t: 'text', x: x0 + cw, y, s: fit(fill(b.right), third, pt), pt, align: 'r' });
     };
@@ -272,4 +272,70 @@ export function printVars(o: { projId?: string; projName?: string; dataDate?: st
     '[Print Date]': formatP6Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) / 60000).slice(0, 16),
     '[Layout]': o.layout ?? '', '[Filter]': o.filter ?? '',
   };
+}
+
+// ---------------------------------------------------------------- report pages (Tools > Reports)
+export interface TableReport { title: string; subtitle?: string; columns: string[]; rows: { cells: string[]; level?: number; bold?: boolean }[] }
+
+/** A report as printed pages: title block, column titles on every page, group rows shaded, header/footer bands. */
+export function layoutReport(r: TableReport, ps: PageSetup, vars: Record<string, string>): Page[] {
+  const [w0, h0] = PAPERS[ps.paper];
+  const [pw, ph] = ps.landscape ? [h0, w0] : [w0, h0];
+  const m = ps.margins, x0 = m.left, cw = pw - m.left - m.right;
+  const pt = ps.fontPt, rh = pt * PT * 1.8, bandH = rh * 1.1;
+  const top = m.top + (ps.header.show ? bandH + 1 : 0);
+  const bottom = ph - m.bottom - (ps.footer.show ? bandH + 1 : 0);
+  const titleH = rh * 2.6;
+  // column widths from the content (first rows), scaled to the page width; numeric columns right-aligned
+  const sample = r.rows.slice(0, 400);
+  const nat = r.columns.map((c, i) => Math.min(80, Math.max(textWidth(c, pt, true) + 2, ...sample.map((x) => textWidth(x.cells[i] ?? '', pt, !!x.bold) + 2 + (i === 0 ? (x.level ?? 0) * 2.5 : 0)))));
+  const total = nat.reduce((s, v) => s + v, 0) || 1;
+  const widths = nat.map((v) => (v / total) * cw);
+  const xs: number[] = []; widths.reduce((x, w) => { xs.push(x); return x + w; }, x0);
+  const numeric = r.columns.map((_, i) => { const v = sample.filter((x) => !x.bold).map((x) => x.cells[i] ?? '').filter(Boolean); return v.length > 0 && v.filter((s) => /^[-$]?[\d,]+(\.\d+)?%?$/.test(s.replace(/\s/g, ''))).length / v.length > 0.6; });
+  const pages: Page[] = [];
+  let i = 0, pg = 0;
+  const firstRows = Math.max(1, Math.floor((bottom - top - titleH - rh) / rh)), perPage = Math.max(1, Math.floor((bottom - top - rh) / rh));
+  const count = r.rows.length <= firstRows ? 1 : 1 + Math.ceil((r.rows.length - firstRows) / perPage);
+  do {
+    const P: Prim[] = [];
+    const vv: Record<string, string> = { ...vars, '[Page]': String(pg + 1), '[Pages]': String(count) };
+    const fill = (s: string) => s.replace(/\[[A-Za-z ]+\]/g, (v) => vv[v] ?? v);
+    const band = (b: Band, y: number) => {
+      if (!b.show) return;
+      if (b.left) P.push({ t: 'text', x: x0, y, s: fit(fill(b.left), cw / 3 - 2, pt, true), pt, bold: true });
+      if (b.center) P.push({ t: 'text', x: x0 + cw / 2, y, s: fit(fill(b.center), cw / 3, pt), pt, align: 'c' });
+      if (b.right) P.push({ t: 'text', x: x0 + cw, y, s: fit(fill(b.right), cw / 3, pt), pt, align: 'r' });
+    };
+    if (ps.header.show) { band(ps.header, m.top + bandH * 0.7); P.push({ t: 'line', x1: x0, y1: m.top + bandH, x2: x0 + cw, y2: m.top + bandH, color: C.line, lw: 0.3 }); }
+    let y = top;
+    if (pg === 0) {
+      P.push({ t: 'text', x: x0, y: y + rh * 1.1, s: fit(r.title, cw, pt + 4, true), pt: pt + 4, bold: true });
+      if (r.subtitle) P.push({ t: 'text', x: x0, y: y + rh * 2.1, s: fit(r.subtitle, cw, pt), pt, color: '#444444' });
+      y += titleH;
+    }
+    P.push({ t: 'rect', x: x0, y, w: cw, h: rh, fill: C.head, stroke: C.line, lw: 0.25 });
+    r.columns.forEach((c, j) => { P.push({ t: 'text', x: xs[j] + widths[j] / 2, y: y + rh * 0.68, s: fit(c, widths[j] - 1, pt, true), pt, bold: true, align: 'c' }); if (j) P.push({ t: 'line', x1: xs[j], y1: y, x2: xs[j], y2: y + rh, color: C.line, lw: 0.2 }); });
+    y += rh;
+    const y0 = y;
+    const take = pg === 0 ? firstRows : perPage;
+    for (let k = 0; k < take && i < r.rows.length; k++, i++) {
+      const row = r.rows[i], lv = row.level ?? 0;
+      if (row.bold) P.push({ t: 'rect', x: x0, y, w: cw, h: rh, fill: GROUP_FILL[Math.min(lv, 4)] });
+      row.cells.forEach((c, j) => {
+        if (!c || j >= widths.length) return;
+        const ind = j === 0 ? lv * 2.5 : 0;
+        P.push(numeric[j] && !(row.bold && j === 0) ? { t: 'text', x: xs[j] + widths[j] - 0.8, y: y + rh * 0.68, s: fit(c, widths[j] - 1.6, pt, !!row.bold), pt, bold: !!row.bold, align: 'r' } : { t: 'text', x: xs[j] + 0.8 + ind, y: y + rh * 0.68, s: fit(c, (row.bold && j === 0 ? cw : widths[j]) - 1.6 - ind, pt, !!row.bold), pt, bold: !!row.bold });
+      });
+      y += rh;
+      P.push({ t: 'line', x1: x0, y1: y, x2: x0 + cw, y2: y, color: C.grid, lw: 0.1 });
+    }
+    r.columns.forEach((_, j) => { if (j) P.push({ t: 'line', x1: xs[j], y1: y0, x2: xs[j], y2: y, color: C.grid, lw: 0.12 }); });
+    P.push({ t: 'rect', x: x0, y: y0 - rh, w: cw, h: y - y0 + rh, stroke: C.line, lw: 0.3 });
+    if (!r.rows.length) P.push({ t: 'text', x: x0 + 1, y: y + rh * 0.8, s: 'No rows (the filter matched nothing).', pt, color: '#666666' });
+    if (ps.footer.show) { const fy = ph - m.bottom - bandH; P.push({ t: 'line', x1: x0, y1: fy, x2: x0 + cw, y2: fy, color: C.line, lw: 0.3 }); band(ps.footer, fy + bandH * 0.75); }
+    pages.push({ w: pw, h: ph, prims: P });
+    pg++;
+  } while (i < r.rows.length);
+  return pages;
 }

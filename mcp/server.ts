@@ -25,6 +25,9 @@ import { pagesToHtml, pagesToPdf } from '../renderer/print/output.ts';
 import { PRINT_GUIDE } from '../renderer/print/layout.ts';
 import { readXlsx, writeXlsx } from '../core/excel/xlsx.ts';
 import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
+import { listReports, parseSpec, runReport, runSpec } from '../renderer/reports/engine.ts';
+import { reportHtml, reportPages, reportText, reportXlsx } from '../renderer/reports/output.ts';
+import { nowStamp } from '../core/report/reports.ts';
 
 const VERSION = '1.0.0';
 interface Session { db: Db; path: string | null; format: Format; undo: { label: string; j: Journal }[]; dirty: boolean; hpd: number }
@@ -60,6 +63,9 @@ const TOOLS = [
   { name: 'export_pdf', description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML instead. Text outside Latin-1 prints as "?" in the PDF (use the desktop app for other scripts). ' + PRINT_GUIDE + ' Layout options: filter (all, critical, not_started, in_progress, completed, ...), group_by (wbs, none), sort_by (task_code, task_name, total_float, finish).', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK (activities), TASKPRED (relationships), RSRC (resources), TASKRSRC (assignments); row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
   { name: 'import_excel', description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities (name, WBS, type, durations, constraint, actual dates, % complete, calendar), relationships, resources and assignments; a "Y" in delete_record_flag deletes the row. Calculated columns (status, start, finish, float) are ignored. Applied as one undoable change; dry_run returns the plan without changing anything.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
+  { name: 'list_reports', description: 'Reports available like P6 Tools > Reports: the standard reports by group (Schedule, Progress, Earned Value, Cost, Resources) and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
+  { name: 'run_report', description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as a PDF (.pdf, same pages as printing, settings like export_pdf), HTML (.html), ASCII text/CSV (.csv or .txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number' } } }) },
+  { name: 'create_report', description: 'Save a report definition like the P6 Report Wizard (name, subject, columns, filter, group_by, sort_by, sort_desc, title, group). Kept with this open project for run_report (not written into the XER). ' + "Subject areas: activities (columns: any activity column id, e.g. task_code, task_name, orig_dur, rem_dur, pct, start, finish, total_float, bl_finish, var_bl_finish, bud_cost, act_cost, ev_bac, ev_pv, ev_ev, ev_ac, ev_sv, ev_cv, ev_spi, ev_cpi, ev_eac, ev_vac; group_by wbs|none), assignments (task_code, task_name, rsrc_id, rsrc_name, target_qty, act_qty, remain_qty, target_cost, act_cost, remain_cost, start, finish; group_by resource|activity|none), wbs (wbs_code, wbs_name, activities, start, finish, total_float, budget, actual, remaining, ev_*), resources (rsrc_id, rsrc_name, rsrc_type, max_units, price, calendar, assignments, target_qty, act_qty, remain_qty, target_cost; group_by none|type), relationships (pred_code, pred_name, succ_code, succ_name, type, lag, free_float, driving; group_by none|pred). Filters: all, critical, longest, notstarted, inprogress, completed, open, milestones, negfloat, late, constrained, started30, finished30, starting30, finishing30, nopreds.", inputSchema: withHandle({ type: 'object', properties: { name: { type: 'string' }, subject: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' }, sort_desc: { type: 'boolean' }, title: { type: 'string' }, group: { type: 'string' } }, required: ['name', 'subject'] }) },
   { name: 'close', description: 'Close the project and free its memory (unsaved changes are lost).', inputSchema: withHandle({ type: 'object', properties: {} }) },
 ];
 
@@ -99,6 +105,34 @@ async function callAsync(name: string, a: Record<string, any>): Promise<unknown>
       const path = resolve(String(a.path ?? ''));
       writeFileSync(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd)));
       return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] };
+    }
+    case 'list_reports': { const s = get(a.handle); return listReports(s.db).map((e) => ({ id: e.id, name: e.name, group: e.group, kind: e.kind, description: e.description })); }
+    case 'create_report': {
+      const s = get(a.handle);
+      const spec = parseSpec(a);
+      if (!spec) throw new UserError('Give the report a "name".');
+      const t = (s.db.tables._REPORT ??= { name: '_REPORT', fields: ['report_id', 'name', 'json'], rows: [] });
+      const ex = t.rows.find((r) => r.name.toLowerCase() === spec.name.toLowerCase());
+      if (ex) ex.json = JSON.stringify(spec);
+      else t.rows.push({ report_id: String(t.rows.length + 1), name: spec.name, json: JSON.stringify(spec) });
+      return { saved: spec.name, id: `custom:${ex?.report_id ?? t.rows.length}`, replaced: !!ex };
+    }
+    case 'run_report': {
+      const s = get(a.handle);
+      const prefs = { hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0 };
+      const ids = projectIds(s.db, a.project);
+      let name: string, report;
+      if (a.definition) { const spec = parseSpec({ name: 'Ad hoc report', ...a.definition }); if (!spec) throw new UserError('definition needs a name and subject'); report = runSpec(s.db, ids, spec, { prefs }); name = spec.name; }
+      else { try { const r = runReport(s.db, ids, String(a.report ?? ''), { prefs, weeks: Number(a.weeks) || undefined }); report = r.report; name = r.entry.name; } catch (e) { throw new UserError((e as Error).message); } }
+      if (!a.path) { const max = Math.min(2000, Number(a.max_rows) || 200); return { report: name, title: report.title, subtitle: report.subtitle, columns: report.columns, total_rows: report.rows.length, rows: report.rows.slice(0, max).map((r) => ({ cells: r.cells, ...(r.bold ? { group: true, level: r.level ?? 0 } : r.level ? { level: r.level } : {}) })), truncated: report.rows.length > max }; }
+      const path = resolve(String(a.path));
+      const ext = (/\.(\w+)$/.exec(path)?.[1] ?? '').toLowerCase();
+      if (ext === 'pdf') { const pages = reportPages(s.db, ids, report, a.settings ?? {}, prefs, name); writeFileSync(path, await pagesToPdf(pages, report.title)); return { saved: path, pages: pages.length, rows: report.rows.length }; }
+      if (ext === 'html' || ext === 'htm') writeFileSync(path, reportHtml(report, nowStamp()));
+      else if (ext === 'csv' || ext === 'txt') writeFileSync(path, reportText(report));
+      else if (ext === 'xlsx') writeFileSync(path, await reportXlsx(report));
+      else throw new UserError('path must end in .pdf, .html, .csv, .txt or .xlsx');
+      return { saved: path, rows: report.rows.length };
     }
     case 'import_excel': {
       const s = get(a.handle);

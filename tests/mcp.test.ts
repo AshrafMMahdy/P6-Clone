@@ -121,3 +121,28 @@ test('MCP: an agent exports a PDF printout and an Excel workbook, edits the work
     assert.equal((await c.tool('undo', { handle: h })).data.undone.startsWith('Edit'), true);
   } finally { c.close(); }
 });
+
+test('MCP: an agent lists, creates and runs reports (data, PDF, Excel) and reads earned value', { timeout: 60_000 }, async () => {
+  const { readFileSync } = await import('node:fs');
+  const c = client();
+  const dir = mkdtempSync(join(tmpdir(), 'p6mcp-'));
+  try {
+    await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const names = (await c.rpc('tools/list')).result.tools.map((t: { name: string }) => t.name);
+    for (const n of ['list_reports', 'run_report', 'create_report', 'earned_value']) assert.ok(names.includes(n), n);
+    const { data: o } = await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    const h = o.handle;
+    const list = (await c.tool('list_reports', { handle: h })).data.result;
+    assert.ok(list.some((e: { name: string }) => e.name === 'Earned Value by WBS'));
+    const made = await c.tool('create_report', { handle: h, name: 'Critical by float', subject: 'activities', columns: ['task_code', 'task_name', 'finish', 'total_float'], filter: 'critical', group_by: 'none', sort_by: 'finish' });
+    assert.equal(made.isError, false, made.content?.[0]?.text);
+    const run = await c.tool('run_report', { handle: h, report: 'Critical by float' });
+    assert.equal(run.data.columns[0], 'Activity ID'); assert.equal(run.data.total_rows, 46);
+    const pdf = await c.tool('run_report', { handle: h, report: 'Relationship Report', path: join(dir, 'rel.pdf'), settings: { paper: 'A4' } });
+    assert.ok(pdf.data.pages >= 2 && readFileSync(join(dir, 'rel.pdf')).subarray(0, 5).toString() === '%PDF-');
+    const xl = await c.tool('run_report', { handle: h, definition: { name: 'Assignments', subject: 'assignments', group_by: 'resource' }, path: join(dir, 'a.xlsx') });
+    assert.equal(xl.isError, false, xl.content?.[0]?.text);
+    const ev = await c.tool('earned_value', { handle: h });
+    assert.ok(Array.isArray(ev.data.projects) && 'totals' in ev.data.projects[0]);
+  } finally { c.close(); }
+});

@@ -15,6 +15,15 @@ export interface ActRow {
   es?: number | null; ef?: number | null; minTf?: number | null;
 }
 
+/** Is the date within n days after (n > 0) or before (n < 0) the project's data date? */
+function near(d: string | undefined, c: Ctx, n: number, r?: Row): boolean {
+  const t = parseP6Date(d);
+  if (t == null) return false;
+  const dd = parseP6Date((r ? c.proj.get(r.proj_id) : [...c.proj.values()][0])?.last_recalc_date);
+  if (dd == null) return false;
+  return n > 0 ? t >= dd && t <= dd + n * 1440 : t <= dd && t >= dd + n * 1440;
+}
+
 export const FILTERS: Record<string, [string, (r: Row, c: Ctx) => boolean]> = {
   all: ['All Activities', () => true],
   critical: ['Critical', (r, c) => isCritical(r, c)],
@@ -25,6 +34,12 @@ export const FILTERS: Record<string, [string, (r: Row, c: Ctx) => boolean]> = {
   open: ['Not Completed', (r) => statusOf(r) !== 'TK_Complete'],
   milestones: ['Milestones', (r) => isMilestone(r)],
   negfloat: ['Negative Float', (r) => Number(r.total_float_hr_cnt) < 0 && r.total_float_hr_cnt !== ''],
+  late: ['Late Activities (finish after baseline, or negative float)', (r, c) => { if (r.act_end_date) return false; const b = c.baseline.get(`${r.task_code}|${r.proj_id}`); const f = parseP6Date(r.early_end_date || r.reend_date), bf = b ? parseP6Date(b.act_end_date || b.target_end_date) : null; return f != null && bf != null ? f > bf : Number(r.total_float_hr_cnt) < 0 && r.total_float_hr_cnt !== ''; }],
+  constrained: ['Constrained Activities', (r) => !!r.cstr_type || !!r.cstr_type2],
+  started30: ['Started in the Last 30 Days', (r, c) => near(r.act_start_date, c, -30, r)],
+  finished30: ['Finished in the Last 30 Days', (r, c) => near(r.act_end_date, c, -30, r)],
+  starting30: ['Starting in the Next 30 Days', (r, c) => !r.act_start_date && near(r.early_start_date || r.restart_date, c, 30, r)],
+  finishing30: ['Finishing in the Next 30 Days', (r, c) => !r.act_end_date && near(r.early_end_date || r.reend_date, c, 30, r)],
   nopreds: ['Open Ends (no predecessors/successors)', (r, c) => !r.act_end_date && (!(c.predsOf.get(r.task_id)?.length) || !(c.succsOf.get(r.task_id)?.length))],
 };
 

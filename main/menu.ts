@@ -127,7 +127,7 @@ export function buildMenu(win: BrowserWindow): Menu {
         cmd('Schedule &Log', 'tools.schedLog'),
         cmd('&Import Log', 'tools.importLog'),
         sep,
-        cmd('&Reports', 'tools.reports', undefined, { submenu: [cmd('&Reports...', 'tools.reports'), cmd('Schedule Report', 'report.schedule'), cmd('Critical Activities', 'report.critical'), cmd('Resource Assignments', 'report.assignments'), cmd('Cost by WBS', 'report.costWbs'), cmd('Cost by Cost Account', 'report.costAccount')] }),
+        cmd('&Reports', 'tools.reports', undefined, { submenu: [cmd('&Reports...', 'tools.reports'), cmd('Report &Wizard...', 'tools.reportWizard'), sep, cmd('Schedule Report', 'report.schedule'), cmd('Critical Activities', 'report.critical'), cmd('Late Activities', 'report.std-late'), cmd('Earned Value by WBS', 'report.std-evwbs'), cmd('Resource Assignments', 'report.assignments'), cmd('Cost by Cost Account', 'report.costAccount')] }),
         sep,
         cmd('Validate XER File...', 'tools.validate'),
       ],

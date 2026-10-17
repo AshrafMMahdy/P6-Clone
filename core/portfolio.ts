@@ -180,7 +180,7 @@ export function portfolioSummary(db: Db, projectIds: string[]): PortfolioSummary
     const loose = rows(db, 'PROJCOST').filter((c) => c.proj_id === id && !c.task_id);
     if (loose.length) {
       const bac = loose.reduce((v, c) => v + num(c.target_cost), 0), act = loose.reduce((v, c) => v + num(c.act_cost), 0), rem = loose.reduce((v, c) => v + num(c.remain_cost), 0);
-      lines.push({ bac, actual: act, remaining: rem, eac: act + rem, pv: 0, ev: 0, ac: act });
+      lines.push({ bac, budget: bac, actual: act, remaining: rem, eac: act + rem, pv: 0, ev: 0, ac: act });
     }
     start ??= parseP6Date(p.plan_start_date);
     finish ??= parseP6Date(p.scd_end_date) ?? parseP6Date(p.plan_end_date);

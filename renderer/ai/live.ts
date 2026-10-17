@@ -8,6 +8,8 @@ import { doUndo, getDb, getUi, mutate, setUi } from '../store.ts';
 import { currentPrint, savePageSetup } from '../print.ts';
 import { printableColumns } from '../print/schedule.ts';
 import { PRINT_GUIDE } from '../print/layout.ts';
+import { listReports, parseSpec, runReport, SUBJECTS, subjectColumns, reportFilters } from '../reports/engine.ts';
+import { openDialog } from '../store.ts';
 
 export interface MenuNode { label: string; id?: string; accelerator?: string; submenu?: MenuNode[] }
 let menuTree: MenuNode[] = [];
@@ -35,6 +37,10 @@ export const LIVE_TOOLS: ToolDef[] = [
   { name: 'select_activity', description: 'Select an activity in the Activities window and scroll it into view.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
   { name: 'edit_project', description: 'Change the open project, or create a new one, with JSON operations. Each call is one undoable step (all or nothing: if one operation fails nothing changes and the error names it); changed activities are selected so the user sees them; deleting asks the user first. A batch that starts with add_project (or copy_project) creates that project and opens it on screen; later operations in the batch and later calls go to it. Build big schedules in several calls (about one WBS area, 30-60 operations, per call).\n' + OP_GUIDE, parameters: { type: 'object', properties: { operations: { type: 'array', items: { type: 'object', properties: { op: { type: 'string', enum: OP_NAMES } }, required: ['op'] } } }, required: ['operations'] } },
   { name: 'set_print_options', description: 'Change File > Page Setup for printing / PDF of the Activities layout (saved; the user then prints or saves). Returns the settings, the page count and the printable column ids. Afterwards open File > Print Preview, or File > Print... / File > Save as PDF... so the user can press Print or Save themselves.\n' + PRINT_GUIDE, parameters: { type: 'object', properties: { settings: { type: 'object' } }, required: ['settings'] } },
+  { name: 'list_reports', description: 'The reports in Tools > Reports (P6 standard reports by group, and the user\'s own), with ids.', parameters: { type: 'object', properties: {} } },
+  { name: 'open_report', description: 'Show a report in the Reports window (the user sees it selected and previewed) and return its columns and rows so you can read and explain it. report: id or name from list_reports.', parameters: { type: 'object', properties: { report: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks (Lookahead report)' }, max_rows: { type: 'number' } }, required: ['report'] } },
+  { name: 'create_report', description: 'Create a report with the Report Wizard ON SCREEN, step by step, so the user watches each page (subject area, columns, filter, group and sort, title) and you click Next and Finish. subject: activities | assignments | wbs | resources | relationships. columns: ids (activities: any activity column id such as task_code, task_name, start, finish, total_float, ev_bac, ev_pv, ev_ev, ev_spi, ev_cpi; other subjects: call with an empty columns list to see the defaults). filter: all, critical, longest, notstarted, inprogress, completed, open, milestones, negfloat, late, constrained, started30, finished30, starting30, finishing30, nopreds, or user:<id>. group_by: activities wbs|none; assignments resource|activity|none; resources none|type; relationships none|pred. sort_by: a column id; sort_desc. Saved in "My Reports".', parameters: { type: 'object', properties: { name: { type: 'string' }, subject: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' }, sort_desc: { type: 'boolean' }, title: { type: 'string' }, group: { type: 'string' } }, required: ['name', 'subject'] } },
+  { name: 'run_report_dialog', description: 'Open the Run Report dialog for a report with the output chosen: preview (Print Preview), printer, pdf, html, text (ASCII/CSV) or excel. For preview you may then ui_click "OK"; for printer and files the user presses OK and chooses where to save.', parameters: { type: 'object', properties: { report: { type: 'string' }, output: { type: 'string' } }, required: ['report', 'output'] } },
   { name: 'undo', description: 'Undo the last change (Edit > Undo).', parameters: { type: 'object', properties: {} } },
 ];
 
@@ -215,6 +221,47 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         const ps = savePageSetup(args.settings ?? {});
         const r = getUi().view === 'activities' && getUi().openProjects.length ? currentPrint(ps) : null;
         return { settings: ps, pages: r?.pages.length ?? null, activities: r?.activities ?? null, unknown_columns: r?.unknownColumns, printable_columns: printableColumns(getDb()).map((c) => c.id), note: r ? undefined : 'Open the Activities window of a project to print the schedule.' };
+      }
+      case 'list_reports': return listReports(getDb()).map((e) => ({ id: e.id, name: e.name, group: e.group, kind: e.kind, description: e.description }));
+      case 'open_report': {
+        const ui0 = getUi();
+        if (!ui0.openProjects.length) return { error: 'Open a project first.' };
+        const { entry, report } = runReport(getDb(), ui0.openProjects, String(args.report ?? ''), { prefs: ui0.prefs, weeks: Number(args.weeks) || undefined });
+        setUi({ view: 'reports' });
+        await sleep(400);
+        const item = [...document.querySelectorAll<HTMLElement>('.report-item')].find((el) => el.textContent?.replace(/ \*$/, '') === entry.name);
+        if (item) await clickEl(item); else setUi({ detailTab: entry.id });
+        const max = Math.min(200, Number(args.max_rows) || 60);
+        return { id: entry.id, name: entry.name, title: report.title, subtitle: report.subtitle, columns: report.columns, total_rows: report.rows.length, rows: report.rows.slice(0, max).map((r) => (r.bold ? { group: r.cells.find(Boolean) ?? '', level: r.level } : Object.fromEntries(report.columns.map((c, i) => [c, r.cells[i] ?? ''])))), truncated: report.rows.length > max };
+      }
+      case 'create_report': {
+        const subj = (Object.keys(SUBJECTS) as (keyof typeof SUBJECTS)[]).find((k) => k === args.subject) ?? 'activities';
+        const spec = parseSpec({ ...args, subject: subj, columns: Array.isArray(args.columns) && args.columns.length ? args.columns : SUBJECTS[subj].defaultColumns });
+        if (!spec) return { error: 'Give the report a name.' };
+        const known = new Set(subjectColumns(getDb(), spec.subject).map((c) => c.id));
+        const unknown = spec.columns.filter((c) => !known.has(c));
+        if (unknown.length) return { error: `Unknown column(s) for ${spec.subject}: ${unknown.join(', ')}`, columns: [...known].slice(0, 400) };
+        if (spec.filter !== 'all' && !reportFilters(getDb()).some((f) => f.id === spec.filter)) return { error: `Unknown filter "${spec.filter}"`, filters: reportFilters(getDb()) };
+        setUi({ view: 'reports' });
+        openDialog('reportWizard', { preset: spec, runAfter: false });
+        const top = () => [...document.querySelectorAll<HTMLElement>('.dialog')].at(-1);
+        for (let step = 0; step < 6; step++) {
+          await sleep(1100);
+          const btn = [...(top()?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((b) => /^(Next >|Finish)$/.test(b.textContent?.trim() ?? ''));
+          if (!btn) return { error: 'The Report Wizard closed before it finished.' };
+          await clickEl(btn);
+        }
+        await sleep(300);
+        const e = listReports(getDb()).find((x) => x.kind === 'custom' && x.name === spec.name);
+        return e ? { saved: e.name, id: e.id, group: e.group, note: 'Saved and selected in the Reports window. Use open_report to read it, or run_report_dialog to print / export it.' } : { error: 'The report was not saved.' };
+      }
+      case 'run_report_dialog': {
+        const e = listReports(getDb()).find((x) => x.id === args.report || x.name.toLowerCase() === String(args.report ?? '').toLowerCase());
+        if (!e) return { error: `No report "${args.report}".` };
+        const out = ['preview', 'printer', 'pdf', 'html', 'text', 'excel'].includes(String(args.output)) ? String(args.output) : 'preview';
+        setUi({ view: 'reports', detailTab: e.id });
+        openDialog('runReport', { reportId: e.id, output: out });
+        return { opened: 'Run Report', report: e.name, output: out };
       }
       case 'undo': {
         const btn = document.querySelector<HTMLElement>('.tbtn[title="Undo"]');

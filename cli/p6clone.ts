@@ -59,6 +59,9 @@ const USAGE = `p6clone <command> [options]
   export-excel <file.xer> --out schedule.xlsx [--project ID]   P6-style spreadsheet (TASK, TASKPRED, RSRC, TASKRSRC)
   import-excel <file.xer> <sheet.xlsx> [--project ID] --out out.xer [--schedule] [--dry-run] [--json]
            Updates the project from the spreadsheet (one transaction). Exit 65 if a row is refused
+  reports  <file.xer> [--json]                         Reports available (P6 standard reports by group)
+  report   <file.xer> <id|name> [--out r.pdf|r.html|r.csv|r.xlsx] [--project ID] [--weeks N] [--settings json] [--json]
+           Run a report (Tools > Reports). --definition json|file runs a Report Wizard definition instead of <id|name>
   diff     <a.xer> <b.xer> [--json]                   Table-level differences (rows keyed by internal ids). Exit 1 if any
   compare  <old.xer> <new.xer> [--json] [--hours-per-day 8]
            Schedule comparison like P6's Claim Digger: projects, WBS (code path), activities (Activity ID) and
@@ -234,6 +237,41 @@ async function main(): Promise<number> {
         else console.log(flag('dry-run') ? '(dry run: nothing changed)' : !plan.ops.length ? 'Nothing to change.' : out ? `Wrote ${out}` : '(no --out: nothing written)');
       }
       return r && !r.ok ? 65 : 0;
+    }
+    case 'reports': {
+      const { db } = load(positional[0]);
+      const { listReports } = await import('../renderer/reports/engine.ts');
+      const list = listReports(db);
+      if (flag('json')) console.log(JSON.stringify(list.map((e) => ({ id: e.id, name: e.name, group: e.group, kind: e.kind })), null, 2));
+      else for (const e of list) console.log(`${e.group.padEnd(13)} ${e.id.padEnd(16)} ${e.name}`);
+      return 0;
+    }
+    case 'report': {
+      const { db } = load(positional[0]);
+      const { runReport, runSpec, parseSpec } = await import('../renderer/reports/engine.ts');
+      const { reportHtml, reportPages, reportText, reportXlsx } = await import('../renderer/reports/output.ts');
+      const { pagesToPdf } = await import('../renderer/print/output.ts');
+      const { nowStamp } = await import('../core/report/reports.ts');
+      const prefs = { hoursPerDay: hpd(), dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0 };
+      const ids = pickProjects(db);
+      const defSrc = opt('definition');
+      let name: string, report;
+      if (defSrc) { const spec = parseSpec(JSON.parse(defSrc.trim().startsWith('{') ? defSrc : readFileSync(defSrc, 'utf8'))); if (!spec) throw new Error('--definition needs "name" and "subject"'); report = runSpec(db, ids, spec, { prefs }); name = spec.name; }
+      else { if (!positional[1]) throw new Error('report <file.xer> <report id or name> (see: p6clone reports <file.xer>)'); const r = runReport(db, ids, positional[1], { prefs, weeks: opt('weeks') ? Number(opt('weeks')) : undefined }); report = r.report; name = r.entry.name; }
+      const out = opt('out');
+      if (!out) {
+        if (flag('json')) console.log(JSON.stringify(report, null, 2));
+        else { console.log(`${report.title}${report.subtitle ? ` - ${report.subtitle}` : ''}`); console.log(queryText(report.rows.map((r) => Object.fromEntries(report.columns.map((c, i) => [c, (i === 0 && r.level ? '  '.repeat(r.level) : '') + (r.cells[i] ?? '')]))))); }
+        return 0;
+      }
+      const ext = (/\.(\w+)$/.exec(out)?.[1] ?? '').toLowerCase();
+      if (ext === 'pdf') { let settings = {}; const src = opt('settings'); if (src) settings = JSON.parse(src.trim().startsWith('{') ? src : readFileSync(src, 'utf8')); const pages = reportPages(db, ids, report, settings, prefs, name); writeFileSync(out, await pagesToPdf(pages, report.title)); console.log(`Wrote ${out} (${pages.length} page${pages.length > 1 ? 's' : ''}, ${report.rows.length} rows)`); return 0; }
+      if (ext === 'html' || ext === 'htm') writeFileSync(out, reportHtml(report, nowStamp()));
+      else if (ext === 'csv' || ext === 'txt') writeFileSync(out, reportText(report));
+      else if (ext === 'xlsx') writeFileSync(out, await reportXlsx(report));
+      else throw new Error('--out must end in .pdf, .html, .csv, .txt or .xlsx');
+      console.log(`Wrote ${out} (${report.rows.length} rows)`);
+      return 0;
     }
     case 'query': {
       const { db } = load(positional[0]);

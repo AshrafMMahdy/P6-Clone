@@ -3,6 +3,7 @@ import { addField, emptyDb, groupBy, indexBy, nextId, rows, table, type Db, type
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { p6num, calendarResolver } from '../core/schedule/cpm.ts';
 import { durationPct } from '../core/progress/update.ts';
+import { activityCosts, earnedValue, type EarnedValue } from '../core/cost/rollup.ts';
 import { ENUMS } from '../core/xer/schema.ts';
 import type { Prefs } from './store.ts';
 import { makeCtx as coreMakeCtx, isCritical, type Ctx as CoreCtx } from '../core/project/ctx.ts';
@@ -99,6 +100,20 @@ export interface Column {
 const sumBy = (rs: Row[] | undefined, f: string) => (rs ?? []).reduce((a, x) => a + Number(x[f] || 0), 0);
 const USD = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 const money = (n: number) => (n ? USD.format(n) : '$0.00');
+// earned value per activity, worked out once per database state (the context is rebuilt when the database changes)
+const evCache = new WeakMap<object, Map<string, EarnedValue>>();
+export function evOf(ctx: Ctx): Map<string, EarnedValue> {
+  let m = evCache.get(ctx);
+  if (!m) {
+    const ids = rows(ctx.db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id);
+    m = new Map([...activityCosts(ctx.db, ids)].map(([k, l]) => [k, earnedValue(l)]));
+    evCache.set(ctx, m);
+  }
+  return m;
+}
+const ev = (k: keyof EarnedValue, fmt: (v: number) => string) => (r: Row, c: Ctx) => { const e = evOf(c).get(r.task_id); return e ? fmt(e[k]) : ''; };
+const idx = (v: number) => (v ? v.toFixed(2) : '');
+const pct1 = (v: number) => `${Math.round(v * 10) / 10}%`;
 const startOf = (r: Row, ctx: Ctx) => (r.act_start_date ? `${fmtDate(r.act_start_date, ctx.prefs)} A` : fmtDate(r.early_start_date || r.restart_date || r.target_start_date, ctx.prefs) + (r.cstr_type && /MSO|MANDSTART/.test(r.cstr_type) ? '*' : ''));
 const finishOf = (r: Row, ctx: Ctx) => (r.act_end_date ? `${fmtDate(r.act_end_date, ctx.prefs)} A` : fmtDate(r.early_end_date || r.reend_date || r.target_end_date, ctx.prefs) + (r.cstr_type && /MEO|MANDFIN/.test(r.cstr_type) ? '*' : ''));
 
@@ -176,6 +191,20 @@ export const COLUMNS: Column[] = [
   { id: 'bud_cost', title: 'Budgeted Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'target_cost') + sumBy(c.costByTask.get(r.task_id), 'target_cost')) },
   { id: 'act_cost', title: 'Actual Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'act_reg_cost') + sumBy(c.rsrcByTask.get(r.task_id), 'act_ot_cost') + sumBy(c.costByTask.get(r.task_id), 'act_cost')) },
   { id: 'rem_cost', title: 'Remaining Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'remain_cost') + sumBy(c.costByTask.get(r.task_id), 'remain_cost')) },
+  // Earned value (P6 column names; Admin Preferences defaults: baseline budget, performance % = activity % complete)
+  { id: 'ev_bac', title: 'Budget at Completion', width: 95, align: 'right', get: ev('bac', money) },
+  { id: 'ev_pv', title: 'Planned Value Cost', width: 95, align: 'right', get: ev('pv', money) },
+  { id: 'ev_ev', title: 'Earned Value Cost', width: 95, align: 'right', get: ev('ev', money) },
+  { id: 'ev_ac', title: 'Actual Cost (ACWP)', width: 95, align: 'right', get: ev('ac', money) },
+  { id: 'ev_sv', title: 'Schedule Variance', width: 90, align: 'right', get: ev('sv', money) },
+  { id: 'ev_cv', title: 'Cost Variance', width: 90, align: 'right', get: ev('cv', money) },
+  { id: 'ev_spi', title: 'Schedule Performance Index', width: 70, align: 'right', get: ev('spi', idx) },
+  { id: 'ev_cpi', title: 'Cost Performance Index', width: 70, align: 'right', get: ev('cpi', idx) },
+  { id: 'ev_etc', title: 'Estimate To Complete', width: 95, align: 'right', get: ev('etc', money) },
+  { id: 'ev_eac', title: 'Estimate At Completion', width: 95, align: 'right', get: ev('eac', money) },
+  { id: 'ev_vac', title: 'Variance At Completion', width: 95, align: 'right', get: ev('vac', money) },
+  { id: 'ev_sched_pct', title: 'Schedule % Complete', width: 70, align: 'right', get: ev('schedulePct', pct1) },
+  { id: 'ev_perf_pct', title: 'Performance % Complete', width: 70, align: 'right', get: ev('performancePct', pct1) },
   { id: 'preds', title: 'Predecessors', width: 120, get: (r, c) => (c.predsOf.get(r.task_id) ?? []).map((p) => c.taskById.get(p.pred_task_id)?.task_code ?? `[${p.pred_task_id}]`).join(', ') },
   { id: 'succs', title: 'Successors', width: 120, get: (r, c) => (c.succsOf.get(r.task_id) ?? []).map((p) => c.taskById.get(p.task_id)?.task_code ?? `[${p.task_id}]`).join(', ') },
   { id: 'rem_early_start', title: 'Remaining Early Start', width: 82, get: (r, c) => fmtDate(r.restart_date, c.prefs) },

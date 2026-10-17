@@ -22,12 +22,13 @@ import { initLive } from './ai/live.ts';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, AssignBaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
 import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
-import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, FilterEditDialog, TimescaleDialog, LayoutDialog, BUILTIN_LAYOUT, saveLayout, layoutFromUi } from './dialogs/EnterpriseDialogs.tsx';
+import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, FilterEditDialog, TimescaleDialog, LayoutDialog, BUILTIN_LAYOUT, BUILTIN_LAYOUTS, saveLayout, layoutFromUi } from './dialogs/EnterpriseDialogs.tsx';
 import { emptyDb, rows } from '../core/db.ts';
 import { fmtDate, projectName } from './model.ts';
 import { printView } from './print.ts';
 import { exportExcel, importExcel } from './excel.ts';
 import { PageSetupDialog } from './dialogs/PageSetupDialog.tsx';
+import { RunReportDialog, ReportWizardDialog } from './dialogs/ReportDialogs.tsx';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const DIALOGS: Record<string, (p: any) => JSX.Element> = {
@@ -35,7 +36,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
+  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
@@ -88,7 +89,7 @@ export function runMenu(id: string): void {
     case 'view.timescale': return openDialog('timescale');
     case 'view.bars': return openDialog('bars');
     case 'view.layout.save':
-      if (ui.layoutName && ui.layoutName !== BUILTIN_LAYOUT) { saveLayout(ui.layoutName, layoutFromUi(getUi())); return toast(`Layout "${ui.layoutName}" saved`); }
+      if (ui.layoutName && !(ui.layoutName in BUILTIN_LAYOUTS)) { saveLayout(ui.layoutName, layoutFromUi(getUi())); return toast(`Layout "${ui.layoutName}" saved`); }
       return openDialog('layout', { mode: 'saveAs' });
     case 'view.layout.open': case 'view.layout.saveAs': return openDialog('layout', { mode: id.split('.')[2] });
     case 'view.zoomIn': return setUi((u) => ({ pxPerDay: Math.min(60, u.pxPerDay * 1.6) }));
@@ -134,6 +135,7 @@ export function runMenu(id: string): void {
     case 'tools.schedLog': return openDialog('log', { title: 'Schedule Log', text: ui.scheduleLog ?? '' });
     case 'tools.importLog': return openDialog('importLog', {});
     case 'tools.reports': return setUi({ view: 'reports' });
+    case 'tools.reportWizard': setUi({ view: 'reports' }); return openDialog('reportWizard', {});
     case 'tools.validate': return void validateFileTool().then(() => getUi().importLog && openDialog('importLog', {}));
     case 'admin.preferences': return openDialog('prefs');
     case 'admin.reset': return void window.p6.confirm('Delete ALL projects and data from the clone database?', 'This cannot be undone.').then((ok) => { if (ok) { replaceDb(emptyDb()); setUi({ openProjects: [], view: 'projects' }); } });
