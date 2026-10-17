@@ -215,3 +215,28 @@ test('copy_project makes a clean, renumbered copy that can be trimmed; lookups r
   assert.equal(sum.activities, srcTasks.length - 1);
   assert.match((runTool('list_wbs', { project: 'NOPE' }, db, ctx, [], 8) as { error: string }).error, /No project "NOPE"/);
 });
+
+test('delete_wbs removes a whole floor and keeps the chain closed across it; dissolving a chain bridges its ends', async () => {
+  const { applyOps } = await import('../core/project/ops.ts');
+  const { emptyDb, rows } = await import('../core/db.ts');
+  const db = emptyDb();
+  const floor = (n: number) => [
+    { op: 'add_wbs', code: `L${n}`, name: `Level ${n}` },
+    { op: 'add_activity', id: `F${n}0`, name: `L${n} formwork`, wbs: `L${n}`, duration_days: 5 },
+    { op: 'add_activity', id: `F${n}1`, name: `L${n} rebar`, wbs: `L${n}`, duration_days: 3 },
+    { op: 'add_activity', id: `F${n}2`, name: `L${n} pour`, wbs: `L${n}`, duration_days: 1 },
+    { op: 'add_relationship', pred: `F${n}0`, succ: `F${n}1`, type: 'SS', lag_days: 2 }, { op: 'add_relationship', pred: `F${n}1`, succ: `F${n}2` },
+    ...(n > 1 ? [{ op: 'add_relationship', pred: `F${n - 1}2`, succ: `F${n}0`, lag_days: 1 }] : []),
+  ];
+  const r = applyOps(db, [{ op: 'add_project', id: 'T', start: '2027-03-01' }, ...floor(1), ...floor(2), ...floor(3)]);
+  assert.equal(r.ok, true, r.error?.message ?? '');
+  const d = applyOps(db, [{ op: 'delete_wbs', code: 'L2' }]);
+  assert.equal(d.ok, true, d.error?.message ?? '');
+  assert.deepEqual(d.results[0], { deleted_wbs: 'L2', wbs_elements: 1, activities: 3, relationships_added: 1 });
+  const code = new Map(rows(db, 'TASK').map((t) => [t.task_id, t.task_code]));
+  const links = rows(db, 'TASKPRED').map((p) => `${code.get(p.pred_task_id)}>${code.get(p.task_id)} ${p.pred_type} ${Number(p.lag_hr_cnt)}`);
+  assert.ok(links.includes('F12>F30 PR_FS 8'), 'level 1 pour now leads to level 3 formwork: ' + links.join(', '));
+  assert.ok(!rows(db, 'PROJWBS').some((w) => w.wbs_short_name === 'L2') && !rows(db, 'TASK').some((t) => t.task_code.startsWith('F2')));
+  // keep_logic false just deletes
+  assert.equal(applyOps(db, [{ op: 'delete_wbs', code: 'L3', keep_logic: false }]).results[0] && rows(db, 'TASKPRED').some((p) => code.get(p.task_id) === 'F30'), false);
+});

@@ -25,7 +25,7 @@ const RTYPE: Record<string, string> = { labor: 'RT_Labor', nonlabor: 'RT_Equip',
 const PRIO: Record<string, string> = { top: 'PT_Top', high: 'PT_High', normal: 'PT_Normal', low: 'PT_Low', lowest: 'PT_Lowest' };
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
-export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'add_calendar', 'add_holidays', 'add_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource'];
+export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource'];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
@@ -36,6 +36,7 @@ export const OP_GUIDE = [
   `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
   `add_holidays: calendar, dates [dates]`,
   `add_wbs: code, [name], [parent] (parent WBS code or dotted path; omit for top level), [project]`,
+  `delete_wbs: code, [keep_logic] (default true: every predecessor of the removed activities is linked on to their successors, so the chain stays closed; false = just delete), [project]. Removes the WBS element, its child elements and all their activities: the way to remove whole floors or areas, e.g. from a copied project`,
   `add_activity: name, [id], [wbs] (WBS code; omit = project root), [type] (${Object.keys(TYPES).join(', ')}), [duration_days], [calendar], [priority] (${Object.keys(PRIO).join(', ')}), [constraint {type, date}] (types: ${Object.keys(CSTR).filter((k) => k !== 'none').join(', ')}), [secondary_constraint], [project]`,
   `update_activity: id, then any add_activity field, plus [new_id], [remaining_days], [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
   `delete_activity / dissolve_activity: id`,
@@ -165,6 +166,16 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       const w = addWbs(db, p.proj_id, parent.wbs_id);
       w.wbs_short_name = code; w.wbs_name = typeof op.name === 'string' ? op.name : code;
       return { wbs: code };
+    }
+    case 'delete_wbs': {
+      const p = project(op.project);
+      const w = wbsOf(p, str(op.code, 'code'));
+      const sub = new Set([w.wbs_id]);
+      for (let grew = true; grew;) { grew = false; for (const x of rows(db, 'PROJWBS')) if (sub.has(x.parent_wbs_id) && !sub.has(x.wbs_id)) { sub.add(x.wbs_id); grew = true; } }
+      const ids = rows(db, 'TASK').filter((t) => sub.has(t.wbs_id)).map((t) => t.task_id);
+      const linked = op.keep_logic === false ? (deleteActivities(db, ids), 0) : dissolveActivities(db, ids);
+      table(db, 'PROJWBS').rows = rows(db, 'PROJWBS').filter((x) => !sub.has(x.wbs_id));
+      return { deleted_wbs: w.wbs_short_name, wbs_elements: sub.size, activities: ids.length, relationships_added: linked };
     }
     case 'add_activity': {
       const p = project(op.project);

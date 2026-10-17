@@ -195,10 +195,17 @@ export function dissolveActivities(db: Db, ids: string[]): number {
   const s = new Set(ids);
   const P = rows(db, 'TASKPRED');
   const add: [string, string, string, number][] = [];
-  for (const id of ids) {
-    const preds = P.filter((r) => r.task_id === id && !s.has(r.pred_task_id));
-    const succs = P.filter((r) => r.pred_task_id === id && !s.has(r.task_id));
-    for (const p of preds) for (const q of succs) add.push([p.pred_task_id, q.task_id, p.pred_type || 'PR_FS', Number(p.lag_hr_cnt || 0)]);
+  // each link into the removed set is carried to every activity the set leads on to, through chains inside it
+  // (a whole floor dissolved at once still joins the floor below to the floor above)
+  const out = new Map<string, Row[]>();
+  for (const r of P) if (s.has(r.pred_task_id)) (out.get(r.pred_task_id) ?? out.set(r.pred_task_id, []).get(r.pred_task_id)!).push(r);
+  for (const p of P.filter((r) => s.has(r.task_id) && !s.has(r.pred_task_id))) {
+    const seen = new Set([p.task_id]), todo = [p.task_id], exits = new Set<string>();
+    while (todo.length) for (const q of out.get(todo.pop()!) ?? []) {
+      if (!s.has(q.task_id)) exits.add(q.task_id);
+      else if (!seen.has(q.task_id)) { seen.add(q.task_id); todo.push(q.task_id); }
+    }
+    for (const b of exits) add.push([p.pred_task_id, b, p.pred_type || 'PR_FS', Number(p.lag_hr_cnt || 0)]);
   }
   deleteActivities(db, ids);
   let n = 0;
