@@ -6,6 +6,8 @@ import { ENUMS, fieldType, fieldsFor, knownFields, knownTables } from './schema.
 
 const KNOWN_VERSION = /^(3\.5|4\.[01]|5\.0(\.\d+)?|6\.[0-2](\.\d+)?|7\.0(\.\d+)?|8\.[1-4](\.\d+)?|1[5-9]\.\d+|2[0-6]\.\d+)$/;
 const PER_KIND_CAP = 5;
+/** Column sizes in the P6 database (characters). */
+const MAX_LEN: Record<string, number> = { 'TASK.task_code': 40, 'TASK.task_name': 120, 'PROJWBS.wbs_short_name': 40, 'PROJWBS.wbs_name': 100, 'PROJECT.proj_short_name': 40 };
 
 /** Severity when a reference does not resolve. Unlisted = warning. */
 const REF_SEVERITY: Record<string, Severity> = {
@@ -111,6 +113,8 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
       for (const f of t.fields) {
         const v = r[f];
         if (v === '' || v == null || !kf.has(f)) continue;
+        const max = MAX_LEN[`${t.name}.${f}`];
+        if (max && v.length > max) c.add({ severity: 'error', code: 'FIELD_TOO_LONG', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name}.${f} is ${v.length} characters, P6 allows ${max}: "${v.slice(0, 50)}…".`, p6: `P6 stores at most ${max} characters here; depending on the database the import fails or the value is cut.` });
         const en = ENUMS[`${t.name}.${f}`];
         if (en) {
           if (t.name === 'TASKPRED' && f === 'pred_type' && /^PR_(FS|SS|FF|SF)\d$/.test(v)) {
@@ -216,6 +220,19 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
     if (r.status_code === 'TK_NotStart' && (as != null || ae != null)) c.add({ severity: 'warning', code: 'STATUS_MISMATCH', table: 'TASK', row, key: id, message: `Activity ${id} is Not Started but has actual dates.`, p6: 'P6 derives status from actual dates.' });
     const dd = parseP6Date(projById.get(r.proj_id)?.last_recalc_date);
     if (dd != null && ((as != null && as > dd) || (ae != null && ae > dd))) c.add({ severity: 'warning', code: 'ACTUAL_AFTER_DD', table: 'TASK', row, key: id, message: `Activity ${id} has actual dates after the data date.`, p6: 'P6 imports them; the schedule log reports actuals in the future.' });
+  }
+
+  // Remaining work planned before the data date (one finding per project)
+  for (const p of projects) {
+    const dd = parseP6Date(p.last_recalc_date);
+    if (dd == null) continue;
+    const mine = (T.TASK?.rows ?? []).filter((r) => r.proj_id === p.proj_id && r.task_type !== 'TT_WBS');
+    const early = mine.filter((r) => !r.act_start_date && (parseP6Date(r.early_start_date) ?? Infinity) < dd);
+    if (!early.length) continue;
+    const first = early.reduce((a, r) => (parseP6Date(r.early_start_date)! < parseP6Date(a.early_start_date)! ? r : a));
+    const ps = parseP6Date(p.plan_start_date);
+    const hint = !mine.some((r) => r.act_start_date) && ps != null && ps < dd ? ` No activity has progress, so the data date was probably meant to be the project start (${p.plan_start_date}).` : '';
+    c.add({ severity: 'warning', code: 'FORECAST_BEFORE_DD', table: 'TASK', key: first.task_code || first.task_id, field: 'early_start_date', message: `Project ${p.proj_short_name || p.proj_id}: data date is ${p.last_recalc_date}, but ${early.length} of ${mine.length} activities without an actual start are planned to start before it (earliest ${first.task_code || first.task_id} on ${first.early_start_date}).${hint}`, p6: 'P6 schedules remaining work from the data date: on F9 these activities move to the data date or later.' });
   }
 
   // Relationships

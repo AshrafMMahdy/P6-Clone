@@ -56,12 +56,28 @@ const cases: [string, Record<string, string[]>][] = [
   ['STATUS_MISMATCH', { TASK: ['task_id\tproj_id\twbs_id\tclndr_id\ttask_code\ttask_type\tstatus_code\ttarget_drtn_hr_cnt\tact_start_date\tact_end_date', '100\t1\t11\t1\tA1\tTT_Task\tTK_Complete\t8\t\t'] }],
   ['ACTUAL_AFTER_DD', { TASK: ['task_id\tproj_id\twbs_id\tclndr_id\ttask_code\ttask_type\tstatus_code\ttarget_drtn_hr_cnt\tact_start_date\tact_end_date', '100\t1\t11\t1\tA1\tTT_Task\tTK_Active\t8\t2024-03-01 08:00\t'] }],
   ['MILESTONE_DURATION', { TASK: ['task_id\tproj_id\twbs_id\tclndr_id\ttask_code\ttask_type\tstatus_code\ttarget_drtn_hr_cnt\tact_start_date\tact_end_date', '100\t1\t11\t1\tA1\tTT_Mile\tTK_NotStart\t8\t\t'] }],
+  ['FIELD_TOO_LONG', { TASK: ['task_id\tproj_id\twbs_id\tclndr_id\ttask_code\ttask_name\ttask_type\tstatus_code\ttarget_drtn_hr_cnt', `100\t1\t11\t1\tA1\t${'x'.repeat(121)}\tTT_Task\tTK_NotStart\t8`] }],
   ['NO_PLAN_START', { PROJECT: ['proj_id\tproj_short_name\tplan_start_date\tlast_recalc_date\tclndr_id', '1\tP1\t\t2024-01-01 08:00\t1'] }],
 ];
 
 for (const [code, over] of cases) {
   test(`rule ${code}`, () => assert.ok(codes(base(over)).includes(code), codes(base(over)).join(',')));
 }
+
+test('FORECAST_BEFORE_DD: one finding per project, with the data-date hint when nothing has progress', () => {
+  const F = 'task_id\tproj_id\twbs_id\tclndr_id\ttask_code\ttask_type\tstatus_code\ttarget_drtn_hr_cnt\tact_start_date\tearly_start_date';
+  const proj = { PROJECT: ['proj_id\tproj_short_name\tplan_start_date\tlast_recalc_date\tclndr_id', '1\tP1\t2024-01-01 08:00\t2024-03-01 08:00\t1'] };
+  const find = (task: string[]) => { const r = parseXer(xer(base({ ...proj, TASK: [F, ...task] }))); return validateXer(r.db, r.findings).filter((f) => f.code === 'FORECAST_BEFORE_DD'); };
+  const f = find(['100\t1\t11\t1\tA1\tTT_Task\tTK_NotStart\t8\t\t2024-01-01 08:00', '101\t1\t11\t1\tA2\tTT_Task\tTK_NotStart\t8\t\t2024-01-02 08:00']);
+  assert.equal(f.length, 1);
+  assert.match(f[0].message, /2 of 2 activities .* \(earliest A1 on 2024-01-01 08:00\)\. No activity has progress/);
+  // started work is fine, and remaining work on or after the data date is fine
+  assert.equal(find(['100\t1\t11\t1\tA1\tTT_Task\tTK_Active\t8\t2024-01-01 08:00\t2024-01-01 08:00', '101\t1\t11\t1\tA2\tTT_Task\tTK_NotStart\t8\t\t2024-03-01 08:00']).length, 0);
+  // progress elsewhere: no hint
+  const g = find(['100\t1\t11\t1\tA1\tTT_Task\tTK_Active\t8\t2024-01-01 08:00\t2024-01-01 08:00', '101\t1\t11\t1\tA2\tTT_Task\tTK_NotStart\t8\t\t2024-02-01 08:00']);
+  assert.equal(g.length, 1);
+  assert.doesNotMatch(g[0].message, /No activity has progress/);
+});
 
 test('misspelled key gets a suggestion', () => {
   const r = parseXer(xer(base(cases[0][1])));

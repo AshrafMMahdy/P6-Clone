@@ -85,6 +85,7 @@
   "error:BAD_NUMBER": 26,
   "error:DANGLING_REF": 23,
   "error:EMPTY_TASK_CODE": 1,
+  "error:FIELD_TOO_LONG": 6,
   "fatal:DUP_KEY": 3,
   "info:CAL_HOURS_MISMATCH": 2,
   "info:MISSING_FIELD": 7,
@@ -137,11 +138,13 @@
   "error:CAL_PARSE": 4,
   "info:MISSING_FIELD": 4,
   "warning:FIELD_UNKNOWN": 5,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:HEADER_DATE": 1
  },
  "PDC-PRG-001_Polaris_DC-1_Baseline_Programme_Rev0.xer": {
   "info:MISSING_FIELD": 2,
-  "warning:FIELD_UNKNOWN": 11
+  "warning:FIELD_UNKNOWN": 11,
+  "warning:FORECAST_BEFORE_DD": 1
  },
  "PDC-PRG-001_RevA_Polaris_DC1_Baseline.xer": {
   "error:BAD_ENUM": 1,
@@ -153,8 +156,10 @@
  "PDC-XER-001_Polaris_DC1_Baseline.xer": {
   "error:BAD_ENUM": 6,
   "error:CAL_PARSE": 2,
+  "error:FIELD_TOO_LONG": 6,
   "info:MISSING_FIELD": 9,
-  "warning:FIELD_UNKNOWN": 1
+  "warning:FIELD_UNKNOWN": 1,
+  "warning:FORECAST_BEFORE_DD": 1
  },
  "PDC1_Baseline_Rev0.xer": {
   "error:DATA_AFTER_END": 1,
@@ -174,6 +179,7 @@
   "warning:VERSION_UNKNOWN": 1
  },
  "Polaris_DC-1_Baseline_CPM_NordBuild.xer": {
+  "error:FIELD_TOO_LONG": 5,
   "fatal:MISSING_KEY_FIELD": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 11,
@@ -195,11 +201,14 @@
  },
  "Polaris_DC-1_Baseline_Programme.xer": {
   "error:CAL_PARSE": 1,
+  "error:FIELD_TOO_LONG": 6,
   "info:MISSING_FIELD": 2,
   "warning:FIELD_UNKNOWN": 2,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1
  },
  "Polaris_DC-1_Baseline_Programme_RevA.xer": {
+  "error:FIELD_TOO_LONG": 1,
   "fatal:MISSING_KEY_FIELD": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 11,
@@ -224,6 +233,7 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 2,
   "warning:FIELD_UNKNOWN": 15,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1
  },
  "Polaris_DC1_Baseline_CPM.xer": {
@@ -232,7 +242,8 @@
   "info:MISSING_FIELD": 7,
   "warning:CAL_EMPTY": 1,
   "warning:DATE_FORMAT": 2,
-  "warning:FIELD_UNKNOWN": 5
+  "warning:FIELD_UNKNOWN": 5,
+  "warning:FORECAST_BEFORE_DD": 1
  },
  "Polaris_DC1_Baseline_Rev0.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
@@ -272,6 +283,7 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 16,
   "warning:FIELD_UNKNOWN": 8,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -282,6 +294,7 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 15,
   "warning:FIELD_UNKNOWN": 8,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -292,6 +305,7 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 16,
   "warning:FIELD_UNKNOWN": 8,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -355,6 +369,7 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 12,
   "warning:FIELD_UNKNOWN": 4,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -377,6 +392,7 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 4,
   "warning:FIELD_UNKNOWN": 20,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:NO_END": 1
  },
  "tower_a_schedule.xer": {
@@ -386,6 +402,7 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 15,
   "warning:FIELD_UNKNOWN": 8,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -394,6 +411,7 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 11,
   "warning:FIELD_UNKNOWN": 4,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  }
