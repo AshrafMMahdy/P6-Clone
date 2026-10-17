@@ -46,7 +46,7 @@ const USAGE = `p6clone <command> [options]
   query    <file.xer> summary|find|activity <ID>|wbs [code]|critical|health|resources [ID] [filters] [--json]
            find filters: --text --status not_started|in_progress|completed --critical --not-critical --wbs
                          --resource --starts-after --starts-before --finishes-after --finishes-before
-                         --max-float --min-float --milestones --sort start|finish|total_float|duration --limit N
+                         --code "[TYPE=]value" --max-float --min-float --milestones --sort start|finish|total_float|duration --limit N
   review   <file.xer> [--json]                         Schedule quality review. Exit 0 pass, 1 warnings, 3 failures
   validate <file.xer> [--json]                       P6-style import diagnostics. Exit 0 ok/warnings, 1 errors, 2 fatal
   schedule <file.xer> [--data-date YYYY-MM-DD] [--out out.xer] [--version 19.12] [--json]
@@ -172,7 +172,7 @@ async function main(): Promise<number> {
         : {
           text: opt('text'), status: opt('status'), critical: flag('critical') ? true : flag('not-critical') ? false : undefined, wbs: opt('wbs'), resource: opt('resource'),
           starts_after: opt('starts-after'), starts_before: opt('starts-before'), finishes_after: opt('finishes-after'), finishes_before: opt('finishes-before'),
-          max_total_float_days: n('max-float'), min_total_float_days: n('min-float'), milestones_only: flag('milestones') || undefined, sort: opt('sort'), limit: n('limit'),
+          max_total_float_days: n('max-float'), min_total_float_days: n('min-float'), milestones_only: flag('milestones') || undefined, activity_code: opt('code'), sort: opt('sort'), limit: n('limit'),
         };
       const projIds = opt('project') ? (db.tables.PROJECT?.rows ?? []).filter((p) => p.proj_short_name === opt('project')).map((p) => p.proj_id) : [];
       const res = runTool(tool, qargs, db, makeCtx(db, { hoursPerDay: hpd() }), projIds, hpd());

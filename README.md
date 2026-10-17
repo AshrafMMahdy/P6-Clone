@@ -78,7 +78,7 @@ node cli/p6clone.ts review tower.xer --json
 |---|---|---|
 | `new --id --name --start --out [--version]` | Empty project: WBS root, default calendar, P6 schedule options | 0 |
 | `edit <xer> --ops <file.json \| -> --out <xer> [--schedule] [--data-date] [--hours-per-day 8] [--json]` | Applies operations as **one transaction**; `--schedule` runs F9 after | 0 ok, 65 an operation failed (nothing written) |
-| `query <xer> summary \| find \| activity <ID> \| wbs [code] \| critical \| health \| resources [ID] [--json]` | Read-only lookups (`find` filters: `--text --status --critical --not-critical --wbs --resource --starts-after --starts-before --finishes-after --finishes-before --max-float --min-float --milestones --sort --limit`) | 0, 66 not found |
+| `query <xer> summary \| find \| activity <ID> \| wbs [code] \| critical \| health \| resources [ID] [--json]` | Read-only lookups (`find` filters: `--text --status --critical --not-critical --wbs --resource --starts-after --starts-before --finishes-after --finishes-before --code [TYPE=]value --max-float --min-float --milestones --sort --limit`; `activity` includes activity codes and UDFs) | 0, 66 not found |
 | `review <xer> [--json]` | Planning-reviewer checks (DCMA-style thresholds) graded pass / warn / fail | 0 pass, 1 warnings, 3 failures |
 | `validate <xer> [--json]` | What real P6 would do on import, plus saved dates P6 would change on F9 | 0 imports, 1 P6 would fail or drop data, 2 P6 rejects |
 | `schedule`, `progress`, `level`, `export`, `diff` | F9, Update Progress, Level Resources, write XER/XML, compare two files | |

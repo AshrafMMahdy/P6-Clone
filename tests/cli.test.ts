@@ -103,3 +103,13 @@ test('unknown command and missing file are reported', () => {
   assert.equal(run('--help').status, 0);
   assert.match(run('query', 'no-such-file.xer', 'summary').stderr, /Cannot read no-such-file\.xer: no such file/);
 });
+
+test('query shows activity codes and UDFs and finds by code', () => {
+  const f = join(SAMPLES_DIR, 'el ezz warehouse.xer');
+  const a = JSON.parse(run('query', f, 'activity', 'A160', '--json').stdout);
+  assert.deepEqual(a.activity_codes, { 'TYPE OF WORK': 'civil - civil works' });
+  assert.deepEqual(a.udfs, { '(New)': '1000' });
+  const found = JSON.parse(run('query', f, 'find', '--code', 'TYPE OF WORK=civil', '--limit', '100', '--json').stdout);
+  assert.equal(found.total_matches, 8);
+  assert.ok(found.activities.some((x: { id: string }) => x.id === 'A160'));
+});

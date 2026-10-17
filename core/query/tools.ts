@@ -25,10 +25,11 @@ export const TOOLS: ToolDef[] = [
     finishes_after: { type: 'string', description: 'YYYY-MM-DD' }, finishes_before: { type: 'string', description: 'YYYY-MM-DD' },
     max_total_float_days: { type: 'number' }, min_total_float_days: { type: 'number' },
     milestones_only: { type: 'boolean' },
+    activity_code: { type: 'string', description: 'Activity code value, optionally with its type: "civil" or "TYPE OF WORK=civil" (code value or description)' },
     sort: { type: 'string', enum: ['start', 'finish', 'total_float', 'duration'], description: 'Default: start' },
     limit: { type: 'number', description: 'Default 25, at most 100' },
   } } },
-  { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type and lag), resource assignments, notes.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
+  { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type and lag), resource assignments, activity codes, user defined fields (UDFs), notes.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
   { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges. Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2' } } } },
   { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: {} } },
@@ -84,6 +85,14 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         const withR = new Set(rows(db, 'TASKRSRC').filter((a) => ids.has(a.rsrc_id)).map((a) => a.task_id));
         list = list.filter((t) => withR.has(t.task_id));
       }
+      if (args.activity_code) {
+        const raw = String(args.activity_code), eq = raw.indexOf('=');
+        const [ty, val] = (eq >= 0 ? [raw.slice(0, eq), raw.slice(eq + 1)] : ['', raw]).map((s) => s.trim().toLowerCase());
+        const types = new Set(rows(db, 'ACTVTYPE').filter((x) => !ty || x.actv_code_type.toLowerCase() === ty).map((x) => x.actv_code_type_id));
+        const codes = new Set(rows(db, 'ACTVCODE').filter((c) => types.has(c.actv_code_type_id) && (c.short_name.toLowerCase() === val || (c.actv_code_name ?? '').toLowerCase() === val)).map((c) => c.actv_code_id));
+        const withC = new Set(rows(db, 'TASKACTV').filter((a) => codes.has(a.actv_code_id)).map((a) => a.task_id));
+        list = list.filter((t) => withC.has(t.task_id));
+      }
       const day = (s?: string) => (s ? parseP6Date(s) : null);
       if (args.starts_after) list = list.filter((t) => (day(start(t)) ?? -Infinity) >= day(args.starts_after)!);
       if (args.starts_before) list = list.filter((t) => (day(start(t)) ?? Infinity) <= day(args.starts_before)! + 1439);
@@ -105,6 +114,9 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const rel = (r: Row, other: string) => { const o = byId.get(other); return { id: o?.task_code ?? other, name: o?.task_name ?? '(outside the open projects)', type: r.pred_type.replace('PR_', ''), lag_days: days(r.lag_hr_cnt, hpd), other_start: d(o ? start(o) : ''), other_finish: d(o ? finish(o) : '') }; };
       const bl = ctx.baseline.get(`${t.task_code}|${t.proj_id}`);
       const cal = rows(db, 'CALENDAR').find((c) => c.clndr_id === t.clndr_id);
+      const codes = new Map(rows(db, 'ACTVCODE').map((c) => [c.actv_code_id, c])), codeTypes = new Map(rows(db, 'ACTVTYPE').map((c) => [c.actv_code_type_id, c.actv_code_type]));
+      const udfTypes = new Map(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'TASK').map((u) => [u.udf_type_id, u.udf_type_label]));
+      const udfCodes = new Map(rows(db, 'UDFCODE').map((c) => [c.udf_code_id, c.short_name]));
       return {
         ...brief(t),
         early_start: d(t.early_start_date), early_finish: d(t.early_end_date), late_start: d(t.late_start_date), late_finish: d(t.late_end_date),
@@ -115,6 +127,12 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         predecessors: (ctx.predsOf.get(t.task_id) ?? []).slice(0, 60).map((r) => rel(r, r.pred_task_id)),
         successors: (ctx.succsOf.get(t.task_id) ?? []).slice(0, 60).map((r) => rel(r, r.task_id)),
         resources: rows(db, 'TASKRSRC').filter((a) => a.task_id === t.task_id).slice(0, 40).map((a) => ({ resource: ctx.rsrc.get(a.rsrc_id)?.rsrc_short_name ?? a.rsrc_id, name: ctx.rsrc.get(a.rsrc_id)?.rsrc_name ?? '', budgeted_units: Number(a.target_qty || 0), remaining_units: Number(a.remain_qty || 0), units_per_day: Math.round(Number(a.remain_qty_per_hr || a.target_qty_per_hr || 0) * hpd * 100) / 100, budgeted_cost: Number(a.target_cost || 0) })),
+        activity_codes: Object.fromEntries(rows(db, 'TASKACTV').filter((a) => a.task_id === t.task_id).map((a) => {
+          const c = codes.get(a.actv_code_id);
+          return [codeTypes.get(a.actv_code_type_id || c?.actv_code_type_id || '') ?? a.actv_code_type_id, c ? [c.short_name, c.actv_code_name].filter(Boolean).join(' - ') : a.actv_code_id];
+        })),
+        udfs: Object.fromEntries(rows(db, 'UDFVALUE').filter((v) => v.fk_id === t.task_id && udfTypes.has(v.udf_type_id))
+          .map((v) => [udfTypes.get(v.udf_type_id), v.udf_text || (v.udf_date ? d(v.udf_date) : '') || (v.udf_code_id ? udfCodes.get(v.udf_code_id) ?? v.udf_code_id : '') || v.udf_number || ''])),
         notes: rows(db, 'TASKMEMO').filter((m) => m.task_id === t.task_id).map((m) => (m.task_memo ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600)).filter(Boolean),
       };
     }
