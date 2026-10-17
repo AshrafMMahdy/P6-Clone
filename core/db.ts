@@ -7,6 +7,27 @@ export function emptyDb(): Db {
   return { tables: {} };
 }
 
+/** One column's sharing state in a ValuePool. */
+export interface PoolColumn { n: number; hits: number; share: boolean }
+const WINDOW = 512; // values of a column looked at before deciding whether to share its values
+
+/** Loading a file: values repeated in a column (dates, flags, codes, ids) become one shared string instead of a copy
+ *  per row. Columns of mostly distinct values (names, GUIDs) stop sharing after their first WINDOW values, as a pool
+ *  entry each would cost more than it saves. `copy` makes the string that is kept (e.g. one that is not a slice). */
+export class ValuePool {
+  private pool = new Map<string, string>();
+  private copy: (s: string) => string;
+  constructor(copy = (s: string) => s) { this.copy = copy; }
+  column(): PoolColumn { return { n: 0, hits: 0, share: true }; }
+  get(c: PoolColumn, v: string): string {
+    if (!c.share) return this.copy(v);
+    const hit = this.pool.get(v);
+    if (hit !== undefined) { v = hit; c.hits++; } else this.pool.set((v = this.copy(v)), v);
+    if (++c.n === WINDOW && c.hits < WINDOW / 4) c.share = false;
+    return v;
+  }
+}
+
 export function table(db: Db, name: string): Table {
   return (db.tables[name] ??= { name, fields: [], rows: [] });
 }

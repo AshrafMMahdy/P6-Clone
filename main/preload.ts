@@ -4,26 +4,25 @@ import type { AiConfig, AiPublicConfig, ChatReply, ChatRequest } from './ai.ts';
 export interface OpenedFile { path: string; name: string; bytes: Uint8Array }
 export interface Filter { name: string; extensions: string[] }
 
-// The database crosses from the main process in batches (one message between processes has a size cap); saves are
-// queued so two never interleave.
-const SAVE_BATCH = 32 * 1024 * 1024;
+// The database crosses between the processes in batches of lines (one message has a size cap, and everything passed
+// to or from the window is copied: a batch at a time, never the whole database). Saves are queued so two never
+// interleave.
 let saving: Promise<boolean> = Promise.resolve(true);
-async function loadDb(): Promise<string[] | null> {
-  const n: number | null = await ipcRenderer.invoke('db:loadBegin');
-  if (n == null) return null;
-  const out: string[] = [];
-  for (let i = 0; i < n; i++) for (const l of (await ipcRenderer.invoke('db:loadBatch', i)) as string[]) out.push(l);
-  return out;
+/** Hands the database file to onLines batch by batch. False when there is no database file. */
+async function loadDb(onLines: (lines: string[]) => void): Promise<boolean> {
+  if (!(await ipcRenderer.invoke('db:loadBegin'))) return false;
+  for (let b: string[] | null; (b = await ipcRenderer.invoke('db:loadBatch')) !== null;) onLines(b);
+  return true;
 }
-async function writeDb(lines: string[]): Promise<boolean> {
+/** Writes the batches next() gives until it gives null; false from next() abandons the save (the old file stays). */
+async function writeDb(next: () => string[] | null | false): Promise<boolean> {
   await ipcRenderer.invoke('db:saveBegin');
-  let batch: string[] = [], size = 0;
-  for (const l of lines) {
-    batch.push(l); size += l.length;
-    if (size >= SAVE_BATCH) { await ipcRenderer.invoke('db:saveLines', batch); batch = []; size = 0; }
+  for (;;) {
+    const b = next();
+    if (b === false) { await ipcRenderer.invoke('db:saveAbort'); return false; }
+    if (b === null) return ipcRenderer.invoke('db:saveEnd');
+    await ipcRenderer.invoke('db:saveLines', b);
   }
-  if (batch.length) await ipcRenderer.invoke('db:saveLines', batch);
-  return ipcRenderer.invoke('db:saveEnd');
 }
 
 const api = {
@@ -31,7 +30,7 @@ const api = {
   openFile: (filters: Filter[], title?: string): Promise<OpenedFile | null> => ipcRenderer.invoke('file:open', filters, title),
   saveFile: (name: string, bytes: Uint8Array, filters: Filter[]): Promise<string | null> => ipcRenderer.invoke('file:save', name, bytes, filters),
   loadDb,
-  saveDb: (lines: string[]): Promise<boolean> => (saving = saving.then(() => writeDb(lines), () => writeDb(lines))),
+  saveDb: (next: () => string[] | null | false): Promise<boolean> => (saving = saving.then(() => writeDb(next), () => writeDb(next))),
   print: (landscape: boolean): Promise<boolean> => ipcRenderer.invoke('print', landscape),
   printPreview: (landscape: boolean): Promise<boolean> => ipcRenderer.invoke('print:preview', landscape),
   pdf: (name: string, landscape: boolean): Promise<string | null> => ipcRenderer.invoke('pdf', name, landscape),

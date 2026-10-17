@@ -15,10 +15,28 @@ export function parseP6Date(s: string | undefined): number | null {
 
 const p2 = (n: number) => String(n).padStart(2, '0');
 
+/** Memoised: a schedule writes the same dates many times, and a built string is a tree of its pieces (~5x its size),
+ *  so each date is built once, kept as one flat string and shared. */
+export function memo<K>(build: (k: K) => string, max = 100000): (k: K) => string {
+  const m = new Map<K, string>();
+  return (k) => {
+    let s = m.get(k);
+    if (s === undefined) {
+      if (m.size >= max) m.clear();
+      m.set(k, (s = JSON.parse(JSON.stringify(build(k))) as string)); // a flat copy
+    }
+    return s;
+  };
+}
+
+const formatMinute = memo((t: number) => {
+  const d = new Date(t * 60000);
+  return `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
+});
+
 export function formatP6Date(t: number | null | undefined): string {
   if (t == null || !Number.isFinite(t)) return '';
-  const d = new Date(Math.round(t) * 60000);
-  return `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
+  return formatMinute(Math.round(t));
 }
 
 /** Day part only, yyyy-mm-dd. */

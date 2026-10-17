@@ -109,13 +109,25 @@ function clean(v: string | undefined): string {
   return v == null ? '' : v.replace(/\r\n|[\t\n]/g, ' ');
 }
 
+const CHUNK = 1 << 22; // characters of text encoded at a time
+const NON_ASCII = /[^\x00-\x7f]/;
+
 export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
   const sel = selectRows(db, opts.projIds);
   const cur = opts.currency ?? db.tables.CURRTYPE?.rows[0]?.curr_short_name ?? 'USD';
-  const lines: string[] = [[
+  // The text is built and encoded in chunks (a file can be larger than the longest possible string). The code page
+  // depends only on which non-ASCII characters occur, so those are collected on the way.
+  const chunks: string[] = [], chars = new Set<string>();
+  let part: string[] = [], size = 0;
+  const lines = { push(...ls: string[]) { for (const l of ls) {
+    if (NON_ASCII.test(l)) for (const ch of l) if (ch.charCodeAt(0) >= 0x80) chars.add(ch);
+    part.push(l); size += l.length + 2;
+    if (size >= CHUNK) { chunks.push(part.join('\r\n') + '\r\n'); part = []; size = 0; }
+  } } };
+  lines.push([
     'ERMHDR', opts.version, opts.exportDate ?? formatDay(Date.now() / 60000), 'Project',
     opts.user ?? 'admin', opts.userName ?? 'admin', opts.dbName ?? 'dbxDatabaseNoName', 'Project Management', cur,
-  ].join('\t')];
+  ].join('\t'));
   const names = [...sel.keys()].filter((n) => !n.startsWith('_'));
   const vo = tableOrderFor(opts.version);
   const order = [...vo.filter((n) => names.includes(n)), ...names.filter((n) => !vo.includes(n)).sort()];
@@ -133,6 +145,11 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
     for (const r of rs) lines.push('%R\t' + fields.map((f) => clean(r[f])).join('\t'));
   }
   lines.push('%E');
-  const text = lines.join('\r\n') + '\r\n';
-  return encodeText(text, !opts.encoding || opts.encoding === 'auto' ? chooseEncoding(text) : opts.encoding);
+  if (part.length) chunks.push(part.join('\r\n') + '\r\n');
+  const enc = !opts.encoding || opts.encoding === 'auto' ? chooseEncoding([...chars].join('')) : opts.encoding;
+  const bytes = chunks.map((c, i) => { chunks[i] = ''; return encodeText(c, i && enc === 'utf-8-bom' ? 'utf-8' : enc); });
+  const out = new Uint8Array(bytes.reduce((n, b) => n + b.length, 0));
+  let at = 0;
+  for (let i = 0; i < bytes.length; i++) { out.set(bytes[i], at); at += bytes[i].length; bytes[i] = out.subarray(0, 0); }
+  return out;
 }

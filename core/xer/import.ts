@@ -118,7 +118,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
   const udfTable = new Map(rows(src, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
   const targetCache = new Map<string, string | undefined>(); // table|field -> referenced table (millions of lookups on big files)
   const remap = (t: string, r: Row): Row => {
-    const out: Row = {};
+    const out: Row = { ...rawOf(r) }; // a copy keeps the source row's shape (built key by key, a 60-field row is a dictionary 6x the size)
     const k = KEYS[t];
     for (const f in r) {
       const v = r[f];

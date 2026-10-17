@@ -9,13 +9,13 @@
 //  - Long work can run as a job that the agent checks with job_status.
 //  - With a root folder, every path is confined to it (symlinks resolved).
 //  - Every failure is a ToolError with a code and a next step.
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync, writeFileSync, writeSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { getHeapStatistics } from 'node:v8';
-import { record, rollback, type Journal } from '../core/journal.ts';
-import { dbToLines, linesToDb } from '../core/db-file.ts';
+import { ABSENT, record, rollback, type Journal } from '../core/journal.ts';
+import { dbLines, DbReader } from '../core/db-file.ts';
 import type { Db } from '../core/db.ts';
 import type { Format } from '../renderer/io.ts';
 
@@ -39,7 +39,7 @@ export const config: Config = {
   maxHandles: num(process.env.P6CLONE_MAX_HANDLES, 8),
   budgetBytes: num(process.env.P6CLONE_MEM_BUDGET_MB, 3072) * 1048576,
   idleMinutes: num(process.env.P6CLONE_IDLE_MINUTES, 30),
-  memFactor: num(process.env.P6CLONE_MEM_FACTOR, 8), // memory per byte of file, until measured after opening
+  memFactor: num(process.env.P6CLONE_MEM_FACTOR, 3), // memory per byte of file: a parsed XER takes ~2x, plus undo and schedule work
   busyWaitMs: num(process.env.P6CLONE_BUSY_WAIT_MS, 20000),
   softTimeoutMs: num(process.env.P6CLONE_SOFT_TIMEOUT_MS, 25000),
   maxResponseChars: num(process.env.P6CLONE_MAX_RESPONSE_CHARS, 400000),
@@ -104,11 +104,27 @@ const mb = (b: number) => `${Math.round(b / 1048576)} MB`;
 export function evict(s: Session, reason: string): string {
   mkdirSync(recoveryDir(), { recursive: true });
   const file = join(recoveryDir(), `${s.handle}.p6db.jsonl`);
-  writeFileSync(file, dbToLines(s.db, null).join('\n'));
+  // line by line: a big project's file is larger than the longest possible string
+  const fd = openSync(file, 'w');
+  try { for (const l of dbLines(s.db, null)) writeSync(fd, l + '\n'); } finally { closeSync(fd); }
   evicted.set(s.handle, { file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, at: Date.now(), reason, dirty: s.dirty });
   sessions.delete(s.handle);
   saveIndex();
   return file;
+}
+/** Read a recovery file in pieces (see evict). */
+function readDbFile(file: string) {
+  const r = new DbReader(), dec = new TextDecoder(), buf = new Uint8Array(1 << 24), fd = openSync(file, 'r');
+  let rest = '';
+  try {
+    for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) {
+      const ls = (rest + dec.decode(buf.subarray(0, n), { stream: true })).split('\n');
+      rest = ls.pop()!;
+      for (const l of ls) r.add(l);
+    }
+  } finally { closeSync(fd); }
+  r.add(rest + dec.decode());
+  return r.finish();
 }
 const indexFile = () => join(recoveryDir(), 'index.json');
 function saveIndex(): void { try { writeFileSync(indexFile(), JSON.stringify(Object.fromEntries(evicted))); } catch { /* best effort */ } }
@@ -124,7 +140,7 @@ export function getSession(h: unknown): Session {
   if (!e) fail('unknown_handle', handle ? `No open project with handle "${handle}".` : 'Give "handle".', 'Open the file again with open_file (or list_open to see the open handles). Handles from before a server restart come back only if they had been saved to recovery.');
   const bytes = Math.round(statSync(e!.file).size * 1.5) + 8 * 1048576;
   admit(bytes, handle);
-  const { db } = linesToDb(readFileSync(e!.file, 'utf8').split('\n'));
+  const { db } = readDbFile(e!.file);
   const back: Session = { handle, ownerKey: e!.ownerKey, db, path: e!.path, format: e!.format, hpd: e!.hpd, history: [], redo: new Map(), dirty: e!.dirty, lastUsed: Date.now(), bytes,
     notice: `This project had been moved out of memory (${e!.reason === 'idle' ? `idle for ${config.idleMinutes} minutes` : 'to make room'}) and was restored from ${e!.file}. Its undo history before that is gone; nothing else was lost.` };
   sessions.set(handle, back);
@@ -182,14 +198,18 @@ function revert(c: { j: Journal; after: Map<unknown[], unknown[]> }, later: Chan
   const added = new Set<unknown>();
   for (const [a, before] of c.j.arrays) { const b = new Set(before); for (const x of c.after.get(a) ?? []) if (!b.has(x)) added.add(x); }
   for (const L of later) {
-    for (const [o, keys] of c.j.fields) { const lk = L.j.fields.get(o); if (lk) for (const k of keys.keys()) if (lk.has(k)) fail('undo_conflict', `A later change ("${L.label}" by ${L.caller}) changed the same item.`, 'Undo that change first (with the owner key: any_caller), or make a correcting edit instead.'); }
+    for (const [o, keys] of c.j.fields) { const lk = L.j.fields.get(o); if (lk) for (let i = 0; i < keys.length; i += 2) if (lk.some((x, n) => n % 2 === 0 && x === keys[i])) fail('undo_conflict', `A later change ("${L.label}" by ${L.caller}) changed the same item.`, 'Undo that change first (with the owner key: any_caller), or make a correcting edit instead.'); }
     for (const o of L.j.fields.keys()) if (added.has(o)) fail('undo_conflict', `A later change ("${L.label}" by ${L.caller}) edited something this change created.`, 'Undo that change first (with the owner key: any_caller), or make a correcting edit instead.');
   }
   if (!later.length) { const j = rollback(c.j); return { j, after: new Map([...j.arrays.keys()].map((a) => [a, a.slice()])) }; }
   const back: Journal = { fields: new Map(), arrays: new Map() };
   for (const [o, keys] of c.j.fields) {
-    const m = new Map<PropertyKey, { had: boolean; old: unknown }>();
-    for (const [k, { had, old }] of keys) { m.set(k, { had: Object.prototype.hasOwnProperty.call(o, k), old: (o as Record<PropertyKey, unknown>)[k] }); if (had) (o as Record<PropertyKey, unknown>)[k] = old; else delete (o as Record<PropertyKey, unknown>)[k]; }
+    const m: unknown[] = [], r = o as Record<PropertyKey, unknown>;
+    for (let i = 0; i < keys.length; i += 2) {
+      const k = keys[i] as PropertyKey, old = keys[i + 1];
+      m.push(k, Object.prototype.hasOwnProperty.call(r, k) ? r[k] : ABSENT);
+      if (old !== ABSENT) r[k] = old; else delete r[k];
+    }
     back.fields.set(o, m);
   }
   const afterOut = new Map<unknown[], unknown[]>();
