@@ -8,8 +8,9 @@ import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { p6num, relationshipFloat } from '../../core/schedule/cpm.ts';
 import { durationPct } from '../../core/progress/update.ts';
 import { recalcAssignment, priceOf } from '../../core/resource/assign.ts';
+import { StepsTab, FeedbackTab, DocsTab, RisksTab } from './ActivityExtraTabs.tsx';
 
-const TABS: [string, string][] = [['general', 'General'], ['status', 'Status'], ['resources', 'Resources'], ['relationships', 'Relationships'], ['preds', 'Predecessors'], ['succs', 'Successors'], ['codes', 'Codes'], ['notebook', 'Notebook'], ['expenses', 'Expenses'], ['summary', 'Summary']];
+const TABS: [string, string][] = [['general', 'General'], ['status', 'Status'], ['resources', 'Resources'], ['relationships', 'Relationships'], ['preds', 'Predecessors'], ['succs', 'Successors'], ['codes', 'Codes'], ['notebook', 'Notebook'], ['steps', 'Steps'], ['feedback', 'Feedback'], ['docs', 'WPs & Docs'], ['expenses', 'Expenses'], ['risks', 'Risks'], ['summary', 'Summary']];
 
 export function updateTask(taskId: string, label: string, fn: (r: Row, db: ReturnType<typeof getDb>) => string | void): void {
   const t = rows(getDb(), 'TASK').find((x) => x.task_id === taskId);
@@ -56,6 +57,10 @@ function TabBody({ tab, t, ctx }: { tab: string; t: Row; ctx: Ctx }) {
     case 'codes': return <Codes t={t} ctx={ctx} />;
     case 'notebook': return <Notebook t={t} />;
     case 'expenses': return <Expenses t={t} ctx={ctx} />;
+    case 'steps': return <StepsTab t={t} />;
+    case 'feedback': return <FeedbackTab t={t} />;
+    case 'docs': return <DocsTab t={t} />;
+    case 'risks': return <RisksTab t={t} />;
     default: return <Summary t={t} ctx={ctx} />;
   }
 }

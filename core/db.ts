@@ -28,6 +28,7 @@ export const KEYS: Record<string, string> = {
   UDFTYPE: 'udf_type_id', UMEASURE: 'unit_id', WBSBUDG: 'wbs_budg_id', WBSMEMO: 'wbs_memo_id',
   WBSRSRC: 'wbsrsrc_id', SHIFT: 'shift_id', LOCATION: 'location_id', EPS: 'eps_id',
   ROLELIMIT: 'rolelim_id', NONWORK: 'nonwork_type_id', FINTMPL: 'fintmpl_id', RISKTYPE: 'risk_type_id',
+  DOCUMENT: 'doc_id', TASKDOC: 'taskdoc_id',
 };
 
 const KEY_TO_TABLE: Record<string, string> = Object.fromEntries(Object.entries(KEYS).map(([t, k]) => [k, t]));
