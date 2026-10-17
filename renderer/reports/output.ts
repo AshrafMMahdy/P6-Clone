@@ -34,8 +34,9 @@ ${r.rows.map((x) => `<tr${x.bold ? ' class="g"' : ''}>${x.cells.map((c, i) => `<
 </tbody></table>${r.text ? `<pre>${esc(r.text)}</pre>` : ''}</body></html>`;
 }
 
-/** P6's ASCII Text File output, as comma-separated values. */
-export const reportText = (r: Report) => reportCsv(r);
+/** P6's ASCII Text File output, as comma-separated values (with a byte-order mark, so Excel opens Arabic and other
+ *  non-Latin text correctly). */
+export const reportText = (r: Report) => '﻿' + reportCsv(r);
 
 /** One worksheet: title, subtitle, column titles, rows (numbers as numbers). */
 export async function reportXlsx(r: Report): Promise<Uint8Array> {

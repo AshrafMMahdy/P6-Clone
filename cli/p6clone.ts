@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { detectFormat, importChecks, readRaw, type Format } from '../renderer/io.ts';
 import type { TextEncodingName } from '../core/encoding.ts';
+import { findUnicodeFont } from '../renderer/print/system-font.ts';
 import { writeOut } from './commands.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { writeXer } from '../core/xer/write.ts';
@@ -58,7 +59,8 @@ const USAGE = `p6clone <command> [options]
   export   <file.xer> --version <v> --out <path> [--format xer|xml]
   print    <file.xer> --out schedule.pdf|.html [--settings json|file.json] [--project ID] [--filter F] [--group wbs|none]
            [--sort S] [--paper A3] [--portrait] [--content both|table|gantt] [--columns task_code,task_name,...]
-           [--links] [--no-legend]   Prints the Activities layout like P6 (all pages). Settings: see README
+           [--links] [--no-legend] [--font file.ttf]   Prints the Activities layout like P6 (all pages). Arabic and
+           other scripts use a TrueType font: --font, P6CLONE_FONT, or a system font (DejaVu Sans, Noto, Arial...)
   export-excel <file.xer> --out schedule.xlsx [--project ID]   P6-style spreadsheet (TASK, TASKPRED, RSRC, TASKRSRC)
   import-excel <file.xer> <sheet.xlsx> [--project ID] --out out.xer [--schedule] [--dry-run] [--json]
            Updates the project from the spreadsheet (one transaction). Exit 65 if a row is refused
@@ -198,7 +200,7 @@ async function main(): Promise<number> {
       const { printPages } = await import('../renderer/print/schedule.ts');
       const { pagesToPdf, pagesToHtml } = await import('../renderer/print/output.ts');
       const r = printPages(db, { projIds: pickProjects(db), setup: settings, filter: opt('filter'), groupBy: opt('group'), sortBy: opt('sort'), prefs: { hoursPerDay: hpd(), dateFormat: 'dd-MMM-yy', showTime: false, durationDecimals: 0 } });
-      writeFileSync(out, /\.html?$/i.test(out) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title));
+      writeFileSync(out, /\.html?$/i.test(out) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title, { font: (cs) => findUnicodeFont(cs, opt('font')) }));
       if (r.unknownColumns.length) console.error(`Unknown column(s) left out: ${r.unknownColumns.join(', ')}`);
       if (flag('json')) console.log(JSON.stringify({ out, pages: r.pages.length, activities: r.activities, unknown_columns: r.unknownColumns }));
       else console.log(`Wrote ${out} (${r.pages.length} page${r.pages.length > 1 ? 's' : ''}, ${r.activities} activities)`);
@@ -268,7 +270,7 @@ async function main(): Promise<number> {
         return 0;
       }
       const ext = (/\.(\w+)$/.exec(out)?.[1] ?? '').toLowerCase();
-      if (ext === 'pdf') { let settings = {}; const src = opt('settings'); if (src) settings = JSON.parse(src.trim().startsWith('{') ? src : readFileSync(src, 'utf8')); const pages = reportPages(db, ids, report, settings, prefs, name); writeFileSync(out, await pagesToPdf(pages, report.title)); console.log(`Wrote ${out} (${pages.length} page${pages.length > 1 ? 's' : ''}, ${report.rows.length} rows)`); return 0; }
+      if (ext === 'pdf') { let settings = {}; const src = opt('settings'); if (src) settings = JSON.parse(src.trim().startsWith('{') ? src : readFileSync(src, 'utf8')); const pages = reportPages(db, ids, report, settings, prefs, name); writeFileSync(out, await pagesToPdf(pages, report.title, { font: (cs) => findUnicodeFont(cs, opt('font')) })); console.log(`Wrote ${out} (${pages.length} page${pages.length > 1 ? 's' : ''}, ${report.rows.length} rows)`); return 0; }
       if (ext === 'html' || ext === 'htm') writeFileSync(out, reportHtml(report, nowStamp()));
       else if (ext === 'csv' || ext === 'txt') writeFileSync(out, reportText(report));
       else if (ext === 'xlsx') writeFileSync(out, await reportXlsx(report));

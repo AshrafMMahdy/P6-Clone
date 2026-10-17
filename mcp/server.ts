@@ -20,6 +20,7 @@ import { record, rollback, type Journal } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { worst, type Finding } from '../core/findings.ts';
 import type { Db } from '../core/db.ts';
+import { findUnicodeFont } from '../renderer/print/system-font.ts';
 import { compareSchedules } from '../core/diff.ts';
 import { printPages, printableColumns } from '../renderer/print/schedule.ts';
 import { pagesToHtml, pagesToPdf } from '../renderer/print/output.ts';
@@ -99,7 +100,7 @@ async function callAsync(name: string, a: Record<string, any>): Promise<unknown>
       const s = get(a.handle);
       const path = resolve(String(a.path ?? ''));
       const r = printPages(s.db, { projIds: projectIds(s.db, a.project), setup: a.settings ?? {}, filter: a.filter, groupBy: a.group_by, sortBy: a.sort_by, prefs: { hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy', showTime: false, durationDecimals: 0 } });
-      writeFileSync(path, /.html?$/i.test(path) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title));
+      writeFileSync(path, /.html?$/i.test(path) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path) }));
       return { saved: path, pages: r.pages.length, activities: r.activities, ...(r.unknownColumns.length ? { unknown_columns: r.unknownColumns, printable_columns: printableColumns(s.db).map((c) => c.id) } : {}) };
     }
     case 'export_excel': {
@@ -147,7 +148,7 @@ async function callAsync(name: string, a: Record<string, any>): Promise<unknown>
       if (!a.path) { const max = Math.min(2000, Number(a.max_rows) || 200); return { report: name, title: report.title, subtitle: report.subtitle, columns: report.columns, total_rows: report.rows.length, rows: report.rows.slice(0, max).map((r) => ({ cells: r.cells, ...(r.bold ? { group: true, level: r.level ?? 0 } : r.level ? { level: r.level } : {}) })), truncated: report.rows.length > max }; }
       const path = resolve(String(a.path));
       const ext = (/\.(\w+)$/.exec(path)?.[1] ?? '').toLowerCase();
-      if (ext === 'pdf') { const pages = reportPages(s.db, ids, report, a.settings ?? {}, prefs, name); writeFileSync(path, await pagesToPdf(pages, report.title)); return { saved: path, pages: pages.length, rows: report.rows.length }; }
+      if (ext === 'pdf') { const pages = reportPages(s.db, ids, report, a.settings ?? {}, prefs, name); writeFileSync(path, await pagesToPdf(pages, report.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path) })); return { saved: path, pages: pages.length, rows: report.rows.length }; }
       if (ext === 'html' || ext === 'htm') writeFileSync(path, reportHtml(report, nowStamp()));
       else if (ext === 'csv' || ext === 'txt') writeFileSync(path, reportText(report));
       else if (ext === 'xlsx') writeFileSync(path, await reportXlsx(report));
