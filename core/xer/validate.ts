@@ -6,8 +6,6 @@ import { ENUMS, fieldType, fieldsFor, knownFields, knownTables } from './schema.
 
 const KNOWN_VERSION = /^(3\.5|4\.[01]|5\.0(\.\d+)?|6\.[0-2](\.\d+)?|7\.0(\.\d+)?|8\.[1-4](\.\d+)?|1[5-9]\.\d+|2[0-6]\.\d+)$/;
 const PER_KIND_CAP = 5;
-/** Column sizes in the P6 database (characters). */
-const MAX_LEN: Record<string, number> = { 'TASK.task_code': 40, 'TASK.task_name': 120, 'PROJWBS.wbs_short_name': 40, 'PROJWBS.wbs_name': 100, 'PROJECT.proj_short_name': 40 };
 
 /** Severity when a reference does not resolve. Unlisted = warning. */
 const REF_SEVERITY: Record<string, Severity> = {
@@ -113,8 +111,6 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
       for (const f of t.fields) {
         const v = r[f];
         if (v === '' || v == null || !kf.has(f)) continue;
-        const max = MAX_LEN[];
-        if (max && v.length > max) c.add({ severity: 'error', code: 'FIELD_TOO_LONG', table: t.name, row, field: f, key: key ? r[key] : undefined, message: , p6:  });
         const en = ENUMS[`${t.name}.${f}`];
         if (en) {
           if (t.name === 'TASKPRED' && f === 'pred_type' && /^PR_(FS|SS|FF|SF)\d$/.test(v)) {
