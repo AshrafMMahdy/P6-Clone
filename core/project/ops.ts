@@ -9,8 +9,9 @@ import { record, rollback } from '../journal.ts';
 import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
 import { assignResource, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { copyProject } from './copy.ts';
+import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
 import {
-  addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, ensureDefaultCalendar, newProject,
+  addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
   enumOk, normDate, refreshOwnDates, setActual, setFinish, setPercent, setStart, statusOf,
 } from './edit.ts';
 
@@ -25,14 +26,14 @@ const RTYPE: Record<string, string> = { labor: 'RT_Labor', nonlabor: 'RT_Equip',
 const PRIO: Record<string, string> = { top: 'PT_Top', high: 'PT_High', normal: 'PT_Normal', low: 'PT_Low', lowest: 'PT_Lowest' };
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
-export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource'];
+export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', ...EXTRA_OP_NAMES];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
   'Operations (JSON objects with "op"; [x] = optional; durations and lags in days; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant):',
   `add_project: id, start, [name], [must_finish_by], [calendar]`,
   `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
-  `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar]`,
+  `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [eps] (EPS ID)`,
   `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
   `add_holidays: calendar, dates [dates]`,
   `add_wbs: code, [name], [parent] (parent WBS code or dotted path; omit for top level), [project]`,
@@ -44,6 +45,7 @@ export const OP_GUIDE = [
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
   `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day], [price_per_unit], [calendar], [parent]`,
   `assign_resource: activity, resource, [units_per_day] or [units]; unassign_resource: activity, resource`,
+  EXTRA_GUIDE,
 ].join('\n');
 
 class OpError extends Error {}
@@ -127,6 +129,7 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       if (op.planned_start != null) p.plan_start_date = date(op.planned_start, 'planned_start');
       if (op.must_finish_by !== undefined) p.plan_end_date = op.must_finish_by ? date(op.must_finish_by, 'must_finish_by') : '';
       if (op.calendar != null) p.clndr_id = calendar(op.calendar).clndr_id;
+      if (op.eps != null) { ensureEps(db); addField(table(db, 'PROJECT'), '_eps_id'); p._eps_id = rows(db, 'EPS').find((e) => e.eps_short_name.toLowerCase() === String(op.eps).toLowerCase())?.eps_id ?? fail(`No EPS "${op.eps}" (add it with {"op":"add_eps"}).`); }
       return { project: p.proj_short_name };
     }
     case 'add_calendar': {
@@ -258,6 +261,8 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       return { unassigned: `${r.rsrc_short_name} -> ${t.task_code}` };
     }
   }
+  const extra = applyExtra(db, op, { hpd, fail, str, num, date, project, activity, wbsOf, calendar, resource, periods, ole });
+  if (extra !== undefined) return extra;
   return fail(`Unknown operation "${op.op}". Known: ${OP_NAMES.join(', ')}.`);
 }
 

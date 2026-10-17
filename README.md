@@ -119,6 +119,17 @@ several). Durations and lags are in days (`--hours-per-day`, default 8). Dates a
 | `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`) |
 | `add_resource` | `id, name?, type?: labor\|nonlabor\|material, units_per_day?, max_units_per_day?, price_per_unit?, calendar?` |
 | `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?` |
+| `update_assignment` | `activity, resource, units?, units_per_day?, remaining_units?, curve?` (resource curve name, `""` = linear) |
+| `update_wbs` | `code, new_code?, name?, parent?` (move; `""` = top level) |
+| `add_code_type`, `add_code_value`, `assign_code` | activity, project or resource codes (`subject`): `name, scope?, max_length?, values?: [{code, name?, parent?}]`; `type, code, name?, parent?`; `type, value` (`""` removes) on an `activity`, `project` or `resource` |
+| `add_udf`, `set_udf` | `name, subject?: activity\|wbs\|project\|resource\|assignment, data_type?: text\|number\|integer\|cost\|start_date\|finish_date`; `udf, value` on an `activity`, `wbs`, `project` or `resource` |
+| `set_notebook` | `activity, text, topic?` (default Notes; `""` text removes) |
+| `add_cost_account`, `add_expense`, `update_expense`, `delete_expense` | `id, name?, parent?`; `activity, name, account?, budgeted_cost?, actual_cost?, remaining_cost?, units?, price_per_unit?, vendor?, po_number?, description?` |
+| `add_step`, `update_step`, `delete_step` | `activity, name, new_name?, weight?, percent_complete?, completed?, description?` (physical % from weighted steps, like P6) |
+| `set_estimates` | `activity, min_days?, most_likely_days?, max_days?, distribution?: triangle\|betapert\|uniform\|none` or `clear: true` (for `monte_carlo`) |
+| `save_baseline`, `assign_baseline`, `delete_baseline`, `restore_baseline` | `name?, assign_as?`; `baseline, as?: project\|bl1\|bl2\|bl3` (the project baseline P6 stores, and the primary/secondary/tertiary user baselines) |
+| `add_eps`/`update_eps`/`delete_eps`, `add_obs`/…, `add_role`/… | `id` (OBS: `name`), `name?, parent?, new_id?` (OBS: `new_name?`); `set_project eps` files a project under an EPS node |
+| `update_calendar` | `name, new_name?, work_week?, holidays?, work_exceptions?, remove_exceptions?` |
 
 Activity types: `task`, `resource_dependent`, `start_milestone`, `finish_milestone`, `level_of_effort`, `wbs_summary`.
 Constraints: `start_on`, `start_on_or_after`, `start_on_or_before`, `finish_on`, `finish_on_or_before`,
@@ -128,18 +139,44 @@ once, and relationships that would make a loop are refused.
 
 ### MCP server
 
-Configure your agent with a stdio server:
+One agent: a stdio server.
 
 ```json
 { "mcpServers": { "p6-clone": { "command": "node", "args": ["/path/to/dist-cli/p6clone-mcp.cjs"] } } }
 ```
 
-Tools: `open_file`, `new_project`, `list_open`, `edit`, `schedule`, `update_progress`, `level_resources`, `validate`,
-`review`, `project_summary`, `find_activities`, `get_activity`, `list_wbs`, `critical_path`, `schedule_health`,
-`resource_summary`, `list_projects`, `undo`, `save` (XER in any version 5.0-24.12, or P6 XML for a `.xml` path), `export_pdf` (the printout as a PDF, with the same settings as Page Setup), `export_excel` and `import_excel` (P6-style workbook; `dry_run` shows the changes first), `earned_value`, `trace_logic`, `compare` (two revisions by Activity ID, against another open project or a file), `list_reports`, `run_report` (rows as data, or a PDF / HTML / CSV / Excel file) and `create_report` (a Report Wizard definition), `close`. The PDF writer uses the standard Helvetica font, so text outside Latin-1 (for example Arabic names) prints as "?" there; the desktop app's PDF uses real fonts.
-Every tool except `open_file`, `new_project` and `list_open` takes the `handle` they return. Results come back as JSON
-(`structuredContent` as well as text). The server reads and writes files where the agent runs, so run it inside the
-agent's sandbox.
+Many agents on one machine: one shared **Streamable HTTP** server (MCP 2025-06-18), bound to 127.0.0.1, with a bearer
+token and one storage root (every path is taken inside it; `..` and symlinks out of it are refused):
+
+```
+node --max-old-space-size=4096 dist-cli/p6clone-mcp.cjs --http --root /data/projects --port 8765 --token $P6CLONE_TOKEN
+```
+
+Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits come from the environment:
+`P6CLONE_MAX_HANDLES` (8), `P6CLONE_MEM_BUDGET_MB` (3072), `P6CLONE_IDLE_MINUTES` (30). Give Node a heap above the budget.
+
+**Sharing without dead stops**
+
+- `open_file` / `new_project` return an unguessable `handle` (for any call) and an `owner_key`. In HTTP mode `save`,
+  `close` and `undo` with `any_caller: true` need the owner key.
+- Calls on one handle run one at a time, in order; a call that waits too long gets `busy` with `retry_after`.
+- Pass `caller` (the bridge stamps it; the HTTP session is the fallback): `undo` and `redo` take back only your own
+  changes, and are refused (`undo_conflict`) only when someone else's later change touched the same items.
+- At the handle or memory limit the least recently used project is written to a recovery file in
+  `<root>/.p6clone-recovery` (unsaved work included) and comes back by itself on its next call, with a `_notice`.
+  Idle projects go the same way after 30 minutes. Nothing is discarded; `list_open` and `server_status` show where it is.
+- Every error is `{error: {code, message, hint, retry_after?}}`: the hint says what to do next. Long work (a big
+  `open_file`, `monte_carlo`) can run with `async: true` and `job_status`; any call still running after 25 s turns into
+  a job by itself. Oversized results come back as a preview with a note on how to ask for less.
+
+Tools: `open_file`, `new_project`, `list_open`, `server_status`, `job_status`, `cancel_job`, `edit`, `schedule`,
+`update_progress`, `level_resources`, `monte_carlo` (P10-P90, histogram, milestone percentiles, criticality,
+sensitivity, risk events; seeded, the project is not changed), `validate`, `review`, `project_summary`,
+`find_activities`, `get_activity`, `list_wbs`, `critical_path`, `schedule_health`, `resource_summary`, `list_projects`,
+`list_dictionaries` (baselines, codes, UDFs, accounts, calendars, curves, EPS, OBS, roles), `earned_value`,
+`trace_logic`, `undo`, `redo`, `save` (XER 5.0-24.12, P6 XML, Microsoft Project XML `format: mspdi`, or MPX), `export_pdf`,
+`export_excel`, `import_excel`, `compare`, `list_reports`, `run_report`, `create_report`, `close`. Read-only tools carry
+the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as well as text).
 
 ### Other commands
 

@@ -1,22 +1,25 @@
 #!/usr/bin/env node
-// P6 Clone MCP server (stdio): a headless Primavera P6 for AI agents. Projects stay open in memory between calls
-// (a 70 MB XER is read once, then edited, scheduled and reviewed many times), every change can be undone, and
-// nothing reaches disk until `save`. Same engine as the desktop app and the CLI. No dependencies.
-// Run: node mcp/server.ts   (or the bundled dist-cli/p6clone-mcp.cjs on older Node)
+// P6 Clone MCP server: a headless Primavera P6 for AI agents, shared by many agents without dead stops.
+// Projects stay open in memory between calls, every change is undoable (per caller), nothing reaches disk until
+// `save`, and every failure comes back with a code and a next step. Same engine as the desktop app and the CLI.
+//   stdio (one agent):  node mcp/server.ts            (or the bundled dist-cli/p6clone-mcp.cjs)
+//   HTTP (many agents): node mcp/server.ts --http --root <storage dir> [--port 8765] [--host 127.0.0.1] [--token T]
+//   Environment: P6CLONE_ROOT, P6CLONE_TOKEN, P6CLONE_PORT, P6CLONE_MAX_HANDLES, P6CLONE_MEM_BUDGET_MB,
+//   P6CLONE_IDLE_MINUTES. Run Node with --max-old-space-size above the memory budget for very large files.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve, basename } from 'node:path';
-import { detectFormat, importChecks, readRaw, type Format } from '../renderer/io.ts';
+import { basename } from 'node:path';
+import { detectFormat, exportFile, importChecks, readRaw, type Format } from '../renderer/io.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { updateProgress } from '../core/progress/update.ts';
 import { levelResources } from '../core/level/level.ts';
-import { applyOps } from '../core/project/ops.ts';
+import { applyOps, OP_GUIDE } from '../core/project/ops.ts';
 import { makeCtx } from '../core/project/ctx.ts';
 import { TOOLS as LOOKUPS, runTool } from '../core/query/tools.ts';
 import { reviewSchedule } from '../core/query/review.ts';
-import { record, rollback, type Journal } from '../core/journal.ts';
+import { record, rollback } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { worst, type Finding } from '../core/findings.ts';
 import type { Db } from '../core/db.ts';
@@ -30,267 +33,298 @@ import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
 import { listReports, parseSpec, runReport, runSpec } from '../renderer/reports/engine.ts';
 import { reportHtml, reportPages, reportText, reportXlsx } from '../renderer/reports/output.ts';
 import { nowStamp } from '../core/report/reports.ts';
+import { defaultEstimates, runMonteCarlo } from '../core/risk/montecarlo.ts';
+import {
+  ToolError, fail, config, setRoot, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
+  exclusive, change, dropLast, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, loadIndex, evictedList, type Session,
+} from './runtime.ts';
 
-const VERSION = '1.0.0';
-interface Session { db: Db; path: string | null; format: Format; undo: { label: string; j: Journal }[]; dirty: boolean; hpd: number }
-const sessions = new Map<string, Session>();
-let seq = 0;
+const VERSION = '2.0.0';
+const prefsOf = (s: Session) => ({ hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0 });
 
+// ---------------------------------------------------------------- tool list
 const handleProp = { handle: { type: 'string', description: 'The handle returned by open_file or new_project' } };
-const withHandle = (schema: Record<string, unknown>) => ({ ...schema, properties: { ...handleProp, ...((schema.properties as object) ?? {}) }, required: ['handle', ...(((schema.required as string[]) ?? []))] });
-const OPS_DOC = `Operations (all optional fields omitted unless needed; durations in days, dates "YYYY-MM-DD" or "YYYY-MM-DD HH:MM"; activities by Activity ID, WBS by code, resources by resource ID, calendars by name; "project" only when the file holds several projects):
-- {op:"add_project", id, name, start, must_finish_by?, calendar?}   - {op:"set_project", project?, name?, data_date?, planned_start?, must_finish_by?, calendar?}
-- {op:"add_calendar", name, work_week?: {sat:[["07:00","12:00"],["13:00","16:00"]], ...}, holidays?: [dates], work_exceptions?: {date: periods}}   - {op:"add_holidays", calendar, dates}
-- {op:"add_wbs", code, name?, parent?}
-- {op:"add_activity", id?, name, wbs?, duration_days?, type?: task|resource_dependent|start_milestone|finish_milestone|level_of_effort|wbs_summary, calendar?, constraint?: {type: start_on|start_on_or_after|start_on_or_before|finish_on|finish_on_or_before|finish_on_or_after|mandatory_start|mandatory_finish|alap|none, date}, secondary_constraint?, priority?, start?}
-- {op:"update_activity", id, new_id?, name?, wbs?, duration_days?, remaining_days?, type?, calendar?, constraint?, start?, finish?, actual_start?, actual_finish?, percent_complete?, expected_finish?, priority?}
-- {op:"delete_activity", id}   - {op:"dissolve_activity", id}  (links its predecessors to its successors)
-- {op:"add_relationship", pred, succ, type?: FS|SS|FF|SF, lag_days?}   - {op:"update_relationship", pred, succ, type?, new_type?, lag_days?}   - {op:"delete_relationship", pred, succ, type?}
-- {op:"add_resource", id, name?, type?: labor|nonlabor|material, units_per_day?, max_units_per_day?, price_per_unit?, calendar?}
-- {op:"assign_resource", activity, resource, units_per_day?, units?}   - {op:"unassign_resource", activity, resource}`;
+const common = { caller: { type: 'string', description: 'Who is calling (set by the bridge); undo and redo act on your own changes' }, async: { type: 'boolean', description: 'Run as a job and return a job_id at once (job_status gives the result)' } };
+const ownerProp = { owner_key: { type: 'string', description: 'The owner key returned when the project was opened' } };
+const withHandle = (schema: Record<string, unknown>, owner = false) => ({ ...schema, properties: { ...handleProp, ...(owner ? ownerProp : {}), ...((schema.properties as object) ?? {}), ...common }, required: ['handle', ...(((schema.required as string[]) ?? []))] });
+const ro = { readOnlyHint: true, openWorldHint: false };
+const edit = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+const writes = { readOnlyHint: false, destructiveHint: true, openWorldHint: false };
+const ERRORS_DOC = ' Errors come back as {error: {code, message, hint, retry_after?}}: follow the hint (e.g. busy -> retry, unknown_handle -> open_file again).';
 
 const TOOLS = [
-  { name: 'open_file', description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file into memory and get a handle. Returns P6 import diagnostics and a project summary. Nothing is written to the file until save.', inputSchema: { type: 'object', properties: { encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' },  path: { type: 'string' }, hours_per_day: { type: 'number', description: 'Hours in a day for durations given in days (default 8)' } }, required: ['path'] } },
-  { name: 'new_project', description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options) and get a handle.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID, e.g. TWR-A' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start / data date, YYYY-MM-DD' }, hours_per_day: { type: 'number' } }, required: ['id', 'start'] } },
-  { name: 'list_open', description: 'Projects currently open in memory.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'edit', description: `Change the project with a list of operations, applied as ONE transaction: if any fails nothing changes and the error names it. Undo with undo. ${OPS_DOC}`, inputSchema: withHandle({ type: 'object', properties: { operations: { type: 'array', items: { type: 'object', properties: { op: { type: 'string' } }, required: ['op'] } } }, required: ['operations'] }) },
-  { name: 'schedule', description: 'Schedule (F9) like P6: CPM with calendars, constraints, retained logic. Returns the finish date and the schedule log highlights.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string', description: 'Optional new data date' } } }) },
-  { name: 'update_progress', description: 'Tools > Update Progress: move the data date and statuse activities from their planned dates, then reschedule.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' } }, required: ['data_date'] }) },
-  { name: 'level_resources', description: 'Tools > Level Resources (resources with a Max Units/Time limit).', inputSchema: withHandle({ type: 'object', properties: { within_float: { type: 'boolean' } } }) },
-  { name: 'validate', description: 'P6 import diagnostics for the project as it is now (what real P6 would accept, warn about or reject), plus saved dates that P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
-  { name: 'review', description: 'Schedule quality review (DCMA-style checks graded pass/warn/fail): missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence, saved dates P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
-  ...LOOKUPS.map((t) => ({ name: t.name, description: t.description, inputSchema: withHandle(t.parameters) })),
-  { name: 'undo', description: 'Undo the last edit, schedule, progress update or leveling on this project.', inputSchema: withHandle({ type: 'object', properties: {} }) },
-  { name: 'save', description: 'Write the project to an XER file (P6 version 5.0 to 24.12; default: the version it was read in, else 19.12), or to P6 XML when the path ends in .xml.', inputSchema: withHandle({ type: 'object', properties: { encoding: { type: 'string', description: 'XER text encoding (default: the code page P6 would use for the text, e.g. windows-1256 for Arabic; utf-8 when no code page holds it)' },  path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, version: { type: 'string' }, overwrite: { type: 'boolean' } } }) },
-  { name: 'export_pdf', description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML instead. Text outside Latin-1 prints as "?" in the PDF (use the desktop app for other scripts). ' + PRINT_GUIDE + ' Layout options: filter (all, critical, not_started, in_progress, completed, ...), group_by (wbs, none), sort_by (task_code, task_name, total_float, finish).', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
-  { name: 'export_excel', description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK (activities), TASKPRED (relationships), RSRC (resources), TASKRSRC (assignments); row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
-  { name: 'import_excel', description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities (name, WBS, type, durations, constraint, actual dates, % complete, calendar), relationships, resources and assignments; a "Y" in delete_record_flag deletes the row. Calculated columns (status, start, finish, float) are ignored. Applied as one undoable change; dry_run returns the plan without changing anything.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
-  { name: 'compare', description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type, so renumbered internal ids do not matter. Durations, lags and floats in days. Use it to see exactly what changed between two revisions.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against (XER, P6 XML, MSPDI, MPX)' }, max_changes: { type: 'number' } } }) },
-  { name: 'list_reports', description: 'Reports available like P6 Tools > Reports: the standard reports by group (Schedule, Progress, Earned Value, Cost, Resources) and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
-  { name: 'run_report', description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as a PDF (.pdf, same pages as printing, settings like export_pdf), HTML (.html), ASCII text/CSV (.csv or .txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number' } } }) },
-  { name: 'create_report', description: 'Save a report definition like the P6 Report Wizard (name, subject, columns, filter, group_by, sort_by, sort_desc, title, group). Kept with this open project for run_report (not written into the XER). ' + "Subject areas: activities (columns: any activity column id, e.g. task_code, task_name, orig_dur, rem_dur, pct, start, finish, total_float, bl_finish, var_bl_finish, bud_cost, act_cost, ev_bac, ev_pv, ev_ev, ev_ac, ev_sv, ev_cv, ev_spi, ev_cpi, ev_eac, ev_vac; group_by wbs|none), assignments (task_code, task_name, rsrc_id, rsrc_name, target_qty, act_qty, remain_qty, target_cost, act_cost, remain_cost, start, finish; group_by resource|activity|none), wbs (wbs_code, wbs_name, activities, start, finish, total_float, budget, actual, remaining, ev_*), resources (rsrc_id, rsrc_name, rsrc_type, max_units, price, calendar, assignments, target_qty, act_qty, remain_qty, target_cost; group_by none|type), relationships (pred_code, pred_name, succ_code, succ_name, type, lag, free_float, driving; group_by none|pred). Filters: all, critical, longest, notstarted, inprogress, completed, open, milestones, negfloat, late, constrained, started30, finished30, starting30, finishing30, nopreds.", inputSchema: withHandle({ type: 'object', properties: { name: { type: 'string' }, subject: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' }, sort_desc: { type: 'boolean' }, title: { type: 'string' }, group: { type: 'string' } }, required: ['name', 'subject'] }) },
-  { name: 'close', description: 'Close the project and free its memory (unsaved changes are lost).', inputSchema: withHandle({ type: 'object', properties: {} }) },
+  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
+  { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
+  { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
+  { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs.', inputSchema: { type: 'object', properties: {} } },
+  { name: 'job_status', annotations: ro, description: 'Result of a job started with async: true (or one that outlived the call time). wait_seconds (max 20) waits for it to finish.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, wait_seconds: { type: 'number' } }, required: ['job_id'] } },
+  { name: 'cancel_job', annotations: edit, description: 'Stop a running job (Monte Carlo stops at once; other work finishes its current step).', inputSchema: { type: 'object', properties: { job_id: { type: 'string' } }, required: ['job_id'] } },
+  { name: 'edit', annotations: edit, description: `Change the project with a list of operations, applied as ONE transaction: if any fails nothing changes and the error names it. Undo with undo.\n${OP_GUIDE}`, inputSchema: withHandle({ type: 'object', properties: { operations: { type: 'array', items: { type: 'object' } } }, required: ['operations'] }) },
+  { name: 'schedule', annotations: edit, description: 'Schedule (F9) like P6: CPM with calendars, constraints, retained logic. Returns the finish date and the schedule log highlights.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' } } }) },
+  { name: 'update_progress', annotations: edit, description: 'Tools > Update Progress: move the data date and statuse activities from their planned dates, then reschedule. If scheduling fails nothing is kept.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' } }, required: ['data_date'] }) },
+  { name: 'level_resources', annotations: edit, description: 'Tools > Level Resources (resources with a Max Units/Time limit).', inputSchema: withHandle({ type: 'object', properties: { within_float: { type: 'boolean' } } }) },
+  { name: 'monte_carlo', annotations: ro, description: 'Schedule risk analysis (Monte Carlo) like Primavera Risk Analysis: samples each activity\'s remaining duration from its three-point estimate (set with the set_estimates edit operation; default_estimates applies min/max percentages to activities without one, for this run only) and risk events from the risk register, schedules every iteration. Returns finish percentiles P10-P90, mean, std dev, chance of meeting the deterministic finish, a histogram (buckets), milestone percentiles, activity criticality index, sensitivity ranking and risk-event impact. The project is not changed. Big projects: pass async: true.', inputSchema: withHandle({ type: 'object', properties: { iterations: { type: 'number', description: 'default 1000' }, seed: { type: 'number', description: 'same seed, same result' }, risk_events: { type: 'string', description: 'pre (default), post or off' }, project: { type: 'string' }, default_estimates: { type: 'object', description: '{min_pct: 90, max_pct: 125, dist: triangle|uniform|betapert} for activities without an estimate' }, buckets: { type: 'number', description: 'histogram buckets (default 20)' }, top: { type: 'number', description: 'how many activities in the criticality and sensitivity lists (default 25)' } } }) },
+  { name: 'validate', annotations: ro, description: 'P6 import diagnostics for the project as it is now (what real P6 would accept, warn about or reject), plus saved dates that P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
+  { name: 'review', annotations: ro, description: 'Schedule quality review (DCMA-style checks graded pass/warn/fail): missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence, saved dates P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
+  ...LOOKUPS.map((t) => ({ name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
+  { name: 'undo', annotations: edit, description: 'Undo your own last change on this project (edit, schedule, progress update, leveling, import). Refused only if someone else\'s later change touched the same items. any_caller: true (with owner_key) undoes the latest change whoever made it.', inputSchema: withHandle({ type: 'object', properties: { any_caller: { type: 'boolean' } } }, true) },
+  { name: 'redo', annotations: edit, description: 'Re-apply your last undone change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
+  { name: 'save', annotations: writes, description: 'Write the project (needs owner_key): XER (P6 version 5.0-24.12; default the version it was read in, else 19.12), P6 XML (.xml), Microsoft Project XML (format: mspdi) or MPX (.mpx). Paths are inside the storage root.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, format: { type: 'string', description: 'xer, p6xml, mspdi or mpx (default from the extension; .xml = P6 XML)' }, version: { type: 'string' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: the code page P6 would use, e.g. windows-1256 for Arabic)' }, overwrite: { type: 'boolean' } } }, true) },
+  { name: 'export_pdf', annotations: writes, description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML. ' + PRINT_GUIDE + ' Layout options: filter, group_by (wbs, none), sort_by.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
+  { name: 'export_excel', annotations: writes, description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK, TASKPRED, RSRC, TASKRSRC; row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
+  { name: 'import_excel', annotations: edit, description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities, relationships, resources and assignments; "Y" in delete_record_flag deletes the row. Calculated columns are ignored. One undoable change; dry_run returns the plan only.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
+  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against' }, max_changes: { type: 'number' } } }) },
+  { name: 'list_reports', annotations: ro, description: 'Reports available like P6 Tools > Reports: the standard reports by group and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
+  { name: 'run_report', annotations: ro, description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as PDF (.pdf), HTML (.html), CSV (.csv/.txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number' } } }) },
+  { name: 'create_report', annotations: edit, description: 'Save a report definition like the P6 Report Wizard (name, subject, columns, filter, group_by, sort_by, sort_desc, title, group). Kept with this open project for run_report (not written into the XER). Subject areas: activities, assignments, wbs, resources, relationships (see list_reports for examples).', inputSchema: withHandle({ type: 'object', properties: { name: { type: 'string' }, subject: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' }, sort_desc: { type: 'boolean' }, title: { type: 'string' }, group: { type: 'string' } }, required: ['name', 'subject'] }) },
+  { name: 'close', annotations: writes, description: 'Close the project and free its memory (needs owner_key; unsaved changes are lost, so save first).', inputSchema: withHandle({ type: 'object', properties: {} }, true) },
 ];
 
-class UserError extends Error {}
-const get = (h: unknown): Session => sessions.get(String(h)) ?? (() => { throw new UserError(`No open project with handle "${h}". Use open_file or new_project; list_open shows the open ones.`); })();
-const allIds = (db: Db) => (db.tables.PROJECT?.rows ?? []).map((p) => p.proj_id);
+// ---------------------------------------------------------------- helpers
+const allIds = (db: Db) => (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_id);
 const summary = (s: Session) => runTool('project_summary', {}, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd);
 const brief = (f: Finding[]) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + 1), a), {}), findings: f.filter((x) => x.severity !== 'info').slice(0, 40).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })) });
-const change = <T>(s: Session, label: string, fn: (db: Db) => T): T => {
-  let out!: T;
-  const j = record(s.db, (d) => { out = fn(d); });
-  s.undo.push({ label, j }); if (s.undo.length > 50) s.undo.shift();
-  s.dirty = true;
-  return out;
-};
-const dd = (v: unknown) => { if (v == null || v === '') return null; const t = parseP6Date(String(v)); if (t == null) throw new UserError(`"${v}" is not a date (use YYYY-MM-DD).`); return t; };
-
+const dd = (v: unknown) => { if (v == null || v === '') return null; const t = parseP6Date(String(v)); if (t == null) fail('bad_input', `"${v}" is not a date.`, 'Use YYYY-MM-DD or YYYY-MM-DD HH:MM.'); return t; };
 const projectIds = (db: Db, id: unknown) => {
   const ps = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
   if (id == null || id === '') return ps.map((p) => p.proj_id);
   const p = ps.find((x) => x.proj_short_name.toLowerCase() === String(id).toLowerCase());
-  if (!p) throw new UserError(`No project "${id}" (open: ${ps.map((x) => x.proj_short_name).join(', ')}).`);
-  return [p.proj_id];
+  if (!p) fail('bad_input', `No project "${id}".`, `Projects in this file: ${ps.map((x) => x.proj_short_name).join(', ')}.`);
+  return [p!.proj_id];
 };
+const readBytes = (p: string) => { try { return new Uint8Array(readFileSync(p)); } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
+const writeOut = (p: string, data: string | Uint8Array) => { try { writeFileSync(p, data); } catch (e) { fail('file_unwritable', `Cannot write ${p}: ${(e as Error).message}.`, 'Check that the folder exists and the file is not open elsewhere.'); } };
+const iso = (t: number | null | undefined) => (t == null || !Number.isFinite(t) ? null : formatP6Date(t));
 
-async function callAsync(name: string, a: Record<string, any>): Promise<unknown> {
-  switch (name) {
-    case 'export_pdf': {
-      const s = get(a.handle);
-      const path = resolve(String(a.path ?? ''));
-      const r = printPages(s.db, { projIds: projectIds(s.db, a.project), setup: a.settings ?? {}, filter: a.filter, groupBy: a.group_by, sortBy: a.sort_by, prefs: { hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy', showTime: false, durationDecimals: 0 } });
-      writeFileSync(path, /.html?$/i.test(path) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path) }));
-      return { saved: path, pages: r.pages.length, activities: r.activities, ...(r.unknownColumns.length ? { unknown_columns: r.unknownColumns, printable_columns: printableColumns(s.db).map((c) => c.id) } : {}) };
-    }
-    case 'export_excel': {
-      const s = get(a.handle);
-      const path = resolve(String(a.path ?? ''));
-      writeFileSync(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd)));
-      return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] };
-    }
-    case 'compare': {
-      const s = get(a.handle);
-      let other: Db;
-      if (a.other_handle) other = get(a.other_handle).db;
-      else if (a.path) {
-        const p = resolve(String(a.path));
-        let bytes: Uint8Array;
-        try { bytes = new Uint8Array(readFileSync(p)); } catch (e) { throw new UserError(`Cannot read ${p}: ${(e as Error).message}`); }
-        other = readRaw(bytes, detectFormat(p, bytes)).db;
-      } else throw new UserError('Give other_handle or path.');
-      const cs = compareSchedules(s.db, other, s.hpd);
-      const count = (o: string, k: string) => cs.filter((c) => c.object === o && c.kind === k).length;
-      const max = Math.min(5000, Number(a.max_changes) || 500);
-      return {
-        summary: Object.fromEntries(['project', 'wbs', 'activity', 'relationship'].map((o) => [o, { added: count(o, 'added'), deleted: count(o, 'deleted'), changed: new Set(cs.filter((c) => c.object === o && c.kind === 'changed').map((c) => c.id)).size }])),
-        changes: cs.slice(0, max), truncated: cs.length > max,
-      };
-    }
-    case 'list_reports': { const s = get(a.handle); return listReports(s.db).map((e) => ({ id: e.id, name: e.name, group: e.group, kind: e.kind, description: e.description })); }
-    case 'create_report': {
-      const s = get(a.handle);
-      const spec = parseSpec(a);
-      if (!spec) throw new UserError('Give the report a "name".');
-      const t = (s.db.tables._REPORT ??= { name: '_REPORT', fields: ['report_id', 'name', 'json'], rows: [] });
-      const ex = t.rows.find((r) => r.name.toLowerCase() === spec.name.toLowerCase());
-      if (ex) ex.json = JSON.stringify(spec);
-      else t.rows.push({ report_id: String(t.rows.length + 1), name: spec.name, json: JSON.stringify(spec) });
-      return { saved: spec.name, id: `custom:${ex?.report_id ?? t.rows.length}`, replaced: !!ex };
-    }
-    case 'run_report': {
-      const s = get(a.handle);
-      const prefs = { hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0 };
-      const ids = projectIds(s.db, a.project);
-      let name: string, report;
-      if (a.definition) { const spec = parseSpec({ name: 'Ad hoc report', ...a.definition }); if (!spec) throw new UserError('definition needs a name and subject'); report = runSpec(s.db, ids, spec, { prefs }); name = spec.name; }
-      else { try { const r = runReport(s.db, ids, String(a.report ?? ''), { prefs, weeks: Number(a.weeks) || undefined }); report = r.report; name = r.entry.name; } catch (e) { throw new UserError((e as Error).message); } }
-      if (!a.path) { const max = Math.min(2000, Number(a.max_rows) || 200); return { report: name, title: report.title, subtitle: report.subtitle, columns: report.columns, total_rows: report.rows.length, rows: report.rows.slice(0, max).map((r) => ({ cells: r.cells, ...(r.bold ? { group: true, level: r.level ?? 0 } : r.level ? { level: r.level } : {}) })), truncated: report.rows.length > max }; }
-      const path = resolve(String(a.path));
-      const ext = (/\.(\w+)$/.exec(path)?.[1] ?? '').toLowerCase();
-      if (ext === 'pdf') { const pages = reportPages(s.db, ids, report, a.settings ?? {}, prefs, name); writeFileSync(path, await pagesToPdf(pages, report.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path) })); return { saved: path, pages: pages.length, rows: report.rows.length }; }
-      if (ext === 'html' || ext === 'htm') writeFileSync(path, reportHtml(report, nowStamp()));
-      else if (ext === 'csv' || ext === 'txt') writeFileSync(path, reportText(report));
-      else if (ext === 'xlsx') writeFileSync(path, await reportXlsx(report));
-      else throw new UserError('path must end in .pdf, .html, .csv, .txt or .xlsx');
-      return { saved: path, rows: report.rows.length };
-    }
-    case 'import_excel': {
-      const s = get(a.handle);
-      const path = resolve(String(a.path ?? ''));
-      let bytes: Uint8Array;
-      try { bytes = new Uint8Array(readFileSync(path)); } catch (e) { throw new UserError(`Cannot read ${path}: ${(e as Error).message}`); }
-      const ids = projectIds(s.db, a.project);
-      if (ids.length !== 1) throw new UserError('The file holds several projects; say which one with "project".');
-      const pid = (s.db.tables.PROJECT?.rows ?? []).find((p) => p.proj_id === ids[0])!.proj_short_name;
-      let sheets;
-      try { sheets = await readXlsx(bytes); } catch (e) { throw new UserError((e as Error).message); }
-      const plan = planImport(s.db, sheets, pid, s.hpd);
-      if (a.dry_run || !plan.ops.length) return { applied: false, ...(plan.ops.length ? {} : { note: 'Nothing to change.' }), summary: plan.summary, warnings: plan.warnings, operations: plan.ops.slice(0, 200) };
-      const r = editCall({ handle: a.handle, operations: plan.ops });
-      return (r as { ok?: boolean }).ok === false ? r : { applied: true, summary: plan.summary, warnings: plan.warnings, note: 'Undo with undo. Run schedule to recalculate dates.' };
-    }
-  }
-  return call(name, a);
-}
+// ---------------------------------------------------------------- tool implementations
+type Ctx = { caller: string; job?: ReturnType<typeof startJob> };
+const NO_HANDLE = new Set(['open_file', 'new_project', 'list_open', 'server_status', 'job_status', 'cancel_job']);
 
-function call(name: string, a: Record<string, any>): unknown {
+async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unknown> {
   switch (name) {
+    case 'list_open': return { open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, projects: allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), unsaved_changes: s.dirty, changes: s.history.length })), moved_out: evictedList() };
+    case 'server_status': return { version: VERSION, ...status() };
+    case 'job_status': {
+      const job = getJob(a.job_id);
+      const wait = Math.min(20, Math.max(0, Number(a.wait_seconds) || 0)) * 1000;
+      for (const t0 = Date.now(); !job.done && Date.now() - t0 < wait;) await new Promise((r) => setTimeout(r, 200));
+      return jobView(job);
+    }
+    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: job.abort ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
     case 'open_file': {
-      const path = resolve(String(a.path ?? ''));
-      let bytes: Uint8Array;
-      try { bytes = new Uint8Array(readFileSync(path)); } catch (e) { throw new UserError(`Cannot read ${path}: ${(e as Error).message}`); }
-      const format = detectFormat(path, bytes);
-      const r = readRaw(bytes, format, a.encoding ?? 'auto');
-      const f = importChecks(r.db, r.findings, format);
-      if (worst(f) === 'fatal') return { opened: false, reason: 'P6 would reject this file', diagnostics: brief(f) };
-      const handle = `p${++seq}`;
-      const s: Session = { db: r.db, path, format, undo: [], dirty: false, hpd: Number(a.hours_per_day) || 8 };
-      sessions.set(handle, s);
-      return { handle, file: basename(path), format, diagnostics: brief(f), summary: summary(s) };
+      const path = pathArg(a.path);
+      const bytes = readBytes(path);
+      const need = estimateBytes(bytes.length);
+      // reserve the memory first, so a big file is refused (with a way forward) instead of exhausting the process
+      const s0 = createSession({ tables: {} }, { path, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: need, dirty: false });
+      try {
+        const format = detectFormat(path, bytes);
+        const r = readRaw(bytes, format, a.encoding ?? 'auto');
+        const f = importChecks(r.db, r.findings, format);
+        if (worst(f) === 'fatal') { closeSession(s0); return { opened: false, reason: 'P6 would reject this file', diagnostics: brief(f) }; }
+        s0.db = r.db; s0.format = format;
+        return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0) };
+      } catch (e) { closeSession(s0); throw e; }
     }
     case 'new_project': {
       const db: Db = { tables: {} };
       const r = applyOps(db, [{ op: 'add_project', id: a.id, name: a.name ?? a.id, start: a.start }]);
-      if (!r.ok) throw new UserError(r.error!.message);
-      const handle = `p${++seq}`;
-      sessions.set(handle, { db, path: null, format: 'xer', undo: [], dirty: true, hpd: Number(a.hours_per_day) || 8 });
-      return { handle, project: a.id };
+      if (!r.ok) fail('bad_input', r.error!.message, 'Give id (Project ID) and start (YYYY-MM-DD).');
+      const s = createSession(db, { path: null, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: 8 * 1048576, dirty: true });
+      return { handle: s.handle, owner_key: s.ownerKey, project: a.id };
     }
-    case 'list_open': return [...sessions].map(([h, s]) => ({ handle: h, file: s.path, projects: (s.db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_short_name), unsaved_changes: s.dirty, undo_steps: s.undo.length }));
+  }
+
+  const s = getSession(a.handle);
+  switch (name) {
+    case 'edit': {
+      let r!: ReturnType<typeof applyOps>;
+      try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd }); if (!r.ok) throw new Error('refused'); }); }
+      catch (e) { if (r && !r.ok) return { ok: false, error: { code: 'op_failed', ...r.error, hint: 'Fix that operation (the message says what is wrong) and send the list again; nothing was changed.' } }; throw e; }
+      s.history[s.history.length - 1].label = `Edit (${r.applied} operation${r.applied === 1 ? '' : 's'})`;
+      return r;
+    }
     case 'schedule': {
-      const s = get(a.handle);
       const t = dd(a.data_date);
-      const res = change(s, 'Schedule', (d) => { const x = scheduleProjects(d, allIds(d), t != null ? { dataDate: t } : {}); if (x.ok) syncAssignmentDates(d); return x; });
-      if (!res.ok) { rollback(s.undo.pop()!.j); return { ok: false, findings: res.findings.filter((f) => f.severity === 'error').map((f) => f.message) }; }
-      return { ok: true, data_date: formatP6Date(res.stats.dataDate), finish: formatP6Date(res.stats.finish), stats: res.stats, warnings: res.findings.filter((f) => f.severity !== 'info').slice(0, 30).map((f) => f.message) };
+      const res = change(s, ctx.caller, 'Schedule', (d) => { const x = scheduleProjects(d, allIds(d), t != null ? { dataDate: t } : {}); if (x.ok) syncAssignmentDates(d); return x; });
+      if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: 'Fix the reported problem (often a loop or a missing calendar) and schedule again; nothing was changed.' } }; }
+      return { ok: true, data_date: iso(res.stats.dataDate), finish: iso(res.stats.finish), stats: res.stats, warnings: res.findings.filter((f) => f.severity !== 'info').slice(0, 30).map((f) => f.message) };
     }
     case 'update_progress': {
-      const s = get(a.handle);
-      const t = dd(a.data_date)!;
-      const res = change(s, 'Update Progress', (d) => { const by = Object.fromEntries(allIds(d).map((id) => [id, updateProgress(d, id, t)])); const x = scheduleProjects(d, allIds(d), { dataDate: t }); if (x.ok) syncAssignmentDates(d); return { ok: x.ok, finish: formatP6Date(x.stats.finish), progress: by }; });
-      // scheduling failed: nothing is kept (progress without a valid schedule would leave the project inconsistent)
-      if (!(res as { ok: boolean }).ok) { rollback(s.undo.pop()!.j); return { ...(res as object), note: 'Scheduling failed, so the progress update was undone. Nothing changed.' }; }
+      const t = dd(a.data_date) ?? fail('bad_input', 'Give data_date.', 'The new data date, YYYY-MM-DD.');
+      const res = change(s, ctx.caller, 'Update Progress', (d) => { const by = Object.fromEntries(allIds(d).map((id) => [id, updateProgress(d, id, t)])); const x = scheduleProjects(d, allIds(d), { dataDate: t }); if (x.ok) syncAssignmentDates(d); return { ok: x.ok, finish: iso(x.stats.finish), progress: by, errors: x.findings.filter((f) => f.severity === 'error').map((f) => f.message) }; });
+      if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.errors.join(' '), hint: 'Scheduling failed, so the progress update was undone; fix the problem and try again.' } }; }
       return res;
     }
-    case 'level_resources': {
-      const s = get(a.handle);
-      return change(s, 'Level Resources', (d) => { const r = levelResources(d, allIds(d), { withinFloat: !!a.within_float }); return { delayed: r.delayed, report: r.log }; });
+    case 'level_resources': return change(s, ctx.caller, 'Level Resources', (d) => { const r = levelResources(d, allIds(d), { withinFloat: !!a.within_float }); return { delayed: r.delayed, report: r.log }; });
+    case 'monte_carlo': {
+      const ids = projectIds(s.db, a.project);
+      const iterations = Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000)));
+      const abort = new AbortController();
+      if (ctx.job) ctx.job.abort = abort;
+      // default estimates only for this run: applied in a journal and rolled back afterwards
+      const j = a.default_estimates ? record(s.db, (d) => { defaultEstimates(d, ids, Number(a.default_estimates.min_pct) || 90, Number(a.default_estimates.max_pct) || 125, a.default_estimates.dist ?? 'triangle'); }) : null;
+      try {
+        const r = await runMonteCarlo(s.db, ids, { iterations, seed: a.seed != null ? Number(a.seed) : undefined, riskEvents: a.risk_events === 'post' || a.risk_events === 'off' ? a.risk_events : 'pre', signal: abort.signal,
+          onProgress: (i) => { if (ctx.job) ctx.job.progress = `${i} of ${iterations} iterations`; } });
+        const top = Math.min(200, Number(a.top) || 25);
+        const buckets = Math.min(100, Math.max(5, Number(a.buckets) || 20));
+        const lo = r.min, hi = r.max, w = (hi - lo) / buckets || 1;
+        const hist = Array.from({ length: buckets }, (_, i) => ({ start: iso(lo + i * w), end: iso(lo + (i + 1) * w), count: 0, cum_pct: 0 }));
+        for (const t of r.finishSamples) hist[Math.min(buckets - 1, Math.floor((t - lo) / w))].count++;
+        let acc = 0; for (const b of hist) { acc += b.count; b.cum_pct = Math.round((acc / r.finishSamples.length) * 1000) / 10; }
+        return {
+          iterations: r.iterations, seed: r.seed, elapsed_seconds: Math.round(r.elapsedMs / 100) / 10, data_date: iso(r.dataDate),
+          deterministic_finish: iso(r.deterministicFinish), chance_of_meeting_deterministic: Math.round(r.probDeterministic * 1000) / 10,
+          finish: { P10: iso(r.percentiles.P10), P50: iso(r.percentiles.P50), P80: iso(r.percentiles.P80), P90: iso(r.percentiles.P90), mean: iso(r.mean), min: iso(r.min), max: iso(r.max), std_dev_days: Math.round(r.stdDevDays * 10) / 10 },
+          histogram: hist,
+          milestones: r.milestones.slice(0, top).map((m) => ({ id: m.code, name: m.name, deterministic: iso(m.deterministic), P10: iso(m.P10), P50: iso(m.P50), P80: iso(m.P80), P90: iso(m.P90) })),
+          criticality: r.activities.slice(0, top).map((x) => ({ id: x.code, name: x.name, critical_pct: Math.round(x.criticality * 10) / 10, p80_finish: iso(x.p80Finish) })),
+          sensitivity: r.sensitivity.slice(0, top).map((x) => ({ id: x.code, name: x.name, correlation: Math.round(x.rho * 100) / 100 })),
+          risk_events: r.risks.map((x) => ({ id: x.code, name: x.name, probability_pct: Math.round(x.probability * 1000) / 10, impact_days: Math.round((x.hours / s.hpd) * 10) / 10, activities: x.activities, triggered_pct: Math.round(x.triggeredPct * 10) / 10 })),
+          note: r.sensitivity.length ? undefined : 'No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule. Set estimates with the set_estimates edit operation, or pass default_estimates.',
+        };
+      } catch (e) { if (abort.signal.aborted) fail('cancelled', 'The Monte Carlo run was cancelled.', 'Start it again when needed.'); throw e; }
+      finally { if (j) rollback(j); }
     }
-    case 'validate': { const s = get(a.handle); return brief(importChecks(s.db, [], s.format)); } // the opened file's format: no XER field-list notices for P6 XML
-    case 'review': { const s = get(a.handle); return reviewSchedule(s.db, { hoursPerDay: s.hpd }); }
+    case 'validate': return brief(importChecks(s.db, [], s.format));
+    case 'review': return reviewSchedule(s.db, { hoursPerDay: s.hpd });
     case 'undo': {
-      const s = get(a.handle);
-      const u = s.undo.pop();
-      if (!u) return { undone: null, note: 'Nothing to undo.' };
-      rollback(u.j);
-      return { undone: u.label, remaining_undo_steps: s.undo.length };
+      if (a.any_caller) requireOwner(s, a.owner_key ?? fail('owner_key_required', 'any_caller undo needs the owner key.', 'Pass owner_key, or undo only your own changes.'), 'Undoing other callers\' changes');
+      const r = undo(s, ctx.caller, !!a.any_caller);
+      return r.undone ? { undone: r.undone, by: r.by, your_remaining_changes: s.history.filter((h) => h.caller === ctx.caller).length } : { undone: null, note: a.any_caller ? 'Nothing to undo.' : `You (${ctx.caller}) have no change to undo on this project.` };
     }
+    case 'redo': { const r = redo(s, ctx.caller); return r.redone ? r : { redone: null, note: 'Nothing to redo (redo is cleared when you make a new change).' }; }
     case 'save': {
-      const s = get(a.handle);
-      const path = a.path ? resolve(String(a.path)) : s.path;
-      if (!path) throw new UserError('Give "path" (this project was created in memory).');
-      if (!a.path && !a.overwrite) throw new UserError(`Saving would overwrite ${path}; pass overwrite: true or a new path.`);
-      const xml = /\.xml$/i.test(path);
-      writeFileSync(path, xml ? writeP6Xml(s.db, { version: a.version ?? '19.12' }) : writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12', encoding: a.encoding ?? 'auto' }));
+      requireOwner(s, a.owner_key, 'Saving');
+      const path = a.path ? pathArg(a.path) : s.path ?? fail('bad_input', 'Give "path" (this project was created in memory).', 'Pass a file path inside the storage root.');
+      if (!a.path && !a.overwrite) fail('confirm_overwrite', `Saving would overwrite ${path}.`, 'Pass overwrite: true, or a new path.');
+      const fmt = String(a.format ?? (/\.mpx$/i.test(path) ? 'mpx' : /\.xml$/i.test(path) ? 'p6xml' : 'xer')).toLowerCase();
+      let bytes: string | Uint8Array, label: string;
+      if (fmt === 'p6xml' || fmt === 'xml') { bytes = writeP6Xml(s.db, { version: a.version ?? '19.12' }); label = 'P6 XML'; }
+      else if (fmt === 'mspdi' || fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto' }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
+      else if (fmt === 'xer') { bytes = writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12', encoding: a.encoding ?? 'auto' }); label = `XER ${a.version ?? s.db.header?.version ?? '19.12'}`; }
+      else return fail('bad_input', `Unknown format "${a.format}".`, 'Use xer, p6xml, mspdi or mpx.');
+      writeOut(path, bytes);
       s.dirty = false;
-      return { saved: path, format: xml ? 'P6 XML' : `XER ${a.version ?? s.db.header?.version ?? '19.12'}` };
+      return { saved: path, format: label, ...((fmt === 'mspdi' || fmt === 'mpx') && allIds(s.db).length > 1 ? { note: 'A Microsoft Project file holds one project: the first one was written.' } : {}) };
     }
-    case 'close': { const s = get(a.handle); sessions.delete(String(a.handle)); return { closed: a.handle, had_unsaved_changes: s.dirty }; }
+    case 'close': { requireOwner(s, a.owner_key, 'Closing'); closeSession(s); forgetEvicted(s.handle); return { closed: s.handle, had_unsaved_changes: s.dirty }; }
+    case 'export_pdf': {
+      const path = pathArg(a.path);
+      const r = printPages(s.db, { projIds: projectIds(s.db, a.project), setup: a.settings ?? {}, filter: a.filter, groupBy: a.group_by, sortBy: a.sort_by, prefs: prefsOf(s) });
+      writeOut(path, /\.html?$/i.test(path) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) }));
+      return { saved: path, pages: r.pages.length, activities: r.activities, ...(r.unknownColumns.length ? { unknown_columns: r.unknownColumns, printable_columns: printableColumns(s.db).map((c) => c.id) } : {}) };
+    }
+    case 'export_excel': { const path = pathArg(a.path); writeOut(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd))); return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] }; }
+    case 'import_excel': {
+      const path = pathArg(a.path);
+      const ids = projectIds(s.db, a.project);
+      if (ids.length !== 1) fail('bad_input', 'The file holds several projects.', 'Say which one with "project".');
+      const pid = s.db.tables.PROJECT.rows.find((p) => p.proj_id === ids[0])!.proj_short_name;
+      let sheets;
+      try { sheets = await readXlsx(readBytes(path)); } catch (e) { if (e instanceof ToolError) throw e; fail('bad_file', (e as Error).message, 'Use an .xlsx saved by export_excel or Excel in that layout.'); }
+      const plan = planImport(s.db, sheets!, pid, s.hpd);
+      if (a.dry_run || !plan.ops.length) return { applied: false, ...(plan.ops.length ? {} : { note: 'Nothing to change.' }), summary: plan.summary, warnings: plan.warnings, operations: plan.ops.slice(0, 200) };
+      return run('edit', { ...a, operations: plan.ops }, ctx).then((r) => ((r as { ok?: boolean }).ok === false ? r : { applied: true, summary: plan.summary, warnings: plan.warnings, note: 'Undo with undo. Run schedule to recalculate dates.' }));
+    }
+    case 'compare': {
+      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
+      const cs = compareSchedules(s.db, other, s.hpd);
+      const count = (o: string, k: string) => cs.filter((c) => c.object === o && c.kind === k).length;
+      const max = Math.min(5000, Number(a.max_changes) || 500);
+      return { summary: Object.fromEntries(['project', 'wbs', 'activity', 'relationship'].map((o) => [o, { added: count(o, 'added'), deleted: count(o, 'deleted'), changed: new Set(cs.filter((c) => c.object === o && c.kind === 'changed').map((c) => c.id)).size }])), changes: cs.slice(0, max), truncated: cs.length > max };
+    }
+    case 'list_reports': return listReports(s.db).map((e) => ({ id: e.id, name: e.name, group: e.group, kind: e.kind, description: e.description }));
+    case 'create_report': {
+      const spec = parseSpec(a) ?? fail('bad_input', 'Give the report a "name" and "subject".', 'subject: activities, assignments, wbs, resources or relationships.');
+      return change(s, ctx.caller, `Report ${spec.name}`, (d) => {
+        const t = (d.tables._REPORT ??= { name: '_REPORT', fields: ['report_id', 'name', 'json'], rows: [] });
+        const ex = t.rows.find((r) => r.name.toLowerCase() === spec.name.toLowerCase());
+        if (ex) ex.json = JSON.stringify(spec); else t.rows.push({ report_id: String(t.rows.length + 1), name: spec.name, json: JSON.stringify(spec) });
+        return { saved: spec.name, id: `custom:${ex?.report_id ?? t.rows.length}`, replaced: !!ex };
+      });
+    }
+    case 'run_report': {
+      const prefs = prefsOf(s);
+      const ids = projectIds(s.db, a.project);
+      let rname: string, report;
+      if (a.definition) { const spec = parseSpec({ name: 'Ad hoc report', ...a.definition }) ?? fail('bad_input', 'definition needs a name and subject.', 'subject: activities, assignments, wbs, resources or relationships.'); report = runSpec(s.db, ids, spec, { prefs }); rname = spec.name; }
+      else { try { const r = runReport(s.db, ids, String(a.report ?? ''), { prefs, weeks: Number(a.weeks) || undefined }); report = r.report; rname = r.entry.name; } catch (e) { fail('bad_input', (e as Error).message, 'Use an id or name from list_reports.'); } }
+      if (!a.path) { const max = Math.min(2000, Number(a.max_rows) || 200); return { report: rname!, title: report!.title, subtitle: report!.subtitle, columns: report!.columns, total_rows: report!.rows.length, rows: report!.rows.slice(0, max).map((r) => ({ cells: r.cells, ...(r.bold ? { group: true, level: r.level ?? 0 } : r.level ? { level: r.level } : {}) })), truncated: report!.rows.length > max }; }
+      const path = pathArg(a.path);
+      const ext = (/\.(\w+)$/.exec(path)?.[1] ?? '').toLowerCase();
+      if (ext === 'pdf') { const pages = reportPages(s.db, ids, report!, a.settings ?? {}, prefs, rname!); writeOut(path, await pagesToPdf(pages, report!.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) })); return { saved: path, pages: pages.length, rows: report!.rows.length }; }
+      if (ext === 'html' || ext === 'htm') writeOut(path, reportHtml(report!, nowStamp()));
+      else if (ext === 'csv' || ext === 'txt') writeOut(path, reportText(report!));
+      else if (ext === 'xlsx') writeOut(path, await reportXlsx(report!));
+      else fail('bad_input', 'path must end in .pdf, .html, .csv, .txt or .xlsx.', 'Choose one of those extensions.');
+      return { saved: path, rows: report!.rows.length };
+    }
   }
   if (LOOKUPS.some((t) => t.name === name)) {
-    const s = get(a.handle);
-    const { handle: _h, ...args } = a;
+    const { handle: _h, caller: _c, async: _a, ...args } = a;
     return runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd);
   }
-  throw new UserError(`Unknown tool ${name}`);
+  return fail('unknown_tool', `Unknown tool ${name}.`, 'tools/list shows the tools.');
 }
 
-// edit: applyOps is one transaction; recording it as well makes it undoable
-const editCall = (a: Record<string, any>) => {
-  const s = get(a.handle);
-  let r!: ReturnType<typeof applyOps>;
-  const j = record(s.db, (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd }); });
-  if (!r.ok) return { ok: false, error: r.error, note: 'Nothing was changed.' };
-  s.undo.push({ label: `Edit (${r.applied} operation${r.applied === 1 ? '' : 's'})`, j }); s.dirty = true;
-  return r;
-};
-
-// ---- JSON-RPC 2.0 over stdio (one message per line), the MCP transport
-type Msg = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: any };
-const send = (m: unknown) => process.stdout.write(JSON.stringify(m) + '\n');
-function handle(m: Msg): void {
-  const reply = (result: unknown) => m.id !== undefined && send({ jsonrpc: '2.0', id: m.id, result });
-  const error = (code: number, message: string) => m.id !== undefined && send({ jsonrpc: '2.0', id: m.id, error: { code, message } });
-  switch (m.method) {
-    case 'initialize': return void reply({ protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'p6-clone', title: 'P6 Clone (headless Primavera P6)', version: VERSION }, instructions: 'Open an XER with open_file (or new_project), then query, edit, schedule, review; save writes the XER. Projects stay open between calls; undo reverses the last change.' });
-    case 'notifications/initialized': case 'notifications/cancelled': return;
-    case 'ping': return void reply({});
-    case 'tools/list': return void reply({ tools: TOOLS });
-    case 'tools/call': {
-      const name = String(m.params?.name ?? ''), args = (m.params?.arguments ?? {}) as Record<string, any>;
-      void (async () => { try {
-        const out = name === 'edit' ? editCall(args) : await callAsync(name, args);
-        const isError = !!(out && typeof out === 'object' && ((out as { ok?: boolean }).ok === false || (out as { error?: unknown }).error && !(out as { activities?: unknown }).activities));
-        return void reply({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out && typeof out === 'object' && !Array.isArray(out) ? out : { result: out }, isError });
-      } catch (e) {
-        return void reply({ content: [{ type: 'text', text: e instanceof UserError ? e.message : `Internal error: ${(e as Error).stack ?? e}` }], isError: true });
-      } })();
-      return;
-    }
-    default: return void error(-32601, `Method not found: ${m.method}`);
+/** One tool call: queued per project, run (or turned into a job), always answered with data or {error}. */
+export async function callTool(name: string, a: Record<string, any>, sessionCaller?: string): Promise<{ out: unknown; isError: boolean }> {
+  const ctx: Ctx = { caller: String(a.caller ?? sessionCaller ?? 'default') };
+  const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
+  const work = async () => {
+    const out = handle != null ? await exclusive(handle, () => run(name, a, ctx)) : await run(name, a, ctx);
+    const s = handle ? sessions.get(handle) : undefined;
+    if (s?.notice && out && typeof out === 'object' && !Array.isArray(out)) { const n = s.notice; s.notice = undefined; return { ...(out as object), _notice: n }; }
+    return out;
+  };
+  const asJob = a.async === true && name !== 'job_status';
+  try {
+    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; return work(); })); return { out: { job_id: job.id, status: 'running', note: 'Call job_status with this job_id for the result.' }, isError: false }; }
+    const p = work();
+    const timeout = Symbol('timeout');
+    const r = await Promise.race([p, new Promise((res) => setTimeout(() => res(timeout), config.softTimeoutMs).unref?.())]);
+    if (r === timeout) { const job = startJob(name, handle, p); return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
+    const isError = !!(r && typeof r === 'object' && (r as { ok?: boolean }).ok === false);
+    return { out: r, isError };
+  } catch (e) {
+    if (e instanceof ToolError) return { out: { error: { code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) } }, isError: true };
+    return { out: { error: { code: 'internal', message: (e as Error).message, hint: 'This is a bug in the server; the project was not changed by this call. Retry, or report it with the message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') } }, isError: true };
   }
 }
-let buf = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk: string) => {
-  buf += chunk;
-  for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
-    const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-    if (!line) continue;
-    let m: Msg;
-    try { m = JSON.parse(line); } catch { send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); continue; }
-    handle(m);
+
+/** An MCP tools/call result; oversized output is cut down to a preview instead of flooding the client. */
+export function toolResult(out: unknown, isError: boolean) {
+  let text = JSON.stringify(out, null, 1);
+  let structured = out && typeof out === 'object' && !Array.isArray(out) ? out : { result: out };
+  if (text.length > config.maxResponseChars) {
+    structured = { truncated: true, size_chars: text.length, note: 'The result was too large to return whole; ask for less (limit, max_rows, filters, a narrower project) or write it to a file (run_report / export_* with path).', preview: text.slice(0, 20000) };
+    text = JSON.stringify(structured, null, 1);
   }
-});
-process.stdin.on('end', () => process.exit(0));
+  return { content: [{ type: 'text', text }], structuredContent: structured, isError };
+}
+
+export const SERVER_INFO = { name: 'p6-clone', title: 'P6 Clone (headless Primavera P6)', version: VERSION };
+export const INSTRUCTIONS = 'Open an XER with open_file (or new_project): keep the handle (for editing) and the owner_key (for save, close and undoing others\' work). Then query, edit, schedule, review, run reports, Monte Carlo; save writes the file. Several agents may share one handle: calls run one at a time, undo and redo act on your own changes (pass caller). Every error has a code and a hint: follow the hint (busy: retry after retry_after seconds; unknown_handle: open the file again). Long work can run with async: true and job_status.';
+export const toolsList = () => TOOLS;
+
+// ---------------------------------------------------------------- start
+export function housekeeping(): void { setInterval(() => { try { sweepIdle(); sweepJobs(); } catch { /* keep serving */ } }, 60000).unref(); }
+
+const isMain = (() => { try { return /server\.(ts|js|cjs)$|p6clone-mcp/.test(process.argv[1] ?? ''); } catch { return false; } })();
+if (isMain) {
+  const args = process.argv.slice(2);
+  const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };
+  setRoot(opt('root') ?? process.env.P6CLONE_ROOT ?? null);
+  loadIndex();
+  housekeeping();
+  if (args.includes('--http')) {
+    config.requireOwnerKey = !args.includes('--no-owner-key');
+    // not awaited: http/stdio import this module, so it must finish evaluating first
+    void import('./http.ts').then(({ startHttp }) => startHttp({ port: Number(opt('port') ?? process.env.P6CLONE_PORT ?? 8765), host: opt('host') ?? '127.0.0.1', token: opt('token') ?? process.env.P6CLONE_TOKEN ?? null }));
+  } else {
+    config.requireOwnerKey = args.includes('--require-owner-key');
+    void import('./stdio.ts').then(({ startStdio }) => startStdio());
+  }
+}

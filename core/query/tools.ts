@@ -38,6 +38,7 @@ export const TOOLS: ToolDef[] = [
   { name: 'list_projects', description: 'Every project in the database (not only the open one): ID, name, status, start and finish, activity count, WBS top-level names, calendar. Use it to find past projects similar to the one being planned or asked about; then read one with the other lookups by passing its ID as "project".', parameters: { type: 'object', properties: { text: { type: 'string', description: 'only projects whose ID or name contains this' } } } },
   { name: 'trace_logic', description: 'Trace Logic (View > Show on Bottom > Trace Logic): an activity\'s predecessors and successors several levels deep, with each link\'s type, lag, relationship free float and whether it is driving. Use it to explain why an activity is where it is.', parameters: { type: 'object', properties: { activity_id: { type: 'string' }, predecessors: { type: 'number', description: 'levels back (default 3, max 10)' }, successors: { type: 'number', description: 'levels forward (default 3, max 10)' }, driving_only: { type: 'boolean' } }, required: ['activity_id'] } },
   { name: 'earned_value', description: 'Earned value as P6 calculates it (baseline budget, planned value at the data date, earned value from % complete, actual cost): project totals, each top-level WBS, and the activities with the worst cost and schedule performance (CPI/SPI). Money in the project currency.', parameters: { type: 'object', properties: { worst: { type: 'number', description: 'how many weakest activities to list (default 10)' } } } },
+  { name: 'list_dictionaries', description: 'The dictionaries edit operations refer to by name: baselines (with which is the project baseline and BL1-BL3), activity/project/resource code types and their values, UDFs, cost accounts, calendars, resource curves, EPS, OBS and roles.', parameters: { type: 'object', properties: { only: { type: 'string', description: 'one of baselines, codes, udfs, accounts, calendars, curves, eps, obs, roles' }, max_values: { type: 'number', description: 'code values listed per type (default 50)' } } } },
   { name: 'resource_summary', description: 'Resources with their assignments: total budgeted/remaining units and cost, first/last use. With `resource`, the activities that resource is assigned to.', parameters: { type: 'object', properties: { resource: { type: 'string' }, limit: { type: 'number' } } } },
 ];
 // every lookup can read a project other than the open one
@@ -63,6 +64,25 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
   const byCode = (code: string) => tasks.find((t) => t.task_code.toLowerCase() === String(code).toLowerCase());
 
   switch (name) {
+    case 'list_dictionaries': {
+      const want = (k: string) => !args.only || String(args.only).toLowerCase() === k;
+      const maxV = Math.min(1000, Number(args.max_values) || 50);
+      const P = rows(db, 'PROJECT');
+      const nameOf = (id: string) => P.find((p) => p.proj_id === id)?.proj_short_name ?? null;
+      const codes = (type: string, tid: string, tname: string, val: string, vshort: string, vname: string) => rows(db, type).map((t) => { const vs = rows(db, val).filter((v) => v[tid] === t[tid]); return { type: t[tname], values: vs.slice(0, maxV).map((v) => ({ code: v[vshort], name: v[vname] })), total_values: vs.length }; });
+      const tree = (tb: string, key: string, name: string, id: string, parent: string) => { const R = rows(db, tb); return R.map((r) => ({ id: r[key], name: r[name], parent: R.find((x) => x[id] === r[parent])?.[key] ?? null })); };
+      return {
+        ...(want('baselines') ? { baselines: all.filter((p) => open.has(p.proj_id)).map((p) => ({ project: p.proj_short_name, project_baseline: nameOf(p.sum_base_proj_id), bl1: nameOf(p._bl1), bl2: nameOf(p._bl2), bl3: nameOf(p._bl3), saved: P.filter((b) => b._baseline_of === p.proj_id).map((b) => ({ name: b.proj_short_name, saved_on: d(b._baseline_date), finish: d(b.scd_end_date || b.plan_end_date) })) })) } : {}),
+        ...(want('codes') ? { activity_codes: codes('ACTVTYPE', 'actv_code_type_id', 'actv_code_type', 'ACTVCODE', 'short_name', 'actv_code_name'), project_codes: codes('PCATTYPE', 'proj_catg_type_id', 'proj_catg_type', 'PCATVAL', 'proj_catg_short_name', 'proj_catg_name'), resource_codes: codes('RCATTYPE', 'rsrc_catg_type_id', 'rsrc_catg_type', 'RCATVAL', 'rsrc_catg_short_name', 'rsrc_catg_name') } : {}),
+        ...(want('udfs') ? { udfs: rows(db, 'UDFTYPE').map((u) => ({ name: u.udf_type_label, subject: u.table_name, data_type: u.logical_data_type })) } : {}),
+        ...(want('accounts') ? { cost_accounts: tree('ACCOUNT', 'acct_short_name', 'acct_name', 'acct_id', 'parent_acct_id') } : {}),
+        ...(want('calendars') ? { calendars: rows(db, 'CALENDAR').map((c) => ({ name: c.clndr_name, type: c.clndr_type?.replace(/^CA_/, ''), hours_per_day: Number(c.day_hr_cnt) || null, project: c.proj_id ? nameOf(c.proj_id) : undefined })) } : {}),
+        ...(want('curves') ? { resource_curves: rows(db, 'RSRCCURVDATA').map((c) => c.curv_name) } : {}),
+        ...(want('eps') ? { eps: tree('EPS', 'eps_short_name', 'eps_name', 'eps_id', 'parent_eps_id') } : {}),
+        ...(want('obs') ? { obs: tree('OBS', 'obs_name', 'obs_name', 'obs_id', 'parent_obs_id') } : {}),
+        ...(want('roles') ? { roles: tree('ROLES', 'role_short_name', 'role_name', 'role_id', 'parent_role_id') } : {}),
+      };
+    }
     case 'list_projects': {
       const q = String(args.text ?? '').toLowerCase();
       const count = new Map<string, number>();
