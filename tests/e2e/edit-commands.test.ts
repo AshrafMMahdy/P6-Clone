@@ -66,6 +66,15 @@ test('link activities, fill down, find next', { timeout: 180_000 }, async () => 
     await win.waitForSelector('.dialog:has-text("Current Data Date")');
     await win.click('.dialog button:has-text("Schedule")');
     await win.waitForSelector('.toast:has-text("Scheduled")');
+    // Predecessors tab: the FS link from A1010 drives A1020 (zero relationship free float)
+    await row('A1020').click();
+    await win.click('.tab:has-text("Predecessors")');
+    const predRow = win.locator('.tbl tr', { hasText: 'A1010' }).first();
+    await predRow.waitFor();
+    const cells = await predRow.locator('td').allInnerTexts();
+    assert.equal(cells[6], 'Yes', `driving cell in ${cells}`);
+    assert.equal(cells[7], '0');
+
     await win.keyboard.press('Control+s');
     await win.waitForSelector('.toast:has-text("committed")');
     const db = linesToDb(readFileSync(join(userData, 'p6clone-db.json'), 'utf8').split('\n')).db;

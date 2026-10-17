@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Tabs } from '../components/Layout.tsx';
 import { getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
 import { useCtx } from '../hooks.ts';
 import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, REL_TYPES, RSRC_TYPES, TASK_TYPES, activityPct, daysToHours, fmtDate, fmtDur, isCritical, isMilestone, setActual, setPercent, statusOf, STATUS, wbsPath, type Ctx } from '../model.ts';
 import { addField, nextId, rows, table, type Row } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
-import { p6num } from '../../core/schedule/cpm.ts';
+import { p6num, relationshipFloat } from '../../core/schedule/cpm.ts';
 import { durationPct } from '../../core/progress/update.ts';
 import { recalcAssignment, priceOf } from '../../core/resource/assign.ts';
 
@@ -176,6 +176,7 @@ function Rels({ t, ctx, which }: { t: Row; ctx: Ctx; which: 'pred' | 'succ' }) {
   const list = which === 'pred' ? ctx.predsOf.get(t.task_id) ?? [] : ctx.succsOf.get(t.task_id) ?? [];
   const other = (r: Row) => ctx.taskById.get(which === 'pred' ? r.pred_task_id : r.task_id);
   const edit = (id: string, patch: Partial<Row>, label: string) => mutate(label, (db) => { Object.assign(db.tables.TASKPRED.rows.find((x) => x.task_pred_id === id)!, patch); });
+  const relFF = useMemo(() => relationshipFloat(ctx.db, ctx), [ctx]);
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid #ccc' }}>
       <div style={{ padding: '3px 6px', display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -186,10 +187,10 @@ function Rels({ t, ctx, which }: { t: Row; ctx: Ctx; which: 'pred' | 'succ' }) {
       </div>
       <div className="tblwrap" style={{ flex: 1, margin: '0 6px 6px' }}>
         <table className="tbl">
-          <thead><tr><th>Activity ID</th><th>Activity Name</th><th>Relationship Type</th><th>Lag</th><th>Start</th><th>Finish</th><th>Critical</th><th>Project</th></tr></thead>
+          <thead><tr><th>Activity ID</th><th>Activity Name</th><th>Relationship Type</th><th>Lag</th><th>Start</th><th>Finish</th><th>Driving</th><th>Relationship Free Float</th><th>Critical</th><th>Project</th></tr></thead>
           <tbody>
             {list.map((r) => {
-              const o = other(r);
+              const o = other(r), ff = relFF(r);
               return (
                 <tr key={r.task_pred_id} className={sel === r.task_pred_id ? 'sel' : ''} onMouseDown={() => setSel(r.task_pred_id)}>
                   <td>{o?.task_code ?? `(external ${which === 'pred' ? r.pred_task_id : r.task_id})`}</td>
@@ -198,12 +199,14 @@ function Rels({ t, ctx, which }: { t: Row; ctx: Ctx; which: 'pred' | 'succ' }) {
                   <td><input type="number" step="0.5" defaultValue={fmtDur(r.lag_hr_cnt, ctx.prefs)} key={r.lag_hr_cnt} style={{ width: 60 }} onBlur={(e) => { const h = p6num(daysToHours(Number(e.target.value || 0), ctx.prefs)); if (h !== r.lag_hr_cnt) edit(r.task_pred_id, { lag_hr_cnt: h }, 'Edit Lag'); }} /></td>
                   <td>{o ? fmtDate(o.act_start_date || o.early_start_date, ctx.prefs) + (o.act_start_date ? ' A' : '') : ''}</td>
                   <td>{o ? fmtDate(o.act_end_date || o.early_end_date, ctx.prefs) + (o.act_end_date ? ' A' : '') : ''}</td>
+                  <td>{ff == null ? '' : ff === 0 ? 'Yes' : 'No'}</td>
+                  <td style={{ textAlign: 'right' }}>{ff == null ? '' : fmtDur(ff / 60, ctx.prefs)}</td>
                   <td>{o && isCritical(o, ctx) ? 'Yes' : 'No'}</td>
                   <td>{ctx.proj.get(which === 'pred' ? r.pred_proj_id : r.proj_id)?.proj_short_name ?? (which === 'pred' ? r.pred_proj_id : r.proj_id)}</td>
                 </tr>
               );
             })}
-            {!list.length && <tr><td colSpan={8} className="muted">None</td></tr>}
+            {!list.length && <tr><td colSpan={10} className="muted">None</td></tr>}
           </tbody>
         </table>
       </div>

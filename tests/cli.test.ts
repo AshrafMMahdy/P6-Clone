@@ -109,6 +109,8 @@ test('query shows activity codes and UDFs and finds by code', () => {
   const a = JSON.parse(run('query', f, 'activity', 'A160', '--json').stdout);
   assert.deepEqual(a.activity_codes, { 'TYPE OF WORK': 'civil - civil works' });
   assert.deepEqual(a.udfs, { '(New)': '1000' });
+  const b = JSON.parse(run('query', f, 'activity', 'A1020', '--json').stdout);
+  assert.deepEqual(b.predecessors.map((p: { id: string; driving: boolean; rel_free_float_days: number }) => [p.id, p.driving, p.rel_free_float_days]), [['A1050', true, 0]]);
   const found = JSON.parse(run('query', f, 'find', '--code', 'TYPE OF WORK=civil', '--limit', '100', '--json').stdout);
   assert.equal(found.total_matches, 8);
   assert.ok(found.activities.some((x: { id: string }) => x.id === 'A160'));

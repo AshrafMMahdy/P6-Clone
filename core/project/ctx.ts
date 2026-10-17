@@ -46,3 +46,4 @@ export function isCritical(r: Row, ctx: { proj: Map<string, Row> }): boolean {
   if (p?.critical_path_type === 'CT_DrivPath') return r.driving_path_flag === 'Y';
   return Number(r.total_float_hr_cnt) <= Number(p?.critical_drtn_hr_cnt || 0);
 }
+

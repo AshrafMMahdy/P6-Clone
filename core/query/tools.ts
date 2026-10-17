@@ -5,6 +5,7 @@ import type { Db, Row } from '../db.ts';
 import { rows } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { isCritical, type Ctx } from '../project/ctx.ts';
+import { relationshipFloat } from '../schedule/cpm.ts';
 import { statusOf, projectName } from '../project/edit.ts';
 
 /** A lookup described for a language model (JSON Schema parameters). */
@@ -29,7 +30,7 @@ export const TOOLS: ToolDef[] = [
     sort: { type: 'string', enum: ['start', 'finish', 'total_float', 'duration'], description: 'Default: start' },
     limit: { type: 'number', description: 'Default 25, at most 100' },
   } } },
-  { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type and lag), resource assignments, activity codes, user defined fields (UDFs), notes.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
+  { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type, lag, driving and relationship free float), resource assignments, activity codes, user defined fields (UDFs), notes.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
   { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges. Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2' } } } },
   { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: {} } },
@@ -111,7 +112,11 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const t = byCode(args.activity_id);
       if (!t) return { error: `No activity with ID "${args.activity_id}" in the open project(s).` };
       const byId = ctx.taskById;
-      const rel = (r: Row, other: string) => { const o = byId.get(other); return { id: o?.task_code ?? other, name: o?.task_name ?? '(outside the open projects)', type: r.pred_type.replace('PR_', ''), lag_days: days(r.lag_hr_cnt, hpd), other_start: d(o ? start(o) : ''), other_finish: d(o ? finish(o) : '') }; };
+      const relFF = relationshipFloat(db, ctx);
+      const rel = (r: Row, other: string) => {
+        const o = byId.get(other), ff = relFF(r);
+        return { id: o?.task_code ?? other, name: o?.task_name ?? '(outside the open projects)', type: r.pred_type.replace('PR_', ''), lag_days: days(r.lag_hr_cnt, hpd), other_start: d(o ? start(o) : ''), other_finish: d(o ? finish(o) : ''), driving: ff == null ? null : ff === 0, rel_free_float_days: ff == null ? null : Math.round((ff / 60 / hpd) * 100) / 100 };
+      };
       const bl = ctx.baseline.get(`${t.task_code}|${t.proj_id}`);
       const cal = rows(db, 'CALENDAR').find((c) => c.clndr_id === t.clndr_id);
       const codes = new Map(rows(db, 'ACTVCODE').map((c) => [c.actv_code_id, c])), codeTypes = new Map(rows(db, 'ACTVTYPE').map((c) => [c.actv_code_type_id, c.actv_code_type]));

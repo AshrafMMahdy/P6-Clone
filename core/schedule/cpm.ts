@@ -120,6 +120,17 @@ export function calendarResolver(db: Db, findings: Finding[]) {
   return { get, fallback: (projCal?: string) => get(projCal) ?? get(defRow?.clndr_id) ?? std };
 }
 
+/** P6 uses the project's own calendar when it has the same name as the global calendar an activity points to: proj_id|clndr_id -> clndr_id. */
+function sameNameProjectCals(db: Db): Map<string, string> {
+  const out = new Map<string, string>();
+  const calRows = rows(db, 'CALENDAR');
+  for (const g of calRows) {
+    if (g.proj_id) continue;
+    for (const pc of calRows) if (pc.proj_id && pc.clndr_id !== g.clndr_id && (pc.clndr_name || '').trim().toLowerCase() === (g.clndr_name || '').trim().toLowerCase()) out.set(pc.proj_id + '|' + g.clndr_id, pc.clndr_id);
+  }
+  return out;
+}
+
 export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedOptions> = {}): ScheduleResult {
   const findings: Finding[] = [];
   const cals = calendarResolver(db, findings);
@@ -142,15 +153,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   const rsrcCal = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.clndr_id]));
   const firstRsrc = new Map<string, string>();
   for (const a of rows(db, 'TASKRSRC')) if (!firstRsrc.has(a.task_id)) firstRsrc.set(a.task_id, a.rsrc_id);
-  // P6 uses the project's own calendar when it has the same name as the global calendar an activity points to
-  const sameNameProjectCal = new Map<string, string>();
-  {
-    const calRows = rows(db, 'CALENDAR');
-    for (const g of calRows) {
-      if (g.proj_id) continue;
-      for (const pc of calRows) if (pc.proj_id && pc.clndr_id !== g.clndr_id && (pc.clndr_name || '').trim().toLowerCase() === (g.clndr_name || '').trim().toLowerCase()) sameNameProjectCal.set(pc.proj_id + '|' + g.clndr_id, pc.clndr_id);
-    }
-  }
+  const sameNameProjectCal = sameNameProjectCals(db);
   const asgByTask = new Map<string, Row[]>();
   for (const a of rows(db, 'TASKRSRC')) { let l = asgByTask.get(a.task_id); if (!l) asgByTask.set(a.task_id, (l = [])); l.push(a); }
   const rsrcType = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
@@ -645,4 +648,31 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   const first = [...projects.values()][0];
   const log = buildScheduleLog({ projects: [...projects.values()].map((p) => p.row), dataDate: first.dd, opts: first.opts, findings, stats, acts: order.map((a) => ({ code: a.code, name: a.row.task_name })) });
   return { ok: true, log, findings, stats, projects: out };
+}
+
+/**
+ * Relationship free float in work minutes, judged from the stored dates (no rescheduling): the successor's early date
+ * less the predecessor's date plus lag (lag on the project's relationship-lag calendar, slack on the predecessor's
+ * calendar like the scheduler; resource calendars of resource dependent activities are not considered). 0 = driving; within a minute counts as 0 (P6 stores some milestones at hh:01).
+ * null when it cannot be judged: an activity unscheduled, or the successor end it ties to has already happened.
+ */
+export function relationshipFloat(db: Db, ctx: { taskById: Map<string, Row>; proj: Map<string, Row> }): (r: Row) => number | null {
+  const cals = calendarResolver(db, []), sameName = sameNameProjectCals(db);
+  const calOf = (t: Row) => cals.get(sameName.get(t.proj_id + '|' + t.clndr_id) ?? t.clndr_id) ?? cals.fallback(ctx.proj.get(t.proj_id)?.clndr_id);
+  const lagKind = new Map<string, LagCalendar>();
+  return (r) => {
+    const a = ctx.taskById.get(r.pred_task_id), b = ctx.taskById.get(r.task_id);
+    const toFinish = r.pred_type === 'PR_FF' || r.pred_type === 'PR_SF';
+    if (!a || !b || b.act_end_date || (!toFinish && b.act_start_date)) return null;
+    const from = parseP6Date(r.pred_type === 'PR_SS' || r.pred_type === 'PR_SF' ? a.act_start_date || a.early_start_date : a.act_end_date || a.early_end_date);
+    const to = parseP6Date(toFinish ? b.early_end_date : b.early_start_date || b.restart_date);
+    if (from == null || to == null) return null;
+    const proj = ctx.proj.get(b.proj_id);
+    let kind = lagKind.get(b.proj_id);
+    if (!kind) lagKind.set(b.proj_id, (kind = proj ? optionsFor(db, proj).lagCalendar : 'predecessor'));
+    const lagCal = kind === 'successor' ? calOf(b) : kind === '24h' ? WorkCalendar.continuous() : kind === 'project' ? cals.fallback(proj?.clndr_id) : calOf(a);
+    const lag = Number(r.lag_hr_cnt || 0) * 60;
+    const ff = calOf(a).workBetween(lag ? lagCal.addWork(from, lag) : from, to);
+    return Math.abs(ff) <= 1 ? 0 : ff;
+  };
 }
