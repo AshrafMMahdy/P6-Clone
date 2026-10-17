@@ -24,6 +24,25 @@ const RTYPE: Record<string, string> = { labor: 'RT_Labor', nonlabor: 'RT_Equip',
 const PRIO: Record<string, string> = { top: 'PT_Top', high: 'PT_High', normal: 'PT_Normal', low: 'PT_Low', lowest: 'PT_Lowest' };
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
+export const OP_NAMES = ['add_project', 'set_project', 'add_calendar', 'add_holidays', 'add_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource'];
+
+/** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
+export const OP_GUIDE = [
+  'Operations (JSON objects with "op"; [x] = optional; durations and lags in days; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant):',
+  `add_project: id, start, [name], [must_finish_by], [calendar]`,
+  `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar]`,
+  `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
+  `add_holidays: calendar, dates [dates]`,
+  `add_wbs: code, [name], [parent] (parent WBS code or dotted path; omit for top level), [project]`,
+  `add_activity: name, [id], [wbs] (WBS code; omit = project root), [type] (${Object.keys(TYPES).join(', ')}), [duration_days], [calendar], [priority] (${Object.keys(PRIO).join(', ')}), [constraint {type, date}] (types: ${Object.keys(CSTR).filter((k) => k !== 'none').join(', ')}), [secondary_constraint], [project]`,
+  `update_activity: id, then any add_activity field, plus [new_id], [remaining_days], [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
+  `delete_activity / dissolve_activity: id`,
+  `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead)`,
+  `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
+  `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day], [price_per_unit], [calendar], [parent]`,
+  `assign_resource: activity, resource, [units_per_day] or [units]; unassign_resource: activity, resource`,
+].join('\n');
+
 class OpError extends Error {}
 const fail = (m: string): never => { throw new OpError(m); };
 const str = (v: unknown, what: string): string => (typeof v === 'string' && v.trim() ? v.trim() : fail(`"${what}" is required (text).`));
@@ -144,7 +163,7 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       const t = addActivity(db, p.proj_id, w.wbs_id, hpd);
       if (op.id != null) {
         const code = str(op.id, 'id');
-        if (rows(db, 'TASK').some((x) => x !== t && x.proj_id === p.proj_id && x.task_code === code)) fail(`Activity ID "${code}" already exists in ${p.proj_short_name}.`);
+        if (rows(db, 'TASK').some((x) => x.task_id !== t.task_id && x.proj_id === p.proj_id && x.task_code === code)) fail(`Activity ID "${code}" already exists in ${p.proj_short_name}.`);
         t.task_code = code;
       }
       t.task_name = str(op.name, 'name');
@@ -156,7 +175,7 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       const t = activity(op.id, op.project);
       if (op.new_id != null) {
         const code = str(op.new_id, 'new_id');
-        if (rows(db, 'TASK').some((x) => x !== t && x.proj_id === t.proj_id && x.task_code === code)) fail(`Activity ID "${code}" already exists.`);
+        if (rows(db, 'TASK').some((x) => x.task_id !== t.task_id && x.proj_id === t.proj_id && x.task_code === code)) fail(`Activity ID "${code}" already exists.`);
         t.task_code = code;
       }
       if (op.wbs != null) t.wbs_id = wbsOf(project(projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name), op.wbs).wbs_id;
@@ -219,7 +238,7 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       return { unassigned: `${r.rsrc_short_name} -> ${t.task_code}` };
     }
   }
-  return fail(`Unknown operation "${op.op}". Known: add_project, set_project, add_calendar, add_holidays, add_wbs, add_activity, update_activity, delete_activity, dissolve_activity, add_relationship, update_relationship, delete_relationship, add_resource, assign_resource, unassign_resource.`);
+  return fail(`Unknown operation "${op.op}". Known: ${OP_NAMES.join(', ')}.`);
 }
 
 function updateActivity(db: Db, t: Row, op: Op, hpd: number, calendar: (n: unknown) => Row, cstr: (v: unknown) => [string, string]): void {

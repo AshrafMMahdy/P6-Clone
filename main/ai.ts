@@ -75,6 +75,7 @@ export class AiStore {
   config(): AiConfig { const s = this.read(); return { enabled: s.enabled, provider: s.provider, baseUrl: s.baseUrl, model: s.model, extraHeaders: this.headers(s), extraBody: s.extraBody }; }
 }
 
+// Anthropic max_tokens 16000: room for a WBS area of schedule operations in one tool call
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 
 /** Build the HTTP request for a provider, with the user's extra headers and parameters (pure, so it can be tested). */
@@ -108,7 +109,7 @@ function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: strin
     return {
       url: `${base}${/\/v1$/.test(base) ? '' : '/v1'}/messages`,
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: { model: cfg.model, max_tokens: 4096, system: req.system, messages, tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })) },
+      body: { model: cfg.model, max_tokens: 16000, system: req.system, messages, tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })) },
     };
   }
   const base = trimSlash(cfg.baseUrl || 'https://api.openai.com/v1');

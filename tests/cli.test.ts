@@ -153,3 +153,29 @@ test('compare matches activities by Activity ID, so renumbered internal ids are 
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /Activities: 0 added, 0 deleted, 0 changed/);
 });
+
+test('the operations guide given to the AI assistant covers every operation, and every listed operation exists', async () => {
+  const { applyOps, OP_GUIDE, OP_NAMES } = await import('../core/project/ops.ts');
+  const { emptyDb } = await import('../core/db.ts');
+  const src = readFileSync(join(import.meta.dirname, '..', 'core', 'project', 'ops.ts'), 'utf8');
+  const handled = [...src.matchAll(/case '([a-z_]+)'/g)].map((m) => m[1]);
+  assert.deepEqual([...OP_NAMES].sort(), [...new Set(handled)].sort());
+  for (const n of OP_NAMES) assert.match(OP_GUIDE, new RegExp(`(^|\n|/ )${n}:|${n} /|; ${n}:`), n);
+  for (const n of OP_NAMES) assert.doesNotMatch(applyOps(emptyDb(), [{ op: n }]).error?.message ?? '', /Unknown operation/, n);
+  // a small schedule built only from what the guide says
+  const db = emptyDb();
+  const r = applyOps(db, [
+    { op: 'add_project', id: 'B5', name: 'Five-story building', start: '2026-11-02' },
+    { op: 'add_calendar', name: '6-day', work_week: { mon: [['07:00', '15:00']], tue: [['07:00', '15:00']], wed: [['07:00', '15:00']], thu: [['07:00', '15:00']], fri: [['07:00', '15:00']], sat: [['07:00', '15:00']], sun: [] }, holidays: ['2026-12-25'] },
+    { op: 'add_wbs', code: 'SUB', name: 'Substructure' }, { op: 'add_wbs', code: 'L1', name: 'Level 1', parent: 'SUB' },
+    { op: 'add_activity', id: 'M0', name: 'Start', type: 'start_milestone', wbs: 'SUB' },
+    { op: 'add_activity', id: 'A1000', name: 'Excavation', wbs: 'SUB', duration_days: 10, calendar: '6-day' },
+    { op: 'add_activity', id: 'A1010', name: 'Columns L1', wbs: 'SUB.L1', duration_days: 5, constraint: { type: 'start_on_or_after', date: '2026-11-20' } },
+    { op: 'add_activity', id: 'M9', name: 'Finish', type: 'finish_milestone' },
+    { op: 'add_relationship', pred: 'M0', succ: 'A1000' }, { op: 'add_relationship', pred: 'A1000', succ: 'A1010', type: 'SS', lag_days: 3 },
+    { op: 'add_relationship', pred: 'A1010', succ: 'M9' },
+    { op: 'add_resource', id: 'CREW', type: 'labor', units_per_day: 8 }, { op: 'assign_resource', activity: 'A1010', resource: 'CREW' },
+  ]);
+  assert.equal(r.ok, true, r.error?.message ?? '');
+  assert.equal(db.tables.TASK.rows.length, 4);
+});

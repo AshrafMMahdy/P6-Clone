@@ -11,7 +11,8 @@ import { compactHistory } from './context.ts';
 import type { AiPublicConfig, ChatMsg } from '../../main/ai.ts';
 
 interface Line { who: 'user' | 'ai' | 'tool' | 'error'; text: string }
-const MAX_ROUNDS = 12;
+// rounds without a successful change (lookups, retries) are capped; building a schedule keeps going while edits land
+const MAX_IDLE_ROUNDS = 12, MAX_ROUNDS = 60;
 const LABEL: Record<string, string> = { ui_menu: 'Menu', ui_click: 'Clicked', ui_type: 'Typed into', ui_screen: 'Looked at the screen', select_activity: 'Selected', edit_project: 'Changed the project', undo: 'Undo',  project_summary: 'Read the project summary', find_activities: 'Searched activities', get_activity: 'Opened activity', list_wbs: 'Read the WBS', critical_path: 'Read the critical path', schedule_health: 'Ran the schedule health check', resource_summary: 'Read resource assignments' };
 
 function systemPrompt(actions: boolean): string {
@@ -29,7 +30,15 @@ function systemPrompt(actions: boolean): string {
     actions
       ? 'When the user asks you to DO something (not only explain), do it with the ui_* tools so they can watch each step: ui_menu for menu commands, ui_screen to see the open dialog, ui_type to fill its fields, ui_click for buttons (for example ui_menu "Tools > Schedule..." then ui_click "Schedule"). For changes to activities, relationships, resources or calendars use edit_project (one undoable step). Say briefly what you are doing. Never delete anything unless the user asked. After changing logic or durations, schedule (F9) so the dates update.'
       : 'The user has not allowed you to operate the application; give the steps instead.',
-  ].join('\n');
+    actions
+      ? ['When the user asks you to create or plan a schedule (for example "a schedule for a five-story building"), build it as an experienced planner would, explaining briefly as you go:',
+        '1. If the request leaves the project start date or major scope open, assume sensible values and say what you assumed (do not stop to ask). If no project is open or the request is for a new one, start the first edit_project call with add_project (short ID, name, start date).',
+        '2. One call for the WBS: phases such as pre-construction / procurement, substructure, superstructure per floor, envelope, MEP, finishes per floor, commissioning and handover.',
+        '3. Then one call per WBS area with its activities: IDs like A1000, A1010 (steps of 10), realistic durations in days, start and finish milestones, and the logic inside the area; link areas to each other in the same or the next call. Repeat floor-by-floor work as a pattern (typical-floor cycle) and overlap trades with SS/FS lags where real crews would.',
+        '4. Every activity needs a predecessor and a successor except the start and finish milestones. Use constraints only for real external dates.',
+        '5. When everything is in: schedule on screen (ui_menu "Tools > Schedule...", ui_click "Schedule"), then check with schedule_health and critical_path, fix open ends or other problems, schedule again, and summarise: activity count, finish date, the critical path, and your assumptions.'].join('\n')
+      : '',
+  ].filter(Boolean).join('\n');
 }
 
 export function AssistantPanel() {
@@ -60,7 +69,7 @@ export function AssistantPanel() {
     history.current.push({ role: 'user', content: q });
     setBusy(true); stopped.current = false;
     try {
-      for (let round = 0; round < MAX_ROUNDS && !stopped.current; round++) {
+      for (let round = 0, idle = 0; round < MAX_ROUNDS && idle < MAX_IDLE_ROUNDS && !stopped.current; round++) {
         const id = `${Date.now()}-${round}`;
         callId.current = id;
         const allow = cfg.actions !== false;
@@ -78,9 +87,11 @@ export function AssistantPanel() {
           const json = JSON.stringify(out);
           history.current.push({ role: 'tool', toolCallId: c.id, name: c.name, content: json.length > 60000 ? json.slice(0, 60000) + '... (truncated)' : json });
           const err = (out as { error?: string })?.error;
+          if (c.name === 'edit_project' && !err) idle = -1;
           add({ who: 'tool', text: `${LABEL[c.name] ?? c.name}${c.args?.path ? ` ${c.args.path}` : c.args?.target ? ` "${c.args.target}"` : c.args?.field ? ` "${c.args.field}"` : c.args?.activity_id ? ` ${c.args.activity_id}` : c.args?.text ? ` for "${c.args.text}"` : ''}${err ? ` (${err})` : ''}` });
         }
-        if (round === MAX_ROUNDS - 1) add({ who: 'error', text: 'Stopped after many lookups. Try a narrower question.' });
+        idle++;
+        if (round === MAX_ROUNDS - 1 || idle === MAX_IDLE_ROUNDS) add({ who: 'error', text: 'Stopped after many steps. Ask me to continue, or try a narrower question.' });
       }
     } finally { setBusy(false); callId.current = null; }
   };

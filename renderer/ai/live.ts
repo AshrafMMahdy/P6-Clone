@@ -2,7 +2,7 @@
 // menus open on screen with the chosen item highlighted, typing appears character by character. Every change goes
 // through the normal undoable edit path (Ctrl+Z), and deletions ask first.
 import type { ToolDef } from '../../core/query/tools.ts';
-import { applyOps } from '../../core/project/ops.ts';
+import { applyOps, OP_GUIDE, OP_NAMES } from '../../core/project/ops.ts';
 import { rows } from '../../core/db.ts';
 import { doUndo, getDb, getUi, mutate, setUi } from '../store.ts';
 
@@ -28,7 +28,7 @@ export const LIVE_TOOLS: ToolDef[] = [
   { name: 'ui_type', description: 'Type text into a field of the open dialog, found by its label (e.g. "Current Data Date"). The text appears as if typed.', parameters: { type: 'object', properties: { field: { type: 'string' }, text: { type: 'string' } }, required: ['field', 'text'] } },
   { name: 'ui_screen', description: 'What is on screen now: the window, the open dialog with its fields and buttons, the selected activity. Use it to decide the next click.', parameters: { type: 'object', properties: {} } },
   { name: 'select_activity', description: 'Select an activity in the Activities window and scroll it into view.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
-  { name: 'edit_project', description: 'Change the open project with the same JSON operations as the headless CLI (add_activity, update_activity, add_relationship, assign_resource, ...; durations in days). Applied as one undoable step; changed activities are selected so the user sees them. Deleting asks the user first.', parameters: { type: 'object', properties: { operations: { type: 'array', items: { type: 'object', properties: { op: { type: 'string' } }, required: ['op'] } } }, required: ['operations'] } },
+  { name: 'edit_project', description: 'Change the open project, or create a new one, with JSON operations. Each call is one undoable step (all or nothing: if one operation fails nothing changes and the error names it); changed activities are selected so the user sees them; deleting asks the user first. A batch that starts with add_project creates that project and opens it on screen; later operations in the batch and later calls go to it. Build big schedules in several calls (about one WBS area, 30-60 operations, per call).\n' + OP_GUIDE, parameters: { type: 'object', properties: { operations: { type: 'array', items: { type: 'object', properties: { op: { type: 'string', enum: OP_NAMES } }, required: ['op'] } } }, required: ['operations'] } },
   { name: 'undo', description: 'Undo the last change (Edit > Undo).', parameters: { type: 'object', properties: {} } },
 ];
 
@@ -182,12 +182,19 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         const dels = ops.filter((o: { op?: string }) => o?.op === 'delete_activity' || o?.op === 'dissolve_activity' || o?.op === 'delete_relationship');
         if (dels.length && !(await window.p6.confirm(`The AI assistant wants to make ${ops.length} change(s), including ${dels.length} deletion(s).`, ops.map((o: Record<string, unknown>) => `${o.op} ${o.id ?? `${o.pred ?? ''} ${o.succ ?? ''}`}`).join('\n').slice(0, 800) + '\n\nAllow? (You can undo with Ctrl+Z.)'))) return { error: 'The user declined.' };
         const projId = getUi().openProjects[0];
-        const proj = projId ? rows(getDb(), 'PROJECT').find((p) => p.proj_id === projId)?.proj_short_name : undefined;
-        // single open project: operations need not name it
-        const withProj = proj ? ops.map((o: Record<string, unknown>) => ({ project: proj, ...o })) : ops;
+        let proj = projId ? rows(getDb(), 'PROJECT').find((p) => p.proj_id === projId)?.proj_short_name : undefined;
+        // operations need not name the project: the open one, or the one this batch creates (from its add_project on)
+        const withProj = ops.map((o: Record<string, unknown>) => {
+          if (o?.op === 'add_project' && typeof o.id === 'string') { proj = o.id.trim(); return o; }
+          return proj && o?.op !== 'add_calendar' && o?.op !== 'add_holidays' && o?.op !== 'add_resource' ? { project: proj, ...o } : o;
+        });
         let r!: ReturnType<typeof applyOps>;
         const before = new Set(rows(getDb(), 'TASK').map((t) => t.task_id));
-        mutate(`AI: ${ops.length} change(s)`, (d) => { r = applyOps(d, withProj, { hoursPerDay: getUi().prefs.hoursPerDay }); if (!r.ok) throw new Error(r.error!.message); });
+        mutate(`AI: ${ops.length} change(s)`, (d) => { r = applyOps(d, withProj, { hoursPerDay: getUi().prefs.hoursPerDay }); if (!r.ok) throw new Error(`operation ${r.error!.index + 1} (${(r.error!.op as { op?: string })?.op ?? '?'}): ${r.error!.message} Nothing in this call was applied.`); });
+        // a created project is opened on screen, like File > Open
+        const created = withProj.filter((o: Record<string, unknown>) => o?.op === 'add_project').at(-1) as { id?: string } | undefined;
+        const newId = created && rows(getDb(), 'PROJECT').find((p) => p.proj_short_name === String(created.id).trim() && !p._baseline_of)?.proj_id;
+        if (newId) setUi({ openProjects: [newId], view: 'activities', selTasks: [], selTask: undefined, selWbs: undefined, collapsed: {} });
         const codes = new Set(ops.flatMap((o: Record<string, unknown>) => [o.id, o.activity, o.pred, o.succ].filter(Boolean).map(String)));
         const touched = rows(getDb(), 'TASK').filter((t) => !before.has(t.task_id) || codes.has(t.task_code)).map((t) => t.task_id);
         if (touched.length) setUi({ view: 'activities', selTasks: touched, selTask: touched[0], revealTask: touched[0] });
