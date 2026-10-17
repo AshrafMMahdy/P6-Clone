@@ -46,6 +46,8 @@ XER files the way a scheduler does in P6. Two front doors, one engine:
 - **CLI** (`cli/p6clone.ts`): one command per call; each call reads and writes files. Simplest when the agent can run shell commands.
 - **MCP server** (`mcp/server.ts`): projects stay **open in memory** between calls (a 70 MB XER is read once), every change can be **undone**, and nothing touches disk until `save`. Best for long editing sessions on big programmes, or agents that cannot run commands.
 
+Both read XER, P6 XML, Microsoft Project XML and MPX (detected from the content; for P6 XML the XER field-list checks are skipped) and write P6 XML when the output path ends in `.xml`, else XER.
+
 Both run on Node 24 directly. For older Node (18+), or to copy into a sandbox without the repository, build single-file bundles:
 
 ```bash
