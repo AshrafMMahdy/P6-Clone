@@ -33,6 +33,25 @@ test('activity code, UDF and remaining-date columns', { timeout: 180_000 }, asyn
     const text = (sel: string) => win.locator(sel).allInnerTexts().then((a) => a.map((s) => s.trim()).filter(Boolean));
     assert.deepEqual(await text('.grid-row:not(.group) [class*="c-udf_"]'), ['$1,000.00']);
     assert.ok((await text('.grid-row:not(.group) [class*="c-code_"]')).length >= 2, 'code values shown');
+
+    // View > Filters > New: Original Duration is greater than 10 days
+    const count = async () => Number((await win.locator('.layoutbar').innerText()).match(/(\d+) activities/)![1]);
+    const before = await count();
+    await menu('view.filters');
+    await win.click('.dialog button:has-text("New...")');
+    await win.waitForSelector('.dialog:has-text("New Filter")');
+    const edit = win.locator('.dialog', { hasText: 'New Filter' });
+    await edit.locator('input').first().fill('Long activities');
+    await edit.locator('tbody select').nth(0).selectOption('orig_dur');
+    await edit.locator('tbody select').nth(1).selectOption('gt');
+    await edit.locator('tbody input').first().fill('10');
+    await edit.locator('button:has-text("OK")').click();
+    await win.click('.dialog button:has-text("OK")');
+    await win.waitForFunction((n) => Number(document.querySelector('.layoutbar')!.textContent!.match(/(\d+) activities/)![1]) < n, before);
+    assert.ok((await count()) > 0);
+    const durs = (await text('.grid-row:not(.group) .c-orig_dur')).map(Number);
+    assert.ok(durs.length > 0 && durs.every((d) => d > 10), `filtered durations ${durs}`);
+    assert.equal(await win.locator('.layoutbar select').first().inputValue(), 'user:1');
     assert.deepEqual(errors, []);
   } finally {
     await app.close();

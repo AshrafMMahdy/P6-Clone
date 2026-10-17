@@ -1,6 +1,6 @@
 // Builds the WBS-banded row list shared by the activity table and the Gantt chart.
 import { parseP6Date } from '../../core/dates.ts';
-import type { Row } from '../../core/db.ts';
+import { rows, type Db, type Row } from '../../core/db.ts';
 import { activityPct, isCritical, isMilestone, projectName, statusOf, COLUMN_BY_ID, type Ctx } from '../model.ts';
 
 export interface ActRow {
@@ -27,6 +27,49 @@ export const FILTERS: Record<string, [string, (r: Row, c: Ctx) => boolean]> = {
   negfloat: ['Negative Float', (r) => Number(r.total_float_hr_cnt) < 0 && r.total_float_hr_cnt !== ''],
   nopreds: ['Open Ends (no predecessors/successors)', (r, c) => !r.act_end_date && (!(c.predsOf.get(r.task_id)?.length) || !(c.succsOf.get(r.task_id)?.length))],
 };
+
+// User filters (View > Filters > New): rows of "column / is / value", all or any must match. Stored in the
+// database table _FILTER (filter_id, name, json) like saved layouts; ui.filter = "user:<filter_id>".
+export interface UserFilter { any: boolean; rows: { col: string; op: string; value: string }[] }
+export const FILTER_OPS: Record<string, string> = {
+  eq: 'equals', ne: 'is not equal to', gt: 'is greater than', ge: 'is greater than or equal to', lt: 'is less than', le: 'is less than or equal to',
+  contains: 'contains', ncontains: 'does not contain', empty: 'is empty', nempty: 'is not empty',
+};
+export const userFilters = (db: Db) => rows(db, '_FILTER').map((r) => ({ id: r.filter_id, name: r.name, def: parseUserFilter(r.json) }));
+export function parseUserFilter(json: string): UserFilter {
+  try {
+    const o = JSON.parse(json) as Partial<UserFilter>;
+    return { any: !!o.any, rows: Array.isArray(o.rows) ? o.rows.filter((x) => x && typeof x.col === 'string' && typeof x.op === 'string').map((x) => ({ col: x.col, op: x.op, value: String(x.value ?? '') })) : [] };
+  } catch { return { any: false, rows: [] }; }
+}
+/** Test for a user filter. Cells are compared as shown in the table, but with yyyy-mm-dd hh:mm dates (so dates compare as text) and numbers by value. */
+export function userFilterTest(f: UserFilter, ctx: Ctx): (r: Row) => boolean {
+  const c2: Ctx = { ...ctx, prefs: { ...ctx.prefs, dateFormat: 'yyyy-mm-dd', showTime: true } };
+  const norm = (s: string) => s.trim().replace(/( A|\*)$/, '').toLowerCase();
+  const asNum = (s: string) => { const t = s.replace(/[$,%\s]/g, ''); return t !== '' && Number.isFinite(Number(t)) ? Number(t) : null; };
+  const tests = f.rows.map(({ col, op, value }) => {
+    const c = COLUMN_BY_ID.get(col), v = norm(value), vn = asNum(v);
+    return (r: Row) => {
+      const x = c ? norm(c.get(r, c2)) : '', xn = asNum(x);
+      const cmp = xn != null && vn != null ? xn - vn : x === v || x.startsWith(`${v} `) ? 0 : x.localeCompare(v);
+      switch (op) {
+        case 'eq': return cmp === 0;
+        case 'ne': return cmp !== 0;
+        case 'gt': return x !== '' && cmp > 0;
+        case 'ge': return x !== '' && cmp >= 0;
+        case 'lt': return x !== '' && cmp < 0;
+        case 'le': return x !== '' && cmp <= 0;
+        case 'contains': return x.includes(v);
+        case 'ncontains': return !x.includes(v);
+        case 'empty': return x === '';
+        case 'nempty': return x !== '';
+        default: return true;
+      }
+    };
+  });
+  if (!tests.length) return () => true;
+  return f.any ? (r) => tests.some((t) => t(r)) : (r) => tests.every((t) => t(r));
+}
 
 export const taskStart = (r: Row) => parseP6Date(r.act_start_date) ?? parseP6Date(r.early_start_date || r.restart_date || r.target_start_date);
 export const taskFinish = (r: Row) => parseP6Date(r.act_end_date) ?? parseP6Date(r.early_end_date || r.reend_date || r.target_end_date);
@@ -67,7 +110,9 @@ function sortFor(sortBy: string, ctx: Ctx): (a: Row, b: Row) => number {
 }
 
 export function buildActivityRows(ctx: Ctx, projIds: string[], collapsed: Record<string, boolean>, filter: string, groupBy: string, sortBy: string, search = ''): ActRow[] {
-  const f = FILTERS[filter]?.[1] ?? FILTERS.all[1];
+  const uf = filter.startsWith('user:') ? rows(ctx.db, '_FILTER').find((r) => `user:${r.filter_id}` === filter) : undefined;
+  const ut = uf ? userFilterTest(parseUserFilter(uf.json), ctx) : null;
+  const f = ut ? (r: Row) => ut(r) : FILTERS[filter]?.[1] ?? FILTERS.all[1];
   const q = search.trim().toLowerCase();
   const tasks = [...ctx.taskById.values()].filter((t) => projIds.includes(t.proj_id) && f(t, ctx) && (!q || t.task_code.toLowerCase().includes(q) || t.task_name.toLowerCase().includes(q)));
   const sort = sortFor(sortBy, ctx);

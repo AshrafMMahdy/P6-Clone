@@ -1,13 +1,14 @@
 // Enterprise dictionaries (calendars, codes, UDFs, OBS, cost accounts, roles, currencies) and
 // view/tools dialogs (leveling, filters, timescale, layouts, page setup).
-import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Dialog, Tabs } from '../components/Layout.tsx';
 import { closeDialog, doUndo, getUi, mutate, openDialog, setUi, toast, useStore, DEFAULT_COLUMNS, type UiState } from '../store.ts';
 import { addField, nextId, rows, table, type Db, type Row, type Table } from '../../core/db.ts';
 import { hoursPerWeek, parseClndrData, serializeClndrData, standardCalendar, type CalendarDef, type Shift } from '../../core/calendar/clndr-data.ts';
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../../core/dates.ts';
 import { levelResources, type LevelOptions, type LevelResult } from '../../core/level/level.ts';
-import { FILTERS } from '../views/activityRows.ts';
+import { FILTERS, FILTER_OPS, parseUserFilter, userFilters, type UserFilter } from '../views/activityRows.ts';
+import { COLUMNS, extraColumns } from '../model.ts';
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -1067,8 +1068,18 @@ export function FiltersDialog(props: { tab?: 'filter' | 'group' }) {
   const [filter, setFilter] = useState(ui.filter);
   const [groupBy, setGroupBy] = useState(ui.groupBy);
   const [sortBy, setSortBy] = useState(ui.sortBy);
+  useStore((s) => s.dbVersion);
+  useEffect(() => setFilter(ui.filter), [ui.filter]); // a filter made with New... is selected
   const codeTypes = rows(db, 'ACTVTYPE');
+  const user = userFilters(db);
   const apply = () => setUi({ filter, groupBy, sortBy });
+  const delUser = async () => {
+    const f = user.find((x) => `user:${x.id}` === filter);
+    if (!f || !(await window.p6.confirm(`Delete filter "${f.name}"?`))) return;
+    mutate(`Delete Filter ${f.name}`, (d) => { table(d, '_FILTER').rows = rows(d, '_FILTER').filter((r) => r.filter_id !== f.id); });
+    setFilter('all');
+    if (getUi().filter === filter) setUi({ filter: 'all' });
+  };
 
   return (
     <Dialog title={tab === 'filter' ? 'Filters' : 'Group and Sort'} width={560} height={430} buttons={<>
@@ -1076,6 +1087,11 @@ export function FiltersDialog(props: { tab?: 'filter' | 'group' }) {
       <button className="btn" onClick={closeDialog}>Cancel</button>
       <button className="btn" onClick={apply}>Apply</button>
       <button className="btn" onClick={() => { setFilter('all'); setGroupBy('wbs'); setSortBy(''); }}>Default</button>
+      {tab === 'filter' && <>
+        <button className="btn" style={{ marginTop: 12 }} onClick={() => openDialog('filterEdit', {})}>New...</button>
+        <button className="btn" disabled={!filter.startsWith('user:')} onClick={() => openDialog('filterEdit', { id: filter.slice(5) })}>Modify...</button>
+        <button className="btn" disabled={!filter.startsWith('user:')} onClick={() => void delUser()}>Delete</button>
+      </>}
     </>}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <Tabs tabs={[['filter', 'Filters'], ['group', 'Group and Sort']]} value={tab} onChange={setTab} />
@@ -1091,6 +1107,13 @@ export function FiltersDialog(props: { tab?: 'filter' | 'group' }) {
                       <td>{label}</td>
                     </tr>
                   ))}
+                  {user.length > 0 && <tr><td colSpan={2} style={{ fontWeight: 'bold', background: '#e8eef8' }}>User Defined</td></tr>}
+                  {user.map((f) => { const k = `user:${f.id}`; return (
+                    <tr key={k} className={filter === k ? 'sel' : ''} onMouseDown={() => setFilter(k)} onDoubleClick={() => { setUi({ filter: k }); closeDialog(); }}>
+                      <td style={{ textAlign: 'center' }}><input type="radio" name="flt" checked={filter === k} onChange={() => setFilter(k)} /></td>
+                      <td>{f.name}</td>
+                    </tr>
+                  ); })}
                 </tbody>
               </table>
             </div>
@@ -1113,6 +1136,61 @@ export function FiltersDialog(props: { tab?: 'filter' | 'group' }) {
           )}
         </div>
       </div>
+    </Dialog>
+  );
+}
+
+/** Filters > New / Modify: name, all or any of the rows must match, rows of column / is / value. */
+export function FilterEditDialog(props: { id?: string }) {
+  const db = useStore((s) => s.db);
+  const ex = props.id ? rows(db, '_FILTER').find((r) => r.filter_id === props.id) : undefined;
+  const [name, setName] = useState(ex?.name ?? uniqueName('Filter', rows(db, '_FILTER').map((r) => r.name)));
+  const [def, setDef] = useState<UserFilter>(() => (ex ? parseUserFilter(ex.json) : { any: false, rows: [{ col: 'total_float', op: 'lt', value: '0' }] }));
+  const cols = [...COLUMNS, ...extraColumns(db)];
+  const setRow = (i: number, patch: Partial<UserFilter['rows'][number]>) => setDef({ ...def, rows: def.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
+  const ok = () => {
+    const n = name.trim();
+    if (!n) return toast('Enter a filter name.');
+    if (rows(db, '_FILTER').some((r) => r.name === n && r.filter_id !== props.id)) return toast(`A filter named "${n}" already exists.`);
+    let id = props.id ?? '';
+    mutate(`${ex ? 'Modify' : 'New'} Filter ${n}`, (d) => {
+      const t = ensureFields(d, '_FILTER', ['filter_id', 'name', 'json']);
+      const json = JSON.stringify(def);
+      const row = t.rows.find((r) => r.filter_id === props.id);
+      if (row) Object.assign(row, { name: n, json });
+      else t.rows.push({ filter_id: (id = String(Math.max(0, ...t.rows.map((r) => Number(r.filter_id) || 0)) + 1)), name: n, json });
+    });
+    closeDialog();
+    setUi({ filter: `user:${id}` }); // like P6, the new or changed filter is applied
+  };
+  return (
+    <Dialog title={ex ? `Modify Filter - ${ex.name}` : 'New Filter'} width={720} height={420} buttons={<>
+      <button className="btn primary" onClick={ok}>OK</button>
+      <button className="btn" onClick={closeDialog}>Cancel</button>
+      <button className="btn" style={{ marginTop: 12 }} onClick={() => setDef({ ...def, rows: [...def.rows, { col: 'task_name', op: 'contains', value: '' }] })}>Add</button>
+    </>}>
+      <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
+        <label>Filter Name</label><input value={name} onChange={(e) => setName(e.target.value)} />
+        <label>Display rows which satisfy</label>
+        <select value={def.any ? 'any' : 'all'} onChange={(e) => setDef({ ...def, any: e.target.value === 'any' })}><option value="all">All of the following</option><option value="any">Any of the following</option></select>
+      </div>
+      <div className="tblwrap" style={{ height: 250, marginTop: 8 }}>
+        <table className="tbl">
+          <thead><tr><th>Parameter</th><th>Is</th><th>Value</th><th style={{ width: 24 }} /></tr></thead>
+          <tbody>{def.rows.map((r, i) => (
+            <tr key={i}>
+              <td><select value={r.col} onChange={(e) => setRow(i, { col: e.target.value })} style={{ width: 230 }}>
+                {cols.map((c) => <option key={c.id} value={c.id}>{c.group ? `${c.group}: ${c.title}` : c.title}</option>)}
+                {!cols.some((c) => c.id === r.col) && <option value={r.col}>(deleted field)</option>}
+              </select></td>
+              <td><select value={r.op} onChange={(e) => setRow(i, { op: e.target.value })}>{Object.entries(FILTER_OPS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></td>
+              <td><input value={r.value} disabled={r.op === 'empty' || r.op === 'nempty'} onChange={(e) => setRow(i, { value: e.target.value })} style={{ width: 150 }} /></td>
+              <td><button className="btn" title="Delete this row" onClick={() => setDef({ ...def, rows: def.rows.filter((_, j) => j !== i) })}>×</button></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <div className="muted" style={{ marginTop: 4 }}>Values are compared as shown in the table; type dates as yyyy-mm-dd and durations in days.</div>
     </Dialog>
   );
 }

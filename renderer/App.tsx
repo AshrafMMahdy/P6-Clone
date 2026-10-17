@@ -22,7 +22,7 @@ import { initLive } from './ai/live.ts';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, AssignBaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
 import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
-import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, TimescaleDialog, LayoutDialog, PageSetupDialog, BUILTIN_LAYOUT, saveLayout, layoutFromUi } from './dialogs/EnterpriseDialogs.tsx';
+import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, FilterEditDialog, TimescaleDialog, LayoutDialog, PageSetupDialog, BUILTIN_LAYOUT, saveLayout, layoutFromUi } from './dialogs/EnterpriseDialogs.tsx';
 import { emptyDb, rows } from '../core/db.ts';
 import { fmtDate, projectName } from './model.ts';
 import { printView } from './print.ts';
@@ -33,7 +33,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
+  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [

@@ -56,3 +56,35 @@ test('formatting and column getters', () => {
   const copy = { ...t };
   assert.match(String(COLUMN_BY_ID.get('task_code')!.edit!.set(db, copy, '', ctx)), /blank/);
 });
+
+test('user filters and database columns (activity codes, UDFs)', async () => {
+  const { buildActivityRows } = await import('../renderer/views/activityRows.ts');
+  const { extraColumns, setColumnDb } = await import('../renderer/model.ts');
+  const { table } = await import('../core/db.ts');
+  const db = emptyDb();
+  setColumnDb(() => db);
+  const pid = newProject(db, { id: 'F', name: 'Filters', start: '2024-01-08 08:00' });
+  const root = db.tables.PROJWBS.rows[0].wbs_id;
+  const [a, b, c] = [addActivity(db, pid, root), addActivity(db, pid, root), addActivity(db, pid, root)];
+  a.target_drtn_hr_cnt = a.remain_drtn_hr_cnt = '16'; b.target_drtn_hr_cnt = b.remain_drtn_hr_cnt = '80'; c.task_name = 'Pour slab';
+  addRelationship(db, a.task_id, b.task_id);
+  scheduleProjects(db, [pid]);
+  table(db, 'ACTVTYPE').rows.push({ actv_code_type_id: '7', actv_code_type: 'Phase' });
+  table(db, 'ACTVCODE').rows.push({ actv_code_id: '70', actv_code_type_id: '7', short_name: 'CIV' });
+  table(db, 'TASKACTV').rows.push({ task_id: b.task_id, actv_code_type_id: '7', actv_code_id: '70', proj_id: pid });
+  table(db, 'UDFTYPE').rows.push({ udf_type_id: '9', table_name: 'TASK', udf_type_label: 'Cost', logical_data_type: 'FT_INT' });
+  table(db, 'UDFVALUE').rows.push({ udf_type_id: '9', fk_id: c.task_id, proj_id: pid, udf_number: '12' });
+  assert.deepEqual(extraColumns(db).map((x) => [x.id, x.title]), [['code_7', 'Phase'], ['udf_9', 'Cost']]);
+  const ctx = makeCtx(db, prefs);
+  assert.equal(COLUMN_BY_ID.get('code_7')!.get(b, ctx), 'CIV');
+  assert.equal(COLUMN_BY_ID.get('udf_9')!.get(c, ctx), '12');
+  const ids = (json: object) => {
+    table(db, '_FILTER').rows = [{ filter_id: '1', name: 'f', json: JSON.stringify(json) }];
+    return buildActivityRows(makeCtx(db, prefs), [pid], {}, 'user:1', 'none', 'task_code').map((r) => r.task!.task_code);
+  };
+  assert.deepEqual(ids({ rows: [{ col: 'orig_dur', op: 'gt', value: '5' }] }), [b.task_code]);
+  assert.deepEqual(ids({ rows: [{ col: 'start', op: 'ge', value: '2024-01-10' }] }), [b.task_code]);
+  assert.deepEqual(ids({ rows: [{ col: 'start', op: 'eq', value: '2024-01-08' }, { col: 'task_name', op: 'contains', value: 'SLAB' }] }), [c.task_code]);
+  assert.deepEqual(ids({ any: true, rows: [{ col: 'code_7', op: 'eq', value: 'civ' }, { col: 'udf_9', op: 'ge', value: '12' }] }), [b.task_code, c.task_code]);
+  assert.deepEqual(ids({ rows: [{ col: 'code_7', op: 'empty', value: '' }] }), [a.task_code, c.task_code]);
+});

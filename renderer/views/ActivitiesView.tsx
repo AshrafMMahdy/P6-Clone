@@ -5,7 +5,7 @@ import { Split, showContextMenu } from '../components/Layout.tsx';
 import { getDb, getUi, mutate, setUi, toast, useStore, openDialog } from '../store.ts';
 import { useCtx, useProjectCalendar } from '../hooks.ts';
 import { COLUMN_BY_ID, fmtDate, fmtDur, isCritical, isMilestone, addRelationship, checkRelationship, makeCtx, TASK_TYPES, type Ctx } from '../model.ts';
-import { buildActivityRows, FILTERS, taskStart, taskFinish } from './activityRows.ts';
+import { buildActivityRows, FILTERS, taskStart, taskFinish, userFilters } from './activityRows.ts';
 import { ActivityDetails } from './ActivityDetails.tsx';
 import { ActivityUsagePane } from './AssignmentsView.tsx';
 import { parseP6Date, formatP6Date } from '../../core/dates.ts';
@@ -185,6 +185,7 @@ export function ActivitiesView() {
         <span>Filter:</span>
         <select className="opt" value={ui.filter} onChange={(e) => setUi({ filter: e.target.value })}>
           {Object.entries(FILTERS).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}
+          {userFilters(ctx.db).map((f) => <option key={f.id} value={`user:${f.id}`}>{f.name}</option>)}
         </select>
         <span>Group:</span>
         <select className="opt" value={ui.groupBy} onChange={(e) => setUi({ groupBy: e.target.value })}>
