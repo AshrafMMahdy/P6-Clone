@@ -5,7 +5,7 @@ import { Split, showContextMenu } from '../components/Layout.tsx';
 import { getDb, getUi, mutate, setUi, toast, useStore, openDialog } from '../store.ts';
 import { useCtx, useProjectCalendar } from '../hooks.ts';
 import { COLUMN_BY_ID, fmtDate, fmtDur, isCritical, isMilestone, addRelationship, checkRelationship, makeCtx, TASK_TYPES, type Ctx } from '../model.ts';
-import { buildActivityRows, FILTERS, taskStart, taskFinish, userFilters } from './activityRows.ts';
+import { buildActivityRows, FILTERS, taskStart, taskFinish, toolbarSearch, userFilters } from './activityRows.ts';
 import { ActivityDetails } from './ActivityDetails.tsx';
 import { ActivityUsagePane } from './AssignmentsView.tsx';
 import { TraceLogic } from './TraceLogic.tsx';
@@ -21,6 +21,7 @@ export function ActivitiesView() {
   const ctx = useCtx();
   const [scrollTop, setScrollTop] = useState(0);
   const [search, setSearch] = useState('');
+  toolbarSearch.text = search;
   const tableH = 400; // approximate table height for centring a revealed row
   const projIds = ui.openProjects;
   const rows = useMemo(() => buildActivityRows(ctx, projIds, ui.collapsed, ui.filter, ui.groupBy, ui.sortBy, search), [ctx, projIds, ui.collapsed, ui.filter, ui.groupBy, ui.sortBy, search]);

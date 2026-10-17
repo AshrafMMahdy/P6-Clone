@@ -61,6 +61,16 @@ test('link activities, fill down, find next', { timeout: 180_000 }, async () => 
     await win.waitForFunction((f) => document.querySelector('.grid-row.sel')?.textContent !== f, first);
     assert.notEqual(await selected(), first);
 
+    // Select All (Ctrl+A) takes only the activities the table shows, so Delete never hits filtered-out ones
+    const box = win.locator('input[placeholder="Filter activities..."]');
+    await box.fill('A1010');
+    await win.waitForFunction(() => document.querySelectorAll('.grid-row:not(.group)').length === 1);
+    await row('A1010').click();
+    await win.keyboard.press('Control+a');
+    await box.fill('');
+    await win.waitForFunction(() => document.querySelectorAll('.grid-row:not(.group)').length === 3);
+    assert.deepEqual(await win.locator('.grid-row.sel').allInnerTexts().then((t) => t.map((x) => x.split(/\s/)[0])), ['A1010']);
+
     // the links drive the schedule: 7 + 7 working days
     await win.keyboard.press('F9');
     await win.waitForSelector('.dialog:has-text("Current Data Date")');

@@ -109,6 +109,9 @@ function sortFor(sortBy: string, ctx: Ctx): (a: Row, b: Row) => number {
   };
 }
 
+/** The Activities toolbar filter box text (kept here so commands such as Select All see the same rows as the table). */
+export const toolbarSearch = { text: '' };
+
 export function buildActivityRows(ctx: Ctx, projIds: string[], collapsed: Record<string, boolean>, filter: string, groupBy: string, sortBy: string, search = ''): ActRow[] {
   const uf = filter.startsWith('user:') ? rows(ctx.db, '_FILTER').find((r) => `user:${r.filter_id}` === filter) : undefined;
   const ut = uf ? userFilterTest(parseUserFilter(uf.json), ctx) : null;

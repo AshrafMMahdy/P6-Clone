@@ -1,6 +1,7 @@
 // Actions triggered from menus, toolbars and context menus.
 import { getDb, getUi, mutate, setUi, toast, openDialog, doUndo, doRedo, saveNow } from './store.ts';
-import { addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, nextTaskCode } from './model.ts';
+import { addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, makeCtx, nextTaskCode } from './model.ts';
+import { buildActivityRows, toolbarSearch } from './views/activityRows.ts';
 import { nextId, rows, table, type Row } from '../core/db.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
@@ -170,7 +171,9 @@ export function handleEditKey(e: KeyboardEvent): boolean {
   if (e.ctrlKey && e.key.toLowerCase() === 'y') { doRedo(); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 's') { saveNow().then(() => toast('Changes committed')); return true; }
   if (e.ctrlKey && e.key.toLowerCase() === 'a' && getUi().view === 'activities') {
-    const ids = rows(getDb(), 'TASK').filter((x) => getUi().openProjects.includes(x.proj_id)).map((x) => x.task_id);
+    // only the activities the table shows (current filter and filter box), as in P6; rows in collapsed bands count
+    const ui = getUi();
+    const ids = buildActivityRows(makeCtx(getDb(), ui.prefs), ui.openProjects, {}, ui.filter, ui.groupBy, ui.sortBy, toolbarSearch.text).filter((r) => r.kind === 'task').map((r) => r.task!.task_id);
     setUi({ selTasks: ids }); return true;
   }
   return false;
