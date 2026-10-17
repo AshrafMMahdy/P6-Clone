@@ -153,13 +153,16 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
         // remember which P6 build wrote the file: 6.x builds place milestones differently
         nr._legacy_ms = isLegacyLayout(src) ? 'Y' : 'N';
         nr._p6_ver = src.header?.version ?? '';
+        if (nr._baseline_of) nr._baseline_of = m('PROJECT')[nr._baseline_of] ?? nr._baseline_of;
       }
       add.push(nr);
     }
     // attach in one step (one undo record instead of one per row on million-row tables)
     if (add.length) dst.rows = rawOf(dst.rows).concat(add);
   }
-  const projIds = plan.projects.filter((p) => p.action !== 'skip').map((p) => m('PROJECT')[p.srcProjId]);
+  // baselines that came with the file are attached to their projects, not opened as projects
+  const baseline = new Set(rows(src, 'PROJECT').filter((p) => p._baseline_of).map((p) => p.proj_id));
+  const projIds = plan.projects.filter((p) => p.action !== 'skip' && !baseline.has(p.srcProjId)).map((p) => m('PROJECT')[p.srcProjId]);
   return { projIds, findings, map };
 }
 

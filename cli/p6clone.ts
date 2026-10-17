@@ -130,7 +130,7 @@ async function main(): Promise<number> {
       if (!out) throw new Error('--out required');
       if ((opt('format') ?? 'xer') === 'xml') {
         const { writeP6Xml } = await import('../core/xml/p6xml.ts');
-        writeFileSync(out, writeP6Xml(db, {}));
+        writeFileSync(out, writeP6Xml(db, { version }));
       } else writeFileSync(out, writeXer(db, { version }));
       console.log(`Wrote ${out}`);
       return 0;

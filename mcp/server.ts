@@ -231,7 +231,7 @@ function call(name: string, a: Record<string, any>): unknown {
       if (!path) throw new UserError('Give "path" (this project was created in memory).');
       if (!a.path && !a.overwrite) throw new UserError(`Saving would overwrite ${path}; pass overwrite: true or a new path.`);
       const xml = /\.xml$/i.test(path);
-      writeFileSync(path, xml ? writeP6Xml(s.db, {}) : writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12' }));
+      writeFileSync(path, xml ? writeP6Xml(s.db, { version: a.version ?? '19.12' }) : writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12' }));
       s.dirty = false;
       return { saved: path, format: xml ? 'P6 XML' : `XER ${a.version ?? s.db.header?.version ?? '19.12'}` };
     }

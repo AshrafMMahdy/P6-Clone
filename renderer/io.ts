@@ -98,7 +98,7 @@ export async function parseFileAsync(name: string, bytes: Uint8Array, format = d
 
 /** File bytes for an export. For 'mpp' this is the Microsoft Project XML that Microsoft Project converts to .mpp. */
 export function exportFile(db: Db, format: Format, opts: { version: string; projIds: string[] }): Uint8Array {
-  if (format === 'xml') return new TextEncoder().encode(writeP6Xml(db, { projIds: opts.projIds }));
+  if (format === 'xml') return new TextEncoder().encode(writeP6Xml(db, { projIds: opts.projIds, version: opts.version }));
   if (format === 'mspdi' || format === 'mpp') return new TextEncoder().encode(writeMspdi(db, { projIds: opts.projIds }));
   if (format === 'mpx') return encodeCp1252(writeMpx(db, { projIds: opts.projIds }));
   return writeXer(db, { version: opts.version, projIds: opts.projIds });

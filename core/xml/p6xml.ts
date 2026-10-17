@@ -124,6 +124,11 @@ const UDFVAL_MAP: FieldMap = [['TypeObjectId', 'udf_type_id'], ['ForeignObjectId
 const CURR_MAP: FieldMap = [['ObjectId', 'curr_id'], ['Id', 'curr_short_name'], ['Name', 'curr_type'], ['Symbol', 'curr_symbol'], ['ExchangeRate', 'base_exch_rate', 'num'], ['DecimalPlaces', 'decimal_digit_cnt', 'num']];
 const ROLE_MAP: FieldMap = [['ObjectId', 'role_id'], ['ParentObjectId', 'parent_role_id'], ['Id', 'role_short_name'], ['Name', 'role_name']];
 const MEMO_MAP: FieldMap = [['ObjectId', 'memo_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['NotebookTopicObjectId', 'memo_type_id'], ['Note', 'task_memo']];
+const STEP_MAP: FieldMap = [['ObjectId', 'proc_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['SequenceNumber', 'seq_num', 'num'], ['Name', 'proc_name'], ['IsCompleted', 'complete_flag', 'bool'], ['Weight', 'proc_wt', 'num'], ['Description', 'proc_descr']];
+const PCODETYPE_MAP: FieldMap = [['ObjectId', 'proj_catg_type_id'], ['Name', 'proj_catg_type'], ['SequenceNumber', 'seq_num', 'num'], ['Length', 'proj_catg_short_len', 'num']];
+const PCODE_MAP: FieldMap = [['ObjectId', 'proj_catg_id'], ['CodeTypeObjectId', 'proj_catg_type_id'], ['ParentObjectId', 'parent_proj_catg_id'], ['CodeValue', 'proj_catg_short_name'], ['Description', 'proj_catg_name'], ['SequenceNumber', 'seq_num', 'num']];
+const RCODETYPE_MAP: FieldMap = [['ObjectId', 'rsrc_catg_type_id'], ['Name', 'rsrc_catg_type'], ['SequenceNumber', 'seq_num', 'num'], ['Length', 'rsrc_catg_short_len', 'num']];
+const RCODE_MAP: FieldMap = [['ObjectId', 'rsrc_catg_id'], ['CodeTypeObjectId', 'rsrc_catg_type_id'], ['ParentObjectId', 'parent_rsrc_catg_id'], ['CodeValue', 'rsrc_catg_short_name'], ['Description', 'rsrc_catg_name'], ['SequenceNumber', 'seq_num', 'num']];
 const TOPIC_MAP: FieldMap = [['ObjectId', 'memo_type_id'], ['Name', 'memo_type'], ['AvailableForActivity', 'task_flag', 'bool']];
 
 const xmlDate = (s: string) => { const t = parseP6Date(s); return t == null ? '' : formatP6Date(t).replace(' ', 'T') + ':00'; };
@@ -213,6 +218,10 @@ function calendarRow(n: XNode): Row {
 const UDF_TAG: Record<string, [tag: string, field: string]> = { FT_START_DATE: ['StartDateValue', 'udf_date'], FT_END_DATE: ['FinishDateValue', 'udf_date'], FT_MONEY: ['CostValue', 'udf_number'], FT_INT: ['IntegerValue', 'udf_number'], FT_FLOAT_2_DECIMALS: ['DoubleValue', 'udf_number'], FT_FLOAT: ['DoubleValue', 'udf_number'] };
 const UDF_READ: [tag: string, field: string][] = [['TextValue', 'udf_text'], ['DoubleValue', 'udf_number'], ['IntegerValue', 'udf_number'], ['CostValue', 'udf_number'], ['StartDateValue', 'udf_date'], ['FinishDateValue', 'udf_date'], ['CodeValue', 'udf_code_id']];
 
+/** <Code> assignments of a project or resource (project / resource codes). */
+function codeRefsXml(rs: Row[], typeF: string, valF: string): string {
+  return rs.map((a) => `<Code><TypeObjectId>${esc(a[typeF] ?? '')}</TypeObjectId><ValueObjectId>${esc(a[valF] ?? '')}</ValueObjectId></Code>`).join('');
+}
 function codesXml(rs: Row[], codeType: Map<string, string>): string {
   return rs.map((a) => `<Code><TypeObjectId>${esc(a.actv_code_type_id || codeType.get(a.actv_code_id) || '')}</TypeObjectId><ValueObjectId>${esc(a.actv_code_id)}</ValueObjectId></Code>`).join('');
 }
@@ -236,8 +245,10 @@ function udfRows(n: XNode, fk: string, projId: string): Row[] {
 export function writeP6Xml(db: Db, opts: { projIds?: string[]; version?: string }): string {
   const sel = selectRows(db, opts.projIds);
   const get = (t: string) => sel.get(t) ?? [];
-  const ns = `http://xmlns.oracle.com/Primavera/P6/V${opts.version ?? '19.12'}/API/BusinessObjects`;
-  const out: string[] = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', `<APIBusinessObjects xmlns="${ns}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="${ns} http://xmlns.oracle.com/Primavera/P6/V${opts.version ?? '19.12'}/API/p6apibo.xsd">`];
+  // the namespace names the P6 release the file is for (P6 XML exists from 8.x; older versions get the 8.1 schema)
+  const ver = opts.version && Number(opts.version.split('.')[0]) >= 8 ? opts.version : opts.version ? '8.1' : '19.12';
+  const ns = `http://xmlns.oracle.com/Primavera/P6/V${ver}/API/BusinessObjects`;
+  const out: string[] = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', `<APIBusinessObjects xmlns="${ns}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="${ns} http://xmlns.oracle.com/Primavera/P6/V${ver ?? '19.12'}/API/p6apibo.xsd">`];
   const el = (tag: string, r: Row, map: FieldMap, extra = '') => out.push(`<${tag}>${toXml(r, map)}${extra}</${tag}>`);
   const udfType = new Map(rows(db, 'UDFTYPE').map((u) => [u.udf_type_id, u]));
   const udfsOf = new Map<string, Row[]>();
@@ -255,17 +266,23 @@ export function writeP6Xml(db: Db, opts: { projIds?: string[]; version?: string 
   const globalTypes = new Set(get('ACTVTYPE').filter((x) => !x.proj_id).map((x) => x.actv_code_type_id));
   for (const r of get('ACTVCODE').filter((x) => globalTypes.has(x.actv_code_type_id))) el('ActivityCode', r, CODE_MAP);
   for (const r of get('CALENDAR').filter((x) => !x.proj_id)) out.push(calendarXml(r));
+  for (const r of get('PCATTYPE')) el('ProjectCodeType', r, PCODETYPE_MAP);
+  for (const r of get('PCATVAL')) el('ProjectCode', r, PCODE_MAP);
+  for (const r of get('RCATTYPE')) el('ResourceCodeType', r, RCODETYPE_MAP);
+  for (const r of get('RCATVAL')) el('ResourceCode', r, RCODE_MAP);
   for (const r of get('ROLES')) el('Role', r, ROLE_MAP);
-  for (const r of get('RSRC')) el('Resource', r, RSRC_MAP, udfs('RSRC', r.rsrc_id));
+  const rcodes = new Map<string, Row[]>(); for (const a of get('RSRCRCAT')) rcodes.set(a.rsrc_id, [...(rcodes.get(a.rsrc_id) ?? []), a]);
+  for (const r of get('RSRC')) el('Resource', r, RSRC_MAP, codeRefsXml(rcodes.get(r.rsrc_id) ?? [], 'rsrc_catg_type_id', 'rsrc_catg_id') + udfs('RSRC', r.rsrc_id));
   for (const r of get('RSRCRATE')) el('ResourceRate', r, RATE_MAP);
-  const wbsAll = get('PROJWBS');
-  for (const p of get('PROJECT')) {
+  const pcodes = new Map<string, Row[]>(); for (const a of get('PROJPCAT')) pcodes.set(a.proj_id, [...(pcodes.get(a.proj_id) ?? []), a]);
+  const projectXml = (tag: 'Project' | 'BaselineProject', p: Row, get: (t: string) => Row[], originalId?: string) => {
+    const wbsAll = get('PROJWBS');
     const pid = p.proj_id;
     const root = wbsAll.find((w) => w.proj_id === pid && w.proj_node_flag === 'Y');
     const so = get('SCHEDOPTIONS').find((s) => s.proj_id === pid) ?? {};
-    let body = toXml(p, PROJECT_MAP) + `<Name>${esc(root?.wbs_name || p._name || p.proj_short_name)}</Name>` + udfs('PROJECT', pid) + schedOptionsXml(so);
+    let body = toXml(p, PROJECT_MAP) + `<Name>${esc(root?.wbs_name || p._name || p.proj_short_name)}</Name>` + (originalId ? `<OriginalProjectObjectId>${esc(originalId)}</OriginalProjectObjectId>` : '') + codeRefsXml(pcodes.get(pid) ?? [], 'proj_catg_type_id', 'proj_catg_id') + udfs('PROJECT', pid) + schedOptionsXml(so);
     if (root?.wbs_id) body += `<WBSObjectId>${esc(root.wbs_id)}</WBSObjectId>`;
-    out.push(`<Project>${body}`);
+    out.push(`<${tag}>${body}`);
     for (const r of get('CALENDAR').filter((x) => x.proj_id === pid)) out.push(calendarXml(r));
     for (const r of get('ACTVTYPE').filter((x) => x.proj_id === pid)) el('ActivityCodeType', r, CODETYPE_MAP);
     for (const r of get('ACTVCODE').filter((x) => !globalTypes.has(x.actv_code_type_id) && get('ACTVTYPE').some((t) => t.actv_code_type_id === x.actv_code_type_id && t.proj_id === pid))) el('ActivityCode', r, CODE_MAP);
@@ -276,8 +293,14 @@ export function writeP6Xml(db: Db, opts: { projIds?: string[]; version?: string 
     for (const r of get('TASKRSRC').filter((t) => t.proj_id === pid)) el('ResourceAssignment', r, ASSIGN_MAP);
     for (const r of get('PROJCOST').filter((t) => t.proj_id === pid)) el('ActivityExpense', r, EXP_MAP);
     for (const r of get('TASKMEMO').filter((t) => t.proj_id === pid)) el('ActivityNote', r, MEMO_MAP);
-    out.push('</Project>');
-  }
+    for (const r of get('TASKPROC').filter((t) => t.proj_id === pid)) // step % complete as a fraction, like activity percentages
+      el('ActivityStep', r, STEP_MAP, r.complete_pct ? `<PercentComplete>${Number(r.complete_pct) / 100}</PercentComplete>` : '');
+    out.push(`</${tag}>`);
+  };
+  for (const p of get('PROJECT')) projectXml('Project', p, get);
+  // baselines of the exported projects, as P6 writes them with "export baselines"
+  const all = (t: string) => rows(db, t);
+  for (const p of get('PROJECT')) for (const b of rows(db, 'PROJECT').filter((x) => x._baseline_of === p.proj_id)) projectXml('BaselineProject', b, all, p.proj_id);
   out.push('</APIBusinessObjects>');
   return out.join('\n') + '\n';
 }
@@ -301,19 +324,24 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   }
   const push = (t: string, r: Row) => { const T = table(db, t); for (const f of Object.keys(r)) addField(T, f); T.rows.push(r); };
   const topMap: [string, string, FieldMap][] = [['Currency', 'CURRTYPE', CURR_MAP], ['OBS', 'OBS', OBS_MAP], ['CostAccount', 'ACCOUNT', ACCOUNT_MAP], ['NotebookTopic', 'MEMOTYPE', TOPIC_MAP],
-    ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP]];
+    ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP],
+    ['ProjectCodeType', 'PCATTYPE', PCODETYPE_MAP], ['ProjectCode', 'PCATVAL', PCODE_MAP], ['ResourceCodeType', 'RCATTYPE', RCODETYPE_MAP], ['ResourceCode', 'RCATVAL', RCODE_MAP]];
   for (const n of api.children) {
     const m = topMap.find(([tag]) => tag === n.name);
-    if (m) { const r = fromXml(n, m[2]); push(m[1], r); if (n.name === 'Resource') for (const u of udfRows(n, r.rsrc_id, '')) push('UDFVALUE', u); }
+    if (m) { const r = fromXml(n, m[2]); push(m[1], r); if (n.name === 'Resource') { for (const u of udfRows(n, r.rsrc_id, '')) push('UDFVALUE', u); for (const c of kids(n, 'Code')) push('RSRCRCAT', { rsrc_id: r.rsrc_id, rsrc_catg_type_id: val(c, 'TypeObjectId'), rsrc_catg_id: val(c, 'ValueObjectId') }); } }
     else if (n.name === 'Calendar') push('CALENDAR', calendarRow(n));
   }
   const projMap: [string, string, FieldMap][] = [['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Relationship', 'TASKPRED', REL_MAP], ['ResourceAssignment', 'TASKRSRC', ASSIGN_MAP],
-    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP]];
-  for (const p of kids(api, 'Project')) {
+    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP]];
+  const baselineOf = new Map<string, string>(kids(api, 'Project').map((p): [string, string] => [val(p, 'CurrentBaselineProjectObjectId'), val(p, 'ObjectId')]).filter(([b]) => !!b));
+  for (const p of [...kids(api, 'Project'), ...kids(api, 'BaselineProject')]) {
     const pr = fromXml(p, PROJECT_MAP);
     const pid = pr.proj_id || String(rows(db, 'PROJECT').length + 1);
     pr.proj_id = pid;
+    // a baseline is kept as a baseline of its project (BaselineProject; OriginalProjectObjectId or the project that points to it)
+    if (p.name === 'BaselineProject') { pr._baseline_of = val(p, 'OriginalProjectObjectId') || baselineOf.get(pid) || ''; pr._baseline_date = pr.last_recalc_date ?? ''; }
     push('PROJECT', pr);
+    for (const c of kids(p, 'Code')) push('PROJPCAT', { proj_id: pid, proj_catg_type_id: val(c, 'TypeObjectId'), proj_catg_id: val(c, 'ValueObjectId') });
     for (const u of udfRows(p, pid, pid)) push('UDFVALUE', u);
     const sox = child(p, 'ScheduleOptions');
     const so = sox ? schedOptionsRow(sox) : fromXml(p, OLD_SCHED_MAP);
@@ -330,7 +358,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
         continue;
       }
       const m = projMap.find(([tag]) => tag === n.name);
-      if (m) { const r = fromXml(n, m[2]); if (m[1] !== 'ACTVCODE') r.proj_id ||= pid; if (m[1] === 'TASKPRED') { r.pred_proj_id ||= pid; } if (m[1] === 'ACTVTYPE') r.proj_id ||= pid; push(m[1], r); }
+      if (m) { const r = fromXml(n, m[2]); if (m[1] === 'TASKPROC') { const pc = val(n, 'PercentComplete'); if (pc) r.complete_pct = String(Number(pc) > 1 ? Number(pc) : Math.round(Number(pc) * 1e6) / 1e4); } if (m[1] !== 'ACTVCODE') r.proj_id ||= pid; if (m[1] === 'TASKPRED') { r.pred_proj_id ||= pid; } if (m[1] === 'ACTVTYPE') r.proj_id ||= pid; push(m[1], r); }
     }
   }
   // P6 writes percentages as fractions; files from earlier P6 Clone builds wrote 0-100 (told apart by any value over 1)
