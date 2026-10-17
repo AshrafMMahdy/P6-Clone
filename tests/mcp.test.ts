@@ -79,5 +79,9 @@ test('MCP: open_file reads P6 XML', { timeout: 60_000 }, async () => {
     assert.equal(o.data.format, 'xml');
     assert.ok(xer.data.summary.activities > 0);
     assert.equal(o.data.summary.activities, xer.data.summary.activities);
+    // validate keeps the opened file's format: no XER field-list (MISSING_FIELD) notices for P6 XML
+    const v = await c.tool('validate', { handle: o.data.handle });
+    assert.equal(v.isError, false);
+    assert.deepEqual(v.data.counts, o.data.diagnostics.counts);
   } finally { c.close(); }
 });

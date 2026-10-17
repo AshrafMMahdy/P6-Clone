@@ -5,11 +5,9 @@
 // Run: node mcp/server.ts   (or the bundled dist-cli/p6clone-mcp.cjs on older Node)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
-import { detectFormat, importChecks, readRaw } from '../renderer/io.ts';
-import { validateXer } from '../core/xer/validate.ts';
+import { detectFormat, importChecks, readRaw, type Format } from '../renderer/io.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
-import { checkStoredDates } from '../core/schedule/stored-dates.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { updateProgress } from '../core/progress/update.ts';
@@ -24,7 +22,7 @@ import { worst, type Finding } from '../core/findings.ts';
 import type { Db } from '../core/db.ts';
 
 const VERSION = '1.0.0';
-interface Session { db: Db; path: string | null; undo: { label: string; j: Journal }[]; dirty: boolean; hpd: number }
+interface Session { db: Db; path: string | null; format: Format; undo: { label: string; j: Journal }[]; dirty: boolean; hpd: number }
 const sessions = new Map<string, Session>();
 let seq = 0;
 
@@ -82,7 +80,7 @@ function call(name: string, a: Record<string, any>): unknown {
       const f = importChecks(r.db, r.findings, format);
       if (worst(f) === 'fatal') return { opened: false, reason: 'P6 would reject this file', diagnostics: brief(f) };
       const handle = `p${++seq}`;
-      const s: Session = { db: r.db, path, undo: [], dirty: false, hpd: Number(a.hours_per_day) || 8 };
+      const s: Session = { db: r.db, path, format, undo: [], dirty: false, hpd: Number(a.hours_per_day) || 8 };
       sessions.set(handle, s);
       return { handle, file: basename(path), format, diagnostics: brief(f), summary: summary(s) };
     }
@@ -91,7 +89,7 @@ function call(name: string, a: Record<string, any>): unknown {
       const r = applyOps(db, [{ op: 'add_project', id: a.id, name: a.name ?? a.id, start: a.start }]);
       if (!r.ok) throw new UserError(r.error!.message);
       const handle = `p${++seq}`;
-      sessions.set(handle, { db, path: null, undo: [], dirty: true, hpd: Number(a.hours_per_day) || 8 });
+      sessions.set(handle, { db, path: null, format: 'xer', undo: [], dirty: true, hpd: Number(a.hours_per_day) || 8 });
       return { handle, project: a.id };
     }
     case 'list_open': return [...sessions].map(([h, s]) => ({ handle: h, file: s.path, projects: (s.db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_short_name), unsaved_changes: s.dirty, undo_steps: s.undo.length }));
@@ -111,7 +109,7 @@ function call(name: string, a: Record<string, any>): unknown {
       const s = get(a.handle);
       return change(s, 'Level Resources', (d) => { const r = levelResources(d, allIds(d), { withinFloat: !!a.within_float }); return { delayed: r.delayed, report: r.log }; });
     }
-    case 'validate': { const s = get(a.handle); const f = validateXer(s.db, []); return brief(worst(f) === 'fatal' ? f : [...f, ...checkStoredDates(s.db)]); }
+    case 'validate': { const s = get(a.handle); return brief(importChecks(s.db, [], s.format)); } // the opened file's format: no XER field-list notices for P6 XML
     case 'review': { const s = get(a.handle); return reviewSchedule(s.db, { hoursPerDay: s.hpd }); }
     case 'undo': {
       const s = get(a.handle);
