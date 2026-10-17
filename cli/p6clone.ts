@@ -2,6 +2,7 @@
 // P6 Clone CLI — same core as the desktop app.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { detectFormat, importChecks, readRaw, type Format } from '../renderer/io.ts';
+import type { TextEncodingName } from '../core/encoding.ts';
 import { writeOut } from './commands.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { writeXer } from '../core/xer/write.ts';
@@ -35,7 +36,9 @@ function queryText(v: unknown, indent = ''): string {
 const USAGE = `p6clone <command> [options]
 
   Input files: XER, P6 XML, Microsoft Project XML or MPX (detected from the content). --out writes P6 XML
-  when the path ends in .xml, else XER.
+  when the path ends in .xml, else XER. XER text encoding is recognised (Windows-1252, 1256 Arabic, 1251, 1253,
+  1255, 1250, GBK, Big5, Shift_JIS, UTF-8); --encoding <name> forces one when reading, --out-encoding when writing
+  (default: the code page P6 would use for the text).
 
   new      --id P1 --name "Tower A" --start 2026-03-01 --out p1.xer [--version 19.12]
   edit     <file.xer> --ops ops.json|- --out out.xer [--schedule] [--data-date D] [--hours-per-day 8] [--json]
@@ -86,7 +89,7 @@ function load(path: string): { db: Db; findings: Finding[]; format: Format } {
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(readFileSync(path)); } catch (e) { throw new Error(`Cannot read ${path}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}`); }
   const format = detectFormat(path, bytes);
-  return { ...readRaw(bytes, format), format };
+  return { ...readRaw(bytes, format, (opt('encoding') as TextEncodingName | undefined) ?? 'auto'), format };
 }
 
 /** --project ID, or every project in the file. */

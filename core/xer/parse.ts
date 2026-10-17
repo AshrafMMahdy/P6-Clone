@@ -1,13 +1,13 @@
 import type { Db, Row, Table } from '../db.ts';
-import { decodeText, type TextEncodingName } from '../encoding.ts';
+import { decodeText, encodingLabel, type TextEncodingName } from '../encoding.ts';
 import type { Finding } from '../findings.ts';
 
 export interface ParseMeta { encoding: TextEncodingName; lineEnding: 'CRLF' | 'LF' | 'mixed'; hasEnd: boolean }
 export interface ParseResult { db: Db; findings: Finding[]; meta: ParseMeta }
 
 /** Parse XER bytes. Never throws; structural problems become findings. */
-export function parseXer(bytes: Uint8Array): ParseResult {
-  const { text, encoding } = decodeText(bytes);
+export function parseXer(bytes: Uint8Array, opts: { encoding?: TextEncodingName | 'auto' } = {}): ParseResult {
+  const { text, encoding } = decodeText(bytes, opts.encoding);
   const findings: Finding[] = [];
   const db: Db = { tables: {} };
   const crlf = (text.match(/\r\n/g) ?? []).length;
@@ -15,9 +15,13 @@ export function parseXer(bytes: Uint8Array): ParseResult {
   const lineEnding = crlf && lf > 1 ? 'mixed' : lf > crlf ? 'LF' : 'CRLF';
   const meta: ParseMeta = { encoding, lineEnding, hasEnd: false };
 
-  if (encoding !== 'windows-1252' && /[^\x00-\x7f]/.test(text)) findings.push({
-    severity: 'info', code: 'ENCODING_UTF8', message: `File is ${encoding}; P6 writes Windows-1252.`,
-    p6: 'P6 reads the file as Windows-1252; non-ASCII characters may appear garbled.',
+  if (encoding.startsWith('utf-8') && /[^\x00-\x7f]/.test(text)) findings.push({
+    severity: 'info', code: 'ENCODING_UTF8', message: `File is ${encoding}; P6 writes XER in the Windows code page of the exporting computer.`,
+    p6: 'P6 reads XER text in the Windows code page for non-Unicode programs; non-ASCII characters may appear garbled. P6 XML is Unicode and keeps every language.',
+  });
+  else if (encoding !== 'windows-1252' && encoding !== 'utf-8') findings.push({
+    severity: 'info', code: 'ENCODING_CODEPAGE', message: `File is ${encodingLabel(encoding)} (read as such; the code page was recognised from the text).`,
+    p6: `P6 imports it correctly on a computer whose Windows language for non-Unicode programs uses ${encodingLabel(encoding)}; elsewhere the text appears garbled. P6 XML is Unicode and keeps every language.`,
   });
   if (lineEnding !== 'CRLF') findings.push({
     severity: 'warning', code: 'LF_ENDINGS', message: `Line endings are ${lineEnding}; P6 writes CRLF.`,
@@ -35,7 +39,7 @@ export function parseXer(bytes: Uint8Array): ParseResult {
     const tag = parts[0];
     if (!sawHeader && tag === 'ERMHDR') {
       sawHeader = true;
-      db.header = { version: parts[1] ?? '', exportDate: parts[2] ?? '', raw: parts };
+      db.header = { version: parts[1] ?? '', exportDate: parts[2] ?? '', raw: parts, encoding };
       continue;
     }
     if (tag === '%T') {

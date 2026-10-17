@@ -1,5 +1,5 @@
 import { KEYS, refTarget, type Db, type Row } from '../db.ts';
-import { encodeCp1252 } from '../encoding.ts';
+import { chooseEncoding, encodeText, type TextEncodingName } from '../encoding.ts';
 import { formatDay } from '../dates.ts';
 import { fieldsFor, variantsFor, tableOrderFor, knownFields, verification } from './schema.ts';
 
@@ -13,8 +13,9 @@ export interface WriteOptions {
   exportDate?: string;
   dbName?: string;
   currency?: string;
-  /** Output text encoding. P6 writes windows-1252. */
-  encoding?: 'windows-1252' | 'utf-8';
+  /** Output text encoding. Default: the code page P6 would use for this text (Windows-1252, or e.g. Windows-1256
+   *  when there is Arabic), UTF-8 only when no single code page can hold it. */
+  encoding?: TextEncodingName | 'auto';
 }
 
 /** Child tables kept whenever their parent row is kept. */
@@ -133,5 +134,5 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
   }
   lines.push('%E');
   const text = lines.join('\r\n') + '\r\n';
-  return opts.encoding === 'utf-8' ? new TextEncoder().encode(text) : encodeCp1252(text);
+  return encodeText(text, !opts.encoding || opts.encoding === 'auto' ? chooseEncoding(text) : opts.encoding);
 }

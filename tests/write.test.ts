@@ -2,13 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseXer } from '../core/xer/parse.ts';
 import { writeXer } from '../core/xer/write.ts';
+import type { TextEncodingName } from '../core/encoding.ts';
 import { realSamples, samples, xer } from './helpers.ts';
 
 function sameHeader(raw: string[]) {
   return { version: raw[1], exportDate: raw[2], user: raw[4], userName: raw[5], dbName: raw[6], currency: raw[8] };
 }
-function enc(meta: { encoding: string }) {
-  return meta.encoding === 'windows-1252' ? 'windows-1252' as const : 'utf-8' as const;
+// written back in the encoding it was read in (Arabic P6 exports are Windows-1256)
+function enc(meta: { encoding: TextEncodingName }) {
+  return meta.encoding;
 }
 
 test('real P6 samples round-trip byte-identical', () => {

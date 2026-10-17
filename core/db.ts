@@ -1,6 +1,6 @@
 export type Row = Record<string, string>;
 export interface Table { name: string; fields: string[]; rows: Row[] }
-export interface XerHeader { version: string; exportDate: string; raw: string[] }
+export interface XerHeader { version: string; exportDate: string; raw: string[]; /** text encoding the file was read in */ encoding?: string }
 export interface Db { header?: XerHeader; tables: Record<string, Table> }
 
 export function emptyDb(): Db {

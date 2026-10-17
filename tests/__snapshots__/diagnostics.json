@@ -1,11 +1,13 @@
 {
  "129 trial.xer": {
   "info:CAL_HOURS_MISMATCH": 3,
+  "info:ENCODING_CODEPAGE": 1,
   "warning:ACTUAL_AFTER_DD": 3,
   "warning:DANGLING_REF": 1
  },
  "130 TRIAL.xer": {
   "info:CAL_HOURS_MISMATCH": 3,
+  "info:ENCODING_CODEPAGE": 1,
   "warning:ACTUAL_AFTER_DD": 1,
   "warning:DANGLING_REF": 1
  },
@@ -29,7 +31,9 @@
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
- "31 buidings.xer": {},
+ "31 buidings.xer": {
+  "info:ENCODING_CODEPAGE": 1
+ },
  "3_storey_residential_block_12_apartments_schedule.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
   "info:ENCODING_UTF8": 1,
@@ -105,6 +109,7 @@
   "info:CAL_HOURS_MISMATCH": 6
  },
  "Detailed Program.xer": {
+  "info:ENCODING_CODEPAGE": 1,
   "warning:ACTUAL_AFTER_DD": 1
  },
  "EBCF-4 070127 Forecast Original.xer": {
@@ -318,8 +323,12 @@
  "beyti phase-2.xer": {
   "info:CAL_HOURS_MISMATCH": 3
  },
- "building a-2.xer": {},
- "building a.xer": {},
+ "building a-2.xer": {
+  "info:ENCODING_CODEPAGE": 1
+ },
+ "building a.xer": {
+  "info:ENCODING_CODEPAGE": 1
+ },
  "cairo alex-road.xer": {},
  "cairo festival city.xer": {},
  "cleopatra elmohandesen.xer": {},

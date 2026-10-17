@@ -7,6 +7,7 @@ import { EXPORT_VERSIONS, verification } from '../../core/xer/schema.ts';
 import { worst } from '../../core/findings.ts';
 import { rows } from '../../core/db.ts';
 import { ensureEps, projectName } from '../model.ts';
+import { ENCODINGS, encodingLabel, type TextEncodingName } from '../../core/encoding.ts';
 import { openProjects } from '../views/ProjectsView.tsx';
 
 function WizardFrame(p: { title: string; steps: string[]; step: number; children: React.ReactNode; onBack?: () => void; onNext?: () => void; onFinish?: () => void; nextDisabled?: boolean; finishLabel?: string }) {
@@ -51,7 +52,8 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
   const [format, setFormat] = useState<Format>(props.preload ? detectFormat(props.preload.name, props.preload.bytes) : 'xer');
   const [importType, setImportType] = useState('project');
   const preloadMpp = !!props.preload && detectFormat(props.preload.name, props.preload.bytes) === 'mpp';
-  const [file, setFile] = useState<{ name: string; parsed: ParsedFile } | null>(null);
+  const [file, setFile] = useState<{ name: string; parsed: ParsedFile; bytes?: Uint8Array; fmt?: Format } | null>(null);
+  const [encoding, setEncoding] = useState<TextEncodingName | 'auto'>('auto');
   const [busy, setBusy] = useState<string | null>(null);
   const [bridgeError, setBridgeError] = useState<string | null>(null);
   const [plan, setPlan] = useState<ImportPlan['projects']>([]);
@@ -67,13 +69,13 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
     });
   }
 
-  const load = async (path: string, name: string, bytes: Uint8Array, fmt: Format) => {
+  const load = async (path: string, name: string, bytes: Uint8Array, fmt: Format, enc: TextEncodingName | 'auto' = encoding) => {
     setBridgeError(null);
     if (fmt !== 'mpp') {
       setFile(null);
       try {
-        const parsed = fmt === 'xer' || fmt === 'xml' ? await parseFileAsync(name, bytes, fmt, undefined, stage) : parseFile(name, bytes, fmt);
-        setFile({ name: path, parsed });
+        const parsed = fmt === 'xer' || fmt === 'xml' ? await parseFileAsync(name, bytes, fmt, undefined, stage, enc) : parseFile(name, bytes, fmt, enc);
+        setFile({ name: path, parsed, bytes, fmt });
         setPlan(defaultRows(parsed));
       } finally { setBusy(null); }
       return;
@@ -170,6 +172,9 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
         </div>}
         {file && <div style={{ marginTop: 12 }}>
           <div>Format: <b>{isMspFormat(file.parsed.format) ? FORMAT_INFO[file.parsed.format].label : file.parsed.format.toUpperCase()}</b>{file.parsed.db.header && <> · ERMHDR version <b>{file.parsed.db.header.version}</b> · exported {file.parsed.db.header.exportDate} by {file.parsed.db.header.raw[5] ?? file.parsed.db.header.raw[4]}</>}</div>
+          {(file.fmt === 'xer' || file.fmt === 'mpx') && <div>Text encoding: <select value={encoding} onChange={(e) => { const v = e.target.value as TextEncodingName | 'auto'; setEncoding(v); void load(file.name, file.name, file.bytes!, file.fmt!, v); }}>
+            <option value="auto">Recognise automatically{file.parsed.db.header?.encoding ? ` (${encodingLabel(file.parsed.db.header.encoding)})` : ''}</option>{ENCODINGS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            <span className="muted" style={{ marginLeft: 6 }}>Change it if names look garbled (P6 writes XER in the exporting computer's Windows code page).</span></div>}
           <div>Tables: {Object.keys(file.parsed.db.tables).length} · Projects: {rows(file.parsed.db, 'PROJECT').length} · Activities: {rows(file.parsed.db, 'TASK').length} · Relationships: {rows(file.parsed.db, 'TASKPRED').length}</div>
           <div style={{ marginTop: 8, padding: 8, border: '1px solid #ccc', background: verdict === 'fatal' ? '#fde4e4' : verdict === 'error' ? '#fff0e0' : '#e9f7e9' }}>
             <b>{verdict === 'fatal' ? 'P6 would REJECT this file.' : verdict === 'error' ? 'P6 import would FAIL or drop data.' : 'P6 would import this file.'}</b>
@@ -239,6 +244,7 @@ export function ExportWizard(props: { projIds?: string[] }) {
   const [step, setStep] = useState(0);
   const [format, setFormat] = useState<Format>('xer');
   const [version, setVersion] = useState('19.12');
+  const [encoding, setEncoding] = useState<TextEncodingName | 'auto'>('auto');
   const [sel, setSel] = useState<string[]>(props.projIds ?? (ui.openProjects.length ? ui.openProjects : projects.slice(0, 1).map((p) => p.proj_id)));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -247,7 +253,7 @@ export function ExportWizard(props: { projIds?: string[] }) {
   const finish = async () => {
     // A Microsoft Project file holds one project (P6 exports one project per MS Project file).
     const ids = msp ? sel.slice(0, 1) : sel;
-    const bytes = exportFile(getDb(), format, { version, projIds: ids });
+    const bytes = exportFile(getDb(), format, { version, projIds: ids, encoding });
     const first = projects.find((p) => p.proj_id === ids[0]);
     const base = (first?.proj_short_name ?? 'export').replace(/[\\/:*?"<>|]/g, '_');
     setError(null);
@@ -279,6 +285,7 @@ export function ExportWizard(props: { projIds?: string[] }) {
       {step === 0 && <>
         <h3>Select the format of the export file</h3>
         <label style={{ display: 'block', margin: '6px 0' }}><input type="radio" checked={format === 'xer'} onChange={() => setFormat('xer')} /> Primavera PM - (XER)</label>
+        {(format === 'xer' || format === 'mpx') && <div style={{ margin: '4px 0 6px 24px' }}>Text encoding: <select value={encoding} onChange={(e) => setEncoding(e.target.value as TextEncodingName | 'auto')}><option value="auto">As P6 would (Windows-1252, or the code page of the language used)</option>{ENCODINGS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>}
         {format === 'xer' && <div style={{ margin: '4px 0 10px 24px' }}>Version: <select value={version} onChange={(e) => setVersion(e.target.value)}>{EXPORT_VERSIONS.map((v) => <option key={v}>{v}</option>)}</select>
           <span className="muted" style={{ marginLeft: 8 }}>Field layout: {verification(version, 'TASK') === 'exact' ? 'verified against real P6 export' : verification(version, 'TASK') === 'modern-build' ? 'from a real modern P6 build' : 'best knowledge'}</span></div>}
         <label style={{ display: 'block', margin: '6px 0' }}><input type="radio" checked={format === 'xml'} onChange={() => setFormat('xml')} /> Primavera PM/EPPM - (XML)</label>

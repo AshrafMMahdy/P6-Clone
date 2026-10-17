@@ -8,7 +8,7 @@ import { syncAssignmentDates } from '../core/resource/assign.ts';
 
 /** Write the result: P6 XML when the path ends in .xml, else XER (the given version, the version read, or 19.12). */
 export function writeOut(path: string, db: Db, version?: string): void {
-  writeFileSync(path, /\.xml$/i.test(path) ? writeP6Xml(db, { version: version ?? '19.12' }) : writeXer(db, { version: version ?? db.header?.version ?? '19.12' }));
+  writeFileSync(path, /\.xml$/i.test(path) ? writeP6Xml(db, { version: version ?? '19.12' }) : writeXer(db, { version: version ?? db.header?.version ?? '19.12', encoding: (process.argv.includes('--out-encoding') ? process.argv[process.argv.indexOf('--out-encoding') + 1] : 'auto') as never }));
 }
 
 export interface ScheduleCmdOptions { dataDate?: string; out?: string; version?: string; json?: boolean }

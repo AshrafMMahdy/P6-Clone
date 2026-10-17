@@ -10,7 +10,7 @@ import { writeXer } from '../core/xer/write.ts';
 import { parseP6Xml, writeP6Xml } from '../core/xml/p6xml.ts';
 import { parseMspdi, writeMspdi } from '../core/msp/mspdi.ts';
 import { parseMpx, writeMpx } from '../core/msp/mpx.ts';
-import { decodeText, encodeCp1252 } from '../core/encoding.ts';
+import { chooseEncoding, decodeText, encodeText, type TextEncodingName } from '../core/encoding.ts';
 import type { Db } from '../core/db.ts';
 import type { Finding } from '../core/findings.ts';
 
@@ -51,11 +51,11 @@ export function detectFormat(name: string, bytes: Uint8Array): Format {
 }
 
 /** Parse and validate the way P6's import would. .mpp needs Microsoft Project: use parseFileAsync. */
-export function parseFile(name: string, bytes: Uint8Array, format = detectFormat(name, bytes)): ParsedFile {
+export function parseFile(name: string, bytes: Uint8Array, format = detectFormat(name, bytes), encoding?: TextEncodingName | 'auto'): ParsedFile {
   if (format === 'mpp') {
     return { format, db: { tables: {} }, findings: [{ severity: 'fatal', code: 'MPP_NEEDS_PROJECT', message: '.mpp files are converted by Microsoft Project; open it with File > Import > Microsoft Project.', p6: 'P6 imports .mpp only through an installed Microsoft Project.' }] };
   }
-  const r = readRaw(bytes, format);
+  const r = readRaw(bytes, format, encoding);
   return { format, db: r.db, findings: importChecks(r.db, r.findings, format) };
 }
 
@@ -66,30 +66,30 @@ export function importChecks(db: Db, parsed: Finding[], format: Format, dates = 
 }
 
 /** Parse only (no P6 import checks) for any format but .mpp. Used by parseFile, the CLI and the MCP server. */
-export function readRaw(bytes: Uint8Array, format: Format): { db: Db; findings: Finding[] } {
+export function readRaw(bytes: Uint8Array, format: Format, encoding?: TextEncodingName | 'auto'): { db: Db; findings: Finding[] } {
   if (format === 'mpp') throw new Error('.mpp files need Microsoft Project: save them as Microsoft Project XML (or import them in the desktop app).');
   if (format === 'xml') return parseP6Xml(xmlText(bytes));
   if (format === 'mspdi') return parseMspdi(xmlText(bytes));
-  if (format === 'mpx') return parseMpx(decodeText(bytes).text);
-  return parseXer(bytes);
+  if (format === 'mpx') return parseMpx(decodeText(bytes, encoding).text);
+  return parseXer(bytes, { encoding });
 }
 
 export interface MppBridge { mppToXml(bytes: Uint8Array): Promise<Uint8Array> }
 
 /** Like parseFile, but .mpp is first converted to Microsoft Project XML by Microsoft Project (rejects with the bridge error). */
-export async function parseFileAsync(name: string, bytes: Uint8Array, format = detectFormat(name, bytes), bridge?: MppBridge, onStage?: (msg: string) => Promise<void>): Promise<ParsedFile> {
+export async function parseFileAsync(name: string, bytes: Uint8Array, format = detectFormat(name, bytes), bridge?: MppBridge, onStage?: (msg: string) => Promise<void>, encoding?: TextEncodingName | 'auto'): Promise<ParsedFile> {
   if (format === 'xer' || format === 'xml') {
     // the same work as parseFile, in stages, so a 100 MB file shows what it is doing instead of freezing
     const stage = onStage ?? (async () => {});
     await stage(`Reading ${(bytes.length / 1048576).toFixed(1)} MB...`);
-    const r = format === 'xml' ? parseP6Xml(xmlText(bytes)) : parseXer(bytes);
+    const r = format === 'xml' ? parseP6Xml(xmlText(bytes)) : parseXer(bytes, { encoding });
     await stage(`Checking ${(r.db.tables.TASK?.rows.length ?? 0).toLocaleString()} activities the way P6 would...`);
     const f = importChecks(r.db, r.findings, format, false);
     if (worst(f) === 'fatal') return { format, db: r.db, findings: f };
     await stage('Comparing the saved dates with what P6 would calculate...');
     return { format, db: r.db, findings: [...f, ...checkStoredDates(r.db)] };
   }
-  if (format !== 'mpp') return parseFile(name, bytes, format);
+  if (format !== 'mpp') return parseFile(name, bytes, format, encoding);
   const b = bridge ?? (globalThis as { p6?: MppBridge }).p6;
   if (!b?.mppToXml) throw new Error('Microsoft Project must be installed to import/export .mpp files (Primavera P6 has the same requirement).');
   const xml = await b.mppToXml(bytes);
@@ -97,11 +97,11 @@ export async function parseFileAsync(name: string, bytes: Uint8Array, format = d
 }
 
 /** File bytes for an export. For 'mpp' this is the Microsoft Project XML that Microsoft Project converts to .mpp. */
-export function exportFile(db: Db, format: Format, opts: { version: string; projIds: string[] }): Uint8Array {
+export function exportFile(db: Db, format: Format, opts: { version: string; projIds: string[]; encoding?: TextEncodingName | 'auto' }): Uint8Array {
   if (format === 'xml') return new TextEncoder().encode(writeP6Xml(db, { projIds: opts.projIds, version: opts.version }));
   if (format === 'mspdi' || format === 'mpp') return new TextEncoder().encode(writeMspdi(db, { projIds: opts.projIds }));
-  if (format === 'mpx') return encodeCp1252(writeMpx(db, { projIds: opts.projIds }));
-  return writeXer(db, { version: opts.version, projIds: opts.projIds });
+  if (format === 'mpx') { const t = writeMpx(db, { projIds: opts.projIds }); return encodeText(t, !opts.encoding || opts.encoding === 'auto' ? chooseEncoding(t) : opts.encoding); }
+  return writeXer(db, { version: opts.version, projIds: opts.projIds, encoding: opts.encoding });
 }
 
 /** Strip Electron's "Error invoking remote method 'x': Error: " prefix from IPC errors. */
