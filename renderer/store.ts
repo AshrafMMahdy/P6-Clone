@@ -4,6 +4,7 @@ import { record, rollback, type Journal } from '../core/journal.ts';
 import { dbToLines, linesToDb } from '../core/db-file.ts';
 import type { P6Api } from '../main/preload.ts';
 import { emptyDb, type Db } from '../core/db.ts';
+import { setColumnDb } from './model.ts';
 import type { Finding } from '../core/findings.ts';
 
 declare global { interface Window { p6: P6Api } }
@@ -72,6 +73,7 @@ export function useStore<T>(sel: (s: typeof state) => T): T {
   return useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, () => sel(snapshot));
 }
 export const getDb = () => state.db;
+setColumnDb(getDb);
 export const getUi = () => state.ui;
 
 export function setUi(patch: Partial<UiState> | ((u: UiState) => Partial<UiState>)): void {

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Dialog } from '../components/Layout.tsx';
 import { closeDialog, getDb, mutate, setUi, toast, useStore, DEFAULT_COLUMNS, type Prefs } from '../store.ts';
-import { COLUMNS, COLUMN_BY_ID, RSRC_TYPES, addRelationship, fmtDate } from '../model.ts';
+import { COLUMNS, COLUMN_BY_ID, RSRC_TYPES, addRelationship, extraColumns, fmtDate } from '../model.ts';
 import { rows } from '../../core/db.ts';
 import { assignResource } from '../../core/resource/assign.ts';
 import { findingsText, parseFile } from '../io.ts';
@@ -12,7 +12,7 @@ export function ColumnsDialog() {
   const [sel, setSel] = useState<string[]>(ui.columns);
   const [pickA, setPickA] = useState<string | null>(null);
   const [pickS, setPickS] = useState<string | null>(null);
-  const avail = COLUMNS.filter((c) => !sel.includes(c.id));
+  const avail = [...COLUMNS, ...extraColumns(getDb())].filter((c) => !sel.includes(c.id)).map((c) => (c.group ? { ...c, title: `${c.group}: ${c.title}` } : c));
   const move = (d: number) => { if (!pickS) return; const i = sel.indexOf(pickS), j = i + d; if (j < 0 || j >= sel.length) return; const n = [...sel]; [n[i], n[j]] = [n[j], n[i]]; setSel(n); };
   const list = (items: { id: string; title: string }[], pick: string | null, setPick: (s: string) => void, onDbl: (id: string) => void) => (
     <div className="tblwrap" style={{ width: 230, height: 320 }}>

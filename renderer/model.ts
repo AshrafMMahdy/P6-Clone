@@ -1,5 +1,5 @@
 // Derived views of the raw P6 tables for the UI: formatting, columns, edit rules, structural edits.
-import { addField, groupBy, indexBy, nextId, rows, table, type Db, type Row } from '../core/db.ts';
+import { addField, emptyDb, groupBy, indexBy, nextId, rows, table, type Db, type Row } from '../core/db.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { p6num, calendarResolver } from '../core/schedule/cpm.ts';
 import { durationPct } from '../core/progress/update.ts';
@@ -71,6 +71,8 @@ export function wbsPath(wbsId: string, ctx: Ctx): string {
 
 export interface Column {
   id: string; title: string; width: number; align?: 'left' | 'right' | 'center';
+  /** View > Columns folder for columns made from the database (Activity Codes, User Defined Fields) */
+  group?: string;
   get: (r: Row, ctx: Ctx) => string;
   edit?: { type: 'text' | 'number' | 'date' | 'select'; options?: Record<string, string>; set: (db: Db, r: Row, v: string, ctx: Ctx) => string | void };
 }
@@ -151,9 +153,62 @@ export const COLUMNS: Column[] = [
   { id: 'rem_cost', title: 'Remaining Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'remain_cost') + sumBy(c.costByTask.get(r.task_id), 'remain_cost')) },
   { id: 'preds', title: 'Predecessors', width: 120, get: (r, c) => (c.predsOf.get(r.task_id) ?? []).map((p) => c.taskById.get(p.pred_task_id)?.task_code ?? `[${p.pred_task_id}]`).join(', ') },
   { id: 'succs', title: 'Successors', width: 120, get: (r, c) => (c.succsOf.get(r.task_id) ?? []).map((p) => c.taskById.get(p.task_id)?.task_code ?? `[${p.task_id}]`).join(', ') },
+  { id: 'rem_early_start', title: 'Remaining Early Start', width: 82, get: (r, c) => fmtDate(r.restart_date, c.prefs) },
+  { id: 'rem_early_finish', title: 'Remaining Early Finish', width: 82, get: (r, c) => fmtDate(r.reend_date, c.prefs) },
+  { id: 'rem_late_start', title: 'Remaining Late Start', width: 82, get: (r, c) => fmtDate(r.rem_late_start_date, c.prefs) },
+  { id: 'rem_late_finish', title: 'Remaining Late Finish', width: 82, get: (r, c) => fmtDate(r.rem_late_end_date, c.prefs) },
+  { id: 'suspend', title: 'Suspend Date', width: 82, get: (r, c) => fmtDate(r.suspend_date, c.prefs) },
+  { id: 'resume', title: 'Resume Date', width: 82, get: (r, c) => fmtDate(r.resume_date, c.prefs) },
+  { id: 'ext_early_start', title: 'External Early Start', width: 82, get: (r, c) => fmtDate(r.external_early_start_date, c.prefs) },
+  { id: 'ext_late_finish', title: 'External Late Finish', width: 82, get: (r, c) => fmtDate(r.external_late_end_date, c.prefs) },
+  { id: 'float_path', title: 'Float Path', width: 50, align: 'right', get: (r) => r.float_path ?? '' },
+  { id: 'float_path_order', title: 'Float Path Order', width: 50, align: 'right', get: (r) => r.float_path_order ?? '' },
+  { id: 'priority', title: 'Leveling Priority', width: 80, get: (r) => PRIORITIES[r.priority_type] ?? r.priority_type ?? '' },
   { id: 'expect_end', title: 'Expected Finish', width: 82, get: (r, c) => fmtDate(r.expect_end_date, c.prefs) },
   { id: 'proj', title: 'Project ID', width: 90, get: (r, c) => c.proj.get(r.proj_id)?.proj_short_name ?? '' },
   { id: 'task_id', title: 'Activity (internal) ID', width: 70, align: 'right', get: (r) => r.task_id },
 ];
-export const COLUMN_BY_ID = new Map(COLUMNS.map((c) => [c.id, c]));
+const PRIORITIES: Record<string, string> = { PT_Top: 'Top', PT_High: 'High', PT_Normal: 'Normal', PT_Low: 'Low', PT_Lowest: 'Lowest' };
+const BASE_COLUMNS = new Map(COLUMNS.map((c) => [c.id, c]));
+
+// per-context lookups for the database columns (task_id -> text), built on first use
+const extraValues = new WeakMap<Ctx, Map<string, Map<string, string>>>();
+function extraValue(ctx: Ctx, colId: string, taskId: string, build: () => Map<string, string>): string {
+  let byCol = extraValues.get(ctx);
+  if (!byCol) extraValues.set(ctx, (byCol = new Map()));
+  let m = byCol.get(colId);
+  if (!m) byCol.set(colId, (m = build()));
+  return m.get(taskId) ?? '';
+}
+
+/** Activity code and activity UDF columns of a database (P6: the Activity Codes and User Defined Fields folders of View > Columns). */
+export function extraColumns(db: Db): Column[] {
+  const out: Column[] = [];
+  for (const t of rows(db, 'ACTVTYPE')) {
+    const id = `code_${t.actv_code_type_id}`;
+    out.push({ id, title: t.actv_code_type, width: 100, group: 'Activity Codes', get: (r, c) => extraValue(c, id, r.task_id, () => {
+      const codes = indexBy(rows(c.db, 'ACTVCODE'), 'actv_code_id'), m = new Map<string, string>();
+      for (const a of rows(c.db, 'TASKACTV')) if (a.actv_code_type_id === t.actv_code_type_id || (!a.actv_code_type_id && codes.get(a.actv_code_id)?.actv_code_type_id === t.actv_code_type_id)) m.set(a.task_id, codes.get(a.actv_code_id)?.short_name ?? '');
+      return m;
+    }) });
+  }
+  for (const u of rows(db, 'UDFTYPE').filter((x) => x.table_name === 'TASK')) {
+    const id = `udf_${u.udf_type_id}`, ty = u.logical_data_type ?? '';
+    const num = /FLOAT|INT|MONEY/.test(ty);
+    out.push({ id, title: u.udf_type_label, width: 100, align: num ? 'right' : undefined, group: 'User Defined Fields', get: (r, c) => extraValue(c, id, r.task_id, () => {
+      const ucodes = indexBy(rows(c.db, 'UDFCODE'), 'udf_code_id'), m = new Map<string, string>();
+      for (const v of rows(c.db, 'UDFVALUE')) if (v.udf_type_id === u.udf_type_id) {
+        m.set(v.fk_id, /DATE/.test(ty) ? fmtDate(v.udf_date, c.prefs) : ty === 'FT_MONEY' ? money(Number(v.udf_number || 0)) : num ? (v.udf_number ?? '') : ty === 'FT_CODE' ? (ucodes.get(v.udf_code_id)?.short_name ?? '') : (v.udf_text ?? ''));
+      }
+      return m;
+    }) });
+  }
+  return out;
+}
+
+let columnDb: () => Db = emptyDb;
+/** Where database columns (codes, UDFs) look up their names: the app's current database. */
+export const setColumnDb = (f: () => Db) => { columnDb = f; };
+/** Column by id: the fixed columns, then the database's code and UDF columns. */
+export const COLUMN_BY_ID = { get: (id: string): Column | undefined => BASE_COLUMNS.get(id) ?? (/^(code|udf)_/.test(id) ? extraColumns(columnDb()).find((c) => c.id === id) : undefined) };
 
