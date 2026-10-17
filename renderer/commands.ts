@@ -1,6 +1,6 @@
 // Actions triggered from menus, toolbars and context menus.
 import { getDb, getUi, mutate, setUi, toast, openDialog, doUndo, doRedo, saveNow } from './store.ts';
-import { addActivity, addWbs, deleteActivities, dissolveActivities, nextTaskCode } from './model.ts';
+import { addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, nextTaskCode } from './model.ts';
 import { nextId, rows, table, type Row } from '../core/db.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
@@ -43,6 +43,21 @@ export function pasteActivities(): void {
   });
   setUi({ selTasks: newIds, selTask: newIds[0] });
   toast(`Pasted ${newIds.length} activit${newIds.length > 1 ? 'ies' : 'y'} (reschedule with F9)`);
+}
+
+/** Edit > Link Activities: finish-to-start links between the selected activities, in the order they were selected. */
+export function linkSelected(): void {
+  const ids = getUi().selTasks;
+  if (ids.length < 2) return toast('Select two or more activities to link.');
+  let n = 0;
+  const skipped: string[] = [];
+  mutate('Link Activities', (d) => {
+    for (let i = 1; i < ids.length; i++) {
+      const err = addRelationship(d, ids[i - 1], ids[i]);
+      if (err) skipped.push(err); else n++;
+    }
+  });
+  toast(`${n} relationship${n === 1 ? '' : 's'} (FS) added${skipped.length ? `; ${skipped.length} skipped: ${skipped[0]}` : ''}`);
 }
 
 /** Insert / Delete handlers registered by windows other than Activities (Resources, ...). */

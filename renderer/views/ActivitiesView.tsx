@@ -2,15 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Grid, type GridItem, type EditorSpec } from '../components/Grid.tsx';
 import { Gantt, DEFAULT_BARS, type GanttEntry, type GanttLink, type GanttActions } from '../components/Gantt.tsx';
 import { Split, showContextMenu } from '../components/Layout.tsx';
-import { getDb, mutate, setUi, toast, useStore, openDialog } from '../store.ts';
+import { getDb, getUi, mutate, setUi, toast, useStore, openDialog } from '../store.ts';
 import { useCtx, useProjectCalendar } from '../hooks.ts';
-import { COLUMN_BY_ID, fmtDate, fmtDur, isCritical, isMilestone, addRelationship, checkRelationship, TASK_TYPES } from '../model.ts';
+import { COLUMN_BY_ID, fmtDate, fmtDur, isCritical, isMilestone, addRelationship, checkRelationship, makeCtx, TASK_TYPES, type Ctx } from '../model.ts';
 import { buildActivityRows, FILTERS, taskStart, taskFinish } from './activityRows.ts';
 import { ActivityDetails } from './ActivityDetails.tsx';
 import { ActivityUsagePane } from './AssignmentsView.tsx';
 import { parseP6Date, formatP6Date } from '../../core/dates.ts';
 import type { Row } from '../../core/db.ts';
-import { activityCommands, copyActivities, pasteActivities } from '../commands.ts';
+import { activityCommands, copyActivities, pasteActivities, linkSelected } from '../commands.ts';
 
 const WBS_COLORS = ['var(--wbs0)', 'var(--wbs1)', 'var(--wbs2)', 'var(--wbs3)', 'var(--wbs4)'];
 
@@ -91,19 +91,8 @@ export function ActivitiesView() {
   };
 
   const getEditor = (key: string, colId: string): EditorSpec | null => {
-    if (!key.startsWith('t:')) {
-      if (key.startsWith('w:') && colId === ui.columns[0]) return null;
-      return null;
-    }
-    const c = COLUMN_BY_ID.get(colId);
-    const t = ctx.taskById.get(key.slice(2));
-    if (!c?.edit || !t) return null;
-    const raw: Record<string, string> = {
-      task_type: t.task_type, duration_type: t.duration_type, pct_type: t.complete_pct_type, cstr_type: t.cstr_type,
-      start: t.act_start_date || t.early_start_date, finish: t.act_end_date || t.early_end_date, act_start: t.act_start_date, act_finish: t.act_end_date, cstr_date: t.cstr_date,
-      orig_dur: fmtDur(t.target_drtn_hr_cnt, ctx.prefs), rem_dur: fmtDur(t.remain_drtn_hr_cnt, ctx.prefs), pct: c.get(t, ctx).replace('%', ''), phys_pct: t.phys_complete_pct || '0',
-    };
-    return { type: c.edit.type, value: raw[colId] ?? c.get(t, ctx), options: c.edit.options };
+    const t = key.startsWith('t:') ? ctx.taskById.get(key.slice(2)) : undefined;
+    return t ? editSpec(t, colId, ctx) : null;
   };
   const onCommit = (key: string, colId: string, value: string) => {
     const c = COLUMN_BY_ID.get(colId)!;
@@ -148,6 +137,8 @@ export function ActivitiesView() {
       { label: 'Assign Predecessors...', onClick: () => openDialog('assign', { which: 'pred' }) },
       { label: 'Assign Successors...', onClick: () => openDialog('assign', { which: 'succ' }) },
       { label: 'Assign Resources...', onClick: () => openDialog('assignRsrc') },
+      { label: 'Link Activities', disabled: ui.selTasks.length < 2, onClick: linkSelected },
+      { label: 'Fill Down', disabled: ui.selTasks.length < 2, onClick: fillDown },
       { sep: true, label: '' },
       { label: 'Add WBS Element', onClick: cmds.addWbs },
       { label: 'Columns...', onClick: () => openDialog('columns') },
@@ -213,7 +204,7 @@ export function ActivitiesView() {
         const table = (
           <Grid cols={cols} items={items} selected={selected} onSelect={onSelect} treeCol={ui.columns.includes('task_code') ? 'task_code' : ui.columns[0]}
             onToggle={(k) => setUi((u) => ({ collapsed: { ...u.collapsed, [k]: !u.collapsed[k] } }))}
-            getEditor={getEditor} onCommit={onCommit} onScroll={setScrollTop} scrollTop={scrollTop}
+            getEditor={getEditor} onCommit={onCommit} onCursor={(c) => { cursorCol = c; }} onScroll={setScrollTop} scrollTop={scrollTop}
             onContextMenu={onContext} labelSpan={ui.columns[1] === 'task_name' ? 2 : 1}
             onResize={(id, w) => setUi((u) => ({ colWidths: { ...u.colWidths, [id]: Math.round(w) } }))}
             sortCol={ui.sortBy.startsWith('col:') ? { id: ui.sortBy.split(':')[1], desc: ui.sortBy.endsWith(':desc') } : undefined}
@@ -234,6 +225,45 @@ export function ActivitiesView() {
       })()}
     </>
   );
+}
+
+/** In-cell editor for an activity column (null when the column cannot be edited). */
+function editSpec(t: Row, colId: string, ctx: Ctx): EditorSpec | null {
+  const c = COLUMN_BY_ID.get(colId);
+  if (!c?.edit) return null;
+  const raw: Record<string, string> = {
+    task_type: t.task_type, duration_type: t.duration_type, pct_type: t.complete_pct_type, cstr_type: t.cstr_type,
+    start: t.act_start_date || t.early_start_date, finish: t.act_end_date || t.early_end_date, act_start: t.act_start_date, act_finish: t.act_end_date, cstr_date: t.cstr_date,
+    orig_dur: fmtDur(t.target_drtn_hr_cnt, ctx.prefs), rem_dur: fmtDur(t.remain_drtn_hr_cnt, ctx.prefs), pct: c.get(t, ctx).replace('%', ''), phys_pct: t.phys_complete_pct || '0',
+  };
+  return { type: c.edit.type, value: raw[colId] ?? c.get(t, ctx), options: c.edit.options };
+}
+
+let cursorCol = ''; // the table's current cell column (Fill Down copies this field)
+
+/** Edit > Fill Down (Ctrl+E): copies the current column's value of the top selected activity to the other selected activities. */
+export function fillDown(): void {
+  const ui = getUi(), db = getDb(), ctx = makeCtx(db, ui.prefs);
+  const col = COLUMN_BY_ID.get(cursorCol && ui.columns.includes(cursorCol) ? cursorCol : ui.columns[0]);
+  const sel = new Set(ui.selTasks);
+  if (ui.view !== 'activities' || sel.size < 2) return toast('Select two or more activities to fill down.');
+  if (!col?.edit) return toast(`${col?.title ?? 'This column'} cannot be edited.`);
+  const order = buildActivityRows(ctx, ui.openProjects, {}, ui.filter, ui.groupBy, ui.sortBy).filter((r) => r.kind === 'task' && sel.has(r.task!.task_id)).map((r) => r.task!);
+  const [src, ...rest] = order;
+  if (!src || !rest.length) return;
+  let value = editSpec(src, col.id, ctx)!.value;
+  if (col.edit.type === 'date') value = value.replace(' ', 'T').slice(0, 16);
+  const errs: string[] = [];
+  mutate(`Fill Down ${col.title}`, (d) => {
+    const now = formatP6Date(Date.now() / 60000);
+    for (const t of rest) {
+      const row = d.tables.TASK.rows.find((x) => x.task_id === t.task_id)!, copy = { ...row };
+      const err = col.edit!.set(d, copy, value, ctx);
+      if (err) errs.push(`${t.task_code}: ${err}`);
+      else if (Object.keys(copy).some((k) => copy[k] !== row[k])) Object.assign(row, copy, { update_date: now });
+    }
+  });
+  toast(errs.length ? `Filled ${rest.length - errs.length} of ${rest.length}. ${errs[0]}` : `${col.title} filled down to ${rest.length} activit${rest.length > 1 ? 'ies' : 'y'}`);
 }
 
 function isDriving(p: Row, a: Row, b: Row): boolean {

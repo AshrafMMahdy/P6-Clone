@@ -2,12 +2,48 @@
 // expanding collapsed WBS bands and scrolling it into view; Find All selects every match.
 import { useState } from 'react';
 import { Dialog } from '../components/Layout.tsx';
-import { closeDialog, getDb, getUi, setUi, toast } from '../store.ts';
+import { closeDialog, getDb, getUi, openDialog, setUi, toast } from '../store.ts';
 import { rows } from '../../core/db.ts';
 import { COLUMN_BY_ID, makeCtx } from '../model.ts';
 import { buildActivityRows } from '../views/activityRows.ts';
 
 let last = { q: '', field: 'any', caseSens: false };
+
+function matches(): string[] {
+  const { q, field, caseSens } = last;
+  const db = getDb(), u = getUi(), ctx = makeCtx(db, u.prefs);
+  const cols = u.columns.map((id) => COLUMN_BY_ID.get(id)).filter((c) => c != null);
+  // table order, ignoring collapsed bands (a match inside one is revealed)
+  const order = buildActivityRows(ctx, u.openProjects, {}, u.filter, u.groupBy, u.sortBy).filter((r) => r.kind === 'task').map((r) => r.task!);
+  const norm = (s: string) => (caseSens ? s : s.toLowerCase());
+  const needle = norm(q.trim());
+  if (!needle) return [];
+  const look = field === 'any' ? cols : cols.filter((c) => c.id === field);
+  return order.filter((t) => look.some((c) => norm(c.get(t, ctx)).includes(needle))).map((t) => t.task_id);
+}
+
+function reveal(ids: string[]) {
+  // expand the WBS bands that hide the found activities
+  const db = getDb(), parent = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w.parent_wbs_id]));
+  const open: Record<string, boolean> = { ...getUi().collapsed };
+  for (const id of ids) {
+    const t = rows(db, 'TASK').find((x) => x.task_id === id);
+    for (let w = t?.wbs_id, n = 0; w && n < 100; w = parent.get(w), n++) delete open[`w:${w}`];
+  }
+  setUi({ collapsed: open, view: 'activities' });
+}
+
+/** Find Next (F3): the next match of the last search after the selected activity. */
+export function findNext(): void {
+  if (!last.q.trim()) return openDialog('find');
+  const m = matches();
+  if (!m.length) return toast(`"${last.q}" was not found.`);
+  const cur = getUi().selTask, i = cur ? m.indexOf(cur) : -1;
+  const id = m[(i + 1) % m.length];
+  reveal([id]);
+  setUi({ selTasks: [id], selTask: id, revealTask: id });
+  if (i + 1 >= m.length && i >= 0) toast('Search wrapped to the first match.');
+}
 
 export function FindDialog() {
   const [q, setQ] = useState(last.q);
@@ -16,36 +52,7 @@ export function FindDialog() {
   const ui = getUi();
   const cols = ui.columns.map((id) => COLUMN_BY_ID.get(id)).filter((c) => c != null);
 
-  const matches = (): string[] => {
-    const db = getDb(), u = getUi(), ctx = makeCtx(db, u.prefs);
-    // table order, ignoring collapsed bands (a match inside one is revealed)
-    const order = buildActivityRows(ctx, u.openProjects, {}, u.filter, u.groupBy, u.sortBy).filter((r) => r.kind === 'task').map((r) => r.task!);
-    const norm = (s: string) => (caseSens ? s : s.toLowerCase());
-    const needle = norm(q.trim());
-    if (!needle) return [];
-    const look = field === 'any' ? cols : cols.filter((c) => c.id === field);
-    return order.filter((t) => look.some((c) => norm(c.get(t, ctx)).includes(needle))).map((t) => t.task_id);
-  };
-  const reveal = (ids: string[]) => {
-    // expand the WBS bands that hide the found activities
-    const db = getDb(), parent = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w.parent_wbs_id]));
-    const open: Record<string, boolean> = { ...getUi().collapsed };
-    for (const id of ids) {
-      const t = rows(db, 'TASK').find((x) => x.task_id === id);
-      for (let w = t?.wbs_id, n = 0; w && n < 100; w = parent.get(w), n++) delete open[`w:${w}`];
-    }
-    setUi({ collapsed: open, view: 'activities' });
-  };
-  const next = () => {
-    last = { q, field, caseSens };
-    const m = matches();
-    if (!m.length) return toast(`"${q}" was not found.`);
-    const cur = getUi().selTask, i = cur ? m.indexOf(cur) : -1;
-    const id = m[(i + 1) % m.length];
-    reveal([id]);
-    setUi({ selTasks: [id], selTask: id, revealTask: id });
-    if (i + 1 >= m.length && i >= 0) toast('Search wrapped to the first match.');
-  };
+  const next = () => { last = { q, field, caseSens }; findNext(); };
   const all = () => {
     last = { q, field, caseSens };
     const m = matches();

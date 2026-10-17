@@ -2,8 +2,8 @@ import { useEffect, type JSX } from 'react';
 import { Icon } from './components/Icons.tsx';
 import { ContextMenuHost, DialogTop } from './components/Layout.tsx';
 import { closeDialog, doRedo, doUndo, getDb, getUi, loadFromDisk, mutate, openDialog, replaceDb, saveNow, setUi, toast, useStore, undoLabel, type ViewName } from './store.ts';
-import { activityCommands, handleEditKey, runSchedule, copyActivities, pasteActivities, renumberActivities, dissolveSelected } from './commands.ts';
-import { ActivitiesView } from './views/ActivitiesView.tsx';
+import { activityCommands, handleEditKey, runSchedule, copyActivities, pasteActivities, renumberActivities, dissolveSelected, linkSelected } from './commands.ts';
+import { ActivitiesView, fillDown } from './views/ActivitiesView.tsx';
 import { ProjectsView, openProjects } from './views/ProjectsView.tsx';
 import { WbsView } from './views/WbsView.tsx';
 import { ResourcesView } from './views/ResourcesView.tsx';
@@ -15,7 +15,7 @@ import { PortfoliosView } from './views/PortfoliosView.tsx';
 import { applyApprovedTimesheets, formatApplySummary, hasPendingActuals } from '../core/timesheet/timesheet.ts';
 import { ImportWizard, ExportWizard } from './dialogs/Wizards.tsx';
 import { BarsDialog } from './dialogs/BarsDialog.tsx';
-import { FindDialog } from './dialogs/FindDialog.tsx';
+import { FindDialog, findNext } from './dialogs/FindDialog.tsx';
 import { AiSettingsDialog } from './dialogs/AiSettingsDialog.tsx';
 import { AssistantPanel } from './ai/AssistantPanel.tsx';
 import { initLive } from './ai/live.ts';
@@ -70,6 +70,9 @@ export function runMenu(id: string): void {
     case 'edit.assignRsrc': return openDialog('assignRsrc');
     case 'edit.assignCodes': return setUi({ detailTab: 'codes' });
     case 'edit.renumber': return void renumberActivities();
+    case 'edit.link': return linkSelected();
+    case 'edit.fillDown': return fillDown();
+    case 'edit.findNext': return ui.openProjects.length ? findNext() : toast('Open a project first.');
     case 'edit.preferences': return openDialog('prefs');
     case 'edit.selectAll': return void handleEditKey(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true }));
     case 'edit.aiSettings': return openDialog('aiSettings');
@@ -206,6 +209,9 @@ export function App() {
         const minus = e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract' || e.code === 'Minus';
         if (plus || minus) { e.preventDefault(); runMenu(e.shiftKey && !e.code.startsWith('Numpad') ? (plus ? 'view.expandAll' : 'view.collapseAll') : (plus ? 'view.zoomIn' : 'view.zoomOut')); return; }
       }
+      // Ctrl+E Fill Down and F3 Find Next act on the table (not while typing in a field or a dialog is open)
+      const typing = (e.target as HTMLElement)?.closest?.('input, textarea, select, [contenteditable="true"]');
+      if (!typing && !getUi().dialogs.length && ((e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'e') || e.key === 'F3')) { e.preventDefault(); runMenu(e.key === 'F3' ? 'edit.findNext' : 'edit.fillDown'); return; }
       if (handleEditKey(e)) e.preventDefault();
     };
     window.addEventListener('keydown', k);

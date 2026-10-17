@@ -27,6 +27,8 @@ export interface GridProps {
   onCommit?: (key: string, colId: string, value: string) => void;
   onContextMenu?: (key: string | null, e: RME) => void;
   onScroll?: (top: number) => void;
+  /** the current cell's column changed (Edit > Fill Down acts on it) */
+  onCursor?: (colId: string) => void;
   scrollTop?: number;
   /** click a column header to sort by it (P6: ascending, then descending) */
   onHeaderClick?: (colId: string) => void;
@@ -83,6 +85,7 @@ export function Grid(p: GridProps) {
     if (spec) { setCur(col); setEditing({ key, col, spec: typed != null && (spec.type === 'text' || spec.type === 'number') ? { ...spec, value: typed, typed: true } : spec }); }
   };
   const curCol = cur && cols.some((c) => c.id === cur) ? cur : cols[0]?.id;
+  useEffect(() => { if (curCol) p.onCursor?.(curCol); }, [curCol]);
   const rowIdx = () => { const sel = p.selected ? [...p.selected] : []; return Math.max(0, p.items.findIndex((it) => it.key === sel[sel.length - 1])); };
   const goRow = (n: number, shift = false) => {
     if (n < 0 || n >= p.items.length) return;
