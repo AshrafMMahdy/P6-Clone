@@ -85,3 +85,39 @@ test('MCP: open_file reads P6 XML', { timeout: 60_000 }, async () => {
     assert.deepEqual(v.data.counts, o.data.diagnostics.counts);
   } finally { c.close(); }
 });
+
+test('MCP: an agent exports a PDF printout and an Excel workbook, edits the workbook and imports it back', { timeout: 60_000 }, async () => {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { readXlsx, writeXlsx } = await import('../core/excel/xlsx.ts');
+  const c = client();
+  const dir = mkdtempSync(join(tmpdir(), 'p6mcp-'));
+  try {
+    await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const names = (await c.rpc('tools/list')).result.tools.map((t: { name: string }) => t.name);
+    for (const n of ['export_pdf', 'export_excel', 'import_excel']) assert.ok(names.includes(n), n);
+    const { data: o } = await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    const h = o.handle;
+    const pdf = await c.tool('export_pdf', { handle: h, path: join(dir, 's.pdf'), settings: { paper: 'A4', landscape: false, content: 'table', columns: ['task_code', 'task_name', 'finish'], header: { center: 'Agent printout' } } });
+    assert.equal(pdf.isError, false, pdf.content?.[0]?.text);
+    const bytes = readFileSync(join(dir, 's.pdf'));
+    assert.equal(bytes.subarray(0, 5).toString(), '%PDF-');
+    assert.equal((bytes.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length, pdf.data.pages);
+    assert.ok(pdf.data.pages >= 2 && pdf.data.activities === 93);
+    const both = await c.tool('export_pdf', { handle: h, path: join(dir, 's2.pdf'), settings: { content: 'both', show_links: true, columns: ['nope'] } });
+    assert.deepEqual(both.data.unknown_columns, ['nope']); assert.ok(both.data.printable_columns.includes('task_code'));
+    const xl = await c.tool('export_excel', { handle: h, path: join(dir, 's.xlsx') });
+    assert.equal(xl.isError, false);
+    // the agent edits a duration in the workbook and imports it
+    const sheets = await readXlsx(new Uint8Array(readFileSync(join(dir, 's.xlsx'))));
+    const t = sheets[0], ci = t.rows[0].indexOf('target_drtn_hr_cnt'), id = t.rows[0].indexOf('task_code');
+    t.rows.find((r) => r[id] === 'A2410')![ci] = 31;
+    writeFileSync(join(dir, 'edited.xlsx'), await writeXlsx(sheets));
+    const dry = await c.tool('import_excel', { handle: h, path: join(dir, 'edited.xlsx'), dry_run: true });
+    assert.equal(dry.data.applied, false); assert.equal(dry.data.summary.activitiesUpdated, 1);
+    const imp = await c.tool('import_excel', { handle: h, path: join(dir, 'edited.xlsx') });
+    assert.equal(imp.data.applied, true, JSON.stringify(imp.data));
+    const a = await c.tool('get_activity', { handle: h, activity_id: 'A2410' });
+    assert.equal(a.data.orig_days, 31);
+    assert.equal((await c.tool('undo', { handle: h })).data.undone.startsWith('Edit'), true);
+  } finally { c.close(); }
+});

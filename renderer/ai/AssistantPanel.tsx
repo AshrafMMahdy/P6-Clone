@@ -13,7 +13,7 @@ import type { AiPublicConfig, ChatMsg } from '../../main/ai.ts';
 interface Line { who: 'user' | 'ai' | 'tool' | 'error'; text: string }
 // rounds without a successful change (lookups, retries) are capped; building a schedule keeps going while edits land
 const MAX_IDLE_ROUNDS = 12, MAX_ROUNDS = 60;
-const LABEL: Record<string, string> = { list_projects: 'Listed the projects', ui_menu: 'Menu', ui_click: 'Clicked', ui_type: 'Typed into', ui_screen: 'Looked at the screen', select_activity: 'Selected', edit_project: 'Changed the project', undo: 'Undo',  project_summary: 'Read the project summary', find_activities: 'Searched activities', get_activity: 'Opened activity', list_wbs: 'Read the WBS', critical_path: 'Read the critical path', schedule_health: 'Ran the schedule health check', resource_summary: 'Read resource assignments' };
+const LABEL: Record<string, string> = { list_projects: 'Listed the projects', set_print_options: 'Set up printing', ui_menu: 'Menu', ui_click: 'Clicked', ui_type: 'Typed into', ui_screen: 'Looked at the screen', select_activity: 'Selected', edit_project: 'Changed the project', undo: 'Undo',  project_summary: 'Read the project summary', find_activities: 'Searched activities', get_activity: 'Opened activity', list_wbs: 'Read the WBS', critical_path: 'Read the critical path', schedule_health: 'Ran the schedule health check', resource_summary: 'Read resource assignments' };
 
 function systemPrompt(actions: boolean): string {
   const db = getDb(), ui = getUi();
@@ -38,6 +38,9 @@ function systemPrompt(actions: boolean): string {
         '3. Then one call per WBS area with its activities: IDs like A1000, A1010 (steps of 10), realistic durations in days, start and finish milestones, and the logic inside the area; link areas to each other in the same or the next call. Repeat floor-by-floor work as a pattern (typical-floor cycle) and overlap trades with SS/FS lags where real crews would.',
         '4. Every activity needs a predecessor and a successor except the start and finish milestones. Use constraints only for real external dates.',
         '5. When everything is in: schedule on screen (ui_menu "Tools > Schedule...", ui_click "Schedule"), then check with schedule_health and critical_path, fix open ends or other problems, schedule again, and summarise: activity count, finish date, the critical path, and your assumptions.'].join('\n')
+      : '',
+    actions
+      ? 'Printing and exports: to prepare a printout or PDF, call set_print_options (paper, orientation, columns to show or hide, columns only / Gantt only / both with the split, relationship lines, legend, baseline, timescale, header and footer), then open it with ui_menu "File > Print Preview", or "File > Save as PDF..." / "File > Print..." where the user presses Save or Print themselves. For Excel: ui_menu "File > Export to Excel..." (the user chooses where to save) or "File > Import from Excel..." (the user picks the file and confirms the listed changes). Explain what each setting does when you change it.'
       : '',
   ].filter(Boolean).join('\n');
 }

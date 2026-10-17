@@ -17,6 +17,8 @@ export function buildMenu(win: BrowserWindow): Menu {
         sep,
         cmd('&Import...', 'file.import'),
         cmd('&Export...', 'file.export'),
+        cmd('Import from E&xcel...', 'file.importXlsx'),
+        cmd('Export to Exce&l...', 'file.exportXlsx'),
         sep,
         cmd('Page Set&up...', 'file.pageSetup'),
         cmd('Print Pre&view', 'file.printPreview'),

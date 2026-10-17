@@ -22,10 +22,12 @@ import { initLive } from './ai/live.ts';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, AssignBaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
 import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
-import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, FilterEditDialog, TimescaleDialog, LayoutDialog, PageSetupDialog, BUILTIN_LAYOUT, saveLayout, layoutFromUi } from './dialogs/EnterpriseDialogs.tsx';
+import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, FilterEditDialog, TimescaleDialog, LayoutDialog, BUILTIN_LAYOUT, saveLayout, layoutFromUi } from './dialogs/EnterpriseDialogs.tsx';
 import { emptyDb, rows } from '../core/db.ts';
 import { fmtDate, projectName } from './model.ts';
 import { printView } from './print.ts';
+import { exportExcel, importExcel } from './excel.ts';
+import { PageSetupDialog } from './dialogs/PageSetupDialog.tsx';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const DIALOGS: Record<string, (p: any) => JSX.Element> = {
@@ -52,6 +54,8 @@ export function runMenu(id: string): void {
     case 'file.closeAll': return setUi({ openProjects: [], selTasks: [], selTask: undefined, view: 'projects' });
     case 'file.import': return openDialog('import');
     case 'file.export': return openDialog('export');
+    case 'file.exportXlsx': return void exportExcel();
+    case 'file.importXlsx': return void importExcel();
     case 'file.pageSetup': return openDialog('pageSetup');
     case 'file.printPreview': return void printView('preview');
     case 'file.print': return void printView('print');

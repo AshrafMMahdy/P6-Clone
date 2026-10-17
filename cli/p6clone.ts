@@ -53,6 +53,12 @@ const USAGE = `p6clone <command> [options]
   progress <file.xer> --data-date YYYY-MM-DD --out out.xer [--version v]
   level    <file.xer> --out out.xer [--version v]
   export   <file.xer> --version <v> --out <path> [--format xer|xml]
+  print    <file.xer> --out schedule.pdf|.html [--settings json|file.json] [--project ID] [--filter F] [--group wbs|none]
+           [--sort S] [--paper A3] [--portrait] [--content both|table|gantt] [--columns task_code,task_name,...]
+           [--links] [--no-legend]   Prints the Activities layout like P6 (all pages). Settings: see README
+  export-excel <file.xer> --out schedule.xlsx [--project ID]   P6-style spreadsheet (TASK, TASKPRED, RSRC, TASKRSRC)
+  import-excel <file.xer> <sheet.xlsx> [--project ID] --out out.xer [--schedule] [--dry-run] [--json]
+           Updates the project from the spreadsheet (one transaction). Exit 65 if a row is refused
   diff     <a.xer> <b.xer> [--json]                   Table-level differences (rows keyed by internal ids). Exit 1 if any
   compare  <old.xer> <new.xer> [--json] [--hours-per-day 8]
            Schedule comparison like P6's Claim Digger: projects, WBS (code path), activities (Activity ID) and
@@ -63,7 +69,7 @@ const args = process.argv.slice(2);
 const cmd = args[0];
 const opt = (name: string) => { const i = args.indexOf(`--${name}`); return i > 0 ? args[i + 1] : undefined; };
 const flag = (name: string) => args.includes(`--${name}`);
-const BOOL = new Set(['--json', '--schedule', '--critical', '--not-critical', '--milestones']);
+const BOOL = new Set(['--json', '--schedule', '--critical', '--not-critical', '--milestones', '--links', '--portrait', '--dry-run', '--no-legend']);
 const positional: string[] = [];
 for (let i = 1; i < args.length; i++) {
   if (args[i].startsWith('--')) { if (!BOOL.has(args[i])) i++; }
@@ -78,6 +84,14 @@ function load(path: string): { db: Db; findings: Finding[]; format: Format } {
   try { bytes = new Uint8Array(readFileSync(path)); } catch (e) { throw new Error(`Cannot read ${path}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}`); }
   const format = detectFormat(path, bytes);
   return { ...readRaw(bytes, format), format };
+}
+
+/** --project ID, or every project in the file. */
+function pickProjects(db: Db): string[] {
+  const projs = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
+  const ids = opt('project') ? projs.filter((p) => p.proj_short_name === opt('project')).map((p) => p.proj_id) : projs.map((p) => p.proj_id);
+  if (!ids.length) throw new Error(`No project "${opt('project')}" (in the file: ${projs.map((p) => p.proj_short_name).join(', ')}).`);
+  return ids;
 }
 
 function printFindings(f: Finding[]): void {
@@ -161,6 +175,65 @@ async function main(): Promise<number> {
       else if (r.ok) console.log(`Applied ${r.applied} operation(s)${sched ? `, scheduled (finish ${sched.finish})` : ''}${out ? `; wrote ${out}` : ' (no --out: nothing written)'}`);
       else console.error(`${r.error!.index >= 0 ? `Operation ${r.error!.index + 1} failed` : 'Failed'}: ${r.error!.message}${r.error!.index >= 0 ? `\n  ${JSON.stringify(r.error!.op)}` : ''}\nNothing was changed.`);
       return r.ok ? 0 : 65;
+    }
+    case 'print': {
+      const { db } = load(positional[0]);
+      const out = opt('out');
+      if (!out) throw new Error('--out <file.pdf|file.html> required');
+      const src = opt('settings');
+      let settings: Record<string, unknown> = {};
+      if (src) { try { settings = JSON.parse(src.trim().startsWith('{') ? src : readFileSync(src, 'utf8')); } catch (e) { console.error(`--settings is not valid JSON: ${(e as Error).message}`); return 65; } }
+      if (opt('paper')) settings.paper = opt('paper');
+      if (flag('portrait')) settings.landscape = false;
+      if (opt('content')) settings.content = opt('content');
+      if (opt('columns')) settings.columns = opt('columns')!.split(',').map((x) => x.trim()).filter(Boolean);
+      if (flag('links')) settings.show_links = true;
+      if (flag('no-legend')) settings.show_legend = false;
+      const { printPages } = await import('../renderer/print/schedule.ts');
+      const { pagesToPdf, pagesToHtml } = await import('../renderer/print/output.ts');
+      const r = printPages(db, { projIds: pickProjects(db), setup: settings, filter: opt('filter'), groupBy: opt('group'), sortBy: opt('sort'), prefs: { hoursPerDay: hpd(), dateFormat: 'dd-MMM-yy', showTime: false, durationDecimals: 0 } });
+      writeFileSync(out, /\.html?$/i.test(out) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title));
+      if (r.unknownColumns.length) console.error(`Unknown column(s) left out: ${r.unknownColumns.join(', ')}`);
+      if (flag('json')) console.log(JSON.stringify({ out, pages: r.pages.length, activities: r.activities, unknown_columns: r.unknownColumns }));
+      else console.log(`Wrote ${out} (${r.pages.length} page${r.pages.length > 1 ? 's' : ''}, ${r.activities} activities)`);
+      return 0;
+    }
+    case 'export-excel': {
+      const { db } = load(positional[0]);
+      const out = opt('out');
+      if (!out) throw new Error('--out <file.xlsx> required');
+      const { writeXlsx } = await import('../core/excel/xlsx.ts');
+      const { exportSheets } = await import('../core/excel/p6sheets.ts');
+      writeFileSync(out, await writeXlsx(exportSheets(db, pickProjects(db), hpd())));
+      console.log(`Wrote ${out}`);
+      return 0;
+    }
+    case 'import-excel': {
+      const { db, findings } = load(positional[0]);
+      const pre = validateXer(db, findings);
+      if (worst(pre) === 'fatal') { printFindings(pre.filter((f) => f.severity === 'fatal')); return 2; }
+      if (!positional[1]) throw new Error('import-excel <file.xer> <sheet.xlsx> ...');
+      const { readXlsx } = await import('../core/excel/xlsx.ts');
+      const { planImport } = await import('../core/excel/p6sheets.ts');
+      const projs = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
+      const pid = opt('project') ?? (projs.length === 1 ? projs[0].proj_short_name : undefined);
+      if (!pid) throw new Error(`The file holds several projects; say which with --project (${projs.map((p) => p.proj_short_name).join(', ')}).`);
+      let bytes: Uint8Array;
+      try { bytes = new Uint8Array(readFileSync(positional[1])); } catch (e) { throw new Error(`Cannot read ${positional[1]}: ${(e as Error).message}`); }
+      const plan = planImport(db, await readXlsx(bytes), pid, hpd());
+      const r = flag('dry-run') || !plan.ops.length ? null : applyOps(db, plan.ops, { hoursPerDay: hpd() });
+      if (r?.ok && flag('schedule')) { const res = scheduleProjects(db, projs.map((p) => p.proj_id), {}); if (res.ok) syncAssignmentDates(db); }
+      const out = opt('out');
+      if (r?.ok && out) writeOut(out, db, opt('version'));
+      if (flag('json')) console.log(JSON.stringify({ applied: !!r?.ok, summary: plan.summary, warnings: plan.warnings, error: r && !r.ok ? r.error : undefined, operations: flag('dry-run') ? plan.ops : undefined, out: r?.ok ? out ?? null : null }, null, 2));
+      else {
+        const x = plan.summary;
+        console.log(`Activities: ${x.activitiesAdded} new, ${x.activitiesUpdated} changed, ${x.activitiesDeleted} deleted; relationships: ${x.relationshipsAdded} new, ${x.relationshipsUpdated} changed, ${x.relationshipsDeleted} deleted; resources: ${x.resourcesAdded} new; assignments: ${x.assignmentsAdded} new, ${x.assignmentsDeleted} removed; ${x.unchanged} unchanged`);
+        for (const w of plan.warnings) console.log(`Warning: ${w}`);
+        if (r && !r.ok) console.error(`Row refused (${JSON.stringify(r.error!.op)}): ${r.error!.message}\nNothing was changed.`);
+        else console.log(flag('dry-run') ? '(dry run: nothing changed)' : !plan.ops.length ? 'Nothing to change.' : out ? `Wrote ${out}` : '(no --out: nothing written)');
+      }
+      return r && !r.ok ? 65 : 0;
     }
     case 'query': {
       const { db } = load(positional[0]);

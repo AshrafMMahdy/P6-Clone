@@ -35,6 +35,7 @@ const api = {
   print: (landscape: boolean): Promise<boolean> => ipcRenderer.invoke('print', landscape),
   printPreview: (landscape: boolean): Promise<boolean> => ipcRenderer.invoke('print:preview', landscape),
   pdf: (name: string, landscape: boolean): Promise<string | null> => ipcRenderer.invoke('pdf', name, landscape),
+  printHtml: (html: string, mode: 'print' | 'pdf' | 'preview', defaultName: string): Promise<boolean | string | null> => ipcRenderer.invoke('print:html', html, mode, defaultName),
   startupImport: (): Promise<OpenedFile | null> => ipcRenderer.invoke('startup:import'),
   confirm: (message: string, detail?: string): Promise<boolean> => ipcRenderer.invoke('confirm', message, detail),
   /** AI assistant (the API key stays in the main process) */

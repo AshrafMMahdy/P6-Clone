@@ -20,6 +20,11 @@ import { record, rollback, type Journal } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { worst, type Finding } from '../core/findings.ts';
 import type { Db } from '../core/db.ts';
+import { printPages, printableColumns } from '../renderer/print/schedule.ts';
+import { pagesToHtml, pagesToPdf } from '../renderer/print/output.ts';
+import { PRINT_GUIDE } from '../renderer/print/layout.ts';
+import { readXlsx, writeXlsx } from '../core/excel/xlsx.ts';
+import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
 
 const VERSION = '1.0.0';
 interface Session { db: Db; path: string | null; format: Format; undo: { label: string; j: Journal }[]; dirty: boolean; hpd: number }
@@ -52,6 +57,9 @@ const TOOLS = [
   ...LOOKUPS.map((t) => ({ name: t.name, description: t.description, inputSchema: withHandle(t.parameters) })),
   { name: 'undo', description: 'Undo the last edit, schedule, progress update or leveling on this project.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'save', description: 'Write the project to an XER file (P6 version 5.0 to 24.12; default: the version it was read in, else 19.12), or to P6 XML when the path ends in .xml.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, version: { type: 'string' }, overwrite: { type: 'boolean' } } }) },
+  { name: 'export_pdf', description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML instead. Text outside Latin-1 prints as "?" in the PDF (use the desktop app for other scripts). ' + PRINT_GUIDE + ' Layout options: filter (all, critical, not_started, in_progress, completed, ...), group_by (wbs, none), sort_by (task_code, task_name, total_float, finish).', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
+  { name: 'export_excel', description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK (activities), TASKPRED (relationships), RSRC (resources), TASKRSRC (assignments); row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
+  { name: 'import_excel', description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities (name, WBS, type, durations, constraint, actual dates, % complete, calendar), relationships, resources and assignments; a "Y" in delete_record_flag deletes the row. Calculated columns (status, start, finish, float) are ignored. Applied as one undoable change; dry_run returns the plan without changing anything.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
   { name: 'close', description: 'Close the project and free its memory (unsaved changes are lost).', inputSchema: withHandle({ type: 'object', properties: {} }) },
 ];
 
@@ -68,6 +76,48 @@ const change = <T>(s: Session, label: string, fn: (db: Db) => T): T => {
   return out;
 };
 const dd = (v: unknown) => { if (v == null || v === '') return null; const t = parseP6Date(String(v)); if (t == null) throw new UserError(`"${v}" is not a date (use YYYY-MM-DD).`); return t; };
+
+const projectIds = (db: Db, id: unknown) => {
+  const ps = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
+  if (id == null || id === '') return ps.map((p) => p.proj_id);
+  const p = ps.find((x) => x.proj_short_name.toLowerCase() === String(id).toLowerCase());
+  if (!p) throw new UserError(`No project "${id}" (open: ${ps.map((x) => x.proj_short_name).join(', ')}).`);
+  return [p.proj_id];
+};
+
+async function callAsync(name: string, a: Record<string, any>): Promise<unknown> {
+  switch (name) {
+    case 'export_pdf': {
+      const s = get(a.handle);
+      const path = resolve(String(a.path ?? ''));
+      const r = printPages(s.db, { projIds: projectIds(s.db, a.project), setup: a.settings ?? {}, filter: a.filter, groupBy: a.group_by, sortBy: a.sort_by, prefs: { hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy', showTime: false, durationDecimals: 0 } });
+      writeFileSync(path, /.html?$/i.test(path) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title));
+      return { saved: path, pages: r.pages.length, activities: r.activities, ...(r.unknownColumns.length ? { unknown_columns: r.unknownColumns, printable_columns: printableColumns(s.db).map((c) => c.id) } : {}) };
+    }
+    case 'export_excel': {
+      const s = get(a.handle);
+      const path = resolve(String(a.path ?? ''));
+      writeFileSync(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd)));
+      return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] };
+    }
+    case 'import_excel': {
+      const s = get(a.handle);
+      const path = resolve(String(a.path ?? ''));
+      let bytes: Uint8Array;
+      try { bytes = new Uint8Array(readFileSync(path)); } catch (e) { throw new UserError(`Cannot read ${path}: ${(e as Error).message}`); }
+      const ids = projectIds(s.db, a.project);
+      if (ids.length !== 1) throw new UserError('The file holds several projects; say which one with "project".');
+      const pid = (s.db.tables.PROJECT?.rows ?? []).find((p) => p.proj_id === ids[0])!.proj_short_name;
+      let sheets;
+      try { sheets = await readXlsx(bytes); } catch (e) { throw new UserError((e as Error).message); }
+      const plan = planImport(s.db, sheets, pid, s.hpd);
+      if (a.dry_run || !plan.ops.length) return { applied: false, ...(plan.ops.length ? {} : { note: 'Nothing to change.' }), summary: plan.summary, warnings: plan.warnings, operations: plan.ops.slice(0, 200) };
+      const r = editCall({ handle: a.handle, operations: plan.ops });
+      return (r as { ok?: boolean }).ok === false ? r : { applied: true, summary: plan.summary, warnings: plan.warnings, note: 'Undo with undo. Run schedule to recalculate dates.' };
+    }
+  }
+  return call(name, a);
+}
 
 function call(name: string, a: Record<string, any>): unknown {
   switch (name) {
@@ -161,13 +211,14 @@ function handle(m: Msg): void {
     case 'tools/list': return void reply({ tools: TOOLS });
     case 'tools/call': {
       const name = String(m.params?.name ?? ''), args = (m.params?.arguments ?? {}) as Record<string, any>;
-      try {
-        const out = name === 'edit' ? editCall(args) : call(name, args);
+      void (async () => { try {
+        const out = name === 'edit' ? editCall(args) : await callAsync(name, args);
         const isError = !!(out && typeof out === 'object' && ((out as { ok?: boolean }).ok === false || (out as { error?: unknown }).error && !(out as { activities?: unknown }).activities));
         return void reply({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out && typeof out === 'object' && !Array.isArray(out) ? out : { result: out }, isError });
       } catch (e) {
         return void reply({ content: [{ type: 'text', text: e instanceof UserError ? e.message : `Internal error: ${(e as Error).stack ?? e}` }], isError: true });
-      }
+      } })();
+      return;
     }
     default: return void error(-32601, `Method not found: ${m.method}`);
   }

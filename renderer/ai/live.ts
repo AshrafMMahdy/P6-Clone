@@ -5,6 +5,9 @@ import type { ToolDef } from '../../core/query/tools.ts';
 import { applyOps, OP_GUIDE, OP_NAMES } from '../../core/project/ops.ts';
 import { rows } from '../../core/db.ts';
 import { doUndo, getDb, getUi, mutate, setUi } from '../store.ts';
+import { currentPrint, savePageSetup } from '../print.ts';
+import { printableColumns } from '../print/schedule.ts';
+import { PRINT_GUIDE } from '../print/layout.ts';
 
 export interface MenuNode { label: string; id?: string; accelerator?: string; submenu?: MenuNode[] }
 let menuTree: MenuNode[] = [];
@@ -31,6 +34,7 @@ export const LIVE_TOOLS: ToolDef[] = [
   { name: 'ui_screen', description: 'What is on screen now: the window, the open dialog with its fields and buttons, the selected activity. Use it to decide the next click.', parameters: { type: 'object', properties: {} } },
   { name: 'select_activity', description: 'Select an activity in the Activities window and scroll it into view.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
   { name: 'edit_project', description: 'Change the open project, or create a new one, with JSON operations. Each call is one undoable step (all or nothing: if one operation fails nothing changes and the error names it); changed activities are selected so the user sees them; deleting asks the user first. A batch that starts with add_project (or copy_project) creates that project and opens it on screen; later operations in the batch and later calls go to it. Build big schedules in several calls (about one WBS area, 30-60 operations, per call).\n' + OP_GUIDE, parameters: { type: 'object', properties: { operations: { type: 'array', items: { type: 'object', properties: { op: { type: 'string', enum: OP_NAMES } }, required: ['op'] } } }, required: ['operations'] } },
+  { name: 'set_print_options', description: 'Change File > Page Setup for printing / PDF of the Activities layout (saved; the user then prints or saves). Returns the settings, the page count and the printable column ids. Afterwards open File > Print Preview, or File > Print... / File > Save as PDF... so the user can press Print or Save themselves.\n' + PRINT_GUIDE, parameters: { type: 'object', properties: { settings: { type: 'object' } }, required: ['settings'] } },
   { name: 'undo', description: 'Undo the last change (Edit > Undo).', parameters: { type: 'object', properties: {} } },
 ];
 
@@ -206,6 +210,11 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         const touched = rows(getDb(), 'TASK').filter((t) => !before.has(t.task_id) || codes.has(t.task_code)).map((t) => t.task_id);
         if (touched.length) setUi({ view: 'activities', selTasks: touched, selTask: touched[0], revealTask: touched[0] });
         return { ...r, note: 'Applied as one step; the user can undo it with Ctrl+Z. Run Tools > Schedule (F9) to recalculate other activities.' };
+      }
+      case 'set_print_options': {
+        const ps = savePageSetup(args.settings ?? {});
+        const r = getUi().view === 'activities' && getUi().openProjects.length ? currentPrint(ps) : null;
+        return { settings: ps, pages: r?.pages.length ?? null, activities: r?.activities ?? null, unknown_columns: r?.unknownColumns, printable_columns: printableColumns(getDb()).map((c) => c.id), note: r ? undefined : 'Open the Activities window of a project to print the schedule.' };
       }
       case 'undo': {
         const btn = document.querySelector<HTMLElement>('.tbtn[title="Undo"]');

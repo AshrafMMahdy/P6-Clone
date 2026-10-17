@@ -33,6 +33,8 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
 - **Project > Maintain Baselines**: save/assign/restore/delete baselines; baseline bars and BL columns/variance.
 - **Enterprise**: EPS, Resources (rates, max units, calendars, roles), Roles, OBS, Activity Codes, UDFs, Calendars (work week + holidays/exceptions, base calendar inheritance), Cost Accounts, Currencies.
 - **Resource Assignments** window with usage profile/spreadsheet; **Reports** (schedule by WBS, critical, lookahead, baseline variance, resource assignments, cost & earned value by WBS, cost by account) → print, PDF, CSV.
+- **Printing and PDF** (File > Page Setup / Print Preview / Print / Save as PDF): the Activities window prints the whole layout, every row on as many pages as needed, like P6. Page Setup chooses the paper (Letter to A1), orientation, margins and text size; what to print (columns and Gantt chart side by side with an adjustable split, columns only, or Gantt chart only); which columns (any column, in any order, independent of the screen layout); relationship lines, baseline bars, legend, grid lines and the timescale range; header and footer bands (left / center / right) with variables such as [Project Name], [Data Date] and [Page] of [Pages]. Column titles and the timescale repeat on every page. Other windows print what is on screen.
+- **Excel** (File > Export to Excel / Import from Excel): P6-style workbook with TASK (activities), TASKPRED (relationships), RSRC (resources) and TASKRSRC (assignments) sheets, field names in row 1 and titles in row 2, durations in days and real Excel dates. Edit it and import it back: new and changed activities, relationships, resources and assignments, "Y" in Delete This Row deletes; the import lists what will change, asks first and is one undoable step. Calculated columns (status, dates, float) are ignored like P6 ignores them.
 - **Microsoft Project**: File > Import / Export also read and write MSPDI XML and MPX; .mpp goes through your installed Microsoft Project (it converts to/from XML in the background).
 - **Timesheets** window (periods, entry, submit/approve/reject) and **Tools > Apply Actuals**; **Risks** window (register, probability/impact matrix, Monte Carlo schedule risk analysis); **Enterprise > Project Portfolios**.
 - **Resource curves**: an assignment's curve (Resources tab, Curve column) shapes how its units are spread in usage profiles and spreadsheets.
@@ -82,6 +84,9 @@ node cli/p6clone.ts review tower.xer --json
 | `query <xer> projects \| summary \| find \| activity <ID> \| wbs [code] \| critical \| health \| resources [ID] [--json]` | Read-only lookups (`find` filters: `--text --status --critical --not-critical --wbs --resource --starts-after --starts-before --finishes-after --finishes-before --code [TYPE=]value --max-float --min-float --milestones --sort --limit`; `activity` includes activity codes and UDFs) | 0, 66 not found |
 | `review <xer> [--json]` | Planning-reviewer checks (DCMA-style thresholds) graded pass / warn / fail | 0 pass, 1 warnings, 3 failures |
 | `validate <xer> [--json]` | What real P6 would do on import, plus saved dates P6 would change on F9 | 0 imports, 1 P6 would fail or drop data, 2 P6 rejects |
+| `print <xer> --out s.pdf\|s.html [--settings json] [--paper A3] [--portrait] [--content both\|table\|gantt] [--columns a,b] [--links]` | The Activities printout as a PDF (built in, no browser needed) or HTML; same pages as the app. Settings as in Page Setup (paper, landscape, margins, font_pt, content, table_share, columns, show_links, show_baseline, show_legend, show_grid, range/from/to, header/footer {show,left,center,right}) |
+| `export-excel <xer> --out s.xlsx [--project ID]` | P6-style spreadsheet (TASK, TASKPRED, RSRC, TASKRSRC) |
+| `import-excel <xer> <s.xlsx> --out out.xer [--project ID] [--schedule] [--dry-run] [--json]` | Update the project from the spreadsheet in one transaction (exit 65 if a row is refused) |
 | `compare <old> <new> [--json]` | Schedule comparison like P6's Claim Digger: projects, WBS (by code path), activities (by Activity ID) and relationships (pred -> succ type) added, deleted or changed, so revisions whose internal ids were renumbered compare cleanly | 0 same, 1 differences, 2 a file P6 rejects |
 | `schedule`, `progress`, `level`, `export`, `diff` | F9, Update Progress, Level Resources, write XER/XML, table-level differences by internal id | |
 
@@ -120,7 +125,7 @@ Configure your agent with a stdio server:
 
 Tools: `open_file`, `new_project`, `list_open`, `edit`, `schedule`, `update_progress`, `level_resources`, `validate`,
 `review`, `project_summary`, `find_activities`, `get_activity`, `list_wbs`, `critical_path`, `schedule_health`,
-`resource_summary`, `undo`, `save` (XER in any version 5.0-24.12, or P6 XML for a `.xml` path), `close`.
+`resource_summary`, `list_projects`, `undo`, `save` (XER in any version 5.0-24.12, or P6 XML for a `.xml` path), `export_pdf` (the printout as a PDF, with the same settings as Page Setup), `export_excel` and `import_excel` (P6-style workbook; `dry_run` shows the changes first), `close`. The PDF writer uses the standard Helvetica font, so text outside Latin-1 (for example Arabic names) prints as "?" there; the desktop app's PDF uses real fonts.
 Every tool except `open_file`, `new_project` and `list_open` takes the `handle` they return. Results come back as JSON
 (`structuredContent` as well as text). The server reads and writes files where the agent runs, so run it inside the
 agent's sandbox.

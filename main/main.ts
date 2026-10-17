@@ -95,6 +95,32 @@ ipcMain.handle('pdf', async (_e, defaultName: string, landscape: boolean) => {
   return r.filePath;
 });
 
+// The Activities printout (renderer/print): a document of page-sized SVGs, printed / previewed / saved from a hidden
+// window so the app window is untouched. Page size and margins come from the document itself.
+ipcMain.handle('print:html', async (_e, html: string, mode: 'print' | 'pdf' | 'preview', defaultName: string) => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6clone-print-'));
+  const file = join(dir, 'schedule.html');
+  writeFileSync(file, html);
+  const doc = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: { sandbox: true } });
+  try {
+    await doc.loadFile(file);
+    if (mode === 'print') return await new Promise<boolean>((resolve) => doc.webContents.print({ printBackground: true }, (ok) => resolve(ok)));
+    const data = await doc.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { top: 0, bottom: 0, left: 0, right: 0 } });
+    if (mode === 'pdf') {
+      const r = await dialog.showSaveDialog(win!, { defaultPath: defaultName, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+      if (r.canceled || !r.filePath) return null;
+      writeFileSync(r.filePath, data);
+      return r.filePath;
+    }
+    const pdf = join(dir, 'Print Preview.pdf');
+    writeFileSync(pdf, data);
+    const pv = new BrowserWindow({ width: 1100, height: 850, title: 'Print Preview', parent: win!, icon: join(__dirname, 'icon.png'), webPreferences: { plugins: true } });
+    pv.setMenu(null);
+    await pv.loadFile(pdf);
+    return true;
+  } finally { doc.destroy(); }
+});
+
 ipcMain.handle('print:preview', async (_e, landscape: boolean) => {
   const data = await win!.webContents.printToPDF({ landscape, printBackground: true, pageSize: 'A3' });
   const file = join(mkdtempSync(join(tmpdir(), 'p6clone-preview-')), 'Print Preview.pdf');
