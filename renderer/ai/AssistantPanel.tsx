@@ -13,7 +13,7 @@ import type { AiPublicConfig, ChatMsg } from '../../main/ai.ts';
 interface Line { who: 'user' | 'ai' | 'tool' | 'error'; text: string }
 // rounds without a successful change (lookups, retries) are capped; building a schedule keeps going while edits land
 const MAX_IDLE_ROUNDS = 12, MAX_ROUNDS = 60;
-const LABEL: Record<string, string> = { ui_menu: 'Menu', ui_click: 'Clicked', ui_type: 'Typed into', ui_screen: 'Looked at the screen', select_activity: 'Selected', edit_project: 'Changed the project', undo: 'Undo',  project_summary: 'Read the project summary', find_activities: 'Searched activities', get_activity: 'Opened activity', list_wbs: 'Read the WBS', critical_path: 'Read the critical path', schedule_health: 'Ran the schedule health check', resource_summary: 'Read resource assignments' };
+const LABEL: Record<string, string> = { list_projects: 'Listed the projects', ui_menu: 'Menu', ui_click: 'Clicked', ui_type: 'Typed into', ui_screen: 'Looked at the screen', select_activity: 'Selected', edit_project: 'Changed the project', undo: 'Undo',  project_summary: 'Read the project summary', find_activities: 'Searched activities', get_activity: 'Opened activity', list_wbs: 'Read the WBS', critical_path: 'Read the critical path', schedule_health: 'Ran the schedule health check', resource_summary: 'Read resource assignments' };
 
 function systemPrompt(actions: boolean): string {
   const db = getDb(), ui = getUi();
@@ -89,7 +89,7 @@ export function AssistantPanel() {
           history.current.push({ role: 'tool', toolCallId: c.id, name: c.name, content: json.length > 60000 ? json.slice(0, 60000) + '... (truncated)' : json });
           const err = (out as { error?: string })?.error;
           if (c.name === 'edit_project' && !err) idle = -1;
-          add({ who: 'tool', text: `${LABEL[c.name] ?? c.name}${c.args?.path ? ` ${c.args.path}` : c.args?.target ? ` "${c.args.target}"` : c.args?.field ? ` "${c.args.field}"` : c.args?.activity_id ? ` ${c.args.activity_id}` : c.args?.text ? ` for "${c.args.text}"` : ''}${err ? ` (${err})` : ''}` });
+          add({ who: 'tool', text: `${LABEL[c.name] ?? c.name}${c.args?.project ? ` [${c.args.project}]` : ''}${c.args?.path ? ` ${c.args.path}` : c.args?.target ? ` "${c.args.target}"` : c.args?.field ? ` "${c.args.field}"` : c.args?.activity_id ? ` ${c.args.activity_id}` : c.args?.text ? ` for "${c.args.text}"` : ''}${err ? ` (${err})` : ''}` });
         }
         idle++;
         if (round === MAX_ROUNDS - 1 || idle === MAX_IDLE_ROUNDS) add({ who: 'error', text: 'Stopped after many steps. Ask me to continue, or try a narrower question.' });
