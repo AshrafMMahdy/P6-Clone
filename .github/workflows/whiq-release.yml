@@ -58,10 +58,11 @@ jobs:
           cat > smoke.mjs <<'JS'
           import { spawn } from 'node:child_process';
           import { existsSync, mkdtempSync } from 'node:fs';
-          import { join } from 'node:path';
+          import { join, resolve } from 'node:path';
           import { tmpdir } from 'node:os';
           const dir = mkdtempSync(join(tmpdir(), 'p6smoke-'));
-          const child = spawn(process.execPath, ['dist-cli/p6clone-mcp.cjs'], { cwd: dir, stdio: ['pipe', 'pipe', 'inherit'] });
+          const child = spawn(process.execPath, [resolve('dist-cli/p6clone-mcp.cjs')], { cwd: dir, stdio: ['pipe', 'pipe', 'inherit'] });
+          child.on('exit', (code) => { console.error(`the MCP server exited (code ${code}) before the smoke finished`); process.exit(1); });
           let buf = '', id = 0; const waiting = new Map();
           child.stdout.on('data', d => { buf += d; const lines = buf.split('\n'); buf = lines.pop(); for (const l of lines) { if (!l.trim()) continue; const m = JSON.parse(l); waiting.get(m.id)?.(m); } });
           const rpc = (method, params) => new Promise(res => { const i = ++id; waiting.set(i, res); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: i, method, params }) + '\n'); });
