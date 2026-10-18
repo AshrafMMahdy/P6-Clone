@@ -92,9 +92,22 @@ export function detectEncoding(b: Uint8Array, force?: TextEncodingName | 'auto')
   return of(detectCodepage(sample));
 }
 
+// Node 20.x and 22.x (the platform's hosted runtime among them) read the label "windows-1252" as ISO-8859-1: bytes 0x80-0x9F
+// come out as C1 controls instead of € ‚ „ … ‘ ’ “ ” • – — ™ (the WHATWG mapping). Activity names carry exactly those (curly
+// quotes, dashes), so on such a runtime the 1252 decoder is the latin-1 one plus this table.
+const CP1252_HIGH = '€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008DŽ\u008F\u0090‘’“”•–—˜™š›œ\u009DžŸ';
+const LATIN1_LABELS = new Set(['windows-1252', 'cp1252', 'x-cp1252', 'latin1', 'iso-8859-1', 'iso8859-1', 'l1', 'ascii', 'us-ascii']);
+const BROKEN_1252 = new TextDecoder('windows-1252').decode(Uint8Array.of(0x80)) !== '€';
+/** TextDecoder, except windows-1252 on a runtime that reads it as latin-1. */
+export function textDecoder(label: string, opts?: TextDecoderOptions): { decode(b: Uint8Array): string } {
+  if (!BROKEN_1252 || !LATIN1_LABELS.has(label.toLowerCase())) return new TextDecoder(label, opts);
+  const latin1 = new TextDecoder('windows-1252');   // = ISO-8859-1 on these runtimes
+  return { decode: (b: Uint8Array) => latin1.decode(b).replace(/[\u0080-\u009f]/g, (c) => CP1252_HIGH[c.charCodeAt(0) - 0x80]) };
+}
+
 export function decodeText(b: Uint8Array, force?: TextEncodingName | 'auto'): { text: string; encoding: TextEncodingName } {
   const { encoding, start, decoder } = detectEncoding(b, force);
-  return { text: new TextDecoder(decoder).decode(b.subarray(start)), encoding };
+  return { text: textDecoder(decoder).decode(b.subarray(start)), encoding };
 }
 
 // ---------------------------------------------------------------- encoding (export)
@@ -104,7 +117,7 @@ function table(enc: string): Map<number, number[]> {
   let m = reverse.get(enc);
   if (m) return m;
   m = new Map();
-  const dec = new TextDecoder(enc);
+  const dec = textDecoder(enc);
   const put = (bytes: number[]) => { const s = dec.decode(new Uint8Array(bytes)); if ([...s].length === 1 && s !== '�') { const c = s.codePointAt(0)!; if (!m!.has(c)) m!.set(c, bytes); } };
   if (enc === 'gbk' || enc === 'big5' || enc === 'shift_jis') {
     for (let a = 0x81; a <= 0xfe; a++) for (let b = 0x40; b <= 0xfe; b++) put([a, b]);
