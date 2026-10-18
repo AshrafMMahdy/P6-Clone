@@ -196,9 +196,9 @@ pre.log { font: 11px Consolas, "Courier New", monospace; background: #fff; borde
 .ai-send:hover:not(:disabled) { background: #1f47a8; }
 .ai-send:disabled { background: #c9d2e3; cursor: default; }
 .ai-send.stop { background: #5a6478; }
-.workspace.ai-on .winbody { margin-right: 22px; }
-.workspace.ai-on.ai-open .winbody { margin-right: calc(22px + 420px); }
-.workspace.ai-on.ai-open.ai-wide .winbody { margin-right: calc(22px + min(760px, 70%)); }
+.workspace.ai-on > .winbody { margin-right: 22px; }
+.workspace.ai-on.ai-open > .winbody { margin-right: calc(22px + 420px); }
+.workspace.ai-on.ai-open.ai-wide > .winbody { margin-right: calc(22px + min(760px, 70%)); }
 /* the assistant operating the app: its cursor, click ripple, pressed control and on-screen menu */
 .ai-cursor { position: fixed; z-index: 1000; pointer-events: none; transition: left .5s cubic-bezier(.3,.7,.3,1), top .5s cubic-bezier(.3,.7,.3,1), opacity .4s; opacity: 0; filter: drop-shadow(1px 2px 2px rgba(0,0,0,.35)); }
 .ai-cursor.on { opacity: 1; }

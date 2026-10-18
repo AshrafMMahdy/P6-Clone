@@ -54,6 +54,14 @@ ok((await win.locator('.ai-msg.ai').innerText()) === 'OK', 'clicking the send ic
 ok((await h()).h === h0.h, 'after sending, the box is back to 3 lines');
 ok(!(await win.locator('.ai-auto input').isChecked()), '"Open on startup" is off by default');
 if (shots) await win.screenshot({ path: join(shots, 'ai-open.png') });
+// a view with its own inner body (Projects), panel widened: room is made once, not twice
+await win.click('.dirbtn:has-text("Projects")'); await win.click('.ai-head button[title="Widen"]'); await win.waitForTimeout(300);
+const inner = win.locator('.winbody .winbody').first();
+ok(await inner.count() === 1 && (await inner.evaluate((e) => getComputedStyle(e).marginRight)) === '0px', 'an inner window body gets no extra room for the panel');
+const ib = await inner.boundingBox(), wp = await win.locator('.ai-panel').boundingBox();
+ok(!!ib && !!wp && Math.abs(ib.x + ib.width - wp.x) <= 2, 'Projects view runs right up to the widened panel (no blank band)');
+if (shots) await win.screenshot({ path: join(shots, 'ai-projects-wide.png') });
+await win.click('.ai-head button[title="Narrow"]'); await win.click('.dirbtn:has-text("Activities")'); await win.waitForTimeout(300);
 await win.keyboard.press('Control+Shift+A'); await win.waitForTimeout(300);
 ok(await win.locator('.ai-panel').count() === 0 && await win.locator('.ai-strip').count() === 1, 'Ctrl+Shift+A closes it back to the strip');
 const glow = await win.locator('.ai-strip').evaluate((e) => getComputedStyle(e).animationName);
