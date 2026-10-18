@@ -1,0 +1,116 @@
+name: whiq-release
+
+# The P6 clone's MCP server as the White Hat IQ platform runs it: one Node bundle (dist-cli/p6clone-mcp.cjs, node18 target, no
+# dependencies) built by scripts/build-cli.mjs, tested on Node 24 (the repo runs its .ts directly), smoked on Node 20 (the hosted
+# box) and on Windows (the pilot install), and published with SHA256SUMS and an engines.lock the platform's
+# scripts/engines-pin.mjs reads. Copy this file to .github/workflows/whiq-release.yml in AshrafMMahdy/p6-clone, then:
+#
+#   git tag whiq-v0.1.0 && git push origin whiq-v0.1.0
+#
+on:
+  push:
+    tags: ["whiq-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP: p6clone
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "24" }
+      - run: npm ci
+      - run: npm test
+      - run: node scripts/build-cli.mjs
+      - uses: actions/upload-artifact@v4
+        with: { name: bundle, path: dist-cli/, if-no-files-found: error }
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, node: "20" }
+          - { os: windows-2022, node: "20" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ matrix.node }}" }
+      - uses: actions/download-artifact@v4
+        with: { name: bundle, path: dist-cli }
+      - name: MCP smoke (initialize, tools/list, new_project, save) on the bundle
+        shell: bash
+        run: |
+          cat > smoke.mjs <<'JS'
+          import { spawn } from 'node:child_process';
+          import { existsSync, mkdtempSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { tmpdir } from 'node:os';
+          const dir = mkdtempSync(join(tmpdir(), 'p6smoke-'));
+          const child = spawn(process.execPath, ['dist-cli/p6clone-mcp.cjs'], { cwd: dir, stdio: ['pipe', 'pipe', 'inherit'] });
+          let buf = '', id = 0; const waiting = new Map();
+          child.stdout.on('data', d => { buf += d; const lines = buf.split('\n'); buf = lines.pop(); for (const l of lines) { if (!l.trim()) continue; const m = JSON.parse(l); waiting.get(m.id)?.(m); } });
+          const rpc = (method, params) => new Promise(res => { const i = ++id; waiting.set(i, res); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: i, method, params }) + '\n'); });
+          const t = setTimeout(() => { console.error('smoke timed out'); process.exit(1); }, 60000);
+          const init = await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'whiq-release-smoke', version: '1' } });
+          child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+          const tools = (await rpc('tools/list', {})).result?.tools?.map(x => x.name) ?? [];
+          for (const need of ['open_file', 'new_project', 'edit', 'schedule', 'save', 'export_pdf']) if (!tools.includes(need)) { console.error(`missing tool ${need}`); process.exit(1); }
+          const np = await rpc('tools/call', { name: 'new_project', arguments: { id: 'SMOKE', name: 'Release smoke', start: '2026-03-01' } });
+          if (np.error || np.result?.isError) { console.error('new_project failed', JSON.stringify(np).slice(0, 400)); process.exit(1); }
+          const handle = np.result?.structuredContent?.handle ?? JSON.parse(np.result?.content?.[0]?.text ?? '{}').handle;
+          const sv = await rpc('tools/call', { name: 'save', arguments: { handle, path: 'smoke.xer' } });
+          if (sv.error || sv.result?.isError || !existsSync(join(dir, 'smoke.xer'))) { console.error('save failed', JSON.stringify(sv).slice(0, 400)); process.exit(1); }
+          console.log(`ok: ${init.result?.serverInfo?.name} ${init.result?.serverInfo?.version}, ${tools.length} tools, saved smoke.xer on node ${process.version} (${process.platform})`);
+          clearTimeout(t); child.kill(); process.exit(0);
+          JS
+          node smoke.mjs
+
+  release:
+    needs: smoke
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: bundle, path: dist-cli }
+      - name: Package, SHA256SUMS and engines.lock
+        shell: bash
+        run: |
+          tag="${{ github.ref_name }}"
+          name="$APP-$tag"
+          mkdir -p "dist/$name"
+          cp dist-cli/p6clone-mcp.cjs dist-cli/p6clone.cjs README.md "dist/$name/" && cp -r dist-cli/fonts "dist/$name/fonts"   # the PDF font (Arabic) travels with the bundle
+          printf '%s\n' "$APP $tag, commit $GITHUB_SHA, bundle node18 target" > "dist/$name/BUILD.txt"
+          cd dist && tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > SHA256SUMS && cat SHA256SUMS
+          python3 - "$APP" "$tag" > engines.lock <<'PY'
+          import json, sys
+          app, tag = sys.argv[1], sys.argv[2]
+          rows = [line.split() for line in open("SHA256SUMS")]
+          print(json.dumps([{"app": app, "tag": tag, "file": f, "sha256": h} for h, f in rows], indent=2))
+          PY
+          cat engines.lock
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          tag="${{ github.ref_name }}"
+          cd dist
+          # A release made first on GitHub's Releases page (that is how the tag can be made without a terminal) gets the files added.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" ./*.tar.gz SHA256SUMS engines.lock --clobber
+          else
+            gh release create "$tag" ./*.tar.gz SHA256SUMS engines.lock --target "$GITHUB_SHA" --title "p6clone $tag" --notes "The P6 clone's MCP server (one Node bundle, node18+) for the White Hat IQ platform. Checksums: SHA256SUMS; engines.lock for the platform's scripts/engines-pin.mjs."
+          fi
