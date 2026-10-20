@@ -59,7 +59,11 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
   does (IDs are row numbers; UIDs never change). A moved leaf keeps its WBS code when the file has a WBS code mask;
   without one Project's WBS code is the outline number, so it follows the new place and `save` says so in `notes`.
   `schedule` leaves Microsoft Project's dates alone while nothing that drives them changed (`kept_msp_dates`), and
-  otherwise lists the dates it replaced (`msp_dates_changed`). Not kept: whitespace between elements and comments
+  otherwise lists the dates it replaced (`msp_dates_changed`). On a file Microsoft Project scheduled, F9 follows
+  Project's rule for started tasks (the remaining work goes on right after the work done, unless the file moves
+  remaining work after the status date), so an untouched chain lands where Project put it; finished tasks keep
+  Project's dates. A file the clone wrote from P6 names the P6 build whose rules made its dates (`P6 Schedule Rules`
+  custom field definition, e.g. 6.x milestones one minute into a period) and F9 applies them again. Not kept: whitespace between elements and comments
   outside elements; a recurring exception one of whose days was edited (its other days stay, as day ranges).
 - **Timesheets** window (periods, entry, submit/approve/reject) and **Tools > Apply Actuals**; **Risks** window (register, probability/impact matrix, Monte Carlo schedule risk analysis); **Enterprise > Project Portfolios**.
 - **Resource curves**: an assignment's curve (Resources tab, Curve column) shapes how its units are spread in usage profiles and spreadsheets.

@@ -26,6 +26,10 @@ export interface SchedOptions {
   legacyMilestones: boolean;
   /** Written by P6 8.x or later (ERMHDR version): these builds differ in a few placement rules. */
   modernBuild: boolean;
+  /** Microsoft Project's rule for a project read from MS Project XML: the remaining work of a started activity goes on
+   *  right after the work done (its actual start plus the duration done), not at the data date as in P6 (Project's
+   *  "move start of remaining parts after the status date" off, its default). */
+  resumeAfterActuals: boolean;
   /** Floats and open ends measured to the latest finish of all projects scheduled together, not each project's own. */
   floatOnOpenedProjects: boolean;
   /** Schedule Options "Calculate start-to-start lag from: Actual Start" (sched_lag_early_start_flag N). P6's default,
@@ -71,6 +75,7 @@ export function optionsFor(db: Db, proj: Row, over: Partial<SchedOptions> = {}):
     floatOnOpenedProjects: so.sched_use_project_end_date_for_float === 'N',
     ssLagFromActualStart: so.sched_lag_early_start_flag === 'N',
     modernBuild: Number((proj._p6_ver || db.header?.version || '0').split('.')[0]) >= 8,
+    resumeAfterActuals: proj._msp_resume === 'Y',
   };
   return { ...base, ...over };
 }
@@ -330,7 +335,10 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         a.es = a.ef = raw;
         continue;
       }
-      const floor = a.status === 'NS' ? a.proj.floor : a.proj.dd;
+      // the duration done: as the file said (a later change of the remaining duration does not undo work done), else
+      // the original less the remaining
+      const done = a.status === 'IP' && a.proj.opts.resumeAfterActuals ? Math.max(0, Math.round((a.row._msp_done ? Number(a.row._msp_done) : (Number(a.row.target_drtn_hr_cnt) || 0) - a.dur / H) * H)) : 0;
+      const floor = a.status === 'NS' ? a.proj.floor : a.status === 'IP' && a.proj.opts.resumeAfterActuals ? a.cal.addWork(a.cal.nextWorkStart(a.as!), done) : a.proj.dd;
       let raw = floor;
       let finDriver: number | null = null; // required finish from an FF/SF link, when it drives
       const applyLogic = a.status === 'NS' || a.proj.opts.logic !== 'override';

@@ -47,6 +47,8 @@ export interface MTask {
   type: number | null;
   durHrs: number | null;
   remHrs: number | null;
+  /** MSPDI ActualDuration: the work done (hours), from which Project schedules the rest */
+  actHrs?: number | null;
   pct: number | null;
   /** P6 date strings 'yyyy-mm-dd hh:mm' ('' when absent). */
   start: string; finish: string; earlyStart: string; earlyFinish: string; lateStart: string; lateFinish: string;
@@ -87,6 +89,9 @@ export interface MProject {
   /** MS Project "split in-progress tasks" ~ P6 Retained Logic. */
   splitsInProgress: boolean | null;
   criticalHrs: number;
+  /** whose rules made the dates: a P6 build (written by the clone from P6) or Microsoft Project (resume: its rule for
+   *  the remaining work of started tasks) */
+  rules?: { ver?: string; legacy?: boolean; known?: boolean; resume?: boolean };
   calendars: MCal[];
   tasks: MTask[];
   resources: MRes[];
@@ -566,6 +571,10 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
   if (m.keep) {
     const P = table(db, 'PROJECT');
     for (const k of ['_msp_keep', '_msp_ghosts', '_msp_p6ext', '_msp_ntasks']) addField(P, k);
+    for (const k of ['_msp_resume', '_p6_ver', '_legacy_ms']) addField(P, k);
+    if (m.rules?.resume) P.rows[0]._msp_resume = 'Y';
+    if (m.rules?.ver) P.rows[0]._p6_ver = m.rules.ver;
+    if (m.rules?.known) P.rows[0]._legacy_ms = m.rules.legacy ? 'Y' : 'N';
     Object.assign(P.rows[0], { _msp_keep: JSON.stringify(m.keep.kids), _msp_ghosts: JSON.stringify(ghosts), _msp_p6ext: m.keep.p6ext ? 'Y' : '', _msp_ntasks: String(rows(db, 'TASK').length) });
   }
   return db;
@@ -611,5 +620,7 @@ function taskRow(t: MTask, pid: string, wbsId: string, clndr: string, code: stri
     early_start_date: es, early_end_date: ef, restart_date: done ? '' : es, reend_date: done ? '' : ef, target_start_date: t.start || es, target_end_date: t.finish || ef,
     rem_late_start_date: done ? '' : t.lateStart, rem_late_end_date: done ? '' : t.lateFinish, cstr_type: cstr, priority_type: 'PT_Normal',
     cstr_date2: cdate2, cstr_type2: cstr2, driving_path_flag: t.critical ? 'Y' : 'N', guid: '', _msp_uid: t.uid,
+    // the duration done, when started: what Microsoft Project's rule for the remaining work counts from (cpm.ts)
+    ...(as && !af ? { _msp_done: p6num(t.actHrs ?? Math.max(0, dur - rem)) } : {}),
   };
 }

@@ -153,9 +153,14 @@ export function mspUntouched(db: Db, projId: string): boolean | null {
 export function mspDateChanges(db: Db, projId: string, max = 25): { activities: number; changes: { id: string; source_uid: string; field: string; ms_project: string; now: string }[] } {
   const out: { id: string; source_uid: string; field: string; ms_project: string; now: string }[] = [];
   let n = 0;
+  const resume = (db.tables.PROJECT?.rows ?? []).find((p) => p.proj_id === projId)?._msp_resume === 'Y';
   for (const t of (db.tables.TASK?.rows ?? []).filter((x) => x.proj_id === projId && x._msp_snap)) {
     const before = JSON.parse(t._msp_snap) as Record<string, string>;
-    const diff = DATES.filter((f) => (t[f] ?? '') !== (before[f] ?? ''));
+    // a finished activity has no dates F9 moves (P6 puts its early and late dates at the data date, Microsoft Project
+    // at its actuals: the file keeps Project's); a started one in a Microsoft Project file starts at its actual start
+    if (t.act_end_date && before.act_end_date === t.act_end_date) continue;
+    const started = resume && t.act_start_date && before.act_start_date === t.act_start_date;
+    const diff = DATES.filter((f) => !(started && (f === 'early_start_date' || f === 'late_start_date')) && (t[f] ?? '') !== (before[f] ?? ''));
     if (!diff.length) continue;
     n++;
     for (const f of diff) if (out.length < max) out.push({ id: t.task_code, source_uid: t._msp_uid, field: f, ms_project: before[f] ?? '', now: t[f] ?? '' });

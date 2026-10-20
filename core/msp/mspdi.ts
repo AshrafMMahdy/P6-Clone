@@ -5,7 +5,7 @@ import type { Finding } from '../findings.ts';
 import { parseClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../dates.ts';
 import { parseXml, type XNode } from '../xml/p6xml.ts';
-import { p6num } from '../schedule/cpm.ts';
+import { isLegacyLayout, p6num } from '../schedule/cpm.ts';
 import { ASG_DEPS, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
 import { defaultShifts, emptyTask, linkKey, num, projectFromDb, projectToDb, toP6Date, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
 
@@ -27,6 +27,10 @@ const TASK_TEXT: [key: keyof P6Extra, fieldId: string, fieldName: string, alias:
   ['durType', '188743743', 'Text5', 'P6 Duration Type'],
 ];
 const RES_TYPE_FIELD = ['205520904', 'Text1', 'P6 Resource Type'];
+/** A definition with no values, naming the P6 build whose scheduling rules made the dates (so F9 after reading the file
+ *  back applies the same: P6 5-7 builds place milestones one minute into a period). */
+const RULES_FIELD = ['188743746', 'Text6'];
+const rulesAlias = (ver: string, legacy: boolean) => `P6 Schedule Rules ${ver || '?'}${legacy ? ' legacy' : ''}`;
 
 // ---------- durations and times
 
@@ -123,9 +127,12 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
 
   // custom field aliases
   const extKey = new Map<string, keyof P6Extra | 'rsrcType'>();
+  let p6rules: { ver: string; legacy: boolean; known: boolean } | null = null;
   for (const e of kids(child(p, 'ExtendedAttributes'), 'ExtendedAttribute')) {
     const alias = val(e, 'Alias');
     const hit = TASK_TEXT.find((x) => x[3] === alias);
+    const rules = /^P6 Schedule Rules (\S+)( legacy)?$/.exec(alias);
+    if (rules) { p6rules = { ver: rules[1] === '?' ? '' : rules[1], legacy: !!rules[2], known: true }; continue; }
     if (hit) extKey.set(val(e, 'FieldID'), hit[0]);
     else if (alias === RES_TYPE_FIELD[2]) extKey.set(val(e, 'FieldID'), 'rsrcType');
   }
@@ -184,6 +191,7 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
     m.type = num(val(t, 'Type'));
     m.durHrs = hrs(val(t, 'Duration'));
     m.remHrs = hrs(val(t, 'RemainingDuration'));
+    m.actHrs = hrs(val(t, 'ActualDuration'));
     m.pct = num(val(t, 'PercentComplete'));
     m.start = toP6Date(val(t, 'Start'));
     m.finish = toP6Date(val(t, 'Finish'));
@@ -273,6 +281,10 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
     splitsInProgress: sip ? flag(sip) : null, criticalHrs: (num(val(p, 'CriticalSlackLimit')) ?? 0) * (minutesPerDay / 60),
     calendars, tasks, resources, assignments,
     keep: { kids: p.children.map((c): [string, string | null] => [c.name, COLLECTIONS.has(c.name) ? null : raw(c)]), ghosts, p6ext: extKey.size > 0 },
+    // dates made by P6 (a file the clone wrote from P6): F9 keeps P6's rules; dates made by Microsoft Project: its rule
+    // for started tasks, unless the file moves remaining work after the status date (then it is P6's rule too)
+    // (a file the clone wrote before it named the rules: P6 5-7 builds leave dates one minute into or before a period)
+    rules: p6rules ?? (extKey.size > 0 ? { ver: '', legacy: tasks.some((t) => [t.earlyStart, t.earlyFinish, t.lateStart, t.lateFinish].some((d) => /:(01|59)$/.test(d))), known: true } : { resume: val(p, 'MoveRemainingStartsForward') !== '1' && val(p, 'MoveRemainingStartsForward').toLowerCase() !== 'true' }),
   };
 }
 
@@ -417,7 +429,9 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
   el('WeekStartDay', 1);
   dt('StatusDate', m.statusDate);
   el('NewTaskStartDate', 0);
-  if (p6ext) proj.push(['ExtendedAttributes', `<ExtendedAttributes>${TASK_TEXT.map(([, id, name, alias]) => `<ExtendedAttribute><FieldID>${id}</FieldID><FieldName>${name}</FieldName><Alias>${alias}</Alias></ExtendedAttribute>`).join('')}<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><FieldName>${RES_TYPE_FIELD[1]}</FieldName><Alias>${RES_TYPE_FIELD[2]}</Alias></ExtendedAttribute></ExtendedAttributes>`]);
+  const pr = m.row ?? {};
+  const rules = `<ExtendedAttribute><FieldID>${RULES_FIELD[0]}</FieldID><FieldName>${RULES_FIELD[1]}</FieldName><Alias>${esc(rulesAlias(pr._p6_ver || db.header?.version || '', pr._legacy_ms ? pr._legacy_ms === 'Y' : isLegacyLayout(db)))}</Alias></ExtendedAttribute>`;
+  if (p6ext) proj.push(['ExtendedAttributes', `<ExtendedAttributes>${TASK_TEXT.map(([, id, name, alias]) => `<ExtendedAttribute><FieldID>${id}</FieldID><FieldName>${name}</FieldName><Alias>${alias}</Alias></ExtendedAttribute>`).join('')}<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><FieldName>${RES_TYPE_FIELD[1]}</FieldName><Alias>${RES_TYPE_FIELD[2]}</Alias></ExtendedAttribute>${fromMsp ? '' : rules}</ExtendedAttributes>`]);
 
   // Calendars: base calendars, then one resource calendar per work resource (MS Project requires it). A calendar read
   // from the file and not changed since goes back as it was (derived calendars and resource calendars included).
@@ -539,7 +553,15 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
     const outlineWas = t.keep?.kids.find((x) => x[0] === 'OutlineNumber')?.[1].replace(/<[^>]+>/g, '').trim();
     const moved = !!t.keep && outlineWas !== t.outline && t.keep.kids.some((x) => x[0] === 'WBS');
     if (moved && !masked) { cur.push(['WBS', `<WBS>${esc(t.outline)}</WBS>`]); followed.push(`${t.extra.activityId ?? t.name} (UID ${t.uid}) ${outlineWas} -> ${t.outline}`); }
-    return element('Task', t.keep, t.row, 'TASK', { ...TASK_DEPS, WBS: () => moved && !masked, ExtendedAttribute: p6ext ? P6_FIELDS : () => false }, notOurs);
+    // finished in the file and still: its early and late dates stay Project's (F9 puts P6's at the data date); started
+    // in a Microsoft Project file: its early and late start are its actual start in Project's terms
+    const ch = t.row ? changedSince('TASK', t.row, k) : () => true;
+    const finished = !!t.row?.act_end_date && !ch(['act_end_date']);
+    const started = !finished && m.row?._msp_resume === 'Y' && !!t.row?.act_start_date;
+    const never = () => false;
+    const datesDeps: Parameters<typeof mergeKids>[2] = finished ? { EarlyStart: never, EarlyFinish: never, LateStart: never, LateFinish: never, TotalSlack: never, FreeSlack: never, Critical: never } : started ? { EarlyStart: ['act_start_date'], LateStart: ['act_start_date'] } : {};
+    if (started) for (const c of cur) if (c[0] === 'EarlyStart' || c[0] === 'LateStart') c[1] = `<${c[0]}>${xmlDate(t.actualStart)}</${c[0]}>`;
+    return element('Task', t.keep, t.row, 'TASK', { ...TASK_DEPS, ...datesDeps, WBS: () => moved && !masked, ExtendedAttribute: p6ext ? P6_FIELDS : () => false }, notOurs);
   };
   // Microsoft Project's ID is the row number: after the outline and the kept rows are in place, rows are numbered in
   // order (the project summary task stays 0), so a task added or moved renumbers the rows after it, as in Project

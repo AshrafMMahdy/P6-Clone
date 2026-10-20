@@ -73,7 +73,7 @@ test('MSPDI through MCP: F9 keeps Microsoft Project\'s dates until something tha
   const h = (await call('open_file', { path: FILE })).handle;
   const kept = await call('schedule', { handle: h });
   assert.deepEqual([kept.ok, kept.kept_msp_dates, kept.unsaved_changes], [true, ['Clinic Fitout'], false]);
-  assert.equal((await call('get_activity', { handle: h, activity_id: 'uid:162' })).start, '2026-03-20 17:00');
+  assert.equal((await call('get_activity', { handle: h, activity_id: 'uid:162' })).start, '2026-03-19 12:00');
   // saved through the server after that F9: the file as it was
   const out = join(mkdtempSync(join(tmpdir(), 'p6msp-')), 'clinic.xml');
   assert.equal((await call('save', { handle: h, path: out, format: 'mspdi' })).saved, out);
@@ -163,4 +163,40 @@ test('MSPDI WBS: a moved leaf keeps its WBS code under a WBS code mask; without 
   const plain = edited(move, undefined, readFileSync(FILE, 'utf8').replace(/<WBSMask>[\s\S]*?<\/WBSMask>/, ''));
   assert.ok(taskXml(plain.out, '162').includes('<WBS>1.3</WBS><OutlineNumber>1.3</OutlineNumber>'));
   assert.match(plain.report[0], /no WBS code mask[\s\S]*UID 162\) 2 -> 1\.3/);
+});
+
+test('MSPDI F9: a Microsoft Project file schedules to Project\'s own dates (a started task\'s remaining work goes on after its work done); an edit moves only what lies after it', async () => {
+  const { scheduleProjects } = await import('../core/schedule/cpm.ts');
+  const { mspDateChanges } = await import('../core/msp/keep.ts');
+  const f9 = (ops: unknown[]) => {
+    const { db } = parseMspdi(readFileSync(FILE, 'utf8'));
+    assert.equal(applyOps(db, ops).ok, true);
+    const pid = db.tables.PROJECT.rows[0].proj_id;
+    assert.equal(scheduleProjects(db, [pid]).ok, true);
+    return { db, ch: mspDateChanges(db, pid, 100) };
+  };
+  // nothing edited: every date as Project computed it (Strip out started 2026-03-02, 20 h done by 2026-03-04 12:00, the
+  // other 20 h right after: finish 2026-03-06 17:00; P6's rule would restart it at the status date and end it 2026-03-07)
+  const none = f9([]);
+  assert.equal(none.ch.activities, 0, JSON.stringify(none.ch.changes));
+  assert.equal(none.db.tables.TASK.rows.find((t) => t._msp_uid === '140')!.early_end_date, '2026-03-06 17:00');
+  // the platform's proof: rename Strip out, double Partitions, a new activity FS+1 after Strip out
+  const { ch } = f9([{ op: 'update_activity', id: 'uid:140', name: 'Strip out (rev)' }, { op: 'update_activity', id: 'uid:155', duration_days: 10 }, { op: 'add_activity', id: 'N1', name: 'New', wbs: '1', duration_days: 3 }, { op: 'add_relationship', pred: 'uid:140', succ: 'N1', lag_days: 1 }]);
+  assert.deepEqual([...new Set(ch.changes.map((c) => c.source_uid))].sort(), ['155', '162']);
+});
+
+test('MSPDI F9: a file the clone wrote from P6 schedules by the rules of the P6 build that made its dates (named in the file, or seen in them)', async () => {
+  const { parseXer } = await import('../core/xer/parse.ts');
+  const { scheduleProjects } = await import('../core/schedule/cpm.ts');
+  const { mspDateChanges } = await import('../core/msp/keep.ts');
+  const { SAMPLES_DIR } = await import('./helpers.ts');
+  const xer = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, 'Baseline 15-11-2010.xer')))).db; // P6 6.x: milestones one minute into a period
+  const xml = writeMspdi(xer);
+  assert.match(xml, /<Alias>P6 Schedule Rules 6\.0\.0 legacy<\/Alias>/);
+  for (const file of [xml, xml.replace(/<ExtendedAttribute><FieldID>188743746<\/FieldID>[\s\S]*?<\/ExtendedAttribute>/, '')]) { // with the rules named, and as v0.1.8 wrote it
+    const { db } = parseMspdi(file);
+    const pid = db.tables.PROJECT.rows[0].proj_id;
+    scheduleProjects(db, [pid]);
+    assert.equal(mspDateChanges(db, pid).activities, 0);
+  }
 });

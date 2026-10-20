@@ -331,6 +331,8 @@ function updateActivity(db: Db, t: Row, op: Op, dayHours: (t: Row) => number, ca
   if (op.actual_start !== undefined) ok(setActual(t, 'start', op.actual_start ? date(op.actual_start, 'actual_start') : ''));
   if (op.actual_finish !== undefined) ok(setActual(t, 'finish', op.actual_finish ? date(op.actual_finish, 'actual_finish') : ''));
   if (op.percent_complete != null) ok(setPercent(t, num(op.percent_complete, 'percent_complete')));
+  // progress entered here replaces the duration done that a Microsoft Project file gave
+  if (t._msp_done && (op.percent_complete != null || op.actual_start !== undefined || op.actual_finish !== undefined)) delete t._msp_done;
   if (op.expected_finish !== undefined) t.expect_end_date = op.expected_finish ? date(op.expected_finish, 'expected_finish') : '';
   if (op.finish != null) ok(setFinish(db, t, String(op.finish)));
   t.status_code = statusOf(t);
