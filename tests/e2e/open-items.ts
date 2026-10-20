@@ -9,7 +9,7 @@ const ok = (c: boolean, m: string) => { console.log((c ? 'PASS ' : 'FAIL ') + m)
 
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6open-'));
-const app = await electron.launch({ args: [root, '--user-data', profile, '--import', join(root, 'sample XERs/cairo festival city.xer')], cwd: root });
+const app = await electron.launch({ args: [root, '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
 for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }

@@ -14,7 +14,7 @@ const port = (srv.address() as { port: number }).port;
 const root = join(import.meta.dirname, '..', '..'), ud = mkdtempSync(join(tmpdir(), 'p6strip-'));
 
 async function launch(importFile = false) {
-  const app = await electron.launch({ args: [root, '--user-data', ud, ...(importFile ? ['--import', join(root, 'sample XERs/cairo festival city.xer')] : [])], cwd: root });
+  const app = await electron.launch({ args: [root, '--user-data', ud, ...(importFile ? ['--import', join(root, 'Sample XERs/cairo festival city.xer')] : [])], cwd: root });
   const win = await app.firstWindow();
   await win.setViewportSize({ width: 1400, height: 850 }).catch(() => {});
   return { app, win, menu: (id: string) => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.getAllWindows()[0].webContents.send('menu', id), id) };

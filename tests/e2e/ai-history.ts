@@ -19,7 +19,7 @@ const root = join(import.meta.dirname, '..', '..'), ud = mkdtempSync(join(tmpdir
 const A = 'cairo festival city.xer', B = '31 buidings.xer';
 
 async function launch(xer?: string) {
-  const app = await electron.launch({ args: [root, '--user-data', ud, ...(xer ? ['--import', join(root, 'sample XERs', xer)] : [])], cwd: root });
+  const app = await electron.launch({ args: [root, '--user-data', ud, ...(xer ? ['--import', join(root, 'Sample XERs', xer)] : [])], cwd: root });
   const win = await app.firstWindow();
   if (xer) {
     await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');

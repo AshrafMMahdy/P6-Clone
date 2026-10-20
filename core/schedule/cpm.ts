@@ -85,12 +85,12 @@ export function isLegacyLayout(db: Db): boolean {
   return !!db.tables.TASK?.fields.includes('old_restart_date');
 }
 
-/** Number as P6 writes it: up to 6 decimals, no trailing zeros. */
 /** The progress an activity's duration done (_msp_done, from a Microsoft Project file) was read with: actual dates,
  *  remaining duration, % complete. Once any of them is set again (desktop edits, Update Progress, timesheets, MCP
  *  update_activity / update_progress, a spreadsheet import), that value no longer holds and is not used. */
 export const progressKey = (t: Row) => [t.act_start_date, t.act_end_date, t.remain_drtn_hr_cnt, t.phys_complete_pct].map((v) => v ?? '').join('|');
 
+/** Number as P6 writes it: up to 6 decimals, no trailing zeros. */
 export const p6num = memo((n: number): string => {
   const s = (Math.round(n * 1e6) / 1e6).toFixed(6).replace(/\.?0+$/, '');
   return s === '-0' ? '0' : s;

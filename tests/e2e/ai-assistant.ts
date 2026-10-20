@@ -22,7 +22,7 @@ const srv = createServer((req, res) => {
 const port = (srv.address() as any).port;
 // End-to-end check of the AI assistant against a fake OpenAI-compatible server: node tests/e2e/ai-assistant.ts (after node scripts/build.mjs)
 const root = join(import.meta.dirname, '..', '..'), ud = mkdtempSync(join(tmpdir(), 'p6ai-'));
-const app = await electron.launch({ args: [root, '--user-data', ud, '--import', join(root, 'sample XERs/cairo festival city.xer')], cwd: root });
+const app = await electron.launch({ args: [root, '--user-data', ud, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 const menu = (id: string) => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.getAllWindows()[0].webContents.send('menu', id), id);
 await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
