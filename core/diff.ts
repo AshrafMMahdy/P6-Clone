@@ -1,4 +1,5 @@
 import { KEYS, type Db, type Row } from './db.ts';
+import { dayHours } from './project/units.ts';
 
 export interface DiffEntry { table: string; key: string; kind: 'added' | 'removed' | 'changed'; field?: string; a?: string; b?: string }
 
@@ -40,7 +41,7 @@ export interface ScheduleChange { object: 'project' | 'wbs' | 'activity' | 'rela
  * each file), WBS by code path, activities by Activity ID, relationships by predecessor, successor and type,
  * so two exports whose internal ids were renumbered compare cleanly. Durations, lags and floats in days.
  */
-export function compareSchedules(a: Db, b: Db, hoursPerDay = 8): ScheduleChange[] {
+export function compareSchedules(a: Db, b: Db, hoursPerDay = 8, calendarDays = false): ScheduleChange[] {
   const projs = (d: Db) => (d.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
   const pa = projs(a), pb = projs(b);
   const up = (p: Row) => (p.proj_short_name ?? '').toUpperCase();
@@ -49,7 +50,9 @@ export function compareSchedules(a: Db, b: Db, hoursPerDay = 8): ScheduleChange[
   const pairs: [Row | undefined, Row | undefined][] = pa.length === pb.length && (pa.length === 1 || none) ? pa.map((x, i) => [x, pb[i]])
     : [...new Set([...pa, ...pb].map(up))].map((n) => [pa.find((p) => up(p) === n), pb.find((p) => up(p) === n)]);
   const out: ScheduleChange[] = [];
-  const days = (h: string | undefined) => (h === '' || h == null ? '' : String(Math.round((Number(h) / hoursPerDay) * 100) / 100));
+  // days by units.ts (each activity's own calendar with calendarDays), in the file the row comes from
+  const dhA = dayHours(a, hoursPerDay, calendarDays), dhB = dayHours(b, hoursPerDay, calendarDays);
+  const days = (h: string | undefined, perDay = hoursPerDay) => (h === '' || h == null ? '' : String(Math.round((Number(h) / perDay) * 100) / 100));
   const diffRows = (object: ScheduleChange['object'], ma: Map<string, Record<string, string>>, mb: Map<string, Record<string, string>>) => {
     for (const [id, ra] of ma) {
       const rb = mb.get(id);
@@ -62,6 +65,7 @@ export function compareSchedules(a: Db, b: Db, hoursPerDay = 8): ScheduleChange[
     const pre = pairs.length > 1 ? `${(y ?? x)!.proj_short_name}:` : '';
     if (!x || !y) { out.push({ object: 'project', kind: x ? 'deleted' : 'added', id: (x ?? y)!.proj_short_name }); continue; }
     const view = (d: Db, p: Row) => {
+      const dh = d === a ? dhA : dhB;
       const wbsRows = (d.tables.PROJWBS?.rows ?? []).filter((w) => w.proj_id === p.proj_id);
       const wbsById = new Map(wbsRows.map((w) => [w.wbs_id, w]));
       const path = (id: string) => { const parts: string[] = []; for (let w = wbsById.get(id), n = 0; w && w.proj_node_flag !== 'Y' && n < 50; w = wbsById.get(w.parent_wbs_id), n++) parts.unshift(w.wbs_short_name); return parts.join('.'); };
@@ -73,14 +77,14 @@ export function compareSchedules(a: Db, b: Db, hoursPerDay = 8): ScheduleChange[
       const wbs = new Map(wbsRows.filter((w) => w.proj_node_flag !== 'Y').map((w) => [path(w.wbs_id), { name: w.wbs_name ?? '' }]));
       const acts = new Map(tasks.map((t) => [t.task_code, {
         name: t.task_name ?? '', wbs: path(t.wbs_id), type: t.task_type ?? '', calendar: cal.get(t.clndr_id) ?? '', status: t.status_code ?? '',
-        original_duration: days(t.target_drtn_hr_cnt), remaining_duration: days(t.remain_drtn_hr_cnt),
-        start: t.act_start_date || t.early_start_date || '', finish: t.act_end_date || t.early_end_date || '', total_float: days(t.total_float_hr_cnt),
+        original_duration: days(t.target_drtn_hr_cnt, dh.task(t)), remaining_duration: days(t.remain_drtn_hr_cnt, dh.task(t)),
+        start: t.act_start_date || t.early_start_date || '', finish: t.act_end_date || t.early_end_date || '', total_float: days(t.total_float_hr_cnt, dh.task(t)),
         actual_start: t.act_start_date ?? '', actual_finish: t.act_end_date ?? '', physical_pct: t.phys_complete_pct ?? '',
         constraint: [t.cstr_type, t.cstr_date].filter(Boolean).join(' '), secondary_constraint: [t.cstr_type2, t.cstr_date2].filter(Boolean).join(' '),
       }]));
       const code = (id: string) => { const t = allTasks.get(id); return t ? (t.proj_id === p.proj_id ? t.task_code : `${t.task_code} (other project)`) : `#${id}`; };
       const rels = new Map((d.tables.TASKPRED?.rows ?? []).filter((r) => allTasks.get(r.task_id)?.proj_id === p.proj_id)
-        .map((r) => [`${code(r.pred_task_id)} -> ${code(r.task_id)} ${(r.pred_type ?? '').replace(/^PR_/, '')}`, { name: '', lag: days(r.lag_hr_cnt) }]));
+        .map((r) => [`${code(r.pred_task_id)} -> ${code(r.task_id)} ${(r.pred_type ?? '').replace(/^PR_/, '')}`, { name: '', lag: days(r.lag_hr_cnt, dh.rel(r)) }]));
       return { proj, wbs, acts, rels };
     };
     const va = view(a, x), vb = view(b, y);

@@ -6,6 +6,7 @@ import { durationPct } from '../core/progress/update.ts';
 import { activityCosts, earnedValue, type EarnedValue } from '../core/cost/rollup.ts';
 import { ENUMS } from '../core/xer/schema.ts';
 import type { Prefs } from './store.ts';
+import { dayHours, type DayHours } from '../core/project/units.ts';
 import { makeCtx as coreMakeCtx, isCritical, type Ctx as CoreCtx } from '../core/project/ctx.ts';
 import { isMilestone, statusOf, setStart as setStartLike, setFinish as setFinishLike, setActual, setPercent, refreshOwnDates } from '../core/project/edit.ts';
 export { isCritical, isMilestone, statusOf, setActual, setPercent, refreshOwnDates };
@@ -35,14 +36,22 @@ export function fmtDate(v: string | number | null | undefined, prefs: Prefs, wit
   return withTime ? `${out} ${s.slice(11)}` : out;
 }
 
-export function fmtDur(hours: string | number | undefined, prefs: Prefs): string {
+export function fmtDur(hours: string | number | undefined, prefs: Prefs, perDay = prefs.hoursPerDay): string {
   if (hours === '' || hours == null) return '';
   const h = Number(hours);
   if (!Number.isFinite(h)) return '';
-  const d = h / prefs.hoursPerDay;
+  const d = h / perDay;
   return (Math.round(d * 10 ** prefs.durationDecimals) / 10 ** prefs.durationDecimals).toString();
 }
-export const daysToHours = (d: number, prefs: Prefs) => d * prefs.hoursPerDay;
+export const daysToHours = (d: number, prefs: Prefs, perDay = prefs.hoursPerDay) => d * perDay;
+const dhOf = new WeakMap<Ctx, DayHours>();
+/** Hours in a day of this activity: its calendar's with prefs.calendarDays (MCP and CLI), else the preference. */
+export function dayOf(r: Row, c: Ctx): number {
+  if (!c.prefs.calendarDays) return c.prefs.hoursPerDay;
+  let d = dhOf.get(c);
+  if (!d) dhOf.set(c, (d = dayHours(c.db, c.prefs.hoursPerDay, true)));
+  return d.task(r);
+}
 
 const calsOf = new WeakMap<Ctx, ReturnType<typeof calendarResolver>>();
 /** P6 Actual Duration (hours): working time on the activity's calendar from its actual start to its actual finish, or to the data date while in progress. */
@@ -126,24 +135,24 @@ export const COLUMNS: Column[] = [
     r.task_code = v;
   } } },
   { id: 'task_name', title: 'Activity Name', width: 260, get: (r) => r.task_name, edit: { type: 'text', set: (_db, r, v) => { r.task_name = v; } } },
-  { id: 'orig_dur', title: 'Original Duration', width: 62, align: 'right', get: (r, c) => fmtDur(r.target_drtn_hr_cnt, c.prefs), edit: { type: 'number', set: (_db, r, v, c) => {
-    const h = daysToHours(Number(v), c.prefs);
+  { id: 'orig_dur', title: 'Original Duration', width: 62, align: 'right', get: (r, c) => fmtDur(r.target_drtn_hr_cnt, c.prefs, dayOf(r, c)), edit: { type: 'number', set: (_db, r, v, c) => {
+    const h = daysToHours(Number(v), c.prefs, dayOf(r, c));
     if (!(h >= 0)) return 'Duration must be zero or greater.';
     if (isMilestone(r) && h > 0) return 'Milestones have zero duration.';
     r.target_drtn_hr_cnt = p6num(h);
     if (!r.act_start_date) r.remain_drtn_hr_cnt = p6num(h);
     refreshOwnDates(_db, r);
   } } },
-  { id: 'rem_dur', title: 'Remaining Duration', width: 62, align: 'right', get: (r, c) => fmtDur(r.remain_drtn_hr_cnt, c.prefs), edit: { type: 'number', set: (_db, r, v, c) => {
+  { id: 'rem_dur', title: 'Remaining Duration', width: 62, align: 'right', get: (r, c) => fmtDur(r.remain_drtn_hr_cnt, c.prefs, dayOf(r, c)), edit: { type: 'number', set: (_db, r, v, c) => {
     if (r.act_end_date) return 'Completed activities have no remaining duration.';
-    const h = daysToHours(Number(v), c.prefs);
+    const h = daysToHours(Number(v), c.prefs, dayOf(r, c));
     if (!(h >= 0)) return 'Duration must be zero or greater.';
     r.remain_drtn_hr_cnt = p6num(h);
     if (!r.act_start_date) r.target_drtn_hr_cnt = p6num(h);
     refreshOwnDates(_db, r);
   } } },
-  { id: 'act_dur', title: 'Actual Duration', width: 56, align: 'right', get: (r, c) => fmtDur(actualDurHours(r, c), c.prefs) },
-  { id: 'atc_dur', title: 'At Completion Duration', width: 70, align: 'right', get: (r, c) => fmtDur(atCompletionDurHours(r, c), c.prefs) },
+  { id: 'act_dur', title: 'Actual Duration', width: 56, align: 'right', get: (r, c) => fmtDur(actualDurHours(r, c), c.prefs, dayOf(r, c)) },
+  { id: 'atc_dur', title: 'At Completion Duration', width: 70, align: 'right', get: (r, c) => fmtDur(atCompletionDurHours(r, c), c.prefs, dayOf(r, c)) },
   { id: 'pct', title: 'Activity % Complete', width: 62, align: 'right', get: (r, c) => `${Math.round(activityPct(r, c) * 10) / 10}%`, edit: { type: 'number', set: (_db, r, v) => setPercent(r, Number(v)) } },
   { id: 'dur_pct', title: 'Duration % Complete', width: 62, align: 'right', get: (r) => `${Math.round(durationPct(r) * 10) / 10}%` },
   { id: 'phys_pct', title: 'Physical % Complete', width: 62, align: 'right', get: (r) => `${Number(r.phys_complete_pct || 0)}%`, edit: { type: 'number', set: (_db, r, v) => { if (!(Number(v) >= 0 && Number(v) <= 100)) return 'Enter 0 to 100.'; r.phys_complete_pct = p6num(Number(v)); } } },
@@ -165,8 +174,8 @@ export const COLUMNS: Column[] = [
     const bf = parseP6Date(b.act_end_date || b.target_end_date), f = parseP6Date(r.act_end_date || r.early_end_date);
     return bf == null || f == null ? '' : fmtDur((bf - f) / 60 * (c.prefs.hoursPerDay / 24), c.prefs);
   } },
-  { id: 'total_float', title: 'Total Float', width: 56, align: 'right', get: (r, c) => fmtDur(r.total_float_hr_cnt, c.prefs) },
-  { id: 'free_float', title: 'Free Float', width: 56, align: 'right', get: (r, c) => fmtDur(r.free_float_hr_cnt, c.prefs) },
+  { id: 'total_float', title: 'Total Float', width: 56, align: 'right', get: (r, c) => fmtDur(r.total_float_hr_cnt, c.prefs, dayOf(r, c)) },
+  { id: 'free_float', title: 'Free Float', width: 56, align: 'right', get: (r, c) => fmtDur(r.free_float_hr_cnt, c.prefs, dayOf(r, c)) },
   { id: 'status', title: 'Activity Status', width: 80, get: (r) => STATUS[statusOf(r)] },
   { id: 'task_type', title: 'Activity Type', width: 110, get: (r) => TASK_TYPES[r.task_type] ?? r.task_type, edit: { type: 'select', options: TASK_TYPES, set: (_db, r, v) => { r.task_type = v; if (isMilestone(r)) { r.target_drtn_hr_cnt = '0'; r.remain_drtn_hr_cnt = '0'; } } } },
   { id: 'duration_type', title: 'Duration Type', width: 130, get: (r) => DUR_TYPES[r.duration_type] ?? r.duration_type, edit: { type: 'select', options: DUR_TYPES, set: (_db, r, v) => { r.duration_type = v; } } },

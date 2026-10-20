@@ -9,6 +9,7 @@ import { activityCosts, earnedValue, sumLines, type CostLine } from '../../core/
 import { relationshipFloat } from '../../core/schedule/cpm.ts';
 import { spreadUsage } from '../../core/resource/usage.ts';
 import { REPORTS, type Report } from '../../core/report/reports.ts';
+import { dayHours, type DayHours } from '../../core/project/units.ts';
 import { COLUMNS, extraColumns, fmtDate, makeCtx, projectName, type Column, type Ctx } from '../model.ts';
 import type { Prefs } from '../store.ts';
 import { buildActivityRows, FILTERS, userFilters } from '../views/activityRows.ts';
@@ -28,7 +29,8 @@ const num2 = (n: number) => String(Math.round(n * 100) / 100);
 const days = (h: string | number | undefined, hpd: number) => (h === '' || h == null ? '' : num2(Number(h) / hpd));
 const n = (s: string | undefined) => Number(s || 0) || 0;
 type Col<T> = { id: string; title: string; align?: 'right'; get: (x: T, env: Env) => string };
-interface Env { db: Db; ctx: Ctx; prefs: Prefs; ev: Map<string, ReturnType<typeof earnedValue>>; projIds: string[] }
+/** dh: days per activity (core/project/units.ts) */
+interface Env { db: Db; ctx: Ctx; prefs: Prefs; ev: Map<string, ReturnType<typeof earnedValue>>; projIds: string[]; dh: DayHours }
 
 // ---------------------------------------------------------------- subject areas and their columns
 const ASSIGNMENT_COLS: Col<Row>[] = [
@@ -48,6 +50,7 @@ const ASSIGNMENT_COLS: Col<Row>[] = [
   { id: 'start', title: 'Start', get: (a, e) => fmtDate(a.act_start_date || a.restart_date || a.target_start_date, e.prefs) + (a.act_start_date ? ' A' : '') },
   { id: 'finish', title: 'Finish', get: (a, e) => fmtDate(a.act_end_date || a.reend_date || a.target_end_date, e.prefs) + (a.act_end_date ? ' A' : '') },
 ];
+/** minTf: the lowest total float, in days (env.dh) */
 interface WbsRow { w: Row; level: number; path: string; line: CostLine; start: number | null; finish: number | null; count: number; minTf: number | null }
 const WBS_COLS: Col<WbsRow>[] = [
   { id: 'wbs_code', title: 'WBS Code', get: (x) => x.path },
@@ -55,7 +58,7 @@ const WBS_COLS: Col<WbsRow>[] = [
   { id: 'activities', title: 'Activities', align: 'right', get: (x) => String(x.count) },
   { id: 'start', title: 'Start', get: (x, e) => fmtDate(x.start, e.prefs) },
   { id: 'finish', title: 'Finish', get: (x, e) => fmtDate(x.finish, e.prefs) },
-  { id: 'total_float', title: 'Total Float', align: 'right', get: (x, e) => (x.minTf == null ? '' : days(x.minTf, e.prefs.hoursPerDay)) },
+  { id: 'total_float', title: 'Total Float', align: 'right', get: (x) => (x.minTf == null ? '' : days(x.minTf, 1)) },
   { id: 'budget', title: 'Budgeted Total Cost', align: 'right', get: (x) => money(x.line.budget) },
   { id: 'actual', title: 'Actual Total Cost', align: 'right', get: (x) => money(x.line.actual) },
   { id: 'remaining', title: 'Remaining Total Cost', align: 'right', get: (x) => money(x.line.remaining) },
@@ -87,8 +90,8 @@ const RELATIONSHIP_COLS: Col<Row>[] = [
   { id: 'succ_code', title: 'Successor', get: (p, e) => e.ctx.taskById.get(p.task_id)?.task_code ?? '' },
   { id: 'succ_name', title: 'Successor Name', get: (p, e) => e.ctx.taskById.get(p.task_id)?.task_name ?? '' },
   { id: 'type', title: 'Relationship Type', get: (p) => REL_LABEL[p.pred_type] ?? p.pred_type },
-  { id: 'lag', title: 'Lag', align: 'right', get: (p, e) => days(p.lag_hr_cnt || '0', e.prefs.hoursPerDay) },
-  { id: 'free_float', title: 'Relationship Free Float', align: 'right', get: (p, e) => { let f = relFloatCache.get(e); if (!f) { f = relationshipFloat(e.db, e.ctx); relFloatCache.set(e, f); } const v = f(p); return v == null ? '' : days(v, e.prefs.hoursPerDay); } },
+  { id: 'lag', title: 'Lag', align: 'right', get: (p, e) => days(p.lag_hr_cnt || '0', e.dh.rel(p)) },
+  { id: 'free_float', title: 'Relationship Free Float', align: 'right', get: (p, e) => { let f = relFloatCache.get(e); if (!f) { f = relationshipFloat(e.db, e.ctx); relFloatCache.set(e, f); } const v = f(p); return v == null ? '' : days(v, e.dh.rel(p)); } },
   { id: 'driving', title: 'Driving', get: (p, e) => { let f = relFloatCache.get(e); if (!f) { f = relationshipFloat(e.db, e.ctx); relFloatCache.set(e, f); } return f(p) === 0 ? 'Yes' : ''; } },
 ];
 
@@ -136,7 +139,7 @@ function sortRows<T>(list: T[], get: (x: T) => string, desc?: boolean): T[] {
 export function runSpec(db: Db, projIds: string[], spec: ReportSpec, o: RunOptions): Report {
   const prefs = o.prefs;
   const ctx = makeCtx(db, prefs);
-  const env: Env = { db, ctx, prefs, ev: new Map(), projIds };
+  const env: Env = { db, ctx, prefs, ev: new Map(), projIds, dh: dayHours(db, prefs.hoursPerDay, !!prefs.calendarDays) };
   const titleOf = spec.title || spec.name;
   const sub = projIds.map((id) => { const p = ctx.proj.get(id); return p ? `${p.proj_short_name} - ${projectName(db, p)}` : ''; }).join('; ');
   const filterName = spec.filter && spec.filter !== 'all' ? reportFilters(db).find((f) => f.id === spec.filter)?.name ?? spec.filter : '';
@@ -191,7 +194,8 @@ export function runSpec(db: Db, projIds: string[], spec: ReportSpec, o: RunOptio
         const s = parseP6Date(t.act_start_date || t.early_start_date || t.restart_date), f = parseP6Date(t.act_end_date || t.early_end_date || t.reend_date);
         if (s != null && (me.start == null || s < me.start)) me.start = s;
         if (f != null && (me.finish == null || f > me.finish)) me.finish = f;
-        if (!t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null && (me.minTf == null || n(t.total_float_hr_cnt) < me.minTf)) me.minTf = n(t.total_float_hr_cnt);
+        const tf = n(t.total_float_hr_cnt) / env.dh.task(t);
+        if (!t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null && (me.minTf == null || tf < me.minTf)) me.minTf = tf;
       }
       for (const c of children) {
         if (c.start != null && (me.start == null || c.start < me.start)) me.start = c.start;
@@ -286,7 +290,7 @@ export function runReport(db: Db, projIds: string[], idOrName: string, o: RunOpt
   if (entry.spec) return { entry, report: runSpec(db, projIds, entry.spec, o) };
   if (entry.id === 'usageMonth') return { entry, report: usageReport(db, projIds, o) };
   const def = REPORTS.find((r) => r.id === entry.id)!;
-  return { entry, report: def.build(db, projIds, { hoursPerDay: o.prefs.hoursPerDay, fmtDate: (s) => fmtDate(s, o.prefs), weeks: o.weeks }) };
+  return { entry, report: def.build(db, projIds, { hoursPerDay: o.prefs.hoursPerDay, fmtDate: (s) => fmtDate(s, o.prefs), weeks: o.weeks, dayHours: dayHours(db, o.prefs.hoursPerDay, !!o.prefs.calendarDays) }) };
 }
 
 function usageReport(db: Db, projIds: string[], o: RunOptions): Report {

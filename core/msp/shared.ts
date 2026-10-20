@@ -11,7 +11,7 @@ import type { Finding } from '../findings.ts';
 import { selectRows } from '../xer/write.ts';
 import { hoursPerWeek, inheritExceptions, parseClndrData, serializeClndrData, standardCalendar, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
-import { p6num } from '../schedule/cpm.ts';
+import { p6num, progressKey } from '../schedule/cpm.ts';
 import type { Ghosts, Kept, ProjectKept } from './keep.ts';
 
 export type RelType = 'FS' | 'SS' | 'FF' | 'SF';
@@ -611,7 +611,7 @@ function taskRow(t: MTask, pid: string, wbsId: string, clndr: string, code: stri
   }
   const done = status === 'TK_Complete';
   const es = done ? as : t.earlyStart || t.start, ef = done ? af : t.earlyFinish || t.finish;
-  return {
+  const row: Row = {
     task_id: t.uid, proj_id: pid, wbs_id: wbsId, clndr_id: clndr, phys_complete_pct: p6num(Math.max(0, Math.min(100, t.pct ?? (done ? 100 : 0)))),
     complete_pct_type: 'CP_Drtn', task_type: type, duration_type: x.durType && P6_DUR_TYPES.has(x.durType) ? x.durType : MSP_TYPE_TO_DT[t.type ?? 1] ?? 'DT_FixedDUR2',
     status_code: status, task_code: code, task_name: t.name, rsrc_id: '', total_float_hr_cnt: done || t.totalSlackHrs == null ? '' : p6num(t.totalSlackHrs),
@@ -620,7 +620,9 @@ function taskRow(t: MTask, pid: string, wbsId: string, clndr: string, code: stri
     early_start_date: es, early_end_date: ef, restart_date: done ? '' : es, reend_date: done ? '' : ef, target_start_date: t.start || es, target_end_date: t.finish || ef,
     rem_late_start_date: done ? '' : t.lateStart, rem_late_end_date: done ? '' : t.lateFinish, cstr_type: cstr, priority_type: 'PT_Normal',
     cstr_date2: cdate2, cstr_type2: cstr2, driving_path_flag: t.critical ? 'Y' : 'N', guid: '', _msp_uid: t.uid,
-    // the duration done, when started: what Microsoft Project's rule for the remaining work counts from (cpm.ts)
-    ...(as && !af ? { _msp_done: p6num(t.actHrs ?? Math.max(0, dur - rem)) } : {}),
   };
+  // the duration done, when started: what Microsoft Project's rule for the remaining work counts from (cpm.ts), with
+  // the progress it holds for (progressKey)
+  if (as && !af) Object.assign(row, { _msp_done: p6num(t.actHrs ?? Math.max(0, dur - rem)), _msp_done_of: progressKey(row) });
+  return row;
 }

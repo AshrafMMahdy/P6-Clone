@@ -1,13 +1,15 @@
 // Built-in reports: tabular data that the UI renders, prints and exports to CSV.
+import type { DayHours } from '../project/units.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date, MIN_PER_DAY } from '../dates.ts';
 import { activityCosts, sumLines, spi, cpi, percentComplete, type CostLine } from '../cost/rollup.ts';
 
-export interface ReportOpts { hoursPerDay: number; fmtDate: (s: string | number | null | undefined) => string; weeks?: number }
+/** dayHours: days per activity (units.ts); hoursPerDay without it */
+export interface ReportOpts { hoursPerDay: number; fmtDate: (s: string | number | null | undefined) => string; weeks?: number; dayHours?: DayHours }
 export interface Report { title: string; subtitle?: string; columns: string[]; rows: { cells: string[]; level?: number; bold?: boolean }[]; text?: string }
 export interface ReportDef { id: string; title: string; group: string; build: (db: Db, projIds: string[], o: ReportOpts) => Report }
 
-const days = (h: string | number | undefined, o: ReportOpts) => (h === '' || h == null ? '' : String(Math.round((Number(h) / o.hoursPerDay) * 10) / 10));
+const days = (h: string | number | undefined, o: ReportOpts, t?: Row) => (h === '' || h == null ? '' : String(Math.round((Number(h) / (t && o.dayHours ? o.dayHours.task(t) : o.hoursPerDay)) * 10) / 10));
 const money = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ratio = (v: number) => (v ? v.toFixed(2) : '');
 const start = (t: Row, o: ReportOpts) => (t.act_start_date ? `${o.fmtDate(t.act_start_date)} A` : o.fmtDate(t.early_start_date || t.target_start_date));
@@ -36,7 +38,7 @@ export const REPORTS: ReportDef[] = [
       wbsWalk(db, projIds, (w, level, path) => {
         out.push({ cells: [w.proj_node_flag === 'Y' ? w.wbs_short_name : path, w.wbs_name, '', '', '', '', '', '', ''], level, bold: true });
         for (const t of (tasksBy.get(w.wbs_id) ?? []).sort((a, b) => (a.early_start_date || a.act_start_date).localeCompare(b.early_start_date || b.act_start_date)))
-          out.push({ cells: [t.task_code, t.task_name, days(t.target_drtn_hr_cnt, o), days(t.remain_drtn_hr_cnt, o), pctTxt(t, asg.get(t.task_id) ?? []), start(t, o), finish(t, o), days(t.total_float_hr_cnt, o), t.driving_path_flag === 'Y' ? 'Yes' : ''], level: level + 1 });
+          out.push({ cells: [t.task_code, t.task_name, days(t.target_drtn_hr_cnt, o, t), days(t.remain_drtn_hr_cnt, o, t), pctTxt(t, asg.get(t.task_id) ?? []), start(t, o), finish(t, o), days(t.total_float_hr_cnt, o, t), t.driving_path_flag === 'Y' ? 'Yes' : ''], level: level + 1 });
       });
       return { title: 'Schedule Report', subtitle: projTitle(db, projIds), columns: ['Activity ID', 'Activity Name', 'Orig Dur', 'Rem Dur', '% Comp', 'Start', 'Finish', 'Total Float', 'Longest Path'], rows: out };
     },
@@ -48,7 +50,7 @@ export const REPORTS: ReportDef[] = [
       const ts = rows(db, 'TASK').filter((t) => projIds.includes(t.proj_id) && !t.act_end_date && t.total_float_hr_cnt !== '' &&
         (projs.get(t.proj_id)?.critical_path_type === 'CT_DrivPath' ? t.driving_path_flag === 'Y' : Number(t.total_float_hr_cnt) <= Number(projs.get(t.proj_id)?.critical_drtn_hr_cnt || 0)));
       ts.sort((a, b) => (a.early_start_date || '').localeCompare(b.early_start_date || ''));
-      return { title: 'Critical Activities', subtitle: projTitle(db, projIds), columns: ['Activity ID', 'Activity Name', 'Rem Dur', 'Start', 'Finish', 'Total Float'], rows: ts.map((t) => ({ cells: [t.task_code, t.task_name, days(t.remain_drtn_hr_cnt, o), start(t, o), finish(t, o), days(t.total_float_hr_cnt, o)] })) };
+      return { title: 'Critical Activities', subtitle: projTitle(db, projIds), columns: ['Activity ID', 'Activity Name', 'Rem Dur', 'Start', 'Finish', 'Total Float'], rows: ts.map((t) => ({ cells: [t.task_code, t.task_name, days(t.remain_drtn_hr_cnt, o, t), start(t, o), finish(t, o), days(t.total_float_hr_cnt, o, t)] })) };
     },
   },
   {
@@ -61,7 +63,7 @@ export const REPORTS: ReportDef[] = [
         const s = parseP6Date(t.early_start_date) ?? Infinity;
         return s <= end;
       }).sort((a, b) => (a.early_start_date || '').localeCompare(b.early_start_date || ''));
-      return { title: `${o.weeks ?? 3}-Week Lookahead`, subtitle: `from data date ${o.fmtDate(dd)} to ${o.fmtDate(end)}`, columns: ['Activity ID', 'Activity Name', 'Status', 'Start', 'Finish', 'Rem Dur', 'Total Float'], rows: ts.map((t) => ({ cells: [t.task_code, t.task_name, t.act_start_date ? 'In Progress' : 'Not Started', start(t, o), finish(t, o), days(t.remain_drtn_hr_cnt, o), days(t.total_float_hr_cnt, o)] })) };
+      return { title: `${o.weeks ?? 3}-Week Lookahead`, subtitle: `from data date ${o.fmtDate(dd)} to ${o.fmtDate(end)}`, columns: ['Activity ID', 'Activity Name', 'Status', 'Start', 'Finish', 'Rem Dur', 'Total Float'], rows: ts.map((t) => ({ cells: [t.task_code, t.task_name, t.act_start_date ? 'In Progress' : 'Not Started', start(t, o), finish(t, o), days(t.remain_drtn_hr_cnt, o, t), days(t.total_float_hr_cnt, o, t)] })) };
     },
   },
   {

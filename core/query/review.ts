@@ -1,5 +1,6 @@
 // Schedule review: the checks a planning reviewer runs on a programme (thresholds follow the common DCMA 14-point
 // guidance), plus whether the saved dates are the ones P6 would calculate. Each check passes, warns or fails.
+import { dayHours } from '../project/units.ts';
 import type { Db, Row } from '../db.ts';
 import { rows } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
@@ -10,11 +11,12 @@ export type Grade = 'pass' | 'warn' | 'fail';
 export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; detail: string; examples: string[] }
 export interface Review { grade: Grade; projects: string[]; openActivities: number; relationships: number; checks: Check[] }
 
-export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[] } = {}): Review {
+export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[]; calendarDays?: boolean } = {}): Review {
   const hpd = opts.hoursPerDay ?? 8;
   const projs = rows(db, 'PROJECT').filter((p) => !p._baseline_of && (!opts.projIds?.length || opts.projIds.includes(p.proj_id)));
   const open = new Set(projs.map((p) => p.proj_id));
   const ctx = makeCtx(db, { hoursPerDay: hpd });
+  const dh = dayHours(db, hpd, !!opts.calendarDays); // 44 working days (of each activity's own calendar with calendarDays)
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const live = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
   const P = rows(db, 'TASKPRED').filter((r) => open.has(r.proj_id) || open.has(r.pred_proj_id));
@@ -39,9 +41,9 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   add('rel_types', 'Relationships other than finish-to-start', P.filter((r) => r.pred_type !== 'PR_FS').length, P.length, 10, null, 'at most 10%', 'Mostly FS logic keeps the critical path readable.');
   const hard = live.filter((t) => /^(CS_MSO|CS_MEO|CS_MANDSTART|CS_MANDFIN)$/.test(t.cstr_type ?? '') || /^(CS_MANDSTART|CS_MANDFIN)$/.test(t.cstr_type2 ?? ''));
   add('hard_constraints', 'Hard constraints (Start On, Finish On, Mandatory)', hard, live.length, null, 5, 'at most 5%', 'Hard constraints override logic and can create negative float.');
-  add('high_float', 'High total float (over 44 working days)', live.filter((t) => Number(t.total_float_hr_cnt) / hpd > 44), live.length, 5, null, 'at most 5%', 'Usually a sign of missing successors.');
+  add('high_float', 'High total float (over 44 working days)', live.filter((t) => Number(t.total_float_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', 'Usually a sign of missing successors.');
   add('negative_float', 'Negative total float', live.filter((t) => t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) < 0), live.length, null, 0, 'none', 'The plan cannot meet a constraint or the must-finish date.');
-  add('long_durations', 'Long remaining durations (over 44 working days)', live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && Number(t.remain_drtn_hr_cnt) / hpd > 44), live.length, 5, null, 'at most 5%', 'Break long activities down so progress can be measured.');
+  add('long_durations', 'Long remaining durations (over 44 working days)', live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && Number(t.remain_drtn_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', 'Break long activities down so progress can be measured.');
   const invalid = dd == null ? [] : tasks.filter((t) => (!t.act_start_date && t.early_start_date && (parseP6Date(t.early_start_date) ?? Infinity) < dd) || (t.act_start_date && (parseP6Date(t.act_start_date) ?? 0) > dd) || (t.act_end_date && (parseP6Date(t.act_end_date) ?? 0) > dd));
   add('invalid_dates', 'Invalid dates (forecast before the data date, or actuals after it)', invalid, tasks.length, null, 0, 'none', dd == null ? 'The project has no data date.' : 'Work not done yet must be planned after the data date; actuals must be on or before it.');
   const withRsrc = new Set(rows(db, 'TASKRSRC').map((a) => a.task_id));

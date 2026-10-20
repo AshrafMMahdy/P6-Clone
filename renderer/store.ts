@@ -12,7 +12,9 @@ declare global { interface Window { p6: P6Api } }
 export type ViewName = 'projects' | 'wbs' | 'activities' | 'resources' | 'assignments' | 'reports' | 'risk' | 'timesheets' | 'portfolios';
 export type BottomPane = 'details' | 'profile' | 'spreadsheet' | 'trace' | 'none';
 
-export interface Prefs { hoursPerDay: number; dateFormat: 'dd-MMM-yy' | 'yyyy-mm-dd' | 'mm/dd/yy' | 'dd/mm/yy'; showTime: boolean; durationDecimals: number }
+/** calendarDays: days on each activity's own calendar (core/project/units.ts) — set by the MCP server and the CLI;
+ *  the desktop app leaves it off and shows every day at hoursPerDay (P6's default, "use assigned calendar" off). */
+export interface Prefs { hoursPerDay: number; dateFormat: 'dd-MMM-yy' | 'yyyy-mm-dd' | 'mm/dd/yy' | 'dd/mm/yy'; showTime: boolean; durationDecimals: number; calendarDays?: boolean }
 export interface DialogState { kind: string; props?: Record<string, unknown> }
 
 export interface UiState {

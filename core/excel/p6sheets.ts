@@ -6,6 +6,7 @@ import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { durationPct } from '../progress/update.ts';
 import type { Op } from '../project/ops.ts';
+import { dayHours } from '../project/units.ts';
 import type { Cell, Sheet } from './xlsx.ts';
 
 export const TYPE_LABEL: Record<string, string> = { TT_Task: 'Task Dependent', TT_Rsrc: 'Resource Dependent', TT_Mile: 'Start Milestone', TT_FinMile: 'Finish Milestone', TT_LOE: 'Level of Effort', TT_WBS: 'WBS Summary' };
@@ -23,7 +24,8 @@ const days = (h: string | undefined, hpd: number) => h === '' || h == null ? nul
 const date = (s: string | undefined) => { const m = parseP6Date(s); return m == null ? null : new Date(m * 60000); };
 
 /** The open project(s) as P6-style sheets. */
-export function exportSheets(db: Db, projIds: string[], hpd = 8): Sheet[] {
+export function exportSheets(db: Db, projIds: string[], hpd = 8, calendarDays = false): Sheet[] {
+  const dh = dayHours(db, hpd, calendarDays); // days as edits (and planImport with the same option) take them
   const ids = new Set(projIds);
   const proj = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p]));
   const W = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
@@ -39,15 +41,15 @@ export function exportSheets(db: Db, projIds: string[], hpd = 8): Sheet[] {
 
   const taskRows: Cell[][] = tasks.map((t) => [
     pid(t.proj_id), t.task_code, STATUS_LABEL[t.status_code] ?? t.status_code, wbsCode(t.wbs_id), t.task_name, TYPE_LABEL[t.task_type] ?? t.task_type,
-    days(t.target_drtn_hr_cnt, hpd), days(t.remain_drtn_hr_cnt, hpd),
+    days(t.target_drtn_hr_cnt, dh.task(t)), days(t.remain_drtn_hr_cnt, dh.task(t)),
     date(t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date), date(t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date),
     date(t.act_start_date), date(t.act_end_date),
     Math.round((t.complete_pct_type === 'CP_Phys' && !t.act_end_date ? Number(t.phys_complete_pct || 0) : durationPct(t)) * 100) / 100,
-    CSTR_LABEL[t.cstr_type] ?? '', date(t.cstr_date), days(t.total_float_hr_cnt, hpd), cal.get(t.clndr_id) ?? '', '',
+    CSTR_LABEL[t.cstr_type] ?? '', date(t.cstr_date), days(t.total_float_hr_cnt, dh.task(t)), cal.get(t.clndr_id) ?? '', '',
   ]);
   const predRows: Cell[][] = rows(db, 'TASKPRED').filter((p) => byId.has(p.task_id) || byId.has(p.pred_task_id)).map((p) => {
     const a = allTasks.get(p.pred_task_id), b = allTasks.get(p.task_id);
-    return [pid(a?.proj_id ?? ''), a?.task_code ?? '', pid(b?.proj_id ?? ''), b?.task_code ?? '', REL_LABEL[p.pred_type] ?? p.pred_type, days(p.lag_hr_cnt, hpd) ?? 0, ''];
+    return [pid(a?.proj_id ?? ''), a?.task_code ?? '', pid(b?.proj_id ?? ''), b?.task_code ?? '', REL_LABEL[p.pred_type] ?? p.pred_type, days(p.lag_hr_cnt, dh.rel(p)) ?? 0, ''];
   });
   const asgs = rows(db, 'TASKRSRC').filter((a) => byId.has(a.task_id));
   const rsrcRows: Cell[][] = rows(db, 'RSRC').map((r) => [
@@ -78,7 +80,8 @@ const dateOf = (v: Cell) => v instanceof Date ? formatP6Date(v.getTime() / 60000
 const fromLabel = (map: Record<string, string>, v: string) => Object.keys(map).find((k) => k === v || map[k].toLowerCase() === v.toLowerCase());
 
 /** Sheets (from readXlsx) as edit operations against the database, for one target project. */
-export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8): ImportPlan {
+export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, calendarDays = false): ImportPlan {
+  const dh = dayHours(db, hpd, calendarDays);
   const warnings: string[] = [];
   const s = { activitiesAdded: 0, activitiesUpdated: 0, activitiesDeleted: 0, relationshipsAdded: 0, relationshipsUpdated: 0, relationshipsDeleted: 0, resourcesAdded: 0, assignmentsAdded: 0, assignmentsDeleted: 0, unchanged: 0 };
   const ops: Op[] = [];
@@ -116,8 +119,8 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8):
     const type = str(r.task_type);
     if (type) { const code2 = fromLabel(TYPE_LABEL, type); if (!code2) warnings.push(`Activity ${code}: unknown activity type "${type}".`); else if (!t || code2 !== t.task_type) op.type = code2; }
     const od = num(r.target_drtn_hr_cnt), rd = num(r.remain_drtn_hr_cnt);
-    if (od != null && (!t || !near(od, days(t.target_drtn_hr_cnt, hpd)))) op.duration_days = od;
-    if (t && rd != null && t.act_start_date && !t.act_end_date && !near(rd, days(t.remain_drtn_hr_cnt, hpd))) op.remaining_days = rd;
+    if (od != null && (!t || !near(od, days(t.target_drtn_hr_cnt, dh.task(t))))) op.duration_days = od;
+    if (t && rd != null && t.act_start_date && !t.act_end_date && !near(rd, days(t.remain_drtn_hr_cnt, dh.task(t)))) op.remaining_days = rd;
     const ct = str(r.cstr_type);
     if (r.cstr_type !== undefined) {
       const c = ct ? fromLabel(CSTR_LABEL, ct) : '';
@@ -145,7 +148,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8):
     if (yes(r.delete_record_flag)) { if (existing) { ops.push({ op: 'delete_relationship', pred, succ, type }); s.relationshipsDeleted++; } continue; }
     const lag = num(r.lag_hr_cnt) ?? 0;
     if (!existing) { ops.push({ op: 'add_relationship', pred, succ, type, lag_days: lag }); s.relationshipsAdded++; }
-    else if (!near(lag, days(existing.lag_hr_cnt, hpd) ?? 0)) { ops.push({ op: 'update_relationship', pred, succ, type, lag_days: lag }); s.relationshipsUpdated++; }
+    else if (!near(lag, days(existing.lag_hr_cnt, dh.rel(existing)) ?? 0)) { ops.push({ op: 'update_relationship', pred, succ, type, lag_days: lag }); s.relationshipsUpdated++; }
     else s.unchanged++;
   }
 

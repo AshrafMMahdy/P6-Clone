@@ -11,6 +11,7 @@ import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
 import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
 import { assignResource, assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { copyProject } from './copy.ts';
+import { dayHours as dayHoursOf } from './units.ts';
 import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
 import {
   addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
@@ -19,7 +20,8 @@ import {
 
 export type Op = Record<string, unknown> & { op: string };
 export interface OpsResult { ok: boolean; applied: number; results: unknown[]; warnings?: string[]; error?: { index: number; op: unknown; message: string } }
-export interface OpsOptions { hoursPerDay?: number }
+/** calendarDays: days on each activity's own calendar (units.ts; MCP and CLI), else at hoursPerDay (the desktop app) */
+export interface OpsOptions { hoursPerDay?: number; calendarDays?: boolean }
 
 const TYPES: Record<string, string> = { task: 'TT_Task', task_dependent: 'TT_Task', resource_dependent: 'TT_Rsrc', start_milestone: 'TT_Mile', finish_milestone: 'TT_FinMile', milestone: 'TT_FinMile', level_of_effort: 'TT_LOE', loe: 'TT_LOE', wbs_summary: 'TT_WBS' };
 const CSTR: Record<string, string> = { start_on: 'CS_MSO', start_on_or_after: 'CS_MSOA', start_on_or_before: 'CS_MSOB', finish_on: 'CS_MEO', finish_on_or_before: 'CS_MEOB', finish_on_or_after: 'CS_MEOA', mandatory_start: 'CS_MANDSTART', mandatory_finish: 'CS_MANDFIN', as_late_as_possible: 'CS_ALAP', alap: 'CS_ALAP', none: '' };
@@ -65,7 +67,7 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   const results: unknown[] = [], warnings: string[] = [];
   let at = -1;
   try {
-    withIdCache(() => record(db, (d) => { for (at = 0; at < list.length; at++) results.push(apply(d, list[at] as Op, hpd, warnings)); }));
+    withIdCache(() => record(db, (d) => { for (at = 0; at < list.length; at++) results.push(apply(d, list[at] as Op, hpd, warnings, !!o.calendarDays)); }));
     return { ok: true, applied: list.length, results, ...(warnings.length ? { warnings } : {}) };
   } catch (e) {
     // record() has already put the database back as it was
@@ -73,7 +75,7 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   }
 }
 
-function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
+function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean): unknown {
   if (!op || typeof op !== 'object' || typeof op.op !== 'string') fail('Each operation needs an "op" name.');
   const projects = () => rows(db, 'PROJECT').filter((p) => !p._baseline_of);
   const project = (id?: unknown): Row => {
@@ -114,14 +116,12 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
     if (hits.length > 1) fail(`WBS code "${code}" is ambiguous; use the full path (e.g. ${path(hits[0])}).`);
     return hits[0] ?? fail(`No WBS "${code}" in project ${p.proj_short_name}.`);
   };
-  // days -> hours on a calendar's own hours per day (P6's calendar day), else the caller's hours per day
-  const calHours = (clndrId: string | undefined) => { const h = Number(rows(db, 'CALENDAR').find((c) => c.clndr_id === clndrId)?.day_hr_cnt); return h > 0 ? h : hpd; };
-  const dayHours = (t: Row) => calHours(t.clndr_id);
+  // days -> hours by units.ts (the activity's calendar with calendarDays, else hpd): the same rule the lookups and
+  // reports give days back with; read afresh, a calendar may change mid-list
+  const dayHours = (t: Row) => dayHoursOf(db, hpd, calDays).task(t);
   /** Lag days on the relationship-lag calendar of the successor's project (P6 default: the predecessor's calendar). */
-  const lagHours = (pred: Row, succ: Row) => {
-    const k = rows(db, 'SCHEDOPTIONS').find((s) => s.proj_id === succ.proj_id)?.sched_calendar_on_relationship_lag;
-    return k === 'rcal_24Hour' ? 24 : k === 'rcal_Successor' ? dayHours(succ) : k === 'rcal_ProjDefault' ? calHours(projects().find((p) => p.proj_id === succ.proj_id)?.clndr_id) : dayHours(pred);
-  };
+  const lagHours = (pred: Row, succ: Row) => dayHoursOf(db, hpd, calDays).lag(pred, succ);
+
   const calendar = (name: unknown): Row => rows(db, 'CALENDAR').find((c) => c.clndr_name.toLowerCase() === String(name).toLowerCase()) ?? fail(`No calendar "${name}".`);
   const curveId = (name: unknown): string => rows(db, 'RSRCCURVDATA').find((c) => c.curv_name.toLowerCase() === String(name).toLowerCase())?.curv_id ?? fail(`No resource curve "${name}". Curves: ${rows(db, 'RSRCCURVDATA').map((c) => c.curv_name).join(', ') || 'none in this file'} (add one with {"op":"add_resource_curve"}).`);
   const resource = (id: unknown): Row => rows(db, 'RSRC').find((r) => r.rsrc_short_name.toLowerCase() === String(id).toLowerCase()) ?? fail(`No resource "${id}" (add it with {"op":"add_resource"}).`);
@@ -331,8 +331,6 @@ function updateActivity(db: Db, t: Row, op: Op, dayHours: (t: Row) => number, ca
   if (op.actual_start !== undefined) ok(setActual(t, 'start', op.actual_start ? date(op.actual_start, 'actual_start') : ''));
   if (op.actual_finish !== undefined) ok(setActual(t, 'finish', op.actual_finish ? date(op.actual_finish, 'actual_finish') : ''));
   if (op.percent_complete != null) ok(setPercent(t, num(op.percent_complete, 'percent_complete')));
-  // progress entered here replaces the duration done that a Microsoft Project file gave
-  if (t._msp_done && (op.percent_complete != null || op.actual_start !== undefined || op.actual_finish !== undefined)) delete t._msp_done;
   if (op.expected_finish !== undefined) t.expect_end_date = op.expected_finish ? date(op.expected_finish, 'expected_finish') : '';
   if (op.finish != null) ok(setFinish(db, t, String(op.finish)));
   t.status_code = statusOf(t);

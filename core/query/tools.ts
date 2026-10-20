@@ -8,6 +8,7 @@ import { isCritical, traceLogic, type Ctx } from '../project/ctx.ts';
 import { relationshipFloat } from '../schedule/cpm.ts';
 import { statusOf, projectName } from '../project/edit.ts';
 import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
+import { dayHours } from '../project/units.ts';
 
 /** A lookup described for a language model (JSON Schema parameters). */
 export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
@@ -47,7 +48,8 @@ for (const t of TOOLS) if (t.name !== 'list_projects') (t.parameters as { proper
 const d = (s?: string) => (s ? s.slice(0, 16) : '');
 const days = (h: string | number | undefined, hpd: number) => (h === '' || h == null ? null : Math.round((Number(h) / hpd) * 10) / 10);
 
-export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ctx<unknown>, projIds: string[], hpd: number): unknown {
+/** calendarDays: days on each activity's own calendar, as applyOps takes them with the same option (MCP, CLI) */
+export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ctx<unknown>, projIds: string[], hpd: number, calendarDays = false): unknown {
   const all = rows(db, 'PROJECT').filter((p) => !p._baseline_of);
   let open = new Set(projIds.length ? projIds : all.map((p) => p.proj_id));
   if (args.project != null && args.project !== '') {
@@ -60,7 +62,9 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
   const wbsPath = (id: string) => { const out: string[] = []; for (let w = wbsById.get(id), n = 0; w && n < 50; w = wbsById.get(w.parent_wbs_id), n++) if (w.proj_node_flag !== 'Y') out.unshift(w.wbs_short_name); return out.join('.'); };
   const start = (t: Row) => t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date || '';
   const finish = (t: Row) => t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date || '';
-  const brief = (t: Row) => ({ id: t.task_code, name: t.task_name, status: STATUS[statusOf(t)] ?? statusOf(t), type: TYPE[t.task_type] ?? t.task_type, start: d(start(t)) + (t.act_start_date ? ' A' : ''), finish: d(finish(t)) + (t.act_end_date ? ' A' : ''), orig_days: days(t.target_drtn_hr_cnt, hpd), rem_days: days(t.remain_drtn_hr_cnt, hpd), total_float_days: t.act_end_date ? null : days(t.total_float_hr_cnt, hpd), critical: isCritical(t, ctx), wbs: wbsPath(t.wbs_id), ...(t._msp_uid ? { source_uid: t._msp_uid } : {}) });
+  // days the way edits take them (units.ts): each activity's own calendar with calendarDays, else hpd
+  const dh = dayHours(db, hpd, calendarDays);
+  const brief = (t: Row) => ({ id: t.task_code, name: t.task_name, status: STATUS[statusOf(t)] ?? statusOf(t), type: TYPE[t.task_type] ?? t.task_type, start: d(start(t)) + (t.act_start_date ? ' A' : ''), finish: d(finish(t)) + (t.act_end_date ? ' A' : ''), orig_days: days(t.target_drtn_hr_cnt, dh.task(t)), rem_days: days(t.remain_drtn_hr_cnt, dh.task(t)), total_float_days: t.act_end_date ? null : days(t.total_float_hr_cnt, dh.task(t)), critical: isCritical(t, ctx), wbs: wbsPath(t.wbs_id), ...(t._msp_uid ? { source_uid: t._msp_uid } : {}) });
   // an activity read from Microsoft Project can be named by its task UID: "uid:12"
   const byCode = (code: string) => { const c = String(code), uid = /^uid:\s*(.+)$/i.exec(c)?.[1]; return tasks.find((t) => t.task_code.toLowerCase() === c.toLowerCase()) ?? (uid ? tasks.find((t) => t._msp_uid === uid) : undefined); };
 
@@ -113,6 +117,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         wbs_top_level: top.slice(0, 40).map((w) => `${w.wbs_short_name} ${w.wbs_name}`),
         calendars: rows(db, 'CALENDAR').length, resources: new Set(rows(db, 'TASKRSRC').filter((a) => open.has(a.proj_id)).map((a) => a.rsrc_id)).size,
         hours_per_day_used_for_days: hpd,
+        days_are: calendarDays ? 'working days of each activity\'s own calendar (its hours per day; lags: the relationship-lag calendar); hours_per_day_used_for_days only where a calendar has none' : 'hours_per_day_used_for_days hours each',
       };
     }
     case 'find_activities': {
@@ -146,7 +151,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       if (args.starts_before) list = list.filter((t) => (day(start(t)) ?? Infinity) <= day(args.starts_before)! + 1439);
       if (args.finishes_after) list = list.filter((t) => (day(finish(t)) ?? -Infinity) >= day(args.finishes_after)!);
       if (args.finishes_before) list = list.filter((t) => (day(finish(t)) ?? Infinity) <= day(args.finishes_before)! + 1439);
-      const tf = (t: Row) => (t.total_float_hr_cnt === '' || t.act_end_date ? null : Number(t.total_float_hr_cnt) / hpd);
+      const tf = (t: Row) => (t.total_float_hr_cnt === '' || t.act_end_date ? null : Number(t.total_float_hr_cnt) / dh.task(t));
       if (args.max_total_float_days != null) list = list.filter((t) => tf(t) != null && tf(t)! <= Number(args.max_total_float_days));
       if (args.min_total_float_days != null) list = list.filter((t) => tf(t) != null && tf(t)! >= Number(args.min_total_float_days));
       const key: Record<string, (t: Row) => number | string> = { start: (t) => start(t), finish: (t) => finish(t), total_float: (t) => tf(t) ?? 1e9, duration: (t) => -Number(t.target_drtn_hr_cnt || 0) };
@@ -162,7 +167,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const relFF = relationshipFloat(db, ctx);
       const rel = (r: Row, other: string) => {
         const o = byId.get(other), ff = relFF(r);
-        return { id: o?.task_code ?? other, name: o?.task_name ?? '(outside the open projects)', type: r.pred_type.replace('PR_', ''), lag_days: days(r.lag_hr_cnt, hpd), other_start: d(o ? start(o) : ''), other_finish: d(o ? finish(o) : ''), driving: ff == null ? null : ff === 0, rel_free_float_days: ff == null ? null : Math.round((ff / 60 / hpd) * 100) / 100 };
+        return { id: o?.task_code ?? other, name: o?.task_name ?? '(outside the open projects)', type: r.pred_type.replace('PR_', ''), lag_days: days(r.lag_hr_cnt, dh.rel(r)), other_start: d(o ? start(o) : ''), other_finish: d(o ? finish(o) : ''), driving: ff == null ? null : ff === 0, rel_free_float_days: ff == null ? null : Math.round((ff / 60 / dh.rel(r)) * 100) / 100 };
       };
       const bl = ctx.baseline.get(`${t.task_code}|${t.proj_id}`);
       const cal = rows(db, 'CALENDAR').find((c) => c.clndr_id === t.clndr_id);
@@ -172,7 +177,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       return {
         ...brief(t),
         early_start: d(t.early_start_date), early_finish: d(t.early_end_date), late_start: d(t.late_start_date), late_finish: d(t.late_end_date),
-        actual_start: d(t.act_start_date), actual_finish: d(t.act_end_date), free_float_days: days(t.free_float_hr_cnt, hpd),
+        actual_start: d(t.act_start_date), actual_finish: d(t.act_end_date), free_float_days: days(t.free_float_hr_cnt, dh.task(t)),
         baseline_start: bl ? d(bl.act_start_date || bl.target_start_date) : null, baseline_finish: bl ? d(bl.act_end_date || bl.target_end_date) : null,
         percent_complete: t.phys_complete_pct, duration_type: t.duration_type, calendar: cal?.clndr_name ?? t.clndr_id,
         constraint: t.cstr_type ? `${t.cstr_type} ${d(t.cstr_date)}` : null, constraint2: t.cstr_type2 ? `${t.cstr_type2} ${d(t.cstr_date2)}` : null,
@@ -218,9 +223,9 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const noSucc = live.filter((t) => !(ctx.succsOf.get(t.task_id)?.length));
       const hard = live.filter((t) => /MANDSTART|MANDFIN|CS_MSO$|CS_MEO$/.test(t.cstr_type ?? '') || /MANDSTART|MANDFIN/.test(t.cstr_type2 ?? ''));
       const anyCstr = live.filter((t) => t.cstr_type || t.cstr_type2);
-      const longDur = live.filter((t) => Number(t.remain_drtn_hr_cnt) / hpd > 44);
+      const longDur = live.filter((t) => Number(t.remain_drtn_hr_cnt) / dh.task(t) > 44);
       const neg = live.filter((t) => Number(t.total_float_hr_cnt) < 0);
-      const highTf = live.filter((t) => Number(t.total_float_hr_cnt) / hpd > 44);
+      const highTf = live.filter((t) => Number(t.total_float_hr_cnt) / dh.task(t) > 44);
       const leads = P.filter((r) => Number(r.lag_hr_cnt) < 0), lags = P.filter((r) => Number(r.lag_hr_cnt) > 0);
       const types = P.reduce<Record<string, number>>((a, r) => ((a[r.pred_type] = (a[r.pred_type] ?? 0) + 1), a), {});
       const stale = dd == null ? [] : live.filter((t) => !t.act_start_date && (parseP6Date(t.early_start_date) ?? Infinity) < dd);
@@ -246,7 +251,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       return {
         activity: brief(t),
         levels: [...tr.levels].sort((a, b) => a[0] - b[0]).filter(([l]) => l !== 0).map(([l, ids]) => ({ level: l, direction: l < 0 ? 'predecessors' : 'successors', activities: ids.map((id) => brief(ctx.taskById.get(id)!)), ...(tr.more.get(l) ? { more_not_listed: tr.more.get(l) } : {}) })),
-        links: tr.links.map((x) => ({ pred: code(x.from), succ: code(x.to), type: (x.rel.pred_type || 'PR_FS').slice(3), lag_days: days(x.rel.lag_hr_cnt || '0', hpd), free_float_days: x.ff == null ? null : days(x.ff, hpd), driving: x.ff === 0 })),
+        links: tr.links.map((x) => ({ pred: code(x.from), succ: code(x.to), type: (x.rel.pred_type || 'PR_FS').slice(3), lag_days: days(x.rel.lag_hr_cnt || '0', dh.rel(x.rel)), free_float_days: x.ff == null ? null : days(x.ff, dh.rel(x.rel)), driving: x.ff === 0 })),
       };
     }
     case 'earned_value': {

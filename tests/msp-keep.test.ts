@@ -214,3 +214,32 @@ test('MSPDI: nothing kept points at a deleted task (assignments, unassigned plac
   const preds = [...out.matchAll(/<PredecessorLink><PredecessorUID>([^<]*)<\/PredecessorUID>(?:(?!<\/PredecessorLink>).)*<CrossProject>0</g)].map((m) => m[1]);
   assert.deepEqual(preds.filter((u) => !uids.has(u)), [], 'every link names a task in the file');
 });
+
+test('MSPDI F9: the duration done a Microsoft Project file gave holds while the activity\'s progress is the file\'s; progress set since (edit, desktop, Update Progress) schedules from the data date', async () => {
+  const { scheduleProjects } = await import('../core/schedule/cpm.ts');
+  const { updateProgress } = await import('../core/progress/update.ts');
+  const { setPercent } = await import('../core/project/edit.ts');
+  const { parseP6Date } = await import('../core/dates.ts');
+  const strip = (db: ReturnType<typeof parseMspdi>['db']) => db.tables.TASK.rows.find((t) => t._msp_uid === '140')!;
+  /** Strip out's finish after F9: with Microsoft Project's rule as read (resume), or P6's (the data date). */
+  const f9 = (change: (db: ReturnType<typeof parseMspdi>['db']) => void, resume = true) => {
+    const { db } = parseMspdi(readFileSync(FILE, 'utf8'));
+    change(db);
+    const p = db.tables.PROJECT.rows[0];
+    if (!resume) delete p._msp_resume;
+    assert.equal(scheduleProjects(db, [p.proj_id]).ok, true);
+    return strip(db).early_end_date;
+  };
+  assert.equal(f9(() => {}), '2026-03-06 17:00'); // 20 h done by 2026-03-04 12:00, the other 20 h right after
+  const changes: [string, (db: ReturnType<typeof parseMspdi>['db']) => void][] = [
+    ['MCP update_activity percent_complete', (db) => assert.equal(applyOps(db, [{ op: 'update_activity', id: 'uid:140', percent_complete: 75 }]).ok, true)],
+    ['MCP update_activity remaining_days', (db) => assert.equal(applyOps(db, [{ op: 'update_activity', id: 'uid:140', remaining_days: 1 }], { calendarDays: true }).ok, true)],
+    ['desktop % complete', (db) => setPercent(strip(db), 75)],
+    ['Update Progress', (db) => updateProgress(db, db.tables.PROJECT.rows[0].proj_id, parseP6Date('2026-03-05 17:00')!)],
+  ];
+  // (Update Progress to 2026-03-05 17:00 leaves 8 h, to the planned finish; Project's stale 20 h done would end it 03-05 12:00)
+  for (const [what, change] of changes) assert.equal(f9(change), f9(change, false), `${what}: the data-date rule`);
+  assert.deepEqual(changes.map(([, c]) => f9(c)), ['2026-03-06 10:00', '2026-03-05 17:00', '2026-03-06 10:00', '2026-03-06 17:00']);
+  // the file's progress put back (as undo does): Project's rule again
+  assert.equal(f9((db) => { const t = strip(db), was = { ...t }; setPercent(t, 75); Object.assign(t, was); }), '2026-03-06 17:00');
+});

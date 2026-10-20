@@ -86,6 +86,11 @@ export function isLegacyLayout(db: Db): boolean {
 }
 
 /** Number as P6 writes it: up to 6 decimals, no trailing zeros. */
+/** The progress an activity's duration done (_msp_done, from a Microsoft Project file) was read with: actual dates,
+ *  remaining duration, % complete. Once any of them is set again (desktop edits, Update Progress, timesheets, MCP
+ *  update_activity / update_progress, a spreadsheet import), that value no longer holds and is not used. */
+export const progressKey = (t: Row) => [t.act_start_date, t.act_end_date, t.remain_drtn_hr_cnt, t.phys_complete_pct].map((v) => v ?? '').join('|');
+
 export const p6num = memo((n: number): string => {
   const s = (Math.round(n * 1e6) / 1e6).toFixed(6).replace(/\.?0+$/, '');
   return s === '-0' ? '0' : s;
@@ -335,10 +340,12 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         a.es = a.ef = raw;
         continue;
       }
-      // the duration done: as the file said (a later change of the remaining duration does not undo work done), else
-      // the original less the remaining
-      const done = a.status === 'IP' && a.proj.opts.resumeAfterActuals ? Math.max(0, Math.round((a.row._msp_done ? Number(a.row._msp_done) : (Number(a.row.target_drtn_hr_cnt) || 0) - a.dur / H) * H)) : 0;
-      const floor = a.status === 'NS' ? a.proj.floor : a.status === 'IP' && a.proj.opts.resumeAfterActuals ? a.cal.addWork(a.cal.nextWorkStart(a.as!), done) : a.proj.dd;
+      // Microsoft Project's rule (the remaining work after the actual start plus the duration done): the duration done
+      // as the file said while the activity's progress is the file's (progressKey), else the original less the
+      // remaining. Progress set again since the file (stale _msp_done) is progress as of the data date: P6's rule.
+      const resume = a.status === 'IP' && a.proj.opts.resumeAfterActuals && !(a.row._msp_done && a.row._msp_done_of !== progressKey(a.row));
+      const done = resume ? Math.max(0, Math.round((a.row._msp_done ? Number(a.row._msp_done) : (Number(a.row.target_drtn_hr_cnt) || 0) - a.dur / H) * H)) : 0;
+      const floor = a.status === 'NS' ? a.proj.floor : resume ? a.cal.addWork(a.cal.nextWorkStart(a.as!), done) : a.proj.dd;
       let raw = floor;
       let finDriver: number | null = null; // required finish from an FF/SF link, when it drives
       const applyLogic = a.status === 'NS' || a.proj.opts.logic !== 'override';

@@ -61,7 +61,9 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
   `schedule` leaves Microsoft Project's dates alone while nothing that drives them changed (`kept_msp_dates`), and
   otherwise lists the dates it replaced (`msp_dates_changed`). On a file Microsoft Project scheduled, F9 follows
   Project's rule for started tasks (the remaining work goes on right after the work done, unless the file moves
-  remaining work after the status date), so an untouched chain lands where Project put it; finished tasks keep
+  remaining work after the status date), so an untouched chain lands where Project put it; a started task whose
+  progress was set since (actual dates, remaining duration or % complete, by an edit, Update Progress or a timesheet)
+  goes on from the data date as in P6, since the work done the file gave no longer holds; finished tasks keep
   Project's dates. A file the clone wrote from P6 names the P6 build whose rules made its dates (`P6 Schedule Rules`
   custom field definition, e.g. 6.x milestones one minute into a period) and F9 applies them again. Not kept: whitespace between elements and comments
   outside elements; a recurring exception one of whose days was edited (its other days stay, as day ranges).
@@ -131,6 +133,18 @@ A WBS element can be named `wbs_id:<id>` (the `wbs_id` that `add_wbs` returns an
 `project` can then be left out. Durations, remaining durations and lags are in days of the activity's own calendar (its
 hours per day; lags: the relationship-lag calendar, by default the predecessor's), else `--hours-per-day` (default 8);
 `*_hours` fields take hours. Dates are `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
+
+Every day value the CLI and the MCP server give back uses the same rule (P6's "use assigned calendar to specify the
+number of work hours for each time period"), so 5 days on a 10-hour calendar reads back as 5: per activity's calendar
+are `orig_days`, `rem_days`, `total_float_days`, `free_float_days` (`get_activity`, `find_activities`,
+`critical_path`, `trace_logic`, `schedule_health`), the long-duration and high-float thresholds of `review`, the
+duration and float columns of reports, `print` / `export_pdf` and `export_excel` / `import_excel`, and `compare`'s
+`original_duration`, `remaining_duration` and `total_float`; on the relationship-lag calendar are `lag_days`,
+`rel_free_float_days`, links' `free_float_days`, and the lag / relationship free float columns. `project_summary`
+says so in `days_are`; `hours_per_day_used_for_days` is the hours per day used where a calendar has none, and still
+the one for units per day and `monte_carlo`'s `impact_days`. Hours fields are unchanged. On an 8-hour calendar
+nothing changes. The desktop app keeps P6's default (the setting off): its activity table, the assistant's edits and
+its lookups all count every day at the hours per day of Edit > User Preferences.
 
 | op | Fields |
 |---|---|

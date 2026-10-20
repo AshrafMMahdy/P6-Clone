@@ -168,7 +168,7 @@ async function main(): Promise<number> {
       let ops: unknown;
       try { ops = JSON.parse(src === '-' ? readFileSync(0, 'utf8') : readFileSync(src, 'utf8')); }
       catch (e) { console.error(`--ops is not valid JSON: ${(e as Error).message}`); return 65; }
-      const r = applyOps(db, ops, { hoursPerDay: hpd() });
+      const r = applyOps(db, ops, { hoursPerDay: hpd(), calendarDays: true });
       let sched: { ok: boolean; finish: string | null } | null = null;
       if (r.ok && flag('schedule')) {
         const dd = opt('data-date') ? parseP6Date(opt('data-date')) : null;
@@ -199,7 +199,7 @@ async function main(): Promise<number> {
       if (flag('no-legend')) settings.show_legend = false;
       const { printPages } = await import('../renderer/print/schedule.ts');
       const { pagesToPdf, pagesToHtml } = await import('../renderer/print/output.ts');
-      const r = printPages(db, { projIds: pickProjects(db), setup: settings, filter: opt('filter'), groupBy: opt('group'), sortBy: opt('sort'), prefs: { hoursPerDay: hpd(), dateFormat: 'dd-MMM-yy', showTime: false, durationDecimals: 0 } });
+      const r = printPages(db, { projIds: pickProjects(db), setup: settings, filter: opt('filter'), groupBy: opt('group'), sortBy: opt('sort'), prefs: { hoursPerDay: hpd(), dateFormat: 'dd-MMM-yy', showTime: false, durationDecimals: 0, calendarDays: true } });
       writeFileSync(out, /\.html?$/i.test(out) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title, { font: (cs) => findUnicodeFont(cs, opt('font')) }));
       if (r.unknownColumns.length) console.error(`Unknown column(s) left out: ${r.unknownColumns.join(', ')}`);
       if (flag('json')) console.log(JSON.stringify({ out, pages: r.pages.length, activities: r.activities, unknown_columns: r.unknownColumns }));
@@ -212,7 +212,7 @@ async function main(): Promise<number> {
       if (!out) throw new Error('--out <file.xlsx> required');
       const { writeXlsx } = await import('../core/excel/xlsx.ts');
       const { exportSheets } = await import('../core/excel/p6sheets.ts');
-      writeFileSync(out, await writeXlsx(exportSheets(db, pickProjects(db), hpd())));
+      writeFileSync(out, await writeXlsx(exportSheets(db, pickProjects(db), hpd(), true)));
       console.log(`Wrote ${out}`);
       return 0;
     }
@@ -228,8 +228,8 @@ async function main(): Promise<number> {
       if (!pid) throw new Error(`The file holds several projects; say which with --project (${projs.map((p) => p.proj_short_name).join(', ')}).`);
       let bytes: Uint8Array;
       try { bytes = new Uint8Array(readFileSync(positional[1])); } catch (e) { throw new Error(`Cannot read ${positional[1]}: ${(e as Error).message}`); }
-      const plan = planImport(db, await readXlsx(bytes), pid, hpd());
-      const r = flag('dry-run') || !plan.ops.length ? null : applyOps(db, plan.ops, { hoursPerDay: hpd() });
+      const plan = planImport(db, await readXlsx(bytes), pid, hpd(), true);
+      const r = flag('dry-run') || !plan.ops.length ? null : applyOps(db, plan.ops, { hoursPerDay: hpd(), calendarDays: true });
       if (r?.ok && flag('schedule')) { const res = scheduleProjects(db, projs.map((p) => p.proj_id), {}); if (res.ok) syncAssignmentDates(db); }
       const out = opt('out');
       if (r?.ok && out) writeOut(out, db, opt('version'));
@@ -257,7 +257,7 @@ async function main(): Promise<number> {
       const { reportHtml, reportPages, reportText, reportXlsx } = await import('../renderer/reports/output.ts');
       const { pagesToPdf } = await import('../renderer/print/output.ts');
       const { nowStamp } = await import('../core/report/reports.ts');
-      const prefs = { hoursPerDay: hpd(), dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0 };
+      const prefs = { hoursPerDay: hpd(), dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0, calendarDays: true };
       const ids = pickProjects(db);
       const defSrc = opt('definition');
       let name: string, report;
@@ -297,7 +297,7 @@ async function main(): Promise<number> {
           max_total_float_days: n('max-float'), min_total_float_days: n('min-float'), milestones_only: flag('milestones') || undefined, activity_code: opt('code'), sort: opt('sort'), limit: n('limit'),
         };
       const projIds = opt('project') ? (db.tables.PROJECT?.rows ?? []).filter((p) => p.proj_short_name === opt('project')).map((p) => p.proj_id) : [];
-      const res = runTool(tool, qargs, db, makeCtx(db, { hoursPerDay: hpd() }), projIds, hpd());
+      const res = runTool(tool, qargs, db, makeCtx(db, { hoursPerDay: hpd() }), projIds, hpd(), true);
       console.log(flag('json') ? JSON.stringify(res, null, 2) : queryText(res));
       return (res as { error?: string })?.error ? 66 : 0;
     }
@@ -305,7 +305,7 @@ async function main(): Promise<number> {
       const { db, findings } = load(positional[0]);
       const pre = validateXer(db, findings);
       if (worst(pre) === 'fatal') { printFindings(pre.filter((f) => f.severity === 'fatal')); return 2; }
-      const r = reviewSchedule(db, { hoursPerDay: hpd() });
+      const r = reviewSchedule(db, { hoursPerDay: hpd(), calendarDays: true });
       console.log(flag('json') ? JSON.stringify(r, null, 2) : reviewText(r));
       return r.grade === 'fail' ? 3 : r.grade === 'warn' ? 1 : 0;
     }
@@ -319,7 +319,7 @@ async function main(): Promise<number> {
     case 'compare': {
       const [a, b] = [load(positional[0]), load(positional[1])];
       for (const [f, x] of [[positional[0], a], [positional[1], b]] as const) if (worst(x.findings) === 'fatal') { console.error(`${f}:`); printFindings(x.findings.filter((y) => y.severity === 'fatal')); return 2; }
-      const cs = compareSchedules(a.db, b.db, hpd());
+      const cs = compareSchedules(a.db, b.db, hpd(), true);
       console.log(flag('json') ? JSON.stringify(cs, null, 2) : `Compare ${positional[0]} -> ${positional[1]}\n${compareText(cs)}`);
       return cs.length ? 1 : 0;
     }

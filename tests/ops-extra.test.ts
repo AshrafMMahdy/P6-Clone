@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyOps } from '../core/project/ops.ts';
+import { applyOps, type OpsOptions } from '../core/project/ops.ts';
 import { rows, type Db } from '../core/db.ts';
 import { runTool } from '../core/query/tools.ts';
 import { makeCtx } from '../core/project/ctx.ts';
@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SAMPLES_DIR } from './helpers.ts';
 
-const ok = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); return r.results; };
+const ok = (db: Db, ops: unknown[], o: OpsOptions = {}) => { const r = applyOps(db, ops, o); assert.ok(r.ok, JSON.stringify(r.error)); return r.results; };
 const bad = (db: Db, ops: unknown[], re: RegExp) => { const r = applyOps(db, ops); assert.equal(r.ok, false); assert.match(r.error!.message, re); };
 
 function base(): Db {
@@ -258,22 +258,26 @@ test('ops: WBS elements addressed by wbs_id (returned by add_wbs); siblings with
   assert.ok(list.wbs.some((w) => w.code === 'B.L1' && w.wbs_id === y.wbs_id));
 });
 
-test('ops: days are hours of the activity\'s own calendar (lags: the predecessor\'s); max_units_per_hour', () => {
+test('ops: days are hours of the activity\'s own calendar (lags: the predecessor\'s) with calendarDays; max_units_per_hour', () => {
   const db = base();
+  const cal = { calendarDays: true }; // the MCP server and the CLI
   ok(db, [{ op: 'add_calendar', name: 'Ten', work_week: { mon: [['07:00', '17:00']], tue: [['07:00', '17:00']], wed: [['07:00', '17:00']], thu: [['07:00', '17:00']], fri: [['07:00', '17:00']] } },
     { op: 'add_activity', id: 'T10', name: 'Ten-hour', calendar: 'Ten', duration_days: 2 },
     { op: 'add_relationship', pred: 'T10', succ: 'T1', lag_days: 1 },
-    { op: 'add_resource', id: 'CR', max_units_per_hour: 0.5 }]);
+    { op: 'add_resource', id: 'CR', max_units_per_hour: 0.5 }], cal);
   const t = (c: string) => rows(db, 'TASK').find((r) => r.task_code === c)!;
   assert.equal(t('T10').target_drtn_hr_cnt, '20');
   assert.equal(rows(db, 'TASKPRED')[0].lag_hr_cnt, '10');
-  ok(db, [{ op: 'update_activity', id: 'T1', calendar: 'Ten', duration_days: 3, }, { op: 'update_activity', id: 'T10', remaining_days: 1 }]);
+  ok(db, [{ op: 'update_activity', id: 'T1', calendar: 'Ten', duration_days: 3, }, { op: 'update_activity', id: 'T10', remaining_days: 1 }], cal);
   assert.deepEqual([t('T1').target_drtn_hr_cnt, t('T10').remain_drtn_hr_cnt], ['30', '10']);
-  ok(db, [{ op: 'set_estimates', activity: 'T10', min_days: 1, max_days: 3 }]);
+  ok(db, [{ op: 'set_estimates', activity: 'T10', min_days: 1, max_days: 3 }], cal);
   assert.deepEqual([getEstimates(db).get(t('T10').task_id)!.min, getEstimates(db).get(t('T10').task_id)!.max], [10, 30]);
   // an 8-hour calendar is unchanged
-  ok(db, [{ op: 'add_activity', id: 'T8', name: 'Eight', duration_days: 2 }]);
+  ok(db, [{ op: 'add_activity', id: 'T8', name: 'Eight', duration_days: 2 }], cal);
   assert.equal(t('T8').target_drtn_hr_cnt, '16');
+  // without it (the desktop app): every day at the fixed hours per day, the 10-hour calendar too
+  ok(db, [{ op: 'update_activity', id: 'T10', remaining_days: 1 }, { op: 'add_activity', id: 'U10', name: 'Ten, desktop', calendar: 'Ten', duration_days: 2 }]);
+  assert.deepEqual([t('T10').remain_drtn_hr_cnt, t('U10').target_drtn_hr_cnt], ['8', '16']);
   const cr = rows(db, 'RSRC').find((r) => r.rsrc_short_name === 'CR')!;
   assert.equal(rows(db, 'RSRCRATE').find((r) => r.rsrc_id === cr.rsrc_id)!.max_qty_per_hr, '0.5');
 });

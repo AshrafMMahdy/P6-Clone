@@ -46,7 +46,7 @@ import {
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
-const prefsOf = (s: Session) => ({ hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0 });
+const prefsOf = (s: Session) => ({ hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0, calendarDays: true });
 
 // ---------------------------------------------------------------- tool list
 const handleProp = { handle: { type: 'string', description: 'The handle returned by open_file or new_project' } };
@@ -88,7 +88,7 @@ const TOOLS = [
 
 // ---------------------------------------------------------------- helpers
 const allIds = (db: Db) => (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_id);
-const summary = (s: Session) => runTool('project_summary', {}, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd);
+const summary = (s: Session) => runTool('project_summary', {}, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
 const brief = (f: Finding[]) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + 1), a), {}), findings: f.filter((x) => x.severity !== 'info').slice(0, 40).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })) });
 const dd = (v: unknown) => { if (v == null || v === '') return null; const t = parseP6Date(String(v)); if (t == null) fail('bad_input', `"${v}" is not a date.`, 'Use YYYY-MM-DD or YYYY-MM-DD HH:MM.'); return t; };
 const projectIds = (db: Db, id: unknown) => {
@@ -184,7 +184,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   switch (name) {
     case 'edit': {
       let r!: ReturnType<typeof applyOps>;
-      try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd }); if (!r.ok) throw new Error('refused'); }); }
+      try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true }); if (!r.ok) throw new Error('refused'); }); }
       catch (e) { if (r && !r.ok) return { ok: false, error: { code: 'op_failed', ...r.error, hint: 'Fix that operation (the message says what is wrong) and send the list again; nothing was changed.' } }; throw e; }
       s.history[s.history.length - 1].label = `Edit (${r.applied} operation${r.applied === 1 ? '' : 's'})`;
       return r;
@@ -255,7 +255,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       finally { if (j) rollback(j); }
     }
     case 'validate': return brief(importChecks(s.db, [], s.format));
-    case 'review': return reviewSchedule(s.db, { hoursPerDay: s.hpd });
+    case 'review': return reviewSchedule(s.db, { hoursPerDay: s.hpd, calendarDays: true });
     case 'undo': {
       if (a.any_caller) requireOwner(s, a.owner_key ?? fail('owner_key_required', 'any_caller undo needs the owner key.', 'Pass owner_key, or undo only your own changes.'), 'Undoing other callers\' changes');
       const r = undo(s, ctx.caller, !!a.any_caller);
@@ -293,7 +293,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       writeOut(path, /\.html?$/i.test(path) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) }));
       return { saved: path, pages: r.pages.length, activities: r.activities, ...(r.unknownColumns.length ? { unknown_columns: r.unknownColumns, printable_columns: printableColumns(s.db).map((c) => c.id) } : {}) };
     }
-    case 'export_excel': { const path = pathArg(a.path, 'path', 'write'); writeOut(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd))); return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] }; }
+    case 'export_excel': { const path = pathArg(a.path, 'path', 'write'); writeOut(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd, true))); return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] }; }
     case 'import_excel': {
       const path = pathArg(a.path);
       const ids = projectIds(s.db, a.project);
@@ -301,13 +301,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const pid = s.db.tables.PROJECT.rows.find((p) => p.proj_id === ids[0])!.proj_short_name;
       let sheets;
       try { sheets = await readXlsx(readBytes(path)); } catch (e) { if (e instanceof ToolError) throw e; fail('bad_file', (e as Error).message, 'Use an .xlsx saved by export_excel or Excel in that layout.'); }
-      const plan = planImport(s.db, sheets!, pid, s.hpd);
+      const plan = planImport(s.db, sheets!, pid, s.hpd, true);
       if (a.dry_run || !plan.ops.length) return { applied: false, ...(plan.ops.length ? {} : { note: 'Nothing to change.' }), summary: plan.summary, warnings: plan.warnings, operations: plan.ops.slice(0, 200) };
       return run('edit', { ...a, operations: plan.ops }, ctx).then((r) => ((r as { ok?: boolean }).ok === false ? r : { applied: true, summary: plan.summary, warnings: [...plan.warnings, ...((r as { warnings?: string[] }).warnings ?? [])], note: 'Undo with undo. Run schedule to recalculate dates.' }));
     }
     case 'compare': {
       const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
-      const cs = compareSchedules(s.db, other, s.hpd);
+      const cs = compareSchedules(s.db, other, s.hpd, true);
       const count = (o: string, k: string) => cs.filter((c) => c.object === o && c.kind === k).length;
       const max = Math.min(5000, Number(a.max_changes) || 500);
       return { summary: Object.fromEntries(['project', 'wbs', 'activity', 'relationship'].map((o) => [o, { added: count(o, 'added'), deleted: count(o, 'deleted'), changed: new Set(cs.filter((c) => c.object === o && c.kind === 'changed').map((c) => c.id)).size }])), changes: cs.slice(0, max), truncated: cs.length > max };
@@ -341,7 +341,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   }
   if (LOOKUPS.some((t) => t.name === name)) {
     const { handle: _h, caller: _c, async: _a, ...args } = a;
-    return runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd);
+    return runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
   }
   return fail('unknown_tool', `Unknown tool ${name}.`, 'tools/list shows the tools.');
 }
