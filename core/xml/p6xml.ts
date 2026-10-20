@@ -131,7 +131,9 @@ const PCODETYPE_MAP: FieldMap = [['ObjectId', 'proj_catg_type_id'], ['Name', 'pr
 const PCODE_MAP: FieldMap = [['ObjectId', 'proj_catg_id'], ['CodeTypeObjectId', 'proj_catg_type_id'], ['ParentObjectId', 'parent_proj_catg_id'], ['CodeValue', 'proj_catg_short_name'], ['Description', 'proj_catg_name'], ['SequenceNumber', 'seq_num', 'num']];
 const RCODETYPE_MAP: FieldMap = [['ObjectId', 'rsrc_catg_type_id'], ['Name', 'rsrc_catg_type'], ['SequenceNumber', 'seq_num', 'num'], ['Length', 'rsrc_catg_short_len', 'num']];
 const RCODE_MAP: FieldMap = [['ObjectId', 'rsrc_catg_id'], ['CodeTypeObjectId', 'rsrc_catg_type_id'], ['ParentObjectId', 'parent_rsrc_catg_id'], ['CodeValue', 'rsrc_catg_short_name'], ['Description', 'rsrc_catg_name'], ['SequenceNumber', 'seq_num', 'num']];
-const TOPIC_MAP: FieldMap = [['ObjectId', 'memo_type_id'], ['Name', 'memo_type'], ['AvailableForActivity', 'task_flag', 'bool']];
+const TOPIC_MAP: FieldMap = [['ObjectId', 'memo_type_id'], ['Name', 'memo_type'], ['AvailableForActivity', 'task_flag', 'bool'], ['AvailableForEPS', 'eps_flag', 'bool'], ['AvailableForProject', 'proj_flag', 'bool'], ['AvailableForWBS', 'wbs_flag', 'bool'], ['SequenceNumber', 'seq_num', 'num']];
+/** a WBS's or (on the root WBS node, the project's WBSObjectId) the project's notebook */
+const WBSMEMO_MAP: FieldMap = [['ObjectId', 'wbs_memo_id'], ['ProjectObjectId', 'proj_id'], ['WBSObjectId', 'wbs_id'], ['NotebookTopicObjectId', 'memo_type_id'], ['Note', 'wbs_memo']];
 
 const xmlDate = (s: string) => { const t = parseP6Date(s); return t == null ? '' : formatP6Date(t).replace(' ', 'T') + ':00'; };
 const xerDate = (s: string) => { const t = parseP6Date(s.replace('T', ' ').slice(0, 16)); return t == null ? '' : formatP6Date(t); };
@@ -297,6 +299,7 @@ export function writeP6Xml(db: Db, opts: { projIds?: string[]; version?: string 
     for (const r of get('TASKMEMO').filter((t) => t.proj_id === pid)) el('ActivityNote', r, MEMO_MAP);
     for (const r of get('TASKPROC').filter((t) => t.proj_id === pid)) // step % complete as a fraction, like activity percentages
       el('ActivityStep', r, STEP_MAP, r.complete_pct ? `<PercentComplete>${Number(r.complete_pct) / 100}</PercentComplete>` : '');
+    for (const r of get('WBSMEMO').filter((t) => t.proj_id === pid)) el('ProjectNote', r, WBSMEMO_MAP);
     out.push(`</${tag}>`);
   };
   for (const p of get('PROJECT')) projectXml('Project', p, get);
@@ -334,7 +337,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     else if (n.name === 'Calendar') push('CALENDAR', calendarRow(n));
   }
   const projMap: [string, string, FieldMap][] = [['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Relationship', 'TASKPRED', REL_MAP], ['ResourceAssignment', 'TASKRSRC', ASSIGN_MAP],
-    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP]];
+    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
   const baselineOf = new Map<string, string>(kids(api, 'Project').map((p): [string, string] => [val(p, 'CurrentBaselineProjectObjectId'), val(p, 'ObjectId')]).filter(([b]) => !!b));
   for (const p of [...kids(api, 'Project'), ...kids(api, 'BaselineProject')]) {
     const pr = fromXml(p, PROJECT_MAP);
@@ -360,7 +363,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
         continue;
       }
       const m = projMap.find(([tag]) => tag === n.name);
-      if (m) { const r = fromXml(n, m[2]); if (m[1] === 'TASKPROC') { const pc = val(n, 'PercentComplete'); if (pc) r.complete_pct = String(Number(pc) > 1 ? Number(pc) : Math.round(Number(pc) * 1e6) / 1e4); } if (m[1] !== 'ACTVCODE') r.proj_id ||= pid; if (m[1] === 'TASKPRED') { r.pred_proj_id ||= pid; } if (m[1] === 'ACTVTYPE') r.proj_id ||= pid; push(m[1], r); }
+      if (m) { const r = fromXml(n, m[2]); if (m[1] === 'TASKPROC') { const pc = val(n, 'PercentComplete'); if (pc) r.complete_pct = String(Number(pc) > 1 ? Number(pc) : Math.round(Number(pc) * 1e6) / 1e4); } if (m[1] !== 'ACTVCODE') r.proj_id ||= pid; if (m[1] === 'TASKPRED') { r.pred_proj_id ||= pid; } if (m[1] === 'ACTVTYPE') r.proj_id ||= pid; if (m[1] === 'WBSMEMO') r.wbs_id ||= rootId; push(m[1], r); }
     }
   }
   // P6 writes percentages as fractions; files from earlier P6 Clone builds wrote 0-100 (told apart by any value over 1)

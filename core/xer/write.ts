@@ -1,5 +1,5 @@
 import { KEYS, refTarget, type Db, type Row } from '../db.ts';
-import { chooseEncoding, encodeText, type TextEncodingName } from '../encoding.ts';
+import { encodeText, encodingLabel, keepOrChoose, type TextEncodingName } from '../encoding.ts';
 import { formatDay } from '../dates.ts';
 import { fieldsFor, variantsFor, tableOrderFor, knownFields, verification } from './schema.ts';
 
@@ -16,6 +16,9 @@ export interface WriteOptions {
   /** Output text encoding. Default: the code page P6 would use for this text (Windows-1252, or e.g. Windows-1256
    *  when there is Arabic), UTF-8 only when no single code page can hold it. */
   encoding?: TextEncodingName | 'auto';
+  /** Without an encoding: the one the file was read in, kept while the text fits it (a note in report when not). */
+  readAs?: TextEncodingName;
+  report?: string[];
 }
 
 /** Child tables kept whenever their parent row is kept. */
@@ -126,7 +129,8 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
   } } };
   lines.push([
     'ERMHDR', opts.version, opts.exportDate ?? formatDay(Date.now() / 60000), 'Project',
-    opts.user ?? 'admin', opts.userName ?? 'admin', opts.dbName ?? 'dbxDatabaseNoName', 'Project Management', cur,
+    // the user and database a file read in was exported from stay as they were (only the export date is new)
+    opts.user ?? (db.header?.raw?.[4] || 'admin'), opts.userName ?? (db.header?.raw?.[5] || 'admin'), opts.dbName ?? (db.header?.raw?.[6] || 'dbxDatabaseNoName'), 'Project Management', cur,
   ].join('\t'));
   // EPS lives in P6's database, never in an XER (P6 asks for it on import and its exports carry no EPS table); the clone
   // keeps its EPS nodes for P6 XML and the portfolio, and writing them here gave every saved XER an unknown table.
@@ -150,7 +154,8 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
   }
   lines.push('%E');
   if (part.length) chunks.push(part.join('\r\n') + '\r\n');
-  const enc = !opts.encoding || opts.encoding === 'auto' ? chooseEncoding([...chars].join('')) : opts.encoding;
+  const enc = !opts.encoding || opts.encoding === 'auto' ? keepOrChoose([...chars].join(''), opts.readAs) : opts.encoding;
+  if (opts.readAs && enc !== opts.encoding && enc !== opts.readAs) opts.report?.push(`Read as ${encodingLabel(opts.readAs)}, but the text no longer fits it: written as ${encodingLabel(enc)}.`);
   const bytes = chunks.map((c, i) => { chunks[i] = ''; return encodeText(c, i && enc === 'utf-8-bom' ? 'utf-8' : enc); });
   const out = new Uint8Array(bytes.reduce((n, b) => n + b.length, 0));
   let at = 0;

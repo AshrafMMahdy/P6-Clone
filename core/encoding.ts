@@ -144,6 +144,10 @@ export function chooseEncoding(s: string): TextEncodingName {
   return 'utf-8';
 }
 
+/** The encoding a file is written in when none is asked for: the one it was read in (BOM kept as read) while the
+ *  text still fits it, else the code page P6 would use (chooseEncoding). */
+export const keepOrChoose = (s: string, readAs?: TextEncodingName): TextEncodingName => (readAs && fits(s, readAs) ? readAs : chooseEncoding(s));
+
 export function encodeText(s: string, enc: TextEncodingName): Uint8Array {
   if (enc === 'utf-8') return new TextEncoder().encode(s);
   if (enc === 'utf-8-bom') { const b = new TextEncoder().encode(s); const o = new Uint8Array(b.length + 3); o.set([0xef, 0xbb, 0xbf]); o.set(b, 3); return o; }

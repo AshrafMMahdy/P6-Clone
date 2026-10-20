@@ -19,6 +19,7 @@ import { ABSENT, record, rollback, type Journal } from '../core/journal.ts';
 import { dbLines, DbReader } from '../core/db-file.ts';
 import type { Db } from '../core/db.ts';
 import type { Format } from '../renderer/io.ts';
+import type { TextEncodingName } from '../core/encoding.ts';
 
 // ---------------------------------------------------------------- errors with a way forward
 export class ToolError extends Error {
@@ -91,10 +92,12 @@ export const recoveryDir = () => join(config.root ?? tmpdir(), '.p6clone-recover
 export interface Change { id: number; label: string; caller: string; j: Journal; after: Map<unknown[], unknown[]>; at: number }
 export interface Session {
   handle: string; ownerKey: string; db: Db; path: string | null; format: Format; hpd: number;
+  /** the text encoding its XER / MPX file was read in (BOM as read): what save writes when no encoding is given */
+  encoding?: TextEncodingName;
   history: Change[]; redo: Map<string, { change: Change; mark: number }[]>; dirty: boolean;
   lastUsed: number; bytes: number; notice?: string;
 }
-interface Evicted { file: string; ownerKey: string; path: string | null; format: Format; hpd: number; at: number; reason: string; dirty: boolean }
+interface Evicted { file: string; ownerKey: string; path: string | null; format: Format; hpd: number; encoding?: TextEncodingName; at: number; reason: string; dirty: boolean }
 export const sessions = new Map<string, Session>();
 const evicted = new Map<string, Evicted>();
 let changeSeq = 0;
@@ -126,7 +129,7 @@ export function evict(s: Session, reason: string): string {
   // line by line: a big project's file is larger than the longest possible string
   const fd = openSync(file, 'w');
   try { for (const l of dbLines(s.db, null)) writeSync(fd, l + '\n'); } finally { closeSync(fd); }
-  evicted.set(s.handle, { file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, at: Date.now(), reason, dirty: s.dirty });
+  evicted.set(s.handle, { file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, encoding: s.encoding, at: Date.now(), reason, dirty: s.dirty });
   sessions.delete(s.handle);
   saveIndex();
   return file;
@@ -160,7 +163,7 @@ export function getSession(h: unknown): Session {
   const bytes = Math.round(statSync(e!.file).size * 1.5) + 8 * 1048576;
   admit(bytes, handle);
   const { db } = readDbFile(e!.file);
-  const back: Session = { handle, ownerKey: e!.ownerKey, db, path: e!.path, format: e!.format, hpd: e!.hpd, history: [], redo: new Map(), dirty: e!.dirty, lastUsed: Date.now(), bytes,
+  const back: Session = { handle, ownerKey: e!.ownerKey, db, path: e!.path, format: e!.format, hpd: e!.hpd, encoding: e!.encoding, history: [], redo: new Map(), dirty: e!.dirty, lastUsed: Date.now(), bytes,
     notice: `This project had been moved out of memory (${e!.reason === 'idle' ? `idle for ${config.idleMinutes} minutes` : 'to make room'}) and was restored from ${e!.file}. Its undo history before that is gone; nothing else was lost.` };
   sessions.set(handle, back);
   evicted.delete(handle); saveIndex();
@@ -168,8 +171,8 @@ export function getSession(h: unknown): Session {
   return back;
 }
 /** Projects moved out with unsaved changes, read back from their recovery files (for the save at exit). */
-export function* unsavedEvicted(): Generator<{ handle: string; path: string | null; hpd: number; db: Db }> {
-  for (const [handle, e] of evicted) if (e.dirty && existsSync(e.file)) yield { handle, path: e.path, hpd: e.hpd, db: readDbFile(e.file).db };
+export function* unsavedEvicted(): Generator<{ handle: string; path: string | null; hpd: number; encoding?: TextEncodingName; db: Db }> {
+  for (const [handle, e] of evicted) if (e.dirty && existsSync(e.file)) yield { handle, path: e.path, hpd: e.hpd, encoding: e.encoding, db: readDbFile(e.file).db };
 }
 export const isDirty = (h: string) => sessions.get(h)?.dirty ?? evicted.get(h)?.dirty ?? false;
 export function closeSession(s: Session): void { sessions.delete(s.handle); evicted.delete(s.handle); }

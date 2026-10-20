@@ -44,7 +44,7 @@ export const EXTRA_GUIDE = [
   `assign_code: type, value ("" removes), and activity (+[project]) | project | resource, [subject] (default from the target)`,
   `add_udf: name, [subject] (activity default, wbs, project, resource, assignment), [data_type] (text default, number, integer, cost, start_date, finish_date)`,
   `set_udf: udf, value (null or "" removes), and activity (+[project]) | wbs (+[project]) | project | resource`,
-  `set_notebook: activity, text ("" removes), [topic] (default "Notes"; created when missing), [project]`,
+  `set_notebook: [activity] | project, topic, text (text "" removes the topic; answer removed: true/false; the topic itself stays). activity (+[project]): its activity notebook; project alone: the project's notebook (P6's WBSMEMO on the project's root WBS node). topic default "Notes", created when missing, else reused`,
   `add_cost_account: id, [name], [parent]`,
   `add_expense: activity, name, [account], [budgeted_cost], [actual_cost], [remaining_cost] (default budgeted - actual), [units], [price_per_unit], [vendor], [po_number], [description], [project]`,
   `update_expense: activity, name, then any add_expense field plus [new_name]; delete_expense: activity, name`,
@@ -282,13 +282,30 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       return { udf: name, value: op.value };
     }
     case 'set_notebook': {
-      const t = h.activity(op.activity, op.project);
       const topic = typeof op.topic === 'string' && op.topic.trim() ? op.topic.trim() : 'Notes';
       const MT = ensure(db, 'MEMOTYPE', ['memo_type_id', 'seq_num', 'eps_flag', 'proj_flag', 'wbs_flag', 'task_flag', 'memo_type']);
+      // one topic per name: an existing one (any case) is reused and made available where it is now used
       let mt = MT.rows.find((m) => lc(m.memo_type) === lc(topic));
-      const TM = ensure(db, 'TASKMEMO', ['memo_id', 'task_id', 'memo_type_id', 'proj_id', 'task_memo']);
       const text = typeof op.text === 'string' ? op.text : op.text == null ? '' : fail('"text" must be text.');
-      if (!text) { if (mt) { const id = mt.memo_type_id, tid = t.task_id; removeWhere(TM.rows, (m) => m.task_id === tid && m.memo_type_id === id); } return { cleared: topic }; }
+      if (op.activity == null || op.activity === '') {
+        // the project's notebook, as P6 keeps it: a WBSMEMO on the project's root WBS node, under a topic for projects / WBS
+        const p = h.project(op.project);
+        const root = rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y') ?? fail(`Project ${p.proj_short_name} has no root WBS node to hold its notebook.`);
+        const WM = ensure(db, 'WBSMEMO', ['wbs_memo_id', 'proj_id', 'memo_type_id', 'wbs_id', 'wbs_memo']);
+        const wid = root.wbs_id;
+        // "" removes that topic's memo, if there is one; the topic (MEMOTYPE) stays, memos or not
+        if (!text) { const id = mt?.memo_type_id; const n = mt ? removeWhere(WM.rows, (m) => m.wbs_id === wid && m.memo_type_id === id) : 0; return { cleared: topic, project: p.proj_short_name, removed: n > 0 }; }
+        if (!mt) { mt = { memo_type_id: String(nextId(db, 'MEMOTYPE')), seq_num: String(MT.rows.length), eps_flag: 'N', proj_flag: 'Y', wbs_flag: 'Y', task_flag: 'N', memo_type: topic }; MT.rows.push(mt); }
+        else { if (mt.proj_flag !== 'Y') mt.proj_flag = 'Y'; if (mt.wbs_flag !== 'Y') mt.wbs_flag = 'Y'; }
+        const mid = mt.memo_type_id;
+        const cur = pick(WM.rows, (m) => m.wbs_id === wid && m.memo_type_id === mid, 1)[0];
+        if (cur) cur.wbs_memo = memoHtml(text);
+        else WM.rows.push({ wbs_memo_id: String(nextId(db, 'WBSMEMO')), proj_id: p.proj_id, memo_type_id: mid, wbs_id: wid, wbs_memo: memoHtml(text) });
+        return { notebook: `${p.proj_short_name} / ${topic}`, project: p.proj_short_name };
+      }
+      const t = h.activity(op.activity, op.project);
+      const TM = ensure(db, 'TASKMEMO', ['memo_id', 'task_id', 'memo_type_id', 'proj_id', 'task_memo']);
+      if (!text) { const id = mt?.memo_type_id, tid = t.task_id; const n = mt ? removeWhere(TM.rows, (m) => m.task_id === tid && m.memo_type_id === id) : 0; return { cleared: topic, removed: n > 0 }; }
       if (!mt) { mt = { memo_type_id: String(nextId(db, 'MEMOTYPE')), seq_num: String(MT.rows.length), eps_flag: 'N', proj_flag: 'N', wbs_flag: 'N', task_flag: 'Y', memo_type: topic }; MT.rows.push(mt); }
       else if (mt.task_flag !== 'Y') mt.task_flag = 'Y';
       const tid = t.task_id, mid = mt.memo_type_id;

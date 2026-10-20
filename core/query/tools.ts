@@ -106,8 +106,12 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const projs = [...open].map((id) => ctx.proj.get(id)).filter((p): p is Row => !!p);
       const count = (s: string) => tasks.filter((t) => statusOf(t) === s).length;
       const top = rows(db, 'PROJWBS').filter((w) => open.has(w.proj_id) && wbsById.get(w.parent_wbs_id)?.proj_node_flag === 'Y');
+      // the project's notebook (set_notebook with project alone): WBSMEMO rows on the root WBS node, by topic
+      const topics = new Map(rows(db, 'MEMOTYPE').map((m) => [m.memo_type_id, m.memo_type]));
+      const plain = (h: string) => (h ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').trim().slice(0, 2000);
+      const notebook = (p: Row) => { const root = rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y'); return root ? rows(db, 'WBSMEMO').filter((m) => m.wbs_id === root.wbs_id).map((m) => ({ topic: topics.get(m.memo_type_id) ?? '', text: plain(m.wbs_memo) })) : []; };
       return {
-        projects: projs.map((p) => ({ id: p.proj_short_name, name: projectName(db, p), data_date: d(p.last_recalc_date), planned_start: d(p.plan_start_date), must_finish_by: d(p.plan_end_date), scheduled_finish: d(p.scd_end_date) })),
+        projects: projs.map((p) => { const nb = notebook(p); return { id: p.proj_short_name, name: projectName(db, p), data_date: d(p.last_recalc_date), planned_start: d(p.plan_start_date), must_finish_by: d(p.plan_end_date), scheduled_finish: d(p.scd_end_date), ...(nb.length ? { notebook: nb } : {}) }; }),
         activities: tasks.length, not_started: count('TK_NotStart'), in_progress: count('TK_Active'), completed: count('TK_Complete'),
         critical: tasks.filter((t) => !t.act_end_date && isCritical(t, ctx)).length,
         negative_float: tasks.filter((t) => !t.act_end_date && Number(t.total_float_hr_cnt) < 0).length,
