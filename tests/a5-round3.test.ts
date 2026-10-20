@@ -1,7 +1,7 @@
 // whiq-v0.1.15: the blended ratio sampler draws as the platform's forecast does (its sampleRatio, ported here as the
 // oracle), each MCP server keeps its own recovery folder, and Microsoft Project imports from before v0.1.14 keep one
 // relationship per pair.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
@@ -70,8 +70,11 @@ test('ratio_empirical draws as the platform\'s sampleRatio, milestones included:
   }
 });
 
+const spawned: ReturnType<typeof spawn>[] = [];
+after(() => { for (const p of spawned) if (p.exitCode == null) p.kill('SIGKILL'); }); // a failed test leaves none running
 function server(env: Record<string, string>, cwd: string) {
   const p = spawn(process.execPath, [join(import.meta.dirname, '..', 'mcp', 'server.ts')], { stdio: ['pipe', 'pipe', 'pipe'], cwd, env: { ...process.env, ...env } });
+  spawned.push(p);
   let buf = '', id = 0, err = '';
   const waiting = new Map<number, (m: any) => void>();
   p.stdout.setEncoding('utf8'); p.stderr.setEncoding('utf8');
@@ -132,11 +135,11 @@ test('after a crash (SIGKILL) a new server brings the handles back from the dead
   const s2 = server(w.env(), w.at('a'));
   assert.equal((await s2.tool('get_activity', { handle: x.handle, activity_id: 'C1' })).name, 'before the crash');
   assert.match(s2.stderr(), /1 project\(s\) from a server that is no longer running/);
-  // the dead folder was moved aside, whole
+  // the dead folder was moved aside, and the restored project's file moved on into the new server's folder (not deleted)
   const aside = files(join(w.rec, 'adopted'));
   assert.equal(aside.length, 1);
   assert.ok(aside[0].startsWith(dead[0]));
-  assert.ok(files(join(w.rec, 'adopted', aside[0])).includes(`${x.handle}.p6db.jsonl`));
+  assert.ok(files(w.rec).filter((n) => n !== 'adopted' && n !== dead[0]).some((n) => files(join(w.rec, n)).includes(`${x.handle}.p6db.jsonl`)));
   s2.p.kill('SIGKILL'); await s2.exited;
 });
 
@@ -175,9 +178,12 @@ test('a dead owner\'s folder, and the shared index of servers before v0.1.15, ar
     const wins = [await got(A, h), await got(B, h)];
     assert.equal(wins.filter(Boolean).length, 1, `${h}: ${wins}`);
   }
-  assert.ok(existsSync(f2), 'the legacy file stays where it was');
-  assert.ok(!existsSync(f1) && files(join(w.rec, 'adopted')).some((n) => n.startsWith(`${pid}-0123456789ab-by-`)), 'the dead folder moved aside');
-  assert.ok(files(join(w.rec, 'adopted')).some((n) => n.startsWith('index-before-v0.1.15-by-')));
+  // the legacy file, restored, moved into the winner's folder (moved, never deleted)
+  assert.ok(!existsSync(f2) && files(w.rec).filter((n) => n !== 'adopted').some((n) => files(join(w.rec, n)).includes('h_legacy.p6db.jsonl')));
+  // the dead folder was taken (moved aside, and gone once its one project was restored); that project moved, whole
+  assert.ok(!existsSync(f1), 'the dead folder moved aside');
+  assert.ok(files(w.rec).filter((n) => n !== 'adopted').some((n) => files(join(w.rec, n)).includes('h_dead.p6db.jsonl')));
+  assert.ok(!existsSync(join(w.rec, 'index.json')), 'the old shared index was taken');
   A.p.kill('SIGKILL'); B.p.kill('SIGKILL'); await A.exited; await B.exited;
 });
 

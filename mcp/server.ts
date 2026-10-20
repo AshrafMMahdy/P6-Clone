@@ -48,7 +48,7 @@ import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler }
 import { dayHours } from '../core/project/units.ts';
 import {
   ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
-  exclusive, change, dropLast, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, type Session,
+  exclusive, change, dropLast, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, type Session,
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
@@ -159,7 +159,7 @@ const MUTATES = new Set(TOOLS.filter((t) => !t.annotations.readOnlyHint && !['li
 async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unknown> {
   switch (name) {
     case 'list_open': return { open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, projects: allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), unsaved_changes: s.dirty, changes: s.history.length })), moved_out: evictedList() };
-    case 'server_status': return { version: VERSION, ...status() };
+    case 'server_status': return { version: VERSION, ...status(), recovery: recoveryStatus() };
     case 'job_status': {
       const job = getJob(a.job_id);
       const wait = Math.min(20, Math.max(0, Number(a.wait_seconds) || 0)) * 1000;
@@ -354,7 +354,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       else return fail('bad_input', `Unknown format "${a.format}".`, 'Use xer, p6xml, mspdi or mpx.');
       await checkpoint(ctx); // nothing is written once the call is cancelled; the write itself is one step
       writeOut(path, bytes);
-      if (!projIds || allIds(s.db).length === 1) s.dirty = false;
+      if (!projIds || allIds(s.db).length === 1) { s.dirty = false; s.savedTo = path; }
       if ((fmt === 'mspdi' || fmt === 'mpx') && (s.db.tables.WBSMEMO?.rows.length || s.db.tables.TASKMEMO?.rows.length)) notes.push('Notebooks (project, WBS and activity) are not written to Microsoft Project files; save as XER or P6 XML to keep them.');
       return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }

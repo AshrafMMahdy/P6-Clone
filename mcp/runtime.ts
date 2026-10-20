@@ -10,7 +10,8 @@
 //  - With a root folder, every path is confined to it (symlinks resolved); --automation-read-root / --automation-write-root
 //    fence reads (read or write root) and writes (write root) separately, like the craft forks.
 //  - Every failure is a ToolError with a code and a next step.
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -101,11 +102,33 @@ const TOKEN = randomBytes(6).toString('hex');
 const OWNER = `${process.pid}-${TOKEN}`;
 const recoveryBase = () => join(config.root ?? tmpdir(), '.p6clone-recovery');
 export const recoveryDir = () => join(recoveryBase(), OWNER);
-/** A process's start time as the OS keeps it (Linux: /proc/<pid>/stat field 22); null where unknown. */
-function procStart(pid: number): string | null { try { const s = readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' ')[19] ?? null; } catch { return null; } }
+/** A process's start time as the OS keeps it: Linux /proc/<pid>/stat field 22; Windows the process's CreationDate
+ *  (CIM, else wmic, each with a timeout); null where it cannot be read (liveness is then the pid alone). */
+function procStart(pid: number): string | null {
+  if (process.platform === 'win32') return windowsStart(pid);
+  try { const s = readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' ')[19] ?? null; } catch { return null; }
+}
+type Run = (cmd: string, args: string[]) => string;
+const runCmd: Run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+/** Windows: CreationDate of a process (the same string for its whole life; another process reusing the pid differs). */
+export function windowsStart(pid: number, run: Run = runCmd): string | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const out = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { $p.CreationDate.ToUniversalTime().ToString('o') }`]).trim();
+    if (out) return `cim:${out}`;
+  } catch { /* no PowerShell, or it timed out: wmic */ }
+  try {
+    const m = /CreationDate=(\S+)/.exec(run('wmic', ['process', 'where', `ProcessId=${pid}`, 'get', 'CreationDate', '/value']));
+    if (m) return `wmic:${m[1]}`;
+  } catch { /* neither: unknown */ }
+  return null;
+}
 function pidAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } }
 interface Lock { pid: number; token: string; started: string | null }
-const ownerAlive = (l: Lock) => { if (!Number.isInteger(l.pid) || l.pid <= 0 || !pidAlive(l.pid)) return false; const now = procStart(l.pid); return l.started == null || now == null || now === l.started; };
+/** Start times compare only when read the same way (proc, cim or wmic): read two ways they tell nothing (alive, then). */
+const sameKind = (a: string, b: string) => (a.match(/^(cim|wmic):/)?.[1] ?? 'proc') === (b.match(/^(cim|wmic):/)?.[1] ?? 'proc');
+export const startsDiffer = (lock: string | null, now: string | null) => lock != null && now != null && sameKind(lock, now) && lock !== now;
+const ownerAlive = (l: Lock) => { if (!Number.isInteger(l.pid) || l.pid <= 0 || !pidAlive(l.pid)) return false; return !startsDiffer(l.started, procStart(l.pid)); };
 /** My folder, with its owner lock (made on first use). */
 function myDir(): string {
   const dir = recoveryDir();
@@ -115,9 +138,79 @@ function myDir(): string {
   }
   return dir;
 }
-/** Move a file aside inside my folder (closed / restored projects): never deleted. */
-function putAside(file: string, why: 'closed'): void {
-  try { const d = join(myDir(), why); mkdirSync(d, { recursive: true }); renameSync(file, join(d, `${Date.now()}-${basename(file)}`)); } catch { /* left where it is */ }
+/** What is known of a closed project's file (a .json beside it in closed/): the retention rule reads it. */
+interface ClosedMeta { handle: string; path: string | null; dirty: boolean; changedAt: number | null; closedAt: number }
+/** Move a closed project's file into my closed/ folder, with what the retention rule needs to know of it. */
+function putAside(file: string, meta: Omit<ClosedMeta, 'closedAt'>): void {
+  try {
+    const d = join(myDir(), 'closed'), to = join(d, `${Date.now()}-${basename(file)}`);
+    mkdirSync(d, { recursive: true });
+    renameSync(file, to);
+    writeFileSync(`${to}.json`, JSON.stringify({ ...meta, closedAt: Date.now() } satisfies ClosedMeta));
+  } catch { /* left where it is */ }
+}
+const keepDays = () => num(process.env.P6CLONE_RECOVERY_KEEP_DAYS, 7);
+const mtime = (p: string) => { try { return statSync(p).mtimeMs; } catch { return null; } };
+/** Why a closed project's file must stay (unsaved work, or its saved file missing or older than its last change),
+ *  or null when the saved file holds it all (then it goes keepDays after the close). */
+function mustKeep(m: ClosedMeta | null): string | null {
+  if (!m) return 'nothing is known of it';
+  if (m.dirty) return 'unsaved changes';
+  if (!m.path) return 'never saved to a file';
+  const t = mtime(m.path);
+  if (t == null) return 'its saved file is missing';
+  // (file times run on the kernel's coarse clock, a few ms behind Date.now(): 2 s of slack; a change after the save
+  // leaves the project dirty anyway)
+  if (m.changedAt != null && t + 2000 < m.changedAt) return 'its saved file is older than its last change';
+  return null;
+}
+const readMeta = (f: string): ClosedMeta | null => { try { return JSON.parse(readFileSync(`${f}.json`, 'utf8')); } catch { return null; } };
+const isProjectFile = (n: string) => n.endsWith('.p6db.jsonl');
+/** Retention: a closed project's file whose saved file holds every change goes keepDays after the close; anything with
+ *  unsaved work, or whose saved file is missing, stays for ever. An adopted folder whose projects have all been taken
+ *  out (restored into my folder) goes, and so does an adopted index of servers before v0.1.15 whose files are all
+ *  gone from where it lists them. Returns what was removed. */
+export function sweepRecovery(now = Date.now()): string[] {
+  const gone: string[] = [];
+  const closed = join(recoveryDir(), 'closed');
+  for (const n of existsSync(closed) ? readdirSync(closed) : []) {
+    if (!isProjectFile(n)) continue;
+    const f = join(closed, n), m = readMeta(f);
+    if (mustKeep(m) != null || now - m!.closedAt < keepDays() * 86400000) continue;
+    try { unlinkSync(f); unlinkSync(`${f}.json`); gone.push(f); } catch { /* next time */ }
+  }
+  const aside = join(recoveryBase(), 'adopted');
+  for (const n of existsSync(aside) ? readdirSync(aside) : []) {
+    const p = join(aside, n);
+    try {
+      if (statSync(p).isDirectory()) {
+        // empty of projects (and of closed files): its owner lock and index are all that is left
+        const left = readdirSync(p).filter((x) => x !== 'owner.json' && x !== 'index.json' && !(x === 'closed' && !readdirSync(join(p, x)).length));
+        if (left.length) continue;
+        for (const x of ['owner.json', 'index.json']) if (existsSync(join(p, x))) unlinkSync(join(p, x));
+        if (existsSync(join(p, 'closed'))) rmdirSync(join(p, 'closed'));
+        rmdirSync(p); gone.push(p);
+      } else if (n.startsWith('index-before-v0.1.15-')) {
+        const j = JSON.parse(readFileSync(p, 'utf8')) as Record<string, Evicted>;
+        if (Object.values(j).every((e) => !e?.file || !existsSync(e.file))) { unlinkSync(p); gone.push(p); }
+      }
+    } catch { /* next time */ }
+  }
+  return gone;
+}
+/** server_status: the recovery folder (all servers' and this one's), its size, and every item kept because it holds
+ *  unsaved work or its saved file is missing, so nothing is left there unnoticed. */
+export function recoveryStatus() {
+  const size = (p: string): number => { try { const st = statSync(p); return st.isDirectory() ? readdirSync(p).reduce((a, n) => a + size(join(p, n)), 0) : st.size; } catch { return 0; } };
+  const kept: { file: string; project_file: string | null; handle: string | null; why: string; since: string }[] = [];
+  const closedDirs = [join(recoveryDir(), 'closed'), ...(existsSync(join(recoveryBase(), 'adopted')) ? readdirSync(join(recoveryBase(), 'adopted')).map((n) => join(recoveryBase(), 'adopted', n, 'closed')) : [])];
+  for (const d of closedDirs) for (const n of existsSync(d) ? readdirSync(d) : []) {
+    if (!isProjectFile(n)) continue;
+    const f = join(d, n), m = readMeta(f), why = mustKeep(m);
+    if (why) kept.push({ file: f, project_file: m?.path ?? null, handle: m?.handle ?? null, why, since: new Date(m?.closedAt ?? mtime(f) ?? 0).toISOString() });
+  }
+  for (const [h, e] of evicted) if (e.dirty) kept.push({ file: e.file, project_file: e.savedTo ?? e.path, handle: h, why: 'unsaved changes (moved out of memory; comes back with its handle)', since: new Date(e.at).toISOString() });
+  return { folder: recoveryDir(), all_servers: recoveryBase(), bytes: size(recoveryDir()), bytes_all_servers: size(recoveryBase()), keep_days: keepDays(), kept_unsaved: kept.slice(0, 200), kept_unsaved_total: kept.length };
 }
 
 // ---------------------------------------------------------------- sessions
@@ -128,10 +221,14 @@ export interface Session {
   encoding?: TextEncodingName;
   history: Change[]; redo: Map<string, { change: Change; mark: number }[]>; dirty: boolean;
   lastUsed: number; bytes: number; notice?: string;
+  /** when it last changed (edit, schedule, undo...): a saved file at least this new holds every change */
+  changedAt?: number;
+  /** the file its last save (of the whole project, leaving no unsaved changes) wrote */
+  savedTo?: string;
 }
 /** adopted: taken over from a server that is gone (its own exit saved its unsaved work already, or it crashed: the
  *  handle brings it back either way), so the save at exit leaves it to the handle */
-interface Evicted { file: string; ownerKey: string; path: string | null; format: Format; hpd: number; encoding?: TextEncodingName; at: number; reason: string; dirty: boolean; adopted?: boolean }
+interface Evicted { file: string; ownerKey: string; path: string | null; format: Format; hpd: number; encoding?: TextEncodingName; at: number; reason: string; dirty: boolean; adopted?: boolean; changedAt?: number; savedTo?: string }
 export const sessions = new Map<string, Session>();
 const evicted = new Map<string, Evicted>();
 /** Projects in memory whose state is also on disk (checkpoint): what a restart, or a server after a crash, brings back. */
@@ -141,7 +238,7 @@ const token = (prefix: string, n = 18) => prefix + randomBytes(n).toString('base
 
 export function createSession(db: Db, init: { path: string | null; format: Format; hpd: number; bytes: number; dirty: boolean }): Session {
   admit(init.bytes);
-  const s: Session = { handle: token('h_'), ownerKey: token('ok_', 24), db, ...init, history: [], redo: new Map(), lastUsed: Date.now() };
+  const s: Session = { handle: token('h_'), ownerKey: token('ok_', 24), db, ...init, history: [], redo: new Map(), lastUsed: Date.now(), ...(init.dirty ? { changedAt: Date.now() } : {}) };
   sessions.set(s.handle, s);
   return s;
 }
@@ -167,7 +264,7 @@ export function evict(s: Session, reason: string): string {
   saveIndex();
   return file;
 }
-const entryOf = (s: Session, file: string, reason: string): Evicted => ({ file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, encoding: s.encoding, at: Date.now(), reason, dirty: s.dirty });
+const entryOf = (s: Session, file: string, reason: string): Evicted => ({ file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, encoding: s.encoding, at: Date.now(), reason, dirty: s.dirty, ...(s.changedAt ? { changedAt: s.changedAt } : {}), ...(s.savedTo ? { savedTo: s.savedTo } : {}) });
 /** A project's lossless file in my folder, written beside and then renamed over the last one. */
 function writeProject(s: Session): string {
   const file = join(myDir(), `${s.handle}.p6db.jsonl`), tmp = `${file}.${randomBytes(3).toString('hex')}.tmp`;
@@ -244,10 +341,11 @@ export function adoptRecovery(): string[] {
     try { mkdirSync(aside, { recursive: true }); renameSync(dir, to); } catch { continue; } // another server took it first
     took.push(...adoptIndex(join(to, 'index.json'), dir, to));
   }
-  // the shared index of servers before v0.1.15 (their files stay where they are)
+  // the shared index of servers before v0.1.15 (their files stay where they are, until restored)
   const legacy = join(base, 'index.json');
   if (existsSync(legacy)) { const to = join(aside, `index-before-v0.1.15-by-${OWNER}.json`); try { mkdirSync(aside, { recursive: true }); renameSync(legacy, to); took.push(...adoptIndex(to, null, null)); } catch { /* another server took it */ } }
   saveIndex();
+  sweepRecovery();
   return took;
 }
 /** Kept for callers of earlier versions: adoptRecovery. */
@@ -263,12 +361,14 @@ export function getSession(h: unknown): Session {
   const bytes = Math.round(statSync(e!.file).size * 1.5) + 8 * 1048576;
   admit(bytes, handle);
   const { db } = readDbFile(e!.file);
-  const back: Session = { handle, ownerKey: e!.ownerKey, db, path: e!.path, format: e!.format, hpd: e!.hpd, encoding: e!.encoding, history: [], redo: new Map(), dirty: e!.dirty, lastUsed: Date.now(), bytes,
+  // a project adopted from a server that is gone moves into my folder (its old folder can then empty and go)
+  if (e!.adopted) { const to = join(myDir(), basename(e!.file)); try { renameSync(e!.file, to); e!.file = to; } catch { /* stays where it is */ } }
+  const back: Session = { handle, ownerKey: e!.ownerKey, db, path: e!.path, format: e!.format, hpd: e!.hpd, encoding: e!.encoding, history: [], redo: new Map(), dirty: e!.dirty, lastUsed: Date.now(), bytes, ...(e!.changedAt ? { changedAt: e!.changedAt } : {}), ...(e!.savedTo ? { savedTo: e!.savedTo } : {}),
     notice: e!.reason === 'restart' ? `The server had restarted (or stopped): this project was restored from ${e!.file}, with the changes it had. Its undo history before that is gone.`
       : `This project had been moved out of memory (${e!.reason === 'idle' ? `idle for ${config.idleMinutes} minutes` : 'to make room'}) and was restored from ${e!.file}. Its undo history before that is gone; nothing else was lost.` };
   sessions.set(handle, back);
   // its file stays, as the checkpoint of the project now in memory (the next checkpoint writes over it)
-  evicted.delete(handle); checkpoints.set(handle, { ...e!, reason: 'restart' }); saveIndex();
+  evicted.delete(handle); checkpoints.set(handle, { ...e!, reason: 'restart', adopted: false }); saveIndex();
   return back;
 }
 /** Projects moved out with unsaved changes, read back from their recovery files (for the save at exit). */
@@ -278,16 +378,17 @@ export function* unsavedEvicted(): Generator<{ handle: string; path: string | nu
 export const isDirty = (h: string) => sessions.get(h)?.dirty ?? evicted.get(h)?.dirty ?? false;
 export function closeSession(s: Session): void {
   sessions.delete(s.handle); clearTimeout(pendingCk.get(s.handle));
-  for (const m of [evicted, checkpoints]) { const e = m.get(s.handle); if (e) { putAside(e.file, 'closed'); m.delete(s.handle); } }
+  for (const m of [evicted, checkpoints]) { const e = m.get(s.handle); if (e) { putAside(e.file, { handle: s.handle, path: s.savedTo ?? s.path, dirty: s.dirty, changedAt: s.changedAt ?? null }); m.delete(s.handle); } }
   saveIndex();
 }
-export function forgetEvicted(handle: string): void { for (const m of [evicted, checkpoints]) { const e = m.get(handle); if (e) { putAside(e.file, 'closed'); m.delete(handle); } } saveIndex(); }
+export function forgetEvicted(handle: string): void { for (const m of [evicted, checkpoints]) { const e = m.get(handle); if (e) { putAside(e.file, { handle, path: e.savedTo ?? e.path, dirty: e.dirty, changedAt: e.changedAt ?? null }); m.delete(handle); } } saveIndex(); }
 export const evictedList = () => [...evicted].map(([h, e]) => ({ handle: h, file: e.path, recovery_file: e.file, reason: e.reason, unsaved_changes: e.dirty, since: new Date(e.at).toISOString() }));
 
 /** Idle projects leave memory (as hygiene); they return on their next call. */
 export function sweepIdle(): void {
   const limit = Date.now() - config.idleMinutes * 60000;
   for (const s of [...sessions.values()]) if (s.lastUsed < limit && !busy.has(s.handle)) evict(s, 'idle');
+  sweepRecovery();
 }
 
 export function requireOwner(s: Session, key: unknown, what: string): void {
@@ -319,7 +420,7 @@ export function change<T>(s: Session, caller: string, label: string, fn: (db: Db
   s.history.push({ id: ++changeSeq, label, caller, j, after, at: Date.now() });
   if (s.history.length > 100) s.history.shift();
   s.redo.delete(caller);
-  s.dirty = true;
+  s.dirty = true; s.changedAt = Date.now();
   return out;
 }
 /** Drop the last change if it turned out to be unwanted (e.g. scheduling failed). */
@@ -369,7 +470,7 @@ export function undo(s: Session, caller: string, anyCaller: boolean): { undone: 
   const stack = s.redo.get(c.caller) ?? [];
   stack.push({ change: { ...c, j: back.j, after: back.after }, mark: changeSeq });
   s.redo.set(c.caller, stack);
-  s.dirty = true;
+  s.dirty = true; s.changedAt = Date.now();
   return { undone: c.label, by: c.caller };
 }
 
@@ -379,7 +480,7 @@ export function redo(s: Session, caller: string): { redone: string | null } {
   if (!r) return { redone: null };
   const back = revert(r.change, s.history.filter((h) => h.id > r.mark));
   s.history.push({ id: ++changeSeq, label: r.change.label, caller, j: back.j, after: back.after, at: Date.now() });
-  s.dirty = true;
+  s.dirty = true; s.changedAt = Date.now();
   return { redone: r.change.label };
 }
 
