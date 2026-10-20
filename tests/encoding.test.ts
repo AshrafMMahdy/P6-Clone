@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { decodeText, chooseEncoding, encodeText } from '../core/encoding.ts';
+import { decodeText, chooseEncoding, encodeText, textDecoder } from '../core/encoding.ts';
 import { parseXer } from '../core/xer/parse.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { applyOps } from '../core/project/ops.ts';
@@ -36,6 +36,6 @@ test('export writes the code page P6 would use, so Arabic (and other scripts) su
   assert.equal(rows(x, 'TASK')[0].task_name, 'صب الأساسات');
   assert.ok(rows(x, 'PROJWBS').some((w) => w.wbs_name === 'الهيكل الخرساني'));
   // other scripts; and text no single code page holds goes out as UTF-8
-  for (const s of ['Приёмка работ', 'שלום', 'Ελλάδα', '建筑施工', '日本の建設', 'Žluťoučký kůň', 'Café 25€']) { const e = chooseEncoding(s); assert.equal(new TextDecoder(e).decode(encodeText(s, e)), s, s); }
+  for (const s of ['Приёмка работ', 'שלום', 'Ελλάδα', '建筑施工', '日本の建設', 'Žluťoučký kůň', 'Café 25€']) { const e = chooseEncoding(s); assert.equal(textDecoder(e).decode(encodeText(s, e)), s, s); }
   assert.equal(chooseEncoding('Arabic عربي and Russian русский'), 'utf-8');
 });

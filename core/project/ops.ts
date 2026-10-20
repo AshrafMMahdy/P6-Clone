@@ -92,6 +92,10 @@ function apply(db: Db, op: Op, hpd: number): unknown {
     const c = String(code).toLowerCase();
     const byId = new Map(W.map((w) => [w.wbs_id, w]));
     const path = (w: Row) => { const out: string[] = []; for (let x: Row | undefined = w, n = 0; x && x.proj_node_flag !== 'Y' && n < 50; x = byId.get(x.parent_wbs_id), n++) out.unshift(x.wbs_short_name); return out.join('.').toLowerCase(); };
+    // A full path names one element; only a bare short name can be ambiguous ("1" is both the top element 1 and the
+    // child 1.1's short name — the normal P6 shape, so the path must win).
+    const byPath = W.filter((w) => w.proj_node_flag !== 'Y' && path(w) === c);
+    if (byPath.length === 1) return byPath[0];
     const hits = W.filter((w) => w.proj_node_flag !== 'Y' && (path(w) === c || w.wbs_short_name.toLowerCase() === c));
     if (hits.length > 1) fail(`WBS code "${code}" is ambiguous; use the full path (e.g. ${path(hits[0])}).`);
     return hits[0] ?? fail(`No WBS "${code}" in project ${p.proj_short_name}.`);

@@ -128,7 +128,9 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
     'ERMHDR', opts.version, opts.exportDate ?? formatDay(Date.now() / 60000), 'Project',
     opts.user ?? 'admin', opts.userName ?? 'admin', opts.dbName ?? 'dbxDatabaseNoName', 'Project Management', cur,
   ].join('\t'));
-  const names = [...sel.keys()].filter((n) => !n.startsWith('_'));
+  // EPS lives in P6's database, never in an XER (P6 asks for it on import and its exports carry no EPS table); the clone
+  // keeps its EPS nodes for P6 XML and the portfolio, and writing them here gave every saved XER an unknown table.
+  const names = [...sel.keys()].filter((n) => !n.startsWith('_') && n !== 'EPS');
   const vo = tableOrderFor(opts.version);
   const order = [...vo.filter((n) => names.includes(n)), ...names.filter((n) => !vo.includes(n)).sort()];
   for (const name of order) {

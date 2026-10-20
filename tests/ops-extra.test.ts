@@ -128,3 +128,30 @@ test('ops: EPS, OBS, roles, calendar changes, assignment curve; XER keeps codes,
   const back = parseXer(typeof out === 'string' ? new TextEncoder().encode(out) : out).db;
   for (const t of ['TASKACTV', 'UDFVALUE', 'TASKPROC', 'PROJCOST']) assert.equal(rows(back, t).length, 1, t);
 });
+
+test('ops: a full WBS path wins over a short name it shares with a child (1 and 1.1, the normal P6 shape)', () => {
+  const db: Db = { tables: {} };
+  ok(db, [
+    { op: 'add_project', id: 'P2', start: '2026-03-02' },
+    { op: 'add_wbs', code: '1', name: 'Sub' }, { op: 'add_wbs', code: '1', name: 'Piling', parent: '1' }, { op: 'add_wbs', code: '2', name: 'Super' },
+    { op: 'add_wbs', code: '1', name: 'Bored', parent: '1.1' },
+    { op: 'add_activity', id: 'T1', name: 'Top', wbs: '1', duration_days: 1 },
+    { op: 'add_activity', id: 'T2', name: 'Child', wbs: '1.1', duration_days: 1 },
+    { op: 'add_activity', id: 'T3', name: 'Grandchild', wbs: '1.1.1', duration_days: 1 },
+  ]);
+  const W = rows(db, 'PROJWBS');
+  const nameOf = (task: string) => W.find((w) => w.wbs_id === rows(db, 'TASK').find((t) => t.task_code === task)!.wbs_id)!.wbs_name;
+  assert.deepEqual(['T1', 'T2', 'T3'].map(nameOf), ['Sub', 'Piling', 'Bored']);
+  bad(db, [{ op: 'add_activity', id: 'T4', name: 'x', wbs: 'nope' }], /No WBS/);
+});
+
+test('xer: a saved project carries no EPS table (P6 keeps the EPS in its database), and validates without findings', async () => {
+  const db: Db = { tables: {} };
+  ok(db, [{ op: 'add_project', id: 'P3', start: '2026-03-02' }, { op: 'add_eps', id: 'CIV', name: 'Civil' }, { op: 'set_project', eps: 'CIV' }, { op: 'add_activity', id: 'T1', name: 'One', duration_days: 2 }]);
+  const out = writeXer(db, { version: '19.12' });
+  const text = new TextDecoder().decode(out);
+  assert.ok(!/^%T\tEPS/m.test(text));
+  const { validateXer } = await import('../core/xer/validate.ts');
+  const findings = validateXer(parseXer(out).db);
+  assert.ok(!findings.some((f) => f.code === 'TABLE_UNKNOWN'), JSON.stringify(findings));
+});

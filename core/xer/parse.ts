@@ -1,5 +1,5 @@
 import { ValuePool, type Db, type PoolColumn, type Row, type Table } from '../db.ts';
-import { detectEncoding, encodingLabel, type TextEncodingName } from '../encoding.ts';
+import { detectEncoding, encodingLabel, textDecoder, type TextEncodingName } from '../encoding.ts';
 import type { Finding } from '../findings.ts';
 
 export interface ParseMeta { encoding: TextEncodingName; lineEnding: 'CRLF' | 'LF' | 'mixed'; hasEnd: boolean }
@@ -21,7 +21,7 @@ export function parseXer(bytes: Uint8Array, opts: { encoding?: TextEncodingName 
   let start = detected.start;
   // a UTF-8 decoder drops a byte order mark at the start of the text (one more after the one detection skipped)
   if (decoder === 'utf-8' && bytes[start] === 0xef && bytes[start + 1] === 0xbb && bytes[start + 2] === 0xbf) start += 3;
-  const dec = new TextDecoder(decoder, { ignoreBOM: true });
+  const dec = textDecoder(decoder, { ignoreBOM: true });   // windows-1252 read right on Node 20/22 too (encoding.ts)
   const findings: Finding[] = [];
   const db: Db = { tables: {} };
   let crlf = 0, lf = 0;
