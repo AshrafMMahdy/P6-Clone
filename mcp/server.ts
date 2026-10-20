@@ -27,12 +27,13 @@ import { makeCtx } from '../core/project/ctx.ts';
 import { TOOLS as LOOKUPS, runTool } from '../core/query/tools.ts';
 import { activityTable, TABLE_GUIDE } from '../core/query/table.ts';
 import { computeSchedule, COMPUTE_GUIDE } from '../core/query/compute.ts';
+import { compareComputed, evaluate } from '../core/query/evaluate.ts';
 import { parseScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../core/schedule/options.ts';
 import { reviewSchedule } from '../core/query/review.ts';
 import { record, rollback } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { worst, type Finding } from '../core/findings.ts';
-import type { Db } from '../core/db.ts';
+import type { Db, Row } from '../core/db.ts';
 import { findUnicodeFont } from '../renderer/print/system-font.ts';
 import { compareSchedules } from '../core/diff.ts';
 import { printPages, printableColumns } from '../renderer/print/schedule.ts';
@@ -43,7 +44,8 @@ import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
 import { listReports, parseSpec, runReport, runSpec } from '../renderer/reports/engine.ts';
 import { reportHtml, reportPages, reportText, reportXlsx } from '../renderer/reports/output.ts';
 import { nowStamp } from '../core/report/reports.ts';
-import { defaultEstimates, runMonteCarlo } from '../core/risk/montecarlo.ts';
+import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler } from '../core/risk/montecarlo.ts';
+import { dayHours } from '../core/project/units.ts';
 import {
   ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
   exclusive, change, dropLast, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, loadIndex, evictedList, type Session,
@@ -74,8 +76,8 @@ const TOOLS = [
   { name: 'activity_table', annotations: ro, description: `Every activity's computed fields as one compact table (columns, then one array per activity, in table order), paged with offset and limit (no cap on limit; default all, next_offset for the next page). Columns: ${TABLE_GUIDE}; names: true adds name after id.`, inputSchema: withHandle({ type: 'object', properties: { project: { type: 'string', description: 'Project ID (default: every project in the file)' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' } } }) },
   { name: 'schedule', annotations: edit, description: 'Schedule (F9) like P6: CPM with calendars, constraints, retained logic. Returns the finish date and the schedule log highlights, and loops ([[activity IDs]] of each loop; [] when none). break_loops: true schedules a network with loops by leaving out the links that close them (returned in broken_links; the links stay in the project); without it a loop fails the schedule, as in P6. options overrides the project\'s schedule options for this run only (set_schedule_options writes them): ' + SCHEDULE_OPTIONS_GUIDE + '. A project opened from Microsoft Project XML in which nothing that drives the dates changed keeps Microsoft Project\'s dates (kept_msp_dates); otherwise msp_dates_changed lists the dates the schedule replaced. data_date moves the data date of every project in the file first, or with project of that project only (the others schedule on their own data dates).', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' }, project: { type: 'string', description: 'Project ID: data_date applies to this project only' }, break_loops: { type: 'boolean' }, options: { type: 'object' } } }) },
   { name: 'update_progress', annotations: edit, description: 'Tools > Update Progress: move the data date and statuse activities from their planned dates, then reschedule. If scheduling fails nothing is kept.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' } }, required: ['data_date'] }) },
-  { name: 'level_resources', annotations: edit, description: 'Tools > Level Resources (resources with a Max Units/Time limit).', inputSchema: withHandle({ type: 'object', properties: { within_float: { type: 'boolean' } } }) },
-  { name: 'monte_carlo', annotations: ro, description: 'Schedule risk analysis (Monte Carlo) like Primavera Risk Analysis: samples each activity\'s remaining duration from its three-point estimate (set with the set_estimates edit operation; default_estimates applies min/max percentages to activities without one, for this run only) and risk events from the risk register, schedules every iteration. Returns finish percentiles P10-P90, mean, std dev, chance of meeting the deterministic finish, a histogram (buckets), milestone percentiles, activity criticality index, sensitivity ranking and risk-event impact. The project is not changed. Big projects: pass async: true.', inputSchema: withHandle({ type: 'object', properties: { iterations: { type: 'number', description: 'default 1000' }, seed: { type: 'number', description: 'same seed, same result' }, risk_events: { type: 'string', description: 'pre (default), post or off' }, project: { type: 'string' }, default_estimates: { type: 'object', description: '{min_pct: 90, max_pct: 125, dist: triangle|uniform|betapert} for activities without an estimate' }, buckets: { type: 'number', description: 'histogram buckets (default 20)' }, top: { type: 'number', description: 'how many activities in the criticality and sensitivity lists (default 25)' } } }) },
+  { name: 'level_resources', annotations: edit, description: 'Tools > Level Resources (resources with a Max Units/Time limit): activities are delayed until each leveled resource has room. within_float: only within total float. over_allocation_pct: allowed overallocation (e.g. 10). priority_by: early_start (default), total_float or priority. resources: [resource IDs] to level (default: all with a limit). activity_priority: [activity IDs] placed first, in that order, once their predecessors are placed. dry_run: true answers the leveled dates (moved) and per-resource peaks without changing the project (no undo entry). Answers delayed, moved [{id, from, start, finish}], peaks [{resource, peak, limit, day, overallocated}] (unit-hours in the peak day) and the report.', inputSchema: withHandle({ type: 'object', properties: { within_float: { type: 'boolean' }, over_allocation_pct: { type: 'number' }, priority_by: { type: 'string' }, resources: { type: 'array', items: { type: 'string' } }, activity_priority: { type: 'array', items: { type: 'string' } }, dry_run: { type: 'boolean' } } }) },
+  { name: 'monte_carlo', annotations: ro, description: 'Schedule risk analysis (Monte Carlo) like Primavera Risk Analysis: samples each activity\'s remaining duration from its three-point estimate (set with the set_estimates edit operation; default_estimates applies min/max percentages to activities without one, for this run only) and risk events from the risk register, schedules every iteration. Returns finish percentiles P10-P90, mean, std dev, chance of meeting the deterministic finish, a histogram (buckets), milestone percentiles, activity criticality index, sensitivity ranking and risk-event impact, and the finishes in working days from the data date (working_days, with sigma marks: mean - 3 to + 3 standard deviations as days and dates). events: risk events for this run only, each {name, probability (0-1) or probability_pct, delay_days or delay_hours, activities?: [IDs]}: when it happens the delay is added to each activity named (days of its calendar), or with no activities to the project finish (a project-level delay, project calendar). sampler: a duration ratio per activity and iteration, {type: ratio_normal, mean, std, min_ratio, max_ratio} or {type: ratio_empirical, ratios: [..], weight: [..] (their chances; default equal)}, with scope all (default: instead of three-point estimates) or unestimated. re_anchor: true rescales each three-point estimate so its mean is the remaining duration. deadline (date): the chance of finishing by it. The project is not changed. Big projects: pass async: true (job_status shows the iterations done); notifications/cancelled or cancel_job stops it, and a progressToken gets notifications/progress.', inputSchema: withHandle({ type: 'object', properties: { iterations: { type: 'number', description: 'default 1000' }, events: { type: 'array', items: { type: 'object' } }, sampler: { type: 'object' }, re_anchor: { type: 'boolean' }, deadline: { type: 'string' }, seed: { type: 'number', description: 'same seed, same result' }, risk_events: { type: 'string', description: 'pre (default), post or off' }, project: { type: 'string' }, default_estimates: { type: 'object', description: '{min_pct: 90, max_pct: 125, dist: triangle|uniform|betapert} for activities without an estimate' }, buckets: { type: 'number', description: 'histogram buckets (default 20)' }, top: { type: 'number', description: 'how many activities in the criticality and sensitivity lists (default 25)' } } }) },
   { name: 'validate', annotations: ro, description: 'P6 import diagnostics for the project as it is now (what real P6 would accept, warn about or reject), plus saved dates that P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'review', annotations: ro, description: 'Schedule quality review (DCMA-style checks graded pass/warn/fail): missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence, saved dates P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   ...LOOKUPS.map((t) => ({ name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
@@ -85,7 +87,8 @@ const TOOLS = [
   { name: 'export_pdf', annotations: writes, description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML. ' + PRINT_GUIDE + ' Layout options: filter, group_by (wbs, none), sort_by.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', annotations: writes, description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK, TASKPRED, RSRC, TASKRSRC; row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
   { name: 'import_excel', annotations: edit, description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities, relationships, resources and assignments; "Y" in delete_record_flag deletes the row. Calculated columns are ignored. One undoable change; dry_run returns the plan only.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
-  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against' }, max_changes: { type: 'number' } } }) },
+  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days. mode: computed compares only what the schedule computes, per activity: duration_delta_days, remaining_delta_days, start_shift_days, finish_shift_days, total_float_delta_days (working days), became_critical / no_longer_critical, plus only_in_a / only_in_b.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against' }, mode: { type: 'string', description: 'all (default) or computed' }, max_changes: { type: 'number' } } }) },
+  { name: 'evaluate', annotations: ro, description: 'What-if without changing the project: schedules a scratch state of it (no undo entry, nothing kept) as it is and with overrides (edit operations, e.g. [{"op":"update_activity","id":"A1000","duration_days":15}]), with the same data_date (this call only) and options (as schedule takes them). Answers base_finish, finish, finish_delta_days (working days), critical (activity IDs), became_critical, no_longer_critical, and changed (per activity, each computed field that changed as [before, after]; max_rows, default 500).', inputSchema: withHandle({ type: 'object', properties: { overrides: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, data_date: { type: 'string' }, project: { type: 'string' }, max_rows: { type: 'number' } } }) },
   { name: 'list_reports', annotations: ro, description: 'Reports available like P6 Tools > Reports: the standard reports by group and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'run_report', annotations: ro, description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as PDF (.pdf), HTML (.html), CSV (.csv/.txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number' } } }) },
   { name: 'create_report', annotations: edit, description: 'Save a report definition like the P6 Report Wizard (name, subject, columns, filter, group_by, sort_by, sort_desc, title, group). Kept with this open project for run_report (not written into the XER). Subject areas: activities, assignments, wbs, resources, relationships (see list_reports for examples).', inputSchema: withHandle({ type: 'object', properties: { name: { type: 'string' }, subject: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' }, sort_desc: { type: 'boolean' }, title: { type: 'string' }, group: { type: 'string' } }, required: ['name', 'subject'] }) },
@@ -121,7 +124,34 @@ const iso = (t: number | null | undefined) => (t == null || !Number.isFinite(t) 
 const checkpoint = async (ctx: Ctx) => { await new Promise((r) => setImmediate(r)); if (ctx.signal.aborted) fail('cancelled', 'The call was cancelled.', 'Nothing was kept or written by it; call again when needed.'); };
 
 // ---------------------------------------------------------------- tool implementations
-type Ctx = { caller: string; job?: ReturnType<typeof startJob>; signal: AbortSignal };
+type Ctx = { caller: string; job?: ReturnType<typeof startJob>; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void };
+
+/** monte_carlo's run-only inputs (events, sampler, re_anchor, deadline) for the engine; bad ones are refused. */
+function monteCarloInputs(s: Session, ids: string[], a: Record<string, any>): Pick<MonteCarloOptions, 'events' | 'sampler' | 'reAnchor' | 'deadline'> {
+  const dh = dayHours(s.db, s.hpd, true);
+  const tasks = (s.db.tables.TASK?.rows ?? []).filter((t) => ids.includes(t.proj_id));
+  const proj = s.db.tables.PROJECT.rows.find((p) => p.proj_id === ids[0]);
+  const n = (v: unknown, what: string) => { const x = Number(v); return Number.isFinite(x) ? x : fail('bad_input', `${what} must be a number.`, 'See the monte_carlo description.'); };
+  const events = a.events == null ? undefined : (Array.isArray(a.events) ? a.events : fail('bad_input', '"events" must be a list.', 'events: [{name, probability, delay_days, activities?}]')).map((e: any, i: number) => {
+    const p = e?.probability_pct != null ? n(e.probability_pct, `events[${i}].probability_pct`) / 100 : n(e?.probability, `events[${i}].probability`);
+    if (!(p >= 0 && p <= 1)) fail('bad_input', `events[${i}]: probability must be between 0 and 1 (or probability_pct 0-100).`, 'Give the chance the event happens.');
+    const acts = Array.isArray(e.activities) ? e.activities.map((c: unknown) => tasks.find((t) => t.task_code === String(c)) ?? fail('bad_input', `events[${i}]: no activity "${c}".`, 'Use Activity IDs of the project.')) : [];
+    const hours = (t?: Row) => (e.delay_hours != null ? n(e.delay_hours, `events[${i}].delay_hours`) : n(e.delay_days, `events[${i}].delay_days`) * (t ? dh.task(t) : dh.cal(proj?.clndr_id)));
+    return { name: String(e.name ?? `Event ${i + 1}`), p, taskHours: acts.map((t: Row) => [t.task_id, hours(t)] as [string, number]), projectHours: acts.length ? 0 : hours() };
+  });
+  let sampler: Sampler | undefined;
+  if (a.sampler != null) {
+    const x = a.sampler, scope = x.scope === 'unestimated' ? 'unestimated' : 'all';
+    if (x.type === 'ratio_normal') sampler = { type: 'ratio_normal', mean: n(x.mean, 'sampler.mean'), std: n(x.std, 'sampler.std'), ...(x.min_ratio != null ? { minRatio: n(x.min_ratio, 'sampler.min_ratio') } : {}), ...(x.max_ratio != null ? { maxRatio: n(x.max_ratio, 'sampler.max_ratio') } : {}), scope };
+    else if (x.type === 'ratio_empirical') {
+      const ratios = Array.isArray(x.ratios) && x.ratios.length ? x.ratios.map((v: unknown, i: number) => n(v, `sampler.ratios[${i}]`)) : fail('bad_input', 'sampler.ratios must be a list of numbers.', 'e.g. {type: "ratio_empirical", ratios: [0.9, 1, 1.2, 1.5]}');
+      const w = x.weight ?? x.weights;
+      const weights = w == null ? undefined : Array.isArray(w) && w.length === ratios.length ? w.map((v: unknown, i: number) => n(v, `sampler.weight[${i}]`)) : fail('bad_input', 'sampler.weight must be a list as long as ratios.', 'One chance per ratio.');
+      sampler = { type: 'ratio_empirical', ratios, ...(weights ? { weights } : {}), scope };
+    } else fail('bad_input', 'sampler.type must be ratio_normal or ratio_empirical.', 'See the monte_carlo description.');
+  }
+  return { events, sampler, reAnchor: a.re_anchor === true, ...(a.deadline != null ? { deadline: dd(a.deadline) ?? fail('bad_input', 'deadline must be a date YYYY-MM-DD.', 'The date to give the chance of finishing by.') } : {}) };
+}
 const NO_HANDLE = new Set(['open_file', 'new_project', 'compute_schedule', 'list_open', 'server_status', 'job_status', 'cancel_job']);
 /** Tools that can change a project (their answers carry unsaved_changes). */
 const MUTATES = new Set(TOOLS.filter((t) => !t.annotations.readOnlyHint && !['list_open', 'server_status', 'job_status', 'cancel_job'].includes(t.name)).map((t) => t.name));
@@ -196,10 +226,16 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const pn = ops.findIndex((o: any) => o?.op === 'set_notebook' && (o.activity == null || o.activity === ''));
       if (pn >= 0 && (s.format === 'mspdi' || s.format === 'mpx')) return { ok: false, error: { code: 'unsupported_for_format', index: pn, op: ops[pn], format: s.format, message: `A project notebook cannot be kept in a ${s.format === 'mpx' ? 'MPX' : 'Microsoft Project XML'} file: Microsoft Project has no notebook topics, and its project notes do not map onto a P6 notebook.`, hint: 'Nothing was changed. Save the project as XER or P6 XML (save with format xer or p6xml), open that, and set the notebook there; or put the text on an activity notebook.' } };
       let r!: ReturnType<typeof applyOps>;
-      try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true, onePerPair: s.format === 'mspdi' || s.format === 'mpx' || s.format === 'mpp' }); if (!r.ok) throw new Error('refused'); }); }
+      try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true }); if (!r.ok) throw new Error('refused'); }); }
       catch (e) { if (r && !r.ok) return { ok: false, error: { code: 'op_failed', ...r.error, hint: 'Fix that operation (the message says what is wrong) and send the list again; nothing was changed.' } }; throw e; }
       s.history[s.history.length - 1].label = `Edit (${r.applied} operation${r.applied === 1 ? '' : 's'})`;
       return r;
+    }
+    case 'evaluate': {
+      let options: ReturnType<typeof parseScheduleOptions> = {};
+      if (a.options != null) { try { options = parseScheduleOptions(a.options, (m) => { throw new Error(m); }, s.hpd); } catch (e) { fail('bad_input', (e as Error).message, `Options: ${SCHEDULE_OPTIONS_GUIDE}.`); } }
+      if (a.overrides != null && !Array.isArray(a.overrides)) fail('bad_input', '"overrides" must be a list of edit operations.', 'e.g. [{"op":"update_activity","id":"A1000","duration_days":15}]');
+      return evaluate(s.db, a.project != null && a.project !== '' ? projectIds(s.db, a.project) : allIds(s.db), { overrides: a.overrides ?? [], options, dataDate: dd(a.data_date) ?? undefined, hoursPerDay: s.hpd, maxRows: Number(a.max_rows) || undefined });
     }
     case 'activity_table': return activityTable(s.db, a.project != null && a.project !== '' ? projectIds(s.db, a.project) : allIds(s.db), { offset: a.offset, limit: a.limit, names: a.names === true, hoursPerDay: s.hpd });
     case 'schedule': {
@@ -243,15 +279,31 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.errors.join(' '), hint: 'Scheduling failed, so the progress update was undone; fix the problem and try again.' } }; }
       return res;
     }
-    case 'level_resources': return change(s, ctx.caller, 'Level Resources', (d) => { const r = levelResources(d, allIds(d), { withinFloat: !!a.within_float }); return { delayed: r.delayed, report: r.log }; });
+    case 'level_resources': {
+      const PB: Record<string, 'es' | 'tf' | 'priority'> = { early_start: 'es', es: 'es', total_float: 'tf', tf: 'tf', priority: 'priority' };
+      const by = a.priority_by == null ? undefined : PB[String(a.priority_by).toLowerCase()] ?? fail('bad_input', 'priority_by must be early_start, total_float or priority.', 'Leave it out for early start.');
+      const R = s.db.tables.RSRC?.rows ?? [], T = (s.db.tables.TASK?.rows ?? []).filter((t) => allIds(s.db).includes(t.proj_id));
+      const list = (v: unknown, what: string) => (Array.isArray(v) ? v.map(String) : fail('bad_input', `${what} must be a list of IDs.`, `e.g. ${what}: ["A1000"]`));
+      const rsrcIds = a.resources == null ? undefined : list(a.resources, 'resources').map((c) => R.find((r) => r.rsrc_short_name.toLowerCase() === c.toLowerCase())?.rsrc_id ?? fail('bad_input', `No resource "${c}".`, 'Use resource IDs (resource_summary lists them).'));
+      const first = a.activity_priority == null ? undefined : list(a.activity_priority, 'activity_priority').map((c) => T.find((t) => t.task_code === c)?.task_id ?? fail('bad_input', `No activity "${c}".`, 'Use Activity IDs.'));
+      const pct = a.over_allocation_pct == null ? undefined : Number(a.over_allocation_pct);
+      if (pct != null && !(pct >= 0)) fail('bad_input', 'over_allocation_pct must be 0 or more.', 'e.g. 10 for 10 %.');
+      const opts = { withinFloat: !!a.within_float, overAllocPct: pct, priority: by, rsrcIds, first };
+      const answer = (r: ReturnType<typeof levelResources>) => ({ delayed: r.delayed, moved: r.moved.map((m) => ({ id: m.code, from: m.from, start: m.start, finish: m.finish })), peaks: r.peaks.map((p) => ({ resource: p.code, peak: p.peak, limit: p.limit, day: p.day, overallocated: p.overallocated })), report: r.log });
+      if (a.dry_run === true) { let out!: ReturnType<typeof answer>; const j = record(s.db, (d) => { out = answer(levelResources(d, allIds(d), opts)); }); rollback(j); return { dry_run: true, ...out }; }
+      return change(s, ctx.caller, 'Level Resources', (d) => answer(levelResources(d, allIds(d), opts)));
+    }
     case 'monte_carlo': {
       const ids = projectIds(s.db, a.project);
       const iterations = Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000)));
       // default estimates only for this run: applied in a journal and rolled back afterwards
       const j = a.default_estimates ? record(s.db, (d) => { defaultEstimates(d, ids, Number(a.default_estimates.min_pct) || 90, Number(a.default_estimates.max_pct) || 125, a.default_estimates.dist ?? 'triangle'); }) : null;
       try {
-        const r = await runMonteCarlo(s.db, ids, { iterations, seed: a.seed != null ? Number(a.seed) : undefined, riskEvents: a.risk_events === 'post' || a.risk_events === 'off' ? a.risk_events : 'pre', signal: ctx.signal,
-          onProgress: (i) => { if (ctx.job) ctx.job.progress = `${i} of ${iterations} iterations`; } });
+        const mc = monteCarloInputs(s, ids, a);
+        let last = 0;
+        const r = await runMonteCarlo(s.db, ids, { iterations, seed: a.seed != null ? Number(a.seed) : undefined, riskEvents: a.risk_events === 'post' || a.risk_events === 'off' ? a.risk_events : 'pre', signal: ctx.signal, ...mc,
+          onProgress: (i) => { if (ctx.job) ctx.job.progress = `${i} of ${iterations} iterations`; const now = Date.now(); if (i === iterations || now - last > 250) { last = now; ctx.progress?.(i, iterations, `${i} of ${iterations} iterations`); } } });
+        const wd = (x: number) => Math.round(x * 100) / 100;
         const top = Math.min(200, Number(a.top) || 25);
         const buckets = Math.min(100, Math.max(5, Number(a.buckets) || 20));
         const lo = r.min, hi = r.max, w = (hi - lo) / buckets || 1;
@@ -267,7 +319,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           criticality: r.activities.slice(0, top).map((x) => ({ id: x.code, name: x.name, critical_pct: Math.round(x.criticality * 10) / 10, p80_finish: iso(x.p80Finish) })),
           sensitivity: r.sensitivity.slice(0, top).map((x) => ({ id: x.code, name: x.name, correlation: Math.round(x.rho * 100) / 100 })),
           risk_events: r.risks.map((x) => ({ id: x.code, name: x.name, probability_pct: Math.round(x.probability * 1000) / 10, impact_days: Math.round((x.hours / s.hpd) * 10) / 10, activities: x.activities, triggered_pct: Math.round(x.triggeredPct * 10) / 10 })),
-          note: r.sensitivity.length ? undefined : 'No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule. Set estimates with the set_estimates edit operation, or pass default_estimates.',
+          working_days: { from: iso(r.days.from), hours_per_day: r.days.hoursPerDay, deterministic: wd(r.days.deterministic), mean: wd(r.days.mean), std: wd(r.days.std), min: wd(r.days.min), max: wd(r.days.max), P10: wd(r.days.P10), P50: wd(r.days.P50), P80: wd(r.days.P80), P90: wd(r.days.P90), sigma: r.days.sigma.map((x) => ({ k: x.k, days: wd(x.days), date: iso(x.date) })) },
+          ...(r.probDeadline != null ? { deadline: { date: iso(mc.deadline!), probability_pct: Math.round(r.probDeadline * 1000) / 10 } } : {}),
+          ...(r.events.length ? { events: r.events.map((x) => ({ name: x.name, probability_pct: Math.round(x.probability * 1000) / 10, triggered_pct: Math.round(x.triggeredPct * 10) / 10 })) } : {}),
+          note: r.sensitivity.length || r.events.length ? undefined : 'No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule. Set estimates with the set_estimates edit operation, or pass default_estimates or a sampler.',
         };
       } catch (e) { if (ctx.signal.aborted) fail('cancelled', 'The Monte Carlo run was cancelled.', 'Start it again when needed.'); throw e; }
       finally { if (j) rollback(j); }
@@ -326,6 +381,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     }
     case 'compare': {
       const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
+      if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); const max = Math.min(5000, Number(a.max_changes) || 500); return { mode: 'computed', changed: c.changes.length, changes: c.changes.slice(0, max), truncated: c.changes.length > max, became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }; }
+      if (a.mode != null && a.mode !== 'all') fail('bad_input', 'mode must be all or computed.', 'Leave it out to compare everything.');
       const cs = compareSchedules(s.db, other, s.hpd, true);
       const count = (o: string, k: string) => cs.filter((c) => c.object === o && c.kind === k).length;
       const max = Math.min(5000, Number(a.max_changes) || 500);
@@ -366,11 +423,12 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
 }
 
 /** One tool call: queued per project, run (or turned into a job), always answered with data or {error}. */
-export async function callTool(name: string, a: Record<string, any>, sessionCaller?: string, signal?: AbortSignal): Promise<{ out: unknown; isError: boolean }> {
+/** progress: when the request asked for progress (MCP progressToken), called as long work goes on. */
+export async function callTool(name: string, a: Record<string, any>, sessionCaller?: string, signal?: AbortSignal, progress?: Ctx['progress']): Promise<{ out: unknown; isError: boolean }> {
   // one abort for the call: the request's cancellation (notifications/cancelled) and cancel_job once it is a job
   const abort = new AbortController();
   if (signal?.aborted) abort.abort(); else signal?.addEventListener('abort', () => abort.abort(), { once: true });
-  const ctx: Ctx = { caller: String(a.caller ?? sessionCaller ?? 'default'), signal: abort.signal };
+  const ctx: Ctx = { caller: String(a.caller ?? sessionCaller ?? 'default'), signal: abort.signal, progress };
   const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
   const work = async () => {
     let out = handle != null ? await exclusive(handle, () => run(name, a, ctx)) : await run(name, a, ctx);

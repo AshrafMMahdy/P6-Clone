@@ -12,7 +12,7 @@
 // early finish and whether it was critical (total float <= 0).
 import { rows, type Db, type Row, type Table } from '../db.ts';
 import { MIN_PER_DAY, parseP6Date } from '../dates.ts';
-import { scheduleProjects, p6num, type SchedOptions } from '../schedule/cpm.ts';
+import { calendarResolver, scheduleProjects, p6num, type SchedOptions } from '../schedule/cpm.ts';
 import { linkedTasks, riskProbability, riskScheduleHours, risksOf, type RiskPhase } from './register.ts';
 
 export const RISKEST = '_RISKEST';
@@ -167,6 +167,39 @@ export interface MonteCarloOptions {
   /** Yield to the event loop every n iterations (default 5). */
   yieldEvery?: number;
   signal?: AbortSignal;
+  /** Risk events given for this run (beside PROJRISK / TASKRISK): each happens with probability p and then adds its
+   *  hours to the activities named (taskHours) and / or to the project finish (projectHours, working time on the
+   *  project's calendar: a project-level delay). */
+  events?: InlineEvent[];
+  /** Duration ratio sampler: each activity's remaining duration times a ratio drawn per iteration. ratio_normal: a
+   *  normal ratio clamped to [minRatio, maxRatio]; ratio_empirical: one of the ratios (weights: their chances).
+   *  scope all (default): in place of three-point estimates; unestimated: only activities without one. */
+  sampler?: Sampler;
+  /** Rescale each three-point estimate so its mean is the activity's remaining duration. */
+  reAnchor?: boolean;
+  /** A date (minutes): the result says the chance of finishing by it. */
+  deadline?: number;
+}
+export interface InlineEvent { name: string; p: number; taskHours: [string, number][]; projectHours: number }
+export type Sampler = ({ type: 'ratio_normal'; mean: number; std: number; minRatio?: number; maxRatio?: number } | { type: 'ratio_empirical'; ratios: number[]; weights?: number[] }) & { scope?: 'all' | 'unestimated' };
+
+/** Mean of a three-point estimate under its distribution. */
+export function estimateMean(e: { min: number; ml: number; max: number; dist: Dist }): number {
+  const [a, b] = e.min <= e.max ? [e.min, e.max] : [e.max, e.min];
+  const m = Math.min(b, Math.max(a, e.ml));
+  return e.dist === 'none' ? e.ml : e.dist === 'uniform' ? (a + b) / 2 : e.dist === 'betapert' ? (a + 4 * m + b) / 6 : (a + m + b) / 3;
+}
+/** One ratio from a sampler (Box-Muller for the normal). */
+export function sampleRatio(s: Sampler, rng: () => number): number {
+  if (s.type === 'ratio_empirical') {
+    const w = s.weights?.length === s.ratios.length ? s.weights : s.ratios.map(() => 1);
+    const tot = w.reduce((x, y) => x + Math.max(0, y), 0) || 1;
+    let u = rng() * tot;
+    for (let i = 0; i < s.ratios.length; i++) { u -= Math.max(0, w[i]); if (u < 0) return s.ratios[i]; }
+    return s.ratios[s.ratios.length - 1];
+  }
+  const z = Math.sqrt(-2 * Math.log(Math.max(1e-12, rng()))) * Math.cos(2 * Math.PI * rng());
+  return Math.min(s.maxRatio ?? Infinity, Math.max(s.minRatio ?? 0, s.mean + s.std * z));
 }
 
 export interface HistogramBin { start: number; end: number; count: number; cumPct: number }
@@ -199,6 +232,13 @@ export interface MonteCarloResult {
   mean: number; min: number; max: number; stdDevDays: number;
   /** Share (0..1) of iterations finishing on or before the deterministic finish. */
   probDeterministic: number;
+  /** With a deadline: share (0..1) of iterations finishing on or before it. */
+  probDeadline?: number;
+  /** The finishes in working days from the data date, on the first project's calendar (its hours per day). */
+  days: { from: number | null; hoursPerDay: number; deterministic: number; mean: number; std: number; min: number; max: number; P10: number; P50: number; P80: number; P90: number;
+    /** mean + k standard deviations (k = -3..3), in working days and as the date that many working days on */
+    sigma: { k: number; days: number; date: number }[] };
+  events: { name: string; probability: number; triggeredPct: number }[];
   histogram: HistogramBin[];
   /** Cumulative curve (S-curve): finish date vs. % of iterations finishing by then. */
   cumulative: { t: number; pct: number }[];
@@ -330,7 +370,14 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   const ests = getEstimates(db);
   const estimable = prep.base.map(isEstimable);
   const baseDur = prep.base.map(remainingHours);
-  const est: (Estimate | null)[] = prep.base.map((t, k) => (estimable[k] ? ests.get(t.task_id) ?? null : null));
+  const est: (Estimate | null)[] = prep.base.map((t, k) => {
+    const e = estimable[k] ? ests.get(t.task_id) ?? null : null;
+    if (!e || !opts.reAnchor) return e;
+    // re-anchored: the same shape, scaled so its mean is the remaining duration
+    const m = estimateMean(e), f = m > 0 ? baseDur[k] / m : 1;
+    return { ...e, min: e.min * f, ml: e.ml * f, max: e.max * f };
+  });
+  const sampler = opts.sampler, ratioK = sampler ? prep.base.map((_t, k) => estimable[k] && (sampler.scope !== 'unestimated' || !est[k])) : [];
   const phase = opts.riskEvents ?? 'pre';
   const kOf = new Map(prep.base.map((t, k) => [t.task_id, k]));
   const riskEvents = phase === 'off' ? [] : risksOf(db, projIds).filter((r) => r.status_code !== 'RS_Rejected').map((r) => ({
@@ -340,8 +387,12 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   const riskHits = new Array<number>(riskEvents.length).fill(0);
   // Activities whose duration may vary: tracked for sensitivity
   const varies = new Set<number>();
-  for (let k = 0; k < n; k++) { const e = est[k]; if (e && e.dist !== 'none' && Math.abs(e.max - e.min) > 1e-9) varies.add(k); if (e && Math.abs(e.ml - baseDur[k]) > 1e-9) varies.add(k); }
+  for (let k = 0; k < n; k++) { const e = est[k]; if (e && e.dist !== 'none' && Math.abs(e.max - e.min) > 1e-9) varies.add(k); if (e && Math.abs(e.ml - baseDur[k]) > 1e-9) varies.add(k); if (ratioK[k] && baseDur[k] > 0) varies.add(k); }
   for (const e of riskEvents) for (const k of e.ks) varies.add(k);
+  const inline = (opts.events ?? []).map((e) => ({ ...e, hits: 0, ks: e.taskHours.map(([id, h]) => [kOf.get(id), h] as const).filter((x): x is readonly [number, number] => x[0] != null && estimable[x[0]]) }));
+  for (const e of inline) for (const [k] of e.ks) varies.add(k);
+  const cals = calendarResolver(db, []), proj0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
+  const pcal = cals.fallback(proj0?.clndr_id ?? '');
   const tracked = [...varies];
   const durSamples = tracked.map(() => new Float64Array(iterations));
   const durStats = Array.from({ length: n }, (_x, k) => ({ min: Infinity, max: -Infinity, sum: 0, base: baseDur[k] }));
@@ -356,12 +407,14 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     const { db: sdb, tasks } = scratch(prep);
     for (let k = 0; k < n; k++) {
       const e = est[k];
-      dur[k] = e ? Math.max(0, sampleDuration(e, rng)) : baseDur[k];
+      dur[k] = sampler && ratioK[k] ? baseDur[k] * Math.max(0, sampleRatio(sampler, rng)) : e ? Math.max(0, sampleDuration(e, rng)) : baseDur[k];
     }
     for (let j = 0; j < riskEvents.length; j++) {
       const ev = riskEvents[j];
       if (rng() < ev.p) { riskHits[j]++; for (const k of ev.ks) dur[k] += ev.hours; }
     }
+    let projDelay = 0;
+    for (const ev of inline) if (rng() < ev.p) { ev.hits++; for (const [k, h] of ev.ks) dur[k] += h; projDelay += ev.projectHours; }
     for (let k = 0; k < n; k++) {
       if (!estimable[k]) continue;
       if (dur[k] !== baseDur[k]) tasks[k].remain_drtn_hr_cnt = String(dur[k]);
@@ -373,6 +426,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     for (let j = 0; j < tracked.length; j++) durSamples[j][it] = dur[tracked[j]];
     const res = scheduleOrThrow(sdb, projIds, over);
     finishes[it] = finishOf(res, projIds);
+    if (projDelay > 0 && Number.isFinite(finishes[it])) finishes[it] = pcal.addWork(finishes[it], Math.round(projDelay * 60));
     for (let k = 0; k < n; k++) {
       const t = tasks[k];
       efSamples[k][it] = parseP6Date(t.early_end_date) ?? NaN;
@@ -448,7 +502,22 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   }));
   activities.sort((a, b) => b.criticality - a.criticality || a.code.localeCompare(b.code, undefined, { numeric: true }));
 
+  // in working days from the data date on the first project's calendar, with sigma marks
+  const from = detRes.stats.dataDate, hpdP = pcal.hoursPerDay() || 8;
+  const wd = (t: number) => (from == null || !Number.isFinite(t) ? NaN : pcal.workBetween(from, t) / 60 / hpdP);
+  const wds = Float64Array.from(sorted, wd);
+  const wMean = wds.reduce((x, y) => x + y, 0) / iterations, wStd = Math.sqrt(wds.reduce((x, y) => x + (y - wMean) ** 2, 0) / iterations);
+  const at = (d: number) => (from == null ? NaN : pcal.addWork(pcal.nextWorkStart(from), Math.max(0, Math.round(d * hpdP * 60))));
+  const days = {
+    from, hoursPerDay: hpdP, deterministic: wd(deterministicFinish), mean: wMean, std: wStd, min: wds[0], max: wds[wds.length - 1],
+    P10: percentile(wds, 0.1), P50: percentile(wds, 0.5), P80: percentile(wds, 0.8), P90: percentile(wds, 0.9),
+    sigma: [-3, -2, -1, 0, 1, 2, 3].map((k) => ({ k, days: wMean + k * wStd, date: at(wMean + k * wStd) })),
+  };
+  let byDeadline = 0;
+  if (opts.deadline != null) for (const f of sorted) if (f <= opts.deadline) byDeadline++;
+
   return {
+    days, events: inline.map((e) => ({ name: e.name, probability: e.p, triggeredPct: (100 * e.hits) / iterations })), ...(opts.deadline != null ? { probDeadline: byDeadline / iterations } : {}),
     iterations, seed, elapsedMs: Date.now() - t0, projIds: [...projIds], dataDate: detRes.stats.dataDate,
     deterministicFinish, finishSamples: Array.from(finishes), percentiles,
     mean, min, max, stdDevDays: Math.sqrt(sq / iterations) / MIN_PER_DAY,

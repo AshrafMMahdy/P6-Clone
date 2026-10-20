@@ -453,6 +453,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
     proj_id: pid, proj_short_name: shortName, clndr_id: projCal, plan_start_date: start, plan_end_date: '', scd_end_date: m.finish, last_recalc_date: m.statusDate || start,
     def_duration_type: 'DT_FixedDUR2', def_complete_pct_type: 'CP_Drtn', def_task_type: 'TT_Task', task_code_prefix: 'A', task_code_base: '1000', task_code_step: '10',
     critical_drtn_hr_cnt: p6num(m.criticalHrs || 0), critical_path_type: 'CT_TotFloat', name_sep_char: '.', project_flag: 'Y', def_qty_type: 'QT_Hour', def_rate_type: 'COST_PER_QTY',
+    _msp_source: 'Y', // read from Microsoft Project (MSPDI or MPX): Project's rules where they differ (one link per pair)
   });
   push('SCHEDOPTIONS', {
     schedoptions_id: pid, proj_id: pid, ...SCHED_DEFAULTS,

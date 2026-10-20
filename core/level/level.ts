@@ -16,8 +16,12 @@ export interface LevelOptions {
   priority?: 'es' | 'tf' | 'priority';
   /** Level only these resources (default: resources with level_flag != 'N'). */
   rsrcIds?: string[];
+  /** These activities (task ids) are placed first, in this order, ahead of the priority rule. */
+  first?: string[];
 }
-export interface LevelResult { log: string; delayed: number; findings: Finding[] }
+/** moved: activities leveling delayed (early start before and after, finish after); peaks: per leveled resource, the
+ *  highest use in a day after leveling (unit-hours) against its limit (Max Units/Time x 8 h x the allowed overallocation). */
+export interface LevelResult { log: string; delayed: number; findings: Finding[]; moved: { taskId: string; code: string; from: string; start: string; finish: string }[]; peaks: { rsrcId: string; code: string; peak: number; limit: number; day: string; overallocated: boolean }[] }
 
 const PRIO: Record<string, number> = { PT_Top: 0, PT_High: 1, PT_Normal: 2, PT_Low: 3, PT_Lowest: 4 };
 const HORIZON_DAYS = 366 * 10;
@@ -81,8 +85,10 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
   }
 
   const pending = tasks.filter((t) => !placed.has(t.task_id) && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
+  const firstAt = new Map((opts.first ?? []).map((id, i) => [id, i]));
   const order = (t: Row) => {
     const es = parseP6Date(t.early_start_date) ?? 0;
+    if (firstAt.has(t.task_id)) return [-1e15 + firstAt.get(t.task_id)!, es];
     if (opts.priority === 'tf') return [Number(t.total_float_hr_cnt || 0), es];
     if (opts.priority === 'priority') return [PRIO[t.priority_type] ?? 2, es];
     return [es, Number(t.total_float_hr_cnt || 0)];
@@ -90,6 +96,7 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
   const log: string[] = [];
   let delayed = 0;
   const moved = new Set<string>(); // activities leveling delayed
+  const movedList: LevelResult['moved'] = [];
   // ready queue: an activity becomes ready when all its (non-LOE) predecessors are placed; the highest priority goes first
   const remaining = new Set(pending.map((t) => t.task_id));
   const succs = new Map<string, string[]>();
@@ -152,6 +159,7 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
       moved.add(t.task_id);
       delayed++;
       log.push(`  ${t.task_code.padEnd(20)} delayed from ${formatP6Date(es0)} to ${formatP6Date(s)}`);
+      movedList.push({ taskId: t.task_id, code: t.task_code, from: formatP6Date(es0), start: formatP6Date(s), finish: formatP6Date(f) });
     }
     if (!moved.has(t.task_id)) continue; // unchanged activities keep every date the scheduler gave them
     const T = table(db, 'TASK');
@@ -160,14 +168,18 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
     Object.assign(t, { early_start_date: fs, early_end_date: ff, restart_date: fs, reend_date: ff, target_start_date: fs, target_end_date: ff });
     if (lf != null) t.total_float_hr_cnt = p6num(cal.workBetween(f, lf) / 60);
   }
-  // report remaining overallocation
+  // report remaining overallocation, and each resource's peak day
+  const peaks: LevelResult['peaks'] = [];
   for (const [rid, u] of usage) {
-    let worst = 0, day = 0;
-    for (const [d, h] of u) { const c = cap.get(rid)! * 8 * tol; if (h - c > worst) { worst = h - c; day = d; } }
+    let worst = 0, day = 0, peak = 0, pday = 0;
+    const c = cap.get(rid)! * 8 * tol;
+    for (const [d, h] of u) { if (h - c > worst) { worst = h - c; day = d; } if (h > peak) { peak = h; pday = d; } }
     if (worst > 0.01) log.push(`  Resource ${rsrcs.get(rid)?.rsrc_short_name ?? rid} still overallocated by ${p6num(worst)} h on ${formatP6Date(day * MIN_PER_DAY).slice(0, 10)}`);
+    peaks.push({ rsrcId: rid, code: rsrcs.get(rid)?.rsrc_short_name ?? rid, peak: Math.round(peak * 100) / 100, limit: Math.round(c * 100) / 100, day: formatP6Date(pday * MIN_PER_DAY).slice(0, 10), overallocated: worst > 0.01 });
   }
+  peaks.sort((a, b) => a.code.localeCompare(b.code));
   const text = ['Leveling Report', '', `Activities delayed .......... ${delayed}`, `Resources leveled ........... ${new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size}`, `Level within float .......... ${opts.withinFloat ? 'Yes' : 'No'}`,
     ...(noLimit.size ? ['', `Not leveled: ${noLimit.size} resource(s) have no Max Units/Time (set it in Enterprise > Resources > Units & Prices): ${[...noLimit].map((id) => rsrcs.get(id)?.rsrc_short_name ?? id).sort().slice(0, 40).join(', ')}${noLimit.size > 40 ? ', ...' : ''}`] : []),
     '', ...log, '', 'End of report'].join('\r\n');
-  return { log: text, delayed, findings };
+  return { log: text, delayed, findings, moved: movedList, peaks };
 }

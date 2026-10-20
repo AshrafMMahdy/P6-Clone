@@ -138,16 +138,34 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   }
 
   const P = rows(db, 'TASKPRED');
+  // rows by pair: a row matches the relationship of its type; a row whose type is not on the pair while the pair has
+  // a relationship of a type no row names is that relationship with its type edited (replaced: old type removed, new
+  // added); only a row left over after that adds a link. A pair the file holds twice (SS + FF) keeps both
+  const recs: { pred: string; succ: string; type: string; r: Record<string, Cell> }[] = [];
   for (const r of records(sheet('TASKPRED'))) {
     const pred = str(r.pred_task_id), succ = str(r.task_id);
     if (!pred || !succ) continue;
     const type = str(r.pred_type).toUpperCase().replace(/^PR_/, '') || 'FS';
     if (!['FS', 'SS', 'FF', 'SF'].includes(type)) { warnings.push(`Relationship ${pred} -> ${succ}: unknown type "${type}".`); continue; }
+    recs.push({ pred, succ, type, r });
+  }
+  const named = new Map<string, Set<string>>();
+  for (const x of recs) { const k = `${x.pred}|${x.succ}`; (named.get(k) ?? named.set(k, new Set()).get(k)!).add(x.type); }
+  const retyped = new Map<string, Row[]>(); // pair -> its relationships whose type no row names
+  for (const x of recs) {
+    const { pred, succ, type, r } = x;
     const a = byCode.get(pred), b = byCode.get(succ);
-    const existing = a && b ? P.find((p) => p.pred_task_id === a.task_id && p.task_id === b.task_id && p.pred_type === `PR_${type}`) : undefined;
+    const onPair = a && b ? P.filter((p) => p.pred_task_id === a.task_id && p.task_id === b.task_id) : [];
+    const existing = onPair.find((p) => p.pred_type === `PR_${type}`);
     if (yes(r.delete_record_flag)) { if (existing) { ops.push({ op: 'delete_relationship', pred, succ, type }); s.relationshipsDeleted++; } continue; }
     const lag = num(r.lag_hr_cnt) ?? 0;
-    if (!existing) { ops.push({ op: 'add_relationship', pred, succ, type, lag_days: lag }); s.relationshipsAdded++; }
+    if (!existing) {
+      const k = `${pred}|${succ}`;
+      if (!retyped.has(k)) retyped.set(k, onPair.filter((p) => !named.get(k)!.has(p.pred_type.replace(/^PR_/, ''))));
+      const old = retyped.get(k)!.shift();
+      if (old) { ops.push({ op: 'update_relationship', pred, succ, type: old.pred_type.replace(/^PR_/, ''), new_type: type, lag_days: lag }); s.relationshipsUpdated++; }
+      else { ops.push({ op: 'add_relationship', pred, succ, type, lag_days: lag }); s.relationshipsAdded++; }
+    }
     else if (!near(lag, days(existing.lag_hr_cnt, dh.rel(existing)) ?? 0)) { ops.push({ op: 'update_relationship', pred, succ, type, lag_days: lag }); s.relationshipsUpdated++; }
     else s.unchanged++;
   }

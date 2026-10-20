@@ -124,8 +124,10 @@ test('edit operations refuse codes P6 does not have and keep P6 rules (milestone
   const err = (ops: unknown[]): string => applyOps(db, ops).error?.message ?? '';
   ok([{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_activity', project: 'P', id: 'A1', name: 'a', duration_days: 5 }, { op: 'add_activity', project: 'P', id: 'A2', name: 'b', duration_days: 2 },
     { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2' }]);
-  // Microsoft Project (onePerPair): a second relationship between the same pair (any type) is skipped with a warning
-  const m = applyOps(structuredClone(db), [{ op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS' }], { onePerPair: true });
+  // a project read from Microsoft Project: a second relationship between the same pair (any type) is skipped with a warning
+  const msp = structuredClone(db);
+  msp.tables.PROJECT.rows[0]._msp_source = 'Y';
+  const m = applyOps(msp, [{ op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS' }]);
   assert.deepEqual([m.results[0], m.warnings!.length], [{ skipped: 'A1 SS A2', existing: 'A1 FS A2' }, 1]);
   assert.match(m.warnings![0], /A1 -> A2 \(SS\) skipped: .*FS relationship, and Microsoft Project keeps one per pair/);
   // P6: one per pair and type (an SS beside the FS is kept); a true duplicate is skipped with a warning; the rest applies

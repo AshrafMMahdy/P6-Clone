@@ -1,7 +1,7 @@
 // What the platform needs to move its schedule computation to the clone (ledger A5 round 3(a)): activity_table (G-1),
 // compute_schedule (G-2), schedule options (G-3), one relationship per pair and type (G-4), duplicate assignments
 // (G-5), break_loops and loops (G-9), and a big network built in seconds (G-13).
-import { test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,6 +14,8 @@ import { rows, type Db } from '../core/db.ts';
 import { SAMPLES_DIR } from './helpers.ts';
 
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError).structuredContent as any; };
+// close what each test opened (discarding): more than 8 open would move the oldest out to the shared recovery folder
+afterEach(async () => { for (const h of (await call('list_open', {})).open) await call('close', { handle: h.handle, discard: true }); });
 const dir = mkdtempSync(join(tmpdir(), 'p6a5-'));
 const NET = [
   { id: 'S', type: 'start_milestone' }, { id: 'A', duration_days: 5, predecessors: [{ id: 'S' }] },

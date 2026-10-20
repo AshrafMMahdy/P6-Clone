@@ -16,18 +16,17 @@ import { copyProject } from './copy.ts';
 import { dayHours as dayHoursOf } from './units.ts';
 import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
 import {
-  addActivity, addRelationship, addWbs, LOOP_MESSAGE, relationshipsBetween, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
+  addActivity, addRelationship, addWbs, LOOP_MESSAGE, onePerPair, relationshipsBetween, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
   enumOk, normDate, refreshOwnDates, setActual, setFinish, setPercent, setStart, statusOf,
 } from './edit.ts';
 
 export type Op = Record<string, unknown> & { op: string };
 export interface OpsResult { ok: boolean; applied: number; results: unknown[]; warnings?: string[]; error?: { index: number; op: unknown; message: string } }
 /** calendarDays: days on each activity's own calendar (units.ts; MCP and CLI), else at hoursPerDay (the desktop app).
- *  onePerPair: one relationship per pair of activities, as Microsoft Project keeps them (an MSPDI / MPX target); else
- *  one per pair and type, as P6 (an SS and an FF between the same two activities). allowLoops: relationships that close
- *  a loop are added (compute_schedule breaks or reports them), else the edit is refused at the one that closed it. */
-export interface OpsOptions { hoursPerDay?: number; calendarDays?: boolean; onePerPair?: boolean; allowLoops?: boolean }
-interface Batch { calDays: boolean; onePerPair: boolean; at?: number; added: { pred: string; succ: string; at: number }[] }
+ *  allowLoops: relationships that close a loop are added (compute_schedule breaks or reports them), else the edit is
+ *  refused at the one that closed it. */
+export interface OpsOptions { hoursPerDay?: number; calendarDays?: boolean; allowLoops?: boolean }
+interface Batch { calDays: boolean; at?: number; added: { pred: string; succ: string; at: number }[] }
 
 /** WBS elements by id, root (per project), lower-case path and short name: positions in the real rows, kept for the
  *  edit (db.ts tableCache; a code or parent changed in place: dropIndexes). */
@@ -79,7 +78,7 @@ const RTYPE: Record<string, string> = { labor: 'RT_Labor', nonlabor: 'RT_Equip',
 const PRIO: Record<string, string> = { top: 'PT_Top', high: 'PT_High', normal: 'PT_Normal', low: 'PT_Low', lowest: 'PT_Lowest' };
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
-export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', ...EXTRA_OP_NAMES];
+export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'set_predecessors', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', ...EXTRA_OP_NAMES];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
@@ -97,6 +96,7 @@ export const OP_GUIDE = [
   `delete_activity / dissolve_activity: id`,
   `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities are both kept; a Microsoft Project XML / MPX file one per pair): one already there is skipped and reported in "warnings". A relationship that closes a loop refuses the edit`,
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
+  `set_predecessors: activity, links [{pred, [type], [lag_days] or [lag_hours]}] ([] = none): replaces every predecessor of the activity in one step`,
   `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day] or [max_units_per_hour], [price_per_unit], [calendar], [parent]`,
   `assign_resource: activity, resource, [allow_duplicate] (true: assign it again when it is already on the activity, as P6 allows), [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6), [curve] (resource curve name, see add_resource_curve); unassign_resource: activity, resource`,
   EXTRA_GUIDE,
@@ -116,7 +116,7 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   const hpd = o.hoursPerDay ?? 8;
   const results: unknown[] = [], warnings: string[] = [];
   let at = -1;
-  const batch: Batch = { calDays: !!o.calendarDays, onePerPair: !!o.onePerPair, added: [] };
+  const batch: Batch = { calDays: !!o.calendarDays, added: [] };
   try {
     withIdCache(() => record(db, (d) => {
       for (at = 0; at < list.length; at++) { batch.at = at; results.push(apply(d, list[at] as Op, hpd, warnings, batch)); }
@@ -303,7 +303,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       // P6 keeps one relationship per pair and type (an SS and an FF between the same two activities are both kept);
       // Microsoft Project one per pair. A relationship already there is skipped, not a failure of the whole list
       const have = relationshipsBetween(db, a.task_id, b.task_id);
-      const dup = have.find((r) => r.pred_type === type) ?? (batch.onePerPair ? have[0] : undefined);
+      const dup = have.find((r) => r.pred_type === type) ?? (onePerPair(projects().find((p) => p.proj_id === b.proj_id)) ? have[0] : undefined);
       if (dup) {
         warnings.push(dup.pred_type === type ? `Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: it already exists.`
           : `Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: ${a.task_code} -> ${b.task_code} already has a ${dup.pred_type.slice(3)} relationship, and Microsoft Project keeps one per pair of activities.`);
@@ -312,6 +312,25 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       ok(addRelationship(db, a.task_id, b.task_id, type, op.lag_days != null ? num(op.lag_days, 'lag_days') * lagHours(a, b) : op.lag_hours != null ? num(op.lag_hours, 'lag_hours') : 0, true));
       batch.added.push({ pred: a.task_id, succ: b.task_id, at: batch.at ?? -1 });
       return { relationship: `${a.task_code} ${type.slice(3)} ${b.task_code}` };
+    }
+    case 'set_predecessors': {
+      // the activity's predecessors replaced by the list, as one step (loops are checked with the rest of the edit)
+      const b = activity(op.activity, op.project);
+      const links = Array.isArray(op.links) ? op.links : fail('"links" must be a list of {pred, type, lag_days} ([] removes every predecessor).');
+      const sb = b.task_id, P = table(db, 'TASKPRED');
+      const gone = removeWhere(P.rows, (r) => r.task_id === sb);
+      const out: string[] = [];
+      links.forEach((l: any, i: number) => {
+        if (!l || typeof l !== 'object') fail(`links[${i}] must be {pred, type, lag_days}.`);
+        const a = activity(l.pred ?? l.id, l.pred_project ?? op.project);
+        const type = REL[String(l.type ?? 'FS').toUpperCase()] ?? fail(`links[${i}]: relationship type must be FS, SS, FF or SF.`);
+        const have = relationshipsBetween(db, a.task_id, sb);
+        if (have.some((r) => r.pred_type === type) || (have.length && onePerPair(projects().find((p) => p.proj_id === b.proj_id)))) fail(`links[${i}]: ${a.task_code} -> ${b.task_code} is listed twice${have.some((r) => r.pred_type === type) ? '' : ' (Microsoft Project keeps one relationship per pair)'}.`);
+        ok(addRelationship(db, a.task_id, sb, type, l.lag_days != null ? num(l.lag_days, `links[${i}].lag_days`) * lagHours(a, b) : l.lag_hours != null ? num(l.lag_hours, `links[${i}].lag_hours`) : 0, true));
+        batch.added.push({ pred: a.task_id, succ: sb, at: batch.at ?? -1 });
+        out.push(`${a.task_code} ${type.slice(3)}`);
+      });
+      return { activity: b.task_code, predecessors: out, removed: gone };
     }
     case 'update_relationship': case 'delete_relationship': {
       const a = activity(op.pred, op.pred_project ?? op.project), b = activity(op.succ, op.succ_project ?? op.project);

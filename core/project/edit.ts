@@ -222,11 +222,18 @@ export function relationshipsBetween(db: Db, predId: string, succId: string): Ro
   return (rowIndex(P, 'pair', (r) => `${r.pred_task_id}|${r.task_id}`).get(`${predId}|${succId}`) ?? []).map((i) => P[i]).filter((r) => r.pred_task_id === predId && r.task_id === succId);
 }
 export const LOOP_MESSAGE = 'This relationship would create a loop (circular logic).';
+/** A project read from Microsoft Project (MSPDI or MPX; _msp_keep: read before _msp_source was kept) keeps one
+ *  relationship per pair of activities, as Project does; any other one per pair and type, as P6. The one rule, for
+ *  edits (MCP, CLI, the desktop assistant and Excel import) and the desktop's own relationship commands alike. */
+export const onePerPair = (p: Row | undefined) => !!p && (p._msp_source === 'Y' || !!p._msp_keep);
+export const ONE_PER_PAIR_MESSAGE = 'These activities are already related, and Microsoft Project keeps one relationship per pair of activities.';
 /** Why P6 would refuse this relationship, or undefined if it is allowed. noLoopCheck: the caller checks loops itself
  *  (an edit checks them once, after all its operations). */
 export function checkRelationship(db: Db, predId: string, succId: string, type = 'PR_FS', noLoopCheck = false): string | undefined {
   if (predId === succId) return 'An activity cannot be related to itself.';
-  if (relationshipsBetween(db, predId, succId).some((r) => r.pred_type === type)) return 'This relationship already exists.';
+  const have = relationshipsBetween(db, predId, succId);
+  if (have.some((r) => r.pred_type === type)) return 'This relationship already exists.';
+  if (have.length) { const T = realOf(rows(db, 'TASK')), i = (rowIndex(T, 'id', (t) => t.task_id).get(succId) ?? []).find((k) => T[k].task_id === succId); if (i != null && onePerPair(realOf(rows(db, 'PROJECT')).find((p) => p.proj_id === T[i].proj_id))) return ONE_PER_PAIR_MESSAGE; }
   if (noLoopCheck) return undefined;
   // P6 refuses links that would create a loop
   const P = realOf(rows(db, 'TASKPRED')), succOf = rowIndex(P, 'pred', (r) => r.pred_task_id);

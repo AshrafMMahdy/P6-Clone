@@ -70,7 +70,8 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
   // memory in bytes (and MB, as before)
   const st = (await call('server_status')).data.memory;
   assert.ok(st.rss_bytes > 1e6 && st.rss_mb === Math.round(st.rss_bytes / 1048576));
-  // import_excel: a relationship of another type on a pair is added beside the first (P6 keeps one per pair and type)
+  // import_excel: a row whose relationship type was edited replaces that link (old type removed, new one added); a
+  // genuinely new row adds one; the plan's warnings come through
   const g = (await call('open_file', { path: f.good })).data.handle;
   await call('export_excel', { handle: g, path: join(dir, 'g.xlsx') });
   const sheets = await readXlsx(new Uint8Array(readFileSync(join(dir, 'g.xlsx'))));
@@ -79,8 +80,22 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
   writeFileSync(join(dir, 'g2.xlsx'), await writeXlsx(sheets));
   const imp = await call('import_excel', { handle: g, path: join(dir, 'g2.xlsx') });
   assert.equal(imp.data.applied, true, JSON.stringify(imp.data));
+  assert.deepEqual([imp.data.summary.relationshipsUpdated, imp.data.summary.relationshipsAdded], [1, 0]);
   assert.ok(!imp.data.warnings.some((w: string) => /skipped/.test(w)), JSON.stringify(imp.data.warnings));
-  assert.deepEqual((await call('get_activity', { handle: g, activity_id: 'A2' })).data.predecessors.filter((p: any) => p.id === 'A1').map((p: any) => p.type).sort(), ['FS', 'SS']);
+  assert.deepEqual((await call('get_activity', { handle: g, activity_id: 'A2' })).data.predecessors.filter((p: any) => p.id === 'A1').map((p: any) => p.type), ['SS']);
+  // a new row beside it (FF) adds a link: the pair then holds SS + FF, and a re-import of that sheet changes nothing
+  const tp2 = sheets.find((s) => s.name === 'TASKPRED')!;
+  tp2.rows.push([...tp2.rows[2]]);
+  tp2.rows[tp2.rows.length - 1][tp2.rows[0].indexOf('pred_type')] = 'FF';
+  tp2.rows.push([...tp2.rows[2]]);
+  tp2.rows[tp2.rows.length - 1][tp2.rows[0].indexOf('pred_type')] = 'XX';
+  writeFileSync(join(dir, 'g3.xlsx'), await writeXlsx(sheets));
+  const imp2 = await call('import_excel', { handle: g, path: join(dir, 'g3.xlsx') });
+  assert.deepEqual([imp2.data.summary.relationshipsAdded, imp2.data.summary.relationshipsUpdated], [1, 0]);
+  assert.ok(imp2.data.warnings.some((w: string) => /unknown type "XX"/.test(w)), JSON.stringify(imp2.data.warnings));
+  assert.deepEqual((await call('get_activity', { handle: g, activity_id: 'A2' })).data.predecessors.filter((p: any) => p.id === 'A1').map((p: any) => p.type).sort(), ['FF', 'SS']);
+  await call('export_excel', { handle: g, path: join(dir, 'g4.xlsx') });
+  assert.equal((await call('import_excel', { handle: g, path: join(dir, 'g4.xlsx'), dry_run: true })).data.note, 'Nothing to change.');
 });
 
 /** A stdio server with arguments; tools and the way it ends. */
