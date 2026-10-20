@@ -26,10 +26,32 @@ env:
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 jobs:
+  # What is built: a tag that already exists is built from the tag itself (a re-run never builds a later commit under an old
+  # tag); a new tag from the commit the run was dispatched on, and the release then creates the tag there.
+  plan:
+    runs-on: ubuntu-22.04
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+    steps:
+      - id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          if [ "${{ github.ref_type }}" != "tag" ] && [ -n "${{ inputs.tag }}" ] && gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "ref=refs/tags/$tag" >> "$GITHUB_OUTPUT"; echo "building the existing tag $tag"
+          else
+            echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"; echo "building $GITHUB_SHA"
+          fi
+
   build:
+    needs: plan
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ needs.plan.outputs.ref }}" }
       - uses: actions/setup-node@v4
         with: { node-version: "24" }
       - run: npm ci
@@ -82,11 +104,12 @@ jobs:
           node smoke.mjs
 
   release:
-    needs: smoke
+    needs: [plan, smoke]
     if: github.ref_type == 'tag' || inputs.tag != ''
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ needs.plan.outputs.ref }}" }
       - uses: actions/download-artifact@v4
         with: { name: bundle, path: dist-cli }
       - name: Package, SHA256SUMS and engines.lock
@@ -96,8 +119,10 @@ jobs:
           name="$APP-$tag"
           mkdir -p "dist/$name"
           cp dist-cli/p6clone-mcp.cjs dist-cli/p6clone.cjs README.md "dist/$name/" && cp -r dist-cli/fonts "dist/$name/fonts"   # the PDF font (Arabic) travels with the bundle
-          printf '%s\n' "$APP $tag, commit $GITHUB_SHA, bundle node18 target" > "dist/$name/BUILD.txt"
-          cd dist && tar -czf "$name.tar.gz" "$name"
+          printf '%s\n' "$APP $tag, commit $(git rev-parse HEAD), bundle node18 target" > "dist/$name/BUILD.txt"
+          # Reproducible: the same commit gives the same archive bytes (names sorted, times of the commit, no owners, no gzip stamp).
+          epoch="$(git log -1 --format=%ct)"
+          cd dist && tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -cf - "$name" | gzip -n > "$name.tar.gz"
           sha256sum "$name.tar.gz" > SHA256SUMS && cat SHA256SUMS
           python3 - "$APP" "$tag" > engines.lock <<'PY'
           import json, sys
@@ -114,9 +139,12 @@ jobs:
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
           cd dist
-          # A release made first on GitHub's Releases page (that is how the tag can be made without a terminal) gets the files added.
+          # A published asset is never replaced: the platform pins it by sha256 (engines.lock), and a replaced file would fail
+          # every install's verify. A release made first on GitHub's Releases page, with no files yet, gets them added.
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" ./*.tar.gz SHA256SUMS engines.lock --clobber
+            n="$(gh release view "$tag" --json assets --jq '.assets | length')"
+            if [ "$n" != "0" ]; then echo "::error::release $tag already has $n file(s); a published release is never overwritten — publish a new tag"; exit 1; fi
+            gh release upload "$tag" ./*.tar.gz SHA256SUMS engines.lock
           else
-            gh release create "$tag" ./*.tar.gz SHA256SUMS engines.lock --target "$GITHUB_SHA" --title "p6clone $tag" --notes "The P6 clone's MCP server (one Node bundle, node18+) for the White Hat IQ platform. Checksums: SHA256SUMS; engines.lock for the platform's scripts/engines-pin.mjs."
+            gh release create "$tag" ./*.tar.gz SHA256SUMS engines.lock --target "$(git rev-parse HEAD)" --title "p6clone $tag" --notes "The P6 clone's MCP server (one Node bundle, node18+) for the White Hat IQ platform. Checksums: SHA256SUMS; engines.lock for the platform's scripts/engines-pin.mjs."
           fi
