@@ -4,10 +4,10 @@
 // read from Microsoft Project can also be named "uid:<task UID>" (the UID it has in that file), a WBS element
 // "wbs_id:<id>" (the id add_wbs returns). Days are converted on the activity's own calendar (its hours per day).
 // Used by the command-line `edit` command and the MCP server.
-import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
+import { addField, nextId, rows, table, withIdCache, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num } from '../schedule/cpm.ts';
-import { record, rollback } from '../journal.ts';
+import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
 import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
 import { assignResource, assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { copyProject } from './copy.ts';
@@ -65,7 +65,7 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   const results: unknown[] = [], warnings: string[] = [];
   let at = -1;
   try {
-    record(db, (d) => { for (at = 0; at < list.length; at++) results.push(apply(d, list[at] as Op, hpd, warnings)); });
+    withIdCache(() => record(db, (d) => { for (at = 0; at < list.length; at++) results.push(apply(d, list[at] as Op, hpd, warnings)); }));
     return { ok: true, applied: list.length, results, ...(warnings.length ? { warnings } : {}) };
   } catch (e) {
     // record() has already put the database back as it was
@@ -83,10 +83,10 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
   };
   const activity = (id: unknown, proj?: unknown): Row => {
     const code = str(id, 'id');
-    const pool = proj != null ? rows(db, 'TASK').filter((t) => t.proj_id === project(proj).proj_id) : rows(db, 'TASK').filter((t) => projects().some((p) => p.proj_id === t.proj_id));
-    let hits = pool.filter((t) => t.task_code === code);
+    const pids = new Set(proj != null ? [project(proj).proj_id] : projects().map((p) => p.proj_id));
+    let hits = pick(rows(db, 'TASK'), (t) => t.task_code === code && pids.has(t.proj_id), 2);
     const uid = !hits.length ? /^uid:\s*(.+)$/i.exec(code)?.[1] : undefined;
-    if (uid) hits = pool.filter((t) => t._msp_uid === uid);
+    if (uid) hits = pick(rows(db, 'TASK'), (t) => t._msp_uid === uid && pids.has(t.proj_id), 2);
     if (hits.length > 1) fail(`${uid ? `Task UID ${uid}` : `Activity ID "${code}"`} exists in several projects; add "project".`);
     return hits[0] ?? fail(uid ? `No activity with Microsoft Project task UID ${uid} (only activities read from an MSPDI or MPX file have one).` : `No activity "${code}".`);
   };
@@ -98,7 +98,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
     return w ? projects().find((p) => p.proj_id === w.proj_id)! : project(id);
   };
   const wbsOf = (p: Row, code: unknown): Row => {
-    const W = rows(db, 'PROJWBS').filter((w) => w.proj_id === p.proj_id);
+    const pid = p.proj_id;
+    const W = pick(rows(db, 'PROJWBS'), (w) => w.proj_id === pid);
     if (code == null || code === '') return W.find((w) => w.proj_node_flag === 'Y') ?? fail(`Project ${p.proj_short_name} has no WBS root.`);
     const wid = wbsIdOf(code);
     if (wid) return W.find((w) => w.wbs_id === wid) ?? fail(`No WBS element with wbs_id ${wid} in project ${p.proj_short_name}.`);
@@ -203,7 +204,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       for (let grew = true; grew;) { grew = false; for (const x of rows(db, 'PROJWBS')) if (sub.has(x.parent_wbs_id) && !sub.has(x.wbs_id)) { sub.add(x.wbs_id); grew = true; } }
       const ids = rows(db, 'TASK').filter((t) => sub.has(t.wbs_id)).map((t) => t.task_id);
       const linked = op.keep_logic === false ? (deleteActivities(db, ids), 0) : dissolveActivities(db, ids);
-      table(db, 'PROJWBS').rows = rows(db, 'PROJWBS').filter((x) => !sub.has(x.wbs_id));
+      removeWhere(rows(db, 'PROJWBS'), (x) => sub.has(x.wbs_id));
       return { deleted_wbs: w.wbs_short_name, wbs_elements: sub.size, activities: ids.length, relationships_added: linked };
     }
     case 'add_activity': {
@@ -212,7 +213,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       const t = addActivity(db, p.proj_id, w.wbs_id, hpd);
       if (op.id != null) {
         const code = str(op.id, 'id');
-        if (rows(db, 'TASK').some((x) => x.task_id !== t.task_id && x.proj_id === p.proj_id && x.task_code === code)) fail(`Activity ID "${code}" already exists in ${p.proj_short_name}.`);
+        const tid = t.task_id, pid = p.proj_id;
+        if (pick(rows(db, 'TASK'), (x) => x.task_id !== tid && x.proj_id === pid && x.task_code === code, 1).length) fail(`Activity ID "${code}" already exists in ${p.proj_short_name}.`);
         t.task_code = code;
       }
       t.task_name = str(op.name, 'name');
@@ -237,7 +239,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       const a = activity(op.pred, op.pred_project ?? op.project), b = activity(op.succ, op.succ_project ?? op.project);
       const type = REL[String(op.type ?? 'FS').toUpperCase()] ?? fail(`Relationship type must be FS, SS, FF or SF.`);
       // P6 keeps one relationship per pair of activities: a second one is skipped, not a failure of the whole list
-      const dup = rows(db, 'TASKPRED').find((r) => r.pred_task_id === a.task_id && r.task_id === b.task_id);
+      const pa = a.task_id, sb = b.task_id;
+      const dup = pick(rows(db, 'TASKPRED'), (r) => r.pred_task_id === pa && r.task_id === sb, 1)[0];
       if (dup) {
         warnings.push(`Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: ${a.task_code} -> ${b.task_code} already has a ${dup.pred_type.slice(3)} relationship, and P6 keeps one per pair of activities.`);
         return { skipped: `${a.task_code} ${type.slice(3)} ${b.task_code}`, existing: `${a.task_code} ${dup.pred_type.slice(3)} ${b.task_code}` };
@@ -249,10 +252,11 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       const a = activity(op.pred, op.pred_project ?? op.project), b = activity(op.succ, op.succ_project ?? op.project);
       const P = table(db, 'TASKPRED');
       const want = op.type ? REL[String(op.type).toUpperCase()] : null;
-      const hits = P.rows.filter((r) => r.pred_task_id === a.task_id && r.task_id === b.task_id && (!want || r.pred_type === want));
+      const pa = a.task_id, sb = b.task_id;
+      const hits = pick(P.rows, (r) => r.pred_task_id === pa && r.task_id === sb && (!want || r.pred_type === want));
       if (!hits.length) fail(`No relationship ${a.task_code} -> ${b.task_code}${want ? ` (${want.slice(3)})` : ''}.`);
       if (hits.length > 1) fail(`Several relationships ${a.task_code} -> ${b.task_code}; give "type".`);
-      if (op.op === 'delete_relationship') { P.rows = P.rows.filter((r) => r !== hits[0]); return { deleted: `${a.task_code} -> ${b.task_code}` }; }
+      if (op.op === 'delete_relationship') { const gone = realOf(hits[0]); removeWhere(P.rows, (r) => r === gone); return { deleted: `${a.task_code} -> ${b.task_code}` }; }
       if (op.new_type) {
         const nt = REL[String(op.new_type).toUpperCase()] ?? fail('new_type must be FS, SS, FF or SF.');
         if (P.rows.some((r) => r !== hits[0] && r.pred_task_id === a.task_id && r.task_id === b.task_id && r.pred_type === nt)) fail(`${a.task_code} -> ${b.task_code} already has a ${nt.slice(3)} relationship.`);
@@ -279,7 +283,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
     }
     case 'assign_resource': {
       const t = activity(op.activity, op.project), r = resource(op.resource);
-      if (rows(db, 'TASKRSRC').some((a) => a.task_id === t.task_id && a.rsrc_id === r.rsrc_id)) fail(`${r.rsrc_short_name} is already assigned to ${t.task_code}.`);
+      const tid = t.task_id, rid = r.rsrc_id;
+      if (pick(rows(db, 'TASKRSRC'), (a) => a.task_id === tid && a.rsrc_id === rid, 1).length) fail(`${r.rsrc_short_name} is already assigned to ${t.task_code}.`);
       const a = assignResource(db, t, r.rsrc_id);
       if (op.units_per_day != null) recalcAssignment(db, t, a, 'target_qty_per_hr', num(op.units_per_day, 'units_per_day') / hpd);
       if (op.units != null) { recalcAssignment(db, t, a, 'target_qty', num(op.units, 'units')); a.remain_qty = a.target_qty; recomputeCosts(db, a); }
@@ -290,7 +295,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
     case 'unassign_resource': {
       const t = activity(op.activity, op.project), r = resource(op.resource);
       const T = table(db, 'TASKRSRC'), n = T.rows.length;
-      T.rows = T.rows.filter((a) => !(a.task_id === t.task_id && a.rsrc_id === r.rsrc_id));
+      const tid = t.task_id, rid = r.rsrc_id;
+      removeWhere(T.rows, (a) => a.task_id === tid && a.rsrc_id === rid);
       if (T.rows.length === n) fail(`${r.rsrc_short_name} is not assigned to ${t.task_code}.`);
       return { unassigned: `${r.rsrc_short_name} -> ${t.task_code}` };
     }

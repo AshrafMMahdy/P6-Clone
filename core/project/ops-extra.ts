@@ -6,6 +6,7 @@ import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { ensureEps } from './edit.ts';
+import { pick, realOf, removeWhere } from '../journal.ts';
 import { STEP_FIELDS, syncFromSteps } from './steps.ts';
 import { DISTS, setEstimate, type Dist } from '../risk/montecarlo.ts';
 import { assignBaseline, deleteBaseline, restoreBaseline, saveBaseline } from '../progress/baseline.ts';
@@ -90,12 +91,14 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     const k = (v == null || v === '' ? dflt : lc(v)) as keyof typeof CODE_SUBJECTS;
     return CODE_SUBJECTS[k] ? CODE_SUBJECTS[k] : fail(`subject must be ${Object.keys(CODE_SUBJECTS).join(', ')}.`);
   };
-  const codeType = (S: (typeof CODE_SUBJECTS)[keyof typeof CODE_SUBJECTS], name: unknown) => rows(db, S.type).find((t) => lc(t[S.tname]) === lc(name)) ?? fail(`No code type "${name}" (add it with {"op":"add_code_type"}).`);
+  const codeType = (S: (typeof CODE_SUBJECTS)[keyof typeof CODE_SUBJECTS], name: unknown) => pick(rows(db, S.type), (t) => lc(t[S.tname]) === lc(name), 1)[0] ?? fail(`No code type "${name}" (add it with {"op":"add_code_type"}).`);
   const codeValue = (S: (typeof CODE_SUBJECTS)[keyof typeof CODE_SUBJECTS], type: Row, code: unknown) => {
-    const vals = rows(db, S.val).filter((v) => v[S.tid] === type[S.tid]);
+    // read only: the real rows (a search through the journal's view, once per assign_code, was slow)
+    const tid = type[S.tid], c = lc(code);
+    const vals = realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid);
     const byId = new Map(vals.map((v) => [v[S.vid], v]));
     const path = (v: Row) => { const out: string[] = []; for (let x: Row | undefined = v, n = 0; x && n < 50; x = byId.get(x[S.vparent]), n++) out.unshift(x[S.vshort]); return out.join('.').toLowerCase(); };
-    const hits = vals.filter((v) => lc(v[S.vshort]) === lc(code) || path(v) === lc(code));
+    const hits = vals.filter((v) => lc(v[S.vshort]) === c || path(v) === c);
     if (hits.length > 1) fail(`Code value "${code}" is ambiguous in ${type[S.tname]}; use the full path (e.g. ${path(hits[0])}).`);
     return hits[0] ?? fail(`No value "${code}" in code type ${type[S.tname]}.`);
   };
@@ -244,8 +247,9 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const S = codeSubject(op.subject, tg.subject as keyof typeof CODE_SUBJECTS);
       const type = codeType(S, str(op.type, 'type'));
       const L = ensure(db, S.link, [S.fk, S.tid, S.vid, ...(S.link === 'TASKACTV' ? ['proj_id'] : [])]);
-      const valsOfType = new Set(rows(db, S.val).filter((v) => v[S.tid] === type[S.tid]).map((v) => v[S.vid]));
-      L.rows = L.rows.filter((a) => !(a[S.fk] === tg.fk && (a[S.tid] === type[S.tid] || valsOfType.has(a[S.vid]))));
+      const fk = tg.fk, tid = type[S.tid]; // plain values: a view's field read per row is slow
+      const valsOfType = new Set(realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid).map((v) => v[S.vid]));
+      removeWhere(L.rows, (a) => a[S.fk] === fk && (a[S.tid] === tid || valsOfType.has(a[S.vid])));
       if (op.value == null || op.value === '') return { removed: type[S.tname] };
       const v = codeValue(S, type, op.value);
       L.rows.push({ [S.fk]: tg.fk, [S.tid]: type[S.tid], [S.vid]: v[S.vid], ...(S.link === 'TASKACTV' ? { proj_id: tg.projId } : {}) });
@@ -267,7 +271,8 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const name = str(op.udf, 'udf');
       const u = rows(db, 'UDFTYPE').find((x) => x.table_name === tbl && lc(x.udf_type_label) === lc(name)) ?? fail(`No ${tg.subject} UDF "${name}" (add it with {"op":"add_udf"}).`);
       const V = ensure(db, 'UDFVALUE', ['udf_type_id', 'fk_id', 'proj_id', 'udf_date', 'udf_number', 'udf_text', 'udf_code_id']);
-      V.rows = V.rows.filter((v) => !(v.udf_type_id === u.udf_type_id && v.fk_id === tg.fk));
+      const uid = u.udf_type_id, fk = tg.fk;
+      removeWhere(V.rows, (v) => v.udf_type_id === uid && v.fk_id === fk);
       if (op.value == null || op.value === '') return { cleared: name };
       const r: Row = { udf_type_id: u.udf_type_id, fk_id: tg.fk, proj_id: tg.projId, udf_date: '', udf_number: '', udf_text: '', udf_code_id: '' };
       if (/DATE/.test(u.logical_data_type)) r.udf_date = date(op.value, 'value');
@@ -283,10 +288,11 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       let mt = MT.rows.find((m) => lc(m.memo_type) === lc(topic));
       const TM = ensure(db, 'TASKMEMO', ['memo_id', 'task_id', 'memo_type_id', 'proj_id', 'task_memo']);
       const text = typeof op.text === 'string' ? op.text : op.text == null ? '' : fail('"text" must be text.');
-      if (!text) { if (mt) TM.rows = TM.rows.filter((m) => !(m.task_id === t.task_id && m.memo_type_id === mt!.memo_type_id)); return { cleared: topic }; }
+      if (!text) { if (mt) { const id = mt.memo_type_id, tid = t.task_id; removeWhere(TM.rows, (m) => m.task_id === tid && m.memo_type_id === id); } return { cleared: topic }; }
       if (!mt) { mt = { memo_type_id: String(nextId(db, 'MEMOTYPE')), seq_num: String(MT.rows.length), eps_flag: 'N', proj_flag: 'N', wbs_flag: 'N', task_flag: 'Y', memo_type: topic }; MT.rows.push(mt); }
       else if (mt.task_flag !== 'Y') mt.task_flag = 'Y';
-      const cur = TM.rows.find((m) => m.task_id === t.task_id && m.memo_type_id === mt!.memo_type_id);
+      const tid = t.task_id, mid = mt.memo_type_id;
+      const cur = pick(TM.rows, (m) => m.task_id === tid && m.memo_type_id === mid, 1)[0];
       if (cur) cur.task_memo = memoHtml(text);
       else TM.rows.push({ memo_id: String(nextId(db, 'TASKMEMO')), task_id: t.task_id, memo_type_id: mt.memo_type_id, proj_id: t.proj_id, task_memo: memoHtml(text) });
       return { notebook: `${t.task_code} / ${topic}` };
@@ -315,7 +321,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       setExpense(c, op);
       return { expense: `${t.task_code} / ${c.cost_name}` };
     }
-    case 'delete_expense': { const { t, c } = expense(op); const id = c.cost_item_id; table(db, 'PROJCOST').rows = rows(db, 'PROJCOST').filter((x) => x.cost_item_id !== id); return { deleted: `${t.task_code} / ${c.cost_name}` }; }
+    case 'delete_expense': { const { t, c } = expense(op); const id = c.cost_item_id; removeWhere(rows(db, 'PROJCOST'), (x) => x.cost_item_id === id); return { deleted: `${t.task_code} / ${c.cost_name}` }; }
     case 'add_step': {
       const t = h.activity(op.activity, op.project);
       const name = str(op.name, 'name');
@@ -335,7 +341,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       syncFromSteps(db, t.task_id);
       return { step: `${t.task_code} / ${s.proc_name}` };
     }
-    case 'delete_step': { const { t, s } = step(op); const id = s.proc_id; table(db, 'TASKPROC').rows = rows(db, 'TASKPROC').filter((x) => x.proc_id !== id); syncFromSteps(db, t.task_id); return { deleted: `${t.task_code} / ${s.proc_name}` }; }
+    case 'delete_step': { const { t, s } = step(op); const id = s.proc_id; removeWhere(rows(db, 'TASKPROC'), (x) => x.proc_id === id); syncFromSteps(db, t.task_id); return { deleted: `${t.task_code} / ${s.proc_name}` }; }
     case 'set_estimates': {
       const t = h.activity(op.activity, op.project);
       if (op.clear === true) { setEstimate(db, t.task_id, null); return { cleared: t.task_code }; }
@@ -417,7 +423,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       }
       if (kind === 'obs') { const n = rows(db, 'PROJWBS').filter((w) => sub.has(w.obs_id)).length; if (n) fail(`OBS "${r[T.key]}" (or a child) is the responsible manager of ${n} WBS element(s).`); }
       if (kind === 'role') { const n = rows(db, 'TASKRSRC').filter((a) => sub.has(a.role_id)).length; if (n) fail(`Role "${r[T.key]}" (or a child) is used by ${n} assignment(s).`); }
-      table(db, T.table).rows = rows(db, T.table).filter((x) => !sub.has(x[T.id]));
+      removeWhere(rows(db, T.table), (x) => sub.has(x[T.id]));
       return { deleted: r[T.key], with_children: sub.size - 1 };
     }
     case 'update_calendar': {

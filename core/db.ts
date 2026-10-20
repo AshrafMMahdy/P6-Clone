@@ -1,4 +1,5 @@
 export type Row = Record<string, string>;
+import { realOf } from './journal.ts';
 export interface Table { name: string; fields: string[]; rows: Row[] }
 export interface XerHeader { version: string; exportDate: string; raw: string[]; /** text encoding the file was read in */ encoding?: string }
 export interface Db { header?: XerHeader; tables: Record<string, Table> }
@@ -80,16 +81,31 @@ function refTargetUncached(field: string, inTable?: string): string | undefined 
   return ALIASES[field] ?? KEY_TO_TABLE[field];
 }
 
+let idCache: WeakMap<Row[], { n: number; last: Row | undefined; max: number }> | null = null;
+/** Run fn with nextId remembering each table's highest id: an edit adds rows one at a time, and a scan of the whole
+ *  table per new row made a 20,000-row edit quadratic. Valid while rows are only added at the end or removed. */
+export function withIdCache<T>(fn: () => T): T {
+  const prev = idCache;
+  idCache ??= new WeakMap();
+  try { return fn(); } finally { idCache = prev; }
+}
+
 /** Next free numeric id for a table's key. */
 export function nextId(db: Db, tableName: string): number {
   const k = KEYS[tableName];
-  let max = 0;
-  if (k) for (const r of rows(db, tableName)) { const n = Number(r[k]); if (n > max) max = n; }
-  return max + 1;
+  if (!k) return 1;
+  const raw = realOf(rows(db, tableName)); // read only: the real rows
+  let c = idCache?.get(raw);
+  // rows taken away and others added since (the last row seen is not where it was): look at everything again
+  if (!c || raw.length < c.n || (c.n > 0 && raw[c.n - 1] !== c.last)) c = { n: 0, last: undefined, max: 0 };
+  for (let i = c.n; i < raw.length; i++) { const n = Number(raw[i][k]); if (n > c.max) c.max = n; }
+  c.n = raw.length; c.last = raw[raw.length - 1];
+  idCache?.set(raw, c);
+  return c.max + 1;
 }
 
 export function addField(t: Table, f: string): void {
-  if (!t.fields.includes(f)) t.fields.push(f);
+  if (!realOf(t.fields).includes(f)) t.fields.push(f); // read the real list: through a recording view, per field per row, it was slow
 }
 
 export function indexBy(rs: Row[], field: string): Map<string, Row> {

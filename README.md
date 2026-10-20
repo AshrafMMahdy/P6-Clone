@@ -190,6 +190,9 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
   `retry_after` in seconds, for one release): `next_step` says what to do next; a failed or cancelled job is an error too. Long work (a big
   `open_file`, `monte_carlo`) can run with `async: true` and `job_status`; any call still running after 25 s turns into
   a job by itself. Oversized results come back as a preview with a note on how to ask for less.
+- One `edit` may carry tens of thousands of operations: time and memory grow with their number, not its square (a plan
+  rebuilding `129 trial.xer`, 48,355 operations with 21,646 `assign_code` and 19,399 `assign_resource`, applies in about
+  15 s at 165 MB peak RSS, undo journal included).
 - MCP `notifications/cancelled` (or `cancel_job` for a job) stops `open_file`, `save` and `schedule` between their
   phases and `monte_carlo` at once, with error `cancelled`: nothing is kept, no file is written, the memory is freed.
 

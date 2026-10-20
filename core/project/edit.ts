@@ -4,6 +4,7 @@ import { addField, groupBy, indexBy, nextId, rows, table, type Db, type Row } fr
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num, calendarResolver } from '../schedule/cpm.ts';
 import { ENUMS } from '../xer/schema.ts';
+import { realOf, removeWhere } from '../journal.ts';
 
 export const isMilestone = (r: Row) => r.task_type === 'TT_Mile' || r.task_type === 'TT_FinMile';
 export const statusOf = (r: Row) => (r.act_end_date ? 'TK_Complete' : r.act_start_date ? 'TK_Active' : 'TK_NotStart');
@@ -149,7 +150,7 @@ export function nextTaskCode(db: Db, projId: string): string {
   const prefix = p?.task_code_prefix ?? 'A';
   const step = Number(p?.task_code_step || 10);
   let n = Number(p?.task_code_base || 1000);
-  const used = new Set(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => t.task_code));
+  const used = new Set(realOf(rows(db, 'TASK')).filter((t) => t.proj_id === projId).map((t) => t.task_code)); // read only
   for (const t of used) {
     if (!t.startsWith(prefix)) continue;
     const k = Number(t.slice(prefix.length));
@@ -182,9 +183,10 @@ export function addActivity(db: Db, projId: string, wbsId: string, hoursPerDay =
 
 export function deleteActivities(db: Db, ids: string[]): void {
   const s = new Set(ids);
-  table(db, 'TASK').rows = rows(db, 'TASK').filter((t) => !s.has(t.task_id));
-  table(db, 'TASKPRED').rows = rows(db, 'TASKPRED').filter((r) => !s.has(r.task_id) && !s.has(r.pred_task_id));
-  for (const t of Object.values(db.tables)) if (t.name !== 'TASK' && t.fields.includes('task_id')) t.rows = t.rows.filter((r) => !s.has(r.task_id));
+  // in place (removeWhere): one journal copy per change, however many operations delete activities
+  removeWhere(rows(db, 'TASK'), (t) => s.has(t.task_id));
+  removeWhere(rows(db, 'TASKPRED'), (r) => s.has(r.task_id) || s.has(r.pred_task_id));
+  for (const t of Object.values(db.tables)) if (t.name !== 'TASK' && t.fields.includes('task_id')) removeWhere(t.rows, (r) => s.has(r.task_id));
 }
 
 /**
@@ -216,7 +218,7 @@ export function dissolveActivities(db: Db, ids: string[]): number {
 /** Why P6 would refuse this relationship, or undefined if it is allowed. */
 export function checkRelationship(db: Db, predId: string, succId: string, type = 'PR_FS'): string | undefined {
   if (predId === succId) return 'An activity cannot be related to itself.';
-  const P = rows(db, 'TASKPRED');
+  const P = realOf(rows(db, 'TASKPRED')); // read only
   if (P.some((r) => r.task_id === succId && r.pred_task_id === predId && r.pred_type === type)) return 'This relationship already exists.';
   // P6 refuses links that would create a loop
   const succOf = groupBy(P, 'pred_task_id');
@@ -234,10 +236,10 @@ export function checkRelationship(db: Db, predId: string, succId: string, type =
 export function addRelationship(db: Db, predId: string, succId: string, type = 'PR_FS', lagHrs = 0): string | void {
   const err = checkRelationship(db, predId, succId, type);
   if (err) return err;
-  const tasks = indexBy(rows(db, 'TASK'), 'task_id');
+  const T = realOf(rows(db, 'TASK')), proj = (id: string) => T.find((t) => t.task_id === id)!.proj_id;
   const P = table(db, 'TASKPRED');
   for (const f of ['task_pred_id', 'task_id', 'pred_task_id', 'proj_id', 'pred_proj_id', 'pred_type', 'lag_hr_cnt']) addField(P, f);
-  P.rows.push({ task_pred_id: String(nextId(db, 'TASKPRED')), task_id: succId, pred_task_id: predId, proj_id: tasks.get(succId)!.proj_id, pred_proj_id: tasks.get(predId)!.proj_id, pred_type: type, lag_hr_cnt: p6num(lagHrs) });
+  P.rows.push({ task_pred_id: String(nextId(db, 'TASKPRED')), task_id: succId, pred_task_id: predId, proj_id: proj(succId), pred_proj_id: proj(predId), pred_type: type, lag_hr_cnt: p6num(lagHrs) });
 }
 
 export function addWbs(db: Db, projId: string, parentId: string): Row {

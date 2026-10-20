@@ -1,13 +1,15 @@
 // Resource assignments (TASKRSRC): P6 duration-type rules and cost = units x price.
 import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
+import { pick } from '../journal.ts';
 
 export const ASSIGN_FIELDS = ['taskrsrc_id', 'task_id', 'proj_id', 'cost_qty_link_flag', 'role_id', 'acct_id', 'rsrc_id', 'remain_qty', 'target_qty', 'remain_qty_per_hr', 'target_qty_per_hr', 'act_ot_qty', 'act_reg_qty', 'cost_per_qty', 'target_cost', 'act_reg_cost', 'act_ot_cost', 'remain_cost', 'act_start_date', 'act_end_date', 'restart_date', 'reend_date', 'target_start_date', 'target_end_date', 'rem_late_start_date', 'rem_late_end_date', 'rate_type', 'curv_id', 'rsrc_type', 'cost_per_qty_source_type'];
 
 /** Price per unit: the assignment's own rate, else the resource's rate in effect at the activity start. */
 export function priceOf(db: Db, a: Row, at?: string): number {
   if (a.cost_per_qty && a.cost_per_qty_source_type === 'ST_Custom') return Number(a.cost_per_qty);
-  const rates = rows(db, 'RSRCRATE').filter((r) => r.rsrc_id === a.rsrc_id).sort((x, y) => (x.start_date || '').localeCompare(y.start_date || ''));
+  const rid = a.rsrc_id;
+  const rates = pick(rows(db, 'RSRCRATE'), (r) => r.rsrc_id === rid).sort((x, y) => (x.start_date || '').localeCompare(y.start_date || ''));
   const when = at ?? a.target_start_date ?? '';
   let rate: Row | undefined;
   for (const r of rates) if (!r.start_date || !when || r.start_date <= when) rate = r;
@@ -60,7 +62,7 @@ export function recalcAssignment(db: Db, task: Row, a: Row, field: 'target_qty' 
 export function assignResource(db: Db, task: Row, rsrcId: string, roleId = ''): Row {
   const T = table(db, 'TASKRSRC');
   for (const f of ASSIGN_FIELDS) addField(T, f);
-  const rsrc = rows(db, 'RSRC').find((r) => r.rsrc_id === rsrcId);
+  const rsrc = pick(rows(db, 'RSRC'), (r) => r.rsrc_id === rsrcId, 1)[0];
   const perHr = Number(rsrc?.def_qty_per_hr || 1);
   const durH = Number(task.target_drtn_hr_cnt || 0);
   const remH = Number(task.remain_drtn_hr_cnt || 0);

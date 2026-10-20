@@ -8,6 +8,42 @@ export const RAW = Symbol('raw');
 /** The real object behind a recording view (or the value itself). */
 export const rawOf = <T>(v: T): T => ((v as { [RAW]?: T } | null)?.[RAW] ?? v);
 
+/** The real object behind any number of nested recording views (or the value itself). */
+export function realOf<T>(v: T): T {
+  let x = v as { [RAW]?: T } | null;
+  for (let r = x?.[RAW]; r != null && r !== x; r = (x as { [RAW]?: T } | null)?.[RAW]) x = r as { [RAW]?: T };
+  return x as T;
+}
+
+/**
+ * Remove the rows `drop` picks from a table's row array IN PLACE, and return how many went. Giving the table a new
+ * filtered array instead made the journal keep a copy of every new array a later operation of the same change
+ * touched: an edit of 20,000 code assignments held 20,000 copies of a 20,000-row table. In place, the journal copies
+ * the array once per change. `drop` sees the real rows (read them, do not write them).
+ */
+export function removeWhere<R>(view: R[], drop: (r: R) => boolean): number {
+  const raw = realOf(view);
+  const i = raw.findIndex(drop);
+  if (i < 0) return 0;
+  view.length = view.length; // a recording view notes the array here (once per change); outside one, nothing happens
+  let w = i;
+  for (let k = i; k < raw.length; k++) if (!drop(raw[k])) raw[w++] = raw[k];
+  const n = raw.length - w;
+  raw.length = w;
+  return n;
+}
+
+/**
+ * The rows `test` picks, searched in the real array (a recording view wraps every row it reads: a search of a big
+ * table through it, once per operation, made a 50,000-operation edit take minutes). The rows come back as the
+ * view's rows, so writing to them is recorded. `test` sees the real rows (read only).
+ */
+export function pick<R>(view: R[], test: (r: R) => boolean, max = Infinity): R[] {
+  const raw = realOf(view), out: R[] = [];
+  for (let i = 0; i < raw.length && out.length < max; i++) if (test(raw[i])) out.push(raw === view ? raw[i] : view[i]);
+  return out;
+}
+
 /** Old value of a key that did not exist before the change. */
 export const ABSENT = Symbol('absent');
 
