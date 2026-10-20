@@ -126,7 +126,9 @@ test('MCP contract: read and write roots, atomic saves into new folders, unsaved
   assert.match(s.stderr(), new RegExp(`saved to ${join(out, rec[0]).replace(/[.\\\\]/g, '\\$&')}`));
   const back = parseXer(new Uint8Array(readFileSync(join(out, rec[0])))).db;
   assert.equal(back.tables.TASK.rows.find((t) => t.task_code === 'A2410')!.task_name, 'Changed before exit');
-  // and on SIGTERM; a project without changes is not saved
+  // and on SIGTERM; a project without changes is not saved (Windows has no SIGTERM: kill() terminates the process at
+  // once, so only the stdin-close path above can save there)
+  if (process.platform === 'win32') return;
   const t = server(['--automation-read-root', inn, '--automation-write-root', join(base, 'out2')], base);
   const n = await t.tool('new_project', { id: 'Fresh Plan', start: '2026-03-02' });
   await t.tool('open_file', { path: 'cfc.xer' });
