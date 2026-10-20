@@ -51,6 +51,14 @@ function systemPrompt(actions: boolean): string {
 const pref = (k: string) => { try { return localStorage.getItem(`p6clone.ai.${k}`); } catch { return null; } };
 const setPref = (k: string, v: string) => { try { localStorage.setItem(`p6clone.ai.${k}`, v); } catch { /* not kept */ } };
 
+type Entry = { k: 'line'; l: Line } | { k: 'msg'; m: ChatMsg };
+const GENERAL = '_general';
+const chatKey = (ids: string[]) => {
+  const db = getDb();
+  const names = ids.map((id) => rows(db, 'PROJECT').find((p) => p.proj_id === id)?.proj_short_name).filter((n): n is string => !!n);
+  return names.length ? names.map((n) => n.toLowerCase()).sort().join('+') : GENERAL;
+};
+
 export function AssistantPanel() {
   const open = useStore((s) => s.ui.aiOpen);
   const wide = useStore((s) => s.ui.aiWide);
@@ -65,6 +73,20 @@ export function AssistantPanel() {
   const box = useRef<HTMLTextAreaElement>(null);
   const [autoOpen, setAutoOpen] = useState(() => pref('autoOpen') === '1');
   const booted = useRef(false);
+  // the conversation is kept per project (the open projects' IDs; "_general" with none open), append-only until cleared
+  const openIds = useStore((s) => s.ui.openProjects);
+  const key = chatKey(openIds);
+  const busyRef = useRef(false);
+  const gen = useRef(0);
+  const load = (k: string) => {
+    const g = ++gen.current;
+    void window.p6.aiChatLoad(k).then((es) => {
+      if (g !== gen.current) return;
+      const list = es as Entry[];
+      history.current = list.flatMap((e) => (e.k === 'msg' ? [e.m] : []));
+      setLines(list.flatMap((e) => (e.k === 'line' ? [e.l] : [])));
+    });
+  };
 
   useEffect(() => { void window.p6.aiGetConfig().then(setCfg); window.p6.onAiConfig(setCfg); }, []);
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [lines, open]);
@@ -80,15 +102,20 @@ export function AssistantPanel() {
     setPref('booted', '1');
     if (first || pref('autoOpen') === '1') setUi({ aiOpen: true });
   }, [cfg?.enabled]);
+  useEffect(() => { if (cfg?.enabled && !busyRef.current) load(key); }, [key, cfg?.enabled]);
   if (!cfg?.enabled) return null;
 
-  const add = (l: Line) => setLines((x) => [...x, l]);
   const ask = async () => {
     const q = input.trim();
     if (!q || busy) return;
+    // everything this answer adds goes to the conversation it started in (unless that is cleared meanwhile)
+    const convKey = key, g = gen.current;
+    const log = (e: Entry) => { if (g === gen.current) void window.p6.aiChatAppend(convKey, [e]); };
+    const add = (l: Line) => { if (g !== gen.current) return; setLines((x) => [...x, l]); log({ k: 'line', l }); };
+    const push = (m: ChatMsg) => { if (g !== gen.current) return; history.current.push(m); log({ k: 'msg', m }); };
     setInput(''); add({ who: 'user', text: q });
-    history.current.push({ role: 'user', content: q });
-    setBusy(true); stopped.current = false;
+    push({ role: 'user', content: q });
+    setBusy(true); busyRef.current = true; stopped.current = false;
     try {
       for (let round = 0, idle = 0; round < MAX_ROUNDS && idle < MAX_IDLE_ROUNDS && !stopped.current; round++) {
         const id = `${Date.now()}-${round}`;
@@ -97,7 +124,7 @@ export function AssistantPanel() {
         const r = await window.p6.aiChat(id, { system: systemPrompt(allow), messages: compactHistory(history.current), tools: allow ? [...TOOLS, ...LIVE_TOOLS] : TOOLS });
         if (!r.ok) { add({ who: 'error', text: r.error }); break; }
         const { content, toolCalls } = r.reply;
-        history.current.push({ role: 'assistant', content, toolCalls });
+        push({ role: 'assistant', content, toolCalls });
         if (content.trim() && !toolCalls.length) add({ who: 'ai', text: content.trim() });
         if (!toolCalls.length) break;
         // answer each lookup from the database (fresh context each round: the project may have changed)
@@ -106,7 +133,7 @@ export function AssistantPanel() {
           let out: unknown;
           try { out = LIVE_TOOLS.some((t) => t.name === c.name) ? await runLive(c.name, c.args ?? {}) : runTool(c.name, c.args ?? {}, getDb(), makeCtx(getDb(), getUi().prefs), getUi().openProjects, ui.prefs.hoursPerDay); } catch (e) { out = { error: (e as Error).message }; }
           const json = JSON.stringify(out);
-          history.current.push({ role: 'tool', toolCallId: c.id, name: c.name, content: json.length > 60000 ? json.slice(0, 60000) + '... (truncated)' : json });
+          push({ role: 'tool', toolCallId: c.id, name: c.name, content: json.length > 60000 ? json.slice(0, 60000) + '... (truncated)' : json });
           const err = (out as { error?: string })?.error;
           if (c.name === 'edit_project' && !err) idle = -1;
           add({ who: 'tool', text: `${LABEL[c.name] ?? c.name}${c.args?.project ? ` [${c.args.project}]` : ''}${c.args?.path ? ` ${c.args.path}` : c.args?.target ? ` "${c.args.target}"` : c.args?.field ? ` "${c.args.field}"` : c.args?.activity_id ? ` ${c.args.activity_id}` : c.args?.text ? ` for "${c.args.text}"` : ''}${err ? ` (${err})` : ''}` });
@@ -114,11 +141,17 @@ export function AssistantPanel() {
         idle++;
         if (round === MAX_ROUNDS - 1 || idle === MAX_IDLE_ROUNDS) add({ who: 'error', text: 'Stopped after many steps. Ask me to continue, or try a narrower question.' });
       }
-    } finally { setBusy(false); callId.current = null; }
+    } finally {
+      setBusy(false); busyRef.current = false; callId.current = null;
+      // the open project changed during the answer: a conversation started with no project open (say, one that
+      // created the project) moves to that project; otherwise show the conversation of what is open now
+      const now = chatKey(getUi().openProjects);
+      if (now !== convKey && g === gen.current) { if (convKey === GENERAL) await window.p6.aiChatMove(convKey, now); load(now); }
+    }
   };
   const stop = () => { stopped.current = true; if (callId.current) void window.p6.aiCancel(callId.current); };
   // Clear context: the assistant forgets the conversation (stops a running answer first)
-  const clear = () => { if (busy) stop(); history.current = []; setLines([]); };
+  const clear = () => { if (busy) stop(); gen.current++; history.current = []; setLines([]); void window.p6.aiChatClear(key); };
   const asked = lines.filter((l) => l.who === 'user').length;
 
   const strip = <div className={`ai-strip ${open ? 'open' : ''}`} title={`${open ? 'Hide' : 'Open'} the AI Assistant (Ctrl+Shift+A)`} onClick={() => setUi({ aiOpen: !open })}><span>AI Assistant</span></div>;

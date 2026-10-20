@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } from 'electron';
 import { AiStore, chat, type AiConfig, type ChatRequest } from './ai.ts';
+import { appendChat, clearChat, loadChat, moveChat } from './ai-chats.ts';
 import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -158,6 +159,11 @@ ipcMain.handle('ai:chat', async (_e, id: string, req: ChatRequest) => {
   finally { aiCalls.delete(id); }
 });
 ipcMain.handle('ai:cancel', (_e, id: string) => { aiCalls.get(id)?.abort(); return true; });
+const chatDir = () => join(app.getPath('userData'), 'ai-chats');
+ipcMain.handle('ai:chatLoad', (_e, key: string) => loadChat(chatDir(), key));
+ipcMain.handle('ai:chatAppend', (_e, key: string, entries: unknown[]) => appendChat(chatDir(), key, entries));
+ipcMain.handle('ai:chatClear', (_e, key: string) => clearChat(chatDir(), key));
+ipcMain.handle('ai:chatMove', (_e, from: string, to: string) => moveChat(chatDir(), from, to));
 
 // the menu bar as data (labels, command ids, shortcuts): the AI assistant uses it to explain and to operate menus
 export interface MenuNode { label: string; id?: string; accelerator?: string; submenu?: MenuNode[] }

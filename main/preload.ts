@@ -43,6 +43,10 @@ const api = {
   aiSetConfig: (c: AiConfig, apiKey?: string): Promise<AiPublicConfig> => ipcRenderer.invoke('ai:setConfig', c, apiKey),
   aiChat: (id: string, req: ChatRequest): Promise<{ ok: true; reply: ChatReply } | { ok: false; error: string }> => ipcRenderer.invoke('ai:chat', id, req),
   aiCancel: (id: string): Promise<boolean> => ipcRenderer.invoke('ai:cancel', id),
+  aiChatLoad: (key: string): Promise<unknown[]> => ipcRenderer.invoke('ai:chatLoad', key),
+  aiChatAppend: (key: string, entries: unknown[]): Promise<void> => ipcRenderer.invoke('ai:chatAppend', key, entries),
+  aiChatClear: (key: string): Promise<void> => ipcRenderer.invoke('ai:chatClear', key),
+  aiChatMove: (from: string, to: string): Promise<void> => ipcRenderer.invoke('ai:chatMove', from, to),
   onAiConfig: (cb: (c: AiPublicConfig) => void) => { ipcRenderer.on('ai:config', (_e, c: AiPublicConfig) => cb(c)); },
   /** .mpp bytes -> Microsoft Project XML bytes, converted by the installed Microsoft Project. Rejects with the bridge error. */
   mppToXml: (bytes: Uint8Array): Promise<Uint8Array> => ipcRenderer.invoke('msp:mppToXml', bytes),
