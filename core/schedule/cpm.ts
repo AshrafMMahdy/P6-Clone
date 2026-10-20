@@ -1,4 +1,5 @@
 // P6-style CPM scheduler (F9). Works on raw TASK/TASKPRED rows and writes dates back.
+import { computeFloatPaths, writeFloatPaths } from './floatPaths.ts';
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, memo, parseP6Date, MIN_PER_DAY } from '../dates.ts';
 import type { Finding } from '../findings.ts';
@@ -38,6 +39,8 @@ export interface SchedOptions {
   /** Schedule a network with loops: the relationships that close them (back links, in table order) are left out of
    *  this run and returned in ScheduleResult.broken; P6 stops instead. */
   breakLoops?: boolean;
+  /** Schedule Options > Advanced > Calculate multiple float paths: F9 fills Float Path and Float Path Order. */
+  floatPaths: { enabled: boolean; method: 'total_float' | 'free_float'; count: number; endActivity?: string };
 }
 
 export interface ScheduleStats { activities: number; relationships: number; notStarted: number; inProgress: number; completed: number; finish: number | null; dataDate: number | null }
@@ -80,6 +83,10 @@ export function optionsFor(db: Db, proj: Row, over: Partial<SchedOptions> = {}):
     ssLagFromActualStart: so.sched_lag_early_start_flag === 'N',
     modernBuild: Number((proj._p6_ver || db.header?.version || '0').split('.')[0]) >= 8,
     resumeAfterActuals: proj._msp_resume === 'Y',
+    floatPaths: {
+      enabled: so.enable_multiple_longest_path_calc === 'Y', method: so.use_total_float_multiple_longest_paths === 'Y' ? 'total_float' : 'free_float', count: Number(so.max_multiple_longest_path) || 10,
+      ...(so.key_activity_for_multiple_longest_paths ? { endActivity: rows(db, 'TASK').find((t) => t.task_id === so.key_activity_for_multiple_longest_paths)?.task_code } : {}),
+    },
   };
   return { ...base, ...over };
 }
@@ -703,6 +710,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     }
     if (a.as != null && a.as > a.proj.dd) findings.push({ severity: 'warning', code: 'ACTUAL_AFTER_DD', key: a.code, message: `${a.code} has an actual start after the data date.`, p6: 'Listed in the schedule log under "Actual dates after data date".' });
   }
+
+  // multiple float paths, for the projects with the option on (written after the dates they are read from)
+  if (!sink) for (const p of projects.values()) if (p.opts.floatPaths?.enabled) writeFloatPaths(db, [p.id], computeFloatPaths(db, [p.id], p.opts.floatPaths).assign);
 
   const first = [...projects.values()][0];
   const log = buildScheduleLog({ projects: [...projects.values()].map((p) => p.row), dataDate: first.dd, opts: first.opts, findings, stats, acts: order.map((a) => ({ code: a.code, name: a.row.task_name })) });

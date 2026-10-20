@@ -8,9 +8,9 @@ const LAG: Record<string, LagCalendar> = { predecessor: 'predecessor', successor
 const FLOAT: Record<string, FloatType> = { start: 'start', start_float: 'start', finish: 'finish', finish_float: 'finish', smallest: 'smallest', most_critical: 'smallest' };
 const CRIT: Record<string, SchedOptions['criticalBy']> = { total_float: 'float', float: 'float', longest_path: 'longestPath' };
 const BOOLS = { open_ended_critical: 'openEndedCritical', use_expected_finish: 'useExpectedFinish', ignore_external: 'ignoreExternal', ss_lag_from_actual_start: 'ssLagFromActualStart' } as const;
-export const SCHEDULE_OPTION_NAMES = ['logic', 'lag_calendar', 'float_type', 'critical', 'critical_float_hours', 'critical_float_days', ...Object.keys(BOOLS)];
+export const SCHEDULE_OPTION_NAMES = ['logic', 'lag_calendar', 'float_type', 'critical', 'critical_float_hours', 'critical_float_days', 'float_paths', 'float_path_method', 'float_paths_count', 'float_path_end', ...Object.keys(BOOLS)];
 
-export const SCHEDULE_OPTIONS_GUIDE = `logic (retained, override, actual), lag_calendar (predecessor, successor, 24h, project), float_type (start, finish, smallest), critical (total_float, longest_path), critical_float_hours or critical_float_days (critical when total float <= this), open_ended_critical, use_expected_finish, ignore_external (relationships to other projects), ss_lag_from_actual_start (true/false)`;
+export const SCHEDULE_OPTIONS_GUIDE = `logic (retained, override, actual), lag_calendar (predecessor, successor, 24h, project), float_type (start, finish, smallest), critical (total_float, longest_path), critical_float_hours or critical_float_days (critical when total float <= this), open_ended_critical, use_expected_finish, ignore_external (relationships to other projects), ss_lag_from_actual_start (true/false), float_paths (true/false: Advanced > Calculate multiple float paths; F9 then fills Float Path and Float Path Order) with float_path_method (free_float, the default, or total_float), float_paths_count (default 10) and float_path_end (Activity ID the paths end with; default the open end with the latest finish)`;
 
 /** The options given (snake_case names), as the scheduler's; an unknown name or value is refused. */
 export function parseScheduleOptions(o: Record<string, unknown>, fail: (m: string) => never, hpd = 8): Partial<SchedOptions> {
@@ -29,6 +29,13 @@ export function parseScheduleOptions(o: Record<string, unknown>, fail: (m: strin
   if (o.critical_float_hours != null) out.criticalFloatHrs = num('critical_float_hours');
   else if (o.critical_float_days != null) out.criticalFloatHrs = num('critical_float_days') * hpd;
   for (const [k, f] of Object.entries(BOOLS)) if (o[k] != null) { if (typeof o[k] !== 'boolean') fail(`${k} must be true or false.`); out[f] = o[k] as boolean; }
+  // Advanced: multiple float paths
+  if (o.float_paths != null || o.float_path_method != null || o.float_paths_count != null || o.float_path_end != null) {
+    if (o.float_paths != null && typeof o.float_paths !== 'boolean') fail('float_paths must be true or false.');
+    const m = o.float_path_method == null ? 'free_float' : String(o.float_path_method).toLowerCase();
+    if (m !== 'free_float' && m !== 'total_float') fail('float_path_method must be free_float or total_float.');
+    out.floatPaths = { enabled: o.float_paths !== false, method: m as 'free_float' | 'total_float', count: o.float_paths_count != null ? Math.max(1, Math.floor(num('float_paths_count'))) : 10, ...(o.float_path_end ? { endActivity: String(o.float_path_end) } : {}) };
+  }
   return out;
 }
 
@@ -52,6 +59,12 @@ export function writeScheduleOptions(db: Db, p: Row, s: Partial<SchedOptions>): 
   if (s.useExpectedFinish != null) { set('sched_use_expect_end_flag', yn(s.useExpectedFinish)); done.push(`use_expected_finish ${s.useExpectedFinish}`); }
   if (s.ignoreExternal != null) { set('sched_outer_depend_type', s.ignoreExternal ? 'SD_None' : 'SD_Both'); done.push(`ignore_external ${s.ignoreExternal}`); }
   if (s.ssLagFromActualStart != null) { set('sched_lag_early_start_flag', yn(!s.ssLagFromActualStart)); done.push(`ss_lag_from_actual_start ${s.ssLagFromActualStart}`); }
+  if (s.floatPaths) {
+    set('enable_multiple_longest_path_calc', yn(s.floatPaths.enabled)); set('use_total_float_multiple_longest_paths', yn(s.floatPaths.method === 'total_float')); set('max_multiple_longest_path', String(s.floatPaths.count));
+    const end = s.floatPaths.endActivity ? (db.tables.TASK?.rows ?? []).find((t) => t.proj_id === p.proj_id && t.task_code === s.floatPaths!.endActivity) : undefined;
+    set('key_activity_for_multiple_longest_paths', end?.task_id ?? '');
+    done.push(`float_paths ${s.floatPaths.enabled ? `${s.floatPaths.method}, ${s.floatPaths.count} paths${end ? `, ending with ${end.task_code}` : ''}` : 'off'}`);
+  }
   const P = table(db, 'PROJECT');
   if (s.criticalBy) { addField(P, 'critical_path_type'); p.critical_path_type = s.criticalBy === 'longestPath' ? 'CT_DrivPath' : 'CT_TotFloat'; done.push(`critical ${s.criticalBy === 'longestPath' ? 'longest_path' : 'total_float'}`); }
   if (s.criticalFloatHrs != null) { addField(P, 'critical_drtn_hr_cnt'); p.critical_drtn_hr_cnt = p6num(s.criticalFloatHrs); done.push(`critical_float_hours ${s.criticalFloatHrs}`); }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { writeScheduleOptions } from '../../core/schedule/options.ts';
 import { Dialog } from '../components/Layout.tsx';
 import { closeDialog, getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
 import { runSchedule } from '../commands.ts';
@@ -75,6 +76,7 @@ export function ScheduleOptionsDialog() {
         const pr = d.tables.PROJECT.rows.find((x) => x.proj_id === pid)!;
         pr.critical_path_type = o.criticalBy === 'longestPath' ? 'CT_DrivPath' : 'CT_TotFloat';
         pr.critical_drtn_hr_cnt = String(o.criticalFloatHrs);
+        writeScheduleOptions(d, pr, { floatPaths: o.floatPaths });
       }
     });
     closeDialog();
@@ -99,6 +101,22 @@ export function ScheduleOptionsDialog() {
       <fieldset><legend>Critical activities (project setting)</legend>
         <label style={{ display: 'block' }}><input type="radio" checked={o.criticalBy === 'float'} onChange={() => set({ criticalBy: 'float' })} /> Total float less than or equal to <input type="number" style={{ width: 60 }} value={o.criticalFloatHrs} onChange={(e) => set({ criticalFloatHrs: Number(e.target.value) })} /> h</label>
         <label style={{ display: 'block' }}><input type="radio" checked={o.criticalBy === 'longestPath'} onChange={() => set({ criticalBy: 'longestPath' })} /> Longest Path</label>
+      </fieldset>
+      <fieldset><legend>Advanced</legend>
+        <label style={{ display: 'block' }}><input type="checkbox" checked={o.floatPaths.enabled} onChange={(e) => set({ floatPaths: { ...o.floatPaths, enabled: e.target.checked } })} /> Calculate multiple float paths</label>
+        <div style={{ paddingLeft: 20, opacity: o.floatPaths.enabled ? 1 : 0.5 }}>
+          <label style={{ display: 'block' }}><input type="radio" disabled={!o.floatPaths.enabled} checked={o.floatPaths.method === 'total_float'} onChange={() => set({ floatPaths: { ...o.floatPaths, method: 'total_float' } })} /> Calculate multiple paths using Total Float</label>
+          <label style={{ display: 'block' }}><input type="radio" disabled={!o.floatPaths.enabled} checked={o.floatPaths.method === 'free_float'} onChange={() => set({ floatPaths: { ...o.floatPaths, method: 'free_float' } })} /> Calculate multiple paths using Free Float</label>
+          <div className="form" style={{ gridTemplateColumns: 'auto 1fr', marginTop: 4 }}>
+            <label>Display multiple float paths ending with activity</label>
+            <select disabled={!o.floatPaths.enabled} value={o.floatPaths.endActivity ?? ''} onChange={(e) => set({ floatPaths: { ...o.floatPaths, endActivity: e.target.value || undefined } })}>
+              <option value="">(the open end with the latest finish)</option>
+              {rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && t.task_type !== 'TT_WBS').map((t) => <option key={t.task_id} value={t.task_code}>{t.task_code} {t.task_name}</option>)}
+            </select>
+            <label>Number of paths to calculate</label>
+            <input type="number" min={1} disabled={!o.floatPaths.enabled} style={{ width: 70 }} value={o.floatPaths.count} onChange={(e) => set({ floatPaths: { ...o.floatPaths, count: Math.max(1, Math.floor(Number(e.target.value) || 1)) } })} />
+          </div>
+        </div>
       </fieldset>
     </Dialog>
   );

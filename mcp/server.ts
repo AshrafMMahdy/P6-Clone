@@ -420,7 +420,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       return { saved: path, rows: report!.rows.length };
     }
   }
-  const analysed = await runAnalysis(name, a, s, { projectIds, allIds, dd, writeOut });
+  const analysed = await runAnalysis(name, a, s, { projectIds, allIds, dd, writeOut, apply: (label, fn) => change(s, ctx.caller, label, fn) });
   if (analysed !== undefined) return analysed;
   if (LOOKUPS.some((t) => t.name === name)) {
     const { handle: _h, caller: _c, async: _a, ...args } = a;
