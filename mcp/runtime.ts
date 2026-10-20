@@ -7,7 +7,8 @@
 //  - Memory: projects are admitted against a budget; idle or least recently used projects are moved out to a lossless
 //    recovery file and come back by themselves on the next call (nothing is ever discarded).
 //  - Long work can run as a job that the agent checks with job_status.
-//  - With a root folder, every path is confined to it (symlinks resolved).
+//  - With a root folder, every path is confined to it (symlinks resolved); --automation-read-root / --automation-write-root
+//    fence reads (read or write root) and writes (write root) separately, like the craft forks.
 //  - Every failure is a ToolError with a code and a next step.
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync, writeFileSync, writeSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -30,12 +31,12 @@ export const fail = (code: string, message: string, hint?: string, extra?: { ret
 
 // ---------------------------------------------------------------- configuration
 export interface Config {
-  root: string | null; requireOwnerKey: boolean; maxHandles: number; budgetBytes: number; idleMinutes: number;
+  root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean; maxHandles: number; budgetBytes: number; idleMinutes: number;
   memFactor: number; busyWaitMs: number; softTimeoutMs: number; maxResponseChars: number;
 }
 const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
 export const config: Config = {
-  root: null, requireOwnerKey: false,
+  root: null, readRoot: null, writeRoot: null, requireOwnerKey: false,
   maxHandles: num(process.env.P6CLONE_MAX_HANDLES, 8),
   budgetBytes: num(process.env.P6CLONE_MEM_BUDGET_MB, 3072) * 1048576,
   idleMinutes: num(process.env.P6CLONE_IDLE_MINUTES, 30),
@@ -48,22 +49,38 @@ export const config: Config = {
 export const effectiveBudget = () => Math.min(config.budgetBytes, getHeapStatistics().heap_size_limit - 512 * 1048576);
 
 // ---------------------------------------------------------------- paths
-let realRoot: string | null = null;
-export function setRoot(dir: string | null): void {
-  config.root = dir ? resolve(dir) : null;
-  if (config.root) { mkdirSync(config.root, { recursive: true }); realRoot = realpathSync(config.root); }
-}
-/** A path argument, made absolute and kept inside the root folder (when there is one), symlinks included. */
-export function pathArg(p: unknown, what = 'path'): string {
+const real = new Map<string, string>(); // root -> its real path
+const made = (dir: string | null | undefined, create: boolean) => {
+  if (!dir) return null;
+  const d = resolve(dir);
+  if (create) mkdirSync(d, { recursive: true });
+  real.set(d, existsSync(d) ? realpathSync(d) : d);
+  return d;
+};
+export function setRoot(dir: string | null): void { config.root = made(dir, true); }
+/** --automation-read-root / --automation-write-root (the write root is created when missing). */
+export function setRoots(read: string | null | undefined, write: string | null | undefined): void { config.readRoot = made(read, false); config.writeRoot = made(write, true); }
+/** Where writes go and relative write paths start: the write root, else the storage root. */
+export const writeBase = () => config.writeRoot ?? config.root;
+const fences = (mode: 'read' | 'write') => (mode === 'write' ? [writeBase()] : config.readRoot || config.writeRoot ? [config.readRoot, writeBase()] : [config.root]).filter((x): x is string => !!x);
+/** A path argument, made absolute and kept inside the roots (when there are any), symlinks included. Reading: the read
+ *  root or the write root; writing: the write root. A relative path is taken from the write root (reads: from the read
+ *  root when the file is there). */
+export function pathArg(p: unknown, what = 'path', mode: 'read' | 'write' = 'read'): string {
   if (typeof p !== 'string' || !p.trim()) fail('bad_input', `Give "${what}" (a file path).`, 'Pass the file path as a string.');
   const s = (p as string).trim();
-  const abs = config.root ? resolve(config.root, s) : resolve(s);
-  if (!config.root) return abs;
-  // resolve the deepest existing part through symlinks, then check it is still inside the root
+  const base = writeBase();
+  const abs = isAbsolute(s) ? resolve(s) : mode === 'read' && config.readRoot && (existsSync(resolve(config.readRoot, s)) || !base) ? resolve(config.readRoot, s) : base ? resolve(base, s) : resolve(s);
+  const fs = fences(mode);
+  if (!fs.length) return abs;
+  // resolve the deepest existing part through symlinks, then check it is still inside a root
   let probe = abs, rest = '';
   while (!existsSync(probe) && dirname(probe) !== probe) { rest = join(probe.slice(dirname(probe).length + 1), rest); probe = dirname(probe); }
-  const real = join(existsSync(probe) ? realpathSync(probe) : probe, rest);
-  if (real !== realRoot && !real.startsWith(realRoot! + sep)) fail('path_outside_root', `"${s}" is outside the storage root.`, 'Use a path inside the storage root (relative paths are taken from the root).', { data: { root: config.root } });
+  const r = join(existsSync(probe) ? realpathSync(probe) : probe, rest);
+  if (!fs.some((f) => { const x = real.get(f) ?? f; return r === x || r.startsWith(x + sep); })) {
+    const which = config.readRoot || config.writeRoot ? (mode === 'write' ? 'the write root' : 'the read and write roots') : 'the storage root';
+    fail('path_outside_root', `"${s}" is outside ${which}.`, `Use a path inside ${which} (relative paths are taken from ${config.writeRoot ? 'the write root' : 'the root'}).`, { data: { root: config.root, read_root: config.readRoot, write_root: writeBase() } });
+  }
   return abs;
 }
 export const recoveryDir = () => join(config.root ?? tmpdir(), '.p6clone-recovery');
@@ -148,6 +165,11 @@ export function getSession(h: unknown): Session {
   try { rmSync(e!.file); } catch { /* keep */ }
   return back;
 }
+/** Projects moved out with unsaved changes, read back from their recovery files (for the save at exit). */
+export function* unsavedEvicted(): Generator<{ handle: string; path: string | null; hpd: number; db: Db }> {
+  for (const [handle, e] of evicted) if (e.dirty && existsSync(e.file)) yield { handle, path: e.path, hpd: e.hpd, db: readDbFile(e.file).db };
+}
+export const isDirty = (h: string) => sessions.get(h)?.dirty ?? evicted.get(h)?.dirty ?? false;
 export function closeSession(s: Session): void { sessions.delete(s.handle); evicted.delete(s.handle); }
 export function forgetEvicted(handle: string): void { const e = evicted.get(handle); if (e) { try { rmSync(e.file); } catch { /* */ } evicted.delete(handle); saveIndex(); } }
 export const evictedList = () => [...evicted].map(([h, e]) => ({ handle: h, file: e.path, recovery_file: e.file, reason: e.reason, unsaved_changes: e.dirty, since: new Date(e.at).toISOString() }));
@@ -263,7 +285,7 @@ export function startJob(tool: string, handle: string | undefined, p: Promise<un
 export function jobView(job: Job) {
   const base = { job_id: job.id, tool: job.tool, handle: job.handle, running_seconds: Math.round(((job.done ?? Date.now()) - job.started) / 1000) };
   if (!job.done) return { ...base, status: 'running', progress: job.progress, note: 'Call job_status again shortly (pass wait_seconds to wait up to 20 s).' };
-  if (job.error) return { ...base, status: job.error instanceof ToolError && job.error.code === 'cancelled' ? 'cancelled' : 'failed', error: job.error instanceof ToolError ? { code: job.error.code, message: job.error.message, hint: job.error.hint } : { code: 'internal', message: job.error.message } };
+  if (job.error) return { ...base, status: job.error instanceof ToolError && job.error.code === 'cancelled' ? 'cancelled' : 'failed', error: job.error instanceof ToolError ? { code: job.error.code, reason: job.error.message, next_step: job.error.hint, message: job.error.message, hint: job.error.hint } : { code: 'internal', reason: job.error.message, message: job.error.message } };
   return { ...base, status: 'done', result: job.result };
 }
 export function getJob(id: unknown): Job {
@@ -278,8 +300,8 @@ export const setProgress = (job: Job | undefined, msg: string) => { if (job) job
 export function status() {
   const m = process.memoryUsage();
   return {
-    memory: { rss_mb: Math.round(m.rss / 1048576), heap_used_mb: Math.round(m.heapUsed / 1048576), budget_mb: Math.round(effectiveBudget() / 1048576), projects_mb: Math.round(usedBytes() / 1048576), heap_limit_mb: Math.round(getHeapStatistics().heap_size_limit / 1048576) },
-    limits: { max_handles: config.maxHandles, idle_minutes: config.idleMinutes, busy_wait_seconds: config.busyWaitMs / 1000, root: config.root, owner_key_required: config.requireOwnerKey },
+    memory: { rss_bytes: m.rss, rss_mb: Math.round(m.rss / 1048576), heap_used_mb: Math.round(m.heapUsed / 1048576), budget_mb: Math.round(effectiveBudget() / 1048576), projects_mb: Math.round(usedBytes() / 1048576), heap_limit_mb: Math.round(getHeapStatistics().heap_size_limit / 1048576) },
+    limits: { max_handles: config.maxHandles, idle_minutes: config.idleMinutes, busy_wait_seconds: config.busyWaitMs / 1000, root: config.root, read_root: config.readRoot, write_root: writeBase(), owner_key_required: config.requireOwnerKey },
     open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, memory_mb: Math.round(s.bytes / 1048576), idle_seconds: Math.round((Date.now() - s.lastUsed) / 1000), busy: busy.has(s.handle), unsaved_changes: s.dirty, changes: s.history.length })),
     moved_out: evictedList(),
     jobs: jobsList(),

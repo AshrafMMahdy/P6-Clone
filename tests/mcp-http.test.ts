@@ -104,7 +104,10 @@ test('MCP HTTP: token, origin, sessions as callers, owner keys, root, per-caller
 
     const st = await bob('server_status');
     assert.ok(st.data.open.length >= 1);
-    const closed = await alice('close', { handle: h, owner_key: key });
+    // close keeps unsaved work: refused unless the caller says to drop it
+    const kept = await alice('close', { handle: h, owner_key: key });
+    assert.deepEqual([kept.isError, kept.data.error.code, kept.data.error.reason, kept.data.unsaved_changes], [true, 'unsaved_changes', kept.data.error.message, undefined]);
+    const closed = await alice('close', { handle: h, owner_key: key, discard: true });
     assert.equal(closed.isError, false);
   } finally { s.stop(); }
 });

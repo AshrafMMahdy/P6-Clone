@@ -1,5 +1,5 @@
 // Project > Maintain Baselines: a baseline is a copy of the project stored as its own (hidden) project.
-import { rows, table, type Db } from '../db.ts';
+import { addField, rows, table, type Db } from '../db.ts';
 import { selectRows } from '../xer/write.ts';
 import { importIntoDb, deleteProject } from '../xer/import.ts';
 import { formatP6Date } from '../dates.ts';
@@ -39,4 +39,10 @@ export function deleteBaseline(db: Db, baselineId: string): void {
 export function restoreBaseline(db: Db, baselineId: string): void {
   const b = rows(db, 'PROJECT').find((x) => x.proj_id === baselineId);
   if (b) b._baseline_of = '';
+}
+
+/** Baselines in an XER: P6 writes each as a PROJECT row whose orig_proj_id names the project it is a baseline of. */
+export function markBaselines(db: Db): void {
+  const P = rows(db, 'PROJECT'), ids = new Set(P.map((p) => p.proj_id));
+  for (const p of P) if (p.orig_proj_id && p.orig_proj_id !== p.proj_id && ids.has(p.orig_proj_id) && !p._baseline_of) { addField(table(db, 'PROJECT'), '_baseline_of'); p._baseline_of = p.orig_proj_id; }
 }

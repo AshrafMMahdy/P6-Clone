@@ -144,7 +144,9 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
     const known = verification(opts.version, name) === 'exact' ? null : knownFields(name);
     const fields = known ? [...base, ...src.filter((f) => !base.includes(f) && known.has(f))] : base;
     lines.push(`%T\t${name}`, `%F\t${fields.join('\t')}`);
-    for (const r of rs) lines.push('%R\t' + fields.map((f) => clean(r[f])).join('\t'));
+    // a baseline is a PROJECT row whose orig_proj_id names its project (how P6 writes and reads baselines)
+    const val = name === 'PROJECT' ? (r: Row, f: string) => (f === 'orig_proj_id' && r._baseline_of ? r._baseline_of : r[f]) : (r: Row, f: string) => r[f];
+    for (const r of rs) lines.push('%R\t' + fields.map((f) => clean(val(r, f))).join('\t'));
   }
   lines.push('%E');
   if (part.length) chunks.push(part.join('\r\n') + '\r\n');

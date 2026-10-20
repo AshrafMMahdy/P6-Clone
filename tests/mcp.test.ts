@@ -2,14 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { SAMPLES_DIR } from './helpers.ts';
 
 const SERVER = join(import.meta.dirname, '..', 'mcp', 'server.ts');
 
-function client() {
-  const p = spawn(process.execPath, [SERVER], { stdio: ['pipe', 'pipe', 'inherit'] });
+function client(args: string[] = []) {
+  const p = spawn(process.execPath, [SERVER, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let err = '';
+  p.stderr.setEncoding('utf8');
+  p.stderr.on('data', (c: string) => { err += c; });
+  const exited = new Promise<number | null>((res) => p.on('exit', (code) => res(code)));
   let buf = '', id = 0;
   const waiting = new Map<number, (m: any) => void>();
   p.stdout.setEncoding('utf8');
@@ -21,7 +25,15 @@ function client() {
     const n = ++id; waiting.set(n, res);
     p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method: 'tools/call', params: { name, arguments: args } }) + '\n' + JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: n, reason: 'test' } }) + '\n');
   }).then((r) => ({ ...r.result, data: r.result.structuredContent }));
-  return { rpc, tool, cancelled, close: () => p.stdin.end() };
+  /** End stdin and wait for the exit; the server saves unsaved projects as it leaves (files named on stderr). */
+  const close = async (keep = false) => {
+    p.stdin.end();
+    const code = await exited;
+    const saved = [...err.matchAll(/saved to (.+?) \(/g)].map((m) => m[1]);
+    if (!keep) for (const f of saved) rmSync(f, { force: true });
+    return { code, saved, stderr: err };
+  };
+  return { rpc, tool, cancelled, close };
 }
 
 test('MCP: an agent builds, schedules, reviews, undoes, saves and reopens a project', { timeout: 60_000 }, async () => {
@@ -69,7 +81,7 @@ test('MCP: an agent builds, schedules, reviews, undoes, saves and reopens a proj
     const f = await c.tool('find_activities', { handle: real.data.handle, text: 'water', limit: 3 });
     assert.ok(f.data.total_matches > 0);
     assert.equal((await c.tool('get_activity', { handle: 'nope', activity_id: 'x' })).isError, true);
-  } finally { c.close(); }
+  } finally { await c.close(); }
 });
 
 test('MCP: open_file reads P6 XML', { timeout: 60_000 }, async () => {
@@ -88,7 +100,7 @@ test('MCP: open_file reads P6 XML', { timeout: 60_000 }, async () => {
     const v = await c.tool('validate', { handle: o.data.handle });
     assert.equal(v.isError, false);
     assert.deepEqual(v.data.counts, o.data.diagnostics.counts);
-  } finally { c.close(); }
+  } finally { await c.close(); }
 });
 
 test('MCP: an agent exports a PDF printout and an Excel workbook, edits the workbook and imports it back', { timeout: 60_000 }, async () => {
@@ -124,7 +136,7 @@ test('MCP: an agent exports a PDF printout and an Excel workbook, edits the work
     const a = await c.tool('get_activity', { handle: h, activity_id: 'A2410' });
     assert.equal(a.data.orig_days, 31);
     assert.equal((await c.tool('undo', { handle: h })).data.undone.startsWith('Edit'), true);
-  } finally { c.close(); }
+  } finally { await c.close(); }
 });
 
 test('MCP: an agent lists, creates and runs reports (data, PDF, Excel) and reads earned value', { timeout: 60_000 }, async () => {
@@ -149,7 +161,7 @@ test('MCP: an agent lists, creates and runs reports (data, PDF, Excel) and reads
     assert.equal(xl.isError, false, xl.content?.[0]?.text);
     const ev = await c.tool('earned_value', { handle: h });
     assert.ok(Array.isArray(ev.data.projects) && 'totals' in ev.data.projects[0]);
-  } finally { c.close(); }
+  } finally { await c.close(); }
 });
 
 test('MCP: compare two revisions by Activity ID, and trace an activity\'s logic', { timeout: 60_000 }, async () => {
@@ -167,7 +179,7 @@ test('MCP: compare two revisions by Activity ID, and trace an activity\'s logic'
     assert.equal(same.data.changes.length, 0);
     const tr = await c.tool('trace_logic', { handle: a, activity_id: 'A2410', predecessors: 2, successors: 1 });
     assert.ok(tr.data.levels.some((l: { level: number }) => l.level === -1) && tr.data.links.some((x: { driving: boolean }) => x.driving));
-  } finally { c.close(); }
+  } finally { await c.close(); }
 });
 
 test('MCP: Microsoft Project task UIDs (source_uid, uid:), one data date per project, one project per Microsoft Project file', { timeout: 60_000 }, async () => {
@@ -208,7 +220,7 @@ test('MCP: Microsoft Project task UIDs (source_uid, uid:), one data date per pro
     assert.equal((await c.tool('schedule', { handle: h, data_date: '2026-03-02', project: 'NOPE' })).data.error.code, 'bad_input');
     await c.tool('schedule', { handle: h, data_date: '2026-05-04' });
     assert.deepEqual(await dates(), { P1: '2026-05-04 00:00', P2: '2026-05-04 00:00' });
-  } finally { c.close(); }
+  } finally { await c.close(); }
 });
 
 test('MCP: notifications/cancelled and cancel_job stop open_file, save and schedule, keeping and writing nothing', { timeout: 120_000 }, async () => {
@@ -239,7 +251,7 @@ test('MCP: notifications/cancelled and cancel_job stop open_file, save and sched
     const done = await c.tool('job_status', { job_id: job.data.job_id, wait_seconds: 20 });
     assert.deepEqual([done.data.status, done.data.error?.code], ['cancelled', 'cancelled']);
     assert.deepEqual((await st()).open.map((x: { handle: string }) => x.handle), [h]);
-  } finally { c.close(); }
+  } finally { await c.close(); }
 });
 
 test('MCP: a cancellation reaches only the request it names, in the caller\'s own HTTP session', { timeout: 60_000 }, async () => {

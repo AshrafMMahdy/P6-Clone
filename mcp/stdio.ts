@@ -1,5 +1,5 @@
 // MCP over stdio: JSON-RPC 2.0, one message per line (one agent per process).
-import { callTool, toolResult, toolsList, SERVER_INFO, INSTRUCTIONS } from './server.ts';
+import { callTool, toolResult, toolsList, shutdown, SERVER_INFO, INSTRUCTIONS } from './server.ts';
 
 type Msg = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: any };
 /** Running tools/call requests by caller and request id, for notifications/cancelled. */
@@ -41,5 +41,6 @@ export function startStdio(): void {
       void handleMessage(m).then(send, (e) => send({ jsonrpc: '2.0', id: m.id ?? null, error: { code: -32603, message: String((e as Error).message) } }));
     }
   });
-  process.stdin.on('end', () => process.exit(0));
+  // calls still running finish first (up to 30 s), so their changes are in the save at exit
+  process.stdin.on('end', () => { const t0 = Date.now(); const wait = () => (running.size && Date.now() - t0 < 30000 ? setTimeout(wait, 50) : shutdown('stdin closed')); wait(); });
 }

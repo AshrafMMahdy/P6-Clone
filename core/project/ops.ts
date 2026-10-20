@@ -1,7 +1,8 @@
 // Edit a P6 database with a list of JSON operations, as one transaction: if any operation fails nothing changes
 // and the error names the operation. Everything is addressed the way a scheduler sees it (project ID, activity
 // ID, WBS code, resource ID, calendar name), never by internal database numbers. Durations are in days. An activity
-// read from Microsoft Project can also be named "uid:<task UID>" (the UID it has in that file).
+// read from Microsoft Project can also be named "uid:<task UID>" (the UID it has in that file), a WBS element
+// "wbs_id:<id>" (the id add_wbs returns). Days are converted on the activity's own calendar (its hours per day).
 // Used by the command-line `edit` command and the MCP server.
 import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
@@ -31,21 +32,21 @@ export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'add_cale
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
-  'Operations (JSON objects with "op"; [x] = optional; durations and lags in days; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant; an activity read from a Microsoft Project file may be named "uid:<task UID>" instead of its ID):',
+  'Operations (JSON objects with "op"; [x] = optional; durations, remaining and lags in days of the activity\'s own calendar (lags: the relationship-lag calendar, by default the predecessor\'s), or *_hours; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant; an activity read from a Microsoft Project file may be named "uid:<task UID>" instead of its ID; a WBS element may be named "wbs_id:<id>" (the id add_wbs returns) instead of its code):',
   `add_project: id, start, [name], [must_finish_by], [calendar]`,
   `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
   `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [eps] (EPS ID)`,
   `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
   `add_holidays: calendar, dates [dates]`,
-  `add_wbs: code, [name], [parent] (parent WBS code or dotted path; omit for top level), [project]`,
+  `add_wbs: code, [name], [parent] (parent WBS code, dotted path or wbs_id:<id>; omit for top level), [project]. Returns wbs_id. P6 needs WBS codes unique under one parent, so a sibling with the same code is refused`,
   `delete_wbs: code, [keep_logic] (default true: every predecessor of the removed activities is linked on to their successors, so the chain stays closed; false = just delete), [project]. Removes the WBS element, its child elements and all their activities: the way to remove whole floors or areas, e.g. from a copied project`,
   `add_activity: name, [id], [wbs] (WBS code; omit = project root), [type] (${Object.keys(TYPES).join(', ')}), [duration_days], [calendar], [priority] (${Object.keys(PRIO).join(', ')}), [constraint {type, date}] (types: ${Object.keys(CSTR).filter((k) => k !== 'none').join(', ')}), [secondary_constraint], [project]`,
   `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
   `delete_activity / dissolve_activity: id`,
   `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead). P6 keeps one relationship per pair: when pred -> succ already exists (any type) it is skipped and reported in "warnings"`,
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
-  `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day], [price_per_unit], [calendar], [parent]`,
-  `assign_resource: activity, resource, [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6); unassign_resource: activity, resource`,
+  `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day] or [max_units_per_hour], [price_per_unit], [calendar], [parent]`,
+  `assign_resource: activity, resource, [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6), [curve] (resource curve name, see add_resource_curve); unassign_resource: activity, resource`,
   EXTRA_GUIDE,
 ].join('\n');
 
@@ -89,9 +90,18 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
     if (hits.length > 1) fail(`${uid ? `Task UID ${uid}` : `Activity ID "${code}"`} exists in several projects; add "project".`);
     return hits[0] ?? fail(uid ? `No activity with Microsoft Project task UID ${uid} (only activities read from an MSPDI or MPX file have one).` : `No activity "${code}".`);
   };
+  const wbsIdOf = (v: unknown) => /^wbs_id:\s*(.+)$/i.exec(typeof v === 'string' ? v.trim() : '')?.[1];
+  /** The project of op.project, or of the WBS element a "wbs_id:" reference names (so "project" can be left out). */
+  const projectFor = (id: unknown, wbsRef: unknown): Row => {
+    const wid = id == null ? wbsIdOf(wbsRef) : undefined;
+    const w = wid ? rows(db, 'PROJWBS').find((x) => x.wbs_id === wid && projects().some((p) => p.proj_id === x.proj_id)) : undefined;
+    return w ? projects().find((p) => p.proj_id === w.proj_id)! : project(id);
+  };
   const wbsOf = (p: Row, code: unknown): Row => {
     const W = rows(db, 'PROJWBS').filter((w) => w.proj_id === p.proj_id);
     if (code == null || code === '') return W.find((w) => w.proj_node_flag === 'Y') ?? fail(`Project ${p.proj_short_name} has no WBS root.`);
+    const wid = wbsIdOf(code);
+    if (wid) return W.find((w) => w.wbs_id === wid) ?? fail(`No WBS element with wbs_id ${wid} in project ${p.proj_short_name}.`);
     const c = String(code).toLowerCase();
     const byId = new Map(W.map((w) => [w.wbs_id, w]));
     const path = (w: Row) => { const out: string[] = []; for (let x: Row | undefined = w, n = 0; x && x.proj_node_flag !== 'Y' && n < 50; x = byId.get(x.parent_wbs_id), n++) out.unshift(x.wbs_short_name); return out.join('.').toLowerCase(); };
@@ -103,7 +113,16 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
     if (hits.length > 1) fail(`WBS code "${code}" is ambiguous; use the full path (e.g. ${path(hits[0])}).`);
     return hits[0] ?? fail(`No WBS "${code}" in project ${p.proj_short_name}.`);
   };
+  // days -> hours on a calendar's own hours per day (P6's calendar day), else the caller's hours per day
+  const calHours = (clndrId: string | undefined) => { const h = Number(rows(db, 'CALENDAR').find((c) => c.clndr_id === clndrId)?.day_hr_cnt); return h > 0 ? h : hpd; };
+  const dayHours = (t: Row) => calHours(t.clndr_id);
+  /** Lag days on the relationship-lag calendar of the successor's project (P6 default: the predecessor's calendar). */
+  const lagHours = (pred: Row, succ: Row) => {
+    const k = rows(db, 'SCHEDOPTIONS').find((s) => s.proj_id === succ.proj_id)?.sched_calendar_on_relationship_lag;
+    return k === 'rcal_24Hour' ? 24 : k === 'rcal_Successor' ? dayHours(succ) : k === 'rcal_ProjDefault' ? calHours(projects().find((p) => p.proj_id === succ.proj_id)?.clndr_id) : dayHours(pred);
+  };
   const calendar = (name: unknown): Row => rows(db, 'CALENDAR').find((c) => c.clndr_name.toLowerCase() === String(name).toLowerCase()) ?? fail(`No calendar "${name}".`);
+  const curveId = (name: unknown): string => rows(db, 'RSRCCURVDATA').find((c) => c.curv_name.toLowerCase() === String(name).toLowerCase())?.curv_id ?? fail(`No resource curve "${name}". Curves: ${rows(db, 'RSRCCURVDATA').map((c) => c.curv_name).join(', ') || 'none in this file'} (add one with {"op":"add_resource_curve"}).`);
   const resource = (id: unknown): Row => rows(db, 'RSRC').find((r) => r.rsrc_short_name.toLowerCase() === String(id).toLowerCase()) ?? fail(`No resource "${id}" (add it with {"op":"add_resource"}).`);
   const cstr = (v: unknown): [string, string] => {
     if (v == null || v === 'none' || v === '') return ['', ''];
@@ -169,16 +188,16 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       return { calendar: c.clndr_name };
     }
     case 'add_wbs': {
-      const p = project(op.project);
+      const p = projectFor(op.project, op.parent);
       const parent = wbsOf(p, op.parent);
       const code = str(op.code, 'code');
       if (rows(db, 'PROJWBS').some((w) => w.proj_id === p.proj_id && w.parent_wbs_id === parent.wbs_id && w.wbs_short_name.toLowerCase() === code.toLowerCase())) fail(`WBS "${code}" already exists there.`);
       const w = addWbs(db, p.proj_id, parent.wbs_id);
       w.wbs_short_name = code; w.wbs_name = typeof op.name === 'string' ? op.name : code;
-      return { wbs: code };
+      return { wbs: code, wbs_id: w.wbs_id };
     }
     case 'delete_wbs': {
-      const p = project(op.project);
+      const p = projectFor(op.project, op.code);
       const w = wbsOf(p, str(op.code, 'code'));
       const sub = new Set([w.wbs_id]);
       for (let grew = true; grew;) { grew = false; for (const x of rows(db, 'PROJWBS')) if (sub.has(x.parent_wbs_id) && !sub.has(x.wbs_id)) { sub.add(x.wbs_id); grew = true; } }
@@ -188,7 +207,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       return { deleted_wbs: w.wbs_short_name, wbs_elements: sub.size, activities: ids.length, relationships_added: linked };
     }
     case 'add_activity': {
-      const p = project(op.project);
+      const p = projectFor(op.project, op.wbs);
       const w = wbsOf(p, op.wbs);
       const t = addActivity(db, p.proj_id, w.wbs_id, hpd);
       if (op.id != null) {
@@ -197,7 +216,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
         t.task_code = code;
       }
       t.task_name = str(op.name, 'name');
-      updateActivity(db, t, op, hpd, calendar, cstr);
+      updateActivity(db, t, op, dayHours, calendar, cstr);
       if (op.duration_days == null && op.duration_hours == null && (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile')) { t.target_drtn_hr_cnt = t.remain_drtn_hr_cnt = '0'; refreshOwnDates(db, t); }
       return { activity: t.task_code };
     }
@@ -209,7 +228,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
         t.task_code = code;
       }
       if (op.wbs != null) t.wbs_id = wbsOf(project(projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name), op.wbs).wbs_id;
-      updateActivity(db, t, op, hpd, calendar, cstr);
+      updateActivity(db, t, op, dayHours, calendar, cstr);
       return { activity: t.task_code };
     }
     case 'delete_activity': { const t = activity(op.id, op.project); deleteActivities(db, [t.task_id]); return { deleted: t.task_code }; }
@@ -223,7 +242,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
         warnings.push(`Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: ${a.task_code} -> ${b.task_code} already has a ${dup.pred_type.slice(3)} relationship, and P6 keeps one per pair of activities.`);
         return { skipped: `${a.task_code} ${type.slice(3)} ${b.task_code}`, existing: `${a.task_code} ${dup.pred_type.slice(3)} ${b.task_code}` };
       }
-      ok(addRelationship(db, a.task_id, b.task_id, type, op.lag_days != null ? num(op.lag_days, 'lag_days') * hpd : op.lag_hours != null ? num(op.lag_hours, 'lag_hours') : 0));
+      ok(addRelationship(db, a.task_id, b.task_id, type, op.lag_days != null ? num(op.lag_days, 'lag_days') * lagHours(a, b) : op.lag_hours != null ? num(op.lag_hours, 'lag_hours') : 0));
       return { relationship: `${a.task_code} ${type.slice(3)} ${b.task_code}` };
     }
     case 'update_relationship': case 'delete_relationship': {
@@ -239,7 +258,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
         if (P.rows.some((r) => r !== hits[0] && r.pred_task_id === a.task_id && r.task_id === b.task_id && r.pred_type === nt)) fail(`${a.task_code} -> ${b.task_code} already has a ${nt.slice(3)} relationship.`);
         hits[0].pred_type = nt;
       }
-      if (op.lag_days != null) hits[0].lag_hr_cnt = p6num(num(op.lag_days, 'lag_days') * hpd);
+      if (op.lag_days != null) hits[0].lag_hr_cnt = p6num(num(op.lag_days, 'lag_days') * lagHours(a, b));
       if (op.lag_hours != null) hits[0].lag_hr_cnt = p6num(num(op.lag_hours, 'lag_hours'));
       return { relationship: `${a.task_code} ${hits[0].pred_type.slice(3)} ${b.task_code}` };
     }
@@ -255,7 +274,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       R.rows.push({ rsrc_id: rid, parent_rsrc_id: op.parent ? resource(op.parent).rsrc_id : '', clndr_id: cal.clndr_id, rsrc_seq_num: String(R.rows.length + 1), rsrc_name: typeof op.name === 'string' ? op.name : id, rsrc_short_name: id, def_qty_per_hr: p6num(perHr), cost_qty_type: 'QT_Hour', ot_factor: '1', active_flag: 'Y', rsrc_type: type, unit_id: '', curr_id: rows(db, 'CURRTYPE')[0]?.curr_id ?? '' });
       const RR = table(db, 'RSRCRATE');
       for (const f of ['rsrc_rate_id', 'rsrc_id', 'max_qty_per_hr', 'cost_per_qty', 'start_date']) addField(RR, f);
-      RR.rows.push({ rsrc_rate_id: String(nextId(db, 'RSRCRATE')), rsrc_id: rid, max_qty_per_hr: p6num(op.max_units_per_day != null ? num(op.max_units_per_day, 'max_units_per_day') / hpd : perHr), cost_per_qty: p6num(op.price_per_unit != null ? num(op.price_per_unit, 'price_per_unit') : 0), start_date: '' });
+      RR.rows.push({ rsrc_rate_id: String(nextId(db, 'RSRCRATE')), rsrc_id: rid, max_qty_per_hr: p6num(op.max_units_per_hour != null ? num(op.max_units_per_hour, 'max_units_per_hour') : op.max_units_per_day != null ? num(op.max_units_per_day, 'max_units_per_day') / hpd : perHr), cost_per_qty: p6num(op.price_per_unit != null ? num(op.price_per_unit, 'price_per_unit') : 0), start_date: '' });
       return { resource: id };
     }
     case 'assign_resource': {
@@ -264,6 +283,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       const a = assignResource(db, t, r.rsrc_id);
       if (op.units_per_day != null) recalcAssignment(db, t, a, 'target_qty_per_hr', num(op.units_per_day, 'units_per_day') / hpd);
       if (op.units != null) { recalcAssignment(db, t, a, 'target_qty', num(op.units, 'units')); a.remain_qty = a.target_qty; recomputeCosts(db, a); }
+      if (op.curve != null && op.curve !== '') { addField(table(db, 'TASKRSRC'), 'curv_id'); a.curv_id = curveId(op.curve); }
       assignmentActuals(a, op, num);
       return { assigned: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty) };
     }
@@ -275,17 +295,18 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       return { unassigned: `${r.rsrc_short_name} -> ${t.task_code}` };
     }
   }
-  const extra = applyExtra(db, op, { hpd, fail, str, num, date, project, activity, wbsOf, calendar, resource, periods, ole });
+  const extra = applyExtra(db, op, { hpd, fail, str, num, date, project, projectFor, activity, wbsOf, calendar, resource, curveId, dayHours, warn: (m) => warnings.push(m), periods, ole });
   if (extra !== undefined) return extra;
   return fail(`Unknown operation "${op.op}". Known: ${OP_NAMES.join(', ')}.`);
 }
 
-function updateActivity(db: Db, t: Row, op: Op, hpd: number, calendar: (n: unknown) => Row, cstr: (v: unknown) => [string, string]): void {
+function updateActivity(db: Db, t: Row, op: Op, dayHours: (t: Row) => number, calendar: (n: unknown) => Row, cstr: (v: unknown) => [string, string]): void {
   if (op.name != null) t.task_name = str(op.name, 'name');
   if (op.type != null) t.task_type = TYPES[String(op.type).toLowerCase()] ?? (enumOk('TASK', 'task_type', String(op.type)) && /^TT_/.test(String(op.type)) ? String(op.type) : fail(`Unknown activity type "${op.type}". Use: ${Object.keys(TYPES).join(', ')}.`));
   // P6 sets a milestone's durations to zero when the type changes
   if (op.type != null && (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile') && op.duration_days == null && op.duration_hours == null) { t.target_drtn_hr_cnt = '0'; if (!t.act_end_date) t.remain_drtn_hr_cnt = '0'; refreshOwnDates(db, t); }
   if (op.calendar != null) t.clndr_id = calendar(op.calendar).clndr_id;
+  const hpd = dayHours(t); // after a calendar change in the same operation
   if (op.priority != null) t.priority_type = PRIO[String(op.priority).toLowerCase()] ?? fail('priority: top, high, normal, low or lowest.');
   const durH = op.duration_days != null ? num(op.duration_days, 'duration_days') * hpd : op.duration_hours != null ? num(op.duration_hours, 'duration_hours') : null;
   if (durH != null) {

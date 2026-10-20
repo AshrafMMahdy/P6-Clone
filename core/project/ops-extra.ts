@@ -17,18 +17,26 @@ export interface OpHelpers {
   num: (v: unknown, what: string) => number;
   date: (v: unknown, what: string) => string;
   project: (id?: unknown) => Row;
+  /** op.project, or the project of the WBS element a "wbs_id:" reference names */
+  projectFor: (id: unknown, wbsRef: unknown) => Row;
   activity: (id: unknown, proj?: unknown) => Row;
   wbsOf: (p: Row, code: unknown) => Row;
   calendar: (name: unknown) => Row;
   resource: (id: unknown) => Row;
+  curveId: (name: unknown) => string;
+  /** hours in a day of the activity's own calendar */
+  dayHours: (t: Row) => number;
+  warn: (message: string) => void;
   periods: (v: unknown) => Shift[];
   ole: (d: string) => number;
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = ['update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment'];
+export const EXTRA_OP_NAMES = ['add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment'];
 
 export const EXTRA_GUIDE = [
+  `add_resource_curve: name, values (21 percentages totalling 100: values[0] at the start, values[1..20] for each 5% of the assignment's time, like P6 Resource Curves); assign it with assign_resource / update_assignment curve`,
+  `build_baseline: [project], [name], [assign_as] (project default, bl1, bl2, bl3; "" = not assigned), activities [{activity (ID or uid:<UID>), [start], [finish], [duration_days], [cost]}]: a baseline (a copy of the project, as save_baseline) whose listed activities carry the given baseline values (planned, not started); activities not listed keep the project's current values; an activity not in the project is skipped with a warning`,
   `update_wbs: code, [new_code], [name], [parent] (move under this WBS code; "" = top level), [project]`,
   `add_code_type: name, [subject] (activity default, project, resource), [scope] (global default, project; activity codes only), [project], [max_length] (default 20, at most 60: a longer value is refused, never cut), [values [{code, [name], [parent]}]]`,
   `add_code_value: type, code, [name], [parent] (parent value code), [subject]`,
@@ -103,7 +111,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
   };
   const target = (o: Op): { subject: string; row: Row; fk: string; projId: string } => {
     if (o.activity != null) { const t = h.activity(o.activity, o.project); return { subject: 'activity', row: t, fk: t.task_id, projId: t.proj_id }; }
-    if (o.wbs != null) { const p = h.project(o.project); const w = h.wbsOf(p, o.wbs); return { subject: 'wbs', row: w, fk: w.wbs_id, projId: p.proj_id }; }
+    if (o.wbs != null) { const p = h.projectFor(o.project, o.wbs); const w = h.wbsOf(p, o.wbs); return { subject: 'wbs', row: w, fk: w.wbs_id, projId: p.proj_id }; }
     if (o.resource != null) { const r = h.resource(o.resource); return { subject: 'resource', row: r, fk: r.rsrc_id, projId: '' }; }
     if (o.project != null) { const p = h.project(o.project); return { subject: 'project', row: p, fk: p.proj_id, projId: p.proj_id }; }
     return fail('Say what to set it on: activity, wbs, project or resource.');
@@ -141,6 +149,15 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
   const SLOT: Record<string, string> = { project: 'sum_base_proj_id', bl1: '_bl1', bl2: '_bl2', bl3: '_bl3', primary: '_bl1', secondary: '_bl2', tertiary: '_bl3' };
   const slot = (v: unknown) => SLOT[lc(v ?? 'project')] ?? fail('as / assign_as must be project, bl1, bl2 or bl3.');
   const assignSlot = (p: Row, f: string, bid: string) => { if (f === 'sum_base_proj_id') { if (bid) assignBaseline(db, p.proj_id, bid); else p.sum_base_proj_id = ''; } else { addField(table(db, 'PROJECT'), f); p[f] = bid; } };
+  /** A baseline activity's budgeted cost: its assignments' budgets scaled to it, else one expense line. */
+  const setBaselineCost = (b: Row, cost: number) => {
+    const A = rows(db, 'TASKRSRC').filter((a) => a.task_id === b.task_id), E = rows(db, 'PROJCOST').filter((c) => c.task_id === b.task_id);
+    const total = [...A, ...E].reduce((s, r) => s + (Number(r.target_cost) || 0), 0);
+    if (total > 0) { for (const r of [...A, ...E]) r.target_cost = r.remain_cost = p6num(((Number(r.target_cost) || 0) * cost) / total); return; }
+    for (const r of [...A, ...E]) r.target_cost = r.remain_cost = '0';
+    const T = ensure(db, 'PROJCOST', PROJCOST_FIELDS);
+    T.rows.push({ ...Object.fromEntries(PROJCOST_FIELDS.map((k) => [k, ''])), cost_item_id: String(nextId(db, 'PROJCOST')), proj_id: b.proj_id, task_id: b.task_id, cost_name: 'Baseline cost', act_cost: '0', cost_per_qty: '0', remain_cost: p6num(cost), target_cost: p6num(cost), cost_load_type: 'CL_Uniform', auto_compute_act_flag: 'N', target_qty: '0', contract_manager_import: 'N' });
+  };
   const tree = (kind: keyof typeof TREES) => {
     const T = TREES[kind];
     if (kind === 'eps') ensureEps(db);
@@ -149,8 +166,44 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
   };
 
   switch (op.op) {
-    case 'update_wbs': {
+    case 'add_resource_curve': {
+      const name = str(op.name, 'name');
+      if (rows(db, 'RSRCCURVDATA').some((c) => lc(c.curv_name) === lc(name))) fail(`Resource curve "${name}" already exists.`);
+      const v = Array.isArray(op.values) && op.values.length === 21 ? op.values.map((x, i) => num(x, `values[${i}]`)) : fail('"values" must be a list of 21 percentages (P6 resource curve: the start, then each 5% of the time).');
+      if (v.some((x) => x < 0)) fail('Curve percentages cannot be negative.');
+      const sum = v.reduce((a, x) => a + x, 0);
+      if (Math.abs(sum - 100) > 0.1) fail(`The curve's percentages total ${p6num(sum)}; P6 needs them to total 100.`);
+      const T = ensure(db, 'RSRCCURVDATA', ['curv_id', 'curv_name', 'default_flag', ...v.map((_, i) => `pct_usage_${i}`)]);
+      const id = String(nextId(db, 'RSRCCURVDATA'));
+      T.rows.push({ curv_id: id, curv_name: name, default_flag: 'N', ...Object.fromEntries(v.map((x, i) => [`pct_usage_${i}`, p6num(x)])) });
+      return { resource_curve: name };
+    }
+    case 'build_baseline': {
       const p = h.project(op.project);
+      const name = typeof op.name === 'string' && op.name.trim() ? op.name.trim() : undefined;
+      if (name && rows(db, 'PROJECT').some((x) => lc(x.proj_short_name) === lc(name))) fail(`A project or baseline "${name}" already exists.`);
+      const list = Array.isArray(op.activities) ? op.activities as Record<string, unknown>[] : fail('"activities" must be a list of {activity, start, finish, duration_days, cost}.');
+      const bid = saveBaseline(db, p.proj_id, name);
+      const byCode = new Map(rows(db, 'TASK').filter((t) => t.proj_id === bid).map((t) => [t.task_code, t]));
+      let set = 0;
+      for (const [i, x] of list.entries()) {
+        let cur: Row;
+        try { cur = h.activity(x?.activity ?? x?.id, p.proj_short_name); } catch (e) { h.warn(`build_baseline: activities[${i}] skipped: ${(e as Error).message}`); continue; }
+        const b = byCode.get(cur.task_code)!;
+        // a baseline value is a plan: the baseline activity is not started, with these dates
+        Object.assign(b, { act_start_date: '', act_end_date: '', status_code: 'TK_NotStart', phys_complete_pct: '0' });
+        if (x.start != null) b.target_start_date = b.early_start_date = b.restart_date = date(x.start, `activities[${i}].start`);
+        if (x.finish != null) b.target_end_date = b.early_end_date = b.reend_date = date(x.finish, `activities[${i}].finish`);
+        if (x.duration_days != null) b.target_drtn_hr_cnt = b.remain_drtn_hr_cnt = p6num(num(x.duration_days, `activities[${i}].duration_days`) * h.dayHours(b));
+        if (x.cost != null) setBaselineCost(b, num(x.cost, `activities[${i}].cost`));
+        set++;
+      }
+      const as = op.assign_as === undefined ? 'project' : op.assign_as;
+      if (as) assignSlot(rows(db, 'PROJECT').find((x) => x.proj_id === p.proj_id)!, slot(as), bid);
+      return { baseline: rows(db, 'PROJECT').find((x) => x.proj_id === bid)!.proj_short_name, of: p.proj_short_name, activities_set: set, assigned_as: as || null };
+    }
+    case 'update_wbs': {
+      const p = h.projectFor(op.project, op.code);
       const w = h.wbsOf(p, str(op.code, 'code'));
       if (op.parent !== undefined) {
         const parent = h.wbsOf(p, op.parent === '' ? null : op.parent);
@@ -286,7 +339,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     case 'set_estimates': {
       const t = h.activity(op.activity, op.project);
       if (op.clear === true) { setEstimate(db, t.task_id, null); return { cleared: t.task_code }; }
-      const d = (k: string) => (op[k] != null ? num(op[k], k) * hpd : undefined);
+      const d = (k: string) => (op[k] != null ? num(op[k], k) * h.dayHours(t) : undefined);
       const dist = op.distribution != null ? (DISTS[lc(op.distribution) as Dist] ? (lc(op.distribution) as Dist) : fail(`distribution must be ${Object.keys(DISTS).join(', ')}.`)) : undefined;
       const [min, ml, max] = [d('min_days'), d('most_likely_days'), d('max_days')];
       if (min != null && max != null && min > max) fail('min_days is more than max_days.');
@@ -391,7 +444,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       if (op.units_per_day != null) recalcAssignment(db, t, a, 'target_qty_per_hr', num(op.units_per_day, 'units_per_day') / hpd);
       if (op.units != null) { recalcAssignment(db, t, a, 'target_qty', num(op.units, 'units')); if (!t.act_start_date) a.remain_qty = a.target_qty; }
       if (op.remaining_units != null) a.remain_qty = p6num(num(op.remaining_units, 'remaining_units'));
-      if (op.curve !== undefined) { addField(table(db, 'TASKRSRC'), 'curv_id'); a.curv_id = op.curve ? (rows(db, 'RSRCCURVDATA').find((c) => lc(c.curv_name) === lc(op.curve))?.curv_id ?? fail(`No resource curve "${op.curve}". Curves: ${rows(db, 'RSRCCURVDATA').map((c) => c.curv_name).join(', ') || 'none in this file'}.`)) : ''; }
+      if (op.curve !== undefined) { addField(table(db, 'TASKRSRC'), 'curv_id'); a.curv_id = op.curve ? h.curveId(op.curve) : ''; }
       recomputeCosts(db, a);
       assignmentActuals(a, op, num);
       return { assignment: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty), remaining_units: Number(a.remain_qty) };

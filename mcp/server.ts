@@ -4,10 +4,14 @@
 // `save`, and every failure comes back with a code and a next step. Same engine as the desktop app and the CLI.
 //   stdio (one agent):  node mcp/server.ts            (or the bundled dist-cli/p6clone-mcp.cjs)
 //   HTTP (many agents): node mcp/server.ts --http --root <storage dir> [--port 8765] [--host 127.0.0.1] [--token T]
+//   Either: [--automation-read-root DIR] [--automation-write-root DIR] fence reads and writes like the craft forks.
+//   On stdin EOF, SIGTERM or SIGINT every project with unsaved changes is saved as <name>.recovered-<stamp>.xer in the
+//   write root (else the storage root, else the project's folder) before the process exits.
 //   Environment: P6CLONE_ROOT, P6CLONE_TOKEN, P6CLONE_PORT, P6CLONE_MAX_HANDLES, P6CLONE_MEM_BUDGET_MB,
 //   P6CLONE_IDLE_MINUTES. Run Node with --max-old-space-size above the memory budget for very large files.
-import { readFileSync, writeFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { basename, dirname, join } from 'node:path';
 import { detectFormat, exportFile, importChecks, readRaw, type Format } from '../renderer/io.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
@@ -35,7 +39,7 @@ import { reportHtml, reportPages, reportText, reportXlsx } from '../renderer/rep
 import { nowStamp } from '../core/report/reports.ts';
 import { defaultEstimates, runMonteCarlo } from '../core/risk/montecarlo.ts';
 import {
-  ToolError, fail, config, setRoot, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
+  ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
   exclusive, change, dropLast, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, loadIndex, evictedList, type Session,
 } from './runtime.ts';
 
@@ -50,10 +54,10 @@ const withHandle = (schema: Record<string, unknown>, owner = false) => ({ ...sch
 const ro = { readOnlyHint: true, openWorldHint: false };
 const edit = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 const writes = { readOnlyHint: false, destructiveHint: true, openWorldHint: false };
-const ERRORS_DOC = ' Errors come back as {error: {code, message, hint, retry_after?}}: follow the hint (e.g. busy -> retry, unknown_handle -> open_file again).';
+const ERRORS_DOC = ' Errors come back as {error: {code, reason, next_step, retry_after_ms?}} (also message, hint, retry_after in seconds): follow next_step (e.g. busy -> retry, unknown_handle -> open_file again). Answers of tools that can change a project carry unsaved_changes.';
 
 const TOOLS = [
-  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
+  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read (the findings stay in diagnostics: fix them before P6 gets the file). Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
   { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
   { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs.', inputSchema: { type: 'object', properties: {} } },
@@ -77,7 +81,7 @@ const TOOLS = [
   { name: 'list_reports', annotations: ro, description: 'Reports available like P6 Tools > Reports: the standard reports by group and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'run_report', annotations: ro, description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as PDF (.pdf), HTML (.html), CSV (.csv/.txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number' } } }) },
   { name: 'create_report', annotations: edit, description: 'Save a report definition like the P6 Report Wizard (name, subject, columns, filter, group_by, sort_by, sort_desc, title, group). Kept with this open project for run_report (not written into the XER). Subject areas: activities, assignments, wbs, resources, relationships (see list_reports for examples).', inputSchema: withHandle({ type: 'object', properties: { name: { type: 'string' }, subject: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' }, sort_desc: { type: 'boolean' }, title: { type: 'string' }, group: { type: 'string' } }, required: ['name', 'subject'] }) },
-  { name: 'close', annotations: writes, description: 'Close the project and free its memory (needs owner_key; unsaved changes are lost, so save first).', inputSchema: withHandle({ type: 'object', properties: {} }, true) },
+  { name: 'close', annotations: writes, description: 'Close the project and free its memory (needs owner_key). Refused (unsaved_changes) while it has unsaved changes: save first, or pass discard: true to drop them.', inputSchema: withHandle({ type: 'object', properties: { discard: { type: 'boolean', description: 'close even with unsaved changes (they are lost)' } } }, true) },
 ];
 
 // ---------------------------------------------------------------- helpers
@@ -93,7 +97,17 @@ const projectIds = (db: Db, id: unknown) => {
   return [p!.proj_id];
 };
 const readBytes = (p: string) => { try { return new Uint8Array(readFileSync(p)); } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
-const writeOut = (p: string, data: string | Uint8Array) => { try { writeFileSync(p, data); } catch (e) { fail('file_unwritable', `Cannot write ${p}: ${(e as Error).message}.`, 'Check that the folder exists and the file is not open elsewhere.'); } };
+/** Write a file atomically: a temporary file in the same folder, flushed to disk, then renamed over the target (a crash
+ *  leaves the old file or the new one, never half of one). Missing folders inside the write root are made. */
+const writeOut = (p: string, data: string | Uint8Array) => {
+  const tmp = join(dirname(p), `.${basename(p)}.${randomBytes(4).toString('hex')}.p6clone-tmp`);
+  try {
+    if (writeBase()) mkdirSync(dirname(p), { recursive: true });
+    const fd = openSync(tmp, 'w');
+    try { const b = typeof data === 'string' ? Buffer.from(data, 'utf8') : data; for (let at = 0; at < b.length;) at += writeSync(fd, b, at, b.length - at); fsyncSync(fd); } finally { closeSync(fd); }
+    renameSync(tmp, p);
+  } catch (e) { try { rmSync(tmp, { force: true }); } catch { /* gone */ } fail('file_unwritable', `Cannot write ${p}: ${(e as Error).message}.`, 'Check that the folder exists and the file is not open elsewhere.'); }
+};
 const iso = (t: number | null | undefined) => (t == null || !Number.isFinite(t) ? null : formatP6Date(t));
 /** Between phases of long work: let waiting messages in (a cancellation), then stop if this call was cancelled. */
 const checkpoint = async (ctx: Ctx) => { await new Promise((r) => setImmediate(r)); if (ctx.signal.aborted) fail('cancelled', 'The call was cancelled.', 'Nothing was kept or written by it; call again when needed.'); };
@@ -101,6 +115,8 @@ const checkpoint = async (ctx: Ctx) => { await new Promise((r) => setImmediate(r
 // ---------------------------------------------------------------- tool implementations
 type Ctx = { caller: string; job?: ReturnType<typeof startJob>; signal: AbortSignal };
 const NO_HANDLE = new Set(['open_file', 'new_project', 'list_open', 'server_status', 'job_status', 'cancel_job']);
+/** Tools that can change a project (their answers carry unsaved_changes). */
+const MUTATES = new Set(TOOLS.filter((t) => !t.annotations.readOnlyHint && !['list_open', 'server_status', 'job_status', 'cancel_job'].includes(t.name)).map((t) => t.name));
 
 async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unknown> {
   switch (name) {
@@ -126,9 +142,15 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         await checkpoint(ctx);
         const f = importChecks(r.db, r.findings, format);
         await checkpoint(ctx);
-        if (worst(f) === 'fatal') { closeSession(s0); return { opened: false, reason: 'P6 would reject this file', diagnostics: brief(f) }; }
+        const fatal = worst(f) === 'fatal';
+        // lenient: the file is opened to be repaired, when there is a project to hold (a file that could not be read has none)
+        if (fatal && !(a.lenient === true && allIds(r.db).length)) {
+          fail('p6_would_reject', `P6 would reject ${basename(path)}: ${f.filter((x) => x.severity === 'fatal').slice(0, 3).map((x) => x.message).join(' ')}`,
+            a.lenient === true ? 'No project could be read from the file, so it cannot be opened even leniently; fix the file (the findings say what is wrong) or rebuild it.' : 'Pass lenient: true to open it anyway and repair it (the findings say what P6 refuses), or fix the file.',
+            { data: { fatal: f.filter((x) => x.severity === 'fatal').slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
+        }
         s0.db = r.db; s0.format = format;
-        return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0) };
+        return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, ...(fatal ? { lenient: true, note: 'P6 would reject this file as it is: the fatal findings are in diagnostics. Fix them before P6 gets it.' } : {}), diagnostics: brief(f), summary: summary(s0) };
       } catch (e) { closeSession(s0); throw e; }
     }
     case 'new_project': {
@@ -208,7 +230,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'redo': { const r = redo(s, ctx.caller); return r.redone ? r : { redone: null, note: 'Nothing to redo (redo is cleared when you make a new change).' }; }
     case 'save': {
       requireOwner(s, a.owner_key, 'Saving');
-      const path = a.path ? pathArg(a.path) : s.path ?? fail('bad_input', 'Give "path" (this project was created in memory).', 'Pass a file path inside the storage root.');
+      const path = a.path ? pathArg(a.path, 'path', 'write') : s.path ?? fail('bad_input', 'Give "path" (this project was created in memory).', 'Pass a file path inside the storage root.');
       if (!a.path && !a.overwrite) fail('confirm_overwrite', `Saving would overwrite ${path}.`, 'Pass overwrite: true, or a new path.');
       const fmt = String(a.format ?? (/\.mpx$/i.test(path) ? 'mpx' : /\.xml$/i.test(path) ? 'p6xml' : 'xer')).toLowerCase();
       const projIds = a.project != null && a.project !== '' ? projectIds(s.db, a.project) : undefined;
@@ -225,14 +247,18 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (!projIds || allIds(s.db).length === 1) s.dirty = false;
       return { saved: path, format: label, ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
-    case 'close': { requireOwner(s, a.owner_key, 'Closing'); closeSession(s); forgetEvicted(s.handle); return { closed: s.handle, had_unsaved_changes: s.dirty }; }
+    case 'close': {
+      requireOwner(s, a.owner_key, 'Closing');
+      if (s.dirty && a.discard !== true) fail('unsaved_changes', 'This project has unsaved changes, so it was not closed.', 'Save it first (save), or close with discard: true to drop the changes.');
+      closeSession(s); forgetEvicted(s.handle); return { closed: s.handle, had_unsaved_changes: s.dirty };
+    }
     case 'export_pdf': {
-      const path = pathArg(a.path);
+      const path = pathArg(a.path, 'path', 'write');
       const r = printPages(s.db, { projIds: projectIds(s.db, a.project), setup: a.settings ?? {}, filter: a.filter, groupBy: a.group_by, sortBy: a.sort_by, prefs: prefsOf(s) });
       writeOut(path, /\.html?$/i.test(path) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) }));
       return { saved: path, pages: r.pages.length, activities: r.activities, ...(r.unknownColumns.length ? { unknown_columns: r.unknownColumns, printable_columns: printableColumns(s.db).map((c) => c.id) } : {}) };
     }
-    case 'export_excel': { const path = pathArg(a.path); writeOut(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd))); return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] }; }
+    case 'export_excel': { const path = pathArg(a.path, 'path', 'write'); writeOut(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd))); return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] }; }
     case 'import_excel': {
       const path = pathArg(a.path);
       const ids = projectIds(s.db, a.project);
@@ -242,7 +268,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       try { sheets = await readXlsx(readBytes(path)); } catch (e) { if (e instanceof ToolError) throw e; fail('bad_file', (e as Error).message, 'Use an .xlsx saved by export_excel or Excel in that layout.'); }
       const plan = planImport(s.db, sheets!, pid, s.hpd);
       if (a.dry_run || !plan.ops.length) return { applied: false, ...(plan.ops.length ? {} : { note: 'Nothing to change.' }), summary: plan.summary, warnings: plan.warnings, operations: plan.ops.slice(0, 200) };
-      return run('edit', { ...a, operations: plan.ops }, ctx).then((r) => ((r as { ok?: boolean }).ok === false ? r : { applied: true, summary: plan.summary, warnings: plan.warnings, note: 'Undo with undo. Run schedule to recalculate dates.' }));
+      return run('edit', { ...a, operations: plan.ops }, ctx).then((r) => ((r as { ok?: boolean }).ok === false ? r : { applied: true, summary: plan.summary, warnings: [...plan.warnings, ...((r as { warnings?: string[] }).warnings ?? [])], note: 'Undo with undo. Run schedule to recalculate dates.' }));
     }
     case 'compare': {
       const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
@@ -268,7 +294,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (a.definition) { const spec = parseSpec({ name: 'Ad hoc report', ...a.definition }) ?? fail('bad_input', 'definition needs a name and subject.', 'subject: activities, assignments, wbs, resources or relationships.'); report = runSpec(s.db, ids, spec, { prefs }); rname = spec.name; }
       else { try { const r = runReport(s.db, ids, String(a.report ?? ''), { prefs, weeks: Number(a.weeks) || undefined }); report = r.report; rname = r.entry.name; } catch (e) { fail('bad_input', (e as Error).message, 'Use an id or name from list_reports.'); } }
       if (!a.path) { const max = Math.min(2000, Number(a.max_rows) || 200); return { report: rname!, title: report!.title, subtitle: report!.subtitle, columns: report!.columns, total_rows: report!.rows.length, rows: report!.rows.slice(0, max).map((r) => ({ cells: r.cells, ...(r.bold ? { group: true, level: r.level ?? 0 } : r.level ? { level: r.level } : {}) })), truncated: report!.rows.length > max }; }
-      const path = pathArg(a.path);
+      const path = pathArg(a.path, 'path', 'write');
       const ext = (/\.(\w+)$/.exec(path)?.[1] ?? '').toLowerCase();
       if (ext === 'pdf') { const pages = reportPages(s.db, ids, report!, a.settings ?? {}, prefs, rname!); writeOut(path, await pagesToPdf(pages, report!.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) })); return { saved: path, pages: pages.length, rows: report!.rows.length }; }
       if (ext === 'html' || ext === 'htm') writeOut(path, reportHtml(report!, nowStamp()));
@@ -293,9 +319,13 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
   const ctx: Ctx = { caller: String(a.caller ?? sessionCaller ?? 'default'), signal: abort.signal };
   const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
   const work = async () => {
-    const out = handle != null ? await exclusive(handle, () => run(name, a, ctx)) : await run(name, a, ctx);
+    let out = handle != null ? await exclusive(handle, () => run(name, a, ctx)) : await run(name, a, ctx);
+    const plain = !!out && typeof out === 'object' && !Array.isArray(out);
+    // a tool that can change a project says whether that project now has unsaved changes
+    const h = handle ?? (plain && typeof (out as { handle?: unknown }).handle === 'string' ? (out as { handle: string }).handle : undefined);
+    if (plain && h && MUTATES.has(name)) out = { ...(out as object), unsaved_changes: isDirty(h) };
     const s = handle ? sessions.get(handle) : undefined;
-    if (s?.notice && out && typeof out === 'object' && !Array.isArray(out)) { const n = s.notice; s.notice = undefined; return { ...(out as object), _notice: n }; }
+    if (s?.notice && plain) { const n = s.notice; s.notice = undefined; return { ...(out as object), _notice: n }; }
     return out;
   };
   const asJob = a.async === true && name !== 'job_status';
@@ -305,12 +335,48 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     const timeout = Symbol('timeout');
     const r = await Promise.race([p, new Promise((res) => setTimeout(() => res(timeout), config.softTimeoutMs).unref?.())]);
     if (r === timeout) { const job = startJob(name, handle, p, abort); return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
-    const isError = !!(r && typeof r === 'object' && (r as { ok?: boolean }).ok === false);
+    const o = r as { ok?: boolean; status?: string; error?: Record<string, unknown> } | null;
+    // a refusal answered as data (ok: false), and a job that failed or was cancelled, are errors too
+    const isError = !!(o && typeof o === 'object' && (o.ok === false || (name === 'job_status' && (o.status === 'failed' || o.status === 'cancelled'))));
+    if (isError && o!.error) return { out: { ...o, error: contractError(o!.error) }, isError };
     return { out: r, isError };
   } catch (e) {
-    if (e instanceof ToolError) return { out: { error: { code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) } }, isError: true };
-    return { out: { error: { code: 'internal', message: (e as Error).message, hint: 'This is a bug in the server; the project was not changed by this call. Retry, or report it with the message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') } }, isError: true };
+    if (e instanceof ToolError) return { out: { error: contractError({ code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) }) }, isError: true };
+    return { out: { error: contractError({ code: 'internal', message: (e as Error).message, hint: 'This is a bug in the server; the project was not changed by this call. Retry, or report it with the message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') }) }, isError: true };
   }
+}
+
+/** The craft forks' error shape ({code, reason, next_step, retry_after_ms}) with the older fields (message, hint,
+ *  retry_after in seconds) kept beside it for one release. */
+function contractError(e: Record<string, unknown>): Record<string, unknown> {
+  const { code, message, hint, retry_after, ...rest } = e;
+  return { code, reason: e.reason ?? message, next_step: e.next_step ?? hint, ...(retry_after ? { retry_after_ms: Number(retry_after) * 1000 } : {}), message, hint, ...(retry_after ? { retry_after } : {}), ...rest };
+}
+
+/** At exit: every project with unsaved changes (in memory or moved out) is saved as <name>.recovered-<stamp>.xer in the
+ *  write root (else the storage root, else the project's own folder, else the working folder). Returns the files. */
+export function saveUnsavedAtExit(reason: string): string[] {
+  const saved: string[] = [];
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  const one = (handle: string, path: string | null, db: Db) => {
+    const first = (db.tables.PROJECT?.rows ?? []).find((p) => p.proj_id === allIds(db)[0])?.proj_short_name;
+    const name = ((path ? basename(path).replace(/\.[^.]+$/, '') : '') || first || handle).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 80) || 'project';
+    const dir = writeBase() ?? (path ? dirname(path) : process.cwd());
+    let file = join(dir, `${name}.recovered-${stamp}.xer`);
+    for (let i = 2; existsSync(file) || saved.includes(file); i++) file = join(dir, `${name}.recovered-${stamp}-${i}.xer`);
+    try { writeOut(file, writeXer(db, { version: db.header?.version ?? '19.12', encoding: 'auto' })); saved.push(file); process.stderr.write(`P6 Clone: unsaved changes of ${handle} saved to ${file} (${reason})\n`); }
+    catch (e) { process.stderr.write(`P6 Clone: the unsaved changes of ${handle} could not be saved (${reason}): ${(e as Error).message}\n`); }
+  };
+  for (const s of sessions.values()) if (s.dirty) one(s.handle, s.path, s.db);
+  for (const e of unsavedEvicted()) one(e.handle, e.path, e.db);
+  return saved;
+}
+let exiting = false;
+/** Leave: save what is unsaved first (stdin closed, SIGTERM, SIGINT). */
+export function shutdown(reason: string): void {
+  if (exiting) return;
+  exiting = true;
+  try { saveUnsavedAtExit(reason); } finally { process.exit(0); }
 }
 
 /** An MCP tools/call result; oversized output is cut down to a preview instead of flooding the client. */
@@ -336,8 +402,10 @@ if (isMain) {
   const args = process.argv.slice(2);
   const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };
   setRoot(opt('root') ?? process.env.P6CLONE_ROOT ?? null);
+  setRoots(opt('automation-read-root'), opt('automation-write-root'));
   loadIndex();
   housekeeping();
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => shutdown(sig));
   if (args.includes('--http')) {
     config.requireOwnerKey = !args.includes('--no-owner-key');
     // not awaited: http/stdio import this module, so it must finish evaluating first

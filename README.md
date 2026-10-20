@@ -105,7 +105,10 @@ node cli/p6clone.ts review tower.xer --json
 code (or `A.B` path), resources by resource ID, calendars by name, projects by project ID (only needed when the file has
 several). An activity read from Microsoft Project XML or MPX keeps its task UID (`source_uid` in lookups; not written to
 XER or P6 XML, and kept when saved back to Microsoft Project) and can be named `uid:<UID>` wherever an activity is.
-Durations and lags are in days (`--hours-per-day`, default 8). Dates are `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
+A WBS element can be named `wbs_id:<id>` (the `wbs_id` that `add_wbs` returns and `list_wbs` shows) wherever a WBS is;
+`project` can then be left out. Durations, remaining durations and lags are in days of the activity's own calendar (its
+hours per day; lags: the relationship-lag calendar, by default the predecessor's), else `--hours-per-day` (default 8);
+`*_hours` fields take hours. Dates are `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
 
 | op | Fields |
 |---|---|
@@ -114,14 +117,15 @@ Durations and lags are in days (`--hours-per-day`, default 8). Dates are `YYYY-M
 | `set_project` | `project?, name?, data_date?, planned_start?, must_finish_by?, calendar?` |
 | `add_calendar` | `name, work_week?: {sat: [["07:00","12:00"],["13:00","16:00"]], ...}, holidays?: [dates], work_exceptions?: {date: periods}` |
 | `add_holidays` | `calendar, dates` |
-| `add_wbs` | `code, name?, parent?` |
+| `add_wbs` | `code, name?, parent?` (returns `wbs_id`; a sibling with the same code is refused, as in P6) |
 | `delete_wbs` | `code, keep_logic?` (default true): removes the WBS element, its children and their activities, linking the predecessors of the removed work to its successors so the chain stays closed (e.g. removing floors from a copied project) |
 | `add_activity` | `id?, name, wbs?, duration_days?, type?, calendar?, constraint?: {type, date}, secondary_constraint?, priority?, start?` |
 | `update_activity` | `id, new_id?, name?, wbs?, duration_days?, remaining_days?, type?, calendar?, constraint?, start?, finish?, actual_start?, actual_finish?, percent_complete?, expected_finish?, priority?` |
 | `delete_activity`, `dissolve_activity` | `id` (dissolve links its predecessors to its successors, like P6) |
 | `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`). P6 keeps one relationship per pair: adding a second (any type) is skipped and listed in the result's `warnings` |
-| `add_resource` | `id, name?, type?: labor\|nonlabor\|material, units_per_day?, max_units_per_day?, price_per_unit?, calendar?` |
-| `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?` |
+| `add_resource` | `id, name?, type?: labor\|nonlabor\|material, units_per_day?, max_units_per_day? \| max_units_per_hour?, price_per_unit?, calendar?` |
+| `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?, curve?` |
+| `add_resource_curve` | `name, values` (21 percentages totalling 100: the start, then each 5% of the assignment's time, like P6 Resource Curves) |
 | `update_assignment` | `activity, resource, units?, units_per_day?, remaining_units?, curve?` (resource curve name, `""` = linear) |
 | `update_wbs` | `code, new_code?, name?, parent?` (move; `""` = top level) |
 | `add_code_type`, `add_code_value`, `assign_code` | activity, project or resource codes (`subject`): `name, scope?, max_length?` (default 20, at most 60; a longer value is refused, never cut)`, values?: [{code, name?, parent?}]`; `type, code, name?, parent?`; `type, value` (`""` removes) on an `activity`, `project` or `resource` |
@@ -131,6 +135,7 @@ Durations and lags are in days (`--hours-per-day`, default 8). Dates are `YYYY-M
 | `add_step`, `update_step`, `delete_step` | `activity, name, new_name?, weight?, percent_complete?, completed?, description?` (physical % from weighted steps, like P6) |
 | `set_estimates` | `activity, min_days?, most_likely_days?, max_days?, distribution?: triangle\|betapert\|uniform\|none` or `clear: true` (for `monte_carlo`) |
 | `save_baseline`, `assign_baseline`, `delete_baseline`, `restore_baseline` | `name?, assign_as?`; `baseline, as?: project\|bl1\|bl2\|bl3` (the project baseline P6 stores, and the primary/secondary/tertiary user baselines) |
+| `build_baseline` | `project?, name?, assign_as?` (default `project`), `activities: [{activity, start?, finish?, duration_days?, cost?}]`: a baseline copy whose listed activities carry the given baseline values. XER keeps baselines the way P6 does: a PROJECT row whose `orig_proj_id` names its project, and the project's `sum_base_proj_id` |
 | `add_eps`/`update_eps`/`delete_eps`, `add_obs`/…, `add_role`/… | `id` (OBS: `name`), `name?, parent?, new_id?` (OBS: `new_name?`); `set_project eps` files a project under an EPS node |
 | `update_calendar` | `name, new_name?, work_week?, holidays?, work_exceptions?, remove_exceptions?` |
 
@@ -155,20 +160,31 @@ token and one storage root (every path is taken inside it; `..` and symlinks out
 node --max-old-space-size=4096 dist-cli/p6clone-mcp.cjs --http --root /data/projects --port 8765 --token $P6CLONE_TOKEN
 ```
 
+Instead of `--root`, `--automation-read-root DIR` and `--automation-write-root DIR` (the craft forks' flags) fence reads
+(read or write root) and writes (write root) apart; relative paths start in the write root (reads: the read root when the
+file is there); a save makes missing folders inside the write root. Every file is written atomically (a temporary file
+in the same folder, flushed, renamed over the target). On stdin EOF, SIGTERM or SIGINT every project with unsaved
+changes is saved as `<name>.recovered-<YYYYMMDD-HHMMSS>.xer` in the write root (else the root, else the project's folder),
+each file named on stderr.
+
 Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits come from the environment:
 `P6CLONE_MAX_HANDLES` (8), `P6CLONE_MEM_BUDGET_MB` (3072), `P6CLONE_IDLE_MINUTES` (30), `P6CLONE_MEM_FACTOR` (3: memory reserved per byte of file; a parsed XER takes about 2x). Give Node a heap above the budget; opening a file peaks at about 5x its size for a moment.
 
 **Sharing without dead stops**
 
 - `open_file` / `new_project` return an unguessable `handle` (for any call) and an `owner_key`. In HTTP mode `save`,
-  `close` and `undo` with `any_caller: true` need the owner key.
+  `close` and `undo` with `any_caller: true` need the owner key. A file P6 would reject is refused (`p6_would_reject`,
+  with `fatal` findings); `lenient: true` opens it anyway to repair it when a project could be read from it.
+- Answers of tools that can change a project carry `unsaved_changes`. `close` is refused (`unsaved_changes`) while there
+  are any, unless `discard: true`.
 - Calls on one handle run one at a time, in order; a call that waits too long gets `busy` with `retry_after`.
 - Pass `caller` (the bridge stamps it; the HTTP session is the fallback): `undo` and `redo` take back only your own
   changes, and are refused (`undo_conflict`) only when someone else's later change touched the same items.
 - At the handle or memory limit the least recently used project is written to a recovery file in
   `<root>/.p6clone-recovery` (unsaved work included) and comes back by itself on its next call, with a `_notice`.
   Idle projects go the same way after 30 minutes. Nothing is discarded; `list_open` and `server_status` show where it is.
-- Every error is `{error: {code, message, hint, retry_after?}}`: the hint says what to do next. Long work (a big
+- Every error is `{error: {code, reason, next_step, retry_after_ms?}}` with `isError` (also `message`, `hint`,
+  `retry_after` in seconds, for one release): `next_step` says what to do next; a failed or cancelled job is an error too. Long work (a big
   `open_file`, `monte_carlo`) can run with `async: true` and `job_status`; any call still running after 25 s turns into
   a job by itself. Oversized results come back as a preview with a note on how to ask for less.
 - MCP `notifications/cancelled` (or `cancel_job` for a job) stops `open_file`, `save` and `schedule` between their

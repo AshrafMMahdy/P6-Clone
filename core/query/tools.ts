@@ -32,7 +32,7 @@ export const TOOLS: ToolDef[] = [
     limit: { type: 'number', description: 'Default 25, at most 100' },
   } } },
   { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type, lag, driving and relationship free float), resource assignments, activity codes, user defined fields (UDFs), notes; source_uid for an activity read from Microsoft Project.', parameters: { type: 'object', properties: { activity_id: { type: 'string', description: 'Activity ID, or "uid:<task UID>" for an activity read from Microsoft Project' } }, required: ['activity_id'] } },
-  { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges. Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2' } } } },
+  { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges, and each element\'s wbs_id (edit operations take "wbs_id:<id>"). Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2' } } } },
   { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: {} } },
   { name: 'list_projects', description: 'Every project in the database (not only the open one): ID, name, status, start and finish, activity count, WBS top-level names, calendar. Use it to find past projects similar to the one being planned or asked about; then read one with the other lookups by passing its ID as "project".', parameters: { type: 'object', properties: { text: { type: 'string', description: 'only projects whose ID or name contains this' } } } },
@@ -198,7 +198,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const out: unknown[] = [];
       const walk = (w: Row, lvl: number) => {
         const ts = tasksUnder.get(w.wbs_id) ?? [];
-        if (out.length < 200) out.push({ level: lvl, code: wbsPath(w.wbs_id) || w.wbs_short_name, name: w.wbs_name, activities: ts.length, start: d(ts.map(start).filter(Boolean).sort()[0]), finish: d(ts.map(finish).filter(Boolean).sort().pop()), critical: ts.filter((t) => !t.act_end_date && isCritical(t, ctx)).length });
+        if (out.length < 200) out.push({ level: lvl, code: wbsPath(w.wbs_id) || w.wbs_short_name, wbs_id: w.wbs_id, name: w.wbs_name, activities: ts.length, start: d(ts.map(start).filter(Boolean).sort()[0]), finish: d(ts.map(finish).filter(Boolean).sort().pop()), critical: ts.filter((t) => !t.act_end_date && isCritical(t, ctx)).length });
         if (lvl < depth) for (const c of (kids.get(w.wbs_id) ?? []).sort((a, b) => Number(a.seq_num) - Number(b.seq_num))) walk(c, lvl + 1);
       };
       for (const r of roots) walk(r, 0);

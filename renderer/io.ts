@@ -1,5 +1,6 @@
 // File-format plumbing shared by wizards and the CLI-like Validate tool.
 import { parseXer } from '../core/xer/parse.ts';
+import { markBaselines } from '../core/progress/baseline.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { checkStoredDates } from '../core/schedule/stored-dates.ts';
 import { worst } from '../core/findings.ts';
@@ -71,7 +72,9 @@ export function readRaw(bytes: Uint8Array, format: Format, encoding?: TextEncodi
   if (format === 'xml') return parseP6Xml(xmlText(bytes));
   if (format === 'mspdi') return parseMspdi(xmlText(bytes));
   if (format === 'mpx') return parseMpx(decodeText(bytes, encoding).text);
-  return parseXer(bytes, { encoding });
+  const r = parseXer(bytes, { encoding });
+  markBaselines(r.db);
+  return r;
 }
 
 export interface MppBridge { mppToXml(bytes: Uint8Array): Promise<Uint8Array> }
