@@ -1,6 +1,14 @@
 # Plan: schedule analysis tools for the MCP server
 
-Status: research done, nothing built. Written 2026-10-21.
+Status: built 2026-10-21 (commits 8ca4597, 62539aa, 5fd2244, 06357f9, 28ecde7, 2d311f2), MCP and desktop
+(Tools > Check Schedule Report, Schedule Options > Advanced, Activity Usage Profile, Tools > Extensions). Where the
+build differs from this plan:
+- Check Schedule has P6 Professional's 14 checks; the dangling start/finish checks (EPPM only) are in `lint`.
+- `tia` `against` became `baseline`: the TIA always runs on the current project and reports the impacted variance to
+  the chosen baseline's finish (a stored baseline is a snapshot and is not edited).
+- `windows_analysis` progress-form updates start from the last update that is a schedule of its own (or the current
+  project), never from a stored baseline.
+- The reasoner's answer is checked through the clone's P6 leveler and compared with P6 default leveling.
 
 White Hat IQ is moving its own scheduling tools into the clone, so its agent does everything through MCP. Six areas are
 missing. The rule for each: **match real P6 first**, then add the platform's extras where they are worth keeping, then

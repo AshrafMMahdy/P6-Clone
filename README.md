@@ -29,6 +29,8 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
 - **Tools > Schedule (F9)**: data date + Options (Retained Logic / Progress Override / Actual Dates, float type, lag calendar, open-ended critical, ignore external links, expected finish, critical = float or longest path). **Tools > Schedule Log** shows the P6-style log (open ends, out-of-sequence, constraint violations, negative float, loops).
 - **Tools > Update Progress**: moves the data date, auto-statuses activities from planned dates, recomputes remaining durations and resource actuals, then reschedules.
 - **Tools > Level Resources**: serial leveler (priority by early start / float / priority, within float, overallocation %).
+- **Tools > Check Schedule Report**: P6 Professional's 14 checks with P6's populations and default targets; click an activity to go to it. **Schedule Options > Advanced**: multiple float paths (total or free float, end activity, number of paths) fill Float Path and Float Path Order on F9 as P6 does. **View > Show on Bottom > Activity Usage Profile / Spreadsheet**: planned value, earned value, actual and remaining curves per week or month.
+- **Tools > Extensions** (beyond P6, usable without the AI agent): DCMA 14-point (own implementation; PAM 200.1 and other profiles, critical path test, CPLI, BEI), Schedule lint (with fixes you can apply), Crashing (least-cost, Kelley-Walker cut sets), What-ifs (many scenarios compared on copies), Schedule reasoner (the White Hat IQ trained optimiser, run locally: a leveling order and crash modes, checked against P6 leveling), Windows analysis (AACE MIP 3.3 / 3.4 half-step) and Time impact analysis (AACE 52R-06).
 - **Project > Project Details**: General, Notebook (project notebook topics: WBSMEMO on the project's root WBS), Dates, Defaults, Settings, Codes (project codes, PROJPCAT).
 - **Project > Maintain Baselines**: save/assign/restore/delete baselines; baseline bars and BL columns/variance.
 - **Enterprise**: EPS, Resources (rates, max units, calendars, roles), Roles, OBS, Activity Codes, UDFs, Calendars (work week + holidays/exceptions, base calendar inheritance), Cost Accounts, Currencies.
@@ -90,7 +92,7 @@ Both run on Node 24 directly. For older Node (18+), or to copy into a sandbox wi
 node scripts/build-cli.mjs
 ```
 
-That writes `dist-cli/p6clone.cjs` and `dist-cli/p6clone-mcp.cjs` (about 250 KB each, no dependencies).
+That writes `dist-cli/p6clone.cjs` and `dist-cli/p6clone-mcp.cjs` (under 1 MB each, no dependencies), plus `dist-cli/models/` and `dist-cli/node_modules/` (the schedule reasoner's model and its 14 MB WebAssembly runtime, for `optimize_schedule`; copy them along, or the tool says the model is missing).
 
 ### CLI
 
@@ -279,7 +281,15 @@ became / no longer critical and the changed rows), `validate`, `review`, `projec
 `trace_logic`, `undo`, `redo`, `save` (XER 5.0-24.12, P6 XML, Microsoft Project XML `format: mspdi`, or MPX; `project`
 writes one project, and is required for mspdi/mpx when the file holds several), `export_pdf`,
 `export_excel`, `import_excel`, `compare` (`mode: computed`: per activity duration delta, start / finish shift, float
-delta, became / no longer critical), `list_reports`, `run_report`, `create_report`, `close`. Read-only tools carry
+delta, became / no longer critical), `list_reports`, `run_report`, `create_report`, `close`. Schedule analysis: `check_schedule` (P6 Professional's 14 checks), `dcma_14` (profiles, baseline, status date,
+contract finish, critical path test, CPLI decided by the contract finish with the baseline figure beside it, BEI), `lint`
+(with fixes as edit operations), `float_paths` (P6 multiple float paths, near-critical, paths between two activities),
+`progress_curves` (PV, EV, AC, remaining early and late, SPI/CPI per period), `resource_histogram`; `schedule` returns
+the P6 schedule log with `log: true`. Recovery: `evaluate_batch` (many what-ifs, the base scheduled once),
+`crash_schedule` (least-cost cut sets across parallel paths, every step, `apply`), `optimize_schedule` (the embedded
+reasoner; `objective: min_crash_cost` runs crash_schedule). Delay analysis: `windows_analysis` (contemporaneous or
+half-step over handles, files, baselines or progress at a data date) and `tia` (fragnet, `keep`); `compare` takes
+`baseline` to compare with a baseline in the same file and matches renumbered activities by name. Read-only tools carry
 the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as well as text).
 
 ### Other commands
