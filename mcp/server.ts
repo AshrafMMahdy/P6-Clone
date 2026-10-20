@@ -199,7 +199,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const keptMsp = allIds(s.db).filter((id) => (t == null || (only != null && id !== only)) && mspUntouched(s.db, id) === true);
       const todo = allIds(s.db).filter((id) => !keptMsp.includes(id));
       const kept = keptMsp.length ? { kept_msp_dates: keptMsp.map(name), note: `Not rescheduled: ${keptMsp.map(name).join(', ')} came from Microsoft Project and nothing that drives its dates changed since, so Microsoft Project's own dates stand.` } : {};
-      if (!todo.length) return { ok: true, ...kept, data_date: iso(Math.min(...keptMsp.map((id) => parseP6Date(s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!.last_recalc_date) ?? Infinity))), finish: null, warnings: [] };
+      if (!todo.length) {
+        // the same answer shape as a real F9, from the dates Microsoft Project wrote
+        const ids = new Set(keptMsp), tasks = (s.db.tables.TASK?.rows ?? []).filter((x) => ids.has(x.proj_id));
+        const finish = tasks.reduce((m, x) => Math.max(m, parseP6Date(x.act_end_date || x.early_end_date || x.target_end_date) ?? -Infinity), -Infinity);
+        const dataDate = Math.min(...keptMsp.map((id) => parseP6Date(s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!.last_recalc_date) ?? Infinity));
+        return { ok: true, ...kept, data_date: iso(dataDate), finish: iso(finish), stats: { activities: tasks.length, dataDate, finish: Number.isFinite(finish) ? finish : null, kept_msp_dates: true }, warnings: [] };
+      }
       const was = s.dirty;
       const res = change(s, ctx.caller, 'Schedule', (d) => {
         // with "project" the data date moves on that project only; the others schedule on their own

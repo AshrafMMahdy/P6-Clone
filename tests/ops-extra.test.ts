@@ -277,3 +277,10 @@ test('ops: days are hours of the activity\'s own calendar (lags: the predecessor
   const cr = rows(db, 'RSRC').find((r) => r.rsrc_short_name === 'CR')!;
   assert.equal(rows(db, 'RSRCRATE').find((r) => r.rsrc_id === cr.rsrc_id)!.max_qty_per_hr, '0.5');
 });
+
+test('ops: actual units without a cost keep linked costs in step with the units', () => {
+  const db = base();
+  ok(db, [{ op: 'add_resource', id: 'PR', price_per_unit: 10 }, { op: 'add_activity', id: 'T8', name: 'Eight', duration_hours: 18 }, { op: 'assign_resource', activity: 'T8', resource: 'PR', units: 18, actual_units: 6 }]);
+  const a = rows(db, 'TASKRSRC').find((x) => x.rsrc_id === rows(db, 'RSRC').find((r) => r.rsrc_short_name === 'PR')!.rsrc_id)!;
+  assert.deepEqual([Number(a.act_reg_qty), Number(a.remain_qty), Number(a.act_reg_cost), Number(a.remain_cost), Number(a.target_cost)], [6, 12, 60, 120, 180]);
+});

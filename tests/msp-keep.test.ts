@@ -73,6 +73,7 @@ test('MSPDI through MCP: F9 keeps Microsoft Project\'s dates until something tha
   const h = (await call('open_file', { path: FILE })).handle;
   const kept = await call('schedule', { handle: h });
   assert.deepEqual([kept.ok, kept.kept_msp_dates, kept.unsaved_changes], [true, ['Clinic Fitout'], false]);
+  assert.ok(/^\d{4}-\d\d-\d\d/.test(kept.finish) && kept.stats.activities > 0, 'a kept F9 still reports the finish and stats');
   assert.equal((await call('get_activity', { handle: h, activity_id: 'uid:162' })).start, '2026-03-19 12:00');
   // saved through the server after that F9: the file as it was
   const out = join(mkdtempSync(join(tmpdir(), 'p6msp-')), 'clinic.xml');
@@ -199,4 +200,17 @@ test('MSPDI F9: a file the clone wrote from P6 schedules by the rules of the P6 
     scheduleProjects(db, [pid]);
     assert.equal(mspDateChanges(db, pid).activities, 0);
   }
+});
+
+test('MSPDI: nothing kept points at a deleted task (assignments, unassigned placeholders, links)', () => {
+  const { db } = parseMspdi(readFileSync(FILE, 'utf8'));
+  const r = applyOps(db, [{ op: 'delete_activity', id: 'uid:155' }]);
+  assert.ok(r.ok, JSON.stringify(r.error));
+  const out = writeMspdi(db).replace(/>\s+</g, '><');
+  const uids = new Set([...out.matchAll(/<Task><UID>([^<]*)<\/UID>/g)].map((m) => m[1]));
+  assert.ok(!uids.has('155'));
+  const asgTasks = [...out.matchAll(/<Assignment>.*?<TaskUID>([^<]*)<\/TaskUID>/g)].map((m) => m[1]);
+  assert.deepEqual(asgTasks.filter((u) => !uids.has(u)), [], 'every assignment names a task in the file');
+  const preds = [...out.matchAll(/<PredecessorLink><PredecessorUID>([^<]*)<\/PredecessorUID>(?:(?!<\/PredecessorLink>).)*<CrossProject>0</g)].map((m) => m[1]);
+  assert.deepEqual(preds.filter((u) => !uids.has(u)), [], 'every link names a task in the file');
 });

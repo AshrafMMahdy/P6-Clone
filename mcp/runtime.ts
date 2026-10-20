@@ -72,6 +72,8 @@ export function pathArg(p: unknown, what = 'path', mode: 'read' | 'write' = 'rea
   const base = writeBase();
   const abs = isAbsolute(s) ? resolve(s) : mode === 'read' && config.readRoot && (existsSync(resolve(config.readRoot, s)) || !base) ? resolve(config.readRoot, s) : base ? resolve(base, s) : resolve(s);
   const fs = fences(mode);
+  // a read root alone fences reading; it must not leave writing unfenced
+  if (mode === 'write' && !fs.length && config.readRoot) fail('path_outside_root', `"${s}" cannot be written: this server has a read root but no write root.`, 'Start the server with --automation-write-root (or --root) to save files.', { data: { read_root: config.readRoot } });
   if (!fs.length) return abs;
   // resolve the deepest existing part through symlinks, then check it is still inside a root
   let probe = abs, rest = '';

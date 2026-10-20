@@ -452,7 +452,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       if (op.remaining_units != null) a.remain_qty = p6num(num(op.remaining_units, 'remaining_units'));
       if (op.curve !== undefined) { addField(table(db, 'TASKRSRC'), 'curv_id'); a.curv_id = op.curve ? h.curveId(op.curve) : ''; }
       recomputeCosts(db, a);
-      assignmentActuals(a, op, num);
+      assignmentActuals(db, a, op, num);
       return { assignment: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty), remaining_units: Number(a.remain_qty) };
     }
   }

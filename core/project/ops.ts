@@ -289,7 +289,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
       if (op.units_per_day != null) recalcAssignment(db, t, a, 'target_qty_per_hr', num(op.units_per_day, 'units_per_day') / hpd);
       if (op.units != null) { recalcAssignment(db, t, a, 'target_qty', num(op.units, 'units')); a.remain_qty = a.target_qty; recomputeCosts(db, a); }
       if (op.curve != null && op.curve !== '') { addField(table(db, 'TASKRSRC'), 'curv_id'); a.curv_id = curveId(op.curve); }
-      assignmentActuals(a, op, num);
+      assignmentActuals(db, a, op, num);
       return { assigned: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty) };
     }
     case 'unassign_resource': {

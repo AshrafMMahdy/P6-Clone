@@ -396,6 +396,9 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
   };
   const seqOf = (x: { keep?: Kept }, _i: number) => x.keep?.seq;
   const ghosts = m.keep?.ghosts ?? { tasks: [], resources: [], assignments: [], calendars: [] };
+  // kept elements that point at a task may only come back if that task is still written
+  const taskUids = new Set([...m.tasks.map((t) => t.uid), ...ghosts.tasks.map((g) => g.uid)]);
+  const tag = (xml: string, name: string) => new RegExp(`<${name}>([^<]*)</${name}>`).exec(xml)?.[1];
   const masked = /<WBSMask>/.test(m.keep?.kids.find((x) => x[0] === 'WBSMasks')?.[1] ?? '');
   const followed: string[] = [];
   const durOf = new Map(m.tasks.map((t) => [t.uid, t.durHrs ?? 0]));
@@ -535,7 +538,7 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
         const keys = JSON.parse(t.row._msp_links) as string[], now = new Map(t.preds.map((l) => [l.uid, l])), done = new Set<string>();
         t.keep.kids.filter((x) => x[0] === 'PredecessorLink').forEach(([, x], i) => {
           const key = keys[i];
-          if (!key) { cur.push(['PredecessorLink', x]); return; }
+          if (!key) { const pu = tag(x, 'PredecessorUID'); if (tag(x, 'CrossProject') === '1' || !pu || taskUids.has(pu)) cur.push(['PredecessorLink', x]); return; }
           const uid = key.slice(0, key.indexOf(':')), l = now.get(uid);
           if (!l || done.has(uid)) return;
           done.add(uid);
@@ -615,7 +618,11 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
     if (a.workHrs != null) el('Work', hoursToIso(a.workHrs));
     return element('Assignment', a.keep, a.row, 'TASKRSRC', ASG_DEPS);
   };
-  proj.push(['Assignments', `<Assignments>${withGhosts(m.assignments.map((a, i) => ({ seq: seqOf(a, i), xml: () => asgXml(a) })), ghosts.assignments)}</Assignments>`]);
+  // a kept assignment goes with its task; a task's "unassigned" placeholder (resource -65535) goes once an edit assigns
+  // a resource to it (Microsoft Project keeps the placeholder only while a task has no resource)
+  const assigned = new Set(m.assignments.filter((a) => !a.keep).map((a) => a.taskUid));
+  const keptAsg = ghosts.assignments.filter((g) => { const tu = tag(g.xml, 'TaskUID'); return !tu || (taskUids.has(tu) && !(tag(g.xml, 'ResourceUID') === '-65535' && assigned.has(tu))); });
+  proj.push(['Assignments', `<Assignments>${withGhosts(m.assignments.map((a, i) => ({ seq: seqOf(a, i), xml: () => asgXml(a) })), keptAsg)}</Assignments>`]);
 
   if (followed.length) opts.report?.push(`This file has no WBS code mask, so Microsoft Project's WBS code is the outline number: the WBS of ${followed.length} moved task(s) follows the new place: ${followed.slice(0, 20).join('; ')}.`);
   const body = m.keep && m.row ? mergeKids(m.keep.kids, proj, PROJECT_DEPS, changedSince('PROJECT', m.row, k), ORDER.Project) : proj.map((x) => x[1]).join('\n');
