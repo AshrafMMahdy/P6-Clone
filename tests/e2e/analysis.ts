@@ -35,6 +35,15 @@ await menu('tools.extensions'); await win.waitForSelector('text=DCMA 14-point');
 await win.click('button:has-text("Run assessment")'); await win.waitForSelector('text=failed');
 const dcma = await win.locator('.tbl >> nth=0').innerText();
 ok(/Critical path test/.test(dcma) && /CPLI/.test(dcma) && /BEI/.test(dcma), 'Extensions runs DCMA 14-point with the critical path test, CPLI and BEI');
+// Extensions > Schedule lint: run, apply a fix
+await win.click('.dirbtn:has-text("Schedule lint")'); await win.click('button:has-text("Run lint")'); await win.waitForSelector('text=failing');
+const lintText = await win.locator('.tbl >> nth=0').innerText();
+ok(/Dangling start/.test(lintText) && /should overlap/.test(lintText), 'lint lists dangling starts and FS overlaps');
+await win.locator('tr:has-text("should overlap")').first().dispatchEvent('mousedown'); await win.waitForTimeout(200);
+const applyBtn = win.locator('button:has-text("Apply")').first();
+ok(await applyBtn.count() > 0, 'an overlap fix can be applied');
+if (await applyBtn.count()) { await applyBtn.click(); await win.waitForTimeout(800); ok(/Applied/.test(await win.locator('.toast').last().innerText().catch(() => '')), 'applying a fix changes the logic and reschedules'); }
+if (shots) await win.screenshot({ path: join(shots, 'lint.png') });
 ok(await win.locator('.dirbtn:has-text("Extensions")').count() === 1, 'Extensions has its own button in the window bar');
 if (shots) await win.screenshot({ path: join(shots, 'dcma.png') });
 ok(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);

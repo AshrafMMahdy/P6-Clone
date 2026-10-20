@@ -1,4 +1,5 @@
 // Actions triggered from menus, toolbars and context menus.
+import { extraLogText } from '../core/analysis/scheduleLog.ts';
 import { getDb, getUi, mutate, setUi, toast, openDialog, doUndo, doRedo, saveNow } from './store.ts';
 import { addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, makeCtx, nextTaskCode } from './model.ts';
 import { buildActivityRows, toolbarSearch } from './views/activityRows.ts';
@@ -193,7 +194,8 @@ export function runSchedule(over: Parameters<typeof scheduleProjects>[2] = {}) {
   mutate('Schedule', (db) => { res = scheduleProjects(db, ui.openProjects, over); if (res.ok) syncAssignmentDates(db); });
   const r = res as ReturnType<typeof scheduleProjects> | null;
   if (r) {
-    setUi({ scheduleLog: r.log });
+    // P6's log also lists invalid milestone links, critical activities, unmet constraints and relationships, external dates
+    setUi({ scheduleLog: r.ok ? r.log.replace(/End of report$/, `${extraLogText(getDb(), ui.openProjects)}End of report`) : r.log });
     if (!r.ok) { doUndo(); openDialog('log', { title: 'Schedule Log', text: r.log || r.findings.map((f) => f.message).join('\n') }); }
   }
   return r;

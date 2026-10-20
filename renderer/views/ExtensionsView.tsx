@@ -8,9 +8,14 @@ import { dcma14, DCMA_PROFILES, type DcmaReport } from '../../core/analysis/dcma
 import { analysisReportHtml } from '../../core/analysis/report.ts';
 import { nowStamp } from '../../core/report/reports.ts';
 import { AnalysisResults } from './AnalysisResults.tsx';
+import { lintSchedule, type Fix, type LintReport } from '../../core/analysis/lint.ts';
+import { applyOps } from '../../core/project/ops.ts';
+import { mutate } from '../store.ts';
+import { runSchedule } from '../commands.ts';
 
 export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'dcma', title: 'DCMA 14-point', blurb: 'The 14 DCMA schedule checks, with the critical path test, CPLI and BEI.' },
+  { id: 'lint', title: 'Schedule lint', blurb: 'Logic and modelling problems P6 accepts, with fixes you can apply.' },
 ];
 
 export function ExtensionsView() {
@@ -24,7 +29,7 @@ export function ExtensionsView() {
           {EXTENSIONS.map((e) => <div key={e.id} className={`dirbtn ${cur.id === e.id ? 'on' : ''}`} style={{ flexDirection: 'column', alignItems: 'flex-start', padding: 6 }} onClick={() => setUi({ extension: e.id })}><b>{e.title}</b><span className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>{e.blurb}</span></div>)}
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 8, minWidth: 0 }}>
-          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : null}
+          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : null}
         </div>
       </div>
     </>
@@ -66,6 +71,32 @@ function DcmaPanel() {
       </div>
       {report && <div><b>{report.summary.failed}</b> failed · {report.summary.passed} passed{report.summary.not_assessed ? ` · ${report.summary.not_assessed} not assessed` : ''} · {report.tasks} tasks, {report.relationships} relationships · status date {report.status_date?.slice(0, 16) ?? 'not set'}{report.baseline ? ` · baseline ${report.baseline.name}` : ' · no baseline'}</div>}
       {report ? <AnalysisResults checks={report.checks} /> : <div className="muted">Runs the 14 DCMA checks on the open project(s). The critical path test runs on a copy; the project is not changed.</div>}
+    </div>
+  );
+}
+
+function LintPanel() {
+  const ui = useStore((s) => s.ui);
+  const [profile, setProfile] = useState<'p6' | 'platform'>('p6');
+  const [report, setReport] = useState<LintReport | null>(null);
+  const run = () => setReport(lintSchedule(getDb(), { projIds: ui.openProjects, hoursPerDay: ui.prefs.hoursPerDay, profile }));
+  const apply = (f: Fix) => {
+    let err = '';
+    // a refused fix rolls back inside mutate (nothing recorded) and is reported
+    try { mutate(`Lint fix: ${f.fix}`, (d) => { const r = applyOps(d, f.ops, { hoursPerDay: ui.prefs.hoursPerDay }); if (!r.ok) { err = r.error!.message; throw new Error(err); } }); } catch { /* reported below */ }
+    if (err) return toast(`Not applied: ${err}`);
+    const r = runSchedule({});
+    toast(`Applied: ${f.fix}${r?.ok ? ' (rescheduled; Ctrl+Z undoes)' : ''}`);
+    run();
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, height: '100%' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <label>Profile <select value={profile} onChange={(e) => setProfile(e.target.value as 'p6' | 'platform')}><option value="p6">P6 checks</option><option value="platform">P6 checks + network score (White Hat IQ)</option></select></label>
+        <button className="btn primary" onClick={run}>Run lint</button>
+      </div>
+      {report && <div>{report.score != null ? <><b>Score {report.score}</b> (grade {report.grade}) · </> : null}{report.checks.filter((c) => c.band === 'fail').length} failing · {report.checks.filter((c) => c.band === 'warn').length} warnings · {report.work_activities} work activities, {report.relationships} relationships</div>}
+      {report ? <AnalysisResults checks={report.checks} onApplyFix={apply} /> : <div className="muted">Finds logic and modelling problems P6 schedules without complaint. Fixes are edit operations: Apply makes the change, reschedules, and can be undone with Ctrl+Z.</div>}
     </div>
   );
 }

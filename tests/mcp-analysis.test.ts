@@ -31,3 +31,21 @@ test('MCP: check_schedule and dcma_14 on a real XER, with a report file and clea
   const badCheck = await call('check_schedule', { handle: h, checks: ['logic', 'zzz'] });
   assert.equal(badCheck.d.error.code, 'bad_input');
 });
+
+test('MCP: lint with fixes (P6 and platform profiles), and schedule returns the full log', async () => {
+  const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'cairo festival city.xer') })).d.handle;
+  const l = await call('lint', { handle: h });
+  assert.equal(l.err, false, JSON.stringify(l.d));
+  assert.equal(l.d.profile, 'p6');
+  assert.ok(l.d.checks.find((c: { id: string }) => c.id === 'dangling_start').total_activities > 0);
+  const lp = await call('lint', { handle: h, profile: 'platform' });
+  assert.ok(typeof lp.d.score === 'number' && lp.d.grade);
+  assert.equal((await call('lint', { handle: h, checks: ['nope'] })).d.error.code, 'bad_input');
+  const sc = await call('schedule', { handle: h });
+  assert.equal(sc.err, false, JSON.stringify(sc.d).slice(0, 300));
+  assert.ok(sc.d.log && Array.isArray(sc.d.log.warnings) && Array.isArray(sc.d.log.exceptions));
+  assert.ok(sc.d.log.warnings.some((w: { code: string }) => w.code === 'OPEN_FINISH'), 'open ends now reach the agent');
+  assert.ok(sc.d.log.exceptions.some((w: { code: string; count: number }) => w.code === 'CRITICAL' && w.count > 0));
+  const quiet = await call('schedule', { handle: h, log: false });
+  assert.equal(quiet.d.log, undefined);
+});

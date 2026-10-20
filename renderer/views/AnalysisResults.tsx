@@ -4,22 +4,26 @@ import { useState } from 'react';
 import { getDb, getUi, setUi } from '../store.ts';
 import { rows } from '../../core/db.ts';
 import type { CheckResult } from '../../core/analysis/common.ts';
+import type { Fix, LintCheck } from '../../core/analysis/lint.ts';
 import { fmtMetric, fmtTarget } from '../../core/analysis/report.ts';
 
-const RESULT = { pass: 'Pass', fail: 'Fail', not_assessed: 'Not assessed' } as const;
-const COLOR = { pass: '#1d6b2d', fail: '#a01818', not_assessed: '#777' } as const;
+const RESULT = { pass: 'Pass', fail: 'Fail', not_assessed: 'Not assessed', warn: 'Warning' } as const;
+const COLOR = { pass: '#1d6b2d', fail: '#a01818', not_assessed: '#777', warn: '#a06a00' } as const;
 
 /** Go to an activity by its ID in the open projects. */
+/** A lint check shows its band (pass, warning, fail); the others their result. */
+const shown = (c: CheckResult | LintCheck): keyof typeof RESULT => ('band' in c ? c.band : c.result);
+
 export function goToActivity(code: string): void {
   const open = new Set(getUi().openProjects);
   const t = rows(getDb(), 'TASK').find((x) => x.task_code === code && open.has(x.proj_id));
   if (t) setUi({ view: 'activities', selTasks: [t.task_id], selTask: t.task_id, revealTask: t.task_id });
 }
 
-export function AnalysisResults({ checks, onGo }: { checks: CheckResult[]; onGo?: () => void }) {
+export function AnalysisResults({ checks, onGo, onApplyFix }: { checks: (CheckResult | LintCheck)[]; onGo?: () => void; onApplyFix?: (f: Fix) => void }) {
   const go = (code: string) => { onGo?.(); goToActivity(code); };
   const link = (code: string) => <a href="#" onClick={(e) => { e.preventDefault(); go(code); }}>{code}</a>;
-  const [open, setOpen] = useState<string | null>(checks.find((c) => c.result === 'fail')?.id ?? null);
+  const [open, setOpen] = useState<string | null>(checks.find((c) => shown(c) === 'fail')?.id ?? null);
   return (
     <div className="tblwrap" style={{ flex: 1, overflow: 'auto' }}>
       <table className="tbl" style={{ width: '100%' }}>
@@ -28,7 +32,7 @@ export function AnalysisResults({ checks, onGo }: { checks: CheckResult[]; onGo?
           {checks.map((c) => [
             <tr key={c.id} className={open === c.id ? 'sel' : ''} style={{ cursor: 'pointer' }} onMouseDown={() => setOpen(open === c.id ? null : c.id)}>
               <td>{c.name}</td><td>{fmtTarget(c)}</td><td>{fmtMetric(c)}</td><td>{c.numerator ?? '—'}</td><td>{c.denominator ?? '—'}</td>
-              <td style={{ color: COLOR[c.result], fontWeight: c.result === 'fail' ? 'bold' : undefined }}>{RESULT[c.result]}</td>
+              <td style={{ color: COLOR[shown(c)], fontWeight: shown(c) === 'fail' ? 'bold' : undefined }}>{RESULT[shown(c)]}</td>
             </tr>,
             open === c.id && (
               <tr key={c.id + ':d'}><td colSpan={6} style={{ background: '#f7f9fc', whiteSpace: 'normal' }}>
@@ -39,6 +43,7 @@ export function AnalysisResults({ checks, onGo }: { checks: CheckResult[]; onGo?
                   {c.activities.map((a, i) => <tr key={i}><td>{/ -> /.test(a.id) ? <>{link(a.id.split(' -> ')[0])} → {link(a.id.split(' -> ')[1])}</> : link(a.id)}</td><td>{a.name}</td><td className="muted">{a.value ?? ''}</td></tr>)}
                 </tbody></table>}
                 {c.total_activities > c.activities.length && <div className="muted" style={{ fontSize: 11 }}>{c.total_activities - c.activities.length} more not listed.</div>}
+                {'fixes' in c && c.fixes?.length ? <div style={{ marginTop: 6 }}><b>Fixes</b>{c.fixes.slice(0, 50).map((f, i) => <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '2px 0' }}>{onApplyFix && <button className="btn" style={{ minWidth: 0, padding: '0 8px' }} onClick={() => onApplyFix(f)}>Apply</button>}<span>{f.fix}{f.saves_days != null ? ` (saves ${f.saves_days} d)` : ''}</span></div>)}</div> : null}
               </td></tr>
             ),
           ])}
