@@ -35,6 +35,7 @@ export function copyProject(db: Db, srcProjId: string, o: CopyOptions): string {
   const asgs = rows(db, 'TASKRSRC').filter((a) => a.proj_id === pid);
   // the copy is not the Microsoft Project file: none of what was kept of it (UIDs, elements, snapshots) goes with it
   for (const r of [p, ...tasks, ...asgs, ...rows(db, 'PROJWBS').filter((w) => w.proj_id === pid)]) for (const f of Object.keys(r)) if (f.startsWith('_msp_')) delete r[f];
+  p._msp_source = 'N'; // and it is a P6 project: P6's rules (one relationship per pair and type), whatever it came from
   if (!o.keepProgress) {
     for (const t of tasks) {
       for (const f of ['act_start_date', 'act_end_date', 'suspend_date', 'resume_date', 'expect_end_date']) if (t[f]) t[f] = '';

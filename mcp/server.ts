@@ -48,7 +48,7 @@ import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler }
 import { dayHours } from '../core/project/units.ts';
 import {
   ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
-  exclusive, change, dropLast, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, loadIndex, evictedList, type Session,
+  exclusive, change, dropLast, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, type Session,
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
@@ -437,7 +437,7 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     const plain = !!out && typeof out === 'object' && !Array.isArray(out);
     // a tool that can change a project says whether that project now has unsaved changes
     const h = handle ?? (plain && typeof (out as { handle?: unknown }).handle === 'string' ? (out as { handle: string }).handle : undefined);
-    if (plain && h && MUTATES.has(name)) out = { ...(out as object), unsaved_changes: isDirty(h) };
+    if (plain && h && MUTATES.has(name)) { out = { ...(out as object), unsaved_changes: isDirty(h) }; scheduleCheckpoint(h); }
     const s = handle ? sessions.get(handle) : undefined;
     if (s?.notice && plain) { const n = s.notice; s.notice = undefined; return { ...(out as object), _notice: n }; }
     return out;
@@ -499,6 +499,8 @@ let exiting = false;
 export function shutdown(reason: string): void {
   if (exiting) return;
   exiting = true;
+  // every handle checkpointed, so the next start brings it back; unsaved work also saved as .recovered files
+  try { if (config.checkpointMs) checkpointAll(); } catch { /* the .recovered files below still hold the work */ }
   try { saveUnsavedAtExit(reason); } finally { process.exit(0); }
 }
 
@@ -526,7 +528,9 @@ if (isMain) {
   const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };
   setRoot(opt('root') ?? process.env.P6CLONE_ROOT ?? null);
   setRoots(opt('automation-read-root'), opt('automation-write-root'));
-  loadIndex();
+  config.checkpointMs = Number(process.env.P6CLONE_CHECKPOINT_MS) > 0 ? Number(process.env.P6CLONE_CHECKPOINT_MS) : 2000;
+  const adopted = adoptRecovery();
+  if (adopted.length) process.stderr.write(`P6 Clone: ${adopted.length} project(s) from a server that is no longer running are back under their handles.\n`);
   housekeeping();
   for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => shutdown(sig));
   if (args.includes('--http')) {

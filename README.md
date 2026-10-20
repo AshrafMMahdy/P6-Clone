@@ -222,11 +222,16 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
 - Pass `caller` (the bridge stamps it; the HTTP session is the fallback): `undo` and `redo` take back only your own
   changes, and are refused (`undo_conflict`) only when someone else's later change touched the same items.
 - At the handle or memory limit the least recently used project is written to a recovery file in
-  `<root or the temp folder>/.p6clone-recovery/<pid>-<random>` (unsaved work included) and comes back by itself on its
+  `<root or the temp folder>/.p6clone-recovery/<pid>-<token>/` (unsaved work included) and comes back by itself on its
   next call, with a `_notice`. Idle projects go the same way after 30 minutes. Nothing is discarded; `list_open` and
-  `server_status` show where it is. Each server process has its own folder: it never restores, saves or deletes
-  projects another server moved out (theirs, and an older server's files, are left as they are), and a handle lives as
-  long as its server (unsaved work is saved as `<name>.recovered-<time>.xer` at exit).
+  `server_status` show where it is.
+- Handles survive a restart and a crash: each project in memory is also written to that folder 2 s after its last
+  change (`P6CLONE_CHECKPOINT_MS`) and at exit. The folder holds an owner lock (pid, start token, the process's start
+  time). A server starting adopts every folder whose owner is gone (no such process, or that pid started at another
+  time), and the shared `index.json` of servers before v0.1.15, by moving it into `adopted/` (one server wins when two
+  start at once); their handles come back under their old owner keys. A folder whose owner is alive is never touched,
+  and nothing is ever deleted (closed projects' files go to `closed/`). Unsaved work is also saved as
+  `<name>.recovered-<time>.xer` at exit.
 - Every error is `{error: {code, reason, next_step, retry_after_ms?}}` with `isError` (also `message`, `hint`,
   `retry_after` in seconds, for one release): `next_step` says what to do next; a failed or cancelled job is an error too. Long work (a big
   `open_file`, `monte_carlo`) can run with `async: true` and `job_status`; any call still running after 25 s turns into

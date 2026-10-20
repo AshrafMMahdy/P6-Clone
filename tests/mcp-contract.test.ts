@@ -100,7 +100,8 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
 
 /** A stdio server with arguments; tools and the way it ends. */
 function server(args: string[], cwd: string) {
-  const p = spawn(process.execPath, [SERVER, ...args], { stdio: ['pipe', 'pipe', 'pipe'], cwd });
+  // its own temp folder: a server adopts the recovery folders of servers that are gone, so tests must not share one
+  const p = spawn(process.execPath, [SERVER, ...args], { stdio: ['pipe', 'pipe', 'pipe'], cwd, env: { ...process.env, TMPDIR: cwd, TMP: cwd, TEMP: cwd } });
   let buf = '', err = '', id = 0;
   const waiting = new Map<number, (m: any) => void>();
   p.stdout.setEncoding('utf8'); p.stderr.setEncoding('utf8');

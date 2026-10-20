@@ -10,8 +10,8 @@
 //  - With a root folder, every path is confined to it (symlinks resolved); --automation-read-root / --automation-write-root
 //    fence reads (read or write root) and writes (write root) separately, like the craft forks.
 //  - Every failure is a ToolError with a code and a next step.
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync, writeFileSync, writeSync, rmSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { getHeapStatistics } from 'node:v8';
@@ -34,6 +34,9 @@ export const fail = (code: string, message: string, hint?: string, extra?: { ret
 export interface Config {
   root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean; maxHandles: number; budgetBytes: number; idleMinutes: number;
   memFactor: number; busyWaitMs: number; softTimeoutMs: number; maxResponseChars: number;
+  /** Write each changed project to the recovery folder this long after its last change (0: never; the server sets it),
+   *  so a crash loses at most that much and a restart brings every handle back. */
+  checkpointMs: number;
 }
 const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
 export const config: Config = {
@@ -45,6 +48,7 @@ export const config: Config = {
   busyWaitMs: num(process.env.P6CLONE_BUSY_WAIT_MS, 20000),
   softTimeoutMs: num(process.env.P6CLONE_SOFT_TIMEOUT_MS, 25000),
   maxResponseChars: num(process.env.P6CLONE_MAX_RESPONSE_CHARS, 400000),
+  checkpointMs: 0,
 };
 /** What the process can really hold: the budget, but never more than V8's heap limit allows. */
 export const effectiveBudget = () => Math.min(config.budgetBytes, getHeapStatistics().heap_size_limit - 512 * 1048576);
@@ -86,11 +90,35 @@ export function pathArg(p: unknown, what = 'path', mode: 'read' | 'write' = 'rea
   }
   return abs;
 }
-/** This server process's own recovery folder, <root or the temp folder>/.p6clone-recovery/<pid>-<random>: servers
- *  without a root (all in the temp folder), or two on one root, never share one, so a server neither restores, saves
- *  nor deletes projects another process moved out (theirs, and an older server's files, are left as they are). */
-const OWNER = `${process.pid}-${randomBytes(6).toString('hex')}`;
-export const recoveryDir = () => join(config.root ?? tmpdir(), '.p6clone-recovery', OWNER);
+// ---------------------------------------------------------------- recovery folders, owned by liveness
+// <root or the temp folder>/.p6clone-recovery/<pid>-<token>/ is this process's: owner.json (pid, start token, the
+// process's start time), index.json (handles moved out, and checkpoints of those in memory) and one file per project.
+// At start a server adopts every folder whose owner is dead (no such pid, or that pid started at another time: a reused
+// pid), by renaming it into adopted/ (atomic: of two servers starting at once, one wins), and the shared index.json of
+// servers before v0.1.15 likewise; their handles come back under their old keys. A folder whose owner is alive is never
+// touched, and nothing is ever deleted: files are restored or moved only.
+const TOKEN = randomBytes(6).toString('hex');
+const OWNER = `${process.pid}-${TOKEN}`;
+const recoveryBase = () => join(config.root ?? tmpdir(), '.p6clone-recovery');
+export const recoveryDir = () => join(recoveryBase(), OWNER);
+/** A process's start time as the OS keeps it (Linux: /proc/<pid>/stat field 22); null where unknown. */
+function procStart(pid: number): string | null { try { const s = readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' ')[19] ?? null; } catch { return null; } }
+function pidAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } }
+interface Lock { pid: number; token: string; started: string | null }
+const ownerAlive = (l: Lock) => { if (!Number.isInteger(l.pid) || l.pid <= 0 || !pidAlive(l.pid)) return false; const now = procStart(l.pid); return l.started == null || now == null || now === l.started; };
+/** My folder, with its owner lock (made on first use). */
+function myDir(): string {
+  const dir = recoveryDir();
+  if (!existsSync(join(dir, 'owner.json'))) {
+    mkdirSync(dir, { recursive: true });
+    try { writeFileSync(join(dir, 'owner.json'), JSON.stringify({ pid: process.pid, token: TOKEN, started: procStart(process.pid) } satisfies Lock), { flag: 'wx' }); } catch { /* there */ }
+  }
+  return dir;
+}
+/** Move a file aside inside my folder (closed / restored projects): never deleted. */
+function putAside(file: string, why: 'closed'): void {
+  try { const d = join(myDir(), why); mkdirSync(d, { recursive: true }); renameSync(file, join(d, `${Date.now()}-${basename(file)}`)); } catch { /* left where it is */ }
+}
 
 // ---------------------------------------------------------------- sessions
 export interface Change { id: number; label: string; caller: string; j: Journal; after: Map<unknown[], unknown[]>; at: number }
@@ -101,9 +129,13 @@ export interface Session {
   history: Change[]; redo: Map<string, { change: Change; mark: number }[]>; dirty: boolean;
   lastUsed: number; bytes: number; notice?: string;
 }
-interface Evicted { file: string; ownerKey: string; path: string | null; format: Format; hpd: number; encoding?: TextEncodingName; at: number; reason: string; dirty: boolean }
+/** adopted: taken over from a server that is gone (its own exit saved its unsaved work already, or it crashed: the
+ *  handle brings it back either way), so the save at exit leaves it to the handle */
+interface Evicted { file: string; ownerKey: string; path: string | null; format: Format; hpd: number; encoding?: TextEncodingName; at: number; reason: string; dirty: boolean; adopted?: boolean }
 export const sessions = new Map<string, Session>();
 const evicted = new Map<string, Evicted>();
+/** Projects in memory whose state is also on disk (checkpoint): what a restart, or a server after a crash, brings back. */
+const checkpoints = new Map<string, Evicted>();
 let changeSeq = 0;
 const token = (prefix: string, n = 18) => prefix + randomBytes(n).toString('base64url');
 
@@ -128,16 +160,37 @@ const mb = (b: number) => `${Math.round(b / 1048576)} MB`;
 
 /** Move a project out of memory into a lossless recovery file; it comes back on its next call. */
 export function evict(s: Session, reason: string): string {
-  mkdirSync(recoveryDir(), { recursive: true });
-  const file = join(recoveryDir(), `${s.handle}.p6db.jsonl`);
-  // line by line: a big project's file is larger than the longest possible string
-  const fd = openSync(file, 'w');
-  try { for (const l of dbLines(s.db, null)) writeSync(fd, l + '\n'); } finally { closeSync(fd); }
-  evicted.set(s.handle, { file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, encoding: s.encoding, at: Date.now(), reason, dirty: s.dirty });
+  const file = writeProject(s);
+  evicted.set(s.handle, entryOf(s, file, reason));
+  checkpoints.delete(s.handle);
   sessions.delete(s.handle);
   saveIndex();
   return file;
 }
+const entryOf = (s: Session, file: string, reason: string): Evicted => ({ file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, encoding: s.encoding, at: Date.now(), reason, dirty: s.dirty });
+/** A project's lossless file in my folder, written beside and then renamed over the last one. */
+function writeProject(s: Session): string {
+  const file = join(myDir(), `${s.handle}.p6db.jsonl`), tmp = `${file}.${randomBytes(3).toString('hex')}.tmp`;
+  // line by line: a big project's file is larger than the longest possible string
+  const fd = openSync(tmp, 'w');
+  try { for (const l of dbLines(s.db, null)) writeSync(fd, l + '\n'); } finally { closeSync(fd); }
+  renameSync(tmp, file);
+  return file;
+}
+/** Write a project in memory to the recovery folder now (a checkpoint): a restart or a crash then loses nothing of it. */
+export function checkpoint(s: Session): void {
+  if (!sessions.has(s.handle)) return;
+  try { checkpoints.set(s.handle, entryOf(s, writeProject(s), 'restart')); saveIndex(); } catch { /* the next one */ }
+}
+const pendingCk = new Map<string, NodeJS.Timeout>();
+/** After a change: a checkpoint config.checkpointMs after the project's last change. */
+export function scheduleCheckpoint(handle: string): void {
+  if (!config.checkpointMs) return;
+  clearTimeout(pendingCk.get(handle));
+  pendingCk.set(handle, setTimeout(() => { pendingCk.delete(handle); const s = sessions.get(handle); if (s && !busy.has(handle)) checkpoint(s); else if (s) scheduleCheckpoint(handle); }, config.checkpointMs).unref());
+}
+/** At exit: every project in memory checkpointed, so the next start brings each handle back. */
+export function checkpointAll(): void { for (const s of sessions.values()) { clearTimeout(pendingCk.get(s.handle)); checkpoint(s); } }
 /** Read a recovery file in pieces (see evict). */
 function readDbFile(file: string) {
   const r = new DbReader(), dec = new TextDecoder(), buf = new Uint8Array(1 << 24), fd = openSync(file, 'r');
@@ -152,11 +205,53 @@ function readDbFile(file: string) {
   r.add(rest + dec.decode());
   return r.finish();
 }
-const indexFile = () => join(recoveryDir(), 'index.json');
-function saveIndex(): void { try { writeFileSync(indexFile(), JSON.stringify(Object.fromEntries(evicted))); } catch { /* best effort */ } }
-/** This process's own index (a new process has a new folder, so none at start: another process's projects are
- *  never taken over). */
-export function loadIndex(): void { try { for (const [h, e] of Object.entries(JSON.parse(readFileSync(indexFile(), 'utf8')) as Record<string, Evicted>)) if (existsSync(e.file)) evicted.set(h, e); } catch { /* none */ } }
+function saveIndex(): void {
+  try { const f = join(myDir(), 'index.json'), tmp = `${f}.tmp`; writeFileSync(tmp, JSON.stringify({ evicted: Object.fromEntries(evicted), checkpoints: Object.fromEntries(checkpoints) })); renameSync(tmp, f); } catch { /* best effort */ }
+}
+/** The handles of an adopted index (moved from `from` to `to`, or null when the files stayed where they were). */
+function adoptIndex(file: string, from: string | null, to: string | null): string[] {
+  let j: Record<string, any>;
+  try { j = JSON.parse(readFileSync(file, 'utf8')); } catch { return []; }
+  const all: Record<string, Evicted> = j && typeof j.evicted === 'object' ? { ...(j.checkpoints ?? {}), ...j.evicted } : j; // v0.1.16, or a flat list before
+  const out: string[] = [];
+  for (const [h, e] of Object.entries(all)) {
+    if (!e || typeof e.file !== 'string' || sessions.has(h) || evicted.has(h)) continue;
+    const at = from && to && e.file.startsWith(from + sep) ? join(to, e.file.slice(from.length + 1)) : e.file;
+    if (existsSync(at)) { evicted.set(h, { ...e, file: at, reason: e.reason === 'restart' || !e.reason ? 'restart' : e.reason, adopted: true }); out.push(h); }
+  }
+  return out;
+}
+/** At start: take the lock of my folder and adopt what dead owners left (see above). Returns the handles adopted. */
+export function adoptRecovery(): string[] {
+  const base = recoveryBase();
+  myDir();
+  const took: string[] = [];
+  const aside = join(base, 'adopted');
+  let names: string[] = [];
+  try { names = readdirSync(base); } catch { return took; }
+  for (const name of names) {
+    if (name === OWNER || name === 'adopted') continue;
+    const dir = join(base, name);
+    try { if (!statSync(dir).isDirectory()) continue; } catch { continue; }
+    let lock: Lock;
+    try { lock = JSON.parse(readFileSync(join(dir, 'owner.json'), 'utf8')); } catch {
+      const m = /^(\d+)-[0-9a-f]{12}$/.exec(name); // a v0.1.15 folder: the pid is in its name
+      if (!m) continue;
+      lock = { pid: Number(m[1]), token: '', started: null };
+    }
+    if (ownerAlive(lock)) continue;
+    const to = join(aside, `${name}-by-${OWNER}`);
+    try { mkdirSync(aside, { recursive: true }); renameSync(dir, to); } catch { continue; } // another server took it first
+    took.push(...adoptIndex(join(to, 'index.json'), dir, to));
+  }
+  // the shared index of servers before v0.1.15 (their files stay where they are)
+  const legacy = join(base, 'index.json');
+  if (existsSync(legacy)) { const to = join(aside, `index-before-v0.1.15-by-${OWNER}.json`); try { mkdirSync(aside, { recursive: true }); renameSync(legacy, to); took.push(...adoptIndex(to, null, null)); } catch { /* another server took it */ } }
+  saveIndex();
+  return took;
+}
+/** Kept for callers of earlier versions: adoptRecovery. */
+export const loadIndex = (): void => void adoptRecovery();
 
 /** The session behind a handle; a project moved out of memory is brought back (with a notice for the caller). */
 export function getSession(h: unknown): Session {
@@ -164,24 +259,29 @@ export function getSession(h: unknown): Session {
   const s = sessions.get(handle);
   if (s) { s.lastUsed = Date.now(); return s; }
   const e = evicted.get(handle);
-  if (!e) fail('unknown_handle', handle ? `No open project with handle "${handle}".` : 'Give "handle".', 'Open the file again with open_file (or list_open to see the open handles). A handle lives as long as its server process: after a restart open the file again (unsaved work was saved at exit as <name>.recovered-<time>.xer).');
+  if (!e) fail('unknown_handle', handle ? `No open project with handle "${handle}".` : 'Give "handle".', 'Open the file again with open_file (or list_open to see the open handles). Handles come back after a server restart or crash (from the recovery folder) unless the project was closed.');
   const bytes = Math.round(statSync(e!.file).size * 1.5) + 8 * 1048576;
   admit(bytes, handle);
   const { db } = readDbFile(e!.file);
   const back: Session = { handle, ownerKey: e!.ownerKey, db, path: e!.path, format: e!.format, hpd: e!.hpd, encoding: e!.encoding, history: [], redo: new Map(), dirty: e!.dirty, lastUsed: Date.now(), bytes,
-    notice: `This project had been moved out of memory (${e!.reason === 'idle' ? `idle for ${config.idleMinutes} minutes` : 'to make room'}) and was restored from ${e!.file}. Its undo history before that is gone; nothing else was lost.` };
+    notice: e!.reason === 'restart' ? `The server had restarted (or stopped): this project was restored from ${e!.file}, with the changes it had. Its undo history before that is gone.`
+      : `This project had been moved out of memory (${e!.reason === 'idle' ? `idle for ${config.idleMinutes} minutes` : 'to make room'}) and was restored from ${e!.file}. Its undo history before that is gone; nothing else was lost.` };
   sessions.set(handle, back);
-  evicted.delete(handle); saveIndex();
-  try { rmSync(e!.file); } catch { /* keep */ }
+  // its file stays, as the checkpoint of the project now in memory (the next checkpoint writes over it)
+  evicted.delete(handle); checkpoints.set(handle, { ...e!, reason: 'restart' }); saveIndex();
   return back;
 }
 /** Projects moved out with unsaved changes, read back from their recovery files (for the save at exit). */
 export function* unsavedEvicted(): Generator<{ handle: string; path: string | null; hpd: number; encoding?: TextEncodingName; db: Db }> {
-  for (const [handle, e] of evicted) if (e.dirty && existsSync(e.file)) yield { handle, path: e.path, hpd: e.hpd, encoding: e.encoding, db: readDbFile(e.file).db };
+  for (const [handle, e] of evicted) if (e.dirty && !e.adopted && existsSync(e.file)) yield { handle, path: e.path, hpd: e.hpd, encoding: e.encoding, db: readDbFile(e.file).db };
 }
 export const isDirty = (h: string) => sessions.get(h)?.dirty ?? evicted.get(h)?.dirty ?? false;
-export function closeSession(s: Session): void { sessions.delete(s.handle); evicted.delete(s.handle); }
-export function forgetEvicted(handle: string): void { const e = evicted.get(handle); if (e) { try { rmSync(e.file); } catch { /* */ } evicted.delete(handle); saveIndex(); } }
+export function closeSession(s: Session): void {
+  sessions.delete(s.handle); clearTimeout(pendingCk.get(s.handle));
+  for (const m of [evicted, checkpoints]) { const e = m.get(s.handle); if (e) { putAside(e.file, 'closed'); m.delete(s.handle); } }
+  saveIndex();
+}
+export function forgetEvicted(handle: string): void { for (const m of [evicted, checkpoints]) { const e = m.get(handle); if (e) { putAside(e.file, 'closed'); m.delete(handle); } } saveIndex(); }
 export const evictedList = () => [...evicted].map(([h, e]) => ({ handle: h, file: e.path, recovery_file: e.file, reason: e.reason, unsaved_changes: e.dirty, since: new Date(e.at).toISOString() }));
 
 /** Idle projects leave memory (as hygiene); they return on their next call. */

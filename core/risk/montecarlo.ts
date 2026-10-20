@@ -377,7 +377,11 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     const m = estimateMean(e), f = m > 0 ? baseDur[k] / m : 1;
     return { ...e, min: e.min * f, ml: e.ml * f, max: e.max * f };
   });
-  const sampler = opts.sampler, ratioK = sampler ? prep.base.map((_t, k) => estimable[k] && (sampler.scope !== 'unestimated' || !est[k])) : [];
+  // a ratio is drawn for every open activity the sampler covers, milestones (zero length) too, as the platform's
+  // forecast does, so the generator's sequence stays the same; only activities with a duration use it
+  const sampler = opts.sampler;
+  const drawK = sampler ? prep.base.map((t, k) => !t.act_end_date && !isSummary(t) && (sampler.scope !== 'unestimated' || !est[k])) : [];
+  const ratioK = sampler ? prep.base.map((_t, k) => drawK[k] && estimable[k]) : [];
   const phase = opts.riskEvents ?? 'pre';
   const kOf = new Map(prep.base.map((t, k) => [t.task_id, k]));
   const riskEvents = phase === 'off' ? [] : risksOf(db, projIds).filter((r) => r.status_code !== 'RS_Rejected').map((r) => ({
@@ -407,7 +411,8 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     const { db: sdb, tasks } = scratch(prep);
     for (let k = 0; k < n; k++) {
       const e = est[k];
-      dur[k] = sampler && ratioK[k] ? baseDur[k] * Math.max(0, sampleRatio(sampler, rng)) : e ? Math.max(0, sampleDuration(e, rng)) : baseDur[k];
+      if (sampler && drawK[k]) { const ratio = sampleRatio(sampler, rng); dur[k] = ratioK[k] ? baseDur[k] * Math.max(0, ratio) : baseDur[k]; }
+      else dur[k] = e ? Math.max(0, sampleDuration(e, rng)) : baseDur[k];
     }
     for (let j = 0; j < riskEvents.length; j++) {
       const ev = riskEvents[j];

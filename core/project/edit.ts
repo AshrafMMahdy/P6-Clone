@@ -223,12 +223,12 @@ export function relationshipsBetween(db: Db, predId: string, succId: string): Ro
 }
 export const LOOP_MESSAGE = 'This relationship would create a loop (circular logic).';
 /** A project read from Microsoft Project keeps one relationship per pair of activities, as Project does; any other
- *  one per pair and type, as P6. Read from Project: _msp_source (the MSPDI and MPX readers since v0.1.14, or an MCP
- *  handle opened from such a file), _msp_keep (MSPDI read before that), or activities carrying Project task UIDs
- *  (_msp_uid: an MPX or MSPDI read before v0.1.14). The one rule, for edits (MCP, CLI, the desktop assistant and Excel
- *  import) and the desktop's own relationship commands alike. */
+ *  one per pair and type, as P6. The project's format mark decides: _msp_source Y (the MSPDI and MPX readers since
+ *  v0.1.14, or an MCP handle opened from such a file) or N (a P6 project, e.g. a copy_project of one). Without a mark
+ *  (read before v0.1.14): _msp_keep (MSPDI) or activities carrying Project task UIDs (_msp_uid: MPX or MSPDI). The one
+ *  rule, for edits (MCP, CLI, the desktop assistant and Excel import) and the desktop's own relationship commands. */
 export function onePerPair(db: Db, p: Row | undefined): boolean {
-  if (!p) return false;
+  if (!p || p._msp_source === 'N') return false;
   if (p._msp_source === 'Y' || p._msp_keep) return true;
   const T = realOf(rows(db, 'TASK'));
   const add = (s: Set<string>, from: number) => { for (let i = from; i < T.length; i++) if (T[i]._msp_uid) s.add(T[i].proj_id); return true; };

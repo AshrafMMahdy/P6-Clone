@@ -9,7 +9,9 @@ import { SAMPLES_DIR } from './helpers.ts';
 const SERVER = join(import.meta.dirname, '..', 'mcp', 'server.ts');
 
 function client(args: string[] = []) {
-  const p = spawn(process.execPath, [SERVER, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+  // its own temp folder: a server adopts the recovery folders of servers that are gone, so tests must not share one
+  const tmp = mkdtempSync(join(tmpdir(), 'p6mcp-tmp-'));
+  const p = spawn(process.execPath, [SERVER, ...args], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp } });
   let err = '';
   p.stderr.setEncoding('utf8');
   p.stderr.on('data', (c: string) => { err += c; });
