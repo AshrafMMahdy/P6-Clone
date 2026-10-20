@@ -218,6 +218,13 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
 - MCP `notifications/cancelled` (or `cancel_job` for a job) stops `open_file`, `save` and `schedule` between their
   phases and `monte_carlo` at once, with error `cancelled`: nothing is kept, no file is written, the memory is freed.
 
+**Breaking changes for MCP clients (2026-10-20)**, made to protect unsaved work:
+
+- `close` refuses with `unsaved_changes` while a project has unsaved changes; pass `discard: true` to close anyway.
+- `job_status` for a failed or cancelled job is an error (`isError`), not a successful answer with a failed status.
+- `save` with `format: mspdi` or `mpx` on a file holding several projects is refused (`bad_input`) unless `project`
+  names one; it no longer writes the first project silently.
+
 Tools: `open_file`, `new_project`, `list_open`, `server_status`, `job_status`, `cancel_job`, `edit`, `schedule`
 (`data_date`, with `project` for one project only),
 `update_progress`, `level_resources`, `monte_carlo` (P10-P90, histogram, milestone percentiles, criticality,
