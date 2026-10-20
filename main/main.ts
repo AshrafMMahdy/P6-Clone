@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { buildMenu } from './menu.ts';
 import { mppToXml, xmlToMpp } from './msproject.ts';
+import { nodeInfer, ReasonerUnavailable } from '../core/analysis/hrmRuntime.ts';
 
 const DB_FILE = () => join(app.getPath('userData'), 'p6clone-db.json');
 let win: BrowserWindow | null = null;
@@ -38,6 +39,8 @@ function createWindow(): void {
   });
 }
 
+// the schedule reasoner runs here (WebAssembly in Node); the renderer sends the model inputs only
+ipcMain.handle('hrm:infer', async (_e, x: Parameters<typeof nodeInfer>[0]) => { try { return { ok: true, out: await nodeInfer(x) }; } catch (e) { return { ok: false, error: (e as Error).message, unavailable: e instanceof ReasonerUnavailable }; } });
 ipcMain.handle('file:open', async (_e, filters: Electron.FileFilter[], title?: string) => {
   const r = await dialog.showOpenDialog(win!, { title, properties: ['openFile'], filters });
   if (r.canceled || !r.filePaths[0]) return null;

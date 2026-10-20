@@ -8,7 +8,7 @@ import { writeFileSync } from 'node:fs';
 import { iconPng } from './icon.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron'], sourcemap: true, logLevel: 'warning' };
+const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'onnxruntime-web'], sourcemap: true, logLevel: 'warning' };
 
 await esbuild({ ...common, entryPoints: [join(root, 'main/main.ts')], outfile: join(root, 'dist/main.cjs') });
 await esbuild({ ...common, entryPoints: [join(root, 'main/preload.ts')], outfile: join(root, 'dist/preload.cjs') });

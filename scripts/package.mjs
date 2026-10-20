@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iconIco } from './icon.mjs';
+import { copyReasoner } from './ort-files.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 execFileSync(process.execPath, [join(root, 'scripts/build.mjs')], { stdio: 'inherit' });
@@ -20,6 +21,7 @@ rmSync(join(out, 'resources', 'default_app.asar'), { force: true });
 const app = join(out, 'resources', 'app');
 mkdirSync(app, { recursive: true });
 cpSync(join(root, 'dist'), join(app, 'dist'), { recursive: true, filter: (p) => !p.endsWith('.map') });
+copyReasoner(root, app); // the schedule reasoner and its WebAssembly runtime (the main process runs it)
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 // same name as the development build, so both use the same saved database
 writeFileSync(join(app, 'package.json'), JSON.stringify({ name: pkg.name, version: pkg.version, description: pkg.description, main: 'dist/main.cjs' }, null, 2));

@@ -37,6 +37,8 @@ const api = {
   printHtml: (html: string, mode: 'print' | 'pdf' | 'preview', defaultName: string): Promise<boolean | string | null> => ipcRenderer.invoke('print:html', html, mode, defaultName),
   startupImport: (): Promise<OpenedFile | null> => ipcRenderer.invoke('startup:import'),
   confirm: (message: string, detail?: string): Promise<boolean> => ipcRenderer.invoke('confirm', message, detail),
+  /** the schedule reasoner (models/reasoner.onnx), run in the main process */
+  hrmInfer: (x: { n: number; feats: Float32Array; bias: Float32Array; modeMask: Uint8Array }): Promise<{ ok: true; out: { priority: Float32Array; modeLogits: Float32Array } } | { ok: false; error: string; unavailable: boolean }> => ipcRenderer.invoke('hrm:infer', x),
   /** AI assistant (the API key stays in the main process) */
   aiGetConfig: (): Promise<AiPublicConfig> => ipcRenderer.invoke('ai:getConfig'),
   menuTree: (): Promise<{ label: string; id?: string; accelerator?: string; submenu?: unknown[] }[]> => ipcRenderer.invoke('menu:tree'),

@@ -12,10 +12,14 @@ import { lintSchedule, type Fix, type LintReport } from '../../core/analysis/lin
 import { applyOps } from '../../core/project/ops.ts';
 import { mutate } from '../store.ts';
 import { runSchedule } from '../commands.ts';
+import { CrashPanel, OptimizePanel, WhatIfPanel } from './RecoveryPanels.tsx';
 
 export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'dcma', title: 'DCMA 14-point', blurb: 'The 14 DCMA schedule checks, with the critical path test, CPLI and BEI.' },
   { id: 'lint', title: 'Schedule lint', blurb: 'Logic and modelling problems P6 accepts, with fixes you can apply.' },
+  { id: 'crash', title: 'Crashing', blurb: 'Least-cost crashing to a date, a number of days, or the cheapest total.' },
+  { id: 'whatif', title: 'What-ifs', blurb: 'Many duration changes compared at once, on copies.' },
+  { id: 'optimize', title: 'Schedule reasoner', blurb: 'The trained optimiser: a leveling order (and crash modes) that finishes sooner.' },
 ];
 
 export function ExtensionsView() {
@@ -29,7 +33,7 @@ export function ExtensionsView() {
           {EXTENSIONS.map((e) => <div key={e.id} className={`dirbtn ${cur.id === e.id ? 'on' : ''}`} style={{ flexDirection: 'column', alignItems: 'flex-start', padding: 6 }} onClick={() => setUi({ extension: e.id })}><b>{e.title}</b><span className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>{e.blurb}</span></div>)}
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 8, minWidth: 0 }}>
-          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : null}
+          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : cur.id === 'crash' ? <CrashPanel /> : cur.id === 'whatif' ? <WhatIfPanel /> : cur.id === 'optimize' ? <OptimizePanel /> : null}
         </div>
       </div>
     </>

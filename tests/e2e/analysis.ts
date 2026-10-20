@@ -44,6 +44,17 @@ const applyBtn = win.locator('button:has-text("Apply")').first();
 ok(await applyBtn.count() > 0, 'an overlap fix can be applied');
 if (await applyBtn.count()) { await applyBtn.click(); await win.waitForTimeout(800); ok(/Applied/.test(await win.locator('.toast').last().innerText().catch(() => '')), 'applying a fix changes the logic and reschedules'); }
 if (shots) await win.screenshot({ path: join(shots, 'lint.png') });
+// Extensions > Crashing, What-ifs, Schedule reasoner
+await win.click('.dirbtn:has-text("Crashing")'); await win.click('button:has-text("Crash")'); await win.waitForSelector('text=working days gained');
+ok(/Step/.test(await win.locator('.tbl >> nth=1').innerText()), 'crashing lists every step');
+await win.click('.dirbtn:has-text("What-ifs")');
+await win.locator('td input >> nth=1').fill('A1000'); await win.locator('td input >> nth=2').fill('1');
+await win.click('button:has-text("Evaluate")'); await win.waitForSelector('text=Project as it is');
+ok(/Scenario 1/.test(await win.locator('.tbl >> nth=1').innerText()), 'what-ifs compare scenarios with the project as it is');
+await win.click('.dirbtn:has-text("Schedule reasoner")'); await win.click('button:has-text("Optimise")');
+await win.waitForSelector('text=/P6 leveling \\(early start|Max Units\\/Time limit and no crash data/', { timeout: 30000 });
+ok(true, 'the schedule reasoner runs in the main process and answers (a proposal, or why there is nothing to choose)');
+if (shots) await win.screenshot({ path: join(shots, 'reasoner.png') });
 ok(await win.locator('.dirbtn:has-text("Extensions")').count() === 1, 'Extensions has its own button in the window bar');
 if (shots) await win.screenshot({ path: join(shots, 'dcma.png') });
 // View > Show on Bottom > Activity Usage Profile
