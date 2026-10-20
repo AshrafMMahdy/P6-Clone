@@ -112,7 +112,12 @@ Links are saved with the project:
     lists its elements). SYNCHRO's export renames elements `name_(#id)` and changes GlobalIds, so the import maps them
     back by that suffix;
   - Navisworks search-set XML (each set becomes links through its conditions);
-  - TimeLiner CSV.
+  - TimeLiner CSV, and TimeLiner's task grid copied to Excel (Name, Actual Start/End, Planned Start/End, Task Type,
+    Attached `Sets-><name>`);
+  - **TimeLiner tasks straight from an `.nwf`**, without Navisworks: names, actual and planned dates, task type and the
+    attached set name. The record layout was decoded from a real 2016 file (see `sample 4D/navisworks-real-2016-villa/
+    NOTES.md`): `int64` Unix-second dates, actual pair first. Explicit selection sets are binary tree paths, so for now
+    the set name is the link key.
 
 ## Colours and states
 
@@ -169,10 +174,14 @@ The MCP server is a Node process, often with no GPU. The plan:
 - **buildingSMART construction-scheduling example**, FZK-Haus and Duplex (A and MEP).
 - **Navisworks search-set XMLs** and the official nw-exchange 4.0/11.0/12.0 schemas.
 - **TimeLiner CSV and MPX** samples.
-- **Small NWD/NWF/NWC files.** Only headers and names can be read; dates and attachments are binary.
+- **Small NWD/NWF/NWC files.** Only headers and names can be read in most of them.
+- **The user's own villa project (2016).** A Revit NWC, an NWF with a real 12-task TimeLiner (planned and actual dates
+  decoded, each task attached to a same-name selection set), the TimeLiner grid in Excel, and the exported AVI. The
+  first end-to-end test: import its tasks, link by set name, then render and compare against the original AVI.
 
 ## Still to confirm on a real installation
 
+- Whether newer Navisworks versions (2023–2026) still store TimeLiner tasks in the 2016 record layout.
 - Navisworks 2025/2026 IFC property naming in search sets: the newer loader's "IFC Attributes / GlobalId" vs the older
   "IfcGUID", and how a custom property set (our `4D` key) is named.
 - Whether MPX is still a TimeLiner data source in Navisworks 2025/2026 (CSV certainly is).
