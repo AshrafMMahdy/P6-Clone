@@ -14,6 +14,7 @@ import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { detectFormat, exportFile, importChecks, readRaw, type Format } from '../renderer/io.ts';
 import { writeXer } from '../core/xer/write.ts';
+import { repairKeys } from '../core/xer/repair.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
@@ -57,7 +58,7 @@ const writes = { readOnlyHint: false, destructiveHint: true, openWorldHint: fals
 const ERRORS_DOC = ' Errors come back as {error: {code, reason, next_step, retry_after_ms?}} (also message, hint, retry_after in seconds): follow next_step (e.g. busy -> retry, unknown_handle -> open_file again). Answers of tools that can change a project carry unsaved_changes.';
 
 const TOOLS = [
-  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read (the findings stay in diagnostics: fix them before P6 gets the file). Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
+  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read and repairs what it safely can (a misspelled key column with unique ids is renamed; empty, missing or repeated ids nothing points at get fresh ones): diagnostics.repaired lists each repair, diagnostics.not_repaired what was left, and still_rejected says whether a save would still be refused by P6. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
   { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
   { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs.', inputSchema: { type: 'object', properties: {} } },
@@ -150,7 +151,23 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
             { data: { fatal: f.filter((x) => x.severity === 'fatal').slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
         }
         s0.db = r.db; s0.format = format;
-        return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, ...(fatal ? { lenient: true, note: 'P6 would reject this file as it is: the fatal findings are in diagnostics. Fix them before P6 gets it.' } : {}), diagnostics: brief(f), summary: summary(s0) };
+        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0) };
+        // lenient: repair what can be repaired without guessing (key columns, ids), then judge the file again
+        const fix = repairKeys(r.db);
+        const g = fix.repaired.length ? importChecks(r.db, r.findings, format) : f;
+        await checkpoint(ctx);
+        if (fix.repaired.length) s0.dirty = true; // the repairs reach the file with the next save
+        const still = worst(g) === 'fatal' || g.some((x) => x.code === 'EMPTY_KEY');
+        // errors left as they are (repairing them would mean guessing or cutting data): named, so nothing is a surprise
+        const left = new Map<string, Finding[]>();
+        for (const x of g) if (x.severity === 'fatal' || x.severity === 'error') left.set(x.code, [...(left.get(x.code) ?? []), x]);
+        for (const [code, xs] of left) fix.not_repaired.push(`${code} x${xs.length} (${xs[0].severity}) not repaired: ${xs[0].message}${xs[0].p6 ? ` P6: ${xs[0].p6}` : ''}`);
+        return {
+          handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still,
+          note: still ? 'P6 would still reject this project if it were saved now: the fatal findings in diagnostics (and not_repaired) were not repaired automatically. Fix them with edit operations before P6 gets the file.'
+            : fix.repaired.length ? 'Opened with repairs (diagnostics.repaired): a save writes a file P6 imports.' : 'Opened; nothing needed repairing.',
+          diagnostics: { ...brief(g), repaired: fix.repaired, not_repaired: fix.not_repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0),
+        };
       } catch (e) { closeSession(s0); throw e; }
     }
     case 'new_project': {

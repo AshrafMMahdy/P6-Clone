@@ -57,7 +57,9 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
   assert.deepEqual([rej.isError, rej.data.error.code, rej.data.error.fatal[0].code], [true, 'p6_would_reject', 'DUP_KEY']);
   assert.match(rej.data.error.next_step, /lenient: true/);
   const len = await call('open_file', { path: f.dup, lenient: true });
-  assert.deepEqual([len.isError, len.data.lenient, len.data.diagnostics.verdict, len.data.unsaved_changes], [false, true, 'fatal', false]);
+  assert.deepEqual([len.isError, len.data.lenient, len.data.diagnostics.verdict, len.data.unsaved_changes, len.data.still_rejected], [false, true, 'fatal', false, true]);
+  // a repeated TASK id that relationships point at cannot be told apart: left, and said so
+  assert.ok(len.data.diagnostics.not_repaired.some((x: string) => /TASK: 1 row\(s\) repeat a task_id/.test(x)), JSON.stringify(len.data.diagnostics));
   const unreadable = await call('open_file', { path: f.junk, lenient: true });
   assert.deepEqual([unreadable.isError, unreadable.data.error.code], [true, 'p6_would_reject']);
   assert.equal((await call('server_status')).data.open.length, 1, 'refused opens hold no project');
@@ -133,4 +135,36 @@ test('MCP contract: read and write roots, atomic saves into new folders, unsaved
   await t.exited;
   assert.deepEqual(readdirSync(join(base, 'out2')).map((x) => x.replace(/\d{8}-\d{6}/, 'STAMP')), ['Fresh Plan.recovered-STAMP.xer']);
   assert.ok(existsSync(join(inn, 'cfc.xer')));
+});
+
+test('MCP contract: a lenient open repairs a misspelled key column (the platform\'s old XER writer), so the saved file is one P6 imports', { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6mcp-fix-'));
+  for (const [file, rels] of [['Polaris_DC1_Baseline_Schedule.xer', 106], ['Aurora_Tower_Baseline_Schedule.xer', 258]] as const) {
+    const path = join(import.meta.dirname, 'fixtures', file);
+    const plain = await call('open_file', { path });
+    assert.deepEqual([plain.data.error.code, plain.data.error.fatal[0].code], ['p6_would_reject', 'MISSING_KEY_FIELD']);
+    const o = await call('open_file', { path, lenient: true });
+    assert.deepEqual([o.isError, o.data.still_rejected, o.data.unsaved_changes, o.data.summary.relationships], [false, false, true, rels], file);
+    assert.deepEqual(o.data.diagnostics.repaired, [`TASKPRED: column "taskpred_id" renamed task_pred_id (its ${rels} values are unique ids).`]);
+    assert.equal(o.data.diagnostics.before_repairs.verdict, 'fatal');
+    const out = join(dir, file);
+    assert.equal((await call('save', { handle: o.data.handle, path: out })).isError, false);
+    const again = await call('open_file', { path: out });
+    assert.equal(again.isError, false, JSON.stringify(again.data));
+    assert.notEqual(again.data.diagnostics.verdict, 'fatal');
+    assert.deepEqual([again.data.diagnostics.findings.filter((x: { code: string }) => x.code === 'EMPTY_KEY').length, again.data.summary.relationships], [0, rels]);
+    const ids = parseXer(new Uint8Array(readFileSync(out))).db.tables.TASKPRED.rows.map((r) => r.task_pred_id);
+    assert.ok(ids.every(Boolean) && new Set(ids).size === rels);
+  }
+  // fresh ids where nothing points at the rows; a missing key that other rows point at is reported, not invented
+  const { repairKeys } = await import('../core/xer/repair.ts');
+  const db = parseXer(new Uint8Array(readFileSync(join(import.meta.dirname, 'fixtures', 'Polaris_DC1_Baseline_Schedule.xer')))).db;
+  db.tables.TASKPRED.rows.forEach((r, i) => { r.task_pred_id = i < 3 ? '' : r.taskpred_id; delete r.taskpred_id; });
+  db.tables.TASKPRED.fields = db.tables.TASKPRED.fields.map((f) => (f === 'taskpred_id' ? 'task_pred_id' : f));
+  db.tables.TASK.fields = db.tables.TASK.fields.filter((f) => f !== 'task_id');
+  const fix = repairKeys(db);
+  assert.deepEqual(fix.repaired, ['TASKPRED: 3 row(s) with an empty, missing or repeated task_pred_id given fresh ids.']);
+  assert.match(fix.not_repaired[0], /^TASK has no task_id column.*other tables point at its rows/);
+  const ids = db.tables.TASKPRED.rows.map((r) => r.task_pred_id);
+  assert.equal(new Set(ids).size, ids.length);
 });

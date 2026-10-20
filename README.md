@@ -174,7 +174,10 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
 
 - `open_file` / `new_project` return an unguessable `handle` (for any call) and an `owner_key`. In HTTP mode `save`,
   `close` and `undo` with `any_caller: true` need the owner key. A file P6 would reject is refused (`p6_would_reject`,
-  with `fatal` findings); `lenient: true` opens it anyway to repair it when a project could be read from it.
+  with `fatal` findings); `lenient: true` opens it anyway when a project could be read from it, and repairs what it
+  safely can: a misspelled key column whose values are unique ids is renamed (e.g. `taskpred_id` -> `task_pred_id`),
+  empty, missing or repeated ids that nothing points at get fresh ones. `diagnostics.repaired` lists each repair,
+  `diagnostics.not_repaired` what was left, and `still_rejected` says whether a save would still be refused.
 - Answers of tools that can change a project carry `unsaved_changes`. `close` is refused (`unsaved_changes`) while there
   are any, unless `discard: true`.
 - Calls on one handle run one at a time, in order; a call that waits too long gets `busy` with `retry_after`.

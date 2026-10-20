@@ -33,7 +33,7 @@ function levenshtein(a: string, b: string): number {
   return d[a.length][b.length];
 }
 
-function suggest(name: string, candidates: Iterable<string>): string | undefined {
+export function suggest(name: string, candidates: Iterable<string>): string | undefined {
   let best: string | undefined;
   let bd = 4;
   for (const c of candidates) {
