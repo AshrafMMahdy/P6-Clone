@@ -86,7 +86,11 @@ export function pathArg(p: unknown, what = 'path', mode: 'read' | 'write' = 'rea
   }
   return abs;
 }
-export const recoveryDir = () => join(config.root ?? tmpdir(), '.p6clone-recovery');
+/** This server process's own recovery folder, <root or the temp folder>/.p6clone-recovery/<pid>-<random>: servers
+ *  without a root (all in the temp folder), or two on one root, never share one, so a server neither restores, saves
+ *  nor deletes projects another process moved out (theirs, and an older server's files, are left as they are). */
+const OWNER = `${process.pid}-${randomBytes(6).toString('hex')}`;
+export const recoveryDir = () => join(config.root ?? tmpdir(), '.p6clone-recovery', OWNER);
 
 // ---------------------------------------------------------------- sessions
 export interface Change { id: number; label: string; caller: string; j: Journal; after: Map<unknown[], unknown[]>; at: number }
@@ -150,7 +154,8 @@ function readDbFile(file: string) {
 }
 const indexFile = () => join(recoveryDir(), 'index.json');
 function saveIndex(): void { try { writeFileSync(indexFile(), JSON.stringify(Object.fromEntries(evicted))); } catch { /* best effort */ } }
-/** After a restart, projects moved out earlier can still be reached by their handles. */
+/** This process's own index (a new process has a new folder, so none at start: another process's projects are
+ *  never taken over). */
 export function loadIndex(): void { try { for (const [h, e] of Object.entries(JSON.parse(readFileSync(indexFile(), 'utf8')) as Record<string, Evicted>)) if (existsSync(e.file)) evicted.set(h, e); } catch { /* none */ } }
 
 /** The session behind a handle; a project moved out of memory is brought back (with a notice for the caller). */
@@ -159,7 +164,7 @@ export function getSession(h: unknown): Session {
   const s = sessions.get(handle);
   if (s) { s.lastUsed = Date.now(); return s; }
   const e = evicted.get(handle);
-  if (!e) fail('unknown_handle', handle ? `No open project with handle "${handle}".` : 'Give "handle".', 'Open the file again with open_file (or list_open to see the open handles). Handles from before a server restart come back only if they had been saved to recovery.');
+  if (!e) fail('unknown_handle', handle ? `No open project with handle "${handle}".` : 'Give "handle".', 'Open the file again with open_file (or list_open to see the open handles). A handle lives as long as its server process: after a restart open the file again (unsaved work was saved at exit as <name>.recovered-<time>.xer).');
   const bytes = Math.round(statSync(e!.file).size * 1.5) + 8 * 1048576;
   admit(bytes, handle);
   const { db } = readDbFile(e!.file);

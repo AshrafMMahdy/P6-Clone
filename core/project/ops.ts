@@ -303,7 +303,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       // P6 keeps one relationship per pair and type (an SS and an FF between the same two activities are both kept);
       // Microsoft Project one per pair. A relationship already there is skipped, not a failure of the whole list
       const have = relationshipsBetween(db, a.task_id, b.task_id);
-      const dup = have.find((r) => r.pred_type === type) ?? (onePerPair(projects().find((p) => p.proj_id === b.proj_id)) ? have[0] : undefined);
+      const dup = have.find((r) => r.pred_type === type) ?? (onePerPair(db, projects().find((p) => p.proj_id === b.proj_id)) ? have[0] : undefined);
       if (dup) {
         warnings.push(dup.pred_type === type ? `Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: it already exists.`
           : `Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: ${a.task_code} -> ${b.task_code} already has a ${dup.pred_type.slice(3)} relationship, and Microsoft Project keeps one per pair of activities.`);
@@ -325,7 +325,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
         const a = activity(l.pred ?? l.id, l.pred_project ?? op.project);
         const type = REL[String(l.type ?? 'FS').toUpperCase()] ?? fail(`links[${i}]: relationship type must be FS, SS, FF or SF.`);
         const have = relationshipsBetween(db, a.task_id, sb);
-        if (have.some((r) => r.pred_type === type) || (have.length && onePerPair(projects().find((p) => p.proj_id === b.proj_id)))) fail(`links[${i}]: ${a.task_code} -> ${b.task_code} is listed twice${have.some((r) => r.pred_type === type) ? '' : ' (Microsoft Project keeps one relationship per pair)'}.`);
+        if (have.some((r) => r.pred_type === type) || (have.length && onePerPair(db, projects().find((p) => p.proj_id === b.proj_id)))) fail(`links[${i}]: ${a.task_code} -> ${b.task_code} is listed twice${have.some((r) => r.pred_type === type) ? '' : ' (Microsoft Project keeps one relationship per pair)'}.`);
         ok(addRelationship(db, a.task_id, sb, type, l.lag_days != null ? num(l.lag_days, `links[${i}].lag_days`) * lagHours(a, b) : l.lag_hours != null ? num(l.lag_hours, `links[${i}].lag_hours`) : 0, true));
         batch.added.push({ pred: a.task_id, succ: sb, at: batch.at ?? -1 });
         out.push(`${a.task_code} ${type.slice(3)}`);

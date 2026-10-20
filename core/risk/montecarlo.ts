@@ -172,8 +172,10 @@ export interface MonteCarloOptions {
    *  project's calendar: a project-level delay). */
   events?: InlineEvent[];
   /** Duration ratio sampler: each activity's remaining duration times a ratio drawn per iteration. ratio_normal: a
-   *  normal ratio clamped to [minRatio, maxRatio]; ratio_empirical: one of the ratios (weights: their chances).
-   *  scope all (default): in place of three-point estimates; unestimated: only activities without one. */
+   *  normal ratio clipped to [minRatio, maxRatio] (default mean 1.12, std 0.28, [0.3, 4]); ratio_empirical: with
+   *  probability weight a ratio bootstrapped uniformly from ratios (only with at least 10 of them), else one from its
+   *  normal (as ratio_normal) — the platform's blended slippage sampler, draw for draw. scope all (default): in place
+   *  of three-point estimates; unestimated: only activities without one. */
   sampler?: Sampler;
   /** Rescale each three-point estimate so its mean is the activity's remaining duration. */
   reAnchor?: boolean;
@@ -181,7 +183,8 @@ export interface MonteCarloOptions {
   deadline?: number;
 }
 export interface InlineEvent { name: string; p: number; taskHours: [string, number][]; projectHours: number }
-export type Sampler = ({ type: 'ratio_normal'; mean: number; std: number; minRatio?: number; maxRatio?: number } | { type: 'ratio_empirical'; ratios: number[]; weights?: number[] }) & { scope?: 'all' | 'unestimated' };
+export interface RatioNormal { mean?: number; std?: number; minRatio?: number; maxRatio?: number }
+export type Sampler = (({ type: 'ratio_normal' } & RatioNormal) | { type: 'ratio_empirical'; ratios: number[]; weight: number; normal?: RatioNormal }) & { scope?: 'all' | 'unestimated' };
 
 /** Mean of a three-point estimate under its distribution. */
 export function estimateMean(e: { min: number; ml: number; max: number; dist: Dist }): number {
@@ -189,17 +192,14 @@ export function estimateMean(e: { min: number; ml: number; max: number; dist: Di
   const m = Math.min(b, Math.max(a, e.ml));
   return e.dist === 'none' ? e.ml : e.dist === 'uniform' ? (a + b) / 2 : e.dist === 'betapert' ? (a + 4 * m + b) / 6 : (a + m + b) / 3;
 }
-/** One ratio from a sampler (Box-Muller for the normal). */
+/** One ratio from a sampler, drawing from rng exactly as the platform's sampleRatio does (the empirical test only
+ *  with at least 10 ratios; Box-Muller from two draws). */
 export function sampleRatio(s: Sampler, rng: () => number): number {
-  if (s.type === 'ratio_empirical') {
-    const w = s.weights?.length === s.ratios.length ? s.weights : s.ratios.map(() => 1);
-    const tot = w.reduce((x, y) => x + Math.max(0, y), 0) || 1;
-    let u = rng() * tot;
-    for (let i = 0; i < s.ratios.length; i++) { u -= Math.max(0, w[i]); if (u < 0) return s.ratios[i]; }
-    return s.ratios[s.ratios.length - 1];
-  }
-  const z = Math.sqrt(-2 * Math.log(Math.max(1e-12, rng()))) * Math.cos(2 * Math.PI * rng());
-  return Math.min(s.maxRatio ?? Infinity, Math.max(s.minRatio ?? 0, s.mean + s.std * z));
+  if (s.type === 'ratio_empirical' && s.ratios.length >= 10 && rng() < s.weight) return s.ratios[Math.floor(rng() * s.ratios.length)];
+  const n: RatioNormal = s.type === 'ratio_empirical' ? s.normal ?? {} : s;
+  const u1 = Math.max(1e-9, rng()), u2 = rng();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  return Math.min(n.maxRatio ?? 4, Math.max(n.minRatio ?? 0.3, (n.mean ?? 1.12) + z * (n.std ?? 0.28)));
 }
 
 export interface HistogramBin { start: number; end: number; count: number; cumPct: number }

@@ -1,6 +1,6 @@
 // Editing a P6 database the way P6 does: new project, activities, relationships, WBS, dates, progress.
 // Shared by the desktop app (renderer/model.ts re-exports these) and the command-line tool.
-import { addField, groupBy, indexBy, nextId, rowIndex, rows, table, type Db, type Row } from '../db.ts';
+import { addField, groupBy, indexBy, nextId, rowIndex, rows, table, tableCache, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num, calendarResolver } from '../schedule/cpm.ts';
 import { ENUMS } from '../xer/schema.ts';
@@ -222,10 +222,18 @@ export function relationshipsBetween(db: Db, predId: string, succId: string): Ro
   return (rowIndex(P, 'pair', (r) => `${r.pred_task_id}|${r.task_id}`).get(`${predId}|${succId}`) ?? []).map((i) => P[i]).filter((r) => r.pred_task_id === predId && r.task_id === succId);
 }
 export const LOOP_MESSAGE = 'This relationship would create a loop (circular logic).';
-/** A project read from Microsoft Project (MSPDI or MPX; _msp_keep: read before _msp_source was kept) keeps one
- *  relationship per pair of activities, as Project does; any other one per pair and type, as P6. The one rule, for
- *  edits (MCP, CLI, the desktop assistant and Excel import) and the desktop's own relationship commands alike. */
-export const onePerPair = (p: Row | undefined) => !!p && (p._msp_source === 'Y' || !!p._msp_keep);
+/** A project read from Microsoft Project keeps one relationship per pair of activities, as Project does; any other
+ *  one per pair and type, as P6. Read from Project: _msp_source (the MSPDI and MPX readers since v0.1.14, or an MCP
+ *  handle opened from such a file), _msp_keep (MSPDI read before that), or activities carrying Project task UIDs
+ *  (_msp_uid: an MPX or MSPDI read before v0.1.14). The one rule, for edits (MCP, CLI, the desktop assistant and Excel
+ *  import) and the desktop's own relationship commands alike. */
+export function onePerPair(db: Db, p: Row | undefined): boolean {
+  if (!p) return false;
+  if (p._msp_source === 'Y' || p._msp_keep) return true;
+  const T = realOf(rows(db, 'TASK'));
+  const add = (s: Set<string>, from: number) => { for (let i = from; i < T.length; i++) if (T[i]._msp_uid) s.add(T[i].proj_id); return true; };
+  return tableCache(T, 'msp-projects', () => { const s = new Set<string>(); add(s, 0); return s; }, add).has(p.proj_id);
+}
 export const ONE_PER_PAIR_MESSAGE = 'These activities are already related, and Microsoft Project keeps one relationship per pair of activities.';
 /** Why P6 would refuse this relationship, or undefined if it is allowed. noLoopCheck: the caller checks loops itself
  *  (an edit checks them once, after all its operations). */
@@ -233,7 +241,7 @@ export function checkRelationship(db: Db, predId: string, succId: string, type =
   if (predId === succId) return 'An activity cannot be related to itself.';
   const have = relationshipsBetween(db, predId, succId);
   if (have.some((r) => r.pred_type === type)) return 'This relationship already exists.';
-  if (have.length) { const T = realOf(rows(db, 'TASK')), i = (rowIndex(T, 'id', (t) => t.task_id).get(succId) ?? []).find((k) => T[k].task_id === succId); if (i != null && onePerPair(realOf(rows(db, 'PROJECT')).find((p) => p.proj_id === T[i].proj_id))) return ONE_PER_PAIR_MESSAGE; }
+  if (have.length) { const T = realOf(rows(db, 'TASK')), i = (rowIndex(T, 'id', (t) => t.task_id).get(succId) ?? []).find((k) => T[k].task_id === succId); if (i != null && onePerPair(db, realOf(rows(db, 'PROJECT')).find((p) => p.proj_id === T[i].proj_id))) return ONE_PER_PAIR_MESSAGE; }
   if (noLoopCheck) return undefined;
   // P6 refuses links that would create a loop
   const P = realOf(rows(db, 'TASKPRED')), succOf = rowIndex(P, 'pred', (r) => r.pred_task_id);

@@ -160,7 +160,7 @@ its lookups all count every day at the hours per day of Edit > User Preferences.
 | `update_activity` | `id, new_id?, name?, wbs?, duration_days?, remaining_days?, type?, calendar?, constraint?, start?, finish?, actual_start?, actual_finish?, percent_complete?, expected_finish?, priority?` |
 | `delete_activity`, `dissolve_activity` | `id` (dissolve links its predecessors to its successors, like P6) |
 | `set_predecessors` | `activity, links: [{pred, type?, lag_days?}]`: every predecessor of the activity replaced in one step (`[]` removes them) |
-| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities, as real P6 files hold them); Microsoft Project one per pair (a project read from an MSPDI / MPX file; the same rule in the desktop app's own relationship commands). One already there is skipped and listed in the result's `warnings`. A relationship that closes a loop refuses the edit (checked once per edit, naming the first that closed one) |
+| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities, as real P6 files hold them); Microsoft Project one per pair (a project read from an MSPDI / MPX file, also one imported before v0.1.14, known by its task UIDs; the same rule in the desktop app's own relationship commands). One already there is skipped and listed in the result's `warnings`. A relationship that closes a loop refuses the edit (checked once per edit, naming the first that closed one) |
 | `add_resource` | `id, name?, type?: labor\|nonlabor\|material, units_per_day?, max_units_per_day? \| max_units_per_hour?, price_per_unit?, calendar?` |
 | `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?, curve?`, `allow_duplicate?` (assign a resource already on the activity again, as P6 allows) |
 | `add_resource_curve` | `name, values` (21 percentages totalling 100: the start, then each 5% of the assignment's time, like P6 Resource Curves) |
@@ -222,8 +222,11 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
 - Pass `caller` (the bridge stamps it; the HTTP session is the fallback): `undo` and `redo` take back only your own
   changes, and are refused (`undo_conflict`) only when someone else's later change touched the same items.
 - At the handle or memory limit the least recently used project is written to a recovery file in
-  `<root>/.p6clone-recovery` (unsaved work included) and comes back by itself on its next call, with a `_notice`.
-  Idle projects go the same way after 30 minutes. Nothing is discarded; `list_open` and `server_status` show where it is.
+  `<root or the temp folder>/.p6clone-recovery/<pid>-<random>` (unsaved work included) and comes back by itself on its
+  next call, with a `_notice`. Idle projects go the same way after 30 minutes. Nothing is discarded; `list_open` and
+  `server_status` show where it is. Each server process has its own folder: it never restores, saves or deletes
+  projects another server moved out (theirs, and an older server's files, are left as they are), and a handle lives as
+  long as its server (unsaved work is saved as `<name>.recovered-<time>.xer` at exit).
 - Every error is `{error: {code, reason, next_step, retry_after_ms?}}` with `isError` (also `message`, `hint`,
   `retry_after` in seconds, for one release): `next_step` says what to do next; a failed or cancelled job is an error too. Long work (a big
   `open_file`, `monte_carlo`) can run with `async: true` and `job_status`; any call still running after 25 s turns into
@@ -254,8 +257,9 @@ and progress, options; answers the `activity_table` rows plus `loops` and `broke
 priority, `resources`, `activity_priority` [IDs placed first], `dry_run: true` = the leveled dates `moved` and
 per-resource `peaks` with nothing committed), `monte_carlo` (P10-P90, histogram, milestone percentiles, criticality,
 sensitivity, risk events from the register or inline `events` [{name, probability, delay_days, activities?}] where no
-activities means a project-level delay, `sampler` ratio_normal {mean, std, min_ratio, max_ratio} or ratio_empirical
-{ratios, weight}, `re_anchor` (three-point means rescaled to the remaining durations), `deadline` (its probability),
+activities means a project-level delay, `sampler` ratio_normal {mean, std, min_ratio, max_ratio} (default 1.12, 0.28, clipped to [0.3, 4]) or ratio_empirical
+{ratios, weight, normal?} (with probability weight a ratio bootstrapped from ratios when there are at least 10, else
+the normal: the platform's blended slippage sampler, draw for draw), `re_anchor` (three-point means rescaled to the remaining durations), `deadline` (its probability),
 `working_days` from the data date with sigma marks; seeded, the project is not changed; progress in job_status and as
 notifications/progress for a progressToken, stopped by notifications/cancelled), `evaluate` (a what-if: `overrides`
 edit operations, `options`, `data_date` on a scratch state with no undo entry; finish and its delta, the critical set,

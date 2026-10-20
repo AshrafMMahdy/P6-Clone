@@ -67,8 +67,12 @@ test('G-6 monte_carlo: inline events (activity and project-level delay), ratio s
   assert.equal((await mc({ sampler: { type: 'ratio_normal', mean: 1.5, std: 0 } })).working_days.mean, 30);
   const clamp = await mc({ sampler: { type: 'ratio_normal', mean: 1.12, std: 0.28, min_ratio: 1, max_ratio: 1.3 } });
   assert.ok(clamp.working_days.min >= 20 && clamp.working_days.max <= 26, JSON.stringify(clamp.working_days));
-  const emp = await mc({ sampler: { type: 'ratio_empirical', ratios: [1, 2], weight: [1, 0] } });
+  // ratio_empirical: weight 1 with ten ratios of 1 draws only them; with fewer than 10 ratios, the normal (std 0: 2)
+  const emp = await mc({ sampler: { type: 'ratio_empirical', ratios: Array(10).fill(1), weight: 1 } });
   assert.deepEqual([emp.working_days.min, emp.working_days.max], [20, 20]);
+  const few = await mc({ sampler: { type: 'ratio_empirical', ratios: [1, 1], weight: 1, normal: { mean: 2, std: 0 } } });
+  assert.deepEqual([few.working_days.min, few.working_days.max], [40, 40]);
+  assert.equal((await mc({ sampler: { type: 'ratio_empirical', ratios: [1], weight: [1] } })).error.code, 'bad_input');
   // re_anchor: an estimate of 10 / 12 / 20 days (mean 14) rescaled to mean 10
   await call('edit', { handle: h, operations: [{ op: 'set_estimates', activity: 'A', min_days: 10, most_likely_days: 12, max_days: 20 }] });
   const raw = await mc({}), re = await mc({ re_anchor: true });

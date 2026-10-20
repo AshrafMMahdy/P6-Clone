@@ -14,7 +14,7 @@ import { rows, type Db } from '../core/db.ts';
 import { SAMPLES_DIR } from './helpers.ts';
 
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError).structuredContent as any; };
-// close what each test opened (discarding): more than 8 open would move the oldest out to the shared recovery folder
+// close what each test opened (discarding): more than 8 open would move the oldest out to a recovery file
 afterEach(async () => { for (const h of (await call('list_open', {})).open) await call('close', { handle: h.handle, discard: true }); });
 const dir = mkdtempSync(join(tmpdir(), 'p6a5-'));
 const NET = [
