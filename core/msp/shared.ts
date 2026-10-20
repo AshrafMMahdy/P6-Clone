@@ -12,6 +12,7 @@ import { selectRows } from '../xer/write.ts';
 import { hoursPerWeek, inheritExceptions, parseClndrData, serializeClndrData, standardCalendar, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num } from '../schedule/cpm.ts';
+import type { Ghosts, Kept, ProjectKept } from './keep.ts';
 
 export type RelType = 'FS' | 'SS' | 'FF' | 'SF';
 
@@ -24,6 +25,8 @@ export interface MCal {
   week: (Shift[] | null)[];
   /** OLE serial day -> shifts (empty = non-work day). */
   exceptions: Map<number, Shift[]>;
+  /** read from MSPDI: the calendar as written; the row it is written from */
+  keep?: Kept; row?: Row;
 }
 
 /** P6 values carried in MS Project custom fields. */
@@ -57,15 +60,18 @@ export interface MTask {
   critical: boolean | null;
   extra: P6Extra;
   preds: MPred[];
+  /** read from MSPDI: the task as written (keep.ts); written from this TASK or (summary) PROJWBS row */
+  keep?: Kept; row?: Row;
 }
 
-export interface MRes { uid: string; id: number; name: string; code: string; type: 'work' | 'material' | 'cost'; maxUnits: number | null; rate: number | null; calUid: string; p6Type?: string }
+export interface MRes { uid: string; id: number; name: string; code: string; type: 'work' | 'material' | 'cost'; maxUnits: number | null; rate: number | null; calUid: string; p6Type?: string; keep?: Kept; row?: Row }
 
 export interface MAssign {
   uid: string; taskUid: string; resUid: string; units: number | null;
   workHrs: number | null; actualWorkHrs: number | null; remainingWorkHrs: number | null;
   cost: number | null; actualCost: number | null; remainingCost: number | null;
   start: string; finish: string; actualStart: string; actualFinish: string;
+  keep?: Kept; row?: Row;
 }
 
 export interface MProject {
@@ -84,6 +90,9 @@ export interface MProject {
   tasks: MTask[];
   resources: MRes[];
   assignments: MAssign[];
+  /** read from MSPDI: the project's own elements, the elements that are not rows, whether the clone's custom fields
+   *  were in the file; written from this PROJECT row */
+  keep?: ProjectKept; row?: Row;
 }
 
 export function emptyTask(uid: string, id: number): MTask {
@@ -133,6 +142,23 @@ export function defaultShifts(): Shift[] {
   return DAY_SHIFTS.map((s) => ({ ...s }));
 }
 
+/** UIDs: a row's own (kept from the file) when not taken yet, else the lowest one nothing kept uses. */
+function uidMaker(kept: (string | undefined)[]): (r?: Row) => string {
+  const keep = new Set(kept.filter((x): x is string => !!x)), used = new Set<string>();
+  let next = 1;
+  return (r) => {
+    let u = r?._msp_uid && !used.has(r._msp_uid) ? r._msp_uid : '';
+    if (!u) { while (keep.has(String(next)) || used.has(String(next))) next++; u = String(next++); }
+    used.add(u);
+    return u;
+  };
+}
+/** IDs: a row's own (from the file), else after the highest one the file had (1, 2, 3... for a P6 project). */
+function idMaker(kept: (string | undefined)[]): (r: Row) => number {
+  let max = kept.reduce((m, x) => Math.max(m, Number(x) || 0), 0);
+  return (r) => (r._msp_id ? Number(r._msp_id) : ++max);
+}
+
 function uniqueName(name: string, used: Set<string>): string {
   let n = name.trim() || 'Calendar';
   for (let i = 2; used.has(n.toLowerCase()); i++) n = `${name.trim() || 'Calendar'} (${i})`;
@@ -168,22 +194,28 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
   const proj = get('PROJECT').find((p) => p.proj_id === pid) ?? rows(db, 'PROJECT').find((p) => p.proj_id === pid) ?? {};
   const wbsAll = get('PROJWBS').filter((w) => w.proj_id === pid);
   const root = wbsAll.find((w) => w.proj_node_flag === 'Y');
+  // read from Microsoft Project XML: what the file had beyond the rows (keep.ts)
+  const keep: ProjectKept | undefined = proj._msp_keep ? { kids: JSON.parse(proj._msp_keep), ghosts: JSON.parse(proj._msp_ghosts || '{}'), p6ext: proj._msp_p6ext === 'Y' } : undefined;
+  const ghosts: Ghosts = { tasks: [], resources: [], assignments: [], calendars: [], ...keep?.ghosts };
+  const keptOf = (r: Row): Kept | undefined => (r._msp_keep ? { kids: JSON.parse(r._msp_keep), xml: '', seq: Number(r._msp_seq), id: r._msp_id || undefined } : r._msp_xml ? { kids: [], xml: r._msp_xml, seq: Number(r._msp_seq) || 0 } : undefined);
 
   // Calendars: every calendar the project uses, written as stand-alone base calendars with inherited holidays merged in.
-  const calRows = get('CALENDAR');
+  // every calendar the project uses; for a project read from MSPDI, also the file's others (none is dropped)
+  const calRows = keep ? [...get('CALENDAR'), ...rows(db, 'CALENDAR').filter((c) => c._msp_xml && !get('CALENDAR').includes(c))] : get('CALENDAR');
   const defs = effectiveCalendars(calRows);
   const calUid = new Map<string, string>();
   const used = new Set<string>();
-  const calendars: MCal[] = calRows.map((r, i) => {
-    const uid = String(i + 1);
+  const calUidFor = uidMaker([...calRows.map((r) => r._msp_uid), ...ghosts.calendars.map((g) => g.uid)]);
+  const calendars: MCal[] = calRows.map((r) => {
+    const uid = calUidFor(r);
     calUid.set(r.clndr_id, uid);
     const d = defs.get(r.clndr_id)!;
-    return { uid, name: uniqueName(r.clndr_name || `Calendar ${uid}`, used), isBase: true, week: d.week.map((s) => s.map((x) => ({ ...x }))), exceptions: new Map(d.exceptions) };
+    return { uid, name: uniqueName(r.clndr_name || `Calendar ${uid}`, used), isBase: true, week: d.week.map((s) => s.map((x) => ({ ...x }))), exceptions: new Map(d.exceptions), keep: keptOf(r), row: r };
   });
   let projCal = calUid.get(proj.clndr_id ?? '') ?? calUid.get(calRows.find((c) => c.default_flag === 'Y')?.clndr_id ?? '') ?? calendars[0]?.uid;
   if (!projCal) {
     const std = standardCalendar();
-    calendars.push({ uid: String(calendars.length + 1), name: uniqueName('Standard', used), isBase: true, week: std.week, exceptions: std.exceptions });
+    calendars.push({ uid: calUidFor(), name: uniqueName('Standard', used), isBase: true, week: std.week, exceptions: std.exceptions });
     projCal = calendars[calendars.length - 1].uid;
   }
   const projCalRow = calRows.find((c) => calUid.get(c.clndr_id) === projCal);
@@ -193,18 +225,24 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
   const dayHrs = Number(projCalRow?.day_hr_cnt) || (weekHrs ? weekHrs / workDays : 8);
 
   // Resources
-  const rates = get('RSRCRATE');
+  // every resource the project uses; for a project read from MSPDI, also the file's unassigned ones
+  const extraRes = keep ? rows(db, 'RSRC').filter((r) => r._msp_keep && !get('RSRC').includes(r)) : [];
+  const rsrcRows = [...get('RSRC'), ...extraRes].sort((a, b) => (a._msp_seq ? Number(a._msp_seq) : 1e9) - (b._msp_seq ? Number(b._msp_seq) : 1e9));
+  const extraIds = new Set(extraRes.map((r) => r.rsrc_id));
+  const rates = [...get('RSRCRATE'), ...rows(db, 'RSRCRATE').filter((x) => extraIds.has(x.rsrc_id))];
   const resUid = new Map<string, string>();
-  const resources: MRes[] = get('RSRC').map((r, i) => {
-    const uid = String(i + 1);
+  const resUidFor = uidMaker([...rsrcRows.map((r) => r._msp_uid), ...ghosts.resources.map((g) => g.uid)]);
+  const resIdFor = idMaker([...rsrcRows.map((r) => r._msp_id), ...ghosts.resources.map((g) => String(g.seq))]);
+  const resources: MRes[] = rsrcRows.map((r) => {
+    const uid = resUidFor(r);
     resUid.set(r.rsrc_id, uid);
     const rr = rates.filter((x) => x.rsrc_id === r.rsrc_id).sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? ''));
     const ps = proj.plan_start_date ?? '';
     const rate = [...rr].reverse().find((x) => !x.start_date || x.start_date <= ps) ?? rr[0];
     return {
-      uid, id: i + 1, name: r.rsrc_name || r.rsrc_short_name || `Resource ${uid}`, code: r.rsrc_short_name ?? '',
+      uid, id: resIdFor(r), name: r.rsrc_name || r.rsrc_short_name || `Resource ${uid}`, code: r.rsrc_short_name ?? '',
       type: r.rsrc_type === 'RT_Mat' ? 'material' : 'work', maxUnits: num(rate?.max_qty_per_hr), rate: num(rate?.cost_per_qty),
-      calUid: calUid.get(r.clndr_id) ?? '', p6Type: r.rsrc_type || undefined,
+      calUid: calUid.get(r.clndr_id) ?? '', p6Type: r.rsrc_type || undefined, keep: keptOf(r), row: r,
     };
   });
 
@@ -230,42 +268,40 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
     if (!a) kidsTask.set(w, (a = []));
     a.push(t);
   }
-  // tasks read from Microsoft Project keep their UID; the others get UIDs no kept one uses
-  const kept = new Set([...projTasks, ...wbsAll].map((r) => r._msp_uid).filter(Boolean));
-  let nextUid = 1;
-  const usedUid = new Set<string>();
-  const uidFor = (r: Row) => {
-    let u = r._msp_uid && !usedUid.has(r._msp_uid) ? r._msp_uid : '';
-    if (!u) { while (kept.has(String(nextUid))) nextUid++; u = String(nextUid++); }
-    usedUid.add(u);
-    return u;
-  };
+  // tasks read from Microsoft Project keep their UID and ID and their place among their siblings; the others get
+  // UIDs and IDs no kept one uses, after them
+  const uidFor = uidMaker([...projTasks, ...wbsAll].map((r) => r._msp_uid).concat(ghosts.tasks.map((g) => g.uid)));
+  const idFor = idMaker([...projTasks, ...wbsAll].map((r) => r._msp_id).concat(ghosts.tasks.map((g) => String(g.seq))));
+  const bySeq = <T extends { r: Row }>(l: T[]) => (l.some((x) => x.r._msp_seq) ? l.map((x, i) => ({ x, i, s: x.r._msp_seq ? Number(x.r._msp_seq) : Infinity })).sort((a, b) => a.s - b.s || a.i - b.i).map((y) => y.x) : l);
   const visited = new Set<string>();
   const visit = (wbsId: string, level: number, outline: string, code: string) => {
     if (visited.has(wbsId)) return;
     visited.add(wbsId);
     let n = 0;
-    for (const t of (kidsTask.get(wbsId) ?? []).sort((a, b) => natural(a.task_code ?? '', b.task_code ?? ''))) {
-      n++;
-      const m = taskFromRow(t, uidFor(t), tasks.length + 1, level, outline ? `${outline}.${n}` : String(n), calUid.get(t.clndr_id) ?? projCal!);
-      taskUid.set(t.task_id, m.uid);
-      tasks.push(m);
-    }
-    const ws = (kidsWbs.get(wbsId) ?? []).sort((a, b) => (Number(a.seq_num) || 0) - (Number(b.seq_num) || 0) || natural(a.wbs_short_name ?? '', b.wbs_short_name ?? ''));
-    for (const w of ws) {
+    const acts = (kidsTask.get(wbsId) ?? []).sort((a, b) => natural(a.task_code ?? '', b.task_code ?? '')).map((r) => ({ r, wbs: false }));
+    const ws = (kidsWbs.get(wbsId) ?? []).sort((a, b) => (Number(a.seq_num) || 0) - (Number(b.seq_num) || 0) || natural(a.wbs_short_name ?? '', b.wbs_short_name ?? '')).map((r) => ({ r, wbs: true }));
+    for (const { r: t, wbs } of bySeq([...acts, ...ws])) {
       n++;
       const o = outline ? `${outline}.${n}` : String(n);
-      const c = code ? `${code}.${w.wbs_short_name}` : w.wbs_short_name ?? '';
-      const s = emptyTask(uidFor(w), tasks.length + 1);
-      Object.assign(s, { name: w.wbs_name || w.wbs_short_name || '', level, outline: o, wbs: c, summary: true, type: 1, durHrs: 0, calUid: projCal });
+      if (!wbs) {
+        const m = taskFromRow(t, uidFor(t), idFor(t), level, o, calUid.get(t.clndr_id) ?? projCal!);
+        Object.assign(m, { keep: keptOf(t), row: t });
+        taskUid.set(t.task_id, m.uid);
+        tasks.push(m);
+        continue;
+      }
+      const c = code ? `${code}.${t.wbs_short_name}` : t.wbs_short_name ?? '';
+      const s = emptyTask(uidFor(t), idFor(t));
+      Object.assign(s, { name: t.wbs_name || t.wbs_short_name || '', level, outline: o, wbs: c, summary: true, type: 1, durHrs: 0, calUid: projCal, keep: keptOf(t), row: t });
       tasks.push(s);
-      visit(w.wbs_id, level + 1, o, c);
+      visit(t.wbs_id, level + 1, o, c);
     }
   };
   visit(rootId, 1, '', '');
   // Orphan WBS cycles never reached: put their activities at the top level
   for (const t of projTasks) if (!taskUid.has(t.task_id)) {
-    const m = taskFromRow(t, uidFor(t), tasks.length + 1, 1, String(tasks.filter((x) => x.level === 1).length + 1), calUid.get(t.clndr_id) ?? projCal);
+    const m = taskFromRow(t, uidFor(t), idFor(t), 1, String(tasks.filter((x) => x.level === 1).length + 1), calUid.get(t.clndr_id) ?? projCal);
+    Object.assign(m, { keep: keptOf(t), row: t });
     taskUid.set(t.task_id, m.uid);
     tasks.push(m);
   }
@@ -291,17 +327,18 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
   }
 
   const assignments: MAssign[] = [];
+  const asgUidFor = uidMaker([...get('TASKRSRC').map((a) => a._msp_uid), ...ghosts.assignments.map((g) => g.uid)]);
   for (const a of get('TASKRSRC')) {
     const t = taskUid.get(a.task_id), r = resUid.get(a.rsrc_id);
     if (!t || !r) continue;
     const target = num(a.target_qty), act = (num(a.act_reg_qty) ?? 0) + (num(a.act_ot_qty) ?? 0), rem = num(a.remain_qty);
     const actCost = (num(a.act_reg_cost) ?? 0) + (num(a.act_ot_cost) ?? 0), remCost = num(a.remain_cost);
     assignments.push({
-      uid: String(assignments.length + 1), taskUid: t, resUid: r, units: num(a.target_qty_per_hr) ?? num(a.remain_qty_per_hr),
+      uid: asgUidFor(a), taskUid: t, resUid: r, units: num(a.target_qty_per_hr) ?? num(a.remain_qty_per_hr),
       workHrs: rem != null ? act + rem : target, actualWorkHrs: act, remainingWorkHrs: rem,
       cost: remCost != null ? actCost + remCost : num(a.target_cost), actualCost: actCost, remainingCost: remCost,
       start: a.act_start_date || a.restart_date || a.target_start_date || '', finish: a.act_end_date || a.reend_date || a.target_end_date || '',
-      actualStart: a.act_start_date ?? '', actualFinish: a.act_end_date ?? '',
+      actualStart: a.act_start_date ?? '', actualFinish: a.act_end_date ?? '', keep: keptOf(a), row: a,
     });
   }
 
@@ -312,7 +349,7 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
     start: proj.plan_start_date || tasks.reduce((m, t) => (t.start && (!m || t.start < m) ? t.start : m), ''), finish,
     statusDate: proj.last_recalc_date ?? '', calUid: projCal, minutesPerDay: Math.round(dayHrs * 60), minutesPerWeek: Math.round((weekHrs || dayHrs * 5) * 60),
     splitsInProgress: so ? so.sched_progress_override !== 'Y' : null, criticalHrs: Number(proj.critical_drtn_hr_cnt) || 0,
-    calendars, tasks, resources, assignments,
+    calendars, tasks, resources, assignments, keep, row: proj,
   };
 }
 
@@ -358,6 +395,8 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
   const db: Db = { tables: {} };
   const push = (t: string, r: Row) => { const T = table(db, t); for (const f of Object.keys(r)) addField(T, f); T.rows.push(r); };
   const pid = '1';
+  const ghosts: Ghosts = m.keep ? m.keep.ghosts : { tasks: [], resources: [], assignments: [], calendars: [] };
+  const kept = (k: { keep?: { kids: [string, string][]; seq: number; id?: string } }): Row => (k.keep ? { _msp_keep: JSON.stringify(k.keep.kids), _msp_seq: String(k.keep.seq), _msp_id: k.keep.id ?? '' } : {});
   const info = (code: string, message: string, p6: string, extra: Partial<Finding> = {}) => findings.push({ severity: 'info', code, message, p6, ...extra });
   const warn = (code: string, message: string, p6: string, extra: Partial<Finding> = {}) => findings.push({ severity: 'warning', code, message, p6, ...extra });
 
@@ -373,11 +412,12 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
   };
   for (const c of m.calendars) {
     const own = c.week.some((d) => d != null) || c.exceptions.size > 0;
-    if (!c.isBase && c.baseUid && calById.has(c.baseUid) && !own && resCalUids.has(c.uid) && !taskCalUids.has(c.uid) && c.uid !== m.calUid) { calAlias.set(c.uid, c.baseUid); continue; }
+    if (!c.isBase && c.baseUid && calById.has(c.baseUid) && !own && resCalUids.has(c.uid) && !taskCalUids.has(c.uid) && c.uid !== m.calUid) { calAlias.set(c.uid, c.baseUid); if (c.keep) ghosts.calendars.push({ seq: c.keep.seq, uid: c.uid, xml: c.keep.xml }); continue; }
     const def: CalendarDef = { week: resolvedWeek(c), exceptions: c.exceptions };
     const wh = hoursPerWeek(def);
     const days = def.week.filter((d) => d.length).length || 5;
     push('CALENDAR', {
+      ...(c.keep ? { _msp_uid: c.uid, _msp_xml: c.keep.xml, _msp_seq: String(c.keep.seq) } : {}),
       clndr_id: c.uid, default_flag: c.uid === m.calUid ? 'Y' : 'N', clndr_name: c.name, proj_id: '', base_clndr_id: !c.isBase && c.baseUid && calById.has(c.baseUid) ? c.baseUid : '',
       last_chng_date: '', clndr_type: c.isBase ? 'CA_Base' : 'CA_Rsrc', day_hr_cnt: p6num(c.uid === m.calUid && m.minutesPerDay ? m.minutesPerDay / 60 : wh / days || 8),
       week_hr_cnt: p6num(wh), month_hr_cnt: p6num((wh / days || 8) * 21.5), year_hr_cnt: p6num(wh * 52), rsrc_private: 'N', clndr_data: serializeClndrData(def),
@@ -429,7 +469,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
       summaryUids.add(t.uid);
       const full = t.wbs || t.outline || String(i + 1);
       const short = parent.code && full.startsWith(parent.code + '.') ? full.slice(parent.code.length + 1) : full.includes('.') && !t.wbs ? full.slice(full.lastIndexOf('.') + 1) : full;
-      push('PROJWBS', { wbs_id: t.uid, proj_id: pid, obs_id: '', seq_num: String(++seq * 10), proj_node_flag: 'N', status_code: 'WS_Open', wbs_short_name: short.slice(0, 40), wbs_name: t.name, parent_wbs_id: parent.wbsId, _msp_uid: t.uid });
+      push('PROJWBS', { wbs_id: t.uid, proj_id: pid, obs_id: '', seq_num: String(++seq * 10), proj_node_flag: 'N', status_code: 'WS_Open', wbs_short_name: short.slice(0, 40), wbs_name: t.name, parent_wbs_id: parent.wbsId, _msp_uid: t.uid, ...kept(t) });
       stack.push({ level: t.level, wbsId: t.uid, code: full });
       if (t.preds.length) warn('MSP_SUMMARY_LINK', `Summary task "${t.name}" has ${t.preds.length} predecessor link(s); WBS nodes cannot carry logic, so they were dropped.`, 'P6 drops relationships on MS Project summary tasks when importing.', { table: 'TASKPRED', key: t.uid });
       continue;
@@ -442,6 +482,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
     codes.add(code);
     const r = taskRow(t, pid, parent.wbsId, cal(t.extra.calName ? m.calendars.find((c) => c.name === t.extra.calName)?.uid ?? t.calUid : t.calUid) || projCal, code, findings);
     taskRows.set(t.uid, r);
+    Object.assign(r, kept(t));
     push('TASK', r);
   }
   // Milestones without a P6 type: start milestone when nothing drives it, else finish milestone
@@ -477,6 +518,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
     if (r.type === 'cost' && !r.p6Type) info('MSP_COST_RESOURCE', `Cost resource "${r.name}" imported as a labor resource.`, 'P6 has no cost resources; P6 imports them as resources or expenses.', { table: 'RSRC', key: r.uid });
     resIds.add(r.uid);
     push('RSRC', {
+      ...(r.keep ? { _msp_uid: r.uid, ...kept(r) } : {}),
       rsrc_id: r.uid, parent_rsrc_id: '', clndr_id: cal(r.calUid) || projCal, rsrc_name: r.name || code, rsrc_short_name: code, rsrc_title_name: '', def_qty_per_hr: p6num(r.maxUnits ?? 1),
       cost_qty_type: 'QT_Hour', active_flag: 'Y', auto_compute_act_flag: 'Y', def_cost_qty_link_flag: 'Y', ot_flag: 'N', rsrc_type: type,
     });
@@ -485,8 +527,10 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
   const rsrcType = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
   for (const a of m.assignments) {
     const t = taskRows.get(a.taskUid);
-    if (!t) { if (summaryUids.has(a.taskUid)) warn('MSP_SUMMARY_ASSIGNMENT', `Resource assignment ${a.uid} on a summary task dropped.`, 'P6 cannot assign resources to WBS nodes.', { table: 'TASKRSRC', key: a.uid }); continue; }
-    if (!resIds.has(a.resUid)) continue; // unassigned (-65535) or unknown resource
+    // not P6 assignments (on a summary task, unassigned, unknown resource): kept to be written back as they were
+    const ghost = () => { if (a.keep) ghosts.assignments.push({ seq: a.keep.seq, uid: a.uid, xml: a.keep.xml }); };
+    if (!t) { ghost(); if (summaryUids.has(a.taskUid)) warn('MSP_SUMMARY_ASSIGNMENT', `Resource assignment ${a.uid} on a summary task dropped.`, 'P6 cannot assign resources to WBS nodes.', { table: 'TASKRSRC', key: a.uid }); continue; }
+    if (!resIds.has(a.resUid)) { ghost(); continue; } // unassigned (-65535) or unknown resource
     const done = !!t.act_end_date;
     const act = a.actualWorkHrs ?? 0;
     const rem = done ? 0 : a.remainingWorkHrs ?? Math.max(0, (a.workHrs ?? 0) - act);
@@ -503,12 +547,18 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
       act_start_date: a.actualStart || (t.act_start_date ?? ''), act_end_date: a.actualFinish || (done ? t.act_end_date : ''),
       restart_date: done ? '' : t.restart_date ?? '', reend_date: done ? '' : t.reend_date ?? '', target_start_date: a.start || t.target_start_date || '', target_end_date: a.finish || t.target_end_date || '',
       rate_type: 'COST_PER_QTY', rsrc_type: rsrcType.get(a.resUid) ?? 'RT_Labor',
+      ...(a.keep ? { _msp_uid: a.uid, _msp_keep: JSON.stringify(a.keep.kids), _msp_seq: String(a.keep.seq) } : {}),
     });
   }
   // P6 TASK.rsrc_id is the primary resource: first assignment
   const firstRsrc = new Map<string, string>();
   for (const a of rows(db, 'TASKRSRC')) if (!firstRsrc.has(a.task_id)) firstRsrc.set(a.task_id, a.rsrc_id);
   if (db.tables.TASK) { addField(db.tables.TASK, 'rsrc_id'); for (const r of db.tables.TASK.rows) r.rsrc_id = firstRsrc.get(r.task_id) ?? ''; }
+  if (m.keep) {
+    const P = table(db, 'PROJECT');
+    for (const k of ['_msp_keep', '_msp_ghosts', '_msp_p6ext', '_msp_ntasks']) addField(P, k);
+    Object.assign(P.rows[0], { _msp_keep: JSON.stringify(m.keep.kids), _msp_ghosts: JSON.stringify(ghosts), _msp_p6ext: m.keep.p6ext ? 'Y' : '', _msp_ntasks: String(rows(db, 'TASK').length) });
+  }
   return db;
 }
 

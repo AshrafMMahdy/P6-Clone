@@ -7,7 +7,8 @@ import { formatP6Date, parseP6Date, minutesToSerial, serialToMinutes } from '../
 
 // ---------- minimal XML tree
 
-export interface XNode { name: string; children: XNode[]; text: string }
+/** s / e: where the element starts and ends in the parsed text (to keep an element verbatim). */
+export interface XNode { name: string; children: XNode[]; text: string; s?: number; e?: number }
 
 const ENT: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const unesc = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e: string) => (e[0] === '#' ? String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e] ?? m));
@@ -24,11 +25,12 @@ export function parseXml(text: string): XNode {
     else if (m[2]) {
       const name = m[2].replace(/^\w+:/, '');
       if (top.name !== name) throw new Error(`unexpected </${name}> (open <${top.name}>)`);
+      top.e = re.lastIndex;
       stack.pop();
     } else if (m[3]) {
-      const n: XNode = { name: m[3].replace(/^\w+:/, ''), children: [], text: '' };
+      const n: XNode = { name: m[3].replace(/^\w+:/, ''), children: [], text: '', s: m.index };
       top.children.push(n);
-      if (!m[5]) stack.push(n);
+      if (!m[5]) stack.push(n); else n.e = re.lastIndex;
     } else if (m[6] != null) top.text += unesc(m[6]);
   }
   if (stack.length > 1) throw new Error(`unclosed <${stack[stack.length - 1].name}>`);

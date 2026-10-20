@@ -1,11 +1,12 @@
 // Microsoft Project XML (MSPDI, namespace http://schemas.microsoft.com/project) import/export.
 // Elements are written in the order of the MSPDI schema (mspdi_pj12.xsd), which Microsoft Project enforces.
-import type { Db } from '../db.ts';
+import type { Db, Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import type { Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../dates.ts';
 import { parseXml, type XNode } from '../xml/p6xml.ts';
 import { p6num } from '../schedule/cpm.ts';
+import { ASG_DEPS, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
 import { defaultShifts, emptyTask, num, projectFromDb, projectToDb, toP6Date, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
 
 export const MSPDI_NS = 'http://schemas.microsoft.com/project';
@@ -60,8 +61,9 @@ export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
   const findings: Finding[] = [];
   const empty: Db = { tables: {} };
   let root: XNode;
+  const src = text.replace(/^﻿/, '');
   try {
-    root = parseXml(text.replace(/^﻿/, ''));
+    root = parseXml(src);
   } catch (e) {
     findings.push({ severity: 'fatal', code: 'XML_PARSE', message: `XML is not well formed: ${(e as Error).message}.`, p6: 'P6 rejects the file.' });
     return { db: empty, findings };
@@ -72,17 +74,23 @@ export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
     return { db: empty, findings };
   }
   try {
-    const m = readProject(p, findings);
+    const m = readProject(p, findings, src);
     if (!m.tasks.length) findings.push({ severity: 'warning', code: 'MSP_NO_TASKS', message: 'The Microsoft Project file contains no tasks.', p6: 'P6 imports an empty project.' });
-    return { db: projectToDb(m, findings, 'The Microsoft Project XML file'), findings };
+    const db = projectToDb(m, findings, 'The Microsoft Project XML file');
+    snapshotKept(db);
+    return { db, findings };
   } catch (e) {
     findings.push({ severity: 'fatal', code: 'MSP_READ', message: `Could not read the Microsoft Project XML file: ${(e as Error).message}.`, p6: 'P6 rejects the file.' });
     return { db: empty, findings };
   }
 }
 
-function readProject(p: XNode, findings: Finding[]): MProject {
+function readProject(p: XNode, findings: Finding[], src: string): MProject {
   const minutesPerDay = num(val(p, 'MinutesPerDay')) || 480;
+  // every element is also kept as written, so what the model does not hold goes back into the file unchanged (keep.ts)
+  const raw = (n: XNode) => src.slice(n.s, n.e);
+  const kidsOf = (n: XNode): [string, string][] => n.children.map((c) => [c.name, raw(c)]);
+  const ghosts: Ghosts = { tasks: [], resources: [], assignments: [], calendars: [] };
   const hrs = (s: string) => (s ? isoDurationHours(s, minutesPerDay) : null);
 
   // custom field aliases
@@ -147,17 +155,21 @@ function readProject(p: XNode, findings: Finding[]): MProject {
         findings.push({ severity: 'warning', code: 'MSP_CAL_RECURRING', table: 'CALENDAR', key: uid, message: `Calendar ${cal.name}: recurring exception type ${type} is not supported; only its first day was imported.`, p6: 'P6 stores exceptions day by day.' });
       }
     }
+    cal.keep = { kids: [], xml: raw(c), seq: calendars.length };
     calendars.push(cal);
   }
 
   // tasks
   const tasks: MTask[] = [];
   const lagFormats = new Set<string>();
-  for (const t of kids(child(p, 'Tasks'), 'Task')) {
-    if (flag(val(t, 'IsNull'))) continue;
+  for (const [i, t] of kids(child(p, 'Tasks'), 'Task').entries()) {
     const uid = val(t, 'UID');
+    const seq = num(val(t, 'ID')) ?? i;
+    // the project summary task (UID 0) and blank rows are not activities: kept as they are, in their place
+    if (flag(val(t, 'IsNull')) || uid === '0' || val(t, 'OutlineLevel') === '0') { if (uid) ghosts.tasks.push({ seq, uid, xml: raw(t) }); continue; }
     if (!uid) continue;
     const m = emptyTask(uid, num(val(t, 'ID')) ?? tasks.length + 1);
+    m.keep = { kids: kidsOf(t), xml: '', seq, id: val(t, 'ID') };
     const outline = val(t, 'OutlineNumber');
     m.name = val(t, 'Name');
     m.level = num(val(t, 'OutlineLevel')) ?? (outline ? outline.split('.').length : 1);
@@ -215,11 +227,10 @@ function readProject(p: XNode, findings: Finding[]): MProject {
 
   // resources
   const resources: MRes[] = [];
-  for (const r of kids(child(p, 'Resources'), 'Resource')) {
-    if (flag(val(r, 'IsNull'))) continue;
+  for (const [seq, r] of kids(child(p, 'Resources'), 'Resource').entries()) {
     const uid = val(r, 'UID');
     const name = val(r, 'Name');
-    if (!uid || (uid === '0' && !name)) continue;
+    if (flag(val(r, 'IsNull')) || !uid || (uid === '0' && !name)) { if (uid) ghosts.resources.push({ seq, uid, xml: raw(r) }); continue; }
     const t = num(val(r, 'Type')) ?? 1;
     const cu = val(r, 'CalendarUID');
     let p6Type: string | undefined;
@@ -228,13 +239,13 @@ function readProject(p: XNode, findings: Finding[]): MProject {
     let rate = num(val(r, 'StandardRate'));
     // StandardRateFormat: 1 per minute, 2 hour, 3 day, 4 week, 5 month (8 h days assumed for day/week/month)
     if (rate != null && t !== 0) rate = fmt === 1 ? rate * 60 : fmt === 3 ? rate / (minutesPerDay / 60) : fmt === 4 ? rate / (minutesPerDay / 12) : fmt === 5 ? rate / (minutesPerDay / 3) : rate;
-    resources.push({ uid, id: num(val(r, 'ID')) ?? resources.length + 1, name, code: val(r, 'Code') || val(r, 'Initials'), type: t === 0 ? 'material' : t === 2 ? 'cost' : 'work', maxUnits: num(val(r, 'MaxUnits')), rate, calUid: cu && cu !== '-1' ? cu : '', p6Type });
+    resources.push({ uid, id: num(val(r, 'ID')) ?? resources.length + 1, name, code: val(r, 'Code') || val(r, 'Initials'), type: t === 0 ? 'material' : t === 2 ? 'cost' : 'work', maxUnits: num(val(r, 'MaxUnits')), rate, calUid: cu && cu !== '-1' ? cu : '', p6Type, keep: { kids: kidsOf(r), xml: '', seq, id: val(r, 'ID') } });
   }
 
   // assignments
   const resType = new Map(resources.map((r) => [r.uid, r.type]));
   const assignments: MAssign[] = [];
-  for (const a of kids(child(p, 'Assignments'), 'Assignment')) {
+  for (const [seq, a] of kids(child(p, 'Assignments'), 'Assignment').entries()) {
     const uid = val(a, 'UID');
     if (!uid) continue;
     const ru = val(a, 'ResourceUID');
@@ -244,6 +255,7 @@ function readProject(p: XNode, findings: Finding[]): MProject {
       workHrs: work, actualWorkHrs: hrs(val(a, 'ActualWork')), remainingWorkHrs: hrs(val(a, 'RemainingWork')),
       cost: num(val(a, 'Cost')), actualCost: num(val(a, 'ActualCost')), remainingCost: num(val(a, 'RemainingCost')),
       start: toP6Date(val(a, 'Start')), finish: toP6Date(val(a, 'Finish')), actualStart: toP6Date(val(a, 'ActualStart')), actualFinish: toP6Date(val(a, 'ActualFinish')),
+      keep: { kids: kidsOf(a), xml: raw(a), seq },
     });
   }
 
@@ -253,6 +265,7 @@ function readProject(p: XNode, findings: Finding[]): MProject {
     statusDate: toP6Date(val(p, 'StatusDate')), calUid: val(p, 'CalendarUID'), minutesPerDay, minutesPerWeek: num(val(p, 'MinutesPerWeek')) || minutesPerDay * 5,
     splitsInProgress: sip ? flag(sip) : null, criticalHrs: (num(val(p, 'CriticalSlackLimit')) ?? 0) * (minutesPerDay / 60),
     calendars, tasks, resources, assignments,
+    keep: { kids: p.children.map((c): [string, string | null] => [c.name, COLLECTIONS.has(c.name) ? null : raw(c)]), ghosts, p6ext: extKey.size > 0 },
   };
 }
 
@@ -260,13 +273,38 @@ function readProject(p: XNode, findings: Finding[]): MProject {
 
 export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
   const m = projectFromDb(db, opts.projIds);
-  const o: string[] = [];
-  const el = (tag: string, v: string | number | null | undefined) => { if (v != null && v !== '') o.push(`<${tag}>${esc(String(v))}</${tag}>`); };
+  // each element's children are collected as [name, xml] pairs, so a project read from MSPDI can be merged back
+  // into what the file had (keep.ts): unchanged elements go out as they came in
+  let cur: [string, string][] = [];
+  const el = (tag: string, v: string | number | null | undefined) => { if (v != null && v !== '') cur.push([tag, `<${tag}>${esc(String(v))}</${tag}>`]); };
   const dt = (tag: string, s: string) => el(tag, xmlDate(s));
   const b = (x: boolean) => (x ? 1 : 0);
   const now = formatP6Date(Math.floor(Date.now() / 60000));
+  const k = keepCtx(db);
+  const fromMsp = !!m.keep;
+  // the clone's own custom fields (P6 Activity ID, ...) go into a Microsoft Project file only when it has them: in a
+  // customer's file, Text1 may be their own field
+  const p6ext = !fromMsp || m.keep!.p6ext;
+  const ourField = new Set([...TASK_TEXT.map((x) => x[1]), RES_TYPE_FIELD[0]]);
+  const notOurs = (n: string, x: string) => n === 'ExtendedAttribute' && !ourField.has(/<FieldID>\s*(\d+)\s*<\/FieldID>/.exec(x)?.[1] ?? '');
+  const P6_FIELDS = ['task_code', 'task_type', 'cstr_type', 'cstr_date', 'cstr_type2', 'cstr_date2', 'duration_type'];
+  /** An element: the file's own merged with the clone's (kept), else the clone's. */
+  const element = (name: string, kept: Kept | undefined, row: Row | undefined, table: string, deps: Parameters<typeof mergeKids>[2], keepAlso?: (n: string, x: string) => boolean) =>
+    `<${name}>${kept && row ? mergeKids(kept.kids, cur, deps, changedSince(table, row, k), ORDER[name], keepAlso) : cur.map((c) => c[1]).join('')}</${name}>`;
+  /** Elements that are not rows (keep.ts Ghost) go back among the others where they were in the file: before the
+   *  first kept element that came after them. The others keep their order (for tasks, the outline's). */
+  const withGhosts = (items: { seq?: number; xml: () => string }[], ghosts: { seq: number; xml: string }[]) => {
+    const g = [...ghosts].sort((x, y) => x.seq - y.seq), out: string[] = [];
+    let i = 0;
+    for (const it of items) { if (it.seq != null) while (i < g.length && g[i].seq < it.seq) out.push(g[i++].xml); out.push(it.xml()); }
+    while (i < g.length) out.push(g[i++].xml);
+    return out.join('');
+  };
+  const seqOf = (x: { keep?: Kept }, _i: number) => x.keep?.seq;
+  const ghosts = m.keep?.ghosts ?? { tasks: [], resources: [], assignments: [], calendars: [] };
 
-  o.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', `<Project xmlns="${MSPDI_NS}">`);
+  const proj: [string, string][] = [];
+  cur = proj;
   el('SaveVersion', 14);
   el('Name', m.name);
   el('Title', m.title);
@@ -294,17 +332,14 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
   el('WeekStartDay', 1);
   dt('StatusDate', m.statusDate);
   el('NewTaskStartDate', 0);
+  if (p6ext) proj.push(['ExtendedAttributes', `<ExtendedAttributes>${TASK_TEXT.map(([, id, name, alias]) => `<ExtendedAttribute><FieldID>${id}</FieldID><FieldName>${name}</FieldName><Alias>${alias}</Alias></ExtendedAttribute>`).join('')}<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><FieldName>${RES_TYPE_FIELD[1]}</FieldName><Alias>${RES_TYPE_FIELD[2]}</Alias></ExtendedAttribute></ExtendedAttributes>`]);
 
-  o.push('<ExtendedAttributes>');
-  for (const [, id, name, alias] of TASK_TEXT) o.push(`<ExtendedAttribute><FieldID>${id}</FieldID><FieldName>${name}</FieldName><Alias>${alias}</Alias></ExtendedAttribute>`);
-  o.push(`<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><FieldName>${RES_TYPE_FIELD[1]}</FieldName><Alias>${RES_TYPE_FIELD[2]}</Alias></ExtendedAttribute>`);
-  o.push('</ExtendedAttributes>');
-
-  // Calendars: base calendars, then one resource calendar per work resource (MS Project requires it)
-  o.push('<Calendars>');
+  // Calendars: base calendars, then one resource calendar per work resource (MS Project requires it). A calendar read
+  // from the file and not changed since goes back as it was (derived calendars and resource calendars included).
   const times = (ss: Shift[]) => (ss.length ? `<WorkingTimes>${ss.map((s) => `<WorkingTime><FromTime>${hms(s.start)}</FromTime><ToTime>${hms(s.end)}</ToTime></WorkingTime>`).join('')}</WorkingTimes>` : '');
-  for (const c of m.calendars) {
-    o.push(`<Calendar><UID>${esc(c.uid)}</UID><Name>${esc(c.name)}</Name><IsBaseCalendar>1</IsBaseCalendar><IsBaselineCalendar>0</IsBaselineCalendar><BaseCalendarUID>-1</BaseCalendarUID><WeekDays>`);
+  const calXml = (c: MProject['calendars'][number]) => {
+    if (c.keep?.xml && c.row && !changedSince('CALENDAR', c.row, k)(['clndr_name', 'clndr_data', 'base_clndr_id'])) return c.keep.xml;
+    const o: string[] = [`<Calendar><UID>${esc(c.uid)}</UID><Name>${esc(c.name)}</Name><IsBaseCalendar>1</IsBaseCalendar><IsBaselineCalendar>0</IsBaselineCalendar><BaseCalendarUID>-1</BaseCalendarUID><WeekDays>`];
     c.week.forEach((ss, i) => o.push(`<WeekDay><DayType>${i + 1}</DayType><DayWorking>${ss && ss.length ? 1 : 0}</DayWorking>${times(ss ?? [])}</WeekDay>`));
     o.push('</WeekDays>');
     // consecutive days with identical hours become one exception range
@@ -324,19 +359,23 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
       o.push('</Exceptions>');
     }
     o.push('</Calendar>');
-  }
-  let calUid = m.calendars.reduce((x, c) => Math.max(x, Number(c.uid) || 0), 0);
+    return o.join('');
+  };
+  // calendars in the file's order (kept ones by their place; new ones after)
+  const calOrder = m.calendars.map((c, i) => ({ c, i })).sort((x, y) => (x.c.keep?.seq ?? 1e9 + x.i) - (y.c.keep?.seq ?? 1e9 + y.i)).map((x) => x.c);
+  const cals = [withGhosts(calOrder.map((c, i) => ({ seq: seqOf(c, i), xml: () => calXml(c) })), ghosts.calendars)];
+  let calUid = [...m.calendars.map((c) => c.uid), ...ghosts.calendars.map((g) => g.uid)].reduce((x, u) => Math.max(x, Number(u) || 0), 0);
   const resCal = new Map<string, number>();
   for (const r of m.resources) {
-    if (r.type !== 'work') continue;
+    // a resource read from the file keeps its own resource calendar while its calendar did not change
+    if (r.type !== 'work' || (r.keep && r.row && !changedSince('RSRC', r.row, k)(['clndr_id']))) continue;
     resCal.set(r.uid, ++calUid);
-    o.push(`<Calendar><UID>${calUid}</UID><Name>${esc(r.name)}</Name><IsBaseCalendar>0</IsBaseCalendar><IsBaselineCalendar>0</IsBaselineCalendar><BaseCalendarUID>${esc(r.calUid || m.calUid)}</BaseCalendarUID></Calendar>`);
+    cals.push(`<Calendar><UID>${calUid}</UID><Name>${esc(r.name)}</Name><IsBaseCalendar>0</IsBaseCalendar><IsBaselineCalendar>0</IsBaselineCalendar><BaseCalendarUID>${esc(r.calUid || m.calUid)}</BaseCalendarUID></Calendar>`);
   }
-  o.push('</Calendars>');
+  proj.push(['Calendars', `<Calendars>${cals.join('')}</Calendars>`]);
 
-  o.push('<Tasks>');
-  for (const t of m.tasks) {
-    o.push('<Task>');
+  const taskXml = (t: MProject['tasks'][number]) => {
+    cur = [];
     el('UID', t.uid);
     el('ID', t.id);
     el('Name', t.name);
@@ -372,19 +411,34 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
       dt('Deadline', t.deadline);
       el('IgnoreResourceCalendar', b(t.ignoreRsrcCal ?? true));
       for (const l of t.preds) {
-        o.push(`<PredecessorLink><PredecessorUID>${esc(l.uid)}</PredecessorUID><Type>${['FF', 'FS', 'SF', 'SS'].indexOf(l.type)}</Type><CrossProject>0</CrossProject><LinkLag>${Math.round(l.lagHrs * 600)}</LinkLag><LagFormat>7</LagFormat></PredecessorLink>`);
+        cur.push(['PredecessorLink', `<PredecessorLink><PredecessorUID>${esc(l.uid)}</PredecessorUID><Type>${['FF', 'FS', 'SF', 'SS'].indexOf(l.type)}</Type><CrossProject>0</CrossProject><LinkLag>${Math.round(l.lagHrs * 600)}</LinkLag><LagFormat>7</LagFormat></PredecessorLink>`]);
       }
-      for (const [k, id] of TASK_TEXT) { const v = t.extra[k]; if (v) o.push(`<ExtendedAttribute><FieldID>${id}</FieldID><Value>${esc(v)}</Value></ExtendedAttribute>`); }
+      if (p6ext) for (const [key, id] of TASK_TEXT) { const v = t.extra[key]; if (v) cur.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${id}</FieldID><Value>${esc(v)}</Value></ExtendedAttribute>`]); }
     } else {
       el('CalendarUID', -1);
     }
-    o.push('</Task>');
-  }
-  o.push('</Tasks>');
+    if (t.summary) return element('Task', t.keep, t.row, 'PROJWBS', SUMMARY_DEPS);
+    // a leaf's WBS code (Microsoft Project's own) stays while the task keeps its place in the outline
+    const outlineWas = t.keep?.kids.find((x) => x[0] === 'OutlineNumber')?.[1].replace(/<[^>]+>/g, '').trim();
+    return element('Task', t.keep, t.row, 'TASK', { ...TASK_DEPS, WBS: () => outlineWas !== t.outline, ExtendedAttribute: p6ext ? P6_FIELDS : () => false }, notOurs);
+  };
+  // Microsoft Project's ID is the row number: after the outline and the kept rows are in place, rows are numbered in
+  // order (the project summary task stays 0), so a task added or moved renumbers the rows after it, as in Project
+  const rowsInOrder: ({ t: MProject['tasks'][number] } | { g: { seq: number; uid: string; xml: string } })[] = [];
+  { const g = [...ghosts.tasks].sort((x, y) => x.seq - y.seq); let i = 0;
+    for (const t of m.tasks) { if (t.keep) while (i < g.length && g[i].seq < t.keep.seq) rowsInOrder.push({ g: g[i++] }); rowsInOrder.push({ t }); }
+    while (i < g.length) rowsInOrder.push({ g: g[i++] }); }
+  let rowNo = 0;
+  const taskRows = rowsInOrder.map((e) => {
+    if ('t' in e) { e.t.id = ++rowNo; return taskXml(e.t); }
+    if (e.g.uid === '0') return e.g.xml;
+    const id = ++rowNo;
+    return e.g.xml.replace(/<ID>\s*\d+\s*<\/ID>/, `<ID>${id}</ID>`);
+  });
+  proj.push(['Tasks', `<Tasks>${taskRows.join('')}</Tasks>`]);
 
-  o.push('<Resources>');
-  for (const r of m.resources) {
-    o.push('<Resource>');
+  const resXml = (r: MProject['resources'][number]) => {
+    cur = [];
     el('UID', r.uid);
     el('ID', r.id);
     el('Name', r.name);
@@ -397,14 +451,13 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
     el('OvertimeRate', 0);
     el('OvertimeRateFormat', 2);
     el('CalendarUID', resCal.get(r.uid));
-    if (r.p6Type) o.push(`<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><Value>${esc(r.p6Type)}</Value></ExtendedAttribute>`);
-    o.push('</Resource>');
-  }
-  o.push('</Resources>');
+    if (r.p6Type && p6ext) cur.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><Value>${esc(r.p6Type)}</Value></ExtendedAttribute>`]);
+    return element('Resource', r.keep, r.row, 'RSRC', { ...RES_DEPS, ExtendedAttribute: p6ext ? ['rsrc_type'] : () => false }, notOurs);
+  };
+  proj.push(['Resources', `<Resources>${withGhosts(m.resources.map((r, i) => ({ seq: seqOf(r, i), xml: () => resXml(r) })), ghosts.resources)}</Resources>`]);
 
-  o.push('<Assignments>');
-  for (const a of m.assignments) {
-    o.push('<Assignment>');
+  const asgXml = (a: MProject['assignments'][number]) => {
+    cur = [];
     el('UID', a.uid);
     el('TaskUID', a.taskUid);
     el('ResourceUID', a.resUid);
@@ -419,9 +472,10 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
     dt('Start', a.start);
     if (a.units != null) el('Units', p6num(a.units));
     if (a.workHrs != null) el('Work', hoursToIso(a.workHrs));
-    o.push('</Assignment>');
-  }
-  o.push('</Assignments>');
-  o.push('</Project>');
-  return o.join('\n') + '\n';
+    return element('Assignment', a.keep, a.row, 'TASKRSRC', ASG_DEPS);
+  };
+  proj.push(['Assignments', `<Assignments>${withGhosts(m.assignments.map((a, i) => ({ seq: seqOf(a, i), xml: () => asgXml(a) })), ghosts.assignments)}</Assignments>`]);
+
+  const body = m.keep && m.row ? mergeKids(m.keep.kids, proj, PROJECT_DEPS, changedSince('PROJECT', m.row, k), ORDER.Project) : proj.map((x) => x[1]).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Project xmlns="${MSPDI_NS}">\n${body}\n</Project>\n`;
 }
