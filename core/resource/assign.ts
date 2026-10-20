@@ -94,3 +94,14 @@ export function syncAssignmentDates(db: Db, taskIds?: Set<string>): void {
     a.act_end_date = t.act_end_date || '';
   }
 }
+
+/** Actual units and costs entered on an assignment. A cost typed in is the cost (P6 turns the units/price link off for it). */
+export function assignmentActuals(a: Row, op: Record<string, unknown>, num: (v: unknown, name: string) => number): void {
+  if (op.actual_units != null) { const q = num(op.actual_units, 'actual_units'); a.act_reg_qty = p6num(q); a.remain_qty = p6num(Math.max(0, Number(a.target_qty || 0) - q)); }
+  if (op.budgeted_cost != null || op.actual_cost != null || op.remaining_cost != null) {
+    a.cost_qty_link_flag = 'N';
+    if (op.budgeted_cost != null) a.target_cost = p6num(num(op.budgeted_cost, 'budgeted_cost'));
+    if (op.actual_cost != null) a.act_reg_cost = p6num(num(op.actual_cost, 'actual_cost'));
+    a.remain_cost = p6num(op.remaining_cost != null ? num(op.remaining_cost, 'remaining_cost') : Math.max(0, Number(a.target_cost || 0) - Number(a.act_reg_cost || 0) - Number(a.act_ot_cost || 0)));
+  }
+}

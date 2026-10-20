@@ -155,3 +155,15 @@ test('xer: a saved project carries no EPS table (P6 keeps the EPS in its databas
   const findings = validateXer(parseXer(out).db);
   assert.ok(!findings.some((f) => f.code === 'TABLE_UNKNOWN'), JSON.stringify(findings));
 });
+
+test('ops: remaining in hours, and costs entered on an assignment kept as entered (P6: the units/price link off)', () => {
+  const db = base();
+  ok(db, [{ op: 'update_activity', id: 'T1', remaining_hours: 27 }]);
+  assert.equal(Number(rows(db, 'TASK').find((t) => t.task_code === 'T1')!.remain_drtn_hr_cnt), 27);
+  ok(db, [{ op: 'update_assignment', activity: 'T1', resource: 'LAB', units: 40, budgeted_cost: 9000, actual_cost: 2500 }]);
+  const a = rows(db, 'TASKRSRC')[0];
+  assert.deepEqual([a.cost_qty_link_flag, Number(a.target_cost), Number(a.act_reg_cost), Number(a.remain_cost)], ['N', 9000, 2500, 6500]);
+  ok(db, [{ op: 'add_activity', id: 'T9', name: 'Nine', duration_hours: 18 }, { op: 'assign_resource', activity: 'T9', resource: 'LAB', units: 18, actual_units: 6, budgeted_cost: 540 }]);
+  const b = rows(db, 'TASKRSRC').find((x) => x.task_id === rows(db, 'TASK').find((t) => t.task_code === 'T9')!.task_id)!;
+  assert.deepEqual([Number(b.act_reg_qty), Number(b.remain_qty), Number(b.target_cost)], [6, 12, 540]);
+});

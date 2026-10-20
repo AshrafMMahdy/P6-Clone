@@ -7,7 +7,7 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { record, rollback } from '../journal.ts';
 import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
-import { assignResource, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
+import { assignResource, assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { copyProject } from './copy.ts';
 import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
 import {
@@ -39,12 +39,12 @@ export const OP_GUIDE = [
   `add_wbs: code, [name], [parent] (parent WBS code or dotted path; omit for top level), [project]`,
   `delete_wbs: code, [keep_logic] (default true: every predecessor of the removed activities is linked on to their successors, so the chain stays closed; false = just delete), [project]. Removes the WBS element, its child elements and all their activities: the way to remove whole floors or areas, e.g. from a copied project`,
   `add_activity: name, [id], [wbs] (WBS code; omit = project root), [type] (${Object.keys(TYPES).join(', ')}), [duration_days], [calendar], [priority] (${Object.keys(PRIO).join(', ')}), [constraint {type, date}] (types: ${Object.keys(CSTR).filter((k) => k !== 'none').join(', ')}), [secondary_constraint], [project]`,
-  `update_activity: id, then any add_activity field, plus [new_id], [remaining_days], [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
+  `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
   `delete_activity / dissolve_activity: id`,
   `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead)`,
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
   `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day], [price_per_unit], [calendar], [parent]`,
-  `assign_resource: activity, resource, [units_per_day] or [units]; unassign_resource: activity, resource`,
+  `assign_resource: activity, resource, [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6); unassign_resource: activity, resource`,
   EXTRA_GUIDE,
 ].join('\n');
 
@@ -255,6 +255,7 @@ function apply(db: Db, op: Op, hpd: number): unknown {
       const a = assignResource(db, t, r.rsrc_id);
       if (op.units_per_day != null) recalcAssignment(db, t, a, 'target_qty_per_hr', num(op.units_per_day, 'units_per_day') / hpd);
       if (op.units != null) { recalcAssignment(db, t, a, 'target_qty', num(op.units, 'units')); a.remain_qty = a.target_qty; recomputeCosts(db, a); }
+      assignmentActuals(a, op, num);
       return { assigned: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty) };
     }
     case 'unassign_resource': {
@@ -284,7 +285,10 @@ function updateActivity(db: Db, t: Row, op: Op, hpd: number, calendar: (n: unkno
     t.target_drtn_hr_cnt = p6num(durH);
     if (!t.act_start_date) t.remain_drtn_hr_cnt = p6num(durH);
   }
-  if (op.remaining_days != null) { if (t.act_end_date) fail('A completed activity has no remaining duration.'); t.remain_drtn_hr_cnt = p6num(num(op.remaining_days, 'remaining_days') * hpd); }
+  if (op.remaining_days != null || op.remaining_hours != null) {
+    if (t.act_end_date) fail('A completed activity has no remaining duration.');
+    t.remain_drtn_hr_cnt = p6num(op.remaining_hours != null ? num(op.remaining_hours, 'remaining_hours') : num(op.remaining_days, 'remaining_days') * hpd);
+  }
   if (op.constraint !== undefined) { const [c, d] = cstr(op.constraint); t.cstr_type = c; t.cstr_date = d; }
   if (op.secondary_constraint !== undefined) { const [c, d] = cstr(op.secondary_constraint); t.cstr_type2 = c; t.cstr_date2 = d; }
   if (op.start != null) ok(setStart(db, t, date(op.start, 'start')));
@@ -295,7 +299,7 @@ function updateActivity(db: Db, t: Row, op: Op, hpd: number, calendar: (n: unkno
   if (op.finish != null) ok(setFinish(db, t, String(op.finish)));
   t.status_code = statusOf(t);
   t.update_date = formatP6Date(Date.now() / 60000);
-  if (durH != null || op.remaining_days != null || op.calendar != null) refreshOwnDates(db, t);
+  if (durH != null || op.remaining_days != null || op.remaining_hours != null || op.calendar != null) refreshOwnDates(db, t);
 }
 
 function periods(v: unknown): Shift[] {
@@ -309,3 +313,4 @@ function periods(v: unknown): Shift[] {
   });
 }
 const ole = (d: string) => Math.round(parseP6Date(d.slice(0, 10))! / 1440) + 25569;
+

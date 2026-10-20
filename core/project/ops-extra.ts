@@ -4,7 +4,7 @@
 import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
-import { recalcAssignment, recomputeCosts } from '../resource/assign.ts';
+import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { ensureEps } from './edit.ts';
 import { STEP_FIELDS, syncFromSteps } from './steps.ts';
 import { DISTS, setEstimate, type Dist } from '../risk/montecarlo.ts';
@@ -47,7 +47,7 @@ export const EXTRA_GUIDE = [
   `add_eps / update_eps / delete_eps: id, [name], [parent], [new_id]; projects are put under an EPS with set_project eps`,
   `add_obs / update_obs / delete_obs: name, [parent], [new_name]; add_role / update_role / delete_role: id, [name], [parent], [new_id]`,
   `update_calendar: name, [new_name], [work_week] (days given replace those days), [holidays [dates]] (non-work), [work_exceptions {date: periods}], [remove_exceptions [dates]]`,
-  `update_assignment: activity, resource, [units], [units_per_day], [remaining_units], [curve] (resource curve name; "" = linear), [project]`,
+  `update_assignment: activity, resource, [units], [units_per_day], [remaining_units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (kept as entered), [curve] (resource curve name; "" = linear), [project]`,
 ].join('\n');
 
 const CODE_SUBJECTS = {
@@ -390,6 +390,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       if (op.remaining_units != null) a.remain_qty = p6num(num(op.remaining_units, 'remaining_units'));
       if (op.curve !== undefined) { addField(table(db, 'TASKRSRC'), 'curv_id'); a.curv_id = op.curve ? (rows(db, 'RSRCCURVDATA').find((c) => lc(c.curv_name) === lc(op.curve))?.curv_id ?? fail(`No resource curve "${op.curve}". Curves: ${rows(db, 'RSRCCURVDATA').map((c) => c.curv_name).join(', ') || 'none in this file'}.`)) : ''; }
       recomputeCosts(db, a);
+      assignmentActuals(a, op, num);
       return { assignment: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty), remaining_units: Number(a.remain_qty) };
     }
   }
