@@ -30,7 +30,7 @@ export const EXTRA_OP_NAMES = ['update_wbs', 'add_code_type', 'add_code_value', 
 
 export const EXTRA_GUIDE = [
   `update_wbs: code, [new_code], [name], [parent] (move under this WBS code; "" = top level), [project]`,
-  `add_code_type: name, [subject] (activity default, project, resource), [scope] (global default, project; activity codes only), [project], [max_length], [values [{code, [name], [parent]}]]`,
+  `add_code_type: name, [subject] (activity default, project, resource), [scope] (global default, project; activity codes only), [project], [max_length] (default 20, at most 60: a longer value is refused, never cut), [values [{code, [name], [parent]}]]`,
   `add_code_value: type, code, [name], [parent] (parent value code), [subject]`,
   `assign_code: type, value ("" removes), and activity (+[project]) | project | resource, [subject] (default from the target)`,
   `add_udf: name, [subject] (activity default, wbs, project, resource, assignment), [data_type] (text default, number, integer, cost, start_date, finish_date)`,
@@ -62,6 +62,8 @@ const TREES = {
   obs: { table: 'OBS', id: 'obs_id', parent: 'parent_obs_id', key: 'obs_name', name: 'obs_name', fields: ['obs_id', 'parent_obs_id', 'seq_num', 'obs_name', 'obs_descr'] },
   role: { table: 'ROLES', id: 'role_id', parent: 'parent_role_id', key: 'role_short_name', name: 'role_name', fields: ['role_id', 'parent_role_id', 'seq_num', 'role_name', 'role_short_name'] },
 } as const;
+/** P6 holds at most 60 characters in a code value (a code type's max length can be 1-60). */
+const CODE_MAX = 60;
 const PROJCOST_FIELDS = ['cost_item_id', 'acct_id', 'pobs_id', 'cost_type_id', 'proj_id', 'task_id', 'cost_name', 'po_number', 'vendor_name', 'act_cost', 'cost_per_qty', 'remain_cost', 'target_cost', 'cost_load_type', 'auto_compute_act_flag', 'target_qty', 'qty_name', 'cost_descr', 'contract_manager_import'];
 
 const ensure = (db: Db, name: string, fields: readonly string[]) => { const T = table(db, name); for (const f of fields) addField(T, f); return T; };
@@ -91,8 +93,8 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
   };
   const addCodeValue = (S: (typeof CODE_SUBJECTS)[keyof typeof CODE_SUBJECTS], type: Row, v: { code?: unknown; name?: unknown; parent?: unknown }) => {
     const code = str(v.code, 'code');
-    const len = Number(type[S.tlen]) || 0;
-    if (len && code.length > len) fail(`Code value "${code}" is longer than ${len} characters (the type's maximum length).`);
+    const len = Math.min(CODE_MAX, Number(type[S.tlen]) || CODE_MAX);
+    if (code.length > len) fail(`Code value "${code}" is ${code.length} characters; code type "${type[S.tname]}" allows ${len} (its max length${len < CODE_MAX ? `; add_code_type max_length can be up to ${CODE_MAX}` : ', the most P6 holds'}). Nothing was cut: give a shorter value.`);
     const parent = v.parent != null && v.parent !== '' ? codeValue(S, type, v.parent) : null;
     if (rows(db, S.val).some((x) => x[S.tid] === type[S.tid] && x[S.vparent] === (parent?.[S.vid] ?? '') && lc(x[S.vshort]) === lc(code))) fail(`Code value "${code}" already exists there.`);
     const T = ensure(db, S.val, [S.vid, S.vparent, S.tid, S.vname, S.vshort, 'seq_num']);
@@ -167,6 +169,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const S = codeSubject(op.subject);
       const name = str(op.name, 'name');
       if (rows(db, S.type).some((t) => lc(t[S.tname]) === lc(name))) fail(`Code type "${name}" already exists.`);
+      if (op.max_length != null && num(op.max_length, 'max_length') > CODE_MAX) fail(`max_length ${op.max_length} is more than P6 allows for a code value (${CODE_MAX}).`);
       const T = ensure(db, S.type, [S.tid, S.tlen, 'seq_num', S.tname, ...(S.type === 'ACTVTYPE' ? ['proj_id', 'wbs_id', 'actv_code_type_scope', 'super_flag'] : [])]);
       const row: Row = { [S.tid]: String(nextId(db, S.type)), [S.tlen]: String(op.max_length != null ? Math.max(1, Math.floor(num(op.max_length, 'max_length'))) : 20), seq_num: String(T.rows.length + 1), [S.tname]: name };
       if (S.type === 'ACTVTYPE') {

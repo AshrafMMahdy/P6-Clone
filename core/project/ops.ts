@@ -1,6 +1,7 @@
 // Edit a P6 database with a list of JSON operations, as one transaction: if any operation fails nothing changes
 // and the error names the operation. Everything is addressed the way a scheduler sees it (project ID, activity
-// ID, WBS code, resource ID, calendar name), never by internal database numbers. Durations are in days.
+// ID, WBS code, resource ID, calendar name), never by internal database numbers. Durations are in days. An activity
+// read from Microsoft Project can also be named "uid:<task UID>" (the UID it has in that file).
 // Used by the command-line `edit` command and the MCP server.
 import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
@@ -16,7 +17,7 @@ import {
 } from './edit.ts';
 
 export type Op = Record<string, unknown> & { op: string };
-export interface OpsResult { ok: boolean; applied: number; results: unknown[]; error?: { index: number; op: unknown; message: string } }
+export interface OpsResult { ok: boolean; applied: number; results: unknown[]; warnings?: string[]; error?: { index: number; op: unknown; message: string } }
 export interface OpsOptions { hoursPerDay?: number }
 
 const TYPES: Record<string, string> = { task: 'TT_Task', task_dependent: 'TT_Task', resource_dependent: 'TT_Rsrc', start_milestone: 'TT_Mile', finish_milestone: 'TT_FinMile', milestone: 'TT_FinMile', level_of_effort: 'TT_LOE', loe: 'TT_LOE', wbs_summary: 'TT_WBS' };
@@ -30,7 +31,7 @@ export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'add_cale
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
-  'Operations (JSON objects with "op"; [x] = optional; durations and lags in days; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant):',
+  'Operations (JSON objects with "op"; [x] = optional; durations and lags in days; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant; an activity read from a Microsoft Project file may be named "uid:<task UID>" instead of its ID):',
   `add_project: id, start, [name], [must_finish_by], [calendar]`,
   `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
   `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [eps] (EPS ID)`,
@@ -41,7 +42,7 @@ export const OP_GUIDE = [
   `add_activity: name, [id], [wbs] (WBS code; omit = project root), [type] (${Object.keys(TYPES).join(', ')}), [duration_days], [calendar], [priority] (${Object.keys(PRIO).join(', ')}), [constraint {type, date}] (types: ${Object.keys(CSTR).filter((k) => k !== 'none').join(', ')}), [secondary_constraint], [project]`,
   `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
   `delete_activity / dissolve_activity: id`,
-  `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead)`,
+  `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead). P6 keeps one relationship per pair: when pred -> succ already exists (any type) it is skipped and reported in "warnings"`,
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
   `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day], [price_per_unit], [calendar], [parent]`,
   `assign_resource: activity, resource, [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6); unassign_resource: activity, resource`,
@@ -60,18 +61,18 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   const list = Array.isArray(ops) ? ops : ops && typeof ops === 'object' && Array.isArray((ops as { operations?: unknown }).operations) ? (ops as { operations: unknown[] }).operations : null;
   if (!list) return { ok: false, applied: 0, results: [], error: { index: -1, op: ops, message: 'Expected a JSON array of operations (or {"operations": [...]}).' } };
   const hpd = o.hoursPerDay ?? 8;
-  const results: unknown[] = [];
+  const results: unknown[] = [], warnings: string[] = [];
   let at = -1;
   try {
-    record(db, (d) => { for (at = 0; at < list.length; at++) results.push(apply(d, list[at] as Op, hpd)); });
-    return { ok: true, applied: list.length, results };
+    record(db, (d) => { for (at = 0; at < list.length; at++) results.push(apply(d, list[at] as Op, hpd, warnings)); });
+    return { ok: true, applied: list.length, results, ...(warnings.length ? { warnings } : {}) };
   } catch (e) {
     // record() has already put the database back as it was
     return { ok: false, applied: 0, results: [], error: { index: at, op: list[at], message: e instanceof OpError ? e.message : `Internal error: ${(e as Error).message}` } };
   }
 }
 
-function apply(db: Db, op: Op, hpd: number): unknown {
+function apply(db: Db, op: Op, hpd: number, warnings: string[]): unknown {
   if (!op || typeof op !== 'object' || typeof op.op !== 'string') fail('Each operation needs an "op" name.');
   const projects = () => rows(db, 'PROJECT').filter((p) => !p._baseline_of);
   const project = (id?: unknown): Row => {
@@ -82,9 +83,11 @@ function apply(db: Db, op: Op, hpd: number): unknown {
   const activity = (id: unknown, proj?: unknown): Row => {
     const code = str(id, 'id');
     const pool = proj != null ? rows(db, 'TASK').filter((t) => t.proj_id === project(proj).proj_id) : rows(db, 'TASK').filter((t) => projects().some((p) => p.proj_id === t.proj_id));
-    const hits = pool.filter((t) => t.task_code === code);
-    if (hits.length > 1) fail(`Activity ID "${code}" exists in several projects; add "project".`);
-    return hits[0] ?? fail(`No activity "${code}".`);
+    let hits = pool.filter((t) => t.task_code === code);
+    const uid = !hits.length ? /^uid:\s*(.+)$/i.exec(code)?.[1] : undefined;
+    if (uid) hits = pool.filter((t) => t._msp_uid === uid);
+    if (hits.length > 1) fail(`${uid ? `Task UID ${uid}` : `Activity ID "${code}"`} exists in several projects; add "project".`);
+    return hits[0] ?? fail(uid ? `No activity with Microsoft Project task UID ${uid} (only activities read from an MSPDI or MPX file have one).` : `No activity "${code}".`);
   };
   const wbsOf = (p: Row, code: unknown): Row => {
     const W = rows(db, 'PROJWBS').filter((w) => w.proj_id === p.proj_id);
@@ -214,6 +217,12 @@ function apply(db: Db, op: Op, hpd: number): unknown {
     case 'add_relationship': {
       const a = activity(op.pred, op.pred_project ?? op.project), b = activity(op.succ, op.succ_project ?? op.project);
       const type = REL[String(op.type ?? 'FS').toUpperCase()] ?? fail(`Relationship type must be FS, SS, FF or SF.`);
+      // P6 keeps one relationship per pair of activities: a second one is skipped, not a failure of the whole list
+      const dup = rows(db, 'TASKPRED').find((r) => r.pred_task_id === a.task_id && r.task_id === b.task_id);
+      if (dup) {
+        warnings.push(`Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: ${a.task_code} -> ${b.task_code} already has a ${dup.pred_type.slice(3)} relationship, and P6 keeps one per pair of activities.`);
+        return { skipped: `${a.task_code} ${type.slice(3)} ${b.task_code}`, existing: `${a.task_code} ${dup.pred_type.slice(3)} ${b.task_code}` };
+      }
       ok(addRelationship(db, a.task_id, b.task_id, type, op.lag_days != null ? num(op.lag_days, 'lag_days') * hpd : op.lag_hours != null ? num(op.lag_hours, 'lag_hours') : 0));
       return { relationship: `${a.task_code} ${type.slice(3)} ${b.task_code}` };
     }

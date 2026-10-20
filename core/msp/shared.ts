@@ -4,6 +4,8 @@
 // MS Project has no WBS table: P6 WBS nodes become summary tasks and summary tasks come back as WBS nodes.
 // What MS Project cannot hold natively (Activity ID, activity type, P6 constraint codes, duration type, the
 // secondary constraint) travels in task Text fields, the way P6 itself maps extra fields on MS Project export.
+// Each task's UID is kept on its activity / WBS row (_msp_uid, never written to XER or P6 XML) so that callers can
+// match activities to the file, and writing Microsoft Project again gives those tasks their original UIDs.
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { selectRows } from '../xer/write.ts';
@@ -228,7 +230,16 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
     if (!a) kidsTask.set(w, (a = []));
     a.push(t);
   }
+  // tasks read from Microsoft Project keep their UID; the others get UIDs no kept one uses
+  const kept = new Set([...projTasks, ...wbsAll].map((r) => r._msp_uid).filter(Boolean));
   let nextUid = 1;
+  const usedUid = new Set<string>();
+  const uidFor = (r: Row) => {
+    let u = r._msp_uid && !usedUid.has(r._msp_uid) ? r._msp_uid : '';
+    if (!u) { while (kept.has(String(nextUid))) nextUid++; u = String(nextUid++); }
+    usedUid.add(u);
+    return u;
+  };
   const visited = new Set<string>();
   const visit = (wbsId: string, level: number, outline: string, code: string) => {
     if (visited.has(wbsId)) return;
@@ -236,7 +247,7 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
     let n = 0;
     for (const t of (kidsTask.get(wbsId) ?? []).sort((a, b) => natural(a.task_code ?? '', b.task_code ?? ''))) {
       n++;
-      const m = taskFromRow(t, String(nextUid++), tasks.length + 1, level, outline ? `${outline}.${n}` : String(n), calUid.get(t.clndr_id) ?? projCal!);
+      const m = taskFromRow(t, uidFor(t), tasks.length + 1, level, outline ? `${outline}.${n}` : String(n), calUid.get(t.clndr_id) ?? projCal!);
       taskUid.set(t.task_id, m.uid);
       tasks.push(m);
     }
@@ -245,7 +256,7 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
       n++;
       const o = outline ? `${outline}.${n}` : String(n);
       const c = code ? `${code}.${w.wbs_short_name}` : w.wbs_short_name ?? '';
-      const s = emptyTask(String(nextUid++), tasks.length + 1);
+      const s = emptyTask(uidFor(w), tasks.length + 1);
       Object.assign(s, { name: w.wbs_name || w.wbs_short_name || '', level, outline: o, wbs: c, summary: true, type: 1, durHrs: 0, calUid: projCal });
       tasks.push(s);
       visit(w.wbs_id, level + 1, o, c);
@@ -254,7 +265,7 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
   visit(rootId, 1, '', '');
   // Orphan WBS cycles never reached: put their activities at the top level
   for (const t of projTasks) if (!taskUid.has(t.task_id)) {
-    const m = taskFromRow(t, String(nextUid++), tasks.length + 1, 1, String(tasks.filter((x) => x.level === 1).length + 1), calUid.get(t.clndr_id) ?? projCal);
+    const m = taskFromRow(t, uidFor(t), tasks.length + 1, 1, String(tasks.filter((x) => x.level === 1).length + 1), calUid.get(t.clndr_id) ?? projCal);
     taskUid.set(t.task_id, m.uid);
     tasks.push(m);
   }
@@ -418,7 +429,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
       summaryUids.add(t.uid);
       const full = t.wbs || t.outline || String(i + 1);
       const short = parent.code && full.startsWith(parent.code + '.') ? full.slice(parent.code.length + 1) : full.includes('.') && !t.wbs ? full.slice(full.lastIndexOf('.') + 1) : full;
-      push('PROJWBS', { wbs_id: t.uid, proj_id: pid, obs_id: '', seq_num: String(++seq * 10), proj_node_flag: 'N', status_code: 'WS_Open', wbs_short_name: short.slice(0, 40), wbs_name: t.name, parent_wbs_id: parent.wbsId });
+      push('PROJWBS', { wbs_id: t.uid, proj_id: pid, obs_id: '', seq_num: String(++seq * 10), proj_node_flag: 'N', status_code: 'WS_Open', wbs_short_name: short.slice(0, 40), wbs_name: t.name, parent_wbs_id: parent.wbsId, _msp_uid: t.uid });
       stack.push({ level: t.level, wbsId: t.uid, code: full });
       if (t.preds.length) warn('MSP_SUMMARY_LINK', `Summary task "${t.name}" has ${t.preds.length} predecessor link(s); WBS nodes cannot carry logic, so they were dropped.`, 'P6 drops relationships on MS Project summary tasks when importing.', { table: 'TASKPRED', key: t.uid });
       continue;
@@ -540,6 +551,6 @@ function taskRow(t: MTask, pid: string, wbsId: string, clndr: string, code: stri
     cstr_date: cdate, act_start_date: as, act_end_date: af, late_start_date: done ? '' : t.lateStart, late_end_date: done ? '' : t.lateFinish, expect_end_date: '',
     early_start_date: es, early_end_date: ef, restart_date: done ? '' : es, reend_date: done ? '' : ef, target_start_date: t.start || es, target_end_date: t.finish || ef,
     rem_late_start_date: done ? '' : t.lateStart, rem_late_end_date: done ? '' : t.lateFinish, cstr_type: cstr, priority_type: 'PT_Normal',
-    cstr_date2: cdate2, cstr_type2: cstr2, driving_path_flag: t.critical ? 'Y' : 'N', guid: '',
+    cstr_date2: cdate2, cstr_type2: cstr2, driving_path_flag: t.critical ? 'Y' : 'N', guid: '', _msp_uid: t.uid,
   };
 }

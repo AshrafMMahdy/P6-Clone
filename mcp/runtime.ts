@@ -263,7 +263,7 @@ export function startJob(tool: string, handle: string | undefined, p: Promise<un
 export function jobView(job: Job) {
   const base = { job_id: job.id, tool: job.tool, handle: job.handle, running_seconds: Math.round(((job.done ?? Date.now()) - job.started) / 1000) };
   if (!job.done) return { ...base, status: 'running', progress: job.progress, note: 'Call job_status again shortly (pass wait_seconds to wait up to 20 s).' };
-  if (job.error) return { ...base, status: 'failed', error: job.error instanceof ToolError ? { code: job.error.code, message: job.error.message, hint: job.error.hint } : { code: 'internal', message: job.error.message } };
+  if (job.error) return { ...base, status: job.error instanceof ToolError && job.error.code === 'cancelled' ? 'cancelled' : 'failed', error: job.error instanceof ToolError ? { code: job.error.code, message: job.error.message, hint: job.error.hint } : { code: 'internal', message: job.error.message } };
   return { ...base, status: 'done', result: job.result };
 }
 export function getJob(id: unknown): Job {

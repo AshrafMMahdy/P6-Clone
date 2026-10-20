@@ -103,7 +103,9 @@ node cli/p6clone.ts review tower.xer --json
 
 **Operations** (`edit --ops`, and the MCP `edit` tool) are a JSON array. Activities are addressed by Activity ID, WBS by
 code (or `A.B` path), resources by resource ID, calendars by name, projects by project ID (only needed when the file has
-several). Durations and lags are in days (`--hours-per-day`, default 8). Dates are `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
+several). An activity read from Microsoft Project XML or MPX keeps its task UID (`source_uid` in lookups; not written to
+XER or P6 XML, and kept when saved back to Microsoft Project) and can be named `uid:<UID>` wherever an activity is.
+Durations and lags are in days (`--hours-per-day`, default 8). Dates are `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
 
 | op | Fields |
 |---|---|
@@ -117,12 +119,12 @@ several). Durations and lags are in days (`--hours-per-day`, default 8). Dates a
 | `add_activity` | `id?, name, wbs?, duration_days?, type?, calendar?, constraint?: {type, date}, secondary_constraint?, priority?, start?` |
 | `update_activity` | `id, new_id?, name?, wbs?, duration_days?, remaining_days?, type?, calendar?, constraint?, start?, finish?, actual_start?, actual_finish?, percent_complete?, expected_finish?, priority?` |
 | `delete_activity`, `dissolve_activity` | `id` (dissolve links its predecessors to its successors, like P6) |
-| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`) |
+| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`). P6 keeps one relationship per pair: adding a second (any type) is skipped and listed in the result's `warnings` |
 | `add_resource` | `id, name?, type?: labor\|nonlabor\|material, units_per_day?, max_units_per_day?, price_per_unit?, calendar?` |
 | `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?` |
 | `update_assignment` | `activity, resource, units?, units_per_day?, remaining_units?, curve?` (resource curve name, `""` = linear) |
 | `update_wbs` | `code, new_code?, name?, parent?` (move; `""` = top level) |
-| `add_code_type`, `add_code_value`, `assign_code` | activity, project or resource codes (`subject`): `name, scope?, max_length?, values?: [{code, name?, parent?}]`; `type, code, name?, parent?`; `type, value` (`""` removes) on an `activity`, `project` or `resource` |
+| `add_code_type`, `add_code_value`, `assign_code` | activity, project or resource codes (`subject`): `name, scope?, max_length?` (default 20, at most 60; a longer value is refused, never cut)`, values?: [{code, name?, parent?}]`; `type, code, name?, parent?`; `type, value` (`""` removes) on an `activity`, `project` or `resource` |
 | `add_udf`, `set_udf` | `name, subject?: activity\|wbs\|project\|resource\|assignment, data_type?: text\|number\|integer\|cost\|start_date\|finish_date`; `udf, value` on an `activity`, `wbs`, `project` or `resource` |
 | `set_notebook` | `activity, text, topic?` (default Notes; `""` text removes) |
 | `add_cost_account`, `add_expense`, `update_expense`, `delete_expense` | `id, name?, parent?`; `activity, name, account?, budgeted_cost?, actual_cost?, remaining_cost?, units?, price_per_unit?, vendor?, po_number?, description?` |
@@ -169,13 +171,17 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
 - Every error is `{error: {code, message, hint, retry_after?}}`: the hint says what to do next. Long work (a big
   `open_file`, `monte_carlo`) can run with `async: true` and `job_status`; any call still running after 25 s turns into
   a job by itself. Oversized results come back as a preview with a note on how to ask for less.
+- MCP `notifications/cancelled` (or `cancel_job` for a job) stops `open_file`, `save` and `schedule` between their
+  phases and `monte_carlo` at once, with error `cancelled`: nothing is kept, no file is written, the memory is freed.
 
-Tools: `open_file`, `new_project`, `list_open`, `server_status`, `job_status`, `cancel_job`, `edit`, `schedule`,
+Tools: `open_file`, `new_project`, `list_open`, `server_status`, `job_status`, `cancel_job`, `edit`, `schedule`
+(`data_date`, with `project` for one project only),
 `update_progress`, `level_resources`, `monte_carlo` (P10-P90, histogram, milestone percentiles, criticality,
 sensitivity, risk events; seeded, the project is not changed), `validate`, `review`, `project_summary`,
 `find_activities`, `get_activity`, `list_wbs`, `critical_path`, `schedule_health`, `resource_summary`, `list_projects`,
 `list_dictionaries` (baselines, codes, UDFs, accounts, calendars, curves, EPS, OBS, roles), `earned_value`,
-`trace_logic`, `undo`, `redo`, `save` (XER 5.0-24.12, P6 XML, Microsoft Project XML `format: mspdi`, or MPX), `export_pdf`,
+`trace_logic`, `undo`, `redo`, `save` (XER 5.0-24.12, P6 XML, Microsoft Project XML `format: mspdi`, or MPX; `project`
+writes one project, and is required for mspdi/mpx when the file holds several), `export_pdf`,
 `export_excel`, `import_excel`, `compare`, `list_reports`, `run_report`, `create_report`, `close`. Read-only tools carry
 the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as well as text).
 

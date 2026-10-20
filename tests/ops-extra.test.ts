@@ -52,6 +52,21 @@ test('ops: activity, project and resource codes, assignment replaces per type', 
   assert.equal(rows(db, 'TASKACTV').length, 0);
 });
 
+test('ops: a code value longer than its type allows (default 20, max_length up to 60) is refused, never cut', () => {
+  const db = base();
+  const v = (n: number) => 'V'.repeat(n);
+  ok(db, [{ op: 'add_code_type', name: 'Short', values: [{ code: v(20) }] }, { op: 'add_code_type', name: 'Long', max_length: 60, values: [{ code: v(60) }] }, { op: 'add_code_type', name: 'Area', subject: 'resource', max_length: 30 }]);
+  bad(db, [{ op: 'add_code_value', type: 'Short', code: v(21) }], new RegExp(`Code value "${v(21)}" is 21 characters; code type "Short" allows 20 .*max_length can be up to 60.*Nothing was cut`));
+  bad(db, [{ op: 'add_code_value', type: 'Long', code: v(61) }], /is 61 characters; code type "Long" allows 60/);
+  bad(db, [{ op: 'add_code_value', type: 'Area', subject: 'resource', code: v(31) }], /allows 30/);
+  bad(db, [{ op: 'add_code_type', name: 'Huge', max_length: 61 }], /max_length 61 is more than P6 allows for a code value \(60\)/);
+  ok(db, [{ op: 'add_code_value', type: 'Area', subject: 'resource', code: v(30) }]);
+  // a type read from a file without a length still holds at most 60
+  rows(db, 'ACTVTYPE').find((t) => t.actv_code_type === 'Long')!.actv_short_len = '';
+  bad(db, [{ op: 'add_code_value', type: 'Long', code: v(61) + 'X' }], /allows 60/);
+  assert.deepEqual(rows(db, 'ACTVCODE').map((c) => c.short_name.length), [20, 60]);
+});
+
 test('ops: UDFs, notebook, cost accounts and expenses, steps, estimates', () => {
   const db = base();
   ok(db, [

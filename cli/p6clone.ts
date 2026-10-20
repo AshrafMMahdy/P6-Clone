@@ -180,7 +180,7 @@ async function main(): Promise<number> {
       const out = opt('out');
       if (r.ok && out) writeOut(out, db, opt('version'));
       if (flag('json')) console.log(JSON.stringify({ ...r, schedule: sched, out: r.ok ? out ?? null : null }, null, 2));
-      else if (r.ok) console.log(`Applied ${r.applied} operation(s)${sched ? `, scheduled (finish ${sched.finish})` : ''}${out ? `; wrote ${out}` : ' (no --out: nothing written)'}`);
+      else if (r.ok) { console.log(`Applied ${r.applied} operation(s)${sched ? `, scheduled (finish ${sched.finish})` : ''}${out ? `; wrote ${out}` : ' (no --out: nothing written)'}`); for (const w of r.warnings ?? []) console.log(`Warning: ${w}`); }
       else console.error(`${r.error!.index >= 0 ? `Operation ${r.error!.index + 1} failed` : 'Failed'}: ${r.error!.message}${r.error!.index >= 0 ? `\n  ${JSON.stringify(r.error!.op)}` : ''}\nNothing was changed.`);
       return r.ok ? 0 : 65;
     }

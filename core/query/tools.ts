@@ -17,7 +17,7 @@ const TYPE: Record<string, string> = { TT_Task: 'task', TT_Rsrc: 'resource depen
 
 export const TOOLS: ToolDef[] = [
   { name: 'project_summary', description: 'Overview of the open project(s): names, data date, start/finish, activity counts by status, critical and negative-float counts, WBS top level, calendars and resources. Call this first.', parameters: { type: 'object', properties: {} } },
-  { name: 'find_activities', description: 'Search activities. All filters are optional and combined. Returns up to `limit` rows (ID, name, status, start, finish, durations in days, total float in days, WBS).', parameters: { type: 'object', properties: {
+  { name: 'find_activities', description: 'Search activities. All filters are optional and combined. Returns up to `limit` rows (ID, name, status, start, finish, durations in days, total float in days, WBS; source_uid = the Microsoft Project task UID for activities read from an MSPDI/MPX file).', parameters: { type: 'object', properties: {
     text: { type: 'string', description: 'Text in the activity ID or name (case-insensitive)' },
     status: { type: 'string', enum: ['not_started', 'in_progress', 'completed'] },
     critical: { type: 'boolean' },
@@ -31,7 +31,7 @@ export const TOOLS: ToolDef[] = [
     sort: { type: 'string', enum: ['start', 'finish', 'total_float', 'duration'], description: 'Default: start' },
     limit: { type: 'number', description: 'Default 25, at most 100' },
   } } },
-  { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type, lag, driving and relationship free float), resource assignments, activity codes, user defined fields (UDFs), notes.', parameters: { type: 'object', properties: { activity_id: { type: 'string' } }, required: ['activity_id'] } },
+  { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type, lag, driving and relationship free float), resource assignments, activity codes, user defined fields (UDFs), notes; source_uid for an activity read from Microsoft Project.', parameters: { type: 'object', properties: { activity_id: { type: 'string', description: 'Activity ID, or "uid:<task UID>" for an activity read from Microsoft Project' } }, required: ['activity_id'] } },
   { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges. Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2' } } } },
   { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: {} } },
@@ -60,8 +60,9 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
   const wbsPath = (id: string) => { const out: string[] = []; for (let w = wbsById.get(id), n = 0; w && n < 50; w = wbsById.get(w.parent_wbs_id), n++) if (w.proj_node_flag !== 'Y') out.unshift(w.wbs_short_name); return out.join('.'); };
   const start = (t: Row) => t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date || '';
   const finish = (t: Row) => t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date || '';
-  const brief = (t: Row) => ({ id: t.task_code, name: t.task_name, status: STATUS[statusOf(t)] ?? statusOf(t), type: TYPE[t.task_type] ?? t.task_type, start: d(start(t)) + (t.act_start_date ? ' A' : ''), finish: d(finish(t)) + (t.act_end_date ? ' A' : ''), orig_days: days(t.target_drtn_hr_cnt, hpd), rem_days: days(t.remain_drtn_hr_cnt, hpd), total_float_days: t.act_end_date ? null : days(t.total_float_hr_cnt, hpd), critical: isCritical(t, ctx), wbs: wbsPath(t.wbs_id) });
-  const byCode = (code: string) => tasks.find((t) => t.task_code.toLowerCase() === String(code).toLowerCase());
+  const brief = (t: Row) => ({ id: t.task_code, name: t.task_name, status: STATUS[statusOf(t)] ?? statusOf(t), type: TYPE[t.task_type] ?? t.task_type, start: d(start(t)) + (t.act_start_date ? ' A' : ''), finish: d(finish(t)) + (t.act_end_date ? ' A' : ''), orig_days: days(t.target_drtn_hr_cnt, hpd), rem_days: days(t.remain_drtn_hr_cnt, hpd), total_float_days: t.act_end_date ? null : days(t.total_float_hr_cnt, hpd), critical: isCritical(t, ctx), wbs: wbsPath(t.wbs_id), ...(t._msp_uid ? { source_uid: t._msp_uid } : {}) });
+  // an activity read from Microsoft Project can be named by its task UID: "uid:12"
+  const byCode = (code: string) => { const c = String(code), uid = /^uid:\s*(.+)$/i.exec(c)?.[1]; return tasks.find((t) => t.task_code.toLowerCase() === c.toLowerCase()) ?? (uid ? tasks.find((t) => t._msp_uid === uid) : undefined); };
 
   switch (name) {
     case 'list_dictionaries': {

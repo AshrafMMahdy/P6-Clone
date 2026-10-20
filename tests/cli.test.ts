@@ -116,14 +116,24 @@ test('query shows activity codes and UDFs and finds by code', () => {
   assert.ok(found.activities.some((x: { id: string }) => x.id === 'A160'));
 });
 
-test('edit operations refuse codes P6 does not have and keep P6 rules (milestone duration, one link per type)', async () => {
+test('edit operations refuse codes P6 does not have and keep P6 rules (milestone duration, one link per pair)', async () => {
   const { applyOps } = await import('../core/project/ops.ts');
   const { emptyDb } = await import('../core/db.ts');
   const db = emptyDb();
   const ok = (ops: unknown[]) => { const r = applyOps(db, ops); assert.equal(r.ok, true, r.error?.message ?? ''); };
   const err = (ops: unknown[]): string => applyOps(db, ops).error?.message ?? '';
   ok([{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_activity', project: 'P', id: 'A1', name: 'a', duration_days: 5 }, { op: 'add_activity', project: 'P', id: 'A2', name: 'b', duration_days: 2 },
-    { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2' }, { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS' }]);
+    { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2' }]);
+  // a second relationship between the same pair (any type) is skipped with a warning; the rest of the list applies
+  const r = applyOps(db, [{ op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS' }, { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2' }, { op: 'update_activity', project: 'P', id: 'A2', name: 'b2' }]);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.results.slice(0, 2), [{ skipped: 'A1 SS A2', existing: 'A1 FS A2' }, { skipped: 'A1 FS A2', existing: 'A1 FS A2' }]);
+  assert.equal(r.warnings!.length, 2);
+  assert.match(r.warnings![0], /A1 -> A2 \(SS\) skipped: .*FS relationship/);
+  assert.equal(db.tables.TASKPRED.rows.length, 1);
+  assert.equal(db.tables.TASK.rows.find((x) => x.task_code === 'A2')!.task_name, 'b2');
+  assert.equal(applyOps(db, [{ op: 'update_activity', project: 'P', id: 'A2', name: 'b' }]).warnings, undefined);
+  db.tables.TASKPRED.rows.push({ ...db.tables.TASKPRED.rows[0], task_pred_id: '99', pred_type: 'PR_SS' }); // a file that has two
   assert.match(err([{ op: 'update_activity', project: 'P', id: 'A1', constraint: { type: 'CS_START_ON', date: '2026-03-02' } }]), /Unknown constraint/);
   assert.match(err([{ op: 'update_activity', project: 'P', id: 'A1', type: 'TT_Milestone' }]), /Unknown activity type/);
   assert.match(err([{ op: 'update_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS', new_type: 'FS' }]), /already has a FS relationship/);

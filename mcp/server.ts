@@ -58,9 +58,9 @@ const TOOLS = [
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
   { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs.', inputSchema: { type: 'object', properties: {} } },
   { name: 'job_status', annotations: ro, description: 'Result of a job started with async: true (or one that outlived the call time). wait_seconds (max 20) waits for it to finish.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, wait_seconds: { type: 'number' } }, required: ['job_id'] } },
-  { name: 'cancel_job', annotations: edit, description: 'Stop a running job (Monte Carlo stops at once; other work finishes its current step).', inputSchema: { type: 'object', properties: { job_id: { type: 'string' } }, required: ['job_id'] } },
+  { name: 'cancel_job', annotations: edit, description: 'Stop a running job (Monte Carlo stops at once; open_file, save and schedule stop between their phases, keeping or writing nothing; other work finishes its current step). MCP notifications/cancelled stops a running call the same way.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' } }, required: ['job_id'] } },
   { name: 'edit', annotations: edit, description: `Change the project with a list of operations, applied as ONE transaction: if any fails nothing changes and the error names it. Undo with undo.\n${OP_GUIDE}`, inputSchema: withHandle({ type: 'object', properties: { operations: { type: 'array', items: { type: 'object' } } }, required: ['operations'] }) },
-  { name: 'schedule', annotations: edit, description: 'Schedule (F9) like P6: CPM with calendars, constraints, retained logic. Returns the finish date and the schedule log highlights.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' } } }) },
+  { name: 'schedule', annotations: edit, description: 'Schedule (F9) like P6: CPM with calendars, constraints, retained logic. Returns the finish date and the schedule log highlights. data_date moves the data date of every project in the file first, or with project of that project only (the others schedule on their own data dates).', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' }, project: { type: 'string', description: 'Project ID: data_date applies to this project only' } } }) },
   { name: 'update_progress', annotations: edit, description: 'Tools > Update Progress: move the data date and statuse activities from their planned dates, then reschedule. If scheduling fails nothing is kept.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' } }, required: ['data_date'] }) },
   { name: 'level_resources', annotations: edit, description: 'Tools > Level Resources (resources with a Max Units/Time limit).', inputSchema: withHandle({ type: 'object', properties: { within_float: { type: 'boolean' } } }) },
   { name: 'monte_carlo', annotations: ro, description: 'Schedule risk analysis (Monte Carlo) like Primavera Risk Analysis: samples each activity\'s remaining duration from its three-point estimate (set with the set_estimates edit operation; default_estimates applies min/max percentages to activities without one, for this run only) and risk events from the risk register, schedules every iteration. Returns finish percentiles P10-P90, mean, std dev, chance of meeting the deterministic finish, a histogram (buckets), milestone percentiles, activity criticality index, sensitivity ranking and risk-event impact. The project is not changed. Big projects: pass async: true.', inputSchema: withHandle({ type: 'object', properties: { iterations: { type: 'number', description: 'default 1000' }, seed: { type: 'number', description: 'same seed, same result' }, risk_events: { type: 'string', description: 'pre (default), post or off' }, project: { type: 'string' }, default_estimates: { type: 'object', description: '{min_pct: 90, max_pct: 125, dist: triangle|uniform|betapert} for activities without an estimate' }, buckets: { type: 'number', description: 'histogram buckets (default 20)' }, top: { type: 'number', description: 'how many activities in the criticality and sensitivity lists (default 25)' } } }) },
@@ -69,7 +69,7 @@ const TOOLS = [
   ...LOOKUPS.map((t) => ({ name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
   { name: 'undo', annotations: edit, description: 'Undo your own last change on this project (edit, schedule, progress update, leveling, import). Refused only if someone else\'s later change touched the same items. any_caller: true (with owner_key) undoes the latest change whoever made it.', inputSchema: withHandle({ type: 'object', properties: { any_caller: { type: 'boolean' } } }, true) },
   { name: 'redo', annotations: edit, description: 'Re-apply your last undone change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
-  { name: 'save', annotations: writes, description: 'Write the project (needs owner_key): XER (P6 version 5.0-24.12; default the version it was read in, else 19.12), P6 XML (.xml), Microsoft Project XML (format: mspdi) or MPX (.mpx). Paths are inside the storage root.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, format: { type: 'string', description: 'xer, p6xml, mspdi or mpx (default from the extension; .xml = P6 XML)' }, version: { type: 'string' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: the code page P6 would use, e.g. windows-1256 for Arabic)' }, overwrite: { type: 'boolean' } } }, true) },
+  { name: 'save', annotations: writes, description: 'Write the project (needs owner_key): XER (P6 version 5.0-24.12; default the version it was read in, else 19.12), P6 XML (.xml), Microsoft Project XML (format: mspdi) or MPX (.mpx). A Microsoft Project file holds one project: when the file has several, mspdi and mpx need project. Paths are inside the storage root.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, project: { type: 'string', description: 'Project ID to write (default: all projects; required for mspdi and mpx when the file holds several)' }, format: { type: 'string', description: 'xer, p6xml, mspdi or mpx (default from the extension; .xml = P6 XML)' }, version: { type: 'string' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: the code page P6 would use, e.g. windows-1256 for Arabic)' }, overwrite: { type: 'boolean' } } }, true) },
   { name: 'export_pdf', annotations: writes, description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML. ' + PRINT_GUIDE + ' Layout options: filter, group_by (wbs, none), sort_by.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', annotations: writes, description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK, TASKPRED, RSRC, TASKRSRC; row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
   { name: 'import_excel', annotations: edit, description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities, relationships, resources and assignments; "Y" in delete_record_flag deletes the row. Calculated columns are ignored. One undoable change; dry_run returns the plan only.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
@@ -95,9 +95,11 @@ const projectIds = (db: Db, id: unknown) => {
 const readBytes = (p: string) => { try { return new Uint8Array(readFileSync(p)); } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
 const writeOut = (p: string, data: string | Uint8Array) => { try { writeFileSync(p, data); } catch (e) { fail('file_unwritable', `Cannot write ${p}: ${(e as Error).message}.`, 'Check that the folder exists and the file is not open elsewhere.'); } };
 const iso = (t: number | null | undefined) => (t == null || !Number.isFinite(t) ? null : formatP6Date(t));
+/** Between phases of long work: let waiting messages in (a cancellation), then stop if this call was cancelled. */
+const checkpoint = async (ctx: Ctx) => { await new Promise((r) => setImmediate(r)); if (ctx.signal.aborted) fail('cancelled', 'The call was cancelled.', 'Nothing was kept or written by it; call again when needed.'); };
 
 // ---------------------------------------------------------------- tool implementations
-type Ctx = { caller: string; job?: ReturnType<typeof startJob> };
+type Ctx = { caller: string; job?: ReturnType<typeof startJob>; signal: AbortSignal };
 const NO_HANDLE = new Set(['open_file', 'new_project', 'list_open', 'server_status', 'job_status', 'cancel_job']);
 
 async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unknown> {
@@ -110,7 +112,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       for (const t0 = Date.now(); !job.done && Date.now() - t0 < wait;) await new Promise((r) => setTimeout(r, 200));
       return jobView(job);
     }
-    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: job.abort ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
+    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: ['monte_carlo', 'open_file', 'save', 'schedule'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
     case 'open_file': {
       const path = pathArg(a.path);
       const bytes = readBytes(path);
@@ -118,9 +120,12 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       // reserve the memory first, so a big file is refused (with a way forward) instead of exhausting the process
       const s0 = createSession({ tables: {} }, { path, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: need, dirty: false });
       try {
+        await checkpoint(ctx);
         const format = detectFormat(path, bytes);
         const r = readRaw(bytes, format, a.encoding ?? 'auto');
+        await checkpoint(ctx);
         const f = importChecks(r.db, r.findings, format);
+        await checkpoint(ctx);
         if (worst(f) === 'fatal') { closeSession(s0); return { opened: false, reason: 'P6 would reject this file', diagnostics: brief(f) }; }
         s0.db = r.db; s0.format = format;
         return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0) };
@@ -146,9 +151,17 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     }
     case 'schedule': {
       const t = dd(a.data_date);
-      const res = change(s, ctx.caller, 'Schedule', (d) => { const x = scheduleProjects(d, allIds(d), t != null ? { dataDate: t } : {}); if (x.ok) syncAssignmentDates(d); return x; });
+      const only = a.project != null && a.project !== '' ? projectIds(s.db, a.project)[0] : null;
+      await checkpoint(ctx);
+      const was = s.dirty;
+      const res = change(s, ctx.caller, 'Schedule', (d) => {
+        // with "project" the data date moves on that project only; the others schedule on their own
+        if (only && t != null) d.tables.PROJECT.rows.find((p) => p.proj_id === only)!.last_recalc_date = formatP6Date(t);
+        const x = scheduleProjects(d, allIds(d), t != null && !only ? { dataDate: t } : {}); if (x.ok) syncAssignmentDates(d); return x;
+      });
       if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: 'Fix the reported problem (often a loop or a missing calendar) and schedule again; nothing was changed.' } }; }
-      return { ok: true, data_date: iso(res.stats.dataDate), finish: iso(res.stats.finish), stats: res.stats, warnings: res.findings.filter((f) => f.severity !== 'info').slice(0, 30).map((f) => f.message) };
+      try { await checkpoint(ctx); } catch (e) { dropLast(s); s.dirty = was; throw e; }
+      return { ok: true, ...(only ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === only)!.proj_short_name } : {}), data_date: iso(only ? res.projects[only].dataDate : res.stats.dataDate), finish: iso(res.stats.finish), stats: res.stats, warnings: res.findings.filter((f) => f.severity !== 'info').slice(0, 30).map((f) => f.message) };
     }
     case 'update_progress': {
       const t = dd(a.data_date) ?? fail('bad_input', 'Give data_date.', 'The new data date, YYYY-MM-DD.');
@@ -160,12 +173,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'monte_carlo': {
       const ids = projectIds(s.db, a.project);
       const iterations = Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000)));
-      const abort = new AbortController();
-      if (ctx.job) ctx.job.abort = abort;
       // default estimates only for this run: applied in a journal and rolled back afterwards
       const j = a.default_estimates ? record(s.db, (d) => { defaultEstimates(d, ids, Number(a.default_estimates.min_pct) || 90, Number(a.default_estimates.max_pct) || 125, a.default_estimates.dist ?? 'triangle'); }) : null;
       try {
-        const r = await runMonteCarlo(s.db, ids, { iterations, seed: a.seed != null ? Number(a.seed) : undefined, riskEvents: a.risk_events === 'post' || a.risk_events === 'off' ? a.risk_events : 'pre', signal: abort.signal,
+        const r = await runMonteCarlo(s.db, ids, { iterations, seed: a.seed != null ? Number(a.seed) : undefined, riskEvents: a.risk_events === 'post' || a.risk_events === 'off' ? a.risk_events : 'pre', signal: ctx.signal,
           onProgress: (i) => { if (ctx.job) ctx.job.progress = `${i} of ${iterations} iterations`; } });
         const top = Math.min(200, Number(a.top) || 25);
         const buckets = Math.min(100, Math.max(5, Number(a.buckets) || 20));
@@ -184,7 +195,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           risk_events: r.risks.map((x) => ({ id: x.code, name: x.name, probability_pct: Math.round(x.probability * 1000) / 10, impact_days: Math.round((x.hours / s.hpd) * 10) / 10, activities: x.activities, triggered_pct: Math.round(x.triggeredPct * 10) / 10 })),
           note: r.sensitivity.length ? undefined : 'No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule. Set estimates with the set_estimates edit operation, or pass default_estimates.',
         };
-      } catch (e) { if (abort.signal.aborted) fail('cancelled', 'The Monte Carlo run was cancelled.', 'Start it again when needed.'); throw e; }
+      } catch (e) { if (ctx.signal.aborted) fail('cancelled', 'The Monte Carlo run was cancelled.', 'Start it again when needed.'); throw e; }
       finally { if (j) rollback(j); }
     }
     case 'validate': return brief(importChecks(s.db, [], s.format));
@@ -200,14 +211,19 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const path = a.path ? pathArg(a.path) : s.path ?? fail('bad_input', 'Give "path" (this project was created in memory).', 'Pass a file path inside the storage root.');
       if (!a.path && !a.overwrite) fail('confirm_overwrite', `Saving would overwrite ${path}.`, 'Pass overwrite: true, or a new path.');
       const fmt = String(a.format ?? (/\.mpx$/i.test(path) ? 'mpx' : /\.xml$/i.test(path) ? 'p6xml' : 'xer')).toLowerCase();
+      const projIds = a.project != null && a.project !== '' ? projectIds(s.db, a.project) : undefined;
+      const names = () => allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!.proj_short_name).join(', ');
+      if ((fmt === 'mspdi' || fmt === 'mpx') && !projIds && allIds(s.db).length > 1) fail('bad_input', `A Microsoft Project file holds one project, and this file holds ${allIds(s.db).length}: ${names()}.`, 'Pass "project" with the Project ID to write (save once per project).');
+      await checkpoint(ctx);
       let bytes: string | Uint8Array, label: string;
-      if (fmt === 'p6xml' || fmt === 'xml') { bytes = writeP6Xml(s.db, { version: a.version ?? '19.12' }); label = 'P6 XML'; }
-      else if (fmt === 'mspdi' || fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto' }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
-      else if (fmt === 'xer') { bytes = writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12', encoding: a.encoding ?? 'auto' }); label = `XER ${a.version ?? s.db.header?.version ?? '19.12'}`; }
+      if (fmt === 'p6xml' || fmt === 'xml') { bytes = writeP6Xml(s.db, { version: a.version ?? '19.12', projIds }); label = 'P6 XML'; }
+      else if (fmt === 'mspdi' || fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: projIds ?? allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto' }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
+      else if (fmt === 'xer') { bytes = writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12', encoding: a.encoding ?? 'auto', projIds }); label = `XER ${a.version ?? s.db.header?.version ?? '19.12'}`; }
       else return fail('bad_input', `Unknown format "${a.format}".`, 'Use xer, p6xml, mspdi or mpx.');
+      await checkpoint(ctx); // nothing is written once the call is cancelled; the write itself is one step
       writeOut(path, bytes);
-      s.dirty = false;
-      return { saved: path, format: label, ...((fmt === 'mspdi' || fmt === 'mpx') && allIds(s.db).length > 1 ? { note: 'A Microsoft Project file holds one project: the first one was written.' } : {}) };
+      if (!projIds || allIds(s.db).length === 1) s.dirty = false;
+      return { saved: path, format: label, ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
     case 'close': { requireOwner(s, a.owner_key, 'Closing'); closeSession(s); forgetEvicted(s.handle); return { closed: s.handle, had_unsaved_changes: s.dirty }; }
     case 'export_pdf': {
@@ -270,8 +286,11 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
 }
 
 /** One tool call: queued per project, run (or turned into a job), always answered with data or {error}. */
-export async function callTool(name: string, a: Record<string, any>, sessionCaller?: string): Promise<{ out: unknown; isError: boolean }> {
-  const ctx: Ctx = { caller: String(a.caller ?? sessionCaller ?? 'default') };
+export async function callTool(name: string, a: Record<string, any>, sessionCaller?: string, signal?: AbortSignal): Promise<{ out: unknown; isError: boolean }> {
+  // one abort for the call: the request's cancellation (notifications/cancelled) and cancel_job once it is a job
+  const abort = new AbortController();
+  if (signal?.aborted) abort.abort(); else signal?.addEventListener('abort', () => abort.abort(), { once: true });
+  const ctx: Ctx = { caller: String(a.caller ?? sessionCaller ?? 'default'), signal: abort.signal };
   const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
   const work = async () => {
     const out = handle != null ? await exclusive(handle, () => run(name, a, ctx)) : await run(name, a, ctx);
@@ -281,11 +300,11 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
   };
   const asJob = a.async === true && name !== 'job_status';
   try {
-    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; return work(); })); return { out: { job_id: job.id, status: 'running', note: 'Call job_status with this job_id for the result.' }, isError: false }; }
+    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; return work(); }), abort); return { out: { job_id: job.id, status: 'running', note: 'Call job_status with this job_id for the result.' }, isError: false }; }
     const p = work();
     const timeout = Symbol('timeout');
     const r = await Promise.race([p, new Promise((res) => setTimeout(() => res(timeout), config.softTimeoutMs).unref?.())]);
-    if (r === timeout) { const job = startJob(name, handle, p); return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
+    if (r === timeout) { const job = startJob(name, handle, p, abort); return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
     const isError = !!(r && typeof r === 'object' && (r as { ok?: boolean }).ok === false);
     return { out: r, isError };
   } catch (e) {

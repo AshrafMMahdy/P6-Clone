@@ -2,6 +2,8 @@
 import { callTool, toolResult, toolsList, SERVER_INFO, INSTRUCTIONS } from './server.ts';
 
 type Msg = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: any };
+/** Running tools/call requests by caller and request id, for notifications/cancelled. */
+const running = new Map<string, AbortController>();
 
 /** Answer one JSON-RPC message (shared by the stdio and HTTP transports). Returns undefined for notifications. */
 export async function handleMessage(m: Msg, sessionCaller?: string): Promise<unknown | undefined> {
@@ -9,12 +11,17 @@ export async function handleMessage(m: Msg, sessionCaller?: string): Promise<unk
   const error = (code: number, message: string) => (m.id !== undefined ? { jsonrpc: '2.0', id: m.id, error: { code, message } } : undefined);
   switch (m.method) {
     case 'initialize': return reply({ protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
-    case 'notifications/initialized': case 'notifications/cancelled': return undefined;
+    case 'notifications/initialized': return undefined;
+    case 'notifications/cancelled': running.get(`${sessionCaller ?? ''}|${m.params?.requestId}`)?.abort(); return undefined;
     case 'ping': return reply({});
     case 'tools/list': return reply({ tools: toolsList() });
     case 'tools/call': {
-      const { out, isError } = await callTool(String(m.params?.name ?? ''), (m.params?.arguments ?? {}) as Record<string, any>, sessionCaller);
-      return reply(toolResult(out, isError));
+      const key = `${sessionCaller ?? ''}|${m.id}`, abort = new AbortController();
+      if (m.id !== undefined) running.set(key, abort);
+      try {
+        const { out, isError } = await callTool(String(m.params?.name ?? ''), (m.params?.arguments ?? {}) as Record<string, any>, sessionCaller, abort.signal);
+        return reply(toolResult(out, isError));
+      } finally { if (running.get(key) === abort) running.delete(key); }
     }
     default: return error(-32601, `Method not found: ${m.method}`);
   }

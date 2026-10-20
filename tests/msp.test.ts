@@ -12,6 +12,11 @@ import { rows, type Db, type Row } from '../core/db.ts';
 import { buildConvertScript, convertError, MSP_REQUIRED, psQuote } from '../main/msproject.ts';
 import { detectFormat, exportFile, parseFile } from '../renderer/io.ts';
 import { samples } from './helpers.ts';
+import { applyOps } from '../core/project/ops.ts';
+import { runTool } from '../core/query/tools.ts';
+import { makeCtx } from '../core/project/ctx.ts';
+import { writeXer } from '../core/xer/write.ts';
+import { writeP6Xml } from '../core/xml/p6xml.ts';
 
 const load = (name: string) => parseXer(samples().find((s) => s.name === name)!.bytes).db;
 const n = (s: string | undefined) => Number(s || 0);
@@ -313,4 +318,45 @@ test('MPP bridge PowerShell script', () => {
   assert.equal(psQuote("it's"), "'it''s'");
   assert.ok(convertError('mppToXml', 3, 'MSPROJECT_NOT_AVAILABLE: class not registered', false).startsWith(MSP_REQUIRED));
   assert.match(convertError('xmlToMpp', null, '', true), /did not finish within 120 s/);
+});
+
+/** FOREIGN with task UIDs that are not 1..n (UID n -> 100 + 7n), as in a file edited in Microsoft Project. */
+const FOREIGN_UIDS = FOREIGN.replace(/<Tasks>[\s\S]*<\/Tasks>/, (x) => x.replace(/<(UID|PredecessorUID)>([1-9]\d*)</g, (_, k, n) => `<${k}>${100 + 7 * Number(n)}<`))
+  .replace(/<TaskUID>(\d+)</g, (_, n) => `<TaskUID>${100 + 7 * Number(n)}<`);
+
+test('Microsoft Project task UIDs stay on the activities: source_uid, uid:<UID> in edits, kept when written back', () => {
+  const { db } = parseMspdi(FOREIGN_UIDS);
+  const uid = new Map(rows(db, 'TASK').map((t) => [t.task_name, t._msp_uid]));
+  assert.deepEqual(Object.fromEntries(uid), { 'Kick-off': '114', Layouts: '121', Partitions: '135', Handover: '142' });
+  const ctx = makeCtx(db, { hoursPerDay: 8 });
+  const one = runTool('get_activity', { activity_id: 'uid:121' }, db, ctx, [], 8) as { id: string; name: string; source_uid: string };
+  assert.deepEqual([one.name, one.source_uid], ['Layouts', '121']);
+  const found = runTool('find_activities', {}, db, ctx, [], 8) as { activities: { name: string; source_uid: string }[] };
+  assert.deepEqual(found.activities.map((a) => [a.name, a.source_uid]).sort(), [['Handover', '142'], ['Kick-off', '114'], ['Layouts', '121'], ['Partitions', '135']]);
+  // every operation that names an activity takes uid:<UID>
+  const r = applyOps(db, [
+    { op: 'update_activity', id: 'uid:121', duration_days: 3 },
+    { op: 'add_relationship', pred: 'uid:114', succ: 'uid:142', type: 'SS' },
+    { op: 'set_notebook', activity: 'uid:142', text: 'handover pack' },
+    { op: 'add_activity', id: 'N1', name: 'New one', duration_days: 1 },
+    { op: 'add_relationship', pred: 'uid:142', succ: 'N1' },
+  ]);
+  assert.equal(r.ok, true, r.error?.message ?? '');
+  assert.equal(rows(db, 'TASK').find((t) => t.task_name === 'Layouts')!.target_drtn_hr_cnt, '24');
+  assert.match(applyOps(db, [{ op: 'delete_activity', id: 'uid:999' }]).error!.message, /No activity with Microsoft Project task UID 999/);
+  // a private field: not in XER or P6 XML
+  assert.ok(!new TextDecoder().decode(writeXer(db, { version: '19.12' })).includes('msp_uid'));
+  assert.ok(!writeP6Xml(db, {}).includes('msp_uid'));
+  assert.deepEqual(validateXer(db, []).filter((f) => f.field === '_msp_uid'), []);
+  // written back to MSPDI and MPX, the tasks keep their UIDs (summary tasks too); a new activity gets an unused one
+  for (const [write, parse] of [[writeMspdi, parseMspdi], [writeMpx, parseMpx]] as const) {
+    const back = parse(write(db)).db;
+    const u = new Map(rows(back, 'TASK').map((t) => [t.task_name, t._msp_uid]));
+    for (const [name, id] of uid) assert.equal(u.get(name), id, `${write.name} ${name}`);
+    assert.deepEqual(rows(back, 'PROJWBS').filter((w) => w.proj_node_flag !== 'Y').map((w) => [w.wbs_name, w._msp_uid]).sort(), [['Build', '128'], ['Design', '107']]);
+    const all = [...rows(back, 'TASK'), ...rows(back, 'PROJWBS').filter((w) => w._msp_uid)].map((r) => r._msp_uid);
+    assert.equal(new Set(all).size, all.length, `${write.name}: UIDs unique`);
+    const rel = rows(back, 'TASKPRED').map((p) => `${p.pred_task_id}>${p.task_id}`);
+    assert.ok(rel.includes('114>142') && rel.includes(`142>${u.get('New one')}`));
+  }
 });

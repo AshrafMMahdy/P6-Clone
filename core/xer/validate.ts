@@ -92,7 +92,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
       c.add({ severity: 'fatal', code: 'MISSING_KEY_FIELD', table: t.name, field: key, message: `${t.name} has no ${key} column${s ? ` (found "${s}" — misspelled?)` : ''}.`, p6: 'P6 cannot import the table without its key.' });
     }
     for (const f of t.fields) {
-      if (kf.size && !kf.has(f)) {
+      if (kf.size && !kf.has(f) && !f.startsWith('_')) { // _fields are the clone's own, never written to a file
         const s = suggest(f, kf);
         c.add({ severity: 'warning', code: 'FIELD_UNKNOWN', table: t.name, field: f, message: `${t.name}.${f} is not a P6 field${s ? `; did you mean ${s}?` : ''}.`, p6: 'P6 ignores unknown columns, so this data is lost on import.' });
       }

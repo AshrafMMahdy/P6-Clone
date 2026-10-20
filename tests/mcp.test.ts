@@ -16,7 +16,12 @@ function client() {
   p.stdout.on('data', (c: string) => { buf += c; for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1); waiting.get(m.id)?.(m); } });
   const rpc = (method: string, params?: unknown) => new Promise<any>((res) => { const n = ++id; waiting.set(n, res); p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n'); });
   const tool = async (name: string, args: Record<string, unknown> = {}) => { const r = await rpc('tools/call', { name, arguments: args }); return { ...r.result, data: r.result.structuredContent }; };
-  return { rpc, tool, close: () => p.stdin.end() };
+  // a tools/call followed at once by its notifications/cancelled (one write, so the server reads both together)
+  const cancelled = (name: string, args: Record<string, unknown>) => new Promise<any>((res) => {
+    const n = ++id; waiting.set(n, res);
+    p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method: 'tools/call', params: { name, arguments: args } }) + '\n' + JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: n, reason: 'test' } }) + '\n');
+  }).then((r) => ({ ...r.result, data: r.result.structuredContent }));
+  return { rpc, tool, cancelled, close: () => p.stdin.end() };
 }
 
 test('MCP: an agent builds, schedules, reviews, undoes, saves and reopens a project', { timeout: 60_000 }, async () => {
@@ -163,4 +168,88 @@ test('MCP: compare two revisions by Activity ID, and trace an activity\'s logic'
     const tr = await c.tool('trace_logic', { handle: a, activity_id: 'A2410', predecessors: 2, successors: 1 });
     assert.ok(tr.data.levels.some((l: { level: number }) => l.level === -1) && tr.data.links.some((x: { driving: boolean }) => x.driving));
   } finally { c.close(); }
+});
+
+test('MCP: Microsoft Project task UIDs (source_uid, uid:), one data date per project, one project per Microsoft Project file', { timeout: 60_000 }, async () => {
+  const c = client();
+  try {
+    await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const h = (await c.tool('new_project', { id: 'P1', start: '2026-03-02' })).data.handle;
+    assert.equal((await c.tool('edit', { handle: h, operations: [
+      { op: 'add_activity', id: 'A1', name: 'One', duration_days: 5 }, { op: 'add_activity', id: 'A2', name: 'Two', duration_days: 3 }, { op: 'add_relationship', pred: 'A1', succ: 'A2' },
+      { op: 'add_project', id: 'P2', start: '2026-03-02' }, { op: 'add_activity', project: 'P2', id: 'B1', name: 'Other', duration_days: 5 },
+    ] })).isError, false);
+    // a Microsoft Project file holds one project: refused without "project", written with it
+    const dir = mkdtempSync(join(tmpdir(), 'p6mcp-'));
+    for (const format of ['mspdi', 'mpx']) {
+      const no = await c.tool('save', { handle: h, path: join(dir, `two.${format}`), format });
+      assert.equal(no.data.error.code, 'bad_input');
+      assert.match(no.data.error.message, /holds 2: P1, P2/);
+      assert.ok(!existsSync(join(dir, `two.${format}`)));
+    }
+    const one = await c.tool('save', { handle: h, path: join(dir, 'p1.xml'), format: 'mspdi', project: 'P1' });
+    assert.deepEqual([one.isError, one.data.project], [false, 'P1']);
+    // reopened: every activity carries its task UID, and edits and lookups take uid:<UID>
+    const m = (await c.tool('open_file', { path: join(dir, 'p1.xml') })).data.handle;
+    const acts = (await c.tool('find_activities', { handle: m })).data.activities as { id: string; name: string; source_uid: string }[];
+    assert.ok(acts.length === 2 && acts.every((a) => /^\d+$/.test(a.source_uid)));
+    const two = acts.find((a) => a.name === 'Two')!;
+    assert.equal((await c.tool('get_activity', { handle: m, activity_id: `uid:${two.source_uid}` })).data.name, 'Two');
+    const ed = await c.tool('edit', { handle: m, operations: [{ op: 'update_activity', id: `uid:${two.source_uid}`, name: 'Two b' }, { op: 'add_relationship', pred: acts.find((a) => a.name === 'One')!.id, succ: `uid:${two.source_uid}`, type: 'SS' }] });
+    assert.equal(ed.isError, false);
+    assert.match(ed.data.warnings[0], /skipped: .* already has a FS relationship/);
+    // schedule: data_date on one project only, or (as before) on every project
+    const dates = async () => Object.fromEntries((await c.tool('list_projects', { handle: h })).data.projects.map((p: { id: string; data_date: string }) => [p.id, p.data_date]));
+    const sc = await c.tool('schedule', { handle: h, data_date: '2026-04-01', project: 'P2' });
+    assert.deepEqual([sc.data.project, sc.data.data_date], ['P2', '2026-04-01 00:00']);
+    assert.deepEqual(await dates(), { P1: '2026-03-02 00:00', P2: '2026-04-01 00:00' });
+    assert.equal((await c.tool('get_activity', { handle: h, activity_id: 'B1' })).data.start, '2026-04-01 08:00');
+    assert.equal((await c.tool('get_activity', { handle: h, activity_id: 'A1' })).data.start, '2026-03-02 08:00');
+    assert.equal((await c.tool('schedule', { handle: h, data_date: '2026-03-02', project: 'NOPE' })).data.error.code, 'bad_input');
+    await c.tool('schedule', { handle: h, data_date: '2026-05-04' });
+    assert.deepEqual(await dates(), { P1: '2026-05-04 00:00', P2: '2026-05-04 00:00' });
+  } finally { c.close(); }
+});
+
+test('MCP: notifications/cancelled and cancel_job stop open_file, save and schedule, keeping and writing nothing', { timeout: 120_000 }, async () => {
+  const c = client();
+  try {
+    await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const st = async () => (await c.tool('server_status')).data;
+    const o = await c.cancelled('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    assert.equal(o.data.error.code, 'cancelled');
+    assert.deepEqual([(await st()).open.length, (await st()).memory.projects_mb], [0, 0]);
+
+    const h = (await c.tool('new_project', { id: 'P1', start: '2026-03-02' })).data.handle;
+    await c.tool('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A1', name: 'One', duration_days: 5 }, { op: 'add_activity', id: 'A2', name: 'Two', duration_days: 3 }, { op: 'add_relationship', pred: 'A1', succ: 'A2' }] });
+    const before = (await c.tool('get_activity', { handle: h, activity_id: 'A2' })).data;
+    const sc = await c.cancelled('schedule', { handle: h, data_date: '2026-04-01' });
+    assert.equal(sc.data.error.code, 'cancelled');
+    assert.deepEqual((await c.tool('get_activity', { handle: h, activity_id: 'A2' })).data, before);
+    assert.equal((await c.tool('list_open')).data.open[0].changes, 1);
+
+    const out = join(mkdtempSync(join(tmpdir(), 'p6mcp-')), 'p1.xer');
+    assert.equal((await c.cancelled('save', { handle: h, path: out })).data.error.code, 'cancelled');
+    assert.ok(!existsSync(out));
+    assert.equal((await c.tool('save', { handle: h, path: out })).isError, false);
+
+    // a job: cancel_job stops a big open_file between its phases and frees its memory
+    const job = await c.tool('open_file', { path: join(SAMPLES_DIR, 'CCA R03 dt 24Oct11SC.xer'), async: true });
+    await c.tool('cancel_job', { job_id: job.data.job_id });
+    const done = await c.tool('job_status', { job_id: job.data.job_id, wait_seconds: 20 });
+    assert.deepEqual([done.data.status, done.data.error?.code], ['cancelled', 'cancelled']);
+    assert.deepEqual((await st()).open.map((x: { handle: string }) => x.handle), [h]);
+  } finally { c.close(); }
+});
+
+test('MCP: a cancellation reaches only the request it names, in the caller\'s own HTTP session', { timeout: 60_000 }, async () => {
+  const { handleMessage } = await import('../mcp/stdio.ts');
+  const call = (id: number, sid: string) => handleMessage({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'open_file', arguments: { path: join(SAMPLES_DIR, 'cairo festival city.xer') } } }, sid) as Promise<any>;
+  const cancel = (id: number, sid: string) => handleMessage({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id } }, sid);
+  const a = call(1, 'alice'), b = call(1, 'bob');
+  assert.equal(await cancel(1, 'alice'), undefined);
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(ra.result.structuredContent.error.code, 'cancelled');
+  assert.equal(rb.result.isError, false);
+  assert.match(rb.result.structuredContent.handle, /^h_/);
 });

@@ -33,6 +33,8 @@ export function copyProject(db: Db, srcProjId: string, o: CopyOptions): string {
   if (root) { root.wbs_short_name = o.id; root.wbs_name = o.name ?? `${projectName(db, srcProj)} (copy)`; }
   const tasks = rows(db, 'TASK').filter((t) => t.proj_id === pid);
   const asgs = rows(db, 'TASKRSRC').filter((a) => a.proj_id === pid);
+  // the copy's activities are not the Microsoft Project file's tasks
+  for (const r of [...tasks, ...rows(db, 'PROJWBS').filter((w) => w.proj_id === pid)]) if (r._msp_uid) delete r._msp_uid;
   if (!o.keepProgress) {
     for (const t of tasks) {
       for (const f of ['act_start_date', 'act_end_date', 'suspend_date', 'resume_date', 'expect_end_date']) if (t[f]) t[f] = '';
