@@ -120,7 +120,7 @@ delay classification and a basis-of-recovery note. Weak points:
   - schedules the base once, then each scenario on a rolled-back journal;
   - returns one compact row per scenario and full details for the best `top`;
   - no MCP round trip per scenario.
-- Kept on the platform for now: the ONNX optimiser (`optimize_schedule`). It is the platform's own model, not P6.
+- **`optimize_schedule`**: the platform's HRM reasoner, embedded (see below), so no export, run and re-import cycles.
 
 ## 3. Delay analysis: windows and time impact
 
@@ -202,8 +202,8 @@ are found, but the MCP `schedule` tool hides the info-level findings. Missing:
 - redundant links;
 - SS abuse.
 
-No empty-WBS or milestone-duration checks. "The five P6 rules from W4.4.14" **does not exist** in the platform's code
-or history (W4.4.x are unrelated work-stream tags). The platform agent needs to say where it comes from.
+No empty-WBS or milestone-duration checks. "The five P6 rules from W4.4.14" is dropped: the platform agent confirmed
+they are P6's own scheduling behaviour, which F9 already implements.
 
 **Tools**
 - MCP `schedule` returns the **full schedule log** (all sections, P6 wording), with each finding's activities.
@@ -281,12 +281,73 @@ progress), then a switch-over on the platform.
 | `compute_execution_status` EVM | `earned_value` + `progress_curves` |
 | `bellator_resource_analysis` | `resource_histogram` |
 
-Staying on the platform for now: the ONNX optimiser, `forecast_finish` (compare it with the clone's `monte_carlo` before
-deciding), DECM, LOB.
+Staying on the platform for now: the bid reasoner (Python + PyTorch, not scheduling), `forecast_finish` (compare it with
+the clone's `monte_carlo` first), DECM and LOB.
+
+## DCMA without Bellator
+
+Bellator is a subscription, so the clone implements DCMA 14-point itself, from the PAM 200.1 definitions. Bellator's good
+ideas (profiles, per-relationship counts, evidence lists) are rebuilt, not called. An optional Bellator connection can
+come later, never as the only path.
+
+## The HRM schedule reasoner, embedded
+
+- **The model:** `reasoner.onnx` is 1.3 MB. Its inputs are features `[1,n,9]`, a bias `[1,n,n]`, a mode mask and a pad.
+  The wrapper code is about 380 lines (`reasonerOnnx.ts`, `reasonerFeatures.ts`, `sgs.ts`).
+- **The runtime:** the platform uses `onnxruntime-node`, a ~60 MB native binary per operating system. The clone uses
+  **`onnxruntime-web` (WebAssembly)** instead, which runs the same model in Node (MCP and CLI) and in the desktop app
+  with no native parts.
+- **The tool:** `optimize_schedule {handle, objective?, samples?, seed?, apply?}`. It runs on the open project and
+  returns a proposal with its finish and changes; `apply` makes it one undoable edit. It can also run inside
+  `evaluate_batch` and `crash_schedule`, so there are no export/import loops.
+- **Fixes on the way in:**
+  - features come from the clone's real resources and calendars;
+  - the "minimum crash cost" objective works (today it returns null), through `crash_schedule`;
+  - the sample count and seed are parameters;
+  - a model that is missing or fails to load gives a clear error, not a silent `{available: false}`.
+- **The bid reasoner** (`bidbrain`, Python + PyTorch) stays on the platform. It is tender strategy, not scheduling;
+  converting it to ONNX would be a separate project.
+
+## Weaknesses found in the platform's tools, fixed in the clone versions
+
+| Platform tool | Weakness | Fix |
+|---|---|---|
+| all of these | calendar days for progress, CPLI, windows, recovery | working calendars, like F9 |
+| `dcma_assess` | no offending activities; all activities counted (completed included); leads and lags per activity; hard constraints never assessed; CPLI always "warn"; missed tasks use the current finish, not the baseline; critical path test guesses the start and end milestones by position | P6 and DCMA populations, per-relationship counts, ID lists, all constraint types, real CPLI, BEI and missed tasks from the chosen baseline, a real critical path test (600-day slip on a scratch copy) |
+| Bellator DCMA | leads and negative float always report "not overridden" | provenance on every threshold |
+| `crashGreedy` / `recover_schedule` | ignores parallel critical paths; returns only final durations; 1-day steps; non-standard slope formula `cost/(d·(d−1))` | cut sets across parallel paths, every step returned, steps sized to the next near-critical path, slope = (crash − normal cost) ÷ (normal − crash days) |
+| progressed CPM (recovery, windows) | remaining = ceil(duration × (1 − %)) with a minimum of 1, ignoring the real remaining duration | the clone's F9 with actual dates, remaining durations and retained logic |
+| `optimize_schedule` | makespan only; min-crash-cost returns null; fixed sample count | objectives and samples as parameters; cost through `crash_schedule` |
+| `analyze_delay_windows` | no driving path; responsibility left to the agent | the driving path per window and the activities on it that lost time; half-step split |
+| (none) | no TIA tool | `tia` |
+| `analyse_paths` | "driving path" ignores relationship type and lag; enumerating every path can explode | real driving relationships; P6 multiple float paths; capped path enumeration |
+| `schedule_lint` | no empty-WBS, milestone-duration or constraint checks; settings live in a wiki page | added; settings as tool input |
+| `kpiCalculator` (EVM) | AC silently falls back to EV (CPI = 1); PV linear; no per-period values | AC = 0 when unknown, with a warning; PV and EV time-phased by P6's rules; per-period SPI/CPI |
+| `bellator_resource_analysis` | capacity defaults to 1; demand counted as tasks, not units | resource limits and units from the schedule |
+| `forecast_finish` | promises P80 but never returns it | the clone's `monte_carlo` already returns P10–P90 |
+
+## Desktop: everything is usable without an agent
+
+What real P6 has goes where P6 has it:
+- Tools > Check Schedule Report;
+- multiple float paths in Schedule Options and the Float Path columns;
+- the full schedule log;
+- the Activity and Resource Usage profiles with PV and EV curves.
+
+Everything P6 does not have goes in a new **Extensions** tab, each with its own screen, so a planner can run it without
+an agent:
+- DCMA 14-point, with a profile picker and drill-down to the activities;
+- Crash to target, a step table with an "Apply" button;
+- What-if scenarios;
+- Windows analysis and TIA;
+- Lint with fix suggestions;
+- the HRM optimiser;
+- 4D, and later LOB.
+
+The AI assistant drives these screens with the cursor, as it does today.
 
 ## Open questions
 
-1. **W4.4.14 / "the five P6 rules":** where is this from? It is not in the platform's code or history.
-2. **CPLI target finish:** baseline finish by default, or the contract finish when given?
-3. **Check Schedule thresholds in P6 Professional:** the EPPM defaults are documented; Professional's may differ. Real
+1. **CPLI target finish:** baseline finish by default, or the contract finish when given?
+2. **Check Schedule thresholds in P6 Professional:** the EPPM defaults are documented; Professional's may differ. Real
    P6 output would settle it.
