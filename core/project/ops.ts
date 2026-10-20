@@ -4,9 +4,11 @@
 // read from Microsoft Project can also be named "uid:<task UID>" (the UID it has in that file), a WBS element
 // "wbs_id:<id>" (the id add_wbs returns). Days are converted on the activity's own calendar (its hours per day).
 // Used by the command-line `edit` command and the MCP server.
-import { addField, nextId, rows, table, withIdCache, type Db, type Row } from '../db.ts';
+import { addField, dropIndexes, nextId, rowIndex, rows, table, tableCache, withIdCache, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num } from '../schedule/cpm.ts';
+import { findLoops } from '../xer/validate.ts';
+import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
 import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
 import { assignResource, assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
@@ -14,14 +16,61 @@ import { copyProject } from './copy.ts';
 import { dayHours as dayHoursOf } from './units.ts';
 import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
 import {
-  addActivity, addRelationship, addWbs, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
+  addActivity, addRelationship, addWbs, LOOP_MESSAGE, relationshipsBetween, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
   enumOk, normDate, refreshOwnDates, setActual, setFinish, setPercent, setStart, statusOf,
 } from './edit.ts';
 
 export type Op = Record<string, unknown> & { op: string };
 export interface OpsResult { ok: boolean; applied: number; results: unknown[]; warnings?: string[]; error?: { index: number; op: unknown; message: string } }
-/** calendarDays: days on each activity's own calendar (units.ts; MCP and CLI), else at hoursPerDay (the desktop app) */
-export interface OpsOptions { hoursPerDay?: number; calendarDays?: boolean }
+/** calendarDays: days on each activity's own calendar (units.ts; MCP and CLI), else at hoursPerDay (the desktop app).
+ *  onePerPair: one relationship per pair of activities, as Microsoft Project keeps them (an MSPDI / MPX target); else
+ *  one per pair and type, as P6 (an SS and an FF between the same two activities). allowLoops: relationships that close
+ *  a loop are added (compute_schedule breaks or reports them), else the edit is refused at the one that closed it. */
+export interface OpsOptions { hoursPerDay?: number; calendarDays?: boolean; onePerPair?: boolean; allowLoops?: boolean }
+interface Batch { calDays: boolean; onePerPair: boolean; at?: number; added: { pred: string; succ: string; at: number }[] }
+
+/** WBS elements by id, root (per project), lower-case path and short name: positions in the real rows, kept for the
+ *  edit (db.ts tableCache; a code or parent changed in place: dropIndexes). */
+interface WbsIndex { byId: Map<string, number>; root: Map<string, number[]>; byPath: Map<string, number[]>; byShort: Map<string, number[]>; path: string[] }
+function wbsIndex(raw: Row[]): WbsIndex {
+  const push = (m: Map<string, number[]>, k: string, i: number) => { const l = m.get(k); if (l) l.push(i); else m.set(k, [i]); };
+  const pathOf = (ix: WbsIndex, i: number): string | null => {
+    const out: string[] = [];
+    for (let x: Row | undefined = raw[i], n = 0; x && x.proj_node_flag !== 'Y' && n < 50; n++) { out.unshift(x.wbs_short_name); const pi = ix.byId.get(x.parent_wbs_id); if (pi == null) { if (x.parent_wbs_id) return null; break; } x = raw[pi]; }
+    return out.join('.').toLowerCase();
+  };
+  const add = (ix: WbsIndex, from: number, full: boolean) => {
+    for (let i = from; i < raw.length; i++) ix.byId.set(raw[i].wbs_id, i);
+    for (let i = from; i < raw.length; i++) {
+      const w = raw[i];
+      if (w.proj_node_flag === 'Y') { push(ix.root, w.proj_id, i); ix.path[i] = ''; continue; }
+      const p = pathOf(ix, i);
+      if (p == null && !full) return false; // its parent is not known yet: index everything again
+      ix.path[i] = p ?? String(w.wbs_short_name).toLowerCase();
+      push(ix.byPath, ix.path[i], i); push(ix.byShort, String(w.wbs_short_name).toLowerCase(), i);
+    }
+    return true;
+  };
+  return tableCache(raw, 'wbs', () => { const ix: WbsIndex = { byId: new Map(), root: new Map(), byPath: new Map(), byShort: new Map(), path: [] }; add(ix, 0, true); return ix; }, (ix, from) => add(ix, from, false));
+}
+
+/** The operation index of the first relationship added in this edit that closes a loop (none: null). Loops the file
+ *  had already are not this edit's doing. */
+function firstLoop(db: Db, added: Batch['added']): number | null {
+  const P = realOf(rows(db, 'TASKPRED'));
+  const mine = new Set(added.map((x) => `${x.pred}|${x.succ}`));
+  const graph = (k: number) => {
+    const ok = new Set(added.slice(0, k + 1).map((x) => `${x.pred}|${x.succ}`));
+    const succ = new Map<string, string[]>();
+    for (const r of P) { const key = `${r.pred_task_id}|${r.task_id}`; if (mine.has(key) && !ok.has(key)) continue; const l = succ.get(r.pred_task_id); if (l) l.push(r.task_id); else succ.set(r.pred_task_id, [r.task_id]); }
+    return succ;
+  };
+  const closes = (k: number) => findLoops(graph(k)).some((c) => { const s = new Set(c); return added.slice(0, k + 1).some((x) => s.has(x.pred) && s.has(x.succ)); });
+  if (!closes(added.length - 1)) return null;
+  let lo = 0, hi = added.length - 1; // the first k whose relationships close a loop
+  while (lo < hi) { const m = (lo + hi) >> 1; if (closes(m)) hi = m; else lo = m + 1; }
+  return added[lo].at;
+}
 
 const TYPES: Record<string, string> = { task: 'TT_Task', task_dependent: 'TT_Task', resource_dependent: 'TT_Rsrc', start_milestone: 'TT_Mile', finish_milestone: 'TT_FinMile', milestone: 'TT_FinMile', level_of_effort: 'TT_LOE', loe: 'TT_LOE', wbs_summary: 'TT_WBS' };
 const CSTR: Record<string, string> = { start_on: 'CS_MSO', start_on_or_after: 'CS_MSOA', start_on_or_before: 'CS_MSOB', finish_on: 'CS_MEO', finish_on_or_before: 'CS_MEOB', finish_on_or_after: 'CS_MEOA', mandatory_start: 'CS_MANDSTART', mandatory_finish: 'CS_MANDFIN', as_late_as_possible: 'CS_ALAP', alap: 'CS_ALAP', none: '' };
@@ -30,13 +79,14 @@ const RTYPE: Record<string, string> = { labor: 'RT_Labor', nonlabor: 'RT_Equip',
 const PRIO: Record<string, string> = { top: 'PT_Top', high: 'PT_High', normal: 'PT_Normal', low: 'PT_Low', lowest: 'PT_Lowest' };
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
-export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', ...EXTRA_OP_NAMES];
+export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', ...EXTRA_OP_NAMES];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
   'Operations (JSON objects with "op"; [x] = optional; durations, remaining and lags in days of the activity\'s own calendar (lags: the relationship-lag calendar, by default the predecessor\'s), or *_hours; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant; an activity read from a Microsoft Project file may be named "uid:<task UID>" instead of its ID; a WBS element may be named "wbs_id:<id>" (the id add_wbs returns) instead of its code):',
   `add_project: id, start, [name], [must_finish_by], [calendar]`,
   `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
+  `set_schedule_options: [project], then any of ${SCHEDULE_OPTIONS_GUIDE}. Written to the project (P6's Schedule Options), used by every later schedule`,
   `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [eps] (EPS ID)`,
   `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
   `add_holidays: calendar, dates [dates]`,
@@ -45,10 +95,10 @@ export const OP_GUIDE = [
   `add_activity: name, [id], [wbs] (WBS code; omit = project root), [type] (${Object.keys(TYPES).join(', ')}), [duration_days], [calendar], [priority] (${Object.keys(PRIO).join(', ')}), [constraint {type, date}] (types: ${Object.keys(CSTR).filter((k) => k !== 'none').join(', ')}), [secondary_constraint], [project]`,
   `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
   `delete_activity / dissolve_activity: id`,
-  `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead). P6 keeps one relationship per pair: when pred -> succ already exists (any type) it is skipped and reported in "warnings"`,
+  `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities are both kept; a Microsoft Project XML / MPX file one per pair): one already there is skipped and reported in "warnings". A relationship that closes a loop refuses the edit`,
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
   `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day] or [max_units_per_hour], [price_per_unit], [calendar], [parent]`,
-  `assign_resource: activity, resource, [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6), [curve] (resource curve name, see add_resource_curve); unassign_resource: activity, resource`,
+  `assign_resource: activity, resource, [allow_duplicate] (true: assign it again when it is already on the activity, as P6 allows), [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6), [curve] (resource curve name, see add_resource_curve); unassign_resource: activity, resource`,
   EXTRA_GUIDE,
 ].join('\n');
 
@@ -66,8 +116,14 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   const hpd = o.hoursPerDay ?? 8;
   const results: unknown[] = [], warnings: string[] = [];
   let at = -1;
+  const batch: Batch = { calDays: !!o.calendarDays, onePerPair: !!o.onePerPair, added: [] };
   try {
-    withIdCache(() => record(db, (d) => { for (at = 0; at < list.length; at++) results.push(apply(d, list[at] as Op, hpd, warnings, !!o.calendarDays)); }));
+    withIdCache(() => record(db, (d) => {
+      for (at = 0; at < list.length; at++) { batch.at = at; results.push(apply(d, list[at] as Op, hpd, warnings, batch)); }
+      // loops: checked once for the whole edit (a check per relationship made a 30,000-link load quadratic); the
+      // error names the first relationship of the list that closed one
+      if (batch.added.length && !o.allowLoops) { const k = firstLoop(d, batch.added); if (k != null) { at = k; fail(LOOP_MESSAGE); } }
+    }));
     return { ok: true, applied: list.length, results, ...(warnings.length ? { warnings } : {}) };
   } catch (e) {
     // record() has already put the database back as it was
@@ -75,7 +131,8 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   }
 }
 
-function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean): unknown {
+function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): unknown {
+  const calDays = batch.calDays;
   if (!op || typeof op !== 'object' || typeof op.op !== 'string') fail('Each operation needs an "op" name.');
   const projects = () => rows(db, 'PROJECT').filter((p) => !p._baseline_of);
   const project = (id?: unknown): Row => {
@@ -83,10 +140,12 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean
     const ps = projects();
     return ps.length === 1 ? ps[0] : fail(ps.length ? `Several projects are in the file; say which with "project": ${ps.map((p) => p.proj_short_name).join(', ')}.` : 'The file has no project yet; add one with {"op":"add_project"}.');
   };
+  /** The activities with this Activity ID (any project), by an index kept for the edit (db.ts rowIndex). */
+  const byCode = (code: string): Row[] => { const T = rows(db, 'TASK'), raw = realOf(T); return (rowIndex(raw, 'code', (t) => t.task_code).get(code) ?? []).filter((i) => raw[i].task_code === code).map((i) => (raw === T ? raw[i] : T[i])); };
   const activity = (id: unknown, proj?: unknown): Row => {
     const code = str(id, 'id');
     const pids = new Set(proj != null ? [project(proj).proj_id] : projects().map((p) => p.proj_id));
-    let hits = pick(rows(db, 'TASK'), (t) => t.task_code === code && pids.has(t.proj_id), 2);
+    let hits = byCode(code).filter((t) => pids.has(t.proj_id)).slice(0, 2);
     const uid = !hits.length ? /^uid:\s*(.+)$/i.exec(code)?.[1] : undefined;
     if (uid) hits = pick(rows(db, 'TASK'), (t) => t._msp_uid === uid && pids.has(t.proj_id), 2);
     if (hits.length > 1) fail(`${uid ? `Task UID ${uid}` : `Activity ID "${code}"`} exists in several projects; add "project".`);
@@ -101,20 +160,20 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean
   };
   const wbsOf = (p: Row, code: unknown): Row => {
     const pid = p.proj_id;
-    const W = pick(rows(db, 'PROJWBS'), (w) => w.proj_id === pid);
-    if (code == null || code === '') return W.find((w) => w.proj_node_flag === 'Y') ?? fail(`Project ${p.proj_short_name} has no WBS root.`);
+    const view = rows(db, 'PROJWBS'), raw = realOf(view), ix = wbsIndex(raw);
+    const at = (i: number) => (raw === view ? raw[i] : view[i]);
+    const mine = (l: number[] | undefined) => (l ?? []).filter((i) => raw[i].proj_id === pid);
+    if (code == null || code === '') { const r = mine(ix.root.get(pid))[0]; return r != null ? at(r) : fail(`Project ${p.proj_short_name} has no WBS root.`); }
     const wid = wbsIdOf(code);
-    if (wid) return W.find((w) => w.wbs_id === wid) ?? fail(`No WBS element with wbs_id ${wid} in project ${p.proj_short_name}.`);
+    if (wid) { const r = mine(ix.byId.has(wid) ? [ix.byId.get(wid)!] : [])[0]; return r != null ? at(r) : fail(`No WBS element with wbs_id ${wid} in project ${p.proj_short_name}.`); }
     const c = String(code).toLowerCase();
-    const byId = new Map(W.map((w) => [w.wbs_id, w]));
-    const path = (w: Row) => { const out: string[] = []; for (let x: Row | undefined = w, n = 0; x && x.proj_node_flag !== 'Y' && n < 50; x = byId.get(x.parent_wbs_id), n++) out.unshift(x.wbs_short_name); return out.join('.').toLowerCase(); };
     // A full path names one element; only a bare short name can be ambiguous ("1" is both the top element 1 and the
     // child 1.1's short name — the normal P6 shape, so the path must win).
-    const byPath = W.filter((w) => w.proj_node_flag !== 'Y' && path(w) === c);
-    if (byPath.length === 1) return byPath[0];
-    const hits = W.filter((w) => w.proj_node_flag !== 'Y' && (path(w) === c || w.wbs_short_name.toLowerCase() === c));
-    if (hits.length > 1) fail(`WBS code "${code}" is ambiguous; use the full path (e.g. ${path(hits[0])}).`);
-    return hits[0] ?? fail(`No WBS "${code}" in project ${p.proj_short_name}.`);
+    const byPath = mine(ix.byPath.get(c));
+    if (byPath.length === 1) return at(byPath[0]);
+    const hits = [...new Set([...byPath, ...mine(ix.byShort.get(c))])];
+    if (hits.length > 1) fail(`WBS code "${code}" is ambiguous; use the full path (e.g. ${ix.path[hits[0]]}).`);
+    return hits.length ? at(hits[0]) : fail(`No WBS "${code}" in project ${p.proj_short_name}.`);
   };
   // days -> hours by units.ts (the activity's calendar with calendarDays, else hpd): the same rule the lookups and
   // reports give days back with; read afresh, a calendar may change mid-list
@@ -141,6 +200,12 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean
       if (op.must_finish_by) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.plan_end_date = date(op.must_finish_by, 'must_finish_by');
       if (op.calendar) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.clndr_id = calendar(op.calendar).clndr_id;
       return { project: id };
+    }
+    case 'set_schedule_options': {
+      const p = project(op.project);
+      const set = writeScheduleOptions(db, p, parseScheduleOptions(op, fail, hpd));
+      if (!set.length) fail(`Give at least one schedule option: ${SCHEDULE_OPTIONS_GUIDE}.`);
+      return { project: p.proj_short_name, set };
     }
     case 'copy_project': {
       const from = project(str(op.from, 'from'));
@@ -192,9 +257,9 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean
       const p = projectFor(op.project, op.parent);
       const parent = wbsOf(p, op.parent);
       const code = str(op.code, 'code');
-      if (rows(db, 'PROJWBS').some((w) => w.proj_id === p.proj_id && w.parent_wbs_id === parent.wbs_id && w.wbs_short_name.toLowerCase() === code.toLowerCase())) fail(`WBS "${code}" already exists there.`);
-      const w = addWbs(db, p.proj_id, parent.wbs_id);
-      w.wbs_short_name = code; w.wbs_name = typeof op.name === 'string' ? op.name : code;
+      const WR = realOf(rows(db, 'PROJWBS')), pw = parent.wbs_id;
+      if ((rowIndex(WR, 'parent', (w) => w.parent_wbs_id).get(pw) ?? []).some((i) => WR[i].proj_id === p.proj_id && WR[i].parent_wbs_id === pw && WR[i].wbs_short_name.toLowerCase() === code.toLowerCase())) fail(`WBS "${code}" already exists there.`);
+      const w = addWbs(db, p.proj_id, parent.wbs_id, code, typeof op.name === 'string' ? op.name : code);
       return { wbs: code, wbs_id: w.wbs_id };
     }
     case 'delete_wbs': {
@@ -210,13 +275,9 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean
     case 'add_activity': {
       const p = projectFor(op.project, op.wbs);
       const w = wbsOf(p, op.wbs);
-      const t = addActivity(db, p.proj_id, w.wbs_id, hpd);
-      if (op.id != null) {
-        const code = str(op.id, 'id');
-        const tid = t.task_id, pid = p.proj_id;
-        if (pick(rows(db, 'TASK'), (x) => x.task_id !== tid && x.proj_id === pid && x.task_code === code, 1).length) fail(`Activity ID "${code}" already exists in ${p.proj_short_name}.`);
-        t.task_code = code;
-      }
+      const code = op.id != null ? str(op.id, 'id') : undefined, pid = p.proj_id;
+      if (code != null && byCode(code).some((x) => x.proj_id === pid)) fail(`Activity ID "${code}" already exists in ${p.proj_short_name}.`);
+      const t = addActivity(db, p.proj_id, w.wbs_id, hpd, code);
       t.task_name = str(op.name, 'name');
       updateActivity(db, t, op, dayHours, calendar, cstr);
       if (op.duration_days == null && op.duration_hours == null && (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile')) { t.target_drtn_hr_cnt = t.remain_drtn_hr_cnt = '0'; refreshOwnDates(db, t); }
@@ -226,8 +287,9 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean
       const t = activity(op.id, op.project);
       if (op.new_id != null) {
         const code = str(op.new_id, 'new_id');
-        if (rows(db, 'TASK').some((x) => x.task_id !== t.task_id && x.proj_id === t.proj_id && x.task_code === code)) fail(`Activity ID "${code}" already exists.`);
+        if (byCode(code).some((x) => x.task_id !== t.task_id && x.proj_id === t.proj_id)) fail(`Activity ID "${code}" already exists.`);
         t.task_code = code;
+        dropIndexes(realOf(rows(db, 'TASK'))); // the index by Activity ID no longer holds
       }
       if (op.wbs != null) t.wbs_id = wbsOf(project(projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name), op.wbs).wbs_id;
       updateActivity(db, t, op, dayHours, calendar, cstr);
@@ -238,14 +300,17 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean
     case 'add_relationship': {
       const a = activity(op.pred, op.pred_project ?? op.project), b = activity(op.succ, op.succ_project ?? op.project);
       const type = REL[String(op.type ?? 'FS').toUpperCase()] ?? fail(`Relationship type must be FS, SS, FF or SF.`);
-      // P6 keeps one relationship per pair of activities: a second one is skipped, not a failure of the whole list
-      const pa = a.task_id, sb = b.task_id;
-      const dup = pick(rows(db, 'TASKPRED'), (r) => r.pred_task_id === pa && r.task_id === sb, 1)[0];
+      // P6 keeps one relationship per pair and type (an SS and an FF between the same two activities are both kept);
+      // Microsoft Project one per pair. A relationship already there is skipped, not a failure of the whole list
+      const have = relationshipsBetween(db, a.task_id, b.task_id);
+      const dup = have.find((r) => r.pred_type === type) ?? (batch.onePerPair ? have[0] : undefined);
       if (dup) {
-        warnings.push(`Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: ${a.task_code} -> ${b.task_code} already has a ${dup.pred_type.slice(3)} relationship, and P6 keeps one per pair of activities.`);
+        warnings.push(dup.pred_type === type ? `Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: it already exists.`
+          : `Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: ${a.task_code} -> ${b.task_code} already has a ${dup.pred_type.slice(3)} relationship, and Microsoft Project keeps one per pair of activities.`);
         return { skipped: `${a.task_code} ${type.slice(3)} ${b.task_code}`, existing: `${a.task_code} ${dup.pred_type.slice(3)} ${b.task_code}` };
       }
-      ok(addRelationship(db, a.task_id, b.task_id, type, op.lag_days != null ? num(op.lag_days, 'lag_days') * lagHours(a, b) : op.lag_hours != null ? num(op.lag_hours, 'lag_hours') : 0));
+      ok(addRelationship(db, a.task_id, b.task_id, type, op.lag_days != null ? num(op.lag_days, 'lag_days') * lagHours(a, b) : op.lag_hours != null ? num(op.lag_hours, 'lag_hours') : 0, true));
+      batch.added.push({ pred: a.task_id, succ: b.task_id, at: batch.at ?? -1 });
       return { relationship: `${a.task_code} ${type.slice(3)} ${b.task_code}` };
     }
     case 'update_relationship': case 'delete_relationship': {
@@ -284,7 +349,9 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], calDays: boolean
     case 'assign_resource': {
       const t = activity(op.activity, op.project), r = resource(op.resource);
       const tid = t.task_id, rid = r.rsrc_id;
-      if (pick(rows(db, 'TASKRSRC'), (a) => a.task_id === tid && a.rsrc_id === rid, 1).length) fail(`${r.rsrc_short_name} is already assigned to ${t.task_code}.`);
+      // P6 allows the same resource twice on an activity (two assignments, e.g. different roles or curves): allow_duplicate
+      const TR = realOf(rows(db, 'TASKRSRC'));
+      if (op.allow_duplicate !== true && (rowIndex(TR, 'task', (x) => x.task_id).get(tid) ?? []).some((i) => TR[i].task_id === tid && TR[i].rsrc_id === rid)) fail(`${r.rsrc_short_name} is already assigned to ${t.task_code} (allow_duplicate: true adds a second assignment).`);
       const a = assignResource(db, t, r.rsrc_id);
       if (op.units_per_day != null) recalcAssignment(db, t, a, 'target_qty_per_hr', num(op.units_per_day, 'units_per_day') / hpd);
       if (op.units != null) { recalcAssignment(db, t, a, 'target_qty', num(op.units, 'units')); a.remain_qty = a.target_qty; recomputeCosts(db, a); }

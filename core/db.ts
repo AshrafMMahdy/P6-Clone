@@ -85,10 +85,31 @@ let idCache: WeakMap<Row[], { n: number; last: Row | undefined; max: number }> |
 /** Run fn with nextId remembering each table's highest id: an edit adds rows one at a time, and a scan of the whole
  *  table per new row made a 20,000-row edit quadratic. Valid while rows are only added at the end or removed. */
 export function withIdCache<T>(fn: () => T): T {
-  const prev = idCache;
+  const prev = idCache, prevIx = ixCache;
   idCache ??= new WeakMap();
-  try { return fn(); } finally { idCache = prev; }
+  ixCache ??= new WeakMap();
+  try { return fn(); } finally { idCache = prev; ixCache = prevIx; }
 }
+
+type Cached = { n: number; last: Row | undefined; ix: unknown };
+let ixCache: WeakMap<Row[], Map<string, Cached>> | null = null;
+/** Something derived from a table's real rows, kept inside withIdCache like rowIndex: extend(value, from) takes the
+ *  rows appended since (false: build it again); outside withIdCache it is built afresh. */
+export function tableCache<T>(raw: Row[], name: string, build: () => T, extend: (t: T, from: number) => boolean): T {
+  let byName = ixCache?.get(raw), c = byName?.get(name);
+  if (!c || raw.length < c.n || (c.n > 0 && raw[c.n - 1] !== c.last) || (raw.length > c.n && !extend(c.ix as T, c.n))) c = { n: 0, last: undefined, ix: build() };
+  c.n = raw.length; c.last = raw[raw.length - 1];
+  if (ixCache) { if (!byName) ixCache.set(raw, (byName = new Map())); byName.set(name, c); }
+  return c.ix as T;
+}
+/** Positions of a table's real rows by key(row). Inside withIdCache it is kept for the whole edit like nextId's cache
+ *  (rows added at the end are indexed as they come; rows taken away rebuild it), so a lookup per operation stays
+ *  linear over a 30,000-operation edit; outside, it is built afresh. A key field changed in place: dropIndexes. */
+export function rowIndex(raw: Row[], name: string, key: (r: Row) => string): Map<string, number[]> {
+  const add = (ix: Map<string, number[]>, from: number) => { for (let i = from; i < raw.length; i++) { const k = key(raw[i]); const l = ix.get(k); if (l) l.push(i); else ix.set(k, [i]); } return true; };
+  return tableCache(raw, name, () => { const ix = new Map<string, number[]>(); add(ix, 0); return ix; }, add);
+}
+export const dropIndexes = (raw: Row[]) => void ixCache?.delete(raw);
 
 /** Next free numeric id for a table's key. */
 export function nextId(db: Db, tableName: string): number {

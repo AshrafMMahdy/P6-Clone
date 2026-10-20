@@ -25,6 +25,9 @@ import { levelResources } from '../core/level/level.ts';
 import { applyOps, OP_GUIDE } from '../core/project/ops.ts';
 import { makeCtx } from '../core/project/ctx.ts';
 import { TOOLS as LOOKUPS, runTool } from '../core/query/tools.ts';
+import { activityTable, TABLE_GUIDE } from '../core/query/table.ts';
+import { computeSchedule, COMPUTE_GUIDE } from '../core/query/compute.ts';
+import { parseScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../core/schedule/options.ts';
 import { reviewSchedule } from '../core/query/review.ts';
 import { record, rollback } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
@@ -61,13 +64,15 @@ const ERRORS_DOC = ' Errors come back as {error: {code, reason, next_step, retry
 
 const TOOLS = [
   { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read and repairs what it safely can (a misspelled key column with unique ids is renamed; empty, missing or repeated ids nothing points at get fresh ones): diagnostics.repaired lists each repair, diagnostics.not_repaired what was left, and still_rejected says whether a save would still be refused by P6. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
-  { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
+  { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, must_finish_by: { type: 'string', description: 'Must finish by (YYYY-MM-DD): late dates and float are measured to it' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
+  { name: 'compute_schedule', annotations: ro, description: `Compute a schedule from a description, with no handle and nothing kept: P6's F9 (calendars, constraints, milestones, progress, retained logic and the other schedule options) on the activities and links given. Takes: ${COMPUTE_GUIDE}.`, inputSchema: { type: 'object', properties: { start: { type: 'string' }, data_date: { type: 'string' }, must_finish_by: { type: 'string' }, hours_per_day: { type: 'number' }, calendar: { type: 'string' }, calendars: { type: 'array', items: { type: 'object' } }, activities: { type: 'array', items: { type: 'object' } }, relationships: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, break_loops: { type: 'boolean' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' }, ...common }, required: ['start', 'activities'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
   { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs.', inputSchema: { type: 'object', properties: {} } },
   { name: 'job_status', annotations: ro, description: 'Result of a job started with async: true (or one that outlived the call time). wait_seconds (max 20) waits for it to finish.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, wait_seconds: { type: 'number' } }, required: ['job_id'] } },
   { name: 'cancel_job', annotations: edit, description: 'Stop a running job (Monte Carlo stops at once; open_file, save and schedule stop between their phases, keeping or writing nothing; other work finishes its current step). MCP notifications/cancelled stops a running call the same way.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' } }, required: ['job_id'] } },
   { name: 'edit', annotations: edit, description: `Change the project with a list of operations, applied as ONE transaction: if any fails nothing changes and the error names it. Undo with undo.\n${OP_GUIDE}`, inputSchema: withHandle({ type: 'object', properties: { operations: { type: 'array', items: { type: 'object' } } }, required: ['operations'] }) },
-  { name: 'schedule', annotations: edit, description: 'Schedule (F9) like P6: CPM with calendars, constraints, retained logic. Returns the finish date and the schedule log highlights. A project opened from Microsoft Project XML in which nothing that drives the dates changed keeps Microsoft Project\'s dates (kept_msp_dates); otherwise msp_dates_changed lists the dates the schedule replaced. data_date moves the data date of every project in the file first, or with project of that project only (the others schedule on their own data dates).', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' }, project: { type: 'string', description: 'Project ID: data_date applies to this project only' } } }) },
+  { name: 'activity_table', annotations: ro, description: `Every activity's computed fields as one compact table (columns, then one array per activity, in table order), paged with offset and limit (no cap on limit; default all, next_offset for the next page). Columns: ${TABLE_GUIDE}; names: true adds name after id.`, inputSchema: withHandle({ type: 'object', properties: { project: { type: 'string', description: 'Project ID (default: every project in the file)' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' } } }) },
+  { name: 'schedule', annotations: edit, description: 'Schedule (F9) like P6: CPM with calendars, constraints, retained logic. Returns the finish date and the schedule log highlights, and loops ([[activity IDs]] of each loop; [] when none). break_loops: true schedules a network with loops by leaving out the links that close them (returned in broken_links; the links stay in the project); without it a loop fails the schedule, as in P6. options overrides the project\'s schedule options for this run only (set_schedule_options writes them): ' + SCHEDULE_OPTIONS_GUIDE + '. A project opened from Microsoft Project XML in which nothing that drives the dates changed keeps Microsoft Project\'s dates (kept_msp_dates); otherwise msp_dates_changed lists the dates the schedule replaced. data_date moves the data date of every project in the file first, or with project of that project only (the others schedule on their own data dates).', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' }, project: { type: 'string', description: 'Project ID: data_date applies to this project only' }, break_loops: { type: 'boolean' }, options: { type: 'object' } } }) },
   { name: 'update_progress', annotations: edit, description: 'Tools > Update Progress: move the data date and statuse activities from their planned dates, then reschedule. If scheduling fails nothing is kept.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' } }, required: ['data_date'] }) },
   { name: 'level_resources', annotations: edit, description: 'Tools > Level Resources (resources with a Max Units/Time limit).', inputSchema: withHandle({ type: 'object', properties: { within_float: { type: 'boolean' } } }) },
   { name: 'monte_carlo', annotations: ro, description: 'Schedule risk analysis (Monte Carlo) like Primavera Risk Analysis: samples each activity\'s remaining duration from its three-point estimate (set with the set_estimates edit operation; default_estimates applies min/max percentages to activities without one, for this run only) and risk events from the risk register, schedules every iteration. Returns finish percentiles P10-P90, mean, std dev, chance of meeting the deterministic finish, a histogram (buckets), milestone percentiles, activity criticality index, sensitivity ranking and risk-event impact. The project is not changed. Big projects: pass async: true.', inputSchema: withHandle({ type: 'object', properties: { iterations: { type: 'number', description: 'default 1000' }, seed: { type: 'number', description: 'same seed, same result' }, risk_events: { type: 'string', description: 'pre (default), post or off' }, project: { type: 'string' }, default_estimates: { type: 'object', description: '{min_pct: 90, max_pct: 125, dist: triangle|uniform|betapert} for activities without an estimate' }, buckets: { type: 'number', description: 'histogram buckets (default 20)' }, top: { type: 'number', description: 'how many activities in the criticality and sensitivity lists (default 25)' } } }) },
@@ -117,7 +122,7 @@ const checkpoint = async (ctx: Ctx) => { await new Promise((r) => setImmediate(r
 
 // ---------------------------------------------------------------- tool implementations
 type Ctx = { caller: string; job?: ReturnType<typeof startJob>; signal: AbortSignal };
-const NO_HANDLE = new Set(['open_file', 'new_project', 'list_open', 'server_status', 'job_status', 'cancel_job']);
+const NO_HANDLE = new Set(['open_file', 'new_project', 'compute_schedule', 'list_open', 'server_status', 'job_status', 'cancel_job']);
 /** Tools that can change a project (their answers carry unsaved_changes). */
 const MUTATES = new Set(TOOLS.filter((t) => !t.annotations.readOnlyHint && !['list_open', 'server_status', 'job_status', 'cancel_job'].includes(t.name)).map((t) => t.name));
 
@@ -172,9 +177,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         };
       } catch (e) { closeSession(s0); throw e; }
     }
+    case 'compute_schedule': { const r = computeSchedule(a); return r.ok ? r : { ok: false, error: { ...r.error, hint: r.error.code === 'schedule_failed' ? 'Fix the reported problem (or pass break_loops: true for loops) and call again.' : 'Fix that part of the input (where says which) and call again.' } }; }
     case 'new_project': {
       const db: Db = { tables: {} };
-      const r = applyOps(db, [{ op: 'add_project', id: a.id, name: a.name ?? a.id, start: a.start }]);
+      const r = applyOps(db, [{ op: 'add_project', id: a.id, name: a.name ?? a.id, start: a.start, ...(a.must_finish_by ? { must_finish_by: a.must_finish_by } : {}) }]);
       if (!r.ok) fail('bad_input', r.error!.message, 'Give id (Project ID) and start (YYYY-MM-DD).');
       const s = createSession(db, { path: null, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: 8 * 1048576, dirty: true });
       return { handle: s.handle, owner_key: s.ownerKey, project: a.id };
@@ -190,13 +196,17 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const pn = ops.findIndex((o: any) => o?.op === 'set_notebook' && (o.activity == null || o.activity === ''));
       if (pn >= 0 && (s.format === 'mspdi' || s.format === 'mpx')) return { ok: false, error: { code: 'unsupported_for_format', index: pn, op: ops[pn], format: s.format, message: `A project notebook cannot be kept in a ${s.format === 'mpx' ? 'MPX' : 'Microsoft Project XML'} file: Microsoft Project has no notebook topics, and its project notes do not map onto a P6 notebook.`, hint: 'Nothing was changed. Save the project as XER or P6 XML (save with format xer or p6xml), open that, and set the notebook there; or put the text on an activity notebook.' } };
       let r!: ReturnType<typeof applyOps>;
-      try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true }); if (!r.ok) throw new Error('refused'); }); }
+      try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true, onePerPair: s.format === 'mspdi' || s.format === 'mpx' || s.format === 'mpp' }); if (!r.ok) throw new Error('refused'); }); }
       catch (e) { if (r && !r.ok) return { ok: false, error: { code: 'op_failed', ...r.error, hint: 'Fix that operation (the message says what is wrong) and send the list again; nothing was changed.' } }; throw e; }
       s.history[s.history.length - 1].label = `Edit (${r.applied} operation${r.applied === 1 ? '' : 's'})`;
       return r;
     }
+    case 'activity_table': return activityTable(s.db, a.project != null && a.project !== '' ? projectIds(s.db, a.project) : allIds(s.db), { offset: a.offset, limit: a.limit, names: a.names === true, hoursPerDay: s.hpd });
     case 'schedule': {
       const t = dd(a.data_date);
+      let over: ReturnType<typeof parseScheduleOptions> = {};
+      if (a.options != null) { if (typeof a.options !== 'object') fail('bad_input', '"options" must be an object.', SCHEDULE_OPTIONS_GUIDE); try { over = parseScheduleOptions(a.options, (m) => { throw new Error(m); }, s.hpd); } catch (e) { fail('bad_input', (e as Error).message, `Options: ${SCHEDULE_OPTIONS_GUIDE}.`); } }
+      if (a.break_loops === true) over.breakLoops = true;
       const only = a.project != null && a.project !== '' ? projectIds(s.db, a.project)[0] : null;
       await checkpoint(ctx);
       // a project read from Microsoft Project XML in which nothing that drives the dates changed keeps Microsoft
@@ -210,20 +220,22 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const ids = new Set(keptMsp), tasks = (s.db.tables.TASK?.rows ?? []).filter((x) => ids.has(x.proj_id));
         const finish = tasks.reduce((m, x) => Math.max(m, parseP6Date(x.act_end_date || x.early_end_date || x.target_end_date) ?? -Infinity), -Infinity);
         const dataDate = Math.min(...keptMsp.map((id) => parseP6Date(s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!.last_recalc_date) ?? Infinity));
-        return { ok: true, ...kept, data_date: iso(dataDate), finish: iso(finish), stats: { activities: tasks.length, dataDate, finish: Number.isFinite(finish) ? finish : null, kept_msp_dates: true }, warnings: [] };
+        return { ok: true, ...kept, loops: [], data_date: iso(dataDate), finish: iso(finish), stats: { activities: tasks.length, dataDate, finish: Number.isFinite(finish) ? finish : null, kept_msp_dates: true }, warnings: [] };
       }
       const was = s.dirty;
       const res = change(s, ctx.caller, 'Schedule', (d) => {
         // with "project" the data date moves on that project only; the others schedule on their own
         if (only && t != null) d.tables.PROJECT.rows.find((p) => p.proj_id === only)!.last_recalc_date = formatP6Date(t);
-        const x = scheduleProjects(d, todo, t != null && !only ? { dataDate: t } : {}); if (x.ok) syncAssignmentDates(d); return x;
+        const x = scheduleProjects(d, todo, { ...over, ...(t != null && !only ? { dataDate: t } : {}) }); if (x.ok) syncAssignmentDates(d); return x;
       });
-      if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: 'Fix the reported problem (often a loop or a missing calendar) and schedule again; nothing was changed.' } }; }
+      if (!res.ok) { dropLast(s); return { ok: false, loops: res.loops ?? [], error: { code: 'schedule_failed', message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: res.loops?.length ? 'The network has loops (loops lists them): fix the logic, or schedule with break_loops: true to leave out the links that close them for this run; nothing was changed.' : 'Fix the reported problem (often a missing calendar) and schedule again; nothing was changed.' } }; }
+      const code = new Map((s.db.tables.TASK?.rows ?? []).map((x) => [x.task_id, x.task_code]));
+      const loopInfo = { loops: res.loops ?? [], ...(over.breakLoops ? { broken_links: (res.broken ?? []).map((x) => ({ pred: code.get(x.pred_task_id) ?? x.pred_task_id, succ: code.get(x.task_id) ?? x.task_id, type: (x.pred_type || 'PR_FS').slice(3) })) } : {}) };
       try { await checkpoint(ctx); } catch (e) { dropLast(s); s.dirty = was; throw e; }
       // F9 on a project from Microsoft Project XML: say which of Microsoft Project's dates the clone's schedule replaced
       const fromMsp = todo.filter((id) => mspUntouched(s.db, id) !== null);
       const mspChanged = fromMsp.length ? { msp_dates_changed: Object.fromEntries(fromMsp.map((id) => [name(id), mspDateChanges(s.db, id)])) } : {};
-      return { ok: true, ...kept, ...mspChanged, ...(only ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === only)!.proj_short_name } : {}), data_date: iso(only ? res.projects[only].dataDate : res.stats.dataDate), finish: iso(res.stats.finish), stats: res.stats, warnings: res.findings.filter((f) => f.severity !== 'info').slice(0, 30).map((f) => f.message) };
+      return { ok: true, ...kept, ...mspChanged, ...loopInfo, ...(only ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === only)!.proj_short_name } : {}), data_date: iso(only ? res.projects[only].dataDate : res.stats.dataDate), finish: iso(res.stats.finish), stats: res.stats, warnings: res.findings.filter((f) => f.severity !== 'info').slice(0, 30).map((f) => f.message) };
     }
     case 'update_progress': {
       const t = dd(a.data_date) ?? fail('bad_input', 'Give data_date.', 'The new data date, YYYY-MM-DD.');

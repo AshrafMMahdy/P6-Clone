@@ -116,7 +116,7 @@ test('query shows activity codes and UDFs and finds by code', () => {
   assert.ok(found.activities.some((x: { id: string }) => x.id === 'A160'));
 });
 
-test('edit operations refuse codes P6 does not have and keep P6 rules (milestone duration, one link per pair)', async () => {
+test('edit operations refuse codes P6 does not have and keep P6 rules (milestone duration, one link per pair and type; per pair for Microsoft Project)', async () => {
   const { applyOps } = await import('../core/project/ops.ts');
   const { emptyDb } = await import('../core/db.ts');
   const db = emptyDb();
@@ -124,13 +124,18 @@ test('edit operations refuse codes P6 does not have and keep P6 rules (milestone
   const err = (ops: unknown[]): string => applyOps(db, ops).error?.message ?? '';
   ok([{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_activity', project: 'P', id: 'A1', name: 'a', duration_days: 5 }, { op: 'add_activity', project: 'P', id: 'A2', name: 'b', duration_days: 2 },
     { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2' }]);
-  // a second relationship between the same pair (any type) is skipped with a warning; the rest of the list applies
+  // Microsoft Project (onePerPair): a second relationship between the same pair (any type) is skipped with a warning
+  const m = applyOps(structuredClone(db), [{ op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS' }], { onePerPair: true });
+  assert.deepEqual([m.results[0], m.warnings!.length], [{ skipped: 'A1 SS A2', existing: 'A1 FS A2' }, 1]);
+  assert.match(m.warnings![0], /A1 -> A2 \(SS\) skipped: .*FS relationship, and Microsoft Project keeps one per pair/);
+  // P6: one per pair and type (an SS beside the FS is kept); a true duplicate is skipped with a warning; the rest applies
   const r = applyOps(db, [{ op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2', type: 'SS' }, { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2' }, { op: 'update_activity', project: 'P', id: 'A2', name: 'b2' }]);
   assert.equal(r.ok, true);
-  assert.deepEqual(r.results.slice(0, 2), [{ skipped: 'A1 SS A2', existing: 'A1 FS A2' }, { skipped: 'A1 FS A2', existing: 'A1 FS A2' }]);
-  assert.equal(r.warnings!.length, 2);
-  assert.match(r.warnings![0], /A1 -> A2 \(SS\) skipped: .*FS relationship/);
-  assert.equal(db.tables.TASKPRED.rows.length, 1);
+  assert.deepEqual(r.results.slice(0, 2), [{ relationship: 'A1 SS A2' }, { skipped: 'A1 FS A2', existing: 'A1 FS A2' }]);
+  assert.equal(r.warnings!.length, 1);
+  assert.match(r.warnings![0], /A1 -> A2 \(FS\) skipped: it already exists/);
+  assert.equal(db.tables.TASKPRED.rows.length, 2);
+  db.tables.TASKPRED.rows.pop(); // back to the one FS
   assert.equal(db.tables.TASK.rows.find((x) => x.task_code === 'A2')!.task_name, 'b2');
   assert.equal(applyOps(db, [{ op: 'update_activity', project: 'P', id: 'A2', name: 'b' }]).warnings, undefined);
   db.tables.TASKPRED.rows.push({ ...db.tables.TASKPRED.rows[0], task_pred_id: '99', pred_type: 'PR_SS' }); // a file that has two

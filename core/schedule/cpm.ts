@@ -35,10 +35,14 @@ export interface SchedOptions {
   /** Schedule Options "Calculate start-to-start lag from: Actual Start" (sched_lag_early_start_flag N). P6's default,
    *  Early Start, runs the lag still to run from an in-progress predecessor's remaining start. */
   ssLagFromActualStart: boolean;
+  /** Schedule a network with loops: the relationships that close them (back links, in table order) are left out of
+   *  this run and returned in ScheduleResult.broken; P6 stops instead. */
+  breakLoops?: boolean;
 }
 
 export interface ScheduleStats { activities: number; relationships: number; notStarted: number; inProgress: number; completed: number; finish: number | null; dataDate: number | null }
-export interface ScheduleResult { ok: boolean; log: string; findings: Finding[]; stats: ScheduleStats; projects: Record<string, { finish: number | null; dataDate: number }> }
+/** loops: the activities (IDs) of each loop found, when there were any; broken: with breakLoops, the relationships left out. */
+export interface ScheduleResult { ok: boolean; log: string; findings: Finding[]; stats: ScheduleStats; projects: Record<string, { finish: number | null; dataDate: number }>; loops?: string[][]; broken?: Row[] }
 
 type RelType = 'FS' | 'SS' | 'FF' | 'SF';
 type Status = 'NS' | 'IP' | 'CO';
@@ -224,6 +228,39 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
   const isMain = (a: Act) => a.type !== 'TT_LOE' && a.type !== 'TT_WBS';
   const main = [...acts.values()].filter(isMain);
+  const loopsOf = () => {
+    const succ = new Map<string, string[]>();
+    for (const r of rels) if (r.pred && r.succ && isMain(r.pred) && isMain(r.succ)) { let l = succ.get(r.pred.code); if (!l) succ.set(r.pred.code, (l = [])); l.push(r.succ.code); }
+    return findLoops(succ);
+  };
+  // break_loops: a depth-first walk in table order; a link back to an activity still on the walk closes a loop
+  let loops: string[][] = [];
+  const broken: Rel[] = [];
+  if (over.breakLoops) {
+    const state = new Map<Act, 1 | 2>();
+    for (const a0 of main) {
+      if (state.has(a0)) continue;
+      const work: [Act, number][] = [[a0, 0]];
+      state.set(a0, 1);
+      while (work.length) {
+        const top = work[work.length - 1], [a, i] = top;
+        if (i >= a.succs.length) { state.set(a, 2); work.pop(); continue; }
+        top[1]++;
+        const r = a.succs[i];
+        if (!r.succ || !isMain(r.succ)) continue;
+        const st = state.get(r.succ);
+        if (st === 1) broken.push(r);
+        else if (st == null) { state.set(r.succ, 1); work.push([r.succ, 0]); }
+      }
+    }
+    if (broken.length) {
+      loops = loopsOf();
+      const gone = new Set(broken);
+      for (const a of acts.values()) { a.preds = a.preds.filter((r) => !gone.has(r)); a.succs = a.succs.filter((r) => !gone.has(r)); }
+      rels.splice(0, rels.length, ...rels.filter((r) => !gone.has(r)));
+      for (const r of broken) findings.push({ severity: 'warning', code: 'SCHED_LOOP_BROKEN', message: `Loop broken: ${r.pred!.code} -> ${r.succ!.code} (${r.type}) left out of this schedule.`, p6: 'P6 stops scheduling on a loop; break_loops schedules without the links that close them.' });
+    }
+  }
 
   // Topological order of main activities
   const indeg = new Map<Act, number>();
@@ -241,13 +278,10 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     }
   }
   if (order.length < main.length) {
-    const succ = new Map<string, string[]>();
-    for (const r of rels) if (r.pred && r.succ && isMain(r.pred) && isMain(r.succ)) {
-      let l = succ.get(r.pred.code); if (!l) succ.set(r.pred.code, (l = [])); l.push(r.succ.code);
-    }
-    for (const loop of findLoops(succ)) findings.push({ severity: 'error', code: 'SCHED_LOOP', message: `Loop: ${loop.join(' → ')} → ${loop[0]}`, p6: 'P6 stops scheduling: "Circular relationship (loop) detected".' });
+    loops = loopsOf();
+    for (const loop of loops) findings.push({ severity: 'error', code: 'SCHED_LOOP', message: `Loop: ${loop.join(' → ')} → ${loop[0]}`, p6: 'P6 stops scheduling: "Circular relationship (loop) detected".' });
     const log = buildScheduleLog({ projects: [...projects.values()].map((p) => p.row), dataDate: null, opts: [...projects.values()][0].opts, findings, stats: emptyStats, acts: [] });
-    return { ok: false, log, findings, stats: emptyStats, projects: {} };
+    return { ok: false, log, findings, stats: emptyStats, projects: {}, loops, broken: [] };
   }
 
   const allTasks = new Map(rows(db, 'TASK').map((t) => [t.task_id, t]));
@@ -672,7 +706,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
   const first = [...projects.values()][0];
   const log = buildScheduleLog({ projects: [...projects.values()].map((p) => p.row), dataDate: first.dd, opts: first.opts, findings, stats, acts: order.map((a) => ({ code: a.code, name: a.row.task_name })) });
-  return { ok: true, log, findings, stats, projects: out };
+  return { ok: true, log, findings, stats, projects: out, loops, broken: broken.map((r) => r.row) };
 }
 
 /**

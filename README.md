@@ -151,6 +151,7 @@ its lookups all count every day at the hours per day of Edit > User Preferences.
 | `add_project` | `id, name, start, must_finish_by?, calendar?` |
 | `copy_project` | `from, id, name?, start?, keep_progress?`: copies WBS, activities, logic, assignments, codes, UDFs and notebooks with new internal IDs; by default progress is cleared and `start` moves every planned date by the same amount |
 | `set_project` | `project?, name?, data_date?, planned_start?, must_finish_by?, calendar?` |
+| `set_schedule_options` | `project?`, then any of `logic` (retained, override, actual), `lag_calendar` (predecessor, successor, 24h, project), `float_type` (start, finish, smallest), `critical` (total_float, longest_path), `critical_float_hours` / `critical_float_days`, `open_ended_critical`, `use_expected_finish`, `ignore_external`, `ss_lag_from_actual_start`: P6's Schedule Options, written to SCHEDOPTIONS / PROJECT and used by every later schedule |
 | `add_calendar` | `name, work_week?: {sat: [["07:00","12:00"],["13:00","16:00"]], ...}, holidays?: [dates], work_exceptions?: {date: periods}` |
 | `add_holidays` | `calendar, dates` |
 | `add_wbs` | `code, name?, parent?` (returns `wbs_id`; a sibling with the same code is refused, as in P6) |
@@ -158,9 +159,9 @@ its lookups all count every day at the hours per day of Edit > User Preferences.
 | `add_activity` | `id?, name, wbs?, duration_days?, type?, calendar?, constraint?: {type, date}, secondary_constraint?, priority?, start?` |
 | `update_activity` | `id, new_id?, name?, wbs?, duration_days?, remaining_days?, type?, calendar?, constraint?, start?, finish?, actual_start?, actual_finish?, percent_complete?, expected_finish?, priority?` |
 | `delete_activity`, `dissolve_activity` | `id` (dissolve links its predecessors to its successors, like P6) |
-| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`). P6 keeps one relationship per pair: adding a second (any type) is skipped and listed in the result's `warnings` |
+| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities, as real P6 files hold them); Microsoft Project one per pair (an MSPDI / MPX handle). One already there is skipped and listed in the result's `warnings`. A relationship that closes a loop refuses the edit (checked once per edit, naming the first that closed one) |
 | `add_resource` | `id, name?, type?: labor\|nonlabor\|material, units_per_day?, max_units_per_day? \| max_units_per_hour?, price_per_unit?, calendar?` |
-| `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?, curve?` |
+| `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?, curve?`, `allow_duplicate?` (assign a resource already on the activity again, as P6 allows) |
 | `add_resource_curve` | `name, values` (21 percentages totalling 100: the start, then each 5% of the assignment's time, like P6 Resource Curves) |
 | `update_assignment` | `activity, resource, units?, units_per_day?, remaining_units?, curve?` (resource curve name, `""` = linear) |
 | `update_wbs` | `code, new_code?, name?, parent?` (move; `""` = top level) |
@@ -228,7 +229,9 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
   a job by itself. Oversized results come back as a preview with a note on how to ask for less.
 - One `edit` may carry tens of thousands of operations: time and memory grow with their number, not its square (a plan
   rebuilding `129 trial.xer`, 48,355 operations with 21,646 `assign_code` and 19,399 `assign_resource`, applies in about
-  15 s at 165 MB peak RSS, undo journal included).
+  15 s at 165 MB peak RSS, undo journal included). Lookups by Activity ID, WBS path and relationship pair are indexed for
+  the edit and loops are checked once at its end, so a build of `JWM` (3,560 WBS, 11,426 activities, 32,407
+  relationships, 3,393 assignments; 50,808 operations) applies in about 2 s.
 - MCP `notifications/cancelled` (or `cancel_job` for a job) stops `open_file`, `save` and `schedule` between their
   phases and `monte_carlo` at once, with error `cancelled`: nothing is kept, no file is written, the memory is freed.
 
@@ -239,8 +242,13 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
 - `save` with `format: mspdi` or `mpx` on a file holding several projects is refused (`bad_input`) unless `project`
   names one; it no longer writes the first project silently.
 
-Tools: `open_file`, `new_project`, `list_open`, `server_status`, `job_status`, `cancel_job`, `edit`, `schedule`
-(`data_date`, with `project` for one project only),
+Tools: `open_file`, `new_project` (`must_finish_by?`), `list_open`, `server_status`, `job_status`, `cancel_job`, `edit`, `schedule`
+(`data_date`, with `project` for one project only; `options` overrides the schedule options for that run;
+`break_loops: true` leaves out the links that close loops and returns them in `broken_links`; `loops` lists each
+loop's activities either way), `activity_table` (every activity's computed dates, floats, critical and driving flags
+and working-day offsets from the data date, as `columns` + `rows`, paged by `offset` / `limit` with no cap),
+`compute_schedule` (no handle, nothing kept: start, calendars, activities with predecessors, constraints, milestones
+and progress, options; answers the `activity_table` rows plus `loops` and `broken_links`),
 `update_progress`, `level_resources`, `monte_carlo` (P10-P90, histogram, milestone percentiles, criticality,
 sensitivity, risk events; seeded, the project is not changed), `validate`, `review`, `project_summary`,
 `find_activities`, `get_activity`, `list_wbs`, `critical_path`, `schedule_health`, `resource_summary`, `list_projects`,

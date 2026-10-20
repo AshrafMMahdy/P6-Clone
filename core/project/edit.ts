@@ -1,6 +1,6 @@
 // Editing a P6 database the way P6 does: new project, activities, relationships, WBS, dates, progress.
 // Shared by the desktop app (renderer/model.ts re-exports these) and the command-line tool.
-import { addField, groupBy, indexBy, nextId, rows, table, type Db, type Row } from '../db.ts';
+import { addField, groupBy, indexBy, nextId, rowIndex, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num, calendarResolver } from '../schedule/cpm.ts';
 import { ENUMS } from '../xer/schema.ts';
@@ -162,7 +162,8 @@ export function nextTaskCode(db: Db, projId: string): string {
 
 export const TASK_FIELDS = ['task_id', 'proj_id', 'wbs_id', 'clndr_id', 'phys_complete_pct', 'complete_pct_type', 'task_type', 'duration_type', 'status_code', 'task_code', 'task_name', 'total_float_hr_cnt', 'free_float_hr_cnt', 'remain_drtn_hr_cnt', 'target_drtn_hr_cnt', 'cstr_date', 'act_start_date', 'act_end_date', 'late_start_date', 'late_end_date', 'expect_end_date', 'early_start_date', 'early_end_date', 'restart_date', 'reend_date', 'target_start_date', 'target_end_date', 'rem_late_start_date', 'rem_late_end_date', 'cstr_type', 'priority_type', 'suspend_date', 'resume_date', 'cstr_date2', 'cstr_type2', 'driving_path_flag', 'create_date', 'update_date', 'create_user', 'update_user'];
 
-export function addActivity(db: Db, projId: string, wbsId: string, hoursPerDay = 8): Row {
+/** A new activity; its Activity ID is `code` (the caller checked it is free), else the project's next one. */
+export function addActivity(db: Db, projId: string, wbsId: string, hoursPerDay = 8, code?: string): Row {
   const p = rows(db, 'PROJECT').find((x) => x.proj_id === projId)!;
   const T = table(db, 'TASK');
   for (const f of TASK_FIELDS) addField(T, f);
@@ -171,7 +172,7 @@ export function addActivity(db: Db, projId: string, wbsId: string, hoursPerDay =
   const r: Row = {
     task_id: String(nextId(db, 'TASK')), proj_id: projId, wbs_id: wbsId, clndr_id: p.clndr_id, phys_complete_pct: '0',
     complete_pct_type: p.def_complete_pct_type || 'CP_Drtn', task_type: p.def_task_type || 'TT_Task', duration_type: p.def_duration_type || 'DT_FixedDUR2',
-    status_code: 'TK_NotStart', task_code: nextTaskCode(db, projId), task_name: 'New Activity', total_float_hr_cnt: '', free_float_hr_cnt: '',
+    status_code: 'TK_NotStart', task_code: code ?? nextTaskCode(db, projId), task_name: 'New Activity', total_float_hr_cnt: '', free_float_hr_cnt: '',
     remain_drtn_hr_cnt: String(5 * hoursPerDay), target_drtn_hr_cnt: String(5 * hoursPerDay), cstr_date: '', act_start_date: '', act_end_date: '',
     late_start_date: '', late_end_date: '', expect_end_date: '', early_start_date: start, early_end_date: '', restart_date: '', reend_date: '',
     target_start_date: start, target_end_date: '', rem_late_start_date: '', rem_late_end_date: '', cstr_type: '', priority_type: 'PT_Normal',
@@ -215,37 +216,44 @@ export function dissolveActivities(db: Db, ids: string[]): number {
   return n;
 }
 
-/** Why P6 would refuse this relationship, or undefined if it is allowed. */
-export function checkRelationship(db: Db, predId: string, succId: string, type = 'PR_FS'): string | undefined {
-  if (predId === succId) return 'An activity cannot be related to itself.';
+/** The relationships from pred to succ (real rows; any type), by an index kept for the edit (db.ts rowIndex). */
+export function relationshipsBetween(db: Db, predId: string, succId: string): Row[] {
   const P = realOf(rows(db, 'TASKPRED')); // read only
-  if (P.some((r) => r.task_id === succId && r.pred_task_id === predId && r.pred_type === type)) return 'This relationship already exists.';
+  return (rowIndex(P, 'pair', (r) => `${r.pred_task_id}|${r.task_id}`).get(`${predId}|${succId}`) ?? []).map((i) => P[i]).filter((r) => r.pred_task_id === predId && r.task_id === succId);
+}
+export const LOOP_MESSAGE = 'This relationship would create a loop (circular logic).';
+/** Why P6 would refuse this relationship, or undefined if it is allowed. noLoopCheck: the caller checks loops itself
+ *  (an edit checks them once, after all its operations). */
+export function checkRelationship(db: Db, predId: string, succId: string, type = 'PR_FS', noLoopCheck = false): string | undefined {
+  if (predId === succId) return 'An activity cannot be related to itself.';
+  if (relationshipsBetween(db, predId, succId).some((r) => r.pred_type === type)) return 'This relationship already exists.';
+  if (noLoopCheck) return undefined;
   // P6 refuses links that would create a loop
-  const succOf = groupBy(P, 'pred_task_id');
+  const P = realOf(rows(db, 'TASKPRED')), succOf = rowIndex(P, 'pred', (r) => r.pred_task_id);
   const stack = [succId], seen = new Set<string>();
   while (stack.length) {
     const x = stack.pop()!;
-    if (x === predId) return 'This relationship would create a loop (circular logic).';
+    if (x === predId) return LOOP_MESSAGE;
     if (seen.has(x)) continue;
     seen.add(x);
-    for (const r of succOf.get(x) ?? []) stack.push(r.task_id);
+    for (const i of succOf.get(x) ?? []) if (P[i].pred_task_id === x) stack.push(P[i].task_id);
   }
   return undefined;
 }
 
-export function addRelationship(db: Db, predId: string, succId: string, type = 'PR_FS', lagHrs = 0): string | void {
-  const err = checkRelationship(db, predId, succId, type);
+export function addRelationship(db: Db, predId: string, succId: string, type = 'PR_FS', lagHrs = 0, noLoopCheck = false): string | void {
+  const err = checkRelationship(db, predId, succId, type, noLoopCheck);
   if (err) return err;
-  const T = realOf(rows(db, 'TASK')), proj = (id: string) => T.find((t) => t.task_id === id)!.proj_id;
+  const T = realOf(rows(db, 'TASK')), byId = rowIndex(T, 'id', (t) => t.task_id), proj = (id: string) => T[(byId.get(id) ?? []).find((i) => T[i].task_id === id) ?? T.findIndex((t) => t.task_id === id)].proj_id;
   const P = table(db, 'TASKPRED');
   for (const f of ['task_pred_id', 'task_id', 'pred_task_id', 'proj_id', 'pred_proj_id', 'pred_type', 'lag_hr_cnt']) addField(P, f);
   P.rows.push({ task_pred_id: String(nextId(db, 'TASKPRED')), task_id: succId, pred_task_id: predId, proj_id: proj(succId), pred_proj_id: proj(predId), pred_type: type, lag_hr_cnt: p6num(lagHrs) });
 }
 
-export function addWbs(db: Db, projId: string, parentId: string): Row {
+export function addWbs(db: Db, projId: string, parentId: string, code?: string, name?: string): Row {
   const W = table(db, 'PROJWBS');
-  const sibs = W.rows.filter((w) => w.parent_wbs_id === parentId);
-  const r: Row = { wbs_id: String(nextId(db, 'PROJWBS')), proj_id: projId, obs_id: '', seq_num: String(sibs.length * 10 + 10), proj_node_flag: 'N', sum_data_flag: 'N', status_code: 'WS_Open', wbs_short_name: `WBS${sibs.length + 1}`, wbs_name: 'New WBS Element', parent_wbs_id: parentId };
+  const sibs = realOf(W.rows).filter((w) => w.parent_wbs_id === parentId);
+  const r: Row = { wbs_id: String(nextId(db, 'PROJWBS')), proj_id: projId, obs_id: '', seq_num: String(sibs.length * 10 + 10), proj_node_flag: 'N', sum_data_flag: 'N', status_code: 'WS_Open', wbs_short_name: code ?? `WBS${sibs.length + 1}`, wbs_name: name ?? 'New WBS Element', parent_wbs_id: parentId };
   W.rows.push(r);
   return r;
 }

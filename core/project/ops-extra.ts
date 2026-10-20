@@ -1,7 +1,7 @@
 // More edit operations (see ops.ts): WBS changes, codes, UDFs, notebooks, cost accounts and expenses, steps,
 // risk estimates, baselines, EPS/OBS/roles, calendar changes and assignment details. Same rules as ops.ts:
 // addressed by IDs and names a scheduler sees, durations in days, one transaction per list.
-import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
+import { addField, dropIndexes, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
@@ -212,11 +212,13 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
         const parent = h.wbsOf(p, op.parent === '' ? null : op.parent);
         if (subtree(rows(db, 'PROJWBS'), w.wbs_id, 'wbs_id', 'parent_wbs_id').has(parent.wbs_id)) fail(`Cannot move WBS ${w.wbs_short_name} under itself or one of its children.`);
         w.parent_wbs_id = parent.wbs_id;
+        dropIndexes(realOf(rows(db, 'PROJWBS')));
       }
       if (op.new_code != null) {
         const code = str(op.new_code, 'new_code');
         if (rows(db, 'PROJWBS').some((x) => x.wbs_id !== w.wbs_id && x.proj_id === p.proj_id && x.parent_wbs_id === w.parent_wbs_id && lc(x.wbs_short_name) === lc(code))) fail(`WBS "${code}" already exists there.`);
         w.wbs_short_name = code;
+        dropIndexes(realOf(rows(db, 'PROJWBS')));
       }
       if (op.name != null) w.wbs_name = str(op.name, 'name');
       return { wbs: w.wbs_short_name };
