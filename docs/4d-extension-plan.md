@@ -42,10 +42,12 @@ long work, per-caller undo for link changes, paths inside the roots, and `owner_
   derived volumes. Grouping by activity feeds productivity and duration checks against the BOQ.
 
 ### Linking
-- **`link_elements`** `{handle, links: [{activity, guids, role?: built|removed|temporary}], mode: add|replace|remove}`:
+- **`link_elements`** `{handle, links: [{activity, guids, role?: built|removed|temporary, profile?}], mode: add|replace|remove}`:
   - every ID is checked, and the unknown ones are listed;
   - an element may belong to several activities (formwork, then concrete, then finishes);
-  - one undoable change.
+  - one undoable change;
+  - `profile` is the appearance for that activity–element pair. SYNCHRO stores it per task–resource assignment, not per
+    task, for example `Install` with a growth direction such as bottom to top.
 - **`link_by_rules`** `{handle, rules, dry_run?}`, modelled on Navisworks Auto-Attach and SYNCHRO Auto-Matching:
   - *property equals activity field*: an element property equals the activity's ID, 4D Key UDF, an activity code or
     the name (for example `Pset_X.TaskCode = {activity_id}`);
@@ -112,6 +114,9 @@ Links are saved with the project:
     lists its elements). SYNCHRO's export renames elements `name_(#id)` and changes GlobalIds, so the import maps them
     back by that suffix;
   - Navisworks search-set XML (each set becomes links through its conditions);
+  - **SYNCHRO `.sp`**: tasks, links, resources, task–resource assignments and their appearance profiles (decoder
+    based on 43 real files; start from the small Scheduler 5.5 files). 3D objects are reached through shared object keys
+    and the source program's IDs (e.g. Revit element numbers), which `import_4d` maps to IFC elements;
   - TimeLiner CSV, and TimeLiner's task grid copied to Excel (Name, Actual Start/End, Planned Start/End, Task Type,
     Attached `Sets-><name>`);
   - **TimeLiner tasks straight from an `.nwf`**, without Navisworks: names, actual and planned dates, task type and the
@@ -154,7 +159,8 @@ The MCP server is a Node process, often with no GPU. The plan:
 2. **M2: simulation and comparison.** Build `simulate_4d` (state tables plus PNG snapshots), `compare_4d`,
    `set_element_status`, and the viewer output.
 3. **M3: video.** Build `render_4d` single and side-by-side, with date, legend, activity list, Gantt strip and S-curve
-   overlays, saved views and an orbit camera. This replaces `simulate_4d` (the platform's) and `export_4d_video`.
+   overlays, saved views and an orbit camera, and SYNCHRO-style **growth** within a task (elements appear bottom to top,
+   left to right and so on, from the appearance profile's direction). This replaces `simulate_4d` (the platform's) and `export_4d_video`.
 4. **M4: model revisions.** Build `relink_model` (the replacement for `ifc_diff`) and make links survive model updates.
 5. **M5: platform switch-over.** Map each old tool to the new one, run both on the same jobs (Aurora Tower,
    Schependomlaan, FZK-Haus, Duplex), compare results, then retire the custom tools. Update the platform's
@@ -170,6 +176,15 @@ The MCP server is a Node process, often with no GPU. The plan:
   and a SYNCHRO-exported 4D IFC (49 tasks covering 2,387 elements). Its as-planned event log (about 7,166
   element–task pairs) is a ready **answer key** for testing `link_by_rules`. Its as-built log only marks each element on
   time or too late per week, with no actual dates.
+- **SYNCHRO training data (Bentley's public knowledge base and a public course re-upload, study only).** 43 `.sp`
+  files from 5.1 to 6.5. Among them:
+  - the Training Building as P6 XML exported by SYNCHRO (95 activities, 158 relationships) with its Assigned and
+    Completed `.sp` files (133 tasks, 4,761 assignments). This is a real P6 + SYNCHRO pair for testing import and export
+    both ways;
+  - the Auto Matching challenge before and after matching (651 tasks; 1,783 assignments after). This is a second answer
+    key for `link_by_rules`;
+  - baselines, actual costs, filters, 3D paths and crane samples;
+  - Bentley's public 4D Schedules API description (`swagger.json`).
 - **Bridge IFC 4.3** (MIT): 354 tasks, 461 sequence links, crews and a calendar inside the IFC.
 - **buildingSMART construction-scheduling example**, FZK-Haus and Duplex (A and MEP).
 - **Navisworks search-set XMLs** and the official nw-exchange 4.0/11.0/12.0 schemas.
@@ -186,6 +201,10 @@ The MCP server is a Node process, often with no GPU. The plan:
   "IfcGUID", and how a custom property set (our `4D` key) is named.
 - Whether MPX is still a TimeLiner data source in Navisworks 2025/2026 (CSV certainly is).
 - SYNCHRO: direct XER import, and how IFC objects become resources with fields usable in Auto-Matching.
+- SYNCHRO `.spx`: no public file exists, so whether it is XML or the `.sp` container is unknown. (It is imported through
+  the same wizard as `.sp`, which suggests the same container.)
+- Writing a `.sp` directly: the format is now readable, but writing one that SYNCHRO accepts is unproven. It is a later
+  experiment; the package route (P6 XML + IFC + Auto-Matching key) stays the plan.
 - Rendering: the speed of software WebGL (SwiftShader) for large models in headless Chromium on the platform's host.
 
 ## Sources
