@@ -9,7 +9,7 @@ import type { Finding } from '../core/findings.ts';
 
 declare global { interface Window { p6: P6Api } }
 
-export type ViewName = 'projects' | 'wbs' | 'activities' | 'resources' | 'assignments' | 'reports' | 'risk' | 'timesheets' | 'portfolios';
+export type ViewName = 'projects' | 'wbs' | 'activities' | 'resources' | 'assignments' | 'reports' | 'risk' | 'timesheets' | 'portfolios' | 'extensions';
 export type BottomPane = 'details' | 'profile' | 'spreadsheet' | 'trace' | 'none';
 
 /** calendarDays: days on each activity's own calendar (core/project/units.ts) — set by the MCP server and the CLI;
@@ -41,6 +41,8 @@ export interface UiState {
   aiOpen?: boolean; aiWide?: boolean;
   /** scroll this activity into view once (Find, Go To) */
   revealTask?: string;
+  /** the open panel of the Extensions window */
+  extension?: string;
   /** Activity table column widths you dragged */
   colWidths?: Record<string, number>;
   /** View > Progress Spotlight: highlight the next update period after the data date */

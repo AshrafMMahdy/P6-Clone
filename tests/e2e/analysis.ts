@@ -1,0 +1,41 @@
+// Schedule analysis in the desktop app: Tools > Check Schedule Report and the Extensions window.
+//   node tests/e2e/analysis.ts [screenshot dir]   (after node scripts/build.mjs)
+import { _electron as electron } from 'playwright';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+const ok = (c: boolean, m: string) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process.exitCode = 1; };
+const shots = process.argv[2];
+const root = join(import.meta.dirname, '..', '..'), ud = mkdtempSync(join(tmpdir(), 'p6an-'));
+const app = await electron.launch({ args: [root, '--user-data', ud, '--import', join(root, 'Sample XERs', 'cairo festival city.xer')], cwd: root });
+const win = await app.firstWindow();
+await win.setViewportSize({ width: 1400, height: 850 }).catch(() => {});
+const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
+const menu = (id: string) => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.getAllWindows()[0].webContents.send('menu', id), id);
+await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
+for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
+
+// Tools > Check Schedule Report
+await menu('tools.checkSchedule'); await win.waitForSelector('.dialog-title:has-text("Check Schedule")');
+ok(await win.locator('.dialog tbody tr').count() === 14, 'the dialog lists the 14 P6 Professional checks with their targets');
+await win.click('.dialog button:has-text("Check Schedule")'); await win.waitForSelector('.dialog-title:has-text("Check Schedule Report")');
+const rowsText = await win.locator('.dialog .tbl >> nth=0').innerText();
+ok(/Logic/.test(rowsText) && /(Fail|Pass)/.test(rowsText), 'the report shows each check with its result');
+if (shots) await win.screenshot({ path: join(shots, 'check-schedule.png') });
+await win.locator('.dialog tr:has-text("Large float")').first().dispatchEvent('mousedown'); await win.waitForTimeout(200);
+const link = win.locator('.dialog .tbl a:not([href="#large_float"])').filter({ hasText: /^A\d/ }).first();
+const hasLink = await link.count();
+if (hasLink) { const code = await link.innerText(); await link.click(); await win.waitForTimeout(400);
+  ok(await win.locator('.dialog').count() === 0, 'clicking an activity closes the report');
+  ok((await win.locator('.grid-row.sel').innerText()).includes(code), `clicking ${code} in the report selects it in the Activities window`); }
+else ok(false, 'a failing check lists activities to click');
+
+// Extensions > DCMA 14-point
+await menu('tools.extensions'); await win.waitForSelector('text=DCMA 14-point');
+await win.click('button:has-text("Run assessment")'); await win.waitForSelector('text=failed');
+const dcma = await win.locator('.tbl >> nth=0').innerText();
+ok(/Critical path test/.test(dcma) && /CPLI/.test(dcma) && /BEI/.test(dcma), 'Extensions runs DCMA 14-point with the critical path test, CPLI and BEI');
+ok(await win.locator('.dirbtn:has-text("Extensions")').count() === 1, 'Extensions has its own button in the window bar');
+if (shots) await win.screenshot({ path: join(shots, 'dcma.png') });
+ok(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
+await app.close();

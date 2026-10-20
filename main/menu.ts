@@ -127,6 +127,8 @@ export function buildMenu(win: BrowserWindow): Menu {
         cmd('Schedule &Risk Analysis...', 'tools.riskAnalysis'),
         cmd('&Global Change...', 'tools.globalChange'),
         sep,
+        cmd('Check Sche&dule Report...', 'tools.checkSchedule'),
+        cmd('E&xtensions', 'tools.extensions'),
         cmd('Schedule &Log', 'tools.schedLog'),
         cmd('&Import Log', 'tools.importLog'),
         sep,

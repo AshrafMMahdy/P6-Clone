@@ -10,6 +10,8 @@ import { ResourcesView } from './views/ResourcesView.tsx';
 import { AssignmentsView } from './views/AssignmentsView.tsx';
 import { ReportsView } from './views/ReportsView.tsx';
 import { RiskView } from './views/RiskView.tsx';
+import { ExtensionsView } from './views/ExtensionsView.tsx';
+import { CheckScheduleDialog } from './dialogs/CheckScheduleDialog.tsx';
 import { TimesheetsView } from './views/TimesheetsView.tsx';
 import { PortfoliosView } from './views/PortfoliosView.tsx';
 import { applyApprovedTimesheets, formatApplySummary, hasPendingActuals } from '../core/timesheet/timesheet.ts';
@@ -37,13 +39,14 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, globalChange: GlobalChangeDialog, globalChangeEdit: GlobalChangeEditDialog, globalChangeReport: GlobalChangeReportDialog, codeDictionary: CodeDictionaryDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog,
+  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, globalChange: GlobalChangeDialog, globalChangeEdit: GlobalChangeEditDialog, globalChangeReport: GlobalChangeReportDialog, codeDictionary: CodeDictionaryDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog, checkSchedule: CheckScheduleDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
   ['projects', 'Projects', Icon.projects], ['wbs', 'WBS', Icon.wbs], ['activities', 'Activities', Icon.activities],
   ['assignments', 'Assignments', Icon.assignments], ['resources', 'Resources', Icon.resources], ['timesheets', 'Timesheets', Icon.timesheets],
   ['risk', 'Risks', Icon.risk], ['portfolios', 'Portfolios', Icon.portfolios], ['reports', 'Reports', Icon.reports],
+  ['extensions', 'Extensions', Icon.extensions],
 ];
 
 export function runMenu(id: string): void {
@@ -133,6 +136,8 @@ export function runMenu(id: string): void {
     case 'tools.timesheets': return setUi({ view: 'timesheets' });
     case 'project.risks': case 'tools.riskAnalysis': return setUi({ view: 'risk' });
     case 'ent.portfolios': return setUi({ view: 'portfolios' });
+    case 'tools.checkSchedule': return needProject() ? undefined : openDialog('checkSchedule');
+    case 'tools.extensions': return setUi({ view: 'extensions' });
     case 'tools.schedLog': return openDialog('log', { title: 'Schedule Log', text: ui.scheduleLog ?? '' });
     case 'tools.importLog': return openDialog('importLog', {});
     case 'tools.reports': return setUi({ view: 'reports' });
@@ -232,8 +237,8 @@ export function App() {
   }, []);
 
   const open = ui.openProjects.map((id) => rows(db, 'PROJECT').find((p) => p.proj_id === id)).filter((p) => p != null);
-  const title = { projects: 'Projects', wbs: 'WBS', activities: 'Activities', assignments: 'Resource Assignments', resources: 'Resources', reports: 'Reports', risk: 'Risks', timesheets: 'Timesheets', portfolios: 'Project Portfolios' }[ui.view];
-  const View = { projects: ProjectsView, wbs: WbsView, activities: ActivitiesView, assignments: AssignmentsView, resources: ResourcesView, reports: ReportsView, risk: RiskView, timesheets: TimesheetsView, portfolios: PortfoliosView }[ui.view];
+  const title = { projects: 'Projects', wbs: 'WBS', activities: 'Activities', assignments: 'Resource Assignments', resources: 'Resources', reports: 'Reports', risk: 'Risks', timesheets: 'Timesheets', portfolios: 'Project Portfolios', extensions: 'Extensions' }[ui.view];
+  const View = { projects: ProjectsView, wbs: WbsView, activities: ActivitiesView, assignments: AssignmentsView, resources: ResourcesView, reports: ReportsView, risk: RiskView, timesheets: TimesheetsView, portfolios: PortfoliosView, extensions: ExtensionsView }[ui.view];
   const p0 = open[0];
   return (
     <div className="app">
