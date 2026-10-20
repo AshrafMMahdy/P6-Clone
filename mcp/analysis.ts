@@ -15,7 +15,12 @@ import { levelResources } from '../core/level/level.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { nowStamp } from '../core/report/reports.ts';
-import { fail, pathArg, type Session } from './runtime.ts';
+import { fail, getSession, pathArg, type Session } from './runtime.ts';
+import { timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
+import { baselineOf } from '../core/analysis/common.ts';
+import { detectFormat, readRaw } from '../renderer/io.ts';
+import { readFileSync } from 'node:fs';
+import { rows } from '../core/db.ts';
 
 /** What the server lends these tools. */
 export interface AnalysisHelpers {
@@ -44,9 +49,11 @@ export const ANALYSIS_TOOLS = (withHandle: (s: Record<string, unknown>) => Recor
   { name: 'evaluate_batch', annotations: ro, description: 'Many what-ifs in one call: the project is scheduled once as it is, then each scenario (a list of edit operations, as edit takes them) on a copy that is thrown away, so nothing changes. One row per scenario: ok or error, finish, finish_delta_days (working days on the project calendar; negative = earlier), critical count, became_critical and no_longer_critical, negative_float count, cost (at completion) and cost_delta; the best `top` (default 3; earliest finish, then cheapest) also list the activities whose dates moved. best names the best scenario.', inputSchema: withHandle({ type: 'object', properties: { project, scenarios: { type: 'array', description: '[{name, overrides: [edit operations]}], up to 200', items: { type: 'object' } }, top: { type: 'number' } }, required: ['scenarios'] }) },
   { name: 'crash_schedule', annotations: writesFile, description: 'Least-cost crashing (Kelley-Walker): each step shortens the cheapest cut set, the activities that together shorten every path driving the finish at once (a shared activity competes with the sum of one activity per parallel path), by the smaller of their crash room, the float of the next near-critical path and what is still needed, then reschedules. Working days on the calendar of each activity; only remaining work is crashed; completed, milestones, LOE and locked activities are not. Crash data per activity: {id, min_days, cost_per_day} or {id, crash_days (remaining duration when fully crashed), crash_cost (extra cost to get there)}; without it every remaining activity may lose default_max_pct (30) % of its remaining duration at 1 per day. Goal: target_finish (date), target_days (working days to gain), or neither with indirect_cost_per_day / ld_per_day to stop at the least total cost. Answers stop SUCCESS | PLATEAU | EXHAUSTED | CAP | ALREADY_MET with a note, every step {activities [{id, days, cost}], days_gained, cost, finish, cumulative_direct_cost, total_cost (direct less indirect and liquidated damages saved)}, the duration changes and the edit ops. apply: true makes the changes and reschedules (one undoable change).', inputSchema: withHandle({ type: 'object', properties: { project, target_finish: { type: 'string' }, target_days: { type: 'number' }, activities: { type: 'array', items: { type: 'object' } }, default_max_pct: { type: 'number' }, indirect_cost_per_day: { type: 'number' }, ld_per_day: { type: 'number' }, locked: { type: 'array', items: { type: 'string' } }, max_steps: { type: 'number', description: 'default 100' }, apply: { type: 'boolean' } } }) },
   { name: 'optimize_schedule', annotations: writesFile, description: 'The White Hat IQ schedule reasoner (a trained model, embedded; runs locally): picks each remaining activity’s mode (normal, or crashed when crash data is given) and a placement priority so the resource-limited schedule finishes soonest, sampling `samples` trajectories around the model’s answer (default 200, 64 above 120 activities; `seed` makes it repeatable). Resources need a Max Units/Time limit to be leveled. The proposal is checked with the P6 leveler: answers cpm_finish (no leveling), p6_leveled_finish (P6 default leveling), reasoner_finish (its modes and priority through the same leveler), better_than_p6_leveler, crash changes and cost, and the priority order. objective min_crash_cost runs crash_schedule instead (give target_finish or target_days). apply: true makes the crash changes, reschedules and levels in the proposed order (one undoable change; like P6 leveling, the next F9 without leveling drops the leveled dates). Up to 3000 remaining activities.', inputSchema: withHandle({ type: 'object', properties: { project, objective: { type: 'string', description: 'makespan (default) or min_crash_cost' }, samples: { type: 'number' }, seed: { type: 'number' }, activities: { type: 'array', description: 'crash data [{id, crash_days, crash_cost} | {id, min_days, cost_per_day}]', items: { type: 'object' } }, target_finish: { type: 'string' }, target_days: { type: 'number' }, apply: { type: 'boolean' } } }) },
+  { name: 'windows_analysis', annotations: ro, description: 'Windows delay analysis (AACE 29R-03 MIP 3.3 contemporaneous; method half_step = MIP 3.4): the updates are put in data-date order (this handle is the latest unless include_current is false) and each window compares one update with the next: finish before and after and the slip in working days (on the first update\u2019s project calendar, so windows add up to total_slip_days), the driving path at the window\u2019s start, the activities on it that lost time with causes (started late, duration revised, logic revised, progressed slower than planned, deleted), and activities added. half_step re-runs the earlier update with only the later one\u2019s progress at its data date and splits the slip into progress_days and revision_days. Activities match by Activity ID, then by a unique name. updates: [{handle} | {path} | {baseline: project|bl1|bl2|bl3} | {data_date, progress: [edit ops]} (the previous update, or the current project after a stored baseline, with this progress, scheduled at data_date)]. milestone measures a key milestone instead of completion.', inputSchema: withHandle({ type: 'object', properties: { project, updates: { type: 'array', items: { type: 'object' } }, include_current: { type: 'boolean' }, method: { type: 'string', description: 'contemporaneous (default) or half_step' }, milestone: { type: 'string' }, max_ids: maxIds }, required: ['updates'] }) },
+  { name: 'tia', annotations: writesFile, description: 'Time impact analysis (AACE 52R-06): the fragnet (edit ops: add_activity, add_relationship, update_activity\u2026) is inserted in a copy of the project and both are scheduled at the same data date (data_date, default the project\u2019s). Answers unimpacted_finish, impacted_finish, delay_days (working days, project calendar), fragnet_on_critical_path, fragnet_path (the fragnet activities and what they drive to the finish), became_critical / no_longer_critical; baseline (project|bl1|bl2|bl3) adds the impacted variance to that baseline\u2019s finish. milestone measures a key milestone. The project is unchanged unless keep: true, which adds the impacted schedule as a new project copy (<Project ID>-TIA, one undoable change).', inputSchema: withHandle({ type: 'object', properties: { project, fragnet: { type: 'array', items: { type: 'object' } }, data_date: { type: 'string' }, milestone: { type: 'string' }, baseline: { type: 'string' }, keep: { type: 'boolean' } }, required: ['fragnet'] }) },
 ];
 
-export const ANALYSIS_NAMES = new Set(['check_schedule', 'dcma_14', 'lint', 'float_paths', 'progress_curves', 'resource_histogram', 'evaluate_batch', 'crash_schedule', 'optimize_schedule']);
+export const ANALYSIS_NAMES = new Set(['check_schedule', 'dcma_14', 'lint', 'float_paths', 'progress_curves', 'resource_histogram', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'tia']);
 
 /** Run an analysis tool; undefined when the name is not one of them. */
 export async function runAnalysis(name: string, a: Record<string, any>, s: Session, h: AnalysisHelpers): Promise<unknown> {
@@ -125,6 +132,56 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const { order, ...answer } = r;
       if (a.apply) h.apply('Optimize schedule (reasoner)', (d) => { ops(d, r.ops); scheduleProjects(d, projIds, {}); if (r.leveled_activities) levelResources(d, projIds, { first: order }); });
       return { objective, ...answer, ...(a.apply ? { applied: true } : {}) };
+    }
+    case 'windows_analysis': {
+      if (!Array.isArray(a.updates) || !a.updates.length) fail('bad_input', 'updates must list the other updates.', 'e.g. [{"path": "Update 1.xer"}, {"handle": "..."}] or [{"baseline": "project"}]');
+      if (a.method != null && a.method !== 'contemporaneous' && a.method !== 'half_step') fail('bad_input', `Unknown method "${a.method}".`, 'Use contemporaneous or half_step.');
+      const mainProj = (db: Db) => rows(db, 'PROJECT').find((p) => !p._baseline_of && (a.project == null || p.proj_short_name === a.project)) ?? fail('bad_input', a.project ? `No project "${a.project}".` : 'The file has no project.', 'Pass project.');
+      const updates: Update[] = [];
+      const cur = mainProj(s.db);
+      for (const [i, u] of (a.updates as Record<string, unknown>[]).entries()) {
+        if (u?.handle) { const o = getSession(u.handle); updates.push({ name: String(u.name ?? o.path ?? u.handle), db: o.db, projId: mainProj(o.db).proj_id }); }
+        else if (u?.path) { const p = pathArg(u.path); let b: Uint8Array; try { b = new Uint8Array(readFileSync(p)); } catch { return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.'); } const db = readRaw(b, detectFormat(p, b)).db; updates.push({ name: String(u.name ?? p), db, projId: mainProj(db).proj_id }); }
+        else if (u?.baseline) { const bl = baselineOf(s.db, cur, String(u.baseline) as 'project') ?? fail('bad_input', `The project has no ${u.baseline} baseline in this file.`, 'Use project, bl1, bl2 or bl3 (a baseline stored in the file).'); updates.push({ name: String(u.name ?? bl.name), db: s.db, projId: bl.projId }); }
+        else if (u?.data_date && Array.isArray(u.progress)) {
+          // built from the last update that is a schedule of its own (a stored baseline is a snapshot, not edited), else the current project
+          const prev = [...updates].reverse().find((x) => x.db !== s.db || x.projId === cur.proj_id) ?? { name: 'current', db: s.db, projId: cur.proj_id };
+          const db = structuredClone(prev.db) as Db, dd = h.dd(u.data_date) ?? fail('bad_input', `updates[${i}].data_date is not a date.`, 'YYYY-MM-DD');
+          const r = applyOps(db, u.progress, { hoursPerDay: s.hpd, calendarDays: true });
+          if (!r.ok) fail('bad_input', `updates[${i}] operation ${r.error!.index + 1}: ${r.error!.message}`, '');
+          if (!scheduleProjects(db, [prev.projId], { dataDate: dd }).ok) fail('schedule_failed', `updates[${i}] cannot be scheduled.`, '');
+          updates.push({ name: String(u.name ?? `update at ${String(u.data_date)}`), db, projId: prev.projId });
+        } else fail('bad_input', `updates[${i}] needs handle, path, baseline, or data_date with progress.`, '');
+      }
+      if (a.include_current !== false) updates.push({ name: 'current', db: s.db, projId: cur.proj_id });
+      const r = windowsAnalysis(updates, { milestone: a.milestone, method: a.method, hoursPerDay: s.hpd, maxIds: maxIds ?? undefined });
+      if (!r.ok) return fail(r.error.code, r.error.message, 'Check the milestone and the updates.');
+      return r;
+    }
+    case 'tia': {
+      if (!Array.isArray(a.fragnet) || !a.fragnet.length) fail('bad_input', 'fragnet must list edit operations.', 'e.g. [{"op": "add_activity", "id": "X1", "name": "Design change", "duration_days": 10}, {"op": "add_relationship", "pred": "A1000", "succ": "X1"}]');
+      const cur = rows(s.db, 'PROJECT').find((p) => p.proj_id === projIds[0])!;
+      let baseline: { name: string; finish: number | null } | undefined;
+      if (a.baseline) {
+        const bl = baselineOf(s.db, cur, String(a.baseline) as 'project') ?? fail('bad_input', `The project has no ${a.baseline} baseline in this file.`, 'Use project, bl1, bl2 or bl3.');
+        let f: number | null = null;
+        for (const t of bl.tasks.values()) { const v = h.dd(t.act_end_date || t.early_end_date || t.target_end_date); if (v != null && (f == null || v > f)) f = v; }
+        if (a.milestone) { const m = bl.tasks.get(a.milestone); f = m ? h.dd(m.act_end_date || m.early_end_date || m.target_end_date) : null; }
+        baseline = { name: bl.name, finish: f };
+      }
+      const dd = a.data_date != null ? h.dd(a.data_date) ?? fail('bad_input', 'data_date is not a date.', 'YYYY-MM-DD') : undefined;
+      const r = timeImpact(s.db, [projIds[0]], a.fragnet, { dataDate: dd, milestone: a.milestone, hoursPerDay: s.hpd, baseline });
+      if (!r.ok) return fail(r.error.code, r.error.message, 'Fix the fragnet operations (Activity IDs of this project).');
+      if (!a.keep) return r;
+      let id = `${cur.proj_short_name}-TIA`;
+      for (let k = 2; rows(s.db, 'PROJECT').some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase()); k++) id = `${cur.proj_short_name}-TIA${k}`;
+      h.apply(`TIA ${id}`, (d) => {
+        const x = applyOps(d, [{ op: 'copy_project', from: cur.proj_short_name, id, keep_progress: true }, ...a.fragnet.map((op: Record<string, unknown>) => ({ ...op, project: op.project ?? id }))], { hoursPerDay: s.hpd, calendarDays: true });
+        if (!x.ok) fail('bad_input', x.error!.message, '');
+        const copy = rows(d, 'PROJECT').find((p) => p.proj_short_name === id)!;
+        scheduleProjects(d, [copy.proj_id], dd != null ? { dataDate: dd } : {});
+      });
+      return { ...r, kept_as: id };
     }
     case 'lint': {
       if (a.profile != null && a.profile !== 'p6' && a.profile !== 'platform') fail('bad_input', `Unknown profile "${a.profile}".`, 'Use p6 or platform.');

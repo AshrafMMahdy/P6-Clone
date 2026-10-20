@@ -72,18 +72,25 @@ export function evaluate(db: Db, projIds: string[], o: EvaluateOptions = {}): Ev
   return answer;
 }
 
-/** compare mode "computed": only what the schedule computes, activity by activity (matched by Project ID and Activity
- *  ID): duration and remaining duration deltas, start / finish shifts and total float delta (working days of the
+/** compare mode "computed": only what the schedule computes, activity by activity (matched by Activity ID, with the
+ *  Project ID when either side has several projects, then by a unique name): duration and remaining duration deltas, start / finish shifts and total float delta (working days of the
  *  activity's own calendar in b), and became / no longer critical. Activities only in one file are listed by ID. */
-export function compareComputed(a: Db, b: Db, hpd = 8) {
+export function compareComputed(a: Db, b: Db, hpd = 8, o: { aProjIds?: string[]; bProjIds?: string[] } = {}) {
   const ids = (d: Db) => rows(d, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id);
-  const keyed = (d: Db) => {
+  // one project on each side (two updates, or a project and its baseline): keyed by Activity ID alone; then
+  // activities left over are paired by a name that is unique on both sides (renumbered activities)
+  const aIds = o.aProjIds ?? ids(a), bIds = o.bProjIds ?? ids(b), single = aIds.length === 1 && bIds.length === 1;
+  const keyed = (d: Db, pids: string[]) => {
     const proj = new Map(rows(d, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name.toUpperCase()]));
     const tasks = new Map(rows(d, 'TASK').map((t) => [t.task_id, t]));
-    const f = computedFields(d, ids(d), hpd);
-    return new Map([...f].map(([id, x]) => [`${proj.get(tasks.get(id)!.proj_id)}|${x.code}`, { ...x, t: tasks.get(id)! }]));
+    const f = computedFields(d, pids, hpd);
+    return new Map([...f].map(([id, x]) => [single ? x.code : `${proj.get(tasks.get(id)!.proj_id)}|${x.code}`, { ...x, t: tasks.get(id)! }]));
   };
-  const A = keyed(a), B = keyed(b);
+  const A = keyed(a, aIds), B = keyed(b, bIds);
+  const byName: { a: string; b: string }[] = [];
+  const unique = (m: Map<string, { t: Row }>, other: Map<string, unknown>) => { const n = new Map<string, string | null>(); for (const [k, x] of m) if (!other.has(k)) { const nm = x.t.task_name.trim().toLowerCase(); n.set(nm, n.has(nm) ? null : k); } return n; };
+  const na = unique(A, B), nb = unique(B, A);
+  for (const [nm, kb] of nb) { const ka = na.get(nm); if (kb && ka) { byName.push({ a: A.get(ka)!.code, b: B.get(kb)!.code }); B.set(ka, B.get(kb)!); B.delete(kb); } }
   const cals = calendarResolver(b, []), dh = dayHours(b, hpd, true);
   const P = (s: unknown) => (typeof s === 'string' ? parseP6Date(s) : null);
   const shift = (t: Row, x: unknown, y: unknown) => { const p = P(x), q = P(y); if (p == null || q == null) return null; const c = cals.get(t.clndr_id) ?? cals.fallback(''); return Math.round((c.workBetween(p, q) / 60 / dh.task(t)) * 100) / 100; };
@@ -101,7 +108,7 @@ export function compareComputed(a: Db, b: Db, hpd = 8) {
     if (Object.keys(c).length > 1) changes.push(c);
   }
   return {
-    changes, only_in_a: [...A.keys()].filter((k) => !B.has(k)).map((k) => A.get(k)!.code), only_in_b: [...B.keys()].filter((k) => !A.has(k)).map((k) => B.get(k)!.code),
+    changes, ...(byName.length ? { matched_by_name: byName } : {}), only_in_a: [...A.keys()].filter((k) => !B.has(k)).map((k) => A.get(k)!.code), only_in_b: [...B.keys()].filter((k) => !A.has(k)).map((k) => B.get(k)!.code),
     became_critical: changes.filter((c) => c.became_critical).map((c) => c.id as string), no_longer_critical: changes.filter((c) => c.no_longer_critical).map((c) => c.id as string),
   };
 }

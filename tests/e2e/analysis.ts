@@ -55,6 +55,19 @@ await win.click('.dirbtn:has-text("Schedule reasoner")'); await win.click('butto
 await win.waitForSelector('text=/P6 leveling \\(early start|Max Units\\/Time limit and no crash data/', { timeout: 30000 });
 ok(true, 'the schedule reasoner runs in the main process and answers (a proposal, or why there is nothing to choose)');
 if (shots) await win.screenshot({ path: join(shots, 'reasoner.png') });
+// Extensions > Time impact analysis, kept as a copy; then Windows analysis between the project and that copy
+await win.click('.dirbtn:has-text("Time impact analysis")');
+await win.locator('td input >> nth=3').fill('A2060'); await win.locator('td input >> nth=7').fill('A2070');
+await win.click('button:has-text("Analyse")'); await win.waitForSelector('text=Impacted finish');
+const tiaText = await win.locator('.tbl >> nth=2').innerText();
+ok(/10 working days/.test(tiaText) && /the fragnet drives the finish/.test(tiaText), 'TIA: a 10-day fragnet on the critical path delays completion 10 working days');
+await win.click('button:has-text("Keep impacted copy")'); await win.waitForTimeout(500);
+ok(/kept as project/.test(await win.locator('.toast').last().innerText().catch(() => '')), 'the impacted schedule is kept as a project copy');
+await win.click('.dirbtn:has-text("Windows analysis")');
+await win.locator('label:has-text("-TIA") input').check();
+await win.click('button:has-text("Analyse")'); await win.waitForSelector('text=Total slip');
+ok(/Total slip 10 working days/.test(await win.locator('text=Total slip').innerText()), 'windows analysis measures the 10-day slip between the project and its impacted copy');
+if (shots) await win.screenshot({ path: join(shots, 'windows.png') });
 ok(await win.locator('.dirbtn:has-text("Extensions")').count() === 1, 'Extensions has its own button in the window bar');
 if (shots) await win.screenshot({ path: join(shots, 'dcma.png') });
 // View > Show on Bottom > Activity Usage Profile
