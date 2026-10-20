@@ -49,3 +49,13 @@ test('MCP: lint with fixes (P6 and platform profiles), and schedule returns the 
   const quiet = await call('schedule', { handle: h, log: false });
   assert.equal(quiet.d.log, undefined);
 });
+
+test('MCP: progress_curves and resource_histogram', async () => {
+  const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'DHBL-24FEB13_VER-7.0.xer') })).d.handle;
+  const c = await call('progress_curves', { handle: h, period: 'month', units: 'hours' });
+  assert.equal(c.err, false, JSON.stringify(c.d).slice(0, 300));
+  assert.ok(c.d.periods.length > 3 && c.d.totals.bac > 0);
+  const r = await call('resource_histogram', { handle: h, period: 'month' });
+  assert.ok(r.d.resources.length > 0 && r.d.resources[0].periods.length > 0);
+  assert.equal((await call('progress_curves', { handle: h, period: 'day' })).d.error.code, 'bad_input');
+});

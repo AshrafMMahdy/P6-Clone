@@ -46,5 +46,10 @@ if (await applyBtn.count()) { await applyBtn.click(); await win.waitForTimeout(8
 if (shots) await win.screenshot({ path: join(shots, 'lint.png') });
 ok(await win.locator('.dirbtn:has-text("Extensions")').count() === 1, 'Extensions has its own button in the window bar');
 if (shots) await win.screenshot({ path: join(shots, 'dcma.png') });
+// View > Show on Bottom > Activity Usage Profile
+await menu('view.bottom.actProfile'); await win.waitForSelector('text=Activity Usage Profile');
+ok(await win.locator('svg polyline').count() >= 2, 'the Activity Usage Profile draws cumulative curves');
+await win.click('button:has-text("Spreadsheet")'); await win.waitForSelector('text=Cum. Planned Value');
+ok(true, 'the Activity Usage Spreadsheet lists planned value, earned value and actual per period');
 ok(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 await app.close();

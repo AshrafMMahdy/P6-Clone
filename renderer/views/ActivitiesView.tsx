@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ActivityUsageProfile } from './ActivityUsageProfile.tsx';
 import { Grid, type GridItem, type EditorSpec } from '../components/Grid.tsx';
 import { Gantt, DEFAULT_BARS, type GanttEntry, type GanttLink, type GanttActions } from '../components/Gantt.tsx';
 import { Split, showContextMenu } from '../components/Layout.tsx';
@@ -236,7 +237,7 @@ export function ActivitiesView() {
         // View > Show on Top (table / Gantt) and Show on Bottom (details / usage / none)
         const top = ui.hideTable ? gantt : ui.hideGantt ? table
           : <Split dir="h" initial={Math.min(760, Math.round(window.innerWidth * 0.48))} storeKey="act-h">{table}{gantt}</Split>;
-        const bottom = ui.bottom === 'none' ? null : ui.bottom === 'profile' || ui.bottom === 'spreadsheet' ? <ActivityUsagePane sheet={ui.bottom === 'spreadsheet'} /> : ui.bottom === 'trace' ? <TraceLogic /> : <ActivityDetails />;
+        const bottom = ui.bottom === 'none' ? null : ui.bottom === 'profile' || ui.bottom === 'spreadsheet' ? <ActivityUsagePane sheet={ui.bottom === 'spreadsheet'} /> : ui.bottom === 'actProfile' || ui.bottom === 'actSheet' ? <ActivityUsageProfile sheet={ui.bottom === 'actSheet'} /> : ui.bottom === 'trace' ? <TraceLogic /> : <ActivityDetails />;
         return bottom ? <Split dir="v" initial={Math.round(window.innerHeight * 0.52)} storeKey="act-v"><div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>{top}</div>{bottom}</Split>
           : <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>{top}</div>;
       })()}
