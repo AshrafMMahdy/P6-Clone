@@ -266,14 +266,15 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if ((fmt === 'mspdi' || fmt === 'mpx') && !projIds && allIds(s.db).length > 1) fail('bad_input', `A Microsoft Project file holds one project, and this file holds ${allIds(s.db).length}: ${names()}.`, 'Pass "project" with the Project ID to write (save once per project).');
       await checkpoint(ctx);
       let bytes: string | Uint8Array, label: string;
+      const notes: string[] = [];
       if (fmt === 'p6xml' || fmt === 'xml') { bytes = writeP6Xml(s.db, { version: a.version ?? '19.12', projIds }); label = 'P6 XML'; }
-      else if (fmt === 'mspdi' || fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: projIds ?? allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto' }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
+      else if (fmt === 'mspdi' || fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: projIds ?? allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto', report: notes }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
       else if (fmt === 'xer') { bytes = writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12', encoding: a.encoding ?? 'auto', projIds }); label = `XER ${a.version ?? s.db.header?.version ?? '19.12'}`; }
       else return fail('bad_input', `Unknown format "${a.format}".`, 'Use xer, p6xml, mspdi or mpx.');
       await checkpoint(ctx); // nothing is written once the call is cancelled; the write itself is one step
       writeOut(path, bytes);
       if (!projIds || allIds(s.db).length === 1) s.dirty = false;
-      return { saved: path, format: label, ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
+      return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
     case 'close': {
       requireOwner(s, a.owner_key, 'Closing');

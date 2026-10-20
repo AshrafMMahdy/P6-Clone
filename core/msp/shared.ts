@@ -60,8 +60,9 @@ export interface MTask {
   critical: boolean | null;
   extra: P6Extra;
   preds: MPred[];
-  /** read from MSPDI: the task as written (keep.ts); written from this TASK or (summary) PROJWBS row */
-  keep?: Kept; row?: Row;
+  /** read from MSPDI: the task as written (keep.ts); written from this TASK or (summary) PROJWBS row; its links in
+   *  the order of its <PredecessorLink> elements (null: one the clone does not read) */
+  keep?: Kept; row?: Row; links?: (MPred | null)[];
 }
 
 export interface MRes { uid: string; id: number; name: string; code: string; type: 'work' | 'material' | 'cost'; maxUnits: number | null; rate: number | null; calUid: string; p6Type?: string; keep?: Kept; row?: Row }
@@ -141,6 +142,9 @@ const DAY_SHIFTS: Shift[] = [{ start: 480, end: 720 }, { start: 780, end: 1020 }
 export function defaultShifts(): Shift[] {
   return DAY_SHIFTS.map((s) => ({ ...s }));
 }
+
+/** A link as comparable text: predecessor UID, P6 type, lag hours. */
+export const linkKey = (predUid: string, type: string, lag: string | number) => `${predUid}:${type}:${Number(lag) || 0}`;
 
 /** UIDs: a row's own (kept from the file) when not taken yet, else the lowest one nothing kept uses. */
 function uidMaker(kept: (string | undefined)[]): (r?: Row) => string {
@@ -494,6 +498,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
 
   // Relationships
   let relId = 0;
+  const imported = new Set<MPred>();
   for (const t of tasks) {
     const succ = taskRows.get(t.uid);
     if (!succ) continue;
@@ -503,7 +508,11 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
       const pred = taskRows.get(p.uid);
       if (!pred) { warn('MSP_LINK_UNRESOLVED', `"${t.name}" has a predecessor ${p.uid} that is not in the file; link dropped.`, 'P6 drops links to tasks it does not import.', { table: 'TASKPRED', key: t.uid }); continue; }
       push('TASKPRED', { task_pred_id: String(++relId), task_id: succ.task_id, pred_task_id: pred.task_id, proj_id: pid, pred_proj_id: pid, pred_type: `PR_${p.type}`, lag_hr_cnt: p6num(p.lagHrs) });
+      imported.add(p);
     }
+    // each <PredecessorLink> of the file: the link it became ('': one the clone did not import), so that a save keeps
+    // the links an edit did not touch as they were written (lag formats, links to summary tasks, other projects)
+    if (t.links) { addField(table(db, 'TASK'), '_msp_links'); succ._msp_links = JSON.stringify(t.links.map((p) => (p && imported.has(p) ? linkKey(p.uid, `PR_${p.type}`, p6num(p.lagHrs)) : ''))); }
   }
 
   // Resources

@@ -115,6 +115,21 @@
 			</WeekDays>
 			<Exceptions>
 				<Exception><EnteredByOccurrences>0</EnteredByOccurrences><TimePeriod><FromDate>2026-03-13T00:00:00</FromDate><ToDate>2026-03-13T23:59:00</ToDate></TimePeriod><Occurrences>1</Occurrences><Name>Site closed</Name><Type>1</Type><DayWorking>0</DayWorking></Exception>
+				<Exception><EnteredByOccurrences>1</EnteredByOccurrences><TimePeriod><FromDate>2026-03-25T00:00:00</FromDate><ToDate>2026-05-25T23:59:00</ToDate></TimePeriod><Occurrences>3</Occurrences><Name>Monthly maintenance</Name><Type>4</Type><Period>1</Period><MonthDay>25</MonthDay><DayWorking>0</DayWorking></Exception>
+			</Exceptions>
+		</Calendar>
+		<Calendar>
+			<UID>15</UID>
+			<GUID>11111111-0000-4000-8000-000000000015</GUID>
+			<Name>Night works</Name>
+			<IsBaseCalendar>0</IsBaseCalendar>
+			<IsBaselineCalendar>0</IsBaselineCalendar>
+			<BaseCalendarUID>11</BaseCalendarUID>
+			<WeekDays>
+				<WeekDay><DayType>7</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+			</WeekDays>
+			<Exceptions>
+				<Exception><EnteredByOccurrences>0</EnteredByOccurrences><TimePeriod><FromDate>2026-03-18T00:00:00</FromDate><ToDate>2026-03-18T23:59:00</ToDate></TimePeriod><Occurrences>1</Occurrences><Name>Permit day</Name><Type>1</Type><DayWorking>0</DayWorking></Exception>
 			</Exceptions>
 		</Calendar>
 		<Calendar>
@@ -217,7 +232,7 @@
 			<ActualDuration>PT20H0M0S</ActualDuration>
 			<RemainingDuration>PT20H0M0S</RemainingDuration>
 			<ConstraintType>0</ConstraintType>
-			<CalendarUID>-1</CalendarUID>
+			<CalendarUID>15</CalendarUID>
 			<Deadline>2026-03-09T17:00:00</Deadline>
 			<LevelAssignments>1</LevelAssignments>
 			<IgnoreResourceCalendar>0</IgnoreResourceCalendar>
@@ -265,6 +280,8 @@
 			<CalendarUID>-1</CalendarUID>
 			<ConstraintDate>2026-03-09T08:00:00</ConstraintDate>
 			<PredecessorLink><PredecessorUID>140</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
+			<PredecessorLink><PredecessorUID>101</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
+			<PredecessorLink><PredecessorUID>9001</PredecessorUID><Type>1</Type><CrossProject>1</CrossProject><CrossProjectName>Services.mpp\12</CrossProjectName><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
 			<ExtendedAttribute><FieldID>188743731</FieldID><Value>Rooms 201-206</Value></ExtendedAttribute>
 			<Baseline><Number>0</Number><Start>2026-03-06T08:00:00</Start><Finish>2026-03-12T17:00:00</Finish><Duration>PT40H0M0S</Duration><Cost>3000</Cost></Baseline>
 		</Task>
@@ -298,7 +315,8 @@
 			<RemainingDuration>PT0H0M0S</RemainingDuration>
 			<ConstraintType>0</ConstraintType>
 			<CalendarUID>-1</CalendarUID>
-			<PredecessorLink><PredecessorUID>155</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>14400</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
+			<PredecessorLink><PredecessorUID>155</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>50</LinkLag><LagFormat>19</LagFormat></PredecessorLink>
+			<PredecessorLink><PredecessorUID>140</PredecessorUID><Type>3</Type><CrossProject>0</CrossProject><LinkLag>4800</LinkLag><LagFormat>8</LagFormat></PredecessorLink>
 			<Hyperlink>Handover checklist</Hyperlink>
 			<HyperlinkAddress>https://example.com/handover</HyperlinkAddress>
 		</Task>

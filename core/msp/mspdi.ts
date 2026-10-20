@@ -2,12 +2,12 @@
 // Elements are written in the order of the MSPDI schema (mspdi_pj12.xsd), which Microsoft Project enforces.
 import type { Db, Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
-import type { Shift } from '../calendar/clndr-data.ts';
+import { parseClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../dates.ts';
 import { parseXml, type XNode } from '../xml/p6xml.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { ASG_DEPS, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
-import { defaultShifts, emptyTask, num, projectFromDb, projectToDb, toP6Date, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
+import { defaultShifts, emptyTask, linkKey, num, projectFromDb, projectToDb, toP6Date, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
 
 export const MSPDI_NS = 'http://schemas.microsoft.com/project';
 
@@ -54,6 +54,34 @@ const parseTime = (s: string, isEnd: boolean): number | null => {
   const v = +m[1] * 60 + +m[2];
   return isEnd && (v === 0 || v >= 1440) ? 1440 : v;
 };
+
+// ---------- calendar elements (read, and patched in place when an edited calendar is written back)
+
+const shiftsOf = (n: XNode | undefined): Shift[] => kids(child(n ?? { name: '', children: [], text: '' }, 'WorkingTimes'), 'WorkingTime')
+  .map((w) => ({ start: parseTime(val(w, 'FromTime'), false), end: parseTime(val(w, 'ToTime'), true) }))
+  .filter((s): s is Shift => s.start != null && s.end != null && s.end > s.start).sort((a, b) => a.start - b.start);
+const dayShifts = (n: XNode) => { const working = flag(val(n, 'DayWorking')); const ss = working ? shiftsOf(n) : []; return working && !ss.length ? defaultShifts() : ss; };
+const serialOf = (s: string) => { const t = parseP6Date(toP6Date(s)); return t == null ? null : minutesToSerial(t); };
+/** The days an <Exception> covers (OLE serial day -> shifts); `known` false for a recurrence type the clone cannot expand. */
+function exceptionDays(ex: XNode): { days: Map<number, Shift[]>; known: boolean; long: boolean } {
+  const days = new Map<number, Shift[]>();
+  const tp = child(ex, 'TimePeriod');
+  if (!tp) return { days, known: true, long: false };
+  const ss = dayShifts(ex);
+  const type = Number(val(ex, 'Type') || '1');
+  const d0 = serialOf(val(tp, 'FromDate')), to = serialOf(val(tp, 'ToDate'));
+  if (d0 == null) return { days, known: true, long: false };
+  const d1 = to ?? d0, long = d1 - d0 > 20000, end = Math.min(d1, d0 + 20000);
+  if (type === 1) { for (let d = d0; d <= end; d += Math.max(1, Number(val(ex, 'Period')) || 1)) days.set(d, ss.map((s) => ({ ...s }))); return { days, known: true, long }; }
+  const dow = Number(val(ex, 'DaysOfWeek')) || 0, month = Number(val(ex, 'Month')), mday = Number(val(ex, 'MonthDay'));
+  for (let d = d0; d <= end; d++) {
+    const dt = new Date(serialToMinutes(d) * 60000);
+    const ok = type === 6 ? (dow & (1 << dt.getUTCDay())) !== 0 : type === 2 || type === 4 ? dt.getUTCDate() === mday && (type === 4 || dt.getUTCMonth() === month) : false;
+    if (ok) days.set(d, ss.map((s) => ({ ...s })));
+  }
+  if (!days.size && type !== 6 && type !== 2 && type !== 4) { days.set(d0, ss.map((s) => ({ ...s }))); return { days, known: false, long }; }
+  return { days, known: true, long };
+}
 
 // ---------- parser
 
@@ -110,9 +138,6 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
     const isBase = flag(val(c, 'IsBaseCalendar'));
     const baseUid = val(c, 'BaseCalendarUID');
     const cal: MCal = { uid, name: val(c, 'Name') || `Calendar ${uid}`, isBase, baseUid: baseUid && baseUid !== '-1' ? baseUid : undefined, week: [null, null, null, null, null, null, null], exceptions: new Map() };
-    const shifts = (n: XNode | undefined): Shift[] => kids(child(n ?? { name: '', children: [], text: '' }, 'WorkingTimes'), 'WorkingTime')
-      .map((w) => ({ start: parseTime(val(w, 'FromTime'), false), end: parseTime(val(w, 'ToTime'), true) }))
-      .filter((s): s is Shift => s.start != null && s.end != null && s.end > s.start).sort((a, b) => a.start - b.start);
     const setRange = (from: string, to: string, ss: Shift[], every = 1) => {
       const a = parseP6Date(toP6Date(from)), b = parseP6Date(toP6Date(to) || toP6Date(from));
       if (a == null || b == null) return;
@@ -122,38 +147,17 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
     };
     for (const wd of kids(child(c, 'WeekDays'), 'WeekDay')) {
       const dt = Number(val(wd, 'DayType'));
-      const working = flag(val(wd, 'DayWorking'));
-      let ss = working ? shifts(wd) : [];
-      if (working && !ss.length) ss = defaultShifts();
+      const ss = dayShifts(wd);
       if (dt >= 1 && dt <= 7) cal.week[dt - 1] = ss;
       else if (dt === 0) { const tp = child(wd, 'TimePeriod'); if (tp) setRange(val(tp, 'FromDate'), val(tp, 'ToDate'), ss); } // legacy exception
     }
     for (const ex of kids(child(c, 'Exceptions'), 'Exception')) {
       const tp = child(ex, 'TimePeriod');
       if (!tp) continue;
-      const working = flag(val(ex, 'DayWorking'));
-      let ss = working ? shifts(ex) : [];
-      if (working && !ss.length) ss = defaultShifts();
-      const type = Number(val(ex, 'Type') || '1');
-      const from = val(tp, 'FromDate'), to = val(tp, 'ToDate');
-      if (type === 1) { setRange(from, to, ss, Number(val(ex, 'Period')) || 1); continue; }
-      // Recurring exceptions: expand inside the time period
-      const a = parseP6Date(toP6Date(from)), b = parseP6Date(toP6Date(to));
-      if (a == null || b == null) continue;
-      const d0 = minutesToSerial(a), d1 = Math.min(minutesToSerial(b), d0 + 20000);
-      const dow = Number(val(ex, 'DaysOfWeek')) || 0, month = Number(val(ex, 'Month')), mday = Number(val(ex, 'MonthDay'));
-      let hit = 0;
-      for (let d = d0; d <= d1; d++) {
-        const dt = new Date(serialToMinutes(d) * 60000);
-        const ok = type === 6 ? (dow & (1 << dt.getUTCDay())) !== 0
-          : type === 2 || type === 4 ? dt.getUTCDate() === mday && (type === 4 || dt.getUTCMonth() === month)
-          : false;
-        if (ok) { cal.exceptions.set(d, ss.map((s) => ({ ...s }))); hit++; }
-      }
-      if (!hit && type !== 6 && type !== 2 && type !== 4) {
-        setRange(from, from, ss);
-        findings.push({ severity: 'warning', code: 'MSP_CAL_RECURRING', table: 'CALENDAR', key: uid, message: `Calendar ${cal.name}: recurring exception type ${type} is not supported; only its first day was imported.`, p6: 'P6 stores exceptions day by day.' });
-      }
+      const { days, known, long } = exceptionDays(ex);
+      for (const [d, ss] of days) cal.exceptions.set(d, ss);
+      if (long) findings.push({ severity: 'warning', code: 'MSP_CAL_RANGE', table: 'CALENDAR', key: uid, message: `Calendar ${cal.name}: exception ${val(tp, 'FromDate')}..${val(tp, 'ToDate')} is longer than 20000 days; truncated.`, p6: 'P6 stores exceptions day by day.' });
+      if (!known) findings.push({ severity: 'warning', code: 'MSP_CAL_RECURRING', table: 'CALENDAR', key: uid, message: `Calendar ${cal.name}: recurring exception type ${val(ex, 'Type')} is not supported; only its first day was imported.`, p6: 'P6 stores exceptions day by day.' });
     }
     cal.keep = { kids: [], xml: raw(c), seq: calendars.length };
     calendars.push(cal);
@@ -202,7 +206,9 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
       const k = extKey.get(val(e, 'FieldID'));
       if (k && k !== 'rsrcType') m.extra[k] = val(e, 'Value');
     }
+    m.links = [];
     for (const l of kids(t, 'PredecessorLink')) {
+      m.links.push(null); // replaced below by the link read from it; null: a link the clone does not import
       const pu = val(l, 'PredecessorUID');
       if (!pu) continue;
       if (flag(val(l, 'CrossProject'))) { findings.push({ severity: 'warning', code: 'MSP_CROSS_PROJECT_LINK', table: 'TASKPRED', key: uid, message: `"${m.name}" has a cross-project predecessor (${val(l, 'CrossProjectName')}); link dropped.`, p6: 'P6 cannot resolve links to other MS Project files.' }); continue; }
@@ -212,9 +218,10 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
       const base = fmt > 32 ? fmt - 32 : fmt; // 35.. = estimated variants
       const lagHrs = lag / 600; // tenths of minutes
       // Assumption (as MPXJ reads it): percentage lags store the plain percentage in LinkLag.
-      if (base === 19 || base === 20) { lagFormats.add('percent'); m.preds.push({ uid: pu, type, lagHrs: 0, lagPct: lag }); continue; }
+      if (base === 19 || base === 20) { lagFormats.add('percent'); m.preds.push({ uid: pu, type, lagHrs: 0, lagPct: lag }); m.links[m.links.length - 1] = m.preds[m.preds.length - 1]; continue; }
       if ([4, 6, 8, 10, 12].includes(base) && lag) lagFormats.add('elapsed');
       m.preds.push({ uid: pu, type, lagHrs });
+      m.links[m.links.length - 1] = m.preds[m.preds.length - 1];
     }
     tasks.push(m);
   }
@@ -271,7 +278,82 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
 
 // ---------- writer
 
-export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
+/** A link read from the file whose type or lag an edit changed: the same element with the new type and lag, in its own
+ *  lag format (a percentage lag stays a percentage of the predecessor's duration). */
+function relink(xml: string, l: MPred, predHrs: number): string {
+  const fmt = Number(/<LagFormat>\s*(\d+)/.exec(xml)?.[1] ?? 7), base = fmt > 32 ? fmt - 32 : fmt;
+  const lag = base === 19 || base === 20 ? Math.round(predHrs > 0 ? (l.lagHrs / predHrs) * 100 : 0) : Math.round(l.lagHrs * 600);
+  let x = xml.replace(/<Type>[^<]*<\/Type>/, `<Type>${['FF', 'FS', 'SF', 'SS'].indexOf(l.type)}</Type>`);
+  x = /<LinkLag>/.test(x) ? x.replace(/<LinkLag>[^<]*<\/LinkLag>/, `<LinkLag>${lag}</LinkLag>`) : x.replace(/<\/Type>/, `</Type><LinkLag>${lag}</LinkLag>`);
+  return x;
+}
+
+const times = (ss: Shift[]) => (ss.length ? `<WorkingTimes>${ss.map((s) => `<WorkingTime><FromTime>${hms(s.start)}</FromTime><ToTime>${hms(s.end)}</ToTime></WorkingTime>`).join('')}</WorkingTimes>` : '');
+const day10 = (d: number) => formatP6Date(serialToMinutes(d)).slice(0, 10);
+const exceptionXml = (from: number, to: number, ss: Shift[], name: string) => `<Exception><EnteredByOccurrences>0</EnteredByOccurrences><TimePeriod><FromDate>${day10(from)}T00:00:00</FromDate><ToDate>${day10(to)}T23:59:00</ToDate></TimePeriod><Occurrences>${to - from + 1}</Occurrences><Name>${esc(name)}</Name><Type>1</Type><DayWorking>${ss.length ? 1 : 0}</DayWorking>${times(ss)}</Exception>`;
+/** Days (with the same hours and name) as exception ranges. */
+function exceptionRanges(days: [number, Shift[], string][]): string {
+  const out: string[] = [];
+  const sorted = [...days].sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i < sorted.length;) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1][0] === sorted[j][0] + 1 && JSON.stringify(sorted[j + 1][1]) === JSON.stringify(sorted[i][1]) && sorted[j + 1][2] === sorted[i][2]) j++;
+    out.push(exceptionXml(sorted[i][0], sorted[j][0], sorted[i][1], sorted[i][2]));
+    i = j + 1;
+  }
+  return out.join('');
+}
+
+/**
+ * An edited calendar written back: the element as the file had it (UID, GUID, base calendar, work weeks, exceptions
+ * with their names and recurrences), with only what changed written anew: the week days whose hours changed, and the
+ * exceptions on days whose hours changed (an exception that covers a changed day goes on for its other days, under
+ * its own name, as day ranges).
+ */
+function patchCalendar(xml: string, before: CalendarDef, after: CalendarDef, name: string | null, baseUid: string | null): string {
+  const cal = parseXml(xml).children[0];
+  const raw = (n: XNode) => xml.slice(n.s, n.e);
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const days = [0, 1, 2, 3, 4, 5, 6].filter((i) => !same(before.week[i], after.week[i]));
+  const exDays = new Set([...before.exceptions.keys(), ...after.exceptions.keys()].filter((d) => !same(before.exceptions.get(d), after.exceptions.get(d))));
+  const dayXml = (i: number) => `<WeekDay><DayType>${i + 1}</DayType><DayWorking>${after.week[i].length ? 1 : 0}</DayWorking>${times(after.week[i])}</WeekDay>`;
+  const weekXml = (n?: XNode) => {
+    const seen = new Set<number>(), o: string[] = [];
+    for (const wd of n?.children ?? []) { const dt = Number(val(wd, 'DayType')); seen.add(dt); o.push(dt >= 1 && dt <= 7 && days.includes(dt - 1) ? dayXml(dt - 1) : raw(wd)); }
+    for (const i of days) if (!seen.has(i + 1)) o.push(dayXml(i));
+    return `<WeekDays>${o.join('')}</WeekDays>`;
+  };
+  const exXml = (n?: XNode) => {
+    const o: string[] = [], nameOf = new Map<number, string>();
+    for (const ex of n?.children ?? []) {
+      const covers = exceptionDays(ex).days;
+      if (![...covers.keys()].some((d) => exDays.has(d))) { o.push(raw(ex)); continue; }
+      const nm = val(ex, 'Name');
+      for (const d of covers.keys()) nameOf.set(d, nm);
+      o.push(exceptionRanges([...covers].filter(([d]) => !exDays.has(d)).map(([d, ss]) => [d, ss, nm])));
+    }
+    o.push(exceptionRanges([...exDays].filter((d) => after.exceptions.has(d)).map((d) => { const ss = after.exceptions.get(d)!; return [d, ss, nameOf.get(d) || (ss.length ? 'Working exception' : 'Nonworking')]; })));
+    return `<Exceptions>${o.join('')}</Exceptions>`;
+  };
+  const out: string[] = [];
+  let week = false, exc = false;
+  for (const c of cal.children) {
+    if (c.name === 'Name' && name != null) out.push(`<Name>${esc(name)}</Name>`);
+    else if (c.name === 'BaseCalendarUID' && baseUid != null) out.push(`<BaseCalendarUID>${esc(baseUid)}</BaseCalendarUID>`);
+    else if (c.name === 'WeekDays' && days.length) { week = true; out.push(weekXml(c)); }
+    else if (c.name === 'Exceptions' && exDays.size) { exc = true; out.push(exXml(c)); }
+    else out.push(raw(c));
+    // the file had none: they go where Microsoft Project writes them
+    if (c.name === 'BaseCalendarUID' && days.length && !cal.children.some((x) => x.name === 'WeekDays')) { week = true; out.push(weekXml()); }
+    if ((c.name === 'WeekDays' || (c.name === 'BaseCalendarUID' && !cal.children.some((x) => x.name === 'WeekDays'))) && exDays.size && !cal.children.some((x) => x.name === 'Exceptions')) { exc = true; out.push(exXml()); }
+  }
+  if (days.length && !week) out.push(weekXml());
+  if (exDays.size && !exc) out.push(exXml());
+  return `<Calendar>${out.join('')}</Calendar>`;
+}
+
+/** report: what the save did that the caller should know (e.g. WBS codes that follow the outline). */
+export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[] } = {}): string {
   const m = projectFromDb(db, opts.projIds);
   // each element's children are collected as [name, xml] pairs, so a project read from MSPDI can be merged back
   // into what the file had (keep.ts): unchanged elements go out as they came in
@@ -302,6 +384,9 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
   };
   const seqOf = (x: { keep?: Kept }, _i: number) => x.keep?.seq;
   const ghosts = m.keep?.ghosts ?? { tasks: [], resources: [], assignments: [], calendars: [] };
+  const masked = /<WBSMask>/.test(m.keep?.kids.find((x) => x[0] === 'WBSMasks')?.[1] ?? '');
+  const followed: string[] = [];
+  const durOf = new Map(m.tasks.map((t) => [t.uid, t.durHrs ?? 0]));
 
   const proj: [string, string][] = [];
   cur = proj;
@@ -336,9 +421,28 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
 
   // Calendars: base calendars, then one resource calendar per work resource (MS Project requires it). A calendar read
   // from the file and not changed since goes back as it was (derived calendars and resource calendars included).
-  const times = (ss: Shift[]) => (ss.length ? `<WorkingTimes>${ss.map((s) => `<WorkingTime><FromTime>${hms(s.start)}</FromTime><ToTime>${hms(s.end)}</ToTime></WorkingTime>`).join('')}</WorkingTimes>` : '');
-  const calXml = (c: MProject['calendars'][number]) => {
-    if (c.keep?.xml && c.row && !changedSince('CALENDAR', c.row, k)(['clndr_name', 'clndr_data', 'base_clndr_id'])) return c.keep.xml;
+  const uidOfCal = new Map(m.calendars.filter((c) => c.row).map((c) => [c.row!.clndr_id, c.uid]));
+  // a resource read from the file whose calendar changed keeps its own resource calendar: that calendar now derives
+  // from the new one (resource calendars are per resource in Microsoft Project)
+  const ownCal = (r: MProject['resources'][number]) => r.keep?.kids.find((x) => x[0] === 'CalendarUID')?.[1].replace(/<[^>]+>/g, '').trim();
+  const resCals = new Set([...ghosts.calendars.map((g) => g.uid), ...m.calendars.filter((c) => c.row?.clndr_type === 'CA_Rsrc').map((c) => c.uid)]);
+  const rebased = new Map<string, string>(), reusedCal = new Set<string>();
+  for (const r of m.resources) {
+    if (!r.keep || !r.row || !changedSince('RSRC', r.row, k)(['clndr_id'])) continue;
+    const own = ownCal(r);
+    if (own && resCals.has(own) && own !== r.calUid) { rebased.set(own, r.calUid || m.calUid); reusedCal.add(r.uid); }
+  }
+  const rebase = (uid: string, xml: string) => (rebased.has(uid) ? xml.replace(/<BaseCalendarUID>[^<]*<\/BaseCalendarUID>/, `<BaseCalendarUID>${esc(rebased.get(uid)!)}</BaseCalendarUID>`) : xml);
+  const calXml = (c: MProject['calendars'][number]) => rebase(c.uid, calXml0(c));
+  const calXml0 = (c: MProject['calendars'][number]) => {
+    if (c.keep?.xml && c.row) {
+      const ch = changedSince('CALENDAR', c.row, k);
+      if (!ch(['clndr_name', 'clndr_data', 'base_clndr_id'])) return c.keep.xml;
+      // edited: the calendar as the file had it, with only what changed written anew
+      const before = JSON.parse(c.row._msp_snap) as Record<string, string>;
+      return patchCalendar(c.keep.xml, parseClndrData(before.clndr_data ?? ''), parseClndrData(c.row.clndr_data ?? ''), ch(['clndr_name']) ? c.row.clndr_name : null,
+        ch(['base_clndr_id']) ? (c.row.base_clndr_id ? uidOfCal.get(c.row.base_clndr_id) ?? '-1' : '-1') : null);
+    }
     const o: string[] = [`<Calendar><UID>${esc(c.uid)}</UID><Name>${esc(c.name)}</Name><IsBaseCalendar>1</IsBaseCalendar><IsBaselineCalendar>0</IsBaselineCalendar><BaseCalendarUID>-1</BaseCalendarUID><WeekDays>`];
     c.week.forEach((ss, i) => o.push(`<WeekDay><DayType>${i + 1}</DayType><DayWorking>${ss && ss.length ? 1 : 0}</DayWorking>${times(ss ?? [])}</WeekDay>`));
     o.push('</WeekDays>');
@@ -363,12 +467,12 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
   };
   // calendars in the file's order (kept ones by their place; new ones after)
   const calOrder = m.calendars.map((c, i) => ({ c, i })).sort((x, y) => (x.c.keep?.seq ?? 1e9 + x.i) - (y.c.keep?.seq ?? 1e9 + y.i)).map((x) => x.c);
-  const cals = [withGhosts(calOrder.map((c, i) => ({ seq: seqOf(c, i), xml: () => calXml(c) })), ghosts.calendars)];
+  const cals = [withGhosts(calOrder.map((c, i) => ({ seq: seqOf(c, i), xml: () => calXml(c) })), ghosts.calendars.map((g) => ({ ...g, xml: rebase(g.uid, g.xml) })))];
   let calUid = [...m.calendars.map((c) => c.uid), ...ghosts.calendars.map((g) => g.uid)].reduce((x, u) => Math.max(x, Number(u) || 0), 0);
   const resCal = new Map<string, number>();
   for (const r of m.resources) {
     // a resource read from the file keeps its own resource calendar while its calendar did not change
-    if (r.type !== 'work' || (r.keep && r.row && !changedSince('RSRC', r.row, k)(['clndr_id']))) continue;
+    if (r.type !== 'work' || reusedCal.has(r.uid) || (r.keep && r.row && !changedSince('RSRC', r.row, k)(['clndr_id']))) continue;
     resCal.set(r.uid, ++calUid);
     cals.push(`<Calendar><UID>${calUid}</UID><Name>${esc(r.name)}</Name><IsBaseCalendar>0</IsBaseCalendar><IsBaselineCalendar>0</IsBaselineCalendar><BaseCalendarUID>${esc(r.calUid || m.calUid)}</BaseCalendarUID></Calendar>`);
   }
@@ -410,17 +514,32 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
       if (t.constraintType && t.constraintType > 1) dt('ConstraintDate', t.constraintDate);
       dt('Deadline', t.deadline);
       el('IgnoreResourceCalendar', b(t.ignoreRsrcCal ?? true));
-      for (const l of t.preds) {
-        cur.push(['PredecessorLink', `<PredecessorLink><PredecessorUID>${esc(l.uid)}</PredecessorUID><Type>${['FF', 'FS', 'SF', 'SS'].indexOf(l.type)}</Type><CrossProject>0</CrossProject><LinkLag>${Math.round(l.lagHrs * 600)}</LinkLag><LagFormat>7</LagFormat></PredecessorLink>`]);
-      }
+      const ourLink = (l: MPred) => `<PredecessorLink><PredecessorUID>${esc(l.uid)}</PredecessorUID><Type>${['FF', 'FS', 'SF', 'SS'].indexOf(l.type)}</Type><CrossProject>0</CrossProject><LinkLag>${Math.round(l.lagHrs * 600)}</LinkLag><LagFormat>7</LagFormat></PredecessorLink>`;
+      if (t.keep && t.row?._msp_links) {
+        // a task read from the file: each link as it was written unless an edit changed it (then only its type and
+        // lag, in its own lag format); removed links go, added ones follow; links the clone does not read stay
+        const keys = JSON.parse(t.row._msp_links) as string[], now = new Map(t.preds.map((l) => [l.uid, l])), done = new Set<string>();
+        t.keep.kids.filter((x) => x[0] === 'PredecessorLink').forEach(([, x], i) => {
+          const key = keys[i];
+          if (!key) { cur.push(['PredecessorLink', x]); return; }
+          const uid = key.slice(0, key.indexOf(':')), l = now.get(uid);
+          if (!l || done.has(uid)) return;
+          done.add(uid);
+          cur.push(['PredecessorLink', linkKey(uid, `PR_${l.type}`, p6num(l.lagHrs)) === key ? x : relink(x, l, durOf.get(uid) ?? 0)]);
+        });
+        for (const l of t.preds) if (!done.has(l.uid)) cur.push(['PredecessorLink', ourLink(l)]);
+      } else for (const l of t.preds) cur.push(['PredecessorLink', ourLink(l)]);
       if (p6ext) for (const [key, id] of TASK_TEXT) { const v = t.extra[key]; if (v) cur.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${id}</FieldID><Value>${esc(v)}</Value></ExtendedAttribute>`]); }
     } else {
       el('CalendarUID', -1);
     }
     if (t.summary) return element('Task', t.keep, t.row, 'PROJWBS', SUMMARY_DEPS);
-    // a leaf's WBS code (Microsoft Project's own) stays while the task keeps its place in the outline
+    // a leaf's WBS code: with a WBS code mask it is the task's own code, kept when the task moves (as in Project); without
+    // one, Project's WBS is the outline number, so a moved task's code follows its new place
     const outlineWas = t.keep?.kids.find((x) => x[0] === 'OutlineNumber')?.[1].replace(/<[^>]+>/g, '').trim();
-    return element('Task', t.keep, t.row, 'TASK', { ...TASK_DEPS, WBS: () => outlineWas !== t.outline, ExtendedAttribute: p6ext ? P6_FIELDS : () => false }, notOurs);
+    const moved = !!t.keep && outlineWas !== t.outline && t.keep.kids.some((x) => x[0] === 'WBS');
+    if (moved && !masked) { cur.push(['WBS', `<WBS>${esc(t.outline)}</WBS>`]); followed.push(`${t.extra.activityId ?? t.name} (UID ${t.uid}) ${outlineWas} -> ${t.outline}`); }
+    return element('Task', t.keep, t.row, 'TASK', { ...TASK_DEPS, WBS: () => moved && !masked, ExtendedAttribute: p6ext ? P6_FIELDS : () => false }, notOurs);
   };
   // Microsoft Project's ID is the row number: after the outline and the kept rows are in place, rows are numbered in
   // order (the project summary task stays 0), so a task added or moved renumbers the rows after it, as in Project
@@ -452,7 +571,7 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
     el('OvertimeRateFormat', 2);
     el('CalendarUID', resCal.get(r.uid));
     if (r.p6Type && p6ext) cur.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><Value>${esc(r.p6Type)}</Value></ExtendedAttribute>`]);
-    return element('Resource', r.keep, r.row, 'RSRC', { ...RES_DEPS, ExtendedAttribute: p6ext ? ['rsrc_type'] : () => false }, notOurs);
+    return element('Resource', r.keep, r.row, 'RSRC', { ...RES_DEPS, ...(reusedCal.has(r.uid) ? { CalendarUID: () => false } : {}), ExtendedAttribute: p6ext ? ['rsrc_type'] : () => false }, notOurs);
   };
   proj.push(['Resources', `<Resources>${withGhosts(m.resources.map((r, i) => ({ seq: seqOf(r, i), xml: () => resXml(r) })), ghosts.resources)}</Resources>`]);
 
@@ -476,6 +595,7 @@ export function writeMspdi(db: Db, opts: { projIds?: string[] } = {}): string {
   };
   proj.push(['Assignments', `<Assignments>${withGhosts(m.assignments.map((a, i) => ({ seq: seqOf(a, i), xml: () => asgXml(a) })), ghosts.assignments)}</Assignments>`]);
 
+  if (followed.length) opts.report?.push(`This file has no WBS code mask, so Microsoft Project's WBS code is the outline number: the WBS of ${followed.length} moved task(s) follows the new place: ${followed.slice(0, 20).join('; ')}.`);
   const body = m.keep && m.row ? mergeKids(m.keep.kids, proj, PROJECT_DEPS, changedSince('PROJECT', m.row, k), ORDER.Project) : proj.map((x) => x[1]).join('\n');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Project xmlns="${MSPDI_NS}">\n${body}\n</Project>\n`;
 }

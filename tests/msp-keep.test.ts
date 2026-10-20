@@ -84,3 +84,83 @@ test('MSPDI through MCP: F9 keeps Microsoft Project\'s dates until something tha
   const ch = sc.msp_dates_changed['Clinic Fitout'];
   assert.ok(ch.activities >= 1 && ch.changes.every((c: { source_uid: string; field: string; ms_project: string; now: string }) => c.source_uid && c.field && c.ms_project !== c.now), JSON.stringify(ch));
 });
+
+/** The file edited with `ops` (and `mutate`), saved: what changed (diff lines), the output, the save's report. */
+function edited(ops: unknown[], mutate?: (db: ReturnType<typeof parseMspdi>['db']) => void, src = readFileSync(FILE, 'utf8')) {
+  const { db } = parseMspdi(src);
+  const r = applyOps(db, ops);
+  assert.equal(r.ok, true, r.error?.message ?? '');
+  mutate?.(db);
+  const report: string[] = [];
+  const out = writeMspdi(db, { report });
+  return { out, d: diff(leaves(src), leaves(out)), report };
+}
+const taskXml = (xml: string, uid: string) => new RegExp(`<Task><UID>${uid}</UID>[\\s\\S]*?</Task>`).exec(xml.replace(/>\s+</g, '><'))![0];
+const links = (xml: string) => xml.match(/<PredecessorLink>[\s\S]*?<\/PredecessorLink>/g) ?? [];
+const calXml = (xml: string, uid: string) => new RegExp(`<Calendar><UID>${uid}</UID>[\\s\\S]*?</Calendar>`).exec(xml.replace(/>\s+</g, '><'))![0];
+
+test('MSPDI links: an edit rewrites only the link it changed (type and lag, in its own lag format); the others stay as written', () => {
+  const src = readFileSync(FILE, 'utf8');
+  const { out, d } = edited([
+    { op: 'update_relationship', pred: 'uid:155', succ: 'uid:162', lag_days: 1 }, // a percentage lag: 8 h of 40 h = 20 %
+    { op: 'update_relationship', pred: 'uid:140', succ: 'uid:155', new_type: 'SS' },
+    { op: 'delete_relationship', pred: 'uid:140', succ: 'uid:162' }, // the elapsed-lag link goes
+  ]);
+  assert.ok(d.every((x) => /\/PredecessorLink\//.test(x)), d.join('\n'));
+  const before = links(taskXml(src, '155'));
+  assert.deepEqual(links(taskXml(out, '155')), [before[0]!.replace('<Type>1</Type>', '<Type>3</Type>'), before[1], before[2]]); // summary and cross-project links as read
+  assert.deepEqual(links(taskXml(out, '162')), ['<PredecessorLink><PredecessorUID>155</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>20</LinkLag><LagFormat>19</LagFormat></PredecessorLink>']);
+  // untouched links of an edited task stay as written: the elapsed lag of 140 -> 162 when only 155 -> 162 changes
+  const only = edited([{ op: 'update_relationship', pred: 'uid:155', succ: 'uid:162', lag_days: 2 }]);
+  assert.deepEqual(links(taskXml(only.out, '162'))[1], links(taskXml(src, '162'))[1]);
+  // an added link: the clone's, after the file's
+  const add = edited([{ op: 'add_relationship', pred: 'uid:140', succ: 'uid:162', type: 'SS' }, { op: 'add_activity', id: 'N1', name: 'New', wbs: '1' }, { op: 'add_relationship', pred: 'N1', succ: 'uid:162' }]);
+  const l = links(taskXml(add.out, '162'));
+  assert.deepEqual([l.length, l[0], l[1]], [3, links(taskXml(src, '162'))[0], links(taskXml(src, '162'))[1]]);
+});
+
+test('MSPDI calendars: an edited calendar keeps its base, GUID, exception names and recurrences; only the changed days are written anew', () => {
+  const src = readFileSync(FILE, 'utf8');
+  const { out, d } = edited([
+    { op: 'update_calendar', name: 'Standard', holidays: ['2026-03-27'], remove_exceptions: ['2026-04-25'] },
+    { op: 'update_calendar', name: 'Night works', work_week: { sat: [['08:00', '13:00']] } },
+  ]);
+  assert.ok(d.every((x) => /^[-+] Calendars\/Calendar\/(WeekDays|Exceptions)\//.test(x)), d.join('\n'));
+  const std = calXml(out, '11'), was = calXml(src, '11');
+  for (const keep of ['<GUID>11111111-0000-4000-8000-000000000011</GUID>', '<Name>Site closed</Name>', /<WeekDays>[\s\S]*<\/WeekDays>/.exec(was)![0]]) assert.ok(std.includes(keep as string), String(keep));
+  // the recurrence that covered the removed day goes on for its other days, under its own name; the new holiday is added
+  assert.ok(!std.includes('<Type>4</Type>'));
+  assert.deepEqual(std.match(/<FromDate>[^<]+<\/FromDate>[\s\S]*?<Name>[^<]+<\/Name>/g)!.map((x) => [x.slice(10, 20), /<Name>([^<]+)/.exec(x)![1]]),
+    [['2026-03-13', 'Site closed'], ['2026-03-25', 'Monthly maintenance'], ['2026-05-25', 'Monthly maintenance'], ['2026-03-27', 'Nonworking']]);
+  // a recurrence untouched by the edit stays a recurrence
+  assert.ok(calXml(edited([{ op: 'update_calendar', name: 'Standard', holidays: ['2026-03-27'] }]).out, '11').includes('<Type>4</Type><Period>1</Period><MonthDay>25</MonthDay>'));
+  const night = calXml(out, '15');
+  for (const keep of ['<GUID>11111111-0000-4000-8000-000000000015</GUID>', '<IsBaseCalendar>0</IsBaseCalendar>', '<BaseCalendarUID>11</BaseCalendarUID>', '<Name>Permit day</Name>',
+    '<WeekDay><DayType>7</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>13:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>']) assert.ok(night.includes(keep), keep);
+  assert.equal((night.match(/<WeekDay>/g) ?? []).length, 1, 'the inherited days stay inherited');
+});
+
+test('MSPDI resources: a resource whose calendar changed keeps its own resource calendar, which now derives from the new one', () => {
+  const { out, d } = edited([], (db) => {
+    const night = db.tables.CALENDAR.rows.find((c) => c.clndr_name === 'Night works')!;
+    db.tables.RSRC.rows.find((r) => r.rsrc_short_name === 'J')!.clndr_id = night.clndr_id;
+  });
+  assert.deepEqual(d, ['+ Calendars/Calendar/BaseCalendarUID=15', '- Calendars/Calendar/BaseCalendarUID=11']);
+  assert.ok(calXml(out, '27').includes('<BaseCalendarUID>15</BaseCalendarUID>') && out.includes('<CalendarUID>27</CalendarUID>'));
+});
+
+test('MSPDI rows: a task added renumbers the rows below it, as Microsoft Project does (IDs are row numbers); UIDs and the blank row above stay', () => {
+  const { out } = edited([{ op: 'add_activity', id: 'N1', name: 'Snagging', wbs: '1' }]);
+  const rows = [...out.replace(/>\s+</g, '><').matchAll(/<Task><UID>(\d+)<\/UID>(?:<GUID>[^<]*<\/GUID>)?<ID>(\d+)<\/ID>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(rows, [['0', '0'], ['101', '1'], ['140', '2'], ['141', '3'], ['155', '4'], ['1', '5'], ['162', '6']]);
+});
+
+test('MSPDI WBS: a moved leaf keeps its WBS code under a WBS code mask; without one the code is the outline number, and the save says so', () => {
+  const move = [{ op: 'update_activity', id: 'uid:162', wbs: '1' }];
+  const masked = edited(move);
+  assert.ok(taskXml(masked.out, '162').includes('<WBS>2</WBS><OutlineNumber>1.3</OutlineNumber><OutlineLevel>2</OutlineLevel>'));
+  assert.deepEqual(masked.report, []);
+  const plain = edited(move, undefined, readFileSync(FILE, 'utf8').replace(/<WBSMask>[\s\S]*?<\/WBSMask>/, ''));
+  assert.ok(taskXml(plain.out, '162').includes('<WBS>1.3</WBS><OutlineNumber>1.3</OutlineNumber>'));
+  assert.match(plain.report[0], /no WBS code mask[\s\S]*UID 162\) 2 -> 1\.3/);
+});
