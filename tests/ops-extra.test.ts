@@ -144,3 +144,14 @@ test('ops: a full WBS path wins over a short name it shares with a child (1 and 
   assert.deepEqual(['T1', 'T2', 'T3'].map(nameOf), ['Sub', 'Piling', 'Bored']);
   bad(db, [{ op: 'add_activity', id: 'T4', name: 'x', wbs: 'nope' }], /No WBS/);
 });
+
+test('xer: a saved project carries no EPS table (P6 keeps the EPS in its database), and validates without findings', async () => {
+  const db: Db = { tables: {} };
+  ok(db, [{ op: 'add_project', id: 'P3', start: '2026-03-02' }, { op: 'add_eps', id: 'CIV', name: 'Civil' }, { op: 'set_project', eps: 'CIV' }, { op: 'add_activity', id: 'T1', name: 'One', duration_days: 2 }]);
+  const out = writeXer(db, { version: '19.12' });
+  const text = new TextDecoder().decode(out);
+  assert.ok(!/^%T\tEPS/m.test(text));
+  const { validateXer } = await import('../core/xer/validate.ts');
+  const findings = validateXer(parseXer(out).db);
+  assert.ok(!findings.some((f) => f.code === 'TABLE_UNKNOWN'), JSON.stringify(findings));
+});
