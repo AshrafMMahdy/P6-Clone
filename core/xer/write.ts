@@ -41,10 +41,12 @@ export function selectRows(db: Db, projIds?: string[]): Map<string, Row[]> {
   }
   const projs = new Set(projIds);
   const kept = new Map<string, Set<string>>(); // table -> kept keys
+  const keptRows = new Set<Row>(); // a row once (a Set: arr.includes was quadratic, minutes on millions of 4D links)
   const keep = (t: string, r: Row) => {
     let arr = out.get(t);
     if (!arr) out.set(t, (arr = []));
-    if (arr.includes(r)) return false;
+    if (keptRows.has(r)) return false;
+    keptRows.add(r);
     arr.push(r);
     const k = KEYS[t];
     if (k) {
