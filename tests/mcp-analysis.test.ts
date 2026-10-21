@@ -41,6 +41,16 @@ test('MCP: lint with fixes (P6 and platform profiles), and schedule returns the 
   const lp = await call('lint', { handle: h, profile: 'platform' });
   assert.ok(typeof lp.d.score === 'number' && lp.d.grade);
   assert.equal((await call('lint', { handle: h, checks: ['nope'] })).d.error.code, 'bad_input');
+  // thresholds per call: named in the answer; a dangling-start allowance as large as the count passes the check
+  const n = l.d.checks.find((c: { id: string }) => c.id === 'dangling_start').total_activities;
+  const lt = await call('lint', { handle: h, profile: 'platform', simulate: false, thresholds: { dangling_start: { max: n }, edgesPerActivity: { pass: [0, 99], warn: [0, 99] } } });
+  assert.equal(lt.err, false, JSON.stringify(lt.d).slice(0, 300));
+  assert.deepEqual(lt.d.overridden, ['dangling_start.max', 'edges_per_activity.pass', 'edges_per_activity.warn']);
+  assert.deepEqual([lt.d.thresholds.dangling_start.max, lt.d.thresholds.ladder.min_group_size], [n, 3]);
+  assert.deepEqual(lt.d.checks.filter((c: { id: string }) => c.id === 'dangling_start' || c.id === 'edges_per_activity').map((c: { band: string }) => c.band), ['pass', 'pass']);
+  const bt = await call('lint', { handle: h, thresholds: { high_float_days: 44 } });
+  assert.deepEqual([bt.err, bt.d.error.code], [true, 'bad_input']);
+  assert.match(bt.d.error.message, /Unknown threshold "high_float_days"/);
   const sc = await call('schedule', { handle: h });
   assert.equal(sc.err, false, JSON.stringify(sc.d).slice(0, 300));
   assert.ok(sc.d.log && Array.isArray(sc.d.log.warnings) && Array.isArray(sc.d.log.exceptions));

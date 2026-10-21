@@ -167,7 +167,7 @@ its lookups all count every day at the hours per day of Edit > User Preferences.
 | `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?, curve?`, `allow_duplicate?` (assign a resource already on the activity again, as P6 allows) |
 | `add_resource_curve`, `update_resource_curve` | `name, new_name` to rename; `name, values` (21 percentages totalling 100: the start, then each 5% of the assignment's time, like P6 Resource Curves) |
 | `update_assignment` | `activity, resource, units?, units_per_day?, remaining_units?, curve?` (resource curve name, `""` = linear) |
-| `update_resource`, `delete_resource` | `id, new_id?, name?`; `id, clear_references?`: delete is refused while an assignment or an activity's primary resource points at it, unless `clear_references: true` removes those assignments and clears the primary resources; its rates, codes, roles and UDF values go with it |
+| `update_resource`, `delete_resource` | `id, new_id?, name?, max_units_per_day? \| max_units_per_hour?` (the cap on every rate row, which leveling reads); `id, clear_references?`: delete is refused while an assignment or an activity's primary resource points at it, unless `clear_references: true` removes those assignments and clears the primary resources; its rates, codes, roles and UDF values go with it |
 | `regenerate_guids`, `clear_authors` | `project?, dictionaries?` (default true: the shared resources, calendars, codes... too): fresh GUIDs for the project, its baselines and their objects (template GUIDs cleared) and a new internal project number (`new_proj_id?`, `keep_proj_id?`); the user fields P6 writes (`create_user`, `update_user`, `add_by_name`, user ids) cleared, and the header's user and database set to P6's defaults |
 | `update_code_type`, `update_code_value`, `delete_code_value` | `name, new_name, subject?, project?`; `type, code, new_code?, name?, subject?, project?` (`project` picks a project code type when several share the name); delete removes the value, its children and their assignments (TASKACTV, PROJPCAT, RSRCRCAT) |
 | `update_wbs` | `code, new_code?, name?, parent?` (move; `""` = top level) |
@@ -296,7 +296,7 @@ writes one project, and is required for mspdi/mpx when the file holds several), 
 `export_excel`, `import_excel`, `compare` (`mode: computed`: per activity duration delta, start / finish shift, float
 delta, became / no longer critical), `list_reports`, `run_report`, `create_report`, `close`. Schedule analysis: `check_schedule` (P6 Professional's 14 checks), `dcma_14` (profiles, baseline, status date,
 contract finish, critical path test, CPLI decided by the contract finish with the baseline figure beside it, BEI), `lint`
-(with fixes as edit operations), `float_paths` (P6 multiple float paths, near-critical, paths between two activities),
+(with fixes as edit operations; `thresholds` overrides any band, count or ladder setting per call, and the answer names those it applied), `float_paths` (P6 multiple float paths, near-critical, paths between two activities),
 `progress_curves` (PV, EV, AC, remaining early and late, SPI/CPI per period), `resource_histogram`; `schedule` returns
 the P6 schedule log with `log: true`. Recovery: `evaluate_batch` (many what-ifs, the base scheduled once),
 `crash_schedule` (least-cost cut sets across parallel paths, every step, `apply`), `optimize_schedule` (the embedded

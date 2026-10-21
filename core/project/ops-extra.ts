@@ -60,7 +60,7 @@ export const EXTRA_GUIDE = [
   `add_obs / update_obs / delete_obs: name, [parent], [new_name], [description] (update_obs; "" clears it); add_role / update_role / delete_role: id, [name], [parent], [new_id]`,
   `update_calendar: name, [new_name], [work_week] (days given replace those days), [holidays [dates]] (non-work), [work_exceptions {date: periods}], [remove_exceptions [dates]]`,
   `update_assignment: activity, resource, [units], [units_per_day], [remaining_units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (kept as entered), [curve] (resource curve name; "" = linear), [project]`,
-  `update_resource: id, [new_id] (a new Resource ID), [name]`,
+  `update_resource: id, [new_id] (a new Resource ID), [name], [max_units_per_day] or [max_units_per_hour] (Max Units / Time on every rate row of the resource, read by level_resources and optimize_schedule)`,
   `delete_resource: id, [clear_references] (default false: refused while an assignment, in any project or baseline, or an activity's primary resource points at it; true: those assignments are removed and the primary resources cleared). Its rates, resource codes, roles and UDF values go with it; its child resources move up to its parent`,
   `regenerate_guids: [project], [dictionaries] (default true: also the GUIDs of the file's shared resources, calendars, codes, OBS, roles...), [new_proj_id] or [keep_proj_id]: every GUID of the project and its baselines (project, WBS, activities, assignments, ...) replaced by a fresh one, template GUIDs cleared; the project also gets a new internal number (the next free one unless new_proj_id; keep_proj_id: true keeps it), every reference following`,
   `clear_authors: [project], [dictionaries] (default true): clears the user fields P6 writes (create_user, update_user, add_by_name, user_id, ts_approve_user_id, checkout_user_id) on the project's rows (and the shared dictionaries'), and with dictionaries the exporting user and database named in the file's header (set to P6's defaults admin / dbxDatabaseNoName)`,
@@ -526,6 +526,19 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       if (op.new_id != null) { const k = str(op.new_id, 'new_id'); if (rows(db, 'RSRC').some((x) => x.rsrc_id !== r.rsrc_id && lc(x.rsrc_short_name) === lc(k))) fail(`Resource "${k}" already exists.`); r.rsrc_short_name = k; }
       if (op.name != null) r.rsrc_name = str(op.name, 'name');
       copies(db, 'RSRC', 'rsrc_id', 'rsrc_short_name', 'rsrc_name', r);
+      // Max Units / Time: P6 keeps it on the resource's rate rows (one per effective date); the cap set here applies to
+      // every one of them (leveling and the resource checks read it there), and a resource with none gets one
+      if (op.max_units_per_hour != null && op.max_units_per_day != null) fail('Give max_units_per_hour or max_units_per_day, not both.');
+      if (op.max_units_per_hour != null || op.max_units_per_day != null) {
+        const perHr = op.max_units_per_hour != null ? num(op.max_units_per_hour, 'max_units_per_hour') : num(op.max_units_per_day, 'max_units_per_day') / hpd;
+        if (!(perHr > 0)) fail('Max units must be greater than 0.');
+        const RR = ensure(db, 'RSRCRATE', ['rsrc_rate_id', 'rsrc_id', 'max_qty_per_hr', 'cost_per_qty', 'start_date']);
+        const mine = RR.rows.filter((x) => x.rsrc_id === r.rsrc_id);
+        if (!mine.length) RR.rows.push({ rsrc_rate_id: String(nextId(db, 'RSRCRATE')), rsrc_id: r.rsrc_id, max_qty_per_hr: p6num(perHr), cost_per_qty: '0', start_date: '' });
+        for (const x of mine) x.max_qty_per_hr = p6num(perHr);
+        if (realOf(table(db, 'RSRC').fields).includes('max_qty_per_hr')) r.max_qty_per_hr = p6num(perHr);
+        return { resource: r.rsrc_short_name, max_units_per_hour: Number(p6num(perHr)), max_units_per_day: Math.round(perHr * hpd * 1000) / 1000 };
+      }
       return { resource: r.rsrc_short_name };
     }
     case 'delete_resource': {

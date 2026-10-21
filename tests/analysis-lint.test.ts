@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { applyOps } from '../core/project/ops.ts';
 import { rows, type Db } from '../core/db.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
-import { lintSchedule } from '../core/analysis/lint.ts';
+import { DEFAULT_LINT_THRESHOLDS, lintSchedule } from '../core/analysis/lint.ts';
 import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
 
 const ok = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); };
@@ -73,6 +73,39 @@ test('lint (platform profile): graded network metrics with a score and grade', (
     assert.ok(r.checks.some((x) => x.id === id), id);
   const conn = r.checks.find((x) => x.id === 'connectivity')!;
   assert.equal(conn.band, 'pass', 'one start (S) and one finish (H)');
+});
+
+test('lint thresholds: the defaults named in the answer, overrides per call (snake_case or the platform\'s camelCase), each check with what it applied', () => {
+  const db = build();
+  const base = lintSchedule(db, { profile: 'platform', simulate: false });
+  assert.deepEqual([base.thresholds, base.overridden, base.not_used], [DEFAULT_LINT_THRESHOLDS, [], undefined]);
+  const c = (r: typeof base, id: string) => r.checks.find((x) => x.id === id)!;
+  assert.deepEqual(c(base, 'serialization').applied, { pass: [0.08, 0.7], warn: [0.05, 0.9], small_network: true, weight: 15 }, 'a small network: the small bands');
+  assert.deepEqual(c(base, 'dangling_start').applied, { max: 0 });
+  assert.equal(c(base, 'dangling_start').band, 'fail');
+  assert.ok(c(base, 'fs_overlap').fixes!.some((f) => f.activities.join() === 'B,G'), 'the 2-day lead is flagged');
+  assert.ok(c(base, 'fs_overlap').fixes!.some((f) => f.activities.length === 4), 'the floor ladder');
+
+  const r = lintSchedule(db, { profile: 'platform', simulate: false, thresholds: {
+    dangling_start: { max: 1 }, fs_overlap: { max_lead_days: 2 }, ladder: { minGroupSize: 5 },
+    smallNetworkBelow: 5, nonFs: { pass: [0, 1], warn: [0, 1] }, criticality: { pass: [0.9, 1], warn: [0.8, 1] },
+    weights: { criticality_ratio: 50 }, grades: { PASS: 50, FAIL: 0 }, stretches: { maxReported: 3 },
+  } });
+  assert.deepEqual(r.overridden, ['dangling_start.max', 'fs_overlap.max_lead_days', 'ladder.min_group_size', 'small_network_below', 'non_fs_share.pass', 'non_fs_share.warn', 'criticality.pass', 'criticality.warn', 'weights.criticality', 'grades.PASS', 'grades.FAIL']);
+  assert.deepEqual(r.not_used, ['stretches'], 'the platform\'s listing settings have nothing to apply to here');
+  assert.equal(c(r, 'dangling_start').band, 'pass', 'one dangling start allowed');
+  assert.equal(c(r, 'fs_overlap').fixes!.some((f) => f.activities.join() === 'B,G'), false, 'a 2-day lead tolerated');
+  assert.equal(c(r, 'fs_overlap').fixes!.some((f) => f.activities.length === 4), false, 'four floors are not a ladder of five');
+  assert.equal(c(r, 'non_fs_share').band, 'pass');
+  assert.deepEqual([c(r, 'criticality').band, c(r, 'criticality').weight, c(r, 'criticality').applied], ['fail', 50, { pass: [0.9, 1], warn: [0.8, 1], weight: 50 }]);
+  assert.equal((c(r, 'serialization').applied as { small_network?: boolean }).small_network, undefined, 'no longer a small network');
+  assert.ok(r.grade === 'PASS' || r.grade === 'FAIL', String(r.grade));
+  assert.ok(r.score! < base.score!, `criticality fails with five times its weight (${r.score} vs ${base.score})`);
+  // DEFAULT is left alone by an override
+  assert.equal(DEFAULT_LINT_THRESHOLDS.dangling_start.max, 0);
+
+  for (const bad of [{ high_float_days: 44 }, { criticality: { pass: 0.3 } }, { criticality: { pass: [0.4, 0.1] } }, { ladder: { min_group_size: -1 } }, { ladder: { nope: 1 } }, { weights: { not_a_check: 1 } }])
+    assert.throws(() => lintSchedule(db, { thresholds: bad }), /threshold|Unknown|must be/, JSON.stringify(bad));
 });
 
 test('schedule log as data: F9 sections plus invalid milestone links, critical, unmet constraints and relationships', () => {
