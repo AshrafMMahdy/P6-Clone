@@ -108,6 +108,7 @@ export function runMenu(id: string): void {
     case 'view.bottom.actProfile': return setUi({ bottom: 'actProfile', view: 'activities' });
     case 'view.bottom.actSheet': return setUi({ bottom: 'actSheet', view: 'activities' });
     case 'view.bottom.trace': return setUi({ bottom: 'trace', view: 'activities' });
+    case 'view.bottom.fourd': return setUi({ bottom: '4d', view: 'activities' });
     case 'view.bottom.none': return setUi({ bottom: 'none' });
     case 'project.wbs': return setUi({ view: 'wbs' });
     case 'project.activities': return setUi({ view: 'activities' });

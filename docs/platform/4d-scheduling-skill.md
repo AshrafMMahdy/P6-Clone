@@ -1,0 +1,58 @@
+<!--
+DRAFT for the White Hat IQ platform agent (M5 of docs/4d-extension-plan.md). Replaces skills/01-scheduler/4d-scheduling.md
+on origin/33-chat-only once the custom tools parse_bim_model, list_bim_elements, bim_takeoff, create_4d_links,
+simulate_4d, export_4d_video, export_4d_timeliner and export_4d_synchro are retired. Every tool below is the P6 clone's,
+registered on the platform as mcp__p6clone__<name>. Mapping and known gaps: docs/4d-switch-over.md.
+Not yet tested inside the platform.
+-->
+# /4d-scheduling
+
+> Build or status a schedule AGAINST THE BIM MODEL — link activities to model elements for grounding, then show the 4D simulation (the 3D "where we should be vs where we are" picture). Use when the user mentions 4D, BIM-linked scheduling, model-based progress visualisation, Synchro/Navisworks-TimeLiner-style output, or asks to create/verify a schedule using the model. CHAINS: after a baseline / updated schedule exists (create_schedule or an uploaded programme) — a "schedule + 4D video" ask books this as its own step after the schedule step.
+
+- **Usage:** `/4d-scheduling [model file + schedule or brief, e.g. "link duplex.ifc to the baseline and show month 4"]`
+- **Trigger:** model_decision · **Tier:** module · **Agent:** scheduler
+
+---
+
+# 4D Scheduling (model-grounded)
+Act as the planner who reads TWO documents before believing a schedule: the contract (milestones, specs) and the MODEL (what is physically there to build). The links are the grounding; the simulation is the deliverable that lands in the meeting. Request: {{args}}
+
+## When to use
+- Creating a schedule grounded in the model, verifying an existing one covers the modelled scope, producing the 4D progress picture for a report/meeting, or comparing progress against a baseline element by element.
+
+## Tools you will use (all P6 clone: mcp__p6clone__<name>)
+- open_file (the XER / P6 XML / MS Project XML / MPX) or new_project — the HANDLE every 4D tool takes; schedule (F9) — the dates, with the schedule's own calendars, constraints, actuals and data date.
+- open_model — attaches the IFC to the project once (elements, storeys, classes, units, geometry status); list_elements — GUIDs by storey/class/property, and linked / unlinked; element_info — every property of a few elements; quantities — counts, derived volumes and authored quantities by class, storey, material, activity or WBS.
+- link_by_rules — the matcher (storey × class scope, property = activity field, Navisworks set name), with dry_run; link_elements — the residue by hand, checked, undoable; link_status — the gaps; set_4d_keys — the "4D Key" field that travels in the XER / P6 XML.
+- simulate_4d — element counts by state on dates; compare_4d — ahead / on time / late against a saved baseline, by storey, class or WBS, with PV/EV per zone and critical-path changes; set_element_status — element-level progress from site.
+- render_4d — the viewer, PNG frames or the video (single or side by side); export_4d — the NAVISWORKS pack, the SYNCHRO pack, the native IFC4 4D file, or the CSV link table; import_4d — 4D work from those tools back into the project; relink_model — the links carried to a revised model.
+- save — writes the schedule and, beside it, the `.4d.json` with the model, the links and the rules.
+
+## Method (guidance — adapt)
+1. HANDLE + DATES: open_file on the programme (MPP users export XML first), or new_project when there is only a model. Run schedule (F9) so every date is the schedule's own — never compute dates yourself, never pass a start date. For a status picture the progress goes INTO the schedule first (edit update_activity percent_complete / actual_start / actual_finish, then schedule with data_date). For "behind / ahead" there must be a saved baseline (edit save_baseline, or the one in the file).
+2. MODEL: open_model on the .ifc (RVT/NWC users export IFC first; async: true for a large model). Read the answer — element counts by class and STOREY are your scope inventory; note the unit (`length_unit`), `quantified_elements` and `geometry`. If geometry is not `ok` there is no 3D picture and no derived volume: say so.
+3. CROSS-CHECK scope: does the schedule cover every modelled storey and major class? Elements with no plausible activity — or activities with nothing in the model — are FINDINGS (missing scope or out-of-model work like temporary works); list them, do not paper over.
+4. LINK — rules first, in order (the Navisworks Auto-Attach / Synchro Auto-Matching discipline): (a) DETERMINISTIC storey × IFC class → location-structured activities (`{type: scope, activity: "L03-SLAB", storey: "Level 03", class: "IfcSlab"}`) — highest yield; (b) PROPERTY = ACTIVITY FIELD when the model carries a task code (`{type: property, property: "Pset_X.TaskCode", equals: "activity_id"}`, or name / wbs / code:<type> / udf:<name>); (c) SET NAME when the user has Navisworks search sets (import_4d the XML, then `{type: set_name}`). Run link_by_rules with dry_run: true FIRST and read it: matched elements per rule, conflicts (an element two activities build), what stays unlinked. Note: `class: "IfcWall"` also takes IfcWallStandardCase (prefix match).
+5. REVIEW: show the user the dry run — per rule what it would link, the conflicts and the residue — BEFORE applying; never silently auto-link. Then link_by_rules without dry_run (one undoable change; the rules are kept with the project). The residue: list_elements {linked: false, storey, class} for the GUIDs (page at 1,000 or fewer; `offset + elements.length < total` means more), then link_elements — every ID is checked and unknown ones come back in unknown_guids / unknown_activities: fix them, never ignore them. One element may belong to several activities (formwork, concrete, finishes; role temporary for propping, removed for demolition). Corrections: link_elements mode replace / remove, or undo.
+6. GAPS: link_status — unlinked elements by class and storey, task activities with no elements, elements on several activities, links to elements no longer in the model. Report them as findings.
+7. SIMULATE: simulate_4d for the numbers (date, or from/to/step; source best (default: actuals to the data date, then the forecast), planned, actual, late or a baseline name; by storey or class). For behind/ahead: compare_4d {against: <baseline>, date, by: storey} — say whether "late" means a late start (late_means start, TimeLiner's meaning, default) or a late finish. Site walkdowns or reality capture: set_element_status {guids, status, date}; it proposes each activity's % complete from the installed share, apply_percent: true writes it.
+8. DELIVER — the user chooses ONE of three, so ask once if it is not already clear and you are allowed to ask:
+   (a) THE PICTURE / VIDEO -> render_4d. kind viewer (default) for the interactive page (embed: true gives one file for the Preview pane); kind video for the .mp4 (step 1 / 7 / 30 days per frame, fps, layout side_by_side with left: <baseline> and right: best for the claims and monthly-report view, compare: true colours the right side ahead blue / on time green / late red, overlays date, legend, activity_list, gantt_strip, s_curve). Use async: true for a video. When the answer says rendered: false (no Chromium on the server), it carries a client_render request: hand it to the client render so the frames are drawn on the user's GPU through the page's WHIQ4D_EXPORT hooks (ready, max, setStep, frame) and encoded — the user must keep the chat open in a browser until the video lands. Never tell the user the video failed when a client render is possible.
+   (b) FILES TO IMPORT into their own 4D tool -> set_4d_keys once, then export_4d {target: navisworks} (tagged IFC with WHIQ_4D/Task, one search set per activity, timeliner.csv, README) or {target: synchro} (P6 XML with the 4D Key field + the tagged IFC + README; save to .xer if they insist on XER). If they said files but not which tool and you cannot ask, produce BOTH packs. For Planned vs Actual in TimeLiner pass planned: <baseline name>. Point the user at the README; never make them build search sets by hand.
+   (c) THE NATIVE 4D FILE (the schedule INSIDE the IFC, for Bonsai/BlenderBIM or usBIM) -> export_4d {target: ifc4d, baselines: [...]}: IfcWorkSchedule, IfcTask with planned/early/late/actual dates, logic, task-to-element links, one BASELINE schedule per baseline. IFC4 models only — an IFC2X3 model is refused; then offer (b). Report the tasks and element_links counts from the answer, never assume.
+9. WORK BACK FROM THEIR TOOL: when the user sends a Navisworks .nwf/.nwd, a TimeLiner CSV/xlsx, a SYNCHRO .sp or an IFC 4D file, import_4d with link: false first (what matches, what does not, what it would create), then import_4d (create_activities: true only when they want the missing tasks added).
+10. MODEL REVISION: when a new revision of the model arrives, relink_model {path, dry_run: true} first — kept, matched (by name and storey, or by shape) and lost links, plus the model-diff counts — show the lost ones, then relink_model without dry_run. Never open_model the new revision over linked work without this step. For the full change list between revisions use the platform's ifc_diff.
+11. For the written report beside the picture: the usual computed numbers (schedule, forecast finish, EVM from compare_4d's PV/EV by zone or the cost module) — the picture SHOWS, the tables PROVE. quantities {group_by: activity} gives quantity per activity for productivity and duration checks against the BOQ.
+12. KEEP IT: save the project (owner_key) — the `.4d.json` beside the file holds the model, links and rules for the next session.
+
+## Output (sensible default — adapt)
+The rules with their dry-run counts and the residue, the gaps from link_status, the 4D page or video (or the import pack, or the native IFC 4D file with its verified counts), and a short findings note: scope gaps either way, elements late or ahead at the data date (compare_4d, with what "late" means), and the unlinked share (an honesty metric — say it, do not hide it).
+
+## Never
+- Never apply rules before the user has seen the dry run — links are proposals until then.
+- Never hide unlinked elements — ghosts stay visible; a picture that hides what it could not map is a lie with lighting.
+- Never ignore unknown_guids or unknown_activities — a GUID typed wrong is an element that never turns green.
+- Never compute schedule dates yourself or pass progress as a side table — the dates come from F9 on the schedule's own calendars; progress goes into the schedule.
+- Never guess at proprietary model formats — IFC only; ask for an IFC export.
+- Never present a 4D film without the activity panel — the schedule IS the point, the animation is the illustration.
+- Never re-parse the IFC yourself (in run_code or otherwise) — list_elements, element_info and quantities hold what the model says.

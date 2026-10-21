@@ -10,7 +10,7 @@ import type { Finding } from '../core/findings.ts';
 declare global { interface Window { p6: P6Api } }
 
 export type ViewName = 'projects' | 'wbs' | 'activities' | 'resources' | 'assignments' | 'reports' | 'risk' | 'timesheets' | 'portfolios' | 'extensions';
-export type BottomPane = 'details' | 'profile' | 'spreadsheet' | 'actProfile' | 'actSheet' | 'trace' | 'none';
+export type BottomPane = 'details' | 'profile' | 'spreadsheet' | 'actProfile' | 'actSheet' | 'trace' | '4d' | 'none';
 
 /** calendarDays: days on each activity's own calendar (core/project/units.ts) — set by the MCP server and the CLI;
  *  the desktop app leaves it off and shows every day at hoursPerDay (P6's default, "use assigned calendar" off). */

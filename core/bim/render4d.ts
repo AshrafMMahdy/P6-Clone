@@ -24,7 +24,7 @@ export function viewerHtml(o: { title: string; model: string; timeline: unknown;
   const bar = o.options.interactive === false ? '' : `<div id="bar"><button id="p4d" title="Play">▶</button><input id="d4d" type="range" min="0" value="0"><select id="s4d" title="Dates to use"></select><button id="v4d-iso">Iso</button><button id="v4d-top">Top</button><button id="v4d-front">Front</button><button id="v4d-side">Side</button><span id="counts4d"></span></div>`;
   const cfg = JSON.stringify({ model: o.model, timeline: o.timeline, options: o.options }).replace(/</g, '\\u003c');
   const script = o.script.inline != null ? `<script>${o.script.inline.replace(/<\/script/gi, '<\\/script')}</script>` : `<script src="${esc(o.script.src ?? 'viewer4d.js')}"></script>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(o.title)}</title><style>${STYLE}${o.options.interactive === false ? '#stage{top:0}' : ''}</style></head><body>${bar}<div id="stage"><canvas id="c4d"></canvas><canvas id="o4d"></canvas></div><script>window.P6C4D=${cfg};</script>${script}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="WHIQ_4D viewer (P6 clone)"><title>${esc(o.title)}</title><style>${STYLE}${o.options.interactive === false ? '#stage{top:0}' : ''}</style></head><body>${bar}<div id="stage"><canvas id="c4d"></canvas><canvas id="o4d"></canvas></div><script>window.P6C4D=${cfg};</script>${script}</body></html>`;
 }
 
 /** Write the viewer: a folder (index.html, viewer4d.js, model.glb, timeline.json) or one file with embed. */

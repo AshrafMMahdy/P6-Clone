@@ -30,7 +30,7 @@ const init = await rpc('initialize', { protocolVersion: '2025-03-26', capabiliti
 child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 const tools = (await rpc('tools/list', {})).result?.tools ?? [];
 const names = tools.map((t) => t.name);
-const FOURD = ['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d'];
+const FOURD = ['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d', 'simulate_4d', 'compare_4d', 'render_4d', 'relink_model', 'synchro_cloud'];
 const ANALYSIS = ['check_schedule', 'dcma_14', 'lint', 'float_paths', 'progress_curves', 'resource_histogram', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'tia'];
 for (const need of ['open_file', 'new_project', 'edit', 'schedule', 'save', 'export_pdf', 'server_status', ...ANALYSIS, ...FOURD]) if (!names.includes(need)) failures.push(`missing tool ${need}`);
 if (JSON.stringify(tools.find((t) => t.name === 'windows_analysis')?._meta?.['whiq/files']?.read) !== '["updates[].path"]') failures.push('windows_analysis has no _meta["whiq/files"]');
@@ -78,6 +78,16 @@ else {
   await call('quantities', { handle: m4.handle, group_by: 'activity' });
   const ex4 = await call('export_4d', { handle: m4.handle, target: 'ifc4d', path: join(dir, '4d') });
   if (ex4.tasks !== 5) failures.push(`export_4d: ${JSON.stringify(ex4).slice(0, 200)}`);
+  const sim4 = await call('simulate_4d', { handle: m4.handle });
+  if (!sim4.frames?.length) failures.push(`simulate_4d: ${JSON.stringify(sim4).slice(0, 200)}`);
+  const cmp4 = await call('compare_4d', { handle: m4.handle, against: 'planned' });
+  if (!cmp4.totals) failures.push(`compare_4d: ${JSON.stringify(cmp4).slice(0, 200)}`);
+  const view4 = await call('render_4d', { handle: m4.handle, kind: 'viewer', path: join(dir, '4d-viewer') });
+  if (!view4.written?.some((f) => f.endsWith('viewer4d.js'))) failures.push(`render_4d viewer: ${JSON.stringify(view4).slice(0, 200)}`);
+  const rel4 = await call('relink_model', { handle: m4.handle, path: ifcFixture, dry_run: true });
+  if (rel4.lost !== 0) failures.push(`relink_model: ${JSON.stringify(rel4).slice(0, 200)}`);
+  const sc4 = await call('synchro_cloud', { handle: m4.handle, owner_key: m4.owner_key });
+  if (sc4.optional !== true) failures.push(`synchro_cloud: ${JSON.stringify(sc4).slice(0, 200)}`);
 }
 await call('save', { handle, owner_key, path: 'smoke.xer' });
 if (!existsSync(join(dir, 'smoke.xer'))) failures.push('save wrote no smoke.xer');

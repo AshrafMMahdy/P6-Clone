@@ -1,6 +1,8 @@
 # Plan: 4D in the P6 clone, MCP first
 
-Status: research done; building M1–M7 from 2026-10-21. Decisions of 2026-10-21 below override the rest of this plan.
+Status: built (M1–M7, whiq-v0.1.21). M7 is optional: the Navisworks add-in in `addins/navisworks` is untested without a
+Navisworks licence; `synchro_cloud` is dormant until Bentley credentials are set. The switch-over map and comparison are
+in `docs/4d-switch-over.md`. Decisions of 2026-10-21 below override the rest of this plan.
 
 ## Decisions (2026-10-21)
 

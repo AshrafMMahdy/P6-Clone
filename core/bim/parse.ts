@@ -71,7 +71,7 @@ export interface IfcIndex {
 export type IfcMeshes = Map<number, { positions: number[]; indices: number[] }>;
 
 /** Index format version — bump when the index shape or the parser's selection rules change, so caches re-parse. */
-export const INDEX_FORMAT = 5; // 5: property definitions are not elements; STEP comments skipped
+export const INDEX_FORMAT = 6; // 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
 
 export interface ParseIfcOptions {
   /** Legacy switch — mesh arrays are never returned any more; geometry itself is governed by `geometry`. */
@@ -114,7 +114,9 @@ export async function parseIfc(absIfcPath: string, opts: ParseIfcOptions = {}): 
     const meta = new Float64Array(metaBuf.buffer, metaBuf.byteOffset, metaBuf.byteLength / 8);
     const STRIDE = summary.stride || 16;
     if (index.lengthScaleSource === 'assumed-m' && summary.maxAbsCoord > 2000) { index.lengthScale = 0.001; index.lengthScaleSource = 'heuristic-mm'; }
-    const S = index.lengthScale;
+    // web-ifc already gives metres when the file declares its unit; only a model with no unit and millimetre-sized
+    // coordinates (the heuristic above) needs scaling here
+    const S = index.lengthScaleSource === 'heuristic-mm' ? 0.001 : 1;
     const byId = new Map(index.elements.map((e) => [e.expressId, e]));
     for (let r = 0; r + STRIDE <= meta.length; r += STRIDE) {
       const e = byId.get(meta[r]);
@@ -175,7 +177,7 @@ function runGeometryWorker(ifc: string, outDir: string, opts: ParseIfcOptions): 
   if (!script) return Promise.resolve({ ok: false, note: 'geometry worker script not found (core/bim/geomWorker.mjs, or ifc/geomWorker.mjs beside the program)' });
   const timeoutMs = opts.timeoutMs ?? 30 * 60_000;
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ['--max-old-space-size=4096', script, ifc, outDir, '4'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, P6CLONE_WEBIFC: webIfcEntry() } });
+    const child = spawn(process.execPath, ['--max-old-space-size=4096', script, ifc, outDir, '4'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, P6CLONE_WEBIFC: webIfcEntry(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
     let err = '', out = '';
     child.stdout.on('data', (d) => { out += String(d); if (out.length > 4000) out = out.slice(-4000); });
     child.stderr.on('data', (d) => { err += String(d); if (err.length > 4000) err = err.slice(-4000); });

@@ -17,6 +17,22 @@ import type { IfcElement, IfcIndex, IfcOwner } from './parse.ts';
 // ── STEP attribute parser ──────────────────────────────────────────────────────────────────────────
 export type StepValue = string | number | boolean | null | undefined | { ref: number } | { enum: string } | StepValue[];
 
+const CONVERSION: Record<string, number> = { INCH: 0.0254, FOOT: 0.3048, YARD: 0.9144, MILE: 1609.344 };
+
+/** A statement without its comments; a comment marker inside a string is text, not a comment. */
+function stripComments(s: string): string {
+  if (!s.includes('/*')) return s;
+  let out = '', str = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (str) { out += c; if (c === "'") str = false; continue; }
+    if (c === "'") { str = true; out += c; continue; }
+    if (c === '/' && s[i + 1] === '*') { const e = s.indexOf('*/', i + 2); if (e < 0) break; i = e + 1; continue; }
+    out += c;
+  }
+  return out;
+}
+
 /** Parse the argument list text of one entity ("'a',#12,$,(1.,2.),IFCLABEL('x'),.T."). Typed values unwrap to their inner value. */
 export function parseArgs(text: string): StepValue[] {
   let i = 0;
@@ -142,11 +158,13 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
   let projectName = '';
   let lengthScale = 1;
   let lengthScaleSource: IfcIndex['lengthScaleSource'] = 'assumed-m';
+  let convScale: number | null = null; // a conversion-based length unit (inch, foot) wins over the SI unit it is based on
 
   const onEntity = (id: number, type: string, argText: string): void => {
     switch (type) {
       case 'IFCPROJECT': { const a = parseArgs(argText); projectName = strOf(a[2]); return; }
       case 'IFCSIUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const p = strOf(a[2]); lengthScale = p === 'MILLI' ? 0.001 : p === 'CENTI' ? 0.01 : p === 'DECI' ? 0.1 : 1; lengthScaleSource = 'unit-assignment'; } return; }
+      case 'IFCCONVERSIONBASEDUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const f = CONVERSION[strOf(a[2]).toUpperCase()]; if (f) convScale = f; } return; }
       case 'IFCBUILDINGSTOREY': { const a = parseArgs(argText); storeyName.set(id, strOf(a[2]) || strOf(a[7]) || `#${id}`); return; }
       case 'IFCSITE': case 'IFCBUILDING': case 'IFCSPACE': case 'IFCSPATIALZONE': { const a = parseArgs(argText); spatialName.set(id, strOf(a[2]) || strOf(a[7]) || `#${id}`); break; }
       case 'IFCRELAGGREGATES': { const a = parseArgs(argText); const p = ref(a[4]); if (p !== undefined) aggregates.push({ parent: p, children: refs(a[5]) }); return; }
@@ -179,8 +197,10 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
     // Type definitions carry the type name (IfcWallType etc.) — one string each.
     if (type.endsWith('TYPE') && argText.startsWith("'")) { const a = parseArgs(argText); typeName.set(id, strOf(a[2])); return; }
     // Products: rooted (GlobalId first), not a container / relationship / definition. Cheap regex, no full parse.
-    if (argText.charCodeAt(0) === 39 /* ' */ && !NOT_ELEMENT.test(type)) {
-      const m = /^'([^']{22})',(#\d+|\$),('(?:[^']|'')*'|\$)/.exec(argText);
+    const at = argText.trimStart();
+    if (at.charCodeAt(0) === 39 /* ' */ && !NOT_ELEMENT.test(type)) {
+      // exporters may break the line or put spaces between the arguments
+      const m = /^'([^']{22})'\s*,\s*(#\d+|\$)\s*,\s*('(?:[^']|'')*'|\$)/.exec(at);
       if (m && GUID_RE.test(m[1])) {
         const name = m[3] === '$' ? '' : decodeStepString(m[3].slice(1, -1).replace(/''/g, "'"));
         const oh = m[2] === '$' ? undefined : Number(m[2].slice(1));
@@ -288,6 +308,7 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
     });
     productMap.set(p.id, { guid: p.guid, ifcClass: p.cls });
   }
+  if (convScale != null) { lengthScale = convScale; lengthScaleSource = 'unit-assignment'; }
   const index: IfcIndex = {
     sourcePath: absIfcPath, schema, lengthScale, lengthScaleSource, elements, storeys, classCounts,
     geometryFailures: 0, quantifiedElements: elements.filter((e) => Object.keys(e.authored).length > 0).length,
@@ -319,7 +340,7 @@ export function scanEntities(absPath: string, onEntity: (id: number, type: strin
         if (c === 47 && text.charCodeAt(i + 1) === 42) { inComment = true; i += 2; continue; }
         if (c === 39) { inString = true; i++; continue; }
         if (c === 59 /* ; */) {
-          const stmt = text.slice(entityStart, i).replace(/\/\*[\s\S]*?\*\//g, '').trim();
+          const stmt = stripComments(text.slice(entityStart, i)).trim();
           entityStart = i + 1;
           i++;
           if (!stmt) continue;

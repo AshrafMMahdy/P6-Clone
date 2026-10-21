@@ -6,6 +6,7 @@ import { parseClndrData, type CalendarDef, type Shift } from '../calendar/clndr-
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../dates.ts';
 import { parseXml, type XNode } from '../xml/p6xml.ts';
 import { isLegacyLayout, p6num } from '../schedule/cpm.ts';
+import { baselineNumbers, baselineXml, importMspBaselines } from './baselines.ts';
 import { ASG_DEPS, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
 import { defaultShifts, emptyTask, linkKey, num, projectFromDb, projectToDb, toP6Date, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
 
@@ -110,6 +111,9 @@ export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
     if (!m.tasks.length) findings.push({ severity: 'warning', code: 'MSP_NO_TASKS', message: 'The Microsoft Project file contains no tasks.', p6: 'P6 imports an empty project.' });
     const db = projectToDb(m, findings, 'The Microsoft Project XML file');
     snapshotKept(db);
+    // Baseline and Baseline1-10: saved baselines of the project (after the snapshot: they are not edits of the file)
+    const bl = importMspBaselines(db, src);
+    if (bl.length) findings.push({ severity: 'info', code: 'MSP_BASELINES', message: `${bl.length} baseline(s) read: ${bl.join(', ')}.`, p6: 'P6 imports Microsoft Project baselines only through its own conversion; the clone keeps each as a saved baseline.' });
     return { db, findings };
   } catch (e) {
     findings.push({ severity: 'fatal', code: 'MSP_READ', message: `Could not read the Microsoft Project XML file: ${(e as Error).message}.`, p6: 'P6 rejects the file.' });
@@ -367,6 +371,7 @@ function patchCalendar(xml: string, before: CalendarDef, after: CalendarDef, nam
 /** report: what the save did that the caller should know (e.g. WBS codes that follow the outline). */
 export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[] } = {}): string {
   const m = projectFromDb(db, opts.projIds);
+  const blNumbers = m.row ? baselineNumbers(db, m.row) : new Map<number, string>();
   // each element's children are collected as [name, xml] pairs, so a project read from MSPDI can be merged back
   // into what the file had (keep.ts): unchanged elements go out as they came in
   let cur: [string, string][] = [];
@@ -564,6 +569,8 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
     const never = () => false;
     const datesDeps: Parameters<typeof mergeKids>[2] = finished ? { EarlyStart: never, EarlyFinish: never, LateStart: never, LateFinish: never, TotalSlack: never, FreeSlack: never, Critical: never } : started ? { EarlyStart: ['act_start_date'], LateStart: ['act_start_date'] } : {};
     if (started) for (const c of cur) if (c[0] === 'EarlyStart' || c[0] === 'LateStart') c[1] = `<${c[0]}>${xmlDate(t.actualStart)}</${c[0]}>`;
+    // the clone's saved baselines, unless the file's own <Baseline> elements are kept for this task
+    if (t.row && blNumbers.size && !t.keep?.kids.some((x) => x[0] === 'Baseline')) for (const x of baselineXml(db, blNumbers, t.row, xmlDate)) cur.push(['Baseline', x]);
     return element('Task', t.keep, t.row, 'TASK', { ...TASK_DEPS, ...datesDeps, WBS: () => moved && !masked, ExtendedAttribute: p6ext ? P6_FIELDS : () => false }, notOurs);
   };
   // Microsoft Project's ID is the row number: after the outline and the kept rows are in place, rows are numbered in

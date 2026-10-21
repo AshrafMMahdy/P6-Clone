@@ -25,6 +25,8 @@ async function writeDb(next: () => string[] | null | false): Promise<boolean> {
   }
 }
 
+type BimModel = { ok: true; hash: string; path: string; index: import('../core/bim/parse.ts').IfcIndex; geometry: boolean; url: string | null } | { ok: false; error: string };
+
 const api = {
   onMenu: (cb: (id: string) => void) => { ipcRenderer.on('menu', (_e, id: string) => cb(id)); },
   openFile: (filters: Filter[], title?: string): Promise<OpenedFile | null> => ipcRenderer.invoke('file:open', filters, title),
@@ -37,6 +39,13 @@ const api = {
   printHtml: (html: string, mode: 'print' | 'pdf' | 'preview', defaultName: string): Promise<boolean | string | null> => ipcRenderer.invoke('print:html', html, mode, defaultName),
   startupImport: (): Promise<OpenedFile | null> => ipcRenderer.invoke('startup:import'),
   confirm: (message: string, detail?: string): Promise<boolean> => ipcRenderer.invoke('confirm', message, detail),
+  /** 4D: models are read in the main process; the viewer is served at p6c4d:// */
+  bimOpen: (path?: string): Promise<BimModel | null> => ipcRenderer.invoke('bim:open', path),
+  bimLoad: (o: { hash: string; path: string }): Promise<BimModel> => ipcRenderer.invoke('bim:load', o),
+  bimText: (path: string): Promise<string> => ipcRenderer.invoke('bim:text', path),
+  bimWriteFiles: (o: { title: string; files: { name: string; data: string | Uint8Array }[] }): Promise<string[] | null> => ipcRenderer.invoke('bim:writeFiles', o),
+  bimReadImport: (): Promise<(import('../core/bim/exchange4d.ts').Imported4d & { path: string }) | null> => ipcRenderer.invoke('bim:readImport'),
+  bimVideo: (o: { hash: string; timeline: unknown; options: Record<string, unknown>; from?: string; to?: string; step?: number; fps?: number; width?: number; height?: number; name: string }): Promise<{ ok: true; saved: string | null; frames: number; mime?: string } | { ok: false; error: string }> => ipcRenderer.invoke('bim:video', o),
   /** the schedule reasoner (models/reasoner.onnx), run in the main process */
   hrmInfer: (x: { n: number; feats: Float32Array; bias: Float32Array; modeMask: Uint8Array }): Promise<{ ok: true; out: { priority: Float32Array; modeLogits: Float32Array } } | { ok: false; error: string; unavailable: boolean }> => ipcRenderer.invoke('hrm:infer', x),
   /** AI assistant (the API key stays in the main process) */

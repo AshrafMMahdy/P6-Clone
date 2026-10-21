@@ -61,7 +61,7 @@ export function buildMenu(win: BrowserWindow): Menu {
         cmd('&Layout', 'view.layout', undefined, { submenu: [cmd('&Open...', 'view.layout.open'), cmd('&Save', 'view.layout.save'), cmd('Save &As...', 'view.layout.saveAs')] }),
         sep,
         cmd('Show on &Top', 'view.top', undefined, { submenu: [cmd('Activity Table', 'view.top.table'), cmd('Gantt Chart', 'view.top.gantt'), cmd('Activity Usage Profile', 'view.top.profile')] }),
-        cmd('Show on &Bottom', 'view.bottom', undefined, { submenu: [cmd('Activity Details', 'view.bottom.details'), cmd('Activity Usage Profile', 'view.bottom.actProfile'), cmd('Activity Usage Spreadsheet', 'view.bottom.actSheet'), cmd('Resource Usage Profile', 'view.bottom.profile'), cmd('Resource Usage Spreadsheet', 'view.bottom.spreadsheet'), cmd('Trace Logic', 'view.bottom.trace'), cmd('No Bottom Layout', 'view.bottom.none')] }),
+        cmd('Show on &Bottom', 'view.bottom', undefined, { submenu: [cmd('Activity Details', 'view.bottom.details'), cmd('Activity Usage Profile', 'view.bottom.actProfile'), cmd('Activity Usage Spreadsheet', 'view.bottom.actSheet'), cmd('Resource Usage Profile', 'view.bottom.profile'), cmd('Resource Usage Spreadsheet', 'view.bottom.spreadsheet'), cmd('Trace Logic', 'view.bottom.trace'), cmd('4D View', 'view.bottom.fourd'), cmd('No Bottom Layout', 'view.bottom.none')] }),
         sep,
         cmd('&Columns...', 'view.columns'),
         cmd('&Bars...', 'view.bars'),

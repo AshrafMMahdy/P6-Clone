@@ -1,5 +1,5 @@
 // Extensions: what the clone does beyond P6, usable without the AI agent (DCMA 14-point, lint, crashing, what-ifs,
-// the schedule reasoner, windows analysis and TIA; 4D follows). Each extension is a panel on the right.
+// the schedule reasoner, windows analysis, TIA and 4D). Each extension is a panel on the right.
 import { useState } from 'react';
 import { getDb, setUi, toast, useStore } from '../store.ts';
 import { rows } from '../../core/db.ts';
@@ -14,6 +14,7 @@ import { mutate } from '../store.ts';
 import { runSchedule } from '../commands.ts';
 import { CrashPanel, OptimizePanel, WhatIfPanel } from './RecoveryPanels.tsx';
 import { TiaPanel, WindowsPanel } from './DelayPanels.tsx';
+import { FourDPanel } from './FourDView.tsx';
 
 export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'dcma', title: 'DCMA 14-point', blurb: 'The 14 DCMA schedule checks, with the critical path test, CPLI and BEI.' },
@@ -23,6 +24,7 @@ export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'optimize', title: 'Schedule reasoner', blurb: 'The trained optimiser: a leveling order (and crash modes) that finishes sooner.' },
   { id: 'windows', title: 'Windows analysis', blurb: 'Slip per update window on the driving path, with the half-step split.' },
   { id: 'tia', title: 'Time impact analysis', blurb: 'A fragnet added to a copy: the delay it causes at the data date.' },
+  { id: '4d', title: '4D', blurb: 'An IFC model linked to the activities: the build by date, Navisworks / SYNCHRO / IFC4 exchange, video.' },
 ];
 
 export function ExtensionsView() {
@@ -36,7 +38,7 @@ export function ExtensionsView() {
           {EXTENSIONS.map((e) => <div key={e.id} className={`dirbtn ${cur.id === e.id ? 'on' : ''}`} style={{ flexDirection: 'column', alignItems: 'flex-start', padding: 6 }} onClick={() => setUi({ extension: e.id })}><b>{e.title}</b><span className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>{e.blurb}</span></div>)}
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 8, minWidth: 0 }}>
-          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : cur.id === 'crash' ? <CrashPanel /> : cur.id === 'whatif' ? <WhatIfPanel /> : cur.id === 'optimize' ? <OptimizePanel /> : cur.id === 'windows' ? <WindowsPanel /> : cur.id === 'tia' ? <TiaPanel /> : null}
+          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : cur.id === 'crash' ? <CrashPanel /> : cur.id === 'whatif' ? <WhatIfPanel /> : cur.id === 'optimize' ? <OptimizePanel /> : cur.id === 'windows' ? <WindowsPanel /> : cur.id === 'tia' ? <TiaPanel /> : cur.id === '4d' ? <FourDPanel /> : null}
         </div>
       </div>
     </>
@@ -48,7 +50,7 @@ function DcmaPanel() {
   const db = getDb();
   const p = rows(db, 'PROJECT').find((x) => x.proj_id === ui.openProjects[0]);
   const [profile, setProfile] = useState('pam200');
-  const [baseline, setBaseline] = useState<'project' | 'bl1' | 'bl2' | 'bl3'>('project');
+  const [baseline, setBaseline] = useState('project'); // project, bl1-bl3, or any saved baseline by name
   const [status, setStatus] = useState('');
   const [target, setTarget] = useState('');
   const [slip, setSlip] = useState('600');
@@ -68,7 +70,7 @@ function DcmaPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, height: '100%' }}>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <label>Profile <select value={profile} onChange={(e) => setProfile(e.target.value)}>{Object.entries(DCMA_PROFILES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
-        <label>Baseline <select value={baseline} onChange={(e) => setBaseline(e.target.value as typeof baseline)}><option value="project">Project baseline</option><option value="bl1">BL1</option><option value="bl2">BL2</option><option value="bl3">BL3</option></select></label>
+        <label>Baseline <select value={baseline} onChange={(e) => setBaseline(e.target.value)}><option value="project">Project baseline</option><option value="bl1">BL1</option><option value="bl2">BL2</option><option value="bl3">BL3</option>{rows(db, 'PROJECT').filter((b) => b._baseline_of === p?.proj_id).map((b) => <option key={b.proj_id} value={b.proj_short_name}>{b.proj_short_name}</option>)}</select></label>
         <label>Status date <input type="datetime-local" value={status} onChange={(e) => setStatus(e.target.value)} title={`Default: the data date (${p?.last_recalc_date?.slice(0, 16) || 'not set'})`} /></label>
         <label>Contract finish <input type="datetime-local" value={target} onChange={(e) => setTarget(e.target.value)} title={`Default: Must Finish By (${p?.plan_end_date?.slice(0, 16) || 'not set'})`} /></label>
         <label>Test delay <input style={{ width: 48 }} value={slip} onChange={(e) => setSlip(e.target.value)} /> days</label>

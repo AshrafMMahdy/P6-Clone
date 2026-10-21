@@ -7,16 +7,18 @@ import { applyOps } from '../core/project/ops.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
 import { cachedModel, loadModel, type Model } from '../core/bim/model.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
-import { ifc4dText, items4d, linksCsv, parseIfc4d, parseSearchSets, parseTimelinerCsv, README, resolveSet, searchSetsXml, sheetToCsv, tagIfc, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
-import { readXlsx } from '../core/excel/xlsx.ts';
+import { ifc4dText, items4d, linksCsv, README, searchSetsXml, tagIfc, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
 import { fail, pathArg, type Session } from './runtime.ts';
 import type { AnalysisHelpers } from './analysis.ts';
 import { nextId } from '../core/db.ts';
-import { readNwfTimeliner } from '../core/bim/nwf.ts';
-import { calendarResolver } from '../core/schedule/cpm.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { compareAt, criticalChanges, simulate, sourceTasks, viewerTimeline } from '../core/bim/sim4d.ts';
 import { writeViewer, type ViewerOptions } from '../core/bim/render4d.ts';
+import { relinkPlan } from '../core/bim/relink.ts';
+import { applyImport as applyImport4d, planImport as planImport4d } from '../core/bim/import4d.ts';
+import { readImport4d } from '../core/bim/read4d.ts';
+import { runSynchroCloud, SYNCHRO_CLOUD_TOOL } from './synchroCloud.ts';
+import { diffIndexes } from '../core/bim/diff.ts';
 import { chromiumPath, ENCODE, inChromium, PNGS } from '../core/bim/headless.ts';
 import { activityCosts, earnedValue } from '../core/cost/rollup.ts';
 import { mkdtempSync, writeFileSync as writeRaw } from 'node:fs';
@@ -28,7 +30,7 @@ const project = { type: 'string', description: 'Project ID (default: the file’
 
 export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<string, unknown>) => [
   { name: 'open_model', annotations: edit, description: 'Attach an IFC model to the project (4D). Parses it once (cached by content; geometry in a separate process, so a huge model cannot take the server down) and answers schema, element count, storeys, classes, units, geometry status and warnings. One model per project; a new one replaces it and keeps the links whose elements are still there. geometry: false is faster (no 3D view or derived volumes). Large models: pass async: true.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, geometry: { type: 'boolean' } }, required: ['path'] }) },
-  { name: 'list_elements', annotations: ro, description: 'Model elements with GlobalId, class, storey, name, type, material and the activities linked to each. Filters: storey, class (prefix, e.g. IfcWall), where [{property, op: = | != | contains | like (* and ?), value}] (property: name, type, material, class, storey, system, or "Pset.Prop"), linked: true | false | <Activity ID>. fields adds properties. Paged by limit (default 200) and offset.', inputSchema: withHandle({ type: 'object', properties: { project, storey: { type: 'string' }, class: { type: 'string' }, where: { type: 'array', items: { type: 'object' } }, linked: {}, fields: { type: 'array', items: { type: 'string' } }, limit: { type: 'number' }, offset: { type: 'number' } } }) },
+  { name: 'list_elements', annotations: ro, description: 'Model elements with GlobalId, class, storey, name, type, material and the activities linked to each. Filters: storey, class (prefix, e.g. IfcWall), where [{property, op: = | != | contains | like (* and ?), value}] (property: name, type, material, class, storey, system, or "Pset.Prop"), linked: true | false | <Activity ID>. fields adds properties. Paged by limit (default 200, at most 1000) and offset.', inputSchema: withHandle({ type: 'object', properties: { project, storey: { type: 'string' }, class: { type: 'string' }, where: { type: 'array', items: { type: 'object' } }, linked: {}, fields: { type: 'array', items: { type: 'string' } }, limit: { type: 'number' }, offset: { type: 'number' } } }) },
   { name: 'element_info', annotations: ro, description: 'Every property, authored quantity, owner stamp and geometry fingerprint of the given elements (up to 200 GlobalIds), and their links.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } } }, required: ['guids'] }) },
   { name: 'quantities', annotations: ro, description: 'Quantities from the model, grouped by class, storey, class+storey, material, activity or wbs: element count, derived volume (m³, from the geometry) and every authored quantity summed (IfcElementQuantity: NetVolume, NetArea, Length, ...). Grouped by activity it feeds productivity and duration checks against the BOQ.', inputSchema: withHandle({ type: 'object', properties: { project, group_by: { type: 'string' }, classes: { type: 'array', items: { type: 'string' } }, storeys: { type: 'array', items: { type: 'string' } } } }) },
   { name: 'link_elements', annotations: edit, description: 'Link model elements to activities: links [{activity, guids, role?: built (default) | removed | temporary, profile?}]. mode add (default), replace (the activity’s links of that role), remove (the named pairs; every link of the activity when guids is empty). An element may belong to several activities (formwork, concrete, finishes). Every ID is checked and unknown ones are listed. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, links: { type: 'array', items: { type: 'object' } }, mode: { type: 'string' } }, required: ['links'] }) },
@@ -36,14 +38,16 @@ export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<s
   { name: 'link_status', annotations: ro, description: 'Gaps in the 4D links: elements no activity builds (by class and storey), task activities with no elements, elements on several activities, links to elements no longer in the model.', inputSchema: withHandle({ type: 'object', properties: { project } }) },
   { name: 'set_4d_keys', annotations: edit, description: 'Write a "4D Key" user-defined field on every activity, from activity_id (default), wbs, code:<code type> or udf:<UDF>. The key travels inside XER and P6 XML; Navisworks rules and SYNCHRO Auto-Matching use it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, from: { type: 'string' } } }) },
   { name: 'export_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'Write a ready-linked 4D package into the folder path. target navisworks: the IFC with a WHIQ_4D property set on every linked element (Task = 4D key), search-set XML (one set per activity), timeliner.csv (UniqueId = P6 task_id, User 1 = key) and a README with the click path. synchro: P6 XML with the 4D Key field, the tagged IFC, README. ifc4d: the model with the schedule inside, IFC4 (Bonsai): work schedule, tasks with planned/early/late/actual dates, logic, task-to-element links, and baselines (baselines: [names]) as BASELINE schedules. csv: the link table. planned: current (default) or a baseline name, for the planned dates (TimeLiner Planned vs Actual).', inputSchema: withHandle({ type: 'object', properties: { project, target: { type: 'string' }, path: { type: 'string', description: 'folder to write into' }, planned: { type: 'string' }, baselines: { type: 'array', items: { type: 'string' } }, key: { type: 'string', description: 'activity field used as the key (default 4d_key, else the Activity ID)' } }, required: ['target', 'path'] }) },
-  { name: 'import_4d', annotations: edit, description: 'Read 4D work from another tool and link it to this project: an IFC 4D file (Bonsai/IFC4 task outputs, or SYNCHRO/IFC2X3 assignments; SYNCHRO-renamed elements "name_(#id)" are matched to the attached design model by that id), a Navisworks search-set XML (kept as selection sets, resolved against the model; link them with link_by_rules set_name), a TimeLiner CSV (or its task grid copied to Excel, .xlsx), or the TimeLiner inside a Navisworks .nwf/.nwd (tasks with planned and actual dates, task type and attached set names, read without Navisworks). Tasks match activities by Activity ID, then by unique name; create_activities: true adds the TimeLiner tasks that match none (planned dates as duration and a start-on-or-after constraint). Attached sets link through selection sets of the same name. link: false only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, link: { type: 'boolean' }, create_activities: { type: 'boolean' } }, required: ['path'] }) },
+  { name: 'import_4d', annotations: edit, description: 'Read 4D work from another tool and link it to this project: an IFC 4D file (Bonsai/IFC4 task outputs, or SYNCHRO/IFC2X3 assignments; SYNCHRO-renamed elements "name_(#id)" are matched to the attached design model by that id), a Navisworks search-set XML (kept as selection sets, resolved against the model; link them with link_by_rules set_name), a TimeLiner CSV (or its task grid copied to Excel, .xlsx), or the TimeLiner inside a Navisworks .nwf/.nwd (tasks with planned and actual dates, task type and attached set names, read without Navisworks), or a SYNCHRO project .sp (5.1 to 6.5, read without SYNCHRO: tasks with their IDs and dates, and the 3D objects assigned to them, matched to the attached design model by the "(#id)" in their names). Tasks match activities by Activity ID, then by unique name; create_activities: true adds the TimeLiner and SYNCHRO tasks that match none, with their planned dates as the duration and a start-on-or-after constraint (SYNCHRO task IDs are kept as Activity IDs). Attached sets link through selection sets of the same name. link: false only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, link: { type: 'boolean' }, create_activities: { type: 'boolean' } }, required: ['path'] }) },
   { name: 'simulate_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D state of the model on dates: element counts by state (not started, in progress, complete, removed, temporary in place, unlinked), optionally by storey or class, and the activities under way in each step. date, or from/to/step (days). source: best (default: actuals up to the data date, then the forecast), planned, actual, late, or a saved baseline name. Dates come from the schedule itself (F9: calendars, actuals, data date). snapshots: [dates] renders PNG frames into path (needs a Chromium: chromium_path or P6CLONE_CHROMIUM; without one, use render_4d kind viewer and look at it).', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, source: { type: 'string' }, by: { type: 'string' }, snapshots: { type: 'array', items: { type: 'string' } }, path: { type: 'string' }, view: { type: 'string' }, chromium_path: { type: 'string' } } }) },
   { name: 'compare_4d', annotations: ro, description: 'Progress against a baseline on a date, element by element (TimeLiner Early/Late appearance): ahead, on time, late, not started, complete. late_means start (default: started later than the baseline, as TimeLiner) or finish (finished later). by storey (default), class or wbs: counts and percentages per zone, the elements behind each late figure (max_ids), planned value vs earned value per zone (each activity\u2019s PV/EV shared over its elements), and the activities that became or stopped being critical since the baseline.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, against: { type: 'string' }, late_means: { type: 'string' }, by: { type: 'string' }, max_ids: { type: 'number' } }, required: ['against'] }) },
   { name: 'set_element_status', annotations: edit, description: 'Element-level progress from site (walkdowns, reality capture): guids, status installed | in_progress | not_installed, date. It overrides the activity\u2019s progress for those elements in simulate_4d, compare_4d and the viewer (actual and best dates), and proposes each touched activity\u2019s % complete from its installed share; apply_percent: true writes it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } }, status: { type: 'string' }, date: { type: 'string' }, apply_percent: { type: 'boolean' } }, required: ['guids', 'status', 'date'] }) },
   { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people. kind viewer (default): an HTML viewer with the model as a separate file (index.html, viewer4d.js, model.glb, timeline.json) in the folder path, or one self-contained file with embed: true; it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or an MP4 (H.264; WebM when the browser has no H.264 encoder) rendered in a headless Chromium (chromium_path or P6CLONE_CHROMIUM); without one the answer gives the self-contained viewer and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, chromium_path: { type: 'string' } }, required: ['path'] }) },
+  { name: 'relink_model', annotations: edit, description: 'Bring the 4D links over to a revised model (M4). Each linked element is found in the new model by its GlobalId; else, in the same IFC class, by name and storey (the nearest one when there are several), else by shape (size and position within tolerance_m, default 0.05). Answers what was kept, matched (and how), and lost (no counterpart: those links are dropped), plus the model diff summary (added, removed, modified, re-identified). dry_run: true only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, tolerance_m: { type: 'number' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
+  SYNCHRO_CLOUD_TOOL(withHandle, project),
 ];
-export const FOURD_FILES: Record<string, { read: string[]; opens: boolean }> = { open_model: { read: ['path'], opens: false }, import_4d: { read: ['path'], opens: false } };
-export const FOURD_NAMES = new Set(['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d', 'simulate_4d', 'compare_4d', 'set_element_status', 'render_4d']);
+export const FOURD_FILES: Record<string, { read: string[]; opens: boolean }> = { open_model: { read: ['path'], opens: false }, import_4d: { read: ['path'], opens: false }, relink_model: { read: ['path'], opens: false } };
+export const FOURD_NAMES = new Set(['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d', 'simulate_4d', 'compare_4d', 'set_element_status', 'render_4d', 'relink_model', 'synchro_cloud']);
 
 /** The model attached to the project: from memory or the disk cache, else reopened from its file. */
 async function modelOf(db: Db, projId: string, required = true): Promise<Model | null> {
@@ -84,7 +88,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const like = (p: string) => new RegExp('^' + p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
       const test = (e: Model['index']['elements'][number]) => where.every((w) => { const v = elementValue(e, String(w.property)) ?? ''; const x = String(w.value ?? ''); switch (w.op ?? '=') { case '=': return v.toLowerCase() === x.toLowerCase(); case '!=': return v.toLowerCase() !== x.toLowerCase(); case 'contains': return v.toLowerCase().includes(x.toLowerCase()); case 'like': return like(x).test(v); default: return fail('bad_input', `Unknown op "${w.op}".`, 'Use =, !=, contains or like.'); } });
       const hit = m.index.elements.filter((e) => (!a.storey || e.storey.toLowerCase() === String(a.storey).toLowerCase()) && (!a.class || e.ifcClass.toLowerCase().startsWith(String(a.class).toLowerCase())) && test(e) && (a.linked == null || (a.linked === true ? byGuid.has(e.guid) : a.linked === false ? !byGuid.has(e.guid) : (byGuid.get(e.guid) ?? []).some((l) => code.get(l.task_id) === a.linked))));
-      const limit = Math.min(5000, Number(a.limit) || 200), offset = Math.max(0, Number(a.offset) || 0);
+      const limit = Math.min(1000, Number(a.limit) || 200), offset = Math.max(0, Number(a.offset) || 0);
       return { total: hit.length, offset, elements: hit.slice(offset, offset + limit).map((e) => ({ guid: e.guid, class: e.ifcClass, storey: e.storey, name: e.name, ...(e.typeName ? { type: e.typeName } : {}), ...(e.material ? { material: e.material } : {}), activities: (byGuid.get(e.guid) ?? []).map((l) => `${code.get(l.task_id)}${l.role !== 'built' ? ` (${l.role})` : ''}`), ...(Array.isArray(a.fields) ? { fields: Object.fromEntries(a.fields.map((f: string) => [f, elementValue(e, f) ?? null])) } : {}) })) };
     }
     case 'element_info': {
@@ -302,63 +306,39 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       h.writeOut(file, Buffer.from(v.b64, 'base64'));
       return { kind, rendered: true, written: [file], frames: v.frames, mime: v.mime, fps, size: [width, height] };
     }
+    case 'relink_model': {
+      const old = (await modelOf(s.db, projId))!;
+      const path = pathArg(a.path);
+      let m: Model;
+      try { m = await loadModel(path); } catch (e) { return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of the revised .ifc file.'); }
+      await h.tick(1, 2, 'model parsed');
+      const linkedGuids = new Set(rows(s.db, T4D.link).filter((r) => r.proj_id === projId).map((r) => r.guid));
+      const plan = relinkPlan(old.index, m.index, linkedGuids, a.tolerance_m != null ? Number(a.tolerance_m) : undefined);
+      const diff = diffIndexes(old.index, m.index);
+      const report = { model: basename(path), linked_elements: linkedGuids.size, kept: plan.kept, matched: plan.matched.length, by_name_and_storey: plan.matched.filter((x) => x.how === 'name+storey').length, by_shape: plan.matched.filter((x) => x.how === 'shape').length, lost: plan.lost.length, lost_elements: plan.lost.slice(0, 200), matched_examples: plan.matched.slice(0, 50), model_diff: diff.summary };
+      if (a.dry_run === true) return { ...report, dry_run: true };
+      h.apply(`Relink to ${basename(path)}`, (d) => {
+        const T = t4d(d, T4D.link);
+        T.rows = T.rows.flatMap((r) => { if (r.proj_id !== projId) return [r]; const to = plan.mapping.get(r.guid); return to ? [{ ...r, guid: to }] : []; });
+        for (const tbl of [T4D.status]) { const X = t4d(d, tbl); X.rows = X.rows.flatMap((r) => { if (r.proj_id !== projId) return [r]; const to = plan.mapping.get(r.guid); return to ? [{ ...r, guid: to }] : []; }); }
+        attachModel(d, projId, m.index, m.hash);
+      });
+      return { ...report, dry_run: false };
+    }
+    case 'synchro_cloud': return runSynchroCloud(s.db, projId, a, h.tick);
     case 'import_4d': {
       const path = pathArg(a.path);
-      let text: string;
-      try { text = readFileSync(path, 'latin1'); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
-      const nwf = text.startsWith('#LcUStream') ? readNwfTimeliner(readFileSync(path)) : null;
-      const imp: Imported4d = nwf ? { source: 'nwf', tasks: nwf.tasks.map((t) => ({ name: t.name, id: t.name, start: t.plannedStart ?? undefined, finish: t.plannedFinish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined, type: t.type, attached: t.attached[0] })), links: [], notes: nwf.notes }
-        : /^ISO-10303-21/m.test(text.slice(0, 200)) ? parseIfc4d(text) : /<exchange\b/.test(text.slice(0, 2000)) ? parseSearchSets(text)
-        : /\.xlsx$/i.test(path) ? parseTimelinerCsv(sheetToCsv((await readXlsx(new Uint8Array(readFileSync(path))))[0]?.rows ?? [])) : parseTimelinerCsv(readFileSync(path, 'utf8'));
+      let bytes: Uint8Array;
+      try { bytes = new Uint8Array(readFileSync(path)); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
+      let imp: Imported4d;
+      try { imp = await readImport4d(path, bytes); } catch (e) { return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${(e as Error).message}`, 'Give an IFC 4D, search-set XML, TimeLiner CSV/xlsx, Navisworks .nwf/.nwd or SYNCHRO .sp file.'); }
       const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf';
       const m = await modelOf(s.db, projId, !tasksOnly);
-      const T = rows(s.db, 'TASK').filter((t) => t.proj_id === projId && t.task_type !== 'TT_WBS');
-      const byId = new Map(T.map((t) => [t.task_code.toLowerCase(), t])), names = new Map<string, Row | null>();
-      for (const t of T) { const k = t.task_name.trim().toLowerCase(); names.set(k, names.has(k) ? null : t); }
-      const match = (id: string, name?: string) => byId.get(id.toLowerCase()) ?? (name ? names.get(name.trim().toLowerCase()) ?? undefined : names.get(id.trim().toLowerCase()) ?? undefined);
-      const byExpress = m ? new Map(m.index.elements.map((e) => [e.expressId, e.guid])) : new Map<number, string>();
-      const nameOf = new Map(imp.tasks.map((t) => [t.id, t.name]));
-      const proposals: { activity: string; guids: string[] }[] = [];
-      const unmatchedTasks: string[] = [], unknownElements = { count: 0 };
-      for (const l of imp.links) {
-        const t = match(l.task, nameOf.get(l.task));
-        if (!t) { unmatchedTasks.push(l.task); continue; }
-        const guids = [...(l.guids ?? []).filter((g) => !m || m.byGuid.has(g) || (unknownElements.count++, false)), ...(l.expressIds ?? []).flatMap((x) => { const g = byExpress.get(x); if (!g) unknownElements.count++; return g ? [g] : []; })];
-        if (guids.length) proposals.push({ activity: t.task_code, guids });
-      }
-      const sets = (imp.sets ?? []).map((st) => ({ name: st.name, guids: m ? resolveSet(m.index, st) : [] }));
-      // TimeLiner: a task's attached set links the set's elements (sets imported before)
-      const knownSets = new Map(rows(s.db, T4D.set).filter((r) => r.proj_id === projId).map((r) => [r.name.toLowerCase(), JSON.parse(r.guids || '[]') as string[]]));
-      if (tasksOnly) for (const t of imp.tasks) { const a0 = match(t.id, t.name); if (!a0) { unmatchedTasks.push(t.id); continue; } const g = t.attached ? knownSets.get(t.attached.toLowerCase()) : undefined; if (g?.length) proposals.push({ activity: a0.task_code, guids: g }); }
-      // TimeLiner tasks with no activity: created on request (planned dates as the duration and a start-on-or-after)
-      const toCreate = a.create_activities === true && tasksOnly ? imp.tasks.filter((t) => !match(t.id, t.name)) : [];
-      const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: new Set(proposals.map((p) => p.activity)).size, unmatched_tasks: [...new Set(unmatchedTasks)].slice(0, 100), proposed_links: proposals.reduce((n, p) => n + p.guids.length, 0), ...(unknownElements.count ? { elements_not_in_model: unknownElements.count } : {}), ...(sets.length ? { sets: sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: [...new Set(imp.tasks.map((t) => t.attached).filter(Boolean))].map((n) => ({ name: n, known: knownSets.has(n!.toLowerCase()) })) } : {}), notes: imp.notes };
-      if (a.link === false) return { ...summary, linked: false, ...(toCreate.length ? { would_create: toCreate.map((t) => t.name) } : {}) };
-      const applied = h.apply(`Import 4D ${basename(path)}`, (d) => {
-        if (sets.length) { const S = t4d(d, T4D.set); for (const st of sets) { S.rows = S.rows.filter((r) => !(r.proj_id === projId && r.name === st.name)); S.rows.push({ set_id: String(nextId(d, T4D.set)), proj_id: projId, name: st.name, guids: JSON.stringify(st.guids), source: basename(path) }); } }
-        const created: { id: string; name: string }[] = [];
-        if (toCreate.length) {
-          const proj = rows(d, 'PROJECT').find((p) => p.proj_id === projId)!;
-          const cal = calendarResolver(d, []).fallback(proj.clndr_id);
-          const hpd = cal.hoursPerDay() || s.hpd;
-          const used = new Set(rows(d, 'TASK').filter((t) => t.proj_id === projId).map((t) => t.task_code));
-          let n = 0;
-          const ops = toCreate.map((t) => {
-            let id = '';
-            do id = `TL${String(++n * 10).padStart(4, '0')}`; while (used.has(id));
-            used.add(id);
-            const st = parseP6Date(t.start ?? ''), fi = parseP6Date(t.finish ?? '');
-            const days = st != null && fi != null ? Math.max(0, Math.round((cal.workBetween(st, fi) / 60 / hpd) * 10) / 10) : 1;
-            created.push({ id, name: t.name });
-            const g = t.attached ? knownSets.get(t.attached.toLowerCase()) : undefined;
-            if (g?.length) proposals.push({ activity: id, guids: g });
-            return { op: 'add_activity', id, name: t.name, duration_days: days, project: proj.proj_short_name, ...(t.start ? { constraint: { type: 'start_on_or_after', date: t.start } } : {}) };
-          });
-          const r = applyOps(d, ops, { hoursPerDay: s.hpd, calendarDays: true });
-          if (!r.ok) fail('bad_input', r.error!.message, '');
-        }
-        return { ...(created.length ? { created_activities: created } : {}), ...(proposals.length ? linkElements(d, projId, proposals, 'add', m?.index ?? null) : { added: 0 }) };
-      });
+      const plan = planImport4d(s.db, projId, imp, m?.index ?? null, { createActivities: a.create_activities === true });
+      const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: new Set(plan.proposals.map((p) => p.activity)).size, unmatched_tasks: plan.unmatchedTasks.slice(0, 100), proposed_links: plan.proposals.reduce((n, p) => n + p.guids.length, 0), ...(plan.elementsNotInModel ? { elements_not_in_model: plan.elementsNotInModel } : {}), ...(plan.sets.length ? { sets: plan.sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: plan.attachedSets } : {}), notes: imp.notes };
+      if (a.link === false) return { ...summary, linked: false, ...(plan.toCreate.length ? { would_create: plan.toCreate.map((t) => t.name) } : {}) };
+      // an activity the edit refuses (a bad name, a clash) refuses the whole import
+      const applied = h.apply(`Import 4D ${basename(path)}`, (d) => { try { return applyImport4d(d, projId, plan, m?.index ?? null, { source: basename(path), hoursPerDay: s.hpd, calendarDays: true }); } catch (e) { return fail('bad_input', `Not imported: ${(e as Error).message}`, 'Fix the task in the other tool, or import with create_activities: false.'); } });
       return { ...summary, linked: true, ...applied };
     }
   }

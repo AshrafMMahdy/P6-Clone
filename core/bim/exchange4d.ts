@@ -1,7 +1,8 @@
 // 4D exchange: what goes to Navisworks, SYNCHRO and IFC4 4D tools, and what comes back. Pure text in and out; the MCP
 // server and the desktop app write the files. Formats per sample 4D/*/NOTES.md (nw-exchange 12.0 schema and real files,
-// TimeLiner CSV exports, the IFC4 specification's scheduling example, Bonsai and SYNCHRO 4D IFCs).
-import { randomUUID } from 'node:crypto';
+// TimeLiner CSV exports, the IFC4 specification's scheduling example, Bonsai and SYNCHRO 4D IFCs). Runs in Node and in
+// the desktop's renderer alike (the global crypto).
+const randomUUID = () => globalThis.crypto.randomUUID();
 import { rows, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { baselineOf } from '../analysis/common.ts';

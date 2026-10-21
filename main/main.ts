@@ -7,6 +7,9 @@ import { basename, join } from 'node:path';
 import { buildMenu } from './menu.ts';
 import { mppToXml, xmlToMpp } from './msproject.ts';
 import { nodeInfer, ReasonerUnavailable } from '../core/analysis/hrmRuntime.ts';
+import { registerBim, registerBimScheme } from './bim.ts';
+
+registerBimScheme(); // before ready: the 4D viewer's p6c4d:// scheme
 
 const DB_FILE = () => join(app.getPath('userData'), 'p6clone-db.json');
 let win: BrowserWindow | null = null;
@@ -214,5 +217,5 @@ ipcMain.handle('confirm',async (_e, message: string, detail?: string) => {
   return r.response === 0;
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => { registerBim(() => win); createWindow(); });
 app.on('window-all-closed', () => app.quit());

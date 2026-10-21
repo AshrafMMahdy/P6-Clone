@@ -30,7 +30,7 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
 - **Tools > Update Progress**: moves the data date, auto-statuses activities from planned dates, recomputes remaining durations and resource actuals, then reschedules.
 - **Tools > Level Resources**: serial leveler (priority by early start / float / priority, within float, overallocation %).
 - **Tools > Check Schedule Report**: P6 Professional's 14 checks with P6's populations and default targets; click an activity to go to it. **Schedule Options > Advanced**: multiple float paths (total or free float, end activity, number of paths) fill Float Path and Float Path Order on F9 as P6 does. **View > Show on Bottom > Activity Usage Profile / Spreadsheet**: planned value, earned value, actual and remaining curves per week or month.
-- **Tools > Extensions** (beyond P6, usable without the AI agent): DCMA 14-point (own implementation; PAM 200.1 and other profiles, critical path test, CPLI, BEI), Schedule lint (with fixes you can apply), Crashing (least-cost, Kelley-Walker cut sets), What-ifs (many scenarios compared on copies), Schedule reasoner (the White Hat IQ trained optimiser, run locally: a leveling order and crash modes, checked against P6 leveling), Windows analysis (AACE MIP 3.3 / 3.4 half-step) and Time impact analysis (AACE 52R-06).
+- **Tools > Extensions** (beyond P6, usable without the AI agent): DCMA 14-point (own implementation; PAM 200.1 and other profiles, critical path test, CPLI, BEI), Schedule lint (with fixes you can apply), Crashing (least-cost, Kelley-Walker cut sets), What-ifs (many scenarios compared on copies), Schedule reasoner (the White Hat IQ trained optimiser, run locally: a leveling order and crash modes, checked against P6 leveling), Windows analysis (AACE MIP 3.3 / 3.4 half-step) and Time impact analysis (AACE 52R-06), and 4D (an IFC model linked to the activities: the build by date against any baseline, picking elements to link them to the selected activity, rules, element status, Navisworks / SYNCHRO / IFC4 packages and imports, and videos rendered on this computer's GPU; View > Show on Bottom > 4D View follows the selected activity).
 - **Project > Project Details**: General, Notebook (project notebook topics: WBSMEMO on the project's root WBS), Dates, Defaults, Settings, Codes (project codes, PROJPCAT).
 - **Project > Maintain Baselines**: save/assign/restore/delete baselines; baseline bars and BL columns/variance.
 - **Enterprise**: EPS, Resources (rates, max units, calendars, roles), Roles, OBS, Activity Codes, UDFs, Calendars (work week + holidays/exceptions, base calendar inheritance), Cost Accounts, Currencies.
@@ -290,7 +290,24 @@ the P6 schedule log with `log: true`. Recovery: `evaluate_batch` (many what-ifs,
 reasoner; `objective: min_crash_cost` runs crash_schedule). Delay analysis: `windows_analysis` (contemporaneous or
 half-step over handles, files, baselines or progress at a data date) and `tia` (fragnet, `keep`); `compare` takes
 `baseline` to compare with a baseline in the same file and matches renumbered activities by name. Read-only tools carry
-the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as well as text).
+the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as well as text).
+
+**4D** (an IFC model linked to the schedule; see `docs/4d-extension-plan.md` and `docs/4d-switch-over.md`): `open_model`
+(IFC2X3 / IFC4, cached by content; geometry in a child process with web-ifc, which ships in `ifc/` beside the bundle),
+`list_elements`, `element_info`, `quantities`, `link_elements` (built / removed / temporary), `link_by_rules`
+(property, scope and selection-set rules, `dry_run` first), `link_status`, `set_4d_keys`, `export_4d` (Navisworks
+search sets + TimeLiner CSV, SYNCHRO, IFC4 4D in the Bonsai style, links CSV), `import_4d` (IFC 4D, Navisworks search
+sets, TimeLiner CSV / xlsx, the TimeLiner inside .nwf / .nwd, SYNCHRO .sp 5.1-6.5, read without those programs),
+`simulate_4d` and `compare_4d` (by date, against any saved baseline, with PV / EV by zone), `set_element_status`,
+`render_4d` (a viewer page, PNGs or an MP4 / WebM; the page renders on the GPU of whoever opens it, so a GPU-less
+server needs no Chromium: the platform's client render drives its `WHIQ4D_EXPORT` hooks), `relink_model` (links survive a
+model revision that changes GlobalIds). The links travel with the schedule in `<file>.4d.json`. Optional: `synchro_cloud`
+(Bentley iTwin Schedules API, dormant until `BENTLEY_CLIENT_ID` / `BENTLEY_CLIENT_SECRET` are set) and a Navisworks add-in
+in `addins/navisworks` (source and build script; needs a Navisworks licence, untested without one).
+
+Baselines: any number per project (P6 keeps any number; BL1-BL3 are only the ones assigned for display). Tools that
+take a baseline accept any saved baseline by name. Microsoft Project XML brings Baseline and Baseline1-10 in as saved
+baselines (Baseline as the project baseline, 1-3 as BL1-BL3) and writes them back.
 
 ### Other commands
 

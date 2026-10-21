@@ -24,14 +24,14 @@ interface Options {
 declare global { interface Window { P6C4D: { model: string; timeline: Timeline; options?: Options }; WHIQ4D_EXPORT: unknown; P6C4D_API: unknown } }
 
 const cfg = window.P6C4D;
-const tl = cfg.timeline;
+let tl = cfg.timeline;
 const opt: Required<Pick<Options, 'layout' | 'left' | 'step' | 'growth' | 'overlays' | 'view'>> & Options = { layout: 'single', left: 'best', step: 7, growth: 'none', overlays: ['date', 'legend', 'activity_list'], view: 'iso', interactive: true, ...cfg.options };
 const DAY = 1440;
 const toMin = (s: string | null | undefined) => (s ? Date.parse(`${s.slice(0, 10)}T${s.slice(11, 16) || '00:00'}:00Z`) / 60000 : null);
 const iso = (m: number) => new Date(m * 60000).toISOString().slice(0, 10);
-const t0 = toMin(tl.start) ?? 0, t1 = toMin(tl.finish) ?? t0 + 30 * DAY;
-const dataDate = toMin(tl.dataDate);
-const actById = new Map(tl.activities.map((a) => [a.task, a]));
+let t0 = toMin(tl.start) ?? 0, t1 = toMin(tl.finish) ?? t0 + 30 * DAY;
+let dataDate = toMin(tl.dataDate);
+let actById = new Map(tl.activities.map((a) => [a.task, a]));
 
 // ── colours: Navisworks task types; comparison: early blue, on time green, late red, not started grey ────────────
 const C = { ghost: 0x5a6372, construct: 0x2c9a4a, demolish: 0xd62728, temporary: 0xe8c547, unlinked: 0x8a93a3, ahead: 0x2a6fdb, on_time: 0x2c9a4a, late: 0xd62728, not_started: 0x7a7f87, complete: 0xb8c0cc, highlight: 0xff8c00 };
@@ -52,13 +52,24 @@ function stateAt([s, f]: [number | null, number | null], role: Role, at: number)
 }
 // growth within a task: the element's place along the chosen direction among the task's elements (0..1)
 const growthRank = new Map<string, number>();
-if (opt.growth !== 'none') {
+function rankGrowth() {
+  growthRank.clear();
+  if (opt.growth === 'none') return;
   const byTask = new Map<string, { guid: string; v: number }[]>();
   for (const [guid, e] of Object.entries(tl.elements)) for (const [task] of e.links) { const v = opt.growth === 'left_right' || opt.growth === 'right_left' ? e.x ?? 0 : e.z ?? 0; (byTask.get(task) ?? byTask.set(task, []).get(task)!).push({ guid, v }); }
   for (const [task, l] of byTask) { l.sort((a, b) => (opt.growth === 'top_down' || opt.growth === 'right_left' ? b.v - a.v : a.v - b.v)); l.forEach((x, i) => growthRank.set(`${task}|${x.guid}`, l.length > 1 ? i / l.length : 0)); }
 }
+rankGrowth();
 const statusBy = new Map<string, { status: string; at: number }[]>();
-for (const s of tl.status) { const at = toMin(s.date); if (at != null) (statusBy.get(s.guid) ?? statusBy.set(s.guid, []).get(s.guid)!).push({ status: s.status, at }); }
+function indexStatus() { statusBy.clear(); for (const s of tl.status) { const at = toMin(s.date); if (at != null) (statusBy.get(s.guid) ?? statusBy.set(s.guid, []).get(s.guid)!).push({ status: s.status, at }); } }
+indexStatus();
+/** New links or dates (the desktop sends them as the user edits): the same model, a new timeline. */
+function setTimeline(next: Timeline) {
+  tl = next; t0 = toMin(tl.start) ?? 0; t1 = toMin(tl.finish) ?? t0 + 30 * DAY; dataDate = toMin(tl.dataDate);
+  actById = new Map(tl.activities.map((a) => [a.task, a])); rankGrowth(); indexStatus();
+  if (slider) slider.max = String(steps());
+  render();
+}
 function elementState(guid: string, source: string, at: number): State | 'unlinked' {
   const e = tl.elements[guid];
   if (!e) return 'unlinked';
@@ -278,11 +289,12 @@ function pick(e: PointerEvent) {
   window.parent?.postMessage({ type: 'p6c4d:pick', guid: guid ?? null, add: e.ctrlKey || e.shiftKey }, '*');
 }
 window.addEventListener('message', (e) => {
-  const m = e.data as { type?: string; date?: string; guids?: string[]; source?: string; options?: Options };
+  const m = e.data as { type?: string; date?: string; guids?: string[]; source?: string; options?: Options; timeline?: Timeline };
   if (m?.type === 'p6c4d:date' && m.date) api.setDate(m.date);
   if (m?.type === 'p6c4d:highlight') api.highlight(m.guids ?? []);
   if (m?.type === 'p6c4d:source' && m.source) api.setSource(m.source);
-  if (m?.type === 'p6c4d:options' && m.options) { Object.assign(opt, m.options); render(); }
+  if (m?.type === 'p6c4d:options' && m.options) { Object.assign(opt, m.options); rankGrowth(); render(); }
+  if (m?.type === 'p6c4d:timeline' && (m as { timeline?: Timeline }).timeline) setTimeline((m as { timeline: Timeline }).timeline);
 });
 
 // ── hooks ─────────────────────────────────────────────────────────────────────────────────────────────────────────
