@@ -30,19 +30,26 @@ export const TOOLS: ToolDef[] = [
     milestones_only: { type: 'boolean' },
     activity_code: { type: 'string', description: 'Activity code value, optionally with its type: "civil" or "TYPE OF WORK=civil" (code value or description)' },
     sort: { type: 'string', enum: ['start', 'finish', 'total_float', 'duration'], description: 'Default: start' },
-    limit: { type: 'number', description: 'Default 25, at most 100' },
+    limit: { type: 'number', description: 'Default 25, at most 100 a page' },
+    offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' },
   } } },
-  { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type, lag, driving and relationship free float), resource assignments, activity codes, user defined fields (UDFs), notes; source_uid for an activity read from Microsoft Project.', parameters: { type: 'object', properties: { activity_id: { type: 'string', description: 'Activity ID, or "uid:<task UID>" for an activity read from Microsoft Project' } }, required: ['activity_id'] } },
-  { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges, and each element\'s wbs_id (edit operations take "wbs_id:<id>"). Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2' } } } },
-  { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50' } } } },
+  { name: 'get_activity', description: 'Everything about one activity: dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type, lag, driving and relationship free float), resource assignments, activity codes, user defined fields (UDFs), notes; source_uid for an activity read from Microsoft Project.', parameters: { type: 'object', properties: { activity_id: { type: 'string', description: 'Activity ID, or "uid:<task UID>" for an activity read from Microsoft Project' }, offset: { type: 'number', description: 'paging of the predecessors, successors and resources (60, 60 and 40 a page): pass next_offset' } }, required: ['activity_id'] } },
+  { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges, and each element\'s wbs_id (edit operations take "wbs_id:<id>"). Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
+  { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50, at most 200 a page' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: {} } },
-  { name: 'list_projects', description: 'Every project in the database (not only the open one): ID, name, status, start and finish, activity count, WBS top-level names, calendar. Use it to find past projects similar to the one being planned or asked about; then read one with the other lookups by passing its ID as "project".', parameters: { type: 'object', properties: { text: { type: 'string', description: 'only projects whose ID or name contains this' } } } },
+  { name: 'list_projects', description: 'Every project in the database (not only the open one): ID, name, status, start and finish, activity count, WBS top-level names, calendar. Use it to find past projects similar to the one being planned or asked about; then read one with the other lookups by passing its ID as "project".', parameters: { type: 'object', properties: { text: { type: 'string', description: 'only projects whose ID or name contains this' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
   { name: 'trace_logic', description: 'Trace Logic (View > Show on Bottom > Trace Logic): an activity\'s predecessors and successors several levels deep, with each link\'s type, lag, relationship free float and whether it is driving. Use it to explain why an activity is where it is.', parameters: { type: 'object', properties: { activity_id: { type: 'string' }, predecessors: { type: 'number', description: 'levels back (default 3, max 10)' }, successors: { type: 'number', description: 'levels forward (default 3, max 10)' }, driving_only: { type: 'boolean' } }, required: ['activity_id'] } },
   { name: 'earned_value', description: 'Earned value as P6 calculates it (baseline budget, planned value at the data date, earned value from % complete, actual cost): project totals, each top-level WBS, and the activities with the worst cost and schedule performance (CPI/SPI). Money in the project currency.', parameters: { type: 'object', properties: { worst: { type: 'number', description: 'how many weakest activities to list (default 10)' } } } },
   { name: 'list_dictionaries', description: 'The dictionaries edit operations refer to by name: baselines (with which is the project baseline and BL1-BL3), activity/project/resource code types and their values, UDFs, cost accounts, calendars, resource curves, EPS, OBS and roles.', parameters: { type: 'object', properties: { only: { type: 'string', description: 'one of baselines, codes, udfs, accounts, calendars, curves, eps, obs, roles' }, max_values: { type: 'number', description: 'code values listed per type (default 50)' } } } },
-  { name: 'resource_summary', description: 'Resources with their assignments: total budgeted/remaining units and cost, first/last use. With `resource`, the activities that resource is assigned to.', parameters: { type: 'object', properties: { resource: { type: 'string' }, limit: { type: 'number' } } } },
+  { name: 'resource_summary', description: 'Resources with their assignments: total budgeted/remaining units and cost, first/last use. With `resource`, the activities that resource is assigned to.', parameters: { type: 'object', properties: { resource: { type: 'string' }, limit: { type: 'number', description: 'Default 30, at most 100 a page' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
 ];
 // every lookup can read a project other than the open one
+/** One page of a list: `offset` rows skipped, at most `limit`; next_offset is null once the list is done. */
+const pageOf = <T,>(list: T[], args: Record<string, any>, limit: number) => {
+  const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
+  const rows = list.slice(offset, offset + limit);
+  return { rows, offset, next_offset: offset + rows.length < list.length ? offset + rows.length : null };
+};
 for (const t of TOOLS) if (t.name !== 'list_projects') (t.parameters as { properties: Record<string, unknown> }).properties.project = { type: 'string', description: 'project ID to read instead of the open project(s), e.g. a past project from list_projects' };
 
 const d = (s?: string) => (s ? s.slice(0, 16) : '');
@@ -100,7 +107,8 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         top_wbs: W.filter((w) => w.parent_wbs_id === roots.get(p.proj_id)).slice(0, 12).map((w) => w.wbs_name),
         calendar: rows(db, 'CALENDAR').find((c) => c.clndr_id === p.clndr_id)?.clndr_name,
       }));
-      return { projects: out.slice(0, 200), total: out.length };
+      const pg = pageOf(out, args, 200);
+      return { projects: pg.rows, total: out.length, offset: pg.offset, next_offset: pg.next_offset };
     }
     case 'project_summary': {
       const projs = [...open].map((id) => ctx.proj.get(id)).filter((p): p is Row => !!p);
@@ -162,7 +170,8 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const k = key[args.sort] ?? key.start;
       list.sort((a, b) => { const x = k(a), y = k(b); return x < y ? -1 : x > y ? 1 : 0; });
       const limit = Math.min(100, Math.max(1, Number(args.limit) || 25));
-      return { total_matches: list.length, shown: Math.min(limit, list.length), activities: list.slice(0, limit).map(brief) };
+      const pg = pageOf(list, args, limit);
+      return { total_matches: list.length, shown: pg.rows.length, offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map(brief) };
     }
     case 'get_activity': {
       const t = byCode(args.activity_id);
@@ -178,6 +187,12 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const codes = new Map(rows(db, 'ACTVCODE').map((c) => [c.actv_code_id, c])), codeTypes = new Map(rows(db, 'ACTVTYPE').map((c) => [c.actv_code_type_id, c.actv_code_type]));
       const udfTypes = new Map(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'TASK').map((u) => [u.udf_type_id, u.udf_type_label]));
       const udfCodes = new Map(rows(db, 'UDFCODE').map((c) => [c.udf_code_id, c.short_name]));
+      // predecessors and successors 60 a page, resources 40 (a page of offset 60 starts the resources at 40)
+      const off = Math.max(0, Math.floor((Number(args.offset) || 0) / 60) * 60);
+      const mineR = rows(db, 'TASKRSRC').filter((a) => a.task_id === t.task_id);
+      const nP = ctx.predsOf.get(t.task_id)?.length ?? 0, nS = ctx.succsOf.get(t.task_id)?.length ?? 0;
+      const more = off + 60 < nP || off + 60 < nS || Math.round(off * 2 / 3) + 40 < mineR.length;
+      const linkPages = { predecessors_total: nP, successors_total: nS, resources_total: mineR.length, ...(off || more ? { offset: off, next_offset: more ? off + 60 : null } : {}) };
       return {
         ...brief(t),
         early_start: d(t.early_start_date), early_finish: d(t.early_end_date), late_start: d(t.late_start_date), late_finish: d(t.late_end_date),
@@ -185,9 +200,10 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         baseline_start: bl ? d(bl.act_start_date || bl.target_start_date) : null, baseline_finish: bl ? d(bl.act_end_date || bl.target_end_date) : null,
         percent_complete: t.phys_complete_pct, duration_type: t.duration_type, calendar: cal?.clndr_name ?? t.clndr_id,
         constraint: t.cstr_type ? `${t.cstr_type} ${d(t.cstr_date)}` : null, constraint2: t.cstr_type2 ? `${t.cstr_type2} ${d(t.cstr_date2)}` : null,
-        predecessors: (ctx.predsOf.get(t.task_id) ?? []).slice(0, 60).map((r) => rel(r, r.pred_task_id)),
-        successors: (ctx.succsOf.get(t.task_id) ?? []).slice(0, 60).map((r) => rel(r, r.task_id)),
-        resources: rows(db, 'TASKRSRC').filter((a) => a.task_id === t.task_id).slice(0, 40).map((a) => ({ resource: ctx.rsrc.get(a.rsrc_id)?.rsrc_short_name ?? a.rsrc_id, name: ctx.rsrc.get(a.rsrc_id)?.rsrc_name ?? '', budgeted_units: Number(a.target_qty || 0), remaining_units: Number(a.remain_qty || 0), units_per_day: Math.round(Number(a.remain_qty_per_hr || a.target_qty_per_hr || 0) * hpd * 100) / 100, budgeted_cost: Number(a.target_cost || 0) })),
+        ...linkPages,
+        predecessors: (ctx.predsOf.get(t.task_id) ?? []).slice(off, off + 60).map((r) => rel(r, r.pred_task_id)),
+        successors: (ctx.succsOf.get(t.task_id) ?? []).slice(off, off + 60).map((r) => rel(r, r.task_id)),
+        resources: mineR.slice(Math.round(off * 2 / 3), Math.round(off * 2 / 3) + 40).map((a) => ({ resource: ctx.rsrc.get(a.rsrc_id)?.rsrc_short_name ?? a.rsrc_id, name: ctx.rsrc.get(a.rsrc_id)?.rsrc_name ?? '', budgeted_units: Number(a.target_qty || 0), remaining_units: Number(a.remain_qty || 0), units_per_day: Math.round(Number(a.remain_qty_per_hr || a.target_qty_per_hr || 0) * hpd * 100) / 100, budgeted_cost: Number(a.target_cost || 0) })),
         activity_codes: Object.fromEntries(rows(db, 'TASKACTV').filter((a) => a.task_id === t.task_id).map((a) => {
           const c = codes.get(a.actv_code_id);
           return [codeTypes.get(a.actv_code_type_id || c?.actv_code_type_id || '') ?? a.actv_code_type_id, c ? [c.short_name, c.actv_code_name].filter(Boolean).join(' - ') : a.actv_code_id];
@@ -204,19 +220,23 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const tasksUnder = new Map<string, Row[]>();
       for (const t of tasks) for (let w: string | undefined = t.wbs_id, n = 0; w && n < 50; w = wbsById.get(w)?.parent_wbs_id, n++) { let l = tasksUnder.get(w); if (!l) tasksUnder.set(w, (l = [])); l.push(t); }
       const roots = args.under ? [...wbsById.values()].filter((w) => open.has(w.proj_id) && (wbsPath(w.wbs_id).toLowerCase() === String(args.under).toLowerCase() || w.wbs_short_name.toLowerCase() === String(args.under).toLowerCase())) : [...wbsById.values()].filter((w) => open.has(w.proj_id) && w.proj_node_flag === 'Y');
-      const out: unknown[] = [];
+      // 200 elements a page, in tree order; offset skips the elements of earlier pages
+      const out: unknown[] = [], skip = Math.max(0, Math.floor(Number(args.offset) || 0));
+      let seen = 0;
       const walk = (w: Row, lvl: number) => {
         const ts = tasksUnder.get(w.wbs_id) ?? [];
-        if (out.length < 200) out.push({ level: lvl, code: wbsPath(w.wbs_id) || w.wbs_short_name, wbs_id: w.wbs_id, name: w.wbs_name, activities: ts.length, start: d(ts.map(start).filter(Boolean).sort()[0]), finish: d(ts.map(finish).filter(Boolean).sort().pop()), critical: ts.filter((t) => !t.act_end_date && isCritical(t, ctx)).length });
+        if (seen++ >= skip && out.length < 200) out.push({ level: lvl, code: wbsPath(w.wbs_id) || w.wbs_short_name, wbs_id: w.wbs_id, name: w.wbs_name, activities: ts.length, start: d(ts.map(start).filter(Boolean).sort()[0]), finish: d(ts.map(finish).filter(Boolean).sort().pop()), critical: ts.filter((t) => !t.act_end_date && isCritical(t, ctx)).length });
         if (lvl < depth) for (const c of (kids.get(w.wbs_id) ?? []).sort((a, b) => Number(a.seq_num) - Number(b.seq_num))) walk(c, lvl + 1);
       };
       for (const r of roots) walk(r, 0);
-      return { wbs: out, truncated: out.length >= 200 };
+      const next = skip + out.length < seen ? skip + out.length : null;
+      return { wbs: out, truncated: next != null, total: seen, offset: skip, next_offset: next };
     }
     case 'critical_path': {
       const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
       const crit = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && (t.driving_path_flag === 'Y' || isCritical(t, ctx))).sort((a, b) => start(a).localeCompare(start(b)));
-      return { total: crit.length, longest_path_flags_present: tasks.some((t) => t.driving_path_flag === 'Y'), activities: crit.slice(0, limit).map(brief) };
+      const pg = pageOf(crit, args, limit);
+      return { total: crit.length, longest_path_flags_present: tasks.some((t) => t.driving_path_flag === 'Y'), offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map(brief) };
     }
     case 'schedule_health': {
       const live = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
@@ -290,11 +310,14 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         if (!r) return { error: `No resource "${args.resource}".` };
         const mine = A.filter((a) => a.rsrc_id === r.rsrc_id);
         const limit = Math.min(100, Math.max(1, Number(args.limit) || 30));
-        return { resource: r.rsrc_short_name, name: r.rsrc_name, type: r.rsrc_type, assignments: mine.length, activities: mine.slice(0, limit).map((a) => { const t = ctx.taskById.get(a.task_id); return { ...(t ? brief(t) : { id: a.task_id }), budgeted_units: Number(a.target_qty || 0), remaining_units: Number(a.remain_qty || 0) }; }) };
+        const pg = pageOf(mine, args, limit);
+        return { resource: r.rsrc_short_name, name: r.rsrc_name, type: r.rsrc_type, assignments: mine.length, offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map((a) => { const t = ctx.taskById.get(a.task_id); return { ...(t ? brief(t) : { id: a.task_id }), budgeted_units: Number(a.target_qty || 0), remaining_units: Number(a.remain_qty || 0) }; }) };
       }
       const by = new Map<string, Row[]>();
       for (const a of A) { let l = by.get(a.rsrc_id); if (!l) by.set(a.rsrc_id, (l = [])); l.push(a); }
-      return { resources: [...by].map(([id, l]) => ({ resource: ctx.rsrc.get(id)?.rsrc_short_name ?? id, name: ctx.rsrc.get(id)?.rsrc_name ?? '', type: ctx.rsrc.get(id)?.rsrc_type ?? '', assignments: l.length, budgeted_units: Math.round(l.reduce((x, a) => x + Number(a.target_qty || 0), 0)), remaining_units: Math.round(l.reduce((x, a) => x + Number(a.remain_qty || 0), 0)), budgeted_cost: Math.round(l.reduce((x, a) => x + Number(a.target_cost || 0), 0)) })).sort((a, b) => b.assignments - a.assignments).slice(0, 80) };
+      const all = [...by].map(([id, l]) => ({ resource: ctx.rsrc.get(id)?.rsrc_short_name ?? id, name: ctx.rsrc.get(id)?.rsrc_name ?? '', type: ctx.rsrc.get(id)?.rsrc_type ?? '', assignments: l.length, budgeted_units: Math.round(l.reduce((x, a) => x + Number(a.target_qty || 0), 0)), remaining_units: Math.round(l.reduce((x, a) => x + Number(a.remain_qty || 0), 0)), budgeted_cost: Math.round(l.reduce((x, a) => x + Number(a.target_cost || 0), 0)) })).sort((a, b) => b.assignments - a.assignments);
+      const pg = pageOf(all, args, 80);
+      return { resources: pg.rows, total: all.length, offset: pg.offset, next_offset: pg.next_offset };
     }
   }
   return { error: `Unknown tool ${name}` };

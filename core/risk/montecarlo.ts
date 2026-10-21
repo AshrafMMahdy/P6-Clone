@@ -164,7 +164,8 @@ export interface MonteCarloOptions {
   riskEvents?: RiskPhase | 'off';
   /** Scheduling option overrides passed to scheduleProjects. */
   schedOptions?: Partial<SchedOptions>;
-  /** Yield to the event loop every n iterations (default 5). */
+  /** Yield to the event loop every n iterations (default 5), and after any iteration that ends 200 ms or more after the
+   *  last yield (a big schedule: status and cancel answer between iterations). */
   yieldEvery?: number;
   signal?: AbortSignal;
   /** Risk events given for this run (beside PROJRISK / TASKRISK): each happens with probability p and then adds its
@@ -406,6 +407,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   const efSamples = Array.from({ length: n }, () => new Float64Array(iterations));
   const dur = new Float64Array(n);
 
+  let lastYield = Date.now();
   for (let it = 0; it < iterations; it++) {
     if (opts.signal?.aborted) throw new Error('Risk analysis cancelled.');
     const { db: sdb, tasks } = scratch(prep);
@@ -438,7 +440,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
       if (!t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null && Number(t.total_float_hr_cnt) <= 0 && !isSummary(t)) critCount[k]++;
     }
     opts.onProgress?.(it + 1);
-    if ((it + 1) % yieldEvery === 0 && it + 1 < iterations) await yieldNow();
+    if (it + 1 < iterations && ((it + 1) % yieldEvery === 0 || Date.now() - lastYield >= 200)) { await yieldNow(); lastYield = Date.now(); }
   }
 
   // Finish distribution

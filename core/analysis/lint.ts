@@ -142,7 +142,7 @@ export function lintSchedule(db: Db, o: LintOptions = {}): LintReport {
   if (want('fs_overlap')) out.push(fsOverlap(s, o.simulate !== false, maxIds, T));
   if (want('empty_wbs')) {
     const W2 = (s.db.tables.PROJWBS?.rows ?? []).filter((w) => s.projIds.has(w.proj_id) && w.proj_node_flag !== 'Y');
-    const kids = new Map<string, string[]>(); for (const w of W2) kids.set(w.parent_wbs_id, [...(kids.get(w.parent_wbs_id) ?? []), w.wbs_id]);
+    const kids = new Map<string, string[]>(); for (const w of W2) { const l = kids.get(w.parent_wbs_id); if (l) l.push(w.wbs_id); else kids.set(w.parent_wbs_id, [w.wbs_id]); }
     const has = new Set(s.tasks.map((t) => t.wbs_id));
     const any = (id: string, n = 0): boolean => has.has(id) || (n < 50 && (kids.get(id) ?? []).some((k) => any(k, n + 1)));
     const f = W2.filter((w) => !any(w.wbs_id)).map((w) => ({ id: w.wbs_short_name, name: w.wbs_name }));
@@ -205,14 +205,19 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
   }
   // ladders: >= 3 look-alike activities (names equal once digits are masked) of similar duration, mostly chained FS
   const groups = new Map<string, Row[]>();
-  for (const t of s.tasks) if (!isDone(t) && !isWbs(t) && !isLoe(t) && !isMilestone(t)) { const k = `${t.proj_id}|${nameKey(t)}`; groups.set(k, [...(groups.get(k) ?? []), t]); }
+  for (const t of s.tasks) if (!isDone(t) && !isWbs(t) && !isLoe(t) && !isMilestone(t)) { const k = `${t.proj_id}|${nameKey(t)}`; const g = groups.get(k); if (g) g.push(t); else groups.set(k, [t]); }
+  // each group's links found from its own activities (not by a pass over every link per group), in link order
+  const byPred = new Map<string, number[]>();
+  s.rels.forEach((r, i) => { const l = byPred.get(r.pred_task_id); if (l) l.push(i); else byPred.set(r.pred_task_id, [i]); });
   const ladders: Fix[] = [];
   for (const g of groups.values()) {
     if (g.length < L.min_group_size) continue;
     const ds = g.map(durD), mn = minOf(ds), mx = maxOf(ds);
     if (!(mn > 0) || mx > L.max_duration_ratio * mn) continue;
     const ids = new Set(g.map((t) => t.task_id));
-    const chain = s.rels.filter((r) => ids.has(r.pred_task_id) && ids.has(r.task_id) && (r.pred_type || 'PR_FS') === 'PR_FS' && lagD(r) >= 0 && lagD(r) <= L.chain_lag_max);
+    const at: number[] = [];
+    for (const t of g) for (const i of byPred.get(t.task_id) ?? []) { const r = s.rels[i]; if (ids.has(r.task_id) && (r.pred_type || 'PR_FS') === 'PR_FS' && lagD(r) >= 0 && lagD(r) <= L.chain_lag_max) at.push(i); }
+    const chain = at.sort((x, y) => x - y).map((i) => s.rels[i]);
     if (chain.length < Math.max(2, Math.floor(L.min_chained_share * (g.length - 1)))) continue;
     const ops = chain.map((r) => ({ op: 'update_relationship', pred: task(r.pred_task_id).task_code, succ: task(r.task_id).task_code, type: 'FS', new_type: 'SS', lag_days: Math.max(L.lag_min, Math.ceil(durD(task(r.pred_task_id)) / Math.max(1e-9, L.lag_divisor))) }));
     ladders.push({ activities: g.map((t) => t.task_code), fix: `Overlap "${g[0].task_name}" and its ${g.length - 1} look-alikes: ${chain.length} FS links become SS + lag`, ops });
@@ -273,10 +278,13 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
     const found: Offender[] = [];
     if (starts.length === 1) {
       const s0 = starts[0];
+      // the work activities of each WBS, once (not a pass over all of them per activity)
+      const byWbs = new Map<string, Row[]>();
+      for (const x of W) { const l = byWbs.get(x.wbs_id); if (l) l.push(x); else byWbs.set(x.wbs_id, [x]); }
       for (const t of W) {
         const ps = preds(t);
         if (ps.length !== 1 || ps[0].pred_task_id !== s0.task_id) continue;
-        const peers = W.filter((x) => x.wbs_id === t.wbs_id && x !== t).map((x) => start(x)).filter((x): x is number => x != null).sort((a, b) => a - b);
+        const peers = byWbs.get(t.wbs_id)!.filter((x) => x !== t).map((x) => start(x)).filter((x): x is number => x != null).sort((a, b) => a - b);
         const ts = start(t);
         if (peers.length < 2 || ts == null || !cal) continue;
         const med = peers[Math.floor(peers.length / 2)];
@@ -310,7 +318,7 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
   if (want('redundant_links')) {
     // an FS (lag >= 0) link implied by another FS (lag >= 0) path between the same two activities
     const fsOut = new Map<string, Row[]>();
-    for (const r of s.rels) if ((r.pred_type || 'PR_FS') === 'PR_FS' && Number(r.lag_hr_cnt || 0) >= 0) fsOut.set(r.pred_task_id, [...(fsOut.get(r.pred_task_id) ?? []), r]);
+    for (const r of s.rels) if ((r.pred_type || 'PR_FS') === 'PR_FS' && Number(r.lag_hr_cnt || 0) >= 0) { const l = fsOut.get(r.pred_task_id); if (l) l.push(r); else fsOut.set(r.pred_task_id, [r]); }
     const inDeg = new Map<string, number>(); for (const rs of fsOut.values()) for (const r of rs) inDeg.set(r.task_id, (inDeg.get(r.task_id) ?? 0) + 1);
     const red: Offender[] = []; let fsN = 0;
     for (const [u, rs] of fsOut) {
