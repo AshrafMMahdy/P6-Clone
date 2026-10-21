@@ -40,9 +40,27 @@ function finishActivity(u: Update, milestone?: string): Row | null {
   return best;
 }
 
+/** A relationship's float for "does it drive": P6's relationship free float (on the predecessor's calendar), taken as 0
+ *  also when there is no working time between the two dates on the successor's calendar (its non-work days hold it to
+ *  that start, e.g. a holiday on the successor's calendar only). */
+export function drivingFloat(d: Db, ctx: ReturnType<typeof makeCtx>): (r: Row) => number | null {
+  const rf = relationshipFloat(d, ctx), cals = calendarResolver(d, []);
+  return (r) => {
+    const v = rf(r);
+    if (v === 0 || v == null || Number(r.lag_hr_cnt || 0)) return v;
+    const a = ctx.taskById.get(r.pred_task_id), b = ctx.taskById.get(r.task_id);
+    if (!a || !b) return v;
+    const from = parseP6Date(r.pred_type === 'PR_SS' || r.pred_type === 'PR_SF' ? a.act_start_date || a.early_start_date : a.act_end_date || a.early_end_date);
+    const to = parseP6Date(r.pred_type === 'PR_FF' || r.pred_type === 'PR_SF' ? b.early_end_date : b.early_start_date);
+    if (from == null || to == null) return v;
+    const cal = cals.get(b.clndr_id) ?? cals.fallback(ctx.proj.get(b.proj_id)?.clndr_id);
+    return Math.abs(cal.workBetween(from, to)) <= 1 ? 0 : v;
+  };
+}
+
 /** Remaining activities that drive the finish at the update's data date: driving links walked back from it, in order. */
 export function drivingPath(u: Update, end: Row): Row[] {
-  const ctx = makeCtx(u.db, { hoursPerDay: 8 }), rf = relationshipFloat(u.db, ctx);
+  const ctx = makeCtx(u.db, { hoursPerDay: 8 }), rf = drivingFloat(u.db, ctx);
   const preds = new Map<string, Row[]>();
   for (const r of rows(u.db, 'TASKPRED')) (preds.get(r.task_id) ?? preds.set(r.task_id, []).get(r.task_id)!).push(r);
   const seen = new Set<string>(), out: Row[] = [], stack = [end];
@@ -121,7 +139,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
 const fmt = (v: number | null | undefined) => (v != null ? formatP6Date(v) : null);
 
 /** Time impact analysis on a copy: unimpacted and impacted schedules at the same data date. */
-export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { dataDate?: number; milestone?: string; hoursPerDay?: number; calendarDays?: boolean; baseline?: { name: string; finish: number | null } } = {}) {
+export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { dataDate?: number; milestone?: string; hoursPerDay?: number; calendarDays?: boolean; baseline?: { name: string; finish: number | null; how?: string } } = {}) {
   const p0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
   const hpd = cal.hoursPerDay() || o.hoursPerDay || 8;
@@ -150,7 +168,7 @@ export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { d
     // the path the fragnet drives: its activities and what they drive, on the chain that drives the finish
     const onPath = m.end ? drivingPath({ name: '', db: d, projId: projIds[0] }, m.end) : [];
     const ids = new Set(onPath.map((t) => t.task_code));
-    const ctx = makeCtx(d, { hoursPerDay: 8 }), rf = relationshipFloat(d, ctx);
+    const ctx = makeCtx(d, { hoursPerDay: 8 }), rf = drivingFloat(d, ctx);
     const succ = new Map<string, Row[]>();
     for (const r2_ of rows(d, 'TASKPRED')) (succ.get(r2_.pred_task_id) ?? succ.set(r2_.pred_task_id, []).get(r2_.pred_task_id)!).push(r2_);
     const reach = new Set<string>(), stack = rows(d, 'TASK').filter((t) => projIds.includes(t.proj_id) && seeds.has(t.task_code));
@@ -164,6 +182,6 @@ export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { d
     unimpacted_finish: fmt(un.finish), impacted_finish: fmt(im.finish), delay_days: wd(un.finish, im.finish),
     fragnet_on_critical_path: im.drives, fragnet_path: im.path,
     became_critical: [...im.critical].filter((c) => !un.critical.has(c)), no_longer_critical: [...un.critical].filter((c) => !im.critical.has(c)),
-    ...(o.baseline ? { baseline: o.baseline.name, baseline_finish: fmt(o.baseline.finish), variance_to_baseline_days: wd(o.baseline.finish, im.finish) } : {}),
+    ...(o.baseline ? { baseline: o.baseline.name, ...(o.baseline.how ? { baseline_how: o.baseline.how } : {}), baseline_finish: fmt(o.baseline.finish), variance_to_baseline_days: wd(o.baseline.finish, im.finish) } : {}),
   };
 }

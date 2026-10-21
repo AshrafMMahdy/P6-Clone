@@ -7,6 +7,7 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
 import { isCritical } from '../project/ctx.ts';
 import { p6num, scheduleProjects } from '../schedule/cpm.ts';
+import { drivingPath } from './delay.ts';
 import {
   baselineOf, baselineFinish, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope, notAssessed,
   offender, passes, percentCheck, relOffender, type CheckResult, type Offender, type Scope, type Threshold,
@@ -57,7 +58,7 @@ export interface DcmaOptions {
 export interface DcmaReport {
   report: 'DCMA 14-Point Assessment';
   profile: string; status_date: string | null;
-  baseline: { which: string; name: string } | null;
+  baseline: { which: string; name: string; how: string } | null;
   limit_days: number; tasks: number; relationships: number;
   summary: { passed: number; failed: number; not_assessed: number };
   checks: CheckResult[];
@@ -165,7 +166,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   const first = [...bls.values()].find(Boolean);
   return {
     report: 'DCMA 14-Point Assessment', profile: profName, status_date: dd != null ? formatP6Date(dd) : null,
-    baseline: first ? { which, name: first.name } : null, limit_days: limit, tasks: T.length, relationships: L.length,
+    baseline: first ? { which, name: first.name, how: first.how } : null, limit_days: limit, tasks: T.length, relationships: L.length,
     summary: { passed: out.filter((c) => c.result === 'pass').length, failed: out.filter((c) => c.result === 'fail').length, not_assessed: out.filter((c) => c.result === 'not_assessed').length },
     checks: out,
   };
@@ -181,8 +182,19 @@ function projectFinish(s: Scope): number | null {
 function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: string): CheckResult {
   const name = NAMES.critical_path_test;
   const crit = T.filter((t) => isCritical(t, s.ctx)).sort((a, b) => (parseP6Date(a.restart_date || a.early_start_date) ?? 0) - (parseP6Date(b.restart_date || b.early_start_date) ?? 0));
-  const test = pick ? T.find((t) => t.task_code === pick) : crit[0];
-  if (!test) return notAssessed('critical_path_test', name, 'days', null, pick ? `Activity ${pick} is not an incomplete task in scope.` : 'No incomplete critical task to test (schedule the project first).');
+  // nothing critical by float (a Must Finish By later than the forecast gives every task float): the first task on the
+  // longest path, the chain that drives the project finish, is tested instead
+  let viaLongest = false, heldBy: string | null = null;
+  let test = pick ? T.find((t) => t.task_code === pick) : crit[0];
+  if (!test && !pick) {
+    const inT = new Set(T.map((t) => t.task_id));
+    const end = s.tasks.filter((t) => !t.act_end_date && !isWbs(t) && !isLoe(t)).sort((a, b) => (forecastFinish(b) ?? 0) - (forecastFinish(a) ?? 0))[0];
+    test = end ? drivingPath({ name: '', db: s.db, projId: end.proj_id }, end).find((t) => inT.has(t.task_id)) : undefined;
+    viaLongest = !!test;
+    // no logic drives the finish (a constraint on the last activity sets it): the task with the least float
+    if (!test && T.length) { test = [...T].sort((a, b) => Number(a.total_float_hr_cnt || 0) - Number(b.total_float_hr_cnt || 0) || (parseP6Date(a.restart_date || a.early_start_date) ?? 0) - (parseP6Date(b.restart_date || b.early_start_date) ?? 0))[0]; heldBy = end?.cstr_type ? end.task_code : null; }
+  }
+  if (!test) return notAssessed('critical_path_test', name, 'days', null, pick ? `Activity ${pick} is not an incomplete task in scope.` : s.tasks.some((t) => t.early_start_date) ? 'No incomplete task drives the project finish (every remaining task is complete, a milestone, or level of effort).' : 'The project has no early dates: schedule it (F9) first.');
   const before = projectFinish(s);
   let after: number | null = null, ok = true, msg = '';
   // the delay in hours of the test activity's calendar; the finish shift is measured in the same working time
@@ -203,10 +215,10 @@ function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: string): 
   return {
     id: 'critical_path_test', name, unit: 'days', metric: moved, threshold: { op: '=', value: slipDays, source: 'DCMA (project finish must move by the delay added)' },
     numerator: null, denominator: null, result: pass ? 'pass' : 'fail', activities: [offender(test, s, `+${slipDays} d`)], total_activities: 1,
-    note: pass ? `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by the same amount: the critical path is continuous.`
+    note: (viaLongest ? `No task is critical by total float, so ${test.task_code}, the first task on the longest path, was tested. ` : !crit.length && !pick ? `No task is critical by total float and no logic drives the finish${heldBy ? ` (a constraint on ${heldBy} sets it)` : ''}, so ${test.task_code}, the task with the least float, was tested. ` : '') + (pass ? `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by the same amount: the critical path is continuous.`
       : moved <= 0.01 ? `Delaying ${test.task_code} by ${slipDays} working days did not move the project finish: ${test.task_code} is critical by its float but not on the path that drives the finish (a constraint that makes float negative, or an open end), so the critical path is not continuous through it.`
       : movedHours > add ? `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by ${moved}, more than the delay: calendars along the path (non-work periods, a different calendar on a successor or a lag) stretch it, so the finish does not follow the critical path day for day.`
-      : `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by only ${moved}: part of the delay is absorbed on the way (a constraint, a missing link, a lag, or start-to-start / finish-to-finish links that let successors start before it finishes).`,
+      : `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by only ${moved}: part of the delay is absorbed on the way (a constraint, a missing link, a lag, or start-to-start / finish-to-finish links that let successors start before it finishes).`),
     detail: { finish_before: formatP6Date(before), finish_after: formatP6Date(after) },
   };
 }

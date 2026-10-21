@@ -303,6 +303,10 @@ progress), then a switch-over on the platform.
 | `cashflow_scurve` | `progress_curves` for the schedule's cost curves; a cash S-curve from certified or paid amounts supplied per period **stays on the platform** (it is arithmetic over the user's figures, not schedule data) |
 | `reduce_redundant_links` | `lint` (`profile: platform`) `redundant_links`: each fix is a `delete_relationship` op to pass to `edit` |
 | `record_progress_update` | `update_progress` (P6's Update Progress to a data date) or `edit` (`update_activity` actual_start / actual_finish / remaining_days / percent_complete) then `schedule` with `data_date` |
+| `forecast_outcome` (final-delay trajectory from the monthly progress record) | **stays on the platform**: a learned trajectory over its own progress logs. Inputs from the clone: `windows_analysis` (slip per period) and `monte_carlo` (P10–P90) |
+| `review_programme` (phase order, a planner's reading) | **stays on the platform**: LLM and model review. The clone's checks it can cite: `lint`, `check_schedule`, `dcma_14` |
+| `verify_schedule_gate` (grounding gate: citations, LLM skeptic, extractors) | **stays on the platform** (LLM review of generated schedules) |
+| `baseline_schedules_skeptic` (independent senior-planner review) | **stays on the platform** (LLM review); it can run the clone's `check_schedule`, `dcma_14` and `lint` as evidence |
 
 Staying on the platform for now: the bid reasoner (Python + PyTorch, not scheduling), DECM and LOB, and the rows above
 marked so (LLM reasoning or narrative, or data that is not in a P6 schedule).

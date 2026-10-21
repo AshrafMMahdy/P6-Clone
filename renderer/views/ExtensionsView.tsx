@@ -76,7 +76,7 @@ function DcmaPanel() {
         <button className="btn primary" onClick={run}>Run assessment</button>
         {report && <button className="btn" onClick={save}>Save Report...</button>}
       </div>
-      {report && <div><b>{report.summary.failed}</b> failed · {report.summary.passed} passed{report.summary.not_assessed ? ` · ${report.summary.not_assessed} not assessed` : ''} · {report.tasks} tasks, {report.relationships} relationships · status date {report.status_date?.slice(0, 16) ?? 'not set'}{report.baseline ? ` · baseline ${report.baseline.name}` : ' · no baseline'}</div>}
+      {report && <div><b>{report.summary.failed}</b> failed · {report.summary.passed} passed{report.summary.not_assessed ? ` · ${report.summary.not_assessed} not assessed` : ''} · {report.tasks} tasks, {report.relationships} relationships · status date {report.status_date?.slice(0, 16) ?? 'not set'}{report.baseline ? ` · baseline ${report.baseline.name}${/project baseline$/.test(report.baseline.how) ? '' : ` (${report.baseline.how})`}` : ' · no baseline'}</div>}
       {report ? <AnalysisResults checks={report.checks} /> : <div className="muted">Runs the 14 DCMA checks on the open project(s). The critical path test runs on a copy; the project is not changed.</div>}
     </div>
   );

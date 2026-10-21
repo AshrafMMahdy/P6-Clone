@@ -172,13 +172,13 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
     case 'tia': {
       if (!Array.isArray(a.fragnet) || !a.fragnet.length) fail('bad_input', 'fragnet must list edit operations.', 'e.g. [{"op": "add_activity", "id": "X1", "name": "Design change", "duration_days": 10}, {"op": "add_relationship", "pred": "A1000", "succ": "X1"}]');
       const cur = rows(s.db, 'PROJECT').find((p) => p.proj_id === projIds[0])!;
-      let baseline: { name: string; finish: number | null } | undefined;
+      let baseline: { name: string; finish: number | null; how: string } | undefined;
       if (a.baseline) {
         const bl = baselineOf(s.db, cur, String(a.baseline) as 'project') ?? fail('bad_input', `The project has no ${a.baseline} baseline in this file.`, 'Use project, bl1, bl2 or bl3.');
         let f: number | null = null;
         for (const t of bl.tasks.values()) { const v = h.dd(t.act_end_date || t.early_end_date || t.target_end_date); if (v != null && (f == null || v > f)) f = v; }
         if (a.milestone) { const m = bl.tasks.get(a.milestone); f = m ? h.dd(m.act_end_date || m.early_end_date || m.target_end_date) : null; }
-        baseline = { name: bl.name, finish: f };
+        baseline = { name: bl.name, finish: f, how: bl.how };
       }
       const dd = a.data_date != null ? h.dd(a.data_date) ?? fail('bad_input', 'data_date is not a date.', 'YYYY-MM-DD') : undefined;
       const r = timeImpact(s.db, [projIds[0]], a.fragnet, { dataDate: dd, milestone: a.milestone, hoursPerDay: s.hpd, baseline });

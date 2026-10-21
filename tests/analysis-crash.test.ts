@@ -187,3 +187,26 @@ test('shutdown mid-crash: the trial durations are put back before anything is sa
   assert.equal(rollbackRunning(), 1);
   assert.equal(JSON.stringify(db), before, 'what shutdown saves is the project as it was');
 });
+
+test('platform review 2: crash ops name the project (replayable in a multi-project file); default crashing on JWM keeps going', async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'N1', start: '2026-03-02' })).d;
+  const h = np.handle, owner_key = np.owner_key;
+  await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 10 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', succ: 'B' }] });
+  await call('schedule', { handle: h, owner_key });
+  // a kept TIA adds a second project with the same Activity IDs
+  assert.equal((await call('tia', { handle: h, owner_key, fragnet: [{ op: 'add_activity', id: 'X', name: 'X', duration_days: 1 }], keep: true })).err, false);
+  const c = await call('crash_schedule', { handle: h, owner_key, project: 'N1', target_days: 2, apply: true });
+  assert.equal(c.err, false, JSON.stringify(c.d).slice(0, 300));
+  assert.ok(c.d.ops.every((o: any) => o.project === 'N1'));
+  assert.equal((await call('edit', { handle: h, owner_key, operations: c.d.ops })).err, false, 'the returned ops replay through edit');
+  // JWM, no crash data: it used to gain 1 of 20 days and stop (a holiday on a successor's calendar hid a driving link)
+  const jwm = await sample('Copy of JWM - Baseline Programme Rev 05A.xer');
+  const jp = rows(jwm, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id);
+  scheduleProjects(jwm, jp);
+  const r = await crashSchedule(jwm, jp, { targetDays: 20 });
+  assert.ok(r.ok);
+  assert.ok(r.days_gained >= 10, `gained ${r.days_gained}`);
+  assert.ok(r.steps.length > 5);
+});

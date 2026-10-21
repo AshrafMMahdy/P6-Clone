@@ -8,8 +8,9 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import { recordAsync, rollback } from '../journal.ts';
 import { makeCtx } from '../project/ctx.ts';
 import { dayHours } from '../project/units.ts';
-import { calendarResolver, relationshipFloat, scheduleProjects } from '../schedule/cpm.ts';
+import { calendarResolver, scheduleProjects } from '../schedule/cpm.ts';
 import { fitAssignmentsToDuration } from '../resource/assign.ts';
+import { drivingFloat } from './delay.ts';
 import { isLoe, isMilestone, isWbs, type Tick } from './common.ts';
 
 class ScheduleFailed extends Error {}
@@ -129,13 +130,13 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
     if (needed(finish) <= EPS) { stop = 'ALREADY_MET'; return; }
     const preds = new Map<string, Row[]>();
     for (const r of rows(d, 'TASKPRED')) (preds.get(r.task_id) ?? preds.set(r.task_id, []).get(r.task_id)!).push(r);
-    let direct = 0, stalls = 0, retry = false;
+    let direct = 0, stalls = 0, minStep = 0, grown = 0;
     const ineffective = new Set<string>();
     for (let n = 1; ; n++) {
       if (n > maxSteps) { stop = 'CAP'; break; }
       if (o.tick) await o.tick(n - 1, maxSteps, `step ${n}: ${r2(days(finish, baseFinish!))} working days gained`);
       const ctx = makeCtx(d, { hoursPerDay: hpd0 });
-      const rf = relationshipFloat(d, ctx);
+      const rf = drivingFloat(d, ctx);
       // the critical network: what drives the project finish, walked back along driving links (negative float from
       // constraints elsewhere does not move the finish, so it is not crashed)
       // LOE and WBS summary activities take their dates from the logic around them, so they never drive it
@@ -181,10 +182,11 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
       }
       const want = needed(finish);
       const room = Math.min(...acts.map(capDays));
-      // whole days where the room allows; a fraction that fails to move a calendar-bound finish is retried at a day
+      // whole days where the room allows. A step that does not move the finish (non-work days on a successor's
+      // calendar swallow it) is retried larger, up to the room, before the cut is given up
       let step = Math.max(0.01, Math.min(want, near, room));
       if (step >= 1) step = Math.floor(step);
-      if (retry && room >= 1) step = Math.max(step, 1);
+      if (minStep) step = Math.min(room, Math.max(step, minStep));
       const asg = rows(d, 'TASKRSRC').filter((a) => acts.some((t) => t.task_id === a.task_id));
       const before = new Map(acts.map((t) => [t.task_id, [t.remain_drtn_hr_cnt, t.target_drtn_hr_cnt] as const]));
       const beforeAsg = asg.map((a) => [a, a.remain_drtn_hr_cnt, a.target_drtn_hr_cnt, a.remain_qty_per_hr] as const);
@@ -193,15 +195,15 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
       const gained = f == null ? 0 : days(f, finish);
       if (gained <= 0.005) {
         // the cut did not move the finish (e.g. lags on other calendars): undo it and keep those activities out
-        const again: boolean = step < 1 && room >= 1 && !retry;
+        const again: boolean = room > step + 0.005 && grown < 4;
         for (const t of acts) { const [rm, tg] = before.get(t.task_id)!; t.remain_drtn_hr_cnt = rm; t.target_drtn_hr_cnt = tg; const c = changed.get(t.task_id)!; c.to = Number(rm); if (c.to === c.from) changed.delete(t.task_id); if (!again) ineffective.add(t.task_id); }
         for (const [a, rd, td, q] of beforeAsg) { a.remain_drtn_hr_cnt = rd; a.target_drtn_hr_cnt = td; a.remain_qty_per_hr = q; }
-        retry = again;
+        if (again) { minStep = Math.min(room, Math.max(1, step * 2)); grown++; } else { minStep = 0; grown = 0; }
         sched();
         if (++stalls >= 5) { stop = 'PLATEAU'; note = 'Crashing the cheapest cut sets no longer moved the finish.'; break; }
         n--; continue;
       }
-      stalls = 0; retry = false; ineffective.clear();
+      stalls = 0; minStep = 0; grown = 0; ineffective.clear();
       const cost = acts.reduce((s, t) => s + limit.get(t.task_id)!.slope * step, 0);
       direct += cost; finish = f!;
       steps.push({
@@ -214,8 +216,8 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
     }
   }); } catch (e) { if (!(e instanceof ScheduleFailed)) throw e; return { ok: false as const, error: { code: 'schedule_failed', message: e.message } }; }
   rollback(j);
-  const multi = projIds.length > 1, projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
-  const ops = [...changed.values()].map((c) => ({ op: 'update_activity', id: c.task.task_code, ...(multi ? { project: projCode.get(c.task.proj_id) } : {}), ...(c.started ? { remaining_hours: c.to } : { duration_hours: c.to }), assignments_follow: true }));
+  const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
+  const ops = [...changed.values()].map((c) => ({ op: 'update_activity', id: c.task.task_code, project: projCode.get(c.task.proj_id), ...(c.started ? { remaining_hours: c.to } : { duration_hours: c.to }), assignments_follow: true }));
   return {
     ok: true as const, stop, ...(note ? { note } : {}),
     base_finish: baseFinish != null ? formatP6Date(baseFinish) : null, finish: finish != null ? formatP6Date(finish) : null,

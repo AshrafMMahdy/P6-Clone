@@ -76,7 +76,7 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
 }
 
 /** A project's baseline: the project baseline P6 stores (sum_base_proj_id) or a user baseline BL1-BL3. */
-export function baselineOf(db: Db, proj: Row, which: 'project' | 'bl1' | 'bl2' | 'bl3' = 'project'): { projId: string; name: string; tasks: Map<string, Row> } | null {
+export function baselineOf(db: Db, proj: Row, which: 'project' | 'bl1' | 'bl2' | 'bl3' = 'project'): { projId: string; name: string; tasks: Map<string, Row>; how: string } | null {
   // the project baseline: sum_base_proj_id, else the one baseline copy saved from this project (files that carry the
   // baseline project but not the assignment, e.g. Tower-A)
   const copies = which === 'project' && !proj.sum_base_proj_id ? rows(db, 'PROJECT').filter((p) => p._baseline_of === proj.proj_id) : [];
@@ -85,7 +85,8 @@ export function baselineOf(db: Db, proj: Row, which: 'project' | 'bl1' | 'bl2' |
   const b = rows(db, 'PROJECT').find((p) => p.proj_id === id);
   if (!b) return null;
   const tasks = new Map(rows(db, 'TASK').filter((t) => t.proj_id === id).map((t) => [t.task_code, t]));
-  return { projId: id, name: b.proj_short_name, tasks };
+  const how = which !== 'project' ? `assigned as ${which.toUpperCase()}` : proj.sum_base_proj_id ? 'the project baseline' : 'the only baseline saved from this project (none is assigned as the project baseline)';
+  return { projId: id, name: b.proj_short_name, tasks, how };
 }
 
 /** A baseline activity's finish: its actual finish, else its planned/early finish. */

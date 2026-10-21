@@ -47,7 +47,7 @@ export interface CurvePeriod {
   spi: number | null; cpi: number | null; cum_spi: number | null; cum_cpi: number | null;
 }
 export interface ProgressCurves {
-  report: 'Progress Curves'; units: 'cost' | 'hours'; period: 'week' | 'month'; data_date: string | null; baseline: string | null;
+  report: 'Progress Curves'; units: 'cost' | 'hours'; period: 'week' | 'month'; data_date: string | null; baseline: string | null; baseline_how?: string;
   stored_periods: number;
   totals: { bac: number; pv: number; ev: number; ac: number; etc: number; eac: number; vac: number; spi: number | null; cpi: number | null; tcpi: number | null };
   periods: CurvePeriod[]; warnings: string[];
@@ -69,9 +69,11 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
 
   // baseline counterparts (dates of the planned value)
   const bl = new Map<string, Row>();
-  let blName: string | null = null;
-  for (const p of projs) { const b = baselineOf(db, p, 'project'); if (b) { blName = b.name; for (const t of b.tasks.values()) bl.set(`${p.proj_id}|${t.task_code}`, t); } }
-  if (!blName) warnings.push('No project baseline is assigned: planned value uses the current budget and planned dates.');
+  // the project baseline, else the primary user baseline (BL1), as P6 Professional's baseline bars fall back
+  let blName: string | null = null, blHow = '';
+  for (const p of projs) { const b = baselineOf(db, p, 'project') ?? baselineOf(db, p, 'bl1'); if (b) { blName = b.name; blHow = b.how; for (const t of b.tasks.values()) bl.set(`${p.proj_id}|${t.task_code}`, t); } }
+  if (!blName) warnings.push('The project has no baseline in this file: planned value follows the current budget and planned dates, so it shows the current plan, not a baseline.');
+  else if (!/project baseline$/.test(blHow)) warnings.push(`Planned value follows ${blName}, ${blHow}.`);
 
   // the quantities per activity
   const q = (t: Row) => {
@@ -166,7 +168,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   }
   if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost' : 'units'} are recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
   if (!totals.bac) warnings.push(units === 'cost' ? 'The schedule has no budgeted cost (no costed resources or expenses): use units: hours, or load costs.' : 'The schedule has no budgeted units (no resource assignments).');
-  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, stored_periods: usedFin.size, totals, periods, warnings };
+  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, totals, periods, warnings };
 }
 
 export interface HistogramPeriod { start: string; end: string; budgeted: number; actual: number; remaining_early: number; remaining_late: number; limit: number | null; over_allocated: number; available: number | null }

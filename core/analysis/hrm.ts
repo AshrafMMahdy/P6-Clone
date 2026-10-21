@@ -186,7 +186,7 @@ export function proposalOps(inst: HrmInstance, modes: number[], multi: boolean, 
   inst.acts.forEach((a, i) => {
     if (!modes[i]) return;
     const h = Number(a.task.remain_drtn_hr_cnt || 0) / (a.duration || 1) || hoursPerDay, hours = a.modes[modes[i]].duration * h;
-    ops.push({ op: 'update_activity', id: a.task.task_code, ...(multi ? { project: projCode.get(a.task.proj_id) } : {}), ...(a.started ? { remaining_hours: hours } : { duration_hours: hours }), assignments_follow: true });
+    ops.push({ op: 'update_activity', id: a.task.task_code, project: projCode.get(a.task.proj_id), ...(a.started ? { remaining_hours: hours } : { duration_hours: hours }), assignments_follow: true });
   });
   return ops;
 }
