@@ -6,32 +6,39 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, join, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cachedModel, loadModel, type Model } from '../core/bim/model.ts';
-import { viewerHtml, viewerScriptPath } from '../core/bim/render4d.ts';
+import { modelFolder, viewerHtml, viewerScriptPath } from '../core/bim/render4d.ts';
+import { placeTiles } from '../core/bim/tiles.ts';
+import { plainElement } from '../core/bim/element.ts';
 import type { Imported4d } from '../core/bim/exchange4d.ts';
 import { readImport4d } from '../core/bim/read4d.ts';
 
 const root = () => join(app.getPath('userData'), '4d');
-const EMPTY = { project: '', name: '', dataDate: null, start: null, finish: null, sources: [{ name: 'best', label: 'best' }], activities: [], elements: {}, status: [] };
+const EMPTY = { project: '', name: '', dataDate: null, start: null, finish: null, sources: [{ name: 'best', label: 'best' }], activities: [], elements: { count: 0, linked: 0, groups: [], of: '' }, status: [] };
 
-/** Before app ready: the scheme must be standard and allowed to fetch, so the viewer can load model.glb. */
+/** Before app ready: the scheme must be standard and allowed to fetch, so the viewer can load its tiles. */
 export function registerBimScheme(): void {
   protocol.registerSchemesAsPrivileged([{ scheme: 'p6c4d', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 }
 
-/** The viewer folder of a model: index.html (waiting for its timeline from the app), viewer4d.js, model.glb. */
+/** The viewer folder of a model: index.html (waiting for its timeline from the app), render.html, viewer4d.js, and the
+ *  model's display tiles in model-<hash>/ (hard links to the cache). */
 function viewerFolder(m: Model): string {
   const dir = join(root(), m.hash);
   mkdirSync(dir, { recursive: true });
   const script = viewerScriptPath();
   if (!script) throw new Error('The 4D viewer (viewer4d.js) is missing from the app.');
   copyFileSync(script, join(dir, 'viewer4d.js'));
-  if (m.glb && !existsSync(join(dir, 'model.glb'))) copyFileSync(m.glb, join(dir, 'model.glb'));
-  writeFileSync(join(dir, 'index.html'), viewerHtml({ title: '4D', model: 'model.glb', timeline: EMPTY, options: { interactive: true, overlays: ['date', 'legend', 'activity_list'] }, script: { src: 'viewer4d.js' } }));
-  writeFileSync(join(dir, 'render.html'), viewerHtml({ title: '4D', model: 'model.glb', timeline: EMPTY, options: { interactive: false }, script: { src: 'viewer4d.js' } }));
+  if (!m.tiles) return dir;
+  placeTiles(m.tiles, dir, modelFolder(m.hash));
+  const model = { tiles: `${modelFolder(m.hash)}/manifest.json` };
+  const timeline = { ...EMPTY, elements: { count: m.index.elements.length, linked: 0, groups: [], of: '' } };
+  writeFileSync(join(dir, 'index.html'), viewerHtml({ title: '4D', model, timeline, options: { interactive: true, overlays: ['date', 'legend', 'activity_list'] }, script: { src: 'viewer4d.js' } }));
+  writeFileSync(join(dir, 'render.html'), viewerHtml({ title: '4D', model, timeline, options: { interactive: false }, script: { src: 'viewer4d.js' } }));
   return dir;
 }
 
-const answer = (m: Model) => ({ hash: m.hash, path: m.index.sourcePath, index: m.index, geometry: !!m.glb, url: m.glb ? `p6c4d://model/${m.hash}/index.html` : null });
+// the renderer gets plain elements (a structured clone carries no getters)
+const answer = (m: Model) => ({ hash: m.hash, path: m.index.sourcePath, index: { ...m.index, elements: m.index.elements.map(plainElement) }, geometry: !!m.tiles, url: m.tiles ? `p6c4d://model/${m.hash}/index.html` : null });
 
 export function registerBim(getWin: () => BrowserWindow | null): void {
   protocol.handle('p6c4d', (req) => {

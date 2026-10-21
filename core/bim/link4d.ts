@@ -3,6 +3,8 @@
 // database, and go to a <file>.4d.json beside an XER/XML the MCP server saves. Pure code: the model index comes in as
 // data (core/bim/model.ts reads IFC files in Node; the desktop's main process does the same).
 import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
+import { realOf } from '../journal.ts';
+import { elementsByGuid, ordinalOf } from './lookup.ts';
 import type { IfcElement, IfcIndex } from './parse.ts';
 
 export const T4D = { model: '_4D_MODEL', link: '_4D_LINK', rule: '_4D_RULE', set: '_4D_SET', status: '_4D_STATUS', view: '_4D_VIEW' } as const;
@@ -52,12 +54,18 @@ export interface LinkInput { activity: string; guids: string[]; role?: string; p
 /** add (default): new pairs are added, existing ones kept; replace: each named activity's links of that role are
  *  replaced; remove: the named pairs (or every link of an activity when guids is empty) are removed. */
 export function linkElements(db: Db, projId: string, input: LinkInput[], mode: 'add' | 'replace' | 'remove', ix: IfcIndex | null) {
-  const find = activityFinder(db, projId), known = ix ? new Set(ix.elements.map((e) => e.guid)) : null;
+  const find = activityFinder(db, projId), known = ix ? elementsByGuid(ix) : null;
   const T = t4d(db, T4D.link);
   const unknownActivities: string[] = [], unknownGuids: string[] = [];
   let added = 0, removed = 0;
-  const key = (taskId: string, guid: string, role: string) => `${taskId}|${guid}|${role}`;
-  const have = new Set(T.rows.filter((r) => r.proj_id === projId).map((r) => key(r.task_id, r.guid, r.role || 'built')));
+  // the GlobalIds an activity already has in a role, built for the activities this call touches (a Set of every
+  // link of a big model, keyed by a string made per link, took hundreds of MB)
+  const haveOf = new Map<string, Set<string>>();
+  if (mode !== 'remove') {
+    for (const l of input) { const t = find(String(l.activity ?? '')); if (t) haveOf.set(`${t.task_id}|${l.role ?? 'built'}`, new Set()); }
+    for (const r of realOf(T.rows)) if (r.proj_id === projId) haveOf.get(`${r.task_id}|${r.role || 'built'}`)?.add(r.guid);
+  }
+  const have = (taskId: string, role: string) => { const k = `${taskId}|${role}`; let h = haveOf.get(k); if (!h) haveOf.set(k, h = new Set()); return h; };
   for (const l of input) {
     const t = find(String(l.activity ?? ''));
     if (!t) { unknownActivities.push(String(l.activity)); continue; }
@@ -75,17 +83,18 @@ export function linkElements(db: Db, projId: string, input: LinkInput[], mode: '
       const before = T.rows.length;
       T.rows = T.rows.filter((r) => !(r.proj_id === projId && r.task_id === t.task_id && (r.role || 'built') === role));
       removed += before - T.rows.length;
-      for (const k of [...have]) if (k.startsWith(`${t.task_id}|`) && k.endsWith(`|${role}`)) have.delete(k);
+      haveOf.set(`${t.task_id}|${role}`, new Set());
     }
+    const h = have(t.task_id, role);
     for (const g of guids) {
       if (known && !known.has(g)) { unknownGuids.push(g); continue; }
-      if (have.has(key(t.task_id, g, role))) continue;
-      have.add(key(t.task_id, g, role));
+      if (h.has(g)) continue;
+      h.add(g);
       T.rows.push({ link_id: String(nextId(db, T4D.link)), proj_id: projId, task_id: t.task_id, guid: g, role, profile: l.profile ?? '' });
       added++;
     }
   }
-  return { added, removed, links: of(db, T4D.link, projId).length, ...(unknownActivities.length ? { unknown_activities: unknownActivities } : {}), ...(unknownGuids.length ? { unknown_guids: unknownGuids.slice(0, 200), unknown_guid_count: unknownGuids.length } : {}) };
+  return { added, removed, links: realOf(T.rows).reduce((n, r) => n + (r.proj_id === projId ? 1 : 0), 0), ...(unknownActivities.length ? { unknown_activities: unknownActivities } : {}), ...(unknownGuids.length ? { unknown_guids: unknownGuids.slice(0, 200), unknown_guid_count: unknownGuids.length } : {}) };
 }
 
 // ── rules (Navisworks Auto-Attach, SYNCHRO Auto-Matching) ──────────────────────────────────────────────────────────
@@ -140,7 +149,9 @@ export function linkByRules(db: Db, projId: string, ix: IfcIndex, rules: Rule[],
   const tasks = rows(db, 'TASK').filter((t) => t.proj_id === projId && t.task_type !== 'TT_WBS');
   const find = activityFinder(db, projId);
   const sets = of(db, T4D.set, projId);
-  const proposals: { activity: string; guid: string; role: Role; rule: number }[] = [];
+  // what the rules propose, grouped by activity and role (an object per proposed link was hundreds of MB on a big model)
+  const grouped = new Map<string, LinkInput & { guids: string[] }>();
+  let proposed = 0;
   const previews: RulePreview[] = [];
   rules.forEach((rule, i) => {
     const problems: string[] = [];
@@ -172,29 +183,43 @@ export function linkByRules(db: Db, projId: string, ix: IfcIndex, rules: Rule[],
       }
     } else problems.push(`Unknown rule type "${(rule as { type: string }).type}": use property, scope or set_name.`);
     let n = 0;
-    const matched = new Set<string>();
-    for (const [act, guids] of out) for (const g of guids) { proposals.push({ activity: act, guid: g, role, rule: i + 1 }); matched.add(g); n++; }
-    previews.push({ rule: i + 1, type: rule.type, matched_elements: matched.size, activities: out.size, links: n, examples: [...out].slice(0, 5).map(([a, g]) => ({ activity: a, guids: g.slice(0, 5) })), ...(problems.length ? { problems } : {}) });
+    for (const [act, guids] of out) { const k = `${act}|${role}`; const g = grouped.get(k) ?? grouped.set(k, { activity: act, guids: [], role }).get(k)!; for (const x of guids) g.guids.push(x); n += guids.length; }
+    proposed += n;
+    // one activity: its GlobalIds are distinct (one push per element); several: counted once each
+    const matched = out.size <= 1 ? n : new Set([...out.values()].flat()).size;
+    previews.push({ rule: i + 1, type: rule.type, matched_elements: matched, activities: out.size, links: n, examples: [...out].slice(0, 5).map(([a, g]) => ({ activity: a, guids: g.slice(0, 5) })), ...(problems.length ? { problems } : {}) });
   });
-  // an element linked as "built" by two different activities from rules is worth a look (many-to-many is allowed)
-  const builtBy = new Map<string, Set<string>>();
-  for (const p of proposals) if (p.role === 'built') (builtBy.get(p.guid) ?? builtBy.set(p.guid, new Set()).get(p.guid)!).add(p.activity);
-  const conflicts = [...builtBy].filter(([, s]) => s.size > 1).slice(0, 100).map(([g, s]) => ({ guid: g, activities: [...s] }));
+  // an element linked as "built" by two different activities from rules is worth a look (many-to-many is allowed);
+  // counted by element ordinal, so a model of millions of elements needs a few MB for it
+  const ordinal = ordinalOf(ix), N = ix.elements.length;
+  const first = new Int32Array(N).fill(-1), clash = new Map<number, Set<string>>(), outside = new Map<string, Set<string>>();
+  const acts: string[] = [];
+  for (const g of grouped.values()) {
+    if (g.role !== 'built') continue;
+    const a = acts.push(g.activity) - 1;
+    for (const guid of g.guids) {
+      const o = ordinal(guid);
+      if (o < 0) { (outside.get(guid) ?? outside.set(guid, new Set()).get(guid)!).add(g.activity); continue; }
+      if (first[o] < 0) first[o] = a;
+      else if (acts[first[o]] !== g.activity) (clash.get(o) ?? clash.set(o, new Set([acts[first[o]]])).get(o)!).add(g.activity);
+    }
+  }
+  const conflicts = [...[...clash].map(([o, set]) => [ix.elements[o].guid, set] as const), ...[...outside].filter(([, set]) => set.size > 1)].slice(0, 100).map(([g, set]) => ({ guid: g, activities: [...set] }));
   let applied: ReturnType<typeof linkElements> | undefined;
   if (!dryRun) {
-    const grouped = new Map<string, LinkInput>();
-    for (const p of proposals) { const k = `${p.activity}|${p.role}`; (grouped.get(k) ?? grouped.set(k, { activity: p.activity, guids: [], role: p.role }).get(k)!).guids.push(p.guid); }
     applied = linkElements(db, projId, [...grouped.values()], 'add', ix);
     const R = t4d(db, T4D.rule);
     for (const r of rules) R.rows.push({ rule_id: String(nextId(db, T4D.rule)), proj_id: projId, json: JSON.stringify(r) });
   }
-  const linked = new Set([...proposals.map((p) => p.guid), ...(dryRun ? of(db, T4D.link, projId).map((l) => l.guid) : [])]);
-  const left: Record<string, number> = {};
-  for (const e of ix.elements) if (!linked.has(e.guid) && !dryRun) continue; else if (!linked.has(e.guid)) left[e.ifcClass] = (left[e.ifcClass] ?? 0) + 1;
+  // what stays unlinked: a dry run, after the proposals and the links there are; else after the links now
+  const linked = new Uint8Array(N);
+  const mark = (guid: string) => { const o = ordinal(guid); if (o >= 0) linked[o] = 1; };
+  if (dryRun) for (const g of grouped.values()) for (const guid of g.guids) mark(guid);
+  for (const r of realOf(rows(db, T4D.link))) if (r.proj_id === projId) mark(r.guid);
   const unlinked: Record<string, number> = {};
-  const nowLinked = new Set(of(db, T4D.link, projId).map((l) => l.guid));
-  for (const e of ix.elements) if (!(dryRun ? linked : nowLinked).has(e.guid)) unlinked[e.ifcClass] = (unlinked[e.ifcClass] ?? 0) + 1;
-  return { dry_run: dryRun, rules: previews, proposed_links: proposals.length, conflicts, unlinked_by_class: unlinked, ...(applied ? { applied } : {}) };
+  ix.elements.forEach((e, o) => { if (!linked[o]) unlinked[e.ifcClass] = (unlinked[e.ifcClass] ?? 0) + 1; });
+
+  return { dry_run: dryRun, rules: previews, proposed_links: proposed, conflicts, unlinked_by_class: unlinked, ...(applied ? { applied } : {}) };
 }
 
 /** Gaps a 4D model should not have: elements no activity builds, activities with no elements, elements on several
@@ -217,13 +242,16 @@ export function linkStatus(db: Db, projId: string, ix: IfcIndex | null) {
   };
 }
 
-/** The elements of an activity, and the activities of an element. */
+/** The elements of an activity, and the activities of an element. The link rows themselves (a row of a link with no
+ *  role is read as built): millions of links make no object of their own. */
 export function linkMaps(db: Db, projId: string) {
-  const byTask = new Map<string, { guid: string; role: Role; profile: string }[]>(), byGuid = new Map<string, { task_id: string; role: Role }[]>();
-  for (const l of of(db, T4D.link, projId)) {
-    const role = (l.role || 'built') as Role;
-    (byTask.get(l.task_id) ?? byTask.set(l.task_id, []).get(l.task_id)!).push({ guid: l.guid, role, profile: l.profile || '' });
-    (byGuid.get(l.guid) ?? byGuid.set(l.guid, []).get(l.guid)!).push({ task_id: l.task_id, role });
+  type L = { guid: string; task_id: string; role: Role; profile: string };
+  const byTask = new Map<string, L[]>(), byGuid = new Map<string, L[]>();
+  for (const r of realOf(rows(db, T4D.link))) {
+    if (r.proj_id !== projId) continue;
+    const l = (r.role && r.profile != null ? r : { ...r, role: r.role || 'built', profile: r.profile || '' }) as unknown as L;
+    const a = byTask.get(l.task_id); if (a) a.push(l); else byTask.set(l.task_id, [l]);
+    const b = byGuid.get(l.guid); if (b) b.push(l); else byGuid.set(l.guid, [l]);
   }
   return { byTask, byGuid };
 }

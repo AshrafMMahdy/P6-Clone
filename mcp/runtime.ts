@@ -250,6 +250,8 @@ const trimmers = new Set<() => void>();
 let reserved = 0;
 export function countMemory(count: () => number, trim?: () => void): void { counters.add(count); if (trim) trimmers.add(trim); }
 const usedBytes = () => [...sessions.values()].reduce((a, s) => a + s.bytes, 0) + [...counters].reduce((a, f) => a + f(), 0) + reserved;
+/** The budget not taken by projects, models and work in flight. */
+export const freeMemory = () => effectiveBudget() - usedBytes();
 /** Reserve memory for work that is not a project (refused like a file that does not fit); call the result to release. */
 export function reserveMemory(bytes: number): () => void {
   admit(bytes);

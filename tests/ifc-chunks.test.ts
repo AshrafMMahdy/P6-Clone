@@ -1,6 +1,6 @@
 // Models past one web-ifc run: cut into chunks (each a valid IFC with its products and everything they reference),
-// meshed one by one, merged; the result equals a single run. Past the display budget the most detailed elements are
-// boxes. A model whose geometry did not build is never drawn as an empty building.
+// meshed one by one; the result equals a single run. The display model is tiles of the full geometry (no boxes), every
+// element with every triangle. A model whose geometry did not build is never drawn as an empty building.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -60,17 +60,70 @@ test('a large synthetic model in many chunks: every one of its 20,000 walls mesh
   assert.ok(r.index.elements.every((e) => e.derivedVolumeM3 != null && Math.abs(e.derivedVolumeM3 - 1.2) < 1e-3), 'each wall 2 x 0.2 x 3 m');
 });
 
-test('past the display budget the most detailed elements are boxes; every element keeps its node', { timeout: 300_000 }, async () => {
-  const glb = join(mkdtempSync(join(tmpdir(), 'p6-glb-')), 'm.glb');
-  const r = await withEnv({ P6CLONE_VIEW_MAX_MB: '0.2' }, () => parseIfc(join(FX, 'Duplex_A_20110907.ifc'), { glbOut: glb }));
-  const b = readFileSync(glb), jl = b.readUInt32LE(12), j = JSON.parse(b.subarray(20, 20 + jl).toString());
-  assert.equal(b.readUInt32LE(8), b.length, 'GLB length field');
-  assert.equal(j.nodes.length, r.index.meshedElements);
-  const boxes = j.nodes.filter((n: { extras: { box?: boolean } }) => n.extras.box).length;
-  assert.ok(boxes > 0 && boxes < j.nodes.length);
-  assert.ok(b.length < 0.4 * 1048576);
-  assert.match(r.index.geometryNote ?? '', /as boxes/);
-  assert.ok(r.index.elements.some((e) => e.derivedVolumeM3), 'quantities still come from the full geometry');
+/** A tile's glTF JSON and its binary chunk. */
+function readTile(file: string): { json: any; bin: Buffer; total: number } {
+  const b = readFileSync(file), jl = b.readUInt32LE(12);
+  return { json: JSON.parse(b.subarray(20, 20 + jl).toString()), bin: b.subarray(28 + jl), total: b.readUInt32LE(8) };
+}
+/** Every element ordinal a tile folder draws, with the triangles it draws for it. */
+function tileTriangles(dir: string): Map<number, number> {
+  const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+  const out = new Map<number, number>();
+  for (const t of m.tiles) {
+    const { json, bin, total } = readTile(join(dir, t.file));
+    assert.equal(total, readFileSync(join(dir, t.file)).length, 'GLB length field');
+    for (const n of json.nodes) {
+      const prim = json.meshes[n.mesh].primitives[0], tris = json.accessors[prim.indices].count / 3;
+      const u32 = (bv: number) => { const v = json.bufferViews[bv]; return new Uint32Array(bin.buffer.slice(bin.byteOffset + v.byteOffset, bin.byteOffset + v.byteOffset + v.byteLength)); };
+      if (n.extras.p6c.kind === 'instances') { for (const o of u32(n.extras.p6c.ordinals)) out.set(o, (out.get(o) ?? 0) + tris); continue; }
+      // a batch: each element a range of vertices, the ranges one after another; its triangles are the indices that
+      // fall in its range
+      const r = u32(n.extras.p6c.ranges), idx = (() => { const a = json.accessors[prim.indices], v = json.bufferViews[a.bufferView]; return new Uint32Array(bin.buffer.slice(bin.byteOffset + v.byteOffset, bin.byteOffset + v.byteOffset + v.byteLength)); })();
+      let end = 0;
+      for (let k = 0; k < r.length; k += 3) { assert.equal(r[k + 1], end, 'ranges follow each other'); end += r[k + 2]; }
+      assert.equal(end, json.accessors[prim.attributes.POSITION].count);
+      const owner = new Uint32Array(end); for (let k = 0; k < r.length; k += 3) owner.fill(r[k], r[k + 1], r[k + 1] + r[k + 2]);
+      for (let k = 0; k < idx.length; k += 3) out.set(owner[idx[k]], (out.get(owner[idx[k]]) ?? 0) + 1);
+    }
+  }
+  return out;
+}
+
+test('display tiles are the full geometry: every meshed element with every triangle, tiles within their size, repeats instanced', { timeout: 300_000 }, async () => {
+  const dir = join(mkdtempSync(join(tmpdir(), 'p6-tiles-')), 'tiles');
+  const r = await withEnv({ P6CLONE_TILE_MB: '0.25' }, () => parseIfc(join(FX, 'Duplex_A_20110907.ifc'), { tilesOut: dir, tileBytes: 0.25 * 1048576 }));
+  assert.equal(r.index.geometryStatus, 'ok');
+  const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+  assert.equal(m.format, 'p6c-4d-tiles');
+  assert.ok(m.tiles.length > 2, `${m.tiles.length} tiles`);
+  assert.equal(m.elements, r.index.elements.length);
+  assert.equal(readFileSync(join(dir, 'elements.txt'), 'utf8').split('\n')[5], r.index.elements[5].guid, 'GlobalIds by ordinal');
+  // no stand-ins: each element's triangles in the tiles are its triangles in the geometry
+  const drawn = tileTriangles(dir);
+  let meshed = 0;
+  r.index.elements.forEach((e, o) => { if (!e.geom) return; meshed++; assert.equal(drawn.get(o), e.geom.triangles, `${e.guid} (${e.ifcClass})`); });
+  assert.equal(meshed, r.index.meshedElements);
+  assert.equal(drawn.size, meshed);
+  // a tile holds at most its size, unless one element alone is bigger
+  const biggest = Math.max(...r.index.elements.map((e) => (e.geom?.triangles ?? 0) * 3 * 16));
+  for (const t of m.tiles) assert.ok(t.bytes <= Math.max(0.25 * 1048576, biggest) + 65536, `${t.file}: ${t.bytes} bytes`);
+  assert.ok(m.instances > 0, 'Duplex places its doors and windows again: instanced');
+  assert.equal(m.tiles.reduce((n: number, t: { instances: number }) => n + t.instances, 0), m.instances);
+});
+
+test('a big model meshed in chunks: tiles of every chunk, numbered on, and every element in them once', { timeout: 600_000 }, async () => {
+  const f = join(mkdtempSync(join(tmpdir(), 'p6-bigt-')), 'big.ifc');
+  writeFileSync(f, walls(6_000), 'latin1');
+  const dir = join(mkdtempSync(join(tmpdir(), 'p6-bigt-')), 'tiles');
+  const r = await parseIfc(f, { tilesOut: dir, chunkBytes: 0.3 * 1048576, tileBytes: 0.1 * 1048576 });
+  assert.match(r.index.geometryNote ?? '', /meshed in \d+ chunks/);
+  const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+  assert.deepEqual(m.tiles.map((t: { file: string }) => t.file), m.tiles.map((_: unknown, i: number) => `tile-${String(i).padStart(5, '0')}.glb`));
+  const drawn = tileTriangles(dir);
+  assert.equal(drawn.size, 6_000);
+  assert.ok([...drawn.values()].every((n) => n === 12), 'a wall is a box: 12 triangles');
+  // identical walls (the same extrusion everywhere): one mesh, placed 6,000 times
+  assert.equal(m.instances, 6_000);
 });
 
 test('render_4d refuses a model whose geometry did not build (no empty building), and says why', { timeout: 120_000 }, async () => {
@@ -90,22 +143,4 @@ test('render_4d refuses a model whose geometry did not build (no empty building)
   assert.equal(r.d.error.code, 'no_geometry');
   assert.match(r.d.error.reason, /no 3D geometry: geometry worker script not found/);
   assert.equal((await call('simulate_4d', { handle: np.handle })).err, false, 'everything without 3D still works');
-});
-
-test('past P6CLONE_VIEW_BATCH elements the display model is batched: few nodes, every element a vertex range', { timeout: 300_000 }, async () => {
-  const glb = join(mkdtempSync(join(tmpdir(), 'p6-batch-')), 'm.glb');
-  const r = await withEnv({ P6CLONE_VIEW_BATCH: '20' }, () => parseIfc(join(FX, 'Duplex_A_20110907.ifc'), { glbOut: glb }));
-  const b = readFileSync(glb), jl = b.readUInt32LE(12), j = JSON.parse(b.subarray(20, 20 + jl).toString());
-  assert.equal(b.readUInt32LE(8), b.length);
-  assert.ok(j.nodes.length < 20, `${j.nodes.length} nodes`);
-  let elements = 0;
-  for (const n of j.nodes) {
-    const ranges = n.extras.batch as (string | number)[];
-    assert.ok(Array.isArray(ranges));
-    const vertices = j.accessors[j.meshes[n.mesh].primitives[0].attributes.POSITION].count;
-    let end = 0;
-    for (let k = 0; k < ranges.length; k += 3) { assert.equal(ranges[k + 1], end, 'ranges follow each other'); end += Number(ranges[k + 2]); elements++; }
-    assert.equal(end, vertices);
-  }
-  assert.equal(elements, r.index.meshedElements);
 });

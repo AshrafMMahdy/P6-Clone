@@ -8,6 +8,7 @@ import { parseP6Date } from '../dates.ts';
 import { baselineOf } from '../analysis/common.ts';
 import { activityValue, linkMaps, type Role } from './link4d.ts';
 import type { IfcIndex } from './parse.ts';
+import { elementsByGuid } from './lookup.ts';
 import { parseArgs, decodeStepString } from './stepIndex.ts';
 
 export const PSET_4D = 'WHIQ_4D';
@@ -23,7 +24,7 @@ export function items4d(db: Db, projId: string, ix: IfcIndex | null, o: { planne
   const bl = o.planned && o.planned !== 'current' ? baselineOf(db, proj, o.planned) : null;
   if (o.planned && o.planned !== 'current' && !bl) throw new Error(`No baseline "${o.planned}".`);
   const { byTask } = linkMaps(db, projId);
-  const byGuid = ix ? new Map(ix.elements.map((e) => [e.guid, e.expressId])) : new Map<string, number>();
+  const byGuid = ix ? elementsByGuid(ix) : new Map<string, { expressId: number }>();
   const out: Item4d[] = [];
   for (const t of rows(db, 'TASK').filter((x) => x.proj_id === projId && x.task_type !== 'TT_WBS')) {
     const ls = byTask.get(t.task_id);
@@ -36,7 +37,7 @@ export function items4d(db: Db, projId: string, ix: IfcIndex | null, o: { planne
       taskId: t.task_id, key: (o.key ? activityValue(db, t, o.key) : undefined) ?? t.task_code, id: t.task_code, name: t.task_name,
       type: role === 'removed' ? 'Demolish' : role === 'temporary' ? 'Temporary' : 'Construct',
       plannedStart: start ?? '', plannedFinish: finish ?? '', actualStart: t.act_start_date || '', actualFinish: t.act_end_date || '', // actual means done: never forecast dates
-      guids: ls.map((l) => l.guid), expressIds: ls.map((l) => byGuid.get(l.guid)).filter((x): x is number => x != null),
+      guids: ls.map((l) => l.guid), expressIds: ls.map((l) => byGuid.get(l.guid)?.expressId).filter((x): x is number => x != null),
     });
   }
   return out;
@@ -60,7 +61,10 @@ export function stepString(s: string): string {
   flush();
   return out;
 }
-interface Tail { head: string; tail: string; nextId: () => number; owner: string; project: string | null; nl: string; schema: string }
+/** What appending to an IFC needs: the next free express id, the owner history and project to point at, the line
+ *  ending, the schema. From the text (stepTail) or streamed from a file (exchange4dFile.ts). */
+export interface StepAppend { nextId: () => number; owner: string; project: string | null; nl: string; schema: string }
+interface Tail extends StepAppend { head: string; tail: string }
 function stepTail(ifcText: string): Tail {
   const end = ifcText.lastIndexOf('ENDSEC;');
   if (end < 0 || !/END-ISO-10303-21;/.test(ifcText.slice(end))) throw new Error('Not an IFC (STEP) file: no DATA section tail.');
@@ -71,25 +75,32 @@ function stepTail(ifcText: string): Tail {
   return { head: ifcText.slice(0, end), tail: ifcText.slice(end), nextId: () => ++max, owner: oh ? `#${oh[1]}` : '$', project: pj ? `#${pj[1]}` : null, nl: ifcText.includes('\r\n') ? '\r\n' : '\n', schema };
 }
 
-/** The IFC with a WHIQ_4D property set on every linked element: Task (the 4D key), TaskName, PlannedStart,
- *  PlannedFinish. Appended only: geometry, GlobalIds and hierarchy stay byte-identical. One rule then attaches every
- *  element in Navisworks (Auto-Attach by property) or SYNCHRO (Auto-Matching on the field). */
-export function tagIfc(ifcText: string, items: Item4d[]) {
-  const t = stepTail(ifcText);
-  const lines: string[] = [];
+/** The WHIQ_4D property sets, line by line (put), for tagIfc and its streamed twin. */
+export function tagLines(t: StepAppend, items: Item4d[], put: (line: string) => void): { tasks: number; elements: number } {
   let elements = 0, tasks = 0;
   for (const it of items) {
     const els = [...new Set(it.expressIds)];
     if (!els.length) continue;
     const props = ([['Task', it.key], ['TaskName', it.name], ['PlannedStart', day(it.plannedStart)], ['PlannedFinish', day(it.plannedFinish)]] as const)
-      .map(([k, v]) => { const id = t.nextId(); lines.push(`#${id}=IFCPROPERTYSINGLEVALUE('${k}',$,IFCLABEL('${stepString(String(v ?? ''))}'),$);`); return `#${id}`; });
+      .map(([k, v]) => { const id = t.nextId(); put(`#${id}=IFCPROPERTYSINGLEVALUE('${k}',$,IFCLABEL('${stepString(String(v ?? ''))}'),$);`); return `#${id}`; });
     const ps = t.nextId();
-    lines.push(`#${ps}=IFCPROPERTYSET('${ifcGuid()}',${t.owner},'${PSET_4D}',$,(${props.join(',')}));`);
+    put(`#${ps}=IFCPROPERTYSET('${ifcGuid()}',${t.owner},'${PSET_4D}',$,(${props.join(',')}));`);
     const rel = t.nextId();
-    lines.push(`#${rel}=IFCRELDEFINESBYPROPERTIES('${ifcGuid()}',${t.owner},$,$,(${els.map((e) => `#${e}`).join(',')}),#${ps});`);
+    put(`#${rel}=IFCRELDEFINESBYPROPERTIES('${ifcGuid()}',${t.owner},$,$,(${els.map((e) => `#${e}`).join(',')}),#${ps});`);
     tasks++; elements += els.length;
   }
-  return { text: t.head + lines.join(t.nl) + (lines.length ? t.nl : '') + t.tail, tasks, elements };
+  return { tasks, elements };
+}
+
+/** The IFC with a WHIQ_4D property set on every linked element: Task (the 4D key), TaskName, PlannedStart,
+ *  PlannedFinish. Appended only: geometry, GlobalIds and hierarchy stay byte-identical. One rule then attaches every
+ *  element in Navisworks (Auto-Attach by property) or SYNCHRO (Auto-Matching on the field). A model too big for one
+ *  string goes through tagIfcFile (exchange4dFile.ts), which streams it. */
+export function tagIfc(ifcText: string, items: Item4d[]) {
+  const t = stepTail(ifcText);
+  const lines: string[] = [];
+  const r = tagLines(t, items, (l) => lines.push(l));
+  return { text: t.head + lines.join(t.nl) + (lines.length ? t.nl : '') + t.tail, ...r };
 }
 
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -129,12 +140,16 @@ export function timelinerCsv(items: Item4d[]): string {
 }
 
 export function linksCsv(db: Db, projId: string, ix: IfcIndex | null): string {
-  const el = ix ? new Map(ix.elements.map((e) => [e.guid, e])) : new Map();
+  const out: string[] = [];
+  linksCsvLines(db, projId, ix, (l) => out.push(l));
+  return out.join('\r\n') + '\r\n';
+}
+/** The link table line by line (put), for a writer that streams it (millions of links are more than one string). */
+export function linksCsvLines(db: Db, projId: string, ix: IfcIndex | null, put: (line: string) => void): void {
+  const el = ix ? elementsByGuid(ix) : new Map<string, IfcIndex['elements'][number]>();
   const tasks = new Map(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => [t.task_id, t]));
-  const head = ['Activity ID', 'Activity Name', 'Role', 'GlobalId', 'IFC Class', 'Element Name', 'Storey'];
-  const body: string[] = [];
-  for (const [taskId, ls] of linkMaps(db, projId).byTask) for (const l of ls) { const t = tasks.get(taskId), e = el.get(l.guid); body.push([t?.task_code, t?.task_name, l.role, l.guid, e?.ifcClass, e?.name, e?.storey].map(csvCell).join(',')); }
-  return [head.join(','), ...body].join('\r\n') + '\r\n';
+  put(['Activity ID', 'Activity Name', 'Role', 'GlobalId', 'IFC Class', 'Element Name', 'Storey'].join(','));
+  for (const [taskId, ls] of linkMaps(db, projId).byTask) for (const l of ls) { const t = tasks.get(taskId), e = el.get(l.guid); put([t?.task_code, t?.task_name, l.role, l.guid, e?.ifcClass, e?.name, e?.storey].map(csvCell).join(',')); }
 }
 
 export const README: Record<string, string> = {
@@ -171,12 +186,18 @@ baseline is a BASELINE work schedule whose tasks point to the planned ones (IfcR
 };
 
 /** IFC4 4D: the schedule written into the model (Bonsai style). The model must be IFC4 (IfcTaskTime and
- *  IfcWorkSchedule as used here do not exist in IFC2X3). */
+ *  IfcWorkSchedule as used here do not exist in IFC2X3). A model too big for one string: ifc4dFile (exchange4dFile.ts). */
 export function ifc4dText(db: Db, projId: string, ifcText: string, items: Item4d[], baselines: string[] = []): { text: string; tasks: number; links: number } {
   const t = stepTail(ifcText);
-  if (!/^IFC4/i.test(t.schema)) throw new Error(`The model is ${t.schema}: IFC4 4D needs an IFC4 model. Use the navisworks or synchro package, or convert the model to IFC4.`);
   const L: string[] = [];
-  const add = (body: string) => { const id = t.nextId(); L.push(`#${id}=${body};`); return `#${id}`; };
+  const r = ifc4dLines(db, projId, t, items, baselines, (l) => L.push(l));
+  return { text: t.head + L.join(t.nl) + t.nl + t.tail, ...r };
+}
+
+/** The IFC4 4D entities, line by line (put). */
+export function ifc4dLines(db: Db, projId: string, t: StepAppend, items: Item4d[], baselines: string[], put: (line: string) => void): { tasks: number; links: number } {
+  if (!/^IFC4/i.test(t.schema)) throw new Error(`The model is ${t.schema}: IFC4 4D needs an IFC4 model. Use the navisworks or synchro package, or convert the model to IFC4.`);
+  const add = (body: string) => { const id = t.nextId(); put(`#${id}=${body};`); return `#${id}`; };
   const s = (v?: string) => (v ? `'${stepString(v)}'` : '$');
   const iso = (d?: string) => (d ? `'${d.slice(0, 10)}T${d.slice(11, 16) || '00:00'}:00'` : '$');
   const dur = (h: number) => `'PT${Math.round(h * 100) / 100}H'`;
@@ -218,7 +239,7 @@ export function ifc4dText(db: Db, projId: string, ifcText: string, items: Item4d
     const ids = schedule(bl.name, 'BASELINE', list);
     for (const [taskId, id] of ids) add(`IFCRELDEFINESBYOBJECT('${ifcGuid()}',${t.owner},$,$,(${id}),${planned.get(taskId)})`);
   }
-  return { text: t.head + L.join(t.nl) + t.nl + t.tail, tasks: planned.size, links: n };
+  return { tasks: planned.size, links: n };
 }
 
 // ── imports ────────────────────────────────────────────────────────────────────────────────────────────────────────

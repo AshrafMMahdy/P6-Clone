@@ -26,6 +26,7 @@ export function copyIfc(root, dest) {
   for (const f of ['package.json', 'web-ifc-api-node.js', 'web-ifc-node.wasm', 'LICENSE.md']) cpSync(join(web, f), join(out, 'web-ifc', f));
   cpSync(join(root, 'core/bim/geomWorker.mjs'), join(out, 'geomWorker.mjs'));
   cpSync(join(root, 'core/bim/geomChunk.mjs'), join(out, 'geomChunk.mjs')); // models past one web-ifc run
+  cpSync(join(root, 'core/bim/geomTiles.mjs'), join(out, 'geomTiles.mjs')); // the display tiles of each run
   cpSync(join(root, 'core/bim/rvtWorker.mjs'), join(out, 'rvtWorker.mjs')); // Revit files: rvt-rs (Apache-2.0) in rvt/
   mkdirSync(join(out, 'rvt'), { recursive: true });
   for (const f of ['rvt.js', 'rvt_bg.wasm', 'LICENSE', 'NOTICE', 'README.md']) cpSync(join(root, 'core/bim/rvt', f), join(out, 'rvt', f));

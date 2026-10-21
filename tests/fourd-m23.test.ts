@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
@@ -66,8 +66,10 @@ test('4D M3: viewer folder (separate model file), self-contained viewer, video a
   const out = mkdtempSync(join(tmpdir(), 'p6-4d-r-'));
   const v = await call('render_4d', { handle: h, path: join(out, 'viewer') });
   assert.equal(v.err, false, JSON.stringify(v.d));
-  assert.deepEqual(v.d.written.map((p: string) => basename(p)), ['index.html', 'viewer4d.js', 'model.glb', 'timeline.json']);
-  assert.match(readFileSync(v.d.written[0], 'utf8'), /"model":"model\.glb"/);
+  // the page, its script, and the model's display tiles in a folder of their own beside it
+  assert.deepEqual(v.d.written.map((p: string) => basename(p)), ['index.html', 'viewer4d.js', 'manifest.json', 'elements.txt', 'tile-00000.glb']);
+  assert.match(readFileSync(v.d.written[0], 'utf8'), /"model":\{"tiles":"model-[0-9a-f]{16}\/manifest\.json"\}/);
+  assert.equal(basename(dirname(v.d.written[2])), basename(dirname(v.d.written[4])));
   const e = await call('render_4d', { handle: h, path: join(out, 'one'), embed: true, layout: 'side_by_side', left: 'planned', right: 'best', growth: 'bottom_up' });
   assert.ok(statSync(e.d.written[0]).size > 1_000_000, 'the model is inside');
   const vid = await call('render_4d', { handle: h, path: join(out, 'video'), kind: 'video', step: 14, width: 640, height: 360 });
@@ -115,19 +117,26 @@ test('render_4d: MP4 everywhere (a WebM recording becomes MP4 with P6CLONE_FFMPE
   }
 });
 
-test('a batched display model draws the same building as one node per element (Chromium)', { skip: !CHROME && 'no Chromium here', timeout: 300_000 }, async () => {
+test('instanced and merged meshes draw the same building, and the same page draws the same frame again (Chromium)', { skip: !CHROME && 'no Chromium here', timeout: 300_000 }, async () => {
   const { inChromium } = await import('../core/bim/headless.ts');
-  const drawn = async (batch: string | undefined) => {
-    const saved = process.env.P6CLONE_VIEW_BATCH;
-    if (batch) process.env.P6CLONE_VIEW_BATCH = batch; else delete process.env.P6CLONE_VIEW_BATCH;
+  const drawn = async (instanceMin: string | undefined) => {
+    const saved = { m: process.env.P6CLONE_INSTANCE_MIN, c: process.env.P6CLONE_MODEL_CACHE };
+    if (instanceMin) process.env.P6CLONE_INSTANCE_MIN = instanceMin; else delete process.env.P6CLONE_INSTANCE_MIN;
+    process.env.P6CLONE_MODEL_CACHE = mkdtempSync(join(tmpdir(), 'p6-inst-')); // meshed afresh
+    (await import('../core/bim/model.ts')).releaseModels(new Set());
     try {
       const { h } = await duplex();
       const v = await call('render_4d', { handle: h, path: mkdtempSync(join(tmpdir(), 'p6-bv-')), kind: 'viewer', embed: true });
-      // pixels that are not the background, at a date when everything is built
-      return await inChromium(CHROME!, v.d.written[0], (ev) => ev(`new Promise((r) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let k = 0; k < d.length; k += 4) if (Math.abs(d[k] - 238) + Math.abs(d[k + 1] - 241) + Math.abs(d[k + 2] - 245) > 30) n++; r(n); }; i.src = window.P6C4D_API.png('2027-06-01'); })`)) as number;
-    } finally { if (saved == null) delete process.env.P6CLONE_VIEW_BATCH; else process.env.P6CLONE_VIEW_BATCH = saved; }
+      // pixels of the building (not the background, nor the see-through unlinked site), when everything is built
+      return { instances: v.d.display.instances, px: await inChromium(CHROME!, v.d.written[0], (ev) => ev(`new Promise((r) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let k = 0; k < d.length; k += 4) if (Math.abs(d[k] - 238) + Math.abs(d[k + 1] - 241) + Math.abs(d[k + 2] - 245) > 80) n++; r(n); }; i.src = window.P6C4D_API.png('2027-06-01'); })`)) as number };
+    } finally {
+      for (const [k, v] of [['P6CLONE_INSTANCE_MIN', saved.m], ['P6CLONE_MODEL_CACHE', saved.c]] as const) if (v == null) delete process.env[k]; else process.env[k] = v;
+    }
   };
-  const one = await drawn(undefined), batched = await drawn('20');
-  assert.ok(one > 10_000, `${one} pixels drawn`);
-  assert.ok(Math.abs(batched - one) / one < 0.1, `per element ${one}, batched ${batched}`);
+  const inst = await drawn(undefined), again = await drawn(undefined), merged = await drawn('1000000');
+  assert.ok(inst.instances > 0 && merged.instances === 0, `${inst.instances} / ${merged.instances} instances`);
+  assert.ok(inst.px > 10_000, `${inst.px} pixels drawn`);
+  // software rendering in threads is not bit-exact: the same frame within 1 %
+  assert.ok(Math.abs(again.px - inst.px) / inst.px < 0.01, `the same frame: ${inst.px} and ${again.px}`);
+  assert.ok(Math.abs(merged.px - inst.px) / inst.px < 0.02, `instanced ${inst.px}, merged ${merged.px}`);
 });

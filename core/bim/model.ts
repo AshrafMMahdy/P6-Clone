@@ -1,115 +1,205 @@
 // IFC models in Node (MCP server, CLI, the desktop's main process): parsed once, cached by the file's content hash in
-// memory and on disk (index JSON + viewer GLB), so reopening a project or a file someone re-saved without changes costs
-// nothing. The memory a model takes is reported so the MCP server can count it in its budget.
+// memory and on disk (the index, its geometry fingerprints and the display tiles), so reopening a project or a file
+// someone re-saved without changes costs nothing. The memory a model takes is reported so the MCP server can count it
+// in its budget, and what reading one will take is estimated before it is read (loadNeeds).
 import { createHash } from 'node:crypto';
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync, statSync, utimesSync, writeSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseIfc, INDEX_FORMAT, type IfcElement, type IfcIndex } from './parse.ts';
+import { chunkBytesOf, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type IfcElement, type IfcIndex } from './parse.ts';
+import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, newGeomStore, type Extras, type GeomStore } from './element.ts';
+import { elementsByGuid } from './lookup.ts';
+import { readManifest, tileBytesOf } from './tiles.ts';
 import { isRevit, rvtToIfc, type RevitSource } from './rvt.ts';
 import { isNavisworks, nwdToIfc, type NavisworksSource } from './nwd.ts';
 
-export interface Model { hash: string; index: IfcIndex; glb: string | null; byGuid: Map<string, IfcElement>; bytes: number; /** a Revit or Navisworks file read through IFC */ source?: RevitSource | NavisworksSource }
+export interface Model {
+  hash: string; index: IfcIndex;
+  /** the display tiles folder (manifest.json, tile-NNNNN.glb, elements.txt), or null when the model has no geometry */
+  tiles: string | null;
+  byGuid: Map<string, IfcElement>; bytes: number;
+  /** a Revit or Navisworks file read through IFC */
+  source?: RevitSource | NavisworksSource;
+}
 
 const memory = new Map<string, Model>();
-// the display model depends on its settings, so they are part of the name
-const cacheName = (hash: string) => `${hash}-v${INDEX_FORMAT}-${Number(process.env.P6CLONE_VIEW_BATCH) || 50000}-${Number(process.env.P6CLONE_VIEW_MAX_MB) || 1024}`;
+// the tiles depend on their size setting, so it is part of the name
+const cacheName = (hash: string) => `${hash}-v${INDEX_FORMAT}-t${Math.round(tileBytesOf() / 1048576)}`;
 const cacheDir = () => { const d = process.env.P6CLONE_MODEL_CACHE || join(tmpdir(), 'p6clone-ifc-cache'); mkdirSync(d, { recursive: true }); return d; };
+/** Caches of an older format are set aside here (renamed, never deleted): opening the model again reads it afresh. */
+export const SUPERSEDED = 'superseded';
 
 export function fileHash(path: string): Promise<string> {
   return new Promise((res, rej) => { const h = createHash('sha256'); createReadStream(path).on('data', (c) => h.update(c)).on('error', rej).on('end', () => res(h.digest('hex').slice(0, 32))); });
 }
 
+// ── what a model takes in memory (measured, scripts/measure-ifc.ts): the compact index ──────────────────────────────
+/** Bytes per element of the index in memory: the element (64), its GlobalId and name, its entry in the GlobalId map. */
+export const ELEMENT_BYTES = 250;
+const indexBytes = (index: IfcIndex) => {
+  const st = geomStore(index);
+  return index.elements.length * ELEMENT_BYTES + (st?.rows?.byteLength ?? 0) + 8 * 1048576;
+};
 // an element rvt-rs could only place as its bounding box has no volume worth a quantity (a 2023 project: doors 22x,
 // railings 700x Revit's own IFC; walls drawn from their profile within 1%): placed and counted, never measured
 const boxOnly = (e: IfcElement) => /bbox/.test(String(e.props['RvtElementRecordGeometry.BodySource'] ?? '')) || e.props['P6Clone.Geometry'] === 'bounding boxes';
-// in memory a parsed index takes about three times its JSON text (objects, strings as UTF-16, the GlobalId map)
-const wrap = (hash: string, index: IfcIndex, glb: string | null, jsonChars: number): Model => {
-  for (const e of index.elements) if (boxOnly(e)) e.derivedVolumeM3 = null;
-  return { hash, index, glb: index.geometryStatus === 'ok' ? glb : null, byGuid: new Map(index.elements.map((e) => [e.guid, e])), bytes: jsonChars * 3 + index.elements.length * 200 };
+const wrap = (hash: string, index: IfcIndex, tiles: string | null): Model => {
+  for (const e of index.elements) if (boxOnly(e)) noVolume(e);
+  return { hash, index, tiles: index.geometryStatus === 'ok' && tiles && readManifest(tiles) ? tiles : null, byGuid: elementsByGuid(index), bytes: indexBytes(index) };
 };
 
-/** Parse (or take from the cache) the model at path: an IFC, or a Revit file (made into IFC4 first, rvt.ts).
- *  geometry: false skips meshes (faster; no GLB, no derived volumes). */
-export async function loadModel(path: string, o: { geometry?: boolean } = {}): Promise<Model> {
+type LoadOptions = { geometry?: boolean; chunkBytes?: number; hash?: string; onProgress?: (done: number, total: number, note: string) => void | Promise<void> };
+/** Parse (or take from the cache) the model at path: an IFC, or a Revit or Navisworks file (made into IFC4 first,
+ *  rvt.ts / nwd.ts). geometry: false skips meshing (faster; no tiles, no derived volumes). A model cached without
+ *  geometry is meshed from its cached index when geometry is asked for. hash: the IFC's own content hash, when the
+ *  caller has it (never a Revit or Navisworks file's: the IFC made from it is cached under its own). */
+export async function loadModel(path: string, o: LoadOptions = {}): Promise<Model> {
   if (!existsSync(path)) throw new Error(`No file at ${path}.`);
   if (isNavisworks(path)) {
     const { ifc, source } = await nwdToIfc(path);
-    const m = await loadIfc(ifc, o);
+    const m = await loadIfc(ifc, { ...o, hash: undefined });
     m.index.sourcePath = path; m.source = source;
     return m;
   }
   if (!isRevit(path)) return loadIfc(path, o);
   const { ifc, source } = await rvtToIfc(path);
-  const m = await loadIfc(ifc, o);
+  const m = await loadIfc(ifc, { ...o, hash: undefined });
   m.index.sourcePath = path; m.source = source;
   const boxes = m.index.elements.filter(boxOnly).length;
   source.geometry = { from_the_file: m.index.elements.length - boxes, bounding_box_only: boxes, note: 'bounding-box elements are placed for 4D but give no derived volume (quantities counts them as unquantified)' };
   return m;
 }
 
-async function loadIfc(path: string, o: { geometry?: boolean }): Promise<Model> {
+async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   pruneCache();
   // an IFC is a STEP file with an IFC schema; anything else (an XER, a GLB, an .rvt) is refused before it replaces a model
   const head = (() => { const fd = openSync(path, 'r'); try { const b = Buffer.alloc(65536); return b.subarray(0, readSync(fd, b, 0, 65536, 0)).toString('latin1'); } finally { closeSync(fd); } })();
   if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit (.rvt / .rfa) and Navisworks (.nwd / .nwc / .nwf) files are read as they are; other formats have to be exported to IFC first.`);
-  const hash = await fileHash(path);
+  const hash = o.hash ?? await fileHash(path);
+  const want = o.geometry !== false;
   const hit = memory.get(cacheName(hash));
-  if (hit && (o.geometry === false || hit.glb || hit.index.geometryStatus === 'unavailable')) { hit.index.sourcePath = path; return hit; }
+  if (hit && (!want || hit.tiles || hit.index.geometryStatus === 'unavailable')) { hit.index.sourcePath = path; return hit; }
   const base = join(cacheDir(), cacheName(hash));
-  // an index cached without geometry does not serve a call that wants it
-  const cached = existsSync(`${base}.ndjson`) && (o.geometry === false || existsSync(`${base}.glb`)) ? tryReadIndex(`${base}.ndjson`) : null;
-  if (cached && (o.geometry === false || cached.index.geometryStatus !== 'skipped')) {
-    const { index, chars } = cached;
+  setAsideOld(hash);
+  let cached = hit ? { index: hit.index } : existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
+  // a model indexed without geometry: meshed now from its cached index (the STEP pass is not run again)
+  if (cached && want && cached.index.geometryStatus === 'skipped') {
+    const index = cached.index;
+    await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
+    writeIndex(base, index);
+    cached = { index };
+  }
+  if (cached && (!want || cached.index.geometryStatus !== 'ok' || readManifest(`${base}.tiles`))) {
+    const { index } = cached;
     index.sourcePath = path;
     touch(base);
-    const m = wrap(hash, index, existsSync(`${base}.glb`) ? `${base}.glb` : null, chars);
+    const m = wrap(hash, index, `${base}.tiles`);
     memory.set(cacheName(hash), m);
     return m;
   }
-  const geometry = o.geometry !== false;
-  const { index } = await parseIfc(path, { geometry, ...(geometry ? { glbOut: `${base}.glb` } : {}) });
-  const chars = writeIndex(`${base}.ndjson`, index);
-  const m = wrap(hash, index, geometry && existsSync(`${base}.glb`) ? `${base}.glb` : null, chars);
+  const { index } = await parseIfc(path, { geometry: want, ...(want ? { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress } : {}) });
+  writeIndex(base, index);
+  if (index.elements.length > 200_000) compactHeap(); // what reading it left behind goes before the next call takes memory
+  const m = wrap(hash, index, want ? `${base}.tiles` : null);
   memory.set(cacheName(hash), m);
   return m;
 }
 
-// The index on disk: a line with everything but the elements, then a line per element (a model of millions of elements
-// is longer than one string can be). Returns / reads the characters written, for the memory count.
-function writeIndex(file: string, index: IfcIndex): number {
-  // written beside, then renamed into place: a cache file is whole or absent
-  const tmp = `${file}.${process.pid}.tmp`;
+// ── the index on disk (format 10): a header line (everything but the elements, and the shared records), then a line
+// per element ([guid, express id, name, shared record, authored quantities]); the geometry fingerprints in <base>.geom
+// (float32 rows, GEOM_STRIDE per element). Written beside and renamed into place: a cache file is whole or absent.
+interface Header extends Omit<IfcIndex, 'elements'> { x: unknown[]; tables: { p: unknown[]; q: unknown[]; me: unknown[]; o: unknown[] }; geom: { origin: number[]; rows: boolean } }
+export function writeIndex(base: string, index: IfcIndex): void {
+  const file = `${base}.ndjson`, tmp = `${file}.${process.pid}.tmp`;
+  // the shared records: those of compact elements, or interned now for plain ones
+  const st = geomStore(index) ?? newGeomStore();
+  const table = new ExtrasTable(st);
+  const xOf = (e: IfcElement): Extras => (e instanceof Element ? e._x : table.get({ c: e.ifcClass, s: e.storey, d: e.discipline, ...(e.material ? { m: e.material } : {}), ...(e.typeName ? { t: e.typeName } : {}), ...(e.system ? { y: e.system } : {}), p: e.props, ...(e.quantityInfo ? { q: e.quantityInfo } : {}), ...(e.measures ? { me: e.measures } : {}), ...(e.owner ? { o: e.owner } : {}) }));
+  const xNo = new Map<Extras, number>(), xs: unknown[] = [];
+  const objs = { p: new Map<object, number>(), q: new Map<object, number>(), me: new Map<object, number>(), o: new Map<object, number>() };
+  const tables = { p: [] as unknown[], q: [] as unknown[], me: [] as unknown[], o: [] as unknown[] };
+  const ref = (k: keyof typeof objs, v: object | undefined) => { if (!v) return -1; let n = objs[k].get(v); if (n == null) { n = tables[k].length; tables[k].push(v); objs[k].set(v, n); } return n; };
+  // first the shared records (the header lists them), then the elements, written in blocks
+  const xIndex = new Int32Array(index.elements.length);
+  index.elements.forEach((e, i) => {
+    const x = xOf(e);
+    let n = xNo.get(x);
+    if (n == null) { n = xs.length; xNo.set(x, n); xs.push([x.c, x.s, x.d, x.m ?? null, x.t ?? null, x.y ?? null, ref('p', x.p), ref('q', x.q), ref('me', x.me), ref('o', x.o)]); }
+    xIndex[i] = n;
+  });
+  const plainGeom = !(index.elements[0] instanceof Element) && index.elements.some((e) => e.geom);
+  const { elements: _skip, ...rest } = index;
+  const header: Header = { ...rest, x: xs, tables, geom: { origin: plainGeom ? [0, 0, 0] : st.origin, rows: !!st.rows || plainGeom } };
   const fd = openSync(tmp, 'w');
-  let chars = 0, buf = '';
-  const put = (line: string) => { buf += line + '\n'; chars += line.length + 1; if (buf.length > 1 << 22) { writeSync(fd, buf); buf = ''; } };
-  try { put(JSON.stringify({ ...index, elements: [] })); for (const e of index.elements) put(JSON.stringify(e)); if (buf) writeSync(fd, buf); } finally { closeSync(fd); }
+  try {
+    writeSync(fd, JSON.stringify(header) + '\n');
+    let buf = '';
+    index.elements.forEach((e, i) => { buf += JSON.stringify([e.guid, e.expressId, e.name, xIndex[i], Object.keys(e.authored).length ? e.authored : 0]) + '\n'; if (buf.length > 1 << 22) { writeSync(fd, buf); buf = ''; } });
+    if (buf) writeSync(fd, buf);
+  } finally { closeSync(fd); }
+  // fingerprints: the store's rows, or those of plain elements
+  if (st.rows) writeFileSync(`${base}.geom`, new Uint8Array(st.rows.buffer, st.rows.byteOffset, st.rows.byteLength));
+  else if (plainGeom) {
+    const rows = new Float32Array(index.elements.length * GEOM_STRIDE).fill(Number.NaN);
+    index.elements.forEach((e, i) => { const g = e.geom; if (g) rows.set([...g.bbox, ...g.centroid, g.volume, g.triangles], i * GEOM_STRIDE); });
+    writeFileSync(`${base}.geom`, new Uint8Array(rows.buffer));
+  } else rmSync(`${base}.geom`, { force: true });
   renameSync(tmp, file);
-  return chars;
 }
+
 /** The cached index, or null when the cache is missing or damaged (then the IFC is read again). */
-function tryReadIndex(file: string): { index: IfcIndex; chars: number } | null { try { return readIndex(file); } catch { rmSync(file, { force: true }); return null; } }
-function readIndex(file: string): { index: IfcIndex; chars: number } {
-  const fd = openSync(file, 'r'), dec = new TextDecoder(), buf = Buffer.alloc(1 << 24);
-  let rest = '', chars = 0, index: IfcIndex | null = null;
-  const line = (l: string) => { if (!l) return; chars += l.length + 1; if (!index) index = JSON.parse(l) as IfcIndex; else index.elements.push(JSON.parse(l)); };
+function tryReadIndex(base: string): { index: IfcIndex } | null { try { return { index: readIndex(base) } } catch { rmSync(`${base}.ndjson`, { force: true }); return null; } }
+export function readIndex(base: string): IfcIndex {
+  const fd = openSync(`${base}.ndjson`, 'r'), dec = new TextDecoder(), buf = Buffer.alloc(1 << 24);
+  let rest = '', header: Header | null = null, index: IfcIndex | null = null, xs: Extras[] = [], st: GeomStore = newGeomStore();
+  const line = (l: string) => {
+    if (!l) return;
+    if (!header) {
+      header = JSON.parse(l) as Header;
+      const { x, tables, geom, ...ix } = header;
+      st = { rows: null, origin: geom.origin as [number, number, number] };
+      if (geom.rows) { const b = readFileSync(`${base}.geom`); st.rows = new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); }
+      const tab = (k: keyof Header['tables'], n: number) => (n >= 0 ? tables[k][n] : undefined);
+      xs = (x as unknown[][]).map((r) => { const e: Extras = { c: r[0] as string, s: r[1] as string, d: r[2] as Extras['d'], p: (tab('p', r[6] as number) ?? {}) as Extras['p'], g: st }; if (r[3]) e.m = r[3] as string; if (r[4]) e.t = r[4] as string; if (r[5]) e.y = r[5] as string; const q = tab('q', r[7] as number), me = tab('me', r[8] as number), o = tab('o', r[9] as number); if (q) e.q = q as Extras['q']; if (me) e.me = me as Extras['me']; if (o) e.o = o as Extras['o']; return e; });
+      index = { ...(ix as Omit<IfcIndex, 'elements'>), elements: [] };
+      return;
+    }
+    const r = JSON.parse(l) as [string, number, string, number, Record<string, number> | 0];
+    const els = index!.elements;
+    els.push(new Element(r[0], r[1], r[2], r[4] || null, xs[r[3]], els.length));
+  };
   try {
     for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) { const ls = (rest + dec.decode(buf.subarray(0, n), { stream: true })).split('\n'); rest = ls.pop()!; for (const l of ls) line(l); }
     line(rest + dec.decode());
   } finally { closeSync(fd); }
-  if (!index) throw new Error(`The model cache ${file} is empty.`);
-  return { index, chars };
+  if (!index) throw new Error(`The model cache ${base}.ndjson is empty.`);
+  if ((index as IfcIndex).elements.length > 200_000) compactHeap();
+  const ix = index as IfcIndex;
+  if (st.rows && st.rows.length !== ix.elements.length * GEOM_STRIDE) throw new Error(`The model cache ${base}.geom does not match its index.`);
+  return ix;
+}
+
+/** Caches of this model in an older format (another INDEX_FORMAT, the GLB of format 9, other tile settings): renamed
+ *  into superseded/, never deleted, so opening the model reads it afresh. */
+export function setAsideOld(hash: string): string[] {
+  const dir = cacheDir(), keep = cacheName(hash), moved: string[] = [];
+  let names: string[] = [];
+  try { names = readdirSync(dir); } catch { return moved; }
+  for (const f of names) {
+    if (!f.startsWith(`${hash}-`) || f.startsWith(`${keep}.`) || /\.\d+\.tmp$/.test(f)) continue;
+    mkdirSync(join(dir, SUPERSEDED), { recursive: true });
+    try { renameSync(join(dir, f), join(dir, SUPERSEDED, f)); moved.push(f); } catch { /* in use: tried again next time */ }
+  }
+  return moved;
 }
 
 /** A model by hash, from memory or the disk cache (null when it has to be opened again from its file). */
 export function cachedModel(hash: string): Model | null {
   const hit = memory.get(cacheName(hash));
   if (hit) return hit;
-  for (const f of [cacheName(hash)]) {
-    const base = join(cacheDir(), f);
-    const c = existsSync(`${base}.ndjson`) ? tryReadIndex(`${base}.ndjson`) : null;
-    if (c) { const { index, chars } = c; touch(base); const m = wrap(hash, index, existsSync(`${base}.glb`) ? `${base}.glb` : null, chars); memory.set(cacheName(hash), m); return m; }
-  }
+  const base = join(cacheDir(), cacheName(hash));
+  const c = existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
+  if (c) { touch(base); const m = wrap(hash, c.index, `${base}.tiles`); memory.set(cacheName(hash), m); return m; }
   return null;
 }
 
@@ -117,31 +207,77 @@ export function cachedModel(hash: string): Model | null {
 export function releaseModels(keep: Set<string>): void { for (const [k, m] of [...memory]) if (!keep.has(m.hash)) memory.delete(k); }
 export const modelBytes = (hashes?: Iterable<string>) => { const want = hashes ? new Set(hashes) : null; let n = 0; for (const m of memory.values()) if (!want || want.has(m.hash)) n += m.bytes; return n; };
 
-/** What reading the IFC at path may need, before it is read: the index in this process (about 4x the file; a 102 MB
- *  model took 423 MB) and, while it runs, the geometry process (about 5x what it meshes at once: the whole file, or one
- *  chunk of P6CLONE_GEOM_CHUNK_MB for a model past one run). Held only while the model is read. */
-export function loadEstimate(path: string, o: { geometry?: boolean } = {}): number {
-  const size = existsSync(path) ? statSync(path).size : 0;
-  if (isRevit(path)) return size * 12; // rvt-rs's process: 419 MB for a 33.7 MB project; the IFC it makes is far smaller
-  if (isNavisworks(path)) return size * 30; // a model tree unpacks about 7x and is held as objects while it is read
-  const chunk = (Number(process.env.P6CLONE_GEOM_CHUNK_MB) || 300) * 1048576;
-  return Math.round(size * 4.2 + (o.geometry === false ? 0 : Math.min(size, chunk) * 5));
-}
+// ── what reading a model will take, before it is read ─────────────────────────────────────────────────────────────
+// Measured with scripts/measure-ifc.ts (peak RSS of the server process and its children, synthetic models of 7 MB to
+// 1.7 GB and the sample models): see docs/4d-tiles-contract.md, "Memory". The estimate is the measured peak plus a margin.
+/** Server-side peak while the STEP pass builds the index: about the file's size for a model of a few hundred MB (the
+ *  pass's garbage between its collections), then INDEX_PER_BYTE of each byte past it (the live index is a quarter of
+ *  the file; the pass collects every 128 MB read), whichever is less, plus INDEX_FIXED (the code it loads). */
+export const INDEX_PER_BYTE = 0.4, INDEX_KNEE = 256 * 1048576, INDEX_FIXED = 96 * 1048576;
+export const indexNeed = (bytes: number) => Math.round(Math.min(bytes, bytes * INDEX_PER_BYTE + INDEX_KNEE) + INDEX_FIXED);
+/** A geometry run's peak (web-ifc's WebAssembly memory, the file's bytes, the meshes) per byte of IFC it meshes, and its
+ *  fixed part (Node and web-ifc themselves). */
+export const MESH_PER_BYTE = 3.8, MESH_FIXED = 330 * 1048576;
+/** The smallest chunk a model is cut into to fit the memory left (smaller ones repeat the shared definitions too often). */
+export const MIN_CHUNK = 16 * 1048576;
 
-// ── the disk cache (OS temp folder): models not used for P6CLONE_MODEL_CACHE_DAYS (14) go, and the oldest go first
-// while it is over P6CLONE_MODEL_CACHE_MB (10240); checked at most once an hour
-const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.glb']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
+export interface LoadNeeds {
+  /** bytes the index takes while it is built (0 when it is cached) */
+  index: number;
+  /** bytes a geometry run takes at its peak (0 without geometry, or when the tiles are cached) */
+  mesh: number;
+  /** IFC bytes per geometry run that fit: the default chunk, or smaller when the memory left is short */
+  chunkBytes: number;
+  total: number;
+}
+const meshNeed = (bytes: number) => Math.round(bytes * MESH_PER_BYTE + MESH_FIXED);
+
+/** What reading the IFC at path needs, given the memory free for it: the index (unless cached), and one geometry run on
+ *  a chunk sized to what is left (never more than P6CLONE_GEOM_CHUNK_MB, never less than MIN_CHUNK). */
+export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; hash?: string } = {}): LoadNeeds {
+  const size = existsSync(path) ? statSync(path).size : 0;
+  // a Revit or Navisworks file is made into an IFC first: rvt-rs's process (419 MB for a 33.7 MB project), or the
+  // Navisworks model tree unpacked (about 7x) and held as objects; the IFC it makes is far smaller than either
+  if (isRevit(path) || isNavisworks(path)) {
+    const index = Math.round(size * (isRevit(path) ? 12 : 30)), chunk = o.geometry === false ? 0 : Math.min(size, chunkBytesOf());
+    const mesh = chunk ? meshNeed(chunk) : 0;
+    return { index, mesh, chunkBytes: chunk, total: index + mesh };
+  }
+  const base = o.hash ? join(cacheDir(), cacheName(o.hash)) : null;
+  const indexCached = !!(base && (memory.has(cacheName(o.hash!)) || existsSync(`${base}.ndjson`)));
+  const tilesCached = !!(base && readManifest(`${base}.tiles`));
+  const index = indexCached ? 0 : indexNeed(size);
+  if (o.geometry === false || tilesCached) return { index, mesh: 0, chunkBytes: 0, total: index };
+  let chunk = Math.min(size, chunkBytesOf());
+  if (o.free != null) {
+    // what fits beside the index (the index stays in memory while the runs go)
+    const room = o.free - index - MESH_FIXED;
+    const fits = Math.floor(room / MESH_PER_BYTE);
+    if (fits < chunk) chunk = Math.max(Math.min(size, MIN_CHUNK), fits);
+  }
+  const mesh = meshNeed(chunk);
+  return { index, mesh, chunkBytes: chunk, total: index + mesh };
+}
+/** The bytes loadNeeds would reserve with no memory limit (the default chunk). */
+export function loadEstimate(path: string, o: { geometry?: boolean } = {}): number { return loadNeeds(path, o).total; }
+
+// ── the disk cache (OS temp folder unless P6CLONE_MODEL_CACHE): models not used for P6CLONE_MODEL_CACHE_DAYS (14) go,
+// and the oldest go first while it is over P6CLONE_MODEL_CACHE_MB (10240); checked at most once an hour. The
+// superseded/ folder (older formats, set aside) is not touched.
+const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
 let pruned = 0;
 export function pruneCache(now = Date.now()): number {
   if (now - pruned < 3_600_000) return 0;
   pruned = now;
   const dir = cacheDir(), days = Number(process.env.P6CLONE_MODEL_CACHE_DAYS) || 14, cap = (Number(process.env.P6CLONE_MODEL_CACHE_MB) || 10240) * 1048576;
-  const files = readdirSync(dir).map((f) => { const p = join(dir, f); try { const st = statSync(p); return { p, at: st.mtimeMs, size: st.size }; } catch { return null; } }).filter((x): x is { p: string; at: number; size: number } => !!x && /\.(json|ndjson|glb)$/.test(x.p)).sort((a, b) => a.at - b.at);
+  const sizeOf = (p: string): number => { try { const st = statSync(p); return st.isDirectory() ? readdirSync(p).reduce((n, f) => n + sizeOf(join(p, f)), 0) : st.size; } catch { return 0; } };
+  const files = readdirSync(dir).filter((f) => /\.(json|ndjson|geom|glb|tiles)$/.test(f)).map((f) => { const p = join(dir, f); try { const st = statSync(p); return { p, at: st.mtimeMs, size: sizeOf(p) }; } catch { return null; } }).filter((x): x is { p: string; at: number; size: number } => !!x).sort((a, b) => a.at - b.at);
   let total = files.reduce((n, f) => n + f.size, 0), removed = 0;
   for (const f of files) {
     if (now - f.at < days * 86_400_000 && total <= cap) break;
-    try { rmSync(f.p, { force: true }); total -= f.size; removed++; } catch { /* in use */ }
+    try { rmSync(f.p, { recursive: true, force: true }); total -= f.size; removed++; } catch { /* in use */ }
   }
   return removed;
 }
-export const glbSize = (m: Model) => (m.glb && existsSync(m.glb) ? statSync(m.glb).size : 0);
+/** Bytes of the model's display tiles. */
+export const tilesSize = (m: Model) => (m.tiles ? readManifest(m.tiles)?.bytes ?? 0 : 0);

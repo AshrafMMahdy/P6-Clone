@@ -1,20 +1,23 @@
 // 4D tools of the MCP server: an IFC model attached to the project, element links (by hand and by rules), their
 // gaps, the 4D key, and the packages for Navisworks, SYNCHRO and IFC4 4D tools (and back). Kept apart from server.ts.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { rows, type Db, type Row } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
-import { cachedModel, loadEstimate, loadModel, modelBytes, releaseModels, type Model } from '../core/bim/model.ts';
+import { cachedModel, fileHash, loadModel, loadNeeds, modelBytes, releaseModels, type Model } from '../core/bim/model.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
-import { ifc4dText, items4d, linksCsv, README, searchSetsXml, tagIfc, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
-import { countMemory, fail, pathArg, reserveMemory, sessions, type Session } from './runtime.ts';
+import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
+import { countMemory, effectiveBudget, fail, freeMemory, pathArg, reserveMemory, sessions, type Session } from './runtime.ts';
 import type { AnalysisHelpers } from './analysis.ts';
 import type { QuantityKind } from '../core/bim/parse.ts';
 import { nextId } from '../core/db.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { compareAt, criticalChanges, simulate, sourceTasks, viewerTimeline } from '../core/bim/sim4d.ts';
-import { writeViewer, type ViewerOptions } from '../core/bim/render4d.ts';
+import { EmbedTooBig, writeViewer, type ViewerOptions } from '../core/bim/render4d.ts';
+import { ifc4dFile, linksCsvFile, tagIfcFile } from '../core/bim/exchange4dFile.ts';
+import { compactHeap, plainElement } from '../core/bim/element.ts';
+import { embedMaxBytes, readManifest } from '../core/bim/tiles.ts';
 import { relinkPlan } from '../core/bim/relink.ts';
 import { applyImport as applyImport4d, planImport as planImport4d } from '../core/bim/import4d.ts';
 import { readImport4d } from '../core/bim/read4d.ts';
@@ -30,7 +33,7 @@ const edit = { readOnlyHint: false, destructiveHint: false, openWorldHint: false
 const project = { type: 'string', description: 'Project ID (default: the file’s only project)' };
 
 export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<string, unknown>) => [
-  { name: 'open_model', annotations: edit, description: 'Attach a model to the project (4D): an IFC, or a Revit .rvt / .rfa (read without Revit by rvt-rs and made into IFC4; the answer’s source says the Revit version, how it was read and what was approximated or skipped; element GlobalIds are those Revit’s own IFC export writes), or a Navisworks .nwd / .nwc / .nwf (the clone’s own reader: each element with its Revit category, family, type, level, ElementId, parameters and the lengths, areas and volumes Revit computed, and the GlobalId Revit’s IFC export writes; an .nwf opens the files it lists from beside it; the geometry read as its triangles, placed, so derived volumes, the 3D view and the 4D video work: Revit elements’ mesh volumes match Revit’s to 1%). Without a handle the file opens into a new model-only workspace (no schedule needed: list_elements, element_info and quantities on it) and the answer gives its handle and owner_key. Parses it once (cached by content; geometry in a separate process, so a huge model cannot take the server down) and answers schema, element count, storeys, classes, units, geometry status and warnings. One model per project; a new one replaces it and keeps the links whose elements are still there. geometry: false is faster (no 3D view or derived volumes). Large models: pass async: true.', inputSchema: { ...withHandle({ type: 'object', properties: { project, path: { type: 'string' }, geometry: { type: 'boolean' } }, required: ['path'] }), required: ['path'] } },
+  { name: 'open_model', annotations: edit, description: 'Attach a model to the project (4D): an IFC, or a Revit .rvt / .rfa (read without Revit by rvt-rs and made into IFC4; the answer’s source says the Revit version, how it was read and what was approximated or skipped; element GlobalIds are those Revit’s own IFC export writes), or a Navisworks .nwd / .nwc / .nwf (the clone’s own reader: each element with its Revit category, family, type, level, ElementId, parameters and the lengths, areas and volumes Revit computed, and the GlobalId Revit’s IFC export writes; an .nwf opens the files it lists from beside it; the geometry read as its triangles, placed, so derived volumes, the 3D view and the 4D video work: Revit elements’ mesh volumes match Revit’s to 1%). Without a handle the file opens into a new model-only workspace (no schedule needed: list_elements, element_info and quantities on it) and the answer gives its handle and owner_key. Parses it once (cached by content; geometry in separate processes, chunk by chunk, so a huge model cannot take the server down) and answers schema, element count, storeys, classes, units, geometry status, the display tiles (display: tiles, MB, triangles, instances) and warnings. One model per project; a new one replaces it and keeps the links whose elements are still there. geometry: false is faster and needs only the index: linking, rules, keys and every export_4d work in full on it; the 3D view, video and derived volumes mesh it when asked. A model that does not fit the memory budget is refused (memory_budget) with what it needs and the budget. Large models: pass async: true.', inputSchema: { ...withHandle({ type: 'object', properties: { project, path: { type: 'string' }, geometry: { type: 'boolean' } }, required: ['path'] }), required: ['path'] } },
   { name: 'list_elements', annotations: ro, description: 'Model elements with GlobalId, class, storey, name, type, material and the activities linked to each. Filters: storey, class (prefix, e.g. IfcWall), where [{property, op: = | != | contains | like (* and ?), value}] (property: name, type, material, class, storey, system, or "Pset.Prop"), linked: true | false | <Activity ID>. fields adds properties. Paged by limit (default 200, at most 1000) and offset.', inputSchema: withHandle({ type: 'object', properties: { project, storey: { type: 'string' }, class: { type: 'string' }, where: { type: 'array', items: { type: 'object' } }, linked: {}, fields: { type: 'array', items: { type: 'string' } }, limit: { type: 'number' }, offset: { type: 'number' } } }) },
   { name: 'element_info', annotations: ro, description: 'Every property, authored quantity, owner stamp and geometry fingerprint of the given elements (up to 200 GlobalIds), and their links.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } } }, required: ['guids'] }) },
   { name: 'quantities', annotations: ro, description: 'Quantities from the model, grouped by class, storey, class+storey, material, activity or wbs: element count, derived volume (m³, from the geometry) and every authored quantity summed (IfcElementQuantity: NetVolume, NetArea, Length, ...). Grouped by activity it feeds productivity and duration checks against the BOQ. Per group also: figures (each total with its kind, unit, how many elements carry it and its source: base_quantity = an IfcElementQuantity, with its set; geometry = derived from the shape; property_set = a property typed as a measure), and for the asked kind (volume default; area, length, count, weight, time) how many elements are quantified and how many have no figure of that kind at all (unquantified).', inputSchema: withHandle({ type: 'object', properties: { project, group_by: { type: 'string' }, kind: { type: 'string', enum: ['volume', 'area', 'length', 'count', 'weight', 'time'] }, classes: { type: 'array', items: { type: 'string' } }, storeys: { type: 'array', items: { type: 'string' } } } }) },
@@ -43,7 +46,7 @@ export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<s
   { name: 'simulate_4d', annotations: ro, description: 'The 4D state of the model on dates: element counts by state (not started, in progress, complete, removed, temporary in place, unlinked), optionally by storey or class, and the activities under way in each step. date, or from/to/step (days). source: best (default: actuals up to the data date, then the forecast), planned, actual, late, or a saved baseline name. Dates come from the schedule itself (F9: calendars, actuals, data date). snapshots: [dates] renders PNG frames into path (needs the server’s P6CLONE_CHROMIUM; without it, use render_4d kind viewer and look at it). Reads the project only.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, source: { type: 'string' }, by: { type: 'string' }, snapshots: { type: 'array', items: { type: 'string' } }, path: { type: 'string' }, view: { type: 'string' } } }) },
   { name: 'compare_4d', annotations: ro, description: 'Progress against a baseline on a date, element by element (TimeLiner Early/Late appearance): ahead, on time, late, not started, complete. late_means start (default: started later than the baseline, as TimeLiner) or finish (finished later). by storey (default), class or wbs: counts and percentages per zone, the elements behind each late figure (max_ids), planned value vs earned value per zone (each activity\u2019s PV/EV shared over its elements), and the activities that became or stopped being critical since the baseline.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, against: { type: 'string' }, late_means: { type: 'string' }, by: { type: 'string' }, max_ids: { type: 'number' } }, required: ['against'] }) },
   { name: 'set_element_status', annotations: edit, description: 'Element-level progress from site (walkdowns, reality capture): guids, status installed | in_progress | not_installed, date. It overrides the activity\u2019s progress for those elements in simulate_4d, compare_4d and the viewer (actual and best dates), and proposes each touched activity\u2019s % complete from its installed share; apply_percent: true writes it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } }, status: { type: 'string' }, date: { type: 'string' }, apply_percent: { type: 'boolean' } }, required: ['guids', 'status', 'date'] }) },
-  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people. kind viewer (default): an HTML viewer with the model as a separate file (index.html, viewer4d.js, model.glb, timeline.json) in the folder path, or one self-contained file with embed: true; it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or a video rendered in a headless Chromium (the server’s P6CLONE_CHROMIUM; a tool argument never names a program). format mp4 (default: H.264 from the browser, or its WebM converted with the server’s P6CLONE_FFMPEG; without ffmpeg the WebM is returned with a note) or webm. Progress per frame; cancel_job stops it; without one the answer gives the self-contained viewer and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps (below 1 holds frames longer) or seconds_per_frame, file_name, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, format: { type: 'string', enum: ['mp4', 'webm'] }, seconds_per_frame: { type: 'number' }, file_name: { type: 'string' } }, required: ['path'] }) },
+  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people, from the FULL geometry (display tiles; docs/4d-tiles-contract.md). kind viewer (default): an HTML viewer in the folder path (index.html, viewer4d.js, and the model\u2019s tiles in model-<hash>/: manifest.json, tile-NNNNN.glb, elements.txt), or one self-contained file with embed: true (models up to P6CLONE_EMBED_MAX_MB, 64 MB of tiles; past it too_big_to_embed); it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or a video rendered in a headless Chromium (the server’s P6CLONE_CHROMIUM; a tool argument never names a program). format mp4 (default: H.264 from the browser, or its WebM converted with the server’s P6CLONE_FFMPEG; without ffmpeg the WebM is returned with a note) or webm. Progress per frame; cancel_job stops it; without one the answer gives the viewer page (self-contained for a small model, else with its model-<hash>/ tile folder beside it, every file in written) and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). A browser that cannot hold the model fails the render in words naming its size (render_failed); boxes: true draws each element as its bounding box, only when asked. layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps (below 1 holds frames longer) or seconds_per_frame, file_name, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, format: { type: 'string', enum: ['mp4', 'webm'] }, seconds_per_frame: { type: 'number' }, file_name: { type: 'string' }, boxes: { type: 'boolean' } }, required: ['path'] }) },
   { name: 'relink_model', annotations: edit, description: 'Bring the 4D links over to a revised model (M4). Each linked element is found in the new model by its GlobalId; else, in the same IFC class, by name and storey (the nearest one when there are several), else by shape (size and position within tolerance_m, default 0.05). Answers what was kept, matched (and how), and lost (no counterpart: those links are dropped), plus the model diff summary (added, removed, modified, re-identified). dry_run: true only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, tolerance_m: { type: 'number' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
   SYNCHRO_CLOUD_TOOL(withHandle, project),
 ];
@@ -53,24 +56,51 @@ export const FOURD_NAMES = new Set(['open_model', 'list_elements', 'element_info
 // models in memory count in the server's budget; when room is needed, those no project in memory uses are let go
 countMemory(() => modelBytes(), () => releaseModels(new Set([...sessions.values()].flatMap((x) => rows(x.db, T4D.model).map((r) => r.hash)))));
 
-/** Read a model with its memory reserved first: a model that does not fit is refused, not run out of memory on. */
-async function readModel(path: string, o: { geometry?: boolean } = {}): Promise<Model> {
-  const release = reserveMemory(loadEstimate(path, o));
-  try { return await loadModel(path, o); } finally { release(); }
+const mbs = (b: number) => `${Math.round(b / 1048576).toLocaleString('en')} MB`;
+/** Read a model with its memory reserved first: a model that does not fit is refused (naming the budget and what it
+ *  needs), not run out of memory on. Meshing is cut into chunks sized to the memory left (loadNeeds), so a model is
+ *  refused only when its index, or its index and the smallest chunk, do not fit. */
+async function readModel(path: string, o: { geometry?: boolean; tick?: AnalysisHelpers['tick'] } = {}): Promise<Model> {
+  if (!existsSync(path)) return fail('model_unreadable', `No file at ${path}.`, 'Give the path of an .ifc file inside the storage root.');
+  const hash = await fileHash(path);
+  const free = freeMemory(), budget = effectiveBudget();
+  const need = loadNeeds(path, { geometry: o.geometry, free, hash });
+  if (need.total > budget || need.total > free) {
+    const size = existsSync(path) ? (await import('node:fs')).statSync(path).size : 0;
+    const parts = [need.index ? `${mbs(need.index)} for the index` : '', need.mesh ? `${mbs(need.mesh)} for meshing it in chunks of ${mbs(need.chunkBytes)} of the IFC` : ''].filter(Boolean).join(' and ');
+    const indexOnly = o.geometry !== false && need.index && need.index <= Math.min(budget, free);
+    fail('memory_budget', `Opening this ${mbs(size)} model needs about ${mbs(need.total)} of memory (${parts}; measured, docs/4d-tiles-contract.md "Memory"); the memory budget is ${mbs(budget)} (P6CLONE_MEM_BUDGET_MB) and ${mbs(Math.max(0, free))} of it is free now.`,
+      need.total > budget ? (indexOnly ? 'The index fits without geometry: open_model with geometry: false links and exports in full (no 3D view, video or derived volumes); or raise P6CLONE_MEM_BUDGET_MB.' : 'The model is larger than the whole memory budget: raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size) or split the model.') : 'Retry when the running calls have finished; idle projects are moved out automatically.',
+      { retryAfter: need.total > budget ? undefined : 10, data: { needed_mb: Math.round(need.total / 1048576), index_mb: Math.round(need.index / 1048576), mesh_mb: Math.round(need.mesh / 1048576), chunk_mb: Math.round(need.chunkBytes / 1048576), budget_mb: Math.round(budget / 1048576), free_mb: Math.round(Math.max(0, free) / 1048576) } });
+  }
+  const release = reserveMemory(need.total);
+  try { return await loadModel(path, { geometry: o.geometry, ...(need.chunkBytes ? { chunkBytes: need.chunkBytes } : {}), hash, ...(o.tick ? { onProgress: (d, t, n) => o.tick!(d, t, n) } : {}) }); } finally { release(); }
 }
 
 /** No 3D model to draw: say why, never draw an empty building. */
 const noGeometry = (m: Model): never => m.index.geometryStatus === 'skipped'
   ? fail('no_geometry', 'The model was opened without geometry.', 'open_model again without geometry: false.')
-  : fail('no_geometry', `The model has no 3D geometry: ${m.index.geometryNote ?? 'its geometry did not build'}`, 'Everything without 3D still works (simulate_4d, compare_4d, quantities, links); for pictures, fix or split the model and open it again.');
+  : fail('no_geometry', `The model has no 3D geometry: ${m.index.geometryNote ?? 'its geometry did not build'}`, 'Everything without 3D still works (simulate_4d, compare_4d, quantities, links, export_4d); for pictures, fix or split the model and open it again.');
 
-/** The model attached to the project: from memory or the disk cache, else reopened from its file. */
+/** The model attached to the project: from memory or the disk cache, else reopened from its file — the index only
+ *  (linking, rules, keys and every export need nothing else), unless geometry is asked for. */
 async function modelOf(db: Db, projId: string, required = true): Promise<Model | null> {
   const r = modelRow(db, projId);
   if (!r) return required ? fail('no_model', 'No model is attached to this project.', 'Attach one with open_model {path}.') : null;
-  const m = cachedModel(r.hash) ?? (existsSync(r.path) ? await readModel(r.path) : null);
+  const m = cachedModel(r.hash) ?? (existsSync(r.path) ? await readModel(r.path, { geometry: false }) : null);
   if (!m && required) return fail('model_missing', `The attached model ${r.path} is not cached and the file is gone.`, 'Attach it again with open_model {path}.');
   return m;
+}
+/** The attached model with its display tiles: meshed now when it was opened without geometry (or its tiles left the
+ *  cache); a model whose geometry did not build is refused in words (no_geometry), never drawn empty. */
+async function modelWithTiles(db: Db, projId: string, tick?: AnalysisHelpers['tick']): Promise<Model> {
+  const m = (await modelOf(db, projId))!;
+  if (m.tiles) return m;
+  if (m.index.geometryStatus === 'unavailable') return noGeometry(m);
+  const r = modelRow(db, projId)!;
+  if (!existsSync(r.path)) return fail('model_missing', `The model ${r.path} has no display tiles in the cache and its file is gone.`, 'Attach it again with open_model {path}.');
+  const g = await readModel(r.path, { geometry: true, tick });
+  return g.tiles ? g : noGeometry(g);
 }
 
 export async function runFourD(name: string, a: Record<string, any>, s: Session, h: AnalysisHelpers): Promise<unknown> {
@@ -82,7 +112,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
     case 'open_model': {
       const path = pathArg(a.path);
       let m: Model;
-      try { m = await readModel(path, { geometry: a.geometry !== false }); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of an .ifc file inside the storage root.'); }
+      try { m = await readModel(path, { geometry: a.geometry !== false, tick: h.tick }); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of an .ifc file inside the storage root.'); }
       await h.tick(1, 1, 'model parsed');
       const ix = m.index;
       const kept = h.apply(`Attach model ${basename(path)}`, (d) => {
@@ -93,7 +123,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         T.rows = T.rows.filter((r) => r.proj_id !== projId || m.byGuid.has(r.guid));
         return { dropped_links: before - T.rows.length };
       });
-      return { model: basename(path), ...(m.source ? { source: m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: ix.lengthScaleSource === 'unit-assignment' ? `${ix.lengthScale} m` : `${ix.lengthScale} m (${ix.lengthScaleSource})`, geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), quantified_elements: ix.quantifiedElements, header: ix.header, ...kept };
+      return { model: basename(path), ...(m.source ? { source: m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: ix.lengthScaleSource === 'unit-assignment' ? `${ix.lengthScale} m` : `${ix.lengthScale} m (${ix.lengthScaleSource})`, geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
     }
     case 'list_elements': {
       const m = (await modelOf(s.db, projId))!;
@@ -111,7 +141,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const guids = (Array.isArray(a.guids) ? a.guids : []).slice(0, 200).map(String);
       const { byGuid } = linkMaps(s.db, projId);
       const code = new Map(rows(s.db, 'TASK').map((t) => [t.task_id, t.task_code]));
-      return { elements: guids.map((g) => { const e = m.byGuid.get(g); return e ? { ...e, activities: (byGuid.get(g) ?? []).map((l) => ({ activity: code.get(l.task_id), role: l.role })) } : { guid: g, error: 'not in the model' }; }) };
+      return { elements: guids.map((g) => { const e = m.byGuid.get(g); return e ? { ...plainElement(e), activities: (byGuid.get(g) ?? []).map((l) => ({ activity: code.get(l.task_id), role: l.role })) } : { guid: g, error: 'not in the model' }; }) };
     }
     case 'quantities': {
       const m = (await modelOf(s.db, projId))!;
@@ -156,10 +186,13 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       }
       const r2 = (v: number) => Math.round(v * 1000) / 1000;
       const SRC = { geometry: 0, base_quantity: 1, property_set: 2 };
+      // derived volumes come from the geometry: without it they are absent (null), said so, never a silent zero
+      const noGeom = m.index.geometryStatus !== 'ok';
       return {
         group_by: by, geometry: m.index.geometryStatus, kind, units,
+        ...(noGeom ? { derived_volume: `unavailable: ${m.index.geometryStatus === 'skipped' ? 'the model was opened with geometry: false (open_model again with geometry for volumes from the shapes)' : `the model's geometry did not build (${m.index.geometryNote ?? 'no reason given'})`}; volume_m3 is null and the authored quantities stand alone` } : {}),
         groups: [...groups].sort((x, y) => y[1].count - x[1].count).map(([k, g]) => ({
-          group: k, count: g.count, volume_m3: r2(g.volume_m3), authored: Object.fromEntries(Object.entries(g.authored).map(([q, v]) => [q, r2(v)])),
+          group: k, count: g.count, volume_m3: noGeom ? null : r2(g.volume_m3), authored: Object.fromEntries(Object.entries(g.authored).map(([q, v]) => [q, r2(v)])),
           quantified: g.count - g.unquantified, unquantified: g.unquantified,
           figures: [...g.figures.values()].sort((x, y) => (x.kind === kind ? 0 : 1) - (y.kind === kind ? 0 : 1) || SRC[x.source] - SRC[y.source] || x.name.localeCompare(y.name))
             .map((f) => ({ name: f.name, kind: f.kind, value: r2(f.value), unit: f.unit, source: f.source, ...(f.sets.size ? { set: [...f.sets].join(', ') } : {}), elements: f.elements })),
@@ -208,17 +241,19 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const stem = basename(row?.path ?? code).replace(/\.ifc$/i, '');
       const written: string[] = [];
       const put = (file: string, data: string) => { const p = join(dir, file); h.writeOut(p, data); written.push(p); };
-      const ifcText = () => { if (!row || !existsSync(row.path)) return fail('model_missing', `The model file ${row?.path ?? ''} is gone.`, 'Attach it again with open_model.'); return readFileSync(row.path, 'latin1'); };
-      if (target === 'csv') { put(`${code}-4d-links.csv`, linksCsv(s.db, projId, m?.index ?? null)); return { target, written, activities: items.length }; }
+      // the model file is streamed into the package (a model of any size: never one string)
+      const ifcPath = () => { if (!row || !existsSync(row.path)) return fail('model_missing', `The model file ${row?.path ?? ''} is gone.`, 'Attach it again with open_model.'); return row.path; };
+      if (target === 'csv') { const f = join(dir, `${code}-4d-links.csv`); linksCsvFile(s.db, projId, m?.index ?? null, f); written.push(f); return { target, written, activities: items.length }; }
       if (target === 'navisworks' || target === 'synchro') {
-        const tagged = tagIfc(ifcText(), items);
-        put(`${stem}-4D.ifc`, tagged.text);
+        const ifcOut = join(dir, `${stem}-4D.ifc`);
+        const tagged = tagIfcFile(ifcPath(), ifcOut, items);
+        written.push(ifcOut);
         if (target === 'navisworks') { put(`${code}-4D-sets.xml`, searchSetsXml(items, code)); put('timeliner.csv', timelinerCsv(items)); }
         else put(`${code}.xml`, writeP6Xml(s.db, { projIds: [projId], version: '19.12' }));
         put('README.txt', README[target]);
         return { target, written, activities: items.length, elements_tagged: tagged.elements, key, planned: a.planned ?? 'current' };
       }
-      try { const r = ifc4dText(s.db, projId, ifcText(), items, Array.isArray(a.baselines) ? a.baselines : []); put(`${stem}-4D-IFC4.ifc`, r.text); put('README.txt', README.ifc4d); return { target, written, tasks: r.tasks, element_links: r.links }; }
+      try { const ifcOut = join(dir, `${stem}-4D-IFC4.ifc`); const r = ifc4dFile(s.db, projId, ifcPath(), ifcOut, items, Array.isArray(a.baselines) ? a.baselines : []); written.push(ifcOut); put('README.txt', README.ifc4d); return { target, written, tasks: r.tasks, element_links: r.links }; }
       catch (e) { return fail('bad_input', (e as Error).message, 'Use the navisworks or synchro target for IFC2X3 models.'); }
     }
     case 'simulate_4d': {
@@ -242,13 +277,14 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       if (Array.isArray(a.snapshots) && a.snapshots.length) {
         const chrome = chromiumPath();
         if (!chrome) note = 'No Chromium to render snapshots (the server’s P6CLONE_CHROMIUM is not set): render_4d kind viewer gives a page to look at.';
-        else if (!m.glb) note = m.index.geometryStatus === 'skipped' ? 'The model was opened without geometry: open_model again with geometry for snapshots.' : `The model has no 3D geometry, so there are no snapshots: ${m.index.geometryNote ?? 'its geometry did not build'}.`;
+        else if (m.index.geometryStatus === 'unavailable') note = `The model has no 3D geometry, so there are no snapshots: ${m.index.geometryNote ?? 'its geometry did not build'}.`;
         else {
+          const g = await modelWithTiles(s.db, projId, h.tick);
           const dir = pathArg(a.path ?? fail('bad_input', 'path (a folder) is needed for snapshots.', 'Pass path.'), 'path', 'write');
           mkdirSync(dir, { recursive: true });
-          const page = writeViewer({ dir: mkdtempSync(join(tmpdir(), 'p6c4d-')), glb: m.glb, timeline: viewerTimeline(s.db, projId, m.index, [source]), options: { left: source, interactive: false, view: a.view ?? 'iso', overlays: ['date', 'legend', 'activity_list'] }, title: 'snapshot', embed: true })[0];
+          const page = writeViewer({ dir: mkdtempSync(join(tmpdir(), 'p6c4d-')), model: { tiles: g.tiles!, hash: g.hash, index: g.index }, timeline: viewerTimeline(s.db, projId, g.index, [source]), options: { left: source, interactive: false, view: a.view ?? 'iso', overlays: ['date', 'legend', 'activity_list'] }, title: 'snapshot', inlineScript: true, file: 'snapshot.html' })[0];
           let pngs: Buffer[];
-          try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`))); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).'); throw e; }
+          try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`))); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? 'The browser could not hold the model: render on a machine with more GPU memory.' : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).'); throw e; } finally { rmSync(dirname(page), { recursive: true, force: true }); }
           snapshots = pngs.map((png, i) => { const p = join(dir, `snapshot-${String(a.snapshots[i]).slice(0, 10)}.png`); h.writeOut(p, png); return p; });
         }
       }
@@ -318,10 +354,10 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       });
     }
     case 'render_4d': {
-      const m = (await modelOf(s.db, projId))!;
-      if (!m.glb) noGeometry(m);
       const kind = String(a.kind ?? 'viewer');
       if (!['viewer', 'images', 'video'].includes(kind)) fail('bad_input', `Unknown kind "${kind}".`, 'Use viewer, images or video.');
+      // the full geometry, as display tiles (meshed now if the model was opened without geometry)
+      const m = await modelWithTiles(s.db, projId, h.tick);
       const layout = a.layout === 'side_by_side' ? 'side_by_side' : 'single';
       const left = String(a.left ?? (layout === 'side_by_side' ? '' : 'best')) || fail('bad_input', 'side_by_side needs left (a saved baseline name, or planned).', 'e.g. {"layout": "side_by_side", "left": "BL-2026-03"}');
       const right = String(a.right ?? 'best');
@@ -333,27 +369,44 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       if (!['none', 'bottom_up', 'top_down', 'left_right', 'right_left'].includes(growth)) fail('bad_input', `Unknown growth "${growth}".`, 'Use none, bottom_up, top_down, left_right or right_left.');
       const options: ViewerOptions = { layout, left, right, compare: a.compare === true, step: Math.max(1, Number(a.step) || 7), growth, overlays: Array.isArray(a.overlays) ? a.overlays : ['date', 'legend', 'activity_list', ...(kind === 'video' ? ['gantt_strip'] : [])], view: a.view ?? 'iso', interactive: kind === 'viewer', title: rows(s.db, 'PROJECT').find((p) => p.proj_id === projId)!.proj_short_name };
       const dir = pathArg(a.path, 'path', 'write');
+      mkdirSync(dir, { recursive: true }); // inside the write root (pathArg checked it)
       const title = `${options.title} 4D`;
-      if (kind === 'viewer') return { kind, written: writeViewer({ dir, glb: m.glb!, timeline, options, title, embed: a.embed === true, file: `${options.title}-4D.html` }), activities: timeline.activities.length, linked_elements: Object.keys(timeline.elements).length, hooks: 'WHIQ4D_EXPORT (ready, max, setStep, frame) and P6C4D_API (setDate, setSource, highlight, encode, png)' };
+      const model = { tiles: m.tiles!, hash: m.hash, index: m.index };
+      const boxes = a.boxes === true; // a stand-in only when the caller asks for it
+      const linked = timeline.elements.linked;
+      const display = (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances, ...(boxes ? { boxes: true } : {}) }; })();
+      const tooBig = (e: unknown) => { if (e instanceof EmbedTooBig) return fail('too_big_to_embed', e.message, 'Leave embed out: the viewer is written as a page with the model\u2019s tiles in a folder beside it (served together).'); throw e; };
+      if (kind === 'viewer') { let written: string[]; try { written = writeViewer({ dir, model, timeline, options, title, embed: a.embed === true, boxes, file: `${options.title}-4D.html` }); } catch (e) { return tooBig(e); } return { kind, written, activities: timeline.activities.length, linked_elements: linked, display, hooks: 'WHIQ4D_EXPORT (started, status, ready, max, setStep, frame) and P6C4D_API (ready, status, setDate, setSource, highlight, encode, png)' }; }
       const width = Math.min(3840, Number(a.width) || 1280), height = Math.min(2160, Number(a.height) || 720);
       // fps below 1 holds each frame longer (0.25 = 4 s a frame)
       const fps = a.seconds_per_frame != null ? 1 / Math.min(60, Math.max(1 / 60, Number(a.seconds_per_frame) || 0.25)) : Math.min(60, Math.max(1 / 60, Number(a.fps) || 4));
       const format = a.format === 'webm' ? 'webm' : 'mp4';
       const name = a.file_name ? basename(String(a.file_name)).replace(/\.(mp4|webm)$/i, '') : `${options.title}-4D`;
-      const page = writeViewer({ dir, glb: m.glb!, timeline, options, title, embed: true, file: `${options.title}-4D-render.html` })[0];
+      // the render page: the viewer script inside it (it is served alone), the model inline when small enough (a page
+      // that needs nothing else), else its tiles in model-<hash>/ beside it (docs/4d-tiles-contract.md)
+      const small = (readManifest(m.tiles!)?.bytes ?? Infinity) <= embedMaxBytes();
       const chrome = chromiumPath();
-      if (!chrome) return { kind, rendered: false, viewer: page, client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width, height }, note: 'No Chromium here (the server’s P6CLONE_CHROMIUM is not set), so nothing was rendered: the self-contained viewer is written; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform\u2019s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.' };
-      await h.tick(0, 1, `rendering the ${kind} in Chromium`);
-      const failed = (e: unknown) => { if (e instanceof RenderFailed) return fail('render_failed', e.message, 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.'); throw e; };
+      // with a Chromium here the page is only the render's means: written apart, gone after; without one it is what the
+      // client route renders, so it goes to the outputs (the platform serves it from there)
+      const pageDir = chrome ? mkdtempSync(join(tmpdir(), 'p6c4d-render-')) : dir;
+      const pageFiles = writeViewer({ dir: pageDir, model, timeline, options, title, embed: small || boxes, inlineScript: true, boxes, file: `${options.title}-4D-render.html` });
+      const page = pageFiles[0];
+      try {
+      if (!chrome) return { kind, rendered: false, viewer: page, ...(pageFiles.length > 1 ? { written: pageFiles } : {}), display, client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width, height, ...(pageFiles.length > 1 ? { model_folder: dirname(pageFiles[1]), files: pageFiles.slice(1), contract: 'docs/4d-tiles-contract.md (p6c-4d-tiles v1)' } : {}) }, note: `No Chromium here (the server’s P6CLONE_CHROMIUM is not set), so nothing was rendered: the viewer page is written${pageFiles.length > 1 ? ' with the model\u2019s tiles in a folder beside it' : ' (self-contained)'}; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform\u2019s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.` };
+      if (m.index.elements.length > 200_000) compactHeap(); // the timeline's garbage goes before the browser takes its memory
+      await h.tick(0, 1, `loading the model (${display.mb} MB in ${display.tiles} tiles) in Chromium`);
+      const failed = (e: unknown) => { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): render it where there is more GPU memory${boxes ? '' : ', or ask for boxes: true (each element drawn as its bounding box)'}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.'); throw e; };
+      const onLoad = (d: number, t: number) => h.tick(d, Math.max(1, t), `loading tile ${d} of ${t} in Chromium`);
+      const timeoutMs = 120 * 60_000;
       if (kind === 'images') {
         const from = parseP6Date(a.from ? String(a.from) : timeline.start ?? '')!, to = parseP6Date(a.to ? String(a.to) : timeline.finish ?? '')!;
         const dates: string[] = []; for (let d = from; d <= to && dates.length < 500; d += options.step! * 1440) dates.push(formatP6Date(d));
         let pngs: Buffer[];
-        try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, dates, h.tick), { width, height }); } catch (e) { return failed(e); }
-        return { kind, rendered: true, written: pngs.map((png, i) => { const p = join(dir, `${name}-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, png); return p; }) };
+        try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, dates, h.tick), { width, height, onLoad, timeoutMs }); } catch (e) { return failed(e); }
+        return { kind, rendered: true, display, written: pngs.map((png, i) => { const p = join(dir, `${name}-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, png); return p; }) };
       }
       let v: { mime: string; frames: number; bytes: Buffer };
-      try { v = await inChromium(chrome, page, (ev) => renderVideo(ev, { from: a.from, to: a.to, step: options.step, fps, width, height, ...(format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1' ? { codec: 'vp9' } : {}) }, h.tick), { width, height }); } catch (e) { return failed(e); }
+      try { v = await inChromium(chrome, page, (ev) => renderVideo(ev, { from: a.from, to: a.to, step: options.step, fps, width, height, ...(format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1' ? { codec: 'vp9' } : {}) }, h.tick), { width, height, onLoad, timeoutMs }); } catch (e) { return failed(e); }
       let note: string | undefined;
       // MP4 everywhere: a browser without an H.264 encoder (Chromium for Testing) records WebM, which ffmpeg turns into MP4
       if (format === 'mp4' && !v.mime.includes('mp4')) {
@@ -364,7 +417,8 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       }
       const file = join(dir, `${name}.${v.mime.includes('mp4') ? 'mp4' : 'webm'}`);
       h.writeOut(file, v.bytes);
-      return { kind, rendered: true, written: [file], frames: v.frames, mime: v.mime, fps, size: [width, height], ...(note ? { note } : {}) };
+      return { kind, rendered: true, written: [file], frames: v.frames, mime: v.mime, fps, size: [width, height], display, ...(note ? { note } : {}) };
+      } finally { if (chrome) rmSync(pageDir, { recursive: true, force: true }); }
     }
     case 'relink_model': {
       const old = (await modelOf(s.db, projId))!;

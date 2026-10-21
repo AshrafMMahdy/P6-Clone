@@ -4,27 +4,49 @@
 // Without a Chromium the caller gets the viewer and renders it on a GPU instead (the platform's client render, or the
 // desktop app). A WebM (browsers without an H.264 encoder) becomes an MP4 with the ffmpeg named by P6CLONE_FFMPEG.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { createReadStream, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 
 /** A program from the environment, if it names an existing file. */
 const fromEnv = (name: string): string | null => { const p = process.env[name]; return p && existsSync(p) ? p : null; };
 export const chromiumPath = (): string | null => fromEnv('P6CLONE_CHROMIUM');
 export const ffmpegPath = (): string | null => fromEnv('P6CLONE_FFMPEG');
 
-/** The headless browser could not be started or talked to: a clean failure for the tool to report, never a crash. */
-export class RenderFailed extends Error {}
+/** The headless browser could not be started or talked to, or could not hold the model: a clean failure for the tool
+ *  to report, never a crash. code: what stopped it (the page's own code, e.g. webgl_context_lost, when it said). */
+export class RenderFailed extends Error { code?: string; constructor(message: string, code?: string) { super(message); if (code) this.code = code; } }
+
+const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.glb': 'model/gltf-binary', '.txt': 'text/plain; charset=utf-8', '.bin': 'application/octet-stream' };
+/** The page's folder over HTTP on the loopback, under a random path (the page fetches its tiles relative to itself,
+ *  as it does from the platform's files route; a file:// page cannot fetch). Only files inside the folder are served. */
+function serveFolder(dir: string): Promise<{ server: Server; base: string }> {
+  const token = randomBytes(12).toString('hex'), root = resolve(dir);
+  const server = createServer((req, res) => {
+    const u = new URL(req.url ?? '/', 'http://x');
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.shift() !== token) { res.writeHead(404).end(); return; }
+    const file = resolve(root, ...parts.map(decodeURIComponent));
+    if (!file.startsWith(root + sep) || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404).end(); return; }
+    res.writeHead(200, { 'content-type': TYPES[file.slice(file.lastIndexOf('.'))] ?? 'application/octet-stream', 'content-length': statSync(file).size, 'cache-control': 'no-store' });
+    createReadStream(file).pipe(res);
+  });
+  return new Promise((ok, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', () => { const a = server.address(); ok({ server, base: `http://127.0.0.1:${typeof a === 'object' && a ? a.port : 0}/${token}/` }); }); });
+}
 
 export type Progress = (done: number, total: number, note: string) => Promise<void>;
 type Evaluate = (expression: string, awaitPromise?: boolean) => Promise<unknown>;
 
 /** Load the viewer page headless and run work against it (evaluate expressions in the page). onProgress may throw (a
  *  cancelled job): the browser is closed and the error passes through. */
-export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate) => Promise<T>, o: { width?: number; height?: number; timeoutMs?: number } = {}): Promise<T> {
+export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate) => Promise<T>, o: { width?: number; height?: number; timeoutMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void } = {}): Promise<T> {
   const profile = mkdtempSync(join(tmpdir(), 'p6c4d-chrome-'));
-  const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`, '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--allow-file-access-from-files', `--window-size=${o.width ?? 1280},${o.height ?? 760}`, 'about:blank'];
+  const http = await serveFolder(dirname(page));
+  // the renderer's heap may grow with the model (a tile at a time); the GPU process (SwiftShader) holds the geometry
+  const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`, '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--js-flags=--max-old-space-size=8192', `--window-size=${o.width ?? 1280},${o.height ?? 760}`, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), 'about:blank'];
+  // (Chromium refuses to start as root with its sandbox: a server run as root, a container, gets it without)
   let died: Error | null = null;
   const waiting = new Map<number, { res: (v: any) => void; rej: (e: Error) => void }>();
   const failAll = (e: Error) => { died ??= e; for (const w of waiting.values()) w.rej(e); waiting.clear(); };
@@ -58,15 +80,23 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
     await send('Emulation.setDeviceMetricsOverride', { width: o.width ?? 1280, height: o.height ?? 760, deviceScaleFactor: 1, mobile: false }, sessionId);
     await send('Page.enable', {}, sessionId);
-    await send('Page.navigate', { url: pathToFileURL(page).href }, sessionId);
+    await send('Page.navigate', { url: `${http.base}${encodeURIComponent(basename(page))}` }, sessionId);
     const evaluate: Evaluate = async (expression, awaitPromise = true) => {
       const r = await send('Runtime.evaluate', { expression, awaitPromise, returnByValue: true }, sessionId);
-      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text ?? 'The page failed.');
+      // what the page threw is the render's failure (the viewer labels its own: "[code] message")
+      if (r.exceptionDetails) { const d = String(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text ?? 'The page failed.').split('\n    at ')[0].replace(/^Error: /, ''); const m = /^\[([a-z_]+)\] ([\s\S]*)$/.exec(d); throw new RenderFailed(m ? m[2] : `The 4D viewer failed in the headless Chromium: ${d}`, m?.[1]); }
       return r.result?.value;
     };
-    // wait for the model to load (the viewer's ready hook)
-    for (const t0 = Date.now(); !(await evaluate('window.P6C4D_API ? window.P6C4D_API.ready() : false', false)); ) {
-      if (Date.now() - t0 > 120_000) throw new RenderFailed('The 4D viewer did not load in the headless Chromium within 2 minutes.');
+    // wait for every tile to be on the GPU (the viewer's status): as long as tiles keep arriving, it waits; a page that
+    // could not hold the model says why, and that is the render's error
+    let seen = -1, since = Date.now();
+    for (;;) {
+      const st = (await evaluate('window.P6C4D_API ? window.P6C4D_API.status() : null', false)) as { state: string; tiles: { loaded: number; total: number }; error?: { code: string; message: string } } | null;
+      if (st?.state === 'ready') break;
+      if (st?.state === 'failed') throw new RenderFailed(st.error?.message ?? 'The 4D viewer could not load the model.', st.error?.code);
+      const n = st ? st.tiles.loaded : -1;
+      if (n !== seen) { seen = n; since = Date.now(); if (st) await o.onLoad?.(st.tiles.loaded, st.tiles.total); }
+      if (Date.now() - since > 120_000) throw new RenderFailed(st ? `The 4D viewer loaded ${st.tiles.loaded} of ${st.tiles.total} tiles in the headless Chromium, then nothing more for 2 minutes.` : 'The 4D viewer did not start in the headless Chromium within 2 minutes.');
       await new Promise((r2) => setTimeout(r2, 250));
     }
     return await work(evaluate);
@@ -76,6 +106,7 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
     child.removeAllListeners('exit');
     child.kill();
     await new Promise((r) => setTimeout(r, 300));
+    http.server.close();
     try { rmSync(profile, { recursive: true, force: true }); } catch { /* a locked profile file is left to the temp cleaner */ }
   }
 }

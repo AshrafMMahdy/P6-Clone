@@ -9,6 +9,7 @@ import { baselineOf } from '../analysis/common.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
 import { linkMaps, T4D, type Role } from './link4d.ts';
 import type { IfcElement, IfcIndex } from './parse.ts';
+import { ordinalOf } from './lookup.ts';
 
 export type State = 'not_started' | 'in_progress' | 'complete' | 'removed' | 'temporary';
 export interface Span { start: number | null; finish: number | null }
@@ -139,8 +140,13 @@ export function criticalChanges(db: Db, projId: string, against: string) {
   return { became_critical: [...now].filter((c) => !then.has(c)), no_longer_critical: [...then].filter((c) => !now.has(c)) };
 }
 
-/** What the 4D viewer plays: per element, the spans and roles of its links under each source; per activity, its
- *  dates and progress; the data date. Small enough to ship as JSON beside the model. */
+/** Bytes as base64, in Node and in the desktop's renderer alike. */
+export function toBase64(u: Uint8Array): string { let s = ''; for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768) as unknown as number[]); return btoa(s); }
+
+/** What the 4D viewer plays: per activity, its dates under each source and its progress; the data date; and the links,
+ *  compact enough for millions of elements: the distinct link lists (an activity and a role each) as groups, and per
+ *  element ordinal (its place in the model index, which the display tiles count by) its group, as base64 uint32
+ *  (0 = unlinked, else group + 1). Site status is by ordinal too. */
 export function viewerTimeline(db: Db, projId: string, ix: IfcIndex, sources: string[]) {
   const { byGuid, byTask } = linkMaps(db, projId);
   const tasks = rows(db, 'TASK').filter((t) => t.proj_id === projId);
@@ -152,14 +158,19 @@ export function viewerTimeline(db: Db, projId: string, ix: IfcIndex, sources: st
     id: t.task_code, name: t.task_name, task: t.task_id, elements: byTask.get(t.task_id)!.length, pct: Number(t.phys_complete_pct || 0), critical: isCritical(t, ctx),
     spans: Object.fromEntries(src.map((s) => { const sp = spanOf(s.get(t.task_id), s.kind === 'baseline' ? 'best' : s.kind); return [s.name, [iso(sp.start), iso(sp.finish)]]; })),
   }));
-  const elements: Record<string, { links: [string, Role][]; z?: number; x?: number; y?: number }> = {};
-  for (const e of ix.elements) {
-    const ls = byGuid.get(e.guid);
-    if (!ls) continue;
-    const c = e.geom?.centroid;
-    elements[e.guid] = { links: ls.map((l) => [l.task_id, l.role]), ...(c ? { x: Math.round(c[0] * 100) / 100, y: Math.round(c[1] * 100) / 100, z: Math.round(c[2] * 100) / 100 } : {}) };
+  const ordinal = ordinalOf(ix);
+  const of = new Uint32Array(ix.elements.length), groups: [string, Role][][] = [], groupNo = new Map<string, number>();
+  let linked = 0;
+  for (const [guid, ls] of byGuid) {
+    const o = ordinal(guid);
+    if (o < 0) continue;
+    const key = ls.map((l) => `${l.task_id}:${l.role}`).join('|');
+    let g = groupNo.get(key);
+    if (g == null) { g = groups.length; groups.push(ls.map((l) => [l.task_id, l.role])); groupNo.set(key, g); }
+    if (!of[o]) linked++;
+    of[o] = g + 1;
   }
   const all = activities.flatMap((a) => Object.values(a.spans).flat()).filter((x): x is string => !!x).sort();
-  const status = rows(db, T4D.status).filter((r) => r.proj_id === projId).map((r) => ({ guid: r.guid, status: r.status, date: r.date }));
-  return { project: proj.proj_short_name, name: proj.proj_name ?? proj.proj_short_name, dataDate: proj.last_recalc_date || null, start: all[0] ?? null, finish: all.at(-1) ?? null, sources: src.map((s) => ({ name: s.name, label: s.label })), activities, elements, status };
+  const status = rows(db, T4D.status).filter((r) => r.proj_id === projId).map((r) => ({ e: ordinal(r.guid), status: r.status, date: r.date })).filter((x) => x.e >= 0);
+  return { project: proj.proj_short_name, name: proj.proj_name ?? proj.proj_short_name, dataDate: proj.last_recalc_date || null, start: all[0] ?? null, finish: all.at(-1) ?? null, sources: src.map((s) => ({ name: s.name, label: s.label })), activities, elements: { count: ix.elements.length, linked, groups, of: toBase64(new Uint8Array(of.buffer)) }, status };
 }
