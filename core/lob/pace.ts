@@ -5,15 +5,15 @@
 import { rows, type Db } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { applyOps } from '../project/ops.ts';
-import { calendarResolver, scheduleProjects } from '../schedule/cpm.ts';
+import { calendarResolver, scheduleProjects, type ScheduleResult } from '../schedule/cpm.ts';
 import { activityId, LOB_UDF } from './expand.ts';
 import { locationDurations } from './edit.ts';
 import type { LobModel } from './model.ts';
 
-export interface PaceResult { ok: boolean; error?: string; passes: number; paced: number; unpaced: string[] }
+export interface PaceResult { ok: boolean; error?: string; passes: number; paced: number; unpaced: string[]; schedule?: ScheduleResult }
 
 /** F9 and continuity for these projects; models: the LOB model of each LOB project (by proj_id). */
-export function scheduleLob(db: Db, projIds: string[], models: Map<string, LobModel>, o: { hoursPerDay: number }): PaceResult {
+export function scheduleLob(db: Db, projIds: string[], models: Map<string, LobModel>, o: { hoursPerDay: number; options?: Parameters<typeof scheduleProjects>[2] }): PaceResult {
   const cal = calendarResolver(db, []);
   // the constraints continuity wrote last time are recomputed from scratch: clear them on LOB activities not started
   const ownerUdf = rows(db, 'UDFTYPE').find((u) => u.table_name === 'TASK' && u.udf_type_label === LOB_UDF.task);
@@ -26,10 +26,11 @@ export function scheduleLob(db: Db, projIds: string[], models: Map<string, LobMo
     const anchor = anchors.get(`${t.proj_id}|${t.task_code}`);
     if (anchor) { t.cstr_type = 'CS_MSOA'; t.cstr_date = anchor; } else if (t.cstr_type === 'CS_MSOA') { t.cstr_type = ''; t.cstr_date = ''; }
   }
-  let moved: string[] = [], paced = 0;
+  let moved: string[] = [], paced = 0, last: ScheduleResult | undefined;
   for (let pass = 1; pass <= 20; pass++) {
-    const s = scheduleProjects(db, projIds, {});
-    if (!s.ok) return { ok: false, error: s.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ') || 'the schedule failed', passes: pass, paced, unpaced: [] };
+    const s = scheduleProjects(db, projIds, o.options ?? {});
+    last = s;
+    if (!s.ok) return { ok: false, error: s.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ') || 'the schedule failed', passes: pass, paced, unpaced: [], schedule: s };
     const ops: unknown[] = [];
     moved = [];
     for (const [projId, m] of models) {
@@ -59,10 +60,10 @@ export function scheduleLob(db: Db, projIds: string[], models: Map<string, LobMo
         }
       }
     }
-    if (!ops.length) return { ok: true, passes: pass, paced: (paced = new Set([...models.values()].flatMap((m) => m.tasks.filter((t) => t.segments.some((g) => g.timing !== 'asap')).map((t) => t.code))).size), unpaced: [] };
+    if (!ops.length) return { ok: true, passes: pass, paced: (paced = new Set([...models.values()].flatMap((m) => m.tasks.filter((t) => t.segments.some((g) => g.timing !== 'asap')).map((t) => t.code))).size), unpaced: [], schedule: s };
     const r = applyOps(db, ops, { hoursPerDay: o.hoursPerDay });
     if (!r.ok) return { ok: false, error: r.error!.message, passes: pass, paced, unpaced: [] };
   }
   // still moving after 20 passes: continuity fights the logic (e.g. a link back from a later trade); it yields
-  return { ok: true, passes: 20, paced, unpaced: [...new Set(moved)] };
+  return { ok: true, passes: 20, paced, unpaced: [...new Set(moved)], ...(last ? { schedule: scheduleProjects(db, projIds, o.options ?? {}) } : {}) };
 }
