@@ -16,10 +16,18 @@ const call = async (name: string, args: Record<string, unknown>) => {
   return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any };
 };
 
+test('hello.nwc: four walls placed where Revit put them (two by a translation of their own frame)', () => {
+  const { elements } = readNavisworks(join(FIX, 'hello.nwc'));
+  // a rectangle of four 149 ft walls turned about 39 degrees: 2 x 114 ft by 2 x 93 ft (70.9 x 56.8 m), 20 ft (6.1 m) high
+  const all = elements.flatMap((e) => e.boxes!);
+  const span = (k: number) => Math.max(...all.map((p) => p[k])) - Math.min(...all.map((p) => p[k]));
+  assert.ok(Math.abs(span(0) - 70.9) < 0.5 && Math.abs(span(1) - 56.8) < 0.5 && Math.abs(span(2) - 6.1) < 0.1, `${span(0)} ${span(1)} ${span(2)}`);
+});
+
 test('hello.nwc: four Revit walls with level, family, type, ElementId, GlobalId and the quantities Revit computed, in SI', () => {
   const { elements, source } = readNavisworks(join(FIX, 'hello.nwc'));
   assert.equal(elements.length, 4);
-  assert.deepEqual(source.files, [{ file: 'hello.nwc', revision: 448, elements: 4, read: true }]);
+  assert.deepEqual(source.files, [{ file: 'hello.nwc', revision: 448, elements: 4, read: true, units: 'feet (Revit)' }]);
   const w = elements[0];
   assert.deepEqual([w.category, w.family, w.type, w.level, w.revitId], ['Walls', 'Basic Wall', 'Generic - 200mm', 'L1', 1593982]);
   assert.match(w.guid!, /^[0-9A-Za-z_$]{22}$/);
@@ -42,12 +50,14 @@ test('open_model on an .nwc without a handle: a model-only workspace with IFC cl
   const o = await call('open_model', { path: join(FIX, 'Electrical.nwc') });
   assert.equal(o.err, false, JSON.stringify(o.d).slice(0, 300));
   assert.equal(o.d.source.format, 'Navisworks');
-  assert.equal(o.d.geometry, 'unavailable');
+  assert.equal(o.d.geometry, 'ok', 'each element drawn as its placed boxes');
+  assert.equal(o.d.source.geometry.elements_with_boxes, 46);
   assert.deepEqual(o.d.storeys.filter((s: string) => s !== 'Default Building' && !/^\(/.test(s)), ['Level 1']);
   assert.equal(o.d.classes.IfcCableCarrierSegment, 20);
   const q = await call('quantities', { handle: o.d.handle, group_by: 'class', kind: 'length' });
   const trays = q.d.groups.find((g: any) => g.group === 'IfcCableCarrierSegment');
   assert.ok(trays.authored.Length > 0 && trays.quantified === 20, JSON.stringify(trays).slice(0, 300));
+  assert.equal(trays.volume_m3, 0, 'box volumes are not quantities');
   const e = (await call('list_elements', { handle: o.d.handle, class: 'IfcLightFixture' })).d.elements;
   const info = (await call('element_info', { handle: o.d.handle, guids: [e[0].guid] })).d.elements[0];
   assert.ok(Object.keys(info.props).some((k) => k.startsWith('Element.')), 'the Revit parameters are there as properties');
@@ -81,6 +91,10 @@ test('the user\u2019s 2016 villa NWC: 416 Revit elements, every one with the Glo
   assert.equal(elements.length, 416);
   assert.equal(elements.filter((e) => e.guid && e.revitId !== null).length, 416);
   assert.equal(elements.filter((e) => e.category === 'Walls').length, 180);
+  // every element placed: its boxes in metres, inside the building's footprint (about 25 x 25 m, 10 m high)
+  assert.equal(elements.filter((e) => e.boxes?.length).length, 416);
+  const xs = elements.flatMap((e) => e.boxes!.map((p) => p[0])), zs = elements.flatMap((e) => e.boxes!.map((p) => p[2]));
+  assert.ok(Math.max(...xs) - Math.min(...xs) < 60 && Math.max(...zs) - Math.min(...zs) < 30, `${Math.min(...xs)}..${Math.max(...xs)}, ${Math.min(...zs)}..${Math.max(...zs)}`);
 });
 
 const GATE = 'C:/Users/ashra/Downloads/Primavera P6 Clone/sample 4D/navisworks-models/duchangyu-client-timeliner/gatehouse.nwd';

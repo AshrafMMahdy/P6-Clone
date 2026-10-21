@@ -24,7 +24,7 @@ type Obj = { cls: number } & Record<string, unknown>;
 
 /** stream: the bytes are a bare run of objects from id 100 (LcOaPartitionProps: element-id keys and their property
  *  groups), read until the first thing that is not a new object. */
-export function decodeTree(buf: Uint8Array, o: { stream?: boolean } = {}): NwTree & { values?: unknown[] } {
+export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: boolean } = {}): NwTree & { values?: unknown[] } {
   const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   let p = 0, nid = 0;
   const objs = new Map<number, unknown>();
@@ -34,6 +34,7 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean } = {}): NwTre
   const f64 = () => { p = (p + 7) & ~7; const x = v.getFloat64(p, true); p += 8; return x; };
   const str = (): string | null => { const n = u32(); if (n === 0xffffffff) return null; if (p + n > buf.length) fail('string past the end'); const s = td.decode(buf.subarray(p, p + n)); p += (n + 3) & ~3; return s; };
   const doubles = (n: number) => { const out: number[] = []; for (let i = 0; i < n; i++) out.push(f64()); return out; };
+  const floats = (n: number) => { const out: number[] = []; for (let i = 0; i < n; i++) { out.push(v.getFloat32(p, true)); p += 4; } return out; };
 
   function value(): unknown {
     const t = u32();
@@ -76,6 +77,17 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean } = {}): NwTre
         if (cls === 0x27) u32();
         return { cls, d } as Obj;
       }
+      // LcOpNwdFragments: a fragment (a piece of an item's geometry), its transform, material and placed box
+      case 0x0d: {
+        p = (p + 7) & ~7; const radius = f64(); u32(); const prim = u32(), flags = u32(), item = u32();
+        return { cls, radius, prim, flags, item, xform: value(), material: value(), box: value() } as Obj;
+      }
+      case 0x5d: { const bbox = floats(6); p = (p + 7) & ~7; const t = doubles(3); floats(1); u32(); return { cls, bbox, t, geom: u32() } as Obj; }
+      case 0x0e: return { cls, t: doubles(3) } as Obj;
+      case 0x0f: { const d = doubles(7); return { cls, t: d.slice(0, 3), q: d.slice(3) } as Obj; }
+      case 0x11: { const m = floats(13); p = (p + 7) & ~7; return { cls, m, t: doubles(3) } as Obj; }
+      case 0x37: { const x = u32(); const colour = value(); return { cls, colour, asset: x & 0x20 ? value() : null } as Obj; }
+      case 0x36: { const c = floats(13); u32(); return { cls, rgb: c.slice(3, 6) } as Obj; }
       default: return fail(`object class 0x${cls.toString(16)} this reader does not know`);
     }
   }
@@ -93,6 +105,10 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean } = {}): NwTre
     return { attr: a, type, value: val };
   }
 
+  if (o.fragments) { // LcOpNwdFragments: u32 count, then the fragments from id 100
+    const n = u32(); nid = 100;
+    return { roots: [], objects: 0, values: Array.from({ length: n }, value) };
+  }
   if (o.stream) {
     nid = 100;
     const values: unknown[] = [];

@@ -16,6 +16,8 @@ export interface NwElement {
   /** quantities Revit computed: m, m2, m3 */
   quantities: { Length?: number; NetArea?: number; NetVolume?: number };
   revitId: number | null;
+  /** its tree item (for the geometry), and its pieces of geometry as placed boxes: 8 corners each, in metres */
+  node?: NwNode; boxes?: number[][];
 }
 
 const FT = 0.3048;
@@ -81,7 +83,7 @@ export function elementsOf(tree: NwTree, guids: string[], source: string, extern
     const e: NwElement = {
       guid: n.guidIndex > 0 && guids[n.guidIndex - 1] ? guids[n.guidIndex - 1] : null, key: `${source}${path}#${out.length}`,
       name: label || 'Element', category: ctx.coll.Category ?? n.attr?.display ?? null, family: ctx.coll.Family ?? null, type: ctx.coll.Type ?? null,
-      level: ctx.level, levelElevationM: null, layer: ctx.layer, material: null, psets: {}, quantities: {}, revitId: null,
+      level: ctx.level, levelElevationM: null, layer: ctx.layer, material: null, psets: {}, quantities: {}, revitId: null, node: n,
     };
     const gs = n.values.filter(isGroup);
     for (const g of gs) apply(e, g);

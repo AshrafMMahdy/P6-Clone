@@ -9,8 +9,9 @@ import { readContainer, section, type NwContainer } from './nwd/container.ts';
 import { decodeTree, type NwGroup } from './nwd/tree.ts';
 import { elementsOf, type NwElement } from './nwd/elements.ts';
 import { compressGuid, toIfc } from './nwd/toIfc.ts';
+import { elementBoxes } from './nwd/geometry.ts';
 
-const NWD_FORMAT = 2; // the conversion: any change to the reader bumps it (2: the Revit data in LcOaPartitionProps), so old conversions are not reused
+const NWD_FORMAT = 3; // the conversion: any change to the reader bumps it (2: the Revit data in LcOaPartitionProps; 3: placed boxes), so old conversions are not reused
 const HEAD = '#LcUStream';
 
 export function isNavisworks(path: string): boolean {
@@ -20,8 +21,9 @@ export function isNavisworks(path: string): boolean {
 }
 
 export interface NavisworksSource {
-  format: 'Navisworks'; files: { file: string; revision: number | null; elements: number; read: boolean; note?: string }[];
-  elements: number; with_revit_ids: number; with_revit_guids: number; geometry: 'not read yet'; warnings: string[];
+  format: 'Navisworks'; files: { file: string; revision: number | null; elements: number; read: boolean; units?: string; note?: string }[];
+  elements: number; with_revit_ids: number; with_revit_guids: number;
+  geometry: { elements_with_boxes: number; note: string }; warnings: string[];
 }
 
 /** The GlobalIds Revit's IFC export writes, in the order the model tree's guid index counts (LcOpGuidStore: u32, u32
@@ -39,13 +41,22 @@ function guidStore(c: NwContainer, max: number): string[] {
 }
 
 /** The elements of one .nwd / .nwc. */
-function readOne(path: string, max: number): { elements: NwElement[]; revision: number } {
+function readOne(path: string, max: number): { elements: NwElement[]; revision: number; units?: string } {
   const c = readContainer(new Uint8Array(readFileSync(path)));
   const lh = section(c, 'LcOpNwdLogicalHierarchy', max);
   if (!lh) return { elements: [], revision: c.revision };
   const pp = section(c, 'LcOaPartitionProps', max);
   const external = pp ? ((decodeTree(pp, { stream: true }).values ?? []) as NwGroup[]).filter((x) => x && (x as NwGroup).kind === 'group') : [];
-  return { elements: elementsOf(decodeTree(lh), guidStore(c, max), basename(path), external), revision: c.revision };
+  const tree = decodeTree(lh);
+  const elements = elementsOf(tree, guidStore(c, max), basename(path), external);
+  // geometry: each element's pieces as placed boxes, in metres (Revit exports keep Revit's feet; others are taken as metres)
+  const fr = section(c, 'LcOpNwdFragments', max);
+  const revit = elements.some((e) => e.revitId !== null || /^LcRevit/.test(e.node?.attr?.internal ?? ''));
+  if (fr) {
+    const scale = revit ? 0.3048 : 1;
+    for (const [i, corners] of elementBoxes(tree, decodeTree(fr, { fragments: true }).values ?? [], elements.map((e) => e.node!))) elements[i].boxes = corners.map((p) => p.map((x) => x * scale));
+  }
+  return { elements, revision: c.revision, units: revit ? 'feet (Revit)' : 'metres (taken as such: the file names no unit)' };
 }
 
 /** The files an .nwf lists (XRefTable), found beside it by name, else where it says. */
@@ -74,7 +85,7 @@ export function readNavisworks(path: string, o: { maxBytes?: number } = {}): { e
     try {
       const r = readOne(p.at, max);
       elements.push(...r.elements);
-      files.push({ file: p.file, revision: r.revision, elements: r.elements.length, read: true });
+      files.push({ file: p.file, revision: r.revision, elements: r.elements.length, read: true, ...(r.units ? { units: r.units } : {}) });
     } catch (e) { files.push({ file: p.file, revision: null, elements: 0, read: false, note: (e as Error).message }); }
   }
   if (!files.some((f) => f.read)) throw new Error(files.map((f) => `${f.file}: ${f.note}`).join('; ') || 'nothing to read');
@@ -84,7 +95,7 @@ export function readNavisworks(path: string, o: { maxBytes?: number } = {}): { e
     source: {
       format: 'Navisworks', files, elements: elements.length,
       with_revit_ids: elements.filter((e) => e.revitId !== null).length, with_revit_guids: elements.filter((e) => e.guid).length,
-      geometry: 'not read yet', warnings,
+      geometry: { elements_with_boxes: elements.filter((e) => e.boxes?.length).length, note: 'each piece of geometry is drawn as its placed bounding box (the triangles are not read yet): enough for the 3D view and the 4D video; box volumes are not quantities (Revit’s own volumes are, as NetVolume)' }, warnings,
     },
   };
 }

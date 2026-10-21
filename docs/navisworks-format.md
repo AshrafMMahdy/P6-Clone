@@ -49,7 +49,23 @@ characters, the GUID is the GlobalId Revit's own IFC export writes (355 of 355 o
 No model of its own: `LcOpXRefTable` holds JSON listing the .nwc / .nwd files; they are read from beside the .nwf, else
 from the saved path.
 
+## Fragments (`LcOpNwdFragments`)
+
+`u32 count`, then `count` fragments as an object stream from id 100. A fragment (class 0x0d): (align 8) double radius,
+u32, u32 primitive (4 faces, 8 lines, 16 / 32 points and text), u32 flags, u32 item: the tree item's position in
+pre-order (the file is 0); then a transform value (0x0e: 3 doubles translation; 0x0f: translation and quaternion x, y,
+z, w; 0x11: 13 floats, a 3x4 matrix and one, then 3 doubles translation), a material (0x37: u32 flags, colours 0x36 of
+13 floats and a u32, an asset 0xb9 when flags & 0x20), and a box (0x5d: 6 floats, the bounding box in the piece's frame,
+3 doubles translation, a float radius, a u32, the u32 number of its geometry block). A box another fragment points back
+to is that geometry placed again. Every fragment's item is a leaf (class 0x16) in all the samples.
+
+## Geometry blocks (`LcOpNwdGeometry`)
+
+Per block an object stream from id 100: 0x5e, then 0x3c positions (u32, u32 count of floats, float32 x y z), 0x3d texture
+coordinates, 0x64 face data (int16 normals and the polygon sizes), each array followed by a compact index code. A table at
+the end gives each block's length. The index code is not decoded yet, so each piece is drawn as its placed box.
+
 ## Not read yet
 
-Geometry (`LcOpNwdGeometry`, `LcOpNwdFragments`), TimeLiner (`LcTlTimelinerElement`), selection sets, clash tests,
+The triangles of the geometry blocks, TimeLiner (`LcTlTimelinerElement`), selection sets, clash tests,
 point clouds, `lichunk-007` files.

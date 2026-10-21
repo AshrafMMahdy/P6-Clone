@@ -22,7 +22,7 @@ export function fileHash(path: string): Promise<string> {
 
 // an element rvt-rs could only place as its bounding box has no volume worth a quantity (a 2023 project: doors 22x,
 // railings 700x Revit's own IFC; walls drawn from their profile within 1%): placed and counted, never measured
-const boxOnly = (e: IfcElement) => /bbox/.test(String(e.props['RvtElementRecordGeometry.BodySource'] ?? ''));
+const boxOnly = (e: IfcElement) => /bbox/.test(String(e.props['RvtElementRecordGeometry.BodySource'] ?? '')) || e.props['P6Clone.Geometry'] === 'bounding boxes';
 // in memory a parsed index takes about three times its JSON text (objects, strings as UTF-16, the GlobalId map)
 const wrap = (hash: string, index: IfcIndex, glb: string | null, jsonChars: number): Model => {
   for (const e of index.elements) if (boxOnly(e)) e.derivedVolumeM3 = null;
@@ -35,8 +35,8 @@ export async function loadModel(path: string, o: { geometry?: boolean } = {}): P
   if (!existsSync(path)) throw new Error(`No file at ${path}.`);
   if (isNavisworks(path)) {
     const { ifc, source } = await nwdToIfc(path);
-    const m = await loadIfc(ifc, { geometry: false }); // the reader has no geometry yet: elements, properties, Revit's quantities
-    m.index.sourcePath = path; m.source = source; m.index.geometryStatus = 'unavailable';
+    const m = await loadIfc(ifc, o);
+    m.index.sourcePath = path; m.source = source;
     return m;
   }
   if (!isRevit(path)) return loadIfc(path, o);
