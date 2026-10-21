@@ -40,10 +40,11 @@ const SAVE: Record<string, Work> = {
 /** Monte Carlo's samples per activity per iteration: its early finish (4 bytes) and, when it varies, its duration (8). */
 export const MC_BYTES_PER_SAMPLE = 12;
 
-/** What reading a file peaks at, per byte of the file (the bytes, the text, the parsed tree, the rows; measured on the
- *  hosted budget: a 68 MB XER about 5x, a 215 MB P6 XML 5.8x now that it is read element by element (8x as a whole
- *  tree), a 137 MB MSPDI 16x). The part above the project's own estimate is reserved while the file is read. */
-export const READ_PEAK: Record<string, number> = { xer: 5.5, xml: 6.5, mspdi: 16, mpp: 16, mpx: 5.5 };
+/** What reading a file peaks at, per byte of the file (the text, the element being read, the rows, the import checks;
+ *  measured on the hosted budget: an XER 5.4-6.7x (most of it the import checks' scheduling pass), read a chunk at a time; a 215 MB P6 XML 5.8x and a 137 MB MSPDI
+ *  10.4-12.5x, each read element by element (8x and 16x as whole trees); an MSPDI keeps every element's own text for the
+ *  save that merges back into it). The part above the project's own estimate is reserved while the file is read. */
+export const READ_PEAK: Record<string, number> = { xer: 6, xml: 6.5, mspdi: 12.5, mpp: 12.5, mpx: 6 };
 export const readPeak = (format: string, bytes: number) => Math.round((READ_PEAK[format] ?? 5.5) * bytes + 8 * MB);
 
 /** The activities the work runs on: the file's projects, not the baselines stored in it */

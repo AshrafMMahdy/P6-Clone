@@ -10,12 +10,12 @@
 //   Environment: P6CLONE_ROOT, P6CLONE_TOKEN, P6CLONE_PORT, P6CLONE_MAX_HANDLES, P6CLONE_MEM_BUDGET_MB,
 //   P6CLONE_IDLE_MINUTES. Run Node with --max-old-space-size above the memory budget for very large files.
 import { minOf } from '../core/arrays.ts';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { detectFormat, exportFile, importChecks, readRaw, type Format } from '../renderer/io.ts';
-import { writeXer } from '../core/xer/write.ts';
+import { writeXer, writeXerTo } from '../core/xer/write.ts';
 import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid } from '../core/xer/repair-valid.ts';
@@ -23,6 +23,8 @@ import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { writeP6Xml, writeP6XmlTo } from '../core/xml/p6xml.ts';
 import { writeMspdiTo } from '../core/msp/mspdi.ts';
 import { readPeak, workNeed } from './workset.ts';
+import { readXerFile } from '../core/xer/parseFile.ts';
+import type { ParseMeta } from '../core/xer/parse.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { updateProgress } from '../core/progress/update.ts';
 import { levelResources } from '../core/level/level.ts';
@@ -122,6 +124,8 @@ const projectIds = (db: Db, id: unknown) => {
   if (!p) fail('bad_input', `No project "${id}".`, `Projects in this file: ${ps.map((x) => x.proj_short_name).join(', ')}.`);
   return [p!.proj_id];
 };
+/** The first 4,000 bytes of a file (what detectFormat reads). */
+const readHead = (p: string): Uint8Array => { try { const fd = openSync(p, 'r'); try { const b = Buffer.alloc(4000); return new Uint8Array(b.subarray(0, readSync(fd, b, 0, 4000, 0))); } finally { closeSync(fd); } } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
 const readBytes = (p: string) => { try { return new Uint8Array(readFileSync(p)); } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
 /** Write a file atomically: a temporary file in the same folder, flushed to disk, then renamed over the target (a crash
  *  leaves the old file or the new one, never half of one). Missing folders inside the write root are made. */
@@ -218,18 +222,20 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: ['monte_carlo', 'open_file', 'save', 'schedule', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'render_4d', 'lob_create', 'lob_edit', 'lob_takt', 'lob_import'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
     case 'open_file': {
       const path = pathArg(a.path);
-      const bytes = readBytes(path);
-      const need = estimateBytes(bytes.length);
+      // an XER is read from its file a chunk at a time; the other formats are read whole (XML trees, MPX)
+      const head = readHead(path), size = fileSize(path), format0 = detectFormat(path, head);
+      const bytes = format0 === 'xer' ? null : readBytes(path);
+      const need = estimateBytes(size);
       // reserve the memory first, so a big file is refused (with a way forward) instead of exhausting the process: the
       // project as it stays in memory, and while it is read the reader's own peak above that (workset.ts READ_PEAK)
       const s0 = createSession({ tables: {} }, { path, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: need, dirty: false });
       let reading = () => {};
-      try { const peak = readPeak(detectFormat(path, bytes), bytes.length); if (peak > need) reading = reserveMemory(peak - need, `Reading ${basename(path)} (${Math.round(bytes.length / 1048576)} MB)`, 'save it as XER from P6 or Microsoft Project (the XER reader needs the least), or split it by project', s0.handle); }
+      try { const peak = readPeak(format0, size); if (peak > need) reading = reserveMemory(peak - need, `Reading ${basename(path)} (${Math.round(size / 1048576)} MB)`, 'save it as XER from P6 or Microsoft Project (the XER reader needs the least), or split it by project', s0.handle); }
       catch (e) { closeSession(s0); forgetEvicted(s0.handle); throw e; }
       try {
         await checkpoint(ctx);
-        const format = detectFormat(path, bytes);
-        const r = readRaw(bytes, format, a.encoding ?? 'auto');
+        const format = format0;
+        const r: { db: Db; findings: Finding[]; meta?: ParseMeta } = bytes ? readRaw(bytes, format, a.encoding ?? 'auto') : readXerFile(path, a.encoding ?? 'auto');
         await checkpoint(ctx);
         const f = importChecks(r.db, r.findings, format);
         await checkpoint(ctx);
@@ -240,7 +246,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
             a.lenient === true ? 'No project could be read from the file, so it cannot be opened even leniently; fix the file (the findings say what is wrong) or rebuild it.' : 'Pass lenient: true to open it anyway and repair it (the findings say what P6 refuses), or fix the file.',
             { data: { fatal: f.filter((x) => x.severity === 'fatal').slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
         }
-        s0.db = r.db; s0.format = format; s0.encoding = readEncoding(bytes, format, r.db, a.encoding);
+        s0.db = r.db; s0.format = format; s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
         load4dSidecar(r.db, path); // <file>.4d.json: the 4D model and links saved with it
         // <file>.lob.json: the LOB models as last saved (used when a notebook was damaged outside the clone)
         const lobSide = readLobSidecar(path);
@@ -419,15 +425,17 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if ((fmt === 'mspdi' || fmt === 'mpx') && !projIds && allIds(s.db).length > 1) fail('bad_input', `A Microsoft Project file holds one project, and this file holds ${allIds(s.db).length}: ${names()}.`, 'Pass "project" with the Project ID to write (save once per project).');
       await checkpoint(ctx);
       let bytes: string | Uint8Array | null = null, label: string;
+      let xerOut: ((put: (b: Uint8Array) => void) => void) | null = null; // an XER goes to the file a chunk at a time
       const notes: string[] = [];
       // P6 XML goes to the file as it is made (never one string the size of the file)
       if (fmt === 'p6xml' || fmt === 'xml') label = 'P6 XML';
       else if (fmt === 'mspdi') label = 'Microsoft Project XML';
       else if (fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: projIds ?? allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto', readAs: s.encoding, report: notes }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
-      else if (fmt === 'xer') { bytes = writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12', encoding: a.encoding ?? 'auto', readAs: s.encoding, projIds, report: notes }); label = `XER ${a.version ?? s.db.header?.version ?? '19.12'}`; }
+      else if (fmt === 'xer') { const o = { version: a.version ?? s.db.header?.version ?? '19.12', encoding: a.encoding ?? 'auto', readAs: s.encoding, projIds, report: notes }; xerOut = (put) => writeXerTo(s.db, o, put); label = `XER ${a.version ?? s.db.header?.version ?? '19.12'}`; }
       else return fail('bad_input', `Unknown format "${a.format}".`, 'Use xer, p6xml, mspdi or mpx.');
       await checkpoint(ctx); // nothing is written once the call is cancelled; the write itself is one step
-      if (bytes == null && fmt === 'mspdi') writeOutWith(path, (put) => writeMspdiTo(s.db, { projIds: projIds ?? allIds(s.db).slice(0, 1), report: notes }, put));
+      if (xerOut) writeOutWith(path, xerOut);
+      else if (bytes == null && fmt === 'mspdi') writeOutWith(path, (put) => writeMspdiTo(s.db, { projIds: projIds ?? allIds(s.db).slice(0, 1), report: notes }, put));
       else if (bytes == null) writeOutWith(path, (put) => writeP6XmlTo(s.db, { version: a.version ?? '19.12', projIds }, put));
       else writeOut(path, bytes);
       // the 4D model, links and rules travel beside the file (<file>.4d.json); XER and P6 XML have no place for them
@@ -485,7 +493,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       }
       // a file compared against is read for this call only, and counted in the memory budget while it is held (C14)
       let release = () => {};
-      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); release = reserveMemory(estimateBytes(fileSize(p)), `Reading ${basename(p)} to compare with`, 'open the other file with open_file and compare with other_handle when there is room'); try { const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; } catch (e) { release(); throw e; } })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
+      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); release = reserveMemory(estimateBytes(fileSize(p)), `Reading ${basename(p)} to compare with`, 'open the other file with open_file and compare with other_handle when there is room'); try { if (detectFormat(p, readHead(p)) === 'xer') return readXerFile(p).db; const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; } catch (e) { release(); throw e; } })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
       try {
       if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return { mode: 'computed', changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }; }
       if (a.mode != null && a.mode !== 'all') fail('bad_input', 'mode must be all or computed.', 'Leave it out to compare everything.');
@@ -615,6 +623,11 @@ function contractError(e: Record<string, unknown>): Record<string, unknown> {
 
 /** The text encoding an XER / MPX file was read in (as given, else as recognised; BOM as read); none for XML or a
  *  file of plain ASCII (any code page writes it the same, so a save chooses as for a new project). */
+/** readEncoding for an XER read from its file: what the reader saw (a file of plain ASCII has none). */
+const xerEncoding = (db: Db, meta: ParseMeta): TextEncodingName | undefined => {
+  const enc = db.header?.encoding ?? meta.encoding;
+  return enc === 'utf-8' && !meta.nonAscii ? undefined : (enc as TextEncodingName);
+};
 function readEncoding(bytes: Uint8Array, format: Format, db: Db, given?: string): TextEncodingName | undefined {
   if (format !== 'xer' && format !== 'mpx') return undefined;
   const enc = (format === 'xer' ? db.header?.encoding : undefined) ?? detectEncoding(bytes, (given as TextEncodingName | undefined) ?? 'auto').encoding;
@@ -633,7 +646,7 @@ export function saveUnsavedAtExit(reason: string): string[] {
     const dir = writeBase() ?? (path ? dirname(path) : process.cwd());
     let file = join(dir, `${name}.recovered-${stamp}.xer`);
     for (let i = 2; existsSync(file) || saved.includes(file); i++) file = join(dir, `${name}.recovered-${stamp}-${i}.xer`);
-    try { writeOut(file, writeXer(db, { version: db.header?.version ?? '19.12', encoding: 'auto', readAs })); saved.push(file); process.stderr.write(`P6 Clone: unsaved changes of ${handle} saved to ${file} (${reason})\n`); }
+    try { writeOutWith(file, (put) => writeXerTo(db, { version: db.header?.version ?? '19.12', encoding: 'auto', readAs }, put)); saved.push(file); process.stderr.write(`P6 Clone: unsaved changes of ${handle} saved to ${file} (${reason})\n`); }
     catch (e) { process.stderr.write(`P6 Clone: the unsaved changes of ${handle} could not be saved (${reason}): ${(e as Error).message}\n`); }
   };
   for (const s of sessions.values()) if (s.dirty) one(s.handle, s.path, s.db, s.encoding);

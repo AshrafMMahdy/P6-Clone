@@ -236,13 +236,13 @@ each file named on stderr.
 Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits come from the environment:
 `P6CLONE_MAX_HANDLES` (8), `P6CLONE_MEM_BUDGET_MB` (3072), `P6CLONE_IDLE_MINUTES` (30), `P6CLONE_MEM_FACTOR` (3: memory reserved per byte of file; a parsed XER takes about 2x). Give Node a heap above the budget.
 Everything a call holds counts in the budget before it starts (`mcp/workset.ts`, measured): reading a file (its peak:
-about 5.5x an XER, 6.5x a P6 XML (read element by element), 16x an MSPDI), and each heavy tool's working set beside its project (`schedule`,
+about 6x an XER (read a chunk at a time), 6.5x a P6 XML and 12.5x an MSPDI (each read element by element)), and each heavy tool's working set beside its project (`schedule`,
 `monte_carlo` (plus 12 bytes per activity per iteration), `lint`, `dcma_14`, `check_schedule`, `float_paths`,
 `crash_schedule`, `level_resources`, `export_excel`, `export_pdf`, `run_report`, `save`, the update files of `compare`
 and `windows_analysis`, ...). Idle projects are moved out to make room; a call that still cannot fit is refused before
 it starts (`memory_budget`), naming what it needs, what is free, what holds the rest, and what would fit (for Monte
 Carlo: how many iterations); it asks to retry only when other calls are running. There is no size limit: these are the
-only checks. P6 XML and MSPDI are written to the file as they are made. An answer longer than
+only checks. XER, P6 XML and MSPDI are written to the file as they are made. An answer longer than
 `P6CLONE_MAX_RESPONSE_CHARS` (400,000) is written whole to `<tool>-result-<stamp>.json` in the write root (else the
 system temp folder) and the answer gives its path (`saved`, `written`) with a preview; `find_activities`,
 `critical_path`, `resource_summary`, `list_wbs`, `list_projects`, `get_activity` (links and resources) and `compare` page

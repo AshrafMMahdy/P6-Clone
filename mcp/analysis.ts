@@ -22,8 +22,10 @@ import { estimateBytes, fail, getSession, pathArg, reserveMemory, type Session }
 import { timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
 import { baselineOf, type Tick } from '../core/analysis/common.ts';
 import { detectFormat, readRaw } from '../renderer/io.ts';
-import { readFileSync, statSync } from 'node:fs';
+import { readXerFile } from '../core/xer/parseFile.ts';
+import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
+const headOf = (p: string): Uint8Array => { const fd = openSync(p, 'r'); try { const b = Buffer.alloc(4000); return new Uint8Array(b.subarray(0, readSync(fd, b, 0, 4000, 0))); } finally { closeSync(fd); } };
 const sizeOf = (p: string) => { try { return statSync(p).size; } catch { return 0; } };
 import { rows } from '../core/db.ts';
 
@@ -167,7 +169,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       try {
       for (const [i, u] of (a.updates as Record<string, unknown>[]).entries()) {
         if (u?.handle) { const o = getSession(u.handle); updates.push({ name: String(u.name ?? o.path ?? u.handle), db: o.db, projId: mainProj(o.db).proj_id }); }
-        else if (u?.path) { const p = pathArg(u.path); releases.push(reserveMemory(estimateBytes(sizeOf(p)), `Reading update ${i + 1} (${basename(p)}) for windows_analysis`, 'open the updates with open_file and pass their handles when there is room')); let b: Uint8Array; try { b = new Uint8Array(readFileSync(p)); } catch { return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.'); } const db = readRaw(b, detectFormat(p, b)).db; updates.push({ name: String(u.name ?? p), db, projId: mainProj(db).proj_id }); }
+        else if (u?.path) { const p = pathArg(u.path); releases.push(reserveMemory(estimateBytes(sizeOf(p)), `Reading update ${i + 1} (${basename(p)}) for windows_analysis`, 'open the updates with open_file and pass their handles when there is room')); let db: Db; try { db = detectFormat(p, headOf(p)) === 'xer' ? readXerFile(p).db : (() => { const b = new Uint8Array(readFileSync(p)); return readRaw(b, detectFormat(p, b)).db; })(); } catch { return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.'); } updates.push({ name: String(u.name ?? p), db, projId: mainProj(db).proj_id }); }
         else if (u?.baseline) { const bl = baselineOf(s.db, cur, String(u.baseline) as 'project') ?? fail('bad_input', `The project has no ${u.baseline} baseline in this file.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(s.db, [cur.proj_id]).join(', ') || 'none saved'}.`); updates.push({ name: String(u.name ?? bl.name), db: s.db, projId: bl.projId }); }
         else if (u?.data_date && Array.isArray(u.progress)) {
           // built from the last update that is a schedule of its own (a stored baseline is a snapshot, not edited), else the current project

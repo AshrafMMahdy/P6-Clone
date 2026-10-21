@@ -57,7 +57,7 @@ export function detectCodepage(b: Uint8Array): TextEncodingName {
   return 'windows-1252';
 }
 
-const SAMPLE = 4 * 1048576; // bytes of non-ASCII lines the code page is recognised from
+export const SAMPLE = 4 * 1048576; // bytes of non-ASCII lines the code page is recognised from
 const CHUNK = 1048576;
 
 /** Encoding of a file without decoding it whole (a file can be larger than the longest possible string): BOM, else

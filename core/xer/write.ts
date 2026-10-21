@@ -118,19 +118,25 @@ const CHUNK = 1 << 22; // characters of text encoded at a time
 const NON_ASCII = /[^\x00-\x7f]/;
 
 export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
+  const parts: Uint8Array[] = [];
+  writeXerTo(db, opts, (b) => parts.push(b));
+  const out = new Uint8Array(parts.reduce((n, b) => n + b.length, 0));
+  let at = 0;
+  for (let i = 0; i < parts.length; i++) { out.set(parts[i], at); at += parts[i].length; parts[i] = out.subarray(0, 0); }
+  return out;
+}
+
+/** The XER file to a sink, encoded a chunk at a time (a file larger than memory is never one string or one buffer).
+ *  The code page depends only on which non-ASCII characters occur, so unless it is given, a first pass over the rows
+ *  collects them (nothing is kept from it) and the second writes. */
+export function writeXerTo(db: Db, opts: WriteOptions, put: (bytes: Uint8Array) => void): void {
   const sel = selectRows(db, opts.projIds);
   const cur = opts.currency ?? db.tables.CURRTYPE?.rows[0]?.curr_short_name ?? 'USD';
-  // The text is built and encoded in chunks (a file can be larger than the longest possible string). The code page
-  // depends only on which non-ASCII characters occur, so those are collected on the way.
-  const chunks: string[] = [], chars = new Set<string>();
-  let part: string[] = [], size = 0;
-  const lines = { push(...ls: string[]) { for (const l of ls) {
-    if (NON_ASCII.test(l)) for (const ch of l) if (ch.charCodeAt(0) >= 0x80) chars.add(ch);
-    part.push(l); size += l.length + 2;
-    if (size >= CHUNK) { chunks.push(part.join('\r\n') + '\r\n'); part = []; size = 0; }
-  } } };
+  const day = opts.exportDate ?? formatDay(Date.now() / 60000);
+  const each = (line: (l: string) => void) => {
+  const lines = { push(...ls: string[]) { for (const l of ls) line(l); } };
   lines.push([
-    'ERMHDR', opts.version, opts.exportDate ?? formatDay(Date.now() / 60000), 'Project',
+    'ERMHDR', opts.version, day, 'Project',
     // the user and database a file read in was exported from stay as they were (only the export date is new)
     opts.user ?? (db.header?.raw?.[4] || 'admin'), opts.userName ?? (db.header?.raw?.[5] || 'admin'), opts.dbName ?? (db.header?.raw?.[6] || 'dbxDatabaseNoName'), 'Project Management', cur,
   ].join('\t'));
@@ -155,12 +161,16 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
     for (const r of rs) lines.push('%R\t' + fields.map((f) => clean(val(r, f))).join('\t'));
   }
   lines.push('%E');
-  if (part.length) chunks.push(part.join('\r\n') + '\r\n');
-  const enc = !opts.encoding || opts.encoding === 'auto' ? keepOrChoose([...chars].join(''), opts.readAs) : opts.encoding;
+  };
+  let enc = opts.encoding && opts.encoding !== 'auto' ? opts.encoding : null;
+  if (!enc) {
+    const chars = new Set<string>();
+    each((l) => { if (NON_ASCII.test(l)) for (const ch of l) if (ch.charCodeAt(0) >= 0x80) chars.add(ch); });
+    enc = keepOrChoose([...chars].join(''), opts.readAs);
+  }
   if (opts.readAs && enc !== opts.encoding && enc !== opts.readAs) opts.report?.push(`Read as ${encodingLabel(opts.readAs)}, but the text no longer fits it: written as ${encodingLabel(enc)}.`);
-  const bytes = chunks.map((c, i) => { chunks[i] = ''; return encodeText(c, i && enc === 'utf-8-bom' ? 'utf-8' : enc); });
-  const out = new Uint8Array(bytes.reduce((n, b) => n + b.length, 0));
-  let at = 0;
-  for (let i = 0; i < bytes.length; i++) { out.set(bytes[i], at); at += bytes[i].length; bytes[i] = out.subarray(0, 0); }
-  return out;
+  let part: string[] = [], size = 0, first = true;
+  const out = () => { if (!part.length) return; put(encodeText(part.join('\r\n') + '\r\n', !first && enc === 'utf-8-bom' ? 'utf-8' : enc!)); first = false; part = []; size = 0; };
+  each((l) => { part.push(l); size += l.length + 2; if (size >= CHUNK) out(); });
+  out();
 }
