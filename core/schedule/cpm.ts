@@ -4,7 +4,7 @@ import { addField, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, memo, parseP6Date, MIN_PER_DAY } from '../dates.ts';
 import type { Finding } from '../findings.ts';
 import { WorkCalendar, CalendarHorizonError } from '../calendar/calendar.ts';
-import { inheritExceptions, parseClndrData, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
+import { calendarDefOfRow, inheritExceptions, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
 import { findLoops } from '../xer/validate.ts';
 import { buildScheduleLog } from './log.ts';
 
@@ -122,7 +122,7 @@ export function calendarResolver(db: Db, findings: Finding[]) {
     if (!r) return null;
     let d: CalendarDef | null = null;
     try {
-      if (r.clndr_data) d = parseClndrData(r.clndr_data);
+      d = calendarDefOfRow(r); // no calendar data: the week P6 gives it (its hours per day and week)
     } catch (e) {
       findings.push({ severity: 'warning', code: 'SCHED_CAL_INVALID', table: 'CALENDAR', key: id, message: `Calendar ${r.clndr_name} is invalid (${(e as Error).message}); standard 5-day calendar used.`, p6: 'P6 cannot use the calendar.' });
     }

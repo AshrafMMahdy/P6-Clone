@@ -3,7 +3,7 @@
 // addressed by IDs and names a scheduler sees, durations in days, one transaction per list.
 import { addField, dropIndexes, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
-import { parseClndrData, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
+import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { ensureEps } from './edit.ts';
 import { pick, realOf, removeWhere } from '../journal.ts';
@@ -448,7 +448,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     case 'update_calendar': {
       const c = h.calendar(op.name);
       if (op.new_name != null) { const n = str(op.new_name, 'new_name'); if (rows(db, 'CALENDAR').some((x) => x.clndr_id !== c.clndr_id && lc(x.clndr_name) === lc(n))) fail(`Calendar "${n}" already exists.`); c.clndr_name = n; }
-      const def = parseClndrData(c.clndr_data);
+      const def = scheduledCalendarDef(c); // no calendar data: the week F9 gives it, now written out in full
       const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
       if (op.work_week != null) {
         if (typeof op.work_week !== 'object') fail('"work_week" must map days (sun..sat) to lists of ["08:00","17:00"] periods.');

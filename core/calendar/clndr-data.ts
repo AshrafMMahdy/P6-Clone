@@ -105,6 +105,30 @@ export function standardCalendar(): CalendarDef {
   return { week: [[], day, day, day, day, day, []], exceptions: new Map() };
 }
 
+/** The work week P6 gives a calendar without calendar data: its hours per day on its days a week (week_hr_cnt /
+ *  day_hr_cnt, Monday on), from 08:00 with an hour's lunch at noon; without usable hours, the standard week
+ *  (Mon-Fri 08:00-12:00, 13:00-17:00, as an 8 h / 40 h calendar comes out too). */
+export function defaultCalendarDef(dayHrs?: string | number, weekHrs?: string | number): CalendarDef {
+  const d = Number(dayHrs), w = Number(weekHrs);
+  if (!(d > 0 && d <= 24) || !(w > 0)) return standardCalendar();
+  const days = Math.min(7, Math.max(1, Math.round(w / d)));
+  const min = Math.round(d * 60);
+  const day: Shift[] = min <= 240 ? [{ start: 480, end: 480 + min }] : min <= 960 ? [{ start: 480, end: 720 }, { start: 780, end: 780 + min - 240 }] : [{ start: 0, end: min }];
+  const week: Shift[][] = [[], [], [], [], [], [], []];
+  for (let i = 0; i < days; i++) week[(i + 1) % 7] = day.map((s) => ({ ...s })); // Mon, Tue, ... Sat, Sun
+  return { week, exceptions: new Map() };
+}
+/** A CALENDAR row's definition: its calendar data, or (none) the week P6 gives it (defaultCalendarDef). */
+export function calendarDefOfRow(r: { clndr_data?: string; day_hr_cnt?: string; week_hr_cnt?: string }): CalendarDef {
+  return r.clndr_data && r.clndr_data.trim() ? parseClndrData(r.clndr_data) : defaultCalendarDef(r.day_hr_cnt, r.week_hr_cnt);
+}
+
+/** The definition F9 schedules a calendar row with: calendarDefOfRow, or the standard week when its data cannot be
+ *  read (the scheduler warns of that). Edits start from it, so what they leave alone schedules as before. */
+export function scheduledCalendarDef(r: { clndr_data?: string; day_hr_cnt?: string; week_hr_cnt?: string }): CalendarDef {
+  try { return calendarDefOfRow(r); } catch { return standardCalendar(); }
+}
+
 export function hoursPerWeek(c: CalendarDef): number {
   return c.week.flat().reduce((a, x) => a + x.end - x.start, 0) / 60;
 }

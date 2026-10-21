@@ -10,7 +10,7 @@ import { p6num } from '../schedule/cpm.ts';
 import { findLoops } from '../xer/validate.ts';
 import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
-import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
+import { parseClndrData, scheduledCalendarDef, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
 import { assignResource, assignmentActuals, fitAssignmentsToDuration, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { copyProject } from './copy.ts';
 import { dayHours as dayHoursOf } from './units.ts';
@@ -248,7 +248,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
     }
     case 'add_holidays': {
       const c = calendar(op.calendar);
-      const def = parseClndrData(c.clndr_data);
+      const def = scheduledCalendarDef(c); // no calendar data: the week F9 gives it, now written out in full
       for (const h of (Array.isArray(op.dates) ? op.dates : fail('"dates" must be a list of dates.'))) def.exceptions.set(ole(date(h, 'dates[]')), []);
       c.clndr_data = serializeClndrData(def);
       return { calendar: c.clndr_name };

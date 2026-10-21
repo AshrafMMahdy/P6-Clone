@@ -9,7 +9,7 @@
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { selectRows } from '../xer/write.ts';
-import { hoursPerWeek, inheritExceptions, parseClndrData, serializeClndrData, standardCalendar, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
+import { hoursPerWeek, inheritExceptions, parseClndrData, scheduledCalendarDef, serializeClndrData, standardCalendar, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num, progressKey } from '../schedule/cpm.ts';
 import type { Ghosts, Kept, ProjectKept } from './keep.ts';
@@ -186,7 +186,7 @@ export function effectiveCalendars(calRows: Row[]): Map<string, CalendarDef> {
     if (hit) return hit;
     const r = byId.get(id)!;
     let d: CalendarDef;
-    try { d = r.clndr_data ? parseClndrData(r.clndr_data) : standardCalendar(); } catch { d = standardCalendar(); }
+    d = scheduledCalendarDef(r); // the week F9 schedules it with (no data: P6's default week from its hours)
     if (r.base_clndr_id && r.base_clndr_id !== id && byId.has(r.base_clndr_id) && depth < 10) d = inheritExceptions(d, def(r.base_clndr_id, depth + 1));
     out.set(id, d);
     return d;
