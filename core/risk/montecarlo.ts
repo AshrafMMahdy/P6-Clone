@@ -404,7 +404,10 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
 
   const finishes = new Float64Array(iterations);
   const critCount = new Uint32Array(n);
-  const efSamples = Array.from({ length: n }, () => new Float64Array(iterations));
+  // each activity's early finish per iteration, as minutes from its first one (4 bytes, exact within 31 years):
+  // 1,000 iterations of 80,000 activities hold 320 MB, not 640
+  const efSamples = Array.from({ length: n }, () => new Float32Array(iterations));
+  const efAnchor = new Float64Array(n).fill(NaN);
   const dur = new Float64Array(n);
 
   let lastYield = Date.now();
@@ -436,7 +439,9 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     if (projDelay > 0 && Number.isFinite(finishes[it])) finishes[it] = pcal.addWork(finishes[it], Math.round(projDelay * 60));
     for (let k = 0; k < n; k++) {
       const t = tasks[k];
-      efSamples[k][it] = parseP6Date(t.early_end_date) ?? NaN;
+      const ef = parseP6Date(t.early_end_date);
+      if (ef == null) efSamples[k][it] = NaN;
+      else { if (Number.isNaN(efAnchor[k])) efAnchor[k] = ef; efSamples[k][it] = ef - efAnchor[k]; }
       if (!t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null && Number(t.total_float_hr_cnt) <= 0 && !isSummary(t)) critCount[k]++;
     }
     opts.onProgress?.(it + 1);
@@ -476,10 +481,11 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   if (cumulative[cumulative.length - 1]?.pct !== 100) cumulative.push({ t: max, pct: 100 });
 
   // Per activity
+  const finishesOf = (k: number) => { const a = efSamples[k].filter((x) => Number.isFinite(x)).sort(), out = new Float64Array(a.length); for (let i = 0; i < a.length; i++) out[i] = a[i] + efAnchor[k]; return out; };
   const rho = new Map<number, number | null>();
   tracked.forEach((k, j) => rho.set(k, spearman(durSamples[j], finishes)));
   const activities: ActivityResult[] = prep.base.map((t, k) => {
-    const efs = efSamples[k].filter((x) => Number.isFinite(x)).sort();
+    const efs = finishesOf(k);
     const s = durStats[k];
     return {
       taskId: t.task_id, code: t.task_code || t.task_id, name: t.task_name ?? '', projId: t.proj_id, milestone: isMile(t),
@@ -496,7 +502,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     .sort((a, b) => Math.abs(b.rho) - Math.abs(a.rho));
   const milestones: MilestoneResult[] = prep.base.flatMap((t, k) => {
     if (!isMile(t) || t.act_end_date) return [];
-    const efs = efSamples[k].filter((x) => Number.isFinite(x)).sort();
+    const efs = finishesOf(k);
     if (!efs.length) return [];
     return [{
       taskId: t.task_id, code: t.task_code || t.task_id, name: t.task_name ?? '', deterministic: detEF[k], mean: efs.reduce((a, b) => a + b, 0) / efs.length,
