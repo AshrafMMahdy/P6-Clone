@@ -7,8 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseIfc, INDEX_FORMAT, type IfcElement, type IfcIndex } from './parse.ts';
 import { isRevit, rvtToIfc, type RevitSource } from './rvt.ts';
+import { isNavisworks, nwdToIfc, type NavisworksSource } from './nwd.ts';
 
-export interface Model { hash: string; index: IfcIndex; glb: string | null; byGuid: Map<string, IfcElement>; bytes: number; /** a Revit file read through IFC */ source?: RevitSource }
+export interface Model { hash: string; index: IfcIndex; glb: string | null; byGuid: Map<string, IfcElement>; bytes: number; /** a Revit or Navisworks file read through IFC */ source?: RevitSource | NavisworksSource }
 
 const memory = new Map<string, Model>();
 // the display model depends on its settings, so they are part of the name
@@ -32,6 +33,12 @@ const wrap = (hash: string, index: IfcIndex, glb: string | null, jsonChars: numb
  *  geometry: false skips meshes (faster; no GLB, no derived volumes). */
 export async function loadModel(path: string, o: { geometry?: boolean } = {}): Promise<Model> {
   if (!existsSync(path)) throw new Error(`No file at ${path}.`);
+  if (isNavisworks(path)) {
+    const { ifc, source } = await nwdToIfc(path);
+    const m = await loadIfc(ifc, { geometry: false }); // the reader has no geometry yet: elements, properties, Revit's quantities
+    m.index.sourcePath = path; m.source = source; m.index.geometryStatus = 'unavailable';
+    return m;
+  }
   if (!isRevit(path)) return loadIfc(path, o);
   const { ifc, source } = await rvtToIfc(path);
   const m = await loadIfc(ifc, o);
@@ -45,7 +52,7 @@ async function loadIfc(path: string, o: { geometry?: boolean }): Promise<Model> 
   pruneCache();
   // an IFC is a STEP file with an IFC schema; anything else (an XER, a GLB, an .rvt) is refused before it replaces a model
   const head = (() => { const fd = openSync(path, 'r'); try { const b = Buffer.alloc(65536); return b.subarray(0, readSync(fd, b, 0, 65536, 0)).toString('latin1'); } finally { closeSync(fd); } })();
-  if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit files are read as .rvt / .rfa; other formats have to be exported to IFC first.`);
+  if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit (.rvt / .rfa) and Navisworks (.nwd / .nwc / .nwf) files are read as they are; other formats have to be exported to IFC first.`);
   const hash = await fileHash(path);
   const hit = memory.get(cacheName(hash));
   if (hit && (o.geometry === false || hit.glb || hit.index.geometryStatus === 'unavailable')) { hit.index.sourcePath = path; return hit; }
@@ -116,6 +123,7 @@ export const modelBytes = (hashes?: Iterable<string>) => { const want = hashes ?
 export function loadEstimate(path: string, o: { geometry?: boolean } = {}): number {
   const size = existsSync(path) ? statSync(path).size : 0;
   if (isRevit(path)) return size * 12; // rvt-rs's process: 419 MB for a 33.7 MB project; the IFC it makes is far smaller
+  if (isNavisworks(path)) return size * 30; // a model tree unpacks about 7x and is held as objects while it is read
   const chunk = (Number(process.env.P6CLONE_GEOM_CHUNK_MB) || 300) * 1048576;
   return Math.round(size * 4.2 + (o.geometry === false ? 0 : Math.min(size, chunk) * 5));
 }

@@ -1,6 +1,6 @@
 # Revit and Navisworks models in the clone (for 4D and for every agent)
 
-Status: approved by the user 2026-10-21 ("Ok you can build them"). Built in stages: RVT first, then NWD.
+Status: approved by the user 2026-10-21 ("Ok you can build them"). Built: RVT (whiq-v0.1.31); NWD elements, properties, Revit quantities and GlobalIds (format notes: docs/navisworks-format.md). Next: NWD geometry, then TimeLiner.
 
 ## Why
 

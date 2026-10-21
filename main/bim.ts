@@ -43,7 +43,7 @@ export function registerBim(getWin: () => BrowserWindow | null): void {
 
   ipcMain.handle('bim:open', async (_e, path?: string) => {
     let p = path;
-    if (!p) { const r = await dialog.showOpenDialog(getWin()!, { title: 'Open model', filters: [{ name: 'Models (IFC, Revit)', extensions: ['ifc', 'rvt', 'rfa'] }], properties: ['openFile'] }); if (r.canceled || !r.filePaths[0]) return null; p = r.filePaths[0]; }
+    if (!p) { const r = await dialog.showOpenDialog(getWin()!, { title: 'Open model', filters: [{ name: 'Models (IFC, Revit, Navisworks)', extensions: ['ifc', 'rvt', 'rfa', 'nwd', 'nwc', 'nwf'] }], properties: ['openFile'] }); if (r.canceled || !r.filePaths[0]) return null; p = r.filePaths[0]; }
     try { const m = await loadModel(p); viewerFolder(m); return { ok: true, ...answer(m) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
   ipcMain.handle('bim:load', async (_e, o: { hash: string; path: string }) => {

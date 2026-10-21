@@ -35,7 +35,7 @@ test('4D: model, viewer, pick and link, bottom pane, package, video', { timeout:
 
     await menu('tools.extensions');
     await win.locator('.dirbtn', { has: win.locator('b', { hasText: /^4D$/ }) }).click();
-    await win.click('button:has-text("Open model (IFC, Revit)")');
+    await win.click('button:has-text("Open model (IFC, Revit, Navisworks)")');
     await win.waitForSelector('text=/\\d+ elements ·/', { timeout: 120_000 });
     const frame = win.frameLocator('iframe');
     await frame.locator('canvas').first().waitFor({ timeout: 60_000 });

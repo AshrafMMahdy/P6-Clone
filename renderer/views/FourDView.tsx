@@ -144,7 +144,7 @@ export function FourDPanel() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, height: '100%', minHeight: 0 }}>
       <div style={bar}>
-        <button onClick={() => void open()}>{row ? 'Replace model…' : 'Open model (IFC, Revit)…'}</button>
+        <button onClick={() => void open()}>{row ? 'Replace model…' : 'Open model (IFC, Revit, Navisworks)…'}</button>
         {row && <span className="muted">{row.path.split(/[\\/]/).pop()} · {status?.elements ?? 0} elements · {status?.links ?? 0} links · {status?.linked_elements ?? 0} elements linked</span>}
         {err && <span style={{ color: '#b00' }}>{err}</span>}
       </div>

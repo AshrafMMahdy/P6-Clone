@@ -310,7 +310,10 @@ the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as
 Revit `.rvt` / `.rfa` read without Revit by rvt-rs (Apache-2.0, its WebAssembly in `ifc/rvt/`, in its own process) and made
 into IFC4 with the GlobalIds Revit's own IFC export writes; the answer's `source` says the Revit version, how the file was
 read and which elements are only bounding boxes (placed and counted, no derived volume); without a `handle` the file
-opens into a model-only workspace, so an agent with no schedule can read elements and quantities),
+opens into a model-only workspace, so an agent with no schedule can read elements and quantities; Navisworks `.nwd` /
+`.nwc` / `.nwf` read by the clone's own clean-room reader (`core/bim/nwd/`): elements with their Revit category, family,
+type, level, ElementId, parameters and Revit's own lengths, areas and volumes in SI, and the GlobalIds Revit's IFC export
+writes, so links carry between RVT, IFC and NWD; DWG-sourced items under their layers; geometry not read yet),
 `list_elements`, `element_info`, `quantities` (per group: totals, and for the asked `kind` the elements quantified and
 unquantified; each figure with its kind, unit and source: base quantity and its set, geometry, or property set),
 `link_elements` (built / removed / temporary), `link_by_rules`

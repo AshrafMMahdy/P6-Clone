@@ -76,6 +76,12 @@ else {
   await call('schedule', { handle: m4.handle, owner_key: m4.owner_key });
   const om = await call('open_model', { handle: m4.handle, owner_key: m4.owner_key, path: ifcFixture });
   if (om.geometry !== 'ok') failures.push(`open_model geometry: ${JSON.stringify(om).slice(0, 200)}`);
+  // Navisworks (the clone's own reader, in the bundle), opened without a schedule
+  const nwFixture = resolve('tests/fixtures/navisworks/hello.nwc');
+  if (existsSync(nwFixture)) {
+    const nw = await call('open_model', { path: nwFixture });
+    if (nw?.source?.format !== 'Navisworks' || nw.elements !== 4 || !nw.handle) failures.push(`open_model .nwc: ${JSON.stringify(nw).slice(0, 200)}`);
+  }
   const H = { handle: m4.handle, owner_key: m4.owner_key };
   const els = await call('list_elements', { handle: m4.handle });
   if (els.total !== 5) failures.push(`list_elements: ${JSON.stringify(els).slice(0, 200)}`);
