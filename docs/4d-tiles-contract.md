@@ -152,7 +152,7 @@ the headless Chromium) under `P6CLONE_MEM_BUDGET_MB=1536` and the platform's hea
 The estimate (`core/bim/model.ts` `loadNeeds`):
 
 - the index (only when the model is not cached): `min(size, INDEX_PER_BYTE × size + INDEX_KNEE) + INDEX_FIXED`, with
-  `INDEX_PER_BYTE` 0.4, `INDEX_KNEE` 256 MB and `INDEX_FIXED` 96 MB (a small file costs about its own size while it is
+  `INDEX_PER_BYTE` 0.4, `INDEX_KNEE` 256 MB and `INDEX_FIXED` 160 MB (a small file costs about its own size while it is
   read; past 256 MB the pass collects every 128 MB read and the live index is about a quarter of the file);
 - meshing: one geometry run at a time on a chunk of the IFC, `MESH_PER_BYTE × chunk + MESH_FIXED` with
   `MESH_PER_BYTE` 3.8 and `MESH_FIXED` 330 MB; the chunk is `P6CLONE_GEOM_CHUNK_MB` (300) or smaller, sized to the

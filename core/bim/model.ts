@@ -231,7 +231,7 @@ export const modelBytes = (hashes?: Iterable<string>) => { const want = hashes ?
 /** Server-side peak while the STEP pass builds the index: about the file's size for a model of a few hundred MB (the
  *  pass's garbage between its collections), then INDEX_PER_BYTE of each byte past it (the live index is a quarter of
  *  the file; the pass collects every 128 MB read), whichever is less, plus INDEX_FIXED (the code it loads). */
-export const INDEX_PER_BYTE = 0.4, INDEX_KNEE = 256 * 1048576, INDEX_FIXED = 96 * 1048576;
+export const INDEX_PER_BYTE = 0.4, INDEX_KNEE = 256 * 1048576, INDEX_FIXED = 160 * 1048576; // fixed: 160 MB, the most a 42 MB model took on Linux (Node 24.14.0) past its own size
 export const indexNeed = (bytes: number) => Math.round(Math.min(bytes, bytes * INDEX_PER_BYTE + INDEX_KNEE) + INDEX_FIXED);
 /** A geometry run's peak (web-ifc's WebAssembly memory, the file's bytes, the meshes) per byte of IFC it meshes, and its
  *  fixed part (Node and web-ifc themselves). */
