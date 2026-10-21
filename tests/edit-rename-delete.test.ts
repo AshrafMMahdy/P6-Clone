@@ -199,10 +199,12 @@ for (const [label, make] of [['badra oil', () => open(join(SAMPLES_DIR, 'badra o
     assert.ok(r.applied > names.length / 3);
     const back = await savedValid(s, `anon-${label.replace(/\W+/g, '-')}.xer`);
     const text = readFileSync(back.path, 'utf8');
-    assert.deepEqual(names.filter((n) => text.includes(n)), [], 'original names left in the saved XER');
+    const fresh = fieldValues(back.s, (f) => f === 'guid');
+    // a short name can turn up by chance inside a fresh random GUID: those are not a leak, so they are left out of the search
+    const words = fresh.reduce((t, g) => t.split(g).join('\t'), text);
+    assert.deepEqual(names.filter((n) => words.includes(n)), [], 'original names left in the saved XER');
     assert.deepEqual(guids.filter((g) => text.includes(g)), [], 'original GUIDs left in the saved XER');
     assert.deepEqual(fieldValues(back.s, (f) => AUTHORS.includes(f)), [], 'user fields cleared');
-    const fresh = fieldValues(back.s, (f) => f === 'guid');
     assert.equal(new Set(fresh).size, fresh.length, 'fresh GUIDs are unique');
     assert.ok(fresh.every((g) => /^[A-Za-z0-9+/]{22}$/.test(g)), 'in P6\'s form');
     // undo puts every name, GUID and user back

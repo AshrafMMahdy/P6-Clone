@@ -37,6 +37,10 @@ export interface IfcElement {
   system?: string;
   /** Authored IfcElementQuantity values, name → value (Net/Gross kept apart). */
   authored: Record<string, number>;
+  /** What each authored quantity is: its kind, the IfcElementQuantity it came from, its own unit when it names one. */
+  quantityInfo?: Record<string, { kind: QuantityKind; set: string; unit?: string }>;
+  /** Properties typed as a measure (IfcVolumeMeasure, IfcAreaMeasure, IfcLengthMeasure...): "Pset.Prop" → kind and unit. */
+  measures?: Record<string, { kind: QuantityKind; unit?: string }>;
   /** Property sets flattened to "Pset.Prop" → value; hashed for comparison, kept for the report. */
   props: Record<string, string | number | boolean>;
   psetHash: string;
@@ -46,6 +50,8 @@ export interface IfcElement {
   bbox?: [number, number, number, number, number, number];
   owner?: IfcOwner;
 }
+
+export type QuantityKind = 'length' | 'area' | 'volume' | 'count' | 'weight' | 'time';
 
 export interface IfcIndex {
   sourcePath: string;
@@ -57,6 +63,8 @@ export interface IfcIndex {
   classCounts: Record<string, number>;
   geometryFailures: number;
   quantifiedElements: number;
+  /** The unit of each kind of figure the project assigns (IfcUnitAssignment), e.g. {length: "m", area: "m²"}. */
+  units?: Partial<Record<QuantityKind, string>>;
   /** File header: who exported it with what, when. */
   header: { application?: string; author?: string; organization?: string; timestamp?: string; project?: string };
   parsedAt: string;
@@ -71,7 +79,7 @@ export interface IfcIndex {
 export type IfcMeshes = Map<number, { positions: number[]; indices: number[] }>;
 
 /** Index format version — bump when the index shape or the parser's selection rules change, so caches re-parse. */
-export const INDEX_FORMAT = 8; // 8: models past one web-ifc run meshed in chunks. 7: the length unit the project assigns. 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
+export const INDEX_FORMAT = 9; // 9: quantity kinds, sets and units, measure-typed properties. 8: models past one web-ifc run meshed in chunks. 7: the length unit the project assigns. 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
 
 export interface ParseIfcOptions {
   /** Legacy switch — mesh arrays are never returned any more; geometry itself is governed by `geometry`. */

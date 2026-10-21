@@ -12,12 +12,19 @@
  */
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import type { IfcElement, IfcIndex, IfcOwner } from './parse.ts';
+import type { IfcElement, IfcIndex, IfcOwner, QuantityKind } from './parse.ts';
 
 // ── STEP attribute parser ──────────────────────────────────────────────────────────────────────────
 export type StepValue = string | number | boolean | null | undefined | { ref: number } | { enum: string } | StepValue[];
 
 const CONVERSION: Record<string, number> = { INCH: 0.0254, FOOT: 0.3048, YARD: 0.9144, MILE: 1609.344 };
+const QTY_KIND: Record<string, QuantityKind> = { IFCQUANTITYLENGTH: 'length', IFCQUANTITYAREA: 'area', IFCQUANTITYVOLUME: 'volume', IFCQUANTITYCOUNT: 'count', IFCQUANTITYWEIGHT: 'weight', IFCQUANTITYTIME: 'time' };
+const UNIT_KIND: Record<string, QuantityKind> = { LENGTHUNIT: 'length', AREAUNIT: 'area', VOLUMEUNIT: 'volume', MASSUNIT: 'weight', TIMEUNIT: 'time' };
+const MEASURE_KIND: Record<string, QuantityKind> = { LENGTH: 'length', POSITIVELENGTH: 'length', NONNEGATIVELENGTH: 'length', AREA: 'area', VOLUME: 'volume', MASS: 'weight', COUNT: 'count', TIME: 'time' };
+const SI_PREFIX: Record<string, string> = { MILLI: 'm', CENTI: 'c', DECI: 'd', KILO: 'k' };
+const SI_NAME: Record<string, string> = { METRE: 'm', SQUARE_METRE: 'm²', CUBIC_METRE: 'm³', GRAM: 'g', SECOND: 's' };
+/** The SI unit IFC assumes when the project assigns none. */
+const DEFAULT_UNITS: Record<QuantityKind, string> = { length: 'm', area: 'm²', volume: 'm³', count: 'no.', weight: 'kg', time: 's' };
 
 /** A statement without its comments; a comment marker inside a string is text, not a comment. */
 function stripComments(s: string): string {
@@ -148,6 +155,10 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
   const propValue = new Map<number, [string, string | number | boolean]>();
   const quantSets = new Map<number, number[]>();
   const quantValue = new Map<number, [string, number]>();
+  const quantMeta = new Map<number, { kind: QuantityKind; unit?: number }>();
+  const propMeasure = new Map<number, { kind: QuantityKind; unit?: number }>();
+  const quantSetName = new Map<number, string>();
+  const unitLabel = new Map<number, { kind?: QuantityKind; label: string }>();
   const ownerHist = new Map<number, { user?: number; app?: number; action?: string; when?: number }>();
   const personOrg = new Map<number, { person?: number; org?: number }>();
   const person = new Map<number, string>();
@@ -167,8 +178,10 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
     switch (type) {
       case 'IFCPROJECT': { const a = parseArgs(argText); projectName = strOf(a[2]); projectUnits = ref(a[8]); return; }
       case 'IFCUNITASSIGNMENT': { const a = parseArgs(argText); unitAssignments.set(id, refs(a[0])); return; }
-      case 'IFCSIUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const p = strOf(a[2]); lengthUnits.set(id, p === 'MILLI' ? 0.001 : p === 'CENTI' ? 0.01 : p === 'DECI' ? 0.1 : p === 'KILO' ? 1000 : 1); } return; }
-      case 'IFCCONVERSIONBASEDUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const f = CONVERSION[strOf(a[2]).toUpperCase()]; if (f) lengthUnits.set(id, f); } return; }
+      case 'IFCSIUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const p = strOf(a[2]); lengthUnits.set(id, p === 'MILLI' ? 0.001 : p === 'CENTI' ? 0.01 : p === 'DECI' ? 0.1 : p === 'KILO' ? 1000 : 1); }
+        const nm = SI_NAME[strOf(a[3])]; if (nm) unitLabel.set(id, { kind: UNIT_KIND[strOf(a[1])], label: (SI_PREFIX[strOf(a[2])] ?? '') + nm }); return; }
+      case 'IFCCONVERSIONBASEDUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const f = CONVERSION[strOf(a[2]).toUpperCase()]; if (f) lengthUnits.set(id, f); }
+        if (strOf(a[2])) unitLabel.set(id, { kind: UNIT_KIND[strOf(a[1])], label: strOf(a[2]).toLowerCase() }); return; }
       case 'IFCBUILDINGSTOREY': { const a = parseArgs(argText); storeyName.set(id, strOf(a[2]) || strOf(a[7]) || `#${id}`); return; }
       case 'IFCSITE': case 'IFCBUILDING': case 'IFCSPACE': case 'IFCSPATIALZONE': { const a = parseArgs(argText); spatialName.set(id, strOf(a[2]) || strOf(a[7]) || `#${id}`); break; }
       case 'IFCRELAGGREGATES': { const a = parseArgs(argText); const p = ref(a[4]); if (p !== undefined) aggregates.push({ parent: p, children: refs(a[5]) }); return; }
@@ -188,9 +201,11 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
       case 'IFCGROUP': case 'IFCSYSTEM': case 'IFCZONE': case 'IFCDISTRIBUTIONSYSTEM': case 'IFCBUILDINGSYSTEM': { const a = parseArgs(argText); groupName.set(id, strOf(a[2])); return; }
       case 'IFCRELDEFINESBYPROPERTIES': { const a = parseArgs(argText); const d = ref(a[5]); if (d !== undefined) relProps.push({ targets: refs(a[4]), relating: d }); return; }
       case 'IFCPROPERTYSET': { const a = parseArgs(argText); psets.set(id, { name: strOf(a[2]) || 'Pset', props: refs(a[4]) }); return; }
-      case 'IFCPROPERTYSINGLEVALUE': { const a = parseArgs(argText); const v = scalar(a[2]); if (v !== undefined) propValue.set(id, [strOf(a[0]), v]); return; }
-      case 'IFCELEMENTQUANTITY': { const a = parseArgs(argText); quantSets.set(id, refs(a[5])); return; }
-      case 'IFCQUANTITYLENGTH': case 'IFCQUANTITYAREA': case 'IFCQUANTITYVOLUME': case 'IFCQUANTITYCOUNT': case 'IFCQUANTITYWEIGHT': case 'IFCQUANTITYTIME': { const a = parseArgs(argText); const v = a[3]; if (typeof v === 'number' && Number.isFinite(v)) quantValue.set(id, [strOf(a[0]), v]); return; }
+      case 'IFCPROPERTYSINGLEVALUE': { const a = parseArgs(argText); const v = scalar(a[2]); if (v !== undefined) propValue.set(id, [strOf(a[0]), v]);
+        // a value typed as a measure (IFCVOLUMEMEASURE(1.2)) is a figure of that kind
+        const mk = typeof v === 'number' ? /\bIFC([A-Z]+)MEASURE\(/.exec(argText)?.[1] : undefined; if (mk && MEASURE_KIND[mk]) propMeasure.set(id, { kind: MEASURE_KIND[mk], unit: ref(a[3]) }); return; }
+      case 'IFCELEMENTQUANTITY': { const a = parseArgs(argText); quantSets.set(id, refs(a[5])); quantSetName.set(id, strOf(a[2]) || 'Quantities'); return; }
+      case 'IFCQUANTITYLENGTH': case 'IFCQUANTITYAREA': case 'IFCQUANTITYVOLUME': case 'IFCQUANTITYCOUNT': case 'IFCQUANTITYWEIGHT': case 'IFCQUANTITYTIME': { const a = parseArgs(argText); const v = a[3]; if (typeof v === 'number' && Number.isFinite(v)) { quantValue.set(id, [strOf(a[0]), v]); quantMeta.set(id, { kind: QTY_KIND[type], unit: ref(a[2]) }); } return; }
       case 'IFCOWNERHISTORY': { const a = parseArgs(argText); const when = typeof a[4] === 'number' && a[4] > 0 ? a[4] : typeof a[7] === 'number' && a[7] > 0 ? a[7] : undefined; ownerHist.set(id, { user: ref(a[0]), app: ref(a[1]), action: strOf(a[3]) || undefined, when }); return; }
       case 'IFCPERSONANDORGANIZATION': { const a = parseArgs(argText); personOrg.set(id, { person: ref(a[0]), org: ref(a[1]) }); return; }
       case 'IFCPERSON': { const a = parseArgs(argText); person.set(id, [strOf(a[2]), strOf(a[1])].filter(Boolean).join(' ') || strOf(a[0])); return; }
@@ -260,19 +275,22 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
   for (const rel of relGroup) { const nm = groupName.get(rel.relating); if (!nm) continue; for (const t of rel.targets) if (!systemOf.has(t)) systemOf.set(t, nm); }
   const propsOf = new Map<number, Record<string, string | number | boolean>>();
   const authoredOf = new Map<number, Record<string, number>>();
+  const quantityInfoOf = new Map<number, NonNullable<IfcElement['quantityInfo']>>(), measuresOf = new Map<number, NonNullable<IfcElement['measures']>>();
+  const unitOf = (u: number | undefined) => (u != null ? unitLabel.get(u)?.label : undefined);
   for (const rel of relProps) {
     const ps = psets.get(rel.relating);
     if (ps) {
-      const pmap: Record<string, string | number | boolean> = {};
-      for (const pid of ps.props) { const pv = propValue.get(pid); if (pv && pv[0]) pmap[`${ps.name}.${pv[0]}`] = pv[1]; }
+      const pmap: Record<string, string | number | boolean> = {}, mmap: NonNullable<IfcElement['measures']> = {};
+      for (const pid of ps.props) { const pv = propValue.get(pid); if (pv && pv[0]) { pmap[`${ps.name}.${pv[0]}`] = pv[1]; const m = propMeasure.get(pid); if (m) mmap[`${ps.name}.${pv[0]}`] = { kind: m.kind, ...(unitOf(m.unit) ? { unit: unitOf(m.unit) } : {}) }; } }
       if (Object.keys(pmap).length) for (const t of rel.targets) propsOf.set(t, { ...(propsOf.get(t) ?? {}), ...pmap });
+      if (Object.keys(mmap).length) for (const t of rel.targets) measuresOf.set(t, { ...(measuresOf.get(t) ?? {}), ...mmap });
       continue;
     }
     const qs = quantSets.get(rel.relating);
     if (qs) {
-      const qmap: Record<string, number> = {};
-      for (const qid of qs) { const qv = quantValue.get(qid); if (qv && qv[0]) qmap[qv[0]] = qv[1]; }
-      if (Object.keys(qmap).length) for (const t of rel.targets) authoredOf.set(t, { ...(authoredOf.get(t) ?? {}), ...qmap });
+      const qmap: Record<string, number> = {}, imap: NonNullable<IfcElement['quantityInfo']> = {}, set = quantSetName.get(rel.relating) ?? 'Quantities';
+      for (const qid of qs) { const qv = quantValue.get(qid); if (qv && qv[0]) { qmap[qv[0]] = qv[1]; const m = quantMeta.get(qid)!; imap[qv[0]] = { kind: m.kind, set, ...(unitOf(m.unit) ? { unit: unitOf(m.unit) } : {}) }; } }
+      if (Object.keys(qmap).length) for (const t of rel.targets) { authoredOf.set(t, { ...(authoredOf.get(t) ?? {}), ...qmap }); quantityInfoOf.set(t, { ...(quantityInfoOf.get(t) ?? {}), ...imap }); }
     }
   }
   const ownerCache = new Map<number, IfcOwner | undefined>();
@@ -308,16 +326,19 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
       ...(mat ? { material: mat } : {}), ...(tn ? { typeName: tn } : {}), ...(sys ? { system: sys } : {}),
       discipline: disciplineOf(p.cls, props, sys),
       authored: authoredOf.get(p.id) ?? {}, props, psetHash, geom: null, derivedVolumeM3: null,
+      ...(quantityInfoOf.has(p.id) ? { quantityInfo: quantityInfoOf.get(p.id) } : {}), ...(measuresOf.has(p.id) ? { measures: measuresOf.get(p.id) } : {}),
       ...(owner ? { owner } : {}),
     });
     productMap.set(p.id, { guid: p.guid, ifcClass: p.cls });
   }
+  const units: Record<QuantityKind, string> = { ...DEFAULT_UNITS };
   { const assigned = (projectUnits != null ? unitAssignments.get(projectUnits) : undefined) ?? [...unitAssignments.values()][0] ?? [];
     const u = assigned.find((x) => lengthUnits.has(x));
-    if (u != null) { lengthScale = lengthUnits.get(u)!; lengthScaleSource = 'unit-assignment'; } }
+    if (u != null) { lengthScale = lengthUnits.get(u)!; lengthScaleSource = 'unit-assignment'; }
+    for (const x of assigned) { const l = unitLabel.get(x); if (l?.kind) units[l.kind] = l.label; } }
   const index: IfcIndex = {
     sourcePath: absIfcPath, schema, lengthScale, lengthScaleSource, elements, storeys, classCounts,
-    geometryFailures: 0, quantifiedElements: elements.filter((e) => Object.keys(e.authored).length > 0).length,
+    geometryFailures: 0, quantifiedElements: elements.filter((e) => Object.keys(e.authored).length > 0).length, units,
     header, parsedAt: new Date().toISOString(),
   };
   return { index, products: productMap };

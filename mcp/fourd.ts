@@ -10,6 +10,7 @@ import { attachModel, elementValue, export4dState, import4dState, linkByRules, l
 import { ifc4dText, items4d, linksCsv, README, searchSetsXml, tagIfc, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
 import { countMemory, fail, pathArg, reserveMemory, sessions, type Session } from './runtime.ts';
 import type { AnalysisHelpers } from './analysis.ts';
+import type { QuantityKind } from '../core/bim/parse.ts';
 import { nextId } from '../core/db.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { compareAt, criticalChanges, simulate, sourceTasks, viewerTimeline } from '../core/bim/sim4d.ts';
@@ -32,7 +33,7 @@ export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<s
   { name: 'open_model', annotations: edit, description: 'Attach an IFC model to the project (4D). Parses it once (cached by content; geometry in a separate process, so a huge model cannot take the server down) and answers schema, element count, storeys, classes, units, geometry status and warnings. One model per project; a new one replaces it and keeps the links whose elements are still there. geometry: false is faster (no 3D view or derived volumes). Large models: pass async: true.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, geometry: { type: 'boolean' } }, required: ['path'] }) },
   { name: 'list_elements', annotations: ro, description: 'Model elements with GlobalId, class, storey, name, type, material and the activities linked to each. Filters: storey, class (prefix, e.g. IfcWall), where [{property, op: = | != | contains | like (* and ?), value}] (property: name, type, material, class, storey, system, or "Pset.Prop"), linked: true | false | <Activity ID>. fields adds properties. Paged by limit (default 200, at most 1000) and offset.', inputSchema: withHandle({ type: 'object', properties: { project, storey: { type: 'string' }, class: { type: 'string' }, where: { type: 'array', items: { type: 'object' } }, linked: {}, fields: { type: 'array', items: { type: 'string' } }, limit: { type: 'number' }, offset: { type: 'number' } } }) },
   { name: 'element_info', annotations: ro, description: 'Every property, authored quantity, owner stamp and geometry fingerprint of the given elements (up to 200 GlobalIds), and their links.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } } }, required: ['guids'] }) },
-  { name: 'quantities', annotations: ro, description: 'Quantities from the model, grouped by class, storey, class+storey, material, activity or wbs: element count, derived volume (m³, from the geometry) and every authored quantity summed (IfcElementQuantity: NetVolume, NetArea, Length, ...). Grouped by activity it feeds productivity and duration checks against the BOQ.', inputSchema: withHandle({ type: 'object', properties: { project, group_by: { type: 'string' }, classes: { type: 'array', items: { type: 'string' } }, storeys: { type: 'array', items: { type: 'string' } } } }) },
+  { name: 'quantities', annotations: ro, description: 'Quantities from the model, grouped by class, storey, class+storey, material, activity or wbs: element count, derived volume (m³, from the geometry) and every authored quantity summed (IfcElementQuantity: NetVolume, NetArea, Length, ...). Grouped by activity it feeds productivity and duration checks against the BOQ. Per group also: figures (each total with its kind, unit, how many elements carry it and its source: base_quantity = an IfcElementQuantity, with its set; geometry = derived from the shape; property_set = a property typed as a measure), and for the asked kind (volume default; area, length, count, weight, time) how many elements are quantified and how many have no figure of that kind at all (unquantified).', inputSchema: withHandle({ type: 'object', properties: { project, group_by: { type: 'string' }, kind: { type: 'string', enum: ['volume', 'area', 'length', 'count', 'weight', 'time'] }, classes: { type: 'array', items: { type: 'string' } }, storeys: { type: 'array', items: { type: 'string' } } } }) },
   { name: 'link_elements', annotations: edit, description: 'Link model elements to activities: links [{activity, guids, role?: built (default) | removed | temporary, profile?}]. mode add (default), replace (the activity’s links of that role), remove (the named pairs; every link of the activity when guids is empty). An element may belong to several activities (formwork, concrete, finishes). Every ID is checked and unknown ones are listed. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, links: { type: 'array', items: { type: 'object' } }, mode: { type: 'string' } }, required: ['links'] }) },
   { name: 'link_by_rules', annotations: edit, description: 'Link by rules (Navisworks Auto-Attach, SYNCHRO Auto-Matching). Rules: {type: property, property: <element property: name, type, material, class, storey, "Pset.Prop">, equals: activity_id | name | 4d_key | wbs | code:<code type> | udf:<UDF>}; {type: scope, activity, storey?, class?, name? (wildcards)}; {type: set_name, equals?: name} (selection sets imported with import_4d, named after activities). Each may set role. dry_run: true answers what each rule would link, conflicts and what stays unlinked, without changing anything; run it first. Applied rules are kept with the project.', inputSchema: withHandle({ type: 'object', properties: { project, rules: { type: 'array', items: { type: 'object' } }, dry_run: { type: 'boolean' } }, required: ['rules'] }) },
   { name: 'link_status', annotations: ro, description: 'Gaps in the 4D links: elements no activity builds (by class and storey), task activities with no elements, elements on several activities, links to elements no longer in the model.', inputSchema: withHandle({ type: 'object', properties: { project } }) },
@@ -127,14 +128,43 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         }
       };
       const cls = (a.classes as string[] | undefined)?.map((c) => c.toLowerCase()), sts = (a.storeys as string[] | undefined)?.map((c) => c.toLowerCase());
-      const groups = new Map<string, { count: number; volume_m3: number; authored: Record<string, number> }>();
+      const kind = String(a.kind ?? 'volume') as QuantityKind;
+      if (!['volume', 'area', 'length', 'count', 'weight', 'time'].includes(kind)) fail('bad_input', `Unknown kind "${a.kind}".`, 'Use volume, area, length, count, weight or time.');
+      const units: Record<string, string> = { length: 'm', area: 'm²', volume: 'm³', count: 'no.', weight: 'kg', time: 's', ...m.index.units };
+      type One = { name: string; kind: QuantityKind; source: 'base_quantity' | 'geometry' | 'property_set'; unit: string; value: number; set?: string };
+      type Fig = One & { sets: Set<string>; elements: number };
+      /** An element's figures: its derived volume, its authored quantities, its properties typed as measures. */
+      const figuresOf = (e: Model['index']['elements'][number]): One[] => [
+        ...(e.derivedVolumeM3 ? [{ name: 'derived volume', kind: 'volume' as const, source: 'geometry' as const, unit: 'm³', value: e.derivedVolumeM3 }] : []),
+        ...Object.entries(e.authored).map(([q, v]) => { const i = e.quantityInfo?.[q]; const k = i?.kind ?? 'volume'; return { name: q, kind: k, source: 'base_quantity' as const, set: i?.set, unit: i?.unit ?? units[k], value: v }; }),
+        ...Object.entries(e.measures ?? {}).filter(([p]) => typeof e.props[p] === 'number').map(([p, mm]) => ({ name: p, kind: mm.kind, source: 'property_set' as const, unit: mm.unit ?? units[mm.kind], value: e.props[p] as number })),
+      ];
+      const groups = new Map<string, { count: number; volume_m3: number; authored: Record<string, number>; unquantified: number; figures: Map<string, Fig> }>();
       for (const e of m.index.elements) {
         if (cls && !cls.some((c) => e.ifcClass.toLowerCase().startsWith(c))) continue;
         if (sts && !sts.includes(e.storey.toLowerCase())) continue;
-        for (const k of keyOf(e)) { const g = groups.get(k) ?? groups.set(k, { count: 0, volume_m3: 0, authored: {} }).get(k)!; g.count++; g.volume_m3 += e.derivedVolumeM3 ?? 0; for (const [q, v] of Object.entries(e.authored)) g.authored[q] = (g.authored[q] ?? 0) + v; }
+        const figs = figuresOf(e), has = figs.some((f) => f.kind === kind && f.value > 0);
+        for (const k of keyOf(e)) {
+          const g = groups.get(k) ?? groups.set(k, { count: 0, volume_m3: 0, authored: {}, unquantified: 0, figures: new Map() }).get(k)!;
+          g.count++; g.volume_m3 += e.derivedVolumeM3 ?? 0; if (!has) g.unquantified++;
+          for (const [q, v] of Object.entries(e.authored)) g.authored[q] = (g.authored[q] ?? 0) + v;
+          for (const f of figs) {
+            const fk = `${f.source}|${f.name}|${f.unit}`, x = g.figures.get(fk) ?? g.figures.set(fk, { ...f, sets: new Set(), value: 0, elements: 0 }).get(fk)!;
+            x.value += f.value; x.elements++; if (f.set) x.sets.add(f.set);
+          }
+        }
       }
       const r2 = (v: number) => Math.round(v * 1000) / 1000;
-      return { group_by: by, geometry: m.index.geometryStatus, groups: [...groups].sort((x, y) => y[1].count - x[1].count).map(([k, g]) => ({ group: k, count: g.count, volume_m3: r2(g.volume_m3), authored: Object.fromEntries(Object.entries(g.authored).map(([q, v]) => [q, r2(v)])) })) };
+      const SRC = { geometry: 0, base_quantity: 1, property_set: 2 };
+      return {
+        group_by: by, geometry: m.index.geometryStatus, kind, units,
+        groups: [...groups].sort((x, y) => y[1].count - x[1].count).map(([k, g]) => ({
+          group: k, count: g.count, volume_m3: r2(g.volume_m3), authored: Object.fromEntries(Object.entries(g.authored).map(([q, v]) => [q, r2(v)])),
+          quantified: g.count - g.unquantified, unquantified: g.unquantified,
+          figures: [...g.figures.values()].sort((x, y) => (x.kind === kind ? 0 : 1) - (y.kind === kind ? 0 : 1) || SRC[x.source] - SRC[y.source] || x.name.localeCompare(y.name))
+            .map((f) => ({ name: f.name, kind: f.kind, value: r2(f.value), unit: f.unit, source: f.source, ...(f.sets.size ? { set: [...f.sets].join(', ') } : {}), elements: f.elements })),
+        })),
+      };
     }
     case 'link_elements': {
       const m = await modelOf(s.db, projId, false);

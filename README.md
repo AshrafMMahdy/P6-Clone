@@ -307,7 +307,9 @@ the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as
 
 **4D** (an IFC model linked to the schedule; see `docs/4d-extension-plan.md` and `docs/4d-switch-over.md`): `open_model`
 (IFC2X3 / IFC4, cached by content; geometry in a child process with web-ifc, which ships in `ifc/` beside the bundle),
-`list_elements`, `element_info`, `quantities`, `link_elements` (built / removed / temporary), `link_by_rules`
+`list_elements`, `element_info`, `quantities` (per group: totals, and for the asked `kind` the elements quantified and
+unquantified; each figure with its kind, unit and source: base quantity and its set, geometry, or property set),
+`link_elements` (built / removed / temporary), `link_by_rules`
 (property, scope and selection-set rules, `dry_run` first), `link_status`, `set_4d_keys`, `export_4d` (Navisworks
 search sets + TimeLiner CSV, SYNCHRO, IFC4 4D in the Bonsai style, links CSV), `import_4d` (IFC 4D, Navisworks search
 sets, TimeLiner CSV / xlsx, the TimeLiner inside .nwf / .nwd, SYNCHRO .sp 5.1-6.5, read without those programs),
