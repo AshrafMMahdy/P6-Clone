@@ -327,7 +327,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       let note: string | undefined;
       // MP4 everywhere: a browser without an H.264 encoder (Chromium for Testing) records WebM, which ffmpeg turns into MP4
       if (format === 'mp4' && !v.mime.includes('mp4')) {
-        await h.tick(1, 1, 'converting the WebM to MP4');
+        if (ffmpegPath()) await h.tick(1, 1, 'converting the WebM to MP4'); // without ffmpeg there is nothing to convert with
         const mp4 = await webmToMp4(v.bytes).catch((e) => { note = `The WebM could not be converted: ${(e as Error).message}`; return null; });
         if (mp4) v = { mime: 'video/mp4', frames: v.frames, bytes: mp4 };
         else note ??= ffmpegPath() ? undefined : 'This Chromium has no H.264 encoder and the server has no ffmpeg (P6CLONE_FFMPEG), so the video is WebM. Set P6CLONE_FFMPEG for MP4.';
