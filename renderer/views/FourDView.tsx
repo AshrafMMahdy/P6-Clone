@@ -122,7 +122,8 @@ export function FourDPanel() {
     const imp = await window.p6.bimReadImport().catch((e: Error) => (toast(`Not read: ${e.message}`), null));
     if (!imp) return;
     const plan = planImport(getDb(), projId, imp, m?.index ?? null, { createActivities: true });
-    const n = plan.proposals.reduce((k, p) => k + p.guids.length, 0) + [...plan.forNew.values()].reduce((k, g) => k + g.length, 0);
+    const setSize = new Map(plan.sets.map((s) => [s.name.toLowerCase(), s.guids.length]));
+    const n = plan.proposals.reduce((k, p) => k + p.guids.length, 0) + [...plan.forNew.values()].reduce((k, g) => k + g.length, 0) + plan.toCreate.reduce((k, t) => k + (setSize.get((t.attached ?? t.name).trim().toLowerCase()) ?? 0), 0);
     const msg = `${imp.source}: ${imp.tasks.length} tasks, ${n} element links${plan.toCreate.length ? `, ${plan.toCreate.length} new activities` : ''}${plan.unmatchedTasks.length && !plan.toCreate.length ? `, ${plan.unmatchedTasks.length} tasks match no activity` : ''}${plan.sets.length ? `, ${plan.sets.length} selection sets` : ''}.${imp.notes.length ? `\n\n${imp.notes.slice(0, 5).join('\n')}` : ''}\n\nImport?`;
     if (!confirm(msg)) return;
     let r: unknown;

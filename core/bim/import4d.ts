@@ -10,7 +10,10 @@ import { linkElements, t4d, T4D } from './link4d.ts';
 import { resolveSet, type Imported4d } from './exchange4d.ts';
 import type { IfcIndex } from './parse.ts';
 
-export interface ImportPlan { /** activities a task of the file matched, linked or not */ matched: Set<string>; proposals: { activity: string; guids: string[] }[]; forNew: Map<string, string[]>; unmatchedTasks: string[]; elementsNotInModel: number; sets: { name: string; guids: string[] }[]; toCreate: Imported4d['tasks']; attachedSets: { name: string; known: boolean }[] }
+export interface ImportPlan { /** activities a task of the file matched, linked or not */ matched: Set<string>; proposals: { activity: string; guids: string[]; role?: 'removed' | 'temporary' }[]; forNew: Map<string, string[]>; unmatchedTasks: string[]; elementsNotInModel: number; sets: { name: string; guids: string[] }[]; toCreate: Imported4d['tasks']; attachedSets: { name: string; known: boolean }[] }
+
+/** TimeLiner's task types as link roles (Construct: built, the default) */
+const roleOf = (type?: string) => (/^demolish$/i.test(type ?? '') ? { role: 'removed' as const } : /^temporary$/i.test(type ?? '') ? { role: 'temporary' as const } : {});
 
 export function planImport(db: Db, projId: string, imp: Imported4d, ix: IfcIndex | null, o: { createActivities?: boolean } = {}): ImportPlan {
   const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf', creatable = tasksOnly || imp.source === 'synchro';
@@ -29,7 +32,7 @@ export function planImport(db: Db, projId: string, imp: Imported4d, ix: IfcIndex
     plan.matched.add(t.task_code);
     if (guids.length) plan.proposals.push({ activity: t.task_code, guids });
   }
-  plan.sets = (imp.sets ?? []).map((st) => ({ name: st.name, guids: ix ? resolveSet(ix, st) : [] }));
+  plan.sets = (imp.sets ?? []).map((st) => ({ name: st.name, guids: st.guids ?? (ix ? resolveSet(ix, st) : []) }));
   const known = new Map([...rows(db, T4D.set).filter((r) => r.proj_id === projId).map((r) => [r.name.toLowerCase(), JSON.parse(r.guids || '[]') as string[]] as const), ...plan.sets.map((s) => [s.name.toLowerCase(), s.guids] as const)]);
   if (creatable) {
     for (const t of imp.tasks) {
@@ -38,7 +41,7 @@ export function planImport(db: Db, projId: string, imp: Imported4d, ix: IfcIndex
       plan.matched.add(a.task_code);
       // the attached set, else a set named like the task (TimeLiner's "Attach Selection Sets to Tasks by Task Name")
       const g = t.attached ? known.get(t.attached.toLowerCase()) : known.get(t.name.trim().toLowerCase());
-      if (g?.length) plan.proposals.push({ activity: a.task_code, guids: g });
+      if (g?.length) plan.proposals.push({ activity: a.task_code, guids: g, ...roleOf(t.type) });
     }
   }
   if (tasksOnly) {
@@ -70,7 +73,7 @@ export function applyImport(db: Db, projId: string, plan: ImportPlan, ix: IfcInd
       const days = st != null && fi != null ? Math.max(0, Math.round((cal.workBetween(st, fi) / 60 / hpd) * 10) / 10) : 1;
       created.push({ id, name: t.name || t.id });
       const g = [...((t.attached ? known.get(t.attached.toLowerCase()) : known.get(t.name.trim().toLowerCase())) ?? []), ...(plan.forNew.get(t.id) ?? [])];
-      if (g.length) proposals.push({ activity: id, guids: g });
+      if (g.length) proposals.push({ activity: id, guids: g, ...roleOf(t.type) });
       return { op: 'add_activity', id, name: t.name || t.id, duration_days: days, project: proj.proj_short_name, ...(t.start ? { constraint: { type: 'start_on_or_after', date: t.start } } : {}) };
     });
     const r = applyOps(db, ops, { hoursPerDay: o.hoursPerDay, calendarDays: o.calendarDays });

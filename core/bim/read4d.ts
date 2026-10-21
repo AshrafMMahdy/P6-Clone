@@ -1,6 +1,5 @@
 // Reading another tool's 4D file into the import format (Node only: the MCP server and the desktop main process).
 import { parseIfc4d, parseSearchSets, parseTimelinerCsv, sheetToCsv, type Imported4d } from './exchange4d.ts';
-import { readNwfTimeliner } from './nwf.ts';
 import type { SynchroFile } from './synchro.ts';
 import { readXlsx } from '../excel/xlsx.ts';
 
@@ -8,12 +7,33 @@ import { readXlsx } from '../excel/xlsx.ts';
  *  XML, a TimeLiner grid in .xlsx, else a TimeLiner CSV. */
 export async function readImport4d(path: string, bytes: Uint8Array): Promise<Imported4d> {
   const head = Buffer.from(bytes.subarray(0, 2000)).toString('latin1');
-  if (head.startsWith('#LcUStream')) { const n = readNwfTimeliner(bytes); return { source: 'nwf', tasks: n.tasks.map((t) => ({ name: t.name, id: t.name, start: t.plannedStart ?? undefined, finish: t.plannedFinish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined, type: t.type, attached: t.attached[0] })), links: [], notes: n.notes }; }
+  if (head.startsWith('#LcUStream')) return navisworksToImport(path);
   if (/\.sp$/i.test(path)) { const { readSynchro } = await import('./synchro.ts'); return synchroToImport(readSynchro(bytes)); }
   if (/^ISO-10303-21/m.test(head.slice(0, 200))) return parseIfc4d(Buffer.from(bytes).toString('latin1'));
   if (/<exchange\b/.test(head) || /<exchange\b/.test(xmlText(bytes.subarray(0, 4000)))) return parseSearchSets(xmlText(bytes));
   if (/\.xlsx$/i.test(path)) return parseTimelinerCsv(sheetToCsv((await readXlsx(bytes))[0]?.rows ?? []));
   return parseTimelinerCsv(Buffer.from(bytes).toString('utf8'));
+}
+
+/** A Navisworks TimeLiner as the import format: the tasks (planned dates as the schedule, actual dates kept), each
+ *  attached to its selection set, or to a set made for it ("TimeLiner: <task>") when it has an explicit selection or
+ *  several sets; the sets as the GlobalIds of the elements they select. */
+export async function navisworksToImport(path: string): Promise<Imported4d> {
+  const { readNavisworksTimeliner } = await import('./nwd.ts');
+  const n = readNavisworksTimeliner(path);
+  const sets = new Map(n.sets.map((s) => [s.name, s.guids] as const)), made: NonNullable<Imported4d['sets']> = [];
+  const tasks = n.tasks.map((t, i) => {
+    let attached: string | undefined = t.sets[0];
+    if (t.items.length || t.sets.length > 1) {
+      let name = `TimeLiner: ${t.name}`;
+      for (let k = 2; sets.has(name) || made.some((m) => m.name === name); k++) name = `TimeLiner: ${t.name} (${k})`;
+      made.push({ name, conditions: [], guids: [...new Set([...(n.taskGuids[i] ?? []), ...t.sets.flatMap((s) => sets.get(s) ?? [])])] });
+      attached = name;
+    }
+    return { name: t.name, id: t.name, start: t.plannedStart ?? undefined, finish: t.plannedFinish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined, type: t.type, attached };
+  });
+  const resolved = n.sets.filter((s): s is { name: string; guids: string[] } => s.guids !== null).map((s) => ({ name: s.name, conditions: [], guids: s.guids }));
+  return { source: 'nwf', tasks, links: [], sets: [...resolved, ...made], notes: n.notes };
 }
 
 /** XML text by its byte-order mark, else the encoding its declaration names, else UTF-8 (what Navisworks and the

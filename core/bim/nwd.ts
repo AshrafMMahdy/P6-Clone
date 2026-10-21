@@ -6,11 +6,12 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
 import { readContainer, section, type NwContainer } from './nwd/container.ts';
-import { decodeTree, type NwGroup } from './nwd/tree.ts';
+import { decodeTree, type NwGroup, type NwNode, type NwTree } from './nwd/tree.ts';
 import { elementsOf, type NwElement } from './nwd/elements.ts';
-import { compressGuid, toIfc } from './nwd/toIfc.ts';
+import { compressGuid, globalIdOf, toIfc } from './nwd/toIfc.ts';
 import { elementShapes } from './nwd/geometry.ts';
 import { decodeBlock, geometryBlocks, type Mesh } from './nwd/mesh.ts';
+import { decodePathMap, decodeSets, decodeTimeliner, type NwPathComponent, type NwTask } from './nwd/timeliner.ts';
 
 const NWD_FORMAT = 5; // the conversion: any change to the reader bumps it (2: the Revit data in LcOaPartitionProps; 3: placed boxes; 4-5: meshes), so old conversions are not reused
 const HEAD = '#LcUStream';
@@ -42,7 +43,7 @@ function guidStore(c: NwContainer, max: number): string[] {
 }
 
 /** The elements of one .nwd / .nwc. */
-function readOne(path: string, max: number): { elements: NwElement[]; revision: number; units?: string } {
+function readOne(path: string, max: number, o: { shapes?: boolean } = {}): { elements: NwElement[]; revision: number; units?: string; tree?: NwTree } {
   const c = readContainer(new Uint8Array(readFileSync(path)));
   const lh = section(c, 'LcOpNwdLogicalHierarchy', max);
   if (!lh) return { elements: [], revision: c.revision };
@@ -51,7 +52,7 @@ function readOne(path: string, max: number): { elements: NwElement[]; revision: 
   const tree = decodeTree(lh);
   const elements = elementsOf(tree, guidStore(c, max), basename(path), external);
   // geometry: each element's pieces as placed boxes, in metres (Revit exports keep Revit's feet; others are taken as metres)
-  const fr = section(c, 'LcOpNwdFragments', max);
+  const fr = o.shapes === false ? null : section(c, 'LcOpNwdFragments', max);
   const revit = elements.some((e) => e.revitId !== null || /^LcRevit/.test(e.node?.attr?.internal ?? ''));
   if (fr) {
     const scale = revit ? 0.3048 : 1;
@@ -67,7 +68,7 @@ function readOne(path: string, max: number): { elements: NwElement[]; revision: 
       elements[i].shape = { positions: s.positions.map((x) => x * scale), triangles: s.triangles, boxes: s.boxes };
     }
   }
-  return { elements, revision: c.revision, units: revit ? 'feet (Revit)' : 'metres (taken as such: the file names no unit)' };
+  return { elements, revision: c.revision, units: revit ? 'feet (Revit)' : 'metres (taken as such: the file names no unit)', tree };
 }
 
 /** The files an .nwf lists (XRefTable), found beside it by name, else where it says. */
@@ -126,4 +127,79 @@ export async function nwdToIfc(path: string): Promise<{ ifc: string; source: Nav
     put(`${base}.json`, JSON.stringify(source));
   }
   return { ifc: `${base}.ifc`, source: JSON.parse(readFileSync(`${base}.json`, 'utf8')) };
+}
+
+export interface NavisworksTimeliner {
+  tasks: NwTask[];
+  /** each task's explicit selection as GlobalIds (null: not resolved) */
+  taskGuids: (string[] | null)[];
+  /** the selection sets as GlobalIds (null: a search set, or a set whose model was not read) */
+  sets: { name: string; guids: string[] | null }[];
+  notes: string[];
+}
+
+/** The items of a model in tree pre-order (the file is 0) and the GlobalIds of the elements an item selects: the
+ *  element it is part of and every element below it. */
+function itemsOf(tree: NwTree, elements: NwElement[]) {
+  const el = new Map(elements.map((e, i) => [e.node!, i])), nodes: (NwNode | null)[] = [null], own = [-1], end: number[] = [];
+  const at = new Map<NwNode, number>();
+  const walk = (n: NwNode, e: number) => { const k = nodes.length, o = el.get(n) ?? e; nodes.push(n); at.set(n, k); own[k] = o; for (const c of n.children) walk(c, o); end[k] = nodes.length; };
+  for (const r of tree.roots) walk(r, -1);
+  end[0] = nodes.length;
+  const guids = (k: number): string[] | null => {
+    if (!Number.isInteger(k) || k < 0 || k >= nodes.length) return null;
+    const pick = new Set<number>(own[k] >= 0 ? [own[k]] : []);
+    for (let j = k; j < end[k]; j++) { const i = el.get(nodes[j]!); if (i !== undefined) pick.add(i); }
+    return [...pick].map((i) => globalIdOf(elements[i]));
+  };
+  return { guids, at };
+}
+
+/** The TimeLiner of a Navisworks file: its tasks, and each task's selection and each selection set as the GlobalIds
+ *  the file's model carries once opened (an .nwf's selections name items by path in the models it lists). */
+export function readNavisworksTimeliner(path: string, o: { maxBytes?: number } = {}): NavisworksTimeliner {
+  const max = o.maxBytes ?? 2048 * 1048576, notes: string[] = [];
+  const c = readContainer(new Uint8Array(readFileSync(path)));
+  const tl = section(c, 'LcTlTimelinerElement', max), ss = section(c, 'LcOpSelectionSetsElement', max);
+  const tasks = tl ? decodeTimeliner(tl) : [], rawSets = ss ? decodeSets(ss) : [];
+  if (!tasks.length) notes.push(tl ? 'The TimeLiner has no tasks the reader could read.' : 'The file has no TimeLiner.');
+  const nwf = /\.nwf$/i.test(path);
+  const models: { file: string; items: ReturnType<typeof itemsOf>; tree: NwTree }[] = [];
+  const needed = rawSets.some((s) => s.items?.length) || tasks.some((t) => t.items.length);
+  if (needed) {
+    for (const p of nwf ? listed(path, max) : [{ file: basename(path), at: path }]) {
+      if (!p.at) { notes.push(`${p.file}: not found beside the .nwf or at its saved path, so its selections are not resolved.`); continue; }
+      try { const r = readOne(p.at, max, { shapes: false }); if (r.tree) models.push({ file: p.file, items: itemsOf(r.tree, r.elements), tree: r.tree }); } catch (e) { notes.push(`${p.file}: ${(e as Error).message}`); }
+    }
+  }
+  // an .nwf: item k is path-map component k - 1, found by position and name from a model's root
+  const comps: NwPathComponent[] = nwf ? decodePathMap(section(c, 'LcOpNwfPathMap', max) ?? new Uint8Array()) : [];
+  const nodeOf = (k: number, tree: NwTree): NwNode | null => {
+    const chain: NwPathComponent[] = [];
+    for (let i = k - 1, n = 0; i >= 0 && n < 100; i = comps[i].parent, n++) { if (!comps[i]) return null; chain.unshift(comps[i]); if (comps[i].parent < 0) break; }
+    let level = tree.roots, node: NwNode | null = null;
+    for (const p of chain) {
+      node = level[p.position]?.name === p.name ? level[p.position] : level.find((x) => x.name === p.name && (x.attr?.display ?? null) === p.attr) ?? null;
+      if (!node) return null;
+      level = node.children;
+    }
+    return node;
+  };
+  const resolve = (refs: number[]): string[] | null => {
+    if (!models.length) return null;
+    const out = new Set<string>();
+    let missed = 0;
+    for (const k of refs) {
+      let g: string[] | null = null;
+      if (!nwf) g = models[0].items.guids(k);
+      else for (const m of models) { const n = nodeOf(k, m.tree); if (n) { g = m.items.guids(m.items.at.get(n)!); break; } }
+      if (g) g.forEach((x) => out.add(x)); else missed++;
+    }
+    if (missed) notes.push(`${missed} selected item(s) were not found in the model.`);
+    return [...out];
+  };
+  const sets = rawSets.map((s) => ({ name: s.name, guids: s.items ? resolve(s.items) : null }));
+  const search = rawSets.filter((s) => !s.items).map((s) => s.name);
+  if (search.length) notes.push(`${search.length} search set(s) are named but their conditions are not read: ${search.slice(0, 10).join(', ')}${search.length > 10 ? '…' : ''}.`);
+  return { tasks, taskGuids: tasks.map((t) => (t.items.length ? resolve(t.items) : null)), sets, notes };
 }

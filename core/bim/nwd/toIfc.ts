@@ -12,6 +12,8 @@ export function compressGuid(bytes: Uint8Array): string {
   return s;
 }
 const madeGuid = (seed: string) => compressGuid(createHash('sha1').update(seed).digest().subarray(0, 16));
+/** The GlobalId an element gets: Revit's own, else one made from its place in the file */
+export const globalIdOf = (e: NwElement) => e.guid ?? madeGuid(e.key);
 
 // Revit category -> IFC4 class (args: 9 for most building elements, 13 for doors and windows)
 const CLASS: Record<string, string> = {
@@ -65,7 +67,7 @@ export function toIfc(elements: NwElement[], o: { name: string; file: string }):
   };
   const inStorey = new Map<number, number[]>(), byType = new Map<string, { cls: string; members: number[] }>(), byMaterial = new Map<string, number[]>();
   for (const e of elements) {
-    const guid = e.guid ?? madeGuid(e.key);
+    const guid = globalIdOf(e);
     const cls = (e.category && CLASS[e.category]) || 'IfcBuildingElementProxy';
     const pl = place(storeyId.get(storeyOf(e)) ? undefined : bPl);
     const tail = THIRTEEN.has(cls) ? '$,$,$,$,$' : '$'; // after Tag: PredefinedType (doors and windows: height, width, type, operation, user operation)

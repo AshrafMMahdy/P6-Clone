@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readNavisworks } from '../core/bim/nwd.ts';
+import { readNavisworks, readNavisworksTimeliner } from '../core/bim/nwd.ts';
+import { decodePathMap, decodeSets, decodeTimeliner } from '../core/bim/nwd/timeliner.ts';
 
 const FIX = join(import.meta.dirname, 'fixtures', 'navisworks');
 /** an element's placed vertices, as [x, y, z] */
@@ -161,5 +162,75 @@ test('the user\u2019s 2016 villa NWC: every element\u2019s mesh volume is the on
     }
   }
   assert.equal(checked, 325);
+  await call('close', { handle: o.d.handle, owner_key: o.d.owner_key, discard: true });
+});
+
+// ── TimeLiner and selection sets ───────────────────────────────────────────────────────────────────────────────
+/** Bytes laid out as Navisworks writes them: u32, strings padded to 4, 64-bit values aligned to 8 in the section */
+type Part = ['u32', number] | ['str', string | null] | ['i64', number] | ['raw', number];
+function bytes(parts: Part[]): Uint8Array {
+  const out: number[] = [];
+  const u32 = (x: number) => { out.push(x & 255, (x >>> 8) & 255, (x >>> 16) & 255, (x >>> 24) & 255); };
+  for (const [k, v] of parts) {
+    if (k === 'u32') u32(v as number);
+    else if (k === 'str') { if (v === null) { u32(0xffffffff); continue; } const b = Buffer.from(v as string); u32(b.length); out.push(...b); while (out.length % 4) out.push(0); }
+    else if (k === 'i64') { while (out.length % 8) out.push(0); const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v as number)); out.push(...b); }
+    else for (let i = 0; i < (v as number); i++) out.push(0);
+  }
+  return Uint8Array.from(out);
+}
+const unix = (s: string) => Date.parse(`${s.replace(' ', 'T')}:00Z`) / 1000;
+
+test('TimeLiner tasks, selection sets and an .nwf path map, decoded from their layout', () => {
+  const empty: Part[] = Array.from({ length: 6 }, () => ['str', ''] as Part);
+  const tasks = decodeTimeliner(bytes([['u32', 1], ['u32', 0x3d], ['str', 'Strip walls'], ...empty, ['u32', 1], ['str', null], ['str', null],
+    ['i64', unix('2026-03-02 08:00')], ['i64', unix('2026-03-05 17:00')], ['u32', 1], ['u32', 1], ['u32', 1], ['i64', unix('2026-03-01 08:00')], ['i64', 0], ['u32', 1], ['u32', 1], ['u32', 1],
+    ['str', 'Demolish'], ['str', null], ['u32', 1], ['u32', 0], ['u32', 2], ['u32', 7], ['u32', 9], ['u32', 1], ['str', 'lcop_selection_set_tree/Walls'], ['raw', 40]]));
+  assert.deepEqual(tasks, [{ name: 'Strip walls', actualStart: '2026-03-02 08:00', actualFinish: '2026-03-05 17:00', plannedStart: '2026-03-01 08:00', plannedFinish: null, type: 'Demolish', items: [7, 9], sets: ['Walls'] }]);
+  const sets = decodeSets(bytes([['u32', 2], ['u32', 5], ['str', 'Walls'], ['u32', 0], ['raw', 16], ['u32', 0], ['u32', 0], ['u32', 2], ['u32', 3], ['u32', 4], ['u32', 0xffffffff], ['i64', 0],
+    ['u32', 5], ['str', 'By category'], ['u32', 0], ['raw', 16], ['u32', 0], ['u32', 1], ['u32', 2], ['u32', 100]]));
+  assert.deepEqual(sets, [{ name: 'Walls', items: [3, 4] }, { name: 'By category', items: null }]);
+  const pm = decodePathMap(bytes([['u32', 2], ['u32', 0], ['u32', 1], ['u32', 0x5f], ['u32', 1], ['u32', 0x35], ['str', 'Level'], ['str', 'L1'], ['i64', 9], ['u32', 0xfffffffe],
+    ['u32', 0x57], ['u32', 0], ['u32', 0x35], ['str', 'Category'], ['str', 'Walls'], ['i64', 0], ['raw', 40],
+    ['u32', 0xfffffffe], ['u32', 0x57], ['u32', 1], ['u32', 0x35], ['str', 'Category'], ['str', 'Floors'], ['i64', 0], ['raw', 40]]));
+  assert.deepEqual(pm, [{ name: 'L1', attr: 'Level', position: 1, parent: -1 }, { name: 'Walls', attr: 'Category', position: 0, parent: 0 }, { name: 'Floors', attr: 'Category', position: 1, parent: 0 }]);
+});
+
+test('a file with no TimeLiner says so', () => {
+  const t = readNavisworksTimeliner(join(FIX, 'hello.nwc'));
+  assert.deepEqual([t.tasks, t.sets], [[], []]);
+  assert.match(t.notes.join(' '), /no TimeLiner/);
+});
+
+const VILLA_NWF = VILLA.replace(/\.nwc$/, '.nwf');
+test('the user’s 2016 villa TimeLiner (.nwf): the 12 tasks as its Excel grid has them, each set resolved through the path map to the NWC’s elements, imported and linked', { skip: !existsSync(VILLA_NWF) && 'the villa sample is not here', timeout: 300_000 }, async () => {
+  const o = await call('open_model', { path: VILLA_NWF });
+  const dry = (await call('import_4d', { handle: o.d.handle, path: VILLA_NWF, link: false, create_activities: true })).d;
+  assert.equal(dry.task_list.length, 12);
+  // task 11: an actual start never edited (the day the file was made), planned as scheduled
+  assert.deepEqual(dry.task_list[10], { name: 'Walls Construction', start: '2016-04-26 09:00', finish: '2016-05-10 17:00', actual_start: '2016-01-23 17:00', actual_finish: '2016-05-10 17:00', type: 'Construct', attached: 'Walls Construction', elements: 179 });
+  assert.deepEqual(dry.sets.map((x: any) => x.elements), [21, 74, 4, 22, 7, 7, 1, 1, 8, 4, 179, 6]);
+  const imp = (await call('import_4d', { handle: o.d.handle, owner_key: o.d.owner_key, path: VILLA_NWF, create_activities: true })).d;
+  assert.equal(imp.created_activities.length, 12);
+  assert.equal(imp.added, 334);
+  // "Ground floor slab" is path-map component 6: level RC Level ground, category Floors
+  const slab = (await call('list_elements', { handle: o.d.handle, linked: 'TL0030' })).d.elements;
+  assert.equal(slab.length, 4);
+  assert.ok(slab.every((e: any) => e.class === 'IfcSlab' && e.storey === 'RC Level ground'), JSON.stringify(slab));
+  await call('close', { handle: o.d.handle, owner_key: o.d.owner_key, discard: true });
+});
+
+test('the gatehouse NWD’s TimeLiner: two tasks with explicit selections (tree items), linked through sets made for them', { skip: !existsSync(GATE) && 'the gatehouse sample is not here', timeout: 300_000 }, async () => {
+  const t = readNavisworksTimeliner(GATE);
+  assert.deepEqual(t.tasks.map((x) => [x.name, x.items, x.plannedStart, x.actualFinish]), [['New Task', [2458], '2013-12-03 09:00', '2013-12-05 17:00'], ['New Task', [2245], '2013-12-03 09:00', '2013-12-06 17:00']]);
+  // the sets select the layers their names say (items counted in tree pre-order, the file is 0)
+  assert.deepEqual(t.sets.map((s) => [s.name, s.guids?.length]), [['Window Frames', 13], ['Solid Doors', 5], ['External Walls', 40], ['Internal Walls', 42], ['Glass', 15], ['Facia', 6], ['Floors', 2], ['Foundations', 16], ['Supporting pillars', 8]]);
+  const o = await call('open_model', { path: GATE });
+  const imp = (await call('import_4d', { handle: o.d.handle, owner_key: o.d.owner_key, path: GATE, create_activities: true })).d;
+  assert.deepEqual(imp.created_activities.map((a: any) => a.id), ['TL0010', 'TL0020']);
+  assert.equal(imp.added, 2);
+  const el = (await call('list_elements', { handle: o.d.handle, linked: 'TL0010' })).d.elements;
+  assert.equal(el.length, 1);
+  assert.match(JSON.stringify((await call('element_info', { handle: o.d.handle, guids: el.map((e: any) => e.guid) })).d), /S_STEEL_COLUMNS_G10/);
   await call('close', { handle: o.d.handle, owner_key: o.d.owner_key, discard: true });
 });
