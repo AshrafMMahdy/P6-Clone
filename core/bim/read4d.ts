@@ -12,7 +12,11 @@ export async function readImport4d(path: string, bytes: Uint8Array): Promise<Imp
   if (/^ISO-10303-21/m.test(head.slice(0, 200))) return parseIfc4d(Buffer.from(bytes).toString('latin1'));
   if (/<exchange\b/.test(head) || /<exchange\b/.test(xmlText(bytes.subarray(0, 4000)))) return parseSearchSets(xmlText(bytes));
   if (/\.xlsx$/i.test(path)) return parseTimelinerCsv(sheetToCsv((await readXlsx(bytes))[0]?.rows ?? []));
-  return parseTimelinerCsv(Buffer.from(bytes).toString('utf8'));
+  // anything else must be a TimeLiner CSV: a file without its Name column (or not text at all) is refused, not read as
+  // an empty schedule
+  const csv = parseTimelinerCsv(Buffer.from(bytes).toString('utf8'));
+  if (!csv.tasks.length && (bytes.subarray(0, 4000).includes(0) || csv.notes.some((n) => /No "Name" column/.test(n)))) throw new Error('not a 4D file this reads (IFC 4D, search-set XML, TimeLiner CSV or .xlsx, Navisworks .nwf/.nwd, SYNCHRO .sp)');
+  return csv;
 }
 
 /** A Navisworks TimeLiner as the import format: the tasks (planned dates as the schedule, actual dates kept), each
@@ -22,7 +26,10 @@ export async function navisworksToImport(path: string): Promise<Imported4d> {
   const { readNavisworksTimeliner } = await import('./nwd.ts');
   const n = readNavisworksTimeliner(path);
   const sets = new Map(n.sets.map((s) => [s.name, s.guids] as const)), made: NonNullable<Imported4d['sets']> = [];
-  const tasks = n.tasks.map((t, i) => {
+  // a summary task (an imported schedule's root, a parent) is its children's span: not an activity of its own, unless
+  // it carries a selection
+  const summaries = n.tasks.filter((t) => t.children > 0 && !t.items.length && !t.sets.length).map((t) => t.name);
+  const tasks = n.tasks.flatMap((t, i) => (t.children > 0 && !t.items.length && !t.sets.length ? [] : [[t, i] as const])).map(([t, i]) => {
     let attached: string | undefined = t.sets[0];
     if (t.items.length || t.sets.length > 1) {
       let name = `TimeLiner: ${t.name}`;
@@ -33,7 +40,7 @@ export async function navisworksToImport(path: string): Promise<Imported4d> {
     return { name: t.name, id: t.name, start: t.plannedStart ?? undefined, finish: t.plannedFinish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined, type: t.type, attached };
   });
   const resolved = n.sets.filter((s): s is { name: string; guids: string[] } => s.guids !== null).map((s) => ({ name: s.name, conditions: [], guids: s.guids }));
-  return { source: 'nwf', tasks, links: [], sets: [...resolved, ...made], notes: n.notes };
+  return { source: /\.nwf$/i.test(path) ? 'nwf' : 'nwd', tasks, links: [], sets: [...resolved, ...made], notes: [...n.notes, ...(summaries.length ? [`Summary tasks left out (their children are the activities): ${summaries.slice(0, 10).join(', ')}.`] : [])] };
 }
 
 /** XML text by its byte-order mark, else the encoding its declaration names, else UTF-8 (what Navisworks and the

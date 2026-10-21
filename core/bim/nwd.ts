@@ -1,7 +1,7 @@
 // Navisworks files (.nwd, .nwc, .nwf) for 4D: read by the clone's own clean-room reader (nwd/), made into IFC4 once
 // per file content (cached beside the IFC cache), then read like any IFC. An .nwf holds no model of its own: the
 // .nwc / .nwd files it lists are read from beside it (or where it says they are) and joined.
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
@@ -31,14 +31,15 @@ export interface NavisworksSource {
 
 /** The GlobalIds Revit's IFC export writes, in the order the model tree's guid index counts (LcOpGuidStore: u32, u32
  *  count, then 16-byte GUIDs, little-endian as Windows writes them). */
+/** A GUID as Windows writes it (the first three fields little-endian), as an IFC GlobalId */
+const windowsGuid = (g: Uint8Array) => compressGuid(Uint8Array.from([g[3], g[2], g[1], g[0], g[5], g[4], g[7], g[6], ...g.subarray(8)]));
+
 function guidStore(c: NwContainer, max: number): string[] {
   const b = section(c, 'LcOpGuidStore', max);
   if (!b || b.length < 8) return [];
   const v = new DataView(b.buffer, b.byteOffset, b.byteLength), n = v.getUint32(4, true), out: string[] = [];
   for (let i = 0; i < n && 8 + 16 * i + 16 <= b.length; i++) {
-    const g = b.subarray(8 + 16 * i, 24 + 16 * i);
-    // Windows GUID bytes: the first three fields little-endian
-    out.push(compressGuid(Uint8Array.from([g[3], g[2], g[1], g[0], g[5], g[4], g[7], g[6], ...g.subarray(8)])));
+    out.push(windowsGuid(b.subarray(8 + 16 * i, 24 + 16 * i)));
   }
   return out;
 }
@@ -72,8 +73,21 @@ function readOne(path: string, max: number, o: { shapes?: boolean } = {}): { ele
   return { elements, revision: c.revision, units: revit ? 'feet (Revit)' : 'metres (taken as such: the file names no unit)', tree };
 }
 
-/** The files an .nwf lists (XRefTable), found beside it by name, else where it says. */
+/** Where an .nwf's listed models may be read from. A server with a storage root sets it (fenceListedModels): then only
+ *  the file beside the .nwf, and only when the fence allows it; never the path saved in the .nwf, which could name
+ *  another user's files. Without one (the desktop) a model not beside the .nwf is read where the .nwf says. */
+let fenceOf: () => ((path: string) => boolean) | null = () => null;
+export function fenceListedModels(current: () => ((path: string) => boolean) | null): void { fenceOf = current; }
+
+/** The bytes a Navisworks file brings to reading it: an .nwf's own and those of every model it lists that can be read. */
+export function navisworksBytes(path: string): number {
+  const size = (p: string) => { try { return statSync(p).size; } catch { return 0; } };
+  return size(path) + (/\.nwf$/i.test(path) ? listed(path, 64 * 1048576).reduce((n, p) => n + (p.at ? size(p.at) : 0), 0) : 0);
+}
+
+/** The files an .nwf lists (XRefTable), found beside it by name, else (unfenced) where it says. */
 function listed(path: string, max: number): { file: string; at: string | null }[] {
+  const fence = fenceOf();
   const c = readContainer(new Uint8Array(readFileSync(path)));
   const x = section(c, 'LcOpXRefTable', max);
   if (!x) return [];
@@ -83,6 +97,7 @@ function listed(path: string, max: number): { file: string; at: string | null }[
   return table.map((t) => {
     const orig = t.RemappedPath || t.OriginalPath || '', name = orig.split(/[\\/]/).pop()!;
     const beside = join(dirname(path), name);
+    if (fence) return { file: name, at: name && existsSync(beside) && fence(beside) ? beside : null };
     return { file: name, at: existsSync(beside) ? beside : existsSync(orig) ? orig : null };
   });
 }
@@ -94,7 +109,7 @@ export function readNavisworks(path: string, o: { maxBytes?: number } = {}): { e
   const parts = /\.nwf$/i.test(path) ? listed(path, max) : [{ file: basename(path), at: path }];
   if (/\.nwf$/i.test(path) && !parts.length) warnings.push('the .nwf lists no model files');
   for (const p of parts) {
-    if (!p.at) { files.push({ file: p.file, revision: null, elements: 0, read: false, note: 'not found beside the .nwf or at its saved path' }); continue; }
+    if (!p.at) { files.push({ file: p.file, revision: null, elements: 0, read: false, note: fenceOf() ? 'not found beside the .nwf' : 'not found beside the .nwf or at its saved path' }); continue; }
     try {
       const r = readOne(p.at, max);
       pushAll(elements, r.elements); // (an argument spread overflows the stack past ~100,000)
@@ -165,12 +180,12 @@ export function readNavisworksTimeliner(path: string, o: { maxBytes?: number } =
   const tasks = tl ? decodeTimeliner(tl) : [], rawSets = ss ? decodeSets(ss) : [];
   if (!tasks.length) notes.push(tl ? 'The TimeLiner has no tasks the reader could read.' : 'The file has no TimeLiner.');
   const nwf = /\.nwf$/i.test(path);
-  const models: { file: string; items: ReturnType<typeof itemsOf>; tree: NwTree }[] = [];
+  const models: { file: string; items: ReturnType<typeof itemsOf>; tree: NwTree; byGuid: Map<string, string> }[] = [];
   const needed = rawSets.some((s) => s.items?.length) || tasks.some((t) => t.items.length);
   if (needed) {
     for (const p of nwf ? listed(path, max) : [{ file: basename(path), at: path }]) {
-      if (!p.at) { notes.push(`${p.file}: not found beside the .nwf or at its saved path, so its selections are not resolved.`); continue; }
-      try { const r = readOne(p.at, max, { shapes: false }); if (r.tree) models.push({ file: p.file, items: itemsOf(r.tree, r.elements), tree: r.tree }); } catch (e) { notes.push(`${p.file}: ${(e as Error).message}`); }
+      if (!p.at) { notes.push(`${p.file}: not found${fenceOf() ? ' beside the .nwf' : ' beside the .nwf or at its saved path'}, so its selections are not resolved.`); continue; }
+      try { const r = readOne(p.at, max, { shapes: false }); if (r.tree) models.push({ file: p.file, items: itemsOf(r.tree, r.elements), tree: r.tree, byGuid: new Map(r.elements.filter((e) => e.guid).map((e) => [e.guid!, globalIdOf(e)])) }); } catch (e) { notes.push(`${p.file}: ${(e as Error).message}`); }
     }
   }
   // an .nwf: item k is path-map component k - 1, found by position and name from a model's root
@@ -193,7 +208,14 @@ export function readNavisworksTimeliner(path: string, o: { maxBytes?: number } =
     for (const k of refs) {
       let g: string[] | null = null;
       if (!nwf) g = models[0].items.guids(k);
-      else for (const m of models) { const n = nodeOf(k, m.tree); if (n) { g = m.items.guids(m.items.at.get(n)!); break; } }
+      else {
+        // an item the map names by its GUID, or a part of one (a piece of its geometry), is that element; else it is
+        // found by its path
+        let c = comps[k - 1];
+        for (let n = 0; c && !c.guid && c.parent >= 0 && n < 100; n++) c = comps[c.parent];
+        const id = c?.guid ? windowsGuid(c.guid) : null;
+        for (const m of models) { if (id && m.byGuid.has(id)) { g = [m.byGuid.get(id)!]; break; } const n = nodeOf(k, m.tree); if (n) { g = m.items.guids(m.items.at.get(n)!); break; } }
+      }
       if (g) g.forEach((x) => out.add(x)); else missed++;
     }
     if (missed) notes.push(`${missed} selected item(s) were not found in the model.`);

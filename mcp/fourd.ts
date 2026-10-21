@@ -5,10 +5,15 @@ import { basename, dirname, join } from 'node:path';
 import { rows, type Db, type Row } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { writeP6XmlTo } from '../core/xml/p6xml.ts';
-import { cachedModel, fileHash, loadModel, loadNeeds, modelBytes, releaseModels, type Model } from '../core/bim/model.ts';
+import { fenceListedModels, isNavisworks } from '../core/bim/nwd.ts';
+import { cachedModel, fileHash, ifcOf, loadModel, loadNeeds, modelBytes, releaseModels, type LoadNeeds, type Model } from '../core/bim/model.ts';
+import { isRevit } from '../core/bim/rvt.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
-import { admit, countMemory, effectiveBudget, fail, freeMemory, pathArg, reserveMemory, sessions, type Session } from './runtime.ts';
+import { admit, countMemory, effectiveBudget, fail, freeMemory, pathArg, readFenced, reserveMemory, sessions, type Session } from './runtime.ts';
+
+// a server with a storage root reads an .nwf's models only beside it and inside the root (realpath checked by pathArg)
+fenceListedModels(() => (readFenced() ? (p) => { try { pathArg(p); return true; } catch { return false; } } : null));
 import type { AnalysisHelpers } from './analysis.ts';
 import type { QuantityKind } from '../core/bim/parse.ts';
 import { nextId } from '../core/db.ts';
@@ -61,22 +66,41 @@ const mbs = (b: number) => `${Math.round(b / 1048576).toLocaleString('en')} MB`;
  *  needs), not run out of memory on. Meshing is cut into chunks sized to the memory left (loadNeeds), so a model is
  *  refused only when its index, or its index and the smallest chunk, do not fit. */
 async function readModel(path: string, o: { geometry?: boolean; tick?: AnalysisHelpers['tick'] } = {}): Promise<Model> {
-  if (!existsSync(path)) return fail('model_unreadable', `No file at ${path}.`, 'Give the path of an .ifc file inside the storage root.');
-  const hash = await fileHash(path);
+  if (!existsSync(path)) return fail('model_unreadable', `No file at ${path}.`, 'Give the path of a model file (.ifc, .rvt, .nwd, .nwc or .nwf) inside the storage root.');
+  // a Revit or Navisworks file is made into an IFC4 first, with memory of its own; its meshing is then sized from that
+  // IFC, not from the source file (a 30 KB .nwf made an 81 MB IFC: chunks sized from the .nwf meant 435 runs)
+  let ifc = path;
+  if (isRevit(path) || isNavisworks(path)) {
+    const conv = fits(path, loadNeeds(path, { geometry: false }), false, () => loadNeeds(path, { geometry: false }));
+    const release = reserveMemory(conv.total);
+    try { ifc = await ifcOf(path); } finally { release(); }
+  }
+  const hash = await fileHash(ifc);
+  const need = fits(path, loadNeeds(ifc, { geometry: o.geometry, free: freeMemory(), hash }), o.geometry, () => loadNeeds(ifc, { geometry: o.geometry, free: freeMemory(), hash }));
+  const release = reserveMemory(need.total);
+  try { return await loadModel(path, { geometry: o.geometry, ...(need.chunkBytes ? { chunkBytes: need.chunkBytes } : {}), ...(ifc === path ? { hash } : {}), ...(o.tick ? { onProgress: (d, t, n) => o.tick!(d, t, n) } : {}) }); } finally { release(); }
+}
+
+/** What to do about a model that could not be read, by its kind */
+const unreadableHint = (path: string) => (existsSync(path) && (isRevit(path) || isNavisworks(path))
+  ? `The ${isRevit(path) ? 'Revit' : 'Navisworks'} file is read without ${isRevit(path) ? 'Revit' : 'Navisworks'}, and the message says what stopped it; saving it again from a current version usually helps, and an IFC exported from it always opens.`
+  : 'Give the path of a model file (.ifc, .rvt, .nwd, .nwc or .nwf) inside the storage root.');
+
+/** The need, when it fits the memory free (idle projects moved out first, as for any file); else refused in words. */
+function fits(path: string, first: LoadNeeds, geometry: boolean | undefined, again: () => LoadNeeds): LoadNeeds {
   const budget = effectiveBudget();
-  let free = freeMemory(), need = loadNeeds(path, { geometry: o.geometry, free, hash });
+  let free = freeMemory(), need = first;
   // idle projects moved out make room first (as for any file); only what still does not fit is refused
-  if (need.total <= budget && need.total > free) { try { admit(need.total); } catch { /* refused below, in words */ } free = freeMemory(); need = loadNeeds(path, { geometry: o.geometry, free, hash }); }
+  if (need.total <= budget && need.total > free) { try { admit(need.total); } catch { /* refused below, in words */ } free = freeMemory(); need = again(); }
   if (need.total > budget || need.total > free) {
-    const size = existsSync(path) ? (await import('node:fs')).statSync(path).size : 0;
+    const size = existsSync(path) ? statSync(path).size : 0;
     const parts = [need.index ? `${mbs(need.index)} for the index` : '', need.mesh ? `${mbs(need.mesh)} for meshing it in chunks of ${mbs(need.chunkBytes)} of the IFC` : ''].filter(Boolean).join(' and ');
-    const indexOnly = o.geometry !== false && need.index && need.index <= Math.min(budget, free);
+    const indexOnly = geometry !== false && need.index && need.index <= Math.min(budget, free);
     fail('memory_budget', `Opening this ${mbs(size)} model needs about ${mbs(need.total)} of memory (${parts}; measured, docs/4d-tiles-contract.md "Memory"); the memory budget is ${mbs(budget)} (P6CLONE_MEM_BUDGET_MB) and ${mbs(Math.max(0, free))} of it is free now.`,
       need.total > budget ? (indexOnly ? 'The index fits without geometry: open_model with geometry: false links and exports in full (no 3D view, video or derived volumes); or raise P6CLONE_MEM_BUDGET_MB.' : 'The model is larger than the whole memory budget: raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size) or split the model.') : 'Retry when the running calls have finished; idle projects are moved out automatically.',
       { retryAfter: need.total > budget ? undefined : 10, data: { needed_mb: Math.round(need.total / 1048576), index_mb: Math.round(need.index / 1048576), mesh_mb: Math.round(need.mesh / 1048576), chunk_mb: Math.round(need.chunkBytes / 1048576), budget_mb: Math.round(budget / 1048576), free_mb: Math.round(Math.max(0, free) / 1048576) } });
   }
-  const release = reserveMemory(need.total);
-  try { return await loadModel(path, { geometry: o.geometry, ...(need.chunkBytes ? { chunkBytes: need.chunkBytes } : {}), hash, ...(o.tick ? { onProgress: (d, t, n) => o.tick!(d, t, n) } : {}) }); } finally { release(); }
+  return need;
 }
 
 /** Where a render the browser could not hold would fit: a crashed page ran out of the machine's memory, the rest out of the GPU's */
@@ -103,8 +127,9 @@ async function modelOf(db: Db, projId: string, required = true, o: { geometry?: 
 async function modelWithTiles(db: Db, projId: string, tick?: AnalysisHelpers['tick']): Promise<Model> {
   const m = (await modelOf(db, projId))!;
   if (m.tiles) return m;
-  if (m.index.geometryStatus === 'unavailable') return noGeometry(m);
   const r = modelRow(db, projId)!;
+  // a model whose meshing failed is tried again once a run of the server (loadModel), then refused in words
+  if (m.index.geometryStatus === 'unavailable' && !existsSync(r.path)) return noGeometry(m);
   if (!existsSync(r.path)) return fail('model_missing', `The model ${r.path} has no display tiles in the cache and its file is gone.`, 'Attach it again with open_model {path}.');
   const g = await readModel(r.path, { geometry: true, tick });
   return g.tiles ? g : noGeometry(g);
@@ -119,7 +144,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
     case 'open_model': {
       const path = pathArg(a.path);
       let m: Model;
-      try { m = await readModel(path, { geometry: a.geometry !== false, tick: h.tick }); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of an .ifc file inside the storage root.'); }
+      try { m = await readModel(path, { geometry: a.geometry !== false, tick: h.tick }); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, unreadableHint(path)); }
       await h.tick(1, 1, 'model parsed');
       const ix = m.index;
       const kept = h.apply(`Attach model ${basename(path)}`, (d) => {
@@ -245,22 +270,23 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       try { items = items4d(s.db, projId, m?.index ?? null, { planned: a.planned, key }); } catch (e) { return fail('bad_input', (e as Error).message, 'planned: current, or the name of a saved baseline.'); }
       if (!items.length && target !== 'csv') fail('no_links', 'No activity has linked elements.', 'Link elements first (link_elements or link_by_rules).');
       const code = rows(s.db, 'PROJECT').find((p) => p.proj_id === projId)!.proj_short_name;
-      const stem = basename(row?.path ?? code).replace(/\.ifc$/i, '');
+      const stem = basename(row?.path ?? code).replace(/\.(ifc|rvt|rfa|nwd|nwc|nwf)$/i, '');
       const written: string[] = [];
       const put = (file: string, data: string) => { const p = join(dir, file); h.writeOut(p, data); written.push(p); };
-      // the model file is streamed into the package (a model of any size: never one string)
-      const ifcPath = () => { if (!row || !existsSync(row.path)) return fail('model_missing', `The model file ${row?.path ?? ''} is gone.`, 'Attach it again with open_model.'); return row.path; };
+      // the model's IFC is streamed into the package (a model of any size: never one string); a Revit or Navisworks
+      // model's is the IFC4 it was made into, whose GlobalIds the links hold
+      const ifcPath = async () => { if (!row || !existsSync(row.path)) return fail('model_missing', `The model file ${row?.path ?? ''} is gone.`, 'Attach it again with open_model.'); return ifcOf(row.path); };
       if (target === 'csv') { const f = join(dir, `${code}-4d-links.csv`); linksCsvFile(s.db, projId, m?.index ?? null, f); written.push(f); return { target, written, activities: items.length }; }
       if (target === 'navisworks' || target === 'synchro') {
         const ifcOut = join(dir, `${stem}-4D.ifc`);
-        const tagged = tagIfcFile(ifcPath(), ifcOut, items);
+        const tagged = tagIfcFile(await ifcPath(), ifcOut, items);
         written.push(ifcOut);
         if (target === 'navisworks') { put(`${code}-4D-sets.xml`, searchSetsXml(items, code)); put('timeliner.csv', timelinerCsv(items)); }
         else { const p = join(dir, `${code}.xml`); h.writeOutWith(p, (w) => writeP6XmlTo(s.db, { projIds: [projId], version: '19.12' }, w)); written.push(p); } // as it is made (a big schedule)
         put('README.txt', README[target]);
         return { target, written, activities: items.length, elements_tagged: tagged.elements, key, planned: a.planned ?? 'current' };
       }
-      try { const ifcOut = join(dir, `${stem}-4D-IFC4.ifc`); const r = ifc4dFile(s.db, projId, ifcPath(), ifcOut, items, Array.isArray(a.baselines) ? a.baselines : []); written.push(ifcOut); put('README.txt', README.ifc4d); return { target, written, tasks: r.tasks, element_links: r.links }; }
+      try { const ifcOut = join(dir, `${stem}-4D-IFC4.ifc`); const r = ifc4dFile(s.db, projId, await ifcPath(), ifcOut, items, Array.isArray(a.baselines) ? a.baselines : []); written.push(ifcOut); put('README.txt', README.ifc4d); return { target, written, tasks: r.tasks, element_links: r.links }; }
       catch (e) { return fail('bad_input', (e as Error).message, 'Use the navisworks or synchro target for IFC2X3 models.'); }
     }
     case 'simulate_4d': {
@@ -432,7 +458,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const old = (await modelOf(s.db, projId, true, { geometry: true }))!;
       const path = pathArg(a.path);
       let m: Model;
-      try { m = await readModel(path); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of the revised .ifc file.'); }
+      try { m = await readModel(path); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, unreadableHint(path)); }
       await h.tick(1, 2, 'model parsed');
       const linkedGuids = new Set(rows(s.db, T4D.link).filter((r) => r.proj_id === projId).map((r) => r.guid));
       const plan = relinkPlan(old.index, m.index, linkedGuids, a.tolerance_m != null ? Number(a.tolerance_m) : undefined);
@@ -461,7 +487,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       try {
       try { bytes = new Uint8Array(readFileSync(path)); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
       try { imp = await readImport4d(path, bytes); } catch (e) { return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${(e as Error).message}`, 'Give an IFC 4D, search-set XML, TimeLiner CSV/xlsx, Navisworks .nwf/.nwd or SYNCHRO .sp file.'); }
-      const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf';
+      const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf' || imp.source === 'nwd';
       const m = await modelOf(s.db, projId, !tasksOnly);
       const plan = planImport4d(s.db, projId, imp, m?.index ?? null, { createActivities: a.create_activities === true });
       const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: plan.matched.size, activities_with_links: new Set(plan.proposals.map((p) => p.activity)).size, unmatched_tasks: plan.unmatchedTasks.slice(0, 100), proposed_links: plan.proposals.reduce((n, p) => n + p.guids.length, 0), ...(plan.elementsNotInModel ? { elements_not_in_model: plan.elementsNotInModel } : {}), ...(plan.sets.length ? { sets: plan.sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: plan.attachedSets } : {}), notes: imp.notes };

@@ -67,6 +67,8 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: b
         const props = Array.from({ length: u32() }, () => prop());
         return { kind: 'group', name, attr: a, props } satisfies NwGroup;
       }
+      // a hyperlink (Revit's URL parameter): two strings, two u32, its name and address, its attribute, a u32
+      case 0x4f: { str(); str(); u32(); u32(); const name = str(), url = str(); const a = attr(); u32(); return { cls, name, url, attr: a } as Obj; }
       case 0x1f: { const name = str(); attr(); u32(); return { cls, name, d: doubles(14) } as Obj; }
       case 0xc8: { const name = str(); u32(); u32(); return { cls, name, asset: value() } as Obj; }
       case 0xb9: { const json = str(); str(); const n = u32(); for (let i = 0; i < n; i++) { str(); u32(); u32(); } return { cls, json } as Obj; }
@@ -85,6 +87,7 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: b
       case 0x5d: { const bbox = floats(6); p = (p + 7) & ~7; const t = doubles(3); floats(1); u32(); return { cls, bbox, t, geom: u32() } as Obj; }
       case 0x0e: return { cls, t: doubles(3) } as Obj;
       case 0x0f: { const d = doubles(7); return { cls, t: d.slice(0, 3), q: d.slice(3) } as Obj; }
+      case 0x10: { const d = doubles(8); return { cls, t: d.slice(0, 3), q: d.slice(3, 7), s: d[7] } as Obj; } // and a uniform scale
       case 0x11: { const m = floats(13); p = (p + 7) & ~7; return { cls, m, t: doubles(3) } as Obj; }
       case 0x37: { const x = u32(); const colour = value(); return { cls, colour, asset: x & 0x20 ? value() : null } as Obj; }
       case 0x36: { const c = floats(13); u32(); return { cls, rgb: c.slice(3, 6) } as Obj; }

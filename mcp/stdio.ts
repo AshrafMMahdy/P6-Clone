@@ -56,6 +56,8 @@ const fallback = (id) => {
 const answered = new Set();
 parentPort.on('message', (m) => {
   if (m.type === 'beat') { beat = Date.now(); return; }
+  // every reply posted before this one is written (messages come in order; writes are synchronous)
+  if (m.type === 'flush') { parentPort.postMessage({ type: 'flushed' }); return; }
   if (m.type === 'job') { if (m.view) jobs.set(m.id, m.view); else jobs.delete(m.id); return; }
   if (m.type === 'send') {
     const id = m.id;
@@ -96,8 +98,13 @@ export function startStdio(): void {
   // the job's state as the front answers it while the main thread is busy
   onJobChange((id, view) => front.postMessage({ type: 'job', id, view: view && view.status === 'running' ? { ...view, started: Date.now() - (view.running_seconds ?? 0) * 1000 } : null }));
   setInterval(() => front.postMessage({ type: 'beat' }), 100).unref();
+  // at the end of stdin: calls still running finish first (up to 30 s), then the front writes every reply it holds,
+  // and only then does the process stop (stopping at once lost replies still on their way to the front)
+  let flushed: (() => void) | null = null;
+  const stop = () => { const done = () => shutdown('stdin closed'); flushed = done; front.postMessage({ type: 'flush' }); setTimeout(done, 5000).unref(); };
   front.on('message', (x: { type: string; line?: string }) => {
-    if (x.type === 'end') { const t0 = Date.now(); const wait = () => (running.size && Date.now() - t0 < 30000 ? setTimeout(wait, 50) : shutdown('stdin closed')); wait(); return; }
+    if (x.type === 'flushed') { flushed?.(); return; }
+    if (x.type === 'end') { const t0 = Date.now(); const wait = () => (running.size && Date.now() - t0 < 30000 ? setTimeout(wait, 50) : stop()); wait(); return; }
     const line = x.line ?? '';
     let m: Msg;
     try { m = JSON.parse(line); } catch { send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); return; }

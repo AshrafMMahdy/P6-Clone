@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { stepIndex } from './stepIndex.ts';
 import { geomWorkerPath, webIfcEntry } from './runtime.ts';
 import { allocGeometry, geomStore, putGeometry, scaleGeometry } from './element.ts';
-import { tileBytesOf, writeTilesManifest, type TileRecord } from './tiles.ts';
+import { readManifest, tileBytesOf, writeTilesManifest, type TileRecord } from './tiles.ts';
 
 export interface IfcOwner {
   author?: string;
@@ -153,7 +153,9 @@ export async function meshIndex(absIfcPath: string, index: IfcIndex, productIds:
     if (tilesTmp && opts.tilesOut) {
       writeTilesManifest(tilesTmp, index, run.tiles, S);
       rmSync(opts.tilesOut, { recursive: true, force: true });
-      renameSync(tilesTmp, opts.tilesOut);
+      // another process meshing the same model (the same content, the same cache name) may have put its tiles in place
+      // first: those are the same tiles, so they stand and these go
+      try { renameSync(tilesTmp, opts.tilesOut); } catch (e) { if (!readManifest(opts.tilesOut)) throw e; }
     }
   } finally {
     rmSync(outDir, { recursive: true, force: true });
@@ -262,13 +264,16 @@ function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opt
     let err = '', out = '';
     child.stdout.on('data', (d) => { out += String(d); if (out.length > 4000) out = out.slice(-4000); });
     child.stderr.on('data', (d) => { err += String(d); if (err.length > 4000) err = err.slice(-4000); });
-    const timer = setTimeout(() => { try { child.kill(); } catch { /* gone */ } }, timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch { /* gone */ } }, timeoutMs);
     child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, note: `geometry worker could not start: ${e.message}` }); });
     child.on('close', (code, signal) => {
       clearTimeout(timer);
-      if (code === 0 && existsSync(join(outDir, 'geom.json'))) { resolve({ ok: true }); return; }
+      // its summary is written last: a worker that wrote it finished, even if the process then fell over on its way out
+      // (Windows: a libuv assertion at exit, 0xC0000409)
+      if (existsSync(join(outDir, 'geom.json'))) { try { JSON.parse(readFileSync(join(outDir, 'geom.json'), 'utf8')); resolve({ ok: true }); return; } catch { /* cut short: a failure */ } }
       const tail = (err.trim().split('\n').filter(Boolean).slice(-3).join(' | ') || out.trim().split('\n').slice(-1)[0] || '').slice(0, 300);
-      const why = signal ? `stopped (${signal}) after ${Math.round(timeoutMs / 60000)} min` : code === null ? 'stopped' : /Aborted|memory|allocation/i.test(tail) ? 'ran out of memory (web-ifc 4 GB WASM ceiling)' : `exited with code ${code}`;
+      const why = timedOut ? `stopped after ${Math.round(timeoutMs / 60000)} min (its time limit)` : signal ? `killed (${signal}) before its time limit` : code === null ? 'stopped' : /Aborted|memory|allocation/i.test(tail) ? 'ran out of memory (web-ifc 4 GB WASM ceiling)' : `exited with code ${code}`;
       resolve({ ok: false, note: `geometry ${why}${tail ? ` — ${tail}` : ''}. The model is indexed (elements, storeys, properties, authored quantities); derived volumes and the 3D view are not available for it.` });
     });
   });

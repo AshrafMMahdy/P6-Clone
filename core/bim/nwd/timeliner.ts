@@ -7,7 +7,10 @@
 // A task: u32 0x3d, the name, six strings, a u32, two strings, then the actual start and end (int64 Unix seconds of
 // the wall clock), three u32 flags, the planned start and end, three flags, the task type ("Construct"), a string, the
 // explicit selections (u32 count; each a u32, a u32 count and that many item references) and the attached sets
-// (u32 count, then "lcop_selection_set_tree/<set name>" each). Tasks are found by that shape, so child tasks are too.
+// (u32 count, then "lcop_selection_set_tree/<set name>" each), more fields, and last the number of its child tasks,
+// which follow it (a list of tasks starts with its count: the top level's, then each parent's). Tasks are found by
+// their shape, so child tasks are too; a task's child count is the u32 just before the next task found. An imported
+// schedule hangs under a root task ("New Data Source (Root)"), a summary of the others.
 //
 // A selection set: u32 kind (5; 4 is a folder), the name, a u32, a 16-byte GUID, a u32, then u32 0 and an explicit
 // selection (u32 count, the item references, 0xffffffff, an aligned u64), or another value and a search (conditions,
@@ -15,16 +18,19 @@
 //
 // Item references: in an .nwd / .nwc, an item's position in the model tree in pre-order (the file itself is 0); in an
 // .nwf, the 1-based position of a component in LcOpNwfPathMap, which names the item by its path in the model it links.
-// The path map: u32 count, u32, then entries: i32, then components (u32 kind 0x5f for an item under the model's root,
-// 0x57 for one below it; u32 its 0-based position among its parent's children; u32 class; the attribute's display
-// name; the item's name; for 0x5f an aligned u64), joined by i32 -2; then the entry's bounding box (6 aligned doubles).
-// An entry that starts with 0x57 is a further child of the last 0x5f.
+// The path map: u32 count, u32, then components, each: i32 its depth (1: under the model's root), negative for one
+// that is selected (a bounding box, 6 aligned doubles, ends it); u32 kind (bit 0x200: a 16-byte GUID follows the
+// name, the IFC GlobalId's bytes as Windows writes them; bit 0x08: then an aligned u64, the Revit ElementId or an
+// item id); u32 its 0-based position among its parent's children; u32 class; the attribute's display name; its name.
+// A component's parent is the last one a level up. Seen: 0x5f and 0x57 (a 2016 .nwf: levels and categories), 0x25f
+// (a 2021 .nwf: every level down to the elements).
 
-export interface NwTask { name: string; actualStart: string | null; actualFinish: string | null; plannedStart: string | null; plannedFinish: string | null; type: string; items: number[]; sets: string[] }
+export interface NwTask { name: string; actualStart: string | null; actualFinish: string | null; plannedStart: string | null; plannedFinish: string | null; type: string; items: number[]; sets: string[]; /** child tasks (a summary when above 0) */ children: number }
 /** items null: a search set (its conditions are not read) */
 export interface NwSet { name: string; items: number[] | null }
-/** parent: the component above it in the path map (0-based), -1 for one under the model's root */
-export interface NwPathComponent { name: string | null; attr: string | null; position: number; parent: number }
+/** parent: the component above it in the path map (0-based), -1 for one under the model's root; guid: the item's
+ *  GUID bytes (Windows order) when the map holds it */
+export interface NwPathComponent { name: string | null; attr: string | null; position: number; parent: number; guid?: Uint8Array }
 
 const SET_PATH = 'lcop_selection_set_tree/';
 const td = new TextDecoder('utf-8', { fatal: true });
@@ -74,16 +80,22 @@ function task(b: Uint8Array, at: number): { task: NwTask; end: number } | null {
     const ns = r.u32();
     if (ns > 1000) return null;
     for (let k = 0; k < ns; k++) { const s = r.str(); if (s === null) return null; sets.push(s.startsWith(SET_PATH) ? s.slice(SET_PATH.length) : s); }
-    return { task: { name, actualStart: when(a0), actualFinish: when(a1), plannedStart: when(p0), plannedFinish: when(p1), type, items, sets }, end: r.p };
+    return { task: { name, actualStart: when(a0), actualFinish: when(a1), plannedStart: when(p0), plannedFinish: when(p1), type, items, sets, children: 0 }, end: r.p };
   } catch { return null; }
 }
 
 /** The TimeLiner tasks, in file order. */
 export function decodeTimeliner(b: Uint8Array): NwTask[] {
   const out: NwTask[] = [];
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
   for (let p = 0; p + 8 <= b.length;) {
     const t = b[p] === 0x3d && b[p + 1] === 0 && b[p + 2] === 0 && b[p + 3] === 0 ? task(b, p) : null;
-    if (t) { out.push(t.task); p = (t.end + 3) & ~3; } else p += 4;
+    if (t) {
+      // the u32 before a task: the previous task's child count (0 for one without), or the count of a list's first
+      const before = p >= 4 ? v.getUint32(p - 4, true) : 0;
+      if (out.length && before > 0 && before < 1e6) out[out.length - 1].children = before;
+      out.push(t.task); p = (t.end + 3) & ~3;
+    } else p += 4;
   }
   return out;
 }
@@ -115,24 +127,20 @@ export function decodeSets(b: Uint8Array): NwSet[] {
 
 /** The components of an .nwf's path map, in file order (item reference k is component k - 1). */
 export function decodePathMap(b: Uint8Array): NwPathComponent[] {
-  const r = reader(b, 8), out: NwPathComponent[] = [];
-  let top = -1;
+  const r = reader(b, 8), out: NwPathComponent[] = [], last: number[] = [];
   try {
     while (r.p + 8 < b.length) {
-      r.i32();
-      let parent = -2;
-      for (;;) {
-        const kind = r.u32(), position = r.u32();
-        r.u32();
-        const attr = r.str(), name = r.str();
-        if (kind === 0x5f) { r.i64(); parent = -1; top = out.length; }
-        else if (kind === 0x57) parent = parent === -2 ? top : out.length - 1;
-        else throw new Error(`path component kind 0x${kind.toString(16)}`);
-        out.push({ name, attr, position, parent });
-        if (r.peek() !== -2) break;
-        r.u32();
-      }
-      r.align(); r.p += 48;
+      const lead = r.i32(), depth = Math.abs(lead);
+      if (!depth || depth > 64 || depth > last.length + 1) break;
+      const kind = r.u32(), position = r.u32();
+      r.u32();
+      const attr = r.str(), name = r.str();
+      let guid: Uint8Array | undefined;
+      if (kind & 0x200) { if (r.p + 16 > b.length) break; guid = b.slice(r.p, r.p + 16); r.p += 16; }
+      if (kind & 0x08) r.i64();
+      out.push({ name, attr, position, parent: depth > 1 ? last[depth - 2] : -1, ...(guid ? { guid } : {}) });
+      last[depth - 1] = out.length - 1; last.length = depth;
+      if (lead < 0) { r.align(); r.p += 48; }
     }
   } catch { /* what was read stands */ }
   return out;

@@ -186,7 +186,7 @@ test('TimeLiner tasks, selection sets and an .nwf path map, decoded from their l
   const tasks = decodeTimeliner(bytes([['u32', 1], ['u32', 0x3d], ['str', 'Strip walls'], ...empty, ['u32', 1], ['str', null], ['str', null],
     ['i64', unix('2026-03-02 08:00')], ['i64', unix('2026-03-05 17:00')], ['u32', 1], ['u32', 1], ['u32', 1], ['i64', unix('2026-03-01 08:00')], ['i64', 0], ['u32', 1], ['u32', 1], ['u32', 1],
     ['str', 'Demolish'], ['str', null], ['u32', 1], ['u32', 0], ['u32', 2], ['u32', 7], ['u32', 9], ['u32', 1], ['str', 'lcop_selection_set_tree/Walls'], ['raw', 40]]));
-  assert.deepEqual(tasks, [{ name: 'Strip walls', actualStart: '2026-03-02 08:00', actualFinish: '2026-03-05 17:00', plannedStart: '2026-03-01 08:00', plannedFinish: null, type: 'Demolish', items: [7, 9], sets: ['Walls'] }]);
+  assert.deepEqual(tasks, [{ name: 'Strip walls', actualStart: '2026-03-02 08:00', actualFinish: '2026-03-05 17:00', plannedStart: '2026-03-01 08:00', plannedFinish: null, type: 'Demolish', items: [7, 9], sets: ['Walls'], children: 0 }]);
   const sets = decodeSets(bytes([['u32', 2], ['u32', 5], ['str', 'Walls'], ['u32', 0], ['raw', 16], ['u32', 0], ['u32', 0], ['u32', 2], ['u32', 3], ['u32', 4], ['u32', 0xffffffff], ['i64', 0],
     ['u32', 5], ['str', 'By category'], ['u32', 0], ['raw', 16], ['u32', 0], ['u32', 1], ['u32', 2], ['u32', 100]]));
   assert.deepEqual(sets, [{ name: 'Walls', items: [3, 4] }, { name: 'By category', items: null }]);

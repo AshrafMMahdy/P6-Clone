@@ -16,7 +16,7 @@ export interface ImportPlan { /** activities a task of the file matched, linked 
 const roleOf = (type?: string) => (/^demolish$/i.test(type ?? '') ? { role: 'removed' as const } : /^temporary$/i.test(type ?? '') ? { role: 'temporary' as const } : {});
 
 export function planImport(db: Db, projId: string, imp: Imported4d, ix: IfcIndex | null, o: { createActivities?: boolean } = {}): ImportPlan {
-  const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf', creatable = tasksOnly || imp.source === 'synchro';
+  const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf' || imp.source === 'nwd', creatable = tasksOnly || imp.source === 'synchro';
   const T = rows(db, 'TASK').filter((t) => t.proj_id === projId && t.task_type !== 'TT_WBS');
   const byId = new Map(T.map((t) => [t.task_code.toLowerCase(), t])), names = new Map<string, Row | null>();
   for (const t of T) { const k = t.task_name.trim().toLowerCase(); names.set(k, names.has(k) ? null : t); }

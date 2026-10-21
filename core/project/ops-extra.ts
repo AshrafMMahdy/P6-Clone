@@ -292,9 +292,15 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const type = codeType(S, str(op.type, 'type'), tg.projId);
       const L = ensure(db, S.link, [S.fk, S.tid, S.vid, ...(S.link === 'TASKACTV' ? ['proj_id'] : [])]);
       const fk = tg.fk, tid = type[S.tid]; // plain values: a view's field read per row is slow
-      const valsOfType = new Set(realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid).map((v) => v[S.vid]));
-      const LR = realOf(L.rows); // the scan only when the index says the object has an assignment (a new activity has none)
-      if (rowIndex(LR, `fk:${S.fk}`, (a) => a[S.fk]).get(fk)?.length) removeWhere(L.rows, (a) => a[S.fk] === fk && (a[S.tid] === tid || valsOfType.has(a[S.vid])));
+      const LR = realOf(L.rows);
+      // the scan only when one of the object's own assignments (by the index) is of this type: an activity's second
+      // code (a trade after its location) scanned the whole table, n² on a big LOB plan (L-3)
+      const mine = rowIndex(LR, `fk:${S.fk}`, (a) => a[S.fk]).get(fk);
+      if (mine?.length) {
+        const valsOfType = new Set(realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid).map((v) => v[S.vid]));
+        const ofType = (a: Row) => a[S.fk] === fk && (a[S.tid] === tid || valsOfType.has(a[S.vid]));
+        if (mine.some((i) => LR[i] && ofType(LR[i]))) removeWhere(L.rows, ofType);
+      }
       if (op.value == null || op.value === '') return { removed: type[S.tname] };
       const v = codeValue(S, type, op.value);
       L.rows.push({ [S.fk]: tg.fk, [S.tid]: type[S.tid], [S.vid]: v[S.vid], ...(S.link === 'TASKACTV' ? { proj_id: tg.projId } : {}) });

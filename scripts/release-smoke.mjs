@@ -3,7 +3,7 @@
 // Every analysis tool is called on a small resourced project; the schedule reasoner must load from the folder's
 // models/ and ort/ (server_status reasoner.loaded) and optimize_schedule must answer. Exit code 1 on any failure.
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -81,6 +81,17 @@ else {
   if (existsSync(nwFixture)) {
     const nw = await call('open_model', { path: nwFixture });
     if (nw?.source?.format !== 'Navisworks' || nw.elements !== 4 || !nw.handle) failures.push(`open_model .nwc: ${JSON.stringify(nw).slice(0, 200)}`);
+    // every 4D export of a Navisworks model carries the IFC4 it was made into (N-37-1), never the .nwc's own bytes
+    const NH = { handle: nw.handle, owner_key: nw.owner_key };
+    await call('edit', { ...NH, operations: [{ op: 'add_activity', id: 'W1', name: 'Walls', duration_days: 5 }] });
+    const walls = (await call('list_elements', { handle: nw.handle })).elements ?? [];
+    await call('link_elements', { ...NH, links: [{ activity: 'W1', guids: walls.map((e) => e.guid) }] });
+    for (const target of ['navisworks', 'synchro', 'ifc4d', 'csv']) {
+      const x = await call('export_4d', { handle: nw.handle, target, path: join(dir, `nwc-4d-${target}`) });
+      const ifc = (x.written ?? []).find((f) => /\.ifc$/i.test(f));
+      if (!x.written?.length || (target !== 'csv' && (!ifc || !/^ISO-10303-21;/.test(readFileSync(ifc, 'latin1').slice(0, 40))))) failures.push(`export_4d ${target} of an .nwc: ${JSON.stringify(x).slice(0, 200)}`);
+    }
+    await call('close', { ...NH, discard: true });
   }
   const H = { handle: m4.handle, owner_key: m4.owner_key };
   const els = await call('list_elements', { handle: m4.handle });

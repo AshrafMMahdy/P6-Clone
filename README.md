@@ -349,7 +349,8 @@ opens into a model-only workspace, so an agent with no schedule can read element
 `.nwc` / `.nwf` read by the clone's own clean-room reader (`core/bim/nwd/`): elements with their Revit category, family,
 type, level, ElementId, parameters and Revit's own lengths, areas and volumes in SI, and the GlobalIds Revit's IFC export
 writes, so links carry between RVT, IFC and NWD; DWG-sourced items under their layers; the geometry read as its triangles and placed, for derived volumes, the 3D view and
-the 4D video (the user's 2016 project: 325 of 325 Revit volumes matched to 1%); a mesh that is open (a surface, a
+the 4D video (the user's 2016 project, concrete: 325 of 325 Revit volumes matched to 1%; steel sections come out 5-8%
+under Revit's figure); a mesh that is open (a surface, a
 fitting open at its ends: holes over a thousandth of its surface) gives no derived volume, and `open_model` counts them
 as `meshed_without_volume`; the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and
 actual dates and type, their selection sets and explicit selections resolved to the model's elements (an `.nwf` names
@@ -380,7 +381,7 @@ MB each; repeated meshes instanced), loaded one after another; a browser that ca
 naming its size, and `boxes: true` (bounding boxes) is drawn only when asked. The layout, what the page fetches and
 signals, and the measurements: `docs/4d-tiles-contract.md`. What bounds a model is the server's memory: give the Node
 process a heap to match (`--max-old-space-size`,
-`P6CLONE_MEM_BUDGET_MB`). Revit `.rvt` files are read once exported to IFC.
+`P6CLONE_MEM_BUDGET_MB`).
 
 **LOB** (Line of Balance, location-based scheduling; see `docs/superpowers/specs/2026-10-21-lob-design.md` and
 `docs/lob-switch-over.md`): an LOB plan is its own project in the same file as the CPM projects, linked to them either

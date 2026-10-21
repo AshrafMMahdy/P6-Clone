@@ -139,7 +139,8 @@ test('render_4d refuses a model whose geometry did not build (no empty building)
   });
   await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: [{ op: 'add_activity', id: 'W', name: 'Walls', duration_days: 2 }] });
   await call('link_by_rules', { handle: np.handle, owner_key: np.owner_key, rules: [{ type: 'scope', activity: 'W', class: 'IfcWall' }] });
-  const r = await call('render_4d', { handle: np.handle, path: mkdtempSync(join(tmpdir(), 'p6-ng-out-')), kind: 'viewer' });
+  // render_4d meshes it again once (a failure may pass); still without its worker, it is refused in words
+  const r = await withEnv({ WHIQ_IFC_GEOM_WORKER: join(tmpdir(), 'no-such-worker.mjs') }, () => call('render_4d', { handle: np.handle, path: mkdtempSync(join(tmpdir(), 'p6-ng-out-')), kind: 'viewer' }));
   assert.equal(r.err, true);
   assert.equal(r.d.error.code, 'no_geometry');
   assert.match(r.d.error.reason, /no 3D geometry: geometry worker script not found/);

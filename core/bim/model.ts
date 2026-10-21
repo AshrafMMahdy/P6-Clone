@@ -11,7 +11,7 @@ import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, ne
 import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
 import { isRevit, rvtToIfc, type RevitSource } from './rvt.ts';
-import { isNavisworks, nwdToIfc, type NavisworksSource } from './nwd.ts';
+import { isNavisworks, navisworksBytes, nwdToIfc, type NavisworksSource } from './nwd.ts';
 
 export interface Model {
   hash: string; index: IfcIndex;
@@ -40,9 +40,10 @@ const indexBytes = (index: IfcIndex) => {
   const st = geomStore(index);
   return index.elements.length * ELEMENT_BYTES + (st?.rows?.byteLength ?? 0) + 8 * 1048576;
 };
-// an element rvt-rs could only place as its bounding box has no volume worth a quantity (a 2023 project: doors 22x,
-// railings 700x Revit's own IFC; walls drawn from their profile within 1%): placed and counted, never measured
-const boxOnly = (e: IfcElement) => /bbox/.test(String(e.props['RvtElementRecordGeometry.BodySource'] ?? '')) || e.props['P6Clone.Geometry'] === 'bounding boxes';
+// an element rvt-rs could only place as a box (its bounding box, or a turned or oriented box of a family instance) has
+// no volume worth a quantity (a 2023 project: doors 22x, railings 700x Revit's own IFC; walls drawn from their profile
+// within 1%): placed and counted, never measured
+const boxOnly = (e: IfcElement) => /box/i.test(String(e.props['RvtElementRecordGeometry.BodySource'] ?? '')) || e.props['P6Clone.Geometry'] === 'bounding boxes';
 const wrap = (hash: string, index: IfcIndex, tiles: string | null): Model => {
   for (const e of index.elements) if (boxOnly(e)) noVolume(e);
   return { hash, index, tiles: index.geometryStatus === 'ok' && tiles && readManifest(tiles) ? tiles : null, byGuid: elementsByGuid(index), bytes: indexBytes(index) };
@@ -56,6 +57,14 @@ type LoadOptions = { geometry?: boolean; chunkBytes?: number; hash?: string; onP
 /** Loads in flight, by file: a second caller waits for the first (two meshing runs of one model would share its tiles
  *  folder and fingerprints), and reads on only when that load did not give it what it asked for. */
 const inFlight = new Map<string, Promise<Model>>();
+/** The IFC a model file is read as: the file itself, or the IFC4 a Revit or Navisworks file was made into (from the
+ *  conversion cache, made again if it was pruned). Exports that carry the model's own file stream this one. */
+export async function ifcOf(path: string): Promise<string> {
+  if (isNavisworks(path)) return (await nwdToIfc(path)).ifc;
+  if (isRevit(path)) return (await rvtToIfc(path)).ifc;
+  return path;
+}
+
 export async function loadModel(path: string, o: LoadOptions = {}): Promise<Model> {
   const key = resolve(path);
   for (let p = inFlight.get(key); p; p = inFlight.get(key)) {
@@ -93,7 +102,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   const hash = o.hash ?? await fileHash(path);
   const want = o.geometry !== false;
   const hit = memory.get(cacheName(hash));
-  if (hit && (!want || hit.tiles || hit.index.geometryStatus === 'unavailable')) { hit.index.sourcePath = path; return hit; }
+  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; return hit; }
   const base = join(cacheDir(), cacheName(hash));
   setAsideOld(hash);
   let cached = hit ? { index: hit.index } : existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
@@ -255,12 +264,10 @@ const meshNeed = (bytes: number) => Math.round(bytes * MESH_PER_BYTE + MESH_FIXE
 export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; hash?: string } = {}): LoadNeeds {
   const size = existsSync(path) ? statSync(path).size : 0;
   // a Revit or Navisworks file is made into an IFC first: rvt-rs's process (419 MB for a 33.7 MB project), or the
-  // Navisworks model tree unpacked (about 7x) and held as objects; the IFC it makes is far smaller than either
-  if (isRevit(path) || isNavisworks(path)) {
-    const index = Math.round(size * (isRevit(path) ? 12 : 30)), chunk = o.geometry === false ? 0 : Math.min(size, chunkBytesOf());
-    const mesh = chunk ? meshNeed(chunk) : 0;
-    return { index, mesh, chunkBytes: chunk, total: index + mesh };
-  }
+  // Navisworks model tree unpacked (about 7x) and held as objects (an .nwf: every model it lists). This is that making;
+  // reading and meshing the IFC it makes is sized from that IFC (loadNeeds on it, once it is made)
+  if (isRevit(path)) { const index = size * 12; return { index, mesh: 0, chunkBytes: 0, total: index }; }
+  if (isNavisworks(path)) { const index = navisworksBytes(path) * 30; return { index, mesh: 0, chunkBytes: 0, total: index }; }
   const base = o.hash ? join(cacheDir(), cacheName(o.hash)) : null;
   const indexCached = !!(base && (memory.has(cacheName(o.hash!)) || existsSync(`${base}.ndjson`)));
   const tilesCached = !!(base && readManifest(`${base}.tiles`));
@@ -291,7 +298,7 @@ export function pruneCache(now = Date.now()): number {
   pruned = now;
   const dir = cacheDir(), days = Number(process.env.P6CLONE_MODEL_CACHE_DAYS) || 14, cap = (Number(process.env.P6CLONE_MODEL_CACHE_MB) || 10240) * 1048576;
   const sizeOf = (p: string): number => { try { const st = statSync(p); return st.isDirectory() ? readdirSync(p).reduce((n, f) => n + sizeOf(join(p, f)), 0) : st.size; } catch { return 0; } };
-  const files = readdirSync(dir).filter((f) => /\.(json|ndjson|geom|glb|tiles)$/.test(f)).map((f) => { const p = join(dir, f); try { const st = statSync(p); return { p, at: st.mtimeMs, size: sizeOf(p) }; } catch { return null; } }).filter((x): x is { p: string; at: number; size: number } => !!x).sort((a, b) => a.at - b.at);
+  const files = readdirSync(dir).filter((f) => /\.(json|ndjson|geom|glb|tiles|ifc)$/.test(f)).map((f) => { const p = join(dir, f); try { const st = statSync(p); return { p, at: st.mtimeMs, size: sizeOf(p) }; } catch { return null; } }).filter((x): x is { p: string; at: number; size: number } => !!x).sort((a, b) => a.at - b.at);
   let total = files.reduce((n, f) => n + f.size, 0), removed = 0;
   for (const f of files) {
     if (now - f.at < days * 86_400_000 && total <= cap) break;

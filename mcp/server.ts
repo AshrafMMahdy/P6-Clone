@@ -60,7 +60,7 @@ import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler }
 import { dayHours } from '../core/project/units.ts';
 import {
   ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
-  exclusive, change, changeAsync, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
+  exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
@@ -154,13 +154,14 @@ const writeOutWith = (p: string, make: (put: (piece: string | Uint8Array) => voi
     renameSync(tmp, p);
   } catch (e) {
     try { rmSync(tmp, { force: true }); } catch { /* gone */ }
-    if (e instanceof ToolError) throw e;
+    // the file system's refusals (EACCES, ENOSPC, EBUSY...) are the file's; anything else is a bug in the writer, said as one
+    if (e instanceof ToolError || !/^E[A-Z]+$/.test(String((e as { code?: unknown }).code ?? ''))) throw e;
     fail('file_unwritable', `Cannot write ${p}: ${(e as Error).message}.`, 'Check that the folder exists and the file is not open elsewhere.');
   }
 };
 /** One page of compare's changes: max_changes (default 500, at most 5,000) from offset; next_offset for the rest. */
 const changesPage = <T,>(all: T[], a: Record<string, any>) => {
-  const max = Math.min(5000, Number(a.max_changes) || 500), offset = Math.max(0, Math.floor(Number(a.offset) || 0));
+  const max = Math.min(5000, Math.max(1, Math.floor(Number(a.max_changes) || 500))), offset = Math.max(0, Math.floor(Number(a.offset) || 0));
   const changes = all.slice(offset, offset + max), next = offset + changes.length < all.length ? offset + changes.length : null;
   return { changes, truncated: next != null, ...(offset || next != null ? { offset, next_offset: next } : {}) };
 };
@@ -484,7 +485,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       }
       // a file compared against is read for this call only, and counted in the memory budget while it is held (C14)
       let release = () => {};
-      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); release = reserveMemory(estimateBytes(fileSize(p)), `Reading ${basename(p)} to compare with`, 'open the other file with open_file and compare with other_handle when there is room'); const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
+      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); release = reserveMemory(estimateBytes(fileSize(p)), `Reading ${basename(p)} to compare with`, 'open the other file with open_file and compare with other_handle when there is room'); try { const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; } catch (e) { release(); throw e; } })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
       try {
       if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return { mode: 'computed', changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }; }
       if (a.mode != null && a.mode !== 'all') fail('bad_input', 'mode must be all or computed.', 'Leave it out to compare everything.');
@@ -556,8 +557,13 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     if (np.isError) return np;
     const ws = np.out as { handle: string; owner_key: string };
     const r = await callTool('open_model', { ...a, handle: ws.handle, owner_key: ws.owner_key }, sessionCaller, signal, progress);
-    if (r.isError) { await callTool('close', { handle: ws.handle, owner_key: ws.owner_key, discard: true }, sessionCaller); return r; }
-    return { out: { ...(r.out as object), handle: ws.handle, owner_key: ws.owner_key, workspace: `model only: project ${id} holds no schedule; save it, or close it with discard: true, when done` }, isError: false };
+    const discard = () => callTool('close', { handle: ws.handle, owner_key: ws.owner_key, discard: true }, sessionCaller);
+    if (r.isError) { await discard(); return r; }
+    const mine = { handle: ws.handle, owner_key: ws.owner_key, workspace: `model only: project ${id} holds no schedule; save it, or close it with discard: true, when done` };
+    // a long open goes on as a job: its result carries the workspace, and a failure closes the workspace as above
+    const job = (r.out as { job_id?: string; status?: string }).status === 'running' ? (r.out as { job_id: string }).job_id : null;
+    if (job) followJob(job, (res) => (res && typeof res === 'object' ? { ...res, ...mine } : res), () => { void discard(); });
+    return { out: { ...(r.out as object), ...mine }, isError: false };
   }
   const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
   const work = async () => {

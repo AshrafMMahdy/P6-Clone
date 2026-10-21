@@ -46,7 +46,13 @@ export const MC_BYTES_PER_SAMPLE = 12;
 export const READ_PEAK: Record<string, number> = { xer: 5.5, xml: 6.5, mspdi: 16, mpp: 16, mpx: 5.5 };
 export const readPeak = (format: string, bytes: number) => Math.round((READ_PEAK[format] ?? 5.5) * bytes + 8 * MB);
 
-const activities = (s: Session) => s.db.tables.TASK?.rows.length ?? 0;
+/** The activities the work runs on: the file's projects, not the baselines stored in it */
+const activities = (s: Session) => {
+  const bl = new Set((s.db.tables.PROJECT?.rows ?? []).filter((p) => p._baseline_of).map((p) => p.proj_id));
+  let n = 0;
+  for (const t of s.db.tables.TASK?.rows ?? []) if (!bl.has(t.proj_id)) n++;
+  return n;
+};
 const mbs = (b: number) => `${Math.round(b / MB)} MB`;
 
 /** The memory a call on this project needs besides the project itself; null for a call that needs little. */
@@ -62,7 +68,7 @@ export function workNeed(tool: string, a: Record<string, any>, s: Session, free:
   if (!w) return null;
   let bytes = w.per * s.bytes + (w.fixed ?? 0), what = `${w.label} on this project (${n.toLocaleString('en-US')} activities)`, hint = w.hint;
   if (tool === 'monte_carlo') {
-    const it = Math.max(1, Math.floor(Number(a.iterations) || 1000));
+    const it = Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000))); // as monte_carlo runs it
     bytes += n * it * MC_BYTES_PER_SAMPLE;
     // how many iterations would fit in what is free now
     const fit = Math.floor((free() - w.per * s.bytes) / Math.max(1, n * MC_BYTES_PER_SAMPLE));

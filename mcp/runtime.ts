@@ -68,6 +68,8 @@ export function setRoot(dir: string | null): void { config.root = made(dir, true
 export function setRoots(read: string | null | undefined, write: string | null | undefined): void { config.readRoot = made(read, false); config.writeRoot = made(write, true); }
 /** Where writes go and relative write paths start: the write root, else the storage root. */
 export const writeBase = () => config.writeRoot ?? config.root;
+/** Whether this server fences the files it reads (a root, or a read root) */
+export const readFenced = () => fences('read').length > 0;
 const fences = (mode: 'read' | 'write') => (mode === 'write' ? [writeBase()] : config.readRoot || config.writeRoot ? [config.readRoot, writeBase()] : [config.root]).filter((x): x is string => !!x);
 /** A path argument, made absolute and kept inside the roots (when there are any), symlinks included. Reading: the read
  *  root or the write root; writing: the write root. A relative path is taken from the write root (reads: from the read
@@ -255,7 +257,7 @@ export const freeMemory = () => effectiveBudget() - usedBytes();
 /** Reserve memory for work that is not a project (refused like a file that does not fit); call the result to release.
  *  `what` names the work in the refusal ("Monte Carlo on this project"), `hint` says what else the caller can do. */
 export function reserveMemory(bytes: number, what?: string, hint?: string, keep?: string): () => void {
-  admit(bytes, keep, what, hint);
+  admit(bytes, keep, what, hint, false);
   reserved += bytes;
   let done = false;
   return () => { if (!done) { done = true; reserved -= bytes; } };
@@ -263,12 +265,15 @@ export function reserveMemory(bytes: number, what?: string, hint?: string, keep?
 
 /** Make room for a project or a call: refuse only when even moving every idle project out would not be enough. The
  *  refusal says what holds the memory, and asks to retry only when work in flight will give some back. */
-export function admit(bytes: number, keep?: string, what = 'This file', hint?: string): void {
+/** project: room for a new project (a slot as well as memory); a reservation for work (reserveMemory) needs memory only,
+ *  so it never moves a project out, or is refused, because the slots are full. */
+export function admit(bytes: number, keep?: string, what = 'This file', hint?: string, project = true): void {
   const budget = effectiveBudget();
   const byAge = () => [...sessions.values()].filter((s) => s.handle !== keep && !busy.has(s.handle)).sort((a, b) => a.lastUsed - b.lastUsed);
-  while ((sessions.size >= config.maxHandles || usedBytes() + bytes > budget) && byAge().length) { evict(byAge()[0], 'memory'); for (const t of trimmers) t(); }
+  const full = () => project && sessions.size >= config.maxHandles;
+  while ((full() || usedBytes() + bytes > budget) && byAge().length) { evict(byAge()[0], 'memory'); for (const t of trimmers) t(); }
   if (usedBytes() + bytes > budget) for (const t of trimmers) t();
-  if (sessions.size >= config.maxHandles) fail('handle_limit', `All ${config.maxHandles} project slots are busy right now.`, 'Retry shortly, or close a project you no longer need.', { retryAfter: 5 });
+  if (full()) fail('handle_limit', `All ${config.maxHandles} project slots are busy right now.`, 'Retry shortly, or close a project you no longer need.', { retryAfter: 5 });
   if (usedBytes() + bytes <= budget) return;
   const projects = [...sessions.values()].reduce((a, s) => a + s.bytes, 0), models = [...counters].reduce((a, f) => a + f(), 0);
   const running = reserved > 0 || [...busy].some((h) => h !== keep); // the call asking is not one to wait for
@@ -530,7 +535,7 @@ export function redo(s: Session, caller: string): { redone: string | null } {
 }
 
 // ---------------------------------------------------------------- jobs (long work the agent checks on)
-interface Job { id: string; tool: string; handle?: string; started: number; done?: number; result?: unknown; error?: ToolError | Error; progress?: string; abort?: AbortController }
+interface Job { id: string; tool: string; handle?: string; started: number; done?: number; result?: unknown; error?: ToolError | Error; progress?: string; abort?: AbortController; settle?: { ok: (r: unknown) => unknown; failed: () => void } }
 const jobs = new Map<string, Job>();
 /** Told when a job starts, moves (its progress) and ends: the stdio front answers job_status from it while the main
  *  thread is busy in a long step (stdio.ts). */
@@ -543,7 +548,7 @@ export function startJob(tool: string, handle: string | undefined, p: Promise<un
   Object.defineProperty(job, 'progress', { enumerable: true, get: () => progress, set: (v: string | undefined) => { progress = v; jobHook?.(job.id, jobView(job)); } });
   jobs.set(job.id, job);
   jobHook?.(job.id, jobView(job));
-  p.then((r) => { job.result = r; }, (e) => { job.error = e; }).finally(() => { job.done = Date.now(); jobHook?.(job.id, null); });
+  p.then((r) => { job.result = job.settle ? job.settle.ok(r) : r; }, (e) => { job.error = e; job.settle?.failed(); }).finally(() => { job.done = Date.now(); jobHook?.(job.id, null); });
   return job;
 }
 export function jobView(job: Job) {
@@ -551,6 +556,13 @@ export function jobView(job: Job) {
   if (!job.done) return { ...base, status: 'running', progress: job.progress, note: 'Call job_status again shortly (pass wait_seconds to wait up to 20 s).' };
   if (job.error) return { ...base, status: job.error instanceof ToolError && job.error.code === 'cancelled' ? 'cancelled' : 'failed', error: job.error instanceof ToolError ? { code: job.error.code, reason: job.error.message, next_step: job.error.hint, message: job.error.message, hint: job.error.hint } : { code: 'internal', reason: job.error.message, message: job.error.message } };
   return { ...base, status: 'done', result: job.result };
+}
+/** What a caller adds to a job's end: its result reshaped, or clean-up when it fails (now, if it already ended). */
+export function followJob(id: string, ok: (r: unknown) => unknown, failed: () => void): void {
+  const job = jobs.get(id);
+  if (!job) return;
+  if (!job.done) { job.settle = { ok, failed }; return; }
+  if (job.error) failed(); else job.result = ok(job.result);
 }
 export function getJob(id: unknown): Job {
   const j = jobs.get(String(id ?? ''));

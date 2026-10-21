@@ -10,7 +10,7 @@ import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { LobRefused, type LobModel } from '../core/lob/model.ts';
 import { applyLobOps, buildLocations, type LobOp } from '../core/lob/input.ts';
-import { expandLob } from '../core/lob/expand.ts';
+import { expandPlan } from '../core/lob/expand.ts';
 import { scheduleLob } from '../core/lob/pace.ts';
 import { isLobProject, loadLobModels, reconcile, saveLobOps } from '../core/lob/store.ts';
 import { lobView } from '../core/lob/view.ts';
@@ -77,8 +77,17 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
   const commit = async (d: Db, projId: string, m: LobModel, previous: LobModel | null) => {
     // in steps, each a yield (server_status and cancel_job answer between them; cancelled: nothing is kept, L-3)
     await h.tick(0, 3, 'expanding the plan into activities and logic');
-    const ex = expandLob(d, projId, m, { hoursPerDay: s.hpd, previous });
-    if (!ex.ok) throw new LobRefused(ex.error!);
+    const plan = expandPlan(d, projId, m, { hoursPerDay: s.hpd, previous });
+    if (!plan.res.ok) throw new LobRefused(plan.res.error!);
+    // applied in batches, a yield between: a plan of thousands of activities does not hold the server (L-3)
+    const BATCH = 2000;
+    for (let k = 0; k < plan.ops.length; k += BATCH) {
+      if (k) await h.tick(0, 3, `expanding the plan: ${k.toLocaleString('en')} of ${plan.ops.length.toLocaleString('en')} edits`);
+      const r = applyOps(d, plan.ops.slice(k, k + BATCH) as Parameters<typeof applyOps>[1], { hoursPerDay: s.hpd });
+      if (!r.ok) throw new LobRefused(r.error!.message);
+    }
+    plan.after();
+    const ex = plan.res;
     await h.tick(1, 3, 'saving the plan into the file');
     const sv = applyOps(d, saveLobOps(d, projId, m), { hoursPerDay: s.hpd });
     if (!sv.ok) throw new LobRefused(sv.error!.message);

@@ -2,13 +2,13 @@
 // item is the item's position in the model tree in pre-order (the file itself is 0); its box (class 0x5d) is the piece's
 // bounding box in its own frame, a translation and the number of its geometry block (a box another fragment points
 // back to is the same geometry placed again); its transform (class 0x0e translation, 0x0f translation and quaternion,
-// 0x11 matrix and translation) places it, else the box's translation does.
+// 0x10 those and a uniform scale, 0x11 matrix and translation) places it, else the box's translation does.
 //
 // Each piece's triangles come from its geometry block (mesh.ts); a block that cannot be read is drawn as its placed box.
 import type { NwNode, NwTree } from './tree.ts';
 import type { Mesh } from './mesh.ts';
 
-interface Frag { item: number; prim: number; xform: { cls: number; t: number[]; q?: number[]; m?: number[] } | null; box: { bbox: number[]; t: number[]; geom: number } | null }
+interface Frag { item: number; prim: number; xform: { cls: number; t: number[]; q?: number[]; s?: number; m?: number[] } | null; box: { bbox: number[]; t: number[]; geom: number } | null }
 
 export interface ElementShape { positions: number[]; triangles: number[]; boxes: number }
 const BOX = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7];
@@ -50,6 +50,7 @@ function placer(f: Frag): (p: number[]) => number[] {
   if (!x) { const t = f.box!.t; return (p) => [p[0] + t[0], p[1] + t[1], p[2] + t[2]]; }
   const t = x.t;
   if (x.cls === 0x0f && x.q) { const [qx, qy, qz, qw] = x.q; return (p) => add(rotate(p, qx, qy, qz, qw), t); }
+  if (x.cls === 0x10 && x.q) { const [qx, qy, qz, qw] = x.q, k = x.s ?? 1; return (p) => add(rotate([p[0] * k, p[1] * k, p[2] * k], qx, qy, qz, qw), t); }
   if (x.cls === 0x11 && x.m) { const m = x.m; return (p) => [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + t[0], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + t[1], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + t[2]]; }
   return (p) => add(p, t);
 }

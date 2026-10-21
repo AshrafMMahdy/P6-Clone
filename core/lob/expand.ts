@@ -89,14 +89,17 @@ function minuteDurations(d: Map<string, number>, hpd: number): Map<string, numbe
 
 /** Bring the project's activities and relationships in line with the model. */
 /** previous: the model as last expanded, so links it had to other projects are taken back when they are gone. */
-export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay: number; previous?: LobModel | null }): ExpandResult {
+/** The plan's activities, codes, UDFs and relationships, as one list of edit operations; after() runs once they are
+ *  applied (the trade values no activity carries any more go). The caller applies them: at once (expandLob), or in
+ *  batches with a yield between (the MCP server, so a big plan does not hold the server, L-3). */
+export function expandPlan(db: Db, projId: string, m: LobModel, o: { hoursPerDay: number; previous?: LobModel | null }): { res: ExpandResult; ops: unknown[]; after: () => void } {
   const proj = rows(db, 'PROJECT').find((p) => p.proj_id === projId)!;
   const P = proj.proj_short_name;
   const res: ExpandResult = { ok: true, added: 0, updated: 0, deleted: 0, keptWithProgress: [], relationships: { added: 0, updated: 0, deleted: 0 } };
   const ops: unknown[] = [];
   // P6 holds an Activity ID of 40 characters: a longer <task>-<location> is refused before anything is made (L-7)
   const long = m.tasks.flatMap((t) => t.order.map((c) => activityId(t.code, c))).filter((id) => id.length > 40);
-  if (long.length) return { ...res, ok: false, error: `${long.length} Activity ID${long.length === 1 ? '' : 's'} would pass P6's 40 characters (${long.slice(0, 3).join(', ')}${long.length > 3 ? ', ...' : ''}): shorten the task or location codes.` };
+  if (long.length) return { ops: [], after: () => {}, res: { ...res, ok: false, error: `${long.length} Activity ID${long.length === 1 ? '' : 's'} would pass P6's 40 characters (${long.slice(0, 3).join(', ')}${long.length > 3 ? ', ...' : ''}): shorten the task or location codes.` } };
   // codes and UDFs (made once, reused after)
   const codeType = (name: string) => rows(db, 'ACTVTYPE').find((t) => t.actv_code_type === name);
   if (!codeType(LOB_CODES.location)) ops.push({ op: 'add_code_type', name: LOB_CODES.location, max_length: 60 });
@@ -179,12 +182,22 @@ export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay:
     if ((owned.has(a.task_id) && !want.has(a.task_code) && a.proj_id === projId) || (owned.has(b.task_id) && !want.has(b.task_code) && b.proj_id === projId)) continue;
     ops.push({ op: 'delete_relationship', pred: a.task_code, succ: b.task_code, pred_project: projCode.get(a.proj_id), succ_project: projCode.get(b.proj_id), type: r.pred_type.replace('PR_', '') }); res.relationships.deleted++;
   }
-  const r = applyOps(db, ops, { hoursPerDay: o.hoursPerDay });
-  if (!r.ok) return { ...res, ok: false, error: r.error!.message };
-  // a trade renamed or gone: its old code value goes once no activity in the file carries it (the old name stays nowhere)
-  const now = new Set(m.tasks.map((t) => t.trade.slice(0, 60)));
-  const used = new Set(rows(db, 'TASKACTV').map((a) => a.actv_code_id));
-  const stale = valueRows(LOB_CODES.trade).filter((v) => !now.has(v.short_name) && !used.has(v.actv_code_id) && o.previous?.tasks.some((t) => t.trade.slice(0, 60) === v.short_name));
-  if (stale.length) applyOps(db, stale.map((v) => ({ op: 'delete_code_value', type: LOB_CODES.trade, code: v.short_name })), { hoursPerDay: o.hoursPerDay });
-  return res;
+  const after = () => {
+    // a trade renamed or gone: its old code value goes once no activity in the file carries it (the old name stays nowhere)
+    const now = new Set(m.tasks.map((t) => t.trade.slice(0, 60)));
+    const used = new Set(rows(db, 'TASKACTV').map((a) => a.actv_code_id));
+    const stale = valueRows(LOB_CODES.trade).filter((v) => !now.has(v.short_name) && !used.has(v.actv_code_id) && o.previous?.tasks.some((t) => t.trade.slice(0, 60) === v.short_name));
+    if (stale.length) applyOps(db, stale.map((v) => ({ op: 'delete_code_value', type: LOB_CODES.trade, code: v.short_name })), { hoursPerDay: o.hoursPerDay });
+  };
+  return { res, ops, after };
+}
+
+/** expandPlan applied at once. */
+export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay: number; previous?: LobModel | null }): ExpandResult {
+  const p = expandPlan(db, projId, m, o);
+  if (!p.res.ok) return p.res;
+  const r = applyOps(db, p.ops, { hoursPerDay: o.hoursPerDay });
+  if (!r.ok) return { ...p.res, ok: false, error: r.error!.message };
+  p.after();
+  return p.res;
 }

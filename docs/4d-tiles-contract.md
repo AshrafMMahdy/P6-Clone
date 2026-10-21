@@ -1,6 +1,6 @@
 # 4D display tiles: the contract with the White Hat IQ platform
 
-Status: built in the clone (INDEX_FORMAT 10, tiles format `p6c-4d-tiles` version 1). This is what the platform serves
+Status: built in the clone (INDEX_FORMAT 11, tiles format `p6c-4d-tiles` version 1). This is what the platform serves
 and listens for; the platform side is not changed by the clone. Code: `core/bim/tiles.ts` (layout),
 `core/bim/geomTiles.mjs` (writer), `viewer4d/viewer.ts` (the page), `core/bim/render4d.ts` (what render_4d writes),
 `core/bim/model.ts` (memory).
