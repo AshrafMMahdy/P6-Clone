@@ -532,10 +532,18 @@ export function redo(s: Session, caller: string): { redone: string | null } {
 // ---------------------------------------------------------------- jobs (long work the agent checks on)
 interface Job { id: string; tool: string; handle?: string; started: number; done?: number; result?: unknown; error?: ToolError | Error; progress?: string; abort?: AbortController }
 const jobs = new Map<string, Job>();
+/** Told when a job starts, moves (its progress) and ends: the stdio front answers job_status from it while the main
+ *  thread is busy in a long step (stdio.ts). */
+let jobHook: ((id: string, view: ReturnType<typeof jobView> | null) => void) | null = null;
+export function onJobChange(f: typeof jobHook): void { jobHook = f; }
 export function startJob(tool: string, handle: string | undefined, p: Promise<unknown>, abort?: AbortController): Job {
   const job: Job = { id: token('job_', 12), tool, handle, started: Date.now(), abort };
+  // progress is set as the work goes (often inside a long synchronous step): each change is passed on at once
+  let progress: string | undefined;
+  Object.defineProperty(job, 'progress', { enumerable: true, get: () => progress, set: (v: string | undefined) => { progress = v; jobHook?.(job.id, jobView(job)); } });
   jobs.set(job.id, job);
-  p.then((r) => { job.result = r; }, (e) => { job.error = e; }).finally(() => { job.done = Date.now(); });
+  jobHook?.(job.id, jobView(job));
+  p.then((r) => { job.result = r; }, (e) => { job.error = e; }).finally(() => { job.done = Date.now(); jobHook?.(job.id, null); });
   return job;
 }
 export function jobView(job: Job) {
