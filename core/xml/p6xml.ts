@@ -17,6 +17,9 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 /** The document tree. With `split`, an element split(parents, name) names (parents: the open elements' names, outside
  *  in) is handed to `emit` as soon as it closes and is not kept in the tree: a big document is held one element at a
  *  time, never whole (elements inside a split one are not split again). */
+/** A string of its own: a value cut from a big document would otherwise keep the whole document alive (V8 keeps a
+ *  piece of 13 characters or more as a view of the string it was cut from). */
+const own = (s: string) => (s.length < 13 ? s : (s + ' ').slice(0, -1));
 export function parseXml(text: string, split?: (parents: string[], name: string) => boolean, emit?: (parents: string[], n: XNode) => void, onRoot?: (root: XNode) => void): XNode {
   const root: XNode = { name: '#root', children: [], text: '' };
   onRoot?.(root);
@@ -40,7 +43,7 @@ export function parseXml(text: string, split?: (parents: string[], name: string)
       if (!cut) top.children.push(n);
       if (!m[5]) { stack.push(n); names.push(n.name); if (cut) inSplit = stack.length; }
       else { n.e = re.lastIndex; if (cut) emit!(names, n); }
-    } else if (m[6] != null) { if (!split || inSplit || /\S/.test(m[6])) top.text += unesc(m[6]); } // (the whitespace between kept elements is not kept)
+    } else if (m[6] != null) { if (!split) top.text += unesc(m[6]); else if (inSplit || /\S/.test(m[6])) top.text += own(unesc(m[6])); } // (the whitespace between kept elements is not kept)
   }
   if (stack.length > 1) throw new Error(`unclosed <${stack[stack.length - 1].name}>`);
   return root;
