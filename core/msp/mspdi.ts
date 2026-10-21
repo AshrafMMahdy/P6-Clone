@@ -95,8 +95,10 @@ export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
   const empty: Db = { tables: {} };
   let root: XNode;
   const src = text.replace(/^﻿/, '');
+  // read as it goes: each task, resource and assignment is read as soon as it closes and let go (readProject)
+  const reader = projectReader(findings, src);
   try {
-    root = parseXml(src);
+    root = parseXml(src, reader.split, reader.emit, reader.onRoot);
   } catch (e) {
     findings.push({ severity: 'fatal', code: 'XML_PARSE', message: `XML is not well formed: ${(e as Error).message}.`, p6: 'P6 rejects the file.' });
     return { db: empty, findings };
@@ -107,7 +109,7 @@ export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
     return { db: empty, findings };
   }
   try {
-    const m = readProject(p, findings, src);
+    const m = reader.finish(p);
     if (!m.tasks.length) findings.push({ severity: 'warning', code: 'MSP_NO_TASKS', message: 'The Microsoft Project file contains no tasks.', p6: 'P6 imports an empty project.' });
     const db = projectToDb(m, findings, 'The Microsoft Project XML file');
     snapshotKept(db);
@@ -121,17 +123,23 @@ export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
   }
 }
 
-function readProject(p: XNode, findings: Finding[], src: string): MProject {
-  const minutesPerDay = num(val(p, 'MinutesPerDay')) || 480;
+/** The project read element by element: the project's own fields, its custom fields and its calendars when the first
+ *  task, resource or assignment arrives (Microsoft Project writes them first), then each of those as it closes. */
+function projectReader(findings: Finding[], src: string) {
+  let doc: XNode | null = null, p: XNode | null = null, headDone = false;
+  let minutesPerDay = 480;
   // every element is also kept as written, so what the model does not hold goes back into the file unchanged (keep.ts)
   const raw = (n: XNode) => src.slice(n.s, n.e);
   const kidsOf = (n: XNode): [string, string][] => n.children.map((c) => [c.name, raw(c)]);
   const ghosts: Ghosts = { tasks: [], resources: [], assignments: [], calendars: [] };
   const hrs = (s: string) => (s ? isoDurationHours(s, minutesPerDay) : null);
-
-  // custom field aliases
   const extKey = new Map<string, keyof P6Extra | 'rsrcType'>();
   let p6rules: { ver: string; legacy: boolean; known: boolean } | null = null;
+  const calendars: MCal[] = [];
+  const head = (p: XNode) => {
+  headDone = true;
+  minutesPerDay = num(val(p, 'MinutesPerDay')) || 480;
+  // custom field aliases
   for (const e of kids(child(p, 'ExtendedAttributes'), 'ExtendedAttribute')) {
     const alias = val(e, 'Alias');
     const hit = TASK_TEXT.find((x) => x[3] === alias);
@@ -142,7 +150,6 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
   }
 
   // calendars
-  const calendars: MCal[] = [];
   for (const c of kids(child(p, 'Calendars'), 'Calendar')) {
     const uid = val(c, 'UID');
     if (!uid) continue;
@@ -173,16 +180,19 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
     cal.keep = { kids: [], xml: raw(c), seq: calendars.length };
     calendars.push(cal);
   }
+  };
 
   // tasks
   const tasks: MTask[] = [];
   const lagFormats = new Set<string>();
-  for (const [i, t] of kids(child(p, 'Tasks'), 'Task').entries()) {
+  let taskNo = 0;
+  const task = (t: XNode) => {
+    const i = taskNo++;
     const uid = val(t, 'UID');
     const seq = num(val(t, 'ID')) ?? i;
     // the project summary task (UID 0) and blank rows are not activities: kept as they are, in their place
-    if (flag(val(t, 'IsNull')) || uid === '0' || val(t, 'OutlineLevel') === '0') { if (uid) ghosts.tasks.push({ seq, uid, xml: raw(t) }); continue; }
-    if (!uid) continue;
+    if (flag(val(t, 'IsNull')) || uid === '0' || val(t, 'OutlineLevel') === '0') { if (uid) ghosts.tasks.push({ seq, uid, xml: raw(t) }); return; }
+    if (!uid) return;
     const m = emptyTask(uid, num(val(t, 'ID')) ?? tasks.length + 1);
     m.keep = { kids: kidsOf(t), xml: '', seq, id: val(t, 'ID') };
     const outline = val(t, 'OutlineNumber');
@@ -236,20 +246,16 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
       m.links[m.links.length - 1] = m.preds[m.preds.length - 1];
     }
     tasks.push(m);
-  }
-  tasks.sort((a, b) => a.id - b.id);
-  // percentage lags: percent of the predecessor's duration
-  const byUid = new Map(tasks.map((t) => [t.uid, t]));
-  for (const t of tasks) for (const l of t.preds) if (l.lagPct != null) l.lagHrs = (l.lagPct / 100) * (byUid.get(l.uid)?.durHrs ?? 0);
-  if (lagFormats.has('elapsed')) findings.push({ severity: 'info', code: 'MSP_ELAPSED_LAG', table: 'TASKPRED', message: 'Some links use elapsed lags; they were converted to working-hour lags.', p6: 'P6 has no elapsed lags; P6 converts them and counts lags on the scheduling option\'s lag calendar.' });
-  if (lagFormats.has('percent')) findings.push({ severity: 'info', code: 'MSP_PERCENT_LAG', table: 'TASKPRED', message: 'Some links use percentage lags; they were converted to hours of the predecessor\'s duration.', p6: 'P6 has no percentage lags.' });
+  };
 
   // resources
   const resources: MRes[] = [];
-  for (const [seq, r] of kids(child(p, 'Resources'), 'Resource').entries()) {
+  let resNo = 0;
+  const resource = (r: XNode) => {
+    const seq = resNo++;
     const uid = val(r, 'UID');
     const name = val(r, 'Name');
-    if (flag(val(r, 'IsNull')) || !uid || (uid === '0' && !name)) { if (uid) ghosts.resources.push({ seq, uid, xml: raw(r) }); continue; }
+    if (flag(val(r, 'IsNull')) || !uid || (uid === '0' && !name)) { if (uid) ghosts.resources.push({ seq, uid, xml: raw(r) }); return; }
     const t = num(val(r, 'Type')) ?? 1;
     const cu = val(r, 'CalendarUID');
     let p6Type: string | undefined;
@@ -258,25 +264,43 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
     let rate = num(val(r, 'StandardRate'));
     // StandardRateFormat: 1 per minute, 2 hour, 3 day, 4 week, 5 month (8 h days assumed for day/week/month)
     if (rate != null && t !== 0) rate = fmt === 1 ? rate * 60 : fmt === 3 ? rate / (minutesPerDay / 60) : fmt === 4 ? rate / (minutesPerDay / 12) : fmt === 5 ? rate / (minutesPerDay / 3) : rate;
+    resType?.set(uid, t === 0 ? 'material' : t === 2 ? 'cost' : 'work'); // (an assignment written before its resource)
     resources.push({ uid, id: num(val(r, 'ID')) ?? resources.length + 1, name, code: val(r, 'Code') || val(r, 'Initials'), type: t === 0 ? 'material' : t === 2 ? 'cost' : 'work', maxUnits: num(val(r, 'MaxUnits')), rate, calUid: cu && cu !== '-1' ? cu : '', p6Type, keep: { kids: kidsOf(r), xml: '', seq, id: val(r, 'ID') } });
-  }
+  };
 
   // assignments
-  const resType = new Map(resources.map((r) => [r.uid, r.type]));
+  let resType: Map<string, MRes['type']> | null = null;
   const assignments: MAssign[] = [];
-  for (const [seq, a] of kids(child(p, 'Assignments'), 'Assignment').entries()) {
+  let asgNo = 0;
+  const assignment = (a: XNode) => {
+    const seq = asgNo++;
+    resType ??= new Map(resources.map((r) => [r.uid, r.type]));
     const uid = val(a, 'UID');
-    if (!uid) continue;
+    if (!uid) return;
     const ru = val(a, 'ResourceUID');
     const work = hrs(val(a, 'Work'));
     assignments.push({
-      uid, taskUid: val(a, 'TaskUID'), resUid: ru, units: resType.get(ru) === 'material' && work != null ? null : num(val(a, 'Units')),
+      uid, taskUid: val(a, 'TaskUID'), resUid: ru, units: resType!.get(ru) === 'material' && work != null ? null : num(val(a, 'Units')),
       workHrs: work, actualWorkHrs: hrs(val(a, 'ActualWork')), remainingWorkHrs: hrs(val(a, 'RemainingWork')),
       cost: num(val(a, 'Cost')), actualCost: num(val(a, 'ActualCost')), remainingCost: num(val(a, 'RemainingCost')),
       start: toP6Date(val(a, 'Start')), finish: toP6Date(val(a, 'Finish')), actualStart: toP6Date(val(a, 'ActualStart')), actualFinish: toP6Date(val(a, 'ActualFinish')),
       keep: { kids: kidsOf(a), xml: raw(a), seq },
     });
-  }
+  };
+
+  const split = (parents: string[], name: string) => parents.length === 2 && parents[0] === 'Project' && ((parents[1] === 'Tasks' && name === 'Task') || (parents[1] === 'Resources' && name === 'Resource') || (parents[1] === 'Assignments' && name === 'Assignment'));
+  const emit = (_parents: string[], n: XNode) => {
+    if (!headDone) { p = doc?.children.find((c) => c.name === 'Project') ?? null; if (p) head(p); }
+    if (n.name === 'Task') task(n); else if (n.name === 'Resource') resource(n); else assignment(n);
+  };
+  const finish = (p: XNode): MProject => {
+  if (!headDone) head(p);
+  tasks.sort((a, b) => a.id - b.id);
+  // percentage lags: percent of the predecessor's duration
+  const byUid = new Map(tasks.map((t) => [t.uid, t]));
+  for (const t of tasks) for (const l of t.preds) if (l.lagPct != null) l.lagHrs = (l.lagPct / 100) * (byUid.get(l.uid)?.durHrs ?? 0);
+  if (lagFormats.has('elapsed')) findings.push({ severity: 'info', code: 'MSP_ELAPSED_LAG', table: 'TASKPRED', message: 'Some links use elapsed lags; they were converted to working-hour lags.', p6: 'P6 has no elapsed lags; P6 converts them and counts lags on the scheduling option\'s lag calendar.' });
+  if (lagFormats.has('percent')) findings.push({ severity: 'info', code: 'MSP_PERCENT_LAG', table: 'TASKPRED', message: 'Some links use percentage lags; they were converted to hours of the predecessor\'s duration.', p6: 'P6 has no percentage lags.' });
 
   const sip = val(p, 'SplitsInProgressTasks');
   return {
@@ -290,6 +314,8 @@ function readProject(p: XNode, findings: Finding[], src: string): MProject {
     // (a file the clone wrote before it named the rules: P6 5-7 builds leave dates one minute into or before a period)
     rules: p6rules ?? (extKey.size > 0 ? { ver: '', legacy: tasks.some((t) => [t.earlyStart, t.earlyFinish, t.lateStart, t.lateFinish].some((d) => /:(01|59)$/.test(d))), known: true } : { resume: val(p, 'MoveRemainingStartsForward') !== '1' && val(p, 'MoveRemainingStartsForward').toLowerCase() !== 'true' }),
   };
+  };
+  return { split, emit, finish, onRoot: (r: XNode) => { doc = r; } };
 }
 
 // ---------- writer
