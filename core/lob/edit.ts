@@ -68,7 +68,7 @@ function diff(task: string, a: Map<string, number | string | null>, b: Map<strin
 export type LobEdit =
   | { op: 'set_crew'; task: string; segment?: number; crews?: number; crew_size?: number; productivity?: number }
   | { op: 'set_rate'; task: string; segment?: number; rate: number }
-  | { op: 'set_duration'; task: string; segment?: number; days: number }
+  | { op: 'set_duration'; task: string; segment?: number; days: number; crew_follows?: boolean }
   | { op: 'set_driver'; task: string; segment?: number; driver: Driver }
   | { op: 'set_timing'; task: string; segment?: number; timing: Timing }
   | { op: 'set_quantity'; task: string; item?: string; location: string; quantity: number }
@@ -103,8 +103,10 @@ export function edit(m0: LobModel, op: LobEdit): { model: LobModel; changes: Lob
     case 'set_rate': { const s = seg(op.segment); if (s.driver !== 'rate') throw new LobRefused(held[s.driver]); s.rate = positive(op.rate, 'rate'); break; }
     case 'set_duration': {
       const s = seg(op.segment);
-      // dragging a line's end: under the crew driver the crew follows (the driver stays crew)
+      // under the crew driver the crew is held: refused, unless crew_follows says to size the crew to the duration
+      // (dragging a line's end in the desktop; the driver stays crew and the new crew is reported), L-9
       if (s.driver === 'rate') throw new LobRefused(held.rate);
+      if (s.driver === 'crew' && op.crew_follows !== true) throw new LobRefused(`${held.crew} (or pass crew_follows: true to size the crew to the duration)`);
       const days = positive(op.days, 'days');
       if (s.driver === 'crew') { s.driver = 'duration'; s.duration = days; derive(m, t, s); s.driver = 'crew'; delete s.duration; } else { s.duration = days; }
       derive(m, t, s);

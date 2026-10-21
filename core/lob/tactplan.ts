@@ -1,7 +1,8 @@
 // Tactplan exchange. Tactplan (Vico Office's successor) has no project file: each grid goes in and out as a CSV or a
 // clipboard table. Layouts from its 2.5.1 import dialogs and a real Grid export:
 //   Locations: Id, Name, Level, Location level (the tree in row order; level 0 is the root "Project")
-//   Grid: Id, Name, Code, Start date, Finish date, Color, ASAP, Paced, Milestone, Location precision, then a column per
+//   Grid: Id, Name, Code, Start date, Finish date, Color, ASAP, Paced, Milestone, Trade (the clone's; Tactplan leaves an
+//         unmapped column out), Location precision, then a column per
 //         location under a header of one row per level (the level legend "Floor (2)" down the precision column, each
 //         location's path down its column); one row per subtask; durations in days; empty = not in the task, * = in
 //         another subtask of the same task
@@ -17,7 +18,8 @@ import { TRADE_COLOURS } from './svg.ts';
 export type DateFormat = 'dd/MM/yyyy' | 'MM/d/yyyy' | 'd/MM/yyyy' | 'yyyy/MM/dd';
 const fmtDate = (iso: string, f: DateFormat) => { const [y, m, d] = iso.slice(0, 10).split('-'); const dd = String(Number(d)), mm = String(Number(m)); return f === 'dd/MM/yyyy' ? `${d}/${m}/${y}` : f === 'MM/d/yyyy' ? `${m}/${dd}/${y}` : f === 'd/MM/yyyy' ? `${dd}/${m}/${y}` : `${y}/${m}/${d}`; };
 
-export function writeTactplan(m: LobModel, o: { decimal: 'dot' | 'comma'; date: string }): { name: string; text: string }[] {
+/** scheduled: the plan as scheduled (lob_view's tasks), so each subtask carries its start and finish dates (L-5). */
+export function writeTactplan(m: LobModel, o: { decimal: 'dot' | 'comma'; date: string; scheduled?: { code: string; locations: [string, string | null, string | null, number][] }[] }): { name: string; text: string }[] {
   const sep = o.decimal === 'comma' ? ';' : ',', date = (['dd/MM/yyyy', 'MM/d/yyyy', 'd/MM/yyyy', 'yyyy/MM/dd'].includes(o.date) ? o.date : 'dd/MM/yyyy') as DateFormat;
   const num = (x: number) => { const s = String(Math.round(x * 1000) / 1000); return o.decimal === 'comma' ? s.replace('.', ',') : s; };
   const cell = (v: string) => (/["\n;,]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
@@ -39,13 +41,16 @@ export function writeTactplan(m: LobModel, o: { decimal: 'dot' | 'comma'; date: 
     return [...levelRows, line([...fixed, ...cols.map(() => '')])];
   };
   const trades = [...new Set(m.tasks.map((t) => t.trade))];
-  const grid = header(['Id', 'Name', 'Code', 'Start date', 'Finish date', 'Color', 'ASAP', 'Paced', 'Milestone', 'Location precision']);
+  const grid = header(['Id', 'Name', 'Code', 'Start date', 'Finish date', 'Color', 'ASAP', 'Paced', 'Milestone', 'Trade', 'Location precision']);
+  const at = new Map((o.scheduled ?? []).flatMap((t) => t.locations.map(([c, s, f]) => [`${t.code}|${c}`, [s, f] as const])));
   for (const t of m.tasks) {
     const d = locationDurations(m, t);
     t.segments.forEach((s, k) => {
       const mine = new Set(t.order.slice(t.order.indexOf(s.from), t.order.indexOf(s.to) + 1));
       const colour = `${TRADE_COLOURS[trades.indexOf(t.trade) % TRADE_COLOURS.length]}ff`;
-      grid.push(line(['', t.name, t.code, s.start ? fmtDate(s.start, date) : '', '', colour, s.timing === 'paced' ? 'FALSE' : 'TRUE', s.timing === 'asap' ? 'FALSE' : 'TRUE', 'FALSE', String(t.precision), ...cols.map((c) => (mine.has(c.code) ? (d.has(c.code) ? num(d.get(c.code)!) : '0') : t.order.includes(c.code) ? '*' : ''))]));
+      const days = [...mine].map((c) => at.get(`${t.code}|${c}`)).filter(Boolean) as (readonly [string | null, string | null])[];
+      const first = days.map((x) => x[0]).filter(Boolean).sort()[0] ?? s.start ?? '', last = days.map((x) => x[1]).filter(Boolean).sort().at(-1) ?? '';
+      grid.push(line(['', t.name, t.code, first ? fmtDate(first, date) : '', last ? fmtDate(last, date) : '', colour, s.timing === 'paced' ? 'FALSE' : 'TRUE', s.timing === 'asap' ? 'FALSE' : 'TRUE', 'FALSE', t.trade, String(t.precision), ...cols.map((c) => (mine.has(c.code) ? (d.has(c.code) ? num(d.get(c.code)!) : '') : t.order.includes(c.code) ? '*' : ''))]));
       void k;
     });
   }
@@ -61,20 +66,36 @@ export function writeTactplan(m: LobModel, o: { decimal: 'dot' | 'comma'; date: 
 }
 
 // ── reading ──────────────────────────────────────────────────────────────────────────────────────────────────────
-function parseTable(text: string): string[][] {
+type Line = string[] & { line: number };
+/** A CSV's text whatever it was saved in: UTF-8 (with or without BOM), UTF-16 (BOM), else Windows-1256 when the bytes
+ *  read as Arabic, else Windows-1252 (L-5). */
+export function decodeText(b: Uint8Array): string {
+  if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) return new TextDecoder('utf-8').decode(b.subarray(3));
+  if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder('utf-16le').decode(b.subarray(2));
+  if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder('utf-16be').decode(b.subarray(2));
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch { /* a legacy code page */ }
+  // Arabic letters sit at 0xC1-0xFE in 1256, where 1252 has accented Latin: an Arabic word is a run of such bytes, an
+  // accent sits between ASCII letters (café)
+  const letter = (x: number) => (x | 0x20) >= 0x61 && (x | 0x20) <= 0x7a;
+  let runs = 0, mixed = 0;
+  for (let i = 1; i < b.length; i++) if (b[i] >= 0xc1) { if (b[i - 1] >= 0xc1) runs++; else if (letter(b[i - 1]) || letter(b[i + 1] ?? 0)) mixed++; }
+  return new TextDecoder(runs > mixed ? 'windows-1256' : 'windows-1252').decode(b);
+}
+function parseTable(text: string): Line[] {
   const first = text.split(/\r?\n/)[0] ?? '';
   const sep = (first.match(/\t/g)?.length ?? 0) > 0 ? '\t' : (first.match(/;/g)?.length ?? 0) > (first.match(/,/g)?.length ?? 0) ? ';' : ',';
-  const out: string[][] = [];
-  let row: string[] = [], cur = '', q = false;
+  const out: Line[] = [];
+  let row: string[] = [], cur = '', q = false, ln = 1, start = 1;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
+    if (c === '\n') ln++;
     if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; continue; }
     if (c === '"') q = true;
     else if (c === sep) { row.push(cur); cur = ''; }
-    else if (c === '\n') { row.push(cur.replace(/\r$/, '')); out.push(row); row = []; cur = ''; }
+    else if (c === '\n') { row.push(cur.replace(/\r$/, '')); out.push(Object.assign(row, { line: start })); row = []; cur = ''; start = ln; }
     else cur += c;
   }
-  if (cur || row.length) { row.push(cur.replace(/\r$/, '')); out.push(row); }
+  if (cur || row.length) { row.push(cur.replace(/\r$/, '')); out.push(Object.assign(row, { line: start })); }
   return out.filter((r) => r.some((x) => x.trim() !== ''));
 }
 const numOf = (s: string) => { const t = s.trim().replace(/\s/g, ''); if (!t) return NaN; return Number(/,\d{1,3}$/.test(t) && !/\.\d/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,(?=\d{3}\b)/g, '')); };
@@ -95,7 +116,8 @@ export function readTactplan(path: string): { model: LobModel; start: string | n
   const gridFile = find(/grid/i) ?? find(/\.(csv|tsv|txt)$/i);
   if (!gridFile) throw new Error('No Tactplan Grid export (Grid.csv) found.');
   const notes: string[] = ['Tactplan exports no dependencies: add the links between trades with lob_edit add_link.'];
-  const grid = parseTable(readFileSync(gridFile, 'utf8'));
+  const grid = parseTable(decodeText(readFileSync(gridFile)));
+  const gridName = gridFile.replace(/^.*[\\/]/, '');
   const hi = grid.findIndex((r) => r.some((c) => /^location precision$/i.test(c.trim())));
   if (hi < 0) throw new Error(`${gridFile}: no "Location precision" column; not a Tactplan Grid export.`);
   const head = grid[hi].map((c) => c.trim().toLowerCase());
@@ -122,7 +144,7 @@ export function readTactplan(path: string): { model: LobModel; start: string | n
   // a Locations export, when there, adds the locations no task runs at
   const locFile = find(/location/i);
   if (locFile) {
-    const L = parseTable(readFileSync(locFile, 'utf8'));
+    const L = parseTable(decodeText(readFileSync(locFile)));
     const h = L[0].map((c) => c.trim().toLowerCase()), ni = h.indexOf('name'), li = h.indexOf('level'), lli = h.indexOf('location level');
     const stack: string[] = [];
     for (const r of L.slice(1)) {
@@ -145,13 +167,17 @@ export function readTactplan(path: string): { model: LobModel; start: string | n
     const asap = col('asap') >= 0 ? truthy(r[col('asap')] ?? '') : true, paced = col('paced') >= 0 ? truthy(r[col('paced')] ?? '') : false;
     const st = isoOf(r[col('start date')] ?? '');
     if (st && (!start || st < start)) start = st;
-    const t = tasks.get(code) ?? tasks.set(code, { code, name: nm, trade: nm, precision, order: [], items: [{ name: nm, unit: 'h', consumption: 1, quantities: [] }], segments: [], hoursPerDay: hpd }).get(code)!;
+    const trade = col('trade') >= 0 ? (r[col('trade')] ?? '').trim() : '';
+    const where = (c: number) => `${gridName} line ${r.line}, column "${locCols.find((x) => x.col === c)?.path.join(' / ') ?? grid[hi][c]}"`;
+    if ((r[col('start date')] ?? '').trim() && !st) throw new Error(`${where(col('start date'))}: "${r[col('start date')]}" is not a date.`);
+    const t = tasks.get(code) ?? tasks.set(code, { code, name: nm, trade: trade || nm, precision, order: [], items: [{ name: nm, unit: 'h', consumption: 1, quantities: [] }], segments: [], hoursPerDay: hpd }).get(code)!;
     const mine: string[] = [];
     for (const lc of locCols) {
       const v = (r[lc.col] ?? '').trim(); if (!v || v === '*') continue;
-      const days = numOf(v); if (!Number.isFinite(days)) continue;
+      const days = numOf(v);
+      if (!Number.isFinite(days) || days <= 0 || days > 10000) throw new Error(`${where(lc.col)}: "${v}" is not a duration (days above 0 and up to 10000; * for another subtask's location, empty for none).`);
       const loc = codeOf(lc.path.slice(0, precision));
-      if (t.order.includes(loc)) continue;
+      if (t.order.includes(loc)) throw new Error(`${where(lc.col)}: task ${code} already runs at ${lc.path.slice(0, precision).join(' / ')} (a duplicate row or column).`);
       t.order.push(loc); mine.push(loc);
       t.items[0].quantities.push({ location: loc, quantity: days * hpd });
     }

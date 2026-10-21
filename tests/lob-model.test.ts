@@ -41,6 +41,9 @@ test('driver rate: a rate change moves the crew (whole people) and durations; a 
   assert.ok(fields(r.changes).includes('crew_size') && fields(r.changes).includes('rate'));
   assert.throws(() => edit(plan('rate'), { op: 'set_crew', task: 'PW', crew_size: 12 }), /the rate is held; change the driver or the rate/);
   assert.throws(() => edit(plan('rate'), { op: 'set_duration', task: 'PW', days: 20 }), /the rate is held/);
+  // under the crew driver the crew is held too (L-9): a duration sizes the crew only when asked to
+  assert.throws(() => edit(plan('crew'), { op: 'set_duration', task: 'PW', days: 20 }), /the crew is held; change the driver or the crew/);
+  assert.equal(edit(plan('crew'), { op: 'set_duration', task: 'PW', days: 20, crew_follows: true }).model.tasks[0].segments[0].driver, 'crew');
 });
 
 test('driver duration: the crew follows, rounded up, and the reachable total is said', () => {

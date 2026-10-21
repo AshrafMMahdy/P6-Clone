@@ -44,7 +44,7 @@ export interface LobLink {
   lagDays: number;
   /** the level the link holds at, coarser than the tasks (layer 2) */
   precision?: number;
-  /** +1: the location below must be done (layer 4) */
+  /** +n: the successor in a location waits for the predecessor n locations further on in its order (layer 4) */
   locationLag?: number;
   bufferDays?: number;
   bufferLocations?: number;

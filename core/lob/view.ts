@@ -73,7 +73,16 @@ export function lobGuard(db: Db, ops: unknown[]): string | null {
   for (const raw of ops) {
     const op = raw as Record<string, unknown>;
     switch (op.op) {
-      case 'update_activity': if (isLob(op.id, op.project) && STRUCT.some((k) => op[k] !== undefined)) return msg(op.id); break;
+      case 'update_activity': {
+        if (!isLob(op.id, op.project)) break;
+        // progress is free (L-2): on a started activity (or one this op starts) the remaining duration and the start /
+        // finish (its actuals) are progress, not the plan
+        const pid = op.project != null ? projOf.get(String(op.project).toLowerCase()) : undefined;
+        const started = op.actual_start != null || rows(db, 'TASK').some((t) => t.task_code === String(op.id) && (pid == null || t.proj_id === pid) && t.act_start_date);
+        const PROGRESS = ['remaining_days', 'remaining_hours', 'start', 'finish'];
+        if (STRUCT.some((k) => op[k] !== undefined && !(started && PROGRESS.includes(k)))) return msg(op.id);
+        break;
+      }
       case 'delete_activity': case 'dissolve_activity': if (isLob(op.id, op.project)) return msg(op.id); break;
       case 'add_relationship': case 'delete_relationship': case 'update_relationship':
         if (isLob(op.pred, op.pred_project ?? op.project) && isLob(op.succ, op.succ_project ?? op.project)) return msg(`The relationship ${op.pred} → ${op.succ}`); break;

@@ -137,10 +137,13 @@ else {
   if (typeof k.fits !== 'boolean') failures.push(`lob_takt: ${JSON.stringify(k).slice(0, 200)}`);
   const f = await call('lob_forecast', { handle, project: 'SLOB' });
   if (!f.forecast) failures.push(`lob_forecast: ${JSON.stringify(f).slice(0, 200)}`);
+  const slob = JSON.stringify((await call('lob_view', { handle, project: 'SLOB' })).tasks?.map((t) => [t.code, t.start, t.finish]));
   const x = await call('lob_export', { handle, project: 'SLOB', path: join(dir, 'tactplan') });
   if (x.written?.length !== 4) failures.push(`lob_export: ${JSON.stringify(x).slice(0, 200)}`);
   const i = await call('lob_import', { ...L, path: join(dir, 'tactplan'), id: 'SLOB2' });
   if (i.tasks !== 2) failures.push(`lob_import (Tactplan): ${JSON.stringify(i).slice(0, 200)}`);
+  const again = JSON.stringify((await call('lob_view', { handle, project: 'SLOB' })).tasks?.map((t) => [t.code, t.start, t.finish]));
+  if (again !== slob) failures.push(`lob_import moved the first plan: ${slob} -> ${again}`);
 }
 await call('save', { handle, owner_key, path: 'smoke.xer' });
 if (!existsSync(join(dir, 'smoke.xer'))) failures.push('save wrote no smoke.xer');

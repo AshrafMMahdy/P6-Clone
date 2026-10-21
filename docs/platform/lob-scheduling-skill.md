@@ -20,7 +20,9 @@ Not yet tested inside the platform.
    - locations: `{levels: ["Tower", "Floor"], grid: [3, 9]}` (codes T1, T1F2...), or a tree for irregular buildings;
    - tasks: per trade, the quantity per location (or one for all), the consumption in hours per unit, the crew size;
      the driver says what is held when something changes (crew by default);
-   - links: `{pred, succ, location_lag: 1}` when the floor below must be done; `buffer_days` for a buffer;
+   - links: `{pred, succ}` waits in each location for the predecessor there; `location_lag: 1` waits for it one
+     location further on as well (on floor n, the predecessor's floor n+1 done: e.g. the slab above poured);
+     `buffer_days` for a buffer in time, `buffer_locations` in locations;
      `{pred: <CPM activity>, project: <CPM project>, succ: <task>}` to start a trade after a CPM milestone.
    The answer is the scheduled plan.
 3. **Look before you change.** `lob_view`: dates and float per trade, the critical trades, `collisions` (two trades in

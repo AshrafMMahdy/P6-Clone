@@ -16,7 +16,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { getHeapStatistics } from 'node:v8';
-import { ABSENT, record, rollback, type Journal } from '../core/journal.ts';
+import { ABSENT, record, recordAsync, rollback, type Journal } from '../core/journal.ts';
 import { dbLines, DbReader } from '../core/db-file.ts';
 import type { Db } from '../core/db.ts';
 import type { Format } from '../renderer/io.ts';
@@ -268,6 +268,14 @@ export function admit(bytes: number, keep?: string): void {
   if (usedBytes() + bytes > budget) fail('memory_budget', `This file needs about ${mb(bytes)} of memory; ${mb(budget - usedBytes())} of the ${mb(budget)} budget is free while other calls are running.`, bytes > budget ? 'The file is larger than the whole memory budget: raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size) or split the file.' : 'Retry when the running calls have finished; idle projects are moved out automatically.', { retryAfter: 10, data: { needed_mb: Math.round(bytes / 1048576), budget_mb: Math.round(budget / 1048576) } });
 }
 const mb = (b: number) => `${Math.round(b / 1048576)} MB`;
+/** A project grown by a call (an LOB plan adds thousands of activities): its memory counted again, as an XER of about
+ *  250 bytes a row would be (L-9); room is made by moving idle projects out, and it is counted even when none is made. */
+export function regrow(s: Session): void {
+  const est = estimateBytes(Object.values(s.db.tables).reduce((n, t) => n + t.rows.length, 0) * 250);
+  if (est <= s.bytes) return;
+  try { admit(est - s.bytes, s.handle); } catch { /* counted anyway: the next file to open waits for room */ }
+  s.bytes = est;
+}
 
 /** Move a project out of memory into a lossless recovery file; it comes back on its next call. */
 export function evict(s: Session, reason: string): string {
@@ -430,6 +438,17 @@ export async function exclusive<T>(handle: string, fn: () => Promise<T> | T): Pr
 export function change<T>(s: Session, caller: string, label: string, fn: (db: Db) => T): T {
   let out!: T;
   const j = record(s.db, (d) => { out = fn(d); });
+  const after = new Map([...j.arrays.keys()].map((a) => [a, a.slice()]));
+  s.history.push({ id: ++changeSeq, label, caller, j, after, at: Date.now() });
+  if (s.history.length > 100) s.history.shift();
+  s.redo.delete(caller);
+  s.dirty = true; s.changedAt = Date.now();
+  return out;
+}
+/** change for work that awaits between its steps (progress, cancellation): a cancelled or failed run leaves nothing. */
+export async function changeAsync<T>(s: Session, caller: string, label: string, fn: (db: Db) => Promise<T>): Promise<T> {
+  let out!: T;
+  const j = await recordAsync(s.db, async (d) => { out = await fn(d); });
   const after = new Map([...j.arrays.keys()].map((a) => [a, a.slice()]));
   s.history.push({ id: ++changeSeq, label, caller, j, after, at: Date.now() });
   if (s.history.length > 100) s.history.shift();

@@ -25,7 +25,7 @@ export interface TaskInput {
 /** Locations from a grid (codes P1, P1F2...: the first letter of each level and the number), a tree or a list. */
 export function buildLocations(i: LocationsInput): LobLocation[] {
   if (!i.levels?.length || i.levels.length > MAX_LEVELS) throw new LobRefused(`levels: 1 to ${MAX_LEVELS} names, e.g. ["Part", "Floor"].`);
-  if (i.list) return i.list;
+  if (i.list) { const bad = i.list.find((l) => typeof l?.code !== 'string' || !Number.isInteger(l.level) || l.level < 1); if (bad) throw new LobRefused(`locations.list: each location needs code, level (1 = the top level) and parent (null at level 1); ${JSON.stringify(bad)} does not.`); return i.list.map((l) => ({ ...l, name: l.name ?? l.code, parent: l.parent ?? null })); }
   const out: LobLocation[] = [];
   if (i.grid) {
     if (i.grid.length !== i.levels.length) throw new LobRefused('grid: one count per level, e.g. {"levels": ["Part", "Floor"], "grid": [2, 9]}.');

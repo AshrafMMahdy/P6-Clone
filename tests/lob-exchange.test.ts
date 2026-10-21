@@ -26,8 +26,8 @@ for (const decimal of ['dot', 'comma'] as const) test(`Tactplan round trip (${de
   const files = writeTactplan(m, { decimal, date: 'dd/MM/yyyy' });
   const grid = files.find((f) => f.name === 'Grid.csv')!.text.split('\r\n');
   const sep = decimal === 'comma' ? ';' : ',';
-  assert.equal(grid[0].split(sep)[9], 'Project (0)', 'the level legend down the precision column');
-  assert.deepEqual(grid[3].split(sep).slice(0, 10), ['Id', 'Name', 'Code', 'Start date', 'Finish date', 'Color', 'ASAP', 'Paced', 'Milestone', 'Location precision']);
+  assert.equal(grid[0].split(sep)[10], 'Project (0)', 'the level legend down the precision column');
+  assert.deepEqual(grid[3].split(sep).slice(0, 11), ['Id', 'Name', 'Code', 'Start date', 'Finish date', 'Color', 'ASAP', 'Paced', 'Milestone', 'Trade', 'Location precision']);
   assert.match(files.find((f) => f.name === 'links-not-exported.txt')!.text, /FR -> BD: FS, location delay 1/);
   const dir = mkdtempSync(join(tmpdir(), 'p6-tpx-'));
   for (const f of files) writeFileSync(join(dir, f.name), f.text);

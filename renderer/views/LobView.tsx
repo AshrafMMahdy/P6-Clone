@@ -68,7 +68,7 @@ export function LobPanel() {
         {plans.length > 0 && <select value={plan?.projId} onChange={(e) => setPick(e.target.value)}>{plans.map((p) => <option key={p.projId} value={p.projId}>{p.code}</option>)}</select>}
         <NewPlan />
         <button onClick={() => void importPlan()}>Import Vico / Tactplan…</button>
-        {plan && <button onClick={() => void window.p6.bimWriteFiles({ title: 'Folder for the Tactplan files', files: writeTactplan(plan.model, { decimal: 'dot', date: 'dd/MM/yyyy' }).map((f) => ({ name: f.name, data: f.text })) }).then((w) => w && toast(`Wrote ${w.length} files for Tactplan.`))}>Export to Tactplan…</button>}
+        {plan && <button onClick={() => void window.p6.bimWriteFiles({ title: 'Folder for the Tactplan files', files: writeTactplan(plan.model, { decimal: 'dot', date: 'dd/MM/yyyy', scheduled: lobView(db, plan.projId, plan.model, { hoursPerDay: ui.prefs.hoursPerDay, limit: Infinity }).tasks }).map((f) => ({ name: f.name, data: f.text })) }).then((w) => w && toast(`Wrote ${w.length} files for Tactplan.`))}>Export to Tactplan…</button>}
         {plan && <span className="seg"><button className={tab === 'flow' ? 'on' : ''} onClick={() => setTab('flow')}>Flowline</button><button className={tab === 'takt' ? 'on' : ''} onClick={() => setTab('takt')}>Takt grid</button></span>}
         {plan && plan.from !== 'notebook' && <span style={{ color: '#b00' }}>{plan.problems.join(' ')}</span>}
       </div>
@@ -151,7 +151,7 @@ function Flowline({ db, projId, model, sel, onSelect, act }: { db: Db; projId: s
     if (drag.mode === 'end') {
       const start = l.points[0][0], fin = F.T(p.x);
       const days = Math.max(0.1, cal.workBetween(start, fin) / 60 / ui.prefs.hoursPerDay);
-      act(`Duration of ${l.task}`, [{ op: 'set_duration', task: l.task, segment: l.segment, days: Math.round(days * 10) / 10 }]);
+      act(`Duration of ${l.task}`, [{ op: 'set_duration', task: l.task, segment: l.segment, days: Math.round(days * 10) / 10, crew_follows: true }]);
     } else if (drag.mode === 'move') {
       const start = l.points[0][0] + (F.T(p.x) - F.T(drag.x0));
       act(`Move ${l.task}`, [{ op: 'set_start', task: l.task, segment: l.segment, date: formatP6Date(cal.nextWorkStart(start)).slice(0, 10) }]);

@@ -4,6 +4,7 @@
 // journalled change; activities the model no longer has are deleted unless they have progress (then kept and said).
 import { rows, type Db, type Row } from '../db.ts';
 import { applyOps } from '../project/ops.ts';
+import { p6num } from '../schedule/cpm.ts';
 import { locationDurations } from './edit.ts';
 import { pathOf, type LobLink, type LobModel, type LobTask } from './model.ts';
 
@@ -46,14 +47,19 @@ export function lobRelationships(m: LobModel, durations: Map<string, Map<string,
     // layer 5: one task-location to another
     if (l.kind === 'location') { if (l.predLocation && l.succLocation && has(p, l.predLocation) && has(s, l.succLocation)) out.push({ pred: activityId(p.code, l.predLocation), succ: activityId(s.code, l.succLocation), type: l.type, lag }); continue; }
     // layers 1, 2 and 4: in every location both share, at the link's level (the coarser of the two by default),
-    // shifted by the location lag (+1: the location below must be done) and the buffer in locations
+    // shifted by the location lag and the buffer in locations: +n, the successor in a location waits for the predecessor
+    // n locations further on in the predecessor's own order (the last n wait for its last location there), L-4
     const level = l.precision ?? Math.min(p.precision, s.precision);
     const shift = (l.locationLag ?? 0) + (l.bufferLocations ?? 0);
     const group = (t: LobTask) => { const g = new Map<string, string[]>(); for (const c of t.order) (g.get(ancestor(c, level)) ?? g.set(ancestor(c, level), []).get(ancestor(c, level))!).push(c); return g; };
     const gp = group(p), gs = group(s);
     for (const [area, succLocs] of gs) {
       let predArea = area;
-      if (shift) { const sib = siblings(area), i = sib.indexOf(area) - shift; if (i < 0 || i >= sib.length) continue; predArea = sib[i]; }
+      if (shift) {
+        const sib = new Set(siblings(area)), seq = [...gp.keys()].filter((x) => sib.has(x)), i = seq.indexOf(area) + shift;
+        if (seq.indexOf(area) < 0 || i < 0) continue; // a negative lag lets the successor lead: its first locations wait for nothing
+        predArea = seq[Math.min(i, seq.length - 1)];
+      }
       const predLocs = gp.get(predArea);
       if (!predLocs) continue;
       const pw = predLocs.filter((c) => has(p, c)), sw = succLocs.filter((c) => has(s, c));
@@ -88,6 +94,9 @@ export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay:
   const P = proj.proj_short_name;
   const res: ExpandResult = { ok: true, added: 0, updated: 0, deleted: 0, keptWithProgress: [], relationships: { added: 0, updated: 0, deleted: 0 } };
   const ops: unknown[] = [];
+  // P6 holds an Activity ID of 40 characters: a longer <task>-<location> is refused before anything is made (L-7)
+  const long = m.tasks.flatMap((t) => t.order.map((c) => activityId(t.code, c))).filter((id) => id.length > 40);
+  if (long.length) return { ...res, ok: false, error: `${long.length} Activity ID${long.length === 1 ? '' : 's'} would pass P6's 40 characters (${long.slice(0, 3).join(', ')}${long.length > 3 ? ', ...' : ''}): shorten the task or location codes.` };
   // codes and UDFs (made once, reused after)
   const codeType = (name: string) => rows(db, 'ACTVTYPE').find((t) => t.actv_code_type === name);
   if (!codeType(LOB_CODES.location)) ops.push({ op: 'add_code_type', name: LOB_CODES.location, max_length: 60 });
@@ -107,9 +116,22 @@ export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay:
   // activities
   const durations = new Map(m.tasks.map((t) => [t.code, minuteDurations(locationDurations(m, t), t.hoursPerDay ?? o.hoursPerDay)]));
   const ownerUdf = rows(db, 'UDFTYPE').find((u) => u.table_name === 'TASK' && u.udf_type_label === LOB_UDF.task);
-  const owned = new Set(ownerUdf ? rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === ownerUdf.udf_type_id && v.udf_text).map((v) => v.fk_id) : []);
   const existing = new Map(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => [t.task_code, t]));
+  // this plan's activities only: another LOB plan in the file keeps its own (L-1)
+  const mineIds = new Set([...existing.values()].map((t) => t.task_id));
+  const owned = new Set(ownerUdf ? rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === ownerUdf.udf_type_id && v.udf_text && mineIds.has(v.fk_id)).map((v) => v.fk_id) : []);
   const locName = new Map(m.locations.map((l) => [l.code, l.name]));
+  // what each activity carries now: only the codes and UDF values that differ are written (a set_udf or assign_code
+  // per activity per save scanned the whole table each: n² on a large plan, L-3)
+  const valueName = new Map(rows(db, 'ACTVCODE').map((v) => [v.actv_code_id, v.short_name]));
+  const typeName = new Map(rows(db, 'ACTVTYPE').map((t) => [t.actv_code_type_id, t.actv_code_type]));
+  const codeNow = new Map<string, string>(); // task_id|type name → value
+  for (const a of rows(db, 'TASKACTV')) if (mineIds.has(a.task_id)) codeNow.set(`${a.task_id}|${typeName.get(a.actv_code_type_id)}`, valueName.get(a.actv_code_id) ?? '');
+  const udfName = new Map(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'TASK').map((u) => [u.udf_type_id, u.udf_type_label]));
+  const udfNow = new Map<string, string>(); // task_id|label → text or number
+  for (const v of rows(db, 'UDFVALUE')) if (mineIds.has(v.fk_id) && udfName.has(v.udf_type_id)) udfNow.set(`${v.fk_id}|${udfName.get(v.udf_type_id)}`, v.udf_text || (v.udf_number !== '' && v.udf_number != null ? String(Number(v.udf_number)) : ''));
+  const code = (row: Row | undefined, id: string, type: string, value: string) => { if (!row || codeNow.get(`${row.task_id}|${type}`) !== value) ops.push({ op: 'assign_code', type, value, activity: id, project: P }); };
+  const udf = (row: Row | undefined, id: string, name: string, value: string | number) => { if (!row || udfNow.get(`${row.task_id}|${name}`) !== String(typeof value === 'number' ? Number(p6num(value)) : value)) ops.push({ op: 'set_udf', udf: name, value, activity: id, project: P }); };
   const want = new Set<string>();
   for (const t of m.tasks) {
     const seg = (c: string) => t.segments.find((s) => t.order.indexOf(c) >= t.order.indexOf(s.from) && t.order.indexOf(c) <= t.order.indexOf(s.to));
@@ -119,11 +141,11 @@ export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay:
       const d = days, row = existing.get(id);
       if (!row) { ops.push({ op: 'add_activity', id, name, duration_days: d, project: P, ...(t.calendar ? { calendar: t.calendar } : {}) }); res.added++; }
       else if (Math.abs(Number(row.target_drtn_hr_cnt || 0) - d * o.hoursPerDay) > 0.005 || row.task_name !== name) { ops.push({ op: 'update_activity', id, project: P, name, duration_days: d }); res.updated++; }
-      if (!row || !owned.has(row.task_id)) ops.push({ op: 'set_udf', udf: LOB_UDF.task, value: t.code, activity: id, project: P });
-      ops.push({ op: 'assign_code', type: LOB_CODES.location, value: c, activity: id, project: P }, { op: 'assign_code', type: LOB_CODES.trade, value: t.trade.slice(0, 60), activity: id, project: P });
+      udf(row, id, LOB_UDF.task, t.code);
+      code(row, id, LOB_CODES.location, c); code(row, id, LOB_CODES.trade, t.trade.slice(0, 60));
       const q = t.items.reduce((n, it) => n + (it.quantities.find((x) => x.location === c)?.quantity ?? 0), 0), s = seg(c);
-      ops.push({ op: 'set_udf', udf: LOB_UDF.quantity, value: q, activity: id, project: P }, { op: 'set_udf', udf: LOB_UDF.consumption, value: t.items[0]?.consumption ?? 0, activity: id, project: P });
-      if (s) ops.push({ op: 'set_udf', udf: LOB_UDF.crew, value: `${s.crews} × ${s.crewSize}`, activity: id, project: P });
+      udf(row, id, LOB_UDF.quantity, q); udf(row, id, LOB_UDF.consumption, t.items[0]?.consumption ?? 0);
+      if (s) udf(row, id, LOB_UDF.crew, `${s.crews} × ${s.crewSize}`);
     }
   }
   for (const [code, row] of existing) {

@@ -19,7 +19,7 @@ import { forecastLob } from '../core/lob/forecast.ts';
 import { readVicoDpp } from '../core/lob/vico.ts';
 import { lobFromVico, vicoCalendarOp } from '../core/lob/fromVico.ts';
 import { readTactplan, writeTactplan } from '../core/lob/tactplan.ts';
-import { fail, pathArg, type Session } from './runtime.ts';
+import { effectiveBudget, fail, pathArg, type Session } from './runtime.ts';
 import type { AnalysisHelpers } from './analysis.ts';
 
 const ro = { readOnlyHint: true, openWorldHint: false };
@@ -27,7 +27,7 @@ const edit = { readOnlyHint: false, destructiveHint: false, openWorldHint: false
 const project = { type: 'string', description: 'the LOB project (Project ID; default the file’s only LOB project)' };
 const obj = { type: 'object' }, arr = (items: object = obj) => ({ type: 'array', items });
 const TASK_HELP = 'A task: {code, name, trade?, level? (name or number; default the deepest), locations? (in working order; default every location of its level), unit?, consumption (hours per unit), quantity (every location) or quantities {location: qty}, crew_size, crews?, productivity?, driver? (crew | rate | duration: what is held when another value changes), rate?, duration_days?, timing? (asap | paced | asap_paced, default asap_paced: the crew never waits)}.';
-const OPS_HELP = 'Operations, applied in order (one refused refuses all): set_crew {task, segment?, crews?, crew_size?, productivity?}, set_rate {task, segment?, rate}, set_duration {task, segment?, days}, set_driver {task, segment?, driver}, set_timing {task, segment?, timing}, set_quantity {task, item?, location, quantity}, set_consumption {task, item?, consumption}, set_location_duration {task, location, days} (sets its production factor), set_factor {task, location, factor}, split {task, at: location} (the locations from there get their own crew), merge {task, at}, set_start {task, segment?, date | null} (a manual start), add_location {code, name?, parent?, after?}, remove_location {code}, add_task {...task}, remove_task {task}, set_order {task, order}, add_link {pred, succ, type?, lag_days?, location_lag? (+1: the location below must be done), buffer_days?, buffer_locations?, precision? (level number), pred_location?, succ_location? (one location to another), project? (the other end is an activity of that project: CPM or another LOB plan)}, remove_link {pred, succ}, set_takt {takt_days, zone_level?, zones?, train?, buffer_periods?}, rename {task, name?, trade?} | {task, item, name?, unit?} | {location, name} | {level (number or name), name} (names only: codes are the activity IDs; the activities and Location / Trade codes follow, the old trade value goes). A refused edit says which value is held by the task’s driver.';
+const OPS_HELP = 'Operations, applied in order (one refused refuses all): set_crew {task, segment?, crews?, crew_size?, productivity?}, set_rate {task, segment?, rate}, set_duration {task, segment?, days, crew_follows?} (under the crew driver refused unless crew_follows: true, which sizes the crew to it), set_driver {task, segment?, driver}, set_timing {task, segment?, timing}, set_quantity {task, item?, location, quantity}, set_consumption {task, item?, consumption}, set_location_duration {task, location, days} (sets its production factor), set_factor {task, location, factor}, split {task, at: location} (the locations from there get their own crew), merge {task, at}, set_start {task, segment?, date | null} (a manual start), add_location {code, name?, parent?, after?}, remove_location {code}, add_task {...task}, remove_task {task}, set_order {task, order}, add_link {pred, succ, type?, lag_days?, location_lag? (+n: the successor in a location waits for the predecessor n locations further on, e.g. +1: the floor above done first; the last n wait for its last location), buffer_days?, buffer_locations?, precision? (level number), pred_location?, succ_location? (one location to another), project? (the other end is an activity of that project: CPM or another LOB plan)}, remove_link {pred, succ}, set_takt {takt_days, zone_level?, zones?, train?, buffer_periods?}, rename {task, name?, trade?} | {task, item, name?, unit?} | {location, name} | {level (number or name), name} (names only: codes are the activity IDs; the activities and Location / Trade codes follow, the old trade value goes). A refused edit says which value is held by the task’s driver.';
 
 export const LOB_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<string, unknown>) => [
   { name: 'lob_create', annotations: edit, description: `Create a location-based (Line of Balance) plan as a new project in this file, beside its CPM projects; it schedules with them and travels in the XER (real P6 reads it as an ordinary, fully linked project). id, name?, start (YYYY-MM-DD), calendar?, locations: {levels: [names, top first], grid: [count per level] (codes P1, P1F2...) | tree: [{code, name, children}] | list: [{code, name, level, parent}]}, tasks: [task], links?: [add_link fields], takt?: {takt_days, ...}. ${TASK_HELP} Or from_cpm: {project, location_code, trade_code}: a new LOB project from a CPM project's activities grouped by two activity code types (the CPM project stays as it was, to compare); dry_run: true shows the grouping. Answers the plan as lob_view does.`, inputSchema: withHandle({ type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, start: { type: 'string' }, calendar: { type: 'string' }, locations: obj, tasks: arr(), links: arr(), takt: obj, from_cpm: obj, dry_run: { type: 'boolean' } }, required: ['id'] }) },
@@ -73,11 +73,15 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
     return { projId, ...x };
   };
   /** Expand, save into the file and schedule, inside one change. */
-  const commit = (d: Db, projId: string, m: LobModel, previous: LobModel | null) => {
+  const commit = async (d: Db, projId: string, m: LobModel, previous: LobModel | null) => {
+    // in steps, each a yield (server_status and cancel_job answer between them; cancelled: nothing is kept, L-3)
+    await h.tick(0, 3, 'expanding the plan into activities and logic');
     const ex = expandLob(d, projId, m, { hoursPerDay: s.hpd, previous });
     if (!ex.ok) throw new LobRefused(ex.error!);
+    await h.tick(1, 3, 'saving the plan into the file');
     const sv = applyOps(d, saveLobOps(d, projId, m), { hoursPerDay: s.hpd });
     if (!sv.ok) throw new LobRefused(sv.error!.message);
+    await h.tick(2, 3, 'scheduling (F9, crews kept continuous)');
     const sc = scheduleWithLob(d, h.allIds(d), s.hpd, {}, undefined);
     if (!sc.schedule.ok) throw new LobRefused(`the plan cannot be scheduled: ${sc.schedule.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ')}`);
     const fin = sc.schedule.projects[projId]?.finish;
@@ -100,14 +104,14 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
         catch (e) { return refused(e); }
       }
       const start = a.start ?? rows(s.db, 'PROJECT').find((p) => !p._baseline_of)?.plan_start_date?.slice(0, 10) ?? fail('bad_input', 'Give start (YYYY-MM-DD).', 'The plan’s start date.');
-      return h.apply(`LOB plan ${id}`, (d) => {
+      return h.applyAsync(`LOB plan ${id}`, async (d) => {
         const r = applyOps(d, [{ op: 'add_project', id, name: a.name ?? id, start, ...(a.calendar ? { calendar: a.calendar } : {}) }], { hoursPerDay: s.hpd });
         if (!r.ok) fail('bad_input', r.error!.message, 'Check id, start and calendar.');
         const projId = rows(d, 'PROJECT').find((p) => p.proj_short_name === id)!.proj_id;
         try {
           const ops: LobOp[] = [...(a.from_cpm ? [] : (a.tasks ?? []).map((t: object) => ({ op: 'add_task', ...t }))), ...(a.links ?? []).map((l: object) => ({ op: 'add_link', ...l })), ...(a.takt ? [{ op: 'set_takt', ...a.takt }] : [])];
           const built = ops.length ? applyLobOps(model, ops) : { model, changes: [], notes: [] };
-          const c = commit(d, projId, built.model, null);
+          const c = await commit(d, projId, built.model, null);
           return { created: id, ...c, notes: built.notes };
         } catch (e) { return refused(e); }
       });
@@ -117,7 +121,7 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
       if (!Array.isArray(a.operations) || !a.operations.length) fail('bad_input', 'operations: a list of operations.', OPS_HELP);
       let next;
       try { next = applyLobOps(model, a.operations); } catch (e) { return refused(e); }
-      return h.apply(`LOB edit (${a.operations.length} operation${a.operations.length === 1 ? '' : 's'})`, (d) => { try { return { changes: next.changes, notes: next.notes, ...commit(d, projId, next.model, model) }; } catch (e) { return refused(e); } });
+      return h.applyAsync(`LOB edit (${a.operations.length} operation${a.operations.length === 1 ? '' : 's'})`, async (d) => { try { return { changes: next.changes, notes: next.notes, ...(await commit(d, projId, next.model, model)) }; } catch (e) { return refused(e); } });
     }
     case 'lob_view': {
       const { projId, model, from, problems } = lobOf(a.project);
@@ -132,7 +136,7 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
       if (!model.takt) fail('bad_input', 'No takt is set on this plan.', 'lob_edit {"operations": [{"op": "set_takt", "takt_days": 5}]} first.');
       if (a.apply !== true) return taktCheck(model);
       const r = taktApply(model);
-      return h.apply('LOB takt', (d) => { try { return { changes: r.changes, ...commit(d, projId, r.model, model) }; } catch (e) { return refused(e); } });
+      return h.applyAsync('LOB takt', async (d) => { try { return { changes: r.changes, ...(await commit(d, projId, r.model, model)) }; } catch (e) { return refused(e); } });
     }
     case 'lob_forecast': { const { projId, model } = lobOf(a.project); return forecastLob(s.db, projId, model, { hoursPerDay: s.hpd, windowDays: a.window_days }); }
     case 'lob_import': {
@@ -142,7 +146,7 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
       let model: LobModel, start: string, calOps: unknown[] = [], notes: string[] = [], hpd = s.hpd;
       if (/\.dpp$/i.test(path)) {
         let v;
-        try { v = readVicoDpp(new Uint8Array(readFileSync(path))); } catch (e) { return fail('bad_input', (e as Error).message, 'Give a Vico Schedule Planner .dpp file.'); }
+        try { v = readVicoDpp(new Uint8Array(readFileSync(path)), { maxBytes: Math.min(256 * 1048576, effectiveBudget() / 8) }); } catch (e) { return fail('bad_input', (e as Error).message, 'Give a Vico Schedule Planner .dpp file.'); }
         const r = lobFromVico(v, id);
         model = r.model; notes = r.notes; hpd = r.hoursPerDay;
         start = v.start ?? model.tasks.flatMap((t) => t.segments.map((g) => g.start ?? '')).filter(Boolean).sort()[0] ?? new Date().toISOString().slice(0, 10);
@@ -152,19 +156,19 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
         try { r = readTactplan(path); } catch (e) { return fail('bad_input', (e as Error).message, 'Give a Tactplan export: the folder holding its Grid.csv (and Locations.csv, Quantities.csv), or the Grid.csv itself; or a Vico .dpp.'); }
         model = { ...r.model, project: id }; notes = r.notes; start = r.start ?? new Date().toISOString().slice(0, 10);
       }
-      return h.apply(`LOB import ${basename(path)}`, (d) => {
+      return h.applyAsync(`LOB import ${basename(path)}`, async (d) => {
         const cal = calOps.length ? (calOps[0] as { name: string }).name : undefined;
         const r = applyOps(d, [...calOps, { op: 'add_project', id, name: model.project === id ? id : id, start, ...(cal ? { calendar: cal } : {}) }], { hoursPerDay: hpd });
         if (!r.ok) fail('bad_input', r.error!.message, '');
         const projId = rows(d, 'PROJECT').find((p) => p.proj_short_name === id)!.proj_id;
-        try { return { imported: id, tasks: model.tasks.length, locations: model.locations.length, ...commit(d, projId, model, null), notes }; } catch (e) { return refused(e); }
+        try { return { imported: id, tasks: model.tasks.length, locations: model.locations.length, ...(await commit(d, projId, model, null)), notes }; } catch (e) { return refused(e); }
       });
     }
     case 'lob_export': {
-      const { model } = lobOf(a.project);
+      const { projId, model } = lobOf(a.project);
       const dir = pathArg(a.path, 'path', 'write');
       mkdirSync(dir, { recursive: true }); // inside the write root (pathArg checked it)
-      const files = writeTactplan(model, { decimal: a.decimal === 'comma' ? 'comma' : 'dot', date: a.date ?? 'dd/MM/yyyy' });
+      const files = writeTactplan(model, { decimal: a.decimal === 'comma' ? 'comma' : 'dot', date: a.date ?? 'dd/MM/yyyy', scheduled: lobView(s.db, projId, model, { hoursPerDay: s.hpd, limit: Infinity }).tasks });
       const written = files.map((f) => { const p = join(dir, f.name); h.writeOut(p, f.text); return p; });
       return { written, note: 'Tactplan imports each grid from its Import dialog (paste or choose the file); links between tasks have no import there: links-not-exported.txt lists them.' };
     }

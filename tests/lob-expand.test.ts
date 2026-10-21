@@ -31,9 +31,10 @@ test('an activity per task × location, codes and UDFs, logic layers 1, 3 and 4'
   assert.equal(rows(db, 'TASK').find((t) => t.task_code === 'PW-P2F3')!.task_name, 'Plaster works, Part 2, Floor 3');
   const R = rels(db);
   for (const x of ['CS-P1F1>CS-P1F2', 'CS-P1F3>CS-P2F1', 'PW-P2F2>PW-P2F3']) assert.ok(R.includes(x), `within a task: ${x}`);
-  // location lag +1: plaster on a floor waits until the concrete of the floor below it is done
-  assert.ok(R.includes('CS-P1F1>PW-P1F2') && R.includes('CS-P1F2>PW-P1F3') && !R.includes('CS-P1F1>PW-P1F1'), R.join(' '));
-  assert.ok(!R.some((x) => x.endsWith('>PW-P1F1') && x.startsWith('CS')), 'no floor below the first floor');
+  // location lag +1 (L-4): plaster on a floor waits until the concrete of the floor above it is done; the top floor
+  // waits for the concrete's last floor
+  assert.ok(R.includes('CS-P1F2>PW-P1F1') && R.includes('CS-P1F3>PW-P1F2') && R.includes('CS-P1F3>PW-P1F3') && !R.includes('CS-P1F1>PW-P1F1'), R.join(' '));
+  assert.ok(!R.some((x) => /^CS-P1F1>PW/.test(x)), 'the first floor of concrete holds no plaster floor up by itself');
   const lt = rows(db, 'ACTVTYPE').find((t) => t.actv_code_type === 'Location')!;
   const vals = rows(db, 'ACTVCODE').filter((v) => v.actv_code_type_id === lt.actv_code_type_id);
   const p1 = vals.find((v) => v.short_name === 'P1')!;

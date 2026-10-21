@@ -97,7 +97,7 @@ CPM schedule, optimised and compared) gives the three things to get right:
 2. A link may be coarser than the tasks (e.g. "roof done in the Part before finishes in that Part").
 3. Within a task, each location follows the previous in its order; the timing option says how: **ASAP**, **Paced**
    (continuous crew), or **ASAP + Paced** (default: earliest start that keeps the crew continuous).
-4. **Location lag** (+1 = the floor below must be done), within vertical stacks.
+4. **Location lag** (+1: the successor on floor n waits for the predecessor on floor n+1 too; the top floor for its last), within vertical stacks.
 5. Specific links from one task-location to another (e.g. Part 2 trades start when Part 1 reaches Floor 3).
 
 **Buffers** (in days or in locations) act as lags in planning and in float, and are absorbed in forecasts.

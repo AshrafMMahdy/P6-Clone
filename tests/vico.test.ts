@@ -107,3 +107,10 @@ test('vico: calendar and what is not decoded', { skip }, () => {
   assert.deepEqual(p.links, []);
   assert.ok(p.notes.some((n) => /dependency/.test(n)), 'the missing logic is stated in notes');
 });
+
+test('L-6: a .dpp whose body unpacks past the cap is refused before it is held in memory', async () => {
+  const { deflateSync } = await import('node:zlib');
+  const head = Buffer.concat([Buffer.from([0x44, 0x53, 0x53, 0x1a, 0, 0, 0, 0]), Buffer.from('GraphisoftControl Project\x1a\x00', 'latin1'), Buffer.alloc(4)]);
+  const bomb = new Uint8Array(Buffer.concat([head, deflateSync(Buffer.alloc(8 * 1048576))]));
+  assert.throws(() => readVicoDpp(bomb, { maxBytes: 1048576 }), /unpacks past 1 MB/);
+});

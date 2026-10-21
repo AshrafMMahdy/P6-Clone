@@ -56,7 +56,7 @@ import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler }
 import { dayHours } from '../core/project/units.ts';
 import {
   ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
-  exclusive, change, dropLast, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, type Session,
+  exclusive, change, changeAsync, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, type Session,
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
@@ -168,6 +168,8 @@ const NO_HANDLE = new Set(['open_file', 'new_project', 'compute_schedule', 'list
 const MUTATES = new Set(TOOLS.filter((t) => !t.annotations.readOnlyHint && !['list_open', 'server_status', 'job_status', 'cancel_job'].includes(t.name)).map((t) => t.name));
 
 async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unknown> {
+  // a tool outside P6CLONE_TOOLSETS is not there at all: listed or called (L-8)
+  if (TOOLS.some((t) => t.name === name) && !toolsList().some((t) => t.name === name)) fail('unknown_tool', `${name} is not offered by this server (P6CLONE_TOOLSETS=${process.env.P6CLONE_TOOLSETS}).`, 'tools/list shows the tools.');
   switch (name) {
     case 'list_open': return { open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, projects: allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), unsaved_changes: s.dirty, changes: s.history.length })), moved_out: evictedList() };
     case 'server_status': return { version: VERSION, ...status(), recovery: recoveryStatus(), reasoner: await reasonerStatus() };
@@ -177,7 +179,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       for (const t0 = Date.now(); !job.done && Date.now() - t0 < wait;) await new Promise((r) => setTimeout(r, 200));
       return jobView(job);
     }
-    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: ['monte_carlo', 'open_file', 'save', 'schedule', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'render_4d'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
+    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: ['monte_carlo', 'open_file', 'save', 'schedule', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'render_4d', 'lob_create', 'lob_edit', 'lob_takt', 'lob_import'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
     case 'open_file': {
       const path = pathArg(a.path);
       const bytes = readBytes(path);
@@ -477,13 +479,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     if (now - lastTick > 250) { lastTick = now; ctx.progress?.(done, total, message); }
     await checkpoint(ctx); // yields, and throws "cancelled" once the call or its job is cancelled
   };
-  const helpers = { projectIds, allIds, dd, writeOut, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), tick };
+  const helpers = { projectIds, allIds, dd, writeOut, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), applyAsync: <T,>(label: string, fn: (d: Db) => Promise<T>) => changeAsync(s, ctx.caller, label, fn), tick };
   const analysed = await runAnalysis(name, a, s, helpers);
   if (analysed !== undefined) return analysed;
   const fourd = await runFourD(name, a, s, helpers);
   if (fourd !== undefined) return fourd;
   const lobbed = await runLob(name, a, s, helpers);
-  if (lobbed !== undefined) return lobbed;
+  if (lobbed !== undefined) { regrow(s); return lobbed; }
   if (LOOKUPS.some((t) => t.name === name)) {
     const { handle: _h, caller: _c, async: _a, ...args } = a;
     return runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
@@ -504,7 +506,8 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     const plain = !!out && typeof out === 'object' && !Array.isArray(out);
     // a tool that can change a project says whether that project now has unsaved changes
     const h = handle ?? (plain && typeof (out as { handle?: unknown }).handle === 'string' ? (out as { handle: string }).handle : undefined);
-    if (plain && h && MUTATES.has(name)) { out = { ...(out as object), unsaved_changes: isDirty(h) }; scheduleCheckpoint(h); }
+    if (plain && h && MUTATES.has(name) && !(name === 'lob_takt' && a.apply !== true)) { // lob_takt's check reads only (L-9)
+      out = { ...(out as object), unsaved_changes: isDirty(h) }; scheduleCheckpoint(h); }
     const s = handle ? sessions.get(handle) : undefined;
     if (s?.notice && plain) { const n = s.notice; s.notice = undefined; return { ...(out as object), _notice: n }; }
     return out;

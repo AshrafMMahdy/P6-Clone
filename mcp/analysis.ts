@@ -32,6 +32,8 @@ export interface AnalysisHelpers {
   writeOut: (path: string, data: string | Uint8Array) => void;
   /** run fn as one undoable change of this caller */
   apply: <T>(label: string, fn: (db: Db) => T) => T;
+  /** apply for work that ticks between its steps */
+  applyAsync: <T>(label: string, fn: (db: Db) => Promise<T>) => Promise<T>;
   /** progress, a yield to the event loop, and the call's cancellation, between units of long work */
   tick: Tick;
 }

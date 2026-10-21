@@ -46,7 +46,8 @@ const MAGIC = [0x44, 0x53, 0x53, 0x1a]; // "DSS\x1a"
 const SIGNATURE = 'GraphisoftControl Project';
 
 /** The zlib-compressed body of a .dpp file; throws on anything that is not one. */
-function inflateBody(bytes: Uint8Array): Buffer {
+/** maxBytes: the most it may unpack to (a zlib bomb stops there, L-6). */
+function inflateBody(bytes: Uint8Array, maxBytes: number): Buffer {
   if (bytes.length < 40 || MAGIC.some((b, i) => bytes[i] !== b)) throw new Error('Not a Vico .dpp file: missing the "DSS" header');
   const sig = Buffer.from(bytes.subarray(8, 8 + SIGNATURE.length)).toString('latin1');
   if (sig !== SIGNATURE) throw new Error(`Not a Vico .dpp file: expected "${SIGNATURE}" at offset 8`);
@@ -55,7 +56,10 @@ function inflateBody(bytes: Uint8Array): Buffer {
   for (let off = 8 + SIGNATURE.length; off < Math.min(bytes.length - 2, 80); off++) {
     const cmf = bytes[off], flg = bytes[off + 1];
     if ((cmf & 0x0f) !== 8 || ((cmf << 8) | flg) % 31 !== 0) continue;
-    try { return inflateSync(bytes.subarray(off)); } catch { /* not the stream; keep looking */ }
+    try { return inflateSync(bytes.subarray(off), { maxOutputLength: maxBytes }); } catch (e) {
+      if ((e as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE') throw new Error(`Vico .dpp file: its body unpacks past ${Math.round(maxBytes / 1048576)} MB, more than this server reads (a Vico project is a few MB); not read`);
+      /* not the stream; keep looking */
+    }
   }
   throw new Error('Vico .dpp file: could not find or inflate the zlib-compressed body');
 }
@@ -214,8 +218,8 @@ function parseCalendar(blob: Uint8Array): VicoCalendar {
 
 // ---- the reader ---------------------------------------------------------------------------------------------------
 
-export function readVicoDpp(bytes: Uint8Array): VicoProject {
-  const store = new Store(parseRecords(inflateBody(bytes)));
+export function readVicoDpp(bytes: Uint8Array, o: { maxBytes?: number } = {}): VicoProject {
+  const store = new Store(parseRecords(inflateBody(bytes, o.maxBytes ?? 256 * 1048576)));
   const notes: string[] = [];
   const root = store.ofClass(C.PROJECT)[0];
   if (!root) throw new Error('Vico .dpp file: no project record (class 2)');

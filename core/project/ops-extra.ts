@@ -289,7 +289,8 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const L = ensure(db, S.link, [S.fk, S.tid, S.vid, ...(S.link === 'TASKACTV' ? ['proj_id'] : [])]);
       const fk = tg.fk, tid = type[S.tid]; // plain values: a view's field read per row is slow
       const valsOfType = new Set(realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid).map((v) => v[S.vid]));
-      removeWhere(L.rows, (a) => a[S.fk] === fk && (a[S.tid] === tid || valsOfType.has(a[S.vid])));
+      const LR = realOf(L.rows); // the scan only when the index says the object has an assignment (a new activity has none)
+      if (rowIndex(LR, `fk:${S.fk}`, (a) => a[S.fk]).get(fk)?.length) removeWhere(L.rows, (a) => a[S.fk] === fk && (a[S.tid] === tid || valsOfType.has(a[S.vid])));
       if (op.value == null || op.value === '') return { removed: type[S.tname] };
       const v = codeValue(S, type, op.value);
       L.rows.push({ [S.fk]: tg.fk, [S.tid]: type[S.tid], [S.vid]: v[S.vid], ...(S.link === 'TASKACTV' ? { proj_id: tg.projId } : {}) });
@@ -312,7 +313,8 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const u = rows(db, 'UDFTYPE').find((x) => x.table_name === tbl && lc(x.udf_type_label) === lc(name)) ?? fail(`No ${tg.subject} UDF "${name}" (add it with {"op":"add_udf"}).`);
       const V = ensure(db, 'UDFVALUE', ['udf_type_id', 'fk_id', 'proj_id', 'udf_date', 'udf_number', 'udf_text', 'udf_code_id']);
       const uid = u.udf_type_id, fk = tg.fk;
-      removeWhere(V.rows, (v) => v.udf_type_id === uid && v.fk_id === fk);
+      const VR = realOf(V.rows); // the scan only when the index says the object has a value of this UDF
+      if (rowIndex(VR, 'udf:fk', (v) => v.fk_id).get(fk)?.some((i) => VR[i].udf_type_id === uid)) removeWhere(V.rows, (v) => v.udf_type_id === uid && v.fk_id === fk);
       if (op.value == null || op.value === '') return { cleared: name };
       const r: Row = { udf_type_id: u.udf_type_id, fk_id: tg.fk, proj_id: tg.projId, udf_date: '', udf_number: '', udf_text: '', udf_code_id: '' };
       if (/DATE/.test(u.logical_data_type)) r.udf_date = date(op.value, 'value');
