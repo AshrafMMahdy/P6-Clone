@@ -353,12 +353,17 @@ in `addins/navisworks` (source and build script; needs a Navisworks licence, unt
 Server settings for 4D: `P6CLONE_CHROMIUM` (a Chromium or Chrome for `render_4d` images and video on the server; a
 tool argument never names a program), `P6CLONE_FFMPEG` (turns a WebM recording into MP4), `P6CLONE_MODEL_CACHE`
 (the parsed-model cache, default the OS temp folder) with `P6CLONE_MODEL_CACHE_DAYS` (14) and `P6CLONE_MODEL_CACHE_MB`
-(10240). Models count in the memory budget. There is no model size limit of the clone's own: the index streams; a model bigger than `P6CLONE_GEOM_CHUNK_MB` (300),
-or one too big for a single web-ifc run (its WebAssembly memory stops at 4 GB), is cut into chunks, each meshed on its
-own and merged; past `P6CLONE_VIEW_BATCH` (50,000) elements the display model merges them into a few meshes coloured
-per element, and past `P6CLONE_VIEW_MAX_MB` (1024) it draws the most detailed elements as boxes (a 1.7 GB IFC of 2.5
-million elements: meshed in 6 chunks in about 4 minutes, a 1.1 GB display model a browser draws). What
-bounds a model is the server's memory: give the Node process a heap to match (`--max-old-space-size`,
+(10240). Models count in the memory budget, estimated before a model is read (the index, and one geometry run) and
+refused in words naming what it needs and the budget. The index streams and is compact (a 2.5 million element model
+in about 0.5 GB); linking, rules, keys and every `export_4d` package need only the index (the tagged IFC is streamed
+from the model file), so a model too big to mesh still links and exports in full. Meshing runs chunk by chunk in its
+own processes: a model bigger than `P6CLONE_GEOM_CHUNK_MB` (300), or than the memory left beside its index, is cut
+into chunks, and each chunk's meshes become display tiles on disk before the next is meshed, so meshing takes what
+one chunk takes, not the model. The viewer and video draw the full geometry from those tiles (`P6CLONE_TILE_MB`, 32
+MB each; repeated meshes instanced), loaded one after another; a browser that cannot hold a model fails in words
+naming its size, and `boxes: true` (bounding boxes) is drawn only when asked. The layout, what the page fetches and
+signals, and the measurements: `docs/4d-tiles-contract.md`. What bounds a model is the server's memory: give the Node
+process a heap to match (`--max-old-space-size`,
 `P6CLONE_MEM_BUDGET_MB`). Revit `.rvt` files are read once exported to IFC.
 
 **LOB** (Line of Balance, location-based scheduling; see `docs/superpowers/specs/2026-10-21-lob-design.md` and
