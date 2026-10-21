@@ -52,7 +52,9 @@ for (const enc of ['utf-8', 'utf-8-bom', 'windows-1256'] as TextEncodingName[]) 
     const diff = changed(a, b, enc);
     assert.equal(diff.length, 1, JSON.stringify(diff));
     const [x, y] = diff[0].map((l) => l.split('\t'));
-    assert.deepEqual(x.map((v, i) => (v === y[i] ? null : [v, y[i]])).filter(Boolean), [['أعمال الحفر', RENAMED]]);
+    // the edit stamps the row's update date (to the minute): a minute passing between the file's making and the save is no difference
+    const stamp = (v: string) => /^\d{4}-\d\d-\d\d \d\d:\d\d$/.test(v);
+    assert.deepEqual(x.map((v, i) => (v === y[i] || (stamp(v) && stamp(y[i])) ? null : [v, y[i]])).filter(Boolean), [['أعمال الحفر', RENAMED]]);
     assert.equal(sv.notes, undefined);
   });
 }
