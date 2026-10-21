@@ -61,11 +61,25 @@ to is that geometry placed again. Every fragment's item is a leaf (class 0x16) i
 
 ## Geometry blocks (`LcOpNwdGeometry`)
 
-Per block an object stream from id 100: 0x5e, then 0x3c positions (u32, u32 count of floats, float32 x y z), 0x3d texture
-coordinates, 0x64 face data (int16 normals and the polygon sizes), each array followed by a compact index code. A table at
-the end gives each block's length. The index code is not decoded yet, so each piece is drawn as its placed box.
+The blocks, then a table: `u32 count, u32 pages, a u32 per page, a u32 length per block`. A block is an object stream
+from id 100: the root (0x5e faces; 0x5f lines and 0x60 points are not meshes), then attributes:
+
+- 0x3c positions, 0x3d texture coordinates: `u32 corners, u32 floats`, the float32 values, then an index code (none
+  when there is one value per corner);
+- 0x64 normals: `i32 -corners, u32 count`, 6 bytes each (3 x int16; 3 x int8 in revision 431), then an index code;
+- triangle strips: `u32 count, u32 bits, u32 count`, the lengths packed most significant bit first in u32 words, then
+  `u32 n` and an index code taking strip corners to corners (0: the corners in order). Strip k gives triangles
+  (k, k+1, k+2), every other one flipped.
+
+Index code, a byte per step: `0x00-0x3f` n+1 new values (the next ones in the array); `0x40-0x7f` the value n corners
+back; `0x80-0xbf` the previous value n+1 more times; `0xc0-0xdf` a predefined value (normals along the axes);
+`0xe0-0xef` and a byte: the value `(n & 15) << 8 | byte` corners back; `0xf0` and a u16: the value at that index. Padded
+to 4 bytes.
+
+Checked: the hello walls' mesh volumes are Revit's to 0.01 ft3; on the user's 2016 project all 325 elements with a Revit
+volume match it within 1%.
 
 ## Not read yet
 
-The triangles of the geometry blocks, TimeLiner (`LcTlTimelinerElement`), selection sets, clash tests,
+Lines and points (blocks 0x5f / 0x60), texture coordinates and normals (the viewer computes its own), TimeLiner (`LcTlTimelinerElement`), selection sets, clash tests,
 point clouds, `lichunk-007` files.

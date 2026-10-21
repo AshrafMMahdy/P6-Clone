@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import { readNavisworks } from '../core/bim/nwd.ts';
 
 const FIX = join(import.meta.dirname, 'fixtures', 'navisworks');
+/** an element's placed vertices, as [x, y, z] */
+const points = (e: { shape?: { positions: number[] } }) => { const p = e.shape?.positions ?? [], out: number[][] = []; for (let k = 0; k < p.length; k += 3) out.push([p[k], p[k + 1], p[k + 2]]); return out; };
 const call = async (name: string, args: Record<string, unknown>) => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const r = await callTool(name, args);
@@ -19,9 +21,21 @@ const call = async (name: string, args: Record<string, unknown>) => {
 test('hello.nwc: four walls placed where Revit put them (two by a translation of their own frame)', () => {
   const { elements } = readNavisworks(join(FIX, 'hello.nwc'));
   // a rectangle of four 149 ft walls turned about 39 degrees: 2 x 114 ft by 2 x 93 ft (70.9 x 56.8 m), 20 ft (6.1 m) high
-  const all = elements.flatMap((e) => e.boxes!);
+  const all = elements.flatMap(points);
   const span = (k: number) => Math.max(...all.map((p) => p[k])) - Math.min(...all.map((p) => p[k]));
   assert.ok(Math.abs(span(0) - 70.9) < 0.5 && Math.abs(span(1) - 56.8) < 0.5 && Math.abs(span(2) - 6.1) < 0.1, `${span(0)} ${span(1)} ${span(2)}`);
+});
+
+test('hello.nwc: each wall’s mesh, measured by the clone, is the volume Revit computed (to 0.1%)', { timeout: 120_000 }, async () => {
+  const o = await call('open_model', { path: join(FIX, 'hello.nwc') });
+  assert.equal(o.d.source.geometry.elements_with_meshes, 4);
+  const els = (await call('list_elements', { handle: o.d.handle })).d.elements;
+  const info = (await call('element_info', { handle: o.d.handle, guids: els.map((e: any) => e.guid) })).d.elements;
+  for (const e of info) {
+    const revit = e.authored.NetVolume;
+    assert.ok(revit > 50 && Math.abs(e.derivedVolumeM3 - revit) / revit < 0.001, `${e.name}: mesh ${e.derivedVolumeM3} m3, Revit ${revit} m3`);
+  }
+  await call('close', { handle: o.d.handle, owner_key: o.d.owner_key, discard: true });
 });
 
 test('hello.nwc: four Revit walls with level, family, type, ElementId, GlobalId and the quantities Revit computed, in SI', () => {
@@ -51,13 +65,13 @@ test('open_model on an .nwc without a handle: a model-only workspace with IFC cl
   assert.equal(o.err, false, JSON.stringify(o.d).slice(0, 300));
   assert.equal(o.d.source.format, 'Navisworks');
   assert.equal(o.d.geometry, 'ok', 'each element drawn as its placed boxes');
-  assert.equal(o.d.source.geometry.elements_with_boxes, 46);
+  assert.equal(o.d.source.geometry.elements_with_meshes, 46);
   assert.deepEqual(o.d.storeys.filter((s: string) => s !== 'Default Building' && !/^\(/.test(s)), ['Level 1']);
   assert.equal(o.d.classes.IfcCableCarrierSegment, 20);
   const q = await call('quantities', { handle: o.d.handle, group_by: 'class', kind: 'length' });
   const trays = q.d.groups.find((g: any) => g.group === 'IfcCableCarrierSegment');
   assert.ok(trays.authored.Length > 0 && trays.quantified === 20, JSON.stringify(trays).slice(0, 300));
-  assert.equal(trays.volume_m3, 0, 'box volumes are not quantities');
+  assert.ok(trays.volume_m3 > 0, 'meshes give derived volumes');
   const e = (await call('list_elements', { handle: o.d.handle, class: 'IfcLightFixture' })).d.elements;
   const info = (await call('element_info', { handle: o.d.handle, guids: [e[0].guid] })).d.elements[0];
   assert.ok(Object.keys(info.props).some((k) => k.startsWith('Element.')), 'the Revit parameters are there as properties');
@@ -91,9 +105,10 @@ test('the user\u2019s 2016 villa NWC: 416 Revit elements, every one with the Glo
   assert.equal(elements.length, 416);
   assert.equal(elements.filter((e) => e.guid && e.revitId !== null).length, 416);
   assert.equal(elements.filter((e) => e.category === 'Walls').length, 180);
-  // every element placed: its boxes in metres, inside the building's footprint (about 25 x 25 m, 10 m high)
-  assert.equal(elements.filter((e) => e.boxes?.length).length, 416);
-  const xs = elements.flatMap((e) => e.boxes!.map((p) => p[0])), zs = elements.flatMap((e) => e.boxes!.map((p) => p[2]));
+  // every element with a shape: its triangles in metres, inside the building's footprint
+  assert.equal(elements.filter((e) => e.shape?.triangles.length).length, 369, 'all but the 47 model lines');
+  assert.equal(elements.filter((e) => e.shape?.boxes).length, 0, 'every piece read as a mesh');
+  const xs = elements.flatMap(points).map((p) => p[0]), zs = elements.flatMap(points).map((p) => p[2]);
   assert.ok(Math.max(...xs) - Math.min(...xs) < 60 && Math.max(...zs) - Math.min(...zs) < 30, `${Math.min(...xs)}..${Math.max(...xs)}, ${Math.min(...zs)}..${Math.max(...zs)}`);
 });
 
@@ -130,4 +145,21 @@ test('the same building as RVT and as NWC: the same GlobalIds, so 4D links carry
   const shared = [...ra].filter((g) => nb.has(g)).length;
   assert.ok(shared >= 350, `${shared} of ${ra.size} RVT elements found in the NWC by GlobalId`);
   for (const x of [a, b]) await call('close', { handle: x.d.handle, owner_key: x.d.owner_key, discard: true });
+});
+
+test('the user\u2019s 2016 villa NWC: every element\u2019s mesh volume is the one Revit computed, within 1%', { skip: !existsSync(VILLA) && 'the villa sample is not here', timeout: 300_000 }, async () => {
+  const o = await call('open_model', { path: VILLA });
+  assert.equal(o.d.source.geometry.elements_with_boxes, 0);
+  const els = (await call('list_elements', { handle: o.d.handle, limit: 1000 })).d.elements;
+  let checked = 0;
+  for (let k = 0; k < els.length; k += 40) {
+    for (const e of (await call('element_info', { handle: o.d.handle, guids: els.slice(k, k + 40).map((x: any) => x.guid) })).d.elements) {
+      const r = e.authored?.NetVolume;
+      if (!(r > 0.001)) continue;
+      assert.ok(Math.abs(e.derivedVolumeM3 - r) / r < 0.01, `${e.name}: mesh ${e.derivedVolumeM3}, Revit ${r}`);
+      checked++;
+    }
+  }
+  assert.equal(checked, 325);
+  await call('close', { handle: o.d.handle, owner_key: o.d.owner_key, discard: true });
 });

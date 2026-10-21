@@ -16,8 +16,10 @@ export interface NwElement {
   /** quantities Revit computed: m, m2, m3 */
   quantities: { Length?: number; NetArea?: number; NetVolume?: number };
   revitId: number | null;
-  /** its tree item (for the geometry), and its pieces of geometry as placed boxes: 8 corners each, in metres */
-  node?: NwNode; boxes?: number[][];
+  /** its tree item (for the geometry) */
+  node?: NwNode;
+  /** its triangles, placed, in metres (pieces that could not be read are their boxes: shape.boxes counts them) */
+  shape?: { positions: number[]; triangles: number[]; boxes: number };
 }
 
 const FT = 0.3048;

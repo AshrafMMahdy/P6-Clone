@@ -9,9 +9,10 @@ import { readContainer, section, type NwContainer } from './nwd/container.ts';
 import { decodeTree, type NwGroup } from './nwd/tree.ts';
 import { elementsOf, type NwElement } from './nwd/elements.ts';
 import { compressGuid, toIfc } from './nwd/toIfc.ts';
-import { elementBoxes } from './nwd/geometry.ts';
+import { elementShapes } from './nwd/geometry.ts';
+import { decodeBlock, geometryBlocks, type Mesh } from './nwd/mesh.ts';
 
-const NWD_FORMAT = 3; // the conversion: any change to the reader bumps it (2: the Revit data in LcOaPartitionProps; 3: placed boxes), so old conversions are not reused
+const NWD_FORMAT = 5; // the conversion: any change to the reader bumps it (2: the Revit data in LcOaPartitionProps; 3: placed boxes; 4-5: meshes), so old conversions are not reused
 const HEAD = '#LcUStream';
 
 export function isNavisworks(path: string): boolean {
@@ -23,7 +24,7 @@ export function isNavisworks(path: string): boolean {
 export interface NavisworksSource {
   format: 'Navisworks'; files: { file: string; revision: number | null; elements: number; read: boolean; units?: string; note?: string }[];
   elements: number; with_revit_ids: number; with_revit_guids: number;
-  geometry: { elements_with_boxes: number; note: string }; warnings: string[];
+  geometry: { elements_with_meshes: number; elements_with_boxes: number; note: string }; warnings: string[];
 }
 
 /** The GlobalIds Revit's IFC export writes, in the order the model tree's guid index counts (LcOpGuidStore: u32, u32
@@ -54,7 +55,17 @@ function readOne(path: string, max: number): { elements: NwElement[]; revision: 
   const revit = elements.some((e) => e.revitId !== null || /^LcRevit/.test(e.node?.attr?.internal ?? ''));
   if (fr) {
     const scale = revit ? 0.3048 : 1;
-    for (const [i, corners] of elementBoxes(tree, decodeTree(fr, { fragments: true }).values ?? [], elements.map((e) => e.node!))) elements[i].boxes = corners.map((p) => p.map((x) => x * scale));
+    const geo = section(c, 'LcOpNwdGeometry', max);
+    const blocks = geo ? geometryBlocks(geo) : null;
+    const cache = new Map<number, Mesh | null | undefined>();
+    const mesh = (n: number) => {
+      if (!geo || !blocks || !blocks[n - 1]) return undefined;
+      if (!cache.has(n)) { try { cache.set(n, decodeBlock(geo, blocks[n - 1].offset, blocks[n - 1].length)); } catch { cache.set(n, undefined); } }
+      return cache.get(n);
+    };
+    for (const [i, s] of elementShapes(tree, decodeTree(fr, { fragments: true }).values ?? [], elements.map((e) => e.node!), mesh)) {
+      elements[i].shape = { positions: s.positions.map((x) => x * scale), triangles: s.triangles, boxes: s.boxes };
+    }
   }
   return { elements, revision: c.revision, units: revit ? 'feet (Revit)' : 'metres (taken as such: the file names no unit)' };
 }
@@ -95,7 +106,7 @@ export function readNavisworks(path: string, o: { maxBytes?: number } = {}): { e
     source: {
       format: 'Navisworks', files, elements: elements.length,
       with_revit_ids: elements.filter((e) => e.revitId !== null).length, with_revit_guids: elements.filter((e) => e.guid).length,
-      geometry: { elements_with_boxes: elements.filter((e) => e.boxes?.length).length, note: 'each piece of geometry is drawn as its placed bounding box (the triangles are not read yet): enough for the 3D view and the 4D video; box volumes are not quantities (Revit’s own volumes are, as NetVolume)' }, warnings,
+      geometry: { elements_with_meshes: elements.filter((e) => e.shape && !e.shape.boxes).length, elements_with_boxes: elements.filter((e) => e.shape?.boxes).length, note: 'the triangles of each piece, placed; a piece whose geometry could not be read is its placed box (that element gives no derived volume)' }, warnings,
     },
   };
 }

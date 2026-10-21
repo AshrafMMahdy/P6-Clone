@@ -1,4 +1,4 @@
-// Navisworks elements as IFC4 (each piece of geometry as its placed box, until the triangles are read): project, site, building, a storey per level, each element in its IFC
+// Navisworks elements as IFC4 (each element's placed triangles as one face set): project, site, building, a storey per level, each element in its IFC
 // class with its type, material, property sets and the quantities Revit computed, so the IFC pipeline (element index,
 // quantities, links, exports) reads a Navisworks file like any IFC.
 import { createHash } from 'node:crypto';
@@ -52,12 +52,13 @@ export function toIfc(elements: NwElement[], o: { name: string; file: string }):
     storeyId.set(name, add(`IFCBUILDINGSTOREY(${esc(madeGuid(`${o.file}:storey:${name}`))},$,${esc(name)},$,$,#${pl},$,$,.ELEMENT.,${z === null ? '$' : real(z)})`));
   }
   if (storeyId.size) add(`IFCRELAGGREGATES(${esc(madeGuid(`${o.file}:agg3`))},$,$,$,#${building},(${[...storeyId.values()].map((s) => `#${s}`).join(',')}))`);
-  /** an element's placed boxes (8 corners each) as one triangulated face set: 12 triangles a box */
-  const BOX = [[1, 3, 2], [1, 4, 3], [5, 6, 7], [5, 7, 8], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 4, 8], [3, 8, 7], [4, 1, 5], [4, 5, 8]];
-  const body = (corners: number[][]) => {
-    const pts = add(`IFCCARTESIANPOINTLIST3D((${corners.map((c) => `(${c.map(real).join(',')})`).join(',')}))`);
+  /** an element's placed triangles as one triangulated face set */
+  const body = (xyz: number[], triangles: number[]) => {
+    const p: string[] = [];
+    for (let k = 0; k < xyz.length; k += 3) p.push(`(${real(xyz[k])},${real(xyz[k + 1])},${real(xyz[k + 2])})`);
+    const pts = add(`IFCCARTESIANPOINTLIST3D((${p.join(',')}))`);
     const tris: string[] = [];
-    for (let b = 0; b * 8 < corners.length; b++) for (const t of BOX) tris.push(`(${t.map((k) => k + b * 8).join(',')})`);
+    for (let k = 0; k < triangles.length; k += 3) tris.push(`(${triangles[k] + 1},${triangles[k + 1] + 1},${triangles[k + 2] + 1})`);
     const fs = add(`IFCTRIANGULATEDFACESET(#${pts},$,.T.,(${tris.join(',')}),$)`);
     const rep = add(`IFCSHAPEREPRESENTATION(#${ctx},'Body','Tessellation',(#${fs}))`);
     return add(`IFCPRODUCTDEFINITIONSHAPE($,$,(#${rep}))`);
@@ -69,13 +70,13 @@ export function toIfc(elements: NwElement[], o: { name: string; file: string }):
     const pl = place(storeyId.get(storeyOf(e)) ? undefined : bPl);
     const tail = THIRTEEN.has(cls) ? '$,$,$,$,$' : '$'; // after Tag: PredefinedType (doors and windows: height, width, type, operation, user operation)
     const typeLabel = e.family && e.type && e.type !== e.family ? `${e.family}:${e.type}` : (e.type ?? e.family ?? null);
-    const shape = e.boxes?.length ? body(e.boxes) : null;
+    const shape = e.shape?.triangles.length ? body(e.shape.positions, e.shape.triangles) : null;
     const el = add(`${cls.toUpperCase()}(${esc(guid)},$,${esc(e.name)},$,${opt(typeLabel)},#${pl},${shape ? `#${shape}` : '$'},${e.revitId !== null ? esc(String(e.revitId)) : '$'},${tail})`);
     const s = storeyId.get(storeyOf(e))!; (inStorey.get(s) ?? inStorey.set(s, []).get(s)!).push(el);
     if (typeLabel) { const t = byType.get(typeLabel) ?? byType.set(typeLabel, { cls, members: [] }).get(typeLabel)!; t.members.push(el); }
     if (e.material) (byMaterial.get(e.material) ?? byMaterial.set(e.material, []).get(e.material)!).push(el);
     // property sets (and the mark that the shape is boxes), then the quantities Revit computed
-    for (const [set, props] of Object.entries(shape ? { ...e.psets, P6Clone: { Geometry: 'bounding boxes' } } : e.psets)) {
+    for (const [set, props] of Object.entries(e.shape?.boxes ? { ...e.psets, P6Clone: { Geometry: 'bounding boxes' } } : e.psets)) {
       const ps = Object.entries(props).map(([k, v]) => add(`IFCPROPERTYSINGLEVALUE(${esc(k)},$,${typeof v === 'number' ? (Number.isInteger(v) ? `IFCINTEGER(${v})` : `IFCREAL(${real(v)})`) : typeof v === 'boolean' ? `IFCBOOLEAN(${v ? '.T.' : '.F.'})` : `IFCLABEL(${esc(String(v))})`},$)`));
       if (!ps.length) continue;
       const pset = add(`IFCPROPERTYSET(${esc(madeGuid(`${guid}:pset:${set}`))},$,${esc(set)},$,(${ps.map((p) => `#${p}`).join(',')}))`);

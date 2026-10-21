@@ -4,38 +4,43 @@
 // back to is the same geometry placed again); its transform (class 0x0e translation, 0x0f translation and quaternion,
 // 0x11 matrix and translation) places it, else the box's translation does.
 //
-// The triangles inside each geometry block (LcOpNwdGeometry) are not decoded yet: each piece is drawn as its placed box.
+// Each piece's triangles come from its geometry block (mesh.ts); a block that cannot be read is drawn as its placed box.
 import type { NwNode, NwTree } from './tree.ts';
+import type { Mesh } from './mesh.ts';
 
 interface Frag { item: number; prim: number; xform: { cls: number; t: number[]; q?: number[]; m?: number[] } | null; box: { bbox: number[]; t: number[]; geom: number } | null }
 
-/** Pre-order positions (the file is 0) of every node and leaf. */
-export function preorder(tree: NwTree): Map<NwNode, number> {
-  const out = new Map<NwNode, number>();
-  let i = 0;
-  const walk = (n: NwNode) => { out.set(n, ++i); for (const c of n.children) walk(c); };
-  for (const r of tree.roots) walk(r);
-  return out;
-}
+export interface ElementShape { positions: number[]; triangles: number[]; boxes: number }
+const BOX = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7];
 
-/** Placed boxes per element: the corners (x, y, z in the file's units) of every piece of geometry its items have. */
-export function elementBoxes(tree: NwTree, fragments: unknown[], elementNodes: NwNode[]): Map<number, number[][]> {
-  // the element each item belongs to: the nearest element at or above it
+/** Each element's placed triangles (x, y, z in the file's units): its pieces' meshes (mesh(n) gives geometry block n,
+ *  null for lines and points, undefined when it could not be read: then the piece is its placed box). */
+export function elementShapes(tree: NwTree, fragments: unknown[], elementNodes: NwNode[], mesh: (n: number) => Mesh | null | undefined): Map<number, ElementShape> {
+  // the element each item belongs to: the nearest element at or above it (items counted in pre-order, the file is 0)
   const element = new Map(elementNodes.map((n, i) => [n, i]));
   const owner: number[] = [];
   let i = 0;
   const walk = (n: NwNode, e: number) => { const own = element.get(n) ?? e; owner[++i] = own; for (const c of n.children) walk(c, own); };
   for (const r of tree.roots) walk(r, -1);
-  const out = new Map<number, number[][]>();
+  const out = new Map<number, ElementShape>();
   for (const raw of fragments) {
     const f = raw as Frag;
     if (!f?.box?.bbox) continue;
     const e = owner[f.item];
     if (e === undefined || e < 0) continue;
-    const [x0, y0, z0, x1, y1, z1] = f.box.bbox;
-    const corners = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
-    const place = placer(f);
-    (out.get(e) ?? out.set(e, []).get(e)!).push(...corners.map(place));
+    const m = mesh(f.box.geom);
+    if (m === null) continue; // lines, points
+    const s = out.get(e) ?? out.set(e, { positions: [], triangles: [], boxes: 0 }).get(e)!;
+    const place = placer(f), base = s.positions.length / 3;
+    if (m) {
+      for (let k = 0; k < m.positions.length; k += 3) s.positions.push(...place([m.positions[k], m.positions[k + 1], m.positions[k + 2]]));
+      for (const t of m.triangles) s.triangles.push(base + t);
+    } else {
+      const [x0, y0, z0, x1, y1, z1] = f.box.bbox;
+      for (const c of [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]) s.positions.push(...place(c));
+      for (const t of BOX) s.triangles.push(base + t);
+      s.boxes++;
+    }
   }
   return out;
 }
