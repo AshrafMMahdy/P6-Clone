@@ -1,10 +1,10 @@
 // 4D tools of the MCP server: an IFC model attached to the project, element links (by hand and by rules), their
 // gaps, the 4D key, and the packages for Navisworks, SYNCHRO and IFC4 4D tools (and back). Kept apart from server.ts.
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { rows, type Db, type Row } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
-import { writeP6Xml } from '../core/xml/p6xml.ts';
+import { writeP6XmlTo } from '../core/xml/p6xml.ts';
 import { cachedModel, fileHash, loadModel, loadNeeds, modelBytes, releaseModels, type Model } from '../core/bim/model.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
@@ -256,7 +256,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         const tagged = tagIfcFile(ifcPath(), ifcOut, items);
         written.push(ifcOut);
         if (target === 'navisworks') { put(`${code}-4D-sets.xml`, searchSetsXml(items, code)); put('timeliner.csv', timelinerCsv(items)); }
-        else put(`${code}.xml`, writeP6Xml(s.db, { projIds: [projId], version: '19.12' }));
+        else { const p = join(dir, `${code}.xml`); h.writeOutWith(p, (w) => writeP6XmlTo(s.db, { projIds: [projId], version: '19.12' }, w)); written.push(p); } // as it is made (a big schedule)
         put('README.txt', README[target]);
         return { target, written, activities: items.length, elements_tagged: tagged.elements, key, planned: a.planned ?? 'current' };
       }
@@ -450,9 +450,16 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
     case 'synchro_cloud': return runSynchroCloud(s.db, projId, a, h.tick);
     case 'import_4d': {
       const path = pathArg(a.path);
+      // the file is read whole, with its text and what is read from it: counted in the budget while it is held (C16);
+      // past the longest string a JavaScript engine holds (about 512 MB) an IFC or CSV cannot be read as text at all
+      const size = (() => { try { return statSync(path).size; } catch { return -1; } })();
+      if (size < 0) return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.');
+      if (size > 0x1fffffe8 && !/\.(nwf|nwd|sp|xlsx)$/i.test(path)) return fail('too_large', `${basename(path)} is ${Math.round(size / 1048576)} MB: more text than one string can hold (about 512 MB), so it cannot be read as a 4D file.`, 'Export the 4D data on its own (the links or the TimeLiner list, without the model geometry), or split it.');
+      const releaseRead = reserveMemory(size * 4 + 8 * 1048576, `Reading ${basename(path)} (${Math.round(size / 1048576)} MB) for import_4d`, 'export the 4D data on its own (without the model geometry), or split it', s.handle);
       let bytes: Uint8Array;
-      try { bytes = new Uint8Array(readFileSync(path)); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
       let imp: Imported4d;
+      try {
+      try { bytes = new Uint8Array(readFileSync(path)); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
       try { imp = await readImport4d(path, bytes); } catch (e) { return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${(e as Error).message}`, 'Give an IFC 4D, search-set XML, TimeLiner CSV/xlsx, Navisworks .nwf/.nwd or SYNCHRO .sp file.'); }
       const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf';
       const m = await modelOf(s.db, projId, !tasksOnly);
@@ -465,6 +472,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       // an activity the edit refuses (a bad name, a clash) refuses the whole import
       const applied = h.apply(`Import 4D ${basename(path)}`, (d) => { try { return applyImport4d(d, projId, plan, m?.index ?? null, { source: basename(path), hoursPerDay: s.hpd, calendarDays: true }); } catch (e) { return fail('bad_input', `Not imported: ${(e as Error).message}`, 'Fix the task in the other tool, or import with create_activities: false.'); } });
       return { ...summary, linked: true, ...applied };
+      } finally { releaseRead(); }
     }
   }
   return undefined;

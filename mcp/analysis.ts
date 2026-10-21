@@ -18,11 +18,13 @@ import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { nowStamp } from '../core/report/reports.ts';
 import { lobActivityCodes } from '../core/lob/view.ts';
-import { fail, getSession, pathArg, type Session } from './runtime.ts';
+import { estimateBytes, fail, getSession, pathArg, reserveMemory, type Session } from './runtime.ts';
 import { timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
 import { baselineOf, type Tick } from '../core/analysis/common.ts';
 import { detectFormat, readRaw } from '../renderer/io.ts';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
+import { basename } from 'node:path';
+const sizeOf = (p: string) => { try { return statSync(p).size; } catch { return 0; } };
 import { rows } from '../core/db.ts';
 
 /** What the server lends these tools. */
@@ -31,6 +33,8 @@ export interface AnalysisHelpers {
   allIds: (db: Db) => string[];
   dd: (v: unknown) => number | null;
   writeOut: (path: string, data: string | Uint8Array) => void;
+  /** writeOut for a file made piece by piece (the pieces go to the file as they come). */
+  writeOutWith: (path: string, make: (put: (piece: string | Uint8Array) => void) => void) => void;
   /** run fn as one undoable change of this caller */
   apply: <T>(label: string, fn: (db: Db) => T) => T;
   /** apply for work that ticks between its steps */
@@ -158,13 +162,17 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const mainProj = (db: Db) => rows(db, 'PROJECT').find((p) => !p._baseline_of && (a.project == null || p.proj_short_name === a.project)) ?? fail('bad_input', a.project ? `No project "${a.project}".` : 'The file has no project.', 'Pass project.');
       const updates: Update[] = [];
       const cur = mainProj(s.db);
+      // each update read from a file, or built as a copy, is held for this call: counted in the memory budget (C14)
+      const releases: (() => void)[] = [];
+      try {
       for (const [i, u] of (a.updates as Record<string, unknown>[]).entries()) {
         if (u?.handle) { const o = getSession(u.handle); updates.push({ name: String(u.name ?? o.path ?? u.handle), db: o.db, projId: mainProj(o.db).proj_id }); }
-        else if (u?.path) { const p = pathArg(u.path); let b: Uint8Array; try { b = new Uint8Array(readFileSync(p)); } catch { return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.'); } const db = readRaw(b, detectFormat(p, b)).db; updates.push({ name: String(u.name ?? p), db, projId: mainProj(db).proj_id }); }
+        else if (u?.path) { const p = pathArg(u.path); releases.push(reserveMemory(estimateBytes(sizeOf(p)), `Reading update ${i + 1} (${basename(p)}) for windows_analysis`, 'open the updates with open_file and pass their handles when there is room')); let b: Uint8Array; try { b = new Uint8Array(readFileSync(p)); } catch { return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.'); } const db = readRaw(b, detectFormat(p, b)).db; updates.push({ name: String(u.name ?? p), db, projId: mainProj(db).proj_id }); }
         else if (u?.baseline) { const bl = baselineOf(s.db, cur, String(u.baseline) as 'project') ?? fail('bad_input', `The project has no ${u.baseline} baseline in this file.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(s.db, [cur.proj_id]).join(', ') || 'none saved'}.`); updates.push({ name: String(u.name ?? bl.name), db: s.db, projId: bl.projId }); }
         else if (u?.data_date && Array.isArray(u.progress)) {
           // built from the last update that is a schedule of its own (a stored baseline is a snapshot, not edited), else the current project
           const prev = [...updates].reverse().find((x) => x.db !== s.db || x.projId === cur.proj_id) ?? { name: 'current', db: s.db, projId: cur.proj_id };
+          releases.push(reserveMemory(s.bytes, `Building update ${i + 1} (a copy of the project) for windows_analysis`, 'pass fewer progress updates, or save them as files and open them'));
           const db = structuredClone(prev.db) as Db, dd = h.dd(u.data_date) ?? fail('bad_input', `updates[${i}].data_date is not a date.`, 'YYYY-MM-DD');
           const r = applyOps(db, u.progress, { hoursPerDay: s.hpd, calendarDays: true });
           if (!r.ok) fail('bad_input', `updates[${i}] operation ${r.error!.index + 1}: ${r.error!.message}`, '');
@@ -176,6 +184,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const r = await windowsAnalysis(updates, { milestone: a.milestone, method: a.method, hoursPerDay: s.hpd, maxIds: maxIds ?? undefined, tick: h.tick });
       if (!r.ok) return fail(r.error.code, r.error.message, 'Check the milestone and the updates.');
       return r;
+      } finally { for (const r of releases) r(); }
     }
     case 'tia': {
       if (!Array.isArray(a.fragnet) || !a.fragnet.length) fail('bad_input', 'fragnet must list edit operations.', 'e.g. [{"op": "add_activity", "id": "X1", "name": "Design change", "duration_days": 10}, {"op": "add_relationship", "pred": "A1000", "succ": "X1"}]');
@@ -221,7 +230,7 @@ function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string
   const from = byCode.get(String(b.from ?? '')), to = byCode.get(String(b.to ?? ''));
   if (!from || !to) return fail('bad_input', 'between needs from and to Activity IDs of this project.', 'e.g. {"from": "A1000", "to": "A9000"}');
   const succ = new Map<string, string[]>();
-  for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) succ.set(r.pred_task_id, [...(succ.get(r.pred_task_id) ?? []), r.task_id]);
+  for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) { const l = succ.get(r.pred_task_id); if (l) l.push(r.task_id); else succ.set(r.pred_task_id, [r.task_id]); }
   // only activities that can reach "to" are walked, so the search does not wander
   const reach = new Set<string>([to.task_id]);
   for (let grew = true; grew;) { grew = false; for (const [p, ss] of succ) if (!reach.has(p) && ss.some((x) => reach.has(x))) { reach.add(p); grew = true; } }

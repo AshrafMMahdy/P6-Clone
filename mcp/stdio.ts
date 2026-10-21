@@ -23,7 +23,7 @@ export async function handleMessage(m: Msg, sessionCaller?: string, notify?: (n:
         const token = m.params?._meta?.progressToken;
         const progress = token != null && notify ? (done: number, total: number, message: string) => notify({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: done, total, message } }) : undefined;
         const { out, isError } = await callTool(String(m.params?.name ?? ''), (m.params?.arguments ?? {}) as Record<string, any>, sessionCaller, abort.signal, progress);
-        return reply(toolResult(out, isError));
+        return reply(toolResult(out, isError, String(m.params?.name ?? '')));
       } finally { if (running.get(key) === abort) running.delete(key); }
     }
     default: return error(-32601, `Method not found: ${m.method}`);

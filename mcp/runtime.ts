@@ -252,22 +252,32 @@ export function countMemory(count: () => number, trim?: () => void): void { coun
 const usedBytes = () => [...sessions.values()].reduce((a, s) => a + s.bytes, 0) + [...counters].reduce((a, f) => a + f(), 0) + reserved;
 /** The budget not taken by projects, models and work in flight. */
 export const freeMemory = () => effectiveBudget() - usedBytes();
-/** Reserve memory for work that is not a project (refused like a file that does not fit); call the result to release. */
-export function reserveMemory(bytes: number): () => void {
-  admit(bytes);
+/** Reserve memory for work that is not a project (refused like a file that does not fit); call the result to release.
+ *  `what` names the work in the refusal ("Monte Carlo on this project"), `hint` says what else the caller can do. */
+export function reserveMemory(bytes: number, what?: string, hint?: string, keep?: string): () => void {
+  admit(bytes, keep, what, hint);
   reserved += bytes;
   let done = false;
   return () => { if (!done) { done = true; reserved -= bytes; } };
 }
 
-/** Make room for a project: refuse only when even moving every idle project out would not be enough. */
-export function admit(bytes: number, keep?: string): void {
+/** Make room for a project or a call: refuse only when even moving every idle project out would not be enough. The
+ *  refusal says what holds the memory, and asks to retry only when work in flight will give some back. */
+export function admit(bytes: number, keep?: string, what = 'This file', hint?: string): void {
   const budget = effectiveBudget();
   const byAge = () => [...sessions.values()].filter((s) => s.handle !== keep && !busy.has(s.handle)).sort((a, b) => a.lastUsed - b.lastUsed);
   while ((sessions.size >= config.maxHandles || usedBytes() + bytes > budget) && byAge().length) { evict(byAge()[0], 'memory'); for (const t of trimmers) t(); }
   if (usedBytes() + bytes > budget) for (const t of trimmers) t();
   if (sessions.size >= config.maxHandles) fail('handle_limit', `All ${config.maxHandles} project slots are busy right now.`, 'Retry shortly, or close a project you no longer need.', { retryAfter: 5 });
-  if (usedBytes() + bytes > budget) fail('memory_budget', `This file needs about ${mb(bytes)} of memory; ${mb(budget - usedBytes())} of the ${mb(budget)} budget is free while other calls are running.`, bytes > budget ? 'The file is larger than the whole memory budget: raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size) or split the file.' : 'Retry when the running calls have finished; idle projects are moved out automatically.', { retryAfter: 10, data: { needed_mb: Math.round(bytes / 1048576), budget_mb: Math.round(budget / 1048576) } });
+  if (usedBytes() + bytes <= budget) return;
+  const projects = [...sessions.values()].reduce((a, s) => a + s.bytes, 0), models = [...counters].reduce((a, f) => a + f(), 0);
+  const running = reserved > 0 || [...busy].some((h) => h !== keep); // the call asking is not one to wait for
+  const held = [`${sessions.size} project${sessions.size === 1 ? '' : 's'} in memory: ${mb(projects)}`, ...(models ? [`4D models: ${mb(models)}`] : []), ...(reserved ? [`calls running: ${mb(reserved)}`] : [])].join('; ');
+  const next = bytes > budget ? `It needs more than the whole memory budget: ${hint ? `${hint}, or ` : ''}raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size).`
+    : running ? `Retry when the running calls have finished (they give their memory back); idle projects are moved out automatically.${hint ? ` Or: ${hint}.` : ''}`
+      : `${hint ? `${hint}; or ` : ''}close a project (close) or a 4D model you no longer need: what is in memory is in use by this call's project.`;
+  fail('memory_budget', `${what} needs about ${mb(bytes)} of memory, and ${mb(Math.max(0, budget - usedBytes()))} of the ${mb(budget)} budget (P6CLONE_MEM_BUDGET_MB) is free (${held}).`, next,
+    { ...(running ? { retryAfter: 10 } : {}), data: { needed_mb: Math.round(bytes / 1048576), free_mb: Math.round(Math.max(0, budget - usedBytes()) / 1048576), budget_mb: Math.round(budget / 1048576) } });
 }
 const mb = (b: number) => `${Math.round(b / 1048576)} MB`;
 /** A project grown by a call (an LOB plan adds thousands of activities): its memory counted again, as an XER of about

@@ -10,16 +10,19 @@
 //   Environment: P6CLONE_ROOT, P6CLONE_TOKEN, P6CLONE_PORT, P6CLONE_MAX_HANDLES, P6CLONE_MEM_BUDGET_MB,
 //   P6CLONE_IDLE_MINUTES. Run Node with --max-old-space-size above the memory budget for very large files.
 import { minOf } from '../core/arrays.ts';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { detectFormat, exportFile, importChecks, readRaw, type Format } from '../renderer/io.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid } from '../core/xer/repair-valid.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
-import { writeP6Xml } from '../core/xml/p6xml.ts';
+import { writeP6Xml, writeP6XmlTo } from '../core/xml/p6xml.ts';
+import { writeMspdiTo } from '../core/msp/mspdi.ts';
+import { readPeak, workNeed } from './workset.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { updateProgress } from '../core/progress/update.ts';
 import { levelResources } from '../core/level/level.ts';
@@ -46,7 +49,7 @@ import { addField, type Db, type Row } from '../core/db.ts';
 import { findUnicodeFont } from '../renderer/print/system-font.ts';
 import { compareSchedules } from '../core/diff.ts';
 import { printPages, printableColumns } from '../renderer/print/schedule.ts';
-import { pagesToHtml, pagesToPdf } from '../renderer/print/output.ts';
+import { pagesToHtml, pagesToPdfParts } from '../renderer/print/output.ts';
 import { PRINT_GUIDE } from '../renderer/print/layout.ts';
 import { readXlsx, writeXlsx } from '../core/excel/xlsx.ts';
 import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
@@ -57,7 +60,7 @@ import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler }
 import { dayHours } from '../core/project/units.ts';
 import {
   ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
-  exclusive, change, changeAsync, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, type Session,
+  exclusive, change, changeAsync, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
@@ -99,7 +102,7 @@ const TOOLS = [
   { name: 'export_pdf', annotations: writes, description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML. ' + PRINT_GUIDE + ' Layout options: filter, group_by (wbs, none), sort_by.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', annotations: writes, description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK, TASKPRED, RSRC, TASKRSRC; row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
   { name: 'import_excel', annotations: edit, description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities, relationships, resources and assignments; "Y" in delete_record_flag deletes the row. Calculated columns are ignored. One undoable change; dry_run returns the plan only.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
-  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days. baseline (project, bl1-bl3 or the name of any saved baseline) compares this project with its baseline stored in the file instead (computed). Activities match by Activity ID, then by a unique name (matched_by_name). mode: computed compares only what the schedule computes, per activity: duration_delta_days, remaining_delta_days, start_shift_days, finish_shift_days, total_float_delta_days (working days), became_critical / no_longer_critical, plus only_in_a / only_in_b.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against' }, mode: { type: 'string', description: 'all (default) or computed' }, baseline: { type: 'string', description: 'project, bl1, bl2, bl3 or a saved baseline name: compare with that baseline in this file' }, project: { type: 'string' }, max_changes: { type: 'number' } } }) },
+  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days. baseline (project, bl1-bl3 or the name of any saved baseline) compares this project with its baseline stored in the file instead (computed). Activities match by Activity ID, then by a unique name (matched_by_name). mode: computed compares only what the schedule computes, per activity: duration_delta_days, remaining_delta_days, start_shift_days, finish_shift_days, total_float_delta_days (working days), became_critical / no_longer_critical, plus only_in_a / only_in_b.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against' }, mode: { type: 'string', description: 'all (default) or computed' }, baseline: { type: 'string', description: 'project, bl1, bl2, bl3 or a saved baseline name: compare with that baseline in this file' }, project: { type: 'string' }, max_changes: { type: 'number', description: 'changes a page (default 500, at most 5000)' }, offset: { type: 'number', description: 'changes to skip: pass next_offset for the next page' } } }) },
   { name: 'evaluate', annotations: ro, description: 'What-if without changing the project: schedules a scratch state of it (no undo entry, nothing kept) as it is and with overrides (edit operations, e.g. [{"op":"update_activity","id":"A1000","duration_days":15}]), with the same data_date (this call only) and options (as schedule takes them). Answers base_finish, finish, finish_delta_days (working days), critical (activity IDs), became_critical, no_longer_critical, and changed (per activity, each computed field that changed as [before, after]; max_rows, default 500).', inputSchema: withHandle({ type: 'object', properties: { overrides: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, data_date: { type: 'string' }, project: { type: 'string' }, max_rows: { type: 'number' } } }) },
   { name: 'list_reports', annotations: ro, description: 'Reports available like P6 Tools > Reports: the standard reports by group and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'run_report', annotations: ro, description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as PDF (.pdf), HTML (.html), CSV (.csv/.txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number' } } }) },
@@ -122,15 +125,46 @@ const projectIds = (db: Db, id: unknown) => {
 const readBytes = (p: string) => { try { return new Uint8Array(readFileSync(p)); } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
 /** Write a file atomically: a temporary file in the same folder, flushed to disk, then renamed over the target (a crash
  *  leaves the old file or the new one, never half of one). Missing folders inside the write root are made. */
-const writeOut = (p: string, data: string | Uint8Array) => {
+const writeOut = (p: string, data: string | Uint8Array) => writeOutWith(p, (put) => put(data));
+/** writeOut for a file made piece by piece: `make` hands each piece to `put`, which goes to the temporary file in
+ *  writes of about 4 MB, so a file larger than memory (a P6 XML of a big schedule) is never one string. */
+const writeOutWith = (p: string, make: (put: (piece: string | Uint8Array) => void) => void) => {
   const tmp = join(dirname(p), `.${basename(p)}.${randomBytes(4).toString('hex')}.p6clone-tmp`);
   try {
     if (writeBase()) mkdirSync(dirname(p), { recursive: true });
     const fd = openSync(tmp, 'w');
-    try { const b = typeof data === 'string' ? Buffer.from(data, 'utf8') : data; for (let at = 0; at < b.length;) at += writeSync(fd, b, at, b.length - at); fsyncSync(fd); } finally { closeSync(fd); }
+    try {
+      const flush = (b: Uint8Array) => { for (let at = 0; at < b.length;) at += writeSync(fd, b, at, b.length - at); };
+      let held: string[] = [], size = 0;
+      // a piece cut inside a surrogate pair (text cut every n characters) keeps its first half for the next write
+      const out = (last: boolean) => {
+        if (!held.length) return;
+        let t = held.join(''); held = []; size = 0;
+        const c = t.charCodeAt(t.length - 1);
+        if (!last && c >= 0xd800 && c <= 0xdbff) { held = [t.slice(-1)]; size = 1; t = t.slice(0, -1); }
+        flush(Buffer.from(t, 'utf8'));
+      };
+      make((piece) => {
+        if (typeof piece !== 'string') { out(true); flush(piece); return; }
+        held.push(piece); size += piece.length;
+        if (size >= 4194304) out(false);
+      });
+      out(true); fsyncSync(fd);
+    } finally { closeSync(fd); }
     renameSync(tmp, p);
-  } catch (e) { try { rmSync(tmp, { force: true }); } catch { /* gone */ } fail('file_unwritable', `Cannot write ${p}: ${(e as Error).message}.`, 'Check that the folder exists and the file is not open elsewhere.'); }
+  } catch (e) {
+    try { rmSync(tmp, { force: true }); } catch { /* gone */ }
+    if (e instanceof ToolError) throw e;
+    fail('file_unwritable', `Cannot write ${p}: ${(e as Error).message}.`, 'Check that the folder exists and the file is not open elsewhere.');
+  }
 };
+/** One page of compare's changes: max_changes (default 500, at most 5,000) from offset; next_offset for the rest. */
+const changesPage = <T,>(all: T[], a: Record<string, any>) => {
+  const max = Math.min(5000, Number(a.max_changes) || 500), offset = Math.max(0, Math.floor(Number(a.offset) || 0));
+  const changes = all.slice(offset, offset + max), next = offset + changes.length < all.length ? offset + changes.length : null;
+  return { changes, truncated: next != null, ...(offset || next != null ? { offset, next_offset: next } : {}) };
+};
+const fileSize = (p: string) => { try { return statSync(p).size; } catch { return 0; } };
 const iso = (t: number | null | undefined) => (t == null || !Number.isFinite(t) ? null : formatP6Date(t));
 /** Between phases of long work: let waiting messages in (a cancellation), then stop if this call was cancelled. */
 const checkpoint = async (ctx: Ctx) => { await new Promise((r) => setImmediate(r)); if (ctx.signal.aborted) fail('cancelled', 'The call was cancelled.', 'Nothing was kept or written by it; call again when needed.'); };
@@ -185,8 +219,12 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const path = pathArg(a.path);
       const bytes = readBytes(path);
       const need = estimateBytes(bytes.length);
-      // reserve the memory first, so a big file is refused (with a way forward) instead of exhausting the process
+      // reserve the memory first, so a big file is refused (with a way forward) instead of exhausting the process: the
+      // project as it stays in memory, and while it is read the reader's own peak above that (workset.ts READ_PEAK)
       const s0 = createSession({ tables: {} }, { path, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: need, dirty: false });
+      let reading = () => {};
+      try { const peak = readPeak(detectFormat(path, bytes), bytes.length); if (peak > need) reading = reserveMemory(peak - need, `Reading ${basename(path)} (${Math.round(bytes.length / 1048576)} MB)`, 'save it as XER from P6 or Microsoft Project (the XER reader needs the least), or split it by project', s0.handle); }
+      catch (e) { closeSession(s0); forgetEvicted(s0.handle); throw e; }
       try {
         await checkpoint(ctx);
         const format = detectFormat(path, bytes);
@@ -219,7 +257,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const still = worst(g) === 'fatal' || g.some((x) => x.code === 'EMPTY_KEY');
         // errors left as they are (repairing them would mean guessing or cutting data): named, so nothing is a surprise
         const left = new Map<string, Finding[]>();
-        for (const x of g) if (x.severity === 'fatal' || x.severity === 'error') left.set(x.code, [...(left.get(x.code) ?? []), x]);
+        for (const x of g) if (x.severity === 'fatal' || x.severity === 'error') { const l = left.get(x.code); if (l) l.push(x); else left.set(x.code, [x]); }
         for (const [code, xs] of left) fix.not_repaired.push(`${code} x${xs.length} (${xs[0].severity}) not repaired: ${xs[0].message}${xs[0].p6 ? ` P6: ${xs[0].p6}` : ''}`);
         return {
           handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still,
@@ -227,7 +265,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
             : fix.repaired.length ? 'Opened with repairs (diagnostics.repaired): a save writes a file P6 imports.' : 'Opened; nothing needed repairing.',
           diagnostics: { ...brief(g), repaired: fix.repaired, not_repaired: fix.not_repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0),
         };
-      } catch (e) { closeSession(s0); throw e; }
+      } catch (e) { closeSession(s0); throw e; } finally { reading(); }
     }
     case 'compute_schedule': { const r = computeSchedule(a); return r.ok ? r : { ok: false, error: { ...r.error, hint: r.error.code === 'schedule_failed' ? 'Fix the reported problem (or pass break_loops: true for loops) and call again.' : 'Fix that part of the input (where says which) and call again.' } }; }
     case 'new_project': {
@@ -379,14 +417,18 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       }
       if ((fmt === 'mspdi' || fmt === 'mpx') && !projIds && allIds(s.db).length > 1) fail('bad_input', `A Microsoft Project file holds one project, and this file holds ${allIds(s.db).length}: ${names()}.`, 'Pass "project" with the Project ID to write (save once per project).');
       await checkpoint(ctx);
-      let bytes: string | Uint8Array, label: string;
+      let bytes: string | Uint8Array | null = null, label: string;
       const notes: string[] = [];
-      if (fmt === 'p6xml' || fmt === 'xml') { bytes = writeP6Xml(s.db, { version: a.version ?? '19.12', projIds }); label = 'P6 XML'; }
-      else if (fmt === 'mspdi' || fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: projIds ?? allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto', readAs: s.encoding, report: notes }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
+      // P6 XML goes to the file as it is made (never one string the size of the file)
+      if (fmt === 'p6xml' || fmt === 'xml') label = 'P6 XML';
+      else if (fmt === 'mspdi') label = 'Microsoft Project XML';
+      else if (fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: projIds ?? allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto', readAs: s.encoding, report: notes }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
       else if (fmt === 'xer') { bytes = writeXer(s.db, { version: a.version ?? s.db.header?.version ?? '19.12', encoding: a.encoding ?? 'auto', readAs: s.encoding, projIds, report: notes }); label = `XER ${a.version ?? s.db.header?.version ?? '19.12'}`; }
       else return fail('bad_input', `Unknown format "${a.format}".`, 'Use xer, p6xml, mspdi or mpx.');
       await checkpoint(ctx); // nothing is written once the call is cancelled; the write itself is one step
-      writeOut(path, bytes);
+      if (bytes == null && fmt === 'mspdi') writeOutWith(path, (put) => writeMspdiTo(s.db, { projIds: projIds ?? allIds(s.db).slice(0, 1), report: notes }, put));
+      else if (bytes == null) writeOutWith(path, (put) => writeP6XmlTo(s.db, { version: a.version ?? '19.12', projIds }, put));
+      else writeOut(path, bytes);
       // the 4D model, links and rules travel beside the file (<file>.4d.json); XER and P6 XML have no place for them
       const sidecar = fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml' ? save4dSidecar(s.db, path, projIds ?? allIds(s.db), writeOut) : null;
       if (sidecar) notes.push(`4D links saved beside it: ${basename(sidecar)}`);
@@ -416,7 +458,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'export_pdf': {
       const path = pathArg(a.path, 'path', 'write');
       const r = printPages(s.db, { projIds: projectIds(s.db, a.project), setup: a.settings ?? {}, filter: a.filter, groupBy: a.group_by, sortBy: a.sort_by, prefs: prefsOf(s) });
-      writeOut(path, /\.html?$/i.test(path) ? pagesToHtml(r.pages, r.title) : await pagesToPdf(r.pages, r.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) }));
+      // a PDF goes to the file in its pieces, each page's drawing let go once compressed
+      if (/\.html?$/i.test(path)) writeOut(path, pagesToHtml(r.pages, r.title));
+      else { const parts = await pagesToPdfParts(r.pages, r.title, { release: true, font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) }); writeOutWith(path, (put) => { for (const b of parts) put(b); }); }
       return { saved: path, pages: r.pages.length, activities: r.activities, ...(r.unknownColumns.length ? { unknown_columns: r.unknownColumns, printable_columns: printableColumns(s.db).map((c) => c.id) } : {}) };
     }
     case 'export_excel': { const path = pathArg(a.path, 'path', 'write'); writeOut(path, await writeXlsx(exportSheets(s.db, projectIds(s.db, a.project), s.hpd, true))); return { saved: path, sheets: ['TASK', 'TASKPRED', 'RSRC', 'TASKRSRC'] }; }
@@ -435,16 +479,19 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (a.baseline) { // this project against its baseline stored in the same file (computed fields)
         const cur = (s.db.tables.PROJECT?.rows ?? []).find((p) => !p._baseline_of && (a.project == null || p.proj_short_name === a.project)) ?? fail('bad_input', 'No project to compare.', 'Pass project.');
         const bl = baselineOf(s.db, cur, String(a.baseline) as 'project') ?? fail('bad_input', `The project has no ${a.baseline} baseline in this file.`, 'Use project, bl1, bl2, bl3 or the name of a saved baseline.');
-        const c = compareComputed(s.db, s.db, s.hpd, { aProjIds: [bl.projId], bProjIds: [cur.proj_id] }); const max = Math.min(5000, Number(a.max_changes) || 500);
-        return { mode: 'computed', baseline: bl.name, ...c, changed: c.changes.length, changes: c.changes.slice(0, max), truncated: c.changes.length > max };
+        const c = compareComputed(s.db, s.db, s.hpd, { aProjIds: [bl.projId], bProjIds: [cur.proj_id] });
+        return { mode: 'computed', baseline: bl.name, ...c, changed: c.changes.length, ...changesPage(c.changes, a) };
       }
-      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
-      if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); const max = Math.min(5000, Number(a.max_changes) || 500); return { mode: 'computed', changed: c.changes.length, changes: c.changes.slice(0, max), truncated: c.changes.length > max, became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }; }
+      // a file compared against is read for this call only, and counted in the memory budget while it is held (C14)
+      let release = () => {};
+      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); release = reserveMemory(estimateBytes(fileSize(p)), `Reading ${basename(p)} to compare with`, 'open the other file with open_file and compare with other_handle when there is room'); const b = readBytes(p); return readRaw(b, detectFormat(p, b)).db; })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
+      try {
+      if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return { mode: 'computed', changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }; }
       if (a.mode != null && a.mode !== 'all') fail('bad_input', 'mode must be all or computed.', 'Leave it out to compare everything.');
       const cs = compareSchedules(s.db, other, s.hpd, true);
       const count = (o: string, k: string) => cs.filter((c) => c.object === o && c.kind === k).length;
-      const max = Math.min(5000, Number(a.max_changes) || 500);
-      return { summary: Object.fromEntries(['project', 'wbs', 'activity', 'relationship'].map((o) => [o, { added: count(o, 'added'), deleted: count(o, 'deleted'), changed: new Set(cs.filter((c) => c.object === o && c.kind === 'changed').map((c) => c.id)).size }])), changes: cs.slice(0, max), truncated: cs.length > max };
+      return { summary: Object.fromEntries(['project', 'wbs', 'activity', 'relationship'].map((o) => [o, { added: count(o, 'added'), deleted: count(o, 'deleted'), changed: new Set(cs.filter((c) => c.object === o && c.kind === 'changed').map((c) => c.id)).size }])), ...changesPage(cs, a) };
+      } finally { release(); }
     }
     case 'list_reports': return listReports(s.db).map((e) => ({ id: e.id, name: e.name, group: e.group, kind: e.kind, description: e.description }));
     case 'create_report': {
@@ -465,7 +512,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (!a.path) { const max = Math.min(2000, Number(a.max_rows) || 200); return { report: rname!, title: report!.title, subtitle: report!.subtitle, columns: report!.columns, total_rows: report!.rows.length, rows: report!.rows.slice(0, max).map((r) => ({ cells: r.cells, ...(r.bold ? { group: true, level: r.level ?? 0 } : r.level ? { level: r.level } : {}) })), truncated: report!.rows.length > max }; }
       const path = pathArg(a.path, 'path', 'write');
       const ext = (/\.(\w+)$/.exec(path)?.[1] ?? '').toLowerCase();
-      if (ext === 'pdf') { const pages = reportPages(s.db, ids, report!, a.settings ?? {}, prefs, rname!); writeOut(path, await pagesToPdf(pages, report!.title, { font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) })); return { saved: path, pages: pages.length, rows: report!.rows.length }; }
+      if (ext === 'pdf') { const pages = reportPages(s.db, ids, report!, a.settings ?? {}, prefs, rname!), n = pages.length; const parts = await pagesToPdfParts(pages, report!.title, { release: true, font: (cs) => findUnicodeFont(cs, a.settings?.font_path ? pathArg(a.settings.font_path, 'font_path') : undefined) }); writeOutWith(path, (put) => { for (const b of parts) put(b); }); return { saved: path, pages: n, rows: report!.rows.length }; }
       if (ext === 'html' || ext === 'htm') writeOut(path, reportHtml(report!, nowStamp()));
       else if (ext === 'csv' || ext === 'txt') writeOut(path, reportText(report!));
       else if (ext === 'xlsx') writeOut(path, await reportXlsx(report!));
@@ -480,7 +527,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     if (now - lastTick > 250) { lastTick = now; ctx.progress?.(done, total, message); }
     await checkpoint(ctx); // yields, and throws "cancelled" once the call or its job is cancelled
   };
-  const helpers = { projectIds, allIds, dd, writeOut, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), applyAsync: <T,>(label: string, fn: (d: Db) => Promise<T>) => changeAsync(s, ctx.caller, label, fn), tick };
+  const helpers = { projectIds, allIds, dd, writeOut, writeOutWith, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), applyAsync: <T,>(label: string, fn: (d: Db) => Promise<T>) => changeAsync(s, ctx.caller, label, fn), tick };
   const analysed = await runAnalysis(name, a, s, helpers);
   if (analysed !== undefined) return analysed;
   const fourd = await runFourD(name, a, s, helpers);
@@ -514,7 +561,7 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
   }
   const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
   const work = async () => {
-    let out = handle != null ? await exclusive(handle, () => run(name, a, ctx)) : await run(name, a, ctx);
+    let out = handle != null ? await exclusive(handle, () => withWorkingSet(name, a, handle, () => run(name, a, ctx))) : await run(name, a, ctx);
     const plain = !!out && typeof out === 'object' && !Array.isArray(out);
     // a tool that can change a project says whether that project now has unsaved changes
     const h = handle ?? (plain && typeof (out as { handle?: unknown }).handle === 'string' ? (out as { handle: string }).handle : undefined);
@@ -540,6 +587,17 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     if (e instanceof ToolError) return { out: { error: contractError({ code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) }) }, isError: true };
     return { out: { error: contractError({ code: 'internal', message: (e as Error).message, hint: 'This is a bug in the server; the project was not changed by this call. Retry, or report it with the message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') }) }, isError: true };
   }
+}
+
+/** A call's working set (workset.ts) reserved in the memory budget while it runs: refused up front, in words, when it
+ *  cannot fit (idle projects are moved out first), instead of running the server out of heap halfway. */
+async function withWorkingSet<T>(name: string, a: Record<string, any>, handle: string, fn: () => Promise<T>): Promise<T> {
+  let s: Session | undefined;
+  try { s = getSession(handle); } catch { return fn(); } // an unknown handle: the tool says so
+  const need = workNeed(name, a, s, freeMemory);
+  if (!need || need.bytes < 16 * 1048576) return fn();
+  const release = reserveMemory(need.bytes, need.what, need.hint, handle);
+  try { return await fn(); } finally { release(); }
 }
 
 /** The craft forks' error shape ({code, reason, next_step, retry_after_ms}) with the older fields (message, hint,
@@ -589,12 +647,27 @@ export function shutdown(reason: string): void {
   try { saveUnsavedAtExit(reason); } finally { process.exit(0); }
 }
 
-/** An MCP tools/call result; oversized output is cut down to a preview instead of flooding the client. */
-export function toolResult(out: unknown, isError: boolean) {
+/** An MCP tools/call result; oversized output is cut down to a preview instead of flooding the client, and the whole
+ *  result is written to a JSON file (in the write root, else the storage root, else the system's temporary folder)
+ *  whose path the answer gives, so none of it is out of reach. */
+export function toolResult(out: unknown, isError: boolean, tool?: string) {
   let text = JSON.stringify(out, null, 1);
   let structured = out && typeof out === 'object' && !Array.isArray(out) ? out : { result: out };
   if (text.length > config.maxResponseChars) {
-    structured = { truncated: true, size_chars: text.length, note: 'The result was too large to return whole; ask for less (limit, max_rows, filters, a narrower project) or write it to a file (run_report / export_* with path).', preview: text.slice(0, 20000) };
+    let saved: string | null = null;
+    try {
+      const dir = writeBase() ?? join(tmpdir(), 'p6clone-results');
+      mkdirSync(dir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+      let file = join(dir, `${(tool ?? 'result').replace(/[^\w-]+/g, '_')}-result-${stamp}.json`);
+      for (let i = 2; existsSync(file); i++) file = join(dir, `${(tool ?? 'result').replace(/[^\w-]+/g, '_')}-result-${stamp}-${i}.json`);
+      writeOutWith(file, (put) => { for (let at = 0; at < text.length; at += 1 << 22) put(text.slice(at, at + (1 << 22))); });
+      saved = file;
+    } catch { /* the preview below still answers */ }
+    structured = { truncated: true, size_chars: text.length, ...(saved ? { saved, written: [saved] } : {}),
+      note: saved ? `The result was too large to return whole (${text.length} characters); all of it is in ${saved} (JSON). Read that file, or ask for less (limit and offset, max_rows, filters, a narrower project).`
+        : 'The result was too large to return whole and could not be written to a file; ask for less (limit and offset, max_rows, filters, a narrower project) or write it to a file (run_report / export_* with path).',
+      preview: text.slice(0, 20000) };
     text = JSON.stringify(structured, null, 1);
   }
   return { content: [{ type: 'text', text }], structuredContent: structured, isError };
