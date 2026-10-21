@@ -58,6 +58,11 @@ async function readModel(path: string, o: { geometry?: boolean } = {}): Promise<
   try { return await loadModel(path, o); } finally { release(); }
 }
 
+/** No 3D model to draw: say why, never draw an empty building. */
+const noGeometry = (m: Model): never => m.index.geometryStatus === 'skipped'
+  ? fail('no_geometry', 'The model was opened without geometry.', 'open_model again without geometry: false.')
+  : fail('no_geometry', `The model has no 3D geometry: ${m.index.geometryNote ?? 'its geometry did not build'}`, 'Everything without 3D still works (simulate_4d, compare_4d, quantities, links); for pictures, fix or split the model and open it again.');
+
 /** The model attached to the project: from memory or the disk cache, else reopened from its file. */
 async function modelOf(db: Db, projId: string, required = true): Promise<Model | null> {
   const r = modelRow(db, projId);
@@ -207,7 +212,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       if (Array.isArray(a.snapshots) && a.snapshots.length) {
         const chrome = chromiumPath();
         if (!chrome) note = 'No Chromium to render snapshots (the server’s P6CLONE_CHROMIUM is not set): render_4d kind viewer gives a page to look at.';
-        else if (!m.glb) note = 'The model was opened without geometry: open_model again with geometry for snapshots.';
+        else if (!m.glb) note = m.index.geometryStatus === 'skipped' ? 'The model was opened without geometry: open_model again with geometry for snapshots.' : `The model has no 3D geometry, so there are no snapshots: ${m.index.geometryNote ?? 'its geometry did not build'}.`;
         else {
           const dir = pathArg(a.path ?? fail('bad_input', 'path (a folder) is needed for snapshots.', 'Pass path.'), 'path', 'write');
           mkdirSync(dir, { recursive: true });
@@ -284,7 +289,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
     }
     case 'render_4d': {
       const m = (await modelOf(s.db, projId))!;
-      if (!m.glb) fail('no_geometry', 'The model was opened without geometry.', 'open_model again without geometry: false.');
+      if (!m.glb) noGeometry(m);
       const kind = String(a.kind ?? 'viewer');
       if (!['viewer', 'images', 'video'].includes(kind)) fail('bad_input', `Unknown kind "${kind}".`, 'Use viewer, images or video.');
       const layout = a.layout === 'side_by_side' ? 'side_by_side' : 'single';

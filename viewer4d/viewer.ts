@@ -109,6 +109,21 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.1); sun.position.set(1, 2, 1.
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10000);
 const meshes: { mesh: THREE.Mesh; guid: string; own: THREE.Material | THREE.Material[] }[] = [];
 const byGuid = new Map<string, THREE.Mesh[]>();
+// big models come as batches: many elements in one mesh, each a vertex range, coloured by vertex colour (RGBA); an
+// opaque pass (alphaTest) and a see-through pass for the ghosts share the geometry
+interface Batch { mesh: THREE.Mesh; colors: THREE.BufferAttribute; guids: string[]; v0: Uint32Array; vn: Uint32Array }
+const batches: Batch[] = [];
+const allGuids = () => [...meshes.map((m) => m.guid), ...batches.flatMap((b) => b.guids)];
+function setupBatch(m: THREE.Mesh, ranges: (string | number)[]) {
+  const n = ranges.length / 3, guids: string[] = [], v0 = new Uint32Array(n), vn = new Uint32Array(n);
+  for (let k = 0; k < n; k++) { guids.push(String(ranges[k * 3])); v0[k] = Number(ranges[k * 3 + 1]); vn[k] = Number(ranges[k * 3 + 2]); }
+  const colors = new THREE.BufferAttribute(new Uint8Array(m.geometry.attributes.position.count * 4), 4, true);
+  m.geometry.setAttribute('color', colors);
+  m.material = new THREE.MeshLambertMaterial({ vertexColors: true, alphaTest: 0.5 });
+  const ghost = new THREE.Mesh(m.geometry, new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, depthWrite: false }));
+  ghost.renderOrder = 1; ghost.raycast = () => {}; m.add(ghost);
+  batches.push({ mesh: m, colors, guids, v0, vn });
+}
 const orbit = { target: new THREE.Vector3(), theta: 0.8, phi: 1.05, r: 30 };
 const VIEWS: Record<string, [number, number]> = { iso: [0.8, 1.05], top: [0.8, 0.12], front: [Math.PI / 2, Math.PI / 2], side: [0, Math.PI / 2], orbit: [0.8, 1.05] };
 function applyOrbit() { const t = orbit.target; camera.position.set(t.x + orbit.r * Math.sin(orbit.phi) * Math.cos(orbit.theta), t.y + orbit.r * Math.cos(orbit.phi), t.z + orbit.r * Math.sin(orbit.phi) * Math.sin(orbit.theta)); camera.lookAt(t); }
@@ -122,6 +137,8 @@ async function loadModel() {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
     m.geometry.computeVertexNormals();
+    const ranges = (m.userData?.batch ?? m.parent?.userData?.batch) as (string | number)[] | undefined;
+    if (ranges) { setupBatch(m, ranges); return; }
     const guid = (m.userData?.guid || m.parent?.userData?.guid || m.parent?.name || m.name) as string;
     meshes.push({ mesh: m, guid, own: mat(0xb8c0cc) });
     (byGuid.get(guid) ?? byGuid.set(guid, []).get(guid)!).push(m);
@@ -138,20 +155,30 @@ async function loadModel() {
 // ── state colouring per pane ────────────────────────────────────────────────────────────────────────────────────
 let current = dataDate ?? t0;
 const highlighted = new Set<string>();
-const counts = (source: string) => { const c: Record<string, number> = {}; for (const { guid } of meshes) { const s = opt.compare && source !== opt.left ? compareState(guid, opt.left!, current) : elementState(guid, source, current); c[s] = (c[s] ?? 0) + 1; } return c; };
+const counts = (source: string) => { const c: Record<string, number> = {}; for (const guid of allGuids()) { const s = opt.compare && source !== opt.left ? compareState(guid, opt.left!, current) : elementState(guid, source, current); c[s] = (c[s] ?? 0) + 1; } return c; };
+/** What an element looks like now: its material, and whether it is drawn at all. */
+function look(guid: string, source: string, asCompare: boolean, own: THREE.Material | THREE.Material[]): [THREE.Material | THREE.Material[], boolean] {
+  if (highlighted.has(guid)) return [M.highlight, true];
+  if (asCompare) {
+    const s = compareState(guid, opt.left!, current);
+    return [s === 'unlinked' ? M.unlinked : s === 'complete' ? own : s === 'not_started' ? M.cmp_not_started : M[s], true];
+  }
+  const s = elementState(guid, source, current);
+  const role = tl.elements[guid]?.links.find(([task]) => stateAt(spanFor(task, source), 'built', current) !== 'not_started')?.[1];
+  return [s === 'unlinked' ? M.unlinked : s === 'not_started' ? M.not_started : s === 'complete' ? own : s === 'temporary' ? M.temporary : role === 'removed' ? M.demolishing : M.in_progress, s !== 'removed'];
+}
+const OWN = mat(0xb8c0cc);
 function paint(source: string, asCompare: boolean) {
-  for (const { mesh, guid, own } of meshes) {
-    if (highlighted.has(guid)) { mesh.visible = true; mesh.material = M.highlight; continue; }
-    if (asCompare) {
-      const s = compareState(guid, opt.left!, current);
-      mesh.visible = true;
-      mesh.material = s === 'unlinked' ? M.unlinked : s === 'complete' ? own : s === 'not_started' ? M.cmp_not_started : M[s];
-      continue;
+  for (const m of meshes) { const [material, visible] = look(m.guid, source, asCompare, m.own); m.mesh.material = material; m.mesh.visible = visible; }
+  for (const b of batches) {
+    const a = b.colors.array as Uint8Array;
+    for (let k = 0; k < b.guids.length; k++) {
+      const [material, visible] = look(b.guids[k], source, asCompare, OWN);
+      const one = material as THREE.MeshLambertMaterial, c = one.color;
+      const rgba = [c.r * 255, c.g * 255, c.b * 255, visible ? (one.transparent ? one.opacity : 1) * 255 : 0];
+      for (let v = b.v0[k], e = v + b.vn[k]; v < e; v++) a.set(rgba, v * 4);
     }
-    const s = elementState(guid, source, current);
-    const role = tl.elements[guid]?.links.find(([task]) => stateAt(spanFor(task, source), 'built', current) !== 'not_started')?.[1];
-    mesh.visible = s !== 'removed';
-    mesh.material = s === 'unlinked' ? M.unlinked : s === 'not_started' ? M.not_started : s === 'complete' ? own : s === 'temporary' ? M.temporary : role === 'removed' ? M.demolishing : M.in_progress;
+    b.colors.needsUpdate = true;
   }
 }
 function panes(): { x: number; w: number; source: string; compare: boolean; label: string }[] {
@@ -284,8 +311,16 @@ function pick(e: PointerEvent) {
   const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
   const ps = panes(), cssW = r.width / ps.length, i = Math.min(ps.length - 1, Math.floor(x / cssW));
   ray.setFromCamera(new THREE.Vector2(((x - i * cssW) / cssW) * 2 - 1, -(y / r.height) * 2 + 1), camera);
-  const hit = ray.intersectObjects(meshes.filter((m) => m.mesh.visible).map((m) => m.mesh), false)[0];
-  const guid = hit ? meshes.find((m) => m.mesh === hit.object)?.guid : undefined;
+  // the first thing hit that is drawn (in a batch, a vertex with some opacity)
+  let guid: string | undefined;
+  for (const hit of ray.intersectObjects([...meshes.filter((m) => m.mesh.visible).map((m) => m.mesh), ...batches.map((b) => b.mesh)], false)) {
+    const b = batches.find((x) => x.mesh === hit.object);
+    if (!b) { guid = meshes.find((m) => m.mesh === hit.object)?.guid; break; }
+    const v = hit.face?.a ?? 0;
+    if ((b.colors.array as Uint8Array)[v * 4 + 3] < 20) continue;
+    let lo = 0, hi = b.v0.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (b.v0[mid] <= v) lo = mid; else hi = mid - 1; }
+    guid = b.guids[lo]; break;
+  }
   window.parent?.postMessage({ type: 'p6c4d:pick', guid: guid ?? null, add: e.ctrlKey || e.shiftKey }, '*');
 }
 window.addEventListener('message', (e) => {

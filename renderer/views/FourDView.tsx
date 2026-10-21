@@ -45,7 +45,7 @@ function Viewer({ m, projId, source, date, highlight, onPick, height }: { m: Loa
   useEffect(() => { if (ready && timeline) { post({ type: 'p6c4d:timeline', timeline }); post({ type: 'p6c4d:source', source }); } }, [ready, timeline, source]);
   useEffect(() => { if (ready && date) post({ type: 'p6c4d:date', date }); }, [ready, date, timeline]);
   useEffect(() => { if (ready) post({ type: 'p6c4d:highlight', guids: highlight }); }, [ready, highlight]);
-  if (!m.url) return <div className="muted">The model has no geometry to show.</div>;
+  if (!m.url) return <div className="muted">The model has no 3D geometry to show{m.index.geometryNote ? `: ${m.index.geometryNote}` : '.'} Links, rules, status and exchange still work.</div>;
   return <iframe ref={ref} src={m.url} onLoad={() => setTimeout(() => setReady(true), 300)} style={{ border: '1px solid #c4cfe0', width: '100%', height: height ?? '100%', minHeight: 200, background: '#fff' }} />;
 }
 

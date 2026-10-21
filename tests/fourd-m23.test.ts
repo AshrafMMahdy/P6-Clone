@@ -107,3 +107,20 @@ test('render_4d: MP4 everywhere (a WebM recording becomes MP4 with P6CLONE_FFMPE
     if (saved.ff == null) delete process.env.P6CLONE_FFMPEG; else process.env.P6CLONE_FFMPEG = saved.ff;
   }
 });
+
+test('a batched display model draws the same building as one node per element (Chromium)', { skip: !CHROME && 'no Chromium here', timeout: 300_000 }, async () => {
+  const { inChromium } = await import('../core/bim/headless.ts');
+  const drawn = async (batch: string | undefined) => {
+    const saved = process.env.P6CLONE_VIEW_BATCH;
+    if (batch) process.env.P6CLONE_VIEW_BATCH = batch; else delete process.env.P6CLONE_VIEW_BATCH;
+    try {
+      const { h } = await duplex();
+      const v = await call('render_4d', { handle: h, path: mkdtempSync(join(tmpdir(), 'p6-bv-')), kind: 'viewer', embed: true });
+      // pixels that are not the background, at a date when everything is built
+      return await inChromium(CHROME!, v.d.written[0], (ev) => ev(`new Promise((r) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let k = 0; k < d.length; k += 4) if (Math.abs(d[k] - 238) + Math.abs(d[k + 1] - 241) + Math.abs(d[k + 2] - 245) > 30) n++; r(n); }; i.src = window.P6C4D_API.png('2027-06-01'); })`)) as number;
+    } finally { if (saved == null) delete process.env.P6CLONE_VIEW_BATCH; else process.env.P6CLONE_VIEW_BATCH = saved; }
+  };
+  const one = await drawn(undefined), batched = await drawn('20');
+  assert.ok(one > 10_000, `${one} pixels drawn`);
+  assert.ok(Math.abs(batched - one) / one < 0.1, `per element ${one}, batched ${batched}`);
+});
