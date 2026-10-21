@@ -1,0 +1,99 @@
+// save {repair: true}: a lenient open that P6 would still reject is written as a repaired copy P6 imports, field by
+// field and never by guessing, every change listed; the original file is never overwritten.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { callTool, toolResult } from '../mcp/server.ts';
+import { applyOps } from '../core/project/ops.ts';
+import { writeXer } from '../core/xer/write.ts';
+import { rows, type Db } from '../core/db.ts';
+import { SAMPLES_DIR } from './helpers.ts';
+
+const call = async (name: string, a: Record<string, unknown>) => toolResult((await callTool(name, a)).out, false).structuredContent as any;
+const dir = mkdtempSync(join(tmpdir(), 'p6repair-'));
+
+/** A small project with one of each damage. */
+function damaged(): string {
+  const db: Db = { tables: {} };
+  assert.equal(applyOps(db, [{ op: 'add_project', id: 'DMG', start: '2026-03-02' }, { op: 'add_wbs', code: 'W', name: 'Works' },
+    ...['IMPOSS', 'SPAN', 'NONE', 'FUTURE', 'BADFIN', 'SHIFT', 'CODES', 'TWIN'].map((id) => ({ op: 'add_activity', id, name: `Activity ${id}`, wbs: 'W', duration_days: 5 })),
+    { op: 'add_relationship', pred: 'IMPOSS', succ: 'SHIFT' }, { op: 'add_relationship', pred: 'SHIFT', succ: 'CODES' }, { op: 'add_relationship', pred: 'IMPOSS', succ: 'CODES' },
+    { op: 'set_project', data_date: '2026-03-16' }]).ok, true);
+  const t = (c: string) => rows(db, 'TASK').find((x) => x.task_code === c)!;
+  // an impossible duration (49,445 days), the remaining duration readable (not started: the same)
+  t('IMPOSS').target_drtn_hr_cnt = '395563.6';
+  // both durations impossible: the planned start-finish span (10 working days) gives it
+  Object.assign(t('SPAN'), { target_drtn_hr_cnt: '999999', remain_drtn_hr_cnt: '-5', target_start_date: '2026-03-02 08:00', target_end_date: '2026-03-13 17:00' });
+  // nothing gives it: P6's default (5 days), not a 0
+  Object.assign(t('NONE'), { target_drtn_hr_cnt: 'abc', remain_drtn_hr_cnt: 'x1', target_start_date: '', target_end_date: '' });
+  // an actual start in 2212, after the data date: cleared, not started
+  Object.assign(t('FUTURE'), { act_start_date: '2212-01-05 13:00', status_code: 'TK_Active' });
+  // started, with an unreadable actual finish: the finish is cleared, it stays in progress
+  Object.assign(t('BADFIN'), { act_start_date: '2026-03-03 08:00', act_end_date: '2026-03-1! 17:00', status_code: 'TK_Complete', remain_drtn_hr_cnt: '0' });
+  // a row made from a damaged line: its name is a number and a field cannot be read
+  Object.assign(t('SHIFT'), { task_name: '362.016667', early_start_date: '20±2-05-12 1<:36' });
+  // codes and flags P6 has no such value for
+  Object.assign(t('CODES'), { task_type: 'TT_Tssk', driving_path_flag: '86', complete_pct_type: 'CP_U~its' });
+  // a repeated task_id (P6 rejects the file), the copy damaged: FUTURE keeps its id (and links), TWIN gets a fresh one
+  Object.assign(t('TWIN'), { task_id: t('FUTURE').task_id, late_start_date: '20q2-1\u0011-27 13:00' });
+  const path = join(dir, 'damaged.xer');
+  writeFileSync(path, writeXer(db, { version: '19.12' }));
+  return path;
+}
+
+test('save repair: one of each damage, repaired field by field, every change listed; the copy opens and schedules; the original is untouched', async () => {
+  const src = damaged(), before = readFileSync(src);
+  const o = await call('open_file', { path: src, lenient: true });
+  assert.equal(o.still_rejected, true, JSON.stringify(o.diagnostics?.not_repaired));
+  assert.equal((await call('save', { handle: o.handle, repair: true })).error.code, 'bad_input', 'a repaired copy needs a new path');
+  assert.equal((await call('save', { handle: o.handle, repair: true, path: src })).error.code, 'bad_input', 'never over the original');
+  const out = join(dir, 'damaged-repaired.xer');
+  const r = await call('save', { handle: o.handle, repair: true, path: out });
+  assert.deepEqual([r.saved, r.repaired, r.check.still_rejected, r.check.counts.fatal ?? 0, r.check.counts.error ?? 0], [out, true, false, 0, 0], JSON.stringify(r.check));
+  const ch = (key: string, field: string) => r.changes.find((c: any) => c.key === key && c.field === field);
+  const code = (c: string) => r.changes.find((x: any) => x.field === '*' && x.old.startsWith(c));
+  const db0 = (await import('../core/xer/parse.ts')).parseXer(new Uint8Array(before)).db;
+  const id = (c: string) => db0.tables.TASK.rows.find((t) => t.task_code === c)!.task_id; // as the file had it
+  assert.deepEqual([ch(id('IMPOSS'), 'target_drtn_hr_cnt').old, ch(id('IMPOSS'), 'target_drtn_hr_cnt').new], ['395563.6', '40']);
+  assert.match(ch(id('IMPOSS'), 'target_drtn_hr_cnt').reason, /impossible: its remaining duration/);
+  assert.equal(ch(id('SPAN'), 'target_drtn_hr_cnt').new, '80');
+  assert.match(ch(id('SPAN'), 'target_drtn_hr_cnt').reason, /planned start-finish span/);
+  assert.deepEqual([ch(id('NONE'), 'target_drtn_hr_cnt').new, ch(id('NONE'), 'remain_drtn_hr_cnt').new], ['40', '40']);
+  assert.match(ch(id('NONE'), 'target_drtn_hr_cnt').reason, /P6's default for a new activity/);
+  assert.deepEqual([ch(id('FUTURE'), 'act_start_date').new, ch(id('FUTURE'), 'status_code').new], ['', 'TK_NotStart']);
+  assert.match(ch(id('FUTURE'), 'act_start_date').reason, /after the data date .* never|cannot lie in the future/);
+  assert.deepEqual([ch(id('BADFIN'), 'act_end_date').new, ch(id('BADFIN'), 'status_code').new], ['', 'TK_Active']);
+  assert.match(code('SHIFT').reason, /damaged line: its name is the number "362.016667"/);
+  assert.equal(r.changes.filter((c: any) => c.table === 'TASKPRED' && c.field === '*').length, 2, 'its two relationships go with it');
+  assert.deepEqual([ch(id('CODES'), 'task_type').new, ch(id('CODES'), 'driving_path_flag').new, ch(id('CODES'), 'complete_pct_type').new], ['TT_Task', 'N', 'CP_Drtn']);
+  const fresh = r.changes.find((c: any) => c.field === 'task_id');
+  assert.deepEqual([fresh.key, fresh.row], [id('FUTURE'), db0.tables.TASK.rows.findIndex((x) => x.task_code === 'TWIN') + 1]);
+  assert.match(fresh.reason, /this activity, TWIN, gets a fresh id \(links to \d+ stay with FUTURE\)/);
+  for (const c of r.changes) assert.ok(c.table && c.row > 0 && c.field && typeof c.old === 'string' && typeof c.new === 'string' && c.reason, JSON.stringify(c));
+  assert.deepEqual(readFileSync(src), before, 'the original file is untouched');
+  // the copy opens without lenient and schedules
+  const back = await call('open_file', { path: out });
+  assert.ok(back.handle, JSON.stringify(back).slice(0, 300));
+  assert.equal((await call('schedule', { handle: back.handle })).ok, true);
+  for (const h of [o.handle, back.handle]) await call('close', { handle: h, discard: true });
+});
+
+test('save repair on CCA R03 (a corrupted 16,000-activity file): the repaired copy validates, opens again and schedules', { timeout: 600_000 }, async () => {
+  const src = join(dir, 'cca.xer');
+  copyFileSync(join(SAMPLES_DIR, 'CCA R03 dt 24Oct11SC.xer'), src);
+  const o = await call('open_file', { path: src, lenient: true });
+  assert.equal(o.still_rejected, true);
+  const out = join(dir, 'cca-repaired.xer');
+  const r = await call('save', { handle: o.handle, repair: true, path: out });
+  assert.deepEqual([r.check.still_rejected, r.check.counts.fatal ?? 0, r.check.counts.error ?? 0], [false, 0, 0], JSON.stringify(r.check).slice(0, 2000));
+  // the 49,445-day duration: from its remaining duration (not started); the 2012 actual starts after the 2011-09-30 data date: cleared
+  assert.ok(r.changes.some((c: any) => c.field === 'target_drtn_hr_cnt' && c.old === '395563.6' && c.new === '336'));
+  assert.ok(r.changes.some((c: any) => c.field === 'act_start_date' && c.old === '2012-08-08 00:00' && c.new === ''));
+  assert.equal(r.changes.filter((c: any) => c.table === 'TASK' && c.field === '*').length, 10);
+  const back = await call('open_file', { path: out });
+  assert.ok(back.handle, JSON.stringify(back).slice(0, 300));
+  assert.equal((await call('schedule', { handle: back.handle })).ok, true);
+  for (const h of [o.handle, back.handle]) await call('close', { handle: h, discard: true });
+});

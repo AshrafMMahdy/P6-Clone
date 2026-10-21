@@ -9,13 +9,14 @@
 //   write root (else the storage root, else the project's folder) before the process exits.
 //   Environment: P6CLONE_ROOT, P6CLONE_TOKEN, P6CLONE_PORT, P6CLONE_MAX_HANDLES, P6CLONE_MEM_BUDGET_MB,
 //   P6CLONE_IDLE_MINUTES. Run Node with --max-old-space-size above the memory budget for very large files.
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { detectFormat, exportFile, importChecks, readRaw, type Format } from '../renderer/io.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
+import { repairToValid } from '../core/xer/repair-valid.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
@@ -90,7 +91,7 @@ const TOOLS = [
   ...LOOKUPS.map((t) => ({ name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
   { name: 'undo', annotations: edit, description: 'Undo your own last change on this project (edit, schedule, progress update, leveling, import). Refused only if someone else\'s later change touched the same items. any_caller: true (with owner_key) undoes the latest change whoever made it.', inputSchema: withHandle({ type: 'object', properties: { any_caller: { type: 'boolean' } } }, true) },
   { name: 'redo', annotations: edit, description: 'Re-apply your last undone change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
-  { name: 'save', annotations: writes, description: 'Write the project (needs owner_key): XER (P6 version 5.0-24.12; default the version it was read in, else 19.12), P6 XML (.xml), Microsoft Project XML (format: mspdi) or MPX (.mpx). A Microsoft Project file holds one project: when the file has several, mspdi and mpx need project. XER and MPX: encoding defaults to the file\'s own (the encoding it was read in, BOM as read; a new project: the code page P6 would use). Paths are inside the storage root.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, project: { type: 'string', description: 'Project ID to write (default: all projects; required for mspdi and mpx when the file holds several)' }, format: { type: 'string', description: 'xer, p6xml, mspdi or mpx (default from the extension; .xml = P6 XML)' }, version: { type: 'string' }, encoding: { type: 'string', description: 'XER/MPX text encoding; encoding defaults to the file\'s own (the one it was read in, BOM as read) while the text fits it; else, and for a new project, the code page P6 would use, e.g. windows-1256 for Arabic' }, overwrite: { type: 'boolean' } } }, true) },
+  { name: 'save', annotations: writes, description: 'Write the project (needs owner_key): XER (P6 version 5.0-24.12; default the version it was read in, else 19.12), P6 XML (.xml), Microsoft Project XML (format: mspdi) or MPX (.mpx). A Microsoft Project file holds one project: when the file has several, mspdi and mpx need project. repair: true (after a lenient open P6 would still reject) writes a repaired copy P6 imports to a new path (never over the file opened): impossible values taken from the activity\'s own other fields (else P6\'s neutral value), actual dates P6 cannot accept cleared (never invented), rows that cannot be identified removed with what pointed at them; the answer lists every change (table, row, key, field, old, new, reason) and check says whether the copy, opened again, would still be rejected. XER and MPX: encoding defaults to the file\'s own (the encoding it was read in, BOM as read; a new project: the code page P6 would use). Paths are inside the storage root.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, project: { type: 'string', description: 'Project ID to write (default: all projects; required for mspdi and mpx when the file holds several)' }, format: { type: 'string', description: 'xer, p6xml, mspdi or mpx (default from the extension; .xml = P6 XML)' }, version: { type: 'string' }, repair: { type: 'boolean', description: 'write a repaired copy P6 imports (a new path)' }, encoding: { type: 'string', description: 'XER/MPX text encoding; encoding defaults to the file\'s own (the one it was read in, BOM as read) while the text fits it; else, and for a new project, the code page P6 would use, e.g. windows-1256 for Arabic' }, overwrite: { type: 'boolean' } } }, true) },
   { name: 'export_pdf', annotations: writes, description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML. ' + PRINT_GUIDE + ' Layout options: filter, group_by (wbs, none), sort_by.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', annotations: writes, description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK, TASKPRED, RSRC, TASKRSRC; row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
   { name: 'import_excel', annotations: edit, description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities, relationships, resources and assignments; "Y" in delete_record_flag deletes the row. Calculated columns are ignored. One undoable change; dry_run returns the plan only.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
@@ -348,10 +349,20 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'save': {
       requireOwner(s, a.owner_key, 'Saving');
       const path = a.path ? pathArg(a.path, 'path', 'write') : s.path ?? fail('bad_input', 'Give "path" (this project was created in memory).', 'Pass a file path inside the storage root.');
+      if (a.repair === true) {
+        const same = (x: string | null) => { if (!x) return false; try { return realpathSync(x) === realpathSync(path); } catch { return x === path; } };
+        if (!a.path || same(s.path)) fail('bad_input', 'A repaired copy is a new file: it never overwrites the file the project was opened from.', 'Pass a new path for the repaired copy.');
+      }
       if (!a.path && !a.overwrite) fail('confirm_overwrite', `Saving would overwrite ${path}.`, 'Pass overwrite: true, or a new path.');
       const fmt = String(a.format ?? (/\.mpx$/i.test(path) ? 'mpx' : /\.xml$/i.test(path) ? 'p6xml' : 'xer')).toLowerCase();
       const projIds = a.project != null && a.project !== '' ? projectIds(s.db, a.project) : undefined;
       const names = () => allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!.proj_short_name).join(', ');
+      // repair: true writes a repaired copy P6 imports (repair-valid.ts), as one undoable change; never over the original
+      let repairs: ReturnType<typeof repairToValid> | null = null;
+      if (a.repair === true) {
+        if (fmt !== 'xer' && fmt !== 'p6xml' && fmt !== 'xml') fail('bad_input', 'repair writes XER or P6 XML.', 'Save the repaired copy as .xer (or .xml).');
+        repairs = change(s, ctx.caller, 'Repair to valid', (d) => { repairKeys(d); return repairToValid(d); });
+      }
       if ((fmt === 'mspdi' || fmt === 'mpx') && !projIds && allIds(s.db).length > 1) fail('bad_input', `A Microsoft Project file holds one project, and this file holds ${allIds(s.db).length}: ${names()}.`, 'Pass "project" with the Project ID to write (save once per project).');
       await checkpoint(ctx);
       let bytes: string | Uint8Array, label: string;
@@ -367,6 +378,14 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (sidecar) notes.push(`4D links saved beside it: ${basename(sidecar)}`);
       if (!projIds || allIds(s.db).length === 1) { s.dirty = false; s.savedTo = path; }
       if ((fmt === 'mspdi' || fmt === 'mpx') && (s.db.tables.WBSMEMO?.rows.length || s.db.tables.TASKMEMO?.rows.length)) notes.push('Notebooks (project, WBS and activity) are not written to Microsoft Project files; save as XER or P6 XML to keep them.');
+      if (repairs) {
+        // the repaired copy, opened again as P6 would: it must not be rejected
+        const back = readRaw(readBytes(path), detectFormat(path, readBytes(path)), 'auto');
+        const g = importChecks(back.db, back.findings, detectFormat(path, readBytes(path)));
+        const still = worst(g) === 'fatal' || g.some((x) => x.code === 'EMPTY_KEY');
+        return { saved: path, format: label, repaired: true, changes: repairs.map((c) => ({ table: c.table, row: c.row, key: c.key, field: c.field, old: c.old, new: c.new, reason: c.reason })), changes_total: repairs.length, check: { ...brief(g), still_rejected: still },
+          note: still ? 'The repaired copy is still one P6 would reject: check.findings names what is left.' : 'The repaired copy is one P6 imports. Run schedule to recalculate the dates the repair cleared. Undo takes the repairs back from the project in memory (the file written stays).' };
+      }
       return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
     case 'close': {
