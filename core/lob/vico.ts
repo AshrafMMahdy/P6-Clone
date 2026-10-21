@@ -30,6 +30,8 @@ export interface VicoProject {
       unitPrice?: number;
     }[];
     locations: string[];
+    /** the sub-tasks (lines): each runs through one location of the task's level from its own start */
+    lines?: { location: string; start: string | null; factor?: number }[];
   }[];
   links: { pred: string; succ: string; type: string; lagDays: number; locationLag?: number; bufferDays?: number }[];
   calendars?: unknown;
@@ -333,7 +335,8 @@ export function readVicoDpp(bytes: Uint8Array): VicoProject {
       };
     });
     const taskLocs = tls.map((x) => ref(x, 315)).filter((x): x is number => x != null).map((id) => locCode.get(id) ?? `#${id}`);
-    return { code, name, start: isoDate(start), end: isoDate(end), durationDays, crew, items, locations: taskLocs };
+    const lineOut = lines.map((l, i) => { const tl = tls.find((x) => ref(x, 526) === l.id) ?? tls[i]; const at = tl ? ref(tl, 315) : null; const factor = tl ? num(tl, 500) : null; return { location: at != null ? locCode.get(at) ?? `#${at}` : '', start: isoDate(num(l, 302) ?? null), ...(factor ? { factor } : {}) }; });
+    return { code, name, start: isoDate(start), end: isoDate(end), durationDays, crew, items, locations: taskLocs, lines: lineOut };
   });
 
   const unknown = [...new Set(store.recs.map((r) => r.cls).filter((c) => !KNOWN_CLASSES.has(c)))];

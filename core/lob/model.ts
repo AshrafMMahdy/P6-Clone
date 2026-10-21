@@ -20,6 +20,8 @@ export interface LobSegment {
   /** total working days of the segment, held when driver = duration */
   duration?: number;
   timing: Timing;
+  /** a manual start: the segment's first location starts on or after this date ('YYYY-MM-DD', Vico's line start) */
+  start?: string;
 }
 export interface LobTask {
   code: string; name: string; trade: string;

@@ -22,8 +22,17 @@ export function lobRelationships(m: LobModel, durations: Map<string, Map<string,
   const ancestor = (c: string, level: number): string => { let x = loc.get(c); while (x && x.level > level) x = loc.get(x.parent ?? ''); return x?.code ?? c; };
   const siblings = (c: string) => { const l = loc.get(c)!; return m.locations.filter((x) => x.level === l.level && x.parent === l.parent).map((x) => x.code); };
   const out: Rel[] = [];
-  // layer 3: within a task, each location after the one before (locations with no work are passed through)
-  for (const t of m.tasks) { const done = t.order.filter((c) => has(t, c)); for (let k = 1; k < done.length; k++) out.push({ pred: activityId(t.code, done[k - 1]), succ: activityId(t.code, done[k]), type: 'FS', lag: 0 }); }
+  // layer 3: within a task, each location after the one before (locations with no work are passed through); a
+  // segment with its own start is its own crew (a Vico line): it is not chained to the segment before it
+  for (const t of m.tasks) {
+    const done = t.order.filter((c) => has(t, c));
+    const freshAt = new Set(t.segments.filter((g) => g.start).map((g) => t.order.indexOf(g.from)));
+    for (let k = 1; k < done.length; k++) {
+      const a = t.order.indexOf(done[k - 1]), b = t.order.indexOf(done[k]);
+      if ([...freshAt].some((i) => i > a && i <= b)) continue;
+      out.push({ pred: activityId(t.code, done[k - 1]), succ: activityId(t.code, done[k]), type: 'FS', lag: 0 });
+    }
+  }
   for (const l of m.links) {
     const p = tasks.get(l.pred), s = tasks.get(l.succ);
     const lag = l.lagDays + (l.bufferDays ?? 0);
@@ -63,6 +72,15 @@ export function lobRelationships(m: LobModel, durations: Map<string, Map<string,
   return [...seen.values()];
 }
 
+/** Durations in whole minutes, the running total rounded (not each one), so a task's total stays exact: nine floors
+ *  each rounded up a little would otherwise push a finish that falls at the end of a day into the next morning. */
+function minuteDurations(d: Map<string, number>, hpd: number): Map<string, number> {
+  const out = new Map<string, number>();
+  let exact = 0, given = 0;
+  for (const [c, days] of d) { exact += days * hpd * 60; const m = Math.round(exact) - given; given += m; out.set(c, m / 60 / hpd); }
+  return out;
+}
+
 /** Bring the project's activities and relationships in line with the model. */
 /** previous: the model as last expanded, so links it had to other projects are taken back when they are gone. */
 export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay: number; previous?: LobModel | null }): ExpandResult {
@@ -83,7 +101,7 @@ export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay:
   for (const [k, name] of Object.entries(LOB_UDF)) if (!udfs.has(name)) ops.push({ op: 'add_udf', name, subject: 'activity', data_type: k === 'quantity' || k === 'consumption' ? 'number' : 'text' });
 
   // activities
-  const durations = new Map(m.tasks.map((t) => [t.code, locationDurations(m, t)]));
+  const durations = new Map(m.tasks.map((t) => [t.code, minuteDurations(locationDurations(m, t), t.hoursPerDay ?? o.hoursPerDay)]));
   const ownerUdf = rows(db, 'UDFTYPE').find((u) => u.table_name === 'TASK' && u.udf_type_label === LOB_UDF.task);
   const owned = new Set(ownerUdf ? rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === ownerUdf.udf_type_id && v.udf_text).map((v) => v.fk_id) : []);
   const existing = new Map(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => [t.task_code, t]));
@@ -94,9 +112,9 @@ export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay:
     for (const [c, days] of durations.get(t.code)!) {
       const id = activityId(t.code, c), name = `${t.name}, ${pathOf(m, c).map((x) => locName.get(x)).join(', ')}`.slice(0, 120);
       want.add(id);
-      const d = Math.round(days * 1000) / 1000, row = existing.get(id);
+      const d = days, row = existing.get(id);
       if (!row) { ops.push({ op: 'add_activity', id, name, duration_days: d, project: P, ...(t.calendar ? { calendar: t.calendar } : {}) }); res.added++; }
-      else if (Math.abs(Number(row.target_drtn_hr_cnt || 0) / o.hoursPerDay - d) > 0.0005 || row.task_name !== name) { ops.push({ op: 'update_activity', id, project: P, name, duration_days: d }); res.updated++; }
+      else if (Math.abs(Number(row.target_drtn_hr_cnt || 0) - d * o.hoursPerDay) > 0.005 || row.task_name !== name) { ops.push({ op: 'update_activity', id, project: P, name, duration_days: d }); res.updated++; }
       if (!row || !owned.has(row.task_id)) ops.push({ op: 'set_udf', udf: LOB_UDF.task, value: t.code, activity: id, project: P });
       ops.push({ op: 'assign_code', type: LOB_CODES.location, value: c, activity: id, project: P }, { op: 'assign_code', type: LOB_CODES.trade, value: t.trade.slice(0, 60), activity: id, project: P });
       const q = t.items.reduce((n, it) => n + (it.quantities.find((x) => x.location === c)?.quantity ?? 0), 0), s = seg(c);

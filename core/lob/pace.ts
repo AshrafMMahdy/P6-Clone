@@ -18,7 +18,14 @@ export function scheduleLob(db: Db, projIds: string[], models: Map<string, LobMo
   // the constraints continuity wrote last time are recomputed from scratch: clear them on LOB activities not started
   const ownerUdf = rows(db, 'UDFTYPE').find((u) => u.table_name === 'TASK' && u.udf_type_label === LOB_UDF.task);
   const owned = new Set(ownerUdf ? rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === ownerUdf.udf_type_id && v.udf_text).map((v) => v.fk_id) : []);
-  for (const t of rows(db, 'TASK')) if (owned.has(t.task_id) && models.has(t.proj_id) && !t.act_start_date && t.cstr_type === 'CS_MSOA') { t.cstr_type = ''; t.cstr_date = ''; }
+  // (a segment's manual start is put back as its own start-on-or-after)
+  const anchors = new Map<string, string>();
+  for (const [projId, m] of models) for (const t of m.tasks) for (const g of t.segments) if (g.start) { const d = locationDurations(m, t); const first = t.order.slice(t.order.indexOf(g.from), t.order.indexOf(g.to) + 1).find((c) => d.has(c)); if (first) anchors.set(`${projId}|${activityId(t.code, first)}`, `${g.start.slice(0, 10)} 00:00`); }
+  for (const t of rows(db, 'TASK')) {
+    if (!owned.has(t.task_id) || !models.has(t.proj_id) || t.act_start_date) continue;
+    const anchor = anchors.get(`${t.proj_id}|${t.task_code}`);
+    if (anchor) { t.cstr_type = 'CS_MSOA'; t.cstr_date = anchor; } else if (t.cstr_type === 'CS_MSOA') { t.cstr_type = ''; t.cstr_date = ''; }
+  }
   let moved: string[] = [], paced = 0;
   for (let pass = 1; pass <= 20; pass++) {
     const s = scheduleProjects(db, projIds, {});
