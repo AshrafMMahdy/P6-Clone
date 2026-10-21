@@ -30,7 +30,7 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
 - **Tools > Update Progress**: moves the data date, auto-statuses activities from planned dates, recomputes remaining durations and resource actuals, then reschedules.
 - **Tools > Level Resources**: serial leveler (priority by early start / float / priority, within float, overallocation %).
 - **Tools > Check Schedule Report**: P6 Professional's 14 checks with P6's populations and default targets; click an activity to go to it. **Schedule Options > Advanced**: multiple float paths (total or free float, end activity, number of paths) fill Float Path and Float Path Order on F9 as P6 does. **View > Show on Bottom > Activity Usage Profile / Spreadsheet**: planned value, earned value, actual and remaining curves per week or month.
-- **Tools > Extensions** (beyond P6, usable without the AI agent): DCMA 14-point (own implementation; PAM 200.1 and other profiles, critical path test, CPLI, BEI), Schedule lint (with fixes you can apply), Crashing (least-cost, Kelley-Walker cut sets), What-ifs (many scenarios compared on copies), Schedule reasoner (the White Hat IQ trained optimiser, run locally: a leveling order and crash modes, checked against P6 leveling), Windows analysis (AACE MIP 3.3 / 3.4 half-step) and Time impact analysis (AACE 52R-06), and 4D (an IFC model linked to the activities: the build by date against any baseline, picking elements to link them to the selected activity, rules, element status, Navisworks / SYNCHRO / IFC4 packages and imports, and videos rendered on this computer's GPU; View > Show on Bottom > 4D View follows the selected activity).
+- **Tools > Extensions** (beyond P6, usable without the AI agent): DCMA 14-point (own implementation; PAM 200.1 and other profiles, critical path test, CPLI, BEI), Schedule lint (with fixes you can apply), Crashing (least-cost, Kelley-Walker cut sets), What-ifs (many scenarios compared on copies), Schedule reasoner (the White Hat IQ trained optimiser, run locally: a leveling order and crash modes, checked against P6 leveling), Windows analysis (AACE MIP 3.3 / 3.4 half-step) and Time impact analysis (AACE 52R-06), LOB (Line of Balance beside the CPM plan: the flowline edited by hand, takt grid, Vico and Tactplan exchange), and 4D (an IFC model linked to the activities: the build by date against any baseline, picking elements to link them to the selected activity, rules, element status, Navisworks / SYNCHRO / IFC4 packages and imports, and videos rendered on this computer's GPU; View > Show on Bottom > 4D View follows the selected activity).
 - **Project > Project Details**: General, Notebook (project notebook topics: WBSMEMO on the project's root WBS), Dates, Defaults, Settings, Codes (project codes, PROJPCAT).
 - **Project > Maintain Baselines**: save/assign/restore/delete baselines; baseline bars and BL columns/variance.
 - **Enterprise**: EPS, Resources (rates, max units, calendars, roles), Roles, OBS, Activity Codes, UDFs, Calendars (work week + holidays/exceptions, base calendar inheritance), Cost Accounts, Currencies.
@@ -322,6 +322,22 @@ per element, and past `P6CLONE_VIEW_MAX_MB` (1024) it draws the most detailed el
 million elements: meshed in 6 chunks in about 4 minutes, a 1.1 GB display model a browser draws). What
 bounds a model is the server's memory: give the Node process a heap to match (`--max-old-space-size`,
 `P6CLONE_MEM_BUDGET_MB`). Revit `.rvt` files are read once exported to IFC.
+
+**LOB** (Line of Balance, location-based scheduling; see `docs/superpowers/specs/2026-10-21-lob-design.md` and
+`docs/lob-switch-over.md`): an LOB plan is its own project in the same file as the CPM projects, linked to them either
+way. `lob_create` (a location tree of up to 6 levels from a grid, a tree or a list; tasks with quantities, consumption,
+crews and a driver; or `from_cpm`: a CPM project's activities grouped by a location code and a trade code),
+`lob_edit` (crews, rates, durations, quantities, production factors, split / merge at a location, manual starts,
+locations, tasks, order, links of all five Vico layers with buffers, takt), `lob_view` (dates, float, critical trades,
+collisions, crews waiting, the flowline as SVG), `lob_takt` (balance check, fit to the takt), `lob_forecast` (from actual
+production, alarms by days to react), `lob_import` (Vico `.dpp`, Tactplan CSVs), `lob_export` (Tactplan CSVs). Each
+task holds one value (crew, rate or duration) and every edit lists every value that moved. The plan expands into
+ordinary activities (`<task>-<location>`), relationships, the Location and Trade codes and LOB UDFs; F9 schedules
+everything and continuity (crews never waiting) is written as start-on-or-after constraints, so real P6 schedules the
+XER to the same dates. The model travels in the XER as a project notebook (checksummed) flagged by a project UDF, and in
+`<file>.lob.json` beside it; LOB activities' durations and logic are edited through the LOB tools only. The user's
+Vico project (2 parts × 9 floors, 14 trades) reproduces Schedule Planner's durations and dates.
+`P6CLONE_TOOLSETS` (e.g. `core,analysis,4d,lob`) lists only some tool groups.
 
 Baselines: any number per project (P6 keeps any number; BL1-BL3 are only the ones assigned for display). Tools that
 take a baseline accept any saved baseline by name. Microsoft Project XML brings Baseline and Baseline1-10 in as saved

@@ -1,6 +1,6 @@
 # LOB (location-based scheduling) in the P6 clone: design
 
-Status: design, for review. Written 2026-10-21. Research behind it is in the session scratchpad
+Status: built (whiq-v0.1.26): core in `core/lob/`, MCP in `mcp/lob.ts`, desktop in `renderer/views/LobView.tsx`; the platform map in `docs/lob-switch-over.md`. Written 2026-10-21. Research behind it is in the session scratchpad
 (`lob-research/vico.md`, `platform.md`, `tactplan.md`); the main sources are listed at the end.
 
 ## Intent

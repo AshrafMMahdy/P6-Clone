@@ -2,8 +2,8 @@
 // travels in the XER: a project UDF flag and a notebook real P6 keeps), built and changed in small calls on the handle.
 // The model is the source of the plan's structure; its activities and logic are ordinary P6 data, scheduled with
 // everything else (continuity on top). Kept apart from server.ts.
-import { existsSync, readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { rows, type Db, type Row } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
@@ -148,7 +148,8 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
         start = v.start ?? model.tasks.flatMap((t) => t.segments.map((g) => g.start ?? '')).filter(Boolean).sort()[0] ?? new Date().toISOString().slice(0, 10);
         if (r.calendar) { const name = `${id} (Vico)`; calOps = [vicoCalendarOp(r.calendar, name, [Number(start.slice(0, 4)) - 1, Number(start.slice(0, 4)) + 5])]; for (const t of model.tasks) t.calendar = name; }
       } else {
-        const r = readTactplan(path);
+        let r;
+        try { r = readTactplan(path); } catch (e) { return fail('bad_input', (e as Error).message, 'Give a Tactplan export: the folder holding its Grid.csv (and Locations.csv, Quantities.csv), or the Grid.csv itself; or a Vico .dpp.'); }
         model = { ...r.model, project: id }; notes = r.notes; start = r.start ?? new Date().toISOString().slice(0, 10);
       }
       return h.apply(`LOB import ${basename(path)}`, (d) => {
@@ -162,8 +163,9 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
     case 'lob_export': {
       const { model } = lobOf(a.project);
       const dir = pathArg(a.path, 'path', 'write');
+      mkdirSync(dir, { recursive: true }); // inside the write root (pathArg checked it)
       const files = writeTactplan(model, { decimal: a.decimal === 'comma' ? 'comma' : 'dot', date: a.date ?? 'dd/MM/yyyy' });
-      const written = files.map((f) => { const p = `${dir}/${f.name}`; h.writeOut(p, f.text); return p; });
+      const written = files.map((f) => { const p = join(dir, f.name); h.writeOut(p, f.text); return p; });
       return { written, note: 'Tactplan imports each grid from its Import dialog (paste or choose the file); links between tasks have no import there: links-not-exported.txt lists them.' };
     }
   }

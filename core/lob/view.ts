@@ -93,3 +93,11 @@ export function lobRowGuard(db: Db, before: Row, after: Row): string | null {
   const fields = ['task_code', 'task_type', 'clndr_id', 'cstr_type', 'cstr_date', 'wbs_id', ...(before.act_start_date ? [] : ['target_drtn_hr_cnt', 'remain_drtn_hr_cnt'])];
   return fields.some((f) => (before[f] ?? '') !== (after[f] ?? '')) ? `${before.task_code} is set by the LOB plan: edit it in Extensions > LOB.` : null;
 }
+
+/** The Activity IDs an LOB plan owns (crash_schedule leaves them to the plan). */
+export function lobActivityCodes(db: Db): string[] {
+  const udf = rows(db, 'UDFTYPE').find((u) => u.table_name === 'TASK' && u.udf_type_label === LOB_UDF.task)?.udf_type_id;
+  if (!udf) return [];
+  const owned = new Set(rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === udf && v.udf_text).map((v) => v.fk_id));
+  return rows(db, 'TASK').filter((t) => owned.has(t.task_id)).map((t) => t.task_code);
+}

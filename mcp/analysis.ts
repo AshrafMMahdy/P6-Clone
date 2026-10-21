@@ -16,6 +16,7 @@ import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { nowStamp } from '../core/report/reports.ts';
+import { lobActivityCodes } from '../core/lob/view.ts';
 import { fail, getSession, pathArg, type Session } from './runtime.ts';
 import { timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
 import { baselineOf, type Tick } from '../core/analysis/common.ts';
@@ -129,7 +130,8 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       return r;
     }
     case 'crash_schedule': {
-      const r = await crashSchedule(s.db, projIds, { targetFinish: a.target_finish, targetDays: a.target_days != null ? Number(a.target_days) : undefined, activities: a.activities, defaultMaxPct: a.default_max_pct != null ? Number(a.default_max_pct) : undefined, indirectPerDay: a.indirect_cost_per_day != null ? Number(a.indirect_cost_per_day) : undefined, ldPerDay: a.ld_per_day != null ? Number(a.ld_per_day) : undefined, locked: a.locked, maxSteps: a.max_steps != null ? Number(a.max_steps) : undefined, hoursPerDay: s.hpd, tick: h.tick });
+      // an LOB plan's activities are crashed through the plan (lob_edit set_crew / set_duration), never directly
+      const r = await crashSchedule(s.db, projIds, { targetFinish: a.target_finish, targetDays: a.target_days != null ? Number(a.target_days) : undefined, activities: a.activities, defaultMaxPct: a.default_max_pct != null ? Number(a.default_max_pct) : undefined, indirectPerDay: a.indirect_cost_per_day != null ? Number(a.indirect_cost_per_day) : undefined, ldPerDay: a.ld_per_day != null ? Number(a.ld_per_day) : undefined, locked: [...(Array.isArray(a.locked) ? a.locked : []), ...lobActivityCodes(s.db)], maxSteps: a.max_steps != null ? Number(a.max_steps) : undefined, hoursPerDay: s.hpd, tick: h.tick });
       if (!r.ok) return fail(r.error.code, r.error.message, r.error.code === 'bad_input' ? 'e.g. {"target_days": 10} or {"target_finish": "2026-12-31"}' : 'Fix the schedule errors first (schedule shows them).');
       if (a.apply && r.ops.length) h.apply('Crash schedule', (d) => { const x = applyOps(d, r.ops, { hoursPerDay: s.hpd, calendarDays: true }); if (!x.ok) fail('bad_input', x.error!.message, ''); reschedule(d, projIds); });
       return { ...r, ...(a.apply ? { applied: r.ops.length > 0 } : {}) };

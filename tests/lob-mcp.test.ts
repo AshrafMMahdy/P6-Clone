@@ -116,3 +116,21 @@ test('lob_import of the user\u2019s Vico project: 14 trades on 2 parts × 9 floo
   const cs = v.tasks.find((t: any) => t.code === 'CS');
   assert.deepEqual([cs.start, cs.finish], ['2025-04-14', '2026-02-13']);
 });
+
+test('lob_export makes its folder; lob_import of something that is not a plan is bad input, not a server error', async () => {
+  const { h, owner_key } = await plan();
+  const dir = join(mkdtempSync(join(tmpdir(), 'p6-tpn-')), 'new', 'folder');
+  const x = await call('lob_export', { handle: h, project: 'TOWER', path: dir });
+  assert.equal(x.err, false, JSON.stringify(x.d).slice(0, 300));
+  assert.equal(readdirSync(dir).length, 4);
+  const i = await call('lob_import', { handle: h, owner_key, path: mkdtempSync(join(tmpdir(), 'p6-empty-')), id: 'NOPE' });
+  assert.equal(i.err, true);
+  assert.equal(i.d.error.code, 'bad_input');
+});
+
+test('crash_schedule leaves an LOB plan\u2019s activities to the plan', async () => {
+  const { h } = await plan();
+  const r = await call('crash_schedule', { handle: h, target_days: 10 });
+  assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+  assert.ok(!(r.d.ops ?? []).some((o: any) => /^(CS|DW|PT)-/.test(o.id ?? '')), 'no LOB activity crashed directly');
+});

@@ -31,8 +31,9 @@ child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initia
 const tools = (await rpc('tools/list', {})).result?.tools ?? [];
 const names = tools.map((t) => t.name);
 const FOURD = ['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d', 'simulate_4d', 'compare_4d', 'set_element_status', 'render_4d', 'relink_model', 'synchro_cloud'];
+const LOB = ['lob_create', 'lob_edit', 'lob_view', 'lob_takt', 'lob_forecast', 'lob_export', 'lob_import'];
 const ANALYSIS = ['check_schedule', 'dcma_14', 'lint', 'float_paths', 'progress_curves', 'resource_histogram', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'tia'];
-for (const need of ['open_file', 'new_project', 'edit', 'schedule', 'save', 'export_pdf', 'server_status', ...ANALYSIS, ...FOURD]) if (!names.includes(need)) failures.push(`missing tool ${need}`);
+for (const need of ['open_file', 'new_project', 'edit', 'schedule', 'save', 'export_pdf', 'server_status', ...ANALYSIS, ...FOURD, ...LOB]) if (!names.includes(need)) failures.push(`missing tool ${need}`);
 if (JSON.stringify(tools.find((t) => t.name === 'windows_analysis')?._meta?.['whiq/files']?.read) !== '["updates[].path"]') failures.push('windows_analysis has no _meta["whiq/files"]');
 
 const status = await call('server_status', {});
@@ -123,10 +124,28 @@ else {
   const sc4 = await call('synchro_cloud', { ...H });
   if (sc4.optional !== true) failures.push(`synchro_cloud: ${JSON.stringify(sc4).slice(0, 200)}`);
 }
+// LOB: a plan of 2 parts x 3 floors beside the CPM project, edited, on a takt, forecast, to Tactplan and back
+{
+  const L = { handle, owner_key };
+  const c = await call('lob_create', { ...L, id: 'SLOB', start: '2026-03-02', locations: { levels: ['Part', 'Floor'], grid: [2, 3] }, tasks: [{ code: 'CS', name: 'Concrete', consumption: 9, quantity: 60, crew_size: 18 }, { code: 'PW', name: 'Plaster', consumption: 0.5, quantity: 1000, crew_size: 10 }], links: [{ pred: 'CS', succ: 'PW', location_lag: 1 }] });
+  if (c.activities?.added !== 12) failures.push(`lob_create: ${JSON.stringify(c).slice(0, 200)}`);
+  const e = await call('lob_edit', { ...L, project: 'SLOB', operations: [{ op: 'split', task: 'PW', at: 'P2F1' }, { op: 'set_crew', task: 'PW', segment: 2, crew_size: 20 }, { op: 'set_takt', takt_days: 5 }] });
+  if (!e.changes?.some((x) => x.field === 'crew_size')) failures.push(`lob_edit: ${JSON.stringify(e).slice(0, 200)}`);
+  const v = await call('lob_view', { handle, project: 'SLOB', svg: join(dir, 'lob.svg') });
+  if (v.tasks?.length !== 2 || !existsSync(join(dir, 'lob.svg'))) failures.push(`lob_view: ${JSON.stringify(v).slice(0, 200)}`);
+  const k = await call('lob_takt', { handle, project: 'SLOB' });
+  if (typeof k.fits !== 'boolean') failures.push(`lob_takt: ${JSON.stringify(k).slice(0, 200)}`);
+  const f = await call('lob_forecast', { handle, project: 'SLOB' });
+  if (!f.forecast) failures.push(`lob_forecast: ${JSON.stringify(f).slice(0, 200)}`);
+  const x = await call('lob_export', { handle, project: 'SLOB', path: join(dir, 'tactplan') });
+  if (x.written?.length !== 4) failures.push(`lob_export: ${JSON.stringify(x).slice(0, 200)}`);
+  const i = await call('lob_import', { ...L, path: join(dir, 'tactplan'), id: 'SLOB2' });
+  if (i.tasks !== 2) failures.push(`lob_import (Tactplan): ${JSON.stringify(i).slice(0, 200)}`);
+}
 await call('save', { handle, owner_key, path: 'smoke.xer' });
 if (!existsSync(join(dir, 'smoke.xer'))) failures.push('save wrote no smoke.xer');
 
 clearTimeout(timer);
 child.removeAllListeners('exit'); child.kill();
 if (failures.length) { console.error(`smoke FAILED on node ${process.version} (${process.platform}):\n- ${failures.join('\n- ')}`); process.exit(1); }
-console.log(`ok: ${init.result?.serverInfo?.name} ${init.result?.serverInfo?.version}, ${names.length} tools, ${ANALYSIS.length} analysis tools and ${FOURD.length} 4D tools answered (video: ${process.env.P6CLONE_CHROMIUM ? (process.env.P6CLONE_FFMPEG ? 'MP4 through ffmpeg' : 'rendered') : 'client render request'}), reasoner loaded (${status.reasoner.runtime}), saved smoke.xer on node ${process.version} (${process.platform})`);
+console.log(`ok: ${init.result?.serverInfo?.name} ${init.result?.serverInfo?.version}, ${names.length} tools, ${ANALYSIS.length} analysis tools and ${FOURD.length} 4D tools and ${LOB.length} LOB tools answered (video: ${process.env.P6CLONE_CHROMIUM ? (process.env.P6CLONE_FFMPEG ? 'MP4 through ffmpeg' : 'rendered') : 'client render request'}), reasoner loaded (${status.reasoner.runtime}), saved smoke.xer on node ${process.version} (${process.platform})`);
