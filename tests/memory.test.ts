@@ -51,10 +51,10 @@ test('a 31,000-operation edit (20,000 assign_code) stays linear in time and memo
     for (let i = 0; i < N; i++) ops.push({ op: 'assign_resource', activity: 'A' + i, resource: 'R' });
     for (let i = 0; i < N; i += 4) ops.push({ op: 'unassign_resource', activity: 'A' + i, resource: 'R' });
     for (let i = 0; i < N; i++) ops.push({ op: 'set_udf', udf: 'Zone', activity: 'A' + i, value: 'Z' + i }, { op: 'set_notebook', activity: 'A' + i, text: 'note ' + i });
-    const h0 = heap(), t0 = Date.now();
+    const h0 = heap(), c0 = process.cpuUsage();
     let r;
     const j = record(db, (d) => { r = applyOps(d, ops); });
-    const seconds = (Date.now() - t0) / 1000, grew = (heap() - h0) / 1048576;
+    const c1 = process.cpuUsage(c0), seconds = (c1.user + c1.system) / 1e6, grew = (heap() - h0) / 1048576;
     const T = (n) => db.tables[n]?.rows.length ?? 0;
     const counts = [T('TASKACTV'), T('TASKPRED'), T('TASKRSRC'), T('UDFVALUE'), T('TASKMEMO')];
     rollback(j);
@@ -65,5 +65,6 @@ test('a 31,000-operation edit (20,000 assign_code) stays linear in time and memo
   assert.deepEqual(out.counts, [20000, 1499, 1500, 2000, 2000]);
   assert.deepEqual(out.undone, [0, 0]);
   assert.ok(out.grew < 150, `the edit and its journal hold ${out.grew.toFixed(0)} MB (before the fix: GBs, the process died)`);
-  assert.ok(out.seconds < 30, `the edit took ${out.seconds} s`);
+  // CPU time, not wall time: a loaded machine (other tests, other sessions) stretches the wall clock, not the work
+  assert.ok(out.seconds < 30, `the edit took ${out.seconds} s of CPU`);
 });
