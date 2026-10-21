@@ -370,6 +370,17 @@ function patchCalendar(xml: string, before: CalendarDef, after: CalendarDef, nam
 
 /** report: what the save did that the caller should know (e.g. WBS codes that follow the outline). */
 export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[] } = {}): string {
+  const parts: string[] = [];
+  writeMspdiTo(db, opts, (piece) => parts.push(piece));
+  return parts.join('');
+}
+
+/** The MSPDI file in pieces, in order, to `put` (a file of any size is never one string): the four collections
+ *  (calendars, tasks, resources, assignments) are kept as their elements' pieces and stand in the project's own
+ *  element list as a marker until they are written. */
+export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string[] }, put: (piece: string) => void): void {
+  const sections: string[][] = [];
+  const section = (pieces: string[]) => { sections.push(pieces); return `\u0001P6C-SECTION:${sections.length - 1}\u0001`; };
   const m = projectFromDb(db, opts.projIds);
   const blNumbers = m.row ? baselineNumbers(db, m.row) : new Map<number, string>();
   // each element's children are collected as [name, xml] pairs, so a project read from MSPDI can be merged back
@@ -392,12 +403,12 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
     `<${name}>${kept && row ? mergeKids(kept.kids, cur, deps, changedSince(table, row, k), ORDER[name], keepAlso) : cur.map((c) => c[1]).join('')}</${name}>`;
   /** Elements that are not rows (keep.ts Ghost) go back among the others where they were in the file: before the
    *  first kept element that came after them. The others keep their order (for tasks, the outline's). */
-  const withGhosts = (items: { seq?: number; xml: () => string }[], ghosts: { seq: number; xml: string }[]) => {
+  const withGhosts = (items: { seq?: number; xml: () => string }[], ghosts: { seq: number; xml: string }[]): string[] => {
     const g = [...ghosts].sort((x, y) => x.seq - y.seq), out: string[] = [];
     let i = 0;
     for (const it of items) { if (it.seq != null) while (i < g.length && g[i].seq < it.seq) out.push(g[i++].xml); out.push(it.xml()); }
     while (i < g.length) out.push(g[i++].xml);
-    return out.join('');
+    return out;
   };
   const seqOf = (x: { keep?: Kept }, _i: number) => x.keep?.seq;
   const ghosts = m.keep?.ghosts ?? { tasks: [], resources: [], assignments: [], calendars: [] };
@@ -489,7 +500,7 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
   };
   // calendars in the file's order (kept ones by their place; new ones after)
   const calOrder = m.calendars.map((c, i) => ({ c, i })).sort((x, y) => (x.c.keep?.seq ?? 1e9 + x.i) - (y.c.keep?.seq ?? 1e9 + y.i)).map((x) => x.c);
-  const cals = [withGhosts(calOrder.map((c, i) => ({ seq: seqOf(c, i), xml: () => calXml(c) })), ghosts.calendars.map((g) => ({ ...g, xml: rebase(g.uid, g.xml) })))];
+  const cals = withGhosts(calOrder.map((c, i) => ({ seq: seqOf(c, i), xml: () => calXml(c) })), ghosts.calendars.map((g) => ({ ...g, xml: rebase(g.uid, g.xml) })));
   let calUid = [...m.calendars.map((c) => c.uid), ...ghosts.calendars.map((g) => g.uid)].reduce((x, u) => Math.max(x, Number(u) || 0), 0);
   const resCal = new Map<string, number>();
   for (const r of m.resources) {
@@ -498,7 +509,7 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
     resCal.set(r.uid, ++calUid);
     cals.push(`<Calendar><UID>${calUid}</UID><Name>${esc(r.name)}</Name><IsBaseCalendar>0</IsBaseCalendar><IsBaselineCalendar>0</IsBaselineCalendar><BaseCalendarUID>${esc(r.calUid || m.calUid)}</BaseCalendarUID></Calendar>`);
   }
-  proj.push(['Calendars', `<Calendars>${cals.join('')}</Calendars>`]);
+  proj.push(['Calendars', section(['<Calendars>', ...cals, '</Calendars>'])]);
 
   const taskXml = (t: MProject['tasks'][number]) => {
     cur = [];
@@ -586,7 +597,8 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
     const id = ++rowNo;
     return e.g.xml.replace(/<ID>\s*\d+\s*<\/ID>/, `<ID>${id}</ID>`);
   });
-  proj.push(['Tasks', `<Tasks>${taskRows.join('')}</Tasks>`]);
+  taskRows.unshift('<Tasks>'); taskRows.push('</Tasks>');
+  proj.push(['Tasks', section(taskRows)]);
 
   const resXml = (r: MProject['resources'][number]) => {
     cur = [];
@@ -605,7 +617,7 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
     if (r.p6Type && p6ext) cur.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><Value>${esc(r.p6Type)}</Value></ExtendedAttribute>`]);
     return element('Resource', r.keep, r.row, 'RSRC', { ...RES_DEPS, ...(reusedCal.has(r.uid) ? { CalendarUID: () => false } : {}), ExtendedAttribute: p6ext ? ['rsrc_type'] : () => false }, notOurs);
   };
-  proj.push(['Resources', `<Resources>${withGhosts(m.resources.map((r, i) => ({ seq: seqOf(r, i), xml: () => resXml(r) })), ghosts.resources)}</Resources>`]);
+  { const r = withGhosts(m.resources.map((r, i) => ({ seq: seqOf(r, i), xml: () => resXml(r) })), ghosts.resources); r.unshift('<Resources>'); r.push('</Resources>'); proj.push(['Resources', section(r)]); }
 
   const asgXml = (a: MProject['assignments'][number]) => {
     cur = [];
@@ -629,9 +641,21 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
   // a resource to it (Microsoft Project keeps the placeholder only while a task has no resource)
   const assigned = new Set(m.assignments.filter((a) => !a.keep).map((a) => a.taskUid));
   const keptAsg = ghosts.assignments.filter((g) => { const tu = tag(g.xml, 'TaskUID'); return !tu || (taskUids.has(tu) && !(tag(g.xml, 'ResourceUID') === '-65535' && assigned.has(tu))); });
-  proj.push(['Assignments', `<Assignments>${withGhosts(m.assignments.map((a, i) => ({ seq: seqOf(a, i), xml: () => asgXml(a) })), keptAsg)}</Assignments>`]);
+  { const r = withGhosts(m.assignments.map((a, i) => ({ seq: seqOf(a, i), xml: () => asgXml(a) })), keptAsg); r.unshift('<Assignments>'); r.push('</Assignments>'); proj.push(['Assignments', section(r)]); }
 
   if (followed.length) opts.report?.push(`This file has no WBS code mask, so Microsoft Project's WBS code is the outline number: the WBS of ${followed.length} moved task(s) follows the new place: ${followed.slice(0, 20).join('; ')}.`);
   const body = m.keep && m.row ? mergeKids(m.keep.kids, proj, PROJECT_DEPS, changedSince('PROJECT', m.row, k), ORDER.Project) : proj.map((x) => x[1]).join('\n');
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Project xmlns="${MSPDI_NS}">\n${body}\n</Project>\n`;
+  put(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Project xmlns="${MSPDI_NS}">\n`);
+  // the project's elements, each collection's pieces where its marker stands (each written once, then let go)
+  const re = /\u0001P6C-SECTION:(\d+)\u0001/g;
+  let at = 0;
+  for (let mm = re.exec(body); mm; mm = re.exec(body)) {
+    if (mm.index > at) put(body.slice(at, mm.index));
+    const i = Number(mm[1]), pieces = sections[i];
+    sections[i] = [];
+    for (let j = 0; j < pieces.length; j++) put(pieces[j]);
+    at = mm.index + mm[0].length;
+  }
+  if (at < body.length) put(body.slice(at));
+  put('\n</Project>\n');
 }

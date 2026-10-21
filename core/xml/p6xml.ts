@@ -14,9 +14,15 @@ const ENT: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apo
 const unesc = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e: string) => (e[0] === '#' ? String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e] ?? m));
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export function parseXml(text: string): XNode {
+/** The document tree. With `split`, an element split(parents, name) names (parents: the open elements' names, outside
+ *  in) is handed to `emit` as soon as it closes and is not kept in the tree: a big document is held one element at a
+ *  time, never whole (elements inside a split one are not split again). */
+export function parseXml(text: string, split?: (parents: string[], name: string) => boolean, emit?: (parents: string[], n: XNode) => void, onRoot?: (root: XNode) => void): XNode {
   const root: XNode = { name: '#root', children: [], text: '' };
+  onRoot?.(root);
   const stack = [root];
+  const names: string[] = []; // the open elements' names (root excluded)
+  let inSplit = 0; // stack depth of the open split element (0: none)
   const re = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<!DOCTYPE[^>]*>|<\/\s*([\w:.-]+)\s*>|<\s*([\w:.-]+)((?:\s+[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>|([^<]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
@@ -26,12 +32,15 @@ export function parseXml(text: string): XNode {
       const name = m[2].replace(/^\w+:/, '');
       if (top.name !== name) throw new Error(`unexpected </${name}> (open <${top.name}>)`);
       top.e = re.lastIndex;
-      stack.pop();
+      stack.pop(); names.pop();
+      if (inSplit && stack.length === inSplit - 1) { inSplit = 0; emit!(names, top); }
     } else if (m[3]) {
       const n: XNode = { name: m[3].replace(/^\w+:/, ''), children: [], text: '', s: m.index };
-      top.children.push(n);
-      if (!m[5]) stack.push(n); else n.e = re.lastIndex;
-    } else if (m[6] != null) top.text += unesc(m[6]);
+      const cut = !inSplit && !!split?.(names, n.name);
+      if (!cut) top.children.push(n);
+      if (!m[5]) { stack.push(n); names.push(n.name); if (cut) inSplit = stack.length; }
+      else { n.e = re.lastIndex; if (cut) emit!(names, n); }
+    } else if (m[6] != null) { if (!split || inSplit || /\S/.test(m[6])) top.text += unesc(m[6]); } // (the whitespace between kept elements is not kept)
   }
   if (stack.length > 1) throw new Error(`unclosed <${stack[stack.length - 1].name}>`);
   return root;
@@ -247,20 +256,30 @@ function udfRows(n: XNode, fk: string, projId: string): Row[] {
 // ---------- writer
 
 export function writeP6Xml(db: Db, opts: { projIds?: string[]; version?: string }): string {
+  const parts: string[] = [];
+  writeP6XmlTo(db, opts, (chunk) => parts.push(chunk));
+  return parts.join('');
+}
+
+/** The P6 XML document piece by piece (put gets whole lines, in order): a file writer streams it, so a big schedule is
+ *  never one string (a 98 MB XER made a 330 MB document and a 3.3 GB peak when it was joined). */
+export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: string }, put: (chunk: string) => void): void {
   const sel = selectRows(db, opts.projIds);
   const get = (t: string) => sel.get(t) ?? [];
   // the namespace names the P6 release the file is for (P6 XML exists from 8.x; older versions get the 8.1 schema)
   const ver = opts.version && Number(opts.version.split('.')[0]) >= 8 ? opts.version : opts.version ? '8.1' : '19.12';
   const ns = `http://xmlns.oracle.com/Primavera/P6/V${ver}/API/BusinessObjects`;
-  const out: string[] = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', `<APIBusinessObjects xmlns="${ns}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="${ns} http://xmlns.oracle.com/Primavera/P6/V${ver ?? '19.12'}/API/p6apibo.xsd">`];
+  const out = { push: (line: string) => put(line + '\n') };
+  out.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
+  out.push(`<APIBusinessObjects xmlns="${ns}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="${ns} http://xmlns.oracle.com/Primavera/P6/V${ver ?? '19.12'}/API/p6apibo.xsd">`);
   const el = (tag: string, r: Row, map: FieldMap, extra = '') => out.push(`<${tag}>${toXml(r, map)}${extra}</${tag}>`);
   const udfType = new Map(rows(db, 'UDFTYPE').map((u) => [u.udf_type_id, u]));
   const udfsOf = new Map<string, Row[]>();
-  for (const u of get('UDFVALUE')) { const k = `${udfType.get(u.udf_type_id)?.table_name}|${u.fk_id}`; udfsOf.set(k, [...(udfsOf.get(k) ?? []), u]); }
+  for (const u of get('UDFVALUE')) { const k = `${udfType.get(u.udf_type_id)?.table_name}|${u.fk_id}`; const l = udfsOf.get(k); if (l) l.push(u); else udfsOf.set(k, [u]); }
   const udfs = (table: string, id: string) => udfsXml(udfsOf.get(`${table}|${id}`) ?? [], udfType);
   const codeType = new Map(rows(db, 'ACTVCODE').map((c) => [c.actv_code_id, c.actv_code_type_id]));
   const codesOf = new Map<string, Row[]>();
-  for (const a of get('TASKACTV')) codesOf.set(a.task_id, [...(codesOf.get(a.task_id) ?? []), a]);
+  for (const a of get('TASKACTV')) { const l = codesOf.get(a.task_id); if (l) l.push(a); else codesOf.set(a.task_id, [a]); }
   for (const r of get('CURRTYPE')) el('Currency', r, CURR_MAP);
   for (const r of get('OBS')) el('OBS', r, OBS_MAP);
   for (const r of get('ACCOUNT')) el('CostAccount', r, ACCOUNT_MAP);
@@ -275,10 +294,10 @@ export function writeP6Xml(db: Db, opts: { projIds?: string[]; version?: string 
   for (const r of get('RCATTYPE')) el('ResourceCodeType', r, RCODETYPE_MAP);
   for (const r of get('RCATVAL')) el('ResourceCode', r, RCODE_MAP);
   for (const r of get('ROLES')) el('Role', r, ROLE_MAP);
-  const rcodes = new Map<string, Row[]>(); for (const a of get('RSRCRCAT')) rcodes.set(a.rsrc_id, [...(rcodes.get(a.rsrc_id) ?? []), a]);
+  const rcodes = new Map<string, Row[]>(); for (const a of get('RSRCRCAT')) { const l = rcodes.get(a.rsrc_id); if (l) l.push(a); else rcodes.set(a.rsrc_id, [a]); }
   for (const r of get('RSRC')) el('Resource', r, RSRC_MAP, codeRefsXml(rcodes.get(r.rsrc_id) ?? [], 'rsrc_catg_type_id', 'rsrc_catg_id') + udfs('RSRC', r.rsrc_id));
   for (const r of get('RSRCRATE')) el('ResourceRate', r, RATE_MAP);
-  const pcodes = new Map<string, Row[]>(); for (const a of get('PROJPCAT')) pcodes.set(a.proj_id, [...(pcodes.get(a.proj_id) ?? []), a]);
+  const pcodes = new Map<string, Row[]>(); for (const a of get('PROJPCAT')) { const l = pcodes.get(a.proj_id); if (l) l.push(a); else pcodes.set(a.proj_id, [a]); }
   const projectXml = (tag: 'Project' | 'BaselineProject', p: Row, get: (t: string) => Row[], originalId?: string) => {
     const wbsAll = get('PROJWBS');
     const pid = p.proj_id;
@@ -307,7 +326,6 @@ export function writeP6Xml(db: Db, opts: { projIds?: string[]; version?: string 
   const all = (t: string) => rows(db, t);
   for (const p of get('PROJECT')) for (const b of rows(db, 'PROJECT').filter((x) => x._baseline_of === p.proj_id)) projectXml('BaselineProject', b, all, p.proj_id);
   out.push('</APIBusinessObjects>');
-  return out.join('\n') + '\n';
 }
 
 // ---------- parser
@@ -315,9 +333,57 @@ export function writeP6Xml(db: Db, opts: { projIds?: string[]; version?: string 
 export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   const findings: Finding[] = [];
   const db: Db = { tables: {} };
+  const push = (t: string, r: Row) => { const T = table(db, t); for (const f of Object.keys(r)) addField(T, f); T.rows.push(r); };
+  const topMap: [string, string, FieldMap][] = [['Currency', 'CURRTYPE', CURR_MAP], ['OBS', 'OBS', OBS_MAP], ['CostAccount', 'ACCOUNT', ACCOUNT_MAP], ['NotebookTopic', 'MEMOTYPE', TOPIC_MAP],
+    ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP],
+    ['ProjectCodeType', 'PCATTYPE', PCODETYPE_MAP], ['ProjectCode', 'PCATVAL', PCODE_MAP], ['ResourceCodeType', 'RCATTYPE', RCODETYPE_MAP], ['ResourceCode', 'RCATVAL', RCODE_MAP]];
+  const projMap: [string, string, FieldMap][] = [['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Relationship', 'TASKPRED', REL_MAP], ['ResourceAssignment', 'TASKRSRC', ASSIGN_MAP],
+    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
+  // Read as it goes: each top-level element, and each activity, WBS element, relationship, ... of a project, is turned
+  // into rows as soon as it closes and let go (a big file is never one tree). A project's own rows are pushed after
+  // every top-level element's, Projects before BaselineProjects, as a whole tree would order them.
+  type Group = { node: XNode; rows: [string, Row][]; held: XNode[]; at: { pid: string; rootId: string } | null; fallback: [Row, string, 'pid' | 'root'][] };
+  const groups = new Map<XNode, Group>();
+  const HEAVY = new Set(['Calendar', 'WBS', 'Activity', ...projMap.map(([tag]) => tag)]);
+  const top = (n: XNode) => {
+    const m = topMap.find(([tag]) => tag === n.name);
+    if (m) { const r = fromXml(n, m[2]); push(m[1], r); if (n.name === 'Resource') { for (const u of udfRows(n, r.rsrc_id, '')) push('UDFVALUE', u); for (const c of kids(n, 'Code')) push('RSRCRCAT', { rsrc_id: r.rsrc_id, rsrc_catg_type_id: val(c, 'TypeObjectId'), rsrc_catg_id: val(c, 'ValueObjectId') }); } }
+    else if (n.name === 'Calendar') push('CALENDAR', calendarRow(n));
+  };
+  /** One child of a project into its group's rows; a value it takes from the project (it names no project or WBS of
+   *  its own) is noted, so it is put right should the project's ObjectId or WBSObjectId come later in the file. */
+  const projectChild = (g: Group, n: XNode) => {
+    const { pid, rootId } = g.at!;
+    const put = (t: string, r: Row) => g.rows.push([t, r]);
+    const or = (r: Row, f: string, kind: 'pid' | 'root') => { if (!r[f]) { r[f] = kind === 'pid' ? pid : rootId; g.fallback.push([r, f, kind]); } };
+    if (n.name === 'Calendar') { const c = calendarRow(n); or(c, 'proj_id', 'pid'); put('CALENDAR', c); return; }
+    if (n.name === 'WBS') { const w = fromXml(n, WBS_MAP); or(w, 'proj_id', 'pid'); or(w, 'parent_wbs_id', 'root'); w.proj_node_flag = 'N'; put('PROJWBS', w); for (const u of udfRows(n, w.wbs_id, w.proj_id)) put('UDFVALUE', u); return; }
+    if (n.name === 'Activity') {
+      const a = fromXml(n, ACT_MAP); or(a, 'proj_id', 'pid'); or(a, 'wbs_id', 'root'); put('TASK', a);
+      for (const c of kids(n, 'Code')) put('TASKACTV', { task_id: a.task_id, actv_code_type_id: val(c, 'TypeObjectId'), actv_code_id: val(c, 'ValueObjectId'), proj_id: a.proj_id });
+      for (const u of udfRows(n, a.task_id, a.proj_id)) put('UDFVALUE', u);
+      return;
+    }
+    const m = projMap.find(([tag]) => tag === n.name);
+    if (m) { const r = fromXml(n, m[2]); if (m[1] === 'TASKPROC') { const pc = val(n, 'PercentComplete'); if (pc) r.complete_pct = String(Number(pc) > 1 ? Number(pc) : Math.round(Number(pc) * 1e6) / 1e4); } if (m[1] !== 'ACTVCODE') or(r, 'proj_id', 'pid'); if (m[1] === 'TASKPRED') or(r, 'pred_proj_id', 'pid'); if (m[1] === 'WBSMEMO') or(r, 'wbs_id', 'root'); put(m[1], r); }
+  };
+  const isProject = (name: string) => name === 'Project' || name === 'BaselineProject';
+  const split = (parents: string[], name: string) => (parents.length === 1 && parents[0] === 'APIBusinessObjects' && !isProject(name))
+    || (parents.length === 2 && parents[0] === 'APIBusinessObjects' && isProject(parents[1]) && HEAVY.has(name));
   let root: XNode;
+  // the open project: the last element under APIBusinessObjects (projects are kept in the tree, their children are not)
+  let doc: XNode | null = null;
   try {
-    root = parseXml(text);
+    root = parseXml(text, split, (parents, n) => {
+      if (parents.length === 1) { top(n); return; }
+      const api = doc?.children.find((c) => c.name === 'APIBusinessObjects'), p = api?.children[api.children.length - 1];
+      if (!p) return;
+      let g = groups.get(p);
+      if (!g) { g = { node: p, rows: [], held: [], at: null, fallback: [] }; groups.set(p, g); }
+      // the project's own fields come before its children in P6's files: known by its first child (else held to the end)
+      if (!g.at && val(p, 'ObjectId')) { const pid = val(p, 'ObjectId'); g.at = { pid, rootId: val(p, 'WBSObjectId') || `${pid}00000` }; }
+      if (g.at) projectChild(g, n); else g.held.push(n);
+    }, (r) => { doc = r; });
   } catch (e) {
     findings.push({ severity: 'fatal', code: 'XML_PARSE', message: `XML is not well formed: ${(e as Error).message}.`, p6: 'P6 rejects the file.' });
     return { db, findings };
@@ -327,19 +393,9 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     findings.push({ severity: 'fatal', code: 'XML_ROOT', message: 'Root element is not <APIBusinessObjects>.', p6: 'P6 rejects the file: not a P6 XML export.' });
     return { db, findings };
   }
-  const push = (t: string, r: Row) => { const T = table(db, t); for (const f of Object.keys(r)) addField(T, f); T.rows.push(r); };
-  const topMap: [string, string, FieldMap][] = [['Currency', 'CURRTYPE', CURR_MAP], ['OBS', 'OBS', OBS_MAP], ['CostAccount', 'ACCOUNT', ACCOUNT_MAP], ['NotebookTopic', 'MEMOTYPE', TOPIC_MAP],
-    ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP],
-    ['ProjectCodeType', 'PCATTYPE', PCODETYPE_MAP], ['ProjectCode', 'PCATVAL', PCODE_MAP], ['ResourceCodeType', 'RCATTYPE', RCODETYPE_MAP], ['ResourceCode', 'RCATVAL', RCODE_MAP]];
-  for (const n of api.children) {
-    const m = topMap.find(([tag]) => tag === n.name);
-    if (m) { const r = fromXml(n, m[2]); push(m[1], r); if (n.name === 'Resource') { for (const u of udfRows(n, r.rsrc_id, '')) push('UDFVALUE', u); for (const c of kids(n, 'Code')) push('RSRCRCAT', { rsrc_id: r.rsrc_id, rsrc_catg_type_id: val(c, 'TypeObjectId'), rsrc_catg_id: val(c, 'ValueObjectId') }); } }
-    else if (n.name === 'Calendar') push('CALENDAR', calendarRow(n));
-  }
-  const projMap: [string, string, FieldMap][] = [['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Relationship', 'TASKPRED', REL_MAP], ['ResourceAssignment', 'TASKRSRC', ASSIGN_MAP],
-    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
   const baselineOf = new Map<string, string>(kids(api, 'Project').map((p): [string, string] => [val(p, 'CurrentBaselineProjectObjectId'), val(p, 'ObjectId')]).filter(([b]) => !!b));
   for (const p of [...kids(api, 'Project'), ...kids(api, 'BaselineProject')]) {
+    const g = groups.get(p) ?? { node: p, rows: [], held: [], at: null, fallback: [] };
     const pr = fromXml(p, PROJECT_MAP);
     const pid = pr.proj_id || String(rows(db, 'PROJECT').length + 1);
     pr.proj_id = pid;
@@ -353,18 +409,11 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     if (Object.keys(so).length) push('SCHEDOPTIONS', { schedoptions_id: pid, proj_id: pid, ...so });
     const rootId = val(p, 'WBSObjectId') || `${pid}00000`;
     push('PROJWBS', { wbs_id: rootId, proj_id: pid, parent_wbs_id: '', proj_node_flag: 'Y', wbs_short_name: pr.proj_short_name, wbs_name: val(p, 'Name'), seq_num: '0', status_code: 'WS_Open', obs_id: '' });
-    for (const n of p.children) {
-      if (n.name === 'Calendar') { const c = calendarRow(n); c.proj_id ||= pid; push('CALENDAR', c); continue; }
-      if (n.name === 'WBS') { const w = fromXml(n, WBS_MAP); w.proj_id ||= pid; w.parent_wbs_id ||= rootId; w.proj_node_flag = 'N'; push('PROJWBS', w); for (const u of udfRows(n, w.wbs_id, w.proj_id)) push('UDFVALUE', u); continue; }
-      if (n.name === 'Activity') {
-        const a = fromXml(n, ACT_MAP); a.proj_id ||= pid; a.wbs_id ||= rootId; push('TASK', a);
-        for (const c of kids(n, 'Code')) push('TASKACTV', { task_id: a.task_id, actv_code_type_id: val(c, 'TypeObjectId'), actv_code_id: val(c, 'ValueObjectId'), proj_id: a.proj_id });
-        for (const u of udfRows(n, a.task_id, a.proj_id)) push('UDFVALUE', u);
-        continue;
-      }
-      const m = projMap.find(([tag]) => tag === n.name);
-      if (m) { const r = fromXml(n, m[2]); if (m[1] === 'TASKPROC') { const pc = val(n, 'PercentComplete'); if (pc) r.complete_pct = String(Number(pc) > 1 ? Number(pc) : Math.round(Number(pc) * 1e6) / 1e4); } if (m[1] !== 'ACTVCODE') r.proj_id ||= pid; if (m[1] === 'TASKPRED') { r.pred_proj_id ||= pid; } if (m[1] === 'ACTVTYPE') r.proj_id ||= pid; if (m[1] === 'WBSMEMO') r.wbs_id ||= rootId; push(m[1], r); }
-    }
+    // what the children took from the project while it was read, as it is now that all of it is read
+    for (const [r, f, kind] of g.fallback) r[f] = kind === 'pid' ? pid : rootId;
+    if (g.held.length) { g.at = { pid, rootId }; for (const n of g.held) projectChild(g, n); }
+    for (const [t, r] of g.rows) push(t, r);
+    groups.delete(p);
   }
   // P6 writes percentages as fractions; files from earlier P6 Clone builds wrote 0-100 (told apart by any value over 1)
   const tasks = rows(db, 'TASK');
