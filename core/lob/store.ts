@@ -122,6 +122,7 @@ export function loadLobModels(db: Db, sidecar?: Record<string, LobModel>): Map<s
   for (const p of rows(db, 'PROJECT')) {
     if (p._baseline_of || !isLobProject(db, p.proj_id)) continue;
     const nb = readLobNotebook(db, p.proj_id);
+    if (nb.model) nb.model.project = p.proj_short_name; // the project may have been renamed (set_project new_id)
     if (nb.model) { out.set(p.proj_id, { model: nb.model, from: 'notebook', problems: [] }); continue; }
     const side = sidecar?.[p.proj_short_name];
     if (side) { out.set(p.proj_id, { model: side, from: 'sidecar', problems: [`${nb.problem}; the model was taken from the .lob.json beside the file`] }); continue; }

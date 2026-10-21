@@ -7,6 +7,8 @@ import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } 
 import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { ensureEps, projectNumberProblem, renumberProject } from './edit.ts';
 import { pick, realOf, removeWhere } from '../journal.ts';
+import { LOB_UDF } from '../lob/expand.ts';
+import { LOB_FLAG } from '../lob/store.ts';
 import { STEP_FIELDS, syncFromSteps } from './steps.ts';
 import { DISTS, setEstimate, type Dist } from '../risk/montecarlo.ts';
 import { assignBaseline, deleteBaseline, restoreBaseline, saveBaseline } from '../progress/baseline.ts';
@@ -45,7 +47,7 @@ export const EXTRA_GUIDE = [
   `assign_code: type, value ("" removes), and activity (+[project]) | project | resource, [subject] (default from the target)`,
   `add_udf: name, [subject] (activity default, wbs, project, resource, assignment), [data_type] (text default, number, integer, cost, start_date, finish_date)`,
   `set_udf: udf, value (null or "" removes), and activity (+[project]) | wbs (+[project]) | project | resource`,
-  `clear_udfs: [project], [subject] (activity, wbs, project, assignment, resource), [udf] (one UDF's label): removes every UDF value of the project's activities, WBS, assignments and the project itself in one step (resource UDF values, shared by every project, only with subject resource or a resource udf)`,
+  `clear_udfs: [project], [subject] (activity, wbs, project, assignment, resource), [udf] (one UDF's label): removes every UDF value of the project's activities, WBS, assignments and the project itself in one step (resource UDF values, shared by every project, only with subject resource or a resource udf); an LOB plan's own UDFs (LOB Task, LOB Quantity, LOB Consumption, LOB Crew, Schedule Method = LOB (P6 clone)) stay unless udf names one`,
   `update_udf: udf (label), new_name, [subject] (activity default, wbs, project, resource, assignment)`,
   `set_notebook: [activity] | project, topic, text (text "" removes the topic; answer removed: true/false; the topic itself stays). activity (+[project]): its activity notebook; project alone: the project's notebook (P6's WBSMEMO on the project's root WBS node). topic default "Notes", created when missing, else reused`,
   `add_cost_account: id, [name], [parent]; update_cost_account: id, [new_id], [name]`,
@@ -588,10 +590,13 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const subj = op.subject != null ? UDF_SUBJECT[lc(op.subject)] ?? fail(`subject must be ${Object.keys(UDF_SUBJECT).join(', ')}.`) : null;
       const types = rows(db, 'UDFTYPE').filter((u) => (!subj || u.table_name === subj) && (op.udf == null || lc(u.udf_type_label) === lc(op.udf)));
       if (op.udf != null && !types.length) fail(`No ${subj ? `${lc(op.subject)} ` : ''}UDF "${op.udf}".`);
+      // unless named, the clone's LOB plan keeps its own UDFs (its activities' LOB Task... and the project's Schedule Method)
+      const lob = new Set<string>(op.udf == null ? [...Object.values(LOB_UDF), LOB_FLAG.udf] : []);
       const tableOf = new Map(types.map((u) => [u.udf_type_id, u.table_name]));
+      const keep = (v: Row) => { const u = types.find((x) => x.udf_type_id === v.udf_type_id); return !!u && lob.has(u.udf_type_label) && (u.udf_type_label !== LOB_FLAG.udf || v.udf_text === LOB_FLAG.value); };
       const ofProject = (name: string, key: string) => new Set(realOf(rows(db, name)).filter((x) => x.proj_id === pid).map((x) => x[key]));
       const mine: Record<string, Set<string> | null> = { TASK: ofProject('TASK', 'task_id'), PROJWBS: ofProject('PROJWBS', 'wbs_id'), TASKRSRC: ofProject('TASKRSRC', 'taskrsrc_id'), PROJECT: new Set([pid]), RSRC: subj === 'RSRC' || op.udf != null ? null : new Set() };
-      const n = removeWhere(rows(db, 'UDFVALUE'), (v) => { const tn = tableOf.get(v.udf_type_id); if (!tn) return false; const m = mine[tn]; return m === null || (!!m && m.has(v.fk_id)); });
+      const n = removeWhere(rows(db, 'UDFVALUE'), (v) => { const tn = tableOf.get(v.udf_type_id); if (!tn || keep(v)) return false; const m = mine[tn]; return m === null || (!!m && m.has(v.fk_id)); });
       return { project: p.proj_short_name, cleared: n };
     }
     case 'delete_expenses': {

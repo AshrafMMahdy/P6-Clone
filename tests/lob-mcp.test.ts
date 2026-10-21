@@ -134,3 +134,25 @@ test('crash_schedule leaves an LOB plan\u2019s activities to the plan', async ()
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
   assert.ok(!(r.d.ops ?? []).some((o: any) => /^(CS|DW|PT)-/.test(o.id ?? '')), 'no LOB activity crashed directly');
 });
+
+test('anonymising an LOB plan: clear_udfs keeps it an LOB plan; rename reaches the activities, codes, notebook and sidecar; a new project ID follows', async () => {
+  const { h, owner_key } = await plan();
+  const c = await call('edit', { handle: h, owner_key, operations: [{ op: 'clear_udfs', project: 'TOWER' }, { op: 'set_project', project: 'TOWER', new_id: 'P-001', name: 'Project 1' }, { op: 'clear_authors', project: 'P-001' }, { op: 'regenerate_guids', project: 'P-001' }] });
+  assert.equal(c.d.ok, true, JSON.stringify(c.d).slice(0, 300));
+  const r = await call('lob_edit', { handle: h, owner_key, project: 'P-001', operations: [
+    { op: 'rename', task: 'CS', name: 'Task 1', trade: 'Trade 1' }, { op: 'rename', task: 'DW', item: 'Drywall', name: 'Item 1', unit: 'u' }, { op: 'rename', task: 'DW', name: 'Task 2', trade: 'Trade 2' }, { op: 'rename', task: 'PT', name: 'Task 3', trade: 'Trade 3' },
+    { op: 'rename', location: 'P1', name: 'Zone A' }, { op: 'rename', level: 'Part', name: 'Level 1' },
+  ] });
+  assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+  assert.ok(r.d.changes.some((x: any) => x.task === 'CS' && x.field === 'trade' && x.old === 'Concrete' && x.new === 'Trade 1'));
+  const acts = JSON.stringify((await call('activity_table', { handle: h, project: 'P-001', names: true })).d);
+  assert.ok(acts.includes('Task 1, Zone A') && !acts.includes('Concrete skeleton'), acts.slice(0, 200));
+  const dir = mkdtempSync(join(tmpdir(), 'p6-anon-'));
+  await call('save', { handle: h, owner_key, path: join(dir, 'a.xer') });
+  const { readFileSync } = await import('node:fs');
+  const xer = readFileSync(join(dir, 'a.xer'), 'utf8'), side = readFileSync(join(dir, 'a.xer.lob.json'), 'utf8');
+  const notebook = (xer.match(/P6CLONE-LOB v1 \d+\/\d+ [0-9a-f]+ ([A-Za-z0-9+/=]+)/g) ?? []).map((x) => Buffer.from(x.split(' ').at(-1)!, 'base64').toString('utf8')).join('');
+  for (const old of ['Concrete', 'Drywall', 'Paint', 'Part 1', '"Part"', 'TOWER']) assert.ok(!xer.includes(old) && !side.includes(old) && !notebook.includes(old), `${old} left in the file`);
+  const o = await call('open_file', { path: join(dir, 'a.xer') });
+  assert.deepEqual(o.d.lob, [{ project: 'P-001', model_from: 'notebook' }]);
+});

@@ -30,6 +30,12 @@ location, coarser-level links, continuity, location lag, location-to-location li
 | `skills/01-scheduler/takt_planning.md` (no tool) | `lob_edit set_takt`, `lob_takt` | The balance check names each trade × zone that does not fit and what would fit it; `apply` sizes crews, holds zones to the takt, paces, links the train with buffers. |
 | (none) | `lob_import`, `lob_export` | Vico `.dpp` (read) and Tactplan CSVs (both ways). |
 
+Anonymised export of a file with an LOB plan: the plan in the notebook (and `.lob.json`) holds the task, trade, item,
+unit, location and level names, so scrub them with `lob_edit rename` (the activities, Location / Trade codes, notebook
+and sidecar follow; the old trade values go), not with `edit` renames of the activities or codes, which the next
+`lob_edit` puts back. `clear_udfs` keeps the plan's own UDFs unless `udf` names one; `set_project new_id` and
+`regenerate_guids` are safe.
+
 `whiq/files`: `lob_import` reads `path`. Read-only: `lob_view`, `lob_forecast`.
 
 ## What a P6 user sees

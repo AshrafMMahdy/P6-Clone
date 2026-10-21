@@ -92,10 +92,14 @@ export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay:
   const codeType = (name: string) => rows(db, 'ACTVTYPE').find((t) => t.actv_code_type === name);
   if (!codeType(LOB_CODES.location)) ops.push({ op: 'add_code_type', name: LOB_CODES.location, max_length: 60 });
   if (!codeType(LOB_CODES.trade)) ops.push({ op: 'add_code_type', name: LOB_CODES.trade, max_length: 60 });
-  const values = (type: string) => { const t = codeType(type); return new Set(t ? rows(db, 'ACTVCODE').filter((v) => v.actv_code_type_id === t.actv_code_type_id).map((v) => v.short_name) : []); };
-  const haveLoc = values(LOB_CODES.location), haveTrade = values(LOB_CODES.trade);
+  const valueRows = (type: string) => { const t = codeType(type); return t ? rows(db, 'ACTVCODE').filter((v) => v.actv_code_type_id === t.actv_code_type_id) : []; };
+  const values = (type: string) => new Set(valueRows(type).map((v) => v.short_name));
+  const haveLoc = new Map(valueRows(LOB_CODES.location).map((v) => [v.short_name, v.actv_code_name])), haveTrade = values(LOB_CODES.trade);
   const byLevel = [...m.locations].sort((a, b) => a.level - b.level);
-  for (const l of byLevel) if (!haveLoc.has(l.code)) ops.push({ op: 'add_code_value', type: LOB_CODES.location, code: l.code, name: l.name, ...(l.parent ? { parent: l.parent } : {}) });
+  for (const l of byLevel) {
+    if (!haveLoc.has(l.code)) ops.push({ op: 'add_code_value', type: LOB_CODES.location, code: l.code, name: l.name, ...(l.parent ? { parent: l.parent } : {}) });
+    else if (haveLoc.get(l.code) !== l.name) ops.push({ op: 'update_code_value', type: LOB_CODES.location, code: l.code, name: l.name }); // renamed in the plan
+  }
   for (const tr of new Set(m.tasks.map((t) => t.trade))) if (!haveTrade.has(tr)) ops.push({ op: 'add_code_value', type: LOB_CODES.trade, code: tr.slice(0, 60), name: tr });
   const udfs = new Set(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'TASK').map((u) => u.udf_type_label));
   for (const [k, name] of Object.entries(LOB_UDF)) if (!udfs.has(name)) ops.push({ op: 'add_udf', name, subject: 'activity', data_type: k === 'quantity' || k === 'consumption' ? 'number' : 'text' });
@@ -155,5 +159,10 @@ export function expandLob(db: Db, projId: string, m: LobModel, o: { hoursPerDay:
   }
   const r = applyOps(db, ops, { hoursPerDay: o.hoursPerDay });
   if (!r.ok) return { ...res, ok: false, error: r.error!.message };
+  // a trade renamed or gone: its old code value goes once no activity in the file carries it (the old name stays nowhere)
+  const now = new Set(m.tasks.map((t) => t.trade.slice(0, 60)));
+  const used = new Set(rows(db, 'TASKACTV').map((a) => a.actv_code_id));
+  const stale = valueRows(LOB_CODES.trade).filter((v) => !now.has(v.short_name) && !used.has(v.actv_code_id) && o.previous?.tasks.some((t) => t.trade.slice(0, 60) === v.short_name));
+  if (stale.length) applyOps(db, stale.map((v) => ({ op: 'delete_code_value', type: LOB_CODES.trade, code: v.short_name })), { hoursPerDay: o.hoursPerDay });
   return res;
 }

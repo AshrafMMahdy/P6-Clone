@@ -62,7 +62,8 @@ export type LobOp = LobEdit
   | ({ op: 'add_link' } & Partial<LobLink> & { pred: string; succ: string; type?: LobLink['type']; lag_days?: number; location_lag?: number; buffer_days?: number; buffer_locations?: number; pred_location?: string; succ_location?: string })
   | { op: 'remove_link'; pred: string; succ: string }
   | { op: 'set_start'; task: string; segment?: number; date: string | null }
-  | ({ op: 'set_takt' } & { takt_days: number; zone_level?: number; zones?: LobTakt['zones']; train?: string[]; buffer_periods?: number });
+  | ({ op: 'set_takt' } & { takt_days: number; zone_level?: number; zones?: LobTakt['zones']; train?: string[]; buffer_periods?: number })
+  | { op: 'rename'; task?: string; item?: string; location?: string; level?: number | string; name?: string; trade?: string; unit?: string };
 
 /** Apply operations in order; the model, every change, and notes. A refused operation refuses the list. */
 export function applyLobOps(m0: LobModel, ops: LobOp[]): { model: LobModel; changes: LobChange[]; notes: string[] } {
@@ -116,6 +117,27 @@ export function applyLobOps(m0: LobModel, ops: LobOp[]): { model: LobModel; chan
         }
         case 'remove_link': { const n = m.links.length; m.links = m.links.filter((l) => !(l.pred === op.pred && l.succ === op.succ)); if (n === m.links.length) throw new LobRefused(`No link ${op.pred} → ${op.succ}.`); changes.push({ task: op.succ, field: 'link', old: op.pred, new: null }); break; }
         case 'set_start': { const t = m.tasks.find((x) => x.code === op.task) ?? (() => { throw new LobRefused(`No task ${op.task}.`); })(); const s = t.segments[(op.segment ?? 1) - 1] ?? (() => { throw new LobRefused(`${op.task} has no segment ${op.segment}.`); })(); changes.push({ task: t.code, segment: op.segment ?? 1, field: 'start', old: s.start ?? null, new: op.date }); if (op.date) s.start = op.date; else delete s.start; break; }
+        case 'rename': { // names only (codes stay: they are the activity IDs); the activities and codes follow on expansion
+          const text = (v: unknown, what: string) => { if (typeof v !== 'string' || !v.trim()) throw new LobRefused(`${what} must be a non-empty text.`); return v.trim(); };
+          const set = <T extends object>(o: T, k: keyof T & string, v: unknown, task: string, extra: Partial<LobChange> = {}) => { if (v === undefined) return; const n = text(v, k); changes.push({ task, ...extra, field: k, old: o[k] as string, new: n }); (o as Record<string, unknown>)[k] = n; };
+          if (op.location != null) set(m.locations.find((l) => l.code === op.location) ?? (() => { throw new LobRefused(`No location ${op.location}.`); })(), 'name', op.name, '', { location: op.location });
+          else if (op.level != null) {
+            const i = typeof op.level === 'number' ? op.level - 1 : m.levels.indexOf(op.level);
+            if (!(i >= 0 && i < m.levels.length)) throw new LobRefused(`No level ${op.level}.`);
+            const n = text(op.name, 'name'); changes.push({ task: '', field: 'level', old: m.levels[i], new: n }); m.levels[i] = n;
+          } else {
+            const t = m.tasks.find((x) => x.code === op.task) ?? (() => { throw new LobRefused(`No task ${op.task}.`); })();
+            if (op.item != null) {
+              const it = t.items.find((x) => x.name === op.item) ?? (() => { throw new LobRefused(`Task ${t.code} has no item ${op.item}.`); })();
+              if (op.name != null && t.items.some((x) => x !== it && x.name === op.name)) throw new LobRefused(`Task ${t.code} has an item ${op.name}.`);
+              set(it, 'name', op.name, t.code); set(it, 'unit', op.unit, t.code);
+            } else {
+              for (const it of t.items) if (op.name !== undefined && it.name === t.name) set(it, 'name', op.name, t.code); // an item named after the task (the default) follows it
+              set(t, 'name', op.name, t.code); set(t, 'trade', op.trade, t.code);
+            }
+          }
+          break;
+        }
         case 'set_takt': { m.takt = { taktDays: op.takt_days, ...(op.zone_level ? { zoneLevel: op.zone_level } : {}), ...(op.zones ? { zones: op.zones } : {}), ...(op.train ? { train: op.train } : {}), ...(op.buffer_periods != null ? { bufferPeriods: op.buffer_periods } : {}) }; changes.push({ task: '', field: 'takt', old: m0.takt?.taktDays ?? null, new: op.takt_days }); break; }
         default: { const r = edit(m, op as LobEdit); m = r.model; changes.push(...r.changes); if (r.note) notes.push(`${(op as LobEdit).task}: ${r.note}`); }
       }
