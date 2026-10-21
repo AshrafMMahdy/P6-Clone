@@ -59,7 +59,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "24.14.0" }
       - run: npm ci
-      - run: npm test
+      - name: Tests (a failure is also written as annotations, which the run page shows without signing in)
+        shell: bash
+        run: |
+          node scripts/build-viewer4d.mjs
+          node --test --test-reporter=spec "tests/*.test.ts" > test.log 2>&1 && { grep -E "^ℹ (tests|pass|fail|skipped)" test.log; exit 0; }
+          grep -E "^ℹ (tests|pass|fail)" test.log
+          grep -E "^✖|AssertionError|actual:|expected:|Error:|reason" test.log | head -40 | sed 's/^ */::error::/'
+          exit 1
       - run: node scripts/build-cli.mjs
       - name: Archive (bundles, the 4D viewer, fonts, the reasoner's models/ and ort/ with its licences, the IFC engine)
         shell: bash
