@@ -35,7 +35,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = ['add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
+export const EXTRA_OP_NAMES = ['add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
 
 export const EXTRA_GUIDE = [
   `update_resource_curve: name, new_name`,
@@ -50,7 +50,7 @@ export const EXTRA_GUIDE = [
   `clear_udfs: [project], [subject] (activity, wbs, project, assignment, resource), [udf] (one UDF's label): removes every UDF value of the project's activities, WBS, assignments and the project itself in one step (resource UDF values, shared by every project, only with subject resource or a resource udf); an LOB plan's own UDFs (LOB Task, LOB Quantity, LOB Consumption, LOB Crew, Schedule Method = LOB (P6 clone)) stay unless udf names one`,
   `update_udf: udf (label), new_name, [subject] (activity default, wbs, project, resource, assignment)`,
   `set_notebook: [activity] | project, topic, text (text "" removes the topic; answer removed: true/false; the topic itself stays). activity (+[project]): its activity notebook; project alone: the project's notebook (P6's WBSMEMO on the project's root WBS node). topic default "Notes", created when missing, else reused`,
-  `set_notebook, more targets: wbs (+[project]): that WBS element's notebook; topic "*" with text "": every notebook of the activity, WBS element or project, whatever its topic (one whose topic the file no longer lists too; answer removed: how many)`,
+  `set_notebook, more targets: wbs (+[project]): that WBS element's notebook; topic "*" with text "": every notebook of the activity, WBS element or project, whatever its topic (one whose topic the file no longer lists too; answer removed: how many); in_baseline: true with project = a baseline's name: the baseline's notebooks`,
   `clear_notebooks: [project], [baselines] (default true): every notebook of the project in one step (activity notebooks; WBS and project notebooks, which hold the EPS notebooks P6 writes into an XER; any topic, one the file no longer lists too), and of its baselines; without project, of every project and baseline in the file. Answers how many went`,
   `add_cost_account: id, [name], [parent]; update_cost_account: id, [new_id], [name]`,
   `add_expense: activity, name, [account], [budgeted_cost], [actual_cost], [remaining_cost] (default budgeted - actual), [units], [price_per_unit], [vendor], [po_number], [description], [project]`,
@@ -59,7 +59,7 @@ export const EXTRA_GUIDE = [
   `set_estimates: activity, [min_days], [most_likely_days], [max_days], [distribution] (${Object.keys(DISTS).join(', ')}), or clear: true. Three-point remaining durations for monte_carlo (missing values default to the remaining duration)`,
   `save_baseline: [project], [name], [assign_as] (project, bl1, bl2, bl3). Copies the project as a baseline`,
   `assign_baseline: baseline (name), [as] (project default = the project baseline P6 stores; bl1, bl2, bl3 = primary/secondary/tertiary user baselines), [project]; "" baseline clears that slot`,
-  `delete_baseline: baseline; restore_baseline: baseline (turns it back into a normal project)`,
+  `delete_baseline: baseline; restore_baseline: baseline (turns it back into a normal project); update_baseline: baseline, [new_name] (its Project ID, and its root WBS code), [name] (its project name, the root WBS name). A baseline's activities and WBS elements are renamed with update_activity / update_wbs and in_baseline: true, project = the baseline`,
   `add_eps / update_eps / delete_eps: id, [name], [parent], [new_id]; projects are put under an EPS with set_project eps`,
   `add_obs / update_obs / delete_obs: name, [parent], [new_name], [description] (update_obs; "" clears it); add_role / update_role / delete_role: id, [name], [parent], [new_id]`,
   `update_calendar: name, [new_name], [work_week] (days given replace those days), [holidays [dates]] (non-work), [work_exceptions {date: periods}], [remove_exceptions [dates]]`,
@@ -463,6 +463,19 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const name = b.proj_short_name;
       deleteBaseline(db, b.proj_id);
       return { deleted: name };
+    }
+    case 'update_baseline': {
+      const b = baseline(str(op.baseline, 'baseline'));
+      const old = b.proj_short_name;
+      const root = rows(db, 'PROJWBS').find((w) => w.proj_id === b.proj_id && w.proj_node_flag === 'Y');
+      if (op.new_name != null) {
+        const n = str(op.new_name, 'new_name');
+        if (rows(db, 'PROJECT').some((x) => x.proj_id !== b.proj_id && lc(x.proj_short_name) === lc(n))) fail(`A project or baseline "${n}" already exists.`);
+        b.proj_short_name = n;
+        if (root) root.wbs_short_name = n;
+      }
+      if (op.name != null && root) root.wbs_name = str(op.name, 'name');
+      return { baseline: b.proj_short_name, was: old };
     }
     case 'restore_baseline': {
       const b = baseline(str(op.baseline, 'baseline'));

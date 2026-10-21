@@ -78,6 +78,14 @@ const RTYPE: Record<string, string> = { labor: 'RT_Labor', nonlabor: 'RT_Equip',
 const PRIO: Record<string, string> = { top: 'PT_Top', high: 'PT_High', normal: 'PT_Normal', low: 'PT_Low', lowest: 'PT_Lowest' };
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
+/** The ops in_baseline allows, and the fields they may carry then. */
+const IN_BASELINE: Record<string, string[]> = {
+  update_activity: ['op', 'in_baseline', 'project', 'id', 'new_id', 'name'],
+  update_wbs: ['op', 'in_baseline', 'project', 'code', 'new_code', 'name'],
+  set_notebook: ['op', 'in_baseline', 'project', 'activity', 'wbs', 'topic', 'text'],
+  update_code_type: ['op', 'in_baseline', 'project', 'name', 'new_name', 'subject'],
+  update_code_value: ['op', 'in_baseline', 'project', 'type', 'code', 'new_code', 'name', 'subject'],
+};
 export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'set_predecessors', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', ...EXTRA_OP_NAMES];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
@@ -134,7 +142,17 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
 function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): unknown {
   const calDays = batch.calDays;
   if (!op || typeof op !== 'object' || typeof op.op !== 'string') fail('Each operation needs an "op" name.');
-  const projects = () => rows(db, 'PROJECT').filter((p) => !p._baseline_of);
+  // in_baseline: the op works on a baseline named by "project" (renaming its activities, WBS and notebooks the way the
+  // live project's are, for an anonymised copy that keeps its baselines); only those ops, only those fields
+  const inBaseline = op.in_baseline === true;
+  if (inBaseline) {
+    const allowed = IN_BASELINE[op.op] ?? fail(`in_baseline works with ${Object.keys(IN_BASELINE).join(', ')} only.`);
+    const extra = Object.keys(op).filter((k) => !allowed.includes(k));
+    if (extra.length) fail(`${op.op} with in_baseline renames only (${allowed.filter((k) => !['op', 'in_baseline'].includes(k)).join(', ')}); not ${extra.join(', ')}.`);
+    if (op.project == null || op.project === '') fail('in_baseline needs "project": the name of the baseline.');
+    if (!rows(db, 'PROJECT').some((p) => p._baseline_of && p.proj_short_name.toLowerCase() === String(op.project).toLowerCase())) fail(`No baseline "${op.project}".`);
+  }
+  const projects = () => rows(db, 'PROJECT').filter((p) => (inBaseline ? !!p._baseline_of : !p._baseline_of));
   const project = (id?: unknown): Row => {
     if (id != null) return projects().find((p) => p.proj_short_name.toLowerCase() === String(id).toLowerCase()) ?? fail(`No project "${id}".`);
     const ps = projects();

@@ -150,27 +150,46 @@ test('Tower-A variant (baseline, roles, rates): the same operations; the baselin
 });
 
 /** Rename everything a person could be named by, as the anonymised export does, from the file's own content. */
-function anonymiseOps(s: S): unknown[] {
+function anonymiseOps(s: S, baselines: 'rename' | 'delete' = 'rename'): unknown[] {
   const ops: unknown[] = [];
-  for (const b of T(s, 'PROJECT').filter((p) => p._baseline_of)) ops.push({ op: 'delete_baseline', baseline: b.proj_short_name });
   const projs = T(s, 'PROJECT').filter((p) => !p._baseline_of);
   const pcode = new Map(projs.map((p, i) => [p.proj_id, `P${i + 1}`]));
+  // baselines: deleted, or renamed with their contents (their activities take the Activity IDs of the live ones they
+  // match, so P6 still compares them; their WBS and notebooks renamed or cleared like the project's)
+  const bls = T(s, 'PROJECT').filter((p) => p._baseline_of);
+  const bcode = new Map(bls.map((b, j) => [b.proj_id, `${pcode.get(b._baseline_of)} - B${j + 1}`]));
+  if (baselines === 'delete') for (const b of bls) ops.push({ op: 'delete_baseline', baseline: b.proj_short_name });
+  else bls.forEach((b, j) => ops.push({ op: 'update_baseline', baseline: b.proj_short_name, new_name: bcode.get(b.proj_id), name: `Baseline ${j + 1}` }));
   projs.forEach((p, i) => ops.push({ op: 'set_project', project: p.proj_short_name, new_id: `P${i + 1}`, name: `Project ${i + 1}`, new_proj_id: String(9000 + i) }));
   T(s, 'PROJWBS').filter((w) => pcode.has(w.proj_id)).forEach((w, i) => ops.push({ op: 'update_wbs', project: pcode.get(w.proj_id), code: `wbs_id:${w.wbs_id}`, new_code: `W${i + 1}`, ...(w.proj_node_flag === 'Y' ? {} : { name: `Area ${i + 1}` }) }));
-  T(s, 'TASK').filter((t) => pcode.has(t.proj_id)).forEach((t, i) => ops.push({ op: 'update_activity', project: pcode.get(t.proj_id), id: t.task_code, new_id: `X${i + 1}`, name: `Activity ${i + 1}` }));
+  const liveTasks = T(s, 'TASK').filter((t) => pcode.has(t.proj_id));
+  const newId = new Map(liveTasks.map((t, i) => [`${t.proj_id}|${t.task_code}`, i + 1]));
+  liveTasks.forEach((t, i) => ops.push({ op: 'update_activity', project: pcode.get(t.proj_id), id: t.task_code, new_id: `X${i + 1}`, name: `Activity ${i + 1}` }));
+  if (baselines === 'rename') {
+    T(s, 'PROJWBS').filter((w) => bcode.has(w.proj_id) && w.proj_node_flag !== 'Y').forEach((w, i) => ops.push({ op: 'update_wbs', in_baseline: true, project: bcode.get(w.proj_id), code: `wbs_id:${w.wbs_id}`, new_code: `BW${i + 1}`, name: `Area ${i + 1}` }));
+    let extra = liveTasks.length;
+    for (const t of T(s, 'TASK').filter((x) => bcode.has(x.proj_id))) {
+      const of = bls.find((b) => b.proj_id === t.proj_id)!._baseline_of, k = newId.get(`${of}|${t.task_code}`) ?? ++extra;
+      ops.push({ op: 'update_activity', in_baseline: true, project: bcode.get(t.proj_id), id: t.task_code, new_id: `X${k}`, name: `Activity ${k}` });
+    }
+  }
+  // every notebook: the activities', the WBS elements' and the projects' (the EPS notebooks P6 writes into an XER), the
+  // baselines' too
+  ops.push({ op: 'clear_notebooks' });
   T(s, 'RSRC').forEach((r, i) => ops.push({ op: 'update_resource', id: r.rsrc_short_name, new_id: `R${i + 1}`, name: `Resource ${i + 1}` }));
-  // code values children first: a parent's new code would change the path its children are found by
-  const live = (typeId: string) => { const pj = T(s, 'ACTVTYPE').find((x) => x.actv_code_type_id === typeId)!.proj_id; return !pj || pcode.has(pj); }; // a baseline's go with it
-  T(s, 'ACTVTYPE').filter((x) => live(x.actv_code_type_id)).forEach((x, i) => ops.push({ op: 'update_code_type', name: x.actv_code_type, ...(x.proj_id ? { project: pcode.get(x.proj_id) } : {}), new_name: `Code type ${i + 1}` }));
+  // code values children first: a parent's new code would change the path its children are found by. A baseline's own
+  // (project) code types are renamed in it (in_baseline), or go with it
+  const ownerOf = (typeId: string) => T(s, 'ACTVTYPE').find((x) => x.actv_code_type_id === typeId)!.proj_id;
+  const live = (typeId: string) => { const pj = ownerOf(typeId); return !pj || pcode.has(pj) || (baselines === 'rename' && bcode.has(pj)); };
+  const types = T(s, 'ACTVTYPE').filter((x) => live(x.actv_code_type_id));
+  const where = (pj: string) => (!pj ? {} : pcode.has(pj) ? { project: pcode.get(pj) } : { project: bcode.get(pj), in_baseline: true });
+  types.forEach((x, i) => ops.push({ op: 'update_code_type', name: x.actv_code_type, ...where(x.proj_id), new_name: `Code type ${i + 1}` }));
   const V = T(s, 'ACTVCODE').filter((v) => live(v.actv_code_type_id)), byId = new Map(V.map((v) => [v.actv_code_id, v]));
   const path = (v: Row) => { const out: string[] = []; for (let x: Row | undefined = v; x; x = byId.get(x.parent_actv_code_id)) out.unshift(x.short_name); return out; };
   [...V].sort((a, b) => path(b).length - path(a).length).forEach((v, i) => {
-    const k = T(s, 'ACTVTYPE').filter((x) => live(x.actv_code_type_id)).findIndex((x) => x.actv_code_type_id === v.actv_code_type_id);
-    const type = T(s, 'ACTVTYPE').filter((x) => live(x.actv_code_type_id))[k];
-    ops.push({ op: 'update_code_value', type: `Code type ${k + 1}`, code: path(v).join('.'), ...(type.proj_id && pcode.has(type.proj_id) ? { project: pcode.get(type.proj_id) } : {}), new_code: `C${i + 1}`, name: `Code ${i + 1}` });
+    const k = types.findIndex((x) => x.actv_code_type_id === v.actv_code_type_id);
+    ops.push({ op: 'update_code_value', type: `Code type ${k + 1}`, code: path(v).join('.'), ...where(types[k].proj_id), new_code: `C${i + 1}`, name: `Code ${i + 1}` });
   });
-  // every notebook: the activities', the WBS elements' and the projects' (the EPS notebooks P6 writes into an XER)
-  ops.push({ op: 'clear_notebooks' });
   T(s, 'CALENDAR').forEach((c, i) => ops.push({ op: 'update_calendar', name: c.clndr_name, new_name: `Calendar ${i + 1}` }));
   T(s, 'OBS').forEach((o, i) => ops.push({ op: 'update_obs', name: o.obs_name, new_name: `OBS ${i + 1}` }));
   T(s, 'ROLES').forEach((r, i) => ops.push({ op: 'update_role', id: r.role_short_name, new_id: `RL${i + 1}`, name: `Role ${i + 1}` }));
@@ -193,13 +212,16 @@ const originalNames = (s: S) => [
   ...(sessions.get(s.h)!.db.header?.raw.slice(4, 7) ?? []).filter((x) => !['admin', 'dbxDatabaseNoName'].includes(x)),
 ].filter((n) => n && n.trim().length >= 4 && !/^[\d.\s:-]+$/.test(n));
 
-for (const [label, make] of [['badra oil', () => open(join(SAMPLES_DIR, 'badra oil.xer'))], ['Tower-A variant', towerA], ['cleopatra elmohandesen', () => open(join(SAMPLES_DIR, 'cleopatra elmohandesen.xer'))]] as const) {
+for (const [label, make, baselines] of [['badra oil', () => open(join(SAMPLES_DIR, 'badra oil.xer')), 'rename'], ['Tower-A variant', towerA, 'rename'], ['Tower-A variant, baselines deleted', towerA, 'delete'], ['cleopatra elmohandesen', () => open(join(SAMPLES_DIR, 'cleopatra elmohandesen.xer')), 'rename']] as const) {
   test(`anonymise ${label}: everything renamed, GUIDs regenerated and authors cleared in one edit; the saved XER holds none of the original names, notebooks or GUIDs and re-opens P6-valid`, { timeout: 120_000 }, async () => {
     const s = await make();
     const names = [...new Set(originalNames(s))], guids = fieldValues(s, GUID);
     assert.ok(names.length > 20, `${names.length} names`);
-    assert.ok(guids.length > 0 || label === 'Tower-A variant', `${guids.length} GUIDs`);
-    const r = await ok(s, anonymiseOps(s));
+    assert.ok(guids.length > 0 || label.startsWith('Tower-A variant'), `${guids.length} GUIDs`);
+    const bls = T(s, 'PROJECT').filter((p) => p._baseline_of).length;
+    const r = await ok(s, anonymiseOps(s, baselines));
+    // the baselines: kept under their new names, or gone
+    assert.deepEqual(T(s, 'PROJECT').filter((p) => p._baseline_of).map((p) => p.proj_short_name), baselines === 'delete' ? [] : Array.from({ length: bls }, (_, j) => `P1 - B${j + 1}`));
     assert.ok(r.applied > names.length / 3);
     const back = await savedValid(s, `anon-${label.replace(/\W+/g, '-')}.xer`);
     const text = readFileSync(back.path, 'utf8');

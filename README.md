@@ -174,14 +174,36 @@ its lookups all count every day at the hours per day of Edit > User Preferences.
 | `add_code_type`, `add_code_value`, `assign_code` | activity, project or resource codes (`subject`): `name, scope?, max_length?` (default 20, at most 60; a longer value is refused, never cut)`, values?: [{code, name?, parent?}]`; `type, code, name?, parent?`; `type, value` (`""` removes) on an `activity`, `project` or `resource` |
 | `add_udf`, `set_udf`, `update_udf`, `clear_udfs` | `name, subject?: activity\|wbs\|project\|resource\|assignment, data_type?: text\|number\|integer\|cost\|start_date\|finish_date`; `udf, value` on an `activity`, `wbs`, `project` or `resource`; `udf, new_name, subject?`; `project?, subject?, udf?`: every UDF value of the project's activities, WBS, assignments and the project in one step (shared resource values only with `subject: resource`) |
 | `set_notebook` | `text, topic?` (default Notes; a topic of that name is reused, else added once; text `""` removes that topic's memo, answering `removed: true` or `false` when there was none, and the topic itself always stays) and `activity` (+`project?`), or `project` alone: the project's notebook, as P6 keeps it (a WBSMEMO on the project's root WBS node, under a topic available for projects and WBS; written to XER and P6 XML `ProjectNote`, shown by `project_summary` as `notebook`). Refused on a Microsoft Project XML / MPX handle (`unsupported_for_format`): Project has no notebook topics, and the clone writes no notebooks to its files |
-| `set_notebook` (more targets), `clear_notebooks` | `wbs` (+`project?`): that WBS element's notebook; `topic: "*"` with `text: ""`: every notebook of the activity, WBS element or project whatever its topic (one whose topic the file no longer lists too; `removed` says how many). `clear_notebooks`: `project?, baselines?` (default true): every activity, WBS and project notebook of the project and its baselines in one step (P6 writes the EPS notebooks of an XER as WBS / project notebooks: these go too); without `project`, of every project and baseline in the file |
+| `set_notebook` (more targets), `clear_notebooks` | `wbs` (+`project?`): that WBS element's notebook; `topic: "*"` with `text: ""`: every notebook of the activity, WBS element or project whatever its topic (one whose topic the file no longer lists too; `removed` says how many); `in_baseline: true` with `project` naming a baseline: the baseline's. `clear_notebooks`: `project?, baselines?` (default true): every activity, WBS and project notebook of the project and its baselines in one step (P6 writes the EPS notebooks of an XER as WBS / project notebooks: these go too); without `project`, of every project and baseline in the file |
 | `add_cost_account`, `update_cost_account`, `add_expense`, `update_expense`, `delete_expense`, `delete_expenses` | `id, name?, parent?`; `id, new_id?, name?`; `activity, name, account?, budgeted_cost?, actual_cost?, remaining_cost?, units?, price_per_unit?, vendor?, po_number?, description?`; `delete_expenses`: `project?` or `activity` (+`project?`), every expense of either in one step |
 | `add_step`, `update_step`, `delete_step` | `activity, name, new_name?, weight?, percent_complete?, completed?, description?` (physical % from weighted steps, like P6) |
 | `set_estimates` | `activity, min_days?, most_likely_days?, max_days?, distribution?: triangle\|betapert\|uniform\|none` or `clear: true` (for `monte_carlo`) |
 | `save_baseline`, `assign_baseline`, `delete_baseline`, `restore_baseline` | `name?, assign_as?`; `baseline, as?: project\|bl1\|bl2\|bl3` (the project baseline P6 stores, and the primary/secondary/tertiary user baselines) |
+| `update_baseline` | `baseline, new_name?, name?`: renames a baseline (its Project ID and root WBS code; `name`: its project name, the root WBS name). Its own activities, WBS elements, project code types and notebooks are renamed with `update_activity` / `update_wbs` / `update_code_type` / `update_code_value` / `set_notebook` and `in_baseline: true`, `project` = the baseline (renames only: any other field is refused) |
 | `build_baseline` | `project?, name?, assign_as?` (default `project`), `activities: [{activity, start?, finish?, duration_days?, cost?}]`: a baseline copy whose listed activities carry the given baseline values. XER keeps baselines the way P6 does: a PROJECT row whose `orig_proj_id` names its project, and the project's `sum_base_proj_id` |
 | `add_eps`/`update_eps`/`delete_eps`, `add_obs`/…, `add_role`/… | `id` (OBS: `name`), `name?, parent?, new_id?` (OBS: `new_name?`, `description?`, `""` clears it); `set_project eps` files a project under an EPS node |
 | `update_calendar` | `name, new_name?, work_week?, holidays?, work_exceptions?, remove_exceptions?` |
+
+#### Anonymising a copy (recipe)
+
+What the platform's anonymised export runs, as one `edit` on a copy of the customer's file (one undoable change), then
+`save`. `tests/edit-rename-delete.test.ts` runs it on three real files and searches the saved XER for every original
+name, notebook text and GUID.
+
+1. Baselines, before the project is renamed (they are found by their own names): keep them renamed,
+   `update_baseline {baseline, new_name: "P1 - B1", name: "Baseline 1"}`, or drop them, `delete_baseline {baseline}`.
+2. `set_project {project, new_id, name, new_proj_id}` for each project.
+3. `update_wbs {project, code: "wbs_id:<id>", new_code, name}` for each WBS element, `update_activity {project, id,
+   new_id, name}` for each activity.
+4. A kept baseline's contents, with `in_baseline: true` and `project` = its new name: `update_wbs`, `update_activity`
+   (give each baseline activity the new Activity ID of the live activity it matches, so P6 still compares them), and
+   its own project code types and values (`update_code_type`, `update_code_value`). A baseline's names are otherwise
+   left as they were: renaming the project does not rename its baselines.
+5. `update_resource`, `update_code_type` / `update_code_value` (children first), `update_calendar`, `update_obs`,
+   `update_role`, `update_cost_account`, `update_udf` and `clear_udfs` where UDF labels or values name the customer.
+6. `clear_notebooks {}`: every activity, WBS and project notebook of every project and baseline, whatever the topic
+   (the EPS notebooks P6 writes into an XER are project notebooks; Tower-A's "EPS: Group / Middle East / Buildings").
+7. `regenerate_guids {project}` and `clear_authors {project}` for each project (baselines' GUIDs too).
 
 Activity types: `task`, `resource_dependent`, `start_milestone`, `finish_milestone`, `level_of_effort`, `wbs_summary`.
 Constraints: `start_on`, `start_on_or_after`, `start_on_or_before`, `finish_on`, `finish_on_or_before`,

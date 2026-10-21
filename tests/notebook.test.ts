@@ -170,3 +170,22 @@ test('WBS notebooks, topic "*" and clear_notebooks (the anonymise op): every not
   assert.ok(!xerText(tower).includes('Middle East'));
 });
 
+test('update_baseline renames a baseline; in_baseline renames its activities, WBS and codes (renames only, a baseline only)', () => {
+  const db: Db = { tables: {} };
+  ok(db, [{ op: 'add_project', id: 'ACME', start: '2026-03-02' }, { op: 'add_wbs', code: 'S1', name: 'Acme structure' }, { op: 'add_activity', id: 'A1', name: 'Acme pour', wbs: 'S1', duration_days: 1 }, { op: 'save_baseline', name: 'ACME-BL1', assign_as: 'project' }]);
+  assert.deepEqual(ok(db, [{ op: 'update_baseline', baseline: 'ACME-BL1', new_name: 'P1 - B1', name: 'Baseline 1' }]), [{ baseline: 'P1 - B1', was: 'ACME-BL1' }]);
+  const b = rows(db, 'PROJECT').find((p) => p._baseline_of)!;
+  const broot = rows(db, 'PROJWBS').find((w) => w.proj_id === b.proj_id && w.proj_node_flag === 'Y')!;
+  assert.deepEqual([b.proj_short_name, broot.wbs_short_name, broot.wbs_name], ['P1 - B1', 'P1 - B1', 'Baseline 1']);
+  ok(db, [{ op: 'set_project', new_id: 'P1', name: 'Project 1' }, { op: 'update_activity', id: 'A1', new_id: 'X1', name: 'Activity 1' }, { op: 'update_wbs', code: 'S1', new_code: 'W1', name: 'Area 1' },
+    { op: 'update_activity', in_baseline: true, project: 'P1 - B1', id: 'A1', new_id: 'X1', name: 'Activity 1' }, { op: 'update_wbs', in_baseline: true, project: 'P1 - B1', code: 'S1', new_code: 'W1', name: 'Area 1' }]);
+  const bt = rows(db, 'TASK').find((t) => t.proj_id === b.proj_id)!;
+  assert.deepEqual([bt.task_code, bt.task_name], ['X1', 'Activity 1'], 'the baseline activity keeps matching the live one');
+  assert.ok(!xerText(db).includes('Acme') && !xerText(db).includes('ACME'));
+  // in_baseline: renames only, on a baseline, for the ops that rename
+  const bad = (op: object) => { const r = applyOps(db, [op]); assert.equal(r.ok, false); return r.error!.message; };
+  assert.match(bad({ op: 'update_activity', in_baseline: true, project: 'P1 - B1', id: 'X1', duration_days: 5 }), /renames only/);
+  assert.match(bad({ op: 'update_activity', in_baseline: true, project: 'P1', id: 'X1', name: 'x' }), /No baseline "P1"/);
+  assert.match(bad({ op: 'add_activity', in_baseline: true, project: 'P1 - B1', name: 'x' }), /in_baseline works with/);
+  assert.match(bad({ op: 'update_baseline', baseline: 'P1 - B1', new_name: 'P1' }), /already exists/);
+});
