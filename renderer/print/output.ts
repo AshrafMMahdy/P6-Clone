@@ -63,6 +63,15 @@ export interface PdfOptions {
 }
 
 export async function pagesToPdf(pages: Page[], title = 'Schedule', opts: PdfOptions = {}): Promise<Uint8Array> {
+  const parts = await pagesToPdfParts(pages, title, opts);
+  const bytes = new Uint8Array(parts.reduce((n, b) => n + b.length, 0));
+  let at = 0; for (const b of parts) { bytes.set(b, at); at += b.length; }
+  return bytes;
+}
+
+/** The PDF as its pieces, in order (to write to a file one after another: a long schedule's PDF is never one buffer).
+ *  release: each page's drawing is let go once it is compressed (the caller does not use the pages again). */
+export async function pagesToPdfParts(pages: Page[], title = 'Schedule', opts: PdfOptions & { release?: boolean } = {}): Promise<Uint8Array[]> {
   const K = 72 / 25.4; // mm -> pt
   const objs: (string | Uint8Array[])[] = [];
   const add = (s: string | Uint8Array[]) => { objs.push(s); return objs.length; };
@@ -73,7 +82,9 @@ export async function pagesToPdf(pages: Page[], title = 'Schedule', opts: PdfOpt
   const f3 = font ? add('') : 0; // Type0 font, filled in once the glyphs used are known
   const used = new Map<number, number>(); // glyph id -> character (for ToUnicode)
   const kids: number[] = [];
-  for (const pg of pages) {
+  for (let pi = 0; pi < pages.length; pi++) {
+    const pg = pages[pi];
+    if (opts.release) (pages as (Page | null)[])[pi] = null;
     const H = pg.h;
     const X = (x: number) => n(x * K), Y = (y: number) => n((H - y) * K);
     const ops: string[] = [];
@@ -145,7 +156,5 @@ export async function pagesToPdf(pages: Page[], title = 'Schedule', opts: PdfOpt
   let out = `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
   out += `trailer\n<< /Size ${objs.length + 1} /Root ${catalog} 0 R /Info ${info} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   push(latin1(out));
-  const bytes = new Uint8Array(size);
-  let at = 0; for (const b of parts) { bytes.set(b, at); at += b.length; }
-  return bytes;
+  return parts;
 }

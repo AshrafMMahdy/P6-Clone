@@ -5,6 +5,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, ren
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
+import { pushAll } from '../arrays.ts';
 import { readContainer, section, type NwContainer } from './nwd/container.ts';
 import { decodeTree, type NwGroup, type NwNode, type NwTree } from './nwd/tree.ts';
 import { elementsOf, type NwElement } from './nwd/elements.ts';
@@ -96,7 +97,7 @@ export function readNavisworks(path: string, o: { maxBytes?: number } = {}): { e
     if (!p.at) { files.push({ file: p.file, revision: null, elements: 0, read: false, note: 'not found beside the .nwf or at its saved path' }); continue; }
     try {
       const r = readOne(p.at, max);
-      elements.push(...r.elements);
+      pushAll(elements, r.elements); // (an argument spread overflows the stack past ~100,000)
       files.push({ file: p.file, revision: r.revision, elements: r.elements.length, read: true, ...(r.units ? { units: r.units } : {}) });
     } catch (e) { files.push({ file: p.file, revision: null, elements: 0, read: false, note: (e as Error).message }); }
   }
