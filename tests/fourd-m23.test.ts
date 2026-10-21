@@ -13,6 +13,8 @@ const call = async (name: string, args: Record<string, unknown>) => {
 };
 if (!existsSync(join(import.meta.dirname, '..', 'dist-viewer', 'viewer4d.js'))) spawnSync(process.execPath, [join(import.meta.dirname, '..', 'scripts', 'build-viewer4d.mjs')]);
 const CHROME = [process.env.P6CLONE_CHROMIUM, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/chromium', '/usr/bin/google-chrome'].find((p) => p && existsSync(p));
+// the server takes its Chromium from the environment only
+if (CHROME) process.env.P6CLONE_CHROMIUM = CHROME;
 
 async function duplex() {
   const np = (await call('new_project', { id: 'D4', start: '2026-03-02' })).d;
@@ -61,12 +63,47 @@ test('4D M3: viewer folder (separate model file), self-contained viewer, video a
   assert.match(readFileSync(v.d.written[0], 'utf8'), /"model":"model\.glb"/);
   const e = await call('render_4d', { handle: h, path: join(out, 'one'), embed: true, layout: 'side_by_side', left: 'planned', right: 'best', growth: 'bottom_up' });
   assert.ok(statSync(e.d.written[0]).size > 1_000_000, 'the model is inside');
-  const vid = await call('render_4d', { handle: h, path: join(out, 'video'), kind: 'video', step: 14, width: 640, height: 360, ...(CHROME ? { chromium_path: CHROME } : {}) });
+  const vid = await call('render_4d', { handle: h, path: join(out, 'video'), kind: 'video', step: 14, width: 640, height: 360 });
   assert.equal(vid.err, false, JSON.stringify(vid.d));
   if (!CHROME) { assert.equal(vid.d.rendered, false); assert.equal(vid.d.client_render.hooks, 'WHIQ4D_EXPORT'); return; }
   assert.equal(vid.d.rendered, true);
   const bytes = readFileSync(vid.d.written[0]);
   assert.ok(bytes.length > 5000 && (bytes.subarray(4, 8).toString() === 'ftyp' || bytes[0] === 0x1a), 'an MP4 (or WebM) file');
-  const img = await call('render_4d', { handle: h, path: join(out, 'png'), kind: 'images', step: 28, width: 640, height: 360, chromium_path: CHROME });
+  const img = await call('render_4d', { handle: h, path: join(out, 'png'), kind: 'images', step: 28, width: 640, height: 360 });
   assert.ok(img.d.written.length >= 2 && readFileSync(img.d.written[0]).subarray(1, 4).toString() === 'PNG');
+});
+
+test('render_4d reports progress per frame and stops on cancel_job', { skip: !CHROME && 'no Chromium here', timeout: 300_000 }, async () => {
+  const { h } = await duplex();
+  const out = mkdtempSync(join(tmpdir(), 'p6-4d-cancel-'));
+  const job = (await call('render_4d', { handle: h, path: out, kind: 'video', from: '2026-03-02', to: '2029-12-31', step: 1, fps: 30, width: 640, height: 360, async: true })).d.job_id;
+  assert.ok(job);
+  let view = (await call('job_status', { job_id: job })).d;
+  for (let k = 0; k < 600 && view.status === 'running' && !/frame \d+ of \d+/.test(String(view.progress ?? '')); k++) { await new Promise((r) => setTimeout(r, 100)); view = (await call('job_status', { job_id: job })).d; }
+  assert.match(String(view.progress ?? ''), /frame \d+ of \d+/, JSON.stringify(view).slice(0, 300));
+  await call('cancel_job', { job_id: job });
+  view = (await call('job_status', { job_id: job, wait_seconds: 20 })).d;
+  assert.equal(view.status, 'cancelled', JSON.stringify(view).slice(0, 300));
+});
+
+const FFMPEG = [process.env.P6CLONE_FFMPEG, ...(process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':').map((d) => join(d, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'))].find((p) => p && existsSync(p));
+test('render_4d: MP4 everywhere (a WebM recording becomes MP4 with P6CLONE_FFMPEG; without it, WebM and a note)', { skip: (!CHROME && 'no Chromium here') || (!FFMPEG && 'no ffmpeg here'), timeout: 300_000 }, async () => {
+  const { h } = await duplex();
+  const saved = { rec: process.env.P6CLONE_RECORD_WEBM, ff: process.env.P6CLONE_FFMPEG };
+  process.env.P6CLONE_RECORD_WEBM = '1'; // as a Chromium without an H.264 encoder (Chromium for Testing) records
+  try {
+    process.env.P6CLONE_FFMPEG = FFMPEG!;
+    const mp4 = await call('render_4d', { handle: h, path: mkdtempSync(join(tmpdir(), 'p6-4d-ff-')), kind: 'video', step: 14, width: 640, height: 360, file_name: 'progress.mp4' });
+    assert.equal(mp4.err, false, JSON.stringify(mp4.d).slice(0, 300));
+    assert.equal(mp4.d.mime, 'video/mp4');
+    assert.equal(basename(mp4.d.written[0]), 'progress.mp4');
+    assert.equal(readFileSync(mp4.d.written[0]).subarray(4, 8).toString('latin1'), 'ftyp');
+    delete process.env.P6CLONE_FFMPEG;
+    const webm = await call('render_4d', { handle: h, path: mkdtempSync(join(tmpdir(), 'p6-4d-ff-')), kind: 'video', step: 14, width: 640, height: 360 });
+    assert.equal(webm.d.mime, 'video/webm');
+    assert.match(webm.d.note, /P6CLONE_FFMPEG/);
+  } finally {
+    if (saved.rec == null) delete process.env.P6CLONE_RECORD_WEBM; else process.env.P6CLONE_RECORD_WEBM = saved.rec;
+    if (saved.ff == null) delete process.env.P6CLONE_FFMPEG; else process.env.P6CLONE_FFMPEG = saved.ff;
+  }
 });

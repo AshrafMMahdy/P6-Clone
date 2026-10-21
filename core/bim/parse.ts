@@ -1,7 +1,7 @@
 // Ported from the White Hat IQ platform's @whiq/ifc (shared/ifc, branch 33-chat-only) so both read models the same way.
 import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, writeFileSync, writeSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { stepIndex } from './stepIndex.ts';
 import { geomWorkerPath, loadWebIfc, webIfcEntry } from './runtime.ts';
@@ -71,7 +71,7 @@ export interface IfcIndex {
 export type IfcMeshes = Map<number, { positions: number[]; indices: number[] }>;
 
 /** Index format version — bump when the index shape or the parser's selection rules change, so caches re-parse. */
-export const INDEX_FORMAT = 6; // 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
+export const INDEX_FORMAT = 7; // 7: the length unit the project assigns. 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
 
 export interface ParseIfcOptions {
   /** Legacy switch — mesh arrays are never returned any more; geometry itself is governed by `geometry`. */
@@ -177,7 +177,10 @@ function runGeometryWorker(ifc: string, outDir: string, opts: ParseIfcOptions): 
   if (!script) return Promise.resolve({ ok: false, note: 'geometry worker script not found (core/bim/geomWorker.mjs, or ifc/geomWorker.mjs beside the program)' });
   const timeoutMs = opts.timeoutMs ?? 30 * 60_000;
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ['--max-old-space-size=4096', script, ifc, outDir, '4'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, P6CLONE_WEBIFC: webIfcEntry(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
+    // no size limit of our own: the worker's heap scales with the machine (60% of its memory, at least 4 GB); web-ifc's
+    // WebAssembly memory is capped at 4 GB by WebAssembly itself (a model past that keeps its index, without geometry)
+    const heapMb = Math.max(4096, Math.floor((totalmem() / 1048576) * 0.6));
+    const child = spawn(process.execPath, [`--max-old-space-size=${heapMb}`, script, ifc, outDir, '4'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, P6CLONE_WEBIFC: webIfcEntry(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
     let err = '', out = '';
     child.stdout.on('data', (d) => { out += String(d); if (out.length > 4000) out = out.slice(-4000); });
     child.stderr.on('data', (d) => { err += String(d); if (err.length > 4000) err = err.slice(-4000); });

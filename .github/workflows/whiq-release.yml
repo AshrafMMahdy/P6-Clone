@@ -98,7 +98,21 @@ jobs:
         with: { node-version: "${{ matrix.node }}" }
       - uses: actions/download-artifact@v4
         with: { name: archive, path: archive }
-      - name: Extract the release archive and smoke every analysis tool (optimize_schedule included) on it
+      - name: A Chromium and an ffmpeg for the 4D video (the server takes them from P6CLONE_CHROMIUM / P6CLONE_FFMPEG)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            choco install ffmpeg -y --no-progress > /dev/null
+            echo "P6CLONE_CHROMIUM=C:/Program Files/Google/Chrome/Application/chrome.exe" >> "$GITHUB_ENV"
+            echo "P6CLONE_FFMPEG=C:/ProgramData/chocolatey/bin/ffmpeg.exe" >> "$GITHUB_ENV"
+          else
+            command -v ffmpeg > /dev/null || (sudo apt-get update -q && sudo apt-get install -y -q ffmpeg)
+            echo "P6CLONE_CHROMIUM=$(command -v google-chrome || command -v chromium)" >> "$GITHUB_ENV"
+            echo "P6CLONE_FFMPEG=$(command -v ffmpeg)" >> "$GITHUB_ENV"
+          fi
+          # record WebM as Chromium for Testing does, so the smoke covers the MP4 conversion with ffmpeg
+          echo "P6CLONE_RECORD_WEBM=1" >> "$GITHUB_ENV"
+      - name: Extract the release archive and smoke every analysis tool and all 16 4D tools (video included) on it
         shell: bash
         run: |
           name="${{ needs.plan.outputs.name }}"

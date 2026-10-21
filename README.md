@@ -304,6 +304,12 @@ server needs no Chromium: the platform's client render drives its `WHIQ4D_EXPORT
 model revision that changes GlobalIds). The links travel with the schedule in `<file>.4d.json`. Optional: `synchro_cloud`
 (Bentley iTwin Schedules API, dormant until `BENTLEY_CLIENT_ID` / `BENTLEY_CLIENT_SECRET` are set) and a Navisworks add-in
 in `addins/navisworks` (source and build script; needs a Navisworks licence, untested without one).
+Server settings for 4D: `P6CLONE_CHROMIUM` (a Chromium or Chrome for `render_4d` images and video on the server; a
+tool argument never names a program), `P6CLONE_FFMPEG` (turns a WebM recording into MP4), `P6CLONE_MODEL_CACHE`
+(the parsed-model cache, default the OS temp folder) with `P6CLONE_MODEL_CACHE_DAYS` (14) and `P6CLONE_MODEL_CACHE_MB`
+(10240). Models count in the memory budget. There is no model size limit of the clone's own: the index streams, and
+the geometry process takes 60% of the machine's memory; web-ifc's WebAssembly memory stops at 4 GB, past which a
+model keeps its index without geometry. Revit `.rvt` files are read once exported to IFC.
 
 Baselines: any number per project (P6 keeps any number; BL1-BL3 are only the ones assigned for display). Tools that
 take a baseline accept any saved baseline by name. Microsoft Project XML brings Baseline and Baseline1-10 in as saved

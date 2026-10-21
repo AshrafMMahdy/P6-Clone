@@ -73,7 +73,7 @@ test('4D: model, viewer, pick and link, bottom pane, package, video', { timeout:
     assert.deepEqual(errors, []);
   } finally {
     await app.close();
-    rmSync(userData, { recursive: true, force: true });
-    rmSync(out, { recursive: true, force: true });
+    // Windows may hold the profile a moment after the app exits
+    for (const d of [userData, out]) try { rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* left to the temp cleaner */ }
   }
 });

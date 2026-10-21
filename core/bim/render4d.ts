@@ -5,12 +5,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here = () => { try { return typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url)); } catch { return process.cwd(); } };
+const here = () => { try { return typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url)); } catch { return null; } };
 
 /** The viewer script: beside a bundle (viewer4d.js), or dist-viewer/ in the repository (scripts/build-viewer4d.mjs). */
 export function viewerScriptPath(): string | null {
   const h = here();
-  for (const p of [join(h, 'viewer4d.js'), join(h, '..', 'viewer4d.js'), join(h, '..', '..', 'dist-viewer', 'viewer4d.js'), join(process.cwd(), 'dist-viewer', 'viewer4d.js')]) if (existsSync(p)) return p;
+  if (!h) return null;
+  for (const p of [join(h, 'viewer4d.js'), join(h, '..', 'viewer4d.js'), join(h, '..', '..', 'dist-viewer', 'viewer4d.js')]) if (existsSync(p)) return p;
   return null;
 }
 

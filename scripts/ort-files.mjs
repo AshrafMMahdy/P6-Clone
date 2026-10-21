@@ -23,7 +23,7 @@ export function copyIfc(root, dest) {
   const web = join(root, 'node_modules/web-ifc'), out = join(dest, 'ifc');
   rmSync(out, { recursive: true, force: true });
   mkdirSync(join(out, 'web-ifc'), { recursive: true });
-  for (const f of ['package.json', 'web-ifc-api-node.js', 'web-ifc-node.wasm', 'web-ifc-mt.wasm', 'LICENSE.md']) cpSync(join(web, f), join(out, 'web-ifc', f));
+  for (const f of ['package.json', 'web-ifc-api-node.js', 'web-ifc-node.wasm', 'LICENSE.md']) cpSync(join(web, f), join(out, 'web-ifc', f));
   cpSync(join(root, 'core/bim/geomWorker.mjs'), join(out, 'geomWorker.mjs'));
   writeFileSync(join(out, 'README.txt'), 'web-ifc 0.0.77 (That Open Company, MPL-2.0: web-ifc/LICENSE.md; source at https://github.com/ThatOpen/engine_web-ifc), used unmodified to read IFC geometry for 4D.\n');
 }

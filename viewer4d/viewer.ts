@@ -211,7 +211,7 @@ function drawOverlays(g: CanvasRenderingContext2D, W: number, H: number, clear =
     const X = (m: number) => x + 6 * k + ((m - t0) / Math.max(1, t1 - t0)) * (w - 12 * k);
     if (opt.overlays.includes('gantt_strip')) {
       const acts = tl.activities, src = opt.layout === 'side_by_side' ? opt.right ?? 'best' : opt.left, rowH = Math.max(1, (h - 12 * k) / Math.max(1, acts.length));
-      acts.forEach((a, i) => { const [s, f] = spanFor(a.task, src); if (s == null || f == null) return; g.fillStyle = a.critical ? '#d62728' : f <= current ? '#8a97ab' : '#2a6fdb'; g.fillRect(X(s), y + 6 * k + i * rowH, Math.max(1, X(f) - X(s)), Math.max(1, rowH - 1)); });
+      acts.forEach((a, i) => { const [s, f] = spanFor(a.task, src); if (s == null || f == null) return; g.fillStyle = f <= current ? '#8a97ab' : '#2c9a4a'; g.fillRect(X(s), y + 6 * k + i * rowH, Math.max(1, X(f) - X(s)), Math.max(1, rowH - 1)); if (a.critical) { g.strokeStyle = '#1f2a3a'; g.lineWidth = Math.max(1, k); g.strokeRect(X(s), y + 6 * k + i * rowH, Math.max(1, X(f) - X(s)), Math.max(1, rowH - 1)); } });
     }
     if (opt.overlays.includes('s_curve')) {
       const total = tl.activities.reduce((n, a) => n + a.elements, 0) || 1;
@@ -229,7 +229,7 @@ function drawOverlays(g: CanvasRenderingContext2D, W: number, H: number, clear =
     g.fillStyle = '#1f2a3a'; g.font = `600 ${12 * k}px Segoe UI, sans-serif`;
     g.fillText(rows.length ? `Under way in the ${opt.step >= 28 ? 'month' : opt.step >= 7 ? 'week' : 'day'} to ${iso(current)}` : 'No activity under way', pad + 8 * k, y + 6 * k);
     g.font = `${12 * k}px Segoe UI, sans-serif`;
-    rows.forEach((r, i) => { const yy = y + (24 + i * 18) * k; g.fillStyle = r.a.critical ? '#d62728' : '#2a6fdb'; g.fillRect(pad + 8 * k, yy + 3 * k, 10 * k, 10 * k); g.fillStyle = '#1f2a3a'; let n = `${r.a.id}  ${r.a.name}`; while (g.measureText(n).width > w - 120 * k && n.length > 4) n = n.slice(0, -2) + '…'; g.fillText(n, pad + 24 * k, yy); g.fillStyle = '#4a5568'; g.fillText(`${Math.round(r.share * 100)}%  ${r.a.elements} el.`, pad + w - 90 * k, yy); });
+    rows.forEach((r, i) => { const yy = y + (24 + i * 18) * k; g.fillStyle = '#2c9a4a'; g.fillRect(pad + 8 * k, yy + 3 * k, 10 * k, 10 * k); if (r.a.critical) { g.strokeStyle = '#1f2a3a'; g.lineWidth = Math.max(1, 1.5 * k); g.strokeRect(pad + 8 * k, yy + 3 * k, 10 * k, 10 * k); } g.fillStyle = '#1f2a3a'; let n = `${r.a.id}  ${r.a.name}`; while (g.measureText(n).width > w - 120 * k && n.length > 4) n = n.slice(0, -2) + '…'; g.fillText(n, pad + 24 * k, yy); g.fillStyle = '#4a5568'; g.fillText(`${Math.round(r.share * 100)}%  ${r.a.elements} el.`, pad + w - 90 * k, yy); });
   }
 }
 function ui() { const g = over.getContext('2d'); if (g) drawOverlays(g, over.width, over.height); const c = document.getElementById('counts4d'); if (c) { const k = counts(opt.layout === 'side_by_side' ? opt.right ?? 'best' : opt.left); c.textContent = Object.entries(k).map(([s, n]) => `${s.replace('_', ' ')} ${n}`).join(' · '); } }
@@ -277,7 +277,7 @@ if (opt.interactive) {
   let timer: ReturnType<typeof setInterval> | null = null;
   play?.addEventListener('click', () => { if (timer) { clearInterval(timer); timer = null; play.textContent = '▶'; return; } play.textContent = '⏸'; let i = Math.round((current - t0) / (opt.step * DAY)); if (i >= steps()) i = 0; timer = setInterval(() => { if (i > steps()) { clearInterval(timer!); timer = null; play.textContent = '▶'; return; } setStepIndex(i++); }, 400); });
   const srcSel = document.getElementById('s4d') as HTMLSelectElement | null;
-  if (srcSel) { srcSel.innerHTML = tl.sources.map((s) => `<option value="${s.name}">${s.label}</option>`).join(''); srcSel.value = opt.left; srcSel.addEventListener('change', () => { opt.left = srcSel.value; render(); }); }
+  if (srcSel) { srcSel.replaceChildren(...tl.sources.map((s) => { const o = document.createElement('option'); o.value = s.name; o.textContent = s.label; return o; })); srcSel.value = opt.left; srcSel.addEventListener('change', () => { opt.left = srcSel.value; render(); }); }
 }
 const ray = new THREE.Raycaster();
 function pick(e: PointerEvent) {
@@ -298,16 +298,19 @@ window.addEventListener('message', (e) => {
 });
 
 // ── hooks ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// how far a long encode has got (the headless renderer reads it to report progress)
+const progress = { done: 0, total: 0 };
 const api = {
   ready: () => loaded,
+  progress: () => ({ ...progress }),
   setDate: (d: string) => { const m = toMin(d); if (m != null) { current = m; render(); } },
   setSource: (s: string) => { opt.left = s; render(); },
   highlight: (guids: string[]) => { highlighted.clear(); for (const g of guids) highlighted.add(g); render(); },
   /** An MP4 (H.264 when the browser can encode it, else WebM/VP9) of the sweep from..to, a frame per step, made here. */
-  encode: async (o: { from?: string; to?: string; step?: number; fps?: number; width?: number; height?: number } = {}): Promise<{ bytes: Uint8Array; mime: string; frames: number }> => {
+  encode: async (o: { from?: string; to?: string; step?: number; fps?: number; width?: number; height?: number; codec?: 'avc' | 'vp9' } = {}): Promise<{ bytes: Uint8Array; mime: string; frames: number }> => {
     const w = (o.width ?? 1280) & ~1, h = (o.height ?? 720) & ~1, fps = o.fps ?? 4, step = (o.step ?? opt.step) * DAY;
     resize(w, h);
-    const codec = await getFirstEncodableVideoCodec(['avc', 'vp9'], { width: w, height: h });
+    const codec = await getFirstEncodableVideoCodec(o.codec === 'vp9' ? ['vp9'] : ['avc', 'vp9'], { width: w, height: h });
     if (!codec) throw new Error('This browser cannot encode H.264 or VP9 video (WebCodecs).');
     const output = new Output({ format: codec === 'avc' ? new Mp4OutputFormat() : new WebMOutputFormat(), target: new BufferTarget() });
     const frame = document.createElement('canvas'); frame.width = w; frame.height = h;
@@ -316,7 +319,8 @@ const api = {
     await output.start();
     const a = toMin(o.from ?? null) ?? t0, b = toMin(o.to ?? null) ?? t1;
     let n = 0;
-    for (let m = a; m <= b + 1e-6; m += step) { current = Math.min(m, b); render(); frame.getContext('2d')!.drawImage(composite(), 0, 0); await src.add(n / fps, 1 / fps); n++; }
+    progress.done = 0; progress.total = Math.floor((b - a) / step + 1e-6) + 1;
+    for (let m = a; m <= b + 1e-6; m += step) { current = Math.min(m, b); render(); frame.getContext('2d')!.drawImage(composite(), 0, 0); await src.add(n / fps, 1 / fps); n++; progress.done = n; }
     await output.finalize();
     return { bytes: new Uint8Array((output.target as BufferTarget).buffer!), mime: codec === 'avc' ? 'video/mp4' : 'video/webm', frames: n };
   },

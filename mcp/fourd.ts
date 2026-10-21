@@ -5,10 +5,10 @@ import { basename, join } from 'node:path';
 import { rows, type Db, type Row } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
-import { cachedModel, loadModel, type Model } from '../core/bim/model.ts';
+import { cachedModel, loadEstimate, loadModel, modelBytes, releaseModels, type Model } from '../core/bim/model.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { ifc4dText, items4d, linksCsv, README, searchSetsXml, tagIfc, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
-import { fail, pathArg, type Session } from './runtime.ts';
+import { countMemory, fail, pathArg, reserveMemory, sessions, type Session } from './runtime.ts';
 import type { AnalysisHelpers } from './analysis.ts';
 import { nextId } from '../core/db.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
@@ -19,7 +19,7 @@ import { applyImport as applyImport4d, planImport as planImport4d } from '../cor
 import { readImport4d } from '../core/bim/read4d.ts';
 import { runSynchroCloud, SYNCHRO_CLOUD_TOOL } from './synchroCloud.ts';
 import { diffIndexes } from '../core/bim/diff.ts';
-import { chromiumPath, ENCODE, inChromium, PNGS } from '../core/bim/headless.ts';
+import { chromiumPath, ffmpegPath, inChromium, RenderFailed, renderPngs, renderVideo, webmToMp4 } from '../core/bim/headless.ts';
 import { activityCosts, earnedValue } from '../core/cost/rollup.ts';
 import { mkdtempSync, writeFileSync as writeRaw } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -38,22 +38,31 @@ export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<s
   { name: 'link_status', annotations: ro, description: 'Gaps in the 4D links: elements no activity builds (by class and storey), task activities with no elements, elements on several activities, links to elements no longer in the model.', inputSchema: withHandle({ type: 'object', properties: { project } }) },
   { name: 'set_4d_keys', annotations: edit, description: 'Write a "4D Key" user-defined field on every activity, from activity_id (default), wbs, code:<code type> or udf:<UDF>. The key travels inside XER and P6 XML; Navisworks rules and SYNCHRO Auto-Matching use it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, from: { type: 'string' } } }) },
   { name: 'export_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'Write a ready-linked 4D package into the folder path. target navisworks: the IFC with a WHIQ_4D property set on every linked element (Task = 4D key), search-set XML (one set per activity), timeliner.csv (UniqueId = P6 task_id, User 1 = key) and a README with the click path. synchro: P6 XML with the 4D Key field, the tagged IFC, README. ifc4d: the model with the schedule inside, IFC4 (Bonsai): work schedule, tasks with planned/early/late/actual dates, logic, task-to-element links, and baselines (baselines: [names]) as BASELINE schedules. csv: the link table. planned: current (default) or a baseline name, for the planned dates (TimeLiner Planned vs Actual).', inputSchema: withHandle({ type: 'object', properties: { project, target: { type: 'string' }, path: { type: 'string', description: 'folder to write into' }, planned: { type: 'string' }, baselines: { type: 'array', items: { type: 'string' } }, key: { type: 'string', description: 'activity field used as the key (default 4d_key, else the Activity ID)' } }, required: ['target', 'path'] }) },
-  { name: 'import_4d', annotations: edit, description: 'Read 4D work from another tool and link it to this project: an IFC 4D file (Bonsai/IFC4 task outputs, or SYNCHRO/IFC2X3 assignments; SYNCHRO-renamed elements "name_(#id)" are matched to the attached design model by that id), a Navisworks search-set XML (kept as selection sets, resolved against the model; link them with link_by_rules set_name), a TimeLiner CSV (or its task grid copied to Excel, .xlsx), or the TimeLiner inside a Navisworks .nwf/.nwd (tasks with planned and actual dates, task type and attached set names, read without Navisworks), or a SYNCHRO project .sp (5.1 to 6.5, read without SYNCHRO: tasks with their IDs and dates, and the 3D objects assigned to them, matched to the attached design model by the "(#id)" in their names). Tasks match activities by Activity ID, then by unique name; create_activities: true adds the TimeLiner and SYNCHRO tasks that match none, with their planned dates as the duration and a start-on-or-after constraint (SYNCHRO task IDs are kept as Activity IDs). Attached sets link through selection sets of the same name. link: false only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, link: { type: 'boolean' }, create_activities: { type: 'boolean' } }, required: ['path'] }) },
-  { name: 'simulate_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D state of the model on dates: element counts by state (not started, in progress, complete, removed, temporary in place, unlinked), optionally by storey or class, and the activities under way in each step. date, or from/to/step (days). source: best (default: actuals up to the data date, then the forecast), planned, actual, late, or a saved baseline name. Dates come from the schedule itself (F9: calendars, actuals, data date). snapshots: [dates] renders PNG frames into path (needs a Chromium: chromium_path or P6CLONE_CHROMIUM; without one, use render_4d kind viewer and look at it).', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, source: { type: 'string' }, by: { type: 'string' }, snapshots: { type: 'array', items: { type: 'string' } }, path: { type: 'string' }, view: { type: 'string' }, chromium_path: { type: 'string' } } }) },
+  { name: 'import_4d', annotations: edit, description: 'Read 4D work from another tool and link it to this project: an IFC 4D file (Bonsai/IFC4 task outputs, or SYNCHRO/IFC2X3 assignments; SYNCHRO-renamed elements "name_(#id)" are matched to the attached design model by that id), a Navisworks search-set XML (kept as selection sets, resolved against the model; link them with link_by_rules set_name), a TimeLiner CSV (or its task grid copied to Excel, .xlsx), or the TimeLiner inside a Navisworks .nwf/.nwd (tasks with planned and actual dates, task type and attached set names, read without Navisworks), or a SYNCHRO project .sp (5.1 to 6.5, read without SYNCHRO: tasks with their IDs and dates, and the 3D objects assigned to them, matched to the attached design model by the "(#id)" in their names). Tasks match activities by Activity ID, then by unique name; create_activities: true adds the TimeLiner and SYNCHRO tasks that match none, with their planned dates as the duration and a start-on-or-after constraint (SYNCHRO task IDs are kept as Activity IDs). Attached sets link through selection sets of the same name; a task with none links the set named like it (TimeLiner’s attach-by-task-name rule). link: false only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, link: { type: 'boolean' }, create_activities: { type: 'boolean' } }, required: ['path'] }) },
+  { name: 'simulate_4d', annotations: ro, description: 'The 4D state of the model on dates: element counts by state (not started, in progress, complete, removed, temporary in place, unlinked), optionally by storey or class, and the activities under way in each step. date, or from/to/step (days). source: best (default: actuals up to the data date, then the forecast), planned, actual, late, or a saved baseline name. Dates come from the schedule itself (F9: calendars, actuals, data date). snapshots: [dates] renders PNG frames into path (needs the server’s P6CLONE_CHROMIUM; without it, use render_4d kind viewer and look at it). Reads the project only.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, source: { type: 'string' }, by: { type: 'string' }, snapshots: { type: 'array', items: { type: 'string' } }, path: { type: 'string' }, view: { type: 'string' } } }) },
   { name: 'compare_4d', annotations: ro, description: 'Progress against a baseline on a date, element by element (TimeLiner Early/Late appearance): ahead, on time, late, not started, complete. late_means start (default: started later than the baseline, as TimeLiner) or finish (finished later). by storey (default), class or wbs: counts and percentages per zone, the elements behind each late figure (max_ids), planned value vs earned value per zone (each activity\u2019s PV/EV shared over its elements), and the activities that became or stopped being critical since the baseline.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, against: { type: 'string' }, late_means: { type: 'string' }, by: { type: 'string' }, max_ids: { type: 'number' } }, required: ['against'] }) },
   { name: 'set_element_status', annotations: edit, description: 'Element-level progress from site (walkdowns, reality capture): guids, status installed | in_progress | not_installed, date. It overrides the activity\u2019s progress for those elements in simulate_4d, compare_4d and the viewer (actual and best dates), and proposes each touched activity\u2019s % complete from its installed share; apply_percent: true writes it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } }, status: { type: 'string' }, date: { type: 'string' }, apply_percent: { type: 'boolean' } }, required: ['guids', 'status', 'date'] }) },
-  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people. kind viewer (default): an HTML viewer with the model as a separate file (index.html, viewer4d.js, model.glb, timeline.json) in the folder path, or one self-contained file with embed: true; it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or an MP4 (H.264; WebM when the browser has no H.264 encoder) rendered in a headless Chromium (chromium_path or P6CLONE_CHROMIUM); without one the answer gives the self-contained viewer and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, chromium_path: { type: 'string' } }, required: ['path'] }) },
+  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people. kind viewer (default): an HTML viewer with the model as a separate file (index.html, viewer4d.js, model.glb, timeline.json) in the folder path, or one self-contained file with embed: true; it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or a video rendered in a headless Chromium (the server’s P6CLONE_CHROMIUM; a tool argument never names a program). format mp4 (default: H.264 from the browser, or its WebM converted with the server’s P6CLONE_FFMPEG; without ffmpeg the WebM is returned with a note) or webm. Progress per frame; cancel_job stops it; without one the answer gives the self-contained viewer and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps (below 1 holds frames longer) or seconds_per_frame, file_name, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, format: { type: 'string', enum: ['mp4', 'webm'] }, seconds_per_frame: { type: 'number' }, file_name: { type: 'string' } }, required: ['path'] }) },
   { name: 'relink_model', annotations: edit, description: 'Bring the 4D links over to a revised model (M4). Each linked element is found in the new model by its GlobalId; else, in the same IFC class, by name and storey (the nearest one when there are several), else by shape (size and position within tolerance_m, default 0.05). Answers what was kept, matched (and how), and lost (no counterpart: those links are dropped), plus the model diff summary (added, removed, modified, re-identified). dry_run: true only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, tolerance_m: { type: 'number' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
   SYNCHRO_CLOUD_TOOL(withHandle, project),
 ];
 export const FOURD_FILES: Record<string, { read: string[]; opens: boolean }> = { open_model: { read: ['path'], opens: false }, import_4d: { read: ['path'], opens: false }, relink_model: { read: ['path'], opens: false } };
 export const FOURD_NAMES = new Set(['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d', 'simulate_4d', 'compare_4d', 'set_element_status', 'render_4d', 'relink_model', 'synchro_cloud']);
 
+// models in memory count in the server's budget; when room is needed, those no project in memory uses are let go
+countMemory(() => modelBytes(), () => releaseModels(new Set([...sessions.values()].flatMap((x) => rows(x.db, T4D.model).map((r) => r.hash)))));
+
+/** Read a model with its memory reserved first: a model that does not fit is refused, not run out of memory on. */
+async function readModel(path: string, o: { geometry?: boolean } = {}): Promise<Model> {
+  const release = reserveMemory(loadEstimate(path, o));
+  try { return await loadModel(path, o); } finally { release(); }
+}
+
 /** The model attached to the project: from memory or the disk cache, else reopened from its file. */
 async function modelOf(db: Db, projId: string, required = true): Promise<Model | null> {
   const r = modelRow(db, projId);
   if (!r) return required ? fail('no_model', 'No model is attached to this project.', 'Attach one with open_model {path}.') : null;
-  const m = cachedModel(r.hash) ?? (existsSync(r.path) ? await loadModel(r.path) : null);
+  const m = cachedModel(r.hash) ?? (existsSync(r.path) ? await readModel(r.path) : null);
   if (!m && required) return fail('model_missing', `The attached model ${r.path} is not cached and the file is gone.`, 'Attach it again with open_model {path}.');
   return m;
 }
@@ -67,7 +76,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
     case 'open_model': {
       const path = pathArg(a.path);
       let m: Model;
-      try { m = await loadModel(path, { geometry: a.geometry !== false }); } catch (e) { return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of an .ifc file inside the storage root.'); }
+      try { m = await readModel(path, { geometry: a.geometry !== false }); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of an .ifc file inside the storage root.'); }
       await h.tick(1, 1, 'model parsed');
       const ix = m.index;
       const kept = h.apply(`Attach model ${basename(path)}`, (d) => {
@@ -196,15 +205,16 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const r = simulate(s.db, projId, m.index, { source, dates, by: a.by, stepDays: step });
       let snapshots: string[] | undefined, note: string | undefined;
       if (Array.isArray(a.snapshots) && a.snapshots.length) {
-        const chrome = chromiumPath(a.chromium_path);
-        if (!chrome) note = 'No Chromium to render snapshots (pass chromium_path or set P6CLONE_CHROMIUM): render_4d kind viewer gives a page to look at.';
+        const chrome = chromiumPath();
+        if (!chrome) note = 'No Chromium to render snapshots (the server’s P6CLONE_CHROMIUM is not set): render_4d kind viewer gives a page to look at.';
         else if (!m.glb) note = 'The model was opened without geometry: open_model again with geometry for snapshots.';
         else {
           const dir = pathArg(a.path ?? fail('bad_input', 'path (a folder) is needed for snapshots.', 'Pass path.'), 'path', 'write');
           mkdirSync(dir, { recursive: true });
           const page = writeViewer({ dir: mkdtempSync(join(tmpdir(), 'p6c4d-')), glb: m.glb, timeline: viewerTimeline(s.db, projId, m.index, [source]), options: { left: source, interactive: false, view: a.view ?? 'iso', overlays: ['date', 'legend', 'activity_list'] }, title: 'snapshot', embed: true })[0];
-          const pngs = await inChromium<string[]>(chrome, page, PNGS(a.snapshots.map(String)));
-          snapshots = pngs.map((b64, i) => { const p = join(dir, `snapshot-${String(a.snapshots[i]).slice(0, 10)}.png`); h.writeOut(p, Buffer.from(b64, 'base64')); return p; });
+          let pngs: Buffer[];
+          try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`))); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).'); throw e; }
+          snapshots = pngs.map((png, i) => { const p = join(dir, `snapshot-${String(a.snapshots[i]).slice(0, 10)}.png`); h.writeOut(p, png); return p; });
         }
       }
       return { ...r, step_days: step, ...(snapshots ? { snapshots } : {}), ...(note ? { note } : {}) };
@@ -290,27 +300,42 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const dir = pathArg(a.path, 'path', 'write');
       const title = `${options.title} 4D`;
       if (kind === 'viewer') return { kind, written: writeViewer({ dir, glb: m.glb!, timeline, options, title, embed: a.embed === true, file: `${options.title}-4D.html` }), activities: timeline.activities.length, linked_elements: Object.keys(timeline.elements).length, hooks: 'WHIQ4D_EXPORT (ready, max, setStep, frame) and P6C4D_API (setDate, setSource, highlight, encode, png)' };
-      const width = Math.min(3840, Number(a.width) || 1280), height = Math.min(2160, Number(a.height) || 720), fps = Math.min(60, Math.max(1, Number(a.fps) || 4));
+      const width = Math.min(3840, Number(a.width) || 1280), height = Math.min(2160, Number(a.height) || 720);
+      // fps below 1 holds each frame longer (0.25 = 4 s a frame)
+      const fps = a.seconds_per_frame != null ? 1 / Math.min(60, Math.max(1 / 60, Number(a.seconds_per_frame) || 0.25)) : Math.min(60, Math.max(1 / 60, Number(a.fps) || 4));
+      const format = a.format === 'webm' ? 'webm' : 'mp4';
+      const name = a.file_name ? basename(String(a.file_name)).replace(/\.(mp4|webm)$/i, '') : `${options.title}-4D`;
       const page = writeViewer({ dir, glb: m.glb!, timeline, options, title, embed: true, file: `${options.title}-4D-render.html` })[0];
-      const chrome = chromiumPath(a.chromium_path);
-      if (!chrome) return { kind, rendered: false, viewer: page, client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width, height }, note: 'No Chromium here (pass chromium_path or set P6CLONE_CHROMIUM), so nothing was rendered: the self-contained viewer is written; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform\u2019s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.' };
+      const chrome = chromiumPath();
+      if (!chrome) return { kind, rendered: false, viewer: page, client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width, height }, note: 'No Chromium here (the server’s P6CLONE_CHROMIUM is not set), so nothing was rendered: the self-contained viewer is written; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform\u2019s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.' };
       await h.tick(0, 1, `rendering the ${kind} in Chromium`);
+      const failed = (e: unknown) => { if (e instanceof RenderFailed) return fail('render_failed', e.message, 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.'); throw e; };
       if (kind === 'images') {
         const from = parseP6Date(a.from ? String(a.from) : timeline.start ?? '')!, to = parseP6Date(a.to ? String(a.to) : timeline.finish ?? '')!;
         const dates: string[] = []; for (let d = from; d <= to && dates.length < 500; d += options.step! * 1440) dates.push(formatP6Date(d));
-        const pngs = await inChromium<string[]>(chrome, page, PNGS(dates), { width, height });
-        return { kind, rendered: true, written: pngs.map((b64, i) => { const p = join(dir, `frame-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, Buffer.from(b64, 'base64')); return p; }) };
+        let pngs: Buffer[];
+        try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, dates, h.tick), { width, height }); } catch (e) { return failed(e); }
+        return { kind, rendered: true, written: pngs.map((png, i) => { const p = join(dir, `${name}-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, png); return p; }) };
       }
-      const v = await inChromium<{ mime: string; frames: number; b64: string }>(chrome, page, ENCODE({ from: a.from, to: a.to, step: options.step, fps, width, height }), { width, height });
-      const file = join(dir, `${options.title}-4D.${v.mime.includes('mp4') ? 'mp4' : 'webm'}`);
-      h.writeOut(file, Buffer.from(v.b64, 'base64'));
-      return { kind, rendered: true, written: [file], frames: v.frames, mime: v.mime, fps, size: [width, height] };
+      let v: { mime: string; frames: number; bytes: Buffer };
+      try { v = await inChromium(chrome, page, (ev) => renderVideo(ev, { from: a.from, to: a.to, step: options.step, fps, width, height, ...(format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1' ? { codec: 'vp9' } : {}) }, h.tick), { width, height }); } catch (e) { return failed(e); }
+      let note: string | undefined;
+      // MP4 everywhere: a browser without an H.264 encoder (Chromium for Testing) records WebM, which ffmpeg turns into MP4
+      if (format === 'mp4' && !v.mime.includes('mp4')) {
+        await h.tick(1, 1, 'converting the WebM to MP4');
+        const mp4 = await webmToMp4(v.bytes).catch((e) => { note = `The WebM could not be converted: ${(e as Error).message}`; return null; });
+        if (mp4) v = { mime: 'video/mp4', frames: v.frames, bytes: mp4 };
+        else note ??= ffmpegPath() ? undefined : 'This Chromium has no H.264 encoder and the server has no ffmpeg (P6CLONE_FFMPEG), so the video is WebM. Set P6CLONE_FFMPEG for MP4.';
+      }
+      const file = join(dir, `${name}.${v.mime.includes('mp4') ? 'mp4' : 'webm'}`);
+      h.writeOut(file, v.bytes);
+      return { kind, rendered: true, written: [file], frames: v.frames, mime: v.mime, fps, size: [width, height], ...(note ? { note } : {}) };
     }
     case 'relink_model': {
       const old = (await modelOf(s.db, projId))!;
       const path = pathArg(a.path);
       let m: Model;
-      try { m = await loadModel(path); } catch (e) { return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of the revised .ifc file.'); }
+      try { m = await readModel(path); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of the revised .ifc file.'); }
       await h.tick(1, 2, 'model parsed');
       const linkedGuids = new Set(rows(s.db, T4D.link).filter((r) => r.proj_id === projId).map((r) => r.guid));
       const plan = relinkPlan(old.index, m.index, linkedGuids, a.tolerance_m != null ? Number(a.tolerance_m) : undefined);
@@ -335,7 +360,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf';
       const m = await modelOf(s.db, projId, !tasksOnly);
       const plan = planImport4d(s.db, projId, imp, m?.index ?? null, { createActivities: a.create_activities === true });
-      const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: new Set(plan.proposals.map((p) => p.activity)).size, unmatched_tasks: plan.unmatchedTasks.slice(0, 100), proposed_links: plan.proposals.reduce((n, p) => n + p.guids.length, 0), ...(plan.elementsNotInModel ? { elements_not_in_model: plan.elementsNotInModel } : {}), ...(plan.sets.length ? { sets: plan.sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: plan.attachedSets } : {}), notes: imp.notes };
+      const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: plan.matched.size, activities_with_links: new Set(plan.proposals.map((p) => p.activity)).size, unmatched_tasks: plan.unmatchedTasks.slice(0, 100), proposed_links: plan.proposals.reduce((n, p) => n + p.guids.length, 0), ...(plan.elementsNotInModel ? { elements_not_in_model: plan.elementsNotInModel } : {}), ...(plan.sets.length ? { sets: plan.sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: plan.attachedSets } : {}), notes: imp.notes };
       if (a.link === false) return { ...summary, linked: false, ...(plan.toCreate.length ? { would_create: plan.toCreate.map((t) => t.name) } : {}) };
       // an activity the edit refuses (a bad name, a clash) refuses the whole import
       const applied = h.apply(`Import 4D ${basename(path)}`, (d) => { try { return applyImport4d(d, projId, plan, m?.index ?? null, { source: basename(path), hoursPerDay: s.hpd, calendarDays: true }); } catch (e) { return fail('bad_input', `Not imported: ${(e as Error).message}`, 'Fix the task in the other tool, or import with create_activities: false.'); } });

@@ -243,13 +243,27 @@ export function createSession(db: Db, init: { path: string | null; format: Forma
   return s;
 }
 export const estimateBytes = (fileBytes: number) => Math.round(fileBytes * config.memFactor) + 8 * 1048576;
-const usedBytes = () => [...sessions.values()].reduce((a, s) => a + s.bytes, 0);
+/** Memory held outside the projects (4D models shared by projects) and reserved by work in flight (a model being read,
+ *  its geometry process): counted in the same budget. */
+const counters = new Set<() => number>();
+const trimmers = new Set<() => void>();
+let reserved = 0;
+export function countMemory(count: () => number, trim?: () => void): void { counters.add(count); if (trim) trimmers.add(trim); }
+const usedBytes = () => [...sessions.values()].reduce((a, s) => a + s.bytes, 0) + [...counters].reduce((a, f) => a + f(), 0) + reserved;
+/** Reserve memory for work that is not a project (refused like a file that does not fit); call the result to release. */
+export function reserveMemory(bytes: number): () => void {
+  admit(bytes);
+  reserved += bytes;
+  let done = false;
+  return () => { if (!done) { done = true; reserved -= bytes; } };
+}
 
 /** Make room for a project: refuse only when even moving every idle project out would not be enough. */
 export function admit(bytes: number, keep?: string): void {
   const budget = effectiveBudget();
   const byAge = () => [...sessions.values()].filter((s) => s.handle !== keep && !busy.has(s.handle)).sort((a, b) => a.lastUsed - b.lastUsed);
-  while ((sessions.size >= config.maxHandles || usedBytes() + bytes > budget) && byAge().length) evict(byAge()[0], 'memory');
+  while ((sessions.size >= config.maxHandles || usedBytes() + bytes > budget) && byAge().length) { evict(byAge()[0], 'memory'); for (const t of trimmers) t(); }
+  if (usedBytes() + bytes > budget) for (const t of trimmers) t();
   if (sessions.size >= config.maxHandles) fail('handle_limit', `All ${config.maxHandles} project slots are busy right now.`, 'Retry shortly, or close a project you no longer need.', { retryAfter: 5 });
   if (usedBytes() + bytes > budget) fail('memory_budget', `This file needs about ${mb(bytes)} of memory; ${mb(budget - usedBytes())} of the ${mb(budget)} budget is free while other calls are running.`, bytes > budget ? 'The file is larger than the whole memory budget: raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size) or split the file.' : 'Retry when the running calls have finished; idle projects are moved out automatically.', { retryAfter: 10, data: { needed_mb: Math.round(bytes / 1048576), budget_mb: Math.round(budget / 1048576) } });
 }
@@ -511,7 +525,7 @@ export const setProgress = (job: Job | undefined, msg: string) => { if (job) job
 export function status() {
   const m = process.memoryUsage();
   return {
-    memory: { rss_bytes: m.rss, rss_mb: Math.round(m.rss / 1048576), heap_used_mb: Math.round(m.heapUsed / 1048576), budget_mb: Math.round(effectiveBudget() / 1048576), projects_mb: Math.round(usedBytes() / 1048576), heap_limit_mb: Math.round(getHeapStatistics().heap_size_limit / 1048576) },
+    memory: { rss_bytes: m.rss, rss_mb: Math.round(m.rss / 1048576), heap_used_mb: Math.round(m.heapUsed / 1048576), budget_mb: Math.round(effectiveBudget() / 1048576), projects_mb: Math.round(usedBytes() / 1048576), reserved_mb: Math.round(reserved / 1048576), heap_limit_mb: Math.round(getHeapStatistics().heap_size_limit / 1048576) },
     limits: { max_handles: config.maxHandles, idle_minutes: config.idleMinutes, busy_wait_seconds: config.busyWaitMs / 1000, root: config.root, read_root: config.readRoot, write_root: writeBase(), owner_key_required: config.requireOwnerKey },
     open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, memory_mb: Math.round(s.bytes / 1048576), idle_seconds: Math.round((Date.now() - s.lastUsed) / 1000), busy: busy.has(s.handle), unsaved_changes: s.dirty, changes: s.history.length })),
     moved_out: evictedList(),

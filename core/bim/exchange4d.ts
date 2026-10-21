@@ -17,7 +17,7 @@ export interface Item4d { taskId: string; key: string; id: string; name: string;
 const day = (s?: string) => (s ? s.slice(0, 10) : '');
 
 /** The activities with elements, with their dates: planned = the current schedule, or a baseline's dates when
- *  planned names one (TimeLiner's usual Planned vs Actual: baseline as planned, the current dates as actual). */
+ *  planned names one (TimeLiner's usual Planned vs Actual: baseline as planned, the actual dates as actual; work not yet started has none). */
 export function items4d(db: Db, projId: string, ix: IfcIndex | null, o: { planned?: string; key?: string } = {}): Item4d[] {
   const proj = rows(db, 'PROJECT').find((p) => p.proj_id === projId)!;
   const bl = o.planned && o.planned !== 'current' ? baselineOf(db, proj, o.planned) : null;
@@ -35,7 +35,7 @@ export function items4d(db: Db, projId: string, ix: IfcIndex | null, o: { planne
     out.push({
       taskId: t.task_id, key: (o.key ? activityValue(db, t, o.key) : undefined) ?? t.task_code, id: t.task_code, name: t.task_name,
       type: role === 'removed' ? 'Demolish' : role === 'temporary' ? 'Temporary' : 'Construct',
-      plannedStart: start ?? '', plannedFinish: finish ?? '', actualStart: bl ? t.act_start_date || t.early_start_date || '' : t.act_start_date || '', actualFinish: bl ? t.act_end_date || t.early_end_date || '' : t.act_end_date || '',
+      plannedStart: start ?? '', plannedFinish: finish ?? '', actualStart: t.act_start_date || '', actualFinish: t.act_end_date || '', // actual means done: never forecast dates
       guids: ls.map((l) => l.guid), expressIds: ls.map((l) => byGuid.get(l.guid)).filter((x): x is number => x != null),
     });
   }
@@ -189,7 +189,7 @@ export function ifc4dText(db: Db, projId: string, ifcText: string, items: Item4d
     const ids = new Map<string, string>();
     for (const { it, row } of list) {
       const r = row ?? tasks.get(it.taskId)!;
-      const tt = add(`IFCTASKTIME($,$,$,.WORKTIME.,${dur(Number(r.target_drtn_hr_cnt || 0))},${iso(it.plannedStart)},${iso(it.plannedFinish)},${iso(r.early_start_date)},${iso(r.early_end_date)},${iso(r.late_start_date)},${iso(r.late_end_date)},${r.free_float_hr_cnt ? dur(Number(r.free_float_hr_cnt)) : '$'},${r.total_float_hr_cnt ? dur(Number(r.total_float_hr_cnt)) : '$'},${Number(r.total_float_hr_cnt || 0) <= 0 && !r.act_end_date ? '.T.' : '.F.'},$,$,${iso(r.act_start_date)},${iso(r.act_end_date)},${r.remain_drtn_hr_cnt ? dur(Number(r.remain_drtn_hr_cnt)) : '$'},${r.phys_complete_pct ? Number(r.phys_complete_pct) / 100 : '$'})`);
+      const tt = add(`IFCTASKTIME($,$,$,.WORKTIME.,${dur(Number(r.target_drtn_hr_cnt || 0))},${iso(it.plannedStart)},${iso(it.plannedFinish)},${iso(r.early_start_date)},${iso(r.early_end_date)},${iso(r.late_start_date)},${iso(r.late_end_date)},${r.free_float_hr_cnt ? dur(Number(r.free_float_hr_cnt)) : '$'},${r.total_float_hr_cnt ? dur(Number(r.total_float_hr_cnt)) : '$'},${Number(r.total_float_hr_cnt || 0) <= 0 && !r.act_end_date ? '.T.' : '.F.'},$,$,${iso(r.act_start_date)},${iso(r.act_end_date)},${r.remain_drtn_hr_cnt ? dur(Number(r.remain_drtn_hr_cnt)) : '$'},${Number(r.phys_complete_pct) > 0 ? Number(r.phys_complete_pct) / 100 : '$'})`);
       const pre = it.type === 'Demolish' ? 'DEMOLITION' : it.type === 'Temporary' ? 'NOTDEFINED' : 'CONSTRUCTION';
       ids.set(it.taskId, add(`IFCTASK('${ifcGuid()}',${t.owner},${s(it.name)},$,$,${s(it.id)},$,$,$,${r.task_type === 'TT_Mile' || r.task_type === 'TT_FinMile' ? '.T.' : '.F.'},$,${tt},.${pre}.)`));
     }

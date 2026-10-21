@@ -5,8 +5,8 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const here = () => { try { return typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url)); } catch { return process.cwd(); } };
-const homes = () => { const h = here(); return [h, join(h, '..'), join(h, '..', '..'), process.cwd()]; };
+const here = () => { try { return typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url)); } catch { return null; } };
+const homes = () => { const h = here(); return h ? [h, join(h, '..'), join(h, '..', '..')] : []; };
 const shipped = (rel: string) => { for (const p of homes()) { const f = join(p, 'ifc', rel); if (existsSync(f)) return f; } return null; };
 
 /** web-ifc's Node entry: a file URL beside a bundle, else the package name. */
@@ -16,8 +16,8 @@ export function webIfcEntry(): string { const f = shipped(join('web-ifc', 'web-i
 export function geomWorkerPath(): string | null {
   const explicit = process.env.P6CLONE_IFC_GEOM_WORKER;
   if (explicit) return existsSync(explicit) ? explicit : null;
-  const own = join(here(), 'geomWorker.mjs');
-  return existsSync(own) ? own : shipped('geomWorker.mjs');
+  const h = here(), own = h ? join(h, 'geomWorker.mjs') : null;
+  return own && existsSync(own) ? own : shipped('geomWorker.mjs');
 }
 
 /** web-ifc as a module object (its CommonJS build arrives as the default export when imported). */

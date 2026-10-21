@@ -41,6 +41,11 @@ test('a conversion-based length unit (feet) is the model unit', async () => {
   assert.equal((await stepIndex(p)).index.lengthScale, 0.3048);
 });
 
+test('the length unit is the one the project assigns, not the last one defined (Revit writes both)', async () => {
+  const p = write(ifc("#7=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);\n#8=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);", "#30=IFCWALL('3YvctVUKr0kugbFTf53O9L',$,'W',$,$,$,$,$);\n#31=IFCSLAB('4YvctVUKr0kugbFTf53O9L',$,'S',$,$,$,$,$,.FLOOR.);"));
+  assert.equal((await stepIndex(p)).index.lengthScale, 0.001);
+});
+
 const SCHEP = join(import.meta.dirname, '..', 'sample 4D', 'ifc-models', 'schependomlaan', 'IFC Schependomlaan.ifc');
 test('a millimetre model (Schependomlaan): every product, and geometry in metres', { skip: !existsSync(SCHEP) && 'Schependomlaan sample not present', timeout: 600_000 }, async () => {
   const { loadModel } = await import('../core/bim/model.ts');

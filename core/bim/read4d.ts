@@ -11,7 +11,7 @@ export async function readImport4d(path: string, bytes: Uint8Array): Promise<Imp
   if (head.startsWith('#LcUStream')) { const n = readNwfTimeliner(bytes); return { source: 'nwf', tasks: n.tasks.map((t) => ({ name: t.name, id: t.name, start: t.plannedStart ?? undefined, finish: t.plannedFinish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined, type: t.type, attached: t.attached[0] })), links: [], notes: n.notes }; }
   if (/\.sp$/i.test(path)) { const { readSynchro } = await import('./synchro.ts'); return synchroToImport(readSynchro(bytes)); }
   if (/^ISO-10303-21/m.test(head.slice(0, 200))) return parseIfc4d(Buffer.from(bytes).toString('latin1'));
-  if (/<exchange/.test(head)) return parseSearchSets(Buffer.from(bytes).toString('latin1'));
+  if (/<exchange\b/.test(head)) return parseSearchSets(Buffer.from(bytes).toString('latin1'));
   if (/\.xlsx$/i.test(path)) return parseTimelinerCsv(sheetToCsv((await readXlsx(bytes))[0]?.rows ?? []));
   return parseTimelinerCsv(Buffer.from(bytes).toString('utf8'));
 }

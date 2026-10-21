@@ -208,8 +208,14 @@ good habit, kept).
   table) per grid: Locations (ID, Name, Level), Grid (tasks with per-location durations, location precision,
   ASAP/Paced), Quantities, Resources, Costs, Tags, with a chosen decimal separator and date format. The clone reads
   and writes that set (a folder of CSVs). Dependencies have no documented import/export in Tactplan, so links do not
-  travel either way: the export says so and lists them for re-entry. The exact column layouts are not published;
-  they come from a real Tactplan export before this part is built.
+  travel either way: the export says so and lists them for re-entry. Layouts (from Tactplan 2.5.1's import
+  dialogs and one real 2023 Grid export seen in a training video; notes in the session's `lob-research/tactplan-csv`):
+  Locations `Id, Name, Level, Location level`; Grid `Id, Name, Code, Start date, Finish date, Color, ASAP, Paced,
+  Milestone, Location precision`, then one duration column per location under a multi-row header (one row per level;
+  empty = not in the task, `*` = another subtask's location; one row per subtask); Quantities `Id, Name, Consumption,
+  Unit, Location precision`, then one quantity column per location. Colours `#rrggbbaa`, booleans TRUE/FALSE or 1/0,
+  dates and decimals per the chosen options. Unconfirmed: the CSV delimiter and quoting; the reader accepts comma,
+  semicolon and tab, and matches columns by header when one is present, else by position.
 - Excel round-trip for locations and quantities.
 
 ### Platform switch-over

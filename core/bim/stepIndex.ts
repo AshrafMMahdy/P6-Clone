@@ -158,13 +158,17 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
   let projectName = '';
   let lengthScale = 1;
   let lengthScaleSource: IfcIndex['lengthScaleSource'] = 'assumed-m';
-  let convScale: number | null = null; // a conversion-based length unit (inch, foot) wins over the SI unit it is based on
+  // length units by id; the one the project's IfcUnitAssignment names is the model's (files define others too)
+  const lengthUnits = new Map<number, number>();
+  const unitAssignments = new Map<number, number[]>();
+  let projectUnits: number | undefined;
 
   const onEntity = (id: number, type: string, argText: string): void => {
     switch (type) {
-      case 'IFCPROJECT': { const a = parseArgs(argText); projectName = strOf(a[2]); return; }
-      case 'IFCSIUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const p = strOf(a[2]); lengthScale = p === 'MILLI' ? 0.001 : p === 'CENTI' ? 0.01 : p === 'DECI' ? 0.1 : 1; lengthScaleSource = 'unit-assignment'; } return; }
-      case 'IFCCONVERSIONBASEDUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const f = CONVERSION[strOf(a[2]).toUpperCase()]; if (f) convScale = f; } return; }
+      case 'IFCPROJECT': { const a = parseArgs(argText); projectName = strOf(a[2]); projectUnits = ref(a[8]); return; }
+      case 'IFCUNITASSIGNMENT': { const a = parseArgs(argText); unitAssignments.set(id, refs(a[0])); return; }
+      case 'IFCSIUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const p = strOf(a[2]); lengthUnits.set(id, p === 'MILLI' ? 0.001 : p === 'CENTI' ? 0.01 : p === 'DECI' ? 0.1 : p === 'KILO' ? 1000 : 1); } return; }
+      case 'IFCCONVERSIONBASEDUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const f = CONVERSION[strOf(a[2]).toUpperCase()]; if (f) lengthUnits.set(id, f); } return; }
       case 'IFCBUILDINGSTOREY': { const a = parseArgs(argText); storeyName.set(id, strOf(a[2]) || strOf(a[7]) || `#${id}`); return; }
       case 'IFCSITE': case 'IFCBUILDING': case 'IFCSPACE': case 'IFCSPATIALZONE': { const a = parseArgs(argText); spatialName.set(id, strOf(a[2]) || strOf(a[7]) || `#${id}`); break; }
       case 'IFCRELAGGREGATES': { const a = parseArgs(argText); const p = ref(a[4]); if (p !== undefined) aggregates.push({ parent: p, children: refs(a[5]) }); return; }
@@ -308,7 +312,9 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
     });
     productMap.set(p.id, { guid: p.guid, ifcClass: p.cls });
   }
-  if (convScale != null) { lengthScale = convScale; lengthScaleSource = 'unit-assignment'; }
+  { const assigned = (projectUnits != null ? unitAssignments.get(projectUnits) : undefined) ?? [...unitAssignments.values()][0] ?? [];
+    const u = assigned.find((x) => lengthUnits.has(x));
+    if (u != null) { lengthScale = lengthUnits.get(u)!; lengthScaleSource = 'unit-assignment'; } }
   const index: IfcIndex = {
     sourcePath: absIfcPath, schema, lengthScale, lengthScaleSource, elements, storeys, classCounts,
     geometryFailures: 0, quantifiedElements: elements.filter((e) => Object.keys(e.authored).length > 0).length,

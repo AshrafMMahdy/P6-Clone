@@ -8,9 +8,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REASONER_KMAX, type Infer } from './hrm.ts';
 
-const here = () => { try { return typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url)); } catch { return process.cwd(); } };
+const here = () => { try { return typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url)); } catch { return null; } };
 /** Folders to look in: beside the bundle, its parent (dist/ in the desktop app), the repository root. */
-const homes = () => { const h = here(); return [h, join(h, '..'), join(h, '..', '..'), process.cwd()]; };
+const homes = () => { const h = here(); return h ? [h, join(h, '..'), join(h, '..', '..')] : []; };
 
 export function reasonerModelPath(): string | null {
   const env = process.env.P6CLONE_REASONER;
