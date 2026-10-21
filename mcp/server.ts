@@ -19,7 +19,6 @@ import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid } from '../core/xer/repair-valid.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { writeP6Xml } from '../core/xml/p6xml.ts';
-import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { updateProgress } from '../core/progress/update.ts';
 import { levelResources } from '../core/level/level.ts';
@@ -32,7 +31,10 @@ import { compareComputed, evaluate } from '../core/query/evaluate.ts';
 import { parseScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../core/schedule/options.ts';
 import { reviewSchedule } from '../core/query/review.ts';
 import { ANALYSIS_TOOLS, runAnalysis } from './analysis.ts';
-import { FOURD_FILES, FOURD_TOOLS, load4dSidecar, runFourD, save4dSidecar } from './fourd.ts';
+import { FOURD_FILES, FOURD_NAMES, FOURD_TOOLS, load4dSidecar, runFourD, save4dSidecar } from './fourd.ts';
+import { LOB_FILES, LOB_NAMES, LOB_TOOLS, lobSidecars, lobSidecarText, readLobSidecar, runLob, scheduleWithLob } from './lob.ts';
+import { lobGuard } from '../core/lob/view.ts';
+import { loadLobModels } from '../core/lob/store.ts';
 import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
 import { baselineOf } from '../core/analysis/common.ts';
 import { reasonerStatus } from '../core/analysis/hrmRuntime.ts';
@@ -88,6 +90,7 @@ const TOOLS = [
   { name: 'review', annotations: ro, description: 'Schedule quality review (DCMA-style checks graded pass/warn/fail): missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence, saved dates P6 would change. For the full DCMA 14-point (critical path test, CPLI, BEI, missed tasks, profiles, activity lists) use dcma_14; for the P6 Check Schedule report use check_schedule.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   ...ANALYSIS_TOOLS(withHandle),
   ...FOURD_TOOLS(withHandle),
+  ...LOB_TOOLS(withHandle),
   ...LOOKUPS.map((t) => ({ name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
   { name: 'undo', annotations: edit, description: 'Undo your own last change on this project (edit, schedule, progress update, leveling, import). Refused only if someone else\'s later change touched the same items. any_caller: true (with owner_key) undoes the latest change whoever made it.', inputSchema: withHandle({ type: 'object', properties: { any_caller: { type: 'boolean' } } }, true) },
   { name: 'redo', annotations: edit, description: 'Re-apply your last undone change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
@@ -197,9 +200,14 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         }
         s0.db = r.db; s0.format = format; s0.encoding = readEncoding(bytes, format, r.db, a.encoding);
         load4dSidecar(r.db, path); // <file>.4d.json: the 4D model and links saved with it
+        // <file>.lob.json: the LOB models as last saved (used when a notebook was damaged outside the clone)
+        const lobSide = readLobSidecar(path);
+        if (lobSide) lobSidecars.set(s0.handle, lobSide);
+        const lobInfo = [...loadLobModels(r.db, lobSide)].map(([pid, x]) => ({ project: r.db.tables.PROJECT.rows.find((p) => p.proj_id === pid)!.proj_short_name, model_from: x.from, ...(x.problems.length ? { problems: x.problems } : {}) }));
+        const lob = lobInfo.length ? { lob: lobInfo } : {};
         // opened from a Microsoft Project file (by its format: the .mpx / MSPDI content the reader saw): Project's rules
         if (format === 'mspdi' || format === 'mpx' || format === 'mpp') for (const p of r.db.tables.PROJECT?.rows ?? []) if (p._msp_source !== 'Y') { addField(r.db.tables.PROJECT, '_msp_source'); p._msp_source = 'Y'; }
-        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0) };
+        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0), ...lob };
         // lenient: repair what can be repaired without guessing (key columns, ids), then judge the file again
         const fix = repairKeys(r.db);
         const g = fix.repaired.length ? importChecks(r.db, r.findings, format) : f;
@@ -236,6 +244,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const ops = Array.isArray(a.operations) ? a.operations : [];
       const pn = ops.findIndex((o: any) => o?.op === 'set_notebook' && (o.activity == null || o.activity === ''));
       if (pn >= 0 && (s.format === 'mspdi' || s.format === 'mpx')) return { ok: false, error: { code: 'unsupported_for_format', index: pn, op: ops[pn], format: s.format, message: `A project notebook cannot be kept in a ${s.format === 'mpx' ? 'MPX' : 'Microsoft Project XML'} file: Microsoft Project has no notebook topics, and its project notes do not map onto a P6 notebook.`, hint: 'Nothing was changed. Save the project as XER or P6 XML (save with format xer or p6xml), open that, and set the notebook there; or put the text on an activity notebook.' } };
+      // an LOB plan's activities: their structure is the plan's (lob_edit), progress and the rest are free
+      const lobRefusal = lobGuard(s.db, ops);
+      if (lobRefusal) return { ok: false, error: { code: 'op_failed', message: lobRefusal, hint: 'Use lob_edit for an LOB plan’s durations, crews, locations and logic; progress, notes, resources and other codes edit as usual.' } };
       let r!: ReturnType<typeof applyOps>;
       try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true }); if (!r.ok) throw new Error('refused'); }); }
       catch (e) { if (r && !r.ok) return { ok: false, error: { code: 'op_failed', ...r.error, hint: 'Fix that operation (the message says what is wrong) and send the list again; nothing was changed.' } }; throw e; }
@@ -273,7 +284,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const res = change(s, ctx.caller, 'Schedule', (d) => {
         // with "project" the data date moves on that project only; the others schedule on their own
         if (only && t != null) d.tables.PROJECT.rows.find((p) => p.proj_id === only)!.last_recalc_date = formatP6Date(t);
-        const x = scheduleProjects(d, todo, { ...over, ...(t != null && !only ? { dataDate: t } : {}) }); if (x.ok) syncAssignmentDates(d); return x;
+        const x = scheduleWithLob(d, todo, s.hpd, { ...over, ...(t != null && !only ? { dataDate: t } : {}) }, lobSidecars.get(s.handle)).schedule; if (x.ok) syncAssignmentDates(d); return x;
       });
       if (!res.ok) { dropLast(s); return { ok: false, loops: res.loops ?? [], error: { code: 'schedule_failed', message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: res.loops?.length ? 'The network has loops (loops lists them): fix the logic, or schedule with break_loops: true to leave out the links that close them for this run; nothing was changed.' : 'Fix the reported problem (often a missing calendar) and schedule again; nothing was changed.' } }; }
       const code = new Map((s.db.tables.TASK?.rows ?? []).map((x) => [x.task_id, x.task_code]));
@@ -286,7 +297,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     }
     case 'update_progress': {
       const t = dd(a.data_date) ?? fail('bad_input', 'Give data_date.', 'The new data date, YYYY-MM-DD.');
-      const res = change(s, ctx.caller, 'Update Progress', (d) => { const by = Object.fromEntries(allIds(d).map((id) => [id, updateProgress(d, id, t)])); const x = scheduleProjects(d, allIds(d), { dataDate: t }); if (x.ok) syncAssignmentDates(d); return { ok: x.ok, finish: iso(x.stats.finish), progress: by, errors: x.findings.filter((f) => f.severity === 'error').map((f) => f.message) }; });
+      const res = change(s, ctx.caller, 'Update Progress', (d) => { const by = Object.fromEntries(allIds(d).map((id) => [id, updateProgress(d, id, t)])); const x = scheduleWithLob(d, allIds(d), s.hpd, { dataDate: t }, lobSidecars.get(s.handle)).schedule; if (x.ok) syncAssignmentDates(d); return { ok: x.ok, finish: iso(x.stats.finish), progress: by, errors: x.findings.filter((f) => f.severity === 'error').map((f) => f.message) }; });
       if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.errors.join(' '), hint: 'Scheduling failed, so the progress update was undone; fix the problem and try again.' } }; }
       return res;
     }
@@ -376,6 +387,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       // the 4D model, links and rules travel beside the file (<file>.4d.json); XER and P6 XML have no place for them
       const sidecar = fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml' ? save4dSidecar(s.db, path, projIds ?? allIds(s.db), writeOut) : null;
       if (sidecar) notes.push(`4D links saved beside it: ${basename(sidecar)}`);
+      // the LOB plans travel inside the XER / P6 XML (a notebook); a copy beside it in case P6 damages that notebook
+      const lobText = fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml' ? lobSidecarText(s.db, projIds ?? allIds(s.db)) : null;
+      if (lobText) { writeOut(`${path}.lob.json`, lobText); notes.push(`LOB plans also saved beside it: ${basename(path)}.lob.json`); }
       if (!projIds || allIds(s.db).length === 1) { s.dirty = false; s.savedTo = path; }
       if ((fmt === 'mspdi' || fmt === 'mpx') && (s.db.tables.WBSMEMO?.rows.length || s.db.tables.TASKMEMO?.rows.length)) notes.push('Notebooks (project, WBS and activity) are not written to Microsoft Project files; save as XER or P6 XML to keep them.');
       if (repairs) {
@@ -468,6 +482,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   if (analysed !== undefined) return analysed;
   const fourd = await runFourD(name, a, s, helpers);
   if (fourd !== undefined) return fourd;
+  const lobbed = await runLob(name, a, s, helpers);
+  if (lobbed !== undefined) return lobbed;
   if (LOOKUPS.some((t) => t.name === name)) {
     const { handle: _h, caller: _c, async: _a, ...args } = a;
     return runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
@@ -578,8 +594,15 @@ const FILES: Record<string, { read: string[]; opens: boolean }> = {
   export_pdf: { read: ['settings.font_path'], opens: false }, run_report: { read: ['settings.font_path'], opens: false },
   windows_analysis: { read: ['updates[].path'], opens: false },
   ...FOURD_FILES,
+  ...LOB_FILES,
 };
-export const toolsList = () => TOOLS.map((t) => (FILES[t.name] ? { ...t, _meta: { 'whiq/files': FILES[t.name] } } : t));
+/** P6CLONE_TOOLSETS (e.g. "core,analysis,4d,lob"): a host that wants fewer tools lists only some groups; default all. */
+const toolsetOf = (name: string) => (FOURD_NAMES.has(name) ? '4d' : LOB_NAMES.has(name) ? 'lob' : ANALYSIS_NAMES.has(name) ? 'analysis' : 'core');
+const ANALYSIS_NAMES = new Set(ANALYSIS_TOOLS((x) => x).map((t) => t.name));
+export const toolsList = () => {
+  const sets = process.env.P6CLONE_TOOLSETS ? new Set(process.env.P6CLONE_TOOLSETS.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean)) : null;
+  return TOOLS.filter((t) => !sets || sets.has(toolsetOf(t.name))).map((t) => (FILES[t.name] ? { ...t, _meta: { 'whiq/files': FILES[t.name] } } : t));
+};
 
 // ---------------------------------------------------------------- start
 export function housekeeping(): void { setInterval(() => { try { sweepIdle(); sweepJobs(); } catch { /* keep serving */ } }, 60000).unref(); }
