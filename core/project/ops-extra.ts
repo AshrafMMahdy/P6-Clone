@@ -127,6 +127,8 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
    *  and with strict, refused unless that tells them apart. */
   const codeType = (S: (typeof CODE_SUBJECTS)[keyof typeof CODE_SUBJECTS], name: unknown, projId?: string, strict = false) => {
     let hits = pick(rows(db, S.type), (t) => lc(t[S.tname]) === lc(name));
+    // in a baseline: its own code types only (a global one, or the live project's, is not the baseline's to rename)
+    if (op.in_baseline === true) return hits.find((t) => t.proj_id === projId) ?? fail(`No code type "${name}" of the baseline "${op.project}" (global code types are renamed once, without in_baseline).`);
     if (hits.length > 1 && projId) hits = hits.filter((t) => t.proj_id === projId).length ? hits.filter((t) => t.proj_id === projId) : hits;
     if (hits.length > 1 && strict) fail(`Several code types are named "${name}"; add "project" to say whose.`);
     return hits[0] ?? fail(`No code type "${name}" (add it with {"op":"add_code_type"}).`);

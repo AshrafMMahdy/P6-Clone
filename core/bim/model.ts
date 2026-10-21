@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { chunkBytesOf, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type IfcElement, type IfcIndex } from './parse.ts';
 import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, newGeomStore, type Extras, type GeomStore } from './element.ts';
 import { elementsByGuid } from './lookup.ts';
@@ -26,7 +26,7 @@ const memory = new Map<string, Model>();
 // the tiles depend on their size setting, so it is part of the name
 const cacheName = (hash: string) => `${hash}-v${INDEX_FORMAT}-t${Math.round(tileBytesOf() / 1048576)}`;
 const cacheDir = () => { const d = process.env.P6CLONE_MODEL_CACHE || join(tmpdir(), 'p6clone-ifc-cache'); mkdirSync(d, { recursive: true }); return d; };
-/** Caches of an older format are set aside here (renamed, never deleted): opening the model again reads it afresh. */
+/** Caches of an older format are set aside here (renamed, kept for the cache's days, then pruned): opening the model again reads it afresh. */
 export const SUPERSEDED = 'superseded';
 
 export function fileHash(path: string): Promise<string> {
@@ -53,7 +53,22 @@ type LoadOptions = { geometry?: boolean; chunkBytes?: number; hash?: string; onP
  *  rvt.ts / nwd.ts). geometry: false skips meshing (faster; no tiles, no derived volumes). A model cached without
  *  geometry is meshed from its cached index when geometry is asked for. hash: the IFC's own content hash, when the
  *  caller has it (never a Revit or Navisworks file's: the IFC made from it is cached under its own). */
+/** Loads in flight, by file: a second caller waits for the first (two meshing runs of one model would share its tiles
+ *  folder and fingerprints), and reads on only when that load did not give it what it asked for. */
+const inFlight = new Map<string, Promise<Model>>();
 export async function loadModel(path: string, o: LoadOptions = {}): Promise<Model> {
+  const key = resolve(path);
+  for (let p = inFlight.get(key); p; p = inFlight.get(key)) {
+    const m = await p.catch(() => null);
+    if (m && (o.geometry === false || m.index.geometryStatus !== 'skipped')) return m;
+    if (inFlight.get(key) === p) break;
+  }
+  const run = loadModelNow(path, o);
+  inFlight.set(key, run);
+  try { return await run; } finally { if (inFlight.get(key) === run) inFlight.delete(key); }
+}
+
+async function loadModelNow(path: string, o: LoadOptions): Promise<Model> {
   if (!existsSync(path)) throw new Error(`No file at ${path}.`);
   if (isNavisworks(path)) {
     const { ifc, source } = await nwdToIfc(path);
@@ -82,8 +97,11 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   const base = join(cacheDir(), cacheName(hash));
   setAsideOld(hash);
   let cached = hit ? { index: hit.index } : existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
-  // a model indexed without geometry: meshed now from its cached index (the STEP pass is not run again)
-  if (cached && want && cached.index.geometryStatus === 'skipped') {
+  // a model indexed without geometry: meshed now from its cached index (the STEP pass is not run again); so is one whose
+  // meshing failed, once a run of the app (a timeout, or memory short at the time, may not happen again)
+  const retry = cached && want && cached.index.geometryStatus === 'unavailable' && !retried.has(hash);
+  if (retry) retried.add(hash);
+  if (cached && want && (cached.index.geometryStatus === 'skipped' || retry)) {
     const index = cached.index;
     await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
     writeIndex(base, index);
@@ -180,7 +198,7 @@ export function readIndex(base: string): IfcIndex {
 }
 
 /** Caches of this model in an older format (another INDEX_FORMAT, the GLB of format 9, other tile settings): renamed
- *  into superseded/, never deleted, so opening the model reads it afresh. */
+ *  into superseded/ (pruned after the cache's days), so opening the model reads it afresh. */
 export function setAsideOld(hash: string): string[] {
   const dir = cacheDir(), keep = cacheName(hash), moved: string[] = [];
   let names: string[] = [];
@@ -263,9 +281,11 @@ export function loadEstimate(path: string, o: { geometry?: boolean } = {}): numb
 
 // ── the disk cache (OS temp folder unless P6CLONE_MODEL_CACHE): models not used for P6CLONE_MODEL_CACHE_DAYS (14) go,
 // and the oldest go first while it is over P6CLONE_MODEL_CACHE_MB (10240); checked at most once an hour. The
-// superseded/ folder (older formats, set aside) is not touched.
+// superseded/ folder (older formats, set aside) is pruned by age only.
 const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
 let pruned = 0;
+const retried = new Set<string>();
+
 export function pruneCache(now = Date.now()): number {
   if (now - pruned < 3_600_000) return 0;
   pruned = now;
@@ -276,6 +296,12 @@ export function pruneCache(now = Date.now()): number {
   for (const f of files) {
     if (now - f.at < days * 86_400_000 && total <= cap) break;
     try { rmSync(f.p, { recursive: true, force: true }); total -= f.size; removed++; } catch { /* in use */ }
+  }
+  // what was set aside (older formats) goes on the same days: it is never read again, only kept a while
+  const old = join(dir, SUPERSEDED);
+  for (const f of existsSync(old) ? readdirSync(old) : []) {
+    const p = join(old, f);
+    try { if (now - statSync(p).mtimeMs >= days * 86_400_000) { rmSync(p, { recursive: true, force: true }); removed++; } } catch { /* in use */ }
   }
   return removed;
 }

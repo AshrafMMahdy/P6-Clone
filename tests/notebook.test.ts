@@ -188,4 +188,9 @@ test('update_baseline renames a baseline; in_baseline renames its activities, WB
   assert.match(bad({ op: 'update_activity', in_baseline: true, project: 'P1', id: 'X1', name: 'x' }), /No baseline "P1"/);
   assert.match(bad({ op: 'add_activity', in_baseline: true, project: 'P1 - B1', name: 'x' }), /in_baseline works with/);
   assert.match(bad({ op: 'update_baseline', baseline: 'P1 - B1', new_name: 'P1' }), /already exists/);
+  // a global code type is not the baseline's: in_baseline does not rename it for every project
+  ok(db, [{ op: 'add_code_type', name: 'Zone' }, { op: 'add_code_value', type: 'Zone', code: 'N', name: 'North' }]);
+  assert.match(bad({ op: 'update_code_type', in_baseline: true, project: 'P1 - B1', name: 'Zone', new_name: 'Area' }), /No code type "Zone" of the baseline/);
+  assert.match(bad({ op: 'update_code_value', in_baseline: true, project: 'P1 - B1', type: 'Zone', code: 'N', name: 'x' }), /No code type "Zone" of the baseline/);
+  assert.ok(rows(db, 'ACTVTYPE').some((t) => t.actv_code_type === 'Zone'));
 });

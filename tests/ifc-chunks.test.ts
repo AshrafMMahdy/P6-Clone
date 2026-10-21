@@ -23,7 +23,8 @@ test('chunked geometry equals a single run (Duplex in many chunks: every mesh, e
   assert.ok(Number(/meshed in (\d+)/.exec(cut.index.geometryNote!)![1]) > 5);
   const a = volumes(one.index), b = volumes(cut.index);
   assert.equal(b.size, a.size);
-  for (const [g, v] of a) assert.ok(Math.abs((b.get(g) ?? -1) - v) < 1e-6, `${g}: ${v} vs ${b.get(g)}`);
+  // an open mesh has no volume in either run (null); the rest agree to the micro-cubic-metre
+  for (const [g, v] of a) { const w = b.get(g); assert.ok(w === v || (w != null && v != null && Math.abs(w - v) < 1e-6), `${g}: ${v} vs ${w}`); }
 });
 
 /** A synthetic IFC4 storey of n walls (extruded rectangles), a few MB. */

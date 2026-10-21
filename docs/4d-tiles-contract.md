@@ -138,6 +138,7 @@ Error codes: `webgl_context_lost`, `gpu_out_of_memory`, `browser_out_of_memory`,
 `load_failed`. The message names the size, e.g. *"The browser could not hold the 4D model, 1,103 MB of geometry in 36
 tiles (2,500,000 elements, 30,000,000 triangles): out of GPU memory at tile 21 of 36, with 640 MB loaded. Render it
 where there is more GPU memory, or ask for boxes (each element drawn as its bounding box)."*
+On the server (`render_4d`) these come back as the tool error `render_failed` with the code in `data.reason`.
 
 **The platform's change for the pickup window**: `clientRender4d.ts` waits 90 s for `ready()`. A big model's tiles can
 take longer. Take `WHIQ4D_EXPORT.started` (or the `whiq4d:started` message) as the page alive, and wait while
@@ -209,5 +210,7 @@ What this shows, and what is still over:
 - `INDEX_FORMAT` 10; cache files `<hash>-v10-t<tileMB>.ndjson` (compact index), `.geom` (fingerprints),
   `.tiles/` (the tile folder).
 - Caches of other formats (the GLB of format 9, other tile sizes) are **renamed** into `<cache>/superseded/` the first
-  time the model is opened again, never deleted; the model is then read and meshed afresh. The 14-day / 10 GB pruning
-  does not touch `superseded/`.
+  time the model is opened again; the model is then read and meshed afresh. `superseded/` is pruned by age only (the
+  same 14 days), never by size.
+- Two loads of one file in one server share the one run (the second waits for it); a model whose meshing failed is
+  meshed again once per run of the server when geometry is asked for, from its cached index.

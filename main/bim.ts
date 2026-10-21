@@ -54,7 +54,7 @@ export function registerBim(getWin: () => BrowserWindow | null): void {
     try { const m = await loadModel(p); viewerFolder(m); return { ok: true, ...answer(m) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
   ipcMain.handle('bim:load', async (_e, o: { hash: string; path: string }) => {
-    try { const m = cachedModel(o.hash) ?? (existsSync(o.path) ? await loadModel(o.path) : null); if (!m) return { ok: false, error: `The model ${o.path} is not cached and the file is gone; open it again.` }; viewerFolder(m); return { ok: true, ...answer(m) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
+    try { const c = cachedModel(o.hash), m = c && c.index.geometryStatus !== 'skipped' ? c : existsSync(o.path) ? await loadModel(o.path) : c; /* an index cached without geometry (an agent reopened it for links) is meshed for the view */ if (!m) return { ok: false, error: `The model ${o.path} is not cached and the file is gone; open it again.` }; viewerFolder(m); return { ok: true, ...answer(m) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
   ipcMain.handle('bim:text', (_e, path: string) => readFileSync(path, 'latin1'));
   ipcMain.handle('bim:writeFiles', async (_e, o: { title: string; files: { name: string; data: string | Uint8Array }[] }) => {

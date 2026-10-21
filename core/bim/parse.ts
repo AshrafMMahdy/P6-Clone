@@ -82,7 +82,7 @@ export type IfcMeshes = Map<number, { positions: number[]; indices: number[] }>;
 
 /** Index format version — bump when the index shape, the parser's selection rules or the display tiles change, so
  *  caches are read again. */
-export const INDEX_FORMAT = 10; // 10: compact index (shared records, fingerprints in a side file), display tiles instead of one GLB. 9: quantity kinds, sets and units, measure-typed properties. 8: models past one web-ifc run meshed in chunks. 7: the length unit the project assigns. 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
+export const INDEX_FORMAT = 11; // 11: no derived volume for an open mesh. 10: compact index (shared records, fingerprints in a side file), display tiles instead of one GLB. 9: quantity kinds, sets and units, measure-typed properties. 8: models past one web-ifc run meshed in chunks. 7: the length unit the project assigns. 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
 
 export interface ParseIfcOptions {
   /** Legacy switch — mesh arrays are never returned any more; geometry itself is governed by `geometry`. */
@@ -217,7 +217,7 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
     for (let k = 0; k + 13 <= rows.length; k += 13) {
       const o = rows[k];
       if (store) putGeometry(store, o, rows.subarray(k + 4, k + 10), rows.subarray(k + 10, k + 13), rows[k + 3], rows[k + 2]);
-      else { const e = index.elements[o] as IfcElement & { geom: GeomFingerprint | null; derivedVolumeM3: number | null }; if (e) { e.geom = { bbox: [...rows.subarray(k + 4, k + 10)] as GeomFingerprint['bbox'], centroid: [...rows.subarray(k + 10, k + 13)] as GeomFingerprint['centroid'], volume: rows[k + 3], triangles: rows[k + 2] }; e.derivedVolumeM3 = rows[k + 3]; } }
+      else { const e = index.elements[o] as IfcElement & { geom: GeomFingerprint | null; derivedVolumeM3: number | null }; if (e) { e.geom = { bbox: [...rows.subarray(k + 4, k + 10)] as GeomFingerprint['bbox'], centroid: [...rows.subarray(k + 10, k + 13)] as GeomFingerprint['centroid'], volume: rows[k + 3], triangles: rows[k + 2] }; e.derivedVolumeM3 = Number.isNaN(rows[k + 3]) ? null : rows[k + 3]; } }
     }
     state.meshed += sum.elements; state.failures += sum.failures; state.maxAbsCoord = Math.max(state.maxAbsCoord, sum.maxAbsCoord);
     if (tilesDir) {

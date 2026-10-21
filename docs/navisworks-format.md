@@ -79,7 +79,23 @@ to 4 bytes.
 Checked: the hello walls' mesh volumes are Revit's to 0.01 ft3; on the user's 2016 project all 325 elements with a Revit
 volume match it within 1%.
 
+## TimeLiner, selection sets, path map (`LcTlTimelinerElement`, `LcOpSelectionSetsElement`, `LcOpNwfPathMap`)
+
+Decoded in `core/bim/nwd/timeliner.ts` (its header has the byte layouts). In short:
+- A task is u32 0x3d, its name, six strings, a u32, two strings, the actual start and end (int64 Unix seconds of the
+  wall clock, aligned to 8), three flags, the planned start and end, three flags, the task type, a string, the explicit
+  selections (count; each a u32, a count and item references) and the attached sets
+  (`lcop_selection_set_tree/<name>`). Before the tasks: the appearances (0x3f) and task types (0x3e). Tasks are found by
+  this shape, so child tasks are found too.
+- A selection set is kind 5 (4 is a folder), its name, a u32, a 16-byte GUID, a u32, then 0 and an explicit selection
+  (count, item references, 0xffffffff, an aligned u64), or a search (conditions in an object stream; not read).
+- Item references are, in an .nwd / .nwc, tree items in pre-order (the file is 0; checked: the gatehouse sets select the
+  layers their names say), and in an .nwf, 1-based components of the path map. A component is kind 0x5f (under the
+  model's root) or 0x57 (below it), its 0-based position among its parent's children, a class, the attribute's display
+  name and the item's name (0x5f: and an aligned u64); components chain with -2, and an entry starting with 0x57 is a
+  further child of the last 0x5f. Checked on the villa: 12 sets resolve to the levels and categories their names say.
+
 ## Not read yet
 
-Lines and points (blocks 0x5f / 0x60), texture coordinates and normals (the viewer computes its own), TimeLiner (`LcTlTimelinerElement`), selection sets, clash tests,
-point clouds, `lichunk-007` files.
+Lines and points (blocks 0x5f / 0x60), texture coordinates and normals (the viewer computes its own), search-set
+conditions, clash tests, point clouds, `lichunk-007` files.

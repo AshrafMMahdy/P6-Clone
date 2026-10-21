@@ -8,7 +8,7 @@ import { writeP6Xml } from '../core/xml/p6xml.ts';
 import { cachedModel, fileHash, loadModel, loadNeeds, modelBytes, releaseModels, type Model } from '../core/bim/model.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
-import { countMemory, effectiveBudget, fail, freeMemory, pathArg, reserveMemory, sessions, type Session } from './runtime.ts';
+import { admit, countMemory, effectiveBudget, fail, freeMemory, pathArg, reserveMemory, sessions, type Session } from './runtime.ts';
 import type { AnalysisHelpers } from './analysis.ts';
 import type { QuantityKind } from '../core/bim/parse.ts';
 import { nextId } from '../core/db.ts';
@@ -63,8 +63,10 @@ const mbs = (b: number) => `${Math.round(b / 1048576).toLocaleString('en')} MB`;
 async function readModel(path: string, o: { geometry?: boolean; tick?: AnalysisHelpers['tick'] } = {}): Promise<Model> {
   if (!existsSync(path)) return fail('model_unreadable', `No file at ${path}.`, 'Give the path of an .ifc file inside the storage root.');
   const hash = await fileHash(path);
-  const free = freeMemory(), budget = effectiveBudget();
-  const need = loadNeeds(path, { geometry: o.geometry, free, hash });
+  const budget = effectiveBudget();
+  let free = freeMemory(), need = loadNeeds(path, { geometry: o.geometry, free, hash });
+  // idle projects moved out make room first (as for any file); only what still does not fit is refused
+  if (need.total <= budget && need.total > free) { try { admit(need.total); } catch { /* refused below, in words */ } free = freeMemory(); need = loadNeeds(path, { geometry: o.geometry, free, hash }); }
   if (need.total > budget || need.total > free) {
     const size = existsSync(path) ? (await import('node:fs')).statSync(path).size : 0;
     const parts = [need.index ? `${mbs(need.index)} for the index` : '', need.mesh ? `${mbs(need.mesh)} for meshing it in chunks of ${mbs(need.chunkBytes)} of the IFC` : ''].filter(Boolean).join(' and ');
@@ -77,17 +79,22 @@ async function readModel(path: string, o: { geometry?: boolean; tick?: AnalysisH
   try { return await loadModel(path, { geometry: o.geometry, ...(need.chunkBytes ? { chunkBytes: need.chunkBytes } : {}), hash, ...(o.tick ? { onProgress: (d, t, n) => o.tick!(d, t, n) } : {}) }); } finally { release(); }
 }
 
+/** Where a render the browser could not hold would fit: a crashed page ran out of the machine's memory, the rest out of the GPU's */
+const roomFor = (code: string) => (code === 'browser_out_of_memory' ? 'render it where more memory is free for the browser beside the server' : 'render it where there is more GPU memory');
+
 /** No 3D model to draw: say why, never draw an empty building. */
 const noGeometry = (m: Model): never => m.index.geometryStatus === 'skipped'
   ? fail('no_geometry', 'The model was opened without geometry.', 'open_model again without geometry: false.')
   : fail('no_geometry', `The model has no 3D geometry: ${m.index.geometryNote ?? 'its geometry did not build'}`, 'Everything without 3D still works (simulate_4d, compare_4d, quantities, links, export_4d); for pictures, fix or split the model and open it again.');
 
 /** The model attached to the project: from memory or the disk cache, else reopened from its file — the index only
- *  (linking, rules, keys and every export need nothing else), unless geometry is asked for. */
-async function modelOf(db: Db, projId: string, required = true): Promise<Model | null> {
+ *  (linking, rules, keys and every export need nothing else), unless geometry is asked for (derived volumes,
+ *  fingerprints, shape matching): then an index cached without geometry is meshed now. */
+async function modelOf(db: Db, projId: string, required = true, o: { geometry?: boolean } = {}): Promise<Model | null> {
   const r = modelRow(db, projId);
   if (!r) return required ? fail('no_model', 'No model is attached to this project.', 'Attach one with open_model {path}.') : null;
-  const m = cachedModel(r.hash) ?? (existsSync(r.path) ? await readModel(r.path, { geometry: false }) : null);
+  let m = cachedModel(r.hash) ?? (existsSync(r.path) ? await readModel(r.path, { geometry: !!o.geometry }) : null);
+  if (m && o.geometry && m.index.geometryStatus === 'skipped' && existsSync(r.path)) m = await readModel(r.path);
   if (!m && required) return fail('model_missing', `The attached model ${r.path} is not cached and the file is gone.`, 'Attach it again with open_model {path}.');
   return m;
 }
@@ -123,7 +130,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         T.rows = T.rows.filter((r) => r.proj_id !== projId || m.byGuid.has(r.guid));
         return { dropped_links: before - T.rows.length };
       });
-      return { model: basename(path), ...(m.source ? { source: m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: ix.lengthScaleSource === 'unit-assignment' ? `${ix.lengthScale} m` : `${ix.lengthScale} m (${ix.lengthScaleSource})`, geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
+      return { model: basename(path), ...(m.source ? { source: m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: ix.lengthScaleSource === 'unit-assignment' ? `${ix.lengthScale} m` : `${ix.lengthScale} m (${ix.lengthScaleSource})`, geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), ...((() => { let n = 0; for (const e of ix.elements) if (e.geom && e.derivedVolumeM3 == null) n++; return n ? { meshed_without_volume: n, volume_note: 'open meshes (a surface, a fitting open at its ends) and stand-in bounding boxes enclose no volume to measure, so they give no derived volume; their authored quantities stand' } : {}; })()), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
     }
     case 'list_elements': {
       const m = (await modelOf(s.db, projId))!;
@@ -137,14 +144,14 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       return { total: hit.length, offset, elements: hit.slice(offset, offset + limit).map((e) => ({ guid: e.guid, class: e.ifcClass, storey: e.storey, name: e.name, ...(e.typeName ? { type: e.typeName } : {}), ...(e.material ? { material: e.material } : {}), activities: (byGuid.get(e.guid) ?? []).map((l) => `${code.get(l.task_id)}${l.role !== 'built' ? ` (${l.role})` : ''}`), ...(Array.isArray(a.fields) ? { fields: Object.fromEntries(a.fields.map((f: string) => [f, elementValue(e, f) ?? null])) } : {}) })) };
     }
     case 'element_info': {
-      const m = (await modelOf(s.db, projId))!;
+      const m = (await modelOf(s.db, projId, true, { geometry: true }))!;
       const guids = (Array.isArray(a.guids) ? a.guids : []).slice(0, 200).map(String);
       const { byGuid } = linkMaps(s.db, projId);
       const code = new Map(rows(s.db, 'TASK').map((t) => [t.task_id, t.task_code]));
       return { elements: guids.map((g) => { const e = m.byGuid.get(g); return e ? { ...plainElement(e), activities: (byGuid.get(g) ?? []).map((l) => ({ activity: code.get(l.task_id), role: l.role })) } : { guid: g, error: 'not in the model' }; }) };
     }
     case 'quantities': {
-      const m = (await modelOf(s.db, projId))!;
+      const m = (await modelOf(s.db, projId, true, { geometry: true }))!;
       const by = String(a.group_by ?? 'class');
       const { byGuid } = linkMaps(s.db, projId);
       const tasks = new Map(rows(s.db, 'TASK').filter((t) => t.proj_id === projId).map((t) => [t.task_id, t]));
@@ -284,7 +291,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
           mkdirSync(dir, { recursive: true });
           const page = writeViewer({ dir: mkdtempSync(join(tmpdir(), 'p6c4d-')), model: { tiles: g.tiles!, hash: g.hash, index: g.index }, timeline: viewerTimeline(s.db, projId, g.index, [source]), options: { left: source, interactive: false, view: a.view ?? 'iso', overlays: ['date', 'legend', 'activity_list'] }, title: 'snapshot', inlineScript: true, file: 'snapshot.html' })[0];
           let pngs: Buffer[];
-          try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`))); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? 'The browser could not hold the model: render on a machine with more GPU memory.' : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).'); throw e; } finally { rmSync(dirname(page), { recursive: true, force: true }); }
+          try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`))); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): ${roomFor(e.code)}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).', e.code ? { data: { reason: e.code } } : undefined); throw e; } finally { rmSync(dirname(page), { recursive: true, force: true }); }
           snapshots = pngs.map((png, i) => { const p = join(dir, `snapshot-${String(a.snapshots[i]).slice(0, 10)}.png`); h.writeOut(p, png); return p; });
         }
       }
@@ -395,7 +402,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       if (!chrome) return { kind, rendered: false, viewer: page, ...(pageFiles.length > 1 ? { written: pageFiles } : {}), display, client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width, height, ...(pageFiles.length > 1 ? { model_folder: dirname(pageFiles[1]), files: pageFiles.slice(1), contract: 'docs/4d-tiles-contract.md (p6c-4d-tiles v1)' } : {}) }, note: `No Chromium here (the server’s P6CLONE_CHROMIUM is not set), so nothing was rendered: the viewer page is written${pageFiles.length > 1 ? ' with the model\u2019s tiles in a folder beside it' : ' (self-contained)'}; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform\u2019s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.` };
       if (m.index.elements.length > 200_000) compactHeap(); // the timeline's garbage goes before the browser takes its memory
       await h.tick(0, 1, `loading the model (${display.mb} MB in ${display.tiles} tiles) in Chromium`);
-      const failed = (e: unknown) => { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): render it where there is more GPU memory${boxes ? '' : ', or ask for boxes: true (each element drawn as its bounding box)'}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.'); throw e; };
+      const failed = (e: unknown) => { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): ${roomFor(e.code)}${boxes ? '' : ', or ask for boxes: true (each element drawn as its bounding box)'}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.', e.code ? { data: { reason: e.code } } : undefined); throw e; };
       const onLoad = (d: number, t: number) => h.tick(d, Math.max(1, t), `loading tile ${d} of ${t} in Chromium`);
       const timeoutMs = 120 * 60_000;
       const what = `the model: ${display.tiles} tiles, ${display.mb} MB, ${display.triangles.toLocaleString('en-US')} triangles`;
@@ -422,7 +429,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       } finally { if (chrome) rmSync(pageDir, { recursive: true, force: true }); }
     }
     case 'relink_model': {
-      const old = (await modelOf(s.db, projId))!;
+      const old = (await modelOf(s.db, projId, true, { geometry: true }))!;
       const path = pathArg(a.path);
       let m: Model;
       try { m = await readModel(path); } catch (e) { if ((e as { code?: string }).code === 'memory_budget') throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, 'Give the path of the revised .ifc file.'); }
