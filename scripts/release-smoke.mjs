@@ -64,6 +64,7 @@ if (tia.delay_days == null) failures.push(`tia: ${JSON.stringify(tia).slice(0, 2
 await call('compare', { handle, baseline: 'project' });
 
 // 4D: the IFC engine (ifc/ beside the bundle: web-ifc and the geometry worker in its own process)
+for (const f of ['geomWorker.mjs', 'geomChunk.mjs', 'web-ifc/web-ifc-node.wasm']) if (!existsSync(join(folder, 'ifc', f))) failures.push(`the archive has no ifc/${f}`);
 if (!existsSync(ifcFixture)) failures.push(`no IFC fixture at ${ifcFixture}`);
 else {
   const m4 = await call('new_project', { id: 'S4D', start: '2026-03-02' });

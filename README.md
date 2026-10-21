@@ -307,9 +307,13 @@ in `addins/navisworks` (source and build script; needs a Navisworks licence, unt
 Server settings for 4D: `P6CLONE_CHROMIUM` (a Chromium or Chrome for `render_4d` images and video on the server; a
 tool argument never names a program), `P6CLONE_FFMPEG` (turns a WebM recording into MP4), `P6CLONE_MODEL_CACHE`
 (the parsed-model cache, default the OS temp folder) with `P6CLONE_MODEL_CACHE_DAYS` (14) and `P6CLONE_MODEL_CACHE_MB`
-(10240). Models count in the memory budget. There is no model size limit of the clone's own: the index streams, and
-the geometry process takes 60% of the machine's memory; web-ifc's WebAssembly memory stops at 4 GB, past which a
-model keeps its index without geometry. Revit `.rvt` files are read once exported to IFC.
+(10240). Models count in the memory budget. There is no model size limit of the clone's own: the index streams; a model bigger than `P6CLONE_GEOM_CHUNK_MB` (300),
+or one too big for a single web-ifc run (its WebAssembly memory stops at 4 GB), is cut into chunks, each meshed on its
+own and merged; past `P6CLONE_VIEW_BATCH` (50,000) elements the display model merges them into a few meshes coloured
+per element, and past `P6CLONE_VIEW_MAX_MB` (1024) it draws the most detailed elements as boxes (a 1.7 GB IFC of 2.5
+million elements: meshed in 6 chunks in about 4 minutes, a 1.1 GB display model a browser draws). What
+bounds a model is the server's memory: give the Node process a heap to match (`--max-old-space-size`,
+`P6CLONE_MEM_BUDGET_MB`). Revit `.rvt` files are read once exported to IFC.
 
 Baselines: any number per project (P6 keeps any number; BL1-BL3 are only the ones assigned for display). Tools that
 take a baseline accept any saved baseline by name. Microsoft Project XML brings Baseline and Baseline1-10 in as saved
