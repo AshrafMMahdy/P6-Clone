@@ -9,7 +9,14 @@ const FX = join(import.meta.dirname, 'fixtures', '4d');
 const call = async (name: string, args: Record<string, unknown>) => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const r = await callTool(name, args);
-  return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any };
+  let d = toolResult(r.out, r.isError).structuredContent as any, err = r.isError;
+  // past the server's soft timeout (a slow runner) the call becomes a job: follow it to its answer
+  while (!err && d?.job_id && d.status === 'running' && !args.async) {
+    const j = toolResult((await callTool('job_status', { job_id: d.job_id, wait_seconds: 20 })).out, false).structuredContent as any;
+    if (j.status === 'running') continue;
+    if (j.status === 'done') d = j.result; else { err = true; d = j; }
+  }
+  return { err, d };
 };
 if (!existsSync(join(import.meta.dirname, '..', 'dist-viewer', 'viewer4d.js'))) spawnSync(process.execPath, [join(import.meta.dirname, '..', 'scripts', 'build-viewer4d.mjs')]);
 const CHROME = [process.env.P6CLONE_CHROMIUM, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/chromium', '/usr/bin/google-chrome'].find((p) => p && existsSync(p));
