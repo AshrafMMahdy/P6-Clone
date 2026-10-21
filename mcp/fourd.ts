@@ -398,15 +398,16 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const failed = (e: unknown) => { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): render it where there is more GPU memory${boxes ? '' : ', or ask for boxes: true (each element drawn as its bounding box)'}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.'); throw e; };
       const onLoad = (d: number, t: number) => h.tick(d, Math.max(1, t), `loading tile ${d} of ${t} in Chromium`);
       const timeoutMs = 120 * 60_000;
+      const what = `the model: ${display.tiles} tiles, ${display.mb} MB, ${display.triangles.toLocaleString('en-US')} triangles`;
       if (kind === 'images') {
         const from = parseP6Date(a.from ? String(a.from) : timeline.start ?? '')!, to = parseP6Date(a.to ? String(a.to) : timeline.finish ?? '')!;
         const dates: string[] = []; for (let d = from; d <= to && dates.length < 500; d += options.step! * 1440) dates.push(formatP6Date(d));
         let pngs: Buffer[];
-        try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, dates, h.tick), { width, height, onLoad, timeoutMs }); } catch (e) { return failed(e); }
+        try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, dates, h.tick), { width, height, onLoad, timeoutMs, what }); } catch (e) { return failed(e); }
         return { kind, rendered: true, display, written: pngs.map((png, i) => { const p = join(dir, `${name}-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, png); return p; }) };
       }
       let v: { mime: string; frames: number; bytes: Buffer };
-      try { v = await inChromium(chrome, page, (ev) => renderVideo(ev, { from: a.from, to: a.to, step: options.step, fps, width, height, ...(format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1' ? { codec: 'vp9' } : {}) }, h.tick), { width, height, onLoad, timeoutMs }); } catch (e) { return failed(e); }
+      try { v = await inChromium(chrome, page, (ev) => renderVideo(ev, { from: a.from, to: a.to, step: options.step, fps, width, height, ...(format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1' ? { codec: 'vp9' } : {}) }, h.tick), { width, height, onLoad, timeoutMs, what }); } catch (e) { return failed(e); }
       let note: string | undefined;
       // MP4 everywhere: a browser without an H.264 encoder (Chromium for Testing) records WebM, which ffmpeg turns into MP4
       if (format === 'mp4' && !v.mime.includes('mp4')) {

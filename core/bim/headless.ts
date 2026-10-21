@@ -41,7 +41,7 @@ type Evaluate = (expression: string, awaitPromise?: boolean) => Promise<unknown>
 
 /** Load the viewer page headless and run work against it (evaluate expressions in the page). onProgress may throw (a
  *  cancelled job): the browser is closed and the error passes through. */
-export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate) => Promise<T>, o: { width?: number; height?: number; timeoutMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void } = {}): Promise<T> {
+export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate) => Promise<T>, o: { width?: number; height?: number; timeoutMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void; what?: string } = {}): Promise<T> {
   const profile = mkdtempSync(join(tmpdir(), 'p6c4d-chrome-'));
   const http = await serveFolder(dirname(page));
   // the renderer's heap may grow with the model (a tile at a time); the GPU process (SwiftShader) holds the geometry
@@ -59,7 +59,7 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
   // a program that is not Chromium closes the pipes at once: those errors end the render, not the server
   write.on('error', (e: Error) => failAll(new RenderFailed(`The Chromium at P6CLONE_CHROMIUM does not speak the DevTools protocol: ${e.message}`)));
   read.on('error', (e: Error) => failAll(new RenderFailed(`The Chromium at P6CLONE_CHROMIUM does not speak the DevTools protocol: ${e.message}`)));
-  let buf = Buffer.alloc(0), id = 0;
+  let buf = Buffer.alloc(0), id = 0, pageSession = '', loaded = ' while loading the viewer';
   read.on('data', (d: Buffer) => {
     buf = Buffer.concat([buf, d]);
     for (let z = buf.indexOf(0); z >= 0; z = buf.indexOf(0)) {
@@ -67,6 +67,10 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
       try { msg = JSON.parse(buf.subarray(0, z).toString('utf8')); } catch { failAll(new RenderFailed('The program at P6CLONE_CHROMIUM sent something that is not the DevTools protocol.')); return; } finally { buf = buf.subarray(z + 1); }
       const w = msg.id != null ? waiting.get(msg.id) : undefined;
       if (w) { waiting.delete(msg.id); if (msg.error) w.rej(new Error(msg.error.message)); else w.res(msg.result); }
+      // the page's process gone (killed for memory, most often): its calls never answer, so the render ends here
+      else if (msg.method === 'Inspector.targetCrashed' || msg.method === 'Target.targetCrashed' || (msg.method === 'Target.detachedFromTarget' && msg.params?.sessionId && msg.params.sessionId === pageSession)) {
+        failAll(new RenderFailed(`The headless Chromium's page crashed${loaded}${o.what ? ` (${o.what})` : ''}: most often the machine ran out of memory for the browser beside the server.`, 'browser_out_of_memory'));
+      }
     }
   });
   const send = (method: string, params: object = {}, sessionId?: string) => new Promise<any>((res, rej) => {
@@ -78,6 +82,9 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
   try {
     const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+    pageSession = sessionId;
+    await send('Target.setDiscoverTargets', { discover: true });
+    await send('Inspector.enable', {}, sessionId);
     await send('Emulation.setDeviceMetricsOverride', { width: o.width ?? 1280, height: o.height ?? 760, deviceScaleFactor: 1, mobile: false }, sessionId);
     await send('Page.enable', {}, sessionId);
     await send('Page.navigate', { url: `${http.base}${encodeURIComponent(basename(page))}` }, sessionId);
@@ -95,10 +102,11 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
       if (st?.state === 'ready') break;
       if (st?.state === 'failed') throw new RenderFailed(st.error?.message ?? 'The 4D viewer could not load the model.', st.error?.code);
       const n = st ? st.tiles.loaded : -1;
-      if (n !== seen) { seen = n; since = Date.now(); if (st) await o.onLoad?.(st.tiles.loaded, st.tiles.total); }
+      if (n !== seen) { seen = n; since = Date.now(); if (st) { loaded = ` after loading ${st.tiles.loaded} of ${st.tiles.total} tiles`; await o.onLoad?.(st.tiles.loaded, st.tiles.total); } }
       if (Date.now() - since > 120_000) throw new RenderFailed(st ? `The 4D viewer loaded ${st.tiles.loaded} of ${st.tiles.total} tiles in the headless Chromium, then nothing more for 2 minutes.` : 'The 4D viewer did not start in the headless Chromium within 2 minutes.');
       await new Promise((r2) => setTimeout(r2, 250));
     }
+    loaded = ' while drawing frames, with every tile loaded';
     return await work(evaluate);
   } finally {
     clearTimeout(timer);

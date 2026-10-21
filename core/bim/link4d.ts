@@ -243,17 +243,21 @@ export function linkStatus(db: Db, projId: string, ix: IfcIndex | null) {
 }
 
 /** The elements of an activity, and the activities of an element. The link rows themselves (a row of a link with no
- *  role is read as built): millions of links make no object of their own. */
+ *  role is read as built): millions of links make no object of their own. Each map is built when first read, so a
+ *  caller that needs one of them (an export: byTask) does not hold the other (millions of entries). */
 export function linkMaps(db: Db, projId: string) {
   type L = { guid: string; task_id: string; role: Role; profile: string };
-  const byTask = new Map<string, L[]>(), byGuid = new Map<string, L[]>();
-  for (const r of realOf(rows(db, T4D.link))) {
-    if (r.proj_id !== projId) continue;
-    const l = (r.role && r.profile != null ? r : { ...r, role: r.role || 'built', profile: r.profile || '' }) as unknown as L;
-    const a = byTask.get(l.task_id); if (a) a.push(l); else byTask.set(l.task_id, [l]);
-    const b = byGuid.get(l.guid); if (b) b.push(l); else byGuid.set(l.guid, [l]);
-  }
-  return { byTask, byGuid };
+  const build = (key: 'task_id' | 'guid') => {
+    const m = new Map<string, L[]>();
+    for (const r of realOf(rows(db, T4D.link))) {
+      if (r.proj_id !== projId) continue;
+      const l = (r.role && r.profile != null ? r : { ...r, role: r.role || 'built', profile: r.profile || '' }) as unknown as L;
+      const a = m.get(l[key]); if (a) a.push(l); else m.set(l[key], [l]);
+    }
+    return m;
+  };
+  let byTask: Map<string, L[]> | undefined, byGuid: Map<string, L[]> | undefined;
+  return { get byTask() { return (byTask ??= build('task_id')); }, get byGuid() { return (byGuid ??= build('guid')); } };
 }
 
 /** Every 4D row of a project, for the <file>.4d.json sidecar; and back. */
