@@ -109,7 +109,7 @@ export function rowIndex(raw: Row[], name: string, key: (r: Row) => string): Map
   const add = (ix: Map<string, number[]>, from: number) => { for (let i = from; i < raw.length; i++) { const k = key(raw[i]); const l = ix.get(k); if (l) l.push(i); else ix.set(k, [i]); } return true; };
   return tableCache(raw, name, () => { const ix = new Map<string, number[]>(); add(ix, 0); return ix; }, add);
 }
-export const dropIndexes = (raw: Row[]) => void ixCache?.delete(raw);
+export const dropIndexes = (raw: Row[]) => { ixCache?.delete(raw); idCache?.delete(raw); }; // a key changed: its ids too
 
 /** Next free numeric id for a table's key. */
 export function nextId(db: Db, tableName: string): number {

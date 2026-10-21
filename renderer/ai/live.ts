@@ -191,7 +191,7 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
       }
       case 'edit_project': {
         const ops = Array.isArray(args.operations) ? args.operations : [];
-        const dels = ops.filter((o: { op?: string }) => o?.op === 'delete_activity' || o?.op === 'dissolve_activity' || o?.op === 'delete_wbs' || o?.op === 'delete_relationship');
+        const dels = ops.filter((o: { op?: string }) => o?.op === 'delete_activity' || o?.op === 'dissolve_activity' || o?.op === 'delete_wbs' || o?.op === 'delete_relationship' || o?.op === 'delete_resource' || o?.op === 'delete_code_value');
         const projId = getUi().openProjects[0];
         let proj = projId ? rows(getDb(), 'PROJECT').find((p) => p.proj_id === projId)?.proj_short_name : undefined;
         // deleting inside a project the assistant created in this session (e.g. trimming a copy) needs no confirmation

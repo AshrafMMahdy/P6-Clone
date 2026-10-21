@@ -169,8 +169,10 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
 /** Delete a project and every row that belongs to it. keepDictionaries keeps global rows. */
 export function deleteProject(db: Db, projId: string, _keepDictionaries = true): void {
   const taskIds = new Set(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => t.task_id));
+  const codeTypes = new Set(rows(db, 'ACTVTYPE').filter((t) => t.proj_id === projId).map((t) => t.actv_code_type_id)); // its project code types
   for (const t of Object.values(db.tables)) {
     if (t.name === 'TASKPRED') { t.rows = t.rows.filter((r) => !taskIds.has(r.task_id) && !taskIds.has(r.pred_task_id)); continue; }
+    if (t.name === 'ACTVCODE') { if (codeTypes.size) t.rows = t.rows.filter((r) => !codeTypes.has(r.actv_code_type_id)); continue; } // their values with them
     if (t.fields.includes('proj_id')) t.rows = t.rows.filter((r) => r.proj_id !== projId);
     else if (t.fields.includes('task_id')) t.rows = t.rows.filter((r) => !taskIds.has(r.task_id));
   }

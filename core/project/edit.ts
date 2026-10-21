@@ -1,10 +1,10 @@
 // Editing a P6 database the way P6 does: new project, activities, relationships, WBS, dates, progress.
 // Shared by the desktop app (renderer/model.ts re-exports these) and the command-line tool.
-import { addField, groupBy, indexBy, nextId, rowIndex, rows, table, tableCache, type Db, type Row } from '../db.ts';
+import { addField, dropIndexes, groupBy, indexBy, nextId, refTarget, rowIndex, rows, table, tableCache, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num, calendarResolver } from '../schedule/cpm.ts';
 import { ENUMS } from '../xer/schema.ts';
-import { realOf, removeWhere } from '../journal.ts';
+import { pick, realOf, removeWhere } from '../journal.ts';
 
 export const isMilestone = (r: Row) => r.task_type === 'TT_Mile' || r.task_type === 'TT_FinMile';
 export const statusOf = (r: Row) => (r.act_end_date ? 'TK_Complete' : r.act_start_date ? 'TK_Active' : 'TK_NotStart');
@@ -138,6 +138,29 @@ export function newProject(db: Db, o: { id: string; name: string; start: string;
   for (const f of ['schedoptions_id', 'proj_id', 'sched_outer_depend_type', 'sched_open_critical_flag', 'sched_lag_early_start_flag', 'sched_retained_logic', 'sched_setplantoforecast', 'sched_float_type', 'sched_calendar_on_relationship_lag', 'sched_use_expect_end_flag', 'sched_progress_override']) addField(S, f);
   S.rows.push({ schedoptions_id: String(nextId(db, 'SCHEDOPTIONS')), proj_id: pid, sched_outer_depend_type: 'SD_Both', sched_open_critical_flag: 'N', sched_lag_early_start_flag: 'Y', sched_retained_logic: 'Y', sched_setplantoforecast: 'N', sched_float_type: 'FT_FF', sched_calendar_on_relationship_lag: 'rcal_Predecessor', sched_use_expect_end_flag: 'Y', sched_progress_override: 'N' });
   return pid;
+}
+
+/** Why n cannot be project projId's new internal number (undefined: it can). P6 takes any whole number. */
+export function projectNumberProblem(db: Db, projId: string, n: string): string | undefined {
+  if (!/^[1-9]\d{0,8}$/.test(n)) return 'A project number must be a positive whole number (the internal proj_id the XER carries; P6 gives the project its own on import).';
+  const other = n !== projId && rows(db, 'PROJECT').find((x) => x.proj_id === n);
+  return other ? `Project number ${n} is already ${other.proj_short_name}'s.` : undefined;
+}
+
+/** Give a project another internal number (the proj_id the XER carries): every field of every table that points at a
+ *  project follows (activities, WBS, relationships of other projects, calendars, codes, UDF values, baselines). */
+export function renumberProject(db: Db, from: string, to: string): number {
+  const projUdf = new Set(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'PROJECT').map((u) => u.udf_type_id));
+  let n = 0;
+  for (const name of Object.keys(db.tables)) {
+    const fs = realOf(db.tables[name].fields).filter((f) => refTarget(f, name) === 'PROJECT' || (name === 'PROJECT' && (f === 'proj_id' || /^_bl[123]$/.test(f))));
+    const udf = (x: Row) => name === 'UDFVALUE' && x.fk_id === from && projUdf.has(x.udf_type_id);
+    if (!fs.length && name !== 'UDFVALUE') continue;
+    const hit = pick(rows(db, name), (x) => udf(x) || fs.some((f) => x[f] === from));
+    for (const x of hit) { if (udf(x)) x.fk_id = to; for (const f of fs) if (x[f] === from) x[f] = to; }
+    if (hit.length) { dropIndexes(realOf(rows(db, name))); n += hit.length; }
+  }
+  return n;
 }
 
 /** Project's display name: PROJECT has no name column in XER; P6 keeps it on the root WBS node. */

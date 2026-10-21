@@ -7,7 +7,7 @@
 import { addField, dropIndexes, nextId, rowIndex, rows, table, tableCache, withIdCache, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num } from '../schedule/cpm.ts';
-import { findLoops } from '../xer/validate.ts';
+import { findLoops, MAX_LEN } from '../xer/validate.ts';
 import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
 import { parseClndrData, scheduledCalendarDef, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
@@ -17,7 +17,7 @@ import { dayHours as dayHoursOf } from './units.ts';
 import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
 import {
   addActivity, addRelationship, addWbs, LOOP_MESSAGE, onePerPair, relationshipsBetween, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
-  enumOk, normDate, refreshOwnDates, setActual, setFinish, setPercent, setStart, statusOf,
+  enumOk, normDate, projectNumberProblem, refreshOwnDates, renumberProject, setActual, setFinish, setPercent, setStart, statusOf,
 } from './edit.ts';
 
 export type Op = Record<string, unknown> & { op: string };
@@ -86,13 +86,13 @@ export const OP_GUIDE = [
   `add_project: id, start, [name], [must_finish_by], [calendar]`,
   `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
   `set_schedule_options: [project], then any of ${SCHEDULE_OPTIONS_GUIDE}. Written to the project (P6's Schedule Options), used by every later schedule`,
-  `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [eps] (EPS ID)`,
+  `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [eps] (EPS ID), [new_id] (a new Project ID, at most 40 characters; the root WBS node's code follows), [new_proj_id] (a new internal project number, the proj_id the XER carries: a positive whole number no other project has; every reference to the project follows)`,
   `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
   `add_holidays: calendar, dates [dates]`,
   `add_wbs: code, [name], [parent] (parent WBS code, dotted path or wbs_id:<id>; omit for top level), [project]. Returns wbs_id. P6 needs WBS codes unique under one parent, so a sibling with the same code is refused`,
   `delete_wbs: code, [keep_logic] (default true: every predecessor of the removed activities is linked on to their successors, so the chain stays closed; false = just delete), [project]. Removes the WBS element, its child elements and all their activities: the way to remove whole floors or areas, e.g. from a copied project`,
   `add_activity: name, [id], [wbs] (WBS code; omit = project root), [type] (${Object.keys(TYPES).join(', ')}), [duration_days], [calendar], [priority] (${Object.keys(PRIO).join(', ')}), [constraint {type, date}] (types: ${Object.keys(CSTR).filter((k) => k !== 'none').join(', ')}), [secondary_constraint], [project]`,
-  `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [assignments_follow] (true: assignments take the new remaining duration, the same remaining units over fewer hours; crash_schedule sets it), [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
+  `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [assignments_follow] (true: assignments take the new remaining duration, the same remaining units over fewer hours; crash_schedule sets it), [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish], [primary_resource] (a resource assigned to it; "" clears the primary resource)`,
   `delete_activity / dissolve_activity: id`,
   `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities are both kept; a Microsoft Project XML / MPX file one per pair): one already there is skipped and reported in "warnings". A relationship that closes a loop refuses the edit`,
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
@@ -222,7 +222,21 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       if (op.must_finish_by !== undefined) p.plan_end_date = op.must_finish_by ? date(op.must_finish_by, 'must_finish_by') : '';
       if (op.calendar != null) p.clndr_id = calendar(op.calendar).clndr_id;
       if (op.eps != null) { ensureEps(db); addField(table(db, 'PROJECT'), '_eps_id'); p._eps_id = rows(db, 'EPS').find((e) => e.eps_short_name.toLowerCase() === String(op.eps).toLowerCase())?.eps_id ?? fail(`No EPS "${op.eps}" (add it with {"op":"add_eps"}).`); }
-      return { project: p.proj_short_name };
+      if (op.new_id != null) {
+        const id = str(op.new_id, 'new_id'), was = p.proj_short_name;
+        if (id.length > MAX_LEN['PROJECT.proj_short_name']) fail(`Project ID "${id}" is ${id.length} characters; P6 holds ${MAX_LEN['PROJECT.proj_short_name']}.`);
+        if (rows(db, 'PROJECT').some((x) => x.proj_id !== p.proj_id && x.proj_short_name.toLowerCase() === id.toLowerCase())) fail(`A project or baseline "${id}" already exists.`);
+        p.proj_short_name = id;
+        const root = wbsOf(p, null); // P6 keeps the project's ID on its root WBS node too
+        if (root.wbs_short_name.toLowerCase() === was.toLowerCase()) root.wbs_short_name = id;
+        if (p._name === was) p._name = id;
+      }
+      if (op.new_proj_id != null) {
+        const n = String(op.new_proj_id).trim();
+        ok(projectNumberProblem(db, p.proj_id, n));
+        if (n !== p.proj_id) renumberProject(db, p.proj_id, n);
+      }
+      return { project: p.proj_short_name, ...(op.new_proj_id != null ? { proj_id: p.proj_id } : {}) };
     }
     case 'add_calendar': {
       const name = str(op.name, 'name');
@@ -293,6 +307,15 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       }
       if (op.wbs != null) t.wbs_id = wbsOf(project(projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name), op.wbs).wbs_id;
       updateActivity(db, t, op, dayHours, calendar, cstr);
+      if (op.primary_resource !== undefined) {
+        addField(table(db, 'TASK'), 'rsrc_id');
+        if (op.primary_resource == null || op.primary_resource === '') t.rsrc_id = '';
+        else {
+          const r = resource(op.primary_resource), tid = t.task_id, rid = r.rsrc_id;
+          if (!realOf(rows(db, 'TASKRSRC')).some((a) => a.task_id === tid && a.rsrc_id === rid)) fail(`${r.rsrc_short_name} is not assigned to ${t.task_code}; P6's primary resource is one of the activity's resources (assign_resource first).`);
+          t.rsrc_id = rid;
+        }
+      }
       return { activity: t.task_code };
     }
     case 'delete_activity': { const t = activity(op.id, op.project); deleteActivities(db, [t.task_id]); return { deleted: t.task_code }; }

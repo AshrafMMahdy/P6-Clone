@@ -1,11 +1,11 @@
 // More edit operations (see ops.ts): WBS changes, codes, UDFs, notebooks, cost accounts and expenses, steps,
 // risk estimates, baselines, EPS/OBS/roles, calendar changes and assignment details. Same rules as ops.ts:
 // addressed by IDs and names a scheduler sees, durations in days, one transaction per list.
-import { addField, dropIndexes, nextId, rows, table, type Db, type Row } from '../db.ts';
+import { addField, dropIndexes, nextId, refTarget, rows, table, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
-import { ensureEps } from './edit.ts';
+import { ensureEps, projectNumberProblem, renumberProject } from './edit.ts';
 import { pick, realOf, removeWhere } from '../journal.ts';
 import { STEP_FIELDS, syncFromSteps } from './steps.ts';
 import { DISTS, setEstimate, type Dist } from '../risk/montecarlo.ts';
@@ -33,7 +33,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = ['add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment'];
+export const EXTRA_OP_NAMES = ['add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors'];
 
 export const EXTRA_GUIDE = [
   `add_resource_curve: name, values (21 percentages totalling 100: values[0] at the start, values[1..20] for each 5% of the assignment's time, like P6 Resource Curves); assign it with assign_resource / update_assignment curve`,
@@ -45,7 +45,7 @@ export const EXTRA_GUIDE = [
   `add_udf: name, [subject] (activity default, wbs, project, resource, assignment), [data_type] (text default, number, integer, cost, start_date, finish_date)`,
   `set_udf: udf, value (null or "" removes), and activity (+[project]) | wbs (+[project]) | project | resource`,
   `set_notebook: [activity] | project, topic, text (text "" removes the topic; answer removed: true/false; the topic itself stays). activity (+[project]): its activity notebook; project alone: the project's notebook (P6's WBSMEMO on the project's root WBS node). topic default "Notes", created when missing, else reused`,
-  `add_cost_account: id, [name], [parent]`,
+  `add_cost_account: id, [name], [parent]; update_cost_account: id, [new_id], [name]`,
   `add_expense: activity, name, [account], [budgeted_cost], [actual_cost], [remaining_cost] (default budgeted - actual), [units], [price_per_unit], [vendor], [po_number], [description], [project]`,
   `update_expense: activity, name, then any add_expense field plus [new_name]; delete_expense: activity, name`,
   `add_step: activity, name, [weight] (default 1), [percent_complete], [completed], [description]; update_step: activity, name, [new_name], [weight], [percent_complete], [completed], [description]; delete_step: activity, name`,
@@ -57,6 +57,13 @@ export const EXTRA_GUIDE = [
   `add_obs / update_obs / delete_obs: name, [parent], [new_name]; add_role / update_role / delete_role: id, [name], [parent], [new_id]`,
   `update_calendar: name, [new_name], [work_week] (days given replace those days), [holidays [dates]] (non-work), [work_exceptions {date: periods}], [remove_exceptions [dates]]`,
   `update_assignment: activity, resource, [units], [units_per_day], [remaining_units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (kept as entered), [curve] (resource curve name; "" = linear), [project]`,
+  `update_resource: id, [new_id] (a new Resource ID), [name]`,
+  `delete_resource: id, [clear_references] (default false: refused while an assignment, in any project or baseline, or an activity's primary resource points at it; true: those assignments are removed and the primary resources cleared). Its rates, resource codes, roles and UDF values go with it; its child resources move up to its parent`,
+  `regenerate_guids: [project], [dictionaries] (default true: also the GUIDs of the file's shared resources, calendars, codes, OBS, roles...), [new_proj_id] or [keep_proj_id]: every GUID of the project and its baselines (project, WBS, activities, assignments, ...) replaced by a fresh one, template GUIDs cleared; the project also gets a new internal number (the next free one unless new_proj_id; keep_proj_id: true keeps it), every reference following`,
+  `clear_authors: [project], [dictionaries] (default true): clears the user fields P6 writes (create_user, update_user, add_by_name, user_id, ts_approve_user_id, checkout_user_id) on the project's rows (and the shared dictionaries'), and with dictionaries the exporting user and database named in the file's header (set to P6's defaults admin / dbxDatabaseNoName)`,
+  `update_code_type: name, new_name, [subject] (activity default, project, resource), [project] (picks the project's own code type when several share the name)`,
+  `update_code_value: type, code (value code or dotted path), [new_code], [name], [subject] (activity default, project, resource), [project] (picks the project's own code type when several share the name)`,
+  `delete_code_value: type, code, [subject], [project]: removes the value, its child values and every assignment of them (TASKACTV, PROJPCAT, RSRCRCAT)`,
 ].join('\n');
 
 const CODE_SUBJECTS = {
@@ -82,6 +89,24 @@ const subtree = (all: Row[], id: string, idF: string, parentF: string) => {
   for (let grew = true; grew;) { grew = false; for (const r of all) if (s.has(r[parentF]) && !s.has(r[idF])) { s.add(r[idF]); grew = true; } }
   return s;
 };
+/** P6 writes a resource's or role's ID and name again on the rows that point at it (RSRCROLE): kept the same. */
+const copies = (db: Db, own: string, id: string, key: string, name: string, v: Row) => {
+  for (const t of Object.values(db.tables)) {
+    const F = realOf(t.fields), fs = [key, name].filter((f) => F.includes(f));
+    if (t.name !== own && F.includes(id) && fs.length) for (const x of pick(t.rows, (y) => y[id] === v[id])) for (const f of fs) x[f] = v[f];
+  }
+};
+const freshGuid = () => Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(16))).toString('base64').slice(0, 22); // P6's form
+const AUTHOR_FIELDS = new Set(['create_user', 'update_user', 'add_by_name', 'user_id', 'ts_approve_user_id', 'checkout_user_id']);
+/** Per table, the rows of these projects, and with dictionaries those of the file's shared objects (no project). */
+function scopedRows(db: Db, projIds: Set<string>, dictionaries: boolean): [string, Row[]][] {
+  const tasks = new Set(realOf(rows(db, 'TASK')).filter((t) => projIds.has(t.proj_id)).map((t) => t.task_id));
+  return Object.values(db.tables).map((t) => {
+    const F = realOf(t.fields);
+    const mine = t.name === 'PROJECT' ? (r: Row) => projIds.has(r.proj_id) : F.includes('proj_id') ? (r: Row) => projIds.has(r.proj_id) || (dictionaries && !r.proj_id) : F.includes('task_id') ? (r: Row) => tasks.has(r.task_id) : () => dictionaries;
+    return [t.name, pick(t.rows, mine)] as [string, Row[]];
+  });
+}
 const memoHtml = (t: string) => `<HTML><BODY>${t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>')}</BODY></HTML>`;
 
 /** Apply one of the extra operations; undefined when the name is not one of them. */
@@ -91,7 +116,14 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     const k = (v == null || v === '' ? dflt : lc(v)) as keyof typeof CODE_SUBJECTS;
     return CODE_SUBJECTS[k] ? CODE_SUBJECTS[k] : fail(`subject must be ${Object.keys(CODE_SUBJECTS).join(', ')}.`);
   };
-  const codeType = (S: (typeof CODE_SUBJECTS)[keyof typeof CODE_SUBJECTS], name: unknown) => pick(rows(db, S.type), (t) => lc(t[S.tname]) === lc(name), 1)[0] ?? fail(`No code type "${name}" (add it with {"op":"add_code_type"}).`);
+  /** The code type of this name; when several share it (project code types of different projects), the one of projId,
+   *  and with strict, refused unless that tells them apart. */
+  const codeType = (S: (typeof CODE_SUBJECTS)[keyof typeof CODE_SUBJECTS], name: unknown, projId?: string, strict = false) => {
+    let hits = pick(rows(db, S.type), (t) => lc(t[S.tname]) === lc(name));
+    if (hits.length > 1 && projId) hits = hits.filter((t) => t.proj_id === projId).length ? hits.filter((t) => t.proj_id === projId) : hits;
+    if (hits.length > 1 && strict) fail(`Several code types are named "${name}"; add "project" to say whose.`);
+    return hits[0] ?? fail(`No code type "${name}" (add it with {"op":"add_code_type"}).`);
+  };
   const codeValue = (S: (typeof CODE_SUBJECTS)[keyof typeof CODE_SUBJECTS], type: Row, code: unknown) => {
     // read only: the real rows (a search through the journal's view, once per assign_code, was slow)
     const tid = type[S.tid], c = lc(code);
@@ -247,7 +279,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const tg = target(op);
       if (tg.subject === 'wbs') fail('Codes are assigned to activities, projects or resources.');
       const S = codeSubject(op.subject, tg.subject as keyof typeof CODE_SUBJECTS);
-      const type = codeType(S, str(op.type, 'type'));
+      const type = codeType(S, str(op.type, 'type'), tg.projId);
       const L = ensure(db, S.link, [S.fk, S.tid, S.vid, ...(S.link === 'TASKACTV' ? ['proj_id'] : [])]);
       const fk = tg.fk, tid = type[S.tid]; // plain values: a view's field read per row is slow
       const valsOfType = new Set(realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid).map((v) => v[S.vid]));
@@ -323,6 +355,12 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const T = ensure(db, 'ACCOUNT', ['acct_id', 'parent_acct_id', 'acct_seq_num', 'acct_name', 'acct_short_name', 'acct_descr']);
       T.rows.push({ acct_id: String(nextId(db, 'ACCOUNT')), parent_acct_id: parent?.acct_id ?? '', acct_seq_num: String(T.rows.length + 1), acct_name: typeof op.name === 'string' ? op.name : id, acct_short_name: id, acct_descr: '' });
       return { cost_account: id };
+    }
+    case 'update_cost_account': {
+      const a = rows(db, 'ACCOUNT').find((x) => lc(x.acct_short_name) === lc(op.id)) ?? fail(`No cost account "${op.id}".`);
+      if (op.new_id != null) { const k = str(op.new_id, 'new_id'); if (rows(db, 'ACCOUNT').some((x) => x.acct_id !== a.acct_id && lc(x.acct_short_name) === lc(k))) fail(`Cost account "${k}" already exists.`); a.acct_short_name = k; }
+      if (op.name != null) a.acct_name = str(op.name, 'name');
+      return { cost_account: a.acct_short_name };
     }
     case 'add_expense': {
       const t = h.activity(op.activity, op.project);
@@ -428,6 +466,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const nk = kind === 'obs' ? op.new_name : op.new_id;
       if (nk != null) { const k = str(nk, kind === 'obs' ? 'new_name' : 'new_id'); if (rows(db, T.table).some((x) => x[T.id] !== r[T.id] && lc(x[T.key]) === lc(k))) fail(`${kind.toUpperCase()} "${k}" already exists.`); r[T.key] = k; }
       if (kind !== 'obs' && op.name != null) r[T.name] = str(op.name, 'name');
+      if (kind === 'role') copies(db, 'ROLES', 'role_id', 'role_short_name', 'role_name', r);
       return { [kind]: r[T.key] };
     }
     case 'delete_eps': case 'delete_obs': case 'delete_role': {
@@ -473,6 +512,84 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       recomputeCosts(db, a);
       assignmentActuals(db, a, op, num);
       return { assignment: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty), remaining_units: Number(a.remain_qty) };
+    }
+    case 'update_resource': {
+      const r = h.resource(op.id);
+      if (op.new_id != null) { const k = str(op.new_id, 'new_id'); if (rows(db, 'RSRC').some((x) => x.rsrc_id !== r.rsrc_id && lc(x.rsrc_short_name) === lc(k))) fail(`Resource "${k}" already exists.`); r.rsrc_short_name = k; }
+      if (op.name != null) r.rsrc_name = str(op.name, 'name');
+      copies(db, 'RSRC', 'rsrc_id', 'rsrc_short_name', 'rsrc_name', r);
+      return { resource: r.rsrc_short_name };
+    }
+    case 'delete_resource': {
+      const r = h.resource(op.id);
+      const rid = r.rsrc_id, key = r.rsrc_short_name, up = r.parent_rsrc_id ?? '';
+      const assignments = realOf(rows(db, 'TASKRSRC')).filter((a) => a.rsrc_id === rid).length, primary = pick(rows(db, 'TASK'), (t) => t.rsrc_id === rid);
+      if ((assignments || primary.length) && op.clear_references !== true) fail(`Resource "${key}" is on ${assignments} assignment(s) and the primary resource of ${primary.length} activit${primary.length === 1 ? 'y' : 'ies'}; clear_references: true removes those assignments and clears the primary resources.`);
+      removeWhere(rows(db, 'TASKRSRC'), (a) => a.rsrc_id === rid);
+      for (const t of primary) t.rsrc_id = '';
+      for (const c of pick(rows(db, 'RSRC'), (x) => x.parent_rsrc_id === rid)) c.parent_rsrc_id = up;
+      const udf = new Set(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'RSRC').map((u) => u.udf_type_id));
+      removeWhere(rows(db, 'UDFVALUE'), (v) => v.fk_id === rid && udf.has(v.udf_type_id));
+      // every other row that points at it: its own (rates, codes, roles, hours: removed), or a reference (cleared)
+      for (const name of Object.keys(db.tables)) {
+        if (name === 'RSRC' || name === 'TASK' || name === 'TASKRSRC') continue;
+        const fs = realOf(db.tables[name].fields).filter((f) => refTarget(f, name) === 'RSRC');
+        if (!fs.length) continue;
+        if (/^(RSRC|WBSRSRC)/.test(name)) removeWhere(rows(db, name), (x) => fs.some((f) => x[f] === rid));
+        else for (const x of pick(rows(db, name), (y) => fs.some((f) => y[f] === rid))) for (const f of fs) if (x[f] === rid) x[f] = '';
+      }
+      removeWhere(rows(db, 'RSRC'), (x) => x.rsrc_id === rid);
+      return { deleted: key, assignments_removed: assignments, primary_resources_cleared: primary.length };
+    }
+    case 'regenerate_guids': case 'clear_authors': {
+      const p = h.project(op.project), dict = op.dictionaries !== false;
+      const ids = new Set([p.proj_id, ...rows(db, 'PROJECT').filter((x) => x._baseline_of === p.proj_id).map((x) => x.proj_id)]);
+      let n = 0;
+      for (const [name, list] of scopedRows(db, ids, dict)) {
+        const fs = realOf(db.tables[name].fields).filter((f) => (op.op === 'clear_authors' ? AUTHOR_FIELDS.has(f) : f === 'guid' || f.endsWith('_guid')));
+        if (fs.length) for (const x of list) for (const f of fs) if (x[f]) { x[f] = f === 'guid' ? freshGuid() : ''; n++; }
+      }
+      if (op.op === 'clear_authors') {
+        const raw = db.header?.raw;
+        if (dict && raw) [[4, 'admin'], [5, 'admin'], [6, 'dbxDatabaseNoName']].forEach(([i, v]) => { if (raw[i as number]) raw[i as number] = v as string; });
+        return { project: p.proj_short_name, fields_cleared: n };
+      }
+      if (op.keep_proj_id !== true) {
+        const to = op.new_proj_id != null ? String(op.new_proj_id).trim() : String(nextId(db, 'PROJECT'));
+        const why = projectNumberProblem(db, p.proj_id, to);
+        if (why) fail(why);
+        if (to !== p.proj_id) renumberProject(db, p.proj_id, to);
+      }
+      return { project: p.proj_short_name, guids: n, proj_id: p.proj_id };
+    }
+    case 'update_code_type': {
+      const S = codeSubject(op.subject);
+      const t = codeType(S, str(op.name, 'name'), op.project != null ? h.project(op.project).proj_id : undefined, true);
+      const n = str(op.new_name, 'new_name'), tid = t[S.tid];
+      if (realOf(rows(db, S.type)).some((x) => x[S.tid] !== tid && lc(x[S.tname]) === lc(n))) fail(`Code type "${n}" already exists.`);
+      t[S.tname] = n;
+      return { code_type: n };
+    }
+    case 'update_code_value': case 'delete_code_value': {
+      const S = codeSubject(op.subject);
+      const type = codeType(S, str(op.type, 'type'), op.project != null ? h.project(op.project).proj_id : undefined, true);
+      const vid = codeValue(S, type, str(op.code, 'code'))[S.vid];
+      const v = pick(rows(db, S.val), (x) => x[S.vid] === vid, 1)[0];
+      if (op.op === 'delete_code_value') {
+        const sub = subtree(realOf(rows(db, S.val)), vid, S.vid, S.vparent);
+        const n = removeWhere(rows(db, S.link), (a) => sub.has(a[S.vid]));
+        removeWhere(rows(db, S.val), (x) => sub.has(x[S.vid]));
+        return { deleted: `${type[S.tname]} = ${v[S.vshort]}`, with_children: sub.size - 1, assignments_removed: n };
+      }
+      if (op.new_code != null) {
+        const code = str(op.new_code, 'new_code'), len = Math.min(CODE_MAX, Number(type[S.tlen]) || CODE_MAX);
+        if (code.length > len) fail(`Code value "${code}" is ${code.length} characters; code type "${type[S.tname]}" allows ${len}. Nothing was cut: give a shorter value.`);
+        const tid = type[S.tid], parent = v[S.vparent];
+        if (realOf(rows(db, S.val)).some((x) => x[S.vid] !== vid && x[S.tid] === tid && x[S.vparent] === parent && lc(x[S.vshort]) === lc(code))) fail(`Code value "${code}" already exists there.`);
+        v[S.vshort] = code;
+      }
+      if (op.name != null) v[S.vname] = String(op.name);
+      return { code_value: `${type[S.tname]} = ${v[S.vshort]}` };
     }
   }
   return undefined;
