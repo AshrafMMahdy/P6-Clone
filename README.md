@@ -225,7 +225,9 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
   field and never by guessing: impossible or unreadable durations from the activity's own other fields (remaining
   duration, planned span), else P6's 5-day default; only actual dates P6 refuses are cleared (unreadable, before 1753,
   a finish before its start), while actuals P6 imports (after the data date, a finish without a start) stay as
-  recorded and are listed in `invalid_dates`; codes and flags take P6's defaults; a row is removed only when it cannot
+  recorded and are listed in `invalid_dates`; codes and flags take P6's defaults; a project with no root WBS node
+  (a baseline written without its WBS) gets one, coded as the project, and WBS elements whose parent is missing go
+  under it; a row is removed only when it cannot
   be identified, with what pointed at it. Every change is listed (`changes`: table, row, key, field, old, new, reason)
   and `check` says whether the copy, opened again, would still be rejected. CCA R03 (30 MB, 16,000 activities):
   lenient open 3 s, repair save 7 s (repair, write, re-open check), re-open 3 s, F9 2 s.

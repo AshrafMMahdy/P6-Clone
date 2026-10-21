@@ -8,7 +8,7 @@
 //    kept and reported as an invalid-date finding, as DCMA's check 9 does, not changed.
 //  - A whole row goes only when it cannot be identified (no readable id, Activity ID or WBS; a row made from a damaged
 //    line, its columns shifted), and with it every row that pointed at it.
-import { KEYS, refTarget, rows, type Db, type Row } from '../db.ts';
+import { addField, KEYS, nextId, refTarget, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { calendarResolver, p6num } from '../schedule/cpm.ts';
 import { ENUMS, fieldType, knownFields } from './schema.ts';
@@ -82,6 +82,25 @@ export function repairToValid(db: Db): { changes: RepairChange[]; findings: Repa
     removeWhere(T[t].rows, (x) => raw.has(x));
   };
   const summary = (t: string, r: Row) => (t === 'TASK' ? `${r.task_code || '(no Activity ID)'} ${r.task_name ?? ''}`.trim().slice(0, 80) : Object.values(r).slice(0, 4).join(' ').slice(0, 80));
+
+  // ---- every project needs its root WBS node (proj_node_flag Y, coded as the project): one missing (a baseline written
+  // without its WBS) is added, and WBS elements whose parent is not in their project are put under the root
+  const rootObs = rows(db, 'OBS').find((o) => !o.parent_obs_id)?.obs_id ?? '';
+  for (const p of rows(db, 'PROJECT')) {
+    const pid = p.proj_id, W = realOf(rows(db, 'PROJWBS')).filter((w) => w.proj_id === pid);
+    let root = rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y');
+    if (!root) {
+      const PW = table(db, 'PROJWBS');
+      for (const f of ['wbs_id', 'proj_id', 'obs_id', 'seq_num', 'proj_node_flag', 'sum_data_flag', 'status_code', 'wbs_short_name', 'wbs_name', 'parent_wbs_id']) addField(PW, f);
+      const r: Row = Object.fromEntries(realOf(PW.fields).map((f) => [f, ''])) as Row;
+      Object.assign(r, { wbs_id: String(nextId(db, 'PROJWBS')), proj_id: pid, obs_id: W[0]?.obs_id ?? rootObs, seq_num: '0', proj_node_flag: 'Y', sum_data_flag: 'Y', status_code: 'WS_Open', wbs_short_name: p.proj_short_name, wbs_name: p.proj_short_name, parent_wbs_id: '' });
+      PW.rows.push(r);
+      root = rows(db, 'PROJWBS').find((w) => w.wbs_id === r.wbs_id)!;
+      changes.push({ table: 'PROJWBS', row: 0, key: r.wbs_id, field: '*', old: '(no row)', new: `${r.wbs_short_name} (root WBS node)`, reason: `project ${p.proj_short_name} has no root WBS node (proj_node_flag Y), which P6 needs to import it: added, coded as the project` });
+    }
+    const ids = new Set(W.map((w) => w.wbs_id));
+    for (const w of rows(db, 'PROJWBS')) if (w.proj_id === pid && w.proj_node_flag !== 'Y' && !ids.has(w.parent_wbs_id)) set('PROJWBS', w, 'parent_wbs_id', root.wbs_id, `its parent WBS ${w.parent_wbs_id ? `"${w.parent_wbs_id}" is not in project ${p.proj_short_name}` : 'is missing'}: put under the project's root WBS node`);
+  }
 
   // ---- activities that cannot be identified (and duplicates: the damaged copy of an id goes)
   const projIds = new Set(rows(db, 'PROJECT').map((p) => p.proj_id)), wbsById = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));

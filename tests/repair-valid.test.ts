@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { callTool, toolResult } from '../mcp/server.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { writeXer } from '../core/xer/write.ts';
+import { parseXer } from '../core/xer/parse.ts';
 import { rows, type Db } from '../core/db.ts';
 import { SAMPLES_DIR } from './helpers.ts';
 
@@ -112,4 +113,50 @@ test('save repair on CCA R03 (a corrupted 16,000-activity file): the repaired co
   assert.ok(back.handle, JSON.stringify(back).slice(0, 300));
   assert.equal((await call('schedule', { handle: back.handle })).ok, true);
   for (const h of [o.handle, back.handle]) await call('close', { handle: h, discard: true });
+});
+
+test('save repair on every Tower-A variant: the baseline with no root WBS node gets one (coded as the project), orphan WBS under it; the copy opens strictly and validates clean', { timeout: 120_000 }, async () => {
+  const { readdirSync } = await import('node:fs');
+  const variants = readdirSync(SAMPLES_DIR).filter((f) => /^tower[-_]a/i.test(f) && f.toLowerCase().endsWith('.xer'));
+  assert.ok(variants.length >= 4, variants.join(', '));
+  for (const f of variants) {
+    assert.equal((await call('open_file', { path: join(SAMPLES_DIR, f) })).error?.code, 'p6_would_reject', `${f} as shipped`);
+    const o = await call('open_file', { path: join(SAMPLES_DIR, f), lenient: true });
+    const out = join(dir, `${f.replace(/\.xer$/i, '')}-repaired.xer`);
+    const r = await call('save', { handle: o.handle, repair: true, path: out });
+    assert.deepEqual([r.check.still_rejected, r.check.counts.fatal ?? 0, r.check.counts.error ?? 0], [false, 0, 0], `${f}: ${JSON.stringify(r.check).slice(0, 400)}`);
+    const roots = r.changes.filter((c: any) => c.table === 'PROJWBS' && c.field === '*' && c.old === '(no row)');
+    assert.equal(roots.length, 1, `${f}: one root WBS node added`);
+    assert.match(roots[0].reason, /no root WBS node .*added, coded as the project/);
+    const back = await call('open_file', { path: out });
+    assert.ok(back.handle, `${f}: ${JSON.stringify(back).slice(0, 300)}`);
+    const v = await call('validate', { handle: back.handle });
+    assert.deepEqual([v.counts?.fatal ?? 0, v.counts?.error ?? 0], [0, 0], `${f}: ${JSON.stringify(v).slice(0, 400)}`);
+    // the baseline's root: proj_node_flag Y, coded as its project, and every WBS of it in one tree under it
+    const db = parseXer(new Uint8Array(readFileSync(out))).db;
+    for (const p of db.tables.PROJECT.rows) {
+      const W = db.tables.PROJWBS.rows.filter((w) => w.proj_id === p.proj_id), root = W.filter((w) => w.proj_node_flag === 'Y');
+      assert.equal(root.length, 1, `${f} ${p.proj_short_name}`);
+      const ids = new Set(W.map((w) => w.wbs_id));
+      assert.deepEqual(W.filter((w) => w.proj_node_flag !== 'Y' && !ids.has(w.parent_wbs_id)), [], `${f} ${p.proj_short_name}: no orphan WBS`);
+    }
+    const added = db.tables.PROJWBS.rows.find((w) => w.wbs_id === roots[0].key)!;
+    assert.equal(added.wbs_short_name, db.tables.PROJECT.rows.find((p) => p.proj_id === added.proj_id)!.proj_short_name);
+    for (const h of [o.handle, back.handle]) await call('close', { handle: h, discard: true });
+  }
+});
+
+test('repair: a project without its root WBS node gets one, and WBS elements whose parent is missing go under it', async () => {
+  const { repairToValid } = await import('../core/xer/repair-valid.ts');
+  const db: Db = { tables: {} };
+  assert.equal(applyOps(db, [{ op: 'add_project', id: 'NOROOT', start: '2026-03-02' }, { op: 'add_wbs', code: 'A' }, { op: 'add_wbs', code: 'B', parent: 'A' }, { op: 'add_activity', id: 'X1', name: 'x', wbs: 'A.B' }]).ok, true);
+  const W = db.tables.PROJWBS.rows, rootId = W.find((w) => w.proj_node_flag === 'Y')!.wbs_id;
+  db.tables.PROJWBS.rows = W.filter((w) => w.proj_node_flag !== 'Y');
+  const { changes } = repairToValid(db);
+  const root = db.tables.PROJWBS.rows.find((w) => w.proj_node_flag === 'Y')!;
+  assert.deepEqual([root.wbs_short_name, root.parent_wbs_id, root.wbs_id !== rootId], ['NOROOT', '', true]);
+  assert.equal(db.tables.PROJWBS.rows.find((w) => w.wbs_short_name === 'A')!.parent_wbs_id, root.wbs_id, 'the orphan goes under the root');
+  assert.equal(db.tables.PROJWBS.rows.find((w) => w.wbs_short_name === 'B')!.parent_wbs_id, db.tables.PROJWBS.rows.find((w) => w.wbs_short_name === 'A')!.wbs_id, 'its child stays where it was');
+  assert.deepEqual(changes.map((c) => [c.table, c.field]), [['PROJWBS', '*'], ['PROJWBS', 'parent_wbs_id']]);
+  assert.equal(db.tables.TASK.rows.length, 1, 'the activity stays');
 });
