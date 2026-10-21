@@ -17,7 +17,9 @@
     "package": "node scripts/package.mjs",
     "e2e": "node scripts/build.mjs && node --test \"tests/e2e/*.test.ts\"",
     "build:cli": "node scripts/build-cli.mjs",
-    "mcp": "node mcp/server.ts"
+    "mcp": "node mcp/server.ts",
+    "pretest": "node scripts/build-viewer4d.mjs",
+    "build:viewer": "node scripts/build-viewer4d.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

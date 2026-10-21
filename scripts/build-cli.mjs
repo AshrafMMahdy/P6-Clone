@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { cpSync } from 'node:fs';
 import { copyIfc, copyReasoner } from './ort-files.mjs';
+import { buildViewer } from './build-viewer4d.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node18', logLevel: 'warning', external: ['onnxruntime-web'] }; // the entry files carry their own #! line
@@ -16,4 +17,5 @@ cpSync(join(root, 'fonts'), join(root, 'dist-cli/fonts'), { recursive: true });
 // the schedule reasoner (optimize_schedule): the model and its WebAssembly runtime
 await copyReasoner(root, join(root, 'dist-cli'));
 copyIfc(root, join(root, 'dist-cli')); // 4D: the IFC engine
+cpSync(await buildViewer(), join(root, 'dist-cli', 'viewer4d.js')); // 4D: the viewer render_4d writes beside the model
 console.log('built dist-cli/p6clone.cjs, dist-cli/p6clone-mcp.cjs, dist-cli/fonts/, dist-cli/models/ dist-cli/ort/ (the reasoner runtime and its licences) and dist-cli/ifc/ (the IFC engine)');

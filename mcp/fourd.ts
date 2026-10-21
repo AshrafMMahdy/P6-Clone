@@ -14,7 +14,13 @@ import type { AnalysisHelpers } from './analysis.ts';
 import { nextId } from '../core/db.ts';
 import { readNwfTimeliner } from '../core/bim/nwf.ts';
 import { calendarResolver } from '../core/schedule/cpm.ts';
-import { parseP6Date } from '../core/dates.ts';
+import { formatP6Date, parseP6Date } from '../core/dates.ts';
+import { compareAt, criticalChanges, simulate, sourceTasks, viewerTimeline } from '../core/bim/sim4d.ts';
+import { writeViewer, type ViewerOptions } from '../core/bim/render4d.ts';
+import { chromiumPath, ENCODE, inChromium, PNGS } from '../core/bim/headless.ts';
+import { activityCosts, earnedValue } from '../core/cost/rollup.ts';
+import { mkdtempSync, writeFileSync as writeRaw } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const ro = { readOnlyHint: true, openWorldHint: false };
 const edit = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -31,9 +37,13 @@ export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<s
   { name: 'set_4d_keys', annotations: edit, description: 'Write a "4D Key" user-defined field on every activity, from activity_id (default), wbs, code:<code type> or udf:<UDF>. The key travels inside XER and P6 XML; Navisworks rules and SYNCHRO Auto-Matching use it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, from: { type: 'string' } } }) },
   { name: 'export_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'Write a ready-linked 4D package into the folder path. target navisworks: the IFC with a WHIQ_4D property set on every linked element (Task = 4D key), search-set XML (one set per activity), timeliner.csv (UniqueId = P6 task_id, User 1 = key) and a README with the click path. synchro: P6 XML with the 4D Key field, the tagged IFC, README. ifc4d: the model with the schedule inside, IFC4 (Bonsai): work schedule, tasks with planned/early/late/actual dates, logic, task-to-element links, and baselines (baselines: [names]) as BASELINE schedules. csv: the link table. planned: current (default) or a baseline name, for the planned dates (TimeLiner Planned vs Actual).', inputSchema: withHandle({ type: 'object', properties: { project, target: { type: 'string' }, path: { type: 'string', description: 'folder to write into' }, planned: { type: 'string' }, baselines: { type: 'array', items: { type: 'string' } }, key: { type: 'string', description: 'activity field used as the key (default 4d_key, else the Activity ID)' } }, required: ['target', 'path'] }) },
   { name: 'import_4d', annotations: edit, description: 'Read 4D work from another tool and link it to this project: an IFC 4D file (Bonsai/IFC4 task outputs, or SYNCHRO/IFC2X3 assignments; SYNCHRO-renamed elements "name_(#id)" are matched to the attached design model by that id), a Navisworks search-set XML (kept as selection sets, resolved against the model; link them with link_by_rules set_name), a TimeLiner CSV (or its task grid copied to Excel, .xlsx), or the TimeLiner inside a Navisworks .nwf/.nwd (tasks with planned and actual dates, task type and attached set names, read without Navisworks). Tasks match activities by Activity ID, then by unique name; create_activities: true adds the TimeLiner tasks that match none (planned dates as duration and a start-on-or-after constraint). Attached sets link through selection sets of the same name. link: false only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, link: { type: 'boolean' }, create_activities: { type: 'boolean' } }, required: ['path'] }) },
+  { name: 'simulate_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D state of the model on dates: element counts by state (not started, in progress, complete, removed, temporary in place, unlinked), optionally by storey or class, and the activities under way in each step. date, or from/to/step (days). source: best (default: actuals up to the data date, then the forecast), planned, actual, late, or a saved baseline name. Dates come from the schedule itself (F9: calendars, actuals, data date). snapshots: [dates] renders PNG frames into path (needs a Chromium: chromium_path or P6CLONE_CHROMIUM; without one, use render_4d kind viewer and look at it).', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, source: { type: 'string' }, by: { type: 'string' }, snapshots: { type: 'array', items: { type: 'string' } }, path: { type: 'string' }, view: { type: 'string' }, chromium_path: { type: 'string' } } }) },
+  { name: 'compare_4d', annotations: ro, description: 'Progress against a baseline on a date, element by element (TimeLiner Early/Late appearance): ahead, on time, late, not started, complete. late_means start (default: started later than the baseline, as TimeLiner) or finish (finished later). by storey (default), class or wbs: counts and percentages per zone, the elements behind each late figure (max_ids), planned value vs earned value per zone (each activity\u2019s PV/EV shared over its elements), and the activities that became or stopped being critical since the baseline.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, against: { type: 'string' }, late_means: { type: 'string' }, by: { type: 'string' }, max_ids: { type: 'number' } }, required: ['against'] }) },
+  { name: 'set_element_status', annotations: edit, description: 'Element-level progress from site (walkdowns, reality capture): guids, status installed | in_progress | not_installed, date. It overrides the activity\u2019s progress for those elements in simulate_4d, compare_4d and the viewer (actual and best dates), and proposes each touched activity\u2019s % complete from its installed share; apply_percent: true writes it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } }, status: { type: 'string' }, date: { type: 'string' }, apply_percent: { type: 'boolean' } }, required: ['guids', 'status', 'date'] }) },
+  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people. kind viewer (default): an HTML viewer with the model as a separate file (index.html, viewer4d.js, model.glb, timeline.json) in the folder path, or one self-contained file with embed: true; it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or an MP4 (H.264; WebM when the browser has no H.264 encoder) rendered in a headless Chromium (chromium_path or P6CLONE_CHROMIUM); without one the answer gives the self-contained viewer and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, chromium_path: { type: 'string' } }, required: ['path'] }) },
 ];
 export const FOURD_FILES: Record<string, { read: string[]; opens: boolean }> = { open_model: { read: ['path'], opens: false }, import_4d: { read: ['path'], opens: false } };
-export const FOURD_NAMES = new Set(['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d']);
+export const FOURD_NAMES = new Set(['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d', 'simulate_4d', 'compare_4d', 'set_element_status', 'render_4d']);
 
 /** The model attached to the project: from memory or the disk cache, else reopened from its file. */
 async function modelOf(db: Db, projId: string, required = true): Promise<Model | null> {
@@ -162,6 +172,135 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       }
       try { const r = ifc4dText(s.db, projId, ifcText(), items, Array.isArray(a.baselines) ? a.baselines : []); put(`${stem}-4D-IFC4.ifc`, r.text); put('README.txt', README.ifc4d); return { target, written, tasks: r.tasks, element_links: r.links }; }
       catch (e) { return fail('bad_input', (e as Error).message, 'Use the navisworks or synchro target for IFC2X3 models.'); }
+    }
+    case 'simulate_4d': {
+      const m = (await modelOf(s.db, projId))!;
+      const source = String(a.source ?? 'best');
+      try { sourceTasks(s.db, projId, source); } catch (e) { return fail('bad_input', (e as Error).message, 'source: best, planned, actual, late, or a saved baseline name.'); }
+      if (a.by != null && a.by !== 'storey' && a.by !== 'class') fail('bad_input', 'by must be storey or class.', 'Leave it out for totals.');
+      const at = (v: unknown, what: string) => h.dd(v) ?? fail('bad_input', `${what} is not a date.`, 'YYYY-MM-DD');
+      const step = Math.max(1, Number(a.step) || 7);
+      let dates: number[];
+      if (a.date) dates = [at(a.date, 'date')!];
+      else {
+        const tl = viewerTimeline(s.db, projId, m.index, [source]);
+        const from = a.from ? at(a.from, 'from')! : parseP6Date(tl.start ?? '') ?? fail('no_links', 'No linked activity has dates.', 'Link elements and schedule (F9) first.');
+        const to = a.to ? at(a.to, 'to')! : parseP6Date(tl.finish ?? '') ?? from;
+        dates = []; for (let d = from; d <= to && dates.length < 400; d += step * 1440) dates.push(d);
+        if (dates.at(-1)! < to && dates.length < 400) dates.push(to);
+      }
+      const r = simulate(s.db, projId, m.index, { source, dates, by: a.by, stepDays: step });
+      let snapshots: string[] | undefined, note: string | undefined;
+      if (Array.isArray(a.snapshots) && a.snapshots.length) {
+        const chrome = chromiumPath(a.chromium_path);
+        if (!chrome) note = 'No Chromium to render snapshots (pass chromium_path or set P6CLONE_CHROMIUM): render_4d kind viewer gives a page to look at.';
+        else if (!m.glb) note = 'The model was opened without geometry: open_model again with geometry for snapshots.';
+        else {
+          const dir = pathArg(a.path ?? fail('bad_input', 'path (a folder) is needed for snapshots.', 'Pass path.'), 'path', 'write');
+          mkdirSync(dir, { recursive: true });
+          const page = writeViewer({ dir: mkdtempSync(join(tmpdir(), 'p6c4d-')), glb: m.glb, timeline: viewerTimeline(s.db, projId, m.index, [source]), options: { left: source, interactive: false, view: a.view ?? 'iso', overlays: ['date', 'legend', 'activity_list'] }, title: 'snapshot', embed: true })[0];
+          const pngs = await inChromium<string[]>(chrome, page, PNGS(a.snapshots.map(String)));
+          snapshots = pngs.map((b64, i) => { const p = join(dir, `snapshot-${String(a.snapshots[i]).slice(0, 10)}.png`); h.writeOut(p, Buffer.from(b64, 'base64')); return p; });
+        }
+      }
+      return { ...r, step_days: step, ...(snapshots ? { snapshots } : {}), ...(note ? { note } : {}) };
+    }
+    case 'compare_4d': {
+      const m = (await modelOf(s.db, projId))!;
+      const proj = rows(s.db, 'PROJECT').find((p) => p.proj_id === projId)!;
+      const date = a.date ? h.dd(a.date) ?? fail('bad_input', 'date is not a date.', 'YYYY-MM-DD') : parseP6Date(proj.last_recalc_date) ?? Math.floor(Date.now() / 60000);
+      const by = (a.by ?? 'storey') as 'storey' | 'class' | 'wbs';
+      if (!['storey', 'class', 'wbs'].includes(by)) fail('bad_input', 'by must be storey, class or wbs.', '');
+      let r;
+      try { r = compareAt(s.db, projId, m.index, { at: date, against: String(a.against), lateMeans: a.late_means === 'finish' ? 'finish' : 'start', by }); } catch (e) { return fail('bad_input', (e as Error).message, 'against: a saved baseline name (or planned).'); }
+      const max = Math.min(2000, Number(a.max_ids) || 100);
+      const totals = { ahead: 0, on_time: 0, late: 0, not_started: 0, complete: 0 } as Record<string, number>;
+      for (const v of r.result.values()) totals[v]++;
+      const n = r.result.size || 1;
+      // PV and EV by zone: each activity's figures shared over its elements
+      const costs = activityCosts(s.db, [projId]);
+      const { byTask } = linkMaps(s.db, projId);
+      const zoneOf = new Map<string, string>();
+      const wbs = new Map(rows(s.db, 'PROJWBS').map((w) => [w.wbs_id, w.wbs_short_name]));
+      const tasks = new Map(rows(s.db, 'TASK').filter((t) => t.proj_id === projId).map((t) => [t.task_id, t]));
+      for (const e of m.index.elements) zoneOf.set(e.guid, by === 'class' ? e.ifcClass : by === 'storey' ? e.storey || '(none)' : '');
+      const money: Record<string, { pv: number; ev: number }> = {};
+      for (const [taskId, ls] of byTask) {
+        const c = costs.get(taskId); if (!c) continue;
+        const ev = earnedValue(c);
+        for (const l of ls) { const z = by === 'wbs' ? wbs.get(tasks.get(taskId)?.wbs_id ?? '') ?? '(none)' : zoneOf.get(l.guid) ?? '(none)'; const zz = money[z] ?? (money[z] = { pv: 0, ev: 0 }); zz.pv += ev.pv / ls.length; zz.ev += ev.ev / ls.length; }
+      }
+      const r2 = (v: number) => Math.round(v * 100) / 100;
+      return {
+        date: formatP6Date(date), against: String(a.against), late_means: a.late_means === 'finish' ? 'finish' : 'start', by, totals, percent: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, Math.round((v / n) * 1000) / 10])),
+        zones: Object.entries(r.zones).map(([zone, c]) => ({ zone, ...c, ...(money[zone] ? { pv: r2(money[zone].pv), ev: r2(money[zone].ev), spi: money[zone].pv ? r2(money[zone].ev / money[zone].pv) : null } : {}) })),
+        late_elements: [...r.result].filter(([, v]) => v === 'late').slice(0, max).map(([g]) => g), ahead_elements: [...r.result].filter(([, v]) => v === 'ahead').slice(0, max).map(([g]) => g),
+        critical_path: criticalChanges(s.db, projId, String(a.against)),
+      };
+    }
+    case 'set_element_status': {
+      const status = String(a.status ?? '');
+      if (!['installed', 'in_progress', 'not_installed'].includes(status)) fail('bad_input', `Unknown status "${a.status}".`, 'Use installed, in_progress or not_installed.');
+      const date = h.dd(a.date) ?? fail('bad_input', 'date is not a date.', 'YYYY-MM-DD');
+      const m = await modelOf(s.db, projId, false);
+      const guids = (Array.isArray(a.guids) ? a.guids : []).map(String);
+      const unknown = m ? guids.filter((g) => !m.byGuid.has(g)) : [];
+      const ok = guids.filter((g) => !unknown.includes(g));
+      const { byGuid, byTask } = linkMaps(s.db, projId);
+      return h.apply('Element status', (d) => {
+        const T = t4d(d, T4D.status);
+        for (const g of ok) T.rows.push({ status_id: String(nextId(d, T4D.status)), proj_id: projId, guid: g, status, date: formatP6Date(date!) });
+        // each touched activity: the share of its built elements now installed
+        const latest = new Map<string, string>();
+        for (const r of rows(d, T4D.status).filter((x) => x.proj_id === projId).sort((x, y) => x.date.localeCompare(y.date))) latest.set(r.guid, r.status);
+        const touched = new Set(ok.flatMap((g) => (byGuid.get(g) ?? []).filter((l) => l.role === 'built').map((l) => l.task_id)));
+        const code = new Map(rows(d, 'TASK').map((t) => [t.task_id, t]));
+        const proposals = [...touched].map((taskId) => { const els = (byTask.get(taskId) ?? []).filter((l) => l.role === 'built'); const inst = els.filter((l) => latest.get(l.guid) === 'installed').length; return { activity: code.get(taskId)!.task_code, installed: inst, elements: els.length, proposed_percent: Math.round((inst / Math.max(1, els.length)) * 1000) / 10, current_percent: Number(code.get(taskId)!.phys_complete_pct || 0) }; });
+        if (a.apply_percent === true) {
+          // installed elements mean the work began: an activity not yet started gets the earliest status date as its actual start
+          const pcode = rows(d, 'PROJECT').find((x) => x.proj_id === projId)!.proj_short_name;
+          const first = new Map<string, string>();
+          for (const r of rows(d, T4D.status).filter((x) => x.proj_id === projId && x.status !== 'not_installed')) for (const l of byGuid.get(r.guid) ?? []) if (l.role === 'built' && (!first.has(l.task_id) || r.date < first.get(l.task_id)!)) first.set(l.task_id, r.date);
+          const ops = proposals.flatMap((p) => { const t = rows(d, 'TASK').find((x) => x.proj_id === projId && x.task_code === p.activity)!; return [...(!t.act_start_date && p.proposed_percent > 0 ? [{ op: 'update_activity', id: p.activity, project: pcode, actual_start: first.get(t.task_id) }] : []), ...(t.act_start_date || p.proposed_percent > 0 ? [{ op: 'update_activity', id: p.activity, project: pcode, percent_complete: p.proposed_percent }] : [])]; });
+          const r = applyOps(d, ops, { hoursPerDay: s.hpd });
+          if (!r.ok) fail('bad_input', r.error!.message, '');
+        }
+        return { recorded: ok.length, ...(unknown.length ? { unknown_guids: unknown.slice(0, 100) } : {}), activities: proposals, applied_percent: a.apply_percent === true };
+      });
+    }
+    case 'render_4d': {
+      const m = (await modelOf(s.db, projId))!;
+      if (!m.glb) fail('no_geometry', 'The model was opened without geometry.', 'open_model again without geometry: false.');
+      const kind = String(a.kind ?? 'viewer');
+      if (!['viewer', 'images', 'video'].includes(kind)) fail('bad_input', `Unknown kind "${kind}".`, 'Use viewer, images or video.');
+      const layout = a.layout === 'side_by_side' ? 'side_by_side' : 'single';
+      const left = String(a.left ?? (layout === 'side_by_side' ? '' : 'best')) || fail('bad_input', 'side_by_side needs left (a saved baseline name, or planned).', 'e.g. {"layout": "side_by_side", "left": "BL-2026-03"}');
+      const right = String(a.right ?? 'best');
+      const sources = [...new Set([left, right, 'best', 'planned'])];
+      let timeline;
+      try { timeline = viewerTimeline(s.db, projId, m.index, sources); } catch (e) { return fail('bad_input', (e as Error).message, 'left/right: best, planned, actual, late, or a saved baseline name.'); }
+      if (!timeline.activities.length) fail('no_links', 'No activity has linked elements.', 'Link elements first (link_elements or link_by_rules).');
+      const growth = String(a.growth ?? 'none');
+      if (!['none', 'bottom_up', 'top_down', 'left_right', 'right_left'].includes(growth)) fail('bad_input', `Unknown growth "${growth}".`, 'Use none, bottom_up, top_down, left_right or right_left.');
+      const options: ViewerOptions = { layout, left, right, compare: a.compare === true, step: Math.max(1, Number(a.step) || 7), growth, overlays: Array.isArray(a.overlays) ? a.overlays : ['date', 'legend', 'activity_list', ...(kind === 'video' ? ['gantt_strip'] : [])], view: a.view ?? 'iso', interactive: kind === 'viewer', title: rows(s.db, 'PROJECT').find((p) => p.proj_id === projId)!.proj_short_name };
+      const dir = pathArg(a.path, 'path', 'write');
+      const title = `${options.title} 4D`;
+      if (kind === 'viewer') return { kind, written: writeViewer({ dir, glb: m.glb!, timeline, options, title, embed: a.embed === true, file: `${options.title}-4D.html` }), activities: timeline.activities.length, linked_elements: Object.keys(timeline.elements).length, hooks: 'WHIQ4D_EXPORT (ready, max, setStep, frame) and P6C4D_API (setDate, setSource, highlight, encode, png)' };
+      const width = Math.min(3840, Number(a.width) || 1280), height = Math.min(2160, Number(a.height) || 720), fps = Math.min(60, Math.max(1, Number(a.fps) || 4));
+      const page = writeViewer({ dir, glb: m.glb!, timeline, options, title, embed: true, file: `${options.title}-4D-render.html` })[0];
+      const chrome = chromiumPath(a.chromium_path);
+      if (!chrome) return { kind, rendered: false, viewer: page, client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width, height }, note: 'No Chromium here (pass chromium_path or set P6CLONE_CHROMIUM), so nothing was rendered: the self-contained viewer is written; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform\u2019s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.' };
+      await h.tick(0, 1, `rendering the ${kind} in Chromium`);
+      if (kind === 'images') {
+        const from = parseP6Date(a.from ? String(a.from) : timeline.start ?? '')!, to = parseP6Date(a.to ? String(a.to) : timeline.finish ?? '')!;
+        const dates: string[] = []; for (let d = from; d <= to && dates.length < 500; d += options.step! * 1440) dates.push(formatP6Date(d));
+        const pngs = await inChromium<string[]>(chrome, page, PNGS(dates), { width, height });
+        return { kind, rendered: true, written: pngs.map((b64, i) => { const p = join(dir, `frame-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, Buffer.from(b64, 'base64')); return p; }) };
+      }
+      const v = await inChromium<{ mime: string; frames: number; b64: string }>(chrome, page, ENCODE({ from: a.from, to: a.to, step: options.step, fps, width, height }), { width, height });
+      const file = join(dir, `${options.title}-4D.${v.mime.includes('mp4') ? 'mp4' : 'webm'}`);
+      h.writeOut(file, Buffer.from(v.b64, 'base64'));
+      return { kind, rendered: true, written: [file], frames: v.frames, mime: v.mime, fps, size: [width, height] };
     }
     case 'import_4d': {
       const path = pathArg(a.path);
