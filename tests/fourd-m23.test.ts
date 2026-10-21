@@ -11,7 +11,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
   const r = await callTool(name, args);
   let d = toolResult(r.out, r.isError).structuredContent as any, err = r.isError;
   // past the server's soft timeout (a slow runner) the call becomes a job: follow it to its answer
-  while (!err && d?.job_id && d.status === 'running' && !args.async) {
+  while (!err && d?.job_id && d.status === 'running' && !args.async && !/^(job_status|cancel_job)$/.test(name)) {
     const j = toolResult((await callTool('job_status', { job_id: d.job_id, wait_seconds: 20 })).out, false).structuredContent as any;
     if (j.status === 'running') continue;
     if (j.status === 'done') d = j.result; else { err = true; d = j; }
