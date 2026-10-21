@@ -1,7 +1,7 @@
 // Extensions for recovery: least-cost crashing, many what-ifs at once, and the schedule reasoner (the trained
 // optimiser, run by the main process). Each works on a copy until Apply, which is one undoable change.
 import { useMemo, useState } from 'react';
-import { getDb, mutate, toast, useStore } from '../store.ts';
+import { getDb, getUi, mutate, toast, useStore } from '../store.ts';
 import { rows, type Db } from '../../core/db.ts';
 import { applyOps } from '../../core/project/ops.ts';
 import { crashSchedule, type CrashActivity } from '../../core/analysis/crash.ts';
@@ -9,20 +9,28 @@ import { evaluateBatch, type Scenario } from '../../core/analysis/batch.ts';
 import { optimizeSchedule } from '../../core/analysis/hrm.ts';
 import { levelResources } from '../../core/level/level.ts';
 import { scheduleProjects } from '../../core/schedule/cpm.ts';
-import { runSchedule } from '../commands.ts';
+import { syncAssignmentDates } from '../../core/resource/assign.ts';
 import { goToActivity } from './AnalysisResults.tsx';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
 const box = { display: 'flex', flexDirection: 'column', gap: 6, height: '100%', minHeight: 0 } as const;
 const bar = { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' } as const;
 
-/** Apply edit operations as one undoable change, then F9 (the desktop's fixed hours per day; ops carry hours). */
-function applyAndSchedule(label: string, ops: unknown[], after?: (d: Db) => void): boolean {
+/** Edit operations, F9 and anything after it (leveling) as one undoable change; a refused step leaves nothing. */
+export function applyAndSchedule(label: string, ops: unknown[], after?: (d: Db) => void): boolean {
+  const ui = getUi();
   let err = '';
-  try { mutate(label, (d) => { const r = applyOps(d, ops); if (!r.ok) { err = r.error!.message; throw new Error(err); } }); } catch { /* reported */ }
+  try {
+    mutate(label, (d) => {
+      const r = applyOps(d, ops, { hoursPerDay: ui.prefs.hoursPerDay });
+      if (!r.ok) { err = r.error!.message; throw new Error(err); }
+      const s = scheduleProjects(d, ui.openProjects, {});
+      if (!s.ok) { err = s.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ') || 'the changed schedule cannot be scheduled'; throw new Error(err); }
+      after?.(d);
+      syncAssignmentDates(d);
+    });
+  } catch { /* reported below */ }
   if (err) { toast(`Not applied: ${err}`); return false; }
-  runSchedule({});
-  if (after) mutate(label, after);
   return true;
 }
 
@@ -36,12 +44,12 @@ export function CrashPanel() {
   const [ld, setLd] = useState('');
   const [pct, setPct] = useState('30');
   const [data, setData] = useState<Record<string, { min: string; cost: string }>>({});
-  const [res, setRes] = useState<ReturnType<typeof crashSchedule> | null>(null);
+  const [res, setRes] = useState<Awaited<ReturnType<typeof crashSchedule>> | null>(null);
   // the remaining critical activities are where crash data matters
   const crit = useMemo(() => rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) <= 0).slice(0, 300), [db, ui.openProjects]);
-  const run = () => {
+  const run = async () => {
     const acts: CrashActivity[] = Object.entries(data).filter(([, v]) => v.min !== '' || v.cost !== '').map(([id, v]) => ({ id, min_days: Number(v.min) || 0, cost_per_day: Number(v.cost) || 0 }));
-    setRes(crashSchedule(getDb(), ui.openProjects, {
+    setRes(await crashSchedule(getDb(), ui.openProjects, {
       targetDays: mode === 'days' ? Number(days) : undefined, targetFinish: mode === 'date' ? date.replace('T', ' ') : undefined,
       indirectPerDay: Number(indirect) || undefined, ldPerDay: Number(ld) || undefined, activities: acts.length ? acts : undefined, defaultMaxPct: Number(pct) || 30, hoursPerDay: ui.prefs.hoursPerDay,
     }));
@@ -87,9 +95,9 @@ interface Row { scenario: string; id: string; days: string }
 export function WhatIfPanel() {
   const ui = useStore((s) => s.ui);
   const [list, setList] = useState<Row[]>([{ scenario: 'Scenario 1', id: '', days: '' }]);
-  const [res, setRes] = useState<ReturnType<typeof evaluateBatch> | null>(null);
+  const [res, setRes] = useState<Awaited<ReturnType<typeof evaluateBatch>> | null>(null);
   const set = (i: number, k: keyof Row, v: string) => setList(list.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
-  const run = () => {
+  const run = async () => {
     const by = new Map<string, Scenario>();
     for (const r of list) {
       if (!r.id.trim() || r.days === '') continue;
@@ -97,7 +105,7 @@ export function WhatIfPanel() {
       s.overrides.push({ op: 'update_activity', id: r.id.trim(), duration_days: Number(r.days) });
     }
     if (!by.size) return toast('Enter an activity ID and a new duration.');
-    setRes(evaluateBatch(getDb(), ui.openProjects, [...by.values()], { hoursPerDay: ui.prefs.hoursPerDay }));
+    setRes(await evaluateBatch(getDb(), ui.openProjects, [...by.values()], { hoursPerDay: ui.prefs.hoursPerDay, calendarDays: false }));
   };
   return (
     <div style={box}>
@@ -137,7 +145,7 @@ export function OptimizePanel() {
   const apply = () => {
     if (!res?.ok) return;
     const order = res.order, lev = res.leveled_activities > 0;
-    if (applyAndSchedule('Optimize schedule (reasoner)', res.ops, lev ? (d) => { const s = scheduleProjects(d, ui.openProjects, {}); if (s.ok) levelResources(d, ui.openProjects, { first: order }); } : undefined)) { toast('Applied the reasoner proposal; Ctrl+Z undoes.'); setRes(null); }
+    if (applyAndSchedule('Optimize schedule (reasoner)', res.ops, lev ? (d) => { levelResources(d, ui.openProjects, { first: order }); } : undefined)) { toast('Applied the reasoner proposal; Ctrl+Z undoes.'); setRes(null); }
   };
   return (
     <div style={box}>

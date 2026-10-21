@@ -288,9 +288,24 @@ progress), then a switch-over on the platform.
 | `analyse_paths` | `float_paths` |
 | `compute_execution_status` EVM | `earned_value` + `progress_curves` |
 | `bellator_resource_analysis` | `resource_histogram` |
+| `forecast_finish` | `monte_carlo` (P10–P90, deadline probability, ratio samplers matching the platform's, since v0.1.14–16) |
+| the platform's `optimize_schedule` (reasoner over onnxruntime-node) | the clone's `optimize_schedule` (the same model, embedded; `objective: min_crash_cost` through `crash_schedule`) |
+| `recover_schedule`, non-crash parts | **stays on the platform**: delay classification and the basis-of-recovery note are LLM reasoning and narrative. Their inputs come from the clone: `windows_analysis` (which activities lost time and why), `crash_schedule` (the recovery steps and costs), `evaluate_batch` (re-sequencing options) |
+| Bellator `health_score` | `lint` with `profile: platform` (weighted score and grade) and `dcma_14`; Bellator's own 0–100 number stays an optional external second opinion |
+| Bellator `logic_audit` | `lint` (open starts and finishes, FS links that should overlap, leads, constraints, redundant links with delete fixes, criticality share) + `check_schedule` (logic, lags, hard constraints) + `schedule` with `log: true` (out-of-sequence progress) |
+| Bellator `progress_audit` | `check_schedule` `invalid_progress_dates` and `dcma_14` `invalid_dates` (actuals after the data date, forecasts before it), `validate` (finish before start, in-progress work without an actual start), `schedule` `log` (out-of-sequence) |
+| Bellator `planning_horizon` | **stays on the platform**: readiness scoring weighs approvals and forecast stability, which are not schedule data in P6 |
+| Bellator `change_tracking` | `compare` (computed) between consecutive updates (actual-date, duration, remaining and float changes, renumbered activities by name) and `windows_analysis` across all updates; DECM rule codes (06A504a/b) and the change narrative stay on the platform |
+| Bellator `baseline_compare` | BEI in `check_schedule` / `dcma_14`, and `compare` with `baseline` (variance per activity). SPI(t) (earned schedule) is not built: it stays on the platform until it is |
+| Bellator `risk_index` | **stays external** (Bellator's composite benchmark); the clone's own measures are `monte_carlo` and `dcma_14` |
+| Bellator `forensic_package` | the evidence comes from `windows_analysis` (half-step, driving paths, lost time) and `tia`; the claim package and its narrative stay on the platform (LLM) |
+| `evm_compute` | `earned_value` and `progress_curves` when the costs are in the schedule; EVM over the platform's own budget register (rows that are not schedule data) **stays on the platform** |
+| `cashflow_scurve` | `progress_curves` for the schedule's cost curves; a cash S-curve from certified or paid amounts supplied per period **stays on the platform** (it is arithmetic over the user's figures, not schedule data) |
+| `reduce_redundant_links` | `lint` (`profile: platform`) `redundant_links`: each fix is a `delete_relationship` op to pass to `edit` |
+| `record_progress_update` | `update_progress` (P6's Update Progress to a data date) or `edit` (`update_activity` actual_start / actual_finish / remaining_days / percent_complete) then `schedule` with `data_date` |
 
-Staying on the platform for now: the bid reasoner (Python + PyTorch, not scheduling), `forecast_finish` (compare it with
-the clone's `monte_carlo` first), DECM and LOB.
+Staying on the platform for now: the bid reasoner (Python + PyTorch, not scheduling), DECM and LOB, and the rows above
+marked so (LLM reasoning or narrative, or data that is not in a P6 schedule).
 
 ## DCMA without Bellator
 

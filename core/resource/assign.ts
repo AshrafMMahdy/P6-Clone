@@ -58,6 +58,21 @@ export function recalcAssignment(db: Db, task: Row, a: Row, field: 'target_qty' 
   recomputeCosts(db, a);
 }
 
+/** After a shorter (crashed) remaining duration: the remaining units are worked over fewer hours (a higher units/time), and
+ *  an assignment with a duration of its own (no units rate, which the scheduler keeps) is cut to the activity's, so it no
+ *  longer holds the late start back. */
+export function fitAssignmentsToDuration(db: Db, task: Row): void {
+  const remH = Number(task.remain_drtn_hr_cnt || 0), durH = Number(task.target_drtn_hr_cnt || 0);
+  const T = table(db, 'TASKRSRC');
+  addField(T, 'remain_drtn_hr_cnt');
+  for (const a of rows(db, 'TASKRSRC')) {
+    if (a.task_id !== task.task_id || a.act_end_date) continue;
+    if (!a.remain_drtn_hr_cnt || Number(a.remain_drtn_hr_cnt) > remH) a.remain_drtn_hr_cnt = p6num(remH);
+    if (!task.act_start_date && a.target_drtn_hr_cnt && Number(a.target_drtn_hr_cnt) > durH) a.target_drtn_hr_cnt = p6num(durH);
+    if (remH > 0 && Number(a.remain_qty || 0) > 0 && Number(a.remain_qty_per_hr || 0) > 0) a.remain_qty_per_hr = p6num(Number(a.remain_qty) / remH);
+  }
+}
+
 /** Assign a resource to an activity with its default units/time over the activity duration. */
 export function assignResource(db: Db, task: Row, rsrcId: string, roleId = ''): Row {
   const T = table(db, 'TASKRSRC');

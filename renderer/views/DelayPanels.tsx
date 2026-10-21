@@ -6,6 +6,7 @@ import { rows } from '../../core/db.ts';
 import { parseP6Date } from '../../core/dates.ts';
 import { applyOps } from '../../core/project/ops.ts';
 import { scheduleProjects } from '../../core/schedule/cpm.ts';
+import { syncAssignmentDates } from '../../core/resource/assign.ts';
 import { baselineOf } from '../../core/analysis/common.ts';
 import { timeImpact, windowsAnalysis } from '../../core/analysis/delay.ts';
 import { goToActivity } from './AnalysisResults.tsx';
@@ -24,10 +25,10 @@ export function WindowsPanel() {
   const [pick, setPick] = useState<Set<string>>(() => new Set(ui.openProjects.slice(0, 1)));
   const [method, setMethod] = useState<'contemporaneous' | 'half_step'>('contemporaneous');
   const [milestone, setMilestone] = useState('');
-  const [res, setRes] = useState<ReturnType<typeof windowsAnalysis> | null>(null);
-  const run = () => {
+  const [res, setRes] = useState<Awaited<ReturnType<typeof windowsAnalysis>> | null>(null);
+  const run = async () => {
     const ups = all.filter((p) => pick.has(p.id)).map((p) => ({ name: p.name, db: getDb(), projId: p.id }));
-    setRes(windowsAnalysis(ups, { method, milestone: milestone.trim() || undefined, hoursPerDay: ui.prefs.hoursPerDay }));
+    setRes(await windowsAnalysis(ups, { method, milestone: milestone.trim() || undefined, hoursPerDay: ui.prefs.hoursPerDay }));
   };
   return (
     <div style={box}>
@@ -80,14 +81,14 @@ export function TiaPanel() {
     let bf: number | null = null;
     if (b) for (const t of b.tasks.values()) { if (milestone && t.task_code !== milestone) continue; const v = parseP6Date(t.act_end_date || t.early_end_date || t.target_end_date); if (v != null && (bf == null || v > bf)) bf = v; }
     const d = dd ? parseP6Date(dd.replace('T', ' ')) : undefined;
-    setRes(timeImpact(getDb(), [cur.proj_id], ops(), { dataDate: d ?? undefined, milestone: milestone.trim() || undefined, hoursPerDay: ui.prefs.hoursPerDay, baseline: b ? { name: b.name, finish: bf } : undefined }));
+    setRes(timeImpact(getDb(), [cur.proj_id], ops(), { dataDate: d ?? undefined, milestone: milestone.trim() || undefined, hoursPerDay: ui.prefs.hoursPerDay, calendarDays: false, baseline: b ? { name: b.name, finish: bf } : undefined }));
   };
   const keep = () => {
     if (!cur) return;
     let id = `${cur.proj_short_name}-TIA`;
     for (let k = 2; rows(getDb(), 'PROJECT').some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase()); k++) id = `${cur.proj_short_name}-TIA${k}`;
     let err = '';
-    try { mutate(`TIA ${id}`, (d) => { const x = applyOps(d, [{ op: 'copy_project', from: cur.proj_short_name, id, keep_progress: true }, ...ops().map((o) => ({ ...o, project: id }))], { hoursPerDay: ui.prefs.hoursPerDay }); if (!x.ok) { err = x.error!.message; throw new Error(err); } const p = rows(d, 'PROJECT').find((q) => q.proj_short_name === id)!; scheduleProjects(d, [p.proj_id], dd ? { dataDate: parseP6Date(dd.replace('T', ' ')) ?? undefined } : {}); }); } catch { /* reported */ }
+    try { mutate(`TIA ${id}`, (d) => { const x = applyOps(d, [{ op: 'copy_project', from: cur.proj_short_name, id, keep_progress: true }, ...ops().map((o) => ({ ...o, project: id }))], { hoursPerDay: ui.prefs.hoursPerDay }); if (!x.ok) { err = x.error!.message; throw new Error(err); } const p = rows(d, 'PROJECT').find((q) => q.proj_short_name === id)!; const s = scheduleProjects(d, [p.proj_id], dd ? { dataDate: parseP6Date(dd.replace('T', ' ')) ?? undefined } : {}); if (!s.ok) { err = 'the impacted copy cannot be scheduled'; throw new Error(err); } syncAssignmentDates(d); }); } catch { /* reported */ }
     toast(err ? `Not kept: ${err}` : `Impacted schedule kept as project ${id} (Ctrl+Z undoes).`);
   };
   const setA = (i: number, k: keyof FragAct, v: string) => setActs(acts.map((a, j) => (j === i ? { ...a, [k]: v } : a)));

@@ -1,8 +1,10 @@
 // Tools > Check Schedule Report, as P6 Professional does it: 14 checks, each with P6's own population and default target, the
 // activities (or relationships) each one finds, and a summary. Thresholds in hours use the admin hours per day
 // (44 days x 8 h = 352 h by default), as P6 does.
-// Default targets are the ones Oracle documents for Check Schedule (the EPPM help gives the numbers; the P6 Professional
-// help lists the same checks without them). EPPM's extra Dangling Start/Finish checks are not in P6 Professional: the
+// Default targets are P6 Professional's (Tools > Check Schedule Report, versions 22 to 25). Oracle's Professional help lists
+// the checks without numbers; the numbers are the Professional dialog's, as walkthroughs of it record them (Taradigm,
+// P6 Professional 23; p6consulting), and Oracle's help for the same report agrees on the 352 h values and the targets.
+// Large Float is < 1 % (Oracle and p6consulting; one walkthrough says < 5 %), BEI > 0.95 as the dialog shows it. EPPM's extra Dangling Start/Finish checks are not in P6 Professional: the
 // lint extension has them.
 import { rows, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
@@ -11,7 +13,7 @@ import {
   P6_HARD, P6_SOFT, pct, percentCheck, relOffender, START_CONSTRAINTS, passes, type CheckResult, type Offender, type Threshold,
 } from './common.ts';
 
-const SRC = 'P6 default (Oracle Check Schedule docs)';
+const SRC = 'P6 Professional default (Check Schedule Report)';
 export const P6_CHECKS: { id: string; name: string; th: Threshold }[] = [
   { id: 'logic', name: 'Logic (missing predecessors or successors)', th: { op: '<', value: 5, source: SRC } },
   { id: 'negative_lags', name: 'Negative lags', th: { op: '<', value: 1, source: SRC } },
@@ -26,7 +28,7 @@ export const P6_CHECKS: { id: string; name: string; th: Threshold }[] = [
   { id: 'invalid_progress_dates', name: 'Invalid progress dates', th: { op: '<', value: 1, source: SRC } },
   { id: 'resource_cost', name: 'Resource/Cost (no resources or expenses)', th: { op: '<', value: 1, source: SRC } },
   { id: 'late_activities', name: 'Late activities', th: { op: '<', value: 5, source: SRC } },
-  { id: 'bei', name: 'Baseline Execution Index (BEI)', th: { op: '>=', value: 0.95, source: SRC } },
+  { id: 'bei', name: 'Baseline Execution Index (BEI)', th: { op: '>', value: 0.95, source: SRC } },
 ];
 
 export interface CheckScheduleOptions {

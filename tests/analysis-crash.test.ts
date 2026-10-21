@@ -27,10 +27,10 @@ function net(): { db: Db; pid: string } {
   return { db, pid };
 }
 
-test('crash: cheapest cut, step sized to the next near-critical path, then a cut set across parallel paths', () => {
+test('crash: cheapest cut, step sized to the next near-critical path, then a cut set across parallel paths', async () => {
   const { db, pid } = net();
   const before = JSON.stringify(db);
-  const r = crashSchedule(db, [pid], {
+  const r = await crashSchedule(db, [pid], {
     targetDays: 5,
     activities: [{ id: 'A', min_days: 7, cost_per_day: 300 }, { id: 'B', min_days: 3, cost_per_day: 100 }, { id: 'D', min_days: 2, cost_per_day: 50 }],
   });
@@ -49,29 +49,29 @@ test('crash: cheapest cut, step sized to the next near-critical path, then a cut
   assert.ok(r.ops.every((o) => o.op === 'update_activity'));
 });
 
-test('crash: exhausted, already met, least total cost, no data defaults', () => {
+test('crash: exhausted, already met, least total cost, no data defaults', async () => {
   const { db, pid } = net();
-  const ex = crashSchedule(db, [pid], { targetDays: 10, activities: [{ id: 'B', min_days: 4, cost_per_day: 10 }] });
+  const ex = await crashSchedule(db, [pid], { targetDays: 10, activities: [{ id: 'B', min_days: 4, cost_per_day: 10 }] });
   assert.ok(ex.ok);
   assert.equal(ex.stop, 'EXHAUSTED');
   assert.equal(ex.days_gained, 2);
-  const met = crashSchedule(db, [pid], { targetFinish: '2027-01-01' });
+  const met = await crashSchedule(db, [pid], { targetFinish: '2027-01-01' });
   assert.ok(met.ok && met.stop === 'ALREADY_MET');
   // indirect 120/d: B (100) pays, B+D (150) does not
-  const opt = crashSchedule(db, [pid], { indirectPerDay: 120, activities: [{ id: 'A', min_days: 7, cost_per_day: 300 }, { id: 'B', min_days: 3, cost_per_day: 100 }, { id: 'D', min_days: 2, cost_per_day: 50 }] });
+  const opt = await crashSchedule(db, [pid], { indirectPerDay: 120, activities: [{ id: 'A', min_days: 7, cost_per_day: 300 }, { id: 'B', min_days: 3, cost_per_day: 100 }, { id: 'D', min_days: 2, cost_per_day: 50 }] });
   assert.ok(opt.ok);
   assert.equal(opt.stop, 'SUCCESS');
   assert.equal(opt.days_gained, 2);
   assert.equal(opt.total_cost, 200 - 240);
-  const def = crashSchedule(db, [pid], { targetDays: 2 });
+  const def = await crashSchedule(db, [pid], { targetDays: 2 });
   assert.ok(def.ok && def.stop === 'SUCCESS' && def.note);
-  assert.equal(crashSchedule(db, [pid], {}).ok, false);
+  assert.equal((await crashSchedule(db, [pid], {})).ok, false);
 });
 
-test('evaluate_batch: many scenarios, base once, nothing kept, errors per scenario', () => {
+test('evaluate_batch: many scenarios, base once, nothing kept, errors per scenario', async () => {
   const { db, pid } = net();
   const before = JSON.stringify(db);
-  const r = evaluateBatch(db, [pid], [
+  const r = await evaluateBatch(db, [pid], [
     { name: 'B shorter', overrides: [{ op: 'update_activity', id: 'B', duration_days: 3 }] },
     { name: 'C longer', overrides: [{ op: 'update_activity', id: 'C', duration_days: 20 }] },
     { name: 'bad', overrides: [{ op: 'update_activity', id: 'NOPE', duration_days: 3 }] },
@@ -109,4 +109,66 @@ test('MCP evaluate_batch and crash_schedule (apply is one undoable change)', asy
   const again = await call('crash_schedule', { handle: h, target_finish: c.d.finish });
   assert.equal(again.d.stop, 'ALREADY_MET', 'the crashed durations were kept and rescheduled');
   assert.equal((await call('crash_schedule', { handle: h })).d.error.code, 'bad_input');
+});
+
+const sample = async (f: string) => { const { readFileSync } = await import('node:fs'); const { join } = await import('node:path'); const { detectFormat, readRaw } = await import('../renderer/io.ts'); const p = join(import.meta.dirname, '..', 'Sample XERs', f), b = new Uint8Array(readFileSync(p)); return readRaw(b, detectFormat(p, b)).db; };
+
+test('crash on real files: Polaris Rev0 after F9 (assignments follow the crash), JWM through an LOE (matches evaluate)', async () => {
+  const { syncAssignmentDates } = await import('../core/resource/assign.ts');
+  const { evaluate } = await import('../core/query/evaluate.ts');
+  // Polaris: F9 gives every assignment the activity's dates; crashed activities used to keep that span and hold their
+  // late start back, so steps paid for days they did not gain (361 and 360 crashed 13 d for 1 d)
+  const pol = await sample('Polaris_DC1_Baseline_Rev0.xer');
+  const pp = rows(pol, 'PROJECT')[0].proj_id;
+  scheduleProjects(pol, [pp]); syncAssignmentDates(pol);
+  const acts = rows(pol, 'TASK').filter((t) => t.task_type === 'TT_Task' && !t.act_end_date).map((t) => ({ id: t.task_code, min_days: Math.round((Number(t.remain_drtn_hr_cnt) / 8) * 0.6), cost_per_day: 100 + (Number(t.task_id) % 7) * 100 }));
+  const r = await crashSchedule(pol, [pp], { targetFinish: '2027-10-01', activities: acts });
+  assert.ok(r.ok && r.stop === 'SUCCESS', JSON.stringify(r).slice(0, 300));
+  for (const s of r.steps) assert.ok(Math.abs(s.days_gained - s.activities[0].days) < 0.01, `step ${s.step}: ${s.activities.map((a) => a.id).join(' ')} crashed ${s.activities[0].days} d for ${s.days_gained} d`);
+  assert.ok(r.ops.every((o: any) => o.assignments_follow === true));
+  // JWM: the LOE G-P-001 ends at the finish with an FF into HO-001; it used to make an uncuttable path (EXHAUSTED, 0 steps)
+  const jwm = await sample('Copy of JWM - Baseline Programme Rev 05A.xer');
+  const jp = rows(jwm, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id);
+  scheduleProjects(jwm, jp);
+  const e = evaluate(jwm, jp, { overrides: [{ op: 'update_activity', id: 'HO-001', duration_days: 10 }] });
+  assert.ok(e.ok);
+  const c = await crashSchedule(jwm, jp, { targetDays: 4, activities: [{ id: 'HO-001', min_days: 10, cost_per_day: 100 }] });
+  assert.ok(c.ok && c.stop === 'SUCCESS', JSON.stringify(c).slice(0, 300));
+  assert.equal(c.finish, e.finish);
+  assert.equal(c.days_gained, -e.finish_delta_days!);
+});
+
+test('crash: an LOE ending at the finish does not block; LDs need a contract date', async () => {
+  const { db, pid } = net();
+  const r = applyOps(db, [{ op: 'add_activity', id: 'PM', name: 'Project management', type: 'loe' }, { op: 'add_relationship', pred: 'S', succ: 'PM', type: 'SS' }, { op: 'add_relationship', pred: 'B', succ: 'PM', type: 'FF' }], { calendarDays: true });
+  assert.ok(r.ok);
+  scheduleProjects(db, [pid]);
+  const c = await crashSchedule(db, [pid], { targetDays: 2 });
+  assert.ok(c.ok && c.stop === 'SUCCESS' && c.days_gained === 2, JSON.stringify(c).slice(0, 300));
+  const ld = await crashSchedule(db, [pid], { indirectPerDay: 10, ldPerDay: 1000, activities: [{ id: 'B', min_days: 3, cost_per_day: 100 }] });
+  assert.ok(ld.ok);
+  assert.equal(ld.days_gained, 0, 'without target_finish the LDs do not pay for crashing');
+  assert.ok(ld.warnings.some((w) => /ld_per_day needs target_finish/.test(w)));
+  assert.equal((await crashSchedule(db, [pid], { ldPerDay: 1000 })).ok, false);
+});
+
+test('MCP: long analyses report progress, stay cancellable and keep the server answering', async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'LONG', start: '2026-03-02' })).d;
+  const ops: unknown[] = [];
+  for (let i = 0; i < 60; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 3 }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
+  await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });
+  const scenarios = Array.from({ length: 200 }, (_, i) => ({ name: `s${i}`, overrides: [{ op: 'update_activity', id: `A${i % 60}`, duration_days: 1 + (i % 5) }] }));
+  const job = (await call('evaluate_batch', { handle: np.handle, scenarios, async: true })).d.job_id;
+  assert.ok(job);
+  // the server answers other calls while it runs, and the job shows its progress
+  const st = await call('server_status', {});
+  assert.equal(st.err, false);
+  let view = (await call('job_status', { job_id: job })).d;
+  for (let k = 0; k < 50 && view.status === 'running' && !view.progress; k++) { await new Promise((r) => setTimeout(r, 20)); view = (await call('job_status', { job_id: job })).d; }
+  assert.match(String(view.progress ?? ''), /scenario \d+ of 200/);
+  await call('cancel_job', { job_id: job });
+  view = (await call('job_status', { job_id: job, wait_seconds: 10 })).d;
+  assert.equal(view.status, 'cancelled', JSON.stringify(view).slice(0, 300));
 });

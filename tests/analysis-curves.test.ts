@@ -71,3 +71,29 @@ test('resource histogram: budgeted, actual, remaining early/late, limit and over
   assert.equal(sum(cost.resources[0].periods.map((p) => p.budgeted)), 2400);
   assert.equal(cost.resources[0].severity, 'none');
 });
+
+test('baseline found by its copy link (Tower-A: no sum_base_proj_id); EV of an actual after the data date stays in cum_ev', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { detectFormat, readRaw } = await import('../renderer/io.ts');
+  const { baselineOf } = await import('../core/analysis/common.ts');
+  const p = join(import.meta.dirname, '..', 'Sample XERs', 'Tower-A.xer'), b = new Uint8Array(readFileSync(p));
+  const tw = readRaw(b, detectFormat(p, b)).db;
+  const main = rows(tw, 'PROJECT').find((x) => !x._baseline_of)!;
+  assert.equal(baselineOf(tw, main, 'project')?.name, 'TOWER-A-BL1');
+  assert.ok(!progressCurves(tw, [main.proj_id], {}).warnings.some((w) => /No project baseline/.test(w)));
+  // an activity whose actual start and finish are after the data date: its EV is still counted by the data date
+  const db: Db = { tables: {} };
+  const r = applyOps(db, [
+    { op: 'add_project', id: 'EV', start: '2026-03-02' }, { op: 'add_resource', id: 'R', name: 'R', price_per_unit: 10 },
+    { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'assign_resource', activity: 'A', resource: 'R', units_per_day: 8 },
+    { op: 'update_activity', id: 'A', actual_start: '2026-03-20 08:00', actual_finish: '2026-03-26 17:00' },
+  ]);
+  assert.ok(r.ok, JSON.stringify(r.error));
+  const pid = rows(db, 'PROJECT')[0].proj_id;
+  scheduleProjects(db, [pid], { dataDate: Date.UTC(2026, 2, 16, 8) / 60000 });
+  const c = progressCurves(db, [pid], { period: 'week' });
+  const lastEv = c.periods.filter((x) => x.cum_ev != null).at(-1)!.cum_ev!;
+  assert.ok(c.totals.ev > 0, 'the activity earned value: ' + c.totals.ev);
+  assert.equal(lastEv, c.totals.ev, 'cum_ev at the data date equals the earned value');
+});

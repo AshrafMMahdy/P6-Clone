@@ -8,6 +8,7 @@
 //  - resource histograms: budgeted (planned dates), actual, remaining early (with P6 resource curves) and remaining
 //    late units or cost per period, the limit, over-allocation and its severity.
 // Spreading is linear over each activity's working time. Values are hours (units) or the project currency (cost).
+import { baselineOf } from './common.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { activityCosts, earnedValue, percentComplete, sumLines } from '../cost/rollup.ts';
@@ -69,7 +70,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   // baseline counterparts (dates of the planned value)
   const bl = new Map<string, Row>();
   let blName: string | null = null;
-  for (const p of projs) if (p.sum_base_proj_id) { blName = rows(db, 'PROJECT').find((x) => x.proj_id === p.sum_base_proj_id)?.proj_short_name ?? null; for (const t of rows(db, 'TASK')) if (t.proj_id === p.sum_base_proj_id) bl.set(`${p.proj_id}|${t.task_code}`, t); }
+  for (const p of projs) { const b = baselineOf(db, p, 'project'); if (b) { blName = b.name; for (const t of b.tasks.values()) bl.set(`${p.proj_id}|${t.task_code}`, t); } }
   if (!blName) warnings.push('No project baseline is assigned: planned value uses the current budget and planned dates.');
 
   // the quantities per activity
@@ -122,8 +123,10 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
       if (lastFinEnd == null || fe > lastFinEnd) lastFinEnd = fe;
     }
     if (as != null && dataDate != null) {
-      const endPast = d(t.act_end_date) ?? dataDate;
-      const a0 = lastFinEnd != null && lastFinEnd > as ? Math.min(lastFinEnd, endPast) : as;
+      // what was earned and spent belongs before the data date, also when an actual date is (wrongly) after it
+      const endPast = Math.min(d(t.act_end_date) ?? dataDate, dataDate);
+      let a0 = lastFinEnd != null && lastFinEnd > as ? Math.min(lastFinEnd, endPast) : as;
+      if (a0 >= endPast) a0 = endPast - 1; // started on or after the data date: all of it in the period before
       spreadLinear(ev, g, evLeft, a0, Math.max(a0, endPast), cal);
       spreadLinear(ac, g, acLeft, a0, Math.max(a0, endPast), cal);
     }

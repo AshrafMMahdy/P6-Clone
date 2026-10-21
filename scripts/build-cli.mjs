@@ -14,5 +14,5 @@ await build({ ...common, entryPoints: [join(root, 'mcp/server.ts')], outfile: jo
 // the Unicode font for PDFs (Arabic, Hebrew, Cyrillic, Greek) travels with the bundles: copy the fonts folder too
 cpSync(join(root, 'fonts'), join(root, 'dist-cli/fonts'), { recursive: true });
 // the schedule reasoner (optimize_schedule): the model and its WebAssembly runtime
-copyReasoner(root, join(root, 'dist-cli'));
-console.log('built dist-cli/p6clone.cjs, dist-cli/p6clone-mcp.cjs, dist-cli/fonts/, dist-cli/models/ and dist-cli/node_modules/ (the reasoner runtime)');
+await copyReasoner(root, join(root, 'dist-cli'));
+console.log('built dist-cli/p6clone.cjs, dist-cli/p6clone-mcp.cjs, dist-cli/fonts/, dist-cli/models/ and dist-cli/ort/ (the reasoner runtime and its licences)');

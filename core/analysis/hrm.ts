@@ -12,7 +12,7 @@ import { scheduleProjects } from '../schedule/cpm.ts';
 import { levelResources } from '../level/level.ts';
 import { onScratch } from './batch.ts';
 import type { CrashActivity } from './crash.ts';
-import { isLoe, isWbs } from './common.ts';
+import { isLoe, isWbs, type Tick } from './common.ts';
 
 export const REASONER_KMAX = 3;
 /** the precedence bias is n x n floats: past this the model gets slow and large */
@@ -100,9 +100,13 @@ export function reasonerInputs(inst: HrmInstance): ReasonerInputs {
   }
   // symmetric reachability: 1 where two activities share a directed path
   const bias = new Float32Array(n * n);
-  const desc: Set<number>[] = Array.from({ length: n }, () => new Set<number>());
-  for (let k = order.length - 1; k >= 0; k--) { const u = order[k]; for (const s of succ[u]) { desc[u].add(s); for (const d of desc[s]) desc[u].add(d); } }
-  for (let u = 0; u < n; u++) for (const v of desc[u]) { bias[u * n + v] = 1; bias[v * n + u] = 1; }
+  // descendants as bit rows (n x n bits: 1.1 MB at 3,000 activities), OR-ed up in reverse precedence order
+  const W = (n + 31) >>> 5, reach = new Uint32Array(n * W);
+  for (let k = order.length - 1; k >= 0; k--) {
+    const u = order[k], ru = u * W;
+    for (const s of succ[u]) { reach[ru + (s >>> 5)] |= 1 << (s & 31); const rs = s * W; for (let w = 0; w < W; w++) reach[ru + w] |= reach[rs + w]; }
+  }
+  for (let u = 0; u < n; u++) for (let w = 0; w < W; w++) for (let bits = reach[u * W + w]; bits; bits &= bits - 1) { const v = (w << 5) + (31 - Math.clz32(bits & -bits)); bias[u * n + v] = 1; bias[v * n + u] = 1; }
   const modeMask = new Uint8Array(n * REASONER_KMAX);
   acts.forEach((a, i) => { for (let j = 0; j < Math.min(REASONER_KMAX, a.modes.length); j++) modeMask[i * REASONER_KMAX + j] = 1; });
   return { n, feats, bias, modeMask };
@@ -149,7 +153,7 @@ export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, 
 
 /** Sampled decode around the net's answer (GRAM-style, as the platform): trajectory 0 is the net's argmax modes and
  *  priority; then `samples` more with sampled modes and jittered priority, each scored by the SGS; the best is kept. */
-export function decode(inst: HrmInstance, out: { priority: Float32Array; modeLogits: Float32Array }, o: { samples?: number; seed?: number } = {}) {
+export async function decode(inst: HrmInstance, out: { priority: Float32Array; modeLogits: Float32Array }, o: { samples?: number; seed?: number; tick?: Tick } = {}) {
   const acts = inst.acts, n = acts.length;
   const valid: number[][] = [], probs: number[][] = [], argmax: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -167,6 +171,7 @@ export function decode(inst: HrmInstance, out: { priority: Float32Array; modeLog
   let best = run(argmax, netPrio);
   const K = o.samples ?? (n > 120 ? 64 : 200);
   for (let k = 0; k < K; k++) {
+    if (o.tick && k % 16 === 0) await o.tick(k, K, `trajectory ${k} of ${K}`);
     const scale = 0.3 + rand(), sample = rand() < 0.5;
     const mc = argmax.map((am, i) => { if (!sample || valid[i].length === 1) return am; const r = rand(); let acc = 0; for (let j = 0; j < valid[i].length; j++) { acc += probs[i][j]; if (r <= acc) return valid[i][j]; } return valid[i].at(-1)!; });
     const c = run(mc, netPrio.map((p) => p + gauss() * scale));
@@ -181,14 +186,14 @@ export function proposalOps(inst: HrmInstance, modes: number[], multi: boolean, 
   inst.acts.forEach((a, i) => {
     if (!modes[i]) return;
     const h = Number(a.task.remain_drtn_hr_cnt || 0) / (a.duration || 1) || hoursPerDay, hours = a.modes[modes[i]].duration * h;
-    ops.push({ op: 'update_activity', id: a.task.task_code, ...(multi ? { project: projCode.get(a.task.proj_id) } : {}), ...(a.started ? { remaining_hours: hours } : { duration_hours: hours }) });
+    ops.push({ op: 'update_activity', id: a.task.task_code, ...(multi ? { project: projCode.get(a.task.proj_id) } : {}), ...(a.started ? { remaining_hours: hours } : { duration_hours: hours }), assignments_follow: true });
   });
   return ops;
 }
 
 const finishOf = (d: Db, projIds: string[]) => { const open = new Set(projIds); let f = -Infinity; for (const t of rows(d, 'TASK')) if (open.has(t.proj_id)) { const v = parseP6Date(t.act_end_date || t.early_end_date); if (v != null && v > f) f = v; } return Number.isFinite(f) ? f : null; };
 
-export interface OptimizeOptions { samples?: number; seed?: number; activities?: CrashActivity[]; hoursPerDay?: number }
+export interface OptimizeOptions { samples?: number; seed?: number; activities?: CrashActivity[]; hoursPerDay?: number; tick?: Tick }
 
 export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOptions, infer: Infer, applyOps: (d: Db, ops: unknown[]) => void) {
   const inst = buildInstance(db, projIds, o);
@@ -198,13 +203,15 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   const leveled = inst.acts.filter((a) => a.crewSize > 0).length, crashable = inst.acts.filter((a) => a.modes.length > 1).length;
   if (!leveled && !crashable) return { ok: false as const, error: { code: 'nothing_to_optimise', message: 'No activity uses a resource with a Max Units/Time limit and no crash data was given, so there is nothing for the reasoner to choose.' } };
   const out = await infer(reasonerInputs(inst));
-  const best = decode(inst, out, o);
+  const best = await decode(inst, out, o);
   const order = inst.acts.map((a, i) => [a.task.task_id, best.prio[i]] as const).sort((x, y) => y[1] - x[1]).map(([id]) => id);
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const ops = proposalOps(inst, best.modes, projIds.length > 1, projCode, o.hoursPerDay);
   // real dates: CPM, P6's default leveling (early start priority), and the reasoner's modes and order through the same leveler
   const measureLeveled = (d: Db, first?: string[]) => { const s = scheduleProjects(d, projIds, {}); if (!s.ok) throw new Error('The schedule failed.'); const cpm = finishOf(d, projIds); if (leveled) levelResources(d, projIds, { first }); return { cpm, leveled: finishOf(d, projIds) }; };
+  if (o.tick) await o.tick(1, 3, 'P6 leveling for comparison');
   const p6 = onScratch(db, (d) => measureLeveled(d));
+  if (o.tick) await o.tick(2, 3, 'leveling in the proposed order');
   const mine = onScratch(db, (d) => { applyOps(d, ops); return measureLeveled(d, order); });
   const fmt = (v: number | null) => (v != null ? formatP6Date(v) : null);
   const byTask = new Map(inst.acts.map((a) => [a.task.task_id, a]));
@@ -214,7 +221,7 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     cpm_finish: fmt(p6.cpm), p6_leveled_finish: fmt(p6.leveled), reasoner_finish: fmt(mine.leveled),
     better_than_p6_leveler: p6.leveled != null && mine.leveled != null ? mine.leveled < p6.leveled : null,
     sgs_makespan_days: best.makespan, crash_cost: Math.round(best.cost * 100) / 100,
-    changes: inst.acts.filter((_, i) => best.modes[i]).map((a) => ({ id: a.task.task_code, from_days: a.duration, to_days: a.modes[best.modes[inst.acts.indexOf(a)]].duration, cost: a.modes[best.modes[inst.acts.indexOf(a)]].cost })),
+    changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
     priority: order.slice(0, 100).map((id) => byTask.get(id)!.task.task_code),
     ops, order,
   };

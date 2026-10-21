@@ -33,6 +33,7 @@ import { reviewSchedule } from '../core/query/review.ts';
 import { ANALYSIS_TOOLS, runAnalysis } from './analysis.ts';
 import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
 import { baselineOf } from '../core/analysis/common.ts';
+import { reasonerStatus } from '../core/analysis/hrmRuntime.ts';
 import { record, rollback } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { worst, type Finding } from '../core/findings.ts';
@@ -72,7 +73,7 @@ const TOOLS = [
   { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, must_finish_by: { type: 'string', description: 'Must finish by (YYYY-MM-DD): late dates and float are measured to it' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
   { name: 'compute_schedule', annotations: ro, description: `Compute a schedule from a description, with no handle and nothing kept: P6's F9 (calendars, constraints, milestones, progress, retained logic and the other schedule options) on the activities and links given. Takes: ${COMPUTE_GUIDE}.`, inputSchema: { type: 'object', properties: { start: { type: 'string' }, data_date: { type: 'string' }, must_finish_by: { type: 'string' }, hours_per_day: { type: 'number' }, calendar: { type: 'string' }, calendars: { type: 'array', items: { type: 'object' } }, activities: { type: 'array', items: { type: 'object' } }, relationships: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, break_loops: { type: 'boolean' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' }, ...common }, required: ['start', 'activities'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
-  { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs.', inputSchema: { type: 'object', properties: {} } },
+  { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs, and reasoner: whether the schedule reasoner (optimize_schedule) loaded, its model and runtime, or why not.', inputSchema: { type: 'object', properties: {} } },
   { name: 'job_status', annotations: ro, description: 'Result of a job started with async: true (or one that outlived the call time). wait_seconds (max 20) waits for it to finish.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, wait_seconds: { type: 'number' } }, required: ['job_id'] } },
   { name: 'cancel_job', annotations: edit, description: 'Stop a running job (Monte Carlo stops at once; open_file, save and schedule stop between their phases, keeping or writing nothing; other work finishes its current step). MCP notifications/cancelled stops a running call the same way.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' } }, required: ['job_id'] } },
   { name: 'edit', annotations: edit, description: `Change the project with a list of operations, applied as ONE transaction: if any fails nothing changes and the error names it. Undo with undo.\n${OP_GUIDE}`, inputSchema: withHandle({ type: 'object', properties: { operations: { type: 'array', items: { type: 'object' } } }, required: ['operations'] }) },
@@ -163,14 +164,14 @@ const MUTATES = new Set(TOOLS.filter((t) => !t.annotations.readOnlyHint && !['li
 async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unknown> {
   switch (name) {
     case 'list_open': return { open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, projects: allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), unsaved_changes: s.dirty, changes: s.history.length })), moved_out: evictedList() };
-    case 'server_status': return { version: VERSION, ...status(), recovery: recoveryStatus() };
+    case 'server_status': return { version: VERSION, ...status(), recovery: recoveryStatus(), reasoner: await reasonerStatus() };
     case 'job_status': {
       const job = getJob(a.job_id);
       const wait = Math.min(20, Math.max(0, Number(a.wait_seconds) || 0)) * 1000;
       for (const t0 = Date.now(); !job.done && Date.now() - t0 < wait;) await new Promise((r) => setTimeout(r, 200));
       return jobView(job);
     }
-    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: ['monte_carlo', 'open_file', 'save', 'schedule'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
+    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: ['monte_carlo', 'open_file', 'save', 'schedule', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
     case 'open_file': {
       const path = pathArg(a.path);
       const bytes = readBytes(path);
@@ -427,7 +428,14 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       return { saved: path, rows: report!.rows.length };
     }
   }
-  const analysed = await runAnalysis(name, a, s, { projectIds, allIds, dd, writeOut, apply: (label, fn) => change(s, ctx.caller, label, fn) });
+  let lastTick = 0;
+  const tick = async (done: number, total: number, message: string) => {
+    if (ctx.job) ctx.job.progress = message;
+    const now = Date.now();
+    if (now - lastTick > 250) { lastTick = now; ctx.progress?.(done, total, message); }
+    await checkpoint(ctx); // yields, and throws "cancelled" once the call or its job is cancelled
+  };
+  const analysed = await runAnalysis(name, a, s, { projectIds, allIds, dd, writeOut, apply: (label, fn) => change(s, ctx.caller, label, fn), tick });
   if (analysed !== undefined) return analysed;
   if (LOOKUPS.some((t) => t.name === name)) {
     const { handle: _h, caller: _c, async: _a, ...args } = a;
@@ -529,7 +537,14 @@ export function toolResult(out: unknown, isError: boolean) {
 
 export const SERVER_INFO = { name: 'p6-clone', title: 'P6 Clone (headless Primavera P6)', version: VERSION };
 export const INSTRUCTIONS = 'Open an XER with open_file (or new_project): keep the handle (for editing) and the owner_key (for save, close and undoing others\' work). Then query, edit, schedule, review, run reports, Monte Carlo; save writes the file. Several agents may share one handle: calls run one at a time, undo and redo act on your own changes (pass caller). Every error has a code and a hint: follow the hint (busy: retry after retry_after seconds; unknown_handle: open the file again). Long work can run with async: true and job_status.';
-export const toolsList = () => TOOLS;
+/** The arguments naming files a tool reads (the White Hat IQ platform stages them before the call; a tool not listed reads
+ *  none). "updates[].path" and "settings.font_path" are inside an argument. */
+const FILES: Record<string, { read: string[]; opens: boolean }> = {
+  open_file: { read: ['path'], opens: true }, compare: { read: ['path'], opens: false }, import_excel: { read: ['path'], opens: false },
+  export_pdf: { read: ['settings.font_path'], opens: false }, run_report: { read: ['settings.font_path'], opens: false },
+  windows_analysis: { read: ['updates[].path'], opens: false },
+};
+export const toolsList = () => TOOLS.map((t) => (FILES[t.name] ? { ...t, _meta: { 'whiq/files': FILES[t.name] } } : t));
 
 // ---------------------------------------------------------------- start
 export function housekeeping(): void { setInterval(() => { try { sweepIdle(); sweepJobs(); } catch { /* keep serving */ } }, 60000).unref(); }

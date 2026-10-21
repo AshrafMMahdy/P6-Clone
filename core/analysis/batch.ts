@@ -7,6 +7,7 @@ import { applyOps } from '../project/ops.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
 import { activityCosts, sumLines } from '../cost/rollup.ts';
 import { calendarResolver, scheduleProjects, type SchedOptions } from '../schedule/cpm.ts';
+import type { Tick } from './common.ts';
 
 export interface Scenario { name: string; overrides: unknown[] }
 export interface ScenarioResult {
@@ -37,17 +38,19 @@ export function measure(d: Db, projIds: string[], over: Partial<SchedOptions> = 
   return { ok: true, m: { finish: r.stats.finish, critical: crit, negative: tasks.filter((t: Row) => !t.act_end_date && Number(t.total_float_hr_cnt || 0) < 0).length, cost: sumLines(activityCosts(d, projIds).values()).eac, dates } };
 }
 
-export function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; top?: number } = {}) {
+export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick } = {}) {
   const hpd = o.hoursPerDay ?? 8, top = o.top ?? 3;
   const base = onScratch(db, (d) => measure(d, projIds, o.options));
   if (!base.ok) return { ok: false as const, error: { code: 'schedule_failed', message: `The project as it is cannot be scheduled: ${base.error}` } };
   const p0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
   const days = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round((cal.workBetween(a, b) / 60 / (cal.hoursPerDay() || hpd)) * 100) / 100);
-  const results: (ScenarioResult & { _m?: Measure })[] = scenarios.map((sc, i) => {
+  const results: (ScenarioResult & { _m?: Measure })[] = [];
+  for (const [i, sc] of scenarios.entries()) {
+    if (o.tick) await o.tick(i, scenarios.length, `scenario ${i + 1} of ${scenarios.length}`);
     const name = sc.name || `scenario ${i + 1}`;
-    return onScratch(db, (d) => {
-      const r = applyOps(d, sc.overrides ?? [], { hoursPerDay: hpd, calendarDays: true });
+    results.push(onScratch(db, (d): ScenarioResult & { _m?: Measure } => {
+      const r = applyOps(d, sc.overrides ?? [], { hoursPerDay: hpd, calendarDays: o.calendarDays ?? true }); // days as the caller edits
       if (!r.ok) return { name, ok: false, error: `operation ${r.error!.index + 1}: ${r.error!.message}` };
       const m = measure(d, projIds, o.options);
       if (!m.ok) return { name, ok: false, error: m.error };
@@ -56,8 +59,8 @@ export function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], 
         critical: m.m.critical.size, became_critical: [...m.m.critical].filter((c) => !base.m.critical.has(c)), no_longer_critical: [...base.m.critical].filter((c) => !m.m.critical.has(c)),
         negative_float: m.m.negative, cost: Math.round(m.m.cost * 100) / 100, cost_delta: Math.round((m.m.cost - base.m.cost) * 100) / 100, _m: m.m,
       };
-    });
-  });
+    }));
+  }
   // the best few (earliest finish, then cheapest) carry the activities whose dates moved
   const ranked = results.filter((r) => r.ok).sort((a, b) => (parseP6Date(a.finish ?? '') ?? Infinity) - (parseP6Date(b.finish ?? '') ?? Infinity) || (a.cost ?? 0) - (b.cost ?? 0));
   for (const r of ranked.slice(0, top)) r.changed = [...r._m!.dates].filter(([k, v]) => { const b = base.m.dates.get(k); return !b || b[0] !== v[0] || b[1] !== v[1]; }).slice(0, 200).map(([k, v]) => { const b = base.m.dates.get(k) ?? [null, null]; return { id: k, start: [b[0], v[0]], finish: [b[1], v[1]] }; });

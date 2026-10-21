@@ -11,7 +11,7 @@ import { findLoops } from '../xer/validate.ts';
 import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
 import { parseClndrData, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
-import { assignResource, assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
+import { assignResource, assignmentActuals, fitAssignmentsToDuration, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { copyProject } from './copy.ts';
 import { dayHours as dayHoursOf } from './units.ts';
 import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
@@ -92,7 +92,7 @@ export const OP_GUIDE = [
   `add_wbs: code, [name], [parent] (parent WBS code, dotted path or wbs_id:<id>; omit for top level), [project]. Returns wbs_id. P6 needs WBS codes unique under one parent, so a sibling with the same code is refused`,
   `delete_wbs: code, [keep_logic] (default true: every predecessor of the removed activities is linked on to their successors, so the chain stays closed; false = just delete), [project]. Removes the WBS element, its child elements and all their activities: the way to remove whole floors or areas, e.g. from a copied project`,
   `add_activity: name, [id], [wbs] (WBS code; omit = project root), [type] (${Object.keys(TYPES).join(', ')}), [duration_days], [calendar], [priority] (${Object.keys(PRIO).join(', ')}), [constraint {type, date}] (types: ${Object.keys(CSTR).filter((k) => k !== 'none').join(', ')}), [secondary_constraint], [project]`,
-  `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
+  `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [assignments_follow] (true: assignments take the new remaining duration, the same remaining units over fewer hours; crash_schedule sets it), [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish]`,
   `delete_activity / dissolve_activity: id`,
   `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities are both kept; a Microsoft Project XML / MPX file one per pair): one already there is skipped and reported in "warnings". A relationship that closes a loop refuses the edit`,
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
@@ -421,6 +421,7 @@ function updateActivity(db: Db, t: Row, op: Op, dayHours: (t: Row) => number, ca
   if (op.finish != null) ok(setFinish(db, t, String(op.finish)));
   t.status_code = statusOf(t);
   t.update_date = formatP6Date(Date.now() / 60000);
+  if (op.assignments_follow === true) fitAssignmentsToDuration(db, t);
   if (durH != null || op.remaining_days != null || op.remaining_hours != null || op.calendar != null) refreshOwnDates(db, t);
 }
 

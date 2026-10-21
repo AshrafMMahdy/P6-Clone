@@ -22,6 +22,10 @@ export interface CheckResult {
   detail?: Record<string, unknown>;
 }
 
+/** Long analyses call this between units of work: it reports progress, yields to the event loop and throws when the
+ *  call was cancelled (the MCP server's; the desktop app passes none, so the work runs straight through). */
+export type Tick = (done: number, total: number, message: string) => Promise<void>;
+
 export const isWbs = (t: Row) => t.task_type === 'TT_WBS';
 export const isLoe = (t: Row) => t.task_type === 'TT_LOE';
 export const isMilestone = (t: Row) => t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile';
@@ -73,7 +77,10 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
 
 /** A project's baseline: the project baseline P6 stores (sum_base_proj_id) or a user baseline BL1-BL3. */
 export function baselineOf(db: Db, proj: Row, which: 'project' | 'bl1' | 'bl2' | 'bl3' = 'project'): { projId: string; name: string; tasks: Map<string, Row> } | null {
-  const id = which === 'project' ? proj.sum_base_proj_id : proj[`_${which}`];
+  // the project baseline: sum_base_proj_id, else the one baseline copy saved from this project (files that carry the
+  // baseline project but not the assignment, e.g. Tower-A)
+  const copies = which === 'project' && !proj.sum_base_proj_id ? rows(db, 'PROJECT').filter((p) => p._baseline_of === proj.proj_id) : [];
+  const id = which === 'project' ? proj.sum_base_proj_id || (copies.length === 1 ? copies[0].proj_id : '') : proj[`_${which}`];
   if (!id || id === proj.proj_id) return null;
   const b = rows(db, 'PROJECT').find((p) => p.proj_id === id);
   if (!b) return null;

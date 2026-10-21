@@ -10,7 +10,7 @@ import { applyOps } from '../project/ops.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
 import { calendarResolver, relationshipFloat, scheduleProjects } from '../schedule/cpm.ts';
 import { onScratch } from './batch.ts';
-import { isWbs } from './common.ts';
+import { isLoe, isWbs, type Tick } from './common.ts';
 
 export interface Update { name: string; db: Db; projId: string }
 
@@ -36,7 +36,7 @@ function finishActivity(u: Update, milestone?: string): Row | null {
   // the latest finish; on a tie, the activity nothing follows (the finish milestone after its last task)
   const hasSucc = new Set(rows(u.db, 'TASKPRED').map((r) => r.pred_task_id));
   let best: Row | null = null;
-  for (const t of T) { const f = finOf(t); if (f != null && (best == null || f > finOf(best)! || (f === finOf(best) && hasSucc.has(best.task_id) && !hasSucc.has(t.task_id)))) best = t; }
+  for (const t of T) { const f = finOf(t); if (!isLoe(t) && f != null && (best == null || f > finOf(best)! || (f === finOf(best) && hasSucc.has(best.task_id) && !hasSucc.has(t.task_id)))) best = t; }
   return best;
 }
 
@@ -50,7 +50,8 @@ export function drivingPath(u: Update, end: Row): Row[] {
     const t = stack.pop()!;
     if (seen.has(t.task_id) || t.act_end_date) continue;
     seen.add(t.task_id); out.push(t);
-    for (const r of preds.get(t.task_id) ?? []) { const p = ctx.taskById.get(r.pred_task_id); if (p && p.proj_id === u.projId && rf(r) === 0) stack.push(p); }
+    // LOE and WBS summary activities take their dates from the logic around them, so they never drive it
+    for (const r of preds.get(t.task_id) ?? []) { const p = ctx.taskById.get(r.pred_task_id); if (p && p.proj_id === u.projId && !isLoe(p) && rf(r) === 0) stack.push(p); }
   }
   const st = (t: Row) => parseP6Date(t.act_start_date || t.early_start_date) ?? 0;
   return out.sort((x, y) => st(x) - st(y) || (finOf(x) ?? 0) - (finOf(y) ?? 0));
@@ -60,7 +61,7 @@ const predCodes = (u: Update, t: Row) => { const byId = new Map(tasksOf(u).map((
 
 const PROGRESS = ['act_start_date', 'act_end_date', 'remain_drtn_hr_cnt', 'phys_complete_pct', 'status_code', 'restart_date', 'reend_date', 'suspend_date', 'resume_date', 'expect_end_date', 'act_work_qty', 'remain_work_qty'];
 
-export function windowsAnalysis(updates: Update[], o: { milestone?: string; method?: 'contemporaneous' | 'half_step'; hoursPerDay?: number; maxIds?: number } = {}) {
+export async function windowsAnalysis(updates: Update[], o: { milestone?: string; method?: 'contemporaneous' | 'half_step'; hoursPerDay?: number; maxIds?: number; tick?: Tick } = {}) {
   const list = [...updates].sort((x, y) => (dataDate(x) ?? 0) - (dataDate(y) ?? 0));
   if (list.length < 2) return { ok: false as const, error: { code: 'bad_input', message: 'A windows analysis needs at least two updates.' } };
   const first = list[0], p0 = rows(first.db, 'PROJECT').find((p) => p.proj_id === first.projId);
@@ -71,6 +72,7 @@ export function windowsAnalysis(updates: Update[], o: { milestone?: string; meth
   const windows = [];
   for (let i = 1; i < list.length; i++) {
     const A = list[i - 1], B = list[i];
+    if (o.tick) await o.tick(i - 1, list.length - 1, `window ${i} of ${list.length - 1}`);
     const ea = finishActivity(A, o.milestone), eb = finishActivity(B, o.milestone);
     if (!ea || !eb) return { ok: false as const, error: { code: 'bad_input', message: `${o.milestone ? `Milestone "${o.milestone}"` : 'A finish'} is missing in ${!ea ? A.name : B.name}.` } };
     const fa = finOf(ea), fb = finOf(eb);
@@ -92,7 +94,7 @@ export function windowsAnalysis(updates: Update[], o: { milestone?: string; meth
       window: i, from: A.name, to: B.name, data_date_from: fmt(dataDate(A)), data_date_to: fmt(dataDate(B)),
       finish_from: fmt(fa), finish_to: fmt(fb), slip_days: wd(fa, fb),
       driving_path: path.slice(0, max).map((t) => t.task_code), ...(path.length > max ? { driving_path_more: path.length - max } : {}),
-      lost_time: lost.slice(0, max), added: tasksOf(B).filter((t) => ![...match.values()].includes(t)).slice(0, max).map((t) => t.task_code),
+      lost_time: lost.slice(0, max), added: (() => { const m = new Set(match.values()); return tasksOf(B).filter((t) => !m.has(t)).slice(0, max).map((t) => t.task_code); })(),
     };
     if (o.method === 'half_step') {
       // update n-1 with only update n's progress, rescheduled at update n's data date
@@ -119,7 +121,7 @@ export function windowsAnalysis(updates: Update[], o: { milestone?: string; meth
 const fmt = (v: number | null | undefined) => (v != null ? formatP6Date(v) : null);
 
 /** Time impact analysis on a copy: unimpacted and impacted schedules at the same data date. */
-export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { dataDate?: number; milestone?: string; hoursPerDay?: number; baseline?: { name: string; finish: number | null } } = {}) {
+export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { dataDate?: number; milestone?: string; hoursPerDay?: number; calendarDays?: boolean; baseline?: { name: string; finish: number | null } } = {}) {
   const p0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
   const hpd = cal.hoursPerDay() || o.hoursPerDay || 8;
@@ -139,7 +141,8 @@ export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { d
   for (const op of fragnet as Record<string, unknown>[]) { if (op?.op === 'add_activity' && typeof op.id === 'string') added.add(op.id); for (const k of ['id', 'pred', 'succ', 'activity']) if (typeof op?.[k] === 'string') touched.add(op[k] as string); }
   const seeds = added.size ? added : touched;
   const im = onScratch(db, (d) => {
-    const a = applyOps(d, fragnet, { hoursPerDay: o.hoursPerDay ?? 8, calendarDays: true });
+    // days in the ops: each activity's calendar (MCP, CLI) or the fixed hours per day (the desktop app), as the caller edits
+    const a = applyOps(d, fragnet, { hoursPerDay: o.hoursPerDay ?? 8, calendarDays: o.calendarDays ?? true });
     if (!a.ok) return { ok: false as const, error: `operation ${a.error!.index + 1}: ${a.error!.message}` };
     const r = scheduleProjects(d, projIds, over);
     if (!r.ok) return { ok: false as const, error: r.findings.find((f) => f.severity === 'error')?.message ?? 'The impacted schedule failed.' };

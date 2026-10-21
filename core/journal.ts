@@ -57,6 +57,20 @@ export interface Journal {
 }
 
 export function record<T extends object>(root: T, fn: (view: T) => void): Journal {
+  const { j, view } = begin(root);
+  try { fn(view); } catch (e) { rollback(j, false); throw e; } // a failed change leaves nothing half-done
+  return j;
+}
+
+/** record for work that awaits between steps (progress, cancellation). The real rows hold the changes until rollback,
+ *  so nothing else may read or write this database meanwhile (the MCP server runs one call per handle). */
+export async function recordAsync<T extends object>(root: T, fn: (view: T) => Promise<void>): Promise<Journal> {
+  const { j, view } = begin(root);
+  try { await fn(view); } catch (e) { rollback(j, false); throw e; }
+  return j;
+}
+
+function begin<T extends object>(root: T): { j: Journal; view: T } {
   const j: Journal = { fields: new Map(), arrays: new Map() };
   const proxies = new WeakMap<object, object>(); // target -> proxy
   const targets = new WeakMap<object, object>(); // proxy -> target
@@ -93,8 +107,7 @@ export function record<T extends object>(root: T, fn: (view: T) => void): Journa
     proxies.set(t, p); targets.set(p, t);
     return p;
   };
-  try { fn(wrap(root) as T); } catch (e) { rollback(j, false); throw e; } // a failed change leaves nothing half-done
-  return j;
+  return { j, view: wrap(root) as T };
 }
 
 /** Put back what a journal recorded. Returns the journal that re-applies the change (for redo; empty when redo is false). */

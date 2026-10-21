@@ -59,7 +59,7 @@ test('Check Schedule: each of the 14 P6 Professional checks finds the activities
   assert.match(c('bei').note!, /baseline/);
   assert.equal(r.threshold_hours, 352);
   // targets follow P6's defaults and can be overridden
-  assert.deepEqual(c('logic').threshold, { op: '<', value: 5, source: 'P6 default (Oracle Check Schedule docs)' });
+  assert.deepEqual(c('logic').threshold, { op: '<', value: 5, source: 'P6 Professional default (Check Schedule Report)' });
   const o = checkSchedule(db, { checks: ['logic'], targets: { logic: 20 } });
   assert.equal(o.checks.length, 1);
   assert.equal(o.checks[0].threshold!.source, 'override');

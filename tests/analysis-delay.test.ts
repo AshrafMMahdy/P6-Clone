@@ -40,8 +40,8 @@ const u2 = () => update('Update 2', '2026-03-16', [
   { op: 'update_activity', id: 'B', new_id: 'B-10', duration_days: 8, actual_start: '2026-03-11 08:00', remaining_days: 6 },
   { op: 'add_activity', id: 'D', name: 'Snagging', duration_days: 2 }, { op: 'add_relationship', pred: 'B-10', succ: 'D' }, { op: 'add_relationship', pred: 'D', succ: 'F' }]);
 
-test('windows: slip per window on the driving path, causes, totals add up, name fallback', () => {
-  const r = windowsAnalysis([u2(), u0(), u1()]);
+test('windows: slip per window on the driving path, causes, totals add up, name fallback', async () => {
+  const r = await windowsAnalysis([u2(), u0(), u1()]);
   assert.ok(r.ok, JSON.stringify(r));
   assert.deepEqual(r.updates.map((u) => u.name), ['Baseline', 'Update 1', 'Update 2'], 'sorted by data date');
   const [w1, w2] = r.windows as any[];
@@ -58,8 +58,8 @@ test('windows: slip per window on the driving path, causes, totals add up, name 
   assert.equal(r.total_slip_days, w1.slip_days + w2.slip_days);
 });
 
-test('windows half-step: progress and revision split', () => {
-  const r = windowsAnalysis([u0(), u1(), u2()], { method: 'half_step' });
+test('windows half-step: progress and revision split', async () => {
+  const r = await windowsAnalysis([u0(), u1(), u2()], { method: 'half_step' });
   assert.ok(r.ok);
   for (const w of r.windows as any[]) assert.equal(Math.round((w.half_step.progress_days + w.half_step.revision_days) * 100) / 100, w.slip_days);
   const w2 = (r.windows as any[])[1];
@@ -119,6 +119,12 @@ test('MCP windows_analysis (baseline and progress updates), tia with keep, compa
   assert.equal(t.d.delay_days, 2);
   assert.equal(t.d.variance_to_baseline_days, 2);
   assert.equal(t.d.kept_as, 'WIN-TIA');
+  // ops that name the live project still go to the copy
+  const t2 = await call('tia', { handle: h, owner_key, project: 'WIN', fragnet: [{ op: 'add_activity', id: 'Y', name: 'Other change', duration_days: 1, project: 'WIN' }, { op: 'add_relationship', pred: 'A', succ: 'Y', project: 'WIN' }], keep: true });
+  assert.equal(t2.err, false, JSON.stringify(t2.d));
+  assert.equal(t2.d.kept_as, 'WIN-TIA2');
+  const live = await call('evaluate', { handle: h, project: 'WIN', overrides: [{ op: 'update_activity', id: 'Y', project: 'WIN', duration_days: 2 }] });
+  assert.ok(JSON.stringify(live.d).includes('No activity'), 'the live project has no Y: ' + JSON.stringify(live.d).slice(0, 300));
   const c = await call('compare', { handle: h, project: 'WIN', baseline: 'project' });
   assert.equal(c.err, false, JSON.stringify(c.d));
   assert.equal(c.d.baseline, 'Plan');

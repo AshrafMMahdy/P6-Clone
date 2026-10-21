@@ -92,7 +92,7 @@ Both run on Node 24 directly. For older Node (18+), or to copy into a sandbox wi
 node scripts/build-cli.mjs
 ```
 
-That writes `dist-cli/p6clone.cjs` and `dist-cli/p6clone-mcp.cjs` (under 1 MB each, no dependencies), plus `dist-cli/models/` and `dist-cli/node_modules/` (the schedule reasoner's model and its 14 MB WebAssembly runtime, for `optimize_schedule`; copy them along, or the tool says the model is missing).
+That writes `dist-cli/p6clone.cjs` and `dist-cli/p6clone-mcp.cjs` (under 1 MB each, no dependencies), plus `dist-cli/models/` and `dist-cli/ort/` (the schedule reasoner's model and its 14 MB WebAssembly runtime with its licences, for `optimize_schedule`; copy them along, or the tool says the model is missing, and `server_status` shows `reasoner.loaded`). The release smoke runs every analysis tool on a bundle folder: `node scripts/release-smoke.mjs dist-cli`.
 
 ### CLI
 
@@ -319,6 +319,13 @@ Also `level` and `export --format xer|xml --version <v>`. `validate` exits 0 (P6
 - **Validator** rules were calibrated so every real P6 export imports clean, while agent output is checked for things like misspelled key fields (`taskpred_id`), `%E` written mid-file, invented enum codes, missing project WBS node, malformed calendars, LF line endings, unknown ERMHDR versions.
 
 ## Develop
+
+Install the dependencies first (after every pull that changes `package-lock.json`): the schedule reasoner's tests
+and `build-cli` need `onnxruntime-web`.
+
+```bash
+npm ci
+```
 
 ```bash
 npm test

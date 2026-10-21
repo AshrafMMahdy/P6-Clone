@@ -203,7 +203,10 @@ function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: string): 
   return {
     id: 'critical_path_test', name, unit: 'days', metric: moved, threshold: { op: '=', value: slipDays, source: 'DCMA (project finish must move by the delay added)' },
     numerator: null, denominator: null, result: pass ? 'pass' : 'fail', activities: [offender(test, s, `+${slipDays} d`)], total_activities: 1,
-    note: pass ? `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by the same amount: the critical path is continuous.` : `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by ${moved}: the critical path does not carry the delay through: a constraint, a missing link, a lag, or start-to-start / finish-to-finish links that let successors start before it finishes absorb part of it.`,
+    note: pass ? `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by the same amount: the critical path is continuous.`
+      : moved <= 0.01 ? `Delaying ${test.task_code} by ${slipDays} working days did not move the project finish: ${test.task_code} is critical by its float but not on the path that drives the finish (a constraint that makes float negative, or an open end), so the critical path is not continuous through it.`
+      : movedHours > add ? `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by ${moved}, more than the delay: calendars along the path (non-work periods, a different calendar on a successor or a lag) stretch it, so the finish does not follow the critical path day for day.`
+      : `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by only ${moved}: part of the delay is absorbed on the way (a constraint, a missing link, a lag, or start-to-start / finish-to-finish links that let successors start before it finishes).`,
     detail: { finish_before: formatP6Date(before), finish_after: formatP6Date(after) },
   };
 }
