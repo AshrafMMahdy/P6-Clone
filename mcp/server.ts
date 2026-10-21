@@ -500,6 +500,17 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
   const abort = new AbortController();
   if (signal?.aborted) abort.abort(); else signal?.addEventListener('abort', () => abort.abort(), { once: true });
   const ctx: Ctx = { caller: String(a.caller ?? sessionCaller ?? 'default'), signal: abort.signal, progress };
+  // open_model without a handle: the file opens into a new model-only workspace (an empty project named after it), for
+  // agents that read a model without a schedule (quantities, procurement)
+  if (name === 'open_model' && (a.handle == null || a.handle === '') && typeof a.path === 'string') {
+    const id = (basename(a.path).replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'MODEL').toUpperCase();
+    const np = await callTool('new_project', { id, start: new Date().toISOString().slice(0, 10), ...(a.caller ? { caller: a.caller } : {}) }, sessionCaller, signal);
+    if (np.isError) return np;
+    const ws = np.out as { handle: string; owner_key: string };
+    const r = await callTool('open_model', { ...a, handle: ws.handle, owner_key: ws.owner_key }, sessionCaller, signal, progress);
+    if (r.isError) { await callTool('close', { handle: ws.handle, owner_key: ws.owner_key, discard: true }, sessionCaller); return r; }
+    return { out: { ...(r.out as object), handle: ws.handle, owner_key: ws.owner_key, workspace: `model only: project ${id} holds no schedule; save it, or close it with discard: true, when done` }, isError: false };
+  }
   const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
   const work = async () => {
     let out = handle != null ? await exclusive(handle, () => run(name, a, ctx)) : await run(name, a, ctx);

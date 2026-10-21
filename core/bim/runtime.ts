@@ -20,5 +20,11 @@ export function geomWorkerPath(): string | null {
   return own && existsSync(own) ? own : shipped('geomWorker.mjs');
 }
 
+/** The Revit reader's worker script (rvt-rs's WebAssembly in rvt/ beside it), run in its own process. */
+export function rvtWorkerPath(): string | null {
+  const h = here(), own = h ? join(h, 'rvtWorker.mjs') : null;
+  return own && existsSync(own) ? own : shipped('rvtWorker.mjs');
+}
+
 /** web-ifc as a module object (its CommonJS build arrives as the default export when imported). */
 export async function loadWebIfc(): Promise<any> { const m: any = await import(webIfcEntry()); return m.IfcAPI ? m : m.default; }

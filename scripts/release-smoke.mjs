@@ -2,7 +2,7 @@
 //   node scripts/release-smoke.mjs <folder with p6clone-mcp.cjs>
 // Every analysis tool is called on a small resourced project; the schedule reasoner must load from the folder's
 // models/ and ort/ (server_status reasoner.loaded) and optimize_schedule must answer. Exit code 1 on any failure.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -65,7 +65,9 @@ if (tia.delay_days == null) failures.push(`tia: ${JSON.stringify(tia).slice(0, 2
 await call('compare', { handle, baseline: 'project' });
 
 // 4D: the IFC engine (ifc/ beside the bundle: web-ifc and the geometry worker in its own process)
-for (const f of ['geomWorker.mjs', 'geomChunk.mjs', 'web-ifc/web-ifc-node.wasm']) if (!existsSync(join(folder, 'ifc', f))) failures.push(`the archive has no ifc/${f}`);
+for (const f of ['geomWorker.mjs', 'geomChunk.mjs', 'web-ifc/web-ifc-node.wasm', 'rvtWorker.mjs', 'rvt/rvt.js', 'rvt/rvt_bg.wasm', 'rvt/LICENSE']) if (!existsSync(join(folder, 'ifc', f))) failures.push(`the archive has no ifc/${f}`);
+// Revit: the reader's WebAssembly loads in its own process (a file that is not Revit is refused in words, exit 3)
+{ const r = spawnSync(process.execPath, [join(folder, 'ifc', 'rvtWorker.mjs'), join(folder, 'ifc', 'rvtWorker.mjs'), join(tmpdir(), 'p6-smoke-rvt.ifc'), join(tmpdir(), 'p6-smoke-rvt.json')], { encoding: 'utf8' }); if (r.status !== 3 || !/magic bytes/.test(r.stderr)) failures.push(`ifc/rvtWorker.mjs did not load rvt-rs: ${r.status} ${r.stderr.slice(0, 200)}`); }
 if (!existsSync(ifcFixture)) failures.push(`no IFC fixture at ${ifcFixture}`);
 else {
   const m4 = await call('new_project', { id: 'S4D', start: '2026-03-02' });

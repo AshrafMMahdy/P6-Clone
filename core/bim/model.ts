@@ -6,8 +6,9 @@ import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseIfc, INDEX_FORMAT, type IfcElement, type IfcIndex } from './parse.ts';
+import { isRevit, rvtToIfc, type RevitSource } from './rvt.ts';
 
-export interface Model { hash: string; index: IfcIndex; glb: string | null; byGuid: Map<string, IfcElement>; bytes: number }
+export interface Model { hash: string; index: IfcIndex; glb: string | null; byGuid: Map<string, IfcElement>; bytes: number; /** a Revit file read through IFC */ source?: RevitSource }
 
 const memory = new Map<string, Model>();
 // the display model depends on its settings, so they are part of the name
@@ -18,16 +19,33 @@ export function fileHash(path: string): Promise<string> {
   return new Promise((res, rej) => { const h = createHash('sha256'); createReadStream(path).on('data', (c) => h.update(c)).on('error', rej).on('end', () => res(h.digest('hex').slice(0, 32))); });
 }
 
+// an element rvt-rs could only place as its bounding box has no volume worth a quantity (a 2023 project: doors 22x,
+// railings 700x Revit's own IFC; walls drawn from their profile within 1%): placed and counted, never measured
+const boxOnly = (e: IfcElement) => /bbox/.test(String(e.props['RvtElementRecordGeometry.BodySource'] ?? ''));
 // in memory a parsed index takes about three times its JSON text (objects, strings as UTF-16, the GlobalId map)
-const wrap = (hash: string, index: IfcIndex, glb: string | null, jsonChars: number): Model => ({ hash, index, glb: index.geometryStatus === 'ok' ? glb : null, byGuid: new Map(index.elements.map((e) => [e.guid, e])), bytes: jsonChars * 3 + index.elements.length * 200 });
+const wrap = (hash: string, index: IfcIndex, glb: string | null, jsonChars: number): Model => {
+  for (const e of index.elements) if (boxOnly(e)) e.derivedVolumeM3 = null;
+  return { hash, index, glb: index.geometryStatus === 'ok' ? glb : null, byGuid: new Map(index.elements.map((e) => [e.guid, e])), bytes: jsonChars * 3 + index.elements.length * 200 };
+};
 
-/** Parse (or take from the cache) the IFC at path. geometry: false skips meshes (faster; no GLB, no derived volumes). */
+/** Parse (or take from the cache) the model at path: an IFC, or a Revit file (made into IFC4 first, rvt.ts).
+ *  geometry: false skips meshes (faster; no GLB, no derived volumes). */
 export async function loadModel(path: string, o: { geometry?: boolean } = {}): Promise<Model> {
   if (!existsSync(path)) throw new Error(`No file at ${path}.`);
+  if (!isRevit(path)) return loadIfc(path, o);
+  const { ifc, source } = await rvtToIfc(path);
+  const m = await loadIfc(ifc, o);
+  m.index.sourcePath = path; m.source = source;
+  const boxes = m.index.elements.filter(boxOnly).length;
+  source.geometry = { from_the_file: m.index.elements.length - boxes, bounding_box_only: boxes, note: 'bounding-box elements are placed for 4D but give no derived volume (quantities counts them as unquantified)' };
+  return m;
+}
+
+async function loadIfc(path: string, o: { geometry?: boolean }): Promise<Model> {
   pruneCache();
   // an IFC is a STEP file with an IFC schema; anything else (an XER, a GLB, an .rvt) is refused before it replaces a model
   const head = (() => { const fd = openSync(path, 'r'); try { const b = Buffer.alloc(65536); return b.subarray(0, readSync(fd, b, 0, 65536, 0)).toString('latin1'); } finally { closeSync(fd); } })();
-  if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit .rvt and other formats have to be exported to IFC first.`);
+  if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit files are read as .rvt / .rfa; other formats have to be exported to IFC first.`);
   const hash = await fileHash(path);
   const hit = memory.get(cacheName(hash));
   if (hit && (o.geometry === false || hit.glb || hit.index.geometryStatus === 'unavailable')) { hit.index.sourcePath = path; return hit; }
@@ -97,6 +115,7 @@ export const modelBytes = (hashes?: Iterable<string>) => { const want = hashes ?
  *  chunk of P6CLONE_GEOM_CHUNK_MB for a model past one run). Held only while the model is read. */
 export function loadEstimate(path: string, o: { geometry?: boolean } = {}): number {
   const size = existsSync(path) ? statSync(path).size : 0;
+  if (isRevit(path)) return size * 12; // rvt-rs's process: 419 MB for a 33.7 MB project; the IFC it makes is far smaller
   const chunk = (Number(process.env.P6CLONE_GEOM_CHUNK_MB) || 300) * 1048576;
   return Math.round(size * 4.2 + (o.geometry === false ? 0 : Math.min(size, chunk) * 5));
 }

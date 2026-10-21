@@ -303,10 +303,14 @@ the P6 schedule log with `log: true`. Recovery: `evaluate_batch` (many what-ifs,
 reasoner; `objective: min_crash_cost` runs crash_schedule). Delay analysis: `windows_analysis` (contemporaneous or
 half-step over handles, files, baselines or progress at a data date) and `tia` (fragnet, `keep`); `compare` takes
 `baseline` to compare with a baseline in the same file and matches renumbered activities by name. Read-only tools carry
-the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as well as text).
-
+the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as well as text).
+
 **4D** (an IFC model linked to the schedule; see `docs/4d-extension-plan.md` and `docs/4d-switch-over.md`): `open_model`
-(IFC2X3 / IFC4, cached by content; geometry in a child process with web-ifc, which ships in `ifc/` beside the bundle),
+(IFC2X3 / IFC4, cached by content; geometry in a child process with web-ifc, which ships in `ifc/` beside the bundle;
+Revit `.rvt` / `.rfa` read without Revit by rvt-rs (Apache-2.0, its WebAssembly in `ifc/rvt/`, in its own process) and made
+into IFC4 with the GlobalIds Revit's own IFC export writes; the answer's `source` says the Revit version, how the file was
+read and which elements are only bounding boxes (placed and counted, no derived volume); without a `handle` the file
+opens into a model-only workspace, so an agent with no schedule can read elements and quantities),
 `list_elements`, `element_info`, `quantities` (per group: totals, and for the asked `kind` the elements quantified and
 unquantified; each figure with its kind, unit and source: base quantity and its set, geometry, or property set),
 `link_elements` (built / removed / temporary), `link_by_rules`
