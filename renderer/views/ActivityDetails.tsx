@@ -1,3 +1,4 @@
+import { lobRowGuard } from '../../core/lob/view.ts';
 import { useMemo, useState, type ReactNode } from 'react';
 import { Tabs } from '../components/Layout.tsx';
 import { getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
@@ -16,7 +17,7 @@ export function updateTask(taskId: string, label: string, fn: (r: Row, db: Retur
   const t = rows(getDb(), 'TASK').find((x) => x.task_id === taskId);
   if (!t) return;
   const copy = { ...t };
-  const err = fn(copy, getDb());
+  const err = fn(copy, getDb()) || lobRowGuard(getDb(), t, copy);
   if (err) { toast(err); return; }
   mutate(label, (db) => {
     const r = db.tables.TASK.rows.find((x) => x.task_id === taskId)!;

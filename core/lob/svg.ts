@@ -11,7 +11,7 @@ import { locationsAt, pathOf, type LobModel } from './model.ts';
 export const TRADE_COLOURS = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#8c564b', '#e377c2', '#bcbd22', '#7f7f7f', '#393b79', '#637939', '#8c6d31', '#843c39', '#7b4173', '#3182bd'];
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-export interface FlowGeometry { rows: { code: string; label: string; path: string[] }[]; t0: number; t1: number; lines: { task: string; segment: number; trade: string; colour: string; critical: boolean; points: [number, number, number][] }[]; dataDate: number | null }
+export interface FlowGeometry { rows: { code: string; label: string; path: string[] }[]; t0: number; t1: number; lines: { task: string; segment: number; trade: string; colour: string; critical: boolean; points: [number, number, number][]; locations: string[] }[]; dataDate: number | null }
 
 /** Where everything goes: rows (finest level, tree order), the time span, and per trade the points (time, row bottom,
  *  row top) of each location's start and finish. */
@@ -27,20 +27,26 @@ export function flowGeometry(db: Db, projId: string, m: LobModel, critical: stri
   // a line per segment (a split, or a Vico line, is drawn on its own), coloured by task as Vico does
   const lines = m.tasks.flatMap((t, ti) => t.segments.map((g, k) => {
     const d = locationDurations(m, t);
-    const points: [number, number, number][] = [];
+    const points: [number, number, number][] = [], locations: string[] = [];
     for (const c of t.order.slice(t.order.indexOf(g.from), t.order.indexOf(g.to) + 1).filter((x) => d.has(x))) {
       const a = acts.get(activityId(t.code, c));
       if (!a) continue;
       const s = parseP6Date(a.act_start_date || a.early_start_date), f = parseP6Date(a.act_end_date || a.early_end_date);
       if (s == null || f == null) continue;
       const [lo, hi] = span(c);
-      points.push([s, lo, hi], [f, lo, hi]);
+      points.push([s, lo, hi], [f, lo, hi]); locations.push(c);
       t0 = Math.min(t0, s); t1 = Math.max(t1, f);
     }
-    return { task: t.code, segment: k + 1, trade: t.trade, colour: TRADE_COLOURS[ti % TRADE_COLOURS.length], critical: critical.includes(t.code), points };
+    return { task: t.code, segment: k + 1, trade: t.trade, colour: TRADE_COLOURS[ti % TRADE_COLOURS.length], critical: critical.includes(t.code), points, locations };
   }));
   const proj = rows(db, 'PROJECT').find((p) => p.proj_id === projId)!;
   return { rows: rowsOut, t0: Number.isFinite(t0) ? t0 : 0, t1: Number.isFinite(t1) ? t1 : 1, lines, dataDate: parseP6Date(proj.last_recalc_date) };
+}
+
+/** The chart's frame: where time and rows go, shared by the SVG and the desktop's interactive chart. */
+export function flowFrame(g: FlowGeometry, levels: number, W: number, H: number) {
+  const left = 70 * levels + 10, top = 40, right = 20, bottom = 30, n = Math.max(1, g.rows.length), rowH = (H - top - bottom) / n;
+  return { left, top, right, bottom, rowH, X: (t: number) => left + ((t - g.t0) / Math.max(1, g.t1 - g.t0)) * (W - left - right), T: (x: number) => g.t0 + ((x - left) / (W - left - right)) * Math.max(1, g.t1 - g.t0), Y: (row: number) => H - bottom - row * rowH };
 }
 
 export function flowlineSvg(db: Db, projId: string, m: LobModel, o: { width?: number; height?: number; critical?: string[]; title?: string } = {}): string {

@@ -45,6 +45,7 @@ const api = {
   bimText: (path: string): Promise<string> => ipcRenderer.invoke('bim:text', path),
   bimWriteFiles: (o: { title: string; files: { name: string; data: string | Uint8Array }[] }): Promise<string[] | null> => ipcRenderer.invoke('bim:writeFiles', o),
   bimReadImport: (): Promise<(import('../core/bim/exchange4d.ts').Imported4d & { path: string }) | null> => ipcRenderer.invoke('bim:readImport'),
+  lobImport: (): Promise<import('./lob.ts').LobImport | { error: string } | null> => ipcRenderer.invoke('lob:import'),
   bimVideo: (o: { hash: string; timeline: unknown; options: Record<string, unknown>; from?: string; to?: string; step?: number; fps?: number; width?: number; height?: number; name: string }): Promise<{ ok: true; saved: string | null; frames: number; mime?: string } | { ok: false; error: string }> => ipcRenderer.invoke('bim:video', o),
   /** the schedule reasoner (models/reasoner.onnx), run in the main process */
   hrmInfer: (x: { n: number; feats: Float32Array; bias: Float32Array; modeMask: Uint8Array }): Promise<{ ok: true; out: { priority: Float32Array; modeLogits: Float32Array } } | { ok: false; error: string; unavailable: boolean }> => ipcRenderer.invoke('hrm:infer', x),

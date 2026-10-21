@@ -1,5 +1,5 @@
 // Extensions: what the clone does beyond P6, usable without the AI agent (DCMA 14-point, lint, crashing, what-ifs,
-// the schedule reasoner, windows analysis, TIA and 4D). Each extension is a panel on the right.
+// the schedule reasoner, windows analysis, TIA, LOB and 4D). Each extension is a panel on the right.
 import { useState } from 'react';
 import { getDb, setUi, toast, useStore } from '../store.ts';
 import { rows } from '../../core/db.ts';
@@ -15,6 +15,7 @@ import { runSchedule } from '../commands.ts';
 import { CrashPanel, OptimizePanel, WhatIfPanel } from './RecoveryPanels.tsx';
 import { TiaPanel, WindowsPanel } from './DelayPanels.tsx';
 import { FourDPanel } from './FourDView.tsx';
+import { LobPanel } from './LobView.tsx';
 
 export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'dcma', title: 'DCMA 14-point', blurb: 'The 14 DCMA schedule checks, with the critical path test, CPLI and BEI.' },
@@ -24,6 +25,7 @@ export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'optimize', title: 'Schedule reasoner', blurb: 'The trained optimiser: a leveling order (and crash modes) that finishes sooner.' },
   { id: 'windows', title: 'Windows analysis', blurb: 'Slip per update window on the driving path, with the half-step split.' },
   { id: 'tia', title: 'Time impact analysis', blurb: 'A fragnet added to a copy: the delay it causes at the data date.' },
+  { id: 'lob', title: 'LOB', blurb: 'Line of Balance: a location-based plan beside the CPM one, flowlines edited by hand, takt, Vico and Tactplan exchange.' },
   { id: '4d', title: '4D', blurb: 'An IFC model linked to the activities: the build by date, Navisworks / SYNCHRO / IFC4 exchange, video.' },
 ];
 
@@ -38,7 +40,7 @@ export function ExtensionsView() {
           {EXTENSIONS.map((e) => <div key={e.id} className={`dirbtn ${cur.id === e.id ? 'on' : ''}`} style={{ flexDirection: 'column', alignItems: 'flex-start', padding: 6 }} onClick={() => setUi({ extension: e.id })}><b>{e.title}</b><span className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>{e.blurb}</span></div>)}
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 8, minWidth: 0 }}>
-          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : cur.id === 'crash' ? <CrashPanel /> : cur.id === 'whatif' ? <WhatIfPanel /> : cur.id === 'optimize' ? <OptimizePanel /> : cur.id === 'windows' ? <WindowsPanel /> : cur.id === 'tia' ? <TiaPanel /> : cur.id === '4d' ? <FourDPanel /> : null}
+          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : cur.id === 'crash' ? <CrashPanel /> : cur.id === 'whatif' ? <WhatIfPanel /> : cur.id === 'optimize' ? <OptimizePanel /> : cur.id === 'windows' ? <WindowsPanel /> : cur.id === 'tia' ? <TiaPanel /> : cur.id === '4d' ? <FourDPanel /> : cur.id === 'lob' ? <LobPanel /> : null}
         </div>
       </div>
     </>

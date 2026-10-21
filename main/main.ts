@@ -8,6 +8,7 @@ import { buildMenu } from './menu.ts';
 import { mppToXml, xmlToMpp } from './msproject.ts';
 import { nodeInfer, ReasonerUnavailable } from '../core/analysis/hrmRuntime.ts';
 import { registerBim, registerBimScheme } from './bim.ts';
+import { registerLob } from './lob.ts';
 
 registerBimScheme(); // before ready: the 4D viewer's p6c4d:// scheme
 
@@ -217,5 +218,5 @@ ipcMain.handle('confirm',async (_e, message: string, detail?: string) => {
   return r.response === 0;
 });
 
-app.whenReady().then(() => { registerBim(() => win); createWindow(); });
+app.whenReady().then(() => { registerBim(() => win); registerLob(() => win); createWindow(); });
 app.on('window-all-closed', () => app.quit());

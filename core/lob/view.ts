@@ -1,7 +1,7 @@
 // What an LOB plan looks like once scheduled, in a form an agent reads at a glance: each trade's locations with their
 // dates and float, the trades on the critical path, where two trades share a location at the same time (collisions),
 // and where a crew waits between locations (gaps). Also the guard that keeps the plan's structure in the LOB tools.
-import { rows, type Db } from '../db.ts';
+import { rows, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
 import { activityId, LOB_CODES, LOB_UDF } from './expand.ts';
@@ -83,4 +83,13 @@ export function lobGuard(db: Db, ops: unknown[]): string | null {
     }
   }
   return null;
+}
+
+/** The same rule for an activity row changed in place (the Activities window, Activity Details, Global Change): a
+ *  change to an LOB activity's duration (before it starts), ID, type, calendar, constraint or WBS is refused. */
+export function lobRowGuard(db: Db, before: Row, after: Row): string | null {
+  const udf = rows(db, 'UDFTYPE').find((u) => u.table_name === 'TASK' && u.udf_type_label === LOB_UDF.task)?.udf_type_id;
+  if (!udf || !rows(db, 'UDFVALUE').some((v) => v.udf_type_id === udf && v.fk_id === before.task_id && v.udf_text)) return null;
+  const fields = ['task_code', 'task_type', 'clndr_id', 'cstr_type', 'cstr_date', 'wbs_id', ...(before.act_start_date ? [] : ['target_drtn_hr_cnt', 'remain_drtn_hr_cnt'])];
+  return fields.some((f) => (before[f] ?? '') !== (after[f] ?? '')) ? `${before.task_code} is set by the LOB plan: edit it in Extensions > LOB.` : null;
 }

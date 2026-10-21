@@ -2,6 +2,7 @@
 // statements set a column to a value or change a number by + - * /. Apply Change shows the Global Change Report
 // (every activity, column, old and new value) and Commit Changes applies it as one undoable step.
 // Also Enterprise > Project Codes / Resource Codes (code types and values) and the resources' Codes tab.
+import { lobRowGuard } from '../../core/lob/view.ts';
 import { useMemo, useState } from 'react';
 import { Dialog } from '../components/Layout.tsx';
 import { closeDialog, getDb, getUi, mutate, openDialog, toast, useStore } from '../store.ts';
@@ -39,7 +40,7 @@ export function previewGlobalChange(db: Db, projIds: string[], gc: GlobalChange,
         if (s.op === '/' && b === 0) { out.push({ taskId: t.task_id, code: t.task_code, name: t.task_name, col: s.col, title: c.title, old, next: '', error: 'division by zero' }); continue; }
         next = String(Math.round((s.op === '+' ? a + b : s.op === '-' ? a - b : s.op === '*' ? a * b : a / b) * 100) / 100);
       }
-      const err = c.edit.set(db, copy, next, ctx);
+      const err = c.edit.set(db, copy, next, ctx) || lobRowGuard(db, t, copy);
       out.push({ taskId: t.task_id, code: t.task_code, name: t.task_name, col: s.col, title: c.title, old, next: err ? next : c.get(copy, ctx), ...(err ? { error: err } : {}) });
     }
   }

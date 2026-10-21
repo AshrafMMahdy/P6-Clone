@@ -1,3 +1,4 @@
+import { lobRowGuard } from '../../core/lob/view.ts';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityUsageProfile } from './ActivityUsageProfile.tsx';
 import { Grid, type GridItem, type EditorSpec } from '../components/Grid.tsx';
@@ -106,7 +107,7 @@ export function ActivitiesView() {
     const t = ctx.taskById.get(key.slice(2));
     if (!t || !c.edit) return;
     const copy = { ...t };
-    const err = c.edit.set(getDb(), copy, value, ctx);
+    const err = c.edit.set(getDb(), copy, value, ctx) || lobRowGuard(getDb(), t, copy);
     if (err) { toast(err); return; }
     if (Object.keys(copy).every((k) => copy[k] === t[k])) return;
     mutate(`Edit ${c.title}`, (db) => {
@@ -277,7 +278,7 @@ export function fillDown(): void {
     const now = formatP6Date(Date.now() / 60000);
     for (const t of rest) {
       const row = d.tables.TASK.rows.find((x) => x.task_id === t.task_id)!, copy = { ...row };
-      const err = col.edit!.set(d, copy, value, ctx);
+      const err = col.edit!.set(d, copy, value, ctx) || lobRowGuard(d, row, copy);
       if (err) errs.push(`${t.task_code}: ${err}`);
       else if (Object.keys(copy).some((k) => copy[k] !== row[k])) Object.assign(row, copy, { update_date: now });
     }
