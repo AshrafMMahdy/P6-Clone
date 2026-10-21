@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { cpSync } from 'node:fs';
-import { copyReasoner } from './ort-files.mjs';
+import { copyIfc, copyReasoner } from './ort-files.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node18', logLevel: 'warning', external: ['onnxruntime-web'] }; // the entry files carry their own #! line
@@ -15,4 +15,5 @@ await build({ ...common, entryPoints: [join(root, 'mcp/server.ts')], outfile: jo
 cpSync(join(root, 'fonts'), join(root, 'dist-cli/fonts'), { recursive: true });
 // the schedule reasoner (optimize_schedule): the model and its WebAssembly runtime
 await copyReasoner(root, join(root, 'dist-cli'));
-console.log('built dist-cli/p6clone.cjs, dist-cli/p6clone-mcp.cjs, dist-cli/fonts/, dist-cli/models/ and dist-cli/ort/ (the reasoner runtime and its licences)');
+copyIfc(root, join(root, 'dist-cli')); // 4D: the IFC engine
+console.log('built dist-cli/p6clone.cjs, dist-cli/p6clone-mcp.cjs, dist-cli/fonts/, dist-cli/models/ dist-cli/ort/ (the reasoner runtime and its licences) and dist-cli/ifc/ (the IFC engine)');

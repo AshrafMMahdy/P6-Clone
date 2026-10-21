@@ -8,6 +8,8 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const folder = resolve(process.argv[2] ?? 'dist-cli');
+// a small IFC4 model (buildingSMART, CC BY 4.0) for the 4D tools: next to this script's repository
+const ifcFixture = resolve(process.argv[3] ?? join(import.meta.dirname, '..', 'tests', 'fixtures', '4d', 'construction-scheduling-task.ifc'));
 const dir = mkdtempSync(join(tmpdir(), 'p6smoke-'));
 const child = spawn(process.execPath, [join(folder, 'p6clone-mcp.cjs')], { cwd: dir, stdio: ['pipe', 'pipe', 'inherit'] });
 child.on('exit', (code) => { console.error(`the MCP server exited (code ${code}) before the smoke finished`); process.exit(1); });
@@ -28,8 +30,9 @@ const init = await rpc('initialize', { protocolVersion: '2025-03-26', capabiliti
 child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 const tools = (await rpc('tools/list', {})).result?.tools ?? [];
 const names = tools.map((t) => t.name);
+const FOURD = ['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d'];
 const ANALYSIS = ['check_schedule', 'dcma_14', 'lint', 'float_paths', 'progress_curves', 'resource_histogram', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'tia'];
-for (const need of ['open_file', 'new_project', 'edit', 'schedule', 'save', 'export_pdf', 'server_status', ...ANALYSIS]) if (!names.includes(need)) failures.push(`missing tool ${need}`);
+for (const need of ['open_file', 'new_project', 'edit', 'schedule', 'save', 'export_pdf', 'server_status', ...ANALYSIS, ...FOURD]) if (!names.includes(need)) failures.push(`missing tool ${need}`);
 if (JSON.stringify(tools.find((t) => t.name === 'windows_analysis')?._meta?.['whiq/files']?.read) !== '["updates[].path"]') failures.push('windows_analysis has no _meta["whiq/files"]');
 
 const status = await call('server_status', {});
@@ -59,10 +62,27 @@ await call('windows_analysis', { handle, include_current: false, updates: [{ bas
 const tia = await call('tia', { handle, fragnet: [{ op: 'add_activity', id: 'X', name: 'Change', duration_days: 2 }, { op: 'add_relationship', pred: 'A', succ: 'X' }, { op: 'add_relationship', pred: 'X', succ: 'B' }] });
 if (tia.delay_days == null) failures.push(`tia: ${JSON.stringify(tia).slice(0, 200)}`);
 await call('compare', { handle, baseline: 'project' });
+
+// 4D: the IFC engine (ifc/ beside the bundle: web-ifc and the geometry worker in its own process)
+if (!existsSync(ifcFixture)) failures.push(`no IFC fixture at ${ifcFixture}`);
+else {
+  const m4 = await call('new_project', { id: 'S4D', start: '2026-03-02' });
+  const ops4 = ['Slab #1', 'Wall #1', 'Wall #2', 'Wall #3', 'Wall #4'].map((n) => ({ op: 'add_activity', id: n.replace(/\W/g, ''), name: n, duration_days: 2 }));
+  await call('edit', { handle: m4.handle, owner_key: m4.owner_key, operations: ops4 });
+  await call('schedule', { handle: m4.handle, owner_key: m4.owner_key });
+  const om = await call('open_model', { handle: m4.handle, owner_key: m4.owner_key, path: ifcFixture });
+  if (om.geometry !== 'ok') failures.push(`open_model geometry: ${JSON.stringify(om).slice(0, 200)}`);
+  const imp4 = await call('import_4d', { handle: m4.handle, owner_key: m4.owner_key, path: ifcFixture });
+  if (imp4.added !== 5) failures.push(`import_4d: ${JSON.stringify(imp4).slice(0, 200)}`);
+  await call('link_status', { handle: m4.handle });
+  await call('quantities', { handle: m4.handle, group_by: 'activity' });
+  const ex4 = await call('export_4d', { handle: m4.handle, target: 'ifc4d', path: join(dir, '4d') });
+  if (ex4.tasks !== 5) failures.push(`export_4d: ${JSON.stringify(ex4).slice(0, 200)}`);
+}
 await call('save', { handle, owner_key, path: 'smoke.xer' });
 if (!existsSync(join(dir, 'smoke.xer'))) failures.push('save wrote no smoke.xer');
 
 clearTimeout(timer);
 child.removeAllListeners('exit'); child.kill();
 if (failures.length) { console.error(`smoke FAILED on node ${process.version} (${process.platform}):\n- ${failures.join('\n- ')}`); process.exit(1); }
-console.log(`ok: ${init.result?.serverInfo?.name} ${init.result?.serverInfo?.version}, ${names.length} tools, ${ANALYSIS.length} analysis tools answered, reasoner loaded (${status.reasoner.runtime}), saved smoke.xer on node ${process.version} (${process.platform})`);
+console.log(`ok: ${init.result?.serverInfo?.name} ${init.result?.serverInfo?.version}, ${names.length} tools, ${ANALYSIS.length} analysis tools and ${FOURD.length} 4D tools answered, reasoner loaded (${status.reasoner.runtime}), saved smoke.xer on node ${process.version} (${process.platform})`);

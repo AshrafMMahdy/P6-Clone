@@ -38,7 +38,8 @@ export interface DcmaOptions {
   profile?: string;
   /** threshold overrides by check id */
   thresholds?: Partial<Record<Key, number>>;
-  baseline?: 'project' | 'bl1' | 'bl2' | 'bl3';
+  /** project, bl1-bl3, or any saved baseline's name */
+  baseline?: string;
   /** status date (default: each project's data date) */
   statusDate?: number | null;
   /** contract finish for CPLI (default: the project's Must Finish By date) */

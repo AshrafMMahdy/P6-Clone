@@ -31,6 +31,7 @@ import { compareComputed, evaluate } from '../core/query/evaluate.ts';
 import { parseScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../core/schedule/options.ts';
 import { reviewSchedule } from '../core/query/review.ts';
 import { ANALYSIS_TOOLS, runAnalysis } from './analysis.ts';
+import { FOURD_FILES, FOURD_TOOLS, load4dSidecar, runFourD, save4dSidecar } from './fourd.ts';
 import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
 import { baselineOf } from '../core/analysis/common.ts';
 import { reasonerStatus } from '../core/analysis/hrmRuntime.ts';
@@ -85,6 +86,7 @@ const TOOLS = [
   { name: 'validate', annotations: ro, description: 'P6 import diagnostics for the project as it is now (what real P6 would accept, warn about or reject), plus saved dates that P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'review', annotations: ro, description: 'Schedule quality review (DCMA-style checks graded pass/warn/fail): missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence, saved dates P6 would change. For the full DCMA 14-point (critical path test, CPLI, BEI, missed tasks, profiles, activity lists) use dcma_14; for the P6 Check Schedule report use check_schedule.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   ...ANALYSIS_TOOLS(withHandle),
+  ...FOURD_TOOLS(withHandle),
   ...LOOKUPS.map((t) => ({ name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
   { name: 'undo', annotations: edit, description: 'Undo your own last change on this project (edit, schedule, progress update, leveling, import). Refused only if someone else\'s later change touched the same items. any_caller: true (with owner_key) undoes the latest change whoever made it.', inputSchema: withHandle({ type: 'object', properties: { any_caller: { type: 'boolean' } } }, true) },
   { name: 'redo', annotations: edit, description: 'Re-apply your last undone change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
@@ -92,7 +94,7 @@ const TOOLS = [
   { name: 'export_pdf', annotations: writes, description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML. ' + PRINT_GUIDE + ' Layout options: filter, group_by (wbs, none), sort_by.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', annotations: writes, description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK, TASKPRED, RSRC, TASKRSRC; row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
   { name: 'import_excel', annotations: edit, description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities, relationships, resources and assignments; "Y" in delete_record_flag deletes the row. Calculated columns are ignored. One undoable change; dry_run returns the plan only.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
-  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days. baseline (project|bl1|bl2|bl3) compares this project with its baseline stored in the file instead (computed). Activities match by Activity ID, then by a unique name (matched_by_name). mode: computed compares only what the schedule computes, per activity: duration_delta_days, remaining_delta_days, start_shift_days, finish_shift_days, total_float_delta_days (working days), became_critical / no_longer_critical, plus only_in_a / only_in_b.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against' }, mode: { type: 'string', description: 'all (default) or computed' }, baseline: { type: 'string', description: 'project, bl1, bl2 or bl3: compare with that baseline in this file' }, project: { type: 'string' }, max_changes: { type: 'number' } } }) },
+  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days. baseline (project, bl1-bl3 or the name of any saved baseline) compares this project with its baseline stored in the file instead (computed). Activities match by Activity ID, then by a unique name (matched_by_name). mode: computed compares only what the schedule computes, per activity: duration_delta_days, remaining_delta_days, start_shift_days, finish_shift_days, total_float_delta_days (working days), became_critical / no_longer_critical, plus only_in_a / only_in_b.', inputSchema: withHandle({ type: 'object', properties: { other_handle: { type: 'string', description: 'the newer revision, already open' }, path: { type: 'string', description: 'or a file to compare against' }, mode: { type: 'string', description: 'all (default) or computed' }, baseline: { type: 'string', description: 'project, bl1, bl2, bl3 or a saved baseline name: compare with that baseline in this file' }, project: { type: 'string' }, max_changes: { type: 'number' } } }) },
   { name: 'evaluate', annotations: ro, description: 'What-if without changing the project: schedules a scratch state of it (no undo entry, nothing kept) as it is and with overrides (edit operations, e.g. [{"op":"update_activity","id":"A1000","duration_days":15}]), with the same data_date (this call only) and options (as schedule takes them). Answers base_finish, finish, finish_delta_days (working days), critical (activity IDs), became_critical, no_longer_critical, and changed (per activity, each computed field that changed as [before, after]; max_rows, default 500).', inputSchema: withHandle({ type: 'object', properties: { overrides: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, data_date: { type: 'string' }, project: { type: 'string' }, max_rows: { type: 'number' } } }) },
   { name: 'list_reports', annotations: ro, description: 'Reports available like P6 Tools > Reports: the standard reports by group and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'run_report', annotations: ro, description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as PDF (.pdf), HTML (.html), CSV (.csv/.txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number' } } }) },
@@ -193,6 +195,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
             { data: { fatal: f.filter((x) => x.severity === 'fatal').slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
         }
         s0.db = r.db; s0.format = format; s0.encoding = readEncoding(bytes, format, r.db, a.encoding);
+        load4dSidecar(r.db, path); // <file>.4d.json: the 4D model and links saved with it
         // opened from a Microsoft Project file (by its format: the .mpx / MSPDI content the reader saw): Project's rules
         if (format === 'mspdi' || format === 'mpx' || format === 'mpp') for (const p of r.db.tables.PROJECT?.rows ?? []) if (p._msp_source !== 'Y') { addField(r.db.tables.PROJECT, '_msp_source'); p._msp_source = 'Y'; }
         if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0) };
@@ -359,6 +362,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       else return fail('bad_input', `Unknown format "${a.format}".`, 'Use xer, p6xml, mspdi or mpx.');
       await checkpoint(ctx); // nothing is written once the call is cancelled; the write itself is one step
       writeOut(path, bytes);
+      // the 4D model, links and rules travel beside the file (<file>.4d.json); XER and P6 XML have no place for them
+      const sidecar = fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml' ? save4dSidecar(s.db, path, projIds ?? allIds(s.db), writeOut) : null;
+      if (sidecar) notes.push(`4D links saved beside it: ${basename(sidecar)}`);
       if (!projIds || allIds(s.db).length === 1) { s.dirty = false; s.savedTo = path; }
       if ((fmt === 'mspdi' || fmt === 'mpx') && (s.db.tables.WBSMEMO?.rows.length || s.db.tables.TASKMEMO?.rows.length)) notes.push('Notebooks (project, WBS and activity) are not written to Microsoft Project files; save as XER or P6 XML to keep them.');
       return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
@@ -389,7 +395,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'compare': {
       if (a.baseline) { // this project against its baseline stored in the same file (computed fields)
         const cur = (s.db.tables.PROJECT?.rows ?? []).find((p) => !p._baseline_of && (a.project == null || p.proj_short_name === a.project)) ?? fail('bad_input', 'No project to compare.', 'Pass project.');
-        const bl = baselineOf(s.db, cur, String(a.baseline) as 'project') ?? fail('bad_input', `The project has no ${a.baseline} baseline in this file.`, 'Use project, bl1, bl2 or bl3.');
+        const bl = baselineOf(s.db, cur, String(a.baseline) as 'project') ?? fail('bad_input', `The project has no ${a.baseline} baseline in this file.`, 'Use project, bl1, bl2, bl3 or the name of a saved baseline.');
         const c = compareComputed(s.db, s.db, s.hpd, { aProjIds: [bl.projId], bProjIds: [cur.proj_id] }); const max = Math.min(5000, Number(a.max_changes) || 500);
         return { mode: 'computed', baseline: bl.name, ...c, changed: c.changes.length, changes: c.changes.slice(0, max), truncated: c.changes.length > max };
       }
@@ -435,8 +441,11 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     if (now - lastTick > 250) { lastTick = now; ctx.progress?.(done, total, message); }
     await checkpoint(ctx); // yields, and throws "cancelled" once the call or its job is cancelled
   };
-  const analysed = await runAnalysis(name, a, s, { projectIds, allIds, dd, writeOut, apply: (label, fn) => change(s, ctx.caller, label, fn), tick });
+  const helpers = { projectIds, allIds, dd, writeOut, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), tick };
+  const analysed = await runAnalysis(name, a, s, helpers);
   if (analysed !== undefined) return analysed;
+  const fourd = await runFourD(name, a, s, helpers);
+  if (fourd !== undefined) return fourd;
   if (LOOKUPS.some((t) => t.name === name)) {
     const { handle: _h, caller: _c, async: _a, ...args } = a;
     return runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
@@ -546,6 +555,7 @@ const FILES: Record<string, { read: string[]; opens: boolean }> = {
   open_file: { read: ['path'], opens: true }, compare: { read: ['path'], opens: false }, import_excel: { read: ['path'], opens: false },
   export_pdf: { read: ['settings.font_path'], opens: false }, run_report: { read: ['settings.font_path'], opens: false },
   windows_analysis: { read: ['updates[].path'], opens: false },
+  ...FOURD_FILES,
 };
 export const toolsList = () => TOOLS.map((t) => (FILES[t.name] ? { ...t, _meta: { 'whiq/files': FILES[t.name] } } : t));
 

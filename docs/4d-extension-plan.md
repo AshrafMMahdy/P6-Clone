@@ -1,6 +1,34 @@
 # Plan: 4D in the P6 clone, MCP first
 
-Status: research done, nothing built. Updated 2026-10-20.
+Status: research done; building M1–M7 from 2026-10-21. Decisions of 2026-10-21 below override the rest of this plan.
+
+## Decisions (2026-10-21)
+
+1. **Baselines: no limit of three.** P6 saves any number of baselines per project; BL1–BL3 are only the user
+   baselines assigned for display. Every 4D and analysis tool that takes a baseline accepts any saved baseline by name
+   (`baseline: "<name>"`) besides `project` and `bl1`–`bl3`. Microsoft Project files bring Baseline and Baseline1–10 in
+   as saved baselines (they were only kept verbatim before), and write them back.
+2. **Desktop at the same time, not later.** Each milestone ships its MCP tools and its desktop part (Extensions > 4D)
+   together, on the same core code.
+3. **Rendering on the viewer's GPU.** The platform's VM and the MCP host have no GPU, so the 4D viewer page is the
+   renderer: on the platform it runs in the user's browser (the platform's existing client-render path), on the
+   desktop in Electron. The page exposes the same `WHIQ4D_EXPORT` hooks the platform's `clientRender4d` already drives
+   (`ready()`, `max()`, `setStep(d)`, `frame(v)`), so that path works unchanged, and it can also encode the MP4 itself
+   (WebCodecs + mediabunny, MPL-2.0) when the browser supports H.264 encoding. `render_4d` in MCP returns the viewer
+   and a render request; headless Chromium is used only when a path to one is configured. Nothing is bundled.
+4. **IFC engine: the platform's own.** `@whiq/ifc` (a streaming STEP index with no WebAssembly, memory proportional to
+   the elements; web-ifc in a child process for geometry; the model diff) is ported into the clone, so both read
+   models the same way. web-ifc (MPL-2.0) ships like the reasoner's runtime: in its own folder beside the bundle, never
+   a `node_modules` folder, with its licence, and in the release smoke.
+5. **M7 is built and labelled optional.**
+   - The Navisworks add-in (.NET, Navisworks API) is a desktop-side piece: it needs a PC with a Navisworks licence, so
+     it ships with its source, build script and README, untested against Navisworks until someone with a licence runs
+     it. The platform's GPU-less VM cannot host it; the platform reaches Navisworks through `export_4d` packages.
+   - The SYNCHRO cloud connector (Bentley iTwin 4D Schedules API) is in the MCP server but dormant: it answers
+     "not configured" until a Bentley client ID and secret are set in the environment (never stored in files). The
+     agent does its normal work through `export_4d` / `import_4d`; the connector is for a user who wants a live push.
+6. **Reviews** of this work cover the platform's checks too: the release archive and its smoke, the MCP contract
+   (context, cancellation, progress, annotations, `whiq/files`), licences, and real files.
 
 ## Goal and order
 
@@ -10,8 +38,8 @@ rendering videos, and handing ready-linked packages to Navisworks and SYNCHRO.
 1. **First, MCP tools.** White Hat IQ's agent does 4D today with its own 9 custom tools. Because the platform already
    writes XER through the clone over MCP, 4D moves into the clone's MCP server the same way, and the custom tools are
    retired one for one.
-2. **Later, the desktop app.** An Extensions tab (viewer, linking, timeline, side-by-side) and the built-in assistant use
-   the same core code. Nothing in the MCP design depends on them.
+2. **The desktop app, in the same milestone each time.** An Extensions tab (viewer, linking, timeline, side-by-side)
+   and the built-in assistant use the same core code (decision 2).
 
 The research is kept in `sample 4D/` (untracked: some sources are study-only or academic-only): `SOURCES.md`,
 `BINARY-NOTES.md` and a `NOTES.md` per format.
