@@ -35,7 +35,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = ['add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
+export const EXTRA_OP_NAMES = ['add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
 
 export const EXTRA_GUIDE = [
   `update_resource_curve: name, new_name`,
@@ -50,6 +50,8 @@ export const EXTRA_GUIDE = [
   `clear_udfs: [project], [subject] (activity, wbs, project, assignment, resource), [udf] (one UDF's label): removes every UDF value of the project's activities, WBS, assignments and the project itself in one step (resource UDF values, shared by every project, only with subject resource or a resource udf); an LOB plan's own UDFs (LOB Task, LOB Quantity, LOB Consumption, LOB Crew, Schedule Method = LOB (P6 clone)) stay unless udf names one`,
   `update_udf: udf (label), new_name, [subject] (activity default, wbs, project, resource, assignment)`,
   `set_notebook: [activity] | project, topic, text (text "" removes the topic; answer removed: true/false; the topic itself stays). activity (+[project]): its activity notebook; project alone: the project's notebook (P6's WBSMEMO on the project's root WBS node). topic default "Notes", created when missing, else reused`,
+  `set_notebook, more targets: wbs (+[project]): that WBS element's notebook; topic "*" with text "": every notebook of the activity, WBS element or project, whatever its topic (one whose topic the file no longer lists too; answer removed: how many)`,
+  `clear_notebooks: [project], [baselines] (default true): every notebook of the project in one step (activity notebooks; WBS and project notebooks, which hold the EPS notebooks P6 writes into an XER; any topic, one the file no longer lists too), and of its baselines; without project, of every project and baseline in the file. Answers how many went`,
   `add_cost_account: id, [name], [parent]; update_cost_account: id, [new_id], [name]`,
   `add_expense: activity, name, [account], [budgeted_cost], [actual_cost], [remaining_cost] (default budgeted - actual), [units], [price_per_unit], [vendor], [po_number], [description], [project]`,
   `update_expense: activity, name, then any add_expense field plus [new_name]; delete_expense: activity, name; delete_expenses: [project], [activity] (+[project]): every expense of the project, or of that one activity, in one step`,
@@ -324,30 +326,34 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       return { udf: name, value: op.value };
     }
     case 'set_notebook': {
+      const all = op.topic === '*';
       const topic = typeof op.topic === 'string' && op.topic.trim() ? op.topic.trim() : 'Notes';
       const MT = ensure(db, 'MEMOTYPE', ['memo_type_id', 'seq_num', 'eps_flag', 'proj_flag', 'wbs_flag', 'task_flag', 'memo_type']);
       // one topic per name: an existing one (any case) is reused and made available where it is now used
-      let mt = MT.rows.find((m) => lc(m.memo_type) === lc(topic));
+      let mt = all ? undefined : MT.rows.find((m) => lc(m.memo_type) === lc(topic));
       const text = typeof op.text === 'string' ? op.text : op.text == null ? '' : fail('"text" must be text.');
+      if (all && text) fail('topic "*" only removes (text ""): name the topic to write a notebook.');
       if (op.activity == null || op.activity === '') {
-        // the project's notebook, as P6 keeps it: a WBSMEMO on the project's root WBS node, under a topic for projects / WBS
+        // a WBS element's notebook, or the project's: a WBSMEMO on the element (the project's root WBS node for the
+        // project), under a topic for projects / WBS
         const p = h.project(op.project);
-        const root = rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y') ?? fail(`Project ${p.proj_short_name} has no root WBS node to hold its notebook.`);
+        const node = op.wbs != null && op.wbs !== '' ? h.wbsOf(p, op.wbs) : rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y') ?? fail(`Project ${p.proj_short_name} has no root WBS node to hold its notebook.`);
+        const what = op.wbs != null && op.wbs !== '' ? { wbs: node.wbs_short_name, project: p.proj_short_name } : { project: p.proj_short_name };
         const WM = ensure(db, 'WBSMEMO', ['wbs_memo_id', 'proj_id', 'memo_type_id', 'wbs_id', 'wbs_memo']);
-        const wid = root.wbs_id;
-        // "" removes that topic's memo, if there is one; the topic (MEMOTYPE) stays, memos or not
-        if (!text) { const id = mt?.memo_type_id; const n = mt ? removeWhere(WM.rows, (m) => m.wbs_id === wid && m.memo_type_id === id) : 0; return { cleared: topic, project: p.proj_short_name, removed: n > 0 }; }
+        const wid = node.wbs_id;
+        // "" removes that topic's memo, if there is one ("*": every memo of the node); the topic (MEMOTYPE) stays
+        if (!text) { const id = mt?.memo_type_id; const n = all || mt ? removeWhere(WM.rows, (m) => m.wbs_id === wid && (all || m.memo_type_id === id)) : 0; return { cleared: all ? 'every topic' : topic, ...what, removed: all ? n : n > 0 }; }
         if (!mt) { mt = { memo_type_id: String(nextId(db, 'MEMOTYPE')), seq_num: String(MT.rows.length), eps_flag: 'N', proj_flag: 'Y', wbs_flag: 'Y', task_flag: 'N', memo_type: topic }; MT.rows.push(mt); }
         else { if (mt.proj_flag !== 'Y') mt.proj_flag = 'Y'; if (mt.wbs_flag !== 'Y') mt.wbs_flag = 'Y'; }
         const mid = mt.memo_type_id;
         const cur = pick(WM.rows, (m) => m.wbs_id === wid && m.memo_type_id === mid, 1)[0];
         if (cur) cur.wbs_memo = memoHtml(text);
         else WM.rows.push({ wbs_memo_id: String(nextId(db, 'WBSMEMO')), proj_id: p.proj_id, memo_type_id: mid, wbs_id: wid, wbs_memo: memoHtml(text) });
-        return { notebook: `${p.proj_short_name} / ${topic}`, project: p.proj_short_name };
+        return { notebook: `${p.proj_short_name}${what.wbs ? ` / ${what.wbs}` : ''} / ${topic}`, ...what };
       }
       const t = h.activity(op.activity, op.project);
       const TM = ensure(db, 'TASKMEMO', ['memo_id', 'task_id', 'memo_type_id', 'proj_id', 'task_memo']);
-      if (!text) { const id = mt?.memo_type_id, tid = t.task_id; const n = mt ? removeWhere(TM.rows, (m) => m.task_id === tid && m.memo_type_id === id) : 0; return { cleared: topic, removed: n > 0 }; }
+      if (!text) { const id = mt?.memo_type_id, tid = t.task_id; const n = all || mt ? removeWhere(TM.rows, (m) => m.task_id === tid && (all || m.memo_type_id === id)) : 0; return { cleared: all ? 'every topic' : topic, removed: all ? n : n > 0 }; }
       if (!mt) { mt = { memo_type_id: String(nextId(db, 'MEMOTYPE')), seq_num: String(MT.rows.length), eps_flag: 'N', proj_flag: 'N', wbs_flag: 'N', task_flag: 'Y', memo_type: topic }; MT.rows.push(mt); }
       else if (mt.task_flag !== 'Y') mt.task_flag = 'Y';
       const tid = t.task_id, mid = mt.memo_type_id;
@@ -355,6 +361,21 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       if (cur) cur.task_memo = memoHtml(text);
       else TM.rows.push({ memo_id: String(nextId(db, 'TASKMEMO')), task_id: t.task_id, memo_type_id: mt.memo_type_id, proj_id: t.proj_id, task_memo: memoHtml(text) });
       return { notebook: `${t.task_code} / ${topic}` };
+    }
+    case 'clear_notebooks': {
+      // every notebook a project carries: its activities' (TASKMEMO), its WBS elements' and its own (WBSMEMO: P6 writes
+      // the EPS notebooks of an XER there too), any topic, and its baselines'
+      const ids = new Set<string>();
+      if (op.project != null && op.project !== '') {
+        const p = h.project(op.project);
+        ids.add(p.proj_id);
+        if (op.baselines !== false) for (const b of rows(db, 'PROJECT')) if (b._baseline_of === p.proj_id) ids.add(b.proj_id);
+      } else for (const p of rows(db, 'PROJECT')) if (op.baselines !== false || !p._baseline_of) ids.add(p.proj_id);
+      const taskProj = new Map(rows(db, 'TASK').map((t) => [t.task_id, t.proj_id]));
+      const wbsProj = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w.proj_id]));
+      const a = db.tables.TASKMEMO ? removeWhere(rows(db, 'TASKMEMO'), (m) => ids.has(m.proj_id || taskProj.get(m.task_id) || '')) : 0;
+      const w = db.tables.WBSMEMO ? removeWhere(rows(db, 'WBSMEMO'), (m) => ids.has(m.proj_id || wbsProj.get(m.wbs_id) || '')) : 0;
+      return { activity_notebooks: a, wbs_and_project_notebooks: w, projects: ids.size };
     }
     case 'add_cost_account': {
       const id = str(op.id, 'id');

@@ -144,3 +144,29 @@ test('text "" removes that topic\'s memo when there is one (removed: true), else
   assert.deepEqual(ok(db, [{ op: 'set_notebook', project: code, topic: 'Review Status', text: '' }]), [{ cleared: 'Review Status', project: code, removed: true }]);
   assert.ok(types().includes('Review Status'));
 });
+
+test('WBS notebooks, topic "*" and clear_notebooks (the anonymise op): every notebook of the project and its baselines goes, whatever its topic; Tower-A\'s EPS notebook too', () => {
+  const db: Db = { tables: {} };
+  ok(db, [{ op: 'add_project', id: 'NP', start: '2026-03-02' }, { op: 'add_wbs', code: 'S1', name: 'Structure' }, { op: 'add_activity', id: 'A1', name: 'One', wbs: 'S1', duration_days: 1 }]);
+  assert.deepEqual(ok(db, [{ op: 'set_notebook', wbs: 'S1', topic: 'Scope', text: 'Client: Acme' }]), [{ notebook: 'NP / S1 / Scope', wbs: 'S1', project: 'NP' }]);
+  const s1 = rows(db, 'PROJWBS').find((w) => w.wbs_short_name === 'S1')!;
+  assert.deepEqual(rows(db, 'WBSMEMO').map((m) => m.wbs_id), [s1.wbs_id], 'on the WBS element, not the root');
+  ok(db, [{ op: 'set_notebook', wbs: 'S1', topic: 'Risks', text: 'Acme risk' }, { op: 'set_notebook', topic: 'Notes', text: 'EPS: Acme / Region' }, { op: 'set_notebook', activity: 'A1', topic: 'Notes', text: 'Acme activity' }]);
+  // topic "*": every topic of that WBS element; the project's notebook and the activity's stay
+  assert.deepEqual(ok(db, [{ op: 'set_notebook', wbs: 'S1', topic: '*', text: '' }]), [{ cleared: 'every topic', wbs: 'S1', project: 'NP', removed: 2 }]);
+  assert.equal(rows(db, 'WBSMEMO').length, 1);
+  assert.equal(applyOps(db, [{ op: 'set_notebook', wbs: 'S1', topic: '*', text: 'x' }]).ok, false, '"*" only removes');
+  // a baseline with notebooks of its own; a memo whose topic the file no longer lists (as P6 exports leave them)
+  ok(db, [{ op: 'save_baseline', name: 'NP-BL' }]);
+  rows(db, 'WBSMEMO').push({ wbs_memo_id: '99', proj_id: rows(db, 'PROJECT')[0].proj_id, memo_type_id: '77', wbs_id: s1.wbs_id, wbs_memo: 'orphan Acme' });
+  assert.ok(rows(db, 'WBSMEMO').length >= 3 && rows(db, 'TASKMEMO').length === 2);
+  assert.deepEqual(ok(db, [{ op: 'clear_notebooks', project: 'NP' }]), [{ activity_notebooks: 2, wbs_and_project_notebooks: rows(db, 'WBSMEMO').length, projects: 2 }].map((x) => ({ ...x, wbs_and_project_notebooks: 3 })));
+  assert.deepEqual([rows(db, 'WBSMEMO').length, rows(db, 'TASKMEMO').length], [0, 0]);
+  assert.ok(!xerText(db).includes('Acme'), 'nothing of the notebooks left in the XER');
+  // Tower-A: its project notebook (topic 3, which its MEMOTYPE does not list) names the EPS
+  const tower = parseXer(readFileSync(join(SAMPLES_DIR, 'tower_a_schedule.xer'))).db;
+  assert.ok(xerText(tower).includes('EPS: Group / Middle East / Buildings'));
+  ok(tower, [{ op: 'clear_notebooks' }]);
+  assert.ok(!xerText(tower).includes('Middle East'));
+});
+

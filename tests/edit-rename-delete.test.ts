@@ -169,6 +169,8 @@ function anonymiseOps(s: S): unknown[] {
     const type = T(s, 'ACTVTYPE').filter((x) => live(x.actv_code_type_id))[k];
     ops.push({ op: 'update_code_value', type: `Code type ${k + 1}`, code: path(v).join('.'), ...(type.proj_id && pcode.has(type.proj_id) ? { project: pcode.get(type.proj_id) } : {}), new_code: `C${i + 1}`, name: `Code ${i + 1}` });
   });
+  // every notebook: the activities', the WBS elements' and the projects' (the EPS notebooks P6 writes into an XER)
+  ops.push({ op: 'clear_notebooks' });
   T(s, 'CALENDAR').forEach((c, i) => ops.push({ op: 'update_calendar', name: c.clndr_name, new_name: `Calendar ${i + 1}` }));
   T(s, 'OBS').forEach((o, i) => ops.push({ op: 'update_obs', name: o.obs_name, new_name: `OBS ${i + 1}` }));
   T(s, 'ROLES').forEach((r, i) => ops.push({ op: 'update_role', id: r.role_short_name, new_id: `RL${i + 1}`, name: `Role ${i + 1}` }));
@@ -185,12 +187,14 @@ const originalNames = (s: S) => [
   ...T(s, 'PROJECT').map((p) => p.proj_short_name), ...T(s, 'PROJWBS').flatMap((w) => [w.wbs_short_name, w.wbs_name]), ...T(s, 'TASK').flatMap((t) => [t.task_code, t.task_name]),
   ...T(s, 'RSRC').flatMap((r) => [r.rsrc_short_name, r.rsrc_name]), ...T(s, 'ACTVTYPE').map((x) => x.actv_code_type), ...T(s, 'ACTVCODE').flatMap((v) => [v.short_name, v.actv_code_name]), ...T(s, 'CALENDAR').map((c) => c.clndr_name), ...T(s, 'OBS').map((o) => o.obs_name),
   ...T(s, 'ROLES').flatMap((r) => [r.role_short_name, r.role_name]), ...T(s, 'ACCOUNT').flatMap((a) => [a.acct_short_name, a.acct_name]),
+  // notebook texts (Tower-A's project notebook: "EPS: Group / Middle East / Buildings")
+  ...T(s, 'TASKMEMO').map((m) => m.task_memo), ...T(s, 'WBSMEMO').map((m) => m.wbs_memo),
   // the exporting user and database the header names, unless P6's defaults
   ...(sessions.get(s.h)!.db.header?.raw.slice(4, 7) ?? []).filter((x) => !['admin', 'dbxDatabaseNoName'].includes(x)),
 ].filter((n) => n && n.trim().length >= 4 && !/^[\d.\s:-]+$/.test(n));
 
 for (const [label, make] of [['badra oil', () => open(join(SAMPLES_DIR, 'badra oil.xer'))], ['Tower-A variant', towerA], ['cleopatra elmohandesen', () => open(join(SAMPLES_DIR, 'cleopatra elmohandesen.xer'))]] as const) {
-  test(`anonymise ${label}: everything renamed, GUIDs regenerated and authors cleared in one edit; the saved XER holds none of the original names or GUIDs and re-opens P6-valid`, { timeout: 120_000 }, async () => {
+  test(`anonymise ${label}: everything renamed, GUIDs regenerated and authors cleared in one edit; the saved XER holds none of the original names, notebooks or GUIDs and re-opens P6-valid`, { timeout: 120_000 }, async () => {
     const s = await make();
     const names = [...new Set(originalNames(s))], guids = fieldValues(s, GUID);
     assert.ok(names.length > 20, `${names.length} names`);
