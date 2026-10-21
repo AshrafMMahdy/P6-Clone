@@ -66,8 +66,19 @@ export function record<T extends object>(root: T, fn: (view: T) => void): Journa
  *  so nothing else may read or write this database meanwhile (the MCP server runs one call per handle). */
 export async function recordAsync<T extends object>(root: T, fn: (view: T) => Promise<void>): Promise<Journal> {
   const { j, view } = begin(root);
-  try { await fn(view); } catch (e) { rollback(j, false); throw e; }
+  running.add(j);
+  try { await fn(view); } catch (e) { if (running.has(j)) rollback(j, false); throw e; } finally { running.delete(j); }
   return j;
+}
+
+const running = new Set<Journal>();
+/** Put back the changes of every recordAsync still running (a crash search mid-step at shutdown), so what is saved
+ *  next is the project as the user left it, never a trial state. Those runs are abandoned. */
+export function rollbackRunning(): number {
+  const n = running.size;
+  for (const j of running) rollback(j, false);
+  running.clear();
+  return n;
 }
 
 function begin<T extends object>(root: T): { j: Journal; view: T } {

@@ -172,3 +172,18 @@ test('MCP: long analyses report progress, stay cancellable and keep the server a
   view = (await call('job_status', { job_id: job, wait_seconds: 10 })).d;
   assert.equal(view.status, 'cancelled', JSON.stringify(view).slice(0, 300));
 });
+
+test('shutdown mid-crash: the trial durations are put back before anything is saved', async () => {
+  const { rollbackRunning } = await import('../core/journal.ts');
+  const { db, pid } = net();
+  const before = JSON.stringify(db);
+  let paused!: () => void;
+  const atStep = new Promise<void>((r) => { paused = r; });
+  // the run stops for good at its second step, with the first step's crash applied to the real rows
+  const run = crashSchedule(db, [pid], { targetDays: 5, activities: [{ id: 'B', min_days: 3, cost_per_day: 100 }, { id: 'A', min_days: 7, cost_per_day: 300 }, { id: 'D', min_days: 2, cost_per_day: 50 }], tick: async (done) => { if (done === 1) { paused(); await new Promise(() => {}); } } });
+  void run;
+  await atStep;
+  assert.notEqual(JSON.stringify(db), before, 'mid-run, the rows hold a trial state');
+  assert.equal(rollbackRunning(), 1);
+  assert.equal(JSON.stringify(db), before, 'what shutdown saves is the project as it was');
+});

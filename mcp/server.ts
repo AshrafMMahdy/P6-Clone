@@ -34,7 +34,7 @@ import { ANALYSIS_TOOLS, runAnalysis } from './analysis.ts';
 import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
 import { baselineOf } from '../core/analysis/common.ts';
 import { reasonerStatus } from '../core/analysis/hrmRuntime.ts';
-import { record, rollback } from '../core/journal.ts';
+import { record, rollback, rollbackRunning } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { worst, type Finding } from '../core/findings.ts';
 import { addField, type Db, type Row } from '../core/db.ts';
@@ -519,6 +519,9 @@ let exiting = false;
 export function shutdown(reason: string): void {
   if (exiting) return;
   exiting = true;
+  // an analysis still trying changes on a project (crash_schedule mid-step) gives them back first, so the files below
+  // hold the project as the user left it, never a trial state
+  rollbackRunning();
   // every handle checkpointed, so the next start brings it back; unsaved work also saved as .recovered files
   try { if (config.checkpointMs) checkpointAll(); } catch { /* the .recovered files below still hold the work */ }
   try { saveUnsavedAtExit(reason); } finally { process.exit(0); }
