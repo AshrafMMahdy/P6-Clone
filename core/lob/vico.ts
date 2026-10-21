@@ -2,6 +2,7 @@
 // Project"). Read-only and reverse-engineered from five sample files written by Schedule Planner v6.8; the format
 // notes (record classes, property ids, what is known and what is not) are in docs/lob-vico-format.md. Anything the
 // reader cannot pin down goes to `notes` instead of being guessed.
+import { maxOf, minOf } from '../arrays.ts';
 import { inflateSync } from 'node:zlib';
 
 export interface VicoProject {
@@ -270,7 +271,7 @@ export function readVicoDpp(bytes: Uint8Array, o: { maxBytes?: number } = {}): V
     return { code, name: str(l, 2), level: locDepth.get(id) ?? 0, parent: parent != null && store.get(parent)?.cls === C.LOCATION ? codeOf(parent) : null };
   });
   if (new Set(locations.map((l) => l.code)).size !== locations.length) notes.push('location codes are not unique');
-  const maxDepth = Math.max(0, ...locations.map((l) => l.level));
+  const maxDepth = Math.max(0, maxOf(locations.map((l) => l.level)));
   if (levels.length && maxDepth + 1 !== levels.length) notes.push(`location tree depth ${maxDepth + 1} differs from the ${levels.length} breakdown levels`);
   const isUnder = (loc: number, anc: number): boolean => {
     for (let x: number | null = loc, g = 0; x != null && g < 64; x = ref(store.get(x), 301), g++) if (x === anc) return true;
@@ -293,10 +294,10 @@ export function readVicoDpp(bytes: Uint8Array, o: { maxBytes?: number } = {}): V
     const tls = lines.flatMap((l) => refs(l, 301).map((id) => store.get(id)).filter((r): r is Rec => r?.cls === C.TASK_LOCATION));
     // start: earliest sub-task start; end: latest stored finish
     const starts = lines.map((l) => num(l, 302)).filter((x): x is number => x != null && x > 0);
-    const start = starts.length ? Math.min(...starts) : null;
+    const start = starts.length ? minOf(starts) : null;
     const res = store.get(resultOf.get(t.id));
     const ends = refs(res, 109).map((id) => num(store.get(id), 101)).filter((x): x is number => x != null && x > 0);
-    const end = ends.length ? Math.max(...ends) : null;
+    const end = ends.length ? maxOf(ends) : null;
     if (end == null) notes.push(`${label}: no stored finish date`);
     // duration: working seconds of each task-location (class 63, first value of property 101), summed
     let secs = 0, haveDur = true;

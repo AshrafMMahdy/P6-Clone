@@ -9,6 +9,7 @@
 //   Quantities: Id, Name, Consumption, Unit, Location precision, then a quantity column per location (same header)
 // Links have no import or export in Tactplan: the export lists them for re-entry. Ids are left blank (Tactplan makes
 // new ones); locations are known by their path of names.
+import { maxOf } from '../arrays.ts';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { locationDurations } from './edit.ts';
@@ -155,7 +156,7 @@ export function readTactplan(path: string): { model: LobModel; start: string | n
       if (!seen.has(code)) { seen.add(code); locations.push({ code, name: r[ni].trim(), level: lv, parent: lv > 1 ? codeOf(stack.slice(0, -1)) : null }); }
     }
   }
-  for (let k = 0; k < Math.max(...locations.map((l) => l.level), 1); k++) levels[k] ??= `Level ${k + 1}`;
+  for (let k = 0; k < Math.max(maxOf(locations.map((l) => l.level)), 1); k++) levels[k] ??= `Level ${k + 1}`;
   // tasks: rows with the same code (else name) are one task's subtasks
   const tasks = new Map<string, LobTask>();
   let start: string | null = null;

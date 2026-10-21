@@ -2,6 +2,7 @@
 // travels in the XER: a project UDF flag and a notebook real P6 keeps), built and changed in small calls on the handle.
 // The model is the source of the plan's structure; its activities and logic are ordinary P6 data, scheduled with
 // everything else (continuity on top). Kept apart from server.ts.
+import { maxOf } from '../core/arrays.ts';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { rows, type Db, type Row } from '../core/db.ts';
@@ -201,11 +202,11 @@ function fromCpm(db: Db, projId: string, locType: string, tradeType: string, id:
   const depth = (c: Row): number => { let d = 1; for (let p = used.get(c.parent_actv_code_id); p; p = used.get(p.parent_actv_code_id)) d++; return d; };
   const locations = [...used.values()].map((c) => ({ code: c.short_name, name: c.actv_code_name || c.short_name, level: depth(c), parent: used.get(c.parent_actv_code_id)?.short_name ?? null }));
   const levelOf = new Map(locations.map((l) => [l.code, l.level]));
-  for (const t of tasks.values()) { t.precision = Math.max(...t.order.map((c) => levelOf.get(c) ?? 1)); t.order = t.order.filter((c) => levelOf.get(c) === t.precision); t.segments = [{ from: t.order[0], to: t.order.at(-1)!, crews: 1, crewSize: 1, productivity: 1, driver: 'crew', timing: 'asap', }]; t.hoursPerDay = hpd; }
+  for (const t of tasks.values()) { t.precision = maxOf(t.order.map((c) => levelOf.get(c) ?? 1)); t.order = t.order.filter((c) => levelOf.get(c) === t.precision); t.segments = [{ from: t.order[0], to: t.order.at(-1)!, crews: 1, crewSize: 1, productivity: 1, driver: 'crew', timing: 'asap', }]; t.hoursPerDay = hpd; }
   // trade-to-trade logic from the CPM relationships between them (one link per pair of trades)
   const links = new Map<string, LobModel['links'][number]>();
   for (const r of rows(db, 'TASKPRED')) { const p = where.get(r.pred_task_id), q = where.get(r.task_id); if (p && q && p[0] !== q[0]) links.set(`${p[0]}>${q[0]}`, { kind: 'task', pred: p[0], succ: q[0], type: 'FS', lagDays: 0 }); }
-  const levels = [...Array(Math.max(1, ...locations.map((l) => l.level))).keys()].map((k) => `Level ${k + 1}`);
+  const levels = [...Array(Math.max(1, maxOf(locations.map((l) => l.level)))).keys()].map((k) => `Level ${k + 1}`);
   return { model: { version: 1, project: id, levels, locations, tasks: [...tasks.values()].map((t) => ({ ...t, code: t.code })), links: [...links.values()] }, ungrouped };
 }
 

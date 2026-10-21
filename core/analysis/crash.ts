@@ -3,6 +3,7 @@
 // the critical network, so one shared activity competes with the sum of one activity per parallel path), by the
 // smaller of their remaining crash capacity, the float of the next near-critical path and what is still needed.
 // Durations are working days on each activity's own calendar; only remaining work is crashed. Runs on a copy.
+import { minOf } from '../arrays.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { recordAsync, rollback } from '../journal.ts';
@@ -144,7 +145,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
       while (stack.length) { const id = stack.pop()!; if (inNet.has(id)) continue; inNet.add(id); for (const r of preds.get(id) ?? []) { const a = ctx.taskById.get(r.pred_task_id); if (a && !a.act_end_date && !isLoe(a) && !isWbs(a) && open.has(a.proj_id) && rf(r) === 0) stack.push(a.task_id); } }
       const crit = tasks.filter((t) => inNet.has(t.task_id));
       const idx = new Map(crit.map((t, i) => [t.task_id, i]));
-      const tfd = Math.min(...crit.map((t) => Number(t.total_float_hr_cnt || 0) / dh.task(t)));
+      const tfd = minOf(crit.map((t) => Number(t.total_float_hr_cnt || 0) / dh.task(t)));
       const N = crit.length * 2 + 2, S = N - 2, T = N - 1;
       const edges: [number, number, number][] = [];
       const hasIn = new Uint8Array(crit.length), hasOut = new Uint8Array(crit.length);
@@ -181,7 +182,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
         if (f > EPS) near = Math.min(near, f);
       }
       const want = needed(finish);
-      const room = Math.min(...acts.map(capDays));
+      const room = minOf(acts.map(capDays));
       // whole days where the room allows. A step that does not move the finish (non-work days on a successor's
       // calendar swallow it) is retried larger, up to the room, before the cut is given up
       let step = Math.max(0.01, Math.min(want, near, room));

@@ -5,6 +5,7 @@
 // sample count and seed are parameters; the best proposal is then checked with the clone's own P6 leveler, against
 // P6's default leveling, so the answer is in real dates. Inference is passed in (infer), so this file stays pure: the
 // MCP server and CLI run the model in Node (hrmRuntime.ts), the desktop app through its main process.
+import { maxOf, minOf } from '../arrays.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { dayHours } from '../project/units.ts';
@@ -89,7 +90,7 @@ export function reasonerInputs(inst: HrmInstance): ReasonerInputs {
   for (const u of order) for (const p of acts[u].preds) depth[u] = Math.max(depth[u], 1 + depth[p.id]);
   const raw = acts.map((a, i) => {
     const durs = a.modes.map((m) => m.duration);
-    return [Math.min(...durs), Math.max(...durs), durs.reduce((x, y) => x + y, 0) / durs.length, a.modes.reduce((x, m) => x + m.crewSize, 0) / a.modes.length, a.modes.reduce((x, m) => x + (m.cost || 0), 0) / a.modes.length, a.modes.length, a.preds.length, succ[i].length, depth[i]];
+    return [minOf(durs), maxOf(durs), durs.reduce((x, y) => x + y, 0) / durs.length, a.modes.reduce((x, m) => x + m.crewSize, 0) / a.modes.length, a.modes.reduce((x, m) => x + (m.cost || 0), 0) / a.modes.length, a.modes.length, a.preds.length, succ[i].length, depth[i]];
   });
   const feats = new Float32Array(n * 9);
   for (let c = 0; c < 9; c++) {
@@ -148,7 +149,7 @@ export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, 
     start[id] = t; finish[id] = t + d;
     if (d > 0 && crew > 0) for (let day = t; day < t + d; day++) u.set(day, (u.get(day) ?? 0) + crew);
   }
-  return { start, finish, makespan: Math.max(0, ...finish) };
+  return { start, finish, makespan: Math.max(0, maxOf(finish)) };
 }
 
 /** Sampled decode around the net's answer (GRAM-style, as the platform): trajectory 0 is the net's argmax modes and
@@ -158,7 +159,7 @@ export async function decode(inst: HrmInstance, out: { priority: Float32Array; m
   const valid: number[][] = [], probs: number[][] = [], argmax: number[] = [];
   for (let i = 0; i < n; i++) {
     const vm = acts[i].modes.map((_, k) => k).filter((k) => k < REASONER_KMAX);
-    const lg = vm.map((k) => out.modeLogits[i * REASONER_KMAX + k]), mx = Math.max(...lg);
+    const lg = vm.map((k) => out.modeLogits[i * REASONER_KMAX + k]), mx = maxOf(lg);
     const ex = lg.map((v) => Math.exp(v - mx)), sum = ex.reduce((x, y) => x + y, 0) || 1;
     valid.push(vm); probs.push(ex.map((e) => e / sum)); argmax.push(vm[lg.indexOf(mx)]);
   }

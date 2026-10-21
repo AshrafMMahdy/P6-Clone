@@ -8,6 +8,7 @@
 //  - resource histograms: budgeted (planned dates), actual, remaining early (with P6 resource curves) and remaining
 //    late units or cost per period, the limit, over-allocation and its severity.
 // Spreading is linear over each activity's working time. Values are hours (units) or the project currency (cost).
+import { maxOf, minOf } from '../arrays.ts';
 import { baselineOf } from './common.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
@@ -63,7 +64,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   const calOf = (t: Row) => cals.get(t.clndr_id) ?? cals.fallback(projById.get(t.proj_id)?.clndr_id);
   const asgBy = groupBy(rows(db, 'TASKRSRC'), 'task_id');
   const lines = activityCosts(db, projIds);
-  const dd = Math.min(...projs.map((p) => parseP6Date(p.last_recalc_date) ?? Infinity));
+  const dd = minOf(projs.map((p) => parseP6Date(p.last_recalc_date) ?? Infinity));
   const dataDate = Number.isFinite(dd) ? dd : null;
   const warnings: string[] = [];
 
@@ -221,7 +222,7 @@ export function resourceHistograms(db: Db, projIds: string[], o: { resources?: s
       return { start: iso(s), end: iso(g.ends[i]), budgeted: r2(budgeted[i]), actual: r2(actual[i]), remaining_early: r2(early[i]), remaining_late: r2(late[i]), limit: limit != null ? r2(limit) : null, over_allocated: limit != null && demand > limit * threshold ? r2(demand - limit) : 0, available: limit != null ? r2(Math.max(0, limit - demand)) : null };
     });
     const peakI = periods.reduce((m, p, i) => (p.actual + p.remaining_early > periods[m].actual + periods[m].remaining_early ? i : m), 0);
-    const ratio = Math.max(0, ...periods.map((p) => (p.limit ? (p.actual + p.remaining_early) / p.limit : 0)));
+    const ratio = Math.max(0, maxOf(periods.map((p) => (p.limit ? (p.actual + p.remaining_early) / p.limit : 0))));
     out.push({
       resource: R.get(id)?.rsrc_short_name ?? id, name: R.get(id)?.rsrc_name ?? '', units: o.cost ? 'cost' : 'hours',
       peak: periods.length ? { start: periods[peakI].start, demand: r2(periods[peakI].actual + periods[peakI].remaining_early), limit: periods[peakI].limit } : null,

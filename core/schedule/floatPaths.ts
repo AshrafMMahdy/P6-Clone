@@ -9,6 +9,7 @@
 //  - Float Path numbers the paths (1 = most critical), Float Path Order the activities along each path.
 // Checked against a real P6 output (Oracle's sample engineering project, in "cairo alex-road.xer", P6 5.0): the same
 // paths and orders (P6 5.0 encoded the numbers as 11, 21, 22; current P6 numbers them 1, 2, 3).
+import { minOf } from '../arrays.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { makeCtx } from '../project/ctx.ts';
@@ -64,7 +65,7 @@ export function computeFloatPaths(db: Db, projIds: string[], o: FloatPathOptions
     chain.forEach((id, i) => assign.set(id, { path: n, order: i + 1 }));
     const tf = (id: string) => { const v = ctx.taskById.get(id)!.total_float_hr_cnt; return v === '' || v == null ? null : Number(v); };
     const fl = chain.map(tf).filter((x): x is number => x != null);
-    paths.push({ path: n, float_hours: fl.length ? Math.min(...fl) : null, activities: chain.map((id, i) => ({ id: code(id), name: ctx.taskById.get(id)!.task_name, order: i + 1, total_float_hours: tf(id) })) });
+    paths.push({ path: n, float_hours: fl.length ? minOf(fl) : null, activities: chain.map((id, i) => ({ id: code(id), name: ctx.taskById.get(id)!.task_name, order: i + 1, total_float_hours: tf(id) })) });
   };
   /** Walk back from an activity through unassigned activities along the most critical links; forward order. */
   const walkBack = (from: string) => {

@@ -1,4 +1,5 @@
 // Ported from the White Hat IQ platform's @whiq/ifc (shared/ifc, branch 33-chat-only).
+import { maxOf } from '../arrays.ts';
 import type { IfcElement, IfcIndex, IfcOwner } from './parse.ts';
 
 export type ChangeKind = 'added' | 'removed' | 'modified' | 'reidentified';
@@ -56,12 +57,12 @@ function geomCompare(a: IfcElement, b: IfcElement, tol: number, volTol: number):
   }
   const size = (g: NonNullable<IfcElement['geom']>) => [g.bbox[3] - g.bbox[0], g.bbox[4] - g.bbox[1], g.bbox[5] - g.bbox[2]];
   const sa = size(a.geom), sb = size(b.geom);
-  const sizeDelta = Math.max(...sa.map((v, i) => Math.abs(v - sb[i])));
+  const sizeDelta = maxOf(sa.map((v, i) => Math.abs(v - sb[i])));
   const volA = a.geom.volume, volB = b.geom.volume;
   const volDelta = Math.abs(volA - volB);
   const volLimit = Math.max(volTol * Math.max(volA, volB), tol ** 3);
   const shapeChanged = sizeDelta > tol || volDelta > volLimit;
-  const moveDelta = Math.max(...a.geom.centroid.map((v, i) => Math.abs(v - b.geom!.centroid[i])));
+  const moveDelta = maxOf(a.geom.centroid.map((v, i) => Math.abs(v - b.geom!.centroid[i])));
   const moved = moveDelta > tol;
   let near = false;
   if (shapeChanged) {

@@ -2,6 +2,7 @@
 // Populations follow DCMA: "tasks" are incomplete activities that are not WBS summary, LOE or milestones; leads, lags
 // and relationship types count relationships. Durations and float are in working days of each activity's calendar.
 // The Critical Path Test runs on a scratch copy (a journal that is rolled back); CPLI and BEI use a chosen baseline.
+import { maxOf, minOf } from '../arrays.ts';
 import { type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
@@ -91,8 +92,8 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   // high float / high duration limit
   const projLen = (() => {
     const p = s.projs[0]; if (!p) return 0;
-    const st = Math.min(...s.tasks.map((t) => parseP6Date(t.act_start_date || t.early_start_date || t.target_start_date) ?? Infinity));
-    const fi = Math.max(...s.tasks.map((t) => forecastFinish(t) ?? -Infinity));
+    const st = minOf(s.tasks.map((t) => parseP6Date(t.act_start_date || t.early_start_date || t.target_start_date) ?? Infinity));
+    const fi = maxOf(s.tasks.map((t) => forecastFinish(t) ?? -Infinity));
     return Number.isFinite(st) && Number.isFinite(fi) ? s.workDays(s.projCal(p), st, fi) : 0;
   })();
   const limit = o.limitDays === 'dynamic' ? Math.max(20, Math.ceil(0.1 * projLen)) : o.limitDays ?? 44;
@@ -175,7 +176,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
 
 /** Project forecast finish (latest activity finish) of the scoped projects. */
 function projectFinish(s: Scope): number | null {
-  const f = Math.max(...s.tasks.map((t) => forecastFinish(t) ?? -Infinity));
+  const f = maxOf(s.tasks.map((t) => forecastFinish(t) ?? -Infinity));
   return Number.isFinite(f) ? f : null;
 }
 
@@ -206,7 +207,7 @@ function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: string): 
     if (!t.act_start_date) t.target_drtn_hr_cnt = p6num(Number(t.target_drtn_hr_cnt || 0) + add);
     const r = scheduleProjects(d, [...s.projIds], {});
     if (!r.ok) { ok = false; msg = r.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '); return; }
-    after = Math.max(...d.tables.TASK.rows.filter((x) => s.projIds.has(x.proj_id)).map((x) => forecastFinish(x) ?? -Infinity));
+    after = maxOf(d.tables.TASK.rows.filter((x) => s.projIds.has(x.proj_id)).map((x) => forecastFinish(x) ?? -Infinity));
   });
   rollback(j);
   if (!ok || before == null || after == null) return notAssessed('critical_path_test', name, 'days', null, `The test could not be scheduled: ${msg || 'no finish date'}.`);
@@ -235,7 +236,7 @@ function cpli(s: Scope, given: number | null, bls: Map<string, ReturnType<typeof
   const cpl = s.workDays(cal, dd, fin);
   const contract = given ?? parseP6Date(p.plan_end_date) ?? null;
   const b = bls.get(p.proj_id);
-  const blFin = b ? Math.max(...[...b.tasks.values()].map((t) => baselineFinish(t) ?? -Infinity)) : null;
+  const blFin = b ? maxOf([...b.tasks.values()].map((t) => baselineFinish(t) ?? -Infinity)) : null;
   const one = (target: number) => { const tf = s.workDays(cal, fin, target); return { target: formatP6Date(target), total_float_days: tf, cpli: cpl > 0 ? Math.round(((cpl + tf) / cpl) * 1000) / 1000 : null }; };
   const vsContract = contract != null ? one(contract) : null, vsBaseline = blFin != null && Number.isFinite(blFin) ? one(blFin) : null;
   const primary = vsContract ?? vsBaseline;

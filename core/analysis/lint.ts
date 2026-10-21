@@ -3,6 +3,7 @@
 // copy). The "platform" profile adds White Hat IQ's graded network metrics (serialization, criticality, single-file
 // work, chain length, link mix and density, redundant links, disguised orphans, SS abuse) with a score and grade.
 // Days are working days of each activity's calendar (the platform's version used calendar days).
+import { maxOf, minOf } from '../arrays.ts';
 import { type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
@@ -208,7 +209,7 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
   const ladders: Fix[] = [];
   for (const g of groups.values()) {
     if (g.length < L.min_group_size) continue;
-    const ds = g.map(durD), mn = Math.min(...ds), mx = Math.max(...ds);
+    const ds = g.map(durD), mn = minOf(ds), mx = maxOf(ds);
     if (!(mn > 0) || mx > L.max_duration_ratio * mn) continue;
     const ids = new Set(g.map((t) => t.task_id));
     const chain = s.rels.filter((r) => ids.has(r.pred_task_id) && ids.has(r.task_id) && (r.pred_type || 'PR_FS') === 'PR_FS' && lagD(r) >= 0 && lagD(r) <= L.chain_lag_max);
@@ -231,7 +232,7 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
       const j = record(s.db, (d) => {
         if (ops.length && !applyOps(d, ops, { hoursPerDay: s.hpd, calendarDays: true }).ok) return;
         const r = scheduleProjects(d, ids, {});
-        if (r.ok) f = Math.max(...d.tables.TASK.rows.filter((t) => s.projIds.has(t.proj_id)).map((t) => parseP6Date(t.act_end_date || t.early_end_date) ?? -Infinity));
+        if (r.ok) f = maxOf(d.tables.TASK.rows.filter((t) => s.projIds.has(t.proj_id)).map((t) => parseP6Date(t.act_end_date || t.early_end_date) ?? -Infinity));
       });
       rollback(j);
       return f;
@@ -258,7 +259,7 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
   const durD = (t: Row) => Number(t.target_drtn_hr_cnt || 0) / s.dh.task(t);
   const p = s.projs[0];
   const cal = p ? s.projCal(p) : null;
-  const st = Math.min(...s.tasks.map((t) => start(t) ?? Infinity)), fi = Math.max(...s.tasks.map((t) => finish(t) ?? -Infinity));
+  const st = minOf(s.tasks.map((t) => start(t) ?? Infinity)), fi = maxOf(s.tasks.map((t) => finish(t) ?? -Infinity));
   const makespan = cal && Number.isFinite(st) && Number.isFinite(fi) ? s.workDays(cal, st, fi) : 0;
   const metric = (id: string, name: string, v: number | null, b: Band, note: string, applied: object, found: Offender[] = []): LintCheck => ({ ...check(id, name, 'info', found, null, b, maxIds, { note, weight: WEIGHTS[id], applied }), unit: 'ratio', metric: v == null ? null : Math.round(v * 1000) / 1000, numerator: null, denominator: null });
 

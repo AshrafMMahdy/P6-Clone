@@ -2,6 +2,7 @@
 // order) and buffer periods. The check names every trade × zone that does not fit the takt and what would make it
 // fit; apply sizes each trade's crew to fit, holds every zone to exactly one takt period (production factors), paces
 // the trades, and links the train zone by zone with the buffer. Every value it moves is reported.
+import { maxOf, minOf } from '../arrays.ts';
 import { edit, locationDurations } from './edit.ts';
 import { locationsAt, type LobChange, type LobLink, type LobModel, type LobTask } from './model.ts';
 
@@ -11,7 +12,7 @@ export interface TaktMisfit { task: string; zone: string; days: number; takt: nu
 export function taktZones(m: LobModel): { code: string; locations: string[] }[] {
   const k = m.takt;
   if (k?.zones?.length) return k.zones;
-  const level = k?.zoneLevel ?? Math.min(...m.tasks.map((t) => t.precision));
+  const level = k?.zoneLevel ?? minOf(m.tasks.map((t) => t.precision));
   const parent = new Map(m.locations.map((l) => [l.code, l.parent]));
   const zoneOf = (c: string) => { let x: string | null = c; while (x && m.locations.find((l) => l.code === x)!.level > level) x = parent.get(x) ?? null; return x ?? c; };
   return locationsAt(m, level).map((z) => ({ code: z.code, locations: m.locations.filter((l) => zoneOf(l.code) === z.code).map((l) => l.code) }));
@@ -46,7 +47,7 @@ export function taktApply(m0: LobModel): { model: LobModel; changes: LobChange[]
     for (const [k, s] of t0.segments.entries()) {
       if (s.driver !== 'crew') run({ op: 'set_driver', task: t0.code, segment: k + 1, driver: 'crew' });
       const t = m.tasks.find((x) => x.code === t0.code)!, seg = t.segments[k];
-      const worst = Math.max(...zones.map((z) => zoneDays(m, t, z.locations.filter((c) => t.order.indexOf(c) >= t.order.indexOf(seg.from) && t.order.indexOf(c) <= t.order.indexOf(seg.to)))));
+      const worst = maxOf(zones.map((z) => zoneDays(m, t, z.locations.filter((c) => t.order.indexOf(c) >= t.order.indexOf(seg.from) && t.order.indexOf(c) <= t.order.indexOf(seg.to)))));
       if (worst > takt + 0.005) run({ op: 'set_crew', task: t.code, segment: k + 1, crew_size: Math.ceil((seg.crewSize * worst) / takt - 1e-9) });
       if (t.segments[k].timing !== 'paced') run({ op: 'set_timing', task: t.code, segment: k + 1, timing: 'paced' });
     }
@@ -59,7 +60,7 @@ export function taktApply(m0: LobModel): { model: LobModel; changes: LobChange[]
     }
   }
   // the train: each trade after the one before, zone by zone, with the buffer in takt periods
-  const train = trainOf(m), level = m.takt?.zoneLevel ?? Math.min(...m.tasks.map((t) => t.precision));
+  const train = trainOf(m), level = m.takt?.zoneLevel ?? minOf(m.tasks.map((t) => t.precision));
   for (let k = 1; k < train.length; k++) {
     const pred = train[k - 1].code, succ = train[k].code, lagDays = (m.takt?.bufferPeriods ?? 0) * takt;
     const link: LobLink = { kind: 'task', pred, succ, type: 'FS', lagDays, precision: level };

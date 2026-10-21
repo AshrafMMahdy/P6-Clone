@@ -1,6 +1,7 @@
 // What an LOB plan looks like once scheduled, in a form an agent reads at a glance: each trade's locations with their
 // dates and float, the trades on the critical path, where two trades share a location at the same time (collisions),
 // and where a crew waits between locations (gaps). Also the guard that keeps the plan's structure in the LOB tools.
+import { minOf } from '../arrays.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
@@ -28,7 +29,7 @@ export function lobView(db: Db, projId: string, m: LobModel, o: { hoursPerDay: n
     const locs = t.order.filter((c) => d.has(c)).map((c) => acts.get(activityId(t.code, c))).filter((a): a is NonNullable<typeof a> => !!a);
     const start = (a: (typeof locs)[number]) => a.act_start_date || a.early_start_date, finish = (a: (typeof locs)[number]) => a.act_end_date || a.early_end_date;
     const floats = locs.map((a) => (a.total_float_hr_cnt === '' ? null : Number(a.total_float_hr_cnt) / o.hoursPerDay)).filter((x): x is number => x != null);
-    const minFloat = floats.length ? Math.min(...floats) : null;
+    const minFloat = floats.length ? minOf(floats) : null;
     if (minFloat != null && minFloat <= 0) out.critical.push(t.code);
     out.tasks.push({
       code: t.code, name: t.name, trade: t.trade,

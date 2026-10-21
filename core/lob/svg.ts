@@ -2,6 +2,7 @@
 // left, the finest level as rows), X time; one line per trade, rising location by location, labelled along its start;
 // the data date in red; the critical trades drawn thicker. Used by lob_view (a picture for the agent and the user) and
 // the desktop's LOB view draws the same geometry.
+import { maxOf, minOf } from '../arrays.ts';
 import { rows, type Db } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { activityId } from './expand.ts';
@@ -16,12 +17,12 @@ export interface FlowGeometry { rows: { code: string; label: string; path: strin
 /** Where everything goes: rows (finest level, tree order), the time span, and per trade the points (time, row bottom,
  *  row top) of each location's start and finish. */
 export function flowGeometry(db: Db, projId: string, m: LobModel, critical: string[] = []): FlowGeometry {
-  const finest = Math.max(...m.tasks.map((t) => t.precision), 1);
+  const finest = Math.max(maxOf(m.tasks.map((t) => t.precision)), 1);
   const leaves = locationsAt(m, finest);
   const rowsOut = leaves.map((l) => ({ code: l.code, label: l.name, path: pathOf(m, l.code) }));
   const rowOf = new Map(rowsOut.map((r, k) => [r.code, k]));
   // a coarser location spans the rows of the finest locations under it
-  const span = (c: string): [number, number] => { const ks = rowsOut.flatMap((r, k) => (r.path.includes(c) ? [k] : [])); return ks.length ? [Math.min(...ks), Math.max(...ks) + 1] : [rowOf.get(c) ?? 0, (rowOf.get(c) ?? 0) + 1]; };
+  const span = (c: string): [number, number] => { const ks = rowsOut.flatMap((r, k) => (r.path.includes(c) ? [k] : [])); return ks.length ? [minOf(ks), maxOf(ks) + 1] : [rowOf.get(c) ?? 0, (rowOf.get(c) ?? 0) + 1]; };
   const acts = new Map(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => [t.task_code, t]));
   let t0 = Infinity, t1 = -Infinity;
   // a line per segment (a split, or a Vico line, is drawn on its own), coloured by task as Vico does
@@ -64,7 +65,7 @@ export function flowlineSvg(db: Db, projId: string, m: LobModel, o: { width?: nu
     const seen = new Map<string, number[]>();
     g.rows.forEach((r, k) => { const c = r.path[lv]; if (c) (seen.get(c) ?? seen.set(c, []).get(c)!).push(k); });
     for (const [c, ks] of seen) {
-      const lo = Math.min(...ks), hi = Math.max(...ks) + 1, name = m.locations.find((l) => l.code === c)?.name ?? c;
+      const lo = minOf(ks), hi = maxOf(ks) + 1, name = m.locations.find((l) => l.code === c)?.name ?? c;
       out.push(`<line x1="${x}" x2="${W - right}" y1="${Y(lo)}" y2="${Y(lo)}" stroke="#e3e8ef"/>`, `<text x="${x + 4}" y="${(Y(lo) + Y(hi)) / 2 + 4}" fill="#4a5568">${esc(name)}</text>`);
     }
   }

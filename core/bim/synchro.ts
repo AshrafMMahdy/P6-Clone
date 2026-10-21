@@ -8,6 +8,7 @@
 // finish comes from its calendar. Layout follows MPXJ's SYNCHRO reader (LGPL), re-derived and checked against files
 // from 5.1 to 6.5; fields between the ones we use are skipped, and every row must end where the next one starts, so a
 // misread row is stepped over and counted in the notes instead of derailing the file.
+import { maxOf, minOf, pushAll } from '../arrays.ts';
 import { inflateSync } from 'node:zlib';
 
 export interface SynchroTask { uuid: string; id: string; name: string; start: string | null; finish: string | null; actualStart: string | null; actualFinish: string | null; durationHours: number | null; parent: string | null; isSummary: boolean }
@@ -280,7 +281,7 @@ export function readSynchro(bytes: Uint8Array): SynchroFile {
 
   const raw: RawTask[] = [], tc = cur('Tasks'), resIds = new Set(out.resources.map((r) => r.uuid));
   if (tc) {
-    try { raw.push(...table(tc, M.task, (c, id) => readTaskRow(c, id, resIds))); } catch (e) { notes.push(`Tasks table stopped early (${(e as Error).message}).`); }
+    try { pushAll(raw, table(tc, M.task, (c, id) => readTaskRow(c, id, resIds))); } catch (e) { notes.push(`Tasks table stopped early (${(e as Error).message}).`); }
     bad += tc.bad;
   }
 
@@ -299,7 +300,7 @@ export function readSynchro(bytes: Uint8Array): SynchroFile {
     if (t.kids.length) {
       const spans = t.kids.map((k) => walk(k, t.uuid));
       const ss = spans.map((x) => x.s).filter((x) => x !== null), fs = spans.map((x) => x.f).filter((x) => x !== null);
-      s = ss.length ? Math.min(...ss) : s; f = fs.length ? Math.max(...fs) : f;
+      s = ss.length ? minOf(ss) : s; f = fs.length ? maxOf(fs) : f;
     }
     row.start = iso(s); row.finish = iso(f);
     return { s, f };

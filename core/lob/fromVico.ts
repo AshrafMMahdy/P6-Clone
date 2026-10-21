@@ -2,6 +2,7 @@
 // their quantities, consumption and crews, one segment per Vico line with that line's start, and its calendar (work
 // week and yearly holidays) as operations that create it. Vico's files carry no logic in the samples seen; the
 // reader's notes say so and travel with the import.
+import { maxOf, minOf } from '../arrays.ts';
 import type { VicoCalendar, VicoProject } from './vico.ts';
 import type { LobLocation, LobModel, LobTask } from './model.ts';
 
@@ -30,7 +31,7 @@ export function lobFromVico(v: VicoProject, project: string): { model: LobModel;
   // a single root location (the building) is the project itself: its children are the top level
   const roots = v.locations.filter((l) => !l.parent);
   const dropRoot = roots.length === 1;
-  const shift = dropRoot ? 1 : 0, minLevel = Math.min(...v.locations.map((l) => l.level));
+  const shift = dropRoot ? 1 : 0, minLevel = minOf(v.locations.map((l) => l.level));
   const locations: LobLocation[] = v.locations.filter((l) => !(dropRoot && l === roots[0])).map((l) => ({ code: l.code, name: /^\d+$/.test(l.name) ? `${(v.levels[l.level] ?? 'Location').replace(/s$/, '')} ${l.name}` : l.name, level: l.level - minLevel + 1 - shift, parent: dropRoot && l.parent === roots[0].code ? null : l.parent }));
   const levels = v.levels.slice(minLevel + shift);
   const level = new Map(locations.map((l) => [l.code, l.level]));
@@ -41,7 +42,7 @@ export function lobFromVico(v: VicoProject, project: string): { model: LobModel;
   const tasks: LobTask[] = v.tasks.map((t) => {
     // the task runs where its quantities are (Vico's lines go through the floors of their part)
     const qLocs = [...new Set(t.items.flatMap((i) => i.quantities.map((q) => q.location)))].filter((c) => level.has(c));
-    const precision = qLocs.length ? Math.max(...qLocs.map((c) => level.get(c)!)) : (level.get(t.locations[0]) ?? 1);
+    const precision = qLocs.length ? maxOf(qLocs.map((c) => level.get(c)!)) : (level.get(t.locations[0]) ?? 1);
     const lines = t.lines?.length ? t.lines : t.locations.map((location) => ({ location, start: t.start }));
     const order: string[] = [];
     const factors: Record<string, number> = {};

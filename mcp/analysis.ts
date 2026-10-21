@@ -1,5 +1,6 @@
 // Schedule analysis tools of the MCP server (kept apart from server.ts so the two grow without stepping on each other):
 // P6 Check Schedule and DCMA 14-point; later lint, float paths, curves, what-ifs, crashing and delay analysis.
+import { minOf } from '../core/arrays.ts';
 import { progressCurves, resourceHistograms } from '../core/analysis/curves.ts';
 import { computeFloatPaths, writeFloatPaths } from '../core/schedule/floatPaths.ts';
 import type { Db } from '../core/db.ts';
@@ -233,7 +234,7 @@ function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string
   };
   if (reach.has(from.task_id)) walk(from.task_id, []);
   const dur = (t: Record<string, string>) => Number((t.act_end_date ? t.target_drtn_hr_cnt : t.remain_drtn_hr_cnt) || 0) / hpd;
-  const rowsOut = out.map((p) => { const ts = p.map((id) => byId.get(id)!); const fl = ts.map((t) => t.total_float_hr_cnt).filter((x) => x !== '' && x != null).map(Number); return { activities: ts.map((t) => t.task_code), duration_days: Math.round(ts.reduce((a, t) => a + dur(t), 0) * 10) / 10, min_float_days: fl.length ? Math.round((Math.min(...fl) / hpd) * 10) / 10 : null }; })
+  const rowsOut = out.map((p) => { const ts = p.map((id) => byId.get(id)!); const fl = ts.map((t) => t.total_float_hr_cnt).filter((x) => x !== '' && x != null).map(Number); return { activities: ts.map((t) => t.task_code), duration_days: Math.round(ts.reduce((a, t) => a + dur(t), 0) * 10) / 10, min_float_days: fl.length ? Math.round((minOf(fl) / hpd) * 10) / 10 : null }; })
     .sort((x, y) => y.duration_days - x.duration_days || (x.min_float_days ?? 0) - (y.min_float_days ?? 0));
   return { from: from.task_code, to: to.task_code, paths: rowsOut, truncated };
 }
