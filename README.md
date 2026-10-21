@@ -218,6 +218,14 @@ Endpoint `POST http://127.0.0.1:8765/mcp` (`GET /health` for liveness). Limits c
   safely can: a misspelled key column whose values are unique ids is renamed (e.g. `taskpred_id` -> `task_pred_id`),
   empty, missing or repeated ids that nothing points at get fresh ones. `diagnostics.repaired` lists each repair,
   `diagnostics.not_repaired` what was left, and `still_rejected` says whether a save would still be refused.
+  `save {repair: true, path}` then writes a repaired copy P6 imports, to a new path (never the file opened), field by
+  field and never by guessing: impossible or unreadable durations from the activity's own other fields (remaining
+  duration, planned span), else P6's 5-day default; only actual dates P6 refuses are cleared (unreadable, before 1753,
+  a finish before its start), while actuals P6 imports (after the data date, a finish without a start) stay as
+  recorded and are listed in `invalid_dates`; codes and flags take P6's defaults; a row is removed only when it cannot
+  be identified, with what pointed at it. Every change is listed (`changes`: table, row, key, field, old, new, reason)
+  and `check` says whether the copy, opened again, would still be rejected. CCA R03 (30 MB, 16,000 activities):
+  lenient open 3 s, repair save 7 s (repair, write, re-open check), re-open 3 s, F9 2 s.
 - Answers of tools that can change a project carry `unsaved_changes`. `close` is refused (`unsaved_changes`) while there
   are any, unless `discard: true`.
 - Calls on one handle run one at a time, in order; a call that waits too long gets `busy` with `retry_after`.

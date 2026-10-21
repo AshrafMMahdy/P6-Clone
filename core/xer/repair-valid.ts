@@ -3,9 +3,9 @@
 //  - A value P6 cannot read or cannot accept is taken from the activity's own other fields when they agree (original
 //    and remaining duration, the planned start-finish span on its calendar, the status its actual dates give), else
 //    P6's neutral value (never a blind 0: a zero duration turns a task into a milestone).
-//  - Actual dates are facts: one P6 cannot accept (unreadable, before 1900, after the data date, a finish before the
-//    start or without a start) is cleared, never invented; the activity is then not started, or in progress when its
-//    start stays. F9 schedules it from its logic.
+//  - Actual dates are the customer's recorded facts: only one P6 REFUSES on import is cleared (never invented), the
+//    list being REFUSED_ACTUALS; one P6 imports but a reviewer flags (after the data date, a finish without a start) is
+//    kept and reported as an invalid-date finding, as DCMA's check 9 does, not changed.
 //  - A whole row goes only when it cannot be identified (no readable id, Activity ID or WBS; a row made from a damaged
 //    line, its columns shifted), and with it every row that pointed at it.
 import { KEYS, refTarget, rows, type Db, type Row } from '../db.ts';
@@ -17,6 +17,19 @@ import { realOf, removeWhere } from '../journal.ts';
 
 /** row: the row's place in its table as the file had it (1-based); key: its id then (before a fresh one). */
 export interface RepairChange { table: string; row: number; key: string; field: string; old: string; new: string; reason: string }
+/** Kept as recorded, reported (DCMA check 9, invalid dates): P6 imports it. */
+export interface RepairFinding { table: string; row: number; key: string; field: string; value: string; code: 'ACTUAL_AFTER_DD' | 'FINISH_WITHOUT_START'; message: string }
+
+/** The actual dates P6 refuses on import, so the repair clears them (the clone's validator rates each an error):
+ *  - unreadable: not a yyyy-mm-dd hh:mm date, or no such day (BAD_DATE: "P6 import fails on unparseable dates");
+ *  - outside what a P6 database stores: before 1753-01-01 (SQL Server's datetime, the narrowest P6 database);
+ *    after 9999 cannot be written in four digits, so it is unreadable;
+ *  - an actual finish before the actual start (ACT_DATES_ORDER: "P6 rejects the actual dates"): the finish goes, the
+ *    start stays (in progress).
+ *  Imported by P6, so kept and reported: an actual after the data date (ACTUAL_AFTER_DD: "P6 imports them; the
+ *  schedule log reports actuals in the future"), an actual finish without a start (P6 fills the start in). */
+export const REFUSED_ACTUALS = ['unreadable (not a date, or no such day)', 'before 1753-01-01 (outside what a P6 database stores)', 'an actual finish before the actual start (the finish is cleared)'];
+const MIN_DB_DATE = parseP6Date('1753-01-01')!;
 
 const ACTUALS = new Set(['act_start_date', 'act_end_date']);
 const COMPUTED = new Set(['early_start_date', 'early_end_date', 'late_start_date', 'late_end_date', 'rem_late_start_date', 'rem_late_end_date', 'restart_date', 'reend_date', 'total_float_hr_cnt', 'free_float_hr_cnt', 'external_early_start_date', 'external_late_end_date', 'float_path', 'float_path_order']);
@@ -25,22 +38,34 @@ const MAX_HOURS = 20 * 365 * 24; // no activity lasts twenty years of round-the-
 const isNum = (v: string) => /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(v);
 const goodDate = (v: string | undefined) => { const t = v ? parseP6Date(v) : null; return t != null && t >= parseP6Date('1900-01-01')! && t <= parseP6Date('2200-12-31')! ? t : null; };
 
-/** What in a row P6 cannot take: unreadable values by the validator's own rules. */
-function badFields(table: string, r: Row): string[] {
-  const kf = knownFields(table), out: string[] = [];
-  for (const [f, v] of Object.entries(r)) {
-    if (v === '' || v == null || f.startsWith('_') || !kf.has(f)) continue;
-    const en = ENUMS[`${table}.${f}`];
-    if (en) { if (!en.includes(v) && !(table === 'TASKPRED' && /^PR_(FS|SS|FF|SF)\d$/.test(v))) out.push(f); continue; }
-    const ty = fieldType(f);
-    if ((ty === 'date' && parseP6Date(v) == null) || (ty === 'number' && !isNum(v)) || (ty === 'flag' && v !== 'Y' && v !== 'N')) out.push(f);
-    else if (MAX_LEN[`${table}.${f}`] && v.length > MAX_LEN[`${table}.${f}`]) out.push(f);
+/** What in a row P6 cannot take: unreadable values by the validator's own rules (each field's rule worked out once per
+ *  table: a file has hundreds of thousands of rows). */
+type Check = (v: string) => boolean;
+const checks = new Map<string, Map<string, Check>>();
+function checksOf(table: string): Map<string, Check> {
+  let m = checks.get(table);
+  if (m) return m;
+  m = new Map();
+  for (const f of knownFields(table)) {
+    if (f.startsWith('_')) continue;
+    const en = ENUMS[`${table}.${f}`], ty = fieldType(f), max = MAX_LEN[`${table}.${f}`];
+    if (en) { const s = new Set(en); m.set(f, (v) => !s.has(v) && !(table === 'TASKPRED' && /^PR_(FS|SS|FF|SF)\d$/.test(v))); }
+    else if (ty === 'date') m.set(f, (v) => parseP6Date(v) == null);
+    else if (ty === 'number') m.set(f, (v) => !isNum(v));
+    else if (ty === 'flag') m.set(f, (v) => v !== 'Y' && v !== 'N');
+    else if (max) m.set(f, (v) => v.length > max);
   }
+  checks.set(table, m);
+  return m;
+}
+function badFields(table: string, r: Row): string[] {
+  const out: string[] = [];
+  for (const [f, bad] of checksOf(table)) { const v = r[f]; if (v !== '' && v != null && bad(v)) out.push(f); }
   return out;
 }
 
-export function repairToValid(db: Db): RepairChange[] {
-  const changes: RepairChange[] = [];
+export function repairToValid(db: Db): { changes: RepairChange[]; findings: RepairFinding[] } {
+  const changes: RepairChange[] = [], findings: RepairFinding[] = [];
   const T = db.tables;
   // rows are named by where they were in the file (1-based), whatever the repair removes before them
   const origin = new Map<Row, number>();
@@ -61,7 +86,7 @@ export function repairToValid(db: Db): RepairChange[] {
   // ---- activities that cannot be identified (and duplicates: the damaged copy of an id goes)
   const projIds = new Set(rows(db, 'PROJECT').map((p) => p.proj_id)), wbsById = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
   const tasks = rows(db, 'TASK');
-  const bad = new Map(tasks.map((t) => [t, badFields('TASK', t)]));
+  const bad = new Map(tasks.map((t, i) => [t, badFields('TASK', realOf(tasks)[i])])); // read the real rows: a scan through the undo journal is slow
   const why = new Map<Row, string>();
   // a code of one field found in another (task_type "DT_FixedDUR2", status "TK_..." in duration_type): its columns shifted
   const domains = ['task_type', 'status_code', 'duration_type', 'complete_pct_type'].map((f) => [f, new Set(ENUMS[`TASK.${f}`])] as const);
@@ -97,7 +122,7 @@ export function repairToValid(db: Db): RepairChange[] {
   for (const t of Object.values(T)) {
     if (t.name === 'TASK') continue;
     const fs = t.fields.filter((f) => refTarget(f, t.name) === 'TASK');
-    const gone = new Set(t.rows.filter((r) => fs.some((f) => r[f] && !taskIds.has(r[f])) || (t.name === 'UDFVALUE' && taskUdf.has(r.udf_type_id) && r.fk_id && !taskIds.has(r.fk_id))));
+    const gone = new Set(realOf(t.rows).filter((r) => fs.some((f) => r[f] && !taskIds.has(r[f])) || (t.name === 'UDFVALUE' && taskUdf.has(r.udf_type_id) && r.fk_id && !taskIds.has(r.fk_id))));
     drop(t.name, gone, (r) => `points at activity ${fs.map((f) => r[f]).find((v) => v && !taskIds.has(v)) ?? r.fk_id}, which is not in the file`);
   }
 
@@ -116,20 +141,26 @@ export function repairToValid(db: Db): RepairChange[] {
     // Activity ID too long: P6 cuts it; a cut that collides would merge two activities, so it is refused (the row goes below)
     if (b.has('task_code')) { set('TASK', t, 'task_code', t.task_code.slice(0, MAX_LEN['TASK.task_code']), `longer than P6's ${MAX_LEN['TASK.task_code']} characters: cut, as P6 does`); b.delete('task_code'); }
     if (b.has('task_name')) { set('TASK', t, 'task_name', t.task_name.slice(0, MAX_LEN['TASK.task_name']), `longer than P6's ${MAX_LEN['TASK.task_name']} characters: cut, as P6 does`); b.delete('task_name'); }
-    // actual dates: facts, never invented; one P6 cannot accept is cleared
+    // actual dates: the customer's facts. Only what P6 refuses is cleared (REFUSED_ACTUALS), never invented
+    const actualsWere = `${t.act_start_date ?? ''}|${t.act_end_date ?? ''}`;
     for (const f of ['act_start_date', 'act_end_date']) {
       const v = t[f];
       if (!v) continue;
       const at = parseP6Date(v);
-      if (at == null) set('TASK', t, f, '', `"${v}" is not a date P6 can read: an actual cannot be guessed, so it is cleared`);
-      else if (at < parseP6Date('1900-01-01')!) set('TASK', t, f, '', `${v.slice(0, 16)} is before 1900: impossible for an actual, which cannot be guessed, so it is cleared`);
-      else if (dd != null && at > dd + 1440) set('TASK', t, f, '', `${v.slice(0, 16)} is after the data date ${formatP6Date(dd)}: an actual cannot lie in the future, so it is cleared`);
+      if (at == null) set('TASK', t, f, '', `"${v}" is not a date P6 can read (P6 refuses it): an actual cannot be guessed, so it is cleared`);
+      else if (at < MIN_DB_DATE) set('TASK', t, f, '', `${v.slice(0, 16)} is before 1753, outside what a P6 database stores (P6 refuses it): an actual cannot be guessed, so it is cleared`);
       b.delete(f);
     }
-    if (t.act_end_date && !t.act_start_date) set('TASK', t, 'act_end_date', '', 'an actual finish needs an actual start, which this activity does not have: cleared, not invented');
-    if (t.act_end_date && t.act_start_date && parseP6Date(t.act_end_date)! < parseP6Date(t.act_start_date)!) set('TASK', t, 'act_end_date', '', 'the actual finish is before the actual start: cleared (the activity stays in progress)');
+    if (t.act_end_date && t.act_start_date && parseP6Date(t.act_end_date)! < parseP6Date(t.act_start_date)!) set('TASK', t, 'act_end_date', '', 'the actual finish is before the actual start, which P6 refuses: the finish is cleared (the activity stays in progress)');
+    // kept as recorded, reported as invalid dates (P6 imports them)
+    for (const f of ['act_start_date', 'act_end_date']) {
+      const at = parseP6Date(t[f]);
+      if (at != null && dd != null && at > dd) findings.push({ table: 'TASK', row: rowNo('TASK', t), key: keyOf('TASK', t), field: f, value: t[f], code: 'ACTUAL_AFTER_DD', message: `${t.task_code}: actual ${f === 'act_start_date' ? 'start' : 'finish'} ${t[f].slice(0, 16)} is after the data date ${formatP6Date(dd)} (an invalid date for a reviewer; P6 imports it, so it is kept as recorded)` });
+    }
+    if (t.act_end_date && !t.act_start_date) findings.push({ table: 'TASK', row: rowNo('TASK', t), key: keyOf('TASK', t), field: 'act_end_date', value: t.act_end_date, code: 'FINISH_WITHOUT_START', message: `${t.task_code}: an actual finish without an actual start (P6 imports it and fills the start in; kept as recorded)` });
+    // the status: from the actual dates when the repair changed them or the status cannot be read (P6 derives it so)
     const status = t.act_end_date ? 'TK_Complete' : t.act_start_date ? 'TK_Active' : 'TK_NotStart';
-    if (t.status_code !== status) set('TASK', t, 'status_code', status, `the status its actual dates give (${t.act_end_date ? 'finished' : t.act_start_date ? 'started' : 'not started'})`);
+    if (t.status_code !== status && (b.has('status_code') || `${t.act_start_date ?? ''}|${t.act_end_date ?? ''}` !== actualsWere)) set('TASK', t, 'status_code', status, `the status its actual dates give (${t.act_end_date ? 'finished' : t.act_start_date ? 'started' : 'not started'})`);
     b.delete('status_code');
     // constraints: an unreadable type or date clears that constraint
     for (const [ty, dt] of [['cstr_type', 'cstr_date'], ['cstr_type2', 'cstr_date2']] as const) {
@@ -158,12 +189,16 @@ export function repairToValid(db: Db): RepairChange[] {
     for (const f of b) generic('TASK', t, f);
   }
   // every other table: the same rules for single fields
-  for (const tb of Object.values(T)) if (tb.name !== 'TASK') for (const r of tb.rows) for (const f of badFields(tb.name, r)) generic(tb.name, r, f);
+  for (const tb of Object.values(T)) {
+    if (tb.name === 'TASK') continue;
+    const view = tb.rows, raw = realOf(view);
+    for (let i = 0; i < raw.length; i++) { const b = badFields(tb.name, raw[i]); if (b.length) for (const f of b) generic(tb.name, view[i], f); }
+  }
   // activity IDs cut to the same value in one project: the later one cannot be told apart
   const seen = new Set<string>(), dupCode = new Set<Row>();
   for (const t of rows(db, 'TASK')) { const k = `${t.proj_id}|${t.task_code}`; if (seen.has(k)) dupCode.add(t); seen.add(k); }
   drop('TASK', dupCode, (r) => `its Activity ID ${r.task_code} (after cutting) is another activity's: cannot be identified`);
-  return changes;
+  return { changes, findings };
 
   function generic(table: string, r: Row, f: string) {
     const v = r[f] ?? '', en = ENUMS[`${table}.${f}`], ty = fieldType(f), max = MAX_LEN[`${table}.${f}`];

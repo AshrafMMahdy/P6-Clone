@@ -102,20 +102,21 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
     if (missing.length) c.add({ severity: 'info', code: 'MISSING_FIELD', table: t.name, message: `${t.name} lacks ${missing.length} of ${expected.length} P6 ${ref} fields: ${missing.slice(0, 12).join(', ')}${missing.length > 12 ? ', …' : ''}.`, p6: 'P6 fills missing columns with defaults.' });
 
     const seen = new Set<string>();
+    // each column's rule, worked out once per table (not per value: a big file has millions of values)
+    const cols = t.fields.filter((f) => kf.has(f)).map((f) => ({ f, max: MAX_LEN[`${t.name}.${f}`], en: ENUMS[`${t.name}.${f}`], ty: fieldType(f) }));
+    const hasKey = !!key && t.fields.includes(key);
     t.rows.forEach((r, i) => {
       const row = i + 1;
-      if (key && t.fields.includes(key)) {
+      if (hasKey) {
         const k = r[key];
         if (!k) c.add({ severity: 'error', code: 'EMPTY_KEY', table: t.name, row, field: key, message: `${t.name} row ${row} has empty ${key}.`, p6: 'P6 rejects the row.' });
         else if (seen.has(k)) c.add({ severity: 'fatal', code: 'DUP_KEY', table: t.name, row, key: k, field: key, message: `Duplicate ${t.name}.${key} = ${k}.`, p6: 'P6 import fails with a unique constraint error.' });
         seen.add(k);
       }
-      for (const f of t.fields) {
+      for (const { f, max, en, ty } of cols) {
         const v = r[f];
-        if (v === '' || v == null || !kf.has(f)) continue;
-        const max = MAX_LEN[`${t.name}.${f}`];
+        if (v === '' || v == null) continue;
         if (max && v.length > max) c.add({ severity: 'error', code: 'FIELD_TOO_LONG', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name}.${f} is ${v.length} characters, P6 allows ${max}: "${v.slice(0, 50)}…".`, p6: `P6 stores at most ${max} characters here; depending on the database the import fails or the value is cut.` });
-        const en = ENUMS[`${t.name}.${f}`];
         if (en) {
           if (t.name === 'TASKPRED' && f === 'pred_type' && /^PR_(FS|SS|FF|SF)\d$/.test(v)) {
             c.add({ severity: 'warning', code: 'LEGACY_REL_TYPE', table: t.name, row, field: f, message: `TASKPRED.pred_type = "${v}" is a legacy numbered code (seen in P6 5.0 exports).`, p6: 'Old P6 builds accept it as the base type; current P6 expects PR_FS/PR_SS/PR_FF/PR_SF.' });
@@ -124,7 +125,6 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
           if (!en.includes(v)) c.add({ severity: 'error', code: 'BAD_ENUM', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name}.${f} = "${v}" is not a P6 code (expected ${en.filter(Boolean).join(', ')}).`, p6: 'P6 import fails on an invalid code value.' });
           continue;
         }
-        const ty = fieldType(f);
         if (ty === 'date') {
           if (parseP6Date(v) == null) c.add({ severity: 'error', code: 'BAD_DATE', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name}.${f} = "${v}" is not a date.`, p6: 'P6 import fails on unparseable dates.' });
           else if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) c.add({ severity: 'warning', code: 'DATE_FORMAT', table: t.name, row, field: f, message: `${t.name}.${f} = "${v}" is not in P6's yyyy-mm-dd hh:mm format.`, p6: 'P6 writes yyyy-mm-dd hh:mm; other forms may be misread.' });

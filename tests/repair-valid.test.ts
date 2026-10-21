@@ -18,7 +18,7 @@ const dir = mkdtempSync(join(tmpdir(), 'p6repair-'));
 function damaged(): string {
   const db: Db = { tables: {} };
   assert.equal(applyOps(db, [{ op: 'add_project', id: 'DMG', start: '2026-03-02' }, { op: 'add_wbs', code: 'W', name: 'Works' },
-    ...['IMPOSS', 'SPAN', 'NONE', 'FUTURE', 'BADFIN', 'SHIFT', 'CODES', 'TWIN'].map((id) => ({ op: 'add_activity', id, name: `Activity ${id}`, wbs: 'W', duration_days: 5 })),
+    ...['IMPOSS', 'SPAN', 'NONE', 'FUTURE', 'BADFIN', 'ANCIENT', 'ORDER', 'NOSTART', 'SHIFT', 'CODES', 'TWIN'].map((id) => ({ op: 'add_activity', id, name: `Activity ${id}`, wbs: 'W', duration_days: 5 })),
     { op: 'add_relationship', pred: 'IMPOSS', succ: 'SHIFT' }, { op: 'add_relationship', pred: 'SHIFT', succ: 'CODES' }, { op: 'add_relationship', pred: 'IMPOSS', succ: 'CODES' },
     { op: 'set_project', data_date: '2026-03-16' }]).ok, true);
   const t = (c: string) => rows(db, 'TASK').find((x) => x.task_code === c)!;
@@ -28,8 +28,14 @@ function damaged(): string {
   Object.assign(t('SPAN'), { target_drtn_hr_cnt: '999999', remain_drtn_hr_cnt: '-5', target_start_date: '2026-03-02 08:00', target_end_date: '2026-03-13 17:00' });
   // nothing gives it: P6's default (5 days), not a 0
   Object.assign(t('NONE'), { target_drtn_hr_cnt: 'abc', remain_drtn_hr_cnt: 'x1', target_start_date: '', target_end_date: '' });
-  // an actual start in 2212, after the data date: cleared, not started
+  // an actual start in 2212, after the data date: P6 imports it, so it is kept and reported as an invalid date
   Object.assign(t('FUTURE'), { act_start_date: '2212-01-05 13:00', status_code: 'TK_Active' });
+  // before 1753, outside what a P6 database stores: P6 refuses it, so it is cleared (not started)
+  Object.assign(t('ANCIENT'), { act_start_date: '1700-05-01 08:00', status_code: 'TK_Active' });
+  // a finish before its start: P6 refuses the actual dates; the finish goes, the start stays (in progress)
+  Object.assign(t('ORDER'), { act_start_date: '2026-03-10 08:00', act_end_date: '2026-03-05 17:00', status_code: 'TK_Complete', remain_drtn_hr_cnt: '0' });
+  // a finish without a start: P6 imports it, kept and reported
+  Object.assign(t('NOSTART'), { act_end_date: '2026-03-05 17:00', status_code: 'TK_Complete', remain_drtn_hr_cnt: '0' });
   // started, with an unreadable actual finish: the finish is cleared, it stays in progress
   Object.assign(t('BADFIN'), { act_start_date: '2026-03-03 08:00', act_end_date: '2026-03-1! 17:00', status_code: 'TK_Complete', remain_drtn_hr_cnt: '0' });
   // a row made from a damaged line: its name is a number and a field cannot be read
@@ -62,8 +68,14 @@ test('save repair: one of each damage, repaired field by field, every change lis
   assert.match(ch(id('SPAN'), 'target_drtn_hr_cnt').reason, /planned start-finish span/);
   assert.deepEqual([ch(id('NONE'), 'target_drtn_hr_cnt').new, ch(id('NONE'), 'remain_drtn_hr_cnt').new], ['40', '40']);
   assert.match(ch(id('NONE'), 'target_drtn_hr_cnt').reason, /P6's default for a new activity/);
-  assert.deepEqual([ch(id('FUTURE'), 'act_start_date').new, ch(id('FUTURE'), 'status_code').new], ['', 'TK_NotStart']);
-  assert.match(ch(id('FUTURE'), 'act_start_date').reason, /after the data date .* never|cannot lie in the future/);
+  // actuals P6 imports are the customer's facts: kept, reported as invalid dates; only what P6 refuses is cleared
+  const rowOf = (c: string) => db0.tables.TASK.rows.findIndex((t) => t.task_code === c) + 1;
+  assert.equal(r.changes.some((c: any) => c.table === 'TASK' && (c.row === rowOf('FUTURE') || c.row === rowOf('NOSTART'))), false, 'FUTURE and NOSTART are not changed');
+  assert.deepEqual(r.invalid_dates.map((x: any) => [x.key, x.field, x.code]).sort(), [[id('FUTURE'), 'act_start_date', 'ACTUAL_AFTER_DD'], [id('NOSTART'), 'act_end_date', 'FINISH_WITHOUT_START']].sort());
+  assert.deepEqual([ch(id('ANCIENT'), 'act_start_date').new, ch(id('ANCIENT'), 'status_code').new], ['', 'TK_NotStart']);
+  assert.match(ch(id('ANCIENT'), 'act_start_date').reason, /before 1753, outside what a P6 database stores \(P6 refuses it\)/);
+  assert.deepEqual([ch(id('ORDER'), 'act_end_date').new, ch(id('ORDER'), 'status_code').new, ch(id('ORDER'), 'act_start_date')], ['', 'TK_Active', undefined]);
+  assert.equal(r.cleared_actuals_rule.length, 3);
   assert.deepEqual([ch(id('BADFIN'), 'act_end_date').new, ch(id('BADFIN'), 'status_code').new], ['', 'TK_Active']);
   assert.match(code('SHIFT').reason, /damaged line: its name is the number "362.016667"/);
   assert.equal(r.changes.filter((c: any) => c.table === 'TASKPRED' && c.field === '*').length, 2, 'its two relationships go with it');
@@ -88,9 +100,13 @@ test('save repair on CCA R03 (a corrupted 16,000-activity file): the repaired co
   const out = join(dir, 'cca-repaired.xer');
   const r = await call('save', { handle: o.handle, repair: true, path: out });
   assert.deepEqual([r.check.still_rejected, r.check.counts.fatal ?? 0, r.check.counts.error ?? 0], [false, 0, 0], JSON.stringify(r.check).slice(0, 2000));
-  // the 49,445-day duration: from its remaining duration (not started); the 2012 actual starts after the 2011-09-30 data date: cleared
+  // the 49,445-day duration: from its remaining duration (not started)
   assert.ok(r.changes.some((c: any) => c.field === 'target_drtn_hr_cnt' && c.old === '395563.6' && c.new === '336'));
-  assert.ok(r.changes.some((c: any) => c.field === 'act_start_date' && c.old === '2012-08-08 00:00' && c.new === ''));
+  // the actual starts after the 2011-09-30 data date: P6 imports them, so they stay as recorded, reported as invalid dates
+  for (const k of ['164390', '164391', '164449', '164450']) {
+    assert.equal(r.changes.some((c: any) => c.key === k), false, k);
+    assert.ok(r.invalid_dates.some((x: any) => x.key === k && x.code === 'ACTUAL_AFTER_DD' && x.field === 'act_start_date'), k);
+  }
   assert.equal(r.changes.filter((c: any) => c.table === 'TASK' && c.field === '*').length, 10);
   const back = await call('open_file', { path: out });
   assert.ok(back.handle, JSON.stringify(back).slice(0, 300));
