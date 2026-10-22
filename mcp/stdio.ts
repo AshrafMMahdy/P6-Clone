@@ -36,18 +36,28 @@ export async function handleMessage(m: Msg, sessionCaller?: string, notify?: (n:
  *  within a second even while a long step of a job holds the main thread (a Monte Carlo iteration, a crash step, a
  *  big save): a platform's liveness check can tell busy from frozen. Every request goes to the main thread as before;
  *  a job_status the main thread has not answered after 400 ms while it is busy (no heartbeat for 400 ms) is answered
- *  by the front from the job's last state, which the main thread posts as the job starts, moves and ends. The main
+ *  by the front from the job's last state, which the main thread posts as the job starts, moves and ends; a
+ *  server_status likewise after 1.5 s, from the state the main thread posts every second (busy: true, and how old it is). The main
  *  thread's late answer to that request is then dropped. P6CLONE_STDIO_THREAD=0 reads stdin on the main thread. */
 const FRONT = String.raw`
 const { parentPort } = require('node:worker_threads');
 const fs = require('node:fs');
 const jobs = new Map(), waiting = new Map();
+let lastStatus = null; // server_status as the main thread last answered it
 let beat = Date.now(), buf = '';
 const write = (s) => { const b = Buffer.from(s + '\n', 'utf8'); for (let at = 0; at < b.length;) { try { at += fs.writeSync(1, b, at, b.length - at); } catch (e) { if (e.code !== 'EAGAIN') throw e; } } };
 const result = (out) => ({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out, isError: false });
 const fallback = (id) => {
   const w = waiting.get(id); if (!w) return;
   if (Date.now() - beat < 400) { w.timer = setTimeout(() => fallback(id), 150); return; }
+  if (w.status) {
+    // a server_status is answered from the posted state only in a real long step (no heartbeat for 1.5 s), and only
+    // once a state was posted: a loaded host's short pauses still get the main thread's own, current answer
+    if (Date.now() - beat < 1500 || !lastStatus) { w.timer = setTimeout(() => fallback(id), 150); return; }
+    waiting.delete(id); w.answered = true; answered.add(id);
+    write(JSON.stringify({ jsonrpc: '2.0', id, result: result({ ...lastStatus, busy: true, status_age_seconds: Math.round((Date.now() - lastStatus.at) / 1000), at: undefined, note: 'The server is in a long step of a call (still working); this is its state as of status_age_seconds ago.' }) }));
+    return;
+  }
   const j = jobs.get(String(w.job));
   if (!j) { w.timer = setTimeout(() => fallback(id), 150); return; }
   waiting.delete(id); w.answered = true; answered.add(id);
@@ -59,6 +69,7 @@ parentPort.on('message', (m) => {
   // every reply posted before this one is written (messages come in order; writes are synchronous)
   if (m.type === 'flush') { parentPort.postMessage({ type: 'flushed' }); return; }
   if (m.type === 'job') { if (m.view) jobs.set(m.id, m.view); else jobs.delete(m.id); return; }
+  if (m.type === 'status') { lastStatus = { ...m.view, at: Date.now() }; return; }
   if (m.type === 'send') {
     const id = m.id;
     if (id != null && answered.has(id)) { answered.delete(id); return; } // answered from the job's last state already
@@ -79,8 +90,8 @@ s.on('data', (chunk) => {
     if (!line) continue;
     let m = null; try { m = JSON.parse(line); } catch { /* the main thread answers the parse error */ }
     if (m && m.method === 'ping' && m.id != null) { write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: {} })); continue; }
-    if (m && m.id != null && m.method === 'tools/call' && m.params && m.params.name === 'job_status') {
-      const w = { job: m.params.arguments && m.params.arguments.job_id, answered: false, timer: null };
+    if (m && m.id != null && m.method === 'tools/call' && m.params && (m.params.name === 'job_status' || m.params.name === 'server_status')) {
+      const w = { job: m.params.arguments && m.params.arguments.job_id, status: m.params.name === 'server_status', answered: false, timer: null };
       waiting.set(m.id, w); w.timer = setTimeout(() => fallback(m.id), 400);
     }
     parentPort.postMessage({ type: 'line', line });
@@ -98,6 +109,8 @@ export function startStdio(): void {
   // the job's state as the front answers it while the main thread is busy
   onJobChange((id, view) => front.postMessage({ type: 'job', id, view: view && view.status === 'running' ? { ...view, started: Date.now() - (view.running_seconds ?? 0) * 1000 } : null }));
   setInterval(() => front.postMessage({ type: 'beat' }), 100).unref();
+  // server_status as it is now, every second, for the front to answer from while a long step holds this thread
+  setInterval(() => { void callTool('server_status', {}).then((r) => { if (!r.isError) front.postMessage({ type: 'status', view: r.out }); }, () => {}); }, 1000).unref();
   // at the end of stdin: calls still running finish first (up to 30 s), then the front writes every reply it holds,
   // and only then does the process stop (stopping at once lost replies still on their way to the front)
   let flushed: (() => void) | null = null;

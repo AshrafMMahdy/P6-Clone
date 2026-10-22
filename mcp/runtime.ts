@@ -319,11 +319,15 @@ export function checkpoint(s: Session): void {
   try { checkpoints.set(s.handle, entryOf(s, writeProject(s), 'restart')); saveIndex(); } catch { /* the next one */ }
 }
 const pendingCk = new Map<string, NodeJS.Timeout>();
-/** After a change: a checkpoint config.checkpointMs after the project's last change. */
+/** Projects with a change in progress across awaits (changeAsync): their tables are half-way, so no checkpoint then. */
+const changing = new Set<string>();
+/** After a change: a checkpoint config.checkpointMs after the project's last change. A project busy with a call is
+ *  checkpointed too (a long Monte Carlo or LOB plan no longer holds back the save of earlier edits), unless a change is
+ *  in progress in it: then the checkpoint waits for the change to end. */
 export function scheduleCheckpoint(handle: string): void {
   if (!config.checkpointMs) return;
   clearTimeout(pendingCk.get(handle));
-  pendingCk.set(handle, setTimeout(() => { pendingCk.delete(handle); const s = sessions.get(handle); if (s && !busy.has(handle)) checkpoint(s); else if (s) scheduleCheckpoint(handle); }, config.checkpointMs).unref());
+  pendingCk.set(handle, setTimeout(() => { pendingCk.delete(handle); const s = sessions.get(handle); if (s && !changing.has(handle)) checkpoint(s); else if (s) scheduleCheckpoint(handle); }, config.checkpointMs).unref());
 }
 /** At exit: every project in memory checkpointed, so the next start brings each handle back. */
 export function checkpointAll(): void { for (const s of sessions.values()) { clearTimeout(pendingCk.get(s.handle)); checkpoint(s); } }
@@ -465,7 +469,9 @@ export function change<T>(s: Session, caller: string, label: string, fn: (db: Db
 /** change for work that awaits between its steps (progress, cancellation): a cancelled or failed run leaves nothing. */
 export async function changeAsync<T>(s: Session, caller: string, label: string, fn: (db: Db) => Promise<T>): Promise<T> {
   let out!: T;
-  const j = await recordAsync(s.db, async (d) => { out = await fn(d); });
+  changing.add(s.handle);
+  let j: Awaited<ReturnType<typeof recordAsync>>;
+  try { j = await recordAsync(s.db, async (d) => { out = await fn(d); }); } finally { changing.delete(s.handle); }
   const after = new Map([...j.arrays.keys()].map((a) => [a, a.slice()]));
   s.history.push({ id: ++changeSeq, label, caller, j, after, at: Date.now() });
   if (s.history.length > 100) s.history.shift();

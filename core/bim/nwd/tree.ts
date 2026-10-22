@@ -57,7 +57,13 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: b
         const name = str(), a = attr(), flags = u32(), guidIndex = u32();
         const values = Array.from({ length: u32() }, value);
         const children = Array.from({ length: u32() }, value).filter((c): c is NwNode => !!c && typeof c === 'object' && 'kind' in c && ((c as NwNode).kind === 'node' || (c as NwNode).kind === 'leaf'));
-        if (cls === 0x20) { u32(); u32(); } // and two u32 after its children
+        // a file's node (0x20), after its children: a kind; 2 (a file read into it): its lights (each a value, class
+        // 0x1b), the ambient colour, its loader plugin and version, its view (6 doubles), its source file's path and its
+        // placement (7 doubles), two u32; else (the document itself) a u32
+        if (cls === 0x20) {
+          if (u32() >= 2) { const nl = u32(); for (let k = 0; k < nl; k++) value(); doubles(3); u32(); str(); u32(); u32(); u32(); doubles(6); u32(); str(); u32(); str(); doubles(7); u32(); u32(); }
+          else u32();
+        }
         return { kind: 'node', name, attr: a, flags, guidIndex, values, children } satisfies NwNode;
       }
       case 0x16: {
@@ -72,9 +78,58 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: b
       }
       // a hyperlink (Revit's URL parameter): two strings, two u32, its name and address, its attribute, a u32
       case 0x4f: { str(); str(); u32(); u32(); const name = str(), url = str(); const a = attr(); u32(); return { cls, name, url, attr: a } as Obj; }
+      // a material asset in binary (navisworks:431; newer files hold JSON, class 0xb9): its id, its schema ("Generic",
+      // "UnifiedBitmap"), then its properties: type, unit, name, a count, a u32, a flag and the asset connected to it (a
+      // value: a texture), then the value (10 text, 2 / 6 a u32, 8 a number, 4 a colour of 4 numbers, 15 a choice: the one chosen
+      // and the count's options, each an id and a label)
+      case 0xb6: {
+        const id = str(), schema = str();
+        for (let n = u32(), k = 0; k < n; k++) {
+          const t = u32(); u32(); str(); const count = u32(); u32(); if (u32()) value();
+          if (t === 10 || t === 12) { str(); } // text, a file path
+          else if (t === 2 || t === 6) u32();
+          else if (t === 8) f64();
+          else if (t === 4) doubles(4);
+          else if (t === 11) { /* a map: its value is the asset connected to it */ }
+          else if (t === 15) { u32(); for (let j = 0; j < count; j++) { u32(); str(); } }
+          else fail(`material asset property of type ${t}`);
+        }
+        value(); // its schema (class 0xb7)
+        // a 16-byte id, a u32, its thumbnail, its categories and its keywords (each a count and the strings), its name, its
+        // swatch and its description
+        if (p + 16 > buf.length) fail('cut short'); p += 16;
+        u32(); str(); for (let list = 0; list < 2; list++) for (let n = u32(), k = 0; k < n; k++) str(); const label = str(); str(); str();
+        return { cls, id, schema, label } as Obj;
+      }
+      case 0xb7: { const name = str(); str(); str(); value(); return { cls, name } as Obj; } // an asset schema: its name, kind, XML and the schema it extends
+      // a DWG material: its name, two u32, its groups (a name, its properties: a key, a type (3 a number, 7 a colour, 10 a
+      // file name and a u32) and the value; then its own groups), and a u32
+      case 0x61: {
+        const name = str(); u32(); u32();
+        const group = (depth: number): void => {
+          if (depth > 32) fail('material groups nested too deep');
+          str();
+          for (let n = u32(), k = 0; k < n; k++) { str(); const t = u32(); if (t === 3) f64(); else if (t === 7) doubles(3); else if (t === 10) { str(); u32(); } else fail(`material property of type ${t}`); }
+          for (let n = u32(), k = 0; k < n; k++) group(depth + 1);
+        };
+        for (let n = u32(), k = 0; k < n; k++) group(0);
+        u32();
+        return { cls, name } as Obj;
+      }
+      // a geometric property (a DWG entity's "arbitrary plane"): two strings, two u32, its name, then its parts (a name, a
+      // type: 8 a vector, 9 a point, each 3 doubles)
+      case 0x62: {
+        str(); str(); u32(); u32(); const name = str(), parts: Record<string, number[]> = {};
+        for (let n = u32(), k = 0; k < n; k++) { const key = str() ?? '', t = u32(); if (t !== 8 && t !== 9) fail(`geometric property part of type ${t}`); parts[key] = doubles(3); }
+        return { cls, name, parts } as Obj;
+      }
       case 0x1f: { const name = str(); attr(); u32(); return { cls, name, d: doubles(14) } as Obj; }
       case 0xc8: { const name = str(); u32(); u32(); return { cls, name, asset: value() } as Obj; }
-      case 0xb9: { const json = str(); str(); const n = u32(); for (let i = 0; i < n; i++) { str(); u32(); u32(); } return { cls, json } as Obj; }
+      case 0xb9: {
+        // a material asset: its JSON, then its texture files (path, a flag, and when the flag is set the image itself,
+        // embedded: a name, an extension, an aligned u64 length and the bytes)
+        const json = str(); str(); const n = u32();
+        for (let i = 0; i < n; i++) { str(); if (u32()) { str(); str(); p = (p + 7) & ~7; const len = Number(v.getBigUint64(p, true)); p += 8; if (p + len > buf.length) fail('an embedded texture past the end'); p = (p + len + 3) & ~3; } else u32(); } return { cls, json } as Obj; }
       case 0x42: { const name = str(), a = attr(); u32(); p = (p + 7) & ~7; const handle = v.getBigUint64(p, true); p += 8; return { cls, name, attr: a, handle } as Obj; }
       case 0x27: case 0x28: case 0x29: {
         str(); attr(); u32();
@@ -88,11 +143,12 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: b
         return { cls, radius, prim, flags, item, xform: value(), material: value(), box: value() } as Obj;
       }
       case 0x5d: { const bbox = floats(6); p = (p + 7) & ~7; const t = doubles(3); floats(1); u32(); return { cls, bbox, t, geom: u32() } as Obj; }
+      case 0x1b: { u32(); return { cls, light: doubles(13) } as Obj; } // a light: colour, direction...
       case 0x0e: return { cls, t: doubles(3) } as Obj;
       case 0x0f: { const d = doubles(7); return { cls, t: d.slice(0, 3), q: d.slice(3) } as Obj; }
       case 0x10: { const d = doubles(8); return { cls, t: d.slice(0, 3), q: d.slice(3, 7), s: d[7] } as Obj; } // and a uniform scale
       case 0x11: { const m = floats(13); p = (p + 7) & ~7; return { cls, m, t: doubles(3) } as Obj; }
-      case 0x37: { const x = u32(); const colour = value(); return { cls, colour, asset: x & 0x20 ? value() : null } as Obj; }
+      case 0x37: { const x = u32(); const colour = value(); const asset = x & 0x20 ? value() : null; if (asset && x & 0x40) u32(); return { cls, colour, asset } as Obj; }
       case 0x36: { const c = floats(13); u32(); return { cls, rgb: c.slice(3, 6) } as Obj; }
       default: return fail(`object class 0x${cls.toString(16)} this reader does not know`);
     }
@@ -125,6 +181,7 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: b
   const base = u32(), count = u32();
   nid = base + 1;
   const roots: NwNode[] = [];
-  for (let i = 0; i < count; i++) { const r = value(); if (r && typeof r === 'object' && 'kind' in r) roots.push(r as NwNode); }
+  // the count is an upper bound: a DWG drawing's tree (navisworks:431) ends with its first root's subtree and a null
+  for (let i = 0; i < count && p + 8 <= buf.length; i++) { const r = value(); if (r && typeof r === 'object' && 'kind' in r) roots.push(r as NwNode); }
   return { roots, objects: objs.size };
 }

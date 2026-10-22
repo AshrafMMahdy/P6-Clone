@@ -98,4 +98,7 @@ Decoded in `core/bim/nwd/timeliner.ts` (its header has the byte layouts). In sho
 ## Not read yet
 
 Lines and points (blocks 0x5f / 0x60), texture coordinates and normals (the viewer computes its own), search-set
-conditions, clash tests, point clouds, `lichunk-007` files.
+conditions, clash tests, point clouds, `lichunk-007` files. Read since: classes 0x4f (URL parameter), 0x10 (scaled
+placement), 0x20 (a file inside a file, with its lights 0x1b, loader, source path and placement), 0x61 (DWG material),
+0x62 (geometric property), 0xb6 / 0xb7 (binary material assets and their schemas, navisworks:431), embedded textures
+in 0xb9, colours per corner (0x3a) and long back-references one further in navisworks:431 meshes; see core/bim/nwd/tree.ts.

@@ -17,6 +17,9 @@ import { readImport4d } from '../core/bim/read4d.ts';
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
 const FIX = join(import.meta.dirname, 'fixtures', 'navisworks');
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
+/** A child server's environment with a temp folder of its own: its recovery folder (and what it adopts from earlier
+ *  runs, saved at exit beside their files) stays out of the shared one */
+const isolated = () => { const t = tmp('p6-child-'); return { ...process.env, TEMP: t, TMP: t, TMPDIR: t, P6CLONE_MAX_HANDLES: undefined }; };
 
 test('N-37-1: every 4D export of an .nwc model carries the IFC4 it was made into', { timeout: 120_000 }, async () => {
   const o = (await call('open_model', { path: join(FIX, 'hello.nwc') })).d;
@@ -90,7 +93,7 @@ test('a file that is no 4D file is refused, not read as an empty TimeLiner CSV',
 test('stdio: every reply is written before the process stops at the end of stdin', { timeout: 120_000 }, () => {
   const lines = [JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: {} })];
   for (let i = 1; i <= 200; i++) lines.push(JSON.stringify({ jsonrpc: '2.0', id: i, method: 'tools/call', params: { name: 'server_status', arguments: {} } }));
-  const r = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'mcp', 'server.ts')], { input: lines.join('\n') + '\n', encoding: 'utf8', maxBuffer: 256 * 1048576, env: { ...process.env, P6CLONE_MAX_HANDLES: undefined } });
+  const r = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'mcp', 'server.ts')], { input: lines.join('\n') + '\n', encoding: 'utf8', maxBuffer: 256 * 1048576, env: isolated() });
   const ids = new Set(r.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).id));
   assert.equal(ids.size, 201, r.stderr.slice(-500));
 });
@@ -148,4 +151,61 @@ test('activity_table of: assignments / codes pages every resource and code assig
   assert.deepEqual(a.rows[0].slice(1, 3), ['A1', 'CREW']);
   const c = (await call('activity_table', { handle: p.handle, of: 'codes', offset: 3 })).d;
   assert.deepEqual([c.total, c.rows.length, c.next_offset, c.rows[0].slice(1, 5)], [5, 2, null, ['A4', 'Zone', 'N', 'North']]);
+});
+
+test('stdio: server_status answers within seconds while a long step holds the main thread', { timeout: 120_000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'mcp', 'server.ts')], { stdio: ['pipe', 'pipe', 'ignore'], env: isolated() });
+  const got = new Map<number, number>(), body = new Map<number, any>(); let buf = '';
+  child.stdout.on('data', (d) => { buf += d; for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) { const l = buf.slice(0, i); buf = buf.slice(i + 1); try { const m = JSON.parse(l); if (typeof m.id === 'number') { got.set(m.id, Date.now()); body.set(m.id, m); } } catch { /* not a reply */ } } });
+  const send = (m: object) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
+  send({ id: 0, method: 'initialize', params: {} });
+  send({ id: 2, method: 'tools/call', params: { name: 'server_status', arguments: {} } }); // the server is up
+  for (let i = 0; i < 600 && !got.has(2); i++) await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 3000)); // its state has been posted to the front (every second)
+  // a long synchronous step: computing a schedule of 60,000 chained activities
+  const activities = Array.from({ length: 60000 }, (_, i) => ({ id: `A${i}`, duration_days: 1, ...(i ? { predecessors: [{ id: `A${i - 1}` }] } : {}) }));
+  const t0 = Date.now();
+  send({ id: 3, method: 'tools/call', params: { name: 'compute_schedule', arguments: { start: '2026-03-02', activities } } });
+  await new Promise((r) => setTimeout(r, 300));
+  const asked = Date.now();
+  send({ id: 4, method: 'tools/call', params: { name: 'server_status', arguments: {} } });
+  for (let i = 0; i < 200 && !got.has(4); i++) await new Promise((r) => setTimeout(r, 50));
+  child.kill();
+  assert.ok(got.has(4) && got.get(4)! - asked < 3000, `server_status answered after ${got.has(4) ? got.get(4)! - asked : 'never'} ms`);
+  // answered by the front while the long call held the main thread (busy), or by the main thread before it began
+  const st = body.get(4)?.result?.structuredContent;
+  assert.ok(st && (st.busy === true || !got.has(3) || got.get(3)! > got.get(4)!), String(JSON.stringify(body.get(4) ?? null)).slice(0, 400));
+  assert.ok(got.has(4) && got.get(4)! - asked < 3000, `server_status answered after ${got.has(4) ? got.get(4)! - asked : 'never'} ms (the long call ran ${got.has(3) ? got.get(3)! - t0 : '?'} ms)`);
+});
+
+test('a project busy with a long call is checkpointed; one with a change in progress waits for the change to end', { timeout: 60_000 }, async () => {
+  const { config, exclusive, scheduleCheckpoint, changeAsync } = await import('../mcp/runtime.ts');
+  const { readdirSync } = await import('node:fs');
+  const files = (h: string) => { const out: string[] = []; const walk = (d: string) => { for (const e of readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) walk(join(d, e.name)); else if (e.name.startsWith(h)) out.push(e.name); } }; walk(join(tmpdir(), '.p6clone-recovery')); return out; };
+  const was = config.checkpointMs; config.checkpointMs = 30;
+  try {
+    const p = (await call('new_project', { id: 'CKB', start: '2026-03-02' })).d;
+    await exclusive(p.handle, async () => { // a long call holds the project
+      scheduleCheckpoint(p.handle);
+      await new Promise((r) => setTimeout(r, 200));
+      assert.ok(files(p.handle).length, 'checkpointed while busy');
+    });
+    const q = (await call('new_project', { id: 'CKC', start: '2026-03-02' })).d;
+    await changeAsync(sessions.get(q.handle)!, 'test', 'slow change', async () => {
+      scheduleCheckpoint(q.handle);
+      await new Promise((r) => setTimeout(r, 200));
+      assert.equal(files(q.handle).length, 0, 'not while the change is half-way');
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.ok(files(q.handle).length, 'checkpointed once the change ended');
+  } finally { config.checkpointMs = was; }
+});
+
+const FORGE = join(import.meta.dirname, '..', 'sample 4D', 'navisworks-models', 'autodesk-forge-samples');
+test('N-37-6: a federated NWD (files in files with their lights, embedded textures) and a 2015 DWG drawing (binary material assets, DWG materials, its older meshes) read whole', { skip: !existsSync(join(FORGE, 'Chair.nwd')) && 'the samples are not here', timeout: 300_000 }, () => {
+  const t = readNavisworks(join(FORGE, 'test.nwd'));
+  assert.deepEqual([t.elements.length, t.source.geometry.elements_with_boxes], [1640, 1]);
+  const c = readNavisworks(join(FORGE, 'Chair.nwd'));
+  assert.deepEqual([c.elements.length, c.source.geometry.elements_with_meshes, c.source.geometry.elements_with_boxes], [10, 6, 0]);
 });

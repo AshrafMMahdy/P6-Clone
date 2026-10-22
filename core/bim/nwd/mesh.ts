@@ -34,6 +34,11 @@ export function geometryBlocks(b: Uint8Array): { offset: number; length: number 
 
 /** One geometry block as a mesh in its own frame, or null when it holds lines or points. Throws on what it cannot read. */
 export function decodeBlock(b: Uint8Array, offset: number, length: number): Mesh | null {
+  // older files (navisworks:431, a DWG drawing) count a long reference one further back ("e0 00" is the value one back)
+  try { return decodeWith(b, offset, length, 0); } catch (e) { try { return decodeWith(b, offset, length, 1); } catch { throw e; } }
+}
+
+function decodeWith(b: Uint8Array, offset: number, length: number, longBack: number): Mesh | null {
   const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const end = offset + length;
   let p = offset;
@@ -50,7 +55,7 @@ export function decodeBlock(b: Uint8Array, offset: number, length: number): Mesh
       else if (op < 0x80) back(op - 0x40);
       else if (op < 0xc0) { if (!n) fail('a repeat with nothing before'); for (let k = 0; k <= op - 0x80 && n < corners; k++) { out[n] = out[n - 1]; n++; } }
       else if (op < 0xe0) out[n++] = -1; // a predefined value (an axis normal)
-      else if (op < 0xf0) { const d = ((op & 15) << 8) | b[p++]; back(d); }
+      else if (op < 0xf0) { const d = (((op & 15) << 8) | b[p++]) + longBack; back(d); }
       else if (op === 0xf0) { out[n++] = v.getUint16(p, true); p += 2; }
       else fail(`index op 0x${op.toString(16)}`);
     }
@@ -84,10 +89,15 @@ export function decodeBlock(b: Uint8Array, offset: number, length: number): Mesh
           if (nn !== corners) code(corners);
           let q = p; while (v.getUint32(q, true) === 0) q += 4;
           const n1 = v.getUint32(q, true), bits = v.getUint32(q + 4, true), n2 = v.getUint32(q + 8, true);
-          if (n1 === n2 && bits > 0 && bits <= 32) { read = true; break; }
+          if ((n1 === n2 && bits > 0 && bits <= 32) || n1 === nid) { read = true; break; } // the strips, or another attribute
         } catch { /* the other size */ }
       }
       if (!read) fail('normals');
+    } else if (cls === 0x3a) {
+      // colours per corner (older files): a u32, -corners, a count, 4 bytes each, then an index code unless one per corner
+      u32(); const corners = -v.getInt32(p, true); p += 4;
+      const nc = u32(); if (p + 4 * nc > end) fail('colours past the block'); p += 4 * nc;
+      if (nc !== corners) code(corners);
     } else fail(`attribute class 0x${cls.toString(16)}`);
   }
   if (!positions || !pIdx) return fail('no positions');

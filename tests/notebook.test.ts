@@ -203,3 +203,4 @@ test('clear_descriptions blanks every description, notes and memo text (roles, c
   assert.deepEqual(ok(db, [{ op: 'clear_descriptions' }]), [{ cleared: { ROLES: 1, ACCOUNT: 1 } }]);
   assert.deepEqual([rows(db, 'ROLES')[0].role_descr, rows(db, 'ACCOUNT')[0].acct_descr, rows(db, 'ROLES')[0].role_name], ['', '', 'Engineer']);
 });
+
