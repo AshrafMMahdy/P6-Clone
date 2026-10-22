@@ -23,6 +23,15 @@ const call = async (name, args) => {
   const r = await rpc('tools/call', { name, arguments: args });
   const out = r.result?.structuredContent ?? (r.result?.content?.[0]?.text ? JSON.parse(r.result.content[0].text) : undefined);
   if (r.error || r.result?.isError) failures.push(`${name}: ${JSON.stringify(r.error ?? out).slice(0, 300)}`);
+  // a call still working after the soft timeout goes on as a job (a slow runner, a video): its result is the job's
+  if (out?.job_id && out.status === 'running' && name !== 'job_status' && name !== 'cancel_job') {
+    for (const t0 = Date.now(); Date.now() - t0 < 10 * 60_000;) {
+      const j = await call('job_status', { job_id: out.job_id, wait_seconds: 20 });
+      if (j.status === 'done') return j.result ?? {};
+      if (j.status !== 'running') { failures.push(`${name} (as a job): ${JSON.stringify(j).slice(0, 300)}`); return {}; }
+    }
+    failures.push(`${name}: still running after 10 minutes`);
+  }
   return out ?? {};
 };
 
