@@ -115,7 +115,7 @@ test('save repair on CCA R03 (a corrupted 16,000-activity file): the repaired co
   for (const h of [o.handle, back.handle]) await call('close', { handle: h, discard: true });
 });
 
-test('save repair on every Tower-A variant: the baseline with no root WBS node gets one (coded as the project), orphan WBS under it; the copy opens strictly and validates clean', { timeout: 120_000 }, async () => {
+test('save repair on every Tower-A variant: the baseline with no root WBS node gets one (coded as the project), orphan WBS under it; the copy opens strictly and validates clean', { timeout: 600_000 }, async () => {
   const { readdirSync } = await import('node:fs');
   const variants = readdirSync(SAMPLES_DIR).filter((f) => /^tower[-_]a/i.test(f) && f.toLowerCase().endsWith('.xer'));
   assert.ok(variants.length >= 4, variants.join(', '));

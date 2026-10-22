@@ -35,7 +35,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = ['add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
+export const EXTRA_OP_NAMES = ['clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
 
 export const EXTRA_GUIDE = [
   `update_resource_curve: name, new_name`,
@@ -52,6 +52,7 @@ export const EXTRA_GUIDE = [
   `set_notebook: [activity] | project, topic, text (text "" removes the topic; answer removed: true/false; the topic itself stays). activity (+[project]): its activity notebook; project alone: the project's notebook (P6's WBSMEMO on the project's root WBS node). topic default "Notes", created when missing, else reused`,
   `set_notebook, more targets: wbs (+[project]): that WBS element's notebook; topic "*" with text "": every notebook of the activity, WBS element or project, whatever its topic (one whose topic the file no longer lists too; answer removed: how many); in_baseline: true with project = a baseline's name: the baseline's notebooks`,
   `clear_notebooks: [project], [baselines] (default true): every notebook of the project in one step (activity notebooks; WBS and project notebooks, which hold the EPS notebooks P6 writes into an XER; any topic, one the file no longer lists too), and of its baselines; without project, of every project and baseline in the file. Answers how many went`,
+  `clear_descriptions: [tables] (default every table): blanks every description, notes and memo text in the file, the ones no other op reaches too (ROLES role_descr, ACCOUNT acct_descr, RSRC rsrc_notes, step and expense descriptions...): every field named *_descr, *_notes or *memo*; names, codes and notebooks (clear_notebooks) stay. Answers what was cleared per table`,
   `add_cost_account: id, [name], [parent]; update_cost_account: id, [new_id], [name]`,
   `add_expense: activity, name, [account], [budgeted_cost], [actual_cost], [remaining_cost] (default budgeted - actual), [units], [price_per_unit], [vendor], [po_number], [description], [project]`,
   `update_expense: activity, name, then any add_expense field plus [new_name]; delete_expense: activity, name; delete_expenses: [project], [activity] (+[project]): every expense of the project, or of that one activity, in one step`,
@@ -369,6 +370,20 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       if (cur) cur.task_memo = memoHtml(text);
       else TM.rows.push({ memo_id: String(nextId(db, 'TASKMEMO')), task_id: t.task_id, memo_type_id: mt.memo_type_id, proj_id: t.proj_id, task_memo: memoHtml(text) });
       return { notebook: `${t.task_code} / ${topic}` };
+    }
+    case 'clear_descriptions': {
+      // file-wide: roles, cost accounts and resources are shared by its projects (anonymising a copy of the file)
+      const only = Array.isArray(op.tables) ? new Set(op.tables.map((t: unknown) => String(t).toUpperCase())) : null;
+      const cleared: Record<string, number> = {};
+      for (const [name, t] of Object.entries(db.tables)) {
+        if (only && !only.has(name) || /MEMO$/.test(name)) continue; // notebooks: clear_notebooks
+        const fields = [...new Set([...(t.fields ?? []), ...Object.keys(t.rows[0] ?? {})])].filter((f) => /(_descr|_notes|memo)$/i.test(f) || /^memo/i.test(f));
+        if (!fields.length) continue;
+        let n = 0;
+        for (const r of rows(db, name)) for (const f of fields) if (r[f] != null && r[f] !== '') { r[f] = ''; n++; } // through the edit's view: undoable
+        if (n) cleared[name] = n;
+      }
+      return { cleared };
     }
     case 'clear_notebooks': {
       // every notebook a project carries: its activities' (TASKMEMO), its WBS elements' and its own (WBSMEMO: P6 writes

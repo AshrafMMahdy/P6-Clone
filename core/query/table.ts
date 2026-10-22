@@ -40,3 +40,30 @@ export function activityTable(db: Db, projIds: string[] | null, opts: { offset?:
   const end = offset + out.length;
   return { columns, rows: out, total: all.length, offset, next_offset: end < all.length ? end : null };
 }
+
+/** Resource assignments (TASKRSRC) or activity code assignments (TASKACTV) of the projects as one compact table, paged
+ *  like activityTable: what an agent reads to see the whole schedule's resources or codes without one call per activity. */
+export function linkTable(db: Db, projIds: string[] | null, of: 'assignments' | 'codes', opts: { offset?: number; limit?: number; hoursPerDay?: number } = {}): ActivityTable {
+  const want = projIds ? new Set(projIds) : null, hpd = opts.hoursPerDay ?? 8;
+  const task = new Map(rows(db, 'TASK').map((t) => [t.task_id, t]));
+  const proj = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
+  const baseline = new Set(rows(db, 'PROJECT').filter((p) => p._baseline_of).map((p) => p.proj_id));
+  const mine = (r: Row) => { const t = task.get(r.task_id); return !!t && (!want || want.has(t.proj_id)) && !baseline.has(t.proj_id); };
+  let columns: string[], make: (r: Row) => unknown[], all: Row[];
+  if (of === 'assignments') {
+    const rsrc = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_short_name])), role = new Map(rows(db, 'ROLES').map((r) => [r.role_id, r.role_short_name]));
+    const n = (v: unknown) => (v === '' || v == null ? null : r2(Number(v)));
+    columns = ['project', 'activity', 'resource', 'role', 'budgeted_units', 'remaining_units', 'actual_units', 'units_per_day', 'budgeted_cost', 'remaining_cost', 'actual_cost'];
+    make = (r) => { const t = task.get(r.task_id)!; return [proj.get(t.proj_id), t.task_code, rsrc.get(r.rsrc_id) ?? null, role.get(r.role_id) ?? null, n(r.target_qty), n(r.remain_qty), n(Number(r.act_reg_qty || 0) + Number(r.act_ot_qty || 0)), r.target_qty_per_hr === '' || r.target_qty_per_hr == null ? null : r2(Number(r.target_qty_per_hr) * hpd), n(r.target_cost), n(r.remain_cost), n(Number(r.act_reg_cost || 0) + Number(r.act_ot_cost || 0))]; };
+    all = rows(db, 'TASKRSRC').filter(mine);
+  } else {
+    const type = new Map(rows(db, 'ACTVTYPE').map((t) => [t.actv_code_type_id, t.actv_code_type])), value = new Map(rows(db, 'ACTVCODE').map((v) => [v.actv_code_id, v]));
+    columns = ['project', 'activity', 'code_type', 'code', 'description'];
+    make = (r) => { const t = task.get(r.task_id)!, v = value.get(r.actv_code_id); return [proj.get(t.proj_id), t.task_code, type.get(r.actv_code_type_id) ?? null, v?.short_name ?? null, v?.actv_code_name ?? null]; };
+    all = rows(db, 'TASKACTV').filter(mine);
+  }
+  const offset = Math.max(0, Math.floor(opts.offset ?? 0));
+  const page = opts.limit == null ? all.slice(offset) : all.slice(offset, offset + Math.max(0, Math.floor(opts.limit)));
+  const end = offset + page.length;
+  return { columns, rows: page.map(make), total: all.length, offset, next_offset: end < all.length ? end : null };
+}

@@ -350,6 +350,23 @@ function scheduleOrThrow(db: Db, projIds: string[], over: Partial<SchedOptions>)
   return res;
 }
 
+/** Each iteration's schedule is garbage once its finishes are kept, and V8 collects it only near its heap limit, which
+ *  a host may set above the memory it really has (80,000 activities: 2.2 GB at 200 iterations, killed at 1,000). In
+ *  Node, a full collection whenever 256 MB more is in use than after the last one keeps the run near what it holds. */
+const gcNow: (() => void) | null = (() => {
+  const getB = (globalThis as { process?: { getBuiltinModule?: (m: string) => any } }).process?.getBuiltinModule;
+  if (!getB) return null; // the desktop's renderer
+  try { getB('v8').setFlagsFromString('--expose-gc'); return getB('vm').runInNewContext('gc') as () => void; } catch { return null; }
+})();
+let gcBase = 0;
+function collectGarbage(): void {
+  if (!gcNow) return;
+  const used = (globalThis as any).process.memoryUsage().heapUsed as number;
+  if (used - gcBase < 256 * 1048576) return;
+  gcNow();
+  gcBase = (globalThis as any).process.memoryUsage().heapUsed;
+}
+
 export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloOptions): Promise<MonteCarloResult> {
   const t0 = Date.now();
   const iterations = Math.max(1, Math.floor(opts.iterations));
@@ -445,7 +462,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
       if (!t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null && Number(t.total_float_hr_cnt) <= 0 && !isSummary(t)) critCount[k]++;
     }
     opts.onProgress?.(it + 1);
-    if (it + 1 < iterations && ((it + 1) % yieldEvery === 0 || Date.now() - lastYield >= 200)) { await yieldNow(); lastYield = Date.now(); }
+    if (it + 1 < iterations && ((it + 1) % yieldEvery === 0 || Date.now() - lastYield >= 200)) { collectGarbage(); await yieldNow(); lastYield = Date.now(); }
   }
 
   // Finish distribution

@@ -43,7 +43,17 @@ const indexBytes = (index: IfcIndex) => {
 // an element rvt-rs could only place as a box (its bounding box, or a turned or oriented box of a family instance) has
 // no volume worth a quantity (a 2023 project: doors 22x, railings 700x Revit's own IFC; walls drawn from their profile
 // within 1%): placed and counted, never measured
-const boxOnly = (e: IfcElement) => /box/i.test(String(e.props['RvtElementRecordGeometry.BodySource'] ?? '')) || e.props['P6Clone.Geometry'] === 'bounding boxes';
+// A wall rvt-rs drew as an axis-aligned box thicker than any wall (both horizontal sides over 1.2 m) is the bounding box
+// of a wall it could not shape (skewed or curved; rac_basic 2023: 446.6 m3 for one wall), whatever its body source says;
+// a straight wall along an axis is a box too, but a thin one
+const boxedWall = (e: IfcElement) => {
+  const g = e.geom;
+  if (!g || g.triangles !== 12 || !/^IfcWall/i.test(e.ifcClass) || e.props['RvtElementRecordGeometry.BodySource'] == null) return false;
+  const [x0, y0, z0, x1, y1, z1] = g.bbox, box = (x1 - x0) * (y1 - y0) * (z1 - z0);
+  const sides = [x1 - x0, y1 - y0, z1 - z0].sort((a, b) => a - b); // the height is not the thin side of a wall
+  return Math.abs(g.volume - box) <= 0.01 * box && sides[0] > 1.2 && sides[1] > 1.2;
+};
+const boxOnly = (e: IfcElement) => /box/i.test(String(e.props['RvtElementRecordGeometry.BodySource'] ?? '')) || e.props['P6Clone.Geometry'] === 'bounding boxes' || boxedWall(e);
 const wrap = (hash: string, index: IfcIndex, tiles: string | null): Model => {
   for (const e of index.elements) if (boxOnly(e)) noVolume(e);
   return { hash, index, tiles: index.geometryStatus === 'ok' && tiles && readManifest(tiles) ? tiles : null, byGuid: elementsByGuid(index), bytes: indexBytes(index) };

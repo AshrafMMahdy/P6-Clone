@@ -194,3 +194,12 @@ test('update_baseline renames a baseline; in_baseline renames its activities, WB
   assert.match(bad({ op: 'update_code_value', in_baseline: true, project: 'P1 - B1', type: 'Zone', code: 'N', name: 'x' }), /No code type "Zone" of the baseline/);
   assert.ok(rows(db, 'ACTVTYPE').some((t) => t.actv_code_type === 'Zone'));
 });
+
+test('clear_descriptions blanks every description, notes and memo text (roles, cost accounts, resources...) and undoes', () => {
+  const db: Db = { tables: {} };
+  ok(db, [{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_role', id: 'ENG', name: 'Engineer' }, { op: 'add_cost_account', id: 'CA1', name: 'Labour' }]);
+  rows(db, 'ROLES')[0].role_descr = 'Secret role text';
+  rows(db, 'ACCOUNT')[0].acct_descr = 'Secret account text';
+  assert.deepEqual(ok(db, [{ op: 'clear_descriptions' }]), [{ cleared: { ROLES: 1, ACCOUNT: 1 } }]);
+  assert.deepEqual([rows(db, 'ROLES')[0].role_descr, rows(db, 'ACCOUNT')[0].acct_descr, rows(db, 'ROLES')[0].role_name], ['', '', 'Engineer']);
+});

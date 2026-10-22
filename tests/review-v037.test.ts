@@ -137,3 +137,15 @@ test('N-37-1: every 4D export of an .rvt model carries the IFC4 it was made into
   }
   await call('close', { ...H, discard: true });
 });
+
+test('activity_table of: assignments / codes pages every resource and code assignment', async () => {
+  const p = (await call('new_project', { id: 'PG', start: '2026-03-02' })).d, H = { handle: p.handle, owner_key: p.owner_key };
+  const ops: any[] = [{ op: 'add_resource', id: 'CREW', name: 'Crew' }, { op: 'add_code_type', name: 'Zone' }, { op: 'add_code_value', type: 'Zone', code: 'N', name: 'North' }];
+  for (let i = 1; i <= 5; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 2 }, { op: 'assign_resource', activity: `A${i}`, resource: 'CREW', units: 8 * i }, { op: 'assign_code', activity: `A${i}`, type: 'Zone', value: 'N' });
+  assert.equal((await call('edit', { ...H, operations: ops })).err, false);
+  const a = (await call('activity_table', { handle: p.handle, of: 'assignments', limit: 3 })).d;
+  assert.deepEqual([a.total, a.rows.length, a.next_offset, a.columns.slice(0, 3)], [5, 3, 3, ['project', 'activity', 'resource']]);
+  assert.deepEqual(a.rows[0].slice(1, 3), ['A1', 'CREW']);
+  const c = (await call('activity_table', { handle: p.handle, of: 'codes', offset: 3 })).d;
+  assert.deepEqual([c.total, c.rows.length, c.next_offset, c.rows[0].slice(1, 5)], [5, 2, null, ['A4', 'Zone', 'N', 'North']]);
+});

@@ -14,7 +14,7 @@ import { elementShapes } from './nwd/geometry.ts';
 import { decodeBlock, geometryBlocks, type Mesh } from './nwd/mesh.ts';
 import { decodePathMap, decodeSets, decodeTimeliner, type NwPathComponent, type NwTask } from './nwd/timeliner.ts';
 
-const NWD_FORMAT = 5; // the conversion: any change to the reader bumps it (2: the Revit data in LcOaPartitionProps; 3: placed boxes; 4-5: meshes), so old conversions are not reused
+const NWD_FORMAT = 6; // the conversion: any change to the reader bumps it (2: the Revit data in LcOaPartitionProps; 3: placed boxes; 4-5: meshes; 6: classes 0x4f, 0x10, 0x20), so old conversions are not reused
 const HEAD = '#LcUStream';
 
 export function isNavisworks(path: string): boolean {

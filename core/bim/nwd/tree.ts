@@ -51,10 +51,13 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: b
   function body(cls: number): unknown {
     switch (cls) {
       case 0x34: return { display: str(), internal: str() } satisfies NwAttr;
+      case 0x20: // a node led by a u32 (a file's partition in newer files), then as 0x35
       case 0x35: {
+        if (cls === 0x20) u32();
         const name = str(), a = attr(), flags = u32(), guidIndex = u32();
         const values = Array.from({ length: u32() }, value);
         const children = Array.from({ length: u32() }, value).filter((c): c is NwNode => !!c && typeof c === 'object' && 'kind' in c && ((c as NwNode).kind === 'node' || (c as NwNode).kind === 'leaf'));
+        if (cls === 0x20) { u32(); u32(); } // and two u32 after its children
         return { kind: 'node', name, attr: a, flags, guidIndex, values, children } satisfies NwNode;
       }
       case 0x16: {
