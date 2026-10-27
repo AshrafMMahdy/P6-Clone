@@ -234,3 +234,18 @@ test('the gatehouse NWD’s TimeLiner: two tasks with explicit selections (tree 
   assert.match(JSON.stringify((await call('element_info', { handle: o.d.handle, guids: el.map((e: any) => e.guid) })).d), /S_STEEL_COLUMNS_G10/);
   await call('close', { handle: o.d.handle, owner_key: o.d.owner_key, discard: true });
 });
+
+test('the Navisworks reader’s heap follows the memory budget (plus headroom), never more than half the machine or 16 GB, never under 1 GB', async () => {
+  const { nwdHeapMb } = await import('../core/bim/nwd.ts');
+  const GB = 1024 * 1048576;
+  assert.equal(nwdHeapMb(3072, 64 * GB), 3072 + 512, 'a big machine: the budget and its headroom, not half the RAM');
+  assert.equal(nwdHeapMb(8192, 64 * GB), 8192 + 512);
+  assert.equal(nwdHeapMb(100000, 256 * GB), 16384, 'the 16 GB ceiling');
+  assert.equal(nwdHeapMb(8192, 8 * GB), 4096, 'a small machine: half its memory');
+  assert.equal(nwdHeapMb(256, 64 * GB), 1024, 'the floor');
+  const was = process.env.P6CLONE_MEM_BUDGET_MB;
+  try {
+    process.env.P6CLONE_MEM_BUDGET_MB = '2048'; assert.equal(nwdHeapMb(undefined, 64 * GB), 2048 + 512);
+    delete process.env.P6CLONE_MEM_BUDGET_MB; assert.equal(nwdHeapMb(undefined, 64 * GB), 3072 + 512, 'unset: the server’s default budget');
+  } finally { if (was === undefined) delete process.env.P6CLONE_MEM_BUDGET_MB; else process.env.P6CLONE_MEM_BUDGET_MB = was; }
+});

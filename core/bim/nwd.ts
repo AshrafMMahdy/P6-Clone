@@ -168,6 +168,16 @@ export async function nwdToIfc(path: string): Promise<{ ifc: string; source: Nav
   return { ifc: `${base}.ifc`, source: JSON.parse(readFileSync(`${base}.json`, 'utf8')) };
 }
 
+/** The reader's heap (MB): it holds a model tree as objects, and what it takes is reserved out of the clone's memory budget
+ *  (P6CLONE_MEM_BUDGET_MB, 3072 when unset: the server's own default), so its heap follows that budget plus headroom for the
+ *  runtime itself, as the server's does; never
+ *  more than half the machine's memory (at most 16 GB), nor less than 1 GB. */
+export function nwdHeapMb(budgetMb: number = Number(process.env.P6CLONE_MEM_BUDGET_MB) || 3072, ramBytes: number = totalmem()): number {
+  const budget = Math.ceil(budgetMb) + NW_HEAP_HEADROOM_MB;
+  return Math.max(1024, Math.min(16384, Math.floor((ramBytes / 1048576) * 0.5), budget));
+}
+const NW_HEAP_HEADROOM_MB = 512;
+
 /** Run a read in the reader's own process (in this one when it is not there); its progress reported, its failure thrown. */
 async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<NavisworksSource> {
   const worker = nwdWorkerPath();
@@ -175,8 +185,7 @@ async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<Naviswo
   const jobFile = join(tmpdir(), `p6clone-nwjob-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.json`);
   writeFileSync(jobFile, JSON.stringify(job));
   try {
-    // the reader holds a model tree as objects: its heap may take half the machine's memory (at most 16 GB)
-    const heap = Math.max(1024, Math.min(16384, Math.floor((totalmem() / 1048576) * 0.5)));
+    const heap = nwdHeapMb();
     const err = await new Promise<string | null>((done) => {
       const child = spawn(process.execPath, [`--max-old-space-size=${heap}`, worker, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
       let text = '', out = '';
