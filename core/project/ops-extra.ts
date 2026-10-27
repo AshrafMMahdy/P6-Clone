@@ -35,7 +35,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = ['clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
+export const EXTRA_OP_NAMES = ['clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
 
 export const EXTRA_GUIDE = [
   `update_resource_curve: name, new_name`,
@@ -63,6 +63,7 @@ export const EXTRA_GUIDE = [
   `delete_baseline: baseline; restore_baseline: baseline (turns it back into a normal project); update_baseline: baseline, [new_name] (its Project ID, and its root WBS code), [name] (its project name, the root WBS name). A baseline's activities and WBS elements are renamed with update_activity / update_wbs and in_baseline: true, project = the baseline`,
   `add_eps / update_eps / delete_eps: id, [name], [parent], [new_id]; projects are put under an EPS with set_project eps`,
   `add_obs / update_obs / delete_obs: name, [parent], [new_name], [description] (update_obs; "" clears it); add_role / update_role / delete_role: id, [name], [parent], [new_id]`,
+  `update_pobs: [pobs_id] or [name], [new_name], [description] ("" clears it), [manager] ("" clears it): a row of the performing organisations (POBS, the file's Performing Organization table: pobs_name, pobs_descr, pobs_manager), which add_obs / update_obs do not reach (they edit the OBS). Needs a pobs_id or the row's name (several rows with that name: use pobs_id; list_dictionaries only: pobs lists them); the root row can be renamed but keeps its place (no parent) and a name. clear_descriptions blanks every pobs_descr too`,
   `update_calendar: name, [new_name], [work_week] (days given replace those days), [holidays [dates]] (non-work), [work_exceptions {date: periods}], [remove_exceptions [dates]]`,
   `update_assignment: activity, resource, [units], [units_per_day], [remaining_units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (kept as entered), [curve] (resource curve name; "" = linear), [project]`,
   `update_resource: id, [new_id] (a new Resource ID), [name], [max_units_per_day] or [max_units_per_hour] (Max Units / Time on every rate row of the resource, read by level_resources and optimize_schedule)`,
@@ -534,6 +535,29 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       if (kind === 'obs' && op.description !== undefined) { addField(table(db, 'OBS'), 'obs_descr'); r.obs_descr = op.description == null ? '' : String(op.description); }
       if (kind === 'role') copies(db, 'ROLES', 'role_id', 'role_short_name', 'role_name', r);
       return { [kind]: r[T.key] };
+    }
+    case 'update_pobs': {
+      // the performing organisations (POBS): a dictionary P6 writes whole into every project export, apart from the OBS
+      const T = table(db, 'POBS');
+      const all = rows(db, 'POBS');
+      const key = op.pobs_id != null && op.pobs_id !== '' ? String(op.pobs_id).trim() : null;
+      let r: Row;
+      if (key != null) r = all.find((x) => x.pobs_id === key) ?? fail(`No POBS row with pobs_id "${key}".`);
+      else {
+        const name = str(op.name, 'name (or pobs_id)');
+        const hits = all.filter((x) => lc(x.pobs_name) === lc(name));
+        if (hits.length > 1) fail(`${hits.length} POBS rows are named "${name}"; give pobs_id (${hits.map((x) => x.pobs_id).join(', ')}).`);
+        r = hits[0] ?? fail(`No POBS row "${name}".`);
+      }
+      const was = r.pobs_name;
+      if (op.new_name != null) {
+        const n = str(op.new_name, 'new_name');
+        if (all.some((x) => x.pobs_id !== r.pobs_id && lc(x.pobs_name) === lc(n))) fail(`POBS "${n}" already exists.`);
+        r.pobs_name = n;
+      }
+      if (op.description !== undefined) { addField(T, 'pobs_descr'); r.pobs_descr = op.description == null ? '' : String(op.description); }
+      if (op.manager !== undefined) { addField(T, 'pobs_manager'); r.pobs_manager = op.manager == null ? '' : String(op.manager); }
+      return { pobs: r.pobs_name, pobs_id: r.pobs_id, was };
     }
     case 'delete_eps': case 'delete_obs': case 'delete_role': {
       const kind = op.op.slice(7) as keyof typeof TREES;

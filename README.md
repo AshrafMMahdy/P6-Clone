@@ -182,6 +182,7 @@ its lookups all count every day at the hours per day of Edit > User Preferences.
 | `update_baseline` | `baseline, new_name?, name?`: renames a baseline (its Project ID and root WBS code; `name`: its project name, the root WBS name). Its own activities, WBS elements, project code types and notebooks are renamed with `update_activity` / `update_wbs` / `update_code_type` / `update_code_value` / `set_notebook` and `in_baseline: true`, `project` = the baseline (renames only: any other field is refused) |
 | `build_baseline` | `project?, name?, assign_as?` (default `project`), `activities: [{activity, start?, finish?, duration_days?, cost?}]`: a baseline copy whose listed activities carry the given baseline values. XER keeps baselines the way P6 does: a PROJECT row whose `orig_proj_id` names its project, and the project's `sum_base_proj_id` |
 | `add_eps`/`update_eps`/`delete_eps`, `add_obs`/…, `add_role`/… | `id` (OBS: `name`), `name?, parent?, new_id?` (OBS: `new_name?`, `description?`, `""` clears it); `set_project eps` files a project under an EPS node |
+| `update_pobs` | `pobs_id` or `name`, `new_name?`, `description?`, `manager?` (`""` clears either): a performing organisation (POBS: `pobs_name`, `pobs_descr`, `pobs_manager`), which `update_obs` does not reach; the root row can be renamed, never loses its place. `list_dictionaries {only: "pobs"}` lists the rows; `clear_descriptions` blanks every `pobs_descr` |
 | `update_calendar` | `name, new_name?, work_week?, holidays?, work_exceptions?, remove_exceptions?` |
 
 #### Anonymising a copy (recipe)
@@ -200,6 +201,7 @@ name, notebook text and GUID.
    its own project code types and values (`update_code_type`, `update_code_value`). A baseline's names are otherwise
    left as they were: renaming the project does not rename its baselines.
 5. `update_resource`, `update_code_type` / `update_code_value` (children first), `update_calendar`, `update_obs`,
+   `update_pobs` (every performing-organisation row: name, description, manager; files such as JWM carry names there; `clear_descriptions {}` blanks every description, `pobs_descr` too),
    `update_role`, `update_cost_account`, `update_udf` and `clear_udfs` where UDF labels or values name the customer.
 6. `clear_notebooks {}`: every activity, WBS and project notebook of every project and baseline, whatever the topic
    (the EPS notebooks P6 writes into an XER are project notebooks; Tower-A's "EPS: Group / Middle East / Buildings").
