@@ -45,8 +45,9 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
   const profile = mkdtempSync(join(tmpdir(), 'p6c4d-chrome-'));
   const http = await serveFolder(dirname(page));
   // the renderer's heap may grow with the model (a tile at a time); the GPU process (SwiftShader) holds the geometry
-  // the graphics card (ANGLE's default backend), else SwiftShader: the processor draws (any server, slow on a big model)
-  const gl = o.gpu ?? renderGpu() !== 'off' ? ['--use-angle=default', '--enable-gpu'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+  // gpu (a render_4d whose probe found a graphics card): ANGLE's default backend; else SwiftShader, the processor draws
+  // (any machine; slow on a big model). A Chromium told to use a graphics card it does not have may hang, not fail
+  const gl = o.gpu ? ['--use-angle=default', '--enable-gpu'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
   const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`, ...gl, '--ignore-gpu-blocklist', '--js-flags=--max-old-space-size=8192', `--window-size=${o.width ?? 1280},${o.height ?? 760}`, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), 'about:blank'];
   // (Chromium refuses to start as root with its sandbox: a server run as root, a container, gets it without)
   let died: Error | null = null;
@@ -138,9 +139,12 @@ export function probeRenderer(chromium: string): Promise<Renderer> {
   let p = probes.get(key);
   if (!p) {
     p = (async () => {
+      if (!gpu) return { kind: 'software' as const, name: 'SwiftShader (P6CLONE_RENDER_GPU=off)' };
+      // a Linux machine with no graphics device (a server, a container): software, without asking Chromium
+      if (process.platform === 'linux' && !existsSync('/dev/dri') && renderGpu() === 'auto') return { kind: 'software' as const, name: 'SwiftShader (no graphics device: /dev/dri)' };
       const dir = mkdtempSync(join(tmpdir(), 'p6c4d-probe-')), page = join(dir, 'probe.html');
       writeFileSync(page, '<!doctype html><script>window.P6C4D_API = { status: () => ({ state: "ready", tiles: { loaded: 0, total: 0 } }) };</script>');
-      try { return rendererOf(String(await inChromium(chromium, page, (ev) => ev(RENDERER_JS), { gpu, timeoutMs: 60_000, width: 64, height: 64 })), gpu); }
+      try { return rendererOf(String(await inChromium(chromium, page, (ev) => ev(RENDERER_JS), { gpu, timeoutMs: 20_000, width: 64, height: 64 })), gpu); }
       catch { return { kind: 'software' as const, name: 'unknown (the probe failed)' }; }
       finally { rmSync(dir, { recursive: true, force: true }); }
     })();
