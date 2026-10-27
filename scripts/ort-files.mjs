@@ -33,5 +33,5 @@ export function copyIfc(root, dest) {
   cpSync(join(root, 'core/bim/rvtWorker.mjs'), join(out, 'rvtWorker.mjs')); // Revit files: rvt-rs (Apache-2.0) in rvt/
   mkdirSync(join(out, 'rvt'), { recursive: true });
   for (const f of ['rvt.js', 'rvt_bg.wasm', 'LICENSE', 'NOTICE', 'README.md', 'p6clone.patch']) cpSync(join(root, 'core/bim/rvt', f), join(out, 'rvt', f));
-  writeFileSync(join(out, 'README.txt'), 'web-ifc 0.0.77 (That Open Company, MPL-2.0: web-ifc/LICENSE.md; source at https://github.com/ThatOpen/engine_web-ifc), used unmodified to read IFC geometry for 4D.\nrvt-rs 0.6.1 (Apache-2.0: rvt/LICENSE and rvt/NOTICE; source at https://github.com/DrunkOnJava/rvt-rs, commit b6086d4), its WebAssembly build with the changes in rvt/p6clone.patch (memory only: the same IFC), to read Revit files (rvt/README.md says how it was built).\n');
+  writeFileSync(join(out, 'README.txt'), 'web-ifc 0.0.77 (That Open Company, MPL-2.0: web-ifc/LICENSE.md; source at https://github.com/ThatOpen/engine_web-ifc), used unmodified to read IFC geometry for 4D.\nrvt-rs 0.10.0 (Apache-2.0: rvt/LICENSE and rvt/NOTICE; source at https://github.com/DrunkOnJava/rvt-rs, tag v0.10.0, commit 0cd60b7), its WebAssembly build with the changes in rvt/p6clone.patch (memory only: the same IFC), to read Revit files (rvt/README.md says how it was built).\n');
 }

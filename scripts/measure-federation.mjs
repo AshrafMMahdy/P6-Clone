@@ -1,7 +1,8 @@
 // Open a (big) model through the MCP server under a memory budget and report what it took: the server's peak memory,
 // the Navisworks reader's (its own process), every process of the run together, the time, and what the model answered.
 // With "video": the model is opened into a new project with an activity per IFC class (one after the other), linked
-// by class, and its 4D video rendered (render_4d; needs P6CLONE_CHROMIUM, and P6CLONE_FFMPEG for MP4).
+// by class, and its 4D video rendered (render_4d; needs P6CLONE_CHROMIUM, and P6CLONE_FFMPEG for MP4), at
+// MEASURE_QUALITY when set (auto, draft, standard, high).
 // Usage: P6CLONE_MEM_BUDGET_MB=2048 node scripts/measure-federation.mjs <model> [video]
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -64,8 +65,8 @@ if (o?.handle || (p && o?.elements)) {
     await call('schedule', H);
     const l = await call('link_by_rules', { ...H, rules: classes.map((c, i) => ({ type: 'scope', activity: `C${i + 1}`, class: c })) });
     const t3 = Date.now();
-    const v = await call('render_4d', { ...H, kind: 'video', step: 7, width: 1280, height: 720, path: join(work, 'video') });
-    report.video = { seconds: Math.round((Date.now() - t3) / 1000), linked: l?.linked ?? l?.applied ?? l?.error, answer: v?.error ? v : { rendered: v.rendered, frames: v.frames, mime: v.mime, file: v.file ?? v.written, reason: v.reason } };
+    const v = await call('render_4d', { ...H, kind: 'video', step: 7, ...(process.env.MEASURE_QUALITY ? { quality: process.env.MEASURE_QUALITY } : {}), path: join(work, 'video') });
+    report.video = { seconds: Math.round((Date.now() - t3) / 1000), linked: l?.linked ?? l?.applied ?? l?.error, answer: v?.error ? v : { rendered: v.rendered, frames: v.frames, size: v.size, quality: v.quality, estimated_minutes: v.estimated_minutes, renderer: v.renderer, quality_note: v.quality_note, file: v.file ?? v.written } };
   }
   report.server_peak_mb = peak();
 }

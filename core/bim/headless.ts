@@ -41,11 +41,13 @@ type Evaluate = (expression: string, awaitPromise?: boolean) => Promise<unknown>
 
 /** Load the viewer page headless and run work against it (evaluate expressions in the page). onProgress may throw (a
  *  cancelled job): the browser is closed and the error passes through. */
-export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate) => Promise<T>, o: { width?: number; height?: number; timeoutMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void; what?: string } = {}): Promise<T> {
+export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate) => Promise<T>, o: { width?: number; height?: number; timeoutMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void; what?: string; gpu?: boolean } = {}): Promise<T> {
   const profile = mkdtempSync(join(tmpdir(), 'p6c4d-chrome-'));
   const http = await serveFolder(dirname(page));
   // the renderer's heap may grow with the model (a tile at a time); the GPU process (SwiftShader) holds the geometry
-  const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`, '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--js-flags=--max-old-space-size=8192', `--window-size=${o.width ?? 1280},${o.height ?? 760}`, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), 'about:blank'];
+  // the graphics card (ANGLE's default backend), else SwiftShader: the processor draws (any server, slow on a big model)
+  const gl = o.gpu ?? renderGpu() !== 'off' ? ['--use-angle=default', '--enable-gpu'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+  const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`, ...gl, '--ignore-gpu-blocklist', '--js-flags=--max-old-space-size=8192', `--window-size=${o.width ?? 1280},${o.height ?? 760}`, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), 'about:blank'];
   // (Chromium refuses to start as root with its sandbox: a server run as root, a container, gets it without)
   let died: Error | null = null;
   const waiting = new Map<number, { res: (v: any) => void; rej: (e: Error) => void }>();
@@ -117,6 +119,34 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
     http.server.close();
     try { rmSync(profile, { recursive: true, force: true }); } catch { /* a locked profile file is left to the temp cleaner */ }
   }
+}
+
+/** P6CLONE_RENDER_GPU: auto (the default: the graphics card when Chrome finds one, else the processor draws), on, off
+ *  (always the processor: SwiftShader). */
+export const renderGpu = (): 'auto' | 'on' | 'off' => { const v = process.env.P6CLONE_RENDER_GPU; return v === 'on' || v === 'off' ? v : 'auto'; };
+/** The renderer that draws: the graphics card, or software (SwiftShader, Mesa's llvmpipe, Windows' WARP: the processor). */
+export interface Renderer { kind: 'gpu' | 'software'; name: string }
+const SOFTWARE = /SwiftShader|llvmpipe|softpipe|Basic Render|WARP|Software/i;
+/** The page expression naming WebGL's renderer. */
+export const RENDERER_JS = `(() => { try { const g = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl'); if (!g) return ''; const d = g.getExtension('WEBGL_debug_renderer_info'); return String(d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)); } catch { return ''; } })()`;
+export const rendererOf = (name: string, gpu: boolean): Renderer => ({ kind: gpu && name && !SOFTWARE.test(name) ? 'gpu' : 'software', name: name || 'none' });
+const probes = new Map<string, Promise<Renderer>>();
+/** What renders on this machine (asked once per Chromium and setting): Chromium started as a render starts it, on an
+ *  empty page, naming its WebGL renderer. */
+export function probeRenderer(chromium: string): Promise<Renderer> {
+  const gpu = renderGpu() !== 'off', key = `${chromium}|${gpu}`;
+  let p = probes.get(key);
+  if (!p) {
+    p = (async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'p6c4d-probe-')), page = join(dir, 'probe.html');
+      writeFileSync(page, '<!doctype html><script>window.P6C4D_API = { status: () => ({ state: "ready", tiles: { loaded: 0, total: 0 } }) };</script>');
+      try { return rendererOf(String(await inChromium(chromium, page, (ev) => ev(RENDERER_JS), { gpu, timeoutMs: 60_000, width: 64, height: 64 })), gpu); }
+      catch { return { kind: 'software' as const, name: 'unknown (the probe failed)' }; }
+      finally { rmSync(dir, { recursive: true, force: true }); }
+    })();
+    probes.set(key, p);
+  }
+  return p;
 }
 
 /** PNG frames at the dates, one page call each, with progress (and cancellation) between frames. */

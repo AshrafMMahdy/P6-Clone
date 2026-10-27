@@ -394,7 +394,7 @@ export function openRvtBytesWithDiagnosticsAndLimits(bytes, limits) {
  * return `{ model, diagnostics }`.
  *
  * `mode` is one of `scaffold`, `typed-no-geometry`, `geometry`, or
- * `strict` (Lane Seven). Stronger modes fail closed when the decoded
+ * `strict`. Stronger modes fail closed when the decoded
  * coverage cannot satisfy the requested bar — the viewer uses this to
  * surface honest confidence rather than over-claiming geometry.
  * @param {Uint8Array} bytes
@@ -542,22 +542,26 @@ export function renderPlanSvg(model, options) {
 }
 
 /**
- * P6 Clone: open a Revit file and write its IFC4 out a piece at a time (to `globalThis.__rvtIfcSink`), returning the
+ * P6 Clone: open a Revit file and write its IFC4 out a piece at a time (to `globalThis.__rvtIfcSink`), answering the
  * export diagnostics. The model never crosses into JavaScript and back (openRvtBytesWithDiagnosticsMode then
  * modelToIfcStep held it three times over), the file and its caches go before the STEP is written, and the STEP is
- * never one string. The STEP text is the same as modelToIfcStep's for the same model.
+ * never one string. The STEP text is the same as modelToIfcStep's for the same model. `revit_property_sets`: add
+ * Revit's own property sets from the parameters the file saves (as `rvt-ifc --revit-property-sets`); they only add:
+ * when they cannot be read the export goes ahead without them, and the answer says so. (`--saved-meshes` is left
+ * out: on a 2023 project it took 3x the memory and 7x the time, and it reads 2023 and later only.)
  * @param {Uint8Array} bytes
  * @param {string} mode
+ * @param {boolean} revit_property_sets
  * @returns {any}
  */
-export function rvtToIfcStream(bytes, mode) {
+export function rvtToIfcStream(bytes, mode, revit_property_sets) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
-        wasm.rvtToIfcStream(retptr, ptr0, len0, ptr1, len1);
+        wasm.rvtToIfcStream(retptr, ptr0, len0, ptr1, len1, revit_property_sets);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -626,7 +630,7 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
-        __wbg___rvtIfcSink_3fbb34ceb653faa3: function(arg0, arg1) {
+        __wbg___rvtIfcSink_4a039d74757add25: function(arg0, arg1) {
             globalThis.__rvtIfcSink(getStringFromWasm0(arg0, arg1));
         },
         __wbg___wbindgen_bigint_get_as_i64_3d3aba5d616c6a51: function(arg0, arg1) {
@@ -713,7 +717,7 @@ function __wbg_get_imports() {
             const ret = Object.entries(getObject(arg0));
             return addHeapObject(ret);
         },
-        __wbg_error_6aa6889d4fc11c7c: function(arg0, arg1) {
+        __wbg_error_1a73f3bc4ce6ebd4: function(arg0, arg1) {
             console.error(getStringFromWasm0(arg0, arg1));
         },
         __wbg_get_1affdbdd5573b16a: function() { return handleError(function (arg0, arg1) {

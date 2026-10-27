@@ -151,6 +151,15 @@ tiles (2,500,000 elements, 30,000,000 triangles): out of GPU memory at tile 21 o
 where there is more GPU memory, or ask for boxes (each element drawn as its bounding box)."*
 On the server (`render_4d`) these come back as the tool error `render_failed` with the code in `data.reason`.
 
+The server's headless Chromium draws on the machine's graphics card when it has one (`P6CLONE_RENDER_GPU`: auto, the
+default; on; off), else with the processor (SwiftShader); a render the graphics card cannot finish goes again in
+software, once, and the answer's `renderer` says which drew it. Measured on a 509 MB federation (320 million
+triangles, 24 frames at 1280x720): 60 minutes in software (about 2 million triangles a second), 34 seconds on this
+machine's graphics card (about 400 million); a 6 million triangle model, 73 s and 4 s. `quality` (images, video): standard (full geometry, 1280x720),
+high (1920x1080), draft (854x480, each element its bounding box), or auto (the default): standard unless
+`renderMinutes` estimates more than `P6CLONE_RENDER_DRAFT_MINUTES` (10) on this machine's renderer, then draft. The
+answer gives `quality`, `estimated_minutes`, `renderer` and, when the user should hear it, `quality_note`.
+
 **The platform's change for the pickup window**: `clientRender4d.ts` waits 90 s for `ready()`. A big model's tiles can
 take longer. Take `WHIQ4D_EXPORT.started` (or the `whiq4d:started` message) as the page alive, and wait while
 `status().tiles.loaded` grows (reset the 90 s on each change), failing with `status().error.message` when

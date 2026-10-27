@@ -23,6 +23,9 @@ test('a Revit 2023 project opens without a schedule, as IFC4 read by rvt-rs, wit
   assert.equal(o.d.source.format, 'Revit');
   assert.equal(o.d.source.revit_version, 2023);
   assert.equal(o.d.source.read_as, 'geometry');
+  // rvt-rs 0.10.0: base quantities from the elements' records, and Revit's own property sets from the parameters saved
+  assert.ok(o.d.quantified_elements >= 45, String(o.d.quantified_elements)); // none before 0.10.0
+  assert.ok(o.d.source.revit_property_sets?.properties > 0 && o.d.source.revit_property_sets.elements > 0, JSON.stringify(o.d.source.revit_property_sets));
   assert.ok(o.d.classes.IfcWall >= 39 && o.d.classes.IfcDoor >= 29, JSON.stringify(o.d.classes));
   const q = await call('quantities', { handle: o.d.handle, group_by: 'class' });
   assert.equal(q.err, false, JSON.stringify(q.d).slice(0, 300));
@@ -92,4 +95,18 @@ test('a Revit file past what the reader can open is refused before it runs, with
   process.env.P6CLONE_REVIT_MAX_MB = '1';
   process.env.P6CLONE_MODEL_CACHE = mkdtempSync(join(tmpdir(), 'p6-rvtmax-'));
   try { await assert.rejects(rvtToIfc(RVT), /past what the Revit reader can open.*NWC \(Navisworks\) or IFC/); } finally { delete process.env.P6CLONE_REVIT_MAX_MB; }
+});
+
+test('through the MCP, a Revit file too big for its reader is model_too_large: what to ask for, and why in plain words', { skip }, async () => {
+  process.env.P6CLONE_REVIT_MAX_MB = '1';
+  try {
+    const o = await call('open_model', { path: RVT });
+    assert.equal(o.err, true);
+    const e = o.d.error ?? o.d;
+    assert.equal(e.code, 'model_too_large', JSON.stringify(o.d).slice(0, 300));
+    assert.deepEqual(e.alternatives, ['nwc', 'ifc']);
+    assert.ok(e.size_mb > e.max_mb);
+    assert.match(e.next_step, /NWC .* IFC export.*not technical/s);
+    assert.match(e.explain_to_user, /4 GB.*not a problem with your model.*NWC \(Navisworks\) or IFC/s);
+  } finally { delete process.env.P6CLONE_REVIT_MAX_MB; }
 });

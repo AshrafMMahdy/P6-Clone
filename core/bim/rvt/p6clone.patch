@@ -1,17 +1,20 @@
 diff --git a/rvt-wasm/src/lib.rs b/rvt-wasm/src/lib.rs
-index 9d7fa39..5711c54 100644
+index a7d5eee..15843f7 100644
 --- a/rvt-wasm/src/lib.rs
 +++ b/rvt-wasm/src/lib.rs
-@@ -33,7 +33,7 @@ use rvt::ifc::{
+@@ -33,9 +33,9 @@ use rvt::ifc::{
      },
      share::{ViewerState, decode_from_fragment, encode_to_fragment},
      sheet::{SheetOptions, render_plan_svg},
 -    step_writer::write_step,
 +    step_writer::{StepOptions, write_step, write_step_to},
  };
- use serde::Deserialize;
+-use serde::Deserialize;
++use serde::{Deserialize, Serialize};
  
-@@ -54,6 +54,35 @@ fn err_str<E: std::fmt::Display>(e: E) -> JsValue {
+ #[derive(Debug, Default, Deserialize)]
+ struct WasmWalkerLimits {
+@@ -54,6 +54,61 @@ fn err_str<E: std::fmt::Display>(e: E) -> JsValue {
  extern "C" {
      #[wasm_bindgen(js_namespace = console, js_name = error)]
      fn console_error(s: &str);
@@ -24,34 +27,60 @@ index 9d7fa39..5711c54 100644
 +#[wasm_bindgen(js_name = p6WindowedSelfCheck)]
 +pub fn p6_windowed_self_check() -> usize { rvt::object_graph::p6clone_windowed_self_check() }
 +
-+/// P6 Clone: open a Revit file and write its IFC4 out a piece at a time (to `globalThis.__rvtIfcSink`), returning the
++/// P6 Clone: what rvtToIfcStream answers: the export diagnostics, and what adding Revit's own property sets did (null
++/// when not asked for; `error` when they could not be read, the export going ahead without them).
++#[derive(serde::Serialize)]
++struct StreamAnswer {
++    diagnostics: rvt::ifc::ExportDiagnostics,
++    revit_property_sets: Option<Addition>,
++}
++#[derive(serde::Serialize, Default)]
++struct Addition {
++    /// elements and types given Revit's own sets, the properties written and the named parameters left out
++    counts: std::collections::BTreeMap<&'static str, usize>,
++    error: Option<String>,
++}
++
++/// P6 Clone: open a Revit file and write its IFC4 out a piece at a time (to `globalThis.__rvtIfcSink`), answering the
 +/// export diagnostics. The model never crosses into JavaScript and back (openRvtBytesWithDiagnosticsMode then
 +/// modelToIfcStep held it three times over), the file and its caches go before the STEP is written, and the STEP is
-+/// never one string. The STEP text is the same as modelToIfcStep's for the same model.
++/// never one string. The STEP text is the same as modelToIfcStep's for the same model. `revit_property_sets`: add
++/// Revit's own property sets from the parameters the file saves (as `rvt-ifc --revit-property-sets`); they only add:
++/// when they cannot be read the export goes ahead without them, and the answer says so. (`--saved-meshes` is left
++/// out: on a 2023 project it took 3x the memory and 7x the time, and it reads 2023 and later only.)
 +#[wasm_bindgen(js_name = rvtToIfcStream)]
-+pub fn rvt_to_ifc_stream(bytes: Vec<u8>, mode: &str) -> Result<JsValue, JsValue> {
++pub fn rvt_to_ifc_stream(bytes: Vec<u8>, mode: &str, revit_property_sets: bool) -> Result<JsValue, JsValue> {
 +    install_panic_hook();
 +    let quality_mode = ExportQualityMode::parse(mode).map_err(err_str)?;
 +    let mut rf = RevitFile::open_bytes(bytes).map_err(err_str)?;
-+    let result = RvtDocExporter
++    let mut result = RvtDocExporter
 +        .export_with_diagnostics_mode_and_limits(
 +            &mut rf,
 +            quality_mode,
 +            rvt::walker::WalkerLimits::default(),
 +        )
 +        .map_err(err_str)?;
++    let psets = revit_property_sets.then(|| match rvt::ifc::revit_property_sets::attach(&mut rf, &mut result.model) {
++        Ok(r) => Addition { counts: [("elements", r.elements), ("types", r.types), ("untyped_elements", r.untyped_elements), ("properties", r.properties), ("left_out", r.left_out)].into(), error: None },
++        Err(e) => Addition { error: Some(format!("{e:#}")), ..Default::default() },
++    });
++    if psets.is_some() {
++        rvt::ifc::recount_exported(&mut result.diagnostics, &result.model);
++    }
 +    drop(rf);
-+    let diagnostics = serde_wasm_bindgen::to_value(&result.diagnostics).map_err(err_str)?;
++    let answer = StreamAnswer { diagnostics: result.diagnostics.clone(), revit_property_sets: psets }
++        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
++        .map_err(err_str)?;
 +    write_step_to(&result.model, &StepOptions::default(), Box::new(|chunk: &str| rvt_ifc_sink(chunk)));
-+    Ok(diagnostics)
++    Ok(answer)
  }
  
  /// Route Rust panics to `console.error` so the viewer reports the
 diff --git a/src/compression.rs b/src/compression.rs
-index 0c4093e..7a79587 100644
+index 390999d..4bcb920 100644
 --- a/src/compression.rs
 +++ b/src/compression.rs
-@@ -216,17 +216,33 @@ impl InflatedStream {
+@@ -217,17 +217,33 @@ impl InflatedStream {
      /// Inflate every member of `stored` and concatenate them in order.
      pub fn from_stored(stream_name: &str, stored: &[u8]) -> Self {
          let prepared = prepare_stream_for_inflate(stream_name, stored);
@@ -96,10 +125,10 @@ index 0c4093e..7a79587 100644
              members.push((*offset, *consumed));
          }
 diff --git a/src/ifc/step_writer.rs b/src/ifc/step_writer.rs
-index 9f284cd..6d19290 100644
+index d27cd7f..ca7dce4 100644
 --- a/src/ifc/step_writer.rs
 +++ b/src/ifc/step_writer.rs
-@@ -55,6 +55,18 @@ pub fn write_step_with_options(model: &IfcModel, options: &StepOptions) -> Strin
+@@ -67,6 +67,18 @@ pub fn write_step_with_options(model: &IfcModel, options: &StepOptions) -> Strin
      w.finish()
  }
  
@@ -118,7 +147,7 @@ index 9f284cd..6d19290 100644
  /// Attribute layout of the tail an IFC4 building-element instance
  /// carries after `IfcProduct`'s seven common attributes
  /// (`GlobalId`, `OwnerHistory`, `Name`, `Description`, `ObjectType`,
-@@ -291,6 +303,8 @@ fn element_attribute_tail(
+@@ -304,6 +316,8 @@ fn element_attribute_tail(
  
  struct StepWriter {
      out: String,
@@ -127,7 +156,7 @@ index 9f284cd..6d19290 100644
      next_id: usize,
      /// Unix timestamp (seconds) used for FILE_NAME + IfcOwnerHistory.
      /// Injected at construction so the output is a pure function of
-@@ -388,6 +402,7 @@ impl StepWriter {
+@@ -401,6 +415,7 @@ impl StepWriter {
      fn new(timestamp: i64) -> Self {
          Self {
              out: String::new(),
@@ -135,7 +164,7 @@ index 9f284cd..6d19290 100644
              next_id: 1,
              timestamp,
          }
-@@ -402,10 +417,22 @@ impl StepWriter {
+@@ -415,10 +430,22 @@ impl StepWriter {
      fn emit_line<S: AsRef<str>>(&mut self, line: S) {
          self.out.push_str(line.as_ref());
          self.out.push('\n');
@@ -159,10 +188,10 @@ index 9f284cd..6d19290 100644
  
      /// Emit `pset` as one `IfcPropertySingleValue` per property, the
 diff --git a/src/object_graph.rs b/src/object_graph.rs
-index 92cfce0..64507f8 100644
+index 586cb05..00f97c0 100644
 --- a/src/object_graph.rs
 +++ b/src/object_graph.rs
-@@ -138,15 +138,54 @@ pub struct StringRecord {
+@@ -140,15 +140,54 @@ pub struct StringRecord {
  /// check simultaneously.
  pub fn extract_string_records(decomp: &[u8]) -> Vec<StringRecord> {
      let mut out = Vec::new();
@@ -219,7 +248,7 @@ index 92cfce0..64507f8 100644
          i = next;
          let tag = u32::from_le_bytes([decomp[i], decomp[i + 1], decomp[i + 2], decomp[i + 3]]);
          let cnt = u32::from_le_bytes([decomp[i + 4], decomp[i + 5], decomp[i + 6], decomp[i + 7]])
-@@ -163,7 +202,7 @@ pub fn extract_string_records(decomp: &[u8]) -> Vec<StringRecord> {
+@@ -165,7 +204,7 @@ pub fn extract_string_records(decomp: &[u8]) -> Vec<StringRecord> {
                  let (cow, _, _) = UTF_16LE.decode(body);
                  let text = cow.into_owned();
                  out.push(StringRecord {
@@ -228,7 +257,7 @@ index 92cfce0..64507f8 100644
                      tag,
                      value: text
                          .trim_end_matches(&['\0', '/', ' ', '\t'] as &[_])
-@@ -175,7 +214,7 @@ pub fn extract_string_records(decomp: &[u8]) -> Vec<StringRecord> {
+@@ -177,7 +216,7 @@ pub fn extract_string_records(decomp: &[u8]) -> Vec<StringRecord> {
          }
          i += 1;
      }
@@ -237,7 +266,7 @@ index 92cfce0..64507f8 100644
  }
  
  /// The offsets where a string record could start. The `u32` count at `+4`
-@@ -303,14 +342,54 @@ pub(crate) fn extract_partition_string_records(
+@@ -303,14 +342,54 @@ pub(crate) fn extract_partition_string_records(rf: &mut RevitFile) -> Result<Vec
      // Concatenate all gzip chunks with an FF-sentinel separator so the
      // extractor sees clear boundaries between them (in case record scans
      // cross chunks accidentally).
@@ -300,10 +329,10 @@ index 92cfce0..64507f8 100644
 -    Ok(extract_string_records(&joined))
  }
 diff --git a/src/reader.rs b/src/reader.rs
-index 3fc700e..bb6d07c 100644
+index de8c7e3..4b5acc3 100644
 --- a/src/reader.rs
 +++ b/src/reader.rs
-@@ -279,11 +279,13 @@ impl RevitFile {
+@@ -357,11 +357,13 @@ impl RevitFile {
          }
          let raw = self.read_stream(name)?;
          let inflated = Arc::new(compression::InflatedStream::from_stored(name, &raw));
@@ -316,4 +345,4 @@ index 3fc700e..bb6d07c 100644
 +
      /// The data objects (RE-153) of partition stream `name`, each at its
      /// offset in the stream's inflated bytes ([`Self::inflated_partition`]),
-     /// memoised (B80).
+     /// memoised.

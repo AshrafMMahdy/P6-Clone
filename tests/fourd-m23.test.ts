@@ -140,3 +140,32 @@ test('instanced and merged meshes draw the same building, and the same page draw
   assert.ok(Math.abs(again.px - inst.px) / inst.px < 0.01, `the same frame: ${inst.px} and ${again.px}`);
   assert.ok(Math.abs(merged.px - inst.px) / inst.px < 0.02, `instanced ${inst.px}, merged ${merged.px}`);
 });
+
+test('4D video quality: auto renders a small model in full; a draft (asked, or chosen as the full one would take long) is 480p boxes, with what to tell the user', { timeout: 600_000 }, async () => {
+  const { h } = await duplex();
+  const out = mkdtempSync(join(tmpdir(), 'p6-4d-q-'));
+  const size = (d: any) => d.size ?? [d.client_render.width, d.client_render.height];
+  const auto = await call('render_4d', { handle: h, path: join(out, 'auto'), kind: 'video', step: 14 });
+  assert.equal(auto.err, false, JSON.stringify(auto.d));
+  assert.equal(auto.d.quality, 'standard');
+  assert.equal(auto.d.quality_note, undefined);
+  assert.deepEqual(size(auto.d), [1280, 720]);
+  assert.ok(auto.d.estimated_minutes >= 0);
+  if (CHROME) assert.ok(['gpu', 'software'].includes(auto.d.renderer.kind) && auto.d.renderer.name);
+  const draft = await call('render_4d', { handle: h, path: join(out, 'draft'), kind: 'video', step: 14, quality: 'draft' });
+  assert.equal(draft.d.quality, 'draft');
+  assert.deepEqual(size(draft.d), [854, 480]);
+  assert.equal(draft.d.display.boxes, true);
+  assert.match(draft.d.quality_note, /^Draft quality, as asked: 854x480, each element drawn as a simple box.*quick preview by choice, not how their model really looks/s);
+  // the full model would take longer than the limit: auto draws a draft and says why
+  process.env.P6CLONE_RENDER_DRAFT_MINUTES = '0.000001';
+  try {
+    const long = await call('render_4d', { handle: h, path: join(out, 'long'), kind: 'video', step: 14 });
+    assert.equal(long.d.quality, 'draft');
+    assert.match(long.d.quality_note, /^Draft quality was chosen because the full model would take .* to render (on this server's graphics card|drawn by the processor).*quality: "standard" gives the full detail/s);
+    const high = await call('render_4d', { handle: h, path: join(out, 'high'), kind: 'video', step: 14, quality: 'high' });
+    assert.deepEqual(size(high.d), [1920, 1080]);
+    assert.match(high.d.quality_note, /^Full detail, as asked: expect .*Tell the user it will take a while/s);
+  } finally { delete process.env.P6CLONE_RENDER_DRAFT_MINUTES; }
+  assert.equal((await call('render_4d', { handle: h, path: join(out, 'x'), kind: 'video', quality: 'ultra' })).d.error.code, 'bad_input');
+});
