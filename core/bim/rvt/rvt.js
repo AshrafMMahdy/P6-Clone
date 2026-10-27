@@ -474,6 +474,15 @@ export function openRvtBytesWithLimits(bytes, limits) {
 }
 
 /**
+ * P6 Clone (testing): the windowed string scan against the whole one.
+ * @returns {number}
+ */
+export function p6WindowedSelfCheck() {
+    const ret = wasm.p6WindowedSelfCheck();
+    return ret >>> 0;
+}
+
+/**
  * Quick summary — reads only the cheap metadata (BasicFileInfo +
  * PartAtom + stream inventory) and returns instantly even for
  * multi-hundred-megabyte RFAs. Used by the viewer for the
@@ -533,6 +542,35 @@ export function renderPlanSvg(model, options) {
 }
 
 /**
+ * P6 Clone: open a Revit file and write its IFC4 out a piece at a time (to `globalThis.__rvtIfcSink`), returning the
+ * export diagnostics. The model never crosses into JavaScript and back (openRvtBytesWithDiagnosticsMode then
+ * modelToIfcStep held it three times over), the file and its caches go before the STEP is written, and the STEP is
+ * never one string. The STEP text is the same as modelToIfcStep's for the same model.
+ * @param {Uint8Array} bytes
+ * @param {string} mode
+ * @returns {any}
+ */
+export function rvtToIfcStream(bytes, mode) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.rvtToIfcStream(retptr, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * Spreadsheet schedule of an exported model as CSV
  * ([`rvt::ifc::schedule_csv`]): `kind` is `"elements"` (every building
  * element) or `"rooms"`; `metric` switches lengths to metres; `excel`
@@ -587,6 +625,9 @@ function __wbg_get_imports() {
             const len1 = WASM_VECTOR_LEN;
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg___rvtIfcSink_3fbb34ceb653faa3: function(arg0, arg1) {
+            globalThis.__rvtIfcSink(getStringFromWasm0(arg0, arg1));
         },
         __wbg___wbindgen_bigint_get_as_i64_3d3aba5d616c6a51: function(arg0, arg1) {
             const v = getObject(arg1);

@@ -86,9 +86,12 @@ model-<hash16>/
   federation (`scripts/make-federation.ts`: 160 copies of test.nwd, 262,400 elements, 320 million triangles) opens
   through the MCP server at `P6CLONE_MEM_BUDGET_MB=2048` in 6.8 minutes: server 360 MB, reader 1,270 MB, every process
   together 1,647 MB (`scripts/measure-federation.mjs`); the IFC4 of 20 of those copies (1.6 GB) is written with the
-  reader at 727 MB. Revit files (`.rvt` / `.rfa`, rvt-rs) are made
-  into an IFC4 first, in rvt-rs's own process (`loadNeeds`: 12× the file); that IFC is a small part of it (0.4 MB of
-  text for a 12 MB project whose reading peaks at 272 MB), so the rest of the path takes it as it is.
+  reader at 727 MB. Revit files (`.rvt` / `.rfa`, rvt-rs with `core/bim/rvt/p6clone.patch`) are made into an IFC4
+  first, in rvt-rs's own process, written to disk a piece at a time; the index (linking, keys, exports, the agents'
+  element data) is then streamed from it, and only the video's tiles mesh it, in chunks. What reading takes is the
+  file and its element partition unpacked (about 5× the file), which rvt-rs scans as a whole (`revitNeed`: 128 MB +
+  9× the file; measured 281 MB for a 19 MB project, 384 MB before the patch); a file past `P6CLONE_REVIT_MAX_MB`
+  (450, where WebAssembly's 4 GB would run out) is refused before it runs, pointing to an NWC or IFC export.
 
 ## 3. What the page fetches
 

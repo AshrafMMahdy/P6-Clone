@@ -344,8 +344,9 @@ the `readOnlyHint` annotation. Results come back as JSON (`structuredContent` as
 
 **4D** (an IFC model linked to the schedule; see `docs/4d-extension-plan.md` and `docs/4d-switch-over.md`): `open_model`
 (IFC2X3 / IFC4, cached by content; geometry in a child process with web-ifc, which ships in `ifc/` beside the bundle;
-Revit `.rvt` / `.rfa` read without Revit by rvt-rs (Apache-2.0, its WebAssembly in `ifc/rvt/`, in its own process) and made
-into IFC4 with the GlobalIds Revit's own IFC export writes; the answer's `source` says the Revit version, how the file was
+Revit `.rvt` / `.rfa` read without Revit by rvt-rs (Apache-2.0, its WebAssembly in `ifc/rvt/` with the clone's memory
+changes in `p6clone.patch`, in its own process) and made into IFC4, written a piece at a time, with the GlobalIds Revit's
+own IFC export writes (files up to about 450 MB: past that, an NWC or IFC export of them opens at any size); the answer's `source` says the Revit version, how the file was
 read and which elements are only bounding boxes (placed and counted, no derived volume); without a `handle` the file
 opens into a model-only workspace, so an agent with no schedule can read elements and quantities; Navisworks `.nwd` /
 `.nwc` / `.nwf` read by the clone's own clean-room reader (`core/bim/nwd/`): elements with their Revit category, family,

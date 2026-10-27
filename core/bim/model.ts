@@ -10,7 +10,7 @@ import { chunkBytesOf, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type Ifc
 import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, newGeomStore, type Extras, type GeomStore } from './element.ts';
 import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
-import { isRevit, rvtToIfc, type RevitSource } from './rvt.ts';
+import { isRevit, revitNeed, rvtToIfc, type RevitSource } from './rvt.ts';
 import { cacheNavisworks, isNavisworks, navisworksKey, navisworksNeed, nwdToIfc, type NavisworksSource } from './nwd.ts';
 
 export interface Model {
@@ -293,9 +293,9 @@ const meshNeed = (bytes: number) => Math.round(bytes * MESH_PER_BYTE + MESH_FIXE
  *  a chunk sized to what is left (never more than P6CLONE_GEOM_CHUNK_MB, never less than MIN_CHUNK). */
 export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; hash?: string } = {}): LoadNeeds {
   const size = existsSync(path) ? statSync(path).size : 0;
-  // a Revit file is made into an IFC first: rvt-rs's process (419 MB for a 33.7 MB project); reading and meshing the
-  // IFC it makes is sized from that IFC (loadNeeds on it, once it is made)
-  if (isRevit(path)) { const index = size * 12; return { index, mesh: 0, chunkBytes: 0, total: index }; }
+  // a Revit file is made into an IFC first, by rvt-rs in its own process (revitNeed); reading and meshing the IFC it
+  // makes is sized from that IFC (loadNeeds on it, once it is made)
+  if (isRevit(path)) { const index = revitNeed(size); return { index, mesh: 0, chunkBytes: 0, total: index }; }
   // a Navisworks model is read as it is, by its own process (its model trees as objects, a model at a time; the geometry
   // a stream at a time), then its index is held here: both, from the sizes of its sections (navisworksNeed)
   if (isNavisworks(path)) { const n = navisworksNeed(path, o.geometry !== false); return { index: n.index, mesh: n.reader, chunkBytes: 0, total: n.index + n.reader }; }

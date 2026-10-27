@@ -60,3 +60,36 @@ test('a file named .rvt that is not a Revit file is refused in words; the model-
   assert.equal(o.d.error.code, 'model_unreadable');
   assert.equal((await call('list_open', {})).d.open.length, before, 'no empty workspace left behind');
 });
+
+// rvt-rs with p6clone.patch (core/bim/rvt/README.md): the same IFC, written a piece at a time, in less memory
+const rvtModule = async () => {
+  const { readFileSync } = await import('node:fs');
+  const { pathToFileURL } = await import('node:url');
+  const dir = join(import.meta.dirname, '..', 'core', 'bim', 'rvt');
+  const rvt = await import(pathToFileURL(join(dir, 'rvt.js')).href);
+  rvt.initSync({ module: readFileSync(join(dir, 'rvt_bg.wasm')) });
+  return rvt;
+};
+
+test('the string records read through a window over the partition are the ones read whole (p6clone.patch)', async () => {
+  assert.ok((await rvtModule()).p6WindowedSelfCheck() > 1000);
+});
+
+test('the IFC written a piece at a time is the IFC written whole: the same elements, GlobalIds and properties', { skip, timeout: 120_000 }, async () => {
+  const { readFileSync } = await import('node:fs');
+  const rvt = await rvtModule(), bytes = new Uint8Array(readFileSync(RVT));
+  const whole = rvt.modelToIfcStep(rvt.openRvtBytesWithDiagnosticsMode(bytes, 'geometry').model);
+  let pieces = '', n = 0;
+  (globalThis as { __rvtIfcSink?: (s: string) => void }).__rvtIfcSink = (s) => { pieces += s; n++; };
+  const diagnostics = rvt.rvtToIfcStream(bytes, 'geometry');
+  assert.ok(diagnostics && n >= 1);
+  const plain = (s: string) => s.replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d|IFCOWNERHISTORY\([^;]*\)/g, 'T'); // the clock
+  assert.equal(plain(pieces), plain(whole));
+});
+
+test('a Revit file past what the reader can open is refused before it runs, with the exports that open at any size', { skip }, async () => {
+  const { rvtToIfc } = await import('../core/bim/rvt.ts');
+  process.env.P6CLONE_REVIT_MAX_MB = '1';
+  process.env.P6CLONE_MODEL_CACHE = mkdtempSync(join(tmpdir(), 'p6-rvtmax-'));
+  try { await assert.rejects(rvtToIfc(RVT), /past what the Revit reader can open.*NWC \(Navisworks\) or IFC/); } finally { delete process.env.P6CLONE_REVIT_MAX_MB; }
+});

@@ -1,12 +1,14 @@
 // Open a (big) model through the MCP server under a memory budget and report what it took: the server's peak memory,
 // the Navisworks reader's (its own process), every process of the run together, the time, and what the model answered.
-// Usage: P6CLONE_MEM_BUDGET_MB=2048 node scripts/measure-federation.mjs <model>
+// With "video": the model is opened into a new project with an activity per IFC class (one after the other), linked
+// by class, and its 4D video rendered (render_4d; needs P6CLONE_CHROMIUM, and P6CLONE_FFMPEG for MP4).
+// Usage: P6CLONE_MEM_BUDGET_MB=2048 node scripts/measure-federation.mjs <model> [video]
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const [model] = process.argv.slice(2);
+const [model, video] = process.argv.slice(2);
 const work = mkdtempSync(join(tmpdir(), 'p6c-measure-'));
 const server = process.env.P6CLONE_SERVER || 'mcp/server.ts';
 const child = spawn(process.execPath, [server], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, TEMP: work, TMP: work, TMPDIR: work, P6CLONE_MODEL_CACHE: process.env.P6CLONE_MODEL_CACHE || join(work, 'cache') } }); // its own temp folder: no other server's recovery copies
@@ -45,13 +47,26 @@ const sampler = setInterval(sample, 2000);
 await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'measure', version: '1' } });
 child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 const t0 = Date.now();
-const o = await call('open_model', { path: model });
+const p = video ? await call('new_project', { id: 'FED', start: '2026-03-02' }) : null;
+const H = p ? { handle: p.handle, owner_key: p.owner_key } : {};
+const o = await call('open_model', { ...H, path: model });
 const open = { seconds: Math.round((Date.now() - t0) / 1000), server_peak_mb: peak() };
 const report = { model, budget_mb: Number(process.env.P6CLONE_MEM_BUDGET_MB) || null, open, answer: o?.error ? o : { elements: o.elements, geometry: o.geometry, meshed: o.meshed_elements, display: o.display, reader_peak_mb: o.source?.peak_memory_mb, files: o.source?.files?.length, warnings: o.source?.warnings?.length } };
-if (o?.handle) {
+if (o?.handle || (p && o?.elements)) {
   const t1 = Date.now();
-  const q = await call('quantities', { handle: o.handle, group_by: 'class' });
+  const q = await call('quantities', { handle: H.handle ?? o.handle, group_by: 'class' });
   report.quantities = { seconds: Math.round((Date.now() - t1) / 1000), groups: q?.groups?.length ?? q };
+  if (video) {
+    // an activity per class, one after the other, each building its class
+    const classes = Object.keys(o.classes ?? {});
+    const ops = classes.flatMap((c, i) => [{ op: 'add_activity', id: `C${i + 1}`, name: c, duration_days: 10 }, ...(i ? [{ op: 'add_relationship', pred: `C${i}`, succ: `C${i + 1}` }] : [])]);
+    await call('edit', { ...H, operations: ops });
+    await call('schedule', H);
+    const l = await call('link_by_rules', { ...H, rules: classes.map((c, i) => ({ type: 'scope', activity: `C${i + 1}`, class: c })) });
+    const t3 = Date.now();
+    const v = await call('render_4d', { ...H, kind: 'video', step: 7, width: 1280, height: 720, path: join(work, 'video') });
+    report.video = { seconds: Math.round((Date.now() - t3) / 1000), linked: l?.linked ?? l?.applied ?? l?.error, answer: v?.error ? v : { rendered: v.rendered, frames: v.frames, mime: v.mime, file: v.file ?? v.written, reason: v.reason } };
+  }
   report.server_peak_mb = peak();
 }
 clearInterval(sampler);

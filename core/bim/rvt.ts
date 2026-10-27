@@ -2,13 +2,19 @@
 // the file's content hash beside the IFC cache, then read like any IFC. What rvt-rs read, approximated or left out goes
 // with it (<hash>-rvt.json), so the answer that opens the model can say so.
 import { spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileHash } from './model.ts';
 import { rvtWorkerPath } from './runtime.ts';
 
-const RVT_FORMAT = 1; // the conversion: a new rvt-rs build or a change here bumps it, so old conversions are not reused
+const RVT_FORMAT = 1; // the conversion: a new rvt-rs build or a change here bumps it, so old conversions are not reused (p6clone.patch writes the same IFC: not bumped)
+/** The memory rvt-rs's process takes to read a Revit file of `bytes` (measured with p6clone.patch, Node 24.14.0: 183,
+ *  214 and 281 MB for 7, 12 and 19 MB projects: the file, its element partition unpacked, about 5x, and the program). */
+export const revitNeed = (bytes: number) => Math.round(128 * 1048576 + bytes * 9);
+/** The largest Revit file rvt-rs can read: its WebAssembly memory stops at 4 GB, and reading takes about 8x the file
+ *  (P6CLONE_REVIT_MAX_MB, 450). */
+export const revitMaxBytes = () => (Number(process.env.P6CLONE_REVIT_MAX_MB) || 450) * 1048576;
 const CFB = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
 /** A Revit file: an OLE compound file named .rvt / .rfa / .rte / .rft (other OLE files, an old .xls, are not). */
@@ -33,6 +39,8 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
   mkdirSync(dir, { recursive: true });
   const base = join(dir, `${await fileHash(path)}-rvt${RVT_FORMAT}`);
   if (!existsSync(`${base}.ifc`) || !existsSync(`${base}.json`)) {
+    const size = statSync(path).size;
+    if (size > revitMaxBytes()) throw new Error(`This Revit file (${Math.round(size / 1048576)} MB) is past what the Revit reader can open (about ${Math.round(revitMaxBytes() / 1048576)} MB: its WebAssembly memory stops at 4 GB). Export it from Revit as NWC (Navisworks) or IFC: both open at any size, with the same GlobalIds, so links carry over.`);
     const worker = rvtWorkerPath();
     if (!worker) throw new Error('The Revit reader (rvtWorker.mjs with rvt/ beside it) is missing from this installation.');
     const err = await new Promise<string | null>((done) => {

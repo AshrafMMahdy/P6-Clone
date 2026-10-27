@@ -1,0 +1,319 @@
+diff --git a/rvt-wasm/src/lib.rs b/rvt-wasm/src/lib.rs
+index 9d7fa39..5711c54 100644
+--- a/rvt-wasm/src/lib.rs
++++ b/rvt-wasm/src/lib.rs
+@@ -33,7 +33,7 @@ use rvt::ifc::{
+     },
+     share::{ViewerState, decode_from_fragment, encode_to_fragment},
+     sheet::{SheetOptions, render_plan_svg},
+-    step_writer::write_step,
++    step_writer::{StepOptions, write_step, write_step_to},
+ };
+ use serde::Deserialize;
+ 
+@@ -54,6 +54,35 @@ fn err_str<E: std::fmt::Display>(e: E) -> JsValue {
+ extern "C" {
+     #[wasm_bindgen(js_namespace = console, js_name = error)]
+     fn console_error(s: &str);
++    /// P6 Clone: where rvtToIfcStream's STEP text goes, a piece at a time (set by the caller on globalThis).
++    #[wasm_bindgen(js_namespace = globalThis, js_name = __rvtIfcSink)]
++    fn rvt_ifc_sink(chunk: &str);
++}
++
++/// P6 Clone (testing): the windowed string scan against the whole one.
++#[wasm_bindgen(js_name = p6WindowedSelfCheck)]
++pub fn p6_windowed_self_check() -> usize { rvt::object_graph::p6clone_windowed_self_check() }
++
++/// P6 Clone: open a Revit file and write its IFC4 out a piece at a time (to `globalThis.__rvtIfcSink`), returning the
++/// export diagnostics. The model never crosses into JavaScript and back (openRvtBytesWithDiagnosticsMode then
++/// modelToIfcStep held it three times over), the file and its caches go before the STEP is written, and the STEP is
++/// never one string. The STEP text is the same as modelToIfcStep's for the same model.
++#[wasm_bindgen(js_name = rvtToIfcStream)]
++pub fn rvt_to_ifc_stream(bytes: Vec<u8>, mode: &str) -> Result<JsValue, JsValue> {
++    install_panic_hook();
++    let quality_mode = ExportQualityMode::parse(mode).map_err(err_str)?;
++    let mut rf = RevitFile::open_bytes(bytes).map_err(err_str)?;
++    let result = RvtDocExporter
++        .export_with_diagnostics_mode_and_limits(
++            &mut rf,
++            quality_mode,
++            rvt::walker::WalkerLimits::default(),
++        )
++        .map_err(err_str)?;
++    drop(rf);
++    let diagnostics = serde_wasm_bindgen::to_value(&result.diagnostics).map_err(err_str)?;
++    write_step_to(&result.model, &StepOptions::default(), Box::new(|chunk: &str| rvt_ifc_sink(chunk)));
++    Ok(diagnostics)
+ }
+ 
+ /// Route Rust panics to `console.error` so the viewer reports the
+diff --git a/src/compression.rs b/src/compression.rs
+index 0c4093e..7a79587 100644
+--- a/src/compression.rs
++++ b/src/compression.rs
+@@ -216,17 +216,33 @@ impl InflatedStream {
+     /// Inflate every member of `stored` and concatenate them in order.
+     pub fn from_stored(stream_name: &str, stored: &[u8]) -> Self {
+         let prepared = prepare_stream_for_inflate(stream_name, stored);
+-        let chunks = inflate_all_members_with_limits(
+-            prepared.as_ref(),
+-            InflateLimits::default(),
+-            1024 * 1024 * 1024,
+-        );
+-        let total: usize = chunks.iter().map(|(_, _, chunk)| chunk.len()).sum();
++        // P6 Clone: two passes, the first only measuring the members (the same ones, by the same rule as
++        // inflate_all_members_with_limits), so each is inflated straight into one buffer of the exact size. Holding
++        // every member and then their concatenation took twice the stream's inflated size at once, and a WebAssembly
++        // memory never shrinks from its peak.
++        let data = prepared.as_ref();
++        let per_chunk = InflateLimits::default();
++        let aggregate = 1024 * 1024 * 1024;
++        let mut sizes: Vec<(usize, usize, usize)> = Vec::new();
++        let mut total: usize = 0;
++        for off in find_gzip_offsets(data) {
++            let (chunk, consumed) = match inflate_member_at_with_limits(data, off, per_chunk) {
++                Ok(c) => c,
++                Err(_) => continue,
++            };
++            if total.saturating_add(chunk.len()) > aggregate {
++                break;
++            }
++            total += chunk.len();
++            sizes.push((off, consumed, chunk.len()));
++        }
+         let mut concat = Vec::with_capacity(total);
+-        let mut chunk_ends = Vec::with_capacity(chunks.len());
+-        let mut members = Vec::with_capacity(chunks.len());
+-        for (offset, consumed, chunk) in &chunks {
+-            concat.extend_from_slice(chunk);
++        let mut chunk_ends = Vec::with_capacity(sizes.len());
++        let mut members = Vec::with_capacity(sizes.len());
++        for (offset, consumed, _) in &sizes {
++            if let Ok((chunk, _)) = inflate_member_at_with_limits(data, *offset, per_chunk) {
++                concat.extend_from_slice(&chunk);
++            }
+             chunk_ends.push(concat.len());
+             members.push((*offset, *consumed));
+         }
+diff --git a/src/ifc/step_writer.rs b/src/ifc/step_writer.rs
+index 9f284cd..6d19290 100644
+--- a/src/ifc/step_writer.rs
++++ b/src/ifc/step_writer.rs
+@@ -55,6 +55,18 @@ pub fn write_step_with_options(model: &IfcModel, options: &StepOptions) -> Strin
+     w.finish()
+ }
+ 
++/// P6 Clone: [`write_step_with_options`], the text handed to `sink` a piece at a time (about 8 MiB each, whole lines)
++/// instead of returned as one string, so a big model's STEP is never held whole. The same text, piece by piece.
++pub fn write_step_to(model: &IfcModel, options: &StepOptions, sink: Box<dyn FnMut(&str)>) {
++    let now = options.timestamp.unwrap_or_else(unix_seconds);
++    let mut w = StepWriter::new(now);
++    w.sink = Some(sink);
++    w.emit_header(model);
++    w.emit_data(model);
++    let mut sink = w.sink.take().expect("set above");
++    sink(&w.finish());
++}
++
+ /// Attribute layout of the tail an IFC4 building-element instance
+ /// carries after `IfcProduct`'s seven common attributes
+ /// (`GlobalId`, `OwnerHistory`, `Name`, `Description`, `ObjectType`,
+@@ -291,6 +303,8 @@ fn element_attribute_tail(
+ 
+ struct StepWriter {
+     out: String,
++    /// P6 Clone: where `out` goes once it passes 8 MiB (write_step_to); None: kept whole (upstream).
++    sink: Option<Box<dyn FnMut(&str)>>,
+     next_id: usize,
+     /// Unix timestamp (seconds) used for FILE_NAME + IfcOwnerHistory.
+     /// Injected at construction so the output is a pure function of
+@@ -388,6 +402,7 @@ impl StepWriter {
+     fn new(timestamp: i64) -> Self {
+         Self {
+             out: String::new(),
++            sink: None,
+             next_id: 1,
+             timestamp,
+         }
+@@ -402,10 +417,22 @@ impl StepWriter {
+     fn emit_line<S: AsRef<str>>(&mut self, line: S) {
+         self.out.push_str(line.as_ref());
+         self.out.push('\n');
++        self.flush_some();
++    }
++
++    /// P6 Clone: hand what was written to the sink once it passes 8 MiB (whole lines only: entities end with one).
++    fn flush_some(&mut self) {
++        if self.out.len() >= 8 << 20 {
++            if let Some(sink) = self.sink.as_mut() {
++                sink(&self.out);
++                self.out.clear();
++            }
++        }
+     }
+ 
+     fn emit_entity<S: AsRef<str>>(&mut self, id: usize, body: S) {
+         self.out.push_str(&format!("#{id}={};\n", body.as_ref()));
++        self.flush_some();
+     }
+ 
+     /// Emit `pset` as one `IfcPropertySingleValue` per property, the
+diff --git a/src/object_graph.rs b/src/object_graph.rs
+index 92cfce0..64507f8 100644
+--- a/src/object_graph.rs
++++ b/src/object_graph.rs
+@@ -138,15 +138,54 @@ pub struct StringRecord {
+ /// check simultaneously.
+ pub fn extract_string_records(decomp: &[u8]) -> Vec<StringRecord> {
+     let mut out = Vec::new();
+-    let mut candidates = RecordCandidates::default();
++    scan_string_records(decomp, 0, usize::MAX, 0, &mut out);
++    out
++}
++
++/// P6 Clone: [`extract_string_records`] over the bytes `fill` gives (`fill(from, to, buf)` puts bytes `from..to` of a
++/// `len`-byte whole into `buf`), read through a window of `WINDOW` bytes and an overlap longer than any record and
++/// than the candidate scan's lookahead, so the whole is never in memory at once. The same records, at the same offsets.
++pub(crate) fn extract_string_records_windowed(len: usize, mut fill: impl FnMut(usize, usize, &mut Vec<u8>)) -> Vec<StringRecord> {
++    const WINDOW: usize = 8 << 20;
++    const OVERLAP: usize = 4096; // a record is at most 8 + 2 * 400 bytes; a candidate block reads 77 ahead
++    let mut out = Vec::new();
++    let mut buf = Vec::new();
+     let mut i = 0usize;
++    while i < len {
++        let end = (i + WINDOW + OVERLAP).min(len);
++        buf.clear();
++        fill(i, end, &mut buf);
++        let last = end == len;
++        let until = if last { usize::MAX } else { WINDOW };
++        let next = scan_string_records(&buf, 0, until, i, &mut out);
++        if last || next == usize::MAX {
++            break;
++        }
++        i += next;
++    }
++    out
++}
++
++/// The scan behind [`extract_string_records`]: offsets `from..until` of `decomp` (records may read past `until`),
++/// each record's offset `base` + its offset in `decomp`. Answers where the scan stopped: the first offset at or past
++/// `until` it would test next, or `usize::MAX` when it reached the end of `decomp`.
++fn scan_string_records(decomp: &[u8], from: usize, until: usize, base: usize, out: &mut Vec<StringRecord>) -> usize {
++    let mut candidates = RecordCandidates::default();
++    let mut i = from;
+     while i + 8 < decomp.len() {
++        if i >= until {
++            return i;
++        }
+         // Every offset the checks below accept has its count's two high
+         // bytes and its first code unit's high byte zero. Offsets without
+         // them are rejected one byte at a time, so jump past them.
+         let Some(next) = candidates.next(decomp, i) else {
+-            break;
++            // no candidate before the last block of the buffer: in a window, the scan goes on from `until`
++            return if until == usize::MAX { usize::MAX } else { until.max(i) };
+         };
++        if next >= until {
++            return next;
++        }
+         i = next;
+         let tag = u32::from_le_bytes([decomp[i], decomp[i + 1], decomp[i + 2], decomp[i + 3]]);
+         let cnt = u32::from_le_bytes([decomp[i + 4], decomp[i + 5], decomp[i + 6], decomp[i + 7]])
+@@ -163,7 +202,7 @@ pub fn extract_string_records(decomp: &[u8]) -> Vec<StringRecord> {
+                 let (cow, _, _) = UTF_16LE.decode(body);
+                 let text = cow.into_owned();
+                 out.push(StringRecord {
+-                    offset: i,
++                    offset: base + i,
+                     tag,
+                     value: text
+                         .trim_end_matches(&['\0', '/', ' ', '\t'] as &[_])
+@@ -175,7 +214,7 @@ pub fn extract_string_records(decomp: &[u8]) -> Vec<StringRecord> {
+         }
+         i += 1;
+     }
+-    out
++    usize::MAX
+ }
+ 
+ /// The offsets where a string record could start. The `u32` count at `+4`
+@@ -303,14 +342,54 @@ pub(crate) fn extract_partition_string_records(
+     // Concatenate all gzip chunks with an FF-sentinel separator so the
+     // extractor sees clear boundaries between them (in case record scans
+     // cross chunks accidentally).
++    // P6 Clone: the concatenation is read a window at a time (extract_string_records_windowed), never built whole: it
++    // was a second copy of the whole inflated partition (88 MiB on a 19 MB project, the reader's peak).
+     let sep = [0xFFu8; 16];
+-    let mut joined =
+-        Vec::with_capacity(inflated.bytes().len() + sep.len() * inflated.chunk_count());
+-    for (i, c) in inflated.chunks().enumerate() {
+-        if i > 0 {
+-            joined.extend_from_slice(&sep);
++    let pieces: Vec<&[u8]> = inflated.chunks().enumerate().flat_map(|(i, c)| [if i > 0 { &sep[..] } else { &sep[..0] }, c]).collect();
++    let len = pieces.iter().map(|p| p.len()).sum();
++    Ok(extract_string_records_windowed(len, |from, to, buf| {
++        let mut at = 0usize;
++        for p in &pieces {
++            let (start, end) = (at, at + p.len());
++            at = end;
++            if end <= from || start >= to {
++                continue;
++            }
++            buf.extend_from_slice(&p[from.max(start) - start..to.min(end) - start]);
++        }
++    }))
++}
++
++/// P6 Clone: records planted in noise, read whole and through windows (a record across every window edge): the same.
++/// Answers the records found, or panics where they differ. (A test, callable from the WebAssembly build: this
++/// machine has no native toolchain to run `cargo test`.)
++pub fn p6clone_windowed_self_check() -> usize {
++    {
++        let mut seed = 0x9e3779b97f4a7c15u64;
++        let mut rnd = move || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; seed };
++        let mut data = vec![0u8; (8 << 20) * 3 + 12345];
++        for b in data.iter_mut() { *b = (rnd() % 7) as u8; }
++        let mut at = 0usize;
++        while at + 900 < data.len() {
++            at += (rnd() % 5000) as usize + 1;
++            if at + 900 >= data.len() { break; }
++            let n = (rnd() % 60) as usize + 1;
++            data[at..at + 4].copy_from_slice(&((rnd() % 9) as u32).to_le_bytes());
++            data[at + 4..at + 8].copy_from_slice(&(n as u32).to_le_bytes());
++            for k in 0..n { data[at + 8 + 2 * k] = b'a' + (k % 26) as u8; data[at + 9 + 2 * k] = 0; }
++        }
++        // a record across every window edge
++        for edge in [8 << 20, 16 << 20] {
++            let s = edge - 11;
++            data[s..s + 4].copy_from_slice(&3u32.to_le_bytes());
++            data[s + 4..s + 8].copy_from_slice(&20u32.to_le_bytes());
++            for k in 0..20 { data[s + 8 + 2 * k] = b'Q'; data[s + 9 + 2 * k] = 0; }
+         }
+-        joined.extend_from_slice(c);
++        let whole = extract_string_records(&data);
++        let windowed = extract_string_records_windowed(data.len(), |from, to, buf| buf.extend_from_slice(&data[from..to]));
++        assert!(whole.len() > 1000);
++        assert_eq!(whole.len(), windowed.len());
++        for (a, b) in whole.iter().zip(&windowed) { assert_eq!((a.offset, a.tag, &a.value), (b.offset, b.tag, &b.value)); }
++        whole.len()
+     }
+-    Ok(extract_string_records(&joined))
+ }
+diff --git a/src/reader.rs b/src/reader.rs
+index 3fc700e..bb6d07c 100644
+--- a/src/reader.rs
++++ b/src/reader.rs
+@@ -279,11 +279,13 @@ impl RevitFile {
+         }
+         let raw = self.read_stream(name)?;
+         let inflated = Arc::new(compression::InflatedStream::from_stored(name, &raw));
++        drop(raw); // P6 Clone: the stored bytes go before anything else is read
+         self.inflated
+             .insert(name.to_string(), Arc::clone(&inflated));
+         Ok(inflated)
+     }
+ 
++
+     /// The data objects (RE-153) of partition stream `name`, each at its
+     /// offset in the stream's inflated bytes ([`Self::inflated_partition`]),
+     /// memoised (B80).
