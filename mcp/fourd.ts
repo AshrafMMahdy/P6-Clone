@@ -87,7 +87,7 @@ const unreadableHint = (path: string) => (existsSync(path) && (isRevit(path) || 
   : 'Give the path of a model file (.ifc, .rvt, .nwd, .nwc or .nwf) inside the storage root.');
 
 /** The need, when it fits the memory free (idle projects moved out first, as for any file); else refused in words. */
-function fits(path: string, first: LoadNeeds, geometry: boolean | undefined, again: () => LoadNeeds): LoadNeeds {
+export function fits(path: string, first: LoadNeeds, geometry: boolean | undefined, again: () => LoadNeeds): LoadNeeds {
   const budget = effectiveBudget();
   let free = freeMemory(), need = first;
   // idle projects moved out make room first (as for any file); only what still does not fit is refused
@@ -97,7 +97,7 @@ function fits(path: string, first: LoadNeeds, geometry: boolean | undefined, aga
     const parts = [need.index ? `${mbs(need.index)} for the index` : '', need.mesh ? (need.chunkBytes ? `${mbs(need.mesh)} for meshing it in chunks of ${mbs(need.chunkBytes)} of the IFC` : `${mbs(need.mesh)} for reading it (the Navisworks reader's own process)`) : ''].filter(Boolean).join(' and ');
     const indexOnly = geometry !== false && need.index && need.index <= Math.min(budget, free);
     fail('memory_budget', `Opening this ${mbs(size)} model needs about ${mbs(need.total)} of memory (${parts}; measured, docs/4d-tiles-contract.md "Memory"); the memory budget is ${mbs(budget)} (P6CLONE_MEM_BUDGET_MB) and ${mbs(Math.max(0, free))} of it is free now.`,
-      need.total > budget ? (indexOnly ? 'The index fits without geometry: open_model with geometry: false links and exports in full (no 3D view, video or derived volumes); or raise P6CLONE_MEM_BUDGET_MB.' : 'The model is larger than the whole memory budget: raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size) or split the model.') : 'Retry when the running calls have finished; idle projects are moved out automatically.',
+      need.total > budget ? (indexOnly ? 'The index fits without geometry: open_model with geometry: false links and exports in full (no 3D view, video or derived volumes); or raise P6CLONE_MEM_BUDGET_MB.' : (isRevit(path) ? 'Export an IFC from Revit (File > Export > IFC); an IFC opens at any size here. Administrators: the Revit file needs more than the whole memory budget; raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size) to read it directly.' : 'The model is larger than the whole memory budget: raise P6CLONE_MEM_BUDGET_MB (and the Node heap with --max-old-space-size) or split the model.')) : 'Retry when the running calls have finished; idle projects are moved out automatically.',
       { retryAfter: need.total > budget ? undefined : 10, data: { needed_mb: Math.round(need.total / 1048576), index_mb: Math.round(need.index / 1048576), mesh_mb: Math.round(need.mesh / 1048576), chunk_mb: Math.round(need.chunkBytes / 1048576), budget_mb: Math.round(budget / 1048576), free_mb: Math.round(Math.max(0, free) / 1048576) } });
   }
   return need;

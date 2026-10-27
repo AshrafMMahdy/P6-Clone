@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { callTool, toolResult } from '../mcp/server.ts';
 import { config, setRoots } from '../mcp/runtime.ts';
@@ -124,4 +124,20 @@ test('a call whose working set does not fit is refused up front, in words, with 
     config.budgetBytes = was;
     await call('close', { handle, owner_key, discard: true });
   }
+});
+
+test('a Revit file refused for memory keeps the memory it needs and points to an IFC export; the budget hint is for administrators, after it', async () => {
+  const { fits } = await import('../mcp/fourd.ts');
+  const mb = 1048576, big = { index: 0, mesh: 0, chunkBytes: 0, total: config.budgetBytes + 4096 * mb };
+  const refusal = (path: string) => { try { fits(path, big, false, () => big); } catch (e) { return e as { code: string; message: string; hint: string }; } throw new Error('not refused'); };
+  const dir = mkdtempSync(join(tmpdir(), 'p6-rvtfits-')), rvt = join(dir, 'tower.rvt'), ifc = join(dir, 'tower.ifc');
+  writeFileSync(rvt, Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0])); // the OLE header that makes it a Revit file
+  const r = refusal(rvt);
+  assert.equal(r.code, 'memory_budget');
+  assert.match(r.message, /needs about [\d,]+ MB of memory/);
+  assert.match(r.hint, /^Export an IFC from Revit \(File > Export > IFC\); an IFC opens at any size here\./);
+  assert.ok(r.hint.indexOf('P6CLONE_MEM_BUDGET_MB') > r.hint.indexOf('opens at any size here') && /Administrators/.test(r.hint));
+  assert.doesNotMatch(r.hint, /split the model/);
+  // an IFC is not told to export an IFC
+  assert.doesNotMatch(refusal(ifc).hint, /File > Export > IFC/);
 });
