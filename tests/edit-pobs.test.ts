@@ -82,5 +82,8 @@ test('MCP: update_pobs renames and clears every performing organisation; saved, 
     // undo restores the names and descriptions in one step
     assert.equal((await c.tool('undo', { handle: h })).isError, false);
     assert.deepEqual(await list(), before);
+    // nothing left unsaved for the server to write beside the sample on exit
+    assert.equal((await c.tool('close', { handle: h, owner_key: k, discard: true })).isError, false);
+    assert.equal((await c.tool('close', { handle: re.handle, owner_key: re.owner_key, discard: true })).isError, false);
   } finally { await c.close(); rmSync(dir, { recursive: true, force: true }); }
 });
