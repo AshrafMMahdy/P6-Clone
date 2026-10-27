@@ -351,8 +351,11 @@ opens into a model-only workspace, so an agent with no schedule can read element
 `.nwc` / `.nwf` read by the clone's own clean-room reader (`core/bim/nwd/`): elements with their Revit category, family,
 type, level, ElementId, parameters and Revit's own lengths, areas and volumes in SI, and the GlobalIds Revit's IFC export
 writes, so links carry between RVT, IFC and NWD; DWG-sourced items under their layers; the geometry read as its triangles and placed, for derived volumes, the 3D view and
-the 4D video (the user's 2016 project, concrete: 325 of 325 Revit volumes matched to 1%; steel sections come out 5-8%
-under Revit's figure); a mesh that is open (a surface, a
+the 4D video (the user's 2016 project, concrete: 325 of 325 Revit volumes matched to 1%; steel sections come out about 2%
+under Revit's figure); read as it is, with no IFC in between: the reader runs in a process of its own (`nwdWorker.ts`,
+shipped as `ifc/nwdWorker.mjs`), a federated `.nwf`'s models one at a time, the geometry a 64 KB stream at a time
+through a file on disk, and `open_model`'s `source.peak_memory_mb` says what it took; an IFC4 of the model is written,
+an element at a time, only for the `export_4d` targets that deliver one; a mesh that is open (a surface, a
 fitting open at its ends: holes over a thousandth of its surface) gives no derived volume, and `open_model` counts them
 as `meshed_without_volume`; the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and
 actual dates and type, their selection sets and explicit selections resolved to the model's elements (an `.nwf` names

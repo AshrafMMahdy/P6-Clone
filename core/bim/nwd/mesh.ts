@@ -17,17 +17,24 @@ export interface Mesh { positions: Float32Array; triangles: Uint32Array }
 
 /** The byte ranges of the geometry blocks (null when the table is not found). */
 export function geometryBlocks(b: Uint8Array): { offset: number; length: number }[] | null {
+  const t = blockTable(b);
+  return t && Array.from(t.lengths, (length, k) => ({ offset: t.offsets[k], length }));
+}
+
+/** The geometry blocks' offsets and lengths from the section's end: b is its last bytes, starting at byte `from` of the
+ *  section (the whole section: 0). Null when the table is not in b. */
+export function blockTable(b: Uint8Array, from = 0): { offsets: Float64Array; lengths: Uint32Array } | null {
   const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
-  for (let at = (b.length - 12) & ~3; at > 0; at -= 4) {
+  for (let at = (b.length - 12) & ~3; at >= 0; at -= 4) {
     const c = v.getUint32(at, true), pages = v.getUint32(at + 4, true);
-    if (c === 0 || c > 10_000_000 || pages > 100_000 || at + 8 + 4 * (pages + c) > b.length) continue;
+    if (c === 0 || c > 50_000_000 || pages > 1_000_000 || at + 8 + 4 * (pages + c) > b.length) continue;
     let sum = 0;
     const base = at + 8 + 4 * pages;
-    for (let k = 0; k < c && sum <= at; k++) sum += v.getUint32(base + 4 * k, true);
-    if (sum !== at) continue;
-    const out: { offset: number; length: number }[] = [];
-    for (let k = 0, o = 0; k < c; k++) { const n = v.getUint32(base + 4 * k, true); out.push({ offset: o, length: n }); o += n; }
-    return out;
+    for (let k = 0; k < c && sum <= from + at; k++) sum += v.getUint32(base + 4 * k, true);
+    if (sum !== from + at || !sum) continue;
+    const offsets = new Float64Array(c), lengths = new Uint32Array(c);
+    for (let k = 0, o = 0; k < c; k++) { const n = v.getUint32(base + 4 * k, true); offsets[k] = o; lengths[k] = n; o += n; }
+    return { offsets, lengths };
   }
   return null;
 }

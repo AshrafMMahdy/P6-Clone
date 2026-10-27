@@ -1,20 +1,29 @@
-// Navisworks files (.nwd, .nwc, .nwf) for 4D: read by the clone's own clean-room reader (nwd/), made into IFC4 once
-// per file content (cached beside the IFC cache), then read like any IFC. An .nwf holds no model of its own: the
-// .nwc / .nwd files it lists are read from beside it (or where it says they are) and joined.
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+// Navisworks files (.nwd, .nwc, .nwf) for 4D: read by the clone's own clean-room reader (nwd/) as they are, straight
+// into the model index and its display tiles (nwd/native.ts, in a process of its own: nwdWorker.ts), cached by the
+// files' content. An IFC4 of the model is written only for the exports that deliver one (nwdToIfc). An .nwf holds no
+// model of its own: the .nwc / .nwd files it lists are read from beside it (or where it says they are) and joined.
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
 import { pushAll } from '../arrays.ts';
-import { readContainer, section, type NwContainer } from './nwd/container.ts';
-import { decodeTree, type NwGroup, type NwNode, type NwTree } from './nwd/tree.ts';
-import { elementsOf, type NwElement } from './nwd/elements.ts';
-import { compressGuid, globalIdOf, toIfc } from './nwd/toIfc.ts';
+import { openContainer, section } from './nwd/container.ts';
+import { decodeTree, type NwNode, type NwTree } from './nwd/tree.ts';
+import type { NwElement } from './nwd/elements.ts';
+import { globalIdOf } from './nwd/toIfc.ts';
 import { elementShapes } from './nwd/geometry.ts';
 import { decodeBlock, geometryBlocks, type Mesh } from './nwd/mesh.ts';
 import { decodePathMap, decodeSets, decodeTimeliner, type NwPathComponent, type NwTask } from './nwd/timeliner.ts';
+import { modelIn, windowsGuid, type NativePart } from './nwd/native.ts';
+import { runJob, type NwJob, type Progress } from './nwd/job.ts';
+import { nwdWorkerPath } from './runtime.ts';
 
-const NWD_FORMAT = 7; // the conversion: any change to the reader bumps it (2: the Revit data in LcOaPartitionProps; 3: placed boxes; 4-5: meshes; 6: classes 0x4f, 0x10, 0x20; 7: files in files, lights, binary assets, DWG materials, older meshes), so old conversions are not reused
+/** The reader's format: any change to what it reads bumps it, so older caches and IFCs are not reused (2: the Revit
+ *  data in LcOaPartitionProps; 3: placed boxes; 4-5: meshes; 6: classes 0x4f, 0x10, 0x20; 7: files in files, lights,
+ *  binary assets, DWG materials, older meshes; 8: read as it is, no IFC in between; element k is #(k + 1)) */
+export const NWD_FORMAT = 8;
 const HEAD = '#LcUStream';
 
 export function isNavisworks(path: string): boolean {
@@ -27,35 +36,18 @@ export interface NavisworksSource {
   format: 'Navisworks'; files: { file: string; revision: number | null; elements: number; read: boolean; units?: string; note?: string }[];
   elements: number; with_revit_ids: number; with_revit_guids: number;
   geometry: { elements_with_meshes: number; elements_with_boxes: number; note: string }; warnings: string[];
+  /** the most memory the reading process took (MB), when it ran in a process of its own */
+  peak_memory_mb?: number;
 }
 
-/** The GlobalIds Revit's IFC export writes, in the order the model tree's guid index counts (LcOpGuidStore: u32, u32
- *  count, then 16-byte GUIDs, little-endian as Windows writes them). */
-/** A GUID as Windows writes it (the first three fields little-endian), as an IFC GlobalId */
-const windowsGuid = (g: Uint8Array) => compressGuid(Uint8Array.from([g[3], g[2], g[1], g[0], g[5], g[4], g[7], g[6], ...g.subarray(8)]));
-
-function guidStore(c: NwContainer, max: number): string[] {
-  const b = section(c, 'LcOpGuidStore', max);
-  if (!b || b.length < 8) return [];
-  const v = new DataView(b.buffer, b.byteOffset, b.byteLength), n = v.getUint32(4, true), out: string[] = [];
-  for (let i = 0; i < n && 8 + 16 * i + 16 <= b.length; i++) {
-    out.push(windowsGuid(b.subarray(8 + 16 * i, 24 + 16 * i)));
-  }
-  return out;
-}
-
-/** The elements of one .nwd / .nwc. */
+/** The elements of one .nwd / .nwc, each with its placed triangles (in memory: the in-process reader the TimeLiner and
+ *  the tests use; a model is opened with native.ts). */
 function readOne(path: string, max: number, o: { shapes?: boolean } = {}): { elements: NwElement[]; revision: number; units?: string; tree?: NwTree } {
-  const c = readContainer(new Uint8Array(readFileSync(path)));
-  const lh = section(c, 'LcOpNwdLogicalHierarchy', max);
-  if (!lh) return { elements: [], revision: c.revision };
-  const pp = section(c, 'LcOaPartitionProps', max);
-  const external = pp ? ((decodeTree(pp, { stream: true }).values ?? []) as NwGroup[]).filter((x) => x && (x as NwGroup).kind === 'group') : [];
-  const tree = decodeTree(lh);
-  const elements = elementsOf(tree, guidStore(c, max), basename(path), external);
-  // geometry: each element's pieces as placed boxes, in metres (Revit exports keep Revit's feet; others are taken as metres)
+  const c = openContainer(path);
+  const { elements, revision, units, tree, revit } = modelIn(c, basename(path), max);
+  if (!tree) return { elements, revision };
+  // geometry: each element's pieces, placed, in metres (Revit exports keep Revit's feet; others are taken as metres)
   const fr = o.shapes === false ? null : section(c, 'LcOpNwdFragments', max);
-  const revit = elements.some((e) => e.revitId !== null || /^LcRevit/.test(e.node?.attr?.internal ?? ''));
   if (fr) {
     const scale = revit ? 0.3048 : 1;
     const geo = section(c, 'LcOpNwdGeometry', max);
@@ -70,7 +62,7 @@ function readOne(path: string, max: number, o: { shapes?: boolean } = {}): { ele
       elements[i].shape = { positions: s.positions.map((x) => x * scale), triangles: s.triangles, boxes: s.boxes };
     }
   }
-  return { elements, revision: c.revision, units: revit ? 'feet (Revit)' : 'metres (taken as such: the file names no unit)', tree };
+  return { elements, revision, units, tree };
 }
 
 /** Where an .nwf's listed models may be read from. A server with a storage root sets it (fenceListedModels): then only
@@ -79,16 +71,10 @@ function readOne(path: string, max: number, o: { shapes?: boolean } = {}): { ele
 let fenceOf: () => ((path: string) => boolean) | null = () => null;
 export function fenceListedModels(current: () => ((path: string) => boolean) | null): void { fenceOf = current; }
 
-/** The bytes a Navisworks file brings to reading it: an .nwf's own and those of every model it lists that can be read. */
-export function navisworksBytes(path: string): number {
-  const size = (p: string) => { try { return statSync(p).size; } catch { return 0; } };
-  return size(path) + (/\.nwf$/i.test(path) ? listed(path, 64 * 1048576).reduce((n, p) => n + (p.at ? size(p.at) : 0), 0) : 0);
-}
-
 /** The files an .nwf lists (XRefTable), found beside it by name, else (unfenced) where it says. */
 function listed(path: string, max: number): { file: string; at: string | null }[] {
   const fence = fenceOf();
-  const c = readContainer(new Uint8Array(readFileSync(path)));
+  const c = openContainer(path);
   const x = section(c, 'LcOpXRefTable', max);
   if (!x) return [];
   const text = new TextDecoder().decode(x), j = text.indexOf('{');
@@ -128,21 +114,85 @@ export function readNavisworks(path: string, o: { maxBytes?: number } = {}): { e
   };
 }
 
-/** The IFC4 for a Navisworks file (made once per content) and what was read. */
+/** The models a Navisworks file opens: an .nwf's (each found as listed()), else the file itself. */
+function partsOf(path: string, max: number): { parts: NativePart[]; empty: boolean } {
+  if (!/\.nwf$/i.test(path)) return { parts: [{ file: basename(path), at: path }], empty: false };
+  const parts = listed(path, max).map((p) => ({ ...p, ...(p.at ? {} : { note: fenceOf() ? 'not found beside the .nwf' : 'not found beside the .nwf or at its saved path' }) }));
+  return { parts, empty: !parts.length };
+}
+
+/** The compressed bytes of what a model's reading holds as objects (its tree, its Revit data, its pieces), per model. */
+const TREE_SECTIONS = ['LcOpNwdLogicalHierarchy', 'LcOaPartitionProps', 'LcOpNwdFragments', 'LcOpGuidStore'];
+function treeBytes(path: string): number[] {
+  return partsOf(path, 64 * 1048576).parts.map((p) => {
+    if (!p.at) return 0;
+    try { return openContainer(p.at).sections.filter((s) => TREE_SECTIONS.some((n) => s.name === n || s.name.endsWith(`\\${n}`))).reduce((n, s) => n + s.length, 0); } catch { return 0; }
+  });
+}
+/** Memory a Navisworks model takes to open (measured, docs/4d-tiles-contract.md "Memory"): the reader's process (a
+ *  fixed part, the biggest model's tree as objects, and every model's elements, kept until the index is written), and the
+ *  index this process then holds. */
+export const NW_READER_FIXED = 200 * 1048576, NW_TREE_PER_BYTE = 40, NW_ELEMENTS_PER_BYTE = 9, NW_INDEX_PER_BYTE = 3;
+export function navisworksNeed(path: string, geometry = true): { reader: number; index: number } {
+  const per = treeBytes(path), all = per.reduce((a, b) => a + b, 0), most = Math.max(0, ...per);
+  return { reader: Math.round(NW_READER_FIXED + most * NW_TREE_PER_BYTE + all * NW_ELEMENTS_PER_BYTE + (geometry ? 64 * 1048576 : 0)), index: Math.round(all * NW_INDEX_PER_BYTE + 16 * 1048576) };
+}
+
+/** The cache key of a Navisworks model: its content (an .nwf's with every model it lists) and the reader's format. */
+export async function navisworksKey(path: string): Promise<string> {
+  let key = await fileHash(path);
+  if (/\.nwf$/i.test(path)) for (const p of listed(path, 64 * 1048576)) if (p.at) key += await fileHash(p.at);
+  return createHash('sha256').update(`${key}:nw${NWD_FORMAT}`).digest('hex').slice(0, 32);
+}
+
+/** Read a Navisworks model into the model cache at base (<base>.ndjson, .geom, .tiles; what was read in <base>.nw.json). */
+export async function cacheNavisworks(path: string, base: string, o: { geometry: boolean; tileBytes?: number; onProgress?: Progress }): Promise<NavisworksSource> {
+  const { parts, empty } = partsOf(path, 2048 * 1048576);
+  const name = basename(path).replace(/\.nw[dcf]$/i, '');
+  const source = await runNavisworks({ kind: 'index', parts, empty, name, file: basename(path), path, base, geometry: o.geometry, ...(o.tileBytes ? { tileBytes: o.tileBytes } : {}) }, o.onProgress);
+  writeFileSync(`${base}.nw.json`, JSON.stringify(source));
+  return source;
+}
+
+/** The IFC4 for a Navisworks file (written once per content, streamed, for the exports that deliver an IFC) and what
+ *  was read. */
 export async function nwdToIfc(path: string): Promise<{ ifc: string; source: NavisworksSource }> {
   const dir = process.env.P6CLONE_MODEL_CACHE || join(tmpdir(), 'p6clone-ifc-cache');
   mkdirSync(dir, { recursive: true });
-  // an .nwf's content is its list; the models it lists are part of what it opens, so their hashes count too
-  let key = await fileHash(path);
-  if (/\.nwf$/i.test(path)) for (const p of listed(path, 64 * 1048576)) if (p.at) key += await fileHash(p.at);
-  const base = join(dir, `${key.length > 32 ? (await import('node:crypto')).createHash('sha256').update(key).digest('hex').slice(0, 32) : key}-nw${NWD_FORMAT}`);
+  const base = join(dir, `ifc-${await navisworksKey(path)}`); // not "<key>-": setAsideOld moves those of another format
   if (!existsSync(`${base}.ifc`) || !existsSync(`${base}.json`)) {
-    const { elements, source } = readNavisworks(path);
-    const put = (file: string, text: string) => { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, text); renameSync(tmp, file); };
-    put(`${base}.ifc`, toIfc(elements, { name: basename(path).replace(/\.nw[dcf]$/i, ''), file: basename(path) }));
-    put(`${base}.json`, JSON.stringify(source));
+    const { parts, empty } = partsOf(path, 2048 * 1048576);
+    const source = await runNavisworks({ kind: 'ifc', parts, empty, name: basename(path).replace(/\.nw[dcf]$/i, ''), file: basename(path), path, out: `${base}.ifc` });
+    writeFileSync(`${base}.json`, JSON.stringify(source));
   }
   return { ifc: `${base}.ifc`, source: JSON.parse(readFileSync(`${base}.json`, 'utf8')) };
+}
+
+/** Run a read in the reader's own process (in this one when it is not there); its progress reported, its failure thrown. */
+async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<NavisworksSource> {
+  const worker = nwdWorkerPath();
+  if (!worker) return runJob(job, onProgress);
+  const jobFile = join(tmpdir(), `p6clone-nwjob-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.json`);
+  writeFileSync(jobFile, JSON.stringify(job));
+  try {
+    // the reader holds a model tree as objects: its heap may take half the machine's memory (at most 16 GB)
+    const heap = Math.max(1024, Math.min(16384, Math.floor((totalmem() / 1048576) * 0.5)));
+    const err = await new Promise<string | null>((done) => {
+      const child = spawn(process.execPath, [`--max-old-space-size=${heap}`, worker, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
+      let text = '', out = '';
+      child.stdout.on('data', (c) => {
+        out += c;
+        for (let i; (i = out.indexOf('\n')) >= 0; out = out.slice(i + 1)) { const m = /^progress (\d+) (\d+) (.*)$/.exec(out.slice(0, i)); if (m) void Promise.resolve(onProgress?.(Number(m[1]), Number(m[2]), m[3])).catch(() => {}); }
+      });
+      child.stderr.on('data', (c) => { text = (text + c).slice(-4000); });
+      const timer = setTimeout(() => child.kill(), (Number(process.env.P6CLONE_NWD_MINUTES) || 60) * 60_000);
+      child.on('error', (e) => { clearTimeout(timer); done(e.message); });
+      // what it read is written last: a reader that wrote it finished, even if the process then fell over on its way out
+      child.on('close', (code, signal) => { clearTimeout(timer); done(existsSync(`${jobFile}.out.json`) ? null : code === 0 ? 'the Navisworks reader stopped without its answer' : (text.trim().split('\n').pop() || `the Navisworks reader stopped (${signal ?? code}${signal || code === null ? ': out of time or memory' : ''})`)); });
+    });
+    if (err) throw new Error(err);
+    return JSON.parse(readFileSync(`${jobFile}.out.json`, 'utf8')) as NavisworksSource;
+  } finally { rmSync(jobFile, { force: true }); rmSync(`${jobFile}.out.json`, { force: true }); }
 }
 
 export interface NavisworksTimeliner {
@@ -175,7 +225,7 @@ function itemsOf(tree: NwTree, elements: NwElement[]) {
  *  the file's model carries once opened (an .nwf's selections name items by path in the models it lists). */
 export function readNavisworksTimeliner(path: string, o: { maxBytes?: number } = {}): NavisworksTimeliner {
   const max = o.maxBytes ?? 2048 * 1048576, notes: string[] = [];
-  const c = readContainer(new Uint8Array(readFileSync(path)));
+  const c = openContainer(path);
   const tl = section(c, 'LcTlTimelinerElement', max), ss = section(c, 'LcOpSelectionSetsElement', max);
   const tasks = tl ? decodeTimeliner(tl) : [], rawSets = ss ? decodeSets(ss) : [];
   if (!tasks.length) notes.push(tl ? 'The TimeLiner has no tasks the reader could read.' : 'The file has no TimeLiner.');

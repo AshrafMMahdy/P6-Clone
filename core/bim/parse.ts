@@ -126,13 +126,19 @@ export const productIdsOf = (index: IfcIndex): Uint32Array => Uint32Array.from(i
 /** Geometry for an index already built: fingerprints into the index, tiles into opts.tilesOut (written beside and
  *  renamed into place: a tile folder is whole or absent). Sets geometryStatus / geometryNote / meshedElements. */
 export async function meshIndex(absIfcPath: string, index: IfcIndex, productIds: Uint32Array, opts: ParseIfcOptions = {}): Promise<void> {
+  await meshWith(index, opts, (outDir, tilesTmp) => buildGeometry(absIfcPath, outDir, tilesTmp, opts, index, productIds));
+}
+
+/** meshIndex with the geometry made by build: it writes runs in the geometry worker's layout (geomWorker.mjs) and
+ *  takes each in with absorbRun (a Navisworks file's own meshes, nwd/native.ts). */
+export async function meshWith(index: IfcIndex, opts: ParseIfcOptions, build: (outDir: string, tilesDir: string | null) => Promise<Built>): Promise<void> {
   const outDir = mkdtempSync(join(tmpdir(), 'whiq-ifcgeom-'));
   const tilesTmp = opts.tilesOut ? `${opts.tilesOut}.${process.pid}.tmp` : null;
   try {
     const store = geomStore(index);
     if (store) allocGeometry(store, index.elements.length);
     if (tilesTmp) { rmSync(tilesTmp, { recursive: true, force: true }); mkdirSync(tilesTmp, { recursive: true }); }
-    const run = await buildGeometry(absIfcPath, outDir, tilesTmp, opts, index, productIds);
+    const run = await build(outDir, tilesTmp);
     if (!run.ok) {
       if (store) store.rows = null;
       index.geometryStatus = 'unavailable';
@@ -191,8 +197,8 @@ function workerScript(opts: ParseIfcOptions): string | null {
   return geomWorkerPath();
 }
 
-type Run = { ok: true; note?: string } | { ok: false; note: string };
-type Built = { ok: true; note?: string; meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[] } | { ok: false; note: string };
+export type Run = { ok: true; note?: string } | { ok: false; note: string };
+export type Built = { ok: true; note?: string; meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[] } | { ok: false; note: string };
 
 /** IFC bytes one geometry run takes on: the option, else P6CLONE_GEOM_CHUNK_MB (300). */
 export const chunkBytesOf = (opts: ParseIfcOptions = {}) => Math.max(1 << 16, opts.chunkBytes ?? (Number(process.env.P6CLONE_GEOM_CHUNK_MB) || 300) * 1048576);
@@ -206,29 +212,12 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   if (!script) return { ok: false, note: 'geometry worker script not found (core/bim/geomWorker.mjs, or ifc/geomWorker.mjs beside the program). The model is indexed (elements, storeys, properties, authored quantities); derived volumes and the 3D view are not available for it.' };
   const productsBin = join(outDir, 'products.bin');
   writeFileSync(productsBin, new Uint8Array(productIds.buffer, productIds.byteOffset, productIds.byteLength));
-  const tiler = join(dirname(script), 'geomTiles.mjs');
-  if (tilesDir && !existsSync(tiler)) return { ok: false, note: 'the display tiler (geomTiles.mjs beside geomWorker.mjs) is missing. The model is indexed; the 3D view is not available for it.' };
-  const store = geomStore(index);
-  const state = { meshed: 0, failures: 0, maxAbsCoord: 0, tiles: [] as TileRecord[] };
+  if (tilesDir && !existsSync(join(dirname(script), 'geomTiles.mjs'))) return { ok: false, note: 'the display tiler (geomTiles.mjs beside geomWorker.mjs) is missing. The model is indexed; the 3D view is not available for it.' };
+  const state = newRunState();
   /** One worker run: mesh, fingerprints into the index, tiles. */
   const one = async (file: string, dir: string): Promise<Run> => {
     const r = await runGeometryWorker(file, dir, productsBin, opts, script);
-    if (!r.ok) return r;
-    const sum = JSON.parse(readFileSync(join(dir, 'geom.json'), 'utf8')) as RunSummary;
-    const mb = readFileSync(join(dir, 'elems.meta')), rows = new Float64Array(mb.buffer, mb.byteOffset, mb.byteLength / 8);
-    for (let k = 0; k + 13 <= rows.length; k += 13) {
-      const o = rows[k];
-      if (store) putGeometry(store, o, rows.subarray(k + 4, k + 10), rows.subarray(k + 10, k + 13), rows[k + 3], rows[k + 2]);
-      else { const e = index.elements[o] as IfcElement & { geom: GeomFingerprint | null; derivedVolumeM3: number | null }; if (e) { e.geom = { bbox: [...rows.subarray(k + 4, k + 10)] as GeomFingerprint['bbox'], centroid: [...rows.subarray(k + 10, k + 13)] as GeomFingerprint['centroid'], volume: rows[k + 3], triangles: rows[k + 2] }; e.derivedVolumeM3 = Number.isNaN(rows[k + 3]) ? null : rows[k + 3]; } }
-    }
-    state.meshed += sum.elements; state.failures += sum.failures; state.maxAbsCoord = Math.max(state.maxAbsCoord, sum.maxAbsCoord);
-    if (tilesDir) {
-      const t = await runNode(tiler, [dir, tilesDir, String(state.tiles.length), String(opts.tileBytes ?? tileBytesOf()), String(Number(process.env.P6CLONE_INSTANCE_MIN) || 4)], opts.timeoutMs ?? 30 * 60_000, () => existsSync(join(dir, 'tiles.json')));
-      if (!t.ok) return { ok: false, note: `the display tiles could not be written: ${t.note}` };
-      state.tiles.push(...(JSON.parse(readFileSync(join(dir, 'tiles.json'), 'utf8')) as TileRecord[]));
-    }
-    rmSync(dir, { recursive: true, force: true });
-    return { ok: true };
+    return r.ok ? absorbRun(dir, index, tilesDir, opts, state) : r;
   };
   if (statSync(ifc).size <= target) {
     const r = await one(ifc, join(outDir, 'g0'));
@@ -253,6 +242,32 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   }
   if (!state.meshed) return { ok: false, note: `no chunk could be meshed: ${failed.slice(0, 3).join('; ')}` };
   return { ok: true, ...state, note: `meshed in ${chunks.length} chunk${chunks.length === 1 ? '' : 's'} of at most ${Math.round(target / 1048576)} MB of the IFC (the model is past one geometry run)${failed.length ? `; ${failed.length} chunk(s) failed and their elements have no geometry: ${failed.slice(0, 3).join('; ')}` : ''}` };
+}
+
+export type RunState = { meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[] };
+export const newRunState = (): RunState => ({ meshed: 0, failures: 0, maxAbsCoord: 0, tiles: [] });
+
+/** A run in the geometry worker's layout (dir: geom.json, elems.meta, geoms.*, places.bin) taken in: its fingerprints
+ *  into the index, its meshes into display tiles (geomTiles.mjs, in its own process), then its files go. */
+export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string | null, opts: ParseIfcOptions, state: RunState): Promise<Run> {
+  const store = geomStore(index);
+  const sum = JSON.parse(readFileSync(join(dir, 'geom.json'), 'utf8')) as RunSummary;
+  const mb = readFileSync(join(dir, 'elems.meta')), rows = new Float64Array(mb.buffer, mb.byteOffset, mb.byteLength / 8);
+  for (let k = 0; k + 13 <= rows.length; k += 13) {
+    const o = rows[k];
+    if (store) putGeometry(store, o, rows.subarray(k + 4, k + 10), rows.subarray(k + 10, k + 13), rows[k + 3], rows[k + 2]);
+    else { const e = index.elements[o] as IfcElement & { geom: GeomFingerprint | null; derivedVolumeM3: number | null }; if (e) { e.geom = { bbox: [...rows.subarray(k + 4, k + 10)] as GeomFingerprint['bbox'], centroid: [...rows.subarray(k + 10, k + 13)] as GeomFingerprint['centroid'], volume: rows[k + 3], triangles: rows[k + 2] }; e.derivedVolumeM3 = Number.isNaN(rows[k + 3]) ? null : rows[k + 3]; } }
+  }
+  state.meshed += sum.elements; state.failures += sum.failures; state.maxAbsCoord = Math.max(state.maxAbsCoord, sum.maxAbsCoord);
+  if (tilesDir) {
+    const worker = workerScript(opts), tiler = worker ? join(dirname(worker), 'geomTiles.mjs') : null;
+    if (!tiler || !existsSync(tiler)) return { ok: false, note: 'the display tiler (geomTiles.mjs beside geomWorker.mjs) is missing. The model is indexed; the 3D view is not available for it.' };
+    const t = await runNode(tiler, [dir, tilesDir, String(state.tiles.length), String(opts.tileBytes ?? tileBytesOf()), String(Number(process.env.P6CLONE_INSTANCE_MIN) || 4)], opts.timeoutMs ?? 30 * 60_000, () => existsSync(join(dir, 'tiles.json')));
+    if (!t.ok) return { ok: false, note: `the display tiles could not be written: ${t.note}` };
+    state.tiles.push(...(JSON.parse(readFileSync(join(dir, 'tiles.json'), 'utf8')) as TileRecord[]));
+  }
+  rmSync(dir, { recursive: true, force: true });
+  return { ok: true };
 }
 
 function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opts: ParseIfcOptions, script: string): Promise<Run> {

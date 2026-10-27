@@ -2,7 +2,7 @@
 // onnxruntime-common bundled into one ES module beside its WebAssembly (~14 MB), plus their licence notices. Not a
 // node_modules folder: the White Hat IQ platform's signed manifest and patch builder skip those. hrmRuntime.ts imports
 // ort/onnxruntime-web/dist/ort.node.min.mjs by absolute path; the module finds its .wasm beside itself (import.meta.url).
-import { build } from 'esbuild';
+import { build, buildSync } from 'esbuild';
 import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -25,6 +25,9 @@ export function copyIfc(root, dest) {
   mkdirSync(join(out, 'web-ifc'), { recursive: true });
   for (const f of ['package.json', 'web-ifc-api-node.js', 'web-ifc-node.wasm', 'LICENSE.md']) cpSync(join(web, f), join(out, 'web-ifc', f));
   cpSync(join(root, 'core/bim/geomWorker.mjs'), join(out, 'geomWorker.mjs'));
+  cpSync(join(root, 'core/bim/meshClosed.mjs'), join(out, 'meshClosed.mjs')); // the closed-mesh rule geomWorker.mjs imports
+  // Navisworks files: the reader, bundled into one module (its own process; it starts the tiler beside it)
+  buildSync({ entryPoints: [join(root, 'core/bim/nwdWorker.ts')], outfile: join(out, 'nwdWorker.mjs'), bundle: true, format: 'esm', platform: 'node', target: 'node22', logLevel: 'warning', banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" } });
   cpSync(join(root, 'core/bim/geomChunk.mjs'), join(out, 'geomChunk.mjs')); // models past one web-ifc run
   cpSync(join(root, 'core/bim/geomTiles.mjs'), join(out, 'geomTiles.mjs')); // the display tiles of each run
   cpSync(join(root, 'core/bim/rvtWorker.mjs'), join(out, 'rvtWorker.mjs')); // Revit files: rvt-rs (Apache-2.0) in rvt/

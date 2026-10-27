@@ -11,14 +11,14 @@ import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, ne
 import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
 import { isRevit, rvtToIfc, type RevitSource } from './rvt.ts';
-import { isNavisworks, navisworksBytes, nwdToIfc, type NavisworksSource } from './nwd.ts';
+import { cacheNavisworks, isNavisworks, navisworksKey, navisworksNeed, nwdToIfc, type NavisworksSource } from './nwd.ts';
 
 export interface Model {
   hash: string; index: IfcIndex;
   /** the display tiles folder (manifest.json, tile-NNNNN.glb, elements.txt), or null when the model has no geometry */
   tiles: string | null;
   byGuid: Map<string, IfcElement>; bytes: number;
-  /** a Revit or Navisworks file read through IFC */
+  /** a Revit file (read through IFC) or a Navisworks file (read as it is): what was read */
   source?: RevitSource | NavisworksSource;
 }
 
@@ -60,8 +60,8 @@ const wrap = (hash: string, index: IfcIndex, tiles: string | null): Model => {
 };
 
 type LoadOptions = { geometry?: boolean; chunkBytes?: number; hash?: string; onProgress?: (done: number, total: number, note: string) => void | Promise<void> };
-/** Parse (or take from the cache) the model at path: an IFC, or a Revit or Navisworks file (made into IFC4 first,
- *  rvt.ts / nwd.ts). geometry: false skips meshing (faster; no tiles, no derived volumes). A model cached without
+/** Parse (or take from the cache) the model at path: an IFC, a Revit file (made into IFC4 first, rvt.ts) or a
+ *  Navisworks file (read as it is, nwd.ts). geometry: false skips meshing (faster; no tiles, no derived volumes). A model cached without
  *  geometry is meshed from its cached index when geometry is asked for. hash: the IFC's own content hash, when the
  *  caller has it (never a Revit or Navisworks file's: the IFC made from it is cached under its own). */
 /** Loads in flight, by file: a second caller waits for the first (two meshing runs of one model would share its tiles
@@ -89,18 +89,38 @@ export async function loadModel(path: string, o: LoadOptions = {}): Promise<Mode
 
 async function loadModelNow(path: string, o: LoadOptions): Promise<Model> {
   if (!existsSync(path)) throw new Error(`No file at ${path}.`);
-  if (isNavisworks(path)) {
-    const { ifc, source } = await nwdToIfc(path);
-    const m = await loadIfc(ifc, { ...o, hash: undefined });
-    m.index.sourcePath = path; m.source = source;
-    return m;
-  }
+  if (isNavisworks(path)) return loadNavisworks(path, o);
   if (!isRevit(path)) return loadIfc(path, o);
   const { ifc, source } = await rvtToIfc(path);
   const m = await loadIfc(ifc, { ...o, hash: undefined });
   m.index.sourcePath = path; m.source = source;
   const boxes = m.index.elements.filter(boxOnly).length;
   source.geometry = { from_the_file: m.index.elements.length - boxes, bounding_box_only: boxes, note: 'bounding-box elements are placed for 4D but give no derived volume (quantities counts them as unquantified)' };
+  return m;
+}
+
+/** A Navisworks model: its index and tiles from the cache, else read from the file (in the reader's own process) into
+ *  it; cached by the files' content and the reader's format. */
+async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
+  pruneCache();
+  const hash = await navisworksKey(path), name = cacheName(hash), base = join(cacheDir(), name);
+  const want = o.geometry !== false;
+  const hit = memory.get(name);
+  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; return hit; }
+  setAsideOld(hash);
+  let index = existsSync(`${base}.ndjson`) && existsSync(`${base}.nw.json`) ? tryReadIndex(base)?.index ?? null : null;
+  // a model read without geometry, or whose geometry failed (once a run of the app), is read again with it
+  const retry = !!index && want && index.geometryStatus === 'unavailable' && !retried.has(hash);
+  if (retry) retried.add(hash);
+  if (!index || retry || (want && (index.geometryStatus === 'skipped' || (index.geometryStatus === 'ok' && !readManifest(`${base}.tiles`))))) {
+    await cacheNavisworks(path, base, { geometry: want, onProgress: o.onProgress });
+    index = readIndex(base);
+  }
+  index.sourcePath = path;
+  touch(base);
+  const m = wrap(hash, index, `${base}.tiles`);
+  m.source = JSON.parse(readFileSync(`${base}.nw.json`, 'utf8')) as NavisworksSource;
+  memory.set(name, m);
   return m;
 }
 
@@ -273,11 +293,12 @@ const meshNeed = (bytes: number) => Math.round(bytes * MESH_PER_BYTE + MESH_FIXE
  *  a chunk sized to what is left (never more than P6CLONE_GEOM_CHUNK_MB, never less than MIN_CHUNK). */
 export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; hash?: string } = {}): LoadNeeds {
   const size = existsSync(path) ? statSync(path).size : 0;
-  // a Revit or Navisworks file is made into an IFC first: rvt-rs's process (419 MB for a 33.7 MB project), or the
-  // Navisworks model tree unpacked (about 7x) and held as objects (an .nwf: every model it lists). This is that making;
-  // reading and meshing the IFC it makes is sized from that IFC (loadNeeds on it, once it is made)
+  // a Revit file is made into an IFC first: rvt-rs's process (419 MB for a 33.7 MB project); reading and meshing the
+  // IFC it makes is sized from that IFC (loadNeeds on it, once it is made)
   if (isRevit(path)) { const index = size * 12; return { index, mesh: 0, chunkBytes: 0, total: index }; }
-  if (isNavisworks(path)) { const index = navisworksBytes(path) * 30; return { index, mesh: 0, chunkBytes: 0, total: index }; }
+  // a Navisworks model is read as it is, by its own process (its model trees as objects, a model at a time; the geometry
+  // a stream at a time), then its index is held here: both, from the sizes of its sections (navisworksNeed)
+  if (isNavisworks(path)) { const n = navisworksNeed(path, o.geometry !== false); return { index: n.index, mesh: n.reader, chunkBytes: 0, total: n.index + n.reader }; }
   const base = o.hash ? join(cacheDir(), cacheName(o.hash)) : null;
   const indexCached = !!(base && (memory.has(cacheName(o.hash!)) || existsSync(`${base}.ndjson`)));
   const tilesCached = !!(base && readManifest(`${base}.tiles`));
@@ -299,7 +320,7 @@ export function loadEstimate(path: string, o: { geometry?: boolean } = {}): numb
 // ── the disk cache (OS temp folder unless P6CLONE_MODEL_CACHE): models not used for P6CLONE_MODEL_CACHE_DAYS (14) go,
 // and the oldest go first while it is over P6CLONE_MODEL_CACHE_MB (10240); checked at most once an hour. The
 // superseded/ folder (older formats, set aside) is pruned by age only.
-const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
+const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles', '.nw.json']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
 let pruned = 0;
 const retried = new Set<string>();
 

@@ -8,55 +8,62 @@
 import type { NwNode, NwTree } from './tree.ts';
 import type { Mesh } from './mesh.ts';
 
-interface Frag { item: number; prim: number; xform: { cls: number; t: number[]; q?: number[]; s?: number; m?: number[] } | null; box: { bbox: number[]; t: number[]; geom: number } | null }
+export interface Frag { item: number; prim: number; xform: { cls: number; t: number[]; q?: number[]; s?: number; m?: number[] } | null; box: { bbox: number[]; t: number[]; geom: number } | null }
 
 export interface ElementShape { positions: number[]; triangles: number[]; boxes: number }
 const BOX = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7];
 
-/** Each element's placed triangles (x, y, z in the file's units): its pieces' meshes (mesh(n) gives geometry block n,
- *  null for lines and points, undefined when it could not be read: then the piece is its placed box). */
-export function elementShapes(tree: NwTree, fragments: unknown[], elementNodes: NwNode[], mesh: (n: number) => Mesh | null | undefined): Map<number, ElementShape> {
+/** Each piece of each element's geometry: each(element, geometry block, its box in its own frame, its placement as a
+ *  column-major 4x4 matrix), in fragment order. */
+export function piecesOf(tree: NwTree, fragments: unknown[], elementNodes: NwNode[], each: (element: number, geom: number, bbox: number[], m: number[]) => void): void {
   // the element each item belongs to: the nearest element at or above it (items counted in pre-order, the file is 0)
   const element = new Map(elementNodes.map((n, i) => [n, i]));
   const owner: number[] = [];
   let i = 0;
   const walk = (n: NwNode, e: number) => { const own = element.get(n) ?? e; owner[++i] = own; for (const c of n.children) walk(c, own); };
   for (const r of tree.roots) walk(r, -1);
-  const out = new Map<number, ElementShape>();
   for (const raw of fragments) {
     const f = raw as Frag;
     if (!f?.box?.bbox) continue;
     const e = owner[f.item];
     if (e === undefined || e < 0) continue;
-    const m = mesh(f.box.geom);
-    if (m === null) continue; // lines, points
-    const s = out.get(e) ?? out.set(e, { positions: [], triangles: [], boxes: 0 }).get(e)!;
-    const place = placer(f), base = s.positions.length / 3;
-    if (m) {
-      for (let k = 0; k < m.positions.length; k += 3) s.positions.push(...place([m.positions[k], m.positions[k + 1], m.positions[k + 2]]));
-      for (const t of m.triangles) s.triangles.push(base + t);
-    } else {
-      const [x0, y0, z0, x1, y1, z1] = f.box.bbox;
-      for (const c of [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]) s.positions.push(...place(c));
-      for (const t of BOX) s.triangles.push(base + t);
-      s.boxes++;
-    }
+    each(e, f.box.geom, f.box.bbox, matrixOf(f));
   }
+}
+
+/** Each element's placed triangles (x, y, z in the file's units): its pieces' meshes (mesh(n) gives geometry block n,
+ *  null for lines and points, undefined when it could not be read: then the piece is its placed box). */
+export function elementShapes(tree: NwTree, fragments: unknown[], elementNodes: NwNode[], mesh: (n: number) => Mesh | null | undefined): Map<number, ElementShape> {
+  const out = new Map<number, ElementShape>();
+  piecesOf(tree, fragments, elementNodes, (e, geom, bbox, m) => {
+    const g = mesh(geom);
+    if (g === null) return; // lines, points
+    const s = out.get(e) ?? out.set(e, { positions: [], triangles: [], boxes: 0 }).get(e)!;
+    const base = s.positions.length / 3;
+    const pos = g ? g.positions : boxCorners(bbox);
+    for (let k = 0; k < pos.length; k += 3) { const x = pos[k], y = pos[k + 1], z = pos[k + 2]; s.positions.push(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]); }
+    for (const t of g ? g.triangles : BOX) s.triangles.push(base + t);
+    if (!g) s.boxes++;
+  });
   return out;
 }
 
-function placer(f: Frag): (p: number[]) => number[] {
+/** A box's 8 corners (x, y, z each) and its 12 triangles (BOX) */
+export const boxCorners = ([x0, y0, z0, x1, y1, z1]: number[]): number[] => [x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1];
+export { BOX };
+
+/** A fragment's placement as a column-major 4x4 matrix: its transform (translation; a rotation by a quaternion, scaled
+ *  uniformly first for 0x10; a 3x4 matrix), else its box's translation. */
+export function matrixOf(f: Frag): number[] {
   const x = f.xform;
-  if (!x) { const t = f.box!.t; return (p) => [p[0] + t[0], p[1] + t[1], p[2] + t[2]]; }
-  const t = x.t;
-  if (x.cls === 0x0f && x.q) { const [qx, qy, qz, qw] = x.q; return (p) => add(rotate(p, qx, qy, qz, qw), t); }
-  if (x.cls === 0x10 && x.q) { const [qx, qy, qz, qw] = x.q, k = x.s ?? 1; return (p) => add(rotate([p[0] * k, p[1] * k, p[2] * k], qx, qy, qz, qw), t); }
-  if (x.cls === 0x11 && x.m) { const m = x.m; return (p) => [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + t[0], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + t[1], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + t[2]]; }
-  return (p) => add(p, t);
-}
-const add = (p: number[], t: number[]) => [p[0] + t[0], p[1] + t[1], p[2] + t[2]];
-/** p rotated by the unit quaternion (x, y, z, w) */
-function rotate(p: number[], x: number, y: number, z: number, w: number): number[] {
-  const ix = w * p[0] + y * p[2] - z * p[1], iy = w * p[1] + z * p[0] - x * p[2], iz = w * p[2] + x * p[1] - y * p[0], iw = -x * p[0] - y * p[1] - z * p[2];
-  return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z, iz * w + iw * -z + ix * -y - iy * -x];
+  const t = x ? x.t : f.box!.t;
+  let r = [1, 0, 0, 0, 1, 0, 0, 0, 1]; // columns
+  if (x && (x.cls === 0x0f || x.cls === 0x10) && x.q) {
+    const [qx, qy, qz, qw] = x.q, k = x.cls === 0x10 ? x.s ?? 1 : 1;
+    // q p q* (as rotate() did for a point), a unit quaternion or not
+    r = [qw * qw + qx * qx - qy * qy - qz * qz, 2 * (qx * qy + qw * qz), 2 * (qx * qz - qw * qy),
+      2 * (qx * qy - qw * qz), qw * qw - qx * qx + qy * qy - qz * qz, 2 * (qy * qz + qw * qx),
+      2 * (qx * qz + qw * qy), 2 * (qy * qz - qw * qx), qw * qw - qx * qx - qy * qy + qz * qz].map((v) => v * k);
+  } else if (x && x.cls === 0x11 && x.m) { const m = x.m; r = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]]; }
+  return [r[0], r[1], r[2], 0, r[3], r[4], r[5], 0, r[6], r[7], r[8], 0, t[0], t[1], t[2], 1];
 }

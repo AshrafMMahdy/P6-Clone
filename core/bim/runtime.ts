@@ -26,5 +26,16 @@ export function rvtWorkerPath(): string | null {
   return own && existsSync(own) ? own : shipped('rvtWorker.mjs');
 }
 
+/** The Navisworks reader's worker (run in its own process): the TypeScript beside this file under Node (the
+ *  repository), else nwdWorker.mjs, the bundle made of it, in ifc/. Null in Electron without the bundle: then the
+ *  reader runs in the app's own process. */
+export function nwdWorkerPath(): string | null {
+  const explicit = process.env.P6CLONE_NWD_WORKER;
+  if (explicit) return existsSync(explicit) ? explicit : null;
+  const h = here(), own = h ? join(h, 'nwdWorker.ts') : null;
+  if (own && !process.versions.electron && existsSync(own)) return own;
+  return shipped('nwdWorker.mjs');
+}
+
 /** web-ifc as a module object (its CommonJS build arrives as the default export when imported). */
 export async function loadWebIfc(): Promise<any> { const m: any = await import(webIfcEntry()); return m.IfcAPI ? m : m.default; }

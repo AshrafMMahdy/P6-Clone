@@ -76,11 +76,19 @@ model-<hash16>/
   mesh), `places.bin` (float64 ordinal, mesh number, 4×4 column-major placement per placed mesh, an element's
   placements consecutive), `elems.meta` (float64 ordinal, vertices, triangles, volume, bbox 6, centroid 3 per element).
   `geomWorker.mjs` writes it from web-ifc; an RVT or NWD reader that writes the same four files gets the same tiles,
-  fingerprints and viewer. Today Revit (`.rvt` / `.rfa`, rvt-rs) and Navisworks (`.nwd` / `.nwc` / `.nwf`, the
-  clone's own reader) files are made into an IFC4 first, so they take this whole path as it is: the compact index,
-  index-only linking and exports, chunked meshing and the same tiles. Their conversion is estimated before it runs
-  (`loadNeeds`: 12× a Revit file for rvt-rs's process, 30× a Navisworks file for its unpacked tree); a reader that
-  wrote the mesh stream directly would skip the IFC in between.
+  fingerprints and viewer. Navisworks files (`.nwd` / `.nwc` / `.nwf`, the clone's own reader, `nwd/native.ts`) do
+  exactly that: no IFC in between. The reader (`nwdWorker.ts`, its own process) writes the index (the records an IFC
+  of the model gives, element k as express id k + 1, Y up as web-ifc gives meshes) and these four files (each
+  geometry block once, every piece placed), and the tiler makes the same tiles; an IFC4 is written, streamed, only
+  for the exports that deliver one. Its memory is estimated from the sizes of the model sections it holds as objects
+  (`navisworksNeed`: a fixed 200 MB, 40× the biggest model's compressed tree, 9× all of them; the index 3×), and
+  `open_model` answers its measured peak (`source.peak_memory_mb`). Measured (Windows, Node 24.14.0): a 509 MB
+  federation (`scripts/make-federation.ts`: 160 copies of test.nwd, 262,400 elements, 320 million triangles) opens
+  through the MCP server at `P6CLONE_MEM_BUDGET_MB=2048` in 6.8 minutes: server 360 MB, reader 1,270 MB, every process
+  together 1,647 MB (`scripts/measure-federation.mjs`); the IFC4 of 20 of those copies (1.6 GB) is written with the
+  reader at 727 MB. Revit files (`.rvt` / `.rfa`, rvt-rs) are made
+  into an IFC4 first, in rvt-rs's own process (`loadNeeds`: 12× the file); that IFC is a small part of it (0.4 MB of
+  text for a 12 MB project whose reading peaks at 272 MB), so the rest of the path takes it as it is.
 
 ## 3. What the page fetches
 
