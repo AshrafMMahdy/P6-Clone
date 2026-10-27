@@ -4,7 +4,7 @@
 // (tests/fixtures/navisworks); the user's own files are read in place where they are present.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readNavisworks, readNavisworksTimeliner } from '../core/bim/nwd.ts';
@@ -248,4 +248,37 @@ test('the Navisworks reader’s heap follows the memory budget (plus headroom), 
     process.env.P6CLONE_MEM_BUDGET_MB = '2048'; assert.equal(nwdHeapMb(undefined, 64 * GB), 2048 + 512);
     delete process.env.P6CLONE_MEM_BUDGET_MB; assert.equal(nwdHeapMb(undefined, 64 * GB), 3072 + 512, 'unset: the server’s default budget');
   } finally { if (was === undefined) delete process.env.P6CLONE_MEM_BUDGET_MB; else process.env.P6CLONE_MEM_BUDGET_MB = was; }
+});
+
+test('the reader’s job file is written in a private directory, mode 0600, and gone with its directory afterwards', { skip: process.platform === 'win32' && 'POSIX modes' }, async () => {
+  const { cacheNavisworks } = await import('../core/bim/nwd.ts');
+  const { readdirSync, readFileSync, rmSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
+  const work = mkdtempSync(join(tmpdir(), 'p6-nwjob-')), temp = join(work, 'tmp');
+  mkdirSync(temp);
+  // a reader that only reports where its job file was, and how it was protected
+  const stub = join(work, 'stub-worker.mjs');
+  writeFileSync(stub, `import { statSync, writeFileSync } from 'node:fs'; import { dirname } from 'node:path';
+const f = process.argv[2];
+writeFileSync(f + '.seen', JSON.stringify({ dir: dirname(f), dirMode: statSync(dirname(f)).mode & 0o777, fileMode: statSync(f).mode & 0o777 }));
+writeFileSync(f + '.out.json', JSON.stringify({ format: 'Navisworks', files: [], warnings: [] }));
+`);
+  const was = { worker: process.env.P6CLONE_NWD_WORKER, tmpdir: process.env.TMPDIR };
+  process.env.P6CLONE_NWD_WORKER = stub; process.env.TMPDIR = temp;
+  let seen: { dir: string; dirMode: number; fileMode: number } | undefined;
+  try {
+    const origin = join(work, 'seen.json'); // outside the job directory, which is gone when the read returns
+    writeFileSync(stub, readFileSync(stub, 'utf8').replace("f + '.seen'", JSON.stringify(origin)));
+    await cacheNavisworks(join(FIX, 'hello.nwc'), join(work, 'base'), { geometry: false });
+    seen = JSON.parse(readFileSync(origin, 'utf8'));
+  } finally {
+    for (const [k, v] of [['P6CLONE_NWD_WORKER', was.worker], ['TMPDIR', was.tmpdir]] as const) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+  assert.ok(seen, 'the reader ran');
+  assert.equal(dirname(seen!.dir), temp, 'inside the temp folder, in a directory of its own');
+  assert.match(seen!.dir.slice(temp.length + 1), /^p6clone-nwjob-[A-Za-z0-9]{6}$/);
+  assert.equal(seen!.dirMode, 0o700);
+  assert.equal(seen!.fileMode, 0o600);
+  assert.deepEqual(readdirSync(temp), [], 'the job file, its answer and its directory are removed afterwards');
+  rmSync(work, { recursive: true, force: true });
 });

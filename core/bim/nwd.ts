@@ -4,7 +4,7 @@
 // model of its own: the .nwc / .nwd files it lists are read from beside it (or where it says they are) and joined.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
@@ -182,8 +182,8 @@ const NW_HEAP_HEADROOM_MB = 512;
 async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<NavisworksSource> {
   const worker = nwdWorkerPath();
   if (!worker) return runJob(job, onProgress);
-  const jobFile = join(tmpdir(), `p6clone-nwjob-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.json`);
-  writeFileSync(jobFile, JSON.stringify(job));
+  const jobDir = mkdtempSync(join(tmpdir(), 'p6clone-nwjob-')), jobFile = join(jobDir, 'job.json');
+  writeFileSync(jobFile, JSON.stringify(job), { mode: 0o600 });
   try {
     const heap = nwdHeapMb();
     const err = await new Promise<string | null>((done) => {
@@ -201,7 +201,7 @@ async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<Naviswo
     });
     if (err) throw new Error(err);
     return JSON.parse(readFileSync(`${jobFile}.out.json`, 'utf8')) as NavisworksSource;
-  } finally { rmSync(jobFile, { force: true }); rmSync(`${jobFile}.out.json`, { force: true }); }
+  } finally { rmSync(jobDir, { recursive: true, force: true }); }
 }
 
 export interface NavisworksTimeliner {
