@@ -104,7 +104,8 @@ export function rvtToIfcStream(bytes, mode) {
 test('2: no idle rule without a reading that covers Project; the size bound alone ends it', async (t) => {
   // a table that does not list the program: no reading
   assert.equal(await cpuCovering(process.pid, ['definitely-not-running-winproj.exe']), null);
-  if (process.platform === 'linux') assert.ok(((await cpuCovering(process.pid, ['node'])) ?? 0) > 0, 'a program that is listed is covered');
+  // this process's own name as /proc lists it (Node 24 names its main thread, and so the process, MainThread)
+  if (process.platform === 'linux') assert.ok(((await cpuCovering(process.pid, [readFileSync('/proc/self/comm', 'utf8').trim()])) ?? 0) > 0, 'a program that is listed is covered');
   const keep = setInterval(() => {}, 1000);
   t.after(() => clearInterval(keep));
   const ended = await new Promise<StuckInfo>((done) => { const stop = externalWatch({ step: 'converting', floorMs: 200, expectMs: 30, pollMs: 20, output: () => 0, cpu: async () => null, onStuck: (i) => { stop(); done(i); } }); });
