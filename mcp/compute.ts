@@ -15,17 +15,17 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyPatch, isEmptyPatch, patchFrom, type DbPatch } from '../core/journalPatch.ts';
 import { ToolError, adjustReserved, change, config, effectiveBudget, getSession, regrow, reserveMemory, sessions, setRoot, setRoots, usedMemory, workerBudget, type Session } from './runtime.ts';
-import { existsSync, rmSync, statSync } from 'node:fs';
-import { basename } from 'node:path';
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { lobSidecars } from './lob.ts';
 
 type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void };
 interface Snapshot { handle: string; ownerKey: string; db: Session['db']; path: string | null; format: Session['format']; hpd: number; encoding?: Session['encoding']; savedTo?: string; dirty: boolean; bytes: number }
-interface Job { id: number; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean } }
+interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean } }
 type Answer =
   | { id: number; type: 'progress'; done: number; total: number; message: string }
   | { id: number; type: 'note'; text: string }
-  | { id: number; type: 'tmp'; path: string }
   | { id: number; type: 'reserved'; delta: number }
   | { id: number; type: 'done'; result: unknown; patch: DbPatch | null; label: string; lobSide: unknown }
   | { id: number; type: 'error'; tool: { code: string; message: string; hint?: string; retryAfter?: number; data?: Record<string, unknown> } | null; message: string; stack?: string };
@@ -61,18 +61,52 @@ function release(w: Worker, keep: boolean): void {
   waiting.shift()?.();
 }
 let jobSeq = 0;
+/** What a worker takes at its peak on a project of `bytes` (the session's estimate): its own runtime (measured 37 MB, rounded up), and the copy
+ *  with the engines' working memory on top, measured on a 12 MB XER (a 43 MB session): schedule 1.9 x, levelling 2.0, check 2.0, Monte Carlo
+ *  2.8, crash 1.0, PDF 1.0, rounded up to 3 x. */
+export const WORKER_RUNTIME_BYTES = 48 * 1048576, WORKER_PEAK_PER_SESSION_BYTE = 3;
+export const workerPeak = (sessionBytes: number) => WORKER_RUNTIME_BYTES + WORKER_PEAK_PER_SESSION_BYTE * Math.max(sessionBytes, 8 * 1048576);
 const snapshotOf = (s: Session): Snapshot => ({ handle: s.handle, ownerKey: s.ownerKey, db: s.db, path: s.path, format: s.format, hpd: s.hpd, ...(s.encoding ? { encoding: s.encoding } : {}), ...(s.savedTo ? { savedTo: s.savedTo } : {}), dirty: s.dirty, bytes: s.bytes });
 /** The other open projects a call reads by handle (windows_analysis: updates[].handle). */
 const readsHandles = (name: string, a: Record<string, any>): string[] => (name === 'windows_analysis' && Array.isArray(a.updates) ? a.updates.filter((u: any) => u?.handle).map((u: any) => String(u.handle)) : []);
-/** A file the worker was writing: "<folder>/.<name>.<hex>.p6clone-tmp" is the temporary file of "<folder>/<name>" (server.ts writeOutWith). */
-export const targetOf = (tmp: string) => join(dirname(tmp), basename(tmp).replace(/^\./, '').replace(/\.[0-9a-f]{8}\.p6clone-tmp$/, ''));
-/** After a worker was ended mid-call: remove the temporary files it left, and say exactly which files it had finished. */
-export function settleWrites(tmps: Set<string>, since: number): string[] {
+/** A file the worker was writing: "<folder>/.<name>.<tag><hex>.p6clone-tmp" is the temporary file of "<folder>/<name>" (server.ts writeOutWith). */
+export const targetOf = (tmp: string) => join(dirname(tmp), basename(tmp).replace(/^\./, '').replace(/\.(?:j[0-9a-f]{6}-)?[0-9a-f]{8}\.p6clone-tmp$/, ''));
+const tagOf = (token: string) => `j${token}-`;
+// The temporary files a worker is about to write are logged in shared memory BEFORE they are made: a message could be lost when the worker
+// is ended at once, memory the main thread holds is not. Layout: Int32 [0] = bytes used; then paths, each ended by a NUL.
+export function logTmp(log: SharedArrayBuffer, path: string): void {
+  const used = new Int32Array(log, 0, 1), bytes = Buffer.from(`${path}\0`, 'utf8'), at = 4 + Atomics.load(used, 0);
+  if (at + bytes.length > log.byteLength) return; // full: the sweep by name still finds the file
+  new Uint8Array(log, at, bytes.length).set(bytes);
+  Atomics.store(used, 0, at - 4 + bytes.length);
+}
+export const readTmpLog = (log: SharedArrayBuffer): string[] => Buffer.from(new Uint8Array(log, 4, Atomics.load(new Int32Array(log, 0, 1), 0))).toString('utf8').split('\0').filter(Boolean);
+/** The folders a call may have written into: those of the temporary files logged, and those its arguments name (a path, or a folder). */
+function foldersOf(logged: string[], a: Record<string, any>): string[] {
+  const dirs = new Set(logged.map((t) => dirname(t))), base = config.writeRoot ?? config.root ?? process.cwd();
+  const walk = (v: unknown, depth: number) => {
+    if (dirs.size > 40 || depth > 3) return;
+    if (typeof v === 'string' && v.length < 1024) {
+      try { const p = resolve(base, v); dirs.add(dirname(p)); if (existsSync(p) && statSync(p).isDirectory()) dirs.add(p); } catch { /* not a path */ }
+    } else if (Array.isArray(v)) for (const x of v) walk(x, depth + 1);
+    else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x, depth + 1);
+  };
+  walk(a, 0);
+  return [...dirs];
+}
+/** After a worker was ended mid-call: remove the temporary files it left (the ones logged, and any of this job's by name), and say
+ *  exactly which files it had finished. */
+export function settleWrites(logged: string[], since: number, folders: string[] = [], token = ''): string[] {
   const finished: string[] = [];
-  for (const t of tmps) {
+  for (const t of logged) {
     try { if (existsSync(t)) { rmSync(t, { force: true }); continue; } } catch { /* in use: left to the temp cleaner */ }
     const target = targetOf(t);
     try { if (existsSync(target) && statSync(target).mtimeMs >= since - 1000) finished.push(target); } catch { /* gone */ }
+  }
+  if (token) for (const d of folders) {
+    let names: string[] = [];
+    try { names = readdirSync(d); } catch { continue; }
+    for (const n of names) if (n.startsWith('.') && n.endsWith('.p6clone-tmp') && n.includes(`.${tagOf(token)}`)) { try { rmSync(join(d, n), { force: true }); } catch { /* in use */ } }
   }
   return finished;
 }
@@ -82,16 +116,18 @@ export function settleWrites(tmps: Set<string>, since: number): string[] {
 export async function offload(name: string, a: Record<string, any>, s: Session, ctx: Ctx): Promise<unknown> {
   const others = readsHandles(name, a).map((h) => getSession(h)).filter((o) => o.handle !== s.handle); // an unknown handle is refused here, as it always was
   const releases: (() => void)[] = [];
-  const tmps = new Set<string>(), started = Date.now();
+  const started = Date.now(), token = randomBytes(3).toString('hex'), tmpLog = new SharedArrayBuffer(1 << 16);
+  const settle = () => settleWrites(readTmpLog(tmpLog), started, foldersOf(readTmpLog(tmpLog), a), token);
   let worker: Worker | null = null, held = 0; // held: what the worker reserved inside the call, counted here against the budget while it runs
   let healthy = false; // the worker answered (a result or the tool's own refusal): it can serve the next call
   try {
-    releases.push(reserveMemory(Math.max(s.bytes, 8 * 1048576), `A copy of the project for the worker that runs ${name}`, 'Close projects you no longer need, then call again.', s.handle));
+    // the worker's expected PEAK is reserved before it starts, so the workers running together never add up past the budget
+    releases.push(reserveMemory(workerPeak(s.bytes), `The worker that runs ${name} (a copy of the project and its working memory)`, 'Close projects you no longer need, or retry when the running calls have finished.', s.handle));
     for (const o of others) releases.push(reserveMemory(Math.max(o.bytes, 8 * 1048576), `A copy of project ${o.handle} for the worker that runs ${name}`, 'Close projects you no longer need, then call again.', s.handle));
     const w = worker = await acquire();
     const id = ++jobSeq;
     const job: Job = {
-      id, name, a, caller: ctx.caller, lobSide: lobSidecars.get(s.handle) ?? null,
+      id, token, tmpLog, name, a, caller: ctx.caller, lobSide: lobSidecars.get(s.handle) ?? null,
       snap: snapshotOf(s), others: others.map(snapshotOf), externalUsed: Math.max(0, usedMemory() - 2 * s.bytes),
       cfg: { root: config.root, readRoot: config.readRoot, writeRoot: config.writeRoot, requireOwnerKey: config.requireOwnerKey },
     };
@@ -101,19 +137,18 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
         if (m.id !== id) return;
         if (m.type === 'progress') ctx.progress?.(m.done, m.total, m.message);
         else if (m.type === 'note') { if (ctx.job) ctx.job.progress = m.text; }
-        else if (m.type === 'tmp') tmps.add(m.path);
         else if (m.type === 'reserved') { held += m.delta; adjustReserved(m.delta); }
         else if (m.type === 'done') { healthy = true; cleanup(); resolve(m); }
         else { healthy = true; cleanup(); reject(m.tool ? new ToolError(m.tool.code, m.tool.message, m.tool.hint, { ...(m.tool.retryAfter ? { retryAfter: m.tool.retryAfter } : {}), ...(m.tool.data ? { data: m.tool.data } : {}) }) : Object.assign(new Error(m.message), m.stack ? { stack: m.stack } : {})); }
       };
-      const onError = (e: Error) => { cleanup(); settleWrites(tmps, started); reject(new ToolError('compute_failed', `The worker that runs ${name} stopped: ${e.message}`, /memory/i.test(e.message) ? 'The project is too big for this computation within the memory budget; close other projects or work on part of the plan.' : 'Call again; if it repeats, report it with the message.')); };
-      const onExit = (code: number) => { cleanup(); settleWrites(tmps, started); reject(new ToolError('compute_failed', `The worker that runs ${name} ended (code ${code}) before it answered.`, 'Call again.')); };
+      const onError = (e: Error) => { cleanup(); settle(); reject(new ToolError('compute_failed', `The worker that runs ${name} stopped: ${e.message}`, /memory/i.test(e.message) ? 'The project is too big for this computation within the memory budget; close other projects or work on part of the plan.' : 'Call again; if it repeats, report it with the message.')); };
+      const onExit = (code: number) => { cleanup(); settle(); reject(new ToolError('compute_failed', `The worker that runs ${name} ended (code ${code}) before it answered.`, 'Call again.')); };
       // a cancelled call ends its worker at once, even in a synchronous loop: it works on a copy, so nothing is half done
       // (its temporary files go, and what it had finished writing is said)
       const onAbort = () => {
         cleanup();
         void w.terminate().then(() => {
-          const finished = settleWrites(tmps, started);
+          const finished = settle();
           reject(new ToolError('cancelled', finished.length ? `The call was cancelled after it had finished writing ${finished.join(', ')}; nothing else was written.` : 'The call was cancelled.', finished.length ? 'Those files are complete; delete them if you do not want them.' : 'Nothing was kept or written by it; call again when needed.', finished.length ? { data: { written: finished } } : {}));
         });
       };
@@ -124,22 +159,22 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
     });
     if (done.patch && !isEmptyPatch(done.patch)) change(s, ctx.caller, done.label || name, (d) => applyPatch(d, done.patch!));
     if (done.lobSide) lobSidecars.set(s.handle, done.lobSide as never);
-    regrow(s);
+    if (name.startsWith('lob_')) regrow(s); // (as the server did: an LOB plan adds thousands of activities)
     return done.result;
   } finally { adjustReserved(-held); for (const r of releases) r(); if (worker) release(worker, healthy); }
 }
 
 // ---------------------------------------------------------------- the worker thread
 /** Start the worker loop (server.ts calls it when it is started with workerData.p6Compute). `run` is the server's own tool runner. */
-export function startComputeWorker(run: (name: string, a: Record<string, any>, ctx: any) => Promise<unknown>, hookWrites: (notice: (tmp: string) => void) => void): void {
+export function startComputeWorker(run: (name: string, a: Record<string, any>, ctx: any) => Promise<unknown>, hookWrites: (notice: (tmp: string) => void) => { value: string }): void {
   if (isMainThread || !workerData?.p6Compute || !parentPort) return;
   const port = parentPort;
   const post = (m: Answer) => port.postMessage(m);
-  let rooted = '', current = 0;
-  hookWrites((tmp) => post({ id: current, type: 'tmp', path: tmp })); // a file about to be written: if the call is ended, the main thread removes it
+  let rooted = '', log: SharedArrayBuffer | null = null;
+  const tag = hookWrites((tmp) => { if (log) logTmp(log, tmp); }); // a file about to be written is logged where the main thread can read it even if this worker is ended at once
 
   port.on('message', async (job: Job) => {
-    current = job.id;
+    log = job.tmpLog; tag.value = tagOf(job.token);
     workerBudget({ externalUsed: job.externalUsed, notice: (delta) => post({ id: job.id, type: 'reserved', delta }) });
     const key = JSON.stringify(job.cfg);
     if (key !== rooted) { rooted = key; setRoot(job.cfg.root); setRoots(job.cfg.readRoot, job.cfg.writeRoot); config.requireOwnerKey = job.cfg.requireOwnerKey; }

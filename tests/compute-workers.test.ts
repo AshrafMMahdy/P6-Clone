@@ -180,19 +180,34 @@ test('windows_analysis with another open project as an update (updates: [{handle
   for (const h of [a, b]) await call('close', { ...h, discard: true });
 });
 
-test('a call ended mid-write: its temporary files go, and exactly what it had finished is said', async () => {
-  const { settleWrites, targetOf } = await import('../mcp/compute.ts');
+test('a call ended mid-write: its temporary files go, and exactly what it had finished is said — without depending on any message', async () => {
+  const { settleWrites, targetOf, logTmp, readTmpLog } = await import('../mcp/compute.ts');
+  const { existsSync } = await import('node:fs');
   const dir = mkdtempSync(join(tmpdir(), 'p6-compute-tmp-'));
   assert.equal(targetOf(join(dir, '.plan.pdf.1a2b3c4d.p6clone-tmp')), join(dir, 'plan.pdf'));
-  const since = Date.now();
-  const half = join(dir, '.half.pdf.00112233.p6clone-tmp'); writeFileSync(half, 'x');              // still being written: removed
-  const done = join(dir, '.done.pdf.44556677.p6clone-tmp'); writeFileSync(join(dir, 'done.pdf'), 'y'); // renamed just before the end: finished
-  const never = join(dir, '.never.pdf.8899aabb.p6clone-tmp');                                          // not even created
-  const finished = settleWrites(new Set([half, done, never]), since);
+  assert.equal(targetOf(join(dir, '.plan.pdf.jabc123-1a2b3c4d.p6clone-tmp')), join(dir, 'plan.pdf'), 'a worker\u2019s file carries its job\u2019s tag');
+  const since = Date.now(), token = 'abc123', tag = `j${token}-`;
+  // the worker logs each temporary file in shared memory BEFORE it makes it: readable after the worker is gone
+  const log = new SharedArrayBuffer(1 << 12);
+  const half = join(dir, `.half.pdf.${tag}00112233.p6clone-tmp`), done = join(dir, `.done.pdf.${tag}44556677.p6clone-tmp`), never = join(dir, `.never.pdf.${tag}8899aabb.p6clone-tmp`);
+  for (const t of [half, done, never]) logTmp(log, t);
+  assert.deepEqual(readTmpLog(log), [half, done, never]);
+  writeFileSync(half, 'x');                    // still being written: removed
+  writeFileSync(join(dir, 'done.pdf'), 'y');   // renamed just before the end: finished (its message may never have arrived)
+  // a file of this job that was not even logged (the log was full), and one of another job: only this job's goes
+  const unlogged = join(dir, `.lost.pdf.${tag}ccddeeff.p6clone-tmp`), other = join(dir, '.other.pdf.jffffff-00000000.p6clone-tmp'), plain = join(dir, '.mine.pdf.00000000.p6clone-tmp');
+  for (const f of [unlogged, other, plain]) writeFileSync(f, 'z');
+  const finished = settleWrites(readTmpLog(log), since, [dir], token);
   assert.deepEqual(finished, [join(dir, 'done.pdf')]);
-  const { existsSync } = await import('node:fs');
   assert.equal(existsSync(half), false);
+  assert.equal(existsSync(unlogged), false, 'swept by its job tag');
+  assert.equal(existsSync(other), true, 'another job\u2019s file is not ours');
+  assert.equal(existsSync(plain), true, 'a file without a job tag is not ours');
   assert.equal(existsSync(join(dir, 'done.pdf')), true, 'a finished file is kept');
+  // a full log drops the entry, never overruns
+  const tiny = new SharedArrayBuffer(16);
+  logTmp(tiny, join(dir, 'a-very-long-name-that-does-not-fit.p6clone-tmp'));
+  assert.deepEqual(readTmpLog(tiny), []);
 });
 
 test('a table the change removed is removed on the other side too, and undone with the change', () => {
@@ -234,4 +249,39 @@ test('memory a worker reserves inside a call is told to the main thread and coun
   assert.equal(out.refused, 'memory_budget', 'the server\'s 100 MB and the 120 MB asked do not fit in 200 MB');
   assert.equal(out.up, 30);
   assert.equal(out.back, 0);
+});
+
+test('workers running together never add up past the budget: each reserves its expected peak before it starts, and a call that would overshoot is refused with a way forward', { timeout: 300_000 }, async () => {
+  const { spawnSync } = await import('node:child_process');
+  const sample = sampleCopy('DHBL-24FEB13_VER-7.0.xer');
+  const code = `
+    const { callTool, toolResult } = await import(${JSON.stringify(new URL('../mcp/server.ts', import.meta.url).href)});
+    const { usedMemory } = await import(${JSON.stringify(new URL('../mcp/runtime.ts', import.meta.url).href)});
+    const { workerPeak } = await import(${JSON.stringify(new URL('../mcp/compute.ts', import.meta.url).href)});
+    const call = async (n, a) => { const r = await callTool(n, a); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent }; };
+    const A = (await call('open_file', { path: ${JSON.stringify(sample)} })).d, B = (await call('open_file', { path: ${JSON.stringify(sample)} })).d;
+    const MB = 1048576, one = usedMemory() / 2, peak = workerPeak(one);
+    const mc = (h) => ({ handle: h.handle, owner_key: h.owner_key, iterations: 60, default_estimates: { min_pct: 90, max_pct: 125 }, async: true });
+    const first = (await call('monte_carlo', mc(A))).d;
+    await new Promise((r) => setTimeout(r, 700)); // the job has started: its worker is reserved
+    const during = usedMemory();
+    const second = await call('monte_carlo', { ...mc(B), async: false });
+    const out = { reservedForFirst: Math.round((during - 2 * one) / MB), peak: Math.round(peak / MB), secondRefused: second.err ? second.d.error.code : (second.d.status ?? 'ran'), hint: second.err ? !!second.d.error.next_step : null };
+    for (;;) { const j = (await call('job_status', { job_id: first.job_id, wait_seconds: 5 })).d; if (j.status !== 'running') { out.firstDone = j.status; break; } }
+    out.after = Math.round((usedMemory() - 2 * one) / MB);
+    const again = await call('monte_carlo', { ...mc(B), async: false, iterations: 20 });
+    out.secondAfter = again.err ? again.d.error.code : 'ran';
+    console.log('RESULT ' + JSON.stringify(out));
+    process.exit(0);`;
+  // the budget holds both projects (about 43 MB each) and ONE worker's peak, not two
+  const script = join(mkdtempSync(join(tmpdir(), 'p6-budget-')), 'run.mjs'); writeFileSync(script, code); // (a file: a worker inherits the flags of an -e script)
+  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, P6CLONE_MEM_BUDGET_MB: '400' } });
+  assert.equal(r.status, 0, r.stderr.slice(-500));
+  const out = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('RESULT '))!.slice(7));
+  assert.ok(out.reservedForFirst >= out.peak, `the first worker's peak (${out.peak} MB) is reserved before it starts: ${JSON.stringify(out)} ${r.stderr.slice(-300)}`);
+  assert.equal(out.secondRefused, 'memory_budget');
+  assert.equal(out.hint, true);
+  assert.equal(out.firstDone, 'done');
+  assert.ok(out.after <= 1, `the reservation is given back: ${out.after} MB`);
+  assert.equal(out.secondAfter, 'ran', 'and the refused call runs once the first has finished');
 });
