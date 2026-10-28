@@ -18,6 +18,7 @@ import { ToolError, adjustReserved, change, config, countMemory, effectiveBudget
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { ensureCwd, safeCwd } from '../core/cwd.ts';
 import { lobSidecars } from './lob.ts';
 
 type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void };
@@ -50,6 +51,7 @@ export const WORKER_RUNTIME_BYTES = 40 * 1048576;
 countMemory(() => live.size * WORKER_RUNTIME_BYTES, () => { for (const i of idle.splice(0)) { clearTimeout(i.timer); stop(i.w); } });
 function stop(w: Worker): void { live.delete(w); void w.terminate(); }
 function spawnWorker(): Worker {
+  ensureCwd();
   // room for a new runtime is made (idle workers and idle projects go first) or the call is refused, in words
   reserveMemory(WORKER_RUNTIME_BYTES, 'A new worker thread (its own runtime)', 'Close projects you no longer need, or retry when the running calls have finished.')();
   const w = new Worker(entry(), { workerData: { p6Compute: true }, resourceLimits: { maxOldGenerationSizeMb: Math.max(1024, Math.floor(effectiveBudget() / 1048576)) } });
@@ -99,7 +101,7 @@ export function logTmp(log: SharedArrayBuffer, path: string): void {
 export const readTmpLog = (log: SharedArrayBuffer): string[] => Buffer.from(new Uint8Array(log, 4, Atomics.load(new Int32Array(log, 0, 1), 0))).toString('utf8').split('\0').filter(Boolean);
 /** The folders a call may have written into: those of the temporary files logged, and those its arguments name (a path, or a folder). */
 function foldersOf(logged: string[], a: Record<string, any>): string[] {
-  const dirs = new Set(logged.map((t) => dirname(t))), base = config.writeRoot ?? config.root ?? process.cwd();
+  const dirs = new Set(logged.map((t) => dirname(t))), base = config.writeRoot ?? config.root ?? safeCwd();
   const walk = (v: unknown, depth: number) => {
     if (dirs.size > 40 || depth > 3) return;
     if (typeof v === 'string' && v.length < 1024) {

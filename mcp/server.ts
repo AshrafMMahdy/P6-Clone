@@ -14,6 +14,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { randomBytes } from 'node:crypto';
 import { isMainThread, workerData } from 'node:worker_threads';
 import { p6Refusals } from '../core/project/integrity.ts';
+import { ensureCwd, safeCwd } from '../core/cwd.ts';
 import { RUN_HERE, answerReasoner, offload, reasonerState, startComputeWorker } from './compute.ts';
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -614,6 +615,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
 /** One tool call: queued per project, run (or turned into a job), always answered with data or {error}. */
 /** progress: when the request asked for progress (MCP progressToken), called as long work goes on. */
 export async function callTool(name: string, a: Record<string, any>, sessionCaller?: string, signal?: AbortSignal, progress?: Ctx['progress']): Promise<{ out: unknown; isError: boolean }> {
+  ensureCwd(); // (a folder the server was started in may be gone: workers and child processes read it when they start)
   // one abort for the call: the request's cancellation (notifications/cancelled) and cancel_job once it is a job
   const abort = new AbortController();
   if (signal?.aborted) abort.abort(); else signal?.addEventListener('abort', () => abort.abort(), { once: true });
@@ -704,7 +706,7 @@ export function saveUnsavedAtExit(reason: string): string[] {
   const one = (handle: string, path: string | null, db: Db, readAs?: TextEncodingName) => {
     const first = (db.tables.PROJECT?.rows ?? []).find((p) => p.proj_id === allIds(db)[0])?.proj_short_name;
     const name = ((path ? basename(path).replace(/\.[^.]+$/, '') : '') || first || handle).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 80) || 'project';
-    const dir = writeBase() ?? (path ? dirname(path) : process.cwd());
+    const dir = writeBase() ?? (path ? dirname(path) : safeCwd());
     let file = join(dir, `${name}.recovered-${stamp}.xer`);
     for (let i = 2; existsSync(file) || saved.includes(file); i++) file = join(dir, `${name}.recovered-${stamp}-${i}.xer`);
     try { writeOutWith(file, (put) => writeXerTo(db, { version: db.header?.version ?? '19.12', encoding: 'auto', readAs }, put)); saved.push(file); process.stderr.write(`P6 Clone: unsaved changes of ${handle} saved to ${file} (${reason})\n`); }

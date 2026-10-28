@@ -542,3 +542,28 @@ test('child Node processes on Node 24 start without the concurrent compilers (th
   assert.equal(r.stdout.trim(), 'up', r.stderr);
   for (const f of ['parse.ts', 'jobWorker.ts', 'nwd.ts', 'rvt.ts']) assert.match(readFileSync(join(import.meta.dirname, '..', 'core', 'bim', f), 'utf8'), /childV8Flags\(\)/, `${f} starts its processes with the flags`);
 });
+
+test('the server runs every tool when the folder it was started in is deleted (workers and child processes do not need the current directory)', { timeout: 120_000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { rmSync } = await import('node:fs');
+  const cwd = mkdtempSync(join(tmpdir(), 'p6-cwd-')), tmp = mkdtempSync(join(tmpdir(), 'p6-cwdtmp-'));
+  const p = spawn(process.execPath, [join(import.meta.dirname, '..', 'mcp', 'server.ts')], { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp } });
+  let buf = '', id = 0;
+  const waiting = new Map<number, (m: any) => void>();
+  p.stdout.setEncoding('utf8');
+  p.stdout.on('data', (c: string) => { buf += c; for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1); waiting.get(m.id)?.(m); } });
+  const rpc = (method: string, params: unknown) => new Promise<any>((res) => { const n = ++id; waiting.set(n, res); p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n'); });
+  const tool = async (name: string, args: Record<string, unknown>) => { const r = await rpc('tools/call', { name, arguments: args }); return { err: !!r.result?.isError, d: r.result?.structuredContent }; };
+  try {
+    await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
+    rmSync(cwd, { recursive: true, force: true }); // the folder the server was started in is gone
+    const np = (await tool('new_project', { id: 'P', start: '2026-03-02' })).d;
+    const H = { handle: np.handle, owner_key: np.owner_key };
+    assert.equal((await tool('edit', { ...H, operations: [{ op: 'add_activity', id: 'A', name: 'a', duration_days: 3 }, { op: 'add_activity', id: 'B', name: 'b', duration_days: 4 }, { op: 'add_relationship', pred: 'A', succ: 'B' }] })).err, false);
+    for (const [name, a] of [['schedule', {}], ['monte_carlo', { iterations: 50, default_estimates: { min_pct: 90, max_pct: 125 } }], ['review', {}], ['export_pdf', { path: join(tmp, 'r.pdf') }], ['export_excel', { path: join(tmp, 'r.xlsx') }], ['run_report', { path: join(tmp, 'rep.pdf') }], ['save', { path: join(tmp, 'p.xer') }]] as const) {
+      const r = await tool(name, { ...H, ...a });
+      assert.equal(r.err, false, `${name}: ${JSON.stringify(r.d).slice(0, 300)}`);
+    }
+    assert.ok(existsSync(join(tmp, 'p.xer')) && existsSync(join(tmp, 'r.pdf')));
+  } finally { p.stdin.end(); }
+});

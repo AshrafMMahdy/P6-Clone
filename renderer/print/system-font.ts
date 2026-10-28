@@ -4,6 +4,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseTtf, type TtfFont } from './unicode-font.ts';
+import { safeCwd } from '../../core/cwd.ts';
 
 const SYSTEM = [
   '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/dejavu/DejaVuSans.ttf', '/usr/share/fonts/TTF/DejaVuSans.ttf',
@@ -15,7 +16,7 @@ const SYSTEM = [
 const shipped = () => {
   // dist-cli/fonts beside the bundles; the repository's fonts/ when run from cli/ or mcp/; the current folder
   const here = dirname(process.argv[1] ?? '.');
-  const dirs = [join(here, 'fonts'), join(here, '..', 'fonts'), join(process.cwd(), 'fonts')];
+  const dirs = [join(here, 'fonts'), join(here, '..', 'fonts'), join(safeCwd(), 'fonts')];
   return dirs.flatMap((d) => { try { return readdirSync(d).filter((f) => /\.ttf$/i.test(f)).map((f) => join(d, f)); } catch { return []; } });
 };
 
