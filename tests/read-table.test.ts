@@ -136,3 +136,24 @@ test('through the MCP: list_tables, read_table paged with next_offset and no cap
   assert.ok(blTasks.d.total > 0);
   await call('close', { ...H, owner_key: o.d.owner_key, discard: true });
 });
+
+const MPP_DIR = join(ROOT, 'Sample MPPs');
+const MPPS = existsSync(MPP_DIR) ? ['Schedule 1 Gemma 1B Instruct.mpp', 'Granite Schedule 1.mpp', 'مصنع البرج للصناعات الغذائية ver9.mpp', 'Bel-Egypt Schedule Rev.1.mpp'].map((f) => join(MPP_DIR, f)).filter(existsSync) : [];
+test('.mpp through the MCP (MPXJ): opened without Microsoft Project, every element of every task, resource, assignment and calendar readable', { timeout: 600_000 }, async (t) => {
+  const { mppReadable, mppToMspdi } = await import('../core/msp/mpp.ts');
+  if (!mppReadable() || !MPPS.length) return t.skip('no MPXJ here (node scripts/build-cli.mjs fetches it)');
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  for (const f of MPPS) {
+    const r = await callTool('open_file', { path: f });
+    const d = toolResult(r.out, r.isError).structuredContent as any;
+    if (r.isError && d.error?.code === 'mpp_reader_missing') return t.skip('no Java here');
+    assert.equal(r.isError, false, `${f}: ${JSON.stringify(d).slice(0, 300)}`);
+    assert.equal(d.format, 'mpp');
+    const tasks = (toolResult((await callTool('read_table', { handle: d.handle, table: 'TASK', limit: 1 })).out, false).structuredContent as any);
+    assert.ok(tasks.total > 0, f);
+    await callTool('close', { handle: d.handle, owner_key: d.owner_key, discard: true });
+    const text = await mppToMspdi(f), { db } = parseMspdi(text);
+    const leaf = everyLeafRead(text, db);
+    assert.deepEqual(leaf.missing, [], `${f}: ${leaf.missing.length} of ${leaf.leaves} values not readable`);
+  }
+});

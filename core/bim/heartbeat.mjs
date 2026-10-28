@@ -28,10 +28,12 @@ export const NAVISWORKS_S_PER_MB = 0.8;
 export const REVIT_S_PER_MB = 2;
 /** Microsoft Project's COM open/save, per MB of the input. PROVISIONAL, as REVIT_S_PER_MB (measured on the owner's PC). */
 export const MSPROJECT_S_PER_MB = 2;
+/** MPXJ turning a .mpp into Microsoft Project XML (Java's start included), per MB of the .mpp. PROVISIONAL until measured. */
+export const MPXJ_S_PER_MB = 2;
 /** The IFC index (stepIndex: the streaming STEP pass and the index built from it, in the server's own process), per MB of the IFC.
  *  Measured 0.095, 0.096, 0.098 s/MB (105 MB, 365 MB, 1.06 GB models, section 6 "open (index only)"): rounded up. */
 export const INDEX_S_PER_MB = 0.1;
-export const RATES = { geometry: GEOMETRY_S_PER_MB, navisworks: NAVISWORKS_S_PER_MB, revit: REVIT_S_PER_MB, msproject: MSPROJECT_S_PER_MB, index: INDEX_S_PER_MB };
+export const RATES = { geometry: GEOMETRY_S_PER_MB, navisworks: NAVISWORKS_S_PER_MB, revit: REVIT_S_PER_MB, msproject: MSPROJECT_S_PER_MB, mpxj: MPXJ_S_PER_MB, index: INDEX_S_PER_MB };
 /** An opaque call is ended past this many times its expected time (owner decision 2026-10-28). */
 export const BOUND_MULTIPLE = 10;
 

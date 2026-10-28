@@ -72,7 +72,8 @@ The platform has 9 custom 4D tool slots (10 names: `model_history` and `ifc_diff
 7. **Preview events**: the platform tools emit `preview_update` and publish to `Artifacts/`. The clone writes files into
    the write root; the platform must surface them. A viewer written as a folder (`index.html` plus three files) needs
    the folder served together; `embed: true` gives one file for the Preview pane.
-8. **.mpp schedules**: the platform reads .mpp; the clone reads XER, P6 XML, MSP XML and MPX only.
+8. **.mpp schedules**: the clone's MCP reads .mpp too (`open_file`, `compare`), through MPXJ with the Java runtime shipped in
+   `mpxj/` beside the bundle; no Microsoft Project needed. Saving stays XER, P6 XML, MSP XML or MPX (Project opens MSP XML).
 9. **The `WHIQ_4D` check**: the platform's `export_4d_video` refuses an HTML file without the text `WHIQ_4D`. The clone's
    page has the `WHIQ4D_EXPORT` hooks but not that text, so the existing `export_4d_video` cannot be pointed at a
    `render_4d` page as it is. Either the platform starts its client-render job directly from `render_4d`'s

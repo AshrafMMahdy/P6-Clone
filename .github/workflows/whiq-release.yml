@@ -59,6 +59,20 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "24.14.0" }
       - run: npm ci
+      - name: The .mpp reader (MPXJ's jars, pinned by SHA-256) and Java runtimes for it, made by jlink for Windows and Linux on x64
+        shell: bash
+        run: |
+          node -e "import('./scripts/mpxj-files.mjs').then((m) => m.fetchMpxj('.'))"
+          # one Temurin JDK version for both (jlink links only its own version's modules), each pinned by SHA-256
+          v=21.0.12.1_1; tag=jdk-21.0.12.1%2B1; base="https://github.com/adoptium/temurin21-binaries/releases/download/$tag"
+          mkdir -p .cache/jdk && cd .cache/jdk
+          curl -fsSL -o linux.tar.gz "$base/OpenJDK21U-jdk_x64_linux_hotspot_$v.tar.gz"
+          curl -fsSL -o win.zip "$base/OpenJDK21U-jdk_x64_windows_hotspot_$v.zip"
+          echo "ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94  linux.tar.gz" | sha256sum -c -
+          echo "f9d6e191ab098c0d416e7d588a24420a8621cd2f4720dab2459b8b7b2d2d8b4e  win.zip" | sha256sum -c -
+          mkdir linux win && tar -xzf linux.tar.gz -C linux --strip-components=1 && unzip -q win.zip -d win
+          echo "P6CLONE_JLINK=$PWD/linux/bin/jlink" >> "$GITHUB_ENV"
+          echo "P6CLONE_JRE_TARGETS={\"linux-x64\":\"$PWD/linux/jmods\",\"win-x64\":\"$(echo $PWD/win/*/jmods)\"}" >> "$GITHUB_ENV"
       - name: Tests (a failure is also written as annotations, which the run page shows without signing in)
         shell: bash
         run: |
@@ -68,13 +82,13 @@ jobs:
           grep -E "^✖|AssertionError|actual:|expected:|Error:|reason" test.log | head -40 | sed 's/^ */::error::/'
           exit 1
       - run: node scripts/build-cli.mjs
-      - name: Archive (bundles, the 4D viewer, fonts, the reasoner's models/ and ort/ with its licences, the IFC engine)
+      - name: Archive (bundles, the 4D viewer, fonts, the reasoner's models/ and ort/ with its licences, the IFC engine, the .mpp reader)
         shell: bash
         run: |
           name="${{ needs.plan.outputs.name }}"
           mkdir -p "dist/$name"
           cp dist-cli/p6clone-mcp.cjs dist-cli/p6clone.cjs dist-cli/viewer4d.js README.md "dist/$name/"   # viewer4d.js: the 4D viewer render_4d writes beside the model (three.js and mediabunny licences inside)
-          cp -r dist-cli/fonts dist-cli/models dist-cli/ort dist-cli/ifc "dist/$name/"   # the PDF font; optimize_schedule's model and runtime; the IFC engine for 4D (never node_modules: the platform manifest skips it)
+          cp -r dist-cli/fonts dist-cli/models dist-cli/ort dist-cli/ifc dist-cli/mpxj "dist/$name/"   # mpxj/: the .mpp reader and its Java runtimes; the PDF font; optimize_schedule's model and runtime; the IFC engine for 4D (never node_modules: the platform manifest skips it)
           printf '%s\n' "$APP ${name#$APP-}, commit $(git rev-parse HEAD), bundle node18 target, reasoner runtime onnxruntime-web 1.30.0 (ort/)" > "dist/$name/BUILD.txt"
           # Reproducible: the same commit gives the same archive bytes (names sorted, times of the commit, no owners, no gzip stamp).
           epoch="$(git log -1 --format=%ct)"
@@ -101,6 +115,7 @@ jobs:
           sparse-checkout: |
             scripts/release-smoke.mjs
             tests/fixtures/4d/construction-scheduling-task.ifc
+            Sample MPPs/Schedule 1 Gemma 1B Instruct.mpp
       - uses: actions/setup-node@v4
         with: { node-version: "${{ matrix.node }}" }
       - uses: actions/download-artifact@v4

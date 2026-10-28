@@ -42,7 +42,7 @@ const names = tools.map((t) => t.name);
 const FOURD = ['open_model', 'list_elements', 'element_info', 'quantities', 'link_elements', 'link_by_rules', 'link_status', 'set_4d_keys', 'export_4d', 'import_4d', 'simulate_4d', 'compare_4d', 'set_element_status', 'render_4d', 'relink_model', 'synchro_cloud'];
 const LOB = ['lob_create', 'lob_edit', 'lob_view', 'lob_takt', 'lob_forecast', 'lob_export', 'lob_import'];
 const ANALYSIS = ['check_schedule', 'dcma_14', 'lint', 'float_paths', 'progress_curves', 'resource_histogram', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'tia'];
-for (const need of ['open_file', 'new_project', 'edit', 'schedule', 'save', 'export_pdf', 'server_status', ...ANALYSIS, ...FOURD, ...LOB]) if (!names.includes(need)) failures.push(`missing tool ${need}`);
+for (const need of ['open_file', 'list_tables', 'read_table', 'new_project', 'edit', 'schedule', 'save', 'export_pdf', 'server_status', ...ANALYSIS, ...FOURD, ...LOB]) if (!names.includes(need)) failures.push(`missing tool ${need}`);
 if (JSON.stringify(tools.find((t) => t.name === 'windows_analysis')?._meta?.['whiq/files']?.read) !== '["updates[].path"]') failures.push('windows_analysis has no _meta["whiq/files"]');
 
 const status = await call('server_status', {});
@@ -174,6 +174,19 @@ else {
   if (i.tasks !== 2) failures.push(`lob_import (Tactplan): ${JSON.stringify(i).slice(0, 200)}`);
   const again = JSON.stringify((await call('lob_view', { handle, project: 'SLOB' })).tasks?.map((t) => [t.code, t.start, t.finish]));
   if (again !== slob) failures.push(`lob_import moved the first plan: ${slob} -> ${again}`);
+}
+// .mpp without Microsoft Project: MPXJ and the Java runtime for this machine in mpxj/ beside the bundle
+{
+  const jre = join(folder, 'mpxj', 'jre', `${process.platform === 'win32' ? 'win' : 'linux'}-${process.arch}`, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+  for (const f of [join(folder, 'mpxj', 'lib', 'mpxj-16.10.0.jar'), join(folder, 'mpxj', 'README.txt'), jre]) if (!existsSync(f)) failures.push(`the archive has no ${f.slice(folder.length + 1)}`);
+  const mpp = resolve(process.argv[4] ?? join(import.meta.dirname, '..', 'Sample MPPs', 'Schedule 1 Gemma 1B Instruct.mpp'));
+  if (!existsSync(mpp)) failures.push(`no .mpp fixture at ${mpp}`);
+  else {
+    const m = await call('open_file', { path: mpp });
+    const t = m.handle ? await call('read_table', { handle: m.handle, table: 'TASK', limit: 1 }) : {};
+    if (m.format !== 'mpp' || !(t.total > 0)) failures.push(`open_file .mpp: ${JSON.stringify(m).slice(0, 200)}`);
+    if (m.handle) await call('close', { handle: m.handle, owner_key: m.owner_key, discard: true });
+  }
 }
 await call('save', { handle, owner_key, path: 'smoke.xer' });
 if (!existsSync(join(dir, 'smoke.xer'))) failures.push('save wrote no smoke.xer');

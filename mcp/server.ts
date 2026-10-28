@@ -34,6 +34,8 @@ import { applyOps, OP_GUIDE } from '../core/project/ops.ts';
 import { makeCtx } from '../core/project/ctx.ts';
 import { TOOLS as LOOKUPS, runTool } from '../core/query/tools.ts';
 import { listTables, projectFilter, readTable } from '../core/query/rawtable.ts';
+import { mppToMspdi, MppReaderMissing } from '../core/msp/mpp.ts';
+import { parseMspdi } from '../core/msp/mspdi.ts';
 import { activityTable, linkTable, TABLE_GUIDE } from '../core/query/table.ts';
 import { computeSchedule, COMPUTE_GUIDE } from '../core/query/compute.ts';
 import { compareComputed, evaluate } from '../core/query/evaluate.ts';
@@ -82,7 +84,7 @@ const writes = { readOnlyHint: false, destructiveHint: true, openWorldHint: fals
 const ERRORS_DOC = ' Errors come back as {error: {code, reason, next_step, retry_after_ms?}} (also message, hint, retry_after in seconds): follow next_step (e.g. busy -> retry, unknown_handle -> open_file again). Answers of tools that can change a project carry unsaved_changes.';
 
 const TOOLS = [
-  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML or MPX file and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read and repairs what it safely can (a misspelled key column with unique ids is renamed; empty, missing or repeated ids nothing points at get fresh ones): diagnostics.repaired lists each repair, diagnostics.not_repaired what was left, and still_rejected says whether a save would still be refused by P6. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
+  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML, MPX or Microsoft Project .mpp file (read without Microsoft Project, through MPXJ) and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read and repairs what it safely can (a misspelled key column with unique ids is renamed; empty, missing or repeated ids nothing points at get fresh ones): diagnostics.repaired lists each repair, diagnostics.not_repaired what was left, and still_rejected says whether a save would still be refused by P6. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
   { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, must_finish_by: { type: 'string', description: 'Must finish by (YYYY-MM-DD): late dates and float are measured to it' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
   { name: 'compute_schedule', annotations: ro, description: `Compute a schedule from a description, with no handle and nothing kept: P6's F9 (calendars, constraints, milestones, progress, retained logic and the other schedule options) on the activities and links given. Takes: ${COMPUTE_GUIDE}.`, inputSchema: { type: 'object', properties: { start: { type: 'string' }, data_date: { type: 'string' }, must_finish_by: { type: 'string' }, hours_per_day: { type: 'number' }, calendar: { type: 'string' }, calendars: { type: 'array', items: { type: 'object' } }, activities: { type: 'array', items: { type: 'object' } }, relationships: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, break_loops: { type: 'boolean' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' }, ...common }, required: ['start', 'activities'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
@@ -129,6 +131,19 @@ const projectIds = (db: Db, id: unknown) => {
   if (!p) fail('bad_input', `No project "${id}".`, `Projects in this file: ${ps.map((x) => x.proj_short_name).join(', ')}.`);
   return [p!.proj_id];
 };
+/** A .mpp read through MPXJ (core/msp/mpp.ts) as the Microsoft Project XML it turns it into; refused in words when this
+ *  installation cannot (no MPXJ, no Java) or the file cannot be read. */
+async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
+  let xml: string;
+  try { xml = await mppToMspdi(path); }
+  catch (e) {
+    if (e instanceof MppReaderMissing) return fail('mpp_reader_missing', e.message, 'Save the file as Microsoft Project XML in Microsoft Project (File > Save As > XML) and open that.');
+    return fail('file_unreadable', `Cannot read ${basename(path)}: ${(e as Error).message}`, 'Open it in Microsoft Project and save it as Microsoft Project XML, then open that.');
+  }
+  const r = parseMspdi(xml);
+  r.findings.push({ severity: 'info', code: 'MPP_READ', message: 'Read without Microsoft Project: MPXJ turned the .mpp into Microsoft Project XML, read as such (every task, resource, assignment and calendar element is kept: read_table, msp:<Name>).', p6: 'P6 imports .mpp through an installed Microsoft Project.' });
+  return r;
+}
 /** The first 4,000 bytes of a file (what detectFormat reads). */
 const readHead = (p: string): Uint8Array => { try { const fd = openSync(p, 'r'); try { const b = Buffer.alloc(4000); return new Uint8Array(b.subarray(0, readSync(fd, b, 0, 4000, 0))); } finally { closeSync(fd); } } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
 const readBytes = (p: string) => { try { return new Uint8Array(readFileSync(p)); } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
@@ -240,7 +255,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       try {
         await checkpoint(ctx);
         const format = format0;
-        const r: { db: Db; findings: Finding[]; meta?: ParseMeta } = bytes ? readRaw(bytes, format, a.encoding ?? 'auto') : readXerFile(path, a.encoding ?? 'auto');
+        const r: { db: Db; findings: Finding[]; meta?: ParseMeta } = format === 'mpp' ? await readMpp(path) : bytes ? readRaw(bytes, format, a.encoding ?? 'auto') : readXerFile(path, a.encoding ?? 'auto');
         await checkpoint(ctx);
         const f = importChecks(r.db, r.findings, format);
         await checkpoint(ctx);
@@ -508,7 +523,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       }
       // a file compared against is read for this call only, and counted in the memory budget while it is held (C14)
       let release = () => {};
-      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? (() => { const p = pathArg(a.path); release = reserveMemory(estimateBytes(fileSize(p)), `Reading ${basename(p)} to compare with`, 'open the other file with open_file and compare with other_handle when there is room'); try { let db: Db; if (detectFormat(p, readHead(p)) === 'xer') db = readXerFile(p).db; else { const b = readBytes(p); db = readRaw(b, detectFormat(p, b)).db; } if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to compare with.`, 'Give an XER, P6 XML or Microsoft Project XML file.'); return db; } catch (e) { release(); throw e; } })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
+      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? await (async () => { const p = pathArg(a.path); release = reserveMemory(estimateBytes(fileSize(p)), `Reading ${basename(p)} to compare with`, 'open the other file with open_file and compare with other_handle when there is room'); try { let db: Db; if (detectFormat(p, readHead(p)) === 'xer') db = readXerFile(p).db; else { const b = readBytes(p), f = detectFormat(p, b); db = f === 'mpp' ? (await readMpp(p)).db : readRaw(b, f).db; } if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to compare with.`, 'Give an XER, P6 XML or Microsoft Project XML file.'); return db; } catch (e) { release(); throw e; } })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
       try {
       if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return { mode: 'computed', changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }; }
       if (a.mode != null && a.mode !== 'all') fail('bad_input', 'mode must be all or computed.', 'Leave it out to compare everything.');
