@@ -347,8 +347,11 @@ test('the Revit reader failing for the disk or for memory is reported with its c
     await assert.rejects(rvtToIfc(f.rvt), (e: unknown) => e instanceof RevitDiskFull && /ENOSPC/.test(e.message) && e.dir === f.cache);
     process.env.FAKE_RVT = 'oom';
     await assert.rejects(rvtToIfc(f.rvt), (e: unknown) => e instanceof RevitTooLarge && /ran the Revit reader out of working memory \(memory allocation of 2147483648 bytes failed\)/.test(e.message) && !!e.ranOut);
+    // the system ending the reader (Linux's out-of-memory killer): a signal there; on Windows a process killed this way
+    // only exits with code 1, and Windows does not end processes for memory, so there it is no sign of memory
     process.env.FAKE_RVT = 'kill';
-    await assert.rejects(rvtToIfc(f.rvt), (e: unknown) => e instanceof RevitTooLarge && /ended by the system \(SIGKILL\)/.test(e.ranOut!));
+    if (process.platform !== 'win32') await assert.rejects(rvtToIfc(f.rvt), (e: unknown) => e instanceof RevitTooLarge && /ended by the system \(SIGKILL\)/.test(e.ranOut!));
+    else await assert.rejects(rvtToIfc(f.rvt), (e: unknown) => !(e instanceof RevitTooLarge) && /the Revit reader stopped \(1\)/.test((e as Error).message));
     process.env.FAKE_RVT = 'bad';
     await assert.rejects(rvtToIfc(f.rvt), (e: unknown) => !(e instanceof RevitTooLarge) && !(e instanceof RevitDiskFull) && /not a readable Revit file/.test((e as Error).message));
     assert.deepEqual(readdirSync(f.cache), [], 'no cache entry, and no half-written IFC of the killed reader');
