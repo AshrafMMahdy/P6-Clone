@@ -41,12 +41,14 @@ const outOfMemory = (e) => {
 const stop = (code, kind, e) => { try { rmSync(tmp, { force: true }); } catch { /* gone */ } console.error(`${kind}: ${String(e?.message ?? e).slice(0, 300)}`); process.exit(code); };
 // rvt-rs unpacks and scans the whole file in ONE WebAssembly call before it writes anything: nothing to tick. Its work is the file
 // (expectedMs, REVIT_S_PER_MB in heartbeat.mjs; provisional); while it works its memory grows (about 8x the file), which counts as
-// life, so a read that is slow but growing is never ended. The write that follows ticks per piece (8 MiB).
+// life up to its bound. The write that follows ticks per piece (8 MiB); one piece may take as long as the file's bound allows.
 const work = expectedMs(statSync(src).size, 'revit');
 const MODES = ['geometry', 'typed-no-geometry', 'scaffold'];
 for (const m of MODES) {
   const fd = openSync(tmp, 'w');
-  step(`unpacking the Revit file (rvt-rs, mode ${m}, attempt ${MODES.indexOf(m) + 1} of ${MODES.length})`, { mem: true, cap: work });
+  // EACH attempt is one opaque call bounded by its own size x rate x 10 (a retry in the same WebAssembly instance reuses the memory the
+  // first attempt grew, so its memory may stay flat: the bound, not the memory, is what limits it; growth only extends it, up to that bound)
+  step(`unpacking the Revit file (rvt-rs, mode ${m}, attempt ${MODES.indexOf(m) + 1} of ${MODES.length})`, { mem: true, expect: work });
   let writing = false;
   // a write error unwinds through the WebAssembly and arrives below as "geometry failed": kept, so it is told apart
   globalThis.__rvtIfcSink = (chunk) => { try { if (!writing) { writing = true; step(`writing the IFC (rvt-rs, mode ${m}; bytes)`, { cap: work }); } written += writeSync(fd, chunk); progress(written); } catch (e) { sinkError ??= e; throw e; } };

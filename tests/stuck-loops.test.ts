@@ -52,25 +52,29 @@ test('judge: a window is 4 x the longest gap, never under the floor; two windows
   // a job whose ticks were 500 ms apart: windows of 2 s, so 3.9 s of silence is alive and 4.1 s is stuck
   assert.equal(judge(at({ maxGapMs: 500, sinceMs: 3900 }), 400), null);
   const i = judge(at({ maxGapMs: 500, sinceMs: 4100 }), 400)!;
-  assert.deepEqual([i.kind, i.windowMs, i.limitMs, i.capped], ['silent', 2000, 4000, false]);
+  assert.deepEqual([i.kind, i.windowMs, i.limitMs, i.lengthened], ['silent', 2000, 4000, false]);
   // opaque: 10 x expected, never under the floor
   assert.equal(judge(at({ expectMs: 1000, sinceMs: 9999 }), 400), null);
   const b = judge(at({ expectMs: 1000, sinceMs: 10_001 }), 400)!;
   assert.deepEqual([b.kind, b.limitMs, b.expectMs], ['bound', 10_000, 1000]);
   assert.equal(judge(at({ expectMs: 10, sinceMs: 399 }), 400), null, 'a small input still has the floor');
   assert.equal(judge(at({ expectMs: 10, sinceMs: 401 }), 400)?.kind, 'bound');
-  // a step's work bound caps the silence a long gap would allow (one huge element cannot take longer than the whole run)
-  const c = judge(at({ maxGapMs: 60_000, capMs: 1000, sinceMs: 10_500 }), 400)!;
-  assert.deepEqual([c.kind, c.limitMs, c.capped], ['silent', 10_000, true]);
+  // a step that knows its whole work (capMs) allows ONE tick to take as long as 10 x that work: a single heavy element is bounded by the
+  // size of what it works on, which cannot be known before it is done, so by the step's size. It LENGTHENS the limit, never shortens it
+  const c = judge(at({ maxGapMs: 100, capMs: 60_000, sinceMs: 300_000 }), 120_000);
+  assert.equal(c, null, '5 minutes for one element, inside 10 x the run\u2019s 1 minute');
+  const d = judge(at({ maxGapMs: 100, capMs: 60_000, sinceMs: 601_000 }), 120_000)!;
+  assert.deepEqual([d.kind, d.limitMs, d.lengthened], ['silent', 600_000, true]);
+  assert.equal(judge(at({ maxGapMs: 100, capMs: 10, sinceMs: 241_000 }), 120_000)?.limitMs, 240_000, 'a small bound does not shorten two windows');
   // a window of its own (a browser starting)
   assert.equal(judge(at({ windowMs: 60_000, sinceMs: 119_000 }), 400), null);
   assert.equal(judge(at({ windowMs: 60_000, sinceMs: 121_000 }), 400)?.kind, 'silent');
 });
 
 test('the words for an ended job: the step, how long, the bound, what was tried, the alternatives', () => {
-  const silent = stuckMessage({ kind: 'silent', step: 'meshing products', done: 1200, silentMs: 480_000, windowMs: 240_000, limitMs: 480_000, maxGapMs: 60_000, expectMs: 0, floorMs: 120_000, capped: false }, { what: 'The geometry worker', tried: 'a single pass', next: 'split the model' });
+  const silent = stuckMessage({ kind: 'silent', step: 'meshing products', done: 1200, silentMs: 480_000, windowMs: 240_000, limitMs: 480_000, maxGapMs: 60_000, expectMs: 0, floorMs: 120_000, lengthened: false }, { what: 'The geometry worker', tried: 'a single pass', next: 'split the model' });
   assert.equal(silent, 'The geometry worker was ended as stuck while meshing products (1200 done): no progress for 8 minutes (two windows of 4 minutes, each 4 times the longest gap between steps this job showed (60 s), at least 2 minutes). Tried: a single pass. Alternatives: split the model.');
-  const bound = stuckMessage({ kind: 'bound', step: 'reading the IFC (web-ifc OpenModel)', silentMs: 3_700_000, windowMs: 3_600_000, limitMs: 3_600_000, maxGapMs: 0, expectMs: 360_000, floorMs: 120_000, capped: false }, { what: 'The geometry worker', next: 'export in parts' });
+  const bound = stuckMessage({ kind: 'bound', step: 'reading the IFC (web-ifc OpenModel)', silentMs: 3_700_000, windowMs: 3_600_000, limitMs: 3_600_000, maxGapMs: 0, expectMs: 360_000, floorMs: 120_000, lengthened: false }, { what: 'The geometry worker', next: 'export in parts' });
   assert.match(bound, /^The geometry worker was ended while reading the IFC \(web-ifc OpenModel\)|^The geometry worker was ended as stuck while reading the IFC \(web-ifc OpenModel\): one call that cannot report progress ran past its work bound of 60 minutes \(about 6 minutes expected for this input at this machine's measured rate, times 10\); it had been silent for 61\.7 minutes\. Alternatives: export in parts\.$/);
 });
 
@@ -156,10 +160,10 @@ test('worker class: an opaque call within its bound is alive, however busy; past
 test('worker class: an unpack that cannot tick but grows its memory (the Revit reader) is alive while it grows and ended when it stops', async () => {
   const restore = env(SHORT);
   try {
-    const grows = await watch(worker("step('unpacking the Revit file', { mem: true }); const keep = []; for (let i = 0; i < 12; i++) { keep.push(Buffer.alloc(4 << 20, i + 1)); await new Promise((r) => setTimeout(r, 200)); } console.log('done ' + keep.length);"));
+    const grows = await watch(worker("step('unpacking the Revit file', { mem: true, expect: 300 }); const keep = []; for (let i = 0; i < 12; i++) { keep.push(Buffer.alloc(4 << 20, i + 1)); await new Promise((r) => setTimeout(r, 200)); } console.log('done ' + keep.length);"));
     assert.deepEqual([grows.code, grows.stuck, grows.out], [0, null, 'done 12']);
-    const flat = await watch(worker("step('unpacking the Revit file', { mem: true }); await new Promise((r) => setTimeout(r, 60000));"));
-    assert.equal(flat.stuck?.kind, 'silent');
+    const flat = await watch(worker("step('unpacking the Revit file', { mem: true, expect: 300 }); await new Promise((r) => setTimeout(r, 60000));"));
+    assert.equal(flat.stuck?.kind, 'bound');
     assert.equal(flat.stuck?.step, 'unpacking the Revit file');
   } finally { restore(); }
 });
@@ -203,8 +207,9 @@ test('unitWatch classes: a slow frame loop lives; the first frame is bounded by 
   assert.equal(stuck[0].total, 10);
 });
 
-test('externalWatch (Microsoft Project): output written is progress; processor time does not keep it past its bound; neither means it waits on a dialog', async () => {
+test('externalWatch (Microsoft Project): output written is progress; processor time does not keep it past its bound; neither means it waits on a dialog', async (t) => {
   const keep = setInterval(() => {}, 1000); // the watch's own timer does not hold the process open
+  t.after(() => clearInterval(keep)); // a failing assertion must not leave the loop held open
   const run = (o: { expectMs: number; output?: () => number; cpu?: () => Promise<number | null> }) => new Promise<StuckInfo>((done) => { const stop = externalWatch({ step: 'converting', floorMs: 200, pollMs: 20, ...o, onStuck: (i) => { stop(); done(i); } }); });
   // nothing written and no processor time: idle, after two windows of max(floor / 2, bound / 4)
   const idle = await run({ expectMs: 10, output: () => 0, cpu: async () => 5000 });
@@ -215,12 +220,12 @@ test('externalWatch (Microsoft Project): output written is progress; processor t
   const bound = await run({ expectMs: 30, output: () => 0, cpu: async () => (c += 500) });
   assert.equal(bound.kind, 'bound');
   assert.equal(bound.limitMs, 300);
-  // output growing resets the clock: 1 s of writes past a 300 ms bound is alive, the silence after it is not
+  // output growing resets the clock, but only up to the bound (300 ms): a save whose file grows for ever is ended soon after it
   let out = 0; const t0 = Date.now();
-  const grow = setInterval(() => { out += 10; if (Date.now() - t0 > 1000) clearInterval(grow); }, 40);
+  const grow = setInterval(() => { out += 10; }, 40);
   const ended = await run({ expectMs: 30, output: () => out, cpu: async () => 0 });
   clearInterval(grow);
-  assert.ok(Date.now() - t0 >= 1000, 'alive while it wrote');
+  assert.ok(Date.now() - t0 >= 280 && Date.now() - t0 < 3000, `ended about one bound after the last counted write: ${Date.now() - t0}`);
   assert.ok(['bound', 'idle'].includes(ended.kind));
   clearInterval(keep);
 });

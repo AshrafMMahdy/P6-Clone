@@ -11,6 +11,7 @@
  * Geometry (fingerprint + viewer GLB) is a separate concern — see geomWorker.mjs / parse.ts.
  */
 import { createReadStream } from 'node:fs';
+import { progress } from './heartbeat.mjs';
 import type { IfcElement, IfcIndex, IfcOwner, QuantityKind } from './parse.ts';
 import { compactHeap, Element, ExtrasTable, Interner, newGeomStore, ownString } from './element.ts';
 import { IFC_CLASS_NAMES } from './ifcClasses.ts';
@@ -408,8 +409,9 @@ export function scanEntities(absPath: string, onEntity: (id: number, type: strin
     let inString = false;
     let inComment = false; // /* ... */ (an apostrophe in a comment must not start a string)
     let entityStart = 0;
-    let read = 0;
+    let read = 0, bytesDone = 0;
     rs.on('data', (chunk: string | Buffer) => {
+      progress(bytesDone += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length); // a tick per 1 MB block (the server watches this section: serverWatch.ts)
       const text = carry + (typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
       // Resume AFTER the carry: its characters were scanned with the previous chunk (re-scanning them toggled the
       // string state twice and silently dropped ~2 % of entities per 1 MB chunk).

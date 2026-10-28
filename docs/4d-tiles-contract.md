@@ -190,10 +190,15 @@ watch as the server's (`inPage` in `headless.ts`: tiles loaded, frames drawn, a 
    element and copied chunk; Revit: every 8 MiB of IFC written; render: every tile and frame; ffmpeg: every frame). Stuck = no
    tick for two windows, a window being 4 times the longest gap between ticks THIS job has shown (measured in the worker, every
    100 ms, not guessed from 5 s heartbeats), never under 2 minutes (`P6CLONE_WORKER_FLOOR_MS` shortens that for tests). A job that is
-   slow but keeps ticking is never ended. Processor time is not life.
+   slow but keeps ticking is never ended. Processor time is not life. Where the loop knows its `done` and `total`, a tick counts only
+   if `done` advanced: going round again with the same count is silence. A step that knows its whole work (the geometry run: its IFC's
+   size x rate) lets ONE tick take as long as 10 x that work, never less than two windows: one heavy element is an opaque call bounded
+   by the size of what it works on, which cannot be known before it is done, so by the run's size.
 2. *An opaque call that cannot tick* (web-ifc `OpenModel`, one inflate of a whole Navisworks section, rvt-rs's unpack, Microsoft
    Project's COM open/save) declares its expected time, input size x the rate measured on this machine, and is ended past
-   **10 x** that (`BOUND_MULTIPLE`), never under the floor. The rate is the slower of the reference rate (below) scaled by a
+   **10 x** that (`BOUND_MULTIPLE`), never under the floor. Each Revit unpack attempt (the three modes share one WebAssembly instance,
+   so a retry's memory may stay flat) is such a call with its own bound. Memory growth (Revit) and output growth (Microsoft Project's
+   save) extend the clock only up to that bound, never alone. The rate is the slower of the reference rate (below) scaled by a
    300 ms start-up benchmark (`machineFactor`, 1 to 5; `P6CLONE_MACHINE_FACTOR` replaces it) and this job's own measured rate on its
    earlier chunks or models (`noteRate`). Inside a ticking step, a huge single element cannot keep silent longer than the step's
    own work bound.
@@ -204,6 +209,7 @@ watch as the server's (`inPage` in `headless.ts`: tiles loaded, frames drawn, a 
    | Navisworks section inflate (`NAVISWORKS_S_PER_MB`) | 0.8 s per MB of file | the 509 MB federation opens in 6.8 min (above): 0.80 s/MB for the whole open |
    | rvt-rs unpack (`REVIT_S_PER_MB`) | 2 s per MB of .rvt, **provisional** | not measured in time: the "8x" is memory. Watched by memory growth meanwhile (a growing read is never ended for being slow) |
    | Microsoft Project COM (`MSPROJECT_S_PER_MB`) | 2 s per MB, **provisional** | not measured |
+   | IFC index, in the server's own process (`INDEX_S_PER_MB`) | 0.1 s per MB of IFC | section 6 "open (index only)": 0.095, 0.096, 0.098 s/MB |
    | Chromium first frame | `renderMinutes` (2.1 M triangles/s software, 400 M/s card) | section 4 (509 MB federation) |
 
    **To update a rate**: edit the one named constant at the top of `core/bim/heartbeat.mjs` and the row above. The Revit and Microsoft
@@ -217,6 +223,25 @@ PowerShell's child; found by name) with PowerShell / wmic / tasklist (`treeCpuMs
 processor time and no output for two windows is "waiting on a dialog", and only the Project instance the script started is ended.
 The Navisworks reader's tiler child passes its steps and ticks on to the reader's own heartbeat (a long tiling is not an idle
 reader). `P6CLONE_NWD_MINUTES`, which was a fixed 60-minute kill, is only an optional cap an administrator may set (unset: none).
+Microsoft Project's idle rule needs a reading of the process table that lists `WINPROJ.EXE` (`cpuCovering`); where only PowerShell can be
+seen (tasklist fall back), only the size bound applies.
+
+**The server's own process** (`core/bim/serverWatch.ts`, `heartbeat.mjs` `startServerWatch`). The sections that read input inside the
+MCP server are declared (`watched()`): the IFC index (`stepIndex`: a tick per 1 MB read, a work bound for the pass after the scan), the
+cached model index (read and write), the 4D file readers (`import_4d`). A thread of the server judges them by the same rule. Stuck while
+the event loop still turns (waiting on something that never comes): the job is cancelled with the reason and the server goes on. Stuck
+while the main thread is blocked in a synchronous loop: V8 cannot interrupt it, so the thread writes `stuck.json` into the server's
+recovery folder and ends the process; every project is checkpointed on disk shortly after its last change and comes back under its
+handle on the next start, which prints the reason and reports it in `server_status` `recovery.previous_server_ended_stuck`.
+`P6CLONE_SERVER_WATCH=off` turns the watch off. Undeclared work is never judged. Not declared, with the reason: the analysis and LOB
+engines (Monte Carlo, crash, optimize, windows analysis, LOB plans) have no measured rate to size a bound from and tick between steps only,
+so a long legitimate step would be a false kill of the whole server (they are ended by `cancel_job`); the O(elements) passes (links,
+exports, quantities) are finite array loops of milliseconds per 100,000 elements and cannot hang.
+
+Every stuck error carries the facts as data, besides the words: the tool error's `stuck` (`{step, kind, silent_ms, window_ms, windows,
+longest_gap_ms | bound_ms, expected_ms, done, total, tried, alternatives}`) with `reason: "stuck"` for a model that cannot be read
+(`model_unreadable`), `import_4d` (`bad_input`) and a render (`render_failed`, `data.stuck`); `open_model` answers `geometry_stuck` beside
+`geometry_note`.
 
 **The platform's change for the pickup window**: `clientRender4d.ts` waits 90 s for `ready()`. A big model's tiles can
 take longer. Take `WHIQ4D_EXPORT.started` (or the `whiq4d:started` message) as the page alive, and wait while

@@ -86,6 +86,6 @@ export function registerBim(getWin: () => BrowserWindow | null): void {
       if (s.canceled || !s.filePath) return { ok: true, saved: null, frames: v.frames };
       writeFileSync(s.filePath, Buffer.from(v.bytes));
       return { ok: true, saved: s.filePath, frames: v.frames, mime: v.mime };
-    } catch (e) { return { ok: false, error: (e as Error).message }; } finally { w.destroy(); }
+    } catch (e) { return { ok: false, error: (e as Error).message, ...((e as { stuck?: unknown }).stuck ? { stuck: (e as { stuck?: unknown }).stuck } : {}) }; } finally { w.destroy(); }
   });
 }

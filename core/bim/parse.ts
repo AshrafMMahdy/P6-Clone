@@ -4,9 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSy
 import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { stepIndex } from './stepIndex.ts';
+import { expectedMs, watched } from './serverWatch.ts';
 import { geomWorkerPath, webIfcEntry } from './runtime.ts';
 import { alive as hbAlive, forgetRates, noteRate, step as hbStep, tick as hbTick } from './heartbeat.mjs';
-import { heartbeatEnv, heartbeatWatcher, stuckMessage, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { heartbeatEnv, heartbeatWatcher, stuckData, stuckMessage, workerFloorMs, type StuckData, type StuckInfo } from './liveness.ts';
 import { allocGeometry, geomStore, putGeometry, scaleGeometry } from './element.ts';
 import { readManifest, tileBytesOf, writeTilesManifest, type TileRecord } from './tiles.ts';
 
@@ -75,6 +76,8 @@ export interface IfcIndex {
   /** Patch 1 (2026-09-17): geometry runs in a child process; when it cannot finish, the index still stands. */
   geometryStatus?: 'ok' | 'skipped' | 'unavailable';
   geometryNote?: string;
+  /** the geometry worker (or the chunker, the tiler) was ended as stuck: the structured facts (step, silence or bound, tried, alternatives) */
+  geometryStuck?: StuckData;
   meshedElements?: number;
 }
 
@@ -113,7 +116,10 @@ export interface ParseIfcOptions {
  * Elements whose geometry web-ifc fails on are counted and skipped, never fatal.
  */
 export async function parseIfc(absIfcPath: string, opts: ParseIfcOptions = {}): Promise<{ index: IfcIndex; meshes: IfcMeshes; tilesPath?: string }> {
-  const { index, productIds } = await stepIndex(absIfcPath);
+  // the index is built in the server's own process: a declared section (serverWatch.ts); ticks per 1 MB read, a work bound for the pass
+  // that follows the scan (size x INDEX_S_PER_MB, measured in section 6)
+  const size = (() => { try { return statSync(absIfcPath).size; } catch { return 0; } })();
+  const { index, productIds } = await watched('indexing the IFC (bytes read)', { what: 'The IFC indexer', tried: 'one streaming pass over the file in the server\u2019s own process', next: STUCK_NEXT, total: size, capMs: expectedMs(size, 'index') }, () => stepIndex(absIfcPath));
   const meshes: IfcMeshes = new Map();
   if (opts.geometry === false) { index.geometryStatus = 'skipped'; return { index, meshes }; }
   await meshIndex(absIfcPath, index, productIds, opts);
@@ -143,6 +149,7 @@ export async function meshWith(index: IfcIndex, opts: ParseIfcOptions, build: (o
       if (store) store.rows = null;
       index.geometryStatus = 'unavailable';
       index.geometryNote = run.note;
+      if (run.stuck) index.geometryStuck = run.stuck;
       index.geometryFailures = index.elements.length;
       index.meshedElements = 0;
       return;
@@ -156,6 +163,7 @@ export async function meshWith(index: IfcIndex, opts: ParseIfcOptions, build: (o
     index.meshedElements = run.meshed;
     index.geometryStatus = 'ok';
     if (run.note) index.geometryNote = run.note;
+    if (run.stuck) index.geometryStuck = run.stuck;
     if (tilesTmp && opts.tilesOut) {
       writeTilesManifest(tilesTmp, index, run.tiles, S);
       rmSync(opts.tilesOut, { recursive: true, force: true });
@@ -179,16 +187,14 @@ const childEnv = () => ({ ...process.env, ...heartbeatEnv(), P6CLONE_WEBIFC: web
 
 /** What the agent is told when the liveness watch ended a worker: the step, how long with no progress or the bound passed, what was
  *  tried, and the alternatives (owner rules 2026-10-27 and 2026-10-28: no fixed time limit). */
-const stuckNote = (i: StuckInfo, what: string, tried?: string) => stuckMessage(i, {
-  what, ...(tried ? { tried } : {}),
-  next: 'open the model with geometry: false (index only: linking, sets, 4D keys and every 4D export still work), export it from the authoring tool as an NWC, NWD or IFC in smaller parts, or split the model by discipline or level',
-});
+const STUCK_NEXT = 'open the model with geometry: false (index only: linking, sets, 4D keys and every 4D export still work), export it from the authoring tool as an NWC, NWD or IFC in smaller parts, or split the model by discipline or level';
+const stuckOf = (i: StuckInfo, what: string, tried: string) => ({ note: stuckMessage(i, { what, tried, next: STUCK_NEXT }), stuck: stuckData(i, { tried, next: STUCK_NEXT }) });
 
 /** A Node script in its own process; ok when it exits 0 and done() holds. It has no fixed time limit: it is watched (heartbeat.mjs,
  *  liveness.ts) and ended only when it shows no progress or passes its work bound. When this process is itself a worker with a
  *  heartbeat (the Navisworks reader runs the tiler), the child's step and ticks are passed on as its own: its parent then sees
  *  the work going on instead of a reader that seems idle. */
-export function runNode(script: string, args: string[], done: () => boolean, what = 'A worker'): Promise<Run> {
+export function runNode(script: string, args: string[], done: () => boolean, what = 'A worker', tried = 'one pass of the worker over its input'): Promise<Run> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, script, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
     let err = '', stuck: StuckInfo | null = null, lastStep = '', lastDone = -1, lastSince = Infinity;
@@ -202,7 +208,7 @@ export function runNode(script: string, args: string[], done: () => boolean, wha
       onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } },
     });
     child.on('error', (e) => { stop(); resolve({ ok: false, note: e.message }); });
-    child.on('close', (code) => { stop(); resolve(code === 0 && done() ? { ok: true } : { ok: false, note: stuck ? stuckNote(stuck, what) : `exited with code ${code}${err ? ` — ${err.trim().split('\n').slice(-2).join(' | ').slice(0, 300)}` : ''}` }); });
+    child.on('close', (code) => { stop(); resolve(code === 0 && done() ? { ok: true } : stuck ? { ok: false, ...stuckOf(stuck, what, tried) } : { ok: false, note: `exited with code ${code}${err ? ` — ${err.trim().split('\n').slice(-2).join(' | ').slice(0, 300)}` : ''}` }); });
   });
 }
 
@@ -213,8 +219,8 @@ function workerScript(opts: ParseIfcOptions): string | null {
   return geomWorkerPath();
 }
 
-export type Run = { ok: true; note?: string } | { ok: false; note: string };
-export type Built = { ok: true; note?: string; meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[] } | { ok: false; note: string };
+export type Run = { ok: true; note?: string } | { ok: false; note: string; stuck?: StuckData };
+export type Built = { ok: true; note?: string; meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[]; stuck?: StuckData } | { ok: false; note: string; stuck?: StuckData };
 
 /** IFC bytes one geometry run takes on: the option, else P6CLONE_GEOM_CHUNK_MB (300). */
 export const chunkBytesOf = (opts: ParseIfcOptions = {}) => Math.max(1 << 16, opts.chunkBytes ?? (Number(process.env.P6CLONE_GEOM_CHUNK_MB) || 300) * 1048576);
@@ -250,21 +256,21 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   if (!existsSync(chunker)) return { ok: false, note: 'the model is too big for one geometry run and the chunker (geomChunk.mjs beside geomWorker.mjs) is missing' };
   const cdir = join(outDir, 'chunks');
   mkdirSync(cdir, { recursive: true });
-  const cut = await runNode(chunker, [ifc, cdir, productsBin, String(target)], () => existsSync(join(cdir, 'chunks.json')), 'The IFC chunker');
-  if (!cut.ok) return { ok: false, note: `cutting the model into chunks failed: ${cut.note}` };
+  const cut = await runNode(chunker, [ifc, cdir, productsBin, String(target)], () => existsSync(join(cdir, 'chunks.json')), 'The IFC chunker', 'one streaming pass over the IFC statements, then the chunk files written one at a time');
+  if (!cut.ok) return { ok: false, note: `cutting the model into chunks failed: ${cut.note}`, ...(cut.stuck ? { stuck: cut.stuck } : {}) };
   const { chunks } = JSON.parse(readFileSync(join(cdir, 'chunks.json'), 'utf8')) as { chunks: { file: string; products: number }[] };
   const failed: string[] = [];
   for (const [k, c] of chunks.entries()) {
     await opts.onProgress?.(k, chunks.length, `meshing chunk ${k + 1} of ${chunks.length}`);
     const r = await one(c.file, join(cdir, `g${k}`));
     rmSync(c.file, { force: true });
-    if (!r.ok) { failed.push(`chunk ${k + 1} (${c.products} products): ${r.note.split(' The model is indexed')[0]}`); state.failures += c.products; }
+    if (!r.ok) { failed.push(`chunk ${k + 1} (${c.products} products): ${r.note.split(' The model is indexed')[0]}`); state.failures += c.products; if (r.stuck) state.stuck ??= r.stuck; }
   }
-  if (!state.meshed) return { ok: false, note: `no chunk could be meshed: ${failed.slice(0, 3).join('; ')}` };
+  if (!state.meshed) return { ok: false, note: `no chunk could be meshed: ${failed.slice(0, 3).join('; ')}`, ...(state.stuck ? { stuck: state.stuck } : {}) };
   return { ok: true, ...state, note: `meshed in ${chunks.length} chunk${chunks.length === 1 ? '' : 's'} of at most ${Math.round(target / 1048576)} MB of the IFC (the model is past one geometry run)${failed.length ? `; ${failed.length} chunk(s) failed and their elements have no geometry: ${failed.slice(0, 3).join('; ')}` : ''}` };
 }
 
-export type RunState = { meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[] };
+export type RunState = { meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[]; stuck?: StuckData };
 export const newRunState = (): RunState => ({ meshed: 0, failures: 0, maxAbsCoord: 0, tiles: [] });
 
 /** A run in the geometry worker's layout (dir: geom.json, elems.meta, geoms.*, places.bin) taken in: its fingerprints
@@ -283,7 +289,7 @@ export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string |
   if (tilesDir) {
     const worker = workerScript(opts), tiler = worker ? join(dirname(worker), 'geomTiles.mjs') : null;
     if (!tiler || !existsSync(tiler)) return { ok: false, note: 'the display tiler (geomTiles.mjs beside geomWorker.mjs) is missing. The model is indexed; the 3D view is not available for it.' };
-    const t = await runNode(tiler, [dir, tilesDir, String(state.tiles.length), String(opts.tileBytes ?? tileBytesOf()), String(Number(process.env.P6CLONE_INSTANCE_MIN) || 4)], () => existsSync(join(dir, 'tiles.json')), 'The display tiler');
+    const t = await runNode(tiler, [dir, tilesDir, String(state.tiles.length), String(opts.tileBytes ?? tileBytesOf()), String(Number(process.env.P6CLONE_INSTANCE_MIN) || 4)], () => existsSync(join(dir, 'tiles.json')), 'The display tiler', 'one pass over the placed meshes, a tile file written at a time');
     if (!t.ok) return { ok: false, note: `the display tiles could not be written: ${t.note}` };
     state.tiles.push(...(JSON.parse(readFileSync(join(dir, 'tiles.json'), 'utf8')) as TileRecord[]));
   }
@@ -307,7 +313,7 @@ function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opt
       // (Windows: a libuv assertion at exit, 0xC0000409)
       if (existsSync(join(outDir, 'geom.json'))) { try { JSON.parse(readFileSync(join(outDir, 'geom.json'), 'utf8')); resolve({ ok: true }); return; } catch { /* cut short: a failure */ } }
       const tail = (err.trim().split('\n').filter(Boolean).slice(-3).join(' | ') || out.trim().split('\n').slice(-1)[0] || '').slice(0, 300);
-      if (stuck) { resolve({ ok: false, note: `${stuckNote(stuck, 'The geometry worker', 'web-ifc meshes every run in one pass; a model past the 4 GB WebAssembly memory is cut into chunks and each is meshed on its own')} The model is indexed (elements, storeys, properties, authored quantities); derived volumes and the 3D view are not available for it.` }); return; }
+      if (stuck) { const r = stuckOf(stuck, 'The geometry worker', 'web-ifc meshes every run in one pass; a model past the 4 GB WebAssembly memory is cut into chunks and each is meshed on its own'); resolve({ ok: false, note: `${r.note} The model is indexed (elements, storeys, properties, authored quantities); derived volumes and the 3D view are not available for it.`, stuck: r.stuck }); return; }
       const why = signal ? `killed (${signal})` : code === null ? 'stopped' : /Aborted|memory|allocation/i.test(tail) ? 'ran out of memory (web-ifc 4 GB WASM ceiling)' : `exited with code ${code}`;
       resolve({ ok: false, note: `geometry ${why}${tail ? ` — ${tail}` : ''}. The model is indexed (elements, storeys, properties, authored quantities); derived volumes and the 3D view are not available for it.` });
     });

@@ -13,7 +13,7 @@
  */
 import { closeSync, fstatSync, openSync, readFileSync, readSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import { alive, progress, startHeartbeat, step } from './heartbeat.mjs';
+import { alive, expectedMs, opaque, progress, startHeartbeat, step } from './heartbeat.mjs';
 
 startHeartbeat(); // the parent's liveness watch (no fixed time limit): a tick per 4 MB scanned, per product, per window written
 
@@ -145,7 +145,10 @@ const closure = (root, into) => {
 };
 const header = (() => { const f = openSync(ifcPath, 'r'); const b = Buffer.alloc(headerEnd); readSync(f, b, 0, headerEnd, 0); closeSync(f); return b; })();
 const out = [];
-const write = (ids, nProducts) => {
+// writing a chunk file is one stretch of work between two products (done does not move): an opaque call bounded by its size at the
+// geometry rate; the windows read from the file tick inside it
+const write = (ids, nProducts) => opaque('writing a chunk file', expectedMs(target, 'geometry'), () => writeChunk(ids, nProducts));
+const writeChunk = (ids, nProducts) => {
   const file = join(outDir, `chunk-${out.length}.ifc`);
   const o = openSync(file, 'w');
   let bytes = 0;

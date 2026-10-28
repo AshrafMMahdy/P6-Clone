@@ -6,8 +6,13 @@ export function step(name: string, o?: { total?: number; cap?: number; mem?: boo
 export function opaque<T>(label: string, expectMs: number, fn: () => T, o?: { mem?: boolean }): T;
 export function opaqueAsync<T>(label: string, expectMs: number, fn: () => Promise<T>, o?: { mem?: boolean }): Promise<T>;
 export const GEOMETRY_S_PER_MB: number, NAVISWORKS_S_PER_MB: number, REVIT_S_PER_MB: number, MSPROJECT_S_PER_MB: number, BOUND_MULTIPLE: number, BENCH_REFERENCE_MS: number;
-export const RATES: { geometry: number; navisworks: number; revit: number; msproject: number };
-export type RateKind = 'geometry' | 'navisworks' | 'revit' | 'msproject';
+export const RATES: { geometry: number; navisworks: number; revit: number; msproject: number; index: number };
+export type RateKind = 'geometry' | 'navisworks' | 'revit' | 'msproject' | 'index';
+export const INDEX_S_PER_MB: number;
+export function startServerWatch(o: { onStuck: (info: any) => void; reportFile: string; blockedMs?: number }): boolean;
+export function enterSection(label: string, o?: { total?: number; cap?: number; mem?: boolean; expect?: number }): unknown;
+export function leaveSection(prev: unknown): void;
+export const serverWatching: () => boolean;
 export function benchmarkMs(): number;
 export function machineFactor(): number;
 export function forgetRates(kind: RateKind): void;

@@ -30,6 +30,8 @@ import { runSynchroCloud, SYNCHRO_CLOUD_TOOL } from './synchroCloud.ts';
 import { diffIndexes } from '../core/bim/diff.ts';
 import { chromiumPath, ffmpegPath, inChromium, isGpuFailure, noteGpuFailure, probeRenderer, RenderFailed, renderPngs, renderVideo, webmToMp4, type Renderer } from '../core/bim/headless.ts';
 import { aboutMinutes, planRender, renderMinutes } from '../core/bim/renderplan.ts';
+import { StuckError } from '../core/bim/liveness.ts';
+import { expectedMs, watched } from '../core/bim/serverWatch.ts';
 import { activityCosts, earnedValue } from '../core/cost/rollup.ts';
 import { mkdtempSync, writeFileSync as writeRaw } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -66,7 +68,14 @@ const mbs = (b: number) => `${Math.round(b / 1048576).toLocaleString('en')} MB`;
 /** Read a model with its memory reserved first: a model that does not fit is refused (naming the budget and what it
  *  needs), not run out of memory on. Meshing is cut into chunks sized to the memory left (loadNeeds), so a model is
  *  refused only when its index, or its index and the smallest chunk, do not fit. */
+/** A model read; a reader ended as stuck is told with its structured facts (data.stuck: step, silent_ms or bound_ms, tried, alternatives). */
 async function readModel(path: string, o: { geometry?: boolean; tick?: AnalysisHelpers['tick'] } = {}): Promise<Model> {
+  try { return await readModelNow(path, o); } catch (e) {
+    if (e instanceof StuckError) fail('model_unreadable', e.message, e.stuck.alternatives, { data: { reason: 'stuck', stuck: e.stuck } });
+    throw e;
+  }
+}
+async function readModelNow(path: string, o: { geometry?: boolean; tick?: AnalysisHelpers['tick'] } = {}): Promise<Model> {
   if (!existsSync(path)) return fail('model_unreadable', `No file at ${path}.`, 'Give the path of a model file (.ifc, .rvt, .nwd, .nwc or .nwf) inside the storage root.');
   // a Revit file is made into an IFC4 first, with memory of its own; its meshing is then sized from that IFC, not from
   // the source file. A Navisworks file is read as it is: its need comes from its sections (loadNeeds)
@@ -176,7 +185,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         T.rows = T.rows.filter((r) => r.proj_id !== projId || m.byGuid.has(r.guid));
         return { dropped_links: before - T.rows.length };
       });
-      return { model: basename(path), ...(m.source ? { source: m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: ix.lengthScaleSource === 'unit-assignment' ? `${ix.lengthScale} m` : `${ix.lengthScale} m (${ix.lengthScaleSource})`, geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), ...((() => { let n = 0; for (const e of ix.elements) if (e.geom && e.derivedVolumeM3 == null) n++; return n ? { meshed_without_volume: n, volume_note: 'open meshes (a surface, a fitting open at its ends) and stand-in bounding boxes enclose no volume to measure, so they give no derived volume; their authored quantities stand' } : {}; })()), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
+      return { model: basename(path), ...(m.source ? { source: m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: ix.lengthScaleSource === 'unit-assignment' ? `${ix.lengthScale} m` : `${ix.lengthScale} m (${ix.lengthScaleSource})`, geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), ...(ix.geometryStuck ? { geometry_stuck: ix.geometryStuck } : {}), ...((() => { let n = 0; for (const e of ix.elements) if (e.geom && e.derivedVolumeM3 == null) n++; return n ? { meshed_without_volume: n, volume_note: 'open meshes (a surface, a fitting open at its ends) and stand-in bounding boxes enclose no volume to measure, so they give no derived volume; their authored quantities stand' } : {}; })()), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
     }
     case 'list_elements': {
       const m = (await modelOf(s.db, projId))!;
@@ -339,7 +348,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
           const page = writeViewer({ dir: mkdtempSync(join(tmpdir(), 'p6c4d-')), model: { tiles: g.tiles!, hash: g.hash, index: g.index }, timeline: viewerTimeline(s.db, projId, g.index, [source]), options: { left: source, interactive: false, view: a.view ?? 'iso', overlays: ['date', 'legend', 'activity_list'] }, title: 'snapshot', inlineScript: true, file: 'snapshot.html' })[0];
           let pngs: Buffer[];
           const man = readManifest(g.tiles!);
-          try { pngs = await inChromium(chrome, page, (ev, alive) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`), alive), { frameMs: man ? renderMinutes('software', man.triangles, 1, 0) * 60_000 : 0, what: `the model: ${man?.tiles.length ?? '?'} tiles`, tried: () => 'the processor (software rendering: snapshots do not use the graphics card)' }); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): ${roomFor(e.code)}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).', e.code ? { data: { reason: e.code } } : undefined); throw e; } finally { rmSync(dirname(page), { recursive: true, force: true }); }
+          try { pngs = await inChromium(chrome, page, (ev, alive) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`), alive), { frameMs: man ? renderMinutes('software', man.triangles, 1, 0) * 60_000 : 0, what: `the model: ${man?.tiles.length ?? '?'} tiles`, tried: () => 'the processor (software rendering: snapshots do not use the graphics card)' }); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): ${roomFor(e.code)}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).', e.code ? { data: { reason: e.code, ...(e.stuck ? { stuck: e.stuck } : {}) } } : undefined); throw e; } finally { rmSync(dirname(page), { recursive: true, force: true }); }
           snapshots = pngs.map((png, i) => { const p = join(dir, `snapshot-${String(a.snapshots[i]).slice(0, 10)}.png`); h.writeOut(p, png); return p; });
         }
       }
@@ -475,7 +484,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
           : e.code === 'disk_full' ? 'Free disk space on the server (the browser profile and the render page are in its temp folder), then retry.'
           : e.code ? `${smaller ? `${smaller}; if that fails too, ` : ''}the browser could not hold the model (${e.code}): ${roomFor(e.code)}${plan.boxes ? '' : ', or ask for boxes: true (each element drawn as its bounding box)'}.`
           : `${smaller ? `${smaller}; if that fails too, c` : 'C'}heck the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.`;
-        return fail('render_failed', `${lead}${e.message}`, next, e.code ? { data: { reason: e.code, ...(fellBack ? { graphics_card_failed: gpuWhy } : {}) } } : undefined);
+        return fail('render_failed', `${lead}${e.message}`, next, e.code ? { data: { reason: e.code, ...(e.stuck ? { stuck: e.stuck } : {}), ...(fellBack ? { graphics_card_failed: gpuWhy } : {}) } } : undefined);
       };
       const onLoad = (d: number, t: number) => h.tick(d, Math.max(1, t), `loading tile ${d} of ${t} in Chromium`);
       // the graphics card when the probe found one. A render it could not finish because of the card (its memory, its
@@ -554,7 +563,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       let imp: Imported4d;
       try {
       try { bytes = new Uint8Array(readFileSync(path)); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
-      try { imp = await readImport4d(path, bytes); } catch (e) { return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${(e as Error).message}`, 'Give an IFC 4D, search-set XML, TimeLiner CSV/xlsx, Navisworks .nwf/.nwd or SYNCHRO .sp file.'); }
+      try { imp = await watched('reading the 4D file', { what: 'The 4D file reader', tried: 'one pass of the reader over the file in the server\u2019s own process', next: 'export the schedule from the source tool in another format (a TimeLiner CSV, a Navisworks search-set XML, an IFC 4D) or in smaller parts, and import that', expectMs: expectedMs(bytes.length, 'navisworks') }, () => readImport4d(path, bytes)); } catch (e) { if (e instanceof StuckError) return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${e.message}`, e.stuck.alternatives, { data: { reason: 'stuck', stuck: e.stuck } }); return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${(e as Error).message}`, 'Give an IFC 4D, search-set XML, TimeLiner CSV/xlsx, Navisworks .nwf/.nwd or SYNCHRO .sp file.'); }
       const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf' || imp.source === 'nwd';
       const m = await modelOf(s.db, projId, !tasksOnly);
       const plan = planImport4d(s.db, projId, imp, m?.index ?? null, { createActivities: a.create_activities === true });

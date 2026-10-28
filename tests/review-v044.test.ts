@@ -531,6 +531,8 @@ test('the Revit reader and the geometry worker are watched the same way: slow an
     };
     const silent = await opened("await new Promise((r) => setTimeout(r, 60000));");
     assert.equal(silent.geometry, 'unavailable');
+    assert.deepEqual([silent.geometry_stuck?.kind, silent.geometry_stuck?.step], ['silent', 'starting']);
+    assert.ok(silent.geometry_stuck.tried && silent.geometry_stuck.alternatives && silent.geometry_stuck.silent_ms > 0, 'the structured facts come with the note');
     assert.match(silent.geometry_note, /^The geometry worker was ended as stuck while starting: no progress for [\d.]+ (?:ms|s|minutes) .*Tried: web-ifc meshes every run.*Alternatives: open the model with geometry: false.*The model is indexed/s);
     // slow and steady for 2.5 s, then fails by itself: it was not ended for being slow
     const slow = await opened("let n = 0; await new Promise((r) => { const t = setInterval(() => { progress(++n); if (n >= 12) { clearInterval(t); r(); } }, 200); }); console.error('stand-in finished'); process.exit(1);");

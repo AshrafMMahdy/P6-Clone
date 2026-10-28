@@ -9,7 +9,7 @@ import { createReadStream, existsSync, mkdtempSync, readFileSync, rmSync, statSy
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { startupWindowMs, stuckMessage, unitWatch, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { startupWindowMs, stuckData, stuckMessage, unitWatch, workerFloorMs, type StuckData, type StuckInfo } from './liveness.ts';
 
 /** A program from the environment, if it names an existing file. */
 const fromEnv = (name: string): string | null => { const p = process.env[name]; return p && existsSync(p) ? p : null; };
@@ -18,7 +18,14 @@ export const ffmpegPath = (): string | null => fromEnv('P6CLONE_FFMPEG');
 
 /** The headless browser could not be started or talked to, or could not hold the model: a clean failure for the tool
  *  to report, never a crash. code: what stopped it (the page's own code, e.g. webgl_context_lost, when it said). */
-export class RenderFailed extends Error { code?: string; constructor(message: string, code?: string) { super(message); if (code) this.code = code; } }
+export class RenderFailed extends Error {
+  code?: string;
+  /** set when the render was ended as stuck: the structured facts (step, silence or bound, tried, alternatives) */
+  stuck?: StuckData;
+  constructor(message: string, code?: string, stuck?: StuckData) { super(message); if (code) this.code = code; if (stuck) this.stuck = stuck; }
+}
+/** A render ended as stuck: the words and the structured facts. */
+const stuckRender = (i: StuckInfo, o: { what: string; tried?: string; next: string }) => new RenderFailed(stuckMessage(i, o), 'render_stuck', stuckData(i, o));
 
 /** The failures that are the graphics card's or WebGL's (the software renderer may draw what they could not):
  *  webgl_context_lost (the driver reset), gpu_out_of_memory (the card's own memory), gpu_process_crashed (Chromium's
@@ -108,11 +115,11 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
   const floorMs = o.floorMs ?? 120_000;
   const watch = unitWatch({
     floorMs, step: 'starting the browser and loading the viewer', windowMs: startupWindowMs(),
-    onStuck: (i: StuckInfo) => failAll(new RenderFailed(stuckMessage(i, {
+    onStuck: (i: StuckInfo) => failAll(stuckRender(i, {
       what: `The render${o.what ? ` of ${o.what}` : ''}`,
       tried: o.tried?.() ?? (o.gpu ? 'the graphics card' : 'the processor (software rendering)'),
       next: o.next ?? 'ask for quality "draft" or boxes: true (each element drawn as its bounding box); render on a machine with a working graphics card (the client_render route); split the model (by discipline or level) or export it as NWC or IFC in smaller parts',
-    }), 'render_stuck')),
+    })),
   });
   const alive: Alive = { beat: (d, t) => watch.beat(d, t), step: (n, s) => watch.step(n, s) };
   try {
@@ -266,10 +273,10 @@ export async function inPage<T>(page: PageHandle, work: (evaluate: Evaluate, ali
   const fail = (e: Error) => { failure ??= e; reject(failure); };
   const watch = unitWatch({
     floorMs: o.floorMs ?? 120_000, step: 'starting the viewer page', windowMs: startupWindowMs(),
-    onStuck: (i: StuckInfo) => fail(new RenderFailed(stuckMessage(i, {
+    onStuck: (i: StuckInfo) => fail(stuckRender(i, {
       what: `The render${o.what ? ` of ${o.what}` : ''}`, tried: o.tried ?? 'this computer\u2019s graphics card (the app has no software fallback)',
       next: o.next ?? 'render the video on the server with render_4d (quality draft or boxes: true is much faster), or on a machine with a stronger graphics card; split the model (by discipline or level) or export it as NWC or IFC in smaller parts',
-    }), 'render_stuck')),
+    })),
   });
   const alive: Alive = { beat: (d, t) => watch.beat(d, t), step: (n, s) => watch.step(n, s) };
   page.onGone((why) => fail(new RenderFailed(`The page's process ended (${why}): most often the computer ran out of memory, or the graphics driver reset.`, 'browser_out_of_memory')));
@@ -301,16 +308,16 @@ export async function webmToMp4(webm: Buffer, ffmpeg: string | null = ffmpegPath
   try {
     const src = join(dir, 'in.webm'), dst = join(dir, 'out.mp4');
     writeFileSync(src, webm);
-    const err = await new Promise<string | null>((resolve) => {
+    const err = await new Promise<RenderFailed | string | null>((resolve) => {
       const c = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-y', '-i', src, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', dst], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-      let e = '', rest = '', stuck: string | null = null;
-      const watch = unitWatch({ floorMs: o.floorMs ?? workerFloorMs(), step: 'converting the WebM to MP4 (ffmpeg, frames written)', onStuck: (i) => { stuck = stuckMessage(i, { what: 'ffmpeg', tried: 'one conversion of the recorded WebM to H.264', next: 'ask for format: "webm" (no conversion), a smaller quality or fewer frames, or convert the WebM on another machine' }); c.kill(); } });
+      let e = '', rest = '', stuck: RenderFailed | null = null;
+      const watch = unitWatch({ floorMs: o.floorMs ?? workerFloorMs(), step: 'converting the WebM to MP4 (ffmpeg, frames written)', onStuck: (i) => { stuck = stuckRender(i, { what: 'ffmpeg', tried: 'one conversion of the recorded WebM to H.264', next: 'ask for format: "webm" (no conversion), a smaller quality or fewer frames, or convert the WebM on another machine' }); c.kill(); } });
       c.stdout.on('data', (d) => { const lines = (rest + String(d)).split('\n'); rest = lines.pop() ?? ''; for (const l of lines) { const m = /^frame=(\d+)/.exec(l.trim()); if (m) watch.beat(Number(m[1]), o.frames); } });
       c.stderr.on('data', (d) => { e = (e + String(d)).slice(-1000); });
       c.on('error', (x) => { watch.stop(); resolve(`ffmpeg could not be started: ${x.message}`); });
       c.on('exit', (code) => { watch.stop(); resolve(stuck ?? (code === 0 ? null : `ffmpeg failed (code ${code}): ${e.trim()}`)); });
     });
-    if (err) throw new RenderFailed(err, err.startsWith('ffmpeg was ended as stuck') ? 'render_stuck' : undefined);
+    if (err) throw typeof err === 'string' ? new RenderFailed(err) : err;
     return readFileSync(dst);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }

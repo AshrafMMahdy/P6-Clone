@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { resolve as absolute } from 'node:path';
 import { expectedMs } from '../core/bim/heartbeat.mjs';
-import { externalWatch, pidsNamed, stuckMessage, treeCpuMs, workerFloorMs, type StuckInfo } from '../core/bim/liveness.ts';
+import { cpuCovering, externalWatch, pidsNamed, StuckError, workerFloorMs, type StuckInfo } from '../core/bim/liveness.ts';
 
 export const MSP_REQUIRED = 'Microsoft Project must be installed to import/export .mpp files (Primavera P6 has the same requirement)';
 // No fixed time limit on the conversion (owner rule 2026-10-28; it was 120 s whatever the file's size). Microsoft Project is opaque
@@ -60,19 +60,22 @@ export function buildConvertScript(direction: ConvertDirection, inPath: string, 
   ].join('; ').replace(/\{; /g, '{ ').replace(/; \}/g, ' }');
 }
 
+/** A conversion ended as stuck: the words and the structured fields (StuckError.stuck). */
+export function mspStuck(direction: ConvertDirection, stuck: StuckInfo): StuckError {
+  const open = direction === 'mppToXml' ? 'opening the .mpp and saving it as Microsoft Project XML' : 'saving the XML as an .mpp';
+  return new StuckError({ ...stuck, step: `Microsoft Project: ${open}` }, {
+    what: 'Microsoft Project (through COM)', tried: 'one conversion in a hidden Microsoft Project; there is no second way to read or write an .mpp',
+    next: direction === 'mppToXml'
+      ? 'open the .mpp once in Microsoft Project yourself (a dialog, such as a read-only prompt, a repair prompt or a licence message, may be waiting there), save it as Microsoft Project XML (File > Save As) and import that XML; or export the schedule from the source tool as XER or XML; or split a very large project'
+      : 'open Microsoft Project once yourself (a dialog may be waiting there), then retry; or save the schedule as Microsoft Project XML and let the receiver open that in Project; or export it as XER or XML',
+  }, '', ` ${MSP_REQUIRED}.`);
+}
+
 /** Human message for a failed conversion. */
 export function convertError(direction: ConvertDirection, code: number | null, stderr: string, stuck: StuckInfo | null = null): string {
   const what = direction === 'mppToXml' ? 'import the .mpp file' : 'save the .mpp file';
   const detail = stderr.replace(/\s+/g, ' ').trim().slice(0, 400).replace(/[.\s]+$/, '');
-  if (stuck) {
-    const open = direction === 'mppToXml' ? 'opening the .mpp and saving it as Microsoft Project XML' : 'saving the XML as an .mpp';
-    return `${stuckMessage({ ...stuck, step: `Microsoft Project: ${open}` }, {
-      what: 'Microsoft Project (through COM)', tried: 'one conversion in a hidden Microsoft Project; there is no second way to read or write an .mpp',
-      next: direction === 'mppToXml'
-        ? 'open the .mpp once in Microsoft Project yourself (a dialog, such as a read-only prompt, a repair prompt or a licence message, may be waiting there), save it as Microsoft Project XML (File > Save As) and import that XML; or export the schedule from the source tool as XER or XML; or split a very large project'
-        : 'open Microsoft Project once yourself (a dialog may be waiting there), then retry; or save the schedule as Microsoft Project XML and let the receiver open that in Project; or export it as XER or XML',
-    })} ${MSP_REQUIRED}.`;
-  }
+  if (stuck) return mspStuck(direction, stuck).message;
   if (code === EXIT.noProject || /MSPROJECT_NOT_AVAILABLE|ENOENT/.test(detail)) return `${MSP_REQUIRED}. Microsoft Project could not be started on this computer${detail ? ` (${detail.replace(/^MSPROJECT_NOT_AVAILABLE:\s*/, '')})` : ''}.`;
   if (code === EXIT.open) return `Microsoft Project could not open the file, so the clone could not ${what}${detail ? `: ${detail.replace(/^OPEN_FAILED:\s*/, '')}` : ''}.`;
   if (code === EXIT.save || code === EXIT.missingOutput) return `Microsoft Project could not write the converted file, so the clone could not ${what}${detail ? `: ${detail.replace(/^SAVE_FAILED:\s*/, '')}` : ''}.`;
@@ -102,13 +105,15 @@ async function runConvert(direction: ConvertDirection, inPath: string, outPath: 
     stopWatch = externalWatch({
       step: `converting (${direction})`, floorMs: workerFloorMs(), expectMs: expectedMs(sizeOf(inPath), 'msproject'),
       output: () => sizeOf(outPath), // a save writes the output as it goes: bytes are progress
-      cpu: () => treeCpuMs(child.pid ?? 0, [MSPROJECT_EXE]),
+      // the idle rule needs a reading that COVERS Project (the process table, with WINPROJ.EXE running): where only PowerShell can be
+      // seen (tasklist fall back, Project not found yet) there is no idle rule, and the size bound alone ends a conversion
+      cpu: () => cpuCovering(child.pid ?? 0, [MSPROJECT_EXE]),
       onStuck: async (i) => {
         stuck = i;
         // end the script, and the Project instance IT started (a new WINPROJ.EXE; one already running is the user's and stays)
         try { child.kill(); } catch { /* gone */ }
         for (const pid of (await pidsNamed(MSPROJECT_EXE)) ?? []) if (!before.has(pid)) { try { process.kill(pid); } catch { /* gone */ } }
-        done(new Error(convertError(direction, null, stderr, i)));
+        done(mspStuck(direction, i));
       },
     });
     child.stdout?.on('data', () => { /* drain */ });

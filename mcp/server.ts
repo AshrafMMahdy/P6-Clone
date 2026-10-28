@@ -58,11 +58,12 @@ import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
 import { listReports, parseSpec, runReport, runSpec } from '../renderer/reports/engine.ts';
 import { reportHtml, reportPages, reportText, reportXlsx } from '../renderer/reports/output.ts';
 import { nowStamp } from '../core/report/reports.ts';
+import { startWatch } from '../core/bim/serverWatch.ts';
 import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler } from '../core/risk/montecarlo.ts';
 import { dayHours } from '../core/project/units.ts';
 import {
   ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
-  exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
+  exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, previousStuck, recoveryDir, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
@@ -724,6 +725,8 @@ if (isMain) {
   setRoots(opt('automation-read-root'), opt('automation-write-root'));
   config.checkpointMs = Number(process.env.P6CLONE_CHECKPOINT_MS) > 0 ? Number(process.env.P6CLONE_CHECKPOINT_MS) : 2000;
   const adopted = adoptRecovery();
+  for (const r of previousStuck()) process.stderr.write(`P6 Clone: the previous server was ended because it was stuck in "${r.stuck.step}" (${r.at}): ${r.stuck.kind === 'bound' ? 'past its work bound' : 'no progress'}; its projects are back under their handles.\n`);
+  startWatch(join(recoveryDir(), 'stuck.json')); // the sections of this process that read input are watched (serverWatch.ts)
   if (adopted.length) process.stderr.write(`P6 Clone: ${adopted.length} project(s) from a server that is no longer running are back under their handles.\n`);
   housekeeping();
   // SIGHUP: a terminal closed (on Windows, the console window); SIGBREAK: Ctrl+Break on Windows

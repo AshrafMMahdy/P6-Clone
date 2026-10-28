@@ -13,6 +13,7 @@ import { readManifest, tileBytesOf } from './tiles.ts';
 import { isRevit, revitNeed, rvtToIfc, type RevitSource } from './rvt.ts';
 import { cacheNavisworks, isNavisworks, navisworksKey, navisworksNeed, nwdToIfc, type NavisworksSource } from './nwd.ts';
 import { alive } from './heartbeat.mjs';
+import { expectedMs, watched } from './serverWatch.ts';
 
 export interface Model {
   hash: string; index: IfcIndex;
@@ -109,13 +110,13 @@ async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
   const hit = memory.get(name);
   if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; return hit; }
   setAsideOld(hash);
-  let index = existsSync(`${base}.ndjson`) && existsSync(`${base}.nw.json`) ? tryReadIndex(base)?.index ?? null : null;
+  let index = existsSync(`${base}.ndjson`) && existsSync(`${base}.nw.json`) ? (await tryReadIndexW(base))?.index ?? null : null;
   // a model read without geometry, or whose geometry failed (once a run of the app), is read again with it
   const retry = !!index && want && index.geometryStatus === 'unavailable' && !retried.has(hash);
   if (retry) retried.add(hash);
   if (!index || retry || (want && (index.geometryStatus === 'skipped' || (index.geometryStatus === 'ok' && !readManifest(`${base}.tiles`))))) {
     await cacheNavisworks(path, base, { geometry: want, onProgress: o.onProgress });
-    index = readIndex(base);
+    index = await indexSection('reading', base, () => readIndex(base));
   }
   index.sourcePath = path;
   touch(base);
@@ -136,7 +137,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; return hit; }
   const base = join(cacheDir(), cacheName(hash));
   setAsideOld(hash);
-  let cached = hit ? { index: hit.index } : existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
+  let cached = hit ? { index: hit.index } : existsSync(`${base}.ndjson`) ? await tryReadIndexW(base) : null;
   // a model indexed without geometry: meshed now from its cached index (the STEP pass is not run again); so is one whose
   // meshing failed, once a run of the app (a timeout, or memory short at the time, may not happen again)
   const retry = cached && want && cached.index.geometryStatus === 'unavailable' && !retried.has(hash);
@@ -144,7 +145,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   if (cached && want && (cached.index.geometryStatus === 'skipped' || retry)) {
     const index = cached.index;
     await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
-    writeIndex(base, index);
+    await indexSection('writing', base, () => writeIndex(base, index));
     cached = { index };
   }
   if (cached && (!want || cached.index.geometryStatus !== 'ok' || readManifest(`${base}.tiles`))) {
@@ -156,7 +157,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
     return m;
   }
   const { index } = await parseIfc(path, { geometry: want, ...(want ? { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress } : {}) });
-  writeIndex(base, index);
+  await indexSection('writing', base, () => writeIndex(base, index));
   if (index.elements.length > 200_000) compactHeap(); // what reading it left behind goes before the next call takes memory
   const m = wrap(hash, index, want ? `${base}.tiles` : null);
   memory.set(cacheName(hash), m);
@@ -206,6 +207,13 @@ export function writeIndex(base: string, index: IfcIndex): void {
   renameSync(tmp, file);
 }
 
+/** The cached index files are read and written in the server's own process: declared sections (serverWatch.ts), one opaque call of the
+ *  file's size at the index rate (section 6), ticking every 16 MB block / 4096 elements. */
+const indexSection = <T,>(verb: string, base: string, fn: () => T): Promise<T> => {
+  const size = (() => { try { return statSync(`${base}.ndjson`).size; } catch { return 0; } })();
+  return watched(`${verb} the cached model index`, { what: 'The model index', tried: 'one pass over the cached index file in the server\u2019s own process', next: 'remove the model cache folder (P6CLONE_MODEL_CACHE) so the model is read again from its file, or open the model with geometry: false', expectMs: expectedMs(size, 'index') }, fn);
+};
+const tryReadIndexW = async (base: string): Promise<{ index: IfcIndex } | null> => { try { return { index: await indexSection('reading', base, () => readIndex(base)) }; } catch (e) { if ((e as Error).name === 'StuckError') throw e; rmSync(`${base}.ndjson`, { force: true }); return null; } };
 /** The cached index, or null when the cache is missing or damaged (then the IFC is read again). */
 function tryReadIndex(base: string): { index: IfcIndex } | null { try { return { index: readIndex(base) } } catch { rmSync(`${base}.ndjson`, { force: true }); return null; } }
 export function readIndex(base: string): IfcIndex {
@@ -228,7 +236,7 @@ export function readIndex(base: string): IfcIndex {
     els.push(new Element(r[0], r[1], r[2], r[4] || null, xs[r[3]], els.length));
   };
   try {
-    for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) { const ls = (rest + dec.decode(buf.subarray(0, n), { stream: true })).split('\n'); rest = ls.pop()!; for (const l of ls) line(l); }
+    for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) { alive(); const ls = (rest + dec.decode(buf.subarray(0, n), { stream: true })).split('\n'); rest = ls.pop()!; for (const l of ls) line(l); }
     line(rest + dec.decode());
   } finally { closeSync(fd); }
   if (!index) throw new Error(`The model cache ${base}.ndjson is empty.`);

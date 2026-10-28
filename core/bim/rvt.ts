@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { heartbeatEnv, heartbeatWatcher, stuckMessage, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
 import { fileHash } from './model.ts';
 import { rvtWorkerPath } from './runtime.ts';
 
@@ -121,7 +121,7 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
       if (out.code === 4) throw new RevitDiskFull(dir, last.replace(/^disk_full: /, ''));
       if (out.code === 5) throw new RevitTooLarge(size, revitMaxBytes(), last.replace(/^out_of_memory: /, ''));
       if (!out.stuck && (out.signal === 'SIGKILL' || out.signal === 'SIGABRT' || /heap out of memory|Allocation failed/i.test(out.text))) throw new RevitTooLarge(size, revitMaxBytes(), `the reader's process was ended by the system${out.signal ? ` (${out.signal})` : ''}, most often for lack of memory`);
-      if (out.stuck) throw new Error(`${path}: ${stuckMessage(out.stuck, { what: 'The Revit reader', tried: 'the reader tries up to three modes in turn (full geometry, typed elements without geometry, the spatial scaffold); it was ended in the mode named above and the later ones were not reached', next: 'export the same model from Revit as an NWC (Navisworks) or IFC file (File > Export) and open that: both open at any size with the same GlobalIds, so links carry over; or split the project into linked models' })}`);
+      if (out.stuck) throw new StuckError(out.stuck, { what: 'The Revit reader', tried: 'the reader tries up to three modes in turn (full geometry, typed elements without geometry, the spatial scaffold); it was ended in the mode named above and the later ones were not reached', next: 'export the same model from Revit as an NWC (Navisworks) or IFC file (File > Export) and open that: both open at any size with the same GlobalIds, so links carry over; or split the project into linked models' }, `${path}: `);
       throw new Error(`${path}: ${last || `the Revit reader stopped (${out.signal ?? out.code})`}`);
     }
     dropOldFormats(dir, hash);

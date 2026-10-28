@@ -8,7 +8,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
-import { heartbeatEnv, heartbeatWatcher, stuckMessage, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
 import { pushAll } from '../arrays.ts';
 import { openContainer, section } from './nwd/container.ts';
 import { decodeTree, type NwNode, type NwTree } from './nwd/tree.ts';
@@ -187,6 +187,7 @@ async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<Naviswo
   writeFileSync(jobFile, JSON.stringify(job), { mode: 0o600 });
   try {
     const heap = nwdHeapMb();
+    let stuckErr: StuckError | null = null;
     const err = await new Promise<string | null>((done) => {
       const child = spawn(process.execPath, [`--max-old-space-size=${heap}`, worker, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
       let text = '', out = '', stuck: StuckInfo | null = null;
@@ -204,9 +205,9 @@ async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<Naviswo
       const end = () => { stop(); if (cap) clearTimeout(cap); };
       child.on('error', (e) => { end(); done(e.message); });
       // what it read is written last: a reader that wrote it finished, even if the process then fell over on its way out
-      child.on('close', (code, signal) => { end(); done(existsSync(`${jobFile}.out.json`) ? null : stuck ? stuckMessage(stuck, { what: 'The Navisworks reader', tried: 'the reader reads each model of the file in turn and hands its elements on as soon as it is read; it was ended in the step named above', next: 'export the model from Navisworks or its authoring tool as smaller NWC or NWD files (one per discipline or level) or as an IFC and open those; for a federation (.nwf) open its models one at a time' }) : code === 0 ? 'the Navisworks reader stopped without its answer' : (text.trim().split('\n').pop() || `the Navisworks reader stopped (${signal ?? code}${signal || code === null ? ': out of time or memory' : ''})`)); });
+      child.on('close', (code, signal) => { end(); done(existsSync(`${jobFile}.out.json`) ? null : stuck ? (stuckErr = new StuckError(stuck, { what: 'The Navisworks reader', tried: 'the reader reads each model of the file in turn and hands its elements on as soon as it is read; it was ended in the step named above', next: 'export the model from Navisworks or its authoring tool as smaller NWC or NWD files (one per discipline or level) or as an IFC and open those; for a federation (.nwf) open its models one at a time' })).message : code === 0 ? 'the Navisworks reader stopped without its answer' : (text.trim().split('\n').pop() || `the Navisworks reader stopped (${signal ?? code}${signal || code === null ? ': out of time or memory' : ''})`)); });
     });
-    if (err) throw new Error(err);
+    if (err) throw stuckErr ?? new Error(err);
     return JSON.parse(readFileSync(`${jobFile}.out.json`, 'utf8')) as NavisworksSource;
   } finally { rmSync(jobDir, { recursive: true, force: true }); }
 }

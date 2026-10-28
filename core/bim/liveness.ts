@@ -45,6 +45,22 @@ const run = (cmd: string, args: string[]) => new Promise<string | null>((done) =
   try { execFile(cmd, args, { windowsHide: true, timeout: 20_000, maxBuffer: 16 << 20 }, (e, out) => done(e ? null : String(out))); } catch { done(null); }
 });
 const lower = (n: string) => n.toLowerCase();
+function sumRows(rows: ProcRow[], pid: number, names: string[]): number {
+  const want = new Set(names.map(lower)), mine = new Set([pid]);
+  for (const r of rows) if (want.has(lower(r.name))) mine.add(r.pid);
+  for (let grew = true; grew;) { grew = false; for (const r of rows) if (!mine.has(r.pid) && mine.has(r.ppid)) { mine.add(r.pid); grew = true; } }
+  return rows.filter((r) => mine.has(r.pid)).reduce((n, r) => n + r.ms, 0);
+}
+/** Like treeCpuMs, but only when the reading COVERS every program in `names`: the process table was read (not the tasklist fall
+ *  back, which sees one process) and each name is running. Otherwise null: a reading that cannot see the program says nothing about
+ *  whether it works, and an idle rule must not be built on it. */
+export async function cpuCovering(pid: number, names: string[]): Promise<number | null> {
+  try {
+    const rows = await processRows();
+    if (!rows || !names.every((n) => rows.some((r) => lower(r.name) === lower(n)))) return null;
+    return sumRows(rows, pid, names);
+  } catch { return null; }
+}
 /** Every process with its parent and processor time (and name, on Linux and Windows); null where no way works. */
 export async function processRows(): Promise<ProcRow[] | null> {
   try {
@@ -76,12 +92,7 @@ export async function processRows(): Promise<ProcRow[] | null> {
 export async function treeCpuMs(pid: number, names: string[] = []): Promise<number | null> {
   try {
     const rows = await processRows();
-    if (rows) {
-      const want = new Set(names.map(lower)), mine = new Set([pid]);
-      for (const r of rows) if (want.has(lower(r.name))) mine.add(r.pid);
-      for (let grew = true; grew;) { grew = false; for (const r of rows) if (!mine.has(r.pid) && mine.has(r.ppid)) { mine.add(r.pid); grew = true; } }
-      return rows.filter((r) => mine.has(r.pid)).reduce((n, r) => n + r.ms, 0);
-    }
+    if (rows) return sumRows(rows, pid, names);
     if (process.platform === 'win32') {
       const t = await run('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/V']); // "CPU Time" as h:mm:ss, the process alone
       const m = t && /"(\d+):(\d\d):(\d\d)"/.exec(t);
@@ -124,8 +135,8 @@ export interface StuckInfo {
   kind: 'silent' | 'bound' | 'idle';
   step: string; done?: number; total?: number;
   silentMs: number; windowMs: number; limitMs: number; maxGapMs: number; expectMs: number; floorMs: number;
-  /** the silence limit was lowered to the step's work bound */
-  capped: boolean;
+  /** the silence limit was lengthened to the step's work bound (one element, one piece may take as long as the whole step's size allows) */
+  lengthened: boolean;
 }
 
 /** The one rule. null: alive. */
@@ -133,12 +144,15 @@ export function judge(s: StepState, floorMs: number): StuckInfo | null {
   const base = { step: s.step, ...(s.done != null ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), silentMs: s.sinceMs, maxGapMs: s.maxGapMs, expectMs: s.expectMs, floorMs };
   if (s.expectMs > 0) {
     const limit = Math.max(floorMs, s.expectMs * BOUND_MULTIPLE);
-    return s.sinceMs > limit ? { kind: 'bound', windowMs: limit, limitMs: limit, capped: false, ...base } : null;
+    return s.sinceMs > limit ? { kind: 'bound', windowMs: limit, limitMs: limit, lengthened: false, ...base } : null;
   }
   const windowMs = s.windowMs ?? Math.max(floorMs, 4 * s.maxGapMs);
-  let limitMs = 2 * windowMs, capped = false;
-  if (s.capMs > 0) { const cap = Math.max(2 * floorMs, s.capMs * BOUND_MULTIPLE); if (cap < limitMs) { limitMs = cap; capped = true; } }
-  return s.sinceMs > limitMs ? { kind: 'silent', windowMs, limitMs, capped, ...base } : null;
+  // a step that knows its whole work (capMs: the size of the step x the rate on this machine) allows ONE tick to take as long as
+  // that work bound allows (10 x): a single heavy element is an opaque call bounded by the size of what it works on, which cannot be
+  // known before it is done, so by the step's whole size. Never shorter than two windows of the job's own gaps.
+  let limitMs = 2 * windowMs, lengthened = false;
+  if (s.capMs > 0) { const cap = s.capMs * BOUND_MULTIPLE; if (cap > limitMs) { limitMs = cap; lengthened = true; } }
+  return s.sinceMs > limitMs ? { kind: 'silent', windowMs, limitMs, lengthened, ...base } : null;
 }
 
 const dur = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : ms < 90_000 ? `${Math.round(ms / 100) / 10} s` : `${Math.round(ms / 6000) / 10} minutes`);
@@ -152,8 +166,24 @@ export function stuckMessage(i: StuckInfo, o: { what: string; tried?: string; ne
     ? `one call that cannot report progress ran past its work bound of ${dur(i.limitMs)} (about ${dur(i.expectMs)} expected for this input at this machine's measured rate, times ${BOUND_MULTIPLE}); it had been silent for ${dur(i.silentMs)}`
     : i.kind === 'idle'
       ? `it used no processor time and wrote nothing for ${dur(i.silentMs)} (two windows of ${dur(i.windowMs)}), which is what a program does when it waits on a dialog nobody can see`
-      : `no progress for ${dur(i.silentMs)} (two windows of ${dur(i.windowMs)}${gap}${i.capped ? `; shortened to the step's work bound of ${dur(i.limitMs)}` : ''})`;
+      : `no progress for ${dur(i.silentMs)} (two windows of ${dur(i.windowMs)}${gap}${i.lengthened ? `; lengthened to the step's work bound of ${dur(i.limitMs)}, because one piece of work may take as long as the size of the whole step allows` : ''})`;
   return `${o.what} was ended as stuck while ${where}: ${why}.${o.tried ? ` Tried: ${o.tried}.` : ''} Alternatives: ${o.next}.`;
+}
+
+/** The structured fields of an ended job, for the tool's error data (the same facts as the words): the step, the silence or the bound
+ *  with its value, what was tried, the alternatives. */
+export interface StuckData { step: string; kind: StuckInfo['kind']; silent_ms: number; window_ms?: number; windows?: number; bound_ms?: number; expected_ms?: number; longest_gap_ms?: number; done?: number; total?: number; tried?: string; alternatives: string }
+export function stuckData(i: StuckInfo, o: { tried?: string; next: string }): StuckData {
+  return {
+    step: i.step, kind: i.kind, silent_ms: Math.round(i.silentMs),
+    ...(i.kind === 'bound' ? { bound_ms: Math.round(i.limitMs), expected_ms: Math.round(i.expectMs) } : { window_ms: Math.round(i.windowMs), windows: 2, ...(i.maxGapMs > 0 ? { longest_gap_ms: Math.round(i.maxGapMs) } : {}) }),
+    ...(i.done != null ? { done: i.done } : {}), ...(i.total ? { total: i.total } : {}), ...(o.tried ? { tried: o.tried } : {}), alternatives: o.next,
+  };
+}
+/** An Error for a job ended as stuck: its message is stuckMessage, its data the structured fields (tools put them in the error's data). */
+export class StuckError extends Error {
+  readonly stuck: StuckData;
+  constructor(i: StuckInfo, o: { what: string; tried?: string; next: string }, prefix = '', suffix = '') { super(`${prefix}${stuckMessage(i, o)}${suffix}`); this.stuck = stuckData(i, o); this.name = 'StuckError'; }
 }
 
 /** What a worker's heartbeat line says (heartbeat.mjs). */
@@ -216,7 +246,7 @@ export function unitWatch(o: { floorMs: number; onStuck: (i: StuckInfo) => void;
   return {
     beat(d, t) {
       if (t != null) total = t;
-      if (d === lastDone) return;
+      if (d === lastDone || d < lastDone) return; // a tick counts only if done ADVANCED: the same count again is silence
       const now = Date.now();
       if (lastDone >= 0) { maxGap = Math.max(maxGap, (now - tickAt) / Math.max(1, d - lastDone)); expect = 0; }
       lastDone = d; doneN = d; tickAt = now;
@@ -234,7 +264,8 @@ export function unitWatch(o: { floorMs: number; onStuck: (i: StuckInfo) => void;
  *  cpu: the processor time (ms) of everything of the program. */
 export function externalWatch(o: { step: string; floorMs: number; expectMs: number; output?: () => number | Promise<number>; cpu?: () => Promise<number | null>; onStuck: (i: StuckInfo) => void; pollMs?: number }): () => void {
   const bound = Math.max(o.floorMs, o.expectMs * BOUND_MULTIPLE), win = Math.max(o.floorMs / 2, bound / 4);
-  let lastTick = Date.now(), lastOut = -1, winStart = lastTick, winMoved = false, cpuThen: number | null = null, idle = 0, busy = false, done = false;
+  const t0 = Date.now();
+  let lastTick = t0, lastOut = -1, winStart = lastTick, winMoved = false, cpuThen: number | null = null, idle = 0, busy = false, done = false;
   const fire = (i: StuckInfo) => { done = true; clearInterval(timer); o.onStuck(i); };
   const timer = setInterval(async () => {
     if (done || busy) return;
@@ -242,14 +273,15 @@ export function externalWatch(o: { step: string; floorMs: number; expectMs: numb
     try {
       const now = Date.now();
       const out = o.output ? await o.output() : 0;
-      if (out !== lastOut) { if (lastOut >= 0) { lastTick = now; winMoved = true; } lastOut = out; }
+      // output written resets the clock, but only up to the work bound: a save whose file keeps growing for ever is not alive
+      if (out !== lastOut) { if (lastOut >= 0 && now - t0 <= bound) { lastTick = now; winMoved = true; } lastOut = out; }
       if (cpuThen == null && o.cpu) cpuThen = await o.cpu();
       if (now - winStart >= win) {
         const cpu = o.cpu ? await o.cpu() : null;
         const used = cpu != null && cpuThen != null && cpu - cpuThen > Math.max(50, 0.005 * win);
         idle = winMoved || used || cpu == null ? 0 : idle + 1;
         cpuThen = cpu; winStart = now; winMoved = false;
-        if (idle >= 2) { fire({ kind: 'idle', step: o.step, silentMs: now - lastTick, windowMs: win, limitMs: 2 * win, maxGapMs: 0, expectMs: o.expectMs, floorMs: o.floorMs, capped: false }); return; }
+        if (idle >= 2) { fire({ kind: 'idle', step: o.step, silentMs: now - lastTick, windowMs: win, limitMs: 2 * win, maxGapMs: 0, expectMs: o.expectMs, floorMs: o.floorMs, lengthened: false }); return; }
       }
       const past = judge({ step: o.step, sinceMs: now - lastTick, maxGapMs: 0, expectMs: o.expectMs, capMs: 0 }, o.floorMs);
       if (past) fire(idle >= 1 ? { ...past, kind: 'idle', windowMs: win } : past);

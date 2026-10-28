@@ -213,7 +213,7 @@ function geometryOut(dir: string) {
     /** close the files, write the fingerprints and the summary: the number of elements with geometry */
     finish(n: number): number {
       flushPlaces(); closeSync(pfd);
-      step('measuring the elements (fingerprints)', { total: n });
+      step('measuring the elements (fingerprints)');
       // an element with an open piece may still be closed as a whole (a steel section drawn face by face): its pieces
       // placed together are measured (one face set per element, as in its IFC)
       const open = new Map<number, number[]>();

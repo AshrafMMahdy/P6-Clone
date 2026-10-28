@@ -317,7 +317,7 @@ test('MPP bridge PowerShell script', () => {
   assert.ok(back.includes("'FileOpenEx' @($in, $false, 'MSProject.XML') @('Name', 'ReadOnly', 'FormatID')"));
   assert.equal(psQuote("it's"), "'it''s'");
   assert.ok(convertError('mppToXml', 3, 'MSPROJECT_NOT_AVAILABLE: class not registered').startsWith(MSP_REQUIRED));
-  const idle = { kind: 'idle' as const, step: 'x', silentMs: 240_000, windowMs: 120_000, limitMs: 240_000, maxGapMs: 0, expectMs: 1000, floorMs: 120_000, capped: false };
+  const idle = { kind: 'idle' as const, step: 'x', silentMs: 240_000, windowMs: 120_000, limitMs: 240_000, maxGapMs: 0, expectMs: 1000, floorMs: 120_000, lengthened: false };
   assert.match(convertError('mppToXml', null, '', idle), /^Microsoft Project \(through COM\) was ended as stuck while Microsoft Project: opening the \.mpp and saving it as Microsoft Project XML: it used no processor time and wrote nothing for 4 minutes.*waits on a dialog nobody can see\. Tried: .*Alternatives: open the \.mpp once in Microsoft Project yourself.*Microsoft Project XML/s);
   assert.match(convertError('xmlToMpp', null, '', { ...idle, kind: 'bound', limitMs: 600_000, silentMs: 601_000 }), /past its work bound of 10 minutes/);
 });

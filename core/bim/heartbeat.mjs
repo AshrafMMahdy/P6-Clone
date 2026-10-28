@@ -28,7 +28,10 @@ export const NAVISWORKS_S_PER_MB = 0.8;
 export const REVIT_S_PER_MB = 2;
 /** Microsoft Project's COM open/save, per MB of the input. PROVISIONAL, as REVIT_S_PER_MB (measured on the owner's PC). */
 export const MSPROJECT_S_PER_MB = 2;
-export const RATES = { geometry: GEOMETRY_S_PER_MB, navisworks: NAVISWORKS_S_PER_MB, revit: REVIT_S_PER_MB, msproject: MSPROJECT_S_PER_MB };
+/** The IFC index (stepIndex: the streaming STEP pass and the index built from it, in the server's own process), per MB of the IFC.
+ *  Measured 0.095, 0.096, 0.098 s/MB (105 MB, 365 MB, 1.06 GB models, section 6 "open (index only)"): rounded up. */
+export const INDEX_S_PER_MB = 0.1;
+export const RATES = { geometry: GEOMETRY_S_PER_MB, navisworks: NAVISWORKS_S_PER_MB, revit: REVIT_S_PER_MB, msproject: MSPROJECT_S_PER_MB, index: INDEX_S_PER_MB };
 /** An opaque call is ended past this many times its expected time (owner decision 2026-10-28). */
 export const BOUND_MULTIPLE = 10;
 
@@ -91,7 +94,8 @@ export const tick = () => { f[0]++; };
 export const alive = () => { f[1]++; };
 /** A new step of the job (its name is in the error when it hangs): its counter restarts. o.total: units in all;
  *  o.cap: the work bound (ms, expectedMs) no silence in this step may pass, whatever its own gaps; o.mem: growth of the
- *  process's memory counts as life (an opaque call that cannot tick but is known to grow while it works); o.expect: the
+ *  process's memory counts as life, up to the step's own bound (o.expect or o.cap, 10 x): an opaque call that cannot tick but is known to grow
+ *  while it works; o.expect: the
  *  step is one opaque call of this many ms (a parent forwarding what its child declared). */
 export function step(name, o = {}) { f[0] = 0; cur = { name, expect: o.expect ?? 0, cap: o.cap ?? 0, total: o.total ?? 0, mem: o.mem ? 1 : 0 }; publish(); }
 /** An opaque call: expectMs is how long it should take (expectedMs); the parent ends it past BOUND_MULTIPLE times that. The
@@ -108,7 +112,7 @@ export async function opaqueAsync(label, expectMs, fn, o = {}) {
 }
 
 const THREAD = `
-const { workerData: { shared, every, sample } } = require('node:worker_threads');
+const { workerData: { shared, every, sample, mult } } = require('node:worker_threads');
 const fs = require('node:fs');
 const f = new Float64Array(shared, 0, 16), nameBytes = new Uint8Array(shared, 128, 256), dec = new TextDecoder();
 let lastDone = f[0], lastAlive = f[1], lastSeq = f[2], opaque = f[3] > 0, tickAt = Date.now(), stepAt = tickAt, maxGap = 0, lastBeat = 0, rssMax = process.memoryUsage.rss();
@@ -116,10 +120,17 @@ setInterval(() => {
   const now = Date.now(), rss = process.memoryUsage.rss();
   if (f[2] !== lastSeq) { // a new step, or back from an opaque call: the clock restarts; the gap across the boundary is nobody's gap
     lastSeq = f[2]; lastDone = f[0]; lastAlive = f[1]; opaque = f[3] > 0; tickAt = stepAt = now; rssMax = rss;
-  } else if (f[0] !== lastDone || f[1] !== lastAlive) {
+  } else if (f[0] !== lastDone || (f[1] !== lastAlive && !f[5])) {
+    // a tick: done moved on, or (where the loop does not know its total) something happened that is not a unit of work. Where the
+    // step knows done and total, only done ADVANCING counts: a loop that goes round again with the same count is silent
     if (!opaque) maxGap = Math.max(maxGap, now - tickAt);
     lastDone = f[0]; lastAlive = f[1]; tickAt = now;
-  } else if (f[6] && rss >= rssMax + 1048576) { tickAt = now; rssMax = rss; }
+  } else if (f[1] !== lastAlive) { lastAlive = f[1]; }
+  else if (f[6] && rss >= rssMax + 1048576 && now - stepAt <= mult * Math.max(f[3], f[4])) {
+    // memory growth is life for a call that cannot tick, but only up to its own work bound (10 x the expected time): a slow leak is
+    // not alive for ever, and a step with no bound has no such life at all
+    tickAt = now; rssMax = rss;
+  }
   if (now - lastBeat < every) return;
   lastBeat = now;
   const c = process.cpuUsage();
@@ -132,7 +143,68 @@ export function startHeartbeat() {
   const every = Number(process.env.P6CLONE_HEARTBEAT_MS);
   if (!(every > 0)) return;
   publish(); // step "starting"
-  const t = new Worker(THREAD, { eval: true, workerData: { shared, every, sample: Math.max(10, Math.min(100, every)) } });
+  const t = new Worker(THREAD, { eval: true, workerData: { shared, every, sample: Math.max(10, Math.min(100, every)), mult: BOUND_MULTIPLE } });
   t.unref();
   t.on('error', () => { /* no heartbeat: the parent then sees silence, and judges it as such */ });
 }
+
+// ---- the MCP server's own process: declared sections, watched from a thread --------------------------------------------------
+// A loop inside the server process cannot be ended from outside the way a worker can (V8 cannot interrupt a synchronous loop on the
+// main thread, short of ending the process), so the server watches the sections it DECLARES (serverWatch.ts watched(): the IFC index,
+// the cached index, the 4D file readers) with this thread, by the same rule as the workers' (ticks, windows, bounds). When one is stuck:
+//  - the main thread still turns its event loop (the job waits on something that never comes): the job is cancelled with the reason
+//    (onStuck), the server goes on;
+//  - the main thread is blocked in a synchronous loop (no turn for blockedMs): nothing can stop it but ending the process. The thread
+//    writes the reason (reportFile, in the server's recovery folder, which the next server adopts and tells) and ends the process:
+//    every project is checkpointed on disk a moment after its last change and comes back under its handle on the next start.
+// Undeclared work is never judged: a false kill of the server is worse than a missed hang.
+const SERVER_THREAD = `
+const { workerData: { shared, sample, floor, mult, blockedMs, reportFile }, parentPort } = require('node:worker_threads');
+const fs = require('node:fs'), path = require('node:path');
+const f = new Float64Array(shared, 0, 16), nameBytes = new Uint8Array(shared, 128, 256), dec = new TextDecoder();
+let lastDone = f[0], lastAlive = f[1], lastSeq = f[2], opaque = f[3] > 0, tickAt = Date.now(), stepAt = tickAt, maxGap = 0, rssMax = process.memoryUsage.rss();
+let lastTurn = f[9], turnAt = Date.now(), posted = '';
+function judge(sinceMs) {
+  const expect = f[3], cap = f[4];
+  if (expect > 0) { const limit = Math.max(floor, expect * mult); return sinceMs > limit ? { kind: 'bound', windowMs: limit, limitMs: limit, lengthened: false } : null; }
+  const windowMs = Math.max(floor, 4 * maxGap); let limitMs = 2 * windowMs, lengthened = false;
+  if (cap > 0 && cap * mult > limitMs) { limitMs = cap * mult; lengthened = true; }
+  return sinceMs > limitMs ? { kind: 'silent', windowMs, limitMs, lengthened } : null;
+}
+setInterval(() => {
+  const now = Date.now(), rss = process.memoryUsage.rss();
+  if (f[9] !== lastTurn) { lastTurn = f[9]; turnAt = now; }
+  if (f[2] !== lastSeq) { lastSeq = f[2]; lastDone = f[0]; lastAlive = f[1]; opaque = f[3] > 0; tickAt = stepAt = now; rssMax = rss; posted = ''; }
+  else if (f[0] !== lastDone || (f[1] !== lastAlive && !f[5])) { if (!opaque) maxGap = Math.max(maxGap, now - tickAt); lastDone = f[0]; lastAlive = f[1]; tickAt = now; }
+  else if (f[1] !== lastAlive) { lastAlive = f[1]; }
+  if (!(f[7] > 0)) return; // nothing declared: nothing is judged
+  const v = judge(now - tickAt);
+  if (!v) return;
+  let n = 0; while (n < 255 && nameBytes[n]) n++;
+  const info = Object.assign(v, { step: dec.decode(nameBytes.subarray(0, n)), done: f[0], total: f[5], silentMs: now - tickAt, maxGapMs: maxGap, expectMs: f[3], floorMs: floor });
+  if (now - turnAt > blockedMs) { // the main thread is in a synchronous loop: only the end of the process stops it
+    try { fs.mkdirSync(path.dirname(reportFile), { recursive: true }); fs.writeFileSync(reportFile, JSON.stringify({ at: new Date().toISOString(), pid: process.pid, stuck: info })); } catch { /* the stderr line stays */ }
+    try { fs.writeSync(2, 'P6 Clone: the server was ended because a section it was running (' + info.step + ') made no progress and blocked it; its projects come back under their handles on the next start.\\n'); } catch { /* gone */ }
+    process.kill(process.pid, 'SIGKILL');
+  } else if (posted !== info.step + f[2]) { posted = info.step + f[2]; parentPort.postMessage(info); }
+}, sample);
+`;
+let serverThread = null;
+const turn = new Float64Array(shared, 0, 16);
+/** Start the server's watch thread (once). onStuck(info): a declared section is stuck while the event loop still turns (cancel the job).
+ *  reportFile: where the reason is written if the process has to be ended. P6CLONE_SERVER_WATCH=off turns it off. */
+export function startServerWatch(o) {
+  if (serverThread || process.env.P6CLONE_SERVER_WATCH === 'off') return false;
+  const floor = Number(process.env.P6CLONE_WORKER_FLOOR_MS) || 120_000;
+  serverThread = new Worker(SERVER_THREAD, { eval: true, workerData: { shared, sample: Math.max(10, Math.min(250, Math.floor(floor / 4))), floor, mult: BOUND_MULTIPLE, blockedMs: o.blockedMs ?? 5000, reportFile: o.reportFile } });
+  serverThread.unref();
+  serverThread.on('message', (info) => o.onStuck(info));
+  serverThread.on('error', () => { /* no watch: nothing is judged */ });
+  const t = setInterval(() => { turn[9]++; }, 100); t.unref(); // the event loop's turns: how the thread tells a blocked main thread from a job waiting
+  return true;
+}
+let depth = 0;
+/** A declared section begins / ends in the server process (the thread judges only while one is open). */
+export function enterSection(label, o = {}) { depth++; f[7] = depth; const prev = cur; step(label, o); return prev; }
+export function leaveSection(prev) { depth = Math.max(0, depth - 1); f[7] = depth; cur = prev; publish(); }
+export const serverWatching = () => serverThread !== null;
