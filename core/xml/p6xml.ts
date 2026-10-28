@@ -2,7 +2,7 @@
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { selectRows } from '../xer/write.ts';
-import { parseClndrData, serializeClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
+import { parseClndrDataLeniently, parseClndrData, serializeClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, parseP6Date, minutesToSerial, serialToMinutes } from '../dates.ts';
 
 // ---------- minimal XML tree
@@ -94,7 +94,7 @@ const val = (n: XNode, name: string) => child(n, name)?.text.trim() ?? '';
 
 // ---------- field maps (XML tag <-> XER field)
 
-type Conv = 'str' | 'date' | 'num' | 'bool' | `enum:${string}`;
+type Conv = 'str' | 'date' | 'num' | 'bool' | 'legacy' | `enum:${string}`; // legacy: a name earlier clones wrote, still read, never written
 type FieldMap = [tag: string, field: string, conv?: Conv][];
 
 const ENUMS: Record<string, Record<string, string>> = {
@@ -110,6 +110,10 @@ const ENUMS: Record<string, Record<string, string>> = {
   critical_path_type: { CT_TotFloat: 'Critical Float', CT_DrivPath: 'Longest Path' },
   wbs_status: { WS_Planned: 'Planned', WS_Open: 'Active', WS_Closed: 'Inactive', WS_Whatif: 'What-If' },
   udf_table: { TASK: 'Activity', PROJWBS: 'WBS', PROJECT: 'Project', RSRC: 'Resource', TASKRSRC: 'Resource Assignment', PROJCOST: 'Activity Expense', TASKPROC: 'Activity Step' },
+  rate_type: { COST_PER_QTY: 'Price / Unit', COST_PER_QTY2: 'Price / Unit 2', COST_PER_QTY3: 'Price / Unit 3', COST_PER_QTY4: 'Price / Unit 4', COST_PER_QTY5: 'Price / Unit 5' },
+  skill_level: { '1': '1 - Master', '2': '2 - Expert', '3': '3 - Skilled', '4': '4 - Proficient', '5': '5 - Inexperienced' },
+  cost_load_type: { CL_Uniform: 'Uniform Over Activity', CL_End: 'End of Activity', CL_Start: 'Start of Activity' },
+  rate_source: { ST_Rsrc: 'Resource', ST_Role: 'Role', ST_Custom: 'Override' },
   udf_data_type: { FT_TEXT: 'Text', FT_START_DATE: 'Start Date', FT_END_DATE: 'Finish Date', FT_FLOAT_2_DECIMALS: 'Double', FT_INT: 'Integer', FT_MONEY: 'Cost', FT_STATICTYPE: 'Indicator', FT_CODE: 'Code' },
   code_scope: { AS_Global: 'Global', AS_EPS: 'EPS', AS_Project: 'Project' },
   lag_calendar: { rcal_Predecessor: 'Predecessor Activity Calendar', rcal_Successor: 'Successor Activity Calendar', rcal_ProjDefault: 'Project Default Calendar', rcal_24Hour: '24 Hour Calendar' },
@@ -117,7 +121,7 @@ const ENUMS: Record<string, Record<string, string>> = {
 };
 
 const PROJECT_MAP: FieldMap = [['ObjectId', 'proj_id'], ['Id', 'proj_short_name'], ['PlannedStartDate', 'plan_start_date', 'date'], ['MustFinishByDate', 'plan_end_date', 'date'],
-  ['DataDate', 'last_recalc_date', 'date'], ['ScheduledFinishDate', 'scd_end_date', 'date'], ['DefaultCalendarObjectId', 'clndr_id'], ['CriticalActivityFloatLimit', 'critical_drtn_hr_cnt', 'num'],
+  ['DataDate', 'last_recalc_date', 'date'], ['ScheduledFinishDate', 'scd_end_date', 'date'], ['ActivityDefaultCalendarObjectId', 'clndr_id'], ['DefaultCalendarObjectId', 'clndr_id', 'legacy'], ['CriticalActivityFloatLimit', 'critical_drtn_hr_cnt', 'num'],
   ['CriticalActivityPathType', 'critical_path_type', 'enum:critical_path_type'], ['ActivityIdPrefix', 'task_code_prefix'], ['ActivityIdSuffix', 'task_code_base', 'num'], ['ActivityIdIncrement', 'task_code_step', 'num'],
   ['ActivityDefaultDurationType', 'def_duration_type', 'enum:duration_type'], ['ActivityDefaultPercentCompleteType', 'def_complete_pct_type', 'enum:complete_pct_type'], ['ActivityDefaultActivityType', 'def_task_type', 'enum:task_type'],
   ['GUID', 'guid'], ['CurrentBaselineProjectObjectId', 'sum_base_proj_id']];
@@ -157,28 +161,31 @@ const ACT_MAP: FieldMap = [['ObjectId', 'task_id'], ['ProjectObjectId', 'proj_id
 const REL_MAP: FieldMap = [['ObjectId', 'task_pred_id'], ['PredecessorActivityObjectId', 'pred_task_id'], ['SuccessorActivityObjectId', 'task_id'], ['PredecessorProjectObjectId', 'pred_proj_id'],
   ['SuccessorProjectObjectId', 'proj_id'], ['Type', 'pred_type', 'enum:pred_type'], ['Lag', 'lag_hr_cnt', 'num']];
 const RSRC_MAP: FieldMap = [['ObjectId', 'rsrc_id'], ['Id', 'rsrc_short_name'], ['Name', 'rsrc_name'], ['ResourceType', 'rsrc_type', 'enum:rsrc_type'], ['CalendarObjectId', 'clndr_id'],
-  ['ParentObjectId', 'parent_rsrc_id'], ['DefaultUnitsPerTime', 'def_qty_per_hr', 'num'], ['MaxUnitsPerTime', 'max_qty_per_hr', 'num'], ['UnitOfMeasureObjectId', 'unit_id'], ['CurrencyObjectId', 'curr_id'], ['SequenceNumber', 'rsrc_seq_num', 'num'], ['IsOvertimeAllowed', 'ot_flag', 'bool'], ['UseTimesheets', 'timesheet_flag', 'bool'], ['AutoComputeActuals', 'auto_compute_act_flag', 'bool'], ['EmployeeId', 'employee_code'], ['EmailAddress', 'email_addr'], ['Title', 'rsrc_title_name'], ['IsActive', 'active_flag', 'bool'], ['GUID', 'guid']];
+  ['ParentObjectId', 'parent_rsrc_id'], ['DefaultUnitsPerTime', 'def_qty_per_hr', 'num'], ['MaxUnitsPerTime', 'max_qty_per_hr', 'num'], ['UnitOfMeasureObjectId', 'unit_id'], ['CurrencyObjectId', 'curr_id'], ['SequenceNumber', 'rsrc_seq_num', 'num'], ['IsOverTimeAllowed', 'ot_flag', 'bool'], ['UseTimesheets', 'timesheet_flag', 'bool'], ['AutoComputeActuals', 'auto_compute_act_flag', 'bool'], ['EmployeeId', 'employee_code'], ['EmailAddress', 'email_addr'], ['Title', 'rsrc_title_name'], ['IsActive', 'active_flag', 'bool'], ['GUID', 'guid']];
 const RATE_MAP: FieldMap = [['ObjectId', 'rsrc_rate_id'], ['ResourceObjectId', 'rsrc_id'], ['EffectiveDate', 'start_date', 'date'], ['MaxUnitsPerTime', 'max_qty_per_hr', 'num'], ['PricePerUnit', 'cost_per_qty', 'num']];
 const ASSIGN_MAP: FieldMap = [['ObjectId', 'taskrsrc_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['ResourceObjectId', 'rsrc_id'], ['RoleObjectId', 'role_id'], ['CostAccountObjectId', 'acct_id'],
   ['PlannedUnits', 'target_qty', 'num'], ['ActualRegularUnits', 'act_reg_qty', 'num'], ['ActualOvertimeUnits', 'act_ot_qty', 'num'], ['RemainingUnits', 'remain_qty', 'num'],
   ['PlannedUnitsPerTime', 'target_qty_per_hr', 'num'], ['RemainingUnitsPerTime', 'remain_qty_per_hr', 'num'], ['PricePerUnit', 'cost_per_qty', 'num'], ['PlannedCost', 'target_cost', 'num'],
   ['ActualRegularCost', 'act_reg_cost', 'num'], ['ActualOvertimeCost', 'act_ot_cost', 'num'], ['RemainingCost', 'remain_cost', 'num'],
   ['ActualStartDate', 'act_start_date', 'date'], ['ActualFinishDate', 'act_end_date', 'date'], ['PlannedStartDate', 'target_start_date', 'date'], ['PlannedFinishDate', 'target_end_date', 'date'],
-  ['RemainingStartDate', 'restart_date', 'date'], ['RemainingFinishDate', 'reend_date', 'date'], ['RateType', 'rate_type'], ['ResourceType', 'rsrc_type', 'enum:rsrc_type'], ['ResourceCurveObjectId', 'curv_id']];
+  ['RemainingStartDate', 'restart_date', 'date'], ['RemainingFinishDate', 'reend_date', 'date'], ['RateType', 'rate_type', 'enum:rate_type'], ['ResourceType', 'rsrc_type', 'enum:rsrc_type'], ['ResourceCurveObjectId', 'curv_id']];
 const EXP_MAP: FieldMap = [['ObjectId', 'cost_item_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['CostAccountObjectId', 'acct_id'], ['ExpenseItem', 'cost_name'],
   ['PlannedCost', 'target_cost', 'num'], ['ActualCost', 'act_cost', 'num'], ['RemainingCost', 'remain_cost', 'num'], ['Vendor', 'vendor_name'], ['DocumentNumber', 'po_number'], ['ExpenseCategoryObjectId', 'cost_type_id']];
 /** Units of measure, expense categories, resource curves and the links between resources and roles (the dictionaries the activity expenses, resources and assignments point at). */
 const UOM_MAP: FieldMap = [['ObjectId', 'unit_id'], ['Abbreviation', 'unit_abbrev'], ['Name', 'unit_name'], ['SequenceNumber', 'seq_num', 'num']];
 const EXPCAT_MAP: FieldMap = [['ObjectId', 'cost_type_id'], ['Name', 'cost_type'], ['SequenceNumber', 'seq_num', 'num']];
-const CURVE_MAP: FieldMap = [['ObjectId', 'curv_id'], ['Name', 'curv_name'], ['IsDefault', 'default_flag', 'bool'], ...Array.from({ length: 21 }, (_, i): [string, string, 'num'] => [`PercentUsage${i}`, `pct_usage_${i}`, 'num'])];
-const RSRCROLE_MAP: FieldMap = [['ObjectId', 'rsrc_role_id'], ['ResourceObjectId', 'rsrc_id'], ['RoleObjectId', 'role_id'], ['SkillLevel', 'skill_level']];
+const CURVE_MAP: FieldMap = [['ObjectId', 'curv_id'], ['Name', 'curv_name'], ['IsDefault', 'default_flag', 'bool']];
+/** A resource curve's 21 points (pct_usage_0..20) are <Values><Value0/><Value5/>...<Value100/></Values> in P6's XML. */
+const curveValuesXml = (r: Row) => `<Values>${Array.from({ length: 21 }, (_, i) => (r[`pct_usage_${i}`] ? `<Value${i * 5}>${esc(r[`pct_usage_${i}`])}</Value${i * 5}>` : '')).join('')}</Values>`;
+const curveValuesRead = (n: XNode, r: Row) => { const v = child(n, 'Values'); for (let i = 0; i < 21; i++) { const x = v ? val(v, `Value${i * 5}`) : ''; r[`pct_usage_${i}`] = x; } };
+const RSRCROLE_MAP: FieldMap = [['ResourceObjectId', 'rsrc_id'], ['ResourceId', 'rsrc_short_name'], ['ResourceName', 'rsrc_name'], ['RoleObjectId', 'role_id'], ['RoleId', 'role_short_name'], ['RoleName', 'role_name'], ['Proficiency', 'skill_level', 'enum:skill_level']];
 const CODETYPE_MAP: FieldMap = [['ObjectId', 'actv_code_type_id'], ['Name', 'actv_code_type'], ['Scope', 'actv_code_type_scope', 'enum:code_scope'], ['ProjectObjectId', 'proj_id'], ['Length', 'actv_short_len', 'num'], ['SequenceNumber', 'seq_num', 'num']];
 const CODE_MAP: FieldMap = [['ObjectId', 'actv_code_id'], ['CodeTypeObjectId', 'actv_code_type_id'], ['ParentObjectId', 'parent_actv_code_id'], ['CodeValue', 'short_name'], ['Description', 'actv_code_name'], ['SequenceNumber', 'seq_num', 'num']];
 const CODEASSIGN_MAP: FieldMap = [['ActivityObjectId', 'task_id'], ['ActivityCodeTypeObjectId', 'actv_code_type_id'], ['ActivityCodeObjectId', 'actv_code_id'], ['ProjectObjectId', 'proj_id']];
 const ACCOUNT_MAP: FieldMap = [['ObjectId', 'acct_id'], ['ParentObjectId', 'parent_acct_id'], ['Id', 'acct_short_name'], ['Name', 'acct_name'], ['SequenceNumber', 'acct_seq_num', 'num']];
 const OBS_MAP: FieldMap = [['ObjectId', 'obs_id'], ['ParentObjectId', 'parent_obs_id'], ['Name', 'obs_name'], ['SequenceNumber', 'seq_num', 'num']];
 const UDFTYPE_MAP: FieldMap = [['ObjectId', 'udf_type_id'], ['SubjectArea', 'table_name', 'enum:udf_table'], ['Title', 'udf_type_label'], ['DataType', 'logical_data_type', 'enum:udf_data_type']];
-const UDFVAL_MAP: FieldMap = [['TypeObjectId', 'udf_type_id'], ['ForeignObjectId', 'fk_id'], ['ProjectObjectId', 'proj_id'], ['Text', 'udf_text'], ['Double', 'udf_number', 'num'], ['StartDate', 'udf_date', 'date']];
+const UDFVAL_MAP: FieldMap = [['UDFTypeObjectId', 'udf_type_id'], ['UDFCodeObjectId', 'udf_code_id'], ['TypeObjectId', 'udf_type_id', 'legacy'], ['ForeignObjectId', 'fk_id'], ['ProjectObjectId', 'proj_id'], ['Text', 'udf_text'], ['Double', 'udf_number', 'num'], ['StartDate', 'udf_date', 'date']];
 const CURR_MAP: FieldMap = [['ObjectId', 'curr_id'], ['Id', 'curr_short_name'], ['Name', 'curr_type'], ['Symbol', 'curr_symbol'], ['ExchangeRate', 'base_exch_rate', 'num'], ['DecimalPlaces', 'decimal_digit_cnt', 'num']];
 const ROLE_MAP: FieldMap = [['ObjectId', 'role_id'], ['ParentObjectId', 'parent_role_id'], ['Id', 'role_short_name'], ['Name', 'role_name']];
 const MEMO_MAP: FieldMap = [['ObjectId', 'memo_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['NotebookTopicObjectId', 'memo_type_id'], ['Note', 'task_memo']];
@@ -198,7 +205,7 @@ function toXml(r: Row, map: FieldMap): string {
   let out = '';
   for (const [tag, field, conv] of map) {
     let v = r[field];
-    if (v == null || v === '') continue;
+    if (v == null || v === '' || conv === 'legacy') continue;
     if (conv === 'date') v = xmlDate(v);
     else if (conv === 'bool') v = v === 'Y' ? 'true' : 'false';
     else if (conv?.startsWith('enum:')) v = ENUMS[conv.slice(5)]?.[v] ?? v;
@@ -207,6 +214,118 @@ function toXml(r: Row, map: FieldMap): string {
   }
   return out;
 }
+
+
+// ---- the rest of what an XER holds, in the elements and fields P6's own XML schema (p6apibo.xsd, as MPXJ embeds it) has for it. Only fields whose P6 XML
+// field is certain are here; the others are listed in P6XML_NOT_CARRIED with why.
+const F = (tag: string, field: string, conv?: Conv): [string, string, Conv?] => (conv ? [tag, field, conv] : [tag, field]);
+const AUDIT_DATES: FieldMap = [F('CreateDate', 'create_date', 'date'), F('CreateUser', 'create_user'), F('LastUpdateDate', 'update_date', 'date'), F('LastUpdateUser', 'update_user')];
+ACT_MAP.push(F('ActualNonLaborUnits', 'act_equip_qty', 'num'), F('ActualThisPeriodNonLaborUnits', 'act_this_per_equip_qty', 'num'), F('ActualThisPeriodLaborUnits', 'act_this_per_work_qty', 'num'), F('ActualLaborUnits', 'act_work_qty', 'num'),
+  F('AutoComputeActuals', 'auto_compute_act_flag', 'bool'), F('EstimatedWeight', 'est_wt', 'num'), F('FloatPath', 'float_path', 'num'), F('FloatPathOrder', 'float_path_order', 'num'), F('RemainingNonLaborUnits', 'remain_equip_qty', 'num'),
+  F('RemainingLaborUnits', 'remain_work_qty', 'num'), F('PlannedNonLaborUnits', 'target_equip_qty', 'num'), F('PlannedLaborUnits', 'target_work_qty', 'num'), F('LocationObjectId', 'location_id'), F('ReviewFinishDate', 'review_end_date', 'date'), ...AUDIT_DATES);
+WBS_MAP.push(F('EstimatedWeight', 'est_wt', 'num'), F('ContainsSummaryData', 'sum_data_flag', 'bool'), F('EarnedValueUserPercent', 'ev_user_pct', 'num'), F('EarnedValueETCUserValue', 'ev_etc_user_value', 'num'), F('OriginalBudget', 'orig_cost', 'num'),
+  F('IndependentETCTotalCost', 'indep_remain_total_cost', 'num'), F('IndependentETCLaborUnits', 'indep_remain_work_qty', 'num'), F('AnticipatedStartDate', 'anticip_start_date', 'date'), F('AnticipatedFinishDate', 'anticip_end_date', 'date'));
+RSRC_MAP.push(F('PrimaryRoleObjectId', 'role_id'), F('OfficePhone', 'office_phone'), F('OtherPhone', 'other_phone'), F('OvertimeFactor', 'ot_factor', 'num'), F('ResourceNotes', 'rsrc_notes'), F('CalculateCostFromUnits', 'def_cost_qty_link_flag', 'bool'),
+  F('LocationObjectId', 'location_id'), F('ShiftObjectId', 'shift_id'), F('UserObjectId', 'user_id'), F('TimesheetApprovalManagerObjectId', 'ts_approve_user_id'));
+RATE_MAP.push(F('PricePerUnit2', 'cost_per_qty2', 'num'), F('PricePerUnit3', 'cost_per_qty3', 'num'), F('PricePerUnit4', 'cost_per_qty4', 'num'), F('PricePerUnit5', 'cost_per_qty5', 'num'), F('ShiftPeriodObjectId', 'shift_period_id'));
+ASSIGN_MAP.push(F('IsCostUnitsLinked', 'cost_qty_link_flag', 'bool'), F('Proficiency', 'skill_level', 'enum:skill_level'), F('PendingPercentComplete', 'pend_complete_pct', 'num'), F('PendingRemainingUnits', 'pend_remain_qty', 'num'),
+  F('PlannedLag', 'target_lag_drtn_hr_cnt', 'num'), F('RemainingLag', 'relag_drtn_hr_cnt', 'num'), F('OvertimeFactor', 'ot_factor', 'num'), F('RemainingLateStartDate', 'rem_late_start_date', 'date'), F('RemainingLateFinishDate', 'rem_late_end_date', 'date'),
+  F('DrivingActivityDatesFlag', 'rollup_dates_flag', 'bool'), F('GUID', 'guid'), F('ActualThisPeriodCost', 'act_this_per_cost', 'num'), F('ActualThisPeriodUnits', 'act_this_per_qty', 'num'), F('RateSource', 'cost_per_qty_source_type', 'enum:rate_source'),
+  F('PendingActualRegularUnits', 'pend_act_reg_qty', 'num'), F('PendingActualOvertimeUnits', 'pend_act_ot_qty', 'num'), F('IsOvertimeAllowed', 'ot_flag', 'bool'), F('PlannedDuration', 'target_drtn_hr_cnt', 'num'),
+  F('CreateDate', 'create_date', 'date'), F('CreateUser', 'create_user'));
+EXP_MAP.push(F('PricePerUnit', 'cost_per_qty', 'num'), F('PlannedUnits', 'target_qty', 'num'), F('AutoComputeActuals', 'auto_compute_act_flag', 'bool'), F('UnitOfMeasure', 'qty_name'), F('ExpenseDescription', 'cost_descr'), F('AccrualType', 'cost_load_type', 'enum:cost_load_type'));
+ROLE_MAP.push(F('SequenceNumber', 'seq_num', 'num'), F('Responsibilities', 'role_descr'), F('CalculateCostFromUnits', 'def_cost_qty_link_flag', 'bool'));
+ACCOUNT_MAP.push(F('Description', 'acct_descr'));
+REL_MAP.push(F('Aref', 'aref', 'date'), F('Arls', 'arls', 'date'), F('Comments', 'comments'));
+OBS_MAP.push(F('Description', 'obs_descr'), F('GUID', 'guid'));
+PCODETYPE_MAP.push(F('Weight', 'proj_catg_type_wt', 'num'), F('MaxCodeValueWeight', 'max_proj_catg_wt', 'num'));
+PCODE_MAP.push(F('Weight', 'proj_catg_wt', 'num'));
+CODE_MAP.push(F('ProjectObjectId', 'proj_id'));
+CURR_MAP.push(F('DecimalSymbol', 'decimal_symbol'), F('DigitGroupingSymbol', 'digit_group_symbol'), F('PositiveSymbol', 'pos_curr_fmt_type'), F('NegativeSymbol', 'neg_curr_fmt_type'));
+PROJECT_MAP.push(F('FiscalYearStartMonth', 'fy_start_month_num', 'num'), F('ActivityDefaultCostAccountObjectId', 'acct_id'), F('SourceProjectObjectId', 'source_proj_id'), F('AddedBy', 'add_by_name'), F('DateAdded', 'add_date', 'date'),
+  F('WebSiteRootDirectory', 'web_local_root_path'), F('WebSiteURL', 'proj_url'), F('ExternalCRKey', 'cr_external_key'), F('ActivityIdBasedOnSelectedActivity', 'task_code_prefix_flag', 'bool'), F('AddActualToRemaining', 'add_act_remain_flag', 'bool'),
+  F('LinkActualToActualThisPeriod', 'act_this_per_link_flag', 'bool'), F('LinkPercentCompleteWithActual', 'act_pct_link_flag', 'bool'), F('UseProjectBaselineForEarnedValue', 'use_project_baseline_flag', 'bool'),
+  F('LinkPlannedAndAtCompletionFlag', 'rem_target_link_flag', 'bool'), F('ResetPlannedToRemainingFlag', 'reset_planned_flag', 'bool'), F('AllowNegativeActualUnitsFlag', 'allow_neg_act_flag', 'bool'), F('CostQuantityRecalculateFlag', 'cost_qty_recalc_flag', 'bool'),
+  F('ActivityDefaultPricePerUnit', 'def_cost_per_qty', 'num'), F('LastFinancialPeriodObjectId', 'last_fin_dates_id'), F('LocationObjectId', 'location_id'), F('FinancialPeriodTemplateId', 'fintmpl_id'), F('CheckOutDate', 'checkout_date', 'date'),
+  F('CheckOutUserObjectId', 'checkout_user_id'), F('LastApplyActualsDate', 'apply_actuals_date', 'date'), F('ProjectForecastStartDate', 'fcst_start_date', 'date'), F('StrategicPriority', 'strgy_priority_num', 'num'),
+  F('SummarizeToWBSLevel', 'wbs_max_sum_level', 'num'), F('SummarizedDataDate', 'sum_data_date', 'date'), F('LastSummarizedDate', 'last_tasksum_date', 'date'), F('ContainsSummaryData', 'sum_data_flag', 'bool'),
+  F('ResourceCanBeAssignedToSameActivityMoreThanOnce', 'rsrc_multi_assign_flag', 'bool'), F('ResourcesCanAssignThemselvesToActivities', 'rsrc_self_add_flag', 'bool'), F('ResourcesCanViewInactiveActivities', 'ts_rsrc_vw_inact_actv_flag', 'bool'),
+  F('EnableSummarization', 'batch_sum_flag', 'bool'), F('ResourcesCanMarkAssignmentAsCompleted', 'allow_complete_flag', 'bool'), F('AssignmentDefaultDrivingFlag', 'def_rollup_dates_flag', 'bool'), F('WBSCodeSeparator', 'name_sep_char'), F('LevelingPriority', 'priority_num', 'num'),
+  F('AssignmentDefaultRateType', 'def_rate_type', 'enum:rate_type'),
+  F('CheckOutStatus', 'checkout_flag', 'bool'), F('PrimaryResourcesCanMarkActivitiesAsCompleted', 'ts_rsrc_mark_act_finish_flag', 'bool'), F('ActivityPercentCompleteBasedOnActivitySteps', 'step_complete_flag', 'bool'));
+SCHED_MAP.push(F('LevelAllResources', 'level_all_rsrc_flag', 'bool'), F('LevelWithinFloat', 'level_within_float_flag', 'bool'), F('MinFloatToPreserve', 'level_float_thrs_cnt', 'num'), F('OverAllocationPercentage', 'level_over_alloc_pct', 'num'),
+  F('PreserveScheduledEarlyAndLateDates', 'level_keep_sched_date_flag', 'bool'), F('IncludeExternalResAss', 'level_outer_assign_flag', 'bool'), F('ExternalProjectPriorityLimit', 'level_outer_assign_priority', 'num'),
+  F('MultipleFloatPathsEnabled', 'enable_multiple_longest_path_calc', 'bool'), F('MaximumMultipleFloatPaths', 'max_multiple_longest_path', 'num'), F('MultipleFloatPathsUseTotalFloat', 'use_total_float_multiple_longest_paths', 'bool'),
+  F('MultipleFloatPathsEndingActivityObjectId', 'key_activity_for_multiple_longest_paths'));
+/** Tables of their own in P6's XML: role prices, financial periods, threshold parameters, and per project the thresholds, issues, period actuals and resource commitments. */
+const ROLERATE_MAP: FieldMap = [F('ObjectId', 'role_rate_id'), F('RoleObjectId', 'role_id'), F('EffectiveDate', 'start_date', 'date'), F('MaxUnitsPerTime', 'max_qty_per_hr', 'num'), F('PricePerUnit', 'cost_per_qty', 'num'),
+  F('PricePerUnit2', 'cost_per_qty2', 'num'), F('PricePerUnit3', 'cost_per_qty3', 'num'), F('PricePerUnit4', 'cost_per_qty4', 'num'), F('PricePerUnit5', 'cost_per_qty5', 'num')];
+const FINDATES_MAP: FieldMap = [F('ObjectId', 'fin_dates_id'), F('Name', 'fin_dates_name'), F('StartDate', 'start_date', 'date'), F('EndDate', 'end_date', 'date')];
+const THRSPARM_MAP: FieldMap = [F('ObjectId', 'thresh_parm_id'), F('Name', 'thresh_parm_name')];
+const PROJTHRS_MAP: FieldMap = [F('ObjectId', 'thresh_id'), F('ProjectObjectId', 'proj_id'), F('OBSObjectId', 'obs_id'), F('ThresholdParameterObjectId', 'thresh_parm_id'), F('WBSObjectId', 'wbs_id'), F('LowerThreshold', 'lo_parm_value', 'num'),
+  F('UpperThreshold', 'hi_parm_value', 'num'), F('FromDate', 'window_start', 'date'), F('ToDate', 'window_end', 'date'),
+  // a window edge is a date or a relative expression (DD, dd+2M): the expression is the XER's own text, and wins on read
+  F('FromDateExpression', 'window_start'), F('ToDateExpression', 'window_end')];
+const PROJISSU_MAP: FieldMap = [F('ObjectId', 'issue_id'), F('ProjectObjectId', 'proj_id'), F('Name', 'issue_name'), F('ActivityObjectId', 'task_id'), F('WBSObjectId', 'wbs_id'), F('ResourceObjectId', 'rsrc_id'), F('OBSObjectId', 'obs_id'),
+  F('ProjectThresholdObjectId', 'thresh_id'), F('ThresholdParameterObjectId', 'thresh_parm_id'), F('IdentifiedBy', 'add_by_name'), F('DateIdentified', 'add_date', 'date'), F('ResolutionDate', 'resolv_date', 'date'), F('Notes', 'issue_notes'),
+  F('UpperThreshold', 'hi_parm_value', 'num'), F('LowerThreshold', 'lo_parm_value', 'num'), F('ActualValue', 'issue_value', 'num')];
+const TASKFIN_MAP: FieldMap = [F('FinancialPeriodObjectId', 'fin_dates_id'), F('ActivityObjectId', 'task_id'), F('ProjectObjectId', 'proj_id'), F('ActualLaborUnits', 'act_work_qty', 'num'), F('ActualLaborCost', 'act_work_cost', 'num'),
+  F('ActualNonLaborUnits', 'act_equip_qty', 'num'), F('ActualNonLaborCost', 'act_equip_cost', 'num'), F('ActualMaterialCost', 'act_mat_cost', 'num'), F('ActualExpenseCost', 'act_expense_cost', 'num'), F('EarnedValueCost', 'bcwp', 'num'),
+  F('PlannedValueCost', 'bcws', 'num'), F('EarnedValueLaborUnits', 'perfm_work_qty', 'num'), F('PlannedValueLaborUnits', 'sched_work_qty', 'num')];
+const WBSRSRC_MAP: FieldMap = [F('ObjectId', 'wbsrsrc_id'), F('WBSObjectId', 'wbs_id'), F('ResourceObjectId', 'rsrc_id'), F('RoleObjectId', 'role_id'), F('ProjectObjectId', 'proj_id'), F('StartDate', 'start_date', 'date'),
+  F('FinishDate', 'end_date', 'date'), F('CommittedFlag', 'committed_flag', 'bool')];
+/** The XER table -> its P6 XML element and field map, for the tables the writer carries field by field (tests/p6xml-coverage.test.ts sweeps every XER field against them). */
+export const P6XML_TABLES: Record<string, { element: string; map: FieldMap }> = {
+  PROJECT: { element: 'Project', map: PROJECT_MAP }, PROJWBS: { element: 'WBS', map: WBS_MAP }, TASK: { element: 'Activity', map: ACT_MAP }, TASKPRED: { element: 'Relationship', map: REL_MAP },
+  RSRC: { element: 'Resource', map: RSRC_MAP }, RSRCRATE: { element: 'ResourceRate', map: RATE_MAP }, TASKRSRC: { element: 'ResourceAssignment', map: ASSIGN_MAP }, PROJCOST: { element: 'ActivityExpense', map: EXP_MAP },
+  UMEASURE: { element: 'UnitOfMeasure', map: UOM_MAP }, COSTTYPE: { element: 'ExpenseCategory', map: EXPCAT_MAP }, RSRCCURVDATA: { element: 'ResourceCurve', map: CURVE_MAP }, RSRCROLE: { element: 'ResourceRole', map: RSRCROLE_MAP },
+  ACTVTYPE: { element: 'ActivityCodeType', map: CODETYPE_MAP }, ACTVCODE: { element: 'ActivityCode', map: CODE_MAP }, TASKACTV: { element: 'ActivityCodeAssignment', map: CODEASSIGN_MAP }, ACCOUNT: { element: 'CostAccount', map: ACCOUNT_MAP },
+  OBS: { element: 'OBS', map: OBS_MAP }, UDFTYPE: { element: 'UDFType', map: UDFTYPE_MAP }, UDFVALUE: { element: 'UDFValue', map: UDFVAL_MAP }, CURRTYPE: { element: 'Currency', map: CURR_MAP }, ROLES: { element: 'Role', map: ROLE_MAP },
+  TASKMEMO: { element: 'ActivityNote', map: MEMO_MAP }, TASKPROC: { element: 'ActivityStep', map: STEP_MAP }, PCATTYPE: { element: 'ProjectCodeType', map: PCODETYPE_MAP }, PCATVAL: { element: 'ProjectCode', map: PCODE_MAP },
+  ROLERATE: { element: 'RoleRate', map: ROLERATE_MAP }, FINDATES: { element: 'FinancialPeriod', map: FINDATES_MAP }, THRSPARM: { element: 'ThresholdParameter', map: THRSPARM_MAP }, PROJTHRS: { element: 'ProjectThreshold', map: PROJTHRS_MAP },
+  PROJISSU: { element: 'ProjectIssue', map: PROJISSU_MAP }, TASKFIN: { element: 'ActivityPeriodActual', map: TASKFIN_MAP }, WBSRSRC: { element: 'ProjectResource', map: WBSRSRC_MAP },
+  RCATTYPE: { element: 'ResourceCodeType', map: RCODETYPE_MAP }, RCATVAL: { element: 'ResourceCode', map: RCODE_MAP }, MEMOTYPE: { element: 'NotebookTopic', map: TOPIC_MAP }, WBSMEMO: { element: 'ProjectNote', map: WBSMEMO_MAP },
+};
+
+
+/** What the P6 XML writer does NOT carry, field by field (table.field, or a whole table), with why - checked against P6's own XML schema (p6apibo.xsd, read from the
+ *  copy MPXJ embeds). Anything an XER holds that is neither in P6XML_TABLES' maps, nor carried by the special writers (calendars, nested codes, UDFs, notes, schedule
+ *  options, curves) nor listed here fails tests/p6xml-coverage.test.ts. Reasons:
+ *  - no element: P6's XML schema has no field for it (columns P6 keeps for itself, or only older builds have);
+ *  - coded: P6's XML writes display text for this coded value, and no authoritative list of that text is available here (writing the XER code would make P6 refuse the file);
+ *  - unsure: a P6 XML field may exist, but which one is not certain, so the value is not written rather than guessed;
+ *  - old build: a column of older P6 builds only, the newer ones keep the same data under the carried column. */
+const NO = 'no element in P6 XML', CODED = 'coded value without a verified P6 XML text', UNSURE = 'P6 XML field not certain', OLD = 'column of older P6 builds only';
+export const P6XML_NOT_CARRIED: Record<string, string> = {
+  'ACTVCODE.color': UNSURE, 'ACTVCODE.total_assignments': NO, 'ACTVCODE.actv_code_short_len': NO, 'ACTVCODE.wbs_id': NO, 'ACTVCODE.guid': NO, 'ACTVTYPE.wbs_id': NO,
+  APPLYACTOPTIONS: NO, 'CURRTYPE.group_digit_cnt': NO, 'CURRTYPE.curr_name': UNSURE, POBS: NO, WBSBUDG: UNSURE, TASKNOTE: NO,
+  'PROJCOST.pobs_id': NO, 'PROJCOST.contract_manager_import': NO, 'PROJCOST.cost_type': NO,
+  'PROJECT.chng_eff_cmp_pct_flag': UNSURE, 'PROJECT.project_flag': NO, 'PROJECT.sum_only_flag': UNSURE, 'PROJECT.orig_proj_id': NO, 'PROJECT.base_type_id': UNSURE, 'PROJECT.risk_level': CODED, 'PROJECT.last_checksum': NO,
+  'PROJECT.def_qty_type': CODED, 'PROJECT.sum_assign_level': CODED, 'PROJECT.last_baseline_update_date': UNSURE, 'PROJECT.intg_proj_type': CODED, 'PROJECT.loaded_scope_level': NO, 'PROJECT.export_flag': NO,
+  'PROJECT.new_fin_dates_id': NO, 'PROJECT.next_data_date': NO, 'PROJECT.close_period_flag': NO, 'PROJECT.trsrcsum_loaded': NO, 'PROJECT.sum_refresh_date': NO, 'PROJECT.baselines_to_export': NO,
+  'PROJECT.baseline_names_to_export': NO, 'PROJECT.add_month_num': NO, 'PROJECT.add_item_cnt': NO, 'PROJECT.control_updates_flag': NO, 'PROJECT.hist_interval': CODED, 'PROJECT.hist_level': CODED,
+  'PROJECT.schedule_type': CODED, 'PROJECT.sum_base_cost': NO, 'PROJECT.proj_name': OLD,
+  'PROJISSU.track_view_id': NO, 'PROJISSU.priority_type': CODED, 'PROJISSU.status_code': CODED, 'PROJISSU.base_proj_id': NO,
+  'PROJTHRS.status_code': CODED, 'PROJTHRS.priority_type': CODED, 'PROJTHRS.thresh_type': CODED, 'PROJTHRS.track_view_id': NO, 'PROJTHRS.issue_cnt': NO,
+  'PROJWBS.proj_node_flag': 'structure: the root node is the Project element', 'PROJWBS.phase_id': UNSURE, 'PROJWBS.ann_dscnt_rate_pct': NO, 'PROJWBS.dscnt_period_type': NO, 'PROJWBS.ev_compute_type': CODED,
+  'PROJWBS.ev_etc_compute_type': CODED, 'PROJWBS.tmpl_guid': NO, 'PROJWBS.plan_open_state': NO,
+  'ROLES.pobs_id': NO, 'ROLES.cost_qty_type': NO, 'ROLES.last_checksum': NO,
+  'RSRC.pobs_id': NO, 'RSRC.cost_qty_type': NO, 'RSRC.xfer_complete_day_cnt': NO, 'RSRC.xfer_notstart_day_cnt': NO, 'RSRC.load_tasks_flag': NO, 'RSRC.level_flag': NO, 'RSRC.last_checksum': NO,
+  'RSRC.cost_qty_link_flag': NO, 'RSRC.proj_id': NO, 'RSRC.default_units_per_time': OLD, 'RSRC.max_units_per_time': OLD,
+  'RSRCROLE.rsrc_type': 'derived: filled in again from the resource when read', 'RSRCROLE.rsrc_role_id': NO,
+  'TASK.rev_fdbk_flag': NO, 'TASK.lock_plan_flag': NO, 'TASK.review_type': CODED, 'TASK.tmpl_guid': NO, 'TASK.old_restart_date': NO, 'TASK.old_reend_date': NO, 'TASK.old_remain_drtn_hr_cnt': NO, 'TASK.seq_num': NO, 'TASK.control_updates_flag': NO,
+  'TASKACTV.taskactv_id': NO, 'TASKPRED.float_path': UNSURE, 'TASKPRED.taskpred_id': OLD,
+  'TASKRSRC.pobs_id': NO, 'TASKRSRC.target_crv': UNSURE, 'TASKRSRC.remain_crv': UNSURE, 'TASKRSRC.actual_crv': UNSURE, 'TASKRSRC.ts_pend_act_end_flag': NO, 'TASKRSRC.has_rsrchours': NO, 'TASKRSRC.taskrsrc_sum_id': NO,
+  'TASKRSRC.old_restart_date': NO, 'TASKRSRC.old_reend_date': NO, 'TASKRSRC.old_remain_drtn_hr_cnt': NO, 'TASKRSRC.cur_cost': NO, 'TASKRSRC.cur_v': NO, 'TASKRSRC.rem_late_start_date2': NO, 'TASKRSRC.rem_late_end_date2': NO,
+  'TASKRSRC.override_rate_flag': NO, 'TASKRSRC.pend_complete_flag': NO, 'TASKRSRC.pend_remain_cost': NO, 'TASKRSRC.pend_act_cost': NO, 'TASKRSRC.cost_qty_type': NO,
+  'TASKRSRC.act_qty': OLD, 'TASKRSRC.act_work_qty': OLD, 'TASKRSRC.act_equip_qty': OLD, 'TASKRSRC.target_work_qty': OLD, 'TASKRSRC.target_equip_qty': OLD, 'TASKRSRC.remain_work_qty': OLD, 'TASKRSRC.remain_equip_qty': OLD,
+  'TASKRSRC.remain_reg_qty': OLD, 'TASKRSRC.remain_ot_qty': OLD, 'TASKRSRC.remain_reg_cost': OLD, 'TASKRSRC.remain_ot_cost': OLD,
+  'THRSPARM.seq_num': NO, 'THRSPARM.wbs_flag': NO, 'THRSPARM.task_flag': NO, 'THRSPARM.rsrc_flag': NO, 'THRSPARM.thresh_parm_type': CODED, 'THRSPARM.thresh_field_name': NO, 'THRSPARM.thresh_short_name': NO,
+  'UDFTYPE.udf_type_name': NO, 'UDFTYPE.super_flag': NO, 'UDFTYPE.indicator_expression': UNSURE, 'UDFTYPE.summary_indicator_expression': UNSURE, 'UDFTYPE.export_flag': NO,
+  'WBSRSRC.auto_compute_dates_flag': NO, 'WBSRSRC.rsrc_request_data': UNSURE,
+};
+/** Tables the XER-to-XML writer carries by other means than a field map: their fields round-trip in nested elements (checked by tests/p6xml-coverage.test.ts). */
+export const P6XML_SPECIAL_TABLES = ['CALENDAR', 'SCHEDOPTIONS', 'PROJPCAT', 'RSRCRCAT', 'TASKACTV', 'UDFVALUE', 'RSRCCURVDATA'];
 
 /** The XML tags the reader turns into the clone's own columns, converting the value (dates, enumerations, flags) or
  *  folding it (a calendar's week and exceptions into clndr_data): every other leaf is kept as it is (xml:<Tag>). */
@@ -255,13 +374,15 @@ function fromXml(n: XNode, map: FieldMap, alsoUsed: string[] = [], keep = true):
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const hm = (m: number) => `${String(Math.floor((m % 1440) / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`;
 // P6 writes a shift's Finish as its last working minute (08:00-16:59 for 08:00-17:00).
-const shiftsXml = (ss: Shift[]) => ss.map((s) => `<WorkTime><Start>${hm(s.start)}</Start><Finish>${hm(s.end - 1)}</Finish></WorkTime>`).join('');
+// (a whole 24-hour working day is two periods, 00:00-11:59 and 12:00-23:59: one 00:00-23:59 period is how the reader tells a non-working exception)
+const shiftsXml = (ss: Shift[]) => ss.flatMap((x) => (x.start === 0 && x.end === 1440 ? [{ start: 0, end: 720 }, { start: 720, end: 1440 }] : [x])).map((s) => `<WorkTime><Start>${hm(s.start)}</Start><Finish>${hm(s.end - 1)}</Finish></WorkTime>`).join('');
 
 function calendarXml(r: Row): string {
   let def: CalendarDef | null = null;
-  try { def = parseClndrData(r.clndr_data); } catch { def = null; }
+  try { def = parseClndrData(r.clndr_data); } catch { def = r.clndr_data ? parseClndrDataLeniently(r.clndr_data) : null; } // (text that is not P6's syntax is written as far as it can be read: never an empty week)
   let s = `<Calendar><ObjectId>${esc(r.clndr_id)}</ObjectId><Name>${esc(r.clndr_name)}</Name><Type>${ENUMS.clndr_type[r.clndr_type] ?? 'Global'}</Type><IsDefault>${r.default_flag === 'Y'}</IsDefault>`;
   if (r.rsrc_private) s += `<IsPersonal>${r.rsrc_private === 'Y'}</IsPersonal>`;
+  if (r.last_chng_date) s += `<LastUpdateDate>${xmlDate(r.last_chng_date)}</LastUpdateDate>`;
   if (r.base_clndr_id) s += `<BaseCalendarObjectId>${esc(r.base_clndr_id)}</BaseCalendarObjectId>`;
   if (r.proj_id) s += `<ProjectObjectId>${esc(r.proj_id)}</ProjectObjectId>`;
   for (const [tag, f] of [['HoursPerDay', 'day_hr_cnt'], ['HoursPerWeek', 'week_hr_cnt'], ['HoursPerMonth', 'month_hr_cnt'], ['HoursPerYear', 'year_hr_cnt']]) if (r[f]) s += `<${tag}>${r[f]}</${tag}>`;
@@ -277,11 +398,12 @@ function calendarRow(n: XNode): Row {
   // P6's Finish is the last working minute (hh:59 or hh:29); older P6 Clone files wrote the end itself (hh:00, 00:00 = midnight)
   const endT = (s: string) => { const v = parseT(s); return v % 30 === 29 ? v + 1 : v === 0 ? 1440 : v; };
   const shifts = (x: XNode) => kids(x, 'WorkTime').map((w) => ({ start: parseT(val(w, 'Start')), end: endT(val(w, 'Finish')) })).filter((s) => s.end > s.start);
+  const joined = (ss: Shift[]) => [...ss].sort((a, b) => a.start - b.start).reduce<Shift[]>((out, s) => { const l = out[out.length - 1]; if (l && l.end === s.start) l.end = s.end; else out.push({ ...s }); return out; }, []); // (periods that touch are one)
   const none: XNode = { name: '', children: [], text: '' };
   const def: CalendarDef = { week: [[], [], [], [], [], [], []], exceptions: new Map() };
   for (const d of kids(child(n, 'StandardWorkWeek') ?? none, 'StandardWorkHours')) {
     const i = DAYS.indexOf(val(d, 'DayOfWeek'));
-    if (i >= 0) def.week[i] = shifts(d);
+    if (i >= 0) def.week[i] = joined(shifts(d));
   }
   const exceptions = [...kids(child(n, 'HolidayOrExceptions') ?? none, 'HolidayOrException'), ...kids(child(n, 'HolidayExceptions') ?? none, 'HolidayException')];
   for (const h of exceptions) {
@@ -289,15 +411,15 @@ function calendarRow(n: XNode): Row {
     if (t == null) continue;
     const ss = shifts(h);
     // a single 00:00-23:59 entry is P6's way of writing a non-working day
-    def.exceptions.set(minutesToSerial(t), ss.length === 1 && ss[0].start === 0 && ss[0].end === 1440 ? [] : ss);
+    def.exceptions.set(minutesToSerial(t), ss.length === 1 && ss[0].start === 0 && ss[0].end === 1440 ? [] : joined(ss));
   }
   const type = Object.entries(ENUMS.clndr_type).find(([, l]) => l === val(n, 'Type'))?.[0] ?? 'CA_Base';
   const yes = (s: string) => s === 'true' || s === '1';
   return keepRest(n, {
     clndr_id: val(n, 'ObjectId'), default_flag: yes(val(n, 'IsDefault')) ? 'Y' : 'N', clndr_name: val(n, 'Name'), proj_id: val(n, 'ProjectObjectId'),
-    base_clndr_id: val(n, 'BaseCalendarObjectId'), last_chng_date: '', clndr_type: type, day_hr_cnt: val(n, 'HoursPerDay'), week_hr_cnt: val(n, 'HoursPerWeek'),
-    month_hr_cnt: val(n, 'HoursPerMonth'), year_hr_cnt: val(n, 'HoursPerYear'), rsrc_private: yes(val(n, 'IsPersonal')) ? 'Y' : 'N', clndr_data: serializeClndrData(def),
-  }, ['ObjectId', 'IsDefault', 'Name', 'ProjectObjectId', 'BaseCalendarObjectId', 'Type', 'HoursPerDay', 'HoursPerWeek', 'HoursPerMonth', 'HoursPerYear', 'IsPersonal']);
+    base_clndr_id: val(n, 'BaseCalendarObjectId'), last_chng_date: ((d) => (d ? xerDate(d) : ''))(val(n, 'LastUpdateDate')), clndr_type: type, day_hr_cnt: val(n, 'HoursPerDay'), week_hr_cnt: val(n, 'HoursPerWeek'),
+    month_hr_cnt: val(n, 'HoursPerMonth'), year_hr_cnt: val(n, 'HoursPerYear'), rsrc_private: val(n, 'IsPersonal') ? (yes(val(n, 'IsPersonal')) ? 'Y' : 'N') : '', clndr_data: serializeClndrData(def),
+  }, ['ObjectId', 'IsDefault', 'Name', 'ProjectObjectId', 'BaseCalendarObjectId', 'Type', 'HoursPerDay', 'HoursPerWeek', 'HoursPerMonth', 'HoursPerYear', 'IsPersonal', 'LastUpdateDate']);
 }
 
 // ---------- code and UDF assignments, nested in their object as P6 writes them (<Code>, <UDF>)
@@ -369,8 +491,11 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
   for (const r of get('RCATVAL')) el('ResourceCode', r, RCODE_MAP);
   for (const r of get('UMEASURE')) el('UnitOfMeasure', r, UOM_MAP);
   for (const r of get('COSTTYPE')) el('ExpenseCategory', r, EXPCAT_MAP);
-  for (const r of get('RSRCCURVDATA')) el('ResourceCurve', r, CURVE_MAP);
+  for (const r of get('RSRCCURVDATA')) el('ResourceCurve', r, CURVE_MAP, curveValuesXml(r));
+  for (const r of get('FINDATES')) el('FinancialPeriod', r, FINDATES_MAP);
+  for (const r of get('THRSPARM')) el('ThresholdParameter', r, THRSPARM_MAP);
   for (const r of get('ROLES')) el('Role', r, ROLE_MAP);
+  for (const r of get('ROLERATE')) el('RoleRate', r, ROLERATE_MAP);
   const rcodes = new Map<string, Row[]>(); for (const a of get('RSRCRCAT')) { const l = rcodes.get(a.rsrc_id); if (l) l.push(a); else rcodes.set(a.rsrc_id, [a]); }
   for (const r of get('RSRC')) el('Resource', r, RSRC_MAP, codeRefsXml(rcodes.get(r.rsrc_id) ?? [], 'rsrc_catg_type_id', 'rsrc_catg_id') + udfs('RSRC', r.rsrc_id));
   for (const r of get('RSRCRATE')) el('ResourceRate', r, RATE_MAP);
@@ -393,6 +518,10 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
     for (const r of get('TASKPRED').filter((t) => t.proj_id === pid)) el('Relationship', r, REL_MAP);
     for (const r of get('TASKRSRC').filter((t) => t.proj_id === pid)) el('ResourceAssignment', r, ASSIGN_MAP);
     for (const r of get('PROJCOST').filter((t) => t.proj_id === pid)) el('ActivityExpense', r, EXP_MAP);
+    for (const r of get('PROJTHRS').filter((t) => t.proj_id === pid)) el('ProjectThreshold', r, PROJTHRS_MAP);
+    for (const r of get('PROJISSU').filter((t) => t.proj_id === pid)) el('ProjectIssue', r, PROJISSU_MAP);
+    for (const r of get('TASKFIN').filter((t) => t.proj_id === pid)) el('ActivityPeriodActual', r, TASKFIN_MAP);
+    for (const r of get('WBSRSRC').filter((t) => t.proj_id === pid)) el('ProjectResource', r, WBSRSRC_MAP);
     for (const r of get('TASKMEMO').filter((t) => t.proj_id === pid)) el('ActivityNote', r, MEMO_MAP);
     for (const r of get('TASKPROC').filter((t) => t.proj_id === pid)) // step % complete as a fraction, like activity percentages
       el('ActivityStep', r, STEP_MAP, r.complete_pct ? `<PercentComplete>${Number(r.complete_pct) / 100}</PercentComplete>` : '');
@@ -413,10 +542,10 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   const db: Db = { tables: {} };
   const push = (t: string, r: Row) => { const T = table(db, t); for (const f of Object.keys(r)) addField(T, f); T.rows.push(r); };
   const topMap: [string, string, FieldMap][] = [['Currency', 'CURRTYPE', CURR_MAP], ['OBS', 'OBS', OBS_MAP], ['CostAccount', 'ACCOUNT', ACCOUNT_MAP], ['NotebookTopic', 'MEMOTYPE', TOPIC_MAP],
-    ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP], ['ResourceRole', 'RSRCROLE', RSRCROLE_MAP], ['UnitOfMeasure', 'UMEASURE', UOM_MAP], ['ExpenseCategory', 'COSTTYPE', EXPCAT_MAP], ['ResourceCurve', 'RSRCCURVDATA', CURVE_MAP],
+    ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP], ['ResourceRole', 'RSRCROLE', RSRCROLE_MAP], ['RoleRate', 'ROLERATE', ROLERATE_MAP], ['FinancialPeriod', 'FINDATES', FINDATES_MAP], ['ThresholdParameter', 'THRSPARM', THRSPARM_MAP], ['UnitOfMeasure', 'UMEASURE', UOM_MAP], ['ExpenseCategory', 'COSTTYPE', EXPCAT_MAP], ['ResourceCurve', 'RSRCCURVDATA', CURVE_MAP],
     ['ProjectCodeType', 'PCATTYPE', PCODETYPE_MAP], ['ProjectCode', 'PCATVAL', PCODE_MAP], ['ResourceCodeType', 'RCATTYPE', RCODETYPE_MAP], ['ResourceCode', 'RCATVAL', RCODE_MAP]];
   const projMap: [string, string, FieldMap][] = [['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Relationship', 'TASKPRED', REL_MAP], ['ResourceAssignment', 'TASKRSRC', ASSIGN_MAP],
-    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
+    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ProjectThreshold', 'PROJTHRS', PROJTHRS_MAP], ['ProjectIssue', 'PROJISSU', PROJISSU_MAP], ['ActivityPeriodActual', 'TASKFIN', TASKFIN_MAP], ['ProjectResource', 'WBSRSRC', WBSRSRC_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
   // Read as it goes: each top-level element, and each activity, WBS element, relationship, ... of a project, is turned
   // into rows as soon as it closes and let go (a big file is never one tree). A project's own rows are pushed after
   // every top-level element's, Projects before BaselineProjects, as a whole tree would order them.
@@ -425,7 +554,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   const HEAVY = new Set(['Calendar', 'WBS', 'Activity', ...projMap.map(([tag]) => tag)]);
   const top = (n: XNode) => {
     const m = topMap.find(([tag]) => tag === n.name);
-    if (m) { const r = fromXml(n, m[2]); push(m[1], r); if (n.name === 'Resource') { for (const u of udfRows(n, r.rsrc_id, '')) push('UDFVALUE', u); for (const c of kids(n, 'Code')) push('RSRCRCAT', { rsrc_id: r.rsrc_id, rsrc_catg_type_id: val(c, 'TypeObjectId'), rsrc_catg_id: val(c, 'ValueObjectId') }); } }
+    if (m) { const r = fromXml(n, m[2]); if (n.name === 'ResourceCurve') curveValuesRead(n, r); push(m[1], r); if (n.name === 'Resource') { for (const u of udfRows(n, r.rsrc_id, '')) push('UDFVALUE', u); for (const c of kids(n, 'Code')) push('RSRCRCAT', { rsrc_id: r.rsrc_id, rsrc_catg_type_id: val(c, 'TypeObjectId'), rsrc_catg_id: val(c, 'ValueObjectId') }); } }
     else if (n.name === 'Calendar') push('CALENDAR', calendarRow(n));
     else if (n.name !== 'Project' && n.name !== 'BaselineProject') push(`_XML_${n.name}`, xmlRow(n)); // an object the clone has no table for: kept
   };

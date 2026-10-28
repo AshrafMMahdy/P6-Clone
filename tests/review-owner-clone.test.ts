@@ -650,7 +650,7 @@ test('the P6 XML writer keeps units of measure, expense categories, resource cur
       const A = a.tables[t]?.rows ?? [], B = b.tables[t]?.rows ?? [];
       if (!A.length) continue;
       assert.equal(B.length, A.length, `${f} ${t}: every row written and read back`);
-      const fields = which === 'all' ? a.tables[t].fields.filter((x) => !x.startsWith('_')) : which;
+      const fields = (which === 'all' ? a.tables[t].fields.filter((x) => !x.startsWith('_')) : which).filter((x) => !(t === 'RSRCROLE' && x === 'rsrc_role_id')); // (rsrc_role_id: P6's XML has no field for it)
       const key = KEY[t] ?? 'role_id';
       const byKey = new Map(B.map((r) => [t === 'RSRCROLE' ? `${r.rsrc_id}|${r.role_id}` : r[key], r]));
       for (const r of A) {

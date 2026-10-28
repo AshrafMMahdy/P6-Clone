@@ -92,11 +92,11 @@ test('P6 XML (a sample, and P6 XML of real XERs): every object a row, every valu
     assert.equal(readAll(db, 'TASK').rows.length, acts);
   }
   // a field and an object the clone does not model: still there
-  const extra = parseP6Xml('<?xml version="1.0"?><APIBusinessObjects><Location><ObjectId>7</ObjectId><Name>Site A</Name><Latitude>30.05</Latitude></Location><Project><ObjectId>1</ObjectId><Id>P</Id><Name>P</Name><WBSObjectId>100</WBSObjectId><SomeNewField>x1</SomeNewField><Activity><ObjectId>11</ObjectId><Id>A1</Id><Name>Dig</Name><ProjectObjectId>1</ProjectObjectId><WBSObjectId>100</WBSObjectId><EstimatedWeight>3.5</EstimatedWeight></Activity></Project></APIBusinessObjects>').db;
+  const extra = parseP6Xml('<?xml version="1.0"?><APIBusinessObjects><Location><ObjectId>7</ObjectId><Name>Site A</Name><Latitude>30.05</Latitude></Location><Project><ObjectId>1</ObjectId><Id>P</Id><Name>P</Name><WBSObjectId>100</WBSObjectId><SomeNewField>x1</SomeNewField><Activity><ObjectId>11</ObjectId><Id>A1</Id><Name>Dig</Name><ProjectObjectId>1</ProjectObjectId><WBSObjectId>100</WBSObjectId><CostPercentComplete>3.5</CostPercentComplete></Activity></Project></APIBusinessObjects>').db;
   const loc = readAll(extra, 'XML:Location');
   assert.deepEqual(loc.rows, [[...loc.columns.map((c) => ({ ObjectId: '7', Name: 'Site A', Latitude: '30.05' })[c] ?? null)]]);
   const t = readAll(extra, 'TASK');
-  assert.equal(t.rows[0][t.columns.indexOf('xml:EstimatedWeight')], '3.5');
+  assert.equal(t.rows[0][t.columns.indexOf('xml:CostPercentComplete')], '3.5');
   const p = readAll(extra, 'PROJECT');
   assert.equal(p.rows[0][p.columns.indexOf('xml:SomeNewField')], 'x1');
 });
