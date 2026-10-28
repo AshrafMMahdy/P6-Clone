@@ -81,7 +81,8 @@ export const rateEnv = () => ({ P6CLONE_OWN_RATES: JSON.stringify(own), P6CLONE_
 export const expectedMs = (bytes, kind) => (Math.max(0, bytes) / 1048576) * Math.max(RATES[kind] * machineFactor(), own[kind] ?? 0) * 1000;
 
 // ---- what the main thread tells the heartbeat thread (shared memory) -------------------------------------------------
-const shared = new SharedArrayBuffer(128 + 256), f = new Float64Array(shared, 0, 16), nameBytes = new Uint8Array(shared, 128, 256);
+// a plain buffer where shared memory is not offered (the desktop app's page loads this module but never starts the thread)
+const shared = typeof SharedArrayBuffer === 'function' ? new SharedArrayBuffer(128 + 256) : new ArrayBuffer(128 + 256), f = new Float64Array(shared, 0, 16), nameBytes = new Uint8Array(shared, 128, 256);
 // f: 0 done (progress), 1 alive counter, 2 step sequence, 3 expected ms (an opaque call), 4 cap ms (the whole step's bound), 5 total, 6 memory-growth counts as life
 const enc = new TextEncoder();
 let cur = { name: 'starting', expect: 0, cap: 0, total: 0, mem: 0 };
