@@ -100,6 +100,6 @@ test('reads P6 XML as P6 writes it: HolidayOrExceptions, hh:59 finishes, nested 
   assert.match(out, /<HolidayOrException><Date>2026-01-05T00:00:00<\/Date><\/HolidayOrException>/);
   assert.match(out, /<PhysicalPercentComplete>0.25<\/PhysicalPercentComplete>/);
   assert.match(out, /<Code><TypeObjectId>7<\/TypeObjectId><ValueObjectId>70<\/ValueObjectId><\/Code><UDF><TypeObjectId>9<\/TypeObjectId><TextValue>Civil<\/TextValue><\/UDF><\/Activity>/);
-  assert.match(out, /<ScheduleOptions>.*<OutOfSequenceScheduleType>Progress Override<\/OutOfSequenceScheduleType><\/ScheduleOptions>/);
-  assert.match(out, /<SubjectArea>Activity<\/SubjectArea>.*<DataType>Text<\/DataType>/);
+  assert.match(out, /<ScheduleOptions>.*<OutOfSequenceScheduleType>Progress Override<\/OutOfSequenceScheduleType>.*<\/ScheduleOptions>/); // (in the schema's order, not last)
+  assert.match(out, /<DataType>Text<\/DataType><ObjectId>9<\/ObjectId><SubjectArea>Activity<\/SubjectArea>/); // (the schema's order)
 });

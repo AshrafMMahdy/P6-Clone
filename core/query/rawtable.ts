@@ -53,7 +53,9 @@ function mspFields(r: Row): Record<string, string | string[]> | null {
 }
 /** A calendar's work week and exceptions, decoded from its clndr_data. */
 function calendarFields(r: Row): Record<string, unknown> {
+  // work_week_source: strict (read exactly as P6's syntax), lenient_guess (a guess from text P6 would not take: do not schedule from it as if exact), none (no week could be read)
   const decoded = (def: CalendarDef, note: string | null) => ({
+    work_week_source: note ? 'lenient_guess' : 'strict',
     work_week: Object.fromEntries(def.week.map((ss, i) => [DAYS[i], shifts(ss)])),
     exceptions: [...def.exceptions.entries()].sort((a, b) => a[0] - b[0]).map(([d, ss]) => ({ date: formatP6Date(serialToMinutes(d)).slice(0, 10), work: shifts(ss) })),
     calendar_note: note,
@@ -62,8 +64,8 @@ function calendarFields(r: Row): Record<string, unknown> {
     // text that is not P6's syntax (written by another tool): read as far as it can be, and said so; clndr_data is always the file's text as it is
     const why = (e as Error).message;
     const def = r.clndr_data ? parseClndrDataLeniently(r.clndr_data) : null;
-    if (def) return decoded(def, `clndr_data is not valid P6 syntax (${why}; P6 would not take it): work_week and exceptions are read from it as far as its text allows; clndr_data is the file's text as it is.`);
-    return { work_week: null, exceptions: null, calendar_note: r.clndr_data ? `clndr_data could not be decoded (${why}): it is given as it is in clndr_data.` : null };
+    if (def) return decoded(def, `GUESS, NOT EXACT: clndr_data is not valid P6 syntax (${why}; P6 would not take it): work_week and exceptions are read from it as far as its text allows; clndr_data is the file's text as it is.`);
+    return { work_week_source: 'none', work_week: null, exceptions: null, calendar_note: r.clndr_data ? `clndr_data could not be decoded (${why}): it is given as it is in clndr_data.` : null };
   }
 }
 
@@ -84,7 +86,7 @@ function columnsOf(name: string, t: { fields: string[]; rows: Row[] }, rows: Row
   const msp = new Set<string>();
   for (const r of rows) { const m = mspFields(r); if (m) for (const k of Object.keys(m)) msp.add(k); }
   const clone = t.fields.filter(cloneField).map((f) => `clone:${f.slice(1)}`);
-  return [...own, ...xml, ...msp, ...clone, ...(name === 'CALENDAR' ? ['work_week', 'exceptions', 'calendar_note'] : [])];
+  return [...own, ...xml, ...msp, ...clone, ...(name === 'CALENDAR' ? ['work_week_source', 'work_week', 'exceptions', 'calendar_note'] : [])];
 }
 
 /** Microsoft Project elements that are not P6 rows (keep.ts ghosts: the project summary task, blank rows, the blank

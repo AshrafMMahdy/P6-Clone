@@ -40,8 +40,8 @@ test('a P6 XML is read element by element: the same rows, also when a project na
   assert.deepEqual(a.findings.filter((f) => f.severity === 'fatal'), []);
   for (const t of ['TASK', 'TASKPRED', 'PROJWBS', 'TASKRSRC', 'UDFVALUE', 'CALENDAR']) assert.equal(a.db.tables[t]?.rows.length ?? 0, db.tables[t]?.rows.length ?? 0, t);
   // the project's ObjectId and WBSObjectId moved to its end, and the activities' own project and WBS taken away
-  const m = /<Project><ObjectId>(\d+)<\/ObjectId>/.exec(text)!;
-  const moved = text.replace(m[0], '<Project>').replace(/<WBSObjectId>(\d+)<\/WBSObjectId>\n/, '\n').replace('</Project>', `<ObjectId>${m[1]}</ObjectId></Project>`)
+  const head = /<Project>[^\n]*/.exec(text)![0], m = /<ObjectId>(\d+)<\/ObjectId>/.exec(head)!;
+  const moved = text.replace(head, head.replace(m[0], '')).replace(/<WBSObjectId>(\d+)<\/WBSObjectId>\n/, '\n').replace('</Project>', `<ObjectId>${m[1]}</ObjectId></Project>`)
     .replace(/<ProjectObjectId>\d+<\/ProjectObjectId>/g, '');
   const b = parseP6Xml(moved);
   assert.equal(b.db.tables.TASK.rows.length, a.db.tables.TASK.rows.length);

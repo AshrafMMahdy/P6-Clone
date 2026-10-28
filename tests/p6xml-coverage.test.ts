@@ -1,5 +1,5 @@
 // The P6 XML writer against P6's own schema and against the XER it came from.
-// 1. Every element and field the writer writes is one P6's XML schema (p6apibo.xsd, read from the copy MPXJ embeds: tests/fixtures/p6apibo-names.json) has.
+// 1. Every element and field the writer writes is one P6's XML schema (p6apibo.xsd, read from the copy MPXJ embeds: core/xml/p6apibo-names.json) has.
 // 2. Every field an XER can hold (the observed layouts of every P6 version, and every sample) is carried, or listed in P6XML_NOT_CARRIED with the reason.
 // 3. XER -> P6 XML -> read back equals the XER, field for field, on every sample, for every field that is carried.
 import { test } from 'node:test';
@@ -8,12 +8,12 @@ import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseXer } from '../core/xer/parse.ts';
-import { P6XML_ENUMS, P6XML_NOT_CARRIED, P6XML_PARTLY_CARRIED, P6XML_ROOT_MAP, P6XML_ROOT_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
+import { p6xmlLossNotes, p6xmlLosses, P6XML_ENUMS, P6XML_NOT_CARRIED, P6XML_PARTLY_CARRIED, P6XML_ROOT_MAP, P6XML_ROOT_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
 import { parseClndrData, parseClndrDataLeniently } from '../core/calendar/clndr-data.ts';
 import { KEYS, type Db, type Row } from '../core/db.ts';
 import { SAMPLES_DIR } from './helpers.ts';
 
-const NAMES = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'p6apibo-names.json'), 'utf8')) as Record<string, string[]>;
+const NAMES = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'core', 'xml', 'p6apibo-names.json'), 'utf8')) as Record<string, string[]>;
 const OBSERVED = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'core', 'xer', 'schema-observed.json'), 'utf8')) as { versions: Record<string, Record<string, { fields: string[] }[]>> };
 const samples = readdirSync(SAMPLES_DIR).filter((f) => /\.xer$/i.test(f)).sort();
 const load = (f: string): Db | null => { try { return parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, f)))).db; } catch { return null; } };
@@ -100,7 +100,7 @@ test('XER -> P6 XML -> read back equals the XER, field for field, on every sampl
       const sig = SIG[t] ?? (keyed ? [KEYS[t]] : t === 'TASKPRED' ? ['task_id', 'pred_task_id', 'pred_type'] : null);
       const fields = map.filter((m) => m[2] !== 'legacy' && !(sig ?? []).includes(m[1])).map((m) => m[1]);
       const dates = new Set(map.filter((m) => m[2] === 'date').map((m) => m[1]));
-      const strict = new Map(map.filter((m) => m[2]?.startsWith('strict:')).map((m) => [m[1], P6XML_ENUMS[m[2]!.slice(7)]]));
+      const strict = new Map(map.filter((m) => m[2]?.startsWith('strict:') || m[2]?.startsWith('enum:')).map((m) => [m[1], P6XML_ENUMS[m[2]!.slice(m[2]!.indexOf(':') + 1)]]));
       // (a date without a time is midnight; a coded value whose P6 text is not verified is not written, so it is not there to read back)
       const same = (x: string, v: string | undefined) => (strict.has(x) ? (v && v in strict.get(x)! ? v : '') : dates.has(x) && /^\d{4}-\d\d-\d\d$/.test(v ?? '') ? `${v} 00:00` : v ?? '');
       if (!sig) { assert.ok(B.length >= A.filter(own).length, `${f} ${t}: rows`); continue; }
@@ -122,8 +122,8 @@ test('XER -> P6 XML -> read back equals the XER, field for field, on every sampl
       const u = b.tables.PROJWBS?.rows.find((w) => w.proj_node_flag === 'Y' && w.proj_id === r.proj_id);
       assert.ok(u, `${f} root WBS of project ${r.proj_id}`);
       for (const [, x, conv] of P6XML_ROOT_MAP) {
-        const want = conv?.startsWith('strict:') ? (r[x] && r[x] in P6XML_ENUMS[conv.slice(7)] ? r[x] : '') : conv === 'date' && /^\d{4}-\d\d-\d\d$/.test(r[x] ?? '') ? `${r[x]} 00:00` : r[x] ?? '';
-        if (x === 'status_code' && !r[x]) continue; // (a root without a status is Active)
+        const want = conv?.startsWith('strict:') || conv?.startsWith('enum:') ? (r[x] && r[x] in P6XML_ENUMS[conv.slice(conv.indexOf(':') + 1)] ? r[x] : '') : conv === 'date' && /^\d{4}-\d\d-\d\d$/.test(r[x] ?? '') ? `${r[x]} 00:00` : r[x] ?? '';
+        if (x === 'status_code' && !(r[x] in P6XML_ENUMS.wbs_status)) { if (u![x] !== 'WS_Open') off.set('PROJWBS(root).status_code', `${f}: not Active`); continue; } // (a root without a status the XML can say is read as Active; the export says how many)
         if ((u![x] ?? '') !== want) { const k = `PROJWBS(root).${x}`; if (!off.has(k)) off.set(k, `${f}: ${JSON.stringify(r[x] ?? '')} -> ${JSON.stringify(u![x] ?? '')}`); }
         if (r[x]) compared[`PROJWBS(root).${x}`] = (compared[`PROJWBS(root).${x}`] ?? 0) + 1;
       }
@@ -188,7 +188,7 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
     if (n) want.set(`${t}.${f ?? '(whole table)'}|${reason}`, n);
   }
   assert.ok(want.size > 5, 'the sample holds values P6 XML has no place for');
-  const got = new Map(p6xmlLosses(db).filter((l) => !/^coded value|^root node|^BaselineProject/.test(l.reason) && !l.reason.startsWith('carried on the root')).map((l) => [`${l.table}.${l.field}|${l.reason}`, l.rows]));
+  const got = new Map(p6xmlLosses(db).filter((l) => !/^coded value|^root node|^BaselineProject|^a column|^calendar|^user-defined/.test(l.reason) && !l.reason.startsWith('carried on the root')).map((l) => [`${l.table}.${l.field}|${l.reason}`, l.rows]));
   assert.deepEqual([...got].sort(), [...want].sort());
   // an empty value is not a loss; a code without a verified text is one; a verified code is not
   T.PROJECT.rows[0].risk_level = ''; T.PROJECT.rows[0].def_qty_type = 'QT_Day';
@@ -203,7 +203,7 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
   for (const [k] of Object.entries(P6XML_NOT_CARRIED)) { const [t, f] = k.split('.'); if (!f) empty.tables[t] && (empty.tables[t].rows = []); else for (const r of empty.tables[t]?.rows ?? []) r[f] = ''; }
   for (const r of empty.tables.PROJECT?.rows ?? []) { r.def_qty_type = ''; r.sum_assign_level = ''; }
   for (const r of empty.tables.PROJWBS?.rows ?? []) { r.ev_compute_type = ''; for (const f of ['est_wt', 'seq_num', 'guid', 'sum_data_flag']) if (r.proj_node_flag === 'Y') r[f] = ''; if (r.proj_node_flag === 'Y' && r.wbs_short_name !== undefined) { const p = empty.tables.PROJECT.rows.find((x) => x.proj_id === r.proj_id); r.wbs_short_name = p?.proj_short_name ?? ''; } }
-  assert.deepEqual(p6xmlLosses(empty).map((l) => `${l.table}.${l.field}`), []);
+  assert.deepEqual(p6xmlLosses(empty).filter((l) => !/^a column|^calendar|^user-defined/.test(l.reason)).map((l) => `${l.table}.${l.field}`), []);
   // the MCP save answer: structured, and plainly in notes; an XER save has none of it
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
@@ -227,4 +227,122 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
   assert.equal(r.err, false);
   assert.equal(r.d.not_in_p6_xml, undefined, 'an XER keeps every field');
   await call('close', { ...H, discard: true });
+});
+
+test('the export finds what it drops in the data: unmapped columns, codes without a text, guessed calendars, user-field values', async () => {
+  const db = load(samples.find((f) => /^CfC\.xer$/i.test(f)) ?? samples[0])!;
+  const base = new Set(p6xmlLosses0(db));
+  // a column no map writes (a newer P6 build's), with data in two rows and empty in the others
+  const T = db.tables.TASK;
+  T.fields.push('zz_new_col'); T.rows[0].zz_new_col = 'a'; T.rows[1].zz_new_col = 'b'; T.rows[2].zz_new_col = '';
+  const L = p6xmlLosses(db);
+  assert.equal(L.find((l) => l.table === 'TASK' && l.field === 'zz_new_col')?.rows, 2);
+  assert.ok(!L.some((l) => l.table === 'TASK' && l.field === 'task_name'), 'a carried column is not reported');
+  // a whole table nothing writes
+  db.tables.ZZTABLE = { name: 'ZZTABLE', fields: ['a'], rows: [{ a: '1' }, { a: '2' }, { a: '3' }] };
+  assert.equal(p6xmlLosses(db).find((l) => l.table === 'ZZTABLE')?.rows, 3);
+  // a code P6's XML has no text for is left out of the file, never written as the XER code, and counted
+  const w = db.tables.PROJWBS.rows.find((r) => r.proj_node_flag !== 'Y')!;
+  w.status_code = 'WS_Requested';
+  const U = db.tables.UDFTYPE?.rows[0];
+  if (U) U.logical_data_type = 'FT_DATE';
+  const xml = writeP6Xml(db, {} as never);
+  assert.ok(!xml.includes('WS_Requested') && !xml.includes('FT_DATE'), 'no raw XER code in the XML');
+  const L2 = p6xmlLosses(db);
+  assert.ok((L2.find((l) => l.table === 'PROJWBS' && l.field === 'status_code')?.rows ?? 0) >= 1);
+  if (U) assert.ok((L2.find((l) => l.table === 'UDFTYPE' && l.field === 'logical_data_type')?.rows ?? 0) >= 1);
+  // a calendar whose clndr_data is not P6's syntax: written from a guess, said so by name, and read_table says the week is a guess
+  const { calendarReading } = await import('../core/xml/p6xml.ts');
+  const { readTable } = await import('../core/query/rawtable.ts');
+  assert.ok(!p6xmlLosses(db).some((l) => l.table === 'CALENDAR'), 'strict calendars are not reported');
+  let bad: Db | null = null, badCal: Row | null = null;
+  for (const f of samples) { const d = load(f); const r = d?.tables.CALENDAR?.rows.find((x) => calendarReading(x).how === 'lenient'); if (d && r) { bad = d; badCal = r; break; } }
+  assert.ok(bad && badCal, 'a sample has a calendar P6 syntax rejects');
+  const lenient = p6xmlLosses(bad!).find((l) => l.table === 'CALENDAR' && l.field === 'clndr_data');
+  assert.ok(lenient && lenient.items?.includes(badCal!.clndr_name) || (lenient?.rows ?? 0) >= 1, JSON.stringify(lenient));
+  assert.match(p6xmlLossNotes(p6xmlLosses(bad!)).join('\n'), /calendar whose clndr_data is not P6's syntax.*guess/);
+  const t = readTable(bad!, 'CALENDAR', null, { limit: 100000 });
+  const col = (r: unknown[], n: string) => r[t.columns.indexOf(n)] as string;
+  const seen = new Set(t.rows.map((r) => col(r, 'work_week_source')));
+  assert.ok(seen.has('lenient_guess'), [...seen].join());
+  for (const r of t.rows) if (col(r, 'work_week_source') === 'lenient_guess') assert.match(col(r, 'calendar_note'), /^GUESS, NOT EXACT/);
+  // text that cannot be read at all: written without a week, and said so
+  const c2 = bad!.tables.CALENDAR.rows[0];
+  const keep = c2.clndr_data;
+  c2.clndr_data = '((( not a calendar';
+  assert.ok(p6xmlLosses(bad!).some((l) => l.table === 'CALENDAR' && l.reason.includes('could not be read at all')));
+  assert.equal(col(readTable(bad!, 'CALENDAR', null, { limit: 100000 }).rows.find((r) => col(r, 'clndr_id') === c2.clndr_id)!, 'work_week_source'), 'none');
+  c2.clndr_data = keep;
+  // a user-defined field value of a type with no value element, and on an object with no UDF list
+  if (db.tables.UDFTYPE?.rows.length) {
+    const ut = db.tables.UDFTYPE.rows[0];
+    db.tables.UDFVALUE ??= { name: 'UDFVALUE', fields: ['udf_type_id', 'fk_id', 'proj_id', 'udf_text', 'udf_number', 'udf_date', 'udf_code_id'], rows: [] };
+    ut.table_name = 'TASKRSRC';
+    db.tables.UDFVALUE.rows.push({ udf_type_id: ut.udf_type_id, fk_id: '1', proj_id: db.tables.PROJECT.rows[0].proj_id, udf_text: 'x' });
+    const L3 = p6xmlLosses(db).find((l) => l.table === 'UDFVALUE' && l.field === '(row)');
+    assert.ok(L3 && L3.items?.includes('TASKRSRC'));
+  }
+  assert.ok(base.size >= 0);
+});
+const p6xmlLosses0 = (d: Db) => p6xmlLosses(d).map((l) => `${l.table}.${l.field}`);
+
+test('the elements are written in the order of P6\'s schema (the xsd:sequence of each type, and of the document)', () => {
+  const bad: string[] = [];
+  const check = (n: XNode, type: string, path: string) => {
+    const q = new Map((NAMES[type] ?? []).map((x, i) => [x, i]));
+    let last = -1, lastName = '';
+    for (const c of n.children) {
+      const i = q.get(c.name);
+      if (i != null) { if (i < last) bad.push(`${path}: ${c.name} after ${lastName}`); last = i; lastName = c.name; }
+      const nested = c.name === 'Code' ? 'CodeAssignment' : c.name === 'UDF' ? 'UDFAssignment' : c.name === 'Values' ? 'ResourceCurveValues' : NAMES[c.name] ? c.name : null;
+      if (c.children.length && nested) check(c, nested, `${path}/${c.name}`);
+    }
+  };
+  let n = 0;
+  for (const f of samples.slice(0, 40)) {
+    const db = load(f);
+    if (!db) continue;
+    if (n === 0 && db.tables.PROJECT?.rows.length) db.tables.PROJECT.rows.push({ ...db.tables.PROJECT.rows[0], proj_id: '99999', _baseline_of: db.tables.PROJECT.rows[0].proj_id });
+    const root = parseXml(writeP6Xml(db, {} as never)).children[0];
+    check(root, 'APIBusinessObjects', 'APIBusinessObjects');
+    n++;
+  }
+  assert.ok(n >= 20);
+  assert.deepEqual([...new Set(bad)].slice(0, 20), []);
+});
+
+// Sources of the coded values (read 2026-10-28). A pair is written when MPXJ links the XER code to the text and Oracle's list has the text; Oracle lists no XER codes.
+const SOURCES = {
+  events: 'https://docs.oracle.com/cd/F51301_01/English/Integration_Documentation/business_object_events_reference/business_object_events_reference.pdf (ProjectType, WBSType, ProjectIssueType tables)',
+  eventsV24: 'https://docs.oracle.com/cd/F88966_01/English/Integration_Documentation/business_object_events_reference/34274.htm (WBSType)',
+  thresholds: 'https://docs.oracle.com/cd/F88966_01/English/Integration_Documentation/p6_eppm_web_services_reference/42401.htm (ProjectThreshold: IssuePriority, Status, DetailToMonitor)',
+  dataMap: 'https://docs.oracle.com/cd/F88966_01/English/Mapping_and_Schema/xer_import_export_data_map_project/xer_import_export_data_map_project.pdf (column -> field label)',
+  mpxj: 'MPXJ 16.10 org.mpxj.primavera: PriorityHelper, XmlProjectWriter, PrimaveraXERFileWriter',
+};
+test('coded values written are the texts Oracle lists and MPXJ links to the XER codes; the rest are left out', () => {
+  assert.ok(Object.values(SOURCES).every((u) => u.length > 20));
+  // Oracle's allowed strings (ProjectType / WBSType / ProjectIssueType / ProjectThreshold)
+  const oracle: Record<string, string[]> = {
+    qty_type: ['Hour', 'Day', 'Week', 'Month', 'Year', 'Days Hours', 'Hours Minutes'], sum_level: ['WBS Level', 'Assignment Level'], discount_period: ['Month', 'Quarter', 'Year'],
+    ev_compute: ['Activity Percent Complete', '0 / 100', '50 / 50', 'Custom Percent Complete', 'WBS Milestones Percent Complete', 'Activity Percent Complete Using Resource Curves'],
+    priority_type: ['Top', 'High', 'Normal', 'Low', 'Lowest'], wbs_status: ['Planned', 'Active', 'Inactive', 'What-If', 'Requested', 'Template'],
+  };
+  for (const [list, texts] of Object.entries(oracle)) for (const t of Object.values(P6XML_ENUMS[list])) assert.ok(texts.includes(t), `${list}: "${t}" is a string Oracle lists`);
+  // the unverified ones stay out of the file, whatever the data holds
+  const db = load(samples.find((f) => /^CfC\.xer$/i.test(f)) ?? samples[0])!;
+  db.tables.PROJECT.rows[0].risk_level = 'RL_High'; db.tables.PROJECT.rows[0].hist_interval = 'HI_Month'; db.tables.PROJECT.rows[0].intg_proj_type = 'IT_ERP';
+  const w = db.tables.PROJWBS.rows.find((r) => r.proj_node_flag !== 'Y')!; w.ev_etc_compute_type = 'EE_PF_1';
+  const xml = writeP6Xml(db, {} as never);
+  for (const bad of ['RL_High', 'HI_Month', 'IT_ERP', 'EE_PF_1', '<RiskLevel>', '<HistoryInterval>', '<IntegratedType>', '<EarnedValueETCComputeType>']) assert.ok(!xml.includes(bad), bad);
+  // issue and threshold priorities: the same PT_ codes and texts as the activity priority
+  const T = db.tables;
+  T.PROJISSU ??= { name: 'PROJISSU', fields: ['issue_id', 'proj_id', 'issue_name', 'priority_type'], rows: [] };
+  T.PROJISSU.rows.push({ issue_id: '900001', proj_id: T.PROJECT.rows[0].proj_id, issue_name: 'x', priority_type: 'PT_Top' });
+  const back = parseP6Xml(writeP6Xml(db, {} as never)).db;
+  assert.ok(writeP6Xml(db, {} as never).includes('<Priority>Top</Priority>'));
+  assert.equal(back.tables.PROJISSU.rows.find((r) => r.issue_id === '900001')?.priority_type, 'PT_Top');
+  // WBS category (phase_id = "WBS Category" in the data map) travels as WBSCategoryObjectId
+  w.phase_id = '77';
+  const b2 = parseP6Xml(writeP6Xml(db, {} as never)).db;
+  assert.equal(b2.tables.PROJWBS.rows.find((r) => r.wbs_id === w.wbs_id)?.phase_id, '77');
 });
