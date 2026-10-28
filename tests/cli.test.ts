@@ -174,7 +174,7 @@ test('compare matches activities by Activity ID, so renumbered internal ids are 
 test('the operations guide given to the AI assistant covers every operation, and every listed operation exists', async () => {
   const { applyOps, OP_GUIDE, OP_NAMES } = await import('../core/project/ops.ts');
   const { emptyDb } = await import('../core/db.ts');
-  const src = ['ops.ts', 'ops-extra.ts'].map((f) => readFileSync(join(import.meta.dirname, '..', 'core', 'project', f), 'utf8')).join('\n');
+  const src = ['ops.ts', 'ops-extra.ts', 'ops-fields.ts'].map((f) => readFileSync(join(import.meta.dirname, '..', 'core', 'project', f), 'utf8')).join('\n');
   const handled = [...src.matchAll(/case '([a-z_]+)'/g)].map((m) => m[1]);
   assert.deepEqual([...OP_NAMES].sort(), [...new Set(handled)].sort());
   for (const n of OP_NAMES) assert.match(OP_GUIDE, new RegExp(`(^|\n|/ )${n}:|${n} /|; ${n}:`), n);

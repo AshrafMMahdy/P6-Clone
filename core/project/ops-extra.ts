@@ -12,6 +12,7 @@ import { LOB_FLAG } from '../lob/store.ts';
 import { STEP_FIELDS, syncFromSteps } from './steps.ts';
 import { DISTS, setEstimate, type Dist } from '../risk/montecarlo.ts';
 import { assignBaseline, deleteBaseline, restoreBaseline, saveBaseline } from '../progress/baseline.ts';
+import { applyFields, FIELD_GUIDE, FIELD_OP_NAMES } from './ops-fields.ts';
 
 export interface OpHelpers {
   hpd: number;
@@ -35,7 +36,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = ['clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
+export const EXTRA_OP_NAMES = [...FIELD_OP_NAMES, 'delete_code_type', 'delete_udf', 'delete_cost_account', 'delete_calendar', 'delete_resource_curve', 'clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
 
 export const EXTRA_GUIDE = [
   `update_resource_curve: name, new_name`,
@@ -73,6 +74,12 @@ export const EXTRA_GUIDE = [
   `update_code_type: name, new_name, [subject] (activity default, project, resource), [project] (picks the project's own code type when several share the name)`,
   `update_code_value: type, code (value code or dotted path), [new_code], [name], [subject] (activity default, project, resource), [project] (picks the project's own code type when several share the name)`,
   `delete_code_value: type, code, [subject], [project]: removes the value, its child values and every assignment of them (TASKACTV, PROJPCAT, RSRCRCAT)`,
+  `delete_code_type: name, [subject] (activity default, project, resource), [project]: the code type, its values and every assignment of them`,
+  `delete_udf: udf (label), [subject] (activity default, wbs, project, resource, assignment): the UDF and every value of it`,
+  `delete_cost_account: id: its child accounts move up to its parent; expenses, assignments and projects that named it are left without an account`,
+  `delete_calendar: name, [replace_with] (a calendar for the activities, projects, resources and calendars that use it; without it, refused while anything uses it). The default calendar is refused: make another one the default first (set_fields CALENDAR default_flag)`,
+  `delete_resource_curve: name: assignments that used it become linear`,
+  ...FIELD_GUIDE,
 ].join('\n');
 
 const CODE_SUBJECTS = {
@@ -212,7 +219,64 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     return { T, find };
   };
 
+  const generic = applyFields(db, op, h);
+  if (generic !== undefined) return generic;
   switch (op.op) {
+    case 'delete_code_type': {
+      const S = codeSubject(op.subject);
+      const t = codeType(S, str(op.name, 'name'), op.project != null ? h.project(op.project).proj_id : undefined, true);
+      const tid = t[S.tid], vals = new Set(realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid).map((v) => v[S.vid]));
+      const links = db.tables[S.link] ? removeWhere(rows(db, S.link), (a) => vals.has(a[S.vid]) || a[S.tid] === tid) : 0;
+      removeWhere(rows(db, S.val), (v) => v[S.tid] === tid);
+      removeWhere(rows(db, S.type), (x) => x[S.tid] === tid);
+      return { deleted_code_type: t[S.tname], values: vals.size, assignments: links };
+    }
+    case 'delete_udf': {
+      const subj = op.subject == null || op.subject === '' ? 'activity' : lc(op.subject);
+      const tbl = UDF_SUBJECT[subj] ?? fail(`subject must be ${Object.keys(UDF_SUBJECT).join(', ')}.`);
+      const u = rows(db, 'UDFTYPE').find((x) => x.table_name === tbl && lc(x.udf_type_label) === lc(op.udf)) ?? fail(`No ${subj} UDF "${op.udf}".`);
+      const id = u.udf_type_id, label = u.udf_type_label;
+      const values = db.tables.UDFVALUE ? removeWhere(rows(db, 'UDFVALUE'), (v) => v.udf_type_id === id) : 0;
+      if (db.tables.UDFCODE) removeWhere(rows(db, 'UDFCODE'), (c) => c.udf_type_id === id);
+      removeWhere(rows(db, 'UDFTYPE'), (x) => x.udf_type_id === id);
+      return { deleted_udf: label, values };
+    }
+    case 'delete_cost_account': {
+      const a = rows(db, 'ACCOUNT').find((x) => lc(x.acct_short_name) === lc(op.id)) ?? fail(`No cost account "${op.id}".`);
+      const id = a.acct_id, parent = a.parent_acct_id ?? '', name = a.acct_short_name;
+      for (const c of pick(rows(db, 'ACCOUNT'), (x) => x.parent_acct_id === id)) c.parent_acct_id = parent;
+      let cleared = 0;
+      for (const t of Object.values(db.tables)) if (!t.name.startsWith('_') && t.name !== 'ACCOUNT' && realOf(t.fields).includes('acct_id')) for (const r of pick(t.rows, (x) => x.acct_id === id)) { r.acct_id = ''; cleared++; }
+      removeWhere(rows(db, 'ACCOUNT'), (x) => x.acct_id === id);
+      return { deleted_cost_account: name, references_cleared: cleared };
+    }
+    case 'delete_calendar': {
+      const c = h.calendar(op.name), id = c.clndr_id, name = c.clndr_name;
+      if (c.default_flag === 'Y') fail(`"${name}" is the default calendar: make another one the default first ({"op":"set_fields","table":"CALENDAR","where":{"clndr_name":"..."},"fields":{"default_flag":"Y"}}, then "N" on this one).`);
+      const by = op.replace_with != null && op.replace_with !== '' ? h.calendar(op.replace_with).clndr_id : null;
+      if (by === id) fail('replace_with is the calendar being deleted.');
+      const uses: string[] = [];
+      for (const t of Object.values(db.tables)) {
+        if (t.name.startsWith('_')) continue;
+        for (const f of realOf(t.fields)) {
+          if (refTarget(f, t.name) !== 'CALENDAR' || (t.name === 'CALENDAR' && f === 'clndr_id')) continue;
+          const hit = pick(t.rows, (r) => r[f] === id);
+          if (!hit.length) continue;
+          if (by) for (const r of hit) r[f] = by; else uses.push(`${hit.length} ${t.name} row(s) by ${f}`);
+        }
+      }
+      if (uses.length) fail(`Calendar "${name}" is in use: ${uses.join('; ')}. Give replace_with.`);
+      removeWhere(rows(db, 'CALENDAR'), (x) => x.clndr_id === id);
+      dropIndexes(realOf(rows(db, 'CALENDAR')));
+      return { deleted_calendar: name, ...(by ? { replaced_with: String(op.replace_with) } : {}) };
+    }
+    case 'delete_resource_curve': {
+      const id = h.curveId(op.name), name = rows(db, 'RSRCCURVDATA').find((x) => x.curv_id === id)?.curv_name;
+      let n = 0;
+      for (const a of pick(rows(db, 'TASKRSRC'), (x) => x.curv_id === id)) { a.curv_id = ''; n++; }
+      removeWhere(rows(db, 'RSRCCURVDATA'), (x) => x.curv_id === id);
+      return { deleted_resource_curve: name, assignments_now_linear: n };
+    }
     case 'add_resource_curve': {
       const name = str(op.name, 'name');
       if (rows(db, 'RSRCCURVDATA').some((c) => lc(c.curv_name) === lc(name))) fail(`Resource curve "${name}" already exists.`);
