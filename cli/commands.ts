@@ -3,11 +3,12 @@ import type { Db } from '../core/db.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { writeXer } from '../core/xer/write.ts';
-import { writeP6Xml } from '../core/xml/p6xml.ts';
+import { p6xmlLossNotes, p6xmlLosses, writeP6Xml } from '../core/xml/p6xml.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 
 /** Write the result: P6 XML when the path ends in .xml, else XER (the given version, the version read, or 19.12). */
 export function writeOut(path: string, db: Db, version?: string): void {
+  if (/\.xml$/i.test(path)) for (const n of p6xmlLossNotes(p6xmlLosses(db))) console.error(n); // what P6 XML has no place for is said, never silent
   writeFileSync(path, /\.xml$/i.test(path) ? writeP6Xml(db, { version: version ?? '19.12' }) : writeXer(db, { version: version ?? db.header?.version ?? '19.12', encoding: (process.argv.includes('--out-encoding') ? process.argv[process.argv.indexOf('--out-encoding') + 1] : 'auto') as never }));
 }
 

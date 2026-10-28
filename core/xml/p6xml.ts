@@ -356,6 +356,59 @@ export const P6XML_PARTLY_CARRIED: Record<string, string> = {
 export const P6XML_ROOT_NOT_CARRIED: Record<string, string> = {
   est_wt: NO, seq_num: NO, guid: 'the Project element\'s GUID is the project\'s', wbs_short_name: 'the Project element\'s Id is the project\'s', sum_data_flag: 'the Project element\'s ContainsSummaryData is the project\'s', ev_etc_compute_type: TEXTS,
 };
+/** One XER field whose values P6 XML has no place for, as far as this export holds them. */
+export interface P6XmlLoss { table: string; field: string; rows: number; reason: string }
+/** What an export to P6 XML leaves out of THIS data: every P6XML_NOT_CARRIED field (and every coded value without a verified text, and what a baseline or the root node cannot hold)
+ *  that has a non-empty value in the rows the export writes, with the number of rows and the reason. Never silent: the save answer, the CLI and the app's export all say it. */
+export function p6xmlLosses(db: Db, projIds?: string[]): P6XmlLoss[] {
+  const sel = selectRows(db, projIds);
+  const out = new Map<string, P6XmlLoss>();
+  const add = (table: string, field: string, reason: string, n = 1) => { if (!n) return; const k = `${table}.${field}|${reason}`; const o = out.get(k); if (o) o.rows += n; else out.set(k, { table, field, rows: n, reason }); };
+  const has = (v: string | undefined) => v != null && v !== '';
+  const isRoot = (r: Row) => r.proj_node_flag === 'Y';
+  for (const [key, reason] of Object.entries(P6XML_NOT_CARRIED)) {
+    if (reason.startsWith('derived') || reason.startsWith('structure')) continue; // written another way, nothing is lost
+    const [t, f] = key.split('.');
+    const rs = sel.get(t) ?? [];
+    if (!f) { add(t, '(whole table)', reason, rs.length); continue; }
+    if (reason === ROOT) { // the root node's value is written on the Project element, when its code has a verified text
+      const rootMap = P6XML_ROOT_MAP.find((m) => m[1] === f);
+      for (const r of rs) if (has(r[f])) { if (!isRoot(r)) add(t, f, reason); else if (rootMap?.[2]?.startsWith('strict:') && !(r[f] in P6XML_ENUMS[rootMap[2].slice(7)])) add(t, f, PARTLY_REASON); }
+      continue;
+    }
+    add(t, f, reason, rs.filter((r) => has(r[f])).length);
+  }
+  // coded values written only for the codes whose text is verified (the strict maps): any other code is left out
+  for (const [t, { map }] of Object.entries(P6XML_TABLES)) for (const [, f, conv] of map) {
+    if (!conv?.startsWith('strict:')) continue;
+    const list = ENUMS[conv.slice(7)];
+    add(t, f, PARTLY_REASON, (sel.get(t) ?? []).filter((r) => has(r[f]) && !(r[f] in list)).length);
+  }
+  // the root WBS node is the Project element, which has no field for these
+  const projName = new Map((sel.get('PROJECT') ?? []).map((p) => [p.proj_id, p.proj_short_name]));
+  for (const [f, reason] of Object.entries(P6XML_ROOT_NOT_CARRIED)) {
+    if (P6XML_NOT_CARRIED[`PROJWBS.${f}`]) continue; // counted above
+    for (const r of (sel.get('PROJWBS') ?? []).filter(isRoot)) if (has(r[f]) && !(f === 'wbs_short_name' && r[f] === projName.get(r.proj_id))) add('PROJWBS', f, `root node: ${reason}`);
+  }
+  // a baseline is written as BaselineProject, which has fewer fields than Project
+  const exported = new Set((sel.get('PROJECT') ?? []).map((p) => p.proj_id));
+  const baselines = rows(db, 'PROJECT').filter((b) => b._baseline_of && exported.has(b._baseline_of));
+  const rootOf = new Map(rows(db, 'PROJWBS').filter(isRoot).map((w) => [w.proj_id, w]));
+  for (const b of baselines) {
+    for (const [tag, f] of PROJECT_MAP) if (NOT_IN_BASELINE.has(tag) && has(b[f])) add('PROJECT', f, BASELINE_REASON);
+    for (const [tag, f] of P6XML_ROOT_MAP) if (NOT_IN_BASELINE.has(tag) && has(rootOf.get(b.proj_id)?.[f])) add('PROJWBS', f, BASELINE_REASON);
+  }
+  return [...out.values()].sort((a, b) => a.reason.localeCompare(b.reason) || a.table.localeCompare(b.table) || a.field.localeCompare(b.field));
+}
+const PARTLY_REASON = 'coded value whose P6 XML text is not verified: only the verified codes are written, the others are left out';
+const BASELINE_REASON = 'BaselineProject in P6 XML has no field for it';
+/** The losses as plain sentences, one per reason (empty when the export loses nothing). */
+export function p6xmlLossNotes(losses: P6XmlLoss[]): string[] {
+  const by = new Map<string, P6XmlLoss[]>();
+  for (const l of losses) (by.get(l.reason) ?? by.set(l.reason, []).get(l.reason)!).push(l);
+  return [...by].map(([reason, ls]) => `Not in the P6 XML (${reason}): ${ls.slice(0, 40).map((l) => `${l.table}.${l.field} ${l.rows} ${l.field === '(whole table)' ? 'row(s)' : 'value(s)'}`).join(', ')}${ls.length > 40 ? `, and ${ls.length - 40} more fields` : ''}. Save as XER to keep them.`);
+}
+
 /** Tables the XER-to-XML writer carries by other means than a field map: their fields round-trip in nested elements (checked by tests/p6xml-coverage.test.ts). */
 export const P6XML_SPECIAL_TABLES = ['CALENDAR', 'SCHEDOPTIONS', 'PROJPCAT', 'RSRCRCAT', 'TASKACTV', 'UDFVALUE', 'RSRCCURVDATA'];
 

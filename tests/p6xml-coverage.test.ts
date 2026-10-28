@@ -4,7 +4,8 @@
 // 3. XER -> P6 XML -> read back equals the XER, field for field, on every sample, for every field that is carried.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseXer } from '../core/xer/parse.ts';
 import { P6XML_ENUMS, P6XML_NOT_CARRIED, P6XML_PARTLY_CARRIED, P6XML_ROOT_MAP, P6XML_ROOT_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
@@ -172,4 +173,58 @@ test('a baseline project is written with the fields P6\'s schema has for a Basel
   const n = back.tables.TASKNOTE?.rows.find((r) => r.task_notes.includes('a note'));
   assert.ok(n, 'the note comes back as a TASKNOTE row');
   assert.ok(!back.tables.TASKMEMO?.rows.some((r) => r.task_memo?.includes('a note')), 'and not as a notebook note');
+});
+
+test('an export to P6 XML says what it leaves out: fields, rows and the reason, through the library and the save answer', { timeout: 60_000 }, async () => {
+  const { p6xmlLosses, p6xmlLossNotes } = await import('../core/xml/p6xml.ts');
+  const db = load(samples.find((f) => /^CfC\.xer$/i.test(f)) ?? samples[0])!;
+  const T = db.tables;
+  // the counts are the rows holding a value, per field and per reason, worked out here from the data
+  const want = new Map<string, number>();
+  for (const [k, reason] of Object.entries(P6XML_NOT_CARRIED)) {
+    if (reason.startsWith('derived') || reason.startsWith('structure') || reason.startsWith('carried on the root')) continue;
+    const [t, f] = k.split('.');
+    const n = f ? (T[t]?.rows ?? []).filter((r) => r[f]).length : (T[t]?.rows.length ?? 0);
+    if (n) want.set(`${t}.${f ?? '(whole table)'}|${reason}`, n);
+  }
+  assert.ok(want.size > 5, 'the sample holds values P6 XML has no place for');
+  const got = new Map(p6xmlLosses(db).filter((l) => !/^coded value|^root node|^BaselineProject/.test(l.reason) && !l.reason.startsWith('carried on the root')).map((l) => [`${l.table}.${l.field}|${l.reason}`, l.rows]));
+  assert.deepEqual([...got].sort(), [...want].sort());
+  // an empty value is not a loss; a code without a verified text is one; a verified code is not
+  T.PROJECT.rows[0].risk_level = ''; T.PROJECT.rows[0].def_qty_type = 'QT_Day';
+  const l1 = p6xmlLosses(db);
+  assert.ok(!l1.some((l) => l.table === 'PROJECT' && l.field === 'risk_level' && l.rows > T.PROJECT.rows.filter((r) => r.risk_level).length));
+  assert.equal(l1.find((l) => l.table === 'PROJECT' && l.field === 'def_qty_type')?.rows, T.PROJECT.rows.filter((r) => r.def_qty_type && r.def_qty_type !== 'QT_Hour').length);
+  const notes = p6xmlLossNotes(l1);
+  assert.ok(notes.length >= 2 && notes.every((n) => /^Not in the P6 XML \(.+\): .+ (value|row)\(s\)/.test(n) && n.includes('Save as XER')), notes.join('\n'));
+  assert.ok(notes.some((n) => n.includes('no element in P6 XML')));
+  // a project with none of it loses nothing
+  const empty = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, samples[0])))).db;
+  for (const [k] of Object.entries(P6XML_NOT_CARRIED)) { const [t, f] = k.split('.'); if (!f) empty.tables[t] && (empty.tables[t].rows = []); else for (const r of empty.tables[t]?.rows ?? []) r[f] = ''; }
+  for (const r of empty.tables.PROJECT?.rows ?? []) { r.def_qty_type = ''; r.sum_assign_level = ''; }
+  for (const r of empty.tables.PROJWBS?.rows ?? []) { r.ev_compute_type = ''; for (const f of ['est_wt', 'seq_num', 'guid', 'sum_data_flag']) if (r.proj_node_flag === 'Y') r[f] = ''; if (r.proj_node_flag === 'Y' && r.wbs_short_name !== undefined) { const p = empty.tables.PROJECT.rows.find((x) => x.proj_id === r.proj_id); r.wbs_short_name = p?.proj_short_name ?? ''; } }
+  assert.deepEqual(p6xmlLosses(empty).map((l) => `${l.table}.${l.field}`), []);
+  // the MCP save answer: structured, and plainly in notes; an XER save has none of it
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const dir = mkdtempSync(join(tmpdir(), 'p6-xmlloss-'));
+  const np = (await call('new_project', { id: 'LOSS', start: '2026-03-02' })).d;
+  const H = { handle: np.handle, owner_key: np.owner_key };
+  const { sessions } = await import('../mcp/runtime.ts');
+  const s = sessions.get(np.handle)!;
+  assert.equal((await call('edit', { ...H, operations: [{ op: 'add_activity', id: 'A1', name: 'a' }] })).err, false);
+  const pr = s.db.tables.PROJECT.rows[0];
+  pr.risk_level = '3'; pr.hist_interval = 'HI_Month';
+  s.db.tables.POBS = { name: 'POBS', fields: ['pobs_id', 'pobs_name'], rows: [{ pobs_id: '1', pobs_name: 'x' }, { pobs_id: '2', pobs_name: 'y' }] };
+  const x = await call('save', { ...H, path: join(dir, 'a.xml') });
+  assert.equal(x.err, false, JSON.stringify(x.d));
+  const risk = x.d.not_in_p6_xml.find((l: any) => l.table === 'PROJECT' && l.field === 'risk_level');
+  assert.deepEqual([risk.rows, risk.reason], [1, 'P6 XML field exists, its texts are not verified']);
+  assert.equal(x.d.not_in_p6_xml.find((l: any) => l.table === 'POBS')?.rows, 2);
+  const said = x.d.notes.join('\n');
+  for (const t of ['PROJECT.risk_level 1 value(s)', 'PROJECT.hist_interval 1 value(s)', 'POBS.(whole table) 2 row(s)', 'no element in P6 XML', 'texts are not verified']) assert.ok(said.includes(t), `${t}: ${said}`);
+  const r = await call('save', { ...H, path: join(dir, 'a.xer') });
+  assert.equal(r.err, false);
+  assert.equal(r.d.not_in_p6_xml, undefined, 'an XER keeps every field');
+  await call('close', { ...H, discard: true });
 });

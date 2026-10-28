@@ -253,7 +253,8 @@ export function ExportWizard(props: { projIds?: string[] }) {
   const finish = async () => {
     // A Microsoft Project file holds one project (P6 exports one project per MS Project file).
     const ids = msp ? sel.slice(0, 1) : sel;
-    const bytes = exportFile(getDb(), format, { version, projIds: ids, encoding });
+    const report: string[] = []; // what the file cannot hold (P6 XML: fields with values it has no place for), said after the export
+    const bytes = exportFile(getDb(), format, { version, projIds: ids, encoding, report });
     const first = projects.find((p) => p.proj_id === ids[0]);
     const base = (first?.proj_short_name ?? 'export').replace(/[\\/:*?"<>|]/g, '_');
     setError(null);
@@ -276,7 +277,7 @@ export function ExportWizard(props: { projIds?: string[] }) {
     // self-check: re-import what was written (for .mpp, the XML handed to Microsoft Project)
     const check = parseFile(path, bytes, format === 'mpp' ? 'mspdi' : format);
     const w = worst(check.findings);
-    toast(`Exported ${ids.length} project(s) to ${path}. Self-check: ${w === 'fatal' || w === 'error' ? 'PROBLEMS (see Import Log)' : 'OK'}`);
+    toast(`Exported ${ids.length} project(s) to ${path}. Self-check: ${w === 'fatal' || w === 'error' ? 'PROBLEMS (see Import Log)' : 'OK'}${report.length ? ` ${report.join(' ')}` : ''}`);
     if (w === 'fatal' || w === 'error') { setUi({ importLog: { file: path, findings: check.findings } }); openDialog('importLog', {}); }
   };
   return (

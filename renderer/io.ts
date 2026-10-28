@@ -8,7 +8,7 @@ import { worst } from '../core/findings.ts';
 /** P6 files: also check whether the saved dates are the ones P6 would calculate (skipped when P6 would reject the file). */
 const withDateCheck = (db: Db, f: Finding[]): Finding[] => (worst(f) === 'fatal' ? f : [...f, ...checkStoredDates(db)]);
 import { writeXer } from '../core/xer/write.ts';
-import { parseP6Xml, writeP6Xml } from '../core/xml/p6xml.ts';
+import { p6xmlLossNotes, p6xmlLosses, parseP6Xml, writeP6Xml } from '../core/xml/p6xml.ts';
 import { parseMspdi, writeMspdi } from '../core/msp/mspdi.ts';
 import { parseMpx, writeMpx } from '../core/msp/mpx.ts';
 import { decodeText, encodeText, encodingLabel, keepOrChoose, type TextEncodingName } from '../core/encoding.ts';
@@ -102,7 +102,7 @@ export async function parseFileAsync(name: string, bytes: Uint8Array, format = d
 /** File bytes for an export. For 'mpp' this is the Microsoft Project XML that Microsoft Project converts to .mpp. */
 /** readAs: the encoding the file was read in, kept for XER / MPX when no encoding is given (and the text fits it). */
 export function exportFile(db: Db, format: Format, opts: { version: string; projIds: string[]; encoding?: TextEncodingName | 'auto'; readAs?: TextEncodingName; report?: string[] }): Uint8Array {
-  if (format === 'xml') return new TextEncoder().encode(writeP6Xml(db, { projIds: opts.projIds, version: opts.version }));
+  if (format === 'xml') { opts.report?.push(...p6xmlLossNotes(p6xmlLosses(db, opts.projIds))); return new TextEncoder().encode(writeP6Xml(db, { projIds: opts.projIds, version: opts.version })); }
   if (format === 'mspdi' || format === 'mpp') return new TextEncoder().encode(writeMspdi(db, { projIds: opts.projIds, report: opts.report }));
   if (format === 'mpx') {
     const t = writeMpx(db, { projIds: opts.projIds });

@@ -24,7 +24,7 @@ import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid } from '../core/xer/repair-valid.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
-import { writeP6Xml, writeP6XmlTo } from '../core/xml/p6xml.ts';
+import { p6xmlLossNotes, p6xmlLosses, writeP6Xml, writeP6XmlTo } from '../core/xml/p6xml.ts';
 import { writeMspdiTo } from '../core/msp/mspdi.ts';
 import { readPeak, workNeed } from './workset.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
@@ -500,6 +500,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       else if (bytes == null && fmt === 'mspdi') writeOutWith(path, (put) => writeMspdiTo(s.db, { projIds: projIds ?? allIds(s.db).slice(0, 1), report: notes }, put));
       else if (bytes == null) writeOutWith(path, (put) => writeP6XmlTo(s.db, { version: a.version ?? '19.12', projIds }, put));
       else writeOut(path, bytes);
+      // what P6's XML has no place for, with values in this data: said in the answer, never silent (structured in not_in_p6_xml, plainly in notes)
+      let xmlLosses: ReturnType<typeof p6xmlLosses> = [];
+      if (fmt === 'p6xml' || fmt === 'xml') { xmlLosses = p6xmlLosses(s.db, projIds); notes.push(...p6xmlLossNotes(xmlLosses)); }
       // the 4D model, links and rules travel beside the file (<file>.4d.json); XER and P6 XML have no place for them
       const sidecar = fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml' ? save4dSidecar(s.db, path, projIds ?? allIds(s.db), writeOut) : null;
       if (sidecar) notes.push(`4D links saved beside it: ${basename(sidecar)}`);
@@ -519,7 +522,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           invalid_dates: repairs.findings, cleared_actuals_rule: REFUSED_ACTUALS, check: { ...brief(g), still_rejected: still },
           note: still ? 'The repaired copy is still one P6 would reject: check.findings names what is left.' : 'The repaired copy is one P6 imports. Run schedule to recalculate the dates the repair cleared. Undo takes the repairs back from the project in memory (the file written stays).' };
       }
-      return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(p6found.length ? { p6_would_reject: { total: p6found.length, in_the_file_as_opened: s.openProblems ? p6found.filter((x) => (s.openProblems!.get(x.key) ?? 0) >= x.count).length : null, findings: p6found.slice(0, 20).map((x) => x.message), note: s.openProblems ? `Not caused by this session: the file already had these when it was opened (they were saved as they were)${rebuilt ? ' (read again from the file it was opened from, as this project was restored without that list)' : ''}. allow_invalid: true is only needed for ones edits add.` : 'This project was restored from a recovery entry written before the list of what the file had when it was opened existed, and the file it was opened from is not available as it was opened (it is missing, or this project was saved over it): nothing could be told apart, so nothing was refused and everything found is listed.' } } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
+      return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(xmlLosses.length ? { not_in_p6_xml: xmlLosses } : {}), ...(p6found.length ? { p6_would_reject: { total: p6found.length, in_the_file_as_opened: s.openProblems ? p6found.filter((x) => (s.openProblems!.get(x.key) ?? 0) >= x.count).length : null, findings: p6found.slice(0, 20).map((x) => x.message), note: s.openProblems ? `Not caused by this session: the file already had these when it was opened (they were saved as they were)${rebuilt ? ' (read again from the file it was opened from, as this project was restored without that list)' : ''}. allow_invalid: true is only needed for ones edits add.` : 'This project was restored from a recovery entry written before the list of what the file had when it was opened existed, and the file it was opened from is not available as it was opened (it is missing, or this project was saved over it): nothing could be told apart, so nothing was refused and everything found is listed.' } } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
     case 'close': {
       requireOwner(s, a.owner_key, 'Closing');
