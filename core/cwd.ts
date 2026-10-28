@@ -6,11 +6,18 @@ import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isMainThread } from 'node:worker_threads';
 
+let lost: string | null = null;
+/** The folder the process was started in once it has been found gone (the process then works from another one), else null. A relative path has nothing to
+ *  be taken from then: tools refuse it (pathArg) rather than put the file somewhere nobody looks. */
+export const cwdLost = (): string | null => lost;
+/** A worker thread is told by the main thread (it cannot move the process itself). */
+export const markCwdLost = (was: string | null): void => { if (was) lost = was; };
 /** The current directory when it still exists; else (and the process moves there, on the main thread) a folder that does. Never throws. */
 export function ensureCwd(): string {
-  try { const c = process.cwd(); if (existsSync(c)) return c; } catch { /* gone: uv_cwd ENOENT */ }
+  let was = lost;
+  try { const c = process.cwd(); if (existsSync(c)) return c; was = c; } catch { was ??= '(deleted)'; /* gone: uv_cwd ENOENT */ }
   for (const d of [tmpdir(), homedir(), '/']) {
-    try { if (isMainThread && existsSync(d)) { process.chdir(d); return d; } } catch { /* try the next */ }
+    try { if (isMainThread && existsSync(d)) { process.chdir(d); lost = was ?? '(deleted)'; return d; } } catch { /* try the next */ }
   }
   return tmpdir();
 }

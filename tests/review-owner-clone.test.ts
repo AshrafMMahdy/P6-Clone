@@ -565,5 +565,13 @@ test('the server runs every tool when the folder it was started in is deleted (w
       assert.equal(r.err, false, `${name}: ${JSON.stringify(r.d).slice(0, 300)}`);
     }
     assert.ok(existsSync(join(tmp, 'p.xer')) && existsSync(join(tmp, 'r.pdf')));
+    // a relative path has nothing to be taken from now: refused in words (never saved to the temp folder the server moved to), in the server's own tools and in a worker's
+    for (const [name, a2] of [['save', { path: 'plan.xer' }], ['export_pdf', { path: 'plan.pdf' }], ['export_excel', { path: 'sub/plan.xlsx' }], ['open_file', { path: 'plan.xer' }]] as const) {
+      const r = await tool(name, { ...H, ...a2 });
+      assert.equal(r.err, true, `${name} refused`);
+      assert.match(r.d.error.reason, /is a relative path, and the folder this server was started in \(.+\) was removed, so there is nothing to take it from/, name);
+      assert.match(r.d.error.next_step, /absolute path/);
+    }
+    assert.equal(existsSync(join(tmp, 'plan.xer')) || existsSync(join(tmpdir(), 'plan.xer')), false, 'nothing was written to the folder the server moved to');
   } finally { p.stdin.end(); }
 });

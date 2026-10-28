@@ -13,6 +13,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { cwdLost } from '../core/cwd.ts';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { getHeapStatistics } from 'node:v8';
@@ -74,11 +75,17 @@ const fences = (mode: 'read' | 'write') => (mode === 'write' ? [writeBase()] : c
 /** A path argument, made absolute and kept inside the roots (when there are any), symlinks included. Reading: the read
  *  root or the write root; writing: the write root. A relative path is taken from the write root (reads: from the read
  *  root when the file is there). */
+/** A relative path taken from the current directory, unless that folder is gone: then there is nothing to take it from. */
+function relativeToCwd(s: string): string {
+  const was = cwdLost();
+  if (was) fail('bad_input', `"${s}" is a relative path, and the folder this server was started in (${was}) was removed, so there is nothing to take it from.`, 'Give an absolute path (or start the server with --root, and relative paths are taken from there).');
+  return resolve(s);
+}
 export function pathArg(p: unknown, what = 'path', mode: 'read' | 'write' = 'read'): string {
   if (typeof p !== 'string' || !p.trim()) fail('bad_input', `Give "${what}" (a file path).`, 'Pass the file path as a string.');
   const s = (p as string).trim();
   const base = writeBase();
-  const abs = isAbsolute(s) ? resolve(s) : mode === 'read' && config.readRoot && (existsSync(resolve(config.readRoot, s)) || !base) ? resolve(config.readRoot, s) : base ? resolve(base, s) : resolve(s);
+  const abs = isAbsolute(s) ? resolve(s) : mode === 'read' && config.readRoot && (existsSync(resolve(config.readRoot, s)) || !base) ? resolve(config.readRoot, s) : base ? resolve(base, s) : relativeToCwd(s);
   const fs = fences(mode);
   // a read root alone fences reading; it must not leave writing unfenced
   if (mode === 'write' && !fs.length && config.readRoot) fail('path_outside_root', `"${s}" cannot be written: this server has a read root but no write root.`, 'Start the server with --automation-write-root (or --root) to save files.', { data: { read_root: config.readRoot } });

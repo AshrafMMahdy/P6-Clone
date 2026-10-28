@@ -18,12 +18,12 @@ import { ToolError, adjustReserved, change, config, countMemory, effectiveBudget
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { ensureCwd, safeCwd } from '../core/cwd.ts';
+import { cwdLost, ensureCwd, markCwdLost, safeCwd } from '../core/cwd.ts';
 import { lobSidecars } from './lob.ts';
 
 type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void };
 interface Snapshot { handle: string; ownerKey: string; db: Session['db']; path: string | null; format: Session['format']; hpd: number; encoding?: Session['encoding']; savedTo?: string; dirty: boolean; bytes: number }
-interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean } }
+interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { cwdLost: string | null; root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean } }
 type Answer =
   | { id: number; type: 'progress'; done: number; total: number; message: string }
   | { id: number; type: 'note'; text: string }
@@ -155,7 +155,7 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
     const job: Job = {
       id, token, tmpLog, name, a, caller: ctx.caller, lobSide: lobSidecars.get(s.handle) ?? null,
       snap: snapshotOf(s), others: others.map(snapshotOf), externalUsed: Math.max(0, usedMemory() - 2 * s.bytes),
-      cfg: { root: config.root, readRoot: config.readRoot, writeRoot: config.writeRoot, requireOwnerKey: config.requireOwnerKey },
+      cfg: { cwdLost: cwdLost(), root: config.root, readRoot: config.readRoot, writeRoot: config.writeRoot, requireOwnerKey: config.requireOwnerKey },
     };
     const done = await new Promise<Extract<Answer, { type: 'done' }>>((resolve, reject) => {
       const cleanup = () => { w.off('message', onMessage); w.off('error', onError); w.off('exit', onExit); ctx.signal.removeEventListener('abort', onAbort); };
@@ -233,6 +233,7 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
   port.on('message', async (job: Job) => {
     log = job.tmpLog; tag.value = tagOf(job.token);
     workerBudget({ externalUsed: job.externalUsed, notice: (delta) => post({ id: job.id, type: 'reserved', delta }) });
+    markCwdLost(job.cfg.cwdLost); // (the worker cannot move the process; the main thread says that the folder it started in is gone)
     const key = JSON.stringify(job.cfg);
     if (key !== rooted) { rooted = key; setRoot(job.cfg.root); setRoots(job.cfg.readRoot, job.cfg.writeRoot); config.requireOwnerKey = job.cfg.requireOwnerKey; }
     const t = job.snap;
