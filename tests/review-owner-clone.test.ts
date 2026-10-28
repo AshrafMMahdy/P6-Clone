@@ -434,3 +434,100 @@ test('an imported EPS node whose ID matches an existing one takes the existing n
   assert.equal(again.length, 2);
   assert.ok(again.every((f) => f.severity === 'info'));
 });
+
+// ------------------------------------------------------------------ the leftovers of the save check
+const openBroken = async (mutate: (db: Db) => void) => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const { writeXer } = await import('../core/xer/write.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const db = load();
+  mutate(db);
+  const dir = mkdtempSync(join(tmpdir(), 'p6-leftover-')), file = join(dir, 'broken.xer');
+  writeFileSync(file, writeXer(db, { version: '' } as any));
+  const o = await call('open_file', { path: file, lenient: true });
+  assert.equal(o.err, false, JSON.stringify(o.d).slice(0, 300));
+  return { call, dir, file, H: { handle: o.d.handle, owner_key: o.d.owner_key }, P: live(db) };
+};
+
+test('an ID the file already had twice may not become three: the edit and the save both refuse a third copy, and an edit that leaves the two alone is fine', { timeout: 60_000 }, async () => {
+  const { sessions } = await import('../mcp/runtime.ts');
+  const { call, dir, H, P } = await openBroken((db) => { const t = rows(db, 'TASK').filter((x) => x.proj_id === live(db).proj_id); t[1].task_code = t[0].task_code; });
+  const s = sessions.get(H.handle)!;
+  const mine = s.db.tables.TASK.rows.filter((x) => x.proj_id === P.proj_id);
+  const dup = mine[0].task_code, third = mine[2];
+  // an edit of the doubled rows that does not touch the ID is not blamed on the edit
+  const ok1 = await call('edit', { ...H, operations: [{ op: 'set_fields', table: 'TASK', project: P.proj_short_name, where: { task_code: dup }, fields: { task_name: 'renamed, ID untouched' } }] });
+  assert.equal(ok1.err, false, JSON.stringify(ok1.d).slice(0, 300));
+  // a third copy made by set_fields is refused, naming 3
+  const no = await call('edit', { ...H, operations: [{ op: 'set_fields', table: 'TASK', project: P.proj_short_name, where: { task_code: third.task_code }, fields: { task_code: dup } }] });
+  assert.equal(no.err, true);
+  assert.match(JSON.stringify(no.d), /used by 3 TASK rows/);
+  // and one made by other means is refused by save
+  third.task_code = dup; s.dirty = true;
+  const refused = await call('save', { ...H, path: join(dir, 'x.xer') });
+  assert.equal(refused.err, true);
+  assert.match(refused.d.error.reason, new RegExp(`Activity ID "${dup}" would be used by 3 TASK rows`));
+  third.task_code = 'BACK-TO-ONE';
+  const saved = await call('save', { ...H, path: join(dir, 'y.xer') });
+  assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 300));
+  assert.equal(saved.d.p6_would_reject.in_the_file_as_opened, saved.d.p6_would_reject.total);
+});
+
+test('a child added under a cycle the file already had is not blamed on the edit; a new cycle is', { timeout: 60_000 }, async () => {
+  const { sessions } = await import('../mcp/runtime.ts');
+  const { call, dir, H, P } = await openBroken((db) => {
+    const p = live(db);
+    ok(db, [{ op: 'add_wbs', project: p.proj_short_name, code: 'CA' }, { op: 'add_wbs', project: p.proj_short_name, code: 'CB' }, { op: 'add_wbs', project: p.proj_short_name, code: 'CC' }]);
+    const w = (c: string) => rows(db, 'PROJWBS').find((x) => x.proj_id === p.proj_id && x.wbs_short_name === c)!;
+    w('CA').parent_wbs_id = w('CB').wbs_id; w('CB').parent_wbs_id = w('CA').wbs_id; // the file's own cycle
+  });
+  const s = sessions.get(H.handle)!;
+  const w = (c: string) => s.db.tables.PROJWBS.rows.find((x) => x.proj_id === P.proj_id && x.wbs_short_name === c)!;
+  // CC goes under the cycle (its parent is a node of it): it is not on the cycle, so the edit is not blamed
+  const e = await call('edit', { ...H, operations: [{ op: 'set_fields', table: 'PROJWBS', where: { wbs_id: w('CC').wbs_id }, fields: { parent_wbs_id: w('CA').wbs_id } }] });
+  assert.equal(e.err, false, JSON.stringify(e.d).slice(0, 300));
+  const saved = await call('save', { ...H, path: join(dir, 'a.xer') });
+  assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 300));
+  assert.equal(saved.d.p6_would_reject.total, 2, 'only the two nodes ON the cycle are reported');
+  assert.equal(saved.d.p6_would_reject.in_the_file_as_opened, 2);
+  // a NEW cycle (CC and a fresh node) is refused
+  const root = s.db.tables.PROJWBS.rows.find((x) => x.proj_id === P.proj_id && x.proj_node_flag === 'Y')!;
+  const fresh = { ...w('CC'), wbs_id: '99999', wbs_short_name: 'CD', parent_wbs_id: w('CC').wbs_id };
+  s.db.tables.PROJWBS.rows.push(fresh);
+  w('CC').parent_wbs_id = '99999'; s.dirty = true;
+  void root;
+  const refused = await call('save', { ...H, path: join(dir, 'b.xer') });
+  assert.equal(refused.err, true);
+  assert.match(refused.d.error.reason, /PROJWBS\.parent_wbs_id: (CC|CD) would be its own ancestor/);
+  assert.doesNotMatch(refused.d.error.reason, /(CA|CB) would be/, 'the file\'s own cycle is not the reason');
+});
+
+test('a project restored without the open-time list rebuilds it from the file it was opened from; when that file is not there it says so and refuses nothing', { timeout: 60_000 }, async () => {
+  const { sessions } = await import('../mcp/runtime.ts');
+  const { call, dir, H, P } = await openBroken((db) => { const t = rows(db, 'TASK').filter((x) => x.proj_id === live(db).proj_id); t[1].task_code = t[0].task_code; });
+  const s = sessions.get(H.handle)!;
+  const mine = s.db.tables.TASK.rows.filter((x) => x.proj_id === P.proj_id);
+  // (as a session restored from a recovery entry of an older server)
+  s.openProblems = undefined; s.dirty = true;
+  const saved = await call('save', { ...H, path: join(dir, 'a.xer') });
+  assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 300));
+  assert.ok(saved.d.p6_would_reject.in_the_file_as_opened >= 1);
+  assert.match(saved.d.p6_would_reject.note, /read again from the file it was opened from/);
+  // rebuilt: a new duplicate is refused again
+  mine[3].task_code = mine[4].task_code; s.dirty = true;
+  const refused = await call('save', { ...H, path: join(dir, 'b.xer') });
+  assert.equal(refused.err, true);
+  assert.equal(refused.d.error.code, 'invalid_for_p6');
+  mine[3].task_code = 'FIXED-3';
+  // no file to read it from (a project made in memory): nothing is refused, everything is listed, and the answer says it could not tell
+  const np = (await call('new_project', { id: 'MEM', start: '2026-03-02' })).d;
+  const N = { handle: np.handle, owner_key: np.owner_key };
+  await call('edit', { ...N, operations: [{ op: 'add_activity', id: 'M1', name: 'a' }, { op: 'add_activity', id: 'M2', name: 'b' }] });
+  const m = sessions.get(np.handle)!;
+  m.openProblems = undefined;
+  m.db.tables.TASK.rows.find((t) => t.task_code === 'M2')!.task_code = 'M1';
+  const unknown = await call('save', { ...N, path: join(dir, 'mem.xer') });
+  assert.equal(unknown.err, false, JSON.stringify(unknown.d).slice(0, 300));
+  assert.equal(unknown.d.p6_would_reject.in_the_file_as_opened, null);
+  assert.match(unknown.d.p6_would_reject.note, /nothing could be told apart, so nothing was refused and everything found is listed/);
+});

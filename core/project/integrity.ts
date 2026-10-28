@@ -7,7 +7,8 @@ import { KEYS, refTarget, rows, type Db, type Row } from '../db.ts';
 import { realOf } from '../journal.ts';
 
 /** A problem: its message, and a key that names the thing itself (not its count), so a flaw the file already had can be told from one an edit made. */
-export interface Problem { key: string; message: string }
+/** count: how many rows share the flaw (a value used by 3 rows is 3); an edit may not raise it. */
+export interface Problem { key: string; message: string; count: number }
 interface Unique { table: string; field: string; scope: string[]; what: string; skip?: (r: Row) => boolean }
 /** Values P6 holds unique: the field, within the scope fields' values. */
 export const UNIQUE: Unique[] = [
@@ -42,7 +43,7 @@ export function duplicates(db: Db, table: string, only?: Row[]): Problem[] {
       const k = key(r);
       if ((count.get(k) ?? 0) < 2 || seen.has(k)) continue;
       seen.add(k);
-      out.push({ key: `dup|${table}|${u.field}|${k}`, message: `${u.what} "${r[u.field]}" would be used by ${count.get(k)} ${table} rows${u.scope.includes('proj_id') && r.proj_id ? ` in project ${r.proj_id}` : ''}; P6 needs it unique.` });
+      out.push({ key: `dup|${table}|${u.field}|${k}`, message: `${u.what} "${r[u.field]}" would be used by ${count.get(k)} ${table} rows${u.scope.includes('proj_id') && r.proj_id ? ` in project ${r.proj_id}` : ''}; P6 needs it unique.`, count: count.get(k) ?? 2 });
     }
   }
   return out;
@@ -59,11 +60,12 @@ export function cycles(db: Db, table: string, only?: Row[]): Problem[] {
   for (const f of parentFields(db, table)) {
     const byId = new Map(all.map((r) => [r[key], r]));
     for (const r of only ?? all) {
+      // only a row ON a cycle is its own ancestor; one whose parents lead into a cycle it is not part of (a child under it) is not blamed
       const seen = new Set<string>([r[key]]);
-      for (let x: Row | undefined = byId.get(r[f]), n = 0; x; x = byId.get(x[f]), n++) {
-        if (seen.has(x[key])) { out.push({ key: `cycle|${table}|${f}|${r[key]}`, message: `${table}.${f}: ${label(r, table) || r[key]} would be its own ancestor (a parent cycle); P6 rejects that.` }); break; }
+      for (let x: Row | undefined = byId.get(r[f]); x; x = byId.get(x[f])) {
+        if (x[key] === r[key]) { out.push({ key: `cycle|${table}|${f}|${r[key]}`, message: `${table}.${f}: ${label(r, table) || r[key]} would be its own ancestor (a parent cycle); P6 rejects that.`, count: 1 }); break; }
+        if (seen.has(x[key])) break;
         seen.add(x[key]);
-        if (n > all.length) break;
       }
       if (out.length > 20) return out;
     }
@@ -72,7 +74,7 @@ export function cycles(db: Db, table: string, only?: Row[]): Problem[] {
 }
 
 /** Relationships from an activity to itself. */
-export const selfLinks = (rs: Row[]): Problem[] => rs.filter((r) => r.task_id && r.task_id === r.pred_task_id).map((r) => ({ key: `self|${r.task_pred_id ?? r.task_id}`, message: `TASKPRED: activity ${r.task_id} would be its own predecessor.` }));
+export const selfLinks = (rs: Row[]): Problem[] => rs.filter((r) => r.task_id && r.task_id === r.pred_task_id).map((r) => ({ key: `self|${r.task_pred_id ?? r.task_id}`, message: `TASKPRED: activity ${r.task_id} would be its own predecessor.`, count: 1 }));
 
 /** Everything P6 refuses in the rows a call changed. */
 export function problemsIn(db: Db, table: string, only?: Row[]): Problem[] {

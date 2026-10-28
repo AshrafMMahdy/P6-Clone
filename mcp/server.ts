@@ -147,6 +147,18 @@ async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
   r.findings.push({ severity: 'info', code: 'MPP_READ', message: 'Read without Microsoft Project: MPXJ turned the .mpp into Microsoft Project XML, read as such (every task, resource, assignment and calendar element is kept: read_table, msp:<Name>).', p6: 'P6 imports .mpp through an installed Microsoft Project.' });
   return r;
 }
+const openProblemsOf = (db: Db) => new Map(p6Refusals(db).map((x) => [x.key, x.count] as const));
+/** A project restored from a recovery entry written before the open-time list existed has none: the file it was opened from, read again, gives it
+ *  (when that file is still the one opened: this project was never saved over it). False when that cannot be done. */
+async function rebuildOpenProblems(s: Session): Promise<boolean> {
+  try {
+    if (!s.path || s.savedTo === s.path || !existsSync(s.path)) return false;
+    const fmt = detectFormat(s.path, readHead(s.path));
+    const r = fmt === 'mpp' ? await readMpp(s.path) : fmt === 'xer' ? readXerFile(s.path, 'auto') : readRaw(readBytes(s.path), fmt, 'auto');
+    s.openProblems = openProblemsOf(r.db);
+    return true;
+  } catch { return false; }
+}
 /** The first 4,000 bytes of a file (what detectFormat reads). */
 const readHead = (p: string): Uint8Array => { try { const fd = openSync(p, 'r'); try { const b = Buffer.alloc(4000); return new Uint8Array(b.subarray(0, readSync(fd, b, 0, 4000, 0))); } finally { closeSync(fd); } } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
 const readBytes = (p: string) => { try { return new Uint8Array(readFileSync(p)); } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
@@ -274,7 +286,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
             a.lenient === true ? 'No project could be read from the file, so it cannot be opened even leniently; fix the file (the findings say what is wrong) or rebuild it.' : 'Pass lenient: true to open it anyway and repair it (the findings say what P6 refuses), or fix the file.',
             { data: { fatal: f.filter((x) => x.severity === 'fatal').slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
         }
-        s0.db = r.db; s0.openProblems = new Set(p6Refusals(r.db).map((x) => x.key)); s0.format = format; /* (openProblems: what P6 would reject in the file as it is; save refuses only what edits add) */ s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
+        s0.db = r.db; s0.openProblems = openProblemsOf(r.db); s0.format = format; /* (openProblems: what P6 would reject in the file as it is; save refuses only what edits add) */ s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
         load4dSidecar(r.db, path); // <file>.4d.json: the 4D model and links saved with it
         // <file>.lob.json: the LOB models as last saved (used when a notebook was damaged outside the clone)
         const lobSide = readLobSidecar(path);
@@ -308,7 +320,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const r = applyOps(db, [{ op: 'add_project', id: a.id, name: a.name ?? a.id, start: a.start, ...(a.must_finish_by ? { must_finish_by: a.must_finish_by } : {}) }]);
       if (!r.ok) fail('bad_input', r.error!.message, 'Give id (Project ID) and start (YYYY-MM-DD).');
       const s = createSession(db, { path: null, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: 8 * 1048576, dirty: true });
-      s.openProblems = new Set(); // (nothing in it yet: whatever a later edit leaves that P6 rejects is that edit's)
+      s.openProblems = new Map(); // (nothing in it yet: whatever a later edit leaves that P6 rejects is that edit's)
       return { handle: s.handle, owner_key: s.ownerKey, project: a.id };
     }
   }
@@ -464,10 +476,12 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if ((fmt === 'mspdi' || fmt === 'mpx') && !projIds && allIds(s.db).length > 1) fail('bad_input', `A Microsoft Project file holds one project, and this file holds ${allIds(s.db).length}: ${names()}.`, 'Pass "project" with the Project ID to write (save once per project).');
       // a project changed in this session is not written holding what P6 rejects on import (the edit tools refuse these as they are made; this is the net under the rest)
       // Violations the file ALREADY had when it was opened are reported in the answer, never a refusal; the ones this session's edits added are refused.
-      let p6found: ReturnType<typeof p6Refusals> = [];
+      let p6found: ReturnType<typeof p6Refusals> = [], rebuilt = false;
       if (a.repair !== true && (fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml')) {
+        if (!s.openProblems && s.dirty) rebuilt = await rebuildOpenProblems(s);
         p6found = p6Refusals(s.db, projIds);
-        const fresh = s.dirty && a.allow_invalid !== true && s.openProblems ? p6found.filter((x) => !s.openProblems!.has(x.key)) : [];
+        const was = s.openProblems;
+        const fresh = s.dirty && a.allow_invalid !== true && was ? p6found.filter((x) => !((was.get(x.key) ?? 0) >= x.count)) : [];
         if (fresh.length) fail('invalid_for_p6', `Not saved: this session's changes left what P6 would reject on import. ${fresh.slice(0, 5).map((x) => x.message).join(' ')}${fresh.length > 5 ? ` (and ${fresh.length - 5} more)` : ''}`, 'Fix those rows (set_fields / update_activity / delete_rows), or save with allow_invalid: true to write it as it is.');
       }
       await checkpoint(ctx);
@@ -504,7 +518,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           invalid_dates: repairs.findings, cleared_actuals_rule: REFUSED_ACTUALS, check: { ...brief(g), still_rejected: still },
           note: still ? 'The repaired copy is still one P6 would reject: check.findings names what is left.' : 'The repaired copy is one P6 imports. Run schedule to recalculate the dates the repair cleared. Undo takes the repairs back from the project in memory (the file written stays).' };
       }
-      return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(p6found.length ? { p6_would_reject: { total: p6found.length, in_the_file_as_opened: p6found.filter((x) => s.openProblems?.has(x.key) ?? true).length, findings: p6found.slice(0, 20).map((x) => x.message), note: 'Not caused by this session: the file already had these when it was opened (they were saved as they were). allow_invalid: true is only needed for ones edits add.' } } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
+      return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(p6found.length ? { p6_would_reject: { total: p6found.length, in_the_file_as_opened: s.openProblems ? p6found.filter((x) => (s.openProblems!.get(x.key) ?? 0) >= x.count).length : null, findings: p6found.slice(0, 20).map((x) => x.message), note: s.openProblems ? `Not caused by this session: the file already had these when it was opened (they were saved as they were)${rebuilt ? ' (read again from the file it was opened from, as this project was restored without that list)' : ''}. allow_invalid: true is only needed for ones edits add.` : 'This project was restored from a recovery entry written before the list of what the file had when it was opened existed, and the file it was opened from is not available as it was opened (it is missing, or this project was saved over it): nothing could be told apart, so nothing was refused and everything found is listed.' } } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
     case 'close': {
       requireOwner(s, a.owner_key, 'Closing');

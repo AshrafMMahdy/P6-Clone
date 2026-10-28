@@ -174,10 +174,11 @@ export function applyFields(db: Db, op: Op, h: OpHelpers): unknown {
   const projectRoot = (pid: string) => rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y') ?? fail('That project has no root WBS node.');
   /** What P6 refuses in the rows a call changed (an ID used twice, a row its own ancestor, a relationship to itself or in a loop): the whole call is
    *  refused, naming the rows, and nothing is changed. */
-  const refuse = (T: { name: string }, touched: Row[], rewired = new Set<Row>()) => {
+  const refuse = (T: { name: string }, touched: Row[], rewired = new Set<Row>(), before = new Map<string, number>()) => {
     if (!touched.length) return;
     const raw = touched.map(realOf);
-    const found = problemsIn(db, T.name, raw).map((p) => p.message);
+    // (a flaw the rows already had, and no worse, is not this call's: the same ID shared by the same number of rows, a cycle the row was on)
+    const found = problemsIn(db, T.name, raw).filter((p) => !((before.get(p.key) ?? 0) >= p.count)).map((p) => p.message);
     // a relationship given other ends is checked for loops with the rest of the edit (one whose lag or type changed closes no new loop)
     for (const r of rewired) { const x = realOf(r); if (x.task_id !== x.pred_task_id) h.linked(x.pred_task_id, x.task_id); }
     if (found.length) fail(`${found.slice(0, 5).join(' ')}${found.length > 5 ? ` (and ${found.length - 5} more)` : ''} Nothing was changed.`);
@@ -194,6 +195,7 @@ export function applyFields(db: Db, op: Op, h: OpHelpers): unknown {
       const hit = picked(T);
       let changed = 0;
       const touched: Row[] = [], rewired = new Set<Row>();
+      const before = new Map(problemsIn(db, T.name, hit.map(realOf)).map((p) => [p.key, p.count] as const)); // what the rows these calls pick already had
       for (const r of hit) {
         const next = Object.fromEntries(Object.entries(fields).map(([f, v]) => [f, value(T, f, v, r)]));
         if (Object.entries(next).some(([f, v]) => (r[f] ?? '') !== v)) { changed++; touched.push(r); if (T.name === 'TASKPRED' && (('task_id' in next && next.task_id !== r.task_id) || ('pred_task_id' in next && next.pred_task_id !== r.pred_task_id))) rewired.add(r); for (const [f, v] of Object.entries(next)) { addField(T, f); r[f] = v; } }
@@ -201,7 +203,7 @@ export function applyFields(db: Db, op: Op, h: OpHelpers): unknown {
       // actual dates written here move the activity's status with them, as update_activity does (status_code follows the actual dates)
       if (T.name === 'TASK' && ('act_start_date' in fields || 'act_end_date' in fields)) for (const r of touched) { const x = realOf(r); const next = x.act_end_date ? 'TK_Complete' : x.act_start_date ? 'TK_Active' : 'TK_NotStart'; if (x.status_code !== next) { addField(T, 'status_code'); r.status_code = next; } }
       if (!hit.length) h.warn(`set_fields: no ${T.name} row matched ${JSON.stringify(op.where ?? {})}.`);
-      refuse(T, touched, rewired);
+      refuse(T, touched, rewired, before);
       return { table: T.name, matched: hit.length, changed };
     }
     case 'add_row': {
