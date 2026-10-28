@@ -6,7 +6,8 @@
 //   XML:<Element>  a P6 XML object the clone has no table for (kept by p6xml.ts as _XML_<Element> rows)
 //   MSP:<Kind> a Microsoft Project element that is not a P6 row (the summary task, blank rows, unassigned assignments...)
 // A calendar's row also gives its work week and its exceptions, decoded from clndr_data (work_week, exceptions).
-// The clone's own bookkeeping (other fields and tables starting with "_") is not the file's and is not shown.
+//   clone:<field>, CLONE:<TABLE>  the clone's own data beside the file's (a project's EPS, baseline links, saved
+//              filters, layouts, reports, portfolios, timesheet lines, risk estimates...): fields and tables starting with "_"
 import type { Db, Row } from '../db.ts';
 import { parseClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, serialToMinutes } from '../dates.ts';
@@ -17,9 +18,11 @@ const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${St
 const shifts = (ss: Shift[]) => ss.map((s) => `${hhmm(s.start)}-${hhmm(s.end)}`);
 
 /** A table's name as the reader sees it, and back. */
-const shown = (name: string) => (name.startsWith('_XML_') ? `XML:${name.slice(5)}` : name);
-const stored = (name: string) => (name.startsWith('XML:') ? `_XML_${name.slice(4)}` : name);
-const visible = (name: string) => !name.startsWith('_') || name.startsWith('_XML_');
+const shown = (name: string) => (name.startsWith('_XML_') ? `XML:${name.slice(5)}` : name.startsWith('_') ? `CLONE:${name.slice(1)}` : name);
+const stored = (name: string) => (name.startsWith('XML:') ? `_XML_${name.slice(4)}` : name.startsWith('CLONE:') ? `_${name.slice(6)}` : name);
+/** Fields read through other columns (xml:, msp:, MSP: tables), not as clone: columns. */
+const EXPANDED = new Set(['_msp_keep', '_msp_xml', '_msp_ghosts']);
+const cloneField = (f: string) => f.startsWith('_') && !f.startsWith('_xml_') && !EXPANDED.has(f);
 
 const unxml = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d))).replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&amp;/g, '&');
 /** An element's value: the text of a simple one, else its XML. */
@@ -75,7 +78,8 @@ function columnsOf(name: string, t: { fields: string[]; rows: Row[] }, rows: Row
   const xml = t.fields.filter((f) => f.startsWith('_xml_')).map((f) => `xml:${f.slice(5)}`);
   const msp = new Set<string>();
   for (const r of rows) { const m = mspFields(r); if (m) for (const k of Object.keys(m)) msp.add(k); }
-  return [...own, ...xml, ...msp, ...(name === 'CALENDAR' ? ['work_week', 'exceptions'] : [])];
+  const clone = t.fields.filter(cloneField).map((f) => `clone:${f.slice(1)}`);
+  return [...own, ...xml, ...msp, ...clone, ...(name === 'CALENDAR' ? ['work_week', 'exceptions'] : [])];
 }
 
 /** Microsoft Project elements that are not P6 rows (keep.ts ghosts: the project summary task, blank rows, the blank
@@ -100,7 +104,7 @@ function ghostTables(db: Db): Record<string, { fields: string[]; rows: Row[] }> 
  *  that are not rows. */
 function tablesOf(db: Db): Map<string, { real: string; t: { fields: string[]; rows: Row[] } }> {
   const m = new Map<string, { real: string; t: { fields: string[]; rows: Row[] } }>();
-  for (const [n, t] of Object.entries(db.tables)) if (visible(n)) m.set(shown(n), { real: n, t });
+  for (const [n, t] of Object.entries(db.tables)) m.set(shown(n), { real: n, t });
   for (const [n, t] of Object.entries(ghostTables(db))) m.set(n, { real: n, t });
   return m;
 }
@@ -134,7 +138,7 @@ export function readTable(db: Db, name: string, projIds: string[] | null, o: { o
   }
   const rows = page.map((r) => {
     const msp = mspFields(r), cal = realName === 'CALENDAR' && (columns.includes('work_week') || columns.includes('exceptions')) ? calendarFields(r) : null;
-    return columns.map((c) => (c.startsWith('xml:') ? r[`_xml_${c.slice(4)}`] ?? null : c.startsWith('msp:') ? msp?.[c] ?? null : cal && c in cal ? cal[c] : r[c] ?? null));
+    return columns.map((c) => (c.startsWith('xml:') ? r[`_xml_${c.slice(4)}`] ?? null : c.startsWith('msp:') ? msp?.[c] ?? null : c.startsWith('clone:') ? r[`_${c.slice(6)}`] ?? null : cal && c in cal ? cal[c] : r[c] ?? null));
   });
   return { table: shownName, columns, rows, total: all.length, offset, ...(offset + page.length < all.length ? { next_offset: offset + page.length } : {}) };
 }

@@ -157,3 +157,29 @@ test('.mpp through the MCP (MPXJ): opened without Microsoft Project, every eleme
     assert.deepEqual(leaf.missing, [], `${f}: ${leaf.missing.length} of ${leaf.leaves} values not readable`);
   }
 });
+
+test('the clone’s own data is readable too (clone:<field>, CLONE:<TABLE>); get_activity and trace_logic take many activities in one call; lookups have no page cap', { timeout: 300_000 }, async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  // an answer too large for one reply is written whole to a JSON file the reply names: read from there
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); const d = toolResult(r.out, r.isError).structuredContent as any; return { err: r.isError, d: d.saved ? JSON.parse(readFileSync(d.saved, 'utf8')) : d }; };
+  const o = await call('open_file', { path: join(SAMPLES_DIR, 'CfC.xer') });
+  const H = { handle: o.d.handle };
+  assert.equal((await call('edit', { ...H, owner_key: o.d.owner_key, operations: [{ op: 'save_baseline', name: 'BL-C' }] })).err, false);
+  const p = (await call('read_table', { ...H, table: 'PROJECT' })).d;
+  assert.ok(p.columns.includes('clone:baseline_of'), p.columns.join());
+  assert.ok(p.rows.some((r: unknown[]) => r[p.columns.indexOf('clone:baseline_of')]));
+  // many activities in one call, each in full
+  const all = (await call('read_table', { ...H, table: 'TASK', columns: ['task_code'] })).d.rows.map((r: string[]) => r[0]);
+  assert.ok(all.length > 150);
+  const many = (await call('get_activity', { ...H, activity_ids: [...all, 'NOPE-1'] })).d;
+  assert.equal(many.activities.length, all.length);
+  assert.deepEqual(many.not_found, ['NOPE-1']);
+  const one = (await call('get_activity', { ...H, activity_id: all[5] })).d;
+  assert.deepEqual(many.activities[5].predecessors, one.predecessors);
+  const tr = (await call('trace_logic', { ...H, activity_ids: all.slice(0, 20), max_per_level: 0 })).d;
+  assert.equal(tr.traces.length, 20);
+  const found = (await call('find_activities', { ...H, limit: 100000 })).d;
+  assert.equal(found.activities.length, found.total_matches);
+  assert.equal(found.next_offset, null);
+  await call('close', { ...H, owner_key: o.d.owner_key, discard: true });
+});

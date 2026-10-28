@@ -21,15 +21,18 @@ export const GEOMETRY_S_PER_MB = 0.4;
 /** Navisworks reader: per MB of the file. The 509 MB federation opened in 6.8 min = 0.80 s/MB for the whole open
  *  (sections, tree, pieces, tiles); a single section is a part of that. */
 export const NAVISWORKS_S_PER_MB = 0.8;
-/** rvt-rs unpacking and scanning a Revit file, per MB of the .rvt. PROVISIONAL: not yet measured in time (the "8x" of
- *  REVIT_MEMORY_PER_BYTE is memory, not seconds). The owner's clone agent measures it on the Helsinki projects and
- *  commits the figure to docs/4d-tiles-contract.md section 6; this ONE line is the update. Until then the unpack is also
- *  watched by its memory growth (a step with mem: true), so a growing read is never ended for being slow. */
-export const REVIT_S_PER_MB = 2;
-/** Microsoft Project's COM open/save, per MB of the input. PROVISIONAL, as REVIT_S_PER_MB (measured on the owner's PC). */
-export const MSPROJECT_S_PER_MB = 2;
-/** MPXJ turning a .mpp into Microsoft Project XML (Java's start included), per MB of the .mpp. PROVISIONAL until measured. */
-export const MPXJ_S_PER_MB = 2;
+/** rvt-rs unpacking and scanning a Revit file, per MB of the .rvt (the whole reader: unpack, scan, IFC written). Measured on
+ *  the owner's PC (benchmark 261 ms, factor 1), 3 runs each: 0.28 s/MB (the Helsinki model, 11.4 MB), 0.11-0.14 (17.8 MB),
+ *  0.18-0.21 (5.7 MB), 0.21-0.23 (5.3 MB): the worst, rounded up. The unpack is also watched by its memory growth. */
+export const REVIT_S_PER_MB = 0.3;
+/** Microsoft Project's COM open and save as XML, per MB of the .mpp (Project's start included). Measured on the owner's PC,
+ *  3 runs each: 0.72-0.87 s/MB (4.9 MB, 4.2 MB), 6.1-9.8 (0.58 MB), 12.2-12.9 (0.46 MB), 9.0-9.2 (0.40 MB); small files
+ *  are Project's 3.5 s start: the worst, rounded up. */
+export const MSPROJECT_S_PER_MB = 13;
+/** MPXJ turning a .mpp into Microsoft Project XML (Java's start included), per MB of the .mpp. Measured on the owner's PC,
+ *  3 runs each: 0.18-0.19 s/MB (4.9 MB, 4.2 MB), 1.29-1.39 (0.58, 0.46 MB), 1.71-1.74 (0.40 MB; Java's 0.6 s start): the
+ *  worst, rounded up. */
+export const MPXJ_S_PER_MB = 1.8;
 /** The IFC index (stepIndex: the streaming STEP pass and the index built from it, in the server's own process), per MB of the IFC.
  *  Measured 0.095, 0.096, 0.098 s/MB (105 MB, 365 MB, 1.06 GB models, section 6 "open (index only)"): rounded up. */
 export const INDEX_S_PER_MB = 0.1;

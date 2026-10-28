@@ -207,13 +207,36 @@ watch as the server's (`inPage` in `headless.ts`: tiles loaded, frames drawn, a 
    |---|---|---|
    | web-ifc `OpenModel` + meshing (`GEOMETRY_S_PER_MB`) | 0.4 s per MB of the run's IFC | section 6: 0.24, 0.39, 0.38, 0.29 s/MB (105 MB to 1.87 GB models, chunker and tiler included), the worst rounded up |
    | Navisworks section inflate (`NAVISWORKS_S_PER_MB`) | 0.8 s per MB of file | the 509 MB federation opens in 6.8 min (above): 0.80 s/MB for the whole open |
-   | rvt-rs unpack (`REVIT_S_PER_MB`) | 2 s per MB of .rvt, **provisional** | not measured in time: the "8x" is memory. Watched by memory growth meanwhile (a growing read is never ended for being slow) |
-   | Microsoft Project COM (`MSPROJECT_S_PER_MB`) | 2 s per MB, **provisional** | not measured |
+   | rvt-rs unpack (`REVIT_S_PER_MB`) | 0.3 s per MB of .rvt | measured below (Revit table): worst 0.28 s/MB, the Helsinki model. Also watched by memory growth |
+   | Microsoft Project COM (`MSPROJECT_S_PER_MB`) | 13 s per MB of .mpp | measured below: worst 12.9 s/MB, a 0.46 MB file (Project's 3.5 s start dominates small files) |
+   | MPXJ .mpp to XML (`MPXJ_S_PER_MB`; MCP `open_file` of a .mpp) | 1.8 s per MB of .mpp | measured below: worst 1.74 s/MB, a 0.40 MB file (Java's 0.6 s start) |
    | IFC index (`INDEX_S_PER_MB`; `indexWorker.ts`) | 0.1 s per MB of IFC | section 6 "open (index only)": 0.095, 0.096, 0.098 s/MB |
    | Chromium first frame | `renderMinutes` (2.1 M triangles/s software, 400 M/s card) | section 4 (509 MB federation) |
 
-   **To update a rate**: edit the one named constant at the top of `core/bim/heartbeat.mjs` and the row above. The Revit and Microsoft
-   Project figures are waiting for a measurement on the owner's PC (the Helsinki .rvt projects; two or three .mpp files).
+   **To update a rate**: edit the one named constant at the top of `core/bim/heartbeat.mjs` and the row above.
+
+   **Revit, Microsoft Project and MPXJ, measured 2026-10-28** on the owner's PC (Windows 11, `benchmarkMs` 261 ms, so
+   `machineFactor` 1: the figures are the reference rates as they stand). Three runs of each file, seconds and seconds per MB:
+
+   | Reader | File | Size | Runs (s) | s/MB |
+   |---|---|---|---|---|
+   | Revit (`rvtWorker.mjs`, whole read to IFC) | Helsinki: Architecture Model Reference.rvt | 11.41 MB | 3.2, 3.2, 3.2 | 0.28, 0.28, 0.28 |
+   | Revit | 01.2 ConREM 2nd year.rvt | 17.83 MB | 2.5, 2.0, 2.0 | 0.14, 0.11, 0.11 |
+   | Revit | Starting Revit Modell_2.Class.rvt | 5.66 MB | 1.2, 1.0, 1.0 | 0.21, 0.18, 0.18 |
+   | Revit | Project1ashraf.rvt | 5.27 MB | 1.2, 1.1, 1.1 | 0.23, 0.21, 0.21 |
+   | Microsoft Project COM (`main/msproject.ts`, .mpp to XML) | Sample MPPs: Dabur Architecture (crashed baseline) | 4.94 MB | 4.3, 3.6, 3.5 | 0.87, 0.73, 0.72 |
+   | Microsoft Project COM | FARM FRITES-addendum-2 | 4.23 MB | 3.6, 3.6, 3.5 | 0.86, 0.85, 0.83 |
+   | Microsoft Project COM | grok trial 1 (aurora tower) | 0.58 MB | 3.5, 3.5, 5.7 | 6.09, 6.10, 9.83 |
+   | Microsoft Project COM | AIStudio CoT Gemini | 0.46 MB | 6.0, 5.7, 5.6 | 12.91, 12.20, 12.16 |
+   | Microsoft Project COM | XML to MPP gemini trial 2 | 0.40 MB | 3.6, 3.6, 3.6 | 8.99, 9.08, 9.17 |
+   | MPXJ (`core/msp/mpp.ts`, .mpp to XML) | Dabur Architecture | 4.94 MB | 0.9, 0.9, 0.9 | 0.18, 0.18, 0.18 |
+   | MPXJ | FARM FRITES-addendum-2 | 4.23 MB | 0.8, 0.8, 0.8 | 0.18, 0.19, 0.19 |
+   | MPXJ | grok trial 1 (aurora tower) | 0.58 MB | 0.8, 0.8, 0.8 | 1.35, 1.39, 1.39 |
+   | MPXJ | AIStudio CoT Gemini | 0.46 MB | 0.6, 0.6, 0.6 | 1.29, 1.30, 1.30 |
+   | MPXJ | XML to MPP gemini trial 2 | 0.40 MB | 0.7, 0.7, 0.7 | 1.72, 1.71, 1.74 |
+
+   Each constant is the worst s/MB rounded up. Small files are dominated by the program's start (Project about 3.5 s, Java
+   0.6 s), so the per-MB figure is generous for large files; the bound is ten times it and never under the worker floor.
 
 When a job is ended the error says: the **step** ("meshing products (1,200 done)"), how long with no progress and the windows, or
 the work bound that was passed and its value, **what was tried** (graphics card, then processor; the reader's modes), and the

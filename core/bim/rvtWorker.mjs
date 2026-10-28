@@ -40,7 +40,7 @@ const outOfMemory = (e) => {
 };
 const stop = (code, kind, e) => { try { rmSync(tmp, { force: true }); } catch { /* gone */ } console.error(`${kind}: ${String(e?.message ?? e).slice(0, 300)}`); process.exit(code); };
 // rvt-rs unpacks and scans the whole file in ONE WebAssembly call before it writes anything: nothing to tick. Its work is the file
-// (expectedMs, REVIT_S_PER_MB in heartbeat.mjs; provisional); while it works its memory grows (about 8x the file), which counts as
+// (expectedMs, REVIT_S_PER_MB in heartbeat.mjs; measured); while it works its memory grows (about 8x the file), which counts as
 // life up to its bound. The write that follows ticks per piece (8 MiB); one piece may take as long as the file's bound allows.
 const work = expectedMs(statSync(src).size, 'revit');
 const MODES = ['geometry', 'typed-no-geometry', 'scaffold'];
