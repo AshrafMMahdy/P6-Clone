@@ -366,3 +366,71 @@ test('a baseline saved from a project does not add a second EPS node, so a chang
   const { p6Refusals } = await import('../core/project/integrity.ts');
   assert.deepEqual(p6Refusals(db), []);
 });
+
+test('save refuses only what this session\'s edits added: what the file already had is saved as it was and listed in the answer', { timeout: 60_000 }, async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const { writeXer } = await import('../core/xer/write.ts');
+  const { sessions } = await import('../mcp/runtime.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  // a sample whose file already breaks two P6 rules: two activities with one ID, and an activity that is its own predecessor
+  const db = load();
+  const P = live(db), mine = rows(db, 'TASK').filter((t) => t.proj_id === P.proj_id);
+  mine[1].task_code = mine[0].task_code;
+  const link = rows(db, 'TASKPRED').find((r) => r.proj_id === P.proj_id)!;
+  link.pred_task_id = link.task_id;
+  const dir = mkdtempSync(join(tmpdir(), 'p6-preexisting-')), file = join(dir, 'broken.xer');
+  writeFileSync(file, writeXer(db, { version: '' } as any));
+  const o = await call('open_file', { path: file, lenient: true });
+  assert.equal(o.err, false, JSON.stringify(o.d).slice(0, 300));
+  const H = { handle: o.d.handle, owner_key: o.d.owner_key };
+  // an unrelated edit, then a save: written, with what the file had reported
+  assert.equal((await call('edit', { ...H, operations: [{ op: 'add_activity', project: P.proj_short_name, id: 'UNRELATED', name: 'unrelated' }] })).err, false);
+  const saved = await call('save', { ...H, path: join(dir, 'a.xer') });
+  assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 400));
+  assert.ok(existsSync(join(dir, 'a.xer')));
+  assert.ok(saved.d.p6_would_reject.total >= 2 && saved.d.p6_would_reject.in_the_file_as_opened === saved.d.p6_would_reject.total, JSON.stringify(saved.d.p6_would_reject));
+  assert.ok(saved.d.p6_would_reject.findings.some((m: string) => /Activity ID/.test(m)) && saved.d.p6_would_reject.findings.some((m: string) => /its own predecessor/.test(m)));
+  // an edit that makes a NEW duplicate is refused (written straight into the table: set_fields itself would not allow it)
+  const s = sessions.get(o.d.handle)!;
+  const t = s.db.tables.TASK.rows.filter((x) => x.proj_id === P.proj_id).find((x) => x.task_code !== mine[0].task_code && x.task_code !== 'UNRELATED')!;
+  const was = t.task_code;
+  t.task_code = 'UNRELATED';
+  s.dirty = true;
+  const refused = await call('save', { ...H, path: join(dir, 'b.xer') });
+  assert.equal(refused.err, true);
+  assert.equal(refused.d.error.code, 'invalid_for_p6');
+  assert.match(refused.d.error.reason, /Activity ID "UNRELATED"/);
+  assert.doesNotMatch(refused.d.error.reason, /its own predecessor/, 'what the file had is not named as the reason');
+  assert.equal(existsSync(join(dir, 'b.xer')), false);
+  t.task_code = was;
+  assert.equal((await call('save', { ...H, path: join(dir, 'c.xer') })).err, false, 'once the new one is gone it saves again');
+  await call('close', { ...H, discard: true });
+});
+
+test('an imported EPS node whose ID matches an existing one takes the existing name and parent, and every such match is reported (id, imported vs kept)', async () => {
+  const { importIntoDb, defaultPlan } = await import('../core/xer/import.ts');
+  const db = load(), src = load();
+  const node = (id: string, parent: string, short: string, name: string): Row => ({ eps_id: id, parent_eps_id: parent, eps_short_name: short, eps_name: name, seq_num: '0' });
+  for (const d of [db, src]) { addRow(d, 'EPS', node('1', '', 'Enterprise', 'All Initiatives')); addRow(d, 'EPS', node('2', '1', 'Region', 'Region North')); }
+  const eps = rows(db, 'EPS');
+  // in the imported file the same IDs sit elsewhere: another eps_id, another parent
+  rows(src, 'EPS')[1].parent_eps_id = '';
+  const before = eps.map((e) => `${e.eps_short_name}|${e.eps_name}`);
+  const first = rows(src, 'EPS')[1];
+  const keptName = rows(db, 'EPS')[1].eps_name;
+  first.eps_name = 'A different name';
+  const res = importIntoDb(db, src, defaultPlan(src));
+  assert.deepEqual(rows(db, 'EPS').map((e) => `${e.eps_short_name}|${e.eps_name}`), before, 'no second node, and the existing name is kept');
+  const matched = res.findings.filter((f) => f.code === 'IMPORT_EPS_MATCHED');
+  assert.equal(matched.length, rows(src, 'EPS').length, 'every node is reported');
+  const m = matched.find((f) => f.key === rows(db, 'EPS')[1].eps_id)!;
+  assert.equal(m.severity, 'warning');
+  assert.match(m.message, new RegExp(`EPS "${first.eps_short_name}".*name "A different name", parent \\(top level\\).*existing one is kept \\(name "${keptName}", parent Enterprise\\)`));
+  assert.match(m.message, /NOT applied/);
+  // identical nodes are reported too, as information
+  const same = load();
+  addRow(same, 'EPS', node('1', '', 'Enterprise', 'All Initiatives')); addRow(same, 'EPS', node('2', '1', 'Region', 'Region North'));
+  const again = importIntoDb(db, same, defaultPlan(same)).findings.filter((f) => f.code === 'IMPORT_EPS_MATCHED');
+  assert.equal(again.length, 2);
+  assert.ok(again.every((f) => f.severity === 'info'));
+});

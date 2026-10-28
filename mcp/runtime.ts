@@ -227,10 +227,12 @@ export interface Session {
   changedAt?: number;
   /** the file its last save (of the whole project, leaving no unsaved changes) wrote */
   savedTo?: string;
+  /** the keys of what P6 would reject (core/project/integrity.ts) in the project as it was opened: save refuses only what edits added to these */
+  openProblems?: Set<string>;
 }
 /** adopted: taken over from a server that is gone (its own exit saved its unsaved work already, or it crashed: the
  *  handle brings it back either way), so the save at exit leaves it to the handle */
-interface Evicted { file: string; ownerKey: string; path: string | null; format: Format; hpd: number; encoding?: TextEncodingName; at: number; reason: string; dirty: boolean; adopted?: boolean; changedAt?: number; savedTo?: string }
+interface Evicted { file: string; ownerKey: string; path: string | null; format: Format; hpd: number; encoding?: TextEncodingName; at: number; reason: string; dirty: boolean; adopted?: boolean; changedAt?: number; savedTo?: string; openProblems?: string[] }
 export const sessions = new Map<string, Session>();
 const evicted = new Map<string, Evicted>();
 /** Projects in memory whose state is also on disk (checkpoint): what a restart, or a server after a crash, brings back. */
@@ -310,7 +312,7 @@ export function evict(s: Session, reason: string): string {
   saveIndex();
   return file;
 }
-const entryOf = (s: Session, file: string, reason: string): Evicted => ({ file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, encoding: s.encoding, at: Date.now(), reason, dirty: s.dirty, ...(s.changedAt ? { changedAt: s.changedAt } : {}), ...(s.savedTo ? { savedTo: s.savedTo } : {}) });
+const entryOf = (s: Session, file: string, reason: string): Evicted => ({ file, ownerKey: s.ownerKey, path: s.path, format: s.format, hpd: s.hpd, encoding: s.encoding, at: Date.now(), reason, dirty: s.dirty, ...(s.changedAt ? { changedAt: s.changedAt } : {}), ...(s.savedTo ? { savedTo: s.savedTo } : {}), ...(s.openProblems ? { openProblems: [...s.openProblems] } : {}) });
 /** A project's lossless file in my folder, written beside and then renamed over the last one. */
 function writeProject(s: Session): string {
   const file = join(myDir(), `${s.handle}.p6db.jsonl`), tmp = `${file}.${randomBytes(3).toString('hex')}.tmp`;
@@ -413,7 +415,7 @@ export function getSession(h: unknown): Session {
   const { db } = readDbFile(e!.file);
   // a project adopted from a server that is gone moves into my folder (its old folder can then empty and go)
   if (e!.adopted) { const to = join(myDir(), basename(e!.file)); try { renameSync(e!.file, to); e!.file = to; } catch { /* stays where it is */ } }
-  const back: Session = { handle, ownerKey: e!.ownerKey, db, path: e!.path, format: e!.format, hpd: e!.hpd, encoding: e!.encoding, history: [], redo: new Map(), dirty: e!.dirty, lastUsed: Date.now(), bytes, ...(e!.changedAt ? { changedAt: e!.changedAt } : {}), ...(e!.savedTo ? { savedTo: e!.savedTo } : {}),
+  const back: Session = { handle, ownerKey: e!.ownerKey, db, path: e!.path, format: e!.format, hpd: e!.hpd, encoding: e!.encoding, history: [], redo: new Map(), dirty: e!.dirty, lastUsed: Date.now(), bytes, ...(e!.changedAt ? { changedAt: e!.changedAt } : {}), ...(e!.savedTo ? { savedTo: e!.savedTo } : {}), ...(e!.openProblems ? { openProblems: new Set(e!.openProblems) } : {}),
     notice: e!.reason === 'restart' ? `The server had restarted (or stopped): this project was restored from ${e!.file}, with the changes it had. Its undo history before that is gone.`
       : `This project had been moved out of memory (${e!.reason === 'idle' ? `idle for ${config.idleMinutes} minutes` : 'to make room'}) and was restored from ${e!.file}. Its undo history before that is gone; nothing else was lost.` };
   sessions.set(handle, back);

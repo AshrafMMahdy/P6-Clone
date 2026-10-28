@@ -177,7 +177,7 @@ export function applyFields(db: Db, op: Op, h: OpHelpers): unknown {
   const refuse = (T: { name: string }, touched: Row[], rewired = new Set<Row>()) => {
     if (!touched.length) return;
     const raw = touched.map(realOf);
-    const found = [...problemsIn(db, T.name, raw)];
+    const found = problemsIn(db, T.name, raw).map((p) => p.message);
     // a relationship given other ends is checked for loops with the rest of the edit (one whose lag or type changed closes no new loop)
     for (const r of rewired) { const x = realOf(r); if (x.task_id !== x.pred_task_id) h.linked(x.pred_task_id, x.task_id); }
     if (found.length) fail(`${found.slice(0, 5).join(' ')}${found.length > 5 ? ` (and ${found.length - 5} more)` : ''} Nothing was changed.`);

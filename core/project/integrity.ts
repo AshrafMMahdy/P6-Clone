@@ -6,6 +6,8 @@
 import { KEYS, refTarget, rows, type Db, type Row } from '../db.ts';
 import { realOf } from '../journal.ts';
 
+/** A problem: its message, and a key that names the thing itself (not its count), so a flaw the file already had can be told from one an edit made. */
+export interface Problem { key: string; message: string }
 interface Unique { table: string; field: string; scope: string[]; what: string; skip?: (r: Row) => boolean }
 /** Values P6 holds unique: the field, within the scope fields' values. */
 export const UNIQUE: Unique[] = [
@@ -28,8 +30,8 @@ export const UNIQUE: Unique[] = [
 const label = (r: Row, T: string): string => String(r[UNIQUE.find((u) => u.table === T)?.field ?? ''] ?? r[KEYS[T]] ?? '');
 
 /** The ID problems of the rows of `table` (`only`, else all): a value another row of the same scope also has. */
-export function duplicates(db: Db, table: string, only?: Row[]): string[] {
-  const out: string[] = [];
+export function duplicates(db: Db, table: string, only?: Row[]): Problem[] {
+  const out: Problem[] = [];
   for (const u of UNIQUE.filter((x) => x.table === table)) {
     const all = realOf(rows(db, table)).filter((r) => !u.skip?.(r) && String(r[u.field] ?? '') !== '');
     const key = (r: Row) => [...u.scope.map((f) => r[f] ?? ''), r[u.field]].join('\u0001');
@@ -40,7 +42,7 @@ export function duplicates(db: Db, table: string, only?: Row[]): string[] {
       const k = key(r);
       if ((count.get(k) ?? 0) < 2 || seen.has(k)) continue;
       seen.add(k);
-      out.push(`${u.what} "${r[u.field]}" would be used by ${count.get(k)} ${table} rows${u.scope.includes('proj_id') && r.proj_id ? ` in project ${r.proj_id}` : ''}; P6 needs it unique.`);
+      out.push({ key: `dup|${table}|${u.field}|${k}`, message: `${u.what} "${r[u.field]}" would be used by ${count.get(k)} ${table} rows${u.scope.includes('proj_id') && r.proj_id ? ` in project ${r.proj_id}` : ''}; P6 needs it unique.` });
     }
   }
   return out;
@@ -50,8 +52,8 @@ export function duplicates(db: Db, table: string, only?: Row[]): string[] {
 export const parentFields = (db: Db, table: string): string[] => (db.tables[table] ? realOf(db.tables[table].fields) : []).filter((f) => f !== KEYS[table] && refTarget(f, table) === table);
 
 /** The cycle problems of the rows of `table` (`only`, else all): a row that is its own ancestor. */
-export function cycles(db: Db, table: string, only?: Row[]): string[] {
-  const out: string[] = [], key = KEYS[table];
+export function cycles(db: Db, table: string, only?: Row[]): Problem[] {
+  const out: Problem[] = [], key = KEYS[table];
   if (!key || !db.tables[table]) return out;
   const all = realOf(rows(db, table));
   for (const f of parentFields(db, table)) {
@@ -59,7 +61,7 @@ export function cycles(db: Db, table: string, only?: Row[]): string[] {
     for (const r of only ?? all) {
       const seen = new Set<string>([r[key]]);
       for (let x: Row | undefined = byId.get(r[f]), n = 0; x; x = byId.get(x[f]), n++) {
-        if (seen.has(x[key])) { out.push(`${table}.${f}: ${label(r, table) || r[key]} would be its own ancestor (a parent cycle); P6 rejects that.`); break; }
+        if (seen.has(x[key])) { out.push({ key: `cycle|${table}|${f}|${r[key]}`, message: `${table}.${f}: ${label(r, table) || r[key]} would be its own ancestor (a parent cycle); P6 rejects that.` }); break; }
         seen.add(x[key]);
         if (n > all.length) break;
       }
@@ -70,23 +72,22 @@ export function cycles(db: Db, table: string, only?: Row[]): string[] {
 }
 
 /** Relationships from an activity to itself. */
-export const selfLinks = (rs: Row[]): string[] => rs.filter((r) => r.task_id && r.task_id === r.pred_task_id).map((r) => `TASKPRED: activity ${r.task_id} would be its own predecessor.`);
+export const selfLinks = (rs: Row[]): Problem[] => rs.filter((r) => r.task_id && r.task_id === r.pred_task_id).map((r) => ({ key: `self|${r.task_pred_id ?? r.task_id}`, message: `TASKPRED: activity ${r.task_id} would be its own predecessor.` }));
 
 /** Everything P6 refuses in the rows a call changed. */
-export function problemsIn(db: Db, table: string, only?: Row[]): string[] {
+export function problemsIn(db: Db, table: string, only?: Row[]): Problem[] {
   return [...duplicates(db, table, only), ...cycles(db, table, only), ...(table === 'TASKPRED' ? selfLinks(only ?? realOf(rows(db, 'TASKPRED'))) : [])];
 }
 
 /** What P6 would reject in the project(s) to be saved (all of the file when projIds is not given): checked before a changed project is written. */
-export function p6Refusals(db: Db, projIds?: string[]): string[] {
+export function p6Refusals(db: Db, projIds?: string[]): Problem[] {
   const inScope = projIds ? new Set(projIds) : null;
-  const out: string[] = [];
+  const out: Problem[] = [];
   for (const t of Object.keys(db.tables)) {
     if (t.startsWith('_')) continue;
     const rs = realOf(rows(db, t));
     const only = inScope && realOf(db.tables[t].fields).includes('proj_id') ? rs.filter((r) => inScope.has(r.proj_id)) : undefined;
     if (UNIQUE.some((u) => u.table === t) || parentFields(db, t).length || t === 'TASKPRED') out.push(...problemsIn(db, t, only));
-    if (out.length > 30) break;
   }
   return out;
 }

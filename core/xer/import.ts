@@ -99,6 +99,13 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
           m(t)[r[k]] = hit[k];
           keepExisting.add(`${t}|${r[k]}`);
           if (act === 'update') updates.push([t, hit, r]);
+          if (t === 'EPS') {
+            // an EPS node of the same ID is the one used: its name and parent stay as they are here; say so for every node, and which differ
+            const parentOf = (db0: Db, x: Row) => (x.parent_eps_id ? rows(db0, 'EPS').find((e) => e.eps_id === x.parent_eps_id)?.eps_short_name ?? `(eps_id ${x.parent_eps_id})` : '(top level)');
+            const imp = { name: r.eps_name ?? '', parent: parentOf(src, r) }, kept = { name: hit.eps_name ?? '', parent: parentOf(db, hit) };
+            const differs = imp.name !== kept.name || imp.parent !== kept.parent;
+            findings.push({ severity: differs ? 'warning' : 'info', code: 'IMPORT_EPS_MATCHED', table: 'EPS', key: hit.eps_id, message: `EPS "${r.eps_short_name}": the imported node (name "${imp.name}", parent ${imp.parent}) was matched to the existing node of the same ID and the existing one is kept (name "${kept.name}", parent ${kept.parent})${differs ? '; the imported name / parent were NOT applied' : ''}.`, p6: 'An EPS ID is unique in P6: the import uses the node of that ID that is already there.' });
+          }
           continue;
         }
       } else if (CHILD[t]) {
