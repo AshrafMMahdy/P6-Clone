@@ -98,7 +98,7 @@ function schedOptionsXml(so: Row): string {
   return `<ScheduleOptions>${toXml(so, SCHED_MAP)}${logic ? `<OutOfSequenceScheduleType>${logic[0]}</OutOfSequenceScheduleType>` : ''}</ScheduleOptions>`;
 }
 function schedOptionsRow(n: XNode): Row {
-  const r = fromXml(n, SCHED_MAP);
+  const r = fromXml(n, SCHED_MAP, ['OutOfSequenceScheduleType']);
   const l = LOGIC.find(([label]) => label === val(n, 'OutOfSequenceScheduleType'));
   if (l) { r.sched_retained_logic = l[1]; r.sched_progress_override = l[2]; }
   return r;
@@ -164,7 +164,24 @@ function toXml(r: Row, map: FieldMap): string {
   return out;
 }
 
-function fromXml(n: XNode, map: FieldMap): Row {
+/** The XML tags the reader turns into the clone's own columns, converting the value (dates, enumerations, flags) or
+ *  folding it (a calendar's week and exceptions into clndr_data): every other leaf is kept as it is (xml:<Tag>). */
+export function p6xmlConvertedTags(): Set<string> {
+  const maps = [PROJECT_MAP, OLD_SCHED_MAP, SCHED_MAP, WBS_MAP, ACT_MAP, REL_MAP, RSRC_MAP, RATE_MAP, ASSIGN_MAP, EXP_MAP, CODETYPE_MAP, CODE_MAP, CODEASSIGN_MAP, ACCOUNT_MAP, OBS_MAP, UDFTYPE_MAP, UDFVAL_MAP, CURR_MAP, ROLE_MAP, MEMO_MAP, STEP_MAP, PCODETYPE_MAP, PCODE_MAP, RCODETYPE_MAP, RCODE_MAP, TOPIC_MAP, WBSMEMO_MAP];
+  return new Set([...maps.flatMap((m) => m.map(([tag]) => tag)), 'OutOfSequenceScheduleType', 'IsDefault', 'Type', 'IsPersonal', 'DayOfWeek', 'Start', 'Finish', 'Date', 'TypeObjectId', 'ValueObjectId', 'PercentComplete']);
+}
+
+/** The leaves of n that nothing read (not in used), kept as _xml_<Tag>: read_table shows them as xml:<Tag>, so nothing
+ *  the file has is dropped. Writers leave fields starting with "_" out. */
+function keepRest(n: XNode, r: Row, used: Iterable<string>, prefix = '_xml_'): Row {
+  const u = new Set(used);
+  for (const c of n.children) if (!c.children.length && !u.has(c.name) && !(`${prefix}${c.name}` in r)) r[`${prefix}${c.name}`] = c.text.trim();
+  return r;
+}
+/** An element the clone has no table for, as a row of _XML_<Element> (read_table: XML:<Element>): its leaves. */
+const xmlRow = (n: XNode, extra: Row = {}): Row => keepRest(n, { ...extra }, [], '');
+
+function fromXml(n: XNode, map: FieldMap, alsoUsed: string[] = [], keep = true): Row {
   const r: Row = {};
   for (const [tag, field, conv] of map) {
     const c = child(n, tag);
@@ -176,7 +193,7 @@ function fromXml(n: XNode, map: FieldMap): Row {
     if (field === 'sched_outer_depend_type') v = v === 'true' || v === '1' ? 'SD_None' : 'SD_Both';
     r[field] = v;
   }
-  return r;
+  return keep ? keepRest(n, r, [...map.map(([tag]) => tag), ...alsoUsed]) : r;
 }
 
 // ---------- calendars
@@ -222,11 +239,11 @@ function calendarRow(n: XNode): Row {
   }
   const type = Object.entries(ENUMS.clndr_type).find(([, l]) => l === val(n, 'Type'))?.[0] ?? 'CA_Base';
   const yes = (s: string) => s === 'true' || s === '1';
-  return {
+  return keepRest(n, {
     clndr_id: val(n, 'ObjectId'), default_flag: yes(val(n, 'IsDefault')) ? 'Y' : 'N', clndr_name: val(n, 'Name'), proj_id: val(n, 'ProjectObjectId'),
     base_clndr_id: val(n, 'BaseCalendarObjectId'), last_chng_date: '', clndr_type: type, day_hr_cnt: val(n, 'HoursPerDay'), week_hr_cnt: val(n, 'HoursPerWeek'),
     month_hr_cnt: val(n, 'HoursPerMonth'), year_hr_cnt: val(n, 'HoursPerYear'), rsrc_private: yes(val(n, 'IsPersonal')) ? 'Y' : 'N', clndr_data: serializeClndrData(def),
-  };
+  }, ['ObjectId', 'IsDefault', 'Name', 'ProjectObjectId', 'BaseCalendarObjectId', 'Type', 'HoursPerDay', 'HoursPerWeek', 'HoursPerMonth', 'HoursPerYear', 'IsPersonal']);
 }
 
 // ---------- code and UDF assignments, nested in their object as P6 writes them (<Code>, <UDF>)
@@ -352,6 +369,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     const m = topMap.find(([tag]) => tag === n.name);
     if (m) { const r = fromXml(n, m[2]); push(m[1], r); if (n.name === 'Resource') { for (const u of udfRows(n, r.rsrc_id, '')) push('UDFVALUE', u); for (const c of kids(n, 'Code')) push('RSRCRCAT', { rsrc_id: r.rsrc_id, rsrc_catg_type_id: val(c, 'TypeObjectId'), rsrc_catg_id: val(c, 'ValueObjectId') }); } }
     else if (n.name === 'Calendar') push('CALENDAR', calendarRow(n));
+    else if (n.name !== 'Project' && n.name !== 'BaselineProject') push(`_XML_${n.name}`, xmlRow(n)); // an object the clone has no table for: kept
   };
   /** One child of a project into its group's rows; a value it takes from the project (it names no project or WBS of
    *  its own) is noted, so it is put right should the project's ObjectId or WBSObjectId come later in the file. */
@@ -369,6 +387,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     }
     const m = projMap.find(([tag]) => tag === n.name);
     if (m) { const r = fromXml(n, m[2]); if (m[1] === 'TASKPROC') { const pc = val(n, 'PercentComplete'); if (pc) r.complete_pct = String(Number(pc) > 1 ? Number(pc) : Math.round(Number(pc) * 1e6) / 1e4); } if (m[1] !== 'ACTVCODE') or(r, 'proj_id', 'pid'); if (m[1] === 'TASKPRED') or(r, 'pred_proj_id', 'pid'); if (m[1] === 'WBSMEMO') or(r, 'wbs_id', 'root'); put(m[1], r); }
+    else put(`_XML_${n.name}`, xmlRow(n, { proj_id: pid })); // an object the clone has no table for: kept
   };
   const isProject = (name: string) => name === 'Project' || name === 'BaselineProject';
   const split = (parents: string[], name: string) => (parents.length === 1 && parents[0] === 'APIBusinessObjects' && !isProject(name))
@@ -399,7 +418,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   const baselineOf = new Map<string, string>(kids(api, 'Project').map((p): [string, string] => [val(p, 'CurrentBaselineProjectObjectId'), val(p, 'ObjectId')]).filter(([b]) => !!b));
   for (const p of [...kids(api, 'Project'), ...kids(api, 'BaselineProject')]) {
     const g = groups.get(p) ?? { node: p, rows: [], held: [], at: null, fallback: [] };
-    const pr = fromXml(p, PROJECT_MAP);
+    const pr = fromXml(p, PROJECT_MAP, OLD_SCHED_MAP.map(([tag]) => tag));
     const pid = pr.proj_id || String(rows(db, 'PROJECT').length + 1);
     pr.proj_id = pid;
     // a baseline is kept as a baseline of its project (BaselineProject; OriginalProjectObjectId or the project that points to it)
@@ -408,7 +427,9 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     for (const c of kids(p, 'Code')) push('PROJPCAT', { proj_id: pid, proj_catg_type_id: val(c, 'TypeObjectId'), proj_catg_id: val(c, 'ValueObjectId') });
     for (const u of udfRows(p, pid, pid)) push('UDFVALUE', u);
     const sox = child(p, 'ScheduleOptions');
-    const so = sox ? schedOptionsRow(sox) : fromXml(p, OLD_SCHED_MAP);
+    const so = sox ? schedOptionsRow(sox) : fromXml(p, OLD_SCHED_MAP, [], false);
+    // the project's own objects the clone has no table for (its leaves are kept on its row, its heavy children above)
+    for (const c of p.children) if (c.children.length && !['ScheduleOptions', 'Code', 'UDF'].includes(c.name) && !HEAVY.has(c.name)) push(`_XML_${c.name}`, xmlRow(c, { proj_id: pid }));
     if (Object.keys(so).length) push('SCHEDOPTIONS', { schedoptions_id: pid, proj_id: pid, ...so });
     const rootId = val(p, 'WBSObjectId') || `${pid}00000`;
     push('PROJWBS', { wbs_id: rootId, proj_id: pid, parent_wbs_id: '', proj_node_flag: 'Y', wbs_short_name: pr.proj_short_name, wbs_name: val(p, 'Name'), seq_num: '0', status_code: 'WS_Open', obs_id: '' });

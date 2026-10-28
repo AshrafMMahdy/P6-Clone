@@ -27,33 +27,50 @@ function doubleEncodedShare(b: Uint8Array): number {
   return high ? (pairs * 2) / high : 0;
 }
 
-/** Recognise the code page of a non-UTF-8 file. */
+/** Recognise the code page of a non-UTF-8 file, from how its non-ASCII bytes sit and what they spell. A Western,
+ *  Central European or Turkish text has them inside words of ASCII letters (Väliseinät, Łączniki); an Arabic, Hebrew,
+ *  Greek, Cyrillic or East Asian text has them as whole words. A short file is told apart as well as a long one: no
+ *  script needs a minimum count of letters. */
 export function detectCodepage(b: Uint8Array): TextEncodingName {
-  let high = 0;
-  for (const x of b) if (x >= 0x80) high++;
-  if (high < 8 || doubleEncodedShare(b) > 0.5) return 'windows-1252';
-  // East Asian double-byte code pages: the whole file decodes cleanly and is mostly ideographs / kana
-  for (const enc of ['gbk', 'big5', 'shift_jis'] as const) {
+  const letter = (c: number) => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+  let high = 0, inLatinWords = 0;
+  for (let i = 0; i < b.length; i++) {
+    if (b[i] < 0x80) continue;
+    high++;
+    if ((i > 0 && letter(b[i - 1])) || (i + 1 < b.length && letter(b[i + 1]))) inLatinWords++;
+  }
+  if (!high || doubleEncodedShare(b) > 0.5) return 'windows-1252';
+  if (inLatinWords >= high * 0.5) return latin(b, high);
+  // East Asian double-byte code pages: the file decodes cleanly, mostly to ideographs or kana, and its characters are
+  // mostly the common ones (GBK's level 1, Big5's frequent block, Shift_JIS's kana and level-1 kanji): Arabic or Greek
+  // bytes paired up decode as rare characters
+  for (const [enc, common] of [['gbk', (l: number) => l >= 0xb0 && l <= 0xd7], ['big5', (l: number) => l >= 0xa4 && l <= 0xc6], ['shift_jis', (l: number) => l >= 0x81 && l <= 0x9f]] as const) {
     try {
       const t = new TextDecoder(enc, { fatal: true }).decode(b);
       const cjk = (t.match(/[぀-ヿ一-鿿]/g) ?? []).length;
-      if (cjk * 2 >= high * 0.8) return enc;
+      if (cjk * 2 < high * 0.8) continue;
+      let leads = 0, usual = 0;
+      for (let i = 0; i < b.length; i++) if (b[i] >= 0x81) { leads++; if (common(b[i])) usual++; i++; }
+      if (usual >= leads * 0.7) return enc;
     } catch { /* not this one */ }
   }
-  let best: TextEncodingName = 'windows-1252', bestScore = 0;
+  // whole words in a single-byte script: the one whose letters they spell best (its most frequent letters' share)
+  let best: TextEncodingName | null = null, bestScore = 0;
   for (const s of SCRIPTS) {
     const t = new TextDecoder(s.enc).decode(b);
     const letters = (t.match(s.range) ?? []).length;
-    if (letters < 8 || letters < high * 0.6) continue;
+    if (letters < 2 || letters < high * 0.6) continue;
     const share = (t.match(s.common) ?? []).length / letters;
     if (share >= s.min && share > bestScore) { best = s.enc; bestScore = share; }
   }
-  if (best !== 'windows-1252') return best;
-  // Central European / Turkish: letters 1252 does not have (ł, ś, ž ... / ğ, ş, ı)
+  return best ?? latin(b, high);
+}
+/** A Latin code page: Central European or Turkish when their own letters show (ł, ś, ž ... / ğ, ş, ı), else Western. */
+function latin(b: Uint8Array, high: number): TextEncodingName {
   const t1250 = new TextDecoder('windows-1250').decode(b), t1254 = new TextDecoder('windows-1254').decode(b);
   const n1250 = (t1250.match(/[łśźżąęčřšžňť]/g) ?? []).length, n1254 = (t1254.match(/[ğşı]/g) ?? []).length; // lower case: currency signs map to capitals
-  if (n1250 >= 8 && n1250 > high * 0.3) return 'windows-1250';
-  if (n1254 >= 8 && n1254 > high * 0.2) return 'windows-1254';
+  if (n1250 >= 2 && n1250 > high * 0.3) return 'windows-1250';
+  if (n1254 >= 2 && n1254 > high * 0.2) return 'windows-1254';
   return 'windows-1252';
 }
 
