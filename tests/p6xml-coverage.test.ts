@@ -202,6 +202,7 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
   const empty = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, samples[0])))).db;
   for (const [k] of Object.entries(P6XML_NOT_CARRIED)) { const [t, f] = k.split('.'); if (!f) empty.tables[t] && (empty.tables[t].rows = []); else for (const r of empty.tables[t]?.rows ?? []) r[f] = ''; }
   for (const r of empty.tables.PROJECT?.rows ?? []) { r.def_qty_type = ''; r.sum_assign_level = ''; }
+  for (const r of empty.tables.SCHEDOPTIONS?.rows ?? []) if (r.LevelPriorityList !== undefined) r.LevelPriorityList = '';
   for (const r of empty.tables.PROJWBS?.rows ?? []) { r.ev_compute_type = ''; for (const f of ['est_wt', 'seq_num', 'guid', 'sum_data_flag']) if (r.proj_node_flag === 'Y') r[f] = ''; if (r.proj_node_flag === 'Y' && r.wbs_short_name !== undefined) { const p = empty.tables.PROJECT.rows.find((x) => x.proj_id === r.proj_id); r.wbs_short_name = p?.proj_short_name ?? ''; } }
   assert.deepEqual(p6xmlLosses(empty).filter((l) => !/^a column|^calendar|^user-defined/.test(l.reason)).map((l) => `${l.table}.${l.field}`), []);
   // the MCP save answer: structured, and plainly in notes; an XER save has none of it
@@ -379,4 +380,27 @@ test('codes paired by name against Oracle\'s lists: written as Oracle\'s text, a
   const L = p6xmlLosses(db);
   assert.equal(L.find((l) => l.table === 'PROJWBS' && l.field === 'ev_etc_compute_type')?.rows, 1);
   assert.ok(!L.some((l) => l.field === 'review_type' || l.field === 'thresh_type'));
+});
+
+test('schedule options and the last schedule date: LevelPriorityList, limit-paths flag and LastScheduleDate go out and come back; the unpaired syntax and setplantoforecast are disclosed', () => {
+  const db = load(samples.find((f) => /^CfC\.xer$/i.test(f)) ?? samples[0])!;
+  const pid = db.tables.PROJECT.rows[0].proj_id;
+  db.tables.PROJECT.rows[0].last_schedule_date = '2026-10-05 15:25';
+  const T = db.tables.SCHEDOPTIONS ??= { name: 'SCHEDOPTIONS', fields: ['schedoptions_id', 'proj_id'], rows: [] };
+  for (const f of ['LevelPriorityList', 'limit_multiple_longest_path_calc', 'sched_setplantoforecast', 'enable_multiple_longest_path_calc']) if (!T.fields.includes(f)) T.fields.push(f);
+  let so = T.rows.find((r) => r.proj_id === pid);
+  if (!so) T.rows.push((so = { schedoptions_id: pid, proj_id: pid }));
+  Object.assign(so, { LevelPriorityList: 'priority_type,ASC_BY_FIELD/ASC', limit_multiple_longest_path_calc: 'Y', sched_setplantoforecast: 'N', enable_multiple_longest_path_calc: 'Y' });
+  const xml = writeP6Xml(db, {} as never);
+  assert.ok(xml.includes('<PriorityList>(0||priority_type(sort_type|ASC)())</PriorityList>') && xml.includes('<LimitMultipleFloatPaths>true</LimitMultipleFloatPaths>') && xml.includes('<LastScheduleDate>2026-10-05T15:25:00</LastScheduleDate>'));
+  const back = parseP6Xml(xml).db;
+  const b = back.tables.SCHEDOPTIONS.rows.find((r) => r.proj_id === pid)!;
+  assert.deepEqual([b.LevelPriorityList, b.limit_multiple_longest_path_calc, back.tables.PROJECT.rows.find((r) => r.proj_id === pid)!.last_schedule_date], ['priority_type,ASC_BY_FIELD/ASC', 'Y', '2026-10-05 15:25']);
+  // the older syntax is not paired: left out and counted; setplantoforecast has no element
+  so.LevelPriorityList = 'priority_type,ASC';
+  const L = p6xmlLosses(db);
+  assert.ok(!writeP6Xml(db, {} as never).includes('<PriorityList>'));
+  assert.equal(L.find((l) => l.table === 'SCHEDOPTIONS' && l.field === 'LevelPriorityList')?.rows, 1);
+  assert.equal(L.find((l) => l.table === 'SCHEDOPTIONS' && l.field === 'sched_setplantoforecast')?.reason, 'no element in P6 XML');
+  assert.ok(!L.some((l) => l.field === 'limit_multiple_longest_path_calc' || l.field === 'last_schedule_date'));
 });

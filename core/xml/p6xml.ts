@@ -128,6 +128,9 @@ const ENUMS: Record<string, Record<string, string>> = {
   // other is kept in a <!--p6clone field=CODE--> comment beside it (P6 ignores comments; this clone reads it), so a clone round trip is exact. TM_Task <-> 'Activity' is paired by elimination (TM_WBS <-> 'WBS').
   review_type: { RV_OK: 'OK' }, issue_status: { IS_Open: 'Open' }, thresh_status: { TS_Enable: 'Enabled' }, thresh_type: { TM_WBS: 'WBS', TM_Task: 'Activity' },
   ev_etc: { EE_Rem_hr: 'ETC = Remaining Cost for Activity', EE_Rem: 'ETC = Remaining Cost for Activity', EE_PF_1: 'PF = 1', EE_PF_cpi: 'PF = 1 / CPI' },
+  // MPXJ writes this level-priority default as 'priority_type,ASC_BY_FIELD/ASC' in its XER (PrimaveraXERFileWriter, column LevelPriorityList) and as '(0||priority_type(sort_type|ASC)())' in its P6 XML
+  // (XmlProjectWriter, ScheduleOptions/PriorityList); both read back into the same MPXJ property. Older XERs write 'priority_type,ASC': a different syntax, not paired.
+  level_priority: { 'priority_type,ASC_BY_FIELD/ASC': '(0||priority_type(sort_type|ASC)())' },
   // the strict lists: one pair each, the only one MPXJ's XML writer and XER writer agree on (both write P6's default)
   qty_type: { QT_Hour: 'Hour' }, sum_level: { SL_Taskrsrc: 'Assignment Level' }, ev_compute: { EC_Cmp_pct: 'Activity Percent Complete' }, discount_period: { PD_Month: 'Month' },
   // (UdfHelper: the only types MPXJ knows; FT_FLOAT and FT_FLOAT_2_DECIMALS are both "Double", the second is what a "Double" reads back as)
@@ -151,7 +154,7 @@ const OLD_SCHED_MAP: FieldMap = [['RelationshipLagCalendar', 'sched_calendar_on_
 const SCHED_MAP: FieldMap = [['IgnoreOtherProjectRelationships', 'sched_outer_depend_type'], ['MakeOpenEndedActivitiesCritical', 'sched_open_critical_flag', 'bool'],
   ['UseExpectedFinishDates', 'sched_use_expect_end_flag', 'bool'], ['StartToStartLagCalculationType', 'sched_lag_early_start_flag', 'bool'],
   ['CalculateFloatBasedOnFinishDate', 'sched_use_project_end_date_for_float', 'bool'], ['RelationshipLagCalendar', 'sched_calendar_on_relationship_lag', 'enum:lag_calendar'],
-  ['ComputeTotalFloatType', 'sched_float_type', 'enum:float_type']];
+  ['ComputeTotalFloatType', 'sched_float_type', 'enum:float_type'], ['PriorityList', 'LevelPriorityList', 'strict:level_priority']];
 const LOGIC: [label: string, retained: string, override: string][] = [['Retained Logic', 'Y', 'N'], ['Progress Override', 'N', 'Y'], ['Actual Dates', 'N', 'N']];
 function schedOptionsXml(so: Row): string {
   if (!Object.keys(so).length) return '';
@@ -293,7 +296,7 @@ PROJECT_MAP.push(F('FiscalYearStartMonth', 'fy_start_month_num', 'num'), F('Acti
   F('LinkActualToActualThisPeriod', 'act_this_per_link_flag', 'bool'), F('LinkPercentCompleteWithActual', 'act_pct_link_flag', 'bool'), F('UseProjectBaselineForEarnedValue', 'use_project_baseline_flag', 'bool'),
   F('LinkPlannedAndAtCompletionFlag', 'rem_target_link_flag', 'bool'), F('ResetPlannedToRemainingFlag', 'reset_planned_flag', 'bool'), F('AllowNegativeActualUnitsFlag', 'allow_neg_act_flag', 'bool'), F('CostQuantityRecalculateFlag', 'cost_qty_recalc_flag', 'bool'),
   F('ActivityDefaultPricePerUnit', 'def_cost_per_qty', 'num'), F('LastFinancialPeriodObjectId', 'last_fin_dates_id'), F('LocationObjectId', 'location_id'), F('FinancialPeriodTemplateId', 'fintmpl_id'), F('CheckOutDate', 'checkout_date', 'date'),
-  F('CheckOutUserObjectId', 'checkout_user_id'), F('LastApplyActualsDate', 'apply_actuals_date', 'date'), F('ProjectForecastStartDate', 'fcst_start_date', 'date'), F('StrategicPriority', 'strgy_priority_num', 'num'),
+  F('CheckOutUserObjectId', 'checkout_user_id'), F('LastApplyActualsDate', 'apply_actuals_date', 'date'), F('LastScheduleDate', 'last_schedule_date', 'date'), F('ProjectForecastStartDate', 'fcst_start_date', 'date'), F('StrategicPriority', 'strgy_priority_num', 'num'),
   F('SummarizeToWBSLevel', 'wbs_max_sum_level', 'num'), F('SummarizedDataDate', 'sum_data_date', 'date'), F('LastSummarizedDate', 'last_tasksum_date', 'date'), F('ContainsSummaryData', 'sum_data_flag', 'bool'),
   F('ResourceCanBeAssignedToSameActivityMoreThanOnce', 'rsrc_multi_assign_flag', 'bool'), F('ResourcesCanAssignThemselvesToActivities', 'rsrc_self_add_flag', 'bool'), F('ResourcesCanViewInactiveActivities', 'ts_rsrc_vw_inact_actv_flag', 'bool'),
   F('EnableSummarization', 'batch_sum_flag', 'bool'), F('ResourcesCanMarkAssignmentAsCompleted', 'allow_complete_flag', 'bool'), F('AssignmentDefaultDrivingFlag', 'def_rollup_dates_flag', 'bool'), F('WBSCodeSeparator', 'name_sep_char'), F('LevelingPriority', 'priority_num', 'num'),
@@ -358,6 +361,9 @@ export const P6XML_TABLES: Record<string, { element: string; map: FieldMap }> = 
  *  the activity priority MPXJ links). Oracle lists no XER codes anywhere, and the GitHub issue morrisonkuhlsen/mkperth#31 ("Performance Factor = 1" for "PF = 1") disagrees with Oracle's spelling,
  *  so risk level, schedule type, threshold parameter type stay out; history interval and level and integrated type have no code in any sample or the pilot file to pair. Review status, issue
  *  status, threshold status/type and the ETC computation are paired by name against Oracle's lists (see ENUMS), only for the codes the data shows. */
+/** SCHEDOPTIONS.limit_multiple_longest_path_calc is Project/LimitMultipleFloatPaths (ScheduleOptions has no such field; paired by name with its siblings MultipleFloatPathsEnabled, MaximumMultipleFloatPaths,
+ *  MultipleFloatPathsUseTotalFloat, which are the other three "multiple float paths" columns). */
+const LIMIT_PATHS_MAP: FieldMap = [['LimitMultipleFloatPaths', 'limit_multiple_longest_path_calc', 'bool']];
 /** What the P6 XML writer does NOT carry, field by field (table.field, or a whole table), with why - checked against P6's own XML schema (p6apibo.xsd, read from the
  *  copy MPXJ embeds) and the helpers MPXJ's XML writer uses for the coded values. Anything an XER holds that is neither in P6XML_TABLES' maps, nor carried by the special
  *  writers (calendars, nested codes, UDFs, notes, schedule options, curves) nor listed here fails tests/p6xml-coverage.test.ts. Reasons:
@@ -393,6 +399,7 @@ export const P6XML_NOT_CARRIED: Record<string, string> = {
   'TASKRSRC.override_rate_flag': NO, 'TASKRSRC.pend_complete_flag': NO, 'TASKRSRC.pend_remain_cost': NO, 'TASKRSRC.pend_act_cost': NO, 'TASKRSRC.cost_qty_type': NO,
   'TASKRSRC.act_qty': OLD, 'TASKRSRC.act_work_qty': OLD, 'TASKRSRC.act_equip_qty': OLD, 'TASKRSRC.target_work_qty': OLD, 'TASKRSRC.target_equip_qty': OLD, 'TASKRSRC.remain_work_qty': OLD, 'TASKRSRC.remain_equip_qty': OLD,
   'TASKRSRC.remain_reg_qty': OLD, 'TASKRSRC.remain_ot_qty': OLD, 'TASKRSRC.remain_reg_cost': OLD, 'TASKRSRC.remain_ot_cost': OLD,
+  'SCHEDOPTIONS.sched_setplantoforecast': NO, // (no field of ScheduleOptions or Project is "set planned to forecast")
   'THRSPARM.seq_num': NO, 'THRSPARM.wbs_flag': NO, 'THRSPARM.task_flag': NO, 'THRSPARM.rsrc_flag': NO, 'THRSPARM.thresh_parm_type': TEXTS, 'THRSPARM.thresh_field_name': NO, 'THRSPARM.thresh_short_name': NO,
   'UDFTYPE.udf_type_name': NO, 'UDFTYPE.super_flag': NO, 'UDFTYPE.indicator_expression': NO, 'UDFTYPE.summary_indicator_expression': NO, 'UDFTYPE.export_flag': NO,
   'WBSRSRC.auto_compute_dates_flag': NO, 'WBSRSRC.rsrc_request_data': NO,
@@ -429,7 +436,7 @@ export function p6xmlLosses(db: Db, projIds?: string[]): P6XmlLoss[] {
     add(t, f, reason, rs.filter((r) => has(r[f])).length);
   }
   // coded values written only for the codes whose text is verified (the strict maps): any other code is left out
-  for (const [t, { map }] of Object.entries(P6XML_TABLES)) for (const [, f, conv] of map) {
+  for (const [t, { map }] of [...Object.entries(P6XML_TABLES), ['SCHEDOPTIONS', { map: SCHED_MAP }] as const]) for (const [, f, conv] of map) {
     if (!conv?.startsWith('strict:') && !conv?.startsWith('enum:')) continue;
     const list = ENUMS[conv.slice(conv.indexOf(':') + 1)];
     add(t, f, PARTLY_REASON, (sel.get(t) ?? []).filter((r) => has(r[f]) && !(r[f] in list)).length);
@@ -484,7 +491,7 @@ function writtenFields(t: string): Set<string> | null {
   const mapped = P6XML_TABLES[t]?.map.filter((m) => m[2] !== 'legacy').map((m) => m[1]);
   const extra: Record<string, string[]> = {
     CALENDAR: ['clndr_id', 'clndr_name', 'clndr_type', 'default_flag', 'rsrc_private', 'last_chng_date', 'base_clndr_id', 'proj_id', 'day_hr_cnt', 'week_hr_cnt', 'month_hr_cnt', 'year_hr_cnt', 'clndr_data'],
-    SCHEDOPTIONS: ['schedoptions_id', 'proj_id', 'sched_retained_logic', 'sched_progress_override', ...SCHED_MAP.map((m) => m[1])],
+    SCHEDOPTIONS: ['schedoptions_id', 'proj_id', 'sched_retained_logic', 'sched_progress_override', ...SCHED_MAP.map((m) => m[1]), ...LIMIT_PATHS_MAP.map((m) => m[1])],
     PROJPCAT: ['proj_id', 'proj_catg_type_id', 'proj_catg_id'], RSRCRCAT: ['rsrc_id', 'rsrc_catg_type_id', 'rsrc_catg_id'], TASKACTV: ['task_id', 'actv_code_type_id', 'actv_code_id', 'proj_id'],
     UDFVALUE: ['udf_type_id', 'fk_id', 'proj_id', 'udf_text', 'udf_number', 'udf_date', 'udf_code_id'], TASKPROC: ['complete_pct'], PROJWBS: [...P6XML_ROOT_MAP.map((m) => m[1]), 'proj_node_flag'], PROJECT: [],
   };
@@ -697,7 +704,7 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
     const root = wbsAll.find((w) => w.proj_id === pid && w.proj_node_flag === 'Y');
     const so = get('SCHEDOPTIONS').find((s) => s.proj_id === pid) ?? {};
     const own = (m: FieldMap) => (tag === 'BaselineProject' ? m.filter(([t]) => !NOT_IN_BASELINE.has(t)) : m);
-    const head: Part[] = [...toParts(p, own(PROJECT_MAP)), ...(root ? toParts(root, own(P6XML_ROOT_MAP)) : []), ['Name', `<Name>${esc(root?.wbs_name || p._name || p.proj_short_name)}</Name>`],
+    const head: Part[] = [...toParts(p, own(PROJECT_MAP)), ...(root ? toParts(root, own(P6XML_ROOT_MAP)) : []), ...(tag === 'Project' ? toParts(so, LIMIT_PATHS_MAP) : []), ['Name', `<Name>${esc(root?.wbs_name || p._name || p.proj_short_name)}</Name>`],
       ['OriginalProjectObjectId', originalId ? `<OriginalProjectObjectId>${esc(originalId)}</OriginalProjectObjectId>` : ''], ['Code', codeRefsXml(pcodes.get(pid) ?? [], 'proj_catg_type_id', 'proj_catg_id')], udfs('PROJECT', pid),
       ['WBSObjectId', root?.wbs_id ? `<WBSObjectId>${esc(root.wbs_id)}</WBSObjectId>` : '']];
     out.push(`<${tag}>${inOrder(tag, head)}`);
@@ -807,7 +814,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   const baselineOf = new Map<string, string>(kids(api, 'Project').map((p): [string, string] => [val(p, 'CurrentBaselineProjectObjectId'), val(p, 'ObjectId')]).filter(([b]) => !!b));
   for (const p of [...kids(api, 'Project'), ...kids(api, 'BaselineProject')]) {
     const g = groups.get(p) ?? { node: p, rows: [], held: [], at: null, fallback: [] };
-    const pr = fromXml(p, PROJECT_MAP, [...OLD_SCHED_MAP, ...P6XML_ROOT_MAP].map(([tag]) => tag));
+    const pr = fromXml(p, PROJECT_MAP, [...OLD_SCHED_MAP, ...P6XML_ROOT_MAP, ...LIMIT_PATHS_MAP].map(([tag]) => tag));
     const pid = pr.proj_id || String(rows(db, 'PROJECT').length + 1);
     pr.proj_id = pid;
     // a baseline is kept as a baseline of its project (BaselineProject; OriginalProjectObjectId or the project that points to it)
@@ -817,6 +824,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     for (const u of udfRows(p, pid, pid)) push('UDFVALUE', u);
     const sox = child(p, 'ScheduleOptions');
     const so = sox ? schedOptionsRow(sox) : fromXml(p, OLD_SCHED_MAP, [], false);
+    if (p.name === 'Project') Object.assign(so, fromXml(p, LIMIT_PATHS_MAP, [], false));
     // the project's own objects the clone has no table for (its leaves are kept on its row, its heavy children above)
     for (const c of p.children) if (c.children.length && !['ScheduleOptions', 'Code', 'UDF'].includes(c.name) && !HEAVY.has(c.name)) push(`_XML_${c.name}`, xmlRow(c, { proj_id: pid }));
     if (Object.keys(so).length) push('SCHEDOPTIONS', { schedoptions_id: pid, proj_id: pid, ...so });
