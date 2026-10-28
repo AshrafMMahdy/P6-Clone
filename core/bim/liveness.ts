@@ -108,6 +108,12 @@ export async function pidsNamed(name: string): Promise<number[] | null> {
 }
 
 export { BOUND_MULTIPLE };
+/** V8 flags for the Node processes this server starts (geometry, index and reader workers). On Node 24 (V8 13.6) a process that ends with
+ *  process.exit() while a background compile job waits for a garbage collection never ends: the main thread joins the platform's threads in
+ *  its exit and the threads wait for the collection the main thread will not run. Seen in the tiler (all work done, tiles.json written, then
+ *  silence) in about 1 run in 4 under load, and ended by the liveness watch two windows later with the elements missing. Without the
+ *  concurrent compilers it did not happen in 32 runs. The flags are Node 24 and later's only (earlier V8s may not know them) and not Electron's. */
+export const childV8Flags = (): string[] => (!process.versions.electron && Number(process.versions.node.split('.')[0]) >= 24 ? ['--no-concurrent-recompilation', '--no-concurrent-sparkplug'] : []);
 /** The shortest a window may be: what a start, a garbage collection or a flush may take without it meaning anything.
  *  P6CLONE_WORKER_FLOOR_MS (the environment only: tests) shortens it. */
 export const workerFloorMs = () => Number(process.env.P6CLONE_WORKER_FLOOR_MS) || 120_000;

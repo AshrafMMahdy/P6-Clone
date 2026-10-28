@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
-import { heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
 
 /** The heap (MB) of a worker that holds a model's index: the memory budget plus headroom, never more than half the machine (at most 16 GB),
  *  nor less than 1 GB (as the Navisworks reader's, nwd.ts nwdHeapMb). */
@@ -26,7 +26,7 @@ export async function inWorker<T>(o: WorkerJob, after: (dir: string) => T | Prom
   try {
     let stuckErr: StuckError | null = null;
     const err = await new Promise<string | null>((done) => {
-      const child = spawn(process.execPath, [...(o.heapMb ? [`--max-old-space-size=${o.heapMb}`] : []), o.script, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
+      const child = spawn(process.execPath, [...(o.heapMb ? [`--max-old-space-size=${o.heapMb}`] : []), ...childV8Flags(), o.script, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
       let text = '', stuck: StuckInfo | null = null;
       child.stderr.on('data', (c) => { text = (text + c).slice(-4000); });
       const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } } });

@@ -203,7 +203,8 @@ export const modelBytes = (hashes?: Iterable<string>) => { const want = hashes ?
  *  the file; the pass collects every 128 MB read), whichever is less, plus INDEX_FIXED (the code it loads). */
 export const INDEX_PER_BYTE = 0.4, INDEX_KNEE = 256 * 1048576, INDEX_FIXED = 160 * 1048576; // fixed: 160 MB, the most a 42 MB model took on Linux (Node 24.14.0) past its own size
 /** The index worker's own Node runtime (indexWorker.ts): the tree of processes counts while the index is built, before any geometry process runs. */
-export const INDEX_WORKER_FIXED = 64 * 1048576;
+// (measured in a fresh process on Linux: the worker's runtime and the tree of processes took 17 MB more on Node 24.14.0 than the 64 MB first set on Node 22)
+export const INDEX_WORKER_FIXED = 96 * 1048576;
 export const indexNeed = (bytes: number) => Math.round(Math.min(bytes, bytes * INDEX_PER_BYTE + INDEX_KNEE) + INDEX_FIXED);
 /** A geometry run's peak (web-ifc's WebAssembly memory, the file's bytes, the meshes) per byte of IFC it meshes, and its
  *  fixed part (Node and web-ifc themselves). */

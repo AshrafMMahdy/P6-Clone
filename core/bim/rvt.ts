@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
 import { fileHash } from './model.ts';
 import { rvtWorkerPath } from './runtime.ts';
 
@@ -100,7 +100,7 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
     if (!worker) throw new Error('The Revit reader (rvtWorker.mjs with rvt/ beside it) is missing from this installation.');
     sweepStaleTemps(dir);
     const out = await new Promise<{ code: number | null; signal: NodeJS.Signals | null; text: string; pid?: number; stuck?: StuckInfo }>((done) => {
-      const child = spawn(process.execPath, [worker, path, `${base}.ifc`, `${base}.json`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
+      const child = spawn(process.execPath, [...childV8Flags(), worker, path, `${base}.ifc`, `${base}.json`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
       let text = '', stuck: StuckInfo | undefined;
       child.stderr.on('data', (c) => { text += c; });
       // No fixed time limit (owner rules 2026-10-27, 2026-10-28): rvt-rs's unpack is one WebAssembly call that cannot tick; it is alive

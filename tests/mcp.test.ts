@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { sampleCopy } from './helpers.ts';
 
@@ -254,6 +254,42 @@ test('MCP: notifications/cancelled and cancel_job stop open_file, save and sched
     assert.deepEqual([done.data.status, done.data.error?.code], ['cancelled', 'cancelled']);
     assert.deepEqual((await st()).open.map((x: { handle: string }) => x.handle), [h]);
   } finally { await c.close(); }
+});
+
+test('MCP: the lines of one read are handled in one turn, so a notifications/cancelled written right after its tools/call always reaches it (the CI race of whiq-v0.1.46)', { timeout: 120_000 }, async () => {
+  // in-process: 60 pairs in one batch, over open_file, save and schedule
+  const { handleLines } = await import('../mcp/stdio.ts');
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const h = (toolResult((await callTool('new_project', { id: 'RACE', start: '2026-03-02' })).out, false).structuredContent as any).handle;
+  await callTool('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A1', name: 'One', duration_days: 5 }] });
+  const out = mkdtempSync(join(tmpdir(), 'p6mcp-race-'));
+  const answers = new Map<number, any>();
+  const lines: string[] = [];
+  for (let i = 1; i <= 60; i++) {
+    const [name, args] = i % 3 === 0 ? ['save', { handle: h, path: join(out, `r${i}.xer`) }] : i % 3 === 1 ? ['schedule', { handle: h, data_date: '2026-04-01' }] : ['open_file', { path: sampleCopy('cairo festival city.xer') }];
+    lines.push(JSON.stringify({ jsonrpc: '2.0', id: i, method: 'tools/call', params: { name, arguments: args } }), JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: i } }));
+  }
+  handleLines(lines, (m: any) => { if (m?.id != null) answers.set(m.id, m); });
+  for (let k = 0; k < 600 && answers.size < 60; k++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(answers.size, 60);
+  const notCancelled = [...answers.values()].filter((m) => m.result?.structuredContent?.error?.code !== 'cancelled').map((m) => m.id);
+  assert.deepEqual(notCancelled, []);
+  assert.deepEqual(existsSync(join(out, 'r3.xer')), false);
+  // the server process: its stdin reader sends the lines of one read to the main thread as ONE message
+  assert.match(readFileSync(join(import.meta.dirname, '..', 'mcp', 'stdio.ts'), 'utf8'), /postMessage\(\{ type: 'lines', lines: batch \}\)/);
+  const p = spawn(process.execPath, [SERVER], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: out, TMP: out, TEMP: out } });
+  const got = new Map<number, any>();
+  let buf = '';
+  p.stdout.setEncoding('utf8');
+  p.stdout.on('data', (c: string) => { buf += c; for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1); got.set(m.id, m); } });
+  try {
+    p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } } }) + '\n');
+    for (let k = 0; k < 200 && !got.has(1); k++) await new Promise((r) => setTimeout(r, 50));
+    const pairs = Array.from({ length: 100 }, (_, i) => 100 + i);
+    p.stdin.write(pairs.map((id) => JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'open_file', arguments: { path: sampleCopy('cairo festival city.xer') } } }) + '\n' + JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id } }) + '\n').join(''));
+    for (let k = 0; k < 600 && !pairs.every((id) => got.has(id)); k++) await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(pairs.filter((id) => got.get(id)?.result?.structuredContent?.error?.code !== 'cancelled'), []);
+  } finally { p.stdin.end(); }
 });
 
 test('MCP: a cancellation reaches only the request it names, in the caller\'s own HTTP session', { timeout: 60_000 }, async () => {

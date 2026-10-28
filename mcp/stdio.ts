@@ -85,6 +85,9 @@ catch { s = fs.createReadStream(null, { fd: 0 }); }
 s.setEncoding('utf8');
 s.on('data', (chunk) => {
   buf += chunk;
+  // every line of a chunk goes to the main thread in ONE message, handled in one turn there: a notifications/cancelled written right after its
+  // tools/call (one write) reaches the call before the call's first await returns, whatever the scheduler does between two posts
+  const batch = [];
   for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
     const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
     if (!line) continue;
@@ -94,12 +97,23 @@ s.on('data', (chunk) => {
       const w = { job: m.params.arguments && m.params.arguments.job_id, status: m.params.name === 'server_status', answered: false, timer: null };
       waiting.set(m.id, w); w.timer = setTimeout(() => fallback(m.id), 400);
     }
-    parentPort.postMessage({ type: 'line', line });
+    batch.push(line);
   }
+  if (batch.length) parentPort.postMessage({ type: 'lines', lines: batch });
 });
 s.on('end', () => parentPort.postMessage({ type: 'end' }));
 s.on('error', () => parentPort.postMessage({ type: 'end' }));
 `;
+
+/** The lines of one read, handled in order in ONE turn of the event loop: a call's first await cannot return before the lines after it (its
+ *  notifications/cancelled) have been handled. */
+export function handleLines(lines: string[], send: (m: unknown) => void): void {
+  for (const line of lines) {
+    let m: Msg;
+    try { m = JSON.parse(line); } catch { send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); continue; }
+    void handleMessage(m, undefined, send).then(send, (e) => send({ jsonrpc: '2.0', id: m.id ?? null, error: { code: -32603, message: String((e as Error).message) } }));
+  }
+}
 
 export function startStdio(): void {
   if (process.env.P6CLONE_STDIO_THREAD === '0') return startStdioMain();
@@ -115,13 +129,10 @@ export function startStdio(): void {
   // and only then does the process stop (stopping at once lost replies still on their way to the front)
   let flushed: (() => void) | null = null;
   const stop = () => { const done = () => shutdown('stdin closed'); flushed = done; front.postMessage({ type: 'flush' }); setTimeout(done, 5000).unref(); };
-  front.on('message', (x: { type: string; line?: string }) => {
+  front.on('message', (x: { type: string; line?: string; lines?: string[] }) => {
     if (x.type === 'flushed') { flushed?.(); return; }
     if (x.type === 'end') { const t0 = Date.now(); const wait = () => (running.size && Date.now() - t0 < 30000 ? setTimeout(wait, 50) : stop()); wait(); return; }
-    const line = x.line ?? '';
-    let m: Msg;
-    try { m = JSON.parse(line); } catch { send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); return; }
-    void handleMessage(m, undefined, send).then(send, (e) => send({ jsonrpc: '2.0', id: m.id ?? null, error: { code: -32603, message: String((e as Error).message) } }));
+    handleLines(x.lines ?? [x.line ?? ''], send);
   });
   front.on('error', (e) => { process.stderr.write(`P6 Clone: the stdio thread stopped (${(e as Error).message}); stopping.\n`); shutdown('stdio thread failed'); });
 }

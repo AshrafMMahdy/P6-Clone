@@ -77,8 +77,9 @@ jobs:
         shell: bash
         run: |
           node scripts/build-viewer4d.mjs
-          node --import ./tests/setup.ts --test --test-reporter=spec "tests/*.test.ts" > test.log 2>&1 && { grep -E "^ℹ (tests|pass|fail|skipped)" test.log; exit 0; }
-          grep -E "^ℹ (tests|pass|fail)" test.log
+          node --import ./tests/setup.ts --test --test-reporter=spec "tests/*.test.ts" > test.log 2>&1 && { grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log; echo "skipped here (a sample or Chromium this machine does not have):"; grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | head -60; exit 0; }
+          grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log
+          grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | head -60 | sed 's/^ */::warning::skipped /'
           grep -E "^✖|AssertionError|actual:|expected:|Error:|reason" test.log | head -40 | sed 's/^ */::error::/'
           exit 1
       - run: node scripts/build-cli.mjs

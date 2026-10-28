@@ -531,3 +531,14 @@ test('a project restored without the open-time list rebuilds it from the file it
   assert.equal(unknown.d.p6_would_reject.in_the_file_as_opened, null);
   assert.match(unknown.d.p6_would_reject.note, /nothing could be told apart, so nothing was refused and everything found is listed/);
 });
+
+test('child Node processes on Node 24 start without the concurrent compilers (the exit deadlock of V8 13.6 that left the tiler hanging after its work)', async () => {
+  const { childV8Flags } = await import('../core/bim/liveness.ts');
+  const major = Number(process.versions.node.split('.')[0]);
+  assert.deepEqual(childV8Flags(), major >= 24 && !process.versions.electron ? ['--no-concurrent-recompilation', '--no-concurrent-sparkplug'] : []);
+  // and a process started with them runs (a flag this Node did not know would end it at once)
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, [...childV8Flags(), '-e', 'console.log("up")'], { encoding: 'utf8' });
+  assert.equal(r.stdout.trim(), 'up', r.stderr);
+  for (const f of ['parse.ts', 'jobWorker.ts', 'nwd.ts', 'rvt.ts']) assert.match(readFileSync(join(import.meta.dirname, '..', 'core', 'bim', f), 'utf8'), /childV8Flags\(\)/, `${f} starts its processes with the flags`);
+});

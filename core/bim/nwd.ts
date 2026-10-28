@@ -8,7 +8,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
-import { heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
 import { pushAll } from '../arrays.ts';
 import { openContainer, section } from './nwd/container.ts';
 import { decodeTree, type NwNode, type NwTree } from './nwd/tree.ts';
@@ -189,7 +189,7 @@ async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<Naviswo
     const heap = nwdHeapMb();
     let stuckErr: StuckError | null = null;
     const err = await new Promise<string | null>((done) => {
-      const child = spawn(process.execPath, [`--max-old-space-size=${heap}`, worker, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
+      const child = spawn(process.execPath, [`--max-old-space-size=${heap}`, ...childV8Flags(), worker, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
       let text = '', out = '', stuck: StuckInfo | null = null;
       // heartbeatWatcher hands over what the reader printed besides its heartbeats: the progress lines
       const onText = (c: string) => {

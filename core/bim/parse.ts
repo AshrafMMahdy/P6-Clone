@@ -8,7 +8,7 @@ import { inWorker, indexHeapMb } from './jobWorker.ts';
 import { readIndex } from './indexFile.ts';
 import { geomWorkerPath, indexWorkerPath, webIfcEntry } from './runtime.ts';
 import { alive as hbAlive, forgetRates, noteRate, step as hbStep, tick as hbTick } from './heartbeat.mjs';
-import { heartbeatEnv, heartbeatWatcher, stuckData, stuckMessage, workerFloorMs, type StuckData, type StuckInfo } from './liveness.ts';
+import { childV8Flags, heartbeatEnv, heartbeatWatcher, stuckData, stuckMessage, workerFloorMs, type StuckData, type StuckInfo } from './liveness.ts';
 import { allocGeometry, geomStore, putGeometry, scaleGeometry } from './element.ts';
 import { readManifest, tileBytesOf, writeTilesManifest, type TileRecord } from './tiles.ts';
 
@@ -203,7 +203,7 @@ const stuckOf = (i: StuckInfo, what: string, tried: string) => ({ note: stuckMes
  *  the work going on instead of a reader that seems idle. */
 export function runNode(script: string, args: string[], done: () => boolean, what = 'A worker', tried = 'one pass of the worker over its input'): Promise<Run> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, script, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
+    const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, ...childV8Flags(), script, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
     let err = '', stuck: StuckInfo | null = null, lastStep = '', lastDone = -1, lastSince = Infinity;
     child.stderr.on('data', (d) => { err = (err + String(d)).slice(-2000); });
     const stop = heartbeatWatcher(child, {
@@ -308,7 +308,7 @@ function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opt
   return new Promise((resolve) => {
     // web-ifc's WebAssembly memory is capped at 4 GB by WebAssembly itself (a model past that keeps its index, without
     // geometry); what a run takes follows the chunk it meshes
-    const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, script, ifc, outDir, '4', productsBin], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
+    const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, ...childV8Flags(), script, ifc, outDir, '4', productsBin], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
     let err = '', out = '', stuck: StuckInfo | null = null;
     child.stderr.on('data', (d) => { err += String(d); if (err.length > 4000) err = err.slice(-4000); });
     // no fixed time limit: watched through its heartbeats, ended only when it stops ticking or passes its work bound (see stuckNote)
