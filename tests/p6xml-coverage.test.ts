@@ -326,14 +326,16 @@ test('coded values written are the texts Oracle lists and MPXJ links to the XER 
     qty_type: ['Hour', 'Day', 'Week', 'Month', 'Year', 'Days Hours', 'Hours Minutes'], sum_level: ['WBS Level', 'Assignment Level'], discount_period: ['Month', 'Quarter', 'Year'],
     ev_compute: ['Activity Percent Complete', '0 / 100', '50 / 50', 'Custom Percent Complete', 'WBS Milestones Percent Complete', 'Activity Percent Complete Using Resource Curves'],
     priority_type: ['Top', 'High', 'Normal', 'Low', 'Lowest'], wbs_status: ['Planned', 'Active', 'Inactive', 'What-If', 'Requested', 'Template'],
+    review_type: ['OK', 'For Review', 'Rejected'], issue_status: ['Open', 'On Hold', 'Closed'], thresh_status: ['Enabled', 'Disabled'], thresh_type: ['Activity', 'WBS'],
+    ev_etc: ['ETC = Remaining Cost for Activity', 'PF = 1', 'PF = Custom Value', 'PF = 1 / CPI', 'PF = 1 / (CPI * SPI)'],
   };
   for (const [list, texts] of Object.entries(oracle)) for (const t of Object.values(P6XML_ENUMS[list])) assert.ok(texts.includes(t), `${list}: "${t}" is a string Oracle lists`);
   // the unverified ones stay out of the file, whatever the data holds
   const db = load(samples.find((f) => /^CfC\.xer$/i.test(f)) ?? samples[0])!;
   db.tables.PROJECT.rows[0].risk_level = 'RL_High'; db.tables.PROJECT.rows[0].hist_interval = 'HI_Month'; db.tables.PROJECT.rows[0].intg_proj_type = 'IT_ERP';
-  const w = db.tables.PROJWBS.rows.find((r) => r.proj_node_flag !== 'Y')!; w.ev_etc_compute_type = 'EE_PF_1';
+  const w = db.tables.PROJWBS.rows.find((r) => r.proj_node_flag !== 'Y')!; w.ev_etc_compute_type = 'EE_PF_user';
   const xml = writeP6Xml(db, {} as never);
-  for (const bad of ['RL_High', 'HI_Month', 'IT_ERP', 'EE_PF_1', '<RiskLevel>', '<HistoryInterval>', '<IntegratedType>', '<EarnedValueETCComputeType>']) assert.ok(!xml.includes(bad), bad);
+  for (const bad of ['RL_High', 'HI_Month', 'IT_ERP', 'EE_PF_user', '<RiskLevel>', '<HistoryInterval>', '<IntegratedType>']) assert.ok(!xml.includes(bad), bad);
   // issue and threshold priorities: the same PT_ codes and texts as the activity priority
   const T = db.tables;
   T.PROJISSU ??= { name: 'PROJISSU', fields: ['issue_id', 'proj_id', 'issue_name', 'priority_type'], rows: [] };
@@ -345,4 +347,36 @@ test('coded values written are the texts Oracle lists and MPXJ links to the XER 
   w.phase_id = '77';
   const b2 = parseP6Xml(writeP6Xml(db, {} as never)).db;
   assert.equal(b2.tables.PROJWBS.rows.find((r) => r.wbs_id === w.wbs_id)?.phase_id, '77');
+});
+
+test('codes paired by name against Oracle\'s lists: written as Oracle\'s text, a second code for one text comes back exact, unseen codes stay out', () => {
+  const db = load(samples.find((f) => /^CfC\.xer$/i.test(f)) ?? samples[0])!;
+  const ws = db.tables.PROJWBS.rows.filter((r) => r.proj_node_flag !== 'Y');
+  const [a, b, c, d, e] = ws;
+  a.ev_etc_compute_type = 'EE_Rem_hr'; b.ev_etc_compute_type = 'EE_Rem'; c.ev_etc_compute_type = 'EE_PF_1'; d.ev_etc_compute_type = 'EE_PF_cpi'; e.ev_etc_compute_type = 'EE_PF_cpi_spi';
+  a.status_code = 'WS_Open'; b.status_code = 'WBS_Active';
+  const T = db.tables, pid = T.PROJECT.rows[0].proj_id;
+  const add = (t: string, fields: string[], r: Row) => { T[t] ??= { name: t, fields, rows: [] }; T[t].rows.push(r); };
+  add('PROJTHRS', ['thresh_id', 'proj_id', 'status_code', 'thresh_type', 'priority_type'], { thresh_id: '90001', proj_id: pid, status_code: 'TS_Enable', thresh_type: 'TM_Task', priority_type: 'PT_High' });
+  add('PROJTHRS', ['thresh_id'], { thresh_id: '90002', proj_id: pid, status_code: 'TS_Enable', thresh_type: 'TM_WBS', priority_type: 'PT_Low' });
+  add('PROJISSU', ['issue_id', 'proj_id', 'issue_name', 'status_code'], { issue_id: '90003', proj_id: pid, issue_name: 'i', status_code: 'IS_Open' });
+  const task = T.TASK.rows.find((t) => t.proj_id === pid)!; task.review_type = 'RV_OK';
+  const xml = writeP6Xml(db, {} as never);
+  for (const t of ['<EarnedValueETCComputeType>ETC = Remaining Cost for Activity</EarnedValueETCComputeType>', '<EarnedValueETCComputeType>PF = 1</EarnedValueETCComputeType>', '<EarnedValueETCComputeType>PF = 1 / CPI</EarnedValueETCComputeType>',
+    '<ReviewStatus>OK</ReviewStatus>', '<DetailToMonitor>Activity</DetailToMonitor>', '<DetailToMonitor>WBS</DetailToMonitor>', '<Status>Enabled</Status>', '<Status>Open</Status>']) assert.ok(xml.includes(t), t);
+  assert.ok(!xml.includes('EE_PF_cpi_spi') && !xml.includes('PF = 1 / (CPI * SPI)'), 'a code the data does not show is not paired');
+  assert.ok(xml.includes('<!--p6clone ev_etc_compute_type=EE_Rem-->') && xml.includes('<!--p6clone status_code=WBS_Active-->'));
+  assert.ok(!xml.includes('<!--p6clone ev_etc_compute_type=EE_Rem_hr-->'), 'the first code of a text needs no note');
+  const back = parseP6Xml(xml).db;
+  const got = (id: string, f: string) => back.tables.PROJWBS.rows.find((r) => r.wbs_id === id)?.[f];
+  assert.deepEqual([a, b, c, d, e].map((r) => got(r.wbs_id, 'ev_etc_compute_type') ?? ''), ['EE_Rem_hr', 'EE_Rem', 'EE_PF_1', 'EE_PF_cpi', '']);
+  assert.deepEqual([a, b].map((r) => got(r.wbs_id, 'status_code')), ['WS_Open', 'WBS_Active']);
+  const th = back.tables.PROJTHRS.rows;
+  assert.deepEqual(th.filter((r) => ['90001', '90002'].includes(r.thresh_id)).map((r) => [r.status_code, r.thresh_type, r.priority_type]), [['TS_Enable', 'TM_Task', 'PT_High'], ['TS_Enable', 'TM_WBS', 'PT_Low']]);
+  assert.equal(back.tables.PROJISSU.rows.find((r) => r.issue_id === '90003')?.status_code, 'IS_Open');
+  assert.equal(back.tables.TASK.rows.find((r) => r.task_id === task.task_id)?.review_type, 'RV_OK');
+  // the unseen code is disclosed, the paired ones are not
+  const L = p6xmlLosses(db);
+  assert.equal(L.find((l) => l.table === 'PROJWBS' && l.field === 'ev_etc_compute_type')?.rows, 1);
+  assert.ok(!L.some((l) => l.field === 'review_type' || l.field === 'thresh_type'));
 });

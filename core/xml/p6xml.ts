@@ -9,7 +9,8 @@ import { formatP6Date, parseP6Date, minutesToSerial, serialToMinutes } from '../
 // ---------- minimal XML tree
 
 /** s / e: where the element starts and ends in the parsed text (to keep an element verbatim). */
-export interface XNode { name: string; children: XNode[]; text: string; s?: number; e?: number }
+/** clone: what a <!--p6clone field=CODE--> comment inside the element says (the XER code a text P6 shares between codes came from). */
+export interface XNode { name: string; children: XNode[]; text: string; s?: number; e?: number; clone?: Record<string, string> }
 
 const ENT: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const unesc = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e: string) => (e[0] === '#' ? String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e] ?? m));
@@ -62,6 +63,7 @@ export function parseXml(text: string | Chunked, split?: (parents: string[], nam
       if (!last && m.index > prev) { const u = unfinishedAt(buf, prev); if (u >= 0) { used = u; break; } }
       prev = re.lastIndex;
       const top = stack[stack.length - 1];
+      if (m[0].startsWith('<!--p6clone ')) { for (const kv of m[0].slice(12, -3).trim().split(/\s+/)) { const i = kv.indexOf('='); if (i > 0) (top.clone ??= {})[kv.slice(0, i)] = kv.slice(i + 1); } continue; }
       if (m[1] != null) top.text += m[1];
       else if (m[2]) {
         const name = m[2].replace(/^\w+:/, '');
@@ -111,12 +113,21 @@ const ENUMS: Record<string, Record<string, string>> = {
   clndr_type: { CA_Base: 'Global', CA_Project: 'Project', CA_Rsrc: 'Resource' },
   priority_type: { PT_Top: 'Top', PT_High: 'High', PT_Normal: 'Normal', PT_Low: 'Low', PT_Lowest: 'Lowest' },
   critical_path_type: { CT_TotFloat: 'Critical Float', CT_DrivPath: 'Longest Path' },
-  wbs_status: { WS_Planned: 'Planned', WS_Open: 'Active', WS_Closed: 'Inactive', WS_Whatif: 'What-If' },
+  wbs_status: { WS_Planned: 'Planned', WS_Open: 'Active', WS_Closed: 'Inactive', WS_Whatif: 'What-If', WBS_Active: 'Active' }, // (WBS_Active: paired by name against Oracle's list, see below; written by other tools)
   udf_table: { TASK: 'Activity', PROJWBS: 'WBS', PROJECT: 'Project', RSRC: 'Resource', TASKRSRC: 'Resource Assignment', PROJCOST: 'Activity Expense', TASKPROC: 'Activity Step' },
   rate_type: { COST_PER_QTY: 'Price / Unit', COST_PER_QTY2: 'Price / Unit 2', COST_PER_QTY3: 'Price / Unit 3', COST_PER_QTY4: 'Price / Unit 4', COST_PER_QTY5: 'Price / Unit 5' },
   skill_level: { '1': '1 - Master', '2': '2 - Expert', '3': '3 - Skilled', '4': '4 - Proficient', '5': '5 - Inexperienced' },
   cost_load_type: { CL_Uniform: 'Uniform Over Activity', CL_End: 'End of Activity', CL_Start: 'Start of Activity' },
   rate_source: { ST_Rsrc: 'Resource', ST_Role: 'Role', ST_Custom: 'Override' },
+  // Paired by name against Oracle's own lists of the P6 XML texts (the XER code names the text, one to one; read 2026-10-28, codes as they occur in all samples and the pilot file):
+  //  Activity ReviewStatus 'OK'|'For Review'|'Rejected'                    https://docs.oracle.com/cd/F51301_01/English/Integration_Documentation/business_object_events_reference/business_object_events_reference.pdf (ActivityType)
+  //  ProjectIssue Status 'Open'|'On Hold'|'Closed'                          same pdf (ProjectIssueType)
+  //  ProjectThreshold Status 'Enabled'|'Disabled', DetailToMonitor 'Activity'|'WBS'   https://docs.oracle.com/cd/F88966_01/English/Integration_Documentation/p6_eppm_web_services_reference/42401.htm
+  //  WBS EarnedValueETCComputeType 'ETC = Remaining Cost for Activity'|'PF = 1'|'PF = Custom Value'|'PF = 1 / CPI'|'PF = 1 / (CPI * SPI)'   https://docs.oracle.com/cd/F88966_01/English/Integration_Documentation/business_object_events_reference/34274.htm
+  // Only the codes the data shows are paired. Two codes for one text (EE_Rem_hr and EE_Rem; WS_Open and WBS_Active) both write that text; the first listed is what the text reads back as, and the
+  // other is kept in a <!--p6clone field=CODE--> comment beside it (P6 ignores comments; this clone reads it), so a clone round trip is exact. TM_Task <-> 'Activity' is paired by elimination (TM_WBS <-> 'WBS').
+  review_type: { RV_OK: 'OK' }, issue_status: { IS_Open: 'Open' }, thresh_status: { TS_Enable: 'Enabled' }, thresh_type: { TM_WBS: 'WBS', TM_Task: 'Activity' },
+  ev_etc: { EE_Rem_hr: 'ETC = Remaining Cost for Activity', EE_Rem: 'ETC = Remaining Cost for Activity', EE_PF_1: 'PF = 1', EE_PF_cpi: 'PF = 1 / CPI' },
   // the strict lists: one pair each, the only one MPXJ's XML writer and XER writer agree on (both write P6's default)
   qty_type: { QT_Hour: 'Hour' }, sum_level: { SL_Taskrsrc: 'Assignment Level' }, ev_compute: { EC_Cmp_pct: 'Activity Percent Complete' }, discount_period: { PD_Month: 'Month' },
   // (UdfHelper: the only types MPXJ knows; FT_FLOAT and FT_FLOAT_2_DECIMALS are both "Double", the second is what a "Double" reads back as)
@@ -237,6 +248,10 @@ function toParts(r: Row, map: FieldMap): Part[] {
     else if (conv === 'pct') v = Number.isFinite(Number(v)) ? String(Number(v) / 100) : v;
     if (field === 'sched_outer_depend_type') v = v === 'SD_None' ? 'true' : 'false';
     if (v) out.push([tag, `<${tag}>${esc(v)}</${tag}>`]);
+    if (conv?.startsWith('enum:') || conv?.startsWith('strict:')) { // a code that shares its text with an earlier one: kept beside it
+      const list = ENUMS[conv.slice(conv.indexOf(':') + 1)], code = r[field];
+      if (v && list?.[code] === v && Object.keys(list).find((k) => list[k] === v) !== code && /^\w+$/.test(code)) out.push(['#clone', `<!--p6clone ${field}=${code}-->`]);
+    }
   }
   return out;
 }
@@ -249,10 +264,10 @@ function toXml(r: Row, map: FieldMap): string {
 // field is certain are here; the others are listed in P6XML_NOT_CARRIED with why.
 const F = (tag: string, field: string, conv?: Conv): [string, string, Conv?] => (conv ? [tag, field, conv] : [tag, field]);
 const AUDIT_DATES: FieldMap = [F('CreateDate', 'create_date', 'date'), F('CreateUser', 'create_user'), F('LastUpdateDate', 'update_date', 'date'), F('LastUpdateUser', 'update_user')];
-ACT_MAP.push(F('ActualNonLaborUnits', 'act_equip_qty', 'num'), F('ActualThisPeriodNonLaborUnits', 'act_this_per_equip_qty', 'num'), F('ActualThisPeriodLaborUnits', 'act_this_per_work_qty', 'num'), F('ActualLaborUnits', 'act_work_qty', 'num'),
+ACT_MAP.push(F('ReviewStatus', 'review_type', 'enum:review_type'), F('ActualNonLaborUnits', 'act_equip_qty', 'num'), F('ActualThisPeriodNonLaborUnits', 'act_this_per_equip_qty', 'num'), F('ActualThisPeriodLaborUnits', 'act_this_per_work_qty', 'num'), F('ActualLaborUnits', 'act_work_qty', 'num'),
   F('AutoComputeActuals', 'auto_compute_act_flag', 'bool'), F('EstimatedWeight', 'est_wt', 'num'), F('FloatPath', 'float_path', 'num'), F('FloatPathOrder', 'float_path_order', 'num'), F('RemainingNonLaborUnits', 'remain_equip_qty', 'num'),
   F('RemainingLaborUnits', 'remain_work_qty', 'num'), F('PlannedNonLaborUnits', 'target_equip_qty', 'num'), F('PlannedLaborUnits', 'target_work_qty', 'num'), F('LocationObjectId', 'location_id'), F('ReviewFinishDate', 'review_end_date', 'date'), ...AUDIT_DATES);
-WBS_MAP.push(F('EstimatedWeight', 'est_wt', 'num'), F('ContainsSummaryData', 'sum_data_flag', 'bool'), F('EarnedValueUserPercent', 'ev_user_pct', 'pct'), F('EarnedValueETCUserValue', 'ev_etc_user_value', 'num'), F('EarnedValueComputeType', 'ev_compute_type', 'strict:ev_compute'), F('OriginalBudget', 'orig_cost', 'num'),
+WBS_MAP.push(F('EstimatedWeight', 'est_wt', 'num'), F('ContainsSummaryData', 'sum_data_flag', 'bool'), F('EarnedValueUserPercent', 'ev_user_pct', 'pct'), F('EarnedValueETCUserValue', 'ev_etc_user_value', 'num'), F('EarnedValueComputeType', 'ev_compute_type', 'strict:ev_compute'), F('EarnedValueETCComputeType', 'ev_etc_compute_type', 'enum:ev_etc'), F('OriginalBudget', 'orig_cost', 'num'),
   F('IndependentETCTotalCost', 'indep_remain_total_cost', 'num'), F('IndependentETCLaborUnits', 'indep_remain_work_qty', 'num'), F('AnticipatedStartDate', 'anticip_start_date', 'date'), F('AnticipatedFinishDate', 'anticip_end_date', 'date'), F('WBSCategoryObjectId', 'phase_id'));
 RSRC_MAP.push(F('PrimaryRoleObjectId', 'role_id'), F('OfficePhone', 'office_phone'), F('OtherPhone', 'other_phone'), F('OvertimeFactor', 'ot_factor', 'num'), F('ResourceNotes', 'rsrc_notes'), F('CalculateCostFromUnits', 'def_cost_qty_link_flag', 'bool'),
   F('LocationObjectId', 'location_id'), F('ShiftObjectId', 'shift_id'), F('UserObjectId', 'user_id'), F('TimesheetApprovalManagerObjectId', 'ts_approve_user_id'));
@@ -294,12 +309,12 @@ const ROLERATE_MAP: FieldMap = [F('ObjectId', 'role_rate_id'), F('RoleObjectId',
   F('PricePerUnit2', 'cost_per_qty2', 'num'), F('PricePerUnit3', 'cost_per_qty3', 'num'), F('PricePerUnit4', 'cost_per_qty4', 'num'), F('PricePerUnit5', 'cost_per_qty5', 'num')];
 const FINDATES_MAP: FieldMap = [F('ObjectId', 'fin_dates_id'), F('Name', 'fin_dates_name'), F('StartDate', 'start_date', 'date'), F('EndDate', 'end_date', 'date')];
 const THRSPARM_MAP: FieldMap = [F('ObjectId', 'thresh_parm_id'), F('Name', 'thresh_parm_name')];
-const PROJTHRS_MAP: FieldMap = [F('ObjectId', 'thresh_id'), F('ProjectObjectId', 'proj_id'), F('OBSObjectId', 'obs_id'), F('ThresholdParameterObjectId', 'thresh_parm_id'), F('WBSObjectId', 'wbs_id'), F('LowerThreshold', 'lo_parm_value', 'num'), F('IssuePriority', 'priority_type', 'enum:priority_type'),
+const PROJTHRS_MAP: FieldMap = [F('ObjectId', 'thresh_id'), F('ProjectObjectId', 'proj_id'), F('OBSObjectId', 'obs_id'), F('ThresholdParameterObjectId', 'thresh_parm_id'), F('WBSObjectId', 'wbs_id'), F('LowerThreshold', 'lo_parm_value', 'num'), F('IssuePriority', 'priority_type', 'enum:priority_type'), F('Status', 'status_code', 'enum:thresh_status'), F('DetailToMonitor', 'thresh_type', 'enum:thresh_type'),
   F('UpperThreshold', 'hi_parm_value', 'num'), F('FromDate', 'window_start', 'date'), F('ToDate', 'window_end', 'date'),
   // a window edge is a date or a relative expression (DD, dd+2M): the expression is the XER's own text, and wins on read
   F('FromDateExpression', 'window_start'), F('ToDateExpression', 'window_end')];
 const PROJISSU_MAP: FieldMap = [F('ObjectId', 'issue_id'), F('ProjectObjectId', 'proj_id'), F('Name', 'issue_name'), F('ActivityObjectId', 'task_id'), F('WBSObjectId', 'wbs_id'), F('ResourceObjectId', 'rsrc_id'), F('OBSObjectId', 'obs_id'),
-  F('ProjectThresholdObjectId', 'thresh_id'), F('ThresholdParameterObjectId', 'thresh_parm_id'), F('Priority', 'priority_type', 'enum:priority_type'), F('IdentifiedBy', 'add_by_name'), F('DateIdentified', 'add_date', 'date'), F('ResolutionDate', 'resolv_date', 'date'), F('Notes', 'issue_notes'),
+  F('ProjectThresholdObjectId', 'thresh_id'), F('ThresholdParameterObjectId', 'thresh_parm_id'), F('Priority', 'priority_type', 'enum:priority_type'), F('Status', 'status_code', 'enum:issue_status'), F('IdentifiedBy', 'add_by_name'), F('DateIdentified', 'add_date', 'date'), F('ResolutionDate', 'resolv_date', 'date'), F('Notes', 'issue_notes'),
   F('UpperThreshold', 'hi_parm_value', 'num'), F('LowerThreshold', 'lo_parm_value', 'num'), F('ActualValue', 'issue_value', 'num')];
 const TASKFIN_MAP: FieldMap = [F('FinancialPeriodObjectId', 'fin_dates_id'), F('ActivityObjectId', 'task_id'), F('ProjectObjectId', 'proj_id'), F('ActualLaborUnits', 'act_work_qty', 'num'), F('ActualLaborCost', 'act_work_cost', 'num'),
   F('ActualNonLaborUnits', 'act_equip_qty', 'num'), F('ActualNonLaborCost', 'act_equip_cost', 'num'), F('ActualMaterialCost', 'act_mat_cost', 'num'), F('ActualExpenseCost', 'act_expense_cost', 'num'), F('EarnedValueCost', 'bcwp', 'num'),
@@ -311,7 +326,7 @@ const SPEND_MAP: FieldMap = [F('ObjectId', 'wbs_budg_id'), F('ProjectObjectId', 
 /** The root WBS node is the Project element (P6's project node): its own fields are the Project's fields of the same meaning. */
 export const P6XML_ROOT_MAP: FieldMap = [F('OBSObjectId', 'obs_id'), F('Status', 'status_code', 'enum:wbs_status'), F('OriginalBudget', 'orig_cost', 'num'), F('IndependentETCTotalCost', 'indep_remain_total_cost', 'num'),
   F('IndependentETCLaborUnits', 'indep_remain_work_qty', 'num'), F('AnticipatedStartDate', 'anticip_start_date', 'date'), F('AnticipatedFinishDate', 'anticip_end_date', 'date'), F('WBSCategoryObjectId', 'phase_id'), F('EarnedValueUserPercent', 'ev_user_pct', 'pct'),
-  F('EarnedValueETCUserValue', 'ev_etc_user_value', 'num'), F('EarnedValueComputeType', 'ev_compute_type', 'strict:ev_compute'),
+  F('EarnedValueETCUserValue', 'ev_etc_user_value', 'num'), F('EarnedValueComputeType', 'ev_compute_type', 'strict:ev_compute'), F('EarnedValueETCComputeType', 'ev_etc_compute_type', 'enum:ev_etc'),
   F('DiscountApplicationPeriod', 'dscnt_period_type', 'strict:discount_period')];
 /** What P6's schema gives BaselineProject less than Project (of the tags the maps above write): left out of a baseline. */
 const NOT_IN_BASELINE = new Set(['CurrentBaselineProjectObjectId', 'SourceProjectObjectId', 'ExternalCRKey', 'FinancialPeriodTemplateId', 'LastApplyActualsDate', 'AllowNegativeActualUnitsFlag', 'UseProjectBaselineForEarnedValue', 'ResourcesCanMarkAssignmentAsCompleted',
@@ -341,7 +356,8 @@ export const P6XML_TABLES: Record<string, { element: string; map: FieldMap }> = 
  *  - MPXJ 16.10 (org.mpxj.primavera: PriorityHelper, XmlProjectWriter, PrimaveraXERFileWriter, UdfHelper, ColorHelper, TimephasedHelper): the only source that links an XER code to an XML text.
  *  A pair is written when MPXJ links the code to the text and Oracle's list has the text (or, for the issue and threshold priorities, when they are the same PT_ codes and the same five texts as
  *  the activity priority MPXJ links). Oracle lists no XER codes anywhere, and the GitHub issue morrisonkuhlsen/mkperth#31 ("Performance Factor = 1" for "PF = 1") disagrees with Oracle's spelling,
- *  so ETC computation, history interval and level, integrated type, risk level, schedule type, review status, issue status, threshold status/type and parameter type stay out. */
+ *  so risk level, schedule type, threshold parameter type stay out; history interval and level and integrated type have no code in any sample or the pilot file to pair. Review status, issue
+ *  status, threshold status/type and the ETC computation are paired by name against Oracle's lists (see ENUMS), only for the codes the data shows. */
 /** What the P6 XML writer does NOT carry, field by field (table.field, or a whole table), with why - checked against P6's own XML schema (p6apibo.xsd, read from the
  *  copy MPXJ embeds) and the helpers MPXJ's XML writer uses for the coded values. Anything an XER holds that is neither in P6XML_TABLES' maps, nor carried by the special
  *  writers (calendars, nested codes, UDFs, notes, schedule options, curves) nor listed here fails tests/p6xml-coverage.test.ts. Reasons:
@@ -362,15 +378,15 @@ export const P6XML_NOT_CARRIED: Record<string, string> = {
   'PROJECT.new_fin_dates_id': NO, 'PROJECT.next_data_date': NO, 'PROJECT.close_period_flag': NO, 'PROJECT.trsrcsum_loaded': NO, 'PROJECT.sum_refresh_date': NO, 'PROJECT.baselines_to_export': NO,
   'PROJECT.baseline_names_to_export': NO, 'PROJECT.add_month_num': NO, 'PROJECT.add_item_cnt': NO, 'PROJECT.control_updates_flag': NO, 'PROJECT.hist_interval': TEXTS, 'PROJECT.hist_level': TEXTS,
   'PROJECT.schedule_type': TEXTS, 'PROJECT.sum_base_cost': NO, 'PROJECT.proj_name': OLD,
-  'PROJISSU.track_view_id': NO, 'PROJISSU.status_code': TEXTS, 'PROJISSU.base_proj_id': NO,
-  'PROJTHRS.status_code': TEXTS, 'PROJTHRS.thresh_type': TEXTS, 'PROJTHRS.track_view_id': NO, 'PROJTHRS.issue_cnt': NO,
-  'PROJWBS.proj_node_flag': 'structure: the root node is the Project element', 'PROJWBS.ann_dscnt_rate_pct': UNIT, 'PROJWBS.dscnt_period_type': ROOT, 'PROJWBS.ev_etc_compute_type': TEXTS,
+  'PROJISSU.track_view_id': NO, 'PROJISSU.base_proj_id': NO,
+  'PROJTHRS.track_view_id': NO, 'PROJTHRS.issue_cnt': NO,
+  'PROJWBS.proj_node_flag': 'structure: the root node is the Project element', 'PROJWBS.ann_dscnt_rate_pct': UNIT, 'PROJWBS.dscnt_period_type': ROOT,
   'PROJWBS.tmpl_guid': NO, 'PROJWBS.plan_open_state': NO,
   'ROLES.pobs_id': NO, 'ROLES.cost_qty_type': NO, 'ROLES.last_checksum': NO,
   'RSRC.pobs_id': NO, 'RSRC.cost_qty_type': NO, 'RSRC.xfer_complete_day_cnt': NO, 'RSRC.xfer_notstart_day_cnt': NO, 'RSRC.load_tasks_flag': NO, 'RSRC.level_flag': NO, 'RSRC.last_checksum': NO,
   'RSRC.cost_qty_link_flag': NO, 'RSRC.proj_id': NO, 'RSRC.default_units_per_time': OLD, 'RSRC.max_units_per_time': OLD,
   'RSRCROLE.rsrc_type': 'derived: filled in again from the resource when read', 'RSRCROLE.rsrc_role_id': NO,
-  'TASK.rev_fdbk_flag': NO, 'TASK.lock_plan_flag': NO, 'TASK.review_type': TEXTS, 'TASK.tmpl_guid': NO, 'TASK.old_restart_date': NO, 'TASK.old_reend_date': NO, 'TASK.old_remain_drtn_hr_cnt': NO, 'TASK.seq_num': NO, 'TASK.control_updates_flag': NO,
+  'TASK.rev_fdbk_flag': NO, 'TASK.lock_plan_flag': NO, 'TASK.tmpl_guid': NO, 'TASK.old_restart_date': NO, 'TASK.old_reend_date': NO, 'TASK.old_remain_drtn_hr_cnt': NO, 'TASK.seq_num': NO, 'TASK.control_updates_flag': NO,
   'TASKACTV.taskactv_id': NO, 'TASKPRED.float_path': NO, 'TASKPRED.taskpred_id': OLD,
   'TASKRSRC.pobs_id': NO, 'TASKRSRC.pend_complete_pct': UNIT, 'TASKRSRC.ts_pend_act_end_flag': NO, 'TASKRSRC.has_rsrchours': NO, 'TASKRSRC.taskrsrc_sum_id': NO,
   'TASKRSRC.old_restart_date': NO, 'TASKRSRC.old_reend_date': NO, 'TASKRSRC.old_remain_drtn_hr_cnt': NO, 'TASKRSRC.cur_cost': NO, 'TASKRSRC.cur_v': NO, 'TASKRSRC.rem_late_start_date2': NO, 'TASKRSRC.rem_late_end_date2': NO,
@@ -388,7 +404,7 @@ export const P6XML_PARTLY_CARRIED: Record<string, string> = {
 };
 /** Fields the WBS element carries that the root node (written as the Project element, whose fields are the project's own) does not. */
 export const P6XML_ROOT_NOT_CARRIED: Record<string, string> = {
-  est_wt: NO, seq_num: NO, guid: 'the Project element\'s GUID is the project\'s', wbs_short_name: 'the Project element\'s Id is the project\'s', sum_data_flag: 'the Project element\'s ContainsSummaryData is the project\'s', ev_etc_compute_type: TEXTS,
+  est_wt: NO, seq_num: NO, guid: 'the Project element\'s GUID is the project\'s', wbs_short_name: 'the Project element\'s Id is the project\'s', sum_data_flag: 'the Project element\'s ContainsSummaryData is the project\'s',
 };
 /** One XER field whose values P6 XML has no place for, as far as this export holds them. */
 export interface P6XmlLoss { table: string; field: string; rows: number; reason: string; items?: string[] }
@@ -526,6 +542,7 @@ function fromXml(n: XNode, map: FieldMap, alsoUsed: string[] = [], keep = true):
     else if (conv === 'color') v = v.replace(/^#/, '');
     else if (conv === 'pct') v = Number.isFinite(Number(v)) && v !== '' && Math.abs(Number(v)) <= 1 ? String(Math.round(Number(v) * 100 * 1e6) / 1e6) : v; // (older P6 Clone files wrote the percent itself; a fraction is at most 1)
     if (field === 'sched_outer_depend_type') v = v === 'true' || v === '1' ? 'SD_None' : 'SD_Both';
+    if ((conv?.startsWith('enum:') || conv?.startsWith('strict:')) && n.clone?.[field] && ENUMS[conv.slice(conv.indexOf(':') + 1)]?.[n.clone[field]] === c.text.trim()) v = n.clone[field]; // (the code the text was written for)
     r[field] = v;
   }
   return keep ? keepRest(n, r, [...map.map(([tag]) => tag), ...alsoUsed]) : r;
