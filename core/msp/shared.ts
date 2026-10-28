@@ -32,7 +32,7 @@ export interface MCal {
 /** P6 values carried in MS Project custom fields. */
 export interface P6Extra { activityId?: string; taskType?: string; cstr?: string; cstr2?: string; durType?: string; calName?: string }
 
-export interface MPred { uid: string; type: RelType; lagHrs: number; /** percentage lag (MS Project only), resolved against the predecessor duration */ lagPct?: number }
+export interface MPred { uid: string; type: RelType; lagHrs: number; /** percentage lag (MS Project only), resolved against the predecessor duration */ lagPct?: number; /** the file's own lag (the LinkLag text and the LagFormat number), kept where the clone converts it to hours: a percentage or elapsed lag */ lagFile?: { value: string; format: string } }
 
 export interface MTask {
   uid: string;
@@ -513,7 +513,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
       if (summaryUids.has(p.uid)) { warn('MSP_SUMMARY_LINK', `Link from summary task ${p.uid} to "${t.name}" dropped (WBS nodes cannot carry logic).`, 'P6 drops relationships on MS Project summary tasks when importing.', { table: 'TASKPRED', key: t.uid }); continue; }
       const pred = taskRows.get(p.uid);
       if (!pred) { warn('MSP_LINK_UNRESOLVED', `"${t.name}" has a predecessor ${p.uid} that is not in the file; link dropped.`, 'P6 drops links to tasks it does not import.', { table: 'TASKPRED', key: t.uid }); continue; }
-      push('TASKPRED', { task_pred_id: String(++relId), task_id: succ.task_id, pred_task_id: pred.task_id, proj_id: pid, pred_proj_id: pid, pred_type: `PR_${p.type}`, lag_hr_cnt: p6num(p.lagHrs) });
+      push('TASKPRED', { task_pred_id: String(++relId), task_id: succ.task_id, pred_task_id: pred.task_id, proj_id: pid, pred_proj_id: pid, pred_type: `PR_${p.type}`, lag_hr_cnt: p6num(p.lagHrs), ...(p.lagFile ? { _msp_lag_value: p.lagFile.value, _msp_lag_format: p.lagFile.format, ...(p.lagPct != null ? { _msp_lag_percent: String(p.lagPct) } : {}) } : {}) });
       imported.add(p);
     }
     // each <PredecessorLink> of the file: the link it became ('': one the clone did not import), so that a save keeps

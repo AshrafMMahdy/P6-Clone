@@ -28,7 +28,7 @@ import type { Finding } from '../findings.ts';
 import type { Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../dates.ts';
 import { p6num } from '../schedule/cpm.ts';
-import { defaultShifts, emptyTask, projectFromDb, projectToDb, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
+import { defaultShifts, emptyTask, projectFromDb, projectToDb, type MAssign, type MCal, type MPred, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
 
 const MARKER = 'P6CLONE: Text1=Activity ID, Text2=Activity Type, Text3=Constraint, Text4=Calendar, Text5=Secondary Constraint, Text6=Duration Type';
 
@@ -282,7 +282,7 @@ function readMpx(text: string, findings: Finding[]): MProject {
 }
 
 function parsePreds(s: string, durH: (s: string) => number | null, findings: Finding[], t: MTask) {
-  const out: { uid: string; type: RelType; lagHrs: number; lagPct?: number }[] = [];
+  const out: MPred[] = [];
   for (const part of s.split(/[,;]/)) {
     const p = part.trim();
     if (!p) continue;
@@ -290,7 +290,7 @@ function parsePreds(s: string, durH: (s: string) => number | null, findings: Fin
     if (!mm) { findings.push({ severity: 'warning', code: 'MPX_BAD_PREDECESSOR', table: 'TASKPRED', key: t.uid, message: `Task "${t.name}": predecessor "${p}" not understood; dropped.`, p6: 'P6 drops links it cannot read.' }); continue; }
     const type = (mm[2]?.toUpperCase() ?? 'FS') as RelType;
     const sign = mm[3] === '-' ? -1 : 1;
-    if (mm[4] && mm[4].trim().endsWith('%')) { out.push({ uid: mm[1], type, lagHrs: 0, lagPct: sign * Number(mm[4].trim().slice(0, -1)) }); continue; }
+    if (mm[4] && mm[4].trim().endsWith('%')) { out.push({ uid: mm[1], type, lagHrs: 0, lagPct: sign * Number(mm[4].trim().slice(0, -1)), lagFile: { value: `${mm[3] ?? ''}${mm[4].trim()}`, format: '%' } }); continue; }
     const lag = mm[4] ? durH(mm[4]) : 0;
     out.push({ uid: mm[1], type, lagHrs: sign * (lag ?? 0) });
   }

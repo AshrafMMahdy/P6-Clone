@@ -575,3 +575,113 @@ test('the server runs every tool when the folder it was started in is deleted (w
     assert.equal(existsSync(join(tmp, 'plan.xer')) || existsSync(join(tmpdir(), 'plan.xer')), false, 'nothing was written to the folder the server moved to');
   } finally { p.stdin.end(); }
 });
+
+// ------------------------------------------------------------------ what a platform import found missing in read_table and the P6 XML writer
+import { readdirSync } from 'node:fs';
+
+test('read_table gives the XER\'s ERMHDR line (version, export date, who, from where, currency), also in list_tables', async () => {
+  const { listTables, readTable } = await import('../core/query/rawtable.ts');
+  let seen = 0;
+  for (const f of readdirSync(SAMPLES_DIR).filter((x) => /\.xer$/i.test(x)).slice(0, 25)) {
+    const bytes = new Uint8Array(readFileSync(join(SAMPLES_DIR, f)));
+    const db = parseXer(bytes).db;
+    const first = new TextDecoder('latin1').decode(bytes.subarray(0, 600)).split(/\r?\n/)[0].replace(/^﻿/, '').split('\t');
+    if (first[0] !== 'ERMHDR') continue;
+    seen++;
+    assert.ok(listTables(db, null).some((t) => t.name === 'ERMHDR' && t.rows === 1), f);
+    const t = readTable(db, 'ERMHDR', null);
+    assert.equal(t.total, 1);
+    const col = (n: string) => t.rows[0][t.columns.indexOf(n)];
+    assert.equal(col('version'), first[1]);
+    assert.equal(col('export_date'), first[2]);
+    if (first[3] !== undefined) assert.equal(col('export_type'), first[3]);
+    if (first[4] !== undefined) assert.equal(col('export_user'), first[4]);
+    if (first.length > 7) assert.equal(col('currency'), first[7]);
+    assert.equal(String(col('raw_line')).split('\t').length, first.length, 'every field of the line');
+    assert.ok(t.columns.includes('clone:encoding'));
+  }
+  assert.ok(seen >= 10);
+});
+
+test('calendars whose clndr_data is not P6 syntax are read as far as the text allows, said so, and clndr_data stays as the file has it - never empty', async () => {
+  const { readTable } = await import('../core/query/rawtable.ts');
+  const { parseClndrData, parseClndrDataLeniently } = await import('../core/calendar/clndr-data.ts');
+  let invalid = 0, valid = 0;
+  for (const f of readdirSync(SAMPLES_DIR).filter((x) => /\.xer$/i.test(x))) {
+    let db: Db; try { db = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, f)))).db; } catch { continue; }
+    if (!db.tables.CALENDAR) continue;
+    const t = readTable(db, 'CALENDAR', null, { limit: 100000 });
+    const c = (r: unknown[], n: string) => r[t.columns.indexOf(n)] as any;
+    for (const r of t.rows) {
+      const raw = c(r, 'clndr_data') as string;
+      if (!raw) continue;
+      let strict = true; try { parseClndrData(raw); } catch { strict = false; }
+      if (strict) { valid++; assert.equal(c(r, 'calendar_note'), null); const a = parseClndrData(raw), b = parseClndrDataLeniently(raw)!; assert.deepEqual(b.week, a.week, `${f}: the lenient reader agrees with the strict one on valid text`); assert.deepEqual([...b.exceptions].sort(), [...a.exceptions].sort()); continue; }
+      invalid++;
+      assert.ok(c(r, 'work_week'), `${f} ${c(r, 'clndr_name')}: a week, not empty`);
+      assert.ok(Object.values(c(r, 'work_week')).some((d: any) => d.length), 'with hours in it');
+      assert.match(c(r, 'calendar_note'), /not valid P6 syntax.*clndr_data is the file's text as it is/);
+      assert.equal(raw, c(r, 'clndr_data'));
+    }
+  }
+  assert.ok(invalid >= 10 && valid > 100, `${invalid} invalid, ${valid} valid`);
+  // text that cannot be read at all: the raw text is there and the note says why work_week is empty
+  const db = load();
+  const cal = rows(db, 'CALENDAR')[0];
+  cal.clndr_data = '((( not a calendar';
+  const t = readTable(db, 'CALENDAR', null, { limit: 1000 });
+  const row = t.rows.find((r) => r[t.columns.indexOf('clndr_id')] === cal.clndr_id)!;
+  assert.equal(row[t.columns.indexOf('clndr_data')], '((( not a calendar');
+  assert.equal(row[t.columns.indexOf('work_week')], null);
+  assert.match(String(row[t.columns.indexOf('calendar_note')]), /could not be decoded.*given as it is in clndr_data/);
+});
+
+test('the P6 XML writer keeps units of measure, expense categories, resource curves, resource-role links, max units and the links to them: XER -> P6 XML -> read back equals the XER on every sample', async () => {
+  const { parseP6Xml, writeP6Xml } = await import('../core/xml/p6xml.ts');
+  const WANT: Record<string, string[] | 'all'> = { UMEASURE: 'all', COSTTYPE: 'all', RSRCCURVDATA: 'all', RSRCROLE: 'all', RSRC: ['max_qty_per_hr', 'unit_id', 'curr_id', 'rsrc_seq_num', 'ot_flag', 'timesheet_flag', 'auto_compute_act_flag', 'def_qty_per_hr'], TASKRSRC: ['curv_id', 'role_id'], PROJCOST: ['cost_type_id'] };
+  const KEY: Record<string, string> = { UMEASURE: 'unit_id', COSTTYPE: 'cost_type_id', RSRCCURVDATA: 'curv_id', RSRC: 'rsrc_id', TASKRSRC: 'taskrsrc_id', PROJCOST: 'cost_item_id' };
+  const counted: Record<string, number> = {};
+  let files = 0;
+  for (const f of readdirSync(SAMPLES_DIR).filter((x) => /\.xer$/i.test(x))) {
+    let a: Db; try { a = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, f)))).db; } catch { continue; }
+    const b = parseP6Xml(writeP6Xml(a, {} as never)).db;
+    files++;
+    for (const [t, which] of Object.entries(WANT)) {
+      const A = a.tables[t]?.rows ?? [], B = b.tables[t]?.rows ?? [];
+      if (!A.length) continue;
+      assert.equal(B.length, A.length, `${f} ${t}: every row written and read back`);
+      const fields = which === 'all' ? a.tables[t].fields.filter((x) => !x.startsWith('_')) : which;
+      const key = KEY[t] ?? 'role_id';
+      const byKey = new Map(B.map((r) => [t === 'RSRCROLE' ? `${r.rsrc_id}|${r.role_id}` : r[key], r]));
+      for (const r of A) {
+        const u = byKey.get(t === 'RSRCROLE' ? `${r.rsrc_id}|${r.role_id}` : r[key]);
+        assert.ok(u, `${f} ${t} ${r[key]}`);
+        for (const x of fields) { assert.equal(u![x] ?? '', r[x] ?? '', `${f} ${t}.${x} of ${r[key] ?? r.role_id}`); counted[`${t}.${x}`] = (counted[`${t}.${x}`] ?? 0) + (r[x] ? 1 : 0); }
+      }
+    }
+  }
+  assert.ok(files >= 50);
+  // every kind of data was in some sample (the test is not empty)
+  for (const k of ['UMEASURE.unit_name', 'COSTTYPE.cost_type', 'RSRCCURVDATA.curv_name', 'RSRCCURVDATA.pct_usage_10', 'RSRCROLE.role_id', 'RSRC.max_qty_per_hr', 'RSRC.unit_id', 'TASKRSRC.curv_id', 'PROJCOST.cost_type_id']) assert.ok(counted[k] > 0, `${k} was in some sample`);
+});
+
+test('a percentage or elapsed lag converted to hours keeps the file\'s own value: _msp_lag_value, _msp_lag_format (and _msp_lag_percent), shown by read_table', async () => {
+  const { parseMspdi } = await import('../core/msp/mspdi.ts');
+  const { readTable } = await import('../core/query/rawtable.ts');
+  const db = parseMspdi(readFileSync(join(import.meta.dirname, 'fixtures', 'rich-mspdi.xml'), 'utf8')).db;
+  const t = readTable(db, 'TASKPRED', null, { limit: 1000 });
+  const get = (r: unknown[], n: string) => r[t.columns.indexOf(n)];
+  const pct = t.rows.find((r) => get(r, 'clone:msp_lag_format') === '19');
+  assert.ok(pct, 'the percentage lag');
+  assert.equal(get(pct!, 'clone:msp_lag_value'), '50');
+  assert.equal(get(pct!, 'clone:msp_lag_percent'), '50');
+  assert.notEqual(get(pct!, 'lag_hr_cnt'), null, 'and the hours it came to are there as before');
+  const elapsed = t.rows.find((r) => get(r, 'clone:msp_lag_format') === '8');
+  assert.ok(elapsed, 'the elapsed lag');
+  assert.equal(get(elapsed!, 'clone:msp_lag_value'), '4800');
+  // links with an ordinary lag carry nothing extra
+  assert.ok(t.rows.some((r) => get(r, 'clone:msp_lag_format') == null));
+  // P6 itself has no percentage lag: the XER of a P6 file has lag_hr_cnt only
+  const p6 = readTable(load(), 'TASKPRED', null, { limit: 5 });
+  assert.ok(!p6.columns.some((c) => c.startsWith('clone:msp_lag')));
+});

@@ -89,6 +89,42 @@ export function parseClndrData(s: string): CalendarDef {
   return { week, exceptions };
 }
 
+/** clndr_data that is not P6's syntax (written by other tools: a child list without its own parentheses, spaces and line breaks inside, shift
+ *  attributes in the other order, "08:00-12:00" ranges) read as far as it can be: the work week from the seven day nodes in order, each day's
+ *  shifts, and every exception date (d|serial) with the shifts after it. null when no day node is found. P6 itself would not take such text;
+ *  scheduling still uses parseClndrData, this is only what read_table shows of it. */
+export function parseClndrDataLeniently(s: string): CalendarDef | null {
+  const dow = /DaysOfWeek/.exec(s), exc = /Exceptions/.exec(s);
+  if (!dow) return null;
+  const days = s.slice(dow.index, exc && exc.index > dow.index ? exc.index : s.length), tail = exc ? s.slice(exc.index).split('HoursPerTimePeriod')[0] : ''; // (its d|8;w|40 are hours, not days)
+  const clock = (h: string) => { const m = /^(\d{1,2}):(\d{2})$/.exec(h); return m ? +m[1] * 60 + +m[2] : NaN; };
+  const shiftsIn = (text: string): Shift[] => {
+    const out: Shift[] = [];
+    for (const m of text.matchAll(/s\|(\d{1,2}:\d{2})\|f\|(\d{1,2}:\d{2})|f\|(\d{1,2}:\d{2})\|s\|(\d{1,2}:\d{2})|(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/g)) {
+      const a = clock(m[1] ?? m[4] ?? m[5]), b0 = clock(m[2] ?? m[3] ?? m[6]), b = b0 === 0 ? 1440 : b0;
+      if (Number.isFinite(a) && Number.isFinite(b) && b > a) out.push({ start: a, end: b });
+    }
+    return out.sort((x, y) => x.start - y.start);
+  };
+  // the day nodes are 1..7 in order; a node named like the day to come, with no attributes (or with the shift in them), starts it
+  const week: Shift[][] = [[], [], [], [], [], [], []];
+  const marks: { day: number; at: number }[] = [];
+  let next = 1;
+  for (const m of days.matchAll(/\(\s*(?:\d+\|\|)?\s*([1-7])(?=\s*[()])(\s*\(\s*\))?/g)) {
+    if (Number(m[1]) !== next) continue;
+    const emptyAttrs = !!m[2] || /^\s*\)/.test(days.slice(m.index! + m[0].length));
+    const here = days.slice(m.index! + m[0].length, m.index! + m[0].length + 40);
+    if (!emptyAttrs && !/^\s*\(\s*(?:\d+\|\|)?(?:[sf]\||\d{1,2}:\d{2}-)/.test(here)) continue;
+    marks.push({ day: next, at: m.index! }); next++;
+  }
+  if (marks.length < 7) return null;
+  marks.forEach((mk, i) => { week[mk.day - 1] = shiftsIn(days.slice(mk.at, marks[i + 1]?.at ?? days.length)); });
+  const exceptions = new Map<number, Shift[]>();
+  const parts = tail.split(/d\|(\d{3,})/);
+  for (let i = 1; i + 1 <= parts.length; i += 2) exceptions.set(Number(parts[i]), shiftsIn(parts[i + 1] ?? ''));
+  return { week, exceptions };
+}
+
 const t = (m: number) => `${String(Math.floor((m % 1440) / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const shiftNodes = (ss: Shift[]) => ss.map((x, i) => `(0||${i}(s|${t(x.start)}|f|${t(x.end)})())`).join('');
 

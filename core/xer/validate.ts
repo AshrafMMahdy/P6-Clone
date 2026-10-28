@@ -194,7 +194,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
       if (wh === 0) c.add({ severity: 'warning', code: 'CAL_NO_WORK', table: 'CALENDAR', row: i + 1, key: r.clndr_id, message: `Calendar ${r.clndr_name} has no work hours in its week.`, p6: 'P6 imports it; activities on it cannot be scheduled.' });
       if (r.week_hr_cnt && Math.abs(Number(r.week_hr_cnt) - wh) > 0.01) c.add({ severity: 'info', code: 'CAL_HOURS_MISMATCH', table: 'CALENDAR', row: i + 1, key: r.clndr_id, message: `Calendar ${r.clndr_name}: week_hr_cnt ${r.week_hr_cnt} but work week has ${wh} h.`, p6: 'P6 uses week_hr_cnt only for display/unit conversion.' });
     } catch (e) {
-      c.add({ severity: 'error', code: 'CAL_PARSE', table: 'CALENDAR', row: i + 1, key: r.clndr_id, field: 'clndr_data', message: `Calendar ${r.clndr_name}: clndr_data does not parse (${(e as Error).message}).`, p6: 'P6 import fails or the calendar is unusable.' });
+      c.add({ severity: 'error', code: 'CAL_PARSE', table: 'CALENDAR', row: i + 1, key: r.clndr_id, field: 'clndr_data', message: `Calendar ${r.clndr_name}: clndr_data does not parse (${(e as Error).message}); read_table gives clndr_data as it is, with the week and exceptions read from it as far as the text allows.`, p6: 'P6 import fails or the calendar is unusable.' });
     }
   }
 

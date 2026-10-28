@@ -157,16 +157,21 @@ const ACT_MAP: FieldMap = [['ObjectId', 'task_id'], ['ProjectObjectId', 'proj_id
 const REL_MAP: FieldMap = [['ObjectId', 'task_pred_id'], ['PredecessorActivityObjectId', 'pred_task_id'], ['SuccessorActivityObjectId', 'task_id'], ['PredecessorProjectObjectId', 'pred_proj_id'],
   ['SuccessorProjectObjectId', 'proj_id'], ['Type', 'pred_type', 'enum:pred_type'], ['Lag', 'lag_hr_cnt', 'num']];
 const RSRC_MAP: FieldMap = [['ObjectId', 'rsrc_id'], ['Id', 'rsrc_short_name'], ['Name', 'rsrc_name'], ['ResourceType', 'rsrc_type', 'enum:rsrc_type'], ['CalendarObjectId', 'clndr_id'],
-  ['ParentObjectId', 'parent_rsrc_id'], ['DefaultUnitsPerTime', 'def_qty_per_hr', 'num'], ['EmployeeId', 'employee_code'], ['EmailAddress', 'email_addr'], ['Title', 'rsrc_title_name'], ['IsActive', 'active_flag', 'bool'], ['GUID', 'guid']];
+  ['ParentObjectId', 'parent_rsrc_id'], ['DefaultUnitsPerTime', 'def_qty_per_hr', 'num'], ['MaxUnitsPerTime', 'max_qty_per_hr', 'num'], ['UnitOfMeasureObjectId', 'unit_id'], ['CurrencyObjectId', 'curr_id'], ['SequenceNumber', 'rsrc_seq_num', 'num'], ['IsOvertimeAllowed', 'ot_flag', 'bool'], ['UseTimesheets', 'timesheet_flag', 'bool'], ['AutoComputeActuals', 'auto_compute_act_flag', 'bool'], ['EmployeeId', 'employee_code'], ['EmailAddress', 'email_addr'], ['Title', 'rsrc_title_name'], ['IsActive', 'active_flag', 'bool'], ['GUID', 'guid']];
 const RATE_MAP: FieldMap = [['ObjectId', 'rsrc_rate_id'], ['ResourceObjectId', 'rsrc_id'], ['EffectiveDate', 'start_date', 'date'], ['MaxUnitsPerTime', 'max_qty_per_hr', 'num'], ['PricePerUnit', 'cost_per_qty', 'num']];
 const ASSIGN_MAP: FieldMap = [['ObjectId', 'taskrsrc_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['ResourceObjectId', 'rsrc_id'], ['RoleObjectId', 'role_id'], ['CostAccountObjectId', 'acct_id'],
   ['PlannedUnits', 'target_qty', 'num'], ['ActualRegularUnits', 'act_reg_qty', 'num'], ['ActualOvertimeUnits', 'act_ot_qty', 'num'], ['RemainingUnits', 'remain_qty', 'num'],
   ['PlannedUnitsPerTime', 'target_qty_per_hr', 'num'], ['RemainingUnitsPerTime', 'remain_qty_per_hr', 'num'], ['PricePerUnit', 'cost_per_qty', 'num'], ['PlannedCost', 'target_cost', 'num'],
   ['ActualRegularCost', 'act_reg_cost', 'num'], ['ActualOvertimeCost', 'act_ot_cost', 'num'], ['RemainingCost', 'remain_cost', 'num'],
   ['ActualStartDate', 'act_start_date', 'date'], ['ActualFinishDate', 'act_end_date', 'date'], ['PlannedStartDate', 'target_start_date', 'date'], ['PlannedFinishDate', 'target_end_date', 'date'],
-  ['RemainingStartDate', 'restart_date', 'date'], ['RemainingFinishDate', 'reend_date', 'date'], ['RateType', 'rate_type'], ['ResourceType', 'rsrc_type', 'enum:rsrc_type']];
+  ['RemainingStartDate', 'restart_date', 'date'], ['RemainingFinishDate', 'reend_date', 'date'], ['RateType', 'rate_type'], ['ResourceType', 'rsrc_type', 'enum:rsrc_type'], ['ResourceCurveObjectId', 'curv_id']];
 const EXP_MAP: FieldMap = [['ObjectId', 'cost_item_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['CostAccountObjectId', 'acct_id'], ['ExpenseItem', 'cost_name'],
-  ['PlannedCost', 'target_cost', 'num'], ['ActualCost', 'act_cost', 'num'], ['RemainingCost', 'remain_cost', 'num'], ['Vendor', 'vendor_name'], ['DocumentNumber', 'po_number']];
+  ['PlannedCost', 'target_cost', 'num'], ['ActualCost', 'act_cost', 'num'], ['RemainingCost', 'remain_cost', 'num'], ['Vendor', 'vendor_name'], ['DocumentNumber', 'po_number'], ['ExpenseCategoryObjectId', 'cost_type_id']];
+/** Units of measure, expense categories, resource curves and the links between resources and roles (the dictionaries the activity expenses, resources and assignments point at). */
+const UOM_MAP: FieldMap = [['ObjectId', 'unit_id'], ['Abbreviation', 'unit_abbrev'], ['Name', 'unit_name'], ['SequenceNumber', 'seq_num', 'num']];
+const EXPCAT_MAP: FieldMap = [['ObjectId', 'cost_type_id'], ['Name', 'cost_type'], ['SequenceNumber', 'seq_num', 'num']];
+const CURVE_MAP: FieldMap = [['ObjectId', 'curv_id'], ['Name', 'curv_name'], ['IsDefault', 'default_flag', 'bool'], ...Array.from({ length: 21 }, (_, i): [string, string, 'num'] => [`PercentUsage${i}`, `pct_usage_${i}`, 'num'])];
+const RSRCROLE_MAP: FieldMap = [['ObjectId', 'rsrc_role_id'], ['ResourceObjectId', 'rsrc_id'], ['RoleObjectId', 'role_id'], ['SkillLevel', 'skill_level']];
 const CODETYPE_MAP: FieldMap = [['ObjectId', 'actv_code_type_id'], ['Name', 'actv_code_type'], ['Scope', 'actv_code_type_scope', 'enum:code_scope'], ['ProjectObjectId', 'proj_id'], ['Length', 'actv_short_len', 'num'], ['SequenceNumber', 'seq_num', 'num']];
 const CODE_MAP: FieldMap = [['ObjectId', 'actv_code_id'], ['CodeTypeObjectId', 'actv_code_type_id'], ['ParentObjectId', 'parent_actv_code_id'], ['CodeValue', 'short_name'], ['Description', 'actv_code_name'], ['SequenceNumber', 'seq_num', 'num']];
 const CODEASSIGN_MAP: FieldMap = [['ActivityObjectId', 'task_id'], ['ActivityCodeTypeObjectId', 'actv_code_type_id'], ['ActivityCodeObjectId', 'actv_code_id'], ['ProjectObjectId', 'proj_id']];
@@ -206,7 +211,7 @@ function toXml(r: Row, map: FieldMap): string {
 /** The XML tags the reader turns into the clone's own columns, converting the value (dates, enumerations, flags) or
  *  folding it (a calendar's week and exceptions into clndr_data): every other leaf is kept as it is (xml:<Tag>). */
 export function p6xmlConvertedTags(): Set<string> {
-  const maps = [PROJECT_MAP, OLD_SCHED_MAP, SCHED_MAP, WBS_MAP, ACT_MAP, REL_MAP, RSRC_MAP, RATE_MAP, ASSIGN_MAP, EXP_MAP, CODETYPE_MAP, CODE_MAP, CODEASSIGN_MAP, ACCOUNT_MAP, OBS_MAP, UDFTYPE_MAP, UDFVAL_MAP, CURR_MAP, ROLE_MAP, MEMO_MAP, STEP_MAP, PCODETYPE_MAP, PCODE_MAP, RCODETYPE_MAP, RCODE_MAP, TOPIC_MAP, WBSMEMO_MAP];
+  const maps = [PROJECT_MAP, OLD_SCHED_MAP, SCHED_MAP, WBS_MAP, ACT_MAP, REL_MAP, RSRC_MAP, RATE_MAP, UOM_MAP, EXPCAT_MAP, CURVE_MAP, RSRCROLE_MAP, ASSIGN_MAP, EXP_MAP, CODETYPE_MAP, CODE_MAP, CODEASSIGN_MAP, ACCOUNT_MAP, OBS_MAP, UDFTYPE_MAP, UDFVAL_MAP, CURR_MAP, ROLE_MAP, MEMO_MAP, STEP_MAP, PCODETYPE_MAP, PCODE_MAP, RCODETYPE_MAP, RCODE_MAP, TOPIC_MAP, WBSMEMO_MAP];
   return new Set([...maps.flatMap((m) => m.map(([tag]) => tag)), 'OutOfSequenceScheduleType', 'IsDefault', 'Type', 'IsPersonal', 'DayOfWeek', 'Start', 'Finish', 'Date', 'TypeObjectId', 'ValueObjectId', 'PercentComplete']);
 }
 
@@ -234,7 +239,8 @@ function fromXml(n: XNode, map: FieldMap, alsoUsed: string[] = [], keep = true):
   for (const [tag, field, conv] of map) {
     const c = child(n, tag);
     if (!c) continue;
-    let v = c.text.trim();
+    // text values exactly as written (a trailing space or no-break space is part of a name); dates, numbers, flags and codes are read without the whitespace around them
+    let v = conv ? c.text.trim() : c.text;
     if (conv === 'date') v = xerDate(v);
     else if (conv === 'bool') v = v === 'true' || v === '1' ? 'Y' : 'N';
     else if (conv?.startsWith('enum:')) { const e = ENUMS[conv.slice(5)]; v = v === 'None' || v === '<None>' ? '' : Object.entries(e).find(([, l]) => l === v)?.[0] ?? v; }
@@ -361,10 +367,14 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
   for (const r of get('PCATVAL')) el('ProjectCode', r, PCODE_MAP);
   for (const r of get('RCATTYPE')) el('ResourceCodeType', r, RCODETYPE_MAP);
   for (const r of get('RCATVAL')) el('ResourceCode', r, RCODE_MAP);
+  for (const r of get('UMEASURE')) el('UnitOfMeasure', r, UOM_MAP);
+  for (const r of get('COSTTYPE')) el('ExpenseCategory', r, EXPCAT_MAP);
+  for (const r of get('RSRCCURVDATA')) el('ResourceCurve', r, CURVE_MAP);
   for (const r of get('ROLES')) el('Role', r, ROLE_MAP);
   const rcodes = new Map<string, Row[]>(); for (const a of get('RSRCRCAT')) { const l = rcodes.get(a.rsrc_id); if (l) l.push(a); else rcodes.set(a.rsrc_id, [a]); }
   for (const r of get('RSRC')) el('Resource', r, RSRC_MAP, codeRefsXml(rcodes.get(r.rsrc_id) ?? [], 'rsrc_catg_type_id', 'rsrc_catg_id') + udfs('RSRC', r.rsrc_id));
   for (const r of get('RSRCRATE')) el('ResourceRate', r, RATE_MAP);
+  for (const r of get('RSRCROLE')) el('ResourceRole', r, RSRCROLE_MAP);
   const pcodes = new Map<string, Row[]>(); for (const a of get('PROJPCAT')) { const l = pcodes.get(a.proj_id); if (l) l.push(a); else pcodes.set(a.proj_id, [a]); }
   const projectXml = (tag: 'Project' | 'BaselineProject', p: Row, get: (t: string) => Row[], originalId?: string) => {
     const wbsAll = get('PROJWBS');
@@ -403,7 +413,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   const db: Db = { tables: {} };
   const push = (t: string, r: Row) => { const T = table(db, t); for (const f of Object.keys(r)) addField(T, f); T.rows.push(r); };
   const topMap: [string, string, FieldMap][] = [['Currency', 'CURRTYPE', CURR_MAP], ['OBS', 'OBS', OBS_MAP], ['CostAccount', 'ACCOUNT', ACCOUNT_MAP], ['NotebookTopic', 'MEMOTYPE', TOPIC_MAP],
-    ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP],
+    ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP], ['ResourceRole', 'RSRCROLE', RSRCROLE_MAP], ['UnitOfMeasure', 'UMEASURE', UOM_MAP], ['ExpenseCategory', 'COSTTYPE', EXPCAT_MAP], ['ResourceCurve', 'RSRCCURVDATA', CURVE_MAP],
     ['ProjectCodeType', 'PCATTYPE', PCODETYPE_MAP], ['ProjectCode', 'PCATVAL', PCODE_MAP], ['ResourceCodeType', 'RCATTYPE', RCODETYPE_MAP], ['ResourceCode', 'RCATVAL', RCODE_MAP]];
   const projMap: [string, string, FieldMap][] = [['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Relationship', 'TASKPRED', REL_MAP], ['ResourceAssignment', 'TASKRSRC', ASSIGN_MAP],
     ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
@@ -490,6 +500,13 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   // P6 writes percentages as fractions; files from earlier P6 Clone builds wrote 0-100 (told apart by any value over 1)
   const tasks = rows(db, 'TASK');
   if (!tasks.some((t) => Number(t.phys_complete_pct) > 1)) for (const t of tasks) if (t.phys_complete_pct) t.phys_complete_pct = String(Math.round(Number(t.phys_complete_pct) * 1e6) / 1e4);
+  // an XER's RSRCROLE row also names the resource and the role (their IDs, names and the resource's type): the XML says only which two are linked
+  if (db.tables.RSRCROLE?.rows.length) {
+    const roles = new Map(rows(db, 'ROLES').map((x) => [x.role_id, x])), rs = new Map(rows(db, 'RSRC').map((x) => [x.rsrc_id, x]));
+    const T = db.tables.RSRCROLE;
+    for (const f of ['role_short_name', 'role_name', 'rsrc_short_name', 'rsrc_name', 'rsrc_type']) addField(T, f);
+    for (const l of T.rows) { const ro = roles.get(l.role_id), re = rs.get(l.rsrc_id); l.role_short_name = ro?.role_short_name ?? ''; l.role_name = ro?.role_name ?? ''; l.rsrc_short_name = re?.rsrc_short_name ?? ''; l.rsrc_name = re?.rsrc_name ?? ''; l.rsrc_type = re?.rsrc_type ?? ''; }
+  }
   if (!rows(db, 'PROJECT').length) findings.push({ severity: 'fatal', code: 'NO_PROJECT', message: 'The XML file contains no <Project>.', p6: 'P6 finds no project to import.' });
   return { db, findings };
 }

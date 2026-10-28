@@ -9,7 +9,7 @@
 //   clone:<field>, CLONE:<TABLE>  the clone's own data beside the file's (a project's EPS, baseline links, saved
 //              filters, layouts, reports, portfolios, timesheet lines, risk estimates...): fields and tables starting with "_"
 import type { Db, Row } from '../db.ts';
-import { parseClndrData, type Shift } from '../calendar/clndr-data.ts';
+import { parseClndrData, parseClndrDataLeniently, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, serialToMinutes } from '../dates.ts';
 import { parseXml } from '../xml/p6xml.ts';
 
@@ -53,13 +53,18 @@ function mspFields(r: Row): Record<string, string | string[]> | null {
 }
 /** A calendar's work week and exceptions, decoded from its clndr_data. */
 function calendarFields(r: Row): Record<string, unknown> {
-  try {
-    const def = parseClndrData(r.clndr_data ?? '');
-    return {
-      work_week: Object.fromEntries(def.week.map((ss, i) => [DAYS[i], shifts(ss)])),
-      exceptions: [...def.exceptions.entries()].sort((a, b) => a[0] - b[0]).map(([d, ss]) => ({ date: formatP6Date(serialToMinutes(d)).slice(0, 10), work: shifts(ss) })),
-    };
-  } catch (e) { return { work_week: null, exceptions: null, calendar_error: (e as Error).message }; }
+  const decoded = (def: CalendarDef, note: string | null) => ({
+    work_week: Object.fromEntries(def.week.map((ss, i) => [DAYS[i], shifts(ss)])),
+    exceptions: [...def.exceptions.entries()].sort((a, b) => a[0] - b[0]).map(([d, ss]) => ({ date: formatP6Date(serialToMinutes(d)).slice(0, 10), work: shifts(ss) })),
+    calendar_note: note,
+  });
+  try { return decoded(parseClndrData(r.clndr_data ?? ''), null); } catch (e) {
+    // text that is not P6's syntax (written by another tool): read as far as it can be, and said so; clndr_data is always the file's text as it is
+    const why = (e as Error).message;
+    const def = r.clndr_data ? parseClndrDataLeniently(r.clndr_data) : null;
+    if (def) return decoded(def, `clndr_data is not valid P6 syntax (${why}; P6 would not take it): work_week and exceptions are read from it as far as its text allows; clndr_data is the file's text as it is.`);
+    return { work_week: null, exceptions: null, calendar_note: r.clndr_data ? `clndr_data could not be decoded (${why}): it is given as it is in clndr_data.` : null };
+  }
 }
 
 /** The projects a project argument names (Project ID, a baseline's too, or the proj_id), else null (every row). */
@@ -79,7 +84,7 @@ function columnsOf(name: string, t: { fields: string[]; rows: Row[] }, rows: Row
   const msp = new Set<string>();
   for (const r of rows) { const m = mspFields(r); if (m) for (const k of Object.keys(m)) msp.add(k); }
   const clone = t.fields.filter(cloneField).map((f) => `clone:${f.slice(1)}`);
-  return [...own, ...xml, ...msp, ...clone, ...(name === 'CALENDAR' ? ['work_week', 'exceptions'] : [])];
+  return [...own, ...xml, ...msp, ...clone, ...(name === 'CALENDAR' ? ['work_week', 'exceptions', 'calendar_note'] : [])];
 }
 
 /** Microsoft Project elements that are not P6 rows (keep.ts ghosts: the project summary task, blank rows, the blank
@@ -100,10 +105,27 @@ function ghostTables(db: Db): Record<string, { fields: string[]; rows: Row[] }> 
   }
   return out;
 }
+/** The XER's first line (ERMHDR) as a one-row table: what the file says of itself - the P6 version, the export date, what was exported, by whom,
+ *  from which database, the currency - as P6 names the fields, then any further field of the line (field_8...), the whole line, and the text
+ *  encoding the clone read the file in. */
+const HEADER_FIELDS = ['version', 'export_date', 'export_type', 'export_user', 'database_name', 'module', 'currency'];
+function headerTable(db: Db): { fields: string[]; rows: Row[] } | null {
+  const h = db.header;
+  if (!h) return null;
+  const parts = h.raw?.length ? h.raw.slice(1) : [h.version, h.exportDate];
+  const row: Row = {};
+  const fields = parts.map((_, i) => HEADER_FIELDS[i] ?? `field_${i + 1}`);
+  parts.forEach((v, i) => { row[fields[i]] = v; });
+  row.raw_line = ['ERMHDR', ...parts].join('\t');
+  if (h.encoding) row._encoding = h.encoding;
+  return { fields: [...fields, 'raw_line', ...(h.encoding ? ['_encoding'] : [])], rows: [row] };
+}
 /** Every table the reader sees, by the name it sees: the file's tables, kept XML objects, Microsoft Project's elements
  *  that are not rows. */
 function tablesOf(db: Db): Map<string, { real: string; t: { fields: string[]; rows: Row[] } }> {
   const m = new Map<string, { real: string; t: { fields: string[]; rows: Row[] } }>();
+  const hdr = headerTable(db);
+  if (hdr) m.set('ERMHDR', { real: 'ERMHDR', t: hdr });
   for (const [n, t] of Object.entries(db.tables)) m.set(shown(n), { real: n, t });
   for (const [n, t] of Object.entries(ghostTables(db))) m.set(n, { real: n, t });
   return m;
@@ -137,7 +159,7 @@ export function readTable(db: Db, name: string, projIds: string[] | null, o: { o
     columns = o.columns;
   }
   const rows = page.map((r) => {
-    const msp = mspFields(r), cal = realName === 'CALENDAR' && (columns.includes('work_week') || columns.includes('exceptions')) ? calendarFields(r) : null;
+    const msp = mspFields(r), cal = realName === 'CALENDAR' && (columns.includes('work_week') || columns.includes('exceptions') || columns.includes('calendar_note')) ? calendarFields(r) : null;
     return columns.map((c) => (c.startsWith('xml:') ? r[`_xml_${c.slice(4)}`] ?? null : c.startsWith('msp:') ? msp?.[c] ?? null : c.startsWith('clone:') ? r[`_${c.slice(6)}`] ?? null : cal && c in cal ? cal[c] : r[c] ?? null));
   });
   return { table: shownName, columns, rows, total: all.length, offset, ...(offset + page.length < all.length ? { next_offset: offset + page.length } : {}) };

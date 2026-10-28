@@ -242,9 +242,9 @@ function projectReader(findings: Finding[], src: string | Chunked) {
       const base = fmt > 32 ? fmt - 32 : fmt; // 35.. = estimated variants
       const lagHrs = lag / 600; // tenths of minutes
       // Assumption (as MPXJ reads it): percentage lags store the plain percentage in LinkLag.
-      if (base === 19 || base === 20) { lagFormats.add('percent'); m.preds.push({ uid: pu, type, lagHrs: 0, lagPct: lag }); m.links[m.links.length - 1] = m.preds[m.preds.length - 1]; continue; }
+      if (base === 19 || base === 20) { lagFormats.add('percent'); m.preds.push({ uid: pu, type, lagHrs: 0, lagPct: lag, lagFile: { value: val(l, 'LinkLag'), format: String(fmt) } }); m.links[m.links.length - 1] = m.preds[m.preds.length - 1]; continue; }
       if ([4, 6, 8, 10, 12].includes(base) && lag) lagFormats.add('elapsed');
-      m.preds.push({ uid: pu, type, lagHrs });
+      m.preds.push({ uid: pu, type, lagHrs, ...(lag && [4, 6, 8, 10, 12].includes(base) ? { lagFile: { value: val(l, 'LinkLag'), format: String(fmt) } } : {}) });
       m.links[m.links.length - 1] = m.preds[m.preds.length - 1];
     }
     tasks.push(m);
