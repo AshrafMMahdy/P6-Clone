@@ -346,8 +346,17 @@ test('coded values written are the texts Oracle lists and MPXJ links to the XER 
   assert.equal(back.tables.PROJISSU.rows.find((r) => r.issue_id === '900001')?.priority_type, 'PT_Top');
   // WBS category (phase_id = "WBS Category" in the data map) travels as WBSCategoryObjectId
   w.phase_id = '77';
-  const b2 = parseP6Xml(writeP6Xml(db, {} as never)).db;
+  assert.ok(!writeP6Xml(db, {} as never).includes('<WBSCategoryObjectId>'), 'no reference without its list');
+  assert.equal(p6xmlLosses(db).find((l) => l.table === 'PROJWBS' && l.field === 'phase_id')?.rows, 1);
+  db.tables.PHASE = { name: 'PHASE', fields: ['phase_id', 'phase_name', 'seq_num'], rows: [{ phase_id: '77', phase_name: 'Design', seq_num: '10' }] };
+  const x2 = writeP6Xml(db, {} as never);
+  assert.ok(x2.includes('<WBSCategory><Name>Design</Name><ObjectId>77</ObjectId><SequenceNumber>10</SequenceNumber></WBSCategory>') && x2.includes('<WBSCategoryObjectId>77</WBSCategoryObjectId>'));
+  const b2 = parseP6Xml(x2).db;
   assert.equal(b2.tables.PROJWBS.rows.find((r) => r.wbs_id === w.wbs_id)?.phase_id, '77');
+  assert.deepEqual(b2.tables.PHASE.rows.map((r) => [r.phase_id, r.phase_name, r.seq_num]), [['77', 'Design', '10']]);
+  assert.ok(!p6xmlLosses(db).some((l) => l.field === 'phase_id'));
+  // a project-only export keeps the list too
+  assert.ok(writeP6Xml(db, { projIds: [db.tables.PROJECT.rows[0].proj_id] }).includes('<WBSCategory>'));
 });
 
 test('codes paired by name against Oracle\'s lists: written as Oracle\'s text, a second code for one text comes back exact, unseen codes stay out', () => {
@@ -403,4 +412,9 @@ test('schedule options and the last schedule date: LevelPriorityList, limit-path
   assert.equal(L.find((l) => l.table === 'SCHEDOPTIONS' && l.field === 'LevelPriorityList')?.rows, 1);
   assert.equal(L.find((l) => l.table === 'SCHEDOPTIONS' && l.field === 'sched_setplantoforecast')?.reason, 'no element in P6 XML');
   assert.ok(!L.some((l) => l.field === 'limit_multiple_longest_path_calc' || l.field === 'last_schedule_date'));
+  // the over-allocation percent: its unit in XML (percent or fraction) is not settled by MPXJ (passes it through unscaled) and Oracle (\"percentage\"): left out, counted
+  so.level_over_alloc_pct = '25';
+  if (!T.fields.includes('level_over_alloc_pct')) T.fields.push('level_over_alloc_pct');
+  assert.ok(!writeP6Xml(db, {} as never).includes('<OverAllocationPercentage>'));
+  assert.equal(p6xmlLosses(db).find((l) => l.table === 'SCHEDOPTIONS' && l.field === 'level_over_alloc_pct')?.reason, 'P6 XML field exists, its unit (percent or fraction) is not verified');
 });

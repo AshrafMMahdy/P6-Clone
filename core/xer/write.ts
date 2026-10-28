@@ -27,7 +27,7 @@ const CHILD_OF: Record<string, string> = {
   PCATVAL: 'proj_catg_type_id', RCATVAL: 'rsrc_catg_type_id', RSRCRCAT: 'rsrc_id', SHIFTPER: 'shift_id',
 };
 // P6 writes these dictionary tables whole in a project export (the real samples carry every POBS row)
-const ALWAYS = new Set(['CURRTYPE', 'POBS']);
+const ALWAYS = new Set(['CURRTYPE', 'POBS', 'PHASE']);
 /** References kept out of refTarget (they often point outside a file) that still pull their row into an export. */
 const SOFT_REFS: [table: string, field: string, target: string][] = [['RSRC', 'shift_id', 'SHIFT'], ['RSRC', 'pobs_id', 'POBS'], ['TASKRSRC', 'pobs_id', 'POBS'], ['TASK', 'rsrc_id', 'RSRC']];
 /** UDFTYPE.table_name -> the table a UDF value's fk_id points into (values of non-project UDFs have no proj_id). */

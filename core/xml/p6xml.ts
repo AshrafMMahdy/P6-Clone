@@ -303,7 +303,7 @@ PROJECT_MAP.push(F('FiscalYearStartMonth', 'fy_start_month_num', 'num'), F('Acti
   F('AssignmentDefaultRateType', 'def_rate_type', 'enum:rate_type'), F('DefaultPriceTimeUnits', 'def_qty_type', 'strict:qty_type'), F('SummaryLevel', 'sum_assign_level', 'strict:sum_level'),
   F('ResourcesCanEditAssignmentPercentComplete', 'chng_eff_cmp_pct_flag', 'bool'),
   F('CheckOutStatus', 'checkout_flag', 'bool'), F('PrimaryResourcesCanMarkActivitiesAsCompleted', 'ts_rsrc_mark_act_finish_flag', 'bool'), F('ActivityPercentCompleteBasedOnActivitySteps', 'step_complete_flag', 'bool'));
-SCHED_MAP.push(F('LevelAllResources', 'level_all_rsrc_flag', 'bool'), F('LevelWithinFloat', 'level_within_float_flag', 'bool'), F('MinFloatToPreserve', 'level_float_thrs_cnt', 'num'), F('OverAllocationPercentage', 'level_over_alloc_pct', 'num'),
+SCHED_MAP.push(F('LevelAllResources', 'level_all_rsrc_flag', 'bool'), F('LevelWithinFloat', 'level_within_float_flag', 'bool'), F('MinFloatToPreserve', 'level_float_thrs_cnt', 'num'),
   F('PreserveScheduledEarlyAndLateDates', 'level_keep_sched_date_flag', 'bool'), F('IncludeExternalResAss', 'level_outer_assign_flag', 'bool'), F('ExternalProjectPriorityLimit', 'level_outer_assign_priority', 'num'),
   F('MultipleFloatPathsEnabled', 'enable_multiple_longest_path_calc', 'bool'), F('MaximumMultipleFloatPaths', 'max_multiple_longest_path', 'num'), F('MultipleFloatPathsUseTotalFloat', 'use_total_float_multiple_longest_paths', 'bool'),
   F('MultipleFloatPathsEndingActivityObjectId', 'key_activity_for_multiple_longest_paths'));
@@ -324,6 +324,8 @@ const TASKFIN_MAP: FieldMap = [F('FinancialPeriodObjectId', 'fin_dates_id'), F('
   F('PlannedValueCost', 'bcws', 'num'), F('EarnedValueLaborUnits', 'perfm_work_qty', 'num'), F('PlannedValueLaborUnits', 'sched_work_qty', 'num')];
 const WBSRSRC_MAP: FieldMap = [F('ObjectId', 'wbsrsrc_id'), F('WBSObjectId', 'wbs_id'), F('ResourceObjectId', 'rsrc_id'), F('RoleObjectId', 'role_id'), F('ProjectObjectId', 'proj_id'), F('StartDate', 'start_date', 'date'),
   F('FinishDate', 'end_date', 'date'), F('CommittedFlag', 'committed_flag', 'bool')];
+/** WBS categories (the PHASE table: phase_id, phase_name, seq_num; "WBS Category" in Oracle's XER data map) are the schema's WBSCategory elements; a WBS's phase_id is its WBSCategoryObjectId. */
+const PHASE_MAP: FieldMap = [F('ObjectId', 'phase_id'), F('Name', 'phase_name'), F('SequenceNumber', 'seq_num', 'num')];
 const TASKNOTE_MAP: FieldMap = [F('ActivityObjectId', 'task_id'), F('ProjectObjectId', 'proj_id'), F('Note', 'task_notes')]; // an activity's note with no notebook topic (the XER's TASKNOTE): ActivityNote without NotebookTopicObjectId
 const SPEND_MAP: FieldMap = [F('ObjectId', 'wbs_budg_id'), F('ProjectObjectId', 'proj_id'), F('WBSObjectId', 'wbs_id'), F('Date', 'start_date', 'date'), F('SpendingPlan', 'spend_cost', 'num'), F('BenefitPlan', 'benefit_cost', 'num')];
 /** The root WBS node is the Project element (P6's project node): its own fields are the Project's fields of the same meaning. */
@@ -343,7 +345,7 @@ export const P6XML_TABLES: Record<string, { element: string; map: FieldMap }> = 
   OBS: { element: 'OBS', map: OBS_MAP }, UDFTYPE: { element: 'UDFType', map: UDFTYPE_MAP }, UDFVALUE: { element: 'UDFValue', map: UDFVAL_MAP }, CURRTYPE: { element: 'Currency', map: CURR_MAP }, ROLES: { element: 'Role', map: ROLE_MAP },
   TASKMEMO: { element: 'ActivityNote', map: MEMO_MAP }, TASKPROC: { element: 'ActivityStep', map: STEP_MAP }, PCATTYPE: { element: 'ProjectCodeType', map: PCODETYPE_MAP }, PCATVAL: { element: 'ProjectCode', map: PCODE_MAP },
   ROLERATE: { element: 'RoleRate', map: ROLERATE_MAP }, FINDATES: { element: 'FinancialPeriod', map: FINDATES_MAP }, THRSPARM: { element: 'ThresholdParameter', map: THRSPARM_MAP }, PROJTHRS: { element: 'ProjectThreshold', map: PROJTHRS_MAP },
-  PROJISSU: { element: 'ProjectIssue', map: PROJISSU_MAP }, TASKNOTE: { element: 'ActivityNote', map: TASKNOTE_MAP }, WBSBUDG: { element: 'ProjectSpendingPlan', map: SPEND_MAP }, TASKFIN: { element: 'ActivityPeriodActual', map: TASKFIN_MAP }, WBSRSRC: { element: 'ProjectResource', map: WBSRSRC_MAP },
+  PROJISSU: { element: 'ProjectIssue', map: PROJISSU_MAP }, TASKNOTE: { element: 'ActivityNote', map: TASKNOTE_MAP }, PHASE: { element: 'WBSCategory', map: PHASE_MAP }, WBSBUDG: { element: 'ProjectSpendingPlan', map: SPEND_MAP }, TASKFIN: { element: 'ActivityPeriodActual', map: TASKFIN_MAP }, WBSRSRC: { element: 'ProjectResource', map: WBSRSRC_MAP },
   RCATTYPE: { element: 'ResourceCodeType', map: RCODETYPE_MAP }, RCATVAL: { element: 'ResourceCode', map: RCODE_MAP }, MEMOTYPE: { element: 'NotebookTopic', map: TOPIC_MAP }, WBSMEMO: { element: 'ProjectNote', map: WBSMEMO_MAP },
 };
 
@@ -399,6 +401,7 @@ export const P6XML_NOT_CARRIED: Record<string, string> = {
   'TASKRSRC.override_rate_flag': NO, 'TASKRSRC.pend_complete_flag': NO, 'TASKRSRC.pend_remain_cost': NO, 'TASKRSRC.pend_act_cost': NO, 'TASKRSRC.cost_qty_type': NO,
   'TASKRSRC.act_qty': OLD, 'TASKRSRC.act_work_qty': OLD, 'TASKRSRC.act_equip_qty': OLD, 'TASKRSRC.target_work_qty': OLD, 'TASKRSRC.target_equip_qty': OLD, 'TASKRSRC.remain_work_qty': OLD, 'TASKRSRC.remain_equip_qty': OLD,
   'TASKRSRC.remain_reg_qty': OLD, 'TASKRSRC.remain_ot_qty': OLD, 'TASKRSRC.remain_reg_cost': OLD, 'TASKRSRC.remain_ot_cost': OLD,
+  'SCHEDOPTIONS.level_over_alloc_pct': UNIT, // (MPXJ passes the value through unscaled in its XML writer/reader (XmlProjectWriter.java:333) and its XER reader/writer, but Oracle's field text only says "percentage": a fraction in XML is not excluded)
   'SCHEDOPTIONS.sched_setplantoforecast': NO, // (no field of ScheduleOptions or Project is "set planned to forecast")
   'THRSPARM.seq_num': NO, 'THRSPARM.wbs_flag': NO, 'THRSPARM.task_flag': NO, 'THRSPARM.rsrc_flag': NO, 'THRSPARM.thresh_parm_type': TEXTS, 'THRSPARM.thresh_field_name': NO, 'THRSPARM.thresh_short_name': NO,
   'UDFTYPE.udf_type_name': NO, 'UDFTYPE.super_flag': NO, 'UDFTYPE.indicator_expression': NO, 'UDFTYPE.summary_indicator_expression': NO, 'UDFTYPE.export_flag': NO,
@@ -465,6 +468,9 @@ export function p6xmlLosses(db: Db, projIds?: string[]): P6XmlLoss[] {
     if (how === 'lenient') add('CALENDAR', 'clndr_data', CAL_LENIENT_REASON, 1, c.clndr_name);
     else if (how === 'none') add('CALENDAR', 'clndr_data', CAL_NONE_REASON, 1, c.clndr_name);
   }
+  // a WBS category reference whose list (the PHASE table) is not there is left out
+  const phaseIds = new Set((sel.get('PHASE') ?? []).map((x) => x.phase_id));
+  for (const w of sel.get('PROJWBS') ?? []) if (has(w.phase_id) && !phaseIds.has(w.phase_id)) add('PROJWBS', 'phase_id', 'WBS category with no PHASE row to point at: the reference is left out');
   // the root WBS node is the Project element, which has no field for these
   const projName = new Map((sel.get('PROJECT') ?? []).map((p) => [p.proj_id, p.proj_short_name]));
   for (const [f, reason] of Object.entries(P6XML_ROOT_NOT_CARRIED)) {
@@ -513,7 +519,7 @@ export const P6XML_SPECIAL_TABLES = ['CALENDAR', 'SCHEDOPTIONS', 'PROJPCAT', 'RS
 /** The XML tags the reader turns into the clone's own columns, converting the value (dates, enumerations, flags) or
  *  folding it (a calendar's week and exceptions into clndr_data): every other leaf is kept as it is (xml:<Tag>). */
 export function p6xmlConvertedTags(): Set<string> {
-  const maps = [PROJECT_MAP, OLD_SCHED_MAP, SCHED_MAP, WBS_MAP, ACT_MAP, REL_MAP, RSRC_MAP, RATE_MAP, UOM_MAP, EXPCAT_MAP, CURVE_MAP, RSRCROLE_MAP, ASSIGN_MAP, EXP_MAP, CODETYPE_MAP, CODE_MAP, CODEASSIGN_MAP, ACCOUNT_MAP, OBS_MAP, UDFTYPE_MAP, UDFVAL_MAP, CURR_MAP, ROLE_MAP, MEMO_MAP, STEP_MAP, PCODETYPE_MAP, PCODE_MAP, RCODETYPE_MAP, RCODE_MAP, TOPIC_MAP, WBSMEMO_MAP, P6XML_ROOT_MAP, TASKNOTE_MAP, SPEND_MAP];
+  const maps = [PROJECT_MAP, OLD_SCHED_MAP, SCHED_MAP, WBS_MAP, ACT_MAP, REL_MAP, RSRC_MAP, RATE_MAP, UOM_MAP, EXPCAT_MAP, CURVE_MAP, RSRCROLE_MAP, ASSIGN_MAP, EXP_MAP, CODETYPE_MAP, CODE_MAP, CODEASSIGN_MAP, ACCOUNT_MAP, OBS_MAP, UDFTYPE_MAP, UDFVAL_MAP, CURR_MAP, ROLE_MAP, MEMO_MAP, STEP_MAP, PCODETYPE_MAP, PCODE_MAP, RCODETYPE_MAP, RCODE_MAP, TOPIC_MAP, WBSMEMO_MAP, PHASE_MAP, P6XML_ROOT_MAP, TASKNOTE_MAP, SPEND_MAP];
   return new Set([...maps.flatMap((m) => m.map(([tag]) => tag)), 'OutOfSequenceScheduleType', 'IsDefault', 'Type', 'IsPersonal', 'DayOfWeek', 'Start', 'Finish', 'Date', 'TypeObjectId', 'ValueObjectId', 'PercentComplete']);
 }
 
@@ -670,6 +676,8 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
   const codeType = new Map(rows(db, 'ACTVCODE').map((c) => [c.actv_code_id, c.actv_code_type_id]));
   const codesOf = new Map<string, Row[]>();
   for (const a of get('TASKACTV')) { const l = codesOf.get(a.task_id); if (l) l.push(a); else codesOf.set(a.task_id, [a]); }
+  const phases = new Set(get('PHASE').map((x) => x.phase_id)); // a WBS category is referenced only when its list is written
+  const withPhase = (r: Row): Row => (r.phase_id && !phases.has(r.phase_id) ? { ...r, phase_id: '' } : r);
   const globalTypes = new Set(get('ACTVTYPE').filter((x) => !x.proj_id).map((x) => x.actv_code_type_id));
   const rcodes = new Map<string, Row[]>(); for (const a of get('RSRCRCAT')) { const l = rcodes.get(a.rsrc_id); if (l) l.push(a); else rcodes.set(a.rsrc_id, [a]); }
   const pcodes = new Map<string, Row[]>(); for (const a of get('PROJPCAT')) { const l = pcodes.get(a.proj_id); if (l) l.push(a); else pcodes.set(a.proj_id, [a]); }
@@ -680,6 +688,7 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
     ['CostAccount', () => { for (const r of get('ACCOUNT')) el('CostAccount', r, ACCOUNT_MAP); }],
     ['NotebookTopic', () => { for (const r of get('MEMOTYPE')) el('NotebookTopic', r, TOPIC_MAP); }],
     ['UDFType', () => { for (const r of get('UDFTYPE')) el('UDFType', r, UDFTYPE_MAP); }],
+    ['WBSCategory', () => { for (const r of get('PHASE')) el('WBSCategory', r, PHASE_MAP); }],
     ['ActivityCodeType', () => { for (const r of get('ACTVTYPE').filter((x) => !x.proj_id)) el('ActivityCodeType', r, CODETYPE_MAP); }],
     ['ActivityCode', () => { for (const r of get('ACTVCODE').filter((x) => globalTypes.has(x.actv_code_type_id))) el('ActivityCode', r, CODE_MAP); }],
     ['Calendar', () => { for (const r of get('CALENDAR').filter((x) => !x.proj_id)) out.push(calendarXml(r)); }],
@@ -704,7 +713,7 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
     const root = wbsAll.find((w) => w.proj_id === pid && w.proj_node_flag === 'Y');
     const so = get('SCHEDOPTIONS').find((s) => s.proj_id === pid) ?? {};
     const own = (m: FieldMap) => (tag === 'BaselineProject' ? m.filter(([t]) => !NOT_IN_BASELINE.has(t)) : m);
-    const head: Part[] = [...toParts(p, own(PROJECT_MAP)), ...(root ? toParts(root, own(P6XML_ROOT_MAP)) : []), ...(tag === 'Project' ? toParts(so, LIMIT_PATHS_MAP) : []), ['Name', `<Name>${esc(root?.wbs_name || p._name || p.proj_short_name)}</Name>`],
+    const head: Part[] = [...toParts(p, own(PROJECT_MAP)), ...(root ? toParts(withPhase(root), own(P6XML_ROOT_MAP)) : []), ...(tag === 'Project' ? toParts(so, LIMIT_PATHS_MAP) : []), ['Name', `<Name>${esc(root?.wbs_name || p._name || p.proj_short_name)}</Name>`],
       ['OriginalProjectObjectId', originalId ? `<OriginalProjectObjectId>${esc(originalId)}</OriginalProjectObjectId>` : ''], ['Code', codeRefsXml(pcodes.get(pid) ?? [], 'proj_catg_type_id', 'proj_catg_id')], udfs('PROJECT', pid),
       ['WBSObjectId', root?.wbs_id ? `<WBSObjectId>${esc(root.wbs_id)}</WBSObjectId>` : '']];
     out.push(`<${tag}>${inOrder(tag, head)}`);
@@ -713,7 +722,7 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
       ['Calendar', () => { for (const r of get('CALENDAR').filter((x) => x.proj_id === pid)) out.push(calendarXml(r)); }],
       ['ActivityCodeType', () => { for (const r of get('ACTVTYPE').filter((x) => x.proj_id === pid)) el('ActivityCodeType', r, CODETYPE_MAP); }],
       ['ActivityCode', () => { for (const r of get('ACTVCODE').filter((x) => !globalTypes.has(x.actv_code_type_id) && get('ACTVTYPE').some((t) => t.actv_code_type_id === x.actv_code_type_id && t.proj_id === pid))) el('ActivityCode', r, CODE_MAP); }],
-      ['WBS', () => { for (const r of wbsAll.filter((w) => w.proj_id === pid && w.proj_node_flag !== 'Y')) el('WBS', { ...r, parent_wbs_id: r.parent_wbs_id === root?.wbs_id ? '' : r.parent_wbs_id }, WBS_MAP, [udfs('PROJWBS', r.wbs_id)]); }],
+      ['WBS', () => { for (const r of wbsAll.filter((w) => w.proj_id === pid && w.proj_node_flag !== 'Y')) el('WBS', { ...withPhase(r), parent_wbs_id: r.parent_wbs_id === root?.wbs_id ? '' : r.parent_wbs_id }, WBS_MAP, [udfs('PROJWBS', r.wbs_id)]); }],
       ['Activity', () => { for (const r of get('TASK').filter((t) => t.proj_id === pid)) // P6 XML percentages are fractions (0.5 = 50%)
         el('Activity', { ...r, wbs_id: r.wbs_id === root?.wbs_id ? '' : r.wbs_id, phys_complete_pct: r.phys_complete_pct ? String(Number(r.phys_complete_pct) / 100) : '' }, ACT_MAP, [['Code', codesXml(codesOf.get(r.task_id) ?? [], codeType)], udfs('TASK', r.task_id)]); }],
       ['Relationship', () => { for (const r of get('TASKPRED').filter((t) => t.proj_id === pid)) el('Relationship', r, REL_MAP); }],
@@ -752,7 +761,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
   const push = (t: string, r: Row) => { const T = table(db, t); for (const f of Object.keys(r)) addField(T, f); T.rows.push(r); };
   const topMap: [string, string, FieldMap][] = [['Currency', 'CURRTYPE', CURR_MAP], ['OBS', 'OBS', OBS_MAP], ['CostAccount', 'ACCOUNT', ACCOUNT_MAP], ['NotebookTopic', 'MEMOTYPE', TOPIC_MAP],
     ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP], ['ResourceRole', 'RSRCROLE', RSRCROLE_MAP], ['RoleRate', 'ROLERATE', ROLERATE_MAP], ['FinancialPeriod', 'FINDATES', FINDATES_MAP], ['ThresholdParameter', 'THRSPARM', THRSPARM_MAP], ['UnitOfMeasure', 'UMEASURE', UOM_MAP], ['ExpenseCategory', 'COSTTYPE', EXPCAT_MAP], ['ResourceCurve', 'RSRCCURVDATA', CURVE_MAP],
-    ['ProjectCodeType', 'PCATTYPE', PCODETYPE_MAP], ['ProjectCode', 'PCATVAL', PCODE_MAP], ['ResourceCodeType', 'RCATTYPE', RCODETYPE_MAP], ['ResourceCode', 'RCATVAL', RCODE_MAP]];
+    ['ProjectCodeType', 'PCATTYPE', PCODETYPE_MAP], ['ProjectCode', 'PCATVAL', PCODE_MAP], ['ResourceCodeType', 'RCATTYPE', RCODETYPE_MAP], ['ResourceCode', 'RCATVAL', RCODE_MAP], ['WBSCategory', 'PHASE', PHASE_MAP]];
   const projMap: [string, string, FieldMap][] = [['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Relationship', 'TASKPRED', REL_MAP], ['ResourceAssignment', 'TASKRSRC', ASSIGN_MAP],
     ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ProjectThreshold', 'PROJTHRS', PROJTHRS_MAP], ['ProjectIssue', 'PROJISSU', PROJISSU_MAP], ['ActivityPeriodActual', 'TASKFIN', TASKFIN_MAP], ['ProjectResource', 'WBSRSRC', WBSRSRC_MAP], ['ProjectSpendingPlan', 'WBSBUDG', SPEND_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
   // Read as it goes: each top-level element, and each activity, WBS element, relationship, ... of a project, is turned
