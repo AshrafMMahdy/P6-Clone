@@ -4,14 +4,14 @@
 //  3 one heavy element may take as long as the step's whole size allows
 //  4 where done and total are known, only done ADVANCING is a tick
 //  5 memory growth is life only up to the bound, never alone
-//  6 the server's own sections are watched (cancel when it still turns, end the process when it is blocked)
+//  6 the server never ends itself: the sections that read input run in workers, judged by their own heartbeats
 //  7 every stuck error says what was tried, and carries the structured facts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { cpuCovering, externalWatch, heartbeatEnv, heartbeatWatcher, StuckError, stuckData, unitWatch, type StuckInfo } from '../core/bim/liveness.ts';
 import { runNode } from '../core/bim/parse.ts';
@@ -20,7 +20,6 @@ import { rvtToIfc } from '../core/bim/rvt.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const HB = pathToFileURL(join(ROOT, 'core', 'bim', 'heartbeat.mjs')).href;
-const WATCH = pathToFileURL(join(ROOT, 'core', 'bim', 'serverWatch.ts')).href;
 const env = (vars: Record<string, string | undefined>) => {
   const was = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
   for (const [k, v] of Object.entries(vars)) { if (v == null) delete process.env[k]; else process.env[k] = v; }
@@ -168,83 +167,115 @@ test('4: where done and total are known, repeated ticks with the same done are s
   assert.equal(stuck[0].done, 5);
 });
 
-// ---- 6: the server's own sections --------------------------------------------------------------------------------------------------
-const server = (body: string) => {
-  const dir = mkdtempSync(join(tmpdir(), 'p6-review-srv-')), p = join(dir, 's.mts');
-  writeFileSync(p, `import { startWatch, watched } from ${JSON.stringify(WATCH)};\nimport { alive, progress, tick } from ${JSON.stringify(HB)};\nconst report = ${JSON.stringify(join(dir, 'recovery', 'stuck.json'))};\nstartWatch(report, 500);\nconst o = (extra = {}) => ({ what: 'The IFC indexer', next: 'open it with geometry: false', ...extra });\n${body}`);
-  return { p, report: join(dir, 'recovery', 'stuck.json') };
-};
-const runServer = (s: { p: string }, timeout = 30_000) => spawnSync(process.execPath, [s.p], { env: { ...process.env, ...SHORT }, encoding: 'utf8', timeout });
-
-test('6: a section of the server that waits on something that never comes is cancelled with the reason; the server goes on', () => {
-  const s = server(`
-try { await watched('reading the cached model index', o({ expectMs: 50, tried: 'one pass' }), () => new Promise(() => {})); console.log('NOT CANCELLED'); }
-catch (e) { console.log(JSON.stringify({ name: e.name, stuck: e.stuck, message: e.message })); }
-console.log('still serving');
-process.exit(0);`);
-  const r = runServer(s);
-  assert.equal(r.status, 0, r.stderr);
-  const lines = r.stdout.trim().split('\n');
-  const e = JSON.parse(lines[0]);
-  assert.equal(e.name, 'StuckError');
-  assert.equal(e.stuck.step, 'reading the cached model index');
-  assert.equal(e.stuck.kind, 'bound');
-  assert.equal(e.stuck.bound_ms, 500);
-  assert.equal(e.stuck.tried, 'one pass');
-  assert.match(e.message, /^The IFC indexer was ended as stuck while reading the cached model index: one call that cannot report progress ran past its work bound of 500 ms/);
-  assert.equal(lines[1], 'still serving');
-  assert.equal(existsSync(s.report), false, 'a job that could be cancelled does not end the server');
-});
-
-test('6: a section blocked in a synchronous loop ends the server process, and leaves the reason where the next server finds it', () => {
-  const s = server(`
-await watched('indexing the IFC (bytes read)', o({ expectMs: 50 }), () => { const t = Date.now(); while (Date.now() - t < 60000) { /* a spin */ } });
-console.log('NOT ENDED');`);
-  const t0 = Date.now();
-  const r = runServer(s);
-  assert.equal(r.signal, 'SIGKILL', `${r.status} ${r.stderr}`);
-  assert.ok(Date.now() - t0 < 15_000);
-  assert.match(r.stderr, /the server was ended because a section it was running \(indexing the IFC \(bytes read\)\) made no progress and blocked it/);
-  const rep = JSON.parse(readFileSync(s.report, 'utf8'));
-  assert.equal(rep.stuck.step, 'indexing the IFC (bytes read)');
-  assert.equal(rep.stuck.kind, 'bound');
-});
-
-test('6: a ticking section is alive however long it takes; work that is not declared is never judged', () => {
-  const s = server(`
-await watched('indexing the IFC (bytes read)', o({ total: 100, capMs: 1000 }), async () => { for (let i = 1; i <= 25; i++) { progress(i); await new Promise((r) => setTimeout(r, 100)); } });
-// undeclared: a synchronous stretch longer than any window is nobody's business to end
-const t = Date.now(); while (Date.now() - t < 2500) { /* undeclared work */ }
-console.log('done');
-process.exit(0);`);
-  const r = runServer(s);
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), 'done');
-});
-
-test('6: where no watch runs (tests, P6CLONE_SERVER_WATCH=off) a section simply runs', () => {
-  const s = server('');
-  writeFileSync(s.p, `import { watched } from ${JSON.stringify(WATCH)};\nconsole.log(await watched('x', { what: 'w', next: 'n' }, async () => 7));`);
-  const r = spawnSync(process.execPath, [s.p], { env: { ...process.env, ...SHORT }, encoding: 'utf8' });
-  assert.equal(r.stdout.trim(), '7');
-  const off = server(`console.log(await watched('x', o({ expectMs: 1 }), async () => { await new Promise((r) => setTimeout(r, 1500)); return 'ran'; }));\nprocess.exit(0);`);
-  const r2 = spawnSync(process.execPath, [off.p], { env: { ...process.env, ...SHORT, P6CLONE_SERVER_WATCH: 'off' }, encoding: 'utf8' });
-  assert.equal(r2.stdout.trim(), 'ran');
-});
-
-test('6: a server adopting the folder of one that was ended as stuck tells the reason (server_status recovery.previous_server_ended_stuck)', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'p6-review-adopt-'));
-  const dead = spawnSync(process.execPath, ['-e', '']).pid!;
-  const old = join(root, '.p6clone-recovery', `${dead}-0123456789ab`);
-  mkdirSync(old, { recursive: true });
-  writeFileSync(join(old, 'stuck.json'), JSON.stringify({ at: '2026-10-28T12:00:00.000Z', pid: dead, stuck: { step: 'indexing the IFC (bytes read)', kind: 'bound', silentMs: 700000, limitMs: 600000, expectMs: 60000 } }));
-  const { config, adoptRecovery, previousStuck, recoveryStatus } = await import('../mcp/runtime.ts');
-  const was = config.root; config.root = root;
+// ---- 6: the server never ends itself: the sections that read input run in workers, judged by their own heartbeats -------------------------
+test('6: a stalled event loop of the parent is not a worker’s silence (workers are judged by their own heartbeat times)', async () => {
+  const restore = env(SHORT);
   try {
-    adoptRecovery();
-    assert.equal(previousStuck().length >= 1, true);
-    assert.equal((recoveryStatus() as { previous_server_ended_stuck?: { stuck: { step: string } }[] }).previous_server_ended_stuck?.at(-1)?.stuck.step, 'indexing the IFC (bytes read)');
-  } finally { config.root = was; }
+    // a healthy worker ticking every 100 ms for 4 s; meanwhile the PARENT's event loop is blocked for 2.5 s (another handle's long
+    // synchronous step: far more than the 800 ms two windows allow). Its beats sit unread in the pipe: that is not its silence.
+    const healthy = worker("step('meshing products'); for (let i = 0; i < 40; i++) { tick(); await new Promise((r) => setTimeout(r, 100)); } console.log('done');");
+    const running = watch(healthy);
+    await new Promise((r) => setTimeout(r, 600));
+    const t = Date.now(); while (Date.now() - t < 2500) { /* the server is busy with something else */ }
+    const r = await running;
+    assert.deepEqual([r.code, r.stuck, r.out], [0, null, 'done']);
+    // the control: a worker that really is silent is still ended, with the parent stalled or not
+    const silent = watch(worker("step('meshing products'); await new Promise((r) => setTimeout(r, 60000));"));
+    await new Promise((r) => setTimeout(r, 300));
+    const t2 = Date.now(); while (Date.now() - t2 < 1500) { /* busy */ }
+    assert.equal((await silent).stuck?.kind, 'silent');
+  } finally { restore(); }
+});
+
+test('6: two sections in flight keep their own state and bounds: one stuck ends only its own worker', async () => {
+  const restore = env(SHORT);
+  try {
+    // A: an opaque call of 50 ms expected (bound 500 ms) that never returns. B: an opaque call of 2 s expected (bound 20 s) that takes 2 s.
+    const [a, b] = await Promise.all([
+      watch(worker(`opaque('reading the cached model index', 50, () => ${spin(30_000)});`)),
+      watch(worker(`opaque('indexing the IFC', 2000, () => ${spin(2000)}); console.log('done');`)),
+    ]);
+    assert.equal(a.stuck?.kind, 'bound');
+    assert.equal(a.stuck?.limitMs, 500);
+    assert.equal(a.stuck?.step, 'reading the cached model index');
+    assert.deepEqual([b.code, b.stuck, b.out], [0, null, 'done']);
+  } finally { restore(); }
+});
+
+const IFC_FIXTURE = join(ROOT, 'tests', 'fixtures', '4d', 'Duplex_A_20110907.ifc');
+const INDEX_WORKER = pathToFileURL(join(ROOT, 'core', 'bim', 'indexWorker.ts')).href;
+const copyIfcFixture = () => { const f = join(mkdtempSync(join(tmpdir(), 'p6-review-ifc-')), 'm.ifc'); writeFileSync(f, Buffer.concat([readFileSync(IFC_FIXTURE), Buffer.from(`\n/* ${Math.random()} */\n`)])); return f; }; // its own content hash: no cached model
+
+test('6: the IFC index runs in a worker of its own: a stuck one ends only that call, with the reason; another project’s unsaved edits and the server are untouched', { timeout: 120_000 }, async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const restore = env({ ...SHORT, P6CLONE_MODEL_CACHE: mkdtempSync(join(tmpdir(), 'p6-review-cache-')) });
+  try {
+    // another handle with unsaved edits
+    const np = (await call('new_project', { id: 'KEEP', start: '2026-03-02' })).d;
+    const ed = await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: [{ op: 'add_activity', id: 'A1', name: 'Unsaved work', duration_days: 5 }] });
+    assert.equal(ed.err, false, JSON.stringify(ed.d).slice(0, 200));
+    // a healthy but slow index worker (ticking for 1.5 s, then the real one), while the server's own loop is blocked for 2 s by "another handle's long synchronous step"
+    const slowDir = mkdtempSync(join(tmpdir(), 'p6-review-slow-')), slow = join(slowDir, 'w.mjs');
+    writeFileSync(slow, `import { startHeartbeat, step, tick } from ${JSON.stringify(HB)};\nstartHeartbeat(); step('indexing the IFC (bytes read)', { total: 100 });\nfor (let i = 1; i <= 15; i++) { tick(); await new Promise((r) => setTimeout(r, 100)); }\nawait import(${JSON.stringify(INDEX_WORKER)});`);
+    const r1 = env({ P6CLONE_INDEX_WORKER: slow });
+    try {
+      const opening = call('open_model', { path: copyIfcFixture() });
+      await new Promise((r) => setTimeout(r, 500));
+      const t = Date.now(); while (Date.now() - t < 2000) { /* a long synchronous step of another handle */ }
+      const ok = await opening;
+      assert.equal(ok.err, false, JSON.stringify(ok.d).slice(0, 300));
+      assert.ok(ok.d.elements > 100, 'the index came back from its worker, whole');
+      await call('close', { handle: ok.d.handle, owner_key: ok.d.owner_key, discard: true });
+    } finally { r1(); }
+    // a stuck one: silent
+    const stuckDir = mkdtempSync(join(tmpdir(), 'p6-review-stuck-')), stuck = join(stuckDir, 'w.mjs');
+    writeFileSync(stuck, `import { startHeartbeat } from ${JSON.stringify(HB)};\nstartHeartbeat();\nawait new Promise((r) => setTimeout(r, 60000));`);
+    const r2 = env({ P6CLONE_INDEX_WORKER: stuck });
+    try {
+      const bad = await call('open_model', { path: copyIfcFixture() });
+      assert.equal(bad.err, true, JSON.stringify(bad.d).slice(0, 300));
+      const err = bad.d.error ?? bad.d;
+      assert.equal(err.code, 'model_unreadable');
+      assert.equal(err.reason, 'stuck');
+      assert.equal(err.stuck.kind, 'silent');
+      assert.match(err.message, /^The IFC indexer was ended as stuck while starting: no progress for .*Tried: one streaming pass over the file in a process of its own.*Alternatives: export the model from the authoring tool as a smaller IFC/s);
+      assert.ok(err.stuck.tried && err.stuck.alternatives && err.stuck.silent_ms > 0);
+    } finally { r2(); }
+    // the server is up and the other project's unsaved edit is there, still unsaved
+    const open = await call('list_open', {});
+    const mine = open.d.open.find((p: any) => p.handle === np.handle);
+    assert.ok(mine, 'the other project is still open');
+    assert.equal(mine.unsaved_changes, true, JSON.stringify(mine));
+    const acts = await call('find_activities', { handle: np.handle, owner_key: np.owner_key, text: 'Unsaved' });
+    assert.equal(acts.err, false, JSON.stringify(acts.d).slice(0, 200));
+    assert.match(JSON.stringify(acts.d), /Unsaved work/);
+    await call('close', { handle: np.handle, owner_key: np.owner_key, discard: true });
+  } finally { restore(); }
+});
+
+test('6: import_4d reads the file in a worker of its own: a stuck reader ends only that call, with the reason', { timeout: 60_000 }, async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const stuckDir = mkdtempSync(join(tmpdir(), 'p6-review-r4d-')), stuck = join(stuckDir, 'w.mjs');
+  writeFileSync(stuck, `import { startHeartbeat } from ${JSON.stringify(HB)};\nstartHeartbeat();\nawait new Promise((r) => setTimeout(r, 60000));`);
+  const csv = join(stuckDir, 'timeliner.csv'); writeFileSync(csv, 'Name,Planned Start,Planned End\nA,2026-03-02,2026-03-06\n');
+  const restore = env({ ...SHORT, P6CLONE_READ4D_WORKER: stuck });
+  try {
+    const np = (await call('new_project', { id: 'R4D', start: '2026-03-02' })).d;
+    const r = await call('import_4d', { handle: np.handle, owner_key: np.owner_key, path: csv });
+    assert.equal(r.err, true, JSON.stringify(r.d).slice(0, 300));
+    const err = r.d.error ?? r.d;
+    assert.equal(err.reason, 'stuck');
+    assert.equal(err.stuck.kind, 'silent');
+    assert.match(err.message, /^Cannot read timeliner\.csv as 4D: The 4D file reader was ended as stuck/);
+    await call('close', { handle: np.handle, owner_key: np.owner_key, discard: true });
+  } finally { restore(); }
+  // the real worker reads it
+  const ok = await call('new_project', { id: 'R4D2', start: '2026-03-02' });
+  const imp = await call('import_4d', { handle: ok.d.handle, owner_key: ok.d.owner_key, path: csv, link: false });
+  assert.equal(imp.err, false, JSON.stringify(imp.d).slice(0, 300));
+  await call('close', { handle: ok.d.handle, owner_key: ok.d.owner_key, discard: true });
 });
 
 // ---- 7: Tried, and the structured facts ------------------------------------------------------------------------------------------------

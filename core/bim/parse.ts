@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSy
 import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { stepIndex } from './stepIndex.ts';
-import { expectedMs, watched } from './serverWatch.ts';
-import { geomWorkerPath, webIfcEntry } from './runtime.ts';
+import { inWorker, indexHeapMb } from './jobWorker.ts';
+import { readIndex } from './indexFile.ts';
+import { geomWorkerPath, indexWorkerPath, webIfcEntry } from './runtime.ts';
 import { alive as hbAlive, forgetRates, noteRate, step as hbStep, tick as hbTick } from './heartbeat.mjs';
 import { heartbeatEnv, heartbeatWatcher, stuckData, stuckMessage, workerFloorMs, type StuckData, type StuckInfo } from './liveness.ts';
 import { allocGeometry, geomStore, putGeometry, scaleGeometry } from './element.ts';
@@ -116,10 +117,15 @@ export interface ParseIfcOptions {
  * Elements whose geometry web-ifc fails on are counted and skipped, never fatal.
  */
 export async function parseIfc(absIfcPath: string, opts: ParseIfcOptions = {}): Promise<{ index: IfcIndex; meshes: IfcMeshes; tilesPath?: string }> {
-  // the index is built in the server's own process: a declared section (serverWatch.ts); ticks per 1 MB read, a work bound for the pass
-  // that follows the scan (size x INDEX_S_PER_MB, measured in section 6)
-  const size = (() => { try { return statSync(absIfcPath).size; } catch { return 0; } })();
-  const { index, productIds } = await watched('indexing the IFC (bytes read)', { what: 'The IFC indexer', tried: 'one streaming pass over the file in the server\u2019s own process', next: STUCK_NEXT, total: size, capMs: expectedMs(size, 'index') }, () => stepIndex(absIfcPath));
+  // The index is built in a process of its own (indexWorker.ts, jobWorker.ts), watched like the geometry worker: a stuck one ends only
+  // that worker and this call, with the reason; the server never has to end itself. It hands the index over as the index file the cache
+  // uses, read back here (the one section that must stay on the server's main thread: it builds the in-memory index the server holds,
+  // a finite pass over a file in 16 MB blocks). Without the worker (an Electron app without the bundle) it runs in this process.
+  const worker = indexWorkerPath();
+  const { index, productIds } = worker
+    ? await inWorker({ script: worker, job: { ifc: absIfcPath }, heapMb: indexHeapMb(), what: 'The IFC indexer', tried: 'one streaming pass over the file in a process of its own, then the index file', next: INDEX_STUCK_NEXT },
+      (dir) => { const ix = readIndex(join(dir, 'index')); return { index: ix, productIds: productIdsOf(ix) }; })
+    : await stepIndex(absIfcPath);
   const meshes: IfcMeshes = new Map();
   if (opts.geometry === false) { index.geometryStatus = 'skipped'; return { index, meshes }; }
   await meshIndex(absIfcPath, index, productIds, opts);
@@ -187,6 +193,7 @@ const childEnv = () => ({ ...process.env, ...heartbeatEnv(), P6CLONE_WEBIFC: web
 
 /** What the agent is told when the liveness watch ended a worker: the step, how long with no progress or the bound passed, what was
  *  tried, and the alternatives (owner rules 2026-10-27 and 2026-10-28: no fixed time limit). */
+const INDEX_STUCK_NEXT = 'export the model from the authoring tool as a smaller IFC (by discipline or level) or as an NWC or NWD, and open that; if the file is not a valid IFC (STEP) file, export it again';
 const STUCK_NEXT = 'open the model with geometry: false (index only: linking, sets, 4D keys and every 4D export still work), export it from the authoring tool as an NWC, NWD or IFC in smaller parts, or split the model by discipline or level';
 const stuckOf = (i: StuckInfo, what: string, tried: string) => ({ note: stuckMessage(i, { what, tried, next: STUCK_NEXT }), stuck: stuckData(i, { tried, next: STUCK_NEXT }) });
 

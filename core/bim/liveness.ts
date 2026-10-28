@@ -198,13 +198,17 @@ const HB = '\u0001HB ';
  *  each heartbeat (a parent that forwards a child's progress). */
 export function heartbeatWatcher(child: ChildProcess, o: { floorMs: number; onStuck: (i: StuckInfo) => void; onText?: (text: string) => void; onBeat?: (b: Beat) => void; pollMs?: number }): () => void {
   let rest = '', last: { b: Beat; at: number } | null = null, done = false;
-  const t0 = Date.now();
+  const t0 = Date.now(), pollMs = o.pollMs ?? Math.max(10, Math.min(1000, Math.floor(o.floorMs / 4)));
+  // A stalled event loop of THIS process (the server busy with another handle's long synchronous step) is not the worker's silence: its
+  // beats sit unread in the pipe while the timer runs first. A poll that comes late by more than a poll or two is time the parent was
+  // not looking: it is taken off the worker's silence (until the next beat is read), so a worker is judged by its own heartbeat times.
+  let prevPoll = t0, away = 0;
   child.stdout?.on('data', (d) => {
     const lines = (rest + String(d)).split('\n'); rest = lines.pop() ?? '';
     const text: string[] = [];
     for (const l of lines) {
       if (!l.startsWith(HB)) { text.push(l); continue; }
-      try { const b = JSON.parse(l.slice(HB.length)) as Beat; last = { b, at: Date.now() }; o.onBeat?.(b); } catch { /* a cut line */ }
+      try { const b = JSON.parse(l.slice(HB.length)) as Beat; last = { b, at: Date.now() }; away = 0; o.onBeat?.(b); } catch { /* a cut line */ }
     }
     if (text.length) o.onText?.(text.join('\n') + '\n');
   });
@@ -212,12 +216,13 @@ export function heartbeatWatcher(child: ChildProcess, o: { floorMs: number; onSt
   const timer = setInterval(() => {
     if (done) return;
     const now = Date.now();
+    away += Math.max(0, now - prevPoll - 2 * pollMs); prevPoll = now;
     const s: StepState = last
-      ? { step: last.b.step, sinceMs: last.b.sinceMs + (now - last.at), maxGapMs: last.b.maxGapMs, expectMs: last.b.expectMs, capMs: last.b.capMs, done: last.b.done, total: last.b.total }
-      : { step: 'starting', sinceMs: now - t0, maxGapMs: 0, expectMs: 0, capMs: 0 };
+      ? { step: last.b.step, sinceMs: Math.max(last.b.sinceMs, last.b.sinceMs + (now - last.at) - away), maxGapMs: last.b.maxGapMs, expectMs: last.b.expectMs, capMs: last.b.capMs, done: last.b.done, total: last.b.total }
+      : { step: 'starting', sinceMs: Math.max(0, now - t0 - away), maxGapMs: 0, expectMs: 0, capMs: 0 };
     const stuck = judge(s, o.floorMs);
     if (stuck) { done = true; clearInterval(timer); o.onStuck(stuck); }
-  }, o.pollMs ?? Math.max(10, Math.min(1000, Math.floor(o.floorMs / 4))));
+  }, pollMs);
   timer.unref?.();
   return () => { done = true; clearInterval(timer); };
 }
@@ -237,11 +242,16 @@ export interface UnitWatch {
 export function unitWatch(o: { floorMs: number; onStuck: (i: StuckInfo) => void; pollMs?: number; step?: string; expectMs?: number; windowMs?: number }): UnitWatch {
   let name = o.step ?? 'starting', expect = o.expectMs ?? 0, window = o.windowMs, cap = 0, total = 0, doneN = 0, lastDone = -1, tickAt = Date.now(), maxGap = 0, stopped = false;
   const state = (): StepState => ({ step: name, sinceMs: Date.now() - tickAt, maxGapMs: maxGap, expectMs: expect, capMs: cap, done: doneN, total, ...(window ? { windowMs: window } : {}) });
+  // (a late poll is time this process's event loop was busy, not silence of the work: it is taken off, as heartbeatWatcher does)
+  const pollMs = o.pollMs ?? Math.max(10, Math.min(1000, Math.floor(o.floorMs / 4)));
+  let prevPoll = Date.now();
   const timer = setInterval(() => {
     if (stopped) return;
+    const now = Date.now();
+    tickAt += Math.max(0, now - prevPoll - 2 * pollMs); prevPoll = now;
     const stuck = judge(state(), o.floorMs);
     if (stuck) { stopped = true; clearInterval(timer); o.onStuck(stuck); }
-  }, o.pollMs ?? Math.max(10, Math.min(1000, Math.floor(o.floorMs / 4))));
+  }, pollMs);
   timer.unref?.();
   return {
     beat(d, t) {

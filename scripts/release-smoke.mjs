@@ -74,7 +74,7 @@ if (tia.delay_days == null) failures.push(`tia: ${JSON.stringify(tia).slice(0, 2
 await call('compare', { handle, baseline: 'project' });
 
 // 4D: the IFC engine (ifc/ beside the bundle: web-ifc and the geometry worker in its own process)
-for (const f of ['geomWorker.mjs', 'meshClosed.mjs', 'heartbeat.mjs', 'nwdWorker.mjs', 'geomChunk.mjs', 'geomTiles.mjs', 'web-ifc/web-ifc-node.wasm', 'rvtWorker.mjs', 'rvt/rvt.js', 'rvt/rvt_bg.wasm', 'rvt/LICENSE']) if (!existsSync(join(folder, 'ifc', f))) failures.push(`the archive has no ifc/${f}`);
+for (const f of ['geomWorker.mjs', 'meshClosed.mjs', 'heartbeat.mjs', 'nwdWorker.mjs', 'indexWorker.mjs', 'read4dWorker.mjs', 'geomChunk.mjs', 'geomTiles.mjs', 'web-ifc/web-ifc-node.wasm', 'rvtWorker.mjs', 'rvt/rvt.js', 'rvt/rvt_bg.wasm', 'rvt/LICENSE']) if (!existsSync(join(folder, 'ifc', f))) failures.push(`the archive has no ifc/${f}`);
 // Revit: the reader's WebAssembly loads in its own process (a file that is not Revit is refused in words, exit 3)
 { const r = spawnSync(process.execPath, [join(folder, 'ifc', 'rvtWorker.mjs'), join(folder, 'ifc', 'rvtWorker.mjs'), join(tmpdir(), 'p6-smoke-rvt.ifc'), join(tmpdir(), 'p6-smoke-rvt.json')], { encoding: 'utf8' }); if (r.status !== 3 || !/magic bytes/.test(r.stderr)) failures.push(`ifc/rvtWorker.mjs did not load rvt-rs: ${r.status} ${r.stderr.slice(0, 200)}`); }
 if (!existsSync(ifcFixture)) failures.push(`no IFC fixture at ${ifcFixture}`);

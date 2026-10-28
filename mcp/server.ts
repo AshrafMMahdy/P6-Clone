@@ -12,6 +12,8 @@
 import { minOf } from '../core/arrays.ts';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { isMainThread, workerData } from 'node:worker_threads';
+import { offload, startComputeWorker } from './compute.ts';
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { detectFormat, exportFile, importChecks, readRaw, type Format } from '../renderer/io.ts';
@@ -58,12 +60,11 @@ import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
 import { listReports, parseSpec, runReport, runSpec } from '../renderer/reports/engine.ts';
 import { reportHtml, reportPages, reportText, reportXlsx } from '../renderer/reports/output.ts';
 import { nowStamp } from '../core/report/reports.ts';
-import { startWatch } from '../core/bim/serverWatch.ts';
 import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler } from '../core/risk/montecarlo.ts';
 import { dayHours } from '../core/project/units.ts';
 import {
   ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
-  exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, previousStuck, recoveryDir, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
+  exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
@@ -286,6 +287,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   }
 
   const s = getSession(a.handle);
+  // the main thread only routes: a tool that can run long works on a copy of its project in a worker thread (compute.ts)
+  if (isMainThread && offloads(name, a)) return offload(name, a, s, ctx);
   switch (name) {
     case 'edit': {
       // Microsoft Project has no project notebook to put one in (its project notes are one plain text on the summary
@@ -709,6 +712,12 @@ const FILES: Record<string, { read: string[]; opens: boolean }> = {
 /** P6CLONE_TOOLSETS (e.g. "core,analysis,4d,lob"): a host that wants fewer tools lists only some groups; default all. */
 const toolsetOf = (name: string) => (FOURD_NAMES.has(name) ? '4d' : LOB_NAMES.has(name) ? 'lob' : ANALYSIS_NAMES.has(name) ? 'analysis' : 'core');
 const ANALYSIS_NAMES = new Set(ANALYSIS_TOOLS((x) => x).map((t) => t.name));
+/** Tools that can run long on a project (the analysis tools; Monte Carlo, levelling, F9, progress updates, what-if evaluation; LOB plans;
+ *  PDF, Excel and report files): they run in a worker thread on a copy of the project (compute.ts). Not here, and why: file opens and saves
+ *  (they create or serialise the session's database), edit/undo/redo (finite, fast operations on the database itself), the lookups, and the 4D
+ *  tools (they work on models held in this process; their heavy parts already run in worker processes). */
+const OFFLOAD = new Set([...ANALYSIS_NAMES, 'monte_carlo', 'level_resources', 'schedule', 'update_progress', 'evaluate', 'review', 'validate', 'export_pdf', 'export_excel', 'lob_create', 'lob_edit', 'lob_takt', 'lob_forecast', 'lob_import']);
+const offloads = (name: string, a: Record<string, any>) => process.env.P6CLONE_COMPUTE_WORKERS !== '0' && (OFFLOAD.has(name) || (name === 'run_report' && !!a.path));
 export const toolsList = () => {
   const sets = process.env.P6CLONE_TOOLSETS ? new Set(process.env.P6CLONE_TOOLSETS.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean)) : null;
   return TOOLS.filter((t) => !sets || sets.has(toolsetOf(t.name))).map((t) => (FILES[t.name] ? { ...t, _meta: { 'whiq/files': FILES[t.name] } } : t));
@@ -717,7 +726,9 @@ export const toolsList = () => {
 // ---------------------------------------------------------------- start
 export function housekeeping(): void { setInterval(() => { try { sweepIdle(); sweepJobs(); } catch { /* keep serving */ } }, 60000).unref(); }
 
-const isMain = (() => { try { return /server\.(ts|js|cjs)$|p6clone-mcp/.test(process.argv[1] ?? ''); } catch { return false; } })();
+const isMain = isMainThread && (() => { try { return /server\.(ts|js|cjs)$|p6clone-mcp/.test(process.argv[1] ?? ''); } catch { return false; } })();
+// a compute worker (compute.ts): the same server code, serving one tool call at a time on a copy of a project
+if (!isMainThread && (workerData as { p6Compute?: boolean } | null)?.p6Compute) startComputeWorker(run);
 if (isMain) {
   const args = process.argv.slice(2);
   const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };
@@ -725,8 +736,6 @@ if (isMain) {
   setRoots(opt('automation-read-root'), opt('automation-write-root'));
   config.checkpointMs = Number(process.env.P6CLONE_CHECKPOINT_MS) > 0 ? Number(process.env.P6CLONE_CHECKPOINT_MS) : 2000;
   const adopted = adoptRecovery();
-  for (const r of previousStuck()) process.stderr.write(`P6 Clone: the previous server was ended because it was stuck in "${r.stuck.step}" (${r.at}): ${r.stuck.kind === 'bound' ? 'past its work bound' : 'no progress'}; its projects are back under their handles.\n`);
-  startWatch(join(recoveryDir(), 'stuck.json')); // the sections of this process that read input are watched (serverWatch.ts)
   if (adopted.length) process.stderr.write(`P6 Clone: ${adopted.length} project(s) from a server that is no longer running are back under their handles.\n`);
   housekeeping();
   // SIGHUP: a terminal closed (on Windows, the console window); SIGBREAK: Ctrl+Break on Windows

@@ -202,9 +202,6 @@ export function sweepRecovery(now = Date.now()): string[] {
 }
 /** server_status: the recovery folder (all servers' and this one's), its size, and every item kept because it holds
  *  unsaved work or its saved file is missing, so nothing is left there unnoticed. */
-/** Servers adopted here that had been ended because a section they ran made no progress and blocked them (serverWatch.ts): the reason. */
-const stuckReports: { at: string; pid: number; stuck: { step: string; kind: string; silentMs: number; limitMs: number; expectMs: number } }[] = [];
-export const previousStuck = () => stuckReports;
 export function recoveryStatus() {
   const size = (p: string): number => { try { const st = statSync(p); return st.isDirectory() ? readdirSync(p).reduce((a, n) => a + size(join(p, n)), 0) : st.size; } catch { return 0; } };
   const kept: { file: string; project_file: string | null; handle: string | null; why: string; since: string }[] = [];
@@ -215,7 +212,7 @@ export function recoveryStatus() {
     if (why) kept.push({ file: f, project_file: m?.path ?? null, handle: m?.handle ?? null, why, since: new Date(m?.closedAt ?? mtime(f) ?? 0).toISOString() });
   }
   for (const [h, e] of evicted) if (e.dirty) kept.push({ file: e.file, project_file: e.savedTo ?? e.path, handle: h, why: 'unsaved changes (moved out of memory; comes back with its handle)', since: new Date(e.at).toISOString() });
-  return { folder: recoveryDir(), all_servers: recoveryBase(), bytes: size(recoveryDir()), bytes_all_servers: size(recoveryBase()), keep_days: keepDays(), kept_unsaved: kept.slice(0, 200), kept_unsaved_total: kept.length, ...(stuckReports.length ? { previous_server_ended_stuck: stuckReports } : {}) };
+  return { folder: recoveryDir(), all_servers: recoveryBase(), bytes: size(recoveryDir()), bytes_all_servers: size(recoveryBase()), keep_days: keepDays(), kept_unsaved: kept.slice(0, 200), kept_unsaved_total: kept.length };
 }
 
 // ---------------------------------------------------------------- sessions
@@ -385,8 +382,6 @@ export function adoptRecovery(): string[] {
     if (ownerAlive(lock)) continue;
     const to = join(aside, `${name}-by-${OWNER}`);
     try { mkdirSync(aside, { recursive: true }); renameSync(dir, to); } catch { continue; } // another server took it first
-    // a server ended because a section it ran was stuck (serverWatch.ts) left its reason beside its projects
-    try { stuckReports.push(JSON.parse(readFileSync(join(to, 'stuck.json'), 'utf8'))); } catch { /* it was not that */ }
     took.push(...adoptIndex(join(to, 'index.json'), dir, to));
   }
   // the shared index of servers before v0.1.15 (their files stay where they are, until restored)

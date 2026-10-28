@@ -1,6 +1,6 @@
 // 4D tools of the MCP server: an IFC model attached to the project, element links (by hand and by rules), their
 // gaps, the 4D key, and the packages for Navisworks, SYNCHRO and IFC4 4D tools (and back). Kept apart from server.ts.
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { rows, type Db, type Row } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
@@ -25,13 +25,12 @@ import { compactHeap, plainElement } from '../core/bim/element.ts';
 import { embedMaxBytes, readManifest } from '../core/bim/tiles.ts';
 import { relinkPlan } from '../core/bim/relink.ts';
 import { applyImport as applyImport4d, planImport as planImport4d } from '../core/bim/import4d.ts';
-import { readImport4d } from '../core/bim/read4d.ts';
+import { readImport4dWatched } from '../core/bim/read4d.ts';
 import { runSynchroCloud, SYNCHRO_CLOUD_TOOL } from './synchroCloud.ts';
 import { diffIndexes } from '../core/bim/diff.ts';
 import { chromiumPath, ffmpegPath, inChromium, isGpuFailure, noteGpuFailure, probeRenderer, RenderFailed, renderPngs, renderVideo, webmToMp4, type Renderer } from '../core/bim/headless.ts';
 import { aboutMinutes, planRender, renderMinutes } from '../core/bim/renderplan.ts';
 import { StuckError } from '../core/bim/liveness.ts';
-import { expectedMs, watched } from '../core/bim/serverWatch.ts';
 import { activityCosts, earnedValue } from '../core/cost/rollup.ts';
 import { mkdtempSync, writeFileSync as writeRaw } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -559,11 +558,10 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       if (size < 0) return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.');
       if (size > 0x1fffffe8 && !/\.(nwf|nwd|sp|xlsx)$/i.test(path)) return fail('too_large', `${basename(path)} is ${Math.round(size / 1048576)} MB: more text than one string can hold (about 512 MB), so it cannot be read as a 4D file.`, 'Export the 4D data on its own (the links or the TimeLiner list, without the model geometry), or split it.');
       const releaseRead = reserveMemory(size * 4 + 8 * 1048576, `Reading ${basename(path)} (${Math.round(size / 1048576)} MB) for import_4d`, 'export the 4D data on its own (without the model geometry), or split it', s.handle);
-      let bytes: Uint8Array;
       let imp: Imported4d;
       try {
-      try { bytes = new Uint8Array(readFileSync(path)); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
-      try { imp = await watched('reading the 4D file', { what: 'The 4D file reader', tried: 'one pass of the reader over the file in the server\u2019s own process', next: 'export the schedule from the source tool in another format (a TimeLiner CSV, a Navisworks search-set XML, an IFC 4D) or in smaller parts, and import that', expectMs: expectedMs(bytes.length, 'navisworks') }, () => readImport4d(path, bytes)); } catch (e) { if (e instanceof StuckError) return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${e.message}`, e.stuck.alternatives, { data: { reason: 'stuck', stuck: e.stuck } }); return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${(e as Error).message}`, 'Give an IFC 4D, search-set XML, TimeLiner CSV/xlsx, Navisworks .nwf/.nwd or SYNCHRO .sp file.'); }
+      try { closeSync(openSync(path, 'r')); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
+      try { imp = await readImport4dWatched(path); } catch (e) { if (e instanceof StuckError) return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${e.message}`, e.stuck.alternatives, { data: { reason: 'stuck', stuck: e.stuck } }); return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${(e as Error).message}`, 'Give an IFC 4D, search-set XML, TimeLiner CSV/xlsx, Navisworks .nwf/.nwd or SYNCHRO .sp file.'); }
       const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf' || imp.source === 'nwd';
       const m = await modelOf(s.db, projId, !tasksOnly);
       const plan = planImport4d(s.db, projId, imp, m?.index ?? null, { createActivities: a.create_activities === true });

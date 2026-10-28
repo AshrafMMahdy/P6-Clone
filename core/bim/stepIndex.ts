@@ -411,7 +411,7 @@ export function scanEntities(absPath: string, onEntity: (id: number, type: strin
     let entityStart = 0;
     let read = 0, bytesDone = 0;
     rs.on('data', (chunk: string | Buffer) => {
-      progress(bytesDone += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length); // a tick per 1 MB block (the server watches this section: serverWatch.ts)
+      progress(bytesDone += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length); // a tick per 1 MB block (the index worker's liveness: indexWorker.ts)
       const text = carry + (typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
       // Resume AFTER the carry: its characters were scanned with the previous chunk (re-scanning them toggled the
       // string state twice and silently dropped ~2 % of entities per 1 MB chunk).

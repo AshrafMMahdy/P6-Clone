@@ -209,7 +209,7 @@ watch as the server's (`inPage` in `headless.ts`: tiles loaded, frames drawn, a 
    | Navisworks section inflate (`NAVISWORKS_S_PER_MB`) | 0.8 s per MB of file | the 509 MB federation opens in 6.8 min (above): 0.80 s/MB for the whole open |
    | rvt-rs unpack (`REVIT_S_PER_MB`) | 2 s per MB of .rvt, **provisional** | not measured in time: the "8x" is memory. Watched by memory growth meanwhile (a growing read is never ended for being slow) |
    | Microsoft Project COM (`MSPROJECT_S_PER_MB`) | 2 s per MB, **provisional** | not measured |
-   | IFC index, in the server's own process (`INDEX_S_PER_MB`) | 0.1 s per MB of IFC | section 6 "open (index only)": 0.095, 0.096, 0.098 s/MB |
+   | IFC index (`INDEX_S_PER_MB`; `indexWorker.ts`) | 0.1 s per MB of IFC | section 6 "open (index only)": 0.095, 0.096, 0.098 s/MB |
    | Chromium first frame | `renderMinutes` (2.1 M triangles/s software, 400 M/s card) | section 4 (509 MB federation) |
 
    **To update a rate**: edit the one named constant at the top of `core/bim/heartbeat.mjs` and the row above. The Revit and Microsoft
@@ -226,21 +226,32 @@ reader). `P6CLONE_NWD_MINUTES`, which was a fixed 60-minute kill, is only an opt
 Microsoft Project's idle rule needs a reading of the process table that lists `WINPROJ.EXE` (`cpuCovering`); where only PowerShell can be
 seen (tasklist fall back), only the size bound applies.
 
-**The server's own process** (`core/bim/serverWatch.ts`, `heartbeat.mjs` `startServerWatch`). The sections that read input inside the
-MCP server are declared (`watched()`): the IFC index (`stepIndex`: a tick per 1 MB read, a work bound for the pass after the scan), the
-cached model index (read and write), the 4D file readers (`import_4d`). A thread of the server judges them by the same rule. Stuck while
-the event loop still turns (waiting on something that never comes): the job is cancelled with the reason and the server goes on. Stuck
-while the main thread is blocked in a synchronous loop: V8 cannot interrupt it, so the thread writes `stuck.json` into the server's
-recovery folder and ends the process; every project is checkpointed on disk shortly after its last change and comes back under its
-handle on the next start, which prints the reason and reports it in `server_status` `recovery.previous_server_ended_stuck`.
-`P6CLONE_SERVER_WATCH=off` turns the watch off. Undeclared work is never judged. Not declared, with the reason: the analysis and LOB
-engines (Monte Carlo, crash, optimize, windows analysis, LOB plans) have no measured rate to size a bound from and tick between steps only,
-so a long legitimate step would be a false kill of the whole server (they are ended by `cancel_job`); the O(elements) passes (links,
-exports, quantities) are finite array loops of milliseconds per 100,000 elements and cannot hang.
+**The server never ends itself** (owner rule 2026-10-28: customer data survives). A stuck loop on the server's main thread could only be
+ended by ending the process, and with it every open project's session (up to one checkpoint interval of edits in each), so nothing
+the server waits on runs there. The sections that read input run in a process of their own (`core/bim/jobWorker.ts` `inWorker`),
+judged by the same heartbeat rule as the geometry worker, and a stuck one ends only its worker and its call, with the reason:
+the IFC index (`indexWorker.ts`: `stepIndex`, a tick per 1 MB read, a work bound of size x `INDEX_S_PER_MB` for the pass after the scan; the
+index comes back to the server as the index file the cache uses, read by `readIndex`), and another tool's 4D file (`read4dWorker.ts`: one
+opaque call of the file's size x the Navisworks rate x 10). Without the bundled worker (an Electron app) they run in the app's process,
+unwatched. A worker is judged by its own heartbeat times: a stalled event loop of the server (busy with another handle's long step)
+is not its silence. The root cause of one call freezing the others is heavy synchronous work on the single thread that serves every handle,
+so the long engines are off it too (`mcp/compute.ts`): the analysis tools (check, DCMA, lint, float paths, curves, what-if batches, crash,
+optimise, windows and time-impact analysis), Monte Carlo, levelling, F9 and progress updates, `evaluate`, the LOB plan tools, and the PDF,
+Excel and report files run on a COPY of their project in a worker thread (the server's own code, started with `workerData.p6Compute`), and
+hand back their answer and their changes as a patch (`core/journalPatch.ts`) that the main thread applies as one undoable change of the handle.
+The main thread only routes; other handles' calls, `job_status` and `cancel_job` are never behind a run. Cancelling a call ends its worker at once
+(`terminate()`, even in a synchronous loop), which is safe because it works on a copy. `P6CLONE_COMPUTE_WORKERS` sets the number of workers
+(default CPUs - 1, at least 2; `0` runs everything in the server, for diagnosis). The cost: the main thread serialises the project once per
+call (about 70 ms for a 12 MB XER) and the memory budget reserves the copy. What cannot move, and why: opening and saving files (they create
+or serialise the session's database, so the main thread would pay for the copy of the whole result), editing, undo and redo (finite, fast
+operations on the database itself), the lookups, the 4D tools (they work on models held in the main process, whose heavy parts already run
+in worker processes), and reading and writing the cached index (`readIndex`, `writeIndex`: they build or walk the in-memory index the server
+holds, which cannot be handed over; finite passes over a file in 16 MB blocks and 4096-element steps). The compute workers have no liveness
+watch of their own (the engines have no measured rate to size a bound from): `cancel_job` ends them. There is no self-kill path.
 
 Every stuck error carries the facts as data, besides the words: the tool error's `stuck` (`{step, kind, silent_ms, window_ms, windows,
 longest_gap_ms | bound_ms, expected_ms, done, total, tried, alternatives}`) with `reason: "stuck"` for a model that cannot be read
-(`model_unreadable`), `import_4d` (`bad_input`) and a render (`render_failed`, `data.stuck`); `open_model` answers `geometry_stuck` beside
+(`model_unreadable`: the IFC index, Revit, Navisworks), `import_4d` (`bad_input`) and a render (`render_failed`, `data.stuck`); `open_model` answers `geometry_stuck` beside
 `geometry_note`.
 
 **The platform's change for the pickup window**: `clientRender4d.ts` waits 90 s for `ready()`. A big model's tiles can
@@ -255,7 +266,7 @@ the headless Chromium) under `P6CLONE_MEM_BUDGET_MB=1536` and the platform's hea
 The estimate (`core/bim/model.ts` `loadNeeds`):
 
 - the index (only when the model is not cached): `min(size, INDEX_PER_BYTE × size + INDEX_KNEE) + INDEX_FIXED`, with
-  `INDEX_PER_BYTE` 0.4, `INDEX_KNEE` 256 MB and `INDEX_FIXED` 160 MB (a small file costs about its own size while it is
+  `INDEX_PER_BYTE` 0.4, `INDEX_KNEE` 256 MB and `INDEX_FIXED` 160 MB (an index-only load adds `INDEX_WORKER_FIXED`, 64 MB, for the index worker's own Node runtime) (a small file costs about its own size while it is
   read; past 256 MB the pass collects every 128 MB read and the live index is about a quarter of the file);
 - meshing: one geometry run at a time on a chunk of the IFC, `MESH_PER_BYTE × chunk + MESH_FIXED` with
   `MESH_PER_BYTE` 3.8 and `MESH_FIXED` 330 MB; the chunk is `P6CLONE_GEOM_CHUNK_MB` (300) or smaller, sized to the

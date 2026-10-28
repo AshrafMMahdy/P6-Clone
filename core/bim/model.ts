@@ -12,8 +12,7 @@ import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
 import { isRevit, revitNeed, rvtToIfc, type RevitSource } from './rvt.ts';
 import { cacheNavisworks, isNavisworks, navisworksKey, navisworksNeed, nwdToIfc, type NavisworksSource } from './nwd.ts';
-import { alive } from './heartbeat.mjs';
-import { expectedMs, watched } from './serverWatch.ts';
+import { readIndex, writeIndex } from './indexFile.ts';
 
 export interface Model {
   hash: string; index: IfcIndex;
@@ -110,13 +109,13 @@ async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
   const hit = memory.get(name);
   if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; return hit; }
   setAsideOld(hash);
-  let index = existsSync(`${base}.ndjson`) && existsSync(`${base}.nw.json`) ? (await tryReadIndexW(base))?.index ?? null : null;
+  let index = existsSync(`${base}.ndjson`) && existsSync(`${base}.nw.json`) ? tryReadIndex(base)?.index ?? null : null;
   // a model read without geometry, or whose geometry failed (once a run of the app), is read again with it
   const retry = !!index && want && index.geometryStatus === 'unavailable' && !retried.has(hash);
   if (retry) retried.add(hash);
   if (!index || retry || (want && (index.geometryStatus === 'skipped' || (index.geometryStatus === 'ok' && !readManifest(`${base}.tiles`))))) {
     await cacheNavisworks(path, base, { geometry: want, onProgress: o.onProgress });
-    index = await indexSection('reading', base, () => readIndex(base));
+    index = readIndex(base);
   }
   index.sourcePath = path;
   touch(base);
@@ -137,7 +136,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; return hit; }
   const base = join(cacheDir(), cacheName(hash));
   setAsideOld(hash);
-  let cached = hit ? { index: hit.index } : existsSync(`${base}.ndjson`) ? await tryReadIndexW(base) : null;
+  let cached = hit ? { index: hit.index } : existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
   // a model indexed without geometry: meshed now from its cached index (the STEP pass is not run again); so is one whose
   // meshing failed, once a run of the app (a timeout, or memory short at the time, may not happen again)
   const retry = cached && want && cached.index.geometryStatus === 'unavailable' && !retried.has(hash);
@@ -145,7 +144,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   if (cached && want && (cached.index.geometryStatus === 'skipped' || retry)) {
     const index = cached.index;
     await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
-    await indexSection('writing', base, () => writeIndex(base, index));
+    writeIndex(base, index);
     cached = { index };
   }
   if (cached && (!want || cached.index.geometryStatus !== 'ok' || readManifest(`${base}.tiles`))) {
@@ -157,94 +156,16 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
     return m;
   }
   const { index } = await parseIfc(path, { geometry: want, ...(want ? { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress } : {}) });
-  await indexSection('writing', base, () => writeIndex(base, index));
+  writeIndex(base, index);
   if (index.elements.length > 200_000) compactHeap(); // what reading it left behind goes before the next call takes memory
   const m = wrap(hash, index, want ? `${base}.tiles` : null);
   memory.set(cacheName(hash), m);
   return m;
 }
 
-// ── the index on disk (format 10): a header line (everything but the elements, and the shared records), then a line
-// per element ([guid, express id, name, shared record, authored quantities]); the geometry fingerprints in <base>.geom
-// (float32 rows, GEOM_STRIDE per element). Written beside and renamed into place: a cache file is whole or absent.
-interface Header extends Omit<IfcIndex, 'elements'> { x: unknown[]; tables: { p: unknown[]; q: unknown[]; me: unknown[]; o: unknown[] }; geom: { origin: number[]; rows: boolean } }
-export function writeIndex(base: string, index: IfcIndex): void {
-  const file = `${base}.ndjson`, tmp = `${file}.${process.pid}.tmp`;
-  // the shared records: those of compact elements, or interned now for plain ones
-  const st = geomStore(index) ?? newGeomStore();
-  const table = new ExtrasTable(st);
-  const xOf = (e: IfcElement): Extras => (e instanceof Element ? e._x : table.get({ c: e.ifcClass, s: e.storey, d: e.discipline, ...(e.material ? { m: e.material } : {}), ...(e.typeName ? { t: e.typeName } : {}), ...(e.system ? { y: e.system } : {}), p: e.props, ...(e.quantityInfo ? { q: e.quantityInfo } : {}), ...(e.measures ? { me: e.measures } : {}), ...(e.owner ? { o: e.owner } : {}) }));
-  const xNo = new Map<Extras, number>(), xs: unknown[] = [];
-  const objs = { p: new Map<object, number>(), q: new Map<object, number>(), me: new Map<object, number>(), o: new Map<object, number>() };
-  const tables = { p: [] as unknown[], q: [] as unknown[], me: [] as unknown[], o: [] as unknown[] };
-  const ref = (k: keyof typeof objs, v: object | undefined) => { if (!v) return -1; let n = objs[k].get(v); if (n == null) { n = tables[k].length; tables[k].push(v); objs[k].set(v, n); } return n; };
-  // first the shared records (the header lists them), then the elements, written in blocks
-  const xIndex = new Int32Array(index.elements.length);
-  index.elements.forEach((e, i) => {
-    if ((i & 0xfff) === 0) alive(); // the Navisworks reader writes this index in its own process: a tick per 4096 elements
-    const x = xOf(e);
-    let n = xNo.get(x);
-    if (n == null) { n = xs.length; xNo.set(x, n); xs.push([x.c, x.s, x.d, x.m ?? null, x.t ?? null, x.y ?? null, ref('p', x.p), ref('q', x.q), ref('me', x.me), ref('o', x.o)]); }
-    xIndex[i] = n;
-  });
-  const plainGeom = !(index.elements[0] instanceof Element) && index.elements.some((e) => e.geom);
-  const { elements: _skip, ...rest } = index;
-  const header: Header = { ...rest, x: xs, tables, geom: { origin: plainGeom ? [0, 0, 0] : st.origin, rows: !!st.rows || plainGeom } };
-  const fd = openSync(tmp, 'w');
-  try {
-    writeSync(fd, JSON.stringify(header) + '\n');
-    let buf = '';
-    index.elements.forEach((e, i) => { if ((i & 0xfff) === 0) alive(); buf += JSON.stringify([e.guid, e.expressId, e.name, xIndex[i], Object.keys(e.authored).length ? e.authored : 0]) + '\n'; if (buf.length > 1 << 22) { writeSync(fd, buf); buf = ''; } });
-    if (buf) writeSync(fd, buf);
-  } finally { closeSync(fd); }
-  // fingerprints: the store's rows, or those of plain elements
-  if (st.rows) writeFileSync(`${base}.geom`, new Uint8Array(st.rows.buffer, st.rows.byteOffset, st.rows.byteLength));
-  else if (plainGeom) {
-    const rows = new Float32Array(index.elements.length * GEOM_STRIDE).fill(Number.NaN);
-    index.elements.forEach((e, i) => { const g = e.geom; if (g) rows.set([...g.bbox, ...g.centroid, g.volume, g.triangles], i * GEOM_STRIDE); });
-    writeFileSync(`${base}.geom`, new Uint8Array(rows.buffer));
-  } else rmSync(`${base}.geom`, { force: true });
-  renameSync(tmp, file);
-}
-
-/** The cached index files are read and written in the server's own process: declared sections (serverWatch.ts), one opaque call of the
- *  file's size at the index rate (section 6), ticking every 16 MB block / 4096 elements. */
-const indexSection = <T,>(verb: string, base: string, fn: () => T): Promise<T> => {
-  const size = (() => { try { return statSync(`${base}.ndjson`).size; } catch { return 0; } })();
-  return watched(`${verb} the cached model index`, { what: 'The model index', tried: 'one pass over the cached index file in the server\u2019s own process', next: 'remove the model cache folder (P6CLONE_MODEL_CACHE) so the model is read again from its file, or open the model with geometry: false', expectMs: expectedMs(size, 'index') }, fn);
-};
-const tryReadIndexW = async (base: string): Promise<{ index: IfcIndex } | null> => { try { return { index: await indexSection('reading', base, () => readIndex(base)) }; } catch (e) { if ((e as Error).name === 'StuckError') throw e; rmSync(`${base}.ndjson`, { force: true }); return null; } };
 /** The cached index, or null when the cache is missing or damaged (then the IFC is read again). */
 function tryReadIndex(base: string): { index: IfcIndex } | null { try { return { index: readIndex(base) } } catch { rmSync(`${base}.ndjson`, { force: true }); return null; } }
-export function readIndex(base: string): IfcIndex {
-  const fd = openSync(`${base}.ndjson`, 'r'), dec = new TextDecoder(), buf = Buffer.alloc(1 << 24);
-  let rest = '', header: Header | null = null, index: IfcIndex | null = null, xs: Extras[] = [], st: GeomStore = newGeomStore();
-  const line = (l: string) => {
-    if (!l) return;
-    if (!header) {
-      header = JSON.parse(l) as Header;
-      const { x, tables, geom, ...ix } = header;
-      st = { rows: null, origin: geom.origin as [number, number, number] };
-      if (geom.rows) { const b = readFileSync(`${base}.geom`); st.rows = new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); }
-      const tab = (k: keyof Header['tables'], n: number) => (n >= 0 ? tables[k][n] : undefined);
-      xs = (x as unknown[][]).map((r) => { const e: Extras = { c: r[0] as string, s: r[1] as string, d: r[2] as Extras['d'], p: (tab('p', r[6] as number) ?? {}) as Extras['p'], g: st }; if (r[3]) e.m = r[3] as string; if (r[4]) e.t = r[4] as string; if (r[5]) e.y = r[5] as string; const q = tab('q', r[7] as number), me = tab('me', r[8] as number), o = tab('o', r[9] as number); if (q) e.q = q as Extras['q']; if (me) e.me = me as Extras['me']; if (o) e.o = o as Extras['o']; return e; });
-      index = { ...(ix as Omit<IfcIndex, 'elements'>), elements: [] };
-      return;
-    }
-    const r = JSON.parse(l) as [string, number, string, number, Record<string, number> | 0];
-    const els = index!.elements;
-    els.push(new Element(r[0], r[1], r[2], r[4] || null, xs[r[3]], els.length));
-  };
-  try {
-    for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) { alive(); const ls = (rest + dec.decode(buf.subarray(0, n), { stream: true })).split('\n'); rest = ls.pop()!; for (const l of ls) line(l); }
-    line(rest + dec.decode());
-  } finally { closeSync(fd); }
-  if (!index) throw new Error(`The model cache ${base}.ndjson is empty.`);
-  if ((index as IfcIndex).elements.length > 200_000) compactHeap();
-  const ix = index as IfcIndex;
-  if (st.rows && st.rows.length !== ix.elements.length * GEOM_STRIDE) throw new Error(`The model cache ${base}.geom does not match its index.`);
-  return ix;
-}
+
 
 /** Caches of this model in an older format (another INDEX_FORMAT, the GLB of format 9, other tile settings): renamed
  *  into superseded/ (pruned after the cache's days), so opening the model reads it afresh. */
@@ -281,6 +202,8 @@ export const modelBytes = (hashes?: Iterable<string>) => { const want = hashes ?
  *  pass's garbage between its collections), then INDEX_PER_BYTE of each byte past it (the live index is a quarter of
  *  the file; the pass collects every 128 MB read), whichever is less, plus INDEX_FIXED (the code it loads). */
 export const INDEX_PER_BYTE = 0.4, INDEX_KNEE = 256 * 1048576, INDEX_FIXED = 160 * 1048576; // fixed: 160 MB, the most a 42 MB model took on Linux (Node 24.14.0) past its own size
+/** The index worker's own Node runtime (indexWorker.ts): the tree of processes counts while the index is built, before any geometry process runs. */
+export const INDEX_WORKER_FIXED = 64 * 1048576;
 export const indexNeed = (bytes: number) => Math.round(Math.min(bytes, bytes * INDEX_PER_BYTE + INDEX_KNEE) + INDEX_FIXED);
 /** A geometry run's peak (web-ifc's WebAssembly memory, the file's bytes, the meshes) per byte of IFC it meshes, and its
  *  fixed part (Node and web-ifc themselves). */
@@ -313,7 +236,7 @@ export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; 
   const indexCached = !!(base && (memory.has(cacheName(o.hash!)) || existsSync(`${base}.ndjson`)));
   const tilesCached = !!(base && readManifest(`${base}.tiles`));
   const index = indexCached ? 0 : indexNeed(size);
-  if (o.geometry === false || tilesCached) return { index, mesh: 0, chunkBytes: 0, total: index };
+  if (o.geometry === false || tilesCached) { const idx = index ? index + INDEX_WORKER_FIXED : 0; return { index: idx, mesh: 0, chunkBytes: 0, total: idx }; }
   let chunk = Math.min(size, chunkBytesOf());
   if (o.free != null) {
     // what fits beside the index (the index stays in memory while the runs go)
@@ -355,3 +278,4 @@ export function pruneCache(now = Date.now()): number {
 }
 /** Bytes of the model's display tiles. */
 export const tilesSize = (m: Model) => (m.tiles ? readManifest(m.tiles)?.bytes ?? 0 : 0);
+export { readIndex, writeIndex };

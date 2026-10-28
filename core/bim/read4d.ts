@@ -2,6 +2,19 @@
 import { parseIfc4d, parseSearchSets, parseTimelinerCsv, sheetToCsv, type Imported4d } from './exchange4d.ts';
 import type { SynchroFile } from './synchro.ts';
 import { readXlsx } from '../excel/xlsx.ts';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { inWorker } from './jobWorker.ts';
+import { read4dWorkerPath } from './runtime.ts';
+
+/** readImport4d in a process of its own (read4dWorker.ts), watched like the other workers: a reader that is stuck ends only itself and
+ *  this call, with the reason. Without the worker (an Electron app without the bundle) it runs here. */
+export async function readImport4dWatched(path: string): Promise<Imported4d> {
+  const worker = read4dWorkerPath();
+  if (!worker) return readImport4d(path, new Uint8Array(readFileSync(path)));
+  return inWorker({ script: worker, job: { path }, what: 'The 4D file reader', tried: 'one pass of the reader over the file in a process of its own', next: 'export the schedule from the source tool in another format (a TimeLiner CSV, a Navisworks search-set XML, an IFC 4D) or in smaller parts, and import that' },
+    (dir) => JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')) as Imported4d);
+}
 
 /** Read a 4D file of another tool, by its content: Navisworks .nwf/.nwd (TimeLiner), SYNCHRO .sp, IFC 4D, a search-set
  *  XML, a TimeLiner grid in .xlsx, else a TimeLiner CSV. */

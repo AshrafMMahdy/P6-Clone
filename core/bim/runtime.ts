@@ -39,5 +39,19 @@ export function nwdWorkerPath(): string | null {
   return shipped('nwdWorker.mjs');
 }
 
+/** A worker bundled like the Navisworks reader's: the TypeScript beside this file under Node (the repository), else the bundle in ifc/.
+ *  Null in Electron without the bundle (then the work runs in the app's own process). `env` names the variable a test's stand-in uses. */
+function bundledWorker(ts: string, mjs: string, env: string): string | null {
+  const explicit = process.env[env];
+  if (explicit) return existsSync(explicit) ? explicit : null;
+  const h = here(), own = h ? join(h, ts) : null;
+  if (own && !process.versions.electron && existsSync(own)) return own;
+  return shipped(mjs);
+}
+/** The IFC index worker (indexWorker.ts, run in its own process). */
+export const indexWorkerPath = (): string | null => bundledWorker('indexWorker.ts', 'indexWorker.mjs', 'P6CLONE_INDEX_WORKER');
+/** The 4D file reader's worker (read4dWorker.ts, run in its own process). */
+export const read4dWorkerPath = (): string | null => bundledWorker('read4dWorker.ts', 'read4dWorker.mjs', 'P6CLONE_READ4D_WORKER');
+
 /** web-ifc as a module object (its CommonJS build arrives as the default export when imported). */
 export async function loadWebIfc(): Promise<any> { const m: any = await import(webIfcEntry()); return m.IfcAPI ? m : m.default; }

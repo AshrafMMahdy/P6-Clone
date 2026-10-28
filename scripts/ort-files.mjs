@@ -28,7 +28,8 @@ export function copyIfc(root, dest) {
   cpSync(join(root, 'core/bim/heartbeat.mjs'), join(out, 'heartbeat.mjs')); // the workers' heartbeat, for the parent's liveness watch
   cpSync(join(root, 'core/bim/meshClosed.mjs'), join(out, 'meshClosed.mjs')); // the closed-mesh rule geomWorker.mjs imports
   // Navisworks files: the reader, bundled into one module (its own process; it starts the tiler beside it)
-  buildSync({ entryPoints: [join(root, 'core/bim/nwdWorker.ts')], outfile: join(out, 'nwdWorker.mjs'), bundle: true, format: 'esm', platform: 'node', target: 'node22', logLevel: 'warning', banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" } });
+  // (and the IFC index and the 4D file reader, each in a process of its own: the server never ends itself over a stuck loop)
+  for (const w of ['nwdWorker', 'indexWorker', 'read4dWorker']) buildSync({ entryPoints: [join(root, `core/bim/${w}.ts`)], outfile: join(out, `${w}.mjs`), bundle: true, format: 'esm', platform: 'node', target: 'node22', logLevel: 'warning', banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" } });
   cpSync(join(root, 'core/bim/geomChunk.mjs'), join(out, 'geomChunk.mjs')); // models past one web-ifc run
   cpSync(join(root, 'core/bim/geomTiles.mjs'), join(out, 'geomTiles.mjs')); // the display tiles of each run
   cpSync(join(root, 'core/bim/rvtWorker.mjs'), join(out, 'rvtWorker.mjs')); // Revit files: rvt-rs (Apache-2.0) in rvt/
