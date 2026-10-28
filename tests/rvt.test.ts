@@ -104,9 +104,9 @@ test('through the MCP, a Revit file too big for its reader is model_too_large: w
     assert.equal(o.err, true);
     const e = o.d.error ?? o.d;
     assert.equal(e.code, 'model_too_large', JSON.stringify(o.d).slice(0, 300));
-    assert.deepEqual(e.alternatives, ['nwc', 'ifc']);
+    assert.deepEqual(e.alternatives, ['nwc', 'nwd', 'ifc']);
     assert.ok(e.size_mb > e.max_mb);
-    assert.match(e.next_step, /NWC .* IFC export.*not technical/s);
+    assert.match(e.next_step, /^FIRST look in the project.*NWC, NWD or IFC export of this same model.*ask the user.*not technical/s);
     assert.match(e.explain_to_user, /4 GB.*not a problem with your model.*NWC \(Navisworks\) or IFC/s);
   } finally { delete process.env.P6CLONE_REVIT_MAX_MB; }
 });

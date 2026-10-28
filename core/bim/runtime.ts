@@ -22,6 +22,8 @@ export function geomWorkerPath(): string | null {
 
 /** The Revit reader's worker script (rvt-rs's WebAssembly in rvt/ beside it), run in its own process. */
 export function rvtWorkerPath(): string | null {
+  const explicit = process.env.P6CLONE_RVT_WORKER; // the environment only (a test's stand-in worker; a tool argument never chooses a program)
+  if (explicit) return existsSync(explicit) ? explicit : null;
   const h = here(), own = h ? join(h, 'rvtWorker.mjs') : null;
   return own && existsSync(own) ? own : shipped('rvtWorker.mjs');
 }

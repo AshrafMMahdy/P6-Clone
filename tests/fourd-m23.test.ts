@@ -162,7 +162,7 @@ test('4D video quality: auto renders a small model in full; a draft (asked, or c
   try {
     const long = await call('render_4d', { handle: h, path: join(out, 'long'), kind: 'video', step: 14 });
     assert.equal(long.d.quality, 'draft');
-    assert.match(long.d.quality_note, /^Draft quality was chosen because the full model would take .* to render (on this server's graphics card|drawn by the processor).*quality: "standard" gives the full detail/s);
+    assert.match(long.d.quality_note, /^Draft quality was chosen because the full model would take .* to render (on this server's graphics card|on the user\u2019s own graphics card|drawn by the processor).*quality: "standard" gives the full detail/s);
     const high = await call('render_4d', { handle: h, path: join(out, 'high'), kind: 'video', step: 14, quality: 'high' });
     assert.deepEqual(size(high.d), [1920, 1080]);
     assert.match(high.d.quality_note, /^Full detail, as asked: expect .*Tell the user it will take a while/s);

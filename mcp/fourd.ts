@@ -7,7 +7,7 @@ import { applyOps } from '../core/project/ops.ts';
 import { writeP6XmlTo } from '../core/xml/p6xml.ts';
 import { fenceListedModels, isNavisworks } from '../core/bim/nwd.ts';
 import { cachedModel, fileHash, ifcOf, loadModel, loadNeeds, modelBytes, releaseModels, type LoadNeeds, type Model } from '../core/bim/model.ts';
-import { checkRevitSize, isRevit, RevitTooLarge } from '../core/bim/rvt.ts';
+import { checkRevitSize, isRevit, REVIT_MEMORY_PER_BYTE, RevitDiskFull, RevitTooLarge, rvtCached } from '../core/bim/rvt.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
 import { admit, countMemory, effectiveBudget, fail, freeMemory, pathArg, readFenced, reserveMemory, sessions, type Session } from './runtime.ts';
@@ -28,7 +28,8 @@ import { applyImport as applyImport4d, planImport as planImport4d } from '../cor
 import { readImport4d } from '../core/bim/read4d.ts';
 import { runSynchroCloud, SYNCHRO_CLOUD_TOOL } from './synchroCloud.ts';
 import { diffIndexes } from '../core/bim/diff.ts';
-import { chromiumPath, ffmpegPath, inChromium, probeRenderer, RenderFailed, renderPngs, renderVideo, webmToMp4, type Renderer } from '../core/bim/headless.ts';
+import { chromiumPath, ffmpegPath, inChromium, isGpuFailure, noteGpuFailure, probeRenderer, RenderFailed, renderPngs, renderVideo, webmToMp4, type Renderer } from '../core/bim/headless.ts';
+import { aboutMinutes, planRender } from '../core/bim/renderplan.ts';
 import { activityCosts, earnedValue } from '../core/cost/rollup.ts';
 import { mkdtempSync, writeFileSync as writeRaw } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,7 +52,7 @@ export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<s
   { name: 'simulate_4d', annotations: ro, description: 'The 4D state of the model on dates: element counts by state (not started, in progress, complete, removed, temporary in place, unlinked), optionally by storey or class, and the activities under way in each step. date, or from/to/step (days). source: best (default: actuals up to the data date, then the forecast), planned, actual, late, or a saved baseline name. Dates come from the schedule itself (F9: calendars, actuals, data date). snapshots: [dates] renders PNG frames into path (needs the server’s P6CLONE_CHROMIUM; without it, use render_4d kind viewer and look at it). Reads the project only.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, source: { type: 'string' }, by: { type: 'string' }, snapshots: { type: 'array', items: { type: 'string' } }, path: { type: 'string' }, view: { type: 'string' } } }) },
   { name: 'compare_4d', annotations: ro, description: 'Progress against a baseline on a date, element by element (TimeLiner Early/Late appearance): ahead, on time, late, not started, complete. late_means start (default: started later than the baseline, as TimeLiner) or finish (finished later). by storey (default), class or wbs: counts and percentages per zone, the elements behind each late figure (max_ids), planned value vs earned value per zone (each activity\u2019s PV/EV shared over its elements), and the activities that became or stopped being critical since the baseline.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, against: { type: 'string' }, late_means: { type: 'string' }, by: { type: 'string' }, max_ids: { type: 'number' } }, required: ['against'] }) },
   { name: 'set_element_status', annotations: edit, description: 'Element-level progress from site (walkdowns, reality capture): guids, status installed | in_progress | not_installed, date. It overrides the activity\u2019s progress for those elements in simulate_4d, compare_4d and the viewer (actual and best dates), and proposes each touched activity\u2019s % complete from its installed share; apply_percent: true writes it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } }, status: { type: 'string' }, date: { type: 'string' }, apply_percent: { type: 'boolean' } }, required: ['guids', 'status', 'date'] }) },
-  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people, from the FULL geometry (display tiles; docs/4d-tiles-contract.md). kind viewer (default): an HTML viewer in the folder path (index.html, viewer4d.js, and the model\u2019s tiles in model-<hash>/: manifest.json, tile-NNNNN.glb, elements.txt), or one self-contained file with embed: true (models up to P6CLONE_EMBED_MAX_MB, 64 MB of tiles; past it too_big_to_embed); it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or a video rendered in a headless Chromium (the server’s P6CLONE_CHROMIUM; a tool argument never names a program). format mp4 (default: H.264 from the browser, or its WebM converted with the server’s P6CLONE_FFMPEG; without ffmpeg the WebM is returned with a note) or webm. Progress per frame; cancel_job stops it; without one the answer gives the viewer page (self-contained for a small model, else with its model-<hash>/ tile folder beside it, every file in written) and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). A browser that cannot hold the model fails the render in words naming its size (render_failed); boxes: true draws each element as its bounding box, only when asked. quality (images, video): auto (default), draft (854x480, each element a simple box: quick on any machine), standard (full geometry, 1280x720) or high (1920x1080); auto is standard unless that would take longer than about 10 minutes on this server (it draws on its graphics card when it has one, else with the processor, much slower on a big model), then draft. The answer gives quality, estimated_minutes, renderer and, when the user should hear it, quality_note: ALWAYS tell the user what quality_note says, in plain words (a draft is a quick preview by choice, not how their model looks; standard gives the full detail and how long it takes), so a simplified video is never taken for the model’s real quality. layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps (below 1 holds frames longer) or seconds_per_frame, file_name, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, format: { type: 'string', enum: ['mp4', 'webm'] }, seconds_per_frame: { type: 'number' }, file_name: { type: 'string' }, boxes: { type: 'boolean' }, quality: { type: 'string', enum: ['auto', 'draft', 'standard', 'high'] } }, required: ['path'] }) },
+  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people, from the FULL geometry (display tiles; docs/4d-tiles-contract.md). kind viewer (default): an HTML viewer in the folder path (index.html, viewer4d.js, and the model\u2019s tiles in model-<hash>/: manifest.json, tile-NNNNN.glb, elements.txt), or one self-contained file with embed: true (models up to P6CLONE_EMBED_MAX_MB, 64 MB of tiles; past it too_big_to_embed); it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or a video rendered in a headless Chromium (the server’s P6CLONE_CHROMIUM; a tool argument never names a program). format mp4 (default: H.264 from the browser, or its WebM converted with the server’s P6CLONE_FFMPEG; without ffmpeg the WebM is returned with a note) or webm. Progress per frame; cancel_job stops it; without one the answer gives the viewer page (self-contained for a small model, else with its model-<hash>/ tile folder beside it, every file in written) and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). A browser that cannot hold the model fails the render in words naming its size (render_failed); boxes: true draws each element as its bounding box, only when asked. quality (images, video): auto (default), draft (854x480, each element a simple box: quick on any machine), standard (full geometry, 1280x720) or high (1920x1080); auto is standard unless that would take longer than about 5 minutes (owner decision 2026-10-27) where it is drawn (this server’s graphics card when it has one, else its processor, much slower on a big model; with no Chromium here, the user’s own graphics card through the client render), then draft; pass quality to override. There is no time limit on a render: it runs while frames keep arriving or the browser keeps working, and is reported stuck only after it shows no life for several minutes. If the graphics card cannot finish (its memory, its driver, WebGL), the render is made again once with the processor, quality and estimate worked out again; any other failure (the machine’s memory, the disk, a stuck browser) is reported with its cause and the next step (a smaller quality first). The answer gives quality, estimated_minutes, renderer and, when the user should hear it, quality_note: ALWAYS tell the user what quality_note says, in plain words (a draft is a quick preview by choice, not how their model looks; standard gives the full detail and how long it takes), so a simplified video is never taken for the model’s real quality. layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps (below 1 holds frames longer) or seconds_per_frame, file_name, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, format: { type: 'string', enum: ['mp4', 'webm'] }, seconds_per_frame: { type: 'number' }, file_name: { type: 'string' }, boxes: { type: 'boolean' }, quality: { type: 'string', enum: ['auto', 'draft', 'standard', 'high'] } }, required: ['path'] }) },
   { name: 'relink_model', annotations: edit, description: 'Bring the 4D links over to a revised model (M4). Each linked element is found in the new model by its GlobalId; else, in the same IFC class, by name and storey (the nearest one when there are several), else by shape (size and position within tolerance_m, default 0.05). Answers what was kept, matched (and how), and lost (no counterpart: those links are dropped), plus the model diff summary (added, removed, modified, re-identified). dry_run: true only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, tolerance_m: { type: 'number' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
   SYNCHRO_CLOUD_TOOL(withHandle, project),
 ];
@@ -71,10 +72,19 @@ async function readModel(path: string, o: { geometry?: boolean; tick?: AnalysisH
   // the source file. A Navisworks file is read as it is: its need comes from its sections (loadNeeds)
   let ifc = path;
   if (isRevit(path)) {
-    try { checkRevitSize(path); } catch (e) { if (e instanceof RevitTooLarge) tooLarge(e); throw e; }
-    const conv = fits(path, loadNeeds(path, { geometry: false }), false, () => loadNeeds(path, { geometry: false }));
-    const release = reserveMemory(conv.total);
-    try { ifc = await ifcOf(path); } finally { release(); }
+    // a file converted before is read from the cache, whatever limit applies to a new conversion now
+    if (await rvtCached(path)) ifc = await ifcOf(path);
+    else {
+      try { checkRevitSize(path); } catch (e) { if (e instanceof RevitTooLarge) tooLarge(e); throw e; }
+      const conv = fits(path, loadNeeds(path, { geometry: false }), false, () => loadNeeds(path, { geometry: false }));
+      const release = reserveMemory(conv.total);
+      try { ifc = await ifcOf(path); } catch (e) {
+        // the reader ran out of memory under the size limit, or the disk could not take the IFC: told as what they are
+        if (e instanceof RevitTooLarge) tooLarge(e);
+        if (e instanceof RevitDiskFull) fail('model_unreadable', e.message, `Free disk space where the model cache is (${e.dir}; P6CLONE_MODEL_CACHE moves it), then open the model again; nothing was cached. An IFC export of the model needs no conversion.`, { data: { reason: 'disk_full' } });
+        throw e;
+      } finally { release(); }
+    }
   }
   const hash = isNavisworks(path) ? undefined : await fileHash(ifc);
   const need = fits(path, loadNeeds(ifc, { geometry: o.geometry, free: freeMemory(), hash }), o.geometry, () => loadNeeds(ifc, { geometry: o.geometry, free: freeMemory(), hash }));
@@ -82,11 +92,13 @@ async function readModel(path: string, o: { geometry?: boolean; tick?: AnalysisH
   try { return await loadModel(path, { geometry: o.geometry, ...(need.chunkBytes ? { chunkBytes: need.chunkBytes } : {}), ...(ifc === path ? { hash } : {}), ...(o.tick ? { onProgress: (d, t, n) => o.tick!(d, t, n) } : {}) }); } finally { release(); }
 }
 
-/** A Revit file too big for its reader: refused with its own code, what to ask the user for, and how to say why. */
+/** A Revit file too big for its reader (past the size limit, or one that ran the reader out of memory under it): refused
+ *  with its own code. What to do first: look for an export of the same model already in the project; ask the user only
+ *  when there is none. */
 const tooLarge = (e: RevitTooLarge): never => fail('model_too_large', e.message,
-  'Ask the user for an NWC (Navisworks) or IFC export of this model, made in Revit (File > Export); either opens at any size here with the same element GlobalIds, so links already made on it carry over. When you tell the user, assume they are not technical: explain why in plain words (explain_to_user, in this error, says it), not only that it failed.',
-  { data: { size_mb: Math.round(e.bytes / 1048576), max_mb: Math.round(e.max / 1048576), alternatives: ['nwc', 'ifc'],
-    explain_to_user: `This Revit file is ${Math.round(e.bytes / 1048576)} MB. The part of the app that reads Revit files works inside a fixed amount of working memory (4 GB), and reading a Revit file takes about 8 times its size, so files above about ${Math.round(e.max / 1048576)} MB do not fit. This is a limit of reading the Revit format directly, not a problem with your model. If you export the same model from Revit as an NWC (Navisworks) or IFC file (File > Export), the app can open it at any size, and every element keeps its ID, so nothing already linked to the schedule is lost.` } });
+  'FIRST look in the project\u2019s bucket or folder (where this file is) for an NWC, NWD or IFC export of this same model: the same file name first (Tower.rvt: Tower.nwc, Tower.nwd, Tower.ifc), then other files only if they are plainly the same model (name, size, date, the project title). If there is one, open_model it: any of them opens at any size here, with the same element GlobalIds, so links already made carry over. Only if none is the same model, ask the user (pass this error\u2019s explain_to_user as the explanation) for an NWC or IFC export of this model made in Revit (File > Export). When you tell the user, assume they are not technical: explain why in plain words (explain_to_user, in this error, says it), not only that it failed.',
+  { data: { size_mb: Math.round(e.bytes / 1048576), max_mb: Math.round(e.max / 1048576), alternatives: ['nwc', 'nwd', 'ifc'], ...(e.ranOut ? { reader_out_of_memory: true, cause: e.ranOut } : {}),
+    explain_to_user: `This Revit file is ${Math.round(e.bytes / 1048576)} MB. The part of the app that reads Revit files works inside a fixed amount of working memory (4 GB), and reading a Revit file takes about ${REVIT_MEMORY_PER_BYTE} times its size, so ${e.ranOut ? 'this file did not fit' : `files above about ${Math.round(e.max / 1048576)} MB do not fit`}. This is a limit of reading the Revit format directly, not a problem with your model. If you export the same model from Revit as an NWC (Navisworks) or IFC file (File > Export), the app can open it at any size, and every element keeps its ID, so nothing already linked to the schedule is lost.` } });
 
 /** What to do about a model that could not be read, by its kind */
 const unreadableHint = (path: string) => (existsSync(path) && (isRevit(path) || isNavisworks(path))
@@ -110,19 +122,10 @@ export function fits(path: string, first: LoadNeeds, geometry: boolean | undefin
   return need;
 }
 
-/** Minutes a render takes, from the triangles drawn per frame and the frames, plus loading the tiles (measured on a
- *  509 MB federation, 320 million triangles, 24 frames at 1280x720: 60 min with the processor drawing, about 2 million
- *  triangles a second; 34 s on this machine's graphics card, about 400 million, the tiles at about 200 MB/s). */
-export function renderMinutes(kind: 'gpu' | 'software', triangles: number, frames: number, tileBytes: number, pixels = 1280 * 720): number {
-  const perFrame = kind === 'gpu' ? 0.15 + triangles / RENDER_GPU_TRIANGLES_PER_S : 0.5 * (pixels / (1280 * 720)) + triangles / RENDER_SOFTWARE_TRIANGLES_PER_S;
-  return (frames * perFrame + tileBytes / (200 * 1048576)) / 60;
-}
-export const RENDER_SOFTWARE_TRIANGLES_PER_S = 2.1e6, RENDER_GPU_TRIANGLES_PER_S = 400e6;
-/** Past this many minutes for the full model, quality auto renders a draft (P6CLONE_RENDER_DRAFT_MINUTES, 10). */
-const draftLimitMinutes = () => Number(process.env.P6CLONE_RENDER_DRAFT_MINUTES) || 10;
+export { renderMinutes, RENDER_SOFTWARE_TRIANGLES_PER_S, RENDER_GPU_TRIANGLES_PER_S, AUTO_DRAFT_MINUTES } from '../core/bim/renderplan.ts';
 
 /** Where a render the browser could not hold would fit: a crashed page ran out of the machine's memory, the rest out of the GPU's */
-const roomFor = (code: string) => (code === 'browser_out_of_memory' ? 'render it where more memory is free for the browser beside the server' : 'render it where there is more GPU memory');
+const roomFor = (code: string) => (code === 'browser_out_of_memory' ? 'render it where more memory is free for the browser beside the server' : code === 'disk_full' ? 'free disk space on the server' : 'render it where there is more GPU memory');
 
 /** No 3D model to draw: say why, never draw an empty building. */
 const noGeometry = (m: Model): never => m.index.geometryStatus === 'skipped'
@@ -162,7 +165,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
     case 'open_model': {
       const path = pathArg(a.path);
       let m: Model;
-      try { m = await readModel(path, { geometry: a.geometry !== false, tick: h.tick }); } catch (e) { if (['memory_budget', 'model_too_large'].includes((e as { code?: string }).code ?? '')) throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, unreadableHint(path)); }
+      try { m = await readModel(path, { geometry: a.geometry !== false, tick: h.tick }); } catch (e) { if (['memory_budget', 'model_too_large', 'model_unreadable'].includes((e as { code?: string }).code ?? '')) throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, unreadableHint(path)); }
       await h.tick(1, 1, 'model parsed');
       const ix = m.index;
       const kept = h.apply(`Attach model ${basename(path)}`, (d) => {
@@ -335,7 +338,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
           mkdirSync(dir, { recursive: true });
           const page = writeViewer({ dir: mkdtempSync(join(tmpdir(), 'p6c4d-')), model: { tiles: g.tiles!, hash: g.hash, index: g.index }, timeline: viewerTimeline(s.db, projId, g.index, [source]), options: { left: source, interactive: false, view: a.view ?? 'iso', overlays: ['date', 'legend', 'activity_list'] }, title: 'snapshot', inlineScript: true, file: 'snapshot.html' })[0];
           let pngs: Buffer[];
-          try { pngs = await inChromium(chrome, page, (ev) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`))); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): ${roomFor(e.code)}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).', e.code ? { data: { reason: e.code } } : undefined); throw e; } finally { rmSync(dirname(page), { recursive: true, force: true }); }
+          try { pngs = await inChromium(chrome, page, (ev, alive) => renderPngs(ev, a.snapshots.map(String), (d, t, n) => h.tick(d, t, `snapshot ${n}`), alive)); } catch (e) { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): ${roomFor(e.code)}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable).', e.code ? { data: { reason: e.code } } : undefined); throw e; } finally { rmSync(dirname(page), { recursive: true, force: true }); }
           snapshots = pngs.map((png, i) => { const p = join(dir, `snapshot-${String(a.snapshots[i]).slice(0, 10)}.png`); h.writeOut(p, png); return p; });
         }
       }
@@ -426,30 +429,25 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const manifest = readManifest(m.tiles!)!;
       // images and video: standard (the full geometry, 1280x720), high (1920x1080) or draft (854x480, each element drawn
       // as its bounding box: quick on any machine); auto (the default) is standard unless that would take longer than
-      // P6CLONE_RENDER_DRAFT_MINUTES (10) on this machine's renderer, then draft. The answer says which, and why
+      // AUTO_DRAFT_MINUTES (5, owner decision 2026-10-27) on the machine that draws, then draft. The answer says which,
+      // and why. The machine that draws: this server's graphics card or processor (probeRenderer), or, with no Chromium
+      // here, the user's own graphics card (the client render), which is estimated as a graphics card
       const asked = String(a.quality ?? 'auto');
       if (!['auto', 'draft', 'standard', 'high'].includes(asked)) fail('bad_input', `Unknown quality "${asked}".`, 'Use auto, draft, standard or high.');
       const chrome = kind === 'viewer' ? null : chromiumPath();
-      const renderer = chrome ? await probeRenderer(chrome) : null;
+      const renderer = chrome ? await probeRenderer(chrome, manifest.bytes) : null;
       const span = (() => { const f = parseP6Date(a.from ? String(a.from) : timeline.start ?? ''), t = parseP6Date(a.to ? String(a.to) : timeline.finish ?? ''); return f != null && t != null && t >= f ? t - f : 30 * 1440; })();
       const frames = Math.min(kind === 'images' ? 500 : 100_000, Math.floor(span / (options.step! * 1440)) + 1);
-      const hd = asked === 'high' ? 1920 * 1080 : 1280 * 720;
-      const fullMinutes = renderMinutes(renderer?.kind ?? 'software', manifest.triangles, frames, manifest.bytes, hd), boxTriangles = m.index.elements.length * 12;
-      const draftMinutes = renderMinutes(renderer?.kind ?? 'software', boxTriangles, frames, 0, 854 * 480);
-      const quality = asked !== 'auto' ? asked : a.boxes === true || fullMinutes <= draftLimitMinutes() ? 'standard' : 'draft';
-      const boxes = a.boxes === true || quality === 'draft'; // a stand-in when asked for, or for a draft
-      const about = (min: number) => (min < 1 ? 'under a minute' : `about ${Math.round(min)} minute${Math.round(min) === 1 ? '' : 's'}`);
-      const where = renderer?.kind === 'gpu' ? `on this server's graphics card (${renderer.name})` : 'drawn by the processor (this server has no graphics card the browser can use)';
-      const qualityNote = kind === 'viewer' ? undefined : quality === 'draft'
-        ? `${asked === 'auto' ? `Draft quality was chosen because the full model would take ${about(fullMinutes)} to render ${where}` : 'Draft quality, as asked'}: 854x480, each element drawn as a simple box, so it renders in ${about(draftMinutes)}. Tell the user it is a quick preview by choice, not how their model really looks, so they do not take it for the model's quality; quality: "standard" gives the full detail (${about(fullMinutes)} here).`
-        : fullMinutes > draftLimitMinutes() ? `Full detail, as asked: expect ${about(fullMinutes)} ${where}; quality: "draft" gives a quick preview in ${about(draftMinutes)}. Tell the user it will take a while, and why.` : undefined;
+      const planFor = (drawing: 'gpu' | 'software', fellBack?: { reason: string; firstMinutes: number }) => planRender({ kind: drawing, client: !chrome, ...(renderer?.kind === 'gpu' ? { gpuName: renderer.name } : {}), ...(fellBack ? { fellBack } : {}), asked: asked as 'auto' | 'draft' | 'standard' | 'high', boxes: a.boxes === true, triangles: manifest.triangles, tileBytes: manifest.bytes, elements: m.index.elements.length, frames, sides: layout === 'side_by_side' ? 2 : 1, width: Number(a.width) || undefined, height: Number(a.height) || undefined });
+      let plan = planFor(chrome ? renderer?.kind ?? 'software' : 'gpu');
       const linked = timeline.elements.linked;
-      const display = (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances, ...(boxes ? { boxes: true } : {}) }; })();
-      const tooBig = (e: unknown) => { if (e instanceof EmbedTooBig) return fail('too_big_to_embed', e.message, 'Leave embed out: the viewer is written as a page with the model\u2019s tiles in a folder beside it (served together).'); throw e; };
-      if (kind === 'viewer') { let written: string[]; try { written = writeViewer({ dir, model, timeline, options, title, embed: a.embed === true, boxes, file: `${options.title}-4D.html` }); } catch (e) { return tooBig(e); } return { kind, written, activities: timeline.activities.length, linked_elements: linked, display, hooks: 'WHIQ4D_EXPORT (started, status, ready, max, setStep, frame) and P6C4D_API (ready, status, setDate, setSource, highlight, encode, png)' }; }
-      const [w0, h0] = quality === 'draft' ? [854, 480] : quality === 'high' ? [1920, 1080] : [1280, 720];
-      const width = Math.min(3840, Number(a.width) || w0), height = Math.min(2160, Number(a.height) || h0);
-      const how = { quality, ...(qualityNote ? { quality_note: qualityNote } : {}), estimated_minutes: Math.round((quality === 'draft' ? draftMinutes : fullMinutes) * 10) / 10, ...(renderer ? { renderer } : {}) };
+      const display = () => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances, ...(plan.boxes ? { boxes: true } : {}) }; };
+      const tooBig = (e: unknown) => { if (e instanceof EmbedTooBig) return fail('too_big_to_embed', e.message, 'Leave embed out: the viewer is written as a page with the model’s tiles in a folder beside it (served together).'); throw e; };
+      if (kind === 'viewer') { let written: string[]; try { written = writeViewer({ dir, model, timeline, options, title, embed: a.embed === true, boxes: plan.boxes, file: `${options.title}-4D.html` }); } catch (e) { return tooBig(e); } return { kind, written, activities: timeline.activities.length, linked_elements: linked, display: display(), hooks: 'WHIQ4D_EXPORT (started, status, ready, max, setStep, frame) and P6C4D_API (ready, status, setDate, setSource, highlight, encode, png)' }; }
+      let fellBack: Renderer | null = null, gpuWhy = '';
+      // what the answer says of the render: the quality, what to tell the user, the estimate and who drew (all of them
+      // follow a fall back to the processor)
+      const how = () => ({ quality: plan.quality, ...(plan.note ? { quality_note: plan.note } : {}), estimated_minutes: Math.round(plan.minutes * 10) / 10, ...(fellBack ? { renderer: fellBack } : renderer ? { renderer } : {}) });
       // fps below 1 holds each frame longer (0.25 = 4 s a frame)
       const fps = a.seconds_per_frame != null ? 1 / Math.min(60, Math.max(1 / 60, Number(a.seconds_per_frame) || 0.25)) : Math.min(60, Math.max(1 / 60, Number(a.fps) || 4));
       const format = a.format === 'webm' ? 'webm' : 'mp4';
@@ -460,37 +458,55 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       // with a Chromium here the page is only the render's means: written apart, gone after; without one it is what the
       // client route renders, so it goes to the outputs (the platform serves it from there)
       const pageDir = chrome ? mkdtempSync(join(tmpdir(), 'p6c4d-render-')) : dir;
-      const pageFiles = writeViewer({ dir: pageDir, model, timeline, options, title, embed: small || boxes, inlineScript: true, boxes, file: `${options.title}-4D-render.html` });
-      const page = pageFiles[0];
+      const writePage = () => writeViewer({ dir: pageDir, model, timeline, options, title, embed: small || plan.boxes, inlineScript: true, boxes: plan.boxes, file: `${options.title}-4D-render.html` });
+      let pageFiles = writePage();
+      let page = pageFiles[0];
       try {
-      if (!chrome) return { kind, rendered: false, ...how, viewer: page, ...(pageFiles.length > 1 ? { written: pageFiles } : {}), display, client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width, height, ...(pageFiles.length > 1 ? { model_folder: dirname(pageFiles[1]), files: pageFiles.slice(1), contract: 'docs/4d-tiles-contract.md (p6c-4d-tiles v1)' } : {}) }, note: `No Chromium here (the server’s P6CLONE_CHROMIUM is not set), so nothing was rendered: the viewer page is written${pageFiles.length > 1 ? ' with the model\u2019s tiles in a folder beside it' : ' (self-contained)'}; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform\u2019s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.` };
+      if (!chrome) return { kind, rendered: false, ...how(), viewer: page, ...(pageFiles.length > 1 ? { written: pageFiles } : {}), display: display(), client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width: plan.width, height: plan.height, ...(pageFiles.length > 1 ? { model_folder: dirname(pageFiles[1]), files: pageFiles.slice(1), contract: 'docs/4d-tiles-contract.md (p6c-4d-tiles v1)' } : {}) }, note: `No Chromium here (the server’s P6CLONE_CHROMIUM is not set), so nothing was rendered: the viewer page is written${pageFiles.length > 1 ? ' with the model’s tiles in a folder beside it' : ' (self-contained)'}; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform’s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.` };
       if (m.index.elements.length > 200_000) compactHeap(); // the timeline's garbage goes before the browser takes its memory
-      await h.tick(0, 1, `loading the model (${display.mb} MB in ${display.tiles} tiles) in Chromium`);
-      const failed = (e: unknown) => { if (e instanceof RenderFailed) return fail('render_failed', e.message, e.code ? `The browser could not hold the model (${e.code}): ${roomFor(e.code)}${boxes ? '' : ', or ask for boxes: true (each element drawn as its bounding box)'}.` : 'Check the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.', e.code ? { data: { reason: e.code } } : undefined); throw e; };
+      await h.tick(0, 1, `loading the model (${display().mb} MB in ${display().tiles} tiles) in Chromium`);
+      // a render the browser could not finish: the cause, and the next step. Smaller quality first is the general retry
+      const failed = (e: unknown) => {
+        if (!(e instanceof RenderFailed)) throw e;
+        const smaller = plan.boxes ? '' : 'Try a smaller quality first (quality: "draft", each element a simple box at 854x480)';
+        const lead = fellBack ? `The graphics card could not finish the render (${gpuWhy}), and the render with the processor then failed too: ` : '';
+        const next = e.code === 'render_stuck' ? `${smaller ? `${smaller}; ` : ''}if the server's graphics card hangs, an administrator can set P6CLONE_RENDER_GPU=off (the processor draws); or render on a machine with a working graphics card.`
+          : e.code === 'disk_full' ? 'Free disk space on the server (the browser profile and the render page are in its temp folder), then retry.'
+          : e.code ? `${smaller ? `${smaller}; if that fails too, ` : ''}the browser could not hold the model (${e.code}): ${roomFor(e.code)}${plan.boxes ? '' : ', or ask for boxes: true (each element drawn as its bounding box)'}.`
+          : `${smaller ? `${smaller}; if that fails too, c` : 'C'}heck the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.`;
+        return fail('render_failed', `${lead}${e.message}`, next, e.code ? { data: { reason: e.code, ...(fellBack ? { graphics_card_failed: gpuWhy } : {}) } } : undefined);
+      };
       const onLoad = (d: number, t: number) => h.tick(d, Math.max(1, t), `loading tile ${d} of ${t} in Chromium`);
-      // the graphics card when the probe found one; a render it could not finish (its memory, its driver) goes again
-      // with the processor drawing, once, and the answer says so
-      let fellBack: Renderer | null = null;
+      // the graphics card when the probe found one. A render it could not finish because of the card (its memory, its
+      // driver, WebGL: isGpuFailure) goes again with the processor drawing, once, with quality and estimate worked out
+      // again for the processor (it is slower: auto may now choose a draft), and the answer says so. Any other failure
+      // (the machine's memory, the disk, a stuck browser) would not be mended by it and is reported (failed)
       const onRenderer = async <T>(run: (gpu: boolean) => Promise<T>): Promise<T> => {
         if (renderer?.kind !== 'gpu') return run(false);
         try { return await run(true); } catch (e) {
-          if (!(e instanceof RenderFailed)) throw e;
-          fellBack = { kind: 'software', name: `SwiftShader, after the graphics card could not finish: ${e.message.slice(0, 160)}` };
-          await h.tick(0, 1, 'the graphics card could not finish the render: drawing it with the processor');
+          if (!isGpuFailure(e)) throw e;
+          noteGpuFailure(chrome, e, manifest.bytes); // the next renders in this process go straight to the processor
+          gpuWhy = e.message.slice(0, 160);
+          const was = plan;
+          plan = planFor('software', { reason: gpuWhy, firstMinutes: was.minutes });
+          fellBack = { kind: 'software', name: `SwiftShader, after the graphics card could not finish: ${gpuWhy}` };
+          if (plan.boxes !== was.boxes) { pageFiles = writePage(); page = pageFiles[0]; } // a draft is boxes: the page is made again
+          await h.tick(0, 1, `the graphics card could not finish the render: drawing it with the processor (${aboutMinutes(plan.minutes)})`);
           return run(false);
         }
       };
-      const timeoutMs = 120 * 60_000;
-      const what = `the model: ${display.tiles} tiles, ${display.mb} MB, ${display.triangles.toLocaleString('en-US')} triangles`;
+      const what = () => `the model: ${display().tiles} tiles, ${display().mb} MB, ${display().triangles.toLocaleString('en-US')} triangles`;
+      // inChromium has no time limit: it watches the render's life (frames, tiles, the browser's processor use); a frame is expected to take what the estimate says
+      const chromeOpts = (gpu: boolean) => ({ width: plan.width, height: plan.height, onLoad, what: what(), gpu, frameMs: (plan.minutes * 60_000) / Math.max(1, frames) });
       if (kind === 'images') {
         const from = parseP6Date(a.from ? String(a.from) : timeline.start ?? '')!, to = parseP6Date(a.to ? String(a.to) : timeline.finish ?? '')!;
         const dates: string[] = []; for (let d = from; d <= to && dates.length < 500; d += options.step! * 1440) dates.push(formatP6Date(d));
         let pngs: Buffer[];
-        try { pngs = await onRenderer((gpu) => inChromium(chrome, page, (ev) => renderPngs(ev, dates, h.tick), { width, height, onLoad, timeoutMs, what, gpu })); } catch (e) { return failed(e); }
-        return { kind, rendered: true, ...how, ...(fellBack ? { renderer: fellBack } : {}), display, written: pngs.map((png, i) => { const p = join(dir, `${name}-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, png); return p; }) };
+        try { pngs = await onRenderer((gpu) => inChromium(chrome, page, (ev, alive) => renderPngs(ev, dates, h.tick, alive), chromeOpts(gpu))); } catch (e) { return failed(e); }
+        return { kind, rendered: true, ...how(), display: display(), written: pngs.map((png, i) => { const p = join(dir, `${name}-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, png); return p; }) };
       }
       let v: { mime: string; frames: number; bytes: Buffer };
-      try { v = await onRenderer((gpu) => inChromium(chrome, page, (ev) => renderVideo(ev, { from: a.from, to: a.to, step: options.step, fps, width, height, ...(format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1' ? { codec: 'vp9' } : {}) }, h.tick), { width, height, onLoad, timeoutMs, what, gpu })); } catch (e) { return failed(e); }
+      try { v = await onRenderer((gpu) => inChromium(chrome, page, (ev, alive) => renderVideo(ev, { from: a.from, to: a.to, step: options.step, fps, width: plan.width, height: plan.height, ...(format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1' ? { codec: 'vp9' } : {}) }, h.tick, alive), chromeOpts(gpu))); } catch (e) { return failed(e); }
       let note: string | undefined;
       // MP4 everywhere: a browser without an H.264 encoder (Chromium for Testing) records WebM, which ffmpeg turns into MP4
       if (format === 'mp4' && !v.mime.includes('mp4')) {
@@ -501,14 +517,14 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       }
       const file = join(dir, `${name}.${v.mime.includes('mp4') ? 'mp4' : 'webm'}`);
       h.writeOut(file, v.bytes);
-      return { kind, rendered: true, ...how, ...(fellBack ? { renderer: fellBack } : {}), written: [file], frames: v.frames, mime: v.mime, fps, size: [width, height], display, ...(note ? { note } : {}) };
+      return { kind, rendered: true, ...how(), written: [file], frames: v.frames, mime: v.mime, fps, size: [plan.width, plan.height], display: display(), ...(note ? { note } : {}) };
       } finally { if (chrome) rmSync(pageDir, { recursive: true, force: true }); }
     }
     case 'relink_model': {
       const old = (await modelOf(s.db, projId, true, { geometry: true }))!;
       const path = pathArg(a.path);
       let m: Model;
-      try { m = await readModel(path); } catch (e) { if (['memory_budget', 'model_too_large'].includes((e as { code?: string }).code ?? '')) throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, unreadableHint(path)); }
+      try { m = await readModel(path); } catch (e) { if (['memory_budget', 'model_too_large', 'model_unreadable'].includes((e as { code?: string }).code ?? '')) throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, unreadableHint(path)); }
       await h.tick(1, 2, 'model parsed');
       const linkedGuids = new Set(rows(s.db, T4D.link).filter((r) => r.proj_id === projId).map((r) => r.guid));
       const plan = relinkPlan(old.index, m.index, linkedGuids, a.tolerance_m != null ? Number(a.tolerance_m) : undefined);

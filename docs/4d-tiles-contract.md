@@ -89,9 +89,13 @@ model-<hash16>/
   reader at 727 MB. Revit files (`.rvt` / `.rfa`, rvt-rs with `core/bim/rvt/p6clone.patch`) are made into an IFC4
   first, in rvt-rs's own process, written to disk a piece at a time; the index (linking, keys, exports, the agents'
   element data) is then streamed from it, and only the video's tiles mesh it, in chunks. What reading takes is the
-  file and its element partition unpacked (about 5× the file), which rvt-rs scans as a whole (`revitNeed`: 128 MB +
-  9× the file; measured 281 MB for a 19 MB project, 384 MB before the patch); a file past `P6CLONE_REVIT_MAX_MB`
-  (450, where WebAssembly's 4 GB would run out) is refused before it runs, pointing to an NWC or IFC export.
+  file and its element partition unpacked, which rvt-rs scans as a whole: about 8× the file in all
+  (`REVIT_MEMORY_PER_BYTE` in `core/bim/rvt.ts`, the one measured constant: 173, 225 and 264 MB for 7, 12 and 19 MB
+  projects on rvt-rs 0.10.0; `revitNeed` = 128 MB + 8× the file); a file past `P6CLONE_REVIT_MAX_MB` (450 = 4 GB / 8
+  with a margin) is refused before it runs, and one that runs the reader out of memory under that is `model_too_large`
+  too (never a lesser conversion); a full disk is `model_unreadable` with the cause. Both point first to an NWC, NWD or
+  IFC export of the same model already in the project, and only then to the user. A half-written conversion of a dead
+  reader (`*.pid.tmp`) is removed on the next start, and the old `-rvt1` conversion when the current one is written.
 
 ## 3. What the page fetches
 
@@ -157,8 +161,21 @@ software, once, and the answer's `renderer` says which drew it. Measured on a 50
 triangles, 24 frames at 1280x720): 60 minutes in software (about 2 million triangles a second), 34 seconds on this
 machine's graphics card (about 400 million); a 6 million triangle model, 73 s and 4 s. `quality` (images, video): standard (full geometry, 1280x720),
 high (1920x1080), draft (854x480, each element its bounding box), or auto (the default): standard unless
-`renderMinutes` estimates more than `P6CLONE_RENDER_DRAFT_MINUTES` (10) on this machine's renderer, then draft. The
-answer gives `quality`, `estimated_minutes`, `renderer` and, when the user should hear it, `quality_note`.
+`renderMinutes` estimates more than `AUTO_DRAFT_MINUTES` (5, owner decision 2026-10-27; `P6CLONE_RENDER_DRAFT_MINUTES`
+overrides it, `quality` per call) where it is drawn, then draft. Where it is drawn: this server's graphics card or
+processor, or, with no Chromium on the server, the user's own graphics card (the client render: estimated as a graphics
+card, and the note says so). The estimate counts `boxes: true`, `layout: side_by_side` (the model drawn twice a frame)
+and a custom `width` / `height`. The answer gives `quality`, `estimated_minutes`, `renderer` and, when the user should
+hear it, `quality_note`.
+
+A render has **no time limit** (owner rule 2026-10-27). It is alive while tiles load and frames arrive, or the browser's
+processes use the processor (Linux: `/proc`; elsewhere frames and tiles only); it is stuck (`render_stuck`) after two
+windows in a row with neither, a window being 4 times the slowest frame measured (the estimate before the first), never
+under 2 minutes. Only the graphics card's failures fall back to software (`webgl_context_lost`, `gpu_out_of_memory`,
+`gpu_process_crashed`, `webgl_unavailable`): quality and `estimated_minutes` are then worked out again for the
+processor (auto may now draw a draft) and the note says it took longer. Every other failure (`browser_out_of_memory`,
+`disk_full`, `render_stuck`) is `render_failed` with the cause and the next step: a smaller quality first. A card that
+failed is remembered for the process (driver-level failures for good; running out of memory for models that size).
 
 **The platform's change for the pickup window**: `clientRender4d.ts` waits 90 s for `ready()`. A big model's tiles can
 take longer. Take `WHIQ4D_EXPORT.started` (or the `whiq4d:started` message) as the page alive, and wait while
@@ -222,7 +239,7 @@ What this shows, and what is still over:
   system memory, so the tree reaches 2.0–2.1 GB. At 1.43M elements (20 tiles, ~600 MB of GLB) the host's global OOM
   killer killed Chromium's GPU process (the 16 GB host had ~1.5 GB free with other sessions running); the 2.5M model
   was not tried again for that reason. Such a page now fails at once with `browser_out_of_memory` naming the tiles,
-  MB and triangles (it used to wait for the 2-hour timeout). The client route draws the same tiles on the user's
+  MB and triangles (it used to wait for the render's old fixed timeout). The client route draws the same tiles on the user's
   GPU, which is the route for models of that size.
 
 ## 7. Caches

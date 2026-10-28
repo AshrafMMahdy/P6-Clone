@@ -18,8 +18,9 @@ the IFC it writes is the same text, byte for byte, as the unmodified build's (ch
 
 Measured (Node 24.14.0, the whole process at its peak), on 0.6.1: 384 -> 281 MB for a 19 MB project, 273 -> 214 MB for
 12 MB; 0.10.0 with the patch: 173, 225 and 264 MB for the 7, 12 and 19 MB projects (its base quantities cost a little);
-WebAssembly memory 236 -> 147 MB for the 19 MB one. What is left is the file and its element partition unpacked (about
-5x the file), which rvt-rs scans as a whole: reading tops out near 450 MB of `.rvt` (WebAssembly's 4 GB).
+WebAssembly memory 236 -> 147 MB for the 19 MB one. What is left is the file and its element partition unpacked, which
+rvt-rs scans as a whole: about 8x the file in all (`REVIT_MEMORY_PER_BYTE` in `../rvt.ts`, where it is stated once), so
+reading tops out near 450 MB of `.rvt` (WebAssembly's 4 GB / 8, with a margin).
 
 Built from tag `v0.10.0` (commit `0cd60b7`, rvt 0.10.0, 2026-10-27) with `p6clone.patch` applied:
 
