@@ -15,7 +15,7 @@ export interface TablePatch {
   /** rows changed in place: [index, keys set, keys removed] */
   set?: [number, Record<string, string>, string[]][];
 }
-export interface DbPatch { header?: Db['header'] | null; tables: Record<string, TablePatch>; allTables?: boolean }
+export interface DbPatch { header?: Db['header'] | null; tables: Record<string, TablePatch>; allTables?: boolean; /** tables the change removed */ deleted?: string[] }
 
 const same = (a: unknown[], b: unknown[]) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
 
@@ -30,15 +30,18 @@ export function patchFrom(db: Db, journals: Journal[]): DbPatch {
     }
     for (const [a, before] of j.arrays) if (!arrays.has(a)) arrays.set(a, before);
   }
-  const everything = (): DbPatch => ({ header: db.header ?? null, allTables: true, tables: Object.fromEntries(Object.entries(db.tables).map(([n, t]) => [n, { full: { fields: t.fields, rows: t.rows } }])) });
-  const out: DbPatch = { tables: {} };
+  // tables the change removed from the table list
+  const deleted: string[] = [];
+  for (const [o, e] of fields) if (o === db.tables) for (const k of e.keys) if (typeof k === 'string' && !db.tables[k]) deleted.push(k);
+  const everything = (): DbPatch => ({ header: db.header ?? null, allTables: true, ...(deleted.length ? { deleted } : {}), tables: Object.fromEntries(Object.entries(db.tables).map(([n, t]) => [n, { full: { fields: t.fields, rows: t.rows } }])) });
+  const out: DbPatch = { tables: {}, ...(deleted.length ? { deleted } : {}) };
   const pending = new Set(fields.keys());
   const tableObjs = new Map<object, string>(Object.entries(db.tables).map(([n, t]) => [t, n]));
   // the database itself, its header, and its table list
   if (pending.delete(db)) { const e = fields.get(db)!; for (const k of e.keys) if (k === 'header') out.header = db.header ?? null; else if (k !== 'tables') return everything(); }
   if (db.header && arrays.has(db.header.raw)) out.header = db.header;
   if (db.header && pending.delete(db.header)) out.header = db.header;
-  if (pending.delete(db.tables)) { for (const k of fields.get(db.tables)!.keys) { const t = db.tables[k as string]; if (t) out.tables[k as string] = { full: { fields: t.fields, rows: t.rows } }; else return everything(); } }
+  if (pending.delete(db.tables)) { for (const k of fields.get(db.tables)!.keys) { const t = db.tables[k as string]; if (t) out.tables[k as string] = { full: { fields: t.fields, rows: t.rows } }; else if (!deleted.includes(k as string)) return everything(); } }
   for (const [name, t] of Object.entries(db.tables) as [string, Table][]) {
     const tp: TablePatch = out.tables[name] ?? {};
     if (pending.delete(t)) { tp.full = { fields: t.fields, rows: t.rows }; }
@@ -72,11 +75,12 @@ export function patchFrom(db: Db, journals: Journal[]): DbPatch {
   return out;
 }
 
-export const isEmptyPatch = (p: DbPatch): boolean => !p.allTables && p.header === undefined && Object.keys(p.tables).length === 0;
+export const isEmptyPatch = (p: DbPatch): boolean => !p.allTables && p.header === undefined && Object.keys(p.tables).length === 0 && !p.deleted?.length;
 
 /** Apply a patch to a database (a recording view, in a change). */
 export function applyPatch(d: Db, p: DbPatch): void {
   if (p.header !== undefined) d.header = p.header ?? undefined;
+  for (const n of p.deleted ?? []) delete d.tables[n];
   for (const [name, tp] of Object.entries(p.tables)) {
     let t = d.tables[name];
     if (tp.full) {

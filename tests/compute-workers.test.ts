@@ -163,3 +163,75 @@ test('LOB plans and PDFs are made in the worker and come back whole (files writt
   writeFileSync(join(dir, 'ok'), '');
   await call('close', { ...h, discard: true });
 });
+
+// ---- the review of b97e874 ----------------------------------------------------------------------------------------------------------
+test('windows_analysis with another open project as an update (updates: [{handle}]) works in the worker, as it did in the server; an unknown handle is refused as before', { timeout: 300_000 }, async () => {
+  const a = await open(), b = await open();
+  const ask = async (workers: boolean, handle: string) => {
+    const restore = env({ P6CLONE_COMPUTE_WORKERS: workers ? undefined : '0' });
+    try { return await call('windows_analysis', { ...a, updates: [{ handle, name: 'other' }], max_ids: 5 }); } finally { restore(); }
+  };
+  const inWorker = await ask(true, b.handle), inServer = await ask(false, b.handle);
+  assert.equal(inWorker.err, inServer.err, JSON.stringify(inWorker.d).slice(0, 300));
+  assert.notEqual(inWorker.d.error?.code, 'unknown_handle', JSON.stringify(inWorker.d).slice(0, 300));
+  assert.deepEqual(strip(inWorker.d), strip(inServer.d));
+  const bad = await ask(true, 'h_nosuch');
+  assert.equal(bad.d.error.code, 'unknown_handle');
+  for (const h of [a, b]) await call('close', { ...h, discard: true });
+});
+
+test('a call ended mid-write: its temporary files go, and exactly what it had finished is said', async () => {
+  const { settleWrites, targetOf } = await import('../mcp/compute.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'p6-compute-tmp-'));
+  assert.equal(targetOf(join(dir, '.plan.pdf.1a2b3c4d.p6clone-tmp')), join(dir, 'plan.pdf'));
+  const since = Date.now();
+  const half = join(dir, '.half.pdf.00112233.p6clone-tmp'); writeFileSync(half, 'x');              // still being written: removed
+  const done = join(dir, '.done.pdf.44556677.p6clone-tmp'); writeFileSync(join(dir, 'done.pdf'), 'y'); // renamed just before the end: finished
+  const never = join(dir, '.never.pdf.8899aabb.p6clone-tmp');                                          // not even created
+  const finished = settleWrites(new Set([half, done, never]), since);
+  assert.deepEqual(finished, [join(dir, 'done.pdf')]);
+  const { existsSync } = await import('node:fs');
+  assert.equal(existsSync(half), false);
+  assert.equal(existsSync(join(dir, 'done.pdf')), true, 'a finished file is kept');
+});
+
+test('a table the change removed is removed on the other side too, and undone with the change', () => {
+  const original = mk(), copy = clone(original), before = JSON.stringify(original);
+  const j = record(copy, (d) => { delete d.tables.PROJECT; d.tables.TASK.rows[0].name = 'z'; });
+  const patch = patchFrom(copy, [j]);
+  assert.deepEqual(patch.deleted, ['PROJECT']);
+  const jj = record(original, (d) => applyPatch(d, patch));
+  assert.deepEqual(original, copy);
+  assert.equal(original.tables.PROJECT, undefined);
+  rollback(jj);
+  assert.equal(JSON.stringify(original), before);
+  // also when the change cannot be placed and every table goes back
+  const stray = clone(mk()), outside = { x: '1' } as Record<string, string>;
+  const j2 = record(stray, (d) => { delete d.tables.PROJECT; (d as unknown as { extra: Record<string, string> }).extra = outside; });
+  const p2 = patchFrom(stray, [j2]);
+  assert.equal(p2.allTables, true);
+  assert.deepEqual(p2.deleted, ['PROJECT']);
+});
+
+test('memory a worker reserves inside a call is told to the main thread and counted against the budget while the call runs; the worker sees what the server holds', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const code = `
+    const rt = await import(${JSON.stringify(new URL('../mcp/runtime.ts', import.meta.url).href)});
+    const MB = 1048576, seen = [];
+    rt.workerBudget({ externalUsed: 100 * MB, notice: (d) => seen.push(d / MB) });
+    const free0 = rt.usedMemory();
+    const r = rt.reserveMemory(50 * MB, 'x', 'y');
+    seen.push('used+' + Math.round((rt.usedMemory() - free0) / MB));
+    r();
+    let refused = null; try { rt.reserveMemory(120 * MB, 'Reading an update', 'hint'); } catch (e) { refused = e.code; }
+    // the main thread counts what the worker told it
+    rt.adjustReserved(30 * MB); const up = Math.round((rt.usedMemory() - free0) / MB); rt.adjustReserved(-30 * MB);
+    console.log(JSON.stringify({ seen, refused, up, back: Math.round((rt.usedMemory() - free0) / MB) }));`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', env: { ...process.env, P6CLONE_MEM_BUDGET_MB: '200' } });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout.trim().split('\n').pop()!);
+  assert.deepEqual(out.seen, [50, 'used+50', -50]);
+  assert.equal(out.refused, 'memory_budget', 'the server\'s 100 MB and the 120 MB asked do not fit in 200 MB');
+  assert.equal(out.up, 30);
+  assert.equal(out.back, 0);
+});

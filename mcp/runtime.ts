@@ -251,16 +251,23 @@ const counters = new Set<() => number>();
 const trimmers = new Set<() => void>();
 let reserved = 0;
 export function countMemory(count: () => number, trim?: () => void): void { counters.add(count); if (trim) trimmers.add(trim); }
-const usedBytes = () => [...sessions.values()].reduce((a, s) => a + s.bytes, 0) + [...counters].reduce((a, f) => a + f(), 0) + reserved;
+const usedBytes = () => [...sessions.values()].reduce((a, s) => a + s.bytes, 0) + [...counters].reduce((a, f) => a + f(), 0) + reserved + externalUsed;
+// A compute worker (compute.ts) sees one project: the main thread's other holdings are told to it (externalUsed), what it reserves is told
+// back (reserveNotice) so the main thread counts it against the budget while the job runs, and it never moves a project out (evictable).
+let externalUsed = 0, evictable = true, reserveNotice: ((delta: number) => void) | null = null;
+export const workerBudget = (o: { externalUsed: number; notice: (delta: number) => void }): void => { externalUsed = o.externalUsed; evictable = false; reserveNotice = o.notice; };
+/** Count (or stop counting) memory a worker holds, on the main thread, against the budget. */
+export const adjustReserved = (delta: number): void => { reserved += delta; };
+export const usedMemory = (): number => usedBytes();
 /** The budget not taken by projects, models and work in flight. */
 export const freeMemory = () => effectiveBudget() - usedBytes();
 /** Reserve memory for work that is not a project (refused like a file that does not fit); call the result to release.
  *  `what` names the work in the refusal ("Monte Carlo on this project"), `hint` says what else the caller can do. */
 export function reserveMemory(bytes: number, what?: string, hint?: string, keep?: string): () => void {
   admit(bytes, keep, what, hint, false);
-  reserved += bytes;
+  reserved += bytes; reserveNotice?.(bytes);
   let done = false;
-  return () => { if (!done) { done = true; reserved -= bytes; } };
+  return () => { if (!done) { done = true; reserved -= bytes; reserveNotice?.(-bytes); } };
 }
 
 /** Make room for a project or a call: refuse only when even moving every idle project out would not be enough. The
@@ -269,7 +276,7 @@ export function reserveMemory(bytes: number, what?: string, hint?: string, keep?
  *  so it never moves a project out, or is refused, because the slots are full. */
 export function admit(bytes: number, keep?: string, what = 'This file', hint?: string, project = true): void {
   const budget = effectiveBudget();
-  const byAge = () => [...sessions.values()].filter((s) => s.handle !== keep && !busy.has(s.handle)).sort((a, b) => a.lastUsed - b.lastUsed);
+  const byAge = () => !evictable ? [] : [...sessions.values()].filter((s) => s.handle !== keep && !busy.has(s.handle)).sort((a, b) => a.lastUsed - b.lastUsed);
   const full = () => project && sessions.size >= config.maxHandles;
   while ((full() || usedBytes() + bytes > budget) && byAge().length) { evict(byAge()[0], 'memory'); for (const t of trimmers) t(); }
   if (usedBytes() + bytes > budget) for (const t of trimmers) t();
