@@ -149,11 +149,13 @@ const readHead = (p: string): Uint8Array => { try { const fd = openSync(p, 'r');
 const readBytes = (p: string) => { try { return new Uint8Array(readFileSync(p)); } catch (e) { return fail('file_unreadable', `Cannot read ${p}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (e as Error).message}.`, 'Check the path (relative paths are taken from the storage root).'); } };
 /** Write a file atomically: a temporary file in the same folder, flushed to disk, then renamed over the target (a crash
  *  leaves the old file or the new one, never half of one). Missing folders inside the write root are made. */
+let writeNotice: ((tmp: string) => void) | null = null;
 const writeOut = (p: string, data: string | Uint8Array) => writeOutWith(p, (put) => put(data));
 /** writeOut for a file made piece by piece: `make` hands each piece to `put`, which goes to the temporary file in
  *  writes of about 4 MB, so a file larger than memory (a P6 XML of a big schedule) is never one string. */
 const writeOutWith = (p: string, make: (put: (piece: string | Uint8Array) => void) => void) => {
   const tmp = join(dirname(p), `.${basename(p)}.${randomBytes(4).toString('hex')}.p6clone-tmp`);
+  writeNotice?.(tmp); // (a compute worker tells the main thread, which removes the file if the call is ended meanwhile)
   try {
     if (writeBase()) mkdirSync(dirname(p), { recursive: true });
     const fd = openSync(tmp, 'w');
@@ -752,7 +754,7 @@ export function housekeeping(): void { setInterval(() => { try { sweepIdle(); sw
 
 const isMain = isMainThread && (() => { try { return /server\.(ts|js|cjs)$|p6clone-mcp/.test(process.argv[1] ?? ''); } catch { return false; } })();
 // a compute worker (compute.ts): the same server code, serving one tool call at a time on a copy of a project
-if (!isMainThread && (workerData as { p6Compute?: boolean } | null)?.p6Compute) startComputeWorker(run);
+if (!isMainThread && (workerData as { p6Compute?: boolean } | null)?.p6Compute) startComputeWorker(run, (f) => { writeNotice = f; });
 if (isMain) {
   const args = process.argv.slice(2);
   const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };
