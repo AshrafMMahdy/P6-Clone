@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseXer } from '../core/xer/parse.ts';
-import { P6XML_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
+import { P6XML_ENUMS, P6XML_NOT_CARRIED, P6XML_PARTLY_CARRIED, P6XML_ROOT_MAP, P6XML_ROOT_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
 import { parseClndrData, parseClndrDataLeniently } from '../core/calendar/clndr-data.ts';
 import { KEYS, type Db, type Row } from '../core/db.ts';
 import { SAMPLES_DIR } from './helpers.ts';
@@ -45,6 +45,7 @@ test('everything the P6 XML writer writes is an element or field of P6\'s XML sc
     assert.ok(names.size, `${table}: P6 has an element ${element}`);
     for (const [tag, field, conv] of map) if (conv !== 'legacy') assert.ok(names.has(tag), `${table}.${field}: ${element}/${tag} is in P6's schema`);
   }
+  for (const [tag, field] of P6XML_ROOT_MAP) assert.ok(NAMES.Project.includes(tag), `PROJWBS.${field}: Project/${tag} is in P6's schema`);
 });
 
 test('every field an XER can hold is carried by the P6 XML writer or listed with the reason it is not', () => {
@@ -71,10 +72,16 @@ test('every field an XER can hold is carried by the P6 XML writer or listed with
     if (f) assert.ok(!P6XML_TABLES[t]?.map.some((m) => m[1] === f && m[2] !== 'legacy'), `${k} is carried after all`);
     else assert.ok(!P6XML_TABLES[t], `${k} is carried after all`);
   }
+  // partly carried: carried (some codes), and the root node's list names fields the WBS element has
+  for (const k of Object.keys(P6XML_PARTLY_CARRIED)) {
+    const [t, f] = k.split('.');
+    assert.ok(P6XML_TABLES[t]?.map.some((m) => m[1] === f) || P6XML_ROOT_MAP.some((m) => m[1] === f), `${k} is not carried at all`);
+  }
+  for (const f of Object.keys(P6XML_ROOT_NOT_CARRIED)) assert.ok(P6XML_TABLES.PROJWBS.map.some((m) => m[1] === f) || P6XML_NOT_CARRIED[`PROJWBS.${f}`], `root ${f} is a WBS field`);
 });
 
 test('XER -> P6 XML -> read back equals the XER, field for field, on every sample', { timeout: 300_000 }, () => {
-  const SIG: Record<string, string[]> = { RSRCROLE: ['rsrc_id', 'role_id'], TASKFIN: ['fin_dates_id', 'task_id'], RSRCRATE: ['rsrc_id', 'start_date', 'shift_period_id'], ROLERATE: ['role_id', 'start_date'] };
+  const SIG: Record<string, string[]> = { RSRCROLE: ['rsrc_id', 'role_id'], TASKFIN: ['fin_dates_id', 'task_id'], RSRCRATE: ['rsrc_id', 'start_date', 'shift_period_id'], ROLERATE: ['role_id', 'start_date'], TASKNOTE: ['task_id', 'proj_id'], WBSBUDG: ['wbs_budg_id'] };
   const compared: Record<string, number> = {};
   const off = new Map<string, string>(); // table.field -> the first row that did not come back as it went
   let files = 0;
@@ -92,7 +99,9 @@ test('XER -> P6 XML -> read back equals the XER, field for field, on every sampl
       const sig = SIG[t] ?? (keyed ? [KEYS[t]] : t === 'TASKPRED' ? ['task_id', 'pred_task_id', 'pred_type'] : null);
       const fields = map.filter((m) => m[2] !== 'legacy' && !(sig ?? []).includes(m[1])).map((m) => m[1]);
       const dates = new Set(map.filter((m) => m[2] === 'date').map((m) => m[1]));
-      const same = (x: string, v: string | undefined) => (dates.has(x) && /^\d{4}-\d\d-\d\d$/.test(v ?? '') ? `${v} 00:00` : v ?? ''); // (a date without a time is midnight)
+      const strict = new Map(map.filter((m) => m[2]?.startsWith('strict:')).map((m) => [m[1], P6XML_ENUMS[m[2]!.slice(7)]]));
+      // (a date without a time is midnight; a coded value whose P6 text is not verified is not written, so it is not there to read back)
+      const same = (x: string, v: string | undefined) => (strict.has(x) ? (v && v in strict.get(x)! ? v : '') : dates.has(x) && /^\d{4}-\d\d-\d\d$/.test(v ?? '') ? `${v} 00:00` : v ?? '');
       if (!sig) { assert.ok(B.length >= A.filter(own).length, `${f} ${t}: rows`); continue; }
       const key = (r: Row) => sig.map((s) => r[s] ?? '').join('|');
       const idx = new Map(B.map((r) => [key(r), r]));
@@ -105,6 +114,17 @@ test('XER -> P6 XML -> read back equals the XER, field for field, on every sampl
           if ((u![x] ?? '') !== same(x, r[x]) && !(t === 'TASKPRED' && x === 'pred_proj_id' && !r[x] && u![x] === r.proj_id)) { const k = `${t}.${x}`; if (!off.has(k)) off.set(k, `${f}: ${JSON.stringify(r[x] ?? '')} -> ${JSON.stringify(u![x] ?? '')}`); }
           if (r[x]) compared[`${t}.${x}`] = (compared[`${t}.${x}`] ?? 0) + 1;
         }
+      }
+    }
+    // the root WBS node, written as the Project element: the fields it carries come back
+    for (const r of (a.tables.PROJWBS?.rows ?? []).filter((w) => w.proj_node_flag === 'Y')) {
+      const u = b.tables.PROJWBS?.rows.find((w) => w.proj_node_flag === 'Y' && w.proj_id === r.proj_id);
+      assert.ok(u, `${f} root WBS of project ${r.proj_id}`);
+      for (const [, x, conv] of P6XML_ROOT_MAP) {
+        const want = conv?.startsWith('strict:') ? (r[x] && r[x] in P6XML_ENUMS[conv.slice(7)] ? r[x] : '') : conv === 'date' && /^\d{4}-\d\d-\d\d$/.test(r[x] ?? '') ? `${r[x]} 00:00` : r[x] ?? '';
+        if (x === 'status_code' && !r[x]) continue; // (a root without a status is Active)
+        if ((u![x] ?? '') !== want) { const k = `PROJWBS(root).${x}`; if (!off.has(k)) off.set(k, `${f}: ${JSON.stringify(r[x] ?? '')} -> ${JSON.stringify(u![x] ?? '')}`); }
+        if (r[x]) compared[`PROJWBS(root).${x}`] = (compared[`PROJWBS(root).${x}`] ?? 0) + 1;
       }
     }
     // calendars: the same week and exceptions (their clndr_data text is written again), and the same other fields
@@ -122,5 +142,34 @@ test('XER -> P6 XML -> read back equals the XER, field for field, on every sampl
   }
   assert.deepEqual([...off], [], 'fields that came back different');
   assert.ok(files >= 55, `${files} samples`);
-  for (const k of ['ROLERATE.cost_per_qty', 'RSRC.max_qty_per_hr', 'RSRC.unit_id', 'UMEASURE.unit_name', 'COSTTYPE.cost_type', 'RSRCROLE.skill_level', 'TASK.act_work_qty', 'TASK.create_user', 'TASKRSRC.guid', 'TASKRSRC.cost_per_qty_source_type', 'PROJCOST.cost_load_type', 'RSRCRATE.cost_per_qty2', 'TASKFIN.bcwp', 'PROJISSU.issue_name', 'PROJTHRS.window_start']) assert.ok(compared[k] > 0, `${k}: some sample has a value and it came back`);
+  for (const k of ['ROLERATE.cost_per_qty', 'RSRC.max_qty_per_hr', 'RSRC.unit_id', 'UMEASURE.unit_name', 'COSTTYPE.cost_type', 'RSRCROLE.skill_level', 'TASK.act_work_qty', 'TASK.create_user', 'TASKRSRC.guid', 'TASKRSRC.cost_per_qty_source_type', 'PROJCOST.cost_load_type', 'RSRCRATE.cost_per_qty2', 'TASKFIN.bcwp', 'PROJISSU.issue_name', 'PROJTHRS.window_start', 'ACTVCODE.color', 'TASKNOTE.task_notes', 'WBSBUDG.spend_cost', 'PROJWBS.ev_user_pct', 'PROJECT.def_qty_type', 'PROJECT.sum_assign_level', 'PROJECT.chng_eff_cmp_pct_flag', 'PROJWBS(root).ev_user_pct', 'PROJWBS(root).orig_cost', 'PROJWBS(root).obs_id']) assert.ok(compared[k] > 0, `${k}: some sample has a value and it came back`);
+});
+
+test('a baseline project is written with the fields P6\'s schema has for a BaselineProject, and an activity note without a topic is not a notebook note', () => {
+  const f = samples.find((x) => { const d = load(x); return d?.tables.PROJECT?.rows.length && d.tables.PROJWBS?.rows.length && !hasDuplicateKeys(d); });
+  assert.ok(f);
+  const db = load(f!)!;
+  const p = db.tables.PROJECT.rows[0];
+  // a baseline of the first project: a copy of its row, marked as the reader marks one
+  db.tables.PROJECT.rows.push({ ...p, proj_id: '99999', proj_short_name: `${p.proj_short_name}_BL`, _baseline_of: p.proj_id, def_qty_type: 'QT_Hour', sum_assign_level: 'SL_Taskrsrc', sum_base_proj_id: '1', use_project_baseline_flag: 'Y' });
+  db.tables.TASKNOTE ??= { name: 'TASKNOTE', fields: ['task_id', 'proj_id', 'task_notes'], rows: [] };
+  db.tables.TASKNOTE.rows.push({ task_id: db.tables.TASK.rows[0].task_id, proj_id: db.tables.TASK.rows[0].proj_id, task_notes: '<HTML><BODY>a note</BODY></HTML>' });
+  const root = parseXml(writeP6Xml(db, {} as never)).children[0];
+  const bl = root.children.filter((e) => e.name === 'BaselineProject');
+  assert.ok(bl.length >= 1, 'a BaselineProject is written');
+  for (const e of bl) for (const c of e.children) assert.ok(NAMES.BaselineProject.includes(c.name), `BaselineProject/${c.name} is in P6's schema`);
+  // an assignment's three curves, a color and a spending plan (the samples hardly have them)
+  const ra = db.tables.TASKRSRC?.rows[0];
+  if (ra) Object.assign(ra, { target_crv: '159:112', remain_crv: '131.505:792;27.895:8;0:160', actual_crv: '8:80' });
+  const cv = db.tables.ACTVCODE?.rows[0];
+  if (cv) cv.color = '0000FF';
+  const xml = writeP6Xml(db, {} as never);
+  if (cv) assert.ok(xml.includes('<Color>#0000FF</Color>'), 'a code value\'s color is #RRGGBB');
+  if (ra) assert.ok(xml.includes('<PlannedCurve>159:112</PlannedCurve>') && xml.includes('<RemainingCurve>') && xml.includes('<ActualCurve>8:80</ActualCurve>'));
+  const back = parseP6Xml(xml).db;
+  if (ra) assert.deepEqual(['target_crv', 'remain_crv', 'actual_crv'].map((x) => back.tables.TASKRSRC.rows.find((r) => r.taskrsrc_id === ra.taskrsrc_id)?.[x]), ['159:112', '131.505:792;27.895:8;0:160', '8:80']);
+  if (cv) assert.equal(back.tables.ACTVCODE.rows.find((r) => r.actv_code_id === cv.actv_code_id)?.color, '0000FF');
+  const n = back.tables.TASKNOTE?.rows.find((r) => r.task_notes.includes('a note'));
+  assert.ok(n, 'the note comes back as a TASKNOTE row');
+  assert.ok(!back.tables.TASKMEMO?.rows.some((r) => r.task_memo?.includes('a note')), 'and not as a notebook note');
 });

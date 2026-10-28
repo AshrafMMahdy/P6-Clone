@@ -867,7 +867,7 @@ Not features, but wrong behaviour seen while tracing:
 | Item | P6 behaviour | Clone status | Notes | AI | MCP/CLI |
 |---|---|---|---|---|---|
 | Format: Primavera PM XER | Import XER from any 5.0–24.x export | done | parse.ts never throws; generic table reader; imported 130 TRIAL/HBTF-2 (24.12)/plant (15.1, 26 MB) cleanly | UI only (user picks file) | MCP open_file; CLI all commands read XER |
-| Format: P6 XML (APIBusinessObjects) | Import P6 / EPPM XML | partial | Reads the elements in p6xml.ts maps, now including BaselineProject, ActivityStep and project/resource codes (327446b). Writes and reads UnitOfMeasure, ExpenseCategory, ResourceCurve (<Values><Value0..Value100/>), ResourceRole (Proficiency "1 - Master"..), RoleRate, FinancialPeriod, ThresholdParameter, ProjectThreshold, ProjectIssue, ActivityPeriodActual, ProjectResource and most fields of every other object, all checked against P6's own XML schema (p6apibo.xsd as MPXJ embeds it; tests/p6xml-coverage.test.ts lists what is not carried and why: P6XML_NOT_CARRIED); still ignores WBS/project notes, issues, thresholds, financial periods and period actuals | UI only | open_file; CLI reads .xml |
+| Format: P6 XML (APIBusinessObjects) | Import P6 / EPPM XML | partial | Reads the elements in p6xml.ts maps, now including BaselineProject, ActivityStep and project/resource codes (327446b). Writes and reads UnitOfMeasure, ExpenseCategory, ResourceCurve (<Values><Value0..Value100/>), ResourceRole (Proficiency "1 - Master"..), RoleRate, FinancialPeriod, ThresholdParameter, ProjectThreshold, ProjectIssue, ActivityPeriodActual, ProjectResource and most fields of every other object, all checked against P6's own XML schema (p6apibo.xsd as MPXJ embeds it; tests/p6xml-coverage.test.ts lists what is not carried and why: P6XML_NOT_CARRIED); also ActivityNote (with and without topic), ProjectSpendingPlan, the root WBS node's budget/earned-value/discount fields on the Project element, activity-code colors and assignment curves; coded values are written only where the jar verifies the P6 text | UI only | open_file; CLI reads .xml |
 | Format: MS Project XML / MPX | Import MSPDI / MPX | done | mspdi.ts/mpx.ts → shared.ts projectToDb; summary tasks become WBS; findings for deadlines, % lags, elapsed lags, cross-project links | UI only | open_file, CLI (detectFormat) |
 | Format: MPP via installed MS Project | Needs MS Project on the PC | done | main/msproject.ts PowerShell COM bridge (FileOpenEx/FileSaveAs MSProject.XML); 120 s timeout | UI; MCP reads .mpp through MPXJ (core/msp/mpp.ts) | open_file / compare read .mpp (no write) |
 | Format: Spreadsheet (XLS) in wizard | Spreadsheet is one of the wizard's formats | partial | Disabled in wizard (Wizards.tsx:151); separate File > Import from Excel menu instead (.xlsx only) | UI only | import-excel / import_excel |
@@ -938,11 +938,11 @@ Not features, but wrong behaviour seen while tracing:
 | PROJISSU / PROJTHRS / THRSPARM | Issues, thresholds | done | 130 TRIAL: 75 issues lossless in XER (lost in XML) | — | — |
 | FINDATES / TASKFIN / TRSRCFIN | Financial periods, period performance | done | cairo alex-road: FINDATES 5, TASKFIN 31 lossless in XER (lost in XML) | — | — |
 | FINTMPL | Financial period template | partial | Table kept; PROJECT.fintmpl_id dropped at 24.12 (layout) | — | — |
-| WBSBUDG / WBSRSRC | WBS budget/spending plan | done | Lossless in XER; lost in XML | — | — |
+| WBSBUDG / WBSRSRC | WBS budget/spending plan | done | Lossless in XER; in P6 XML as ProjectSpendingPlan and ProjectResource | — | — |
 | BUDGCHNG / PROJFUND / FUNDSRC | Budget log, funding | partial | Kept generically; FUNDSRC has no key (no renumbering); never seen in samples | — | — |
 | SCHEDOPTIONS | Schedule/leveling options | done | Leveling fields lost in XML only | — | — |
 | RSRCCURVDATA | Resource curves | done | Selected export keeps only referenced curves (plant 7→5); P6 likely writes all | — | — |
-| UMEASURE / LOCATION / APPLYACTOPTIONS / TASKNOTE | Misc dictionaries | done | Generic | — | — |
+| UMEASURE / LOCATION / APPLYACTOPTIONS / TASKNOTE | Misc dictionaries | done | Generic; TASKNOTE is an ActivityNote without a topic in P6 XML (APPLYACTOPTIONS and POBS have no element there) | — | — |
 | Baselines (as projects) | Separate projects / baselines_to_export | partial | Clone baselines are PROJECT rows with _baseline_of; written as ordinary projects in an all-projects export, left out of a selected export | — | — |
 
 ### P6 XML
@@ -959,7 +959,7 @@ Not features, but wrong behaviour seen while tracing:
 | Project codes / resource codes | Code types/values/assignments | done | Fixed in 327446b. Re-run at HEAD: cairo alex-road PCATTYPE 1 / PCATVAL 3 kept; only the weight fields (proj_catg_type_wt, proj_catg_wt) drop | — | — |
 | Notes: WBS, project; issues; thresholds | Notebook topics per object | missing | WBSMEMO (CfC 6→0), PROJISSU (75→0), PROJTHRS/THRSPARM → 0; only ActivityNote kept | — | — |
 | RoleRate / ResourceRole / UnitOfMeasure / curves | Dictionaries | partial | ResourceRole, UnitOfMeasure, ExpenseCategory and ResourceCurve are written to P6 XML and read back equal to the XER on every sample (tests/review-owner-clone.test.ts); RoleRate, FinancialPeriod, thresholds, issues and period actuals are carried too; P6XML_NOT_CARRIED lists the remaining fields | — | — |
-| Financial periods, period performance, WBS budgets | FinancialPeriod, ActivityPeriodActual | missing | FINDATES 5→0, TASKFIN 31→0, WBSBUDG 13→0, WBSRSRC 1→0 | — | — |
+| Financial periods, period performance, WBS budgets | FinancialPeriod, ActivityPeriodActual | missing | No UI; all five tables are written to and read from P6 XML | — | — |
 | Project-level fields | ~100 Project elements | partial | Only 17 mapped (PROJECT_MAP); CfC lost 35 non-empty PROJECT fields; SCHEDOPTIONS lose all leveling settings | — | — |
 | Activity fields | Work/equipment units, est weight, review | partial | 18-21 non-empty TASK fields lost (est_wt, *_work_qty, *_equip_qty, lock_plan_flag, float_path…) | — | — |
 | Assignment fields | Curves, lag, rate source | partial | 15-16 lost (curv_id, target_lag_drtn_hr_cnt, cost_qty_link_flag, rem_late_*…). RateType written raw "COST_PER_QTY" instead of P6's enum label (p6xml.ts:114, no enum conversion) | — | — |
