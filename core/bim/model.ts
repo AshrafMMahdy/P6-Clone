@@ -12,6 +12,7 @@ import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
 import { isRevit, revitNeed, rvtToIfc, type RevitSource } from './rvt.ts';
 import { cacheNavisworks, isNavisworks, navisworksKey, navisworksNeed, nwdToIfc, type NavisworksSource } from './nwd.ts';
+import { alive } from './heartbeat.mjs';
 
 export interface Model {
   hash: string; index: IfcIndex;
@@ -179,6 +180,7 @@ export function writeIndex(base: string, index: IfcIndex): void {
   // first the shared records (the header lists them), then the elements, written in blocks
   const xIndex = new Int32Array(index.elements.length);
   index.elements.forEach((e, i) => {
+    if ((i & 0xfff) === 0) alive(); // the Navisworks reader writes this index in its own process: a tick per 4096 elements
     const x = xOf(e);
     let n = xNo.get(x);
     if (n == null) { n = xs.length; xNo.set(x, n); xs.push([x.c, x.s, x.d, x.m ?? null, x.t ?? null, x.y ?? null, ref('p', x.p), ref('q', x.q), ref('me', x.me), ref('o', x.o)]); }
@@ -191,7 +193,7 @@ export function writeIndex(base: string, index: IfcIndex): void {
   try {
     writeSync(fd, JSON.stringify(header) + '\n');
     let buf = '';
-    index.elements.forEach((e, i) => { buf += JSON.stringify([e.guid, e.expressId, e.name, xIndex[i], Object.keys(e.authored).length ? e.authored : 0]) + '\n'; if (buf.length > 1 << 22) { writeSync(fd, buf); buf = ''; } });
+    index.elements.forEach((e, i) => { if ((i & 0xfff) === 0) alive(); buf += JSON.stringify([e.guid, e.expressId, e.name, xIndex[i], Object.keys(e.authored).length ? e.authored : 0]) + '\n'; if (buf.length > 1 << 22) { writeSync(fd, buf); buf = ''; } });
     if (buf) writeSync(fd, buf);
   } finally { closeSync(fd); }
   // fingerprints: the store's rows, or those of plain elements

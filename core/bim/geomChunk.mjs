@@ -13,9 +13,9 @@
  */
 import { closeSync, fstatSync, openSync, readFileSync, readSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import { progress, startHeartbeat } from './heartbeat.mjs';
+import { alive, progress, startHeartbeat, step } from './heartbeat.mjs';
 
-startHeartbeat(); // the parent's liveness watch (no time limit)
+startHeartbeat(); // the parent's liveness watch (no fixed time limit): a tick per 4 MB scanned, per product, per window written
 
 const [ifcPath, outDir, productsFile, targetArg] = process.argv.slice(2);
 if (!ifcPath || !outDir || !productsFile) { console.error('usage: geomChunk.mjs <ifc> <outDir> <productIdsFile> <targetBytes>'); process.exit(2); }
@@ -52,6 +52,7 @@ const voids = new Map(); // building element -> IfcRelVoidsElement ids
 let maxId = 0, entities = 0, headerEnd = 0, project = 0;
 
 // ── pass: statements by byte offset (strings and comments respected) ──────────────────────────────────────────
+step('cutting the model into chunks: scanning the IFC (bytes)', { total: fileSize });
 const fd = openSync(ifcPath, 'r');
 const BLOCK = 64 << 20;
 const buf = Buffer.alloc(BLOCK);
@@ -65,6 +66,7 @@ for (;;) {
   let i = carry.length, start = stmtStart - at0;
   while (i < text.length) {
     const c = text[i];
+    if ((i & 0x3fffff) === 0) progress(at0 + i); // a tick per 4 MB of the file
     if (inComment) { if (c === 42 && text[i + 1] === 47) { inComment = false; i += 2; } else i++; continue; }
     if (inString) { if (c === 39) inString = false; i++; continue; }
     if (c === 47 && text[i + 1] === 42) { inComment = true; i += 2; continue; }
@@ -109,6 +111,7 @@ function record(s, at) {
 // ── chunks: products in batches, each with its closure; the project's closure (units, contexts) in every chunk ─
 const pb = readFileSync(productsFile);
 const products = [...new Uint32Array(pb.buffer, pb.byteOffset, pb.byteLength / 4)].filter((p) => p > 0 && p <= maxId && len[p] > 0);
+step('cutting the model into chunks: products (cut into chunk files)', { total: products.length });
 const stamp = new Uint16Array(maxId + 1); // the chunk an entity was last put in (at most 65,535 chunks)
 const stack = [];
 let chunkNo = 0;
@@ -156,6 +159,7 @@ const write = (ids, nProducts) => {
       if (winAt < 0 || off[id] < winAt || off[id] + L > winAt + win.length) {
         win = Buffer.alloc(Math.max(16 << 20, L)); winAt = off[id];
         win = win.subarray(0, readSync(src, win, 0, win.length, winAt));
+        alive(); // a window of the file read: a chunk being written moves
       }
       writeSync(o, win.subarray(off[id] - winAt, off[id] - winAt + L)); writeSync(o, '\n'); bytes += L + 1;
     }

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { AUTO_DRAFT_MINUTES, planRender, renderMinutes, RENDER_SOFTWARE_TRIANGLES_PER_S } from '../core/bim/renderplan.ts';
 import { inChromium, isGpuFailure, probeRenderer, RenderFailed, resetRendererMemory } from '../core/bim/headless.ts';
-import { heartbeatEnv, heartbeatWatcher, parsePsCpu, parseWindowsCpu, sumTree, treeCpuMs, watchLiveness } from '../core/bim/liveness.ts';
+import { heartbeatEnv, heartbeatWatcher, judge, parsePsCpu, parseWindowsCpu, sumTree, treeCpuMs, unitWatch, type StuckInfo } from '../core/bim/liveness.ts';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { dirname } from 'node:path';
@@ -116,16 +116,17 @@ test('only the graphics card’s failures are GPU failures', () => {
 
 // ---- liveness instead of a time limit (liveness.ts, headless.ts) ---------------------------------------------------
 
-test('watchLiveness: progress keeps a job alive; silence for two windows is stuck; processor time counts as life', async () => {
-  const stuck: number[] = [];
-  let n = 0;
-  const alive = watchLiveness({ floorMs: 100, progress: () => n, onStuck: (ms) => stuck.push(ms) });
-  for (let i = 0; i < 8; i++) { n++; await new Promise((r) => setTimeout(r, 60)); } // a beat in every window
-  assert.deepEqual(stuck, []);
+test('unitWatch: a tick in every window keeps a job alive; silence for two windows is stuck, once, with the step named', async () => {
+  const stuck: StuckInfo[] = [];
+  const w = unitWatch({ floorMs: 100, step: 'loading tiles', onStuck: (i) => stuck.push(i) });
+  for (let i = 0; i < 8; i++) { w.beat(i); await new Promise((r) => setTimeout(r, 30)); } // a beat in every window
+  assert.equal(stuck.length, 0);
   await new Promise((r) => setTimeout(r, 450));
-  alive();
+  w.stop();
   assert.equal(stuck.length, 1, 'silent for two windows: stuck, once');
-  assert.ok(stuck[0] >= 200);
+  assert.equal(stuck[0].kind, 'silent');
+  assert.equal(stuck[0].step, 'loading tiles');
+  assert.ok(stuck[0].silentMs >= 200);
 });
 
 // the stand-in Chromium: speaks the DevTools pipe (fd 3 in, fd 4 out); what it does comes from the environment
@@ -160,25 +161,35 @@ const page = (dir: string) => { const p = join(dir, 'page.html'); writeFileSync(
 const runs = (log: string) => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { gpu: boolean }) : []);
 const WIN = process.platform === 'win32';
 
-test('a render has no time limit: it lives while frames arrive, and is stuck only after two silent windows', { skip: WIN && 'the stand-in browser is a script' }, async () => {
+test('a render has no time limit: it lives while frames arrive, and is stuck only after two silent windows, with the step, the bound and the alternatives', { skip: WIN && 'the stand-in browser is a script' }, async () => {
   const f = fakeChromium(), restore = env({ FAKE_LOG: f.log });
   try {
     // frames keep arriving for longer than two windows: not stuck, no limit on the total
     const t0 = Date.now();
-    const ok = await inChromium(f.p, page(f.dir), async (ev, alive) => { for (let i = 0; i < 12; i++) { alive.beat(i); await new Promise((r) => setTimeout(r, 100)); } return ev('1'); }, { floorMs: 300 });
+    const ok = await inChromium(f.p, page(f.dir), async (ev, alive) => { for (let i = 0; i < 12; i++) { alive.beat(i, 12); await new Promise((r) => setTimeout(r, 100)); } return ev('1'); }, { floorMs: 300 });
     assert.equal(ok, 'ok');
     assert.ok(Date.now() - t0 >= 1200);
     // nothing arrives and the browser is idle: two windows, then stuck, with the cause
     const t1 = Date.now();
-    await assert.rejects(inChromium(f.p, page(f.dir), (ev) => ev('hang'), { floorMs: 300 }), (e: unknown) => e instanceof RenderFailed && e.code === 'render_stuck' && /no tile or frame, and no processor time/.test(e.message));
+    await assert.rejects(inChromium(f.p, page(f.dir), (ev) => ev('hang'), { floorMs: 300, what: 'the model: 3 tiles', tried: () => 'the graphics card, then the processor' }), (e: unknown) => e instanceof RenderFailed && e.code === 'render_stuck'
+      && /^The render of the model: 3 tiles was ended as stuck while drawing frames in the browser: no progress for [\d.]+ (?:ms|s|minutes) \(two windows of 300 ms/.test(e.message) && /Tried: the graphics card, then the processor\./.test(e.message) && /Alternatives: .*draft.*boxes.*split the model/.test(e.message));
     assert.ok(Date.now() - t1 < 6000, 'ended soon after the second window');
   } finally { restore(); }
 });
 
-test('a browser that is working on one long frame is not stuck (Linux: its processor time is read)', { skip: (process.platform !== 'linux' && 'processor time is read from /proc') }, async () => {
+test('a browser that SPINS inside one frame (a render loop that never finishes) is ended: the processor time is no longer life', { skip: WIN && 'the stand-in browser is a script' }, async () => {
+  const f = fakeChromium(), t0 = Date.now();
+  // 1.5 s of work in a single frame, windows of 300 ms and no frame estimate: two windows of 300 ms pass with the processor busy
+  await assert.rejects(inChromium(f.p, page(f.dir), (ev) => ev('busy'), { floorMs: 300 }), (e: unknown) => e instanceof RenderFailed && e.code === 'render_stuck' && /no progress for/.test(e.message));
+  assert.ok(Date.now() - t0 < 1500);
+});
+
+test('the first frame is an opaque call bounded by 10 times the estimate: inside it a long frame is alive, past it the render is ended with the bound named', { skip: WIN && 'the stand-in browser is a script' }, async () => {
   const f = fakeChromium();
-  // 1.5 s of work in a single frame, windows of 300 ms: five windows pass with no frame, none of them idle
-  assert.equal(await inChromium(f.p, page(f.dir), (ev) => ev('busy'), { floorMs: 300 }), 'done');
+  // frameMs 1000: the bound is 10 s, so 1.5 s of one frame lives
+  assert.equal(await inChromium(f.p, page(f.dir), (ev) => ev('busy'), { floorMs: 300, frameMs: 1000 }), 'done');
+  // frameMs 50: the bound is max(floor 300, 500) ms; the frame never ends
+  await assert.rejects(inChromium(f.p, page(f.dir), (ev) => ev('hang'), { floorMs: 300, frameMs: 50 }), (e: unknown) => e instanceof RenderFailed && e.code === 'render_stuck' && /one call that cannot report progress ran past its work bound of 500 ms \(about 50 ms expected/.test(e.message));
 });
 
 test('the probe: a failure that is not the graphics side’s is not remembered; a GPU failure is, for the process', { skip: WIN && 'the stand-in browser is a script' }, async () => {
@@ -472,12 +483,12 @@ test('rvtWorker.mjs: a write error or an out-of-memory trap ends the run at once
 
 // ---- no time limit on the workers, on any platform: their heartbeats (heartbeat.mjs, liveness.ts) ----------------
 
-const STANDIN = (body: string) => { const dir = mkdtempSync(join(tmpdir(), 'p6-standin-')), p = join(dir, 'worker.mjs'); writeFileSync(p, `import { progress, startHeartbeat } from ${JSON.stringify(HB_URL)};\nstartHeartbeat();\n${body}`); return p; };
-const SHORT = { P6CLONE_HEARTBEAT_MS: '100', P6CLONE_WORKER_FLOOR_MS: '400' };
-const watched = (script: string) => new Promise<{ code: number | null; stuck: number; beats: string }>((done) => {
+const STANDIN = (body: string) => { const dir = mkdtempSync(join(tmpdir(), 'p6-standin-')), p = join(dir, 'worker.mjs'); writeFileSync(p, `import { alive, opaque, progress, startHeartbeat, step, tick } from ${JSON.stringify(HB_URL)};\nstartHeartbeat();\n${body}`); return p; };
+const SHORT = { P6CLONE_HEARTBEAT_MS: '100', P6CLONE_WORKER_FLOOR_MS: '400', P6CLONE_MACHINE_FACTOR: '1' };
+const watched = (script: string) => new Promise<{ code: number | null; stuck: StuckInfo | null; beats: string }>((done) => {
   const child = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...heartbeatEnv() } });
-  let stuck = 0, text = '';
-  const stop = heartbeatWatcher(child, { floorMs: Number(process.env.P6CLONE_WORKER_FLOOR_MS), onText: (t) => { text += t; }, onStuck: (ms) => { stuck = ms; child.kill(); } });
+  let stuck: StuckInfo | null = null, text = '';
+  const stop = heartbeatWatcher(child, { floorMs: Number(process.env.P6CLONE_WORKER_FLOOR_MS), onText: (t) => { text += t; }, onStuck: (i) => { stuck = i; child.kill(); } });
   child.on('close', (code) => { stop(); done({ code, stuck, beats: text }); });
 });
 
@@ -487,18 +498,17 @@ test('a worker that progresses slowly but steadily is never ended, however long 
     // 3 s of steady progress, one step every 200 ms: seven times the 400 ms floor, and no processor time to speak of
     const t0 = Date.now();
     const slow = await watched(STANDIN("let n = 0; await new Promise((r) => { const t = setInterval(() => { progress(++n); if (n >= 15) { clearInterval(t); r(); } }, 200); }); console.log('done');"));
-    assert.deepEqual([slow.code, slow.stuck], [0, 0]);
+    assert.deepEqual([slow.code, slow.stuck], [0, null]);
     assert.ok(Date.now() - t0 >= 2800);
     assert.equal(slow.beats.trim(), 'done', 'its own output comes through, its heartbeats do not');
     // idle: heartbeats go on, nothing else changes: two windows, then ended
     const t1 = Date.now();
-    const silent = await watched(STANDIN("await new Promise((r) => setTimeout(r, 60000));"));
-    assert.ok(silent.stuck >= 800, String(silent.stuck));
+    const silent = await watched(STANDIN("step('meshing products'); await new Promise((r) => setTimeout(r, 60000));"));
+    assert.equal(silent.stuck?.kind, 'silent');
+    assert.equal(silent.stuck?.step, 'meshing products');
+    assert.ok(silent.stuck!.silentMs >= 800, String(silent.stuck!.silentMs));
     assert.notEqual(silent.code, 0);
     assert.ok(Date.now() - t1 < 8000);
-    // one long synchronous call (nothing for the main thread to report): the processor time its heartbeat reports is the life
-    const busy = await watched(STANDIN("const t = Date.now(); while (Date.now() - t < 2500) { /* WebAssembly, say */ } console.log('done');"));
-    assert.deepEqual([busy.code, busy.stuck], [0, 0]);
   } finally { restore(); }
 });
 
@@ -509,7 +519,7 @@ test('the Revit reader and the geometry worker are watched the same way: slow an
     assert.match((await rvtToIfc(f.rvt)).ifc, /-rvt2\.ifc$/);
     rmSync(join(f.cache), { recursive: true, force: true }); mkdirSync(f.cache);
     process.env.FAKE_RVT = 'silent';
-    await assert.rejects(rvtToIfc(f.rvt), /the Revit reader stopped making progress \(its heartbeat showed no IFC written and no processor time for [\d.]+ minutes\) and was ended/);
+    await assert.rejects(rvtToIfc(f.rvt), /The Revit reader was ended as stuck while starting: no progress for [\d.]+ (?:ms|s|minutes) \(two windows of 400 ms.*Tried: .*three modes.*Alternatives: export the same model from Revit as an NWC \(Navisworks\) or IFC/s);
     assert.deepEqual(readdirSync(f.cache), []);
     // the geometry worker, through open_model: a stand-in named like the real one (the environment only)
     const geom = (body: string) => { const w = STANDIN(body), d = join(w, '..'); for (const n of ['geomTiles.mjs', 'geomChunk.mjs', 'heartbeat.mjs']) copyFileSync(join(ROOT, 'core', 'bim', n), join(d, n)); return w; }; // beside the tiler and chunker, as the real one is
@@ -521,7 +531,7 @@ test('the Revit reader and the geometry worker are watched the same way: slow an
     };
     const silent = await opened("await new Promise((r) => setTimeout(r, 60000));");
     assert.equal(silent.geometry, 'unavailable');
-    assert.match(silent.geometry_note, /^geometry stopped making progress \(its heartbeat showed no progress and no processor time for [\d.]+ minutes\) and was ended/);
+    assert.match(silent.geometry_note, /^The geometry worker was ended as stuck while starting: no progress for [\d.]+ (?:ms|s|minutes) .*Tried: web-ifc meshes every run.*Alternatives: open the model with geometry: false.*The model is indexed/s);
     // slow and steady for 2.5 s, then fails by itself: it was not ended for being slow
     const slow = await opened("let n = 0; await new Promise((r) => { const t = setInterval(() => { progress(++n); if (n >= 12) { clearInterval(t); r(); } }, 200); }); console.error('stand-in finished'); process.exit(1);");
     assert.equal(slow.geometry, 'unavailable');
@@ -550,7 +560,7 @@ test('the Navisworks reader has no fixed 60-minute limit: slow and steady lives,
     const restore = env({ ...SHORT, P6CLONE_NWD_WORKER: STANDIN(body), P6CLONE_MODEL_CACHE: mkdtempSync(join(cache, 'c-')), P6CLONE_NWD_MINUTES: undefined, ...extra });
     try { await nwdToIfc(nwc); return null; } catch (e) { return (e as Error).message; } finally { restore(); }
   };
-  assert.match((await run("await new Promise((r) => setTimeout(r, 60000));"))!, /^the Navisworks reader stopped making progress \(its heartbeat showed no progress and no processor time for [\d.]+ minutes\) and was ended/);
+  assert.match((await run("await new Promise((r) => setTimeout(r, 60000));"))!, /^The Navisworks reader was ended as stuck while starting: no progress for [\d.]+ (?:ms|s|minutes) .*Alternatives: export the model from Navisworks/s);
   // 2.5 s of steady progress (six times the 400 ms floor), then it ends without an answer by itself: not ended for being slow
   assert.equal(await run("let n = 0; await new Promise((r) => { const t = setInterval(() => { progress(++n); console.log('progress ' + n + ' 12 step'); if (n >= 12) { clearInterval(t); r(); } }, 200); });"), 'the Navisworks reader stopped without its answer');
   // the optional cap, when an administrator sets one, still ends a reader that is alive

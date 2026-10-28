@@ -5,6 +5,7 @@
 // on its tree node (older files) or in the table LcOaPartitionProps, in tree order (newer files): those are matched to
 // the elements in order, each to the next element of the same category, family and type.
 import type { NwAttr, NwGroup, NwNode, NwProp, NwTree } from './tree.ts';
+import { tick } from '../heartbeat.mjs';
 
 export interface NwElement {
   /** the GlobalId Revit's own IFC export writes (from LcOpGuidStore), else null (one is made from the item's path) */
@@ -71,6 +72,7 @@ function apply(e: NwElement, g: NwGroup): void {
 export function elementsOf(tree: NwTree, guids: string[], source: string, external: NwGroup[] = []): NwElement[] {
   const out: NwElement[] = [];
   const visit = (n: NwNode, ctx: { level: string | null; layer: string | null; coll: Record<string, string>; path: string }) => {
+    tick();
     const label = n.name ?? n.attr?.display ?? '';
     const path = `${ctx.path}/${label}`;
     if (isContainer(n)) {

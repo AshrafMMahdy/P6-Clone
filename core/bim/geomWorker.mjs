@@ -16,12 +16,12 @@
  * order of the index), so a chunk of the model maps back to the whole.
  * Usage: node geomWorker.mjs <ifc> <outDir> <memoryLimitGB> <products.bin>
  */
-import { readFileSync, writeFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, openSync, writeSync, closeSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { closed } from './meshClosed.mjs';
-import { progress, startHeartbeat } from './heartbeat.mjs';
+import { expectedMs, opaque, step, tick, startHeartbeat } from './heartbeat.mjs';
 
-startHeartbeat(); // the parent's liveness watch (no time limit): processor time and the elements meshed so far
+startHeartbeat(); // the parent's liveness watch (no fixed time limit): a tick per mesh callback; web-ifc's OpenModel is one opaque call with a work bound
 
 const [ifcPath, outDir, memGb, productsBin] = process.argv.slice(2);
 if (!ifcPath || !outDir || !productsBin) { console.error('usage: geomWorker.mjs <ifc> <outDir> <memoryLimitGB> <products.bin>'); process.exit(2); }
@@ -35,7 +35,11 @@ const mod = await import(process.env.P6CLONE_WEBIFC || 'web-ifc');
 const WebIFC = mod.IfcAPI ? mod : mod.default;
 const api = new WebIFC.IfcAPI();
 await api.Init();
-const modelID = api.OpenModel(new Uint8Array(readFileSync(ifcPath)), { MEMORY_LIMIT: (Number(memGb) || 4) * 1024 * 1024 * 1024 });
+// the run's work, from its size and the rate measured on this machine (heartbeat.mjs): OpenModel is ONE call that cannot tick
+// (the parent ends it past 10 times this); meshing ticks per callback, and no silence in it may pass the same bound
+const work = expectedMs(statSync(ifcPath).size, 'geometry');
+const modelID = opaque('reading the IFC (web-ifc OpenModel)', work, () => api.OpenModel(new Uint8Array(readFileSync(ifcPath)), { MEMORY_LIMIT: (Number(memGb) || 4) * 1024 * 1024 * 1024 }));
+step('meshing products', { cap: work });
 
 const geomFd = openSync(join(outDir, 'geoms.bin'), 'w');
 const placesFd = openSync(join(outDir, 'places.bin'), 'w');
@@ -61,6 +65,7 @@ function hashes(a, b) {
 try {
   api.StreamAllMeshes(modelID, (mesh) => {
     try {
+      tick(); // every callback is a step of the loop, whether its product is meshed, skipped or fails
       const ordinal = ordinalOf(mesh.expressID);
       if (ordinal < 0) return; // not a product of the index (an opening's own mesh, a spatial element)
       const geoms = mesh.geometries;
@@ -118,7 +123,7 @@ try {
       }
       if (elemN * ELEM >= elemBuf.length) flushElems();
       elemBuf.set([ordinal, vTotal, iTotal / 3, open ? NaN : Math.abs(volume), minx, miny, minz, maxx, maxy, maxz, sx / vTotal, sy / vTotal, sz / vTotal], elemN * ELEM);
-      elemN++; elements++; progress(elements);
+      elemN++; elements++;
     } catch { failures++; }
   });
 } finally {

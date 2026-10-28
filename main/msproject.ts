@@ -1,11 +1,19 @@
 // MPP bridge. Like Primavera P6, the clone cannot read or write the binary .mpp format itself: it asks an installed
 // Microsoft Project (COM automation, "MSProject.Application") to convert between .mpp and Microsoft Project XML.
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve as absolute } from 'node:path';
+import { expectedMs } from '../core/bim/heartbeat.mjs';
+import { externalWatch, pidsNamed, stuckMessage, treeCpuMs, workerFloorMs, type StuckInfo } from '../core/bim/liveness.ts';
 
 export const MSP_REQUIRED = 'Microsoft Project must be installed to import/export .mpp files (Primavera P6 has the same requirement)';
-export const CONVERT_TIMEOUT_MS = 120_000;
+// No fixed time limit on the conversion (owner rule 2026-10-28; it was 120 s whatever the file's size). Microsoft Project is opaque
+// (a COM call reports nothing), so it is watched from outside (liveness.ts externalWatch): ended past a work bound (the input's
+// size x MSPROJECT_S_PER_MB in heartbeat.mjs x this machine's factor x 10, never under the floor; the output growing while it saves
+// resets the clock), or when neither PowerShell nor Project (WINPROJ.EXE, started through COM: not PowerShell's child) used
+// processor time and nothing was written for two windows: Project waits on a dialog nobody can see.
+/** The process Microsoft Project runs as. */
+export const MSPROJECT_EXE = 'WINPROJ.EXE';
 
 export type ConvertDirection = 'mppToXml' | 'xmlToMpp';
 
@@ -53,26 +61,36 @@ export function buildConvertScript(direction: ConvertDirection, inPath: string, 
 }
 
 /** Human message for a failed conversion. */
-export function convertError(direction: ConvertDirection, code: number | null, stderr: string, timedOut: boolean): string {
+export function convertError(direction: ConvertDirection, code: number | null, stderr: string, stuck: StuckInfo | null = null): string {
   const what = direction === 'mppToXml' ? 'import the .mpp file' : 'save the .mpp file';
   const detail = stderr.replace(/\s+/g, ' ').trim().slice(0, 400).replace(/[.\s]+$/, '');
-  if (timedOut) return `Microsoft Project did not finish within ${CONVERT_TIMEOUT_MS / 1000} s, so the clone could not ${what}. ${MSP_REQUIRED}.`;
+  if (stuck) {
+    const open = direction === 'mppToXml' ? 'opening the .mpp and saving it as Microsoft Project XML' : 'saving the XML as an .mpp';
+    return `${stuckMessage({ ...stuck, step: `Microsoft Project: ${open}` }, {
+      what: 'Microsoft Project (through COM)', tried: 'one conversion in a hidden Microsoft Project; there is no second way to read or write an .mpp',
+      next: direction === 'mppToXml'
+        ? 'open the .mpp once in Microsoft Project yourself (a dialog, such as a read-only prompt, a repair prompt or a licence message, may be waiting there), save it as Microsoft Project XML (File > Save As) and import that XML; or export the schedule from the source tool as XER or XML; or split a very large project'
+        : 'open Microsoft Project once yourself (a dialog may be waiting there), then retry; or save the schedule as Microsoft Project XML and let the receiver open that in Project; or export it as XER or XML',
+    })} ${MSP_REQUIRED}.`;
+  }
   if (code === EXIT.noProject || /MSPROJECT_NOT_AVAILABLE|ENOENT/.test(detail)) return `${MSP_REQUIRED}. Microsoft Project could not be started on this computer${detail ? ` (${detail.replace(/^MSPROJECT_NOT_AVAILABLE:\s*/, '')})` : ''}.`;
   if (code === EXIT.open) return `Microsoft Project could not open the file, so the clone could not ${what}${detail ? `: ${detail.replace(/^OPEN_FAILED:\s*/, '')}` : ''}.`;
   if (code === EXIT.save || code === EXIT.missingOutput) return `Microsoft Project could not write the converted file, so the clone could not ${what}${detail ? `: ${detail.replace(/^SAVE_FAILED:\s*/, '')}` : ''}.`;
   return `Converting with Microsoft Project failed (exit code ${code ?? 'none'}), so the clone could not ${what}${detail ? `: ${detail}` : ''}. ${MSP_REQUIRED}.`;
 }
 
-function runConvert(direction: ConvertDirection, inPath: string, outPath: string): Promise<void> {
+async function runConvert(direction: ConvertDirection, inPath: string, outPath: string): Promise<void> {
+  if (process.platform !== 'win32') throw new Error(`${MSP_REQUIRED}. Microsoft Project only runs on Windows.`);
+  if (!existsSync(inPath)) throw new Error(`Input file not found: ${inPath}`);
+  // the Project instances running before: only one that this script starts is ever ended (the user may have their own open)
+  const before = new Set((await pidsNamed(MSPROJECT_EXE)) ?? []);
   return new Promise<void>((resolve, reject) => {
-    if (process.platform !== 'win32') { reject(new Error(`${MSP_REQUIRED}. Microsoft Project only runs on Windows.`)); return; }
-    if (!existsSync(inPath)) { reject(new Error(`Input file not found: ${inPath}`)); return; }
     // absolute paths: Microsoft Project resolves relative ones against its own folder
     const script = buildConvertScript(direction, absolute(inPath), absolute(outPath));
     let stderr = '';
-    let timedOut = false;
-    let settled = false;
-    const done = (err?: Error) => { if (settled) return; settled = true; clearTimeout(timer); err ? reject(err) : resolve(); };
+    let stuck: StuckInfo | null = null;
+    let settled = false, stopWatch = () => {};
+    const done = (err?: Error) => { if (settled) return; settled = true; stopWatch(); err ? reject(err) : resolve(); };
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -80,14 +98,26 @@ function runConvert(direction: ConvertDirection, inPath: string, outPath: string
       reject(new Error(`${MSP_REQUIRED}. PowerShell could not be started: ${(e as Error).message}`));
       return;
     }
-    const timer = setTimeout(() => { timedOut = true; child.kill(); done(new Error(convertError(direction, null, stderr, true))); }, CONVERT_TIMEOUT_MS);
+    const sizeOf = (p: string) => { try { return statSync(p).size; } catch { return 0; } };
+    stopWatch = externalWatch({
+      step: `converting (${direction})`, floorMs: workerFloorMs(), expectMs: expectedMs(sizeOf(inPath), 'msproject'),
+      output: () => sizeOf(outPath), // a save writes the output as it goes: bytes are progress
+      cpu: () => treeCpuMs(child.pid ?? 0, [MSPROJECT_EXE]),
+      onStuck: async (i) => {
+        stuck = i;
+        // end the script, and the Project instance IT started (a new WINPROJ.EXE; one already running is the user's and stays)
+        try { child.kill(); } catch { /* gone */ }
+        for (const pid of (await pidsNamed(MSPROJECT_EXE)) ?? []) if (!before.has(pid)) { try { process.kill(pid); } catch { /* gone */ } }
+        done(new Error(convertError(direction, null, stderr, i)));
+      },
+    });
     child.stdout?.on('data', () => { /* drain */ });
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-    child.on('error', (e) => done(new Error(convertError(direction, null, (e as Error).message, false))));
+    child.on('error', (e) => done(new Error(convertError(direction, null, (e as Error).message, null))));
     child.on('close', (code) => {
-      if (timedOut) return;
+      if (stuck) return;
       if (code === 0 && existsSync(outPath)) done();
-      else done(new Error(convertError(direction, code ?? null, stderr, false)));
+      else done(new Error(convertError(direction, code ?? null, stderr, null)));
     });
   });
 }

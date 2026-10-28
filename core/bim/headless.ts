@@ -9,7 +9,7 @@ import { createReadStream, existsSync, mkdtempSync, readFileSync, rmSync, statSy
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { treeCpuMs, watchLiveness } from './liveness.ts';
+import { startupWindowMs, stuckMessage, unitWatch, workerFloorMs, type StuckInfo } from './liveness.ts';
 
 /** A program from the environment, if it names an existing file. */
 const fromEnv = (name: string): string | null => { const p = process.env[name]; return p && existsSync(p) ? p : null; };
@@ -27,9 +27,9 @@ export class RenderFailed extends Error { code?: string; constructor(message: st
 export const GPU_FAILURES = new Set(['webgl_context_lost', 'gpu_out_of_memory', 'gpu_process_crashed', 'webgl_unavailable']);
 export const isGpuFailure = (e: unknown): e is RenderFailed => e instanceof RenderFailed && !!e.code && GPU_FAILURES.has(e.code);
 
-/** What the render reports to its watch (inChromium): a unit of progress arrived (done counts frames or tiles), and how
- *  long one unit is expected to take before any has been measured. */
-export interface Alive { beat(done: number): void; expect(unitMs: number): void }
+/** What the render reports to its watch (inChromium): a unit of progress arrived (done of total frames or tiles). The first
+ *  beat of a phase is the baseline; the first unit completed after it is the first measured gap. */
+export interface Alive { beat(done: number, total?: number): void; step(name: string, o?: { expectMs?: number; total?: number }): void }
 
 const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.glb': 'model/gltf-binary', '.txt': 'text/plain; charset=utf-8', '.bin': 'application/octet-stream' };
 /** The page's folder over HTTP on the loopback, under a random path (the page fetches its tiles relative to itself,
@@ -53,13 +53,15 @@ type Evaluate = (expression: string, awaitPromise?: boolean) => Promise<unknown>
 
 /** Load the viewer page headless and run work against it (evaluate expressions in the page). onProgress may throw (a
  *  cancelled job): the browser is closed and the error passes through.
- *  There is no time limit (owner rule 2026-10-27). The render is alive while tiles load and frames arrive (work reports
- *  them through `alive`) or the browser's processes keep using the processor; it is stuck (code render_stuck) after two
- *  windows in a row with neither. A window is 4 times the slowest tile or frame measured (frameMs, the estimate, before
- *  the first one), and never under floorMs: 2 minutes, because a browser start, a garbage collection or a driver stall
- *  on one huge frame can be quiet that long without being stuck. (The processor time is read from outside: /proc on Linux; PowerShell, then wmic,
- *  then tasklist on Windows; ps on macOS; where none works only tiles and frames count.) */
-export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate, alive: Alive) => Promise<T>, o: { width?: number; height?: number; floorMs?: number; frameMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void; what?: string; gpu?: boolean } = {}): Promise<T> {
+ *  There is no fixed time limit (owner rules 2026-10-27, 2026-10-28). The render is alive while tiles load and frames arrive
+ *  (work reports them through `alive`); the browser's processor time is NOT life (a render loop that spins without
+ *  drawing a frame is stuck). It is stuck (code render_stuck) after two windows in a row without a tile or frame, a window
+ *  being 4 times the longest gap between tiles or frames this render has shown, never under floorMs (2 minutes: a garbage
+ *  collection or a driver stall on one huge frame can be quiet that long); the first frame, which has no measured gap, is an
+ *  opaque call bounded by 10 times the estimate (frameMs, renderplan.ts); the browser's start-up has a window of its own
+ *  (startupWindowMs, 60 s, two in a row). The error names the step, the silence or the bound, what was tried and the
+ *  alternatives (stuckMessage). */
+export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate, alive: Alive) => Promise<T>, o: { width?: number; height?: number; floorMs?: number; frameMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void; what?: string; gpu?: boolean; tried?: () => string; next?: string } = {}): Promise<T> {
   const profile = mkdtempSync(join(tmpdir(), 'p6c4d-chrome-'));
   const http = await serveFolder(dirname(page));
   // the renderer's heap may grow with the model (a tile at a time); the GPU process (SwiftShader) holds the geometry
@@ -103,14 +105,16 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
     write.write(JSON.stringify({ id: i, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0');
   });
   // liveness, not a time limit (see above)
-  let beats = 0, lastDone = -1, lastAt = Date.now(), slowest = 0, expected = o.frameMs ?? 0;
-  const alive: Alive = {
-    beat(done) { if (done === lastDone) return; const now = Date.now(); if (lastDone >= 0 && done > lastDone) slowest = Math.max(slowest, (now - lastAt) / (done - lastDone)); lastDone = done; lastAt = now; beats++; },
-    expect(unitMs) { expected = unitMs; slowest = 0; lastDone = -1; lastAt = Date.now(); },
-  };
   const floorMs = o.floorMs ?? 120_000;
-  const stopWatch = watchLiveness({ floorMs, windowMs: () => 4 * Math.max(slowest, expected), progress: () => beats, cpu: () => (child.pid ? treeCpuMs(child.pid) : null),
-    onStuck: (ms) => failAll(new RenderFailed(`The render stopped making progress${loaded}${o.what ? ` (${o.what})` : ''}: no tile or frame, and no processor time in the browser, for ${Math.round(ms / 60_000 * 10) / 10} minutes (two windows sized from the ${slowest ? 'measured' : 'estimated'} time of one ${loaded.includes('drawing') ? 'frame' : 'tile'}).`, 'render_stuck')) });
+  const watch = unitWatch({
+    floorMs, step: 'starting the browser and loading the viewer', windowMs: startupWindowMs(),
+    onStuck: (i: StuckInfo) => failAll(new RenderFailed(stuckMessage(i, {
+      what: `The render${o.what ? ` of ${o.what}` : ''}`,
+      tried: o.tried?.() ?? (o.gpu ? 'the graphics card' : 'the processor (software rendering)'),
+      next: o.next ?? 'ask for quality "draft" or boxes: true (each element drawn as its bounding box); render on a machine with a working graphics card (the client_render route); split the model (by discipline or level) or export it as NWC or IFC in smaller parts',
+    }), 'render_stuck')),
+  });
+  const alive: Alive = { beat: (d, t) => watch.beat(d, t), step: (n, s) => watch.step(n, s) };
   try {
     const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
@@ -128,13 +132,14 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
     };
     // wait for every tile to be on the GPU (the viewer's status): as long as tiles keep arriving (or the browser works), it
     // waits; a page that could not hold the model says why, and that is the render's error
-    let seen = -1, noApi = 0, webglChecked = false;
+    let seen = -1, noApi = 0, webglChecked = false, loading = false;
     for (;;) {
       const st = (await evaluate('window.P6C4D_API ? window.P6C4D_API.status() : null', false)) as { state: string; tiles: { loaded: number; total: number }; error?: { code: string; message: string } } | null;
       if (st?.state === 'ready') break;
       if (st?.state === 'failed') throw new RenderFailed(st.error?.message ?? 'The 4D viewer could not load the model.', st.error?.code);
+      if (st && !loading) { loading = true; alive.step('loading the model\u2019s tiles into the browser', { total: st.tiles.total }); } // the page is up: the start-up window is over
       const n = st ? st.tiles.loaded : -1;
-      if (st && n !== seen) { seen = n; alive.beat(n); loaded = ` after loading ${st.tiles.loaded} of ${st.tiles.total} tiles`; await o.onLoad?.(st.tiles.loaded, st.tiles.total); }
+      if (st && n !== seen) { seen = n; alive.beat(n, st.tiles.total); loaded = ` after loading ${st.tiles.loaded} of ${st.tiles.total} tiles`; await o.onLoad?.(st.tiles.loaded, st.tiles.total); }
       // a page that never started: no WebGL context at all is the graphics side's failure, and says so
       if (!st && ++noApi === 20 && !webglChecked) {
         webglChecked = true;
@@ -143,10 +148,11 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
       await new Promise((r2) => setTimeout(r2, 250));
     }
     loaded = ' while drawing frames, with every tile loaded';
-    alive.expect(o.frameMs ?? 0);
+    // the first frame has no measured gap yet: one opaque call, bounded by 10 times the estimate (then the measured gaps rule)
+    alive.step('drawing frames in the browser', { expectMs: o.frameMs ?? 0 });
     return await work(evaluate, alive);
   } finally {
-    stopWatch();
+    watch.stop();
     if (!died) try { await Promise.race([send('Browser.close'), new Promise((r) => setTimeout(r, 2000))]); } catch { /* closing */ }
     child.removeAllListeners('exit');
     child.kill();
@@ -194,7 +200,7 @@ export async function probeRenderer(chromium: string, modelBytes = 0): Promise<R
       if (process.platform === 'linux' && !existsSync('/dev/dri') && renderGpu() === 'auto') return { renderer: { kind: 'software' as const, name: 'SwiftShader (no graphics device: /dev/dri)' }, keep: true };
       const dir = mkdtempSync(join(tmpdir(), 'p6c4d-probe-')), page = join(dir, 'probe.html');
       writeFileSync(page, '<!doctype html><script>window.P6C4D_API = { status: () => ({ state: "ready", tiles: { loaded: 0, total: 0 } }) };</script>');
-      try { return { renderer: rendererOf(String(await inChromium(chromium, page, (ev) => ev(RENDERER_JS), { gpu, floorMs: 10_000, width: 64, height: 64 })), gpu), keep: true }; }
+      try { return { renderer: rendererOf(String(await inChromium(chromium, page, (ev) => ev(RENDERER_JS), { gpu, floorMs: startupWindowMs(), width: 64, height: 64 })), gpu), keep: true }; }
       catch (e) { return { renderer: { kind: 'software' as const, name: `unknown (the probe failed: ${(e as Error).message.slice(0, 120)})` }, keep: isGpuFailure(e) }; }
       finally { rmSync(dir, { recursive: true, force: true }); }
     })();
@@ -212,7 +218,7 @@ export async function probeRenderer(chromium: string, modelBytes = 0): Promise<R
 export async function renderPngs(evaluate: Evaluate, dates: string[], onProgress: Progress, alive?: Alive): Promise<Buffer[]> {
   const out: Buffer[] = [];
   for (const [i, d] of dates.entries()) {
-    alive?.beat(i);
+    alive?.beat(i, dates.length);
     await onProgress(i, dates.length, `frame ${i + 1} of ${dates.length}`);
     const url = String(await evaluate(`window.P6C4D_API.png(${JSON.stringify(d)})`));
     out.push(Buffer.from(url.replace(/^data:image\/png;base64,/, ''), 'base64'));
@@ -220,41 +226,91 @@ export async function renderPngs(evaluate: Evaluate, dates: string[], onProgress
   return out;
 }
 
-/** The video encoded in the page; progress is read from the page every half second while it runs. */
-export async function renderVideo(evaluate: Evaluate, o: object, onProgress: Progress, alive?: Alive): Promise<{ mime: string; frames: number; bytes: Buffer }> {
-  const run = evaluate(`window.P6C4D_API.encode(${JSON.stringify(o)}).then((r) => { let s = ''; const b = r.bytes; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768)); return { mime: r.mime, frames: r.frames, b64: btoa(s) }; })`) as Promise<{ mime: string; frames: number; b64: string }>;
-  let finished = false;
+/** Run `run` (a long call into the page: the encode) while the page's own progress is read every half second: each frame done is
+ *  a tick for the watch, and the caller's onProgress hears of it (it may throw: a cancelled job). */
+export async function whileEncoding<T>(run: Promise<T>, evaluate: Evaluate, onProgress: Progress, alive?: Alive): Promise<T> {
+  let finished = false, finishing = false;
   const watch = (async () => {
     while (!finished) {
       await new Promise((r) => setTimeout(r, 500));
       if (finished) return;
       const p = (await evaluate('window.P6C4D_API.progress()', false).catch(() => null)) as { done: number; total: number } | null;
-      if (p?.total) { alive?.beat(p.done); await onProgress(p.done, p.total, `frame ${p.done} of ${p.total}`); }
+      if (p?.total) {
+        alive?.beat(p.done, p.total);
+        if (p.done >= p.total && !finishing) { finishing = true; alive?.step('finishing the video (the last frames, the muxer, handing the video back)'); }
+        await onProgress(p.done, p.total, `frame ${p.done} of ${p.total}`);
+      }
     }
   })();
   // a cancelled job (onProgress throws) ends the race; both promises are handled, so nothing is left unhandled
   const stop = new Promise<never>((_, rej) => { watch.catch(rej); });
-  try {
-    const v = await Promise.race([run, stop]);
-    return { mime: v.mime, frames: v.frames, bytes: Buffer.from(v.b64, 'base64') };
-  } finally { finished = true; }
+  try { return await Promise.race([run, stop]); } finally { finished = true; }
 }
 
-/** WebM to MP4 (H.264) with ffmpeg; null when no ffmpeg is configured. */
-export async function webmToMp4(webm: Buffer, ffmpeg: string | null = ffmpegPath()): Promise<Buffer | null> {
+/** The video encoded in the page; progress is read from the page every half second while it runs. */
+export async function renderVideo(evaluate: Evaluate, o: object, onProgress: Progress, alive?: Alive): Promise<{ mime: string; frames: number; bytes: Buffer }> {
+  const run = evaluate(`window.P6C4D_API.encode(${JSON.stringify(o)}).then((r) => { let s = ''; const b = r.bytes; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768)); return { mime: r.mime, frames: r.frames, b64: btoa(s) }; })`) as Promise<{ mime: string; frames: number; b64: string }>;
+  const v = await whileEncoding(run, evaluate, onProgress, alive);
+  return { mime: v.mime, frames: v.frames, bytes: Buffer.from(v.b64, 'base64') };
+}
+
+/** A page that is already open (the desktop app's offscreen window on the user's graphics card), driven with the same watch as
+ *  inChromium: its tiles load and its frames are drawn under the same rules (two silent windows, 4 x the longest gap, never
+ *  under floorMs; the first frame bounded by 10 x frameMs; start-up in its own window), and a page whose process is gone ends
+ *  the render at once. The page's own failure ([code] message) is the render's. */
+export interface PageHandle { evaluate(expression: string): Promise<unknown>; onGone(handler: (why: string) => void): void }
+export async function inPage<T>(page: PageHandle, work: (evaluate: Evaluate, alive: Alive) => Promise<T>, o: { floorMs?: number; frameMs?: number; what?: string; tried?: string; next?: string } = {}): Promise<T> {
+  let failure: Error | null = null, reject!: (e: Error) => void;
+  const failed = new Promise<never>((_, rej) => { reject = rej; });
+  failed.catch(() => { /* handled by the race below */ });
+  const fail = (e: Error) => { failure ??= e; reject(failure); };
+  const watch = unitWatch({
+    floorMs: o.floorMs ?? 120_000, step: 'starting the viewer page', windowMs: startupWindowMs(),
+    onStuck: (i: StuckInfo) => fail(new RenderFailed(stuckMessage(i, {
+      what: `The render${o.what ? ` of ${o.what}` : ''}`, tried: o.tried ?? 'this computer\u2019s graphics card (the app has no software fallback)',
+      next: o.next ?? 'render the video on the server with render_4d (quality draft or boxes: true is much faster), or on a machine with a stronger graphics card; split the model (by discipline or level) or export it as NWC or IFC in smaller parts',
+    }), 'render_stuck')),
+  });
+  const alive: Alive = { beat: (d, t) => watch.beat(d, t), step: (n, s) => watch.step(n, s) };
+  page.onGone((why) => fail(new RenderFailed(`The page's process ended (${why}): most often the computer ran out of memory, or the graphics driver reset.`, 'browser_out_of_memory')));
+  // (a call that answers at once must not hide a failure already declared: it is looked at before and after)
+  const evaluate: Evaluate = async (expression) => { if (failure) throw failure; const r = await Promise.race([page.evaluate(expression), failed]); if (failure) throw failure; return r; };
+  try {
+    let seen = -1, loading = false;
+    for (;;) {
+      const st = (await evaluate('(window.P6C4D_API && window.P6C4D_API.status()) || null')) as { state: string; tiles: { loaded: number; total: number }; error?: { code: string; message: string } } | null;
+      if (st?.state === 'ready') break;
+      if (st?.state === 'failed') throw new RenderFailed(st.error?.message ?? 'The 4D viewer could not load the model.', st.error?.code);
+      if (st && !loading) { loading = true; alive.step('loading the model\u2019s tiles into the page', { total: st.tiles.total }); }
+      if (st && st.tiles.loaded !== seen) { seen = st.tiles.loaded; alive.beat(seen, st.tiles.total); }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    alive.step('drawing frames in the page', { expectMs: o.frameMs ?? 0 });
+    const out = await Promise.race([work(evaluate, alive), failed]);
+    if (failure) throw failure;
+    return out;
+  } finally { watch.stop(); }
+}
+
+/** WebM to MP4 (H.264) with ffmpeg; null when no ffmpeg is configured. ffmpeg reports its own progress (-progress: frame=N),
+ *  so it is watched like any loop we own: ended when no frame is written for two windows (a window being 4 times the longest
+ *  gap between its reports, never under floorMs), with the cause. */
+export async function webmToMp4(webm: Buffer, ffmpeg: string | null = ffmpegPath(), o: { floorMs?: number; frames?: number } = {}): Promise<Buffer | null> {
   if (!ffmpeg) return null;
   const dir = mkdtempSync(join(tmpdir(), 'p6c4d-ff-'));
   try {
     const src = join(dir, 'in.webm'), dst = join(dir, 'out.mp4');
     writeFileSync(src, webm);
     const err = await new Promise<string | null>((resolve) => {
-      const c = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', dst], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
-      let e = '';
+      const c = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-y', '-i', src, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', dst], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      let e = '', rest = '', stuck: string | null = null;
+      const watch = unitWatch({ floorMs: o.floorMs ?? workerFloorMs(), step: 'converting the WebM to MP4 (ffmpeg, frames written)', onStuck: (i) => { stuck = stuckMessage(i, { what: 'ffmpeg', tried: 'one conversion of the recorded WebM to H.264', next: 'ask for format: "webm" (no conversion), a smaller quality or fewer frames, or convert the WebM on another machine' }); c.kill(); } });
+      c.stdout.on('data', (d) => { const lines = (rest + String(d)).split('\n'); rest = lines.pop() ?? ''; for (const l of lines) { const m = /^frame=(\d+)/.exec(l.trim()); if (m) watch.beat(Number(m[1]), o.frames); } });
       c.stderr.on('data', (d) => { e = (e + String(d)).slice(-1000); });
-      c.on('error', (x) => resolve(`ffmpeg could not be started: ${x.message}`));
-      c.on('exit', (code) => resolve(code === 0 ? null : `ffmpeg failed (code ${code}): ${e.trim()}`));
+      c.on('error', (x) => { watch.stop(); resolve(`ffmpeg could not be started: ${x.message}`); });
+      c.on('exit', (code) => { watch.stop(); resolve(stuck ?? (code === 0 ? null : `ffmpeg failed (code ${code}): ${e.trim()}`)); });
     });
-    if (err) throw new RenderFailed(err);
+    if (err) throw new RenderFailed(err, err.startsWith('ffmpeg was ended as stuck') ? 'render_stuck' : undefined);
     return readFileSync(dst);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }

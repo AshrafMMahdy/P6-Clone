@@ -1,2 +1,16 @@
 export function progress(n: number): void;
+export function tick(): void;
+export function alive(): void;
 export function startHeartbeat(): void;
+export function step(name: string, o?: { total?: number; cap?: number; mem?: boolean; expect?: number }): void;
+export function opaque<T>(label: string, expectMs: number, fn: () => T, o?: { mem?: boolean }): T;
+export function opaqueAsync<T>(label: string, expectMs: number, fn: () => Promise<T>, o?: { mem?: boolean }): Promise<T>;
+export const GEOMETRY_S_PER_MB: number, NAVISWORKS_S_PER_MB: number, REVIT_S_PER_MB: number, MSPROJECT_S_PER_MB: number, BOUND_MULTIPLE: number, BENCH_REFERENCE_MS: number;
+export const RATES: { geometry: number; navisworks: number; revit: number; msproject: number };
+export type RateKind = 'geometry' | 'navisworks' | 'revit' | 'msproject';
+export function benchmarkMs(): number;
+export function machineFactor(): number;
+export function forgetRates(kind: RateKind): void;
+export function noteRate(kind: RateKind, ms: number, bytes: number): void;
+export function rateEnv(): Record<string, string>;
+export function expectedMs(bytes: number, kind: RateKind): number;

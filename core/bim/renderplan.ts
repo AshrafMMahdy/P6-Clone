@@ -45,6 +45,8 @@ export interface Plan {
   /** the full model (not boxes) at standard, or high when asked, size */
   fullMinutes: number; draftMinutes: number;
   where: string; note?: string;
+  /** what is actually drawn: the model's full geometry or each element as its bounding box, at this size (quality names the size tier; a box drawing at standard size is still boxes) */
+  drawn: { geometry: 'full' | 'boxes'; width: number; height: number };
 }
 
 const about = (min: number) => (min < 1 ? 'under a minute' : `about ${Math.round(min)} minute${Math.round(min) === 1 ? '' : 's'}`);
@@ -68,7 +70,8 @@ export function planRender(i: PlanInput): Plan {
   const limitText = `${Number(limit.toPrecision(2))} minutes`;
   let note = quality === 'draft'
     ? `${i.asked === 'auto' ? `Draft quality was chosen because the full model would take ${about(fullMinutes)} to render ${where} (quality auto draws a draft past ${limitText}; owner decision 2026-10-27)` : 'Draft quality, as asked'}: ${width}x${height}, each element drawn as a simple box, so it renders in ${about(draftMinutes)}. Tell the user it is a quick preview by choice, not how their model really looks, so they do not take it for the model's quality; quality: "standard" gives the full detail (${about(fullMinutes)} ${i.fellBack ? 'with the processor' : 'here'}).`
-    : mins > limit ? `${boxes ? 'Boxes, as asked' : 'Full detail, as asked'}: expect ${about(mins)} ${where}${boxes ? '' : `; quality: "draft" gives a quick preview in ${about(draftMinutes)}`}. Tell the user it will take a while, and why.` : undefined;
+    : boxes ? `Boxes, as asked: each element is drawn as its bounding box at ${width}x${height}, not the model's full geometry (quality ${quality} is the picture size); expect ${about(mins)} ${where}.${mins > limit ? ' Tell the user it will take a while, and why.' : ''} Tell the user this is boxes, not the model's own shapes.`
+    : mins > limit ? `Full detail, as asked: expect ${about(mins)} ${where}; quality: "draft" gives a quick preview in ${about(draftMinutes)}. Tell the user it will take a while, and why.` : undefined;
   if (i.fellBack) note = `The graphics card could not finish this render (${i.fellBack.reason}), so the processor drew it, which takes longer: ${about(mins)} instead of the ${about(i.fellBack.firstMinutes)} first estimated. Tell the user why it took longer.${note ? ` ${note}` : ''}`;
-  return { quality, boxes, width, height, minutes: mins, fullMinutes, draftMinutes, where, ...(note ? { note } : {}) };
+  return { quality, boxes, width, height, minutes: mins, fullMinutes, draftMinutes, where, drawn: { geometry: boxes ? 'boxes' : 'full', width, height }, ...(note ? { note } : {}) };
 }

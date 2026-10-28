@@ -12,12 +12,12 @@
  * A disk or memory failure ends the run at once: it is not a property of the file, so the lesser modes (typed elements,
  * the spatial scaffold) are not tried, and nothing is written that would be taken for the file's conversion.
  */
-import { closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { progress, startHeartbeat } from './heartbeat.mjs';
+import { expectedMs, opaque, progress, startHeartbeat, step } from './heartbeat.mjs';
 
-startHeartbeat(); // the parent's liveness watch (no time limit): processor time and the IFC bytes written so far
+startHeartbeat(); // the parent's liveness watch (no fixed time limit): the unpack (one WebAssembly call) is watched by its memory growth and a work bound, the IFC write by the bytes written
 
 const [src, outIfc, outJson] = process.argv.slice(2);
 if (!src || !outIfc || !outJson) { console.error('usage: rvtWorker.mjs <revit file> <out.ifc> <out.json>'); process.exit(2); }
@@ -27,7 +27,7 @@ const memory = rvt.initSync({ module: readFileSync(join(dir, 'rvt_bg.wasm')) })?
 
 const bytes = new Uint8Array(readFileSync(src));
 let metadata = null;
-try { metadata = rvt.fileMetadata(bytes); } catch { /* not every file carries it; the open below says why it fails */ }
+try { metadata = opaque('reading the Revit file header (rvt-rs fileMetadata)', expectedMs(bytes.length, 'revit'), () => rvt.fileMetadata(bytes)); } catch { /* not every file carries it; the open below says why it fails */ }
 const tmp = `${outIfc}.${process.pid}.tmp`;
 let answer = null, mode = null;
 const why = [];
@@ -39,10 +39,17 @@ const outOfMemory = (e) => {
     || (/unreachable|memory access out of bounds/i.test(msg) && (memory?.buffer.byteLength ?? 0) > 3.5 * 2 ** 30);
 };
 const stop = (code, kind, e) => { try { rmSync(tmp, { force: true }); } catch { /* gone */ } console.error(`${kind}: ${String(e?.message ?? e).slice(0, 300)}`); process.exit(code); };
-for (const m of ['geometry', 'typed-no-geometry', 'scaffold']) {
+// rvt-rs unpacks and scans the whole file in ONE WebAssembly call before it writes anything: nothing to tick. Its work is the file
+// (expectedMs, REVIT_S_PER_MB in heartbeat.mjs; provisional); while it works its memory grows (about 8x the file), which counts as
+// life, so a read that is slow but growing is never ended. The write that follows ticks per piece (8 MiB).
+const work = expectedMs(statSync(src).size, 'revit');
+const MODES = ['geometry', 'typed-no-geometry', 'scaffold'];
+for (const m of MODES) {
   const fd = openSync(tmp, 'w');
+  step(`unpacking the Revit file (rvt-rs, mode ${m}, attempt ${MODES.indexOf(m) + 1} of ${MODES.length})`, { mem: true, cap: work });
+  let writing = false;
   // a write error unwinds through the WebAssembly and arrives below as "geometry failed": kept, so it is told apart
-  globalThis.__rvtIfcSink = (chunk) => { try { written += writeSync(fd, chunk); progress(written); } catch (e) { sinkError ??= e; throw e; } };
+  globalThis.__rvtIfcSink = (chunk) => { try { if (!writing) { writing = true; step(`writing the IFC (rvt-rs, mode ${m}; bytes)`, { cap: work }); } written += writeSync(fd, chunk); progress(written); } catch (e) { sinkError ??= e; throw e; } };
   try { answer = rvt.rvtToIfcStream(bytes, m, true); mode = m; } catch (e) {
     if (sinkError) { closeSync(fd); stop(4, 'disk_full', sinkError); }
     if (outOfMemory(e)) { closeSync(fd); stop(5, 'out_of_memory', e); }

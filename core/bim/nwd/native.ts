@@ -4,7 +4,7 @@
 // and the fingerprints read (the geometry worker's layout, geomWorker.mjs). The models of an .nwf are read one at a
 // time; a section is inflated only when it is read, and the geometry a 64 KB stream at a time through a file on disk,
 // so memory follows a model's tree, not its file.
-import { closeSync, openSync, readSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, openSync, readSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { openContainer, section, sectionPieces, type NwContainer } from './container.ts';
 import { decodeTree, type NwGroup, type NwTree } from './tree.ts';
@@ -13,6 +13,7 @@ import { blockTable, decodeBlock } from './mesh.ts';
 import { BOX, boxCorners, piecesOf } from './geometry.ts';
 import { classOf, compressGuid, globalIdOf, psetsOf, quantitiesOf, sixDecimals, storeyOf, typeLabelOf } from './toIfc.ts';
 import { closed } from '../meshClosed.mjs';
+import { alive, forgetRates, noteRate, step } from '../heartbeat.mjs';
 import { disciplineOf } from '../stepIndex.ts';
 import { Element, ExtrasTable, Interner, newGeomStore, ownString } from '../element.ts';
 import type { IfcElement, IfcIndex, QuantityKind } from '../parse.ts';
@@ -71,16 +72,20 @@ export function readNative(parts: NativePart[], o: { dir?: string; maxBytes?: nu
   const files: NativeFile[] = [];
   let count = 0;
   const g = o.dir ? geometryOut(o.dir) : null;
+  forgetRates('navisworks'); // this job's own rate starts with its first model
   for (const [k, p] of parts.entries()) {
     o.progress?.(k, parts.length, `reading ${p.file}`);
+    step(`reading ${p.file}: unpacking and decoding the model tree`, { total: 0 });
     if (!p.at) { files.push({ file: p.file, revision: null, elements: 0, read: false, note: p.note ?? 'not found' }); continue; }
     let m: ReturnType<typeof modelIn>, shapes: ((e: number) => Shape | null) | null = null;
     const base = count;
     try {
-      const c = openContainer(p.at);
+      const c = openContainer(p.at), t0 = Date.now();
       m = modelIn(c, p.file, max);
-      if (g && m.tree) shapes = g.model(c, m.tree, m.elements, base, m.revit ? 0.3048 : 1, max);
+      if (g && m.tree) { step(`reading ${p.file}: placing the geometry pieces`); shapes = g.model(c, m.tree, m.elements, base, m.revit ? 0.3048 : 1, max); }
+      noteRate('navisworks', Date.now() - t0, statSync(p.at).size); // this job's own rate: the next model's bounds are sized from the slower of it and the benchmark's
     } catch (e) { files.push({ file: p.file, revision: null, elements: 0, read: false, note: (e as Error).message }); continue; }
+    step(`reading ${p.file}: handing on the elements`, { total: m.elements.length });
     m.elements.forEach((e, i) => { delete e.node; o.each(e, base + i, g?.boxesOf(base + i) ?? 0, shapes ? () => shapes!(base + i) : null); });
     count += m.elements.length;
     files.push({ file: p.file, revision: m.revision, elements: m.elements.length, read: true, ...(m.units ? { units: m.units } : {}) });
@@ -190,7 +195,7 @@ function geometryOut(dir: string) {
       flushPlaces();
       const rows = new Map<number, number[]>(), row = new Float64Array(PLACE);
       const read = (r: number) => { readSync(pfd, new Uint8Array(row.buffer), 0, PLACE * 8, r * PLACE * 8); return row; };
-      for (let r = r0; r < placements; r++) { const e = read(r)[0]; (rows.get(e) ?? rows.set(e, []).get(e)!).push(r); }
+      for (let r = r0; r < placements; r++) { const e = read(r)[0]; (rows.get(e) ?? rows.set(e, []).get(e)!).push(r); if ((r & 0xffff) === 0) alive(); }
       return (e) => {
         const list = rows.get(e);
         if (!list) return null;
@@ -208,10 +213,11 @@ function geometryOut(dir: string) {
     /** close the files, write the fingerprints and the summary: the number of elements with geometry */
     finish(n: number): number {
       flushPlaces(); closeSync(pfd);
+      step('measuring the elements (fingerprints)', { total: n });
       // an element with an open piece may still be closed as a whole (a steel section drawn face by face): its pieces
       // placed together are measured (one face set per element, as in its IFC)
       const open = new Map<number, number[]>();
-      for (let e = 0; e < n && (e + 1) * ACC <= acc.length; e++) if (acc[e * ACC] && acc[e * ACC + 12]) open.set(e, []);
+      for (let e = 0; e < n && (e + 1) * ACC <= acc.length; e++) { if (acc[e * ACC] && acc[e * ACC + 12]) open.set(e, []); if ((e & 0xffff) === 0) alive(); }
       if (open.size) {
         const pf = openSync(join(dir, 'places.bin'), 'r'), chunk = new Float64Array(PLACE * 4096);
         try {
@@ -219,9 +225,11 @@ function geometryOut(dir: string) {
             const got = readSync(pf, new Uint8Array(chunk.buffer), 0, chunk.byteLength, r * PLACE * 8) / (PLACE * 8);
             if (!got) break;
             for (let j = 0; j < got; j++, r++) open.get(chunk[j * PLACE])?.push(r);
+            alive();
           }
           const row = new Float64Array(PLACE);
           for (const [e, rows] of open) {
+            alive();
             const pos: number[] = [], tri: number[] = [];
             for (const r of rows) {
               readSync(pf, new Uint8Array(row.buffer), 0, PLACE * 8, r * PLACE * 8);

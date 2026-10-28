@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { heartbeatEnv, heartbeatWatcher, workerFloorMs } from './liveness.ts';
+import { heartbeatEnv, heartbeatWatcher, stuckMessage, workerFloorMs, type StuckInfo } from './liveness.ts';
 import { fileHash } from './model.ts';
 import { rvtWorkerPath } from './runtime.ts';
 
@@ -99,14 +99,14 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
     const worker = rvtWorkerPath();
     if (!worker) throw new Error('The Revit reader (rvtWorker.mjs with rvt/ beside it) is missing from this installation.');
     sweepStaleTemps(dir);
-    const out = await new Promise<{ code: number | null; signal: NodeJS.Signals | null; text: string; pid?: number; stuck?: number }>((done) => {
+    const out = await new Promise<{ code: number | null; signal: NodeJS.Signals | null; text: string; pid?: number; stuck?: StuckInfo }>((done) => {
       const child = spawn(process.execPath, [worker, path, `${base}.ifc`, `${base}.json`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
-      let text = '', stuck: number | undefined;
+      let text = '', stuck: StuckInfo | undefined;
       child.stderr.on('data', (c) => { text += c; });
-      // No time limit (owner rule 2026-10-27): the reader is alive while its heartbeats (heartbeat.mjs, any platform: its
-      // own processor time and the IFC bytes it has written) show work; its first phase, unpacking the file, writes
-      // nothing but uses the processor. Stuck = two windows in a row with neither (workerFloorMs, 2 minutes, at least).
-      const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onStuck: (ms) => { stuck = ms; child.kill(); } });
+      // No fixed time limit (owner rules 2026-10-27, 2026-10-28): rvt-rs's unpack is one WebAssembly call that cannot tick; it is alive
+      // while its memory grows (heartbeat.mjs, mem) and is ended past a work bound (the file's size x REVIT_S_PER_MB x the machine factor
+      // x 10); the IFC write that follows ticks per 8 MiB piece. Stuck = two windows without either (workerFloorMs, 2 minutes, at least).
+      const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onStuck: (i) => { stuck = i; child.kill(); } });
       child.on('error', (e) => { stop(); done({ code: -1, signal: null, text: e.message }); });
       child.on('close', (code, signal) => { stop(); done({ code, signal, text: text.trim(), pid: child.pid, stuck }); });
     });
@@ -121,7 +121,7 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
       if (out.code === 4) throw new RevitDiskFull(dir, last.replace(/^disk_full: /, ''));
       if (out.code === 5) throw new RevitTooLarge(size, revitMaxBytes(), last.replace(/^out_of_memory: /, ''));
       if (!out.stuck && (out.signal === 'SIGKILL' || out.signal === 'SIGABRT' || /heap out of memory|Allocation failed/i.test(out.text))) throw new RevitTooLarge(size, revitMaxBytes(), `the reader's process was ended by the system${out.signal ? ` (${out.signal})` : ''}, most often for lack of memory`);
-      if (out.stuck) throw new Error(`${path}: the Revit reader stopped making progress (its heartbeat showed no IFC written and no processor time for ${Math.round(out.stuck / 6000) / 10} minutes) and was ended.`);
+      if (out.stuck) throw new Error(`${path}: ${stuckMessage(out.stuck, { what: 'The Revit reader', tried: 'the reader tries up to three modes in turn (full geometry, typed elements without geometry, the spatial scaffold); it was ended in the mode named above and the later ones were not reached', next: 'export the same model from Revit as an NWC (Navisworks) or IFC file (File > Export) and open that: both open at any size with the same GlobalIds, so links carry over; or split the project into linked models' })}`);
       throw new Error(`${path}: ${last || `the Revit reader stopped (${out.signal ?? out.code})`}`);
     }
     dropOldFormats(dir, hash);

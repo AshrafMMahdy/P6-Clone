@@ -13,6 +13,7 @@ import { ifcWriter } from './toIfc.ts';
 import { absorbRun, meshWith, newRunState } from '../parse.ts';
 import { writeIndex } from '../model.ts';
 import type { NavisworksSource } from '../nwd.ts';
+import { step, tick } from '../heartbeat.mjs';
 
 export interface NwJob {
   kind: 'index' | 'ifc';
@@ -38,6 +39,7 @@ export async function runJob(job: NwJob, progress?: Progress): Promise<Naviswork
     const geometry = job.kind === 'ifc' || job.geometry !== false;
     let ids = 0, guids = 0, boxed = 0;
     const each: EachElement = (e, k, boxes, shape) => {
+      tick(); // an element handed on: the reader's progress (heartbeat.mjs)
       if (e.revitId !== null) ids++;
       if (e.guid) guids++;
       if (boxes) boxed++;
@@ -54,17 +56,21 @@ export async function runJob(job: NwJob, progress?: Progress): Promise<Naviswork
     let meshed = r.geometry?.elements ?? 0;
     if (writer) {
       progress?.(job.parts.length, job.parts.length + 1, 'writing the IFC');
+      step('writing the IFC (copying and renumbering, MB)');
       writer.finish();
     } else {
+      step('building the model index');
       const index = builder!.finish();
       if (r.geometry) {
         progress?.(job.parts.length, job.parts.length + 1, 'making the display tiles');
+        step('making the display tiles (the tiler\u2019s own steps follow)');
         await meshWith(index, { tilesOut: `${job.base}.tiles`, ...(job.tileBytes ? { tileBytes: job.tileBytes } : {}) }, async (_out, tilesDir) => {
           const st = newRunState(), run = await absorbRun(dir, index, tilesDir, {}, st);
           return run.ok ? { ok: true, ...st } : run;
         });
         meshed = index.meshedElements ?? 0;
       } else index.geometryStatus = 'skipped';
+      step('writing the model index');
       writeIndex(job.base!, index);
     }
     source.geometry.elements_with_meshes = Math.max(0, meshed - boxed);

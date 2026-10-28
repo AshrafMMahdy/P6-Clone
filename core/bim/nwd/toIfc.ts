@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, openSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
 import type { NwElement } from './elements.ts';
+import { alive } from '../heartbeat.mjs';
 
 const CH = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$';
 /** 16 bytes as an IFC GlobalId (22 characters of base 64, big-endian) */
@@ -134,6 +135,7 @@ export function ifcWriter(path: string, o: { name: string; file: string }) {
         const chunk = Buffer.alloc(1 << 22);
         let rest = '', got: number;
         while ((got = readSync(ifd, chunk, 0, chunk.length, null)) > 0) {
+          alive(); // a 4 MB piece copied and renumbered
           const lines = (rest + chunk.toString('latin1', 0, got)).split('\n');
           rest = lines.pop()!;
           writeSync(ofd, lines.map(renumber).join('\n') + '\n');

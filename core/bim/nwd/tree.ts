@@ -17,6 +17,8 @@ export type NwValue = string | number | boolean | NwAttr | null;
 export interface NwProp { attr: NwAttr | null; type: number; value: NwValue }
 export interface NwGroup { kind: 'group'; name: string | null; attr: NwAttr | null; props: NwProp[] }
 export interface NwNode { kind: 'node' | 'leaf'; name: string | null; attr: NwAttr | null; flags: number; guidIndex: number; values: unknown[]; children: NwNode[] }
+import { tick } from '../heartbeat.mjs';
+
 export interface NwTree { roots: NwNode[]; objects: number }
 
 const td = new TextDecoder();
@@ -41,7 +43,7 @@ export function decodeTree(buf: Uint8Array, o: { stream?: boolean; fragments?: b
     if (t === 0 || t === 0xffffffff) return null;
     if (t === 1) return objs.get(u32()) ?? null;
     if (t !== nid) fail(`unexpected tag ${t} (next object ${nid})`);
-    nid++;
+    nid++; tick(); // a tick per object decoded: the reader's progress while a big tree is read
     const cls = u32(), id = t;
     const o = body(cls);
     objs.set(id, o);

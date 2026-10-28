@@ -9,6 +9,7 @@
 //   the header line again
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
+import { alive, expectedMs, opaque } from '../heartbeat.mjs';
 
 export interface NwSection { name: string; version: number; offset: number; length: number }
 /** read: the bytes at a place in the file (the file in memory, or read from disk as asked: openContainer) */
@@ -22,6 +23,11 @@ export const isNavisworksBytes = (b: Uint8Array) => b.length > 52 && td.decode(b
 /** Every zlib stream in b, inflated and joined (a stream's own length is found by inflating it). maxBytes caps what
  *  the whole section may unpack to. */
 export function inflateAll(b: Uint8Array, maxBytes: number): Uint8Array {
+  // one zlib stream is one call that cannot tick: its work is the section's compressed size at the reader's measured rate
+  // (heartbeat.mjs); past 10 times that the parent ends the reader and names this step
+  return opaque(`unpacking a Navisworks section (${Math.round(b.length / 1048576 * 10) / 10} MB compressed)`, expectedMs(b.length, 'navisworks'), () => inflateStreams(b, maxBytes));
+}
+function inflateStreams(b: Uint8Array, maxBytes: number): Uint8Array {
   const out: Buffer[] = [];
   let total = 0;
   for (let i = 0; i + 2 <= b.length;) {
@@ -33,7 +39,7 @@ export function inflateAll(b: Uint8Array, maxBytes: number): Uint8Array {
       if ((e as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE') throw new Error(`a Navisworks section unpacks past ${Math.round(maxBytes / 1048576)} MB`);
       i++; continue;
     }
-    out.push(one); total += one.length;
+    out.push(one); total += one.length; alive();
     i += used;
   }
   return out.length === 1 ? out[0] : Buffer.concat(out);
@@ -107,6 +113,7 @@ export function* sectionPieces(c: NwContainer, name: string, window = 16 << 20):
       if ((e as { code?: string }).code === 'Z_BUF_ERROR' && from + w.length < end) { const grow = i === 0; from += i; w = c.read(from, Math.min(grow ? w.length * 2 : Math.max(window, w.length), end - from)); i = 0; continue; }
       i++; continue;
     }
+    alive(); // a stream of the geometry unpacked: a tick
     yield one;
     i += used;
   }

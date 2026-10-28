@@ -5,7 +5,8 @@ import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { stepIndex } from './stepIndex.ts';
 import { geomWorkerPath, webIfcEntry } from './runtime.ts';
-import { heartbeatEnv, heartbeatWatcher, workerFloorMs } from './liveness.ts';
+import { alive as hbAlive, forgetRates, noteRate, step as hbStep, tick as hbTick } from './heartbeat.mjs';
+import { heartbeatEnv, heartbeatWatcher, stuckMessage, workerFloorMs, type StuckInfo } from './liveness.ts';
 import { allocGeometry, geomStore, putGeometry, scaleGeometry } from './element.ts';
 import { readManifest, tileBytesOf, writeTilesManifest, type TileRecord } from './tiles.ts';
 
@@ -176,20 +177,32 @@ interface RunSummary { elements: number; placements: number; meshes: number; fai
 const heapMb = () => Math.max(1024, Math.min(4096, Math.floor((totalmem() / 1048576) * 0.5)));
 const childEnv = () => ({ ...process.env, ...heartbeatEnv(), P6CLONE_WEBIFC: webIfcEntry(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) });
 
-/** The words for a worker the liveness watch ended: no time limit stops a worker (owner rule 2026-10-27); this one showed no
- *  life (no progress step, no processor time in its heartbeats) for two windows in a row. */
-const stuckNote = (ms: number) => `stopped making progress (its heartbeat showed no progress and no processor time for ${Math.round(ms / 6000) / 10} minutes) and was ended`;
+/** What the agent is told when the liveness watch ended a worker: the step, how long with no progress or the bound passed, what was
+ *  tried, and the alternatives (owner rules 2026-10-27 and 2026-10-28: no fixed time limit). */
+const stuckNote = (i: StuckInfo, what: string, tried?: string) => stuckMessage(i, {
+  what, ...(tried ? { tried } : {}),
+  next: 'open the model with geometry: false (index only: linking, sets, 4D keys and every 4D export still work), export it from the authoring tool as an NWC, NWD or IFC in smaller parts, or split the model by discipline or level',
+});
 
-/** A Node script in its own process; ok when it exits 0 and done() holds. It has no time limit: it is watched (heartbeat.mjs,
- *  liveness.ts) and ended only when it shows no life. */
-function runNode(script: string, args: string[], done: () => boolean): Promise<Run> {
+/** A Node script in its own process; ok when it exits 0 and done() holds. It has no fixed time limit: it is watched (heartbeat.mjs,
+ *  liveness.ts) and ended only when it shows no progress or passes its work bound. When this process is itself a worker with a
+ *  heartbeat (the Navisworks reader runs the tiler), the child's step and ticks are passed on as its own: its parent then sees
+ *  the work going on instead of a reader that seems idle. */
+export function runNode(script: string, args: string[], done: () => boolean, what = 'A worker'): Promise<Run> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, script, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
-    let err = '', stuck = 0;
+    let err = '', stuck: StuckInfo | null = null, lastStep = '', lastDone = -1, lastSince = Infinity;
     child.stderr.on('data', (d) => { err = (err + String(d)).slice(-2000); });
-    const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onStuck: (ms) => { stuck = ms; try { child.kill(); } catch { /* gone */ } } });
+    const stop = heartbeatWatcher(child, {
+      floorMs: workerFloorMs(),
+      onBeat: (b) => {
+        if (b.step !== lastStep) { lastStep = b.step; hbStep(b.step, { cap: b.capMs, total: b.total, expect: b.expectMs }); } else if (b.done !== lastDone || b.sinceMs < lastSince) { hbTick(); hbAlive(); }
+        lastDone = b.done; lastSince = b.sinceMs;
+      },
+      onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } },
+    });
     child.on('error', (e) => { stop(); resolve({ ok: false, note: e.message }); });
-    child.on('close', (code) => { stop(); resolve(code === 0 && done() ? { ok: true } : { ok: false, note: stuck ? stuckNote(stuck) : `exited with code ${code}${err ? ` — ${err.trim().split('\n').slice(-2).join(' | ').slice(0, 300)}` : ''}` }); });
+    child.on('close', (code) => { stop(); resolve(code === 0 && done() ? { ok: true } : { ok: false, note: stuck ? stuckNote(stuck, what) : `exited with code ${code}${err ? ` — ${err.trim().split('\n').slice(-2).join(' | ').slice(0, 300)}` : ''}` }); });
   });
 }
 
@@ -217,10 +230,14 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   writeFileSync(productsBin, new Uint8Array(productIds.buffer, productIds.byteOffset, productIds.byteLength));
   if (tilesDir && !existsSync(join(dirname(script), 'geomTiles.mjs'))) return { ok: false, note: 'the display tiler (geomTiles.mjs beside geomWorker.mjs) is missing. The model is indexed; the 3D view is not available for it.' };
   const state = newRunState();
+  forgetRates('geometry'); // this job's own rate starts here (the bound of each run is sized from the slower of it and the benchmark's)
   /** One worker run: mesh, fingerprints into the index, tiles. */
   const one = async (file: string, dir: string): Promise<Run> => {
+    const t0 = Date.now();
     const r = await runGeometryWorker(file, dir, productsBin, opts, script);
-    return r.ok ? absorbRun(dir, index, tilesDir, opts, state) : r;
+    const absorbed = r.ok ? await absorbRun(dir, index, tilesDir, opts, state) : r;
+    if (absorbed.ok) noteRate('geometry', Date.now() - t0, statSync(file).size); // this job's own rate: the bound of the next run is sized from the slower of it and the benchmark's
+    return absorbed;
   };
   if (statSync(ifc).size <= target) {
     const r = await one(ifc, join(outDir, 'g0'));
@@ -233,7 +250,7 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   if (!existsSync(chunker)) return { ok: false, note: 'the model is too big for one geometry run and the chunker (geomChunk.mjs beside geomWorker.mjs) is missing' };
   const cdir = join(outDir, 'chunks');
   mkdirSync(cdir, { recursive: true });
-  const cut = await runNode(chunker, [ifc, cdir, productsBin, String(target)], () => existsSync(join(cdir, 'chunks.json')));
+  const cut = await runNode(chunker, [ifc, cdir, productsBin, String(target)], () => existsSync(join(cdir, 'chunks.json')), 'The IFC chunker');
   if (!cut.ok) return { ok: false, note: `cutting the model into chunks failed: ${cut.note}` };
   const { chunks } = JSON.parse(readFileSync(join(cdir, 'chunks.json'), 'utf8')) as { chunks: { file: string; products: number }[] };
   const failed: string[] = [];
@@ -257,6 +274,7 @@ export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string |
   const sum = JSON.parse(readFileSync(join(dir, 'geom.json'), 'utf8')) as RunSummary;
   const mb = readFileSync(join(dir, 'elems.meta')), rows = new Float64Array(mb.buffer, mb.byteOffset, mb.byteLength / 8);
   for (let k = 0; k + 13 <= rows.length; k += 13) {
+    if (k % (13 * 4096) === 0) hbAlive(); // the fingerprints go into the index 4096 at a time: a tick (the Navisworks reader runs this)
     const o = rows[k];
     if (store) putGeometry(store, o, rows.subarray(k + 4, k + 10), rows.subarray(k + 10, k + 13), rows[k + 3], rows[k + 2]);
     else { const e = index.elements[o] as IfcElement & { geom: GeomFingerprint | null; derivedVolumeM3: number | null }; if (e) { e.geom = { bbox: [...rows.subarray(k + 4, k + 10)] as GeomFingerprint['bbox'], centroid: [...rows.subarray(k + 10, k + 13)] as GeomFingerprint['centroid'], volume: rows[k + 3], triangles: rows[k + 2] }; e.derivedVolumeM3 = Number.isNaN(rows[k + 3]) ? null : rows[k + 3]; } }
@@ -265,7 +283,7 @@ export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string |
   if (tilesDir) {
     const worker = workerScript(opts), tiler = worker ? join(dirname(worker), 'geomTiles.mjs') : null;
     if (!tiler || !existsSync(tiler)) return { ok: false, note: 'the display tiler (geomTiles.mjs beside geomWorker.mjs) is missing. The model is indexed; the 3D view is not available for it.' };
-    const t = await runNode(tiler, [dir, tilesDir, String(state.tiles.length), String(opts.tileBytes ?? tileBytesOf()), String(Number(process.env.P6CLONE_INSTANCE_MIN) || 4)], () => existsSync(join(dir, 'tiles.json')));
+    const t = await runNode(tiler, [dir, tilesDir, String(state.tiles.length), String(opts.tileBytes ?? tileBytesOf()), String(Number(process.env.P6CLONE_INSTANCE_MIN) || 4)], () => existsSync(join(dir, 'tiles.json')), 'The display tiler');
     if (!t.ok) return { ok: false, note: `the display tiles could not be written: ${t.note}` };
     state.tiles.push(...(JSON.parse(readFileSync(join(dir, 'tiles.json'), 'utf8')) as TileRecord[]));
   }
@@ -278,10 +296,10 @@ function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opt
     // web-ifc's WebAssembly memory is capped at 4 GB by WebAssembly itself (a model past that keeps its index, without
     // geometry); what a run takes follows the chunk it meshes
     const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, script, ifc, outDir, '4', productsBin], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
-    let err = '', out = '', stuck = 0;
+    let err = '', out = '', stuck: StuckInfo | null = null;
     child.stderr.on('data', (d) => { err += String(d); if (err.length > 4000) err = err.slice(-4000); });
-    // no time limit: watched through its heartbeats, ended only when it shows no life (see stuckNote)
-    const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onText: (t) => { out += t; if (out.length > 4000) out = out.slice(-4000); }, onStuck: (ms) => { stuck = ms; try { child.kill(); } catch { /* gone */ } } });
+    // no fixed time limit: watched through its heartbeats, ended only when it stops ticking or passes its work bound (see stuckNote)
+    const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onText: (t) => { out += t; if (out.length > 4000) out = out.slice(-4000); }, onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } } });
     child.on('error', (e) => { stop(); resolve({ ok: false, note: `geometry worker could not start: ${e.message}` }); });
     child.on('close', (code, signal) => {
       stop();
@@ -289,7 +307,8 @@ function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opt
       // (Windows: a libuv assertion at exit, 0xC0000409)
       if (existsSync(join(outDir, 'geom.json'))) { try { JSON.parse(readFileSync(join(outDir, 'geom.json'), 'utf8')); resolve({ ok: true }); return; } catch { /* cut short: a failure */ } }
       const tail = (err.trim().split('\n').filter(Boolean).slice(-3).join(' | ') || out.trim().split('\n').slice(-1)[0] || '').slice(0, 300);
-      const why = stuck ? stuckNote(stuck) : signal ? `killed (${signal})` : code === null ? 'stopped' : /Aborted|memory|allocation/i.test(tail) ? 'ran out of memory (web-ifc 4 GB WASM ceiling)' : `exited with code ${code}`;
+      if (stuck) { resolve({ ok: false, note: `${stuckNote(stuck, 'The geometry worker', 'web-ifc meshes every run in one pass; a model past the 4 GB WebAssembly memory is cut into chunks and each is meshed on its own')} The model is indexed (elements, storeys, properties, authored quantities); derived volumes and the 3D view are not available for it.` }); return; }
+      const why = signal ? `killed (${signal})` : code === null ? 'stopped' : /Aborted|memory|allocation/i.test(tail) ? 'ran out of memory (web-ifc 4 GB WASM ceiling)' : `exited with code ${code}`;
       resolve({ ok: false, note: `geometry ${why}${tail ? ` — ${tail}` : ''}. The model is indexed (elements, storeys, properties, authored quantities); derived volumes and the 3D view are not available for it.` });
     });
   });

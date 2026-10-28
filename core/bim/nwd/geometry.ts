@@ -7,6 +7,7 @@
 // Each piece's triangles come from its geometry block (mesh.ts); a block that cannot be read is drawn as its placed box.
 import type { NwNode, NwTree } from './tree.ts';
 import type { Mesh } from './mesh.ts';
+import { tick } from '../heartbeat.mjs';
 
 export interface Frag { item: number; prim: number; xform: { cls: number; t: number[]; q?: number[]; s?: number; m?: number[] } | null; box: { bbox: number[]; t: number[]; geom: number } | null }
 
@@ -20,10 +21,11 @@ export function piecesOf(tree: NwTree, fragments: unknown[], elementNodes: NwNod
   const element = new Map(elementNodes.map((n, i) => [n, i]));
   const owner: number[] = [];
   let i = 0;
-  const walk = (n: NwNode, e: number) => { const own = element.get(n) ?? e; owner[++i] = own; for (const c of n.children) walk(c, own); };
+  const walk = (n: NwNode, e: number) => { tick(); const own = element.get(n) ?? e; owner[++i] = own; for (const c of n.children) walk(c, own); };
   for (const r of tree.roots) walk(r, -1);
   for (const raw of fragments) {
     const f = raw as Frag;
+    tick();
     if (!f?.box?.bbox) continue;
     const e = owner[f.item];
     if (e === undefined || e < 0) continue;

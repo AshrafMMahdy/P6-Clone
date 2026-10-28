@@ -15,9 +15,9 @@
  */
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import { progress, startHeartbeat } from './heartbeat.mjs';
+import { alive, progress, startHeartbeat, step } from './heartbeat.mjs';
 
-startHeartbeat(); // the parent's liveness watch (no time limit)
+startHeartbeat(); // the parent's liveness watch (no fixed time limit): a tick per placed element and per tile written
 
 const [runDir, tilesDir, firstArg, tileArg, instArg] = process.argv.slice(2);
 if (!runDir || !tilesDir) { console.error('usage: geomTiles.mjs <runDir> <tilesDir> <firstTileNo> <tileBytes> [instanceMin]'); process.exit(2); }
@@ -75,7 +75,7 @@ function trs(m) {
 
 // ── how often each mesh is placed in this run ────────────────────────────────────────────────────────────────────
 const uses = new Uint32Array(meta.length / 4);
-for (let p = 0; p < nPlaces; p++) uses[places[p * PLACE + 1]]++;
+for (let p = 0; p < nPlaces; p++) { uses[places[p * PLACE + 1]]++; if ((p & 0xfffff) === 0) alive(); }
 
 // ── the tile being built ─────────────────────────────────────────────────────────────────────────────────────────
 const out = [];
@@ -182,11 +182,12 @@ function writeTile() {
 }
 
 // ── element by element (an element's placements are consecutive: the worker wrote them so) ──────────────────────────
+step('writing the display tiles (placed meshes)', { total: nPlaces });
 for (let p = 0; p < nPlaces;) {
   progress(p);
   let q = p + 1; while (q < nPlaces && places[q * PLACE] === places[p * PLACE]) q++;
   let need = 12; for (let k = p; k < q; k++) need += meshBytes(places[k * PLACE + 1]);
-  if (tile && tile.bytes && tile.bytes + need > TILE) writeTile();
+  if (tile && tile.bytes && tile.bytes + need > TILE) { writeTile(); alive(); } // a tile written is a step of the loop
   if (!tile) newTile([places[p * PLACE + 14], places[p * PLACE + 15], places[p * PLACE + 16]]);
   addElement(p, q);
   p = q;

@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { cachedModel, loadModel, type Model } from '../core/bim/model.ts';
 import { modelFolder, viewerHtml, viewerScriptPath } from '../core/bim/render4d.ts';
 import { placeTiles } from '../core/bim/tiles.ts';
+import { inPage, whileEncoding } from '../core/bim/headless.ts';
 import { plainElement } from '../core/bim/element.ts';
 import type { Imported4d } from '../core/bim/exchange4d.ts';
 import { readImport4d } from '../core/bim/read4d.ts';
@@ -73,9 +74,13 @@ export function registerBim(getWin: () => BrowserWindow | null): void {
     const w = new BrowserWindow({ show: false, width: o.width ?? 1280, height: o.height ?? 720, webPreferences: { offscreen: false, backgroundThrottling: false } });
     try {
       await w.loadURL(`p6c4d://model/${o.hash}/render.html`);
-      for (const t0 = Date.now(); !(await w.webContents.executeJavaScript('!!(window.P6C4D_API && window.P6C4D_API.ready())')); ) { if (Date.now() - t0 > 60_000) throw new Error('The model did not load.'); await new Promise((r) => setTimeout(r, 200)); }
-      await w.webContents.executeJavaScript(`window.postMessage(${JSON.stringify({ type: 'p6c4d:timeline', timeline: o.timeline })}, '*'); window.postMessage(${JSON.stringify({ type: 'p6c4d:options', options: o.options })}, '*'); new Promise((r) => setTimeout(r, 200))`);
-      const v = await w.webContents.executeJavaScript(`window.P6C4D_API.encode(${JSON.stringify({ from: o.from, to: o.to, step: o.step, fps: o.fps, width: o.width, height: o.height })}).then((r) => ({ mime: r.mime, frames: r.frames, bytes: r.bytes }))`, true) as { mime: string; frames: number; bytes: Uint8Array };
+      // No fixed time limit (it was a 60 s wait for the model and nothing at all for the encode): the same watch as the server's
+      // render (headless.ts inPage): tiles loading and frames drawn are the ticks, a silent page is ended with the step and the
+      // alternatives, a page whose process is gone ends the render at once
+      const v = await inPage({ evaluate: (e) => w.webContents.executeJavaScript(e), onGone: (h) => { w.webContents.once('render-process-gone', (_ev, d) => h(d.reason)); } }, async (evaluate, alive) => {
+        await evaluate(`window.postMessage(${JSON.stringify({ type: 'p6c4d:timeline', timeline: o.timeline })}, '*'); window.postMessage(${JSON.stringify({ type: 'p6c4d:options', options: o.options })}, '*'); new Promise((r) => setTimeout(r, 200))`);
+        return await whileEncoding(evaluate(`window.P6C4D_API.encode(${JSON.stringify({ from: o.from, to: o.to, step: o.step, fps: o.fps, width: o.width, height: o.height })}).then((r) => ({ mime: r.mime, frames: r.frames, bytes: r.bytes }))`) as Promise<{ mime: string; frames: number; bytes: Uint8Array }>, evaluate, async () => undefined, alive);
+      }, { what: 'the 4D video' });
       const ext = v.mime.includes('mp4') ? 'mp4' : 'webm';
       const s = await dialog.showSaveDialog(getWin()!, { title: 'Save 4D video', defaultPath: `${o.name}.${ext}`, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
       if (s.canceled || !s.filePath) return { ok: true, saved: null, frames: v.frames };
