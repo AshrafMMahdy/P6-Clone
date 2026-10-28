@@ -9,7 +9,7 @@ import { createReadStream, existsSync, mkdtempSync, readFileSync, rmSync, statSy
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { watchLiveness } from './liveness.ts';
+import { treeCpuMs, watchLiveness } from './liveness.ts';
 
 /** A program from the environment, if it names an existing file. */
 const fromEnv = (name: string): string | null => { const p = process.env[name]; return p && existsSync(p) ? p : null; };
@@ -57,8 +57,8 @@ type Evaluate = (expression: string, awaitPromise?: boolean) => Promise<unknown>
  *  them through `alive`) or the browser's processes keep using the processor; it is stuck (code render_stuck) after two
  *  windows in a row with neither. A window is 4 times the slowest tile or frame measured (frameMs, the estimate, before
  *  the first one), and never under floorMs: 2 minutes, because a browser start, a garbage collection or a driver stall
- *  on one huge frame can be quiet that long without being stuck. (Where the processor cannot be read, off Linux, only
- *  tiles and frames count.) */
+ *  on one huge frame can be quiet that long without being stuck. (The processor time is read from outside: /proc on Linux; PowerShell, then wmic,
+ *  then tasklist on Windows; ps on macOS; where none works only tiles and frames count.) */
 export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate, alive: Alive) => Promise<T>, o: { width?: number; height?: number; floorMs?: number; frameMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void; what?: string; gpu?: boolean } = {}): Promise<T> {
   const profile = mkdtempSync(join(tmpdir(), 'p6c4d-chrome-'));
   const http = await serveFolder(dirname(page));
@@ -109,7 +109,7 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
     expect(unitMs) { expected = unitMs; slowest = 0; lastDone = -1; lastAt = Date.now(); },
   };
   const floorMs = o.floorMs ?? 120_000;
-  const stopWatch = watchLiveness({ floorMs, windowMs: () => 4 * Math.max(slowest, expected), progress: () => beats, pid: () => child.pid,
+  const stopWatch = watchLiveness({ floorMs, windowMs: () => 4 * Math.max(slowest, expected), progress: () => beats, cpu: () => (child.pid ? treeCpuMs(child.pid) : null),
     onStuck: (ms) => failAll(new RenderFailed(`The render stopped making progress${loaded}${o.what ? ` (${o.what})` : ''}: no tile or frame, and no processor time in the browser, for ${Math.round(ms / 60_000 * 10) / 10} minutes (two windows sized from the ${slowest ? 'measured' : 'estimated'} time of one ${loaded.includes('drawing') ? 'frame' : 'tile'}).`, 'render_stuck')) });
   try {
     const { targetId } = await send('Target.createTarget', { url: 'about:blank' });

@@ -25,6 +25,7 @@ export function copyIfc(root, dest) {
   mkdirSync(join(out, 'web-ifc'), { recursive: true });
   for (const f of ['package.json', 'web-ifc-api-node.js', 'web-ifc-node.wasm', 'LICENSE.md']) cpSync(join(web, f), join(out, 'web-ifc', f));
   cpSync(join(root, 'core/bim/geomWorker.mjs'), join(out, 'geomWorker.mjs'));
+  cpSync(join(root, 'core/bim/heartbeat.mjs'), join(out, 'heartbeat.mjs')); // the workers' heartbeat, for the parent's liveness watch
   cpSync(join(root, 'core/bim/meshClosed.mjs'), join(out, 'meshClosed.mjs')); // the closed-mesh rule geomWorker.mjs imports
   // Navisworks files: the reader, bundled into one module (its own process; it starts the tiler beside it)
   buildSync({ entryPoints: [join(root, 'core/bim/nwdWorker.ts')], outfile: join(out, 'nwdWorker.mjs'), bundle: true, format: 'esm', platform: 'node', target: 'node22', logLevel: 'warning', banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" } });

@@ -15,6 +15,9 @@
 import { closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { progress, startHeartbeat } from './heartbeat.mjs';
+
+startHeartbeat(); // the parent's liveness watch (no time limit): processor time and the IFC bytes written so far
 
 const [src, outIfc, outJson] = process.argv.slice(2);
 if (!src || !outIfc || !outJson) { console.error('usage: rvtWorker.mjs <revit file> <out.ifc> <out.json>'); process.exit(2); }
@@ -28,7 +31,7 @@ try { metadata = rvt.fileMetadata(bytes); } catch { /* not every file carries it
 const tmp = `${outIfc}.${process.pid}.tmp`;
 let answer = null, mode = null;
 const why = [];
-let sinkError = null;
+let sinkError = null, written = 0;
 /** Did the reader run out of working memory? Its WebAssembly memory cannot pass 4 GB, and a failed allocation ends in a trap. */
 const outOfMemory = (e) => {
   const msg = String(e?.message ?? e);
@@ -39,7 +42,7 @@ const stop = (code, kind, e) => { try { rmSync(tmp, { force: true }); } catch { 
 for (const m of ['geometry', 'typed-no-geometry', 'scaffold']) {
   const fd = openSync(tmp, 'w');
   // a write error unwinds through the WebAssembly and arrives below as "geometry failed": kept, so it is told apart
-  globalThis.__rvtIfcSink = (chunk) => { try { writeSync(fd, chunk); } catch (e) { sinkError ??= e; throw e; } };
+  globalThis.__rvtIfcSink = (chunk) => { try { written += writeSync(fd, chunk); progress(written); } catch (e) { sinkError ??= e; throw e; } };
   try { answer = rvt.rvtToIfcStream(bytes, m, true); mode = m; } catch (e) {
     if (sinkError) { closeSync(fd); stop(4, 'disk_full', sinkError); }
     if (outOfMemory(e)) { closeSync(fd); stop(5, 'out_of_memory', e); }

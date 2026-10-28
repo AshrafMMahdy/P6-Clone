@@ -13,6 +13,9 @@
  */
 import { closeSync, fstatSync, openSync, readFileSync, readSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
+import { progress, startHeartbeat } from './heartbeat.mjs';
+
+startHeartbeat(); // the parent's liveness watch (no time limit)
 
 const [ifcPath, outDir, productsFile, targetArg] = process.argv.slice(2);
 if (!ifcPath || !outDir || !productsFile) { console.error('usage: geomChunk.mjs <ifc> <outDir> <productIdsFile> <targetBytes>'); process.exit(2); }
@@ -163,11 +166,12 @@ const write = (ids, nProducts) => {
 let ids = [], size = 0, inChunk = 0;
 const begin = () => { if (++chunkNo > 65535) { console.error('more than 65,535 chunks: raise the chunk size'); process.exit(3); } ids = []; inChunk = 0; size = project ? closure(project, ids) : 0; };
 begin();
+let doneProducts = 0;
 for (const p of products) {
   if (inChunk && size >= target) { write(ids, inChunk); begin(); }
   size += closure(p, ids);
   for (const r of voids.get(p) ?? []) size += closure(r, ids);
-  inChunk++;
+  inChunk++; progress(++doneProducts);
 }
 if (inChunk) write(ids, inChunk);
 closeSync(src);

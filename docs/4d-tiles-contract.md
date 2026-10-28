@@ -177,6 +177,16 @@ processor (auto may now draw a draft) and the note says it took longer. Every ot
 `disk_full`, `render_stuck`) is `render_failed` with the cause and the next step: a smaller quality first. A card that
 failed is remembered for the process (driver-level failures for good; running out of memory for models that size).
 
+The worker processes (the geometry worker, the chunker, the tiler, the Revit reader) have no time limit either, on any
+platform. Each sends a heartbeat on stdout from a thread of its own every 5 s (`core/bim/heartbeat.mjs`: its own
+`process.cpuUsage` and a progress counter: elements meshed, products chunked, IFC bytes written), which the parent reads
+(`heartbeatWatcher` in `core/bim/liveness.ts`; `P6CLONE_HEARTBEAT_MS`). A worker is ended only after two windows in a row
+with no progress step and no processor time reported (a window is 4 times the slowest gap between steps seen, never under
+2 minutes; `P6CLONE_WORKER_FLOOR_MS` shortens that for tests), and the answer says so. For Chromium, which cannot send
+heartbeats, the processor time of its process tree is read from outside: `/proc` on Linux; PowerShell, then wmic, then
+tasklist on Windows; `ps` on macOS. (The Navisworks reader's own 60-minute `P6CLONE_NWD_MINUTES` limit is not yet on this
+watch.)
+
 **The platform's change for the pickup window**: `clientRender4d.ts` waits 90 s for `ready()`. A big model's tiles can
 take longer. Take `WHIQ4D_EXPORT.started` (or the `whiq4d:started` message) as the page alive, and wait while
 `status().tiles.loaded` grows (reset the 90 s on each change), failing with `status().error.message` when

@@ -19,6 +19,9 @@
 import { readFileSync, writeFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { closed } from './meshClosed.mjs';
+import { progress, startHeartbeat } from './heartbeat.mjs';
+
+startHeartbeat(); // the parent's liveness watch (no time limit): processor time and the elements meshed so far
 
 const [ifcPath, outDir, memGb, productsBin] = process.argv.slice(2);
 if (!ifcPath || !outDir || !productsBin) { console.error('usage: geomWorker.mjs <ifc> <outDir> <memoryLimitGB> <products.bin>'); process.exit(2); }
@@ -115,7 +118,7 @@ try {
       }
       if (elemN * ELEM >= elemBuf.length) flushElems();
       elemBuf.set([ordinal, vTotal, iTotal / 3, open ? NaN : Math.abs(volume), minx, miny, minz, maxx, maxy, maxz, sx / vTotal, sy / vTotal, sz / vTotal], elemN * ELEM);
-      elemN++; elements++;
+      elemN++; elements++; progress(elements);
     } catch { failures++; }
   });
 } finally {

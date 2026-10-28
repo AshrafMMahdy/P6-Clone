@@ -15,6 +15,9 @@
  */
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
+import { progress, startHeartbeat } from './heartbeat.mjs';
+
+startHeartbeat(); // the parent's liveness watch (no time limit)
 
 const [runDir, tilesDir, firstArg, tileArg, instArg] = process.argv.slice(2);
 if (!runDir || !tilesDir) { console.error('usage: geomTiles.mjs <runDir> <tilesDir> <firstTileNo> <tileBytes> [instanceMin]'); process.exit(2); }
@@ -180,6 +183,7 @@ function writeTile() {
 
 // ── element by element (an element's placements are consecutive: the worker wrote them so) ──────────────────────────
 for (let p = 0; p < nPlaces;) {
+  progress(p);
   let q = p + 1; while (q < nPlaces && places[q * PLACE] === places[p * PLACE]) q++;
   let need = 12; for (let k = p; k < q; k++) need += meshBytes(places[k * PLACE + 1]);
   if (tile && tile.bytes && tile.bytes + need > TILE) writeTile();

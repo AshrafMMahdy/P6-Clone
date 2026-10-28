@@ -4,13 +4,15 @@
 // so none of this needs a browser, a graphics card or a Revit sample.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { AUTO_DRAFT_MINUTES, planRender, renderMinutes, RENDER_SOFTWARE_TRIANGLES_PER_S } from '../core/bim/renderplan.ts';
 import { inChromium, isGpuFailure, probeRenderer, RenderFailed, resetRendererMemory } from '../core/bim/headless.ts';
-import { watchLiveness } from '../core/bim/liveness.ts';
+import { heartbeatEnv, heartbeatWatcher, parsePsCpu, parseWindowsCpu, sumTree, treeCpuMs, watchLiveness } from '../core/bim/liveness.ts';
+import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import { REVIT_MEMORY_PER_BYTE, revitMaxBytes, revitNeed, RevitDiskFull, RevitTooLarge, rvtToIfc, sweepStaleTemps } from '../core/bim/rvt.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -114,7 +116,7 @@ test('only the graphics card’s failures are GPU failures', () => {
 test('watchLiveness: progress keeps a job alive; silence for two windows is stuck; processor time counts as life', async () => {
   const stuck: number[] = [];
   let n = 0;
-  const alive = watchLiveness({ floorMs: 100, progress: () => n, pid: () => undefined, onStuck: (ms) => stuck.push(ms) });
+  const alive = watchLiveness({ floorMs: 100, progress: () => n, onStuck: (ms) => stuck.push(ms) });
   for (let i = 0; i < 8; i++) { n++; await new Promise((r) => setTimeout(r, 60)); } // a beat in every window
   assert.deepEqual(stuck, []);
   await new Promise((r) => setTimeout(r, 450));
@@ -300,9 +302,14 @@ test('render_4d with no Chromium: the client render is estimated as a graphics c
 // ---- the Revit reader --------------------------------------------------------------------------------------------
 
 // a stand-in rvtWorker.mjs: what it does comes from FAKE_RVT
+const HB_URL = pathToFileURL(join(ROOT, 'core', 'bim', 'heartbeat.mjs')).href;
 const FAKE_WORKER = `
 import { copyFileSync, renameSync, writeFileSync } from 'node:fs';
+import { progress, startHeartbeat } from ${JSON.stringify(HB_URL)};
 const [src, outIfc, outJson] = process.argv.slice(2), mode = process.env.FAKE_RVT || 'ok';
+startHeartbeat();
+if (mode === 'silent') { await new Promise((r) => setTimeout(r, 120000)); process.exit(1); } // does nothing (its heartbeat goes on: no progress, no processor time)
+else if (mode === 'slow') { let n = 0; await new Promise((r) => { const t = setInterval(() => { progress(++n); if (n >= 20) { clearInterval(t); r(); } }, 150); }); } // steady, slow progress
 const tmp = outIfc + '.' + process.pid + '.tmp';
 if (mode !== 'ok') writeFileSync(tmp, 'half an IFC');
 if (mode === 'disk') { console.error('disk_full: ENOSPC: no space left on device, write'); process.exit(4); }
@@ -394,7 +401,7 @@ test('a conversion that succeeds removes the old -rvt1 one; a file already conve
     // the skill says the same, in the same order
     const skill = readFileSync(join(ROOT, 'docs', 'platform', '4d-scheduling-skill.md'), 'utf8');
     assert.match(skill, /model_too_large[^\n]*FIRST look in the project's bucket or folder[^\n]*NWC, NWD or IFC export of that same model[^\n]*same file name first[^\n]*Only if none is the same model, ask the user \(pass the error's explain_to_user\)/);
-  } finally { restore(); }
+  } finally { restore(); delete process.env.P6CLONE_REVIT_MAX_MB; }
 });
 
 test('half-written conversions of readers that are gone are swept; a running reader’s are not', () => {
@@ -411,6 +418,7 @@ test('half-written conversions of readers that are gone are swept; a running rea
 const stubWorker = () => {
   const dir = mkdtempSync(join(tmpdir(), 'p6-stub-worker-')); mkdirSync(join(dir, 'rvt'));
   copyFileSync(join(ROOT, 'core', 'bim', 'rvtWorker.mjs'), join(dir, 'rvtWorker.mjs'));
+  copyFileSync(join(ROOT, 'core', 'bim', 'heartbeat.mjs'), join(dir, 'heartbeat.mjs'));
   writeFileSync(join(dir, 'rvt', 'rvt_bg.wasm'), '');
   writeFileSync(join(dir, 'rvt', 'rvt.js'), `
 export function initSync() { return { memory: { buffer: { byteLength: Number(process.env.STUB_MEM || 0) } } }; }
@@ -454,4 +462,77 @@ test('rvtWorker.mjs: a write error or an out-of-memory trap ends the run at once
   // a file whose geometry cannot be read still falls to the typed elements: that is the file, not the resources
   const lesser = run('geometry-only');
   assert.deepEqual([lesser.code, lesser.json, lesser.mode], [0, true, 'typed-no-geometry']);
+});
+
+// ---- no time limit on the workers, on any platform: their heartbeats (heartbeat.mjs, liveness.ts) ----------------
+
+const STANDIN = (body: string) => { const dir = mkdtempSync(join(tmpdir(), 'p6-standin-')), p = join(dir, 'worker.mjs'); writeFileSync(p, `import { progress, startHeartbeat } from ${JSON.stringify(HB_URL)};\nstartHeartbeat();\n${body}`); return p; };
+const SHORT = { P6CLONE_HEARTBEAT_MS: '100', P6CLONE_WORKER_FLOOR_MS: '400' };
+const watched = (script: string) => new Promise<{ code: number | null; stuck: number; beats: string }>((done) => {
+  const child = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...heartbeatEnv() } });
+  let stuck = 0, text = '';
+  const stop = heartbeatWatcher(child, { floorMs: Number(process.env.P6CLONE_WORKER_FLOOR_MS), onText: (t) => { text += t; }, onStuck: (ms) => { stuck = ms; child.kill(); } });
+  child.on('close', (code) => { stop(); done({ code, stuck, beats: text }); });
+});
+
+test('a worker that progresses slowly but steadily is never ended, however long it takes; a silent one is, with the cause (heartbeats, any platform)', async () => {
+  const restore = env(SHORT);
+  try {
+    // 3 s of steady progress, one step every 200 ms: seven times the 400 ms floor, and no processor time to speak of
+    const t0 = Date.now();
+    const slow = await watched(STANDIN("let n = 0; await new Promise((r) => { const t = setInterval(() => { progress(++n); if (n >= 15) { clearInterval(t); r(); } }, 200); }); console.log('done');"));
+    assert.deepEqual([slow.code, slow.stuck], [0, 0]);
+    assert.ok(Date.now() - t0 >= 2800);
+    assert.equal(slow.beats.trim(), 'done', 'its own output comes through, its heartbeats do not');
+    // idle: heartbeats go on, nothing else changes: two windows, then ended
+    const t1 = Date.now();
+    const silent = await watched(STANDIN("await new Promise((r) => setTimeout(r, 60000));"));
+    assert.ok(silent.stuck >= 800, String(silent.stuck));
+    assert.notEqual(silent.code, 0);
+    assert.ok(Date.now() - t1 < 8000);
+    // one long synchronous call (nothing for the main thread to report): the processor time its heartbeat reports is the life
+    const busy = await watched(STANDIN("const t = Date.now(); while (Date.now() - t < 2500) { /* WebAssembly, say */ } console.log('done');"));
+    assert.deepEqual([busy.code, busy.stuck], [0, 0]);
+  } finally { restore(); }
+});
+
+test('the Revit reader and the geometry worker are watched the same way: slow and steady lives, silent is ended with a cause (no time limit)', { timeout: 120_000 }, async () => {
+  const f = fakeRevit(), restore = env({ ...SHORT, P6CLONE_RVT_WORKER: f.worker, P6CLONE_MODEL_CACHE: f.cache, FAKE_IFC: join(FX, 'construction-scheduling-task.ifc') });
+  try {
+    process.env.FAKE_RVT = 'slow'; // 3 s of steady progress, windows of 400 ms
+    assert.match((await rvtToIfc(f.rvt)).ifc, /-rvt2\.ifc$/);
+    rmSync(join(f.cache), { recursive: true, force: true }); mkdirSync(f.cache);
+    process.env.FAKE_RVT = 'silent';
+    await assert.rejects(rvtToIfc(f.rvt), /the Revit reader stopped making progress \(its heartbeat showed no IFC written and no processor time for [\d.]+ minutes\) and was ended/);
+    assert.deepEqual(readdirSync(f.cache), []);
+    // the geometry worker, through open_model: a stand-in named like the real one (the environment only)
+    const geom = (body: string) => { const w = STANDIN(body), d = join(w, '..'); for (const n of ['geomTiles.mjs', 'geomChunk.mjs', 'heartbeat.mjs']) copyFileSync(join(ROOT, 'core', 'bim', n), join(d, n)); return w; }; // beside the tiler and chunker, as the real one is
+    const cache = mkdtempSync(join(tmpdir(), 'p6-geomcache-'));
+    const opened = async (body: string) => {
+      const r2 = env({ WHIQ_IFC_GEOM_WORKER: geom(body), P6CLONE_MODEL_CACHE: mkdtempSync(join(cache, 'c-')) });
+      const copy = join(mkdtempSync(join(tmpdir(), 'p6-geomifc-')), 'm.ifc'); writeFileSync(copy, Buffer.concat([readFileSync(join(FX, 'Duplex_A_20110907.ifc')), Buffer.from(`\n/* ${Math.random()} */\n`)])); // its own content hash: no cached model
+      try { const o = await call('open_model', { path: copy }); assert.equal(o.err, false, JSON.stringify(o.d).slice(0, 300)); await call('close', { handle: o.d.handle, owner_key: o.d.owner_key, discard: true }); return o.d; } finally { r2(); }
+    };
+    const silent = await opened("await new Promise((r) => setTimeout(r, 60000));");
+    assert.equal(silent.geometry, 'unavailable');
+    assert.match(silent.geometry_note, /^geometry stopped making progress \(its heartbeat showed no progress and no processor time for [\d.]+ minutes\) and was ended/);
+    // slow and steady for 2.5 s, then fails by itself: it was not ended for being slow
+    const slow = await opened("let n = 0; await new Promise((r) => { const t = setInterval(() => { progress(++n); if (n >= 12) { clearInterval(t); r(); } }, 200); }); console.error('stand-in finished'); process.exit(1);");
+    assert.equal(slow.geometry, 'unavailable');
+    assert.match(slow.geometry_note, /^geometry exited with code 1 \u2014 stand-in finished/);
+  } finally { restore(); delete process.env.FAKE_RVT; }
+});
+
+test('the processor time of a process tree is read from outside on Linux, Windows (PowerShell, wmic) and macOS: the tables parse and sum', async () => {
+  const tree = sumTree([[1, 0, 100], [2, 1, 50], [3, 2, 25], [4, 9, 1000]], 1);
+  assert.equal(tree, 175);
+  const ps = 'ProcessId,ParentProcessId,KernelModeTime,UserModeTime\r\n"10","1","20000000","10000000"\r\n"11","10","0","5000000"\r\n';
+  assert.deepEqual(parseWindowsCpu(ps), [[10, 1, 3000], [11, 10, 500]]);
+  const wmic = 'Node,KernelModeTime,ParentProcessId,ProcessId,UserModeTime\r\nPC,20000000,1,10,10000000\r\n';
+  assert.deepEqual(parseWindowsCpu(wmic.replace('Node,', '').replace('PC,', '')), [[10, 1, 3000]]);
+  assert.deepEqual(parsePsCpu(' 10 1 0:03.50\n 11 10 1-02:00:01\n'), [[10, 1, 3500], [11, 10, (86400 + 7200 + 1) * 1000]]);
+  if (process.platform === 'linux' || process.platform === 'darwin') {
+    const ms = await treeCpuMs(process.pid);
+    assert.ok(ms != null && ms > 0, String(ms));
+  }
 });

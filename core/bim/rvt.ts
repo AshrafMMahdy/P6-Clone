@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { treeCpuMs, watchLiveness } from './liveness.ts';
+import { heartbeatEnv, heartbeatWatcher, workerFloorMs } from './liveness.ts';
 import { fileHash } from './model.ts';
 import { rvtWorkerPath } from './runtime.ts';
 
@@ -100,15 +100,13 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
     if (!worker) throw new Error('The Revit reader (rvtWorker.mjs with rvt/ beside it) is missing from this installation.');
     sweepStaleTemps(dir);
     const out = await new Promise<{ code: number | null; signal: NodeJS.Signals | null; text: string; pid?: number; stuck?: number }>((done) => {
-      const child = spawn(process.execPath, [worker, path, `${base}.ifc`, `${base}.json`], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, env: { ...process.env, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
+      const child = spawn(process.execPath, [worker, path, `${base}.ifc`, `${base}.json`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
       let text = '', stuck: number | undefined;
       child.stderr.on('data', (c) => { text += c; });
-      // No time limit (owner rule 2026-10-27): the reader is alive while the IFC it writes grows or its process uses the
-      // processor (its first phase, unpacking the file, writes nothing but works). Stuck = two windows of 2 minutes
-      // (the least a quiet start or a garbage collection can take) with neither. Where the processor cannot be read
-      // (off Linux) there is no watch: it is left to finish or to fail by itself.
-      const tmpSize = () => { try { return statSync(`${base}.ifc.${child.pid}.tmp`).size; } catch { return 0; } };
-      const stop = treeCpuMs(process.pid) === null ? () => {} : watchLiveness({ floorMs: 120_000, progress: tmpSize, pid: () => child.pid, onStuck: (ms) => { stuck = ms; child.kill(); } });
+      // No time limit (owner rule 2026-10-27): the reader is alive while its heartbeats (heartbeat.mjs, any platform: its
+      // own processor time and the IFC bytes it has written) show work; its first phase, unpacking the file, writes
+      // nothing but uses the processor. Stuck = two windows in a row with neither (workerFloorMs, 2 minutes, at least).
+      const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onStuck: (ms) => { stuck = ms; child.kill(); } });
       child.on('error', (e) => { stop(); done({ code: -1, signal: null, text: e.message }); });
       child.on('close', (code, signal) => { stop(); done({ code, signal, text: text.trim(), pid: child.pid, stuck }); });
     });
@@ -123,7 +121,7 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
       if (out.code === 4) throw new RevitDiskFull(dir, last.replace(/^disk_full: /, ''));
       if (out.code === 5) throw new RevitTooLarge(size, revitMaxBytes(), last.replace(/^out_of_memory: /, ''));
       if (!out.stuck && (out.signal === 'SIGKILL' || out.signal === 'SIGABRT' || /heap out of memory|Allocation failed/i.test(out.text))) throw new RevitTooLarge(size, revitMaxBytes(), `the reader's process was ended by the system${out.signal ? ` (${out.signal})` : ''}, most often for lack of memory`);
-      if (out.stuck) throw new Error(`${path}: the Revit reader stopped making progress (its IFC did not grow and it used no processor time for ${Math.round(out.stuck / 60_000)} minutes) and was ended.`);
+      if (out.stuck) throw new Error(`${path}: the Revit reader stopped making progress (its heartbeat showed no IFC written and no processor time for ${Math.round(out.stuck / 6000) / 10} minutes) and was ended.`);
       throw new Error(`${path}: ${last || `the Revit reader stopped (${out.signal ?? out.code})`}`);
     }
     dropOldFormats(dir, hash);
