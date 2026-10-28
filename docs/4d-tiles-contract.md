@@ -184,8 +184,8 @@ platform. Each sends a heartbeat on stdout from a thread of its own every 5 s (`
 with no progress step and no processor time reported (a window is 4 times the slowest gap between steps seen, never under
 2 minutes; `P6CLONE_WORKER_FLOOR_MS` shortens that for tests), and the answer says so. For Chromium, which cannot send
 heartbeats, the processor time of its process tree is read from outside: `/proc` on Linux; PowerShell, then wmic, then
-tasklist on Windows; `ps` on macOS. (The Navisworks reader's own 60-minute `P6CLONE_NWD_MINUTES` limit is not yet on this
-watch.)
+tasklist on Windows; `ps` on macOS. The Navisworks reader is on the same watch (its progress lines count as progress); `P6CLONE_NWD_MINUTES`, which was a fixed
+60-minute kill, is now only an optional cap an administrator may set (unset: none).
 
 **The platform's change for the pickup window**: `clientRender4d.ts` waits 90 s for `ready()`. A big model's tiles can
 take longer. Take `WHIQ4D_EXPORT.started` (or the `whiq4d:started` message) as the page alive, and wait while

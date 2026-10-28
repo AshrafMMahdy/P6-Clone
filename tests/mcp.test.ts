@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { SAMPLES_DIR } from './helpers.ts';
+import { sampleCopy } from './helpers.ts';
 
 const SERVER = join(import.meta.dirname, '..', 'mcp', 'server.ts');
 
@@ -79,7 +79,7 @@ test('MCP: an agent builds, schedules, reviews, undoes, saves and reopens a proj
     assert.equal(re.data.summary.activities, 2);
     assert.equal((await c.tool('close', { handle: re.data.handle })).isError, false);
 
-    const real = await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    const real = await c.tool('open_file', { path: sampleCopy('cairo festival city.xer') });
     const f = await c.tool('find_activities', { handle: real.data.handle, text: 'water', limit: 3 });
     assert.ok(f.data.total_matches > 0);
     assert.equal((await c.tool('get_activity', { handle: 'nope', activity_id: 'x' })).isError, true);
@@ -90,7 +90,7 @@ test('MCP: open_file reads P6 XML', { timeout: 60_000 }, async () => {
   const c = client();
   try {
     await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
-    const xer = await c.tool('open_file', { path: join(SAMPLES_DIR, 'CfC.xer') });
+    const xer = await c.tool('open_file', { path: sampleCopy('CfC.xer') });
     const xml = join(mkdtempSync(join(tmpdir(), 'p6mcp-')), 'cfc.xml');
     assert.equal((await c.tool('save', { handle: xer.data.handle, path: xml })).isError, false);
     const o = await c.tool('open_file', { path: xml });
@@ -114,7 +114,7 @@ test('MCP: an agent exports a PDF printout and an Excel workbook, edits the work
     await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     const names = (await c.rpc('tools/list')).result.tools.map((t: { name: string }) => t.name);
     for (const n of ['export_pdf', 'export_excel', 'import_excel']) assert.ok(names.includes(n), n);
-    const { data: o } = await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    const { data: o } = await c.tool('open_file', { path: sampleCopy('cairo festival city.xer') });
     const h = o.handle;
     const pdf = await c.tool('export_pdf', { handle: h, path: join(dir, 's.pdf'), settings: { paper: 'A4', landscape: false, content: 'table', columns: ['task_code', 'task_name', 'finish'], header: { center: 'Agent printout' } } });
     assert.equal(pdf.isError, false, pdf.content?.[0]?.text);
@@ -149,7 +149,7 @@ test('MCP: an agent lists, creates and runs reports (data, PDF, Excel) and reads
     await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     const names = (await c.rpc('tools/list')).result.tools.map((t: { name: string }) => t.name);
     for (const n of ['list_reports', 'run_report', 'create_report', 'earned_value']) assert.ok(names.includes(n), n);
-    const { data: o } = await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    const { data: o } = await c.tool('open_file', { path: sampleCopy('cairo festival city.xer') });
     const h = o.handle;
     const list = (await c.tool('list_reports', { handle: h })).data.result;
     assert.ok(list.some((e: { name: string }) => e.name === 'Earned Value by WBS'));
@@ -170,14 +170,14 @@ test('MCP: compare two revisions by Activity ID, and trace an activity\'s logic'
   const c = client();
   try {
     await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
-    const a = (await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') })).data.handle;
-    const b = (await c.tool('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') })).data.handle;
+    const a = (await c.tool('open_file', { path: sampleCopy('cairo festival city.xer') })).data.handle;
+    const b = (await c.tool('open_file', { path: sampleCopy('cairo festival city.xer') })).data.handle;
     await c.tool('edit', { handle: b, operations: [{ op: 'update_activity', id: 'A2410', duration_days: 30 }, { op: 'add_activity', id: 'NEW1', name: 'Added' }, { op: 'delete_activity', id: 'A1320' }] });
     const cmp = await c.tool('compare', { handle: a, other_handle: b });
     assert.equal(cmp.isError, false, cmp.content?.[0]?.text);
     assert.deepEqual([cmp.data.summary.activity.added, cmp.data.summary.activity.deleted], [1, 1]);
     assert.ok(cmp.data.summary.activity.changed >= 1 && cmp.data.changes.some((x: { id: string; field?: string }) => x.id === 'A2410'));
-    const same = await c.tool('compare', { handle: a, path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    const same = await c.tool('compare', { handle: a, path: sampleCopy('cairo festival city.xer') });
     assert.equal(same.data.changes.length, 0);
     const tr = await c.tool('trace_logic', { handle: a, activity_id: 'A2410', predecessors: 2, successors: 1 });
     assert.ok(tr.data.levels.some((l: { level: number }) => l.level === -1) && tr.data.links.some((x: { driving: boolean }) => x.driving));
@@ -230,7 +230,7 @@ test('MCP: notifications/cancelled and cancel_job stop open_file, save and sched
   try {
     await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     const st = async () => (await c.tool('server_status')).data;
-    const o = await c.cancelled('open_file', { path: join(SAMPLES_DIR, 'cairo festival city.xer') });
+    const o = await c.cancelled('open_file', { path: sampleCopy('cairo festival city.xer') });
     assert.equal(o.data.error.code, 'cancelled');
     assert.deepEqual([(await st()).open.length, (await st()).memory.projects_mb], [0, 0]);
 
@@ -248,7 +248,7 @@ test('MCP: notifications/cancelled and cancel_job stop open_file, save and sched
     assert.equal((await c.tool('save', { handle: h, path: out })).isError, false);
 
     // a job: cancel_job stops a big open_file between its phases and frees its memory
-    const job = await c.tool('open_file', { path: join(SAMPLES_DIR, 'CCA R03 dt 24Oct11SC.xer'), async: true });
+    const job = await c.tool('open_file', { path: sampleCopy('CCA R03 dt 24Oct11SC.xer'), async: true });
     await c.tool('cancel_job', { job_id: job.data.job_id });
     const done = await c.tool('job_status', { job_id: job.data.job_id, wait_seconds: 20 });
     assert.deepEqual([done.data.status, done.data.error?.code], ['cancelled', 'cancelled']);
@@ -258,7 +258,7 @@ test('MCP: notifications/cancelled and cancel_job stop open_file, save and sched
 
 test('MCP: a cancellation reaches only the request it names, in the caller\'s own HTTP session', { timeout: 60_000 }, async () => {
   const { handleMessage } = await import('../mcp/stdio.ts');
-  const call = (id: number, sid: string) => handleMessage({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'open_file', arguments: { path: join(SAMPLES_DIR, 'cairo festival city.xer') } } }, sid) as Promise<any>;
+  const call = (id: number, sid: string) => handleMessage({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'open_file', arguments: { path: sampleCopy('cairo festival city.xer') } } }, sid) as Promise<any>;
   const cancel = (id: number, sid: string) => handleMessage({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id } }, sid);
   const a = call(1, 'alice'), b = call(1, 'bob');
   assert.equal(await cancel(1, 'alice'), undefined);

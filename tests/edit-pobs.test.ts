@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { SAMPLES_DIR } from './helpers.ts';
+import { sampleCopy } from './helpers.ts';
 
 const SERVER = join(import.meta.dirname, '..', 'mcp', 'server.ts');
 
@@ -35,7 +35,7 @@ test('MCP: update_pobs renames and clears every performing organisation; saved, 
     assert.match(edit.description, /update_pobs: \[pobs_id\] or \[name\]/);
     assert.match(edit.description, /pobs_descr/);
 
-    const o = (await c.tool('open_file', { path: join(SAMPLES_DIR, 'el ezz warehouse.xer') })).data;
+    const o = (await c.tool('open_file', { path: sampleCopy('el ezz warehouse.xer') })).data;
     const h = o.handle, k = o.owner_key;
     const list = async (h2 = h) => (await c.tool('list_dictionaries', { handle: h2, only: 'pobs' })).data.pobs as { pobs_id: string; name: string; parent: string | null; description?: string; manager?: string }[];
     const before = await list();

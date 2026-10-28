@@ -8,6 +8,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
+import { heartbeatEnv, heartbeatWatcher, workerFloorMs } from './liveness.ts';
 import { pushAll } from '../arrays.ts';
 import { openContainer, section } from './nwd/container.ts';
 import { decodeTree, type NwNode, type NwTree } from './nwd/tree.ts';
@@ -187,17 +188,23 @@ async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<Naviswo
   try {
     const heap = nwdHeapMb();
     const err = await new Promise<string | null>((done) => {
-      const child = spawn(process.execPath, [`--max-old-space-size=${heap}`, worker, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
-      let text = '', out = '';
-      child.stdout.on('data', (c) => {
+      const child = spawn(process.execPath, [`--max-old-space-size=${heap}`, worker, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
+      let text = '', out = '', stuck = 0;
+      // heartbeatWatcher hands over what the reader printed besides its heartbeats: the progress lines
+      const onText = (c: string) => {
         out += c;
         for (let i; (i = out.indexOf('\n')) >= 0; out = out.slice(i + 1)) { const m = /^progress (\d+) (\d+) (.*)$/.exec(out.slice(0, i)); if (m) void Promise.resolve(onProgress?.(Number(m[1]), Number(m[2]), m[3])).catch(() => {}); }
-      });
+      };
       child.stderr.on('data', (c) => { text = (text + c).slice(-4000); });
-      const timer = setTimeout(() => child.kill(), (Number(process.env.P6CLONE_NWD_MINUTES) || 60) * 60_000);
-      child.on('error', (e) => { clearTimeout(timer); done(e.message); });
+      // no fixed time limit (owner rule 2026-10-27): the reader is watched through its heartbeats (heartbeat.mjs, liveness.ts) and ended
+      // only after two windows in a row with no progress and no processor time (P6CLONE_NWD_MINUTES, if set, is an optional
+      // overall limit for an administrator who wants one; unset, there is none)
+      const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onText, onStuck: (ms) => { stuck = ms; child.kill(); } });
+      const cap = Number(process.env.P6CLONE_NWD_MINUTES) > 0 ? setTimeout(() => child.kill(), Number(process.env.P6CLONE_NWD_MINUTES) * 60_000) : null;
+      const end = () => { stop(); if (cap) clearTimeout(cap); };
+      child.on('error', (e) => { end(); done(e.message); });
       // what it read is written last: a reader that wrote it finished, even if the process then fell over on its way out
-      child.on('close', (code, signal) => { clearTimeout(timer); done(existsSync(`${jobFile}.out.json`) ? null : code === 0 ? 'the Navisworks reader stopped without its answer' : (text.trim().split('\n').pop() || `the Navisworks reader stopped (${signal ?? code}${signal || code === null ? ': out of time or memory' : ''})`)); });
+      child.on('close', (code, signal) => { end(); done(existsSync(`${jobFile}.out.json`) ? null : stuck ? `the Navisworks reader stopped making progress (its heartbeat showed no progress and no processor time for ${Math.round(stuck / 6000) / 10} minutes) and was ended` : code === 0 ? 'the Navisworks reader stopped without its answer' : (text.trim().split('\n').pop() || `the Navisworks reader stopped (${signal ?? code}${signal || code === null ? ': out of time or memory' : ''})`)); });
     });
     if (err) throw new Error(err);
     return JSON.parse(readFileSync(`${jobFile}.out.json`, 'utf8')) as NavisworksSource;

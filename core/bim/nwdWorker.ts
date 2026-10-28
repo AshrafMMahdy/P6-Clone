@@ -4,12 +4,15 @@
 // Usage: node nwdWorker.ts <job.json>
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { runJob, type NwJob } from './nwd/job.ts';
+import { progress, startHeartbeat } from './heartbeat.mjs';
+
+startHeartbeat(); // the parent's liveness watch (no time limit): processor time and the progress below
 
 const file = process.argv[2];
 if (!file) { console.error('usage: nwdWorker <job.json>'); process.exit(2); }
 try {
   const job = JSON.parse(readFileSync(file, 'utf8')) as NwJob;
-  const source = await runJob(job, (d, t, note) => { process.stdout.write(`progress ${d} ${t} ${note.replace(/\n/g, ' ')}\n`); });
+  const source = await runJob(job, (d, t, note) => { progress(d); process.stdout.write(`progress ${d} ${t} ${note.replace(/\n/g, ' ')}\n`); });
   const peak = Math.round(process.resourceUsage().maxRSS / 1024);
   writeFileSync(`${file}.out.tmp`, JSON.stringify({ ...source, peak_memory_mb: peak }));
   renameSync(`${file}.out.tmp`, `${file}.out.json`);

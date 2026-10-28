@@ -13,6 +13,9 @@ import { inChromium, isGpuFailure, probeRenderer, RenderFailed, resetRendererMem
 import { heartbeatEnv, heartbeatWatcher, parsePsCpu, parseWindowsCpu, sumTree, treeCpuMs, watchLiveness } from '../core/bim/liveness.ts';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
+import { dirname } from 'node:path';
+import { SAMPLES_DIR, sampleCopy, samples } from './helpers.ts';
+import { nwdToIfc } from '../core/bim/nwd.ts';
 import { REVIT_MEMORY_PER_BYTE, revitMaxBytes, revitNeed, RevitDiskFull, RevitTooLarge, rvtToIfc, sweepStaleTemps } from '../core/bim/rvt.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -535,4 +538,40 @@ test('the processor time of a process tree is read from outside on Linux, Window
     const ms = await treeCpuMs(process.pid);
     assert.ok(ms != null && ms > 0, String(ms));
   }
+});
+
+test('the Navisworks reader has no fixed 60-minute limit: slow and steady lives, silent is ended with a cause (P6CLONE_NWD_MINUTES is only an optional cap)', { timeout: 60_000 }, async () => {
+  const cache = mkdtempSync(join(tmpdir(), 'p6-nwcache-'));
+  const nwc = join(mkdtempSync(join(tmpdir(), 'p6-nwsrc-')), 'hello.nwc'); copyFileSync(join(ROOT, 'tests', 'fixtures', 'navisworks', 'hello.nwc'), nwc);
+  const run = async (body: string, extra: Record<string, string | undefined> = {}) => {
+    const restore = env({ ...SHORT, P6CLONE_NWD_WORKER: STANDIN(body), P6CLONE_MODEL_CACHE: mkdtempSync(join(cache, 'c-')), P6CLONE_NWD_MINUTES: undefined, ...extra });
+    try { await nwdToIfc(nwc); return null; } catch (e) { return (e as Error).message; } finally { restore(); }
+  };
+  assert.match((await run("await new Promise((r) => setTimeout(r, 60000));"))!, /^the Navisworks reader stopped making progress \(its heartbeat showed no progress and no processor time for [\d.]+ minutes\) and was ended/);
+  // 2.5 s of steady progress (six times the 400 ms floor), then it ends without an answer by itself: not ended for being slow
+  assert.equal(await run("let n = 0; await new Promise((r) => { const t = setInterval(() => { progress(++n); console.log('progress ' + n + ' 12 step'); if (n >= 12) { clearInterval(t); r(); } }, 200); });"), 'the Navisworks reader stopped without its answer');
+  // the optional cap, when an administrator sets one, still ends a reader that is alive
+  if (process.platform !== 'win32') assert.match((await run("let n = 0; await new Promise((r) => { const t = setInterval(() => progress(++n), 100); setTimeout(() => { clearInterval(t); r(); }, 5000); });", { P6CLONE_NWD_MINUTES: '0.01' }))!, /stopped \(SIGTERM/);
+});
+
+test('a test that hands a sample to a server process works on a copy: the fixture folder is never written, and recovery files are never samples', async () => {
+  const before = readdirSync(SAMPLES_DIR).sort();
+  const file = sampleCopy('cairo festival city.xer');
+  assert.notEqual(dirname(file), SAMPLES_DIR);
+  const p = spawn(process.execPath, [join(ROOT, 'mcp', 'server.ts')], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: mkdtempSync(join(tmpdir(), 'p6-v044-srv-')) } });
+  let out = '', err = '';
+  p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; });
+  const send = (id: number, method: string, params: unknown) => p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+  const answer = async (id: number) => { for (let i = 0; i < 600; i++) { const l = out.split('\n').find((x) => x.startsWith(`{"jsonrpc":"2.0","id":${id},`)); if (l) return JSON.parse(l).result.structuredContent; await new Promise((r) => setTimeout(r, 100)); } throw new Error('no answer'); };
+  const exited = new Promise((r) => p.on('exit', r));
+  send(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
+  await answer(1).catch(() => null);
+  send(2, 'tools/call', { name: 'open_file', arguments: { path: file } });
+  const o = await answer(2);
+  send(3, 'tools/call', { name: 'edit', arguments: { handle: o.handle, operations: [{ op: 'add_activity', id: 'ZZ1', name: 'x', duration_days: 1 }] } });
+  await answer(3);
+  p.stdin.end(); await exited;
+  assert.match(err, new RegExp(`saved to ${dirname(file).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}`), 'the recovery file is beside the copy');
+  assert.deepEqual(readdirSync(SAMPLES_DIR).sort(), before, 'nothing was written into the shared fixture folder');
+  assert.ok(samples().every((x) => !/\.recovered-/.test(x.name)));
 });
