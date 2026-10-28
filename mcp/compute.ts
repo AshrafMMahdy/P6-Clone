@@ -14,7 +14,7 @@ import { cpus } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyPatch, isEmptyPatch, patchFrom, type DbPatch } from '../core/journalPatch.ts';
-import { ToolError, adjustReserved, change, config, effectiveBudget, getSession, regrow, reserveMemory, sessions, setRoot, setRoots, usedMemory, workerBudget, type Session } from './runtime.ts';
+import { ToolError, adjustReserved, change, config, countMemory, effectiveBudget, getSession, regrow, reserveMemory, sessions, setRoot, setRoots, usedMemory, workerBudget, type Session } from './runtime.ts';
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -42,30 +42,46 @@ let active = 0;
 const waiting: (() => void)[] = [];
 const IDLE_MS = 60_000;
 
+// The workers' own runtime (a Node isolate: measured 37 MB each) is counted once per live worker in the memory budget, not again in every call:
+// a job reserves what it adds to a worker that is there already. Idle workers give theirs back when memory is wanted (trim).
+const live = new Set<Worker>();
+/** What one worker's runtime takes (measured 37 MB, rounded up). */
+export const WORKER_RUNTIME_BYTES = 40 * 1048576;
+countMemory(() => live.size * WORKER_RUNTIME_BYTES, () => { for (const i of idle.splice(0)) { clearTimeout(i.timer); stop(i.w); } });
+function stop(w: Worker): void { live.delete(w); void w.terminate(); }
 function spawnWorker(): Worker {
+  // room for a new runtime is made (idle workers and idle projects go first) or the call is refused, in words
+  reserveMemory(WORKER_RUNTIME_BYTES, 'A new worker thread (its own runtime)', 'Close projects you no longer need, or retry when the running calls have finished.')();
   const w = new Worker(entry(), { workerData: { p6Compute: true }, resourceLimits: { maxOldGenerationSizeMb: Math.max(1024, Math.floor(effectiveBudget() / 1048576)) } });
   w.unref();
+  live.add(w);
+  w.once('exit', () => live.delete(w));
   return w;
 }
 async function acquire(): Promise<Worker> {
   while (active >= maxWorkers()) await new Promise<void>((r) => waiting.push(r));
-  active++;
   const i = idle.pop();
-  if (i) { clearTimeout(i.timer); return i.w; }
-  return spawnWorker();
+  if (i) { clearTimeout(i.timer); active++; return i.w; }
+  const w = spawnWorker();
+  active++;
+  return w;
 }
 function release(w: Worker, keep: boolean): void {
   active--;
-  if (keep) { const timer = setTimeout(() => { const k = idle.findIndex((x) => x.w === w); if (k >= 0) idle.splice(k, 1); void w.terminate(); }, IDLE_MS); timer.unref(); idle.push({ w, timer }); }
-  else void w.terminate();
+  if (keep) { const timer = setTimeout(() => { const k = idle.findIndex((x) => x.w === w); if (k >= 0) idle.splice(k, 1); stop(w); }, IDLE_MS); timer.unref(); idle.push({ w, timer }); }
+  else stop(w);
   waiting.shift()?.();
 }
 let jobSeq = 0;
-/** What a worker takes at its peak on a project of `bytes` (the session's estimate): its own runtime (measured 37 MB, rounded up), and the copy
- *  with the engines' working memory on top, measured on a 12 MB XER (a 43 MB session): schedule 1.9 x, levelling 2.0, check 2.0, Monte Carlo
- *  2.8, crash 1.0, PDF 1.0, rounded up to 3 x. */
-export const WORKER_RUNTIME_BYTES = 48 * 1048576, WORKER_PEAK_PER_SESSION_BYTE = 3;
-export const workerPeak = (sessionBytes: number) => WORKER_RUNTIME_BYTES + WORKER_PEAK_PER_SESSION_BYTE * Math.max(sessionBytes, 8 * 1048576);
+/** What a call adds in a worker that is there already, on a project of `bytes` (the session's estimate): the copy and the engines' working memory
+ *  on top, measured on a 12 MB XER (a 43 MB session; peak over the runtime): schedule 1.9 x, levelling 2.0, check 2.0, crash 1.0, evaluate 1.2,
+ *  PDF 1.0, DCMA 0.4 - so 2 x. Monte Carlo (2.8 x) and the other tools workset.ts knows reserve their own working set on top, as they always
+ *  did (server.ts withWorkingSet). The worker's runtime is counted per worker (WORKER_RUNTIME_BYTES), not here. */
+export const WORKER_PEAK_PER_SESSION_BYTE = 2;
+export const workerPeak = (sessionBytes: number) => WORKER_PEAK_PER_SESSION_BYTE * Math.max(sessionBytes, 8 * 1048576);
+/** offload() answer when the worker could not be afforded and nothing else is running: the caller runs the tool here, as before workers existed
+ *  (the tool's own working-set check still refuses what cannot fit). */
+export const RUN_HERE = Symbol('run here');
 const snapshotOf = (s: Session): Snapshot => ({ handle: s.handle, ownerKey: s.ownerKey, db: s.db, path: s.path, format: s.format, hpd: s.hpd, ...(s.encoding ? { encoding: s.encoding } : {}), ...(s.savedTo ? { savedTo: s.savedTo } : {}), dirty: s.dirty, bytes: s.bytes });
 /** The other open projects a call reads by handle (windows_analysis: updates[].handle). */
 const readsHandles = (name: string, a: Record<string, any>): string[] => (name === 'windows_analysis' && Array.isArray(a.updates) ? a.updates.filter((u: any) => u?.handle).map((u: any) => String(u.handle)) : []);
@@ -121,10 +137,18 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
   let worker: Worker | null = null, held = 0; // held: what the worker reserved inside the call, counted here against the budget while it runs
   let healthy = false; // the worker answered (a result or the tool's own refusal): it can serve the next call
   try {
-    // the worker's expected PEAK is reserved before it starts, so the workers running together never add up past the budget
-    releases.push(reserveMemory(workerPeak(s.bytes), `The worker that runs ${name} (a copy of the project and its working memory)`, 'Close projects you no longer need, or retry when the running calls have finished.', s.handle));
-    for (const o of others) releases.push(reserveMemory(Math.max(o.bytes, 8 * 1048576), `A copy of project ${o.handle} for the worker that runs ${name}`, 'Close projects you no longer need, then call again.', s.handle));
-    const w = worker = await acquire();
+    // what the worker adds is reserved before it starts (a new runtime is counted when it is made), so the workers running together never add up
+    // past the budget. Nothing else running and no room for a worker: the tool runs here, in the server, as it did before workers (RUN_HERE);
+    // while other calls run, a call that would overshoot is refused with a way forward.
+    try {
+      releases.push(reserveMemory(workerPeak(s.bytes), `The worker that runs ${name} (a copy of the project and its working memory)`, 'Close projects you no longer need, or retry when the running calls have finished.', s.handle));
+      for (const o of others) releases.push(reserveMemory(Math.max(o.bytes, 8 * 1048576), `A copy of project ${o.handle} for the worker that runs ${name}`, 'Close projects you no longer need, then call again.', s.handle));
+      worker = await acquire();
+    } catch (e) {
+      if (e instanceof ToolError && e.code === 'memory_budget' && active === 0 && !worker) return RUN_HERE;
+      throw e;
+    }
+    const w = worker;
     const id = ++jobSeq;
     const job: Job = {
       id, token, tmpLog, name, a, caller: ctx.caller, lobSide: lobSidecars.get(s.handle) ?? null,
@@ -162,6 +186,37 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
     if (name.startsWith('lob_')) regrow(s); // (as the server did: an LOB plan adds thousands of activities)
     return done.result;
   } finally { adjustReserved(-held); for (const r of releases) r(); if (worker) release(worker, healthy); }
+}
+
+// ---------------------------------------------------------------- the reasoner's status
+type ReasonerState = { loaded: boolean | null; model: string | null; runtime?: string; checking?: boolean; error?: string };
+let reasonerKnown: ReasonerState | null = null, reasonerAsked = false;
+/** server_status asks "did the schedule reasoner load?". Loading the ONNX model takes 0.3-0.8 s of synchronous work, which on the server's main
+ *  thread stalled every other call (and let a job being watched finish before the caller could look at it). It is loaded once in a throw-away
+ *  worker thread; until that has answered the status says it is checking (loaded: null), and every later call has the answer at once. */
+export function reasonerState(inProcess: () => Promise<ReasonerState>, modelPath: () => string | null): ReasonerState {
+  if (reasonerKnown) return reasonerKnown;
+  if (!reasonerAsked) {
+    reasonerAsked = true;
+    const done = (r: ReasonerState) => { reasonerKnown = r; };
+    const here = () => { void inProcess().then(done, (e) => done({ loaded: false, model: modelPath(), error: (e as Error).message })); };
+    if (process.env.P6CLONE_COMPUTE_WORKERS === '0') here();
+    else {
+      try {
+        const w = new Worker(entry(), { workerData: { p6Reasoner: true } });
+        w.unref();
+        w.once('message', (m: ReasonerState) => { done(m); void w.terminate(); });
+        w.once('error', () => { reasonerAsked = true; here(); });
+      } catch { here(); }
+    }
+  }
+  return { loaded: null, model: modelPath(), checking: true };
+}
+/** In the throw-away worker (server.ts starts it with workerData.p6Reasoner): load the model and say so. */
+export function answerReasoner(status: () => Promise<ReasonerState>): void {
+  if (isMainThread || !workerData?.p6Reasoner || !parentPort) return;
+  const port = parentPort;
+  void status().then((r) => port.postMessage(r), (e) => port.postMessage({ loaded: false, model: null, error: (e as Error).message }));
 }
 
 // ---------------------------------------------------------------- the worker thread

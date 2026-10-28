@@ -64,6 +64,12 @@ test('export writes the code page P6 would use, so Arabic (and other scripts) su
     ['Hebrew (cp1255)', 'windows-1255', ['יציקת תקרה', 'בניית קירות']],
     ['Polish (cp1250)', 'windows-1250', ['Ściany działowe', 'Łączniki stalowe']],
     ['Turkish (cp1254)', 'windows-1254', ['Döşeme betonu ışık', 'Ağaç işleri']],
+    // an accent that stands alone as a word ("à", "é") is a Latin letter, not Cyrillic, Hebrew or Greek (the owner's review of 28f0855..f8c9bfb)
+    ['French with a lone "à" (cp1252), once read as Cyrillic', 'windows-1252', ['Mise à jour', 'Prêt à poser']],
+    ['French, "Réglage à faire" (cp1252), once read as Hebrew', 'windows-1252', ['Mise à jour', 'Réglage à faire']],
+    ['Portuguese with a lone "é" (cp1252), once read as Greek', 'windows-1252', ['Obra é nova', 'Fase é final']],
+    ['French, "à" only (cp1252)', 'windows-1252', ['Mise à jour', 'Mise à niveau']],
+    ['dashes and Ø (cp1252)', 'windows-1252', ['Phase 1 – Civil', 'Ø 200 pipe']],
   ];
   for (const [what, enc, rows] of cases) test(`code page from a short file: ${what}`, () => { assert.equal(detectCodepage(encode(xerOf(rows), enc)), enc); });
   test('code page from a short file: Chinese (GBK) and Japanese (Shift_JIS) still read as such', () => {

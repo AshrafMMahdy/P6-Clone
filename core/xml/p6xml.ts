@@ -20,7 +20,29 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 /** A string of its own: a value cut from a big document would otherwise keep the whole document alive (V8 keeps a
  *  piece of 13 characters or more as a view of the string it was cut from). */
 const own = (s: string) => (s.length < 13 ? s : (s + ' ').slice(0, -1));
-export function parseXml(text: string, split?: (parents: string[], name: string) => boolean, emit?: (parents: string[], n: XNode) => void, onRoot?: (root: XNode) => void): XNode {
+/** Text held in pieces: a document larger than one string can be (about 512 MB) is read as a list of strings. slice(s, e) cuts by position in the whole. */
+export class Chunked {
+  readonly chunks: string[] = [];
+  private starts: number[] = [];
+  length = 0;
+  push(piece: string): void { if (!piece) return; this.starts.push(this.length); this.chunks.push(piece); this.length += piece.length; }
+  slice(s = 0, e = this.length): string {
+    if (e <= s) return '';
+    let lo = 0, hi = this.chunks.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (this.starts[m] <= s) lo = m; else hi = m - 1; } // the piece s is in
+    let out = '';
+    for (let k = lo; k < this.chunks.length && this.starts[k] < e; k++) out += this.chunks[k].slice(Math.max(0, s - this.starts[k]), e - this.starts[k]);
+    return out;
+  }
+}
+/** Where an unfinished construct starts at the end of what has been read so far (a tag, comment, CDATA or declaration whose end has not come yet), else -1. */
+const unfinishedAt = (buf: string, from: number): number => {
+  const i = buf.indexOf('<', from);
+  if (i < 0) return -1;
+  if (/^<(?:!\[CDATA\[|!--|\?|!DOCTYPE)/.test(buf.slice(i, i + 10))) return i; // (its end would have matched)
+  return buf.indexOf('<', i + 1) < 0 ? i : -1; // a tag has no "<" in it: this is the last one
+};
+export function parseXml(text: string | Chunked, split?: (parents: string[], name: string) => boolean, emit?: (parents: string[], n: XNode) => void, onRoot?: (root: XNode) => void): XNode {
   const root: XNode = { name: '#root', children: [], text: '' };
   onRoot?.(root);
   const stack = [root];
@@ -28,22 +50,39 @@ export function parseXml(text: string, split?: (parents: string[], name: string)
   let inSplit = 0; // stack depth of the open split element (0: none)
   const re = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[([\s\S]*?)\]\]>|<!DOCTYPE[^>]*>|<\/\s*([\w:.-]+)\s*>|<\s*([\w:.-]+)((?:\s+[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>|([^<]+)/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    const top = stack[stack.length - 1];
-    if (m[1] != null) top.text += m[1];
-    else if (m[2]) {
-      const name = m[2].replace(/^\w+:/, '');
-      if (top.name !== name) throw new Error(`unexpected </${name}> (open <${top.name}>)`);
-      top.e = re.lastIndex;
-      stack.pop(); names.pop();
-      if (inSplit && stack.length === inSplit - 1) { inSplit = 0; emit!(names, top); }
-    } else if (m[3]) {
-      const n: XNode = { name: m[3].replace(/^\w+:/, ''), children: [], text: '', s: m.index };
-      const cut = !inSplit && !!split?.(names, n.name);
-      if (!cut) top.children.push(n);
-      if (!m[5]) { stack.push(n); names.push(n.name); if (cut) inSplit = stack.length; }
-      else { n.e = re.lastIndex; if (cut) emit!(names, n); }
-    } else if (m[6] != null) { if (!split) top.text += unesc(m[6]); else if (inSplit || /\S/.test(m[6])) top.text += own(unesc(m[6])); } // (the whitespace between kept elements is not kept)
+  // a document in pieces is read piece by piece: what the last piece left unfinished (a tag cut in two, half an entity) goes in front of the next
+  const pieces = typeof text === 'string' ? [text] : text.chunks;
+  let carry = '', offset = 0; // offset: the position, in the whole document, of carry's first character
+  for (let k = 0; k < pieces.length; k++) {
+    const last = k === pieces.length - 1, buf = carry + pieces[k], base = offset;
+    let used = buf.length, prev = 0;
+    re.lastIndex = 0;
+    while ((m = re.exec(buf))) {
+      if (!last && m.index > prev) { const u = unfinishedAt(buf, prev); if (u >= 0) { used = u; break; } }
+      prev = re.lastIndex;
+      const top = stack[stack.length - 1];
+      if (m[1] != null) top.text += m[1];
+      else if (m[2]) {
+        const name = m[2].replace(/^\w+:/, '');
+        if (top.name !== name) throw new Error(`unexpected </${name}> (open <${top.name}>)`);
+        top.e = base + re.lastIndex;
+        stack.pop(); names.pop();
+        if (inSplit && stack.length === inSplit - 1) { inSplit = 0; emit!(names, top); }
+      } else if (m[3]) {
+        const n: XNode = { name: m[3].replace(/^\w+:/, ''), children: [], text: '', s: base + m.index };
+        const cut = !inSplit && !!split?.(names, n.name);
+        if (!cut) top.children.push(n);
+        if (!m[5]) { stack.push(n); names.push(n.name); if (cut) inSplit = stack.length; }
+        else { n.e = base + re.lastIndex; if (cut) emit!(names, n); }
+      } else if (m[6] != null) {
+        let t = m[6];
+        // (an entity cut in two at the end of a piece waits for its other half)
+        if (!last && re.lastIndex === buf.length) { const a = t.lastIndexOf('&'); if (a >= 0 && a > t.length - 12 && !t.includes(';', a)) { t = t.slice(0, a); used = buf.length - (m[6].length - a); prev = used; } }
+        if (!split) top.text += unesc(t); else if (inSplit || /\S/.test(t)) top.text += own(unesc(t)); // (the whitespace between kept elements is not kept)
+      }
+    }
+    if (!last && used === buf.length && prev < buf.length) { const u = unfinishedAt(buf, prev); if (u >= 0) used = u; }
+    carry = buf.slice(used); offset = base + used;
   }
   if (stack.length > 1) throw new Error(`unclosed <${stack[stack.length - 1].name}>`);
   return root;
@@ -171,11 +210,20 @@ export function p6xmlConvertedTags(): Set<string> {
   return new Set([...maps.flatMap((m) => m.map(([tag]) => tag)), 'OutOfSequenceScheduleType', 'IsDefault', 'Type', 'IsPersonal', 'DayOfWeek', 'Start', 'Finish', 'Date', 'TypeObjectId', 'ValueObjectId', 'PercentComplete']);
 }
 
-/** The leaves of n that nothing read (not in used), kept as _xml_<Tag>: read_table shows them as xml:<Tag>, so nothing
- *  the file has is dropped. Writers leave fields starting with "_" out. */
+/** An element as XML text (its text, then its children; attributes are not kept by the reader). */
+const xmlText = (n: XNode): string => `<${n.name}>${esc(n.text)}${n.children.map(xmlText).join('')}</${n.name}>`;
+/** What nothing read (not in used) is kept as _xml_<Tag>: read_table shows it as xml:<Tag>, so nothing the file has is dropped: a leaf as its
+ *  text exactly as written (not trimmed), an element with children as its XML, and a tag that repeats once per occurrence (the second
+ *  is <Tag>#2, the third <Tag>#3...). Writers leave fields starting with "_" out. */
 function keepRest(n: XNode, r: Row, used: Iterable<string>, prefix = '_xml_'): Row {
-  const u = new Set(used);
-  for (const c of n.children) if (!c.children.length && !u.has(c.name) && !(`${prefix}${c.name}` in r)) r[`${prefix}${c.name}`] = c.text.trim();
+  const u = new Set(used), seen = new Map<string, number>();
+  for (const c of n.children) {
+    if (u.has(c.name)) continue;
+    const k = (seen.get(c.name) ?? 0) + 1;
+    seen.set(c.name, k);
+    const field = `${prefix}${c.name}${k > 1 ? `#${k}` : ''}`;
+    if (!(field in r)) r[field] = c.children.length ? xmlText(c) : c.text;
+  }
   return r;
 }
 /** An element the clone has no table for, as a row of _XML_<Element> (read_table: XML:<Element>): its leaves. */

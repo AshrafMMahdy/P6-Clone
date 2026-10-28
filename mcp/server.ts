@@ -13,7 +13,8 @@ import { minOf } from '../core/arrays.ts';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { isMainThread, workerData } from 'node:worker_threads';
-import { offload, startComputeWorker } from './compute.ts';
+import { p6Refusals } from '../core/project/integrity.ts';
+import { RUN_HERE, answerReasoner, offload, reasonerState, startComputeWorker } from './compute.ts';
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { detectFormat, exportFile, importChecks, readRaw, type Format } from '../renderer/io.ts';
@@ -35,6 +36,7 @@ import { makeCtx } from '../core/project/ctx.ts';
 import { TOOLS as LOOKUPS, runTool } from '../core/query/tools.ts';
 import { listTables, projectFilter, readTable } from '../core/query/rawtable.ts';
 import { mppToMspdi, MppReaderMissing } from '../core/msp/mpp.ts';
+import { StuckError } from '../core/bim/liveness.ts';
 import { parseMspdi } from '../core/msp/mspdi.ts';
 import { activityTable, linkTable, TABLE_GUIDE } from '../core/query/table.ts';
 import { computeSchedule, COMPUTE_GUIDE } from '../core/query/compute.ts';
@@ -48,7 +50,7 @@ import { lobGuard } from '../core/lob/view.ts';
 import { loadLobModels } from '../core/lob/store.ts';
 import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
 import { baselineOf } from '../core/analysis/common.ts';
-import { reasonerStatus } from '../core/analysis/hrmRuntime.ts';
+import { reasonerModelPath, reasonerStatus } from '../core/analysis/hrmRuntime.ts';
 import { record, rollback, rollbackRunning } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { worst, type Finding } from '../core/findings.ts';
@@ -88,7 +90,7 @@ const TOOLS = [
   { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, must_finish_by: { type: 'string', description: 'Must finish by (YYYY-MM-DD): late dates and float are measured to it' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
   { name: 'compute_schedule', annotations: ro, description: `Compute a schedule from a description, with no handle and nothing kept: P6's F9 (calendars, constraints, milestones, progress, retained logic and the other schedule options) on the activities and links given. Takes: ${COMPUTE_GUIDE}.`, inputSchema: { type: 'object', properties: { start: { type: 'string' }, data_date: { type: 'string' }, must_finish_by: { type: 'string' }, hours_per_day: { type: 'number' }, calendar: { type: 'string' }, calendars: { type: 'array', items: { type: 'object' } }, activities: { type: 'array', items: { type: 'object' } }, relationships: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, break_loops: { type: 'boolean' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' }, ...common }, required: ['start', 'activities'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
-  { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs, and reasoner: whether the schedule reasoner (optimize_schedule) loaded, its model and runtime, or why not.', inputSchema: { type: 'object', properties: {} } },
+  { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs, and reasoner: whether the schedule reasoner (optimize_schedule) loaded, its model and runtime, or why not (checked in the background: the first call after the server starts may say checking: true, loaded: null).', inputSchema: { type: 'object', properties: {} } },
   { name: 'job_status', annotations: ro, description: 'Result of a job started with async: true (or one that outlived the call time). wait_seconds (max 20) waits for it to finish.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, wait_seconds: { type: 'number' } }, required: ['job_id'] } },
   { name: 'cancel_job', annotations: edit, description: 'Stop a running job (Monte Carlo stops at once; open_file, save and schedule stop between their phases, keeping or writing nothing; other work finishes its current step). MCP notifications/cancelled stops a running call the same way.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' } }, required: ['job_id'] } },
   { name: 'edit', annotations: edit, description: `Change the project with a list of operations, applied as ONE transaction: if any fails nothing changes and the error names it. Undo with undo.\n${OP_GUIDE}`, inputSchema: withHandle({ type: 'object', properties: { operations: { type: 'array', items: { type: 'object' } } }, required: ['operations'] }) },
@@ -107,7 +109,7 @@ const TOOLS = [
   ...LOOKUPS.map((t) => ({ name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
   { name: 'undo', annotations: edit, description: 'Undo your own last change on this project (edit, schedule, progress update, leveling, import). Refused only if someone else\'s later change touched the same items. any_caller: true (with owner_key) undoes the latest change whoever made it.', inputSchema: withHandle({ type: 'object', properties: { any_caller: { type: 'boolean' } } }, true) },
   { name: 'redo', annotations: edit, description: 'Re-apply your last undone change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
-  { name: 'save', annotations: writes, description: 'Write the project (needs owner_key): XER (P6 version 5.0-24.12; default the version it was read in, else 19.12), P6 XML (.xml), Microsoft Project XML (format: mspdi) or MPX (.mpx). A Microsoft Project file holds one project: when the file has several, mspdi and mpx need project. repair: true (after a lenient open P6 would still reject) writes a repaired copy P6 imports to a new path (never over the file opened): impossible values taken from the activity\'s own other fields (else P6\'s neutral value), only actual dates P6 refuses cleared (unreadable, before 1753, a finish before its start; never invented), actual dates P6 imports kept and listed in invalid_dates (after the data date, a finish without a start), rows that cannot be identified removed with what pointed at them; the answer lists every change (table, row, key, field, old, new, reason) and check says whether the copy, opened again, would still be rejected. XER and MPX: encoding defaults to the file\'s own (the encoding it was read in, BOM as read; a new project: the code page P6 would use). Paths are inside the storage root.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, project: { type: 'string', description: 'Project ID to write (default: all projects; required for mspdi and mpx when the file holds several)' }, format: { type: 'string', description: 'xer, p6xml, mspdi or mpx (default from the extension; .xml = P6 XML)' }, version: { type: 'string' }, repair: { type: 'boolean', description: 'write a repaired copy P6 imports (a new path)' }, encoding: { type: 'string', description: 'XER/MPX text encoding; encoding defaults to the file\'s own (the one it was read in, BOM as read) while the text fits it; else, and for a new project, the code page P6 would use, e.g. windows-1256 for Arabic' }, overwrite: { type: 'boolean' } } }, true) },
+  { name: 'save', annotations: writes, description: 'Write the project (needs owner_key): XER (P6 version 5.0-24.12; default the version it was read in, else 19.12), P6 XML (.xml), Microsoft Project XML (format: mspdi) or MPX (.mpx). A Microsoft Project file holds one project: when the file has several, mspdi and mpx need project. repair: true (after a lenient open P6 would still reject) writes a repaired copy P6 imports to a new path (never over the file opened): impossible values taken from the activity\'s own other fields (else P6\'s neutral value), only actual dates P6 refuses cleared (unreadable, before 1753, a finish before its start; never invented), actual dates P6 imports kept and listed in invalid_dates (after the data date, a finish without a start), rows that cannot be identified removed with what pointed at them; the answer lists every change (table, row, key, field, old, new, reason) and check says whether the copy, opened again, would still be rejected. XER and MPX: encoding defaults to the file\'s own (the encoding it was read in, BOM as read; a new project: the code page P6 would use). A changed project is not written while it holds what P6 would reject on import (an Activity ID used twice in a project, a Resource / Project ID used twice, a row that is its own ancestor, an activity linked to itself): the save is refused, naming them (allow_invalid: true writes it anyway). Paths are inside the storage root.', inputSchema: withHandle({ type: 'object', properties: { allow_invalid: { type: 'boolean', description: 'Write even when the changes made in this session left something P6 rejects on import (an Activity ID used twice, a parent cycle, an activity linked to itself); default false: the save is refused and names them' }, path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, project: { type: 'string', description: 'Project ID to write (default: all projects; required for mspdi and mpx when the file holds several)' }, format: { type: 'string', description: 'xer, p6xml, mspdi or mpx (default from the extension; .xml = P6 XML)' }, version: { type: 'string' }, repair: { type: 'boolean', description: 'write a repaired copy P6 imports (a new path)' }, encoding: { type: 'string', description: 'XER/MPX text encoding; encoding defaults to the file\'s own (the one it was read in, BOM as read) while the text fits it; else, and for a new project, the code page P6 would use, e.g. windows-1256 for Arabic' }, overwrite: { type: 'boolean' } } }, true) },
   { name: 'export_pdf', annotations: writes, description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML. ' + PRINT_GUIDE + ' Layout options: filter, group_by (wbs, none), sort_by.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', annotations: writes, description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet: sheets TASK, TASKPRED, RSRC, TASKRSRC; row 1 field names, row 2 titles, durations and lags in days, dates as Excel dates. Can be edited and brought back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' } }, required: ['path'] }) },
   { name: 'import_excel', annotations: edit, description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout: new and changed activities, relationships, resources and assignments; "Y" in delete_record_flag deletes the row. Calculated columns are ignored. One undoable change; dry_run returns the plan only.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
@@ -134,9 +136,10 @@ const projectIds = (db: Db, id: unknown) => {
 /** A .mpp read through MPXJ (core/msp/mpp.ts) as the Microsoft Project XML it turns it into; refused in words when this
  *  installation cannot (no MPXJ, no Java) or the file cannot be read. */
 async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
-  let xml: string;
+  let xml: Awaited<ReturnType<typeof mppToMspdi>>;
   try { xml = await mppToMspdi(path); }
   catch (e) {
+    if (e instanceof StuckError) return fail('file_unreadable', `Cannot read ${basename(path)}: ${e.message}`, e.stuck.alternatives, { data: { cause: 'stuck', stuck: e.stuck } });
     if (e instanceof MppReaderMissing) return fail('mpp_reader_missing', e.message, 'Save the file as Microsoft Project XML in Microsoft Project (File > Save As > XML) and open that.');
     return fail('file_unreadable', `Cannot read ${basename(path)}: ${(e as Error).message}`, 'Open it in Microsoft Project and save it as Microsoft Project XML, then open that.');
   }
@@ -237,7 +240,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   if (TOOLS.some((t) => t.name === name) && !toolsList().some((t) => t.name === name)) fail('unknown_tool', `${name} is not offered by this server (P6CLONE_TOOLSETS=${process.env.P6CLONE_TOOLSETS}).`, 'tools/list shows the tools.');
   switch (name) {
     case 'list_open': return { open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, projects: allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), unsaved_changes: s.dirty, changes: s.history.length })), moved_out: evictedList() };
-    case 'server_status': return { version: VERSION, ...status(), recovery: recoveryStatus(), reasoner: await reasonerStatus() };
+    case 'server_status': return { version: VERSION, ...status(), recovery: recoveryStatus(), reasoner: reasonerState(reasonerStatus, reasonerModelPath) };
     case 'job_status': {
       const job = getJob(a.job_id);
       const wait = Math.min(20, Math.max(0, Number(a.wait_seconds) || 0)) * 1000;
@@ -311,7 +314,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
 
   const s = getSession(a.handle);
   // the main thread only routes: a tool that can run long works on a copy of its project in a worker thread (compute.ts)
-  if (isMainThread && offloads(name, a)) return offload(name, a, s, ctx);
+  if (isMainThread && offloads(name, a)) { const r = await offload(name, a, s, ctx); if (r !== RUN_HERE) return r; }
   switch (name) {
     case 'edit': {
       // Microsoft Project has no project notebook to put one in (its project notes are one plain text on the summary
@@ -458,6 +461,11 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         repairs = change(s, ctx.caller, 'Repair to valid', (d) => { repairKeys(d); return repairToValid(d); });
       }
       if ((fmt === 'mspdi' || fmt === 'mpx') && !projIds && allIds(s.db).length > 1) fail('bad_input', `A Microsoft Project file holds one project, and this file holds ${allIds(s.db).length}: ${names()}.`, 'Pass "project" with the Project ID to write (save once per project).');
+      // a project changed in this session is not written holding what P6 rejects on import (the edit tools refuse these as they are made; this is the net under the rest)
+      if (s.dirty && a.repair !== true && a.allow_invalid !== true && (fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml')) {
+        const bad = p6Refusals(s.db, projIds);
+        if (bad.length) fail('invalid_for_p6', `Not saved: P6 would reject this on import. ${bad.slice(0, 5).join(' ')}${bad.length > 5 ? ` (and ${bad.length - 5} more)` : ''}`, 'Fix those rows (set_fields / update_activity / delete_rows), or save with allow_invalid: true to write it as it is.');
+      }
       await checkpoint(ctx);
       let bytes: string | Uint8Array | null = null, label: string;
       let xerOut: ((put: (b: Uint8Array) => void) => void) | null = null; // an XER goes to the file a chunk at a time
@@ -758,6 +766,7 @@ export function housekeeping(): void { setInterval(() => { try { sweepIdle(); sw
 const isMain = isMainThread && (() => { try { return /server\.(ts|js|cjs)$|p6clone-mcp/.test(process.argv[1] ?? ''); } catch { return false; } })();
 // a compute worker (compute.ts): the same server code, serving one tool call at a time on a copy of a project
 if (!isMainThread && (workerData as { p6Compute?: boolean } | null)?.p6Compute) startComputeWorker(run, (f) => { writeNotice = f; return writeTag; });
+answerReasoner(reasonerStatus);
 if (isMain) {
   const args = process.argv.slice(2);
   const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };

@@ -8,28 +8,31 @@ import { p6num } from '../schedule/cpm.ts';
 
 const day = (s: string) => s.replace('T', ' ').slice(0, 16);
 
-/** Baselines found in an MSPDI text, by number: task UID -> {start, finish, hours}. */
-export function scanMspBaselines(xml: string, minutesPerDay = 480): Map<number, Map<string, { start: string; finish: string; hours: number | null }>> {
-  const out = new Map<number, Map<string, { start: string; finish: string; hours: number | null }>>();
-  const tasks = /<Tasks>([\s\S]*?)<\/Tasks>/.exec(xml)?.[1] ?? '';
-  for (const t of tasks.matchAll(/<Task>([\s\S]*?)<\/Task>/g)) {
-    const uid = /<UID>\s*(\d+)\s*<\/UID>/.exec(t[1])?.[1];
-    if (!uid || uid === '0') continue;
-    for (const b of t[1].matchAll(/<Baseline>([\s\S]*?)<\/Baseline>/g)) {
-      const n = Number(/<Number>\s*(\d+)\s*<\/Number>/.exec(b[1])?.[1]);
-      const start = /<Start>([^<]+)<\/Start>/.exec(b[1])?.[1], finish = /<Finish>([^<]+)<\/Finish>/.exec(b[1])?.[1];
-      if (!Number.isFinite(n) || !start || !finish) continue;
-      const dur = /<Duration>PT(\d+)H(\d+)M/.exec(b[1]);
-      (out.get(n) ?? out.set(n, new Map()).get(n)!).set(uid, { start: day(start), finish: day(finish), hours: dur ? Number(dur[1]) + Number(dur[2]) / 60 : null });
-    }
+export type FoundBaselines = Map<number, Map<string, { start: string; finish: string; hours: number | null }>>;
+/** The baselines of one task's XML (the inside of its <Task>), added to out. */
+export function scanTaskBaselines(task: string, out: FoundBaselines): void {
+  const uid = /<UID>\s*(\d+)\s*<\/UID>/.exec(task)?.[1];
+  if (!uid || uid === '0') return;
+  for (const b of task.matchAll(/<Baseline>([\s\S]*?)<\/Baseline>/g)) {
+    const n = Number(/<Number>\s*(\d+)\s*<\/Number>/.exec(b[1])?.[1]);
+    const start = /<Start>([^<]+)<\/Start>/.exec(b[1])?.[1], finish = /<Finish>([^<]+)<\/Finish>/.exec(b[1])?.[1];
+    if (!Number.isFinite(n) || !start || !finish) continue;
+    const dur = /<Duration>PT(\d+)H(\d+)M/.exec(b[1]);
+    (out.get(n) ?? out.set(n, new Map()).get(n)!).set(uid, { start: day(start), finish: day(finish), hours: dur ? Number(dur[1]) + Number(dur[2]) / 60 : null });
   }
+}
+/** Baselines found in an MSPDI text, by number: task UID -> {start, finish, hours}. */
+export function scanMspBaselines(xml: string, minutesPerDay = 480): FoundBaselines {
+  const out: FoundBaselines = new Map();
+  const tasks = /<Tasks>([\s\S]*?)<\/Tasks>/.exec(xml)?.[1] ?? '';
+  for (const t of tasks.matchAll(/<Task>([\s\S]*?)<\/Task>/g)) scanTaskBaselines(t[1], out);
   void minutesPerDay;
   return out;
 }
 
 /** Save each baseline of the file as a baseline copy of the project and assign Baseline / Baseline1-3. */
-export function importMspBaselines(db: Db, xml: string): string[] {
-  const found = scanMspBaselines(xml);
+export function importMspBaselines(db: Db, xml: string | FoundBaselines): string[] {
+  const found = typeof xml === 'string' ? scanMspBaselines(xml) : xml; // (a document read in pieces: the reader collected them task by task)
   if (!found.size) return [];
   const proj = rows(db, 'PROJECT').find((p) => !p._baseline_of);
   if (!proj) return [];

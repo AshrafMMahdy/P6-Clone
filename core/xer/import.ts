@@ -21,6 +21,7 @@ const MATCH: Record<string, (r: Row) => string> = {
   OBS: (r) => r.obs_name, CURRTYPE: (r) => r.curr_short_name, UMEASURE: (r) => r.unit_abbrev, MEMOTYPE: (r) => r.memo_type,
   COSTTYPE: (r) => r.cost_type, RSRCCURVDATA: (r) => r.curv_name, PCATTYPE: (r) => r.proj_catg_type, RCATTYPE: (r) => r.rsrc_catg_type,
   POBS: (r) => r.pobs_name, FINDATES: (r) => r.fin_dates_name,
+  EPS: (r) => r.eps_short_name, // (an EPS ID is unique in P6: the node of the same ID is the one used, so a baseline or a merged file does not add a second "Enterprise")
 };
 /** Child dictionary rows matched within their (mapped) parent. */
 const CHILD: Record<string, { parent: string; name: (r: Row) => string }> = {

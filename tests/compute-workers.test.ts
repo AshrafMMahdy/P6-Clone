@@ -261,14 +261,15 @@ test('workers running together never add up past the budget: each reserves its e
     const call = async (n, a) => { const r = await callTool(n, a); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent }; };
     const A = (await call('open_file', { path: ${JSON.stringify(sample)} })).d, B = (await call('open_file', { path: ${JSON.stringify(sample)} })).d;
     const MB = 1048576, one = usedMemory() / 2, peak = workerPeak(one);
+    const { WORKER_RUNTIME_BYTES: RT } = await import(${JSON.stringify(new URL('../mcp/compute.ts', import.meta.url).href)});
     const mc = (h) => ({ handle: h.handle, owner_key: h.owner_key, iterations: 60, default_estimates: { min_pct: 90, max_pct: 125 }, async: true });
     const first = (await call('monte_carlo', mc(A))).d;
     await new Promise((r) => setTimeout(r, 700)); // the job has started: its worker is reserved
     const during = usedMemory();
     const second = await call('monte_carlo', { ...mc(B), async: false });
-    const out = { reservedForFirst: Math.round((during - 2 * one) / MB), peak: Math.round(peak / MB), secondRefused: second.err ? second.d.error.code : (second.d.status ?? 'ran'), hint: second.err ? !!second.d.error.next_step : null };
+    const out = { runtime: Math.round(RT / MB), reservedForFirst: Math.round((during - 2 * one) / MB), peak: Math.round(peak / MB), secondRefused: second.err ? second.d.error.code : (second.d.status ?? 'ran'), hint: second.err ? !!second.d.error.next_step : null };
     for (;;) { const j = (await call('job_status', { job_id: first.job_id, wait_seconds: 5 })).d; if (j.status !== 'running') { out.firstDone = j.status; break; } }
-    out.after = Math.round((usedMemory() - 2 * one) / MB);
+    out.after = Math.round((usedMemory() - 2 * one) / MB); // (a worker left idle keeps its runtime counted: 40 MB each, until the memory is wanted)
     const again = await call('monte_carlo', { ...mc(B), async: false, iterations: 20 });
     out.secondAfter = again.err ? again.d.error.code : 'ran';
     console.log('RESULT ' + JSON.stringify(out));
@@ -278,10 +279,30 @@ test('workers running together never add up past the budget: each reserves its e
   const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, P6CLONE_MEM_BUDGET_MB: '400' } });
   assert.equal(r.status, 0, r.stderr.slice(-500));
   const out = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('RESULT '))!.slice(7));
-  assert.ok(out.reservedForFirst >= out.peak, `the first worker's peak (${out.peak} MB) is reserved before it starts: ${JSON.stringify(out)} ${r.stderr.slice(-300)}`);
+  assert.ok(out.reservedForFirst >= out.peak + out.runtime, `the first worker's reservation (${out.peak} MB) and its runtime (${out.runtime} MB) are counted before it starts: ${JSON.stringify(out)} ${r.stderr.slice(-300)}`);
   assert.equal(out.secondRefused, 'memory_budget');
   assert.equal(out.hint, true);
   assert.equal(out.firstDone, 'done');
-  assert.ok(out.after <= 1, `the reservation is given back: ${out.after} MB`);
+  assert.ok(out.after <= 2 * out.runtime + 1, `the reservation is given back (only idle workers' runtimes stay counted): ${out.after} MB`);
   assert.equal(out.secondAfter, 'ran', 'and the refused call runs once the first has finished');
+});
+
+test('server_status does not load the reasoner model on the server\'s main thread: it answers at once (checking), and the worker that loaded it has told by the next call', { timeout: 60_000 }, async () => {
+  const { spawnSync } = await import('node:child_process');
+  const code = `
+    const { callTool, toolResult } = await import(${JSON.stringify(new URL('../mcp/server.ts', import.meta.url).href)});
+    const status = async () => { const t = Date.now(); const r = await callTool('server_status', {}); return { ms: Date.now() - t, reasoner: toolResult(r.out, r.isError).structuredContent.reasoner }; };
+    const first = await status();
+    let later = first;
+    for (let i = 0; i < 100 && later.reasoner.checking; i++) { await new Promise((r) => setTimeout(r, 100)); later = await status(); }
+    console.log('RESULT ' + JSON.stringify({ first, later }));
+    process.exit(0);`;
+  const script = join(mkdtempSync(join(tmpdir(), 'p6-status-')), 'run.mjs'); writeFileSync(script, code);
+  const r = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr.slice(-500));
+  const out = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('RESULT '))!.slice(7));
+  assert.equal(out.first.reasoner.checking, true, 'the first answer does not wait for the model');
+  assert.equal(out.first.reasoner.loaded, null);
+  assert.equal(out.later.reasoner.checking, undefined);
+  assert.equal(out.later.reasoner.loaded, true, JSON.stringify(out.later));
 });

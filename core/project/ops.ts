@@ -35,7 +35,7 @@ function wbsIndex(raw: Row[]): WbsIndex {
   const push = (m: Map<string, number[]>, k: string, i: number) => { const l = m.get(k); if (l) l.push(i); else m.set(k, [i]); };
   const pathOf = (ix: WbsIndex, i: number): string | null => {
     const out: string[] = [];
-    for (let x: Row | undefined = raw[i], n = 0; x && x.proj_node_flag !== 'Y' && n < 50; n++) { out.unshift(x.wbs_short_name); const pi = ix.byId.get(x.parent_wbs_id); if (pi == null) { if (x.parent_wbs_id) return null; break; } x = raw[pi]; }
+    for (let x: Row | undefined = raw[i], n = 0; x && x.proj_node_flag !== 'Y' && n < ix.byId.size; n++) { out.unshift(x.wbs_short_name); const pi = ix.byId.get(x.parent_wbs_id); if (pi == null) { if (x.parent_wbs_id) return null; break; } x = raw[pi]; }
     return out.join('.').toLowerCase();
   };
   const add = (ix: WbsIndex, from: number, full: boolean) => {
@@ -428,7 +428,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       return { unassigned: `${r.rsrc_short_name} -> ${t.task_code}` };
     }
   }
-  const extra = applyExtra(db, op, { hpd, fail, str, num, date, project, projectFor, activity, wbsOf, calendar, resource, curveId, dayHours, warn: (m) => warnings.push(m), periods, ole });
+  const extra = applyExtra(db, op, { hpd, fail, str, num, date, project, projectFor, activity, wbsOf, calendar, resource, curveId, dayHours, warn: (m) => warnings.push(m), periods, ole, linked: (pred, succ) => batch.added.push({ pred, succ, at: batch.at ?? -1 }) });
   if (extra !== undefined) return extra;
   return fail(`Unknown operation "${op.op}". Known: ${OP_NAMES.join(', ')}.`);
 }

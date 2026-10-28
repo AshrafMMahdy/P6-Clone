@@ -29,7 +29,7 @@ export function exportSheets(db: Db, projIds: string[], hpd = 8, calendarDays = 
   const ids = new Set(projIds);
   const proj = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p]));
   const W = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
-  const wbsCode = (id: string) => { const out: string[] = []; for (let w = W.get(id), n = 0; w && n < 50; w = W.get(w.parent_wbs_id), n++) out.unshift(w.proj_node_flag === 'Y' ? proj.get(w.proj_id)?.proj_short_name ?? w.wbs_short_name : w.wbs_short_name); return out.join('.'); };
+  const wbsCode = (id: string) => { const out: string[] = []; for (let w = W.get(id), n = 0; w && n < W.size; w = W.get(w.parent_wbs_id), n++) out.unshift(w.proj_node_flag === 'Y' ? proj.get(w.proj_id)?.proj_short_name ?? w.wbs_short_name : w.wbs_short_name); return out.join('.'); };
   const cal = new Map(rows(db, 'CALENDAR').map((c) => [c.clndr_id, c.clndr_name]));
   const tasks = rows(db, 'TASK').filter((t) => ids.has(t.proj_id));
   const byId = new Map(tasks.map((t) => [t.task_id, t]));
@@ -100,7 +100,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   const byCode = new Map(tasks.map((t) => [t.task_code, t]));
   const cal = new Map(rows(db, 'CALENDAR').map((c) => [c.clndr_id, c.clndr_name]));
   const W = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
-  const wbsPath = (id: string) => { const out: string[] = []; for (let w = W.get(id), n = 0; w && w.proj_node_flag !== 'Y' && n < 50; w = W.get(w.parent_wbs_id), n++) out.unshift(w.wbs_short_name); return out.join('.'); };
+  const wbsPath = (id: string) => { const out: string[] = []; for (let w = W.get(id), n = 0; w && w.proj_node_flag !== 'Y' && n < W.size; w = W.get(w.parent_wbs_id), n++) out.unshift(w.wbs_short_name); return out.join('.'); };
   const near = (a: number | null, b: number | null) => a == null || b == null ? a === b : Math.abs(a - b) < 0.01;
   const sameDate = (a: string, b: string | undefined) => (a || '').slice(0, 16) === (b || '').slice(0, 16) || (a.length === 10 && (b || '').startsWith(a));
 

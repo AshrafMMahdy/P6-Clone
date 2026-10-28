@@ -36,7 +36,7 @@ function mspFields(r: Row): Record<string, string | string[]> | null {
   let kids: [string, string | null][];
   if (r._msp_keep) {
     // a task's, resource's or assignment's: its children; the project's: { kids, ... }
-    try { const k = JSON.parse(r._msp_keep) as [string, string | null][] | { kids?: [string, string | null][] }; kids = Array.isArray(k) ? k : k.kids ?? []; } catch { return null; }
+    try { const k = JSON.parse(r._msp_keep) as [string, string | null][] | { kids?: [string, string | null][] }; kids = Array.isArray(k) ? k : k.kids ?? []; } catch { return { 'msp:_unreadable': r._msp_keep }; } // (kept as it is: not lost, and not silent)
   } else if (r._msp_xml) {
     // a calendar: kept whole, as its element
     const root = parseXml(r._msp_xml), el = root.children[0];

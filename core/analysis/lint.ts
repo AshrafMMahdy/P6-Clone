@@ -144,7 +144,7 @@ export function lintSchedule(db: Db, o: LintOptions = {}): LintReport {
     const W2 = (s.db.tables.PROJWBS?.rows ?? []).filter((w) => s.projIds.has(w.proj_id) && w.proj_node_flag !== 'Y');
     const kids = new Map<string, string[]>(); for (const w of W2) { const l = kids.get(w.parent_wbs_id); if (l) l.push(w.wbs_id); else kids.set(w.parent_wbs_id, [w.wbs_id]); }
     const has = new Set(s.tasks.map((t) => t.wbs_id));
-    const any = (id: string, n = 0): boolean => has.has(id) || (n < 50 && (kids.get(id) ?? []).some((k) => any(k, n + 1)));
+    const any = (id: string, n = 0): boolean => has.has(id) || (n <= kids.size && (kids.get(id) ?? []).some((k) => any(k, n + 1)));
     const f = W2.filter((w) => !any(w.wbs_id)).map((w) => ({ id: w.wbs_short_name, name: w.wbs_name }));
     out.push(check('empty_wbs', 'WBS elements with no activities', 'warning', f, W2.length, upTo(f.length, T.empty_wbs.max), maxIds, { applied: T.empty_wbs, note: 'WBS elements with no activities under them: scope missing from the schedule, or elements to delete.' }));
   }

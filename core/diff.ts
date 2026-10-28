@@ -68,7 +68,7 @@ export function compareSchedules(a: Db, b: Db, hoursPerDay = 8, calendarDays = f
       const dh = d === a ? dhA : dhB;
       const wbsRows = (d.tables.PROJWBS?.rows ?? []).filter((w) => w.proj_id === p.proj_id);
       const wbsById = new Map(wbsRows.map((w) => [w.wbs_id, w]));
-      const path = (id: string) => { const parts: string[] = []; for (let w = wbsById.get(id), n = 0; w && w.proj_node_flag !== 'Y' && n < 50; w = wbsById.get(w.parent_wbs_id), n++) parts.unshift(w.wbs_short_name); return parts.join('.'); };
+      const path = (id: string) => { const parts: string[] = []; for (let w = wbsById.get(id), n = 0; w && w.proj_node_flag !== 'Y' && n < wbsById.size; w = wbsById.get(w.parent_wbs_id), n++) parts.unshift(w.wbs_short_name); return parts.join('.'); };
       const cal = new Map((d.tables.CALENDAR?.rows ?? []).map((c) => [c.clndr_id, c.clndr_name]));
       const allTasks = new Map((d.tables.TASK?.rows ?? []).map((t) => [t.task_id, t]));
       const tasks = (d.tables.TASK?.rows ?? []).filter((t) => t.proj_id === p.proj_id);

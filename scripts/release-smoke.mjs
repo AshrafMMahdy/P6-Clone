@@ -45,7 +45,9 @@ const ANALYSIS = ['check_schedule', 'dcma_14', 'lint', 'float_paths', 'progress_
 for (const need of ['open_file', 'list_tables', 'read_table', 'new_project', 'edit', 'schedule', 'save', 'export_pdf', 'server_status', ...ANALYSIS, ...FOURD, ...LOB]) if (!names.includes(need)) failures.push(`missing tool ${need}`);
 if (JSON.stringify(tools.find((t) => t.name === 'windows_analysis')?._meta?.['whiq/files']?.read) !== '["updates[].path"]') failures.push('windows_analysis has no _meta["whiq/files"]');
 
-const status = await call('server_status', {});
+let status = await call('server_status', {});
+// (the model is loaded in a worker thread in the background: the first answer may say checking)
+for (let k = 0; k < 150 && status.reasoner?.checking; k++) { await new Promise((r) => setTimeout(r, 200)); status = await call('server_status', {}); }
 if (!status.reasoner?.loaded) failures.push(`the reasoner did not load: ${JSON.stringify(status.reasoner)}`);
 
 const np = await call('new_project', { id: 'SMOKE', name: 'Release smoke', start: '2026-03-02' });
@@ -178,7 +180,7 @@ else {
 // .mpp without Microsoft Project: MPXJ and the Java runtime for this machine in mpxj/ beside the bundle
 {
   const jre = join(folder, 'mpxj', 'jre', `${process.platform === 'win32' ? 'win' : 'linux'}-${process.arch}`, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
-  for (const f of [join(folder, 'mpxj', 'lib', 'mpxj-16.10.0.jar'), join(folder, 'mpxj', 'README.txt'), jre]) if (!existsSync(f)) failures.push(`the archive has no ${f.slice(folder.length + 1)}`);
+  for (const f of [join(folder, 'mpxj', 'lib', 'mpxj-16.10.0.jar'), join(folder, 'mpxj', 'README.txt'), join(folder, 'mpxj', 'LICENSE-LGPL-2.1.txt'), jre]) if (!existsSync(f)) failures.push(`the archive has no ${f.slice(folder.length + 1)}`);
   const mpp = resolve(process.argv[4] ?? join(import.meta.dirname, '..', 'Sample MPPs', 'Schedule 1 Gemma 1B Instruct.mpp'));
   if (!existsSync(mpp)) failures.push(`no .mpp fixture at ${mpp}`);
   else {

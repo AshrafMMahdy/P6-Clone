@@ -4,7 +4,8 @@
 // Not a node_modules folder: the White Hat IQ platform's signed manifest and patch builder skip those.
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const CENTRAL = 'https://repo1.maven.org/maven2';
@@ -58,6 +59,8 @@ export async function copyMpxj(root, dest) {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(join(out, 'lib'), { recursive: true });
   for (const [path] of MPXJ_JARS) cpSync(join(src, path.split('/').pop()), join(out, 'lib', path.split('/').pop()));
+  // the licence texts: LGPL-2.1 asks that MPXJ's be supplied with it (the jar does not carry it), and Apache-2.0 asks the same of the Apache jars
+  for (const f of ['LICENSE-LGPL-2.1.txt', 'LICENSE-Apache-2.0.txt']) cpSync(join(dirname(fileURLToPath(import.meta.url)), 'licenses', f), join(out, f));
   const targets = process.env.P6CLONE_JRE_TARGETS ? JSON.parse(process.env.P6CLONE_JRE_TARGETS) : {};
   for (const [target, jmods] of Object.entries(targets)) {
     const r = spawnSync(process.env.P6CLONE_JLINK || 'jlink', ['--module-path', jmods, '--add-modules', JRE_MODULES, '--strip-debug', '--no-header-files', '--no-man-pages', '--compress=zip-9', '--output', join(out, 'jre', target)], { encoding: 'utf8' });
@@ -65,12 +68,14 @@ export async function copyMpxj(root, dest) {
   }
   writeFileSync(join(out, 'README.txt'), [
     'The .mpp reader (core/msp/mpp.ts): MPXJ turns a Microsoft Project .mpp into Microsoft Project XML, which the clone reads.',
-    'Run as: java -cp "lib/*" org.mpxj.sample.MpxjConvert <in.mpp> <out.xml>. MPXJ and every jar here are used unmodified;',
-    'each jar carries its own licence text in META-INF. Sources: https://repo1.maven.org/maven2/<path> (MPXJ: https://github.com/joniles/mpxj).',
+    'Run as: java -cp "lib/*" org.mpxj.sample.MpxjConvert <in.mpp> <out.xml>. MPXJ and every jar here are used unmodified.',
+    'Licences: MPXJ is LGPL-2.1-or-later, and its text is LICENSE-LGPL-2.1.txt beside this file (the jar does not carry it); the Apache-2.0 jars are under',
+    'LICENSE-Apache-2.0.txt; the jars that carry their own licence text keep it in META-INF. You may replace lib/mpxj-*.jar with your own build of MPXJ.',
+    'Sources: https://repo1.maven.org/maven2/<path> (-sources.jar beside each jar; MPXJ: https://github.com/joniles/mpxj).',
     '',
     ...MPXJ_JARS.map(([path, hash, lic]) => `lib/${path.split('/').pop()}  ${lic}  sha256 ${hash}`),
     '',
-    Object.keys(targets).length ? `jre/: Java runtimes made by jlink (OpenJDK, GPL-2.0 with the Classpath Exception; licences in jre/<os>-<arch>/legal/) for ${Object.keys(targets).join(', ')}; modules ${JRE_MODULES}.` : 'No Java runtime is shipped in this build: the machine\'s own Java 11 or later runs MPXJ (P6CLONE_JAVA names it).',
+    Object.keys(targets).length ? `jre/: Java runtimes made by jlink (OpenJDK, GPL-2.0 with the Classpath Exception; licences in jre/<os>-<arch>/legal/) for ${Object.keys(targets).join(', ')}; modules ${JRE_MODULES}.` : 'No Java runtime is shipped in this build: the machine\'s own Java runs MPXJ (P6CLONE_JAVA names it; every jar here is built for Java 8, and the runtimes shipped by other builds are Java 21).',
     '',
   ].join('\n'));
   return out;

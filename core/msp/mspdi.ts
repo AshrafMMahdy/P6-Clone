@@ -4,9 +4,9 @@ import type { Db, Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { parseClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../dates.ts';
-import { parseXml, type XNode } from '../xml/p6xml.ts';
+import { parseXml, type Chunked, type XNode } from '../xml/p6xml.ts';
 import { isLegacyLayout, p6num } from '../schedule/cpm.ts';
-import { baselineNumbers, baselineXml, importMspBaselines } from './baselines.ts';
+import { baselineNumbers, baselineXml, importMspBaselines, scanTaskBaselines, type FoundBaselines } from './baselines.ts';
 import { ASG_DEPS, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
 import { defaultShifts, emptyTask, linkKey, num, projectFromDb, projectToDb, toP6Date, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
 
@@ -90,11 +90,12 @@ function exceptionDays(ex: XNode): { days: Map<number, Shift[]>; known: boolean;
 
 // ---------- parser
 
-export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
+/** Microsoft Project XML as text, or as pieces (Chunked: a document larger than one string, e.g. what MPXJ writes for a big .mpp; its first piece has no BOM). */
+export function parseMspdi(text: string | Chunked): { db: Db; findings: Finding[] } {
   const findings: Finding[] = [];
   const empty: Db = { tables: {} };
   let root: XNode;
-  const src = text.replace(/^﻿/, '');
+  const src = typeof text === 'string' ? text.replace(/^﻿/, '') : text;
   // read as it goes: each task, resource and assignment is read as soon as it closes and let go (readProject)
   const reader = projectReader(findings, src);
   try {
@@ -114,7 +115,7 @@ export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
     const db = projectToDb(m, findings, 'The Microsoft Project XML file');
     snapshotKept(db);
     // Baseline and Baseline1-10: saved baselines of the project (after the snapshot: they are not edits of the file)
-    const bl = importMspBaselines(db, src);
+    const bl = importMspBaselines(db, typeof src === 'string' ? src : reader.baselines);
     if (bl.length) findings.push({ severity: 'info', code: 'MSP_BASELINES', message: `${bl.length} baseline(s) read: ${bl.join(', ')}.`, p6: 'P6 imports Microsoft Project baselines only through its own conversion; the clone keeps each as a saved baseline.' });
     return { db, findings };
   } catch (e) {
@@ -125,7 +126,8 @@ export function parseMspdi(text: string): { db: Db; findings: Finding[] } {
 
 /** The project read element by element: the project's own fields, its custom fields and its calendars when the first
  *  task, resource or assignment arrives (Microsoft Project writes them first), then each of those as it closes. */
-function projectReader(findings: Finding[], src: string) {
+function projectReader(findings: Finding[], src: string | Chunked) {
+  const baselines: FoundBaselines = new Map(); // (a document in pieces: collected task by task as they are read)
   let doc: XNode | null = null, p: XNode | null = null, headDone = false;
   let minutesPerDay = 480;
   // every element is also kept as written, so what the model does not hold goes back into the file unchanged (keep.ts)
@@ -291,7 +293,7 @@ function projectReader(findings: Finding[], src: string) {
   const split = (parents: string[], name: string) => parents.length === 2 && parents[0] === 'Project' && ((parents[1] === 'Tasks' && name === 'Task') || (parents[1] === 'Resources' && name === 'Resource') || (parents[1] === 'Assignments' && name === 'Assignment'));
   const emit = (_parents: string[], n: XNode) => {
     if (!headDone) { p = doc?.children.find((c) => c.name === 'Project') ?? null; if (p) head(p); }
-    if (n.name === 'Task') task(n); else if (n.name === 'Resource') resource(n); else assignment(n);
+    if (n.name === 'Task') { task(n); if (typeof src !== 'string') { const x = raw(n); if (x.includes('<Baseline>')) scanTaskBaselines(x, baselines); } } else if (n.name === 'Resource') resource(n); else assignment(n);
   };
   const finish = (p: XNode): MProject => {
   if (!headDone) head(p);
@@ -315,7 +317,7 @@ function projectReader(findings: Finding[], src: string) {
     rules: p6rules ?? (extKey.size > 0 ? { ver: '', legacy: tasks.some((t) => [t.earlyStart, t.earlyFinish, t.lateStart, t.lateFinish].some((d) => /:(01|59)$/.test(d))), known: true } : { resume: val(p, 'MoveRemainingStartsForward') !== '1' && val(p, 'MoveRemainingStartsForward').toLowerCase() !== 'true' }),
   };
   };
-  return { split, emit, finish, onRoot: (r: XNode) => { doc = r; } };
+  return { split, emit, finish, baselines, onRoot: (r: XNode) => { doc = r; } };
 }
 
 // ---------- writer

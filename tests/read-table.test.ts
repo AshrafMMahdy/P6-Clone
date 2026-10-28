@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SAMPLES_DIR } from './helpers.ts';
+import { textDecoder } from '../core/encoding.ts';
 import { parseXer } from '../core/xer/parse.ts';
 import { parseP6Xml, parseXml, p6xmlConvertedTags, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
 import { parseMspdi } from '../core/msp/mspdi.ts';
@@ -27,7 +28,7 @@ test('every XER sample: every table, row and field read back as the file has it 
     const bytes = new Uint8Array(readFileSync(join(SAMPLES_DIR, f)));
     const { db } = parseXer(bytes);
     const enc = db.header?.encoding ?? 'utf-8';
-    const text = new TextDecoder(enc === 'utf-8-bom' ? 'utf-8' : enc).decode(bytes);
+    const text = textDecoder(enc === 'utf-8-bom' ? 'utf-8' : enc).decode(bytes); // (the reader's own decoder: Node 22's windows-1252 is latin-1, where 0x80 is not the euro sign)
     const file = new Map<string, { fields: string[]; rows: string[][] }>();
     let cur: { fields: string[]; rows: string[][] } | null = null;
     for (const line of text.split(/\r?\n/)) {
@@ -152,7 +153,7 @@ test('.mpp through the MCP (MPXJ): opened without Microsoft Project, every eleme
     const tasks = (toolResult((await callTool('read_table', { handle: d.handle, table: 'TASK', limit: 1 })).out, false).structuredContent as any);
     assert.ok(tasks.total > 0, f);
     await callTool('close', { handle: d.handle, owner_key: d.owner_key, discard: true });
-    const text = await mppToMspdi(f), { db } = parseMspdi(text);
+    const chunks = await mppToMspdi(f), text = chunks.slice(), { db } = parseMspdi(chunks); // (read in pieces, as the server reads it)
     const leaf = everyLeafRead(text, db);
     assert.deepEqual(leaf.missing, [], `${f}: ${leaf.missing.length} of ${leaf.leaves} values not readable`);
   }

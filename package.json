@@ -10,7 +10,7 @@
     "p6clone-mcp": "mcp/server.ts"
   },
   "scripts": {
-    "test": "node --test --test-reporter=dot \"tests/*.test.ts\"",
+    "test": "node --import ./tests/setup.ts --test --test-reporter=dot \"tests/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs && electron .",

@@ -13,6 +13,7 @@ import { STEP_FIELDS, syncFromSteps } from './steps.ts';
 import { DISTS, setEstimate, type Dist } from '../risk/montecarlo.ts';
 import { assignBaseline, deleteBaseline, restoreBaseline, saveBaseline } from '../progress/baseline.ts';
 import { applyFields, FIELD_GUIDE, FIELD_OP_NAMES } from './ops-fields.ts';
+import { cycles } from './integrity.ts';
 
 export interface OpHelpers {
   hpd: number;
@@ -33,6 +34,8 @@ export interface OpHelpers {
   warn: (message: string) => void;
   periods: (v: unknown) => Shift[];
   ole: (d: string) => number;
+  /** Relationships this call wrote or re-pointed (pred, succ task ids): checked for loops with the rest of the edit */
+  linked: (pred: string, succ: string) => void;
 }
 type Op = Record<string, unknown> & { op: string };
 
@@ -147,7 +150,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     const tid = type[S.tid], c = lc(code);
     const vals = realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid);
     const byId = new Map(vals.map((v) => [v[S.vid], v]));
-    const path = (v: Row) => { const out: string[] = []; for (let x: Row | undefined = v, n = 0; x && n < 50; x = byId.get(x[S.vparent]), n++) out.unshift(x[S.vshort]); return out.join('.').toLowerCase(); };
+    const path = (v: Row) => { const out: string[] = []; for (let x: Row | undefined = v, n = 0; x && n < byId.size; x = byId.get(x[S.vparent]), n++) out.unshift(x[S.vshort]); return out.join('.').toLowerCase(); };
     const hits = vals.filter((v) => lc(v[S.vshort]) === c || path(v) === c);
     if (hits.length > 1) fail(`Code value "${code}" is ambiguous in ${type[S.tname]}; use the full path (e.g. ${path(hits[0])}).`);
     return hits[0] ?? fail(`No value "${code}" in code type ${type[S.tname]}.`);
@@ -224,7 +227,10 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
   switch (op.op) {
     case 'delete_code_type': {
       const S = codeSubject(op.subject);
-      const t = codeType(S, str(op.name, 'name'), op.project != null ? h.project(op.project).proj_id : undefined, true);
+      const P = op.project != null ? h.project(op.project) : null;
+      const t = codeType(S, str(op.name, 'name'), P?.proj_id, true);
+      // with "project", only that project's own code type goes: a global type of the same name is used by other projects and is deleted without "project"
+      if (P && t.proj_id !== P.proj_id) fail(`${P.proj_short_name} has no code type of its own named "${op.name}"; "${op.name}" is a ${t.proj_id ? `code type of another project` : 'global code type'} that other projects use. To delete it, leave project out.`);
       const tid = t[S.tid], vals = new Set(realOf(rows(db, S.val)).filter((v) => v[S.tid] === tid).map((v) => v[S.vid]));
       const links = db.tables[S.link] ? removeWhere(rows(db, S.link), (a) => vals.has(a[S.vid]) || a[S.tid] === tid) : 0;
       removeWhere(rows(db, S.val), (v) => v[S.tid] === tid);
@@ -253,7 +259,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     case 'delete_calendar': {
       const c = h.calendar(op.name), id = c.clndr_id, name = c.clndr_name;
       if (c.default_flag === 'Y') fail(`"${name}" is the default calendar: make another one the default first ({"op":"set_fields","table":"CALENDAR","where":{"clndr_name":"..."},"fields":{"default_flag":"Y"}}, then "N" on this one).`);
-      const by = op.replace_with != null && op.replace_with !== '' ? h.calendar(op.replace_with).clndr_id : null;
+      const rep = op.replace_with != null && op.replace_with !== '' ? h.calendar(op.replace_with) : null, by = rep?.clndr_id ?? null;
       if (by === id) fail('replace_with is the calendar being deleted.');
       const uses: string[] = [];
       for (const t of Object.values(db.tables)) {
@@ -262,9 +268,16 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
           if (refTarget(f, t.name) !== 'CALENDAR' || (t.name === 'CALENDAR' && f === 'clndr_id')) continue;
           const hit = pick(t.rows, (r) => r[f] === id);
           if (!hit.length) continue;
-          if (by) for (const r of hit) r[f] = by; else uses.push(`${hit.length} ${t.name} row(s) by ${f}`);
+          if (rep) {
+            // the replacement must be one those rows may use: a project calendar only in its own project, a resource calendar only on resources
+            const kind = rep.clndr_type, mine = rep.proj_id;
+            const bad = hit.filter((r) => (kind === 'CA_Rsrc' && t.name !== 'RSRC' && !(t.name === 'CALENDAR' && f === 'base_clndr_id')) || (kind === 'CA_Project' && ((t.name === 'PROJECT' ? r.proj_id : (r.proj_id ?? '')) !== mine))).length;
+            if (bad) fail(`Calendar "${rep.clndr_name}" cannot replace "${name}" on ${bad} ${t.name} row(s) by ${f}: ${kind === 'CA_Rsrc' ? 'it is a resource calendar, which only resources use' : 'it is a calendar of another project'}. Give a global calendar, or one of the same project.`);
+            for (const r of hit) r[f] = by!;
+          } else uses.push(`${hit.length} ${t.name} row(s) by ${f}`);
         }
       }
+      if (rep && db.tables.CALENDAR) { const loop = cycles(db, 'CALENDAR'); if (loop.length) fail(`${loop[0]} (replace_with "${rep.clndr_name}" is built on "${name}").`); }
       if (uses.length) fail(`Calendar "${name}" is in use: ${uses.join('; ')}. Give replace_with.`);
       removeWhere(rows(db, 'CALENDAR'), (x) => x.clndr_id === id);
       dropIndexes(realOf(rows(db, 'CALENDAR')));

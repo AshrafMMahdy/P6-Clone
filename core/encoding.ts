@@ -33,11 +33,17 @@ function doubleEncodedShare(b: Uint8Array): number {
  *  script needs a minimum count of letters. */
 export function detectCodepage(b: Uint8Array): TextEncodingName {
   const letter = (c: number) => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
-  let high = 0, inLatinWords = 0;
+  // à é è ù (and the capitals) stand alone as words in French, Portuguese, Italian: "Mise à jour", "Obra é nova". In 1251/1253/1255 the same bytes
+  // are letters of a script whose words are runs of letters, so a lone one between spaces is Latin evidence, not Cyrillic, Greek or Hebrew evidence
+  const LONE = new Set([0xc0, 0xc9, 0xe0, 0xe8, 0xe9, 0xf9]);
+  let high = 0, inLatinWords = 0, inRuns = 0;
   for (let i = 0; i < b.length; i++) {
     if (b[i] < 0x80) continue;
     high++;
-    if ((i > 0 && letter(b[i - 1])) || (i + 1 < b.length && letter(b[i + 1]))) inLatinWords++;
+    const before = i > 0 ? b[i - 1] : 0x20, after = i + 1 < b.length ? b[i + 1] : 0x20;
+    if (letter(before) || letter(after)) inLatinWords++;
+    else if (LONE.has(b[i]) && before < 0x80 && after < 0x80) inLatinWords++; // a lone word between spaces and punctuation
+    if (before >= 0x80 || after >= 0x80) inRuns++;
   }
   if (!high || doubleEncodedShare(b) > 0.5) return 'windows-1252';
   if (inLatinWords >= high * 0.5) return latin(b, high);
@@ -55,8 +61,9 @@ export function detectCodepage(b: Uint8Array): TextEncodingName {
     } catch { /* not this one */ }
   }
   // whole words in a single-byte script: the one whose letters they spell best (its most frequent letters' share)
+  // (a script's words are runs of letters: with most of the non-ASCII bytes standing alone, there is no script to recognise, only accents)
   let best: TextEncodingName | null = null, bestScore = 0;
-  for (const s of SCRIPTS) {
+  if (inRuns >= high * 0.5) for (const s of SCRIPTS) {
     const t = new TextDecoder(s.enc).decode(b);
     const letters = (t.match(s.range) ?? []).length;
     if (letters < 2 || letters < high * 0.6) continue;

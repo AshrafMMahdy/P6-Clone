@@ -4,12 +4,14 @@
 // assignment and calendar, as the file has it. Java: P6CLONE_JAVA, else the runtime shipped in mpxj/jre/<os>-<arch>/,
 // else the machine's own. MPXJ reads .mpp; it does not write it (save as Microsoft Project XML, which Project opens).
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readSync, rmSync, statSync } from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expectedMs } from '../bim/heartbeat.mjs';
-import { externalWatch, treeCpuMs, workerFloorMs, type StuckInfo } from '../bim/liveness.ts';
+import { externalWatch, StuckError, treeCpuMs, workerFloorMs, type StuckInfo } from '../bim/liveness.ts';
+import { Chunked } from '../xml/p6xml.ts';
 
 const here = () => { try { return typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url)); } catch { return null; } };
 /** The MPXJ folder (lib/ with the jars, jre/ with the runtimes): beside a bundle, else the repository's cache. */
@@ -37,8 +39,29 @@ const classPath = (home: string) => (existsSync(join(home, 'lib')) ? join(home, 
 /** The .mpp reader is not here (no MPXJ, or no Java): refused in words, with what to do. */
 export class MppReaderMissing extends Error {}
 
-/** The Microsoft Project XML of a .mpp file (MPXJ in its own process; no time limit: watched for life). */
-export async function mppToMspdi(path: string): Promise<string> {
+/** A text file read in pieces of about `pieceBytes` (never one string: a document can be larger than the longest string, about 512 MB). A BOM is dropped. */
+export function readChunked(path: string, pieceBytes = Number(process.env.P6CLONE_XML_CHUNK_BYTES) || 32 * 1048576): Chunked {
+  const out = new Chunked(), fd = openSync(path, 'r'), dec = new StringDecoder('utf8'), buf = Buffer.alloc(Math.max(1024, pieceBytes));
+  try {
+    let first = true;
+    for (let n = readSync(fd, buf, 0, buf.length, null); n > 0; n = readSync(fd, buf, 0, buf.length, null)) {
+      let piece = dec.write(buf.subarray(0, n));
+      if (first && piece) { piece = piece.replace(/^\uFEFF/, ''); first = false; }
+      out.push(piece);
+    }
+    out.push(dec.end());
+  } finally { closeSync(fd); }
+  return out;
+}
+
+/** What the conversion was doing when it was ended, in words: the step, the silence or the bound with its value, what was tried, the alternatives. */
+export const mppStuck = (stuck: StuckInfo): StuckError => new StuckError({ ...stuck, step: 'reading the .mpp (MPXJ, in a Java process of its own)' }, {
+  what: 'The .mpp reader (MPXJ)', tried: 'one conversion of the file to Microsoft Project XML in a Java process of its own; the file was read the one way this installation reads an .mpp without Microsoft Project',
+  next: 'open the .mpp in Microsoft Project and save it as Microsoft Project XML (File > Save As > XML), then open that; or export the schedule from the source tool as XER or XML; or split a very large project',
+});
+
+/** The Microsoft Project XML of a .mpp file (MPXJ in its own process; no time limit: watched for life). Read in pieces, never as one string. */
+export async function mppToMspdi(path: string): Promise<Chunked> {
   const home = mpxjHome();
   if (!home) throw new MppReaderMissing('The .mpp reader (MPXJ, in mpxj/ beside the program) is missing from this installation.');
   const dir = mkdtempSync(join(tmpdir(), 'p6clone-mpp-'));
@@ -57,13 +80,13 @@ export async function mppToMspdi(path: string): Promise<string> {
       child.on('error', (e) => { stop(); done((e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no-java' : e.message); });
       child.on('close', (c) => { stop(); done(c ?? -1); });
     });
-    if (code === 'no-java') throw new MppReaderMissing(`Reading .mpp needs Java, and there is none here (${java}): this installation ships one in mpxj/jre/ for Windows and Linux on x64; elsewhere install Java 11 or later, or set P6CLONE_JAVA.`);
-    if (stuck) throw new Error(`MPXJ stopped making progress reading the .mpp (no XML written and no processor time) and was ended.`);
+    if (code === 'no-java') throw new MppReaderMissing(`Reading .mpp needs Java, and there is none here (${java}): this installation ships one in mpxj/jre/ for Windows and Linux on x64; elsewhere install a Java runtime (the jars are Java 8 class files), or set P6CLONE_JAVA.`);
+    if (stuck) throw mppStuck(stuck);
     if (code !== 0 || !existsSync(out)) {
       const why = /MPXJException: ([^\n\r]*)|Exception: ([^\n\r]*)/.exec(text);
       throw new Error(`MPXJ could not read this .mpp: ${(why?.[1] ?? why?.[2] ?? text.trim().split(/\r?\n/).pop() ?? `exit ${code}`).trim()}.`);
     }
-    return readFileSync(out, 'utf8');
+    return readChunked(out);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 /** Whether this installation can read .mpp (MPXJ and a Java). */

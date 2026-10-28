@@ -34,7 +34,7 @@ export const TOOLS: ToolDef[] = [
     offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' },
   } } },
   { name: 'get_activity', description: 'Everything about an activity, or many at once (activity_ids: any number, every link and resource of each): dates (early, late, actual, baseline), durations, float, constraints, calendar, predecessors and successors (with type, lag, driving and relationship free float), resource assignments, activity codes, user defined fields (UDFs), notes; source_uid for an activity read from Microsoft Project.', parameters: { type: 'object', properties: { activity_id: { type: 'string', description: 'Activity ID, or "uid:<task UID>" for an activity read from Microsoft Project' }, activity_ids: { type: 'array', items: { type: 'string' }, description: 'many activities in one call (instead of activity_id): each with all its predecessors, successors and resources; unknown IDs are listed in not_found' }, offset: { type: 'number', description: 'activity_id only: paging of the predecessors, successors and resources (60, 60 and 40 a page): pass next_offset' } } } },
-  { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges, and each element\'s wbs_id (edit operations take "wbs_id:<id>"). Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2 (at most 50)' }, limit: { type: 'number', description: 'elements a page (default 200; no cap)' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
+  { name: 'list_wbs', description: 'The WBS tree with activity counts and date ranges, and each element\'s wbs_id (edit operations take "wbs_id:<id>"). Optionally only below a WBS code, to a depth.', parameters: { type: 'object', properties: { under: { type: 'string', description: 'WBS code' }, depth: { type: 'number', description: 'Default 2; any depth the tree has' }, limit: { type: 'number', description: 'elements a page (default 200; no cap)' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
   { name: 'critical_path', description: 'Activities on the longest path / critical (lowest total float), in start order.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Default 50; no cap' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
   { name: 'schedule_health', description: 'Schedule quality checks a planning reviewer uses: open ends (missing predecessors/successors), negative float, hard constraints, long durations, lags and leads, FS vs other relationship types, out-of-sequence progress, activities with dates before the data date. Gives counts and examples.', parameters: { type: 'object', properties: { max_examples: { type: 'number', description: 'activities listed per check (default 8; 0 = every one)' } } } },
   { name: 'list_projects', description: 'Every project in the database (not only the open one): ID, name, status, start and finish, activity count, WBS top-level names, calendar. Use it to find past projects similar to the one being planned or asked about; then read one with the other lookups by passing its ID as "project".', parameters: { type: 'object', properties: { text: { type: 'string', description: 'only projects whose ID or name contains this' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
@@ -66,7 +66,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
   }
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const wbsById = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
-  const wbsPath = (id: string) => { const out: string[] = []; for (let w = wbsById.get(id), n = 0; w && n < 50; w = wbsById.get(w.parent_wbs_id), n++) if (w.proj_node_flag !== 'Y') out.unshift(w.wbs_short_name); return out.join('.'); };
+  const wbsPath = (id: string) => { const out: string[] = []; for (let w = wbsById.get(id), n = 0; w && n < wbsById.size; w = wbsById.get(w.parent_wbs_id), n++) if (w.proj_node_flag !== 'Y') out.unshift(w.wbs_short_name); return out.join('.'); };
   const start = (t: Row) => t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date || '';
   const finish = (t: Row) => t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date || '';
   // days the way edits take them (units.ts): each activity's own calendar with calendarDays, else hpd
@@ -142,7 +142,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       if (args.wbs) {
         const q = String(args.wbs).toLowerCase();
         const roots = new Set([...wbsById.values()].filter((w) => open.has(w.proj_id) && (wbsPath(w.wbs_id).toLowerCase() === q || w.wbs_short_name.toLowerCase() === q || w.wbs_name.toLowerCase().includes(q))).map((w) => w.wbs_id));
-        const under = (id: string) => { for (let w: string | undefined = id, n = 0; w && n < 50; w = wbsById.get(w)?.parent_wbs_id, n++) if (roots.has(w)) return true; return false; };
+        const under = (id: string) => { for (let w: string | undefined = id, n = 0; w && n < wbsById.size; w = wbsById.get(w)?.parent_wbs_id, n++) if (roots.has(w)) return true; return false; };
         list = list.filter((t) => under(t.wbs_id));
       }
       if (args.resource) {
@@ -216,7 +216,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         })),
         udfs: Object.fromEntries((udfsOf.get(t.task_id) ?? []).filter((v) => udfTypes.has(v.udf_type_id))
           .map((v) => [udfTypes.get(v.udf_type_id), v.udf_text || (v.udf_date ? d(v.udf_date) : '') || (v.udf_code_id ? udfCodes.get(v.udf_code_id) ?? v.udf_code_id : '') || v.udf_number || ''])),
-        notes: (memosOf.get(t.task_id) ?? []).map((m) => (m.task_memo ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, many ? undefined : 600)).filter(Boolean),
+        notes: (memosOf.get(t.task_id) ?? []).map((m) => (m.task_memo ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean),
         };
       };
       if (!many) return full(found[0][1]!);
@@ -224,19 +224,19 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       return { activities: found.filter(([, t]) => t).map(([, t]) => full(t!)), ...(missing.length ? { not_found: missing } : {}) };
     }
     case 'list_wbs': {
-      const depth = Math.min(50, Math.max(1, Number(args.depth) || 2)), limit = Math.max(1, Number(args.limit) || 200);
+      const depth = Math.max(1, Number(args.depth) || 2), limit = Math.max(1, Number(args.limit) || 200);
       const kids = new Map<string, Row[]>();
       for (const w of wbsById.values()) if (open.has(w.proj_id)) { let l = kids.get(w.parent_wbs_id); if (!l) kids.set(w.parent_wbs_id, (l = [])); l.push(w); }
       const tasksUnder = new Map<string, Row[]>();
-      for (const t of tasks) for (let w: string | undefined = t.wbs_id, n = 0; w && n < 50; w = wbsById.get(w)?.parent_wbs_id, n++) { let l = tasksUnder.get(w); if (!l) tasksUnder.set(w, (l = [])); l.push(t); }
+      for (const t of tasks) for (let w: string | undefined = t.wbs_id, n = 0; w && n < wbsById.size; w = wbsById.get(w)?.parent_wbs_id, n++) { let l = tasksUnder.get(w); if (!l) tasksUnder.set(w, (l = [])); l.push(t); }
       const roots = args.under ? [...wbsById.values()].filter((w) => open.has(w.proj_id) && (wbsPath(w.wbs_id).toLowerCase() === String(args.under).toLowerCase() || w.wbs_short_name.toLowerCase() === String(args.under).toLowerCase())) : [...wbsById.values()].filter((w) => open.has(w.proj_id) && w.proj_node_flag === 'Y');
       // limit elements a page (200 by default), in tree order; offset skips the elements of earlier pages
       const out: unknown[] = [], skip = Math.max(0, Math.floor(Number(args.offset) || 0));
       let seen = 0;
-      const walk = (w: Row, lvl: number) => {
+      const walk = (w: Row, lvl: number, above: Set<string> = new Set()) => { // (above: the elements on the way down, so a parent cycle in a damaged file ends the walk)
         const ts = tasksUnder.get(w.wbs_id) ?? [];
         if (seen++ >= skip && out.length < limit) out.push({ level: lvl, code: wbsPath(w.wbs_id) || w.wbs_short_name, wbs_id: w.wbs_id, name: w.wbs_name, activities: ts.length, start: d(ts.map(start).filter(Boolean).sort()[0]), finish: d(ts.map(finish).filter(Boolean).sort().pop()), critical: ts.filter((t) => !t.act_end_date && isCritical(t, ctx)).length });
-        if (lvl < depth) for (const c of (kids.get(w.wbs_id) ?? []).sort((a, b) => Number(a.seq_num) - Number(b.seq_num))) walk(c, lvl + 1);
+        if (lvl < depth) { above.add(w.wbs_id); for (const c of (kids.get(w.wbs_id) ?? []).sort((a, b) => Number(a.seq_num) - Number(b.seq_num))) if (!above.has(c.wbs_id)) walk(c, lvl + 1, above); above.delete(w.wbs_id); }
       };
       for (const r of roots) walk(r, 0);
       const next = skip + out.length < seen ? skip + out.length : null;
