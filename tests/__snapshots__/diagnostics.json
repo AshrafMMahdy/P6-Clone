@@ -332,7 +332,9 @@
  "cairo alex-road.xer": {},
  "cairo festival city.xer": {},
  "cleopatra elmohandesen.xer": {},
- "damac-hyde park.xer": {},
+ "damac-hyde park.xer": {
+  "info:ENCODING_CODEPAGE": 1
+ },
  "el ezz warehouse.xer": {
   "info:CAL_HOURS_MISMATCH": 1
  },
