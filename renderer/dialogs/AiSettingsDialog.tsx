@@ -27,7 +27,7 @@ export function AiSettingsDialog() {
   const set = (patch: Partial<AiPublicConfig>) => setCfg({ ...cfg, ...patch });
   // the free-form fields are checked here with the same rules the main process applies
   let extraError = '';
-  try { parseExtraHeaders(cfg.extraHeaders); parseExtraBody(cfg.extraBody); } catch (e) { extraError = (e as Error).message; }
+  try { parseExtraHeaders(cfg.extraHeaders); parseExtraBody(cfg.extraBody, cfg.provider); } catch (e) { extraError = (e as Error).message; }
   const save = async (close: boolean) => {
     if (extraError) return null;
     setBusy(true);
@@ -67,7 +67,7 @@ export function AiSettingsDialog() {
             : <input type="password" autoComplete="off" style={{ width: 380 }} value={key} placeholder={preset.needsKey ? 'Paste your API key' : 'Not needed for a local server (leave empty)'} onChange={(e) => setKey(e.target.value)} />}
         </td></tr>
         <tr><td style={{ verticalAlign: 'top' }}>Extra headers<br /><span className="muted">optional</span></td><td><textarea rows={2} style={{ width: 380, font: '12px Consolas, monospace' }} value={cfg.extraHeaders ?? ''} placeholder={'One per line, e.g.\nanthropic-workspace-id: wrkspc_...   or   OpenAI-Organization: org_...'} onChange={(e) => set({ extraHeaders: e.target.value })} /></td></tr>
-        <tr><td style={{ verticalAlign: 'top' }}>Extra request<br />parameters (JSON)<br /><span className="muted">optional</span></td><td><textarea rows={3} style={{ width: 380, font: '12px Consolas, monospace' }} value={cfg.extraBody ?? ''} placeholder={'{"temperature": 0.2, "top_p": 0.9, "max_tokens": 8000}'} onChange={(e) => set({ extraBody: e.target.value })} /></td></tr>
+        <tr><td style={{ verticalAlign: 'top' }}>Extra request<br />parameters (JSON)<br /><span className="muted">optional</span></td><td><textarea rows={3} style={{ width: 380, font: '12px Consolas, monospace' }} value={cfg.extraBody ?? ''} placeholder={cfg.provider === 'anthropic' ? '{"max_tokens": 8000}' : '{"temperature": 0.2, "top_p": 0.9, "max_tokens": 8000}'} onChange={(e) => set({ extraBody: e.target.value })} /></td></tr>
       </tbody></table>
       {extraError && <div style={{ padding: 6, margin: '6px 0', border: '1px solid #e0a0a0', background: '#fde4e4' }}>{extraError}</div>}
       <p className="muted" style={{ marginTop: 10 }}>

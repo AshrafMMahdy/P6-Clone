@@ -74,8 +74,11 @@ test('extra headers and request parameters are merged, validated, and headers st
   assert.equal(r.headers['anthropic-beta'], 'tools-2026');
   assert.equal(r.headers['X-Gateway'], 'abc');
   assert.equal(r.headers['x-api-key'], 'k');
-  assert.equal(r.body.temperature, 0.2);
+  assert.equal(r.body.temperature, undefined); // API version 2026-10-21 refuses sampling parameters: an old saved setting is not sent
+  assert.equal(r.body.top_p, undefined);
   assert.equal(r.body.max_tokens, 8000); // overrides the default
+  const o = buildRequest({ ...cfg, provider: 'openai', baseUrl: 'https://openrouter.ai/api/v1' }, 'k', req) as any;
+  assert.equal(o.body.temperature, 0.2); // OpenAI-compatible hosts still take them
   assert.equal(r.body.messages.length, 3); // the assistant's own fields are kept
   assert.throws(() => buildRequest({ ...cfg, extraBody: '{"messages": []}' }, 'k', req), /cannot set messages/);
   assert.throws(() => buildRequest({ ...cfg, extraBody: '[1]' }, 'k', req), /JSON object/);
@@ -84,11 +87,37 @@ test('extra headers and request parameters are merged, validated, and headers st
   const box = { available: () => true, encrypt: (s: string) => 'ENC:' + Buffer.from(s).toString('base64'), decrypt: (s: string) => Buffer.from(s.slice(4), 'base64').toString() };
   const file = join(mkdtempSync(join(tmpdir(), 'ai-')), 'ai.json');
   const store = new AiStore(file, box);
-  store.save({ ...cfg, extraHeaders: 'X-Gateway-Token: very-secret' });
+  const saved = { ...cfg, extraBody: '{"max_tokens": 8000}' };
+  store.save({ ...saved, extraHeaders: 'X-Gateway-Token: very-secret' });
   assert.ok(!readFileSync(file, 'utf8').includes('very-secret'));
   assert.equal(store.publicConfig().extraHeaders, 'X-Gateway-Token: very-secret');
-  assert.equal(store.config().extraBody, cfg.extraBody);
+  assert.equal(store.config().extraBody, saved.extraBody);
   assert.throws(() => store.save({ ...cfg, extraBody: '{bad' }), /not valid JSON/);
+  assert.throws(() => store.save({ ...cfg, extraBody: '{"temperature": 0.2}' }), /removed them in version 2026-10-21/);
+  assert.doesNotThrow(() => store.save({ ...cfg, provider: 'openai', extraBody: '{"temperature": 0.2}' }));
+});
+
+test('Anthropic requests name API version 2026-10-21 and hand thinking blocks back unchanged', () => {
+  const cfg = { enabled: true, provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com', model: 'claude-opus-5-5' };
+  const plain = buildRequest(cfg, 'k', req) as any;
+  assert.equal(plain.headers['anthropic-version'], '2026-10-21');
+  assert.equal(plain.body.thinking, undefined); // nothing to hand back: the model's own default
+  assert.equal(plain.headers['anthropic-beta'], undefined);
+  const reply = parseReply(cfg, { content: [{ type: 'thinking', thinking: '', signature: 'SIG' }, { type: 'redacted_thinking', data: 'enc' }, { type: 'tool_use', id: 't1', name: 'get_activity', input: { activity_id: 'A1' } }], stop_reason: 'tool_use' });
+  assert.equal(reply.thinking?.length, 2);
+  assert.equal(reply.toolCalls[0].id, 't1'); // read by type, not position
+  const next = buildRequest(cfg, 'k', { system: 's', tools: [], messages: [
+    { role: 'user', content: 'q' },
+    { role: 'assistant', content: '', toolCalls: reply.toolCalls, thinking: reply.thinking },
+    { role: 'tool', toolCallId: 't1', name: 'get_activity', content: '{}' },
+  ] }) as any;
+  const asst = next.body.messages[1].content;
+  assert.deepEqual(asst.map((b: any) => b.type), ['thinking', 'redacted_thinking', 'tool_use']);
+  assert.equal(asst[0].signature, 'SIG');
+  assert.deepEqual(next.body.thinking, { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
+  assert.equal(next.headers['anthropic-beta'], 'thinking-binding-controls-2026-08-01');
+  const none = parseReply(cfg, { content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' });
+  assert.equal(none.thinking, undefined);
 });
 
 test('extra headers tolerate pasted text: spaces in names, typographic dashes, invisible characters', async () => {

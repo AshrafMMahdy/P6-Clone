@@ -1,9 +1,11 @@
 // Free-form provider settings for the AI assistant: extra HTTP headers ("Name: value" per line) and extra request
-// parameters (a JSON object merged into every request, e.g. temperature, top_p, max_tokens). No Node imports, so the
+// parameters (a JSON object merged into every request, e.g. max_tokens). No Node imports, so the
 // settings dialog can validate with the same code.
 
 /** Fields the assistant needs to work; extra parameters cannot replace them. */
 export const RESERVED_BODY = ['messages', 'tools', 'system', 'tool_choice', 'stream'];
+/** Sampling parameters the Claude API removed in version 2026-10-21: a request that sends one fails, at any value. */
+export const ANTHROPIC_REMOVED_BODY = ['temperature', 'top_p', 'top_k'];
 
 export function parseExtraHeaders(text: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -24,7 +26,8 @@ export function parseExtraHeaders(text: string | undefined): Record<string, stri
   return out;
 }
 
-export function parseExtraBody(text: string | undefined): Record<string, unknown> {
+/** provider: 'anthropic' also refuses the sampling parameters that API no longer takes. */
+export function parseExtraBody(text: string | undefined, provider?: 'anthropic' | 'openai'): Record<string, unknown> {
   const t = (text ?? '').trim();
   if (!t) return {};
   let v: unknown;
@@ -32,5 +35,7 @@ export function parseExtraBody(text: string | undefined): Record<string, unknown
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('Extra request parameters must be a JSON object, like {"temperature": 0.2}.');
   const bad = Object.keys(v).filter((k) => RESERVED_BODY.includes(k));
   if (bad.length) throw new Error(`Extra request parameters cannot set ${bad.join(', ')} (the assistant controls these).`);
+  const removed = provider === 'anthropic' ? Object.keys(v).filter((k) => ANTHROPIC_REMOVED_BODY.includes(k)) : [];
+  if (removed.length) throw new Error(`Extra request parameters cannot set ${removed.join(', ')} for Anthropic: the Claude API removed them in version 2026-10-21, and a request that sends one fails. Remove ${removed.length > 1 ? 'them' : 'it'}.`);
   return v as Record<string, unknown>;
 }

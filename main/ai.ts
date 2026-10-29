@@ -2,14 +2,14 @@
 // The key is encrypted with the operating system's protection (Electron safeStorage: DPAPI on Windows).
 // Providers: Anthropic (Messages API) and anything OpenAI-compatible (OpenAI, OpenRouter, LM Studio, Ollama, ...).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { parseExtraBody, parseExtraHeaders, RESERVED_BODY } from './ai-extras.ts';
+import { parseExtraBody, parseExtraHeaders, RESERVED_BODY, ANTHROPIC_REMOVED_BODY } from './ai-extras.ts';
 
 export type ProviderKind = 'anthropic' | 'openai';
 export interface AiConfig {
   enabled: boolean; provider: ProviderKind; baseUrl: string; model: string;
   /** let the assistant operate the app (visibly, undoable) */ actions?: boolean;
   /** extra HTTP headers, "Name: value" per line (stored encrypted) */ extraHeaders?: string;
-  /** JSON object merged into every request (temperature, top_p, max_tokens, ...) */ extraBody?: string;
+  /** JSON object merged into every request (max_tokens, ...; for Anthropic never temperature / top_p / top_k) */ extraBody?: string;
 }
 /** What the window may see: everything but the key. */
 export interface AiPublicConfig extends AiConfig { hasKey: boolean; keyHint: string; encrypted: boolean }
@@ -20,10 +20,10 @@ export interface ToolCall { id: string; name: string; args: Record<string, unkno
 /** Provider-neutral chat message. */
 export type ChatMsg =
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; /** Anthropic thinking blocks, exactly as returned */ thinking?: unknown[] }
   | { role: 'tool'; toolCallId: string; name: string; content: string };
 export interface ChatRequest { system: string; messages: ChatMsg[]; tools: ToolDef[] }
-export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: string }
+export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: string; /** Anthropic: the reply's thinking blocks, unchanged */ thinking?: unknown[] }
 
 interface Stored extends AiConfig { key?: string; keyEnc?: boolean; keyHint?: string; headersEnc?: string }
 export interface KeyBox { available(): boolean; encrypt(s: string): string; decrypt(s: string): string }
@@ -48,7 +48,7 @@ export class AiStore {
   /** apiKey: undefined keeps the saved key, '' removes it. */
   save(c: AiConfig, apiKey?: string): AiPublicConfig {
     const s = this.read();
-    parseExtraHeaders(c.extraHeaders); parseExtraBody(c.extraBody); // refuse to save what would break every request
+    parseExtraHeaders(c.extraHeaders); parseExtraBody(c.extraBody, c.provider); // refuse to save what would break every request
     const next: Stored = { ...s, enabled: !!c.enabled, provider: c.provider === 'openai' ? 'openai' : 'anthropic', baseUrl: String(c.baseUrl || '').trim(), model: String(c.model || '').trim(), actions: c.actions !== false, extraBody: String(c.extraBody ?? '').trim() };
     // extra headers can carry secrets (gateway tokens): encrypted like the key
     delete next.extraHeaders;
@@ -75,14 +75,21 @@ export class AiStore {
   config(): AiConfig { const s = this.read(); return { enabled: s.enabled, provider: s.provider, baseUrl: s.baseUrl, model: s.model, extraHeaders: this.headers(s), extraBody: s.extraBody }; }
 }
 
+/** The Claude API version the assistant names. 2026-10-21 removed temperature / top_p / top_k (a 400 on every model). */
+export const ANTHROPIC_API_VERSION = '2026-10-21';
+/** The beta that carries thinking.block_binding. */
+const THINKING_BINDING_BETA = 'thinking-binding-controls-2026-08-01';
 // Anthropic max_tokens 16000: room for a WBS area of schedule operations in one tool call
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 
 /** Build the HTTP request for a provider, with the user's extra headers and parameters (pure, so it can be tested). */
 export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
   const r = baseRequest(cfg, key, req);
-  const extra = parseExtraBody(cfg.extraBody);
+  const extra = parseExtraBody(cfg.extraBody, undefined);
   for (const k of RESERVED_BODY) delete extra[k];
+  // Settings saved before API version 2026-10-21 can still carry a sampling parameter, which that version refuses on every
+  // request; the dialog shows why when it is opened (parseExtraBody with the provider).
+  if (cfg.provider === 'anthropic') for (const k of ANTHROPIC_REMOVED_BODY) delete extra[k];
   const headers = parseExtraHeaders(cfg.extraHeaders);
   // Anthropic keys not scoped to a workspace need "anthropic-workspace-id"; accept the obvious spellings of it
   if (cfg.provider === 'anthropic') for (const n of Object.keys(headers)) {
@@ -97,7 +104,8 @@ function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: strin
     const messages: unknown[] = [];
     for (const m of req.messages) {
       if (m.role === 'user') messages.push({ role: 'user', content: m.content });
-      else if (m.role === 'assistant') messages.push({ role: 'assistant', content: [...(m.content ? [{ type: 'text', text: m.content }] : []), ...(m.toolCalls ?? []).map((t) => ({ type: 'tool_use', id: t.id, name: t.name, input: t.args }))] });
+      // its thinking blocks go back first and unchanged: models that think by default need them beside the tool_use
+      else if (m.role === 'assistant') messages.push({ role: 'assistant', content: [...(m.thinking ?? []), ...(m.content ? [{ type: 'text', text: m.content }] : []), ...(m.toolCalls ?? []).map((t) => ({ type: 'tool_use', id: t.id, name: t.name, input: t.args }))] });
       else {
         // consecutive tool results go into one user message
         const prev = messages[messages.length - 1] as { role: string; content: unknown[] } | undefined;
@@ -106,10 +114,15 @@ function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: strin
         else messages.push({ role: 'user', content: [block] });
       }
     }
+    // Thinking blocks going back are bound to the context before them on Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5, and
+    // the conversation is shortened as it grows (renderer/ai/context.ts): "drop_block" drops a block whose context changed
+    // instead of failing the request. Models without the check accept it.
+    const sendsThinking = req.messages.some((m) => m.role === 'assistant' && (m.thinking?.length ?? 0) > 0);
     return {
       url: `${base}${/\/v1$/.test(base) ? '' : '/v1'}/messages`,
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: { model: cfg.model, max_tokens: 16000, system: req.system, messages, tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })) },
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': ANTHROPIC_API_VERSION, ...(sendsThinking ? { 'anthropic-beta': THINKING_BINDING_BETA } : {}) },
+      body: { model: cfg.model, max_tokens: 16000, system: req.system, messages, tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })),
+        ...(sendsThinking ? { thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } } : {}) },
     };
   }
   const base = trimSlash(cfg.baseUrl || 'https://api.openai.com/v1');
@@ -137,6 +150,7 @@ export function parseReply(cfg: AiConfig, json: any): ChatReply {
       content: blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'),
       toolCalls: blocks.filter((b) => b.type === 'tool_use').map((b) => ({ id: String(b.id), name: String(b.name), args: b.input ?? {} })),
       stop: String(json?.stop_reason ?? ''),
+      ...(blocks.some((b) => b.type === 'thinking' || b.type === 'redacted_thinking') ? { thinking: blocks.filter((b) => b.type === 'thinking' || b.type === 'redacted_thinking') } : {}),
     };
   }
   const m = json?.choices?.[0]?.message ?? {};
