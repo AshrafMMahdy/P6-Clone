@@ -131,7 +131,7 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
  *  collects them (nothing is kept from it) and the second writes. */
 export function writeXerTo(db: Db, opts: WriteOptions, put: (bytes: Uint8Array) => void): void {
   const sel = selectRows(db, opts.projIds);
-  const cur = opts.currency ?? db.tables.CURRTYPE?.rows[0]?.curr_short_name ?? 'USD';
+  const cur = opts.currency ?? db.tables.CURRTYPE?.rows[0]?.curr_short_name ?? (db.header?.raw?.[8] || 'USD'); // (a currency the file only names in its ERMHDR line stays)
   const day = opts.exportDate ?? formatDay(Date.now() / 60000);
   const each = (line: (l: string) => void) => {
   const lines = { push(...ls: string[]) { for (const l of ls) line(l); } };

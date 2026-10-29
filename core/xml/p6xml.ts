@@ -468,6 +468,9 @@ export function p6xmlLosses(db: Db, projIds?: string[]): P6XmlLoss[] {
     if (how === 'lenient') add('CALENDAR', 'clndr_data', CAL_LENIENT_REASON, 1, c.clndr_name);
     else if (how === 'none') add('CALENDAR', 'clndr_data', CAL_NONE_REASON, 1, c.clndr_name);
   }
+  // the ERMHDR line: its currency is written (the Currency element); the rest has no element and is kept only in a comment this clone reads
+  const H = db.header?.raw;
+  if (H?.length) for (const [i, f] of [[2, 'export_date'], [4, 'export_user'], [5, 'export_user_name'], [6, 'database_name']] as const) if (has(H[i])) add('ERMHDR', f, HEADER_REASON);
   // a WBS category reference whose list (the PHASE table) is not there is left out
   const phaseIds = new Set((sel.get('PHASE') ?? []).map((x) => x.phase_id));
   for (const w of sel.get('PROJWBS') ?? []) if (has(w.phase_id) && !phaseIds.has(w.phase_id)) add('PROJWBS', 'phase_id', 'WBS category with no PHASE row to point at: the reference is left out');
@@ -487,6 +490,7 @@ export function p6xmlLosses(db: Db, projIds?: string[]): P6XmlLoss[] {
   }
   return [...out.values()].sort((a, b) => a.reason.localeCompare(b.reason) || a.table.localeCompare(b.table) || a.field.localeCompare(b.field));
 }
+const HEADER_REASON = 'ERMHDR value with no element in P6 XML: kept only in a comment that P6 ignores and this clone reads back';
 const UNMAPPED_REASON = 'a column (or table) with data that this writer has no map for';
 const UDF_AREA_REASON = 'user-defined field value on an object whose P6 XML element this writer gives no UDF list (its type\'s subject area is in items)';
 const UDF_VALUE_REASON = 'user-defined field value held in a column other than the one its type writes';
@@ -666,7 +670,11 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
   const ns = `http://xmlns.oracle.com/Primavera/P6/V${ver}/API/BusinessObjects`;
   const out = { push: (line: string) => put(line + '\n') };
   out.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
+  // the ERMHDR line (version, date, user, database, currency...) has no element in P6 XML: kept in a comment P6 ignores and this clone reads back
+  const hdr = db.header?.raw?.slice(1) ?? [];
+  const hdrCurrency = hdr[7] ?? '';
   out.push(`<APIBusinessObjects xmlns="${ns}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="${ns} http://xmlns.oracle.com/Primavera/P6/V${ver ?? '19.12'}/API/p6apibo.xsd">`);
+  if (hdr.length) out.push(`<!--p6clone ermhdr=${encodeURIComponent(JSON.stringify(hdr)).replace(/-/g, '%2D')}-->`);
   // an element's children are written in the order P6's schema lists them (extra: its nested <Code>, <UDF>, <Values>... as [tag, xml])
   const el = (tag: string, r: Row, map: FieldMap, extra: Part[] = []) => out.push(`<${tag}>${inOrder(tag, [...toParts(r, map), ...extra])}</${tag}>`);
   const udfType = new Map(rows(db, 'UDFTYPE').map((u) => [u.udf_type_id, u]));
@@ -683,7 +691,11 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
   const pcodes = new Map<string, Row[]>(); for (const a of get('PROJPCAT')) { const l = pcodes.get(a.proj_id); if (l) l.push(a); else pcodes.set(a.proj_id, [a]); }
   // the top-level objects, each kind together and the kinds in the schema's order
   const topLevel: [string, () => void][] = [
-    ['Currency', () => { for (const r of get('CURRTYPE')) el('Currency', r, CURR_MAP); }],
+    ['Currency', () => {
+      for (const r of get('CURRTYPE')) el('Currency', r, CURR_MAP);
+      // no CURRTYPE table: the currency the ERMHDR line names is the base currency (the id a resource's curr_id already points at, else 1)
+      if (!get('CURRTYPE').length && hdrCurrency) el('Currency', { curr_id: get('RSRC').find((x) => x.curr_id)?.curr_id ?? '1', curr_short_name: hdrCurrency, curr_type: hdrCurrency, base_exch_rate: '1' }, CURR_MAP, [['IsBaseCurrency', '<IsBaseCurrency>true</IsBaseCurrency>']]);
+    }],
     ['OBS', () => { for (const r of get('OBS')) el('OBS', r, OBS_MAP); }],
     ['CostAccount', () => { for (const r of get('ACCOUNT')) el('CostAccount', r, ACCOUNT_MAP); }],
     ['NotebookTopic', () => { for (const r of get('MEMOTYPE')) el('NotebookTopic', r, TOPIC_MAP); }],
@@ -820,6 +832,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     findings.push({ severity: 'fatal', code: 'XML_ROOT', message: 'Root element is not <APIBusinessObjects>.', p6: 'P6 rejects the file: not a P6 XML export.' });
     return { db, findings };
   }
+  try { const h = JSON.parse(decodeURIComponent(api.clone?.ermhdr ?? '')) as string[]; if (Array.isArray(h) && h.length) db.header = { version: h[0] ?? '', exportDate: h[1] ?? '', raw: ['ERMHDR', ...h] }; } catch { /* no header comment: a file P6 or another tool wrote */ }
   const baselineOf = new Map<string, string>(kids(api, 'Project').map((p): [string, string] => [val(p, 'CurrentBaselineProjectObjectId'), val(p, 'ObjectId')]).filter(([b]) => !!b));
   for (const p of [...kids(api, 'Project'), ...kids(api, 'BaselineProject')]) {
     const g = groups.get(p) ?? { node: p, rows: [], held: [], at: null, fallback: [] };

@@ -110,7 +110,7 @@ function ghostTables(db: Db): Record<string, { fields: string[]; rows: Row[] }> 
 /** The XER's first line (ERMHDR) as a one-row table: what the file says of itself - the P6 version, the export date, what was exported, by whom,
  *  from which database, the currency - as P6 names the fields, then any further field of the line (field_8...), the whole line, and the text
  *  encoding the clone read the file in. */
-const HEADER_FIELDS = ['version', 'export_date', 'export_type', 'export_user', 'database_name', 'module', 'currency'];
+const HEADER_FIELDS = ['version', 'export_date', 'export_type', 'export_user', 'export_user_name', 'database_name', 'module', 'currency']; // (ERMHDR, version, date, Project, user, user's name, database, Project Management, currency)
 function headerTable(db: Db): { fields: string[]; rows: Row[] } | null {
   const h = db.header;
   if (!h) return null;

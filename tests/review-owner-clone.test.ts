@@ -596,7 +596,8 @@ test('read_table gives the XER\'s ERMHDR line (version, export date, who, from w
     assert.equal(col('export_date'), first[2]);
     if (first[3] !== undefined) assert.equal(col('export_type'), first[3]);
     if (first[4] !== undefined) assert.equal(col('export_user'), first[4]);
-    if (first.length > 7) assert.equal(col('currency'), first[7]);
+    if (first.length > 5) { assert.equal(col('export_user_name'), first[5]); assert.equal(col('database_name'), first[6]); assert.equal(col('module'), first[7]); }
+    if (first.length > 8) assert.equal(col('currency'), first[8]);
     assert.equal(String(col('raw_line')).split('\t').length, first.length, 'every field of the line');
     assert.ok(t.columns.includes('clone:encoding'));
   }

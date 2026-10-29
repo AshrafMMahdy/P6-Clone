@@ -8,6 +8,7 @@ import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseXer } from '../core/xer/parse.ts';
+import { writeXer } from '../core/xer/write.ts';
 import { p6xmlLossNotes, p6xmlLosses, P6XML_ENUMS, P6XML_NOT_CARRIED, P6XML_PARTLY_CARRIED, P6XML_ROOT_MAP, P6XML_ROOT_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
 import { parseClndrData, parseClndrDataLeniently } from '../core/calendar/clndr-data.ts';
 import { KEYS, type Db, type Row } from '../core/db.ts';
@@ -188,7 +189,7 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
     if (n) want.set(`${t}.${f ?? '(whole table)'}|${reason}`, n);
   }
   assert.ok(want.size > 5, 'the sample holds values P6 XML has no place for');
-  const got = new Map(p6xmlLosses(db).filter((l) => !/^coded value|^root node|^BaselineProject|^a column|^calendar|^user-defined/.test(l.reason) && !l.reason.startsWith('carried on the root')).map((l) => [`${l.table}.${l.field}|${l.reason}`, l.rows]));
+  const got = new Map(p6xmlLosses(db).filter((l) => !/^coded value|^root node|^BaselineProject|^a column|^calendar|^user-defined|^ERMHDR/.test(l.reason) && !l.reason.startsWith('carried on the root')).map((l) => [`${l.table}.${l.field}|${l.reason}`, l.rows]));
   assert.deepEqual([...got].sort(), [...want].sort());
   // an empty value is not a loss; a code without a verified text is one; a verified code is not
   T.PROJECT.rows[0].risk_level = ''; T.PROJECT.rows[0].def_qty_type = 'QT_Day';
@@ -204,7 +205,7 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
   for (const r of empty.tables.PROJECT?.rows ?? []) { r.def_qty_type = ''; r.sum_assign_level = ''; }
   for (const r of empty.tables.SCHEDOPTIONS?.rows ?? []) if (r.LevelPriorityList !== undefined) r.LevelPriorityList = '';
   for (const r of empty.tables.PROJWBS?.rows ?? []) { r.ev_compute_type = ''; for (const f of ['est_wt', 'seq_num', 'guid', 'sum_data_flag']) if (r.proj_node_flag === 'Y') r[f] = ''; if (r.proj_node_flag === 'Y' && r.wbs_short_name !== undefined) { const p = empty.tables.PROJECT.rows.find((x) => x.proj_id === r.proj_id); r.wbs_short_name = p?.proj_short_name ?? ''; } }
-  assert.deepEqual(p6xmlLosses(empty).filter((l) => !/^a column|^calendar|^user-defined/.test(l.reason)).map((l) => `${l.table}.${l.field}`), []);
+  assert.deepEqual(p6xmlLosses(empty).filter((l) => !/^a column|^calendar|^user-defined|^ERMHDR/.test(l.reason)).map((l) => `${l.table}.${l.field}`), []);
   // the MCP save answer: structured, and plainly in notes; an XER save has none of it
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
@@ -417,4 +418,25 @@ test('schedule options and the last schedule date: LevelPriorityList, limit-path
   if (!T.fields.includes('level_over_alloc_pct')) T.fields.push('level_over_alloc_pct');
   assert.ok(!writeP6Xml(db, {} as never).includes('<OverAllocationPercentage>'));
   assert.equal(p6xmlLosses(db).find((l) => l.table === 'SCHEDOPTIONS' && l.field === 'level_over_alloc_pct')?.reason, 'P6 XML field exists, its unit (percent or fraction) is not verified');
+});
+
+test('the ERMHDR line: a currency only the header names is written as the base Currency and comes back; the rest of the header is kept in a comment and disclosed', () => {
+  const db = load(samples.find((f) => /^CfC\.xer$/i.test(f)) ?? samples[0])!;
+  delete db.tables.CURRTYPE;
+  db.header = { version: '8.4.0', exportDate: '2026-01-02', raw: ['ERMHDR', '8.4.0', '2026-01-02', 'Project', 'jdoe', 'John Doe', 'my--database', 'Project Management', 'EUR'] };
+  const xml = writeP6Xml(db, {} as never);
+  assert.match(xml, /<Currency><DecimalPlaces>|<Currency>/);
+  assert.ok(xml.includes('<Id>EUR</Id>') && xml.includes('<Name>EUR</Name>') && xml.includes('<IsBaseCurrency>true</IsBaseCurrency>') && xml.includes('<ExchangeRate>1</ExchangeRate>'));
+  assert.ok(!/<!--[^>]*--[^>]/.test(xml.replace(/-->/g, '')) , 'no "--" inside the comment');
+  const back = parseP6Xml(xml).db;
+  assert.deepEqual(back.tables.CURRTYPE.rows.map((r) => [r.curr_short_name, r.base_exch_rate]), [['EUR', '1']]);
+  assert.deepEqual(back.header?.raw, db.header.raw, 'the header comes back as it was');
+  // an XER written from the read-back file names the currency again
+  assert.match(new TextDecoder().decode(writeXer(back, { version: '19.12' })), /^ERMHDR\t19\.12\t[^\t]*\tProject\tjdoe\tJohn Doe\tmy--database\tProject Management\tEUR/);
+  // and from the original (no CURRTYPE), the currency is no longer USD
+  assert.match(new TextDecoder().decode(writeXer(db, { version: '19.12' })), /Project Management\tEUR/);
+  // the header values P6 XML has no element for are said
+  const L = p6xmlLosses(db).filter((l) => l.table === 'ERMHDR');
+  assert.deepEqual(L.map((l) => l.field).sort(), ['database_name', 'export_date', 'export_user', 'export_user_name']);
+  assert.ok(L.every((l) => l.rows === 1 && l.reason.startsWith('ERMHDR value with no element')));
 });
