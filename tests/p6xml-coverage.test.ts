@@ -464,3 +464,31 @@ test('every sample: open -> save as XER keeps the ERMHDR line (all but version a
   }
   assert.ok(n >= 50 && nonUsd >= 5 && xmlN >= 40, `${n} samples, ${nonUsd} with a currency other than USD, ${xmlN} through XML`);
 });
+
+test('clear_authors with dictionaries clears the header\'s user, user name and database in both ERMHDR layouts, on every sample; nothing else of the header changes', async () => {
+  const { applyOps } = await import('../core/project/ops.ts');
+  let n = 0, modern = 0;
+  for (const f of samples) {
+    const db = load(f);
+    if (!db?.header?.raw?.length || !db.tables.PROJECT?.rows.length) continue;
+    const was = [...db.header.raw];
+    const isModern = was.length > 8 && was[3] === '';
+    const idx = isModern ? [5, 6, 7] : [4, 5, 6];
+    const who = idx.map((i) => was[i]).filter((v) => v && !['admin', 'dbxDatabaseNoName'].includes(v));
+    const live = db.tables.PROJECT.rows.find((p) => !p._baseline_of) ?? db.tables.PROJECT.rows[0];
+    const r = applyOps(db, [{ op: 'clear_authors', project: live.proj_short_name }]);
+    assert.ok(r.ok, `${f}: ${JSON.stringify(r.error)}`);
+    const now = db.header!.raw;
+    assert.equal(now.length, was.length, f);
+    for (const v of who) assert.ok(!now.includes(v), `${f}: "${v}" is still in the header`);
+    now.forEach((v, i) => { if (!idx.includes(i)) assert.equal(v, was[i], `${f}: field ${i} is not an identity field and stays`); });
+    n++; if (isModern) modern++;
+  }
+  assert.ok(n >= 50, `${n} samples`);
+  // a P6 18+ header (the only such sample, PDC1_Baseline_Rev0.xer, has no project): the same file's line on a loaded project
+  const db = load(samples.find((x) => /^CfC\.xer$/i.test(x)) ?? samples[0])!;
+  db.header = { version: '18.8', exportDate: '2026-09-24', raw: ['ERMHDR', '18.8', '2026-09-24', '', 'Project', 'ADMIN', 'PDC1_BASELINE', 'NordBuild', 'P6 Professional', '', 'EUR'] };
+  assert.ok(applyOps(db, [{ op: 'clear_authors', project: db.tables.PROJECT.rows[0].proj_short_name }]).ok);
+  assert.deepEqual(db.header.raw, ['ERMHDR', '18.8', '2026-09-24', '', 'Project', 'admin', 'admin', 'dbxDatabaseNoName', 'P6 Professional', '', 'EUR']);
+  void modern;
+});

@@ -11,6 +11,12 @@ export function ermhdrFields(parts: string[]): string[] {
   const names = modern ? ['version', 'export_date', 'field_3', 'export_type', 'export_user'] : ['version', 'export_date', 'export_type', 'export_user', 'export_user_name', 'database_name', 'module', 'currency'];
   return parts.map((_, i) => (modern && i === parts.length - 1 ? 'currency' : names[i] ?? `field_${i + 1}`));
 }
+/** The ERMHDR fields (index in the raw line, tag first) that name who exported the file and from where, with what an anonymised file has there: the user, the user's name and the
+ *  database - one place further on in the P6 18+ layout, where the third field is empty and the line is longer. */
+export function ermhdrIdentity(raw: string[]): [index: number, anonymous: string][] {
+  const modern = raw.length > 8 && raw[3] === '';
+  return modern ? [[5, 'admin'], [6, 'admin'], [7, 'dbxDatabaseNoName']] : [[4, 'admin'], [5, 'admin'], [6, 'dbxDatabaseNoName']];
+}
 /** The currency an ERMHDR line (raw, tag first) names: its last field, when the line has the fields of a P6 header; else ''. */
 export function ermhdrCurrency(raw?: string[]): string { return raw && raw.length > 8 ? raw[raw.length - 1] ?? '' : ''; }
 

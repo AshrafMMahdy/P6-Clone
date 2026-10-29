@@ -1,7 +1,7 @@
 // More edit operations (see ops.ts): WBS changes, codes, UDFs, notebooks, cost accounts and expenses, steps,
 // risk estimates, baselines, EPS/OBS/roles, calendar changes and assignment details. Same rules as ops.ts:
 // addressed by IDs and names a scheduler sees, durations in days, one transaction per list.
-import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, table, type Db, type Row } from '../db.ts';
+import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, table, ermhdrIdentity, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
@@ -734,7 +734,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       }
       if (op.op === 'clear_authors') {
         const raw = db.header?.raw;
-        if (dict && raw) [[4, 'admin'], [5, 'admin'], [6, 'dbxDatabaseNoName']].forEach(([i, v]) => { if (raw[i as number]) raw[i as number] = v as string; });
+        if (dict && raw) for (const [i, v] of ermhdrIdentity(raw)) if (raw[i]) raw[i] = v; // (the user, the user's name and the database of the header, in either layout)
         return { project: p.proj_short_name, fields_cleared: n };
       }
       if (op.keep_proj_id !== true) {
