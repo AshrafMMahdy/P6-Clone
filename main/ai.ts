@@ -20,13 +20,17 @@ export interface ToolCall { id: string; name: string; args: Record<string, unkno
 /** Provider-neutral chat message. */
 export type ChatMsg =
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; /** Anthropic: the reply as returned (thinking in place), with its model */ raw?: AnthropicTurn }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; /** the reply's own reasoning, with its model: Anthropic's whole reply (thinking in place), or an OpenAI-compatible host's reasoning field */ raw?: AnthropicTurn | ReasoningTurn }
   | { role: 'tool'; toolCallId: string; name: string; content: string };
 export interface ChatRequest { system: string; messages: ChatMsg[]; tools: ToolDef[] }
 /** An Anthropic reply that held thinking blocks, kept whole (thinking, text and tool_use in their order) with the model
  *  that wrote it: it goes back unchanged, to that model, while the stored text and tool calls are still that reply. */
 export interface AnthropicTurn { model: string; content: unknown[] }
-export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: string; raw?: AnthropicTurn }
+/** An OpenAI-compatible reply's reasoning in the field the host sent it in (DeepSeek, Kimi, MiniMax, GLM, Qwen:
+ *  reasoning_content), with the model that wrote it: it goes back on that model's own turns, which these hosts require
+ *  (DeepSeek answers 400 when an assistant turn of a tool conversation comes back without it). */
+export interface ReasoningTurn { model: string; field: 'reasoning_content' | 'reasoning'; value: string }
+export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: string; raw?: AnthropicTurn | ReasoningTurn }
 
 interface Stored extends AiConfig { key?: string; keyEnc?: boolean; keyHint?: string; headersEnc?: string }
 export interface KeyBox { available(): boolean; encrypt(s: string): string; decrypt(s: string): string }
@@ -114,13 +118,16 @@ export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { ur
 
 /** The kept reply when it is still this message for this model (same text, same tool calls in order), else null. */
 function keptTurn(m: ChatMsg, model: string): unknown[] | null {
-  if (m.role !== 'assistant' || !m.raw || m.raw.model !== model) return null;
+  if (m.role !== 'assistant' || !m.raw || m.raw.model !== model || !('content' in m.raw) || !Array.isArray(m.raw.content)) return null;
   const blocks = m.raw.content as Array<{ type?: string; text?: string; id?: string }>;
   const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n');
   const ids = blocks.filter((b) => b.type === 'tool_use').map((b) => String(b.id));
   const calls = (m.toolCalls ?? []).map((c) => c.id);
   return text === m.content && ids.length === calls.length && ids.every((id, i) => id === calls[i]) ? m.raw.content : null;
 }
+
+/** The host of a URL, or '' when it is not one. */
+function hostOf(url: string): string { try { return new URL(url).hostname; } catch { return ''; } }
 
 function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
   if (cfg.provider === 'anthropic') {
@@ -150,10 +157,16 @@ function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: strin
     };
   }
   const base = trimSlash(cfg.baseUrl || 'https://api.openai.com/v1');
+  const needsReasoningField = /(^|\.)deepseek\.com$/i.test(hostOf(base));
   const messages: unknown[] = [{ role: 'system', content: req.system }];
   for (const m of req.messages) {
     if (m.role === 'user') messages.push({ role: 'user', content: m.content });
-    else if (m.role === 'assistant') messages.push({ role: 'assistant', content: m.content || null, ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((t) => ({ id: t.id, type: 'function', function: { name: t.name, arguments: JSON.stringify(t.args) } })) } : {}) });
+    else if (m.role === 'assistant') {
+      // The model's own reasoning back in the field it came in; DeepSeek also needs the field on a turn another model
+      // wrote (empty) once tools are in the conversation.
+      const own = m.raw && 'field' in m.raw && m.raw.model === cfg.model ? { [m.raw.field]: m.raw.value } : needsReasoningField && req.tools.length ? { reasoning_content: '' } : {};
+      messages.push({ role: 'assistant', content: m.content || null, ...own, ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((t) => ({ id: t.id, type: 'function', function: { name: t.name, arguments: JSON.stringify(t.args) } })) } : {}) });
+    }
     else messages.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
   }
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -183,6 +196,8 @@ export function parseReply(cfg: AiConfig, json: any): ChatReply {
     content: typeof m.content === 'string' ? m.content : Array.isArray(m.content) ? m.content.map((p: any) => p.text ?? '').join('') : '',
     toolCalls: calls.map((c, i) => { let args: Record<string, unknown> = {}; try { args = JSON.parse(c.function?.arguments || '{}'); } catch { /* model sent bad JSON */ } return { id: String(c.id ?? `call_${i}`), name: String(c.function?.name ?? ''), args }; }),
     stop: String(json?.choices?.[0]?.finish_reason ?? ''),
+    ...(typeof m.reasoning_content === 'string' && m.reasoning_content ? { raw: { model: cfg.model, field: 'reasoning_content' as const, value: m.reasoning_content } }
+      : typeof m.reasoning === 'string' && m.reasoning ? { raw: { model: cfg.model, field: 'reasoning' as const, value: m.reasoning } } : {}),
   };
 }
 

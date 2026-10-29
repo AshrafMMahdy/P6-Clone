@@ -136,6 +136,28 @@ test('Anthropic requests name API version 2026-10-21 and hand the reply back as 
 });
 
 
+test('OpenAI-compatible hosts get their own reasoning field back on their own turns (DeepSeek needs it)', () => {
+  const cfg = { enabled: true, provider: 'openai' as const, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4' };
+  const tools = [{ name: 'get_activity', description: 'd', parameters: { type: 'object', properties: {} } }];
+  const reply = parseReply(cfg, { choices: [{ message: { content: '', reasoning_content: 'look it up', tool_calls: [{ id: 'c1', function: { name: 'get_activity', arguments: '{}' } }] }, finish_reason: 'tool_calls' }] });
+  assert.deepEqual(reply.raw, { model: 'deepseek-v4', field: 'reasoning_content', value: 'look it up' });
+  const conv = (raw: typeof reply.raw) => ({ system: 's', tools, messages: [
+    { role: 'user' as const, content: 'q' },
+    { role: 'assistant' as const, content: '', toolCalls: reply.toolCalls, raw },
+    { role: 'tool' as const, toolCallId: 'c1', name: 'get_activity', content: '{}' },
+  ] });
+  const same = buildRequest(cfg, 'k', conv(reply.raw)) as any;
+  assert.equal(same.body.messages[2].reasoning_content, 'look it up');
+  const other = buildRequest({ ...cfg, model: 'deepseek-v4-flash' }, 'k', conv(reply.raw)) as any;
+  assert.equal(other.body.messages[2].reasoning_content, ''); // another model's turn: the field DeepSeek requires, empty
+  const generic = buildRequest({ ...cfg, baseUrl: 'http://127.0.0.1:1234/v1', model: 'deepseek-v4-flash' }, 'k', conv(reply.raw)) as any;
+  assert.ok(!('reasoning_content' in generic.body.messages[2])); // an unknown host gets no field it did not send
+  const local = parseReply({ ...cfg, baseUrl: 'http://127.0.0.1:1234/v1' }, { choices: [{ message: { content: 'hi', reasoning: 'r' } }] });
+  assert.deepEqual(local.raw, { model: 'deepseek-v4', field: 'reasoning', value: 'r' });
+  const anth = buildRequest({ enabled: true, provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'deepseek-v4' }, 'k', conv(reply.raw)) as any;
+  assert.ok(Array.isArray(anth.body.messages[1].content) && !anth.body.thinking); // never read as an Anthropic turn
+});
+
 test('extra headers tolerate pasted text: spaces in names, typographic dashes, invisible characters', async () => {
   const { parseExtraHeaders } = await import('../main/ai-extras.ts');
   for (const s of ['WORKSPACE ID: wrkspc_01ab', 'WORKSPACE-ID: wrkspc_01ab', 'WORKSPACE‑ID: wrkspc_01ab', 'WORKSPACE–ID : wrkspc_01ab',
