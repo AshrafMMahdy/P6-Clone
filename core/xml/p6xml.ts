@@ -1,5 +1,5 @@
 // P6 XML (APIBusinessObjects) import/export, mapped onto the same P6 tables the XER layer uses.
-import { addField, rows, table, type Db, type Row } from '../db.ts';
+import { addField, ermhdrCurrency, ermhdrFields, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { selectRows } from '../xer/write.ts';
 import SCHEMA_NAMES from './p6apibo-names.json' with { type: 'json' };
@@ -470,7 +470,7 @@ export function p6xmlLosses(db: Db, projIds?: string[]): P6XmlLoss[] {
   }
   // the ERMHDR line: its currency is written (the Currency element); the rest has no element and is kept only in a comment this clone reads
   const H = db.header?.raw;
-  if (H?.length) for (const [i, f] of [[2, 'export_date'], [4, 'export_user'], [5, 'export_user_name'], [6, 'database_name']] as const) if (has(H[i])) add('ERMHDR', f, HEADER_REASON);
+  if (H && H.length > 3) { const parts = H.slice(1), names = ermhdrFields(parts); parts.forEach((v, i) => { if (i > 0 && i < parts.length - 1 && has(v) && v !== 'Project') add('ERMHDR', names[i], HEADER_REASON); }); } // (all but the version, the 'Project' tag and the currency)
   // a WBS category reference whose list (the PHASE table) is not there is left out
   const phaseIds = new Set((sel.get('PHASE') ?? []).map((x) => x.phase_id));
   for (const w of sel.get('PROJWBS') ?? []) if (has(w.phase_id) && !phaseIds.has(w.phase_id)) add('PROJWBS', 'phase_id', 'WBS category with no PHASE row to point at: the reference is left out');
@@ -672,7 +672,7 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
   out.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
   // the ERMHDR line (version, date, user, database, currency...) has no element in P6 XML: kept in a comment P6 ignores and this clone reads back
   const hdr = db.header?.raw?.slice(1) ?? [];
-  const hdrCurrency = hdr[7] ?? '';
+  const hdrCurrency = ermhdrCurrency(db.header?.raw);
   out.push(`<APIBusinessObjects xmlns="${ns}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="${ns} http://xmlns.oracle.com/Primavera/P6/V${ver ?? '19.12'}/API/p6apibo.xsd">`);
   if (hdr.length) out.push(`<!--p6clone ermhdr=${encodeURIComponent(JSON.stringify(hdr)).replace(/-/g, '%2D')}-->`);
   // an element's children are written in the order P6's schema lists them (extra: its nested <Code>, <UDF>, <Values>... as [tag, xml])

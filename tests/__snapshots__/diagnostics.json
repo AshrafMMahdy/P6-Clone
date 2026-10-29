@@ -170,7 +170,6 @@
   "error:DATA_AFTER_END": 1,
   "fatal:NO_PROJECT": 1,
   "info:ENCODING_UTF8": 1,
-  "warning:HEADER_FORMAT": 1,
   "warning:LF_ENDINGS": 1,
   "warning:NO_TASK": 1
  },

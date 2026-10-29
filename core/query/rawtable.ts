@@ -8,7 +8,7 @@
 // A calendar's row also gives its work week and its exceptions, decoded from clndr_data (work_week, exceptions).
 //   clone:<field>, CLONE:<TABLE>  the clone's own data beside the file's (a project's EPS, baseline links, saved
 //              filters, layouts, reports, portfolios, timesheet lines, risk estimates...): fields and tables starting with "_"
-import type { Db, Row } from '../db.ts';
+import { ermhdrFields, type Db, type Row } from '../db.ts';
 import { parseClndrData, parseClndrDataLeniently, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, serialToMinutes } from '../dates.ts';
 import { parseXml } from '../xml/p6xml.ts';
@@ -110,13 +110,12 @@ function ghostTables(db: Db): Record<string, { fields: string[]; rows: Row[] }> 
 /** The XER's first line (ERMHDR) as a one-row table: what the file says of itself - the P6 version, the export date, what was exported, by whom,
  *  from which database, the currency - as P6 names the fields, then any further field of the line (field_8...), the whole line, and the text
  *  encoding the clone read the file in. */
-const HEADER_FIELDS = ['version', 'export_date', 'export_type', 'export_user', 'export_user_name', 'database_name', 'module', 'currency']; // (ERMHDR, version, date, Project, user, user's name, database, Project Management, currency)
 function headerTable(db: Db): { fields: string[]; rows: Row[] } | null {
   const h = db.header;
   if (!h) return null;
   const parts = h.raw?.length ? h.raw.slice(1) : [h.version, h.exportDate];
   const row: Row = {};
-  const fields = parts.map((_, i) => HEADER_FIELDS[i] ?? `field_${i + 1}`);
+  const fields = ermhdrFields(parts);
   parts.forEach((v, i) => { row[fields[i]] = v; });
   row.raw_line = ['ERMHDR', ...parts].join('\t');
   if (h.encoding) row._encoding = h.encoding;

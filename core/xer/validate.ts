@@ -73,7 +73,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   // Header
   if (db.header) {
     if (!KNOWN_VERSION.test(version)) c.add({ severity: 'warning', code: 'VERSION_UNKNOWN', message: `ERMHDR version "${version}" is not a P6 release number.`, p6: 'P6 maps fields by name; an unrecognised version may be refused by older P6 builds.' });
-    if (raw[3] !== 'Project') c.add({ severity: 'warning', code: 'HEADER_FORMAT', message: `ERMHDR 4th value is "${raw[3] ?? ''}", P6 writes "Project".`, p6: 'P6 expects ERMHDR, version, date, "Project", user, user name, database, "Project Management", currency.' });
+    if (raw[3] !== 'Project' && !(raw[3] === '' && raw[4] === 'Project')) c.add({ severity: 'warning', code: 'HEADER_FORMAT', message: `ERMHDR 4th value is "${raw[3] ?? ''}", P6 writes "Project".`, p6: 'P6 expects ERMHDR, version, date, "Project", user, user name, database, "Project Management", currency.' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(raw[2] ?? '')) c.add({ severity: 'warning', code: 'HEADER_DATE', message: `ERMHDR export date "${raw[2] ?? ''}" is not yyyy-mm-dd.`, p6: 'P6 writes the export date without a time.' });
   }
 

@@ -4,6 +4,16 @@ export interface Table { name: string; fields: string[]; rows: Row[] }
 export interface XerHeader { version: string; exportDate: string; raw: string[]; /** text encoding the file was read in */ encoding?: string }
 export interface Db { header?: XerHeader; tables: Record<string, Table> }
 
+/** The names of an ERMHDR line's fields after the tag. Older P6 writes version, date, "Project", user, user's name, database, module, currency; P6 18+ writes an empty third
+ *  field, "Project", and more after the user: only the ones that are certain are named there (the currency is the last field in both). */
+export function ermhdrFields(parts: string[]): string[] {
+  const modern = parts.length > 8 && parts[2] === '';
+  const names = modern ? ['version', 'export_date', 'field_3', 'export_type', 'export_user'] : ['version', 'export_date', 'export_type', 'export_user', 'export_user_name', 'database_name', 'module', 'currency'];
+  return parts.map((_, i) => (modern && i === parts.length - 1 ? 'currency' : names[i] ?? `field_${i + 1}`));
+}
+/** The currency an ERMHDR line (raw, tag first) names: its last field, when the line has the fields of a P6 header; else ''. */
+export function ermhdrCurrency(raw?: string[]): string { return raw && raw.length > 8 ? raw[raw.length - 1] ?? '' : ''; }
+
 export function emptyDb(): Db {
   return { tables: {} };
 }

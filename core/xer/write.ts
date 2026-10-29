@@ -131,15 +131,25 @@ export function writeXer(db: Db, opts: WriteOptions): Uint8Array {
  *  collects them (nothing is kept from it) and the second writes. */
 export function writeXerTo(db: Db, opts: WriteOptions, put: (bytes: Uint8Array) => void): void {
   const sel = selectRows(db, opts.projIds);
-  const cur = opts.currency ?? db.tables.CURRTYPE?.rows[0]?.curr_short_name ?? (db.header?.raw?.[8] || 'USD'); // (a currency the file only names in its ERMHDR line stays)
+  // A file that had an ERMHDR line keeps it as it was read, field for field and as many as it had (type, user, user's name, database, module, currency - whatever the CURRTYPE table
+  // says); only the version and the export date are new, and what the caller names (user, user name, database, currency) replaces its place. A new project (no header) takes its
+  // currency from the base CURRTYPE row (the one P6 XML calls IsBaseCurrency, else the first), else USD.
+  const H = db.header?.raw && db.header.raw.length > 3 ? db.header.raw : null;
+  const baseCurr = db.tables.CURRTYPE?.rows.find((r) => r._xml_IsBaseCurrency === 'true') ?? db.tables.CURRTYPE?.rows[0];
   const day = opts.exportDate ?? formatDay(Date.now() / 60000);
+  const headerLine = (): string => {
+    if (!H) return ['ERMHDR', opts.version, day, 'Project', opts.user ?? 'admin', opts.userName ?? 'admin', opts.dbName ?? 'dbxDatabaseNoName', 'Project Management', opts.currency ?? baseCurr?.curr_short_name ?? 'USD'].join('\t');
+    const f = [...H];
+    f[1] = opts.version; f[2] = day;
+    const modern = f.length > 8 && f[3] === ''; // (P6 18+: more fields after the user; the currency is the last in both)
+    if (!modern) { if (opts.user != null && f.length > 4) f[4] = opts.user; if (opts.userName != null && f.length > 5) f[5] = opts.userName; if (opts.dbName != null && f.length > 6) f[6] = opts.dbName; }
+    else if (opts.user != null) f[5] = opts.user;
+    if (opts.currency != null && f.length > 8) f[f.length - 1] = opts.currency;
+    return f.join('\t');
+  };
   const each = (line: (l: string) => void) => {
   const lines = { push(...ls: string[]) { for (const l of ls) line(l); } };
-  lines.push([
-    'ERMHDR', opts.version, day, 'Project',
-    // the user and database a file read in was exported from stay as they were (only the export date is new)
-    opts.user ?? (db.header?.raw?.[4] || 'admin'), opts.userName ?? (db.header?.raw?.[5] || 'admin'), opts.dbName ?? (db.header?.raw?.[6] || 'dbxDatabaseNoName'), 'Project Management', cur,
-  ].join('\t'));
+  lines.push(headerLine());
   // EPS lives in P6's database, never in an XER (P6 asks for it on import and its exports carry no EPS table); the clone
   // keeps its EPS nodes for P6 XML and the portfolio, and writing them here gave every saved XER an unknown table.
   const names = [...sel.keys()].filter((n) => !n.startsWith('_') && n !== 'EPS');

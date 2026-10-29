@@ -437,6 +437,30 @@ test('the ERMHDR line: a currency only the header names is written as the base C
   assert.match(new TextDecoder().decode(writeXer(db, { version: '19.12' })), /Project Management\tEUR/);
   // the header values P6 XML has no element for are said
   const L = p6xmlLosses(db).filter((l) => l.table === 'ERMHDR');
-  assert.deepEqual(L.map((l) => l.field).sort(), ['database_name', 'export_date', 'export_user', 'export_user_name']);
+  assert.deepEqual(L.map((l) => l.field).sort(), ['database_name', 'export_date', 'export_user', 'export_user_name', 'module']);
   assert.ok(L.every((l) => l.rows === 1 && l.reason.startsWith('ERMHDR value with no element')));
+});
+
+test('every sample: open -> save as XER keeps the ERMHDR line (all but version and date), and XER -> P6 XML -> XER keeps its currency', () => {
+  const head = (b: Uint8Array) => new TextDecoder('latin1').decode(b.subarray(0, 800)).split(/\r?\n/)[0].replace(/^﻿/, '').split('\t');
+  let n = 0, nonUsd = 0, xmlN = 0;
+  for (const f of samples) {
+    const bytes = new Uint8Array(readFileSync(join(SAMPLES_DIR, f)));
+    const db = load(f);
+    if (!db?.header) continue;
+    const was = head(bytes);
+    if (was[0] !== 'ERMHDR') continue;
+    const saved = head(writeXer(db, { version: db.header.version || '19.12', encoding: 'utf8' as never }));
+    // every field but the date (and the version, given the same here) comes back as it was
+    assert.deepEqual(saved.filter((_, i) => i !== 2), was.filter((_, i) => i !== 2), f);
+    n++;
+    if (was[8] && was[8] !== 'USD') nonUsd++;
+    if (hasDuplicateKeys(db) || !db.tables.PROJECT?.rows.length) continue;
+    const back = parseP6Xml(writeP6Xml(db, {} as never)).db;
+    const again = head(writeXer(back, { version: db.header.version || '19.12', encoding: 'utf8' as never }));
+    assert.equal(again[8], was[8], `${f}: currency through P6 XML`);
+    assert.deepEqual(again.filter((_, i) => i !== 2), was.filter((_, i) => i !== 2), `${f}: header through P6 XML`);
+    xmlN++;
+  }
+  assert.ok(n >= 50 && nonUsd >= 5 && xmlN >= 40, `${n} samples, ${nonUsd} with a currency other than USD, ${xmlN} through XML`);
 });
