@@ -181,3 +181,17 @@ test('Anthropic workspace header is sent as anthropic-workspace-id whatever the 
   }
   assert.equal(buildRequest({ ...base, provider: 'openai', extraHeaders: 'WORKSPACE-ID: w' }, 'k', req).headers['WORKSPACE-ID'], 'w');
 });
+
+test("Anthropic max_tokens is the model's own output limit (models.dev), never a fixed smaller number", async () => {
+  const { __setModelsDevForTest } = await import('../main/modelsDev.ts');
+  const { anthropicMaxTokens, outputLimitFromRefusal, ANTHROPIC_FALLBACK_OUTPUT } = await import('../main/ai.ts');
+  __setModelsDevForTest({ anthropic: { models: { 'claude-opus-5-5': { limit: { output: 128000 } } } }, other: { models: { 'claude-cross': { limit: { output: 64000 } } } } });
+  const cfg = { enabled: true, provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com', model: 'claude-opus-5-5' };
+  assert.equal((buildRequest(cfg, 'k', req) as any).body.max_tokens, 128000);
+  assert.equal(anthropicMaxTokens('claude-cross'), 64000); // listed under another provider
+  assert.equal(anthropicMaxTokens('claude-unknown'), ANTHROPIC_FALLBACK_OUTPUT); // models.dev does not know it
+  assert.equal(outputLimitFromRefusal('max_tokens: 32768 > 8192, which is the maximum allowed number of output tokens for claude-x', 32768), 8192);
+  assert.equal(outputLimitFromRefusal('invalid x-api-key', 32768), null);
+  __setModelsDevForTest(null);
+  assert.equal((buildRequest(cfg, 'k', req) as any).body.max_tokens, ANTHROPIC_FALLBACK_OUTPUT); // not loaded yet
+});

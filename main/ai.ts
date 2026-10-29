@@ -3,6 +3,7 @@
 // Providers: Anthropic (Messages API) and anything OpenAI-compatible (OpenAI, OpenRouter, LM Studio, Ollama, ...).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { parseExtraBody, parseExtraHeaders, RESERVED_BODY, ANTHROPIC_REMOVED_BODY } from './ai-extras.ts';
+import { modelOutputLimit } from './modelsDev.ts';
 
 export type ProviderKind = 'anthropic' | 'openai';
 export interface AiConfig {
@@ -86,7 +87,22 @@ export class AiStore {
 export const ANTHROPIC_API_VERSION = '2026-10-21';
 /** The beta that carries thinking.block_binding. */
 const THINKING_BINDING_BETA = 'thinking-binding-controls-2026-08-01';
-// Anthropic max_tokens 16000: room for a WBS area of schedule operations in one tool call
+/** Anthropic requires max_tokens: the model's own output limit (models.dev), else what this model's refusal named
+ *  earlier (remembered for the process), else the known-safe 32768 that every current Claude model takes. Never a fixed
+ *  smaller number: a long tool call (a WBS area of schedule operations) must not be cut. The user's extra body still
+ *  overrides it. */
+export const ANTHROPIC_FALLBACK_OUTPUT = 32768;
+const learnedOutput = new Map<string, number>();
+export function anthropicMaxTokens(model: string): number {
+  return learnedOutput.get(model) ?? modelOutputLimit('anthropic', model) ?? ANTHROPIC_FALLBACK_OUTPUT;
+}
+/** A refusal of the asked max_tokens ("max_tokens: 64000 > 32000, which is the maximum allowed…"): the number to ask
+ *  instead, when the host named one below what was asked. */
+export function outputLimitFromRefusal(text: string, asked: number): number | null {
+  if (!/max_tokens|maximum (?:allowed )?(?:number of )?(?:output )?tokens/i.test(text)) return null;
+  const nums = (text.match(/\d{4,7}/g) ?? []).map(Number).filter((n) => n >= 1024 && n < asked);
+  return nums.length ? Math.max(...nums) : null;
+}
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 
 /** Build the HTTP request for a provider, with the user's extra headers and parameters (pure, so it can be tested). */
@@ -152,7 +168,7 @@ function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: strin
     return {
       url: `${base}${/\/v1$/.test(base) ? '' : '/v1'}/messages`,
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': ANTHROPIC_API_VERSION, ...(sendsThinking ? { 'anthropic-beta': THINKING_BINDING_BETA } : {}) },
-      body: { model: cfg.model, max_tokens: 16000, system: req.system, messages, tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })),
+      body: { model: cfg.model, max_tokens: anthropicMaxTokens(cfg.model), system: req.system, messages, tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })),
         ...(sendsThinking ? { thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } } : {}) },
     };
   }
@@ -222,6 +238,10 @@ export async function chat(store: AiStore, req: ChatRequest, signal?: AbortSigna
   let json: any;
   try { json = JSON.parse(text); } catch { json = null; }
   if (!res.ok) {
+    // The model takes fewer output tokens than asked and said how many: remember it and ask again (each retry asks less).
+    const asked = Number((r.body as { max_tokens?: unknown }).max_tokens);
+    const lower = cfg.provider === 'anthropic' && res.status === 400 ? outputLimitFromRefusal(text, asked) : null;
+    if (lower) { learnedOutput.set(cfg.model, lower); return chat(store, req, signal); }
     const msg = json?.error?.message ?? json?.error ?? json?.message ?? text.slice(0, 300);
     throw new Error(`The provider answered ${res.status}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
   }

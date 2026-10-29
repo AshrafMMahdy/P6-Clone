@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } from 'electron';
 import { AiStore, chat, type AiConfig, type ChatRequest } from './ai.ts';
+import { initModelsDev } from './modelsDev.ts';
 import { appendChat, clearChat, loadChat, moveChat } from './ai-chats.ts';
 import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -218,5 +219,5 @@ ipcMain.handle('confirm',async (_e, message: string, detail?: string) => {
   return r.response === 0;
 });
 
-app.whenReady().then(() => { registerBim(() => win); registerLob(() => win); createWindow(); });
+app.whenReady().then(() => { initModelsDev(join(app.getPath('userData'), 'models-dev.json')); registerBim(() => win); registerLob(() => win); createWindow(); });
 app.on('window-all-closed', () => app.quit());
