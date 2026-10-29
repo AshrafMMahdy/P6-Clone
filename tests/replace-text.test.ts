@@ -285,3 +285,15 @@ test('matches made through an Arabic or Hebrew prefix are listed with the word a
   t.task_name = 'Acme';
   assert.equal((applyOps(db, [{ op: 'replace_text', pairs: [{ find: 'Acme', replace: 'X' }] }]).results[0] as any).prefixed_matches, undefined);
 });
+
+test('every prefixed match is listed, however many (no count cap)', () => {
+  const db = load();
+  const t = task(db);
+  const L = [...'جحخدذرزسشص'];
+  const terms: string[] = [];
+  for (const a of L) for (const b of L) for (const c of L) terms.push(a + b + c);
+  t.task_name = terms.map((w) => 'و' + w).join(' ');
+  const r = applyOps(db, [{ op: 'replace_text', pairs: terms.map((w) => ({ find: w, replace: 'X' })) }]).results[0] as any;
+  assert.equal(r.prefixed_matches.length, 1000);
+  assert.equal(r.prefixed_total, 1000);
+});

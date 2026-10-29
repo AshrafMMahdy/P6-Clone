@@ -759,7 +759,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const total = tallies.reduce((n, x) => n + x.n, 0);
       const pm = [...prefixed.values()];
       return { replaced: total, pairs: c.pairs.map((p, i) => ({ find: p.find, replace: p.replace, replaced: tallies[i].n, where: tallies[i].where })),
-        ...(pm.length ? { prefixed_matches: pm.slice(0, 500), prefixed_total: pm.reduce((n, x) => n + x.count, 0), prefixed_note: 'These words were matched through a prefix (Arabic و ف ب ك ل ال, Hebrew ו ה ב ל מ ש כ), the prefix kept. A prefix letter can belong to another word (Hebrew שרון for רון): check this list.' } : {}) };
+        ...(pm.length ? { prefixed_matches: pm, prefixed_total: pm.reduce((n, x) => n + x.count, 0), prefixed_note: 'These words were matched through a prefix (Arabic و ف ب ك ل ال, Hebrew ו ה ב ל מ ש כ), the prefix kept. A prefix letter can belong to another word (Hebrew שרון for רון): check this list.' } : {}) };
     }
     case 'regenerate_guids': case 'clear_authors': {
       const p = h.project(op.project), dict = op.dictionaries !== false;
