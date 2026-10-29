@@ -97,28 +97,44 @@ test('extra headers and request parameters are merged, validated, and headers st
   assert.doesNotThrow(() => store.save({ ...cfg, provider: 'openai', extraBody: '{"temperature": 0.2}' }));
 });
 
-test('Anthropic requests name API version 2026-10-21 and hand thinking blocks back unchanged', () => {
+test('Anthropic requests name API version 2026-10-21 and hand the reply back as written, to its own model', () => {
   const cfg = { enabled: true, provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com', model: 'claude-opus-5-5' };
   const plain = buildRequest(cfg, 'k', req) as any;
   assert.equal(plain.headers['anthropic-version'], '2026-10-21');
   assert.equal(plain.body.thinking, undefined); // nothing to hand back: the model's own default
   assert.equal(plain.headers['anthropic-beta'], undefined);
-  const reply = parseReply(cfg, { content: [{ type: 'thinking', thinking: '', signature: 'SIG' }, { type: 'redacted_thinking', data: 'enc' }, { type: 'tool_use', id: 't1', name: 'get_activity', input: { activity_id: 'A1' } }], stop_reason: 'tool_use' });
-  assert.equal(reply.thinking?.length, 2);
-  assert.equal(reply.toolCalls[0].id, 't1'); // read by type, not position
-  const next = buildRequest(cfg, 'k', { system: 's', tools: [], messages: [
-    { role: 'user', content: 'q' },
-    { role: 'assistant', content: '', toolCalls: reply.toolCalls, thinking: reply.thinking },
-    { role: 'tool', toolCallId: 't1', name: 'get_activity', content: '{}' },
-  ] }) as any;
-  const asst = next.body.messages[1].content;
-  assert.deepEqual(asst.map((b: any) => b.type), ['thinking', 'redacted_thinking', 'tool_use']);
-  assert.equal(asst[0].signature, 'SIG');
+  // an interleaved reply: thinking between the tool calls
+  const content = [{ type: 'thinking', thinking: '', signature: 'SIG' }, { type: 'tool_use', id: 't1', name: 'get_activity', input: { activity_id: 'A1' } },
+    { type: 'redacted_thinking', data: 'enc' }, { type: 'text', text: 'And the next.' }, { type: 'tool_use', id: 't2', name: 'get_activity', input: { activity_id: 'A2' } }];
+  const reply = parseReply(cfg, { content, stop_reason: 'tool_use' });
+  assert.deepEqual(reply.raw, { model: 'claude-opus-5-5', content });
+  assert.deepEqual(reply.toolCalls.map((c) => c.id), ['t1', 't2']); // read by type, not position
+  const conv = (over: Partial<{ content: string }> = {}) => ({ system: 's', tools: [], messages: [
+    { role: 'user' as const, content: 'q' },
+    { role: 'assistant' as const, content: over.content ?? reply.content, toolCalls: reply.toolCalls, raw: reply.raw },
+    { role: 'tool' as const, toolCallId: 't1', name: 'get_activity', content: '{}' },
+    { role: 'tool' as const, toolCallId: 't2', name: 'get_activity', content: '{}' },
+  ] });
+  const next = buildRequest(cfg, 'k', conv()) as any;
+  assert.deepEqual(next.body.messages[1].content, content); // exactly as returned, thinking in place
   assert.deepEqual(next.body.thinking, { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
   assert.equal(next.headers['anthropic-beta'], 'thinking-binding-controls-2026-08-01');
+  // the user's own beta header joins it (any spelling), and their own thinking setting keeps the binding
+  const own = buildRequest({ ...cfg, extraHeaders: 'Anthropic-Beta: context-1m-2025-08-07', extraBody: '{"thinking": {"type": "adaptive", "display": "summarized"}}' }, 'k', conv()) as any;
+  assert.equal(own.headers['anthropic-beta'], 'thinking-binding-controls-2026-08-01,context-1m-2025-08-07');
+  assert.equal(Object.keys(own.headers).filter((n) => n.toLowerCase() === 'anthropic-beta').length, 1);
+  assert.deepEqual(own.body.thinking, { type: 'adaptive', display: 'summarized', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
+  // another model, or a reply whose text changed, goes without thinking and without the thinking setting
+  const other = buildRequest({ ...cfg, model: 'claude-haiku-4-5' }, 'k', conv()) as any;
+  assert.ok(!other.body.messages[1].content.some((b: any) => b.type === 'thinking' || b.type === 'redacted_thinking'));
+  assert.equal(other.body.thinking, undefined);
+  const edited = buildRequest(cfg, 'k', conv({ content: 'something else' })) as any;
+  assert.ok(!edited.body.messages[1].content.some((b: any) => b.type === 'thinking'));
+  assert.equal(edited.body.thinking, undefined);
   const none = parseReply(cfg, { content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' });
-  assert.equal(none.thinking, undefined);
+  assert.equal(none.raw, undefined);
 });
+
 
 test('extra headers tolerate pasted text: spaces in names, typographic dashes, invisible characters', async () => {
   const { parseExtraHeaders } = await import('../main/ai-extras.ts');

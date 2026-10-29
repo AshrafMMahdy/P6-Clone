@@ -20,10 +20,13 @@ export interface ToolCall { id: string; name: string; args: Record<string, unkno
 /** Provider-neutral chat message. */
 export type ChatMsg =
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; /** Anthropic thinking blocks, exactly as returned */ thinking?: unknown[] }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; /** Anthropic: the reply as returned (thinking in place), with its model */ raw?: AnthropicTurn }
   | { role: 'tool'; toolCallId: string; name: string; content: string };
 export interface ChatRequest { system: string; messages: ChatMsg[]; tools: ToolDef[] }
-export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: string; /** Anthropic: the reply's thinking blocks, unchanged */ thinking?: unknown[] }
+/** An Anthropic reply that held thinking blocks, kept whole (thinking, text and tool_use in their order) with the model
+ *  that wrote it: it goes back unchanged, to that model, while the stored text and tool calls are still that reply. */
+export interface AnthropicTurn { model: string; content: unknown[] }
+export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: string; raw?: AnthropicTurn }
 
 interface Stored extends AiConfig { key?: string; keyEnc?: boolean; keyHint?: string; headersEnc?: string }
 export interface KeyBox { available(): boolean; encrypt(s: string): string; decrypt(s: string): string }
@@ -95,7 +98,28 @@ export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { ur
   if (cfg.provider === 'anthropic') for (const n of Object.keys(headers)) {
     if (/^(anthropic)?workspace(id)?$/.test(n.toLowerCase().replace(/[^a-z]/g, '')) && n !== 'anthropic-workspace-id') { headers['anthropic-workspace-id'] = headers[n]; delete headers[n]; }
   }
-  return { url: r.url, headers: { ...r.headers, ...headers }, body: { ...(r.body as object), ...extra } };
+  const merged: Record<string, string> = { ...r.headers };
+  for (const [name, value] of Object.entries(headers)) {
+    // the user's own anthropic-beta joins the one the request needs (any spelling of the name), never replaces it
+    const own = name.toLowerCase() === 'anthropic-beta' ? Object.keys(merged).find((n) => n.toLowerCase() === 'anthropic-beta') : undefined;
+    if (own) { merged[own] = [merged[own], value].filter(Boolean).join(','); continue; }
+    merged[name] = value;
+  }
+  const body: Record<string, unknown> = { ...(r.body as object), ...extra };
+  // a user's own thinking setting keeps the binding the handed-back blocks need
+  const binding = (r.body as { thinking?: { block_binding?: unknown } }).thinking?.block_binding;
+  if (binding && extra.thinking && typeof extra.thinking === 'object') body.thinking = { ...(extra.thinking as object), block_binding: binding };
+  return { url: r.url, headers: merged, body };
+}
+
+/** The kept reply when it is still this message for this model (same text, same tool calls in order), else null. */
+function keptTurn(m: ChatMsg, model: string): unknown[] | null {
+  if (m.role !== 'assistant' || !m.raw || m.raw.model !== model) return null;
+  const blocks = m.raw.content as Array<{ type?: string; text?: string; id?: string }>;
+  const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n');
+  const ids = blocks.filter((b) => b.type === 'tool_use').map((b) => String(b.id));
+  const calls = (m.toolCalls ?? []).map((c) => c.id);
+  return text === m.content && ids.length === calls.length && ids.every((id, i) => id === calls[i]) ? m.raw.content : null;
 }
 
 function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
@@ -104,8 +128,8 @@ function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: strin
     const messages: unknown[] = [];
     for (const m of req.messages) {
       if (m.role === 'user') messages.push({ role: 'user', content: m.content });
-      // its thinking blocks go back first and unchanged: models that think by default need them beside the tool_use
-      else if (m.role === 'assistant') messages.push({ role: 'assistant', content: [...(m.thinking ?? []), ...(m.content ? [{ type: 'text', text: m.content }] : []), ...(m.toolCalls ?? []).map((t) => ({ type: 'tool_use', id: t.id, name: t.name, input: t.args }))] });
+      // the reply as the model wrote it, thinking in place, while it is still that reply for this model; else without thinking
+      else if (m.role === 'assistant') messages.push({ role: 'assistant', content: keptTurn(m, cfg.model) ?? [...(m.content ? [{ type: 'text', text: m.content }] : []), ...(m.toolCalls ?? []).map((t) => ({ type: 'tool_use', id: t.id, name: t.name, input: t.args }))] });
       else {
         // consecutive tool results go into one user message
         const prev = messages[messages.length - 1] as { role: string; content: unknown[] } | undefined;
@@ -117,7 +141,7 @@ function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: strin
     // Thinking blocks going back are bound to the context before them on Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5, and
     // the conversation is shortened as it grows (renderer/ai/context.ts): "drop_block" drops a block whose context changed
     // instead of failing the request. Models without the check accept it.
-    const sendsThinking = req.messages.some((m) => m.role === 'assistant' && (m.thinking?.length ?? 0) > 0);
+    const sendsThinking = req.messages.some((m) => m.role === 'assistant' && keptTurn(m, cfg.model) !== null);
     return {
       url: `${base}${/\/v1$/.test(base) ? '' : '/v1'}/messages`,
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': ANTHROPIC_API_VERSION, ...(sendsThinking ? { 'anthropic-beta': THINKING_BINDING_BETA } : {}) },
@@ -150,7 +174,7 @@ export function parseReply(cfg: AiConfig, json: any): ChatReply {
       content: blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'),
       toolCalls: blocks.filter((b) => b.type === 'tool_use').map((b) => ({ id: String(b.id), name: String(b.name), args: b.input ?? {} })),
       stop: String(json?.stop_reason ?? ''),
-      ...(blocks.some((b) => b.type === 'thinking' || b.type === 'redacted_thinking') ? { thinking: blocks.filter((b) => b.type === 'thinking' || b.type === 'redacted_thinking') } : {}),
+      ...(blocks.some((b) => b.type === 'thinking' || b.type === 'redacted_thinking') ? { raw: { model: cfg.model, content: blocks } } : {}),
     };
   }
   const m = json?.choices?.[0]?.message ?? {};

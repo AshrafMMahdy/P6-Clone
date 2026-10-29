@@ -8,7 +8,7 @@ const CONTEXT_CHARS = 240_000; // about 60k tokens of conversation sent per requ
  * shortened first, then the oldest whole questions are dropped (the latest questions are always kept in full).
  */
 export function compactHistory(h: ChatMsg[], limit = CONTEXT_CHARS): ChatMsg[] {
-  const size = (m: ChatMsg[]) => m.reduce((a, x) => a + (x.content?.length ?? 0) + JSON.stringify((x as { toolCalls?: unknown }).toolCalls ?? '').length + JSON.stringify((x as { thinking?: unknown }).thinking ?? '').length, 0);
+  const size = (m: ChatMsg[]) => m.reduce((a, x) => a + (x.content?.length ?? 0) + JSON.stringify((x as { toolCalls?: unknown }).toolCalls ?? '').length + JSON.stringify((x as { raw?: unknown }).raw ?? '').length, 0);
   if (size(h) <= limit) return h;
   const userIdx = h.map((m, i) => (m.role === 'user' ? i : -1)).filter((i) => i >= 0);
   const keepFrom = userIdx[Math.max(0, userIdx.length - 2)] ?? 0; // the last two questions stay untouched

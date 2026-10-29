@@ -124,8 +124,8 @@ export function AssistantPanel() {
         const allow = cfg.actions !== false;
         const r = await window.p6.aiChat(id, { system: systemPrompt(allow), messages: compactHistory(history.current), tools: allow ? [...TOOLS, ...LIVE_TOOLS] : TOOLS });
         if (!r.ok) { add({ who: 'error', text: r.error }); break; }
-        const { content, toolCalls, thinking } = r.reply;
-        push({ role: 'assistant', content, toolCalls, ...(thinking?.length ? { thinking } : {}) });
+        const { content, toolCalls, raw } = r.reply;
+        push({ role: 'assistant', content, toolCalls, ...(raw ? { raw } : {}) });
         if (content.trim() && !toolCalls.length) add({ who: 'ai', text: content.trim() });
         if (!toolCalls.length) break;
         // answer each lookup from the database (fresh context each round: the project may have changed)

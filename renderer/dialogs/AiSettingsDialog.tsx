@@ -44,7 +44,7 @@ export function AiSettingsDialog() {
     const r = await window.p6.aiChat(`test-${Date.now()}`, { system: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'Say OK' }], tools: [] });
     setTestMsg(r.ok ? `Connected. The model replied: "${r.reply.content.trim().slice(0, 80)}"` : `Failed: ${r.error}`);
   };
-  const removeKey = async () => { setBusy(true); try { const n = await window.p6.aiSetConfig({ enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, actions: cfg.actions, extraHeaders: cfg.extraHeaders, extraBody: cfg.extraBody }, ''); setCfg(n); setChangingKey(true); toast('API key removed'); } finally { setBusy(false); } };
+  const removeKey = async () => { setBusy(true); try { const n = await window.p6.aiSetConfig({ enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, actions: cfg.actions, extraHeaders: cfg.extraHeaders, extraBody: cfg.extraBody }, ''); setCfg(n); setChangingKey(true); toast('API key removed'); } catch (e) { toast(`The key was not removed: ${(e as Error).message}`); } finally { setBusy(false); } };
 
   return (
     <Dialog title="AI Assistant Settings" width={640} height={560} buttons={<>
