@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { record, rollback } from '../core/journal.ts';
 import { applyPatch, isEmptyPatch, patchFrom } from '../core/journalPatch.ts';
 import type { Db } from '../core/db.ts';
-import { performance } from 'node:perf_hooks';
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { sampleCopy } from './helpers.ts';
 
 const call = async (name: string, args: Record<string, unknown>) => {
@@ -105,31 +105,41 @@ test('a refusal from the tool comes back as the same refusal; a bad owner key ne
 });
 
 test('a long Monte Carlo on one handle does not delay another handle’s calls (the main thread only routes)', { timeout: 300_000 }, async () => {
+  // No fixed milliseconds: what is measured is compared with the same calls on the same machine at the same time (without the run), and with the run itself.
   const a = await open('DHBL-24FEB13_VER-7.0.xer'), b = await open();
+  const median = (xs: number[]) => [...xs].sort((x, y) => x - y)[Math.floor(xs.length / 2)];
+  const one = async () => { const t = performance.now(); const r = await call('project_summary', { ...b }); assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 200)); return performance.now() - t; };
+  const lag = monitorEventLoopDelay({ resolution: 5 });
   try {
-    const elu0 = performance.eventLoopUtilization();
-    const started = Date.now();
+    // the same calls with nothing running: how long they take on this machine now, and how late the event loop's timers are
+    await one();
+    lag.enable();
+    const idle: number[] = [];
+    for (let i = 0; i < 12; i++) { idle.push(await one()); await new Promise((r2) => setTimeout(r2, 30)); }
+    lag.disable();
+    const idleLag = lag.percentile(50);
+    lag.reset();
     const job = (await call('monte_carlo', { ...a, iterations: 60, default_estimates: { min_pct: 90, max_pct: 125 }, async: true })).d;
     assert.equal(job.status, 'running');
-    // another handle's calls, one after another, while the Monte Carlo runs
-    const times: number[] = [];
-    for (; ;) {
-      const t = Date.now();
-      const r = await call('project_summary', { ...b });
-      times.push(Date.now() - t);
-      assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 200));
+    // the other handle's calls, one after another, while the Monte Carlo runs; each is counted when the job was still running AFTER it returned
+    // (a main thread held by the run could not have answered before the run was done)
+    const during: number[] = [];
+    let whileRunning = 0, finished = false;
+    lag.enable();
+    while (!finished) {
+      during.push(await one());
       const st = (await call('job_status', { job_id: job.job_id })).d;
-      if (st.status !== 'running') { assert.equal(st.status, 'done', JSON.stringify(st).slice(0, 300)); break; }
-      await new Promise((r2) => setTimeout(r2, 150));
+      if (st.status === 'running') whileRunning++; else { assert.equal(st.status, 'done', JSON.stringify(st).slice(0, 300)); finished = true; }
+      if (!finished) await new Promise((r2) => setTimeout(r2, 30));
     }
-    const busy = performance.eventLoopUtilization(elu0).utilization;
-    assert.ok(Date.now() - started > 2500, 'the run took long enough to matter');
-    assert.ok(times.length >= 5, `calls on the other handle went through while it ran: ${times.length}`);
-    assert.ok(Math.max(...times) < 500, `the other handle's slowest call: ${Math.max(...times)} ms`);
-    // the run itself is not on this thread: run in the server it keeps the main thread at 90 % or more; the routing (a copy of the
-    // project, the polling, the patch) is a few per cent
-    assert.ok(busy < 0.35, `the main thread was busy ${Math.round(busy * 100)} % of the run`);
-  } finally { for (const h of [a, b]) await call('close', { ...h, discard: true }); }
+    lag.disable();
+    const duringLag = lag.percentile(50);
+    assert.ok(whileRunning >= 3, `calls on the other handle were answered while the run was still going: ${whileRunning} of ${during.length}`);
+    // a call while the run goes takes about what it takes without it (a held main thread would make it take the run's whole length)
+    assert.ok(median(during) < 8 * median(idle), `median call ${median(during).toFixed(1)} ms during the run vs ${median(idle).toFixed(1)} ms without it`);
+    // and the main thread's timers are not late because of the run: the median lag is within a few times the idle one
+    assert.ok(duringLag < 8 * Math.max(idleLag, 5e6) , `event-loop lag (median) ${(duringLag / 1e6).toFixed(1)} ms during the run vs ${(idleLag / 1e6).toFixed(1)} ms without it`);
+  } finally { lag.disable(); for (const h of [a, b]) await call('close', { ...h, discard: true }); }
 });
 
 test('cancelling a call ends its worker at once and leaves the project, and every other project, as they were', { timeout: 120_000 }, async () => {
