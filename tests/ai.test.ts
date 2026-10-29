@@ -136,7 +136,7 @@ test('Anthropic requests name API version 2026-10-21 and hand the reply back as 
 });
 
 
-test('OpenAI-compatible hosts get their own reasoning field back on their own turns (DeepSeek needs it)', () => {
+test('the reasoning_content hosts get their reasoning back on their own turns (DeepSeek, Kimi need it); no other host does', () => {
   const cfg = { enabled: true, provider: 'openai' as const, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4' };
   const tools = [{ name: 'get_activity', description: 'd', parameters: { type: 'object', properties: {} } }];
   const reply = parseReply(cfg, { choices: [{ message: { content: '', reasoning_content: 'look it up', tool_calls: [{ id: 'c1', function: { name: 'get_activity', arguments: '{}' } }] }, finish_reason: 'tool_calls' }] });
@@ -151,9 +151,13 @@ test('OpenAI-compatible hosts get their own reasoning field back on their own tu
   const other = buildRequest({ ...cfg, model: 'deepseek-v4-flash' }, 'k', conv(reply.raw)) as any;
   assert.equal(other.body.messages[2].reasoning_content, ''); // another model's turn: the field DeepSeek requires, empty
   const generic = buildRequest({ ...cfg, baseUrl: 'http://127.0.0.1:1234/v1', model: 'deepseek-v4-flash' }, 'k', conv(reply.raw)) as any;
-  assert.ok(!('reasoning_content' in generic.body.messages[2])); // an unknown host gets no field it did not send
+  assert.ok(!('reasoning_content' in generic.body.messages[2])); // an unknown host gets no reasoning field
   const local = parseReply({ ...cfg, baseUrl: 'http://127.0.0.1:1234/v1' }, { choices: [{ message: { content: 'hi', reasoning: 'r' } }] });
   assert.deepEqual(local.raw, { model: 'deepseek-v4', field: 'reasoning', value: 'r' });
+  const groq = buildRequest({ ...cfg, baseUrl: 'https://api.groq.com/openai/v1' }, 'k', conv(local.raw)) as any;
+  assert.ok(!('reasoning' in groq.body.messages[2]) && !('reasoning_content' in groq.body.messages[2])); // never echoed to a host that may refuse it
+  const kimi = buildRequest({ ...cfg, baseUrl: 'https://api.moonshot.ai/v1', model: 'kimi-k3' }, 'k', conv(reply.raw)) as any;
+  assert.equal(kimi.body.messages[2].reasoning_content, ''); // Kimi needs the field too
   const anth = buildRequest({ enabled: true, provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'deepseek-v4' }, 'k', conv(reply.raw)) as any;
   assert.ok(Array.isArray(anth.body.messages[1].content) && !anth.body.thinking); // never read as an Anthropic turn
 });

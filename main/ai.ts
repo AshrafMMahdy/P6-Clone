@@ -157,14 +157,18 @@ function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: strin
     };
   }
   const base = trimSlash(cfg.baseUrl || 'https://api.openai.com/v1');
-  const needsReasoningField = /(^|\.)deepseek\.com$/i.test(hostOf(base));
+  // The reasoning_content family takes its reasoning back on its own turns; DeepSeek and Kimi refuse a tool conversation's
+  // assistant turn without the field. Other hosts get nothing back (some return a field they refuse as input: Groq).
+  const host = hostOf(base);
+  const echoesReasoning = /(^|\.)(deepseek\.com|moonshot\.(ai|cn)|kimi\.(ai|com)|z\.ai|bigmodel\.cn|aliyuncs\.com)$/i.test(host);
+  const needsReasoningField = /(^|\.)(deepseek\.com|moonshot\.(ai|cn)|kimi\.(ai|com))$/i.test(host);
   const messages: unknown[] = [{ role: 'system', content: req.system }];
   for (const m of req.messages) {
     if (m.role === 'user') messages.push({ role: 'user', content: m.content });
     else if (m.role === 'assistant') {
-      // The model's own reasoning back in the field it came in; DeepSeek also needs the field on a turn another model
-      // wrote (empty) once tools are in the conversation.
-      const own = m.raw && 'field' in m.raw && m.raw.model === cfg.model ? { [m.raw.field]: m.raw.value } : needsReasoningField && req.tools.length ? { reasoning_content: '' } : {};
+      // The model's own reasoning back on these hosts; DeepSeek and Kimi also need the field (empty) on a turn another
+      // model wrote once tools are in the conversation.
+      const own = echoesReasoning && m.raw && 'field' in m.raw && m.raw.model === cfg.model ? { reasoning_content: m.raw.value } : needsReasoningField && req.tools.length ? { reasoning_content: '' } : {};
       messages.push({ role: 'assistant', content: m.content || null, ...own, ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((t) => ({ id: t.id, type: 'function', function: { name: t.name, arguments: JSON.stringify(t.args) } })) } : {}) });
     }
     else messages.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
