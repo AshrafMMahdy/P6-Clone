@@ -4,7 +4,7 @@
 // 3. XER -> P6 XML -> read back equals the XER, field for field, on every sample, for every field that is carried.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseXer } from '../core/xer/parse.ts';
@@ -32,7 +32,7 @@ test('everything the P6 XML writer writes is an element or field of P6\'s XML sc
     }
   };
   let checked = 0;
-  for (const f of samples.slice(0, 40)) {
+  for (const f of samples.filter((x) => statSync(join(SAMPLES_DIR, x)).size < 8 * 1048576).slice(0, 40)) { // (read back as whole trees: the files under 8 MB, memory a test run can spare)
     const db = load(f);
     if (!db) continue;
     const root = parseXml(writeP6Xml(db, {} as never)).children[0];
@@ -301,7 +301,8 @@ test('the elements are written in the order of P6\'s schema (the xsd:sequence of
     }
   };
   let n = 0;
-  for (const f of samples.slice(0, 40)) {
+  // (the document is read back as a whole tree here: the files under 8 MB, which is memory a test run can spare)
+  for (const f of samples.filter((x) => statSync(join(SAMPLES_DIR, x)).size < 8 * 1048576).slice(0, 40)) {
     const db = load(f);
     if (!db) continue;
     if (n === 0 && db.tables.PROJECT?.rows.length) db.tables.PROJECT.rows.push({ ...db.tables.PROJECT.rows[0], proj_id: '99999', _baseline_of: db.tables.PROJECT.rows[0].proj_id });

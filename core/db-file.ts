@@ -3,7 +3,7 @@
 // {"table", fields} line followed by {"rows"} lines of at most ROWS_PER_LINE rows.
 import { ValuePool, type Db, type PoolColumn } from './db.ts';
 
-const ROWS_PER_LINE = 5000;
+const ROWS_PER_LINE = 1000; // (older files have up to 5000; any number reads the same)
 
 /** The lines of a database file, made one at a time (the whole file never has to be in memory as text). */
 export function* dbLines(db: Db, ui: unknown): Generator<string> {

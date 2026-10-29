@@ -46,7 +46,7 @@ const jobs = new Map(), waiting = new Map();
 let lastStatus = null; // server_status as the main thread last answered it
 let beat = Date.now(), buf = '';
 const write = (s) => { const b = Buffer.from(s + '\n', 'utf8'); for (let at = 0; at < b.length;) { try { at += fs.writeSync(1, b, at, b.length - at); } catch (e) { if (e.code !== 'EAGAIN') throw e; } } };
-const result = (out) => ({ content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out, isError: false });
+const result = (out) => ({ content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out, isError: false });
 const fallback = (id) => {
   const w = waiting.get(id); if (!w) return;
   if (Date.now() - beat < 400) { w.timer = setTimeout(() => fallback(id), 150); return; }

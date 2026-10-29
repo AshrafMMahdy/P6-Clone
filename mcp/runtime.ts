@@ -16,7 +16,8 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { cwdLost } from '../core/cwd.ts';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { getHeapStatistics } from 'node:v8';
+import { getHeapStatistics, setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { ABSENT, record, recordAsync, rollback, type Journal } from '../core/journal.ts';
 import { dbLines, DbReader } from '../core/db-file.ts';
 import type { Db } from '../core/db.ts';
@@ -253,6 +254,27 @@ export function createSession(db: Db, init: { path: string | null; format: Forma
   sessions.set(s.handle, s);
   return s;
 }
+/** A full garbage collection, on demand: what a big parse or a long page walk left is garbage the heap would keep for a long time (an 8 GB heap limit means no pressure), and it is what makes the
+ *  process's memory 2-3 times the project's. V8 hands the freed pages back to the system after it. (No flag at start: gc is exposed at run time.) */
+let gcFn: (() => void) | null | undefined;
+let heapAfterGc = 0;
+export function releaseMemory(): void {
+  if (gcFn === undefined) { try { setFlagsFromString('--expose-gc'); gcFn = runInNewContext('gc') as () => void; } catch { gcFn = null; } }
+  const trace = process.env.P6CLONE_GC_TRACE ? [process.memoryUsage(), Date.now()] as const : null;
+  gcFn?.();
+  heapAfterGc = getHeapStatistics().used_heap_size;
+  if (trace) { const m = process.memoryUsage(); process.stderr.write(`${Date.now()} gc: heap ${Math.round(trace[0].heapUsed / 1048576)} -> ${Math.round(m.heapUsed / 1048576)} MB, rss ${Math.round(trace[0].rss / 1048576)} -> ${Math.round(m.rss / 1048576)} MB, ${Date.now() - trace[1]} ms\n`); }
+}
+/** Called as answers are made: when the heap has grown 64 MB since the last full collection (a page walk, a big answer, a parse), one is done as soon as the call in hand has answered. */
+export function releaseIfGrown(): void { if (getHeapStatistics().used_heap_size - heapAfterGc > 64 * 1048576) releaseSoon(); }
+let releaseQueued = false;
+/** The same, once the call in hand has answered (never in the middle of one). */
+export function releaseSoon(): void { if (releaseQueued) return; releaseQueued = true; setImmediate(() => { releaseQueued = false; releaseMemory(); }); }
+/** A file this big is measured, not estimated, once read (a gc before and after tells what the project holds), and its memory released. */
+export const MEASURE_FILE_BYTES = 4 * 1048576;
+/** The memory a project holds as it is read: the heap it adds (after a full gc) plus a quarter for undo and schedule work; the estimate stays for files too small to be worth a gc. */
+export const heapNow = (): number => { releaseMemory(); return process.memoryUsage().heapUsed; };
+export const retainedBytes = (heapBefore: number): number => Math.max(8 * 1048576, Math.round((heapNow() - heapBefore) * 1.25));
 export const estimateBytes = (fileBytes: number) => Math.round(fileBytes * config.memFactor) + 8 * 1048576;
 /** Memory held outside the projects (4D models shared by projects) and reserved by work in flight (a model being read,
  *  its geometry process): counted in the same budget. */
@@ -325,7 +347,10 @@ function writeProject(s: Session): string {
   const file = join(myDir(), `${s.handle}.p6db.jsonl`), tmp = `${file}.${randomBytes(3).toString('hex')}.tmp`;
   // line by line: a big project's file is larger than the longest possible string
   const fd = openSync(tmp, 'w');
-  try { for (const l of dbLines(s.db, null)) writeSync(fd, l + '\n'); } finally { closeSync(fd); }
+  // (a project's lines are megabytes of text each, and nothing frees them until the heap is collected: written like this a 68 MB XER's checkpoint, two seconds after it was opened, took
+  // the process from 380 to 660 MB; so the line is written as it is (no copy with the newline), and a collection is done every 32 MB)
+  let since = 0;
+  try { for (const l of dbLines(s.db, null)) { writeSync(fd, l); writeSync(fd, '\n'); since += l.length; if (since > 32e6) { since = 0; releaseMemory(); } } } finally { closeSync(fd); }
   renameSync(tmp, file);
   return file;
 }
@@ -436,6 +461,7 @@ export function* unsavedEvicted(): Generator<{ handle: string; path: string | nu
 }
 export const isDirty = (h: string) => sessions.get(h)?.dirty ?? evicted.get(h)?.dirty ?? false;
 export function closeSession(s: Session): void {
+  if (s.bytes >= 32 * 1048576) releaseSoon(); // (a big project's memory goes back to the system)
   sessions.delete(s.handle); clearTimeout(pendingCk.get(s.handle));
   for (const m of [evicted, checkpoints]) { const e = m.get(s.handle); if (e) { putAside(e.file, { handle: s.handle, path: s.savedTo ?? s.path, dirty: s.dirty, changedAt: s.changedAt ?? null }); m.delete(s.handle); } }
   saveIndex();
@@ -598,7 +624,7 @@ export const setProgress = (job: Job | undefined, msg: string) => { if (job) job
 export function status() {
   const m = process.memoryUsage();
   return {
-    memory: { rss_bytes: m.rss, rss_mb: Math.round(m.rss / 1048576), heap_used_mb: Math.round(m.heapUsed / 1048576), budget_mb: Math.round(effectiveBudget() / 1048576), projects_mb: Math.round(usedBytes() / 1048576), reserved_mb: Math.round(reserved / 1048576), heap_limit_mb: Math.round(getHeapStatistics().heap_size_limit / 1048576) },
+    memory: { rss_bytes: m.rss, rss_mb: Math.round(m.rss / 1048576), heap_used_mb: Math.round(m.heapUsed / 1048576), heap_total_mb: Math.round(m.heapTotal / 1048576), external_mb: Math.round(m.external / 1048576), array_buffers_mb: Math.round(m.arrayBuffers / 1048576), budget_mb: Math.round(effectiveBudget() / 1048576), projects_mb: Math.round(usedBytes() / 1048576), reserved_mb: Math.round(reserved / 1048576), heap_limit_mb: Math.round(getHeapStatistics().heap_size_limit / 1048576) },
     limits: { max_handles: config.maxHandles, idle_minutes: config.idleMinutes, busy_wait_seconds: config.busyWaitMs / 1000, root: config.root, read_root: config.readRoot, write_root: writeBase(), owner_key_required: config.requireOwnerKey },
     open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, memory_mb: Math.round(s.bytes / 1048576), idle_seconds: Math.round((Date.now() - s.lastUsed) / 1000), busy: busy.has(s.handle), unsaved_changes: s.dirty, changes: s.history.length })),
     moved_out: evictedList(),

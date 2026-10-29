@@ -69,7 +69,7 @@ import { nowStamp } from '../core/report/reports.ts';
 import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler } from '../core/risk/montecarlo.ts';
 import { dayHours } from '../core/project/units.ts';
 import {
-  ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
+  MEASURE_FILE_BYTES, heapNow, releaseIfGrown, retainedBytes, ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
   exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
 } from './runtime.ts';
 
@@ -270,6 +270,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       // reserve the memory first, so a big file is refused (with a way forward) instead of exhausting the process: the
       // project as it stays in memory, and while it is read the reader's own peak above that (workset.ts READ_PEAK)
       const s0 = createSession({ tables: {} }, { path, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: need, dirty: false });
+      const heap0 = size >= MEASURE_FILE_BYTES ? heapNow() : 0; // (a big file: what the project holds is measured once it is read)
       let reading = () => {};
       try { const peak = readPeak(format0, size); if (peak > need) reading = reserveMemory(peak - need, `Reading ${basename(path)} (${Math.round(size / 1048576)} MB)`, 'save it as XER from P6 or Microsoft Project (the XER reader needs the least), or split it by project', s0.handle); }
       catch (e) { closeSession(s0); forgetEvicted(s0.handle); throw e; }
@@ -288,6 +289,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
             { data: { fatal: f.filter((x) => x.severity === 'fatal').slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
         }
         s0.db = r.db; s0.openProblems = openProblemsOf(r.db); s0.format = format; /* (openProblems: what P6 would reject in the file as it is; save refuses only what edits add) */ s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
+        if (size >= MEASURE_FILE_BYTES) { s0.bytes = retainedBytes(heap0); } // what the project really holds (heap after a full gc, +25 % for undo and schedule work), and the parse's garbage given back
         load4dSidecar(r.db, path); // <file>.4d.json: the 4D model and links saved with it
         // <file>.lob.json: the LOB models as last saved (used when a notebook was damaged outside the clone)
         const lobSide = readLobSidecar(path);
@@ -656,7 +658,9 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; return work(); }), abort); return { out: { job_id: job.id, status: 'running', note: 'Call job_status with this job_id for the result.' }, isError: false }; }
     const p = work();
     const timeout = Symbol('timeout');
-    const r = await Promise.race([p, new Promise((res) => setTimeout(() => res(timeout), config.softTimeoutMs).unref?.())]);
+    // (the timer is cleared once the call answers: left running, its promise held the race's result - the whole answer, a page of 500 rows - for the soft timeout, call after call)
+    let soft: ReturnType<typeof setTimeout> | undefined;
+    const r = await Promise.race([p, new Promise((res) => { soft = setTimeout(() => res(timeout), config.softTimeoutMs); soft.unref?.(); })]).finally(() => clearTimeout(soft));
     if (r === timeout) { const job = startJob(name, handle, p, abort); return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
     const o = r as { ok?: boolean; status?: string; error?: Record<string, unknown> } | null;
     // a refusal answered as data (ok: false), and a job that failed or was cancelled, are errors too
@@ -735,8 +739,17 @@ export function shutdown(reason: string): void {
 /** An MCP tools/call result; oversized output is cut down to a preview instead of flooding the client, and the whole
  *  result is written to a JSON file (in the write root, else the storage root, else the system's temporary folder)
  *  whose path the answer gives, so none of it is out of reach. */
+/** A page of table rows is sent once: structuredContent carries the rows, and the text part is a line saying what the page is when the rows would make it big (read_table pages: 500 rows of
+ *  61 columns are 400 KB, and the same rows pretty-printed beside them doubled that, and the memory of every page walk). Everything else is compact JSON: no pretty-printing. */
+const PAGE_TEXT_CHARS = 16_000;
 export function toolResult(out: unknown, isError: boolean, tool?: string) {
-  let text = JSON.stringify(out, null, 1);
+  let text = JSON.stringify(out);
+  if (tool === 'read_table' && !isError && text.length > PAGE_TEXT_CHARS && out && typeof out === 'object' && Array.isArray((out as { rows?: unknown }).rows)) {
+    const o = out as { table?: string; columns?: unknown[]; rows: unknown[]; total?: number; offset?: number; next_offset?: number };
+    releaseIfGrown();
+    return { content: [{ type: 'text', text: `read_table ${o.table ?? ''}: rows ${(o.offset ?? 0) + 1}-${(o.offset ?? 0) + o.rows.length} of ${o.total ?? '?'}, ${o.columns?.length ?? '?'} columns${o.next_offset != null ? `; next_offset ${o.next_offset}` : '; last page'}. The columns and rows are in structuredContent.` }], structuredContent: out, isError };
+  }
+  releaseIfGrown();
   let structured = out && typeof out === 'object' && !Array.isArray(out) ? out : { result: out };
   if (text.length > config.maxResponseChars) {
     let saved: string | null = null;
@@ -753,7 +766,7 @@ export function toolResult(out: unknown, isError: boolean, tool?: string) {
       note: saved ? `The result was too large to return whole (${text.length} characters); all of it is in ${saved} (JSON). Read that file, or ask for less (limit and offset, max_rows, filters, a narrower project).`
         : 'The result was too large to return whole and could not be written to a file; ask for less (limit and offset, max_rows, filters, a narrower project) or write it to a file (run_report / export_* with path).',
       preview: text.slice(0, 20000) };
-    text = JSON.stringify(structured, null, 1);
+    text = JSON.stringify(structured);
   }
   return { content: [{ type: 'text', text }], structuredContent: structured, isError };
 }

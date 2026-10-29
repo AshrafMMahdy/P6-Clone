@@ -38,7 +38,7 @@ test('DHBL: update_assignment on all 17,958 assignments in a few seconds (was 20
   let r: any;
   const t = await secs(async () => { r = await ok(s, ops); });
   console.log(`update_assignment x${ops.length}: ${t.toFixed(2)} s`);
-  assert.ok(r.applied === ops.length || r.preview?.includes(`"applied": ${ops.length}`), JSON.stringify(r).slice(0, 300)); // a 2 MB answer comes back truncated
+  assert.ok(r.applied === ops.length || new RegExp(`"applied":\\s*${ops.length}`).test(r.preview ?? ""), JSON.stringify(r).slice(0, 300)); // a 2 MB answer comes back truncated
   assert.ok(t < 20, `${t.toFixed(1)} s`);
   // each assignment got its own value (the first one of that resource on that activity, as before)
   const byId = new Map(T(s, 'TASKRSRC').map((a) => [a.taskrsrc_id, a]));

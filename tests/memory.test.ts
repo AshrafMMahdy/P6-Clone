@@ -68,3 +68,50 @@ test('a 31,000-operation edit (20,000 assign_code) stays linear in time and memo
   // CPU time, not wall time: a loaded machine (other tests, other sessions) stretches the wall clock, not the work
   assert.ok(out.seconds < 30, `the edit took ${out.seconds} s of CPU`);
 });
+
+// ---- the server: what a call leaves behind, what projects_mb says, how the answers are sent (clone memory on a 68 MB XER)
+test('server: a call leaves nothing behind (the soft-timeout timer held every answer for 30 s), pages are sent once and compact, a big file is measured', { timeout: 120_000 }, async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const rt = await import('../mcp/runtime.ts');
+  const { sampleCopy } = await import('./helpers.ts');
+  const path = sampleCopy('DHBL-24FEB13_VER-7.0.xer'); // 12 MB
+  const size = (await import('node:fs')).statSync(path).size;
+  const o = await callTool('open_file', { path });
+  const h = (toolResult(o.out, o.isError).structuredContent as any).handle;
+  const s = rt.getSession(h);
+  // a file this big is measured, not estimated: what the project holds (heap after a full collection) plus a quarter, below the 3x estimate and above what is really held
+  assert.ok(s.bytes < rt.estimateBytes(size), `projects_mb ${Math.round(s.bytes / 1048576)} is measured, under the estimate ${Math.round(rt.estimateBytes(size) / 1048576)}`);
+  assert.ok(s.bytes > 0.5 * size, `and not under half the file: ${Math.round(s.bytes / 1048576)} MB`);
+  const st = (toolResult((await callTool('server_status', {})).out, false).structuredContent as any).memory;
+  for (const k of ['heap_total_mb', 'external_mb', 'array_buffers_mb']) assert.equal(typeof st[k], 'number', k);
+  // a page: sent once. structuredContent holds the rows; the text is one line, not a second copy
+  const x = await callTool('read_table', { handle: h, table: 'TASK', limit: 500 });
+  const r = toolResult(x.out, x.isError, 'read_table');
+  const rows = (r.structuredContent as any).rows.length;
+  assert.equal(rows, 500);
+  assert.ok(r.content[0].text.length < 400 && /rows 1-500 of \d+/.test(r.content[0].text) && r.content[0].text.includes('structuredContent'), r.content[0].text);
+  // a small answer is compact JSON in the text part (no pretty-printing)
+  const small = toolResult((await callTool('read_table', { handle: h, table: 'TASK', limit: 2, columns: ['task_code'] })).out, false, 'read_table');
+  assert.equal(small.content[0].text, JSON.stringify(small.structuredContent));
+  // calls do not pile up: 150 pages of 500 rows leave less than a tenth of what they carried (the leak kept all of it)
+  const heap = () => { rt.releaseMemory(); return process.memoryUsage().heapUsed; };
+  const before = heap();
+  let carried = 0;
+  for (let i = 0; i < 150; i++) { const p = await callTool('read_table', { handle: h, table: 'TASK', offset: (i * 500) % 20000, limit: 500 }); carried += JSON.stringify((p.out as any).rows).length; toolResult(p.out, false, 'read_table'); }
+  const kept = heap() - before;
+  assert.ok(kept < 0.1 * carried, `150 pages carried ${Math.round(carried / 1048576)} MB and left ${Math.round(kept / 1048576)} MB behind`);
+  await callTool('close', { handle: h, discard: true });
+});
+
+test('an XER read from its file with one reused buffer is the same project as parseXer on its bytes', () => {
+  // (parseXerFile reads every chunk into one buffer; the reader keeps no view of a chunk past the next read)
+  return import('../core/xer/parseFile.ts').then(async ({ parseXerFile }) => {
+    const { parseXer } = await import('../core/xer/parse.ts');
+    const { readFileSync } = await import('node:fs');
+    for (const f of ['DHBL-24FEB13_VER-7.0.xer', 'CfC.xer', '129 trial.xer']) {
+      const file = join(SAMPLES_DIR, f);
+      const a = parseXerFile(file), b = parseXer(new Uint8Array(readFileSync(file)));
+      assert.equal(JSON.stringify(a.db), JSON.stringify(b.db), f);
+    }
+  });
+});

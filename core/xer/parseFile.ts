@@ -14,8 +14,13 @@ export function parseXerFile(path: string, opts: { encoding?: TextEncodingName |
     // a full collection every 64 MB read: the lines' garbage (decoded text, split fields) is let go as it goes, so
     // the peak stays near the rows kept instead of growing to what the heap allows (a 195 MB XER: see README)
     let read = 0;
+    // one buffer for every chunk, both passes (a new 16 MB buffer per chunk left the allocator's freed blocks in the process: ~100 MB more resident than the project); the reader keeps
+    // no view of a chunk past the next read (parse.ts lineSpans copies the line a chunk cuts)
+    let buf = Buffer.allocUnsafe(0);
     return parseXerSource({ size, read: (pos, len) => {
-      const b = Buffer.allocUnsafe(Math.min(len, size - pos)); const n = readSync(fd, b, 0, b.length, pos);
+      const want = Math.min(len, size - pos);
+      if (want > buf.length) buf = Buffer.allocUnsafe(want);
+      const b = buf; const n = readSync(fd, b, 0, want, pos);
       if (size > 64 * 1048576 && (read += n) >= 64 * 1048576) { read = 0; compactHeap(); }
       return b.subarray(0, n);
     } }, opts);

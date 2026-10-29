@@ -266,13 +266,15 @@ test('workers running together never add up past the budget: each reserves its e
   const sample = sampleCopy('DHBL-24FEB13_VER-7.0.xer');
   const code = `
     const { callTool, toolResult } = await import(${JSON.stringify(new URL('../mcp/server.ts', import.meta.url).href)});
-    const { usedMemory } = await import(${JSON.stringify(new URL('../mcp/runtime.ts', import.meta.url).href)});
+    const { usedMemory, config } = await import(${JSON.stringify(new URL('../mcp/runtime.ts', import.meta.url).href)});
     const { workerPeak } = await import(${JSON.stringify(new URL('../mcp/compute.ts', import.meta.url).href)});
     const call = async (n, a) => { const r = await callTool(n, a); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent }; };
     const A = (await call('open_file', { path: ${JSON.stringify(sample)} })).d, B = (await call('open_file', { path: ${JSON.stringify(sample)} })).d;
     const MB = 1048576, one = usedMemory() / 2, peak = workerPeak(one);
     const { WORKER_RUNTIME_BYTES: RT } = await import(${JSON.stringify(new URL('../mcp/compute.ts', import.meta.url).href)});
     const mc = (h) => ({ handle: h.handle, owner_key: h.owner_key, iterations: 60, default_estimates: { min_pct: 90, max_pct: 125 }, async: true });
+    // the budget holds both projects (as they are measured: a file this size is not counted at the 3x estimate) and ONE worker's peak and runtime with half as much again, not two
+    config.budgetBytes = usedMemory() + 1.5 * (peak + RT);
     const first = (await call('monte_carlo', mc(A))).d;
     await new Promise((r) => setTimeout(r, 700)); // the job has started: its worker is reserved
     const during = usedMemory();
@@ -284,9 +286,8 @@ test('workers running together never add up past the budget: each reserves its e
     out.secondAfter = again.err ? again.d.error.code : 'ran';
     console.log('RESULT ' + JSON.stringify(out));
     process.exit(0);`;
-  // the budget holds both projects (about 43 MB each) and ONE worker's peak, not two
   const script = join(mkdtempSync(join(tmpdir(), 'p6-budget-')), 'run.mjs'); writeFileSync(script, code); // (a file: a worker inherits the flags of an -e script)
-  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, P6CLONE_MEM_BUDGET_MB: '400' } });
+  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env } });
   assert.equal(r.status, 0, r.stderr.slice(-500));
   const out = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('RESULT '))!.slice(7));
   assert.ok(out.reservedForFirst >= out.peak + out.runtime, `the first worker's reservation (${out.peak} MB) and its runtime (${out.runtime} MB) are counted before it starts: ${JSON.stringify(out)} ${r.stderr.slice(-300)}`);
