@@ -85,13 +85,49 @@ test('Arabic and Chinese: phrases, short Arabic terms as whole words, Chinese te
   const t = task(db);
   t.task_name = 'مشروع شركة الأمل للمقاولات';
   const w = rows(db, 'PROJWBS').find((x) => x.proj_node_flag !== 'Y')!;
-  w.wbs_name = 'أمل برج الأمل'; // a 3-letter Arabic term: "أمل" as a word, not inside "الأمل"
+  w.wbs_name = 'أمل برج الأمل'; // a 3-letter Arabic term: "أمل" as a word, and with its article (the prefix ال stays)
   const q = rows(db, 'TASK')[1]; q.task_name = '中建三局项目部 and 中建';
   const r = run(db, { pairs: [{ find: 'شركة الأمل للمقاولات', replace: 'شركة س' }, { find: 'أمل', replace: 'س' }, { find: '中建', replace: '甲方' }] });
   assert.equal(t.task_name, 'مشروع شركة س');
-  assert.equal(w.wbs_name, 'س برج الأمل');
+  assert.equal(w.wbs_name, 'س برج الس');
   assert.equal(q.task_name, '甲方三局项目部 and 甲方');
-  assert.deepEqual(r.pairs.map((p) => p.replaced), [1, 1, 2]);
+  assert.deepEqual(r.pairs.map((p) => p.replaced), [1, 2, 2]);
+});
+
+test('Arabic: a short term is found with its proclitics (و ف / ب ك ل / ال / لل) and the prefix stays; a term given with ال is matched without it too', () => {
+  const db = load();
+  const t = task(db);
+  // أمل bare, with the article, and with و / ب / ل / لل / ف+لل: all the written forms of one word; not inside تأمل (another word) or أملاك (a longer one)
+  t.task_name = 'أمل الأمل والأمل بالأمل للأمل فللأمل وبأمل تأمل أملاك';
+  const r = run(db, { pairs: [{ find: 'أمل', replace: 'س' }] });
+  assert.equal(t.task_name, 'س الس والس بالس للس فللس وبس تأمل أملاك');
+  assert.equal(r.pairs[0].replaced, 7);
+  // with diacritics on the prefix, and the term at the end of the text
+  t.task_name = 'وَالأمل';
+  run(db, { pairs: [{ find: 'أمل', replace: 'س' }] });
+  assert.equal(t.task_name, 'وَالس');
+  // given with the article, the bare word and the other prefixed forms are found too
+  t.task_name = 'الأمل أمل والأمل بأمل للأمل';
+  const r2 = run(db, { pairs: [{ find: 'الأمل', replace: 'ص' }] });
+  assert.equal(t.task_name, 'ص ص وص بص للص');
+  assert.equal(r2.pairs[0].replaced, 5);
+  // a Latin initial is still a whole word with nothing attached
+  t.task_name = 'والTGS TGS';
+  run(db, { pairs: [{ find: 'TGS', replace: 'ABC' }] });
+  assert.equal(t.task_name, 'والTGS ABC');
+});
+
+test('Hebrew: a short term is found with its prefixes (ו ה ב ל מ ש כ) and the prefix stays; a term given with ה is matched without it too', () => {
+  const db = load();
+  const t = task(db);
+  t.task_name = 'בית הבית ובבית מבית לבית והבית כשבית ביתנו ביתן';
+  const r = run(db, { pairs: [{ find: 'בית', replace: 'X' }] });
+  assert.equal(t.task_name, 'X הX ובX מX לX והX כשX ביתנו ביתן');
+  assert.equal(r.pairs[0].replaced, 7);
+  t.task_name = 'הבית בית ובבית';
+  const r2 = run(db, { pairs: [{ find: 'הבית', replace: 'Y' }] });
+  assert.equal(t.task_name, 'Y Y ובY');
+  assert.equal(r2.pairs[0].replaced, 3);
 });
 
 test('notebooks: only the text between the tags; entities and attributes are left alone', () => {

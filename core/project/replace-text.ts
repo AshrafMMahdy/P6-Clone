@@ -6,13 +6,20 @@
 //   - several terms: the longest wins where they overlap; text a replacement produced is never searched again.
 
 export interface Pair { find: string; replace: string }
-export interface Term { pair: number; folded: string; whole: boolean }
+/** affix: the prefixes a whole-word term may carry in the script's writing (Arabic and Hebrew attach conjunctions, prepositions and the article to the word). */
+export interface Term { pair: number; folded: string; whole: boolean; affix?: RegExp }
 
 const WORD = /[\p{L}\p{N}\p{M}_]/u;
 /** Scripts with no spaces between words: a whole-word rule cannot be applied to them. */
 const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
 const LETTER = /\p{L}/u;
 const SHORT = 3;
+// Arabic: و/ف (and, then), then ب/ك/ل (in, like, to) and/or the article ال, where لل is ل + ال contracted (والأمل, بالأمل, للأمل, فللأمل). Hebrew: ו ה ב ל מ ש כ, up to three (והבית, מבית, כשבית).
+const AR_AFFIX = /^[وف]?(?:لل|[بكل]?(?:ال)?)$/u;
+const HE_AFFIX = /^[ושהבלמכ]{1,3}$/u;
+const scriptAffix = (s: string): RegExp | undefined => (/\p{Script=Arabic}/u.test(s) ? AR_AFFIX : /\p{Script=Hebrew}/u.test(s) ? HE_AFFIX : undefined);
+/** The article a term may be given with (ال, ה), which the term is also matched without. */
+const articleOf = (s: string): number => (/^\p{Script=Arabic}/u.test(s) && s.startsWith('ال') ? 2 : /^\p{Script=Hebrew}/u.test(s) && s.startsWith('ה') ? 1 : 0);
 
 /** A code point's case-folded form: upper then lower (ß -> ss, ς -> σ), the way a person reads two spellings as the same word. */
 const foldChar = (c: string): string => c.toUpperCase().toLowerCase();
@@ -30,7 +37,16 @@ export function compile(pairs: unknown, caseInsensitive: boolean): { terms: Term
     if (seen.has(key)) throw new Error(`pairs[${i}] repeats pairs[${seen.get(key)}] ("${find}").`);
     seen.set(key, i);
     out.push({ find, replace: rep.normalize('NFC') });
-    terms.push({ pair: i, folded: key, whole: [...find].length <= SHORT && !UNSPACED.test(find) });
+    terms.push({ pair: i, folded: key, whole: [...find].length <= SHORT && !UNSPACED.test(find), affix: scriptAffix(find) });
+  });
+  // a term given with the article is matched without it too (with whatever prefixes the script allows before it), unless the list names that form itself
+  out.forEach((p, i) => {
+    const cut = articleOf(p.find), bare = cut ? p.find.slice(cut) : '';
+    if (!cut || [...bare].length < 2) return;
+    const key = caseInsensitive ? [...bare].map(foldChar).join('') : bare;
+    if (seen.has(key)) return;
+    seen.set(key, i);
+    terms.push({ pair: i, folded: key, whole: [...bare].length <= SHORT, affix: scriptAffix(bare) });
   });
   return { terms, pairs: out };
 }
@@ -54,9 +70,13 @@ function matchesIn(text: string, terms: Term[], ci: boolean): Hit[] {
       if (!startsChar[at] || !endsChar[last]) continue;
       const start = from[at], end = to[last];
       if (t.whole) {
-        const before = start > 0 ? charBefore(text, start) : '';
         const after = end < text.length ? String.fromCodePoint(text.codePointAt(end)!) : '';
-        if ((before && WORD.test(before)) || (after && WORD.test(after))) continue;
+        if (after && WORD.test(after)) continue;
+        // what stands before the term in its word must be nothing, or a prefix the script attaches to words
+        let ws = start;
+        while (ws > 0) { const ch = charBefore(text, ws); if (!WORD.test(ch)) break; ws -= ch.length; }
+        const prefix = text.slice(ws, start);
+        if (prefix && !(t.affix && t.affix.test(prefix.replace(/\p{M}/gu, '')))) continue;
       }
       hits.push({ start, end, pair: t.pair });
     }
