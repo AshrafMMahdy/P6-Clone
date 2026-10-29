@@ -1,7 +1,7 @@
 // More edit operations (see ops.ts): WBS changes, codes, UDFs, notebooks, cost accounts and expenses, steps,
 // risk estimates, baselines, EPS/OBS/roles, calendar changes and assignment details. Same rules as ops.ts:
 // addressed by IDs and names a scheduler sees, durations in days, one transaction per list.
-import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, table, ermhdrIdentity, type Db, type Row } from '../db.ts';
+import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, table, ermhdrFields, ermhdrIdentity, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
@@ -13,7 +13,8 @@ import { STEP_FIELDS, syncFromSteps } from './steps.ts';
 import { DISTS, setEstimate, type Dist } from '../risk/montecarlo.ts';
 import { assignBaseline, deleteBaseline, restoreBaseline, saveBaseline } from '../progress/baseline.ts';
 import { applyFields, FIELD_GUIDE, FIELD_OP_NAMES } from './ops-fields.ts';
-import { cycles } from './integrity.ts';
+import { cycles, p6Refusals } from './integrity.ts';
+import { compile, isHtml, isTextField, replaceHtml, replacePlain } from './replace-text.ts';
 
 export interface OpHelpers {
   hpd: number;
@@ -39,7 +40,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = [...FIELD_OP_NAMES, 'delete_code_type', 'delete_udf', 'delete_cost_account', 'delete_calendar', 'delete_resource_curve', 'clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
+export const EXTRA_OP_NAMES = [...FIELD_OP_NAMES, 'delete_code_type', 'delete_udf', 'delete_cost_account', 'delete_calendar', 'delete_resource_curve', 'clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'replace_text', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
 
 export const EXTRA_GUIDE = [
   `update_resource_curve: name, new_name`,
@@ -73,6 +74,7 @@ export const EXTRA_GUIDE = [
   `update_resource: id, [new_id] (a new Resource ID), [name], [max_units_per_day] or [max_units_per_hour] (Max Units / Time on every rate row of the resource, read by level_resources and optimize_schedule)`,
   `delete_resource: id, [clear_references] (default false: refused while an assignment, in any project or baseline, or an activity's primary resource points at it; true: those assignments are removed and the primary resources cleared). Its rates, resource codes, roles and UDF values go with it; its child resources move up to its parent`,
   `regenerate_guids: [project], [dictionaries] (default true: also the GUIDs of the file's shared resources, calendars, codes, OBS, roles...), [new_proj_id] or [keep_proj_id]: every GUID of the project and its baselines (project, WBS, activities, assignments, ...) replaced by a fresh one, template GUIDs cleared; the project also gets a new internal number (the next free one unless new_proj_id; keep_proj_id: true keeps it), every reference following`,
+  `replace_text: pairs [{find, replace}], [case_insensitive] (default false): renames words and phrases in ONE operation in every text field of every table of the file (all projects and baselines, the shared dictionaries): names, short names and IDs (Activity, Resource, WBS, code values), descriptions, notes and notebooks (HTML memos: the text between the tags only), titles, UDF text, step, expense and issue text, e-mail addresses, authors (create_user, update_user), and the file header's user, user name and database. Never a reference or internal ID, GUID, date, number, flag or a value P6 defines (task_type, status_code, calendar data). A term of up to 3 letters (initials like "TGS") matches whole words only ("SETTINGS" is left alone); a longer one matches anywhere; Chinese, Japanese and Thai terms always anywhere. case_insensitive compares by Unicode case folding (Straße = STRASSE). Overlapping terms: the longest wins; a replacement is never searched again. Refused (nothing changed) when it would make two IDs the same. Answers per pair the number replaced and where (table.field: count); one undo takes it all back`,
   `clear_authors: [project], [dictionaries] (default true): clears the user fields P6 writes (create_user, update_user, add_by_name, user_id, ts_approve_user_id, checkout_user_id) on the project's rows (and the shared dictionaries'), and with dictionaries the exporting user and database named in the file's header (set to P6's defaults admin / dbxDatabaseNoName)`,
   `update_code_type: name, new_name, [subject] (activity default, project, resource), [project] (picks the project's own code type when several share the name)`,
   `update_code_value: type, code (value code or dotted path), [new_code], [name], [subject] (activity default, project, resource), [project] (picks the project's own code type when several share the name)`,
@@ -723,6 +725,35 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       }
       removeWhere(rows(db, 'RSRC'), (x) => x.rsrc_id === rid);
       return { deleted: key, assignments_removed: assignments, primary_resources_cleared: primary.length };
+    }
+    case 'replace_text': {
+      const ci = op.case_insensitive === true;
+      let c: ReturnType<typeof compile>;
+      try { c = compile(op.pairs, ci); } catch (e) { return fail((e as Error).message); }
+      const tallies = c.pairs.map(() => ({ n: 0, where: {} as Record<string, number> }));
+      const before = new Map(p6Refusals(db).map((p) => [p.key, p.count]));
+      const apply = (v: string, where: string): string => {
+        const count = (pair: number) => { tallies[pair].n++; tallies[pair].where[where] = (tallies[pair].where[where] ?? 0) + 1; };
+        return isHtml(v) ? replaceHtml(v, c.terms, c.pairs, ci, count) : replacePlain(v, c.terms, c.pairs, ci, count);
+      };
+      for (const t of Object.values(db.tables)) {
+        if (t.name.startsWith('_') && !t.name.startsWith('_XML_')) continue; // (the clone's own tables)
+        const fs = realOf(t.fields).filter((f) => isTextField(t.name, f));
+        if (!fs.length) continue;
+        for (const r of pick(t.rows, () => true)) for (const f of fs) {
+          const v = r[f];
+          if (typeof v !== 'string' || !v || (f.startsWith('_xml_') && v.startsWith('<'))) continue; // (a kept XML element is markup, not text)
+          const nv = apply(v, `${t.name}.${f}`);
+          if (nv !== v) r[f] = nv;
+        }
+      }
+      // the header's user, user name and database
+      const raw = db.header?.raw;
+      if (raw) { const names = ermhdrFields(raw.slice(1)); for (const [i] of ermhdrIdentity(raw)) { const v = raw[i]; if (!v) continue; const nv = apply(v, `ERMHDR.${names[i - 1]}`); if (nv !== v) raw[i] = nv; } }
+      // an ID that two rows now share is a file P6 rejects: refused, and nothing is changed
+      for (const p of p6Refusals(db)) if (p.count > (before.get(p.key) ?? 0)) fail(`replace_text would make an ID the same as another's (${p.message}); give the terms a different replacement.`);
+      const total = tallies.reduce((n, x) => n + x.n, 0);
+      return { replaced: total, pairs: c.pairs.map((p, i) => ({ find: p.find, replace: p.replace, replaced: tallies[i].n, where: tallies[i].where })) };
     }
     case 'regenerate_guids': case 'clear_authors': {
       const p = h.project(op.project), dict = op.dictionaries !== false;

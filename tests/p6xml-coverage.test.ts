@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseXer } from '../core/xer/parse.ts';
 import { writeXer } from '../core/xer/write.ts';
-import { p6xmlLossNotes, p6xmlLosses, P6XML_ENUMS, P6XML_NOT_CARRIED, P6XML_PARTLY_CARRIED, P6XML_ROOT_MAP, P6XML_ROOT_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
+import { Chunked, writeP6XmlTo, p6xmlLossNotes, p6xmlLosses, P6XML_ENUMS, P6XML_NOT_CARRIED, P6XML_PARTLY_CARRIED, P6XML_ROOT_MAP, P6XML_ROOT_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
 import { parseClndrData, parseClndrDataLeniently } from '../core/calendar/clndr-data.ts';
 import { KEYS, type Db, type Row } from '../core/db.ts';
 import { SAMPLES_DIR } from './helpers.ts';
@@ -20,6 +20,15 @@ const samples = readdirSync(SAMPLES_DIR).filter((f) => /\.xer$/i.test(f)).sort()
 const load = (f: string): Db | null => { try { return parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, f)))).db; } catch { return null; } };
 /** Samples with a key used twice are damaged files (bit flips in transit): a key cannot tell their rows apart. */
 const hasDuplicateKeys = (db: Db) => Object.entries(db.tables).some(([t, T]) => KEYS[t] && T.rows.some((r) => r[KEYS[t]]) && new Set(T.rows.map((r) => r[KEYS[t]])).size !== T.rows.length);
+
+/** The document the writer makes, read element by element (parseXml's split/emit): `open` sees every top-level element and every child of a project as it opens, `element` gets each
+ *  of them whole once it closes and none is kept - a 330 MB document (the 98 MB sample) is never a tree, so no sample needs to be left out for its size. */
+function streamDoc(db: Db, on: { open?: (parents: string[], name: string) => void; element: (parents: string[], n: XNode) => void }): void {
+  const doc = new Chunked();
+  writeP6XmlTo(db, {} as never, (c) => doc.push(c));
+  const isProject = (n: string) => n === 'Project' || n === 'BaselineProject';
+  parseXml(doc, (parents, name) => { on.open?.(parents, name); return (parents.length === 1 && !isProject(name)) || (parents.length === 2 && isProject(parents[1])); }, on.element);
+}
 
 test('everything the P6 XML writer writes is an element or field of P6\'s XML schema', () => {
   const unknown = new Map<string, number>();
@@ -32,14 +41,19 @@ test('everything the P6 XML writer writes is an element or field of P6\'s XML sc
     }
   };
   let checked = 0;
-  for (const f of samples.filter((x) => statSync(join(SAMPLES_DIR, x)).size < 8 * 1048576).slice(0, 40)) { // (read back as whole trees: the files under 8 MB, memory a test run can spare)
+  for (const f of samples) { // every sample, the 30 MB and the 98 MB ones too (read element by element)
     const db = load(f);
     if (!db) continue;
-    const root = parseXml(writeP6Xml(db, {} as never)).children[0];
-    for (const e of root.children) { if (!NAMES[e.name]) { unknown.set(`(top)${e.name}`, 1); continue; } walk(e, e.name, e.name); }
+    streamDoc(db, { element: (parents, e) => {
+      if (parents.length === 1) { if (!NAMES[e.name]) unknown.set(`(top)${e.name}`, 1); else walk(e, e.name, e.name); return; }
+      const type = parents[1]; // a child of a project
+      if (!NAMES[type].includes(e.name)) { unknown.set(`${type}/${e.name}`, (unknown.get(`${type}/${e.name}`) ?? 0) + 1); return; }
+      const nested = e.name === 'Code' ? 'CodeAssignment' : e.name === 'UDF' ? 'UDFAssignment' : NAMES[e.name] ? e.name : null;
+      if (e.children.length && nested && NAMES[nested]) walk(e, nested, `${type}/${e.name}`);
+    } });
     checked++;
   }
-  assert.ok(checked >= 20);
+  assert.ok(checked >= 50, `${checked} samples`);
   assert.deepEqual([...unknown], [], 'elements the P6 schema does not have');
   // and the maps themselves (also the ones no sample uses)
   for (const [table, { element, map }] of Object.entries(P6XML_TABLES)) {
@@ -290,6 +304,7 @@ const p6xmlLosses0 = (d: Db) => p6xmlLosses(d).map((l) => `${l.table}.${l.field}
 
 test('the elements are written in the order of P6\'s schema (the xsd:sequence of each type, and of the document)', () => {
   const bad: string[] = [];
+  const seqIndex = (type: string) => new Map((NAMES[type] ?? []).map((x, i) => [x, i]));
   const check = (n: XNode, type: string, path: string) => {
     const q = new Map((NAMES[type] ?? []).map((x, i) => [x, i]));
     let last = -1, lastName = '';
@@ -301,16 +316,29 @@ test('the elements are written in the order of P6\'s schema (the xsd:sequence of
     }
   };
   let n = 0;
-  // (the document is read back as a whole tree here: the files under 8 MB, which is memory a test run can spare)
-  for (const f of samples.filter((x) => statSync(join(SAMPLES_DIR, x)).size < 8 * 1048576).slice(0, 40)) {
+  const top = seqIndex('APIBusinessObjects');
+  for (const f of samples) { // every sample (read element by element)
     const db = load(f);
     if (!db) continue;
     if (n === 0 && db.tables.PROJECT?.rows.length) db.tables.PROJECT.rows.push({ ...db.tables.PROJECT.rows[0], proj_id: '99999', _baseline_of: db.tables.PROJECT.rows[0].proj_id });
-    const root = parseXml(writeP6Xml(db, {} as never)).children[0];
-    check(root, 'APIBusinessObjects', 'APIBusinessObjects');
+    let lastTop = -1, lastTopName = '', lastIn = -1, lastInName = '', project = '';
+    streamDoc(db, {
+      open: (parents, name) => { // the order of the document's elements, and of a project's children, as they open
+        if (parents.length === 1) {
+          const i = top.get(name) ?? lastTop; if (i < lastTop) bad.push(`document: ${name} after ${lastTopName}`); lastTop = i; lastTopName = name;
+          if (name === 'Project' || name === 'BaselineProject') { project = name; lastIn = -1; lastInName = ''; }
+        } else if (parents.length === 2) {
+          const i = seqIndex(project).get(name) ?? lastIn; if (i < lastIn) bad.push(`${project}: ${name} after ${lastInName}`); lastIn = i; lastInName = name;
+        }
+      },
+      element: (parents, e) => {
+        const type = parents.length === 1 ? e.name : e.name === 'Code' ? 'CodeAssignment' : e.name === 'UDF' ? 'UDFAssignment' : e.name;
+        if (e.children.length && NAMES[type]) check(e, type, parents.length === 1 ? e.name : `${parents[1]}/${e.name}`);
+      },
+    });
     n++;
   }
-  assert.ok(n >= 20);
+  assert.ok(n >= 50, `${n} samples`);
   assert.deepEqual([...new Set(bad)].slice(0, 20), []);
 });
 

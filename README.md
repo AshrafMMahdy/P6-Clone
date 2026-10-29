@@ -183,6 +183,7 @@ its lookups all count every day at the hours per day of Edit > User Preferences.
 | `build_baseline` | `project?, name?, assign_as?` (default `project`), `activities: [{activity, start?, finish?, duration_days?, cost?}]`: a baseline copy whose listed activities carry the given baseline values. XER keeps baselines the way P6 does: a PROJECT row whose `orig_proj_id` names its project, and the project's `sum_base_proj_id` |
 | `add_eps`/`update_eps`/`delete_eps`, `add_obs`/…, `add_role`/… | `id` (OBS: `name`), `name?, parent?, new_id?` (OBS: `new_name?`, `description?`, `""` clears it); `set_project eps` files a project under an EPS node |
 | `update_pobs` | `pobs_id` or `name`, `new_name?`, `description?`, `manager?` (`""` clears either): a performing organisation (POBS: `pobs_name`, `pobs_descr`, `pobs_manager`), which `update_obs` does not reach; the root row can be renamed, never loses its place. `list_dictionaries {only: "pobs"}` lists the rows; `clear_descriptions` blanks every `pobs_descr` |
+| `replace_text` | `pairs: [{find, replace}], case_insensitive?` (default false): one pass over every text field of every table (all projects, baselines and dictionaries: names, short names and IDs, descriptions, notes and HTML notebooks - the text between the tags only - UDF text, steps, expenses, issues, e-mail addresses, authors) and the header's user, user name and database. Never an internal ID or reference, GUID, date, number, flag or P6 code. A term of up to 3 letters (initials, "TGS") matches whole words only; a longer one anywhere; Chinese, Japanese and Thai terms anywhere. `case_insensitive` is Unicode case folding. The longest of overlapping terms wins; replacements are not searched again; refused (nothing changed) when two IDs would become the same. Answers per pair the count and `where` (`table.field: n`) |
 | `update_calendar` | `name, new_name?, work_week?, holidays?, work_exceptions?, remove_exceptions?` |
 
 #### Anonymising a copy (recipe)
@@ -206,6 +207,7 @@ name, notebook text and GUID.
 6. `clear_notebooks {}`: every activity, WBS and project notebook of every project and baseline, whatever the topic
    (the EPS notebooks P6 writes into an XER are project notebooks; Tower-A's "EPS: Group / Middle East / Buildings").
 7. `regenerate_guids {project}` and `clear_authors {project}` for each project (baselines' GUIDs too).
+8. `replace_text {pairs: [{find: "TGS", replace: "Client"}, {find: "Construction Co", replace: "Builder"}]}`: the customer's names wherever they still stand, in every text field and notebook of every project, baseline and dictionary, and in the header (one pass; its answer says how many were replaced and where, so what is left can be searched for).
 
 Activity types: `task`, `resource_dependent`, `start_milestone`, `finish_milestone`, `level_of_effort`, `wbs_summary`.
 Constraints: `start_on`, `start_on_or_after`, `start_on_or_before`, `finish_on`, `finish_on_or_before`,
