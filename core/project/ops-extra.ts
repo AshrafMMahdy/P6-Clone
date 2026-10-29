@@ -74,7 +74,7 @@ export const EXTRA_GUIDE = [
   `update_resource: id, [new_id] (a new Resource ID), [name], [max_units_per_day] or [max_units_per_hour] (Max Units / Time on every rate row of the resource, read by level_resources and optimize_schedule)`,
   `delete_resource: id, [clear_references] (default false: refused while an assignment, in any project or baseline, or an activity's primary resource points at it; true: those assignments are removed and the primary resources cleared). Its rates, resource codes, roles and UDF values go with it; its child resources move up to its parent`,
   `regenerate_guids: [project], [dictionaries] (default true: also the GUIDs of the file's shared resources, calendars, codes, OBS, roles...), [new_proj_id] or [keep_proj_id]: every GUID of the project and its baselines (project, WBS, activities, assignments, ...) replaced by a fresh one, template GUIDs cleared; the project also gets a new internal number (the next free one unless new_proj_id; keep_proj_id: true keeps it), every reference following`,
-  `replace_text: pairs [{find, replace}], [case_insensitive] (default false): renames words and phrases in ONE operation in every text field of every table of the file (all projects and baselines, the shared dictionaries): names, short names and IDs (Activity, Resource, WBS, code values), descriptions, notes and notebooks (HTML memos: the text between the tags only), titles, UDF text, step, expense and issue text, e-mail addresses, authors (create_user, update_user), and the file header's user, user name and database. Never a reference or internal ID, GUID, date, number, flag or a value P6 defines (task_type, status_code, calendar data). A term of up to 3 letters (initials like "TGS") matches whole words only ("SETTINGS" is left alone); a longer one matches anywhere; Chinese, Japanese and Thai terms always anywhere. case_insensitive compares by Unicode case folding (Straße = STRASSE). Overlapping terms: the longest wins; a replacement is never searched again. Refused (nothing changed) when it would make two IDs the same. Answers per pair the number replaced and where (table.field: count); one undo takes it all back`,
+  `replace_text: pairs [{find, replace}], [case_insensitive] (default false), [anywhere] (default false): renames words and phrases in ONE operation in every text field of every table of the file (all projects and baselines, the shared dictionaries): names, short names and IDs (Activity, Resource, WBS, code values), descriptions, notes and notebooks (HTML memos: the text between the tags only), titles, UDF text, step, expense and issue text, e-mail addresses, authors (create_user, update_user), and the file header's user, user name and database. Never a reference or internal ID, GUID, date, number, flag or a value P6 defines (task_type, status_code, calendar data). A term matches whole words, whatever its length ("Mall" is not in "Small", "Park" not in "Parking", "TGS" not in "SETTINGS"); anywhere: true matches it inside words too; Chinese, Japanese and Thai terms always anywhere. Arabic and Hebrew terms also match with the prefixes those scripts attach (the prefix kept) and the answer lists those matches (prefixed_matches: word, field); Arabic spellings are one (أ إ آ = ا, ة = ه, ى = ي, no tatweel or vowel marks). Text in HTML memos is matched decoded (&amp; &nbsp;), never inside an entity. case_insensitive compares by Unicode case folding (Straße = STRASSE). Overlapping terms: the longest wins; a replacement is never searched again. Refused (nothing changed) when it would make two IDs the same. Answers per pair the number replaced and where (table.field: count); one undo takes it all back`,
   `clear_authors: [project], [dictionaries] (default true): clears the user fields P6 writes (create_user, update_user, add_by_name, user_id, ts_approve_user_id, checkout_user_id) on the project's rows (and the shared dictionaries'), and with dictionaries the exporting user and database named in the file's header (set to P6's defaults admin / dbxDatabaseNoName)`,
   `update_code_type: name, new_name, [subject] (activity default, project, resource), [project] (picks the project's own code type when several share the name)`,
   `update_code_value: type, code (value code or dotted path), [new_code], [name], [subject] (activity default, project, resource), [project] (picks the project's own code type when several share the name)`,
@@ -729,11 +729,15 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     case 'replace_text': {
       const ci = op.case_insensitive === true;
       let c: ReturnType<typeof compile>;
-      try { c = compile(op.pairs, ci); } catch (e) { return fail((e as Error).message); }
+      try { c = compile(op.pairs, ci, op.anywhere === true); } catch (e) { return fail((e as Error).message); }
       const tallies = c.pairs.map(() => ({ n: 0, where: {} as Record<string, number> }));
       const before = new Map(p6Refusals(db).map((p) => [p.key, p.count]));
+      const prefixed = new Map<string, { find: string; word: string; field: string; count: number }>(); // matches made through an Arabic or Hebrew prefix: the word each stood in
       const apply = (v: string, where: string): string => {
-        const count = (pair: number) => { tallies[pair].n++; tallies[pair].where[where] = (tallies[pair].where[where] ?? 0) + 1; };
+        const count = (pair: number, word?: string) => {
+          tallies[pair].n++; tallies[pair].where[where] = (tallies[pair].where[where] ?? 0) + 1;
+          if (word) { const k = `${pair}|${where}|${word}`; const e = prefixed.get(k); if (e) e.count++; else prefixed.set(k, { find: c.pairs[pair].find, word, field: where, count: 1 }); }
+        };
         return isHtml(v) ? replaceHtml(v, c.terms, c.pairs, ci, count) : replacePlain(v, c.terms, c.pairs, ci, count);
       };
       for (const t of Object.values(db.tables)) {
@@ -753,7 +757,9 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       // an ID that two rows now share is a file P6 rejects: refused, and nothing is changed
       for (const p of p6Refusals(db)) if (p.count > (before.get(p.key) ?? 0)) fail(`replace_text would make an ID the same as another's (${p.message}); give the terms a different replacement.`);
       const total = tallies.reduce((n, x) => n + x.n, 0);
-      return { replaced: total, pairs: c.pairs.map((p, i) => ({ find: p.find, replace: p.replace, replaced: tallies[i].n, where: tallies[i].where })) };
+      const pm = [...prefixed.values()];
+      return { replaced: total, pairs: c.pairs.map((p, i) => ({ find: p.find, replace: p.replace, replaced: tallies[i].n, where: tallies[i].where })),
+        ...(pm.length ? { prefixed_matches: pm.slice(0, 500), prefixed_total: pm.reduce((n, x) => n + x.count, 0), prefixed_note: 'These words were matched through a prefix (Arabic و ف ب ك ل ال, Hebrew ו ה ב ל מ ש כ), the prefix kept. A prefix letter can belong to another word (Hebrew שרון for רון): check this list.' } : {}) };
     }
     case 'regenerate_guids': case 'clear_authors': {
       const p = h.project(op.project), dict = op.dictionaries !== false;

@@ -739,16 +739,9 @@ export function shutdown(reason: string): void {
 /** An MCP tools/call result; oversized output is cut down to a preview instead of flooding the client, and the whole
  *  result is written to a JSON file (in the write root, else the storage root, else the system's temporary folder)
  *  whose path the answer gives, so none of it is out of reach. */
-/** A page of table rows is sent once: structuredContent carries the rows, and the text part is a line saying what the page is when the rows would make it big (read_table pages: 500 rows of
- *  61 columns are 400 KB, and the same rows pretty-printed beside them doubled that, and the memory of every page walk). Everything else is compact JSON: no pretty-printing. */
-const PAGE_TEXT_CHARS = 16_000;
+/** Every answer is compact JSON in the text part (no pretty-printing) beside structuredContent: the MCP spec asks for the serialized result in a text block, and a client that reads only text must not lose the rows. */
 export function toolResult(out: unknown, isError: boolean, tool?: string) {
   let text = JSON.stringify(out);
-  if (tool === 'read_table' && !isError && text.length > PAGE_TEXT_CHARS && out && typeof out === 'object' && Array.isArray((out as { rows?: unknown }).rows)) {
-    const o = out as { table?: string; columns?: unknown[]; rows: unknown[]; total?: number; offset?: number; next_offset?: number };
-    releaseIfGrown();
-    return { content: [{ type: 'text', text: `read_table ${o.table ?? ''}: rows ${(o.offset ?? 0) + 1}-${(o.offset ?? 0) + o.rows.length} of ${o.total ?? '?'}, ${o.columns?.length ?? '?'} columns${o.next_offset != null ? `; next_offset ${o.next_offset}` : '; last page'}. The columns and rows are in structuredContent.` }], structuredContent: out, isError };
-  }
   releaseIfGrown();
   let structured = out && typeof out === 'object' && !Array.isArray(out) ? out : { result: out };
   if (text.length > config.maxResponseChars) {

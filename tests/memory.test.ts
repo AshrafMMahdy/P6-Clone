@@ -70,7 +70,7 @@ test('a 31,000-operation edit (20,000 assign_code) stays linear in time and memo
 });
 
 // ---- the server: what a call leaves behind, what projects_mb says, how the answers are sent (clone memory on a 68 MB XER)
-test('server: a call leaves nothing behind (the soft-timeout timer held every answer for 30 s), pages are sent once and compact, a big file is measured', { timeout: 120_000 }, async () => {
+test('server: a call leaves nothing behind (the soft-timeout timer held every answer for 30 s), pages carry their rows as compact JSON, a big file is measured', { timeout: 120_000 }, async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const rt = await import('../mcp/runtime.ts');
   const { sampleCopy } = await import('./helpers.ts');
@@ -84,12 +84,13 @@ test('server: a call leaves nothing behind (the soft-timeout timer held every an
   assert.ok(s.bytes > 0.5 * size, `and not under half the file: ${Math.round(s.bytes / 1048576)} MB`);
   const st = (toolResult((await callTool('server_status', {})).out, false).structuredContent as any).memory;
   for (const k of ['heap_total_mb', 'external_mb', 'array_buffers_mb']) assert.equal(typeof st[k], 'number', k);
-  // a page: sent once. structuredContent holds the rows; the text is one line, not a second copy
+  // a page: the rows in structuredContent, and in the text part as COMPACT JSON (the MCP spec's serialized result; a text-only client must not lose the rows) - never pretty-printed
   const x = await callTool('read_table', { handle: h, table: 'TASK', limit: 500 });
   const r = toolResult(x.out, x.isError, 'read_table');
   const rows = (r.structuredContent as any).rows.length;
   assert.equal(rows, 500);
-  assert.ok(r.content[0].text.length < 400 && /rows 1-500 of \d+/.test(r.content[0].text) && r.content[0].text.includes('structuredContent'), r.content[0].text);
+  assert.equal(r.content[0].text, JSON.stringify(r.structuredContent));
+  assert.ok(!r.content[0].text.includes('\n'), 'one line');
   // a small answer is compact JSON in the text part (no pretty-printing)
   const small = toolResult((await callTool('read_table', { handle: h, table: 'TASK', limit: 2, columns: ['task_code'] })).out, false, 'read_table');
   assert.equal(small.content[0].text, JSON.stringify(small.structuredContent));

@@ -36,7 +36,7 @@ test('names, short names, descriptions, UDF text, steps, expenses and issues are
   for (const [name, T] of Object.entries(db.tables)) for (const x of T.rows) for (const [f, v] of Object.entries(x)) if (/(name|descr|notes?|label|udf_text)$/.test(f) && f !== 'udf_type_name' && f !== 'table_name') assert.ok(!/Acme/.test(String(v)), `${name}.${f}: ${v}`);
 });
 
-test('a 3-letter initial is a whole word (TGS in "TGS-01" and "TGS Tower", not in SETTINGS or TGSX); a longer phrase matches anywhere', () => {
+test('a term is a whole word whatever its length (TGS not in SETTINGS, Mall not in Small, Park not in Parking); anywhere: true matches inside words', () => {
   const db = load();
   const t = task(db);
   t.task_name = 'TGS Tower'; t.task_code = 'TGS-01';
@@ -46,8 +46,19 @@ test('a 3-letter initial is a whole word (TGS in "TGS-01" and "TGS Tower", not i
   assert.equal(t.task_name, 'ABC Tower');
   assert.equal(t.task_code, 'ABC-01');
   assert.equal(w.wbs_name, 'Edit SETTINGS of TGSX (ABC)');
+  assert.equal(q.task_name, 'MyConstruction Co site, Builder', 'a phrase is a whole word too: not inside MyConstruction');
+  assert.equal(r.pairs[1].replaced, 1);
+  q.task_name = 'MyConstruction Co site, Construction Co';
+  const r2 = run(db, { pairs: [{ find: 'Construction Co', replace: 'Builder' }], anywhere: true });
   assert.equal(q.task_name, 'MyBuilder site, Builder');
-  assert.equal(r.pairs[1].replaced >= 2, true);
+  assert.equal(r2.pairs[0].replaced, 2);
+  // Mall / Small, Park / Parking / Park Lane
+  q.task_name = 'Small Mall, Parking, Park Lane, Mall-2';
+  run(db, { pairs: [{ find: 'Mall', replace: 'M' }, { find: 'Park', replace: 'P' }] });
+  assert.equal(q.task_name, 'Small M, Parking, P Lane, M-2');
+  q.task_name = 'Small Mall, Parking';
+  run(db, { pairs: [{ find: 'Mall', replace: 'M' }, { find: 'Park', replace: 'P' }], anywhere: true, case_insensitive: true });
+  assert.equal(q.task_name, 'SM M, Ping');
 });
 
 test('overlapping terms: the longest wins; what a replacement wrote is not searched again', () => {
@@ -115,6 +126,37 @@ test('Arabic: a short term is found with its proclitics (و ف / ب ك ل / ال
   t.task_name = 'والTGS TGS';
   run(db, { pairs: [{ find: 'TGS', replace: 'ABC' }] });
   assert.equal(t.task_name, 'والTGS ABC');
+});
+
+test('Arabic spellings: alef forms, ة/ه, ى/ي, Persian ک ی, tatweel and vowel marks are one for matching; the other letters of the text stay as the file has them', () => {
+  const db = load();
+  const t = task(db);
+  // أحمد written with and without the hamza, with the tatweel and with vowel marks; مكتبة with ta marbuta or ha
+  t.task_name = 'أحمد احمد إحمد أحـمد أَحْمَد، مكتبة مكتبه';
+  const r = run(db, { pairs: [{ find: 'أحمد', replace: 'س' }, { find: 'مكتبة', replace: 'ص' }] });
+  assert.equal(t.task_name, 'س س س س س، ص ص');
+  assert.deepEqual(r.pairs.map((p) => p.replaced), [5, 2]);
+  // the term spelled the other way finds them as well
+  t.task_name = 'احمد أحمد مكتبة';
+  run(db, { pairs: [{ find: 'احمد', replace: 'س' }, { find: 'مكتبه', replace: 'ص' }] });
+  assert.equal(t.task_name, 'س س ص');
+  // ى and ي, آ ٱ إ, Persian ی ک
+  t.task_name = 'مصطفى مصطفي، آمنة امنة، کتاب كتاب كتابی';
+  run(db, { pairs: [{ find: 'مصطفي', replace: 'م' }, { find: 'أمنه', replace: 'ن' }, { find: 'كتاب', replace: 'ك' }] });
+  assert.equal(t.task_name, 'م م، ن ن، ك ك كتابی', 'كتابی is another word');
+  // a short term (3 letters) keeps its whole-word rule and its prefixes with the variants; the text around keeps its own letters
+  t.task_name = 'للأمل والامل بإمل وأملاك أُمَل';
+  const r3 = run(db, { pairs: [{ find: 'أمل', replace: 'س' }] });
+  assert.equal(t.task_name, 'للس والس بس وأملاك س', JSON.stringify(t.task_name));
+  assert.equal(r3.pairs[0].replaced, 4);
+  // other letters are not folded together (د and ذ stay two letters)
+  t.task_name = 'احمد احمذ';
+  run(db, { pairs: [{ find: 'احمد', replace: 'س' }] });
+  assert.equal(t.task_name, 'س احمذ');
+  // and it works inside a notebook between the tags, with the case rules of other scripts untouched
+  addRow(db, 'WBSMEMO', { wbs_memo_id: '990030', proj_id: t.proj_id, wbs_id: rows(db, 'PROJWBS')[0].wbs_id, memo_type_id: '1', wbs_memo: '<HTML><BODY>مكتبه الأمل</BODY></HTML>' });
+  run(db, { pairs: [{ find: 'مكتبة', replace: 'ص' }] });
+  assert.equal(rows(db, 'WBSMEMO').find((x) => x.wbs_memo_id === '990030')!.wbs_memo, '<HTML><BODY>ص الأمل</BODY></HTML>');
 });
 
 test('Hebrew: a short term is found with its prefixes (ו ה ב ל מ ש כ) and the prefix stays; a term given with ה is matched without it too', () => {
@@ -193,4 +235,53 @@ test('an ID that would become the same as another is refused and nothing is chan
   assert.equal((await call('undo', { ...H })).err, false);
   assert.deepEqual(await names(), ['Acme one', 'Acme two'], 'one undo');
   await call('close', { ...H, discard: true });
+});
+
+test('HTML entities are never matched inside; the decoded text between the tags is what matches', () => {
+  const db = load();
+  const t = task(db);
+  const memo = (id: string, html: string) => addRow(db, 'TASKMEMO', { memo_id: id, task_id: t.task_id, memo_type_id: '1', proj_id: t.proj_id, task_memo: html });
+  const get = (id: string) => rows(db, 'TASKMEMO').find((x) => x.memo_id === id)!.task_memo;
+  memo('990040', '<P>a &gt; b &lt; c &amp; d&nbsp;e &#1575;&#x6A9; f</P>');
+  const r = run(db, { pairs: [{ find: 'gt', replace: 'X' }, { find: 'amp', replace: 'X' }, { find: 'nbsp', replace: 'X' }, { find: 'lt', replace: 'X' }, { find: 'x6A9', replace: 'X' }], anywhere: true });
+  assert.equal(r.replaced, 0, JSON.stringify(r.pairs));
+  assert.equal(get('990040'), '<P>a &gt; b &lt; c &amp; d&nbsp;e &#1575;&#x6A9; f</P>');
+  // a term with & or a space is found through its entities; the other letters around are left as the file wrote them
+  memo('990041', '<P>Smith&nbsp;&amp;&nbsp;Co &eacute;tude Smith &amp; Co</P>');
+  const r2 = run(db, { pairs: [{ find: 'Smith & Co', replace: 'Jones <&> Sons' }] });
+  assert.equal(get('990041'), '<P>Jones &lt;&amp;&gt; Sons &eacute;tude Jones &lt;&amp;&gt; Sons</P>');
+  assert.equal(r2.pairs[0].where['TASKMEMO.task_memo'], 2);
+  // an Arabic letter written as an entity matches as the letter
+  memo('990042', '<P>&#1571;&#1581;&#1605;&#1583; and أحمد</P>');
+  run(db, { pairs: [{ find: 'احمد', replace: 'س' }] });
+  assert.equal(get('990042'), '<P>س and س</P>');
+  // text with an entity but no tag is a memo too
+  t.task_name = 'R &amp; D plan';
+  run(db, { pairs: [{ find: 'amp', replace: 'X' }, { find: 'plan', replace: 'scheme' }] });
+  assert.equal(t.task_name, 'R &amp; D scheme');
+});
+
+test('kept XML leaves: only names, descriptions and notes are text; Status, Type and the like are P6\'s own words', () => {
+  const db = load();
+  const p = rows(db, 'PROJECT')[0];
+  for (const [f, v] of [['_xml_Name', 'Acme plan'], ['_xml_Description', 'for Acme'], ['_xml_Notes#2', 'Acme note'], ['_xml_Status', 'Acme Active'], ['_xml_Type', 'Acme'], ['_xml_Priority', 'Acme High'], ['_xml_Detail', '<a>Acme</a>']] as const) { addField(db.tables.PROJECT, f); p[f] = v; }
+  run(db, { pairs: [{ find: 'Acme', replace: 'Client' }] });
+  assert.deepEqual(['_xml_Name', '_xml_Description', '_xml_Notes#2'].map((f) => p[f]), ['Client plan', 'for Client', 'Client note']);
+  assert.deepEqual(['_xml_Status', '_xml_Type', '_xml_Priority', '_xml_Detail'].map((f) => p[f]), ['Acme Active', 'Acme', 'Acme High', '<a>Acme</a>']);
+});
+
+test('matches made through an Arabic or Hebrew prefix are listed with the word and field', () => {
+  const db = load();
+  const t = task(db), q = rows(db, 'TASK')[1];
+  t.task_name = 'שרון רון והרון';
+  q.task_name = 'والأمل أمل بالأمل';
+  const r = applyOps(db, [{ op: 'replace_text', pairs: [{ find: 'רון', replace: 'X' }, { find: 'أمل', replace: 'س' }] }]).results[0] as any;
+  assert.equal(t.task_name, 'שX X והX', 'שרון is taken for ש + רון: over-replacing is the safer side');
+  const words = r.prefixed_matches.map((m: any) => `${m.find}|${m.word}|${m.field}`).sort();
+  assert.deepEqual(words, ['רון|והרון|TASK.task_name', 'רון|שרון|TASK.task_name', 'أمل|بالأمل|TASK.task_name', 'أمل|والأمل|TASK.task_name'].sort());
+  assert.equal(r.prefixed_total, 4);
+  assert.match(r.prefixed_note, /prefix/);
+  // none made through a prefix: no list
+  t.task_name = 'Acme';
+  assert.equal((applyOps(db, [{ op: 'replace_text', pairs: [{ find: 'Acme', replace: 'X' }] }]).results[0] as any).prefixed_matches, undefined);
 });
