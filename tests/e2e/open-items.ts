@@ -114,6 +114,27 @@ await win.click('.dialog button:has-text("Close")');
 await runMenu('tools.schedule'); await win.waitForSelector('.dialog-title:has-text("Schedule")');
 await win.click('.dialog button:has-text("Options...")');
 ok(await win.locator('.dialog label:has-text("Calculate start-to-start lag from")').count() === 1, 'Schedule Options: "Calculate start-to-start lag from" offered');
+for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
+
+// 8. Admin > Financial Periods (Batch Create) and Tools > Store Period Performance
+await runMenu('admin.finPeriods'); await win.waitForSelector('.dialog-title:has-text("Financial Periods")');
+const dates = win.locator('.dialog input[type=date]');
+await dates.nth(2).fill('2010-01-01'); await dates.nth(3).fill('2010-12-31');
+await win.click('.dialog button:has-text("Create")'); await win.waitForTimeout(250);
+ok(await win.locator('.dialog tbody tr', { hasText: '2010-06-01' }).count() === 1 && await win.locator('.dialog tbody tr').count() === 12, 'Financial Periods: Batch Create made 12 monthly periods');
+await win.click('.dialog button:has-text("Close")');
+// a month of progress (Update Progress to 2010-08-01), so July has work to store
+await runMenu('tools.progress'); await win.waitForSelector('.dialog-title:has-text("Update Progress")');
+await win.fill('.dialog input[type=datetime-local]', '2010-08-01T00:00'); await win.click('.dialog button:has-text("Apply")'); await win.waitForTimeout(400);
+for (let i = 0; i < 3 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
+await runMenu('tools.storePeriod'); await win.waitForSelector('.dialog-title:has-text("Store Period Performance")');
+ok(/2010-07-01/.test(await win.locator('.dialog select').first().inputValue()), 'Store Period Performance: the period before the data date is chosen');
+await win.click('.dialog button:has-text("Store Now")'); await win.waitForTimeout(300);
+const stTxt = await win.locator('.toast').last().innerText().catch(() => '');
+ok(/[1-9][0-9]* activities stored in 2010-07-01/.test(stTxt), 'Store Period Performance: stored: ' + stTxt);
+await runMenu('admin.finPeriods'); await win.waitForSelector('.dialog-title:has-text("Financial Periods")');
+ok(Number((await win.locator('.dialog tbody tr', { hasText: '2010-07-01' }).locator('td').nth(3).innerText()) || 0) > 0, 'Financial Periods: the July period holds stored activities');
+await win.click('.dialog button:has-text("Close")');
 ok(!errors.length, 'no page errors ' + errors.join(' | '));
 await app.close();
 rmSync(profile, { recursive: true, force: true });

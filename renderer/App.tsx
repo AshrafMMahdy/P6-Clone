@@ -31,6 +31,7 @@ import { printView } from './print.ts';
 import { exportExcel, importExcel } from './excel.ts';
 import { PageSetupDialog } from './dialogs/PageSetupDialog.tsx';
 import { RenumberDialog } from './dialogs/RenumberDialog.tsx';
+import { FinancialPeriodsDialog, StorePeriodDialog } from './dialogs/PeriodDialogs.tsx';
 import { RunReportDialog, ReportWizardDialog } from './dialogs/ReportDialogs.tsx';
 import { GlobalChangeDialog, GlobalChangeEditDialog, GlobalChangeReportDialog, CodeDictionaryDialog } from './dialogs/GlobalChangeDialogs.tsx';
 
@@ -41,7 +42,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
   level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, globalChange: GlobalChangeDialog, globalChangeEdit: GlobalChangeEditDialog, globalChangeReport: GlobalChangeReportDialog, codeDictionary: CodeDictionaryDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog, checkSchedule: CheckScheduleDialog,
-  renumber: RenumberDialog,
+  renumber: RenumberDialog, finPeriods: FinancialPeriodsDialog, storePeriod: StorePeriodDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
@@ -147,6 +148,8 @@ export function runMenu(id: string): void {
     case 'tools.importLog': return openDialog('importLog', {});
     case 'tools.reports': return setUi({ view: 'reports' });
     case 'tools.globalChange': return openDialog('globalChange');
+    case 'tools.storePeriod': return needProject() ? undefined : openDialog('storePeriod');
+    case 'admin.finPeriods': return openDialog('finPeriods');
     case 'ent.projectCodes': return openDialog('codeDictionary', { kind: 'project' });
     case 'ent.resourceCodes': return openDialog('codeDictionary', { kind: 'resource' });
     case 'tools.reportWizard': setUi({ view: 'reports' }); return openDialog('reportWizard', {});

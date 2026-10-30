@@ -15,6 +15,7 @@ import { assignBaseline, deleteBaseline, restoreBaseline, saveBaseline } from '.
 import { applyFields, FIELD_GUIDE, FIELD_OP_NAMES } from './ops-fields.ts';
 import { cycles, p6Refusals } from './integrity.ts';
 import { compile, isHtml, isTextField, replaceHtml, replacePlain } from './replace-text.ts';
+import { addPeriod, defaultPeriod, financialPeriods, overlapping, storePeriodPerformance } from '../progress/period.ts';
 
 export interface OpHelpers {
   hpd: number;
@@ -40,7 +41,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = [...FIELD_OP_NAMES, 'delete_code_type', 'delete_udf', 'delete_cost_account', 'delete_calendar', 'delete_resource_curve', 'clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'replace_text', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve'];
+export const EXTRA_OP_NAMES = [...FIELD_OP_NAMES, 'delete_code_type', 'delete_udf', 'delete_cost_account', 'delete_calendar', 'delete_resource_curve', 'clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'replace_text', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve', 'add_financial_periods', 'update_financial_period', 'delete_financial_period', 'store_period_performance'];
 
 export const EXTRA_GUIDE = [
   `update_resource_curve: name, new_name`,
@@ -84,6 +85,8 @@ export const EXTRA_GUIDE = [
   `delete_cost_account: id: its child accounts move up to its parent; expenses, assignments and projects that named it are left without an account`,
   `delete_calendar: name, [replace_with] (a calendar for the activities, projects, resources and calendars that use it; without it, refused while anything uses it). The default calendar is refused: make another one the default first (set_fields CALENDAR default_flag)`,
   `delete_resource_curve: name: assignments that used it become linear`,
+  `add_financial_periods: periods [{name, start, end}], or from, to, every (month or week), [week_ends_on] (sun..sat; default the day before from's weekday): P6's Admin > Financial Periods (and its Batch Create); batch names are the start dates; a period overlapping another is refused. update_financial_period: name, [new_name], [start], [end]. delete_financial_period: name, [clear_stored] (refused while period performance is stored in it, unless true: that stored data goes too)`,
+  `store_period_performance: [project], [period] (financial period name; default the latest period starting before the project's data date): P6's Tools > Store Period Performance: each activity's and assignment's actuals for the period (labor and nonlabor units and cost, material and expense cost; the value to date less what other periods hold), with earned value and planned value (cost and labor units), are stored in the period (TASKFIN, TRSRCFIN; storing the period again overwrites it) and Actual This Period is set to zero. Needs the project's "Link actual to date and actual this period" option (act_this_per_link_flag Y), as P6 does. Answers what was stored`,
   ...FIELD_GUIDE,
 ].join('\n');
 
@@ -224,9 +227,69 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     return { T, find };
   };
 
+  const finPeriod = (name: unknown) => rows(db, 'FINDATES').find((f) => lc(f.fin_dates_name) === lc(name)) ?? fail(`No financial period "${name}". Periods: ${financialPeriods(db).map((f) => f.fin_dates_name).join(', ') || 'none (add_financial_periods)'}.`);
+  const dayOf = (d: string) => `${d.slice(0, 10)} 00:00`;
   const generic = applyFields(db, op, h);
   if (generic !== undefined) return generic;
   switch (op.op) {
+    case 'add_financial_periods': {
+      const made: string[] = [];
+      const put = (name: string, start: string, end: string) => {
+        if (end < start) fail(`Financial period ${name} ends before it starts.`);
+        if (rows(db, 'FINDATES').some((f) => lc(f.fin_dates_name) === lc(name))) fail(`Financial period "${name}" already exists.`);
+        const o = overlapping(db, start, end);
+        if (o) fail(`Financial period ${name} (${start.slice(0, 10)} - ${end.slice(0, 10)}) overlaps ${o.fin_dates_name} (${o.start_date.slice(0, 10)} - ${o.end_date.slice(0, 10)}).`);
+        addPeriod(db, name, start, end); made.push(name);
+      };
+      if (op.periods != null) {
+        if (!Array.isArray(op.periods)) fail('periods must be a list of {name, start, end}.');
+        (op.periods as Record<string, unknown>[]).forEach((x, i) => put(str(x?.name, `periods[${i}].name`), dayOf(date(x?.start, `periods[${i}].start`)), dayOf(date(x?.end, `periods[${i}].end`))));
+      } else {
+        const from = new Date(`${date(op.from, 'from').slice(0, 10)}T00:00:00Z`), to = new Date(`${date(op.to, 'to').slice(0, 10)}T00:00:00Z`);
+        const every = lc(op.every ?? 'month');
+        if (every !== 'month' && every !== 'week') fail('every must be month or week.');
+        if (to < from) fail('to is before from.');
+        const iso = (d: Date) => d.toISOString().slice(0, 10);
+        const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const endDay = op.week_ends_on != null ? DAYS.indexOf(lc(op.week_ends_on).slice(0, 3)) : (from.getUTCDay() + 6) % 7;
+        if (endDay < 0) fail('week_ends_on must be a day: sun, mon, tue, wed, thu, fri or sat.');
+        for (let s = from, k = 0; s <= to && k < 5000; k++) {
+          const e = new Date(s);
+          if (every === 'month') { e.setUTCMonth(e.getUTCMonth() + 1, 1); e.setUTCDate(0); } // the month's last day
+          else { while (e.getUTCDay() !== endDay) e.setUTCDate(e.getUTCDate() + 1); }
+          put(iso(s), `${iso(s)} 00:00`, `${iso(e)} 00:00`);
+          s = new Date(e); s.setUTCDate(s.getUTCDate() + 1);
+        }
+      }
+      return { financial_periods: made.length, first: made[0], last: made[made.length - 1] };
+    }
+    case 'update_financial_period': {
+      const f = finPeriod(op.name);
+      if (op.new_name != null) { const nn = str(op.new_name, 'new_name'); if (rows(db, 'FINDATES').some((x) => x !== f && lc(x.fin_dates_name) === lc(nn))) fail(`Financial period "${nn}" already exists.`); f.fin_dates_name = nn; }
+      const start = op.start != null ? dayOf(date(op.start, 'start')) : f.start_date, end = op.end != null ? dayOf(date(op.end, 'end')) : f.end_date;
+      if (end < start) fail('The period ends before it starts.');
+      const o = overlapping(db, start, end, f.fin_dates_id);
+      if (o) fail(`It would overlap ${o.fin_dates_name}.`);
+      f.start_date = start; f.end_date = end;
+      return { financial_period: f.fin_dates_name };
+    }
+    case 'delete_financial_period': {
+      const f = finPeriod(op.name), id = f.fin_dates_id;
+      const stored = rows(db, 'TASKFIN').filter((r) => r.fin_dates_id === id).length + rows(db, 'TRSRCFIN').filter((r) => r.fin_dates_id === id).length;
+      if (stored && op.clear_stored !== true) fail(`Period performance is stored in ${f.fin_dates_name} (${stored} rows); clear_stored: true deletes it with the period.`);
+      removeWhere(rows(db, 'TASKFIN'), (r) => r.fin_dates_id === id);
+      removeWhere(rows(db, 'TRSRCFIN'), (r) => r.fin_dates_id === id);
+      for (const p of rows(db, 'PROJECT')) for (const k of ['last_fin_dates_id', 'new_fin_dates_id']) if (p[k] === id) p[k] = '';
+      removeWhere(rows(db, 'FINDATES'), (r) => r.fin_dates_id === id);
+      return { deleted: f.fin_dates_name, stored_rows_removed: stored };
+    }
+    case 'store_period_performance': {
+      const p = h.project(op.project);
+      if (!rows(db, 'FINDATES').length) fail('No financial periods yet: add them with {"op":"add_financial_periods"} (P6: Admin > Financial Periods).');
+      const f = op.period != null ? finPeriod(op.period) : defaultPeriod(db, p) ?? fail(`No financial period starts before ${p.proj_short_name}'s data date; give period.`);
+      const r = storePeriodPerformance(db, p.proj_id, f.fin_dates_id);
+      return 'error' in r ? fail(r.error) : r;
+    }
     case 'delete_code_type': {
       const S = codeSubject(op.subject);
       const P = op.project != null ? h.project(op.project) : null;

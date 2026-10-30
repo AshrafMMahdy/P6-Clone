@@ -122,6 +122,7 @@ export function buildMenu(win: BrowserWindow): Menu {
         cmd('&Schedule...', 'tools.schedule', 'F9'),
         cmd('&Level Resources...', 'tools.level', 'Shift+F9'),
         cmd('&Update Progress...', 'tools.progress'),
+        cmd('Store &Period Performance...', 'tools.storePeriod'),
         cmd('Apply &Actuals', 'tools.applyActuals'),
         cmd('&Timesheet Approval', 'tools.timesheets'),
         cmd('Schedule &Risk Analysis...', 'tools.riskAnalysis'),
@@ -141,6 +142,7 @@ export function buildMenu(win: BrowserWindow): Menu {
       label: '&Admin', submenu: [
         cmd('&Admin Preferences...', 'admin.preferences'),
         cmd('&Timesheet Dates...', 'tools.timesheets'),
+        cmd('&Financial Periods...', 'admin.finPeriods'),
         cmd('Reset &Database...', 'admin.reset'),
       ],
     },

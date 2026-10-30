@@ -22,17 +22,32 @@ export function percentComplete(t: Row, asg: Row[]): number {
   return o ? Math.max(0, Math.min(1, (o - n(t.remain_drtn_hr_cnt)) / o)) : 0;
 }
 
+/** Each project's baseline activities by `${projId}|${Activity ID}` (projects with a project baseline assigned). */
+export function baselineActivities(db: Db, projIds: string[]): Map<string, Row> {
+  const projects = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p]));
+  const bl = new Map<string, Row>();
+  for (const pid of projIds) {
+    const bid = projects.get(pid)?.sum_base_proj_id;
+    if (bid) for (const t of rows(db, 'TASK')) if (t.proj_id === bid) bl.set(`${pid}|${t.task_code}`, t);
+  }
+  return bl;
+}
+
+/** The share of the activity's baseline (else planned) dates elapsed at its project's data date: planned value / BAC. */
+export function plannedShare(t: Row, baseline: Row | undefined, dataDate: number): number {
+  const b = baseline ?? t;
+  const ps = parseP6Date(b.target_start_date || b.early_start_date), pf = parseP6Date(b.target_end_date || b.early_end_date);
+  if (ps == null || pf == null) return 0;
+  return dataDate >= pf ? 1 : dataDate <= ps ? 0 : (dataDate - ps) / Math.max(1, pf - ps);
+}
+
 /** Cost line per activity. Planned value uses the baseline activity's dates when one is assigned, else planned dates. */
 export function activityCosts(db: Db, projIds: string[]): Map<string, CostLine> {
   const asgBy = groupBy(rows(db, 'TASKRSRC'), 'task_id');
   const expBy = groupBy(rows(db, 'PROJCOST'), 'task_id');
   const projects = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p]));
-  const bl = new Map<string, Row>();
   const costOf = (taskId: string) => (asgBy.get(taskId) ?? []).reduce((s, x) => s + n(x.target_cost), 0) + (expBy.get(taskId) ?? []).reduce((s, x) => s + n(x.target_cost), 0);
-  for (const pid of projIds) {
-    const bid = projects.get(pid)?.sum_base_proj_id;
-    if (bid) for (const t of rows(db, 'TASK')) if (t.proj_id === bid) bl.set(`${pid}|${t.task_code}`, t);
-  }
+  const bl = baselineActivities(db, projIds);
   const out = new Map<string, CostLine>();
   for (const t of rows(db, 'TASK')) {
     if (!projIds.includes(t.proj_id)) continue;
@@ -43,11 +58,7 @@ export function activityCosts(db: Db, projIds: string[]): Map<string, CostLine> 
     const bac = hasBl ? (blt ? costOf(blt.task_id) : 0) : budget; // an activity added after the baseline has no baseline budget
     const actual = a.reduce((s, x) => s + n(x.act_reg_cost) + n(x.act_ot_cost), 0) + e.reduce((s, x) => s + n(x.act_cost), 0);
     const remaining = a.reduce((s, x) => s + n(x.remain_cost), 0) + e.reduce((s, x) => s + n(x.remain_cost), 0);
-    const dd = parseP6Date(projects.get(t.proj_id)?.last_recalc_date) ?? 0;
-    const b = bl.get(`${t.proj_id}|${t.task_code}`) ?? t;
-    const ps = parseP6Date(b.target_start_date || b.early_start_date), pf = parseP6Date(b.target_end_date || b.early_end_date);
-    let frac = 0;
-    if (ps != null && pf != null) frac = dd >= pf ? 1 : dd <= ps ? 0 : (dd - ps) / Math.max(1, pf - ps);
+    const frac = plannedShare(t, blt, parseP6Date(projects.get(t.proj_id)?.last_recalc_date) ?? 0);
     const ev = bac * percentComplete(t, a);
     out.set(t.task_id, { bac, budget, actual, remaining, eac: actual + remaining, pv: bac * frac, ev, ac: actual });
   }
