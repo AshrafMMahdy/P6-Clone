@@ -549,9 +549,12 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   const namedTypes = new Map<string, Set<string>>();
   for (const x of recs) (namedTypes.get(x.k) ?? namedTypes.set(x.k, new Set()).get(x.k)!).add(x.type);
   const retyped = new Map<string, Row[]>(); // pair -> its relationships whose type no row names
+  // the file's relationships by pair (a scan of every relationship per row was quadratic: 32,000 rows took a minute)
+  const byPair = new Map<string, Row[]>();
+  for (const p of PR) { const k2 = `${p.pred_task_id}|${p.task_id}`; const l = byPair.get(k2); if (l) l.push(p); else byPair.set(k2, [p]); }
   for (const { pred, succ, type, r, ref, ends, k } of recs) {
     const a = taskOf(str(r.pred_proj_id), pred), b = taskOf(str(r.proj_id), succ);
-    const onPair = a && b ? PR.filter((p) => p.pred_task_id === a.task_id && p.task_id === b.task_id) : [];
+    const onPair = a && b ? byPair.get(`${a.task_id}|${b.task_id}`) ?? [] : [];
     const existing = onPair.find((p) => p.pred_type === `PR_${type}`);
     if (yes(r.delete_record_flag)) { if (existing) { emit({ op: 'delete_relationship', pred, succ, type, ...P, ...ends }, ref, 3); s.relationshipsDeleted++; } continue; }
     const lag = num(r.lag_hr_cnt) ?? 0;

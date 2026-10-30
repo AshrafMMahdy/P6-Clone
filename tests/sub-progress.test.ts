@@ -65,7 +65,7 @@ test('transfer_progress: a subcontractor\'s progress onto the GC programme in on
   assert.equal(row[1], [...codes.slice(3)].map((c) => sub.get(c)![1]).sort()[0], 'the earliest of their starts');
   assert.equal(row[2], '', 'not finished while any of theirs is open');
   assert.equal(row[3], 'TK_Active');
-  assert.ok(p.unmatched_from.length > 100, 'their other activities are listed as not matched');
+  assert.ok(p.unmatched_from_count > 100 && p.unmatched_from.length === 100, 'their other activities are counted as not matched, the first 100 listed');
 
   const bad = await call('transfer_progress', { ...G, path: w2, match: 'code', code_type: 'Nope' });
   assert.match(bad.d.error.message, /No activity code type "Nope"/);

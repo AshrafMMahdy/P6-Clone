@@ -231,3 +231,13 @@ test('MCP: export_excel describe / sheets / columns, import_excel skips a refuse
   await call('close', { ...H, discard: true });
 });
 
+
+test('a 32,000-relationship programme re-imports unchanged in seconds (relationships matched by an index, not a scan)', async () => {
+  const db = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, 'Copy of JWM - Baseline Programme Rev 05A.xer')))).db;
+  const p = rows(db, 'PROJECT').find((x) => !x._baseline_of)!;
+  const sheets = await readXlsx(await writeXlsx(exportSheets(db, [p.proj_id], 8, true)));
+  const t0 = Date.now();
+  const plan = planImport(db, sheets, p.proj_short_name, 8, true);
+  assert.equal(plan.ops.length, 0, JSON.stringify(plan.ops.slice(0, 3)));
+  assert.ok(Date.now() - t0 < 5000, `planned in ${Date.now() - t0} ms`);
+});
