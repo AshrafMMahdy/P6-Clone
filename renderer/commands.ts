@@ -223,20 +223,8 @@ export function handleEditKey(e: KeyboardEvent): boolean {
   return false;
 }
 
-/** Edit > Renumber Activity IDs: selected (or all open) activities, in start order, using the project's prefix/suffix/increment. */
-export async function renumberActivities(): Promise<void> {
-  const ui = getUi(), db = getDb();
-  const ids = ui.selTasks.length ? new Set(ui.selTasks) : new Set(rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id)).map((t) => t.task_id));
-  if (!ids.size) return toast('No activities to renumber.');
-  if (!(await window.p6.confirm(`Renumber ${ids.size} activity IDs?`, 'Activities are numbered in start-date order using the project ID prefix, suffix and increment.'))) return;
-  mutate('Renumber Activity IDs', (d) => {
-    for (const p of rows(d, 'PROJECT').filter((x) => ui.openProjects.includes(x.proj_id))) {
-      const list = rows(d, 'TASK').filter((t) => t.proj_id === p.proj_id && ids.has(t.task_id))
-        .sort((a, b) => (a.act_start_date || a.early_start_date || '').localeCompare(b.act_start_date || b.early_start_date || '') || a.task_code.localeCompare(b.task_code));
-      const others = new Set(rows(d, 'TASK').filter((t) => t.proj_id === p.proj_id && !ids.has(t.task_id)).map((t) => t.task_code));
-      const prefix = p.task_code_prefix ?? 'A', step = Number(p.task_code_step || 10);
-      let n = Number(p.task_code_base || 1000);
-      for (const t of list) { while (others.has(prefix + n)) n += step; t.task_code = prefix + n; n += step; }
-    }
-  });
+/** Edit > Renumber Activity IDs: P6's dialog (Prefix, Suffix, Increment) on the selected or shown activities. */
+export function renumberActivities(): void {
+  if (!getUi().openProjects.length) return toast('Open a project first.');
+  openDialog('renumber');
 }

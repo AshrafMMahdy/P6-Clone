@@ -90,7 +90,18 @@ await show('A2420');
 await row('A2420').click({ button: 'right' });
 const items = await win.locator('.ctxmenu').innerText();
 ok(['Dissolve', 'Renumber Activity IDs', 'Assign Activity Codes', 'Link Activities'].every((x) => items.includes(x)), 'table right-click menu: Dissolve, Renumber, Assign Activity Codes, Link');
-await win.keyboard.press('Escape');
+// Renumber Activity IDs: P6's dialog (Prefix, Suffix, Increment) on the selected activity
+await win.locator('.ctxmenu').getByText('Renumber Activity IDs').click();
+await win.waitForSelector('.dialog-title:has-text("Renumber Activity IDs")');
+const rn = win.locator('.dialog input');
+await rn.nth(0).fill('RN'); await rn.nth(1).fill('7'); await rn.nth(2).fill('1');
+ok(/A2420 → RN7/.test(await win.locator('.dialog').innerText()), 'Renumber: the preview shows the new ID');
+await win.click('.dialog button:has-text("OK")'); await win.waitForTimeout(250);
+await show('RN7');
+ok(await win.locator('.grid-row', { hasText: 'RN7' }).count() === 1, 'Renumber: A2420 is now RN7');
+await runMenu('edit.undo'); await win.waitForTimeout(200);
+await show('A2420');
+ok(await win.locator('.grid-row', { hasText: 'A2420' }).count() === 1, 'Renumber: one undo restores A2420');
 
 // 6. Project Details Calculations / UDFs; 7. Schedule Options SS lag
 await runMenu('project.details');

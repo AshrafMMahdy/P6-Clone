@@ -30,6 +30,7 @@ import { fmtDate, projectName } from './model.ts';
 import { printView } from './print.ts';
 import { exportExcel, importExcel } from './excel.ts';
 import { PageSetupDialog } from './dialogs/PageSetupDialog.tsx';
+import { RenumberDialog } from './dialogs/RenumberDialog.tsx';
 import { RunReportDialog, ReportWizardDialog } from './dialogs/ReportDialogs.tsx';
 import { GlobalChangeDialog, GlobalChangeEditDialog, GlobalChangeReportDialog, CodeDictionaryDialog } from './dialogs/GlobalChangeDialogs.tsx';
 
@@ -40,6 +41,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
   level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, globalChange: GlobalChangeDialog, globalChangeEdit: GlobalChangeEditDialog, globalChangeReport: GlobalChangeReportDialog, codeDictionary: CodeDictionaryDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog, checkSchedule: CheckScheduleDialog,
+  renumber: RenumberDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [

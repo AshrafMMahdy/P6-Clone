@@ -300,6 +300,13 @@ with `offset` / `next_offset`.
   15 s at 165 MB peak RSS, undo journal included). Lookups by Activity ID, WBS path and relationship pair are indexed for
   the edit and loops are checked once at its end, so a build of `JWM` (3,560 WBS, 11,426 activities, 32,407
   relationships, 3,393 assignments; 50,808 operations) applies in about 2 s.
+- One `edit` operation works on every activity a filter picks, as P6's filter, select all, then Global Change / Assign
+  / Delete: `select` (project, ids, WBS branch, activity code value, UDF value, resource, any TASK `where`, `exclude`,
+  `order_by`) in place of `id` / `activity` on update_activity, delete / dissolve / move_activity, assign_code,
+  set_udf, set_notebook, set_estimates, set_predecessors, assign / unassign_resource, update_assignment, the expense and
+  step operations; `link_activities` (P6's Link Activities: each picked activity to the next) and
+  `renumber_activities` (P6's Renumber Activity IDs: prefix, start, increment, refused on a duplicate ID). On 5,000
+  activities each of link, code, UDF, resource, update, renumber and delete takes under 0.2 s, one undo.
 - MCP `notifications/cancelled` (or `cancel_job` for a job) stops `open_file`, `save` and `schedule` between their
   phases and `monte_carlo` at once, with error `cancelled`: nothing is kept, no file is written, the memory is freed.
 

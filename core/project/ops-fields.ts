@@ -26,6 +26,44 @@ const REQUIRED: Record<string, string[]> = { RSRCRATE: ['rsrc_id'], ROLERATE: ['
 const lc = (v: unknown) => String(v ?? '').trim().toLowerCase();
 const numText = (n: number) => String(Math.round(n * 1e6) / 1e6);
 
+/** A where {field: value or {op, value}} as a test on rows (set_fields, delete_rows, an edit's select). */
+export function whereTest(where: Record<string, unknown>, fail: (m: string) => never): (r: Row) => boolean {
+  const norm = (f: string, v: unknown): string => {
+    const kind = fieldType(f), t = v == null ? '' : typeof v === 'boolean' ? (v ? 'Y' : 'N') : String(v);
+    if (kind === 'date') return t === '' ? '' : normDate(t) ?? t;
+    if (kind === 'flag') return /^(y|yes|true)$/i.test(t) ? 'Y' : /^(n|no|false)$/i.test(t) ? 'N' : t;
+    return t;
+  };
+  /** Order of the row's value a against b by the field's own kind: numbers by value in a field that holds numbers, dates as dates, everything else
+   *  as the exact text (a code "0100" is not "100", "A1" is not "a1"). */
+  const cmp = (f: string, a: string, b: unknown, fold = false): number => {
+    if (fieldType(f) === 'number') {
+      const y = norm(f, b);
+      if (a === '' || y === '') return a === y ? 0 : a === '' ? -1 : 1;
+      if (!Number.isFinite(Number(y))) fail(`where ${f}: ${f} holds numbers; "${y}" is not one.`);
+      return Number.isFinite(Number(a)) ? Number(a) - Number(y) : a < y ? -1 : 1;
+    }
+    const x = norm(f, a), y = norm(f, b), p = fold ? x.toLowerCase() : x, q = fold ? y.toLowerCase() : y;
+    return p < q ? -1 : p > q ? 1 : 0;
+  };
+  const conds = Object.entries(where);
+  return (r: Row) => conds.every(([f, c]) => {
+    const v = r[f] ?? '';
+    if (!c || typeof c !== 'object' || Array.isArray(c)) return Array.isArray(c) ? c.some((x) => cmp(f, v, x) === 0) : cmp(f, v, c) === 0;
+    const { op: o = '=', value: w } = c as { op?: string; value?: unknown };
+    const by: Record<string, () => boolean> = {
+      '=': () => cmp(f, v, w) === 0, '!=': () => cmp(f, v, w) !== 0,
+      '<': () => v !== '' && cmp(f, v, w) < 0, '<=': () => v !== '' && cmp(f, v, w) <= 0,
+      '>': () => v !== '' && cmp(f, v, w) > 0, '>=': () => v !== '' && cmp(f, v, w) >= 0,
+      contains: () => String(v).includes(String(w ?? '')), starts_with: () => String(v).startsWith(String(w ?? '')),
+      icontains: () => lc(v).includes(lc(w)), istarts_with: () => lc(v).startsWith(lc(w)), iequals: () => cmp(f, v, w, true) === 0,
+      in: () => Array.isArray(w) && w.some((x) => cmp(f, v, x) === 0),
+      empty: () => (v === '') === (w !== false),
+    };
+    return (by[o] ?? fail(`where ${f}: unknown op "${o}" (${Object.keys(by).join(', ')}).`))();
+  });
+}
+
 export function applyFields(db: Db, op: Op, h: OpHelpers): unknown {
   const { fail, str } = h;
   /** A P6 table of the file (or, for add_row, one P6 has) by name. */
@@ -119,40 +157,8 @@ export function applyFields(db: Db, op: Op, h: OpHelpers): unknown {
       })() : null;
       reach = (r) => !((T.name === 'PROJECT' && hidden.has(r.proj_id)) || (F.includes('proj_id') && T.name !== 'PROJECT' && hidden.has(r.proj_id)) || bTasks?.has(r.task_id) || bWbs?.has(r.wbs_id) || udf?.(r));
     }
-    const norm = (f: string, v: unknown): string => {
-      const kind = fieldType(f), t = v == null ? '' : typeof v === 'boolean' ? (v ? 'Y' : 'N') : String(v);
-      if (kind === 'date') return t === '' ? '' : normDate(t) ?? t;
-      if (kind === 'flag') return /^(y|yes|true)$/i.test(t) ? 'Y' : /^(n|no|false)$/i.test(t) ? 'N' : t;
-      return t;
-    };
-    /** Order of the row's value a against b by the field's own kind: numbers by value in a field that holds numbers, dates as dates, everything else
-     *  as the exact text (a code "0100" is not "100", "A1" is not "a1"). */
-    const cmp = (f: string, a: string, b: unknown, fold = false): number => {
-      if (fieldType(f) === 'number') {
-        const y = norm(f, b);
-        if (a === '' || y === '') return a === y ? 0 : a === '' ? -1 : 1;
-        if (!Number.isFinite(Number(y))) fail(`where ${f}: ${f} holds numbers; "${y}" is not one.`);
-        return Number.isFinite(Number(a)) ? Number(a) - Number(y) : a < y ? -1 : 1;
-      }
-      const x = norm(f, a), y = norm(f, b), p = fold ? x.toLowerCase() : x, q = fold ? y.toLowerCase() : y;
-      return p < q ? -1 : p > q ? 1 : 0;
-    };
-    const test = (r: Row) => (!reach || reach(r)) && (!inProject || inProject(r)) && Object.entries(where).every(([f, c]) => {
-      const v = r[f] ?? '';
-      if (!c || typeof c !== 'object' || Array.isArray(c)) return Array.isArray(c) ? c.some((x) => cmp(f, v, x) === 0) : cmp(f, v, c) === 0;
-      const { op: o = '=', value: w } = c as { op?: string; value?: unknown };
-      const by: Record<string, () => boolean> = {
-        '=': () => cmp(f, v, w) === 0, '!=': () => cmp(f, v, w) !== 0,
-        '<': () => v !== '' && cmp(f, v, w) < 0, '<=': () => v !== '' && cmp(f, v, w) <= 0,
-        '>': () => v !== '' && cmp(f, v, w) > 0, '>=': () => v !== '' && cmp(f, v, w) >= 0,
-        contains: () => String(v).includes(String(w ?? '')), starts_with: () => String(v).startsWith(String(w ?? '')),
-        icontains: () => lc(v).includes(lc(w)), istarts_with: () => lc(v).startsWith(lc(w)), iequals: () => cmp(f, v, w, true) === 0,
-        in: () => Array.isArray(w) && w.some((x) => cmp(f, v, x) === 0),
-        empty: () => (v === '') === (w !== false),
-      };
-      return (by[o] ?? fail(`where ${f}: unknown op "${o}" (${Object.keys(by).join(', ')}).`))();
-    });
-    return pick(T.rows, test);
+    const matches = whereTest(where, fail);
+    return pick(T.rows, (r) => (!reach || reach(r)) && (!inProject || inProject(r)) && matches(r));
   };
   /** Rows of other tables that point at these keys of T (field by field). */
   const pointers = (T: { name: string }, keys: Set<string>) => {

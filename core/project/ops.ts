@@ -15,6 +15,7 @@ import { assignResource, assignmentActuals, fitAssignmentsToDuration, recalcAssi
 import { copyProject } from './copy.ts';
 import { dayHours as dayHoursOf } from './units.ts';
 import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
+import { SELECT_GUIDE, SELECT_KEY, selectActivities, type SelectHelpers } from './select.ts';
 import {
   addActivity, addRelationship, addWbs, LOOP_MESSAGE, onePerPair, relationshipsBetween, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
   enumOk, normDate, projectNumberProblem, refreshOwnDates, renumberProject, setActual, setFinish, setPercent, setStart, statusOf,
@@ -86,7 +87,7 @@ const IN_BASELINE: Record<string, string[]> = {
   update_code_type: ['op', 'in_baseline', 'project', 'name', 'new_name', 'subject'],
   update_code_value: ['op', 'in_baseline', 'project', 'type', 'code', 'new_code', 'name', 'subject'],
 };
-export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'set_predecessors', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', ...EXTRA_OP_NAMES];
+export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'set_predecessors', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', 'link_activities', 'renumber_activities', ...EXTRA_OP_NAMES];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
@@ -107,6 +108,7 @@ export const OP_GUIDE = [
   `set_predecessors: activity, links [{pred, [type], [lag_days] or [lag_hours]}] ([] = none): replaces every predecessor of the activity in one step`,
   `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day] or [max_units_per_hour], [price_per_unit], [calendar], [parent]`,
   `assign_resource: activity, resource, [allow_duplicate] (true: assign it again when it is already on the activity, as P6 allows), [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6), [curve] (resource curve name, see add_resource_curve); unassign_resource: activity, resource`,
+  SELECT_GUIDE,
   EXTRA_GUIDE,
 ].join('\n');
 
@@ -199,10 +201,28 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
   /** Lag days on the relationship-lag calendar of the successor's project (P6 default: the predecessor's calendar). */
   const lagHours = (pred: Row, succ: Row) => dayHoursOf(db, hpd, calDays).lag(pred, succ);
 
+  const resource = (id: unknown): Row => rows(db, 'RSRC').find((r) => r.rsrc_short_name.toLowerCase() === String(id).toLowerCase()) ?? fail(`No resource "${id}" (add it with {"op":"add_resource"}).`);
+  const sel: SelectHelpers = { fail, project, projects, wbsOf, resource };
+  const projectId = (t: Row) => projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name;
+
+  // select: the operation done on every activity a filter picks (P6's select-all then Global Change / Assign / Delete)
+  if (op.select !== undefined && op.op !== 'link_activities' && op.op !== 'renumber_activities') {
+    const key = SELECT_KEY[op.op] ?? fail(`select works with ${Object.keys(SELECT_KEY).join(', ')}, link_activities and renumber_activities.`);
+    if (op[key] != null) fail(`Give ${key} or select, not both.`);
+    const s = op.select && typeof op.select === 'object' && op.project != null && (op.select as Row).project == null ? { ...(op.select as object), project: op.project } : op.select;
+    const picked = selectActivities(db, s, sel);
+    if (!picked.length) { warnings.push(`${op.op}: select picked no activity; nothing changed.`); return { selected: 0 }; }
+    // deleting or dissolving them: once for them all (one pass over the tables, not one per activity)
+    if (op.op === 'delete_activity') { deleteActivities(db, picked.map((t) => t.task_id)); return { selected: picked.length, deleted: picked.length }; }
+    if (op.op === 'dissolve_activity') return { selected: picked.length, dissolved: picked.length, relationships_added: dissolveActivities(db, picked.map((t) => t.task_id)) };
+    const { select: _s, ...one } = op;
+    const done = picked.map((t) => apply(db, { ...one, [key]: t.task_code, project: projectId(t) } as Op, hpd, warnings, batch));
+    return { selected: picked.length, results: done.slice(0, 10), ...(done.length > 10 ? { more: done.length - 10 } : {}) };
+  }
+
   const calendar = (name: unknown): Row => rows(db, 'CALENDAR').find((c) => c.clndr_name.toLowerCase() === String(name).toLowerCase()) ?? fail(`No calendar "${name}".`);
   const curveId = (name: unknown): string => rows(db, 'RSRCCURVDATA').find((c) => c.curv_name.toLowerCase() === String(name).toLowerCase())?.curv_id ?? fail(`No resource curve "${name}". Curves: ${rows(db, 'RSRCCURVDATA').map((c) => c.curv_name).join(', ') || 'none in this file'} (add one with {"op":"add_resource_curve"}).`);
-  const resource = (id: unknown): Row => rows(db, 'RSRC').find((r) => r.rsrc_short_name.toLowerCase() === String(id).toLowerCase()) ?? fail(`No resource "${id}" (add it with {"op":"add_resource"}).`);
-  const cstr = (v: unknown): [string, string] => {
+  const cstr =(v: unknown): [string, string] => {
     if (v == null || v === 'none' || v === '') return ['', ''];
     const c = v as { type?: unknown; date?: unknown };
     const t = typeof c === 'object' ? String(c.type ?? '') : String(v);
@@ -418,6 +438,38 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       if (op.curve != null && op.curve !== '') { addField(table(db, 'TASKRSRC'), 'curv_id'); a.curv_id = curveId(op.curve); }
       assignmentActuals(db, a, op, num);
       return { assigned: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty) };
+    }
+    case 'link_activities': {
+      // P6's Link Activities: each selected activity to the next, in the layout's order (here order_by, default start)
+      const picked = selectActivities(db, op.select ?? fail('link_activities needs select: the activities to link, in order.'), sel, 'start');
+      if (picked.length < 2) { warnings.push(`link_activities: select picked ${picked.length} activit${picked.length === 1 ? 'y' : 'ies'}; nothing to link.`); return { selected: picked.length, linked: 0 }; }
+      let linked = 0, skipped = 0;
+      for (let i = 1; i < picked.length; i++) {
+        const a = picked[i - 1], b = picked[i];
+        const r = apply(db, { op: 'add_relationship', pred: a.task_code, pred_project: projectId(a), succ: b.task_code, succ_project: projectId(b), type: op.type, lag_days: op.lag_days, lag_hours: op.lag_hours }, hpd, warnings, batch) as { skipped?: string };
+        if (r.skipped) skipped++; else linked++;
+      }
+      return { selected: picked.length, linked, ...(skipped ? { skipped } : {}) };
+    }
+    case 'renumber_activities': {
+      // P6's Renumber Activity IDs: prefix + start, prefix + (start + increment), ... in order (P6 calls the start number
+      // the Suffix; defaults: the project's Activity ID numbering, else A1000 by 10)
+      const picked = selectActivities(db, op.select ?? fail('renumber_activities needs select: the activities to renumber.'), sel, 'id');
+      if (!picked.length) { warnings.push('renumber_activities: select picked no activity; nothing changed.'); return { selected: 0 }; }
+      const p = projects().find((x) => x.proj_id === picked[0].proj_id)!;
+      const prefix = op.prefix != null ? String(op.prefix) : p.task_code_prefix || 'A';
+      const start = op.start != null ? num(op.start, 'start') : Number(p.task_code_base) || 1000;
+      const step = op.increment != null ? num(op.increment, 'increment') : Number(p.task_code_step) || 10;
+      if (!Number.isInteger(start) || start < 0 || !Number.isInteger(step) || step < 1) fail('start must be a whole number of 0 or more, increment a whole number of 1 or more.');
+      const next = picked.map((_, i) => `${prefix}${start + i * step}`);
+      const long = next.find((c) => c.length > MAX_LEN['TASK.task_code']);
+      if (long) fail(`Activity ID "${long}" is ${long.length} characters; P6 holds ${MAX_LEN['TASK.task_code']}.`);
+      const moving = new Set(picked.map((t) => t.task_id));
+      const clash = picked.flatMap((t, i) => byCode(next[i]).filter((x) => x.proj_id === t.proj_id && !moving.has(x.task_id)).map((x) => `${next[i]} (kept by ${x.task_name})`));
+      if (clash.length) fail(`Renumbering would give IDs other activities keep: ${clash.slice(0, 5).join(', ')}${clash.length > 5 ? ` (and ${clash.length - 5} more)` : ''}. Choose another prefix or start.`);
+      picked.forEach((t, i) => { t.task_code = next[i]; });
+      dropIndexes(realOf(rows(db, 'TASK'))); // the index by Activity ID no longer holds
+      return { selected: picked.length, renumbered: picked.length, first: next[0], last: next[next.length - 1] };
     }
     case 'unassign_resource': {
       const t = activity(op.activity, op.project), r = resource(op.resource);
