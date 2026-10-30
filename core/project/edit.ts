@@ -210,14 +210,41 @@ export function deleteActivities(db: Db, ids: string[]): void {
   // in place (removeWhere): one journal copy per change, however many operations delete activities
   removeWhere(rows(db, 'TASK'), (t) => s.has(t.task_id));
   removeWhere(rows(db, 'TASKPRED'), (r) => s.has(r.task_id) || s.has(r.pred_task_id));
-  // UDF values of the activities, their assignments and expenses (they name their row by fk_id, not task_id)
-  const gone = new Set(realOf(rows(db, 'TASKRSRC')).filter((r) => s.has(r.task_id)).map((r) => r.taskrsrc_id));
+  // the assignments with all that hangs on them; UDF values of the activities and expenses (named by fk_id, not task_id)
+  removeAssignments(db, new Set(realOf(rows(db, 'TASKRSRC')).filter((r) => s.has(r.task_id)).map((r) => r.taskrsrc_id)));
   const costs = new Set(realOf(rows(db, 'PROJCOST')).filter((r) => s.has(r.task_id)).map((r) => r.cost_item_id));
   const udf = new Map(rows(db, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
-  removeWhere(rows(db, 'UDFVALUE'), (r) => (udf.get(r.udf_type_id) === 'TASK' && s.has(r.fk_id)) || (udf.get(r.udf_type_id) === 'TASKRSRC' && gone.has(r.fk_id)) || (udf.get(r.udf_type_id) === 'PROJCOST' && costs.has(r.fk_id)));
+  removeWhere(rows(db, 'UDFVALUE'), (r) => (udf.get(r.udf_type_id) === 'TASK' && s.has(r.fk_id)) || (udf.get(r.udf_type_id) === 'PROJCOST' && costs.has(r.fk_id)));
   for (const t of Object.values(db.tables)) if (t.name !== 'TASK' && t.fields.includes('task_id')) removeWhere(t.rows, (r) => s.has(r.task_id));
-  // what names an assignment by taskrsrc_id: its period actuals and assignment codes
-  if (gone.size) for (const name of ['TRSRCFIN', 'ASGNMNTACAT']) if (db.tables[name]) removeWhere(rows(db, name), (r) => gone.has(r.taskrsrc_id));
+}
+
+/** Remove assignments (TASKRSRC by taskrsrc_id) with what names them: their UDF values, period actuals (TRSRCFIN) and
+ *  assignment codes (ASGNMNTACAT); an activity's primary resource no longer on it is cleared, as P6 does. */
+export function removeAssignments(db: Db, ids: Set<string>): number {
+  if (!ids.size) return 0;
+  const A = realOf(rows(db, 'TASKRSRC')).filter((a) => ids.has(a.taskrsrc_id));
+  const n = removeWhere(rows(db, 'TASKRSRC'), (a) => ids.has(a.taskrsrc_id));
+  const udf = new Set(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'TASKRSRC').map((u) => u.udf_type_id));
+  if (udf.size) removeWhere(rows(db, 'UDFVALUE'), (r) => udf.has(r.udf_type_id) && ids.has(r.fk_id));
+  for (const name of ['TRSRCFIN', 'ASGNMNTACAT']) if (db.tables[name]) removeWhere(rows(db, name), (r) => ids.has(r.taskrsrc_id));
+  const left = new Set(realOf(rows(db, 'TASKRSRC')).map((a) => `${a.task_id}|${a.rsrc_id}`));
+  const tasks = new Set(A.map((a) => a.task_id));
+  for (const t of pick(rows(db, 'TASK'), (x) => tasks.has(x.task_id) && !!x.rsrc_id)) if (!left.has(`${t.task_id}|${t.rsrc_id}`)) t.rsrc_id = '';
+  return n;
+}
+
+/** The assignments of an activity an operation names: by resource, or (a role assignment, no resource) by role; P6
+ *  allows the same resource on an activity more than once, so nth (1 = first, in the order they were added) picks one.
+ *  Several and no nth: refused, naming how many. */
+export function namedAssignment(db: Db, t: Row, rsrc: Row | null, role: Row | null, nth: number | undefined, fail: (m: string) => never): Row {
+  const tid = t.task_id, rid = rsrc?.rsrc_id ?? '', roleId = role?.role_id;
+  // by an index of the real rows kept for the edit (a scan of the journal's view per operation was quadratic)
+  const view = rows(db, 'TASKRSRC'), raw = realOf(view);
+  const list = (rowIndex(raw, 'task', (x) => x.task_id).get(tid) ?? []).filter((k) => raw[k].task_id === tid && (rsrc ? raw[k].rsrc_id === rid : !raw[k].rsrc_id && raw[k].role_id === roleId)).sort((x, y) => x - y).map((k) => (raw === view ? raw[k] : view[k]));
+  const what = rsrc ? rsrc.rsrc_short_name : `Role ${role?.role_short_name}`;
+  if (!list.length) return fail(`${what} is not assigned to ${t.task_code}.`);
+  if (nth != null) return list[nth - 1] ?? fail(`${what} is assigned to ${t.task_code} ${list.length} time(s); nth ${nth} is not one of them.`);
+  return list.length === 1 ? list[0] : fail(`${what} is assigned to ${t.task_code} ${list.length} times; give nth (1-${list.length}) to say which.`);
 }
 
 /**

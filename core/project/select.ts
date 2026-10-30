@@ -10,7 +10,7 @@ import { whereTest } from './ops-fields.ts';
 export const SELECT_KEY: Record<string, string> = {
   update_activity: 'id', delete_activity: 'id', dissolve_activity: 'id', move_activity: 'id',
   assign_code: 'activity', set_udf: 'activity', set_notebook: 'activity', set_estimates: 'activity', set_predecessors: 'activity',
-  assign_resource: 'activity', unassign_resource: 'activity', update_assignment: 'activity',
+  assign_resource: 'activity', assign_role: 'activity', unassign_resource: 'activity', update_assignment: 'activity',
   add_expense: 'activity', update_expense: 'activity', delete_expense: 'activity', delete_expenses: 'activity',
   add_step: 'activity', update_step: 'activity', delete_step: 'activity',
 };

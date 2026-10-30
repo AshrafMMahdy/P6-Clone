@@ -17,7 +17,7 @@ import { dayHours as dayHoursOf } from './units.ts';
 import { applyExtra, EXTRA_GUIDE, EXTRA_OP_NAMES } from './ops-extra.ts';
 import { SELECT_GUIDE, SELECT_KEY, selectActivities, type SelectHelpers } from './select.ts';
 import {
-  addActivity, addRelationship, addWbs, LOOP_MESSAGE, onePerPair, relationshipsBetween, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, newProject,
+  addActivity, addRelationship, addWbs, LOOP_MESSAGE, onePerPair, relationshipsBetween, deleteActivities, dissolveActivities, ensureDefaultCalendar, ensureEps, namedAssignment, newProject, removeAssignments,
   enumOk, normDate, projectNumberProblem, refreshOwnDates, renumberProject, setActual, setFinish, setPercent, setStart, statusOf,
 } from './edit.ts';
 
@@ -87,7 +87,7 @@ const IN_BASELINE: Record<string, string[]> = {
   update_code_type: ['op', 'in_baseline', 'project', 'name', 'new_name', 'subject'],
   update_code_value: ['op', 'in_baseline', 'project', 'type', 'code', 'new_code', 'name', 'subject'],
 };
-export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'set_predecessors', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'unassign_resource', 'link_activities', 'renumber_activities', ...EXTRA_OP_NAMES];
+export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'set_predecessors', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'assign_role', 'unassign_resource', 'link_activities', 'renumber_activities', ...EXTRA_OP_NAMES];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
@@ -107,7 +107,8 @@ export const OP_GUIDE = [
   `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
   `set_predecessors: activity, links [{pred, [type], [lag_days] or [lag_hours]}] ([] = none): replaces every predecessor of the activity in one step`,
   `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day] or [max_units_per_hour], [price_per_unit], [calendar], [parent]`,
-  `assign_resource: activity, resource, [allow_duplicate] (true: assign it again when it is already on the activity, as P6 allows), [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6), [curve] (resource curve name, see add_resource_curve); unassign_resource: activity, resource`,
+  `assign_resource: activity, resource, [allow_duplicate] (true: assign it again when it is already on the activity, as P6 allows), [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6), [curve] (resource curve name, see add_resource_curve); unassign_resource: activity, resource or assigned_role (a role assignment with no resource), [nth] (the same resource on the activity more than once: 1 = first); its UDF values, period actuals and assignment codes go with it`,
+  `assign_role: activity, role (Role ID), [units] or [units_per_day]: P6's Assign Roles, a role assignment with no resource yet, priced by the role's rate`,
   SELECT_GUIDE,
   EXTRA_GUIDE,
 ].join('\n');
@@ -205,6 +206,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
   const lagHours = (pred: Row, succ: Row) => dayHoursOf(db, hpd, calDays).lag(pred, succ);
 
   const resource = (id: unknown): Row => rows(db, 'RSRC').find((r) => r.rsrc_short_name.toLowerCase() === String(id).toLowerCase()) ?? fail(`No resource "${id}" (add it with {"op":"add_resource"}).`);
+  const role = (id: unknown): Row => rows(db, 'ROLES').find((r) => r.role_short_name.toLowerCase() === String(id).toLowerCase()) ?? fail(`No role "${id}" (add it with {"op":"add_role"}).`);
   const sel: SelectHelpers = { fail, project, projects, wbsOf, resource };
   const projectId = (t: Row) => projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name;
   /** The activities op.select picks; the op's own "project" limits them when the select names none. */
@@ -479,12 +481,21 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       return { selected: picked.length, renumbered: picked.length, first: next[0], last: next[next.length - 1] };
     }
     case 'unassign_resource': {
-      const t = activity(op.activity, op.project), r = resource(op.resource);
-      const T = table(db, 'TASKRSRC'), n = T.rows.length;
-      const tid = t.task_id, rid = r.rsrc_id;
-      removeWhere(T.rows, (a) => a.task_id === tid && a.rsrc_id === rid);
-      if (T.rows.length === n) fail(`${r.rsrc_short_name} is not assigned to ${t.task_code}.`);
-      return { unassigned: `${r.rsrc_short_name} -> ${t.task_code}` };
+      // the assignment with its UDF values, period actuals and assignment codes (a role assignment: assigned_role)
+      const t = activity(op.activity, op.project), byRole = op.resource == null && op.assigned_role != null;
+      const a = namedAssignment(db, t, byRole ? null : resource(op.resource), byRole ? role(op.assigned_role) : null, op.nth != null ? num(op.nth, 'nth') : undefined, fail);
+      removeAssignments(db, new Set([a.taskrsrc_id]));
+      return { unassigned: `${op.resource ?? `Role ${op.assigned_role}`} -> ${t.task_code}` };
+    }
+    case 'assign_role': {
+      // P6's Assign Roles: a role on the activity with no resource yet (priced by the role's rate)
+      const t = activity(op.activity, op.project), r = role(op.role);
+      const a = assignResource(db, t, '', r.role_id);
+      a.cost_per_qty_source_type = 'ST_Role';
+      if (op.units_per_day != null) recalcAssignment(db, t, a, 'target_qty_per_hr', num(op.units_per_day, 'units_per_day') / hpd);
+      if (op.units != null) { recalcAssignment(db, t, a, 'target_qty', num(op.units, 'units')); a.remain_qty = a.target_qty; }
+      recomputeCosts(db, a);
+      return { assigned: `Role ${r.role_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty) };
     }
   }
   const extra = applyExtra(db, op, { hpd, fail, str, num, date, project, projectFor, activity, wbsOf, calendar, resource, curveId, dayHours, warn: (m) => warnings.push(m), periods, ole, linked: (pred, succ) => batch.added.push({ pred, succ, at: batch.at ?? -1 }) });

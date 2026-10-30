@@ -8,8 +8,10 @@ export const ASSIGN_FIELDS = ['taskrsrc_id', 'task_id', 'proj_id', 'cost_qty_lin
 /** Price per unit: the assignment's own rate, else the resource's rate in effect at the activity start. */
 export function priceOf(db: Db, a: Row, at?: string): number {
   if (a.cost_per_qty && a.cost_per_qty_source_type === 'ST_Custom') return Number(a.cost_per_qty);
-  const rid = a.rsrc_id;
-  const rates = pick(rows(db, 'RSRCRATE'), (r) => r.rsrc_id === rid).sort((x, y) => (x.start_date || '').localeCompare(y.start_date || ''));
+  const rid = a.rsrc_id, roleId = a.role_id;
+  // the role's rate (P6's Rate Source = Role), always for a role assignment with no resource yet
+  const byRole = !!roleId && (a.cost_per_qty_source_type === 'ST_Role' || !rid);
+  const rates = (byRole ? pick(rows(db, 'ROLERATE'), (r) => r.role_id === roleId) : pick(rows(db, 'RSRCRATE'), (r) => r.rsrc_id === rid)).sort((x, y) => (x.start_date || '').localeCompare(y.start_date || ''));
   const when = at ?? a.target_start_date ?? '';
   let rate: Row | undefined;
   for (const r of rates) if (!r.start_date || !when || r.start_date <= when) rate = r;

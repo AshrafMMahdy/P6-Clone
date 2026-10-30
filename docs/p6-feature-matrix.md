@@ -638,7 +638,7 @@ Not features, but wrong behaviour seen while tracing:
 | Edit units in window | Edit any editable column | partial | Budgeted/actual/remaining units only (:29, P6 duration-type rules via recalcAssignment). Units/time, dates and price read-only | UI* | — |
 | Group / sort / filter assignments | Group by resource, activity, project, WBS... | missing | Fixed grouping by resource; no filters | — | run_report (assignments group_by resource/activity) |
 | Delete assignment in window | Delete key | missing | Only from Activity Details > Resources > Remove | op unassign_resource | edit unassign_resource |
-| Assign Roles (role-only assignment) | Assign a role, resource TBD | missing | assignResource accepts roleId (assign.ts:60) but nothing passes one | — | — |
+| Assign Roles (role-only assignment) | Assign a role, resource TBD | partial | Ops assign_role (priced by the role rate), update_assignment / unassign_resource with assigned_role; Excel import adds and updates role rows. No Assign Roles dialog in the app yet | ops assign_role, update_assignment, unassign_resource | edit; import_excel |
 | Replace resource on assignment | Swap resource, keep units | missing | — | — | — |
 | Staff role assignments | Assign resource by role and proficiency | missing | — | — | — |
 | Resource Usage Profile | Histogram; stacked by project/resource; cumulative; cost or units | partial | AssignmentsView.tsx:266: one resource, units only (actual, remaining, overallocation), limit line, data date. No cost, cumulative curve, budgeted/baseline, stacking or all-resources view | — | — |

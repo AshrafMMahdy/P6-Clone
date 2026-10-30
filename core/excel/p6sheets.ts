@@ -87,12 +87,12 @@ type Ctx = ReturnType<typeof context>;
 
 const isDateUdf = (u: Row) => /DATE/.test(u.logical_data_type);
 const isTextUdf = (u: Row) => u.logical_data_type === 'FT_TEXT';
-/** An indicator UDF (P6's traffic lights): its value is a UDFCODE, which set_udf does not write; exported for reference. */
+/** An indicator UDF (P6's traffic lights): its value is P6's icon code (UDF_G0 to UDF_G4) held as text. */
 const isIndicator = (u: Row) => u.logical_data_type === 'FT_STATICTYPE';
 const udfCell = (c: Ctx, u: Row, fk: string, codes?: Map<string, string>): Cell => {
   const v = c.udfValue.get(`${u.udf_type_id}|${fk}`);
   if (!v) return null;
-  if (isIndicator(u)) return codes?.get(v.udf_code_id) ?? v.udf_code_id ?? null;
+  if (isIndicator(u)) return v.udf_text || (codes?.get(v.udf_code_id) ?? v.udf_code_id) || null;
   return isDateUdf(u) ? date(v.udf_date) : isTextUdf(u) ? v.udf_text : v.udf_number === '' || v.udf_number == null ? null : Number(v.udf_number);
 };
 
@@ -101,7 +101,7 @@ function allColumns(db: Db, c: Ctx): Record<SheetName, Col[]> {
   const pid = (id: string) => c.proj.get(id)?.proj_short_name ?? '';
   const code = (t: Row | undefined) => t?.task_code ?? '';
   const udfCodes = new Map(rows(db, 'UDFCODE').map((x) => [x.udf_code_id, x.short_name]));
-  const udfCols = (table: string, fk: (r: Row) => string): Col[] => c.udfs(table).map((u) => ({ field: `user_field_${u.udf_type_id}`, title: u.udf_type_label, calc: isIndicator(u), get: (r: Row) => udfCell(c, u, fk(r), udfCodes) }));
+  const udfCols = (table: string, fk: (r: Row) => string): Col[] => c.udfs(table).map((u) => ({ field: `user_field_${u.udf_type_id}`, title: u.udf_type_label, calc: false, get: (r: Row) => udfCell(c, u, fk(r), udfCodes) }));
   const codeCols = (kind: CodeKind, fk: (r: Row) => string, calc: boolean, keep?: (t: Row) => boolean): Col[] =>
     c.codes(kind, keep).map((ct) => ({ field: ct.field, title: ct.name, calc, get: (r: Row) => { const v = ct.of.get(fk(r)); return v ? ct.path(v) : null; } }));
   const tdh = (t: Row | undefined) => c.dh.task(t);
@@ -380,7 +380,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
       const id = f.slice('user_field_'.length);
       const u = udfTypes.find((x) => x.udf_type_id === id) ?? udfTypes.find((x) => lc(x.udf_type_label) === lc(titles.get(f)));
       if (!u) warnings.push(`${f}: no UDF ${titles.get(f) || id} for ${UDF_TARGET[udfTable]}s in this file; the column was skipped.`);
-      return u && !isIndicator(u) ? { f, u } : null;
+      return u ? { f, u } : null;
     }).filter((x): x is { f: string; u: Row } => !!x);
     /** The operations for one row (fk: the object's key when it exists; target: how operations name it). */
     return (r: Record<string, Cell>, fk: string | null, target: Record<string, unknown>, ref: RowRef, rank: number): number => {
@@ -399,7 +399,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
         const cell = r[f], cur = fk ? c.udfValue.get(`${u.udf_type_id}|${fk}`) : undefined;
         let value: string | number = '';
         if (isDateUdf(u)) { value = dateOf(cell); if (cur ? sameDate(value, cur.udf_date) && !!value === !!cur.udf_date : !value) continue; }
-        else if (isTextUdf(u)) { value = str(cell); if (sameText(value, cur?.udf_text)) continue; }
+        else if (isTextUdf(u) || isIndicator(u)) { value = str(cell); if (sameText(value, cur?.udf_text)) continue; }
         else { const v = num(cell); if (str(cell) && v == null) { warnings.push(`Row ${ref.row} of ${ref.sheet}: ${u.udf_type_label} "${str(cell)}" is not a number; skipped.`); continue; } if (near(v, cur && cur.udf_number !== '' ? Number(cur.udf_number) : null)) continue; value = v ?? ''; }
         emit({ op: 'set_udf', udf: u.udf_type_label, value, ...target }, ref, rank); n++;
       }
@@ -602,25 +602,29 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
     if (!x) s.expensesAdded++; else if (n) s.expensesUpdated++; else s.unchanged++;
   }
 
-  // ---- Resource assignments, by activity and resource (the n-th row of a pair: its n-th assignment)
-  // a project's assignments by activity and resource (a scan per row was quadratic on a big sheet)
+  // ---- Resource assignments, by activity and resource, or by activity and role for a role assignment (no resource);
+  // the n-th row of a pair is its n-th assignment, as P6 allows the same resource on an activity more than once
+  // a project's assignments by activity and resource / role (a scan per row was quadratic on a big sheet)
   const A = new Map<string, Row[]>();
-  for (const x of rows(db, 'TASKRSRC')) if (mineT.has(x.task_id)) { const k = `${x.task_id}|${x.rsrc_id}`; const l = A.get(k); if (l) l.push(x); else A.set(k, [x]); }
+  const who = (x: Row) => x.rsrc_id || `role:${x.role_id}`;
+  for (const x of rows(db, 'TASKRSRC')) if (mineT.has(x.task_id)) { const k = `${x.task_id}|${who(x)}`; const l = A.get(k); if (l) l.push(x); else A.set(k, [x]); }
   const asgRecs = records('TASKRSRC');
   const asgExtras = extras('assignment', 'TASKRSRC', fieldsOf('TASKRSRC').filter((f) => f.startsWith('asgnmnt_catg_') || f.startsWith('user_field_')), asgRecs[0]?.titles ?? new Map());
   const seen = new Map<string, number>();
   for (const { r, ref } of asgRecs) {
-    const act = str(r.task_id), res = str(r.rsrc_id);
-    if (!act) continue;
-    if (!res) { if (str(r.role_id)) warnings.push(`Row ${ref.row} of TASKRSRC: a role assignment (no Resource ID) is exported for reference; import updates resource assignments.`); continue; }
-    if (has(r, 'proj_id') && str(r.proj_id) && str(r.proj_id) !== projectId) { warnings.push(`Assignment ${act} / ${res} belongs to project ${str(r.proj_id)}; skipped.`); continue; }
-    const t = byCode.get(act), rr = R.get(lc(res));
-    const k = `${act}|${lc(res)}`, nth = seen.get(k) ?? 0;
+    const act = str(r.task_id), res = str(r.rsrc_id), roleOnly = !res ? str(r.role_id) : '';
+    if (!act || (!res && !roleOnly)) continue;
+    if (has(r, 'proj_id') && str(r.proj_id) && str(r.proj_id) !== projectId) { warnings.push(`Assignment ${act} / ${res || roleOnly} belongs to project ${str(r.proj_id)}; skipped.`); continue; }
+    const t = byCode.get(act), rr = res ? R.get(lc(res)) : undefined;
+    const rid = roleOnly ? roleId.get(lc(roleOnly)) : undefined;
+    if (roleOnly && rid == null) { warnings.push(`Row ${ref.row} of TASKRSRC: no role "${roleOnly}" in this file; row skipped.`); continue; }
+    const k = `${act}|${res ? lc(res) : `role:${lc(roleOnly)}`}`, nth = seen.get(k) ?? 0;
     seen.set(k, nth + 1);
-    const a = t && rr?.rsrc_id ? A.get(`${t.task_id}|${rr.rsrc_id}`)?.[nth] : undefined;
-    const target = { activity: act, resource: rr?.rsrc_short_name ?? res, ...P };
+    const mine = t ? A.get(`${t.task_id}|${res ? rr?.rsrc_id : `role:${rid}`}`) ?? [] : [];
+    const a = mine[nth];
+    // the assignment named as the operations name it: resource (or the role of a role assignment), nth among several
+    const target: Record<string, unknown> = { activity: act, ...(res ? { resource: rr?.rsrc_short_name ?? res } : { assigned_role: roleOnly }), ...(mine.length > 1 && a ? { nth: nth + 1 } : {}), ...P };
     if (yes(r.delete_record_flag)) { if (a) { emit({ op: 'unassign_resource', ...target }, ref, 3); s.assignmentsDeleted++; } continue; }
-    if (nth > 0 && !a) { warnings.push(`Row ${ref.row} of TASKRSRC: ${res} on ${act} a second time; add it in the app or with assign_resource allow_duplicate (import matches each pair's rows to its assignments in order).`); continue; }
     const hd = dh.task(t);
     const upd: Op = { op: 'update_assignment', ...target };
     const numField = (f: string, key: string, curV: number | null, scale = 1) => { const v = num(r[f]); if (has(r, f) && v != null && !near(v, curV)) upd[key] = v * scale; };
@@ -652,21 +656,23 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
       const d = dateOf(r[f]);
       if (a ? !sameDate(d, a[f]) && (d || a[f]) : !!d) upd[key] = d || null;
     }
-    for (const [f, m, what, curName, key] of [['role_id', roleId, 'role', c.roleName.get(a?.role_id ?? ''), 'role'], ['acct_id', acctId, 'cost account', c.acctName.get(a?.acct_id ?? ''), 'account'], ['curv_id', curveId, 'resource curve', c.curveName.get(a?.curv_id ?? ''), 'curve']] as const) {
+    for (const [f, m, what, curName, key] of [...(roleOnly ? [] : [['role_id', roleId, 'role', c.roleName.get(a?.role_id ?? ''), 'role'] as const]), ['acct_id', acctId, 'cost account', c.acctName.get(a?.acct_id ?? ''), 'account'], ['curv_id', curveId, 'resource curve', c.curveName.get(a?.curv_id ?? ''), 'curve']] as const) {
       if (!has(r, f) || lc(str(r[f])) === lc(curName)) continue;
       if (named(m, str(r[f]), what, ref) != null) upd[key] = str(r[f]);
     }
-    // the same resource on an activity twice: operations name an assignment by the pair, so only the first is updated
-    if (nth > 0) { if (Object.keys(upd).length > 4) warnings.push(`Row ${ref.row} of TASKRSRC: ${res} is assigned to ${act} more than once; only the first assignment is updated by import.`); else s.unchanged++; continue; }
     let n = 0;
     if (!a) {
       // a new row's zeros are no entry (a cost typed in, even 0, would cut the cost's link to units x price)
       for (const f of ['actual_units', 'budgeted_cost', 'actual_cost', 'remaining_cost', 'actual_this_period_units', 'actual_this_period_cost', 'remaining_lag_days']) if (upd[f] === 0) delete upd[f];
       if (upd.remaining_units != null && upd.remaining_units === upd.units) delete upd.remaining_units;
-      emit({ op: 'assign_resource', ...target, ...(upd.units != null ? { units: upd.units } : {}) }, ref, 2); n++;
+      // a resource already on the activity again (P6 allows it), or a role assignment
+      const add: Op = res ? { op: 'assign_resource', activity: act, resource: target.resource, ...(nth > 0 ? { allow_duplicate: true } : {}), ...P } : { op: 'assign_role', activity: act, role: roleOnly, ...P };
+      emit({ ...add, ...(upd.units != null ? { units: upd.units } : {}) }, ref, 2); n++;
       delete upd.units;
+      // the operations after it name the new assignment: the last of its pair
+      if (nth > 0) { target.nth = nth + 1; upd.nth = nth + 1; }
     }
-    if (Object.keys(upd).length > 4) { emit(upd, ref, 2); n++; }
+    if (Object.keys(upd).filter((f) => f !== 'nth').length > 4) { emit(upd, ref, 2); n++; }
     n += asgExtras(r, a?.taskrsrc_id ?? null, target, ref, 2);
     if (!a) s.assignmentsAdded++; else if (n) s.assignmentsUpdated++; else s.unchanged++;
   }

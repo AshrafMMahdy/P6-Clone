@@ -5,7 +5,7 @@ import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, table, ermhdr
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { assignmentActuals, assignmentDetails, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
-import { ensureEps, projectNumberProblem, renumberProject } from './edit.ts';
+import { ensureEps, namedAssignment, projectNumberProblem, removeAssignments, renumberProject } from './edit.ts';
 import { pick, realOf, removeWhere } from '../journal.ts';
 import { LOB_UDF } from '../lob/expand.ts';
 import { LOB_FLAG } from '../lob/store.ts';
@@ -71,7 +71,7 @@ export const EXTRA_GUIDE = [
   `add_obs / update_obs / delete_obs: name, [parent], [new_name], [description] (update_obs; "" clears it); add_role / update_role / delete_role: id, [name], [parent], [new_id]`,
   `update_pobs: [pobs_id] or [name], [new_name], [description] ("" clears it), [manager] ("" clears it): a row of the performing organisations (POBS, the file's Performing Organization table: pobs_name, pobs_descr, pobs_manager), which add_obs / update_obs do not reach (they edit the OBS). Needs a pobs_id or the row's name (several rows with that name: use pobs_id; list_dictionaries only: pobs lists them); the root row can be renamed but keeps its place (no parent) and a name. clear_descriptions blanks every pobs_descr too`,
   `update_calendar: name, [new_name], [work_week] (days given replace those days), [holidays [dates]] (non-work), [work_exceptions {date: periods}], [remove_exceptions [dates]]`,
-  `update_assignment: activity, resource, [units], [units_per_day], [remaining_units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (kept as entered), [curve] (resource curve name; "" = linear), [role] (role ID; "" clears), [account] (cost account ID; "" clears), [actual_start], [actual_finish] (null clears), [duration_days] / [remaining_duration_days] (the assignment's own; its units / time follow), [remaining_units_per_day], [remaining_lag_days], [actual_this_period_units], [actual_this_period_cost], [project]`,
+  `update_assignment: activity, resource or assigned_role (a role assignment with no resource), [nth] (the same resource on the activity more than once: 1 = first), [units], [units_per_day], [remaining_units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (kept as entered), [curve] (resource curve name; "" = linear), [role] (role ID; "" clears), [account] (cost account ID; "" clears), [actual_start], [actual_finish] (null clears), [duration_days] / [remaining_duration_days] (the assignment's own; its units / time follow), [remaining_units_per_day], [remaining_lag_days], [actual_this_period_units], [actual_this_period_cost], [project]`,
   `update_resource: id, [new_id] (a new Resource ID), [name], [max_units_per_day] or [max_units_per_hour] (Max Units / Time on every rate row of the resource, read by level_resources and optimize_schedule)`,
   `delete_resource: id, [clear_references] (default false: refused while an assignment, in any project or baseline, or an activity's primary resource points at it; true: those assignments are removed and the primary resources cleared). Its rates, resource codes, roles and UDF values go with it; its child resources move up to its parent`,
   `regenerate_guids: [project], [dictionaries] (default true: also the GUIDs of the file's shared resources, calendars, codes, OBS, roles...), [new_proj_id] or [keep_proj_id]: every GUID of the project and its baselines (project, WBS, activities, assignments, ...) replaced by a fresh one, template GUIDs cleared; the project also gets a new internal number (the next free one unless new_proj_id; keep_proj_id: true keeps it), every reference following`,
@@ -85,7 +85,7 @@ export const EXTRA_GUIDE = [
   `delete_cost_account: id: its child accounts move up to its parent; expenses, assignments and projects that named it are left without an account`,
   `delete_calendar: name, [replace_with] (a calendar for the activities, projects, resources and calendars that use it; without it, refused while anything uses it). The default calendar is refused: make another one the default first (set_fields CALENDAR default_flag)`,
   `delete_resource_curve: name: assignments that used it become linear`,
-  `add_financial_periods: periods [{name, start, end}], or from, to, every (month or week), [week_ends_on] (sun..sat; default the day before from's weekday): P6's Admin > Financial Periods (and its Batch Create); batch names are the start dates; a period overlapping another is refused. update_financial_period: name, [new_name], [start], [end]. delete_financial_period: name, [clear_stored] (refused while period performance is stored in it, unless true: that stored data goes too)`,
+  `add_financial_periods: periods [{name, start, end}], or from, to, every (month or week), [week_ends_on] (sun..sat; default the day before from's weekday): P6's Admin > Financial Periods (and its Batch Create); batch names are the start dates; a period overlapping another is refused; update_financial_period: name, [new_name], [start], [end]; delete_financial_period: name, [clear_stored] (refused while period performance is stored in it, unless true: that stored data goes too)`,
   `store_period_performance: [project], [period] (financial period name; default the latest period starting before the project's data date): P6's Tools > Store Period Performance: each activity's and assignment's actuals for the period (labor and nonlabor units and cost, material and expense cost; the value to date less what other periods hold), with earned value and planned value (cost and labor units), are stored in the period (TASKFIN, TRSRCFIN; storing the period again overwrites it) and Actual This Period is set to zero. Needs the project's "Link actual to date and actual this period" option (act_this_per_link_flag Y), as P6 does. Answers what was stored`,
   ...FIELD_GUIDE,
 ].join('\n');
@@ -172,11 +172,17 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     T.rows.push({ [S.vid]: String(nextId(db, S.val)), [S.vparent]: parent?.[S.vid] ?? '', [S.tid]: type[S.tid], [S.vname]: typeof v.name === 'string' ? v.name : code, [S.vshort]: code, seq_num: String(T.rows.length + 1) });
     return code;
   };
+  /** The assignment an op names: activity + resource, or + assigned_role (a role assignment), [nth] among several. */
+  const assignmentOf = (o: Op) => {
+    const t = h.activity(o.activity, o.project), byRole = o.resource == null && o.assigned_role != null;
+    const role = byRole ? rows(db, 'ROLES').find((r) => lc(r.role_short_name) === lc(o.assigned_role)) ?? fail(`No role "${o.assigned_role}".`) : null;
+    const r = byRole ? null : h.resource(o.resource);
+    return { t, r, a: namedAssignment(db, t, r, role, o.nth != null ? num(o.nth, 'nth') : undefined, fail) };
+  };
   const target = (o: Op): { subject: string; row: Row; fk: string; projId: string } => {
     // an assignment (activity + resource) or an expense (activity + expense name): their own codes and UDFs
-    if (o.activity != null && o.resource != null) {
-      const t = h.activity(o.activity, o.project), r = h.resource(o.resource), tid = t.task_id, rid = r.rsrc_id;
-      const a = pick(rows(db, 'TASKRSRC'), (x) => x.task_id === tid && x.rsrc_id === rid, 1)[0] ?? fail(`${r.rsrc_short_name} is not assigned to ${t.task_code}.`);
+    if (o.activity != null && (o.resource != null || o.assigned_role != null)) {
+      const { t, a } = assignmentOf(o);
       return { subject: 'assignment', row: a, fk: a.taskrsrc_id, projId: t.proj_id };
     }
     if (o.activity != null && o.expense != null) { const { t, c } = expense({ ...o, name: o.expense }); return { subject: 'expense', row: c, fk: c.cost_item_id, projId: t.proj_id }; }
@@ -483,6 +489,8 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const r: Row = { udf_type_id: u.udf_type_id, fk_id: tg.fk, proj_id: tg.projId, udf_date: '', udf_number: '', udf_text: '', udf_code_id: '' };
       if (/DATE/.test(u.logical_data_type)) r.udf_date = date(op.value, 'value');
       else if (u.logical_data_type === 'FT_TEXT') r.udf_text = String(op.value);
+      // an indicator UDF holds P6's icon code (UDF_G0 to UDF_G4) as text
+      else if (u.logical_data_type === 'FT_STATICTYPE') r.udf_text = /^UDF_G[0-4]$/i.test(String(op.value)) ? String(op.value).toUpperCase() : fail(`UDF "${name}" is an indicator: its value is one of P6's icon codes UDF_G0 to UDF_G4; not "${op.value}".`);
       else { const n = num(op.value, 'value'); r.udf_number = p6num(u.logical_data_type === 'FT_INT' ? Math.round(n) : n); }
       V.rows.push(r);
       return { udf: name, value: op.value };
@@ -745,11 +753,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       return { calendar: c.clndr_name, note: 'Schedule to apply the change to dates.' };
     }
     case 'update_assignment': {
-      const t = h.activity(op.activity, op.project), r = h.resource(op.resource);
-      // by an index of the real rows kept for the edit (a search through the journal's view per operation was quadratic)
-      const view = rows(db, 'TASKRSRC'), raw = realOf(view), tid = t.task_id, rid = r.rsrc_id;
-      const i = (rowIndex(raw, 'task', (x) => x.task_id).get(tid) ?? []).find((k) => raw[k].task_id === tid && raw[k].rsrc_id === rid);
-      const a = i != null ? (raw === view ? raw[i] : view[i]) : fail(`${r.rsrc_short_name} is not assigned to ${t.task_code}.`);
+      const { t, r, a } = assignmentOf(op);
       if (op.units_per_day != null) recalcAssignment(db, t, a, 'target_qty_per_hr', num(op.units_per_day, 'units_per_day') / hpd);
       if (op.units != null) { recalcAssignment(db, t, a, 'target_qty', num(op.units, 'units')); if (!t.act_start_date) a.remain_qty = a.target_qty; }
       if (op.remaining_units != null) a.remain_qty = p6num(num(op.remaining_units, 'remaining_units'));
@@ -757,7 +761,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       recomputeCosts(db, a);
       assignmentActuals(db, a, op, num);
       assignmentDetails(db, t, a, op, h);
-      return { assignment: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty), remaining_units: Number(a.remain_qty) };
+      return { assignment: `${r ? r.rsrc_short_name : `Role ${op.assigned_role}`} -> ${t.task_code}`, budgeted_units: Number(a.target_qty), remaining_units: Number(a.remain_qty) };
     }
     case 'update_resource': {
       const r = h.resource(op.id);
@@ -784,7 +788,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const rid = r.rsrc_id, key = r.rsrc_short_name, up = r.parent_rsrc_id ?? '';
       const assignments = realOf(rows(db, 'TASKRSRC')).filter((a) => a.rsrc_id === rid).length, primary = pick(rows(db, 'TASK'), (t) => t.rsrc_id === rid);
       if ((assignments || primary.length) && op.clear_references !== true) fail(`Resource "${key}" is on ${assignments} assignment(s) and the primary resource of ${primary.length} activit${primary.length === 1 ? 'y' : 'ies'}; clear_references: true removes those assignments and clears the primary resources.`);
-      removeWhere(rows(db, 'TASKRSRC'), (a) => a.rsrc_id === rid);
+      removeAssignments(db, new Set(realOf(rows(db, 'TASKRSRC')).filter((a) => a.rsrc_id === rid).map((a) => a.taskrsrc_id)));
       for (const t of primary) t.rsrc_id = '';
       for (const c of pick(rows(db, 'RSRC'), (x) => x.parent_rsrc_id === rid)) c.parent_rsrc_id = up;
       const udf = new Set(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'RSRC').map((u) => u.udf_type_id));
