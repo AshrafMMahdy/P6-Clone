@@ -61,7 +61,7 @@ const USAGE = `p6clone <command> [options]
            [--sort S] [--paper A3] [--portrait] [--content both|table|gantt] [--columns task_code,task_name,...]
            [--links] [--no-legend] [--font file.ttf]   Prints the Activities layout like P6 (all pages). Arabic and
            other scripts use a TrueType font: --font, P6CLONE_FONT, or a system font (DejaVu Sans, Noto, Arial...)
-  export-excel <file.xer> --out schedule.xlsx [--project ID]   P6-style spreadsheet (TASK, TASKPRED, RSRC, TASKRSRC)
+  export-excel <file.xer> --out schedule.xlsx [--project ID] [--sheets TASK,PROJCOST,...] [--columns '{"TASK":["task_code","actv_code_*"]}'] [--describe]   P6-style spreadsheet (TASK, TASKPRED, PROJCOST, RSRC, TASKRSRC; --columns picks each sheet's columns, --describe lists them)
   import-excel <file.xer> <sheet.xlsx> [--project ID] --out out.xer [--schedule] [--dry-run] [--json]
            Updates the project from the spreadsheet (one transaction). Exit 65 if a row is refused
   reports  <file.xer> [--json]                         Reports available (P6 standard reports by group)
@@ -209,12 +209,23 @@ async function main(): Promise<number> {
     }
     case 'export-excel': {
       const { db } = load(positional[0]);
+      const { writeXlsx } = await import('../core/excel/xlsx.ts');
+      const { exportSheets, templateColumns, SHEETS } = await import('../core/excel/p6sheets.ts');
+      let columns: Record<string, string[]> | undefined;
+      try { columns = opt('columns') ? JSON.parse(opt('columns')!) : undefined; } catch { throw new Error('--columns takes JSON, e.g. {"TASK":["task_code","task_name","actv_code_*"]}'); }
+      const template = { sheets: opt('sheets')?.split(',').map((x) => x.trim()).filter(Boolean), columns };
+      const ids = pickProjects(db), t = templateColumns(db, ids, template, hpd(), true);
+      if (flag('describe')) {
+        if (flag('json')) console.log(JSON.stringify(t.available, null, 2));
+        else for (const sh of SHEETS) console.log(`${sh}: ${t.available[sh].map((c) => `${c.field}${c.calc ? '*' : ''}${c.required ? '!' : ''}`).join(', ')}`);
+        return 0;
+      }
       const out = opt('out');
       if (!out) throw new Error('--out <file.xlsx> required');
-      const { writeXlsx } = await import('../core/excel/xlsx.ts');
-      const { exportSheets } = await import('../core/excel/p6sheets.ts');
-      writeFileSync(out, await writeXlsx(exportSheets(db, pickProjects(db), hpd(), true)));
-      console.log(`Wrote ${out}`);
+      if (!Object.keys(t.columns).length) throw new Error(`No subject area to write (${t.unknown.join(', ')}); sheets: ${SHEETS.join(', ')}`);
+      for (const u of t.unknown) console.error(`Unknown column or sheet: ${u}`);
+      writeFileSync(out, await writeXlsx(exportSheets(db, ids, hpd(), true, template)));
+      console.log(`Wrote ${out} (${Object.keys(t.columns).join(', ')})`);
       return 0;
     }
     case 'import-excel': {
@@ -223,26 +234,28 @@ async function main(): Promise<number> {
       if (worst(pre) === 'fatal') { printFindings(pre.filter((f) => f.severity === 'fatal')); return 2; }
       if (!positional[1]) throw new Error('import-excel <file.xer> <sheet.xlsx> ...');
       const { readXlsx } = await import('../core/excel/xlsx.ts');
-      const { planImport } = await import('../core/excel/p6sheets.ts');
+      const { applyImport, planImport } = await import('../core/excel/p6sheets.ts');
       const projs = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
       const pid = opt('project') ?? (projs.length === 1 ? projs[0].proj_short_name : undefined);
       if (!pid) throw new Error(`The file holds several projects; say which with --project (${projs.map((p) => p.proj_short_name).join(', ')}).`);
       let bytes: Uint8Array;
       try { bytes = new Uint8Array(readFileSync(positional[1])); } catch (e) { throw new Error(`Cannot read ${positional[1]}: ${(e as Error).message}`); }
       const plan = planImport(db, await readXlsx(bytes), pid, hpd(), true);
-      const r = flag('dry-run') || !plan.ops.length ? null : applyOps(db, plan.ops, { hoursPerDay: hpd(), calendarDays: true });
-      if (r?.ok && flag('schedule')) { const res = scheduleProjects(db, projs.map((p) => p.proj_id), {}); if (res.ok) syncAssignmentDates(db); }
+      // a row P6 would refuse is skipped and listed, the rest applied (P6's import log); exit 65 when any was refused
+      const r = flag('dry-run') || !plan.ops.length ? null : applyImport(db, plan, { hoursPerDay: hpd(), calendarDays: true });
+      if (r?.applied && flag('schedule')) { const res = scheduleProjects(db, projs.map((p) => p.proj_id), {}); if (res.ok) syncAssignmentDates(db); }
       const out = opt('out');
-      if (r?.ok && out) writeOut(out, db, opt('version'));
-      if (flag('json')) console.log(JSON.stringify({ applied: !!r?.ok, summary: plan.summary, warnings: plan.warnings, error: r && !r.ok ? r.error : undefined, operations: flag('dry-run') ? plan.ops : undefined, out: r?.ok ? out ?? null : null }, null, 2));
+      if (r?.applied && out) writeOut(out, db, opt('version'));
+      const refused = (r?.refused ?? []).map((x) => ({ sheet: x.sheet, row: x.row, op: x.op, message: x.message }));
+      if (flag('json')) console.log(JSON.stringify({ applied: !!r?.applied, operations_applied: r?.applied ?? 0, summary: plan.summary, warnings: [...plan.warnings, ...(r?.warnings ?? [])], refused, operations: flag('dry-run') ? plan.ops : undefined, out: r?.applied ? out ?? null : null }, null, 2));
       else {
         const x = plan.summary;
-        console.log(`Activities: ${x.activitiesAdded} new, ${x.activitiesUpdated} changed, ${x.activitiesDeleted} deleted; relationships: ${x.relationshipsAdded} new, ${x.relationshipsUpdated} changed, ${x.relationshipsDeleted} deleted; resources: ${x.resourcesAdded} new; assignments: ${x.assignmentsAdded} new, ${x.assignmentsDeleted} removed; ${x.unchanged} unchanged`);
-        for (const w of plan.warnings) console.log(`Warning: ${w}`);
-        if (r && !r.ok) console.error(`Row refused (${JSON.stringify(r.error!.op)}): ${r.error!.message}\nNothing was changed.`);
-        else console.log(flag('dry-run') ? '(dry run: nothing changed)' : !plan.ops.length ? 'Nothing to change.' : out ? `Wrote ${out}` : '(no --out: nothing written)');
+        console.log(`Activities: ${x.activitiesAdded} new, ${x.activitiesUpdated} changed, ${x.activitiesDeleted} deleted; relationships: ${x.relationshipsAdded} new, ${x.relationshipsUpdated} changed, ${x.relationshipsDeleted} deleted; expenses: ${x.expensesAdded} new, ${x.expensesUpdated} changed, ${x.expensesDeleted} deleted; resources: ${x.resourcesAdded} new, ${x.resourcesUpdated} changed; assignments: ${x.assignmentsAdded} new, ${x.assignmentsUpdated} changed, ${x.assignmentsDeleted} removed; ${x.unchanged} unchanged`);
+        for (const w of [...plan.warnings, ...(r?.warnings ?? [])]) console.log(`Warning: ${w}`);
+        for (const f of refused) console.error(`Row refused: ${f.sheet} row ${f.row} (${JSON.stringify(f.op)}): ${f.message}`);
+        console.log(flag('dry-run') ? '(dry run: nothing changed)' : !plan.ops.length ? 'Nothing to change.' : !r?.applied ? 'Every changed row was refused; nothing was changed.' : out ? `Wrote ${out}` : '(no --out: nothing written)');
       }
-      return r && !r.ok ? 65 : 0;
+      return refused.length ? 65 : 0;
     }
     case 'reports': {
       const { db } = load(positional[0]);

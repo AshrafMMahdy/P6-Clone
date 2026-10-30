@@ -28,8 +28,9 @@ import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, Rol
 import { emptyDb, rows } from '../core/db.ts';
 import { fmtDate, projectName } from './model.ts';
 import { printView } from './print.ts';
-import { exportExcel, importExcel } from './excel.ts';
+import { importExcel } from './excel.ts';
 import { PageSetupDialog } from './dialogs/PageSetupDialog.tsx';
+import { ExcelExportDialog } from './dialogs/ExcelExportDialog.tsx';
 import { RunReportDialog, ReportWizardDialog } from './dialogs/ReportDialogs.tsx';
 import { GlobalChangeDialog, GlobalChangeEditDialog, GlobalChangeReportDialog, CodeDictionaryDialog } from './dialogs/GlobalChangeDialogs.tsx';
 
@@ -39,7 +40,7 @@ const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
   columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
-  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, globalChange: GlobalChangeDialog, globalChangeEdit: GlobalChangeEditDialog, globalChangeReport: GlobalChangeReportDialog, codeDictionary: CodeDictionaryDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog, checkSchedule: CheckScheduleDialog,
+  level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, globalChange: GlobalChangeDialog, globalChangeEdit: GlobalChangeEditDialog, globalChangeReport: GlobalChangeReportDialog, codeDictionary: CodeDictionaryDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog, checkSchedule: CheckScheduleDialog, excelExport: ExcelExportDialog,
 };
 
 const VIEWS: [ViewName, string, () => JSX.Element][] = [
@@ -59,7 +60,7 @@ export function runMenu(id: string): void {
     case 'file.closeAll': return setUi({ openProjects: [], selTasks: [], selTask: undefined, view: 'projects' });
     case 'file.import': return openDialog('import');
     case 'file.export': return openDialog('export');
-    case 'file.exportXlsx': return void exportExcel();
+    case 'file.exportXlsx': return openDialog('excelExport');
     case 'file.importXlsx': return void importExcel();
     case 'file.pageSetup': return openDialog('pageSetup');
     case 'file.printPreview': return void printView('preview');

@@ -123,3 +123,33 @@ export function assignmentActuals(db: Db, a: Row, op: Record<string, unknown>, n
     a.remain_cost = p6num(op.remaining_cost != null ? num(op.remaining_cost, 'remaining_cost') : Math.max(0, Number(a.target_cost || 0) - Number(a.act_reg_cost || 0) - Number(a.act_ot_cost || 0)));
   }
 }
+
+/** The rest of an assignment P6 lets an import set (role, cost account, actual dates, its own durations and lag,
+ *  remaining units / time, this period's actuals). Runs after assignmentActuals: remaining units given with actual
+ *  units are the ones kept. */
+export function assignmentDetails(db: Db, task: Row, a: Row, op: Record<string, unknown>, h: { num: (v: unknown, name: string) => number; date: (v: unknown, name: string) => string; fail: (m: string) => never; dayHours: (t: Row) => number }): void {
+  const T = table(db, 'TASKRSRC');
+  const lc = (v: unknown) => String(v ?? '').trim().toLowerCase();
+  const set = (f: string, v: string) => { addField(T, f); a[f] = v; };
+  const named = (tbl: string, key: string, field: string, v: unknown, what: string) => (v == null || v === '' ? '' : pick(rows(db, tbl), (x) => lc(x[field]) === lc(v), 1)[0]?.[key] ?? h.fail(`No ${what} "${v}".`));
+  if (op.role !== undefined) set('role_id', named('ROLES', 'role_id', 'role_short_name', op.role, 'role'));
+  if (op.account !== undefined) set('acct_id', named('ACCOUNT', 'acct_id', 'acct_short_name', op.account, 'cost account'));
+  if (op.actual_start !== undefined) set('act_start_date', op.actual_start ? h.date(op.actual_start, 'actual_start') : '');
+  if (op.actual_finish !== undefined) {
+    const d = op.actual_finish ? h.date(op.actual_finish, 'actual_finish') : '';
+    if (d && !a.act_start_date) h.fail('Set the assignment\'s actual start first.');
+    if (d && d < a.act_start_date) h.fail('An assignment\'s actual finish must be on or after its actual start.');
+    set('act_end_date', d);
+  }
+  const hd = h.dayHours(task);
+  const nonNeg = (k: string) => { const v = h.num(op[k], k); if (v < 0) h.fail(`${k} cannot be negative.`); return v; };
+  if (op.remaining_units != null && op.actual_units != null) a.remain_qty = p6num(nonNeg('remaining_units'));
+  // the assignment's own durations: its units stay, its units / time follow (P6's Units / Time recalculated)
+  if (op.duration_days != null) { const hrs = nonNeg('duration_days') * hd; set('target_drtn_hr_cnt', p6num(hrs)); if (hrs > 0 && Number(a.target_qty || 0) > 0) a.target_qty_per_hr = p6num(Number(a.target_qty) / hrs); }
+  if (op.remaining_duration_days != null) { const hrs = nonNeg('remaining_duration_days') * hd; set('remain_drtn_hr_cnt', p6num(hrs)); if (hrs > 0 && Number(a.remain_qty || 0) > 0) a.remain_qty_per_hr = p6num(Number(a.remain_qty) / hrs); }
+  if (op.remaining_units_per_day != null) a.remain_qty_per_hr = p6num(nonNeg('remaining_units_per_day') / hd);
+  if (op.remaining_lag_days != null) set('relag_drtn_hr_cnt', p6num(nonNeg('remaining_lag_days') * hd));
+  if (op.actual_this_period_units != null) set('act_this_per_qty', p6num(h.num(op.actual_this_period_units, 'actual_this_period_units')));
+  if (op.actual_this_period_cost != null) set('act_this_per_cost', p6num(h.num(op.actual_this_period_cost, 'actual_this_period_cost')));
+  recomputeCosts(db, a);
+}

@@ -92,7 +92,7 @@ Ranked for the two uses: **(V)** validating XER output from the platform's sched
 | 21 | **Resource usage views are thin**: one resource at a time, units only (no costs), no stacking or cumulative, no Activity Usage Profile/Spreadsheet (the View menu item opens the resource profile); P6 default curves not seeded | V T | Main P6 tools for checking resource loading | Resource Assignments window and usage views |
 | 22 | **Gantt and printing ignore bar settings**: Bars dialog recolours 9 fixed bars only; no float, LOE, progress-line, sight-line bars; drag-to-link always FS; printed Gantt and timescale ignore Bars/Timescale; Page Setup has no scaling or fit-to-N-pages, single header/footer band, 9 variables | T | Visible presentation lessons; printed output differs from P6 | Gantt chart; Printing and Page Setup |
 | 23 | **Projects and WBS windows are fixed views**: no column chooser, filters or group/sort in Projects; WBS can't be moved/indented/reordered, no WBS Details tabs; Projects window Status column shows Open/Active instead of the real status (bug) and `list_projects` returns a blank status (bug) | V T | Restructuring and comparing several imported agent projects | Projects window and EPS; WBS window |
-| 24 | **Expenses are thin**: no Expenses window; no category, units/price, accrual type, auto-compute, vendor; remaining forced to budget − actual; not in the Excel export | V | Expense rows in agent XERs can't be inspected | Expenses |
+| 24 | **Expenses are thin**: no Expenses window; no category, units/price, accrual type, auto-compute, vendor; remaining forced to budget − actual (the Excel export and import carry expenses: PROJCOST sheet) | V | Expense rows in agent XERs can't be inspected | Expenses |
 | 25 | **Whole P6 windows missing**: Issues, Thresholds (and Monitor Thresholds), Work Products & Documents window (only the activity tab exists), Tracking, Budget Log / Spending Plan / Funding, financial periods and Store Period Performance | T | Data round-trips in XER, but nothing to teach or inspect | Issues, Thresholds…; Enterprise menu |
 
 Just outside the top 25: Global Change limits (activities only, no Else or field expressions), flat project/resource code values with no grouping by them, the Report Editor / time-distributed reports / batch reports, timesheet two-level approval, MSP export losing codes/notes/UDFs, and Excel import aborting on the first refused row.
@@ -473,7 +473,7 @@ Not features, but wrong behaviour seen while tracing:
 | Expense % complete / actual this period | Progress of expense | missing | — | — | — |
 | Expense costs in activity totals and EV | Included in total cost / EV | done | model.ts:191-193; rollup.ts:28 | lookup earned_value | earned_value |
 | Expense columns (Budgeted Expense Cost etc.) | Separate expense cost columns | missing | Only merged into total cost columns | — | — |
-| Expenses in Excel export | P6 spreadsheet export has an expenses subject | missing | Workbook sheets are TASK, TASKPRED, RSRC, TASKRSRC only | — | export_excel (no expenses) |
+| Expenses in Excel export | P6 spreadsheet export has an expenses subject | done | PROJCOST sheet (Oracle's XLSX data map): Expense Item, account, costs, units, price, unit of measure, vendor, document number, description, expense UDFs; imported by activity + Expense Item, Delete This Row | — | export_excel / import_excel |
 
 ### Issues, Thresholds, Work Products & Documents, Tracking
 
@@ -904,7 +904,7 @@ Not features, but wrong behaviour seen while tracing:
 | Unknown / custom fields | P6 writes its own schema only | done | Exact layouts keep the version's fields; approximated versions keep source fields seen in any real layout (write.ts:127-130, fixed in 2105890). Non-P6 fields are dropped (Tower-A taskpred_id, cost_type) | — | — |
 | Export P6 XML | XML of selected projects | partial | See section 4 | UI only | CLI export --format xml; MCP save *.xml |
 | Export MSP XML / MPX / MPP | One project per file | partial | One project only (Wizards.tsx:249); see section 5 | UI only | — (no CLI/MCP MSP writer) |
-| Export Spreadsheet (XLS) via wizard | Spreadsheet format with templates | partial | Not in the wizard; separate "Export to Excel" with fixed columns (section 6) | UI only | export-excel / export_excel |
+| Export Spreadsheet (XLS) via wizard | Spreadsheet format with templates | partial | Not in the wizard; separate "Export to Excel" with P6's template (subject areas and columns, saved by name; section 10 Excel) | UI only | export-excel / export_excel |
 | Self-check after export | — (clone extra) | extra | Re-reads the written bytes and validates them (Wizards.tsx:271-274) | — | CLI validate on the output file |
 
 ### XER table coverage (import, keep, export)
@@ -985,17 +985,18 @@ Not features, but wrong behaviour seen while tracing:
 
 | Item | P6 behaviour | Clone status | Notes | AI | MCP/CLI |
 |---|---|---|---|---|---|
-| Export sheets TASK, TASKPRED, RSRC, TASKRSRC | Spreadsheet export subject areas | done | p6sheets.ts:59-65 plus USERDATA; field-name row 1, titles row 2 | UI only (user saves) | export-excel / export_excel |
-| EXPENSES (PROJCOST) sheet | Expense subject area | missing | No PROJCOST sheet | — | — |
-| Template: choose columns per sheet, save template | Modify template, save and reuse | missing | Fixed column lists (p6sheets.ts:17-20); no codes or UDF columns | — | — |
-| File type | .xls (Excel 97-2003) | partial | .xlsx only (own zip writer, xlsx.ts) | — | — |
+| Export sheets TASK, TASKPRED, PROJCOST, RSRC, TASKRSRC | Spreadsheet export subject areas | done | p6sheets.ts SHEETS plus USERDATA; field-name row 1, titles row 2 with "(*)" on calculated columns | UI (Export to Excel dialog) | export-excel / export_excel |
+| EXPENSES (PROJCOST) sheet | Expense subject area | done | Exported and imported (add, update, delete) | — | export_excel / import_excel |
+| Template: choose columns per sheet, save template | Modify template, save and reuse | done | Export to Excel dialog (ExcelExportDialog.tsx): subject areas, columns per sheet incl. activity / resource / assignment / project codes and UDFs, required columns locked, named templates saved on this computer | — | export_excel sheets / columns / describe; CLI --sheets / --columns / --describe |
+| File type | .xlsx (P6 EPPM / Professional XLSX import-export) | done | .xlsx (own zip writer, xlsx.ts); P6's current spreadsheet format is XLSX (Oracle XLSX Import/Export Data Map) | — | — |
 | Import: add/update/delete activities | Matched by Activity ID | done | Measured: rename, duration change, new activity, delete row → one transaction, undoable | UI only | import-excel / import_excel (dry run) |
 | "Delete This Row" | delete_record_flag = Y | done | TASK, TASKPRED, TASKRSRC | UI only | same |
+| Activity codes, UDFs, status, % complete type, secondary constraint | actv_code_XXXX_id, user_field_XXXX, status_code, complete_pct_type, cstr_type2 | done | Codes and UDFs of activities, resources, assignments and expenses as columns; status changed with actual dates left as they were sets or clears them; project codes exported for reference (P6 does not import them) | — | export_excel / import_excel |
 | Read-only columns ignored | Calculated fields skipped | done | Status, start/finish, float ignored (p6sheets.ts:3-4) | — | — |
 | Round-trip idempotent | Re-import without edits changes nothing | done | CfC: 0 operations, 446 rows unchanged; Tower-A 0 ops | — | — |
-| RSRC sheet updates existing resources | Updates fields | partial | Only adds new resources; existing ones skipped (p6sheets.ts:155) | — | — |
-| TASKRSRC updates units | Updates units | partial | An existing assignment counts as unchanged; unit edits are ignored (p6sheets.ts:167) | — | — |
-| Errors in rows | Import log of refused rows | partial | The first refused row aborts the whole import (CfC test: "A milestone has zero duration"); P6 logs and skips | — | exit 65 |
+| RSRC sheet updates existing resources | Updates fields | done | Name, type, max units, price, default units / time, calendar, role, unit of measure, title, employee ID, email, phones, login, resource codes, UDFs; new resources added | — | import_excel |
+| TASKRSRC updates units | Updates units | done | Budgeted / remaining / actual units, Units % Complete, costs, this period, actual dates, own durations, remaining lag and units / time, role, cost account, curve, assignment codes, UDFs (the first assignment of a resource on an activity; a second one is reported) | — | import_excel |
+| Errors in rows | Import log of refused rows | done | A refused row is skipped with all its changes and listed (sheet, row, message); the rest is applied as one undo step (applyImport); dictionary entries the file lacks are skipped with a warning, as P6 does | Import log dialog | import_excel refused; CLI exit 65 |
 
 ## 11. Printing and other exchange
 

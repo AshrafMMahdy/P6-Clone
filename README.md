@@ -122,8 +122,8 @@ node cli/p6clone.ts review tower.xer --json
 | `print <xer> --out s.pdf\|s.html [--settings json] [--paper A3] [--portrait] [--content both\|table\|gantt] [--columns a,b] [--links]` | The Activities printout as a PDF (built in, no browser needed) or HTML; same pages as the app. Settings as in Page Setup (paper, landscape, margins, font_pt, content, table_share, columns, show_links, show_baseline, show_legend, show_grid, range/from/to, header/footer {show,left,center,right}) |
 | `reports <xer> [--json]` | The reports available (standard reports by group) |
 | `report <xer> <id\|name> [--out r.pdf\|r.html\|r.csv\|r.xlsx] [--definition json] [--weeks N] [--settings json]` | Run a report; without --out it prints the rows. --definition runs a Report Wizard definition (name, subject, columns, filter, group_by, sort_by, sort_desc) |
-| `export-excel <xer> --out s.xlsx [--project ID]` | P6-style spreadsheet (TASK, TASKPRED, RSRC, TASKRSRC) |
-| `import-excel <xer> <s.xlsx> --out out.xer [--project ID] [--schedule] [--dry-run] [--json]` | Update the project from the spreadsheet in one transaction (exit 65 if a row is refused) |
+| `export-excel <xer> --out s.xlsx [--project ID] [--sheets TASK,PROJCOST,...] [--columns JSON] [--describe]` | P6-style spreadsheet (TASK, TASKPRED, PROJCOST, RSRC, TASKRSRC, Oracle's XLSX data map); `--columns '{"TASK":["task_code","actv_code_*","user_field_*"]}'` picks each sheet's columns (P6's Modify Template), `--describe` lists every column |
+| `import-excel <xer> <s.xlsx> --out out.xer [--project ID] [--schedule] [--dry-run] [--json]` | Update the project from the spreadsheet as P6's spreadsheet import: a row P6 would refuse is skipped and listed, the rest applied (exit 65 if a row was refused) |
 | `compare <old> <new> [--json]` | Schedule comparison like P6's Claim Digger: projects, WBS (by code path), activities (by Activity ID) and relationships (pred -> succ type) added, deleted or changed, so revisions whose internal ids were renumbered compare cleanly | 0 same, 1 differences, 2 a file P6 rejects |
 | `schedule`, `progress`, `level`, `export`, `diff` | F9, Update Progress, Level Resources, write XER/XML, table-level differences by internal id | |
 
@@ -337,7 +337,15 @@ became / no longer critical and the changed rows), `validate`, `review`, `projec
 `list_dictionaries` (baselines, codes, UDFs, accounts, calendars, curves, EPS, OBS, roles), `earned_value`,
 `trace_logic`, `undo`, `redo`, `save` (XER 5.0-24.12, P6 XML, Microsoft Project XML `format: mspdi`, or MPX; `project`
 writes one project, and is required for mspdi/mpx when the file holds several), `export_pdf`,
-`export_excel`, `import_excel`, `compare` (`mode: computed`: per activity duration delta, start / finish shift, float
+`export_excel` (P6's spreadsheet export, Oracle's XLSX data map: sheets TASK, TASKPRED, PROJCOST expenses, RSRC,
+TASKRSRC; `sheets` and `columns` {SHEET: [fields]} are P6's Modify Template, with code columns `actv_code_<type id>_id`,
+`rsrc_catg_<id>_id`, `asgnmnt_catg_<id>_id`, `proj_catg_<id>_id`, UDF columns `user_field_<udf id>`, wildcards
+`actv_code_*` / `user_field_*` / `*`; P6's required columns always written; `(*)` titles = calculated; `describe: true`
+lists every column and writes nothing), `import_excel` (activities incl. status, % complete type, secondary constraint,
+codes and UDFs; relationships incl. between projects; expenses; resources added and updated; assignments added and
+updated incl. costs, actuals, dates, durations, role, account, curve, assignment codes, UDFs; dictionary entries the file
+lacks are skipped with a warning; a refused row is skipped and listed in `refused` {sheet, row, op, message}, the rest
+one undo step; `dry_run`), `compare` (`mode: computed`: per activity duration delta, start / finish shift, float
 delta, became / no longer critical), `list_reports`, `run_report`, `create_report`, `close`. Schedule analysis: `check_schedule` (P6 Professional's 14 checks), `dcma_14` (profiles, baseline, status date,
 contract finish, critical path test, CPLI decided by the contract finish with the baseline figure beside it, BEI), `lint`
 (with fixes as edit operations; `thresholds` overrides any band, count or ladder setting per call, and the answer names those it applied), `float_paths` (P6 multiple float paths, near-critical, paths between two activities),
