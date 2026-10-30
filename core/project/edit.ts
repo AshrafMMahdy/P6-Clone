@@ -210,7 +210,12 @@ export function deleteActivities(db: Db, ids: string[]): void {
   // in place (removeWhere): one journal copy per change, however many operations delete activities
   removeWhere(rows(db, 'TASK'), (t) => s.has(t.task_id));
   removeWhere(rows(db, 'TASKPRED'), (r) => s.has(r.task_id) || s.has(r.pred_task_id));
+  // UDF values of the activities and of their assignments (they name their row by fk_id, not task_id)
+  const gone = new Set(realOf(rows(db, 'TASKRSRC')).filter((r) => s.has(r.task_id)).map((r) => r.taskrsrc_id));
+  const udf = new Map(rows(db, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
+  removeWhere(rows(db, 'UDFVALUE'), (r) => (udf.get(r.udf_type_id) === 'TASK' && s.has(r.fk_id)) || (udf.get(r.udf_type_id) === 'TASKRSRC' && gone.has(r.fk_id)));
   for (const t of Object.values(db.tables)) if (t.name !== 'TASK' && t.fields.includes('task_id')) removeWhere(t.rows, (r) => s.has(r.task_id));
+  if (gone.size) removeWhere(rows(db, 'TRSRCFIN'), (r) => gone.has(r.taskrsrc_id));
 }
 
 /**

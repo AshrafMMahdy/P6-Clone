@@ -317,7 +317,12 @@ loop's activities either way), `activity_table` (every activity's computed dates
 and working-day offsets from the data date, as `columns` + `rows`, paged by `offset` / `limit` with no cap),
 `compute_schedule` (no handle, nothing kept: start, calendars, activities with predecessors, constraints, milestones
 and progress, options; answers the `activity_table` rows plus `loops` and `broken_links`),
-`update_progress`, `level_resources` (`within_float`, `over_allocation_pct`, `priority_by` early_start / total_float /
+`update_progress`, `transfer_progress` (a subcontractor's update onto this project's activities in one call, from a
+`path` or `other_handle`: matched by Activity ID, name, an activity code or UDF, or pairs; several of theirs onto one package
+activity; actual dates, %, remaining, expected finish, suspend / resume, units, assignments, expenses and steps; `dry_run`),
+`import_file` (P6's Import into the open file: `new`, `replace`, `update` = Update Existing Project with per-data-type
+update / keep / skip / remove_missing, `add_into`; dictionaries keep / update / insert / skip; `dry_run`),
+`level_resources` (`within_float`, `over_allocation_pct`, `priority_by` early_start / total_float /
 priority, `resources`, `activity_priority` [IDs placed first], `dry_run: true` = the leveled dates `moved` and
 per-resource `peaks` with nothing committed), `monte_carlo` (P10-P90, histogram, milestone percentiles, criticality,
 sensitivity, risk events from the register or inline `events` [{name, probability, delay_days, activities?}] where no

@@ -86,7 +86,8 @@ export const workerPeak = (sessionBytes: number) => WORKER_PEAK_PER_SESSION_BYTE
 export const RUN_HERE = Symbol('run here');
 const snapshotOf = (s: Session): Snapshot => ({ handle: s.handle, ownerKey: s.ownerKey, db: s.db, path: s.path, format: s.format, hpd: s.hpd, ...(s.encoding ? { encoding: s.encoding } : {}), ...(s.savedTo ? { savedTo: s.savedTo } : {}), dirty: s.dirty, bytes: s.bytes });
 /** The other open projects a call reads by handle (windows_analysis: updates[].handle). */
-const readsHandles = (name: string, a: Record<string, any>): string[] => (name === 'windows_analysis' && Array.isArray(a.updates) ? a.updates.filter((u: any) => u?.handle).map((u: any) => String(u.handle)) : []);
+const readsHandles = (name: string, a: Record<string, any>): string[] => (name === 'windows_analysis' && Array.isArray(a.updates) ? a.updates.filter((u: any) => u?.handle).map((u: any) => String(u.handle))
+  : (name === 'import_file' || name === 'transfer_progress') && a.other_handle ? [String(a.other_handle)] : []);
 /** A file the worker was writing: "<folder>/.<name>.<tag><hex>.p6clone-tmp" is the temporary file of "<folder>/<name>" (server.ts writeOutWith). */
 export const targetOf = (tmp: string) => join(dirname(tmp), basename(tmp).replace(/^\./, '').replace(/\.(?:j[0-9a-f]{6}-)?[0-9a-f]{8}\.p6clone-tmp$/, ''));
 const tagOf = (token: string) => `j${token}-`;
@@ -185,7 +186,7 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
     });
     if (done.patch && !isEmptyPatch(done.patch)) change(s, ctx.caller, done.label || name, (d) => applyPatch(d, done.patch!));
     if (done.lobSide) lobSidecars.set(s.handle, done.lobSide as never);
-    if (name.startsWith('lob_')) regrow(s); // (as the server did: an LOB plan adds thousands of activities)
+    if (name.startsWith('lob_') || name === 'import_file') regrow(s); // (as the server does: an LOB plan or an imported project adds thousands of rows)
     return done.result;
   } finally { adjustReserved(-held); for (const r of releases) r(); if (worker) release(worker, healthy); }
 }

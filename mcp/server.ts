@@ -31,6 +31,8 @@ import { readXerFile } from '../core/xer/parseFile.ts';
 import type { ParseMeta } from '../core/xer/parse.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { updateProgress } from '../core/progress/update.ts';
+import { transferProgress, PARTS, type MatchBy, type TransferSpec } from '../core/progress/transfer.ts';
+import { importIntoDb, REMOVABLE, type ImportPlan, type ProjectAction } from '../core/xer/import.ts';
 import { levelResources } from '../core/level/level.ts';
 import { applyOps, OP_GUIDE } from '../core/project/ops.ts';
 import { makeCtx } from '../core/project/ctx.ts';
@@ -100,6 +102,8 @@ const TOOLS = [
   { name: 'read_table', annotations: ro, description: 'Read any table of the open file as it is: every row, every column the file has, nothing summarised (list_tables names them). Answers columns, then one array per row, paged with offset and limit (default 1000, no cap; next_offset while more remain). Columns are the file’s own fields (XER names: dates "YYYY-MM-DD HH:MM", durations and lags in hours, as P6 writes them), then what a P6 XML file carries beyond them (xml:<Tag>) and a Microsoft Project file’s own elements (msp:<Name>: notes, baselines, custom fields, timephased data... as written); the clone’s own fields beside the file’s as clone:<field> (a project’s clone:eps_id, a baseline’s clone:baseline_of...); CALENDAR rows also give work_week (each day’s shifts) and exceptions ([{date, work}], work [] = non-work day) decoded from clndr_data. Baselines are projects: read their rows with project = the baseline’s Project ID. columns: only those columns.', inputSchema: withHandle({ type: 'object', properties: { table: { type: 'string' }, project: { type: 'string', description: 'Project ID, or a baseline’s (default: every row)' }, offset: { type: 'number' }, limit: { type: 'number', description: 'rows per page (default 1000, no cap)' }, columns: { type: 'array', items: { type: 'string' } } }, required: ['table'] }) },
   { name: 'schedule', annotations: edit, description: 'Schedule (F9) like P6: CPM with calendars, constraints, retained logic. Returns the finish date, the full schedule log as data (log: statistics, errors, warnings and exceptions, each section with its activities: loops, no predecessors, no successors, out of sequence, actuals after the data date, milestones with invalid relationships, critical activities, unsatisfied constraints and relationships, external dates, negative float; log_max_ids caps each section (default 100, 0 = all), log: false leaves it out), and loops ([[activity IDs]] of each loop; [] when none). break_loops: true schedules a network with loops by leaving out the links that close them (returned in broken_links; the links stay in the project); without it a loop fails the schedule, as in P6. options overrides the project\'s schedule options for this run only (set_schedule_options writes them): ' + SCHEDULE_OPTIONS_GUIDE + '. A project opened from Microsoft Project XML in which nothing that drives the dates changed keeps Microsoft Project\'s dates (kept_msp_dates); otherwise msp_dates_changed lists the dates the schedule replaced. data_date moves the data date of every project in the file first, or with project of that project only (the others schedule on their own data dates).', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' }, project: { type: 'string', description: 'Project ID: data_date applies to this project only' }, break_loops: { type: 'boolean' }, options: { type: 'object' }, log: { type: 'boolean' }, log_max_ids: { type: 'number' } } }) },
   { name: 'update_progress', annotations: edit, description: 'Tools > Update Progress: move the data date and statuse activities from their planned dates, then reschedule. If scheduling fails nothing is kept.', inputSchema: withHandle({ type: 'object', properties: { data_date: { type: 'string' } }, required: ['data_date'] }) },
+  { name: 'import_file', annotations: edit, description: 'File > Import into this open file, like P6\'s Import wizard: a project from a file (path: XER, P6 XML, Microsoft Project XML, MPX or .mpp) or another open project (other_handle). action: new (a new project; a Project ID already used gets -1, -2…), replace (Replace Existing Project: project\'s content becomes the file\'s; activities of the same Activity ID keep their identity, so relationships from other projects to them survive; the ones that cannot are reported), update (Update Existing Project: activities matched by Activity ID, WBS by code path, relationships by predecessor, successor and type, assignments by activity, resource and role, code and UDF values, notes, steps and expenses by their activity and name; matched objects are updated or kept per data type, new ones inserted, what the file lacks is kept unless remove_missing), add_into (Add Into Existing Project: the file\'s project becomes a WBS node of project, under wbs (a WBS code, default its top); an Activity ID already used gets -1). project: the target Project ID (replace, update, add_into). from_project: the Project ID in the file (default: its only project; new: every project in it). data (update): per data type — activities, wbs, relationships, assignments, activity_code_assignments, udf_values, notebooks, steps, expenses, issues, project_calendars, project_code_types, or a P6 table name — update (default), keep, skip (Do Not Import) or remove_missing (activities, relationships and assignments: also removes what the file lacks). dictionaries: per type — calendars, resources, roles, cost_accounts, activity_codes, udfs, obs, currencies, units, notebook_topics, expense_categories, resource_curves, project_codes, resource_codes, financial_periods, resource_rates, role_rates, or a table name — keep (default: a row of the same name is used as it is), update, insert (a copy) or skip (Do Not Import: a match is used, the rest is left out with what needs it). dry_run: true answers the counts and findings without changing anything. Answers projects, counts per table {inserted, updated, kept, removed, skipped} and findings (IMPORT_ID_RENAMED, IMPORT_LINK_DROPPED, IMPORT_EPS_MATCHED, IMPORT_UNRESOLVED). One undoable change. A baseline cannot be the target.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, other_handle: { type: 'string' }, action: { type: 'string', enum: ['new', 'replace', 'update', 'add_into'] }, project: { type: 'string' }, from_project: { type: 'string' }, wbs: { type: 'string' }, data: { type: 'object' }, dictionaries: { type: 'object' }, dry_run: { type: 'boolean' } }, required: ['action'] }) },
+  { name: 'transfer_progress', annotations: edit, description: 'Transfer progress from another schedule (a subcontractor\'s update: path or other_handle) onto this project\'s activities in one step, without importing their activities. match: activity_id (default), name, code (code_type: the activity code type whose value on this project\'s activities names theirs: their Activity ID, or the value of their from_code_type), udf (udf / from_udf likewise), or pairs [{from, to}] (their Activity ID -> this project\'s). One activity here may stand for several of theirs (a package summary): it takes the earliest actual start, the latest actual finish once all of them are finished, physical % weighted by their original durations, and the remaining duration until the last of them finishes (on its own calendar, from their data date); one of theirs may feed several here. Parts: dates (actual start / finish), percent (physical %), remaining (remaining duration), expected (expected finish), suspend (suspend / resume), units (actual and remaining labor and nonlabor units), assignments (matched by resource and role ID: units, dates; costs recomputed from this project\'s own rates unless costs: "copy"; add_assignments: true assigns a resource this project has but the activity lacks), expenses (by expense item name: actual and remaining cost), steps (by step name); include: {part: false} leaves a part out. data_date: "from" (theirs) or a date moves this project\'s data date. project / from_project: Project IDs (default: the only project; theirs: every project in the file). dry_run: true answers the changes without making them. Answers matched, updated, changes [{id, from, changed {field: [before, after]}}], unmatched_from (their activities nothing here matched), ambiguous (a name that matches more than one activity), assignments / expenses / steps {updated, added, unmatched} and warnings (e.g. actual dates after the data date). One undoable change; schedule afterwards to see the effect.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, other_handle: { type: 'string' }, match: { type: 'string', enum: ['activity_id', 'name', 'code', 'udf', 'pairs'] }, code_type: { type: 'string' }, from_code_type: { type: 'string' }, udf: { type: 'string' }, from_udf: { type: 'string' }, pairs: { type: 'array', items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } }, include: { type: 'object' }, costs: { type: 'string', enum: ['recompute', 'copy'] }, add_assignments: { type: 'boolean' }, data_date: { type: 'string' }, project: { type: 'string' }, from_project: { type: 'string' }, dry_run: { type: 'boolean' } } }) },
   { name: 'level_resources', annotations: edit, description: 'Tools > Level Resources (resources with a Max Units/Time limit): activities are delayed until each leveled resource has room. within_float: only within total float. over_allocation_pct: allowed overallocation (e.g. 10). priority_by: early_start (default), total_float or priority. resources: [resource IDs] to level (default: all with a limit). activity_priority: [activity IDs] placed first, in that order, once their predecessors are placed. dry_run: true answers the leveled dates (moved) and per-resource peaks without changing the project (no undo entry). Answers delayed, moved [{id, from, start, finish}], peaks [{resource, peak, limit, day, overallocated}] (unit-hours in the peak day) and the report.', inputSchema: withHandle({ type: 'object', properties: { within_float: { type: 'boolean' }, over_allocation_pct: { type: 'number' }, priority_by: { type: 'string' }, resources: { type: 'array', items: { type: 'string' } }, activity_priority: { type: 'array', items: { type: 'string' } }, dry_run: { type: 'boolean' } } }) },
   { name: 'monte_carlo', annotations: ro, description: 'Schedule risk analysis (Monte Carlo) like Primavera Risk Analysis: samples each activity\'s remaining duration from its three-point estimate (set with the set_estimates edit operation; default_estimates applies min/max percentages to activities without one, for this run only) and risk events from the risk register, schedules every iteration. Returns finish percentiles P10-P90, mean, std dev, chance of meeting the deterministic finish, a histogram (buckets), milestone percentiles, activity criticality index, sensitivity ranking and risk-event impact, and the finishes in working days from the data date (working_days, with sigma marks: mean - 3 to + 3 standard deviations as days and dates). events: risk events for this run only, each {name, probability (0-1) or probability_pct, delay_days or delay_hours, activities?: [IDs]}: when it happens the delay is added to each activity named (days of its calendar), or with no activities to the project finish (a project-level delay, project calendar). sampler: a duration ratio per activity and iteration, {type: ratio_normal, mean, std, min_ratio, max_ratio} (default 1.12, 0.28, 0.3, 4) or {type: ratio_empirical, ratios: [..], weight (0-1, default 0.66), normal?: {mean, std, min_ratio, max_ratio}}: with probability weight a ratio drawn uniformly from ratios (only when there are at least 10), else from the normal (the platform\'s slippage sampler; seeded), with scope all (default: instead of three-point estimates) or unestimated. re_anchor: true rescales each three-point estimate so its mean is the remaining duration. deadline (date): the chance of finishing by it. The project is not changed. Big projects: pass async: true (job_status shows the iterations done); notifications/cancelled or cancel_job stops it, and a progressToken gets notifications/progress.', inputSchema: withHandle({ type: 'object', properties: { iterations: { type: 'number', description: 'default 1000' }, events: { type: 'array', items: { type: 'object' } }, sampler: { type: 'object' }, re_anchor: { type: 'boolean' }, deadline: { type: 'string' }, seed: { type: 'number', description: 'same seed, same result' }, risk_events: { type: 'string', description: 'pre (default), post or off' }, project: { type: 'string' }, default_estimates: { type: 'object', description: '{min_pct: 90, max_pct: 125, dist: triangle|uniform|betapert} for activities without an estimate' }, buckets: { type: 'number', description: 'histogram buckets (default 20)' }, top: { type: 'number', description: 'how many activities in the criticality and sensitivity lists (default 25)' } } }) },
   { name: 'validate', annotations: ro, description: 'P6 import diagnostics for the project as it is now (what real P6 would accept, warn about or reject), plus saved dates that P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
@@ -136,6 +140,43 @@ const projectIds = (db: Db, id: unknown) => {
 };
 /** A .mpp read through MPXJ (core/msp/mpp.ts) as the Microsoft Project XML it turns it into; refused in words when this
  *  installation cannot (no MPXJ, no Java) or the file cannot be read. */
+/** The other side of compare, import_file and transfer_progress: another open project (other_handle) or a file (path),
+ *  read for this call only and counted in the memory budget while it is held (C14). */
+async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db; release: () => void; bytes: number }> {
+  if (a.other_handle) { const o = getSession(a.other_handle); return { db: o.db, release: () => {}, bytes: o.bytes }; }
+  if (!a.path) fail('bad_input', 'Give other_handle or path.', `other_handle: another open project; path: a file to ${what}.`);
+  const p = pathArg(a.path), bytes = estimateBytes(fileSize(p));
+  const release = reserveMemory(bytes, `Reading ${basename(p)} to ${what}`, `open the other file with open_file and pass other_handle when there is room`);
+  try {
+    let db: Db;
+    if (detectFormat(p, readHead(p)) === 'xer') db = readXerFile(p).db;
+    else { const b = readBytes(p), f = detectFormat(p, b); db = f === 'mpp' ? (await readMpp(p)).db : readRaw(b, f).db; }
+    if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to ${what}.`, 'Give an XER, P6 XML or Microsoft Project file.');
+    return { db, release, bytes };
+  } catch (e) { release(); throw e; }
+}
+/** A project of this file by Project ID (default: its only non-baseline project). */
+function projectOf(db: Db, id: unknown, where: string): Row {
+  const P = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
+  if (id != null && id !== '') return (db.tables.PROJECT?.rows ?? []).find((p) => p.proj_short_name === String(id)) ?? fail('bad_input', `${where} has no project ${id}.`, `Projects: ${P.map((p) => p.proj_short_name).join(', ')}.`);
+  if (P.length === 1) return P[0];
+  return fail('bad_input', `${where} holds ${P.length} projects: say which.`, `Projects: ${P.map((p) => p.proj_short_name).join(', ')}.`);
+}
+const IMPORT_DATA: Record<string, string[]> = { activities: ['TASK'], wbs: ['PROJWBS'], relationships: ['TASKPRED'], assignments: ['TASKRSRC'], activity_code_assignments: ['TASKACTV'], udf_values: ['UDFVALUE'], notebooks: ['TASKMEMO', 'WBSMEMO'], steps: ['TASKPROC'], expenses: ['PROJCOST'], issues: ['PROJISSU'], project_calendars: ['CALENDAR'], project_code_types: ['ACTVTYPE'] };
+const IMPORT_DICT: Record<string, string[]> = { calendars: ['CALENDAR'], resources: ['RSRC'], roles: ['ROLES'], cost_accounts: ['ACCOUNT'], activity_codes: ['ACTVTYPE', 'ACTVCODE'], udfs: ['UDFTYPE'], obs: ['OBS'], currencies: ['CURRTYPE'], units: ['UMEASURE'], notebook_topics: ['MEMOTYPE'], expense_categories: ['COSTTYPE'], resource_curves: ['RSRCCURVDATA'], project_codes: ['PCATTYPE', 'PCATVAL'], resource_codes: ['RCATTYPE', 'RCATVAL'], financial_periods: ['FINDATES'], resource_rates: ['RSRCRATE'], role_rates: ['ROLERATE'] };
+/** {name or table: action} -> {table: action}, each action checked. */
+function importActions<T extends string>(v: unknown, names: Record<string, string[]>, allowed: readonly T[], what: string): Partial<Record<string, T>> {
+  if (v == null) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) fail('bad_input', `${what} must be an object of {type: action}.`, `e.g. {"${Object.keys(names)[0]}": "${allowed[0]}"}`);
+  const out: Partial<Record<string, T>> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    const tables = names[k.toLowerCase()] ?? (/^[A-Z]+$/.test(k) ? [k] : fail('bad_input', `${what}: unknown type "${k}".`, `Types: ${Object.keys(names).join(', ')} (or a P6 table name).`));
+    if (!allowed.includes(x as T)) fail('bad_input', `${what}.${k} must be ${allowed.join(', ')}.`, `e.g. "${allowed[0]}"`);
+    for (const t of tables) out[t] = x as T;
+  }
+  return out;
+}
+
 async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
   let xml: Awaited<ReturnType<typeof mppToMspdi>>;
   try { xml = await mppToMspdi(path); }
@@ -403,6 +444,55 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.errors.join(' '), hint: 'Scheduling failed, so the progress update was undone; fix the problem and try again.' } }; }
       return res;
     }
+    case 'import_file': {
+      const action = String(a.action ?? '');
+      if (!['new', 'replace', 'update', 'add_into'].includes(action)) fail('bad_input', 'action must be new, replace, update or add_into.', 'update: Update Existing Project (matched objects updated, new ones added).');
+      const data = importActions(a.data, IMPORT_DATA, ['update', 'keep', 'skip', 'remove_missing'] as const, 'data');
+      for (const [t, x] of Object.entries(data)) if (x === 'remove_missing' && !REMOVABLE.includes(t)) fail('bad_input', `remove_missing is for activities, relationships and assignments, not ${t}.`, 'Use update, keep or skip.');
+      if (Object.keys(data).length && action !== 'update') fail('bad_input', 'data actions apply to action: update.', 'Leave data out, or use action update.');
+      const dict = importActions(a.dictionaries, IMPORT_DICT, ['keep', 'update', 'insert', 'skip'] as const, 'dictionaries');
+      const target = action === 'new' ? undefined : projectOf(s.db, a.project, 'This file');
+      if (target?._baseline_of) fail('bad_input', `${target.proj_short_name} is a baseline.`, 'Import into the project itself.');
+      const { db: src, release } = await readOther(a, 'import');
+      try {
+        const theirs = (src.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
+        const from = a.from_project != null ? [projectOf(src, a.from_project, 'The file')] : action === 'new' ? theirs : [projectOf(src, undefined, 'The file')];
+        let wbsId: string | undefined;
+        if (action === 'add_into' && a.wbs != null) {
+          const ws = (s.db.tables.PROJWBS?.rows ?? []).filter((w) => w.proj_id === target!.proj_id && w.wbs_short_name === String(a.wbs));
+          if (ws.length !== 1) fail('bad_input', ws.length ? `More than one WBS of code ${a.wbs}.` : `No WBS ${a.wbs} in ${target!.proj_short_name}.`, 'list_wbs lists the WBS codes.');
+          wbsId = ws[0].wbs_id;
+        }
+        const plan: ImportPlan = { projects: from.map((p) => ({ srcProjId: p.proj_id, action: action as ProjectAction, targetProjId: target?.proj_id, wbsId })), dict, data };
+        if (action === 'new') for (const b of (src.tables.PROJECT?.rows ?? []).filter((p) => p._baseline_of && from.some((f) => f.proj_id === p._baseline_of))) plan.projects.push({ srcProjId: b.proj_id, action: 'new' }); // their baselines come with them
+        const run = (d: Db) => { const r = importIntoDb(d, src, plan); return { projects: r.projIds.map((id) => d.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), counts: r.counts, findings: r.findings.map((f) => ({ severity: f.severity, code: f.code, message: f.message })) }; };
+        if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...out }; }
+        const out = change(s, ctx.caller, `Import (${action})`, run);
+        regrow(s); // what the project now holds with the imported rows
+        return out;
+      } finally { release(); }
+    }
+    case 'transfer_progress': {
+      const by = String(a.match ?? 'activity_id') as MatchBy;
+      if (!['activity_id', 'name', 'code', 'udf', 'pairs'].includes(by)) fail('bad_input', 'match must be activity_id, name, code, udf or pairs.', 'activity_id when both schedules share Activity IDs.');
+      if (by === 'code' && !a.code_type) fail('bad_input', 'match code needs code_type.', 'The activity code type whose value names their activity.');
+      if (by === 'udf' && !a.udf) fail('bad_input', 'match udf needs udf.', 'The activity UDF whose value names their activity.');
+      if (by === 'pairs' && !Array.isArray(a.pairs)) fail('bad_input', 'match pairs needs pairs: [{from, to}].', 'from: their Activity ID; to: this project\'s.');
+      const include = a.include == null ? undefined : typeof a.include === 'object' ? a.include : fail('bad_input', 'include must be {part: true|false}.', `Parts: ${PARTS.join(', ')}.`);
+      for (const k of Object.keys(include ?? {})) if (!(PARTS as readonly string[]).includes(k)) fail('bad_input', `include: unknown part "${k}".`, `Parts: ${PARTS.join(', ')}.`);
+      if (a.costs != null && a.costs !== 'recompute' && a.costs !== 'copy') fail('bad_input', 'costs must be recompute or copy.', 'recompute: this project\'s own rates.');
+      if (a.data_date != null && a.data_date !== 'from' && !dd(a.data_date)) fail('bad_input', 'data_date must be "from" or a date.', 'e.g. "from" or 2026-03-02.');
+      const target = projectOf(s.db, a.project, 'This file');
+      if (target._baseline_of) fail('bad_input', `${target.proj_short_name} is a baseline.`, 'Transfer onto the project itself.');
+      const { db: src, release } = await readOther(a, 'transfer progress from');
+      try {
+        const from = a.from_project != null ? [projectOf(src, a.from_project, 'Their file')] : (src.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
+        const spec: TransferSpec = { from: src, fromProjIds: from.map((p) => p.proj_id), toProjId: target.proj_id, by, codeType: a.code_type, fromCodeType: a.from_code_type, udf: a.udf, fromUdf: a.from_udf, pairs: a.pairs?.map((x: any) => ({ from: String(x?.from ?? ''), to: String(x?.to ?? '') })), include, costs: a.costs, addAssignments: a.add_assignments === true, dataDate: a.data_date == null ? undefined : String(a.data_date) };
+        const run = (d: Db) => { const r = transferProgress(d, spec); if ('error' in r) throw new ToolError('bad_input', r.error, 'Check the match options (list_dictionaries lists code types and UDFs).'); return r; };
+        if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...out }; }
+        return change(s, ctx.caller, 'Transfer Progress', run);
+      } finally { release(); }
+    }
     case 'level_resources': {
       const PB: Record<string, 'es' | 'tf' | 'priority'> = { early_start: 'es', es: 'es', total_float: 'tf', tf: 'tf', priority: 'priority' };
       const by = a.priority_by == null ? undefined : PB[String(a.priority_by).toLowerCase()] ?? fail('bad_input', 'priority_by must be early_start, total_float or priority.', 'Leave it out for early start.');
@@ -559,8 +649,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         return { mode: 'computed', baseline: bl.name, ...c, changed: c.changes.length, ...changesPage(c.changes, a) };
       }
       // a file compared against is read for this call only, and counted in the memory budget while it is held (C14)
-      let release = () => {};
-      const other = a.other_handle ? getSession(a.other_handle).db : a.path ? await (async () => { const p = pathArg(a.path); release = reserveMemory(estimateBytes(fileSize(p)), `Reading ${basename(p)} to compare with`, 'open the other file with open_file and compare with other_handle when there is room'); try { let db: Db; if (detectFormat(p, readHead(p)) === 'xer') db = readXerFile(p).db; else { const b = readBytes(p), f = detectFormat(p, b); db = f === 'mpp' ? (await readMpp(p)).db : readRaw(b, f).db; } if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to compare with.`, 'Give an XER, P6 XML or Microsoft Project XML file.'); return db; } catch (e) { release(); throw e; } })() : fail('bad_input', 'Give other_handle or path.', 'other_handle: another open project; path: a file to compare against.');
+      const { db: other, release } = await readOther(a, 'compare with');
       try {
       if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return { mode: 'computed', changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }; }
       if (a.mode != null && a.mode !== 'all') fail('bad_input', 'mode must be all or computed.', 'Leave it out to compare everything.');
@@ -778,11 +867,11 @@ const FILES: Record<string, { read: string[]; opens: boolean }> = {
 /** P6CLONE_TOOLSETS (e.g. "core,analysis,4d,lob"): a host that wants fewer tools lists only some groups; default all. */
 const toolsetOf = (name: string) => (FOURD_NAMES.has(name) ? '4d' : LOB_NAMES.has(name) ? 'lob' : ANALYSIS_NAMES.has(name) ? 'analysis' : 'core');
 const ANALYSIS_NAMES = new Set(ANALYSIS_TOOLS((x) => x).map((t) => t.name));
-/** Tools that can run long on a project (the analysis tools; Monte Carlo, levelling, F9, progress updates, what-if evaluation; LOB plans;
+/** Tools that can run long on a project (the analysis tools; Monte Carlo, levelling, F9, progress updates, imports into the project and progress transfers, what-if evaluation; LOB plans;
  *  PDF, Excel and report files): they run in a worker thread on a copy of the project (compute.ts). Not here, and why: file opens and saves
  *  (they create or serialise the session's database), edit/undo/redo (finite, fast operations on the database itself), the lookups, and the 4D
  *  tools (they work on models held in this process; their heavy parts already run in worker processes). */
-const OFFLOAD = new Set([...ANALYSIS_NAMES, 'monte_carlo', 'level_resources', 'schedule', 'update_progress', 'evaluate', 'review', 'validate', 'export_pdf', 'export_excel', 'lob_create', 'lob_edit', 'lob_takt', 'lob_forecast', 'lob_import']);
+const OFFLOAD = new Set([...ANALYSIS_NAMES, 'monte_carlo', 'level_resources', 'schedule', 'update_progress', 'import_file', 'transfer_progress', 'evaluate', 'review', 'validate', 'export_pdf', 'export_excel', 'lob_create', 'lob_edit', 'lob_takt', 'lob_forecast', 'lob_import']);
 const offloads = (name: string, a: Record<string, any>) => process.env.P6CLONE_COMPUTE_WORKERS !== '0' && (OFFLOAD.has(name) || (name === 'run_report' && !!a.path));
 export const toolsList = () => {
   const sets = process.env.P6CLONE_TOOLSETS ? new Set(process.env.P6CLONE_TOOLSETS.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean)) : null;

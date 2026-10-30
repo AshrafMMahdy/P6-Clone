@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Dialog } from '../components/Layout.tsx';
 import { closeDialog, getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
 import { bridgeMessage, detectFormat, exportFile, FORMAT_INFO, isMspFormat, MSP_FORMATS, parseFile, parseFileAsync, type Format, type ParsedFile } from '../io.ts';
-import { importIntoDb, type ImportPlan, type ProjectAction, type DictAction } from '../../core/xer/import.ts';
+import { importIntoDb, REMOVABLE, type ImportPlan, type ProjectAction, type DictAction, type DataAction } from '../../core/xer/import.ts';
 import { EXPORT_VERSIONS, verification } from '../../core/xer/schema.ts';
 import { worst } from '../../core/findings.ts';
 import { rows } from '../../core/db.ts';
@@ -43,6 +43,8 @@ function MspFormatChoice(p: { format: Format; setFormat: (f: Format) => void; no
 }
 
 const DICTS: [string, string][] = [['CALENDAR', 'Calendars'], ['RSRC', 'Resources'], ['ROLES', 'Roles'], ['ACTVTYPE', 'Activity Codes'], ['UDFTYPE', 'User Defined Fields'], ['ACCOUNT', 'Cost Accounts']];
+/** Project data on Update Existing Project (P6's Modify Import Configuration, project data). */
+const DATA: [string, string][] = [['TASK', 'Activities'], ['PROJWBS', 'WBS'], ['TASKPRED', 'Relationships'], ['TASKRSRC', 'Resource Assignments'], ['TASKACTV', 'Activity Code Assignments'], ['UDFVALUE', 'UDF Values'], ['TASKMEMO', 'Notebooks'], ['TASKPROC', 'Steps'], ['PROJCOST', 'Expenses']];
 
 /** File > Import wizard (P6 steps: format, type, file, projects, update options, finish). */
 export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Array } }) {
@@ -60,6 +62,7 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
   // show each stage of reading a big file (the window repaints between stages)
   const stage = async (msg: string) => { setBusy(msg); await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))); };
   const [dict, setDict] = useState<Record<string, DictAction>>({});
+  const [data, setData] = useState<Record<string, DataAction>>({});
   const steps = ['Import Format', 'Import Type', 'Import File', 'Projects To Import', 'Update Project Options', 'Finish'];
 
   function defaultRows(pf: ParsedFile): ImportPlan['projects'] {
@@ -128,7 +131,7 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
     let extra: typeof file.parsed.findings = [];
     mutate(`Import ${fname}`, (db) => {
       ensureEps(db);
-      const res = importIntoDb(db, file.parsed.db, { projects: plan, dict });
+      const res = importIntoDb(db, file.parsed.db, { projects: plan, dict, data });
       ids = res.projIds;
       extra = res.findings;
     });
@@ -200,6 +203,7 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
                       <option value="new">Create New Project</option>
                       <option value="replace" disabled={!existing.length}>Replace Existing Project</option>
                       <option value="update" disabled={!existing.length}>Update Existing Project</option>
+                      <option value="add_into" disabled={!existing.length}>Add Into Existing Project</option>
                       <option value="skip">Do Not Import</option>
                     </select></td>
                     <td>{r.action === 'new'
@@ -211,7 +215,7 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
             </tbody>
           </table>
         </div>
-        <p className="muted">Replace deletes the existing project's data and loads the file into it (keeping its project ID). Update matches activities by Activity ID and keeps their internal IDs.</p>
+        <p className="muted">Replace loads the file into the existing project in place of its data (keeping its project ID; activities of the same Activity ID keep their relationships from other projects). Update matches activities by Activity ID, WBS by code path, relationships, assignments and the rest by what they belong to: matched data is updated or kept (Update Project Options), new data is added, and data the file lacks stays unless you choose Remove from Project. Add Into puts the file's project under the existing project's top WBS.</p>
       </>}
       {step === 4 && <>
         <h3>Update project options</h3>
@@ -220,9 +224,19 @@ export function ImportWizard(props: { preload?: { name: string; bytes: Uint8Arra
           <thead><tr><th>Data Type</th><th>Action</th></tr></thead>
           <tbody>{DICTS.map(([k, l]) => (
             <tr key={k}><td>{l}</td><td><select value={dict[k] ?? 'keep'} onChange={(e) => setDict({ ...dict, [k]: e.target.value as DictAction })}>
-              <option value="keep">Keep Existing</option><option value="update">Update Existing</option><option value="insert">Insert New</option></select></td></tr>
+              <option value="keep">Keep Existing</option><option value="update">Update Existing</option><option value="insert">Insert New</option><option value="skip">Do Not Import</option></select></td></tr>
           ))}</tbody>
         </table>
+        {plan.some((r) => r.action === 'update') && <>
+          <p className="muted">Project data of the projects being updated:</p>
+          <table className="tbl" style={{ maxWidth: 420 }}>
+            <thead><tr><th>Data Type</th><th>Action</th></tr></thead>
+            <tbody>{DATA.map(([k, l]) => (
+              <tr key={k}><td>{l}</td><td><select value={data[k] ?? 'update'} onChange={(e) => setData({ ...data, [k]: e.target.value as DataAction })}>
+                <option value="update">Update Existing</option><option value="keep">Keep Existing</option><option value="skip">Do Not Import</option>{REMOVABLE.includes(k) && <option value="remove_missing">Remove from Project</option>}</select></td></tr>
+            ))}</tbody>
+          </table>
+        </>}
       </>}
       {step === 5 && file && <>
         <h3>Ready to import</h3>
