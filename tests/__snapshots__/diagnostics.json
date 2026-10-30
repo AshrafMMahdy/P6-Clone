@@ -142,7 +142,7 @@
   "error:BAD_ENUM": 12,
   "error:CAL_PARSE": 4,
   "info:MISSING_FIELD": 4,
-  "warning:FIELD_UNKNOWN": 5,
+  "warning:FIELD_UNKNOWN": 4,
   "warning:FORECAST_BEFORE_DD": 1,
   "warning:HEADER_DATE": 1
  },
@@ -156,7 +156,7 @@
   "error:CAL_PARSE": 5,
   "info:DANGLING_REF": 6,
   "info:MISSING_FIELD": 1,
-  "warning:FIELD_UNKNOWN": 12
+  "warning:FIELD_UNKNOWN": 11
  },
  "PDC-XER-001_Polaris_DC1_Baseline.xer": {
   "error:BAD_ENUM": 6,
