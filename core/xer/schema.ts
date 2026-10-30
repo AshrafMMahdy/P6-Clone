@@ -60,7 +60,7 @@ export function knownTables(): Set<string> {
 }
 
 /** Tables a modern P6 may emit that the real samples never contained. Order positions are best knowledge. */
-const MODERN_ONLY_TABLES = ['NONWORK', 'FINTMPL', 'LOCATION', 'SHIFT', 'SHIFTPER', 'ROLELIMIT', 'RISKTYPE', 'PROJFUND', 'FUNDSRC', 'ISSUHIST', 'TASKFDBK', 'RSRCLEVELLIST', 'TRSRCFIN', 'RSRCHOUR', 'PROJEST', 'DOCUMENT', 'TASKDOC', 'EXPTYPE', 'JOBSVC'];
+const MODERN_ONLY_TABLES = ['NONWORK', 'FINTMPL', 'LOCATION', 'SHIFT', 'SHIFTPER', 'ROLELIMIT', 'RISKTYPE', 'PROJFUND', 'FUNDSRC', 'ISSUHIST', 'TASKFDBK', 'RSRCLEVELLIST', 'TRSRCFIN', 'RSRCHOUR', 'PROJEST', 'DOCUMENT', 'TASKDOC', 'EXPTYPE', 'JOBSVC', 'ASGNMNTCATTYPE', 'ASGNMNTCATVAL', 'ASGNMNTACAT'];
 
 export const TABLE_ORDER: string[] = (() => {
   const order = [...observed.tableOrder];
@@ -72,6 +72,11 @@ export const TABLE_ORDER: string[] = (() => {
   insertBefore('SHIFTPER', 'UDFTYPE');
   insertBefore('ROLELIMIT', 'PROJECT');
   insertBefore('RISKTYPE', 'ROLES');
+  // assignment codes (Oracle's XER data map): the code types with the other code types, values with values, the
+  // assignments of them after the resource assignments they name
+  insertBefore('ASGNMNTCATTYPE', 'COSTTYPE');
+  insertBefore('ASGNMNTCATVAL', 'PCATVAL');
+  insertBefore('ASGNMNTACAT', 'UDFVALUE');
   for (const t of MODERN_ONLY_TABLES) if (!order.includes(t)) order.push(t);
   return order;
 })();

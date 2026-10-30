@@ -4,7 +4,7 @@
 import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, table, ermhdrFields, ermhdrIdentity, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
-import { assignmentActuals, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
+import { assignmentActuals, assignmentDetails, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { ensureEps, projectNumberProblem, renumberProject } from './edit.ts';
 import { pick, realOf, removeWhere } from '../journal.ts';
 import { LOB_UDF } from '../lob/expand.ts';
@@ -48,11 +48,11 @@ export const EXTRA_GUIDE = [
   `add_resource_curve: name, values (21 percentages totalling 100: values[0] at the start, values[1..20] for each 5% of the assignment's time, like P6 Resource Curves); assign it with assign_resource / update_assignment curve`,
   `build_baseline: [project], [name], [assign_as] (project default, bl1, bl2, bl3; "" = not assigned), activities [{activity (ID or uid:<UID>), [start], [finish], [duration_days], [cost]}]: a baseline (a copy of the project, as save_baseline) whose listed activities carry the given baseline values (planned, not started); activities not listed keep the project's current values; an activity not in the project is skipped with a warning`,
   `update_wbs: code, [new_code], [name], [parent] (move under this WBS code; "" = top level), [project]`,
-  `add_code_type: name, [subject] (activity default, project, resource), [scope] (global default, project; activity codes only), [project], [max_length] (default 20, at most 60: a longer value is refused, never cut), [values [{code, [name], [parent]}]]`,
+  `add_code_type: name, [subject] (activity default, project, resource, assignment), [scope] (global default, project; activity codes only), [project], [max_length] (default 20, at most 60: a longer value is refused, never cut), [values [{code, [name], [parent]}]]`,
   `add_code_value: type, code, [name], [parent] (parent value code), [subject]`,
-  `assign_code: type, value ("" removes), and activity (+[project]) | project | resource, [subject] (default from the target)`,
-  `add_udf: name, [subject] (activity default, wbs, project, resource, assignment), [data_type] (text default, number, integer, cost, start_date, finish_date)`,
-  `set_udf: udf, value (null or "" removes), and activity (+[project]) | wbs (+[project]) | project | resource`,
+  `assign_code: type, value ("" removes), and activity (+[project]) | project | resource | activity + resource (that resource assignment's assignment code), [subject] (default from the target)`,
+  `add_udf: name, [subject] (activity default, wbs, project, resource, assignment, expense), [data_type] (text default, number, integer, cost, start_date, finish_date)`,
+  `set_udf: udf, value (null or "" removes), and activity (+[project]) | wbs (+[project]) | project | resource | activity + resource (a resource assignment) | activity + expense (an expense by its name)`,
   `clear_udfs: [project], [subject] (activity, wbs, project, assignment, resource), [udf] (one UDF's label): removes every UDF value of the project's activities, WBS, assignments and the project itself in one step (resource UDF values, shared by every project, only with subject resource or a resource udf); an LOB plan's own UDFs (LOB Task, LOB Quantity, LOB Consumption, LOB Crew, Schedule Method = LOB (P6 clone)) stay unless udf names one`,
   `update_udf: udf (label), new_name, [subject] (activity default, wbs, project, resource, assignment)`,
   `set_notebook: [activity] | project, topic, text (text "" removes the topic; answer removed: true/false; the topic itself stays). activity (+[project]): its activity notebook; project alone: the project's notebook (P6's WBSMEMO on the project's root WBS node). topic default "Notes", created when missing, else reused`,
@@ -60,7 +60,7 @@ export const EXTRA_GUIDE = [
   `clear_notebooks: [project], [baselines] (default true): every notebook of the project in one step (activity notebooks; WBS and project notebooks, which hold the EPS notebooks P6 writes into an XER; any topic, one the file no longer lists too), and of its baselines; without project, of every project and baseline in the file. Answers how many went`,
   `clear_descriptions: [tables] (default every table): blanks every description, notes and memo text in the file, the ones no other op reaches too (ROLES role_descr, ACCOUNT acct_descr, RSRC rsrc_notes, step and expense descriptions...): every field named *_descr, *_notes or *memo*; names, codes and notebooks (clear_notebooks) stay. Answers what was cleared per table`,
   `add_cost_account: id, [name], [parent]; update_cost_account: id, [new_id], [name]`,
-  `add_expense: activity, name, [account], [budgeted_cost], [actual_cost], [remaining_cost] (default budgeted - actual), [units], [price_per_unit], [vendor], [po_number], [description], [project]`,
+  `add_expense: activity, name, [account], [budgeted_cost], [actual_cost], [remaining_cost] (default budgeted - actual), [units], [price_per_unit], [unit_of_measure], [vendor], [po_number], [description], [project]`,
   `update_expense: activity, name, then any add_expense field plus [new_name]; delete_expense: activity, name; delete_expenses: [project], [activity] (+[project]): every expense of the project, or of that one activity, in one step`,
   `add_step: activity, name, [weight] (default 1), [percent_complete], [completed], [description]; update_step: activity, name, [new_name], [weight], [percent_complete], [completed], [description]; delete_step: activity, name`,
   `set_estimates: activity, [min_days], [most_likely_days], [max_days], [distribution] (${Object.keys(DISTS).join(', ')}), or clear: true. Three-point remaining durations for monte_carlo (missing values default to the remaining duration)`,
@@ -71,7 +71,7 @@ export const EXTRA_GUIDE = [
   `add_obs / update_obs / delete_obs: name, [parent], [new_name], [description] (update_obs; "" clears it); add_role / update_role / delete_role: id, [name], [parent], [new_id]`,
   `update_pobs: [pobs_id] or [name], [new_name], [description] ("" clears it), [manager] ("" clears it): a row of the performing organisations (POBS, the file's Performing Organization table: pobs_name, pobs_descr, pobs_manager), which add_obs / update_obs do not reach (they edit the OBS). Needs a pobs_id or the row's name (several rows with that name: use pobs_id; list_dictionaries only: pobs lists them); the root row can be renamed but keeps its place (no parent) and a name. clear_descriptions blanks every pobs_descr too`,
   `update_calendar: name, [new_name], [work_week] (days given replace those days), [holidays [dates]] (non-work), [work_exceptions {date: periods}], [remove_exceptions [dates]]`,
-  `update_assignment: activity, resource, [units], [units_per_day], [remaining_units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (kept as entered), [curve] (resource curve name; "" = linear), [project]`,
+  `update_assignment: activity, resource, [units], [units_per_day], [remaining_units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (kept as entered), [curve] (resource curve name; "" = linear), [role] (role ID; "" clears), [account] (cost account ID; "" clears), [actual_start], [actual_finish] (null clears), [duration_days] / [remaining_duration_days] (the assignment's own; its units / time follow), [remaining_units_per_day], [remaining_lag_days], [actual_this_period_units], [actual_this_period_cost], [project]`,
   `update_resource: id, [new_id] (a new Resource ID), [name], [max_units_per_day] or [max_units_per_hour] (Max Units / Time on every rate row of the resource, read by level_resources and optimize_schedule)`,
   `delete_resource: id, [clear_references] (default false: refused while an assignment, in any project or baseline, or an activity's primary resource points at it; true: those assignments are removed and the primary resources cleared). Its rates, resource codes, roles and UDF values go with it; its child resources move up to its parent`,
   `regenerate_guids: [project], [dictionaries] (default true: also the GUIDs of the file's shared resources, calendars, codes, OBS, roles...), [new_proj_id] or [keep_proj_id]: every GUID of the project and its baselines (project, WBS, activities, assignments, ...) replaced by a fresh one, template GUIDs cleared; the project also gets a new internal number (the next free one unless new_proj_id; keep_proj_id: true keeps it), every reference following`,
@@ -94,8 +94,10 @@ const CODE_SUBJECTS = {
   activity: { type: 'ACTVTYPE', tid: 'actv_code_type_id', tname: 'actv_code_type', tlen: 'actv_short_len', val: 'ACTVCODE', vid: 'actv_code_id', vparent: 'parent_actv_code_id', vshort: 'short_name', vname: 'actv_code_name', link: 'TASKACTV', fk: 'task_id' },
   project: { type: 'PCATTYPE', tid: 'proj_catg_type_id', tname: 'proj_catg_type', tlen: 'proj_catg_short_len', val: 'PCATVAL', vid: 'proj_catg_id', vparent: 'parent_proj_catg_id', vshort: 'proj_catg_short_name', vname: 'proj_catg_name', link: 'PROJPCAT', fk: 'proj_id' },
   resource: { type: 'RCATTYPE', tid: 'rsrc_catg_type_id', tname: 'rsrc_catg_type', tlen: 'rsrc_catg_short_len', val: 'RCATVAL', vid: 'rsrc_catg_id', vparent: 'parent_rsrc_catg_id', vshort: 'rsrc_catg_short_name', vname: 'rsrc_catg_name', link: 'RSRCRCAT', fk: 'rsrc_id' },
+  // P6's assignment codes (ASGNMNTCATTYPE / ASGNMNTCATVAL / ASGNMNTACAT, on a resource assignment)
+  assignment: { type: 'ASGNMNTCATTYPE', tid: 'asgnmnt_catg_type_id', tname: 'asgnmnt_catg_type', tlen: 'asgnmnt_catg_short_len', val: 'ASGNMNTCATVAL', vid: 'asgnmnt_catg_id', vparent: 'parent_asgnmnt_catg_id', vshort: 'asgnmnt_catg_short_name', vname: 'asgnmnt_catg_name', link: 'ASGNMNTACAT', fk: 'taskrsrc_id' },
 } as const;
-const UDF_SUBJECT: Record<string, string> = { activity: 'TASK', wbs: 'PROJWBS', project: 'PROJECT', resource: 'RSRC', assignment: 'TASKRSRC' };
+const UDF_SUBJECT: Record<string, string> = { activity: 'TASK', wbs: 'PROJWBS', project: 'PROJECT', resource: 'RSRC', assignment: 'TASKRSRC', expense: 'PROJCOST' };
 const UDF_TYPE: Record<string, string> = { text: 'FT_TEXT', number: 'FT_FLOAT_2_DECIMALS', integer: 'FT_INT', cost: 'FT_MONEY', start_date: 'FT_START_DATE', finish_date: 'FT_END_DATE', date: 'FT_START_DATE' };
 const TREES = {
   eps: { table: 'EPS', id: 'eps_id', parent: 'parent_eps_id', key: 'eps_short_name', name: 'eps_name', fields: ['eps_id', 'parent_eps_id', 'eps_short_name', 'eps_name', 'seq_num'] },
@@ -171,6 +173,13 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     return code;
   };
   const target = (o: Op): { subject: string; row: Row; fk: string; projId: string } => {
+    // an assignment (activity + resource) or an expense (activity + expense name): their own codes and UDFs
+    if (o.activity != null && o.resource != null) {
+      const t = h.activity(o.activity, o.project), r = h.resource(o.resource), tid = t.task_id, rid = r.rsrc_id;
+      const a = pick(rows(db, 'TASKRSRC'), (x) => x.task_id === tid && x.rsrc_id === rid, 1)[0] ?? fail(`${r.rsrc_short_name} is not assigned to ${t.task_code}.`);
+      return { subject: 'assignment', row: a, fk: a.taskrsrc_id, projId: t.proj_id };
+    }
+    if (o.activity != null && o.expense != null) { const { t, c } = expense({ ...o, name: o.expense }); return { subject: 'expense', row: c, fk: c.cost_item_id, projId: t.proj_id }; }
     if (o.activity != null) { const t = h.activity(o.activity, o.project); return { subject: 'activity', row: t, fk: t.task_id, projId: t.proj_id }; }
     if (o.wbs != null) { const p = h.projectFor(o.project, o.wbs); const w = h.wbsOf(p, o.wbs); return { subject: 'wbs', row: w, fk: w.wbs_id, projId: p.proj_id }; }
     if (o.resource != null) { const r = h.resource(o.resource); return { subject: 'resource', row: r, fk: r.rsrc_id, projId: '' }; }
@@ -194,7 +203,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     if (o.actual_cost != null) c.act_cost = p6num(num(o.actual_cost, 'actual_cost'));
     if (o.remaining_cost != null) c.remain_cost = p6num(num(o.remaining_cost, 'remaining_cost'));
     else if (o.budgeted_cost != null || o.actual_cost != null || o.units != null || o.price_per_unit != null) c.remain_cost = p6num(Math.max(0, (Number(c.target_cost) || 0) - (Number(c.act_cost) || 0)));
-    for (const [k, f] of [['vendor', 'vendor_name'], ['po_number', 'po_number'], ['description', 'cost_descr']] as const) if (o[k] != null) c[f] = String(o[k]);
+    for (const [k, f] of [['vendor', 'vendor_name'], ['po_number', 'po_number'], ['description', 'cost_descr'], ['unit_of_measure', 'qty_name']] as const) if (o[k] != null) c[f] = String(o[k]);
   };
   const step = (o: Op) => {
     const t = h.activity(o.activity, o.project);
@@ -431,10 +440,11 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     }
     case 'assign_code': {
       const tg = target(op);
-      if (tg.subject === 'wbs') fail('Codes are assigned to activities, projects or resources.');
+      if (tg.subject === 'wbs' || tg.subject === 'expense') fail('Codes are assigned to activities, projects, resources or resource assignments.');
       const S = codeSubject(op.subject, tg.subject as keyof typeof CODE_SUBJECTS);
       const type = codeType(S, str(op.type, 'type'), tg.projId);
-      const L = ensure(db, S.link, [S.fk, S.tid, S.vid, ...(S.link === 'TASKACTV' ? ['proj_id'] : [])]);
+      const withProj = S.link === 'TASKACTV' || S.link === 'ASGNMNTACAT';
+      const L = ensure(db, S.link, [S.fk, S.tid, S.vid, ...(withProj ? ['proj_id'] : [])]);
       const fk = tg.fk, tid = type[S.tid]; // plain values: a view's field read per row is slow
       const LR = realOf(L.rows);
       // the scan only when one of the object's own assignments (by the index) is of this type: an activity's second
@@ -447,7 +457,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       }
       if (op.value == null || op.value === '') return { removed: type[S.tname] };
       const v = codeValue(S, type, op.value);
-      L.rows.push({ [S.fk]: tg.fk, [S.tid]: type[S.tid], [S.vid]: v[S.vid], ...(S.link === 'TASKACTV' ? { proj_id: tg.projId } : {}) });
+      L.rows.push({ [S.fk]: tg.fk, [S.tid]: type[S.tid], [S.vid]: v[S.vid], ...(withProj ? { proj_id: tg.projId } : {}) });
       return { assigned: `${type[S.tname]} = ${v[S.vshort]}` };
     }
     case 'add_udf': {
@@ -573,7 +583,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       setExpense(c, op);
       return { expense: `${t.task_code} / ${c.cost_name}` };
     }
-    case 'delete_expense': { const { t, c } = expense(op); const id = c.cost_item_id; removeWhere(rows(db, 'PROJCOST'), (x) => x.cost_item_id === id); return { deleted: `${t.task_code} / ${c.cost_name}` }; }
+    case 'delete_expense': { const { t, c } = expense(op); const id = c.cost_item_id; removeWhere(rows(db, 'PROJCOST'), (x) => x.cost_item_id === id); const udf = new Set(rows(db, 'UDFTYPE').filter((u) => u.table_name === 'PROJCOST').map((u) => u.udf_type_id)); if (udf.size) removeWhere(rows(db, 'UDFVALUE'), (v) => v.fk_id === id && udf.has(v.udf_type_id)); return { deleted: `${t.task_code} / ${c.cost_name}` }; }
     case 'add_step': {
       const t = h.activity(op.activity, op.project);
       const name = str(op.name, 'name');
@@ -746,6 +756,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       if (op.curve !== undefined) { addField(table(db, 'TASKRSRC'), 'curv_id'); a.curv_id = op.curve ? h.curveId(op.curve) : ''; }
       recomputeCosts(db, a);
       assignmentActuals(db, a, op, num);
+      assignmentDetails(db, t, a, op, h);
       return { assignment: `${r.rsrc_short_name} -> ${t.task_code}`, budgeted_units: Number(a.target_qty), remaining_units: Number(a.remain_qty) };
     }
     case 'update_resource': {

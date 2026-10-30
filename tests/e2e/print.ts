@@ -65,6 +65,8 @@ ok(JSON.stringify(existsSync(pdf) ? box(pdf) : null) === JSON.stringify([1191, 8
 
 // 4. Excel export, edit, import
 await runMenu('file.exportXlsx');
+// the Export to Excel dialog (P6's template: subject areas and columns), its defaults, then Export...
+await win.click('.dialog button:has-text("Export...")');
 let xlsx = ''; for (let i = 0; i < 40 && !existsSync(xlsx = join(out, 'CFC Modified.xlsx')); i++) await win.waitForTimeout(250);
 ok(existsSync(xlsx), 'Export to Excel wrote the workbook');
 if (existsSync(xlsx)) {

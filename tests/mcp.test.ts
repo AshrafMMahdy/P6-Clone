@@ -137,7 +137,7 @@ test('MCP: an agent exports a PDF printout and an Excel workbook, edits the work
     assert.equal(imp.data.applied, true, JSON.stringify(imp.data));
     const a = await c.tool('get_activity', { handle: h, activity_id: 'A2410' });
     assert.equal(a.data.orig_days, 31);
-    assert.equal((await c.tool('undo', { handle: h })).data.undone.startsWith('Edit'), true);
+    assert.equal((await c.tool('undo', { handle: h })).data.undone, 'Import edited.xlsx');
   } finally { await c.close(); }
 });
 
