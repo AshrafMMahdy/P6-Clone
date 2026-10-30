@@ -21,11 +21,11 @@ export function financialPeriods(db: Db): Row[] {
   return [...rows(db, 'FINDATES')].sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
 }
 
-/** The period to store by default: the latest one that starts before the project's data date (the data date is
- *  normally the first moment of the next period). */
+/** The period to store by default: the latest one that starts on a day before the project's data date (the data date
+ *  is normally the first day of the next period, at 00:00 or at the work start time). */
 export function defaultPeriod(db: Db, project: Row): Row | undefined {
-  const dd = parseP6Date(project.last_recalc_date) ?? Date.now() / 60000;
-  return financialPeriods(db).filter((f) => (parseP6Date(f.start_date) ?? Infinity) < dd).pop();
+  const day = (project.last_recalc_date || new Date().toISOString()).slice(0, 10);
+  return financialPeriods(db).filter((f) => (f.start_date || '').slice(0, 10) < day).pop();
 }
 
 /** A period that would overlap one already defined (P6 keeps them apart), or null. */
@@ -83,13 +83,16 @@ export function storePeriodPerformance(db: Db, projId: string, finDatesId: strin
   for (const t of tasks) {
     const A = asgBy.get(t.task_id) ?? [], E = expBy.get(t.task_id) ?? [];
     const sum = (type: string, f: (a: Row) => number) => A.filter((a) => kind.get(a.rsrc_id) === type).reduce((s, a) => s + f(a), 0);
+    // units to date: the assignments', or the activity's own actual units when it has none of that kind (P6 keeps them
+    // on the activity then; imported files and transfer_progress write them)
+    const units = (type: string, own: string) => (A.some((a) => kind.get(a.rsrc_id) === type) ? sum(type, (a) => n(a.act_reg_qty) + n(a.act_ot_qty)) : n(t[own]));
     const qty = (a: Row) => n(a.act_reg_qty) + n(a.act_ot_qty), cost = (a: Row) => n(a.act_reg_cost) + n(a.act_ot_cost);
     const c = costs.get(t.task_id)!;
     const frac = plannedShare(t, bl.get(`${projId}|${t.task_code}`), dd), pct = percentComplete(t, A), lb = laborBudget(t);
     const prior = otherTask.get(t.task_id);
     const v = {
-      act_work_qty: sum('RT_Labor', qty) - before(prior, 'act_work_qty'), act_work_cost: sum('RT_Labor', cost) - before(prior, 'act_work_cost'),
-      act_equip_qty: sum('RT_Equip', qty) - before(prior, 'act_equip_qty'), act_equip_cost: sum('RT_Equip', cost) - before(prior, 'act_equip_cost'),
+      act_work_qty: units('RT_Labor', 'act_work_qty') - before(prior, 'act_work_qty'), act_work_cost: sum('RT_Labor', cost) - before(prior, 'act_work_cost'),
+      act_equip_qty: units('RT_Equip', 'act_equip_qty') - before(prior, 'act_equip_qty'), act_equip_cost: sum('RT_Equip', cost) - before(prior, 'act_equip_cost'),
       act_mat_cost: sum('RT_Mat', cost) - before(prior, 'act_mat_cost'), act_expense_cost: E.reduce((s, x) => s + n(x.act_cost), 0) - before(prior, 'act_expense_cost'),
       bcwp: c.ev - before(prior, 'bcwp'), perfm_work_qty: lb * pct - before(prior, 'perfm_work_qty'),
       bcws: c.pv - before(prior, 'bcws'), sched_work_qty: lb * frac - before(prior, 'sched_work_qty'),

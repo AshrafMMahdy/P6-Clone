@@ -100,3 +100,24 @@ test('link_activities: a chain in start order, existing links skipped, one undo;
   ok(db, [{ op: 'renumber_activities', select: { wbs: 'NEWW', exclude: { ids: ['Q100'] } }, prefix: 'Z-', start: 15, increment: 5 }]);
   assert.deepEqual(tasks(db).filter((t) => t.task_code.startsWith('Z-')).map((t) => t.task_code).sort(), ['Z-15', 'Z-20', 'Z-25', 'Z-30']);
 });
+
+test('select across projects: the op\'s project limits link and renumber; set_predecessors still finds links in other projects; empty exclude refused', () => {
+  const db = { tables: {} } as Db;
+  ok(db, [
+    { op: 'add_project', id: 'P1', start: '2026-01-05' }, { op: 'add_project', id: 'P2', start: '2026-01-05' },
+    ...['P1', 'P2'].flatMap((p) => [{ op: 'add_wbs', project: p, code: 'W' }, { op: 'add_activity', project: p, wbs: 'W', id: 'A1', name: 'a1' }, { op: 'add_activity', project: p, wbs: 'W', id: 'A2', name: 'a2' }]),
+    { op: 'add_activity', project: 'P2', id: 'X9', name: 'x9' },
+  ]);
+  const pid = (p: string) => rows(db, 'PROJECT').find((x) => x.proj_short_name === p)!.proj_id;
+  const l = ok(db, [{ op: 'link_activities', project: 'P1', select: { wbs: 'W' }, order_by: 'id' }]);
+  assert.deepEqual(l.results[0], { selected: 2, linked: 1 });
+  assert.ok(rows(db, 'TASKPRED').every((r) => r.proj_id === pid('P1') && r.pred_proj_id === pid('P1')), 'no link into P2');
+  ok(db, [{ op: 'renumber_activities', project: 'P1', select: { ids: ['A1'] }, prefix: 'X', start: 1 }]);
+  assert.deepEqual(rows(db, 'TASK').filter((t) => t.task_code === 'X1').map((t) => t.proj_id), [pid('P1')]);
+  assert.equal(rows(db, 'TASK').filter((t) => t.task_code === 'A1').length, 1, "P2's A1 kept its ID");
+  // the picked activity is named by its own id; links resolve across projects as without select
+  ok(db, [{ op: 'set_predecessors', select: { project: 'P1', ids: ['A2'] }, links: [{ pred: 'X9' }] }]);
+  const a2 = rows(db, 'TASK').find((t) => t.task_code === 'A2' && t.proj_id === pid('P1'))!;
+  assert.deepEqual(rows(db, 'TASKPRED').filter((r) => r.task_id === a2.task_id).map((r) => rows(db, 'TASK').find((t) => t.task_id === r.pred_task_id)!.task_code), ['X9']);
+  assert.match(applyOps(db, [{ op: 'update_activity', name: 'n', select: { wbs: 'W', exclude: {} } }]).error!.message, /exclude needs at least one criterion/);
+});

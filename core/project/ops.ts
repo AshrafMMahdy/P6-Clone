@@ -166,6 +166,9 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
     const code = str(id, 'id');
     const pids = new Set(proj != null ? [project(proj).proj_id] : projects().map((p) => p.proj_id));
     let hits = byCode(code).filter((t) => pids.has(t.proj_id)).slice(0, 2);
+    // an activity a select picked, named by its internal id (its Activity ID may be in several projects)
+    const tid = !hits.length ? /^task_id:(.+)$/.exec(code)?.[1] : undefined;
+    if (tid) return pick(rows(db, 'TASK'), (t) => t.task_id === tid && pids.has(t.proj_id), 1)[0] ?? fail(`No activity with task_id ${tid}${proj != null ? ` in ${proj}` : ''}.`);
     const uid = !hits.length ? /^uid:\s*(.+)$/i.exec(code)?.[1] : undefined;
     if (uid) hits = pick(rows(db, 'TASK'), (t) => t._msp_uid === uid && pids.has(t.proj_id), 2);
     if (hits.length > 1) fail(`${uid ? `Task UID ${uid}` : `Activity ID "${code}"`} exists in several projects; add "project".`);
@@ -204,19 +207,21 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
   const resource = (id: unknown): Row => rows(db, 'RSRC').find((r) => r.rsrc_short_name.toLowerCase() === String(id).toLowerCase()) ?? fail(`No resource "${id}" (add it with {"op":"add_resource"}).`);
   const sel: SelectHelpers = { fail, project, projects, wbsOf, resource };
   const projectId = (t: Row) => projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name;
+  /** The activities op.select picks; the op's own "project" limits them when the select names none. */
+  const selected = (dflt = 'id') => selectActivities(db, op.select && typeof op.select === 'object' && op.project != null && (op.select as Row).project == null ? { ...(op.select as object), project: op.project } : op.select, sel, dflt);
 
   // select: the operation done on every activity a filter picks (P6's select-all then Global Change / Assign / Delete)
   if (op.select !== undefined && op.op !== 'link_activities' && op.op !== 'renumber_activities') {
     const key = SELECT_KEY[op.op] ?? fail(`select works with ${Object.keys(SELECT_KEY).join(', ')}, link_activities and renumber_activities.`);
     if (op[key] != null) fail(`Give ${key} or select, not both.`);
-    const s = op.select && typeof op.select === 'object' && op.project != null && (op.select as Row).project == null ? { ...(op.select as object), project: op.project } : op.select;
-    const picked = selectActivities(db, s, sel);
+    const picked = selected();
     if (!picked.length) { warnings.push(`${op.op}: select picked no activity; nothing changed.`); return { selected: 0 }; }
     // deleting or dissolving them: once for them all (one pass over the tables, not one per activity)
     if (op.op === 'delete_activity') { deleteActivities(db, picked.map((t) => t.task_id)); return { selected: picked.length, deleted: picked.length }; }
     if (op.op === 'dissolve_activity') return { selected: picked.length, dissolved: picked.length, relationships_added: dissolveActivities(db, picked.map((t) => t.task_id)) };
+    // each picked activity by its internal id: "project" stays what the op said (set_predecessors resolves its links by it)
     const { select: _s, ...one } = op;
-    const done = picked.map((t) => apply(db, { ...one, [key]: t.task_code, project: projectId(t) } as Op, hpd, warnings, batch));
+    const done = picked.map((t) => apply(db, { ...one, [key]: `task_id:${t.task_id}` } as Op, hpd, warnings, batch));
     return { selected: picked.length, results: done.slice(0, 10), ...(done.length > 10 ? { more: done.length - 10 } : {}) };
   }
 
@@ -441,7 +446,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
     }
     case 'link_activities': {
       // P6's Link Activities: each selected activity to the next, in the layout's order (here order_by, default start)
-      const picked = selectActivities(db, op.select ?? fail('link_activities needs select: the activities to link, in order.'), sel, 'start');
+      if (op.select == null) fail('link_activities needs select: the activities to link, in order.');
+      const picked = selected('start');
       if (picked.length < 2) { warnings.push(`link_activities: select picked ${picked.length} activit${picked.length === 1 ? 'y' : 'ies'}; nothing to link.`); return { selected: picked.length, linked: 0 }; }
       let linked = 0, skipped = 0;
       for (let i = 1; i < picked.length; i++) {
@@ -454,7 +460,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
     case 'renumber_activities': {
       // P6's Renumber Activity IDs: prefix + start, prefix + (start + increment), ... in order (P6 calls the start number
       // the Suffix; defaults: the project's Activity ID numbering, else A1000 by 10)
-      const picked = selectActivities(db, op.select ?? fail('renumber_activities needs select: the activities to renumber.'), sel, 'id');
+      if (op.select == null) fail('renumber_activities needs select: the activities to renumber.');
+      const picked = selected('id');
       if (!picked.length) { warnings.push('renumber_activities: select picked no activity; nothing changed.'); return { selected: 0 }; }
       const p = projects().find((x) => x.proj_id === picked[0].proj_id)!;
       const prefix = op.prefix != null ? String(op.prefix) : p.task_code_prefix || 'A';

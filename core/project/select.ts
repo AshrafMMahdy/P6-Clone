@@ -62,6 +62,7 @@ export function selectActivities(db: Db, sel: unknown, h: SelectHelpers, default
     if (typeof s.exclude !== 'object' || Array.isArray(s.exclude)) fail('select.exclude takes the same criteria as select.');
     const x = s.exclude as Record<string, unknown>;
     if (x.project != null || x.exclude != null || x.order_by != null) fail('select.exclude takes ids, wbs, code, udf, resource and where.');
+    if (!['ids', 'wbs', 'code', 'udf', 'resource', 'where'].some((k) => x[k] != null)) fail('select.exclude needs at least one criterion (ids, wbs, code, udf, resource or where); an empty one would take every activity out.');
     const xids = x.ids != null ? (Array.isArray(x.ids) ? x.ids.map(String) : fail('select.exclude.ids must be a list of Activity IDs.')) : null;
     const out = new Set(filterBy(db, picked, x, xids, h, pids));
     picked = picked.filter((t) => !out.has(t));

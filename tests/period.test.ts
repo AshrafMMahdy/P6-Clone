@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { applyOps } from '../core/project/ops.ts';
 import { rows, type Db } from '../core/db.ts';
 import { rollback, record } from '../core/journal.ts';
+import { defaultPeriod } from '../core/progress/period.ts';
 
 const ok = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops, { calendarDays: true }); assert.equal(r.ok, true, JSON.stringify(r.error)); return r; };
 const fail = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops, { calendarDays: true }); assert.equal(r.ok, false); return r.error!.message; };
@@ -33,6 +34,9 @@ test('financial periods: batch months and weeks, overlap refused, rename, delete
   const w = ok(db, [{ op: 'add_financial_periods', from: '2026-04-01', to: '2026-04-20', every: 'week', week_ends_on: 'fri' }]);
   assert.equal((w.results[0] as any).financial_periods, 4); // Apr 1-3, 4-10, 11-17, 18-24
   assert.equal(rows(db, 'FINDATES').find((f) => f.fin_dates_name === '2026-04-01')!.end_date, '2026-04-03 00:00', 'the first week ends on the Friday');
+  // a data date at the work start time of the first day of February: January is the period just finished
+  ok(db, [{ op: 'set_project', data_date: '2026-02-01 08:00' }]);
+  assert.equal(defaultPeriod(db, rows(db, 'PROJECT')[0])!.fin_dates_name, '2026-01-01');
   ok(db, [{ op: 'update_financial_period', name: '2026-01-01', new_name: 'Jan 26' }, { op: 'delete_financial_period', name: '2026-04-11' }]);
   assert.ok(rows(db, 'FINDATES').some((f) => f.fin_dates_name === 'Jan 26'));
   assert.equal(rows(db, 'FINDATES').length, 6);
@@ -96,4 +100,15 @@ test('store_period_performance: per period values, overwrite, Actual This Period
   ok(db, [{ op: 'delete_financial_period', name: '2026-02-01', clear_stored: true }]);
   assert.equal(rows(db, 'TASKFIN').length, 1);
   assert.equal(rows(db, 'TRSRCFIN').filter((r) => r.fin_dates_id === febId).length, 0);
+});
+
+test('store_period_performance: an activity without assignments stores its own actual labor and nonlabor units', () => {
+  const db = { tables: {} } as Db;
+  ok(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'B', name: 'No resources', duration_days: 10 }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-01-31', every: 'month' },
+    { op: 'set_fields', table: 'PROJECT', fields: { act_this_per_link_flag: 'Y' }, all: true },
+    { op: 'set_fields', table: 'TASK', fields: { act_work_qty: 25, act_equip_qty: 4, act_this_per_work_qty: 25 }, all: true }]);
+  const r = ok(db, [{ op: 'store_period_performance', period: '2026-01-01' }]).results[0] as any;
+  assert.equal(r.stored.labor_units, 25);
+  assert.equal(r.stored.nonlabor_units, 4);
+  assert.equal(rows(db, 'TASK')[0].act_this_per_work_qty, '0');
 });
