@@ -5,6 +5,7 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num, calendarResolver } from '../schedule/cpm.ts';
 import { ENUMS } from '../xer/schema.ts';
 import { pick, realOf, removeWhere } from '../journal.ts';
+import { defaultCalendarId } from '../progress/period.ts';
 
 export const isMilestone = (r: Row) => r.task_type === 'TT_Mile' || r.task_type === 'TT_FinMile';
 export const statusOf = (r: Row) => (r.act_end_date ? 'TK_Complete' : r.act_start_date ? 'TK_Active' : 'TK_NotStart');
@@ -131,6 +132,8 @@ export function newProject(db: Db, o: { id: string; name: string; start: string;
     task_code_prefix: 'A', task_code_base: '1000', task_code_step: '10', critical_drtn_hr_cnt: '0', critical_path_type: 'CT_TotFloat',
     def_qty_type: 'QT_Hour', def_rate_type: 'COST_PER_QTY', name_sep_char: '.', sum_base_proj_id: '', guid: '', project_flag: 'Y', _eps_id: o.epsId ?? '1', _name: o.name,
   });
+  // a new project reports on the default financial period calendar, when the file has calendars (P6)
+  if (rows(db, 'FINTMPL').length) { addField(P, 'fintmpl_id'); P.rows[P.rows.length - 1].fintmpl_id = defaultCalendarId(db); }
   const W = table(db, 'PROJWBS');
   for (const f of ['wbs_id', 'proj_id', 'obs_id', 'seq_num', 'proj_node_flag', 'sum_data_flag', 'status_code', 'wbs_short_name', 'wbs_name', 'parent_wbs_id']) addField(W, f);
   W.rows.push({ wbs_id: String(nextId(db, 'PROJWBS')), proj_id: pid, obs_id: '', seq_num: '0', proj_node_flag: 'Y', sum_data_flag: 'Y', status_code: 'WS_Open', wbs_short_name: o.id, wbs_name: o.name, parent_wbs_id: '' });

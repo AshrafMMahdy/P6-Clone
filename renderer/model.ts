@@ -299,12 +299,20 @@ function finColumn(db: Db, f: Row, key: string): Column {
     edit: {
       type: 'number', set: () => 'Past-period values are edited one cell at a time.',
       apply: (d, r, v) => {
+        // the editor holds the stored number (finStored), never the displayed money text
+        const n = Number(String(v).trim());
+        if (String(v).trim() === '' || !Number.isFinite(n)) return `"${v}" is not a number.`;
+        if (n === finStored(d, f.fin_dates_id, r.task_id, key)) return undefined;
         const p = rows(d, 'PROJECT').find((x) => x.proj_id === r.proj_id);
-        const res = applyOps(d, [{ op: 'set_period_actuals', activity: r.task_code, project: p?.proj_short_name, period: f.fin_dates_name, values: { [key]: Number(String(v).replace(/[$,\s]/g, '')) || 0 } }]);
+        const res = applyOps(d, [{ op: 'set_period_actuals', activity: r.task_code, project: p?.proj_short_name, period: f.fin_dates_name, values: { [key]: n } }]);
         return res.ok ? undefined : res.error!.message;
       },
     },
   };
+}
+/** A past period's stored value of an activity (0 when nothing is stored): what its cell's editor starts from. */
+export function finStored(db: Db, finId: string, taskId: string, key: string): number {
+  return Number(rows(db, 'TASKFIN').find((x) => x.fin_dates_id === finId && x.task_id === taskId)?.[PERIOD_VALUES[key]] || 0);
 }
 /** The financial period columns the preferences' range shows (P6: User Preferences > Application, financial periods). */
 function finColumns(db: Db): Column[] {

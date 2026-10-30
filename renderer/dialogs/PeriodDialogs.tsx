@@ -41,9 +41,8 @@ export function FinancialPeriodsDialog() {
         <button className="btn" disabled={!cal || !calName} onClick={() => { if (edit('Rename Financial Period Calendar', [{ op: 'update_financial_period_calendar', name: cal!.fintmpl_name, new_name: calName }])) setCalName(''); }}>Rename</button>
         <button className="btn" disabled={!cal || cal.default_flag === 'Y'} onClick={() => edit('Default Financial Period Calendar', [{ op: 'update_financial_period_calendar', name: cal!.fintmpl_name, default: true }])}>Set Default</button>
         <button className="btn" disabled={!cal} onClick={async () => {
-          const n = rows(getDb(), 'TASKFIN').filter((r) => list.some((f) => f.fin_dates_id === r.fin_dates_id)).length;
-          if (!(await window.p6.confirm(`Delete calendar ${cal!.fintmpl_name}?`, `Its ${list.length} periods go with it${n ? `, and the period performance stored in them (${n} activity rows)` : ''}.`))) return;
-          if (edit('Delete Financial Period Calendar', [{ op: 'delete_financial_period_calendar', name: cal!.fintmpl_name, clear_stored: true }])) setCalId(defaultCalendarId(getDb()));
+          if (!(await window.p6.confirm(`Delete calendar ${cal!.fintmpl_name}?`, `Its ${list.length} periods go with it.`))) return;
+          if (edit('Delete Financial Period Calendar', [{ op: 'delete_financial_period_calendar', name: cal!.fintmpl_name }])) setCalId(defaultCalendarId(getDb()));
         }}>Delete</button>
       </div>
       <table className="tbl"><thead><tr><th>Period Name</th><th>Start Date</th><th>End Date</th><th>Stored activities</th></tr></thead><tbody>

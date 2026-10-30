@@ -6,7 +6,7 @@ import { Gantt, DEFAULT_BARS, type GanttEntry, type GanttLink, type GanttActions
 import { Split, showContextMenu } from '../components/Layout.tsx';
 import { getDb, getUi, mutate, setUi, toast, useStore, openDialog } from '../store.ts';
 import { useCtx, useProjectCalendar } from '../hooks.ts';
-import { COLUMN_BY_ID, fmtDate, fmtDur, isCritical, isMilestone, addRelationship, checkRelationship, makeCtx, TASK_TYPES, type Ctx } from '../model.ts';
+import { COLUMN_BY_ID, finStored, fmtDate, fmtDur, isCritical, isMilestone, addRelationship, checkRelationship, makeCtx, TASK_TYPES, type Ctx } from '../model.ts';
 import { buildActivityRows, FILTERS, taskStart, taskFinish, toolbarSearch, userFilters } from './activityRows.ts';
 import { ActivityDetails } from './ActivityDetails.tsx';
 import { ActivityUsagePane } from './AssignmentsView.tsx';
@@ -107,7 +107,8 @@ export function ActivitiesView() {
     const t = ctx.taskById.get(key.slice(2));
     if (!t || !c.edit) return;
     if (c.edit.apply) {
-      // a value of another table (a past period's): applied inside the edit's own undoable change
+      // a value of another table (a past period's): applied inside the edit's own undoable change; unchanged, nothing
+      if (String(value).trim() === editSpec(t, colId, ctx)?.value) return;
       let err = '';
       try { mutate(`Edit ${c.title}`, (db) => { const e = c.edit!.apply!(db, t, value); if (e) { err = e; throw new Error(e); } }); } catch { toast(err || `${c.title} could not be changed.`); }
       return;
@@ -259,6 +260,8 @@ export function ActivitiesView() {
 function editSpec(t: Row, colId: string, ctx: Ctx): EditorSpec | null {
   const c = COLUMN_BY_ID.get(colId);
   if (!c?.edit) return null;
+  const fin = /^fin_(\d+)_(\w+)$/.exec(colId); // a past period's value: the stored number, not the money text shown
+  if (fin) return { type: 'number', value: String(finStored(ctx.db, fin[1], t.task_id, fin[2])) };
   const raw: Record<string, string> = {
     task_type: t.task_type, duration_type: t.duration_type, pct_type: t.complete_pct_type, cstr_type: t.cstr_type,
     start: t.act_start_date || t.early_start_date, finish: t.act_end_date || t.early_end_date, act_start: t.act_start_date, act_finish: t.act_end_date, cstr_date: t.cstr_date,

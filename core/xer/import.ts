@@ -4,6 +4,7 @@ import { KEYS, refTarget, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { isLegacyLayout } from '../schedule/cpm.ts';
 import { deleteActivities } from '../project/edit.ts';
+import { defaultCalendarId, financialPeriods } from '../progress/period.ts';
 
 /**
  * P6's import action for a project in the file.
@@ -41,7 +42,7 @@ const MATCH: Record<string, (r: Row) => string> = {
   ACTVTYPE: (r) => `${r.actv_code_type}|${r.actv_code_type_scope ?? ''}`, UDFTYPE: (r) => `${r.table_name}|${r.udf_type_label}`,
   OBS: (r) => r.obs_name, CURRTYPE: (r) => r.curr_short_name, UMEASURE: (r) => r.unit_abbrev, MEMOTYPE: (r) => r.memo_type,
   COSTTYPE: (r) => r.cost_type, RSRCCURVDATA: (r) => r.curv_name, PCATTYPE: (r) => r.proj_catg_type, RCATTYPE: (r) => r.rsrc_catg_type,
-  POBS: (r) => r.pobs_name, FINDATES: (r) => r.fin_dates_name,
+  POBS: (r) => r.pobs_name, FINDATES: (r) => r.fin_dates_name, FINTMPL: (r) => r.fintmpl_name,
   EPS: (r) => r.eps_short_name, // (an EPS ID is unique in P6: the node of the same ID is the one used, so a baseline or a merged file does not add a second "Enterprise")
 };
 /** Child dictionary rows matched within their (mapped) parent. */
@@ -225,7 +226,8 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
   // Pass 1: allocate keys, match dictionaries and (update) the merged projects' rows; parents before their children
   // (child dictionaries last: a code type can name a WBS, so it comes after PROJWBS, and its values after it)
   const names = Object.keys(src.tables);
-  const rank = (n: string) => (CHILD[n] ? 6 : n === 'PROJWBS' ? 2 : n === 'TASK' ? 3 : n === 'TASKRSRC' ? 4 : src.tables[n].fields.includes('task_id') || src.tables[n].fields.includes('wbs_id') ? 5 : 0);
+  // (periods after their financial period calendars: a period is matched within its calendar)
+  const rank = (n: string) => (CHILD[n] ? 6 : n === 'FINDATES' ? 1 : n === 'PROJWBS' ? 2 : n === 'TASK' ? 3 : n === 'TASKRSRC' ? 4 : src.tables[n].fields.includes('task_id') || src.tables[n].fields.includes('wbs_id') ? 5 : 0);
   const order = [...names].sort((x, y) => rank(x) - rank(y));
   for (const t of order) {
     const k = KEYS[t];
@@ -236,7 +238,9 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
       const dictRow = !isProjectRow(t, r) || (t === 'CALENDAR' && !r.proj_id);
       if (dictRow && MATCH[t]) {
         const name = MATCH[t](r);
-        const hit = rows(db, t).find((x) => MATCH[t](x) === name && (t !== 'CALENDAR' || !x.proj_id));
+        // a financial period by name within its calendar (the one its calendar maps to; none: the default)
+        const finCal = () => { const c = r.fintmpl_id || defaultCalendarId(src); return (c ? m('FINTMPL')[c] : '') || defaultCalendarId(db); };
+        const hit = t === 'FINDATES' ? financialPeriods(db, finCal()).find((x) => x.fin_dates_name === r.fin_dates_name) : rows(db, t).find((x) => MATCH[t](x) === name && (t !== 'CALENDAR' || !x.proj_id));
         const a = plan.dict?.[t] ?? 'keep';
         if (hit && a !== 'insert') {
           m(t)[r[k]] = hit[k];
@@ -388,6 +392,11 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
   // baselines that came with the file are attached to their projects, not opened as projects
   const baseline = new Set(rows(src, 'PROJECT').filter((p) => p._baseline_of).map((p) => p.proj_id));
   const projIds = [...new Set(plan.projects.filter((p) => p.action !== 'skip' && !baseline.has(p.srcProjId)).map((p) => m('PROJECT')[p.srcProjId]))];
+  // financial period calendars: one default (the one this file had, else the first), and a project imported without a
+  // calendar gets the default, as P6 assigns it to imported projects
+  const cals = rows(db, 'FINTMPL');
+  for (const c of cals.filter((x) => x.default_flag === 'Y').slice(1)) c.default_flag = 'N';
+  if (cals.length) { const def = defaultCalendarId(db); for (const p of rows(db, 'PROJECT')) if (projIds.includes(p.proj_id) && !p.fintmpl_id) { if (!db.tables.PROJECT.fields.includes('fintmpl_id')) table(db, 'PROJECT').fields.push('fintmpl_id'); p.fintmpl_id = def; } }
   return { projIds, findings, map, counts };
 }
 

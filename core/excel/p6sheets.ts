@@ -614,6 +614,9 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   const asgRecs = records('TASKRSRC');
   const asgExtras = extras('assignment', 'TASKRSRC', fieldsOf('TASKRSRC').filter((f) => f.startsWith('asgnmnt_catg_') || f.startsWith('user_field_')), asgRecs[0]?.titles ?? new Map());
   const seen = new Map<string, number>();
+  // deletions are emitted after the loop, each pair's from its last assignment up: one removed does not move the
+  // positions (nth) of those still to be removed
+  const deletes: { op: Op; ref: RowRef; nth: number }[] = [];
   for (const { r, ref } of asgRecs) {
     const act = str(r.task_id), res = str(r.rsrc_id), roleOnly = !res ? str(r.role_id) : '';
     if (!act || (!res && !roleOnly)) continue;
@@ -625,9 +628,10 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
     seen.set(k, nth + 1);
     const mine = t ? A.get(`${t.task_id}|${res ? rr?.rsrc_id : `role:${rid}`}`) ?? [] : [];
     const a = mine[nth];
-    // the assignment named as the operations name it: resource (or the role of a role assignment), nth among several
-    const target: Record<string, unknown> = { activity: act, ...(res ? { resource: rr?.rsrc_short_name ?? res } : { assigned_role: roleOnly }), ...(mine.length > 1 && a ? { nth: nth + 1 } : {}), ...P };
-    if (yes(r.delete_record_flag)) { if (a) { emit({ op: 'unassign_resource', ...target }, ref, 3); s.assignmentsDeleted++; } continue; }
+    // the assignment named as the operations name it: resource (or the role of a role assignment) and its position among
+    // the same, always given (an assignment this sheet adds to the pair makes it several before the edit is over)
+    const target: Record<string, unknown> = { activity: act, ...(res ? { resource: rr?.rsrc_short_name ?? res } : { assigned_role: roleOnly }), nth: nth + 1, ...P };
+    if (yes(r.delete_record_flag)) { if (a) { deletes.push({ op: { op: 'unassign_resource', ...target }, ref, nth }); s.assignmentsDeleted++; } continue; }
     const hd = dh.task(t);
     const upd: Op = { op: 'update_assignment', ...target };
     const numField = (f: string, key: string, curV: number | null, scale = 1) => { const v = num(r[f]); if (has(r, f) && v != null && !near(v, curV)) upd[key] = v * scale; };
@@ -672,13 +676,13 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
       const add: Op = res ? { op: 'assign_resource', activity: act, resource: target.resource, ...(nth > 0 ? { allow_duplicate: true } : {}), ...P } : { op: 'assign_role', activity: act, role: roleOnly, ...P };
       emit({ ...add, ...(upd.units != null ? { units: upd.units } : {}) }, ref, 2); n++;
       delete upd.units;
-      // the operations after it name the new assignment: the last of its pair
-      if (nth > 0) { target.nth = nth + 1; upd.nth = nth + 1; }
+      // (the operations after it name the new assignment by its position, nth + 1: added after the pair's earlier rows)
     }
     if (Object.keys(upd).filter((f) => f !== 'nth').length > 4) { emit(upd, ref, 2); n++; }
     n += asgExtras(r, a?.taskrsrc_id ?? null, target, ref, 2);
     if (!a) s.assignmentsAdded++; else if (n) s.assignmentsUpdated++; else s.unchanged++;
   }
+  for (const d of deletes.sort((x, y) => y.nth - x.nth)) emit(d.op, d.ref, 3);
   if (!SHEETS.some((n) => sheet(n))) warnings.push('No TASK, TASKPRED, PROJCOST, RSRC or TASKRSRC sheet: this does not look like a P6 spreadsheet export.');
   // resources and activities first, relationships after them, then expenses and assignments, deletions last (a
   // relationship or assignment may name an activity or resource the sheet adds); in sheet order within each

@@ -169,3 +169,32 @@ test('financial period calendars survive XER and P6 XML', async () => {
   assert.equal(name(x, rows(x, 'PROJECT').find((p) => !p._baseline_of)!.fintmpl_id), 'Fortnight');
   assert.equal(rows(x, 'FINTMPL').find((c) => c.default_flag === 'Y')?.fintmpl_name, 'Monthly');
 });
+
+test('review fixes: merged files keep one calendar and match periods within it; a default change moves no project; zero edits write nothing', async () => {
+  const { writeXer } = await import('../core/xer/write.ts'), { parseXer } = await import('../core/xer/parse.ts');
+  const { importIntoDb, defaultPlan } = await import('../core/xer/import.ts');
+  const one = build();
+  ok(one, [{ op: 'add_financial_period_calendar', name: 'Calendar' }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-01-31', every: 'month' }]);
+  const file = parseXer(writeXer(one, { version: '19.12' })).db;
+  const ws = { tables: {} } as Db;
+  importIntoDb(ws, file, defaultPlan(file));
+  importIntoDb(ws, file, defaultPlan(file));
+  assert.equal(rows(ws, 'FINTMPL').length, 1, 'the same calendar is not added twice');
+  assert.equal(rows(ws, 'FINDATES').length, 1, 'nor its period');
+  const cal = rows(ws, 'FINTMPL')[0].fintmpl_id;
+  assert.ok(rows(ws, 'PROJECT').every((p) => p.fintmpl_id === cal), 'both imported projects report on it');
+  ok(ws, [{ op: 'set_fields', table: 'PROJECT', fields: { act_this_per_link_flag: 'Y' }, all: true }]);
+  for (const p of rows(ws, 'PROJECT').map((x) => x.proj_short_name)) ok(ws, [{ op: 'store_period_performance', project: p, period: '2026-01-01' }]);
+
+  // projects keep their calendar when another becomes the default
+  const db = build();
+  ok(db, [{ op: 'add_financial_periods', from: '2026-01-01', to: '2026-01-31', every: 'month' }, { op: 'add_financial_period_calendar', name: 'Monthly' }, { op: 'add_financial_period_calendar', name: 'Weekly' }, { op: 'update_financial_period_calendar', name: 'Weekly', default: true }]);
+  assert.equal(rows(db, 'PROJECT')[0].fintmpl_id, rows(db, 'FINTMPL').find((c) => c.fintmpl_name === 'Monthly')!.fintmpl_id);
+  ok(db, [{ op: 'add_project', id: 'NEW', start: '2026-02-02' }]);
+  assert.equal(rows(db, 'PROJECT').find((p) => p.proj_short_name === 'NEW')!.fintmpl_id, rows(db, 'FINTMPL').find((c) => c.fintmpl_name === 'Weekly')!.fintmpl_id, 'a new project gets the default');
+  ok(db, [{ op: 'set_fields', table: 'PROJECT', fields: { act_this_per_link_flag: 'Y' }, all: true }, { op: 'update_activity', id: 'A', actual_start: '2026-01-05' }]);
+  ok(db, [{ op: 'set_period_actuals', activity: 'A', period: '2026-01-01', values: { labor_cost: 0 } }]);
+  assert.equal(rows(db, 'TASKFIN').length, 0, 'a zero where nothing is stored writes nothing');
+  ok(db, [{ op: 'set_period_actuals', activity: 'A', period: '2026-01-01', values: { expense_cost: 5 } }]);
+  assert.match(fail(db, [{ op: 'delete_financial_period_calendar', name: 'Monthly' }]), /Projects use Monthly|stored/);
+});

@@ -54,9 +54,10 @@ export function knownFields(tableName: string): Set<string> {
   return s;
 }
 
-/** Fields of a modern P6 (financial period calendars, 18.8+) that no real sample carried: PROJECT.fintmpl_id is in
- *  Oracle's XER Import/Export Data Map (v23); FINTMPL's and FINDATES.fintmpl_id are named after P6's API
- *  (FinancialPeriodTemplate: ObjectId, FinancialPeriodTemplateName, DefaultFlag; FinancialPeriod.FinancialPeriodTemplateId). */
+/** Fields of a modern P6 (financial period calendars, 18.8+) beyond the sample layouts the schema was built from:
+ *  FINTMPL (fintmpl_id, fintmpl_name, default_flag) as real P6 6.0 / 20.12 / 24.12 XERs write it (downloaded XERs/),
+ *  PROJECT.fintmpl_id from Oracle's XER Import/Export Data Map (v23); FINDATES.fintmpl_id after P6's API
+ *  (FinancialPeriod.FinancialPeriodTemplateId; no real XER seen with periods and calendars together). */
 const MODERN_FIELDS: Record<string, string[]> = { FINTMPL: ['fintmpl_id', 'fintmpl_name', 'default_flag'], FINDATES: ['fintmpl_id'], PROJECT: ['fintmpl_id'] };
 
 export function knownTables(): Set<string> {

@@ -84,3 +84,23 @@ test('Excel: duplicates, role assignments and indicator UDFs round-trip; edits r
   assert.deepEqual(asg(db), [['LAB', 40], ['LAB', 30], ['ENG', 12], ['LAB', 7]]);
   assert.equal(rows(db, 'UDFVALUE').find((v) => v.udf_text.startsWith('UDF_G'))!.udf_text, 'UDF_G4');
 });
+
+test('review fixes: Excel deletes the flagged duplicates, not their neighbours; delete one and add one of a pair; a role assignment keeps its role', async () => {
+  const db = { tables: {} } as Db;
+  ok(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB' }, { op: 'add_activity', id: 'A', name: 'Pour', duration_days: 10 },
+    ...[10, 20, 30].map((u) => ({ op: 'assign_resource', activity: 'A', resource: 'LAB', units: u, allow_duplicate: true }))]);
+  const pid = rows(db, 'PROJECT')[0].proj_id;
+  const sheets = async () => readXlsx(await writeXlsx(exportSheets(db, [pid], 8, false, { columns: { TASKRSRC: ['*'] } })));
+  let s = await sheets();
+  let T = s.find((x) => x.name === 'TASKRSRC')!, at = (f: string) => T.rows[0].map(String).indexOf(f);
+  T.rows[2][at('delete_record_flag')] = 'Y'; T.rows[3][at('delete_record_flag')] = 'Y';
+  assert.deepEqual(applyImport(db, planImport(db, s, 'P'), { calendarDays: true }).refused, []);
+  assert.deepEqual(rows(db, 'TASKRSRC').map((a) => Number(a.target_qty)), [30]);
+  // delete the one there and add a new one of the same pair, in one sheet
+  s = await sheets(); T = s.find((x) => x.name === 'TASKRSRC')!;
+  const extra = [...T.rows[2]]; extra[at('target_qty')] = 5; T.rows[2][at('delete_record_flag')] = 'Y'; T.rows.push(extra);
+  assert.deepEqual(applyImport(db, planImport(db, s, 'P'), { calendarDays: true }).refused, []);
+  assert.deepEqual(rows(db, 'TASKRSRC').map((a) => Number(a.target_qty)), [5]);
+  const r = build();
+  assert.match(fail(r, [{ op: 'update_assignment', activity: 'A', assigned_role: 'ENG', role: '' }]), /keeps its role/);
+});

@@ -247,7 +247,7 @@ const writeOutWith = (p: string, make: (put: (piece: string | Uint8Array) => voi
 };
 /** One page of compare's changes: max_changes (default 500; no cap) from offset; next_offset for the rest. */
 const changesPage = <T,>(all: T[], a: Record<string, any>) => {
-  const max = Math.max(1, Math.floor(Number(a.max_changes) || 500)), offset = Math.max(0, Math.floor(Number(a.offset) || 0));
+  const max = a.max_changes === 0 ? Infinity : Math.max(1, Math.floor(Number(a.max_changes) || 500)), offset = Math.max(0, Math.floor(Number(a.offset) || 0));
   const changes = all.slice(offset, offset + max), next = offset + changes.length < all.length ? offset + changes.length : null;
   return { changes, truncated: next != null, ...(offset || next != null ? { offset, next_offset: next } : {}) };
 };

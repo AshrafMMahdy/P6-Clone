@@ -54,7 +54,7 @@ function TabBody({ tab, t, ctx }: { tab: string; t: Row; ctx: Ctx }) {
   switch (tab) {
     case 'general': return <General t={t} ctx={ctx} />;
     case 'status': return <Status t={t} ctx={ctx} />;
-    case 'resources': return <Resources t={t} ctx={ctx} />;
+    case 'resources': return <Resources key={t.task_id} t={t} ctx={ctx} />;
     case 'relationships': return <div className="tabbody flush" style={{ flexDirection: 'row' }}><Rels t={t} ctx={ctx} which="pred" /><Rels t={t} ctx={ctx} which="succ" /></div>;
     case 'preds': return <div className="tabbody flush"><Rels t={t} ctx={ctx} which="pred" /></div>;
     case 'succs': return <div className="tabbody flush"><Rels t={t} ctx={ctx} which="succ" /></div>;

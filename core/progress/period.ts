@@ -66,7 +66,13 @@ export function addCalendar(db: Db, name: string, isDefault: boolean): Row {
   const r: Row = { fintmpl_id: String(nextId(db, 'FINTMPL')), fintmpl_name: name, default_flag: first || isDefault ? 'Y' : 'N' };
   if (r.default_flag === 'Y') for (const c of T.rows) c.default_flag = 'N';
   T.rows.push(r);
-  if (first) for (const f of rows(db, 'FINDATES')) if (!f.fintmpl_id) f.fintmpl_id = r.fintmpl_id;
+  if (first) {
+    for (const f of rows(db, 'FINDATES')) if (!f.fintmpl_id) f.fintmpl_id = r.fintmpl_id;
+    // the projects report on it from now on: a later change of default does not move them (P6 applies the default to new
+    // and imported projects only)
+    addField(table(db, 'PROJECT'), 'fintmpl_id');
+    for (const p of rows(db, 'PROJECT')) if (!p.fintmpl_id) p.fintmpl_id = r.fintmpl_id;
+  }
   return r;
 }
 
@@ -172,6 +178,7 @@ export function setPeriodActuals(db: Db, t: Row, fin: Row, values: Record<string
   const TF = table(db, 'TASKFIN');
   for (const f of TASKFIN_FIELDS) addField(TF, f);
   const fid = fin.fin_dates_id, tid = t.task_id;
+  const zero = Object.values(values).every((v) => v === 0);
   const row = () => {
     const have = TF.rows.find((r) => r.fin_dates_id === fid && r.task_id === tid);
     if (have) return have;
@@ -186,6 +193,7 @@ export function setPeriodActuals(db: Db, t: Row, fin: Row, values: Record<string
     const RF = table(db, 'TRSRCFIN');
     for (const f of TRSRCFIN_FIELDS) addField(RF, f);
     let a = RF.rows.find((r) => r.fin_dates_id === fid && r.taskrsrc_id === asg.taskrsrc_id);
+    if (!a && zero) return { activity: t.task_code, period: fin.fin_dates_name, stored: {} };
     if (!a) { RF.rows.push({ fin_dates_id: fid, taskrsrc_id: asg.taskrsrc_id, task_id: tid, proj_id: t.proj_id, act_qty: '0', act_cost: '0.00' }); a = RF.rows[RF.rows.length - 1]; }
     if (values.units != null) a.act_qty = p6num(values.units);
     if (values.cost != null) a.act_cost = money(values.cost);
@@ -204,6 +212,7 @@ export function setPeriodActuals(db: Db, t: Row, fin: Row, values: Record<string
   const bad = Object.keys(values).filter((k) => !PERIOD_VALUES[k]);
   if (bad.length) return { error: `Unknown past-period value ${bad.join(', ')}; use ${Object.keys(PERIOD_VALUES).join(', ')}.` };
   if (mile && Object.keys(values).some((k) => k !== 'expense_cost')) return { error: `${t.task_code} is a milestone; P6 edits only its past-period expense cost.` };
+  if (zero && !TF.rows.some((r) => r.fin_dates_id === fid && r.task_id === tid)) return { activity: t.task_code, period: fin.fin_dates_name, stored: {} };
   const r = row();
   for (const [k, v] of Object.entries(values)) { const f = PERIOD_VALUES[k]; r[f] = COST.has(f) ? money(v) : p6num(v); }
   return { activity: t.task_code, period: fin.fin_dates_name, stored: Object.fromEntries(Object.entries(PERIOD_VALUES).map(([k, f]) => [k, r[f]])) };

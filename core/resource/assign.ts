@@ -134,7 +134,7 @@ export function assignmentDetails(db: Db, task: Row, a: Row, op: Record<string, 
   const lc = (v: unknown) => String(v ?? '').trim().toLowerCase();
   const set = (f: string, v: string) => { addField(T, f); a[f] = v; };
   const named = (tbl: string, key: string, field: string, v: unknown, what: string) => (v == null || v === '' ? '' : pick(rows(db, tbl), (x) => lc(x[field]) === lc(v), 1)[0]?.[key] ?? h.fail(`No ${what} "${v}".`));
-  if (op.role !== undefined) set('role_id', named('ROLES', 'role_id', 'role_short_name', op.role, 'role'));
+  if (op.role !== undefined) { if (!a.rsrc_id && (op.role == null || op.role === '')) h.fail('A role assignment (no resource) keeps its role; unassign_resource with assigned_role removes it.'); set('role_id', named('ROLES', 'role_id', 'role_short_name', op.role, 'role')); }
   if (op.account !== undefined) set('acct_id', named('ACCOUNT', 'acct_id', 'acct_short_name', op.account, 'cost account'));
   if (op.actual_start !== undefined) set('act_start_date', op.actual_start ? h.date(op.actual_start, 'actual_start') : '');
   if (op.actual_finish !== undefined) {
