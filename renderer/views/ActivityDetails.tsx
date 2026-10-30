@@ -9,6 +9,9 @@ import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { p6num, relationshipFloat } from '../../core/schedule/cpm.ts';
 import { durationPct } from '../../core/progress/update.ts';
 import { recalcAssignment, priceOf } from '../../core/resource/assign.ts';
+import { applyOps } from '../../core/project/ops.ts';
+import { removeAssignments } from '../../core/project/edit.ts';
+import { financialPeriods, projectCalendar } from '../../core/progress/period.ts';
 import { StepsTab, FeedbackTab, DocsTab, RisksTab } from './ActivityExtraTabs.tsx';
 
 const TABS: [string, string][] = [['general', 'General'], ['status', 'Status'], ['resources', 'Resources'], ['relationships', 'Relationships'], ['preds', 'Predecessors'], ['succs', 'Successors'], ['codes', 'Codes'], ['notebook', 'Notebook'], ['steps', 'Steps'], ['feedback', 'Feedback'], ['docs', 'WPs & Docs'], ['expenses', 'Expenses'], ['risks', 'Risks'], ['summary', 'Summary']];
@@ -222,7 +225,27 @@ function Rels({ t, ctx, which }: { t: Row; ctx: Ctx; which: 'pred' | 'succ' }) {
 
 function Resources({ t, ctx }: { t: Row; ctx: Ctx }) {
   const [sel, setSel] = useState<string | null>(null);
+  const [period, setPeriod] = useState('');
   const list = ctx.rsrcByTask.get(t.task_id) ?? [];
+  const proj = rows(ctx.db, 'PROJECT').find((p) => p.proj_id === t.proj_id);
+  const periods = proj ? financialPeriods(ctx.db, projectCalendar(ctx.db, proj)) : [];
+  const fin = periods.find((f) => f.fin_dates_id === period);
+  const role = (id: string) => rows(ctx.db, 'ROLES').find((r) => r.role_id === id);
+  /** How the edit operations name an assignment: resource (or the role of a role assignment), nth among the same. */
+  const named = (a: Row) => {
+    const same = list.filter((x) => (a.rsrc_id ? x.rsrc_id === a.rsrc_id : !x.rsrc_id && x.role_id === a.role_id));
+    return { ...(a.rsrc_id ? { resource: ctx.rsrc.get(a.rsrc_id)?.rsrc_short_name } : { assigned_role: role(a.role_id)?.role_short_name }), ...(same.length > 1 ? { nth: same.indexOf(a) + 1 } : {}) };
+  };
+  const stored = (a: Row) => (fin ? rows(ctx.db, 'TRSRCFIN').find((x) => x.fin_dates_id === fin.fin_dates_id && x.taskrsrc_id === a.taskrsrc_id) : undefined);
+  const editPeriod = (a: Row, key: 'units' | 'cost', v: number) => {
+    let err = '';
+    try {
+      mutate(`Edit ${fin!.fin_dates_name} Actual ${key === 'units' ? 'Units' : 'Cost'}`, (db) => {
+        const r = applyOps(db, [{ op: 'set_period_actuals', activity: t.task_code, project: proj?.proj_short_name, period: fin!.fin_dates_name, ...named(a), values: { [key]: v } }]);
+        if (!r.ok) { err = r.error!.message; throw new Error(err); }
+      });
+    } catch { toast(err); }
+  };
   const editQty = (a: Row, field: 'target_qty' | 'act_reg_qty' | 'remain_qty', v: number) => mutate('Edit Assignment Units', (db) => {
     const r = db.tables.TASKRSRC.rows.find((x) => x.taskrsrc_id === a.taskrsrc_id)!;
     const task = db.tables.TASK.rows.find((x) => x.task_id === r.task_id)!;
@@ -232,27 +255,31 @@ function Resources({ t, ctx }: { t: Row; ctx: Ctx }) {
     <div className="tabbody flush">
       <div style={{ padding: '3px 6px', display: 'flex', gap: 6 }}>
         <button className="btn" onClick={() => openDialog('assignRsrc')}>Add Resource</button>
-        <button className="btn" disabled={!sel} onClick={() => { mutate('Remove Resource Assignment', (db) => { db.tables.TASKRSRC.rows = db.tables.TASKRSRC.rows.filter((x) => x.taskrsrc_id !== sel); }); setSel(null); }}>Remove</button>
+        <button className="btn" onClick={() => openDialog('assignRole')}>Add Role</button>
+        <button className="btn" disabled={!sel} onClick={() => { mutate('Remove Resource Assignment', (db) => { removeAssignments(db, new Set([sel!])); }); setSel(null); }}>Remove</button>
+        <span style={{ marginLeft: 'auto' }}>Past period <select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="">(none)</option>{periods.map((f) => <option key={f.fin_dates_id} value={f.fin_dates_id}>{f.fin_dates_name}</option>)}</select></span>
       </div>
       <div className="tblwrap" style={{ flex: 1, margin: '0 6px 6px' }}>
         <table className="tbl">
-          <thead><tr><th>Resource ID</th><th>Resource Name</th><th>Type</th><th>Budgeted Units</th><th>Actual Units</th><th>Remaining Units</th><th>Units/Time</th><th>Price/Unit</th><th>Curve</th><th>Budgeted Cost</th><th>Actual Cost</th><th>Remaining Cost</th></tr></thead>
+          <thead><tr><th>Resource ID</th><th>Resource Name</th><th>Type</th><th>Budgeted Units</th><th>Actual Units</th><th>Remaining Units</th><th>Units/Time</th><th>Price/Unit</th><th>Curve</th><th>Budgeted Cost</th><th>Actual Cost</th><th>Remaining Cost</th><th>Role</th>{fin && <><th>({fin.fin_dates_name}) Actual Units</th><th>({fin.fin_dates_name}) Actual Cost</th></>}</tr></thead>
           <tbody>
             {list.map((a) => {
               const r = ctx.rsrc.get(a.rsrc_id);
               const num = (f: 'target_qty' | 'act_reg_qty' | 'remain_qty') => <input type="number" defaultValue={Number(a[f] || 0)} key={a[f]} style={{ width: 70 }} onBlur={(e) => { if (Number(e.target.value) !== Number(a[f] || 0)) editQty(a, f, Number(e.target.value)); }} />;
               return (
                 <tr key={a.taskrsrc_id} className={sel === a.taskrsrc_id ? 'sel' : ''} onMouseDown={() => setSel(a.taskrsrc_id)}>
-                  <td>{r?.rsrc_short_name ?? a.rsrc_id}</td><td>{r?.rsrc_name}</td><td>{RSRC_TYPES[a.rsrc_type || r?.rsrc_type || ''] ?? ''}</td>
+                  <td>{r?.rsrc_short_name ?? (a.rsrc_id ? a.rsrc_id : <i>(role)</i>)}</td><td>{r?.rsrc_name ?? role(a.role_id)?.role_name}</td><td>{RSRC_TYPES[a.rsrc_type || r?.rsrc_type || ''] ?? ''}</td>
                   <td>{num('target_qty')}</td><td>{num('act_reg_qty')}</td><td>{num('remain_qty')}</td>
                   <td>{p6num(Number(a.target_qty_per_hr || 0) * 8)}/d</td><td>{p6num(priceOf(getDb(), a))}</td>
                   <td><select value={a.curv_id || ''} onChange={(e) => mutate('Change Resource Curve', (db) => { const x = db.tables.TASKRSRC.rows.find((y) => y.taskrsrc_id === a.taskrsrc_id)!; addField(db.tables.TASKRSRC, 'curv_id'); x.curv_id = e.target.value; })}>
                     <option value=''>Linear (default)</option>{rows(ctx.db, 'RSRCCURVDATA').map((c) => <option key={c.curv_id} value={c.curv_id}>{c.curv_name}</option>)}</select></td>
                   <td>{p6num(Number(a.target_cost || 0))}</td><td>{p6num(Number(a.act_reg_cost || 0) + Number(a.act_ot_cost || 0))}</td><td>{p6num(Number(a.remain_cost || 0))}</td>
+                  <td>{role(a.role_id)?.role_short_name ?? ''}</td>
+                  {fin && (['units', 'cost'] as const).map((k) => { const v = Number(stored(a)?.[k === 'units' ? 'act_qty' : 'act_cost'] || 0); return <td key={k}><input type="number" defaultValue={v} key={`${fin.fin_dates_id}:${v}`} style={{ width: 70 }} onBlur={(e) => { if (Number(e.target.value) !== v) editPeriod(a, k, Number(e.target.value)); }} /></td>; })}
                 </tr>
               );
             })}
-            {!list.length && <tr><td colSpan={12} className="muted">No resources assigned</td></tr>}
+            {!list.length && <tr><td colSpan={15} className="muted">No resources assigned</td></tr>}
           </tbody>
         </table>
       </div>

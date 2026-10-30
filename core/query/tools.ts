@@ -8,7 +8,7 @@ import { isCritical, traceLogic, type Ctx } from '../project/ctx.ts';
 import { relationshipFloat } from '../schedule/cpm.ts';
 import { statusOf, projectName } from '../project/edit.ts';
 import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
-import { financialPeriods } from '../progress/period.ts';
+import { financialPeriods, periodCalendar, projectCalendar } from '../progress/period.ts';
 import { dayHours } from '../project/units.ts';
 
 /** A lookup described for a language model (JSON Schema parameters). */
@@ -87,7 +87,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       return {
         ...(want('baselines') ? { baselines: all.filter((p) => open.has(p.proj_id)).map((p) => ({ project: p.proj_short_name, project_baseline: nameOf(p.sum_base_proj_id), bl1: nameOf(p._bl1), bl2: nameOf(p._bl2), bl3: nameOf(p._bl3), saved: P.filter((b) => b._baseline_of === p.proj_id).map((b) => ({ name: b.proj_short_name, saved_on: d(b._baseline_date), finish: d(b.scd_end_date || b.plan_end_date) })) })) } : {}),
         ...(want('codes') ? { activity_codes: codes('ACTVTYPE', 'actv_code_type_id', 'actv_code_type', 'ACTVCODE', 'short_name', 'actv_code_name'), project_codes: codes('PCATTYPE', 'proj_catg_type_id', 'proj_catg_type', 'PCATVAL', 'proj_catg_short_name', 'proj_catg_name'), resource_codes: codes('RCATTYPE', 'rsrc_catg_type_id', 'rsrc_catg_type', 'RCATVAL', 'rsrc_catg_short_name', 'rsrc_catg_name'), assignment_codes: codes('ASGNMNTCATTYPE', 'asgnmnt_catg_type_id', 'asgnmnt_catg_type', 'ASGNMNTCATVAL', 'asgnmnt_catg_short_name', 'asgnmnt_catg_name') } : {}),
-        ...(want('periods') ? { financial_periods: financialPeriods(db).map((f) => ({ name: f.fin_dates_name, start: d(f.start_date), end: d(f.end_date), stored_activities: rows(db, 'TASKFIN').filter((x) => x.fin_dates_id === f.fin_dates_id).length })) } : {}),
+        ...(want('periods') ? { financial_periods: financialPeriods(db).map((f) => ({ name: f.fin_dates_name, ...(rows(db, 'FINTMPL').length ? { calendar: rows(db, 'FINTMPL').find((c) => c.fintmpl_id === periodCalendar(db, f))?.fintmpl_name } : {}), start: d(f.start_date), end: d(f.end_date), stored_activities: rows(db, 'TASKFIN').filter((x) => x.fin_dates_id === f.fin_dates_id).length })), financial_period_calendars: rows(db, 'FINTMPL').map((c) => ({ name: c.fintmpl_name, default: c.default_flag === 'Y', projects: P.filter((p) => !p._baseline_of && projectCalendar(db, p) === c.fintmpl_id).map((p) => p.proj_short_name) })) } : {}),
         ...(want('udfs') ? { udfs: rows(db, 'UDFTYPE').map((u) => ({ name: u.udf_type_label, subject: u.table_name, data_type: u.logical_data_type })) } : {}),
         ...(want('accounts') ? { cost_accounts: tree('ACCOUNT', 'acct_short_name', 'acct_name', 'acct_id', 'parent_acct_id') } : {}),
         ...(want('calendars') ? { calendars: rows(db, 'CALENDAR').map((c) => ({ name: c.clndr_name, type: c.clndr_type?.replace(/^CA_/, ''), hours_per_day: Number(c.day_hr_cnt) || null, project: c.proj_id ? nameOf(c.proj_id) : undefined })) } : {}),

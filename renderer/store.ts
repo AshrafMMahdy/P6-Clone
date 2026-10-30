@@ -14,7 +14,7 @@ export type BottomPane = 'details' | 'profile' | 'spreadsheet' | 'actProfile' | 
 
 /** calendarDays: days on each activity's own calendar (core/project/units.ts) — set by the MCP server and the CLI;
  *  the desktop app leaves it off and shows every day at hoursPerDay (P6's default, "use assigned calendar" off). */
-export interface Prefs { hoursPerDay: number; dateFormat: 'dd-MMM-yy' | 'yyyy-mm-dd' | 'mm/dd/yy' | 'dd/mm/yy'; showTime: boolean; durationDecimals: number; calendarDays?: boolean }
+export interface Prefs { hoursPerDay: number; dateFormat: 'dd-MMM-yy' | 'yyyy-mm-dd' | 'mm/dd/yy' | 'dd/mm/yy'; showTime: boolean; durationDecimals: number; /** the financial periods whose columns the activity table offers (P6: User Preferences > Application), start days YYYY-MM-DD */ finPeriodFrom?: string; finPeriodTo?: string; calendarDays?: boolean }
 export interface DialogState { kind: string; props?: Record<string, unknown> }
 
 export interface UiState {
@@ -77,8 +77,8 @@ export function useStore<T>(sel: (s: typeof state) => T): T {
   return useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, () => sel(snapshot));
 }
 export const getDb = () => state.db;
-setColumnDb(getDb);
 export const getUi = () => state.ui;
+setColumnDb(getDb, () => state.ui.prefs);
 
 export function setUi(patch: Partial<UiState> | ((u: UiState) => Partial<UiState>)): void {
   state.ui = { ...state.ui, ...(typeof patch === 'function' ? patch(state.ui) : patch) };

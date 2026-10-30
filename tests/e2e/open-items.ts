@@ -135,6 +135,48 @@ ok(/[1-9][0-9]* activities stored in 2010-07-01/.test(stTxt), 'Store Period Perf
 await runMenu('admin.finPeriods'); await win.waitForSelector('.dialog-title:has-text("Financial Periods")');
 ok(Number((await win.locator('.dialog tbody tr', { hasText: '2010-07-01' }).locator('td').nth(3).innerText()) || 0) > 0, 'Financial Periods: the July period holds stored activities');
 await win.click('.dialog button:has-text("Close")');
+
+// 9. Financial period calendars, the Financial Period Value columns, past-period values on the Resources tab, Assign Roles
+await runMenu('admin.finPeriods'); await win.waitForSelector('.dialog-title:has-text("Financial Periods")');
+await win.fill('.dialog input[placeholder="Calendar name"]', 'Monthly'); await win.click('.dialog .row button:has-text("Add")'); await win.waitForTimeout(200);
+ok(await win.locator('.dialog tbody tr').count() === 12, 'Financial period calendars: the first calendar keeps the 12 periods');
+await win.fill('.dialog input[placeholder="Calendar name"]', 'Weekly'); await win.click('.dialog .row button:has-text("Add")'); await win.waitForTimeout(200);
+ok(/No financial periods/.test(await win.locator('.dialog tbody').innerText()), 'Financial period calendars: a new calendar starts empty');
+await win.click('.dialog button:has-text("Close")');
+await runMenu('project.details'); await win.waitForSelector('.dialog-title:has-text("Project Details")');
+await win.click('.dialog .tab:has-text("Settings")');
+ok(/Weekly/.test(await win.locator('.dialog select').last().innerText()), 'Project Details > Settings: the financial period calendar is offered');
+await win.click('.dialog button:has-text("Close")');
+await runMenu('admin.preferences'); await win.waitForSelector('.dialog-title:has-text("User Preferences")');
+const pd = win.locator('.dialog input[type=date]'); await pd.nth(0).fill('2010-07-01'); await pd.nth(1).fill('2010-07-31');
+await win.click('.dialog button:has-text("OK")');
+await runMenu('view.columns'); await win.waitForSelector('.dialog-title:has-text("Columns")');
+await win.locator('.dialog tr', { hasText: '(Monthly 2010-07-01): Actual Expense Cost' }).dblclick();
+await win.click('.dialog button:has-text("OK")'); await win.waitForTimeout(200);
+await show('');
+const started = win.locator('.grid-row:not(.group)').filter({ has: win.locator('.c-start', { hasText: / A$/ }) }).first();
+const finCell = started.locator('[class*="_expense_cost"]');
+ok(await finCell.count() === 1, 'Financial Period Value column shown in the activity table');
+await finCell.dblclick(); await win.keyboard.press('Control+a'); await win.keyboard.type('321'); await win.keyboard.press('Enter'); await win.waitForTimeout(250);
+ok(/321/.test(await finCell.innerText()), 'Financial Period Value: a past-period expense cost edited in its cell: ' + await finCell.innerText());
+await runMenu('edit.undo'); await win.waitForTimeout(200);
+ok(!/321/.test(await finCell.innerText()), 'Financial Period Value: one undo takes the edit back');
+// Assign Roles: a role made in Enterprise > Roles, assigned from the table's right-click menu
+await runMenu('ent.roles'); await win.waitForSelector('.dialog-title:has-text("Roles")');
+await win.click('.dialog button:has-text("Add Root")'); await win.waitForTimeout(150);
+for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
+await started.click(); await started.click({ button: 'right' });
+await win.locator('.ctxmenu').getByText('Assign Roles...').click();
+await win.waitForSelector('.dialog-title:has-text("Assign Roles")');
+await win.locator('.dialog tr', { hasText: 'ROLE1' }).click(); await win.click('.dialog button:has-text("Assign")'); await win.waitForTimeout(200);
+await tab('Resources').click();
+ok(await win.locator('.details tbody tr', { hasText: 'ROLE1' }).count() === 1, 'Assign Roles: a role assignment (no resource) on the activity');
+// a past period's Actual Units of that assignment, on Activity Details > Resources
+await win.locator('.details span:has-text("Past period") select').selectOption({ label: '2010-07-01' }); await win.waitForTimeout(150);
+const roleRow = () => win.locator('.details tbody tr', { hasText: 'ROLE1' });
+const unitsIn = roleRow().locator('input[type=number]').nth(3);
+await unitsIn.fill('7'); await unitsIn.blur(); await win.waitForTimeout(250);
+ok(await roleRow().locator('input[type=number]').nth(3).inputValue() === '7', 'Resources tab: the Actual Units of a past period edited on the assignment');
 ok(!errors.length, 'no page errors ' + errors.join(' | '));
 await app.close();
 rmSync(profile, { recursive: true, force: true });

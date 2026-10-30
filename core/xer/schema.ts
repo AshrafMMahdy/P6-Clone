@@ -50,8 +50,14 @@ export function verification(version: string, tableName: string): Verification {
 export function knownFields(tableName: string): Set<string> {
   const s = new Set<string>();
   for (const v of Object.values(OBS)) for (const x of v[tableName] ?? []) for (const f of x.fields) s.add(f);
+  for (const f of MODERN_FIELDS[tableName] ?? []) s.add(f);
   return s;
 }
+
+/** Fields of a modern P6 (financial period calendars, 18.8+) that no real sample carried: PROJECT.fintmpl_id is in
+ *  Oracle's XER Import/Export Data Map (v23); FINTMPL's and FINDATES.fintmpl_id are named after P6's API
+ *  (FinancialPeriodTemplate: ObjectId, FinancialPeriodTemplateName, DefaultFlag; FinancialPeriod.FinancialPeriodTemplateId). */
+const MODERN_FIELDS: Record<string, string[]> = { FINTMPL: ['fintmpl_id', 'fintmpl_name', 'default_flag'], FINDATES: ['fintmpl_id'], PROJECT: ['fintmpl_id'] };
 
 export function knownTables(): Set<string> {
   const s = new Set<string>(observed.tableOrder);

@@ -4,6 +4,7 @@ import { closeDialog, getDb, mutate, setUi, toast, useStore, DEFAULT_COLUMNS, ty
 import { COLUMNS, COLUMN_BY_ID, RSRC_TYPES, addRelationship, extraColumns, fmtDate } from '../model.ts';
 import { rows } from '../../core/db.ts';
 import { assignResource } from '../../core/resource/assign.ts';
+import { applyOps } from '../../core/project/ops.ts';
 import { findingsText, parseFile } from '../io.ts';
 import type { Finding } from '../../core/findings.ts';
 
@@ -140,6 +141,44 @@ export function AssignResourceDialog() {
   );
 }
 
+/** Assign Roles (P6): a role on the selected activities with no resource yet, priced by the role's rate (core assign_role). */
+export function AssignRoleDialog() {
+  const ui = useStore((s) => s.ui);
+  const db = getDb();
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState<string | null>(null);
+  const roles = rows(db, 'ROLES').filter((r) => !q || (r.role_short_name + ' ' + r.role_name).toLowerCase().includes(q.toLowerCase()));
+  const targets = ui.selTasks.length ? ui.selTasks : ui.selTask ? [ui.selTask] : [];
+  const assign = () => {
+    const role = rows(db, 'ROLES').find((r) => r.role_id === sel)!;
+    const short = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
+    let err = '';
+    try {
+      mutate('Assign Role', (d) => {
+        const ops = targets.map((id) => rows(d, 'TASK').find((t) => t.task_id === id)).filter((t): t is NonNullable<typeof t> => !!t).map((t) => ({ op: 'assign_role', activity: t.task_code, project: short.get(t.proj_id), role: role.role_short_name }));
+        const r = applyOps(d, ops, { hoursPerDay: ui.prefs.hoursPerDay });
+        if (!r.ok) { err = r.error!.message; throw new Error(err); }
+      });
+    } catch { toast(err); return; }
+    closeDialog();
+  };
+  return (
+    <Dialog title="Assign Roles" width={560} height={440} buttons={<>
+      <button className="btn primary" disabled={!sel || !targets.length} onClick={assign}>Assign</button>
+      <button className="btn" onClick={closeDialog}>Close</button>
+    </>}>
+      {!targets.length && <p className="sev-warning">Select one or more activities first.</p>}
+      <input placeholder="Search roles" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: '100%', marginBottom: 6, border: '1px solid #7f9db9', height: 21 }} />
+      <div className="tblwrap" style={{ height: 320 }}>
+        <table className="tbl"><thead><tr><th>Role ID</th><th>Role Name</th></tr></thead><tbody>
+          {roles.map((r) => <tr key={r.role_id} className={sel === r.role_id ? 'sel' : ''} onMouseDown={() => setSel(r.role_id)}><td>{r.role_short_name}</td><td>{r.role_name}</td></tr>)}
+          {!roles.length && <tr><td colSpan={2} className="muted">No roles. Create them in Enterprise &gt; Roles.</td></tr>}
+        </tbody></table>
+      </div>
+    </Dialog>
+  );
+}
+
 export function PreferencesDialog() {
   const prefs = useStore((s) => s.ui.prefs);
   const [p, setP] = useState<Prefs>(prefs);
@@ -156,6 +195,13 @@ export function PreferencesDialog() {
           <label>Date format</label><select value={p.dateFormat} onChange={(e) => setP({ ...p, dateFormat: e.target.value as Prefs['dateFormat'] })}><option value="dd-MMM-yy">dd-MMM-yy</option><option value="yyyy-mm-dd">yyyy-mm-dd</option><option value="mm/dd/yy">mm/dd/yy</option><option value="dd/mm/yy">dd/mm/yy</option></select>
           <label>Show time</label><input type="checkbox" checked={p.showTime} onChange={(e) => setP({ ...p, showTime: e.target.checked })} />
         </div>
+      </fieldset>
+      <fieldset><legend>Financial Period Columns</legend>
+        <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
+          <label>Periods starting from</label><input type="date" value={p.finPeriodFrom ?? ''} onChange={(e) => setP({ ...p, finPeriodFrom: e.target.value || undefined })} />
+          <label>to</label><input type="date" value={p.finPeriodTo ?? ''} onChange={(e) => setP({ ...p, finPeriodTo: e.target.value || undefined })} />
+        </div>
+        <p className="muted">The Financial Period Value columns of these periods (past-period actuals, earned and planned value) are offered in View &gt; Columns.</p>
       </fieldset>
     </Dialog>
   );

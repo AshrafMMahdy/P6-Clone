@@ -91,6 +91,8 @@ export function ProjectDetailsDialog(props: { projId?: string }) {
           <label>Define critical activities as</label>
           <select value={p.critical_path_type || 'CT_TotFloat'} onChange={(e) => set('critical_path_type', e.target.value)}><option value="CT_TotFloat">Total Float less than or equal to</option><option value="CT_DrivPath">Longest Path</option></select>
           <label>Critical float (hours)</label><input type="number" defaultValue={p.critical_drtn_hr_cnt || '0'} onBlur={(e) => set('critical_drtn_hr_cnt', e.target.value)} />
+          <label>Financial period calendar</label>
+          <select value={p.fintmpl_id || ''} onChange={(e) => set('fintmpl_id', e.target.value, 'Assign Financial Period Calendar')}><option value="">(the default calendar)</option>{rows(db, 'FINTMPL').map((c) => <option key={c.fintmpl_id} value={c.fintmpl_id}>{c.fintmpl_name}{c.default_flag === 'Y' ? ' (default)' : ''}</option>)}</select>
         </div>}
         {tab === 'notebook' && root && <ProjectNotebook pid={pid} wbsId={root.wbs_id} />}
         {tab === 'codes' && <ProjectCodes pid={pid} />}

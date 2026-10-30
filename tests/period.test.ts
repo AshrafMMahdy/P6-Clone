@@ -112,3 +112,60 @@ test('store_period_performance: an activity without assignments stores its own a
   assert.equal(r.stored.nonlabor_units, 4);
   assert.equal(rows(db, 'TASK')[0].act_this_per_work_qty, '0');
 });
+
+test('financial period calendars: the first keeps the existing periods; a project reports on its own calendar', () => {
+  const db = build();
+  ok(db, [{ op: 'add_project', id: 'Q', start: '2026-01-05' }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-02-28', every: 'month' }]);
+  ok(db, [{ op: 'add_financial_period_calendar', name: 'Monthly' }, { op: 'add_financial_period_calendar', name: 'Weekly' }]);
+  const cal = (n: string) => rows(db, 'FINTMPL').find((c) => c.fintmpl_name === n)!.fintmpl_id;
+  assert.ok(rows(db, 'FINDATES').every((f) => f.fintmpl_id === cal('Monthly')), 'the periods the file had belong to the first (default) calendar');
+  // the same dates in another calendar do not overlap; the same name is told apart by calendar
+  ok(db, [{ op: 'add_financial_periods', calendar: 'Weekly', from: '2026-01-01', to: '2026-01-31', every: 'week', week_ends_on: 'sat' }, { op: 'set_project', project: 'Q', financial_period_calendar: 'Weekly' }]);
+  assert.match(fail(db, [{ op: 'update_financial_period', name: '2026-01-01', new_name: 'x' }]), /give calendar/);
+  ok(db, [{ op: 'set_fields', table: 'PROJECT', fields: { act_this_per_link_flag: 'Y' }, all: true }, { op: 'set_project', project: 'Q', data_date: '2026-01-10' }]);
+  assert.equal(defaultPeriod(db, rows(db, 'PROJECT').find((p) => p.proj_short_name === 'Q')!)!.fintmpl_id, cal('Weekly'));
+  assert.match(fail(db, [{ op: 'store_period_performance', project: 'P', period: '2026-01-04' }]), /No financial period "2026-01-04" in that calendar/);
+  assert.match(fail(db, [{ op: 'delete_financial_period_calendar', name: 'Weekly' }]), /Projects use Weekly: Q/);
+  assert.match(fail(db, [{ op: 'delete_financial_period_calendar', name: 'Monthly' }]), /default calendar/);
+  ok(db, [{ op: 'set_project', project: 'Q', financial_period_calendar: '' }, { op: 'delete_financial_period_calendar', name: 'Weekly' }]);
+  assert.ok(rows(db, 'FINDATES').every((f) => f.fintmpl_id === cal('Monthly')));
+});
+
+test('set_period_actuals: activity values, an assignment re-summing its kind, P6 rules', () => {
+  const db = build();
+  ok(db, [{ op: 'add_financial_periods', from: '2026-01-01', to: '2026-01-31', every: 'month' }]);
+  assert.match(fail(db, [{ op: 'set_period_actuals', activity: 'A', period: '2026-01-01', values: { expense_cost: 5 } }]), /Link actual to date/);
+  ok(db, [{ op: 'set_fields', table: 'PROJECT', fields: { act_this_per_link_flag: 'Y' }, all: true }]);
+  assert.match(fail(db, [{ op: 'set_period_actuals', activity: 'A', period: '2026-01-01', values: { expense_cost: 5 } }]), /no actual start/);
+  ok(db, [{ op: 'update_activity', id: 'A', actual_start: '2026-01-05' }]);
+  const r = ok(db, [{ op: 'set_period_actuals', activity: 'A', period: '2026-01-01', values: { expense_cost: 120, earned_value: 300 } }]).results[0] as any;
+  assert.equal(r.stored.expense_cost, '120.00');
+  assert.equal(r.stored.earned_value, '300.00');
+  assert.match(fail(db, [{ op: 'set_period_actuals', activity: 'A', period: '2026-01-01', values: { colour: 1 } }]), /Unknown past-period value colour/);
+  // the labor assignment's period units: the activity's labor units are its assignments' sum
+  const a = ok(db, [{ op: 'set_period_actuals', activity: 'A', resource: 'LAB', period: '2026-01-01', values: { units: 12, cost: 120 } }]).results[0] as any;
+  assert.equal(a.stored.labor_units, '12');
+  assert.equal(a.stored.labor_cost, '120.00');
+  assert.equal(rows(db, 'TRSRCFIN').length, 1);
+  // a milestone: expense cost only
+  ok(db, [{ op: 'add_activity', id: 'M', name: 'Done', type: 'finish_milestone' }, { op: 'update_activity', id: 'M', actual_start: '2026-01-06', actual_finish: '2026-01-06' }]);
+  assert.match(fail(db, [{ op: 'set_period_actuals', activity: 'M', period: '2026-01-01', values: { labor_units: 1 } }]), /milestone/);
+  ok(db, [{ op: 'set_period_actuals', activity: 'M', period: '2026-01-01', values: { expense_cost: 9 } }]);
+});
+
+test('financial period calendars survive XER and P6 XML', async () => {
+  const db = build();
+  ok(db, [{ op: 'add_financial_period_calendar', name: 'Monthly' }, { op: 'add_financial_period_calendar', name: 'Fortnight' },
+    { op: 'add_financial_periods', calendar: 'Fortnight', periods: [{ name: 'F1', start: '2026-01-01', end: '2026-01-14' }] },
+    { op: 'add_financial_periods', from: '2026-01-01', to: '2026-01-31', every: 'month' }, { op: 'set_project', financial_period_calendar: 'Fortnight' }]);
+  const { writeXer } = await import('../core/xer/write.ts'), { parseXer } = await import('../core/xer/parse.ts');
+  const back = parseXer(writeXer(db, { version: '19.12' })).db;
+  const name = (d: Db, id: string) => rows(d, 'FINTMPL').find((c) => c.fintmpl_id === id)?.fintmpl_name;
+  assert.deepEqual(rows(back, 'FINDATES').map((f) => [f.fin_dates_name, name(back, f.fintmpl_id)]).sort(), [['2026-01-01', 'Monthly'], ['F1', 'Fortnight']]);
+  assert.equal(name(back, rows(back, 'PROJECT')[0].fintmpl_id), 'Fortnight');
+  const { writeP6Xml, parseP6Xml } = await import('../core/xml/p6xml.ts');
+  const x = parseP6Xml(writeP6Xml(db, {})).db;
+  assert.deepEqual(rows(x, 'FINDATES').map((f) => [f.fin_dates_name, name(x, f.fintmpl_id)]).sort(), [['2026-01-01', 'Monthly'], ['F1', 'Fortnight']]);
+  assert.equal(name(x, rows(x, 'PROJECT').find((p) => !p._baseline_of)!.fintmpl_id), 'Fortnight');
+  assert.equal(rows(x, 'FINTMPL').find((c) => c.default_flag === 'Y')?.fintmpl_name, 'Monthly');
+});

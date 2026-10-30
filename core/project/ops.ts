@@ -95,7 +95,7 @@ export const OP_GUIDE = [
   `add_project: id, start, [name], [must_finish_by], [calendar]`,
   `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
   `set_schedule_options: [project], then any of ${SCHEDULE_OPTIONS_GUIDE}. Written to the project (P6's Schedule Options), used by every later schedule`,
-  `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [eps] (EPS ID), [new_id] (a new Project ID, at most 40 characters; the root WBS node's code follows), [new_proj_id] (a new internal project number, the proj_id the XER carries: a positive whole number no other project has; every reference to the project follows)`,
+  `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [financial_period_calendar] (the calendar of financial periods the project reports on; "" = the default), [eps] (EPS ID), [new_id] (a new Project ID, at most 40 characters; the root WBS node's code follows), [new_proj_id] (a new internal project number, the proj_id the XER carries: a positive whole number no other project has; every reference to the project follows)`,
   `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
   `add_holidays: calendar, dates [dates]`,
   `add_wbs: code, [name], [parent] (parent WBS code, dotted path or wbs_id:<id>; omit for top level), [project]. Returns wbs_id. P6 needs WBS codes unique under one parent, so a sibling with the same code is refused`,
@@ -266,6 +266,10 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       if (op.planned_start != null) p.plan_start_date = date(op.planned_start, 'planned_start');
       if (op.must_finish_by !== undefined) p.plan_end_date = op.must_finish_by ? date(op.must_finish_by, 'must_finish_by') : '';
       if (op.calendar != null) p.clndr_id = calendar(op.calendar).clndr_id;
+      if (op.financial_period_calendar !== undefined) {
+        addField(table(db, 'PROJECT'), 'fintmpl_id');
+        p.fintmpl_id = op.financial_period_calendar ? rows(db, 'FINTMPL').find((c) => c.fintmpl_name.toLowerCase() === String(op.financial_period_calendar).toLowerCase())?.fintmpl_id ?? fail(`No financial period calendar "${op.financial_period_calendar}" (add it with {"op":"add_financial_period_calendar"}).`) : '';
+      }
       if (op.eps != null) { ensureEps(db); addField(table(db, 'PROJECT'), '_eps_id'); p._eps_id = rows(db, 'EPS').find((e) => e.eps_short_name.toLowerCase() === String(op.eps).toLowerCase())?.eps_id ?? fail(`No EPS "${op.eps}" (add it with {"op":"add_eps"}).`); }
       if (op.new_id != null) {
         const id = str(op.new_id, 'new_id'), was = p.proj_short_name;

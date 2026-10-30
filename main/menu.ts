@@ -47,7 +47,7 @@ export function buildMenu(win: BrowserWindow): Menu {
         cmd('&Link Activities', 'edit.link'),
         cmd('F&ill Down', 'edit.fillDown', 'Ctrl+E', { registerAccelerator: false }),
         sep,
-        cmd('Assign', 'edit.assign', undefined, { submenu: [cmd('Predecessors...', 'edit.assignPred'), cmd('Successors...', 'edit.assignSucc'), cmd('Resources...', 'edit.assignRsrc'), cmd('Activity Codes...', 'edit.assignCodes')] }),
+        cmd('Assign', 'edit.assign', undefined, { submenu: [cmd('Predecessors...', 'edit.assignPred'), cmd('Successors...', 'edit.assignSucc'), cmd('Resources...', 'edit.assignRsrc'), cmd('Roles...', 'edit.assignRole'), cmd('Activity Codes...', 'edit.assignCodes')] }),
         sep,
         cmd('Select &All', 'edit.selectAll', 'Ctrl+A', { registerAccelerator: false }),
         cmd('&Find...', 'edit.find', 'Ctrl+F'),

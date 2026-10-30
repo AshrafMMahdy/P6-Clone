@@ -5,6 +5,8 @@ import { p6num, calendarResolver } from '../core/schedule/cpm.ts';
 import { durationPct } from '../core/progress/update.ts';
 import { activityCosts, earnedValue, type EarnedValue } from '../core/cost/rollup.ts';
 import { ENUMS } from '../core/xer/schema.ts';
+import { applyOps } from '../core/project/ops.ts';
+import { financialPeriods, periodCalendar, PERIOD_VALUES } from '../core/progress/period.ts';
 import type { Prefs } from './store.ts';
 import { dayHours, type DayHours } from '../core/project/units.ts';
 import { makeCtx as coreMakeCtx, isCritical, type Ctx as CoreCtx } from '../core/project/ctx.ts';
@@ -103,7 +105,10 @@ export interface Column {
   /** View > Columns folder for columns made from the database (Activity Codes, User Defined Fields) */
   group?: string;
   get: (r: Row, ctx: Ctx) => string;
-  edit?: { type: 'text' | 'number' | 'date' | 'select'; options?: Record<string, string>; set: (db: Db, r: Row, v: string, ctx: Ctx) => string | void };
+  edit?: { type: 'text' | 'number' | 'date' | 'select'; options?: Record<string, string>; set: (db: Db, r: Row, v: string, ctx: Ctx) => string | void;
+    /** For a value kept in another table than TASK (a past period's value): applied to the database inside the edit's
+     *  own undoable change, instead of set on a copy of the activity row; answers the refusal, if any */
+    apply?: (db: Db, r: Row, v: string) => string | void };
 }
 
 const sumBy = (rs: Row[] | undefined, f: string) => (rs ?? []).reduce((a, x) => a + Number(x[f] || 0), 0);
@@ -266,12 +271,50 @@ export function extraColumns(db: Db): Column[] {
       return m;
     }) });
   }
+  out.push(...finColumns(db));
   return out;
 }
 
 let columnDb: () => Db = emptyDb;
-/** Where database columns (codes, UDFs) look up their names: the app's current database. */
-export const setColumnDb = (f: () => Db) => { columnDb = f; };
-/** Column by id: the fixed columns, then the database's code and UDF columns. */
-export const COLUMN_BY_ID = { get: (id: string): Column | undefined => BASE_COLUMNS.get(id) ?? (/^(code|udf)_/.test(id) ? extraColumns(columnDb()).find((c) => c.id === id) : undefined) };
+let columnPrefs: () => Prefs | undefined = () => undefined;
+/** Where database columns (codes, UDFs, financial periods) look up their names, and the preferences that pick the
+ *  financial periods shown: the app's current database and preferences. */
+export const setColumnDb = (f: () => Db, prefs?: () => Prefs) => { columnDb = f; if (prefs) columnPrefs = prefs; };
+/** Column by id: the fixed columns, then the database's code and UDF columns, then a financial period's value. */
+export const COLUMN_BY_ID = { get: (id: string): Column | undefined => BASE_COLUMNS.get(id) ?? (/^(code|udf)_/.test(id) ? extraColumns(columnDb()).find((c) => c.id === id) : (() => { const m = /^fin_(\d+)_(\w+)$/.exec(id); const f = m ? rows(columnDb(), 'FINDATES').find((x) => x.fin_dates_id === m[1]) : undefined; return f && FIN_TITLES[m![2]] ? finColumn(columnDb(), f, m![2]) : undefined; })()) };
+
+/** P6's Financial Period Value columns: "(period): Actual Labor Units" and the rest, one per stored value. */
+const FIN_TITLES: Record<string, string> = {
+  labor_units: 'Actual Labor Units', labor_cost: 'Actual Labor Cost', nonlabor_units: 'Actual Nonlabor Units', nonlabor_cost: 'Actual Nonlabor Cost',
+  material_cost: 'Actual Material Cost', expense_cost: 'Actual Expense Cost', earned_value: 'Earned Value Cost', earned_value_labor_units: 'Earned Value Labor Units',
+  planned_value: 'Planned Value Cost', planned_value_labor_units: 'Planned Value Labor Units',
+};
+function finColumn(db: Db, f: Row, key: string): Column {
+  const id = `fin_${f.fin_dates_id}_${key}`, field = PERIOD_VALUES[key], cost = /cost|_value$/.test(key) && !/units/.test(key);
+  const cals = rows(db, 'FINTMPL');
+  const cal = cals.length > 1 ? `${cals.find((c) => c.fintmpl_id === periodCalendar(db, f))?.fintmpl_name ?? ''} ` : '';
+  return {
+    id, title: `(${cal}${f.fin_dates_name}): ${FIN_TITLES[key]}`, width: 110, align: 'right', group: 'Financial Period Value',
+    get: (r, c) => extraValue(c, id, r.task_id, () => new Map(rows(c.db, 'TASKFIN').filter((x) => x.fin_dates_id === f.fin_dates_id).map((x) => [x.task_id, cost ? money(Number(x[field] || 0)) : String(Number(x[field] || 0))]))),
+    edit: {
+      type: 'number', set: () => 'Past-period values are edited one cell at a time.',
+      apply: (d, r, v) => {
+        const p = rows(d, 'PROJECT').find((x) => x.proj_id === r.proj_id);
+        const res = applyOps(d, [{ op: 'set_period_actuals', activity: r.task_code, project: p?.proj_short_name, period: f.fin_dates_name, values: { [key]: Number(String(v).replace(/[$,\s]/g, '')) || 0 } }]);
+        return res.ok ? undefined : res.error!.message;
+      },
+    },
+  };
+}
+/** The financial period columns the preferences' range shows (P6: User Preferences > Application, financial periods). */
+function finColumns(db: Db): Column[] {
+  const pr = columnPrefs();
+  if (!pr?.finPeriodFrom || !pr.finPeriodTo) return [];
+  const out: Column[] = [];
+  for (const f of financialPeriods(db)) {
+    const day = (f.start_date || '').slice(0, 10);
+    if (day >= pr.finPeriodFrom && day <= pr.finPeriodTo) for (const key of Object.keys(FIN_TITLES)) out.push(finColumn(db, f, key));
+  }
+  return out;
+}
 

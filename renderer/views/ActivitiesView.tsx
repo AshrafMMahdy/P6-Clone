@@ -106,6 +106,12 @@ export function ActivitiesView() {
     const c = COLUMN_BY_ID.get(colId)!;
     const t = ctx.taskById.get(key.slice(2));
     if (!t || !c.edit) return;
+    if (c.edit.apply) {
+      // a value of another table (a past period's): applied inside the edit's own undoable change
+      let err = '';
+      try { mutate(`Edit ${c.title}`, (db) => { const e = c.edit!.apply!(db, t, value); if (e) { err = e; throw new Error(e); } }); } catch { toast(err || `${c.title} could not be changed.`); }
+      return;
+    }
     const copy = { ...t };
     const err = c.edit.set(getDb(), copy, value, ctx) || lobRowGuard(getDb(), t, copy);
     if (err) { toast(err); return; }
@@ -145,6 +151,7 @@ export function ActivitiesView() {
       { label: 'Assign Predecessors...', onClick: () => openDialog('assign', { which: 'pred' }) },
       { label: 'Assign Successors...', onClick: () => openDialog('assign', { which: 'succ' }) },
       { label: 'Assign Resources...', onClick: () => openDialog('assignRsrc') },
+      { label: 'Assign Roles...', onClick: () => openDialog('assignRole') },
       { label: 'Assign Activity Codes...', disabled: !ui.selTask, onClick: () => setUi({ bottom: 'details', detailTab: 'codes' }) },
       { label: 'Link Activities', disabled: ui.selTasks.length < 2, onClick: linkSelected },
       { label: 'Dissolve', disabled: !ui.selTasks.length, onClick: dissolveSelected },
@@ -166,6 +173,7 @@ export function ActivitiesView() {
       { label: 'Assign Predecessors...', onClick: () => openDialog('assign', { which: 'pred' }) },
       { label: 'Assign Successors...', onClick: () => openDialog('assign', { which: 'succ' }) },
       { label: 'Assign Resources...', onClick: () => openDialog('assignRsrc') },
+      { label: 'Assign Roles...', onClick: () => openDialog('assignRole') },
       { label: 'Delete Activity', onClick: cmds.del },
       { sep: true, label: '' },
       { label: 'Cut', onClick: cutActivities },
@@ -278,6 +286,7 @@ export function fillDown(): void {
     const now = formatP6Date(Date.now() / 60000);
     for (const t of rest) {
       const row = d.tables.TASK.rows.find((x) => x.task_id === t.task_id)!, copy = { ...row };
+      if (col.edit!.apply) { const e = col.edit!.apply(d, row, value); if (e) errs.push(`${t.task_code}: ${e}`); continue; }
       const err = col.edit!.set(d, copy, value, ctx) || lobRowGuard(d, row, copy);
       if (err) errs.push(`${t.task_code}: ${err}`);
       else if (Object.keys(copy).some((k) => copy[k] !== row[k])) Object.assign(row, copy, { update_date: now });

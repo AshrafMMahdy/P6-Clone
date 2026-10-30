@@ -3,6 +3,9 @@
 // (TRSRCFIN) into the chosen financial period, then sets Actual This Period to zero. With "Link actual to date and
 // actual this period" (which P6 requires), a period's value is the value to date less what the other periods stored;
 // storing the same period again overwrites it, as in P6. Past periods then drive the S-curves (analysis/curves.ts).
+// Financial period calendars (P6 18.8+, FINTMPL): each project reports on one calendar's periods (PROJECT.fintmpl_id,
+// else the default calendar); a period with no calendar of its own belongs to the default one (a file from before
+// calendars, or from a P6 without them, keeps one list of periods).
 import { addField, groupBy, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { removeWhere } from '../journal.ts';
@@ -10,35 +13,60 @@ import { activityCosts, baselineActivities, percentComplete, plannedShare } from
 import { p6num } from '../schedule/cpm.ts';
 
 export const FINDATES_FIELDS = ['fin_dates_id', 'fin_dates_name', 'start_date', 'end_date'] as const;
+export const FINTMPL_FIELDS = ['fintmpl_id', 'fintmpl_name', 'default_flag'] as const;
 const TASKFIN_FIELDS = ['fin_dates_id', 'task_id', 'proj_id', 'act_work_qty', 'act_work_cost', 'act_equip_qty', 'act_equip_cost', 'act_mat_cost', 'act_expense_cost', 'bcwp', 'perfm_work_qty', 'bcws', 'sched_work_qty'] as const;
 const TRSRCFIN_FIELDS = ['fin_dates_id', 'taskrsrc_id', 'task_id', 'proj_id', 'act_qty', 'act_cost'] as const;
 
 const n = (s: string | undefined) => Number(s || 0) || 0;
 const money = (v: number) => (Math.round(v * 100) / 100).toFixed(2);
 
-/** The financial periods, earliest first. */
-export function financialPeriods(db: Db): Row[] {
-  return [...rows(db, 'FINDATES')].sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
+/** The default financial period calendar's id ('' when the file has no calendars). */
+export function defaultCalendarId(db: Db): string {
+  const C = rows(db, 'FINTMPL');
+  return (C.find((c) => c.default_flag === 'Y') ?? C[0])?.fintmpl_id ?? '';
+}
+/** The calendar a period belongs to, and the one a project reports on. */
+export const periodCalendar = (db: Db, f: Row) => f.fintmpl_id || defaultCalendarId(db);
+export const projectCalendar = (db: Db, p: Row) => p.fintmpl_id || defaultCalendarId(db);
+
+/** The financial periods, earliest first: of one calendar when calendarId is given. */
+export function financialPeriods(db: Db, calendarId?: string): Row[] {
+  return rows(db, 'FINDATES').filter((f) => calendarId == null || periodCalendar(db, f) === calendarId).sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
 }
 
-/** The period to store by default: the latest one that starts on a day before the project's data date (the data date
- *  is normally the first day of the next period, at 00:00 or at the work start time). */
+/** The period to store by default: the latest of the project's calendar that starts on a day before its data date (the
+ *  data date is normally the first day of the next period, at 00:00 or at the work start time). */
 export function defaultPeriod(db: Db, project: Row): Row | undefined {
   const day = (project.last_recalc_date || new Date().toISOString()).slice(0, 10);
-  return financialPeriods(db).filter((f) => (f.start_date || '').slice(0, 10) < day).pop();
+  return financialPeriods(db, projectCalendar(db, project)).filter((f) => (f.start_date || '').slice(0, 10) < day).pop();
 }
 
-/** A period that would overlap one already defined (P6 keeps them apart), or null. */
-export function overlapping(db: Db, start: string, end: string, except?: string): Row | null {
+/** A period of the same calendar that would overlap (P6 keeps a calendar's periods apart), or null. */
+export function overlapping(db: Db, start: string, end: string, calendarId: string, except?: string): Row | null {
   const s = parseP6Date(start)!, e = parseP6Date(end)!;
-  return rows(db, 'FINDATES').find((f) => f.fin_dates_id !== except && (parseP6Date(f.start_date) ?? 0) <= e && (parseP6Date(f.end_date) ?? 0) >= s) ?? null;
+  return financialPeriods(db, calendarId).find((f) => f.fin_dates_id !== except && (parseP6Date(f.start_date) ?? 0) <= e && (parseP6Date(f.end_date) ?? 0) >= s) ?? null;
 }
 
-export function addPeriod(db: Db, name: string, start: string, end: string): Row {
+export function addPeriod(db: Db, name: string, start: string, end: string, calendarId = ''): Row {
   const T = table(db, 'FINDATES');
   for (const f of FINDATES_FIELDS) addField(T, f);
-  const r: Row = { fin_dates_id: String(nextId(db, 'FINDATES')), fin_dates_name: name, start_date: start, end_date: end };
+  if (calendarId) addField(T, 'fintmpl_id');
+  const r: Row = { fin_dates_id: String(nextId(db, 'FINDATES')), fin_dates_name: name, start_date: start, end_date: end, ...(calendarId ? { fintmpl_id: calendarId } : {}) };
   T.rows.push(r);
+  return r;
+}
+
+export function addCalendar(db: Db, name: string, isDefault: boolean): Row {
+  const T = table(db, 'FINTMPL');
+  for (const f of FINTMPL_FIELDS) addField(T, f);
+  const first = !T.rows.length;
+  // the periods a file had before its first calendar keep belonging to the default one: written onto them now, so a
+  // later change of default does not move them
+  if (first && rows(db, 'FINDATES').length) { addField(table(db, 'FINDATES'), 'fintmpl_id'); }
+  const r: Row = { fintmpl_id: String(nextId(db, 'FINTMPL')), fintmpl_name: name, default_flag: first || isDefault ? 'Y' : 'N' };
+  if (r.default_flag === 'Y') for (const c of T.rows) c.default_flag = 'N';
+  T.rows.push(r);
+  if (first) for (const f of rows(db, 'FINDATES')) if (!f.fintmpl_id) f.fintmpl_id = r.fintmpl_id;
   return r;
 }
 
@@ -51,6 +79,7 @@ export function storePeriodPerformance(db: Db, projId: string, finDatesId: strin
   if (p._baseline_of) return { error: `${p.proj_short_name} is a baseline; period performance is stored for projects.` };
   const fin = rows(db, 'FINDATES').find((f) => f.fin_dates_id === finDatesId);
   if (!fin) return { error: 'No such financial period.' };
+  if (periodCalendar(db, fin) !== projectCalendar(db, p)) return { error: `${fin.fin_dates_name} is a period of another financial period calendar than ${p.proj_short_name}'s.` };
   if (p.act_this_per_link_flag !== 'Y') return { error: `P6 stores period performance only with "Link actual to date and actual this period units and costs" on (Project Details, Calculations); ${p.proj_short_name} has it off (set_fields PROJECT act_this_per_link_flag = Y).` };
 
   const tasks = rows(db, 'TASK').filter((t) => t.proj_id === projId);
@@ -118,4 +147,64 @@ export function storePeriodPerformance(db: Db, projId: string, finDatesId: strin
   p.last_fin_dates_id = finDatesId;
   const r2 = (x: number) => Math.round(x * 100) / 100;
   return { project: p.proj_short_name, period: fin.fin_dates_name, activities: nTask, assignments: nAsg, stored: Object.fromEntries(Object.entries(total).map(([k, x]) => [k, r2(x)])) as StoreResult['stored'] };
+}
+
+/** The past-period values of an activity, as P6's Financial Period Value columns name them, and their TASKFIN fields. */
+export const PERIOD_VALUES: Record<string, string> = {
+  labor_units: 'act_work_qty', labor_cost: 'act_work_cost', nonlabor_units: 'act_equip_qty', nonlabor_cost: 'act_equip_cost',
+  material_cost: 'act_mat_cost', expense_cost: 'act_expense_cost', earned_value: 'bcwp', earned_value_labor_units: 'perfm_work_qty',
+  planned_value: 'bcws', planned_value_labor_units: 'sched_work_qty',
+};
+const COST = new Set(['act_work_cost', 'act_equip_cost', 'act_mat_cost', 'act_expense_cost', 'bcwp', 'bcws']);
+
+/** Edit stored past-period values (P6: the Financial Period Value columns of the Activity Table, and Actual Units / Cost
+ *  of a period on Activity Details > Resources). An assignment's values (units, cost) are stored on it and its activity's
+ *  value of that kind (labor, nonlabor, material) becomes the sum of its assignments'. As in P6: needs the project's link
+ *  of actual to date and actual this period, an activity with an actual start, and on a milestone only expense cost.
+ *  The stored period changes; actual to date does not (the next Store Period Performance carries the difference). */
+export function setPeriodActuals(db: Db, t: Row, fin: Row, values: Record<string, number>, asg?: Row): { error: string } | { activity: string; period: string; stored: Record<string, string> } {
+  const p = rows(db, 'PROJECT').find((x) => x.proj_id === t.proj_id);
+  if (!p || p._baseline_of) return { error: 'Past-period values are edited on a project, not a baseline.' };
+  if (p.act_this_per_link_flag !== 'Y') return { error: `P6 edits past-period values only with "Link actual to date and actual this period units and costs" on (Project Details, Calculations); ${p.proj_short_name} has it off.` };
+  if (periodCalendar(db, fin) !== projectCalendar(db, p)) return { error: `${fin.fin_dates_name} is a period of another financial period calendar than ${p.proj_short_name}'s.` };
+  if (!t.act_start_date) return { error: `${t.task_code} has no actual start; P6 edits past-period values of started activities only.` };
+  const mile = t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile';
+  const TF = table(db, 'TASKFIN');
+  for (const f of TASKFIN_FIELDS) addField(TF, f);
+  const fid = fin.fin_dates_id, tid = t.task_id;
+  const row = () => {
+    const have = TF.rows.find((r) => r.fin_dates_id === fid && r.task_id === tid);
+    if (have) return have;
+    const r: Row = { fin_dates_id: fid, task_id: tid, proj_id: t.proj_id, act_work_qty: '0', act_work_cost: '0.00', act_equip_qty: '0', act_equip_cost: '0.00', act_mat_cost: '0.00', act_expense_cost: '0.00', bcwp: '0.00', perfm_work_qty: '0', bcws: '0.00', sched_work_qty: '0' };
+    TF.rows.push(r);
+    return TF.rows[TF.rows.length - 1];
+  };
+  if (asg) {
+    if (mile) return { error: `${t.task_code} is a milestone; P6 edits only its past-period expense cost.` };
+    const bad = Object.keys(values).filter((k) => k !== 'units' && k !== 'cost');
+    if (bad.length) return { error: `An assignment's past-period values are units and cost; not ${bad.join(', ')}.` };
+    const RF = table(db, 'TRSRCFIN');
+    for (const f of TRSRCFIN_FIELDS) addField(RF, f);
+    let a = RF.rows.find((r) => r.fin_dates_id === fid && r.taskrsrc_id === asg.taskrsrc_id);
+    if (!a) { RF.rows.push({ fin_dates_id: fid, taskrsrc_id: asg.taskrsrc_id, task_id: tid, proj_id: t.proj_id, act_qty: '0', act_cost: '0.00' }); a = RF.rows[RF.rows.length - 1]; }
+    if (values.units != null) a.act_qty = p6num(values.units);
+    if (values.cost != null) a.act_cost = money(values.cost);
+    // the activity's value of the assignment's kind: the sum of its assignments' for the period
+    const kind = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
+    const type = asg.rsrc_id ? kind.get(asg.rsrc_id) ?? 'RT_Labor' : 'RT_Labor';
+    const mine = new Set(rows(db, 'TASKRSRC').filter((x) => x.task_id === tid && (x.rsrc_id ? kind.get(x.rsrc_id) ?? 'RT_Labor' : 'RT_Labor') === type).map((x) => x.taskrsrc_id));
+    const per = RF.rows.filter((r) => r.fin_dates_id === fid && mine.has(r.taskrsrc_id));
+    const q = per.reduce((s, r) => s + n(r.act_qty), 0), c = per.reduce((s, r) => s + n(r.act_cost), 0);
+    const r = row();
+    if (type === 'RT_Labor') { r.act_work_qty = p6num(q); r.act_work_cost = money(c); }
+    else if (type === 'RT_Equip') { r.act_equip_qty = p6num(q); r.act_equip_cost = money(c); }
+    else r.act_mat_cost = money(c);
+    return { activity: t.task_code, period: fin.fin_dates_name, stored: Object.fromEntries(Object.entries(PERIOD_VALUES).map(([k, f]) => [k, r[f]])) };
+  }
+  const bad = Object.keys(values).filter((k) => !PERIOD_VALUES[k]);
+  if (bad.length) return { error: `Unknown past-period value ${bad.join(', ')}; use ${Object.keys(PERIOD_VALUES).join(', ')}.` };
+  if (mile && Object.keys(values).some((k) => k !== 'expense_cost')) return { error: `${t.task_code} is a milestone; P6 edits only its past-period expense cost.` };
+  const r = row();
+  for (const [k, v] of Object.entries(values)) { const f = PERIOD_VALUES[k]; r[f] = COST.has(f) ? money(v) : p6num(v); }
+  return { activity: t.task_code, period: fin.fin_dates_name, stored: Object.fromEntries(Object.entries(PERIOD_VALUES).map(([k, f]) => [k, r[f]])) };
 }

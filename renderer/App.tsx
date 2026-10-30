@@ -23,7 +23,7 @@ import { AssistantPanel } from './ai/AssistantPanel.tsx';
 import { initLive } from './ai/live.ts';
 import { ScheduleDialog, ScheduleOptionsDialog, UpdateProgressDialog } from './dialogs/ScheduleDialogs.tsx';
 import { NewProjectDialog, ProjectDetailsDialog, DeleteProjectDialog, BaselinesDialog, AssignBaselinesDialog, EpsDialog } from './dialogs/ProjectDialogs.tsx';
-import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
+import { ColumnsDialog, LogDialog, ImportLogDialog, AssignDialog, AssignResourceDialog, AssignRoleDialog, PreferencesDialog, AboutDialog, validateFileTool } from './dialogs/CommonDialogs.tsx';
 import { CalendarsDialog, CodesDialog, UdfDialog, ObsDialog, AccountsDialog, RolesDialog, CurrenciesDialog, LevelDialog, FiltersDialog, FilterEditDialog, TimescaleDialog, LayoutDialog, BUILTIN_LAYOUT, BUILTIN_LAYOUTS, saveLayout, layoutFromUi } from './dialogs/EnterpriseDialogs.tsx';
 import { emptyDb, rows } from '../core/db.ts';
 import { fmtDate, projectName } from './model.ts';
@@ -40,7 +40,7 @@ import { GlobalChangeDialog, GlobalChangeEditDialog, GlobalChangeReportDialog, C
 const DIALOGS: Record<string, (p: any) => JSX.Element> = {
   import: ImportWizard, export: ExportWizard, schedule: ScheduleDialog, schedOptions: ScheduleOptionsDialog, progress: UpdateProgressDialog,
   newProject: NewProjectDialog, projectDetails: ProjectDetailsDialog, deleteProject: DeleteProjectDialog, baselines: BaselinesDialog, eps: EpsDialog,
-  columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, prefs: PreferencesDialog, about: AboutDialog,
+  columns: ColumnsDialog, log: LogDialog, importLog: ImportLogDialog, assign: AssignDialog, assignRsrc: AssignResourceDialog, assignRole: AssignRoleDialog, prefs: PreferencesDialog, about: AboutDialog,
   calendars: CalendarsDialog, codes: CodesDialog, udfs: UdfDialog, obs: ObsDialog, accounts: AccountsDialog, roles: RolesDialog, currencies: CurrenciesDialog,
   level: LevelDialog, filters: FiltersDialog, filterEdit: FilterEditDialog, timescale: TimescaleDialog, bars: BarsDialog, find: FindDialog, globalChange: GlobalChangeDialog, globalChangeEdit: GlobalChangeEditDialog, globalChangeReport: GlobalChangeReportDialog, codeDictionary: CodeDictionaryDialog, runReport: RunReportDialog, reportWizard: ReportWizardDialog, aiSettings: AiSettingsDialog, assignBaselines: AssignBaselinesDialog, layout: LayoutDialog, pageSetup: PageSetupDialog, checkSchedule: CheckScheduleDialog, excelExport: ExcelExportDialog,
   renumber: RenumberDialog, finPeriods: FinancialPeriodsDialog, storePeriod: StorePeriodDialog,
@@ -81,6 +81,7 @@ export function runMenu(id: string): void {
     case 'edit.assignPred': return openDialog('assign', { which: 'pred' });
     case 'edit.assignSucc': return openDialog('assign', { which: 'succ' });
     case 'edit.assignRsrc': return openDialog('assignRsrc');
+    case 'edit.assignRole': return openDialog('assignRole');
     case 'edit.assignCodes': return setUi({ detailTab: 'codes' });
     case 'edit.renumber': return void renumberActivities();
     case 'edit.link': return linkSelected();
