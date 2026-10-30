@@ -34,7 +34,7 @@ import { updateProgress } from '../core/progress/update.ts';
 import { transferProgress, PARTS, type MatchBy, type TransferSpec } from '../core/progress/transfer.ts';
 import { importIntoDb, REMOVABLE, type ImportPlan, type ProjectAction } from '../core/xer/import.ts';
 import { levelResources } from '../core/level/level.ts';
-import { applyOps, OP_GUIDE } from '../core/project/ops.ts';
+import { applyOps, expandSelects, OP_GUIDE } from '../core/project/ops.ts';
 import { makeCtx } from '../core/project/ctx.ts';
 import { TOOLS as LOOKUPS, runTool } from '../core/query/tools.ts';
 import { listTables, projectFilter, readTable } from '../core/query/rawtable.ts';
@@ -380,7 +380,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const pn = ops.findIndex((o: any) => o?.op === 'set_notebook' && (o.activity == null || o.activity === ''));
       if (pn >= 0 && (s.format === 'mspdi' || s.format === 'mpx')) return { ok: false, error: { code: 'unsupported_for_format', index: pn, op: ops[pn], format: s.format, message: `A project notebook cannot be kept in a ${s.format === 'mpx' ? 'MPX' : 'Microsoft Project XML'} file: Microsoft Project has no notebook topics, and its project notes do not map onto a P6 notebook.`, hint: 'Nothing was changed. Save the project as XER or P6 XML (save with format xer or p6xml), open that, and set the notebook there; or put the text on an activity notebook.' } };
       // an LOB plan's activities: their structure is the plan's (lob_edit), progress and the rest are free
-      const lobRefusal = lobGuard(s.db, ops);
+      // a select's activities checked one by one (link_activities and renumber_activities included)
+      const lobRefusal = lobGuard(s.db, ops.some((o: any) => o?.select !== undefined) ? expandSelects(s.db, ops) : ops);
       if (lobRefusal) return { ok: false, error: { code: 'op_failed', message: lobRefusal, hint: 'Use lob_edit for an LOB plan’s durations, crews, locations and logic; progress, notes, resources and other codes edit as usual.' } };
       let r!: ReturnType<typeof applyOps>;
       try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true }); if (!r.ok) throw new Error('refused'); }); }

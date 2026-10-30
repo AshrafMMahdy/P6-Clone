@@ -142,6 +142,29 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   }
 }
 
+/** The operations of a list with each select spelled out as the one-activity operations it stands for (by Activity ID
+ *  and project), link_activities as its add_relationship pairs and renumber_activities as update_activity new_id: for a
+ *  check that reads operations activity by activity (the MCP server's LOB guard). Read only; a select that would be
+ *  refused is left as it is (the edit refuses it). The selects are read against the database as it is before the list. */
+export function expandSelects(db: Db, ops: unknown[]): unknown[] {
+  const out: unknown[] = [];
+  const T = new Map(rows(db, 'TASK').map((t) => [t.task_id, t]));
+  const pid = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
+  for (const raw of ops) {
+    const op = raw as Op;
+    const key = op && typeof op === 'object' && op.select !== undefined ? (op.op === 'link_activities' || op.op === 'renumber_activities' ? '' : SELECT_KEY[op.op]) : undefined;
+    if (key === undefined) { out.push(raw); continue; }
+    const r = applyOps(db, [{ op: '_selected', select: op.select, ...(op.project != null ? { project: op.project } : {}), order: op.op === 'link_activities' ? 'start' : 'id' }]);
+    if (!r.ok) { out.push(raw); continue; }
+    const picked = (r.results[0] as string[]).map((id) => T.get(id)!).filter(Boolean);
+    const { select: _s, ...one } = op;
+    if (op.op === 'link_activities') for (let i = 1; i < picked.length; i++) out.push({ op: 'add_relationship', pred: picked[i - 1].task_code, pred_project: pid.get(picked[i - 1].proj_id), succ: picked[i].task_code, succ_project: pid.get(picked[i].proj_id) });
+    else if (op.op === 'renumber_activities') for (const t of picked) out.push({ op: 'update_activity', id: t.task_code, project: pid.get(t.proj_id), new_id: '(renumbered)' });
+    else for (const t of picked) out.push({ ...one, [key]: t.task_code, project: pid.get(t.proj_id) });
+  }
+  return out;
+}
+
 function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): unknown {
   const calDays = batch.calDays;
   if (!op || typeof op !== 'object' || typeof op.op !== 'string') fail('Each operation needs an "op" name.');
@@ -169,7 +192,12 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
     let hits = byCode(code).filter((t) => pids.has(t.proj_id)).slice(0, 2);
     // an activity a select picked, named by its internal id (its Activity ID may be in several projects)
     const tid = !hits.length ? /^task_id:(.+)$/.exec(code)?.[1] : undefined;
-    if (tid) return pick(rows(db, 'TASK'), (t) => t.task_id === tid && pids.has(t.proj_id), 1)[0] ?? fail(`No activity with task_id ${tid}${proj != null ? ` in ${proj}` : ''}.`);
+    if (tid) {
+      // by an index of the real rows kept for the edit: a scan per picked activity made a select over 10,000 quadratic
+      const T = rows(db, 'TASK'), raw = realOf(T);
+      const i = (rowIndex(raw, 'task_id', (t) => t.task_id).get(tid) ?? []).find((k) => raw[k].task_id === tid && pids.has(raw[k].proj_id));
+      return i != null ? (raw === T ? raw[i] : T[i]) : fail(`No activity with task_id ${tid}${proj != null ? ` in ${proj}` : ''}.`);
+    }
     const uid = !hits.length ? /^uid:\s*(.+)$/i.exec(code)?.[1] : undefined;
     if (uid) hits = pick(rows(db, 'TASK'), (t) => t._msp_uid === uid && pids.has(t.proj_id), 2);
     if (hits.length > 1) fail(`${uid ? `Task UID ${uid}` : `Activity ID "${code}"`} exists in several projects; add "project".`);
@@ -212,6 +240,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
   /** The activities op.select picks; the op's own "project" limits them when the select names none. */
   const selected = (dflt = 'id') => selectActivities(db, op.select && typeof op.select === 'object' && op.project != null && (op.select as Row).project == null ? { ...(op.select as object), project: op.project } : op.select, sel, dflt);
 
+  // (expandSelects: what a select picks, in its order, without changing anything)
+  if (op.op === '_selected') return selected(String(op.order ?? 'id')).map((t) => t.task_id);
   // select: the operation done on every activity a filter picks (P6's select-all then Global Change / Assign / Delete)
   if (op.select !== undefined && op.op !== 'link_activities' && op.op !== 'renumber_activities') {
     const key = SELECT_KEY[op.op] ?? fail(`select works with ${Object.keys(SELECT_KEY).join(', ')}, link_activities and renumber_activities.`);
@@ -221,6 +251,15 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
     // deleting or dissolving them: once for them all (one pass over the tables, not one per activity)
     if (op.op === 'delete_activity') { deleteActivities(db, picked.map((t) => t.task_id)); return { selected: picked.length, deleted: picked.length }; }
     if (op.op === 'dissolve_activity') return { selected: picked.length, dissolved: picked.length, relationships_added: dissolveActivities(db, picked.map((t) => t.task_id)) };
+    // unassigning: each activity's assignment named as the op names it, then all removed in one pass (one per activity
+    // rescanned the assignment, UDF and period tables each time: 11,000 activities took minutes)
+    if (op.op === 'unassign_resource') {
+      const byRole = op.resource == null && op.assigned_role != null;
+      const r = byRole ? null : resource(op.resource), ro = byRole ? role(op.assigned_role) : null, nth = op.nth != null ? num(op.nth, 'nth') : undefined;
+      const ids = new Set(picked.map((t) => namedAssignment(db, t, r, ro, nth, fail).taskrsrc_id));
+      removeAssignments(db, ids);
+      return { selected: picked.length, unassigned: ids.size };
+    }
     // each picked activity by its internal id: "project" stays what the op said (set_predecessors resolves its links by it)
     const { select: _s, ...one } = op;
     const done = picked.map((t) => apply(db, { ...one, [key]: `task_id:${t.task_id}` } as Op, hpd, warnings, batch));

@@ -396,7 +396,14 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
   // calendar gets the default, as P6 assigns it to imported projects
   const cals = rows(db, 'FINTMPL');
   for (const c of cals.filter((x) => x.default_flag === 'Y').slice(1)) c.default_flag = 'N';
-  if (cals.length) { const def = defaultCalendarId(db); for (const p of rows(db, 'PROJECT')) if (projIds.includes(p.proj_id) && !p.fintmpl_id) { if (!db.tables.PROJECT.fields.includes('fintmpl_id')) table(db, 'PROJECT').fields.push('fintmpl_id'); p.fintmpl_id = def; } }
+  if (cals.length) {
+    const def = defaultCalendarId(db);
+    for (const p of rows(db, 'PROJECT')) if (projIds.includes(p.proj_id) && !p.fintmpl_id) { if (!db.tables.PROJECT.fields.includes('fintmpl_id')) table(db, 'PROJECT').fields.push('fintmpl_id'); p.fintmpl_id = def; }
+    // periods with no calendar of their own (a file from before calendars) belong to the default one: written onto them,
+    // as the first calendar does (addCalendar), so a later change of default does not move them away from their projects
+    const loose = rows(db, 'FINDATES').filter((f) => !f.fintmpl_id);
+    if (loose.length) { if (!db.tables.FINDATES.fields.includes('fintmpl_id')) table(db, 'FINDATES').fields.push('fintmpl_id'); for (const f of loose) f.fintmpl_id = def; }
+  }
   return { projIds, findings, map, counts };
 }
 

@@ -1,7 +1,7 @@
 // More edit operations (see ops.ts): WBS changes, codes, UDFs, notebooks, cost accounts and expenses, steps,
 // risk estimates, baselines, EPS/OBS/roles, calendar changes and assignment details. Same rules as ops.ts:
 // addressed by IDs and names a scheduler sees, durations in days, one transaction per list.
-import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, table, ermhdrFields, ermhdrIdentity, type Db, type Row } from '../db.ts';
+import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, rowsBy, table, ermhdrFields, ermhdrIdentity, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
 import { assignmentActuals, assignmentDetails, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
@@ -198,7 +198,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     const t = h.activity(o.activity, o.project);
     const name = str(o.name, 'name');
     const tid = t.task_id, key = lc(name);
-    const hits = pick(rows(db, 'PROJCOST'), (c) => c.task_id === tid && lc(c.cost_name) === key); // the real rows searched: a view's scan per op was slow
+    const hits = rowsBy(rows(db, 'PROJCOST'), 'task', (c) => c.task_id, tid).filter((c) => lc(c.cost_name) === key); // by an index: a scan per op made a select over every activity quadratic
     if (hits.length > 1) fail(`Activity ${t.task_code} has several expenses named "${name}".`);
     return { t, c: hits[0] ?? fail(`Activity ${t.task_code} has no expense "${name}".`) };
   };
@@ -216,7 +216,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
   const step = (o: Op) => {
     const t = h.activity(o.activity, o.project);
     const name = str(o.name, 'name');
-    return { t, s: rows(db, 'TASKPROC').find((s) => s.task_id === t.task_id && lc(s.proc_name) === lc(name)) ?? fail(`Activity ${t.task_code} has no step "${name}".`) };
+    return { t, s: rowsBy(rows(db, 'TASKPROC'), 'task', (s) => s.task_id, t.task_id).find((s) => lc(s.proc_name) === lc(name)) ?? fail(`Activity ${t.task_code} has no step "${name}".`) };
   };
   const setStep = (s: Row, o: Op) => {
     if (o.weight != null) { const w = num(o.weight, 'weight'); if (w < 0) fail('weight cannot be negative.'); s.proc_wt = p6num(w); }
@@ -264,7 +264,12 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     case 'update_financial_period_calendar': {
       const c = finCalendar(op.name);
       if (op.new_name != null) { const nn = str(op.new_name, 'new_name'); if (rows(db, 'FINTMPL').some((x) => x !== c && lc(x.fintmpl_name) === lc(nn))) fail(`Financial period calendar "${nn}" already exists.`); c.fintmpl_name = nn; }
-      if (op.default === true) { for (const x of rows(db, 'FINTMPL')) x.default_flag = x === c ? 'Y' : 'N'; }
+      if (op.default === true) {
+        // periods without a calendar of their own are the old default's: kept there (P6 moves no period with the default)
+        const was = defaultCalendarId(db), loose = rows(db, 'FINDATES').filter((f) => !f.fintmpl_id);
+        if (was && loose.length) { addField(table(db, 'FINDATES'), 'fintmpl_id'); for (const f of loose) f.fintmpl_id = was; }
+        for (const x of rows(db, 'FINTMPL')) x.default_flag = x === c ? 'Y' : 'N';
+      }
       return { financial_period_calendar: c.fintmpl_name, default: c.default_flag === 'Y' };
     }
     case 'delete_financial_period_calendar': {
@@ -620,7 +625,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     case 'add_expense': {
       const t = h.activity(op.activity, op.project);
       const name = str(op.name, 'name');
-      if (rows(db, 'PROJCOST').some((c) => c.task_id === t.task_id && lc(c.cost_name) === lc(name))) fail(`Activity ${t.task_code} already has an expense "${name}".`);
+      if (rowsBy(rows(db, 'PROJCOST'), 'task', (c) => c.task_id, t.task_id).some((c) => lc(c.cost_name) === lc(name))) fail(`Activity ${t.task_code} already has an expense "${name}".`);
       const T = ensure(db, 'PROJCOST', PROJCOST_FIELDS);
       const c: Row = { cost_item_id: String(nextId(db, 'PROJCOST')), acct_id: '', pobs_id: '', cost_type_id: '', proj_id: t.proj_id, task_id: t.task_id, cost_name: name, po_number: '', vendor_name: '', act_cost: '0', cost_per_qty: '0', remain_cost: '0', target_cost: '0', cost_load_type: 'CL_Uniform', auto_compute_act_flag: 'N', target_qty: '0', qty_name: '', cost_descr: '', contract_manager_import: 'N' };
       T.rows.push(c);
@@ -637,10 +642,13 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     case 'add_step': {
       const t = h.activity(op.activity, op.project);
       const name = str(op.name, 'name');
-      if (rows(db, 'TASKPROC').some((s) => s.task_id === t.task_id && lc(s.proc_name) === lc(name))) fail(`Activity ${t.task_code} already has a step "${name}".`);
+      // the activity's steps by an index, the new id by nextId: a scan of every step per op made a select over every
+      // activity quadratic (and a spread of every id into Math.max overflows the stack past ~100,000 steps)
       const T = ensure(db, 'TASKPROC', STEP_FIELDS);
-      const seq = Math.max(0, ...T.rows.filter((s) => s.task_id === t.task_id).map((s) => Number(s.seq_num) || 0)) + 10;
-      const s: Row = { proc_id: String(Math.max(0, ...T.rows.map((r) => Number(r.proc_id) || 0)) + 1), task_id: t.task_id, proj_id: t.proj_id, seq_num: String(seq), proc_name: name, complete_flag: 'N', proc_wt: '1', complete_pct: '0', proc_descr: '' };
+      const mine = rowsBy(T.rows, 'task', (s) => s.task_id, t.task_id);
+      if (mine.some((s) => lc(s.proc_name) === lc(name))) fail(`Activity ${t.task_code} already has a step "${name}".`);
+      const seq = mine.reduce((m, s) => Math.max(m, Number(s.seq_num) || 0), 0) + 10;
+      const s: Row = { proc_id: String(nextId(db, 'TASKPROC')), task_id: t.task_id, proj_id: t.proj_id, seq_num: String(seq), proc_name: name, complete_flag: 'N', proc_wt: '1', complete_pct: '0', proc_descr: '' };
       T.rows.push(s);
       setStep(s, op);
       syncFromSteps(db, t.task_id);

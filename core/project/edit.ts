@@ -18,9 +18,25 @@ export function normDate(v: string): string | null {
 
 /** The activity's work calendar (its own, else the project's). */
 export function calOf(db: Db, r: Row) {
+  // the work calendar is the same for the same calendar rows (its own and its base's): kept by their text, so an edit of
+  // 10,000 activities parses each calendar once, not once per activity (a calendar edited mid-edit has new text)
+  const C = realOf(rows(db, 'CALENDAR'));
+  const parts: string[] = [];
+  for (let id = r.clndr_id, n = 0; id && n <= 10; n++) {
+    const c = C.find((x) => x.clndr_id === id);
+    if (!c) break;
+    parts.push(`${c.clndr_id}\u0001${c.clndr_data ?? ''}\u0001${c.day_hr_cnt ?? ''}\u0001${c.week_hr_cnt ?? ''}`);
+    id = c.base_clndr_id && c.base_clndr_id !== c.clndr_id ? c.base_clndr_id : '';
+  }
+  const key = parts.join('\u0002');
+  const hit = parts.length ? CAL_CACHE.get(key) : undefined;
+  if (hit) return hit;
   const cals = calendarResolver(db, []);
-  return cals.get(r.clndr_id) ?? cals.fallback(rows(db, 'PROJECT').find((p) => p.proj_id === r.proj_id)?.clndr_id);
+  const cal = cals.get(r.clndr_id) ?? cals.fallback(rows(db, 'PROJECT').find((p) => p.proj_id === r.proj_id)?.clndr_id);
+  if (parts.length) { if (CAL_CACHE.size >= 256) CAL_CACHE.clear(); CAL_CACHE.set(key, cal); }
+  return cal;
 }
+const CAL_CACHE = new Map<string, ReturnType<ReturnType<typeof calendarResolver>['fallback']>>();
 /**
  * After an edit, P6 shows the activity's own new dates at once (other activities move on the next F9):
  * the finish is the start plus the remaining duration on the activity's calendar.

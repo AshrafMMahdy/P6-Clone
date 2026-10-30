@@ -42,7 +42,8 @@ const under = (all: Row[], ids: Set<string>, idF: string, parentF: string) => {
 };
 const startOf = (t: Row) => t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date || '';
 const finishOf = (t: Row) => t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date || '';
-const byId = (a: Row, b: Row) => String(a.task_code).localeCompare(String(b.task_code), undefined, { numeric: true });
+const ID_ORDER = new Intl.Collator(undefined, { numeric: true }); // one collator: localeCompare with options per pair was slow on 10,000 rows
+const byId = (a: Row, b: Row) => ID_ORDER.compare(String(a.task_code), String(b.task_code));
 
 /** The activities a select picks, in its order. */
 export function selectActivities(db: Db, sel: unknown, h: SelectHelpers, defaultOrder = 'id'): Row[] {
@@ -131,10 +132,14 @@ function filterBy(db: Db, from: Row[], s: Record<string, unknown>, ids: string[]
     if (!u || typeof u !== 'object') fail('select.udf must be {udf, value} (or {udf, op, value}, or {udf, empty: true}), or a list of them.');
     const { udf, op, value, empty } = u as Record<string, unknown>;
     const ut = rows(db, 'UDFTYPE').find((x) => x.table_name === 'TASK' && lc(x.udf_type_label) === lc(udf)) ?? fail(`select.udf: no activity UDF "${udf}".`);
-    const field = ut.logical_data_type === 'FT_TEXT' ? 'udf_text' : /DATE/.test(ut.logical_data_type) ? 'udf_date' : /CODE/.test(ut.logical_data_type) ? 'udf_code_id' : 'udf_number';
-    const vals = new Map(rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === ut.udf_type_id).map((v) => [v.fk_id, v]));
+    // where each kind keeps its value (set_udf): an indicator its icon code as text, a code UDF the code value's id
+    // (compared here by the value's code, as a user names it)
+    const dt = ut.logical_data_type;
+    const field = dt === 'FT_TEXT' || dt === 'FT_STATICTYPE' ? 'udf_text' : /DATE/.test(dt) ? 'udf_date' : /CODE/.test(dt) ? 'udf_code_id' : 'udf_number';
+    const codeName = /CODE/.test(dt) ? new Map(rows(db, 'UDFCODE').map((c) => [c.udf_code_id, c.short_name || c.udf_code_name || ''])) : null;
+    const vals = new Map(rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === ut.udf_type_id).map((v) => [v.fk_id, codeName ? { ...v, udf_code_id: codeName.get(v.udf_code_id) ?? '' } : v]));
     if (empty === true) { picked = picked.filter((t) => !(vals.get(t.task_id)?.[field] ?? '')); continue; }
-    const test = whereTest({ [field]: op != null ? { op, value } : value }, fail);
+    const test = whereTest({ [field]: op != null ? { op, value } : dt === 'FT_STATICTYPE' && typeof value === 'string' ? value.toUpperCase() : value }, fail);
     picked = picked.filter((t) => { const v = vals.get(t.task_id); return !!v && test(v); });
   }
   if (s.resource != null) {

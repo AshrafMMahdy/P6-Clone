@@ -18,6 +18,9 @@ const TASKFIN_FIELDS = ['fin_dates_id', 'task_id', 'proj_id', 'act_work_qty', 'a
 const TRSRCFIN_FIELDS = ['fin_dates_id', 'taskrsrc_id', 'task_id', 'proj_id', 'act_qty', 'act_cost'] as const;
 
 const n = (s: string | undefined) => Number(s || 0) || 0;
+/** An assignment's kind (labor, nonlabor, material): its resource's type; a role assignment with no resource yet is
+ *  labor (TASKRSRC.rsrc_type, which the clone writes RT_Labor for it). Store and the edit of a past period agree on it. */
+const kindOf = (types: Map<string, string>) => (a: Row) => (a.rsrc_id ? types.get(a.rsrc_id) : undefined) ?? (a.rsrc_type || 'RT_Labor');
 const money = (v: number) => (Math.round(v * 100) / 100).toFixed(2);
 
 /** The default financial period calendar's id ('' when the file has no calendars). */
@@ -92,7 +95,7 @@ export function storePeriodPerformance(db: Db, projId: string, finDatesId: strin
   const ids = new Set(tasks.map((t) => t.task_id));
   const asgBy = groupBy(rows(db, 'TASKRSRC').filter((a) => ids.has(a.task_id)), 'task_id');
   const expBy = groupBy(rows(db, 'PROJCOST').filter((c) => ids.has(c.task_id)), 'task_id');
-  const kind = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
+  const kind = kindOf(new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type])));
   // what the other periods hold (this period's own rows are overwritten)
   const otherTask = groupBy(rows(db, 'TASKFIN').filter((f) => ids.has(f.task_id) && f.fin_dates_id !== finDatesId), 'task_id');
   const otherAsg = groupBy(rows(db, 'TRSRCFIN').filter((f) => ids.has(f.task_id) && f.fin_dates_id !== finDatesId), 'taskrsrc_id');
@@ -105,7 +108,7 @@ export function storePeriodPerformance(db: Db, projId: string, finDatesId: strin
   const laborBudget = (t: Row) => {
     const b = bl.get(`${projId}|${t.task_code}`);
     const src = blAsg ? (b ? blAsg.get(b.task_id) ?? [] : []) : asgBy.get(t.task_id) ?? [];
-    return src.filter((a) => kind.get(a.rsrc_id) === 'RT_Labor').reduce((s, a) => s + n(a.target_qty), 0);
+    return src.filter((a) => kind(a) === 'RT_Labor').reduce((s, a) => s + n(a.target_qty), 0);
   };
 
   const TF = table(db, 'TASKFIN'), RF = table(db, 'TRSRCFIN');
@@ -117,10 +120,10 @@ export function storePeriodPerformance(db: Db, projId: string, finDatesId: strin
   let nTask = 0, nAsg = 0;
   for (const t of tasks) {
     const A = asgBy.get(t.task_id) ?? [], E = expBy.get(t.task_id) ?? [];
-    const sum = (type: string, f: (a: Row) => number) => A.filter((a) => kind.get(a.rsrc_id) === type).reduce((s, a) => s + f(a), 0);
+    const sum = (type: string, f: (a: Row) => number) => A.filter((a) => kind(a) === type).reduce((s, a) => s + f(a), 0);
     // units to date: the assignments', or the activity's own actual units when it has none of that kind (P6 keeps them
     // on the activity then; imported files and transfer_progress write them)
-    const units = (type: string, own: string) => (A.some((a) => kind.get(a.rsrc_id) === type) ? sum(type, (a) => n(a.act_reg_qty) + n(a.act_ot_qty)) : n(t[own]));
+    const units = (type: string, own: string) => (A.some((a) => kind(a) === type) ? sum(type, (a) => n(a.act_reg_qty) + n(a.act_ot_qty)) : n(t[own]));
     const qty = (a: Row) => n(a.act_reg_qty) + n(a.act_ot_qty), cost = (a: Row) => n(a.act_reg_cost) + n(a.act_ot_cost);
     const c = costs.get(t.task_id)!;
     const frac = plannedShare(t, bl.get(`${projId}|${t.task_code}`), dd), pct = percentComplete(t, A), lb = laborBudget(t);
@@ -198,9 +201,9 @@ export function setPeriodActuals(db: Db, t: Row, fin: Row, values: Record<string
     if (values.units != null) a.act_qty = p6num(values.units);
     if (values.cost != null) a.act_cost = money(values.cost);
     // the activity's value of the assignment's kind: the sum of its assignments' for the period
-    const kind = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
-    const type = asg.rsrc_id ? kind.get(asg.rsrc_id) ?? 'RT_Labor' : 'RT_Labor';
-    const mine = new Set(rows(db, 'TASKRSRC').filter((x) => x.task_id === tid && (x.rsrc_id ? kind.get(x.rsrc_id) ?? 'RT_Labor' : 'RT_Labor') === type).map((x) => x.taskrsrc_id));
+    const kind = kindOf(new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type])));
+    const type = kind(asg);
+    const mine = new Set(rows(db, 'TASKRSRC').filter((x) => x.task_id === tid && kind(x) === type).map((x) => x.taskrsrc_id));
     const per = RF.rows.filter((r) => r.fin_dates_id === fid && mine.has(r.taskrsrc_id));
     const q = per.reduce((s, r) => s + n(r.act_qty), 0), c = per.reduce((s, r) => s + n(r.act_cost), 0);
     const r = row();
