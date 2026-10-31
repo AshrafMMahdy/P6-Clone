@@ -686,3 +686,24 @@ test('a percentage or elapsed lag converted to hours keeps the file\'s own value
   const p6 = readTable(load(), 'TASKPRED', null, { limit: 5 });
   assert.ok(!p6.columns.some((c) => c.startsWith('clone:msp_lag')));
 });
+
+test('list_wbs gives each summary its original duration (project calendar, first start to last finish) and least total float', async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'SUMD', start: '2026-03-02' })).d;   // a Monday; 8-hour Monday-Friday week
+  const H = { handle: np.handle, owner_key: np.owner_key };
+  const e = await call('edit', { ...H, operations: [{ op: 'add_wbs', code: 'A' }, { op: 'add_wbs', code: 'B' },
+    { op: 'add_activity', id: 'A1', name: 'a1', wbs: 'A', duration_days: 5 }, { op: 'add_activity', id: 'A2', name: 'a2', wbs: 'A', duration_days: 3 },
+    { op: 'add_activity', id: 'B1', name: 'b1', wbs: 'B', duration_days: 2 },
+    { op: 'add_relationship', pred: 'A1', succ: 'A2' }, { op: 'add_relationship', pred: 'B1', succ: 'A2' }] });
+  assert.equal(e.err, false, JSON.stringify(e.d).slice(0, 300));
+  assert.equal((await call('schedule', { handle: np.handle, log: false })).err, false);
+  const w = (await call('list_wbs', { handle: np.handle, depth: 5 })).d;
+  const by = (c: string) => w.wbs.find((x: any) => x.code === c);
+  assert.equal(by('A').orig_days, 8, JSON.stringify(by('A')));      // Mon 2 Mar to Wed 11 Mar: 8 working days over the weekend
+  assert.equal(by('A').total_float_days, 0);
+  assert.equal(by('B').orig_days, 2);
+  assert.equal(by('B').total_float_days, 3);                        // B1 can slip until A1's finish
+  assert.equal(w.wbs[0].orig_days, 8);
+  await call('close', { ...H, discard: true });
+});
