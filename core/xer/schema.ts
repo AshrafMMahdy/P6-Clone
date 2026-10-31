@@ -54,7 +54,7 @@ export function knownFields(tableName: string): Set<string> {
   return s;
 }
 
-/** Fields of a modern P6 (financial period calendars, 18.8+) beyond the sample layouts the schema was built from:
+/** Fields of a modern P6 (financial period calendars, 20.12+) beyond the sample layouts the schema was built from:
  *  FINTMPL (fintmpl_id, fintmpl_name, default_flag) as real P6 6.0 / 20.12 / 24.12 XERs write it (downloaded XERs/),
  *  PROJECT.fintmpl_id from Oracle's XER Import/Export Data Map (v23); FINDATES.fintmpl_id after P6's API
  *  (FinancialPeriod.FinancialPeriodTemplateId; no real XER seen with periods and calendars together). */
@@ -73,7 +73,7 @@ export const TABLE_ORDER: string[] = (() => {
   const order = [...observed.tableOrder];
   const insertBefore = (t: string, before: string) => { if (!order.includes(t)) order.splice(Math.max(0, order.indexOf(before)), 0, t); };
   insertBefore('NONWORK', 'OBS');
-  insertBefore('FINTMPL', 'MEMOTYPE');
+  insertBefore('FINTMPL', 'FINDATES'); // a real 24.12 XER: right after CURRTYPE, before the periods that name it
   insertBefore('LOCATION', 'MEMOTYPE');
   insertBefore('SHIFT', 'UDFTYPE');
   insertBefore('SHIFTPER', 'UDFTYPE');
