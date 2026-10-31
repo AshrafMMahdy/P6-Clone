@@ -12,6 +12,7 @@ import { writeXer } from '../core/xer/write.ts';
 import { Chunked, writeP6XmlTo, p6xmlLossNotes, p6xmlLosses, P6XML_ENUMS, P6XML_NOT_CARRIED, P6XML_PARTLY_CARRIED, P6XML_ROOT_MAP, P6XML_ROOT_NOT_CARRIED, P6XML_SPECIAL_TABLES, P6XML_TABLES, parseP6Xml, parseXml, writeP6Xml, type XNode } from '../core/xml/p6xml.ts';
 import { parseClndrData, parseClndrDataLeniently } from '../core/calendar/clndr-data.ts';
 import { KEYS, type Db, type Row } from '../core/db.ts';
+import { knownFields } from '../core/xer/schema.ts';
 import { SAMPLES_DIR } from './helpers.ts';
 
 const NAMES = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'core', 'xml', 'p6apibo-names.json'), 'utf8')) as Record<string, string[]>;
@@ -68,7 +69,8 @@ test('every field an XER can hold is carried by the P6 XML writer or listed with
   const fields = new Map<string, Set<string>>();
   const add = (t: string, f: string) => (fields.get(t) ?? fields.set(t, new Set()).get(t)!).add(f);
   for (const v of Object.values(OBSERVED.versions)) for (const [t, l] of Object.entries(v)) for (const x of l) x.fields.forEach((f) => add(t, f));
-  for (const f of samples) { const db = load(f); if (db) for (const [t, T] of Object.entries(db.tables)) if (!t.startsWith('_')) T.fields.filter((x) => !x.startsWith('_')).forEach((x) => add(t, x)); }
+  // (a sample's own fields that are P6's: a field P6 does not have, in a file a planning agent wrote, P6 ignores on import)
+  for (const f of samples) { const db = load(f); if (db) for (const [t, T] of Object.entries(db.tables)) if (!t.startsWith('_')) { const p6 = knownFields(t); T.fields.filter((x) => !x.startsWith('_') && (p6.has(x) || !p6.size)).forEach((x) => add(t, x)); } }
   const left: string[] = [];
   for (const [t, fs] of fields) {
     if (P6XML_NOT_CARRIED[t]) continue; // a whole table
@@ -110,7 +112,10 @@ test('XER -> P6 XML -> read back equals the XER, field for field, on every sampl
       const A: Row[] = a.tables[t]?.rows ?? [];
       if (!A.length) continue;
       const B: Row[] = b.tables[t]?.rows ?? [];
-      const own = t === 'PROJWBS' ? (r: Row) => r.proj_node_flag !== 'Y' : () => true; // the root WBS node is the Project element
+      // the root WBS node is the Project element; a UDF value whose type has no P6 data type (FT_DATE, written by an agent)
+      // has no value element to go under (the writer reports it lost)
+      const udfOk = new Set((a.tables.UDFTYPE?.rows ?? []).filter((u) => u.logical_data_type in P6XML_ENUMS.udf_data_type).map((u) => u.udf_type_id));
+      const own = t === 'PROJWBS' ? (r: Row) => r.proj_node_flag !== 'Y' : t === 'UDFVALUE' ? (r: Row) => udfOk.has(r.udf_type_id) : () => true;
       const keyed = KEYS[t] && A.some((r) => r[KEYS[t]]);
       const sig = SIG[t] ?? (keyed ? [KEYS[t]] : t === 'TASKPRED' ? ['task_id', 'pred_task_id', 'pred_type'] : null);
       const fields = map.filter((m) => m[2] !== 'legacy' && !(sig ?? []).includes(m[1])).map((m) => m[1]);

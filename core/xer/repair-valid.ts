@@ -64,6 +64,29 @@ function badFields(table: string, r: Row): string[] {
   return out;
 }
 
+/** The activities (TASK rows) that cannot be identified, each with why: no readable task_id, Activity ID or WBS, or a
+ *  row made from a damaged line (its columns shifted). P6 does not load them as activities; repairToValid removes them.
+ *  Read only. bad: each row's fields that cannot be read. */
+export function unidentified(db: Db): { why: Map<Row, string>; bad: Map<Row, string[]> } {
+  const wbsById = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
+  const tasks = rows(db, 'TASK');
+  const bad = new Map(tasks.map((t, i) => [t, badFields('TASK', realOf(tasks)[i])])); // read the real rows: a scan through the undo journal is slow
+  const why = new Map<Row, string>();
+  // a code of one field found in another (task_type "DT_FixedDUR2", status "TK_..." in duration_type): its columns shifted
+  const domains = ['task_type', 'status_code', 'duration_type', 'complete_pct_type'].map((f) => [f, new Set(ENUMS[`TASK.${f}`])] as const);
+  const shifted = (t: Row) => domains.filter(([f, own]) => t[f] && !own.has(t[f]) && domains.some(([g, other]) => g !== f && other.has(t[f]))).length;
+  for (const t of tasks) {
+    const b = bad.get(t)!;
+    if (!/^\d+$/.test(t.task_id ?? '')) why.set(t, `no readable task_id ("${t.task_id}")`);
+    else if (!t.task_code) why.set(t, 'no Activity ID');
+    else if (t.task_code.length > MAX_LEN['TASK.task_code']) why.set(t, `a row made from a damaged line: its Activity ID column holds "${t.task_code.slice(0, 40)}…", longer than any ID (its columns are shifted)`);
+    else if (!wbsById.has(t.wbs_id)) why.set(t, `no readable WBS (wbs_id "${t.wbs_id}")`);
+    else if (isNum(t.task_name ?? '') && b.length) why.set(t, `a row made from a damaged line: its name is the number "${t.task_name}" and ${b.slice(0, 4).join(', ')} cannot be read`);
+    else if (shifted(t) >= 2) why.set(t, `a row made from a damaged line: ${domains.filter(([f]) => t[f] && !ENUMS[`TASK.${f}`].includes(t[f])).map(([f]) => `${f} holds "${t[f]}"`).join(', ')} (its columns are shifted)`);
+  }
+  return { why, bad };
+}
+
 export function repairToValid(db: Db): { changes: RepairChange[]; findings: RepairFinding[] } {
   const changes: RepairChange[] = [], findings: RepairFinding[] = [];
   const T = db.tables;
@@ -105,20 +128,7 @@ export function repairToValid(db: Db): { changes: RepairChange[]; findings: Repa
   // ---- activities that cannot be identified (and duplicates: the damaged copy of an id goes)
   const projIds = new Set(rows(db, 'PROJECT').map((p) => p.proj_id)), wbsById = new Map(rows(db, 'PROJWBS').map((w) => [w.wbs_id, w]));
   const tasks = rows(db, 'TASK');
-  const bad = new Map(tasks.map((t, i) => [t, badFields('TASK', realOf(tasks)[i])])); // read the real rows: a scan through the undo journal is slow
-  const why = new Map<Row, string>();
-  // a code of one field found in another (task_type "DT_FixedDUR2", status "TK_..." in duration_type): its columns shifted
-  const domains = ['task_type', 'status_code', 'duration_type', 'complete_pct_type'].map((f) => [f, new Set(ENUMS[`TASK.${f}`])] as const);
-  const shifted = (t: Row) => domains.filter(([f, own]) => t[f] && !own.has(t[f]) && domains.some(([g, other]) => g !== f && other.has(t[f]))).length;
-  for (const t of tasks) {
-    const b = bad.get(t)!;
-    if (!/^\d+$/.test(t.task_id ?? '')) why.set(t, `no readable task_id ("${t.task_id}")`);
-    else if (!t.task_code) why.set(t, 'no Activity ID');
-    else if (t.task_code.length > MAX_LEN['TASK.task_code']) why.set(t, `a row made from a damaged line: its Activity ID column holds "${t.task_code.slice(0, 40)}…", longer than any ID (its columns are shifted)`);
-    else if (!wbsById.has(t.wbs_id)) why.set(t, `no readable WBS (wbs_id "${t.wbs_id}")`);
-    else if (isNum(t.task_name ?? '') && b.length) why.set(t, `a row made from a damaged line: its name is the number "${t.task_name}" and ${b.slice(0, 4).join(', ')} cannot be read`);
-    else if (shifted(t) >= 2) why.set(t, `a row made from a damaged line: ${domains.filter(([f]) => t[f] && !ENUMS[`TASK.${f}`].includes(t[f])).map(([f]) => `${f} holds "${t[f]}"`).join(', ')} (its columns are shifted)`);
-  }
+  const { why, bad } = unidentified(db);
   // a task_id two rows claim: the cleanest copy keeps it; another copy that its Activity ID identifies gets a fresh id
   // (what points at that id is the other copy's), else it cannot be identified
   const byId = new Map<string, Row[]>();

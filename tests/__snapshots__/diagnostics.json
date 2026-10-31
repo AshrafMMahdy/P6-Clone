@@ -167,11 +167,18 @@
   "warning:FORECAST_BEFORE_DD": 1
  },
  "PDC1_Baseline_Rev0.xer": {
+  "error:BAD_ENUM": 14,
   "error:DATA_AFTER_END": 1,
-  "fatal:NO_PROJECT": 1,
+  "fatal:NO_PROJ_NODE": 1,
   "info:ENCODING_UTF8": 1,
+  "info:MISSING_FIELD": 9,
+  "warning:CAL_NO_DATA": 1,
+  "warning:DANGLING_REF": 13,
+  "warning:FIELD_COUNT_SHORT": 6,
+  "warning:FIELD_UNKNOWN": 18,
+  "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
-  "warning:NO_TASK": 1
+  "warning:WBS_ORPHAN": 6
  },
  "Polaris_Baseline.xer": {
   "fatal:MISSING_KEY_FIELD": 1,

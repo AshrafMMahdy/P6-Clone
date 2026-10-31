@@ -22,7 +22,7 @@ import { detectFormat, exportFile, importChecks, readRaw, type Format } from '..
 import { writeXer, writeXerTo } from '../core/xer/write.ts';
 import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
-import { REFUSED_ACTUALS, repairToValid } from '../core/xer/repair-valid.ts';
+import { REFUSED_ACTUALS, repairToValid, unidentified } from '../core/xer/repair-valid.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { p6xmlLossNotes, p6xmlLosses, writeP6Xml, writeP6XmlTo } from '../core/xml/p6xml.ts';
 import { writeMspdiTo } from '../core/msp/mspdi.ts';
@@ -339,7 +339,14 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const lob = lobInfo.length ? { lob: lobInfo } : {};
         // opened from a Microsoft Project file (by its format: the .mpx / MSPDI content the reader saw): Project's rules
         if (format === 'mspdi' || format === 'mpx' || format === 'mpp') for (const p of r.db.tables.PROJECT?.rows ?? []) if (p._msp_source !== 'Y') { addField(r.db.tables.PROJECT, '_msp_source'); p._msp_source = 'Y'; }
-        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0), ...lob };
+        // activities P6 does not load (rows made from damaged lines, no readable id): named with their line, so a reader
+        // of the file's rows (read_table) knows they are not activities; a save with repair removes them
+        const unreadable = () => {
+          const T = r.db.tables.TASK?.rows ?? [], at = new Map(T.map((t, i) => [t, i]));
+          const list = [...unidentified(r.db).why].map(([t, why]) => { const i = at.get(t) ?? -1; return { table: 'TASK', row: i + 1, ...(r.meta?.taskLines?.[i] ? { line: r.meta.taskLines[i] } : {}), task_id: t.task_id ?? '', activity_id: String(t.task_code ?? '').slice(0, 60), reason: why }; }).sort((x, y) => x.row - y.row);
+          return list.length ? { unreadable_rows: { total: list.length, rows: list.slice(0, 500), note: 'TASK rows P6 does not load as activities (read_table still lists them as they are in the file); save with repair: true removes them.' } } : {};
+        };
+        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0), ...unreadable(), ...lob };
         // lenient: repair what can be repaired without guessing (key columns, ids), then judge the file again
         const fix = repairKeys(r.db);
         const g = fix.repaired.length ? importChecks(r.db, r.findings, format) : f;
@@ -354,7 +361,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still,
           note: still ? 'P6 would still reject this project if it were saved now: the fatal findings in diagnostics (and not_repaired) were not repaired automatically. Fix them with edit operations before P6 gets the file.'
             : fix.repaired.length ? 'Opened with repairs (diagnostics.repaired): a save writes a file P6 imports.' : 'Opened; nothing needed repairing.',
-          diagnostics: { ...brief(g), repaired: fix.repaired, not_repaired: fix.not_repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0),
+          diagnostics: { ...brief(g), repaired: fix.repaired, not_repaired: fix.not_repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0), ...unreadable(), ...lob,
         };
       } catch (e) { closeSession(s0); throw e; } finally { reading(); }
     }

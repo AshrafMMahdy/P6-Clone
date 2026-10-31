@@ -2,7 +2,7 @@ import { ValuePool, type Db, type PoolColumn, type Row, type Table } from '../db
 import { detectCodepage, encodingLabel, SAMPLE, textDecoder, type TextEncodingName } from '../encoding.ts';
 import type { Finding } from '../findings.ts';
 
-export interface ParseMeta { encoding: TextEncodingName; lineEnding: 'CRLF' | 'LF' | 'mixed'; hasEnd: boolean; /** a byte over 0x7F after the byte order mark */ nonAscii?: boolean }
+export interface ParseMeta { encoding: TextEncodingName; lineEnding: 'CRLF' | 'LF' | 'mixed'; hasEnd: boolean; /** a byte over 0x7F after the byte order mark */ nonAscii?: boolean; /** the file's line of each TASK row, in order (a damaged row is named by its line) */ taskLines?: number[] }
 
 /** Where the bytes come from: a file is read a chunk at a time (never whole), an array is read in place. */
 export interface ByteSource { size: number; read(pos: number, len: number): Uint8Array }
@@ -82,7 +82,7 @@ export function parseXerSource(src: ByteSource, opts: { encoding?: TextEncodingN
   const db: Db = { tables: {} };
   const lineEnding = crlf && lf > 1 ? 'mixed' : lf > crlf ? 'LF' : 'CRLF';
   const nonAscii = encoding.startsWith('utf-8') && hi;
-  const meta: ParseMeta = { encoding, lineEnding, hasEnd: false, nonAscii: hi };
+  const meta: ParseMeta = { encoding, lineEnding, hasEnd: false, nonAscii: hi, taskLines: [] };
 
   if (nonAscii) findings.push({
     severity: 'info', code: 'ENCODING_UTF8', message: `File is ${encoding}; P6 writes XER in the Windows code page of the exporting computer.`,
@@ -119,9 +119,21 @@ export function parseXerSource(src: ByteSource, opts: { encoding?: TextEncodingN
   let template: Row = {};
   let cols: PoolColumn[] = [];
   let sawHeader = false;
+  // %E markers with data after them (a file some tool wrote with %E after each table, or after each row): the data is
+  // read on as if the markers were not there, so nothing in the file is lost and the file can be repaired (the clone
+  // writes one %E, at the end); the marker is reported
+  let endAt = 0, strayEnds = 0;
+  const after = { lines: 0, tables: new Set<string>(), first: 0 };
   for (let line = nextLine(); line !== null; line = nextLine()) {
     const parts = line.split('\t');
     const tag = parts[0];
+    if (endAt && (tag === '%T' || tag === '%F' || tag === '%R')) {
+      if (!after.lines) after.first = endAt;
+      after.lines++;
+      const t = tag === '%T' ? flat((parts[1] ?? '').trim()) : cur?.name;
+      if (t) after.tables.add(t);
+      if (endAt > 0) { strayEnds++; endAt = -1; } // (-1: this %E counted; data seen after it)
+    }
     if (!sawHeader && tag === 'ERMHDR') {
       sawHeader = true;
       db.header = { version: parts[1] ?? '', exportDate: parts[2] ?? '', raw: parts.map(flat), encoding };
@@ -167,15 +179,10 @@ export function parseXerSource(src: ByteSource, opts: { encoding?: TextEncodingN
         r[blockFields[j]] = v ? pool.get(cols[j], v) : '';
       }
       cur.rows.push(r);
+      if (cur.name === 'TASK') meta.taskLines!.push(lineNo);
     } else if (tag === '%E') {
       meta.hasEnd = true;
-      const at = lineNo, ignored: string[] = [];
-      for (let l = nextLine(); l !== null; l = nextLine()) if (l.startsWith('%T\t')) ignored.push(l.slice(3).trim());
-      if (ignored.length) findings.push({
-        severity: 'error', code: 'DATA_AFTER_END', message: `%E end marker at line ${at}, but ${ignored.length} more table(s) follow and are ignored: ${ignored.slice(0, 8).join(', ')}${ignored.length > 8 ? ', …' : ''}.`,
-        p6: 'P6 stops reading at the first %E; everything after it is not imported.',
-      });
-      break;
+      endAt = lineNo;
     } else if (line.trim() !== '') {
       findings.push({
         severity: 'error', code: 'BAD_LINE', table: cur?.name,
@@ -183,6 +190,14 @@ export function parseXerSource(src: ByteSource, opts: { encoding?: TextEncodingN
         p6: 'P6 import fails or drops the record (file looks corrupted).',
       });
     }
+  }
+  if (after.lines) {
+    const ts = [...after.tables];
+    findings.push({
+      severity: 'error', code: 'DATA_AFTER_END',
+      message: `%E end marker at line ${after.first}${strayEnds > 1 ? ` (and ${strayEnds - 1} more)` : ''}, but ${after.lines} more line(s) of data follow (${ts.slice(0, 8).join(', ')}${ts.length > 8 ? ', …' : ''}); they were read as if the marker${strayEnds > 1 ? 's were' : ' was'} not there.`,
+      p6: 'An XER has one %E, at its end. A file with %E between its tables or rows was not written by P6, and P6 may stop reading at the first one; saved by the clone it has one %E, at the end.',
+    });
   }
   if (!sawHeader) findings.push({ severity: 'fatal', code: 'NO_HEADER', message: 'First line is not an ERMHDR header.', p6: 'P6 rejects the file as not a valid XER file.' });
   if (!meta.hasEnd) findings.push({ severity: 'warning', code: 'NO_END', message: 'Missing %E end marker.', p6: 'P6 imports up to end of file.' });
