@@ -323,6 +323,10 @@ const PROJISSU_MAP: FieldMap = [F('ObjectId', 'issue_id'), F('ProjectObjectId', 
 const TASKFIN_MAP: FieldMap = [F('FinancialPeriodObjectId', 'fin_dates_id'), F('ActivityObjectId', 'task_id'), F('ProjectObjectId', 'proj_id'), F('ActualLaborUnits', 'act_work_qty', 'num'), F('ActualLaborCost', 'act_work_cost', 'num'),
   F('ActualNonLaborUnits', 'act_equip_qty', 'num'), F('ActualNonLaborCost', 'act_equip_cost', 'num'), F('ActualMaterialCost', 'act_mat_cost', 'num'), F('ActualExpenseCost', 'act_expense_cost', 'num'), F('EarnedValueCost', 'bcwp', 'num'),
   F('PlannedValueCost', 'bcws', 'num'), F('EarnedValueLaborUnits', 'perfm_work_qty', 'num'), F('PlannedValueLaborUnits', 'sched_work_qty', 'num')];
+/** An assignment's stored period actuals (TRSRCFIN: Store Period Performance, set_period_actuals) are P6's ResourceAssignmentPeriodActual: the
+ *  assignment's units and cost in one financial period (FinancialPeriodObjectId), like ActivityPeriodActual for the activity's. */
+const TRSRCFIN_MAP: FieldMap = [F('FinancialPeriodObjectId', 'fin_dates_id'), F('ResourceAssignmentObjectId', 'taskrsrc_id'), F('ActivityObjectId', 'task_id'), F('ProjectObjectId', 'proj_id'),
+  F('ActualUnits', 'act_qty', 'num'), F('ActualCost', 'act_cost', 'num')];
 const WBSRSRC_MAP: FieldMap = [F('ObjectId', 'wbsrsrc_id'), F('WBSObjectId', 'wbs_id'), F('ResourceObjectId', 'rsrc_id'), F('RoleObjectId', 'role_id'), F('ProjectObjectId', 'proj_id'), F('StartDate', 'start_date', 'date'),
   F('FinishDate', 'end_date', 'date'), F('CommittedFlag', 'committed_flag', 'bool')];
 /** WBS categories (the PHASE table: phase_id, phase_name, seq_num; "WBS Category" in Oracle's XER data map) are the schema's WBSCategory elements; a WBS's phase_id is its WBSCategoryObjectId. */
@@ -346,7 +350,7 @@ export const P6XML_TABLES: Record<string, { element: string; map: FieldMap }> = 
   OBS: { element: 'OBS', map: OBS_MAP }, UDFTYPE: { element: 'UDFType', map: UDFTYPE_MAP }, UDFVALUE: { element: 'UDFValue', map: UDFVAL_MAP }, CURRTYPE: { element: 'Currency', map: CURR_MAP }, ROLES: { element: 'Role', map: ROLE_MAP },
   TASKMEMO: { element: 'ActivityNote', map: MEMO_MAP }, TASKPROC: { element: 'ActivityStep', map: STEP_MAP }, PCATTYPE: { element: 'ProjectCodeType', map: PCODETYPE_MAP }, PCATVAL: { element: 'ProjectCode', map: PCODE_MAP },
   ROLERATE: { element: 'RoleRate', map: ROLERATE_MAP }, FINDATES: { element: 'FinancialPeriod', map: FINDATES_MAP }, FINTMPL: { element: 'FinancialPeriodTemplate', map: FINTMPL_MAP }, THRSPARM: { element: 'ThresholdParameter', map: THRSPARM_MAP }, PROJTHRS: { element: 'ProjectThreshold', map: PROJTHRS_MAP },
-  PROJISSU: { element: 'ProjectIssue', map: PROJISSU_MAP }, TASKNOTE: { element: 'ActivityNote', map: TASKNOTE_MAP }, PHASE: { element: 'WBSCategory', map: PHASE_MAP }, WBSBUDG: { element: 'ProjectSpendingPlan', map: SPEND_MAP }, TASKFIN: { element: 'ActivityPeriodActual', map: TASKFIN_MAP }, WBSRSRC: { element: 'ProjectResource', map: WBSRSRC_MAP },
+  PROJISSU: { element: 'ProjectIssue', map: PROJISSU_MAP }, TASKNOTE: { element: 'ActivityNote', map: TASKNOTE_MAP }, PHASE: { element: 'WBSCategory', map: PHASE_MAP }, WBSBUDG: { element: 'ProjectSpendingPlan', map: SPEND_MAP }, TASKFIN: { element: 'ActivityPeriodActual', map: TASKFIN_MAP }, TRSRCFIN: { element: 'ResourceAssignmentPeriodActual', map: TRSRCFIN_MAP }, WBSRSRC: { element: 'ProjectResource', map: WBSRSRC_MAP },
   RCATTYPE: { element: 'ResourceCodeType', map: RCODETYPE_MAP }, RCATVAL: { element: 'ResourceCode', map: RCODE_MAP }, MEMOTYPE: { element: 'NotebookTopic', map: TOPIC_MAP }, WBSMEMO: { element: 'ProjectNote', map: WBSMEMO_MAP },
 };
 
@@ -745,6 +749,7 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
       ['ProjectThreshold', () => { for (const r of get('PROJTHRS').filter((t) => t.proj_id === pid)) el('ProjectThreshold', r, PROJTHRS_MAP); }],
       ['ProjectIssue', () => { for (const r of get('PROJISSU').filter((t) => t.proj_id === pid)) el('ProjectIssue', r, PROJISSU_MAP); }],
       ['ActivityPeriodActual', () => { for (const r of get('TASKFIN').filter((t) => t.proj_id === pid)) el('ActivityPeriodActual', r, TASKFIN_MAP); }],
+      ['ResourceAssignmentPeriodActual', () => { for (const r of get('TRSRCFIN').filter((t) => t.proj_id === pid)) el('ResourceAssignmentPeriodActual', r, TRSRCFIN_MAP); }],
       ['ProjectResource', () => { for (const r of get('WBSRSRC').filter((t) => t.proj_id === pid)) el('ProjectResource', r, WBSRSRC_MAP); }],
       ['ProjectSpendingPlan', () => { for (const r of get('WBSBUDG').filter((t) => t.proj_id === pid)) el('ProjectSpendingPlan', r, SPEND_MAP); }],
       // an activity's notes: with a topic (a notebook note), and without (no ObjectId, no topic: the reader tells it from a notebook note by that)
@@ -777,7 +782,7 @@ export function parseP6Xml(text: string): { db: Db; findings: Finding[] } {
     ['UDFType', 'UDFTYPE', UDFTYPE_MAP], ['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Role', 'ROLES', ROLE_MAP], ['Resource', 'RSRC', RSRC_MAP], ['ResourceRate', 'RSRCRATE', RATE_MAP], ['ResourceRole', 'RSRCROLE', RSRCROLE_MAP], ['RoleRate', 'ROLERATE', ROLERATE_MAP], ['FinancialPeriodTemplate', 'FINTMPL', FINTMPL_MAP], ['FinancialPeriod', 'FINDATES', FINDATES_MAP], ['ThresholdParameter', 'THRSPARM', THRSPARM_MAP], ['UnitOfMeasure', 'UMEASURE', UOM_MAP], ['ExpenseCategory', 'COSTTYPE', EXPCAT_MAP], ['ResourceCurve', 'RSRCCURVDATA', CURVE_MAP],
     ['ProjectCodeType', 'PCATTYPE', PCODETYPE_MAP], ['ProjectCode', 'PCATVAL', PCODE_MAP], ['ResourceCodeType', 'RCATTYPE', RCODETYPE_MAP], ['ResourceCode', 'RCATVAL', RCODE_MAP], ['WBSCategory', 'PHASE', PHASE_MAP]];
   const projMap: [string, string, FieldMap][] = [['ActivityCodeType', 'ACTVTYPE', CODETYPE_MAP], ['ActivityCode', 'ACTVCODE', CODE_MAP], ['Relationship', 'TASKPRED', REL_MAP], ['ResourceAssignment', 'TASKRSRC', ASSIGN_MAP],
-    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ProjectThreshold', 'PROJTHRS', PROJTHRS_MAP], ['ProjectIssue', 'PROJISSU', PROJISSU_MAP], ['ActivityPeriodActual', 'TASKFIN', TASKFIN_MAP], ['ProjectResource', 'WBSRSRC', WBSRSRC_MAP], ['ProjectSpendingPlan', 'WBSBUDG', SPEND_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
+    ['ActivityExpense', 'PROJCOST', EXP_MAP], ['ProjectThreshold', 'PROJTHRS', PROJTHRS_MAP], ['ProjectIssue', 'PROJISSU', PROJISSU_MAP], ['ActivityPeriodActual', 'TASKFIN', TASKFIN_MAP], ['ResourceAssignmentPeriodActual', 'TRSRCFIN', TRSRCFIN_MAP], ['ProjectResource', 'WBSRSRC', WBSRSRC_MAP], ['ProjectSpendingPlan', 'WBSBUDG', SPEND_MAP], ['ActivityCodeAssignment', 'TASKACTV', CODEASSIGN_MAP], ['ActivityNote', 'TASKMEMO', MEMO_MAP], ['UDFValue', 'UDFVALUE', UDFVAL_MAP], ['ActivityStep', 'TASKPROC', STEP_MAP], ['ProjectNote', 'WBSMEMO', WBSMEMO_MAP]];
   // Read as it goes: each top-level element, and each activity, WBS element, relationship, ... of a project, is turned
   // into rows as soon as it closes and let go (a big file is never one tree). A project's own rows are pushed after
   // every top-level element's, Projects before BaselineProjects, as a whole tree would order them.

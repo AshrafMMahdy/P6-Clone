@@ -104,3 +104,34 @@ test('review fixes: Excel deletes the flagged duplicates, not their neighbours; 
   const r = build();
   assert.match(fail(r, [{ op: 'update_assignment', activity: 'A', assigned_role: 'ENG', role: '' }]), /keeps its role/);
 });
+
+test('Excel: a refused added assignment does not refuse the later rows of its pair; each later row imports as P6 imports it', async () => {
+  // A has LAB once and role ENG once; the sheet adds LAB three more times and ENG twice. The first added row of each pair
+  // is refused (an actual finish with no actual start): it alone is refused, the rows after it are added as they are
+  const db = { tables: {} } as Db;
+  ok(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB', price_per_unit: 10 }, { op: 'add_role', id: 'ENG', name: 'Engineer' },
+    { op: 'add_activity', id: 'A', name: 'Pour', duration_days: 10 }, { op: 'assign_resource', activity: 'A', resource: 'LAB', units: 40 }, { op: 'assign_role', activity: 'A', role: 'ENG', units: 8 },
+    { op: 'add_udf', name: 'Crew', subject: 'assignment' }]);
+  const pid = rows(db, 'PROJECT')[0].proj_id;
+  const s = await readXlsx(await writeXlsx(exportSheets(db, [pid], 8, false, { columns: { TASKRSRC: ['*'] } })));
+  const T = s.find((x) => x.name === 'TASKRSRC')!, head = T.rows[0].map(String), at = (f: string) => head.indexOf(f);
+  const crew = head.findIndex((f) => f.startsWith('user_field_'));
+  assert.ok(crew >= 0, 'the assignment UDF column is exported');
+  const lab = T.rows.slice(2).find((r) => r[at('rsrc_id')] === 'LAB')!, eng = T.rows.slice(2).find((r) => !r[at('rsrc_id')])!;
+  type SheetRow = (typeof T.rows)[number];
+  const row = (base: SheetRow, units: number, remaining: number, extra: Record<string, string> = {}): SheetRow => {
+    const r = [...base]; r[at('target_qty')] = units; r[at('remain_qty')] = remaining; r[crew] = `C${units}`;
+    for (const [f, v] of Object.entries(extra)) r[at(f)] = v;
+    return r;
+  };
+  const badLab = row(lab, 5, 5, { act_end_date: '2026-01-09 17:00' }), badEng = row(eng, 6, 6, { act_end_date: '2026-01-09 17:00' });
+  T.rows.push(badLab, row(lab, 7, 4), row(eng, 3, 2), badEng, row(lab, 9, 9), row(eng, 4, 1));
+  const res = applyImport(db, planImport(db, s, 'P'), { calendarDays: true });
+  const sheetRow = (r: SheetRow) => T.rows.indexOf(r) + 1;
+  assert.deepEqual(res.refused.map((x) => [x.sheet, x.row]), [['TASKRSRC', sheetRow(badLab)], ['TASKRSRC', sheetRow(badEng)]], JSON.stringify(res.refused));
+  for (const x of res.refused) assert.match(x.message, /actual start first/);
+  const crewOf = new Map(rows(db, 'UDFVALUE').map((u) => [u.fk_id, u.udf_text]));
+  assert.deepEqual(rows(db, 'TASKRSRC').map((a) => [a.rsrc_id ? 'LAB' : 'ENG', Number(a.target_qty), Number(a.remain_qty), crewOf.get(a.taskrsrc_id) ?? '']),
+    [['LAB', 40, 40, ''], ['ENG', 8, 8, ''], ['LAB', 7, 4, 'C7'], ['ENG', 3, 2, 'C3'], ['LAB', 9, 9, 'C9'], ['ENG', 4, 1, 'C4']]);
+  assert.ok(rows(db, 'TASKRSRC').every((a) => !a.act_end_date), 'nothing of the refused rows was applied');
+});

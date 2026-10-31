@@ -317,10 +317,14 @@ export interface ImportSummary {
 }
 /** Where an operation came from: the sheet and its row as Excel numbers it. */
 export interface RowRef { sheet: string; row: number }
+export interface AsgSlot { pair: string; nth: number }
 export interface ImportPlan {
   ops: Op[];
   /** per operation, its sheet row (rows[i] made ops[i]) */
   rows: RowRef[];
+  /** per operation of a TASKRSRC row, the assignment it names: its activity / resource (or role) pair and its position
+   *  in the pair (the nth the operations give it), so a refused row that adds one moves the later rows of the pair down */
+  slots?: (AsgSlot | null)[];
   summary: ImportSummary;
   warnings: string[];
 }
@@ -342,9 +346,9 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   const dh = c.dh;
   const warnings: string[] = [];
   const s: ImportSummary = { activitiesAdded: 0, activitiesUpdated: 0, activitiesDeleted: 0, relationshipsAdded: 0, relationshipsUpdated: 0, relationshipsDeleted: 0, expensesAdded: 0, expensesUpdated: 0, expensesDeleted: 0, resourcesAdded: 0, resourcesUpdated: 0, assignmentsAdded: 0, assignmentsUpdated: 0, assignmentsDeleted: 0, unchanged: 0 };
-  const out: { op: Op; ref: RowRef; rank: number }[] = [];
+  const out: { op: Op; ref: RowRef; rank: number; slot?: AsgSlot }[] = [];
   const proj = rows(db, 'PROJECT').find((p) => p.proj_short_name === projectId && !p._baseline_of);
-  if (!proj) return { ops: [], rows: [], summary: s, warnings: [`No project "${projectId}".`] };
+  if (!proj) return { ops: [], rows: [], slots: [], summary: s, warnings: [`No project "${projectId}".`] };
   const P = { project: projectId };
   const sheet = (n: string) => sheets.find((x) => x.name.toUpperCase() === n);
   // row 1 = field names (P6 matches on these); data from the first row that is not the titles row
@@ -363,7 +367,8 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   const byCode = new Map(tasks.map((t) => [t.task_code, t]));
   const calByName = new Map(rows(db, 'CALENDAR').map((x) => [lc(x.clndr_name), x]));
   const wbsPath = (id: string) => { const o: string[] = []; for (let w = c.W.get(id), n = 0; w && w.proj_node_flag !== 'Y' && n < c.W.size; w = c.W.get(w.parent_wbs_id), n++) o.unshift(w.wbs_short_name.trim()); return o.join('.'); };
-  const emit = (op: Op, ref: RowRef, rank: number) => { out.push({ op, ref, rank }); };
+  let slot: AsgSlot | undefined; // the assignment the TASKRSRC row being planned names (its operations carry it)
+  const emit = (op: Op, ref: RowRef, rank: number) => { out.push({ op, ref, rank, ...(slot ? { slot } : {}) }); };
 
   /** The code and UDF columns of a sheet: compared with the object's values, as assign_code / set_udf operations. */
   const extras = (kind: CodeKind, udfTable: string, fields: string[], titles: Map<string, string>, scopeProj?: string) => {
@@ -616,7 +621,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   const seen = new Map<string, number>();
   // deletions are emitted after the loop, each pair's from its last assignment up: one removed does not move the
   // positions (nth) of those still to be removed
-  const deletes: { op: Op; ref: RowRef; nth: number }[] = [];
+  const deletes: { op: Op; ref: RowRef; nth: number; slot: AsgSlot }[] = [];
   for (const { r, ref } of asgRecs) {
     const act = str(r.task_id), res = str(r.rsrc_id), roleOnly = !res ? str(r.role_id) : '';
     if (!act || (!res && !roleOnly)) continue;
@@ -626,12 +631,13 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
     if (roleOnly && rid == null) { warnings.push(`Row ${ref.row} of TASKRSRC: no role "${roleOnly}" in this file; row skipped.`); continue; }
     const k = `${act}|${res ? lc(res) : `role:${lc(roleOnly)}`}`, nth = seen.get(k) ?? 0;
     seen.set(k, nth + 1);
+    slot = { pair: k, nth: nth + 1 };
     const mine = t ? A.get(`${t.task_id}|${res ? rr?.rsrc_id : `role:${rid}`}`) ?? [] : [];
     const a = mine[nth];
     // the assignment named as the operations name it: resource (or the role of a role assignment) and its position among
     // the same, always given (an assignment this sheet adds to the pair makes it several before the edit is over)
     const target: Record<string, unknown> = { activity: act, ...(res ? { resource: rr?.rsrc_short_name ?? res } : { assigned_role: roleOnly }), nth: nth + 1, ...P };
-    if (yes(r.delete_record_flag)) { if (a) { deletes.push({ op: { op: 'unassign_resource', ...target }, ref, nth }); s.assignmentsDeleted++; } continue; }
+    if (yes(r.delete_record_flag)) { if (a) { deletes.push({ op: { op: 'unassign_resource', ...target }, ref, nth, slot }); s.assignmentsDeleted++; } continue; }
     const hd = dh.task(t);
     const upd: Op = { op: 'update_assignment', ...target };
     const numField = (f: string, key: string, curV: number | null, scale = 1) => { const v = num(r[f]); if (has(r, f) && v != null && !near(v, curV)) upd[key] = v * scale; };
@@ -682,12 +688,13 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
     n += asgExtras(r, a?.taskrsrc_id ?? null, target, ref, 2);
     if (!a) s.assignmentsAdded++; else if (n) s.assignmentsUpdated++; else s.unchanged++;
   }
-  for (const d of deletes.sort((x, y) => y.nth - x.nth)) emit(d.op, d.ref, 3);
+  for (const d of deletes.sort((x, y) => y.nth - x.nth)) { slot = d.slot; emit(d.op, d.ref, 3); }
+  slot = undefined;
   if (!SHEETS.some((n) => sheet(n))) warnings.push('No TASK, TASKPRED, PROJCOST, RSRC or TASKRSRC sheet: this does not look like a P6 spreadsheet export.');
   // resources and activities first, relationships after them, then expenses and assignments, deletions last (a
   // relationship or assignment may name an activity or resource the sheet adds); in sheet order within each
   const order = out.map((_, i) => i).sort((i, j) => out[i].rank - out[j].rank || i - j);
-  return { ops: order.map((i) => out[i].op), rows: order.map((i) => out[i].ref), summary: s, warnings };
+  return { ops: order.map((i) => out[i].op), rows: order.map((i) => out[i].ref), slots: order.map((i) => out[i].slot ?? null), summary: s, warnings };
 }
 
 export interface ImportResult {
@@ -707,13 +714,30 @@ export function applyImport(db: Db, plan: ImportPlan, o: OpsOptions = {}): Impor
   const skipped = new Set<string>();
   const key = (i: number) => `${plan.rows[i]?.sheet}|${plan.rows[i]?.row}`;
   const keep = (i: number) => !skipped.has(key(i));
+  // the operations as they are applied: a refused row that adds an assignment moves the later rows of its pair one place down
+  const ops = plan.ops.slice(), slots = (plan.slots ?? []).slice();
+  /** A refused row that would have added an assignment to a pair: the pair has one fewer, so each later operation that
+   *  names an assignment of the pair after it names it one place earlier (as P6's import, which skips the bad row,
+   *  would find it). Without this every later added row of the pair was refused too, its nth one past the last. */
+  const unslot = (bad: number) => {
+    const k = key(bad), added = ops.findIndex((op, i) => (op.op === 'assign_resource' || op.op === 'assign_role') && slots[i] && key(i) === k);
+    if (added < 0) return;
+    const { pair, nth } = slots[added]!;
+    for (let i = 0; i < ops.length; i++) {
+      const sl = slots[i];
+      if (!sl || sl.pair !== pair || sl.nth <= nth || !keep(i)) continue;
+      slots[i] = { pair, nth: sl.nth - 1 };
+      if (typeof ops[i].nth === 'number') ops[i] = { ...ops[i], nth: (ops[i].nth as number) - 1 };
+    }
+  };
   const run = (list: number[]): void => {
     while (list.length) {
-      const r = applyOps(db, list.map((i) => plan.ops[i]), o);
+      const r = applyOps(db, list.map((i) => ops[i]), o);
       if (r.ok) { res.applied += list.length; res.warnings.push(...(r.warnings ?? [])); return; }
       const k = Math.max(0, r.error!.index), bad = list[k];
       skipped.add(key(bad));
-      res.refused.push({ ...plan.rows[bad], op: plan.ops[bad], message: r.error!.message });
+      res.refused.push({ ...plan.rows[bad], op: ops[bad], message: r.error!.message });
+      unslot(bad);
       run(list.slice(0, k).filter(keep)); // what came before it (less the bad row's own operations)
       list = list.slice(k + 1).filter(keep);
     }

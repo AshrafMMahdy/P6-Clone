@@ -99,7 +99,7 @@ test('every field an XER can hold is carried by the P6 XML writer or listed with
 });
 
 test('XER -> P6 XML -> read back equals the XER, field for field, on every sample', { timeout: 300_000 }, () => {
-  const SIG: Record<string, string[]> = { RSRCROLE: ['rsrc_id', 'role_id'], TASKFIN: ['fin_dates_id', 'task_id'], RSRCRATE: ['rsrc_id', 'start_date', 'shift_period_id'], ROLERATE: ['role_id', 'start_date'], TASKNOTE: ['task_id', 'proj_id'], WBSBUDG: ['wbs_budg_id'] };
+  const SIG: Record<string, string[]> = { RSRCROLE: ['rsrc_id', 'role_id'], TASKFIN: ['fin_dates_id', 'task_id'], TRSRCFIN: ['fin_dates_id', 'taskrsrc_id'], RSRCRATE: ['rsrc_id', 'start_date', 'shift_period_id'], ROLERATE: ['role_id', 'start_date'], TASKNOTE: ['task_id', 'proj_id'], WBSBUDG: ['wbs_budg_id'] };
   const compared: Record<string, number> = {};
   const off = new Map<string, string>(); // table.field -> the first row that did not come back as it went
   let files = 0;
@@ -164,6 +164,55 @@ test('XER -> P6 XML -> read back equals the XER, field for field, on every sampl
   assert.deepEqual([...off], [], 'fields that came back different');
   assert.ok(files >= 55, `${files} samples`);
   for (const k of ['ROLERATE.cost_per_qty', 'RSRC.max_qty_per_hr', 'RSRC.unit_id', 'UMEASURE.unit_name', 'COSTTYPE.cost_type', 'RSRCROLE.skill_level', 'TASK.act_work_qty', 'TASK.create_user', 'TASKRSRC.guid', 'TASKRSRC.cost_per_qty_source_type', 'PROJCOST.cost_load_type', 'RSRCRATE.cost_per_qty2', 'TASKFIN.bcwp', 'PROJISSU.issue_name', 'PROJTHRS.window_start', 'ACTVCODE.color', 'TASKNOTE.task_notes', 'WBSBUDG.spend_cost', 'PROJWBS.ev_user_pct', 'PROJECT.def_qty_type', 'PROJECT.sum_assign_level', 'PROJECT.chng_eff_cmp_pct_flag', 'PROJWBS(root).ev_user_pct', 'PROJWBS(root).orig_cost', 'PROJWBS(root).obs_id']) assert.ok(compared[k] > 0, `${k}: some sample has a value and it came back`);
+});
+
+test('period actuals (Store Period Performance, set_period_actuals) are P6\'s ActivityPeriodActual and ResourceAssignmentPeriodActual, each naming its financial period, and read back', async () => {
+  const { applyOps } = await import('../core/project/ops.ts');
+  const { rows } = await import('../core/db.ts');
+  const db = { tables: {} } as Db;
+  const ok = (ops: unknown[]) => { const r = applyOps(db, ops, { calendarDays: true }); assert.equal(r.ok, true, JSON.stringify(r.error)); };
+  ok([{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB', type: 'labor', price_per_unit: 10 }, { op: 'add_resource', id: 'MAT', type: 'material', price_per_unit: 2 },
+    { op: 'add_role', id: 'ENG', name: 'Engineer' }, { op: 'add_activity', id: 'A', name: 'Dig', duration_days: 40 },
+    { op: 'assign_resource', activity: 'A', resource: 'LAB', units: 320 }, { op: 'assign_resource', activity: 'A', resource: 'MAT', units: 100 }, { op: 'assign_role', activity: 'A', role: 'ENG', units: 80 },
+    { op: 'add_financial_period_calendar', name: 'Monthly' }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-03-31', every: 'month' },
+    { op: 'set_fields', table: 'PROJECT', fields: { act_this_per_link_flag: 'Y' }, all: true },
+    // January's actuals stored by Store Period Performance, February's typed into the past period (set_period_actuals)
+    { op: 'update_activity', id: 'A', actual_start: '2026-01-05' }, { op: 'update_assignment', activity: 'A', resource: 'LAB', actual_units: 40 },
+    { op: 'update_assignment', activity: 'A', resource: 'MAT', actual_units: 30 }, { op: 'set_project', data_date: '2026-02-01' }, { op: 'store_period_performance', period: '2026-01-01' },
+    { op: 'set_period_actuals', activity: 'A', resource: 'LAB', period: '2026-02-01', values: { units: 12, cost: 120 } },
+    { op: 'set_period_actuals', activity: 'A', resource: 'MAT', period: '2026-02-01', values: { units: 7.5, cost: 15 } }]);
+  const TF = rows(db, 'TASKFIN'), RF = rows(db, 'TRSRCFIN');
+  assert.ok(TF.length >= 2 && RF.length >= 4, `stored: ${TF.length} activity, ${RF.length} assignment period rows`);
+  assert.ok(new Set(RF.map((r) => r.fin_dates_id)).size === 2, 'two periods hold assignment actuals');
+  const xml = writeP6Xml(db, {} as never);
+  // in P6's schema: children of the Project, in the schema's order, with only the schema's fields
+  const project = parseXml(xml).children[0].children.find((e) => e.name === 'Project')!;
+  const names = project.children.map((c) => c.name);
+  const apa = project.children.filter((c) => c.name === 'ActivityPeriodActual'), rpa = project.children.filter((c) => c.name === 'ResourceAssignmentPeriodActual');
+  assert.deepEqual([apa.length, rpa.length], [TF.length, RF.length]);
+  assert.ok(names.lastIndexOf('ResourceAssignment') < names.indexOf('ActivityPeriodActual') && names.lastIndexOf('ActivityPeriodActual') < names.indexOf('ResourceAssignmentPeriodActual'), 'after the assignments, in the schema\'s order');
+  for (const e of [...apa, ...rpa]) for (const c of e.children) assert.ok(NAMES[e.name].includes(c.name), `${e.name}/${c.name} is in P6's schema`);
+  // each names a financial period, an activity and (the assignment's) an assignment the file has
+  const top = parseXml(xml).children[0].children;
+  const periods = new Set(top.filter((e) => e.name === 'FinancialPeriod').map((e) => e.children.find((c) => c.name === 'ObjectId')!.text));
+  const asg = new Set(project.children.filter((e) => e.name === 'ResourceAssignment').map((e) => e.children.find((c) => c.name === 'ObjectId')!.text));
+  const act = new Set(project.children.filter((e) => e.name === 'Activity').map((e) => e.children.find((c) => c.name === 'ObjectId')!.text));
+  const v = (e: XNode, tag: string) => e.children.find((c) => c.name === tag)?.text ?? '';
+  for (const e of [...apa, ...rpa]) { assert.ok(periods.has(v(e, 'FinancialPeriodObjectId')), `${e.name}: its FinancialPeriod is in the file`); assert.ok(act.has(v(e, 'ActivityObjectId'))); }
+  for (const e of rpa) assert.ok(asg.has(v(e, 'ResourceAssignmentObjectId')), 'its ResourceAssignment is in the file');
+  // the clone's own reader: the same rows, field for field
+  const back = parseP6Xml(xml).db;
+  const sig = (t: string, r: Row) => (t === 'TASKFIN' ? `${r.task_id}|${r.fin_dates_id}` : `${r.taskrsrc_id}|${r.fin_dates_id}`);
+  for (const [t, { map }] of [['TASKFIN', P6XML_TABLES.TASKFIN], ['TRSRCFIN', P6XML_TABLES.TRSRCFIN]] as const) {
+    const B = new Map((back.tables[t]?.rows ?? []).map((r) => [sig(t, r), r]));
+    assert.equal(B.size, rows(db, t).length, `${t}: every row read back`);
+    for (const r of rows(db, t)) for (const [, f] of map) assert.equal(B.get(sig(t, r))?.[f] ?? '', r[f] ?? '', `${t}.${f} of ${sig(t, r)}`);
+  }
+  // and nothing of them is reported lost
+  assert.deepEqual(p6xmlLosses(db).filter((l) => l.table === 'TASKFIN' || l.table === 'TRSRCFIN'), []);
+  // the same through an XER first (the file a P6 user sends)
+  const viaXer = parseP6Xml(writeP6Xml(parseXer(writeXer(db, { version: '19.12' })).db, {} as never)).db;
+  assert.deepEqual((viaXer.tables.TRSRCFIN?.rows ?? []).map((r) => sig('TRSRCFIN', r) + `|${r.act_qty}|${r.act_cost}`).sort(), RF.map((r) => sig('TRSRCFIN', r) + `|${r.act_qty}|${r.act_cost}`).sort());
 });
 
 test('a baseline project is written with the fields P6\'s schema has for a BaselineProject, and an activity note without a topic is not a notebook note', () => {
