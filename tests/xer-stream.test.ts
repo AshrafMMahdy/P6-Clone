@@ -20,6 +20,21 @@ const same = (a: ReturnType<typeof parseXer>, b: ReturnType<typeof parseXer>, wh
 /** A source that hands out at most n bytes a read: every line crosses chunk boundaries. */
 const tiny = (b: Uint8Array, n: number): ByteSource => ({ size: b.length, read: (pos, len) => b.subarray(pos, Math.min(b.length, pos + Math.min(len, n))) });
 
+/** A source like parseFile.ts: ONE Node Buffer reused for every read, at most n bytes a read (Buffer.slice is a view — a
+ *  cut line kept with it was overwritten by the next read, 2026-11-01). */
+const reused = (b: Uint8Array, n: number): ByteSource => { const buf = Buffer.alloc(n); return { size: b.length, read: (pos, len) => { const k = Math.min(len, n, b.length - pos); buf.set(b.subarray(pos, pos + k)); return buf.subarray(0, k); } }; };
+
+test('a source that reuses one Buffer for every read parses as the bytes do (lines cut at every boundary)', () => {
+  const dir = join(import.meta.dirname, 'fixtures');
+  const files = readdirSync(dir).filter((x) => /\.xer$/i.test(x)).map((x) => join(dir, x)).filter((f) => readFileSync(f).length < 400_000).slice(0, 6);
+  assert.ok(files.length > 0, 'a fixture XER');
+  for (const f of files) {
+    const bytes = new Uint8Array(readFileSync(f));
+    const a = parseXer(bytes);
+    for (const n of [7, 64, 4096]) same(a, parseXerSource(reused(bytes, n)), `${f} through one reused ${n}-byte Buffer`);
+  }
+});
+
 test('a file read a chunk at a time parses as its bytes do (every sample, and through 7-byte chunks)', { timeout: 300_000 }, () => {
   const dir = existsSync(SAMPLES_DIR) ? SAMPLES_DIR : join(import.meta.dirname, 'fixtures');
   const files = readdirSync(dir).filter((f) => /\.xer$/i.test(f)).slice(0, 40).map((f) => join(dir, f));

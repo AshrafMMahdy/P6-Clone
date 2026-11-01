@@ -22,7 +22,10 @@ function* lineSpans(src: ByteSource, start: number): Generator<Uint8Array> {
       if (carry) { const j: Uint8Array = new Uint8Array(carry.length + piece.length); j.set(carry); j.set(piece, carry.length); carry = null; yield j; } else yield piece;
       s = i + 1;
     }
-    if (s < c.length) { const rest = c.subarray(s); if (carry) { const j: Uint8Array = new Uint8Array(carry.length + rest.length); j.set(carry); j.set(rest, carry.length); carry = j; } else carry = rest.slice(); }
+    // A COPY of the cut line: the source may hand out a Node Buffer it reuses for the next read (parseFile.ts), and
+    // Buffer.prototype.slice is a view, not a copy — the cut line was overwritten by the next chunk (a line across every
+    // 16 MB boundary of a 66 MB XER came out corrupt: one relationship and two assignments lost, BAD_LINE findings).
+    if (s < c.length) { const rest = c.subarray(s); if (carry) { const j: Uint8Array = new Uint8Array(carry.length + rest.length); j.set(carry); j.set(rest, carry.length); carry = j; } else carry = Uint8Array.prototype.slice.call(rest); }
   }
   if (carry) yield carry;
 }
@@ -67,7 +70,7 @@ export function parseXerSource(src: ByteSource, opts: { encoding?: TextEncodingN
     hi = true;
     if (force || bom) continue;
     if (utf8) { try { fatal.decode(l, { stream: true }); } catch { utf8 = false; } }
-    if (sampled < SAMPLE) { sample.push(l.slice()); sampled += n; }
+    if (sampled < SAMPLE) { sample.push(Uint8Array.prototype.slice.call(l)); sampled += n; }   // a copy (l may be a view of a reused Buffer)
   }
   if (utf8 && hi && !force && !bom) { try { fatal.decode(); } catch { utf8 = false; } }
   const of = (encoding: TextEncodingName, start = 0) => ({ encoding, start, decoder: encoding === 'utf-8-bom' ? 'utf-8' : encoding });
