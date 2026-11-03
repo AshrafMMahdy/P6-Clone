@@ -13,3 +13,6 @@ dist-viewer/
 
 # downloads pinned by hash (scripts/mpxj-files.mjs)
 .cache/
+
+# the platform agent engine, fetched read-only at a pinned commit (desktop app only; never committed or released)
+vendor/whiq-agent/
