@@ -76,7 +76,7 @@ Renderer: the existing right panel, now a client of the engine's SSE stream (tok
 - every platform scheduler tool and skill works unchanged, but on the schedule the user is looking at;
 - the cursor stays for on-screen actions.
 
-**Keeping in sync.** The platform publishes the agent server the same way it publishes engines: a tagged release bundle. The clone pins it in a lock file. The platform already pins the clone, so each side pins the other. Updating is then "bump the pin", not a merge.
+**Keeping in sync (owner rule, 2026-11-03).** The platform repo gets nothing for this: no second harness, no release, no publishing. A clone-side script fetches the platform's agent code read-only from GitHub at a pinned commit into a gitignored folder of the clone (`vendor/whiq-agent/`) and builds it there; updating means bumping the pinned commit and fetching again. The embedded agent is desktop-app only: it is never part of the clone's MCP release (`dist-cli`, the `p6clone` engine the platform downloads), so the platform never receives a second harness either way.
 
 ### Platform pieces: keep, adapt, or switch off
 
@@ -96,7 +96,7 @@ Renderer: the existing right panel, now a client of the engine's SSE stream (tok
 
 ## 4. Decisions for the owner
 
-1. **How the clone gets the agent engine.** (a) A pinned release bundle from the platform. (b) A vendored copy refreshed by script. **Recommend (a)**: it mirrors how the platform pins the clone, and keeps one source of truth.
+1. **How the clone gets the agent engine.** Decided by the owner: fetched read-only from the platform's GitHub at a pinned commit into a gitignored folder of the clone; nothing added to or published from the platform; never in the clone's MCP release.
 2. **Code execution on Windows** (`run_code`, `query_documents`, `transcribe_audio`). (a) WSL plus 09 Local Sandbox. (b) A local Python/Node process without isolation. (c) Off. (b) runs agent-written code with the user's rights, which is a real security risk. **Recommend (a)**, with (c) automatically when WSL is absent.
 3. **PQ-VAE (`review_programme`, `forecast_outcome`).** It needs Python and torch (large). Bundle it, download it on demand, or leave it out.
 4. **Model setup.**
