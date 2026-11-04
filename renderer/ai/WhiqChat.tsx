@@ -50,6 +50,7 @@ export function WhiqChat(props: { convKey: string; clearSignal: number; onBusy: 
   // a cleared conversation starts a new chat (the agent keeps the old one)
   useEffect(() => { if (!props.clearSignal) return; saveChat(props.convKey, null); setChatId(null); setLines([]); setLive(''); setStatus(''); setFolder(''); }, [props.clearSignal]);
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [lines, live]);
+  useEffect(() => { void window.p6.whiq.warm(); }, []);
 
   // the chat's history and folder, then its live events
   useEffect(() => {

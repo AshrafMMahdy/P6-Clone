@@ -20,7 +20,12 @@ const fake = await fakeModel((r) => {
   if (done === 1) return { call: 'mcp__p6clone_live__list_projects', args: {} };
   if (done === 2) return { call: 'mcp__p6clone_live__select_activity', args: { activity_id: 'A2410' } };
   if (done === 3) return { call: 'write_doc', args: { path: 'summary.md', format: 'md', content: `# Open projects\n\n${String(toolResults(r)[1]?.content ?? '').slice(0, 400)}\n` } };
-  return { text: 'Done: I read the open schedule, selected A2410 and wrote **summary.md**.' };
+  // a Word report and its PDF through the platform's engines
+  if (done === 4) return { call: 'load_tools', args: { names: ['mcp__wordcraft__*'] } };
+  if (done === 5) return { call: 'mcp__wordcraft__import_markdown', args: { markdown: '# Schedule report\n\nThe open project is CFC Modified.', title: 'Schedule report' } };
+  if (done === 6) return { call: 'mcp__wordcraft__save_document', args: { path: 'report.docx' } };
+  if (done === 7) return { call: 'mcp__wordcraft__export_pdf', args: { path: 'report.pdf' } };
+  return { text: 'Done: I read the open schedule, selected A2410 and wrote **summary.md** and a Word report.' };
 });
 
 const root = join(import.meta.dirname, '..', '..');
@@ -48,6 +53,11 @@ ok(/File: summary\.md/.test(await win.locator('.ai-panel .ai-body').innerText())
 const saved = join(folder, 'AI Outputs', 'summary.md');
 ok(existsSync(saved) && /CFC/.test(readFileSync(saved, 'utf8')), `the file is in the working folder: ${saved}`);
 ok(/📁 p6whiq-wd-/.test(await win.locator('.ai-panel .ai-input').innerText()), 'the panel names the working folder');
+const docx = join(folder, 'AI Outputs', 'report.docx'), pdf = join(folder, 'AI Outputs', 'report.pdf');
+for (let i = 0; i < 30 && !(existsSync(docx) && existsSync(pdf)); i++) await win.waitForTimeout(500);
+ok(existsSync(docx) && readFileSync(docx).subarray(0, 2).toString() === 'PK', `the Word report made by the Word engine is in the working folder: ${docx}`);
+ok(existsSync(pdf) && readFileSync(pdf).subarray(0, 5).toString() === '%PDF-', 'and its PDF export');
+ok(/File: report\.docx/.test(await win.locator('.ai-panel .ai-body').innerText()), 'the Word report shows as a chip');
 ok(!errors.length, 'no page errors ' + errors.join(' | '));
 await app.close();
 fake.close();

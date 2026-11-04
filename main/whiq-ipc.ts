@@ -65,6 +65,8 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     ipcMain.handle(ch, async (_e, ...a) => { try { return { ok: true, data: await fn(...a) }; } catch (err) { return { ok: false, error: (err as Error).message }; } });
 
   // P6CLONE_WHIQ=off: the panel keeps its own loop (tests of that fallback; a build without the agent behaves the same)
+  // the panel opened: start the agent now, so its engines have listed their tools by the first message
+  handle('whiq:warm', async () => { void host.start().catch(() => { /* reported on use */ }); return true; });
   handle('whiq:status', async () => ({ ...host.status, missing: process.env.P6CLONE_WHIQ === 'off' ? 'Turned off (P6CLONE_WHIQ=off).' : host.available() }));
   handle('whiq:createChat', (title?: string) => host.api('POST', '/api/chats', { title: title || 'Scheduler', module: 'scheduler' }));
   handle('whiq:chat', (chatId: string) => host.api('GET', `/api/chats/${encodeURIComponent(chatId)}`));

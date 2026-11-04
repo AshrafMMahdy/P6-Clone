@@ -70,6 +70,7 @@ const api = {
   liveReply: (id: number, v: { ok: boolean; result?: unknown; error?: string }) => ipcRenderer.send('live:reply', id, v),
   /** The embedded platform agent (main/whiq-ipc.ts): every call answers {ok, data} or {ok: false, error}. */
   whiq: {
+    warm: () => ipcRenderer.invoke('whiq:warm') as Promise<WhiqResult<boolean>>,
     status: () => ipcRenderer.invoke('whiq:status') as Promise<WhiqResult<{ state: string; error?: string; missing: string | null }>>,
     createChat: (title?: string) => ipcRenderer.invoke('whiq:createChat', title) as Promise<WhiqResult<{ id: string; workingDir?: string }>>,
     chat: (chatId: string) => ipcRenderer.invoke('whiq:chat', chatId) as Promise<WhiqResult<Record<string, unknown>>>,

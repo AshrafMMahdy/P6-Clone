@@ -3,9 +3,9 @@
 // repo; a commit it does not have yet is reported with the command that fetches it. Then the agent's workspaces are
 // cut down to the agent's own (the platform's other apps are not fetched) and an API-only page stands in for the
 // platform's front end, which the agent server insists on (the clone's AI panel is the front end here).
-//   node scripts/fetch-whiq-agent.mjs [--install] [--build]
+//   node scripts/fetch-whiq-agent.mjs [--install] [--build] [--engines]
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,3 +50,15 @@ const run = (cmd, a, cwd, env = {}) => {
 };
 if (args.has('--install')) run('npm', ['install', '--no-audit', '--no-fund'], out);
 if (args.has('--build')) run('node', ['scripts/build-servers.mjs'], out, { ONLY: '03 Shared Platform Agents' });
+// --engines: the platform's own engines at its pins (downloaded, sha256-checked and smoke-tested by its script), except
+// the P6 clone engine, which is this repo's own build (dist-cli: node scripts/build-cli.mjs), the same code as the app
+if (args.has('--engines')) {
+  const lockFile = JSON.parse(readFileSync(join(out, 'engines.lock'), 'utf8'));
+  for (const name of Object.keys(lockFile.engines ?? {})) if (name !== 'p6clone') run('node', ['scripts/engines-fetch.mjs', '--only', name], out);
+  const cli = join(root, 'dist-cli');
+  if (!existsSync(join(cli, 'p6clone-mcp.cjs'))) throw new Error('No dist-cli/p6clone-mcp.cjs: run node scripts/build-cli.mjs first.');
+  const to = join(out, 'engines', 'p6clone');
+  rmSync(to, { recursive: true, force: true });
+  cpSync(cli, to, { recursive: true });
+  console.log(`p6clone engine: this repo's dist-cli copied to ${to}`);
+}
