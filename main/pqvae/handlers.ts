@@ -7,7 +7,7 @@ import { blendDurationBands, describe, flagDurations } from './calib.ts';
 import { Pcg64 } from './rng.ts';
 import { buildAnchors, forecast, growthParams, loadHorrormap, pct, type Horror, type Ted } from './reference.ts';
 import { MAX_PERIODS, type Engines } from './engines.ts';
-import { KeyErr, mean, pyFloat, pyRound, std, truthy, type Rec } from './pyutil.ts';
+import { KeyErr, mean, pyFloat, pyRound, pyStr, std, truthy, type Rec } from './pyutil.ts';
 
 const need = (body: Rec, key: string): any => { if (!(key in body)) throw new KeyErr(key); return body[key]; };
 const pyInt = (v: unknown, dflt: number): number => (truthy(v) ? Math.trunc(pyFloat(v)) : dflt);
@@ -36,9 +36,32 @@ export async function encode(e: Engines, body: Rec): Promise<Rec> {
   return { codes: Array.from({ length: recs.length }, (_, i) => [codes[3 * i], codes[3 * i + 1], codes[3 * i + 2]]), n: recs.length };
 }
 
+/** Distinct activity names above which a review shares one reading between names that differ only in their digits. Reading a name costs about
+ *  14 ms on 4 threads (JWM, 9,965 names: 141 s of the 166 s review), so 3,000 names is about 40 s: inside the platform client's 180 s on a PC
+ *  several times slower than the build machine. At or below it every name is read, exactly as the Python engine does. */
+const SHARE_ABOVE = (): number => Number(process.env.PQVAE_SHARE_ABOVE) || 3000;
+
 export async function reviewSchedule(e: Engines, body: Rec): Promise<Rec> {
   const raw: Rec[] = need(body, 'records');
   if (raw.length < 3) return { verdict: 'n/a', reason: 'fewer than 3 activities', activities: [] };
+  const names = new Set<string>();
+  for (const r of raw) if (r?.name != null) names.add(pyStr(r.name));
+  const limit = SHARE_ABOVE();
+  const readings = names.size > limit ? e.text.share(names) : names.size;
+  try {
+    const out = await review(e, body, raw);
+    if (readings < names.size) {
+      const notice = `This programme has ${names.size} distinct activity names, more than the ${limit} the engine reads one by one inside a chat call's time limit. Names that differ only in their digits (Level 3, Level 12) shared one reading, ${readings} readings in all. Every activity is still reviewed, but the text-based parts are approximate for it: the surprise scores, order vs random, and the trade and phase read from the name by meaning (a keyword or the stated trade and phase are not affected).`;
+      out.notice = notice;
+      out.phase_order.notice = notice;
+      out.order_vs_random.notice = notice;
+      out.shared_name_readings = { distinct_names: names.size, readings, limit };
+    }
+    return out;
+  } finally { e.text.unshare(); }
+}
+
+async function review(e: Engines, body: Rec, raw: Rec[]): Promise<Rec> {
   const recs = await normActivities(raw, e.text, e.sem);
   recs.sort(byStart);
   const { cal, bands: prior } = e.arData();
@@ -63,10 +86,13 @@ export async function reviewSchedule(e: Engines, body: Rec): Promise<Rec> {
   const verdict = z > 2 ? 'red' : z > 1 ? 'amber' : 'ok';
   // SHUFFLE NULL: score k random orderings of the SAME activities; if the real order is not clearly more probable than random, the
   // sequencing carries no information. numpy's default_rng(7).permutation, reproduced exactly (rng.ts).
+  // `shuffles` is Python's `int(body.get("shuffles") or 12)`: absent, null and 0 mean the default 12. Below 1 (-1, or the string "0") Python
+  // divides by an empty list and answers NaN; here the null is skipped and the answer says so.
   const k = pyInt(body.shuffles, 12);
   const rng = new Pcg64(7);
   const nulls: number[] = [];
   for (let t = 0; t < k; t++) {
+    await e.tick();
     const perm = rng.permutation(n);
     const sh = perm.map((j, pos) => ({ ...recs[j], position_frac: pos / Math.max(n - 1, 1) }));
     const s2 = (await buildSequences(e, sh))[0];
@@ -74,9 +100,9 @@ export async function reviewSchedule(e: Engines, body: Rec): Promise<Rec> {
     nulls.push(mean(w.subarray(0, n)));
   }
   const seqScore = mean(nll);
-  const betterThan = nulls.filter((x) => x > seqScore).length / nulls.length;   // share of random orders that score WORSE than the real one
-  const gap = (mean(nulls) - seqScore) / (std(nulls) + 1e-6);
-  const orderVerdict = betterThan >= 0.9 ? 'ok' : betterThan >= 0.6 ? 'amber' : 'red';
+  const betterThan = nulls.length ? nulls.filter((x) => x > seqScore).length / nulls.length : null;   // share of random orders that score WORSE than the real one
+  const gap = nulls.length ? (mean(nulls) - seqScore) / (std(nulls) + 1e-6) : null;
+  const orderVerdict = betterThan == null ? 'n/a' : betterThan >= 0.9 ? 'ok' : betterThan >= 0.6 ? 'amber' : 'red';
   // PHASE-ORDER CONSISTENCY, no model: does the build phase (as mapped from the names) advance with the start order? Kendall tau between the
   // phase index and the start position over all pairs whose phases differ.
   const ph = seq.records.map((r) => PHASES.indexOf(r.phase)), pos = seq.records.map((r) => pyFloat(r.position_frac));
@@ -101,8 +127,9 @@ export async function reviewSchedule(e: Engines, body: Rec): Promise<Rec> {
     project_score: pyRound(proj, 3), z: pyRound(z, 2), clean_mean: pyRound(mu, 3), verdict, activities: acts,
     calibration_org: describe(body.calib, { duration_bands: used }), counts,
     phase_order: { kendall_tau: pyRound(tau, 2), verdict: phaseVerdict, pairs: conc + disc, inversions, n_inversions: nInv, note: 'no model: build phase (mapped from names) vs start order — the reading to check by eye' },
-    order_vs_random: { better_than_random_share: pyRound(betterThan, 2), sigma_gap: pyRound(gap, 2), verdict: orderVerdict, shuffles: k,
-      note: 'learned grammar (v2-minilm, activity corpus = generator + 5 EPC programmes) vs random orders of the SAME activities; advisory — small programmes give noisy shares, read the phase-order line first' },
+    order_vs_random: { better_than_random_share: betterThan == null ? null : pyRound(betterThan, 2), sigma_gap: gap == null ? null : pyRound(gap, 2), verdict: orderVerdict, shuffles: nulls.length,
+      note: nulls.length ? 'learned grammar (v2-minilm, activity corpus = generator + 5 EPC programmes) vs random orders of the SAME activities; advisory — small programmes give noisy shares, read the phase-order line first'
+        : 'no random orders were scored (shuffles < 1), so there is no order-vs-random reading; use the phase-order line' },
     duration_flags: dflags.filter((f) => f > 0).length,
   };
   // The scorer reads 256 positions. Past that the Python sidecar fails (index out of bounds); this one scores overlapping windows of 256.
@@ -129,6 +156,11 @@ export async function trajectory(e: Engines, body: Rec): Promise<Rec> {
   const used = Math.min(Math.max(2, Math.trunc(months * (months / Math.max(plannedTotal, months, 1)))), MAX_PERIODS);
   const [lo, ld] = await e.head(codes.subarray(0, used * 3), PROJECT_TYPES.indexOf(ptype));
   const out: Rec = { pred_overrun_x: pyRound(Math.exp(lo), 3), pred_delay_months: pyRound(Math.expm1(ld), 1) };
+  if (months > MAX_PERIODS) {
+    out.periods_read = used;
+    out.notice = used === MAX_PERIODS ? `${months} periods were given; the trajectory model has ${MAX_PERIODS} positions, so it read the first ${MAX_PERIODS} (in period order) and ignored the last ${months - MAX_PERIODS}.`
+      : `${months} periods were given; the trajectory model reads the first ${used} of them (the share of the plan elapsed; it has ${MAX_PERIODS} positions at most).`;
+  }
   Object.assign(out, { months_observed: months, planned_months: plannedTotal, ptype, observed: ps.map((p) => ({ m: p.period, planned: p.planned_pct, actual: p.actual_pct })) });
   // the company's outcome correction: actual ~ a + b * pred, learned from its finished projects
   const cal = body.calib || {};

@@ -9,9 +9,13 @@
 //   POST /growth          { ptype, contract_form }     -> lognormal growth parameters + recoverability
 // Any other endpoint of the Python sidecar answers HTTP 200 { error } (the client turns `error` into a message). Every answer carries
 // `calibration: "v2-minilm"`.
+// Differences from the Python sidecar, each visible in the answer: a programme past 256 activities is scored in windows (`windowed_scoring`);
+// past 3,000 distinct names the names that differ only in their digits share one reading (`notice`, so a review fits the client's 180 s);
+// past 120 periods /trajectory says how many it read (`notice`); shuffles below 1 answer verdict "n/a" instead of NaN. A call whose client has
+// gone stops between batches. Only Host 127.0.0.1:<port> / localhost:<port> without an Origin is served; a body over 64 MB is 413.
 //
 //   node main/pqvae/sidecar.ts --models <dir> [--port <n>] [--threads <n>]      --port 0 (the default) takes a free port; --threads (default 1)
-//   is the WebAssembly runtime's thread count
+//   is the WebAssembly runtime's thread count (start.ts passes min(4, cores - 1), at least 1)
 // The chosen port is printed as one JSON line on stdout, {"port":N}. It listens on 127.0.0.1 only and ends when its stdin closes (the spawning
 // process holds the pipe: the sidecar never outlives it); started from a terminal it keeps running. LLM_ROUTER_URL names the router whose
 // decide seat reads activity names (default http://127.0.0.1:5009).

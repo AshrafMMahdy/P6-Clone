@@ -86,7 +86,7 @@ export function normActivity(r: Rec, i: number, n: number, seat: Map<string, Sea
 
 /** Whole-list normalisation: one decide-seat batch for the list, the names the keywords miss embedded in one batch, then the per-record chain. */
 export async function normActivities(recs: Rec[], text: MiniLm, sem: Semantic): Promise<Rec[]> {
-  const seat = await seatTradePhase(recs);
+  const seat = await seatTradePhase(recs, text.tick, (s) => text.key(s));
   const need = new Set<string>();
   for (const r of recs) {
     const o = { ...ACT_DEFAULTS, ...dropNull(r ?? {}) };

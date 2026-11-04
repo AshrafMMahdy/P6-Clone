@@ -1,6 +1,6 @@
 // onnxruntime-web in Node (WebAssembly, no native binary), loaded the way core/analysis/hrmRuntime.ts does it: beside a bundle the runtime is in
 // ort/ (not a node_modules folder), in the repository it is the package. One thread by default (PQVAE_THREADS / --threads raises it: 4 threads
-// embed text about 3x faster). Models are read from the folder the sidecar was started with.
+// embed text about 2.5x faster, also on Electron's Node; start.ts passes min(4, cores - 1)). Models are read from the folder the sidecar was started with.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

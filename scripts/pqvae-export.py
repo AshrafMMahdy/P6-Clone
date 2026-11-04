@@ -17,6 +17,8 @@ versions wrote it. Writes:
   minilm.onnx          paraphrase-multilingual-MiniLM-L12-v2 transformer (hidden states; pooling is done by the caller)
   tokenizer.json       its tokenizer
   ar_calibration.json duration_bands.json growth_params.json horrormap.json ted_winratios.json
+  LICENSE-MiniLM.txt   the Apache-2.0 text the MiniLM model is under (scripts/licenses/LICENSE-Apache-2.0.txt)
+  NOTICE.txt           the source model and its revision, and where each data file comes from
   manifest.json        files + sha256, source commit, calibration label, MiniLM variants measured and the one chosen
 
 MiniLM variants (all measured against the fp32 sentence-transformers output on the same texts):
@@ -53,6 +55,7 @@ DEFAULT_SRC = REPO / "vendor" / "whiq-agent" / "03 Shared Platform Agents" / "ap
 DEFAULT_OUT = REPO / "vendor" / "whiq-agent" / "pqvae-onnx"
 DEFAULT_NAMES = REPO / "tests" / "fixtures" / "pqvae" / "names.json"
 MINILM_ID = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+LICENSE_APACHE = REPO / "scripts" / "licenses" / "LICENSE-Apache-2.0.txt"   # the full text with its appendix (node_modules/typescript/LICENSE stops at the terms)
 OPSET = 17
 
 # A compressed MiniLM keeps the outputs when, on the measured texts: the sentence embeddings stay within cosine 0.9999 of fp32's, the
@@ -427,6 +430,9 @@ def main():
                 cf = d / ".whiq-agent-commit"
                 break
     commit = cf.read_text(encoding="utf-8").strip() if cf and cf.exists() else None
+    revision = _hf_revision(a.minilm)
+    shutil.copyfile(LICENSE_APACHE, out / "LICENSE-MiniLM.txt")
+    (out / "NOTICE.txt").write_text(_notice(a.minilm, revision, chosen, commit), encoding="utf-8", newline="\n")
     import onnx
     import onnxruntime
     import sentence_transformers
@@ -434,7 +440,7 @@ def main():
         "format": 1,
         "calibration": sc.CALIBRATION,
         "sourceCommit": commit,
-        "minilm": {"model": a.minilm, "variant": chosen, "variants": measured, "keep": KEEP, "maxSeqLength": 128},
+        "minilm": {"model": a.minilm, "revision": revision, "license": "Apache-2.0", "variant": chosen, "variants": measured, "keep": KEEP, "maxSeqLength": 128},
         "sources": {str(p.relative_to(src)).replace("\\", "/"): sha256(p) for p in (art / "vocab_a" / "model.pt", art / "vocab_b" / "model.pt", art / "ar_scorer" / "model.pt", art / "trajectory" / "model.pt")},
         "checks": report,
         "exporter": {"torch": torch.__version__, "onnx": onnx.__version__, "onnxruntime": onnxruntime.__version__, "sentence_transformers": sentence_transformers.__version__, "opset": OPSET},
@@ -447,6 +453,38 @@ def main():
     shutil.rmtree(tmp, ignore_errors=True)
     total = sum(v["bytes"] for v in man["files"].values())
     log(f"done: {len(man['files'])} files, {total / 1e6:.1f} MB -> {out}")
+
+
+def _hf_revision(model):
+    """The commit of the model in the Hugging Face cache (the snapshot folder's name); a local folder has none."""
+    if Path(model).is_dir():
+        return "local folder " + Path(model).name
+    snap = _tokenizer_json(model).resolve().parent
+    return snap.name if snap.parent.name == "snapshots" else "unknown"
+
+
+def _notice(model, revision, variant, commit):
+    return f"""PQ-VAE models for the desktop app's embedded platform agent. Written by scripts/pqvae-export.py.
+
+minilm.onnx, tokenizer.json
+  Converted from the model {model}
+  (https://huggingface.co/{model}), revision {revision}.
+  Licence: Apache License 2.0, the full text is LICENSE-MiniLM.txt in this folder.
+  Changes: the transformer is exported to ONNX (hidden states; the mean pooling and the L2 normalisation are done by the caller);
+  weights stored as {variant}. The tokenizer is the model's own tokenizer.json.
+
+vocab_a_codes.onnx, vocab_b_codes.onnx, ar_nll.onnx, trajectory_head.onnx, ar_calibration.json, duration_bands.json, growth_params.json
+  Exported from the platform's trained PQ-VAE artifacts (pqvae/artifacts/) at the platform commit pinned in
+  vendor/whiq-agent/.whiq-agent-commit: {commit}.
+
+horrormap.json
+  A copy of the platform's pqvae/data/anchors/horrormap.json at that pinned commit.
+
+ted_winratios.json
+  Converted from the platform's pqvae/data/raw/ted_winratios.csv at that pinned commit (rows with a winning ratio between 0.3 and 3.0).
+
+manifest.json lists every file here with its size and sha256.
+"""
 
 
 def _tokenizer_json(model):

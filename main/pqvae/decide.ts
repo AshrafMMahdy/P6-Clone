@@ -77,16 +77,18 @@ const line = (i: number, r: Rec): string => {
   return `a${i}: ${truthy(r?.name) ? pyStr(r.name) : ''}` + (ctx ? `  [wbs: ${ctx}]` : '');
 };
 
-/** Trade + phase per activity name from the decide seat; {} (keep the old chain) when it answers nothing. */
-export async function seatTradePhase(recs: Rec[]): Promise<Map<string, SeatHit>> {
+/** Trade + phase per activity name from the decide seat; {} (keep the old chain) when it answers nothing. `tick` runs between router calls (the
+ *  server's abort check); `key` maps a name to the one asked in its place (names that share a reading share the seat's answer too). */
+export async function seatTradePhase(recs: Rec[], tick: () => Promise<void> = async () => undefined, key: (s: string) => string = (s) => s): Promise<Map<string, SeatHit>> {
   const pending = new Map<string, Rec>();
   for (const r of recs) {
-    const nm = truthy(r?.name) ? pyStr(r.name) : '';
+    const nm = truthy(r?.name) ? key(pyStr(r.name)) : '';
     if (nm && !cache.has(nm) && !pending.has(nm)) pending.set(nm, r);
   }
   if (pending.size && Date.now() >= downUntil) {
     const items = [...pending];
     for (let at = 0; at < items.length; at += CHUNK) {
+      await tick();
       const chunk = items.slice(at, at + CHUNK);
       const state = chunk.map(([, r], i) => line(i, r)).join('\n');
       const qs: Record<string, Question> = {};
@@ -97,6 +99,6 @@ export async function seatTradePhase(recs: Rec[]): Promise<Map<string, SeatHit>>
     }
   }
   const out = new Map<string, SeatHit>();
-  for (const r of recs) { const nm = truthy(r?.name) ? pyStr(r.name) : ''; const h = cache.get(nm); if (h) out.set(nm, h); }
+  for (const r of recs) { const nm = truthy(r?.name) ? pyStr(r.name) : ''; const h = cache.get(key(nm)); if (h) out.set(nm, h); }
   return out;
 }
