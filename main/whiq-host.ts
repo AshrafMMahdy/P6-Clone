@@ -128,6 +128,14 @@ export class WhiqHost {
     return data;
   }
 
+  /** A file of the agent server (its generated files), as bytes. */
+  async raw(path: string): Promise<Buffer> {
+    await this.start();
+    const r = await fetch(`http://127.0.0.1:${this.chatPort}${path}`, { headers: { 'x-cowork-as': 'master' } });
+    if (!r.ok) throw new Error(`GET ${path}: HTTP ${r.status}`);
+    return Buffer.from(await r.arrayBuffer());
+  }
+
   /** The chat's live events until stop() is called (or the server goes). */
   async stream(chatId: string, onEvent: (e: AgentEvent) => void): Promise<() => void> {
     await this.start();

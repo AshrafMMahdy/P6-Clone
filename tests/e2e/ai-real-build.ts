@@ -20,7 +20,7 @@ const real = join(process.env.APPDATA!, 'p6-clone');
 const profile = mkdtempSync(join(tmpdir(), 'p6realbuild-'));
 for (const f of ['Local State', 'ai-assistant.json']) copyFileSync(join(real, f), join(profile, f));
 const root = join(import.meta.dirname, '..', '..');
-const app = await electron.launch({ args: [root, '--user-data', profile, ...(past ? ['--import', past] : [])], cwd: root });
+const app = await electron.launch({ env: { ...process.env, P6CLONE_WHIQ: 'off' } as Record<string, string>, args: [root, '--user-data', profile, ...(past ? ['--import', past] : [])], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 if (past) {
   await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');

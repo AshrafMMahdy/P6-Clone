@@ -28,7 +28,7 @@ const srv = createServer((req, res) => {
 const port = (srv.address() as any).port;
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6build-'));
-const app = await electron.launch({ args: [root, '--user-data', profile], cwd: root });
+const app = await electron.launch({ env: { ...process.env, P6CLONE_WHIQ: 'off' } as Record<string, string>, args: [root, '--user-data', profile], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 await win.waitForSelector('.ai-strip, .workspace');
 await win.evaluate(async (port) => { await (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake', actions: true }); }, port);

@@ -3,6 +3,7 @@
 // The model looks things up with the tools in ./tools.ts (the conversation loop runs here; the provider call and the
 // API key stay in the main process). Activity IDs in answers are links that select the activity.
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { WhiqChat } from './WhiqChat.tsx';
 import { getDb, getUi, setUi, useStore } from '../store.ts';
 import { makeCtx, projectName } from '../model.ts';
 import { rows } from '../../core/db.ts';
@@ -73,6 +74,10 @@ export function AssistantPanel() {
   const bottom = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const [autoOpen, setAutoOpen] = useState(() => pref('autoOpen') === '1');
+  // the platform's scheduler agent when it is installed (vendor/whiq-agent); this panel's own loop otherwise
+  const [agent, setAgent] = useState<'checking' | 'on' | 'off'>('checking');
+  const [clearSignal, setClearSignal] = useState(0);
+  const [agentBusy, setAgentBusy] = useState(false);
   const booted = useRef(false);
   // the conversation is kept per project (the open projects' IDs; "_general" with none open), append-only until cleared
   const openIds = useStore((s) => s.ui.openProjects);
@@ -89,7 +94,7 @@ export function AssistantPanel() {
     });
   };
 
-  useEffect(() => { void window.p6.aiGetConfig().then(setCfg); window.p6.onAiConfig(setCfg); }, []);
+  useEffect(() => { void window.p6.aiGetConfig().then(setCfg); window.p6.onAiConfig(setCfg); void window.p6.whiq.status().then((r) => setAgent(r.ok && !r.data.missing ? 'on' : 'off')); }, []);
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [lines, open]);
   useEffect(() => { if (open) box.current?.focus(); }, [open]);
   // the closed strip takes its own room on the right (it must not cover the Gantt's scrollbar)
@@ -155,20 +160,22 @@ export function AssistantPanel() {
   const clear = () => { if (busy) stop(); gen.current++; history.current = []; setLines([]); void window.p6.aiChatClear(key); };
   const asked = lines.filter((l) => l.who === 'user').length;
 
+  const examples = ['What is driving the project finish?', 'Review this schedule against DCMA 14 and write the findings to a Word report.', 'Read the attached contract PDF and list the milestone dates it requires.', cfg.actions !== false ? 'Schedule the project for me (F9) and show me the critical path.' : 'What is planned for the next 4 weeks?'];
   const strip = <div className={`ai-strip ${open ? 'open' : ''}`} title={`${open ? 'Hide' : 'Open'} the AI Assistant (Ctrl+Shift+A)`} onClick={() => setUi({ aiOpen: !open })}><span>AI Assistant</span></div>;
   if (!open) return strip;
   return (<>
     {strip}
     <div className={`ai-panel ${wide ? 'wide' : ''}`}>
       <div className="ai-head">
-        <b>AI Assistant</b><span className="muted ai-shrink" title={cfg.model || 'no model set'}>{cfg.model || 'no model set'}</span>
+        <b>{agent === 'on' ? 'Scheduler Agent' : 'AI Assistant'}</b><span className="muted ai-shrink" title={cfg.model || 'no model set'}>{cfg.model || 'no model set'}</span>
         <span style={{ flex: 1 }} />
         <label className="ai-auto" title="Open the assistant by itself whenever the app starts"><input type="checkbox" checked={autoOpen} onChange={(e) => { setAutoOpen(e.target.checked); setPref('autoOpen', e.target.checked ? '1' : '0'); }} />Open on startup</label>
-        {asked > 0 && <span className="muted ai-shrink" title="Each new question includes the earlier ones, so you can ask follow-ups">remembers {asked} question{asked > 1 ? 's' : ''}</span>}
-        <button className="tbtn" title="Clear context: start a new conversation (the assistant forgets earlier questions)" disabled={!lines.length} onClick={clear}><span className="lbl">Clear context</span></button>
+        {agent !== 'on' && asked > 0 && <span className="muted ai-shrink" title="Each new question includes the earlier ones, so you can ask follow-ups">remembers {asked} question{asked > 1 ? 's' : ''}</span>}
+        <button className="tbtn" title="Clear context: start a new conversation (the assistant forgets earlier questions)" disabled={agent === 'on' ? agentBusy : !lines.length} onClick={agent === 'on' ? () => setClearSignal((n) => n + 1) : clear}><span className="lbl">Clear context</span></button>
         <button className="tbtn" title={wide ? 'Narrow' : 'Widen'} onClick={() => setUi({ aiWide: !wide })}><span className="lbl">{wide ? '⇥' : '⇤'}</span></button>
         <button className="tbtn" title="Minimize (Ctrl+Shift+A)" onClick={() => setUi({ aiOpen: false })}><span className="lbl">—</span></button>
       </div>
+      {agent === 'on' ? <WhiqChat key={key} convKey={key} clearSignal={clearSignal} onBusy={setAgentBusy} examples={examples} /> : agent === 'off' && <>
       <div className="ai-body">
         {!lines.length && <div className="muted" style={{ padding: 10 }}>
           Ask about the open project, for example:
@@ -187,13 +194,14 @@ export function AssistantPanel() {
           : <button className="ai-send" title="Send (Enter)" aria-label="Send" disabled={!input.trim()} onClick={() => void ask()}><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></button>}
         </div>
       </div>
+      </>}
     </div>
   </>
   );
 }
 
 /** Small markdown subset (paragraphs, bullets, numbered lists, tables, **bold**, `code`) with activity IDs as links. */
-function Rich({ text }: { text: string }) {
+export function Rich({ text }: { text: string }) {
   const codes = useRef<Map<string, string> | null>(null);
   if (!codes.current) codes.current = new Map(rows(getDb(), 'TASK').map((t) => [t.task_code, t.task_id]));
   const go = (taskId: string) => setUi({ view: 'activities', selTasks: [taskId], selTask: taskId, revealTask: taskId });
