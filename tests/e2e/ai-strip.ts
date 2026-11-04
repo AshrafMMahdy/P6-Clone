@@ -2,6 +2,7 @@
 // - a glowing strip stays on the right; the panel opens beside it and the window makes room (nothing is covered)
 // - the panel opens by itself the first time only, later only with "Open on startup" ticked
 // - the send button sits inside the message box
+import { fillOneProvider } from './ai-settings.ts';
 import { _electron as electron } from 'playwright';
 import { createServer } from 'node:http';
 import { mkdtempSync } from 'node:fs';
@@ -25,10 +26,7 @@ let { app, win, menu } = await launch(true);
 await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
 for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
 await menu('edit.aiSettings'); await win.waitForSelector('.dialog-title:has-text("AI Assistant Settings")');
-await win.locator('.dialog input[type=checkbox]').first().check();
-await win.selectOption('.dialog select >> nth=0', 'LM Studio (local)');
-await win.fill('.dialog input[placeholder="https://..."]', `http://127.0.0.1:${port}/v1`);
-await win.fill('.dialog tr:has-text("Model") input', 'fake-model');
+await fillOneProvider(win, { url: `http://127.0.0.1:${port}/v1`, model: 'fake-model' });
 await win.click('.dialog button:has-text("OK")');
 await win.waitForSelector('.ai-panel', { timeout: 5000 }).catch(() => {});
 ok(await win.locator('.ai-panel').count() === 1, 'first time: the panel opens by itself');

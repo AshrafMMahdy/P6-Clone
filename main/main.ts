@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } from 'electron';
-import { AiStore, chat, type AiConfig, type ChatRequest } from './ai.ts';
+import { AiStore, chat, chatWith, type AiConfig, type ChatRequest, type PublicModels } from './ai.ts';
 import { initModelsDev } from './modelsDev.ts';
 import { appendChat, clearChat, loadChat, moveChat } from './ai-chats.ts';
 import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -162,6 +162,19 @@ ipcMain.handle('ai:getConfig', () => ai().publicConfig());
 // the embedded platform agent; new AI settings take effect on its next start
 const whiq = registerWhiq(() => win, ai);
 ipcMain.handle('ai:setConfig', (_e, c: AiConfig, apiKey?: string) => { const r = ai().save(c, apiKey); whiq.stop(); win?.webContents.send('ai:config', r); return r; });
+// providers, tiers and seats (the platform's AI Providers page): saved as one; the agent restarts on its next use
+ipcMain.handle('ai:getModels', () => ai().publicModels());
+ipcMain.handle('ai:saveModels', (_e, m: PublicModels, keys: Record<string, string | undefined>) => {
+  try { const r = ai().saveModels(m, keys); whiq.stop(); win?.webContents.send('ai:config', ai().publicConfig()); return { ok: true, models: r }; }
+  catch (e) { return { ok: false, error: (e as Error).message }; }
+});
+ipcMain.handle('ai:testTier', async (_e, name: string) => {
+  try {
+    const { cfg, key } = ai().tierRequest(name);
+    const r = await chatWith(cfg, key, { system: 'Answer in one short sentence.', messages: [{ role: 'user', content: 'Say: ready.' }], tools: [] }, AbortSignal.timeout(60_000));
+    return { ok: true, reply: r.content.slice(0, 200) };
+  } catch (e) { return { ok: false, error: (e as Error).message }; }
+});
 ipcMain.handle('ai:chat', async (_e, id: string, req: ChatRequest) => {
   const ctl = new AbortController();
   aiCalls.set(id, ctl);

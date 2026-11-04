@@ -1,81 +1,136 @@
-// Edit > AI Assistant Settings: provider, URL, model and API key. The key is sent once to the main process, which
-// encrypts it; afterwards the dialog only shows that a key is saved (masked) and can replace or remove it.
+// Edit > AI Assistant Settings, after the platform's AI Providers page, for one user: General (on, may it work the app),
+// API keys (several providers: name, kind, endpoint, key, extra headers / parameters), Models & tiers (an ordered list,
+// strongest first: the agent's ladder for handovers and Researchers; each tier a provider and a model, with a Test
+// button) and Seats (which tier each of the agent's seats sits on: the agent, Reviewer, Advisor, the eyes, ...; an unset
+// chat seat sits on the first tier). Keys go once to the main process, which encrypts them, and are never shown again.
 import { useEffect, useState } from 'react';
-import { Dialog } from '../components/Layout.tsx';
+import { Dialog, Tabs } from '../components/Layout.tsx';
 import { closeDialog, toast } from '../store.ts';
-import type { AiPublicConfig, ProviderKind } from '../../main/ai.ts';
+import type { ModelKind, PublicModels, PublicProvider, TierDef } from '../../main/ai.ts';
 import { parseExtraBody, parseExtraHeaders } from '../../main/ai-extras.ts';
 
-const PRESETS: { label: string; provider: ProviderKind; url: string; hint: string; needsKey: boolean }[] = [
-  { label: 'Anthropic', provider: 'anthropic', url: 'https://api.anthropic.com', hint: 'e.g. claude-sonnet-5-5', needsKey: true },
-  { label: 'OpenAI', provider: 'openai', url: 'https://api.openai.com/v1', hint: 'a chat model that supports tools', needsKey: true },
-  { label: 'OpenRouter', provider: 'openai', url: 'https://openrouter.ai/api/v1', hint: 'e.g. anthropic/claude-sonnet-5.5', needsKey: true },
-  { label: 'LM Studio (local)', provider: 'openai', url: 'http://localhost:1234/v1', hint: 'the model loaded in LM Studio (needs tool support)', needsKey: false },
-  { label: 'Ollama (local)', provider: 'openai', url: 'http://localhost:11434/v1', hint: 'e.g. qwen3 or llama3.1', needsKey: false },
-  { label: 'Other (OpenAI-compatible)', provider: 'openai', url: '', hint: 'any server with /chat/completions', needsKey: false },
+const PRESETS: { label: string; kind: ModelKind; url: string; hint: string }[] = [
+  { label: 'Anthropic', kind: 'anthropic', url: 'https://api.anthropic.com', hint: 'e.g. claude-opus-5-5' },
+  { label: 'OpenAI', kind: 'openai', url: 'https://api.openai.com/v1', hint: 'a chat model that supports tools' },
+  { label: 'OpenRouter', kind: 'openai', url: 'https://openrouter.ai/api/v1', hint: 'e.g. anthropic/claude-sonnet-5.5' },
+  { label: 'Google Gemini', kind: 'gemini', url: 'https://generativelanguage.googleapis.com', hint: 'e.g. gemini-3-pro' },
+  { label: 'LM Studio (local)', kind: 'openai', url: 'http://localhost:1234/v1', hint: 'the model loaded in LM Studio (needs tool support)' },
+  { label: 'Ollama (local)', kind: 'openai', url: 'http://localhost:11434/v1', hint: 'e.g. qwen3 or llama3.1' },
+  { label: 'Other (OpenAI-compatible)', kind: 'openai', url: '', hint: 'any server with /chat/completions' },
 ];
+/** The agent's seats (the platform router's roles), as the user sees them. Chat seats sit on the first tier when unset. */
+const SEATS: { id: string; label: string; help: string; chat: boolean }[] = [
+  { id: 'agent', label: 'Agent', help: 'the scheduler agent itself (and Researchers / handovers start from the ladder)', chat: true },
+  { id: 'skeptic', label: 'Reviewer', help: 'checks the agent\'s work (the skeptic)', chat: true },
+  { id: 'senior_guidance', label: 'Advisor', help: 'senior guidance when the agent is stuck or planning', chat: true },
+  { id: 'fast_retrieve', label: 'Fast retrieval', help: 'quick look-ups in long documents', chat: true },
+  { id: 'vision_ocr', label: 'Eyes (vision / OCR)', help: 'a vision model that reads drawings, scans and images for the agent when its own model cannot see', chat: true },
+  { id: 'ocr_locator', label: 'OCR locator', help: 'finds where a text is on a page', chat: true },
+  { id: 'autopilot', label: 'Autopilot', help: 'answers the agent\'s questions when no one is there', chat: true },
+  { id: 'extract', label: 'Extraction', help: 'pulls structured data out of documents', chat: true },
+  { id: 'decide', label: 'Decisions', help: 'small yes / no judgements in the loop', chat: true },
+  { id: 'web_search', label: 'Web search', help: 'a search provider (off unless set)', chat: false },
+  { id: 'embedding', label: 'Embeddings', help: 'an embedding model for semantic search (off unless set)', chat: false },
+  { id: 'reranker', label: 'Reranker', help: 'orders search hits (off unless set)', chat: false },
+  { id: 'stt', label: 'Speech to text', help: 'transcribes audio (off unless set)', chat: false },
+];
+const newId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 export function AiSettingsDialog() {
-  const [cfg, setCfg] = useState<AiPublicConfig | null>(null);
-  const [key, setKey] = useState('');
-  const [changingKey, setChangingKey] = useState(false);
+  const [m, setM] = useState<PublicModels | null>(null);
+  const [keys, setKeys] = useState<Record<string, string | undefined>>({});
+  const [tab, setTab] = useState('general');
   const [busy, setBusy] = useState(false);
-  const [testMsg, setTestMsg] = useState<string | null>(null);
-  useEffect(() => { void window.p6.aiGetConfig().then((c) => { setCfg(c); setChangingKey(!c.hasKey); }); }, []);
-  if (!cfg) return <Dialog title="AI Assistant Settings" buttons={<button className="btn" onClick={closeDialog}>Cancel</button>}><p>Loading...</p></Dialog>;
-  const preset = PRESETS.find((p) => p.provider === cfg.provider && p.url && cfg.baseUrl.replace(/\/+$/, '') === p.url) ?? PRESETS.find((p) => p.label.startsWith('Other'))!;
-  const set = (patch: Partial<AiPublicConfig>) => setCfg({ ...cfg, ...patch });
-  // the free-form fields are checked here with the same rules the main process applies
-  let extraError = '';
-  try { parseExtraHeaders(cfg.extraHeaders); parseExtraBody(cfg.extraBody, cfg.provider); } catch (e) { extraError = (e as Error).message; }
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { void window.p6.aiGetModels().then(setM); }, []);
+  if (!m) return <Dialog title="AI Assistant Settings" buttons={<button className="btn" onClick={closeDialog}>Cancel</button>}><p>Loading...</p></Dialog>;
+  const set = (patch: Partial<PublicModels>) => setM({ ...m, ...patch });
+  const setProv = (i: number, patch: Partial<PublicProvider>) => set({ providers: m.providers.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
+  const setTier = (i: number, patch: Partial<TierDef>) => set({ tiers: m.tiers.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
+  const moveTier = (i: number, d: number) => { const t = [...m.tiers]; [t[i], t[i + d]] = [t[i + d], t[i]]; set({ tiers: t }); };
+  const used = (id: string) => m.tiers.some((t) => t.provider === id);
+  const tierUsed = (n: string) => Object.values(m.seats).includes(n);
+  // the free-form fields checked here with the rules the main process applies
+  let fieldError = '';
+  for (const p of m.providers) { try { parseExtraHeaders(p.extraHeaders); parseExtraBody(p.extraBody, p.kind === 'anthropic' ? 'anthropic' : 'openai'); } catch (e) { fieldError = `${p.name}: ${(e as Error).message}`; } }
   const save = async (close: boolean) => {
-    if (extraError) return null;
     setBusy(true);
     try {
-      const next = await window.p6.aiSetConfig({ enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, actions: cfg.actions, extraHeaders: cfg.extraHeaders, extraBody: cfg.extraBody }, changingKey && key ? key : undefined);
-      setCfg(next); setKey(''); setChangingKey(!next.hasKey);
-      if (close) { closeDialog(); toast(next.enabled ? 'AI assistant enabled (View > AI Assistant, Ctrl+Shift+A)' : 'AI assistant settings saved'); }
-      return next;
+      const r = await window.p6.aiSaveModels(m, keys);
+      if (!r.ok) { setMsg({ ok: false, text: r.error }); return false; }
+      setM(r.models); setKeys({});
+      if (close) { closeDialog(); toast(r.models.enabled ? 'AI assistant enabled (View > AI Assistant, Ctrl+Shift+A)' : 'AI assistant settings saved'); }
+      return true;
     } finally { setBusy(false); }
   };
-  const test = async () => {
+  const test = async (name: string) => {
     if (!(await save(false))) return;
-    setTestMsg('Testing...');
-    const r = await window.p6.aiChat(`test-${Date.now()}`, { system: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'Say OK' }], tools: [] });
-    setTestMsg(r.ok ? `Connected. The model replied: "${r.reply.content.trim().slice(0, 80)}"` : `Failed: ${r.error}`);
+    setMsg({ ok: true, text: `Testing ${name}...` });
+    const r = await window.p6.aiTestTier(name);
+    setMsg(r.ok ? { ok: true, text: `${name}: connected. The model replied: "${r.reply.trim().slice(0, 80)}"` } : { ok: false, text: `${name}: ${r.error}` });
   };
-  const removeKey = async () => { setBusy(true); try { const n = await window.p6.aiSetConfig({ enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, actions: cfg.actions, extraHeaders: cfg.extraHeaders, extraBody: cfg.extraBody }, ''); setCfg(n); setChangingKey(true); toast('API key removed'); } catch (e) { toast(`The key was not removed: ${(e as Error).message}`); } finally { setBusy(false); } };
+  const addProvider = () => { const id = newId(); set({ providers: [...m.providers, { id, name: `provider ${m.providers.length + 1}`, kind: 'anthropic', baseUrl: PRESETS[0].url, extraHeaders: '', extraBody: '', hasKey: false, keyHint: '' }] }); };
+  const addTier = () => set({ tiers: [...m.tiers, { name: m.tiers.length ? `Tier ${m.tiers.length + 1}` : 'Main', provider: m.providers[0]?.id ?? '', model: '' }] });
+  const mono = { font: '12px Consolas, monospace' } as const;
 
   return (
-    <Dialog title="AI Assistant Settings" width={640} height={560} buttons={<>
-      <button className="btn primary" disabled={busy || !!extraError} onClick={() => void save(true)}>OK</button>
+    <Dialog title="AI Assistant Settings" width={760} height={600} buttons={<>
+      <button className="btn primary" disabled={busy || !!fieldError} onClick={() => void save(true)}>OK</button>
       <button className="btn" onClick={closeDialog}>Cancel</button>
-      <button className="btn" disabled={busy || !cfg.model} onClick={() => void test()}>Test Connection</button>
     </>}>
-      <label style={{ display: 'block', margin: '4px 0 10px' }}><input type="checkbox" checked={cfg.enabled} onChange={(e) => set({ enabled: e.target.checked })} /> <b>Enable the AI assistant</b> (a panel on the right of the window that answers questions about the open project)</label>
-      <label style={{ display: 'block', margin: '0 0 10px 20px' }}><input type="checkbox" checked={cfg.actions !== false} onChange={(e) => set({ actions: e.target.checked })} /> Let the assistant operate the app when you ask it to (you see every step on screen; every change can be undone with Ctrl+Z; it asks before deleting)</label>
-      <table className="form"><tbody>
-        <tr><td>Provider</td><td><select value={preset.label} onChange={(e) => { const p = PRESETS.find((x) => x.label === e.target.value)!; set({ provider: p.provider, baseUrl: p.url || cfg.baseUrl }); }}>
-          {PRESETS.map((p) => <option key={p.label}>{p.label}</option>)}
-        </select></td></tr>
-        <tr><td>API style</td><td><select value={cfg.provider} onChange={(e) => set({ provider: e.target.value as ProviderKind })}><option value="anthropic">Anthropic Messages API</option><option value="openai">OpenAI-compatible (chat/completions)</option></select></td></tr>
-        <tr><td>Provider URL</td><td><input style={{ width: 380 }} value={cfg.baseUrl} placeholder="https://..." onChange={(e) => set({ baseUrl: e.target.value })} /></td></tr>
-        <tr><td>Model</td><td><input style={{ width: 380 }} value={cfg.model} placeholder={preset.hint} onChange={(e) => set({ model: e.target.value })} /></td></tr>
-        <tr><td>API key</td><td>
-          {!changingKey && cfg.hasKey
-            ? <span><input type="password" readOnly value="••••••••••••••••" style={{ width: 200 }} /> {cfg.keyHint} <button className="btn" onClick={() => setChangingKey(true)}>Change</button> <button className="btn" onClick={() => void removeKey()}>Remove</button></span>
-            : <input type="password" autoComplete="off" style={{ width: 380 }} value={key} placeholder={preset.needsKey ? 'Paste your API key' : 'Not needed for a local server (leave empty)'} onChange={(e) => setKey(e.target.value)} />}
-        </td></tr>
-        <tr><td style={{ verticalAlign: 'top' }}>Extra headers<br /><span className="muted">optional</span></td><td><textarea rows={2} style={{ width: 380, font: '12px Consolas, monospace' }} value={cfg.extraHeaders ?? ''} placeholder={'One per line, e.g.\nanthropic-workspace-id: wrkspc_...   or   OpenAI-Organization: org_...'} onChange={(e) => set({ extraHeaders: e.target.value })} /></td></tr>
-        <tr><td style={{ verticalAlign: 'top' }}>Extra request<br />parameters (JSON)<br /><span className="muted">optional</span></td><td><textarea rows={3} style={{ width: 380, font: '12px Consolas, monospace' }} value={cfg.extraBody ?? ''} placeholder={cfg.provider === 'anthropic' ? '{"max_tokens": 8000}' : '{"temperature": 0.2, "top_p": 0.9, "max_tokens": 8000}'} onChange={(e) => set({ extraBody: e.target.value })} /></td></tr>
-      </tbody></table>
-      {extraError && <div style={{ padding: 6, margin: '6px 0', border: '1px solid #e0a0a0', background: '#fde4e4' }}>{extraError}</div>}
-      <p className="muted" style={{ marginTop: 10 }}>
-        The key is encrypted with Windows' own protection{cfg.encrypted ? '' : ' (not available on this computer: stored in plain text)'} and kept by the app's background process; it is never written into the project database or shown again.
-        The assistant reads the open project through lookups (summary, activity search, activity details, WBS, critical path, schedule health, resources), so it works on very large programmes.
-        Project data is sent to the provider you choose; use a local server (LM Studio, Ollama) to keep it on this computer.
-      </p>
-      {testMsg && <div style={{ padding: 8, border: '1px solid #ccc', background: testMsg.startsWith('Failed') ? '#fde4e4' : '#eef7ee' }}>{testMsg}</div>}
+      <Tabs tabs={[['general', 'General'], ['keys', '1 · API keys'], ['tiers', '2 · Models & tiers'], ['seats', '3 · Seats']]} value={tab} onChange={setTab} />
+      <div style={{ padding: '8px 4px', overflow: 'auto', maxHeight: 440 }}>
+        {tab === 'general' && <>
+          <label style={{ display: 'block', margin: '4px 0 10px' }}><input type="checkbox" checked={m.enabled} onChange={(e) => set({ enabled: e.target.checked })} /> <b>Enable the AI assistant</b> (the scheduler agent in a panel on the right of the window)</label>
+          <label style={{ display: 'block', margin: '0 0 10px 20px' }}><input type="checkbox" checked={m.actions} onChange={(e) => set({ actions: e.target.checked })} /> Let it operate the app when you ask it to (you see every step on screen; every change can be undone with Ctrl+Z; it asks before deleting)</label>
+          <p className="muted">Set your providers' keys in tab 1, the models in tab 2 (the first tier is the agent's model unless a seat says otherwise), and in tab 3 which model each of the agent's helpers uses.
+            Keys are encrypted with Windows' own protection{m.encrypted ? '' : ' (not available on this computer: stored in plain text)'} and never shown again. Project data and documents go to the providers you choose; a local server (LM Studio, Ollama) keeps them on this computer.</p>
+        </>}
+        {tab === 'keys' && <>
+          {m.providers.map((p, i) => {
+            const preset = PRESETS.find((x) => x.kind === p.kind && x.url && p.baseUrl.replace(/\/+$/, '') === x.url) ?? PRESETS[PRESETS.length - 1];
+            const changing = keys[p.id] !== undefined;
+            return <fieldset key={p.id} style={{ marginBottom: 8 }}><legend><input value={p.name} onChange={(e) => setProv(i, { name: e.target.value })} style={{ width: 160 }} /></legend>
+              <table className="form"><tbody>
+                <tr><td>Which one</td><td><select value={preset.label} onChange={(e) => { const x = PRESETS.find((y) => y.label === e.target.value)!; setProv(i, { kind: x.kind, baseUrl: x.url || p.baseUrl }); }}>{PRESETS.map((x) => <option key={x.label}>{x.label}</option>)}</select>
+                  {' '}<select value={p.kind} onChange={(e) => setProv(i, { kind: e.target.value as ModelKind })}><option value="anthropic">Anthropic Messages API</option><option value="openai">OpenAI-compatible</option><option value="gemini">Gemini</option></select></td></tr>
+                <tr><td>Endpoint</td><td><input style={{ width: 420, ...mono }} value={p.baseUrl} placeholder="https://..." onChange={(e) => setProv(i, { baseUrl: e.target.value })} /></td></tr>
+                <tr><td>API key</td><td>{!changing && p.hasKey
+                  ? <span><input type="password" readOnly value="••••••••••••" style={{ width: 160 }} /> {p.keyHint} <button className="btn" onClick={() => setKeys({ ...keys, [p.id]: '' })}>Replace</button> <button className="btn" onClick={() => { setKeys({ ...keys, [p.id]: '' }); setProv(i, { hasKey: false }); }}>Remove</button></span>
+                  : <input type="password" autoComplete="off" style={{ width: 420 }} value={keys[p.id] ?? ''} placeholder="Paste the key (leave empty for a local server)" onChange={(e) => setKeys({ ...keys, [p.id]: e.target.value })} />}</td></tr>
+                <tr><td>Extra headers</td><td><textarea rows={1} style={{ width: 420, ...mono }} value={p.extraHeaders} placeholder="optional, one per line: Name: value" onChange={(e) => setProv(i, { extraHeaders: e.target.value })} /></td></tr>
+                <tr><td>Extra parameters</td><td><textarea rows={1} style={{ width: 420, ...mono }} value={p.extraBody} placeholder='optional JSON, e.g. {"max_tokens": 8000}' onChange={(e) => setProv(i, { extraBody: e.target.value })} /></td></tr>
+              </tbody></table>
+              <button className="btn" disabled={used(p.id)} title={used(p.id) ? 'In use by a tier: point the tier elsewhere first' : 'Remove this provider'} onClick={() => set({ providers: m.providers.filter((_, j) => j !== i) })}>Remove provider</button>
+            </fieldset>;
+          })}
+          <button className="btn" onClick={addProvider}>+ Add a provider</button>
+        </>}
+        {tab === 'tiers' && <>
+          <p className="muted">Strongest first: the agent hands harder work up this list and starts Researchers and handovers on the tier it picks. An unset seat uses the first tier.</p>
+          <table className="tbl"><thead><tr><th>Tier</th><th>Provider</th><th>Model</th><th>Parameters (JSON)</th><th /><th /></tr></thead><tbody>
+            {m.tiers.map((t, i) => <tr key={i}>
+              <td><input value={t.name} style={{ width: 90 }} onChange={(e) => setTier(i, { name: e.target.value })} /></td>
+              <td><select value={t.provider} onChange={(e) => setTier(i, { provider: e.target.value })}><option value="" />{m.providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></td>
+              <td><input value={t.model} style={{ width: 170, ...mono }} placeholder={PRESETS.find((x) => x.kind === m.providers.find((p) => p.id === t.provider)?.kind)?.hint ?? 'model id'} onChange={(e) => setTier(i, { model: e.target.value })} /></td>
+              <td><input value={t.params ?? ''} style={{ width: 130, ...mono }} placeholder="{}" onChange={(e) => setTier(i, { params: e.target.value })} /></td>
+              <td style={{ whiteSpace: 'nowrap' }}><button className="tbtn" disabled={i === 0} title="Stronger: move up" onClick={() => moveTier(i, -1)}>↑</button><button className="tbtn" disabled={i === m.tiers.length - 1} title="Weaker: move down" onClick={() => moveTier(i, 1)}>↓</button></td>
+              <td style={{ whiteSpace: 'nowrap' }}><button className="btn" disabled={busy || !t.model} onClick={() => void test(t.name)}>Test it</button> <button className="tbtn" disabled={tierUsed(t.name)} title={tierUsed(t.name) ? 'A seat uses it: point the seat elsewhere first' : 'Remove this tier'} onClick={() => set({ tiers: m.tiers.filter((_, j) => j !== i) })}>🗑</button></td>
+            </tr>)}
+          </tbody></table>
+          <button className="btn" disabled={!m.providers.length} onClick={addTier}>+ Add a tier</button>
+        </>}
+        {tab === 'seats' && <>
+          <p className="muted">All seats use the agent's model unless you pick another tier. The eyes give the agent vision when its own model cannot read images.</p>
+          <table className="tbl"><thead><tr><th>Seat</th><th>Tier</th><th>What it does</th></tr></thead><tbody>
+            {SEATS.map((s) => <tr key={s.id}><td>{s.label}</td>
+              <td><select value={m.seats[s.id] ?? ''} onChange={(e) => set({ seats: { ...m.seats, [s.id]: e.target.value } })}><option value="">{s.chat ? `(first tier${m.tiers[0] ? `: ${m.tiers[0].name}` : ''})` : '(off)'}</option>{m.tiers.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}</select></td>
+              <td className="muted">{s.help}</td></tr>)}
+          </tbody></table>
+        </>}
+        {fieldError && <div style={{ padding: 6, margin: '6px 0', border: '1px solid #e0a0a0', background: '#fde4e4' }}>{fieldError}</div>}
+        {msg && <div style={{ padding: 8, marginTop: 6, border: '1px solid #ccc', background: msg.ok ? '#eef7ee' : '#fde4e4' }}>{msg.text}</div>}
+      </div>
     </Dialog>
   );
 }

@@ -9,15 +9,8 @@ import { startLiveMcp } from './live-mcp.ts';
 import type { AgentModels } from './whiq-config.ts';
 import type { AiStore } from './ai.ts';
 
-/** The models the agent runs on, from the AI settings (one provider and model until the seats page exists). */
-export function modelsFrom(ai: AiStore): AgentModels {
-  const c = ai.publicConfig();
-  if (!c.model) throw new Error('Set a model in Tools > AI Assistant Settings first.');
-  return {
-    providers: [{ name: 'main', type: c.provider === 'anthropic' ? 'anthropic' : 'openai-compat', baseUrl: c.baseUrl, key: ai.key() }],
-    tiers: [{ name: 'Main', provider: 'main', model: c.model }],
-  };
-}
+/** The models the agent runs on: the providers, tiers and seats of the AI settings. */
+export const modelsFrom = (ai: AiStore): AgentModels => ai.agentModels() as AgentModels;
 
 export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiStore): WhiqHost {
   const vendor = app.isPackaged ? join(process.resourcesPath, 'whiq-agent') : join(app.getAppPath(), 'vendor', 'whiq-agent');

@@ -1,5 +1,6 @@
 // The assistant keeps each project's conversation across restarts until Clear context:
 //   node tests/e2e/ai-history.ts   (after node scripts/build.mjs)
+import { fillOneProvider } from './ai-settings.ts';
 import { _electron as electron } from 'playwright';
 import { createServer } from 'node:http';
 import { mkdtempSync } from 'node:fs';
@@ -35,10 +36,7 @@ const openProject = async (win: Awaited<ReturnType<typeof launch>>['win'], id: R
 // 1. project A: turn the assistant on, ask two questions
 let { app, win, menu } = await launch(A);
 await menu('edit.aiSettings'); await win.waitForSelector('.dialog-title:has-text("AI Assistant Settings")');
-await win.locator('.dialog input[type=checkbox]').first().check();
-await win.selectOption('.dialog select >> nth=0', 'LM Studio (local)');
-await win.fill('.dialog input[placeholder="https://..."]', `http://127.0.0.1:${port}/v1`);
-await win.fill('.dialog tr:has-text("Model") input', 'fake-model');
+await fillOneProvider(win, { url: `http://127.0.0.1:${port}/v1`, model: 'fake-model' });
 await win.click('.dialog button:has-text("OK")');
 await openPanel(win);
 await say(win, 'first about A'); await say(win, 'second about A');

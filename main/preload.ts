@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AiConfig, AiPublicConfig, ChatReply, ChatRequest } from './ai.ts';
+import type { AiConfig, AiPublicConfig, ChatReply, ChatRequest, PublicModels } from './ai.ts';
 
 export interface OpenedFile { path: string; name: string; bytes: Uint8Array }
 export type WhiqResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -61,6 +61,10 @@ const api = {
   aiChatClear: (key: string): Promise<void> => ipcRenderer.invoke('ai:chatClear', key),
   aiChatMove: (from: string, to: string): Promise<void> => ipcRenderer.invoke('ai:chatMove', from, to),
   onAiConfig: (cb: (c: AiPublicConfig) => void) => { ipcRenderer.on('ai:config', (_e, c: AiPublicConfig) => cb(c)); },
+  /** Providers, tiers and seats: read (keys never), save (new keys by provider id), test a saved tier. */
+  aiGetModels: (): Promise<PublicModels> => ipcRenderer.invoke('ai:getModels'),
+  aiSaveModels: (m: PublicModels, keys: Record<string, string | undefined>): Promise<{ ok: true; models: PublicModels } | { ok: false; error: string }> => ipcRenderer.invoke('ai:saveModels', m, keys),
+  aiTestTier: (name: string): Promise<{ ok: true; reply: string } | { ok: false; error: string }> => ipcRenderer.invoke('ai:testTier', name),
   /** The open schedule's MCP server for the embedded agent (main/live-mcp.ts): a request to list or run a tool, and the answer. */
   onLiveCall: (cb: (id: number, kind: 'list' | 'call', payload: unknown) => void) => { const f = (_e: unknown, id: number, kind: 'list' | 'call', payload: unknown) => cb(id, kind, payload); ipcRenderer.on('live:call', f); return () => { ipcRenderer.off('live:call', f); }; },
   liveReply: (id: number, v: { ok: boolean; result?: unknown; error?: string }) => ipcRenderer.send('live:reply', id, v),
