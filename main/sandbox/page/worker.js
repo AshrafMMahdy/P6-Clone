@@ -214,6 +214,15 @@ self.onmessage = async (e) => {
       for (const f of m.files) safeWrite(String(f.path), f.bytes);
       return reply({ ok: true });
     }
+    if (m.kind === 'read') {   // a part of a file of the session (the app saves a session's state through this)
+      const path = String(m.path ?? '');
+      if (!(path.startsWith(HOME + '/') || path.startsWith('/tmp/')) || path.includes('..')) throw fail('path leaves the session folder: ' + path, 'path');
+      const size = FS.stat(path).size;
+      const len = Math.max(0, Math.min(Number(m.length) || 0, size - (Number(m.offset) || 0)));
+      const bytes = new Uint8Array(len);
+      if (len) { const st = FS.open(path, 'r'); try { FS.read(st, bytes, 0, len, Number(m.offset) || 0); } finally { FS.close(st); } }
+      return self.postMessage({ type: 'res', id: m.id, ok: true, result: { size, bytes } }, [bytes.buffer]);
+    }
     if (m.kind === 'facts') {
       const names = ['process', 'require', 'module', 'Buffer', 'electron', 'ipcRenderer', 'sbx', 'RTCPeerConnection', 'WebTransport', 'SharedArrayBuffer'];
       return reply({ ok: true, result: { violations: violations.slice(), isolated: self.crossOriginIsolated === true, folderBytes: folderBytes(), types: Object.fromEntries(names.map((n) => [n, typeof self[n]])) } });

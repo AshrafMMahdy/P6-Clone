@@ -8,6 +8,11 @@
 // In main.ts, before app ready:   registerSandboxScheme();   (or registerSandboxScheme([...the program's other privileged schemes]): Electron takes them in one call)
 // Then:                           const sb = await startPyodideSandbox({ dir: <vendor/pyodide, or resources/pyodide when packaged> });
 // Optional settings (the names are service.py's): VM_SANDBOX_FILE_MB (512), VM_SANDBOX_DISK_MB (2048), VM_SANDBOX_IDLE_S (3600).
+// Added here, because a session is a whole Chromium page with Pyodide (about half a GB of the app's memory each): VM_SANDBOX_MAX_SESSIONS (2).
+// A session that has to make room is the least recently used one that is not running a cell; if every one is running, the request is refused (503).
+// A session the service ends on its own (to make room, or idle) is saved first the way the platform snapshots a sandbox (pyodideSnapshot.ts: its files and
+// its picklable variables, on disk under the app's user data for 24 h, 2 GB in all) and put back when the id comes again; the first run says so.
+// Settings for that: P6_SANDBOX_SNAPSHOT_MB (2048), P6_SANDBOX_SNAPSHOT_KEEP_S (86400), P6_SANDBOX_SNAPSHOT_S (120: the time one archive step may take).
 import { app } from 'electron';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -15,6 +20,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { SANDBOX_SCHEME_ENTRY, SandboxSession, registerSandboxScheme, sandboxPath, type Limits, type RunResult, type Shared } from './pyodideSession.ts';
 import { runSelftest, type Selftest } from './pyodideSelftest.ts';
+import { SnapshotStore, restoreSession, saveSession, type EndReason } from './pyodideSnapshot.ts';
 
 export { registerSandboxScheme, SANDBOX_SCHEME_ENTRY };
 export type { Selftest };
@@ -23,6 +29,9 @@ const MAX_BODY = 256 * 1048576;   // one request; the platform sends big files i
 const DEFAULT_PACKAGES = ['numpy', 'pandas', 'scipy', 'matplotlib', 'openpyxl', 'xlsxwriter', 'python-docx', 'python-pptx', 'pypdf', 'lxml', 'pillow'];
 
 const envNumber = (name: string, fallback: number): number => { const v = Number(process.env[name]); return Number.isFinite(v) && v > 0 ? v : fallback; };
+
+/** Every session is busy and the cap is reached: answered 503 like the other refusals of service.py (jail_unavailable). */
+class SandboxFull extends Error {}
 
 /** Where the page's three files are: beside the built main process (dist/sandbox-page, scripts/build-sandbox-page.mjs) or, in a source run, in main/sandbox/page. */
 function findPageDir(): string {
@@ -55,7 +64,7 @@ const NO_SHELL = (language: string): RunResult => ({
   exitCode: 127,
 });
 
-export async function startPyodideSandbox(o: { dir: string; pageDir?: string; port?: number; log?: (line: string) => void }): Promise<{ url: string; close(): Promise<void>; selftest: Selftest }> {
+export async function startPyodideSandbox(o: { dir: string; pageDir?: string; port?: number; snapshotDir?: string; log?: (line: string) => void }): Promise<{ url: string; close(): Promise<void>; selftest: Selftest }> {
   const log = o.log ?? (() => {});
   const limits: Limits = { fileMb: envNumber('VM_SANDBOX_FILE_MB', 512), diskMb: envNumber('VM_SANDBOX_DISK_MB', 2048), idleS: envNumber('VM_SANDBOX_IDLE_S', 3600), memMb: 4096 /* the WebAssembly memory ceiling */ };
   if (!existsSync(join(o.dir, 'pyodide.asm.wasm'))) throw new Error(`Pyodide is not installed in ${o.dir} (node scripts/fetch-pyodide.mjs)`);
@@ -75,9 +84,38 @@ export async function startPyodideSandbox(o: { dir: string; pageDir?: string; po
   let selftest: Selftest = { ok: false, checks: [{ name: 'self-test', ok: false, detail: 'not run yet' }] };
   let closed = false;
 
+  const maxSessions = Math.max(1, Math.floor(envNumber('VM_SANDBOX_MAX_SESSIONS', 2)));
+  const store = new SnapshotStore(o.snapshotDir ?? join(app.getPath('userData'), 'whiq', 'sandbox-snapshots'), {
+    maxBytes: envNumber('P6_SANDBOX_SNAPSHOT_MB', 2048) * 1048576, keepMs: envNumber('P6_SANDBOX_SNAPSHOT_KEEP_S', 86400) * 1000, log,
+  });
+  const snapshotMs = envNumber('P6_SANDBOX_SNAPSHOT_S', 120) * 1000;
+  /** Sessions that left the table and are being saved: their windows are still open, so a new session waits for them (the cap counts memory). */
+  const ending = new Map<Promise<void>, SandboxSession>();
+
+  /** End a session the service chose to end: out of the table at once, saved, then destroyed. */
+  const end = (id: string, why: EndReason): void => {
+    const s = sessions.get(id);
+    if (!s) return;
+    sessions.delete(id);
+    log(`session ${id}: ending (${why.log})`);
+    const p: Promise<void> = saveSession(s, store, why, { timeoutMs: snapshotMs, log }).catch((e: Error) => log(`session ${id}: save failed: ${e.message}`)).finally(() => { s.destroy(); ending.delete(p); });
+    ending.set(p, s);
+  };
+
+  /** The session of this id; a new one when there is none and `create`. A new one beyond the cap ends the least recently used session that is not in use; when all are in use: SandboxFull. */
   const get = (id: string, create: boolean): SandboxSession | undefined => {
     let s = sessions.get(id);
-    if (!s && create) { s = new SandboxSession(id, shared); sessions.set(id, s); }
+    if (s || !create) return s;
+    while (sessions.size >= maxSessions) {
+      let lru: SandboxSession | undefined;
+      for (const o of sessions.values()) if (!o.inUse && (!lru || o.used < lru.used)) lru = o;
+      if (!lru) throw new SandboxFull(`The desktop code sandbox already runs ${sessions.size} sessions (the limit is ${maxSessions}) and each is running a cell right now. Try again when one of them has finished.`);
+      end(lru.id, { log: `to make room for ${id}: the limit is ${maxSessions} session${maxSessions === 1 ? "" : "s"}`, told: `to make room for another chat: the desktop sandbox keeps at most ${maxSessions} session${maxSessions === 1 ? "" : "s"}` });
+    }
+    s = new SandboxSession(id, shared);
+    if (ending.size) s.holdBoot = Promise.all([...ending.keys()]);
+    s.afterBoot = () => restoreSession(s!, store, { log });   // what an earlier session of this id left (nothing, for a new chat) comes back before its first request
+    sessions.set(id, s);
     return s;
   };
 
@@ -89,7 +127,7 @@ export async function startPyodideSandbox(o: { dir: string; pageDir?: string; po
       if (req.headers.origin !== undefined || (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`)) return sendJson(res, 403, { error: 'forbidden' });
       const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
       if (req.method === 'GET') {
-        if (path === '/health') return sendJson(res, 200, { ok: true, jail: selftest.ok, sessions: sessions.size });
+        if (path === '/health') return sendJson(res, 200, { ok: true, jail: selftest.ok, sessions: sessions.size, maxSessions, idleS: limits.idleS });
         if (path === '/selftest') return sendJson(res, 200, selftest);
         return sendJson(res, 404, { error: 'not found' });
       }
@@ -110,11 +148,13 @@ export async function startPyodideSandbox(o: { dir: string; pageDir?: string; po
       if (path === '/kill') {
         const s = sessions.get(id);
         sessions.delete(id);
+        store.remove(id);   // the platform ended it itself (after its own snapshot): it knows, and whatever was saved here is older
         s?.destroy();
         return sendJson(res, 200, { ok: true });
       }
-      if (path === '/keepalive') { get(id, true)!.touch(); return sendJson(res, 200, { ok: true }); }
-      if (path === '/interrupt') { get(id, true)!.interrupt(); return sendJson(res, 200, { ok: true }); }   // Stop / the watchdog: the running cell stops, the session's variables stay
+      // no session of that id (never made, killed, or ended by the service): nothing to keep alive or to stop, and nothing is made just for it
+      if (path === '/keepalive') { sessions.get(id)?.touch(); return sendJson(res, 200, { ok: true }); }
+      if (path === '/interrupt') { sessions.get(id)?.interrupt(); return sendJson(res, 200, { ok: true }); }   // Stop / the watchdog: the running cell stops, the session's variables stay
       if (path === '/write') {
         const s = get(id, true)!;
         const list = Array.isArray(body.files) ? (body.files as Record<string, unknown>[]) : [];
@@ -141,6 +181,7 @@ export async function startPyodideSandbox(o: { dir: string; pageDir?: string; po
       }
       return sendJson(res, 404, { error: 'not found' });
     } catch (e) {
+      if (e instanceof SandboxFull) { if (!res.headersSent) sendJson(res, 503, { error: 'sandbox_capacity', message: e.message }); else res.end(); return; }
       if (!res.headersSent) sendJson(res, 500, { error: `${(e as Error).name}: ${(e as Error).message}` });
       else res.end();
     }
@@ -154,17 +195,21 @@ export async function startPyodideSandbox(o: { dir: string; pageDir?: string; po
 
   // idle sessions are removed after IDLE_S; a session that is running a cell never is
   const reaper = setInterval(() => {
-    for (const [id, s] of sessions) {
-      if (!s.busy && Date.now() - s.used > limits.idleS * 1000) { sessions.delete(id); s.destroy(); log(`session ${id}: removed after ${limits.idleS} s idle`); }
+    for (const [id, s] of [...sessions]) {
+      if (!s.inUse && Date.now() - s.used > limits.idleS * 1000) end(id, { log: `removed after ${limits.idleS} s idle`, told: `it was idle for ${limits.idleS >= 120 ? Math.round(limits.idleS / 60) + ' min' : limits.idleS + ' s'}` });
     }
   }, Math.max(250, Math.min(60_000, (limits.idleS * 1000) / 4)));
   reaper.unref();
+  const sweeper = setInterval(() => { try { store.sweep(); } catch (e) { log(`snapshot sweep failed: ${(e as Error).message}`); } }, Math.max(250, Math.min(3600_000, (envNumber('P6_SANDBOX_SNAPSHOT_KEEP_S', 86400) * 1000) / 4)));
+  sweeper.unref();
 
   const close = async (): Promise<void> => {
     if (closed) return;
     closed = true;
     clearInterval(reaper);
+    clearInterval(sweeper);
     for (const s of sessions.values()) s.destroy();
+    for (const s of ending.values()) s.destroy();
     sessions.clear();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

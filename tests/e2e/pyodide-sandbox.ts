@@ -56,6 +56,7 @@ try {
   // ---- the jail was proven at start
   const h = await call(U, '/health');
   ok(h.status === 200 && h.json.ok === true && h.json.jail === true, `health: ${JSON.stringify(h.json)}`);
+  ok(h.json.maxSessions === 2 && h.json.idleS === 3600, `the defaults: at most 2 live sessions, an hour idle (health says ${h.json.maxSessions} and ${h.json.idleS} s)`);
   const st = await call(U, '/selftest');
   for (const c of st.json.checks as Check[]) ok(c.ok, `self-test: ${c.name}${c.ok ? '' : '  --  ' + c.detail}`);
   ok(st.json.ok === true && st.json.checks.length >= 20, `self-test: ${st.json.checks.length} checks, all pass; the harness waited ${main.startedMs} ms for it`);
@@ -300,6 +301,7 @@ print(list(os.listdir('/')))
   } else console.log('SKIP the platform snapshot/restore (vendor/whiq-agent is not installed)');
 
   // ---- kill, and the service's own door
+  await run('s1', 'only_s1 = 1');   // the cap of 2 has ended s1 long ago: it is live again before it is killed
   const before = (await call(U, '/health')).json.sessions;
   await call(U, '/kill', { id: 's1' });
   const afterKill = (await call(U, '/health')).json.sessions;
@@ -315,7 +317,7 @@ print(list(os.listdir('/')))
     ok(!reachable, `the service answers on 127.0.0.1 only (${lan.address} refuses)`);
   }
 } catch (e) {
-  ok(false, 'the normal-instance tests ran to the end: ' + ((e as Error).stack ?? e));
+  ok(false, 'the normal-instance tests ran to the end: ' + ((e as Error).stack ?? e) + ((e as Error).cause ? ' / cause: ' + String((e as Error).cause) : ''));
 } finally {
   await main.close();
 }
@@ -346,11 +348,131 @@ try {
   ok((await run2('busy', 'print(keep)')).stdout.trim() === 'alive', 'the busy session survived its long run (its idle time starts when the run ends)');
   await new Promise((r) => setTimeout(r, 6500));
   ok((await call(U2, '/health')).json.sessions === 0, 'every session is gone after the idle time');
+  const afterIdle = await run2(idleId, 'print("v" in globals())');
+  ok(afterIdle.stdout.trim() === 'True' && /session was ended earlier \(it was idle for 4 s\)\. It was moved out of memory and put back from its snapshot/.test(afterIdle.stderr), `a session the reaper removed is saved first and put back when it is asked for again, and the run says so: ${JSON.stringify(afterIdle.stderr.slice(0, 200))}`);
+  ok(!/session was ended earlier/.test((await run2(idleId, 'print(1)')).stderr), 'and says it once');
+  await call(U2, '/kill', { id: idleId });
   const ka = await run2('ka', 'z = 5');
   for (let i = 0; i < 4; i++) { await new Promise((r) => setTimeout(r, 2000)); await call(U2, '/keepalive', { id: 'ka' }); }
   ok(ka.exitCode === 0 && (await run2('ka', 'print(z)')).stdout.trim() === '5', '/keepalive holds a session past the idle time');
   await lim.close();
 } catch (e) { ok(false, 'the limits instance ran to the end: ' + ((e as Error).stack ?? e)); }
+
+// ---- the cap on live sessions: the least recently used idle session makes room; never one with a cell running
+try {
+  const cap = await launch({ VM_SANDBOX_MAX_SESSIONS: '2' });
+  const U3 = cap.url;
+  const run3 = async (id: string, code: string): Promise<Run> => (await call(U3, '/run', { id, code, language: 'python', timeoutMs: 0 })).json;
+  const live = async (): Promise<number> => (await call(U3, '/health')).json.sessions;
+  const BUSY = 'import time\nt = time.time()\nwhile time.time() - t < 9: pass\nprint("busy done")';
+  ok((await call(U3, '/health')).json.maxSessions === 2, 'the cap instance reports maxSessions 2');
+  await run3('A', 'mark = "A"');
+  await run3('B', 'mark = "B"');
+  await call(U3, '/keepalive', { id: 'A' });   // A is now the more recently used: B is the least recently used
+  ok((await call(U3, '/create', { id: 'C' })).status === 200 && await live() === 2, `a third /create at the cap answers ok and the number of sessions stays at ${await live()}`);
+  const aStill = await run3('A', 'print(mark)');
+  ok(aStill.stdout.trim() === 'A' && !aStill.stderr, 'the more recently used session (A) is kept, with its variables');
+  // C took B's place; B is asked for again: that is a request for an unknown session, which starts afresh (and, at the cap, ends the least recently used other one)
+  ok((await call(U3, '/keepalive', { id: 'B' })).json.ok === true && (await call(U3, '/interrupt', { id: 'B' })).json.ok === true && await live() === 2, '/keepalive and /interrupt for the ended session answer ok and make nothing');
+  const bAfter = await run3('B', 'print("mark" in globals() and mark == "B")');
+  ok(bAfter.stdout.trim() === 'True' && /session was ended earlier \(to make room for another chat: the desktop sandbox keeps at most 2 sessions\)\. It was moved out of memory and put back/.test(bAfter.stderr) && await live() === 2, `the ended session (B) used again comes back with its variables and the run says why: ${JSON.stringify(bAfter.stderr.slice(0, 200))}`);
+  await call(U3, '/kill', { id: 'B' });
+  const bKilled = await run3('B', 'print(1)');
+  ok(!/session was ended earlier/.test(bKilled.stderr), 'a session the platform killed itself comes back without that note');
+
+  // every session running a cell: nobody is ended, the new one is refused (503) the way the service refuses when the jail is not proven
+  await run3('A', 'mark = "A2"');
+  const busyA = run3('A', BUSY);
+  const busyB = run3('B', BUSY);
+  await new Promise((r) => setTimeout(r, 1500));
+  const refused = [await call(U3, '/create', { id: 'D' }), await call(U3, '/run', { id: 'D', code: 'print(1)', language: 'python' }), await call(U3, '/write', { id: 'D', files: [{ path: 'x.txt', data: 'x' }] })];
+  ok(refused.every((r) => r.status === 503 && r.json?.error === 'sandbox_capacity' && /limit is 2/.test(r.json?.message ?? '') && /Try again/.test(r.json?.message ?? '')) && await live() === 2, `with both sessions running a cell, /create, /run and /write for a third are refused: ${refused.map((r) => r.status).join(', ')} ${refused[0].json?.message}`);
+  ok((await call(U3, '/keepalive', { id: 'D' })).status === 200 && await live() === 2, '/keepalive for an unknown id is not a refusal and makes no session');
+  const [ra, rb] = [await busyA, await busyB];
+  ok(ra.stdout.trim() === 'busy done' && rb.stdout.trim() === 'busy done' && !ra.error && !rb.error, 'the cells that were running when the third was refused ran to the end');
+
+  // one busy, one idle: the idle one makes room, the busy one is never touched
+  const busyA2 = run3('A', BUSY);
+  await new Promise((r) => setTimeout(r, 1000));
+  ok((await call(U3, '/create', { id: 'E' })).status === 200 && await live() === 2, 'with A running and B idle, a /create ends B and not A');
+  const a2 = await busyA2;
+  ok(a2.stdout.trim() === 'busy done' && (await run3('A', 'print(mark)')).stdout.trim() === 'A2', 'the running session (A) finished its cell and still has its variables');
+  const bGone = await run3('B', 'print("mark" in globals())');
+  ok(/session was ended earlier/.test(bGone.stderr), 'while B, the one that was idle, was ended (and comes back saved)');
+  await cap.close();
+} catch (e) { ok(false, 'the session-cap instance ran to the end: ' + ((e as Error).stack ?? e)); }
+
+// ---- a session the service ends is saved first and comes back whole: files, a DataFrame, a dict; what cannot be carried is named
+const NOTE = (s: string): number => (s.match(/session was ended earlier/g) ?? []).length;
+const snapDirOf = (dir: string, id: string): string => join(dir, createHash('sha256').update(id).digest('hex'));
+try {
+  const snapDir = mkdtempSync(join(tmpdir(), 'p6sbx-snaps-'));
+  const sv = await launch({ VM_SANDBOX_MAX_SESSIONS: '1', P6_SBX_SNAPDIR: snapDir });
+  const U4 = sv.url;
+  const run4 = async (id: string, code: string): Promise<Run> => (await call(U4, '/run', { id, code, language: 'python', timeoutMs: 0 })).json;
+  await run4('P', `
+import pandas as pd, os
+df = pd.DataFrame({'a': [1, 2, 3], 'b': list('xyz')})
+d = {'k': [1, 2, {'z': 3}]}
+os.makedirs('out/deep', exist_ok=True)
+open('out/deep/f.txt', 'w').write('kept file')
+open('data.bin', 'wb').write(bytes(range(256)) * 100)
+gen = (i for i in range(3))
+def helper(): return 1
+`);
+  const t0 = Date.now();
+  ok((await call(U4, '/create', { id: 'Q' })).status === 200 && Date.now() - t0 < 3000, `a /create that must end P to make room answers at once (${Date.now() - t0} ms): P is saved while Q waits for its window`);
+  const q1 = await run4('Q', 'q = "from Q"\nopen("q.txt", "w").write("q file")');
+  ok(q1.exitCode === 0 && !q1.error, 'Q runs once P is gone');
+  const dirP = snapDirOf(snapDir, 'P');
+  ok(existsSync(join(dirP, 'files.tar.gz')) && existsSync(join(dirP, 'vars.tar.gz')) && existsSync(join(dirP, 'meta.json')), 'P is on disk under the snapshot folder, named by the hash of its id');
+  ok(!readFileSync(join(dirP, 'meta.json'), 'utf8').includes('"P"'), 'and its id is not written in clear');
+  const pBack = await run4('P', `print(df.shape, df['b'].tolist(), d, open('out/deep/f.txt').read(), len(open('data.bin','rb').read()), 'gen' in globals(), 'helper' in globals())`);
+  ok(pBack.stdout.trim() === "(3, 2) ['x', 'y', 'z'] {'k': [1, 2, {'z': 3}]} kept file 25600 False False", `P comes back with its DataFrame, dict and files: ${pBack.stdout.trim() || pBack.stderr.slice(-200)}`);
+  ok(NOTE(pBack.stderr) === 1 && /moved out of memory and put back from its snapshot/.test(pBack.stderr) && /to make room for another chat/.test(pBack.stderr) && /variables d, df/.test(pBack.stderr) && /Not restored \(pickle cannot carry them\): gen/.test(pBack.stderr) && /Functions and classes you defined are not carried: helper/.test(pBack.stderr), `the first run says it was moved out and restored, and names what could not be: ${JSON.stringify(pBack.stderr.slice(0, 420))}`);
+  ok(NOTE((await run4('P', 'print(1)')).stderr) === 0, 'the note comes once');
+  ok(!existsSync(dirP), 'the snapshot is removed from the disk after the restore');
+  const qBack = await run4('Q', 'print(q, open("q.txt").read())');
+  ok(qBack.stdout.trim() === 'from Q q file' && NOTE(qBack.stderr) === 1, `Q, ended by P's return, is saved and restored in turn: ${qBack.stdout.trim()}`);
+  // a platform /kill is the platform's own end of the chat: nothing of ours is kept for it
+  await run4('P', 'z = 1');   // P is back, and Q is saved again
+  ok(existsSync(snapDirOf(snapDir, 'Q')), 'Q is saved again when P takes its place');
+  await call(U4, '/kill', { id: 'Q' });
+  ok(!existsSync(snapDirOf(snapDir, 'Q')), 'a /kill removes whatever was saved for the id');
+  await sv.close();
+  rmSync(snapDir, { recursive: true, force: true });
+} catch (e) { ok(false, 'the save-and-restore instance ran to the end: ' + ((e as Error).stack ?? e)); }
+
+// ---- what cannot be saved is said, exactly: too big, deleted by age
+try {
+  const snapDir = mkdtempSync(join(tmpdir(), 'p6sbx-snaps-'));
+  const fl = await launch({ VM_SANDBOX_MAX_SESSIONS: '1', P6_SANDBOX_SNAPSHOT_MB: '2', P6_SANDBOX_SNAPSHOT_KEEP_S: '8', P6_SBX_SNAPDIR: snapDir });
+  const U5 = fl.url;
+  const run5 = async (id: string, code: string): Promise<Run> => (await call(U5, '/run', { id, code, language: 'python', timeoutMs: 0 })).json;
+  await run5('big', 'import os\nopen("r.bin", "wb").write(os.urandom(3 * 1048576))\nkept = 1');
+  await run5('small', 'small = 1');   // ends "big": 3 MB of random bytes do not pack under the 1 MB one saved session may take
+  ok(!existsSync(join(snapDirOf(snapDir, 'big'), 'files.tar.gz')), 'a session too big for the snapshot limit leaves no archive');
+  const bigBack = await run5('big', 'import os\nprint(os.path.exists("r.bin"), "kept" in globals())');
+  ok(bigBack.stdout.trim() === 'False False' && NOTE(bigBack.stderr) === 1 && /Its state could not be saved \(its files are 3 MB packed, over the 1 MB a saved session may take\)/.test(bigBack.stderr) && /files from before are gone/.test(bigBack.stderr), `too big: the run says exactly what was lost: ${JSON.stringify(bigBack.stderr.slice(0, 300))}`);
+  // "small" was ended when big came back: saved now; after the keep time (8 s here, 24 h by default) it is deleted, and the id is told
+  await new Promise((r) => setTimeout(r, 11_000));
+  const smallBack = await run5('small', 'print("small" in globals())');
+  ok(smallBack.stdout.trim() === 'False' && NOTE(smallBack.stderr) === 1 && /Its saved state was then deleted \(it was kept for 8 s and then deleted\)/.test(smallBack.stderr), `deleted by age: ${JSON.stringify(smallBack.stderr.slice(0, 300))}`);
+  await fl.close();
+  rmSync(snapDir, { recursive: true, force: true });
+} catch (e) { ok(false, 'the too-big instance ran to the end: ' + ((e as Error).stack ?? e)); }
+
+// ---- the variables cannot be saved in time: the files still are, and the note says what was lost
+try {
+  const to = await launch({ VM_SANDBOX_MAX_SESSIONS: '1', P6_SANDBOX_SNAPSHOT_S: '4' });
+  const U6 = to.url;
+  const run6 = async (id: string, code: string): Promise<Run> => (await call(U6, '/run', { id, code, language: 'python', timeoutMs: 0 })).json;
+  await run6('slow', 'class Slow:\n    def __reduce__(self):\n        import time; time.sleep(60); return (Slow, ())\nfirst = 1\nslow = Slow()\nopen("f.txt", "w").write("file kept")');
+  await run6('other', 'o = 1');   // ends "slow": its variables take longer than 4 s to pack
+  const back = await run6('slow', 'print(open("f.txt").read(), "first" in globals(), "slow" in globals())');
+  ok(back.stdout.trim() === 'file kept False False' && NOTE(back.stderr) === 1 && /1 file\(s\), no variables \(they could not be saved: the archive of the variables failed/.test(back.stderr), `variables out of time: the file is back, the note says the variables are not: ${back.stdout.trim()} ${JSON.stringify(back.stderr.slice(0, 300))}`);
+  await to.close();
+} catch (e) { ok(false, 'the timeout instance ran to the end: ' + ((e as Error).stack ?? e)); }
 
 // ---- each layer alone: with the page policy removed the request cancel still refuses everything
 try {

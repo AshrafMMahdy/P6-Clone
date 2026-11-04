@@ -93,6 +93,16 @@ export class SandboxSession {
   readonly id: string;
   used = Date.now();
   busy = 0;
+  /** Writes in progress (a session that is being written to is not idle either). */
+  private writing = 0;
+  /** The next run says this on stderr, once (the service sets it when this session takes the place of one it ended and restored, or could not). */
+  lostNote: string | null = null;
+  /** Held by the service while sessions it ended are still being saved: this one does not open its window (and take its memory) before. */
+  holdBoot: Promise<unknown> | null = null;
+  /** Run once, when the Python is up and before the first request is served: the service puts a saved state back here. */
+  afterBoot: (() => Promise<void>) | null = null;
+  /** Anything was run in or written to this session (otherwise there is nothing to save when it is ended). */
+  hasState = false;
   win: BrowserWindow | null = null;
   info: WorkerInfo | null = null;
   counters: Counters = { netBlocked: [], windowsDenied: 0, navBlocked: 0, downloadsBlocked: 0, permissionsDenied: [], devtoolsClosed: 0 };
@@ -186,10 +196,21 @@ export class SandboxSession {
   /** The session's Python is running (window opened, packages loaded). Starts it when it is not. */
   ensure(): Promise<WorkerInfo> {
     if (this.destroyed) return Promise.reject(new Error('the session was ended'));
-    this.ready ??= this.boot().catch((e) => { this.ready = null; if (this.win) this.sendUp({ type: 'terminate' }); throw e; });
+    this.ready ??= this.boot().then(async (info) => {
+      const f = this.afterBoot;
+      this.afterBoot = null;
+      if (f) await f();
+      return info;
+    }).catch((e) => { this.ready = null; if (this.win) this.sendUp({ type: 'terminate' }); throw e; });
     return this.ready;
   }
+  /** The Python is up (not starting, not lost, not ended). */
+  get live(): boolean { return !this.destroyed && this.info !== null && this.ready !== null && !!this.win && !this.win.isDestroyed(); }
   private async boot(): Promise<WorkerInfo> {
+    const hold = this.holdBoot;
+    this.holdBoot = null;
+    if (hold) await hold.catch(() => undefined);
+    if (this.destroyed) throw new Error('the session was ended');
     const t0 = Date.now();
     if (!this.win || this.win.isDestroyed()) await this.openWindow();
     const info = await new Promise<WorkerInfo>((resolve, reject) => {
@@ -272,20 +293,49 @@ export class SandboxSession {
 
   // ---- what the service asks of a session
   async write(files: { path: string; data: Buffer }[]): Promise<void> {
-    this.touch();
-    await this.ensure();
-    const r = await this.call('write', { files: files.map((f) => ({ path: f.path, bytes: plain(f.data) })) });
-    if (!r.ok) throw Object.assign(new Error(r.error ?? 'write failed'), { errorKind: r.errorKind });
+    this.writing++;
+    this.hasState = true;
+    try {
+      this.touch();
+      await this.ensure();
+      const r = await this.call('write', { files: files.map((f) => ({ path: f.path, bytes: plain(f.data) })) });
+      if (!r.ok) throw Object.assign(new Error(r.error ?? 'write failed'), { errorKind: r.errorKind });
+    } finally { this.writing--; this.touch(); }
   }
+
+  /** A cell is running or queued, or files are being written: the session is in use and is never ended for idleness or to make room. */
+  get inUse(): boolean { return this.busy > 0 || this.writing > 0; }
 
   run(code: string, timeoutMs: number): Promise<RunResult> {
     this.busy++;
+    this.hasState = true;
     this.touch();
-    return this.exclusive(() => this.runLocked(code, timeoutMs)).finally(() => { this.busy--; this.touch(); });
+    return this.exclusive(() => this.runLocked(code, timeoutMs)).then((r) => this.withNote(r)).finally(() => { this.busy--; this.touch(); });
   }
-  private async runLocked(code: string, timeoutMs: number): Promise<RunResult> {
+  private withNote(r: RunResult): RunResult {
+    const note = this.lostNote;
+    if (!note) return r;
+    this.lostNote = null;
+    return { ...r, stderr: `${note}
+${r.stderr}` };
+  }
+  /** The service's own steps (saving and putting back a state): Python run at once, without the queue; `starting` is for the step that runs while the session is still being made ready. */
+  runInternal(code: string, timeoutMs: number, starting = false): Promise<RunResult> { return this.runLocked(code, timeoutMs, starting); }
+  /** Bytes of a file in the session (the service reads the archives of a saved state out in parts). */
+  async readFile(path: string, offset: number, length: number): Promise<{ size: number; bytes: Buffer }> {
+    const r = await this.call('read', { path, offset, length });
+    if (!r.ok) throw new Error(r.error ?? 'read failed');
+    const res = (r.result ?? {}) as { size?: unknown; bytes?: unknown };
+    return { size: Number(res.size) || 0, bytes: Buffer.from(res.bytes instanceof Uint8Array ? res.bytes : new Uint8Array(0)) };
+  }
+  /** Bytes into a file in the session (no ensure: the session may still be starting). */
+  async writeRaw(files: { path: string; data: Buffer }[]): Promise<void> {
+    const r = await this.call('write', { files: files.map((f) => ({ path: f.path, bytes: plain(f.data) })) });
+    if (!r.ok) throw Object.assign(new Error(r.error ?? 'write failed'), { errorKind: r.errorKind });
+  }
+  private async runLocked(code: string, timeoutMs: number, starting = false): Promise<RunResult> {
     const fail = (stderr: string, error: string): RunResult => ({ stdout: '', stderr, error, traceback: '', exitCode: 1 });
-    try { await this.ensure(); } catch (e) { return fail(`[the Python sandbox did not start: ${(e as Error).message}]`, 'sandbox unavailable'); }
+    if (!starting) try { await this.ensure(); } catch (e) { return fail(`[the Python sandbox did not start: ${(e as Error).message}]`, 'sandbox unavailable'); }
     const secs = Math.floor(timeoutMs / 1000);
     let timedOut = false;
     let killed = false;

@@ -17,7 +17,7 @@ svc.registerSandboxScheme();
 app.whenReady().then(async () => {
   try {
     const t0 = Date.now();
-    const sb = await svc.startPyodideSandbox({ dir: join(root, 'vendor', 'pyodide'), pageDir: join(root, 'main', 'sandbox', 'page') });
+    const sb = await svc.startPyodideSandbox({ dir: join(root, 'vendor', 'pyodide'), pageDir: join(root, 'main', 'sandbox', 'page'), snapshotDir: process.env.P6_SBX_SNAPDIR || undefined });
     writeFileSync(out, JSON.stringify({ url: sb.url, selftest: sb.selftest, startedMs: Date.now() - t0 }));
   } catch (e) {
     writeFileSync(out, JSON.stringify({ error: String((e && e.stack) || e) }));
