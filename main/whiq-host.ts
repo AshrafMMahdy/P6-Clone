@@ -10,6 +10,8 @@ import { join } from 'node:path';
 import { routerConfig, type AgentModels } from './whiq-config.ts';
 
 export interface HostPaths { vendor: string; data: string }
+/** An MCP server the agent is to connect to (the open schedule, on screen): written into its mcp-servers.json at each start. */
+export interface ExtraMcp { id: string; label: string; url: string; token: string }
 export type AgentEvent = Record<string, unknown> & { type: string };
 
 const freePort = () => new Promise<number>((res, rej) => { const s = createServer(); s.unref(); s.on('error', rej); s.listen(0, '127.0.0.1', () => { const p = (s.address() as { port: number }).port; s.close(() => res(p)); }); });
@@ -26,7 +28,8 @@ export class WhiqHost {
 
   private paths: HostPaths;
   private models: () => AgentModels;
-  constructor(paths: HostPaths, models: () => AgentModels) { this.paths = paths; this.models = models; }
+  private extraMcp: () => Promise<ExtraMcp[]>;
+  constructor(paths: HostPaths, models: () => AgentModels, extraMcp: () => Promise<ExtraMcp[]> = async () => []) { this.paths = paths; this.models = models; this.extraMcp = extraMcp; }
 
   /** the loopback ports in use (0 when off) */
   get ports() { return { router: this.routerPort, agent: this.chatPort }; }
@@ -54,6 +57,11 @@ export class WhiqHost {
     const cfgFile = join(this.paths.data, 'llm-router.json');
     writeFileSync(cfgFile, JSON.stringify(config, null, 2));
     [this.routerPort, this.chatPort] = [await freePort(), await freePort()];
+    // the agent's own MCP servers file, in its runtime dir: only ours (a token fresh per run; the agent reads it at boot)
+    const runtime = join(this.paths.data, 'runtime');
+    mkdirSync(runtime, { recursive: true });
+    const mcp = (await this.extraMcp()).map((x) => ({ id: x.id, label: x.label, transport: 'http', url: x.url, headers: { authorization: `Bearer ${x.token}` }, enabled: true, trusted: true }));
+    writeFileSync(join(runtime, 'mcp-servers.json'), JSON.stringify(mcp, null, 2));
     const node = { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' };
     this.router = this.child('router', this.routerDir, ['server.mjs'], {
       ...node, ...keys, PORT: String(this.routerPort), LLM_ROUTER_CONFIG: cfgFile,
@@ -61,7 +69,7 @@ export class WhiqHost {
     });
     this.chat = this.child('agent', this.chatDir, ['server.dist.mjs'], {
       ...node, PORT: String(this.chatPort), WHIQ_DEFAULT_MODULE: 'scheduler', LLM_ROUTER_URL: `http://127.0.0.1:${this.routerPort}`,
-      COWORK_RUNTIME_DIR: join(this.paths.data, 'runtime'), WHIQ_SHARED_RUNTIME_DIR: join(this.paths.data, 'runtime'),
+      COWORK_RUNTIME_DIR: runtime, WHIQ_SHARED_RUNTIME_DIR: runtime,
       WHIQ_STORAGE_DIR: join(this.paths.data, 'storage'), WHIQ_LOCAL_MODE: '1', WHIQ_ROOT: this.paths.vendor,
       COWORK_BEHIND_GATEWAY: '', COWORK_BASE_PATH: '', DATABASE_APP_URL: '',
     });

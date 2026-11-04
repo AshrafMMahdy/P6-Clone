@@ -4,6 +4,7 @@
 import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron';
 import { join } from 'node:path';
 import { WhiqHost, type AgentEvent } from './whiq-host.ts';
+import { startLiveMcp } from './live-mcp.ts';
 import type { AgentModels } from './whiq-config.ts';
 import type { AiStore } from './ai.ts';
 
@@ -19,7 +20,10 @@ export function modelsFrom(ai: AiStore): AgentModels {
 
 export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiStore): WhiqHost {
   const vendor = app.isPackaged ? join(process.resourcesPath, 'whiq-agent') : join(app.getAppPath(), 'vendor', 'whiq-agent');
-  const host = new WhiqHost({ vendor, data: join(app.getPath('userData'), 'whiq') }, () => modelsFrom(ai()));
+  // the open schedule's MCP server: started with the agent's first start, kept for the app's life
+  let live: Promise<{ url: string; token: string; close: () => void }> | null = null;
+  const liveMcp = async () => { live ??= startLiveMcp(getWin); const l = await live; return [{ id: 'p6clone_live', label: 'P6 Clone: the open schedule, on screen', url: l.url, token: l.token }]; };
+  const host = new WhiqHost({ vendor, data: join(app.getPath('userData'), 'whiq') }, () => modelsFrom(ai()), liveMcp);
   const watching = new Map<string, () => void>();
   const send = (chatId: string, e: AgentEvent) => getWin()?.webContents.send('whiq:event', chatId, e);
   // every handler answers {ok, ...} or {ok: false, error}: a failure reaches the panel as words, never a crash
@@ -34,6 +38,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   handle('whiq:approval', (toolCallId: string, kind: 'approve' | 'skip', note?: string) => host.api('POST', '/api/agent/approval', { toolCallId, kind, note }));
   handle('whiq:abort', (chatId: string) => host.api('POST', '/api/agent/abort', { chatId }));
   handle('whiq:resume', (chatId: string) => host.api('POST', '/api/agent/resume', { chatId }));
+  handle('whiq:mcpStatus', () => host.api('GET', '/api/mcp/servers'));
   handle('whiq:files', (chatId: string) => host.api('GET', `/api/files?chatId=${encodeURIComponent(chatId)}`));
   /** The user picks the chat's working folder (where its files go and what it may read). Null when cancelled. */
   handle('whiq:chooseFolder', async (chatId: string) => {
@@ -51,6 +56,6 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   });
   handle('whiq:unwatch', async (chatId: string) => { watching.get(chatId)?.(); watching.delete(chatId); return true; });
 
-  app.on('will-quit', () => { for (const s of watching.values()) s(); watching.clear(); host.stop(); });
+  app.on('will-quit', () => { for (const s of watching.values()) s(); watching.clear(); host.stop(); void live?.then((l) => l.close()); });
   return host;
 }

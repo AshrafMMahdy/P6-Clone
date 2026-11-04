@@ -61,6 +61,9 @@ const api = {
   aiChatClear: (key: string): Promise<void> => ipcRenderer.invoke('ai:chatClear', key),
   aiChatMove: (from: string, to: string): Promise<void> => ipcRenderer.invoke('ai:chatMove', from, to),
   onAiConfig: (cb: (c: AiPublicConfig) => void) => { ipcRenderer.on('ai:config', (_e, c: AiPublicConfig) => cb(c)); },
+  /** The open schedule's MCP server for the embedded agent (main/live-mcp.ts): a request to list or run a tool, and the answer. */
+  onLiveCall: (cb: (id: number, kind: 'list' | 'call', payload: unknown) => void) => { const f = (_e: unknown, id: number, kind: 'list' | 'call', payload: unknown) => cb(id, kind, payload); ipcRenderer.on('live:call', f); return () => { ipcRenderer.off('live:call', f); }; },
+  liveReply: (id: number, v: { ok: boolean; result?: unknown; error?: string }) => ipcRenderer.send('live:reply', id, v),
   /** The embedded platform agent (main/whiq-ipc.ts): every call answers {ok, data} or {ok: false, error}. */
   whiq: {
     status: () => ipcRenderer.invoke('whiq:status') as Promise<WhiqResult<{ state: string; error?: string; missing: string | null }>>,
@@ -72,6 +75,7 @@ const api = {
     abort: (chatId: string) => ipcRenderer.invoke('whiq:abort', chatId) as Promise<WhiqResult<unknown>>,
     resume: (chatId: string) => ipcRenderer.invoke('whiq:resume', chatId) as Promise<WhiqResult<unknown>>,
     files: (chatId: string) => ipcRenderer.invoke('whiq:files', chatId) as Promise<WhiqResult<unknown>>,
+    mcpStatus: () => ipcRenderer.invoke('whiq:mcpStatus') as Promise<WhiqResult<unknown>>,
     chooseFolder: (chatId: string) => ipcRenderer.invoke('whiq:chooseFolder', chatId) as Promise<WhiqResult<{ ok: boolean; path: string } | null>>,
     openPath: (p: string) => ipcRenderer.invoke('whiq:openPath', p) as Promise<WhiqResult<boolean>>,
     showInFolder: (p: string) => ipcRenderer.invoke('whiq:showInFolder', p) as Promise<WhiqResult<boolean>>,
