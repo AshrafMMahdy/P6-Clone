@@ -2,7 +2,7 @@
 // stand-in model (fake-model.ts): it saves the open project into the working folder (export_project, a live tool),
 // imports it into its scheduler (import_schedule_file), reviews it with PQ-VAE (review_programme: the app's ONNX
 // engine, no Python), and runs Python in the code sandbox (run_code). Each step's result is checked as the model saw it.
-//   node tests/e2e/whiq-tools.ts [--sandbox wsl|pyodide]   (needs vendor/whiq-agent with pqvae-onnx, and vendor/pyodide)
+//   node tests/e2e/whiq-tools.ts [--sandbox wsl|pyodide] [--exe <P6 Clone.exe>]   (needs vendor/whiq-agent with pqvae-onnx, and vendor/pyodide)
 import { _electron as electron } from 'playwright';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,7 +29,9 @@ const fake = await fakeModel((r) => {
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6whiqt-'));
 const folder = mkdtempSync(join(tmpdir(), 'p6whiqt-wd-'));
-const app = await electron.launch({ args: [root, '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root, chromiumSandbox: true, env: { ...process.env, P6CLONE_SANDBOX: kind } as Record<string, string> });
+// --exe <P6 Clone.exe>: the packaged program (its resources: agent, engines, models, Pyodide) instead of this checkout
+const exe = process.argv.includes('--exe') ? process.argv[process.argv.indexOf('--exe') + 1] : '';
+const app = await electron.launch({ ...(exe ? { executablePath: exe } : {}), args: [...(exe ? [] : [root]), '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root, chromiumSandbox: true, env: { ...process.env, P6CLONE_SANDBOX: kind } as Record<string, string> });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
 for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }

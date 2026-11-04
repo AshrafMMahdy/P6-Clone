@@ -2,7 +2,7 @@
 // so every step is real but the model's choices: the agent loads the app's live tools, reads the open schedule,
 // selects an activity on screen, writes a summary file and answers. The panel shows the steps and the answer, the
 // activity is selected in the app, and the file asks for a working folder (none chosen yet) and lands in it.
-//   node tests/e2e/whiq-panel.ts   (needs vendor/whiq-agent installed and built)
+//   node tests/e2e/whiq-panel.ts [--exe <P6 Clone.exe>]   (needs vendor/whiq-agent installed and built)
 import { _electron as electron } from 'playwright';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,7 +31,8 @@ const fake = await fakeModel((r) => {
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6whiqp-'));
 const folder = mkdtempSync(join(tmpdir(), 'p6whiq-wd-'));
-const app = await electron.launch({ args: [root, '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
+const exe = process.argv.includes('--exe') ? process.argv[process.argv.indexOf('--exe') + 1] : '';   // the packaged program
+const app = await electron.launch({ ...(exe ? { executablePath: exe } : {}), args: [...(exe ? [] : [root]), '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
 for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
