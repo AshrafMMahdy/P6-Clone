@@ -10,6 +10,7 @@ import { mppToXml, xmlToMpp } from './msproject.ts';
 import { nodeInfer, ReasonerUnavailable } from '../core/analysis/hrmRuntime.ts';
 import { registerBim, registerBimScheme } from './bim.ts';
 import { registerLob } from './lob.ts';
+import { registerWhiq } from './whiq-ipc.ts';
 
 registerBimScheme(); // before ready: the 4D viewer's p6c4d:// scheme
 
@@ -158,7 +159,9 @@ const ai = () => (aiStore ??= new AiStore(join(app.getPath('userData'), 'ai-assi
 }));
 const aiCalls = new Map<string, AbortController>();
 ipcMain.handle('ai:getConfig', () => ai().publicConfig());
-ipcMain.handle('ai:setConfig', (_e, c: AiConfig, apiKey?: string) => { const r = ai().save(c, apiKey); win?.webContents.send('ai:config', r); return r; });
+// the embedded platform agent; new AI settings take effect on its next start
+const whiq = registerWhiq(() => win, ai);
+ipcMain.handle('ai:setConfig', (_e, c: AiConfig, apiKey?: string) => { const r = ai().save(c, apiKey); whiq.stop(); win?.webContents.send('ai:config', r); return r; });
 ipcMain.handle('ai:chat', async (_e, id: string, req: ChatRequest) => {
   const ctl = new AbortController();
   aiCalls.set(id, ctl);

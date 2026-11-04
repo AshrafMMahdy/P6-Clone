@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { AiConfig, AiPublicConfig, ChatReply, ChatRequest } from './ai.ts';
 
 export interface OpenedFile { path: string; name: string; bytes: Uint8Array }
+export type WhiqResult<T> = { ok: true; data: T } | { ok: false; error: string };
 export interface Filter { name: string; extensions: string[] }
 
 // The database crosses between the processes in batches of lines (one message has a size cap, and everything passed
@@ -60,6 +61,24 @@ const api = {
   aiChatClear: (key: string): Promise<void> => ipcRenderer.invoke('ai:chatClear', key),
   aiChatMove: (from: string, to: string): Promise<void> => ipcRenderer.invoke('ai:chatMove', from, to),
   onAiConfig: (cb: (c: AiPublicConfig) => void) => { ipcRenderer.on('ai:config', (_e, c: AiPublicConfig) => cb(c)); },
+  /** The embedded platform agent (main/whiq-ipc.ts): every call answers {ok, data} or {ok: false, error}. */
+  whiq: {
+    status: () => ipcRenderer.invoke('whiq:status') as Promise<WhiqResult<{ state: string; error?: string; missing: string | null }>>,
+    createChat: (title?: string) => ipcRenderer.invoke('whiq:createChat', title) as Promise<WhiqResult<{ id: string; workingDir?: string }>>,
+    chat: (chatId: string) => ipcRenderer.invoke('whiq:chat', chatId) as Promise<WhiqResult<Record<string, unknown>>>,
+    send: (chatId: string, content: string) => ipcRenderer.invoke('whiq:send', chatId, content) as Promise<WhiqResult<unknown>>,
+    askReply: (chatId: string, toolCallId: string, reply: unknown) => ipcRenderer.invoke('whiq:askReply', chatId, toolCallId, reply) as Promise<WhiqResult<unknown>>,
+    approval: (toolCallId: string, kind: 'approve' | 'skip', note?: string) => ipcRenderer.invoke('whiq:approval', toolCallId, kind, note) as Promise<WhiqResult<unknown>>,
+    abort: (chatId: string) => ipcRenderer.invoke('whiq:abort', chatId) as Promise<WhiqResult<unknown>>,
+    resume: (chatId: string) => ipcRenderer.invoke('whiq:resume', chatId) as Promise<WhiqResult<unknown>>,
+    files: (chatId: string) => ipcRenderer.invoke('whiq:files', chatId) as Promise<WhiqResult<unknown>>,
+    chooseFolder: (chatId: string) => ipcRenderer.invoke('whiq:chooseFolder', chatId) as Promise<WhiqResult<{ ok: boolean; path: string } | null>>,
+    openPath: (p: string) => ipcRenderer.invoke('whiq:openPath', p) as Promise<WhiqResult<boolean>>,
+    showInFolder: (p: string) => ipcRenderer.invoke('whiq:showInFolder', p) as Promise<WhiqResult<boolean>>,
+    watch: (chatId: string) => ipcRenderer.invoke('whiq:watch', chatId) as Promise<WhiqResult<boolean>>,
+    unwatch: (chatId: string) => ipcRenderer.invoke('whiq:unwatch', chatId) as Promise<WhiqResult<boolean>>,
+    onEvent: (cb: (chatId: string, e: Record<string, unknown> & { type: string }) => void) => { const f = (_e: unknown, id: string, ev: Record<string, unknown> & { type: string }) => cb(id, ev); ipcRenderer.on('whiq:event', f); return () => { ipcRenderer.off('whiq:event', f); }; },
+  },
   /** .mpp bytes -> Microsoft Project XML bytes, converted by the installed Microsoft Project. Rejects with the bridge error. */
   mppToXml: (bytes: Uint8Array): Promise<Uint8Array> => ipcRenderer.invoke('msp:mppToXml', bytes),
   /** Ask for an .mpp path and save Microsoft Project XML bytes there through Microsoft Project. Null when cancelled. */
