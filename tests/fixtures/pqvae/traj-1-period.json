@@ -1,0 +1,1 @@
+{"endpoint":"/trajectory","request":{"periods":[{"period":1,"planned_pct":0.0197,"actual_pct":0.0094,"spi":0.478,"rfi_count":25,"variation_count":6}],"ptype":"Office"},"response":{"error":"need at least 2 periods","calibration":"v2-minilm"}}

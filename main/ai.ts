@@ -39,7 +39,7 @@ export const DEFAULTS: AiConfig = { enabled: false, provider: 'anthropic', baseU
 
 // ---- providers, model tiers and seats (the platform's AI Providers page, for one user): several providers, each with its
 // own key (encrypted with the OS, under a stable id, so a rename keeps it); an ordered list of tiers, strongest first (the
-// agent's ladder for handovers and Researchers); seats pointing at tiers (an unset chat seat sits on the first tier).
+// agent's ladder for handovers and Researchers); seats pointing at tiers (an unset chat seat sits on the agent's tier).
 export type ModelKind = 'anthropic' | 'openai' | 'gemini';
 export interface PublicProvider { id: string; name: string; kind: ModelKind; baseUrl: string; extraHeaders: string; extraBody: string; hasKey: boolean; keyHint: string }
 export interface TierDef { name: string; provider: string; model: string; /** JSON object of request parameters (optional) */ params?: string }

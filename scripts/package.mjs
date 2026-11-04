@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iconIco } from './icon.mjs';
 import { copyIfc, copyReasoner } from './ort-files.mjs';
+import { copyWhiqAgent } from './whiq-agent-files.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 execFileSync(process.execPath, [join(root, 'scripts/build.mjs')], { stdio: 'inherit' });
@@ -23,6 +24,12 @@ mkdirSync(app, { recursive: true });
 cpSync(join(root, 'dist'), join(app, 'dist'), { recursive: true, filter: (p) => !p.endsWith('.map') });
 await copyReasoner(root, app); // the schedule reasoner and its WebAssembly runtime (the main process runs it)
 copyIfc(root, app); // 4D: the IFC engine (the main process reads models)
+// the embedded platform agent (the AI panel): its servers, the packages they load, its engines, the platform's sandbox
+// service and the PQ-VAE models (resources/whiq-agent); Pyodide, the code sandbox when WSL has none (resources/pyodide)
+const agent = copyWhiqAgent(join(root, 'vendor', 'whiq-agent'), join(out, 'resources', 'whiq-agent'));
+console.log(`platform agent: ${agent.packages} packages, ${agent.mb} MB`);
+if (!existsSync(join(root, 'vendor', 'pyodide'))) throw new Error('vendor/pyodide is missing: node scripts/fetch-pyodide.mjs');
+cpSync(join(root, 'vendor', 'pyodide'), join(out, 'resources', 'pyodide'), { recursive: true });
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 // same name as the development build, so both use the same saved database
 writeFileSync(join(app, 'package.json'), JSON.stringify({ name: pkg.name, version: pkg.version, description: pkg.description, main: 'dist/main.cjs' }, null, 2));

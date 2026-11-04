@@ -9,7 +9,10 @@ import { serveMcpHttp } from '../mcp/httpTransport.ts';
 export interface LiveTool { name: string; description: string; parameters: Record<string, unknown> }
 const INSTRUCTIONS = 'The schedule open in the P6 Clone window in front of the user. These tools read the open projects and work the app '
   + 'visibly: menus open on screen, a cursor moves to what is clicked, typing appears, every change can be undone (Ctrl+Z) and deletions ask '
-  + 'the user first. Use them to act on the open schedule; use the p6clone engine tools for files.';
+  + 'the user first. Use them to act on the open schedule; use the p6clone engine tools for files. To run your own schedule '
+  + 'tools on the open project (review_programme, forecast_outcome, run_cpm, monte_carlo, ...), export_project saves it into '
+  + 'the working folder; import_schedule_file that path, then work on its handle (changes there do not reach the app: make '
+  + 'them with edit_project).';
 
 export async function startLiveMcp(getWin: () => BrowserWindow | null): Promise<{ url: string; token: string; close: () => void }> {
   let next = 0;

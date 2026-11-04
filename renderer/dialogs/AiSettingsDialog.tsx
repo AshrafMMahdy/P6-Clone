@@ -1,8 +1,8 @@
 // Edit > AI Assistant Settings, after the platform's AI Providers page, for one user: General (on, may it work the app),
 // API keys (several providers: name, kind, endpoint, key, extra headers / parameters), Models & tiers (an ordered list,
 // strongest first: the agent's ladder for handovers and Researchers; each tier a provider and a model, with a Test
-// button) and Seats (which tier each of the agent's seats sits on: the agent, Reviewer, Advisor, the eyes, ...; an unset
-// chat seat sits on the first tier). Keys go once to the main process, which encrypts them, and are never shown again.
+// button) and Seats (which tier each of the agent's seats sits on: the agent, Researchers, Reviewer, Advisor, handovers,
+// the eyes, ...; an unset chat seat sits on the agent's tier). Keys go once to the main process, which encrypts them, and are never shown again.
 import { useEffect, useState } from 'react';
 import { Dialog, Tabs } from '../components/Layout.tsx';
 import { closeDialog, toast } from '../store.ts';
@@ -18,9 +18,12 @@ const PRESETS: { label: string; kind: ModelKind; url: string; hint: string }[] =
   { label: 'Ollama (local)', kind: 'openai', url: 'http://localhost:11434/v1', hint: 'e.g. qwen3 or llama3.1' },
   { label: 'Other (OpenAI-compatible)', kind: 'openai', url: '', hint: 'any server with /chat/completions' },
 ];
-/** The agent's seats (the platform router's roles), as the user sees them. Chat seats sit on the first tier when unset. */
+/** The agent's seats (the platform router's roles, and where handovers go), as the user sees them. Chat seats sit on the
+ *  agent's tier when unset. */
 const SEATS: { id: string; label: string; help: string; chat: boolean }[] = [
-  { id: 'agent', label: 'Agent', help: 'the scheduler agent itself (and Researchers / handovers start from the ladder)', chat: true },
+  { id: 'agent', label: 'Agent', help: 'the scheduler agent itself', chat: true },
+  { id: 'research', label: 'Researcher', help: 'sub-agents the agent sends to read and dig (it may also send one to another tier)', chat: true },
+  { id: 'handover', label: 'Handover', help: 'where the agent hands work it cannot finish (unset: the next tier up the list; never below the agent\'s own)', chat: false },
   { id: 'skeptic', label: 'Reviewer', help: 'checks the agent\'s work (the skeptic)', chat: true },
   { id: 'senior_guidance', label: 'Advisor', help: 'senior guidance when the agent is stuck or planning', chat: true },
   { id: 'fast_retrieve', label: 'Fast retrieval', help: 'quick look-ups in long documents', chat: true },
@@ -43,6 +46,10 @@ export function AiSettingsDialog() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => { void window.p6.aiGetModels().then(setM); }, []);
+  // the code sandbox the agent's code runs in (picked when the agent starts: WSL's Linux jail, else Pyodide)
+  const [sb, setSb] = useState<{ kind: string; wsl?: string; wslSetup?: boolean; error?: string } | null>(null);
+  const readSb = () => void window.p6.whiq.sandbox().then((r) => setSb(r.ok ? r.data : null));
+  useEffect(readSb, []);
   if (!m) return <Dialog title="AI Assistant Settings" buttons={<button className="btn" onClick={closeDialog}>Cancel</button>}><p>Loading...</p></Dialog>;
   const set = (patch: Partial<PublicModels>) => setM({ ...m, ...patch });
   const setProv = (i: number, patch: Partial<PublicProvider>) => set({ providers: m.providers.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
@@ -85,6 +92,15 @@ export function AiSettingsDialog() {
           <label style={{ display: 'block', margin: '0 0 10px 20px' }}><input type="checkbox" checked={m.actions} onChange={(e) => set({ actions: e.target.checked })} /> Let it operate the app when you ask it to (you see every step on screen; every change can be undone with Ctrl+Z; it asks before deleting)</label>
           <p className="muted">Set your providers' keys in tab 1, the models in tab 2 (the first tier is the agent's model unless a seat says otherwise), and in tab 3 which model each of the agent's helpers uses.
             Keys are encrypted with Windows' own protection{m.encrypted ? '' : ' (not available on this computer: stored in plain text)'} and never shown again. Project data and documents go to the providers you choose; a local server (LM Studio, Ollama) keeps them on this computer.</p>
+          <fieldset><legend>Code sandbox (where the agent runs the code it writes, cut off from your files and the internet)</legend>
+            <p style={{ margin: '2px 0 6px' }}>{!sb || (sb.kind === 'none' && !sb.error) ? 'Chosen when the agent first starts: the Linux sandbox in WSL if it is set up on this computer, else Python inside the app.'
+              : sb.kind === 'wsl' ? 'In use: the Linux sandbox in WSL (Python with its packages and ortools, shell and Node commands).'
+              : sb.kind === 'pyodide' ? 'In use: Python inside the app (Pyodide: Python only, no ortools, no shell commands).'
+              : `No sandbox: ${sb.error}. The agent works without running code.`}
+              {sb?.wsl && sb.kind !== 'wsl' && sb.wsl !== 'not tried' ? <span className="muted"> WSL: {sb.wsl}.</span> : null}</p>
+            {sb?.wslSetup && <button className="btn" onClick={() => void window.p6.whiq.sandboxSetupWsl()}>Set up the Linux sandbox in WSL...</button>}
+            {sb && sb.kind !== 'wsl' && sb.wsl && sb.wsl !== 'not tried' && <button className="btn" onClick={() => void window.p6.whiq.sandboxRecheck().then(readSb)}>Check again</button>}
+          </fieldset>
         </>}
         {tab === 'keys' && <>
           {m.providers.map((p, i) => {
@@ -107,7 +123,7 @@ export function AiSettingsDialog() {
           <button className="btn" onClick={addProvider}>+ Add a provider</button>
         </>}
         {tab === 'tiers' && <>
-          <p className="muted">Strongest first: the agent hands harder work up this list and starts Researchers and handovers on the tier it picks. An unset seat uses the first tier.</p>
+          <p className="muted">Strongest first: the agent hands harder work up this list and starts Researchers and handovers on the tier it picks. An unset seat uses the agent's tier.</p>
           <table className="tbl"><thead><tr><th>Tier</th><th>Provider</th><th>Model</th><th>Parameters (JSON)</th><th /><th /></tr></thead><tbody>
             {m.tiers.map((t, i) => <tr key={i}>
               <td><input value={t.name} style={{ width: 90 }} onChange={(e) => setTier(i, { name: e.target.value })} /></td>
@@ -124,7 +140,7 @@ export function AiSettingsDialog() {
           <p className="muted">All seats use the agent's model unless you pick another tier. The eyes give the agent vision when its own model cannot read images.</p>
           <table className="tbl"><thead><tr><th>Seat</th><th>Tier</th><th>What it does</th></tr></thead><tbody>
             {SEATS.map((s) => <tr key={s.id}><td>{s.label}</td>
-              <td><select value={m.seats[s.id] ?? ''} onChange={(e) => set({ seats: { ...m.seats, [s.id]: e.target.value } })}><option value="">{s.chat ? `(first tier${m.tiers[0] ? `: ${m.tiers[0].name}` : ''})` : '(off)'}</option>{m.tiers.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}</select></td>
+              <td><select value={m.seats[s.id] ?? ''} onChange={(e) => set({ seats: { ...m.seats, [s.id]: e.target.value } })}><option value="">{s.id === 'handover' ? '(the next tier up)' : !s.chat ? '(off)' : s.id === 'agent' ? `(first tier${m.tiers[0] ? `: ${m.tiers[0].name}` : ''})` : `(the agent's${(m.seats.agent || m.tiers[0]?.name) ? `: ${m.seats.agent || m.tiers[0].name}` : ''})`}</option>{m.tiers.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}</select></td>
               <td className="muted">{s.help}</td></tr>)}
           </tbody></table>
         </>}

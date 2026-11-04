@@ -1,0 +1,14 @@
+diff --git a/shared/chat-engine/server/engines/craftSupervisor.ts b/shared/chat-engine/server/engines/craftSupervisor.ts
+index f59afb3..7930033 100644
+--- a/shared/chat-engine/server/engines/craftSupervisor.ts
++++ b/shared/chat-engine/server/engines/craftSupervisor.ts
+@@ -542,7 +542,8 @@ async function spawnClient(engine: EngineName, staging: string, author: string,
+   }
+   // O10: the engine gets the SDK's default allowlist, never the server's whole environment (API keys stay here).
+   const env: Record<string, string> = { ...getDefaultEnvironment() };
+-  for (const k of ['CRAFT_FONTS_DIR', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP']) if (process.env[k]) env[k] = process.env[k] as string;
++  // P6 Clone: ELECTRON_RUN_AS_NODE: the server runs on the desktop app's Electron as Node, and so do the node engines it starts
++  for (const k of ['CRAFT_FONTS_DIR', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP', 'ELECTRON_RUN_AS_NODE']) if (process.env[k]) env[k] = process.env[k] as string;
+   if (engine === 'p6clone') {
+     // The clone (whiq-v0.1.4) fences reads to in/ or out/ and writes to out/ (the roots above), and its storage root is the chat's
+     // staging, where its .p6clone-recovery/ files live — behind the supervisor's own fence (runCall). Its memory budget is sized from

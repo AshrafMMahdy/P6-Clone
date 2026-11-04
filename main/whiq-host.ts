@@ -13,6 +13,8 @@ export interface HostPaths { vendor: string; data: string }
 /** An MCP server the agent is to connect to (the open schedule, on screen): written into its mcp-servers.json at each start. */
 export interface ExtraMcp { id: string; label: string; url: string; token: string }
 export type AgentEvent = Record<string, unknown> & { type: string };
+/** Environment for the agent server from the app's own services beside it (the code sandbox, the PQ-VAE engine). */
+export type ServiceEnv = (routerUrl: string) => Promise<Record<string, string>>;
 
 const freePort = () => new Promise<number>((res, rej) => { const s = createServer(); s.unref(); s.on('error', rej); s.listen(0, '127.0.0.1', () => { const p = (s.address() as { port: number }).port; s.close(() => res(p)); }); });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -29,7 +31,8 @@ export class WhiqHost {
   private paths: HostPaths;
   private models: () => AgentModels;
   private extraMcp: () => Promise<ExtraMcp[]>;
-  constructor(paths: HostPaths, models: () => AgentModels, extraMcp: () => Promise<ExtraMcp[]> = async () => []) { this.paths = paths; this.models = models; this.extraMcp = extraMcp; }
+  private services: ServiceEnv;
+  constructor(paths: HostPaths, models: () => AgentModels, extraMcp: () => Promise<ExtraMcp[]> = async () => [], services: ServiceEnv = async () => ({})) { this.paths = paths; this.models = models; this.extraMcp = extraMcp; this.services = services; }
 
   /** the loopback ports in use (0 when off) */
   get ports() { return { router: this.routerPort, agent: this.chatPort }; }
@@ -52,7 +55,7 @@ export class WhiqHost {
     if (missing) throw new Error(missing);
     this.stopping = false;
     this.status = { state: 'starting' };
-    const { config, env: keys } = routerConfig(this.models());
+    const { config, env: keys, agentEnv } = routerConfig(this.models());
     mkdirSync(join(this.paths.data, 'logs'), { recursive: true });
     const cfgFile = join(this.paths.data, 'llm-router.json');
     writeFileSync(cfgFile, JSON.stringify(config, null, 2));
@@ -63,6 +66,7 @@ export class WhiqHost {
     const mcp = (await this.extraMcp()).map((x) => ({ id: x.id, label: x.label, transport: 'http', url: x.url, headers: { authorization: `Bearer ${x.token}` }, enabled: true, trusted: true }));
     writeFileSync(join(runtime, 'mcp-servers.json'), JSON.stringify(mcp, null, 2));
     const node = { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' };
+    const services = await this.services(`http://127.0.0.1:${this.routerPort}`);
     this.router = this.child('router', this.routerDir, ['server.mjs'], {
       ...node, ...keys, PORT: String(this.routerPort), LLM_ROUTER_CONFIG: cfgFile,
       WHIQ_PLATFORM_KEYS_FILE: join(this.paths.data, 'platform-keys.json'), DATABASE_APP_URL: '',
@@ -71,7 +75,7 @@ export class WhiqHost {
       ...node, PORT: String(this.chatPort), WHIQ_DEFAULT_MODULE: 'scheduler', LLM_ROUTER_URL: `http://127.0.0.1:${this.routerPort}`,
       COWORK_RUNTIME_DIR: runtime, WHIQ_SHARED_RUNTIME_DIR: runtime,
       WHIQ_STORAGE_DIR: join(this.paths.data, 'storage'), WHIQ_LOCAL_MODE: '1', WHIQ_ROOT: this.paths.vendor,
-      COWORK_BEHIND_GATEWAY: '', COWORK_BASE_PATH: '', DATABASE_APP_URL: '',
+      COWORK_BEHIND_GATEWAY: '', COWORK_BASE_PATH: '', DATABASE_APP_URL: '', ...agentEnv, ...services,
     });
     await this.waitFor(`http://127.0.0.1:${this.routerPort}/api/health`, 'router');
     await this.waitFor(`http://127.0.0.1:${this.chatPort}/api/health`, 'agent');

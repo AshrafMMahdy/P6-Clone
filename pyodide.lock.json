@@ -1,0 +1,36 @@
+{
+  "_comment": "What scripts/fetch-pyodide.mjs puts in vendor/pyodide/ (the Python of the desktop sandbox, main/sandbox). Every download is pinned by SHA-256. 'packages' are taken from the Pyodide distribution (with the packages they depend on); 'wheels' are pure-Python wheels from PyPI that the distribution does not carry, installed offline from vendor/pyodide/ (never fetched at run time).",
+  "pyodide": {
+    "version": "314.0.7",
+    "python": "3.14.2",
+    "url": "https://github.com/pyodide/pyodide/releases/download/314.0.7/pyodide-314.0.7.tar.bz2",
+    "sha256": "192b5864e6e6d30ab074861af800cb8b4acb0998ef0f9342c3367448aeb86645",
+    "size": 337536678
+  },
+  "packages": ["numpy", "pandas", "scipy", "matplotlib", "lxml", "pillow"],
+  "wheels": [
+    { "name": "et-xmlfile", "version": "2.0.0", "imports": ["et_xmlfile"], "depends": [], "license": "MIT",
+      "file": "et_xmlfile-2.0.0-py3-none-any.whl", "sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+      "url": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl" },
+    { "name": "openpyxl", "version": "3.1.5", "imports": ["openpyxl"], "depends": ["et-xmlfile"], "license": "MIT",
+      "file": "openpyxl-3.1.5-py2.py3-none-any.whl", "sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+      "url": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl" },
+    { "name": "xlsxwriter", "version": "3.2.9", "imports": ["xlsxwriter"], "depends": [], "license": "BSD-2-Clause",
+      "file": "xlsxwriter-3.2.9-py3-none-any.whl", "sha256": "9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3",
+      "url": "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl" },
+    { "name": "python-docx", "version": "1.2.0", "imports": ["docx"], "depends": ["lxml", "typing-extensions"], "license": "MIT",
+      "file": "python_docx-1.2.0-py3-none-any.whl", "sha256": "3fd478f3250fbbbfd3b94fe1e985955737c145627498896a8a6bf81f4baf66c7",
+      "url": "https://files.pythonhosted.org/packages/d0/00/1e03a4989fa5795da308cd774f05b704ace555a70f9bf9d3be057b680bcf/python_docx-1.2.0-py3-none-any.whl" },
+    { "name": "python-pptx", "version": "1.0.2", "imports": ["pptx"], "depends": ["pillow", "xlsxwriter", "lxml", "typing-extensions"], "license": "MIT",
+      "file": "python_pptx-1.0.2-py3-none-any.whl", "sha256": "160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba",
+      "url": "https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl" },
+    { "name": "pypdf", "version": "6.19.0", "imports": ["pypdf"], "depends": [], "license": "BSD-3-Clause",
+      "file": "pypdf-6.19.0-py3-none-any.whl", "sha256": "7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14",
+      "url": "https://files.pythonhosted.org/packages/3c/2c/c43c03eaf630435f023f1dc61ec4a4a78951ad5530a62c71cc89bde307b7/pypdf-6.19.0-py3-none-any.whl" }
+  ],
+  "licenses": [
+    { "file": "pyodide-LICENSE.txt", "what": "Pyodide (MPL-2.0)", "url": "https://raw.githubusercontent.com/pyodide/pyodide/314.0.7/LICENSE", "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5" },
+    { "file": "cpython-LICENSE.txt", "what": "CPython 3.14.2 (PSF-2.0), inside pyodide.asm.wasm and python_stdlib.zip", "url": "https://raw.githubusercontent.com/python/cpython/v3.14.2/LICENSE", "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231" },
+    { "file": "emscripten-LICENSE.txt", "what": "Emscripten 5.0.3 runtime, inside pyodide.asm.mjs (MIT / NCSA)", "url": "https://raw.githubusercontent.com/emscripten-core/emscripten/5.0.3/LICENSE", "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86" }
+  ]
+}

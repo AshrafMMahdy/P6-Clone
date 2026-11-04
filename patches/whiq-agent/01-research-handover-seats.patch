@@ -1,0 +1,24 @@
+diff --git a/shared/chat-engine/server/childAgents.ts b/shared/chat-engine/server/childAgents.ts
+index 1d0b64e..aaefd3f 100644
+--- a/shared/chat-engine/server/childAgents.ts
++++ b/shared/chat-engine/server/childAgents.ts
+@@ -37,7 +37,7 @@ export const CHILD_BUDGET: Record<ChildAgentKind, { steps: number; continues: nu
+   rlm:      { steps: envInt('CHILD_RLM_STEPS', 75),      continues: 2 },
+ };
+ /** The router seat a kind runs on when it has no tier (its own seat on the AI Providers page). */
+-export const KIND_SEAT: Partial<Record<ChildAgentKind, string>> = { review: 'skeptic', advisor: 'senior_guidance', fast: 'fast_retrieve', vision: 'vision_ocr', rlm: 'fast_retrieve' };
++export const KIND_SEAT: Partial<Record<ChildAgentKind, string>> = { research: 'research', review: 'skeptic', advisor: 'senior_guidance', fast: 'fast_retrieve', vision: 'vision_ocr', rlm: 'fast_retrieve' };
+ function envInt(name: string, dflt: number): number { const n = Number(process.env[name]); return Number.isInteger(n) && n > 0 ? n : dflt; }
+ 
+ export const isWorkerKind = (k: ChildAgentKind | undefined): boolean => k === 'review' || k === 'advisor';
+@@ -231,7 +231,9 @@ export async function resolveHandoverTier(session: ChatSession, requested: strin
+   const { order, agentTier } = await tierLadder(session);
+   if (!order.length) return { error: 'the LLM Router has no tiers configured — handover needs at least one tier on the AI Providers page' };
+   const mine = agentTier && order.includes(agentTier) ? order.indexOf(agentTier) : -1;
+-  const want = (requested ?? 'up').trim();
++  // P6 Clone: the Handover seat names where a handover with no tier goes, when that tier is at or above this chat's own
++  const seat = process.env.WHIQ_HANDOVER_TIER?.trim();
++  const want = (requested ?? (seat && order.includes(seat) && (mine < 0 || order.indexOf(seat) <= mine) ? seat : 'up')).trim();
+   if (want === 'up' || want === '') {
+     const i = mine < 0 ? 0 : Math.max(mine - 1, 0);
+     return { tier: order[i] };

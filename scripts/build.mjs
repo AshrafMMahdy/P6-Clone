@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { copyFileSync, writeFileSync } from 'node:fs';
 import { buildViewer } from './build-viewer4d.mjs';
 import { iconPng } from './icon.mjs';
+import { buildSandboxPage } from './build-sandbox-page.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'onnxruntime-web'], sourcemap: true, logLevel: 'warning' };
@@ -14,6 +15,9 @@ const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node22'
 await esbuild({ ...common, entryPoints: [join(root, 'main/main.ts')], outfile: join(root, 'dist/main.cjs') });
 copyFileSync(await buildViewer(), join(root, 'dist/viewer4d.js')); // 4D: the viewer (Extensions > 4D, render_4d)
 await esbuild({ ...common, entryPoints: [join(root, 'main/preload.ts')], outfile: join(root, 'dist/preload.cjs') });
+buildSandboxPage(); // dist/sandbox-page: the code sandbox's page (main/sandbox/pyodideService.ts)
+// the PQ-VAE engine the embedded agent's schedule review and forecast use (its own process: main/pqvae/start.ts)
+await esbuild({ ...common, format: 'esm', entryPoints: [join(root, 'main/pqvae/sidecar.ts')], outfile: join(root, 'dist/pqvae-sidecar.mjs') });
 await vite({
   root: join(root, 'renderer'),
   base: './',

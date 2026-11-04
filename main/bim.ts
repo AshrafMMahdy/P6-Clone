@@ -16,10 +16,9 @@ import { readImport4d } from '../core/bim/read4d.ts';
 const root = () => join(app.getPath('userData'), '4d');
 const EMPTY = { project: '', name: '', dataDate: null, start: null, finish: null, sources: [{ name: 'best', label: 'best' }], activities: [], elements: { count: 0, linked: 0, groups: [], of: '' }, status: [] };
 
-/** Before app ready: the scheme must be standard and allowed to fetch, so the viewer can load its tiles. */
-export function registerBimScheme(): void {
-  protocol.registerSchemesAsPrivileged([{ scheme: 'p6c4d', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
-}
+/** Registered before app ready (main.ts, in Electron's one call for privileged schemes): standard and allowed to fetch,
+ *  so the viewer can load its tiles. */
+export const BIM_SCHEME = { scheme: 'p6c4d', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } };
 
 /** The viewer folder of a model: index.html (waiting for its timeline from the app), render.html, viewer4d.js, and the
  *  model's display tiles in model-<hash>/ (hard links to the cache). */

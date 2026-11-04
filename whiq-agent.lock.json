@@ -6,7 +6,6 @@
   "paths": [
     "package.json",
     "package-lock.json",
-    "tsconfig.json",
     "engines.lock",
     "shared",
     "03 Shared Platform Agents/app",

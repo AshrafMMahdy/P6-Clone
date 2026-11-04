@@ -8,11 +8,12 @@ import { basename, join } from 'node:path';
 import { buildMenu } from './menu.ts';
 import { mppToXml, xmlToMpp } from './msproject.ts';
 import { nodeInfer, ReasonerUnavailable } from '../core/analysis/hrmRuntime.ts';
-import { registerBim, registerBimScheme } from './bim.ts';
+import { registerBim, BIM_SCHEME } from './bim.ts';
+import { registerSandboxScheme } from './sandbox/pyodideService.ts';
 import { registerLob } from './lob.ts';
 import { registerWhiq } from './whiq-ipc.ts';
 
-registerBimScheme(); // before ready: the 4D viewer's p6c4d:// scheme
+registerSandboxScheme([BIM_SCHEME]); // before ready, in one call: the code sandbox's scheme and the 4D viewer's p6c4d://
 
 const DB_FILE = () => join(app.getPath('userData'), 'p6clone-db.json');
 let win: BrowserWindow | null = null;

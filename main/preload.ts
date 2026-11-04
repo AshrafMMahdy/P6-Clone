@@ -81,6 +81,12 @@ const api = {
     resume: (chatId: string) => ipcRenderer.invoke('whiq:resume', chatId) as Promise<WhiqResult<unknown>>,
     files: (chatId: string) => ipcRenderer.invoke('whiq:files', chatId) as Promise<WhiqResult<unknown>>,
     mcpStatus: () => ipcRenderer.invoke('whiq:mcpStatus') as Promise<WhiqResult<unknown>>,
+    /** save a file for the agent's own tools into 00_INPUTS of the talking chat's working folder; its path there */
+    saveInput: (name: string, data: Uint8Array) => ipcRenderer.invoke('whiq:saveInput', name, data) as Promise<WhiqResult<{ path: string; folder: string }>>,
+    /** the code sandbox (WSL's Linux jail, else Pyodide): which one, why not WSL, its set-up and a fresh pick */
+    sandbox: () => ipcRenderer.invoke('whiq:sandbox') as Promise<WhiqResult<{ kind: 'wsl' | 'pyodide' | 'none'; wsl?: string; wslSetup?: boolean; error?: string }>>,
+    sandboxSetupWsl: () => ipcRenderer.invoke('whiq:sandboxSetupWsl') as Promise<WhiqResult<boolean>>,
+    sandboxRecheck: () => ipcRenderer.invoke('whiq:sandboxRecheck') as Promise<WhiqResult<boolean>>,
     chooseFolder: (chatId: string) => ipcRenderer.invoke('whiq:chooseFolder', chatId) as Promise<WhiqResult<string | null>>,
     folder: (chatId: string) => ipcRenderer.invoke('whiq:folder', chatId) as Promise<WhiqResult<string>>,
     attach: (chatId: string) => ipcRenderer.invoke('whiq:attach', chatId) as Promise<WhiqResult<{ folder: string; files: string[] } | null>>,

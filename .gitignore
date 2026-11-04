@@ -16,3 +16,6 @@ dist-viewer/
 
 # the platform agent engine, fetched read-only at a pinned commit (desktop app only; never committed or released)
 vendor/whiq-agent/
+
+# the sandbox's Python (scripts/fetch-pyodide.mjs): Pyodide and its packages, pinned in pyodide.lock.json
+vendor/pyodide/
