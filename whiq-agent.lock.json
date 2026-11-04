@@ -1,0 +1,19 @@
+{
+  "comment": "The platform's scheduler agent (White Hat IQ), embedded in the desktop app's AI panel. Read-only: fetched by scripts/fetch-whiq-agent.mjs into vendor/whiq-agent/ (gitignored), never committed here and never part of the MCP release (dist-cli). Update = new commit here, then fetch again.",
+  "repo": "https://github.com/AshrafMMahdy/White-Hat-IQ-2",
+  "branch": "33-chat-only",
+  "commit": "c6c43ad82a4dd308352d3149279868db904268c0",
+  "paths": [
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
+    "engines.lock",
+    "shared",
+    "03 Shared Platform Agents/app",
+    "06 LLM Router",
+    "09 Local Sandbox",
+    "scripts/build-servers.mjs",
+    "scripts/engines-fetch.mjs"
+  ],
+  "workspaces": ["shared/*", "03 Shared Platform Agents/app"]
+}

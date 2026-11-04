@@ -114,8 +114,8 @@ test('XER -> P6 XML -> read back equals the XER, field for field, on every sampl
       const B: Row[] = b.tables[t]?.rows ?? [];
       // the root WBS node is the Project element; a UDF value whose type has no P6 data type (FT_DATE, written by an agent)
       // has no value element to go under (the writer reports it lost)
-      const udfOk = new Set((a.tables.UDFTYPE?.rows ?? []).filter((u) => u.logical_data_type in P6XML_ENUMS.udf_data_type).map((u) => u.udf_type_id));
-      const own = t === 'PROJWBS' ? (r: Row) => r.proj_node_flag !== 'Y' : t === 'UDFVALUE' ? (r: Row) => udfOk.has(r.udf_type_id) : () => true;
+      const udfOk: Set<string> = new Set((a.tables.UDFTYPE?.rows ?? []).filter((u) => u.logical_data_type in P6XML_ENUMS.udf_data_type).map((u) => u.udf_type_id));
+      const own: (r: Row) => boolean = t === 'PROJWBS' ? (r: Row) => r.proj_node_flag !== 'Y' : t === 'UDFVALUE' ? (r: Row) => udfOk.has(r.udf_type_id) : () => true;
       const keyed = KEYS[t] && A.some((r) => r[KEYS[t]]);
       const sig = SIG[t] ?? (keyed ? [KEYS[t]] : t === 'TASKPRED' ? ['task_id', 'pred_task_id', 'pred_type'] : null);
       const fields = map.filter((m) => m[2] !== 'legacy' && !(sig ?? []).includes(m[1])).map((m) => m[1]);
