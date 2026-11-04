@@ -5,7 +5,7 @@
 import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron';
 import { spawn } from 'node:child_process';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 import { EOL } from 'node:os';
 import { WhiqHost, type AgentEvent } from './whiq-host.ts';
 import { startLiveMcp } from './live-mcp.ts';
@@ -14,6 +14,22 @@ import { wslSetupCommand } from './sandbox/wslSandbox.ts';
 import { startPqvae, type Pqvae } from './pqvae/start.ts';
 import type { AgentModels } from './whiq-config.ts';
 import type { AiStore } from './ai.ts';
+
+/** A file name Windows accepts: no path or reserved characters, no device name (CON, NUL, COM1, ...), no trailing dot or space. */
+export function safeName(name: string, fallback: string): string {
+  let n = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '');
+  if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i.test(n)) n = `_${n}`;
+  return n || fallback;
+}
+/** `name` in `dir`, or "name (2).ext", "name (3).ext", ... when that is taken: an attachment never replaces a file. */
+export function freeName(dir: string, name: string): string {
+  const dot = name.lastIndexOf('.'), stem = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : '';
+  let n = name;
+  for (let i = 2; existsSync(join(dir, n)); i++) n = `${stem} (${i})${ext}`;
+  return n;
+}
+/** Documents a file chip opens with their program; anything else (a script, a program) is shown in its folder instead. */
+const OPENABLE = /\.(docx?|xlsx?|xlsm|csv|pptx?|pdf|md|txt|json|xml|xer|mpp|png|jpe?g|gif|svg|webp|dwg|dxf|html?)$/i;
 
 /** The models the agent runs on: the providers, tiers and seats of the AI settings. */
 export const modelsFrom = (ai: AiStore): AgentModels => ai.agentModels() as AgentModels;
@@ -34,21 +50,40 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     log: sandboxLog,
   });
   // the PQ-VAE engine (schedule review, outcome forecast): a fresh one with each agent start, as it asks that start's router
+  // one start at a time (two starts that overlap, after two quick settings saves, never leave two engines)
   let pqvae: Pqvae | null = null;
-  const startEngine = async (routerUrl: string): Promise<Record<string, string>> => {
-    pqvae?.stop(); pqvae = null;
-    try {
-      pqvae = await startPqvae({ entry: join(app.getAppPath(), 'dist', 'pqvae-sidecar.mjs'), models: join(vendor, 'pqvae-onnx'), routerUrl, log: join(data, 'logs', 'pqvae.log') });
-      return { PQVAE_PORT: String(pqvae.port) };
-    } catch (e) { sandboxLog(`[pqvae] not started: ${(e as Error).message}`); return {}; }   // its tools then say it is unavailable
+  let engineQueue: Promise<unknown> = Promise.resolve();
+  const startEngine = (routerUrl: string): Promise<Record<string, string>> => {
+    const next = engineQueue.then(async (): Promise<Record<string, string>> => {
+      pqvae?.stop(); pqvae = null;
+      try {
+        pqvae = await startPqvae({ entry: join(app.getAppPath(), 'dist', 'pqvae-sidecar.mjs'), models: join(vendor, 'pqvae-onnx'), routerUrl, log: join(data, 'logs', 'pqvae.log') });
+        return { PQVAE_PORT: String(pqvae.port) };
+      } catch (e) { sandboxLog(`[pqvae] not started: ${(e as Error).message}`); return {}; }   // its tools then say it is unavailable
+    });
+    engineQueue = next.catch(() => undefined);
+    return next;
   };
   const services = async (routerUrl: string) => { const [, pq] = await Promise.all([sandbox.ensure(), startEngine(routerUrl)]); return { ...sandbox.env(), ...pq }; };
   const host = new WhiqHost({ vendor, data }, () => modelsFrom(ai()), liveMcp, services);
   const watching = new Map<string, () => void>();
   const send = (chatId: string, e: AgentEvent) => getWin()?.webContents.send('whiq:event', chatId, e);
+  host.onDown = (why) => {
+    for (const [chatId, off] of watching) { off(); send(chatId, { type: 'agent_down', message: why }); }
+    watching.clear();
+  };
+  /** The chat's live events forwarded to the window, once per chat and again after the agent restarted. */
+  const watch = async (chatId: string) => {
+    if (watching.has(chatId)) return;
+    const off = await host.stream(chatId, (e) => { send(chatId, e); if (e.type === 'preview_update' || e.type === 'done') void syncFiles(chatId); },
+      () => { if (watching.get(chatId) === off) watching.delete(chatId); });
+    watching.set(chatId, off);
+  };
 
   // ---- the chat's working folder: where its files are copied to and attachments go (asked for when first needed)
   const folders = new Map<string, string>(), declined = new Set<string>();
+  /** a path inside one of the chats' working folders (the panel's file chips point there) */
+  const isFileOfAgent = (p: string) => { const f = resolve(String(p)).toLowerCase(); return [...folders.values()].some((w) => f.startsWith(resolve(w).toLowerCase() + sep)); };
   /** the chat that sent the last message: the one the agent's on-screen tools are working for */
   let lastChat = '';
   const folderOf = async (chatId: string): Promise<string> => {
@@ -98,7 +133,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   handle('whiq:status', async () => ({ ...host.status, missing: process.env.P6CLONE_WHIQ === 'off' ? 'Turned off (P6CLONE_WHIQ=off).' : host.available() }));
   handle('whiq:createChat', (title?: string) => host.api('POST', '/api/chats', { title: title || 'Scheduler', module: 'scheduler' }));
   handle('whiq:chat', (chatId: string) => host.api('GET', `/api/chats/${encodeURIComponent(chatId)}`));
-  handle('whiq:send', (chatId: string, content: string) => { lastChat = chatId; return host.api('POST', '/api/agent/send', { chatId, content }); });
+  handle('whiq:send', async (chatId: string, content: string) => { lastChat = chatId; await watch(chatId); return host.api('POST', '/api/agent/send', { chatId, content }); });
   handle('whiq:askReply', (chatId: string, toolCallId: string, reply: unknown) => host.api('POST', '/api/agent/ask-reply', { chatId, toolCallId, reply }));
   handle('whiq:approval', (toolCallId: string, kind: 'approve' | 'skip', note?: string) => host.api('POST', '/api/agent/approval', { toolCallId, kind, note }));
   handle('whiq:abort', (chatId: string) => host.api('POST', '/api/agent/abort', { chatId }));
@@ -117,14 +152,14 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     if (!r || r.canceled || !r.filePaths.length) return null;
     const inputs = join(wd, '00_INPUTS');
     mkdirSync(inputs, { recursive: true });
-    for (const p of r.filePaths) copyFileSync(p, join(inputs, basename(p)));
-    return { folder: wd, files: r.filePaths.map((p) => `00_INPUTS/${basename(p)}`) };
+    const names = r.filePaths.map((p) => { const n = freeName(inputs, safeName(basename(p), 'attachment')); copyFileSync(p, join(inputs, n)); return n; });
+    return { folder: wd, files: names.map((n) => `00_INPUTS/${n}`) };
   });
   /** A file the agent's on-screen tools save for its own tools (the open project as XER for import_schedule_file): into
    *  00_INPUTS of the working folder of the chat that is talking (asked for when it has none). Its path in that folder. */
   handle('whiq:saveInput', async (name: string, data: Uint8Array) => {
     if (!lastChat) throw new Error('No chat with the agent is open.');
-    const file = basename(String(name)).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || 'project.xer';
+    const file = safeName(basename(String(name)), 'project.xer');
     let wd = await folderOf(lastChat);
     if (!wd) wd = await askFolder(lastChat, 'the open project is saved into it for the agent');
     if (!wd) throw new Error('No working folder was chosen, so the project could not be saved for the agent.');
@@ -133,13 +168,13 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     return { path: `00_INPUTS/${file}`, folder: wd };
   });
   handle('whiq:folder', (chatId: string) => folderOf(chatId));
-  handle('whiq:openPath', async (p: string) => { const err = await shell.openPath(p); if (err) throw new Error(err); return true; });
-  handle('whiq:showInFolder', async (p: string) => { shell.showItemInFolder(p); return true; });
-  handle('whiq:watch', async (chatId: string) => {
-    if (watching.has(chatId)) return true;
-    watching.set(chatId, await host.stream(chatId, (e) => { send(chatId, e); if (e.type === 'preview_update' || e.type === 'done') void syncFiles(chatId); }));
-    return true;
+  handle('whiq:openPath', async (p: string) => {
+    if (!isFileOfAgent(p)) throw new Error('Only files in the agent\'s working folders are opened from the panel.');
+    if (!OPENABLE.test(p)) { shell.showItemInFolder(p); return true; }
+    const err = await shell.openPath(p); if (err) throw new Error(err); return true;
   });
+  handle('whiq:showInFolder', async (p: string) => { if (!isFileOfAgent(p)) throw new Error('Only files in the agent\'s working folders are shown from the panel.'); shell.showItemInFolder(p); return true; });
+  handle('whiq:watch', async (chatId: string) => { await watch(chatId); return true; });
   handle('whiq:unwatch', async (chatId: string) => { watching.get(chatId)?.(); watching.delete(chatId); return true; });
 
   // the code sandbox for Settings: which one runs the agent's code, and setting up the WSL one (in a console the user sees:
@@ -150,7 +185,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     spawn('wsl.exe', ['-e', 'bash', '-lc', wslSetupCommand(version)], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
     return true;
   });
-  handle('whiq:sandboxRecheck', async () => { host.stop(); await sandbox.close(); return true; });
+  handle('whiq:sandboxRecheck', async () => { host.stop('The code sandbox is being picked again: the agent starts with it on your next message.'); await sandbox.close(); return true; });
   app.on('will-quit', () => { for (const s of watching.values()) s(); watching.clear(); host.stop(); pqvae?.stop(); void sandbox.close(); void live?.then((l) => l.close()); });
   return host;
 }

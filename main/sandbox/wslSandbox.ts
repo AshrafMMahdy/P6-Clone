@@ -3,7 +3,7 @@
 // copied into the WSL home (~/.p6clone/sandbox-<version>, the Linux disk: fast, writable), started on a loopback port
 // Windows reaches through WSL's localhost forwarding, and used only once its own self-test proves the jail. It ends
 // with the app: its stdin is a pipe from this process, and the wrapper stops it when that pipe closes.
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 
 export interface WslSandbox { url: string; close(): void }
@@ -11,24 +11,34 @@ export type WslResult = { ok: true; sandbox: WslSandbox } | { ok: false; reason:
 
 const freePort = () => new Promise<number>((res, rej) => { const s = createServer(); s.unref(); s.on('error', rej); s.listen(0, '127.0.0.1', () => { const p = (s.address() as { port: number }).port; s.close(() => res(p)); }); });
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-/** One bash command in the default WSL distribution; '' when WSL is not there. */
-function bash(cmd: string, timeout = 60_000): { code: number; out: string } {
-  const r = spawnSync('wsl.exe', ['-e', 'bash', '-lc', cmd], { encoding: 'utf8', timeout, windowsHide: true });
-  return { code: r.status ?? -1, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.replace(/\0/g, '').trim() };
+/** A program's exit code and output, never blocking the app (a cold WSL takes seconds to start); -1 on a time-out. */
+function run(cmd: string, args: string[], timeout: number, encoding: BufferEncoding = 'utf8'): Promise<{ code: number; out: string }> {
+  return new Promise((done) => {
+    const c = spawn(cmd, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks: Buffer[] = [];
+    c.stdout.on('data', (d: Buffer) => chunks.push(d)); c.stderr.on('data', (d: Buffer) => chunks.push(d));
+    const t = setTimeout(() => { try { c.kill(); } catch { /* gone */ } }, timeout);
+    const end = (code: number) => { clearTimeout(t); done({ code, out: Buffer.concat(chunks).toString(encoding).replace(/\0/g, '').trim() }); };
+    c.on('error', () => end(-1));
+    c.on('close', (code) => end(code ?? -1));
+  });
 }
+/** One bash command in the default WSL distribution. */
+const bash = (cmd: string, timeout = 60_000) => run('wsl.exe', ['-e', 'bash', '-lc', cmd], timeout);
 
 /** The folder the service lives in inside WSL, for this version of it. */
 export const wslHome = (version: string) => `$HOME/.p6clone/sandbox-${version.replace(/[^\w.-]/g, '').slice(0, 12)}`;
 
-/** Copy the service in (once per version) and check what it needs: bubblewrap, python3 and the packages (install.sh). */
-export function prepareWsl(source: string, version: string): { ok: true } | { ok: false; reason: string; setup?: boolean } {
+/** Copy the service in (its few files, every time: the clone's patches change them; the packages in .venv stay) and
+ *  check what it needs: bubblewrap, python3 and the packages (install.sh). */
+export async function prepareWsl(source: string, version: string): Promise<{ ok: true } | { ok: false; reason: string; setup?: boolean }> {
   if (process.platform !== 'win32') return { ok: false, reason: 'not Windows' };
-  const list = spawnSync('wsl.exe', ['-l', '-q'], { encoding: 'utf16le', timeout: 15_000, windowsHide: true });
-  if (list.status !== 0 || !String(list.stdout ?? '').replace(/\0/g, '').trim()) return { ok: false, reason: 'WSL is not installed (or has no Linux distribution)' };
+  const list = await run('wsl.exe', ['-l', '-q'], 15_000, 'utf16le');
+  if (list.code !== 0 || !list.out) return { ok: false, reason: 'WSL is not installed (or has no Linux distribution)' };
   const home = wslHome(version);
-  const copy = bash(`set -e; d="${home}"; if [ ! -f "$d/service.py" ]; then mkdir -p "$d"; src="$(wslpath -a ${q(source.replace(/\\/g, '/'))})"; cp "$src"/*.py "$src"/*.sh "$src"/requirements.txt "$d"/; fi; echo copied`);
+  const copy = await bash(`set -e; d="${home}"; mkdir -p "$d"; src="$(wslpath -a ${q(source.replace(/\\/g, '/'))})"; cp "$src"/*.py "$src"/*.sh "$src"/requirements.txt "$d"/; echo copied`);
   if (copy.code !== 0) return { ok: false, reason: `could not copy the sandbox into WSL: ${copy.out.slice(-300)}` };
-  const need = bash(`command -v bwrap >/dev/null || echo "bubblewrap"; command -v python3 >/dev/null || echo "python3"; [ -x "${home}/.venv/bin/python3" ] || echo "packages"`);
+  const need = await bash(`command -v bwrap >/dev/null || echo "bubblewrap"; command -v python3 >/dev/null || echo "python3"; [ -x "${home}/.venv/bin/python3" ] || echo "packages"`);
   const missing = need.out.split(/\s+/).filter(Boolean);
   if (missing.length) return { ok: false, reason: `the WSL sandbox is not set up (missing: ${missing.join(', ')})`, setup: true };
   return { ok: true };
@@ -36,7 +46,7 @@ export function prepareWsl(source: string, version: string): { ok: true } | { ok
 
 /** Start the service in WSL and wait for its self-test; refused when the jail is not proven there. */
 export async function startWslSandbox(source: string, version: string, log: (line: string) => void = () => {}): Promise<WslResult> {
-  const ready = prepareWsl(source, version);
+  const ready = await prepareWsl(source, version);
   if (!ready.ok) return ready;
   const port = await freePort();
   // the service in the background; `cat` holds until our end of stdin closes (the app quit or close()), then it is stopped

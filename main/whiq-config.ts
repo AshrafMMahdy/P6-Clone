@@ -7,7 +7,8 @@
 // API keys never go into the file: each provider names an environment variable (apiKeyEnv) that only the router child
 // process receives, decrypted in the main process.
 export type ProviderType = 'anthropic' | 'openai-compat' | 'gemini';
-export interface AgentProvider { name: string; type: ProviderType; baseUrl: string; key: string }
+/** headers: extra HTTP headers (a gateway's token, ...): like the key, they reach the router by environment only */
+export interface AgentProvider { name: string; type: ProviderType; baseUrl: string; key: string; headers?: Record<string, string> }
 export interface Tier { name: string; provider: string; model: string; params?: Record<string, unknown>; description?: string }
 /** Seats that hold a chat model (platform router roles): the agent, its sub-agents' seats and helpers. */
 export const CHAT_SEATS = ['agent', 'research', 'skeptic', 'senior_guidance', 'fast_retrieve', 'vision_ocr', 'ocr_locator', 'autopilot', 'extract', 'decide'] as const;
@@ -23,6 +24,7 @@ export interface AgentModels {
 }
 
 const envOf = (i: number) => `P6CLONE_PROVIDER_${i}_KEY`;
+const headersEnvOf = (i: number) => `P6CLONE_PROVIDER_${i}_HEADERS`;
 
 /** The router config, the environment its child process needs (keys) and the agent server's (the Handover seat). */
 export function routerConfig(m: AgentModels): { config: Record<string, unknown>; env: Record<string, string>; agentEnv: Record<string, string> } {
@@ -30,12 +32,15 @@ export function routerConfig(m: AgentModels): { config: Record<string, unknown>;
   if (!m.tiers.length) throw new Error('No model tier is set up.');
   const names = new Set(m.providers.map((p) => p.name));
   const env: Record<string, string> = {};
-  const providers: Record<string, unknown> = {};
+  // (no prototype: a tier or provider named "constructor" is a name like any other)
+  const providers: Record<string, unknown> = Object.create(null);
   m.providers.forEach((p, i) => {
-    providers[p.name] = { type: p.type, baseUrl: p.baseUrl, apiKeyEnv: envOf(i) };
+    const headers = p.headers && Object.keys(p.headers).length ? p.headers : null;
+    providers[p.name] = { type: p.type, baseUrl: p.baseUrl, apiKeyEnv: envOf(i), ...(headers ? { headersEnv: headersEnvOf(i) } : {}) };
     if (p.key) env[envOf(i)] = p.key;
+    if (headers) env[headersEnvOf(i)] = JSON.stringify(headers);
   });
-  const tiers: Record<string, unknown> = {};
+  const tiers: Record<string, unknown> = Object.create(null);
   for (const t of m.tiers) {
     if (!names.has(t.provider)) throw new Error(`Tier "${t.name}": no provider "${t.provider}".`);
     if (!t.model) throw new Error(`Tier "${t.name}": no model.`);

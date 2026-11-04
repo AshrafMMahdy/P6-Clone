@@ -44,3 +44,40 @@ test('the platform agent runs embedded: chat, message, streamed answer, no key o
   await new Promise((r) => setTimeout(r, 500));
   for (const port of [ports.router, ports.agent]) await assert.rejects(fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) }), `port ${port} still answers after stop`);
 });
+
+test('the servers answer the app only; a stop during a start ends it; a settings save restarts only on a change', { skip: !installed && 'platform agent not installed', timeout: 180_000 }, async () => {
+  const { request } = await import('node:http');
+  const get = (port: number, headers: Record<string, string>) => new Promise<number>((res, rej) => { const r = request({ host: '127.0.0.1', port, path: '/api/health', headers }, (x) => { x.resume(); res(x.statusCode ?? 0); }); r.on('error', rej); r.end(); });
+  const data = mkdtempSync(join(tmpdir(), 'whiq-host-'));
+  let model = 'claude-opus-5-5', slow = true;
+  const host = new WhiqHost({ vendor, data }, () => ({
+    providers: [{ name: 'main', type: 'anthropic', baseUrl: 'https://api.anthropic.com', key: 'sk-ant-not-a-real-key-123' }],
+    tiers: [{ name: 'Strong', provider: 'main', model }],
+  }), async () => [], async () => { if (slow) await new Promise((r) => setTimeout(r, 1500)); return {}; });
+  const downs: string[] = [];
+  host.onDown = (why) => downs.push(why);
+  // a stop while the start waits for its services: the start ends, nothing of it is left running
+  const first = host.start().catch((e: Error) => e);
+  await new Promise((r) => setTimeout(r, 300));
+  host.stop();
+  assert.match(String(await first), /stopped while it was starting/);
+  await new Promise((r) => setTimeout(r, 2000));
+  assert.equal(host.status.state, 'off');
+  assert.deepEqual(host.ports, { router: 0, agent: 0 }, 'no server was started for the stopped start');
+  slow = false;
+  try {
+    await host.start();
+    const { router, agent } = host.ports;
+    for (const port of [router, agent]) {
+      assert.equal(await get(port, {}), 200, 'the app reaches it');
+      assert.equal(await get(port, { origin: 'https://evil.example' }), 403, 'a web page does not');
+      assert.equal(await get(port, { host: `evil.example:${port}` }), 403, 'nor a rebound name');
+    }
+    host.stopIfChanged('changed');
+    assert.equal(host.status.state, 'ready', 'a save that changed nothing of the agent keeps it running');
+    model = 'claude-sonnet-5-5';
+    host.stopIfChanged('the models changed');
+    assert.equal(host.status.state, 'off');
+    assert.deepEqual(downs, ['the models changed'], 'the window is told the running agent went (once)');
+  } finally { host.stop(); }
+});

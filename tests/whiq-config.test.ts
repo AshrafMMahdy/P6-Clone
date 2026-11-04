@@ -38,3 +38,14 @@ test('router config: keys by environment only; tiers in order; seats default to 
   assert.throws(bad({ providers: p, tiers: [] }), /No model tier/);
   assert.throws(bad({ providers: [], tiers: [] }), /No AI provider/);
 });
+
+test('router config: extra headers by environment only; any tier name, "constructor" too', () => {
+  const { config, env } = routerConfig({
+    providers: [{ name: 'gw', type: 'openai-compat', baseUrl: 'https://gw.example/v1', key: '', headers: { 'X-Gateway-Token': 'gw-secret-1' } }],
+    tiers: [{ name: 'constructor', provider: 'gw', model: 'm' }, { name: '__proto__x', provider: 'gw', model: 'n' }],
+  });
+  assert.ok(!JSON.stringify(config).includes('gw-secret-1'), 'no header value in the file');
+  const p = (config.providers as Record<string, { headersEnv?: string }>).gw;
+  assert.deepEqual(JSON.parse(env[p.headersEnv!]), { 'X-Gateway-Token': 'gw-secret-1' });
+  assert.deepEqual(config.tierOrder, ['constructor', '__proto__x']);
+});

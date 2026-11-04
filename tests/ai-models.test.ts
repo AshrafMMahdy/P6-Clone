@@ -21,7 +21,7 @@ test('old single-provider settings are read as provider "main" and tier "Main"',
   assert.equal(s.key(), 'sk-old-12345678');
   assert.equal(s.publicConfig().model, 'gpt-x');
   const a = s.agentModels();
-  assert.deepEqual(a.providers, [{ name: 'main', type: 'openai-compat', baseUrl: 'https://openrouter.ai/api/v1', key: 'sk-old-12345678' }]);
+  assert.deepEqual(a.providers, [{ name: 'main', type: 'openai-compat', baseUrl: 'https://openrouter.ai/api/v1', key: 'sk-old-12345678', headers: {} }]);
 });
 
 test('several providers, tiers and seats; keys by id survive a rename; refusals save nothing', () => {
@@ -43,6 +43,7 @@ test('several providers, tiers and seats; keys by id survive a rename; refusals 
   assert.deepEqual(a.tiers[1].params, { temperature: 0.2 });
   assert.deepEqual(a.seats, { vision_ocr: 'Eyes', skeptic: 'Quick' });
   assert.equal(s.publicModels().providers[1].extraHeaders, 'X-Title: P6');
+  assert.deepEqual(a.providers[1].headers, { 'X-Title': 'P6' }, 'extra headers reach the agent');
   // a rename keeps the key (by id); no key given keeps it
   const renamed = s.publicModels(); renamed.providers[0].name = 'Claude';
   s.saveModels(renamed);

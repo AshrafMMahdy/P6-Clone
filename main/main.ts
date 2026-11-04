@@ -25,15 +25,27 @@ const userData = argVal('--user-data');
 if (userData) app.setPath('userData', userData);
 // Large programmes (100 MB XERs, 100k+ activities) are held in the window's memory: allow it more than V8's default.
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=12288');
+// Background mode: started by a test or another program (a remote-debugging port, which Playwright always passes and a
+// person never does), with --background, or P6CLONE_BACKGROUND=1. The windows open minimized and never take the front
+// of the screen from what the user is doing; they keep rendering and running timers as if shown (owner, 2026-11-04).
+const background = argv.includes('--background') || app.commandLine.hasSwitch('remote-debugging-port') || process.env.P6CLONE_BACKGROUND === '1';
+if (background) {
+  for (const s of ['disable-renderer-backgrounding', 'disable-background-timer-throttling', 'disable-backgrounding-occluded-windows']) app.commandLine.appendSwitch(s);
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+}
+/** A new window of the app: shown, or in background mode opened minimized (never in front, never focused). */
+const shown = (w: BrowserWindow): BrowserWindow => { if (background) w.minimize(); return w; };
 
 function createWindow(): void {
   win = new BrowserWindow({
+    show: !background,
     width: 1440, height: 900, minWidth: 900, minHeight: 600,
     title: 'Primavera P6 Professional (Clone)',
     backgroundColor: '#f0f0f0',
     icon: join(__dirname, 'icon.png'),
-    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false },
+    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false, backgroundThrottling: !background },
   });
+  shown(win);
   Menu.setApplicationMenu(buildMenu(win));
   win.loadFile(join(__dirname, 'renderer', 'index.html'));
   // --menu <command id> runs a menu command once the window is ready (e.g. --menu edit.aiSettings)
@@ -134,7 +146,7 @@ ipcMain.handle('print:html', async (_e, html: string, mode: 'print' | 'pdf' | 'p
     }
     const pdf = join(dir, 'Print Preview.pdf');
     writeFileSync(pdf, data);
-    const pv = new BrowserWindow({ width: 1100, height: 850, title: 'Print Preview', parent: win!, icon: join(__dirname, 'icon.png'), webPreferences: { plugins: true } });
+    const pv = shown(new BrowserWindow({ show: !background, width: 1100, height: 850, title: 'Print Preview', parent: win!, icon: join(__dirname, 'icon.png'), webPreferences: { plugins: true } }));
     pv.setMenu(null);
     await pv.loadFile(pdf);
     return true;
@@ -145,7 +157,7 @@ ipcMain.handle('print:preview', async (_e, landscape: boolean) => {
   const data = await win!.webContents.printToPDF({ landscape, printBackground: true, pageSize: 'A3' });
   const file = join(mkdtempSync(join(tmpdir(), 'p6clone-preview-')), 'Print Preview.pdf');
   writeFileSync(file, data);
-  const pv = new BrowserWindow({ width: 1100, height: 850, title: 'Print Preview', parent: win!, icon: join(__dirname, 'icon.png'), webPreferences: { plugins: true } });
+  const pv = shown(new BrowserWindow({ show: !background, width: 1100, height: 850, title: 'Print Preview', parent: win!, icon: join(__dirname, 'icon.png'), webPreferences: { plugins: true } }));
   pv.setMenu(null);
   await pv.loadFile(file);
   return true;
@@ -162,11 +174,12 @@ const aiCalls = new Map<string, AbortController>();
 ipcMain.handle('ai:getConfig', () => ai().publicConfig());
 // the embedded platform agent; new AI settings take effect on its next start
 const whiq = registerWhiq(() => win, ai);
-ipcMain.handle('ai:setConfig', (_e, c: AiConfig, apiKey?: string) => { const r = ai().save(c, apiKey); whiq.stop(); win?.webContents.send('ai:config', r); return r; });
+const SETTINGS_CHANGED = 'The AI settings changed, so the agent stopped; it starts again with them on your next message.';
+ipcMain.handle('ai:setConfig', (_e, c: AiConfig, apiKey?: string) => { const r = ai().save(c, apiKey); whiq.stopIfChanged(SETTINGS_CHANGED); win?.webContents.send('ai:config', r); return r; });
 // providers, tiers and seats (the platform's AI Providers page): saved as one; the agent restarts on its next use
 ipcMain.handle('ai:getModels', () => ai().publicModels());
 ipcMain.handle('ai:saveModels', (_e, m: PublicModels, keys: Record<string, string | undefined>) => {
-  try { const r = ai().saveModels(m, keys); whiq.stop(); win?.webContents.send('ai:config', ai().publicConfig()); return { ok: true, models: r }; }
+  try { const r = ai().saveModels(m, keys); whiq.stopIfChanged(SETTINGS_CHANGED); win?.webContents.send('ai:config', ai().publicConfig()); return { ok: true, models: r }; }
   catch (e) { return { ok: false, error: (e as Error).message }; }
 });
 ipcMain.handle('ai:testTier', async (_e, name: string) => {

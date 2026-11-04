@@ -38,7 +38,7 @@ await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.c
 for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
 // the folder dialog answers with our folder (the first file asks for one)
 await app.evaluate(({ dialog }, f) => { (dialog as any).showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
-await win.evaluate((u) => (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: u, model: 'fake-1', actions: true }, 'not-a-key'), fake.url);
+await win.evaluate((u) => (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: u, model: 'fake-1', actions: true, extraHeaders: 'X-Test-Gateway: g1' }, 'not-a-key'), fake.url);
 await win.waitForSelector('.ai-panel', { timeout: 15000 }).catch(async () => { await win.click('.ai-strip'); await win.waitForSelector('.ai-panel'); });
 await win.waitForSelector('.ai-head b:has-text("Scheduler Agent")', { timeout: 15000 });
 ok(true, 'the panel runs on the platform agent');
@@ -59,6 +59,7 @@ for (let i = 0; i < 30 && !(existsSync(docx) && existsSync(pdf)); i++) await win
 ok(existsSync(docx) && readFileSync(docx).subarray(0, 2).toString() === 'PK', `the Word report made by the Word engine is in the working folder: ${docx}`);
 ok(existsSync(pdf) && readFileSync(pdf).subarray(0, 5).toString() === '%PDF-', 'and its PDF export');
 ok(/File: report\.docx/.test(await win.locator('.ai-panel .ai-body').innerText()), 'the Word report shows as a chip');
+ok(fake.headers.length > 0 && fake.headers.every((h) => h['x-test-gateway'] === 'g1'), 'the provider\'s extra headers reach the model with every request');
 ok(!errors.length, 'no page errors ' + errors.join(' | '));
 await app.close();
 fake.close();

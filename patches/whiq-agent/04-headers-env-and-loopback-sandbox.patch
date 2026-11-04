@@ -1,0 +1,45 @@
+diff --git a/06 LLM Router/server.mjs b/06 LLM Router/server.mjs
+index 901df10..5e845e5 100644
+--- a/06 LLM Router/server.mjs	
++++ b/06 LLM Router/server.mjs	
+@@ -551,7 +551,11 @@ function envApiKey(providerName, provider) {
+ function withResolvedKey(providerName, provider) {
+   if (!provider || typeof provider !== 'object') return provider;
+   const fromEnv = envApiKey(providerName, provider);
+-  return fromEnv ? { ...provider, apiKey: fromEnv } : provider;
++  const out = fromEnv ? { ...provider, apiKey: fromEnv } : provider;
++  // P6 Clone: a provider's extra headers by environment too (headersEnv, JSON), so a gateway's token stays out of the file
++  const hdr = provider.headersEnv ? process.env[provider.headersEnv] : '';
++  if (!hdr) return out;
++  try { return { ...out, headers: { ...(out.headers && typeof out.headers === 'object' ? out.headers : {}), ...JSON.parse(hdr) } }; } catch { return out; }
+ }
+ 
+ // ── Role resolution ──────────────────────────────────────────────────────────
+diff --git a/09 Local Sandbox/service.py b/09 Local Sandbox/service.py
+index 58ea146..15278e3 100644
+--- a/09 Local Sandbox/service.py	
++++ b/09 Local Sandbox/service.py	
+@@ -426,12 +426,23 @@ class Handler(BaseHTTPRequestHandler):
+         self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body)))
+         self.end_headers(); self.wfile.write(body)
+ 
++    def foreign(self):
++        """P6 Clone: answer loopback callers only, never a web page (an Origin) or a rebound name (a foreign Host)."""
++        port = self.server.server_address[1]
++        host = (self.headers.get("Host") or "").lower()
++        if self.headers.get("Origin") is not None or host not in ("127.0.0.1:%d" % port, "localhost:%d" % port):
++            self.send(403, {"error": "forbidden"})
++            return True
++        return False
++
+     def do_GET(self):
++        if self.foreign(): return
+         if self.path == "/health": return self.send(200, {"ok": True, "jail": selftest_result["ok"], "sessions": len(sessions)})
+         if self.path == "/selftest": return self.send(200, selftest_result)
+         self.send(404, {"error": "not found"})
+ 
+     def do_POST(self):
++        if self.foreign(): return
+         try:
+             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+         except ValueError:

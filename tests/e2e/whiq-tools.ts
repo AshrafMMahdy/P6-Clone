@@ -50,6 +50,11 @@ ok(/phase_order|kendall|order_vs_random/i.test(seen[3] ?? '') && !/unavailable/i
 ok(/sandbox-ok \S+ 6/.test(seen[4] ?? ''), `run_code ran Python in the ${kind} sandbox: ${short(seen[4])}`);
 const sb = await win.evaluate(() => (window as any).p6.whiq.sandbox());
 ok(sb.ok && sb.data.kind === kind, `the sandbox in use is ${kind}: ${JSON.stringify(sb.data)}`);
+// its door answers the agent server only: never a web page (an Origin) or a rebound name (a foreign Host)
+const { request } = await import('node:http');
+const door = new URL(sb.data.url);
+const status = (headers: Record<string, string>) => new Promise<number>((res) => { const q = request({ host: '127.0.0.1', port: Number(door.port), path: '/run', method: 'POST', headers: { 'content-type': 'text/plain', ...headers } }, (x) => { x.resume(); res(x.statusCode ?? 0); }); q.on('error', () => res(0)); q.end('{"id":"x","code":"print(1)"}'); });
+ok(await status({ origin: 'https://evil.example' }) === 403 && await status({ host: `evil.example:${door.port}` }) === 403, 'the sandbox door refuses a web page and a rebound name');
 ok(/Done: exported/.test(await win.locator('.ai-panel .ai-body').innerText()), 'the answer is in the panel');
 ok(!errors.length, 'no page errors ' + errors.join(' | '));
 await app.close();

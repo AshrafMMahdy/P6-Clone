@@ -129,18 +129,25 @@ export class AiStore {
     });
     return this.publicModels();
   }
-  /** The embedded agent's models (main/whiq-config.ts): every provider with its key, the tiers in order, the seats. */
-  agentModels(): { providers: { name: string; type: 'anthropic' | 'openai-compat' | 'gemini'; baseUrl: string; key: string }[]; tiers: { name: string; provider: string; model: string; params?: Record<string, unknown> }[]; seats: Record<string, string> } {
+  /** The embedded agent's models (main/whiq-config.ts): every provider with its key and extra headers, the tiers in order
+   *  (each with its provider's extra parameters under its own), the seats. */
+  agentModels(): { providers: { name: string; type: 'anthropic' | 'openai-compat' | 'gemini'; baseUrl: string; key: string; headers: Record<string, string> }[]; tiers: { name: string; provider: string; model: string; params?: Record<string, unknown> }[]; seats: Record<string, string> } {
     const s = this.read();
     if (!s.tiers.length) throw new Error('Set a provider and a model in AI Assistant Settings first.');
+    const body = new Map(s.providers.map((p) => [p.id, parseExtraBody(p.extraBody, p.kind === 'anthropic' ? 'anthropic' : 'openai')]));
     return {
-      providers: s.providers.map((p) => ({ name: p.id, type: p.kind === 'anthropic' ? 'anthropic' as const : p.kind === 'gemini' ? 'gemini' as const : 'openai-compat' as const, baseUrl: p.baseUrl || KIND_BASE[p.kind], key: this.secret(p, p.key) })),
-      tiers: s.tiers.map((t) => ({ name: t.name, provider: t.provider, model: t.model, ...(t.params ? { params: JSON.parse(t.params) as Record<string, unknown> } : {}) })),
+      providers: s.providers.map((p) => ({ name: p.id, type: p.kind === 'anthropic' ? 'anthropic' as const : p.kind === 'gemini' ? 'gemini' as const : 'openai-compat' as const, baseUrl: p.baseUrl || KIND_BASE[p.kind], key: this.secret(p, p.key), headers: parseExtraHeaders(this.secret(p, p.headersEnc)) })),
+      tiers: s.tiers.map((t) => {
+        const params = { ...body.get(t.provider), ...(t.params ? JSON.parse(t.params) as Record<string, unknown> : {}) };
+        return { name: t.name, provider: t.provider, model: t.model, ...(Object.keys(params).length ? { params } : {}) };
+      }),
       seats: s.seats,
     };
   }
 
   // ---- the main agent's provider and model, for the panel's own loop (a build without the platform agent)
+  /** the kind of the agent seat's provider (the panel's own loop cannot speak Gemini's format) */
+  agentKind(): ModelKind | undefined { return this.agent(this.read()).p?.kind; }
   publicConfig(): AiPublicConfig {
     const s = this.read(), { tier, p } = this.agent(s);
     return {
@@ -315,6 +322,7 @@ export function parseReply(cfg: AiConfig, json: any): ChatReply {
 }
 
 export async function chat(store: AiStore, req: ChatRequest, signal?: AbortSignal): Promise<ChatReply> {
+  if (store.agentKind() === 'gemini') throw new Error('A Gemini model runs through the Scheduler Agent only (the panel\'s own loop speaks the Anthropic and OpenAI formats).');
   return chatWith(store.config(), store.key(), req, signal);
 }
 

@@ -6,8 +6,8 @@ import { createServer } from 'node:http';
 export type Req = { model: string; messages: { role: string; content?: unknown; tool_calls?: unknown[]; tool_call_id?: string }[]; tools?: { type: string; function: { name: string; description?: string; parameters?: any } }[] };
 export type Reply = { text: string } | { call: string; args: Record<string, unknown> };
 
-export async function fakeModel(script: (req: Req, n: number) => Reply): Promise<{ url: string; requests: Req[]; close: () => void }> {
-  const requests: Req[] = [];
+export async function fakeModel(script: (req: Req, n: number) => Reply): Promise<{ url: string; requests: Req[]; headers: Record<string, string | string[] | undefined>[]; close: () => void }> {
+  const requests: Req[] = [], headers: Record<string, string | string[] | undefined>[] = [];
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -15,7 +15,7 @@ export async function fakeModel(script: (req: Req, n: number) => Reply): Promise
       if (!req.url?.endsWith('/chat/completions')) { res.writeHead(404); return res.end(); }
       let r: Req;
       try { r = JSON.parse(body); } catch { res.writeHead(400); return res.end(); }
-      requests.push(r);
+      requests.push(r); headers.push(req.headers);
       const out = script(r, requests.length);
       const message = 'text' in out
         ? { role: 'assistant', content: out.text }
@@ -25,5 +25,5 @@ export async function fakeModel(script: (req: Req, n: number) => Reply): Promise
     });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
-  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, requests, close: () => server.close() };
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, requests, headers, close: () => server.close() };
 }

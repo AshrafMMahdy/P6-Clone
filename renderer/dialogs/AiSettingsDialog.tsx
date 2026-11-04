@@ -53,7 +53,11 @@ export function AiSettingsDialog() {
   if (!m) return <Dialog title="AI Assistant Settings" buttons={<button className="btn" onClick={closeDialog}>Cancel</button>}><p>Loading...</p></Dialog>;
   const set = (patch: Partial<PublicModels>) => setM({ ...m, ...patch });
   const setProv = (i: number, patch: Partial<PublicProvider>) => set({ providers: m.providers.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
-  const setTier = (i: number, patch: Partial<TierDef>) => set({ tiers: m.tiers.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
+  // a renamed tier keeps its seats (they point at it by name)
+  const setTier = (i: number, patch: Partial<TierDef>) => {
+    const was = m.tiers[i].name, renamed = patch.name !== undefined && patch.name !== was;
+    set({ tiers: m.tiers.map((t, j) => (j === i ? { ...t, ...patch } : t)), ...(renamed ? { seats: Object.fromEntries(Object.entries(m.seats).map(([k, v]) => [k, v === was ? patch.name! : v])) } : {}) });
+  };
   const moveTier = (i: number, d: number) => { const t = [...m.tiers]; [t[i], t[i + d]] = [t[i + d], t[i]]; set({ tiers: t }); };
   const used = (id: string) => m.tiers.some((t) => t.provider === id);
   const tierUsed = (n: string) => Object.values(m.seats).includes(n);

@@ -45,7 +45,8 @@ export function WhiqChat(props: { convKey: string; clearSignal: number; onBusy: 
   const add = (l: Line) => setLines((x) => [...x, l]);
   /** a chat made in this panel just now: nothing to load (its first message is already shown) */
   const fresh = useRef<string | null>(null);
-  const busyOn = (b: boolean) => { setBusy(b); props.onBusy(b); };
+  const busyRef = useRef(false);   // read inside the event handler (state there is the first render's)
+  const busyOn = (b: boolean) => { busyRef.current = b; setBusy(b); props.onBusy(b); };
 
   // a cleared conversation starts a new chat (the agent keeps the old one)
   useEffect(() => { if (!props.clearSignal) return; saveChat(props.convKey, null); setChatId(null); setLines([]); setLive(''); setStatus(''); setFolder(''); }, [props.clearSignal]);
@@ -95,6 +96,10 @@ export function WhiqChat(props: { convKey: string; clearSignal: number; onBusy: 
       case 'file_saved': add({ k: 'file', name: e.name, path: e.path }); break;
       case 'folder': setFolder(e.path ?? ''); break;
       case 'error': add({ k: 'error', text: e.message ?? 'The agent stopped with an error.' }); break;
+      // the agent itself went (settings changed, a crash): an answer in progress is over; the next message starts it again
+      case 'agent_down':
+        if (busyRef.current) { if (liveRef.current.trim()) add({ k: 'ai', text: liveRef.current.trim() }); add({ k: 'error', text: e.message ?? 'The agent stopped.' }); }
+        liveRef.current = ''; setLive(''); setStatus(''); busyOn(false); break;
       // the answer streamed in: at the end of the turn it is the agent's answer
       case 'done': if (liveRef.current.trim()) add({ k: 'ai', text: liveRef.current.trim() }); liveRef.current = ''; setLive(''); setStatus(''); busyOn(false); break;
     }

@@ -26,17 +26,26 @@ export class CodeSandbox {
   private door: Server | null = null;
   private backend: Promise<Backend> | null = null;
   private closeBackend: (() => void | Promise<void>) | null = null;
+  private picking: Promise<SandboxState> | null = null;
+  /** bumped by close(): a pick or a start under way when the sandbox was closed ends there, and stops what it started */
+  private gen = 0;
   constructor(o: { wslSource: string; version: string; pyodideDir: string; log?: (l: string) => void }) { this.o = { log: () => {}, ...o }; }
 
   get status(): SandboxState { return this.state; }
 
-  /** Pick the sandbox (once while the app runs) and open its door; nothing is started yet. */
-  async ensure(): Promise<SandboxState> {
-    if (this.door) return this.state;
+  /** Pick the sandbox (once while the app runs; callers at the same time share the pick) and open its door. */
+  ensure(): Promise<SandboxState> {
+    if (this.door) return Promise.resolve(this.state);
+    this.picking ??= this.pick(this.gen).finally(() => { this.picking = null; });
+    return this.picking;
+  }
+
+  private async pick(g: number): Promise<SandboxState> {
     const force = process.env.P6CLONE_SANDBOX;
     let wsl = 'not tried', wslSetup = false;
     if (force !== 'pyodide' && existsSync(this.o.wslSource)) {
-      const r = prepareWsl(this.o.wslSource, this.o.version);
+      const r = await prepareWsl(this.o.wslSource, this.o.version);
+      if (g !== this.gen) return this.state;   // closed meanwhile
       if (r.ok) return this.open({ kind: 'wsl', note: NOTE.wsl });
       wsl = r.reason; wslSetup = !!r.setup;
     }
@@ -55,23 +64,38 @@ export class CodeSandbox {
 
   /** The sandbox behind the door, started on the first request: the one picked, else Pyodide when WSL's jail fails. */
   private start(): Promise<Backend> {
+    const g = this.gen;
+    /** a backend that came up after close(): stopped at once, never kept */
+    const kept = async (b: Backend): Promise<Backend> => {
+      if (g === this.gen) return b;
+      await b.close();
+      throw new Error('The code sandbox was closed while it was starting.');
+    };
     this.backend ??= (async () => {
       if (this.state.kind === 'wsl') {
         const r = await startWslSandbox(this.o.wslSource, this.o.version, (l) => this.o.log(`[wsl-sandbox] ${l}`));
-        if (r.ok) { this.closeBackend = r.sandbox.close; this.state = { ...this.state, started: true }; return r.sandbox; }
+        if (r.ok) { await kept(r.sandbox); this.closeBackend = r.sandbox.close; this.state = { ...this.state, started: true }; return r.sandbox; }
+        if (g !== this.gen) throw new Error('The code sandbox was closed while it was starting.');
         this.o.log(`[sandbox] WSL refused at first use, Pyodide takes over: ${r.reason}`);
         this.state = { ...this.state, kind: 'pyodide', note: NOTE.pyodide, wsl: r.reason, wslSetup: !!r.setup };
       }
       const p = await startPyodideSandbox({ dir: this.o.pyodideDir });
+      await kept(p);
       this.closeBackend = () => p.close();
       if (!p.selftest.ok) this.o.log(`[sandbox] Pyodide failed its self-test: ${p.selftest.checks.filter((c) => !c.ok).map((c) => `${c.name} (${c.detail ?? ''})`).join('; ')}`);
       this.state = { ...this.state, started: true, ...(p.selftest.ok ? {} : { error: 'the Pyodide sandbox failed its self-test (see logs/sandbox.log)' }) };
       return p;   // a failed self-test answers 503 jail_unavailable itself: the platform says so to the agent
-    })().catch((e) => { this.backend = null; this.state = { ...this.state, error: (e as Error).message }; throw e; });
+    })().catch((e) => { if (g === this.gen) { this.backend = null; this.state = { ...this.state, error: (e as Error).message }; } throw e; });
     return this.backend;
   }
 
   private async pass(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // loopback callers only (the agent server): no web page (an Origin), no rebound name (a foreign Host); the backend's
+    // own checks see this door, not the caller, so the door makes them
+    const port = (this.door?.address() as AddressInfo | null)?.port, host = String(req.headers.host ?? '').toLowerCase();
+    if (req.headers.origin !== undefined || (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`)) {
+      res.writeHead(403, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'forbidden' })); return;
+    }
     // the platform probes health with a 10 s bound before it creates a session (30 s): while the sandbox is still proving
     // its jail, the door answers the probe and the create waits; a sandbox whose jail fails refuses every POST itself (503)
     if (req.url === '/health' && !this.state.started && !this.state.error) {
@@ -97,7 +121,7 @@ export class CodeSandbox {
   /** Stop it (the app quits, or the user set WSL up and wants a fresh pick at the agent's next start). */
   async close(): Promise<void> {
     const c = this.closeBackend, d = this.door;
-    this.closeBackend = null; this.backend = null; this.door = null; this.state = { kind: 'none' };
+    this.gen++; this.closeBackend = null; this.backend = null; this.door = null; this.picking = null; this.state = { kind: 'none' };
     d?.close();
     await c?.();
   }
