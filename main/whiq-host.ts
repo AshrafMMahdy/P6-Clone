@@ -87,7 +87,8 @@ export class WhiqHost {
     const missing = this.available();
     if (missing) throw new Error(missing);
     // a stop() during any await below ends this start: what it spawned is killed, nothing of it is kept
-    const live = () => { if (g !== this.gen) throw new Error('The agent was stopped while it was starting.'); };
+    // (a server that died during the start ended it too: its own error is the reason)
+    const live = () => { if (g !== this.gen) throw new Error(this.status.state === 'failed' && this.status.error ? this.status.error : 'The agent was stopped while it was starting.'); };
     this.status = { state: 'starting' };
     const models = this.models();
     const { config, env: keys, agentEnv } = routerConfig(models);

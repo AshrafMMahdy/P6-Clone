@@ -71,12 +71,41 @@ test('a request with an Origin header is 403, GET and POST, whatever the origin 
   assert.equal((await call({})).status, 200);   // and the client without one is served
 });
 
+/** A request over a plain socket that reads the answer whatever happens to the rest of the upload: the server answers a
+ *  refused body at once, before the upload is over, and an HTTP client may fail its upload (EPIPE) before it reads it. */
+async function oversize(chunked: boolean): Promise<{ status: number; body: string }> {
+  const { connect } = await import('node:net');
+  return new Promise((ok) => {
+    const s = connect(port, '127.0.0.1');
+    const got: Buffer[] = [];
+    // a whole answer (headers and as many body bytes as they declare) ends the request: kept alive as a real client does
+    const answer = (): { status: number; body: string } | null => {
+      const t = Buffer.concat(got).toString('utf8'), end = t.indexOf('\r\n\r\n');
+      if (end < 0) return null;
+      const len = Number(/content-length: *(\d+)/i.exec(t.slice(0, end))?.[1] ?? 0), body = t.slice(end + 4);
+      return Buffer.byteLength(body) >= len ? { status: Number(/^HTTP\/1\.1 (\d+)/.exec(t)?.[1] ?? 0), body } : null;
+    };
+    s.on('data', (d: Buffer) => { got.push(d); const a = answer(); if (a) { s.destroy(); ok(a); } });
+    s.on('error', () => { /* after the answer, or a refused upload */ });
+    s.on('close', () => ok(answer() ?? { status: 0, body: '' }));
+    const size = 65 * 1024 * 1024, piece = Buffer.alloc(1024 * 1024, 32);
+    s.write(`POST /encode HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\n${chunked ? 'Transfer-Encoding: chunked' : `Content-Length: ${size}`}\r\n\r\n`);
+    let sent = 0;
+    const pump = (): void => {
+      while (sent < size && !s.destroyed) {
+        sent += piece.length;
+        if (!s.write(chunked ? Buffer.concat([Buffer.from(`${piece.length.toString(16)}\r\n`), piece, Buffer.from('\r\n')]) : piece)) { s.once('drain', pump); return; }
+      }
+    };
+    pump();
+  });
+}
+
 test('a body over 64 MB is 413, declared by Content-Length or streamed chunked; the server stays up', { skip }, async () => {
-  const big = Buffer.alloc(65 * 1024 * 1024, 32);
-  const a = await call({ path: '/encode', method: 'POST', body: big });
+  const a = await oversize(false);
   assert.equal(a.status, 413);
-  assert.match(a.json.error, /64 MB/);
-  const b = await call({ path: '/encode', method: 'POST', chunked: 1024 * 1024 });
+  assert.match(a.body, /64 MB/);
+  const b = await oversize(true);
   assert.equal(b.status, 413);
   assert.equal((await call({})).status, 200);
   // a large body under the cap is read (it is not JSON here: 400, not 413)

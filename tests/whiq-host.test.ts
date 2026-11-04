@@ -10,7 +10,10 @@ import { join } from 'node:path';
 import { WhiqHost, type AgentEvent } from '../main/whiq-host.ts';
 
 const vendor = join(import.meta.dirname, '..', 'vendor', 'whiq-agent');
-const installed = existsSync(join(vendor, '03 Shared Platform Agents', 'app', 'server.dist.mjs')) && existsSync(join(vendor, 'node_modules'));
+// installed for THIS platform: the agent's packages carry native parts (a Windows install does not run under WSL's Linux)
+const canvas = join(vendor, 'node_modules', '@napi-rs');
+const installed = existsSync(join(vendor, '03 Shared Platform Agents', 'app', 'server.dist.mjs'))
+  && existsSync(canvas) && readdirSync(canvas).some((d) => d.startsWith(`canvas-${process.platform}-${process.arch}`));
 
 test('the platform agent runs embedded: chat, message, streamed answer, no key on disk, clean stop', { skip: !installed && 'platform agent not installed', timeout: 180_000 }, async () => {
   const data = mkdtempSync(join(tmpdir(), 'whiq-host-'));

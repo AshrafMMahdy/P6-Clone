@@ -70,7 +70,8 @@ export function makeServer(models: string, maxBody = MAX_BODY) {
       let raw: Buffer;
       try { raw = await readBody(req, maxBody); } catch (e) {
         if (!(e instanceof TooBig)) throw e;
-        res.setHeader('Connection', 'close');
+        // no "Connection: close": Node then reads and drops the rest of the upload before it would close, so the client,
+        // still sending, gets the answer (a close mid-upload resets the connection and loses it); Node's request timeout bounds it
         return send(res, 413, { error: `request body is over ${maxBody / 1024 / 1024} MB` });
       }
       let body: Rec;
