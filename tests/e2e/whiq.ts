@@ -35,6 +35,6 @@ ok(/provider|key|auth/i.test(got.said.join(' ')), 'the provider\'s refusal is in
 await app.close();
 await new Promise((r) => setTimeout(r, 1500));
 const { execFileSync } = await import('node:child_process');
-const left = process.platform === 'win32' ? execFileSync('powershell', ['-NoProfile', '-Command', "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'server.dist.mjs|LLM Router' } | Measure-Object).Count"], { encoding: 'utf8' }).trim() : '0';
+const left = process.platform === 'win32' ? execFileSync('powershell', ['-NoProfile', '-Command', "(Get-CimInstance Win32_Process -Filter \"Name='electron.exe' or Name='node.exe'\" | Where-Object { $_.CommandLine -match 'server.dist.mjs|server.mjs' } | Measure-Object).Count"], { encoding: 'utf8' }).trim() : '0';
 ok(left === '0', `quitting the app stopped both servers (${left} left)`);
 rmSync(profile, { recursive: true, force: true });
