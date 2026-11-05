@@ -58,7 +58,9 @@ jobs:
         with: { ref: "${{ needs.plan.outputs.ref }}" }
       - uses: actions/setup-node@v4
         with: { node-version: "24.14.0" }
+      # onnxruntime-node (the desktop app's GPU text encoder, not part of this release) would download CUDA files on Linux
       - run: npm ci
+        env: { ONNXRUNTIME_NODE_INSTALL: "false" }
       - name: The .mpp reader (MPXJ's jars, pinned by SHA-256) and Java runtimes for it, made by jlink for Windows and Linux on x64
         shell: bash
         run: |

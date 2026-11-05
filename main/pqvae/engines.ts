@@ -2,9 +2,9 @@
 // File names are the ones scripts/pqvae-export.py writes; the engine names are the ones the Python sidecar reports in /health.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadSession, ort, type Session } from './runtime.ts';
+import { gpuMode, loadGpuSession, loadSession, native, ort, type Session, type TextProvider } from './runtime.ts';
 import { Tokenizer } from './tokenizer.ts';
-import { MiniLm } from './minilm.ts';
+import { MiniLm, BATCH_GPU, BATCH } from './minilm.ts';
 import { TextCache } from './textCache.ts';
 import { Semantic } from './normalise.ts';
 import { FEATURE_DIM, FEATURE_DIM_B } from './features.ts';
@@ -19,9 +19,9 @@ export const MAX_PERIODS = 120;   // the trajectory head's position table (train
 export class Aborted extends Error { constructor() { super('request abandoned by its client'); } }
 
 /** The exact weights the text vectors come from (name@revision:variant#sha of the file), from the model folder's manifest. */
-function modelId(dir: string): string {
+function modelId(dir: string, provider: TextProvider): string {
   const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
-  return `${m.minilm?.model ?? 'minilm'}@${m.minilm?.revision ?? '?'}:${m.minilm?.variant ?? '?'}#${String(m.files?.['minilm.onnx']?.sha256 ?? '').slice(0, 12)}`;
+  return `${m.minilm?.model ?? 'minilm'}@${m.minilm?.revision ?? '?'}:${m.minilm?.variant ?? '?'}#${String(m.files?.['minilm.onnx']?.sha256 ?? '').slice(0, 12)}:${provider}`;   // GPU and CPU floats differ slightly: each provider keeps its own readings
 }
 
 export class Engines {
@@ -29,6 +29,10 @@ export class Engines {
   readonly loaded = new Set<string>();
   readonly text: MiniLm;
   readonly sem: Semantic;
+  /** What reads the texts (/health): DirectML on the GPU, or wasm with the reason it is not the GPU. */
+  textEncoder: { provider: TextProvider; reason?: string };
+  private cacheRoot: string | undefined;
+  private textSess: Promise<Session> | null = null;
   /** The running request's abort signal (requests run one at a time); the server sets it. */
   signal: AbortSignal | null = null;
   private tok: Tokenizer | null = null;
@@ -40,7 +44,14 @@ export class Engines {
     this.dir = dir;
     this.tick = this.tick.bind(this);
     // the tokenizer and the encoder are loaded the first time a text is embedded
-    this.text = new MiniLm(() => (this.tok ??= new Tokenizer(JSON.parse(readFileSync(join(this.dir, 'tokenizer.json'), 'utf8')))), () => this.session('minilm.onnx'), this.tick, cacheRoot ? new TextCache(cacheRoot, modelId(dir)) : null);
+    this.cacheRoot = cacheRoot;
+    // the GPU is tried when onnxruntime-node loads (the session itself may still fail: then the wasm path and its own cache folder take over)
+    const mode = gpuMode(), n = mode === 'off' ? null : native();
+    this.textEncoder = mode === 'off' ? { provider: 'wasm', reason: 'PQVAE_GPU=off' } : n!.m ? { provider: 'dml' } : { provider: 'wasm', reason: n!.why };
+    if (mode === 'on' && this.textEncoder.provider !== 'dml') throw new Error(`PQVAE_GPU=on but the GPU cannot be used: ${this.textEncoder.reason}`);
+    if (this.textEncoder.reason && mode !== 'off') console.error(`pqvae: text encoder on wasm: ${this.textEncoder.reason}`);
+    this.text = new MiniLm(() => (this.tok ??= new Tokenizer(JSON.parse(readFileSync(join(this.dir, 'tokenizer.json'), 'utf8')))), () => this.textSession(), this.tick, cacheRoot ? new TextCache(cacheRoot, modelId(dir, this.textEncoder.provider)) : null);
+    if (this.textEncoder.provider === 'dml' && !process.env.PQVAE_BATCH) this.text.batch = BATCH_GPU;
     this.sem = new Semantic(this.text);
   }
 
@@ -59,6 +70,26 @@ export class Engines {
     }
     return this.json.get(name) as T;
   }
+
+  /** minilm.onnx on the GPU when it can, else on wasm (once the GPU session fails, the cache folder changes to the wasm one). */
+  private textSession(): Promise<Session> {
+    return this.textSess ??= (async () => {
+      const file = join(this.dir, 'minilm.onnx');
+      if (this.textEncoder.provider === 'dml') {
+        try { return await loadGpuSession(file); } catch (e) {
+          if (gpuMode() === 'on') throw new Error(`PQVAE_GPU=on but DirectML failed to create the session: ${(e as Error).message}`);
+          this.textEncoder = { provider: 'wasm', reason: `DirectML failed to create the session: ${(e as Error).message}` };
+          console.error(`pqvae: text encoder on wasm: ${this.textEncoder.reason}`);
+          if (!process.env.PQVAE_BATCH) this.text.batch = BATCH;
+          this.text.useDisk(this.cacheRoot ? new TextCache(this.cacheRoot, modelId(this.dir, 'wasm')) : null);
+        }
+      }
+      return loadSession(file);
+    })().catch((e) => { this.textSess = null; throw e; });
+  }
+
+  /** Makes the text encoder's session now (which provider reads the texts is only settled once it exists). */
+  async settleEncoder(): Promise<{ provider: TextProvider; reason?: string }> { await this.textSession(); return this.textEncoder; }
 
   session(file: string): Promise<Session> {
     let s = this.sessions.get(file);

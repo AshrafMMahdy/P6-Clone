@@ -17,9 +17,9 @@ const fx = join(import.meta.dirname, 'fixtures', 'pqvae');
 const skip = existsSync(join(models, 'manifest.json')) ? false : 'vendor/whiq-agent/pqvae-onnx/manifest.json is missing (python -P scripts/pqvae-export.py)';
 
 /** One engine on `cache`: answers `body` on `path`, then its /health; stopped after. */
-async function once(cache: string, path: string, body: unknown): Promise<{ answer: unknown; health: any }> {
+async function once(cache: string, path: string, body: unknown, env: Record<string, string> = {}): Promise<{ answer: unknown; health: any }> {
   const proc = spawn(process.execPath, [join(root, 'main', 'pqvae', 'sidecar.ts'), '--models', models, '--port', '0', '--cache', cache], {
-    stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, LLM_ROUTER_URL: 'http://127.0.0.1:1' }, windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, LLM_ROUTER_URL: 'http://127.0.0.1:1', ...env }, windowsHide: true,
   });
   try {
     const port = await new Promise<number>((ok, no) => {
@@ -46,7 +46,8 @@ test('text readings on disk: a fresh engine answers exactly the same and reads n
   const dirs = readdirSync(cache);
   assert.equal(dirs.length, 1);
   const dir = join(cache, dirs[0]), id = readFileSync(join(dir, 'model.txt'), 'utf8').trim();
-  assert.match(id, /^sentence-transformers\/paraphrase-multilingual-MiniLM-L12-v2@[0-9a-f]{40}:fp16#[0-9a-f]{12}$/);
+  assert.match(id, /^sentence-transformers\/paraphrase-multilingual-MiniLM-L12-v2@[0-9a-f]{40}:fp16#[0-9a-f]{12}:(dml|wasm)$/);
+  assert.ok(id.endsWith(`:${cold.health.textEncoder.provider}`), 'the model id names the provider that read the texts');
   assert.equal(dirs[0], createHash('sha256').update(id).digest('hex').slice(0, 16));
   const shards = readdirSync(dir).filter((f) => f.endsWith('.bin'));
   assert.ok(shards.length > 0 && shards.every((f) => /^[0-9a-f]{2}\.bin$/.test(f) && statSync(join(dir, f)).size % 1568 === 0));
@@ -71,4 +72,15 @@ test('a cut last record (a crash mid-write) is ignored and the cache still answe
   appendFileSync(join(dir, shard), Buffer.alloc(700, 7));   // half a record
   const warm = await once(cache, '/review_schedule', request);
   assert.deepEqual(warm.answer, cold.answer);
+});
+
+test('the GPU and wasm readings never share a cache folder', { skip, timeout: 300_000 }, async () => {
+  const cache = mkdtempSync(join(tmpdir(), 'pqvae-cache-'));
+  const { request } = JSON.parse(readFileSync(join(fx, 'review-small5.json'), 'utf8'));
+  const cpu = await once(cache, '/review_schedule', request, { PQVAE_GPU: 'off' });
+  assert.equal(cpu.health.textEncoder.provider, 'wasm');
+  const auto = await once(cache, '/review_schedule', request, { PQVAE_GPU: 'auto' });
+  if (auto.health.textEncoder.provider !== 'dml') return;   // no GPU here: both runs are wasm and share one folder
+  assert.equal(readdirSync(cache).length, 2, 'one folder per provider');
+  assert.ok(auto.health.textCache.misses > 0, 'the GPU run did not reuse the wasm readings');
 });

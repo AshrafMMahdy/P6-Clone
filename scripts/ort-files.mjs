@@ -3,7 +3,7 @@
 // node_modules folder: the White Hat IQ platform's signed manifest and patch builder skip those. hrmRuntime.ts imports
 // ort/onnxruntime-web/dist/ort.node.min.mjs by absolute path; the module finds its .wasm beside itself (import.meta.url).
 import { build, buildSync } from 'esbuild';
-import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export async function copyReasoner(root, dest) {
@@ -15,6 +15,24 @@ export async function copyReasoner(root, dest) {
   await build({ entryPoints: [join(web, 'dist/ort.node.min.mjs')], outfile: join(out, 'ort.node.min.mjs'), bundle: true, format: 'esm', platform: 'node', target: 'node18', logLevel: 'warning' });
   for (const f of ['ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm']) cpSync(join(web, 'dist', f), join(out, f));
   cpSync(join(root, 'licenses'), join(dest, 'ort'), { recursive: true });
+}
+
+/** The PQ-VAE text encoder's GPU runtime beside a bundle (desktop only; the MCP release has none): ort-node/ with onnxruntime-node's JavaScript
+ *  (onnxruntime-common bundled into dist/index.cjs), its Windows x64 native binding and onnxruntime.dll in bin/napi-v6/win32/x64, DirectML.dll
+ *  (with the DirectX shader compiler it loads), and the licence notices. Not a node_modules folder (the platform's manifest skips those).
+ *  main/pqvae/runtime.ts requires ort-node/dist/index.cjs; the binding is found by the package's own relative path (../bin/napi-v6/...). */
+export function copyOrtNode(root, dest) {
+  const pkg = join(root, 'node_modules/onnxruntime-node'), out = join(dest, 'ort-node'), bin = join('bin', 'napi-v6', 'win32', 'x64');
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(join(out, 'dist'), { recursive: true });
+  buildSync({ entryPoints: [join(pkg, 'dist/index.js')], outfile: join(out, 'dist', 'index.cjs'), bundle: true, format: 'cjs', platform: 'node', target: 'node22', external: ['*.node'], logLevel: 'warning' });
+  cpSync(join(pkg, bin), join(out, bin), { recursive: true });
+  cpSync(join(root, 'licenses', 'onnxruntime-LICENSE'), join(out, 'onnxruntime-LICENSE'));
+  cpSync(join(root, 'licenses', 'onnxruntime-ThirdPartyNotices.txt'), join(out, 'onnxruntime-ThirdPartyNotices.txt'));
+  const v = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')).version;
+  writeFileSync(join(out, 'README.txt'), `onnxruntime-node ${v} (Microsoft, MIT: onnxruntime-LICENSE; third-party notices: onnxruntime-ThirdPartyNotices.txt) and onnxruntime-common, used unmodified: the PQ-VAE engine reads texts on the GPU with it (DirectML, any DirectX 12 GPU). Windows x64 only.
+bin/napi-v6/win32/x64/DirectML.dll is DirectML 1.15.4, Microsoft's redistributable, under the Microsoft Software License Terms for Microsoft DirectX Machine Learning (DirectML): https://www.nuget.org/packages/Microsoft.AI.DirectML/1.15.4/License. It is distributed here only as part of P6 Clone, unmodified, with its notices kept. dxcompiler.dll and dxil.dll are Microsoft's DirectX Shader Compiler redistributables (https://github.com/microsoft/DirectXShaderCompiler, its LICENSE.TXT), as shipped in the onnxruntime-node npm package.
+`);
 }
 
 /** The IFC engine (4D) beside a bundle: ifc/ with web-ifc's Node build, its WebAssembly and licence (MPL-2.0), and the

@@ -7,7 +7,8 @@ import { ort, type Session } from './runtime.ts';
 import type { TextCache } from './textCache.ts';
 
 export const TEXT_DIM = 384;
-const BATCH = 32;
+export const BATCH = 32;       // wasm: texts per run
+export const BATCH_GPU = 256;  // DirectML: 32 per run reads 870 texts/s, 256 reads 2,700 (the GPU wants big runs)
 
 /** A name with its digit runs and spaces normalised: "Pour slab L12 - bay 3" and "Pour slab L7 - bay 10" are one pattern. */
 const pattern = (s: string): string => s.replace(/\p{Nd}+/gu, '#').replace(/\s+/g, ' ').trim();
@@ -18,6 +19,10 @@ export class MiniLm {
   private tok: () => Tokenizer;
   private session: () => Promise<Session>;
   private disk: TextCache | null;
+  /** texts per run: set by the engine from the provider */
+  batch = Number(process.env.PQVAE_BATCH) || BATCH;
+  /** counts the swaps of the disk cache: a warm() that began before one starts over (its readings came from the other provider) */
+  private gen = 0;
   /** names a shared review stood in for: read exactly when the engine is idle (fill), so the next review is exact */
   private later = new Set<string>();
   /** Awaited before every batch: the server's yield-and-abort check (engines.tick). */
@@ -33,6 +38,8 @@ export class MiniLm {
     return first.size;
   }
   unshare(): void { this.alias = null; }
+  /** The text encoder fell back to another provider: its readings are kept in another folder (textCache.ts), and nothing read so far is reused. */
+  useDisk(d: TextCache | null): void { this.disk = d; this.cache.clear(); this.gen++; }
   /** The disk cache's folder and how often it answered since the engine started (/health), or null without one. */
   cacheStats(): { dir: string; hits: number; misses: number } | null { return this.disk ? { dir: this.disk.dir, hits: this.disk.hits, misses: this.disk.misses } : null; }
   /** How many of these texts were never read (neither in memory nor on disk). */
@@ -54,10 +61,12 @@ export class MiniLm {
     if (!todo.length) return;
     const tok = this.tok();
     const enc = todo.map((s) => ({ s, ids: tok.encode(s) })).sort((a, b) => a.ids.length - b.ids.length);
+    const gen = this.gen;
     const [o, sess] = await Promise.all([ort(), this.session()]);
-    for (let at = 0; at < enc.length; at += BATCH) {
+    if (gen !== this.gen) return this.warm(strings);   // the provider changed while the session loaded
+    for (let at = 0; at < enc.length; at += this.batch) {
       await this.tick();
-      const batch = enc.slice(at, at + BATCH);
+      const batch = enc.slice(at, at + this.batch);
       const len = batch[batch.length - 1].ids.length;
       const ids = new BigInt64Array(batch.length * len).fill(1n), mask = new BigInt64Array(batch.length * len);
       batch.forEach((b, i) => b.ids.forEach((t, j) => { ids[i * len + j] = BigInt(t); mask[i * len + j] = 1n; }));

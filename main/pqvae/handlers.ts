@@ -39,16 +39,18 @@ export async function encode(e: Engines, body: Rec): Promise<Rec> {
 /** Names never read before (not on the disk cache either) above which a review shares one reading between names that differ only in their
  *  digits. Reading a name costs about 14 ms on 4 threads (JWM, 9,965 names: 141 s of the 166 s review), so 3,000 names is about 40 s: inside
  *  the platform client's 180 s on a PC several times slower than the build machine. Names read before cost nothing, so a programme reviewed
- *  again is read exactly; after a shared review the engine reads the exact names while it is idle (MiniLm.fill), so the next review is exact. */
-const SHARE_ABOVE = (): number => Number(process.env.PQVAE_SHARE_ABOVE) || 3000;
+ *  again is read exactly; after a shared review the engine reads the exact names while it is idle (MiniLm.fill), so the next review is exact.
+ *  On the GPU (2,000+ names a second) the same 40 s is 60,000 names: JWM is read exactly. */
+const SHARE_ABOVE = (gpu = false): number => Number(process.env.PQVAE_SHARE_ABOVE) || (gpu ? 60000 : 3000);
 
 export async function reviewSchedule(e: Engines, body: Rec): Promise<Rec> {
   const raw: Rec[] = need(body, 'records');
   if (raw.length < 3) return { verdict: 'n/a', reason: 'fewer than 3 activities', activities: [] };
   const names = new Set<string>();
   for (const r of raw) if (r?.name != null) names.add(pyStr(r.name));
-  const limit = SHARE_ABOVE();
   const unread = e.text.unread(names);
+  let limit = SHARE_ABOVE();
+  if (unread > limit && (await e.settleEncoder()).provider === 'dml') limit = SHARE_ABOVE(true);   // the GPU session is made now: it may still fail and fall back to wasm
   const readings = unread > limit ? e.text.share(names) : names.size;
   if (readings < names.size) e.text.readLater(names);
   try {

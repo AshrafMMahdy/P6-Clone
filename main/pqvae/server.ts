@@ -72,7 +72,7 @@ export function makeServer(models: string, maxBody = MAX_BODY, cacheRoot?: strin
       if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return refuse('host not allowed');
       if (req.headers.origin !== undefined) return refuse('requests from web pages are not allowed');
       if (req.method === 'GET') {
-        if (req.url === '/health') return send(res, 200, { ok: true, loaded: [...engines.loaded].sort(), calibration: CALIBRATION, abandoned, textCache: engines.text.cacheStats(), readingLater: engines.text.pending() });
+        if (req.url === '/health') return send(res, 200, { ok: true, loaded: [...engines.loaded].sort(), calibration: CALIBRATION, abandoned, textEncoder: engines.textEncoder, textCache: engines.text.cacheStats(), readingLater: engines.text.pending() });
         return send(res, 404, { error: 'not found' });
       }
       let raw: Buffer;

@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iconIco } from './icon.mjs';
-import { copyIfc, copyReasoner } from './ort-files.mjs';
+import { copyIfc, copyOrtNode, copyReasoner } from './ort-files.mjs';
 import { copyWhiqAgent } from './whiq-agent-files.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,6 +25,7 @@ mkdirSync(app, { recursive: true });
 cpSync(join(root, 'dist'), join(app, 'dist'), { recursive: true, filter: (p) => !p.endsWith('.map') && !p.startsWith(join(root, 'dist', 'ifc')) });
 await copyReasoner(root, app); // the schedule reasoner and its WebAssembly runtime (the main process runs it)
 copyIfc(root, app); // 4D: the IFC engine (the main process reads models)
+copyOrtNode(root, app); // the PQ-VAE text encoder's GPU runtime (onnxruntime-node + DirectML, Windows x64)
 // the embedded platform agent (the AI panel): its servers, the packages they load, its engines, the platform's sandbox
 // service and the PQ-VAE models (resources/whiq-agent); Pyodide, the code sandbox when WSL has none (resources/pyodide)
 const agent = copyWhiqAgent(join(root, 'vendor', 'whiq-agent'), join(out, 'resources', 'whiq-agent'));
