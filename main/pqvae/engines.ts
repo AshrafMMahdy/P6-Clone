@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { loadSession, ort, type Session } from './runtime.ts';
 import { Tokenizer } from './tokenizer.ts';
 import { MiniLm } from './minilm.ts';
+import { TextCache } from './textCache.ts';
 import { Semantic } from './normalise.ts';
 import { FEATURE_DIM, FEATURE_DIM_B } from './features.ts';
 import type { Rec } from './pyutil.ts';
@@ -17,6 +18,12 @@ export const MAX_PERIODS = 120;   // the trajectory head's position table (train
 /** Thrown between batches when the client of the running request has gone. */
 export class Aborted extends Error { constructor() { super('request abandoned by its client'); } }
 
+/** The exact weights the text vectors come from (name@revision:variant#sha of the file), from the model folder's manifest. */
+function modelId(dir: string): string {
+  const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+  return `${m.minilm?.model ?? 'minilm'}@${m.minilm?.revision ?? '?'}:${m.minilm?.variant ?? '?'}#${String(m.files?.['minilm.onnx']?.sha256 ?? '').slice(0, 12)}`;
+}
+
 export class Engines {
   readonly dir: string;
   readonly loaded = new Set<string>();
@@ -28,11 +35,12 @@ export class Engines {
   private sessions = new Map<string, Promise<Session>>();
   private json = new Map<string, unknown>();
 
-  constructor(dir: string) {
+  /** cacheRoot: where text readings are kept on disk (textCache.ts); none, memory only */
+  constructor(dir: string, cacheRoot?: string) {
     this.dir = dir;
     this.tick = this.tick.bind(this);
     // the tokenizer and the encoder are loaded the first time a text is embedded
-    this.text = new MiniLm(() => (this.tok ??= new Tokenizer(JSON.parse(readFileSync(join(this.dir, 'tokenizer.json'), 'utf8')))), () => this.session('minilm.onnx'), this.tick);
+    this.text = new MiniLm(() => (this.tok ??= new Tokenizer(JSON.parse(readFileSync(join(this.dir, 'tokenizer.json'), 'utf8')))), () => this.session('minilm.onnx'), this.tick, cacheRoot ? new TextCache(cacheRoot, modelId(dir)) : null);
     this.sem = new Semantic(this.text);
   }
 

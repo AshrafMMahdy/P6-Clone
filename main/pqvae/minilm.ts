@@ -1,7 +1,10 @@
 // The multilingual text block of every featurizer (pqvae/whiqcodes/textenc.py): paraphrase-multilingual-MiniLM-L12-v2, 384-d, mean pooling
-// over the tokens, L2 normalised, cached per distinct string. The transformer is minilm.onnx (hidden states); the pooling is done here.
+// over the tokens, L2 normalised, cached per distinct string: in memory, and on disk when the engine has a text cache (textCache.ts: a
+// text read once is never read again, by any request, project or later run). The transformer is minilm.onnx (hidden states); the
+// pooling is done here.
 import type { Tokenizer } from './tokenizer.ts';
 import { ort, type Session } from './runtime.ts';
+import type { TextCache } from './textCache.ts';
 
 export const TEXT_DIM = 384;
 const BATCH = 32;
@@ -14,9 +17,12 @@ export class MiniLm {
   private alias: Map<string, string> | null = null;
   private tok: () => Tokenizer;
   private session: () => Promise<Session>;
+  private disk: TextCache | null;
+  /** names a shared review stood in for: read exactly when the engine is idle (fill), so the next review is exact */
+  private later = new Set<string>();
   /** Awaited before every batch: the server's yield-and-abort check (engines.tick). */
   readonly tick: () => Promise<void>;
-  constructor(tok: () => Tokenizer, session: () => Promise<Session>, tick: () => Promise<void> = async () => undefined) { this.tok = tok; this.session = session; this.tick = tick; }
+  constructor(tok: () => Tokenizer, session: () => Promise<Session>, tick: () => Promise<void> = async () => undefined, disk: TextCache | null = null) { this.tok = tok; this.session = session; this.tick = tick; this.disk = disk; }
 
   /** For the length of one request, names that differ only in their digits share the first such name's vector (the first in `names`' order).
    *  Returns how many distinct vectors the names need. Large programmes only: it is not what the Python engine does. */
@@ -27,12 +33,24 @@ export class MiniLm {
     return first.size;
   }
   unshare(): void { this.alias = null; }
+  /** The disk cache's folder and how often it answered since the engine started (/health), or null without one. */
+  cacheStats(): { dir: string; hits: number; misses: number } | null { return this.disk ? { dir: this.disk.dir, hits: this.disk.hits, misses: this.disk.misses } : null; }
+  /** How many of these texts were never read (neither in memory nor on disk). */
+  unread(texts: Iterable<string>): number { let n = 0; for (const s of texts) if (!this.cache.has(s) && !this.disk?.has(s)) n++; return n; }
+  /** Remembers texts to read exactly when the engine is idle. */
+  readLater(texts: Iterable<string>): void { for (const s of texts) this.later.add(s); }
+  /** Texts still waiting for their exact reading. */
+  pending(): number { for (const s of this.later) if (this.cache.has(s) || this.disk?.has(s)) this.later.delete(s); return this.later.size; }
+  /** Reads the waiting texts exactly (stopped by the engine's tick when a request comes: what was read is kept, the rest waits). */
+  async fill(): Promise<void> { if (this.pending()) await this.warm([...this.later]); this.pending(); }
   /** The string whose vector stands for `s` (itself unless names are shared). */
   key(s: string): string { return this.alias?.get(s) ?? s; }
 
   /** Embeds the strings not cached yet, in batches of similar length. */
   async warm(strings: Iterable<string>): Promise<void> {
-    const todo = [...new Set([...strings].map((s) => this.key(String(s))))].filter((s) => !this.cache.has(s)).sort();
+    let todo = [...new Set([...strings].map((s) => this.key(String(s))))].filter((s) => !this.cache.has(s)).sort();
+    // what was read before (another request, project or run) comes from the disk, bit for bit
+    if (this.disk) todo = todo.filter((s) => { const v = this.disk!.get(s); if (v) this.cache.set(s, v); return !v; });
     if (!todo.length) return;
     const tok = this.tok();
     const enc = todo.map((s) => ({ s, ids: tok.encode(s) })).sort((a, b) => a.ids.length - b.ids.length);
@@ -53,6 +71,7 @@ export class MiniLm {
         n = Math.max(Math.sqrt(n), 1e-12);
         this.cache.set(b.s, Float32Array.from(v, (x) => x / n));
       });
+      this.disk?.put(batch.map((b) => [b.s, this.cache.get(b.s)!] as [string, Float32Array]));   // each batch kept at once: an aborted request keeps its work
     }
   }
 

@@ -14,7 +14,7 @@
 // past 120 periods /trajectory says how many it read (`notice`); shuffles below 1 answer verdict "n/a" instead of NaN. A call whose client has
 // gone stops between batches. Only Host 127.0.0.1:<port> / localhost:<port> without an Origin is served; a body over 64 MB is 413.
 //
-//   node main/pqvae/sidecar.ts --models <dir> [--port <n>] [--threads <n>]      --port 0 (the default) takes a free port; --threads (default 1)
+//   node main/pqvae/sidecar.ts --models <dir> [--port <n>] [--threads <n>] [--cache <dir>]      --port 0 (the default) takes a free port; --threads (default 1)
 //   is the WebAssembly runtime's thread count (start.ts passes min(4, cores - 1), at least 1)
 // The chosen port is printed as one JSON line on stdout, {"port":N}. It listens on 127.0.0.1 only and ends when its stdin closes (the spawning
 // process holds the pipe: the sidecar never outlives it); started from a terminal it keeps running. LLM_ROUTER_URL names the router whose
@@ -33,7 +33,9 @@ function main(): void {
   const models = resolve(opt('--models') ?? process.env.PQVAE_MODELS ?? [join(h, '..', '..', 'vendor', 'whiq-agent', 'pqvae-onnx'), join(h, 'pqvae-onnx'), join(h, '..', 'pqvae-onnx')].find((d) => existsSync(join(d, 'manifest.json'))) ?? '');
   if (!Number.isInteger(port) || port < 0 || port > 65535) { console.error(`pqvae sidecar: bad --port ${opt('--port')}`); process.exit(2); }
   if (!existsSync(join(models, 'manifest.json'))) { console.error(`pqvae sidecar: no model folder at ${models} (--models <dir>; scripts/pqvae-export.py writes it)`); process.exit(2); }
-  const { server } = makeServer(models);
+  // --cache <dir> (or PQVAE_TEXT_CACHE): text readings kept on disk across requests and runs (textCache.ts); none, memory only
+  const cache = opt('--cache') ?? process.env.PQVAE_TEXT_CACHE;
+  const { server } = makeServer(models, undefined, cache ? resolve(cache) : undefined);
   server.on('error', (e: NodeJS.ErrnoException) => { console.error(`pqvae sidecar: ${e.code === 'EADDRINUSE' ? `port ${port} is in use (EADDRINUSE)` : e.message}`); process.exit(1); });
   server.listen(port, '127.0.0.1', () => console.log(JSON.stringify({ port: (server.address() as { port: number }).port })));
   // ends with whoever started it: when the pipe on stdin closes

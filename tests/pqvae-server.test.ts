@@ -139,9 +139,16 @@ test('review_schedule: past the limit of distinct names, names differing in digi
   const records = Array.from({ length: 120 }, (_, i) => ({ activity_id: String(i), name: `${trades[i % 4]} ${i}`, duration_days: 4 }));   // 120 distinct names, 4 patterns
   const r = await post('/review_schedule', { records, shuffles: 2 });
   assert.equal(r.status, 200, JSON.stringify(r.json).slice(0, 200));
-  assert.deepEqual(r.json.shared_name_readings, { distinct_names: 120, readings: 4, limit: 40 });
-  for (const where of [r.json, r.json.phase_order, r.json.order_vs_random]) assert.match(where.notice, /120 distinct activity names.*4 readings/);
+  assert.deepEqual(r.json.shared_name_readings, { distinct_names: 120, never_read: 120, readings: 4, limit: 40 });
+  for (const where of [r.json, r.json.phase_order, r.json.order_vs_random]) assert.match(where.notice, /120 distinct activity names.*4 readings.*review it again later/);
   assert.equal(r.json.activities.length, 120, 'every activity is still reviewed');
+  // the engine reads the exact names while idle; then the same programme is read exactly, with no notice
+  let pending = -1;
+  for (let i = 0; i < 120 && pending !== 0; i++) { await new Promise((ok) => setTimeout(ok, 500)); pending = (await call({})).json.readingLater; }
+  assert.equal(pending, 0, 'the idle reading finished');
+  const again = await post('/review_schedule', { records, shuffles: 2 });
+  assert.equal(again.json.notice, undefined, 'read exactly the second time');
+  assert.equal(again.json.shared_name_readings, undefined);
   // at or below the limit nothing is shared and no notice is added
   const small = json('review-small5.json');
   const ok = await post('/review_schedule', small.request);

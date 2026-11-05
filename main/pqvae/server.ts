@@ -40,10 +40,18 @@ const readBody = (req: IncomingMessage, limit: number): Promise<Buffer> => new P
  *  has gone is stopped between batches, and one still waiting its turn never starts, so an abandoned call leaves nothing queued behind it.
  *  Only the local client is served: a Host that is not 127.0.0.1:<port> or localhost:<port> (DNS rebinding) and any request carrying an Origin
  *  (a web page's) are refused with 403; the platform's client sends neither. */
-export function makeServer(models: string, maxBody = MAX_BODY) {
-  const engines = new Engines(models);
+export function makeServer(models: string, maxBody = MAX_BODY, cacheRoot?: string) {
+  const engines = new Engines(models, cacheRoot);
   let chain: Promise<unknown> = Promise.resolve();
   let abandoned = 0;
+  // exact readings of names a shared review stood in for, read while no request waits; a request stops it (what was read is kept) and it
+  // goes on after
+  let filling: AbortController | null = null;
+  const fillWhenIdle = (): void => {
+    if (filling || !engines.text.pending()) return;
+    const c = (filling = new AbortController());
+    void serial(() => engines.text.fill(), c.signal).catch(() => undefined).finally(() => { if (filling === c) filling = null; if (!c.signal.aborted) fillWhenIdle(); });
+  };
   const serial = <T>(f: () => Promise<T>, signal: AbortSignal): Promise<T> => {
     const run = async (): Promise<T> => {
       if (signal.aborted) throw new Aborted();
@@ -64,7 +72,7 @@ export function makeServer(models: string, maxBody = MAX_BODY) {
       if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return refuse('host not allowed');
       if (req.headers.origin !== undefined) return refuse('requests from web pages are not allowed');
       if (req.method === 'GET') {
-        if (req.url === '/health') return send(res, 200, { ok: true, loaded: [...engines.loaded].sort(), calibration: CALIBRATION, abandoned });
+        if (req.url === '/health') return send(res, 200, { ok: true, loaded: [...engines.loaded].sort(), calibration: CALIBRATION, abandoned, textCache: engines.text.cacheStats(), readingLater: engines.text.pending() });
         return send(res, 404, { error: 'not found' });
       }
       let raw: Buffer;
@@ -82,7 +90,8 @@ export function makeServer(models: string, maxBody = MAX_BODY) {
       const fn = ROUTES[path];
       if (!fn) return send(res, 404, { error: 'not found' });
       try {
-        const out = await serial(async () => fn(engines, body ?? {}), gone.signal);
+        filling?.abort();   // a request goes before the idle reading
+        const out = await serial(async () => fn(engines, body ?? {}), gone.signal).finally(() => setTimeout(fillWhenIdle, 1000));
         if (out && typeof out === 'object' && !Array.isArray(out) && !('calibration' in out)) out.calibration = CALIBRATION;
         send(res, 200, out);
       } catch (e) {

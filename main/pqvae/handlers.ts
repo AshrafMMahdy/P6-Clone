@@ -36,9 +36,10 @@ export async function encode(e: Engines, body: Rec): Promise<Rec> {
   return { codes: Array.from({ length: recs.length }, (_, i) => [codes[3 * i], codes[3 * i + 1], codes[3 * i + 2]]), n: recs.length };
 }
 
-/** Distinct activity names above which a review shares one reading between names that differ only in their digits. Reading a name costs about
- *  14 ms on 4 threads (JWM, 9,965 names: 141 s of the 166 s review), so 3,000 names is about 40 s: inside the platform client's 180 s on a PC
- *  several times slower than the build machine. At or below it every name is read, exactly as the Python engine does. */
+/** Names never read before (not on the disk cache either) above which a review shares one reading between names that differ only in their
+ *  digits. Reading a name costs about 14 ms on 4 threads (JWM, 9,965 names: 141 s of the 166 s review), so 3,000 names is about 40 s: inside
+ *  the platform client's 180 s on a PC several times slower than the build machine. Names read before cost nothing, so a programme reviewed
+ *  again is read exactly; after a shared review the engine reads the exact names while it is idle (MiniLm.fill), so the next review is exact. */
 const SHARE_ABOVE = (): number => Number(process.env.PQVAE_SHARE_ABOVE) || 3000;
 
 export async function reviewSchedule(e: Engines, body: Rec): Promise<Rec> {
@@ -47,15 +48,17 @@ export async function reviewSchedule(e: Engines, body: Rec): Promise<Rec> {
   const names = new Set<string>();
   for (const r of raw) if (r?.name != null) names.add(pyStr(r.name));
   const limit = SHARE_ABOVE();
-  const readings = names.size > limit ? e.text.share(names) : names.size;
+  const unread = e.text.unread(names);
+  const readings = unread > limit ? e.text.share(names) : names.size;
+  if (readings < names.size) e.text.readLater(names);
   try {
     const out = await review(e, body, raw);
     if (readings < names.size) {
-      const notice = `This programme has ${names.size} distinct activity names, more than the ${limit} the engine reads one by one inside a chat call's time limit. Names that differ only in their digits (Level 3, Level 12) shared one reading, ${readings} readings in all. Every activity is still reviewed, but the text-based parts are approximate for it: the surprise scores, order vs random, and the trade and phase read from the name by meaning (a keyword or the stated trade and phase are not affected).`;
+      const notice = `This programme has ${names.size} distinct activity names, ${unread} of them never read before: more than the ${limit} the engine reads one by one inside a chat call's time limit. Names that differ only in their digits (Level 3, Level 12) shared one reading, ${readings} readings in all. Every activity is still reviewed, but the text-based parts are approximate for it: the surprise scores, order vs random, and the trade and phase read from the name by meaning (a keyword or the stated trade and phase are not affected). The engine now reads the exact names while it is idle (a few minutes for a programme this size): review it again later for the exact reading.`;
       out.notice = notice;
       out.phase_order.notice = notice;
       out.order_vs_random.notice = notice;
-      out.shared_name_readings = { distinct_names: names.size, readings, limit };
+      out.shared_name_readings = { distinct_names: names.size, never_read: unread, readings, limit };
     }
     return out;
   } finally { e.text.unshare(); }

@@ -55,7 +55,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     const next = engineQueue.then(async (): Promise<Record<string, string>> => {
       pqvae?.stop(); pqvae = null;
       try {
-        pqvae = await startPqvae({ entry: join(app.getAppPath(), 'dist', 'pqvae-sidecar.mjs'), models: join(vendor, 'pqvae-onnx'), routerUrl, log: join(data, 'logs', 'pqvae.log') });
+        pqvae = await startPqvae({ entry: join(app.getAppPath(), 'dist', 'pqvae-sidecar.mjs'), models: join(vendor, 'pqvae-onnx'), routerUrl, log: join(data, 'logs', 'pqvae.log'), cache: join(data, 'pqvae-text-cache') });
         return { PQVAE_PORT: String(pqvae.port) };
       } catch (e) { sandboxLog(`[pqvae] not started: ${(e as Error).message}`); return {}; }   // its tools then say it is unavailable
     });

@@ -8,12 +8,13 @@ import { availableParallelism } from 'node:os';
 
 export interface Pqvae { port: number; stop(): void }
 
-export function startPqvae(o: { entry: string; models: string; routerUrl: string; log: string }): Promise<Pqvae> {
+/** cache: the folder of its text readings on disk (kept across runs: a name read once is never read again) */
+export function startPqvae(o: { entry: string; models: string; routerUrl: string; log: string; cache: string }): Promise<Pqvae> {
   if (!existsSync(o.entry)) return Promise.reject(new Error(`the PQ-VAE engine is not built (${o.entry})`));
   if (!existsSync(o.models)) return Promise.reject(new Error(`the PQ-VAE models are not installed (${o.models})`));
   // WebAssembly threads of the encoder: up to 4, always one core left for the app, at least 1
   const threads = Math.max(1, Math.min(4, availableParallelism() - 1));
-  const child: ChildProcess = spawn(process.execPath, [o.entry, '--models', o.models, '--port', '0', '--threads', String(threads)], {
+  const child: ChildProcess = spawn(process.execPath, [o.entry, '--models', o.models, '--port', '0', '--threads', String(threads), '--cache', o.cache], {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', LLM_ROUTER_URL: o.routerUrl }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
   });
   const log = createWriteStream(o.log, { flags: 'a' });
