@@ -230,7 +230,7 @@ export interface Session {
   /** the text encoding its XER / MPX file was read in (BOM as read): what save writes when no encoding is given */
   encoding?: TextEncodingName;
   history: Change[]; redo: Map<string, { change: Change; mark: number }[]>; dirty: boolean;
-  lastUsed: number; bytes: number; notice?: string;
+  lastUsed: number; bytes: number; notice?: string; /** the last checkpoint write failed (said once in a notice; WHIQ 4L-13 G8) */ ckFailed?: boolean;
   /** when it last changed (edit, schedule, undo...): a saved file at least this new holds every change */
   changedAt?: number;
   /** the file its last save (of the whole project, leaving no unsaved changes) wrote */
@@ -357,7 +357,13 @@ function writeProject(s: Session): string {
 /** Write a project in memory to the recovery folder now (a checkpoint): a restart or a crash then loses nothing of it. */
 export function checkpoint(s: Session): void {
   if (!sessions.has(s.handle)) return;
-  try { checkpoints.set(s.handle, entryOf(s, writeProject(s), 'restart')); saveIndex(); } catch { /* the next one */ }
+  try { checkpoints.set(s.handle, entryOf(s, writeProject(s), 'restart')); saveIndex(); if (s.ckFailed) { s.ckFailed = undefined; s.notice = `${s.notice ? `${s.notice} ` : ''}The recovery copy of this project is being written again (it had failed); a restart now loses nothing of it.`; } }
+  catch (e) {
+    // WHIQ 4L-13 (G8): said once, in the next answer for this project (a full disk was silent, and a restart then lost the work
+    // since the last good copy); the next change tries again.
+    if (!s.ckFailed) { s.ckFailed = true; s.notice = `${s.notice ? `${s.notice} ` : ''}The recovery copy of this project could not be written (${(e as Error).message}): until it is, a restart of the server would lose the changes since the last save. Save the project (save) to keep them.`; }
+    process.stderr.write(`P6 Clone: checkpoint of ${s.handle} failed: ${(e as Error).message}\n`);
+  }
 }
 const pendingCk = new Map<string, NodeJS.Timeout>();
 /** Projects with a change in progress across awaits (changeAsync): their tables are half-way, so no checkpoint then. */
@@ -614,7 +620,7 @@ export function followJob(id: string, ok: (r: unknown) => unknown, failed: () =>
 }
 export function getJob(id: unknown): Job {
   const j = jobs.get(String(id ?? ''));
-  if (!j) fail('unknown_job', `No job "${id}".`, 'Jobs are kept for an hour after they finish; start the work again if it is gone.');
+  if (!j) fail('unknown_job', `No job "${id}".`, 'Jobs are kept for an hour after they finish, and a restart of the server forgets them. The job may have finished its change before it was forgotten: call list_open and read the project (its activities, its unsaved_changes) BEFORE starting a changing tool again, so the change is not made twice; a read-only job (a report, an analysis) can simply be run again.');
   return j!;
 }
 export function sweepJobs(): void { const limit = Date.now() - 3600000; for (const [id, j] of jobs) if (j.done && j.done < limit) jobs.delete(id); }

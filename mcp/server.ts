@@ -786,10 +786,10 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     const o = r as { ok?: boolean; status?: string; error?: Record<string, unknown> } | null;
     // a refusal answered as data (ok: false), and a job that failed or was cancelled, are errors too
     const isError = !!(o && typeof o === 'object' && (o.ok === false || (name === 'job_status' && (o.status === 'failed' || o.status === 'cancelled'))));
-    if (isError && o!.error) return { out: { ...o, error: contractError(o!.error) }, isError };
+    if (isError && o!.error) return { out: { ...o, error: keptNote(contractError(o!.error), handle) }, isError };
     return { out: r, isError };
   } catch (e) {
-    if (e instanceof ToolError) return { out: { error: contractError({ code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) }) }, isError: true };
+    if (e instanceof ToolError) return { out: { error: keptNote(contractError({ code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) }), handle) }, isError: true };
     return { out: { error: contractError({ code: 'internal', message: (e as Error).message, hint: 'This is a bug in the server; the project was not changed by this call. Retry, or report it with the message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') }) }, isError: true };
   }
 }
@@ -807,6 +807,12 @@ async function withWorkingSet<T>(name: string, a: Record<string, any>, handle: s
 
 /** The craft forks' error shape ({code, reason, next_step, retry_after_ms}) with the older fields (message, hint,
  *  retry_after in seconds) kept beside it for one release. */
+/** A failed call on an open project says what is kept (WHIQ 4L-13): the call's own change is rolled back (one journal entry per
+ *  call), every earlier call stands — so only this call is redone, never the steps before it. */
+function keptNote(err: Record<string, unknown>, handle: unknown): Record<string, unknown> {
+  if (typeof handle !== 'string' || !handle || err.code === 'unknown_handle' || err.code === 'unknown_job' || !sessions.has(handle)) return err;
+  return { ...err, project_state: 'as after your last successful call: your earlier calls on this project are kept; only this one did not apply. Redo only this call (fixed), not the ones before it.' };
+}
 function contractError(e: Record<string, unknown>): Record<string, unknown> {
   const { code, message, hint, retry_after, ...rest } = e;
   return { code, reason: e.reason ?? message, next_step: e.next_step ?? hint, ...(retry_after ? { retry_after_ms: Number(retry_after) * 1000 } : {}), message, hint, ...(retry_after ? { retry_after } : {}), ...rest };
@@ -838,7 +844,10 @@ export function saveUnsavedAtExit(reason: string): string[] {
     let file = join(dir, `${name}.recovered-${stamp}.xer`);
     for (let i = 2; existsSync(file) || saved.includes(file); i++) file = join(dir, `${name}.recovered-${stamp}-${i}.xer`);
     try { writeOutWith(file, (put) => writeXerTo(db, { version: db.header?.version ?? '19.12', encoding: 'auto', readAs }, put)); saved.push(file); process.stderr.write(`P6 Clone: unsaved changes of ${handle} saved to ${file} (${reason})\n`); }
-    catch (e) { process.stderr.write(`P6 Clone: the unsaved changes of ${handle} could not be saved (${reason}): ${(e as Error).message}\n`); }
+    catch (e) { process.stderr.write(`P6 Clone: the unsaved changes of ${handle} could not be saved (${reason}): ${(e as Error).message}\n`); return; }
+    // the 4D model / links (XER has no place for them) and the LOB plans' copy go beside it, as an explicit save writes them
+    try { save4dSidecar(db, file, allIds(db), writeOut); const lob = lobSidecarText(db, allIds(db)); if (lob) writeOut(`${file}.lob.json`, lob); }
+    catch (e) { process.stderr.write(`P6 Clone: the 4D links / LOB plans of ${handle} could not be saved beside ${file} (${reason}): ${(e as Error).message}\n`); }
   };
   for (const s of sessions.values()) if (s.dirty) one(s.handle, s.path, s.db, s.encoding);
   for (const e of unsavedEvicted()) one(e.handle, e.path, e.db, e.encoding);
