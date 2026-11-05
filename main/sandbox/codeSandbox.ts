@@ -21,7 +21,7 @@ const NOTE = {
 type Backend = { url: string; close(): void | Promise<void> };
 
 export class CodeSandbox {
-  private o: { wslSource: string; version: string; pyodideDir: string; log: (l: string) => void };
+  private o: { wslSource: string; pyodideDir: string; log: (l: string) => void };
   private state: SandboxState = { kind: 'none' };
   private door: Server | null = null;
   private backend: Promise<Backend> | null = null;
@@ -29,7 +29,7 @@ export class CodeSandbox {
   private picking: Promise<SandboxState> | null = null;
   /** bumped by close(): a pick or a start under way when the sandbox was closed ends there, and stops what it started */
   private gen = 0;
-  constructor(o: { wslSource: string; version: string; pyodideDir: string; log?: (l: string) => void }) { this.o = { log: () => {}, ...o }; }
+  constructor(o: { wslSource: string; pyodideDir: string; log?: (l: string) => void }) { this.o = { log: () => {}, ...o }; }
 
   get status(): SandboxState { return this.state; }
 
@@ -44,7 +44,7 @@ export class CodeSandbox {
     const force = process.env.P6CLONE_SANDBOX;
     let wsl = 'not tried', wslSetup = false;
     if (force !== 'pyodide' && existsSync(this.o.wslSource)) {
-      const r = await prepareWsl(this.o.wslSource, this.o.version);
+      const r = await prepareWsl(this.o.wslSource);
       if (g !== this.gen) return this.state;   // closed meanwhile
       if (r.ok) return this.open({ kind: 'wsl', note: NOTE.wsl });
       wsl = r.reason; wslSetup = !!r.setup;
@@ -73,7 +73,7 @@ export class CodeSandbox {
     };
     this.backend ??= (async () => {
       if (this.state.kind === 'wsl') {
-        const r = await startWslSandbox(this.o.wslSource, this.o.version, (l) => this.o.log(`[wsl-sandbox] ${l}`));
+        const r = await startWslSandbox(this.o.wslSource, (l) => this.o.log(`[wsl-sandbox] ${l}`));
         if (r.ok) { await kept(r.sandbox); this.closeBackend = r.sandbox.close; this.state = { ...this.state, started: true }; return r.sandbox; }
         if (g !== this.gen) throw new Error('The code sandbox was closed while it was starting.');
         this.o.log(`[sandbox] WSL refused at first use, Pyodide takes over: ${r.reason}`);

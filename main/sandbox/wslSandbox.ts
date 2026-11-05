@@ -1,6 +1,7 @@
 // The platform's own code sandbox (vendor/whiq-agent/09 Local Sandbox: Python, shell and Node, each chat in a
 // bubblewrap jail) run inside WSL, when this PC has WSL with bubblewrap and the sandbox's packages set up. The service is
-// copied into the WSL home (~/.p6clone/sandbox-<version>, the Linux disk: fast, writable), started on a loopback port
+// copied into the WSL home (~/.p6clone/sandbox, the Linux disk: fast, writable; one folder whatever the platform's version,
+// its packages set up once and again only when its package list changes), started on a loopback port
 // Windows reaches through WSL's localhost forwarding, and used only once its own self-test proves the jail. It ends
 // with the app: its stdin is a pipe from this process, and the wrapper stops it when that pipe closes.
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -26,31 +27,31 @@ function run(cmd: string, args: string[], timeout: number, encoding: BufferEncod
 /** One bash command in the default WSL distribution. */
 const bash = (cmd: string, timeout = 60_000) => run('wsl.exe', ['-e', 'bash', '-lc', cmd], timeout);
 
-/** The folder the service lives in inside WSL, for this version of it. */
-export const wslHome = (version: string) => `$HOME/.p6clone/sandbox-${version.replace(/[^\w.-]/g, '').slice(0, 12)}`;
+/** The folder the service lives in inside WSL. */
+export const WSL_HOME = '$HOME/.p6clone/sandbox';
 
 /** Copy the service in (its few files, every time: the clone's patches change them; the packages in .venv stay) and
  *  check what it needs: bubblewrap, python3 and the packages (install.sh). */
-export async function prepareWsl(source: string, version: string): Promise<{ ok: true } | { ok: false; reason: string; setup?: boolean }> {
+export async function prepareWsl(source: string): Promise<{ ok: true } | { ok: false; reason: string; setup?: boolean }> {
   if (process.platform !== 'win32') return { ok: false, reason: 'not Windows' };
   const list = await run('wsl.exe', ['-l', '-q'], 15_000, 'utf16le');
   if (list.code !== 0 || !list.out) return { ok: false, reason: 'WSL is not installed (or has no Linux distribution)' };
-  const home = wslHome(version);
+  const home = WSL_HOME;
   const copy = await bash(`set -e; d="${home}"; mkdir -p "$d"; src="$(wslpath -a ${q(source.replace(/\\/g, '/'))})"; cp "$src"/*.py "$src"/*.sh "$src"/requirements.txt "$d"/; echo copied`);
   if (copy.code !== 0) return { ok: false, reason: `could not copy the sandbox into WSL: ${copy.out.slice(-300)}` };
-  const need = await bash(`command -v bwrap >/dev/null || echo "bubblewrap"; command -v python3 >/dev/null || echo "python3"; [ -x "${home}/.venv/bin/python3" ] || echo "packages"`);
+  const need = await bash(`command -v bwrap >/dev/null || echo "bubblewrap"; command -v python3 >/dev/null || echo "python3"; [ -x "${home}/.venv/bin/python3" ] && cmp -s "${home}/requirements.txt" "${home}/.requirements.installed" || echo "packages"`);
   const missing = need.out.split(/\s+/).filter(Boolean);
   if (missing.length) return { ok: false, reason: `the WSL sandbox is not set up (missing: ${missing.join(', ')})`, setup: true };
   return { ok: true };
 }
 
 /** Start the service in WSL and wait for its self-test; refused when the jail is not proven there. */
-export async function startWslSandbox(source: string, version: string, log: (line: string) => void = () => {}): Promise<WslResult> {
-  const ready = await prepareWsl(source, version);
+export async function startWslSandbox(source: string, log: (line: string) => void = () => {}): Promise<WslResult> {
+  const ready = await prepareWsl(source);
   if (!ready.ok) return ready;
   const port = await freePort();
   // the service in the background; `cat` holds until our end of stdin closes (the app quit or close()), then it is stopped
-  const cmd = `cd "${wslHome(version)}" && python3 service.py --port ${port} & P=$!; cat >/dev/null; kill $P 2>/dev/null; wait $P 2>/dev/null`;
+  const cmd = `cd "${WSL_HOME}" && python3 service.py --port ${port} & P=$!; cat >/dev/null; kill $P 2>/dev/null; wait $P 2>/dev/null`;
   const child: ChildProcess = spawn('wsl.exe', ['-e', 'bash', '-lc', cmd], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const tail: string[] = [];
   const keep = (d: Buffer) => { for (const l of d.toString('utf8').replace(/\0/g, '').split(/\r?\n/)) if (l.trim()) { log(l); tail.push(l); if (tail.length > 30) tail.shift(); } };
@@ -74,6 +75,6 @@ export async function startWslSandbox(source: string, version: string, log: (lin
 
 /** The set-up the user runs once, in a console they can see (it asks for their Linux password): bubblewrap and venv
  *  from the distribution, then the sandbox's packages (install.sh: about 600 MB from the internet). */
-export function wslSetupCommand(version: string): string {
-  return `echo "P6 Clone: setting up the code sandbox in WSL (bubblewrap, python3-venv, then about 600 MB of Python packages)."; sudo apt-get install -y bubblewrap python3-venv && bash "${wslHome(version)}/install.sh"; echo; read -p "Finished. Press Enter, then click Check again in the AI settings." _`;
+export function wslSetupCommand(): string {
+  return `echo "P6 Clone: setting up the code sandbox in WSL (bubblewrap, python3-venv, then about 600 MB of Python packages)."; sudo apt-get install -y bubblewrap python3-venv && bash "${WSL_HOME}/install.sh" && cp "${WSL_HOME}/requirements.txt" "${WSL_HOME}/.requirements.installed"; echo; read -p "Finished. Press Enter, then click Check again in the AI settings." _`;
 }

@@ -41,11 +41,9 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   const liveMcp = async () => { live ??= startLiveMcp(getWin); const l = await live; return [{ id: 'p6clone_live', label: 'P6 Clone: the open schedule, on screen', url: l.url, token: l.token }]; };
   const data = join(app.getPath('userData'), 'whiq');
   // the code sandbox: picked at the agent's first start (WSL when its jail holds there, else Pyodide), kept while the app runs
-  const stampFile = join(vendor, '.whiq-agent-commit');
-  const version = existsSync(stampFile) ? readFileSync(stampFile, 'utf8').slice(0, 8) : 'dev';
   const sandboxLog = (l: string) => { try { mkdirSync(join(data, 'logs'), { recursive: true }); appendFileSync(join(data, 'logs', 'sandbox.log'), `${l}${EOL}`); } catch { /* best effort */ } };
   const sandbox = new CodeSandbox({
-    wslSource: join(vendor, '09 Local Sandbox'), version,
+    wslSource: join(vendor, '09 Local Sandbox'),
     pyodideDir: app.isPackaged ? join(process.resourcesPath, 'pyodide') : join(app.getAppPath(), 'vendor', 'pyodide'),
     log: sandboxLog,
   });
@@ -182,7 +180,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   handle('whiq:sandbox', async () => sandbox.status);
   handle('whiq:sandboxSetupWsl', async () => {
     // detached: a console window of its own (Windows), where sudo can ask for the password
-    spawn('wsl.exe', ['-e', 'bash', '-lc', wslSetupCommand(version)], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+    spawn('wsl.exe', ['-e', 'bash', '-lc', wslSetupCommand()], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
     return true;
   });
   handle('whiq:sandboxRecheck', async () => { host.stop('The code sandbox is being picked again: the agent starts with it on your next message.'); await sandbox.close(); return true; });
