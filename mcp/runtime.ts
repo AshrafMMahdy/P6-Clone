@@ -601,14 +601,22 @@ const jobs = new Map<string, Job>();
  *  thread is busy in a long step (stdio.ts). */
 let jobHook: ((id: string, view: ReturnType<typeof jobView> | null) => void) | null = null;
 export function onJobChange(f: typeof jobHook): void { jobHook = f; }
+/** The job's own pulses for the client (WHIQ 4L-13): its progress as it moves, and its end with its final status, so a caller
+ *  is told instead of asking job_status again and again. */
+let jobPulse: ((view: ReturnType<typeof jobView>) => void) | null = null;
+export function onJobPulse(f: typeof jobPulse): void { jobPulse = f; }
 export function startJob(tool: string, handle: string | undefined, p: Promise<unknown>, abort?: AbortController): Job {
   const job: Job = { id: token('job_', 12), tool, handle, started: Date.now(), abort };
   // progress is set as the work goes (often inside a long synchronous step): each change is passed on at once
   let progress: string | undefined;
-  Object.defineProperty(job, 'progress', { enumerable: true, get: () => progress, set: (v: string | undefined) => { progress = v; jobHook?.(job.id, jobView(job)); } });
+  Object.defineProperty(job, 'progress', { enumerable: true, get: () => progress, set: (v: string | undefined) => { const changed = v !== progress; progress = v; jobHook?.(job.id, jobView(job)); if (changed) jobPulse?.(jobView(job)); } });
   jobs.set(job.id, job);
   jobHook?.(job.id, jobView(job));
-  p.then((r) => { job.result = job.settle ? job.settle.ok(r) : r; }, (e) => { job.error = e; job.settle?.failed(); }).finally(() => { job.done = Date.now(); jobHook?.(job.id, null); });
+  p.then((r) => { job.result = job.settle ? job.settle.ok(r) : r; }, (e) => { job.error = e; job.settle?.failed(); }).finally(() => {
+    job.done = Date.now(); jobHook?.(job.id, null);
+    // the end pulse names the status and the error, not the result (job_status gives the whole answer)
+    if (jobPulse) { const v = jobView(job) as Record<string, unknown>; const { result: _r, ...end } = v; jobPulse(end as ReturnType<typeof jobView>); }
+  });
   return job;
 }
 export function jobView(job: Job) {

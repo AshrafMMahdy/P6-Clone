@@ -1,7 +1,10 @@
 // MCP over stdio: JSON-RPC 2.0, one message per line (one agent per process).
 import { Worker } from 'node:worker_threads';
 import { callTool, toolResult, toolsList, shutdown, SERVER_INFO, INSTRUCTIONS } from './server.ts';
-import { onJobChange } from './runtime.ts';
+import { onJobChange, onJobPulse } from './runtime.ts';
+/** notifications/job (WHIQ 4L-13): {job_id, tool, handle, status: running | done | failed | cancelled, progress?, error?} —
+ *  sent as a job's progress changes and once when it ends. */
+const jobNote = (view: unknown) => ({ jsonrpc: '2.0', method: 'notifications/job', params: view });
 
 type Msg = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: any };
 /** Running tools/call requests by caller and request id, for notifications/cancelled. */
@@ -122,6 +125,7 @@ export function startStdio(): void {
   const send = (m: unknown) => { if (m) front.postMessage({ type: 'send', id: (m as { id?: unknown }).id ?? null, line: JSON.stringify(m) }); };
   // the job's state as the front answers it while the main thread is busy
   onJobChange((id, view) => front.postMessage({ type: 'job', id, view: view && view.status === 'running' ? { ...view, started: Date.now() - (view.running_seconds ?? 0) * 1000 } : null }));
+  onJobPulse((view) => send(jobNote(view)));
   setInterval(() => front.postMessage({ type: 'beat' }), 100).unref();
   // server_status as it is now, every second, for the front to answer from while a long step holds this thread
   setInterval(() => { void callTool('server_status', {}).then((r) => { if (!r.isError) front.postMessage({ type: 'status', view: r.out }); }, () => {}); }, 1000).unref();
@@ -139,6 +143,7 @@ export function startStdio(): void {
 
 function startStdioMain(): void {
   const send = (m: unknown) => { if (m) process.stdout.write(JSON.stringify(m) + '\n'); };
+  onJobPulse((view) => send(jobNote(view)));
   let buf = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk: string) => {
