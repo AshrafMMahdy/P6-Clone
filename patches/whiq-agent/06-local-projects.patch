@@ -1,0 +1,284 @@
+diff --git a/shared/chat-engine/server/chatStore.ts b/shared/chat-engine/server/chatStore.ts
+index b74cbea..009e630 100644
+--- a/shared/chat-engine/server/chatStore.ts
++++ b/shared/chat-engine/server/chatStore.ts
+@@ -776,6 +776,8 @@ export function createSession(opts: {
+   authorEmail?: string;
+   // V8 bucket binding
+   projectId?: string;
++  localProjectId?: string;
++  localProjectName?: string;
+   /** spread study — the server ran WHIQ_HARNESS=minimal when this chat was created */
+   harness?: 'minimal';
+   // V7 council
+@@ -812,6 +814,7 @@ export function createSession(opts: {
+     ...(opts.authorRole ? { authorRole: opts.authorRole } : {}),
+     ...(opts.authorEmail ? { authorEmail: opts.authorEmail } : {}),
+     ...(opts.projectId ? { projectId: opts.projectId } : {}),
++    ...(opts.localProjectId ? { localProjectId: opts.localProjectId, ...(opts.localProjectName ? { localProjectName: opts.localProjectName } : {}) } : {}),
+     ...(opts.seats ? { seats: opts.seats } : {}),
+     ...(opts.organizerId ? { organizerId: opts.organizerId } : {}),
+     ...(opts.executorId ? { executorId: opts.executorId } : {}),
+@@ -1297,6 +1300,17 @@ export function setProjectId(sessionId: string, projectId: string | undefined):
+   persistDebounced(sessionId);
+ }
+ 
++/** A local chat's project (WHIQ_LOCAL_MODE; see ChatSession.localProjectId). An empty id takes the chat out of it. */
++export function setLocalProject(sessionId: string, projectId: string | undefined, name?: string): void {
++  loadSync();
++  const session = sessions.get(sessionId);
++  if (!session) return;
++  if (projectId) { if (session.localProjectId !== projectId) delete session.localProjectName; session.localProjectId = projectId; if (name) session.localProjectName = name; }
++  else { delete session.localProjectId; delete session.localProjectName; }
++  session.updatedAt = new Date().toISOString();
++  persistDebounced(sessionId);
++}
++
+ export function setPendingDraft(sessionId: string, draft: string | undefined): void {
+   loadSync();
+   const session = sessions.get(sessionId);
+diff --git a/shared/chat-engine/server/childAgents.ts b/shared/chat-engine/server/childAgents.ts
+index aaefd3f..4a8fac4 100644
+--- a/shared/chat-engine/server/childAgents.ts
++++ b/shared/chat-engine/server/childAgents.ts
+@@ -328,6 +328,7 @@ export function spawnChild(input: SpawnInput): ChatSession {
+     trustMode: 'act-auto',   // W4.3.8: a child has no user to answer a card; its writes are bounded by `owns` (A4.3) and the parent integrates
+     kind: 'solo', orgId: parent.orgId, authorId: parent.authorId, authorRole: parent.authorRole, authorEmail: parent.authorEmail,
+     projectId: parent.projectId,
++    localProjectId: parent.localProjectId, localProjectName: parent.localProjectName,
+   });
+   const state: ChildAgentState = {
+     parentChatId: parent.id, name, kind: input.kind, owns: input.owns ?? [], budget, continuesUsed: 0, roundSettled: false,
+diff --git a/shared/chat-engine/server/projectBrief.ts b/shared/chat-engine/server/projectBrief.ts
+index 24db6eb..5da2485 100644
+--- a/shared/chat-engine/server/projectBrief.ts
++++ b/shared/chat-engine/server/projectBrief.ts
+@@ -12,7 +12,7 @@
+  */
+ import { readdirSync, readFileSync, statSync } from 'node:fs';
+ import { join } from 'node:path';
+-import { ageOf, projectIntro } from './memoryStore';
++import { ageOf, memoryProjectOf, projectIntro } from './memoryStore';
+ import { getTool, toolOfferedToSession } from './tools/registry';
+ import type { ChatSession } from '../types';
+ 
+@@ -61,9 +61,10 @@ export function projectBriefBlock(workingDir: string | undefined): string {
+  * A subagent reads it but does not write it (project_intro is hidden from children: childAgents CHILD_HIDDEN); a chat that is
+  * not offered project_intro (the free public tool) is never told to write one.
+  */
+-export function projectIntroBlock(session: { orgId?: string; projectId?: string; child?: unknown }): string {
+-  if (!session.projectId) return '';
+-  const intro = projectIntro(session.orgId, session.projectId);
++export function projectIntroBlock(session: { orgId?: string; projectId?: string; localProjectId?: string; child?: unknown }): string {
++  const projectId = memoryProjectOf(session);
++  if (!projectId) return '';
++  const intro = projectIntro(session.orgId, projectId);
+   if (intro) {
+     const at = intro.updatedAt ?? intro.createdAt;
+     const by = intro.history?.[intro.history.length - 1]?.by ?? 'an agent on this project';
+diff --git a/shared/chat-engine/server/routes/chats.ts b/shared/chat-engine/server/routes/chats.ts
+index 1068565..6cc9674 100644
+--- a/shared/chat-engine/server/routes/chats.ts
++++ b/shared/chat-engine/server/routes/chats.ts
+@@ -14,13 +14,14 @@ import { getHeapStatistics } from 'node:v8';
+ import { join } from 'node:path';
+ import { tmpdir } from 'node:os';
+ import {
+-  appendMessage, createSession, deleteMessage, deleteSession, editMessage, getSession, leaveRoom, listSessions, replaceMessages, setHandleHome,
++  appendMessage, createSession, setLocalProject, deleteMessage, deleteSession, editMessage, getSession, leaveRoom, listSessions, replaceMessages, setHandleHome,
+   setMembers, setModule, setProjectId, setProviderModel, setPendingDraft, setTitle, setTrustMode, setViewHint, setWorkingDir,
+   notePublicUploads,   // branch 28
+   chatStoreUnavailable, pinRoomBucket, pinRoomFolder,
+ } from '../chatStore';
+ import { bucketPathFor, downloadBucketFileTo, getRoomBucket, identityOf, listBucketFiles, listBuckets, roomFolder, syncBucket, uploadSourceFiles } from '../bucketBridge';
+ import { isChatModule } from '../chatMode';
++import { localProjectsOn, setMemoryProjectName } from '../memoryStore';
+ import { noteFilesArrived } from '../waitEvents';
+ import type { ProviderId, RoomMember, TrustMode } from '../../types';
+ import { compactChat } from '@whiq/chat-engine/server/compact';
+@@ -69,6 +70,20 @@ async function projectReach(id: ReturnType<typeof who>, projectId: string): Prom
+     return 'unreachable';
+   }
+ }
++/**
++ * A local chat's project (the desktop app, WHIQ_LOCAL_MODE=1): the app names the project itself - `localProjectId` and
++ * `localProjectName` in the body - and there is no Database to check it against. It is not a Database project: the chat keeps its
++ * own working folder and no records, history or bucket mirror turn on; it scopes the chat's Memory and project introduction.
++ * Anywhere else the fields are ignored. An empty id (PATCH) takes the chat out of its project.
++ */
++function localProject(body: unknown): { localProjectId?: string; localProjectName?: string } | null {
++  const b = (body ?? {}) as { localProjectId?: unknown; localProjectName?: unknown };
++  if (!localProjectsOn() || typeof b.localProjectId !== 'string') return null;
++  const localProjectId = b.localProjectId.trim().slice(0, 200);
++  const localProjectName = typeof b.localProjectName === 'string' ? b.localProjectName.trim().slice(0, 200) : '';
++  if (localProjectId && localProjectName) setMemoryProjectName(localProjectId, localProjectName);
++  return { ...(localProjectId ? { localProjectId } : {}), ...(localProjectName ? { localProjectName } : {}) };
++}
+ /** W4.5: the Project Database did not answer — 503 in plain words, never "project not found". */
+ const DB_UNREACHABLE = { error: 'database_unreachable', message: 'The Project Database cannot be reached right now — try again in a minute.' };
+ /** The project check's answer as a response, or null when the project is the caller's. */
+@@ -523,6 +538,7 @@ export function chatsRouter(): Router {
+       // V8 — bucket binding (solo chats live inside a project bucket). A project chat works in THAT project, full stop
+       // (W4.2: a `restrictToBucket` an older client still posts is accepted and ignored — it decides nothing any more).
+       projectId:  typeof req.body?.projectId === 'string' && req.body.projectId ? req.body.projectId : undefined,
++      ...localProject(req.body),
+       ...(MINIMAL_HARNESS ? { harness: 'minimal' as const } : {}),
+     });
+     res.json(withoutArchive(session));
+@@ -557,6 +573,8 @@ export function chatsRouter(): Router {
+       if (refuseProject(res, await projectReach(who(req), want))) return;
+       setProjectId(id, want);
+     }
++    const local = localProject(req.body);
++    if (local) setLocalProject(id, local.localProjectId, local.localProjectName);
+     // W4.2: `restrictToBucket` in the body (older clients, the channels bridge) is ignored, never refused.
+     if (typeof req.body?.viewHint === 'string') setViewHint(id, req.body.viewHint.slice(0, 200) || undefined);   // branch 24
+     if (typeof req.body?.pendingDraft === 'string') setPendingDraft(id, req.body.pendingDraft || undefined);
+@@ -687,6 +705,7 @@ export function chatsRouter(): Router {
+       members:    session.members,
+       ...(session.module ? { module: session.module } : {}),
+       ...(keepProject ? { projectId: session.projectId } : {}),
++      ...(session.localProjectId ? { localProjectId: session.localProjectId, localProjectName: session.localProjectName } : {}),
+     });
+     if (!session.projectId) {
+       if (session.roomBucketId) pinRoomBucket(forked.id, session.roomBucketId);
+diff --git a/shared/chat-engine/server/routes/memory.ts b/shared/chat-engine/server/routes/memory.ts
+index 2c8382d..c4eb617 100644
+--- a/shared/chat-engine/server/routes/memory.ts
++++ b/shared/chat-engine/server/routes/memory.ts
+@@ -6,13 +6,16 @@
+ import type { Request, Response, Router } from 'express';
+ import { Router as makeRouter } from 'express';
+ import { resolveIdentity } from '@whiq/chat-engine/server/identity';
+-import { addMemory, ageOf, forgetMemory, getMemory, listMemory, memoryChangeLog, memoryState, memoryTagCounts, restoreMemory, updateMemory } from '../memoryStore';
++import { addMemory, ageOf, forgetMemory, getMemory, listMemory, localProjectsOn, memoryChangeLog, memoryState, memoryTagCounts, restoreMemory, updateMemory } from '../memoryStore';
+ import type { MemoryItem } from '../../types';
+ import { listBuckets } from '../bucketBridge';
+ 
++/** Every project (the desktop app, WHIQ_LOCAL_MODE: its projects are the app's own, one user). */
++class AnyProject extends Set<string> { has(): boolean { return true; } }
+ /** The projects the caller can reach (the same check that binds a chat to a project: routes/chats projectReach), or
+  *  'unreachable' when the Project Database does not answer — never read as "every project" (review M4). */
+ export async function reachableProjects(id: ReturnType<typeof resolveIdentity>): Promise<Set<string> | 'unreachable'> {
++  if (localProjectsOn()) return new AnyProject();   // the desktop app's own projects have no Database to ask
+   try { return new Set((await listBuckets({ userId: id.userId, orgId: id.orgId, role: id.role, email: id.email })).map((b) => b.id)); }
+   catch { return 'unreachable'; }
+ }
+diff --git a/shared/chat-engine/server/tools/manage_memory.ts b/shared/chat-engine/server/tools/manage_memory.ts
+index 1e2d36a..4918547 100644
+--- a/shared/chat-engine/server/tools/manage_memory.ts
++++ b/shared/chat-engine/server/tools/manage_memory.ts
+@@ -12,7 +12,7 @@
+  */
+ import { registerTool, SteerError } from './registry';
+ import type { ToolContext } from './registry';
+-import { addMemory, ageOf, forgetMemory, getMemory, memoryState, memoryTagCounts, projectIntro, recallMemory, retireMemory, similarMemories, supersedeMemory, updateMemory, type MemoryWhere } from '../memoryStore';
++import { addMemory, ageOf, forgetMemory, getMemory, memoryProjectOf, memoryState, memoryTagCounts, projectIntro, recallMemory, retireMemory, setMemoryProjectName, similarMemories, supersedeMemory, updateMemory, type MemoryWhere } from '../memoryStore';
+ import type { ChatSession, MemoryItem } from '../../types';
+ import { isHumanWritten } from './ask_user';
+ 
+@@ -55,7 +55,9 @@ export function memoryUserOf(session: Pick<ChatSession, 'kind' | 'authorId' | 'm
+   }
+   return session.authorId;
+ }
+-const whereOf = (ctx: ToolContext, extra: Partial<MemoryWhere> = {}): MemoryWhere => ({ orgId: ctx.session.orgId, userId: memoryUserOf(ctx.session), module: ctx.session.module, projectId: ctx.session.projectId, ...extra });
++/** A local chat's project gets its readable name for the Memory's folder (the Markdown files); a Database project is named by its id. */
++const nameLocalProject = (s: Pick<ChatSession, 'localProjectId' | 'localProjectName'>): void => { if (s.localProjectId) setMemoryProjectName(s.localProjectId, s.localProjectName); };
++const whereOf = (ctx: ToolContext, extra: Partial<MemoryWhere> = {}): MemoryWhere => ({ orgId: ctx.session.orgId, userId: memoryUserOf(ctx.session), module: ctx.session.module, projectId: memoryProjectOf(ctx.session), ...extra });
+ const tagOf = (t: unknown): string => String(t).trim().toLowerCase().replace(/\s+/g, '-');
+ const isoOrUndefined = (v: unknown): string | undefined => {
+   const s = String(v ?? '').trim();
+@@ -70,7 +72,7 @@ function view(m: MemoryItem, ctx: ToolContext): Record<string, unknown> {
+   return {
+     id: m.id, text: m.text, ...(m.kind ? { kind: m.kind } : {}), ...(m.tags?.length ? { tags: m.tags } : {}),
+     written: m.createdAt.slice(0, 10), ...(m.updatedAt ? { updated: m.updatedAt.slice(0, 10) } : {}), age: ageOf(m.updatedAt ?? m.createdAt),
+-    project: !m.projectId ? 'general' : m.projectId === ctx.session.projectId ? 'this project' : `project ${m.projectId}`,
++    project: !m.projectId ? 'general' : m.projectId === memoryProjectOf(ctx.session) ? 'this project' : `project ${m.projectId}`,
+     ...(state !== 'current' ? { state } : {}), ...(m.expiresAt ? { expires: m.expiresAt.slice(0, 16).replace('T', ' ') } : {}),
+     ...(m.supersededBy ? { superseded_by: m.supersededBy } : {}),
+   };
+@@ -116,7 +118,7 @@ export function registerMemoryTools(): void {
+       const n = Math.max(Math.trunc(input.limit ?? 8) || 8, 1);
+       const tags = (input.tags ?? []).map(tagOf).filter(Boolean);
+       if (!String(input.query ?? '').trim() && !tags.length) throw new SteerError('recall_memory: give a query, tags, or both.');
+-      const hits = recallMemory(ctx.session.orgId, String(input.query ?? ''), n, memoryUserOf(ctx.session), ctx.session.module, { projectId: ctx.session.projectId, allProjects: !!input.all_projects, includeInactive: !!input.include_old, ...(tags.length ? { tags } : {}) });
++      const hits = recallMemory(ctx.session.orgId, String(input.query ?? ''), n, memoryUserOf(ctx.session), ctx.session.module, { projectId: memoryProjectOf(ctx.session), allProjects: !!input.all_projects, includeInactive: !!input.include_old, ...(tags.length ? { tags } : {}) });
+       return { memories: hits.map((m) => view(m, ctx)), tags_in_use: memoryTagCounts(whereOf(ctx, { allProjects: true })) };
+     },
+   });
+@@ -151,7 +153,8 @@ export function registerMemoryTools(): void {
+     execute: async (input, ctx) => {
+       const stale = looksLikeRunMeasurement(input.text);
+       if (stale) return { saved: false, note: stale };
+-      const general = input.about === 'general' || !ctx.session.projectId;
++      const general = input.about === 'general' || !memoryProjectOf(ctx.session);
++      if (!general) nameLocalProject(ctx.session);
+       const expiresAt = isoOrUndefined(input.expires);
+       const tags = (input.tags ?? []).map(tagOf).filter(Boolean);
+       const gate = tagGate(ctx, tags, !!input.confirm_new_tags);
+@@ -160,7 +163,7 @@ export function registerMemoryTools(): void {
+         const near = similarMemories(input.text, whereOf(ctx, general ? { projectId: undefined } : {}));
+         if (near.length) return { saved: false, similar: near.map((m) => view(m, ctx)), note: 'These read like the same thing. If one of them has changed, update_memory it (mode "edit" to correct it, "supersede" when the fact itself changed); if yours is a different fact, call save_memory again with new: true.' };
+       }
+-      const m = addMemory({ text: input.text, kind: input.kind as MemoryItem['kind'], orgId: ctx.session.orgId, authorId: memoryUserOf(ctx.session), module: ctx.session.module, projectId: general ? undefined : ctx.session.projectId, sourceChatId: ctx.chatId, tags, expiresAt, by: who(ctx) });
++      const m = addMemory({ text: input.text, kind: input.kind as MemoryItem['kind'], orgId: ctx.session.orgId, authorId: memoryUserOf(ctx.session), module: ctx.session.module, projectId: general ? undefined : memoryProjectOf(ctx.session), sourceChatId: ctx.chatId, tags, expiresAt, by: who(ctx) });
+       if (m) void import('../agentLoop').then(({ emit }) => emit(ctx.chatId, { type: 'memory_saved', chatId: ctx.chatId, items: [{ id: m.id, text: m.text }] })).catch(() => undefined);   // the chat's "saved to memory" notice
+       return m ? { saved: true, id: m.id, project: general ? 'general' : 'this project', ...(m.tags ? { tags: m.tags } : {}), ...(expiresAt ? { expires: expiresAt } : {}) } : { saved: false, note: 'Already saved in the same words — nothing to add.' };
+     },
+@@ -188,7 +191,7 @@ export function registerMemoryTools(): void {
+     dangerous: true, codeExec: false, destructive: false, planModeOnly: false, actModeOnly: false,
+     execute: async (input, ctx) => {
+       const m = getMemory(String(input.id ?? ''));
+-      if (m && m.projectId && m.projectId !== ctx.session.projectId && m.kind !== 'intro') throw new SteerError(`update_memory: "${m.id}" belongs to another project — read-only from here. Save what holds here as a new entry.`);
++      if (m && m.projectId && m.projectId !== memoryProjectOf(ctx.session) && m.kind !== 'intro') throw new SteerError(`update_memory: "${m.id}" belongs to another project — read-only from here. Save what holds here as a new entry.`);
+       if (!m || !recallScope(m, ctx)) throw new SteerError(`update_memory: no entry "${input.id}" in your Memory — recall_memory shows the ids.`);
+       if (memoryState(m) === 'retired' || m.supersededAt) throw new SteerError(`update_memory: "${m.id}" is ${memoryState(m)} — update the current entry instead${m.supersededBy ? ` (${m.supersededBy})` : ''}.`);
+       const expiresAt = isoOrUndefined(input.expires);
+@@ -218,7 +221,7 @@ export function registerMemoryTools(): void {
+     dangerous: true, codeExec: false, destructive: false, planModeOnly: false, actModeOnly: false,
+     execute: async (input, ctx) => {
+       const m = getMemory(String(input.id ?? ''));
+-      if (m && m.projectId && m.projectId !== ctx.session.projectId && m.kind !== 'intro') throw new SteerError(`forget_memory: "${m.id}" belongs to another project — read-only from here.`);
++      if (m && m.projectId && m.projectId !== memoryProjectOf(ctx.session) && m.kind !== 'intro') throw new SteerError(`forget_memory: "${m.id}" belongs to another project — read-only from here.`);
+       if (!m || !recallScope(m, ctx)) throw new Error(`forget_memory: no memory with id "${input.id}" — call recall_memory to see stored ids.`);
+       const r = input.reason ? retireMemory(m.id, String(input.reason), who(ctx)) : (forgetMemory(m.id, who(ctx)) ? m : null);
+       return { forgotten: !!r, id: m.id, kept: 'retired, not deleted — restorable in Settings → Memory' };
+@@ -241,10 +244,11 @@ export function registerMemoryTools(): void {
+     },
+     dangerous: true, codeExec: false, destructive: false, planModeOnly: false, actModeOnly: false,
+     execute: async (input, ctx) => {
+-      const projectId = ctx.session.projectId;
++      const projectId = memoryProjectOf(ctx.session);
+       if (!projectId) throw new SteerError('project_intro: this chat is not in a project — an introduction belongs to a project.');
+       const cur = projectIntro(ctx.session.orgId, projectId);
+       if (input.action !== 'write') return cur ? { found: true, id: cur.id, text: cur.text, written: cur.createdAt.slice(0, 10), age: ageOf(cur.updatedAt ?? cur.createdAt) } : { found: false, note: 'No introduction yet — write one once you have read the project\'s key documents.' };
++      nameLocalProject(ctx.session);
+       const text = String(input.text ?? '').trim();
+       if (text.length < 40) throw new SteerError('project_intro: write the full introduction (a few paragraphs).');
+       // Project-wide: no author and no module, so every user and every agent of the project reads it.
+@@ -263,8 +267,8 @@ export function registerMemoryTools(): void {
+ function recallScope(m: MemoryItem, ctx: ToolContext): boolean {
+   const org = ctx.session.orgId && ctx.session.orgId !== '*' ? ctx.session.orgId : undefined;
+   if (ctx.session.orgId !== '*' && m.orgId !== org) return false;
+-  if (m.kind === 'intro') return m.projectId === ctx.session.projectId;
+-  if (m.projectId && m.projectId !== ctx.session.projectId) return false;
++  if (m.kind === 'intro') return m.projectId === memoryProjectOf(ctx.session);
++  if (m.projectId && m.projectId !== memoryProjectOf(ctx.session)) return false;
+   if (m.authorId && m.authorId !== memoryUserOf(ctx.session)) return false;
+   if (m.module && m.module !== ctx.session.module) return false;
+   return true;
+diff --git a/shared/chat-engine/types.ts b/shared/chat-engine/types.ts
+index e09cfce..a107f7d 100644
+--- a/shared/chat-engine/types.ts
++++ b/shared/chat-engine/types.ts
+@@ -343,6 +343,10 @@ export interface ChatSession {
+   authorEmail?: string;
+   /** V8 — the 02-Database project bucket this chat lives in. Undefined = general room. */
+   projectId?: string;
++  /** A project of the desktop app's own (WHIQ_LOCAL_MODE), named by the app: no Database behind it, so it scopes this chat's Memory
++   *  (and the project introduction) and switches on nothing of a Database project (workspace mirror, records, history). */
++  localProjectId?: string;
++  localProjectName?: string;
+   /** Branch 24 — the platform assistant: which 01 view the user is looking at right now
+    *  ('dashboard' | 'kanban' | 'situation-deck' | 'project:<id>'), pushed by the right pane. A hint, not a scope. */
+   viewHint?: string;

@@ -5,7 +5,7 @@
 // a message rewritten or taken back, one step reported three times) are sent into the panel as the agent's stream sends them.
 //   node tests/e2e/whiq-panel-events.ts   (needs vendor/whiq-agent installed and built)
 import { _electron as electron } from 'playwright';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fakeModel, type Req } from './fake-model.ts';
@@ -82,6 +82,14 @@ await win.click('.ai-panel .ai-pin:has-text("Sub-agents") a');
 ok(/contract-scan · researcher · step \d+\/\d+ · handed back/.test(await win.locator('.ai-panel .ai-pin:has-text("Sub-agents")').innerText()), 'and opens to its last state');
 // memory, cost
 ok(/Saved to memory: The owner wants a weekly look-ahead/.test(await body()), 'a "Saved to memory" note');
+// the memory is a Markdown file in the data folder: Data\Memories\General\<kind>\<first words>.md
+const mem = join(profile, 'Data', 'Memories');
+let memFile = '';
+for (let i = 0; i < 20 && !memFile; i++) {
+  await win.waitForTimeout(500);
+  if (existsSync(mem)) memFile = (readdirSync(mem, { recursive: true }) as string[]).find((f) => f.endsWith('.md') && /weekly look-ahead/.test(readFileSync(join(mem, f), 'utf8'))) ?? '';
+}
+ok(/^General[\\/]/.test(memFile), `the memory is a Markdown file under Data\\Memories\\General: ${memFile}`);
 ok(/\d+ tokens/.test(await win.locator('.ai-panel .ai-input').innerText()), 'the running cost shows');
 // suggested replies: chips that send
 await win.waitForSelector('.ai-panel .ai-chip', { timeout: 30000 });

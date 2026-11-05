@@ -64,7 +64,8 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     engineQueue = next.catch(() => undefined);
     return next;
   };
-  const services = async (routerUrl: string) => { const [, pq] = await Promise.all([sandbox.ensure(), startEngine(routerUrl)]); return { ...sandbox.env(), ...pq }; };
+  // the agent's memories as Markdown files in Data\Memories (patch 05: one file per memory, by scope and kind)
+  const services = async (routerUrl: string) => { const [, pq] = await Promise.all([sandbox.ensure(), startEngine(routerUrl)]); return { ...sandbox.env(), ...pq, WHIQ_MEMORY_DIR: dataDir('Memories') }; };
   const host = new WhiqHost({ vendor, data, logs }, () => modelsFrom(ai()), liveMcp, services);
   const watching = new Map<string, () => void>();
   const send = (chatId: string, e: AgentEvent) => getWin()?.webContents.send('whiq:event', chatId, e);
@@ -144,7 +145,8 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   handle('whiq:warm', async () => { void host.start().catch(() => { /* reported on use */ }); return true; });
   handle('whiq:status', async () => ({ ...host.status, missing: process.env.P6CLONE_WHIQ === 'off' ? 'Turned off (P6CLONE_WHIQ=off).' : host.available() }));
   handle('whiq:createChat', async (title?: string, project?: string) => {
-    const c = await host.api('POST', '/api/chats', { title: title || 'Scheduler', module: 'scheduler' }) as { id: string };
+    // the chat's project for its memories and project introduction (patch 06: local projects, no Database involved)
+    const c = await host.api('POST', '/api/chats', { title: title || 'Scheduler', module: 'scheduler', ...(project ? { localProjectId: project, localProjectName: project } : {}) }) as { id: string };
     if (project) projectOf.set(c.id, project);
     return c;
   });
@@ -193,7 +195,15 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     const err = await shell.openPath(p); if (err) throw new Error(err); return true;
   });
   handle('whiq:showInFolder', async (p: string) => { if (!isFileOfAgent(p)) throw new Error('Only files in the agent\'s working folders are shown from the panel.'); shell.showItemInFolder(p); return true; });
-  handle('whiq:watch', async (chatId: string, project?: string) => { if (project) projectOf.set(chatId, project); await watch(chatId); return true; });
+  handle('whiq:watch', async (chatId: string, project?: string) => {
+    // a chat made before chats had projects (or under another one) gets its project once
+    if (project && projectOf.get(chatId) !== project) {
+      projectOf.set(chatId, project);
+      await host.api('PATCH', `/api/chats/${encodeURIComponent(chatId)}`, { localProjectId: project, localProjectName: project }).catch(() => undefined);
+    }
+    await watch(chatId);
+    return true;
+  });
   handle('whiq:unwatch', async (chatId: string) => { watching.get(chatId)?.(); watching.delete(chatId); return true; });
 
   // the code sandbox for Settings: which one runs the agent's code, and setting up the WSL one (in a console the user sees:

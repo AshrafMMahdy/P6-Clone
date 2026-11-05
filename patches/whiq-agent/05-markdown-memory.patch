@@ -1,0 +1,468 @@
+diff --git b/shared/chat-engine/server/memoryMarkdown.ts b/shared/chat-engine/server/memoryMarkdown.ts
+new file mode 100644
+index 0000000..a0ab1b4
+--- /dev/null
++++ b/shared/chat-engine/server/memoryMarkdown.ts
+@@ -0,0 +1,149 @@
++/**
++ * The Memory as Markdown files (WHIQ_MEMORY_DIR): the file format and the names, apart from the store that keeps them.
++ *
++ *   <dir>/<scope>/<Kind folder>/<title>.md          scope = "General", or the project's name
++ *   <dir>/<scope>/_Retired/<Kind folder>/…          retired entries (kept, out of the live folders)
++ *   <dir>/<scope>/_Superseded/<Kind folder>/…       entries a newer one replaced
++ *
++ * A file is a front matter block (every field of the MemoryItem, so the entry round-trips whole) and the memory's text as
++ * the Markdown body. The front matter is the small YAML subset written here and read back below (scalars, one-line lists, a
++ * block list of mappings for the history): hand-edited files in the usual YAML shapes read too.
++ */
++import type { MemoryChange, MemoryItem } from '../types';
++
++export const GENERAL = 'General';
++const KIND_FOLDER: Record<string, string> = { fact: 'Facts', preference: 'Preferences', party: 'People and parties', decision: 'Decisions', other: 'Other', intro: 'Project introduction' };
++export const kindFolder = (k: MemoryItem['kind']): string => KIND_FOLDER[k ?? 'other'] ?? 'Other';
++/** A kind written by hand: "fact", "Facts", "people and parties" … */
++export function kindOfName(s: string): MemoryItem['kind'] | undefined {
++  const t = s.trim().toLowerCase();
++  return (Object.keys(KIND_FOLDER) as Array<NonNullable<MemoryItem['kind']>>).find((k) => k === t || KIND_FOLDER[k].toLowerCase() === t || `${k}s` === t);
++}
++const ACTIONS = new Set<MemoryChange['action']>(['written', 'edited', 'superseded', 'retired', 'restored']);
++
++// ── names ──────────────────────────────────────────────────────────────────────────────────────────────────────────
++const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])$/i;
++/** A name any file system takes (Windows included): no \ / : * ? " < > | or control characters, no reserved device name, no
++ *  trailing dot or space, at most `max` characters, never empty. */
++export function safeName(raw: string, max = 60, fallback = 'memory'): string {
++  let s = raw.normalize('NFC').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
++  if (s.length > max) { const cut = s.slice(0, max); s = cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max / 2))).replace(/[\ud800-\udbff]$/, ''); }   // a word boundary when there is one
++  s = s.replace(/^[.\s]+|[.\s]+$/g, '');
++  if (!s) return fallback;
++  if (RESERVED.test(s.split('.')[0].trimEnd())) s = `_${s}`;   // CON, con.txt … are devices on Windows
++  return s;
++}
++/** The file name for an entry: its first words. */
++export const titleOf = (text: string): string => safeName(text.replace(/[#>*_`~\[\]]+/g, ' ').split(/\r?\n/).find((l) => l.trim()) ?? '', 60);
++
++// ── writing ────────────────────────────────────────────────────────────────────────────────────────────────────────
++const bare = (s: string): boolean => /^[A-Za-z0-9_][A-Za-z0-9_.:+-]*$/.test(s) && !/^(true|false|null|yes|no|on|off|~)$/i.test(s) && !/^[0-9.+-]+$/.test(s);
++const sc = (s: string): string => (bare(s) ? s : JSON.stringify(s));
++function line(out: string[], key: string, v: string | undefined, indent = ''): void { if (v !== undefined) out.push(`${indent}${key}: ${sc(v)}`); }
++
++export function renderMemoryFile(m: MemoryItem, projectName?: string): string {
++  const o: string[] = ['---'];
++  line(o, 'id', m.id);
++  line(o, 'kind', m.kind);
++  if (m.tags) o.push(`tags: [${m.tags.map((t) => sc(t)).join(', ')}]`);
++  line(o, 'author', m.authorId); line(o, 'module', m.module); line(o, 'org', m.orgId);
++  line(o, 'project', m.projectId); line(o, 'projectName', m.projectId ? projectName : undefined);
++  line(o, 'sourceChat', m.sourceChatId);
++  line(o, 'created', m.createdAt); line(o, 'updated', m.updatedAt); line(o, 'expiresAt', m.expiresAt);
++  line(o, 'supersededAt', m.supersededAt); line(o, 'supersededBy', m.supersededBy);
++  line(o, 'retiredAt', m.retiredAt); line(o, 'retiredReason', m.retiredReason);
++  if (m.history) {
++    if (!m.history.length) o.push('history: []');
++    else {
++      o.push('history:');
++      for (const c of m.history) {
++        o.push(`  - at: ${sc(c.at)}`); line(o, 'by', c.by, '    '); line(o, 'action', c.action, '    ');
++        line(o, 'text', c.text, '    '); line(o, 'note', c.note, '    ');
++      }
++    }
++  }
++  o.push('---', '', m.text, '');
++  return o.join('\n');
++}
++
++// ── reading ────────────────────────────────────────────────────────────────────────────────────────────────────────
++export type Parsed = { ok: true; item: MemoryItem; projectName?: string; noId: boolean } | { ok: false; why: string };
++
++function scalar(v: string): string {
++  const t = v.trim();
++  if (t.startsWith('"')) { try { const x = JSON.parse(t); if (typeof x === 'string') return x; } catch { /* fall through: a hand-written quote */ } return t.replace(/^"|"$/g, ''); }
++  if (t.startsWith("'") && t.endsWith("'") && t.length >= 2) return t.slice(1, -1).replace(/''/g, "'");
++  return t.replace(/\s+#.*$/, '');   // a trailing comment
++}
++function flowList(v: string): string[] {
++  const inner = v.trim().replace(/^\[/, '').replace(/\]$/, '');
++  const parts: string[] = []; let cur = '', q = '';
++  for (const ch of inner) {
++    if (q) { cur += ch; if (ch === q && !cur.endsWith(`\\${q}`)) q = ''; }
++    else if (ch === '"' || ch === "'") { q = ch; cur += ch; }
++    else if (ch === ',') { parts.push(cur); cur = ''; }
++    else cur += ch;
++  }
++  parts.push(cur);
++  return parts.map((p) => p.trim()).filter(Boolean).map(scalar);
++}
++const KV = /^([A-Za-z][\w-]*):(?:\s+(.*))?$/;
++
++/** The text of one file → the entry, or why it cannot be read as one. `mtime` stands in for a missing created stamp. */
++export function parseMemoryFile(raw: string, mtime: string, folderKind?: MemoryItem['kind']): Parsed {
++  const src = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
++  const lines = src.split(/\r?\n/);
++  if (lines[0]?.trimEnd() !== '---') {
++    const text = src.trim();   // no front matter: the whole file is the text of a new entry
++    if (text.length < 4) return { ok: false, why: 'it holds no text' };
++    return { ok: true, noId: true, item: { id: '', text, kind: folderKind, createdAt: mtime } };
++  }
++  const end = lines.findIndex((l, i) => i > 0 && l.trimEnd() === '---');
++  if (end < 0) return { ok: false, why: 'its front matter block is not closed (no second "---" line)' };
++  const f: Record<string, string | string[]> = {}; const hist: Array<Record<string, string>> = []; let histSeen = false, openKey = '', cur: Record<string, string> | null = null;
++  for (let i = 1; i < end; i++) {
++    const l = lines[i];
++    if (!l.trim() || l.trim().startsWith('#')) continue;
++    if (/^\s/.test(l) || l.startsWith('- ')) {
++      const t = l.trim();
++      if (openKey === 'history') {
++        const item = t.startsWith('- ') ? (cur = {}, hist.push(cur), t.slice(2).trim()) : t;
++        const kv = KV.exec(item);
++        if (!kv || !cur) return { ok: false, why: `line ${i + 1} of its front matter is not a history entry ("${t.slice(0, 40)}")` };
++        cur[kv[1]] = scalar(kv[2] ?? '');
++      } else if (openKey && t.startsWith('- ')) ((f[openKey] ??= []) as string[]).push(scalar(t.slice(2)));
++      else return { ok: false, why: `line ${i + 1} of its front matter is out of place ("${t.slice(0, 40)}")` };
++      continue;
++    }
++    const kv = KV.exec(l.trimEnd());
++    if (!kv) return { ok: false, why: `line ${i + 1} of its front matter is not "key: value" ("${l.slice(0, 40)}")` };
++    const [, key, v = ''] = kv;
++    openKey = key;
++    if (key === 'history') { histSeen = true; if (v.trim() && v.trim() !== '[]') return { ok: false, why: 'its history is not a list of entries' }; }
++    else if (v.trim() === '') f[key] = [];   // a block list follows, or an empty value
++    else f[key] = v.trim().startsWith('[') ? flowList(v) : (key === 'tags' && !v.trim().startsWith('"') ? v.split(',').map((x) => scalar(x)).filter(Boolean) : scalar(v));
++  }
++  const str = (k: string): string | undefined => { const v = f[k]; const s = Array.isArray(v) ? (v.length ? v.join(', ') : undefined) : v; return s === '' || s === 'null' || s === '~' ? undefined : s; };
++  const text = lines.slice(end + 1).join('\n').trim();
++  if (text.length < 4) return { ok: false, why: 'it holds no text under its front matter' };
++  const kindRaw = str('kind'); const kind = kindRaw ? kindOfName(kindRaw) : (str('id') ? undefined : folderKind);   // the folder says the kind of a file that is not an entry yet
++  if (kindRaw && !kind) return { ok: false, why: `its kind "${kindRaw}" is not one of ${Object.values(KIND_FOLDER).join(', ')}` };
++  const format = str('format');
++  if (format && format !== '1') return { ok: false, why: `its format ${format} is another build's` };
++  const history: MemoryChange[] = [];
++  for (const h of hist) {
++    if (!h.at || !h.by || !ACTIONS.has(h.action as MemoryChange['action'])) return { ok: false, why: `a history entry is incomplete or has an unknown action ("${h.action ?? ''}")` };
++    history.push({ at: h.at, by: h.by, action: h.action as MemoryChange['action'], ...(h.text !== undefined && h.text !== '' ? { text: h.text } : {}), ...(h.note !== undefined && h.note !== '' ? { note: h.note } : {}) });
++  }
++  const tags = f.tags === undefined ? undefined : (Array.isArray(f.tags) ? f.tags : [f.tags]);
++  const opt = <K extends string>(k: K, v: string | undefined) => (v === undefined ? {} : { [k]: v });
++  const item: MemoryItem = {
++    id: str('id') ?? '', text,
++    ...opt('kind', kind), ...opt('orgId', str('org')), ...opt('authorId', str('author')), ...opt('module', str('module')), ...opt('projectId', str('project')),
++    ...opt('sourceChatId', str('sourceChat')), createdAt: str('created') ?? mtime,
++    ...(tags ? { tags } : {}), ...opt('updatedAt', str('updated')), ...opt('supersededAt', str('supersededAt')), ...opt('supersededBy', str('supersededBy')),
++    ...opt('retiredAt', str('retiredAt')), ...opt('retiredReason', str('retiredReason')), ...opt('expiresAt', str('expiresAt')),
++    ...(histSeen ? { history } : {}),
++  };
++  return { ok: true, noId: !item.id, item, projectName: str('projectName') };
++}
+diff --git a/shared/chat-engine/server/memoryStore.ts b/shared/chat-engine/server/memoryStore.ts
+index 7353b85..90bbd62 100644
+--- a/shared/chat-engine/server/memoryStore.ts
++++ b/shared/chat-engine/server/memoryStore.ts
+@@ -4,16 +4,18 @@
+  * object-storage mirror (mirrors taskStore). recall is SYNC (keyword + recency) so the
+  * system prompt can inject memory without an async hop.
+  */
+-import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
++import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, statSync, watch, type FSWatcher } from 'node:fs';
++import { createHash } from 'node:crypto';
+ import { safeReplaceFile } from '@whiq/agent/atomicFile';
+ import { docStoreEnabled } from '@whiq/agent/docStore';
+ import { createDocBacking } from '@whiq/agent/docBacking';
+-import { dirname, join, resolve } from 'node:path';
++import { basename, dirname, extname, join, resolve, sep } from 'node:path';
+ import { nanoid } from 'nanoid';
+ import type { MemoryChange, MemoryItem } from '../types';
+ import { coworkKey, coworkSuffix, getBlob, listBlobs, objectStorageActive, putBlob } from './storageService';
+ import { currentProduct, runtimeDir } from './paths';
+ import { supportingFault } from './toolFault';
++import { GENERAL, kindFolder, kindOfName, parseMemoryFile, renderMemoryFile, safeName, titleOf, type Parsed } from './memoryMarkdown';
+ 
+ // Per call, never a module const: the engine's root arrives via initProduct() at boot, and
+ // `import` is hoisted - a value resolved here at module load resolves before the app has said
+@@ -67,6 +69,7 @@ function scheduleIoRetry(): void {
+ }
+ 
+ function loadSync(): void {
++  if (mdDir()) { loadMd(); return; }
+   if (loaded) return;
+   ensureDir();
+   const file = STORE_FILE();
+@@ -120,6 +123,241 @@ function loadSync(): void {
+ 
+ function persist(): void { if (timer) clearTimeout(timer); timer = setTimeout(flush, DEBOUNCE_MS); }
+ 
++// ── Markdown files (WHIQ_MEMORY_DIR) ──────────────────────────────────────────────────────────────────────────────
++// With WHIQ_MEMORY_DIR set the entries live as Markdown files (memoryMarkdown.ts: the layout and the format) instead of
++// memory.json: the same in-memory model, the same debounced atomic saves; only load and persist differ. A file edited, added
++// or deleted by hand is picked up (a watcher, and a re-scan on access); a file that cannot be read as an entry is left exactly
++// as it is, and logged.
++const mdDir = (): string | null => { const d = process.env.WHIQ_MEMORY_DIR?.trim(); return d ? resolve(d) : null; };
++/** The file an entry sits in: its path under the folder, a hash of what it holds (the entry as last written or read), its
++ *  stamp on disk, and the folder the entry belonged in then (a change of kind, state or project moves it, nothing else does). */
++interface MdFile { rel: string; hash: string; sig: string; want: string }
++const mdFiles = new Map<string, MdFile>();
++/** Files left alone (not readable as an entry), by path, with the stamp they were logged at: logged once until they change. */
++const mdBad = new Map<string, string>();
++const projectNames = new Map<string, string>();
++const projectFolder = new Map<string, string>();
++let mdScanAt = 0;
++let mdWatch: FSWatcher | null = null;
++let mdWatchDir = '';
++/** The folder this store loaded: the variable is read once per run in practice, and a store never writes into another folder. */
++let mdRoot = '';
++let mdFaultTold = false;
++const MD_RESCAN_MS = 1_000;
++const sha = (s: string): string => createHash('sha1').update(s).digest('hex');
++const sigOf = (abs: string): string => { try { const s = statSync(abs); return `${s.mtimeMs}:${s.size}`; } catch { return ''; } };
++const mdLog = (what: string, why: unknown, code = 'memory_load_failed'): void => {
++  process.stderr.write(`[memoryStore] ${what}: ${String(why)}\n`);
++  supportingFault('memory store', what, why, { code });
++};
++
++function freshScope(id: string, name?: string): string {
++  const base = safeName(name || id, 60, 'project');
++  const taken = (s: string): boolean => s.toLowerCase() === GENERAL.toLowerCase() || /^_(retired|superseded)$/i.test(s) || [...projectFolder].some(([k, v]) => k !== id && v.toLowerCase() === s.toLowerCase());
++  return taken(base) ? `${base} (${safeName(id, 20, 'project')})` : base;
++}
++/** The scope folder of a project: its name when one is known (set by the app), else its id; kept once chosen. */
++function scopeFolder(projectId: string | undefined): string {
++  if (!projectId) return GENERAL;
++  let f = projectFolder.get(projectId);
++  if (!f) { f = freshScope(projectId, projectNames.get(projectId)); projectFolder.set(projectId, f); }
++  return f;
++}
++const dirFor = (m: MemoryItem): string => join(scopeFolder(m.projectId), ...(m.retiredAt ? ['_Retired'] : m.supersededAt ? ['_Superseded'] : []), kindFolder(m.kind));
++
++/** The readable name of a project, for its folder (a local chat's project is named by the app). An id until then; a folder
++ *  chosen by hand is never renamed. */
++export function setMemoryProjectName(projectId: string, name: string | undefined): void {
++  const n = name?.trim();
++  if (!projectId || !n || projectNames.get(projectId) === n) return;
++  loadSync();
++  const prev = projectNames.get(projectId);
++  projectNames.set(projectId, n);
++  if (!mdDir()) return;
++  const cur = projectFolder.get(projectId);
++  if (!cur || cur === safeName(projectId, 60, 'project') || (prev && cur === safeName(prev, 60, 'project'))) { projectFolder.delete(projectId); projectFolder.set(projectId, freshScope(projectId, n)); }
++  persist();
++}
++
++function mdWalk(root: string, rel = ''): string[] {
++  const out: string[] = [];
++  for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
++    if (e.name.startsWith('.')) continue;   // an editor's own folder (.obsidian)
++    const r = rel ? join(rel, e.name) : e.name;
++    if (e.isDirectory()) out.push(...mdWalk(root, r)); else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) out.push(r);
++  }
++  return out;
++}
++
++/** Read the folder: new and changed files become entries, a file gone is a memory the person deleted, a file that is not an
++ *  entry stays as it is. Throws on an I/O error (the caller tries again). */
++function mdScan(): void {
++  const root = mdDir()!;
++  mdScanAt = Date.now();
++  if (!existsSync(root)) {   // the folder itself gone (an unplugged drive): never read as "every memory deleted"
++    try { mdWatch?.close(); } catch { /* already closed */ }   // (a watch on a removed folder spins on Windows); set again when the folder is back
++    mdWatch = null;
++    return;
++  }
++  const rels = mdWalk(root), seen = new Set(rels);
++  const byRel = new Map([...mdFiles].map(([id, f]) => [f.rel, id] as const));
++  const owner = new Map<string, string>();   // entry id → the file that holds it
++  const changed: Array<{ rel: string; sig: string; p: Extract<Parsed, { ok: true }> }> = [];
++  for (const rel of rels) {
++    const abs = join(root, rel), sig = sigOf(abs), known = byRel.get(rel);
++    if (known && mdFiles.get(known)!.sig === sig) { owner.set(known, rel); continue; }
++    if (mdBad.get(rel) === sig) continue;
++    let raw: string;
++    try { raw = readFileSync(abs, 'utf8'); } catch { continue; }   // held by another program: the next scan reads it
++    const p = parseMemoryFile(raw, new Date(statSync(abs).mtimeMs).toISOString(), kindOfName(basename(dirname(rel))));
++    if (!p.ok) { mdBad.set(rel, sig); mdLog(`${rel} is not a memory file - left as it is`, p.why); continue; }
++    mdBad.delete(rel);
++    changed.push({ rel, sig, p });
++  }
++  for (const rel of [...mdBad.keys()]) if (!seen.has(rel)) mdBad.delete(rel);
++  const holds = (c: { rel: string; p: Extract<Parsed, { ok: true }> }): number => (mdFiles.get(c.p.item.id)?.rel === c.rel ? 0 : 1);
++  changed.sort((a, b) => holds(a) - holds(b) || a.rel.localeCompare(b.rel));   // the file an entry sat in first: a copy of it is the new one
++  const now = new Date().toISOString();
++  let rewrite = false;
++  for (const { rel, sig, p } of changed) {
++    let m = p.item, force = false;
++    if (!m.id || (owner.has(m.id) && owner.get(m.id) !== rel)) {
++      // a file added by hand (no id), or a copy of one: a new entry
++      const from = m.id;
++      const top = rel.split(sep)[0], home = rel.includes(sep) ? [...projectFolder].find(([, v]) => v.toLowerCase() === top.toLowerCase())?.[0] : undefined;
++      m = { ...m, id: `mem-${nanoid(8)}`, ...(home && !m.projectId ? { projectId: home } : {}), history: [...(m.history ?? []), { at: now, by: 'user', action: 'written', note: from ? `copied from ${from}` : 'added as a file' }] };
++      force = true;
++    } else {
++      const old = items.get(m.id);
++      if (old && old.text !== m.text && (m.history?.length ?? 0) <= (old.history?.length ?? 0)) {   // new words by hand: the earlier ones go to the history
++        m = { ...m, updatedAt: now, history: [...(m.history ?? old.history ?? []), { at: now, by: 'user', action: 'edited', text: old.text, note: 'edited in the file' }] };
++        force = true;
++      }
++    }
++    owner.set(m.id, rel);
++    if (m.projectId && p.projectName) projectNames.set(m.projectId, p.projectName);
++    if (m.projectId && rel.includes(sep) && !projectFolder.has(m.projectId)) projectFolder.set(m.projectId, rel.split(sep)[0]);
++    items.set(m.id, m);
++    mdFiles.set(m.id, { rel, sig, want: dirFor(m), hash: force ? '' : sha(renderMemoryFile(m, m.projectId ? projectNames.get(m.projectId) : undefined)) });
++    rewrite ||= force;
++  }
++  for (const [id, f] of [...mdFiles]) {
++    if (seen.has(f.rel)) continue;
++    mdFiles.delete(id); items.delete(id);   // the file was deleted by hand: the memory goes with it
++    process.stderr.write(`[memoryStore] ${f.rel} was deleted - ${id} is gone from memory too\n`);
++  }
++  if (rewrite) persist();
++}
++
++function mdUnique(root: string, dir: string, base: string): string {
++  let taken = new Set<string>();
++  try { taken = new Set(readdirSync(join(root, dir)).map((n) => n.toLowerCase())); } catch { /* a new folder */ }
++  let name = `${base}.md`;
++  for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${base} (${i}).md`;
++  return join(dir, name);
++}
++function mdPrune(root: string, dir: string): void {
++  for (let d = dir; d && d !== '.'; d = dirname(d)) { try { rmdirSync(join(root, d)); } catch { return; } }   // only while empty
++}
++
++/** Write one entry's file if it changed (a new file, an edit, or a move to the folder its kind, state or project now means).
++ *  Throws when the write did not land. */
++function mdSave(root: string, m: MemoryItem): void {
++  const rec = mdFiles.get(m.id);
++  const body = renderMemoryFile(m, m.projectId ? projectNames.get(m.projectId) : undefined), hash = sha(body), want = dirFor(m);
++  if (rec && rec.hash === hash && rec.want === want) return;
++  let rel = rec?.rel ?? '';
++  // a file changed by hand since the last scan is kept beside itself before it is written over
++  const keepEdited = (abs: string): void => {
++    if (!rec || !existsSync(abs) || sigOf(abs) === rec.sig) return;
++    const copy = `${abs}.edited-${new Date().toISOString().replace(/[:.]/g, '-')}`;
++    copyFileSync(abs, copy);
++    process.stderr.write(`[memoryStore] ${rel} was edited while the app saved it - your version is kept as ${copy}\n`);
++  };
++  if (rec && rec.want !== want) {
++    const to = mdUnique(root, want, basename(rec.rel, extname(rec.rel)));
++    mkdirSync(join(root, dirname(to)), { recursive: true });
++    if (existsSync(join(root, rec.rel))) { keepEdited(join(root, rec.rel)); renameSync(join(root, rec.rel), join(root, to)); }
++    mdPrune(root, dirname(rec.rel));
++    mdFiles.set(m.id, { ...rec, rel: to, want });
++    rel = to;
++  } else if (!rec) rel = mdUnique(root, want, titleOf(m.text));
++  const abs = join(root, rel);
++  mkdirSync(dirname(abs), { recursive: true });
++  keepEdited(abs);
++  if (!safeReplaceFile(abs, body, rel)) throw new Error(`${rel} could not be written`);
++  mdFiles.set(m.id, { rel, hash, sig: sigOf(abs), want });
++}
++/** Every entry whose file is out of date. False when one did not land (it stays unsaved; the next save retries). */
++function mdSaveAll(): boolean {
++  const root = mdDir()!;
++  if (!existsSync(root)) for (const f of mdFiles.values()) f.hash = '';   // the folder was removed: every entry is written again from memory
++  mkdirSync(root, { recursive: true });
++  let ok = true;
++  for (const m of items.values()) {
++    try { mdSave(root, m); }
++    catch (e) { ok = false; if (!mdFaultTold) { mdFaultTold = true; mdLog(`save ${m.id}`, e, 'memory_save_failed'); } }
++  }
++  if (ok) mdFaultTold = false;
++  return ok;
++}
++function flushMd(): void {
++  timer = null;
++  if (mdRoot && mdDir() !== mdRoot) return;
++  if (!loaded) { loadSync(); if (!loaded) { savePending = true; return; } }
++  if (!mdSaveAll() && !exiting) { timer = setTimeout(flush, 2_000); timer.unref?.(); }   // at exit a failed save is not retried: a retry would keep the process from ending
++}
++/** Pending saves first (a scan must not meet an entry the files do not hold yet), then the folder is read again. */
++function refreshMd(): void {
++  if (mdRoot && mdDir() !== mdRoot) return;
++  if (!existsSync(mdRoot)) { try { mdScan(); } catch { /* nothing to read */ } return; }   // a folder that is gone: the next save writes it again
++  try { if (timer) { clearTimeout(timer); flushMd(); } mdScan(); if (!mdWatch && existsSync(mdRoot)) startMdWatch(mdRoot); }
++  catch (e) { mdLog('re-read the memory folder', e); }
++}
++/** Hand edits, soon: the folder is watched; the scan on access (at most once a second) catches what a watcher misses. */
++function startMdWatch(root: string): void {
++  if (mdWatch && mdWatchDir === root) return;
++  try { mdWatch?.close(); } catch { /* already closed */ }
++  let t: NodeJS.Timeout | null = null;
++  try {
++    const w = watch(root, { recursive: true }, () => { if (t) return; t = setTimeout(() => { t = null; if (mdDir() === root) refreshMd(); }, 250); t.unref?.(); });
++    // the folder itself removed ends the watch; it is set again when the folder is back (refreshMd)
++    w.on('error', () => { try { w.close(); } catch { /* already closed */ } if (mdWatch === w) mdWatch = null; });
++    w.unref?.();
++    mdWatch = w; mdWatchDir = root;
++  } catch (e) { process.stderr.write(`[memoryStore] the memory folder is not watched (${String(e)}) - it is re-read when the memory is used\n`); }
++}
++/** The first time a folder is used: memory.json is imported once, then set aside (as .imported, like any older format). */
++function mdImportJson(): void {
++  const file = STORE_FILE();
++  if (mdFiles.size || mdBad.size || !existsSync(file)) return;
++  let parsed: ReturnType<typeof parseStoreFile>;
++  try { parsed = parseStoreFile(readFileSync(file, 'utf8')); } catch (e) { mdLog('read memory.json to import it', e); return; }
++  if (!parsed.ok) { mdLog('import memory.json', `it is ${parsed.why} - left as it is`); return; }
++  for (const m of parsed.items) if (!items.has(m.id)) items.set(m.id, m);
++  if (!mdSaveAll()) return;   // every entry reaches its file before the JSON is set aside
++  try {
++    renameSync(file, file + '.imported');
++    process.stderr.write(`[memoryStore] ${parsed.items.length} memories moved from memory.json to Markdown files; ${file}.imported kept as the backup\n`);
++  } catch (e) { mdLog('set the old memory.json aside after the import', e, 'memory_save_failed'); }
++}
++function loadMd(): void {
++  const root = mdDir()!;
++  if (!loaded) {
++    if (Date.now() < ioRetryAt) return;
++    try { mkdirSync(root, { recursive: true }); mdScan(); mdImportJson(); }
++    catch (e) { const first = ioDelayMs === 0; scheduleIoRetry(); if (first) mdLog('read the memory folder (not loaded, nothing saved over it; tried again in the background)', e); return; }
++    ioDelayMs = 0; ioRetryAt = 0; loaded = true; mdRoot = root;
++    startMdWatch(root);
++    if (savePending) { savePending = false; persist(); }
++    return;
++  }
++  if (Date.now() - mdScanAt >= MD_RESCAN_MS) refreshMd();
++}
++/** Read the folder now (hand edits at once): for a caller that must see the files as they are. */
++export function syncMemoryFiles(): void { if (mdDir()) { loadSync(); if (loaded) refreshMd(); } }
++
++
+ // ── Postgres backing (WHIQ_STATE_STORE=db) ────────────────────────────────────
+ // Only load and save change; every exported function keeps its signature and its synchronous shape.
+ const backing = createDocBacking<{ id: string; orgId?: string }>({
+@@ -153,6 +391,7 @@ const backing = createDocBacking<{ id: string; orgId?: string }>({
+ export function memoryStoreUnavailable(): string | null { return backing.unavailable(); }
+ 
+ function flush(): void {
++  if (mdDir()) { flushMd(); return; }
+   if (docStoreEnabled()) { void Promise.resolve(backing.flush()).catch((e) => supportingFault('memory store', 'save the memories to the database', e, { code: 'memory_save_failed' })); return; }
+   // Never a save over a file this run has not read (review M5/M6): unloaded (its read failed) or read-only (it could not be
+   // set aside). The memories of this run stay in memory; a later load that reads the file merges them in and saves.
+@@ -188,6 +427,7 @@ async function mirror(): Promise<void> {
+ }
+ 
+ export async function initMemoryStore(): Promise<void> {
++  if (mdDir()) { loadSync(); return; }
+   if (docStoreEnabled()) { await backing.init(); loaded = true; return; }
+   loadSync();
+   await hydrateFromObjectStorage();
+@@ -222,7 +462,8 @@ async function hydrateFromObjectStorage(): Promise<void> {
+   } catch (e) { process.stderr.write(`[memoryStore] hydrate failed: ${String(e)}\n`); supportingFault('memory store', 'restore memory.json from object storage', e); }
+ }
+ 
+-function flushOnExit(): void { if (timer) clearTimeout(timer); try { flush(); } catch { /* best effort */ } }
++let exiting = false;
++function flushOnExit(): void { exiting = true; if (timer) clearTimeout(timer); try { flush(); } catch { /* best effort */ } }
+ process.on('beforeExit', flushOnExit);
+ process.on('SIGINT', flushOnExit);
+ process.on('SIGTERM', flushOnExit);
+@@ -427,6 +668,11 @@ export function recallMemory(orgId: string | undefined, query: string, n = 8, us
+   return scored.filter(s => s.score > 0 || (more.tags?.length && !terms.length)).slice(0, n).map(s => s.m);
+ }
+ 
++/** The project a chat's Memory is scoped to: a Database project, or a local chat's own (ChatSession.localProjectId). */
++export const memoryProjectOf = (s: { projectId?: string; localProjectId?: string }): string | undefined => s.projectId ?? s.localProjectId;
++/** The desktop app (WHIQ_LOCAL_MODE): its chats may carry a project of their own, with no Database to check it against. */
++export const localProjectsOn = (): boolean => process.env.WHIQ_LOCAL_MODE === '1' && process.env.COWORK_BEHIND_GATEWAY !== '1';
++
+ /** Item 2.9: the project's introduction — one current per project, any agent, any user of the org. */
+ export function projectIntro(orgId: string | undefined, projectId: string | undefined): MemoryItem | undefined {
+   if (!projectId) return undefined;
