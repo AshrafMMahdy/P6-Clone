@@ -21,7 +21,7 @@ const NOTE = {
 type Backend = { url: string; close(): void | Promise<void> };
 
 export class CodeSandbox {
-  private o: { wslSource: string; pyodideDir: string; log: (l: string) => void };
+  private o: { wslSource: string; pyodideDir: string; snapshotDir?: string; log: (l: string) => void };
   private state: SandboxState = { kind: 'none' };
   private door: Server | null = null;
   private backend: Promise<Backend> | null = null;
@@ -29,7 +29,7 @@ export class CodeSandbox {
   private picking: Promise<SandboxState> | null = null;
   /** bumped by close(): a pick or a start under way when the sandbox was closed ends there, and stops what it started */
   private gen = 0;
-  constructor(o: { wslSource: string; pyodideDir: string; log?: (l: string) => void }) { this.o = { log: () => {}, ...o }; }
+  constructor(o: { wslSource: string; pyodideDir: string; snapshotDir?: string; log?: (l: string) => void }) { this.o = { log: () => {}, ...o }; }
 
   get status(): SandboxState { return this.state; }
 
@@ -79,7 +79,7 @@ export class CodeSandbox {
         this.o.log(`[sandbox] WSL refused at first use, Pyodide takes over: ${r.reason}`);
         this.state = { ...this.state, kind: 'pyodide', note: NOTE.pyodide, wsl: r.reason, wslSetup: !!r.setup };
       }
-      const p = await startPyodideSandbox({ dir: this.o.pyodideDir });
+      const p = await startPyodideSandbox({ dir: this.o.pyodideDir, ...(this.o.snapshotDir ? { snapshotDir: this.o.snapshotDir } : {}) });
       await kept(p);
       this.closeBackend = () => p.close();
       if (!p.selftest.ok) this.o.log(`[sandbox] Pyodide failed its self-test: ${p.selftest.checks.filter((c) => !c.ok).map((c) => `${c.name} (${c.detail ?? ''})`).join('; ')}`);

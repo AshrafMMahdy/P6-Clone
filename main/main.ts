@@ -12,10 +12,11 @@ import { registerBim, BIM_SCHEME } from './bim.ts';
 import { registerSandboxScheme } from './sandbox/pyodideService.ts';
 import { registerLob } from './lob.ts';
 import { registerWhiq } from './whiq-ipc.ts';
+import { dataDir, dataFile, dataNote, dataRoot, moveLegacyData } from './dataPaths.ts';
 
 registerSandboxScheme([BIM_SCHEME]); // before ready, in one call: the code sandbox's scheme and the 4D viewer's p6c4d://
 
-const DB_FILE = () => join(app.getPath('userData'), 'p6clone-db.json');
+const DB_FILE = () => dataFile('Database', 'p6clone-db.json');
 let win: BrowserWindow | null = null;
 
 // Optional automation: --import <file> opens the import wizard on that file; --user-data <dir> isolates the database.
@@ -23,6 +24,9 @@ const argv = process.argv;
 const argVal = (name: string) => { const i = argv.indexOf(name); return i > 0 ? argv[i + 1] : undefined; };
 const userData = argVal('--user-data');
 if (userData) app.setPath('userData', userData);
+// the app's data beside the program (main/dataPaths.ts); the first start of that layout moves the AppData layout's data there
+for (const m of moveLegacyData()) console.log(`[data] moved ${m} into ${dataRoot()}`);
+if (dataNote) console.log(`[data] ${dataNote}`);
 // Large programmes (100 MB XERs, 100k+ activities) are held in the window's memory: allow it more than V8's default.
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=12288');
 // Background mode: started by a test or another program (a remote-debugging port, which Playwright always passes and a
@@ -165,7 +169,7 @@ ipcMain.handle('print:preview', async (_e, landscape: boolean) => {
 
 // AI assistant: settings (key encrypted, never sent to the window) and chat calls
 let aiStore: AiStore | null = null;
-const ai = () => (aiStore ??= new AiStore(join(app.getPath('userData'), 'ai-assistant.json'), {
+const ai = () => (aiStore ??= new AiStore(dataFile('Settings', 'ai-assistant.json'), {
   available: () => safeStorage.isEncryptionAvailable(),
   encrypt: (s) => safeStorage.encryptString(s).toString('base64'),
   decrypt: (s) => safeStorage.decryptString(Buffer.from(s, 'base64')),
@@ -197,7 +201,7 @@ ipcMain.handle('ai:chat', async (_e, id: string, req: ChatRequest) => {
   finally { aiCalls.delete(id); }
 });
 ipcMain.handle('ai:cancel', (_e, id: string) => { aiCalls.get(id)?.abort(); return true; });
-const chatDir = () => join(app.getPath('userData'), 'ai-chats');
+const chatDir = () => dataDir('Agent', 'panel-chats');
 ipcMain.handle('ai:chatLoad', (_e, key: string) => loadChat(chatDir(), key));
 ipcMain.handle('ai:chatAppend', (_e, key: string, entries: unknown[]) => appendChat(chatDir(), key, entries));
 ipcMain.handle('ai:chatClear', (_e, key: string) => clearChat(chatDir(), key));
@@ -249,5 +253,5 @@ ipcMain.handle('confirm',async (_e, message: string, detail?: string) => {
   return r.response === 0;
 });
 
-app.whenReady().then(() => { initModelsDev(join(app.getPath('userData'), 'models-dev.json')); registerBim(() => win); registerLob(() => win); createWindow(); });
+app.whenReady().then(() => { initModelsDev(dataFile('Cache', 'models-dev.json')); registerBim(() => win); registerLob(() => win); createWindow(); });
 app.on('window-all-closed', () => app.quit());

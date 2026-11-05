@@ -14,7 +14,8 @@ const owner = join(process.env.APPDATA ?? '', 'p6-clone');
 if (!existsSync(join(owner, 'ai-assistant.json'))) { console.log('SKIP no AI settings in ' + owner); process.exit(0); }
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6whiq-real-'));
-const folder = mkdtempSync(join(tmpdir(), 'p6whiq-real-wd-'));
+// the project's own folder in the data folder (Data/Projects/<Project ID>): the default working folder, no prompt
+const folder = join(profile, 'Data', 'Projects', 'CFC Modified');
 for (const f of ['ai-assistant.json', 'Local State']) if (existsSync(join(owner, f))) copyFileSync(join(owner, f), join(profile, f));
 const exe = process.argv.includes('--exe') ? process.argv[process.argv.indexOf('--exe') + 1] : '';
 const app = await electron.launch({ ...(exe ? { executablePath: exe } : {}), args: [...(exe ? [] : [root]), '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root, chromiumSandbox: true });
@@ -57,4 +58,4 @@ ok(!errors.length, 'no page errors ' + errors.join(' | '));
 await app.close();
 const logs = join(profile, 'whiq', 'logs');
 if (process.exitCode && existsSync(logs)) console.log('logs kept in ' + logs);
-else { rmSync(profile, { recursive: true, force: true }); rmSync(folder, { recursive: true, force: true }); }
+else { rmSync(profile, { recursive: true, force: true }); }

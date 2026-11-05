@@ -1,7 +1,7 @@
 // Package the app as a normal Windows program folder (no installer, no extra tools):
 // release/P6 Clone/P6 Clone.exe plus a shortcut with the app icon. Uses Electron's own prebuilt runtime.
 // Usage: node scripts/package.mjs
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 execFileSync(process.execPath, [join(root, 'scripts/build.mjs')], { stdio: 'inherit' });
 
 const out = join(root, 'release', 'P6 Clone');
-rmSync(out, { recursive: true, force: true });
+// a fresh program folder, but its Data folder (the user's projects, settings and the agent's files, main/dataPaths.ts) stays
+if (existsSync(out)) for (const f of readdirSync(out)) if (f !== 'Data') rmSync(join(out, f), { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 cpSync(join(root, 'node_modules/electron/dist'), out, { recursive: true });
 renameSync(join(out, 'electron.exe'), join(out, 'P6 Clone.exe'));

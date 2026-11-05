@@ -12,8 +12,9 @@ import { inPage, whileEncoding } from '../core/bim/headless.ts';
 import { plainElement } from '../core/bim/element.ts';
 import type { Imported4d } from '../core/bim/exchange4d.ts';
 import { readImport4d } from '../core/bim/read4d.ts';
+import { dataDir } from './dataPaths.ts';
 
-const root = () => join(app.getPath('userData'), '4d');
+const root = () => dataDir('4D');
 const EMPTY = { project: '', name: '', dataDate: null, start: null, finish: null, sources: [{ name: 'best', label: 'best' }], activities: [], elements: { count: 0, linked: 0, groups: [], of: '' }, status: [] };
 
 /** Registered before app ready (main.ts, in Electron's one call for privileged schemes): standard and allowed to fetch,

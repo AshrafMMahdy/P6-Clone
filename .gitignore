@@ -19,3 +19,6 @@ vendor/whiq-agent/
 
 # the sandbox's Python (scripts/fetch-pyodide.mjs): Pyodide and its packages, pinned in pyodide.lock.json
 vendor/pyodide/
+
+# the app's data in a development run (main/dataPaths.ts: projects, settings, the agent's files)
+/Data/

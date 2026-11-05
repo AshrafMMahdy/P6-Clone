@@ -28,7 +28,8 @@ const fake = await fakeModel((r) => {
 
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6whiqt-'));
-const folder = mkdtempSync(join(tmpdir(), 'p6whiqt-wd-'));
+// the project's own folder in the data folder (Data/Projects/<Project ID>): the default working folder, no prompt
+const folder = join(profile, 'Data', 'Projects', 'CFC Modified');
 // --exe <P6 Clone.exe>: the packaged program (its resources: agent, engines, models, Pyodide) instead of this checkout
 const exe = process.argv.includes('--exe') ? process.argv[process.argv.indexOf('--exe') + 1] : '';
 const app = await electron.launch({ ...(exe ? { executablePath: exe } : {}), args: [...(exe ? [] : [root]), '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root, chromiumSandbox: true, env: { ...process.env, P6CLONE_SANDBOX: kind } as Record<string, string> });
@@ -63,4 +64,4 @@ if (process.exitCode) for (const f of ['agent.log', 'pqvae.log', 'sandbox.log'])
   const p = join(profile, 'whiq', 'logs', f);
   if (existsSync(p)) console.log(`--- ${f} (last lines about engines)\n` + readFileSync(p, 'utf8').split(/\r?\n/).filter((l) => /p6clone|engine|error|fail/i.test(l)).slice(-25).join('\n'));
 }
-rmSync(profile, { recursive: true, force: true }); rmSync(folder, { recursive: true, force: true });
+rmSync(profile, { recursive: true, force: true });

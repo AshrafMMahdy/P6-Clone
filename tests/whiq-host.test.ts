@@ -18,7 +18,7 @@ const installed = existsSync(join(vendor, '03 Shared Platform Agents', 'app', 's
 test('the platform agent runs embedded: chat, message, streamed answer, no key on disk, clean stop', { skip: !installed && 'platform agent not installed', timeout: 180_000 }, async () => {
   const data = mkdtempSync(join(tmpdir(), 'whiq-host-'));
   let ports = { router: 0, agent: 0 };
-  const host = new WhiqHost({ vendor, data }, () => ({
+  const host = new WhiqHost({ vendor, data, logs: join(data, 'logs') }, () => ({
     providers: [{ name: 'main', type: 'anthropic', baseUrl: 'https://api.anthropic.com', key: 'sk-ant-not-a-real-key-123' }],
     tiers: [{ name: 'Strong', provider: 'main', model: 'claude-opus-5-5' }],
   }));
@@ -53,7 +53,7 @@ test('the servers answer the app only; a stop during a start ends it; a settings
   const get = (port: number, headers: Record<string, string>) => new Promise<number>((res, rej) => { const r = request({ host: '127.0.0.1', port, path: '/api/health', headers }, (x) => { x.resume(); res(x.statusCode ?? 0); }); r.on('error', rej); r.end(); });
   const data = mkdtempSync(join(tmpdir(), 'whiq-host-'));
   let model = 'claude-opus-5-5', slow = true;
-  const host = new WhiqHost({ vendor, data }, () => ({
+  const host = new WhiqHost({ vendor, data, logs: join(data, 'logs') }, () => ({
     providers: [{ name: 'main', type: 'anthropic', baseUrl: 'https://api.anthropic.com', key: 'sk-ant-not-a-real-key-123' }],
     tiers: [{ name: 'Strong', provider: 'main', model }],
   }), async () => [], async () => { if (slow) await new Promise((r) => setTimeout(r, 1500)); return {}; });

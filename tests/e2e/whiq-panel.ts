@@ -1,7 +1,7 @@
 // End-to-end: the AI panel on the embedded platform scheduler agent, with a scripted stand-in model (fake-model.ts)
 // so every step is real but the model's choices: the agent loads the app's live tools, reads the open schedule,
 // selects an activity on screen, writes a summary file and answers. The panel shows the steps and the answer, the
-// activity is selected in the app, and the file asks for a working folder (none chosen yet) and lands in it.
+// activity is selected in the app, and the file lands in the project's own folder (Data\Projects\<Project ID>), unasked.
 //   node tests/e2e/whiq-panel.ts [--exe <P6 Clone.exe>]   (needs vendor/whiq-agent installed and built)
 import { _electron as electron } from 'playwright';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -30,7 +30,8 @@ const fake = await fakeModel((r) => {
 
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6whiqp-'));
-const folder = mkdtempSync(join(tmpdir(), 'p6whiq-wd-'));
+// the project's own folder in the data folder (Data/Projects/<Project ID>): the default working folder, no prompt
+const folder = join(profile, 'Data', 'Projects', 'CFC Modified');
 const exe = process.argv.includes('--exe') ? process.argv[process.argv.indexOf('--exe') + 1] : '';   // the packaged program
 const app = await electron.launch({ ...(exe ? { executablePath: exe } : {}), args: [...(exe ? [] : [root]), '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
@@ -48,12 +49,13 @@ await win.waitForSelector('.ai-panel .ai-msg:has-text("Done: I read the open sch
 const panel = await win.locator('.ai-panel .ai-body').innerText();
 ok(/Done: I read the open schedule/.test(panel), 'the agent\'s answer is in the panel');
 ok(/On screen: list projects/.test(panel) && /On screen: select activity A2410/.test(panel), 'its steps on the open schedule show as lines');
+ok((panel.match(/On screen: list projects/g) ?? []).length === 1 && (panel.match(/load tools/g) ?? []).length === 2, 'each step shows once, not once per status change');
 ok(await win.locator('.grid-row.sel', { hasText: 'A2410' }).count() >= 1 || /A2410/.test(await win.locator('.grid-row.sel').first().innerText().catch(() => '')), 'A2410 is selected in the Activities window');
 await win.waitForSelector('.ai-panel .ai-msg:has-text("File: summary.md")', { timeout: 30000 }).catch(() => {});
 ok(/File: summary\.md/.test(await win.locator('.ai-panel .ai-body').innerText()), 'the file shows as a chip');
 const saved = join(folder, 'AI Outputs', 'summary.md');
 ok(existsSync(saved) && /CFC/.test(readFileSync(saved, 'utf8')), `the file is in the working folder: ${saved}`);
-ok(/📁 p6whiq-wd-/.test(await win.locator('.ai-panel .ai-input').innerText()), 'the panel names the working folder');
+ok(/📁 CFC Modified/.test(await win.locator('.ai-panel .ai-input').innerText()), 'the panel names the working folder: the project folder');
 const docx = join(folder, 'AI Outputs', 'report.docx'), pdf = join(folder, 'AI Outputs', 'report.pdf');
 for (let i = 0; i < 30 && !(existsSync(docx) && existsSync(pdf)); i++) await win.waitForTimeout(500);
 ok(existsSync(docx) && readFileSync(docx).subarray(0, 2).toString() === 'PK', `the Word report made by the Word engine is in the working folder: ${docx}`);
@@ -63,4 +65,4 @@ ok(fake.headers.length > 0 && fake.headers.every((h) => h['x-test-gateway'] === 
 ok(!errors.length, 'no page errors ' + errors.join(' | '));
 await app.close();
 fake.close();
-rmSync(profile, { recursive: true, force: true }); rmSync(folder, { recursive: true, force: true });
+rmSync(profile, { recursive: true, force: true });

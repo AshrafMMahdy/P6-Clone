@@ -12,6 +12,7 @@ import { startLiveMcp } from './live-mcp.ts';
 import { CodeSandbox } from './sandbox/codeSandbox.ts';
 import { wslSetupCommand } from './sandbox/wslSandbox.ts';
 import { startPqvae, type Pqvae } from './pqvae/start.ts';
+import { dataDir } from './dataPaths.ts';
 import type { AgentModels } from './whiq-config.ts';
 import type { AiStore } from './ai.ts';
 
@@ -39,11 +40,12 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   // the open schedule's MCP server: started with the agent's first start, kept for the app's life
   let live: Promise<{ url: string; token: string; close: () => void }> | null = null;
   const liveMcp = async () => { live ??= startLiveMcp(getWin); const l = await live; return [{ id: 'p6clone_live', label: 'P6 Clone: the open schedule, on screen', url: l.url, token: l.token }]; };
-  const data = join(app.getPath('userData'), 'whiq');
+  // its files in the data folder beside the program (dataPaths.ts): Agent, Logs, Cache
+  const data = dataDir('Agent'), logs = dataDir('Logs');
   // the code sandbox: picked at the agent's first start (WSL when its jail holds there, else Pyodide), kept while the app runs
-  const sandboxLog = (l: string) => { try { mkdirSync(join(data, 'logs'), { recursive: true }); appendFileSync(join(data, 'logs', 'sandbox.log'), `${l}${EOL}`); } catch { /* best effort */ } };
+  const sandboxLog = (l: string) => { try { appendFileSync(join(logs, 'sandbox.log'), `${l}${EOL}`); } catch { /* best effort */ } };
   const sandbox = new CodeSandbox({
-    wslSource: join(vendor, '09 Local Sandbox'),
+    wslSource: join(vendor, '09 Local Sandbox'), snapshotDir: dataDir('Cache', 'sandbox-snapshots'),
     pyodideDir: app.isPackaged ? join(process.resourcesPath, 'pyodide') : join(app.getAppPath(), 'vendor', 'pyodide'),
     log: sandboxLog,
   });
@@ -55,7 +57,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     const next = engineQueue.then(async (): Promise<Record<string, string>> => {
       pqvae?.stop(); pqvae = null;
       try {
-        pqvae = await startPqvae({ entry: join(app.getAppPath(), 'dist', 'pqvae-sidecar.mjs'), models: join(vendor, 'pqvae-onnx'), routerUrl, log: join(data, 'logs', 'pqvae.log'), cache: join(data, 'pqvae-text-cache') });
+        pqvae = await startPqvae({ entry: join(app.getAppPath(), 'dist', 'pqvae-sidecar.mjs'), models: join(vendor, 'pqvae-onnx'), routerUrl, log: join(logs, 'pqvae.log'), cache: dataDir('Cache', 'pqvae-text') });
         return { PQVAE_PORT: String(pqvae.port) };
       } catch (e) { sandboxLog(`[pqvae] not started: ${(e as Error).message}`); return {}; }   // its tools then say it is unavailable
     });
@@ -63,7 +65,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     return next;
   };
   const services = async (routerUrl: string) => { const [, pq] = await Promise.all([sandbox.ensure(), startEngine(routerUrl)]); return { ...sandbox.env(), ...pq }; };
-  const host = new WhiqHost({ vendor, data }, () => modelsFrom(ai()), liveMcp, services);
+  const host = new WhiqHost({ vendor, data, logs }, () => modelsFrom(ai()), liveMcp, services);
   const watching = new Map<string, () => void>();
   const send = (chatId: string, e: AgentEvent) => getWin()?.webContents.send('whiq:event', chatId, e);
   host.onDown = (why) => {
@@ -84,19 +86,30 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   const isFileOfAgent = (p: string) => { const f = resolve(String(p)).toLowerCase(); return [...folders.values()].some((w) => f.startsWith(resolve(w).toLowerCase() + sep)); };
   /** the chat that sent the last message: the one the agent's on-screen tools are working for */
   let lastChat = '';
+  /** the project each chat works on (the panel says, at its start and when it watches), for its default working folder */
+  const projectOf = new Map<string, string>();
+  const setFolder = async (chatId: string, path: string) => {
+    await host.api('POST', '/api/working-dir/set', { chatId, path });
+    folders.set(chatId, path);
+    send(chatId, { type: 'folder', path });
+  };
+  /** The chat's working folder: the one chosen for it, else its project's folder in the data folder (Data\Projects\<project>,
+   *  set on the chat the first time it is needed), else none (a chat with no project: asked for when a file needs one). */
   const folderOf = async (chatId: string): Promise<string> => {
     if (folders.has(chatId)) return folders.get(chatId)!;
     const c = await host.api('GET', `/api/chats/${encodeURIComponent(chatId)}`) as { workingDir?: string };
-    if (c.workingDir) folders.set(chatId, c.workingDir);
-    return c.workingDir ?? '';
+    if (c.workingDir) { folders.set(chatId, c.workingDir); return c.workingDir; }
+    const project = projectOf.get(chatId);
+    if (!project) return '';
+    const dir = dataDir('Projects', safeName(project, 'Project'));
+    await setFolder(chatId, dir);
+    return dir;
   };
   const askFolder = async (chatId: string, why: string): Promise<string> => {
     const win = getWin();
     const r = win ? await dialog.showOpenDialog(win, { title: `Working folder for the AI agent: ${why}`, properties: ['openDirectory', 'createDirectory'] }) : null;
     if (!r || r.canceled || !r.filePaths[0]) return '';
-    await host.api('POST', '/api/working-dir/set', { chatId, path: r.filePaths[0] });
-    folders.set(chatId, r.filePaths[0]);
-    send(chatId, { type: 'folder', path: r.filePaths[0] });
+    await setFolder(chatId, r.filePaths[0]);
     return r.filePaths[0];
   };
   // the agent's files (its own store, as on the platform) copied into "AI Outputs" of the working folder, new or
@@ -114,7 +127,8 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
       // the agent's own relative path, kept inside the folder (no "..", no drive or root)
       const parts = f.path.split(/[\\/]/).filter((x) => x && x !== '.' && x !== '..' && !/^[a-z]:$/i.test(x));
       if (!parts.length) continue;
-      const to = join(wd, 'AI Outputs', ...parts);
+      // the agent's working notes (pads/: plans, findings) go to Notes, everything else it made to AI Outputs
+      const to = parts[0] === 'pads' ? join(wd, 'Notes', ...parts.slice(1)) : join(wd, 'AI Outputs', ...parts);
       mkdirSync(join(to, '..'), { recursive: true });
       writeFileSync(to, await host.raw(`/api/files/raw/${f.path.split('/').map(encodeURIComponent).join('/')}?chatId=${encodeURIComponent(chatId)}&dl=1`));
       copied.set(`${chatId}|${f.path}`, `${f.mtime}|${f.sizeBytes}`);
@@ -129,13 +143,20 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   // the panel opened: start the agent now, so its engines have listed their tools by the first message
   handle('whiq:warm', async () => { void host.start().catch(() => { /* reported on use */ }); return true; });
   handle('whiq:status', async () => ({ ...host.status, missing: process.env.P6CLONE_WHIQ === 'off' ? 'Turned off (P6CLONE_WHIQ=off).' : host.available() }));
-  handle('whiq:createChat', (title?: string) => host.api('POST', '/api/chats', { title: title || 'Scheduler', module: 'scheduler' }));
-  handle('whiq:chat', (chatId: string) => host.api('GET', `/api/chats/${encodeURIComponent(chatId)}`));
-  handle('whiq:send', async (chatId: string, content: string) => { lastChat = chatId; await watch(chatId); return host.api('POST', '/api/agent/send', { chatId, content }); });
+  handle('whiq:createChat', async (title?: string, project?: string) => {
+    const c = await host.api('POST', '/api/chats', { title: title || 'Scheduler', module: 'scheduler' }) as { id: string };
+    if (project) projectOf.set(c.id, project);
+    return c;
+  });
+  // `ifRunning`: a refresh of what the panel shows must not start an agent that was just stopped (a settings change)
+  handle('whiq:chat', async (chatId: string, ifRunning?: boolean) => ifRunning && host.status.state !== 'ready' ? null : host.api('GET', `/api/chats/${encodeURIComponent(chatId)}`));
+  handle('whiq:send', async (chatId: string, content: string) => { lastChat = chatId; await watch(chatId); return host.api('POST', '/api/agent/send', { chatId, content, suggestReplies: true }); });
   handle('whiq:askReply', (chatId: string, toolCallId: string, reply: unknown) => host.api('POST', '/api/agent/ask-reply', { chatId, toolCallId, reply }));
   handle('whiq:approval', (toolCallId: string, kind: 'approve' | 'skip', note?: string) => host.api('POST', '/api/agent/approval', { toolCallId, kind, note }));
   handle('whiq:abort', (chatId: string) => host.api('POST', '/api/agent/abort', { chatId }));
   handle('whiq:resume', (chatId: string) => host.api('POST', '/api/agent/resume', { chatId }));
+  handle('whiq:children', async (chatId: string) => host.status.state !== 'ready' ? [] : host.api('GET', `/api/chats/${encodeURIComponent(chatId)}/children`));
+  handle('whiq:handoff', (chatId: string, handoffId: string, decision: 'here' | 'not_now') => host.api('POST', '/api/agent/handoff', { chatId, handoffId, decision }));
   handle('whiq:mcpStatus', () => host.api('GET', '/api/mcp/servers'));
   handle('whiq:files', (chatId: string) => host.api('GET', `/api/files?chatId=${encodeURIComponent(chatId)}`));
   /** The user picks the chat's working folder (where its files go and what it may read). Null when cancelled. */
@@ -172,7 +193,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     const err = await shell.openPath(p); if (err) throw new Error(err); return true;
   });
   handle('whiq:showInFolder', async (p: string) => { if (!isFileOfAgent(p)) throw new Error('Only files in the agent\'s working folders are shown from the panel.'); shell.showItemInFolder(p); return true; });
-  handle('whiq:watch', async (chatId: string) => { await watch(chatId); return true; });
+  handle('whiq:watch', async (chatId: string, project?: string) => { if (project) projectOf.set(chatId, project); await watch(chatId); return true; });
   handle('whiq:unwatch', async (chatId: string) => { watching.get(chatId)?.(); watching.delete(chatId); return true; });
 
   // the code sandbox for Settings: which one runs the agent's code, and setting up the WSL one (in a console the user sees:

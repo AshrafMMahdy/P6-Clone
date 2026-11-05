@@ -12,7 +12,8 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { routerConfig, type AgentModels } from './whiq-config.ts';
 
-export interface HostPaths { vendor: string; data: string }
+/** vendor: the fetched agent; data: its own files (runtime, storage, its router's config); logs: its servers' logs */
+export interface HostPaths { vendor: string; data: string; logs: string }
 /** An MCP server the agent is to connect to (the open schedule, on screen): written into its mcp-servers.json at each start. */
 export interface ExtraMcp { id: string; label: string; url: string; token: string }
 export type AgentEvent = Record<string, unknown> & { type: string };
@@ -93,7 +94,7 @@ export class WhiqHost {
     const models = this.models();
     const { config, env: keys, agentEnv } = routerConfig(models);
     this.bootModels = JSON.stringify(models);
-    mkdirSync(join(this.paths.data, 'logs'), { recursive: true });
+    mkdirSync(this.paths.logs, { recursive: true });
     const cfgFile = join(this.paths.data, 'llm-router.json');
     writeFileSync(cfgFile, JSON.stringify(config, null, 2));
     const guard = join(this.paths.data, 'child-guard.cjs');
@@ -125,7 +126,7 @@ export class WhiqHost {
   }
 
   private child(name: string, cwd: string, args: string[], env: NodeJS.ProcessEnv): ChildProcess {
-    const log = createWriteStream(join(this.paths.data, 'logs', `${name}.log`), { flags: 'a' });
+    const log = createWriteStream(join(this.paths.logs, `${name}.log`), { flags: 'a' });
     // stdin: a pipe the guard watches; it closes when this process ends, however it ends
     const p = spawn(process.execPath, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     p.stdout?.pipe(log); p.stderr?.pipe(log);
@@ -133,7 +134,7 @@ export class WhiqHost {
       log.end();
       if (p !== this.router && p !== this.chat) return;   // a server of an earlier start, or one stop() ended
       // a server that died takes the agent down with it: the next request starts both again
-      this.status = { state: 'failed', error: `The platform agent's ${name} stopped (exit ${code}); see ${join(this.paths.data, 'logs', `${name}.log`)}.` };
+      this.status = { state: 'failed', error: `The platform agent's ${name} stopped (exit ${code}); see ${join(this.paths.logs, `${name}.log`)}.` };
       this.starting = null;
       this.gen++;
       this.kill();
@@ -149,7 +150,7 @@ export class WhiqHost {
       try { if ((await fetch(url, { signal: AbortSignal.timeout(2000) })).ok) return; } catch { /* not up yet */ }
       await sleep(500);
     }
-    throw new Error(`The platform agent's ${what} did not start within a minute; see ${join(this.paths.data, 'logs')}.`);
+    throw new Error(`The platform agent's ${what} did not start within a minute; see ${this.paths.logs}.`);
   }
 
   private kill(): void {
