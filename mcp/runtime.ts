@@ -609,7 +609,10 @@ export function startJob(tool: string, handle: string | undefined, p: Promise<un
   const job: Job = { id: token('job_', 12), tool, handle, started: Date.now(), abort };
   // progress is set as the work goes (often inside a long synchronous step): each change is passed on at once
   let progress: string | undefined;
-  Object.defineProperty(job, 'progress', { enumerable: true, get: () => progress, set: (v: string | undefined) => { const changed = v !== progress; progress = v; jobHook?.(job.id, jobView(job)); if (changed) jobPulse?.(jobView(job)); } });
+  // a progress pulse at the rhythm the server already reports progress at (notifications/progress, 250 ms): Monte Carlo moves
+  // its text every iteration, and a pulse per iteration would flood the client; the end pulse is always sent
+  let lastPulse = 0;
+  Object.defineProperty(job, 'progress', { enumerable: true, get: () => progress, set: (v: string | undefined) => { const changed = v !== progress; progress = v; jobHook?.(job.id, jobView(job)); const now = Date.now(); if (changed && now - lastPulse >= 250) { lastPulse = now; jobPulse?.(jobView(job)); } } });
   jobs.set(job.id, job);
   jobHook?.(job.id, jobView(job));
   p.then((r) => { job.result = job.settle ? job.settle.ok(r) : r; }, (e) => { job.error = e; job.settle?.failed(); }).finally(() => {

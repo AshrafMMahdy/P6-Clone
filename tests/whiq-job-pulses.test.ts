@@ -33,6 +33,9 @@ test('a job sends progress pulses and one end pulse (notifications/job)', { time
     assert.equal(end[0].status, 'done');
     assert.equal(end[0].tool, 'monte_carlo');
     assert.equal(end[0].result, undefined, 'the end pulse carries no result (job_status has it)');
+    const running = notes.filter((n) => n.job_id === job.job_id && n.status === 'running');
+    const secs = (Date.now() - t0) / 1000;
+    assert.ok(running.length <= Math.ceil(secs * 4) + 2, `progress pulses follow the 250 ms rhythm, not one per iteration: ${running.length} in ${secs.toFixed(1)} s`);
     const done = await call('job_status', { job_id: job.job_id });
     assert.equal(done.status, 'done');
   } finally { p.kill(); }
