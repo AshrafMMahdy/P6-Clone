@@ -136,7 +136,7 @@ export class AiStore {
     if (!s.tiers.length) throw new Error('Set a provider and a model in AI Assistant Settings first.');
     const body = new Map(s.providers.map((p) => [p.id, parseExtraBody(p.extraBody, p.kind === 'anthropic' ? 'anthropic' : 'openai')]));
     return {
-      providers: s.providers.map((p) => ({ name: p.id, type: p.kind === 'anthropic' ? 'anthropic' as const : p.kind === 'gemini' ? 'gemini' as const : 'openai-compat' as const, baseUrl: p.baseUrl || KIND_BASE[p.kind], key: this.secret(p, p.key), headers: parseExtraHeaders(this.secret(p, p.headersEnc)) })),
+      providers: s.providers.map((p) => ({ name: p.id, type: p.kind === 'anthropic' ? 'anthropic' as const : p.kind === 'gemini' ? 'gemini' as const : 'openai-compat' as const, baseUrl: p.baseUrl || KIND_BASE[p.kind], key: this.secret(p, p.key), headers: p.kind === 'anthropic' ? anthropicHeaders(parseExtraHeaders(this.secret(p, p.headersEnc))) : parseExtraHeaders(this.secret(p, p.headersEnc)) })),
       tiers: s.tiers.map((t) => {
         const params = { ...body.get(t.provider), ...(t.params ? JSON.parse(t.params) as Record<string, unknown> : {}) };
         return { name: t.name, provider: t.provider, model: t.model, ...(Object.keys(params).length ? { params } : {}) };
@@ -205,6 +205,16 @@ export function outputLimitFromRefusal(text: string, asked: number): number | nu
 }
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 
+/** An Anthropic provider's extra headers: a key not scoped to a workspace needs "anthropic-workspace-id", and the obvious
+ *  spellings of it ("workspace", "Workspace-Id", ...) are taken as that header (the panel's loop and the agent's router alike). */
+export function anthropicHeaders(headers: Record<string, string>): Record<string, string> {
+  const out = { ...headers };
+  for (const n of Object.keys(out)) {
+    if (/^(anthropic)?workspace(id)?$/.test(n.toLowerCase().replace(/[^a-z]/g, '')) && n !== 'anthropic-workspace-id') { out['anthropic-workspace-id'] = out[n]; delete out[n]; }
+  }
+  return out;
+}
+
 /** Build the HTTP request for a provider, with the user's extra headers and parameters (pure, so it can be tested). */
 export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
   const r = baseRequest(cfg, key, req);
@@ -213,11 +223,7 @@ export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { ur
   // Settings saved before API version 2026-10-21 can still carry a sampling parameter, which that version refuses on every
   // request; the dialog shows why when it is opened (parseExtraBody with the provider).
   if (cfg.provider === 'anthropic') for (const k of ANTHROPIC_REMOVED_BODY) delete extra[k];
-  const headers = parseExtraHeaders(cfg.extraHeaders);
-  // Anthropic keys not scoped to a workspace need "anthropic-workspace-id"; accept the obvious spellings of it
-  if (cfg.provider === 'anthropic') for (const n of Object.keys(headers)) {
-    if (/^(anthropic)?workspace(id)?$/.test(n.toLowerCase().replace(/[^a-z]/g, '')) && n !== 'anthropic-workspace-id') { headers['anthropic-workspace-id'] = headers[n]; delete headers[n]; }
-  }
+  const headers = cfg.provider === 'anthropic' ? anthropicHeaders(parseExtraHeaders(cfg.extraHeaders)) : parseExtraHeaders(cfg.extraHeaders);
   const merged: Record<string, string> = { ...r.headers };
   for (const [name, value] of Object.entries(headers)) {
     // the user's own anthropic-beta joins the one the request needs (any spelling of the name), never replaces it

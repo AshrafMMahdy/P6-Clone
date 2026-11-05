@@ -48,7 +48,7 @@ await cfg('fake-2', true);   // the agent's model changed: it restarts
 ok((await win.evaluate(() => (window as any).p6.whiq.status())).data.state === 'off', 'a changed model stops the agent');
 ok(await ask('second question', 'Answer two.'), 'after the settings changed, the next message is answered in the same panel');
 ok(fake.requests.some((r) => r.model === 'fake-2'), 'with the new model');
-ok(!(await win.locator('.ai-panel button:has-text("Stop")').count()), 'the panel is not left busy');
+ok(!(await win.locator('.ai-panel .ai-send.stop').count()), 'the panel is not left busy');
 await cfg('fake-2', false);  // only the operate switch: the agent keeps running
 ok((await win.evaluate(() => (window as any).p6.whiq.status())).data.state === 'ready', 'a save that changes nothing of the agent keeps it running');
 ok(await ask('third question', 'Answer three.'), 'the third answer arrives');
