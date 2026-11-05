@@ -21,7 +21,8 @@ rmSync(join(out, 'resources', 'default_app.asar'), { force: true });
 
 const app = join(out, 'resources', 'app');
 mkdirSync(app, { recursive: true });
-cpSync(join(root, 'dist'), join(app, 'dist'), { recursive: true, filter: (p) => !p.endsWith('.map') });
+// (dist/ifc stays behind: copyIfc puts the IFC engine at app/ifc, once)
+cpSync(join(root, 'dist'), join(app, 'dist'), { recursive: true, filter: (p) => !p.endsWith('.map') && !p.startsWith(join(root, 'dist', 'ifc')) });
 await copyReasoner(root, app); // the schedule reasoner and its WebAssembly runtime (the main process runs it)
 copyIfc(root, app); // 4D: the IFC engine (the main process reads models)
 // the embedded platform agent (the AI panel): its servers, the packages they load, its engines, the platform's sandbox
