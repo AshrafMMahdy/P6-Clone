@@ -2,6 +2,7 @@
 // (costs a long conversation's worth of requests):  node tests/e2e/ai-real-build.ts ["request"] [--past <xer>]
 // --past imports a past project first, so the assistant can learn from it (or copy it) instead of starting cold.
 // Uses a throwaway profile with only the saved AI settings (key stays encrypted), then reviews what was built.
+import { copyOwnerSettings } from './owner-settings.ts';
 import { _electron as electron } from 'playwright';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,9 +17,8 @@ const argv = process.argv.slice(2);
 const pastAt = argv.indexOf('--past');
 const past = pastAt >= 0 ? argv.splice(pastAt, 2)[1] : undefined;
 const request = argv[0] ?? 'Create a schedule for a five-story reinforced-concrete office building.';
-const real = join(process.env.APPDATA!, 'p6-clone');
 const profile = mkdtempSync(join(tmpdir(), 'p6realbuild-'));
-for (const f of ['Local State', 'ai-assistant.json']) copyFileSync(join(real, f), join(profile, f));
+if (!copyOwnerSettings(profile)) { console.log('SKIP no AI settings of the owner'); process.exit(0); }
 const root = join(import.meta.dirname, '..', '..');
 const app = await electron.launch({ env: { ...process.env, P6CLONE_WHIQ: 'off' } as Record<string, string>, args: [root, '--user-data', profile, ...(past ? ['--import', past] : [])], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
@@ -42,7 +42,7 @@ const shown = await win.locator('.grid-row').count();
 await win.waitForTimeout(3000); // let the database save
 await app.close();
 
-const file = join(profile, 'p6clone-db.json');
+const file = join(profile, 'Data', 'Database', 'p6clone-db.json');
 ok(existsSync(file), 'the database was saved');
 const { db } = linesToDb(readFileSync(file, 'utf8').split('\n').filter(Boolean));
 const all = rows(db, 'PROJECT').filter((p) => !p._baseline_of);

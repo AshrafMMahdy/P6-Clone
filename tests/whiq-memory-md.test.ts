@@ -14,7 +14,10 @@ import { fakeModel, type Req } from './e2e/fake-model.ts';
 const vendor = join(import.meta.dirname, '..', 'vendor', 'whiq-agent');
 const server = join(vendor, 'shared', 'chat-engine', 'server');
 const fetched = existsSync(join(server, 'memoryMarkdown.ts')) && existsSync(join(vendor, 'node_modules'));
-const skip = !fetched && 'platform agent not fetched with the Markdown memory patch';
+// the store is bundled with esbuild's command line, whose native binary is installed for this platform only (a Windows
+// install under WSL's Linux has the Windows one)
+const esbuildHere = existsSync(join(import.meta.dirname, '..', 'node_modules', '@esbuild', `${process.platform}-${process.arch}`));
+const skip = !fetched ? 'platform agent not fetched with the Markdown memory patch' : !esbuildHere ? `esbuild is not installed for ${process.platform}-${process.arch}` : false;
 const fwd = (p: string) => p.replace(/\\/g, '/');
 
 // ── the store, bundled once (the app's server bundles it the same way), imported fresh per test ─────────────────────
@@ -339,7 +342,9 @@ test('titles that Windows cannot take become safe, unique file names that stay p
 
 // ── the agent server: a local chat that carries a project of the app's own ─────────────────────────────────────────
 const installed = existsSync(join(vendor, '03 Shared Platform Agents', 'app', 'server.dist.mjs'));
-const rebuilt = installed && /localProjectId/.test(readFileSync(join(vendor, '03 Shared Platform Agents', 'app', 'server.dist.mjs'), 'utf8'));
+const rebuilt = installed && /localProjectId/.test(readFileSync(join(vendor, '03 Shared Platform Agents', 'app', 'server.dist.mjs'), 'utf8'))
+  // installed for THIS platform (the agent's packages carry native parts, as in whiq-host.test.ts)
+  && existsSync(join(vendor, 'node_modules', '@napi-rs')) && readdirSync(join(vendor, 'node_modules', '@napi-rs')).some((d) => d.startsWith(`canvas-${process.platform}-${process.arch}`));
 
 test('a local chat with localProjectId scopes memory and the project introduction, and keeps its own working folder', { skip: !rebuilt && 'platform agent not built with the local-projects patch', timeout: 240_000 }, async () => {
   const offered = (r: Req, name: string) => (r.tools ?? []).some((t) => t.function.name === name);

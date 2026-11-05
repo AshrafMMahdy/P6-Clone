@@ -87,7 +87,7 @@ test('link activities, fill down, find next', { timeout: 180_000 }, async () => 
 
     await win.keyboard.press('Control+s');
     await win.waitForSelector('.toast:has-text("committed")');
-    const db = linesToDb(readFileSync(join(userData, 'p6clone-db.json'), 'utf8').split('\n')).db;
+    const db = linesToDb(readFileSync(join(userData, 'Data', 'Database', 'p6clone-db.json'), 'utf8').split('\n')).db;
     assert.equal(db.tables.TASKPRED.rows.length, 2);
     assert.equal(db.tables.TASK.rows.find((r: Record<string, string>) => r.task_code === 'A1020')!.early_start_date, '2024-01-26 08:00');
     assert.deepEqual(errors, []);

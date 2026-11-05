@@ -118,6 +118,20 @@ ok(/Final wording\./.test(await body()) && !/Draft wording/.test(await body()), 
 await emit({ type: 'message_hidden', messageId: 'm-x' });
 await win.waitForTimeout(200);
 ok(!/Final wording/.test(await body()), 'a message the agent took back is removed');
+// a real run: the answer streams, the next step (the platform's "is the work done?" check) is reset, then its reply is
+// hidden; the answer stays
+await emit({ type: 'token', messageId: 'm-ans', delta: 'The average is 5.43 days.' });
+await emit({ type: 'token_reset', messageId: 'm-chk' });
+await emit({ type: 'token', messageId: 'm-chk', delta: 'The work is finished.' });
+await emit({ type: 'message_hidden', messageId: 'm-chk' });
+await win.waitForTimeout(200);
+ok(/The average is 5\.43 days\./.test(await body()) && !/The work is finished/.test(await body()), 'an answer stays when the next step is reset and hidden');
+await emit({ type: 'token', messageId: 'm-r', delta: 'First try' });
+await emit({ type: 'token_reset', messageId: 'm-r' });
+await emit({ type: 'token', messageId: 'm-r', delta: 'Second try.' });
+await emit({ type: 'done', messageId: 'm-r' });
+await win.waitForTimeout(200);
+ok(/Second try\./.test(await body()) && !/First try/.test(await body()), 'a retried step drops only its own first attempt');
 await emit({ type: 'handoff', handoff: { id: 'ho-1', task: 'Draft the claim letter', status: 'pending' } });
 await win.waitForSelector('.ai-panel .ai-msg:has-text("Draft the claim letter") button:has-text("Do it here")');
 await emit({ type: 'handoff', handoff: { id: 'ho-1', task: 'Draft the claim letter', status: 'declined' } });

@@ -38,7 +38,7 @@ await win.click('.dialog .tab:has-text("Models & tiers")');
 await win.click('.dialog button:has-text("Test it")'); await win.waitForSelector('text=connected.', { timeout: 10000 });
 ok(true, 'Test it reaches the provider: ' + (await win.locator('text=connected.').innerText()));
 await win.click('.dialog button:has-text("OK")'); await win.waitForTimeout(400);
-const cfgFile = readFileSync(join(ud, 'ai-assistant.json'), 'utf8');
+const cfgFile = readFileSync(join(ud, 'Data', 'Settings', 'ai-assistant.json'), 'utf8');
 ok(!cfgFile.includes('sk-test-abcdef123456'), 'the key on disk is encrypted, not plain text');
 ok(seen[0]?.auth === 'Bearer sk-test-abcdef123456', 'the key is sent to the provider as a Bearer token');
 ok(seen[0]?.xtest === 'hello' && seen[0]?.j.temperature === 0.3, 'extra header and JSON parameters reach the provider');

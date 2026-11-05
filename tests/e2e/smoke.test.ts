@@ -48,7 +48,7 @@ test('import, schedule, commit, export round trip in the desktop app', { timeout
 
     await win.keyboard.press('Control+s');
     await win.waitForSelector('.toast:has-text("committed")');
-    const dbFile = join(userData, 'p6clone-db.json');
+    const dbFile = join(userData, 'Data', 'Database', 'p6clone-db.json');
     assert.ok(existsSync(dbFile));
     const saved = linesToDb(readFileSync(dbFile, 'utf8').split('\n')).db;
     assert.ok(saved.tables.TASK.rows.length > 10);

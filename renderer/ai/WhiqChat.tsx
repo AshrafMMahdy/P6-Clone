@@ -106,8 +106,9 @@ export function WhiqChat(props: { convKey: string; clearSignal: number; onBusy: 
   const stopRunning = () => setLines((x) => x.map((l) => (l.k === 'tool' && l.state === 'running' ? { ...l, state: 'stopped' } : l)));
   /** text streamed before a step or at the end of a turn becomes the agent's message */
   const flushLive = () => {
-    const t = liveRef.current.trim();
-    if (t) put((l) => l.k === 'ai' && l.mid === liveMid.current, () => ({ k: 'ai', text: t, mid: liveMid.current }));
+    // the message id now, not when React applies the update: the next message's id is set right after this call
+    const t = liveRef.current.trim(), mid = liveMid.current;
+    if (t) put((l) => l.k === 'ai' && l.mid === mid, () => ({ k: 'ai', text: t, mid }));
     liveRef.current = ''; setLive('');
   };
 
@@ -178,7 +179,12 @@ export function WhiqChat(props: { convKey: string; clearSignal: number; onBusy: 
         // a new message starts: the one before it is finished (each message is its own bubble, and can be hidden or rewritten on its own)
         if (e.messageId && e.messageId !== liveMid.current) { flushLive(); liveMid.current = e.messageId; }
         liveRef.current += e.delta ?? ''; setLive(liveRef.current); break;
-      case 'token_reset': liveRef.current = ''; setLive(''); break;
+      // a retried step drops what IT streamed so far; the reset names its message, and a finished message before it is kept
+      // (a real run lost the answer to the reset of the next step, the platform's check that the work is done)
+      case 'token_reset':
+        if (e.messageId && e.messageId !== liveMid.current) { flushLive(); liveMid.current = e.messageId; }
+        else { liveRef.current = ''; setLive(''); }
+        break;
       case 'status':
         setStatus(e.label ?? ''); setSugg(null);
         // a steered message the turn ended before reading starts a turn of its own: the panel is busy again

@@ -2,15 +2,15 @@
 //   node tests/e2e/ai-real.ts
 // Copies only the saved AI settings (key stays encrypted; Windows decrypts it for the same user) into a throwaway
 // profile, so the user's own database and open app are not touched.
+import { copyOwnerSettings } from './owner-settings.ts';
 import { _electron as electron } from 'playwright';
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const ok = (c: boolean, m: string) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process.exitCode = 1; };
-const real = join(process.env.APPDATA!, 'p6-clone');
 const profile = mkdtempSync(join(tmpdir(), 'p6real-'));
-for (const f of ['Local State', 'ai-assistant.json']) copyFileSync(join(real, f), join(profile, f));
+if (!copyOwnerSettings(profile)) { console.log('SKIP no AI settings of the owner'); process.exit(0); }
 const root = join(import.meta.dirname, '..', '..');
 const app = await electron.launch({ env: { ...process.env, P6CLONE_WHIQ: 'off' } as Record<string, string>, args: [root, '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));

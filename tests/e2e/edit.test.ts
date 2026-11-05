@@ -54,7 +54,7 @@ test('create project, add and link activities, edit duration, schedule', { timeo
     await win.keyboard.press('Control+s');
     await win.waitForSelector('.toast:has-text("committed")');
 
-    const db = linesToDb(readFileSync(join(userData, 'p6clone-db.json'), 'utf8').split('\n')).db;
+    const db = linesToDb(readFileSync(join(userData, 'Data', 'Database', 'p6clone-db.json'), 'utf8').split('\n')).db;
     const t = (c: string) => db.tables.TASK.rows.find((r: Record<string, string>) => r.task_code === c)!;
     assert.equal(t('A1000').target_drtn_hr_cnt, '80');
     assert.equal(t('A1000').early_start_date, '2024-01-08 08:00');
