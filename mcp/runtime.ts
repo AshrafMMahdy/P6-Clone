@@ -403,7 +403,13 @@ function adoptIndex(file: string, from: string | null, to: string | null): strin
   const out: string[] = [];
   for (const [h, e] of Object.entries(all)) {
     if (!e || typeof e.file !== 'string' || sessions.has(h) || evicted.has(h)) continue;
-    const at = from && to && e.file.startsWith(from + sep) ? join(to, e.file.slice(from.length + 1)) : e.file;
+    // WHIQ 4L-13: a recovery folder the host MOVED (copied into a new process's root after a crash) holds paths of where it was:
+    // the file is found by the owner folder's name (<…>/.p6clone-recovery/<owner>/<rest>) wherever that folder now sits.
+    let at = from && to && e.file.startsWith(from + sep) ? join(to, e.file.slice(from.length + 1)) : e.file;
+    if (!existsSync(at) && from && to) {
+      const parts = e.file.split(/[\\/]/), k = parts.lastIndexOf(basename(from));
+      if (k >= 0 && k < parts.length - 1) at = join(to, ...parts.slice(k + 1));
+    }
     if (existsSync(at)) { evicted.set(h, { ...e, file: at, reason: e.reason === 'restart' || !e.reason ? 'restart' : e.reason, adopted: true }); out.push(h); }
   }
   return out;
