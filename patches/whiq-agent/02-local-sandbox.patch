@@ -1,33 +1,35 @@
 diff --git a/03 Shared Platform Agents/app/server/tools/index.ts b/03 Shared Platform Agents/app/server/tools/index.ts
-index 30286e7..b8fc096 100644
+index 30286e7..61f6662 100644
 --- a/03 Shared Platform Agents/app/server/tools/index.ts	
 +++ b/03 Shared Platform Agents/app/server/tools/index.ts	
-@@ -392,8 +392,10 @@ export async function registerAllTools(): Promise<void> {
+@@ -392,8 +392,11 @@ export async function registerAllTools(): Promise<void> {
    // cloud key; channel outreach needs the 07 Channels process, which local
    // mode does not boot. LLM/web tools stay — the LLM is cloud by design.
    const LOCAL_MODE = process.env.WHIQ_LOCAL_MODE === '1';
 -  const e2bUsable = !LOCAL_MODE || Boolean(process.env.E2B_API_KEY?.trim());
 -  if (e2bUsable) registerTranscribeAudioTool((chatId, ev) => emit(chatId, ev)); // E2b audio/video → transcript file
-+  // P6 Clone: a local sandbox (VM_SANDBOX=on) runs code too; transcription needs one that has its speech packages
++  // P6 Clone: a local sandbox (VM_SANDBOX=on) runs code too
 +  const localSandbox = /^(on|1|true|yes)$/i.test(String(process.env.VM_SANDBOX ?? '').trim());
 +  const e2bUsable = !LOCAL_MODE || Boolean(process.env.E2B_API_KEY?.trim()) || localSandbox;
-+  if (e2bUsable && process.env.WHIQ_SANDBOX_TRANSCRIBE !== '0') registerTranscribeAudioTool((chatId, ev) => emit(chatId, ev)); // E2b audio/video → transcript file
++  // P6 Clone: transcription needs no sandbox (the router's stt seat does it): offered when the app says that seat is set (WHIQ_STT_SEAT=on)
++  if (!LOCAL_MODE || Boolean(process.env.E2B_API_KEY?.trim()) || process.env.WHIQ_STT_SEAT === 'on') registerTranscribeAudioTool((chatId, ev) => emit(chatId, ev)); // E2b audio/video → transcript file
    registerPublishArtifactTool((chatId, ev) => emit(chatId, ev)); // 07b interactive HTML artifacts
    registerShareLinkTool();   // 07c public TTL share links
    if (!LOCAL_MODE) registerChannelOutreachTools(); // B5 notify_user + ask_away_user (channel gateway loopback)
 diff --git a/03 Shared Platform Agents/app/server/tools/shared/index.ts b/03 Shared Platform Agents/app/server/tools/shared/index.ts
-index 240ee24..433b161 100644
+index 240ee24..ce8d882 100644
 --- a/03 Shared Platform Agents/app/server/tools/shared/index.ts	
 +++ b/03 Shared Platform Agents/app/server/tools/shared/index.ts	
-@@ -101,8 +101,9 @@ export async function registerSharedTools(): Promise<void> {
+@@ -101,8 +101,10 @@ export async function registerSharedTools(): Promise<void> {
    registerRenderDocPagesTool();                             // see a written deck / document as composed pages
    registerTaskTools();                                      // manage_tasks / list_tasks — the user's own reminders
    if (process.env.WHIQ_LOCAL_MODE !== '1') registerChannelOutreachTools();   // notify_user + ask_away_user (07 Channels; local mode does not boot it)
 -  if (process.env.WHIQ_LOCAL_MODE !== '1' || Boolean(apiKeys.E2B_API_KEY)) {
 -    registerTranscribeAudioTool((chatId, ev) => emit(chatId, ev));   // E2B audio/video → transcript file
-+  // P6 Clone: a local sandbox (VM_SANDBOX=on) runs code too; transcription needs one that has its speech packages
++  // P6 Clone: transcription needs no sandbox (the router's stt seat does it): offered when the app says that seat is set (WHIQ_STT_SEAT=on)
++  if (process.env.WHIQ_LOCAL_MODE !== '1' || Boolean(apiKeys.E2B_API_KEY) || process.env.WHIQ_STT_SEAT === 'on') registerTranscribeAudioTool((chatId, ev) => emit(chatId, ev));   // audio/video → transcript file
++  // P6 Clone: a local sandbox (VM_SANDBOX=on) runs code too
 +  if (process.env.WHIQ_LOCAL_MODE !== '1' || Boolean(apiKeys.E2B_API_KEY) || /^(on|1|true|yes)$/i.test(String(process.env.VM_SANDBOX ?? '').trim())) {
-+    if (process.env.WHIQ_SANDBOX_TRANSCRIBE !== '0') registerTranscribeAudioTool((chatId, ev) => emit(chatId, ev));   // E2B audio/video → transcript file
      registerRunCodeTool();                                  // ad-hoc Python/Node/shell in E2B — the CODE_SELFCHECK escape hatch
      registerSaveSandboxFileTool((chatId, ev) => emit(chatId, ev)); // move a sandbox-built file (real .xlsx formulas, charts) into the outputs
    }

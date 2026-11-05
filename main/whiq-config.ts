@@ -6,6 +6,10 @@
 // Handover seat is no router seat: it names the tier a handover with no tier goes to (agent env WHIQ_HANDOVER_TIER).
 // API keys never go into the file: each provider names an environment variable (apiKeyEnv) that only the router child
 // process receives, decrypted in the main process.
+// A service seat is off unless set, with two exceptions: Web search sits on the agent's tier when that tier's provider can
+// search by itself (providerCanSearch), and the agent server learns of a set Speech-to-text seat (WHIQ_STT_SEAT) to offer
+// transcribe_audio.
+import { providerCanSearch } from './ai-extras.ts';
 export type ProviderType = 'anthropic' | 'openai-compat' | 'gemini';
 /** headers: extra HTTP headers (a gateway's token, ...): like the key, they reach the router by environment only */
 export interface AgentProvider { name: string; type: ProviderType; baseUrl: string; key: string; headers?: Record<string, string> }
@@ -19,7 +23,7 @@ export interface AgentModels {
   providers: AgentProvider[];
   /** strongest first */
   tiers: Tier[];
-  /** seat -> tier name; a chat seat not listed sits on the agent's tier, a service seat not listed is off */
+  /** seat -> tier name; a chat seat not listed sits on the agent's tier, a service seat not listed is off (Web search: on the agent's tier when its provider can search) */
   seats?: Partial<Record<Seat, string>>;
 }
 
@@ -51,7 +55,13 @@ export function routerConfig(m: AgentModels): { config: Record<string, unknown>;
   const seatTier = (seat: Seat): string | undefined => {
     const t = m.seats?.[seat];
     if (t != null && !tiers[t]) throw new Error(`Seat "${seat}": no tier "${t}".`);
-    return t ?? ((CHAT_SEATS as readonly string[]).includes(seat) ? agentTier : undefined);
+    if (t != null) return t;
+    if ((CHAT_SEATS as readonly string[]).includes(seat)) return agentTier;
+    if (seat === 'web_search') {   // the agent's own provider searches when it can
+      const p = m.providers.find((x) => x.name === m.tiers.find((t) => t.name === agentTier)?.provider);
+      return p && providerCanSearch(p.type, p.baseUrl) ? agentTier : undefined;
+    }
+    return undefined;
   };
   // the scheduler module maps each seat to its tier; the flat roles carry the same (the router falls back to them)
   const scheduler: Record<string, string> = {}, roles: Record<string, unknown> = {};
@@ -63,5 +73,8 @@ export function routerConfig(m: AgentModels): { config: Record<string, unknown>;
     roles[seat] = entry;
   }
   const handover = seatTier('handover');
-  return { config: { providers, roles, matchSkepticToAgent: false, tiers, tierOrder: m.tiers.map((t) => t.name), modules: { scheduler } }, env, agentEnv: handover ? { WHIQ_HANDOVER_TIER: handover } : {} };
+  const agentEnv: Record<string, string> = {};
+  if (handover) agentEnv.WHIQ_HANDOVER_TIER = handover;
+  if (scheduler.stt) agentEnv.WHIQ_STT_SEAT = 'on';
+  return { config: { providers, roles, matchSkepticToAgent: false, tiers, tierOrder: m.tiers.map((t) => t.name), modules: { scheduler } }, env, agentEnv };
 }

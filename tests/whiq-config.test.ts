@@ -49,3 +49,29 @@ test('router config: extra headers by environment only; any tier name, "construc
   assert.deepEqual(JSON.parse(env[p.headersEnv!]), { 'X-Gateway-Token': 'gw-secret-1' });
   assert.deepEqual(config.tierOrder, ['constructor', '__proto__x']);
 });
+
+test('router config: an unset Web search seat sits on the agent tier when its provider can search; Speech to text tells the agent server', () => {
+  const tiers = (provider: string) => [{ name: 'Main', provider, model: 'm' }];
+  const sched = (provider: { type: 'anthropic' | 'openai-compat' | 'gemini'; baseUrl: string }, seats?: Record<string, string>) =>
+    (routerConfig({ providers: [{ name: 'p', key: '', ...provider }], tiers: tiers('p'), seats }).config.modules as { scheduler: Record<string, string> }).scheduler;
+  assert.equal(sched({ type: 'anthropic', baseUrl: 'https://api.anthropic.com' }).web_search, 'Main');
+  assert.equal(sched({ type: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com' }).web_search, 'Main');
+  assert.equal(sched({ type: 'openai-compat', baseUrl: 'https://openrouter.ai/api/v1' }).web_search, 'Main');
+  assert.equal(sched({ type: 'openai-compat', baseUrl: 'http://localhost:1234/v1' }).web_search, undefined, 'a provider that cannot search: off');
+  assert.equal(sched({ type: 'openai-compat', baseUrl: 'https://api.openai.com/v1' }).web_search, undefined);
+  // the default follows the AGENT's tier, and a seat the user set wins
+  const two = routerConfig({
+    providers: [{ name: 'local', type: 'openai-compat', baseUrl: 'http://localhost:1234/v1', key: '' }, { name: 'claude', type: 'anthropic', baseUrl: 'https://api.anthropic.com', key: '' }],
+    tiers: [{ name: 'Local', provider: 'local', model: 'a' }, { name: 'Claude', provider: 'claude', model: 'b' }],
+    seats: { agent: 'Claude' },
+  });
+  assert.equal((two.config.modules as { scheduler: Record<string, string> }).scheduler.web_search, 'Claude');
+  const own = routerConfig({ providers: [{ name: 'claude', type: 'anthropic', baseUrl: 'x', key: '' }, { name: 'l', type: 'openai-compat', baseUrl: 'y', key: '' }], tiers: [{ name: 'Claude', provider: 'claude', model: 'b' }, { name: 'L', provider: 'l', model: 'a' }], seats: { web_search: 'L' } });
+  assert.equal((own.config.modules as { scheduler: Record<string, string> }).scheduler.web_search, 'L');
+  // speech to text: no default; a set seat is announced to the agent server (it offers transcribe_audio then)
+  const none = routerConfig({ providers: [{ name: 'p', type: 'anthropic', baseUrl: 'x', key: '' }], tiers: tiers('p') });
+  assert.equal((none.config.modules as { scheduler: Record<string, string> }).scheduler.stt, undefined);
+  assert.equal(none.agentEnv.WHIQ_STT_SEAT, undefined);
+  const stt = routerConfig({ providers: [{ name: 'p', type: 'anthropic', baseUrl: 'x', key: '' }, { name: 'w', type: 'openai-compat', baseUrl: 'https://api.openai.com/v1', key: '' }], tiers: [{ name: 'Main', provider: 'p', model: 'm' }, { name: 'Whisper', provider: 'w', model: 'whisper-1' }], seats: { stt: 'Whisper' } });
+  assert.equal(stt.agentEnv.WHIQ_STT_SEAT, 'on');
+});

@@ -7,12 +7,17 @@ import { createServer } from 'node:http';
 export type Req = { model: string; messages: { role: string; content?: unknown; tool_calls?: unknown[]; tool_call_id?: string }[]; tools?: { type: string; function: { name: string; description?: string; parameters?: any } }[] };
 export type Reply = ({ text: string } | { call: string; args: Record<string, unknown> }) & { delayMs?: number };
 
-export async function fakeModel(script: (req: Req, n: number) => Reply): Promise<{ url: string; requests: Req[]; headers: Record<string, string | string[] | undefined>[]; close: () => void }> {
-  const requests: Req[] = [], headers: Record<string, string | string[] | undefined>[] = [];
+/** `transcript`: what its /audio/transcriptions answers (the speech-to-text seat's provider); the audio it was sent is kept in `audio`. */
+export async function fakeModel(script: (req: Req, n: number) => Reply, transcript = 'Hello from the stand-in transcriber.'): Promise<{ url: string; requests: Req[]; headers: Record<string, string | string[] | undefined>[]; audio: { model: string; format: string; bytes: number; auth: string }[]; close: () => void }> {
+  const requests: Req[] = [], headers: Record<string, string | string[] | undefined>[] = [], audio: { model: string; format: string; bytes: number; auth: string }[] = [];
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
+      if (req.url?.endsWith('/audio/transcriptions')) {
+        try { const a = JSON.parse(body); audio.push({ model: a.model, format: a.input_audio?.format, bytes: Buffer.from(String(a.input_audio?.data ?? ''), 'base64').length, auth: String(req.headers.authorization ?? '') }); } catch { res.writeHead(400); return res.end(); }
+        res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ text: transcript }));
+      }
       if (!req.url?.endsWith('/chat/completions')) { res.writeHead(404); return res.end(); }
       let r: Req;
       try { r = JSON.parse(body); } catch { res.writeHead(400); return res.end(); }
@@ -29,5 +34,5 @@ export async function fakeModel(script: (req: Req, n: number) => Reply): Promise
     });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
-  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, requests, headers, close: () => server.close() };
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, requests, headers, audio, close: () => server.close() };
 }

@@ -1,0 +1,57 @@
+diff --git a/06 LLM Router/server.mjs b/06 LLM Router/server.mjs
+index 5e845e5..3e72f37 100644
+--- a/06 LLM Router/server.mjs	
++++ b/06 LLM Router/server.mjs	
+@@ -1822,12 +1822,52 @@ async function searchOpenRouterWeb(provider, model, query, max) {
+   return { ok: true, body: { results, ...(answer ? { answer } : {}) } };
+ }
+ 
++/** Anthropic's server-side web search tool (web_search_20250305, the basic version: no code execution needed) on the
++ *  provider's own Messages API, with the provider's headers (key, workspace, version) as callAnthropic sends them.
++ *  Results come from the web_search_tool_result blocks, the answer is the text blocks, cited by their citations.
++ *  An organisation that has web search disabled gets a 400 invalid_request_error: returned as is (not ok). */
++async function searchAnthropic(provider, model, query, max) {
++  const base = (provider.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '');
++  const messages = [{ role: 'user', content: `Search the web and answer concisely with current facts, naming your sources: ${query}` }];
++  const results = [];
++  const seen = new Set();
++  const cited = new Map();
++  let answer = '';
++  for (let turn = 0; turn < 4; turn++) {                                        // pause_turn: the server loop asks to be resumed
++    const body = { model, max_tokens: 2048, messages, tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] };
++    const { headers } = applyAnthropicRequestFields(body, {}, {}, provider);
++    const r = await llmFetch(`${base}/v1/messages`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(WEBSEARCH_TIMEOUT_MS) });
++    const j = await r.json().catch(() => ({}));
++    if (!r.ok) return { ok: false, status: r.status, body: j?.error ?? j };
++    const content = Array.isArray(j.content) ? j.content : [];
++    for (const b of content) {
++      if (b?.type === 'web_search_tool_result') {
++        if (!Array.isArray(b.content)) return { ok: false, status: 502, body: { type: b.content?.type ?? 'web_search_tool_result_error', message: `web search failed: ${b.content?.error_code ?? 'unknown'}` } };
++        for (const x of b.content) {
++          if (x?.type !== 'web_search_result' || !x.url || seen.has(x.url)) continue;
++          seen.add(x.url);
++          results.push({ title: String(x.title ?? ''), url: String(x.url), snippet: '' });
++        }
++      } else if (b?.type === 'text') {
++        answer += b.text ?? '';
++        for (const c of b.citations ?? []) if (c?.url && c.cited_text && !cited.has(c.url)) cited.set(c.url, String(c.cited_text));
++      }
++    }
++    if (j.stop_reason !== 'pause_turn') break;
++    messages.push({ role: 'assistant', content });
++  }
++  for (const x of results) x.snippet = (cited.get(x.url) ?? '').slice(0, 500);
++  answer = answer.trim();
++  return { ok: true, body: { results: results.slice(0, max), ...(answer ? { answer } : {}) } };
++}
++
+ const WEBSEARCH_VENDORS = {
+   'gemini-grounding': searchGeminiGrounded,
+   gemini: searchGeminiGrounded,      // a plain gemini provider grounds fine
+   tavily: searchTavily,
+   brave: searchBrave,
+   'google-cse': searchGoogleCse,
++  anthropic: searchAnthropic,
+ };
+ 
+ // ── Per-user preferences (USER level, not org config — each user sets their own) ────────────────────

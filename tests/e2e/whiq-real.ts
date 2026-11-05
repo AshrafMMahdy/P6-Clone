@@ -58,6 +58,11 @@ ok(outs.some((f) => /\.docx$/i.test(f)), `a Word report is in the working folder
 const c = await ask('Using Python in your code sandbox, compute the average and the longest original duration of the activities in the imported schedule, and tell me both numbers.', 8);
 console.log(`--- answer 3 (${c.s} s): ${show(c.text)}`);
 ok(/run code|run_code|python/i.test(c.text) && /\d/.test(c.text), 'it ran Python and gave numbers');
+const d = await ask('Search the web: what is the latest released version of Primavera P6 Professional? Give the source URL.', 8);
+console.log(`--- answer 4 (${d.s} s): ${show(d.text)}`);
+ok(/web.?search/i.test(d.text), 'it ran the web search step');
+ok(/https?:\/\/[^\s)\]]+\.[a-z]{2,}/i.test(d.text.replace(/^.*?web.?search/is, '')), 'a source URL is in the answer');
+ok(!/web search failed|No web-search provider|provider_error|not enabled/i.test(d.text), 'the web search did not fail: ' + show(d.text));
 if (process.exitCode) {   // what the agent itself has for the last turn (its messages, with their hidden marks)
   for (const t of (await win.evaluate(() => (window as any).__ev ?? [])).filter((t: string) => !/^token/.test(t) || /=> $/.test(t)).slice(0, 80)) console.log('  ev ' + t);
   const chats = await win.evaluate(() => JSON.parse(localStorage.getItem('p6clone.whiq.chats') ?? '{}'));

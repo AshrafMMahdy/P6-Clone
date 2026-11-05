@@ -115,7 +115,7 @@ export class CodeSandbox {
   /** The agent server's environment for this sandbox (none: run_code stays hidden, as the platform does without one). */
   env(): Record<string, string> {
     const s = this.state;
-    return s.url ? { VM_SANDBOX: 'on', VM_SANDBOX_URL: s.url, WHIQ_SANDBOX_NOTE: s.note ?? '', WHIQ_SANDBOX_TRANSCRIBE: '0' } : {};
+    return s.url ? { VM_SANDBOX: 'on', VM_SANDBOX_URL: s.url, WHIQ_SANDBOX_NOTE: s.note ?? '' } : {};
   }
 
   /** Stop it (the app quits, or the user set WSL up and wants a fresh pick at the agent's next start). */

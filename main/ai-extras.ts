@@ -7,6 +7,12 @@ export const RESERVED_BODY = ['messages', 'tools', 'system', 'tool_choice', 'str
 /** Sampling parameters the Claude API removed in version 2026-10-21: a request that sends one fails, at any value. */
 export const ANTHROPIC_REMOVED_BODY = ['temperature', 'top_p', 'top_k'];
 
+/** Whether a provider can search the web by itself (the router's web_search vendors that need no extra key): an Anthropic
+ *  or Gemini provider, or an OpenRouter endpoint. The Web search seat, when unset, sits on the agent's tier if this holds. */
+export function providerCanSearch(kind: string, baseUrl: string): boolean {
+  return kind === 'anthropic' || kind === 'gemini' || /openrouter\.ai/i.test(baseUrl);
+}
+
 export function parseExtraHeaders(text: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [i, raw] of (text ?? '').split(/\r?\n/).entries()) {

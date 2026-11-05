@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { Dialog, Tabs } from '../components/Layout.tsx';
 import { closeDialog, toast } from '../store.ts';
 import type { ModelKind, PublicModels, PublicProvider, TierDef } from '../../main/ai.ts';
-import { parseExtraBody, parseExtraHeaders } from '../../main/ai-extras.ts';
+import { parseExtraBody, parseExtraHeaders, providerCanSearch } from '../../main/ai-extras.ts';
 
 const PRESETS: { label: string; kind: ModelKind; url: string; hint: string }[] = [
   { label: 'Anthropic', kind: 'anthropic', url: 'https://api.anthropic.com', hint: 'e.g. claude-opus-5-5' },
@@ -32,7 +32,7 @@ const SEATS: { id: string; label: string; help: string; chat: boolean }[] = [
   { id: 'autopilot', label: 'Autopilot', help: 'answers the agent\'s questions when no one is there', chat: true },
   { id: 'extract', label: 'Extraction', help: 'pulls structured data out of documents', chat: true },
   { id: 'decide', label: 'Decisions', help: 'small yes / no judgements in the loop', chat: true },
-  { id: 'web_search', label: 'Web search', help: 'a search provider (off unless set)', chat: false },
+  { id: 'web_search', label: 'Web search', help: 'a search provider (unset: the agent model searches when its provider can: Anthropic, Gemini or OpenRouter; else off)', chat: false },
   { id: 'embedding', label: 'Embeddings', help: 'an embedding model for semantic search (off unless set)', chat: false },
   { id: 'reranker', label: 'Reranker', help: 'orders search hits (off unless set)', chat: false },
   { id: 'stt', label: 'Speech to text', help: 'transcribes audio (off unless set)', chat: false },
@@ -81,6 +81,10 @@ export function AiSettingsDialog() {
     setMsg(r.ok ? { ok: true, text: `${name}: connected. The model replied: "${r.reply.trim().slice(0, 80)}"` } : { ok: false, text: `${name}: ${r.error}` });
   };
   const addProvider = () => { const id = newId(); set({ providers: [...m.providers, { id, name: `provider ${m.providers.length + 1}`, kind: 'anthropic', baseUrl: PRESETS[0].url, extraHeaders: '', extraBody: '', hasKey: false, keyHint: '' }] }); };
+  // the Web search seat unset: the agent's tier, when its provider can search (the same rule as the agent's router config)
+  const agentTierDef = m.tiers.find((t) => t.name === m.seats.agent) ?? m.tiers[0];
+  const agentProv = m.providers.find((p) => p.id === agentTierDef?.provider);
+  const offOrAgentSearch = agentTierDef && agentProv && providerCanSearch(agentProv.kind, agentProv.baseUrl) ? `(the agent's: ${agentTierDef.name})` : '(off)';
   const addTier = () => set({ tiers: [...m.tiers, { name: m.tiers.length ? `Tier ${m.tiers.length + 1}` : 'Main', provider: m.providers[0]?.id ?? '', model: '' }] });
   const mono = { font: '12px Consolas, monospace' } as const;
 
@@ -144,7 +148,7 @@ export function AiSettingsDialog() {
           <p className="muted">All seats use the agent's model unless you pick another tier. The eyes give the agent vision when its own model cannot read images.</p>
           <table className="tbl"><thead><tr><th>Seat</th><th>Tier</th><th>What it does</th></tr></thead><tbody>
             {SEATS.map((s) => <tr key={s.id}><td>{s.label}</td>
-              <td><select value={m.seats[s.id] ?? ''} onChange={(e) => set({ seats: { ...m.seats, [s.id]: e.target.value } })}><option value="">{s.id === 'handover' ? '(the next tier up)' : !s.chat ? '(off)' : s.id === 'agent' ? `(first tier${m.tiers[0] ? `: ${m.tiers[0].name}` : ''})` : `(the agent's${(m.seats.agent || m.tiers[0]?.name) ? `: ${m.seats.agent || m.tiers[0].name}` : ''})`}</option>{m.tiers.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}</select></td>
+              <td><select value={m.seats[s.id] ?? ''} onChange={(e) => set({ seats: { ...m.seats, [s.id]: e.target.value } })}><option value="">{s.id === 'handover' ? '(the next tier up)' : !s.chat ? (s.id === 'web_search' ? offOrAgentSearch : '(off)') : s.id === 'agent' ? `(first tier${m.tiers[0] ? `: ${m.tiers[0].name}` : ''})` : `(the agent's${(m.seats.agent || m.tiers[0]?.name) ? `: ${m.seats.agent || m.tiers[0].name}` : ''})`}</option>{m.tiers.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}</select></td>
               <td className="muted">{s.help}</td></tr>)}
           </tbody></table>
         </>}
