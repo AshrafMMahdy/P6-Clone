@@ -56,7 +56,7 @@ function serveFolder(dir: string): Promise<{ server: Server; base: string }> {
 }
 
 export type Progress = (done: number, total: number, note: string) => Promise<void>;
-type Evaluate = (expression: string, awaitPromise?: boolean) => Promise<unknown>;
+export type Evaluate = (expression: string, awaitPromise?: boolean) => Promise<unknown>;
 
 /** Load the viewer page headless and run work against it (evaluate expressions in the page). onProgress may throw (a
  *  cancelled job): the browser is closed and the error passes through.
@@ -221,14 +221,17 @@ export async function probeRenderer(chromium: string, modelBytes = 0): Promise<R
   return r.renderer;
 }
 
-/** PNG frames at the dates, one page call each, with progress (and cancellation) between frames. */
-export async function renderPngs(evaluate: Evaluate, dates: string[], onProgress: Progress, alive?: Alive): Promise<Buffer[]> {
+/** PNG frames at the dates, one page call each, with progress (and cancellation) between frames. With `each`, a frame goes to it
+ *  the moment it is made (and is not kept here: the answer is empty), and the frames in `skip` (already made) are not drawn. */
+export async function renderPngs(evaluate: Evaluate, dates: string[], onProgress: Progress, alive?: Alive, o: { skip?: ReadonlySet<number>; each?: (i: number, png: Buffer) => void | Promise<void> } = {}): Promise<Buffer[]> {
   const out: Buffer[] = [];
   for (const [i, d] of dates.entries()) {
+    if (o.skip?.has(i)) continue;
     alive?.beat(i, dates.length);
     await onProgress(i, dates.length, `frame ${i + 1} of ${dates.length}`);
     const url = String(await evaluate(`window.P6C4D_API.png(${JSON.stringify(d)})`));
-    out.push(Buffer.from(url.replace(/^data:image\/png;base64,/, ''), 'base64'));
+    const png = Buffer.from(url.replace(/^data:image\/png;base64,/, ''), 'base64');
+    if (o.each) await o.each(i, png); else out.push(png);
   }
   return out;
 }
@@ -254,8 +257,13 @@ export async function whileEncoding<T>(run: Promise<T>, evaluate: Evaluate, onPr
   try { return await Promise.race([run, stop]); } finally { finished = true; }
 }
 
-/** The video encoded in the page; progress is read from the page every half second while it runs. */
-export async function renderVideo(evaluate: Evaluate, o: object, onProgress: Progress, alive?: Alive): Promise<{ mime: string; frames: number; bytes: Buffer }> {
+/** What the page will encode, before any frame is drawn: the frame count, the codec and the encoder's bitrate. */
+export interface VideoPlan { frames: number; mime: string; codec: 'avc' | 'vp9'; bitrate: number; fps: number }
+export const planVideo = (evaluate: Evaluate, o: object) => evaluate(`window.P6C4D_API.plan(${JSON.stringify(o)})`) as Promise<VideoPlan>;
+
+/** One run of frames (o.first, o.count) encoded in the page as a file of its own; progress is read from the page every half
+ *  second while it runs (frames of this run, in `onProgress`'s units). */
+export async function renderSegment(evaluate: Evaluate, o: object, onProgress: Progress, alive?: Alive): Promise<{ mime: string; frames: number; bytes: Buffer }> {
   const run = evaluate(`window.P6C4D_API.encode(${JSON.stringify(o)}).then((r) => { let s = ''; const b = r.bytes; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768)); return { mime: r.mime, frames: r.frames, b64: btoa(s) }; })`) as Promise<{ mime: string; frames: number; b64: string }>;
   const v = await whileEncoding(run, evaluate, onProgress, alive);
   return { mime: v.mime, frames: v.frames, bytes: Buffer.from(v.b64, 'base64') };

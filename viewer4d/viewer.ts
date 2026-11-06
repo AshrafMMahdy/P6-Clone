@@ -559,6 +559,18 @@ const progress = { done: 0, total: 0 };
 /** The hooks answer only once every tile is on the GPU; a model the browser could not hold throws its labelled error. */
 const failedNow = () => { if (failure) throw new Error(`[${failure.code}] ${failure.message}`); };
 const whenLoaded = async () => { failedNow(); await loading.catch(() => failedNow()); };
+type SweepOptions = { from?: string; to?: string; step?: number; fps?: number; width?: number; height?: number; codec?: 'avc' | 'vp9' };
+/** The picture size, frame rate, step and dates of a video, and its frame count (frame i is the date a + i * step, the last held at b). */
+const sweep = (o: SweepOptions) => {
+  const w = (o.width ?? 1280) & ~1, h = (o.height ?? 720) & ~1, fps = o.fps ?? 4, step = (o.step ?? opt.step) * DAY;
+  const a = toMin(o.from ?? null) ?? t0, b = toMin(o.to ?? null) ?? t1;
+  return { w, h, fps, step, a, b, total: Math.floor((b - a) / step + 1e-6) + 1 };
+};
+const videoCodec = async (o: SweepOptions, w: number, h: number) => {
+  const codec = await getFirstEncodableVideoCodec(o.codec === 'vp9' ? ['vp9'] : ['avc', 'vp9'], { width: w, height: h });
+  if (!codec) throw new Error('This browser cannot encode H.264 or VP9 video (WebCodecs).');
+  return codec as 'avc' | 'vp9';
+};
 const api = {
   ready: () => { failedNow(); return loaded; },
   status: () => JSON.parse(JSON.stringify(status)) as Status,
@@ -566,24 +578,32 @@ const api = {
   setDate: (d: string) => { const m = toMin(d); if (m != null) { current = m; render(); } },
   setSource: (s: string) => { opt.left = s; render(); },
   highlight: (list: string[]) => { highlighted.clear(); for (const g of list) { const o = ordinalOfGuid(g); if (o >= 0) highlighted.add(o); } render(); },
-  /** An MP4 (H.264 when the browser can encode it, else WebM/VP9) of the sweep from..to, a frame per step, made here. */
-  encode: async (o: { from?: string; to?: string; step?: number; fps?: number; width?: number; height?: number; codec?: 'avc' | 'vp9' } = {}): Promise<{ bytes: Uint8Array; mime: string; frames: number }> => {
+  /** The sweep from..to a frame per step, without drawing it: how many frames, the codec this browser encodes it with and the
+   *  bitrate the encoder is given (QUALITY_HIGH at this size), from which the caller sizes a segment before the first one is made. */
+  plan: async (o: SweepOptions = {}): Promise<{ frames: number; mime: string; codec: 'avc' | 'vp9'; bitrate: number; fps: number }> => {
     await whenLoaded();
-    const w = (o.width ?? 1280) & ~1, h = (o.height ?? 720) & ~1, fps = o.fps ?? 4, step = (o.step ?? opt.step) * DAY;
+    const s = sweep(o);
+    const codec = await videoCodec(o, s.w, s.h);
+    return { frames: s.total, mime: codec === 'avc' ? 'video/mp4' : 'video/webm', codec, bitrate: (QUALITY_HIGH as unknown as { _toVideoBitrate(c: string, w: number, h: number): number })._toVideoBitrate(codec, s.w, s.h), fps: s.fps };
+  },
+  /** An MP4 (H.264 when the browser can encode it, else WebM/VP9) of the sweep from..to, a frame per step, made here. With
+   *  first and count, only that run of frames (frame i is the date a + i * step): a file of its own, its timestamps from 0,
+   *  every segment starting on a key frame, so the caller can join the segments without encoding again. */
+  encode: async (o: SweepOptions & { first?: number; count?: number } = {}): Promise<{ bytes: Uint8Array; mime: string; frames: number }> => {
+    await whenLoaded();
+    const { w, h, fps, step, a, b, total } = sweep(o);
     resize(w, h);
-    const codec = await getFirstEncodableVideoCodec(o.codec === 'vp9' ? ['vp9'] : ['avc', 'vp9'], { width: w, height: h });
-    if (!codec) throw new Error('This browser cannot encode H.264 or VP9 video (WebCodecs).');
+    const codec = await videoCodec(o, w, h);
+    const first = Math.min(total, Math.max(0, Math.floor(o.first ?? 0))), last = Math.min(total, o.count == null ? total : first + Math.max(1, Math.floor(o.count)));
     const output = new Output({ format: codec === 'avc' ? new Mp4OutputFormat() : new WebMOutputFormat(), target: new BufferTarget() });
     const frame = document.createElement('canvas'); frame.width = w; frame.height = h;
     const src = new CanvasSource(frame, { codec, bitrate: QUALITY_HIGH });
     output.addVideoTrack(src, { frameRate: fps });
     await output.start();
-    const a = toMin(o.from ?? null) ?? t0, b = toMin(o.to ?? null) ?? t1;
-    let n = 0;
-    progress.done = 0; progress.total = Math.floor((b - a) / step + 1e-6) + 1;
-    for (let m = a; m <= b + 1e-6; m += step) { failedNow(); current = Math.min(m, b); render(); frame.getContext('2d')!.drawImage(composite(), 0, 0); await src.add(n / fps, 1 / fps); n++; progress.done = n; }
+    progress.done = 0; progress.total = last - first;
+    for (let n = first; n < last; n++) { failedNow(); current = Math.min(a + n * step, b); render(); frame.getContext('2d')!.drawImage(composite(), 0, 0); await src.add((n - first) / fps, 1 / fps); progress.done = n - first + 1; }
     await output.finalize();
-    return { bytes: new Uint8Array((output.target as BufferTarget).buffer!), mime: codec === 'avc' ? 'video/mp4' : 'video/webm', frames: n };
+    return { bytes: new Uint8Array((output.target as BufferTarget).buffer!), mime: codec === 'avc' ? 'video/mp4' : 'video/webm', frames: last - first };
   },
   /** One frame as PNG (data URL) at a date. */
   png: (d?: string) => { failedNow(); if (!loaded) throw new Error('The 4D model has not finished loading (P6C4D_API.ready() is still false).'); if (d) api.setDate(d); render(); return composite().toDataURL('image/png'); },

@@ -10,7 +10,7 @@ import { cachedModel, fileHash, ifcOf, loadModel, loadNeeds, modelBytes, release
 import { checkRevitSize, isRevit, REVIT_MEMORY_PER_BYTE, RevitDiskFull, RevitTooLarge, rvtCached } from '../core/bim/rvt.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
-import { admit, countMemory, effectiveBudget, fail, freeMemory, pathArg, readFenced, reserveMemory, sessions, type Session } from './runtime.ts';
+import { admit, countMemory, effectiveBudget, fail, ToolError, freeMemory, pathArg, readFenced, reserveMemory, sessions, type Session } from './runtime.ts';
 
 // a server with a storage root reads an .nwf's models only beside it and inside the root (realpath checked by pathArg)
 fenceListedModels(() => (readFenced() ? (p) => { try { pathArg(p); return true; } catch { return false; } } : null));
@@ -28,8 +28,9 @@ import { applyImport as applyImport4d, planImport as planImport4d } from '../cor
 import { readImport4dWatched } from '../core/bim/read4d.ts';
 import { runSynchroCloud, SYNCHRO_CLOUD_TOOL } from './synchroCloud.ts';
 import { diffIndexes } from '../core/bim/diff.ts';
-import { chromiumPath, ffmpegPath, inChromium, isGpuFailure, noteGpuFailure, probeRenderer, RenderFailed, renderPngs, renderVideo, webmToMp4, type Renderer } from '../core/bim/headless.ts';
+import { chromiumPath, ffmpegPath, inChromium, isGpuFailure, noteGpuFailure, planVideo, probeRenderer, RenderFailed, renderPngs, renderSegment, webmToMp4, type Renderer, type VideoPlan } from '../core/bim/headless.ts';
 import { aboutMinutes, planRender, renderMinutes } from '../core/bim/renderplan.ts';
+import { fingerprintDiff, hashOf, joinSegments, keptPicture, moveInto, Parts, segmentFrames, verifyVideo } from '../core/bim/renderParts.ts';
 import { StuckError } from '../core/bim/liveness.ts';
 import { activityCosts, earnedValue } from '../core/cost/rollup.ts';
 import { mkdtempSync, writeFileSync as writeRaw } from 'node:fs';
@@ -53,7 +54,7 @@ export const FOURD_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<s
   { name: 'simulate_4d', annotations: ro, description: 'The 4D state of the model on dates: element counts by state (not started, in progress, complete, removed, temporary in place, unlinked), optionally by storey or class, and the activities under way in each step. date, or from/to/step (days). source: best (default: actuals up to the data date, then the forecast), planned, actual, late, or a saved baseline name. Dates come from the schedule itself (F9: calendars, actuals, data date). snapshots: [dates] renders PNG frames into path (needs the server’s P6CLONE_CHROMIUM; without it, use render_4d kind viewer and look at it). Reads the project only.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, source: { type: 'string' }, by: { type: 'string' }, snapshots: { type: 'array', items: { type: 'string' } }, path: { type: 'string' }, view: { type: 'string' } } }) },
   { name: 'compare_4d', annotations: ro, description: 'Progress against a baseline on a date, element by element (TimeLiner Early/Late appearance): ahead, on time, late, not started, complete. late_means start (default: started later than the baseline, as TimeLiner) or finish (finished later). by storey (default), class or wbs: counts and percentages per zone, the elements behind each late figure (max_ids), planned value vs earned value per zone (each activity\u2019s PV/EV shared over its elements), and the activities that became or stopped being critical since the baseline.', inputSchema: withHandle({ type: 'object', properties: { project, date: { type: 'string' }, against: { type: 'string' }, late_means: { type: 'string' }, by: { type: 'string' }, max_ids: { type: 'number' } }, required: ['against'] }) },
   { name: 'set_element_status', annotations: edit, description: 'Element-level progress from site (walkdowns, reality capture): guids, status installed | in_progress | not_installed, date. It overrides the activity\u2019s progress for those elements in simulate_4d, compare_4d and the viewer (actual and best dates), and proposes each touched activity\u2019s % complete from its installed share; apply_percent: true writes it. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, guids: { type: 'array', items: { type: 'string' } }, status: { type: 'string' }, date: { type: 'string' }, apply_percent: { type: 'boolean' } }, required: ['guids', 'status', 'date'] }) },
-  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people, from the FULL geometry (display tiles; docs/4d-tiles-contract.md). kind viewer (default): an HTML viewer in the folder path (index.html, viewer4d.js, and the model\u2019s tiles in model-<hash>/: manifest.json, tile-NNNNN.glb, elements.txt), or one self-contained file with embed: true (models up to P6CLONE_EMBED_MAX_MB, 64 MB of tiles; past it too_big_to_embed); it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or a video rendered in a headless Chromium (the server’s P6CLONE_CHROMIUM; a tool argument never names a program). format mp4 (default: H.264 from the browser, or its WebM converted with the server’s P6CLONE_FFMPEG; without ffmpeg the WebM is returned with a note) or webm. Progress per frame; cancel_job stops it; without one the answer gives the viewer page (self-contained for a small model, else with its model-<hash>/ tile folder beside it, every file in written) and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). A browser that cannot hold the model fails the render in words naming its size (render_failed); boxes: true draws each element as its bounding box, only when asked. quality (images, video): auto (default), draft (854x480, each element a simple box: quick on any machine), standard (full geometry, 1280x720) or high (1920x1080); auto is standard unless that would take longer than about 5 minutes (owner decision 2026-10-27) where it is drawn (this server’s graphics card when it has one, else its processor, much slower on a big model; with no Chromium here, the user’s own graphics card through the client render), then draft; pass quality to override. There is no time limit on a render: it runs while frames keep arriving or the browser keeps working, and is reported stuck only after it shows no life for several minutes. If the graphics card cannot finish (its memory, its driver, WebGL), the render is made again once with the processor, quality and estimate worked out again; any other failure (the machine’s memory, the disk, a stuck browser) is reported with its cause and the next step (a smaller quality first). The answer gives quality, estimated_minutes, renderer and, when the user should hear it, quality_note: ALWAYS tell the user what quality_note says, in plain words (a draft is a quick preview by choice, not how their model looks; standard gives the full detail and how long it takes), so a simplified video is never taken for the model’s real quality. drawn: what was actually drawn ({geometry: full or boxes, width, height}); quality is the picture size, so boxes: true at standard size is still boxes (the quality_note says so). layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps (below 1 holds frames longer) or seconds_per_frame, file_name, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, format: { type: 'string', enum: ['mp4', 'webm'] }, seconds_per_frame: { type: 'number' }, file_name: { type: 'string' }, boxes: { type: 'boolean' }, quality: { type: 'string', enum: ['auto', 'draft', 'standard', 'high'] } }, required: ['path'] }) },
+  { name: 'render_4d', annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, description: 'The 4D model for people, from the FULL geometry (display tiles; docs/4d-tiles-contract.md). kind viewer (default): an HTML viewer in the folder path (index.html, viewer4d.js, and the model\u2019s tiles in model-<hash>/: manifest.json, tile-NNNNN.glb, elements.txt), or one self-contained file with embed: true (models up to P6CLONE_EMBED_MAX_MB, 64 MB of tiles; past it too_big_to_embed); it plays the schedule, switches sources, and exposes WHIQ4D_EXPORT hooks for a client render. kind images / video: PNG frames or a video rendered in a headless Chromium (the server’s P6CLONE_CHROMIUM; a tool argument never names a program). format mp4 (default: H.264 from the browser, or its WebM converted with the server’s P6CLONE_FFMPEG; without ffmpeg the WebM is returned with a note) or webm. Progress per frame; cancel_job stops it; without one the answer gives the viewer page (self-contained for a small model, else with its model-<hash>/ tile folder beside it, every file in written) and a client_render request so it is rendered on a GPU (the platform\u2019s client render, or the desktop app). A browser that cannot hold the model fails the render in words naming its size (render_failed); boxes: true draws each element as its bounding box, only when asked. quality (images, video): auto (default), draft (854x480, each element a simple box: quick on any machine), standard (full geometry, 1280x720) or high (1920x1080); auto is standard unless that would take longer than about 5 minutes (owner decision 2026-10-27) where it is drawn (this server’s graphics card when it has one, else its processor, much slower on a big model; with no Chromium here, the user’s own graphics card through the client render), then draft; pass quality to override. There is no time limit on a render: it runs while frames keep arriving or the browser keeps working, and is reported stuck only after it shows no life for several minutes. If the graphics card cannot finish (its memory, its driver, WebGL), the render is made again once with the processor, quality and estimate worked out again; any other failure (the machine’s memory, the disk, a stuck browser) is reported with its cause and the next step (a smaller quality first). The answer gives quality, estimated_minutes, renderer and, when the user should hear it, quality_note: ALWAYS tell the user what quality_note says, in plain words (a draft is a quick preview by choice, not how their model looks; standard gives the full detail and how long it takes), so a simplified video is never taken for the model’s real quality. drawn: what was actually drawn ({geometry: full or boxes, width, height}); quality is the picture size, so boxes: true at standard size is still boxes (the quality_note says so). layout single or side_by_side (left: baseline name, right: best; one camera, one date), compare: true colours the right side against left (ahead blue, on time green, late red). from, to, step (days per frame), fps (below 1 holds frames longer) or seconds_per_frame, file_name, width, height, view (iso, top, front, side), growth (none, bottom_up, top_down, left_right, right_left: elements appear in that order within their activity), overlays (date, legend, activity_list, gantt_strip, s_curve). A render that fails part-way can be continued: a video is made in segments (each as many frames as the tile memory budget, P6CLONE_TILE_MB, holds) and images one by one, each written to disk the moment it is done, with a render.json beside them in <path>/<file_name>.parts/ (the arguments, a fingerprint of everything that changes the picture, the frames done). The render_failed error then carries frames_done, frames_total, kept_segments (video) or kept (images), reason and resume: call render_4d again with the same arguments and resume set to that path, and only the missing frames are made and joined with the kept ones into the one video (joined without encoding again and checked frame by frame; the .parts folder is removed after). If anything that changes the picture differs from what was kept (the model, the schedule or its links, a source, an option) the call is refused with resume_mismatch saying what changed: render afresh (without resume; the kept parts are replaced).', inputSchema: withHandle({ type: 'object', properties: { project, kind: { type: 'string' }, resume: { type: 'string', description: 'images, video: the resume path of a failed render_4d (its render.json), to make only the frames still missing; same arguments as that call' }, path: { type: 'string' }, embed: { type: 'boolean' }, layout: { type: 'string' }, left: { type: 'string' }, right: { type: 'string' }, compare: { type: 'boolean' }, from: { type: 'string' }, to: { type: 'string' }, step: { type: 'number' }, fps: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, view: { type: 'string' }, growth: { type: 'string' }, overlays: { type: 'array', items: { type: 'string' } }, format: { type: 'string', enum: ['mp4', 'webm'] }, seconds_per_frame: { type: 'number' }, file_name: { type: 'string' }, boxes: { type: 'boolean' }, quality: { type: 'string', enum: ['auto', 'draft', 'standard', 'high'] } }, required: ['path'] }) },
   { name: 'relink_model', annotations: edit, description: 'Bring the 4D links over to a revised model (M4). Each linked element is found in the new model by its GlobalId; else, in the same IFC class, by name and storey (the nearest one when there are several), else by shape (size and position within tolerance_m, default 0.05). Answers what was kept, matched (and how), and lost (no counterpart: those links are dropped), plus the model diff summary (added, removed, modified, re-identified). dry_run: true only reports. One undoable change.', inputSchema: withHandle({ type: 'object', properties: { project, path: { type: 'string' }, tolerance_m: { type: 'number' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
   SYNCHRO_CLOUD_TOOL(withHandle, project),
 ];
@@ -447,8 +448,14 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const renderer = chrome ? await probeRenderer(chrome, manifest.bytes) : null;
       const span = (() => { const f = parseP6Date(a.from ? String(a.from) : timeline.start ?? ''), t = parseP6Date(a.to ? String(a.to) : timeline.finish ?? ''); return f != null && t != null && t >= f ? t - f : 30 * 1440; })();
       const frames = Math.min(kind === 'images' ? 500 : 100_000, Math.floor(span / (options.step! * 1440)) + 1);
-      const planFor = (drawing: 'gpu' | 'software', fellBack?: { reason: string; firstMinutes: number }) => planRender({ kind: drawing, client: !chrome, ...(renderer?.kind === 'gpu' ? { gpuName: renderer.name } : {}), ...(fellBack ? { fellBack } : {}), asked: asked as 'auto' | 'draft' | 'standard' | 'high', boxes: a.boxes === true, triangles: manifest.triangles, tileBytes: manifest.bytes, elements: m.index.elements.length, frames, sides: layout === 'side_by_side' ? 2 : 1, width: Number(a.width) || undefined, height: Number(a.height) || undefined });
-      let plan = planFor(chrome ? renderer?.kind ?? 'software' : 'gpu');
+      const planFor = (drawing: 'gpu' | 'software', fellBack?: { reason: string; firstMinutes: number }, pin?: { quality: string; boxes: boolean; width: number; height: number }) => planRender({ kind: drawing, client: !chrome, ...(renderer?.kind === 'gpu' ? { gpuName: renderer.name } : {}), ...(fellBack ? { fellBack } : {}), asked: (pin ? pin.quality : asked) as 'auto' | 'draft' | 'standard' | 'high', boxes: pin ? pin.boxes : a.boxes === true, triangles: manifest.triangles, tileBytes: manifest.bytes, elements: m.index.elements.length, frames, sides: layout === 'side_by_side' ? 2 : 1, width: pin ? pin.width : Number(a.width) || undefined, height: pin ? pin.height : Number(a.height) || undefined });
+      // a resume adopts the picture the kept render was drawn with for what the caller left to auto (quality, size, boxes): auto is
+      // never decided again, so a load or a remembered card failure that would now pick another plan cannot refuse the resume.
+      // What the caller gave is used as given (and a difference is a resume_mismatch)
+      const kept = kind !== 'viewer' && a.resume != null ? keptPicture(pathArg(a.resume, 'resume', 'write')) : null;
+      const adopt = kept ? { quality: asked !== 'auto' ? asked : kept.quality, boxes: a.boxes === true || (a.boxes == null && kept.boxes), width: Number(a.width) || kept.width, height: Number(a.height) || kept.height } : undefined;
+      let plan = planFor(chrome ? renderer?.kind ?? 'software' : 'gpu', undefined, adopt);
+      if (adopt && asked === 'auto' && plan.quality === kept!.quality) plan = { ...plan, note: `${plan.note ? `${plan.note} ` : ''}Continuing a kept render: quality ${kept!.quality} (${kept!.width}x${kept!.height}${kept!.boxes ? ', boxes' : ''}) is the one it was drawn with, not decided again.`.trim() };
       const linked = timeline.elements.linked;
       const display = () => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances, ...(plan.boxes ? { boxes: true } : {}) }; };
       const tooBig = (e: unknown) => { if (e instanceof EmbedTooBig) return fail('too_big_to_embed', e.message, 'Leave embed out: the viewer is written as a page with the model’s tiles in a folder beside it (served together).'); throw e; };
@@ -470,21 +477,59 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const writePage = () => writeViewer({ dir: pageDir, model, timeline, options, title, embed: small || plan.boxes, inlineScript: true, boxes: plan.boxes, file: `${options.title}-4D-render.html` });
       let pageFiles = writePage();
       let page = pageFiles[0];
-      try {
-      if (!chrome) return { kind, rendered: false, ...how(), viewer: page, ...(pageFiles.length > 1 ? { written: pageFiles } : {}), display: display(), client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width: plan.width, height: plan.height, ...(pageFiles.length > 1 ? { model_folder: dirname(pageFiles[1]), files: pageFiles.slice(1), contract: 'docs/4d-tiles-contract.md (p6c-4d-tiles v1)' } : {}) }, note: `No Chromium here (the server’s P6CLONE_CHROMIUM is not set), so nothing was rendered: the viewer page is written${pageFiles.length > 1 ? ' with the model’s tiles in a folder beside it' : ' (self-contained)'}; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform’s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.` };
-      if (m.index.elements.length > 200_000) compactHeap(); // the timeline's garbage goes before the browser takes its memory
-      await h.tick(0, 1, `loading the model (${display().mb} MB in ${display().tiles} tiles) in Chromium`);
+      let parts = null as Parts | null, resumed = 0, checking = false;
       // a render the browser could not finish: the cause, and the next step. Smaller quality first is the general retry
       const failed = (e: unknown) => {
-        if (!(e instanceof RenderFailed)) throw e;
+        // a cancelled render keeps what it made: a partial answer (the job ends 'cancelled' with this result), as a failure's data says
+        if ((e as { code?: string } | null)?.code === 'cancelled' && parts) {
+          if (!parts.framesDone) parts.discard();
+          else { const k = parts.report(); return { kind, rendered: false, partial: true, stopped: 'cancelled', ...k, note: `Cancelled with ${k.frames_done} of ${k.frames_total} frames kept: to continue, call render_4d again with the same arguments and resume: "${k.resume}" (only the missing frames are made).` }; }
+        }
+        // any other stop after work was kept (a file that could not be written, a join that failed) says so too; a tool error that is
+        // already worded (a refused resume, a failed join) goes on as it is
+        if (e instanceof ToolError) throw e;
+        if (!(e instanceof RenderFailed)) {
+          if (!parts || !parts.framesDone) { parts?.discard(); throw e; }
+          const k = parts.report();
+          return fail('render_failed', `The render stopped: ${(e as Error).message}`, `${k.frames_done} of ${k.frames_total} frames are kept: fix the cause, then call render_4d again with the same arguments and resume: "${k.resume}" (only the missing frames are made).`, { data: { cause: (e as Error).message, ...k, ...(parts.redrawn.length ? { redrawn: parts.redrawn } : {}) } });
+        }
         const smaller = plan.boxes ? '' : 'Try a smaller quality first (quality: "draft", each element a simple box at 854x480)';
         const lead = fellBack ? `The graphics card could not finish the render (${gpuWhy}), and the render with the processor then failed too: ` : '';
         const next = e.code === 'render_stuck' ? `${smaller ? `${smaller}; ` : ''}if the server's graphics card hangs, an administrator can set P6CLONE_RENDER_GPU=off (the processor draws); or render on a machine with a working graphics card.`
           : e.code === 'disk_full' ? 'Free disk space on the server (the browser profile and the render page are in its temp folder), then retry.'
           : e.code ? `${smaller ? `${smaller}; if that fails too, ` : ''}the browser could not hold the model (${e.code}): ${roomFor(e.code)}${plan.boxes ? '' : ', or ask for boxes: true (each element drawn as its bounding box)'}.`
           : `${smaller ? `${smaller}; if that fails too, c` : 'C'}heck the server’s P6CLONE_CHROMIUM (a Chromium or Chrome executable), or render on a GPU with the client_render route.`;
-        return fail('render_failed', `${lead}${e.message}`, next, e.code ? { data: { reason: e.code, ...(e.stuck ? { stuck: e.stuck } : {}), ...(fellBack ? { graphics_card_failed: gpuWhy } : {}) } } : undefined);
+        // what was made before it stopped is kept: the answer says how far it got and how to continue
+        const kept = parts && parts.framesDone > 0 ? parts.report() : null;
+        if (parts && !kept) parts.discard();
+        const cont = kept ? ` ${kept.frames_done} of ${kept.frames_total} frames are kept (${kind === 'video' ? 'segments' : 'images'} written): to continue, call render_4d again with the same arguments and resume: "${kept.resume}" (only the missing frames are made).` : '';
+        return fail('render_failed', `${lead}${e.message}`, next + cont, e.code || kept ? { data: { ...(e.code ? { reason: e.code } : {}), ...(e.stuck ? { stuck: e.stuck } : {}), ...(fellBack ? { graphics_card_failed: gpuWhy } : {}), cause: e.message, ...(kept ?? {}), ...(kept && parts!.redrawn.length ? { redrawn: parts!.redrawn } : {}) } } : undefined);
       };
+      try {
+      if (!chrome) return { kind, rendered: false, ...how(), viewer: page, ...(pageFiles.length > 1 ? { written: pageFiles } : {}), display: display(), client_render: { artifact: page, hooks: 'WHIQ4D_EXPORT', step: options.step, width: plan.width, height: plan.height, ...(pageFiles.length > 1 ? { model_folder: dirname(pageFiles[1]), files: pageFiles.slice(1), contract: 'docs/4d-tiles-contract.md (p6c-4d-tiles v1)' } : {}) }, note: `No Chromium here (the server’s P6CLONE_CHROMIUM is not set), so nothing was rendered: the viewer page is written${pageFiles.length > 1 ? ' with the model’s tiles in a folder beside it' : ' (self-contained)'}; render it on a GPU with the WHIQ4D_EXPORT hooks (the platform’s client render) or the desktop app (Extensions > 4D > Video), or call P6C4D_API.encode() in a browser.` };
+      // continuing a render: the parts folder <path>/<name>.parts/ holds what a failed one made (core/bim/renderParts.ts)
+      const keep = <T>(f: () => T): T => { try { return f(); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOSPC') throw new RenderFailed('Writing the render\u2019s files failed: the disk is full.', 'disk_full'); throw e; } };
+      const put = (p: string, d: string | Uint8Array) => keep(() => h.writeOut(p, d));
+      const partsDir = join(dir, `${name}.parts`);
+      const vp9 = format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1';
+      const { handle: _h, owner_key: _k, caller: _c, async: _a, resume: _r, ...args } = a;
+      const timelineHash = hashOf(timeline);
+      // everything that changes a pixel or the cut into frames (not who draws it, nor how the video is cut into segments)
+      const fingerprint = (): Record<string, unknown> => JSON.parse(JSON.stringify({ kind, name, format, codec: vp9 ? 'vp9' : 'avc', model: m.hash, timeline: timelineHash, layout, left: options.left, right: options.right, compare: options.compare, step: options.step, growth, overlays: options.overlays, view: options.view, from: a.from ?? null, to: a.to ?? null, fps, width: plan.width, height: plan.height, boxes: plan.boxes, quality: plan.quality }));
+      if (a.resume != null) {
+        const file = pathArg(a.resume, 'resume', 'write');
+        const kept0 = await Parts.load(file, put);
+        if (!kept0) return fail('resume_unreadable', `There is nothing to continue at "${String(a.resume)}" (no render.json there; a render that finished removes its parts).`, 'Render afresh: call render_4d again without resume.');
+        const mismatch = (changed: string[]) => fail('resume_mismatch', `The kept render is not this one: ${changed.join('; ')}.`, 'Render afresh: call render_4d again without resume (the kept parts are replaced), or give the arguments the failed call had.', { data: { changed, resume: kept0.manifestPath } });
+        if (kept0.m.kind !== kind) mismatch([`kind was ${kept0.m.kind}, now ${kind}`]);
+        if (kept0.manifestPath !== join(partsDir, 'render.json')) mismatch([`path or file_name changed (the kept render is in ${kept0.dir})`]);
+        const changed = fingerprintDiff(kept0.m.fingerprint, fingerprint());
+        if (changed.length) mismatch(changed);
+        if (kept0.redrawn.length) kept0.save();
+        parts = kept0; resumed = kept0.framesDone; checking = true;
+      }
+      if (m.index.elements.length > 200_000) compactHeap(); // the timeline's garbage goes before the browser takes its memory
+      await h.tick(0, 1, `loading the model (${display().mb} MB in ${display().tiles} tiles) in Chromium`);
       const onLoad = (d: number, t: number) => h.tick(d, Math.max(1, t), `loading tile ${d} of ${t} in Chromium`);
       // the graphics card when the probe found one. A render it could not finish because of the card (its memory, its
       // driver, WebGL: isGpuFailure) goes again with the processor drawing, once, with quality and estimate worked out
@@ -497,7 +542,11 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
           noteGpuFailure(chrome, e, manifest.bytes); // the next renders in this process go straight to the processor
           gpuWhy = e.message.slice(0, 160);
           const was = plan;
-          plan = planFor('software', { reason: gpuWhy, firstMinutes: was.minutes });
+          // frames already kept keep their picture (size, boxes): the processor draws the rest the same way, only slower, and the
+          // estimate and the note say so. With none kept, quality and size are worked out again for the processor.
+          const keptNow = parts && parts.framesDone > 0;
+          plan = planFor('software', { reason: gpuWhy, firstMinutes: was.minutes }, keptNow ? { quality: was.quality, boxes: was.boxes, width: was.width, height: was.height } : undefined);
+          if (keptNow) plan = { ...plan, note: `${plan.note ?? ''} The ${parts!.framesDone} frames already made keep their picture (${was.width}x${was.height}${was.boxes ? ', boxes' : ''}), so the rest is drawn the same way.`.trim() };
           fellBack = { kind: 'software', name: `SwiftShader, after the graphics card could not finish: ${gpuWhy}` };
           if (plan.boxes !== was.boxes) { pageFiles = writePage(); page = pageFiles[0]; } // a draft is boxes: the page is made again
           await h.tick(0, 1, `the graphics card could not finish the render: drawing it with the processor (${aboutMinutes(plan.minutes)})`);
@@ -508,27 +557,84 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       // inChromium has no fixed time limit: it watches the render's ticks (tiles, frames; the first frame is bounded by 10 x the estimate, never the browser's processor time)
       const triedBefore = () => (fellBack ? `the graphics card (it could not finish: ${gpuWhy}), then the processor (software rendering)` : renderer?.kind === 'gpu' ? 'the graphics card' : 'the processor (software rendering)');
       const chromeOpts = (gpu: boolean) => ({ width: plan.width, height: plan.height, onLoad, what: what(), gpu, frameMs: (plan.minutes * 60_000) / Math.max(1, frames), tried: triedBefore, ...(plan.boxes ? {} : { next: 'ask for quality "draft" or boxes: true (each element drawn as its bounding box, much faster); render on a machine with a working graphics card (the client_render route); split the model (by discipline or level) or export it as NWC or IFC in smaller parts' }) });
+      // test only: the render fails once (per call) when this many frames are done and more are still to make, with the code
+      // P6CLONE_TEST_FAIL_CODE (default test_failure; a graphics card code makes the fall back to the processor run)
+      const failAt = Number(process.env.P6CLONE_TEST_FAIL_AT_FRAME);
+      let failed1 = false;
+      const testFail = (p: Parts) => { if (!failed1 && Number.isFinite(failAt) && failAt > 0 && p.framesDone >= failAt && p.missing().length) { failed1 = true; throw new RenderFailed(`Test: the render was made to fail after ${p.framesDone} frames (P6CLONE_TEST_FAIL_AT_FRAME).`, process.env.P6CLONE_TEST_FAIL_CODE || 'test_failure'); } };
+      // the parts for the plan as it is now: those kept are used when it is the same render, else (a fall back to the processor
+      // drew another size, or boxes) they are not the same pictures and the render starts again
+      const begin = (framesTotal: number, extra: { mime?: string; fps?: number } = {}): Parts => {
+        const fp = fingerprint();
+        if (parts) {
+          const changed = [...fingerprintDiff(parts.m.fingerprint, fp), ...(parts.m.frames_total !== framesTotal ? [`frames_total was ${parts.m.frames_total}, now ${framesTotal}`] : []), ...(extra.mime && parts.m.mime && parts.m.mime !== extra.mime ? [`the browser now encodes ${extra.mime}, the kept segments are ${parts.m.mime}`] : [])];
+          if (changed.length && checking) fail('resume_mismatch', `The kept render is not this one: ${changed.join('; ')}.`, 'Render afresh: call render_4d again without resume (the kept parts are replaced).', { data: { changed, resume: parts.manifestPath } });
+          // (frames already made are never thrown away here: a fall back keeps their picture, see onRenderer; so a plan that still differs refuses)
+          if (changed.length && parts.framesDone) fail('resume_mismatch', `The frames kept (${parts.framesDone}) were drawn for another picture than this one: ${changed.join('; ')}.`, `Nothing was removed. Call render_4d again with resume: "${parts.manifestPath}" and the arguments the kept frames were drawn with, or without resume to render afresh (the kept parts are then replaced).`, { data: { changed, ...parts.report() } });
+          if (changed.length) { parts = null; resumed = 0; }
+        }
+        checking = false;
+        return parts ??= Parts.create(partsDir, { kind: kind as 'images' | 'video', arguments: args, fingerprint: fp, frames_total: framesTotal, ...extra }, put);
+      };
       if (kind === 'images') {
         const from = parseP6Date(a.from ? String(a.from) : timeline.start ?? '')!, to = parseP6Date(a.to ? String(a.to) : timeline.finish ?? '')!;
         const dates: string[] = []; for (let d = from; d <= to && dates.length < 500; d += options.step! * 1440) dates.push(formatP6Date(d));
-        let pngs: Buffer[];
-        try { pngs = await onRenderer((gpu) => inChromium(chrome, page, (ev, alive) => renderPngs(ev, dates, h.tick, alive), chromeOpts(gpu))); } catch (e) { return failed(e); }
-        return { kind, rendered: true, ...how(), display: display(), written: pngs.map((png, i) => { const p = join(dir, `${name}-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`); h.writeOut(p, png); return p; }) };
+        const fileOf = (i: number) => join(dir, `${name}-${String(i).padStart(4, '0')}-${dates[i].slice(0, 10)}.png`);
+        // (a kept frame counts only under the name this render gives it, in this folder)
+        if (parts) { const bad = parts.m.images.filter((i) => i.file !== fileOf(i.index)); if (bad.length) { parts.redrawn.push(...bad.map((i) => `frame ${i.index + 1} is not at the place this render writes it`)); parts.m.images = parts.m.images.filter((i) => !bad.includes(i)); parts.save(); resumed = parts.framesDone; } }
+        const run = (gpu: boolean) => {
+          const p = begin(dates.length);
+          // each frame is written to its final place the moment it is made, then the manifest says so
+          return inChromium(chrome, page, (ev, alive) => renderPngs(ev, dates, h.tick, alive, { skip: new Set(p.m.images.map((i) => i.index)), each: (i, png) => { put(fileOf(i), png); keep(() => p.addImage(i, fileOf(i))); testFail(p); } }), chromeOpts(gpu));
+        };
+        if (!parts || parts.missing().length) await onRenderer(run);
+        parts!.discard();
+        return { kind, rendered: true, ...how(), display: display(), written: dates.map((_, i) => fileOf(i)), ...(resumed ? { resumed_frames: resumed } : {}), ...(parts!.redrawn.length ? { redrawn: parts!.redrawn, redrawn_note: 'Kept parts that did not check out were drawn again.' } : {}) };
       }
-      let v: { mime: string; frames: number; bytes: Buffer };
-      try { v = await onRenderer((gpu) => inChromium(chrome, page, (ev, alive) => renderVideo(ev, { from: a.from, to: a.to, step: options.step, fps, width: plan.width, height: plan.height, ...(format === 'webm' || process.env.P6CLONE_RECORD_WEBM === '1' ? { codec: 'vp9' } : {}) }, h.tick, alive), chromeOpts(gpu))); } catch (e) { return failed(e); }
+      // the video: segments, each a file of its own as soon as it is made (the page encodes a run of frames: P6C4D_API.encode
+      // with first and count), as many frames as the tile memory budget holds at the bytes a frame has taken so far; then
+      // joined without encoding again
+      const req = { from: a.from, to: a.to, step: options.step, fps, width: plan.width, height: plan.height, ...(vp9 ? { codec: 'vp9' } : {}) };
+      const makeSegments = (gpu: boolean) => inChromium(chrome, page, async (ev, alive) => {
+        const vp: VideoPlan = await planVideo(ev, req);
+        const p = begin(vp.frames, { mime: vp.mime, fps });
+        for (let next = p.missing()[0]; next; next = p.missing()[0]) {
+          testFail(p);
+          const first = next[0], count = Math.min(next[1], segmentFrames(p.m.segments, vp.bitrate, fps)), before = p.framesDone;
+          alive.step(`drawing frames ${first + 1} to ${first + count} of ${vp.frames} in the page`, { expectMs: chromeOpts(gpu).frameMs });
+          const seg = await renderSegment(ev, { ...req, first, count }, (d) => h.tick(before + d, vp.frames, `frame ${before + d} of ${vp.frames}`), alive);
+          if (seg.frames !== count || seg.mime !== vp.mime) throw new RenderFailed(`The page made ${seg.frames} frames of ${seg.mime} for a segment of ${count} frames of ${vp.mime}.`);
+          keep(() => p.addSegment(first, seg.bytes, seg.frames, seg.mime));
+          await h.tick(p.framesDone, vp.frames, `frame ${p.framesDone} of ${vp.frames}`);
+        }
+      }, chromeOpts(gpu));
+      if (!parts || parts.missing().length) await onRenderer(makeSegments);
+      const p = parts!, total = p.m.frames_total, segs = p.sortedSegments();
+      // the join (no encoding): every segment's packets into one file, checked before anything is removed
+      const unjoined = (why: string, reason: string) => fail('render_failed', `The segments were made but could not be joined into the video: ${why}.`, `The ${segs.length} segments are kept; call render_4d again with the same arguments and resume: "${p.manifestPath}" (nothing is drawn again), or join them with another tool.`, { data: { reason, ...p.report() } });
+      if (process.env.P6CLONE_TEST_JOIN_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.P6CLONE_TEST_JOIN_DELAY_MS))); // test only: a moment to cancel in
+      await h.tick(total, total, `joining ${segs.length} segment${segs.length === 1 ? '' : 's'} into one video`);
+      let mime = p.m.mime!, joined = join(p.dir, `joined.${mime.includes('mp4') ? 'mp4' : 'webm'}`);
+      try { await joinSegments(segs.map((x) => ({ file: join(p.dir, x.file), first: x.first })), joined, { mime, fps }); } catch (e) { return unjoined((e as Error).message, 'join_failed'); }
+      const bad = await verifyVideo(joined, { frames: total, fps, segments: segs.length });
+      if (bad) return unjoined(bad, 'join_unverified');
       let note: string | undefined;
-      // MP4 everywhere: a browser without an H.264 encoder (Chromium for Testing) records WebM, which ffmpeg turns into MP4
-      if (format === 'mp4' && !v.mime.includes('mp4')) {
+      // MP4 everywhere: a browser without an H.264 encoder (Chromium for Testing) records WebM, which ffmpeg turns into MP4 (the whole, after the join)
+      if (format === 'mp4' && !mime.includes('mp4')) {
         if (ffmpegPath()) await h.tick(1, 1, 'converting the WebM to MP4'); // without ffmpeg there is nothing to convert with
-        const mp4 = await webmToMp4(v.bytes, undefined, { frames: v.frames }).catch((e) => { note = `The WebM could not be converted: ${(e as Error).message}`; return null; });
-        if (mp4) v = { mime: 'video/mp4', frames: v.frames, bytes: mp4 };
-        else note ??= ffmpegPath() ? undefined : 'This Chromium has no H.264 encoder and the server has no ffmpeg (P6CLONE_FFMPEG), so the video is WebM. Set P6CLONE_FFMPEG for MP4.';
+        const mp4 = await webmToMp4(readFileSync(joined), undefined, { frames: total }).catch((e) => { note = `The WebM could not be converted: ${(e as Error).message}`; return null; });
+        if (mp4) {
+          const out = join(p.dir, 'joined.mp4');
+          put(out, mp4);
+          const why = await verifyVideo(out, { frames: total, fps, segments: 1 });
+          if (why) note = `The WebM was converted to MP4 but the MP4 is not right (${why}), so the video is the WebM.`; else { joined = out; mime = 'video/mp4'; }
+        } else note ??= ffmpegPath() ? undefined : 'This Chromium has no H.264 encoder and the server has no ffmpeg (P6CLONE_FFMPEG), so the video is WebM. Set P6CLONE_FFMPEG for MP4.';
       }
-      const file = join(dir, `${name}.${v.mime.includes('mp4') ? 'mp4' : 'webm'}`);
-      h.writeOut(file, v.bytes);
-      return { kind, rendered: true, ...how(), written: [file], frames: v.frames, mime: v.mime, fps, size: [plan.width, plan.height], display: display(), ...(note ? { note } : {}) };
-      } finally { if (chrome) rmSync(pageDir, { recursive: true, force: true }); }
+      const file = join(dir, `${name}.${mime.includes('mp4') ? 'mp4' : 'webm'}`);
+      moveInto(joined, file);
+      p.discard();
+      return { kind, rendered: true, ...how(), written: [file], frames: total, mime, fps, size: [plan.width, plan.height], segments: segs.length, ...(resumed ? { resumed_frames: resumed, drawn_frames: total - resumed } : {}), ...(p.redrawn.length ? { redrawn: p.redrawn, redrawn_note: 'Kept parts that did not check out were drawn again.' } : {}), display: display(), ...(note ? { note } : {}) };
+      } catch (e) { return failed(e); } finally { if (chrome) rmSync(pageDir, { recursive: true, force: true }); }
     }
     case 'relink_model': {
       const old = (await modelOf(s.db, projId, true, { geometry: true }))!;
