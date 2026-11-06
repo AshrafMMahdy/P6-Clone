@@ -89,14 +89,16 @@ test('G-6 monte_carlo: inline events (activity and project-level delay), ratio s
   assert.equal((await call('get_activity', { handle: h, activity_id: 'A' })).orig_days, 10, 'the project is not changed');
 });
 
-test('G-6 monte_carlo stops at a cancellation', async () => {
+test('G-6 monte_carlo stops at a cancellation and keeps the iterations done (4L-13: a partial answer, not an error)', async () => {
   const h = (await call('new_project', { id: 'MX', start: '2026-03-02' })).handle;
   await call('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 10 }, { op: 'set_estimates', activity: 'A', min_days: 8, max_days: 14 }] });
   const abort = new AbortController();
   const p = callTool('monte_carlo', { handle: h, iterations: 20000, seed: 1 }, undefined, abort.signal, (done) => { if (done > 50) abort.abort(); });
   const r = await p;
-  assert.equal(r.isError, true);
-  assert.equal((toolResult(r.out, r.isError).structuredContent as any).error.code, 'cancelled');
+  assert.equal(r.isError, false);
+  const d = toolResult(r.out, r.isError).structuredContent as any;
+  assert.equal(d.partial, true); assert.equal(d.stopped, 'cancelled');
+  assert.ok(d.iterations_done > 50 && d.iterations_done < 20000, String(d.iterations_done));
 });
 
 async function crew() {
