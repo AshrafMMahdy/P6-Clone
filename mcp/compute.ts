@@ -20,6 +20,7 @@ import { basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { cwdLost, ensureCwd, markCwdLost, safeCwd } from '../core/cwd.ts';
 import { lobSidecars } from './lob.ts';
+import { unitWatch, workerFloorMs } from '../core/bim/liveness.ts';
 
 type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void };
 interface Snapshot { handle: string; ownerKey: string; db: Session['db']; path: string | null; format: Session['format']; hpd: number; encoding?: Session['encoding']; savedTo?: string; dirty: boolean; bytes: number }
@@ -42,6 +43,10 @@ const idle: { w: Worker; timer: NodeJS.Timeout }[] = [];
 let active = 0;
 const waiting: (() => void)[] = [];
 const IDLE_MS = 60_000;
+/** Tools that keep their finished work when cancelled: the worker is asked to stop at its next step and answers with what it has
+ *  (partial). There is no fixed time limit: it is ended only when its progress ticks have gone silent for 4 times their longest
+ *  gap (never under workerFloorMs), the same judge as the render watch (liveness.ts unitWatch). */
+const STOPS_GRACEFULLY = new Set(['monte_carlo', 'evaluate_batch']);
 
 // The workers' own runtime (a Node isolate: measured 37 MB each) is counted once per live worker in the memory budget, not again in every call:
 // a job reserves what it adds to a worker that is there already. Idle workers give theirs back when memory is wanted (trim).
@@ -159,10 +164,19 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
       cfg: { cwdLost: cwdLost(), root: config.root, readRoot: config.readRoot, writeRoot: config.writeRoot, requireOwnerKey: config.requireOwnerKey },
     };
     const done = await new Promise<Extract<Answer, { type: 'done' }>>((resolve, reject) => {
-      const cleanup = () => { w.off('message', onMessage); w.off('error', onError); w.off('exit', onExit); ctx.signal.removeEventListener('abort', onAbort); };
+      // the worker's progress ticks are watched from the start; the watch only matters once a stop has been asked
+      // (a watch that found silence fires once and stops; ticks that come back start a new one that keeps the gaps seen,
+      // the silence included, so a later stop still waits on a worker that is working)
+      let stopping = false, silent = false;
+      const watchFrom = (maxGapMs: number) => unitWatch({ floorMs: workerFloorMs(), maxGapMs, onStuck: () => { silent = true; if (stopping) kill(); } });
+      let watch = watchFrom(0);
+      const cleanup = () => { watch.stop(); w.off('message', onMessage); w.off('error', onError); w.off('exit', onExit); ctx.signal.removeEventListener('abort', onAbort); };
       const onMessage = (m: Answer) => {
         if (m.id !== id) return;
-        if (m.type === 'progress') ctx.progress?.(m.done, m.total, m.message);
+        if (m.type === 'progress') {
+          if (silent) { const s = watch.state(); watch.stop(); silent = false; watch = watchFrom(Math.max(s.maxGapMs, s.sinceMs)); }
+          watch.beat(m.done, m.total); ctx.progress?.(m.done, m.total, m.message);
+        }
         else if (m.type === 'note') { if (ctx.job) ctx.job.progress = m.text; }
         else if (m.type === 'reserved') { held += m.delta; adjustReserved(m.delta); }
         else if (m.type === 'done') { healthy = true; cleanup(); resolve(m); }
@@ -170,9 +184,14 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
       };
       const onError = (e: Error) => { cleanup(); settle(); reject(new ToolError('compute_failed', `The worker that runs ${name} stopped: ${e.message}`, /memory/i.test(e.message) ? 'The project is too big for this computation within the memory budget; close other projects or work on part of the plan.' : 'Call again; if it repeats, report it with the message.')); };
       const onExit = (code: number) => { cleanup(); settle(); reject(new ToolError('compute_failed', `The worker that runs ${name} ended (code ${code}) before it answered.`, 'Call again.')); };
-      // a cancelled call ends its worker at once, even in a synchronous loop: it works on a copy, so nothing is half done
-      // (its temporary files go, and what it had finished writing is said)
+      // A cancelled call that can stop gracefully (STOPS_GRACEFULLY) is asked to stop and answers with what it finished; it is
+      // ended only once it is silent (above). Any other call ends its worker at once, even in a synchronous loop: it works on a
+      // copy, so nothing is half done (its temporary files go, and what it had finished writing is said).
       const onAbort = () => {
+        if (STOPS_GRACEFULLY.has(name) && !stopping) { stopping = true; w.postMessage({ stop: id }); if (silent) kill(); return; }
+        kill();
+      };
+      const kill = () => {
         cleanup();
         void w.terminate().then(() => {
           const finished = settle();
@@ -180,7 +199,8 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
         });
       };
       w.on('message', onMessage); w.once('error', onError); w.once('exit', onExit);
-      if (ctx.signal.aborted) return onAbort();
+      // cancelled before the job was sent (while it waited for a worker or memory): nothing ran, the worker stays idle and healthy
+      if (ctx.signal.aborted) { cleanup(); healthy = true; return reject(new ToolError('cancelled', 'The call was cancelled before it started.', 'Nothing was done or written; call again when needed.')); }
       ctx.signal.addEventListener('abort', onAbort, { once: true });
       w.postMessage(job);
     });
@@ -231,7 +251,9 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
   let rooted = '', log: SharedArrayBuffer | null = null;
   const tag = hookWrites((tmp) => { if (log) logTmp(log, tmp); }); // a file about to be written is logged where the main thread can read it even if this worker is ended at once
 
-  port.on('message', async (job: Job) => {
+  let stopJob: ((id: number) => void) | null = null; // the main thread asks the running job to stop at its next step
+  port.on('message', async (job: Job | { stop: number }) => {
+    if ('stop' in job) { stopJob?.(job.stop); return; }
     log = job.tmpLog; tag.value = tagOf(job.token);
     workerBudget({ externalUsed: job.externalUsed, notice: (delta) => post({ id: job.id, type: 'reserved', delta }) });
     markCwdLost(job.cfg.cwdLost); // (the worker cannot move the process; the main thread says that the folder it started in is gone)
@@ -243,8 +265,10 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
     for (const o of job.others) sessions.set(o.handle, { handle: o.handle, ownerKey: o.ownerKey, db: o.db, path: o.path, format: o.format, hpd: o.hpd, ...(o.encoding ? { encoding: o.encoding } : {}), ...(o.savedTo ? { savedTo: o.savedTo } : {}), history: [], redo: new Map(), dirty: o.dirty, lastUsed: Date.now(), bytes: o.bytes });
     if (job.lobSide) lobSidecars.set(s.handle, job.lobSide as never);
     let last = 0;
+    const stopper = new AbortController();
+    stopJob = (id) => { if (id === job.id) stopper.abort(); };
     const ctx: Ctx = {
-      caller: job.caller, signal: new AbortController().signal,
+      caller: job.caller, signal: stopper.signal,
       progress: (done, total, message) => post({ id: job.id, type: 'progress', done, total, message }),
       job: { set progress(text: string | undefined) { const now = Date.now(); if (now - last > 250) { last = now; post({ id: job.id, type: 'note', text: String(text) }); } } },
     };
@@ -255,6 +279,6 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
     } catch (e) {
       const t2 = e as ToolError;
       post({ id: job.id, type: 'error', tool: e instanceof ToolError ? { code: t2.code, message: t2.message, ...(t2.hint ? { hint: t2.hint } : {}), ...(t2.retryAfter ? { retryAfter: t2.retryAfter } : {}), ...(t2.data ? { data: t2.data } : {}) } : null, message: (e as Error)?.message ?? String(e), stack: (e as Error)?.stack });
-    } finally { sessions.delete(s.handle); for (const o of job.others) sessions.delete(o.handle); lobSidecars.delete(s.handle); }
+    } finally { stopJob = null; sessions.delete(s.handle); for (const o of job.others) sessions.delete(o.handle); lobSidecars.delete(s.handle); }
   });
 }

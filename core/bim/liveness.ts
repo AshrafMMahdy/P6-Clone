@@ -245,8 +245,8 @@ export interface UnitWatch {
   state(): StepState;
   stop(): void;
 }
-export function unitWatch(o: { floorMs: number; onStuck: (i: StuckInfo) => void; pollMs?: number; step?: string; expectMs?: number; windowMs?: number }): UnitWatch {
-  let name = o.step ?? 'starting', expect = o.expectMs ?? 0, window = o.windowMs, cap = 0, total = 0, doneN = 0, lastDone = -1, tickAt = Date.now(), maxGap = 0, stopped = false;
+export function unitWatch(o: { floorMs: number; onStuck: (i: StuckInfo) => void; pollMs?: number; step?: string; expectMs?: number; windowMs?: number; maxGapMs?: number }): UnitWatch {
+  let name = o.step ?? 'starting', expect = o.expectMs ?? 0, window = o.windowMs, cap = 0, total = 0, doneN = 0, lastDone = -1, tickAt = Date.now(), maxGap = o.maxGapMs ?? 0, stopped = false;
   const state = (): StepState => ({ step: name, sinceMs: Date.now() - tickAt, maxGapMs: maxGap, expectMs: expect, capMs: cap, done: doneN, total, ...(window ? { windowMs: window } : {}) });
   // (a late poll is time this process's event loop was busy, not silence of the work: it is taken off, as heartbeatWatcher does)
   const pollMs = o.pollMs ?? Math.max(10, Math.min(1000, Math.floor(o.floorMs / 4)));

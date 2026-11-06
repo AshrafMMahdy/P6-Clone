@@ -9,6 +9,9 @@ import { activityCosts, sumLines } from '../cost/rollup.ts';
 import { calendarResolver, scheduleProjects, type SchedOptions } from '../schedule/cpm.ts';
 import type { Tick } from './common.ts';
 
+/** Test-only: make the scenario at this index throw. */
+export const testHooks: { failScenario: number | null } = { failScenario: null };
+
 export interface Scenario { name: string; overrides: unknown[] }
 export interface ScenarioResult {
   name: string; ok: boolean; error?: string;
@@ -46,10 +49,17 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
   const days = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round((cal.workBetween(a, b) / 60 / (cal.hoursPerDay() || hpd)) * 100) / 100);
   const results: (ScenarioResult & { _m?: Measure })[] = [];
+  // a cancelled call stops after the scenarios it has finished: those rows are the answer, marked partial
+  let cancelled = false;
   for (const [i, sc] of scenarios.entries()) {
-    if (o.tick) await o.tick(i, scenarios.length, `scenario ${i + 1} of ${scenarios.length}`);
+    if (o.tick) {
+      try { await o.tick(i, scenarios.length, `scenario ${i + 1} of ${scenarios.length}`); }
+      catch (e) { if ((e as { code?: unknown })?.code === 'cancelled' && results.length) { cancelled = true; break; } throw e; }
+    }
     const name = sc.name || `scenario ${i + 1}`;
-    results.push(onScratch(db, (d): ScenarioResult & { _m?: Measure } => {
+    // a scenario that throws is its own failed row; the others still run (onScratch has put the project back)
+    try { results.push(onScratch(db, (d): ScenarioResult & { _m?: Measure } => {
+      if (testHooks.failScenario === i) throw new Error('test failure');
       const r = applyOps(d, sc.overrides ?? [], { hoursPerDay: hpd, calendarDays: o.calendarDays ?? true }); // days as the caller edits
       if (!r.ok) return { name, ok: false, error: `operation ${r.error!.index + 1}: ${r.error!.message}` };
       const m = measure(d, projIds, o.options);
@@ -59,11 +69,12 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
         critical: m.m.critical.size, became_critical: [...m.m.critical].filter((c) => !base.m.critical.has(c)), no_longer_critical: [...base.m.critical].filter((c) => !m.m.critical.has(c)),
         negative_float: m.m.negative, cost: Math.round(m.m.cost * 100) / 100, cost_delta: Math.round((m.m.cost - base.m.cost) * 100) / 100, _m: m.m,
       };
-    }));
+    })); } catch (e) { results.push({ name, ok: false, error: `The scenario failed: ${(e as Error)?.message ?? e}` }); }
   }
   // the best few (earliest finish, then cheapest) carry the activities whose dates moved
   const ranked = results.filter((r) => r.ok).sort((a, b) => (parseP6Date(a.finish ?? '') ?? Infinity) - (parseP6Date(b.finish ?? '') ?? Infinity) || (a.cost ?? 0) - (b.cost ?? 0));
   for (const r of ranked.slice(0, top)) r.changed = [...r._m!.dates].filter(([k, v]) => { const b = base.m.dates.get(k); return !b || b[0] !== v[0] || b[1] !== v[1]; }).slice(0, 200).map(([k, v]) => { const b = base.m.dates.get(k) ?? [null, null]; return { id: k, start: [b[0], v[0]], finish: [b[1], v[1]] }; });
   for (const r of results) delete r._m;
-  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best: ranked[0]?.name ?? null, scenarios: results };
+  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best: ranked[0]?.name ?? null, scenarios: results,
+    ...(cancelled ? { partial: true as const, stopped: 'cancelled' as const, scenarios_done: results.length, scenarios_requested: scenarios.length } : {}) };
 }

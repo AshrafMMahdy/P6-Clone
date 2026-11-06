@@ -221,7 +221,10 @@ export interface MilestoneResult extends Percentiles { taskId: string; code: str
 export interface RiskEventResult { projRiskId: string; code: string; name: string; probability: number; hours: number; activities: number; triggeredPct: number }
 
 export interface MonteCarloResult {
+  /** The iterations the statistics are of (fewer than asked when the run was cancelled or failed: see partial). */
   iterations: number;
+  /** Set when the run stopped early (cancelled, or an iteration failed) after at least one finished iteration. */
+  partial?: { stopped: 'cancelled' | 'failed'; requested: number; error?: string };
   seed: number;
   elapsedMs: number;
   projIds: string[];
@@ -367,9 +370,13 @@ function collectGarbage(): void {
   gcBase = (globalThis as any).process.memoryUsage().heapUsed;
 }
 
+/** Test-only: make the iteration at this index throw (failAt: before it is scheduled; failAccountingAt: after, while its results are worked out). */
+export const testHooks: { failAt: number | null; failAccountingAt: number | null } = { failAt: null, failAccountingAt: null };
+
 export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloOptions): Promise<MonteCarloResult> {
   const t0 = Date.now();
-  const iterations = Math.max(1, Math.floor(opts.iterations));
+  const requested = Math.max(1, Math.floor(opts.iterations));
+  let iterations = requested; // (after the loop: the iterations that finished)
   const seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
   const rng = mulberry32(seed);
   const over = opts.schedOptions ?? {};
@@ -419,50 +426,77 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   const durSamples = tracked.map(() => new Float64Array(iterations));
   const durStats = Array.from({ length: n }, (_x, k) => ({ min: Infinity, max: -Infinity, sum: 0, base: baseDur[k] }));
 
-  const finishes = new Float64Array(iterations);
+  let finishes = new Float64Array(iterations);
   const critCount = new Uint32Array(n);
   // each activity's early finish per iteration, as minutes from its first one (4 bytes, exact within 31 years):
   // 1,000 iterations of 80,000 activities hold 320 MB, not 640
   const efSamples = Array.from({ length: n }, () => new Float32Array(iterations));
   const efAnchor = new Float64Array(n).fill(NaN);
   const dur = new Float64Array(n);
+  const efNow = new Float64Array(n), critNow = new Uint8Array(n); // (one iteration's, until it has fully succeeded)
 
   let lastYield = Date.now();
+  // a run that is cancelled, or fails, after some iterations goes on with the ones it finished (marked partial)
+  let done = 0, stopped: { by: 'cancelled' | 'failed'; error?: Error } | null = null;
+  try {
   for (let it = 0; it < iterations; it++) {
-    if (opts.signal?.aborted) throw new Error('Risk analysis cancelled.');
+    if (opts.signal?.aborted) { stopped = { by: 'cancelled' }; break; }
+    if (testHooks.failAt === it) throw new Error('test failure');
     const { db: sdb, tasks } = scratch(prep);
     for (let k = 0; k < n; k++) {
       const e = est[k];
       if (sampler && drawK[k]) { const ratio = sampleRatio(sampler, rng); dur[k] = ratioK[k] ? baseDur[k] * Math.max(0, ratio) : baseDur[k]; }
       else dur[k] = e ? Math.max(0, sampleDuration(e, rng)) : baseDur[k];
     }
+    const hitRisk: number[] = [], hitInline: typeof inline = []; // (counted once the iteration is done)
     for (let j = 0; j < riskEvents.length; j++) {
       const ev = riskEvents[j];
-      if (rng() < ev.p) { riskHits[j]++; for (const k of ev.ks) dur[k] += ev.hours; }
+      if (rng() < ev.p) { hitRisk.push(j); for (const k of ev.ks) dur[k] += ev.hours; }
     }
     let projDelay = 0;
-    for (const ev of inline) if (rng() < ev.p) { ev.hits++; for (const [k, h] of ev.ks) dur[k] += h; projDelay += ev.projectHours; }
+    for (const ev of inline) if (rng() < ev.p) { hitInline.push(ev); for (const [k, h] of ev.ks) dur[k] += h; projDelay += ev.projectHours; }
     for (let k = 0; k < n; k++) {
       if (!estimable[k]) continue;
       if (dur[k] !== baseDur[k]) tasks[k].remain_drtn_hr_cnt = String(dur[k]);
-      const s = durStats[k];
-      if (dur[k] < s.min) s.min = dur[k];
-      if (dur[k] > s.max) s.max = dur[k];
-      s.sum += dur[k];
     }
     for (let j = 0; j < tracked.length; j++) durSamples[j][it] = dur[tracked[j]];
     const res = scheduleOrThrow(sdb, projIds, over);
-    finishes[it] = finishOf(res, projIds);
-    if (projDelay > 0 && Number.isFinite(finishes[it])) finishes[it] = pcal.addWork(finishes[it], Math.round(projDelay * 60));
+    // everything this iteration adds is worked out first and committed in one go below, so a failure anywhere in it leaves the
+    // statistics exactly as the `done` finished iterations made them
+    let fin = finishOf(res, projIds);
+    if (projDelay > 0 && Number.isFinite(fin)) fin = pcal.addWork(fin, Math.round(projDelay * 60));
     for (let k = 0; k < n; k++) {
-      const t = tasks[k];
-      const ef = parseP6Date(t.early_end_date);
-      if (ef == null) efSamples[k][it] = NaN;
-      else { if (Number.isNaN(efAnchor[k])) efAnchor[k] = ef; efSamples[k][it] = ef - efAnchor[k]; }
-      if (!t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null && Number(t.total_float_hr_cnt) <= 0 && !isSummary(t)) critCount[k]++;
+      const t = tasks[k], ef = parseP6Date(t.early_end_date);
+      efNow[k] = ef == null ? NaN : ef;
+      critNow[k] = !t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null && Number(t.total_float_hr_cnt) <= 0 && !isSummary(t) ? 1 : 0;
     }
+    if (testHooks.failAccountingAt === it) throw new Error('test failure in the accounting');
+    finishes[it] = fin;
+    for (let k = 0; k < n; k++) {
+      if (estimable[k]) {
+        const s = durStats[k];
+        if (dur[k] < s.min) s.min = dur[k];
+        if (dur[k] > s.max) s.max = dur[k];
+        s.sum += dur[k];
+      }
+      if (Number.isNaN(efNow[k])) efSamples[k][it] = NaN;
+      else { if (Number.isNaN(efAnchor[k])) efAnchor[k] = efNow[k]; efSamples[k][it] = efNow[k] - efAnchor[k]; }
+      critCount[k] += critNow[k];
+    }
+    for (const j of hitRisk) riskHits[j]++;
+    for (const e of hitInline) e.hits++;
+    done = it + 1;
     opts.onProgress?.(it + 1);
     if (it + 1 < iterations && ((it + 1) % yieldEvery === 0 || Date.now() - lastYield >= 200)) { collectGarbage(); await yieldNow(); lastYield = Date.now(); }
+  }
+  } catch (e) { stopped = { by: 'failed', error: e as Error }; } // (a cancel is the break above; anything thrown is a failure, with its cause)
+  if (stopped) {
+    // none finished: the run is an error as it was (a cancelled run says so)
+    if (done < 1) throw stopped.by === 'cancelled' ? new Error('Risk analysis cancelled.') : stopped.error;
+    iterations = done;
+    finishes = finishes.subarray(0, done);
+    for (let k = 0; k < n; k++) efSamples[k] = efSamples[k].subarray(0, done);
+    for (let j = 0; j < tracked.length; j++) durSamples[j] = durSamples[j].subarray(0, done);
   }
 
   // Finish distribution
@@ -552,5 +586,6 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     deterministicFinish, finishSamples: Array.from(finishes), percentiles,
     mean, min, max, stdDevDays: Math.sqrt(sq / iterations) / MIN_PER_DAY,
     probDeterministic: onTime / iterations, histogram, cumulative, activities, sensitivity, milestones, risks,
+    ...(stopped ? { partial: { stopped: stopped.by, requested, ...(stopped.error && stopped.by === 'failed' ? { error: stopped.error.message } : {}) } } : {}),
   };
 }

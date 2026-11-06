@@ -595,7 +595,7 @@ export function redo(s: Session, caller: string): { redone: string | null } {
 }
 
 // ---------------------------------------------------------------- jobs (long work the agent checks on)
-interface Job { id: string; tool: string; handle?: string; started: number; done?: number; result?: unknown; error?: ToolError | Error; progress?: string; abort?: AbortController; settle?: { ok: (r: unknown) => unknown; failed: () => void } }
+interface Job { id: string; tool: string; handle?: string; started: number; done?: number; result?: unknown; error?: ToolError | Error; progress?: string; abort?: AbortController; /** a partial answer (cancelled or failed part-way): the job ends with this status and keeps the result */ stopped?: 'cancelled' | 'failed'; settle?: { ok: (r: unknown) => unknown; failed: () => void } }
 const jobs = new Map<string, Job>();
 /** Told when a job starts, moves (its progress) and ends: the stdio front answers job_status from it while the main
  *  thread is busy in a long step (stdio.ts). */
@@ -615,7 +615,7 @@ export function startJob(tool: string, handle: string | undefined, p: Promise<un
   Object.defineProperty(job, 'progress', { enumerable: true, get: () => progress, set: (v: string | undefined) => { const changed = v !== progress; progress = v; jobHook?.(job.id, jobView(job)); const now = Date.now(); if (changed && now - lastPulse >= 250) { lastPulse = now; jobPulse?.(jobView(job)); } } });
   jobs.set(job.id, job);
   jobHook?.(job.id, jobView(job));
-  p.then((r) => { job.result = job.settle ? job.settle.ok(r) : r; }, (e) => { job.error = e; job.settle?.failed(); }).finally(() => {
+  p.then((r) => { job.result = job.settle ? job.settle.ok(r) : r; const st = (r as { partial?: unknown; stopped?: unknown } | null)?.partial === true ? (r as { stopped?: unknown }).stopped : null; if (st === 'cancelled' || st === 'failed') job.stopped = st; }, (e) => { job.error = e; job.settle?.failed(); }).finally(() => {
     job.done = Date.now(); jobHook?.(job.id, null);
     // the end pulse names the status and the error, not the result (job_status gives the whole answer)
     if (jobPulse) { const v = jobView(job) as Record<string, unknown>; const { result: _r, ...end } = v; jobPulse(end as ReturnType<typeof jobView>); }
@@ -626,6 +626,8 @@ export function jobView(job: Job) {
   const base = { job_id: job.id, tool: job.tool, handle: job.handle, running_seconds: Math.round(((job.done ?? Date.now()) - job.started) / 1000) };
   if (!job.done) return { ...base, status: 'running', progress: job.progress, note: 'Call job_status again shortly (pass wait_seconds to wait up to 20 s).' };
   if (job.error) return { ...base, status: job.error instanceof ToolError && job.error.code === 'cancelled' ? 'cancelled' : 'failed', error: job.error instanceof ToolError ? { code: job.error.code, reason: job.error.message, next_step: job.error.hint, message: job.error.message, hint: job.error.hint } : { code: 'internal', reason: job.error.message, message: job.error.message } };
+  // a run that stopped part-way (cancel, or a failure) and kept its finished work: the status says how it ended, the result is that work
+  if (job.stopped) { const r = job.result as { error?: unknown } | null; return { ...base, status: job.stopped, result: job.result, ...(job.stopped === 'failed' && typeof r?.error === 'string' ? { error: { code: 'partial_failure', reason: r.error, message: r.error } } : {}) }; }
   return { ...base, status: 'done', result: job.result };
 }
 /** What a caller adds to a job's end: its result reshaped, or clean-up when it fails (now, if it already ended). */
@@ -641,7 +643,7 @@ export function getJob(id: unknown): Job {
   return j!;
 }
 export function sweepJobs(): void { const limit = Date.now() - 3600000; for (const [id, j] of jobs) if (j.done && j.done < limit) jobs.delete(id); }
-export const jobsList = () => [...jobs.values()].map((j) => ({ job_id: j.id, tool: j.tool, handle: j.handle, status: j.done ? (j.error ? 'failed' : 'done') : 'running' }));
+export const jobsList = () => [...jobs.values()].map((j) => ({ job_id: j.id, tool: j.tool, handle: j.handle, status: j.done ? (j.error ? 'failed' : j.stopped ?? 'done') : 'running' }));
 export const setProgress = (job: Job | undefined, msg: string) => { if (job) job.progress = msg; };
 
 export function status() {
