@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chunkBytesOf, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type IfcElement, type IfcIndex } from './parse.ts';
+import { chunkBytesOf, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type IfcElement, type IfcIndex, type KeptChunk } from './parse.ts';
 import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, newGeomStore, type Extras, type GeomStore } from './element.ts';
 import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
@@ -171,6 +171,42 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
 function dropKeptChunks(base: string, index: IfcIndex): void {
   if (index.geometryStatus !== 'ok') return;
   try { rmSync(`${base}.chunks`, { recursive: true, force: true }); } catch { /* in use: pruned with the cache */ }
+}
+
+/** One way a model was cut for meshing (parse.ts: <chunk bytes>-<engine and products key>): the chunks kept whole there, the chunk
+ *  size, and how many chunks the model was cut into (null: kept before kept.json named it). */
+export type KeptChunkSet = { kept: number; of: number | null; chunkBytes: number };
+/** The chunks a stopped meshing of the IFC with this content (fileHash) kept in the model cache (parse.ts keepChunks), by the way the
+ *  model was cut; null when none is kept. Read from the disk as it is now (the next meshing cut the same way takes them in). */
+export function keptChunks(hash: string): KeptChunkSet[] | null {
+  const dir = `${join(cacheDir(), cacheName(hash))}.chunks`;
+  const sets: KeptChunkSet[] = [];
+  let ways: string[];
+  try { ways = readdirSync(dir); } catch { return null; }
+  for (const w of ways) {
+    const cut = /^(\d+(?:\.\d+)?)-[0-9a-f]+$/.exec(w); // (the chunk bytes as given: P6CLONE_GEOM_CHUNK_MB may be a fraction)
+    if (!cut) continue;
+    let names: string[];
+    try { names = readdirSync(join(dir, w)); } catch { continue; }
+    // a chunk is kept whole or absent (its folder renamed into place with its kept.json); <k>.<pid>.tmp is one a stop cut short
+    let kept = 0, of: number | null = null;
+    for (const k of names) {
+      if (!/^\d+$/.test(k)) continue;
+      try { const m = JSON.parse(readFileSync(join(dir, w, k, 'kept.json'), 'utf8')) as KeptChunk; kept++; if (typeof m.of === 'number') of = m.of; } catch { /* not whole: not kept */ }
+    }
+    if (kept) sets.push({ kept, of, chunkBytes: Number(cut[1]) });
+  }
+  return sets.length ? sets : null;
+}
+
+/** The chunks a stopped meshing of the IFC with this content kept, removed (the agent will not open the model again): what was kept
+ *  (null: no whole chunk), and whether there was a folder to remove. An error removing it (a file in use) is thrown as it is. */
+export function discardKeptChunks(hash: string): { sets: KeptChunkSet[] | null; removed: boolean } {
+  const dir = `${join(cacheDir(), cacheName(hash))}.chunks`;
+  const sets = keptChunks(hash);
+  if (!existsSync(dir)) return { sets, removed: false };
+  rmSync(dir, { recursive: true, force: true });
+  return { sets, removed: true };
 }
 
 /** The cached index, or null when the cache is missing or damaged (then the IFC is read again). */

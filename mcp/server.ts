@@ -47,7 +47,7 @@ import { compareComputed, evaluate } from '../core/query/evaluate.ts';
 import { parseScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../core/schedule/options.ts';
 import { reviewSchedule } from '../core/query/review.ts';
 import { ANALYSIS_TOOLS, runAnalysis } from './analysis.ts';
-import { FOURD_FILES, FOURD_NAMES, FOURD_TOOLS, load4dSidecar, runFourD, save4dSidecar } from './fourd.ts';
+import { discardKeptMeshing, FOURD_FILES, FOURD_NAMES, FOURD_TOOLS, load4dSidecar, runFourD, save4dSidecar } from './fourd.ts';
 import { LOB_FILES, LOB_NAMES, LOB_TOOLS, lobSidecars, lobSidecarText, readLobSidecar, runLob, scheduleWithLob } from './lob.ts';
 import { lobGuard } from '../core/lob/view.ts';
 import { loadLobModels } from '../core/lob/store.ts';
@@ -293,6 +293,7 @@ const MUTATES = new Set(TOOLS.filter((t) => !t.annotations.readOnlyHint && !['li
 async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unknown> {
   // a tool outside P6CLONE_TOOLSETS is not there at all: listed or called (L-8)
   if (TOOLS.some((t) => t.name === name) && !toolsList().some((t) => t.name === name)) fail('unknown_tool', `${name} is not offered by this server (P6CLONE_TOOLSETS=${process.env.P6CLONE_TOOLSETS}).`, 'tools/list shows the tools.');
+  if (name === 'open_model' && a.discard_kept === true) return discardKeptMeshing(a.path);
   switch (name) {
     case 'list_open': return { open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, projects: allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), unsaved_changes: s.dirty, changes: s.history.length })), moved_out: evictedList() };
     case 'server_status': return { version: VERSION, ...status(), recovery: recoveryStatus(), reasoner: reasonerState(reasonerStatus, reasonerModelPath) };
@@ -762,7 +763,9 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
   const ctx: Ctx = { caller: String(a.caller ?? sessionCaller ?? 'default'), signal: abort.signal, progress };
   // open_model without a handle: the file opens into a new model-only workspace (an empty project named after it), for
   // agents that read a model without a schedule (quantities, procurement)
-  if (name === 'open_model' && (a.handle == null || a.handle === '') && typeof a.path === 'string') {
+  // (open_model discard_kept touches only the model cache: no workspace, no project; run answers it)
+  const discardKept = name === 'open_model' && a.discard_kept === true;
+  if (name === 'open_model' && !discardKept && (a.handle == null || a.handle === '') && typeof a.path === 'string') {
     const id = (basename(a.path).replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'MODEL').toUpperCase();
     const np = await callTool('new_project', { id, start: new Date().toISOString().slice(0, 10), ...(a.caller ? { caller: a.caller } : {}) }, sessionCaller, signal);
     if (np.isError) return np;
@@ -776,7 +779,7 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     if (job) followJob(job, (res) => (res && typeof res === 'object' ? { ...res, ...mine } : res), () => { void discard(); });
     return { out: { ...(r.out as object), ...mine }, isError: false };
   }
-  const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
+  const handle = NO_HANDLE.has(name) || discardKept ? undefined : String(a.handle ?? '');
   // A watch in this call (liveness.ts) whose work uses the processor without progress says so on the job's progress line, each window,
   // and takes it back once progress returns (no number decides anything: the job is never stopped while it works; the agent sees it).
   const busy: { job?: { progress?: string } } = {};

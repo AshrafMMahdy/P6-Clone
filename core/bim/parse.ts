@@ -255,7 +255,7 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   const state = newRunState();
   forgetRates('geometry'); // this job's own rate starts here (the bound of each run is sized from the slower of it and the benchmark's)
   /** One worker run: mesh, fingerprints into the index, tiles (and, a chunk, kept in keepTo as it is done). */
-  const one = async (file: string, dir: string, keepTo?: string): Promise<Run> => {
+  const one = async (file: string, dir: string, keepTo?: KeepTo): Promise<Run> => {
     const t0 = Date.now();
     const r = await runGeometryWorker(file, dir, productsBin, opts, script);
     const absorbed = r.ok ? await absorbRun(dir, index, tilesDir, opts, state, keepTo) : r;
@@ -291,7 +291,7 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
     }
     if (took === 'damaged') redone++;
     await opts.onProgress?.(k, chunks.length, `meshing chunk ${k + 1} of ${chunks.length}${took === 'damaged' ? ' (its kept results did not check out)' : ''}`);
-    const r = await one(c.file, join(cdir, `g${k}`), keptDir ? join(keptDir, String(k)) : undefined);
+    const r = await one(c.file, join(cdir, `g${k}`), keptDir ? { dir: join(keptDir, String(k)), of: chunks.length } : undefined);
     rmSync(c.file, { force: true });
     if (!r.ok) { failed.push(`chunk ${k + 1} (${c.products} products): ${r.note.split(' The model is indexed')[0]}`); state.failures += c.products; if (r.stuck) state.stuck ??= r.stuck; }
   }
@@ -345,7 +345,7 @@ function absorbFingerprints(dir: string, index: IfcIndex, state: RunState): void
 /** A run in the geometry worker's layout (dir: geom.json, elems.meta, geoms.*, places.bin) taken in: its fingerprints
  *  into the index, its meshes into display tiles (geomTiles.mjs, in its own process), then its files go. With keepTo (a chunk of a
  *  model meshed in chunks), what it gave is kept there first: its fingerprints and its tiles (keepChunk). */
-export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string | null, opts: ParseIfcOptions, state: RunState, keepTo?: string): Promise<Run> {
+export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string | null, opts: ParseIfcOptions, state: RunState, keepTo?: KeepTo): Promise<Run> {
   absorbFingerprints(dir, index, state);
   const before = state.tiles.length;
   if (tilesDir) {
@@ -360,21 +360,24 @@ export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string |
   return { ok: true };
 }
 
-/** A kept chunk's manifest (kept.json): each of its files' length and CRC32, and its tiles (null: kept without tiles). */
-interface KeptChunk { files: { name: string; bytes: number; crc: number }[]; tiles: TileRecord[] | null }
+/** Where a chunk is kept (its folder) and how many chunks the model was cut into. */
+type KeepTo = { dir: string; of: number };
+/** A kept chunk's manifest (kept.json): each of its files' length and CRC32, its tiles (null: kept without tiles), and how many chunks
+ *  the model was cut into (keptChunks in model.ts tells it; absent in a chunk kept before it was written). */
+export interface KeptChunk { files: { name: string; bytes: number; crc: number }[]; tiles: TileRecord[] | null; of?: number }
 const sealOf = (path: string, name: string) => { const b = readFileSync(path); return { name, bytes: b.length, crc: crc32(b) }; };
 
 /** A chunk's results kept (G10, 4L-13): its fingerprints (geom.json, elems.meta) and its tiles (renamed t-N.glb), with kept.json naming
  *  each file's length and CRC32 (review 4L-13 L1: a power loss can leave a file of zeros), written beside and renamed into place: a
  *  kept chunk is whole or absent. */
-function keepChunk(dir: string, tilesDir: string | null, tiles: TileRecord[], keepTo: string): void {
+function keepChunk(dir: string, tilesDir: string | null, tiles: TileRecord[], { dir: keepTo, of }: KeepTo): void {
   const tmp = `${keepTo}.${process.pid}.tmp`;
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
   copyFileSync(join(dir, 'geom.json'), join(tmp, 'geom.json'));
   copyFileSync(join(dir, 'elems.meta'), join(tmp, 'elems.meta'));
   const kept = tilesDir ? tiles.map((t, i) => { copyFileSync(join(tilesDir, t.file), join(tmp, `t-${i}.glb`)); return { ...t, file: `t-${i}.glb` }; }) : null;
-  const manifest: KeptChunk = { files: ['geom.json', 'elems.meta', ...(kept ?? []).map((t) => t.file)].map((f) => sealOf(join(tmp, f), f)), tiles: kept };
+  const manifest: KeptChunk = { files: ['geom.json', 'elems.meta', ...(kept ?? []).map((t) => t.file)].map((f) => sealOf(join(tmp, f), f)), tiles: kept, of };
   writeFileSync(join(tmp, 'kept.json'), JSON.stringify(manifest));
   rmSync(keepTo, { recursive: true, force: true });
   // another process meshing the same model may have kept this chunk first: those are the same results, so they stand
