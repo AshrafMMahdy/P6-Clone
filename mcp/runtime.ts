@@ -625,7 +625,7 @@ export function startJob(tool: string, handle: string | undefined, p: Promise<un
 export function jobView(job: Job) {
   const base = { job_id: job.id, tool: job.tool, handle: job.handle, running_seconds: Math.round(((job.done ?? Date.now()) - job.started) / 1000) };
   if (!job.done) return { ...base, status: 'running', progress: job.progress, note: 'Call job_status again shortly (pass wait_seconds to wait up to 20 s).' };
-  if (job.error) return { ...base, status: job.error instanceof ToolError && job.error.code === 'cancelled' ? 'cancelled' : 'failed', error: job.error instanceof ToolError ? { code: job.error.code, reason: job.error.message, next_step: job.error.hint, message: job.error.message, hint: job.error.hint } : { code: 'internal', reason: job.error.message, message: job.error.message } };
+  if (job.error) return { ...base, status: job.error instanceof ToolError && job.error.code === 'cancelled' ? 'cancelled' : 'failed', error: job.error instanceof ToolError ? { ...(job.error.data ?? {}), code: job.error.code, reason: job.error.message, next_step: job.error.hint, message: job.error.message, hint: job.error.hint } : { code: 'internal', reason: job.error.message, message: job.error.message } };
   // a run that stopped part-way (cancel, or a failure) and kept its finished work: the status says how it ended, the result is that work
   if (job.stopped) { const r = job.result as { error?: unknown } | null; return { ...base, status: job.stopped, result: job.result, ...(job.stopped === 'failed' && typeof r?.error === 'string' ? { error: { code: 'partial_failure', reason: r.error, message: r.error } } : {}) }; }
   return { ...base, status: 'done', result: job.result };
