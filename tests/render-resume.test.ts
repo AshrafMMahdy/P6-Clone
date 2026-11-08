@@ -326,7 +326,7 @@ test('video: a failure late in a render keeps every whole chunk drawn; resume ma
   assert.equal(e.code, 'render_failed');
   assert.equal(data.reason, 'test_failure');
   assert.ok(data.frames_done >= 6 && data.frames_done < data.frames_total, JSON.stringify(data));
-  assert.ok(data.kept_segments.length >= 1 && data.kept_segments.every((p: string) => existsSync(p) && /run-\d+\.mp4$/.test(p)));
+  assert.ok(data.kept_segments.length >= 1 && data.kept_segments.every((p: string) => existsSync(p) && /run-\d+\.(mp4|webm)$/.test(p)), JSON.stringify(data.kept_segments)); // (a browser without H.264 records WebM)
   assert.equal(basename(dirname(data.resume)), 'plan.parts');
   assert.match(String(e.hint ?? e.message), /to continue, call render_4d again with the same arguments and resume: ".*render\.json"; a call without resume starts over/);
   assert.ok(!existsSync(join(out, 'plan.mp4')), 'no half video');
@@ -822,7 +822,7 @@ test('a parts folder that cannot be removed after a finished render does not mak
 const bytesOf = (dir: string) => tree(dir).sort().map((f) => { const p = join(dir, f); return `${f}:${statSync(p).isDirectory() ? 'dir' : readFileSync(p).toString('base64')}`; }).join('|');
 
 test('a resume refused after the manifest was read (frames_total, or the codec) changes nothing: no file cut, no render.json rewritten, no folder removed, even when every kept run was bad', { skip: !CHROME && 'no Chromium here', timeout: 600_000 }, async () => {
-  for (const [what, edit, code] of [['frames_total', (m: any) => { m.frames_total += 1; }, /frames_total was/], ['the codec', (m: any) => { m.mime = 'video/webm'; }, /the browser now encodes video\/mp4, the kept runs are video\/webm/]] as const) {
+  for (const [what, edit, code] of [['frames_total', (m: any) => { m.frames_total += 1; }, /frames_total was/], ['the codec', (m: any) => { m.mime = String(m.mime).includes('mp4') ? 'video/webm' : 'video/mp4'; }, /the browser now encodes video\/\w+, the kept runs are video\/\w+/]] as const) {
     for (const bad of [false, true]) {
       const { args, out, e } = await failVideo(`rf${bad ? 'b' : 'g'}${what.slice(0, 2)}`, 4);
       const segs = e.kept_segments as string[];
