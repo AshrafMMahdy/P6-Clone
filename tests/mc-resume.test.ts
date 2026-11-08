@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, statSync, truncateSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync, truncateSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runMonteCarlo, testHooks, type MonteCarloOptions } from '../core/risk/montecarlo.ts';
@@ -41,7 +41,7 @@ const project = async (n: number) => {
 const est = { min_pct: 80, max_pct: 140 };
 const mcArgs = (h: { handle: string }, extra: Record<string, unknown> = {}) => ({ ...h, iterations: 120, seed: 11, default_estimates: est, events: [{ name: 'Late permit', probability: 0.3, delay_days: 4 }, { name: 'Crane', probability: 0.2, delay_days: 2, activities: ['A5'] }], deadline: '2026-07-01', ...extra });
 /** The answer without what may differ between two equal runs (time taken, how much came from a file). */
-const same = (d: any) => { const { elapsed_seconds: _e, resumed_iterations: _r, ...rest } = d; return rest; };
+const same = (d: any) => { const { elapsed_seconds: _e, resumed_iterations: _r, redone_iterations: _d, redone_note: _n, ...rest } = d; return rest; };
 const keptFiles = () => readdirSync(root).filter((f) => f.startsWith('monte_carlo-'));
 
 test('a run that failed part-way is continued from its kept iterations: the answer equals an uninterrupted run (same seed)', async () => {
@@ -214,11 +214,52 @@ test('a record keeps only the durations that vary, and a resumed run still equal
   const at20 = statSync(file).size;
   testHooks.failAt = 30;
   await runMonteCarlo(db, ids, o(new IterationFile(file))).finally(() => { testHooks.failAt = null; });
-  const per = (statSync(file).size - at20) / 10; // (iterations 21-30 set no anchor: the first iteration set them all; a unit is framed by its length)
+  const per = (statSync(file).size - at20) / 10; // (iterations 21-30 set no anchor: the first iteration set them all; a unit is framed by its length and CRC32)
   const bits = (m: number) => Math.ceil(m / 8);
-  assert.equal(per, 4 + 4 + 8 + 8 * varying + 4 * n + bits(n) + bits(2) + bits(1) + 4, `${per} bytes an iteration (each estimable duration kept: ${8 * estimable} for them)`);
+  assert.equal(per, 8 + 4 + 8 + 8 * varying + 4 * n + bits(n) + bits(2) + bits(1) + 4, `${per} bytes an iteration (each estimable duration kept: ${8 * estimable} for them)`);
   const c = await runMonteCarlo(db, ids, o(new IterationFile(file)));
   assert.equal(c.resumed, 30);
   assert.deepEqual(strip(c), strip(ref));
+  await call('close', { ...h, discard: true });
+});
+
+/** Where each kept unit's bytes are in a kept file: after the head line, each unit is its length (u32), its CRC32 (u32) and its bytes
+ *  (in layout 1, before the CRC32, its length and its bytes): at, where the unit starts; data, where its bytes start. */
+const unitsOf = (file: string) => {
+  const b = readFileSync(file), nl = b.indexOf(10), hd = JSON.parse(b.toString('utf8', 0, nl)).version === 1 ? 4 : 8, out: { at: number; data: number; len: number }[] = [];
+  for (let at = nl + 1; at + hd <= b.length;) { const len = b.readUInt32LE(at); if (!len || at + hd + len > b.length) break; out.push({ at, data: at + hd, len }); at += hd + len; }
+  return out;
+};
+// Review 4L-13 L1 / L2: a unit was checked only by its length, so one that a power loss left as zeros (or old bytes) of the right length
+// was taken in as it was: the answer was wrong without a warning. Now each unit has a CRC32: a damaged one, and every one after it, is
+// run again, and the answer says how many.
+test('a kept iteration damaged in place (zeros of the right length, or a stretch of zeros) is run again, with every one after it, and named', async () => {
+  const h = await project(25);
+  const full = (await call('monte_carlo', mcArgs(h))).d;
+  const stop = async (at: number) => { testHooks.failAt = at; try { return (await call('monte_carlo', mcArgs(h))).d; } finally { testHooks.failAt = null; } };
+  // the bytes of the 11th iteration zeroed, its length and CRC32 left
+  const a = await stop(30);
+  const u = unitsOf(a.resume);
+  assert.equal(u.length, 30);
+  const b = readFileSync(a.resume); b.fill(0, u[10].data, u[10].data + u[10].len); writeFileSync(a.resume, b);
+  const ra = (await call('monte_carlo', mcArgs(h, { resume: a.resume }))).d;
+  assert.equal(ra.resumed_iterations, 10);
+  assert.equal(ra.redone_iterations, 20);
+  assert.match(ra.redone_note, /20 kept iterations did not check out/);
+  assert.deepEqual(same(ra), same(full));
+  // a stretch of zeros from the 26th on (the file's length was written, its data was not)
+  const c = await stop(30);
+  const v = unitsOf(c.resume), bc = readFileSync(c.resume);
+  bc.fill(0, v[25].at); writeFileSync(c.resume, bc);
+  const rc = (await call('monte_carlo', mcArgs(h, { resume: c.resume }))).d;
+  assert.equal(rc.resumed_iterations, 25);
+  assert.equal(rc.redone_iterations, 1, 'a stretch of zeros counts once');
+  assert.deepEqual(same(rc), same(full));
+  // a unit cut short at the end (a kill) was never kept: made again, not named
+  const d = await stop(30);
+  truncateSync(d.resume, statSync(d.resume).size - 3);
+  const rd = (await call('monte_carlo', mcArgs(h, { resume: d.resume }))).d;
+  assert.equal(rd.resumed_iterations, 29); assert.equal(rd.redone_iterations, undefined);
+  assert.deepEqual(same(rd), same(full));
   await call('close', { ...h, discard: true });
 });

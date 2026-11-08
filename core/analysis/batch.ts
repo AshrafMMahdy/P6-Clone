@@ -29,8 +29,9 @@ export interface RowStore {
   /** `inputs` is everything the answer is made from (the store fingerprints it). The scenarios kept by the batch this one continues, in
    *  order (none when it starts afresh); throws, changing nothing, when there is no kept batch there or it is not this one. */
   open(inputs: unknown): Iterable<KeptScenario>;
-  /** The batch goes on after the first `count` kept scenarios (anything after them is cut off). */
-  resumeAt(count: number): void;
+  /** The batch goes on after the first `count` kept scenarios (anything after them is cut off). Returns how many kept scenarios are
+   *  done again (found damaged, or after a damaged one). */
+  resumeAt(count: number): number;
   /** One finished scenario, kept before it returns. */
   add(kept: KeptScenario): void;
   /** The batch finished: what it kept goes. A message when that could not be removed. */
@@ -82,6 +83,7 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   const moved: (KeptScenario['changed'])[] = [];
   // a batch continued from a store: its kept scenarios are taken in as they were, and only the rest are scheduled
   const store = o.store;
+  let redone = 0;
   if (store) {
     const inputs = { format: 1, projIds, scenarios, options: o.options ?? null, hpd, calendarDays: o.calendarDays ?? true, top, ...batchData(db, projIds, scenarios, o.options) };
     for (const k of store.open(inputs)) {
@@ -90,7 +92,7 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
       results.push(k.row); moved.push(k.changed ?? null);
       o.onRow?.(k.row);
     }
-    store.resumeAt(results.length);
+    redone = store.resumeAt(results.length);
   }
   const resumed = results.length;
   // a cancelled call stops after the scenarios it has finished: those rows are the answer, marked partial (so does one whose scenario
@@ -137,5 +139,5 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   for (const i of order.slice(0, top)) scenariosOut[i].changed = moved[i]!;
   return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best: order.length ? results[order[0]].name : null, scenarios: scenariosOut,
     ...(stopped ? { partial: true as const, stopped, scenarios_done: results.length, scenarios_requested: scenarios.length, ...(failed ? { error: failed.message } : {}), ...(kept ? { kept } : {}) } : {}),
-    ...(store ? { resumed } : {}), ...(keptNote ? { keptNote } : {}) };
+    ...(store ? { resumed } : {}), ...(redone ? { redone } : {}), ...(keptNote ? { keptNote } : {}) };
 }

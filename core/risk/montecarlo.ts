@@ -202,8 +202,9 @@ export interface IterationStore {
    *  starting afresh uses. Returns the seed and the iterations kept by the run this one continues, in order (none when it starts afresh);
    *  throws, changing nothing, when there is no kept run there or it is not this one. */
   open(inputs: unknown, layout: IterationLayout, asked: number | undefined, fresh: number): { seed: number; kept: Iterable<Uint8Array> };
-  /** The run goes on after the first `count` kept iterations (anything after them is cut off). */
-  resumeAt(count: number): void;
+  /** The run goes on after the first `count` kept iterations (anything after them is cut off). Returns how many kept iterations are
+   *  made again (found damaged, or after a damaged one). */
+  resumeAt(count: number): number;
   /** One finished iteration, kept before it returns (the bytes are reused afterwards); a throw fails the iteration. */
   add(record: Uint8Array): void;
   /** The run finished: what it kept goes. A message when that could not be removed. */
@@ -254,6 +255,9 @@ export interface MonteCarloResult {
   /** Set when the run stopped early (cancelled, or an iteration failed) after at least one finished iteration; kept: where its
    *  iterations are kept (with a store), to continue it. */
   partial?: { stopped: 'cancelled' | 'failed'; requested: number; error?: string; kept?: string };
+  /** With a store: the kept iterations of the run this one continued that were found damaged (a power loss), or came after a damaged
+   *  one, and were run again (0 when none). */
+  redone?: number;
   /** With a store: the iterations taken from the run this one continued. */
   resumed?: number;
   /** With a store: the finished run's kept iterations could not be removed (in words). */
@@ -545,7 +549,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   // where the last one left it (so the iterations after them are those an uninterrupted run makes)
   let done = 0;
   const store = opts.store;
-  let rng = mulberry32(seed);
+  let rng = mulberry32(seed), redone = 0;
   if (store) {
     const inputs = { format: 2, projIds, iterations: requested, phase, deadline: opts.deadline ?? null, over, sampler: sampler ?? null, reAnchor: !!opts.reAnchor,
       // the data the iterations schedule, as it reads it (review 4L-13 M1): what the tables say, not how they are laid out in memory (a
@@ -565,7 +569,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
       done++;
       opts.onIteration?.(r.fin);
     }
-    store.resumeAt(done);
+    redone = store.resumeAt(done);
     if (done) opts.onProgress?.(done);
   }
   const resumed = done;
@@ -718,6 +722,6 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     mean, min, max, stdDevDays: Math.sqrt(sq / iterations) / MIN_PER_DAY,
     probDeterministic: onTime / iterations, histogram, cumulative, activities, sensitivity, milestones, risks,
     ...(stopped ? { partial: { stopped: stopped.by, requested, ...(stopped.error && stopped.by === 'failed' ? { error: stopped.error.message } : {}), ...(kept ? { kept } : {}) } } : {}),
-    ...(store ? { resumed } : {}), ...(keptNote ? { keptNote } : {}),
+    ...(store ? { resumed } : {}), ...(redone ? { redone } : {}), ...(keptNote ? { keptNote } : {}),
   };
 }

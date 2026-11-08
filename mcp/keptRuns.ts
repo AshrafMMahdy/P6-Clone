@@ -5,16 +5,20 @@
 // path, the agent passes exactly that path back, and a call without resume starts over. A run that finishes removes its file.
 //
 // A file: one line of JSON (what the work is: its format, a fingerprint of everything its result is made from, and what the units look
-// like), then the units, each as it finishes, appended. A unit cut short by a kill is not whole and is made again (the file is cut back
-// to the last whole one when the run goes on).
+// like), then the units, each as it finishes, appended: its length, its CRC32 and its bytes. A unit cut short by a kill is not whole and
+// is made again (the file is cut back to the last whole one when the run goes on); so is a unit whose bytes do not match its CRC32 (a
+// power loss can leave a stretch of zeros, or old bytes, of the right length), with every unit after it, and the answer says how many.
 import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, readSync, rmdirSync, rmSync, statSync, writeSync } from 'node:fs';
+import { crc32 } from 'node:zlib';
 import { basename, dirname, join } from 'node:path';
 import { hashOf } from '../core/bim/renderParts.ts';
 import type { IterationLayout, IterationStore } from '../core/risk/montecarlo.ts';
 import type { KeptScenario, RowStore } from '../core/analysis/batch.ts';
 import { pathArg, ToolError } from './runtime.ts';
 
-interface Head { format: string; version: 1; fingerprint: string; [k: string]: unknown }
+/** The file's own layout: 2, each unit framed by its length and its CRC32 (1: by its length only, review 4L-13 L1). */
+const VERSION = 2;
+interface Head { format: string; version: number; fingerprint: string; [k: string]: unknown }
 
 /** What a call to continue says about a kept file, and the next step, as a ToolError (nothing kept is touched). */
 function refused(code: string, message: string, hint: string, resume: string): never {
@@ -53,7 +57,8 @@ class KeptFile {
     }
     let head: Head | null = null;
     try { head = line == null ? null : JSON.parse(line); } catch { head = null; }
-    if (!head || head.format !== this.format || head.version !== 1 || typeof head.fingerprint !== 'string') { this.close(); refused('resume_mismatch', `"${asGiven}" is not kept work of ${this.tool}.`, `Pass the resume path a stopped ${this.tool} answered, or call ${this.tool} without resume to start over.`, asGiven); }
+    if (!head || head.format !== this.format || typeof head.fingerprint !== 'string') { this.close(); refused('resume_mismatch', `"${asGiven}" is not kept work of ${this.tool}.`, `Pass the resume path a stopped ${this.tool} answered, or call ${this.tool} without resume to start over.`, asGiven); }
+    if (head.version !== VERSION) { this.close(); refused('resume_mismatch', `The kept ${this.tool} run at "${asGiven}" was kept by another version of this program (its layout ${head.version}, this one reads ${VERSION}); it cannot be continued. Nothing was removed.`, `Call ${this.tool} again without resume to start over.`, asGiven); }
     this.start = at; this.end = statSync(this.path).size;
     return head;
   }
@@ -65,25 +70,42 @@ class KeptFile {
     this.put(line, 0);
     this.start = this.end = line.length;
   }
-  /** The units from the start, each as its length (u32) and bytes: those whole, in order, and where each ends. */
+  /** The unit framed at `at` (its length u32, its CRC32 u32, its bytes): 'cut' when it does not fit before the end of the file (a kill
+   *  while it was written); damaged (with where it ends, when its length can be read) when its length is 0 (never written: a stretch of
+   *  zeros) or its bytes do not match its CRC32. */
+  private frame(at: number): { bytes: Uint8Array; end: number } | 'cut' | { damaged: true; end: number | null } {
+    const hd = Buffer.alloc(8);
+    if (at + 8 > this.end || readSync(this.fd!, hd, 0, 8, at) < 8) return 'cut';
+    const n = hd.readUInt32LE(0);
+    if (!n) return { damaged: true, end: null };
+    if (at + 8 + n > this.end) return 'cut';
+    const b = Buffer.alloc(n);
+    for (let got = 0; got < n;) { const k = readSync(this.fd!, b, got, n - got, at + 8 + got); if (!k) return 'cut'; got += k; }
+    return crc32(b) === hd.readUInt32LE(4) ? { bytes: b, end: at + 8 + n } : { damaged: true, end: at + 8 + n };
+  }
+  /** The units from the start: those whole and sound, in order, and where each ends (up to the first one cut short or damaged). */
   *units(): Generator<{ bytes: Uint8Array; end: number }> {
-    const len = Buffer.alloc(4);
-    for (let at = this.start; at + 4 <= this.end;) {
-      if (readSync(this.fd!, len, 0, 4, at) < 4) return;
-      const n = len.readUInt32LE(0);
-      if (!n || at + 4 + n > this.end) return; // a unit cut short (or nothing written after the length)
-      const b = Buffer.alloc(n);
-      for (let got = 0; got < n;) { const k = readSync(this.fd!, b, got, n - got, at + 4 + got); if (!k) return; got += k; }
-      at += 4 + n;
-      yield { bytes: b, end: at };
+    for (let at = this.start; ;) {
+      const u = this.frame(at);
+      if (u === 'cut' || 'damaged' in u) return;
+      at = u.end;
+      yield u;
     }
+  }
+  /** How many units are kept from `at` on (those a resume does not take: a damaged one and every one after it). A unit cut short at the
+   *  end was never kept (its run had not counted it) and is not one of them; a stretch of zeros counts once (its units cannot be told
+   *  apart). */
+  countFrom(at: number): number {
+    let n = 0;
+    for (let u = this.frame(at); u !== 'cut'; u = this.frame(at)) { n++; if (u.end == null) break; at = u.end; }
+    return n;
   }
   /** Go on after the units up to `at` (what follows is cut off). */
   cutAt(at: number): void { ftruncateSync(this.fd!, at); this.end = at; }
   append(bytes: Uint8Array): void {
-    const len = Buffer.alloc(4); len.writeUInt32LE(bytes.length, 0);
-    this.put(len, this.end); this.put(bytes, this.end + 4);
-    this.end += 4 + bytes.length;
+    const hd = Buffer.alloc(8); hd.writeUInt32LE(bytes.length, 0); hd.writeUInt32LE(crc32(bytes), 4);
+    this.put(hd, this.end); this.put(bytes, this.end + 8);
+    this.end += 8 + bytes.length;
   }
   private put(b: Uint8Array, at: number): void { for (let w = 0; w < b.length;) w += writeSync(this.fd!, b, w, b.length - w, at + w); }
   close(): void { if (this.fd != null) { try { closeSync(this.fd); } catch { /* closed */ } this.fd = null; } }
@@ -118,7 +140,7 @@ class UnitFile {
   get path(): string | null { return this.f?.path ?? null; }
   /** A run afresh: its head (written with its first unit) and its file's name. */
   start(head: { fingerprint: string; [k: string]: unknown }, name: string): void {
-    this.head = { format: this.format, version: 1, ...head };
+    this.head = { format: this.format, version: VERSION, ...head };
     this.f = new KeptFile(this.tool, pathArg(`${this.tool}-${name}.parts/${this.file}`, 'resume', 'write'), this.format, this.file);
   }
   /** The kept run named by resume: its head, checked by `check` (a message of what differs, or null); refused, changing nothing, when
@@ -139,8 +161,15 @@ class UnitFile {
     const units = this.f.units(), ends = this.ends;
     return { *[Symbol.iterator]() { for (const u of units) { ends.push(u.end); yield u.bytes; } } };
   }
-  /** The run goes on after the first `count` units read (one not taken, cut short or damaged, is cut off and made again). */
-  resumeAt(count: number): void { if (!this.fresh && this.f) this.f.cutAt(count ? this.ends[count - 1] : this.f.start); }
+  /** The run goes on after the first `count` units read (one not taken, cut short or damaged, is cut off and made again). Returns how
+   *  many kept units are made again: those found damaged (or not taken by the run) and every one after them. */
+  resumeAt(count: number): number {
+    if (this.fresh || !this.f) return 0;
+    const at = count ? this.ends[count - 1] : this.f.start;
+    const redone = this.f.countFrom(at);
+    this.f.cutAt(at);
+    return redone;
+  }
   add(unit: Uint8Array): void {
     if (!this.f) return;
     if (this.f.fd == null) { this.f.create(this.head!); this.onKept?.(this.f.path); }
@@ -168,7 +197,7 @@ export class IterationFile implements IterationStore {
       : asked != null && asked !== Number(h.seed) >>> 0 ? `seed was ${Number(h.seed) >>> 0}, now ${asked}` : null));
     return { seed: Number(head.seed) >>> 0, kept: this.u.units() };
   }
-  resumeAt(count: number): void { this.u.resumeAt(count); }
+  resumeAt(count: number): number { return this.u.resumeAt(count); }
   get path(): string | null { return this.u.path; }
   add(record: Uint8Array): void { this.u.add(record); }
   finish(): string | undefined { return this.u.finish(); }
@@ -186,7 +215,7 @@ export class ScenarioFile implements RowStore {
     const units = this.u.units();
     return { *[Symbol.iterator]() { for (const b of units) { let k: KeptScenario; try { k = JSON.parse(Buffer.from(b).toString('utf8')); } catch { return; } yield k; } } };
   }
-  resumeAt(count: number): void { this.u.resumeAt(count); }
+  resumeAt(count: number): number { return this.u.resumeAt(count); }
   get path(): string | null { return this.u.path; }
   add(kept: KeptScenario): void { this.u.add(Buffer.from(JSON.stringify(kept), 'utf8')); }
   finish(): string | undefined { return this.u.finish(); }

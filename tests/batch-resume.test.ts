@@ -4,7 +4,7 @@
 // is not this batch is refused and changes nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, statSync, truncateSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, truncateSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setRoots } from '../mcp/runtime.ts';
@@ -29,7 +29,7 @@ const chain = async (n: number) => {
 // the best scenario is early (it is kept by the stopped batch), the next best ones are the last two (done by the resume)
 const N = 300;
 const scenarios = Array.from({ length: N }, (_, i) => ({ name: `s${i}`, overrides: [{ op: 'update_activity', id: `A${i % 60}`, duration_days: i === 1 ? 1 : i >= N - 2 ? 2 : 4 + (i % 3) }] }));
-const same = (d: any) => { const { resumed_scenarios: _r, ...rest } = d; return rest; };
+const same = (d: any) => { const { resumed_scenarios: _r, redone_scenarios: _d, redone_note: _n, ...rest } = d; return rest; };
 
 /** A batch (a job) cancelled once it has started scenario `at` or later. */
 const stopped = async (h: object, at: number) => {
@@ -99,4 +99,31 @@ test('a batch on a project edited here, saved and opened again, continues from i
   assert.deepEqual(same(resumed.d), same(full));
   assert.deepEqual(same(full), same((await call('evaluate_batch', { ...h, scenarios, top: 3 })).d), 'the project as edited here and as opened again are the same batch');
   for (const x of [built, h, { handle: o.handle }]) await call('close', { ...x, discard: true });
+});
+
+// Review 4L-13 L1 / L2: a kept scenario was checked only by its length and JSON, so one whose bytes changed in place (a power loss can
+// leave old bytes of the right length) was taken in as it was and the answer was wrong without a warning. Each scenario now has a CRC32:
+// a damaged one, and every one after it, is done again, and the answer says how many.
+test('a kept scenario damaged in place is done again, with every one after it, and named', async () => {
+  const h = await chain(60);
+  const full = (await call('evaluate_batch', { ...h, scenarios, top: 3 })).d;
+  const part = (await stopped(h, 12)).d;
+  const done = part.scenarios_done as number;
+  assert.ok(done >= 4, String(done));
+  // the second scenario's finish changed in place, a digit for a digit: the same length, still JSON
+  // (a unit: its length u32, its CRC32 u32, its bytes; in layout 1, before the CRC32, its length and its bytes)
+  const b = readFileSync(part.resume), nl = b.indexOf(10), hd = JSON.parse(b.toString('utf8', 0, nl)).version === 1 ? 4 : 8;
+  let at = nl + 1;
+  at += hd + b.readUInt32LE(at);
+  const len = b.readUInt32LE(at), text = b.toString('utf8', at + hd, at + hd + len);
+  const m = /"finish":"\d{4}-\d\d-(\d)/.exec(text)!;
+  const pos = at + hd + Buffer.byteLength(text.slice(0, m.index + m[0].length - 1));
+  b[pos] = b[pos] === 0x31 ? 0x32 : 0x31; writeFileSync(part.resume, b);
+  JSON.parse(b.toString('utf8', at + hd, at + hd + len)); // (still a scenario a JSON reader takes)
+  const resumed = (await call('evaluate_batch', { ...h, scenarios, top: 3, resume: part.resume })).d;
+  assert.equal(resumed.resumed_scenarios, 1);
+  assert.equal(resumed.redone_scenarios, done - 1);
+  assert.match(resumed.redone_note, /kept scenarios? did not check out/);
+  assert.deepEqual(same(resumed), same(full));
+  await call('close', { ...h, discard: true });
 });
