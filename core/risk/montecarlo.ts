@@ -195,7 +195,7 @@ export interface MonteCarloOptions {
   store?: IterationStore;
 }
 /** The shape of one kept iteration (records are made and read here; the store only keeps them). */
-export interface IterationLayout { activities: number; estimable: number; risks: number; events: number }
+export interface IterationLayout { activities: number; estimable: number; /** the estimable activities whose duration varies (kept) */ durations: number; risks: number; events: number }
 /** Where a run keeps its finished iterations. */
 export interface IterationStore {
   /** `inputs` is everything the result is made from (the store fingerprints it); `asked` the seed the call gave, `fresh` the one a run
@@ -469,6 +469,18 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
 
   // One iteration's results, worked out before it is committed (commit), and as a store keeps them (record / read)
   const estK = prep.base.flatMap((_t, k) => (estimable[k] ? [k] : []));
+  // An estimable activity whose duration never depends on the generator (no ratio drawn for it, no estimate or a fixed one, no risk or
+  // event on it): its value, worked out once exactly as the loop makes it; null for one drawn each iteration. A record keeps only the
+  // durations that vary (review 4L-13 M3: 8 bytes per estimable activity per iteration was 60 MB for 5,000 activities x 1,000).
+  const drawn = Symbol('drawn');
+  const fixedDur = (k: number): number | null => {
+    if (varies.has(k) || (sampler && drawK[k])) return null;
+    const e = est[k];
+    if (!e) return baseDur[k];
+    try { return Math.max(0, sampleDuration(e, () => { throw drawn; })); } catch (x) { if (x === drawn) return null; throw x; }
+  };
+  const durK: number[] = [], fixK: number[] = [], fixV: number[] = [];
+  for (const k of estK) { const v = fixedDur(k); if (v == null) durK.push(k); else { fixK.push(k); fixV.push(v); } }
   const efRel = new Float32Array(n); // each activity's early finish from its anchor (as efSamples holds it)
   const ancK: number[] = [], ancV: number[] = []; // anchors set by this iteration (the first finite early finish of an activity)
   const hitR = new Uint8Array(riskEvents.length), hitI = new Uint8Array(inline.length);
@@ -489,10 +501,10 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     for (let j = 0; j < hitR.length; j++) riskHits[j] += hitR[j];
     for (let j = 0; j < hitI.length; j++) inline[j].hits += hitI[j];
   };
-  // a record: rng position (u32), finish (f64), the estimable activities' durations (f64), every activity's early finish from its
-  // anchor (f32), critical (bits), risks and events that happened (bits), then the anchors set (count, then k u32 and value f64 each)
+  // a record: rng position (u32), finish (f64), the durations that vary (f64; the others are fixedDur's), every activity's early finish
+  // from its anchor (f32), critical (bits), risks and events that happened (bits), then the anchors set (count, then k u32 and value f64)
   const bits = (m: number) => Math.ceil(m / 8);
-  const fixed = 4 + 8 + 8 * estK.length + 4 * n + bits(n) + bits(hitR.length) + bits(hitI.length) + 4;
+  const fixed = 4 + 8 + 8 * durK.length + 4 * n + bits(n) + bits(hitR.length) + bits(hitI.length) + 4;
   let recBuf: Uint8Array | null = null;
   const record = (rngState: number, fin: number): Uint8Array => {
     const len = fixed + 12 * ancK.length;
@@ -502,7 +514,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     let o = 0;
     v.setUint32(o, rngState, true); o += 4;
     v.setFloat64(o, fin, true); o += 8;
-    for (const k of estK) { v.setFloat64(o, dur[k], true); o += 8; }
+    for (const k of durK) { v.setFloat64(o, dur[k], true); o += 8; }
     for (let k = 0; k < n; k++) { v.setFloat32(o, efRel[k], true); o += 4; }
     const flags = (src: ArrayLike<number>) => { for (let i = 0; i < src.length; i++) if (src[i]) b[o + (i >> 3)] |= 1 << (i & 7); o += bits(src.length); };
     flags(critNow); flags(hitR); flags(hitI);
@@ -517,7 +529,8 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     let o = 0;
     const rngState = v.getUint32(o, true); o += 4;
     const fin = v.getFloat64(o, true); o += 8;
-    for (const k of estK) { dur[k] = v.getFloat64(o, true); o += 8; }
+    for (const k of durK) { dur[k] = v.getFloat64(o, true); o += 8; }
+    for (let i = 0; i < fixK.length; i++) dur[fixK[i]] = fixV[i];
     for (let k = 0; k < n; k++) { efRel[k] = v.getFloat32(o, true); o += 4; }
     const flags = (dst: Uint8Array) => { for (let i = 0; i < dst.length; i++) dst[i] = (b[o + (i >> 3)] >> (i & 7)) & 1; o += bits(dst.length); };
     flags(critNow); flags(hitR); flags(hitI);
@@ -534,14 +547,14 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   const store = opts.store;
   let rng = mulberry32(seed);
   if (store) {
-    const inputs = { format: 1, projIds, iterations: requested, phase, deadline: opts.deadline ?? null, over, sampler: sampler ?? null, reAnchor: !!opts.reAnchor,
+    const inputs = { format: 2, projIds, iterations: requested, phase, deadline: opts.deadline ?? null, over, sampler: sampler ?? null, reAnchor: !!opts.reAnchor,
       // the data the iterations schedule, as it reads it (review 4L-13 M1): what the tables say, not how they are laid out in memory (a
       // project built here, saved and opened again is the same run; a project's place in the EPS is not read), and the options the
       // scheduler takes from them and from what is not rows (the field list, a file header: an iteration's scratch project has none)
       data: dataDigest({ ...prep.shared, TASK: { rows: prep.taskRows }, PROJECT: { rows: prep.projRows } }, { PROJECT: PROJECT_PLACE_FIELDS }),
       scheduler: ((d) => projIds.map((id) => { const p = d.tables.PROJECT.rows.find((r) => r.proj_id === id); return p ? optionsFor(d, p, over) : null; }))(scratch(prep).db),
       est, risks: riskEvents.map((e) => ({ id: e.row.proj_risk_id, p: e.p, hours: e.hours, ks: e.ks })), events: inline.map((e) => ({ name: e.name, p: e.p, ks: e.ks, projectHours: e.projectHours })) };
-    const o = store.open(inputs, { activities: n, estimable: estK.length, risks: hitR.length, events: hitI.length }, opts.seed != null ? opts.seed >>> 0 : undefined, seed);
+    const o = store.open(inputs, { activities: n, estimable: estK.length, durations: durK.length, risks: hitR.length, events: hitI.length }, opts.seed != null ? opts.seed >>> 0 : undefined, seed);
     seed = o.seed; rng = mulberry32(seed);
     for (const b of o.kept) {
       if (done >= iterations) break;

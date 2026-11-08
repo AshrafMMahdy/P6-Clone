@@ -187,3 +187,38 @@ test('a run on a project built here, saved and opened again, continues from its 
   assert.deepEqual(same(full), same((await call('monte_carlo', { ...h, ...args })).d), 'the project as built and as opened again are the same run');
   await call('close', { ...h, discard: true }); await call('close', { handle: o.handle, discard: true });
 });
+
+// Review 4L-13 M3: a record held every estimable activity's duration (8 bytes each per iteration: 60 MB for 5,000 activities x 1,000
+// iterations). It now holds only the durations that vary; the others (no estimate, a fixed or zero-width one) are worked out again
+// exactly, so a resumed run still equals an uninterrupted one.
+test('a record keeps only the durations that vary, and a resumed run still equals an uninterrupted one exactly', async () => {
+  const h = await project(120);
+  const db = getSession(h.handle).db;
+  const { setEstimate, remainingHours } = await import('../core/risk/montecarlo.ts');
+  const ids = [db.tables.PROJECT.rows[0].proj_id];
+  const T = db.tables.TASK.rows, task = (code: string) => T.find((t) => t.task_code === code)!;
+  // estimates that vary (A10-A14), one fixed away from the remaining duration (A20: kept, it changes the schedule), fixed and
+  // zero-width ones at it (A21, A22: not kept); the rest have none
+  for (let i = 10; i < 15; i++) { const hr = remainingHours(task(`A${i}`)); setEstimate(db, task(`A${i}`).task_id, { min: hr * 0.8, ml: hr, max: hr * 1.5, dist: i % 2 ? 'betapert' : 'triangle' }); }
+  setEstimate(db, task('A20').task_id, { ml: remainingHours(task('A20')) + 8, dist: 'none' });
+  setEstimate(db, task('A21').task_id, { dist: 'none' });
+  setEstimate(db, task('A22').task_id, { min: remainingHours(task('A22')), max: remainingHours(task('A22')) });
+  const o = (store?: IterationFile): MonteCarloOptions => ({ iterations: 40, seed: 9, events: [{ name: 'e', p: 0.5, taskHours: [[task('A30').task_id, 16]], projectHours: 0 }], ...(store ? { store } : {}) });
+  const strip = (r: any) => { const { elapsedMs: _e, resumed: _r, ...rest } = r; return rest; };
+  const ref = await runMonteCarlo(db, ids, o());
+  // what varies: A10-A14, A20, the two register risks' activities (A3, A118) and the event's (A30)
+  const varying = 5 + 1 + 2 + 1, n = T.filter((t) => ids.includes(t.proj_id)).length, estimable = n - 1;
+  testHooks.failAt = 20;
+  const a = await runMonteCarlo(db, ids, o(new IterationFile(null))).finally(() => { testHooks.failAt = null; });
+  const file = a.partial!.kept!;
+  const at20 = statSync(file).size;
+  testHooks.failAt = 30;
+  await runMonteCarlo(db, ids, o(new IterationFile(file))).finally(() => { testHooks.failAt = null; });
+  const per = (statSync(file).size - at20) / 10; // (iterations 21-30 set no anchor: the first iteration set them all; a unit is framed by its length)
+  const bits = (m: number) => Math.ceil(m / 8);
+  assert.equal(per, 4 + 4 + 8 + 8 * varying + 4 * n + bits(n) + bits(2) + bits(1) + 4, `${per} bytes an iteration (each estimable duration kept: ${8 * estimable} for them)`);
+  const c = await runMonteCarlo(db, ids, o(new IterationFile(file)));
+  assert.equal(c.resumed, 30);
+  assert.deepEqual(strip(c), strip(ref));
+  await call('close', { ...h, discard: true });
+});
