@@ -49,6 +49,7 @@ test('a run that failed part-way is continued from its kept iterations: the answ
   const full = (await call('monte_carlo', mcArgs(h))).d;
   assert.equal(full.partial, undefined);
   assert.deepEqual(keptFiles(), [], 'a finished run removes its kept file');
+  assert.match(full.parts_removed, /monte_carlo-[0-9a-f]{12}-s11\.parts$/, 'and names it (a mirror of the outputs removes its copy)');
   testHooks.failAt = 47;
   let part;
   try { part = (await call('monte_carlo', mcArgs(h))).d; } finally { testHooks.failAt = null; }

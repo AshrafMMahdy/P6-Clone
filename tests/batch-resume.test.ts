@@ -45,6 +45,7 @@ test('a batch cancelled part-way is continued from its kept scenarios: the answe
   assert.equal(full.best, 's1');
   assert.deepEqual(full.scenarios.filter((s: any) => s.changed).map((s: any) => s.name).sort(), ['s1', `s${N - 2}`, `s${N - 1}`]);
   assert.deepEqual(readdirSync(root).filter((f) => f.startsWith('evaluate_batch-')), [], 'a finished batch removes its file');
+  assert.match(full.parts_removed, /evaluate_batch-[0-9a-f]{12}\.parts$/, 'and names it (a mirror of the outputs removes its copy)');
   const part = (await stopped(h, 8)).d;
   assert.equal(part.partial, true); assert.equal(part.stopped, 'cancelled');
   assert.ok(part.scenarios_done >= 2 && part.scenarios_done < N - 2, String(part.scenarios_done));

@@ -97,6 +97,9 @@ class KeptFile {
   }
 }
 
+/** Where a call's kept work is, as a whole: its .parts folder (never the folder above it: a resume given as a file elsewhere is that file). */
+export const keptPlace = (file: string): string => (/\.parts$/.test(basename(dirname(file))) ? dirname(file) : file);
+
 /** What every answer with kept work says about continuing (the tool reads exactly this path, never searches for one). */
 export const keepWords = (tool: string, resume: string, units: string) => `to continue, call ${tool} again with the same arguments and resume: "${resume}" (only the ${units} still missing are done, and the answer is the one an uninterrupted run gives); a call without resume starts over (it replaces the kept file of that name).`;
 
@@ -111,6 +114,8 @@ class UnitFile {
   readonly tool: string; private format: string; private file: string; private resume: unknown; private onKept?: (path: string) => void;
   constructor(tool: string, format: string, file: string, resume: unknown, onKept?: (path: string) => void) { this.tool = tool; this.format = format; this.file = file; this.resume = resume; this.onKept = onKept; }
   get resuming() { return this.resume != null; }
+  /** The file this call keeps its units in (null before it is known). */
+  get path(): string | null { return this.f?.path ?? null; }
   /** A run afresh: its head (written with its first unit) and its file's name. */
   start(head: { fingerprint: string; [k: string]: unknown }, name: string): void {
     this.head = { format: this.format, version: 1, ...head };
@@ -164,6 +169,7 @@ export class IterationFile implements IterationStore {
     return { seed: Number(head.seed) >>> 0, kept: this.u.units() };
   }
   resumeAt(count: number): void { this.u.resumeAt(count); }
+  get path(): string | null { return this.u.path; }
   add(record: Uint8Array): void { this.u.add(record); }
   finish(): string | undefined { return this.u.finish(); }
   stop(done: number): string | null { return this.u.stop(done); }
@@ -181,6 +187,7 @@ export class ScenarioFile implements RowStore {
     return { *[Symbol.iterator]() { for (const b of units) { let k: KeptScenario; try { k = JSON.parse(Buffer.from(b).toString('utf8')); } catch { return; } yield k; } } };
   }
   resumeAt(count: number): void { this.u.resumeAt(count); }
+  get path(): string | null { return this.u.path; }
   add(kept: KeptScenario): void { this.u.add(Buffer.from(JSON.stringify(kept), 'utf8')); }
   finish(): string | undefined { return this.u.finish(); }
   stop(done: number): string | null { return this.u.stop(done); }
