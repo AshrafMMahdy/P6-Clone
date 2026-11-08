@@ -28,3 +28,17 @@ test('…and a job that stops progressing is still judged frozen with the same s
   w.stop();
   assert.equal((stuck as StuckInfo | null)?.kind, 'idle', JSON.stringify(stuck));
 });
+
+// Review 4L-13 H1: a reading that takes two windows or more. The next check then fires at once, "late" by more than a window against the
+// window's start, and the old rule skipped it as event-loop lag — every window after it too, so a frozen job was never judged. Lateness is
+// the timer's own (when it was due), not the time our own awaited reading took.
+test('…and a job that stops progressing is judged frozen when the reading takes two windows or more', async () => {
+  const windowMs = 200;
+  let stuck: StuckInfo | null = null;
+  const slowCpu = () => new Promise<number>((r) => setTimeout(() => r(0), windowMs * 2.5));
+  const w = unitWatch({ onStuck: (i) => { stuck = i; }, cpu: slowCpu, windowMs });
+  w.beat(1);
+  for (let i = 0; i < 80 && !stuck; i++) await new Promise((r) => setTimeout(r, windowMs / 2));
+  w.stop();
+  assert.equal((stuck as StuckInfo | null)?.kind, 'idle', `never judged: ${JSON.stringify(stuck)}`);
+});

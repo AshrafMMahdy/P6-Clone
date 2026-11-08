@@ -177,18 +177,21 @@ function watchLoop(w: Watched, onStuck: (i: StuckInfo) => void, windowMs = liven
   const report = watchReport.getStore();
   let told = false;
   const tell = (line: string | null) => { if (!report || (!line && !told)) return; told = !!line; try { report.line(line); } catch { /* the job is gone */ } };
-  let stopped = false, winStart = Date.now(), cpuThen: number | null = null, gotBase = false, timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false, winStart = Date.now(), due = 0, cpuThen: number | null = null, gotBase = false, timer: ReturnType<typeof setTimeout> | undefined;
   const base = w.cpu ? w.cpu().then((v) => { cpuThen = v; gotBase = true; }, () => { gotBase = true; }) : Promise.resolve();
   // One window after another, each starting where the last one ended (the time spent reading the processor time — PowerShell on
   // Windows can take longer than a window under load — belongs to the next window, so progress made meanwhile always counts).
-  const next = () => { if (!stopped) { timer = setTimeout(check, Math.max(0, winStart + windowMs - Date.now())); timer.unref?.(); } };
+  // due: when this check is meant to fire — the window's end, or now when our own reading already ran past it (that time is not lag).
+  const next = () => { if (!stopped) { const now = Date.now(); due = Math.max(winStart + windowMs, now); timer = setTimeout(check, due - now); timer.unref?.(); } };
   const check = async () => {
     if (stopped) return;
     try {
       await base;
       const now = Date.now();
-      // this process did not get to look for a whole window or more (its own event loop was busy): that window is not counted
-      if (now - (winStart + windowMs) >= windowMs) { winStart = now; cpuThen = w.cpu ? await w.cpu().catch(() => null) : null; return; }
+      // this process did not get to look for a whole window or more after the check was due (its own event loop was busy): that window
+      // is not counted. Measured from when the timer was due, never from the window's start: a reading that took two windows or more
+      // would otherwise make every later check "late" and no window would ever be judged (review 4L-13 H1).
+      if (now - due >= windowMs) { winStart = now; cpuThen = w.cpu ? await w.cpu().catch(() => null) : null; return; }
       await w.refresh?.().catch(() => undefined);
       const progressed = w.lastProgressAt() >= winStart;
       const nextStart = Date.now();
