@@ -82,7 +82,8 @@ jobs:
           node --import ./tests/setup.ts --test --test-reporter=spec "tests/*.test.ts" > test.log 2>&1 && { grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log; echo "skipped here (a sample or Chromium this machine does not have):"; grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | sed -n 1,60p; exit 0; }
           grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log
           grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | sed -n 1,60p | sed 's/^ */::warning::skipped /'
-          grep -E "^✖|AssertionError|actual:|expected:|Error:|reason" test.log | sed -n 1,40p | sed 's/^ */::error::/'
+          # one annotation per failing test with its error (GitHub shows at most 10 per step, so the details go in each one)
+          awk '/^✖ failing tests:/{f=1;next} f' test.log | awk '/^✖ /{if(b!="")print b; b=$0; next} b=="" {next} {gsub(/%/,"%25"); b=b"%0A"$0} END{if(b!="")print b}' | cut -c1-4000 | sed 's/^/::error::/'
           exit 1
       - run: node scripts/build-cli.mjs
       - name: Archive (bundles, the 4D viewer, fonts, the reasoner's models/ and ort/ with its licences, the IFC engine, the .mpp reader)
