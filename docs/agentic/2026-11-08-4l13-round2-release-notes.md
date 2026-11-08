@@ -1,4 +1,6 @@
-# whiq-v0.1.62: render_4d round 2 (platform review of whiq-v0.1.61)
+# whiq-v0.1.64: render_4d round 2 (platform review of whiq-v0.1.61)
+
+(v0.1.62 and v0.1.63 failed CI on two test assumptions, an H.264 browser; nothing was published under them. v0.1.64 = the same code.)
 
 Items: H6 streaming, H5 decoder config, M3, M4, L1-L5, M2 wording, image paths relative to the write root.
 Not ours: H1, H3, M1, H2 (platform), H4 (23c7bdf) and M5 (ab2d274), both by the platform agent in this repo.
