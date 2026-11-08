@@ -76,7 +76,7 @@ const mbs = (b: number) => `${Math.round(b / 1048576).toLocaleString('en')} MB`;
 /** Read a model with its memory reserved first: a model that does not fit is refused (naming the budget and what it
  *  needs), not run out of memory on. Meshing is cut into chunks sized to the memory left (loadNeeds), so a model is
  *  refused only when its index, or its index and the smallest chunk, do not fit. */
-/** A model read; a reader ended as stuck is told with its structured facts (data.stuck: step, silent_ms or bound_ms, tried, alternatives). */
+/** A model read; a reader ended as stuck is told with its structured facts (data.stuck: step, kind, silent_ms, windows, window_ms, cpu_ms, tried, alternatives). */
 async function readModel(path: string, o: { geometry?: boolean; tick?: AnalysisHelpers['tick'] } = {}): Promise<Model> {
   try { return await readModelNow(path, o); } catch (e) {
     if (e instanceof StuckError) fail('model_unreadable', e.message, e.stuck.alternatives, { data: { reason: 'stuck', stuck: e.stuck } });
