@@ -201,25 +201,31 @@ render_4d again with the same arguments and resume: "<x>.parts/render.json"; a c
 replaces the old parts of that name). The tool reads exactly the resume path given (compared as a path: resolved, case-folded on Windows)
 and never searches for one. On a resume, the manifest is checked (shape, names, ranges, that each run reads back as its frames and decoder
 configuration up to its `bytes`) and **nothing is changed on disk until the resume is accepted**: a refused resume (`resume_mismatch`,
-`resume_unreadable`) removes, cuts and rewrites nothing; once accepted, a run file longer than its `bytes` (a chunk being written when the
+`resume_unreadable` when there is no render.json of a render there, `resume_not_readable_now` when one is there but cannot be read now: a
+lock, a scan; call again with the same resume, never afresh, which would replace it) removes, cuts and rewrites nothing; once accepted, a run file longer than its `bytes` (a chunk being written when the
 process died) is cut back, a run that does not check out is left out of the manifest (its file is overwritten only when its frames are drawn
 again), and those frames are drawn again. The encoder in use is the one this call draws with: the first run it encodes sets the `config` every run must have, or, when nothing is
 missing, the newest kept run's (the runs are numbered in the order they were drawn). A run whose `config` differs cannot be joined to
 those of this encoder; it is marked `stale` in `render.json` (listed, not counted in `frames_done`, its frames missing), drawn again in the
 same pass, and dropped from the manifest once runs in use cover its frames (its file stays until the parts are removed); `redrawn` says
-which and why. A stale run is never used again: a call cannot know its encoder's configuration before it draws. The answer lists stale runs apart,
+which and why. A call cannot know its encoder's configuration before it draws, so the frames no run holds (in use or stale) are drawn first;
+once the first chunk gives the configuration, a stale run with that configuration (an encoder that flipped back: A, then B, then A) is used
+again where no run in use, nor the run being drawn, holds any of its frames, the newest first, so no frame is counted twice; `reused` lists
+them. The answer lists stale runs apart,
 as `stale_segments`; `kept_segments` is exactly the work `frames_done` counts. Nothing is retried: if a run drawn in this call still
 differs from the reference (an unstable encoder, or an encoder that changed since the newest kept run when nothing was missing), the join is
 refused as `render_failed` with `reason: decoder_config_differs` and the kept report; the next resume converges (its reference is then the
 newest run, and the older ones are the stale ones). Parts loaded for a resume are never replaced or removed by a refusal or a failure (a
 changed picture or `frames_total` is a `resume_mismatch`); only a call without resume replaces them. Any listed run, live or stale, is kept
 work: the failure answer carries the report, `resume` and the wording. A manifest image entry that resolves outside the write root is not
-followed, and `redrawn` says so. The runs are joined by copying packets (a refusal if their configurations differ), the result is checked
-frame by frame, and the `.parts` folder is removed after every successful render (video MP4, WebM converted to MP4 with ffmpeg, images).
+followed, and `redrawn` says so. The runs are joined by copying packets (a refusal if their configurations differ) into
+`joined.<ext>.p6clone-tmp` in the `.parts` folder (a temporary name a mirror skips, until it is checked and moved into place), the result is
+checked frame by frame, and the `.parts` folder is removed after every successful render (video MP4, WebM converted to MP4 with ffmpeg, images).
 Images are written straight into the output folder as they are made; `render.json` lists each by its path **relative to the write root**
 (the output folder when the server has none), so a tree copied to another root (an engine restart) is the same render and its frames are not
 drawn again; an entry resolving outside the root is ignored. A second `render_4d` in the same `.parts` folder while one is still working in it
-(a cancelled job answers before it has stopped) is refused as `render_busy`, with `job_id` when it is a job. With no Chromium here (the client
+(a cancelled job answers before it has stopped) is refused as `render_busy`, with `job_id` when it is a job (one started with `async: true`
+or one the soft timeout turned into a job). With no Chromium here (the client
 route) nothing is rendered and `resume` is not used; the note says so and the parts are left as they are.
 
 **How a job is judged frozen** (`core/bim/liveness.ts`, `core/bim/heartbeat.mjs`): the platform's rule, one for every watch (owner
