@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -55,4 +55,103 @@ test('a meshing stopped at a chunk keeps the chunks it finished: the next open m
     assert.deepEqual(picture(m), picture(ref.m));
     assert.equal(existsSync(join(cache, chunks[0])), false, 'once the model is cached its kept chunks go');
   });
+});
+
+// ---- review 4L-13 M4, L1, L2, L3 ----
+const env = { P6CLONE_GEOM_CHUNK_MB: '0.1' };
+let refMemo: Promise<{ picture: ReturnType<typeof picture>; total: number }> | null = null;
+/** The model meshed without a stop (a cache of its own), once for these tests. */
+const reference = () => (refMemo ??= (async () => {
+  const { loadModel, releaseModels } = await import('../core/bim/model.ts');
+  const notes: string[] = [];
+  releaseModels(new Set()); // (a model is held in memory by its content: the one an earlier test read would be taken as it is)
+  const m = await withEnv({ ...env, P6CLONE_MODEL_CACHE: mkdtempSync(join(tmpdir(), 'p6-kept-ref-')) }, () => loadModel(FX, { onProgress: (_d, _t, n) => { notes.push(n); } }));
+  const out = { picture: picture(m), total: notes.filter((n) => /^meshing chunk/.test(n)).length };
+  releaseModels(new Set());
+  return out;
+})());
+/** A copy of the model in a cache of its own, its meshing stopped at the fourth chunk: the cache, the file, the kept chunks' folder. */
+const stoppedAt3 = async (extra: Record<string, string | undefined> = {}) => {
+  const { loadModel, releaseModels } = await import('../core/bim/model.ts');
+  const cache = mkdtempSync(join(tmpdir(), 'p6-kept-'));
+  const file = join(mkdtempSync(join(tmpdir(), 'p6-kept-ifc-')), 'duplex.ifc');
+  copyFileSync(FX, file);
+  releaseModels(new Set());
+  await withEnv({ ...env, ...extra, P6CLONE_MODEL_CACHE: cache }, () => assert.rejects(loadModel(file, { onProgress: (d) => { if (d === 3) throw Object.assign(new Error('The call was cancelled.'), { code: 'cancelled' }); } }), /cancelled/));
+  const chunks = readdirSync(cache).find((f) => f.endsWith('.chunks'))!;
+  const kept = join(cache, chunks, readdirSync(join(cache, chunks))[0]);
+  assert.deepEqual(readdirSync(kept).sort(), ['0', '1', '2']);
+  return { cache, file, chunks: join(cache, chunks), kept };
+};
+const meshed = (notes: string[]) => ({ kept: notes.filter((n) => /kept from an earlier meshing/.test(n)).length, meshed: notes.filter((n) => /^meshing chunk/.test(n)).length });
+
+test('M4: an open without geometry keeps the chunks a stopped meshing kept; the next open with geometry takes them in', { timeout: 600_000 }, async () => {
+  const { loadModel, releaseModels } = await import('../core/bim/model.ts');
+  const ref = await reference();
+  const s = await stoppedAt3();
+  await withEnv({ ...env, P6CLONE_MODEL_CACHE: s.cache }, async () => {
+    releaseModels(new Set());
+    const plain = await loadModel(s.file, { geometry: false });
+    assert.equal(plain.tiles, null);
+    assert.deepEqual(readdirSync(s.kept).sort(), ['0', '1', '2'], 'an open without geometry meshed nothing: the kept chunks stay');
+    releaseModels(new Set());
+    const notes: string[] = [];
+    const m = await loadModel(s.file, { onProgress: (_d, _t, n) => { notes.push(n); } });
+    assert.deepEqual(meshed(notes), { kept: 3, meshed: ref.total - 3 }, notes.join(' | '));
+    assert.deepEqual(picture(m), ref.picture);
+    assert.equal(existsSync(s.chunks), false, 'a pass that meshed: the kept chunks go');
+  });
+});
+
+test('M4: chunks kept for one list of products are not taken by a meshing of another list', { timeout: 600_000 }, async () => {
+  const { loadModel, readIndex, releaseModels } = await import('../core/bim/model.ts');
+  const { meshIndex, productIdsOf } = await import('../core/bim/parse.ts');
+  const s = await stoppedAt3();
+  await withEnv({ ...env, P6CLONE_MODEL_CACHE: s.cache }, async () => {
+    releaseModels(new Set());
+    await loadModel(s.file, { geometry: false }); // (the index, cached; the kept chunks stay)
+    const index = readIndex(s.chunks.replace(/\.chunks$/, ''));
+    const ids = productIdsOf(index);
+    const notes: string[] = [];
+    const tiles = join(mkdtempSync(join(tmpdir(), 'p6-kept-sub-')), 'tiles');
+    await meshIndex(s.file, index, ids.subarray(0, Math.floor(ids.length / 2)), { keepChunks: s.chunks, tilesOut: tiles, onProgress: (_d, _t, n) => { notes.push(n); } });
+    assert.equal(meshed(notes).kept, 0, notes.join(' | '));
+    assert.ok(meshed(notes).meshed > 0);
+  });
+});
+
+test('L1 / L2: a kept chunk damaged in place (zeros of the right length) is meshed again and named; the model equals one meshed without a stop', { timeout: 600_000 }, async () => {
+  const { loadModel, releaseModels } = await import('../core/bim/model.ts');
+  const ref = await reference();
+  const s = await stoppedAt3();
+  const meta = join(s.kept, '1', 'elems.meta');
+  writeFileSync(meta, Buffer.alloc(readFileSync(meta).length));
+  await withEnv({ ...env, P6CLONE_MODEL_CACHE: s.cache }, async () => {
+    releaseModels(new Set());
+    const notes: string[] = [];
+    const m = await loadModel(s.file, { onProgress: (_d, _t, n) => { notes.push(n); } });
+    assert.deepEqual(meshed(notes), { kept: 2, meshed: ref.total - 2 }, notes.join(' | '));
+    assert.ok(notes.includes(`meshing chunk 2 of ${ref.total} (its kept results did not check out)`), notes.join(' | '));
+    assert.match(m.index.geometryNote ?? '', /1 chunk kept from an earlier meshing did not check out \(damaged, as a power loss can leave a file\) and was meshed again/);
+    assert.deepEqual(picture(m), ref.picture);
+  });
+});
+
+test('L3: chunks kept by another version of the engine (here: the tiler changed) are not taken', { timeout: 600_000 }, async () => {
+  const { loadModel, releaseModels } = await import('../core/bim/model.ts');
+  const ref = await reference();
+  // the geometry scripts copied beside the repository's node_modules (web-ifc is found from there)
+  const engine = mkdtempSync(join(import.meta.dirname, '..', '.p6-test-engine-'));
+  try {
+    for (const f of ['geomWorker.mjs', 'meshClosed.mjs', 'heartbeat.mjs', 'geomChunk.mjs', 'geomTiles.mjs']) copyFileSync(join(import.meta.dirname, '..', 'core', 'bim', f), join(engine, f));
+    const worker = { P6CLONE_IFC_GEOM_WORKER: join(engine, 'geomWorker.mjs') };
+    const s = await stoppedAt3(worker);
+    appendFileSync(join(engine, 'geomTiles.mjs'), '\n// another version of the tiler\n');
+    await withEnv({ ...env, ...worker, P6CLONE_MODEL_CACHE: s.cache }, async () => {
+      releaseModels(new Set());
+      const notes: string[] = [];
+      await loadModel(s.file, { onProgress: (_d, _t, n) => { notes.push(n); } });
+      assert.deepEqual(meshed(notes), { kept: 0, meshed: ref.total }, notes.join(' | '));
+    });
+  } finally { rmSync(engine, { recursive: true, force: true }); }
 });

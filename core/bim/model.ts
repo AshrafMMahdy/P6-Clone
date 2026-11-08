@@ -145,7 +145,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
     const index = cached.index;
     await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
     writeIndex(base, index);
-    dropKeptChunks(base);
+    dropKeptChunks(base, index);
     cached = { index };
   }
   if (cached && (!want || cached.index.geometryStatus !== 'ok' || readManifest(`${base}.tiles`))) {
@@ -158,15 +158,20 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   }
   const { index } = await parseIfc(path, { geometry: want, ...(want ? { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress } : {}) });
   writeIndex(base, index);
-  dropKeptChunks(base);
+  if (want) dropKeptChunks(base, index); // (an open without geometry meshed nothing: what a stopped meshing kept is still to be used)
   if (index.elements.length > 200_000) compactHeap(); // what reading it left behind goes before the next call takes memory
   const m = wrap(hash, index, want ? `${base}.tiles` : null);
   memory.set(cacheName(hash), m);
   return m;
 }
 
-/** The model is cached (its index and tiles): the chunks a stopped meshing kept (parse.ts keepChunks) have done their work. */
-function dropKeptChunks(base: string): void { try { rmSync(`${base}.chunks`, { recursive: true, force: true }); } catch { /* in use: pruned with the cache */ } }
+/** After a pass that meshed the model, now cached with its geometry: the chunks a stopped meshing kept (parse.ts keepChunks) have done
+ *  their work. A pass whose meshing failed as a whole (geometry unavailable: it is meshed again, once a run of the app) keeps them (review
+ *  4L-13 M4: only a pass that meshed drops them; an open without geometry never comes here). */
+function dropKeptChunks(base: string, index: IfcIndex): void {
+  if (index.geometryStatus !== 'ok') return;
+  try { rmSync(`${base}.chunks`, { recursive: true, force: true }); } catch { /* in use: pruned with the cache */ }
+}
 
 /** The cached index, or null when the cache is missing or damaged (then the IFC is read again). */
 function tryReadIndex(base: string): { index: IfcIndex } | null { try { return { index: readIndex(base) } } catch { rmSync(`${base}.ndjson`, { force: true }); return null; } }
