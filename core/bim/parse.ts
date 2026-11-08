@@ -1,6 +1,6 @@
 // Ported from the White Hat IQ platform's @whiq/ifc (shared/ifc, branch 33-chat-only) so both read models the same way.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { stepIndex } from './stepIndex.ts';
@@ -105,6 +105,12 @@ export interface ParseIfcOptions {
   tileBytes?: number;
   /** Progress while meshing: runs done of runs. */
   onProgress?: (done: number, total: number, note: string) => void | Promise<void>;
+  /** A model past one geometry run is meshed in chunks: each finished chunk (its fingerprints and its display tiles) is kept in this
+   *  folder as it is done, and a later meshing of the same model with the same chunk size takes it in instead of meshing it again
+   *  (model.ts: <cache>/<hash>-v<format>-t<tile MB>.chunks, keyed by the model's content: the model is opened again from its file, so
+   *  nothing is passed back by hand). A stop (a cancel, a failure, a crash) leaves the chunks done; model.ts removes the folder once
+   *  the model is cached. */
+  keepChunks?: string;
 }
 
 /**
@@ -243,11 +249,11 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   if (tilesDir && !existsSync(join(dirname(script), 'geomTiles.mjs'))) return { ok: false, note: 'the display tiler (geomTiles.mjs beside geomWorker.mjs) is missing. The model is indexed; the 3D view is not available for it.' };
   const state = newRunState();
   forgetRates('geometry'); // this job's own rate starts here (the bound of each run is sized from the slower of it and the benchmark's)
-  /** One worker run: mesh, fingerprints into the index, tiles. */
-  const one = async (file: string, dir: string): Promise<Run> => {
+  /** One worker run: mesh, fingerprints into the index, tiles (and, a chunk, kept in keepTo as it is done). */
+  const one = async (file: string, dir: string, keepTo?: string): Promise<Run> => {
     const t0 = Date.now();
     const r = await runGeometryWorker(file, dir, productsBin, opts, script);
-    const absorbed = r.ok ? await absorbRun(dir, index, tilesDir, opts, state) : r;
+    const absorbed = r.ok ? await absorbRun(dir, index, tilesDir, opts, state, keepTo) : r;
     if (absorbed.ok) noteRate('geometry', Date.now() - t0, statSync(file).size); // this job's own rate: the bound of the next run is sized from the slower of it and the benchmark's
     return absorbed;
   };
@@ -266,9 +272,16 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   if (!cut.ok) return { ok: false, note: `cutting the model into chunks failed: ${cut.note}`, ...(cut.stuck ? { stuck: cut.stuck } : {}) };
   const { chunks } = JSON.parse(readFileSync(join(cdir, 'chunks.json'), 'utf8')) as { chunks: { file: string; products: number }[] };
   const failed: string[] = [];
+  // the chunks a stopped meshing of this model finished, at this chunk size (the cut is the same for the same file and size)
+  const keptDir = opts.keepChunks ? join(opts.keepChunks, String(target)) : null;
   for (const [k, c] of chunks.entries()) {
+    if (keptDir && takeKeptChunk(join(keptDir, String(k)), index, tilesDir, state)) {
+      await opts.onProgress?.(k, chunks.length, `chunk ${k + 1} of ${chunks.length} kept from an earlier meshing`);
+      rmSync(c.file, { force: true });
+      continue;
+    }
     await opts.onProgress?.(k, chunks.length, `meshing chunk ${k + 1} of ${chunks.length}`);
-    const r = await one(c.file, join(cdir, `g${k}`));
+    const r = await one(c.file, join(cdir, `g${k}`), keptDir ? join(keptDir, String(k)) : undefined);
     rmSync(c.file, { force: true });
     if (!r.ok) { failed.push(`chunk ${k + 1} (${c.products} products): ${r.note.split(' The model is indexed')[0]}`); state.failures += c.products; if (r.stuck) state.stuck ??= r.stuck; }
   }
@@ -279,9 +292,8 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
 export type RunState = { meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[]; stuck?: StuckData };
 export const newRunState = (): RunState => ({ meshed: 0, failures: 0, maxAbsCoord: 0, tiles: [] });
 
-/** A run in the geometry worker's layout (dir: geom.json, elems.meta, geoms.*, places.bin) taken in: its fingerprints
- *  into the index, its meshes into display tiles (geomTiles.mjs, in its own process), then its files go. */
-export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string | null, opts: ParseIfcOptions, state: RunState): Promise<Run> {
+/** A run's fingerprints (dir: geom.json, elems.meta) into the index, and its counts into the state. */
+function absorbFingerprints(dir: string, index: IfcIndex, state: RunState): void {
   const store = geomStore(index);
   const sum = JSON.parse(readFileSync(join(dir, 'geom.json'), 'utf8')) as RunSummary;
   const mb = readFileSync(join(dir, 'elems.meta')), rows = new Float64Array(mb.buffer, mb.byteOffset, mb.byteLength / 8);
@@ -292,6 +304,14 @@ export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string |
     else { const e = index.elements[o] as IfcElement & { geom: GeomFingerprint | null; derivedVolumeM3: number | null }; if (e) { e.geom = { bbox: [...rows.subarray(k + 4, k + 10)] as GeomFingerprint['bbox'], centroid: [...rows.subarray(k + 10, k + 13)] as GeomFingerprint['centroid'], volume: rows[k + 3], triangles: rows[k + 2] }; e.derivedVolumeM3 = Number.isNaN(rows[k + 3]) ? null : rows[k + 3]; } }
   }
   state.meshed += sum.elements; state.failures += sum.failures; state.maxAbsCoord = Math.max(state.maxAbsCoord, sum.maxAbsCoord);
+}
+
+/** A run in the geometry worker's layout (dir: geom.json, elems.meta, geoms.*, places.bin) taken in: its fingerprints
+ *  into the index, its meshes into display tiles (geomTiles.mjs, in its own process), then its files go. With keepTo (a chunk of a
+ *  model meshed in chunks), what it gave is kept there first: its fingerprints and its tiles (keepChunk). */
+export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string | null, opts: ParseIfcOptions, state: RunState, keepTo?: string): Promise<Run> {
+  absorbFingerprints(dir, index, state);
+  const before = state.tiles.length;
   if (tilesDir) {
     const worker = workerScript(opts), tiler = worker ? join(dirname(worker), 'geomTiles.mjs') : null;
     if (!tiler || !existsSync(tiler)) return { ok: false, note: 'the display tiler (geomTiles.mjs beside geomWorker.mjs) is missing. The model is indexed; the 3D view is not available for it.' };
@@ -299,8 +319,39 @@ export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string |
     if (!t.ok) return { ok: false, note: `the display tiles could not be written: ${t.note}` };
     state.tiles.push(...(JSON.parse(readFileSync(join(dir, 'tiles.json'), 'utf8')) as TileRecord[]));
   }
+  if (keepTo) keepChunk(dir, tilesDir, state.tiles.slice(before), keepTo);
   rmSync(dir, { recursive: true, force: true });
   return { ok: true };
+}
+
+/** A chunk's results kept (G10, 4L-13): its fingerprints (geom.json, elems.meta) and its tiles (renamed t-N.glb, listed in tiles.json),
+ *  written beside and renamed into place: a kept chunk is whole or absent. */
+function keepChunk(dir: string, tilesDir: string | null, tiles: TileRecord[], keepTo: string): void {
+  const tmp = `${keepTo}.${process.pid}.tmp`;
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  copyFileSync(join(dir, 'geom.json'), join(tmp, 'geom.json'));
+  copyFileSync(join(dir, 'elems.meta'), join(tmp, 'elems.meta'));
+  const kept = tilesDir ? tiles.map((t, i) => { copyFileSync(join(tilesDir, t.file), join(tmp, `t-${i}.glb`)); return { ...t, file: `t-${i}.glb` }; }) : null;
+  writeFileSync(join(tmp, 'tiles.json'), JSON.stringify(kept));
+  rmSync(keepTo, { recursive: true, force: true });
+  // another process meshing the same model may have kept this chunk first: those are the same results, so they stand
+  try { renameSync(tmp, keepTo); } catch (e) { rmSync(tmp, { recursive: true, force: true }); if (!existsSync(join(keepTo, 'tiles.json'))) throw e; }
+}
+
+/** A kept chunk taken in, as if it had just been meshed: its fingerprints into the index, its tiles into tilesDir numbered after the
+ *  tiles so far. False (nothing taken in) when there is none, or it does not fit (kept without tiles and tiles are wanted, a file
+ *  gone or not its length): the chunk is then meshed again, and kept anew. */
+function takeKeptChunk(kdir: string, index: IfcIndex, tilesDir: string | null, state: RunState): boolean {
+  if (!existsSync(join(kdir, 'tiles.json'))) return false;
+  try {
+    const kept = JSON.parse(readFileSync(join(kdir, 'tiles.json'), 'utf8')) as TileRecord[] | null;
+    if (tilesDir && (!Array.isArray(kept) || kept.some((t) => statSync(join(kdir, t.file)).size !== t.bytes))) throw new Error('its tiles are not whole');
+    const records = tilesDir ? kept!.map((t, i) => { const file = `tile-${String(state.tiles.length + i).padStart(5, '0')}.glb`; copyFileSync(join(kdir, t.file), join(tilesDir, file)); return { ...t, file }; }) : [];
+    absorbFingerprints(kdir, index, state);
+    state.tiles.push(...records);
+    return true;
+  } catch { rmSync(kdir, { recursive: true, force: true }); return false; }
 }
 
 function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opts: ParseIfcOptions, script: string): Promise<Run> {

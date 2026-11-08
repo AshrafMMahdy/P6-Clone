@@ -143,8 +143,9 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   if (retry) retried.add(hash);
   if (cached && want && (cached.index.geometryStatus === 'skipped' || retry)) {
     const index = cached.index;
-    await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
+    await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
     writeIndex(base, index);
+    dropKeptChunks(base);
     cached = { index };
   }
   if (cached && (!want || cached.index.geometryStatus !== 'ok' || readManifest(`${base}.tiles`))) {
@@ -155,13 +156,17 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
     memory.set(cacheName(hash), m);
     return m;
   }
-  const { index } = await parseIfc(path, { geometry: want, ...(want ? { tilesOut: `${base}.tiles`, chunkBytes: o.chunkBytes, onProgress: o.onProgress } : {}) });
+  const { index } = await parseIfc(path, { geometry: want, ...(want ? { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress } : {}) });
   writeIndex(base, index);
+  dropKeptChunks(base);
   if (index.elements.length > 200_000) compactHeap(); // what reading it left behind goes before the next call takes memory
   const m = wrap(hash, index, want ? `${base}.tiles` : null);
   memory.set(cacheName(hash), m);
   return m;
 }
+
+/** The model is cached (its index and tiles): the chunks a stopped meshing kept (parse.ts keepChunks) have done their work. */
+function dropKeptChunks(base: string): void { try { rmSync(`${base}.chunks`, { recursive: true, force: true }); } catch { /* in use: pruned with the cache */ } }
 
 /** The cached index, or null when the cache is missing or damaged (then the IFC is read again). */
 function tryReadIndex(base: string): { index: IfcIndex } | null { try { return { index: readIndex(base) } } catch { rmSync(`${base}.ndjson`, { force: true }); return null; } }
@@ -263,7 +268,7 @@ export function pruneCache(now = Date.now()): number {
   pruned = now;
   const dir = cacheDir(), days = Number(process.env.P6CLONE_MODEL_CACHE_DAYS) || 14, cap = (Number(process.env.P6CLONE_MODEL_CACHE_MB) || 10240) * 1048576;
   const sizeOf = (p: string): number => { try { const st = statSync(p); return st.isDirectory() ? readdirSync(p).reduce((n, f) => n + sizeOf(join(p, f)), 0) : st.size; } catch { return 0; } };
-  const files = readdirSync(dir).filter((f) => /\.(json|ndjson|geom|glb|tiles|ifc)$/.test(f)).map((f) => { const p = join(dir, f); try { const st = statSync(p); return { p, at: st.mtimeMs, size: sizeOf(p) }; } catch { return null; } }).filter((x): x is { p: string; at: number; size: number } => !!x).sort((a, b) => a.at - b.at);
+  const files = readdirSync(dir).filter((f) => /\.(json|ndjson|geom|glb|tiles|ifc|chunks)$/.test(f)).map((f) => { const p = join(dir, f); try { const st = statSync(p); return { p, at: st.mtimeMs, size: sizeOf(p) }; } catch { return null; } }).filter((x): x is { p: string; at: number; size: number } => !!x).sort((a, b) => a.at - b.at);
   let total = files.reduce((n, f) => n + f.size, 0), removed = 0;
   for (const f of files) {
     if (now - f.at < days * 86_400_000 && total <= cap) break;
