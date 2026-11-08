@@ -42,4 +42,14 @@ test('ended after a cancel: the rows it had sent out are the answer (evaluate_ba
   assert.equal(parseP6Date(m.finish.P50), finishes[4]);
   assert.equal(parseP6Date(m.finish.P90), finishes[8]);
   assert.match(m.note, /10 iterations it had finished/);
+  // 4L-13: the file the work is kept in goes out first ({resume}); the answer names it, and it is not a row of the answer
+  const kb = FROM_KEPT.evaluate_batch([{ resume: '/w/evaluate_batch-x.parts/scenarios.ndjson' }, ...rows], { scenarios: [{}, {}, {}, {}] }) as Record<string, any>;
+  assert.deepEqual([kb.scenarios_done, kb.scenarios.length, kb.resume], [2, 2, '/w/evaluate_batch-x.parts/scenarios.ndjson']);
+  assert.match(kb.note, /resume: "\/w\/evaluate_batch-x.parts\/scenarios.ndjson"/);
+  const km = FROM_KEPT.monte_carlo([{ resume: '/w/monte_carlo-x.parts/iterations.p6mc' }, ...finishes], { iterations: 1000 }) as Record<string, any>;
+  assert.deepEqual([km.iterations_done, km.resume, parseP6Date(km.finish.P50)], [10, '/w/monte_carlo-x.parts/iterations.p6mc', finishes[4]]);
+  assert.match(km.note, /to continue, call monte_carlo again with the same arguments and resume/);
+  // only the file and nothing finished: nothing to answer with (the call is cancelled as any other)
+  assert.equal(FROM_KEPT.monte_carlo([{ resume: '/w/m' }], { iterations: 10 }), null);
+  assert.equal(FROM_KEPT.evaluate_batch([{ resume: '/w/b' }], { scenarios: [{}] }), null);
 });

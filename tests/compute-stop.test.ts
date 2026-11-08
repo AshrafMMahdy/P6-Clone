@@ -6,6 +6,11 @@
 //    finished iterations were lost.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { setRoots } from '../mcp/runtime.ts';
+import { tmpdir } from 'node:os';
+
+// a stopped run keeps its work in the write root (4L-13): the test's own temp folder, not the folder the tests run in
+setRoots(null, tmpdir());
 
 const call = async (name: string, args: Record<string, unknown>) => {
   const { callTool, toolResult } = await import('../mcp/server.ts');

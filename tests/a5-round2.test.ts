@@ -11,6 +11,10 @@ import { applyOps } from '../core/project/ops.ts';
 import { addRelationship, checkRelationship } from '../core/project/edit.ts';
 import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
 import { rows, type Db } from '../core/db.ts';
+import { setRoots } from '../mcp/runtime.ts';
+
+// a stopped run keeps its work in the write root (4L-13): the test's own temp folder, not the folder the tests run in
+setRoots(null, tmpdir());
 
 const call = async (name: string, args: Record<string, unknown>, progress?: (d: number, t: number, m: string) => void) => { const r = await callTool(name, args, undefined, undefined, progress); return toolResult(r.out, r.isError).structuredContent as any; };
 afterEach(async () => { for (const h of (await call('list_open', {})).open) await call('close', { handle: h.handle, discard: true }); });

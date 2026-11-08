@@ -22,6 +22,7 @@ import { cwdLost, ensureCwd, markCwdLost, safeCwd } from '../core/cwd.ts';
 import { lobSidecars } from './lob.ts';
 import { unitWatch } from '../core/bim/liveness.ts';
 import { formatP6Date } from '../core/dates.ts';
+import { keepWords } from './keptRuns.ts';
 
 type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void; /** a finished row of the answer, sent out as it is done (kept if the worker is ended) */ keep?: (row: unknown) => void };
 interface Snapshot { handle: string; ownerKey: string; db: Session['db']; path: string | null; format: Session['format']; hpd: number; encoding?: Session['encoding']; savedTo?: string; dirty: boolean; bytes: number }
@@ -54,17 +55,31 @@ const STOPS_GRACEFULLY = new Set(['monte_carlo', 'evaluate_batch']);
 export const threadCpu = (w: Worker): (() => Promise<number>) | undefined => (typeof (w as { cpuUsage?: unknown }).cpuUsage === 'function'
   ? async () => { const c = await (w as unknown as { cpuUsage(): Promise<{ user: number; system: number }> }).cpuUsage(); return (c.user + c.system) / 1000; }
   : undefined);
-/** The answer a tool's kept rows make when its worker was ended (frozen) before it answered: only tools whose rows ARE their answer. */
+/** The kept work's file among the rows a worker sent out ({resume: path}, sent once the file holds work). */
+const keptPath = (rows: unknown[]): string | undefined => (rows.find((x) => !!x && typeof x === 'object' && typeof (x as { resume?: unknown }).resume === 'string') as { resume: string } | undefined)?.resume;
+/** The answer a tool's kept rows make when its worker was ended (frozen) before it answered: only tools whose rows ARE their answer
+ *  (null: nothing finished, the call is cancelled as any other). */
 export const FROM_KEPT: Record<string, (rows: unknown[], a: Record<string, any>) => unknown> = {
-  evaluate_batch: (rows, a) => ({ ok: true, partial: true, stopped: 'cancelled', scenarios: rows, scenarios_done: rows.length, scenarios_requested: Array.isArray(a.scenarios) ? a.scenarios.length : rows.length, best: null, note: 'The worker stopped responding after the cancel and was ended; these are the scenarios it had finished (the base and the best are not worked out).' }),
-  // each finished iteration's project finish: the finish statistics are exact for those iterations; what needs every activity's samples is not kept
+  // the scenario rows it had finished; the file they are kept in is the first row sent out (continuing from it gives the base and the best)
+  evaluate_batch: (rows, a) => {
+    const done = rows.filter((x) => !!x && typeof x === 'object' && typeof (x as { name?: unknown }).name === 'string');
+    const resume = keptPath(rows);
+    if (!done.length) return null;
+    return { ok: true, partial: true, stopped: 'cancelled', scenarios: done, scenarios_done: done.length, scenarios_requested: Array.isArray(a.scenarios) ? a.scenarios.length : done.length, best: null, ...(resume ? { resume } : {}),
+      note: `The worker stopped responding after the cancel and was ended; these are the scenarios it had finished (the base and the best are not worked out here).${resume ? ` They are kept in ${resume}: ${keepWords('evaluate_batch', resume, 'scenarios')}` : ''}` };
+  },
+  // each finished iteration's project finish: the finish statistics are exact for those iterations; what needs every activity's samples
+  // is in the file the iterations are kept in (its path is the first row sent out): continuing from it gives every statistic
   monte_carlo: (rows, a) => {
-    const f = rows.map(Number).filter(Number.isFinite).sort((x, y) => x - y), n = f.length;
+    const done = rows.filter((x) => typeof x === 'number');
+    const resume = keptPath(rows);
+    if (!done.length) return null;
+    const f = done.map(Number).filter(Number.isFinite).sort((x, y) => x - y), n = f.length;
     const at = (p: number) => formatP6Date(f[Math.min(n - 1, Math.max(0, Math.ceil(p * n) - 1))]);
     const mean = f.reduce((x, y) => x + y, 0) / n;
-    return { partial: true, stopped: 'cancelled', iterations_done: rows.length, iterations_requested: Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000))),
-      finish: { P10: at(0.1), P50: at(0.5), P80: at(0.8), P90: at(0.9), mean: formatP6Date(mean), min: formatP6Date(f[0]), max: formatP6Date(f[n - 1]) },
-      note: `The worker stopped responding after the cancel and was ended; these finish dates are of the ${rows.length} iterations it had finished (criticality, sensitivity, milestones and the histogram need every activity's samples and are not worked out: run it again for them).` };
+    return { partial: true, stopped: 'cancelled', iterations_done: done.length, iterations_requested: Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000))),
+      finish: { P10: at(0.1), P50: at(0.5), P80: at(0.8), P90: at(0.9), mean: formatP6Date(mean), min: formatP6Date(f[0]), max: formatP6Date(f[n - 1]) }, ...(resume ? { resume } : {}),
+      note: `The worker stopped responding after the cancel and was ended; these finish dates are of the ${done.length} iterations it had finished (criticality, sensitivity, milestones and the histogram need every activity's samples and are not worked out here).${resume ? ` The iterations are kept in ${resume}: ${keepWords('monte_carlo', resume, 'iterations')}` : ''}` };
   },
 };
 
@@ -218,7 +233,8 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
         void w.terminate().then(() => {
           const finished = settle();
           // the rows it had sent out are kept: they are the answer (marked partial) where the tool's rows are its answer
-          if (stopping && kept.length && FROM_KEPT[name]) { resolve({ id, type: 'done', result: FROM_KEPT[name](kept, a), patch: null, label: name, lobSide: null }); return; }
+          const fromKept = stopping && kept.length && FROM_KEPT[name] ? FROM_KEPT[name](kept, a) : null;
+          if (fromKept) { resolve({ id, type: 'done', result: fromKept, patch: null, label: name, lobSide: null }); return; }
           reject(new ToolError('cancelled', finished.length ? `The call was cancelled after it had finished writing ${finished.join(', ')}; nothing else was written.` : 'The call was cancelled.', finished.length ? 'Those files are complete; delete them if you do not want them.' : 'Nothing was kept or written by it; call again when needed.', finished.length ? { data: { written: finished } } : {}));
         });
       };

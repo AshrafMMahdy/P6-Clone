@@ -20,6 +20,24 @@ export interface ScenarioResult {
   cost?: number; cost_delta?: number;
   changed?: { id: string; start: [string | null, string | null]; finish: [string | null, string | null] }[];
 }
+/** A finished scenario as a store keeps it: its index, its row, and (a scenario that scheduled) the activities whose dates it moved,
+ *  which the answer gives for the best few. */
+export interface KeptScenario { i: number; row: ScenarioResult; changed: NonNullable<ScenarioResult['changed']> | null }
+/** Where a batch keeps each finished scenario as it is done (the MCP server: a file in the write root, mcp/keptRuns.ts): a batch that
+ *  stops (cancelled, its worker or process ended) is continued from it by a later call, which answers what an uninterrupted one does. */
+export interface RowStore {
+  /** `inputs` is everything the answer is made from (the store fingerprints it). The scenarios kept by the batch this one continues, in
+   *  order (none when it starts afresh); throws, changing nothing, when there is no kept batch there or it is not this one. */
+  open(inputs: unknown): Iterable<KeptScenario>;
+  /** The batch goes on after the first `count` kept scenarios (anything after them is cut off). */
+  resumeAt(count: number): void;
+  /** One finished scenario, kept before it returns. */
+  add(kept: KeptScenario): void;
+  /** The batch finished: what it kept goes. A message when that could not be removed. */
+  finish(): string | undefined;
+  /** The batch stopped after `done` scenarios: where they are kept, or null when none are. */
+  stop(done: number): string | null;
+}
 export interface Measure { finish: number | null; critical: Set<string>; negative: number; cost: number; dates: Map<string, [string | null, string | null]> }
 
 /** Run fn on a copy that is rolled back afterwards; its result is kept. */
@@ -41,42 +59,72 @@ export function measure(d: Db, projIds: string[], over: Partial<SchedOptions> = 
   return { ok: true, m: { finish: r.stats.finish, critical: crit, negative: tasks.filter((t: Row) => !t.act_end_date && Number(t.total_float_hr_cnt || 0) < 0).length, cost: sumLines(activityCosts(d, projIds).values()).eac, dates } };
 }
 
-export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick; /** each finished scenario row, as it is done */ onRow?: (row: ScenarioResult) => void } = {}) {
+export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick; /** each finished scenario row, as it is done */ onRow?: (row: ScenarioResult) => void; store?: RowStore } = {}) {
   const hpd = o.hoursPerDay ?? 8, top = o.top ?? 3;
   const base = onScratch(db, (d) => measure(d, projIds, o.options));
   if (!base.ok) return { ok: false as const, error: { code: 'schedule_failed', message: `The project as it is cannot be scheduled: ${base.error}` } };
   const p0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
   const days = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round((cal.workBetween(a, b) / 60 / (cal.hoursPerDay() || hpd)) * 100) / 100);
-  const results: (ScenarioResult & { _m?: Measure })[] = [];
-  // a cancelled call stops after the scenarios it has finished: those rows are the answer, marked partial
-  let cancelled = false;
+  const results: ScenarioResult[] = [];
+  // the activities whose dates each scenario moved (worked out as it finishes, so a kept scenario carries them): the best few show them
+  const moved: (KeptScenario['changed'])[] = [];
+  // a batch continued from a store: its kept scenarios are taken in as they were, and only the rest are scheduled
+  const store = o.store;
+  if (store) {
+    const inputs = { format: 1, projIds, scenarios, options: o.options ?? null, hpd, calendarDays: o.calendarDays ?? true, top, tables: db.tables };
+    for (const k of store.open(inputs)) {
+      // (a damaged one, and what follows it, are done again)
+      if (k?.i !== results.length || results.length >= scenarios.length || !k.row || typeof k.row !== 'object' || (k.row.ok && !Array.isArray(k.changed))) break;
+      results.push(k.row); moved.push(k.changed ?? null);
+      o.onRow?.(k.row);
+    }
+    store.resumeAt(results.length);
+  }
+  const resumed = results.length;
+  // a cancelled call stops after the scenarios it has finished: those rows are the answer, marked partial (so does one whose scenario
+  // could not be kept: stopped failed, with the cause)
+  let cancelled = false, failed: Error | null = null;
+  try {
   for (const [i, sc] of scenarios.entries()) {
+    if (i < resumed) continue;
     if (o.tick) {
       try { await o.tick(i, scenarios.length, `scenario ${i + 1} of ${scenarios.length}`); }
       catch (e) { if ((e as { code?: unknown })?.code === 'cancelled' && results.length) { cancelled = true; break; } throw e; }
     }
     const name = sc.name || `scenario ${i + 1}`;
     // a scenario that throws is its own failed row; the others still run (onScratch has put the project back)
-    try { results.push(onScratch(db, (d): ScenarioResult & { _m?: Measure } => {
+    let m: Measure | null = null, row: ScenarioResult;
+    try { row = onScratch(db, (d): ScenarioResult => {
       if (testHooks.failScenario === i) throw new Error('test failure');
       const r = applyOps(d, sc.overrides ?? [], { hoursPerDay: hpd, calendarDays: o.calendarDays ?? true }); // days as the caller edits
       if (!r.ok) return { name, ok: false, error: `operation ${r.error!.index + 1}: ${r.error!.message}` };
-      const m = measure(d, projIds, o.options);
-      if (!m.ok) return { name, ok: false, error: m.error };
+      const x = measure(d, projIds, o.options);
+      if (!x.ok) return { name, ok: false, error: x.error };
+      m = x.m;
       return {
-        name, ok: true, finish: m.m.finish != null ? formatP6Date(m.m.finish) : null, finish_delta_days: days(base.m.finish, m.m.finish),
-        critical: m.m.critical.size, became_critical: [...m.m.critical].filter((c) => !base.m.critical.has(c)), no_longer_critical: [...base.m.critical].filter((c) => !m.m.critical.has(c)),
-        negative_float: m.m.negative, cost: Math.round(m.m.cost * 100) / 100, cost_delta: Math.round((m.m.cost - base.m.cost) * 100) / 100, _m: m.m,
+        name, ok: true, finish: x.m.finish != null ? formatP6Date(x.m.finish) : null, finish_delta_days: days(base.m.finish, x.m.finish),
+        critical: x.m.critical.size, became_critical: [...x.m.critical].filter((c) => !base.m.critical.has(c)), no_longer_critical: [...base.m.critical].filter((c) => !x.m.critical.has(c)),
+        negative_float: x.m.negative, cost: Math.round(x.m.cost * 100) / 100, cost_delta: Math.round((x.m.cost - base.m.cost) * 100) / 100,
       };
-    })); } catch (e) { results.push({ name, ok: false, error: `The scenario failed: ${(e as Error)?.message ?? e}` }); }
+    }); } catch (e) { row = { name, ok: false, error: `The scenario failed: ${(e as Error)?.message ?? e}` }; m = null; }
+    const changed = row.ok && m ? [...(m as Measure).dates].filter(([k, v]) => { const b = base.m.dates.get(k); return !b || b[0] !== v[0] || b[1] !== v[1]; }).slice(0, 200).map(([k, v]) => { const b = base.m.dates.get(k) ?? [null, null]; return { id: k, start: [b[0], v[0]] as [string | null, string | null], finish: [b[1], v[1]] as [string | null, string | null] }; }) : null;
+    try { store?.add({ i, row, changed }); } catch (e) { failed = e as Error; break; } // kept before it counts: a batch stopped later continues after it
+    results.push(row); moved.push(changed);
     // sent out as soon as it is done (a compute worker ended after a cancel keeps it)
-    if (o.onRow) { const { _m: _x, ...row } = results[results.length - 1]; o.onRow(row); }
+    o.onRow?.(row);
   }
-  // the best few (earliest finish, then cheapest) carry the activities whose dates moved
-  const ranked = results.filter((r) => r.ok).sort((a, b) => (parseP6Date(a.finish ?? '') ?? Infinity) - (parseP6Date(b.finish ?? '') ?? Infinity) || (a.cost ?? 0) - (b.cost ?? 0));
-  for (const r of ranked.slice(0, top)) r.changed = [...r._m!.dates].filter(([k, v]) => { const b = base.m.dates.get(k); return !b || b[0] !== v[0] || b[1] !== v[1]; }).slice(0, 200).map(([k, v]) => { const b = base.m.dates.get(k) ?? [null, null]; return { id: k, start: [b[0], v[0]], finish: [b[1], v[1]] }; });
-  for (const r of results) delete r._m;
-  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best: ranked[0]?.name ?? null, scenarios: results,
-    ...(cancelled ? { partial: true as const, stopped: 'cancelled' as const, scenarios_done: results.length, scenarios_requested: scenarios.length } : {}) };
+  } catch (e) { store?.stop(results.length); throw e; } // (cancelled before any scenario was done: an error, as it was)
+  if (failed && !results.length) { store?.stop(0); throw failed; }
+  const stopped = cancelled ? 'cancelled' as const : failed ? 'failed' as const : null;
+  // what the store keeps: gone once the batch finished; else where it is, to continue the batch
+  const kept = stopped ? store?.stop(results.length) ?? null : null;
+  const keptNote = !stopped && store ? store.finish() : undefined;
+  // the best few (earliest finish, then cheapest) carry the activities whose dates moved, over every scenario (those kept too)
+  const order = results.map((_r, i) => i).filter((i) => results[i].ok).sort((a, b) => (parseP6Date(results[a].finish ?? '') ?? Infinity) - (parseP6Date(results[b].finish ?? '') ?? Infinity) || (results[a].cost ?? 0) - (results[b].cost ?? 0));
+  const scenariosOut = results.map((r) => ({ ...r }));
+  for (const i of order.slice(0, top)) scenariosOut[i].changed = moved[i]!;
+  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best: order.length ? results[order[0]].name : null, scenarios: scenariosOut,
+    ...(stopped ? { partial: true as const, stopped, scenarios_done: results.length, scenarios_requested: scenarios.length, ...(failed ? { error: failed.message } : {}), ...(kept ? { kept } : {}) } : {}),
+    ...(store ? { resumed } : {}), ...(keptNote ? { keptNote } : {}) };
 }

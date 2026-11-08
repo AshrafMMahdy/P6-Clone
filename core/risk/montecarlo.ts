@@ -24,16 +24,22 @@ export interface Estimate { taskId: string; min: number; ml: number; max: number
 
 // ---------------------------------------------------------------- PRNG and distributions
 
+/** A seeded generator: uniform numbers in [0, 1), and its position (one 32-bit word), so a run continued later goes on
+ *  exactly where it was. */
+export type Rng = (() => number) & { state(): number; setState(s: number): void };
 /** Seeded 32-bit PRNG (mulberry32). Returns a function giving uniform numbers in [0, 1). */
-export function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): Rng {
   let a = seed >>> 0;
-  return () => {
+  const next = (() => {
     a = (a + 0x6d2b79f5) >>> 0;
     let t = a;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  }) as Rng;
+  next.state = () => a;
+  next.setState = (s) => { a = s >>> 0; };
+  return next;
 }
 
 function normal(rng: () => number): number {
@@ -184,6 +190,26 @@ export interface MonteCarloOptions {
   reAnchor?: boolean;
   /** A date (minutes): the result says the chance of finishing by it. */
   deadline?: number;
+  /** Where each finished iteration is kept as it is done (the MCP server: a file in the write root, mcp/keptRuns.ts): a run that
+   *  stops (cancelled, failed, its process ended) is continued from it by a later run, which gives what an uninterrupted run gives. */
+  store?: IterationStore;
+}
+/** The shape of one kept iteration (records are made and read here; the store only keeps them). */
+export interface IterationLayout { activities: number; estimable: number; risks: number; events: number }
+/** Where a run keeps its finished iterations. */
+export interface IterationStore {
+  /** `inputs` is everything the result is made from (the store fingerprints it); `asked` the seed the call gave, `fresh` the one a run
+   *  starting afresh uses. Returns the seed and the iterations kept by the run this one continues, in order (none when it starts afresh);
+   *  throws, changing nothing, when there is no kept run there or it is not this one. */
+  open(inputs: unknown, layout: IterationLayout, asked: number | undefined, fresh: number): { seed: number; kept: Iterable<Uint8Array> };
+  /** The run goes on after the first `count` kept iterations (anything after them is cut off). */
+  resumeAt(count: number): void;
+  /** One finished iteration, kept before it returns (the bytes are reused afterwards); a throw fails the iteration. */
+  add(record: Uint8Array): void;
+  /** The run finished: what it kept goes. A message when that could not be removed. */
+  finish(): string | undefined;
+  /** The run stopped after `done` iterations: where they are kept, or null when none are (what this run made with none is removed). */
+  stop(done: number): string | null;
 }
 export interface InlineEvent { name: string; p: number; taskHours: [string, number][]; projectHours: number }
 export interface RatioNormal { mean?: number; std?: number; minRatio?: number; maxRatio?: number }
@@ -225,8 +251,13 @@ export interface RiskEventResult { projRiskId: string; code: string; name: strin
 export interface MonteCarloResult {
   /** The iterations the statistics are of (fewer than asked when the run was cancelled or failed: see partial). */
   iterations: number;
-  /** Set when the run stopped early (cancelled, or an iteration failed) after at least one finished iteration. */
-  partial?: { stopped: 'cancelled' | 'failed'; requested: number; error?: string };
+  /** Set when the run stopped early (cancelled, or an iteration failed) after at least one finished iteration; kept: where its
+   *  iterations are kept (with a store), to continue it. */
+  partial?: { stopped: 'cancelled' | 'failed'; requested: number; error?: string; kept?: string };
+  /** With a store: the iterations taken from the run this one continued. */
+  resumed?: number;
+  /** With a store: the finished run's kept iterations could not be removed (in words). */
+  keptNote?: string;
   seed: number;
   elapsedMs: number;
   projIds: string[];
@@ -379,8 +410,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   const t0 = Date.now();
   const requested = Math.max(1, Math.floor(opts.iterations));
   let iterations = requested; // (after the loop: the iterations that finished)
-  const seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
-  const rng = mulberry32(seed);
+  let seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
   const over = opts.schedOptions ?? {};
   const yieldEvery = Math.max(1, opts.yieldEvery ?? 5);
   const prep = prepare(db, projIds);
@@ -437,11 +467,97 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   const dur = new Float64Array(n);
   const efNow = new Float64Array(n), critNow = new Uint8Array(n); // (one iteration's, until it has fully succeeded)
 
+  // One iteration's results, worked out before it is committed (commit), and as a store keeps them (record / read)
+  const estK = prep.base.flatMap((_t, k) => (estimable[k] ? [k] : []));
+  const efRel = new Float32Array(n); // each activity's early finish from its anchor (as efSamples holds it)
+  const ancK: number[] = [], ancV: number[] = []; // anchors set by this iteration (the first finite early finish of an activity)
+  const hitR = new Uint8Array(riskEvents.length), hitI = new Uint8Array(inline.length);
+  const commit = (it: number, fin: number) => {
+    finishes[it] = fin;
+    for (let j = 0; j < tracked.length; j++) durSamples[j][it] = dur[tracked[j]];
+    for (let k = 0; k < n; k++) {
+      if (estimable[k]) {
+        const s = durStats[k];
+        if (dur[k] < s.min) s.min = dur[k];
+        if (dur[k] > s.max) s.max = dur[k];
+        s.sum += dur[k];
+      }
+      efSamples[k][it] = efRel[k];
+      critCount[k] += critNow[k];
+    }
+    for (let i = 0; i < ancK.length; i++) efAnchor[ancK[i]] = ancV[i];
+    for (let j = 0; j < hitR.length; j++) riskHits[j] += hitR[j];
+    for (let j = 0; j < hitI.length; j++) inline[j].hits += hitI[j];
+  };
+  // a record: rng position (u32), finish (f64), the estimable activities' durations (f64), every activity's early finish from its
+  // anchor (f32), critical (bits), risks and events that happened (bits), then the anchors set (count, then k u32 and value f64 each)
+  const bits = (m: number) => Math.ceil(m / 8);
+  const fixed = 4 + 8 + 8 * estK.length + 4 * n + bits(n) + bits(hitR.length) + bits(hitI.length) + 4;
+  let recBuf: Uint8Array | null = null;
+  const record = (rngState: number, fin: number): Uint8Array => {
+    const len = fixed + 12 * ancK.length;
+    if (!recBuf || recBuf.length < len) recBuf = new Uint8Array(fixed + 12 * n);
+    const b = recBuf.subarray(0, len), v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    b.fill(0);
+    let o = 0;
+    v.setUint32(o, rngState, true); o += 4;
+    v.setFloat64(o, fin, true); o += 8;
+    for (const k of estK) { v.setFloat64(o, dur[k], true); o += 8; }
+    for (let k = 0; k < n; k++) { v.setFloat32(o, efRel[k], true); o += 4; }
+    const flags = (src: ArrayLike<number>) => { for (let i = 0; i < src.length; i++) if (src[i]) b[o + (i >> 3)] |= 1 << (i & 7); o += bits(src.length); };
+    flags(critNow); flags(hitR); flags(hitI);
+    v.setUint32(o, ancK.length, true); o += 4;
+    for (let i = 0; i < ancK.length; i++) { v.setUint32(o, ancK[i], true); v.setFloat64(o + 4, ancV[i], true); o += 12; }
+    return b;
+  };
+  /** A kept record into the iteration's values (as the loop leaves them); the rng position and finish, or null when it is not whole. */
+  const read = (b: Uint8Array): { rngState: number; fin: number } | null => {
+    if (b.length < fixed || (b.length - fixed) % 12 !== 0) return null;
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    let o = 0;
+    const rngState = v.getUint32(o, true); o += 4;
+    const fin = v.getFloat64(o, true); o += 8;
+    for (const k of estK) { dur[k] = v.getFloat64(o, true); o += 8; }
+    for (let k = 0; k < n; k++) { efRel[k] = v.getFloat32(o, true); o += 4; }
+    const flags = (dst: Uint8Array) => { for (let i = 0; i < dst.length; i++) dst[i] = (b[o + (i >> 3)] >> (i & 7)) & 1; o += bits(dst.length); };
+    flags(critNow); flags(hitR); flags(hitI);
+    const count = v.getUint32(o, true); o += 4;
+    if (b.length !== fixed + 12 * count) return null;
+    ancK.length = 0; ancV.length = 0;
+    for (let i = 0; i < count; i++) { const k = v.getUint32(o, true); if (k >= n) return null; ancK.push(k); ancV.push(v.getFloat64(o + 4, true)); o += 12; }
+    return { rngState, fin };
+  };
+
+  // a run continued from a store: its kept iterations are taken in exactly as the loop commits them, and the generator goes on from
+  // where the last one left it (so the iterations after them are those an uninterrupted run makes)
+  let done = 0;
+  const store = opts.store;
+  let rng = mulberry32(seed);
+  if (store) {
+    const inputs = { format: 1, projIds, iterations: requested, phase, deadline: opts.deadline ?? null, over, sampler: sampler ?? null, reAnchor: !!opts.reAnchor,
+      tasks: { fields: prep.taskFields, rows: prep.taskRows }, projects: { fields: prep.projFields, rows: prep.projRows }, shared: prep.shared,
+      est, risks: riskEvents.map((e) => ({ id: e.row.proj_risk_id, p: e.p, hours: e.hours, ks: e.ks })), events: inline.map((e) => ({ name: e.name, p: e.p, ks: e.ks, projectHours: e.projectHours })) };
+    const o = store.open(inputs, { activities: n, estimable: estK.length, risks: hitR.length, events: hitI.length }, opts.seed != null ? opts.seed >>> 0 : undefined, seed);
+    seed = o.seed; rng = mulberry32(seed);
+    for (const b of o.kept) {
+      if (done >= iterations) break;
+      const r = read(b);
+      if (!r) break; // a damaged record: it and what follows are made again
+      commit(done, r.fin);
+      rng.setState(r.rngState);
+      done++;
+      opts.onIteration?.(r.fin);
+    }
+    store.resumeAt(done);
+    if (done) opts.onProgress?.(done);
+  }
+  const resumed = done;
+
   let lastYield = Date.now();
   // a run that is cancelled, or fails, after some iterations goes on with the ones it finished (marked partial)
-  let done = 0, stopped: { by: 'cancelled' | 'failed'; error?: Error } | null = null;
+  let stopped: { by: 'cancelled' | 'failed'; error?: Error } | null = null;
   try {
-  for (let it = 0; it < iterations; it++) {
+  for (let it = done; it < iterations; it++) {
     if (opts.signal?.aborted) { stopped = { by: 'cancelled' }; break; }
     if (testHooks.failAt === it) throw new Error('test failure');
     const { db: sdb, tasks } = scratch(prep);
@@ -450,18 +566,17 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
       if (sampler && drawK[k]) { const ratio = sampleRatio(sampler, rng); dur[k] = ratioK[k] ? baseDur[k] * Math.max(0, ratio) : baseDur[k]; }
       else dur[k] = e ? Math.max(0, sampleDuration(e, rng)) : baseDur[k];
     }
-    const hitRisk: number[] = [], hitInline: typeof inline = []; // (counted once the iteration is done)
+    hitR.fill(0); hitI.fill(0); // (counted once the iteration is done)
     for (let j = 0; j < riskEvents.length; j++) {
       const ev = riskEvents[j];
-      if (rng() < ev.p) { hitRisk.push(j); for (const k of ev.ks) dur[k] += ev.hours; }
+      if (rng() < ev.p) { hitR[j] = 1; for (const k of ev.ks) dur[k] += ev.hours; }
     }
     let projDelay = 0;
-    for (const ev of inline) if (rng() < ev.p) { hitInline.push(ev); for (const [k, h] of ev.ks) dur[k] += h; projDelay += ev.projectHours; }
+    for (let j = 0; j < inline.length; j++) { const ev = inline[j]; if (rng() < ev.p) { hitI[j] = 1; for (const [k, h] of ev.ks) dur[k] += h; projDelay += ev.projectHours; } }
     for (let k = 0; k < n; k++) {
       if (!estimable[k]) continue;
       if (dur[k] !== baseDur[k]) tasks[k].remain_drtn_hr_cnt = String(dur[k]);
     }
-    for (let j = 0; j < tracked.length; j++) durSamples[j][it] = dur[tracked[j]];
     const res = scheduleOrThrow(sdb, projIds, over);
     // everything this iteration adds is worked out first and committed in one go below, so a failure anywhere in it leaves the
     // statistics exactly as the `done` finished iterations made them
@@ -473,26 +588,22 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
       critNow[k] = !t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null && Number(t.total_float_hr_cnt) <= 0 && !isSummary(t) ? 1 : 0;
     }
     if (testHooks.failAccountingAt === it) throw new Error('test failure in the accounting');
-    finishes[it] = fin;
+    ancK.length = 0; ancV.length = 0;
     for (let k = 0; k < n; k++) {
-      if (estimable[k]) {
-        const s = durStats[k];
-        if (dur[k] < s.min) s.min = dur[k];
-        if (dur[k] > s.max) s.max = dur[k];
-        s.sum += dur[k];
-      }
-      if (Number.isNaN(efNow[k])) efSamples[k][it] = NaN;
-      else { if (Number.isNaN(efAnchor[k])) efAnchor[k] = efNow[k]; efSamples[k][it] = efNow[k] - efAnchor[k]; }
-      critCount[k] += critNow[k];
+      if (Number.isNaN(efNow[k])) { efRel[k] = NaN; continue; }
+      if (Number.isNaN(efAnchor[k])) { ancK.push(k); ancV.push(efNow[k]); efRel[k] = 0; } else efRel[k] = efNow[k] - efAnchor[k];
     }
-    for (const j of hitRisk) riskHits[j]++;
-    for (const e of hitInline) e.hits++;
+    store?.add(record(rng.state(), fin)); // kept before it counts: a run stopped later continues after it
+    commit(it, fin);
     done = it + 1;
     opts.onIteration?.(fin);
     opts.onProgress?.(it + 1);
     if (it + 1 < iterations && ((it + 1) % yieldEvery === 0 || Date.now() - lastYield >= 200)) { collectGarbage(); await yieldNow(); lastYield = Date.now(); }
   }
   } catch (e) { stopped = { by: 'failed', error: e as Error }; } // (a cancel is the break above; anything thrown is a failure, with its cause)
+  // what the store keeps: gone once the run finished; else where it is, to continue the run
+  const kept = stopped ? store?.stop(done) ?? null : null;
+  const keptNote = !stopped && store ? store.finish() : undefined;
   if (stopped) {
     // none finished: the run is an error as it was (a cancelled run says so)
     if (done < 1) throw stopped.by === 'cancelled' ? new Error('Risk analysis cancelled.') : stopped.error;
@@ -589,6 +700,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     deterministicFinish, finishSamples: Array.from(finishes), percentiles,
     mean, min, max, stdDevDays: Math.sqrt(sq / iterations) / MIN_PER_DAY,
     probDeterministic: onTime / iterations, histogram, cumulative, activities, sensitivity, milestones, risks,
-    ...(stopped ? { partial: { stopped: stopped.by, requested, ...(stopped.error && stopped.by === 'failed' ? { error: stopped.error.message } : {}) } } : {}),
+    ...(stopped ? { partial: { stopped: stopped.by, requested, ...(stopped.error && stopped.by === 'failed' ? { error: stopped.error.message } : {}), ...(kept ? { kept } : {}) } } : {}),
+    ...(store ? { resumed } : {}), ...(keptNote ? { keptNote } : {}),
   };
 }
