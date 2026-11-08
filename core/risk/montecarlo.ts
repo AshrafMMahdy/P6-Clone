@@ -201,7 +201,7 @@ export interface IterationStore {
   /** `inputs` is everything the result is made from (the store fingerprints it); `asked` the seed the call gave, `fresh` the one a run
    *  starting afresh uses. Returns the seed and the iterations kept by the run this one continues, in order (none when it starts afresh);
    *  throws, changing nothing, when there is no kept run there or it is not this one. */
-  open(inputs: unknown, layout: IterationLayout, asked: number | undefined, fresh: number): { seed: number; kept: Iterable<Uint8Array> };
+  open(inputs: unknown, layout: IterationLayout, asked: number | undefined, fresh: number): Promise<{ seed: number; kept: Iterable<Uint8Array> }>;
   /** The run goes on after the first `count` kept iterations (anything after them is cut off). Returns how many kept iterations are
    *  made again (found damaged, or after a damaged one). */
   resumeAt(count: number): number;
@@ -558,7 +558,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
       data: dataDigest({ ...prep.shared, TASK: { rows: prep.taskRows }, PROJECT: { rows: prep.projRows } }, { PROJECT: PROJECT_PLACE_FIELDS }),
       scheduler: ((d) => projIds.map((id) => { const p = d.tables.PROJECT.rows.find((r) => r.proj_id === id); return p ? optionsFor(d, p, over) : null; }))(scratch(prep).db),
       est, risks: riskEvents.map((e) => ({ id: e.row.proj_risk_id, p: e.p, hours: e.hours, ks: e.ks })), events: inline.map((e) => ({ name: e.name, p: e.p, ks: e.ks, projectHours: e.projectHours })) };
-    const o = store.open(inputs, { activities: n, estimable: estK.length, durations: durK.length, risks: hitR.length, events: hitI.length }, opts.seed != null ? opts.seed >>> 0 : undefined, seed);
+    const o = await store.open(inputs, { activities: n, estimable: estK.length, durations: durK.length, risks: hitR.length, events: hitI.length }, opts.seed != null ? opts.seed >>> 0 : undefined, seed);
     seed = o.seed; rng = mulberry32(seed);
     for (const b of o.kept) {
       if (done >= iterations) break;

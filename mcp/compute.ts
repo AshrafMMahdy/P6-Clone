@@ -22,9 +22,11 @@ import { cwdLost, ensureCwd, markCwdLost, safeCwd } from '../core/cwd.ts';
 import { lobSidecars } from './lob.ts';
 import { unitWatch } from '../core/bim/liveness.ts';
 import { formatP6Date } from '../core/dates.ts';
-import { keepWords } from './keptRuns.ts';
+import { claimNow, keepWords, type Claim } from './keptRuns.ts';
 
-type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void; /** a finished row of the answer, sent out as it is done (kept if the worker is ended) */ keep?: (row: unknown) => void };
+type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void; /** a finished row of the answer, sent out as it is done (kept if the worker is ended) */ keep?: (row: unknown) => void; /** in the worker: how a run claims its kept file here, on the main thread (keptRuns.ts) */ claim?: Claim };
+/** The main thread's answer to a worker's claim of a kept file: given, or refused (run_busy, as a ToolError's parts). */
+type Claimed = { claimed: number; refused?: { code: string; message: string; hint?: string; data?: Record<string, unknown> } };
 interface Snapshot { handle: string; ownerKey: string; db: Session['db']; path: string | null; format: Session['format']; hpd: number; encoding?: Session['encoding']; savedTo?: string; dirty: boolean; bytes: number }
 interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { cwdLost: string | null; root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean } }
 type Answer =
@@ -32,6 +34,8 @@ type Answer =
   | { id: number; type: 'note'; text: string }
   | { id: number; type: 'reserved'; delta: number }
   | { id: number; type: 'kept'; row: unknown }
+  /** a run asks for its kept file (one run at a time on a kept file in this server: the claims live on the main thread) */
+  | { id: number; type: 'claim'; tool: string; path: string; n: number }
   | { id: number; type: 'done'; result: unknown; patch: DbPatch | null; label: string; lobSide: unknown }
   | { id: number; type: 'error'; tool: { code: string; message: string; hint?: string; retryAfter?: number; data?: Record<string, unknown> } | null; message: string; stack?: string };
 
@@ -178,6 +182,7 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
   const started = Date.now(), token = randomBytes(3).toString('hex'), tmpLog = new SharedArrayBuffer(1 << 16);
   const settle = () => settleWrites(readTmpLog(tmpLog), started, foldersOf(readTmpLog(tmpLog), a), token);
   let worker: Worker | null = null, held = 0; // held: what the worker reserved inside the call, counted here against the budget while it runs
+  const claims: (() => void)[] = []; // the kept files the call's run claimed (keptRuns.ts), given back when the call ends
   let healthy = false; // the worker answered (a result or the tool's own refusal): it can serve the next call
   try {
     // what the worker adds is reserved before it starts (a new runtime is counted when it is made), so the workers running together never add up
@@ -214,6 +219,13 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
         if (m.id !== id) return;
         if (m.type === 'progress') { if (frozen) { frozen = false; watch = watchNew(); } watch.beat(m.done, m.total); ctx.progress?.(m.done, m.total, m.message); }
         else if (m.type === 'kept') kept.push(m.row);
+        else if (m.type === 'claim') {
+          // claimed for this call (its job named while it holds it); given back when the call ends here, whatever way (finally below)
+          let reply: Claimed;
+          try { claims.push(claimNow(() => ctx.job?.id, m.tool, m.path)); reply = { claimed: m.n }; }
+          catch (e) { const t = e as ToolError; reply = { claimed: m.n, refused: { code: t.code, message: t.message, ...(t.hint ? { hint: t.hint } : {}), ...(t.data ? { data: t.data } : {}) } }; }
+          w.postMessage(reply);
+        }
         else if (m.type === 'note') { if (ctx.job) ctx.job.progress = m.text; }
         else if (m.type === 'reserved') { held += m.delta; adjustReserved(m.delta); }
         else if (m.type === 'done') { healthy = true; cleanup(); resolve(m); }
@@ -248,7 +260,7 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
     if (done.lobSide) lobSidecars.set(s.handle, done.lobSide as never);
     if (name.startsWith('lob_') || name === 'import_file') regrow(s); // (as the server does: an LOB plan or an imported project adds thousands of rows)
     return done.result;
-  } finally { adjustReserved(-held); for (const r of releases) r(); if (worker) release(worker, healthy); }
+  } finally { adjustReserved(-held); for (const r of releases) r(); for (const c of claims) c(); if (worker) release(worker, healthy); }
 }
 
 // ---------------------------------------------------------------- the reasoner's status
@@ -292,8 +304,16 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
   const tag = hookWrites((tmp) => { if (log) logTmp(log, tmp); }); // a file about to be written is logged where the main thread can read it even if this worker is ended at once
 
   let stopJob: ((id: number) => void) | null = null; // the main thread asks the running job to stop at its next step
-  port.on('message', async (job: Job | { stop: number }) => {
+  // a run's claims of its kept files, waiting for the main thread's answer
+  const claiming = new Map<number, { given: () => void; refused: (e: ToolError) => void }>();
+  let claimSeq = 0;
+  port.on('message', async (job: Job | { stop: number } | Claimed) => {
     if ('stop' in job) { stopJob?.(job.stop); return; }
+    if ('claimed' in job) {
+      const c = claiming.get(job.claimed); claiming.delete(job.claimed);
+      if (c && job.refused) c.refused(new ToolError(job.refused.code, job.refused.message, job.refused.hint, job.refused.data ? { data: job.refused.data } : {})); else c?.given();
+      return;
+    }
     log = job.tmpLog; tag.value = tagOf(job.token);
     workerBudget({ externalUsed: job.externalUsed, notice: (delta) => post({ id: job.id, type: 'reserved', delta }) });
     markCwdLost(job.cfg.cwdLost); // (the worker cannot move the process; the main thread says that the folder it started in is gone)
@@ -311,6 +331,8 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
       caller: job.caller, signal: stopper.signal,
       progress: (done, total, message) => post({ id: job.id, type: 'progress', done, total, message }),
       keep: (row) => post({ id: job.id, type: 'kept', row }),
+      // the claim lives on the main thread, which gives it back when this call ends there (its answer, or this worker ended)
+      claim: (tool, path) => new Promise((given, refused) => { const n = ++claimSeq; claiming.set(n, { given: () => given(() => undefined), refused }); post({ id: job.id, type: 'claim', tool, path, n }); }),
       job: { set progress(text: string | undefined) { const now = Date.now(); if (now - last > 250) { last = now; post({ id: job.id, type: 'note', text: String(text) }); } } },
     };
     try {

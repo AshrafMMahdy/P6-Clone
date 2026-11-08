@@ -11,7 +11,7 @@
 import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, readSync, rmdirSync, rmSync, statSync, writeSync } from 'node:fs';
 import { crc32 } from 'node:zlib';
 import { basename, dirname, join } from 'node:path';
-import { hashOf } from '../core/bim/renderParts.ts';
+import { foldPath, hashOf } from '../core/bim/renderParts.ts';
 import type { IterationLayout, IterationStore } from '../core/risk/montecarlo.ts';
 import type { KeptScenario, RowStore } from '../core/analysis/batch.ts';
 import { pathArg, ToolError } from './runtime.ts';
@@ -119,6 +119,31 @@ class KeptFile {
   }
 }
 
+// ---- one run at a time on a kept file (review 4L-13 M2) ----
+// A cancelled job answers before it has stopped (its last iteration or scenario is still running): a resume, or a fresh call of the same
+// name, started then would cut or replace the file while the first run still writes to it at its own offset. So a run claims its kept
+// file in this server (as render_4d claims its .parts folder) and a second run on it is refused as run_busy, naming the job that holds
+// it. The claims are held on the server's main thread: a run in a compute worker asks for its claim there (compute.ts), and the claims
+// of a call go when the call ends there (its worker answered, or was ended).
+/** The kept files the runs of this server are working on: path folded -> the id of the job the run is (read when asked: a call the
+ *  soft timeout turns into a job is that job from then on). */
+const running = new Map<string, () => string | undefined>();
+/** Claim a kept file for a run: the release, or a refusal (run_busy, naming the job that holds it). */
+export type Claim = (tool: string, path: string) => Promise<() => void>;
+/** The refusal of a second run on a kept file (the main thread makes it; a compute worker passes it on as it is). */
+export function busyError(tool: string, path: string, job: string | undefined): ToolError {
+  return new ToolError('run_busy', `Another ${tool} call in this server is still working on the kept file ${path}${job ? ` (job ${job})` : ''}: a cancelled job answers before it has stopped.`, `Wait for it to end${job ? ` (job_status ${job})` : ''}, then call again: with resume if it kept work, else as it was.`, { data: { resume: path, ...(job ? { job_id: job } : {}) } });
+}
+/** Claim a kept file on this thread (the server's main thread) for the call whose job `job` names: the release, or run_busy thrown. */
+export function claimNow(job: () => string | undefined, tool: string, path: string): () => void {
+  const key = foldPath(path);
+  if (running.has(key)) throw busyError(tool, path, running.get(key)!());
+  running.set(key, job);
+  return () => { if (running.get(key) === job) running.delete(key); };
+}
+/** Claims made on this thread (the server's main thread): `job` names the job of the call that claims. */
+export const claimHere = (job: () => string | undefined): Claim => async (tool, path) => claimNow(job, tool, path);
+
 /** Where a call's kept work is, as a whole: its .parts folder (never the folder above it: a resume given as a file elsewhere is that file). */
 export const keptPlace = (file: string): string => (/\.parts$/.test(basename(dirname(file))) ? dirname(file) : file);
 
@@ -133,28 +158,38 @@ class UnitFile {
   private f: KeptFile | null = null; private fresh = true; private head: Head | null = null;
   /** where each kept unit read ends */
   private ends: number[] = [];
-  readonly tool: string; private format: string; private file: string; private resume: unknown; private onKept?: (path: string) => void;
-  constructor(tool: string, format: string, file: string, resume: unknown, onKept?: (path: string) => void) { this.tool = tool; this.format = format; this.file = file; this.resume = resume; this.onKept = onKept; }
+  /** the claim on the file, given back by release() */
+  private claimed: (() => void) | null = null;
+  readonly tool: string; private format: string; private file: string; private resume: unknown; private onKept?: (path: string) => void; private claim: Claim;
+  constructor(tool: string, format: string, file: string, resume: unknown, claim: Claim, onKept?: (path: string) => void) { this.tool = tool; this.format = format; this.file = file; this.resume = resume; this.claim = claim; this.onKept = onKept; }
   get resuming() { return this.resume != null; }
   /** The file this call keeps its units in (null before it is known). */
   get path(): string | null { return this.f?.path ?? null; }
-  /** A run afresh: its head (written with its first unit) and its file's name. */
-  start(head: { fingerprint: string; [k: string]: unknown }, name: string): void {
+  /** A run afresh: its head (written with its first unit) and its file's name, claimed (refused as run_busy, changing nothing, while
+   *  another run of this server works on a file of that name). */
+  async start(head: { fingerprint: string; [k: string]: unknown }, name: string): Promise<void> {
+    const f = new KeptFile(this.tool, pathArg(`${this.tool}-${name}.parts/${this.file}`, 'resume', 'write'), this.format, this.file);
+    this.claimed = await this.claim(this.tool, f.path);
     this.head = { format: this.format, version: VERSION, ...head };
-    this.f = new KeptFile(this.tool, pathArg(`${this.tool}-${name}.parts/${this.file}`, 'resume', 'write'), this.format, this.file);
+    this.f = f;
   }
   /** The kept run named by resume: its head, checked by `check` (a message of what differs, or null); refused, changing nothing, when
-   *  it is not there, cannot be read now, or is not this run. */
-  load(check: (head: Head) => string | null): Head {
+   *  another run of this server works on it, it is not there, cannot be read now, or is not this run. */
+  async load(check: (head: Head) => string | null): Promise<Head> {
     const given = String(this.resume);
     const f = new KeptFile(this.tool, pathArg(this.resume, 'resume', 'write'), this.format, this.file);
-    const head = f.readHead(given);
-    const changed = check(head);
-    if (changed) { f.close(); refused('resume_mismatch', `The kept ${this.tool} run is not this one: ${changed}.`, `Give the arguments the stopped call had (and resume: "${given}"), or call ${this.tool} without resume to start over. Nothing was removed.`, given); }
-    this.f = f; this.fresh = false;
-    this.onKept?.(f.path);
-    return head;
+    this.claimed = await this.claim(this.tool, f.path);
+    try {
+      const head = f.readHead(given);
+      const changed = check(head);
+      if (changed) { f.close(); refused('resume_mismatch', `The kept ${this.tool} run is not this one: ${changed}.`, `Give the arguments the stopped call had (and resume: "${given}"), or call ${this.tool} without resume to start over. Nothing was removed.`, given); }
+      this.f = f; this.fresh = false;
+      this.onKept?.(f.path);
+      return head;
+    } catch (e) { this.release(); throw e; }
   }
+  /** The run has ended (whatever way): its claim on the file goes. */
+  release(): void { const r = this.claimed; this.claimed = null; r?.(); }
   /** The kept units, in order (whole ones only). */
   units(): Iterable<Uint8Array> {
     if (this.fresh || !this.f) return [];
@@ -175,25 +210,29 @@ class UnitFile {
     if (this.f.fd == null) { this.f.create(this.head!); this.onKept?.(this.f.path); }
     this.f.append(unit);
   }
-  /** The run finished: its file goes (a message when it could not be removed). */
-  finish(): string | undefined { return this.f && (this.f.fd != null || existsSync(this.f.path)) ? this.f.remove() : undefined; }
-  /** The run stopped after `done` units: where they are kept, or null (a file this run made with none goes; one loaded for a resume stays). */
+  /** The run finished: its file goes (a message when it could not be removed), and its claim. */
+  finish(): string | undefined { try { return this.f && (this.f.fd != null || existsSync(this.f.path)) ? this.f.remove() : undefined; } finally { this.release(); } }
+  /** The run stopped after `done` units: where they are kept, or null (a file this run made with none goes; one loaded for a resume
+   *  stays); its claim goes. */
   stop(done: number): string | null {
-    if (!this.f) return null;
-    if (done > 0) { this.f.close(); return this.f.path; }
-    if (this.fresh && this.f.fd != null) this.f.remove(); else this.f.close();
-    return null;
+    try {
+      if (!this.f) return null;
+      if (done > 0) { this.f.close(); return this.f.path; }
+      if (this.fresh && this.f.fd != null) this.f.remove(); else this.f.close();
+      return null;
+    } finally { this.release(); }
   }
 }
 
 /** monte_carlo's iterations, kept as they finish (core/risk/montecarlo.ts makes and reads the records). */
 export class IterationFile implements IterationStore {
   private u: UnitFile;
-  constructor(resume: unknown, onKept?: (path: string) => void) { this.u = new UnitFile('monte_carlo', 'p6clone-monte-carlo', 'iterations.p6mc', resume, onKept); }
-  open(inputs: unknown, layout: IterationLayout, asked: number | undefined, freshSeed: number): { seed: number; kept: Iterable<Uint8Array> } {
+  /** claim: how a run claims its file (claimHere on the server's main thread; a compute worker asks the main thread). */
+  constructor(resume: unknown, claim: Claim, onKept?: (path: string) => void) { this.u = new UnitFile('monte_carlo', 'p6clone-monte-carlo', 'iterations.p6mc', resume, claim, onKept); }
+  async open(inputs: unknown, layout: IterationLayout, asked: number | undefined, freshSeed: number): Promise<{ seed: number; kept: Iterable<Uint8Array> }> {
     const fingerprint = hashOf({ inputs, layout });
-    if (!this.u.resuming) { const seed = asked ?? freshSeed; this.u.start({ fingerprint, seed, layout }, `${fingerprint.slice(0, 12)}-s${seed}`); return { seed, kept: [] }; }
-    const head = this.u.load((h) => (h.fingerprint !== fingerprint ? 'the schedule, its estimates or risks, or an argument (iterations, sampler, events, risk_events, default_estimates, re_anchor, deadline) is not what the kept run was made from'
+    if (!this.u.resuming) { const seed = asked ?? freshSeed; await this.u.start({ fingerprint, seed, layout }, `${fingerprint.slice(0, 12)}-s${seed}`); return { seed, kept: [] }; }
+    const head = await this.u.load((h) => (h.fingerprint !== fingerprint ? 'the schedule, its estimates or risks, or an argument (iterations, sampler, events, risk_events, default_estimates, re_anchor, deadline) is not what the kept run was made from'
       : asked != null && asked !== Number(h.seed) >>> 0 ? `seed was ${Number(h.seed) >>> 0}, now ${asked}` : null));
     return { seed: Number(head.seed) >>> 0, kept: this.u.units() };
   }
@@ -202,16 +241,19 @@ export class IterationFile implements IterationStore {
   add(record: Uint8Array): void { this.u.add(record); }
   finish(): string | undefined { return this.u.finish(); }
   stop(done: number): string | null { return this.u.stop(done); }
+  /** The call has ended: its claim on the file goes. */
+  release(): void { this.u.release(); }
 }
 
 /** evaluate_batch's scenarios, kept as they finish: each its row and the activities whose dates it moved (core/analysis/batch.ts). */
 export class ScenarioFile implements RowStore {
   private u: UnitFile;
-  constructor(resume: unknown, onKept?: (path: string) => void) { this.u = new UnitFile('evaluate_batch', 'p6clone-evaluate-batch', 'scenarios.ndjson', resume, onKept); }
-  open(inputs: unknown): Iterable<KeptScenario> {
+  /** claim: how a run claims its file (claimHere on the server's main thread; a compute worker asks the main thread). */
+  constructor(resume: unknown, claim: Claim, onKept?: (path: string) => void) { this.u = new UnitFile('evaluate_batch', 'p6clone-evaluate-batch', 'scenarios.ndjson', resume, claim, onKept); }
+  async open(inputs: unknown): Promise<Iterable<KeptScenario>> {
     const fingerprint = hashOf(inputs);
-    if (!this.u.resuming) { this.u.start({ fingerprint }, fingerprint.slice(0, 12)); return []; }
-    this.u.load((h) => (h.fingerprint !== fingerprint ? 'the project, the scenarios or an argument (project, top) is not what the kept run was made from' : null));
+    if (!this.u.resuming) { await this.u.start({ fingerprint }, fingerprint.slice(0, 12)); return []; }
+    await this.u.load((h) => (h.fingerprint !== fingerprint ? 'the project, the scenarios or an argument (project, top) is not what the kept run was made from' : null));
     const units = this.u.units();
     return { *[Symbol.iterator]() { for (const b of units) { let k: KeptScenario; try { k = JSON.parse(Buffer.from(b).toString('utf8')); } catch { return; } yield k; } } };
   }
@@ -220,4 +262,6 @@ export class ScenarioFile implements RowStore {
   add(kept: KeptScenario): void { this.u.add(Buffer.from(JSON.stringify(kept), 'utf8')); }
   finish(): string | undefined { return this.u.finish(); }
   stop(done: number): string | null { return this.u.stop(done); }
+  /** The call has ended: its claim on the file goes. */
+  release(): void { this.u.release(); }
 }

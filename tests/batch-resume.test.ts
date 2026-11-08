@@ -127,3 +127,24 @@ test('a kept scenario damaged in place is done again, with every one after it, a
   assert.deepEqual(same(resumed), same(full));
   await call('close', { ...h, discard: true });
 });
+
+// Review 4L-13 M2: two runs could write one kept file (the same project open twice: the same fingerprint, the same file; or a resume
+// started while a cancelled job is still in its last scenario). One run at a time on a kept file: a second is refused as run_busy.
+test('a second batch on a kept file while one is working on it is refused as run_busy, naming the job', async () => {
+  const built = await chain(60);
+  const file = join(root, `busy-${Math.random().toString(36).slice(2, 6)}.xer`);
+  assert.equal((await call('save', { ...built, path: file })).err, false);
+  const A = (await call('open_file', { path: file })).d.handle as string, B = (await call('open_file', { path: file })).d.handle as string;
+  const many = Array.from({ length: 3000 }, (_, i) => scenarios[i % N]).map((s, i) => ({ ...s, name: `m${i}` }));
+  const job = (await call('evaluate_batch', { handle: A, scenarios: many, top: 3, async: true })).d.job_id;
+  for (let k = 0; k < 2000; k++) { const v = (await call('job_status', { job_id: job })).d; if (v.status !== 'running' || Number(/scenario (\d+) of/.exec(String(v.progress ?? ''))?.[1]) > 3) break; await new Promise((r) => setTimeout(r, 2)); }
+  const r = await call('evaluate_batch', { handle: B, scenarios: many, top: 3 });
+  assert.equal(r.err, true, JSON.stringify(r.d).slice(0, 300));
+  assert.equal(r.d.error.code, 'run_busy', JSON.stringify(r.d));
+  assert.equal(r.d.error.job_id, job);
+  await call('cancel_job', { job_id: job });
+  let st: any;
+  for (;;) { st = (await call('job_status', { job_id: job, wait_seconds: 2 })).d; if (st.status !== 'running') break; }
+  assert.ok(st.result?.resume, JSON.stringify(st).slice(0, 300));
+  for (const x of [built, { handle: A }, { handle: B }]) await call('close', { ...x, discard: true });
+});

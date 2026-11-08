@@ -28,7 +28,7 @@ export interface KeptScenario { i: number; row: ScenarioResult; changed: NonNull
 export interface RowStore {
   /** `inputs` is everything the answer is made from (the store fingerprints it). The scenarios kept by the batch this one continues, in
    *  order (none when it starts afresh); throws, changing nothing, when there is no kept batch there or it is not this one. */
-  open(inputs: unknown): Iterable<KeptScenario>;
+  open(inputs: unknown): Promise<Iterable<KeptScenario>>;
   /** The batch goes on after the first `count` kept scenarios (anything after them is cut off). Returns how many kept scenarios are
    *  done again (found damaged, or after a damaged one). */
   resumeAt(count: number): number;
@@ -86,7 +86,7 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   let redone = 0;
   if (store) {
     const inputs = { format: 1, projIds, scenarios, options: o.options ?? null, hpd, calendarDays: o.calendarDays ?? true, top, ...batchData(db, projIds, scenarios, o.options) };
-    for (const k of store.open(inputs)) {
+    for (const k of await store.open(inputs)) {
       // (a damaged one, and what follows it, are done again)
       if (k?.i !== results.length || results.length >= scenarios.length || !k.row || typeof k.row !== 'object' || (k.row.ok && !Array.isArray(k.changed))) break;
       results.push(k.row); moved.push(k.changed ?? null);

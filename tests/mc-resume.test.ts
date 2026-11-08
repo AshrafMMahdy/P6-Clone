@@ -10,7 +10,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runMonteCarlo, testHooks, type MonteCarloOptions } from '../core/risk/montecarlo.ts';
 import { addRisk, linkActivity } from '../core/risk/register.ts';
-import { IterationFile } from '../mcp/keptRuns.ts';
+import { claimHere, IterationFile } from '../mcp/keptRuns.ts';
+const here = claimHere(() => undefined); // (a run's claim of its kept file, as the server's main thread makes it)
 import { getSession, setRoots } from '../mcp/runtime.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'p6-mc-resume-'));
@@ -78,17 +79,17 @@ test('core: every statistic of a run stopped twice and continued twice equals th
   assert.ok(ref.risks.length === 2 && ref.risks.every((r) => r.triggeredPct > 0), JSON.stringify(ref.risks));
   assert.ok(ref.events[0].triggeredPct > 0 && ref.milestones.length === 1 && ref.sensitivity.length > 10 && ref.probDeadline != null);
   testHooks.failAt = 20;
-  const a = await runMonteCarlo(db, ids, o(new IterationFile(null))).finally(() => { testHooks.failAt = null; });
+  const a = await runMonteCarlo(db, ids, o(new IterationFile(null, here))).finally(() => { testHooks.failAt = null; });
   assert.equal(a.iterations, 20);
   const file = a.partial!.kept!;
   // a kill while the next iteration was being written: its bytes are cut short at the end of the file
   const whole = statSync(file).size;
   testHooks.failAt = 55;
-  const b = await runMonteCarlo(db, ids, o(new IterationFile(file))).finally(() => { testHooks.failAt = null; });
+  const b = await runMonteCarlo(db, ids, o(new IterationFile(file, here))).finally(() => { testHooks.failAt = null; });
   assert.equal(b.resumed, 20); assert.equal(b.iterations, 55); assert.equal(b.partial!.kept, file);
   assert.ok(statSync(file).size > whole);
   truncateSync(file, statSync(file).size - 7); // the 55th iteration is not whole any more
-  const c = await runMonteCarlo(db, ids, o(new IterationFile(file)));
+  const c = await runMonteCarlo(db, ids, o(new IterationFile(file, here)));
   assert.equal(c.resumed, 54);
   assert.deepEqual(strip(c), strip(ref));
   assert.equal(existsSync(file), false);
@@ -209,15 +210,15 @@ test('a record keeps only the durations that vary, and a resumed run still equal
   // what varies: A10-A14, A20, the two register risks' activities (A3, A118) and the event's (A30)
   const varying = 5 + 1 + 2 + 1, n = T.filter((t) => ids.includes(t.proj_id)).length, estimable = n - 1;
   testHooks.failAt = 20;
-  const a = await runMonteCarlo(db, ids, o(new IterationFile(null))).finally(() => { testHooks.failAt = null; });
+  const a = await runMonteCarlo(db, ids, o(new IterationFile(null, here))).finally(() => { testHooks.failAt = null; });
   const file = a.partial!.kept!;
   const at20 = statSync(file).size;
   testHooks.failAt = 30;
-  await runMonteCarlo(db, ids, o(new IterationFile(file))).finally(() => { testHooks.failAt = null; });
+  await runMonteCarlo(db, ids, o(new IterationFile(file, here))).finally(() => { testHooks.failAt = null; });
   const per = (statSync(file).size - at20) / 10; // (iterations 21-30 set no anchor: the first iteration set them all; a unit is framed by its length and CRC32)
   const bits = (m: number) => Math.ceil(m / 8);
   assert.equal(per, 8 + 4 + 8 + 8 * varying + 4 * n + bits(n) + bits(2) + bits(1) + 4, `${per} bytes an iteration (each estimable duration kept: ${8 * estimable} for them)`);
-  const c = await runMonteCarlo(db, ids, o(new IterationFile(file)));
+  const c = await runMonteCarlo(db, ids, o(new IterationFile(file, here)));
   assert.equal(c.resumed, 30);
   assert.deepEqual(strip(c), strip(ref));
   await call('close', { ...h, discard: true });
@@ -262,4 +263,63 @@ test('a kept iteration damaged in place (zeros of the right length, or a stretch
   assert.equal(rd.resumed_iterations, 29); assert.equal(rd.redone_iterations, undefined);
   assert.deepEqual(same(rd), same(full));
   await call('close', { ...h, discard: true });
+});
+
+// Review 4L-13 M2: two runs could write one kept file: the same project open twice (two handles: the same fingerprint, the same file),
+// or a resume started while a cancelled job (it answers before it has stopped) is still in its last iteration. One run at a time on a
+// kept file now: a second is refused as run_busy, naming the job that holds it.
+test('a second run on a kept file while one is working on it is refused as run_busy, naming the job; once that ends it goes on', async () => {
+  const h = await project(30);
+  const file = join(root, `busy-${Math.random().toString(36).slice(2, 6)}.xer`);
+  assert.equal((await call('save', { ...h, path: file })).err, false);
+  const A = (await call('open_file', { path: file })).d.handle as string, B = (await call('open_file', { path: file })).d.handle as string;
+  const args = (handle: string, extra: Record<string, unknown> = {}) => ({ handle, iterations: 20000, seed: 11, default_estimates: est, ...extra });
+  testHooks.failAt = 20;
+  const part = (await call('monte_carlo', args(A)).finally(() => { testHooks.failAt = null; })).d;
+  const size = statSync(part.resume).size;
+  const job = (await call('monte_carlo', args(A, { resume: part.resume, async: true }))).d.job_id;
+  for (let k = 0; k < 400; k++) { const v = (await call('job_status', { job_id: job })).d; if (Number(/^(\d+) of/.exec(String(v.progress ?? ''))?.[1]) > 20 || v.status !== 'running') break; await new Promise((r) => setTimeout(r, 10)); }
+  for (const again of [args(B, { resume: part.resume }), args(B)]) { // a resume of it, and a fresh call of the same name (the other handle)
+    const r = await call('monte_carlo', again);
+    assert.equal(r.err, true, JSON.stringify(r.d).slice(0, 300));
+    assert.equal(r.d.error.code, 'run_busy', JSON.stringify(r.d));
+    assert.equal(r.d.error.job_id, job);
+    assert.match(r.d.error.reason, new RegExp(`job ${job}`));
+  }
+  await call('cancel_job', { job_id: job });
+  let st: any;
+  for (let k = 0; k < 60; k++) { st = (await call('job_status', { job_id: job, wait_seconds: 2 })).d; if (st.status !== 'running') break; }
+  assert.equal(st.status, 'cancelled');
+  assert.ok(statSync(part.resume).size > size);
+  // once it has ended the file is free: the run goes on from what both kept (cancelled again: 20,000 iterations are not waited for)
+  const later = (await call('monte_carlo', args(B, { resume: part.resume, async: true }))).d.job_id;
+  for (let k = 0; k < 400; k++) { const v = (await call('job_status', { job_id: later })).d; if (v.status !== 'running' || /of/.test(String(v.progress ?? ''))) break; await new Promise((r) => setTimeout(r, 10)); }
+  await call('cancel_job', { job_id: later });
+  for (let k = 0; k < 60; k++) { st = (await call('job_status', { job_id: later, wait_seconds: 2 })).d; if (st.status !== 'running') break; }
+  assert.equal(st.status, 'cancelled', JSON.stringify(st).slice(0, 300));
+  assert.ok(st.result.resumed_iterations > 20, JSON.stringify(st.result).slice(0, 300));
+  for (const x of [h, { handle: A }, { handle: B }]) await call('close', { ...x, discard: true });
+});
+
+test('…the same in compute workers: the claim is held on the server\'s main thread', { timeout: 300_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6-mc-busy-'));
+  copyFileSync(join(import.meta.dirname, 'fixtures', 'seed-aurora.xer'), join(dir, 'a.xer'));
+  const s = server(dir);
+  try {
+    await s.rpc('initialize', {});
+    const o1 = await s.c('open_file', { path: join(dir, 'a.xer') }), o2 = await s.c('open_file', { path: join(dir, 'a.xer') });
+    const args = { iterations: 2000, seed: 5, default_estimates: est };
+    const job = (await s.c('monte_carlo', { handle: o1.handle, ...args, async: true })).job_id;
+    for (let k = 0; k < 600; k++) { const v = await s.c('job_status', { job_id: job }); if (/^(\d{2,}) of/.test(String(v.progress ?? ''))) break; await new Promise((r) => setTimeout(r, 50)); }
+    const r = await s.rpc('tools/call', { name: 'monte_carlo', arguments: { handle: o2.handle, ...args } });
+    const err = r.result.structuredContent.error;
+    assert.equal(err?.code, 'run_busy', JSON.stringify(r.result).slice(0, 600));
+    assert.equal(err.job_id, job);
+    await s.c('cancel_job', { job_id: job });
+    let st: any;
+    for (let k = 0; k < 60; k++) { st = await s.c('job_status', { job_id: job, wait_seconds: 2 }); if (st.status !== 'running') break; }
+    // once it has ended (its worker answered) the claim is given back: the other handle continues the run
+    const again = await s.c('monte_carlo', { handle: o2.handle, ...args, resume: st.result.resume });
+    assert.equal(again.resumed_iterations, st.result.iterations_done, JSON.stringify(again).slice(0, 300));
+  } finally { s.p.kill('SIGKILL'); }
 });
