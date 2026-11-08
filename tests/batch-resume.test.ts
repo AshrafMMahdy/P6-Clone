@@ -77,3 +77,26 @@ test('a damaged last scenario is done again; a resume of other scenarios or argu
   assert.equal(gone.err, true); assert.equal(gone.d.error.code, 'resume_unreadable');
   await call('close', { ...h, discard: true });
 });
+
+// Review 4L-13 M1: the fingerprint was of the tables as laid out in memory (key order, field order, the EPS only in memory), so a batch
+// on a project edited here, saved and opened again was refused as resume_mismatch. (A project made here has no file version, and an
+// XER has one: the scheduler's rules for the version differ, so that project is edited after it was opened from its first save.)
+test('a batch on a project edited here, saved and opened again, continues from its kept scenarios: the answer equals an uninterrupted batch', async () => {
+  const built = await chain(60);
+  const first = join(root, `built-${Math.random().toString(36).slice(2, 6)}.xer`), file = first.replace(/\.xer$/, '-edited.xer');
+  assert.equal((await call('save', { ...built, path: first })).err, false);
+  const a = (await call('open_file', { path: first })).d, h = { handle: a.handle as string, owner_key: a.owner_key as string };
+  assert.equal((await call('edit', { ...h, operations: [{ op: 'update_activity', id: 'A3', name: 'A3 edited' }, { op: 'add_activity', id: 'X1', name: 'X1', duration_days: 2 }, { op: 'add_relationship', pred: 'A10', succ: 'X1' }] })).err, false);
+  await call('schedule', h);
+  assert.equal((await call('save', { ...h, path: file })).err, false);
+  const part = (await stopped(h, 8)).d;
+  assert.equal(part.partial, true); assert.ok(existsSync(part.resume), JSON.stringify(part).slice(0, 300));
+  const o = (await call('open_file', { path: file })).d;
+  const resumed = await call('evaluate_batch', { handle: o.handle, scenarios, top: 3, resume: part.resume });
+  assert.equal(resumed.err, false, JSON.stringify(resumed.d).slice(0, 400));
+  assert.equal(resumed.d.resumed_scenarios, part.scenarios_done);
+  const full = (await call('evaluate_batch', { handle: o.handle, scenarios, top: 3 })).d;
+  assert.deepEqual(same(resumed.d), same(full));
+  assert.deepEqual(same(full), same((await call('evaluate_batch', { ...h, scenarios, top: 3 })).d), 'the project as edited here and as opened again are the same batch');
+  for (const x of [built, h, { handle: o.handle }]) await call('close', { ...x, discard: true });
+});

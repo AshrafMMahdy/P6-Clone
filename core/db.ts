@@ -1,4 +1,5 @@
 export type Row = Record<string, string>;
+import { createHash } from 'node:crypto';
 import { realOf } from './journal.ts';
 export interface Table { name: string; fields: string[]; rows: Row[] }
 export interface XerHeader { version: string; exportDate: string; raw: string[]; /** text encoding the file was read in */ encoding?: string }
@@ -167,3 +168,28 @@ export function groupBy(rs: Row[], field: string): Map<string, Row[]> {
   }
   return m;
 }
+
+/** A digest of what the tables say, independent of how they are laid out in memory (review 4L-13 M1): the same data built in
+ *  memory, or saved and opened again, gives the same digest. Per table (by name; a table with no rows is the same as none), each row
+ *  in order, its non-empty values by field name (the order of `fields` and of a row's keys is layout; an empty value and a missing
+ *  one are the same). Values are compared as the text they hold. Whatever the computation reads besides rows (the field list, the
+ *  file's header) is the caller's to add; `omit` names, per table, fields the computation never reads. */
+export function dataDigest(tables: Record<string, { rows: Row[] } | undefined>, omit: Record<string, readonly string[]> = {}): string {
+  const h = createHash('sha256');
+  const put = (s: string) => { h.update(`${s.length}:`); h.update(s); };
+  for (const name of Object.keys(tables).sort()) {
+    const rs = tables[name]?.rows;
+    if (!rs?.length) continue;
+    put(name); h.update(`#${rs.length};`);
+    const skip = omit[name] ?? [];
+    for (const r of rs) {
+      const keys = Object.keys(r).filter((k) => r[k] != null && r[k] !== '' && !skip.includes(k)).sort();
+      h.update(`{${keys.length};`);
+      for (const k of keys) { put(k); put(String(r[k])); }
+    }
+  }
+  return h.digest('hex');
+}
+/** The fields the clone keeps on a PROJECT row beside P6's data, which an XER does not carry: its place in the EPS and its name there.
+ *  Scheduling never reads them (edit operations on the EPS read the place). */
+export const PROJECT_PLACE_FIELDS = ['_eps_id', '_name'] as const;

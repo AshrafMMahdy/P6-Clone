@@ -166,3 +166,24 @@ test('the kept file survives the process: a server killed mid-run, a new server 
     assert.equal(existsSync(resume), false);
   } finally { for (const x of live) x.p.kill('SIGKILL'); }
 });
+
+// Review 4L-13 M1: the fingerprint was of the tables as laid out in memory (key order, field order, a table only in memory), so a run on
+// a project built here, saved and opened again was refused as resume_mismatch: its kept work was lost after any stop.
+test('a run on a project built here, saved and opened again, continues from its kept iterations: the answer equals an uninterrupted run', async () => {
+  const h = await project(15);
+  const file = join(root, `built-${Math.random().toString(36).slice(2, 6)}.xer`);
+  const sv = await call('save', { ...h, path: file });
+  assert.equal(sv.err, false, JSON.stringify(sv.d).slice(0, 300));
+  const args = { iterations: 60, seed: 4, default_estimates: est, events: [{ name: 'Late permit', probability: 0.3, delay_days: 4 }] };
+  testHooks.failAt = 20;
+  const part = (await call('monte_carlo', { ...h, ...args }).finally(() => { testHooks.failAt = null; })).d;
+  assert.equal(part.iterations_done, 20); assert.ok(part.resume, JSON.stringify(part).slice(0, 300));
+  const o = (await call('open_file', { path: file })).d;
+  const resumed = await call('monte_carlo', { handle: o.handle, ...args, resume: part.resume });
+  assert.equal(resumed.err, false, JSON.stringify(resumed.d).slice(0, 400));
+  assert.equal(resumed.d.resumed_iterations, 20);
+  const full = (await call('monte_carlo', { handle: o.handle, ...args })).d;
+  assert.deepEqual(same(resumed.d), same(full));
+  assert.deepEqual(same(full), same((await call('monte_carlo', { ...h, ...args })).d), 'the project as built and as opened again are the same run');
+  await call('close', { ...h, discard: true }); await call('close', { handle: o.handle, discard: true });
+});

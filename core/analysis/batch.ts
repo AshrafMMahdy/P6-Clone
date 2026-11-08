@@ -1,12 +1,12 @@
 // What-ifs in bulk: the project is scheduled once as it is, then each scenario (a list of edit operations) is applied
 // and scheduled on a rolled-back copy, so dozens of candidates cost one call and one F9 each, and nothing is kept.
-import { rows, type Db, type Row } from '../db.ts';
+import { dataDigest, PROJECT_PLACE_FIELDS, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
 import { applyOps } from '../project/ops.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
 import { activityCosts, sumLines } from '../cost/rollup.ts';
-import { calendarResolver, scheduleProjects, type SchedOptions } from '../schedule/cpm.ts';
+import { calendarResolver, optionsFor, scheduleProjects, type SchedOptions } from '../schedule/cpm.ts';
 import type { Tick } from './common.ts';
 
 /** Test-only: make the scenario at this index throw. */
@@ -59,6 +59,17 @@ export function measure(d: Db, projIds: string[], over: Partial<SchedOptions> = 
   return { ok: true, m: { finish: r.stats.finish, critical: crit, negative: tasks.filter((t: Row) => !t.act_end_date && Number(t.total_float_hr_cnt || 0) < 0).length, cost: sumLines(activityCosts(d, projIds).values()).eac, dates } };
 }
 
+/** What a batch's answer is made from in the project (review 4L-13 M1), as its fingerprint takes it: what the tables say, not how
+ *  they are laid out in memory (a project built here, saved and opened again is the same batch), and the options the scheduler takes
+ *  from them and from what is not rows (the field list, the file's version). Every table the scenarios' edit operations may read
+ *  counts; the EPS and a project's place in it (never in an XER: the EPS lives in P6's database) only when a scenario's operations name
+ *  an EPS, and a project's name in the EPS never (nothing a row says reads it). */
+export function batchData(db: Db, projIds: string[], scenarios: Scenario[], over: Partial<SchedOptions> = {}): { data: string; scheduler: (SchedOptions | null)[] } {
+  const eps = scenarios.some((sc) => (sc.overrides ?? []).some((op) => !!op && typeof op === 'object' && (/_eps$/.test(String((op as { op?: unknown }).op)) || (op as { eps?: unknown }).eps != null)));
+  const tables = eps ? db.tables : Object.fromEntries(Object.entries(db.tables).filter(([name]) => name !== 'EPS'));
+  return { data: dataDigest(tables, { PROJECT: eps ? ['_name'] : PROJECT_PLACE_FIELDS }), scheduler: projIds.map((id) => { const p = rows(db, 'PROJECT').find((r) => r.proj_id === id); return p ? optionsFor(db, p, over) : null; }) };
+}
+
 export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick; /** each finished scenario row, as it is done */ onRow?: (row: ScenarioResult) => void; store?: RowStore } = {}) {
   const hpd = o.hoursPerDay ?? 8, top = o.top ?? 3;
   const base = onScratch(db, (d) => measure(d, projIds, o.options));
@@ -72,7 +83,7 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   // a batch continued from a store: its kept scenarios are taken in as they were, and only the rest are scheduled
   const store = o.store;
   if (store) {
-    const inputs = { format: 1, projIds, scenarios, options: o.options ?? null, hpd, calendarDays: o.calendarDays ?? true, top, tables: db.tables };
+    const inputs = { format: 1, projIds, scenarios, options: o.options ?? null, hpd, calendarDays: o.calendarDays ?? true, top, ...batchData(db, projIds, scenarios, o.options) };
     for (const k of store.open(inputs)) {
       // (a damaged one, and what follows it, are done again)
       if (k?.i !== results.length || results.length >= scenarios.length || !k.row || typeof k.row !== 'object' || (k.row.ok && !Array.isArray(k.changed))) break;

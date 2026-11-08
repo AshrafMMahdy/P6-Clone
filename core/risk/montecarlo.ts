@@ -10,9 +10,9 @@
 // never touched), samples remaining durations of not-started / in-progress activities, adds the triggered
 // risk impacts, runs the normal CPM (`scheduleProjects`) and records the project finish, each activity's
 // early finish and whether it was critical (total float <= 0).
-import { rows, type Db, type Row, type Table } from '../db.ts';
+import { dataDigest, PROJECT_PLACE_FIELDS, rows, type Db, type Row, type Table } from '../db.ts';
 import { MIN_PER_DAY, parseP6Date } from '../dates.ts';
-import { calendarResolver, scheduleProjects, p6num, type SchedOptions } from '../schedule/cpm.ts';
+import { calendarResolver, optionsFor, scheduleProjects, p6num, type SchedOptions } from '../schedule/cpm.ts';
 import { linkedTasks, riskProbability, riskScheduleHours, risksOf, type RiskPhase } from './register.ts';
 
 export const RISKEST = '_RISKEST';
@@ -535,7 +535,11 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   let rng = mulberry32(seed);
   if (store) {
     const inputs = { format: 1, projIds, iterations: requested, phase, deadline: opts.deadline ?? null, over, sampler: sampler ?? null, reAnchor: !!opts.reAnchor,
-      tasks: { fields: prep.taskFields, rows: prep.taskRows }, projects: { fields: prep.projFields, rows: prep.projRows }, shared: prep.shared,
+      // the data the iterations schedule, as it reads it (review 4L-13 M1): what the tables say, not how they are laid out in memory (a
+      // project built here, saved and opened again is the same run; a project's place in the EPS is not read), and the options the
+      // scheduler takes from them and from what is not rows (the field list, a file header: an iteration's scratch project has none)
+      data: dataDigest({ ...prep.shared, TASK: { rows: prep.taskRows }, PROJECT: { rows: prep.projRows } }, { PROJECT: PROJECT_PLACE_FIELDS }),
+      scheduler: ((d) => projIds.map((id) => { const p = d.tables.PROJECT.rows.find((r) => r.proj_id === id); return p ? optionsFor(d, p, over) : null; }))(scratch(prep).db),
       est, risks: riskEvents.map((e) => ({ id: e.row.proj_risk_id, p: e.p, hours: e.hours, ks: e.ks })), events: inline.map((e) => ({ name: e.name, p: e.p, ks: e.ks, projectHours: e.projectHours })) };
     const o = store.open(inputs, { activities: n, estimable: estK.length, risks: hitR.length, events: hitI.length }, opts.seed != null ? opts.seed >>> 0 : undefined, seed);
     seed = o.seed; rng = mulberry32(seed);
