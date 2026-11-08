@@ -41,7 +41,7 @@ export function measure(d: Db, projIds: string[], over: Partial<SchedOptions> = 
   return { ok: true, m: { finish: r.stats.finish, critical: crit, negative: tasks.filter((t: Row) => !t.act_end_date && Number(t.total_float_hr_cnt || 0) < 0).length, cost: sumLines(activityCosts(d, projIds).values()).eac, dates } };
 }
 
-export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick } = {}) {
+export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick; /** each finished scenario row, as it is done */ onRow?: (row: ScenarioResult) => void } = {}) {
   const hpd = o.hoursPerDay ?? 8, top = o.top ?? 3;
   const base = onScratch(db, (d) => measure(d, projIds, o.options));
   if (!base.ok) return { ok: false as const, error: { code: 'schedule_failed', message: `The project as it is cannot be scheduled: ${base.error}` } };
@@ -70,6 +70,8 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
         negative_float: m.m.negative, cost: Math.round(m.m.cost * 100) / 100, cost_delta: Math.round((m.m.cost - base.m.cost) * 100) / 100, _m: m.m,
       };
     })); } catch (e) { results.push({ name, ok: false, error: `The scenario failed: ${(e as Error)?.message ?? e}` }); }
+    // sent out as soon as it is done (a compute worker ended after a cancel keeps it)
+    if (o.onRow) { const { _m: _x, ...row } = results[results.length - 1]; o.onRow(row); }
   }
   // the best few (earliest finish, then cheapest) carry the activities whose dates moved
   const ranked = results.filter((r) => r.ok).sort((a, b) => (parseP6Date(a.finish ?? '') ?? Infinity) - (parseP6Date(b.finish ?? '') ?? Infinity) || (a.cost ?? 0) - (b.cost ?? 0));

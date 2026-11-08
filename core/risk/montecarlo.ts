@@ -160,6 +160,8 @@ export interface MonteCarloOptions {
   iterations: number;
   seed?: number;
   onProgress?: (i: number) => void;
+  /** each finished iteration's project finish (ms), as it is committed (a compute worker sends it out: kept if the worker is ended) */
+  onIteration?: (finish: number) => void;
   /** Which risk values drive risk events: pre-response (default), post-response, or none. */
   riskEvents?: RiskPhase | 'off';
   /** Scheduling option overrides passed to scheduleProjects. */
@@ -486,6 +488,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     for (const j of hitRisk) riskHits[j]++;
     for (const e of hitInline) e.hits++;
     done = it + 1;
+    opts.onIteration?.(fin);
     opts.onProgress?.(it + 1);
     if (it + 1 < iterations && ((it + 1) % yieldEvery === 0 || Date.now() - lastYield >= 200)) { collectGarbage(); await yieldNow(); lastYield = Date.now(); }
   }

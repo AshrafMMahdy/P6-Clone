@@ -20,15 +20,17 @@ import { basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { cwdLost, ensureCwd, markCwdLost, safeCwd } from '../core/cwd.ts';
 import { lobSidecars } from './lob.ts';
-import { unitWatch, workerFloorMs } from '../core/bim/liveness.ts';
+import { unitWatch } from '../core/bim/liveness.ts';
+import { formatP6Date } from '../core/dates.ts';
 
-type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void };
+type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void; /** a finished row of the answer, sent out as it is done (kept if the worker is ended) */ keep?: (row: unknown) => void };
 interface Snapshot { handle: string; ownerKey: string; db: Session['db']; path: string | null; format: Session['format']; hpd: number; encoding?: Session['encoding']; savedTo?: string; dirty: boolean; bytes: number }
 interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { cwdLost: string | null; root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean } }
 type Answer =
   | { id: number; type: 'progress'; done: number; total: number; message: string }
   | { id: number; type: 'note'; text: string }
   | { id: number; type: 'reserved'; delta: number }
+  | { id: number; type: 'kept'; row: unknown }
   | { id: number; type: 'done'; result: unknown; patch: DbPatch | null; label: string; lobSide: unknown }
   | { id: number; type: 'error'; tool: { code: string; message: string; hint?: string; retryAfter?: number; data?: Record<string, unknown> } | null; message: string; stack?: string };
 
@@ -44,9 +46,27 @@ let active = 0;
 const waiting: (() => void)[] = [];
 const IDLE_MS = 60_000;
 /** Tools that keep their finished work when cancelled: the worker is asked to stop at its next step and answers with what it has
- *  (partial). There is no fixed time limit: it is ended only when its progress ticks have gone silent for 4 times their longest
- *  gap (never under workerFloorMs), the same judge as the render watch (liveness.ts unitWatch). */
+ *  (partial). There is no fixed time limit and no stop while it works: it is ended only when FROZEN (no progress and no busy time of
+ *  its thread for two windows in a row: the platform's rule, liveness.ts), and then the rows it had sent out (ctx.keep) are the answer. */
 const STOPS_GRACEFULLY = new Set(['monte_carlo', 'evaluate_batch']);
+/** A worker thread's own processor time so far (ms): Worker.cpuUsage (Node 22.19+). Undefined where it is not offered: no reading.
+ *  (Not the event loop's busy time: a thread blocked waiting reads as busy there.) */
+export const threadCpu = (w: Worker): (() => Promise<number>) | undefined => (typeof (w as { cpuUsage?: unknown }).cpuUsage === 'function'
+  ? async () => { const c = await (w as unknown as { cpuUsage(): Promise<{ user: number; system: number }> }).cpuUsage(); return (c.user + c.system) / 1000; }
+  : undefined);
+/** The answer a tool's kept rows make when its worker was ended (frozen) before it answered: only tools whose rows ARE their answer. */
+export const FROM_KEPT: Record<string, (rows: unknown[], a: Record<string, any>) => unknown> = {
+  evaluate_batch: (rows, a) => ({ ok: true, partial: true, stopped: 'cancelled', scenarios: rows, scenarios_done: rows.length, scenarios_requested: Array.isArray(a.scenarios) ? a.scenarios.length : rows.length, best: null, note: 'The worker stopped responding after the cancel and was ended; these are the scenarios it had finished (the base and the best are not worked out).' }),
+  // each finished iteration's project finish: the finish statistics are exact for those iterations; what needs every activity's samples is not kept
+  monte_carlo: (rows, a) => {
+    const f = rows.map(Number).filter(Number.isFinite).sort((x, y) => x - y), n = f.length;
+    const at = (p: number) => formatP6Date(f[Math.min(n - 1, Math.max(0, Math.ceil(p * n) - 1))]);
+    const mean = f.reduce((x, y) => x + y, 0) / n;
+    return { partial: true, stopped: 'cancelled', iterations_done: rows.length, iterations_requested: Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000))),
+      finish: { P10: at(0.1), P50: at(0.5), P80: at(0.8), P90: at(0.9), mean: formatP6Date(mean), min: formatP6Date(f[0]), max: formatP6Date(f[n - 1]) },
+      note: `The worker stopped responding after the cancel and was ended; these finish dates are of the ${rows.length} iterations it had finished (criticality, sensitivity, milestones and the histogram need every activity's samples and are not worked out: run it again for them).` };
+  },
+};
 
 // The workers' own runtime (a Node isolate: measured 37 MB each) is counted once per live worker in the memory budget, not again in every call:
 // a job reserves what it adds to a worker that is there already. Idle workers give theirs back when memory is wanted (trim).
@@ -164,19 +184,21 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
       cfg: { cwdLost: cwdLost(), root: config.root, readRoot: config.readRoot, writeRoot: config.writeRoot, requireOwnerKey: config.requireOwnerKey },
     };
     const done = await new Promise<Extract<Answer, { type: 'done' }>>((resolve, reject) => {
-      // the worker's progress ticks are watched from the start; the watch only matters once a stop has been asked
-      // (a watch that found silence fires once and stops; ticks that come back start a new one that keeps the gaps seen,
-      // the silence included, so a later stop still waits on a worker that is working)
-      let stopping = false, silent = false;
-      const watchFrom = (maxGapMs: number) => unitWatch({ floorMs: workerFloorMs(), maxGapMs, onStuck: () => { silent = true; if (stopping) kill(); } });
-      let watch = watchFrom(0);
+      // watched from the start (its line says when it works without progress); ended only once a stop was asked AND it is frozen
+      // (no progress, no busy time of its thread, two windows in a row — liveness.ts). Its busy time: the thread's event loop use.
+      let stopping = false, frozen = false;
+      const kept: unknown[] = [];
+      // its processor time: the thread's own (Worker.cpuUsage, Node 22.19+); where that is not offered there is no reading (frozen after
+      // three windows with no progress, as the platform's rule). Not the event loop's busy time: a thread blocked waiting reads as busy there.
+      const cpu = threadCpu(w);
+      // (a watch that found it frozen stops; progress after that starts a new one: frozen is the state now, not once)
+      const watchNew = () => unitWatch({ step: name, cpu, onStuck: () => { frozen = true; if (stopping) kill(); } });
+      let watch = watchNew();
       const cleanup = () => { watch.stop(); w.off('message', onMessage); w.off('error', onError); w.off('exit', onExit); ctx.signal.removeEventListener('abort', onAbort); };
       const onMessage = (m: Answer) => {
         if (m.id !== id) return;
-        if (m.type === 'progress') {
-          if (silent) { const s = watch.state(); watch.stop(); silent = false; watch = watchFrom(Math.max(s.maxGapMs, s.sinceMs)); }
-          watch.beat(m.done, m.total); ctx.progress?.(m.done, m.total, m.message);
-        }
+        if (m.type === 'progress') { if (frozen) { frozen = false; watch = watchNew(); } watch.beat(m.done, m.total); ctx.progress?.(m.done, m.total, m.message); }
+        else if (m.type === 'kept') kept.push(m.row);
         else if (m.type === 'note') { if (ctx.job) ctx.job.progress = m.text; }
         else if (m.type === 'reserved') { held += m.delta; adjustReserved(m.delta); }
         else if (m.type === 'done') { healthy = true; cleanup(); resolve(m); }
@@ -185,16 +207,18 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
       const onError = (e: Error) => { cleanup(); settle(); reject(new ToolError('compute_failed', `The worker that runs ${name} stopped: ${e.message}`, /memory/i.test(e.message) ? 'The project is too big for this computation within the memory budget; close other projects or work on part of the plan.' : 'Call again; if it repeats, report it with the message.')); };
       const onExit = (code: number) => { cleanup(); settle(); reject(new ToolError('compute_failed', `The worker that runs ${name} ended (code ${code}) before it answered.`, 'Call again.')); };
       // A cancelled call that can stop gracefully (STOPS_GRACEFULLY) is asked to stop and answers with what it finished; it is
-      // ended only once it is silent (above). Any other call ends its worker at once, even in a synchronous loop: it works on a
+      // ended only if it is frozen (above). Any other call ends its worker at once, even in a synchronous loop: it works on a
       // copy, so nothing is half done (its temporary files go, and what it had finished writing is said).
       const onAbort = () => {
-        if (STOPS_GRACEFULLY.has(name) && !stopping) { stopping = true; w.postMessage({ stop: id }); if (silent) kill(); return; }
+        if (STOPS_GRACEFULLY.has(name) && !stopping) { stopping = true; w.postMessage({ stop: id }); if (frozen) kill(); return; }
         kill();
       };
       const kill = () => {
         cleanup();
         void w.terminate().then(() => {
           const finished = settle();
+          // the rows it had sent out are kept: they are the answer (marked partial) where the tool's rows are its answer
+          if (stopping && kept.length && FROM_KEPT[name]) { resolve({ id, type: 'done', result: FROM_KEPT[name](kept, a), patch: null, label: name, lobSide: null }); return; }
           reject(new ToolError('cancelled', finished.length ? `The call was cancelled after it had finished writing ${finished.join(', ')}; nothing else was written.` : 'The call was cancelled.', finished.length ? 'Those files are complete; delete them if you do not want them.' : 'Nothing was kept or written by it; call again when needed.', finished.length ? { data: { written: finished } } : {}));
         });
       };
@@ -270,6 +294,7 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
     const ctx: Ctx = {
       caller: job.caller, signal: stopper.signal,
       progress: (done, total, message) => post({ id: job.id, type: 'progress', done, total, message }),
+      keep: (row) => post({ id: job.id, type: 'kept', row }),
       job: { set progress(text: string | undefined) { const now = Date.now(); if (now - last > 250) { last = now; post({ id: job.id, type: 'note', text: String(text) }); } } },
     };
     try {

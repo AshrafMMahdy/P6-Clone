@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
-import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, type StuckInfo } from './liveness.ts';
 
 /** The heap (MB) of a worker that holds a model's index: the memory budget plus headroom, never more than half the machine (at most 16 GB),
  *  nor less than 1 GB (as the Navisworks reader's, nwd.ts nwdHeapMb). */
@@ -19,7 +19,7 @@ export const indexHeapMb = (budgetMb: number = Number(process.env.P6CLONE_MEM_BU
 export interface WorkerJob { script: string; job: Record<string, unknown>; heapMb?: number; what: string; tried: string; next: string }
 
 /** Run the worker on the job; when it has written "done", `after` reads the result from the job's folder (removed afterwards). A worker
- *  ended as stuck is a StuckError (step, silence or bound, tried, alternatives); any other failure is an Error with the worker's last line. */
+ *  ended as frozen is a StuckError (step, how long, tried, alternatives); any other failure is an Error with the worker's last line. */
 export async function inWorker<T>(o: WorkerJob, after: (dir: string) => T | Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'p6clone-job-')), jobFile = join(dir, 'job.json');
   writeFileSync(jobFile, JSON.stringify({ ...o.job, dir }), { mode: 0o600 });
@@ -29,7 +29,7 @@ export async function inWorker<T>(o: WorkerJob, after: (dir: string) => T | Prom
       const child = spawn(process.execPath, [...(o.heapMb ? [`--max-old-space-size=${o.heapMb}`] : []), ...childV8Flags(), o.script, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
       let text = '', stuck: StuckInfo | null = null;
       child.stderr.on('data', (c) => { text = (text + c).slice(-4000); });
-      const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } } });
+      const stop = heartbeatWatcher(child, { onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } } });
       child.on('error', (e) => { stop(); done(e.message); });
       // what it made is marked last: a worker that wrote "done" finished, even if the process then fell over on its way out
       child.on('close', (code, signal) => {

@@ -8,7 +8,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
-import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, type StuckInfo } from './liveness.ts';
 import { pushAll } from '../arrays.ts';
 import { openContainer, section } from './nwd/container.ts';
 import { decodeTree, type NwNode, type NwTree } from './nwd/tree.ts';
@@ -198,9 +198,9 @@ async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<Naviswo
       };
       child.stderr.on('data', (c) => { text = (text + c).slice(-4000); });
       // no fixed time limit (owner rules 2026-10-27, 2026-10-28): the reader is watched through its heartbeats (heartbeat.mjs, liveness.ts) and ended
-      // only after two windows in a row with no progress, or when one call that cannot report progress passes its work bound (P6CLONE_NWD_MINUTES, if set, is an optional
+      // only when frozen: no progress and no processor time for two windows in a row (P6CLONE_NWD_MINUTES, if set, is an optional
       // overall limit for an administrator who wants one; unset, there is none)
-      const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onText, onStuck: (i) => { stuck = i; child.kill(); } });
+      const stop = heartbeatWatcher(child, { onText, onStuck: (i) => { stuck = i; child.kill(); } });
       const cap = Number(process.env.P6CLONE_NWD_MINUTES) > 0 ? setTimeout(() => child.kill(), Number(process.env.P6CLONE_NWD_MINUTES) * 60_000) : null;
       const end = () => { stop(); if (cap) clearTimeout(cap); };
       child.on('error', (e) => { end(); done(e.message); });

@@ -39,7 +39,7 @@ import { makeCtx } from '../core/project/ctx.ts';
 import { TOOLS as LOOKUPS, runTool } from '../core/query/tools.ts';
 import { listTables, projectFilter, readTable } from '../core/query/rawtable.ts';
 import { mppToMspdi, MppReaderMissing } from '../core/msp/mpp.ts';
-import { StuckError } from '../core/bim/liveness.ts';
+import { StuckError, watchReport } from '../core/bim/liveness.ts';
 import { parseMspdi } from '../core/msp/mspdi.ts';
 import { activityTable, linkTable, TABLE_GUIDE } from '../core/query/table.ts';
 import { computeSchedule, COMPUTE_GUIDE } from '../core/query/compute.ts';
@@ -72,7 +72,7 @@ import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler }
 import { dayHours } from '../core/project/units.ts';
 import {
   MEASURE_FILE_BYTES, heapNow, releaseIfGrown, retainedBytes, ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
-  exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
+  exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, noteSilence, askWake, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, type Session,
 } from './runtime.ts';
 
 const VERSION = '2.0.0';
@@ -94,7 +94,7 @@ const TOOLS = [
   { name: 'compute_schedule', annotations: ro, description: `Compute a schedule from a description, with no handle and nothing kept: P6's F9 (calendars, constraints, milestones, progress, retained logic and the other schedule options) on the activities and links given. Takes: ${COMPUTE_GUIDE}.`, inputSchema: { type: 'object', properties: { start: { type: 'string' }, data_date: { type: 'string' }, must_finish_by: { type: 'string' }, hours_per_day: { type: 'number' }, calendar: { type: 'string' }, calendars: { type: 'array', items: { type: 'object' } }, activities: { type: 'array', items: { type: 'object' } }, relationships: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, break_loops: { type: 'boolean' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' }, ...common }, required: ['start', 'activities'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
   { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs, and reasoner: whether the schedule reasoner (optimize_schedule) loaded, its model and runtime, or why not (checked in the background: the first call after the server starts may say checking: true, loaded: null).', inputSchema: { type: 'object', properties: {} } },
-  { name: 'job_status', annotations: ro, description: 'Result of a job started with async: true (or one that outlived the call time). wait_seconds (max 20) waits for it to finish.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, wait_seconds: { type: 'number' } }, required: ['job_id'] } },
+  { name: 'job_status', annotations: ro, description: 'Result of a job started with async: true (or one that outlived the call time). wait_seconds (max 20) waits for it to finish.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, wait_seconds: { type: 'number' }, wake_after_s: { type: 'number', description: 'wake me (a no_progress pulse) if the job still shows no progress after this many seconds — counted from now or its next progress; the job is never stopped by it' } }, required: ['job_id'] } },
   { name: 'cancel_job', annotations: edit, description: 'Stop a running job (Monte Carlo and evaluate_batch stop at their next step and return what they finished, marked partial; open_file, save and schedule stop between their phases, keeping or writing nothing; other work finishes its current step). MCP notifications/cancelled stops a running call the same way.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' } }, required: ['job_id'] } },
   { name: 'edit', annotations: edit, description: `Change the project with a list of operations, applied as ONE transaction: if any fails nothing changes and the error names it. Undo with undo.\n${OP_GUIDE}`, inputSchema: withHandle({ type: 'object', properties: { operations: { type: 'array', items: { type: 'object' } } }, required: ['operations'] }) },
   { name: 'activity_table', annotations: ro, description: `Every activity's computed fields as one compact table (columns, then one array per activity, in table order), paged with offset and limit (no cap on limit; default all, next_offset for the next page). Columns: ${TABLE_GUIDE}; names: true adds name after id. of: assignments gives every resource assignment instead (project, activity, resource, role, budgeted / remaining / actual units, units_per_day, budgeted / remaining / actual cost), of: codes every activity code assignment (project, activity, code_type, code, description), paged the same way.`, inputSchema: withHandle({ type: 'object', properties: { project: { type: 'string', description: 'Project ID (default: every project in the file)' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' }, of: { type: 'string', enum: ['activities', 'assignments', 'codes'] } } }) },
@@ -257,7 +257,7 @@ const iso = (t: number | null | undefined) => (t == null || !Number.isFinite(t) 
 const checkpoint = async (ctx: Ctx) => { await new Promise((r) => setImmediate(r)); if (ctx.signal.aborted) fail('cancelled', 'The call was cancelled.', 'Nothing was kept or written by it; call again when needed.'); };
 
 // ---------------------------------------------------------------- tool implementations
-type Ctx = { caller: string; job?: ReturnType<typeof startJob>; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void };
+type Ctx = { caller: string; job?: ReturnType<typeof startJob>; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void; /** a finished row of the answer, sent out as it is done (a compute worker keeps it if it is ended) */ keep?: (row: unknown) => void };
 
 /** monte_carlo's run-only inputs (events, sampler, re_anchor, deadline) for the engine; bad ones are refused. */
 function monteCarloInputs(s: Session, ids: string[], a: Record<string, any>): Pick<MonteCarloOptions, 'events' | 'sampler' | 'reAnchor' | 'deadline'> {
@@ -298,6 +298,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'job_status': {
       const job = getJob(a.job_id);
       const wait = Math.min(20, Math.max(0, Number(a.wait_seconds) || 0)) * 1000;
+      // the agent may ask to be woken again if the job still shows no progress after wake_after_s (its own choice; nothing is stopped)
+      if (Number(a.wake_after_s) > 0) askWake(job, Number(a.wake_after_s));
       for (const t0 = Date.now(); !job.done && Date.now() - t0 < wait;) await new Promise((r) => setTimeout(r, 200));
       return jobView(job);
     }
@@ -532,7 +534,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       try {
         const mc = monteCarloInputs(s, ids, a);
         let last = 0;
-        const r = await runMonteCarlo(s.db, ids, { iterations, seed: a.seed != null ? Number(a.seed) : undefined, riskEvents: a.risk_events === 'post' || a.risk_events === 'off' ? a.risk_events : 'pre', signal: ctx.signal, ...mc,
+        const r = await runMonteCarlo(s.db, ids, { iterations, seed: a.seed != null ? Number(a.seed) : undefined, riskEvents: a.risk_events === 'post' || a.risk_events === 'off' ? a.risk_events : 'pre', signal: ctx.signal, ...mc, ...(ctx.keep ? { onIteration: (f: number) => ctx.keep!(f) } : {}),
           onProgress: (i) => { if (ctx.job) ctx.job.progress = `${i} of ${iterations} iterations`; const now = Date.now(); if (i === iterations || now - last > 250) { last = now; ctx.progress?.(i, iterations, `${i} of ${iterations} iterations`); } } });
         const wd = (x: number) => Math.round(x * 100) / 100;
         const top = Math.min(200, Number(a.top) || 25);
@@ -725,7 +727,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     if (now - lastTick > 250) { lastTick = now; ctx.progress?.(done, total, message); }
     await checkpoint(ctx); // yields, and throws "cancelled" once the call or its job is cancelled
   };
-  const helpers = { projectIds, allIds, dd, writeOut, writeOutWith, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), applyAsync: <T,>(label: string, fn: (d: Db) => Promise<T>) => changeAsync(s, ctx.caller, label, fn), tick };
+  const helpers = { projectIds, allIds, dd, writeOut, writeOutWith, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), applyAsync: <T,>(label: string, fn: (d: Db) => Promise<T>) => changeAsync(s, ctx.caller, label, fn), tick, keep: ctx.keep };
   const analysed = await runAnalysis(name, a, s, helpers);
   if (analysed !== undefined) return analysed;
   const fourd = await runFourD(name, a, s, helpers);
@@ -764,7 +766,18 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     return { out: { ...(r.out as object), ...mine }, isError: false };
   }
   const handle = NO_HANDLE.has(name) ? undefined : String(a.handle ?? '');
-  const work = async () => {
+  // A watch in this call (liveness.ts) whose work uses the processor without progress says so on the job's progress line, each window,
+  // and takes it back once progress returns (no number decides anything: the job is never stopped while it works; the agent sees it).
+  const busy: { job?: { progress?: string } } = {};
+  let busyText: string | null = null, busyBase: string | undefined;
+  const reportBusy = (line: string | null) => {
+    const j = busy.job;
+    if (!j) return;
+    if (line) { if (busyText == null || j.progress !== busyText) busyBase = j.progress; busyText = `${busyBase ? `${busyBase} — ` : ''}${line}`; j.progress = busyText; }
+    else if (busyText != null) { if (j.progress === busyText) j.progress = busyBase; busyText = null; }
+  };
+  // …and every window with no progress goes to the job, which may wake the agent once (runtime.ts noteSilence)
+  const work = () => watchReport.run({ line: reportBusy, silence: (x) => { if (busy.job) noteSilence(busy.job as Parameters<typeof noteSilence>[0], x); } }, async () => {
     let out = handle != null ? await exclusive(handle, () => withWorkingSet(name, a, handle, () => run(name, a, ctx))) : await run(name, a, ctx);
     const plain = !!out && typeof out === 'object' && !Array.isArray(out);
     // a tool that can change a project says whether that project now has unsaved changes
@@ -774,16 +787,16 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     const s = handle ? sessions.get(handle) : undefined;
     if (s?.notice && plain) { const n = s.notice; s.notice = undefined; return { ...(out as object), _notice: n }; }
     return out;
-  };
+  });
   const asJob = a.async === true && name !== 'job_status';
   try {
-    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; return work(); }), abort); return { out: { job_id: job.id, status: 'running', note: 'Call job_status with this job_id for the result.' }, isError: false }; }
+    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; busy.job = job; return work(); }), abort); return { out: { job_id: job.id, status: 'running', note: 'Call job_status with this job_id for the result.' }, isError: false }; }
     const p = work();
     const timeout = Symbol('timeout');
     // (the timer is cleared once the call answers: left running, its promise held the race's result - the whole answer, a page of 500 rows - for the soft timeout, call after call)
     let soft: ReturnType<typeof setTimeout> | undefined;
     const r = await Promise.race([p, new Promise((res) => { soft = setTimeout(() => res(timeout), config.softTimeoutMs); soft.unref?.(); })]).finally(() => clearTimeout(soft));
-    if (r === timeout) { const job = startJob(name, handle, p, abort); return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
+    if (r === timeout) { const job = startJob(name, handle, p, abort); busy.job = job; return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
     const o = r as { ok?: boolean; status?: string; error?: Record<string, unknown> } | null;
     // a refusal answered as data (ok: false), and a job that failed or was cancelled, are errors too
     const isError = !!(o && typeof o === 'object' && (o.ok === false || (name === 'job_status' && (o.status === 'failed' || o.status === 'cancelled') && !('result' in o))));

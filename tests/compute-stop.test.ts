@@ -1,5 +1,5 @@
 // How a cancelled worker call ends (mcp/compute.ts offload). Monte Carlo and evaluate_batch are asked to stop and answer with what
-// they finished; they are ended only once their ticks go silent. Two holes the blind review of 4L-13 found:
+// they finished; they are ended only when frozen (no progress, no processor time of their thread). Two holes the blind review of 4L-13 found:
 //  - a cancel that lands before the job was sent to its worker left the call running for ever (the stop was posted to a worker
 //    that had no job, and nothing else settled it);
 //  - a silence seen BEFORE the cancel (a slow start) latched, so a later cancel ended a worker that was working again and its
@@ -23,7 +23,7 @@ const chain = async (n: number) => {
 const est = { min_pct: 90, max_pct: 125 };
 const waitJob = async (id: string) => { for (; ;) { const v = (await call('job_status', { job_id: id, wait_seconds: 2 })).d; if (v.status !== 'running') return v; } };
 
-test('a Monte Carlo cancelled before its worker got the job ends at once, not after the silence floor', { timeout: 60_000 }, async () => {
+test('a Monte Carlo cancelled before its worker got the job ends at once, not after a window', { timeout: 60_000 }, async () => {
   const was = process.env.P6CLONE_COMPUTE_WORKERS;
   process.env.P6CLONE_COMPUTE_WORKERS = '2';
   try {
@@ -48,9 +48,9 @@ test('a Monte Carlo cancelled before its worker got the job ends at once, not af
 });
 
 test('a silence before the cancel does not latch: a worker ticking again is still asked to stop and keeps its work', { timeout: 120_000 }, async () => {
-  // a floor of 1 ms: the worker's start-up (copying the project) is already "silence" before its first tick
-  const was = process.env.P6CLONE_WORKER_FLOOR_MS;
-  process.env.P6CLONE_WORKER_FLOOR_MS = '1';
+  // a window of 50 ms: the worker's start-up (copying the project) is already a window with no progress before its first tick
+  const was = process.env.P6CLONE_LIVENESS_WINDOW_MS;
+  process.env.P6CLONE_LIVENESS_WINDOW_MS = '50';
   try {
     const h = await chain(60);
     const job = (await call('monte_carlo', { ...h, iterations: 20000, default_estimates: est, async: true })).d.job_id;
@@ -62,5 +62,5 @@ test('a silence before the cancel does not latch: a worker ticking again is stil
     assert.equal(v.result?.partial, true, 'the finished iterations were kept: ' + JSON.stringify(v).slice(0, 300));
     assert.ok(v.result.iterations_done >= 1);
     await call('close', { ...h, discard: true });
-  } finally { if (was == null) delete process.env.P6CLONE_WORKER_FLOOR_MS; else process.env.P6CLONE_WORKER_FLOOR_MS = was; }
+  } finally { if (was == null) delete process.env.P6CLONE_LIVENESS_WINDOW_MS; else process.env.P6CLONE_LIVENESS_WINDOW_MS = was; }
 });

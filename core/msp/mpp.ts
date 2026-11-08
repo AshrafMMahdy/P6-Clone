@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expectedMs } from '../bim/heartbeat.mjs';
-import { externalWatch, StuckError, treeCpuMs, workerFloorMs, type StuckInfo } from '../bim/liveness.ts';
+import { externalWatch, StuckError, treeCpuMs, type StuckInfo } from '../bim/liveness.ts';
 import { Chunked } from '../xml/p6xml.ts';
 
 const here = () => { try { return typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url)); } catch { return null; } };
@@ -75,8 +75,8 @@ export async function mppToMspdi(path: string): Promise<Chunked> {
       const child = spawn(java, ['-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory', '-Djava.awt.headless=true', '-cp', classPath(home), 'org.mpxj.sample.MpxjConvert', input, out], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
       child.stdout.on('data', (d) => { text = (text + d).slice(-4000); });
       child.stderr.on('data', (d) => { text = (text + d).slice(-4000); });
-      // no time limit: alive while the XML grows or Java uses the processor; ended past ten times the work its size takes
-      const stop = externalWatch({ step: 'reading the .mpp (MPXJ)', floorMs: workerFloorMs(), expectMs: expectedMs(size, 'mpxj'), output: () => (existsSync(out) ? statSync(out).size : 0), cpu: () => treeCpuMs(child.pid ?? 0), onStuck: (i) => { stuck = i; child.kill(); } });
+      // no time limit: alive while the XML grows or Java uses the processor (frozen: neither, two windows in a row)
+      const stop = externalWatch({ step: 'reading the .mpp (MPXJ)', expectMs: expectedMs(size, 'mpxj'), output: () => (existsSync(out) ? statSync(out).size : 0), cpu: () => treeCpuMs(child.pid ?? 0), onStuck: (i) => { stuck = i; child.kill(); } });
       child.on('error', (e) => { stop(); done((e as NodeJS.ErrnoException).code === 'ENOENT' ? 'no-java' : e.message); });
       child.on('close', (c) => { stop(); done(c ?? -1); });
     });

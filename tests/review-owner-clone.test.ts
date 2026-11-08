@@ -285,18 +285,20 @@ test('parseMspdi reads a document in pieces exactly as it reads the whole text (
   void writeXer;
 });
 
-test('the .mpp reader ended as stuck says the step, the silence or bound with its value, what was tried, the alternatives, and carries the facts as data', async () => {
+test('the .mpp reader ended as frozen says the step, how long, its processor time, what was tried, the alternatives, and carries the facts as data', async () => {
   const { mppStuck, readChunked } = await import('../core/msp/mpp.ts');
-  const e = mppStuck({ kind: 'idle', step: 'x', silentMs: 250_000, windowMs: 120_000, maxGapMs: 0, floorMs: 120_000, limitMs: 240_000, expectMs: 1000 } as any);
-  assert.match(e.message, /was ended as stuck while reading the \.mpp \(MPXJ/);
-  assert.match(e.message, /used no processor time and wrote nothing for/);
+  const e = mppStuck({ kind: 'idle', step: 'x', silentMs: 250_000, windows: 2, windowMs: 5_000, cpuMs: 0, expectMs: 1000 });
+  assert.match(e.message, /was ended as frozen while reading the \.mpp \(MPXJ/);
+  assert.match(e.message, /no progress for .* and no processor time \(0 ms\) in 2 windows/);
   assert.match(e.message, /Tried: /);
   assert.match(e.message, /Alternatives: open the \.mpp in Microsoft Project/);
   assert.equal(e.stuck.kind, 'idle');
   assert.ok(e.stuck.silent_ms >= 250_000 && e.stuck.alternatives && e.stuck.tried);
-  const b = mppStuck({ kind: 'bound', step: 'x', silentMs: 900_000, windowMs: 0, maxGapMs: 0, floorMs: 120_000, limitMs: 600_000, expectMs: 60_000 } as any);
-  assert.match(b.message, /ran past its work bound of 10 min/);
-  assert.equal(b.stuck.bound_ms, 600_000);
+  // no processor reading to be had: three windows with no progress (no bound exists: a job that works is never ended)
+  const b = mppStuck({ kind: 'silent', step: 'x', silentMs: 15_000, windows: 3, windowMs: 5_000, cpuMs: null, expectMs: 60_000 });
+  assert.match(b.message, /its processor time could not be read here \(about 60 s was expected/);
+  assert.equal(b.stuck.cpu_ms, null);
+  assert.equal(b.stuck.expected_ms, 60_000);
   // readChunked: pieces of a given size, multi-byte characters whole, BOM dropped
   const dir = mkdtempSync(join(tmpdir(), 'p6-chunked-')), f = join(dir, 'a.xml');
   const content = '﻿<a>' + 'é中😀'.repeat(5000) + '</a>';
@@ -328,17 +330,17 @@ test('a stand-in Java that never answers: the .mpp is refused as stuck, with the
     console.log('RESULT ' + JSON.stringify(toolResult(r.out, r.isError).structuredContent));
     process.exit(0);`);
   const { spawnSync } = await import('node:child_process');
-  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, P6CLONE_MPXJ: fakeHome, P6CLONE_JAVA: java, P6CLONE_WORKER_FLOOR_MS: '400', P6CLONE_HEARTBEAT_MS: '100', P6CLONE_MACHINE_FACTOR: '1', P6CLONE_MPP_WINDOW_MS: '300' }, timeout: 50_000 });
+  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env, P6CLONE_MPXJ: fakeHome, P6CLONE_JAVA: java, P6CLONE_LIVENESS_WINDOW_MS: '300', P6CLONE_HEARTBEAT_MS: '100', P6CLONE_MACHINE_FACTOR: '1' }, timeout: 50_000 });
   const line = r.stdout.split('\n').find((l) => l.startsWith('RESULT '));
   assert.ok(line, r.stderr.slice(-500));
   const d = JSON.parse(line!.slice(7));
   assert.ok(d.error, line!.slice(0, 400));
   assert.equal(d.error.code, 'file_unreadable');
-  assert.match(d.error.reason, /was ended as stuck while reading the \.mpp/);
+  assert.match(d.error.reason, /was ended as frozen while reading the \.mpp/);
   assert.match(d.error.reason, /Alternatives: /);
   assert.equal(d.error.stuck.step, 'reading the .mpp (MPXJ, in a Java process of its own)');
   assert.equal(d.error.cause, 'stuck');
-  assert.ok(d.error.stuck.bound_ms > 0 || d.error.stuck.window_ms > 0);
+  assert.ok(d.error.stuck.window_ms > 0 && d.error.stuck.windows >= 2);
   assert.ok(d.error.stuck.tried && d.error.stuck.alternatives);
 });
 

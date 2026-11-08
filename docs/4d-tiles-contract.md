@@ -168,12 +168,12 @@ card, and the note says so). The estimate counts `boxes: true`, `layout: side_by
 and a custom `width` / `height`. The answer gives `quality`, `estimated_minutes`, `renderer` and, when the user should
 hear it, `quality_note`.
 
-A render has **no fixed time limit** (owner rules 2026-10-27, 2026-10-28). It is alive while tiles load and frames arrive; the
-browser's processor time is **not** life (a render loop that spins without drawing a frame is stuck). It is stuck
-(`render_stuck`) after two windows in a row without a tile or a frame, a window being 4 times the longest gap between tiles or
-frames this render has shown, never under 2 minutes. The first frame has no measured gap yet: it is one opaque call, bounded by
-10 times the estimate (`frameMs`, `renderplan.ts`), then the measured gaps rule. The browser's start-up has a window of its own
-(`P6CLONE_STARTUP_WINDOW_MS`, 60 s, two in a row; the renderer probe too). Only the graphics card's failures fall back to
+A render has **no fixed time limit** and is never ended while it works (the owner's rule: no fixed time limits, progress and
+liveness; judged by the platform's rule, owner decision 2026-11-08). It is alive while tiles load and frames arrive, or while the
+browser's process tree uses the processor. It is ended (`render_stuck`) only when frozen: two windows of 5 s in a row with no tile,
+no frame and no processor time (with no processor reading at all, three). A render loop that spins without drawing is NOT ended: its
+job line says "using CPU, no progress since …" and the agent is woken once (below) and decides. `frameMs` (`renderplan.ts`) is only
+an estimate in the messages. Only the graphics card's failures fall back to's failures fall back to
 software (`webgl_context_lost`, `gpu_out_of_memory`, `gpu_process_crashed`, `webgl_unavailable`): quality and
 `estimated_minutes` are then worked out again for the processor (auto may now draw a draft) and the note says it took longer.
 Every other failure (`browser_out_of_memory`, `disk_full`, `render_stuck`) is `render_failed` with the cause and the next step: a
@@ -183,31 +183,34 @@ names the picture size, and `boxes: true` at standard size is still boxes), and 
 WebM to MP4 (ffmpeg) is watched by ffmpeg's own `-progress` frames; the desktop app's video render (`main/bim.ts`) by the same
 watch as the server's (`inPage` in `headless.ts`: tiles loaded, frames drawn, a page whose process is gone ends it at once).
 
-**How a job is judged stuck** (`core/bim/liveness.ts` `judge`, `core/bim/heartbeat.mjs`). Two layers, one rule for every worker:
+**How a job is judged frozen** (`core/bim/liveness.ts`, `core/bim/heartbeat.mjs`): the platform's rule, one for every watch (owner
+decision 2026-11-08; the earlier gap multiple, floor, start-up windows and 10 x work bound are gone — they were never the owner's).
+Every window (5 s; `P6CLONE_LIVENESS_WINDOW_MS` shortens it for tests) a watch asks: did the work make progress (a tick, a unit done,
+a new step, output written)? Alive. Else did it use the processor (10 ms or more in the window: a worker's process tree, the browser's,
+ffmpeg's, Microsoft Project's, a compute thread's own `Worker.cpuUsage`)? Alive — a job that works is never ended, however long.
+Neither, two windows in a row: frozen (waiting on a dialog nobody can see, a dead lock), and ended with the step, how long, what was
+tried and the alternatives (`stuckMessage`). No processor reading to be had: frozen after three windows with no progress.
+Ticks (what counts as progress): geometry reader every mesh callback; chunker every 4 MB scanned, every product, every window written;
+tiler every placed element and tile; Navisworks reader every tree object, fragment, piece, element and copied chunk; Revit every 8 MiB
+of IFC written; render every tile and frame; ffmpeg every frame. Where a loop knows its `done` and `total`, only `done` advancing counts.
 
-1. *A loop we own reports progress* (geometry reader: every mesh callback; chunker: every 4 MB scanned, every product, every
-   window written; tiler: every placed element and every tile written; Navisworks reader: every tree object, fragment, piece,
-   element and copied chunk; Revit: every 8 MiB of IFC written; render: every tile and frame; ffmpeg: every frame). Stuck = no
-   tick for two windows, a window being 4 times the longest gap between ticks THIS job has shown (measured in the worker, every
-   100 ms, not guessed from 5 s heartbeats), never under 2 minutes (`P6CLONE_WORKER_FLOOR_MS` shortens that for tests). A job that is
-   slow but keeps ticking is never ended. Processor time is not life. Where the loop knows its `done` and `total`, a tick counts only
-   if `done` advanced: going round again with the same count is silence. A step that knows its whole work (the geometry run: its IFC's
-   size x rate) lets ONE tick take as long as 10 x that work, never less than two windows: one heavy element is an opaque call bounded
-   by the size of what it works on, which cannot be known before it is done, so by the run's size.
-2. *An opaque call that cannot tick* (web-ifc `OpenModel`, one inflate of a whole Navisworks section, rvt-rs's unpack, Microsoft
-   Project's COM open/save) declares its expected time, input size x the rate measured on this machine, and is ended past
-   **10 x** that (`BOUND_MULTIPLE`), never under the floor. Each Revit unpack attempt (the three modes share one WebAssembly instance,
-   so a retry's memory may stay flat) is such a call with its own bound. Memory growth (Revit) and output growth (Microsoft Project's
-   save) extend the clock only up to that bound, never alone. The rate is the slower of the reference rate (below) scaled by a
-   300 ms start-up benchmark (`machineFactor`, 1 to 5; `P6CLONE_MACHINE_FACTOR` replaces it) and this job's own measured rate on its
-   earlier chunks or models (`noteRate`). Inside a ticking step, a huge single element cannot keep silent longer than the step's
-   own work bound.
+**What the agent is told** (`mcp/runtime.ts` `noteSilence`): while a job uses the processor without progress, its progress line says
+"using CPU, no progress since 10:42 (12 min) — cancel it if that is not expected". Once per job, when the silence first passes the job's
+OWN longest gap between progress points (or, before it has shown one, the step's expected time below) — that measured value, no
+multiplier — the job pulses `no_progress` (a `notifications/job` with `event: "no_progress"` and the facts) and the platform wakes the
+agent. After that only when the agent asks: `job_status` `wake_after_s`. Nothing is stopped by it; the agent decides (cancel_job, or wait).
+
+   *Expected times* (the second basis above, and the messages): an opaque call that cannot tick (web-ifc `OpenModel`, one inflate of a
+   whole Navisworks section, rvt-rs's unpack, Microsoft Project's COM open/save) names its expected time, input size x the rate
+   measured on this machine. The rate is the slower of the reference rate (below) scaled by a 300 ms start-up benchmark
+   (`machineFactor`, 1 to 5; `P6CLONE_MACHINE_FACTOR` replaces it) and this job's own measured rate on its earlier chunks or models
+   (`noteRate`). It is an estimate, never a limit.
 
    | Call | Reference rate | Where it comes from |
    |---|---|---|
    | web-ifc `OpenModel` + meshing (`GEOMETRY_S_PER_MB`) | 0.4 s per MB of the run's IFC | section 6: 0.24, 0.39, 0.38, 0.29 s/MB (105 MB to 1.87 GB models, chunker and tiler included), the worst rounded up |
    | Navisworks section inflate (`NAVISWORKS_S_PER_MB`) | 0.8 s per MB of file | the 509 MB federation opens in 6.8 min (above): 0.80 s/MB for the whole open |
-   | rvt-rs unpack (`REVIT_S_PER_MB`) | 0.3 s per MB of .rvt | measured below (Revit table): worst 0.28 s/MB, the Helsinki model. Also watched by memory growth |
+   | rvt-rs unpack (`REVIT_S_PER_MB`) | 0.3 s per MB of .rvt | measured below (Revit table): worst 0.28 s/MB, the Helsinki model |
    | Microsoft Project COM (`MSPROJECT_S_PER_MB`) | 13 s per MB of .mpp | measured below: worst 12.9 s/MB, a 0.46 MB file (Project's 3.5 s start dominates small files) |
    | MPXJ .mpp to XML (`MPXJ_S_PER_MB`; MCP `open_file` of a .mpp) | 1.8 s per MB of .mpp | measured below: worst 1.74 s/MB, a 0.40 MB file (Java's 0.6 s start) |
    | IFC index (`INDEX_S_PER_MB`; `indexWorker.ts`) | 0.1 s per MB of IFC | section 6 "open (index only)": 0.095, 0.096, 0.098 s/MB |

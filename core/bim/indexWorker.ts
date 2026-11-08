@@ -13,9 +13,9 @@ try {
   const job = JSON.parse(readFileSync(file, 'utf8')) as { ifc: string; dir: string };
   const size = statSync(job.ifc).size, work = expectedMs(size, 'index');
   // a tick per 1 MB read (stepIndex: progress(bytes)); the pass that follows the scan has no ticks of its own: it may take 10 x the size's work
-  step('indexing the IFC (bytes read)', { total: size, cap: work });
+  step('indexing the IFC (bytes read)', { total: size, expect: work });
   const { index } = await stepIndex(job.ifc);
-  step('writing the index file', { cap: work }); // ticks per 4096 elements (writeIndex: alive)
+  step('writing the index file', { expect: work }); // ticks per 4096 elements (writeIndex: alive)
   writeIndex(join(job.dir, 'index'), index);
   writeFileSync(join(job.dir, 'done'), '');
   process.exit(0);

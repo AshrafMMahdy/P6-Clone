@@ -39,7 +39,7 @@ await api.Init();
 // (the parent ends it past 10 times this); meshing ticks per callback, and no silence in it may pass the same bound
 const work = expectedMs(statSync(ifcPath).size, 'geometry');
 const modelID = opaque('reading the IFC (web-ifc OpenModel)', work, () => api.OpenModel(new Uint8Array(readFileSync(ifcPath)), { MEMORY_LIMIT: (Number(memGb) || 4) * 1024 * 1024 * 1024 }));
-step('meshing products', { cap: work });
+step('meshing products', { expect: work });
 
 const geomFd = openSync(join(outDir, 'geoms.bin'), 'w');
 const placesFd = openSync(join(outDir, 'places.bin'), 'w');

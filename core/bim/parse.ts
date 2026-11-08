@@ -8,7 +8,7 @@ import { inWorker, indexHeapMb } from './jobWorker.ts';
 import { readIndex } from './indexFile.ts';
 import { geomWorkerPath, indexWorkerPath, webIfcEntry } from './runtime.ts';
 import { alive as hbAlive, forgetRates, noteRate, step as hbStep, tick as hbTick } from './heartbeat.mjs';
-import { childV8Flags, heartbeatEnv, heartbeatWatcher, stuckData, stuckMessage, workerFloorMs, type StuckData, type StuckInfo } from './liveness.ts';
+import { childV8Flags, heartbeatEnv, heartbeatWatcher, stuckData, stuckMessage, type StuckData, type StuckInfo } from './liveness.ts';
 import { allocGeometry, geomStore, putGeometry, scaleGeometry } from './element.ts';
 import { readManifest, tileBytesOf, writeTilesManifest, type TileRecord } from './tiles.ts';
 
@@ -77,7 +77,7 @@ export interface IfcIndex {
   /** Patch 1 (2026-09-17): geometry runs in a child process; when it cannot finish, the index still stands. */
   geometryStatus?: 'ok' | 'skipped' | 'unavailable';
   geometryNote?: string;
-  /** the geometry worker (or the chunker, the tiler) was ended as stuck: the structured facts (step, silence or bound, tried, alternatives) */
+  /** the geometry worker (or the chunker, the tiler) was ended as frozen: the structured facts (step, how long, processor time, tried, alternatives) */
   geometryStuck?: StuckData;
   meshedElements?: number;
 }
@@ -198,7 +198,7 @@ const STUCK_NEXT = 'open the model with geometry: false (index only: linking, se
 const stuckOf = (i: StuckInfo, what: string, tried: string) => ({ note: stuckMessage(i, { what, tried, next: STUCK_NEXT }), stuck: stuckData(i, { tried, next: STUCK_NEXT }) });
 
 /** A Node script in its own process; ok when it exits 0 and done() holds. It has no fixed time limit: it is watched (heartbeat.mjs,
- *  liveness.ts) and ended only when it shows no progress or passes its work bound. When this process is itself a worker with a
+ *  liveness.ts) and ended only when frozen: no progress and no processor time. When this process is itself a worker with a
  *  heartbeat (the Navisworks reader runs the tiler), the child's step and ticks are passed on as its own: its parent then sees
  *  the work going on instead of a reader that seems idle. */
 export function runNode(script: string, args: string[], done: () => boolean, what = 'A worker', tried = 'one pass of the worker over its input'): Promise<Run> {
@@ -207,9 +207,8 @@ export function runNode(script: string, args: string[], done: () => boolean, wha
     let err = '', stuck: StuckInfo | null = null, lastStep = '', lastDone = -1, lastSince = Infinity;
     child.stderr.on('data', (d) => { err = (err + String(d)).slice(-2000); });
     const stop = heartbeatWatcher(child, {
-      floorMs: workerFloorMs(),
       onBeat: (b) => {
-        if (b.step !== lastStep) { lastStep = b.step; hbStep(b.step, { cap: b.capMs, total: b.total, expect: b.expectMs }); } else if (b.done !== lastDone || b.sinceMs < lastSince) { hbTick(); hbAlive(); }
+        if (b.step !== lastStep) { lastStep = b.step; hbStep(b.step, { total: b.total, expect: b.expectMs }); } else if (b.done !== lastDone || b.sinceMs < lastSince) { hbTick(); hbAlive(); }
         lastDone = b.done; lastSince = b.sinceMs;
       },
       onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } },
@@ -311,8 +310,8 @@ function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opt
     const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, ...childV8Flags(), script, ifc, outDir, '4', productsBin], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
     let err = '', out = '', stuck: StuckInfo | null = null;
     child.stderr.on('data', (d) => { err += String(d); if (err.length > 4000) err = err.slice(-4000); });
-    // no fixed time limit: watched through its heartbeats, ended only when it stops ticking or passes its work bound (see stuckNote)
-    const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onText: (t) => { out += t; if (out.length > 4000) out = out.slice(-4000); }, onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } } });
+    // no fixed time limit: watched through its heartbeats, ended only when frozen (no progress and no processor time)
+    const stop = heartbeatWatcher(child, { onText: (t) => { out += t; if (out.length > 4000) out = out.slice(-4000); }, onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } } });
     child.on('error', (e) => { stop(); resolve({ ok: false, note: `geometry worker could not start: ${e.message}` }); });
     child.on('close', (code, signal) => {
       stop();

@@ -1,21 +1,22 @@
-// Liveness instead of time limits (owner rules 2026-10-27 and 2026-10-28: no fixed time limits; only progress and stated limits
-// relative to the work). Two layers:
-//  1. A loop we own ticks (a product meshed, a tile written, a frame drawn). A job is stuck when it has not ticked for two
-//     windows, a window being 4 times the longest gap between ticks THIS job has shown, never under a floor (120 s, the
-//     time a start, a garbage collection or a driver stall may take). Processor time is NOT life: a loop that spins without
-//     ticking is stuck. A job that is slow but keeps ticking is never ended.
-//  2. An opaque call (one WebAssembly read, one inflate of a whole section, a COM conversion) cannot tick: it declares how long
-//     it should take (input size x the rate measured on this machine, heartbeat.mjs expectedMs) and is ended past
-//     BOUND_MULTIPLE (10) times that, never under the floor.
-// Workers we wrote report from their own thread (heartbeat.mjs: the step, the time since the last tick, the longest gap, the
-// declared bound); the parent judges (heartbeatWatcher). The browser and other programs we drive are watched from here
-// (unitWatch: ticks we see; externalWatch: an external program's output and processor time). stuckMessage() is the one
-// text for an ended job: which step, how long without progress or which bound was passed, what was tried, the alternatives.
-// The processor time of a process tree (treeCpuMs: /proc, PowerShell / wmic / tasklist, ps) is read only where it is
-// evidence of something else than life (a program waiting on a dialog uses none).
+// Liveness instead of time limits (owner rule 2026-10-27/28: no fixed time limits, only progress and liveness), judged by the
+// PLATFORM's rule (owner decision 2026-11-08: one rule for the platform and the clone; White-Hat-IQ-2 craftSupervisor.ts
+// livenessVerdict). Every window (5 s) a watch asks two things of the work it watches:
+//  1. did it make progress in the window (a tick, a unit done, a new step, a beat whose last tick is newer, output written)?
+//     Then it is alive.
+//  2. else, did it use processor time (10 ms or more in the window)? Then it is working: alive. A job that uses the processor is
+//     NEVER ended, a loop that spins included (the user can cancel it).
+// It is frozen on the second window in a row with no progress and no processor time (a program waiting on a dialog nobody can
+// see, a dead lock); where no processor reading can be had at all, on the third window in a row with no progress. Nothing else
+// ends a job: no gap multiple, no floor, no work bound. A window whose check came late because THIS process's event loop was busy
+// (it fired after a second window had begun) is not counted: the work was not watched in it.
+// Workers we wrote report from their own thread (heartbeat.mjs: the step, the time since its last tick, its processor time); the
+// parent judges (heartbeatWatcher). The browser and other programs we drive are watched from here (unitWatch: ticks we see, the
+// processor time of the program's process tree; externalWatch: an external program's output and processor time). stuckMessage()
+// is the one text for an ended job: which step, how long without progress, what was tried, the alternatives.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile, type ChildProcess } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
-import { BOUND_MULTIPLE, rateEnv } from './heartbeat.mjs';
+import { rateEnv } from './heartbeat.mjs';
 
 /** Summed processor time (ms) of a process and its descendants from a table of [pid, parent pid, ms] rows. */
 export function sumTree(rows: Array<[number, number, number]>, pid: number): number {
@@ -107,202 +108,206 @@ export async function pidsNamed(name: string): Promise<number[] | null> {
   return rows ? rows.filter((r) => lower(r.name) === lower(name)).map((r) => r.pid) : null;
 }
 
-export { BOUND_MULTIPLE };
 /** V8 flags for the Node processes this server starts (geometry, index and reader workers). On Node 24 (V8 13.6) a process that ends with
  *  process.exit() while a background compile job waits for a garbage collection never ends: the main thread joins the platform's threads in
  *  its exit and the threads wait for the collection the main thread will not run. Seen in the tiler (all work done, tiles.json written, then
- *  silence) in about 1 run in 4 under load, and ended by the liveness watch two windows later with the elements missing. Without the
- *  concurrent compilers it did not happen in 32 runs. The flags are Node 24 and later's only (earlier V8s may not know them) and not Electron's. */
+ *  silence) in about 1 run in 4 under load. Without the concurrent compilers it did not happen in 32 runs. The flags are Node 24 and later's
+ *  only (earlier V8s may not know them) and not Electron's. */
 export const childV8Flags = (): string[] => (!process.versions.electron && Number(process.versions.node.split('.')[0]) >= 24 ? ['--no-concurrent-recompilation', '--no-concurrent-sparkplug'] : []);
-/** The shortest a window may be: what a start, a garbage collection or a flush may take without it meaning anything.
- *  P6CLONE_WORKER_FLOOR_MS (the environment only: tests) shortens it. */
-export const workerFloorMs = () => Number(process.env.P6CLONE_WORKER_FLOOR_MS) || 120_000;
-/** A browser starting and loading the viewer has no work to size a bound from: one named window, two of them in a row = stuck. */
-export const startupWindowMs = () => Number(process.env.P6CLONE_STARTUP_WINDOW_MS) || 60_000;
 
-/** Where a job is, as the judge needs it. */
-export interface StepState {
-  /** the step now running ("meshing products") */
-  step: string;
-  /** ms since the step's last tick (or its start) */
-  sinceMs: number;
-  /** the longest gap between two ticks this job has shown */
-  maxGapMs: number;
-  /** > 0: the step is ONE opaque call that should take this long (ms); it is ended past BOUND_MULTIPLE times that */
-  expectMs: number;
-  /** > 0: the work bound of the whole step (ms): no silence may pass BOUND_MULTIPLE times it, whatever the gaps were */
-  capMs: number;
-  done?: number; total?: number;
-  /** a window of its own (start-up) instead of 4 times the longest gap */
-  windowMs?: number;
+// ---- the rule (the platform's, craftSupervisor.ts livenessVerdict) ---------------------------------------------------
+/** The window of the check (the platform's: 5 s). P6CLONE_LIVENESS_WINDOW_MS (the environment only: tests) shortens it. */
+export const livenessWindowMs = () => Number(process.env.P6CLONE_LIVENESS_WINDOW_MS) || 5_000;
+/** Processor time in a window that means the work is running (the platform's 10 ms). */
+export const BUSY_CPU_MS = 10;
+/** Windows in a row with no progress and no processor time that make the work frozen (the platform's: the second; a process starved on a
+ *  loaded machine can get no processor for a moment). */
+export const IDLE_FROZEN_WINDOWS = 2;
+/** Windows in a row with no progress and NO processor reading to be had that make the work frozen (the platform's UNREAD_FROZEN_WINDOWS). */
+export const UNREAD_FROZEN_WINDOWS = 3;
+
+/** A watch's counters, kept between windows. */
+export interface LiveCounters { idle: number; unread: number }
+/** The verdict for one window, pure (tests drive it): progress or processor time = alive; else counted, frozen at the second idle window
+ *  ('idle') or the third window with no reading ('silent'). cpuMs: processor time used in the window, null when it could not be read. */
+export function verdict(c: LiveCounters, progressed: boolean, cpuMs: number | null): 'alive' | 'checking' | 'idle' | 'silent' {
+  if (progressed) { c.idle = 0; c.unread = 0; return 'alive'; }
+  if (cpuMs == null) { c.idle = 0; c.unread++; return c.unread >= UNREAD_FROZEN_WINDOWS ? 'silent' : 'checking'; }
+  c.unread = 0;
+  if (cpuMs >= BUSY_CPU_MS) { c.idle = 0; return 'alive'; }
+  c.idle++;
+  return c.idle >= IDLE_FROZEN_WINDOWS ? 'idle' : 'checking';
 }
+
+/** A window with no progress, as a watch reports it to the job it runs in (the job decides whether the agent is woken: runtime.ts
+ *  noteSilence). maxGapMs: the longest gap between two progress points this work has shown (0: none yet); expectMs: what the step is
+ *  expected to take (measured rates x this machine, 0 when none); usingCpu: null when no processor reading could be had. */
+export interface Silence { step: string; done?: number; total?: number; silentMs: number; lastProgressAt: number; maxGapMs: number; expectMs: number; usingCpu: boolean | null; cpuMs: number | null }
+/** What a watch tells the job it runs in (the server sets it for each call; a watch made inside the call reports to it):
+ *  line — while its work uses the processor without progress, a line such as "using CPU, no progress since 10:42 (12 min) — cancel it
+ *  if that is not expected", each window, and null once progress returns; silence — every window with no progress (the facts). Neither
+ *  decides anything: the job is not stopped. */
+export interface WatchReport { line(text: string | null): void; silence(s: Silence): void }
+export const watchReport = new AsyncLocalStorage<WatchReport>();
+const hhmm = (t: number) => { const d = new Date(t); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+/** The busy line's words. */
+export const busyWords = (lastProgressAt: number, now = Date.now()) => `using CPU, no progress since ${hhmm(lastProgressAt)} (${dur(now - lastProgressAt)}) — cancel it if that is not expected`;
+
+/** A job ended as frozen. */
 export interface StuckInfo {
-  /** silent: no tick for two windows; bound: an opaque call past its work bound; idle: a program that used no processor time */
-  kind: 'silent' | 'bound' | 'idle';
+  /** idle: no progress and no processor time; silent: no progress and no processor reading to be had */
+  kind: 'idle' | 'silent';
   step: string; done?: number; total?: number;
-  silentMs: number; windowMs: number; limitMs: number; maxGapMs: number; expectMs: number; floorMs: number;
-  /** the silence limit was lengthened to the step's work bound (one element, one piece may take as long as the whole step's size allows) */
-  lengthened: boolean;
+  /** ms since the work last showed progress */
+  silentMs: number;
+  /** the windows in a row that judged it, and their length */
+  windows: number; windowMs: number;
+  /** processor time (ms) it used in the last window; null: none could be read */
+  cpuMs: number | null;
+  /** what the step was expected to take (ms; informational, e.g. an opaque call's estimate), 0 when none */
+  expectMs?: number;
 }
 
-/** The one rule. null: alive. */
-export function judge(s: StepState, floorMs: number): StuckInfo | null {
-  const base = { step: s.step, ...(s.done != null ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), silentMs: s.sinceMs, maxGapMs: s.maxGapMs, expectMs: s.expectMs, floorMs };
-  if (s.expectMs > 0) {
-    const limit = Math.max(floorMs, s.expectMs * BOUND_MULTIPLE);
-    return s.sinceMs > limit ? { kind: 'bound', windowMs: limit, limitMs: limit, lengthened: false, ...base } : null;
-  }
-  const windowMs = s.windowMs ?? Math.max(floorMs, 4 * s.maxGapMs);
-  // a step that knows its whole work (capMs: the size of the step x the rate on this machine) allows ONE tick to take as long as
-  // that work bound allows (10 x): a single heavy element is an opaque call bounded by the size of what it works on, which cannot be
-  // known before it is done, so by the step's whole size. Never shorter than two windows of the job's own gaps.
-  let limitMs = 2 * windowMs, lengthened = false;
-  if (s.capMs > 0) { const cap = s.capMs * BOUND_MULTIPLE; if (cap > limitMs) { limitMs = cap; lengthened = true; } }
-  return s.sinceMs > limitMs ? { kind: 'silent', windowMs, limitMs, lengthened, ...base } : null;
+/** What a watch needs of the work: when it last made progress (ms timestamp), its processor time so far (ms; null when it cannot be
+ *  read), and where it is (for the message). */
+interface Watched { lastProgressAt(): number; /** the longest gap between two progress points so far (ms; 0: none yet) */ maxGapMs(): number; cpu?: () => Promise<number | null>; where(): { step: string; done?: number; total?: number; expectMs?: number }; refresh?: () => Promise<void> }
+/** The one watch loop: a check every window, the verdict above, onStuck once. Returns stop(). */
+function watchLoop(w: Watched, onStuck: (i: StuckInfo) => void, windowMs = livenessWindowMs()): () => void {
+  const c: LiveCounters = { idle: 0, unread: 0 };
+  const report = watchReport.getStore();
+  let told = false;
+  const tell = (line: string | null) => { if (!report || (!line && !told)) return; told = !!line; try { report.line(line); } catch { /* the job is gone */ } };
+  let stopped = false, busy = false, winStart = Date.now(), cpuThen: number | null = null, gotBase = false;
+  const base = w.cpu ? w.cpu().then((v) => { cpuThen = v; gotBase = true; }, () => { gotBase = true; }) : Promise.resolve();
+  const timer = setInterval(async () => {
+    if (stopped || busy) return;
+    busy = true;
+    try {
+      await base;
+      const now = Date.now();
+      // fired after a second window had begun: this process was busy and did not watch the window — not counted
+      if (now - winStart >= 2 * windowMs) { winStart = now; cpuThen = w.cpu ? await w.cpu().catch(() => null) : null; return; }
+      await w.refresh?.().catch(() => undefined);
+      const progressed = w.lastProgressAt() >= winStart;
+      const cpuNow = w.cpu ? await w.cpu().catch(() => null) : null;
+      const used = cpuNow != null && cpuThen != null && gotBase ? Math.max(0, cpuNow - cpuThen) : null;
+      cpuThen = cpuNow; winStart = Date.now();
+      const v = verdict(c, progressed, used);
+      // working without progress: said on the job's line (never a reason to stop it); taken back once it moves again
+      if (!progressed && used != null && used >= BUSY_CPU_MS) tell(busyWords(w.lastProgressAt())); else if (progressed) tell(null);
+      // every window with no progress: its facts to the job (which may wake the agent; nothing is stopped by it)
+      if (!progressed && report) {
+        const at = w.where(), last = w.lastProgressAt();
+        try { report.silence({ step: at.step, ...(at.done != null ? { done: at.done } : {}), ...(at.total ? { total: at.total } : {}), silentMs: Date.now() - last, lastProgressAt: last, maxGapMs: w.maxGapMs(), expectMs: at.expectMs ?? 0, usingCpu: used == null ? null : used >= BUSY_CPU_MS, cpuMs: used }); } catch { /* the job is gone */ }
+      }
+      if (v === 'idle' || v === 'silent') {
+        stopped = true; clearInterval(timer);
+        onStuck({ kind: v, ...w.where(), silentMs: Date.now() - w.lastProgressAt(), windows: v === 'idle' ? c.idle : c.unread, windowMs, cpuMs: used });
+      }
+    } finally { busy = false; }
+  }, windowMs);
+  timer.unref?.();
+  return () => { stopped = true; clearInterval(timer); tell(null); };
 }
 
-const dur = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : ms < 90_000 ? `${Math.round(ms / 100) / 10} s` : `${Math.round(ms / 6000) / 10} minutes`);
-/** The words for a job ended as stuck: which step, how long with no progress (or which bound was passed, and its value),
- *  what was tried, the alternatives. what: who ("The geometry worker"); tried and next are the caller's. */
+function dur(ms: number): string { return ms < 1000 ? `${Math.round(ms)} ms` : ms < 90_000 ? `${Math.round(ms / 100) / 10} s` : `${Math.round(ms / 6000) / 10} minutes`; }
+/** The words for a job ended as frozen: which step, how long with no progress and no processor time, what was tried, the alternatives.
+ *  what: who ("The geometry worker"); tried and next are the caller's. */
 export function stuckMessage(i: StuckInfo, o: { what: string; tried?: string; next: string }): string {
   const at = i.total ? ` (${i.done ?? 0} of ${i.total})` : i.done ? ` (${i.done} done)` : '';
   const where = `${i.step}${at}`;
-  const gap = i.maxGapMs > 0 ? `, each 4 times the longest gap between steps this job showed (${dur(i.maxGapMs)}), at least ${dur(i.floorMs)}` : `, the minimum of ${dur(i.floorMs)}: this job had shown no gap between steps yet`;
-  const why = i.kind === 'bound'
-    ? `one call that cannot report progress ran past its work bound of ${dur(i.limitMs)} (about ${dur(i.expectMs)} expected for this input at this machine's measured rate, times ${BOUND_MULTIPLE}); it had been silent for ${dur(i.silentMs)}`
-    : i.kind === 'idle'
-      ? `it used no processor time and wrote nothing for ${dur(i.silentMs)} (two windows of ${dur(i.windowMs)}), which is what a program does when it waits on a dialog nobody can see`
-      : `no progress for ${dur(i.silentMs)} (two windows of ${dur(i.windowMs)}${gap}${i.lengthened ? `; lengthened to the step's work bound of ${dur(i.limitMs)}, because one piece of work may take as long as the size of the whole step allows` : ''})`;
-  return `${o.what} was ended as stuck while ${where}: ${why}.${o.tried ? ` Tried: ${o.tried}.` : ''} Alternatives: ${o.next}.`;
+  const expected = i.expectMs ? ` (about ${dur(i.expectMs)} was expected for this input on this machine)` : '';
+  const why = i.kind === 'idle'
+    ? `no progress for ${dur(i.silentMs)} and no processor time (${i.cpuMs ?? 0} ms) in ${i.windows} windows of ${dur(i.windowMs)} in a row${expected} — it was frozen, or waiting on something nobody can answer (a dialog nobody can see)`
+    : `no progress for ${dur(i.silentMs)} in ${i.windows} windows of ${dur(i.windowMs)} in a row, and its processor time could not be read here${expected}`;
+  return `${o.what} was ended as frozen while ${where}: ${why}. It is never ended while it works (uses the processor).${o.tried ? ` Tried: ${o.tried}.` : ''} Alternatives: ${o.next}.`;
 }
 
-/** The structured fields of an ended job, for the tool's error data (the same facts as the words): the step, the silence or the bound
- *  with its value, what was tried, the alternatives. */
-export interface StuckData { step: string; kind: StuckInfo['kind']; silent_ms: number; window_ms?: number; windows?: number; bound_ms?: number; expected_ms?: number; longest_gap_ms?: number; done?: number; total?: number; tried?: string; alternatives: string }
+/** The structured fields of an ended job, for the tool's error data (the same facts as the words). */
+export interface StuckData { step: string; kind: StuckInfo['kind']; silent_ms: number; windows: number; window_ms: number; cpu_ms: number | null; expected_ms?: number; done?: number; total?: number; tried?: string; alternatives: string }
 export function stuckData(i: StuckInfo, o: { tried?: string; next: string }): StuckData {
   return {
-    step: i.step, kind: i.kind, silent_ms: Math.round(i.silentMs),
-    ...(i.kind === 'bound' ? { bound_ms: Math.round(i.limitMs), expected_ms: Math.round(i.expectMs) } : { window_ms: Math.round(i.windowMs), windows: 2, ...(i.maxGapMs > 0 ? { longest_gap_ms: Math.round(i.maxGapMs) } : {}) }),
+    step: i.step, kind: i.kind, silent_ms: Math.round(i.silentMs), windows: i.windows, window_ms: Math.round(i.windowMs), cpu_ms: i.cpuMs == null ? null : Math.round(i.cpuMs),
+    ...(i.expectMs ? { expected_ms: Math.round(i.expectMs) } : {}),
     ...(i.done != null ? { done: i.done } : {}), ...(i.total ? { total: i.total } : {}), ...(o.tried ? { tried: o.tried } : {}), alternatives: o.next,
   };
 }
-/** An Error for a job ended as stuck: its message is stuckMessage, its data the structured fields (tools put them in the error's data). */
+/** An Error for a job ended as frozen: its message is stuckMessage, its data the structured fields (tools put them in the error's data). */
 export class StuckError extends Error {
   readonly stuck: StuckData;
   constructor(i: StuckInfo, o: { what: string; tried?: string; next: string }, prefix = '', suffix = '') { super(`${prefix}${stuckMessage(i, o)}${suffix}`); this.stuck = stuckData(i, o); this.name = 'StuckError'; }
 }
 
-/** What a worker's heartbeat line says (heartbeat.mjs). */
-export interface Beat { cpu: number; rss: number; done: number; total: number; step: string; expectMs: number; capMs: number; sinceMs: number; stepMs: number; maxGapMs: number }
+/** What a worker's heartbeat line says (heartbeat.mjs): its process's processor time (ms) and memory, the step, its progress, the time
+ *  since its last tick, the step's estimate (informational). */
+export interface Beat { cpu: number; rss: number; done: number; total: number; step: string; expectMs: number; sinceMs: number; stepMs: number; /** the longest gap between two ticks the worker has shown (measured there; opaque calls are not gaps) */ maxGapMs?: number }
 const HB = '\u0001HB ';
 
-/** Watch a worker process we wrote: its heartbeats (stdout lines from its own thread: the step, the time since its last tick
- *  measured there, the longest gap, the bound it declared) are the evidence, whatever the platform. Stuck by judge(): two
- *  silent windows (4 x the longest gap, never under floorMs), or an opaque call past BOUND_MULTIPLE x its expected time.
- *  Silence of the whole process (no heartbeat at all) counts as time since the last tick. The child must have stdout
- *  piped and the heartbeat environment (heartbeatEnv). onText gets what the worker printed besides heartbeats; onBeat
- *  each heartbeat (a parent that forwards a child's progress). */
-export function heartbeatWatcher(child: ChildProcess, o: { floorMs: number; onStuck: (i: StuckInfo) => void; onText?: (text: string) => void; onBeat?: (b: Beat) => void; pollMs?: number }): () => void {
-  let rest = '', last: { b: Beat; at: number } | null = null, done = false;
-  const t0 = Date.now(), pollMs = o.pollMs ?? Math.max(10, Math.min(1000, Math.floor(o.floorMs / 4)));
-  // A stalled event loop of THIS process (the server busy with another handle's long synchronous step) is not the worker's silence: its
-  // beats sit unread in the pipe while the timer runs first. A poll that comes late by more than a poll or two is time the parent was
-  // not looking: it is taken off the worker's silence (until the next beat is read), so a worker is judged by its own heartbeat times.
-  let prevPoll = t0, away = 0;
+/** Watch a worker process we wrote: progress is what its heartbeats say (a tick newer than the window's start, a new step); its processor
+ *  time is its process tree's (treeCpuMs), or where that cannot be read the time its own heartbeat reports (its process). The child must
+ *  have stdout piped and the heartbeat environment (heartbeatEnv). onText gets what the worker printed besides heartbeats; onBeat each
+ *  heartbeat (a parent that forwards a child's progress). */
+export function heartbeatWatcher(child: ChildProcess, o: { onStuck: (i: StuckInfo) => void; onText?: (text: string) => void; onBeat?: (b: Beat) => void; windowMs?: number }): () => void {
+  let rest = '', last: { b: Beat; at: number } | null = null, lastStep = '';
+  let progressAt = Date.now();
   child.stdout?.on('data', (d) => {
     const lines = (rest + String(d)).split('\n'); rest = lines.pop() ?? '';
     const text: string[] = [];
     for (const l of lines) {
       if (!l.startsWith(HB)) { text.push(l); continue; }
-      try { const b = JSON.parse(l.slice(HB.length)) as Beat; last = { b, at: Date.now() }; away = 0; o.onBeat?.(b); } catch { /* a cut line */ }
+      try {
+        const b = JSON.parse(l.slice(HB.length)) as Beat, at = Date.now();
+        // its last tick, by its own clock; a new step is progress too
+        progressAt = Math.max(progressAt, at - Math.max(0, b.sinceMs), b.step !== lastStep ? at : 0);
+        lastStep = b.step; last = { b, at };
+        o.onBeat?.(b);
+      } catch { /* a cut line */ }
     }
     if (text.length) o.onText?.(text.join('\n') + '\n');
   });
   child.stdout?.on('end', () => { if (rest && !rest.startsWith(HB)) o.onText?.(rest); });
-  const timer = setInterval(() => {
-    if (done) return;
-    const now = Date.now();
-    away += Math.max(0, now - prevPoll - 2 * pollMs); prevPoll = now;
-    const s: StepState = last
-      ? { step: last.b.step, sinceMs: Math.max(last.b.sinceMs, last.b.sinceMs + (now - last.at) - away), maxGapMs: last.b.maxGapMs, expectMs: last.b.expectMs, capMs: last.b.capMs, done: last.b.done, total: last.b.total }
-      : { step: 'starting', sinceMs: Math.max(0, now - t0 - away), maxGapMs: 0, expectMs: 0, capMs: 0 };
-    const stuck = judge(s, o.floorMs);
-    if (stuck) { done = true; clearInterval(timer); o.onStuck(stuck); }
-  }, pollMs);
-  timer.unref?.();
-  return () => { done = true; clearInterval(timer); };
+  const cpu = async (): Promise<number | null> => (child.pid ? await treeCpuMs(child.pid) : null) ?? last?.b.cpu ?? null;
+  return watchLoop({
+    lastProgressAt: () => progressAt, maxGapMs: () => last?.b.maxGapMs ?? 0, cpu,
+    where: () => (last ? { step: last.b.step, done: last.b.done, total: last.b.total, expectMs: last.b.expectMs } : { step: 'starting' }),
+  }, o.onStuck, o.windowMs);
 }
 /** The environment that makes a worker send heartbeats (every P6CLONE_HEARTBEAT_MS, 5000), with this machine's speed factor
- *  (the start-up benchmark, once) and the job's own measured rates, which the worker's bounds are sized from. */
+ *  (the start-up benchmark, once) and the job's own measured rates (its estimates). */
 export const heartbeatEnv = (): Record<string, string> => ({ P6CLONE_HEARTBEAT_MS: String(Number(process.env.P6CLONE_HEARTBEAT_MS) || 5000), ...rateEnv() });
 
-/** A watch on work whose ticks we see from here (frames drawn, tiles loaded, ffmpeg's frames): the same judge as the
- *  workers'. The first beat of a step is the baseline; the first unit completed after it ends an opaque estimate (expectMs)
- *  and is the first measured gap. A unit's gap is the time it took (a jump of several units counts as their mean). */
+/** A watch on work whose ticks we see from here (frames drawn, tiles loaded, ffmpeg's frames, a compute worker's rows). A tick counts
+ *  only when done ADVANCED (the same count again is no progress); a new step is progress. cpu: the work's processor time so far (the
+ *  program's process tree, a worker thread's busy time); without one, frozen after three windows with no progress. */
 export interface UnitWatch {
   beat(done: number, total?: number): void;
-  step(name: string, o?: { expectMs?: number; total?: number; windowMs?: number; capMs?: number }): void;
-  state(): StepState;
+  /** a new step (its name is in the message); expectMs: what it is expected to take (informational) */
+  step(name: string, o?: { expectMs?: number; total?: number }): void;
   stop(): void;
 }
-export function unitWatch(o: { floorMs: number; onStuck: (i: StuckInfo) => void; pollMs?: number; step?: string; expectMs?: number; windowMs?: number; maxGapMs?: number }): UnitWatch {
-  let name = o.step ?? 'starting', expect = o.expectMs ?? 0, window = o.windowMs, cap = 0, total = 0, doneN = 0, lastDone = -1, tickAt = Date.now(), maxGap = o.maxGapMs ?? 0, stopped = false;
-  const state = (): StepState => ({ step: name, sinceMs: Date.now() - tickAt, maxGapMs: maxGap, expectMs: expect, capMs: cap, done: doneN, total, ...(window ? { windowMs: window } : {}) });
-  // (a late poll is time this process's event loop was busy, not silence of the work: it is taken off, as heartbeatWatcher does)
-  const pollMs = o.pollMs ?? Math.max(10, Math.min(1000, Math.floor(o.floorMs / 4)));
-  let prevPoll = Date.now();
-  const timer = setInterval(() => {
-    if (stopped) return;
-    const now = Date.now();
-    tickAt += Math.max(0, now - prevPoll - 2 * pollMs); prevPoll = now;
-    const stuck = judge(state(), o.floorMs);
-    if (stuck) { stopped = true; clearInterval(timer); o.onStuck(stuck); }
-  }, pollMs);
-  timer.unref?.();
+export function unitWatch(o: { onStuck: (i: StuckInfo) => void; step?: string; cpu?: () => Promise<number | null>; windowMs?: number }): UnitWatch {
+  let name = o.step ?? 'starting', expect = 0, total = 0, doneN = 0, lastDone = -1, progressAt = Date.now(), maxGap = 0;
+  const stop = watchLoop({ lastProgressAt: () => progressAt, maxGapMs: () => maxGap, cpu: o.cpu, where: () => ({ step: name, done: doneN, total, expectMs: expect }) }, o.onStuck, o.windowMs);
   return {
     beat(d, t) {
       if (t != null) total = t;
-      if (d === lastDone || d < lastDone) return; // a tick counts only if done ADVANCED: the same count again is silence
+      if (d <= lastDone) return; // the same count again (or less) is no progress
       const now = Date.now();
-      if (lastDone >= 0) { maxGap = Math.max(maxGap, (now - tickAt) / Math.max(1, d - lastDone)); expect = 0; }
-      lastDone = d; doneN = d; tickAt = now;
+      maxGap = Math.max(maxGap, now - progressAt); // the job's own record (kept across its steps)
+      lastDone = d; doneN = d; progressAt = now;
     },
-    step(n, s = {}) { name = n; expect = s.expectMs ?? 0; window = s.windowMs; cap = s.capMs ?? 0; total = s.total ?? 0; doneN = 0; lastDone = -1; tickAt = Date.now(); },
-    state,
-    stop() { stopped = true; clearInterval(timer); },
+    step(n, s = {}) { name = n; expect = s.expectMs ?? 0; total = s.total ?? 0; doneN = 0; lastDone = -1; progressAt = Date.now(); },
+    stop,
   };
 }
 
-/** A watch on a program we cannot see inside (Microsoft Project through COM): ended past its work bound (expectMs x
- *  BOUND_MULTIPLE, never under floorMs; output written resets the clock), or when neither its output grows nor it uses
- *  processor time for two windows of max(floorMs / 2, a quarter of the bound) (kind idle: waiting on a dialog). A program that
- *  reaches its bound after a window with no processor time is reported as idle too: that is what the bound found.
- *  cpu: the processor time (ms) of everything of the program. */
-export function externalWatch(o: { step: string; floorMs: number; expectMs: number; output?: () => number | Promise<number>; cpu?: () => Promise<number | null>; onStuck: (i: StuckInfo) => void; pollMs?: number }): () => void {
-  const bound = Math.max(o.floorMs, o.expectMs * BOUND_MULTIPLE), win = Math.max(o.floorMs / 2, bound / 4);
-  const t0 = Date.now();
-  let lastTick = t0, lastOut = -1, winStart = lastTick, winMoved = false, cpuThen: number | null = null, idle = 0, busy = false, done = false;
-  const fire = (i: StuckInfo) => { done = true; clearInterval(timer); o.onStuck(i); };
-  const timer = setInterval(async () => {
-    if (done || busy) return;
-    busy = true;
-    try {
-      const now = Date.now();
-      const out = o.output ? await o.output() : 0;
-      // output written resets the clock, but only up to the work bound: a save whose file keeps growing for ever is not alive
-      if (out !== lastOut) { if (lastOut >= 0 && now - t0 <= bound) { lastTick = now; winMoved = true; } lastOut = out; }
-      if (cpuThen == null && o.cpu) cpuThen = await o.cpu();
-      if (now - winStart >= win) {
-        const cpu = o.cpu ? await o.cpu() : null;
-        const used = cpu != null && cpuThen != null && cpu - cpuThen > Math.max(50, 0.005 * win);
-        idle = winMoved || used || cpu == null ? 0 : idle + 1;
-        cpuThen = cpu; winStart = now; winMoved = false;
-        if (idle >= 2) { fire({ kind: 'idle', step: o.step, silentMs: now - lastTick, windowMs: win, limitMs: 2 * win, maxGapMs: 0, expectMs: o.expectMs, floorMs: o.floorMs, lengthened: false }); return; }
-      }
-      const past = judge({ step: o.step, sinceMs: now - lastTick, maxGapMs: 0, expectMs: o.expectMs, capMs: 0 }, o.floorMs);
-      if (past) fire(idle >= 1 ? { ...past, kind: 'idle', windowMs: win } : past);
-    } finally { busy = false; }
-  }, o.pollMs ?? Math.max(10, Math.min(2000, Math.floor(o.floorMs / 4))));
-  timer.unref?.();
-  return () => { done = true; clearInterval(timer); };
+/** A watch on a program we cannot see inside (Microsoft Project through COM, MPXJ): progress is its output growing; cpu: the processor
+ *  time of everything of the program. Frozen as everywhere: no output and no processor time for two windows in a row (a program waiting
+ *  on a dialog uses none), or no output for three with no reading. */
+export function externalWatch(o: { step: string; expectMs?: number; output?: () => number | Promise<number>; cpu?: () => Promise<number | null>; onStuck: (i: StuckInfo) => void; windowMs?: number }): () => void {
+  let progressAt = Date.now(), lastOut: number | null = null, maxGap = 0;
+  // the output is read at each check: grown (or shrunk) since the last one is progress
+  const refresh = async () => { if (!o.output) return; const out = await o.output(); if (lastOut != null && out !== lastOut) { const now = Date.now(); maxGap = Math.max(maxGap, now - progressAt); progressAt = now; } lastOut = out; };
+  void refresh().catch(() => undefined);
+  return watchLoop({ lastProgressAt: () => progressAt, maxGapMs: () => maxGap, cpu: o.cpu, refresh, where: () => ({ step: o.step, expectMs: o.expectMs ?? 0 }) }, o.onStuck, o.windowMs);
 }

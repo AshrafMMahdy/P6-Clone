@@ -43,6 +43,8 @@ export interface AnalysisHelpers {
   applyAsync: <T>(label: string, fn: (db: Db) => Promise<T>) => Promise<T>;
   /** progress, a yield to the event loop, and the call's cancellation, between units of long work */
   tick: Tick;
+  /** a finished row of the answer, sent out as it is done (in a compute worker: kept if the worker is ended); absent elsewhere */
+  keep?: (row: unknown) => void;
 }
 
 // read-only for the project: an optional report path writes an HTML file and nothing else
@@ -133,7 +135,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
     }
     case 'evaluate_batch': {
       if (!Array.isArray(a.scenarios) || !a.scenarios.length) fail('bad_input', 'scenarios must be a non-empty list.', 'e.g. [{"name": "A shorter", "overrides": [{"op": "update_activity", "id": "A1000", "duration_days": 5}]}]');
-      const r = await evaluateBatch(s.db, projIds, a.scenarios.map((x: any, i: number) => ({ name: String(x?.name ?? `scenario ${i + 1}`), overrides: Array.isArray(x?.overrides) ? x.overrides : [] })), { hoursPerDay: s.hpd, top: a.top != null ? Number(a.top) : undefined, tick: h.tick });
+      const r = await evaluateBatch(s.db, projIds, a.scenarios.map((x: any, i: number) => ({ name: String(x?.name ?? `scenario ${i + 1}`), overrides: Array.isArray(x?.overrides) ? x.overrides : [] })), { hoursPerDay: s.hpd, top: a.top != null ? Number(a.top) : undefined, tick: h.tick, onRow: h.keep });
       if (!r.ok) return fail(r.error.code, r.error.message, 'Fix the schedule errors first (schedule shows them).');
       return r;
     }

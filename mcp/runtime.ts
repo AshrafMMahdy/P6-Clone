@@ -20,6 +20,7 @@ import { getHeapStatistics, setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { ABSENT, record, recordAsync, rollback, type Journal } from '../core/journal.ts';
 import { dbLines, DbReader } from '../core/db-file.ts';
+import type { Silence } from '../core/bim/liveness.ts';
 import type { Db } from '../core/db.ts';
 import type { Format } from '../renderer/io.ts';
 import type { TextEncodingName } from '../core/encoding.ts';
@@ -595,7 +596,7 @@ export function redo(s: Session, caller: string): { redone: string | null } {
 }
 
 // ---------------------------------------------------------------- jobs (long work the agent checks on)
-interface Job { id: string; tool: string; handle?: string; started: number; done?: number; result?: unknown; error?: ToolError | Error; progress?: string; abort?: AbortController; /** a partial answer (cancelled or failed part-way): the job ends with this status and keeps the result */ stopped?: 'cancelled' | 'failed'; settle?: { ok: (r: unknown) => unknown; failed: () => void } }
+interface Job { id: string; tool: string; handle?: string; started: number; done?: number; result?: unknown; error?: ToolError | Error; progress?: string; abort?: AbortController; /** a partial answer (cancelled or failed part-way): the job ends with this status and keeps the result */ stopped?: 'cancelled' | 'failed'; settle?: { ok: (r: unknown) => unknown; failed: () => void }; /** the agent was woken once for a silence of this job (noteSilence) */ woke?: boolean; /** the agent asked to be woken again when no progress for ms (job_status wake_after_s), counted from at or the last progress after it */ wakeAfter?: { at: number; ms: number } }
 const jobs = new Map<string, Job>();
 /** Told when a job starts, moves (its progress) and ends: the stdio front answers job_status from it while the main
  *  thread is busy in a long step (stdio.ts). */
@@ -622,6 +623,32 @@ export function startJob(tool: string, handle: string | undefined, p: Promise<un
   });
   return job;
 }
+/** A window of a job with no progress (liveness.ts watchReport.silence). The agent is woken — a `no_progress` pulse with the facts — ONCE
+ *  per job, when the silence first passes the job's own longest gap between progress points, or, before it has shown any (a call that
+ *  cannot report progress), the time its step is expected to take (measured rates x this machine). No multiplier: the job's own measured
+ *  value. After that only when the agent asks (askWake: job_status wake_after_s). Nothing is stopped: the agent decides. */
+export function noteSilence(job: Job, s: Silence): void {
+  if (job.done || !jobPulse) return;
+  let basis: { kind: 'longest_gap' | 'expected' | 'asked'; ms: number } | null = null;
+  if (!job.woke) {
+    const rec = s.maxGapMs > 0 ? { kind: 'longest_gap' as const, ms: s.maxGapMs } : s.expectMs > 0 ? { kind: 'expected' as const, ms: s.expectMs } : null;
+    if (rec && s.silentMs > rec.ms) { job.woke = true; basis = rec; }
+  }
+  if (!basis && job.wakeAfter && Date.now() - Math.max(job.wakeAfter.at, s.lastProgressAt) >= job.wakeAfter.ms) { basis = { kind: 'asked', ms: job.wakeAfter.ms }; job.wakeAfter = undefined; }
+  if (!basis) return;
+  const sec = (ms: number) => Math.round(ms / 1000);
+  const v = jobView(job) as Record<string, unknown>;
+  const { result: _r, ...view } = v;
+  jobPulse({ ...view, event: 'no_progress', no_progress: {
+    step: s.step, ...(s.done != null ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}),
+    silent_s: sec(s.silentMs), since: new Date(s.lastProgressAt).toISOString(),
+    [basis.kind === 'longest_gap' ? 'longest_gap_before_s' : basis.kind === 'expected' ? 'expected_s' : 'asked_after_s']: sec(basis.ms),
+    using_cpu: s.usingCpu, ...(s.cpuMs != null ? { cpu_ms_last_window: Math.round(s.cpuMs) } : {}),
+    note: `${s.step}: no progress for ${sec(s.silentMs)} s (${basis.kind === 'longest_gap' ? `longer than any gap this job has shown, ${sec(basis.ms)} s` : basis.kind === 'expected' ? `longer than its expected ${sec(basis.ms)} s` : `the ${sec(basis.ms)} s you asked for`}), ${s.usingCpu === true ? 'still using the processor' : s.usingCpu === false ? 'and using no processor time' : 'processor time not readable here'}. It is not stopped: cancel it (cancel_job) if that is not expected, or call job_status with wake_after_s to be woken again if it still shows no progress.`,
+  } } as unknown as ReturnType<typeof jobView>);
+}
+/** The agent asks to be woken again if the job still shows no progress after `seconds` (counted from now, or from its next progress). */
+export function askWake(job: Job, seconds: number): void { if (seconds > 0 && !job.done) job.wakeAfter = { at: Date.now(), ms: seconds * 1000 }; }
 export function jobView(job: Job) {
   const base = { job_id: job.id, tool: job.tool, handle: job.handle, running_seconds: Math.round(((job.done ?? Date.now()) - job.started) / 1000) };
   if (!job.done) return { ...base, status: 'running', progress: job.progress, note: 'Call job_status again shortly (pass wait_seconds to wait up to 20 s).' };

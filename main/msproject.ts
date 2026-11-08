@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { resolve as absolute } from 'node:path';
 import { expectedMs } from '../core/bim/heartbeat.mjs';
-import { cpuCovering, externalWatch, pidsNamed, StuckError, workerFloorMs, type StuckInfo } from '../core/bim/liveness.ts';
+import { cpuCovering, externalWatch, pidsNamed, StuckError, type StuckInfo } from '../core/bim/liveness.ts';
 
 export const MSP_REQUIRED = 'Microsoft Project must be installed to import/export .mpp files (Primavera P6 has the same requirement)';
 // No fixed time limit on the conversion (owner rule 2026-10-28; it was 120 s whatever the file's size). Microsoft Project is opaque
@@ -60,7 +60,7 @@ export function buildConvertScript(direction: ConvertDirection, inPath: string, 
   ].join('; ').replace(/\{; /g, '{ ').replace(/; \}/g, ' }');
 }
 
-/** A conversion ended as stuck: the words and the structured fields (StuckError.stuck). */
+/** A conversion ended as frozen: the words and the structured fields (StuckError.stuck). */
 export function mspStuck(direction: ConvertDirection, stuck: StuckInfo): StuckError {
   const open = direction === 'mppToXml' ? 'opening the .mpp and saving it as Microsoft Project XML' : 'saving the XML as an .mpp';
   return new StuckError({ ...stuck, step: `Microsoft Project: ${open}` }, {
@@ -103,10 +103,10 @@ async function runConvert(direction: ConvertDirection, inPath: string, outPath: 
     }
     const sizeOf = (p: string) => { try { return statSync(p).size; } catch { return 0; } };
     stopWatch = externalWatch({
-      step: `converting (${direction})`, floorMs: workerFloorMs(), expectMs: expectedMs(sizeOf(inPath), 'msproject'),
+      step: `converting (${direction})`, expectMs: expectedMs(sizeOf(inPath), 'msproject'),
       output: () => sizeOf(outPath), // a save writes the output as it goes: bytes are progress
-      // the idle rule needs a reading that COVERS Project (the process table, with WINPROJ.EXE running): where only PowerShell can be
-      // seen (tasklist fall back, Project not found yet) there is no idle rule, and the size bound alone ends a conversion
+      // the processor reading must COVER Project (the process table, with WINPROJ.EXE running): one that sees only PowerShell (tasklist
+      // fall back, Project not started yet) is no reading — PowerShell waiting on COM uses none while Project works
       cpu: () => cpuCovering(child.pid ?? 0, [MSPROJECT_EXE]),
       onStuck: async (i) => {
         stuck = i;

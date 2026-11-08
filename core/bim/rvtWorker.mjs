@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expectedMs, opaque, progress, startHeartbeat, step } from './heartbeat.mjs';
 
-startHeartbeat(); // the parent's liveness watch (no fixed time limit): the unpack (one WebAssembly call) is watched by its memory growth and a work bound, the IFC write by the bytes written
+startHeartbeat(); // the parent's liveness watch (no fixed time limit): the unpack (one WebAssembly call) is alive while it uses the processor, the IFC write shows progress by the bytes written
 
 const [src, outIfc, outJson] = process.argv.slice(2);
 if (!src || !outIfc || !outJson) { console.error('usage: rvtWorker.mjs <revit file> <out.ifc> <out.json>'); process.exit(2); }
@@ -48,10 +48,10 @@ for (const m of MODES) {
   const fd = openSync(tmp, 'w');
   // EACH attempt is one opaque call bounded by its own size x rate x 10 (a retry in the same WebAssembly instance reuses the memory the
   // first attempt grew, so its memory may stay flat: the bound, not the memory, is what limits it; growth only extends it, up to that bound)
-  step(`unpacking the Revit file (rvt-rs, mode ${m}, attempt ${MODES.indexOf(m) + 1} of ${MODES.length})`, { mem: true, expect: work });
+  step(`unpacking the Revit file (rvt-rs, mode ${m}, attempt ${MODES.indexOf(m) + 1} of ${MODES.length})`, { expect: work });
   let writing = false;
   // a write error unwinds through the WebAssembly and arrives below as "geometry failed": kept, so it is told apart
-  globalThis.__rvtIfcSink = (chunk) => { try { if (!writing) { writing = true; step(`writing the IFC (rvt-rs, mode ${m}; bytes)`, { cap: work }); } written += writeSync(fd, chunk); progress(written); } catch (e) { sinkError ??= e; throw e; } };
+  globalThis.__rvtIfcSink = (chunk) => { try { if (!writing) { writing = true; step(`writing the IFC (rvt-rs, mode ${m}; bytes)`, { expect: work }); } written += writeSync(fd, chunk); progress(written); } catch (e) { sinkError ??= e; throw e; } };
   try { answer = rvt.rvtToIfcStream(bytes, m, true); mode = m; } catch (e) {
     if (sinkError) { closeSync(fd); stop(4, 'disk_full', sinkError); }
     if (outOfMemory(e)) { closeSync(fd); stop(5, 'out_of_memory', e); }

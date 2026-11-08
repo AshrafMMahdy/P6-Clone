@@ -9,7 +9,7 @@ import { createReadStream, existsSync, mkdtempSync, readFileSync, rmSync, statSy
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { startupWindowMs, stuckData, stuckMessage, unitWatch, workerFloorMs, type StuckData, type StuckInfo } from './liveness.ts';
+import { stuckData, stuckMessage, treeCpuMs, unitWatch, type StuckData, type StuckInfo } from './liveness.ts';
 
 /** A program from the environment, if it names an existing file. */
 const fromEnv = (name: string): string | null => { const p = process.env[name]; return p && existsSync(p) ? p : null; };
@@ -20,11 +20,11 @@ export const ffmpegPath = (): string | null => fromEnv('P6CLONE_FFMPEG');
  *  to report, never a crash. code: what stopped it (the page's own code, e.g. webgl_context_lost, when it said). */
 export class RenderFailed extends Error {
   code?: string;
-  /** set when the render was ended as stuck: the structured facts (step, silence or bound, tried, alternatives) */
+  /** set when the render was ended as frozen: the structured facts (step, how long, processor time, tried, alternatives) */
   stuck?: StuckData;
   constructor(message: string, code?: string, stuck?: StuckData) { super(message); if (code) this.code = code; if (stuck) this.stuck = stuck; }
 }
-/** A render ended as stuck: the words and the structured facts. */
+/** A render ended as frozen: the words and the structured facts. */
 const stuckRender = (i: StuckInfo, o: { what: string; tried?: string; next: string }) => new RenderFailed(stuckMessage(i, o), 'render_stuck', stuckData(i, o));
 
 /** The failures that are the graphics card's or WebGL's (the software renderer may draw what they could not):
@@ -61,14 +61,11 @@ export type Evaluate = (expression: string, awaitPromise?: boolean) => Promise<u
 /** Load the viewer page headless and run work against it (evaluate expressions in the page). onProgress may throw (a
  *  cancelled job): the browser is closed and the error passes through.
  *  There is no fixed time limit (owner rules 2026-10-27, 2026-10-28). The render is alive while tiles load and frames arrive
- *  (work reports them through `alive`); the browser's processor time is NOT life (a render loop that spins without
- *  drawing a frame is stuck). It is stuck (code render_stuck) after two windows in a row without a tile or frame, a window
- *  being 4 times the longest gap between tiles or frames this render has shown, never under floorMs (2 minutes: a garbage
- *  collection or a driver stall on one huge frame can be quiet that long); the first frame, which has no measured gap, is an
- *  opaque call bounded by 10 times the estimate (frameMs, renderplan.ts); the browser's start-up has a window of its own
- *  (startupWindowMs, 60 s, two in a row). The error names the step, the silence or the bound, what was tried and the
- *  alternatives (stuckMessage). */
-export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate, alive: Alive) => Promise<T>, o: { width?: number; height?: number; floorMs?: number; frameMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void; what?: string; gpu?: boolean; tried?: () => string; next?: string } = {}): Promise<T> {
+ *  (work reports them through `alive`) or while the browser's process tree uses the processor (the platform's rule, owner decision
+ *  2026-11-08: a render is never ended while it works). It is frozen (code render_stuck) after two windows in a row with neither
+ *  (liveness.ts). frameMs (renderplan.ts's estimate per frame) is only shown in the message. The error names the step, how long,
+ *  what was tried and the alternatives (stuckMessage). */
+export async function inChromium<T>(chromium: string, page: string, work: (evaluate: Evaluate, alive: Alive) => Promise<T>, o: { width?: number; height?: number; frameMs?: number; onLoad?: (loaded: number, total: number) => Promise<void> | void; what?: string; gpu?: boolean; tried?: () => string; next?: string } = {}): Promise<T> {
   const profile = mkdtempSync(join(tmpdir(), 'p6c4d-chrome-'));
   const http = await serveFolder(dirname(page));
   // the renderer's heap may grow with the model (a tile at a time); the GPU process (SwiftShader) holds the geometry
@@ -111,10 +108,9 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
     const i = ++id; waiting.set(i, { res, rej });
     write.write(JSON.stringify({ id: i, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0');
   });
-  // liveness, not a time limit (see above)
-  const floorMs = o.floorMs ?? 120_000;
+  // liveness, not a time limit (see above): the browser's whole process tree (renderer, graphics process) is what works
   const watch = unitWatch({
-    floorMs, step: 'starting the browser and loading the viewer', windowMs: startupWindowMs(),
+    step: 'starting the browser and loading the viewer', cpu: async () => (child.pid ? treeCpuMs(child.pid) : null),
     onStuck: (i: StuckInfo) => failAll(stuckRender(i, {
       what: `The render${o.what ? ` of ${o.what}` : ''}`,
       tried: o.tried?.() ?? (o.gpu ? 'the graphics card' : 'the processor (software rendering)'),
@@ -155,7 +151,7 @@ export async function inChromium<T>(chromium: string, page: string, work: (evalu
       await new Promise((r2) => setTimeout(r2, 250));
     }
     loaded = ' while drawing frames, with every tile loaded';
-    // the first frame has no measured gap yet: one opaque call, bounded by 10 times the estimate (then the measured gaps rule)
+    // the estimate per frame is shown if it is ever ended (never a limit)
     alive.step('drawing frames in the browser', { expectMs: o.frameMs ?? 0 });
     return await work(evaluate, alive);
   } finally {
@@ -207,7 +203,7 @@ export async function probeRenderer(chromium: string, modelBytes = 0): Promise<R
       if (process.platform === 'linux' && !existsSync('/dev/dri') && renderGpu() === 'auto') return { renderer: { kind: 'software' as const, name: 'SwiftShader (no graphics device: /dev/dri)' }, keep: true };
       const dir = mkdtempSync(join(tmpdir(), 'p6c4d-probe-')), page = join(dir, 'probe.html');
       writeFileSync(page, '<!doctype html><script>window.P6C4D_API = { status: () => ({ state: "ready", tiles: { loaded: 0, total: 0 } }) };</script>');
-      try { return { renderer: rendererOf(String(await inChromium(chromium, page, (ev) => ev(RENDERER_JS), { gpu, floorMs: startupWindowMs(), width: 64, height: 64 })), gpu), keep: true }; }
+      try { return { renderer: rendererOf(String(await inChromium(chromium, page, (ev) => ev(RENDERER_JS), { gpu, width: 64, height: 64 })), gpu), keep: true }; }
       catch (e) { return { renderer: { kind: 'software' as const, name: `unknown (the probe failed: ${(e as Error).message.slice(0, 120)})` }, keep: isGpuFailure(e) }; }
       finally { rmSync(dir, { recursive: true, force: true }); }
     })();
@@ -270,17 +266,17 @@ export async function renderSegment(evaluate: Evaluate, o: object, onProgress: P
 }
 
 /** A page that is already open (the desktop app's offscreen window on the user's graphics card), driven with the same watch as
- *  inChromium: its tiles load and its frames are drawn under the same rules (two silent windows, 4 x the longest gap, never
- *  under floorMs; the first frame bounded by 10 x frameMs; start-up in its own window), and a page whose process is gone ends
- *  the render at once. The page's own failure ([code] message) is the render's. */
+ *  inChromium: alive while its tiles load and its frames are drawn, or while the app (its own process tree: the page's renderer and
+ *  graphics processes) uses the processor; a page whose process is gone ends the render at once. The page's own failure
+ *  ([code] message) is the render's. */
 export interface PageHandle { evaluate(expression: string): Promise<unknown>; onGone(handler: (why: string) => void): void }
-export async function inPage<T>(page: PageHandle, work: (evaluate: Evaluate, alive: Alive) => Promise<T>, o: { floorMs?: number; frameMs?: number; what?: string; tried?: string; next?: string } = {}): Promise<T> {
+export async function inPage<T>(page: PageHandle, work: (evaluate: Evaluate, alive: Alive) => Promise<T>, o: { frameMs?: number; what?: string; tried?: string; next?: string; /** the app's processor time so far (ms); default its own process tree */ cpu?: () => Promise<number | null> } = {}): Promise<T> {
   let failure: Error | null = null, reject!: (e: Error) => void;
   const failed = new Promise<never>((_, rej) => { reject = rej; });
   failed.catch(() => { /* handled by the race below */ });
   const fail = (e: Error) => { failure ??= e; reject(failure); };
   const watch = unitWatch({
-    floorMs: o.floorMs ?? 120_000, step: 'starting the viewer page', windowMs: startupWindowMs(),
+    step: 'starting the viewer page', cpu: o.cpu ?? (() => treeCpuMs(process.pid)),
     onStuck: (i: StuckInfo) => fail(stuckRender(i, {
       what: `The render${o.what ? ` of ${o.what}` : ''}`, tried: o.tried ?? 'this computer\u2019s graphics card (the app has no software fallback)',
       next: o.next ?? 'render the video on the server with render_4d (quality draft or boxes: true is much faster), or on a machine with a stronger graphics card; split the model (by discipline or level) or export it as NWC or IFC in smaller parts',
@@ -307,10 +303,9 @@ export async function inPage<T>(page: PageHandle, work: (evaluate: Evaluate, ali
   } finally { watch.stop(); }
 }
 
-/** WebM to MP4 (H.264) with ffmpeg; null when no ffmpeg is configured. ffmpeg reports its own progress (-progress: frame=N),
- *  so it is watched like any loop we own: ended when no frame is written for two windows (a window being 4 times the longest
- *  gap between its reports, never under floorMs), with the cause. */
-export async function webmToMp4(webm: Buffer, ffmpeg: string | null = ffmpegPath(), o: { floorMs?: number; frames?: number } = {}): Promise<Buffer | null> {
+/** WebM to MP4 (H.264) with ffmpeg; null when no ffmpeg is configured. ffmpeg reports its own progress (-progress: frame=N):
+ *  alive while it writes frames or uses the processor; ended only when frozen (liveness.ts), with the cause. */
+export async function webmToMp4(webm: Buffer, ffmpeg: string | null = ffmpegPath(), o: { frames?: number } = {}): Promise<Buffer | null> {
   if (!ffmpeg) return null;
   const dir = mkdtempSync(join(tmpdir(), 'p6c4d-ff-'));
   try {
@@ -319,7 +314,7 @@ export async function webmToMp4(webm: Buffer, ffmpeg: string | null = ffmpegPath
     const err = await new Promise<RenderFailed | string | null>((resolve) => {
       const c = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-y', '-i', src, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', dst], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
       let e = '', rest = '', stuck: RenderFailed | null = null;
-      const watch = unitWatch({ floorMs: o.floorMs ?? workerFloorMs(), step: 'converting the WebM to MP4 (ffmpeg, frames written)', onStuck: (i) => { stuck = stuckRender(i, { what: 'ffmpeg', tried: 'one conversion of the recorded WebM to H.264', next: 'ask for format: "webm" (no conversion), a smaller quality or fewer frames, or convert the WebM on another machine' }); c.kill(); } });
+      const watch = unitWatch({ step: 'converting the WebM to MP4 (ffmpeg, frames written)', cpu: async () => (c.pid ? treeCpuMs(c.pid) : null), onStuck: (i) => { stuck = stuckRender(i, { what: 'ffmpeg', tried: 'one conversion of the recorded WebM to H.264', next: 'ask for format: "webm" (no conversion), a smaller quality or fewer frames, or convert the WebM on another machine' }); c.kill(); } });
       c.stdout.on('data', (d) => { const lines = (rest + String(d)).split('\n'); rest = lines.pop() ?? ''; for (const l of lines) { const m = /^frame=(\d+)/.exec(l.trim()); if (m) watch.beat(Number(m[1]), o.frames); } });
       c.stderr.on('data', (d) => { e = (e + String(d)).slice(-1000); });
       c.on('error', (x) => { watch.stop(); resolve(`ffmpeg could not be started: ${x.message}`); });

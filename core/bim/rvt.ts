@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, workerFloorMs, type StuckInfo } from './liveness.ts';
+import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, type StuckInfo } from './liveness.ts';
 import { fileHash } from './model.ts';
 import { rvtWorkerPath } from './runtime.ts';
 
@@ -104,9 +104,9 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
       let text = '', stuck: StuckInfo | undefined;
       child.stderr.on('data', (c) => { text += c; });
       // No fixed time limit (owner rules 2026-10-27, 2026-10-28): rvt-rs's unpack is one WebAssembly call that cannot tick; it is alive
-      // while its memory grows (heartbeat.mjs, mem) and is ended past a work bound (the file's size x REVIT_S_PER_MB x the machine factor
-      // x 10); the IFC write that follows ticks per 8 MiB piece. Stuck = two windows without either (workerFloorMs, 2 minutes, at least).
-      const stop = heartbeatWatcher(child, { floorMs: workerFloorMs(), onStuck: (i) => { stuck = i; child.kill(); } });
+      // while it uses the processor; the IFC write that follows ticks per 8 MiB piece. Frozen = two windows with no progress and no
+      // processor time (the platform's rule, liveness.ts).
+      const stop = heartbeatWatcher(child, { onStuck: (i) => { stuck = i; child.kill(); } });
       child.on('error', (e) => { stop(); done({ code: -1, signal: null, text: e.message }); });
       child.on('close', (code, signal) => { stop(); done({ code, signal, text: text.trim(), pid: child.pid, stuck }); });
     });
