@@ -174,6 +174,34 @@ test('Monte Carlo with deterministic estimates reproduces the CPM finish', async
   assert.equal(r.sensitivity.length, 0);
 });
 
+test('Monte Carlo schedules with the file\'s P6 version, as schedule does (owner 2026-11-08)', async () => {
+  // A (24-hour calendar) drives B's finish (FF) to a non-work hour: P6 8+ keeps B's finish at its last work hour, older P6
+  // moves it to the next work start. A Monte Carlo iteration lost the file's version and used the older rule.
+  const H24 = '(0||CalendarData()((0||DaysOfWeek()((0||1()((0||0(s|00:00|f|00:00)())))(0||2()((0||0(s|00:00|f|00:00)())))(0||3()((0||0(s|00:00|f|00:00)())))(0||4()((0||0(s|00:00|f|00:00)())))(0||5()((0||0(s|00:00|f|00:00)())))(0||6()((0||0(s|00:00|f|00:00)())))(0||7()((0||0(s|00:00|f|00:00)())))))(0||Exceptions()())))';
+  const build = (version?: string): Db => {
+    const d = chain([1, 1, 1]);
+    if (version) d.header = { version } as Db['header'];
+    d.tables.CALENDAR.rows.push({ clndr_id: '2', default_flag: 'N', clndr_name: '24h', clndr_data: H24 });
+    const [a, b] = d.tables.TASK.rows;
+    Object.assign(a, { clndr_id: '2', target_drtn_hr_cnt: '120', remain_drtn_hr_cnt: '120' });
+    Object.assign(b, { target_drtn_hr_cnt: '8', remain_drtn_hr_cnt: '8' });
+    d.tables.TASKPRED.rows[0].pred_type = 'PR_FF';
+    // B drives the finish milestone itself (through C both rules would start C at the same work start)
+    d.tables.TASK.rows = d.tables.TASK.rows.filter((t) => t.task_code !== 'C');
+    d.tables.TASKPRED.rows = d.tables.TASKPRED.rows.filter((l) => l.task_id !== '102').map((l) => (l.pred_task_id === '102' ? { ...l, pred_task_id: '101' } : l));
+    return d;
+  };
+  const v8 = scheduleProjects(build('8.2'), ['1']).stats.finish, old = scheduleProjects(build(), ['1']).stats.finish;
+  assert.notEqual(v8, old, 'the fixture must reach the rule the P6 builds differ on');
+  for (const version of ['8.2', undefined]) {
+    const db = build(version);
+    defaultEstimates(db, ['1'], 100, 100);
+    const r = await runMonteCarlo(db, ['1'], { iterations: 5, seed: 1 });
+    assert.equal(r.deterministicFinish, version ? v8 : old);
+    assert.ok(r.finishSamples.every((f) => f === r.deterministicFinish));
+  }
+});
+
 test('risk events add their impact to linked activities when they occur', async () => {
   const db = chain();
   defaultEstimates(db, ['1'], 100, 100);

@@ -342,6 +342,8 @@ interface Prepared {
   projRows: Row[];
   projFields: string[];
   shared: Record<string, Table>;
+  /** The file's header: its P6 version picks the scheduler's placement rules (optionsFor), so an iteration schedules as `schedule` does. */
+  header?: Db['header'];
 }
 
 function prepare(db: Db, projIds: string[]): Prepared {
@@ -357,7 +359,7 @@ function prepare(db: Db, projIds: string[]): Prepared {
     if (t) shared[name] = { name, fields: [...t.fields], rows: t.rows.map((r) => ({ ...r })) };
   }
   const P = db.tables.PROJECT ?? { name: 'PROJECT', fields: [], rows: [] };
-  return { base: pos.map((i) => taskRows[i]), pos, taskRows, taskFields: [...T.fields], projRows: P.rows.map((r) => ({ ...r })), projFields: [...P.fields], shared };
+  return { base: pos.map((i) => taskRows[i]), pos, taskRows, taskFields: [...T.fields], projRows: P.rows.map((r) => ({ ...r })), projFields: [...P.fields], shared, header: db.header };
 }
 
 /** Fresh scratch Db for one iteration: TASK rows of the analysed projects and PROJECT rows are copies. */
@@ -366,6 +368,7 @@ function scratch(p: Prepared): { db: Db; tasks: Row[] } {
   const tasks: Row[] = new Array(p.pos.length);
   for (let k = 0; k < p.pos.length; k++) trows[p.pos[k]] = tasks[k] = { ...p.base[k] };
   const db: Db = {
+    ...(p.header ? { header: p.header } : {}),
     tables: {
       ...p.shared,
       TASK: { name: 'TASK', fields: [...p.taskFields], rows: trows },
@@ -554,7 +557,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     const inputs = { format: 2, projIds, iterations: requested, phase, deadline: opts.deadline ?? null, over, sampler: sampler ?? null, reAnchor: !!opts.reAnchor,
       // the data the iterations schedule, as it reads it (review 4L-13 M1): what the tables say, not how they are laid out in memory (a
       // project built here, saved and opened again is the same run; a project's place in the EPS is not read), and the options the
-      // scheduler takes from them and from what is not rows (the field list, a file header: an iteration's scratch project has none)
+      // scheduler takes from them and from what is not rows (the field list, the file header's P6 version)
       data: dataDigest({ ...prep.shared, TASK: { rows: prep.taskRows }, PROJECT: { rows: prep.projRows } }, { PROJECT: PROJECT_PLACE_FIELDS }),
       scheduler: ((d) => projIds.map((id) => { const p = d.tables.PROJECT.rows.find((r) => r.proj_id === id); return p ? optionsFor(d, p, over) : null; }))(scratch(prep).db),
       est, risks: riskEvents.map((e) => ({ id: e.row.proj_risk_id, p: e.p, hours: e.hours, ks: e.ks })), events: inline.map((e) => ({ name: e.name, p: e.p, ks: e.ks, projectHours: e.projectHours })) };
