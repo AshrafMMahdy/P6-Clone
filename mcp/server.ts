@@ -802,7 +802,8 @@ export async function callTool(name: string, a: Record<string, any>, sessionCall
     // (the timer is cleared once the call answers: left running, its promise held the race's result - the whole answer, a page of 500 rows - for the soft timeout, call after call)
     let soft: ReturnType<typeof setTimeout> | undefined;
     const r = await Promise.race([p, new Promise((res) => { soft = setTimeout(() => res(timeout), config.softTimeoutMs); soft.unref?.(); })]).finally(() => clearTimeout(soft));
-    if (r === timeout) { const job = startJob(name, handle, p, abort); busy.job = job; return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
+    // (ctx.job too: the tool's progress goes to the job from now on, and a tool that names its job, render_4d's render_busy, finds it)
+    if (r === timeout) { const job = startJob(name, handle, p, abort); ctx.job = job; busy.job = job; return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
     const o = r as { ok?: boolean; status?: string; error?: Record<string, unknown> } | null;
     // a refusal answered as data (ok: false), and a job that failed or was cancelled, are errors too
     const isError = !!(o && typeof o === 'object' && (o.ok === false || (name === 'job_status' && (o.status === 'failed' || o.status === 'cancelled') && !('result' in o))));

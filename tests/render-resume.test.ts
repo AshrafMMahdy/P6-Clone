@@ -242,9 +242,12 @@ test('runs from different encoders: a join of them is refused; reconcile marks t
   const again = (await Parts.load(parts.manifestPath, putFile, parts.base))!;
   assert.equal(again.m.segments.length, 3);
   assert.equal(again.framesDone, 80 + 20);
-  // another encoder (ca) in use on a later call: the runs that differ are stale; a stale run is not brought back even though it matches
+  // another encoder (ca) in use on a later call: the runs that differ are stale, and the stale run ca drew comes back (no run in use holds its frames)
   again.reconcile(ca);
-  assert.deepEqual(again.m.segments.map((s) => [s.file, !!s.stale]).sort(), [['run-0001.mp4', true], ['run-0002.mp4', true], ['run-0003.mp4', true]]);
+  assert.deepEqual(again.m.segments.map((s) => [s.file, !!s.stale]).sort(), [['run-0001.mp4', false], ['run-0002.mp4', true], ['run-0003.mp4', true]]);
+  assert.equal(again.framesDone, 80); assert.deepEqual(again.missing(), [[80, 80]]);
+  assert.match(again.reused[0], /run-0001.*used again/);
+  assert.match(JSON.stringify(again.report()), /used again/);
   // the redraw completes: a run of the encoder in use covers the stale run's frames, and the stale run leaves the manifest
   const { parts: p3 } = newParts(160, 'video/mp4');
   const s1 = p3.startRun(0, 'video/mp4', 4); for (const c of a) await s1.add(c);
@@ -265,23 +268,50 @@ test('runs from different encoders: a join of them is refused; reconcile marks t
   decodes(join(d2, 'ok.mp4'), 160);
 });
 
-test('a stale run never comes back into use (A, then B, then A would count frames twice); it stays listed until runs in use cover it', async () => {
+test('a stale run the encoder in use drew comes back into use where no run in use holds its frames (A, then B, then A: nothing counted twice); one that overlaps stays listed until runs in use cover it', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'p6-rr-flip-'));
-  const seg = (file: string, first: number, config: string, stale?: true) => ({ file, first, frames: 2, bytes: 1, config, ...(stale ? { stale } : {}) });
-  const p = new Parts(join(dir, 'x.parts'), { format: 'p6c-4d-render', version: 1, kind: 'video', arguments: {}, fingerprint: {}, frames_total: 10, mime: 'video/mp4', fps: 1, segments: [seg('run-0001.mp4', 6, 'A', true), seg('run-0002.mp4', 8, 'B')], images: [] }, putFile, dir);
+  const seg = (file: string, first: number, config: string, stale?: true, frames = 2) => ({ file, first, frames, bytes: 1, config, ...(stale ? { stale } : {}) });
+  const p = new Parts(join(dir, 'x.parts'), { format: 'p6c-4d-render', version: 1, kind: 'video', arguments: {}, fingerprint: {}, frames_total: 10, mime: 'video/mp4', fps: 1, segments: [seg('run-0001.mp4', 6, 'A', true), seg('run-0002.mp4', 8, 'B'), seg('run-0005.mp4', 1, 'A', true)], images: [] }, putFile, dir);
   assert.deepEqual(p.missing().map((m) => m[0]).sort(), [0], 'a stale run does not count at load');
-  p.m.segments.push(seg('run-0003.mp4', 0, 'A')); // this call's encoder is A: its first run
-  p.reconcile('A');
-  assert.deepEqual(p.m.segments.map((s) => `${s.file}${s.stale ? ' stale' : ''}`), ['run-0001.mp4 stale', 'run-0002.mp4 stale', 'run-0003.mp4'], 'run-0001 matches A but is not brought back');
-  assert.equal(p.framesDone, 2, 'no frame counted twice');
+  assert.deepEqual(p.missing(true), [[0, 1], [3, 3]], 'the frames no run holds, in use or stale');
+  // this call's encoder is A: its first run (frames 1-2) is being drawn; run-0005 (A, frames 2-3) overlaps it and stays stale
+  p.m.segments.push(seg('run-0003.mp4', 0, 'A'));
+  p.reconcile('A', [0, 2]);
+  assert.deepEqual(p.m.segments.map((s) => `${s.file}${s.stale ? ' stale' : ''}`), ['run-0001.mp4', 'run-0002.mp4 stale', 'run-0005.mp4 stale', 'run-0003.mp4'], 'run-0001 matches A and no run in use holds its frames: used again; run-0005 overlaps the run being drawn');
+  assert.equal(p.framesDone, 4, 'no frame counted twice');
   const live = p.sortedSegments();
   assert.ok(live.every((s, i) => i === 0 || live[i - 1].first + live[i - 1].frames <= s.first), 'runs in use do not overlap');
-  assert.deepEqual((p.report() as any).stale_segments.map((f: string) => basename(f)), ['run-0001.mp4', 'run-0002.mp4']);
-  assert.deepEqual((p.report() as any).kept_segments.map((f: string) => basename(f)), ['run-0003.mp4'], 'kept_segments is what frames_done counts');
+  assert.deepEqual((p.report() as any).stale_segments.map((f: string) => basename(f)), ['run-0005.mp4', 'run-0002.mp4']);
+  assert.deepEqual((p.report() as any).kept_segments.map((f: string) => basename(f)), ['run-0003.mp4', 'run-0001.mp4'], 'kept_segments is what frames_done counts');
   // a stale run covered by runs in use is retired
-  p.m.segments.push(seg('run-0004.mp4', 6, 'A'));
+  p.m.segments.push(seg('run-0004.mp4', 2, 'A', undefined, 1));
   p.retire();
-  assert.deepEqual(p.m.segments.map((s) => s.file), ['run-0002.mp4', 'run-0003.mp4', 'run-0004.mp4'], 'run-0001 (frames 7-8) is covered and leaves; run-0002 is not covered and stays');
+  assert.deepEqual(p.m.segments.map((s) => s.file), ['run-0001.mp4', 'run-0002.mp4', 'run-0003.mp4', 'run-0004.mp4'], 'run-0005 (frames 2-3) is covered and leaves; run-0002 is not covered and stays');
+});
+
+test('the flip back the review found (A drew 300 of 333 frames, B one chunk, cancelled; A in use again): only the 33 frames no run of A holds are drawn', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6-rr-flip2-'));
+  const p = new Parts(join(dir, 'x.parts'), { format: 'p6c-4d-render', version: 1, kind: 'video', arguments: {}, fingerprint: {}, frames_total: 333, mime: 'video/mp4', fps: 1,
+    segments: [{ file: 'run-0001.mp4', first: 0, frames: 300, bytes: 1, config: 'A', stale: true }, { file: 'run-0002.mp4', first: 300, frames: 10, bytes: 1, config: 'B' }], images: [] }, putFile, dir);
+  // the frames no run holds go first (the call's encoder, A, draws them): its first chunk sets the reference
+  const first = p.missing(true)[0];
+  assert.deepEqual(first, [310, 23]);
+  p.m.segments.push({ file: 'run-0003.mp4', first: 310, frames: 23, bytes: 1, config: 'A' });
+  p.reconcile('A', first);
+  assert.deepEqual(p.missing(true), []);
+  assert.deepEqual(p.missing(), [[300, 10]], 'run-0001 is used again; only B\u2019s frames are drawn again');
+  assert.equal(23 + p.missing().reduce((n, m) => n + m[1], 0), 33);
+  assert.deepEqual(p.odd('A'), []);
+});
+
+test('a render.json that is there but cannot be read now is not "nothing there" (the resume is answered: call again with the same resume)', async () => {
+  const { ManifestUnreadable } = await import('../core/bim/renderParts.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'p6-rr-m2-'));
+  assert.equal(await Parts.load(join(dir, 'gone.parts', 'render.json'), putFile, dir), null, 'nothing there');
+  mkdirSync(join(dir, 'x.parts', 'render.json'), { recursive: true }); // a read that fails (EISDIR) as a lock or a scan would
+  await assert.rejects(Parts.load(join(dir, 'x.parts'), putFile, dir), (e: unknown) => e instanceof ManifestUnreadable && /could not be read now/.test((e as Error).message));
+  writeFileSync(join(dir, 'bad.json'), '{not json');
+  assert.equal(await Parts.load(join(dir, 'bad.json'), putFile, dir), null, 'not a manifest');
 });
 
 test('images are kept by their path relative to the write root; entries outside it are ignored; an earlier version\u2019s absolute path inside the root is read as relative', async () => {
@@ -613,8 +643,14 @@ test('a cancel while the runs are being joined still returns the partial result,
   const r = view.result;
   assert.equal(r.frames_done, r.frames_total);
   assert.ok(r.kept_segments.length >= 1 && existsSync(r.resume));
-  const done = await call('render_4d', { ...args, resume: r.resume });
+  // the join writes under a temporary name until it is complete and checked (a mirror skips it: a half-joined video is never offered)
+  let seen: { file: string; names: string[] } | null = null;
+  const back2 = hook({ onJoined: (f) => { seen = { file: f, names: readdirSync(dirname(f)) }; } });
+  let done;
+  try { done = await call('render_4d', { ...args, resume: r.resume }); } finally { back2(); }
   assert.equal(done.err, false, JSON.stringify(done.d).slice(0, 400));
+  assert.match(basename(seen!.file), /\.p6clone-tmp$/);
+  assert.deepEqual(seen!.names.filter((n) => /^joined\.(mp4|webm)$/.test(n)), [], 'no joined video under its own name before it is checked');
   assert.equal(done.d.resumed_frames, r.frames_total, 'nothing drawn again');
   assert.equal((await probeVideo(done.d.written[0])).frames, r.frames_total);
   noParts(out);
@@ -889,6 +925,60 @@ test('an encoder whose new run still differs from the reference refuses the join
   assert.ok(r.d.error.frames_done >= 1 && r.d.error.kept_segments.length >= 1 && r.d.error.resume, JSON.stringify(r.d.error).slice(0, 500));
   for (const [f, b] of Object.entries(keptBytes)) assert.equal(readFileSync(join(out, 'xx.parts', f)).toString('base64'), b, `${f} is not changed`);
   assert.ok(!existsSync(join(out, 'xx.mp4')), 'no video was made');
+  // the next resume converges: the newest run (this encoder's) is the reference, the odd run's frames are drawn again, one video is made
+  const total = r.d.error.frames_total as number;
+  const again = await call('render_4d', { ...args, resume: manifest });
+  assert.equal(again.err, false, JSON.stringify(again.d).slice(0, 400));
+  assert.equal((await probeVideo(again.d.written[0])).frames, total);
+  decodes(again.d.written[0], total);
+  noParts(out);
+});
+
+test('a render the soft timeout turns into a job is named by that job: render_busy carries its job_id', { skip: !CHROME && 'no Chromium here', timeout: 600_000 }, async () => {
+  const { config } = await import('../mcp/runtime.ts');
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const { h } = await duplex(), second = await duplex();
+  const out = mkdtempSync(join(tmpdir(), 'p6-rr-promo-'));
+  const args = { handle: h, path: out, kind: 'video', file_name: 'pr', ...small };
+  const was = config.softTimeoutMs, back = hook({ joinDelayMs: 8000 });
+  let job = '';
+  try {
+    config.softTimeoutMs = 300; // (no async: the render is promoted to a job as the platform's long renders are)
+    const first = toolResult((await callTool('render_4d', args)).out, false).structuredContent as any;
+    config.softTimeoutMs = was;
+    assert.equal(first.status, 'running', JSON.stringify(first).slice(0, 300));
+    job = first.job_id;
+    const busy = await call('render_4d', { ...args, handle: second.h });
+    assert.equal(busy.err, true, JSON.stringify(busy.d).slice(0, 300));
+    assert.equal(busy.d.error.code, 'render_busy');
+    assert.equal(busy.d.error.job_id, job, JSON.stringify(busy.d.error).slice(0, 400));
+  } finally { config.softTimeoutMs = was; back(); }
+  await call('job_status', { job_id: job, wait_seconds: 20 });
+});
+
+test('a call the soft timeout turns into a job is that job for the tool: its progress goes to the job', { timeout: 120_000 }, async () => {
+  const { config } = await import('../mcp/runtime.ts');
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const np = (await call('new_project', { id: 'PROMO', start: '2026-03-02' })).d;
+  const ops: unknown[] = [];
+  for (let i = 0; i < 60; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 3 }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
+  await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });
+  await call('schedule', { handle: np.handle, owner_key: np.owner_key });
+  const was = config.softTimeoutMs;
+  let job = '', progress = '';
+  setRoots(null, mkdtempSync(join(tmpdir(), 'p6-rr-promo-mc-'))); // (the cancelled run keeps its iterations in the write root)
+  try {
+    config.softTimeoutMs = 200;
+    const first = toolResult((await callTool('monte_carlo', { handle: np.handle, iterations: 20000, default_estimates: { min_pct: 90, max_pct: 125 } })).out, false).structuredContent as any;
+    config.softTimeoutMs = was;
+    job = first.job_id;
+    assert.equal(first.status, 'running', JSON.stringify(first).slice(0, 300));
+    for (let k = 0; k < 100 && !/of 20000 iterations/.test(progress); k++) { await new Promise((r) => setTimeout(r, 100)); progress = String((await call('job_status', { job_id: job })).d.progress ?? ''); }
+  } finally { config.softTimeoutMs = was; if (job) await call('cancel_job', { job_id: job }); }
+  assert.match(progress, /\d+ of 20000 iterations/);
+  await call('job_status', { job_id: job, wait_seconds: 20 });
+  setRoots(null, null);
+  await call('close', { handle: np.handle, owner_key: np.owner_key, discard: true });
 });
 
 test('kept work that is only stale runs is still kept work: a refusal carries the report with stale_segments and resume, and removes nothing; a manifest change after load (frames_total) is refused the same way', { skip: !CHROME && 'no Chromium here', timeout: 600_000 }, async () => {

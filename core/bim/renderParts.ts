@@ -12,10 +12,15 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { ALL_FORMATS, BufferSource, CustomSource, EncodedPacketSink, EncodedVideoPacketSource, FilePathTarget, Input, Mp4OutputFormat, Output, WebMOutputFormat, type InputVideoTrack } from 'mediabunny';
 
 export const PARTS_MANIFEST = 'render.json';
+/** A render.json that is there but could not be read now (not "nothing there"): continuing works with the same resume once it can be. */
+export class ManifestUnreadable extends Error {
+  readonly path: string; readonly cause: Error;
+  constructor(path: string, cause: Error) { super(`${path} could not be read now (${cause.message})`); this.path = path; this.cause = cause; }
+}
 /** A run of frames in a file of this folder: `bytes` is its whole length (the file may be longer: a chunk being written when the
  *  process died), `frames` what those bytes hold, `config` a hash of the decoder configuration of the encoder that drew it. A
  *  segment of an earlier version (seg-N.mp4, a whole file, no config) reads the same way. */
-export interface Segment { file: string; first: number; frames: number; bytes: number; config?: string; /** drawn by another encoder than the one in use: listed, not counted, until a run drawn by the encoder in use replaces it */ stale?: true }
+export interface Segment { file: string; first: number; frames: number; bytes: number; config?: string; /** drawn by another encoder than the one in use: listed, not counted, until a run drawn by the encoder in use replaces it, or (that encoder in use again, and no run in use over its frames) it is used again */ stale?: true }
 export interface PartsManifest {
   format: 'p6c-4d-render'; version: 1;
   kind: 'images' | 'video';
@@ -161,6 +166,8 @@ export class Parts {
   }
   /** What load found wrong and will be made again, in words for the answer (and, after a stale run is taken out, why). */
   redrawn: string[] = [];
+  /** Stale runs used again (the encoder in use drew them): in words for the answer. */
+  reused: string[] = [];
   /** run files longer than their whole length: the bytes of a chunk that was being written; cut off by settle() */
   private cut = new Map<string, number>();
   /** what load found is not yet in render.json: settle() writes it */
@@ -171,13 +178,15 @@ export class Parts {
    *  says. What fails is left out of the manifest in memory and listed in `redrawn`: those frames are made again. Nothing is changed
    *  on disk (no file removed, cut or rewritten: a resume that is then refused leaves everything as it was); settle() does that once
    *  the resume is accepted, and a failing file is overwritten only when its frames are actually drawn again. null when there is no
-   *  usable manifest. */
+   *  manifest there (or it is not one); a manifest that is there but cannot be read now (a lock, a scan, a permission) throws
+   *  ManifestUnreadable: nothing is lost, the same resume works once it can be read. */
   static async load(file: string, put: Parts['put'], base: string): Promise<Parts | null> {
-    let m: PartsManifest, dir: string;
-    try {
-      const path = existsSync(file) && statSync(file).isDirectory() ? join(file, PARTS_MANIFEST) : file;
-      m = JSON.parse(readFileSync(path, 'utf8')); dir = dirname(path);
-    } catch { return null; }
+    let m: PartsManifest, text: string;
+    const path = existsSync(file) && statSync(file).isDirectory() ? join(file, PARTS_MANIFEST) : file;
+    const dir = dirname(path);
+    try { text = readFileSync(path, 'utf8'); }
+    catch (e) { const code = (e as NodeJS.ErrnoException).code; if (code === 'ENOENT' || code === 'ENOTDIR') return null; throw new ManifestUnreadable(path, e as Error); }
+    try { m = JSON.parse(text); } catch { return null; }
     const obj = (x: unknown) => !!x && typeof x === 'object' && !Array.isArray(x);
     const int = (x: unknown, min: number) => Number.isInteger(x) && (x as number) >= min;
     if (!obj(m) || m.format !== 'p6c-4d-render' || (m.kind !== 'video' && m.kind !== 'images') || !obj(m.fingerprint) || !obj(m.arguments) || !int(m.frames_total, 1) || !Array.isArray(m.segments) || !Array.isArray(m.images)) return null;
@@ -226,7 +235,8 @@ export class Parts {
   }
   /** The resume is accepted: run files are cut back to their whole length, and the manifest is written as load read it. */
   settle() {
-    for (const [file, bytes] of this.cut) { try { truncateSync(join(this.dir, file), bytes); } catch { /* the file is redrawn anyway when it cannot be cut */ } }
+    // (a file that cannot be cut now stays longer than its whole length: harmless, every read of it stops at `bytes`, and the next settle cuts it)
+    for (const [file, bytes] of this.cut) { try { truncateSync(join(this.dir, file), bytes); } catch { /* left longer, see above */ } }
     this.cut.clear();
     if (this.unsaved) this.save();
   }
@@ -237,10 +247,11 @@ export class Parts {
   /** whether anything is listed: runs in use or stale, images (kept work, whether or not it counts as frames done) */
   get kept() { return this.m.segments.length > 0 || this.m.images.length > 0; }
   get framesDone() { return this.m.kind === 'video' ? this.live.reduce((n, s) => n + s.frames, 0) : this.m.images.length; }
-  /** The runs of frames still to make, in order: [first, count]. */
-  missing(): [number, number][] {
+  /** The runs of frames still to make, in order: [first, count]. withStale: only those no run holds, in use or stale (a stale run of
+   *  the encoder in use may come back into use, so those are drawn first: reconcile). */
+  missing(withStale = false): [number, number][] {
     const have = new Uint8Array(this.m.frames_total);
-    if (this.m.kind === 'video') for (const s of this.live) have.fill(1, s.first, s.first + s.frames); else for (const i of this.m.images) have[i.index] = 1;
+    if (this.m.kind === 'video') for (const s of withStale ? this.m.segments : this.live) have.fill(1, s.first, s.first + s.frames); else for (const i of this.m.images) have[i.index] = 1;
     const out: [number, number][] = [];
     for (let i = 0; i < have.length; i++) if (!have[i]) { let j = i; while (j < have.length && !have[j]) j++; out.push([i, j - i]); i = j; }
     return out;
@@ -254,10 +265,19 @@ export class Parts {
   newestConfig(): string { return this.m.segments.reduce<Segment | null>((a, s) => (!a || runNumber(s.file) > runNumber(a.file) ? s : a), null)?.config ?? ''; }
   /** `ref` is the decoder configuration of the encoder in use. Every run that differs from it is marked stale (it cannot be joined to
    *  runs of this encoder): listed in render.json, not counted, its frames missing so they are drawn again, until runs in use cover
-   *  them (retire). A stale run never becomes a run in use again: a call cannot know its encoder's configuration before it draws, so
-   *  a flip back could count frames twice. In memory: the caller saves. */
-  reconcile(ref: string) {
+   *  them (retire). A stale run that this encoder drew (its configuration is `ref`: the encoder flipped back, A then B then A) is used
+   *  again when no run in use holds any of its frames, nor `drawing` (the run being drawn: [first, count]), so no frame is counted
+   *  twice; the newest first. In memory: the caller saves. */
+  reconcile(ref: string, drawing?: [number, number]) {
     for (const s of this.m.segments) if (s.config !== ref && !s.stale) { s.stale = true; this.unsaved = true; this.redrawn.push(`${s.file} (frames ${s.first + 1} to ${s.first + s.frames}): drawn by another encoder than the one in use (its decoder configuration differs, so it cannot be joined to the others), drawn again`); }
+    const taken = new Uint8Array(this.m.frames_total);
+    for (const s of this.live) taken.fill(1, s.first, s.first + s.frames);
+    if (drawing) taken.fill(1, drawing[0], drawing[0] + drawing[1]);
+    for (const s of this.m.segments.filter((x) => x.stale && x.config === ref).sort((a, b) => runNumber(b.file) - runNumber(a.file))) {
+      if (taken.subarray(s.first, s.first + s.frames).some((x) => x)) continue;
+      delete s.stale; taken.fill(1, s.first, s.first + s.frames); this.unsaved = true;
+      this.reused.push(`${s.file} (frames ${s.first + 1} to ${s.first + s.frames}): drawn by the encoder in use, so it is used again`);
+    }
   }
   /** The runs in use whose configuration is not `ref`: runs the encoder in use drew that still differ from it (an encoder that is not stable). */
   odd(ref: string): Segment[] { return this.live.filter((s) => s.config !== ref); }
@@ -281,7 +301,7 @@ export class Parts {
   /** What a failure tells the caller: how far it got, what is kept and how to continue. */
   report() {
     const kept = this.m.kind === 'video' ? { kept_segments: this.sortedSegments().map((s) => join(this.dir, s.file)), ...(this.m.segments.some((s) => s.stale) ? { stale_segments: this.m.segments.filter((s) => s.stale).sort((a, b) => a.first - b.first).map((s) => join(this.dir, s.file)) } : {}) } : { kept: [...this.m.images].sort((a, b) => a.index - b.index).map((i) => resolve(this.base, i.file)) };
-    return { frames_done: this.framesDone, frames_total: this.m.frames_total, ...kept, ...(this.kept ? { resume: this.manifestPath } : {}), ...(this.redrawn.length ? { redrawn: this.redrawn } : {}) };
+    return { frames_done: this.framesDone, frames_total: this.m.frames_total, ...kept, ...(this.kept ? { resume: this.manifestPath } : {}), ...(this.redrawn.length ? { redrawn: this.redrawn } : {}), ...(this.reused.length ? { reused: this.reused } : {}) };
   }
   discard() { rmSync(this.dir, { recursive: true, force: true }); }
 }
