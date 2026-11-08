@@ -7,6 +7,7 @@ import { applyOps } from '../core/project/ops.ts';
 import { writeP6XmlTo } from '../core/xml/p6xml.ts';
 import { fenceListedModels, isNavisworks } from '../core/bim/nwd.ts';
 import { cachedModel, discardKeptChunks, fileHash, ifcOf, keptChunks, loadModel, loadNeeds, modelBytes, releaseModels, type KeptChunkSet, type LoadNeeds, type Model } from '../core/bim/model.ts';
+import { meshEngine } from '../core/bim/parse.ts';
 import { checkRevitSize, isRevit, REVIT_MEMORY_PER_BYTE, RevitDiskFull, RevitTooLarge, rvtCached } from '../core/bim/rvt.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
@@ -78,17 +79,20 @@ const mbs = (b: number) => `${Math.round(b / 1048576).toLocaleString('en')} MB`;
 /** Read a model with its memory reserved first: a model that does not fit is refused (naming the budget and what it
  *  needs), not run out of memory on. Meshing is cut into chunks sized to the memory left (loadNeeds), so a model is
  *  refused only when its index, or its index and the smallest chunk, do not fit. */
-/** A model read; a reader ended as stuck is told with its structured facts (data.stuck: step, kind, silent_ms, windows, window_ms, cpu_ms, tried, alternatives). */
+/** A model read; a reader ended as stuck is told with its structured facts (data.stuck: step, kind, silent_ms, windows, window_ms, cpu_ms,
+ *  tried, alternatives). A read that stops (cancelled or failed) says what its meshing kept and how to continue or discard it (stopped):
+ *  open_model, and every tool that meshes the attached model (render_4d and the others through modelOf / modelWithTiles). */
 async function readModel(path: string, o: ReadOptions = {}): Promise<Model> {
-  try { return await readModelNow(path, o); } catch (e) {
-    if (e instanceof StuckError) fail('model_unreadable', e.message, e.stuck.alternatives, { data: { reason: 'stuck', stuck: e.stuck } });
-    throw e;
+  const seen: { hash?: string } = {};
+  try { return await readModelNow(path, o, seen); } catch (e) {
+    return stopped(e instanceof StuckError ? new ToolError('model_unreadable', e.message, e.stuck.alternatives, { data: { reason: 'stuck', stuck: e.stuck } }) : e, path, seen.hash, !!o.opening);
   }
 }
+/** opening: the read is open_model's (its words, and any failure is model_unreadable). */
+type ReadOptions = { geometry?: boolean; tick?: AnalysisHelpers['tick']; opening?: boolean };
 /** seen.hash: the content hash of the IFC that is meshed (the model's own, or the IFC a Revit file was made into), set once known: a
- *  stopped open finds the chunks its meshing kept by it (keptChunks). */
-type ReadOptions = { geometry?: boolean; tick?: AnalysisHelpers['tick']; seen?: { hash?: string } };
-async function readModelNow(path: string, o: ReadOptions = {}): Promise<Model> {
+ *  stopped read finds the chunks its meshing kept by it (keptChunks). */
+async function readModelNow(path: string, o: ReadOptions, seen: { hash?: string }): Promise<Model> {
   if (!existsSync(path)) return fail('model_unreadable', `No file at ${path}.`, 'Give the path of a model file (.ifc, .rvt, .nwd, .nwc or .nwf) inside the storage root.');
   // a Revit file is made into an IFC4 first, with memory of its own; its meshing is then sized from that IFC, not from
   // the source file. A Navisworks file is read as it is: its need comes from its sections (loadNeeds)
@@ -109,10 +113,21 @@ async function readModelNow(path: string, o: ReadOptions = {}): Promise<Model> {
     }
   }
   const hash = isNavisworks(path) ? undefined : await fileHash(ifc);
-  if (o.seen) o.seen.hash = hash;
-  const need = fits(path, loadNeeds(ifc, { geometry: o.geometry, free: freeMemory(), hash }), o.geometry, () => loadNeeds(ifc, { geometry: o.geometry, free: freeMemory(), hash }));
+  seen.hash = hash;
+  const at = (chunkBytes?: number) => () => loadNeeds(ifc, { geometry: o.geometry, free: freeMemory(), hash, ...(chunkBytes ? { chunkBytes } : {}) });
+  const first = at()();
+  // chunks kept from an earlier meshing of this model by this engine are taken in only when it is cut the same way: it is meshed in chunks
+  // of their size when that fits the memory free now (the same judgement as any open); else from scratch, and the geometry note says why
+  const kept = first.chunkBytes && hash ? keptToUse(hash) : null;
+  let need: LoadNeeds | null = null, meshNote: string | undefined;
+  if (kept && kept.chunkBytes !== first.chunkBytes) {
+    const r = room(at(kept.chunkBytes)(), at(kept.chunkBytes));
+    if (r.need.total <= r.budget && r.need.total <= r.free) need = r.need;
+    else meshNote = `the ${kept.kept} chunk${kept.kept === 1 ? '' : 's'} kept from an earlier meshing ${kept.kept === 1 ? 'was' : 'were'} not used: meshing in chunks of their size (${chunkMb(kept.chunkBytes)} of the IFC) needs about ${mbs(r.need.total)} of memory and ${mbs(Math.max(0, Math.min(r.free, r.budget)))} of the memory budget is free now, so the model was meshed from scratch`;
+  }
+  need ??= fits(path, first, o.geometry, at());
   const release = reserveMemory(need.total);
-  try { return await loadModel(path, { geometry: o.geometry, ...(need.chunkBytes ? { chunkBytes: need.chunkBytes } : {}), ...(ifc === path ? { hash } : {}), ...(o.tick ? { onProgress: (d, t, n) => o.tick!(d, t, n) } : {}) }); } finally { release(); }
+  try { return await loadModel(path, { geometry: o.geometry, ...(need.chunkBytes ? { chunkBytes: need.chunkBytes } : {}), ...(ifc === path ? { hash } : {}), ...(meshNote ? { meshNote } : {}), ...(o.tick ? { onProgress: (d, t, n) => o.tick!(d, t, n) } : {}) }); } finally { release(); }
 }
 
 /** A Revit file too big for its reader (past the size limit, or one that ran the reader out of memory under it): refused
@@ -128,33 +143,47 @@ const unreadableHint = (path: string) => (existsSync(path) && (isRevit(path) || 
   ? `The ${isRevit(path) ? 'Revit' : 'Navisworks'} file is read without ${isRevit(path) ? 'Revit' : 'Navisworks'}, and the message says what stopped it; saving it again from a current version usually helps, and an IFC exported from it always opens.`
   : 'Give the path of a model file (.ifc, .rvt, .nwd, .nwc or .nwf) inside the storage root.');
 
+/** A chunk size in words (P6CLONE_GEOM_CHUNK_MB may be a fraction). */
+const chunkMb = (b: number) => { const x = b / 1048576; return `${x >= 10 ? Math.round(x) : Math.round(x * 10) / 10} MB`; };
+
+/** The kept chunks the next meshing of this model can take in: of this engine (or kept before kept.json named its engine), the set
+ *  with the most chunks; null when there is none. */
+function keptToUse(hash: string): KeptChunkSet | null {
+  const engine = meshEngine();
+  const sets = (keptChunks(hash) ?? []).filter((k) => k.engine == null || k.engine === engine);
+  return sets.length ? sets.reduce((a, b) => (b.kept > a.kept ? b : a)) : null;
+}
+
 /** What a stopped meshing of a model kept (keptChunks: its finished chunks, in the clone's model cache) and what to do with it, in words:
- *  `kept` names the count, `next` how to continue or discard; null when nothing is kept. */
-function keptMeshing(hash: string | undefined, path: string): { kept: string; next: string; data: Record<string, unknown> } | null {
+ *  `kept` names the count, `next` how to continue (open_model's words, or those of another tool that meshes the model) or discard;
+ *  null when nothing is kept. */
+function keptMeshing(hash: string | undefined, path: string, opening: boolean): { kept: string; next: string; data: Record<string, unknown> } | null {
   const sets = hash ? keptChunks(hash) : null;
   if (!sets) return null;
   const n = sets.reduce((x, k) => x + k.kept, 0);
-  const mb = (b: number) => { const x = b / 1048576; return `${x >= 10 ? Math.round(x) : Math.round(x * 10) / 10} MB`; };
   return {
-    kept: `${sets.map((k) => `${k.kept}${k.of != null ? ` of ${k.of}` : ''} chunk${(k.of ?? k.kept) === 1 ? '' : 's'}${sets.length > 1 ? ` (cut at ${mb(k.chunkBytes)})` : ''}`).join(' and ')} of the model’s meshing ${n === 1 ? 'is' : 'are'} kept in the clone’s model cache (not in the project)`,
-    next: `Calling open_model again with the same path, with geometry, continues from them: only the missing chunks are meshed (kept chunks are used when the model is cut the same way, in chunks of ${sets.map((k) => mb(k.chunkBytes)).join(' or ')} of the IFC as the memory free at the time decides, by this version of the clone; otherwise it is meshed from scratch). If you will not open this model again, discard them: open_model with this path and discard_kept: true.`,
+    kept: `${sets.map((k) => `${k.kept}${k.of != null ? ` of ${k.of}` : ''} chunk${(k.of ?? k.kept) === 1 ? '' : 's'}${sets.length > 1 ? ` (cut at ${chunkMb(k.chunkBytes)})` : ''}`).join(' and ')} of the model’s meshing ${n === 1 ? 'is' : 'are'} kept in the clone’s model cache (not in the project)`,
+    next: `${opening ? 'Calling open_model again with the same path, with geometry,' : 'Calling this tool again (or open_model with the model’s path)'} continues from them: only the missing chunks are meshed (${sets.length === 1 ? `in chunks of their size, ${chunkMb(sets[0].chunkBytes)} of the IFC,` : 'those of the set with the most chunks, in chunks of its size,'} when that fits the memory free then, else it is meshed from scratch and the model’s geometry note says why; chunks kept by another version of the clone are not used). If you will not open this model again, discard them: open_model with path "${path}" and discard_kept: true.`,
     data: { kept_chunks: n, ...(sets.length === 1 && sets[0].of != null ? { chunks_total: sets[0].of } : {}), discard_with: { tool: 'open_model', path, discard_kept: true } },
   };
 }
 
-/** An open_model that stopped: a cancel told as a cancel, a failure with its cause (its own code, else model_unreadable), each with what
- *  its meshing kept (keptMeshing) or, a cancel, that nothing was kept. */
-function stoppedOpen(e: unknown, path: string, hash: string | undefined): never {
-  const k = keptMeshing(hash, path);
+/** A model read that stopped: a cancel told as a cancel, a failure with its cause (its own code; else, open_model or with chunks kept,
+ *  model_unreadable; another tool's failure with nothing kept goes on as it is), each with what its meshing kept (keptMeshing) or, a
+ *  cancel, that nothing was kept. */
+function stopped(e: unknown, path: string, hash: string | undefined, opening: boolean): never {
+  const k = keptMeshing(hash, path, opening);
   const code = (e as { code?: string } | null)?.code ?? '';
+  const who = opening ? 'open_model' : 'The call';
   if (code === 'cancelled') {
-    if (!k) return fail('cancelled', 'open_model was cancelled; nothing of the model’s meshing was kept (no chunk of it had finished).', 'Nothing to discard; call open_model again when the model is needed.', { data: { kept_chunks: 0 } });
-    return fail('cancelled', `open_model was cancelled while the model was meshed: ${k.kept}.`, k.next, { data: k.data });
+    if (!k) return fail('cancelled', `${who} was cancelled; nothing of the model’s meshing was kept (no chunk of it had finished).`, `Nothing to discard; call ${opening ? 'open_model' : 'it'} again when needed.`, { data: { kept_chunks: 0 } });
+    return fail('cancelled', `${who} was cancelled while the model was meshed: ${k.kept}.`, k.next, { data: k.data });
   }
   if (e instanceof ToolError && ['memory_budget', 'model_too_large', 'model_unreadable'].includes(code)) {
     if (!k) throw e;
     throw new ToolError(e.code, e.message, `${e.hint ? `${e.hint} ` : ''}${k.kept}: ${k.next}`, { ...(e.retryAfter ? { retryAfter: e.retryAfter } : {}), data: { ...e.data, ...k.data } });
   }
+  if (!opening && !k) throw e;
   const cause = (e as Error).message;
   return fail('model_unreadable', `Cannot read the model: ${cause}`, k ? `Fix the cause. ${k.kept}: ${k.next}` : unreadableHint(path), k ? { data: { cause, ...k.data } } : undefined);
 }
@@ -173,12 +202,17 @@ export async function discardKeptMeshing(pathIn: unknown): Promise<unknown> {
       : `Nothing of this model’s meshing was kept${removed ? ' (an unfinished chunk folder was removed)' : ''}; nothing else was touched. The model was not opened.` };
 }
 
-/** The need, when it fits the memory free (idle projects moved out first, as for any file); else refused in words. */
-export function fits(path: string, first: LoadNeeds, geometry: boolean | undefined, again: () => LoadNeeds): LoadNeeds {
+/** The need with room made for it: idle projects moved out first when it is within the budget but more than is free (as for any file). */
+function room(first: LoadNeeds, again: () => LoadNeeds): { need: LoadNeeds; budget: number; free: number } {
   const budget = effectiveBudget();
   let free = freeMemory(), need = first;
+  if (need.total <= budget && need.total > free) { try { admit(need.total); } catch { /* told by the caller, in words */ } free = freeMemory(); need = again(); }
+  return { need, budget, free };
+}
+/** The need, when it fits the memory free (idle projects moved out first, as for any file); else refused in words. */
+export function fits(path: string, first: LoadNeeds, geometry: boolean | undefined, again: () => LoadNeeds): LoadNeeds {
   // idle projects moved out make room first (as for any file); only what still does not fit is refused
-  if (need.total <= budget && need.total > free) { try { admit(need.total); } catch { /* refused below, in words */ } free = freeMemory(); need = again(); }
+  const { need, budget, free } = room(first, again);
   if (need.total > budget || need.total > free) {
     const size = existsSync(path) ? statSync(path).size : 0;
     const parts = [need.index ? `${mbs(need.index)} for the index` : '', need.mesh ? (need.chunkBytes ? `${mbs(need.mesh)} for meshing it in chunks of ${mbs(need.chunkBytes)} of the IFC` : `${mbs(need.mesh)} for reading it (the Navisworks reader's own process)`) : ''].filter(Boolean).join(' and ');
@@ -233,8 +267,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
     case 'open_model': {
       const path = pathArg(a.path);
       let m: Model;
-      const seen: { hash?: string } = {};
-      try { m = await readModel(path, { geometry: a.geometry !== false, tick: h.tick, seen }); } catch (e) { return stoppedOpen(e, path, seen.hash); }
+      m = await readModel(path, { geometry: a.geometry !== false, tick: h.tick, opening: true });
       await h.tick(1, 1, 'model parsed');
       const ix = m.index;
       const kept = h.apply(`Attach model ${basename(path)}`, (d) => {
@@ -245,7 +278,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         T.rows = T.rows.filter((r) => r.proj_id !== projId || m.byGuid.has(r.guid));
         return { dropped_links: before - T.rows.length };
       });
-      return { model: basename(path), ...(m.source ? { source: m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: ix.lengthScaleSource === 'unit-assignment' ? `${ix.lengthScale} m` : `${ix.lengthScale} m (${ix.lengthScaleSource})`, geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), ...(ix.geometryStuck ? { geometry_stuck: ix.geometryStuck } : {}), ...((() => { const k = ix.geometryStatus === 'ok' ? null : keptMeshing(m.hash, path); return k ? { ...k.data, kept_note: `${k.kept}. ${k.next}` } : {}; })()), ...((() => { let n = 0; for (const e of ix.elements) if (e.geom && e.derivedVolumeM3 == null) n++; return n ? { meshed_without_volume: n, volume_note: 'open meshes (a surface, a fitting open at its ends) and stand-in bounding boxes enclose no volume to measure, so they give no derived volume; their authored quantities stand' } : {}; })()), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
+      return { model: basename(path), ...(m.source ? { source: m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: ix.lengthScaleSource === 'unit-assignment' ? `${ix.lengthScale} m` : `${ix.lengthScale} m (${ix.lengthScaleSource})`, geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), ...(ix.geometryStuck ? { geometry_stuck: ix.geometryStuck } : {}), ...((() => { const k = ix.geometryStatus === 'ok' ? null : keptMeshing(m.hash, path, true); return k ? { ...k.data, kept_note: `${k.kept}. ${k.next}` } : {}; })()), ...((() => { let n = 0; for (const e of ix.elements) if (e.geom && e.derivedVolumeM3 == null) n++; return n ? { meshed_without_volume: n, volume_note: 'open meshes (a surface, a fitting open at its ends) and stand-in bounding boxes enclose no volume to measure, so they give no derived volume; their authored quantities stand' } : {}; })()), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = readManifest(m.tiles!)!; return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
     }
     case 'list_elements': {
       const m = (await modelOf(s.db, projId))!;

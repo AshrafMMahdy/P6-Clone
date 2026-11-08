@@ -60,7 +60,8 @@ const wrap = (hash: string, index: IfcIndex, tiles: string | null): Model => {
   return { hash, index, tiles: index.geometryStatus === 'ok' && tiles && readManifest(tiles) ? tiles : null, byGuid: elementsByGuid(index), bytes: indexBytes(index) };
 };
 
-type LoadOptions = { geometry?: boolean; chunkBytes?: number; hash?: string; onProgress?: (done: number, total: number, note: string) => void | Promise<void> };
+/** meshNote: said in the geometry note of a meshing this open does (why chunks kept from an earlier meshing were not used). */
+type LoadOptions = { geometry?: boolean; chunkBytes?: number; hash?: string; meshNote?: string; onProgress?: (done: number, total: number, note: string) => void | Promise<void> };
 /** Parse (or take from the cache) the model at path: an IFC, a Revit file (made into IFC4 first, rvt.ts) or a
  *  Navisworks file (read as it is, nwd.ts). geometry: false skips meshing (faster; no tiles, no derived volumes). A model cached without
  *  geometry is meshed from its cached index when geometry is asked for. hash: the IFC's own content hash, when the
@@ -143,7 +144,10 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   if (retry) retried.add(hash);
   if (cached && want && (cached.index.geometryStatus === 'skipped' || retry)) {
     const index = cached.index;
-    await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
+    // a cancel is the caller's choice, not a failure: a retry it stopped has not been tried (the next open tries it)
+    try { await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress }); }
+    catch (e) { if (retry && (e as { code?: string } | null)?.code === 'cancelled') retried.delete(hash); throw e; }
+    noteMeshing(index, o);
     writeIndex(base, index);
     dropKeptChunks(base, index);
     cached = { index };
@@ -157,6 +161,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
     return m;
   }
   const { index } = await parseIfc(path, { geometry: want, ...(want ? { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress } : {}) });
+  if (want) noteMeshing(index, o);
   writeIndex(base, index);
   if (want) dropKeptChunks(base, index); // (an open without geometry meshed nothing: what a stopped meshing kept is still to be used)
   if (index.elements.length > 200_000) compactHeap(); // what reading it left behind goes before the next call takes memory
@@ -173,9 +178,15 @@ function dropKeptChunks(base: string, index: IfcIndex): void {
   try { rmSync(`${base}.chunks`, { recursive: true, force: true }); } catch { /* in use: pruned with the cache */ }
 }
 
+/** The caller's word on this meshing (meshNote) added to the model's geometry note. */
+function noteMeshing(index: IfcIndex, o: LoadOptions): void {
+  if (o.meshNote) index.geometryNote = index.geometryNote ? `${index.geometryNote}; ${o.meshNote}` : o.meshNote;
+}
+
 /** One way a model was cut for meshing (parse.ts: <chunk bytes>-<engine and products key>): the chunks kept whole there, the chunk
- *  size, and how many chunks the model was cut into (null: kept before kept.json named it). */
-export type KeptChunkSet = { kept: number; of: number | null; chunkBytes: number };
+ *  size, how many chunks the model was cut into and the engine that meshed them (parse.ts meshEngine; null: kept before kept.json
+ *  named them). */
+export type KeptChunkSet = { kept: number; of: number | null; chunkBytes: number; engine: string | null };
 /** The chunks a stopped meshing of the IFC with this content (fileHash) kept in the model cache (parse.ts keepChunks), by the way the
  *  model was cut; null when none is kept. Read from the disk as it is now (the next meshing cut the same way takes them in). */
 export function keptChunks(hash: string): KeptChunkSet[] | null {
@@ -189,12 +200,12 @@ export function keptChunks(hash: string): KeptChunkSet[] | null {
     let names: string[];
     try { names = readdirSync(join(dir, w)); } catch { continue; }
     // a chunk is kept whole or absent (its folder renamed into place with its kept.json); <k>.<pid>.tmp is one a stop cut short
-    let kept = 0, of: number | null = null;
+    let kept = 0, of: number | null = null, engine: string | null = null;
     for (const k of names) {
       if (!/^\d+$/.test(k)) continue;
-      try { const m = JSON.parse(readFileSync(join(dir, w, k, 'kept.json'), 'utf8')) as KeptChunk; kept++; if (typeof m.of === 'number') of = m.of; } catch { /* not whole: not kept */ }
+      try { const m = JSON.parse(readFileSync(join(dir, w, k, 'kept.json'), 'utf8')) as KeptChunk; kept++; if (typeof m.of === 'number') of = m.of; if (typeof m.engine === 'string') engine = m.engine; } catch { /* not whole: not kept */ }
     }
-    if (kept) sets.push({ kept, of, chunkBytes: Number(cut[1]) });
+    if (kept) sets.push({ kept, of, chunkBytes: Number(cut[1]), engine });
   }
   return sets.length ? sets : null;
 }
@@ -271,7 +282,8 @@ const meshNeed = (bytes: number) => Math.round(bytes * MESH_PER_BYTE + MESH_FIXE
 
 /** What reading the IFC at path needs, given the memory free for it: the index (unless cached), and one geometry run on
  *  a chunk sized to what is left (never more than P6CLONE_GEOM_CHUNK_MB, never less than MIN_CHUNK). */
-export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; hash?: string } = {}): LoadNeeds {
+/** chunkBytes: the chunk size asked for (that of chunks kept from an earlier meshing), else the default, made smaller to fit free. */
+export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; hash?: string; chunkBytes?: number } = {}): LoadNeeds {
   const size = existsSync(path) ? statSync(path).size : 0;
   // a Revit file is made into an IFC first, by rvt-rs in its own process (revitNeed); reading and meshing the IFC it
   // makes is sized from that IFC (loadNeeds on it, once it is made)
@@ -284,8 +296,8 @@ export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; 
   const tilesCached = !!(base && readManifest(`${base}.tiles`));
   const index = indexCached ? 0 : indexNeed(size);
   if (o.geometry === false || tilesCached) { const idx = index ? index + INDEX_WORKER_FIXED : 0; return { index: idx, mesh: 0, chunkBytes: 0, total: idx }; }
-  let chunk = Math.min(size, chunkBytesOf());
-  if (o.free != null) {
+  let chunk = o.chunkBytes ?? Math.min(size, chunkBytesOf());
+  if (o.free != null && o.chunkBytes == null) {
     // what fits beside the index (the index stays in memory while the runs go)
     const room = o.free - index - MESH_FIXED;
     const fits = Math.floor(room / MESH_PER_BYTE);

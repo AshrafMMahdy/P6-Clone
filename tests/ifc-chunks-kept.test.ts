@@ -155,3 +155,28 @@ test('L3: chunks kept by another version of the engine (here: the tiler changed)
     });
   } finally { rmSync(engine, { recursive: true, force: true }); }
 });
+
+test('a cancelled retry of a model whose meshing failed does not use up the retry: the next open meshes it, from the chunks kept', { timeout: 600_000 }, async () => {
+  const { loadModel, releaseModels } = await import('../core/bim/model.ts');
+  const ref = await reference();
+  const cache = mkdtempSync(join(tmpdir(), 'p6-kept-retry-'));
+  const file = join(mkdtempSync(join(tmpdir(), 'p6-kept-ifc-')), 'duplex.ifc');
+  copyFileSync(FX, file);
+  // its meshing fails (no geometry worker): indexed, geometry unavailable, cached so
+  await withEnv({ ...env, P6CLONE_MODEL_CACHE: cache, WHIQ_IFC_GEOM_WORKER: join(tmpdir(), 'no-such-worker.mjs') }, async () => {
+    releaseModels(new Set());
+    assert.equal((await loadModel(file)).index.geometryStatus, 'unavailable');
+  });
+  await withEnv({ ...env, P6CLONE_MODEL_CACHE: cache }, async () => {
+    // the one retry of this run, cancelled at the fourth chunk
+    releaseModels(new Set());
+    await assert.rejects(loadModel(file, { onProgress: (d) => { if (d === 3) throw Object.assign(new Error('The call was cancelled.'), { code: 'cancelled' }); } }), /cancelled/);
+    // a cancel is not a failure: the next open retries, taking in the three chunks kept
+    releaseModels(new Set());
+    const notes: string[] = [];
+    const m = await loadModel(file, { onProgress: (_d, _t, n) => { notes.push(n); } });
+    assert.equal(m.index.geometryStatus, 'ok', m.index.geometryNote ?? '');
+    assert.deepEqual(meshed(notes), { kept: 3, meshed: ref.total - 3 }, notes.join(' | '));
+    assert.deepEqual(picture(m), ref.picture);
+  });
+});

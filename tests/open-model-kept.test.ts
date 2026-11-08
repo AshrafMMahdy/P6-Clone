@@ -4,7 +4,7 @@
 // removes them when the model will not be opened again. discard_kept removes only that model's kept chunks and opens nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -14,6 +14,7 @@ process.env.P6CLONE_GEOM_CHUNK_MB = '0.1'; // (Duplex cut into many chunks)
 const { callTool, toolResult } = await import('../mcp/server.ts');
 const { onJobChange } = await import('../mcp/runtime.ts');
 const { releaseModels } = await import('../core/bim/model.ts');
+const { meshEngine } = await import('../core/bim/parse.ts');
 const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal) => { const x = await callTool(name, args, undefined, signal); return { err: x.isError, d: toolResult(x.out, x.isError).structuredContent as any }; };
 
 /** A project, a copy of the model and a model cache of its own. */
@@ -27,9 +28,9 @@ const setup = async (id: string) => {
 /** The chunks kept whole in the cache: <cache>/<model>.chunks/<way>/<k>/kept.json. */
 const keptOnDisk = (cache: string) => readdirSync(cache).filter((f) => f.endsWith('.chunks')).flatMap((d) => readdirSync(join(cache, d)).flatMap((w) => readdirSync(join(cache, d, w)).filter((k) => /^\d+$/.test(k) && existsSync(join(cache, d, w, k, 'kept.json'))))).length;
 
-/** open_model as a job, its progress followed: the chunks meshed and taken in from an earlier meshing (by number), and the total.
- *  stop(k, id): told at each chunk about to be meshed (1-based); it may cancel. */
-async function openJob(args: Record<string, unknown>, stop?: (k: number, id: string, ac: AbortController) => void) {
+/** open_model (or another tool that meshes the model) as a job, its progress followed: the chunks meshed and taken in from an earlier
+ *  meshing (by number), and the total. stop(k, id): told at each chunk about to be meshed (1-based); it may cancel. */
+async function openJob(args: Record<string, unknown>, stop?: (k: number, id: string, ac: AbortController) => void, tool = 'open_model') {
   releaseModels(new Set()); // (a model is held in memory by its content: each open here reads the cache or the file)
   const ac = new AbortController();
   const meshed = new Set<number>(), taken = new Set<number>();
@@ -42,7 +43,7 @@ async function openJob(args: Record<string, unknown>, stop?: (k: number, id: str
     if (m) { taken.add(Number(m[1])); total = Number(m[2]); }
   });
   try {
-    const j = await call('open_model', { ...args, async: true }, ac.signal);
+    const j = await call(tool, { ...args, async: true }, ac.signal);
     assert.equal(j.err, false, JSON.stringify(j.d));
     let v: any;
     do v = (await call('job_status', { job_id: j.d.job_id, wait_seconds: 20 })).d; while (v.status === 'running');
@@ -60,8 +61,7 @@ test('open_model cancelled (cancel_job) mid-meshing: cancelled, with the chunks 
   const e = stopped.v.error;
   assert.equal(e.code, 'cancelled');
   assert.equal(e.reason, `open_model was cancelled while the model was meshed: ${n} of ${stopped.total} chunks of the model’s meshing are kept in the clone’s model cache (not in the project).`);
-  assert.match(e.next_step, /^Calling open_model again with the same path, with geometry, continues from them: only the missing chunks are meshed \(kept chunks are used when the model is cut the same way, in chunks of 0\.1 MB of the IFC/);
-  assert.match(e.next_step, /If you will not open this model again, discard them: open_model with this path and discard_kept: true\.$/);
+  assert.equal(e.next_step, `Calling open_model again with the same path, with geometry, continues from them: only the missing chunks are meshed (in chunks of their size, 0.1 MB of the IFC, when that fits the memory free then, else it is meshed from scratch and the model\u2019s geometry note says why; chunks kept by another version of the clone are not used). If you will not open this model again, discard them: open_model with path "${s.file}" and discard_kept: true.`);
   assert.equal(e.kept_chunks, n);
   assert.equal(e.chunks_total, stopped.total);
   assert.deepEqual(e.discard_with, { tool: 'open_model', path: s.file, discard_kept: true });
@@ -118,4 +118,52 @@ test('open_model cancelled before any chunk was meshed: cancelled, nothing kept'
   assert.equal(stopped.v.error.reason, 'open_model was cancelled; nothing of the model’s meshing was kept (no chunk of it had finished).');
   assert.equal(stopped.v.error.kept_chunks, 0);
   assert.equal(keptOnDisk(s.cache), 0);
+});
+
+test('kept at one chunk size, the default now another: the model is meshed in chunks of the kept size (it fits) and they are taken in', { timeout: 600_000 }, async () => {
+  const s = await setup('KEPT4');
+  const stopped = await openJob({ handle: s.handle, owner_key: s.owner_key, path: s.file }, (k, _id, ac) => { if (k === 4) ac.abort(); });
+  assert.equal(stopped.v.error.kept_chunks, 3);
+  process.env.P6CLONE_GEOM_CHUNK_MB = '0.2'; // (the chunk size an open picks now differs from the kept one, as less or more memory free would make it)
+  try {
+    const again = await openJob({ handle: s.handle, owner_key: s.owner_key, path: s.file });
+    assert.equal(again.v.status, 'done', JSON.stringify(again.v));
+    assert.equal(again.v.result.geometry, 'ok');
+    assert.equal(again.total, stopped.total, 'cut as the kept chunks were');
+    assert.equal(again.taken.size, 3);
+    assert.equal(again.meshed.size, stopped.total - 3);
+    assert.doesNotMatch(again.v.result.geometry_note ?? '', /not used/);
+  } finally { process.env.P6CLONE_GEOM_CHUNK_MB = '0.1'; }
+});
+
+test('kept chunks whose size does not fit the memory free now are not used: meshed from scratch, and the geometry note says why', { timeout: 600_000 }, async () => {
+  const s = await setup('KEPT5');
+  releaseModels(new Set()); // (the index read from the file into this cache)
+  assert.equal((await call('open_model', { handle: s.handle, owner_key: s.owner_key, path: s.file, geometry: false })).err, false);
+  const base = readdirSync(s.cache).find((f) => f.endsWith('.ndjson'))!.replace(/\.ndjson$/, '');
+  // one chunk kept by this engine at a size no memory budget here holds (10,000,000 MB)
+  const way = join(s.cache, `${base}.chunks`, `${1e7 * 1048576}-0123456789abcdef`, '0');
+  mkdirSync(way, { recursive: true });
+  writeFileSync(join(way, 'kept.json'), JSON.stringify({ files: [], tiles: [], of: 2, engine: meshEngine() }));
+  const o = await openJob({ handle: s.handle, owner_key: s.owner_key, path: s.file });
+  assert.equal(o.v.status, 'done', JSON.stringify(o.v));
+  assert.equal(o.v.result.geometry, 'ok');
+  assert.equal(o.taken.size, 0);
+  assert.equal(o.meshed.size, o.total);
+  assert.match(o.v.result.geometry_note, /the 1 chunk kept from an earlier meshing was not used: meshing in chunks of their size \(10000000 MB of the IFC\) needs about [\d,]+ MB of memory and [\d,]+ MB of the memory budget is free now, so the model was meshed from scratch/);
+  assert.equal(existsSync(join(s.cache, `${base}.chunks`)), false, 'meshed: the kept chunks go');
+});
+
+test('render_4d meshing a model opened without geometry, cancelled part-way: cancelled, with the chunks kept and how to continue or discard', { timeout: 600_000 }, async () => {
+  const s = await setup('KEPT6');
+  releaseModels(new Set()); // (the index read from the file into this cache)
+  assert.equal((await call('open_model', { handle: s.handle, owner_key: s.owner_key, path: s.file, geometry: false })).err, false);
+  const stopped = await openJob({ handle: s.handle, path: mkdtempSync(join(tmpdir(), 'p6-okept-out-')), kind: 'viewer' }, (k, _id, ac) => { if (k === 4) ac.abort(); }, 'render_4d');
+  assert.equal(stopped.v.status, 'cancelled', JSON.stringify(stopped.v));
+  const e = stopped.v.error;
+  assert.equal(e.code, 'cancelled');
+  assert.equal(e.reason, `The call was cancelled while the model was meshed: 3 of ${stopped.total} chunks of the model’s meshing are kept in the clone’s model cache (not in the project).`);
+  assert.equal(e.next_step, `Calling this tool again (or open_model with the model’s path) continues from them: only the missing chunks are meshed (in chunks of their size, 0.1 MB of the IFC, when that fits the memory free then, else it is meshed from scratch and the model’s geometry note says why; chunks kept by another version of the clone are not used). If you will not open this model again, discard them: open_model with path "${s.file}" and discard_kept: true.`);
+  assert.equal(e.kept_chunks, 3);
+  assert.equal(keptOnDisk(s.cache), 3);
 });

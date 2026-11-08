@@ -280,7 +280,8 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   // the chunks a stopped meshing of this model finished, cut and meshed the same way: the same chunk size, the same products (in the
   // same order: meshIndex may be given another list) and the same engine (the scripts that cut, mesh and tile, and web-ifc: a kept
   // chunk of an older engine would mix its tessellation with the new one's)
-  const keptDir = opts.keepChunks ? join(opts.keepChunks, `${target}-${chunkKey(script, productIds)}`) : null;
+  const engine = opts.keepChunks ? engineText(script) : '';
+  const keptDir = opts.keepChunks ? join(opts.keepChunks, `${target}-${chunkKey(engine, productIds)}`) : null;
   let redone = 0;
   for (const [k, c] of chunks.entries()) {
     const took = keptDir ? takeKeptChunk(join(keptDir, String(k)), index, tilesDir, state) : 'none';
@@ -291,7 +292,7 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
     }
     if (took === 'damaged') redone++;
     await opts.onProgress?.(k, chunks.length, `meshing chunk ${k + 1} of ${chunks.length}${took === 'damaged' ? ' (its kept results did not check out)' : ''}`);
-    const r = await one(c.file, join(cdir, `g${k}`), keptDir ? { dir: join(keptDir, String(k)), of: chunks.length } : undefined);
+    const r = await one(c.file, join(cdir, `g${k}`), keptDir ? { dir: join(keptDir, String(k)), of: chunks.length, engine: engineDigest(engine) } : undefined);
     rmSync(c.file, { force: true });
     if (!r.ok) { failed.push(`chunk ${k + 1} (${c.products} products): ${r.note.split(' The model is indexed')[0]}`); state.failures += c.products; if (r.stuck) state.stuck ??= r.stuck; }
   }
@@ -314,16 +315,24 @@ function fileDigest(path: string): string {
 }
 /** The key of a model's kept chunks besides their size (review 4L-13 M4, L3): the engine (ENGINE_SCRIPTS beside the worker, web-ifc's
  *  entry and WebAssembly where the worker finds them) and the products the meshing was given, in order. */
-function chunkKey(script: string, productIds: Uint32Array): string {
-  const h = createHash('sha256').update(`kept-chunks/1;`);
-  for (const f of ENGINE_SCRIPTS) h.update(`${f}=${fileDigest(join(dirname(script), f))};`);
-  const entry = webIfcEntry();
-  let web: string | null = null;
-  try { web = entry.startsWith('file:') ? fileURLToPath(entry) : createRequire(script).resolve(entry); } catch { /* not found from the worker: it cannot mesh either */ }
-  h.update(`web-ifc=${web ? `${fileDigest(web)},${fileDigest(join(dirname(web), 'web-ifc-node.wasm'))}` : 'absent'};`);
+function chunkKey(engine: string, productIds: Uint32Array): string {
+  const h = createHash('sha256').update(`kept-chunks/1;${engine}`);
   h.update(new Uint8Array(productIds.buffer, productIds.byteOffset, productIds.byteLength));
   return h.digest('hex').slice(0, 16);
 }
+/** The engine a chunk is meshed by, as the text chunkKey hashes: each of ENGINE_SCRIPTS beside the worker and web-ifc's entry and
+ *  WebAssembly where the worker finds them, by their contents. */
+function engineText(script: string): string {
+  let t = '';
+  for (const f of ENGINE_SCRIPTS) t += `${f}=${fileDigest(join(dirname(script), f))};`;
+  const entry = webIfcEntry();
+  let web: string | null = null;
+  try { web = entry.startsWith('file:') ? fileURLToPath(entry) : createRequire(script).resolve(entry); } catch { /* not found from the worker: it cannot mesh either */ }
+  return `${t}web-ifc=${web ? `${fileDigest(web)},${fileDigest(join(dirname(web), 'web-ifc-node.wasm'))}` : 'absent'};`;
+}
+const engineDigest = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+/** The engine this installation meshes with (kept.json's engine: a kept chunk of another one is not taken); null without a worker. */
+export function meshEngine(opts: ParseIfcOptions = {}): string | null { const s = workerScript(opts); return s ? engineDigest(engineText(s)) : null; }
 
 export type RunState = { meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[]; stuck?: StuckData };
 export const newRunState = (): RunState => ({ meshed: 0, failures: 0, maxAbsCoord: 0, tiles: [] });
@@ -360,24 +369,24 @@ export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string |
   return { ok: true };
 }
 
-/** Where a chunk is kept (its folder) and how many chunks the model was cut into. */
-type KeepTo = { dir: string; of: number };
-/** A kept chunk's manifest (kept.json): each of its files' length and CRC32, its tiles (null: kept without tiles), and how many chunks
- *  the model was cut into (keptChunks in model.ts tells it; absent in a chunk kept before it was written). */
-export interface KeptChunk { files: { name: string; bytes: number; crc: number }[]; tiles: TileRecord[] | null; of?: number }
+/** Where a chunk is kept (its folder), how many chunks the model was cut into, and the engine it was meshed by (meshEngine). */
+type KeepTo = { dir: string; of: number; engine: string };
+/** A kept chunk's manifest (kept.json): each of its files' length and CRC32, its tiles (null: kept without tiles), how many chunks
+ *  the model was cut into and the engine that meshed it (keptChunks in model.ts reads them; absent in a chunk kept before they were written). */
+export interface KeptChunk { files: { name: string; bytes: number; crc: number }[]; tiles: TileRecord[] | null; of?: number; engine?: string }
 const sealOf = (path: string, name: string) => { const b = readFileSync(path); return { name, bytes: b.length, crc: crc32(b) }; };
 
 /** A chunk's results kept (G10, 4L-13): its fingerprints (geom.json, elems.meta) and its tiles (renamed t-N.glb), with kept.json naming
  *  each file's length and CRC32 (review 4L-13 L1: a power loss can leave a file of zeros), written beside and renamed into place: a
  *  kept chunk is whole or absent. */
-function keepChunk(dir: string, tilesDir: string | null, tiles: TileRecord[], { dir: keepTo, of }: KeepTo): void {
+function keepChunk(dir: string, tilesDir: string | null, tiles: TileRecord[], { dir: keepTo, of, engine }: KeepTo): void {
   const tmp = `${keepTo}.${process.pid}.tmp`;
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
   copyFileSync(join(dir, 'geom.json'), join(tmp, 'geom.json'));
   copyFileSync(join(dir, 'elems.meta'), join(tmp, 'elems.meta'));
   const kept = tilesDir ? tiles.map((t, i) => { copyFileSync(join(tilesDir, t.file), join(tmp, `t-${i}.glb`)); return { ...t, file: `t-${i}.glb` }; }) : null;
-  const manifest: KeptChunk = { files: ['geom.json', 'elems.meta', ...(kept ?? []).map((t) => t.file)].map((f) => sealOf(join(tmp, f), f)), tiles: kept, of };
+  const manifest: KeptChunk = { files: ['geom.json', 'elems.meta', ...(kept ?? []).map((t) => t.file)].map((f) => sealOf(join(tmp, f), f)), tiles: kept, of, engine };
   writeFileSync(join(tmp, 'kept.json'), JSON.stringify(manifest));
   rmSync(keepTo, { recursive: true, force: true });
   // another process meshing the same model may have kept this chunk first: those are the same results, so they stand
