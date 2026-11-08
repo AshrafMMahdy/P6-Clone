@@ -253,16 +253,33 @@ export async function whileEncoding<T>(run: Promise<T>, evaluate: Evaluate, onPr
   try { return await Promise.race([run, stop]); } finally { finished = true; }
 }
 
-/** What the page will encode, before any frame is drawn: the frame count, the codec and the encoder's bitrate. */
-export interface VideoPlan { frames: number; mime: string; codec: 'avc' | 'vp9'; bitrate: number; fps: number }
+/** What the page will encode, before any frame is drawn: the frame count and the codec. */
+export interface VideoPlan { frames: number; mime: string; codec: 'avc' | 'vp9'; fps: number }
 export const planVideo = (evaluate: Evaluate, o: object) => evaluate(`window.P6C4D_API.plan(${JSON.stringify(o)})`) as Promise<VideoPlan>;
 
-/** One run of frames (o.first, o.count) encoded in the page as a file of its own; progress is read from the page every half
- *  second while it runs (frames of this run, in `onProgress`'s units). */
-export async function renderSegment(evaluate: Evaluate, o: object, onProgress: Progress, alive?: Alive): Promise<{ mime: string; frames: number; bytes: Buffer }> {
-  const run = evaluate(`window.P6C4D_API.encode(${JSON.stringify(o)}).then((r) => { let s = ''; const b = r.bytes; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768)); return { mime: r.mime, frames: r.frames, b64: btoa(s) }; })`) as Promise<{ mime: string; frames: number; b64: string }>;
-  const v = await whileEncoding(run, evaluate, onProgress, alive);
-  return { mime: v.mime, frames: v.frames, bytes: Buffer.from(v.b64, 'base64') };
+/** One run of frames (o.first, o.count) encoded in the page as a stream: the page hands out the finished chunks of the video (the
+ *  header, then each fragment or cluster, cut where the encoder has a key frame) and they are taken on each of the page's progress
+ *  reads (the same poll as the frames done, in `onProgress`'s units), each to `onChunk` in order, awaited (it writes them to disk).
+ *  Whatever the run ends in, the chunks already finished are taken once more before this returns or throws (best effort when it
+ *  failed: a page that is gone cannot be asked); but never after a chunk that failed to be handled: a run has no holes, so what
+ *  follows a lost chunk is drawn again, not kept. */
+export async function renderRun(evaluate: Evaluate, o: object, onChunk: (chunk: Buffer) => void | Promise<void>, onProgress: Progress, alive?: Alive): Promise<{ mime: string; frames: number }> {
+  let lost = false, queue: Promise<void> = Promise.resolve();
+  const take = async () => {
+    if (lost) return;
+    for (const c of (await evaluate('window.P6C4D_API.drain()', false)) as string[]) { if (lost) return; try { await onChunk(Buffer.from(c, 'base64')); } catch (e) { lost = true; throw e; } }
+  };
+  const drain = () => (queue = queue.then(take, take)); // one at a time, in order (a read still running when the run ends is not overtaken)
+  const run = evaluate(`window.P6C4D_API.encode(${JSON.stringify({ ...o, stream: true })})`) as Promise<{ mime: string; frames: number }>;
+  run.catch(() => undefined); // (a failure that comes after the race has ended is already the render's)
+  try {
+    const v = await whileEncoding(run, evaluate, async (d, t, n) => { await drain(); await onProgress(d, t, n); }, alive);
+    await drain();
+    return v;
+  } catch (e) {
+    await drain().catch(() => undefined);
+    throw e;
+  }
 }
 
 /** A page that is already open (the desktop app's offscreen window on the user's graphics card), driven with the same watch as

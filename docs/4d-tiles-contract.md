@@ -183,6 +183,45 @@ names the picture size, and `boxes: true` at standard size is still boxes), and 
 WebM to MP4 (ffmpeg) is watched by ffmpeg's own `-progress` frames; the desktop app's video render (`main/bim.ts`) by the same
 watch as the server's (`inPage` in `headless.ts`: tiles loaded, frames drawn, a page whose process is gone ends it at once).
 
+**A render that can be continued** (`render_4d`, `kind: video` or `images`, with a server Chromium; `core/bim/renderParts.ts`). Beside the
+output, in `<path>/<file_name>.parts/`, `render.json` holds the arguments, a fingerprint of everything that changes the picture (model,
+schedule and links, source, size, boxes, quality, dates, step, fps, growth, overlays, view; not how the video is cut), `frames_total`, and
+what is done. There are no segments sized by the tile memory budget any more: **a video is streamed**. Each encoder session is a *run*:
+the page encodes a fragmented MP4 (`fastStart: 'fragmented'`) or an append-only WebM through a Mediabunny `StreamTarget`, with the library's
+own fragment and key-frame defaults (no number of ours), and hands out only *whole* chunks (the header, then each fragment or cluster, each
+starting on an encoder key frame: `P6C4D_API.drain()`); Node reads them every half second and appends them to `run-N.mp4` / `run-N.webm`.
+After each whole chunk `render.json` is rewritten with the run's entry `{file, first, frames, bytes, config}`: `bytes` is the length that is
+whole, `frames` what those bytes hold, `config` a hash of the decoder configuration (codec string and description bytes). The page never
+holds the video, and a killed process leaves everything up to the last whole chunk. `encode` without `stream: true` (the desktop app) still
+returns the whole file.
+
+A failure or cancel keeps what is whole; the `render_failed` error (or the cancelled job's partial answer) carries `frames_done`, `frames_total`,
+`kept_segments` (video: the run files) or `kept` (images: the frames), `resume` (the render.json), `redrawn`, and says: *to continue, call
+render_4d again with the same arguments and resume: "<x>.parts/render.json"; a call without resume starts over* (a call without resume
+replaces the old parts of that name). The tool reads exactly the resume path given (compared as a path: resolved, case-folded on Windows)
+and never searches for one. On a resume, the manifest is checked (shape, names, ranges, that each run reads back as its frames and decoder
+configuration up to its `bytes`) and **nothing is changed on disk until the resume is accepted**: a refused resume (`resume_mismatch`,
+`resume_unreadable`) removes, cuts and rewrites nothing; once accepted, a run file longer than its `bytes` (a chunk being written when the
+process died) is cut back, a run that does not check out is left out of the manifest (its file is overwritten only when its frames are drawn
+again), and those frames are drawn again. The encoder in use is the one this call draws with: the first run it encodes sets the `config` every run must have, or, when nothing is
+missing, the newest kept run's (the runs are numbered in the order they were drawn). A run whose `config` differs cannot be joined to
+those of this encoder; it is marked `stale` in `render.json` (listed, not counted in `frames_done`, its frames missing), drawn again in the
+same pass, and dropped from the manifest once runs in use cover its frames (its file stays until the parts are removed); `redrawn` says
+which and why. A stale run is never used again: a call cannot know its encoder's configuration before it draws. The answer lists stale runs apart,
+as `stale_segments`; `kept_segments` is exactly the work `frames_done` counts. Nothing is retried: if a run drawn in this call still
+differs from the reference (an unstable encoder, or an encoder that changed since the newest kept run when nothing was missing), the join is
+refused as `render_failed` with `reason: decoder_config_differs` and the kept report; the next resume converges (its reference is then the
+newest run, and the older ones are the stale ones). Parts loaded for a resume are never replaced or removed by a refusal or a failure (a
+changed picture or `frames_total` is a `resume_mismatch`); only a call without resume replaces them. Any listed run, live or stale, is kept
+work: the failure answer carries the report, `resume` and the wording. A manifest image entry that resolves outside the write root is not
+followed, and `redrawn` says so. The runs are joined by copying packets (a refusal if their configurations differ), the result is checked
+frame by frame, and the `.parts` folder is removed after every successful render (video MP4, WebM converted to MP4 with ffmpeg, images).
+Images are written straight into the output folder as they are made; `render.json` lists each by its path **relative to the write root**
+(the output folder when the server has none), so a tree copied to another root (an engine restart) is the same render and its frames are not
+drawn again; an entry resolving outside the root is ignored. A second `render_4d` in the same `.parts` folder while one is still working in it
+(a cancelled job answers before it has stopped) is refused as `render_busy`, with `job_id` when it is a job. With no Chromium here (the client
+route) nothing is rendered and `resume` is not used; the note says so and the parts are left as they are.
+
 **How a job is judged frozen** (`core/bim/liveness.ts`, `core/bim/heartbeat.mjs`): the platform's rule, one for every watch (owner
 decision 2026-11-08; the earlier gap multiple, floor, start-up windows and 10 x work bound are gone — they were never the owner's).
 Every window (5 s; `P6CLONE_LIVENESS_WINDOW_MS` shortens it for tests) a watch asks: did the work make progress (a tick, a unit done,

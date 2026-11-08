@@ -15,7 +15,7 @@
 // Signals to the parent window (the platform): whiq4d:started at once, whiq4d:progress per tile, whiq4d:ready,
 // whiq4d:error.
 import * as THREE from 'three';
-import { BufferTarget, CanvasSource, getFirstEncodableVideoCodec, Mp4OutputFormat, Output, QUALITY_HIGH, WebMOutputFormat } from 'mediabunny';
+import { BufferTarget, CanvasSource, getFirstEncodableVideoCodec, Mp4OutputFormat, Output, QUALITY_HIGH, StreamTarget, WebMOutputFormat } from 'mediabunny';
 
 type Role = 'built' | 'removed' | 'temporary';
 type State = 'not_started' | 'in_progress' | 'complete' | 'removed' | 'temporary';
@@ -571,6 +571,23 @@ const videoCodec = async (o: SweepOptions, w: number, h: number) => {
   if (!codec) throw new Error('This browser cannot encode H.264 or VP9 video (WebCodecs).');
   return codec as 'avc' | 'vp9';
 };
+/** What a streaming encode has written, and where its whole chunks end (the container's own marks: the header, each fragment or
+ *  cluster). Bytes are handed out only up to a mark, so a chunk is never cut in the middle. */
+class Outbox {
+  private pieces: Uint8Array[] = []; private have = 0; private gone = 0; private ends: number[] = [];
+  write(c: { position: number; data: Uint8Array }) { if (c.position !== this.have) throw new Error(`The encoder wrote out of order (at byte ${c.position}, expected ${this.have}).`); this.pieces.push(c.data); this.have += c.data.length; }
+  mark(end: number) { this.ends.push(end); }
+  take(): Uint8Array[] {
+    const out: Uint8Array[] = [];
+    while (this.ends.length && this.ends[0] <= this.have) {
+      const n = this.ends.shift()! - this.gone, chunk = new Uint8Array(n);
+      for (let at = 0; at < n;) { const p = this.pieces[0], k = Math.min(p.length, n - at); chunk.set(p.subarray(0, k), at); at += k; if (k === p.length) this.pieces.shift(); else this.pieces[0] = p.subarray(k); }
+      this.gone += n; out.push(chunk);
+    }
+    return out;
+  }
+}
+let outbox = new Outbox();
 const api = {
   ready: () => { failedNow(); return loaded; },
   status: () => JSON.parse(JSON.stringify(status)) as Status,
@@ -578,24 +595,30 @@ const api = {
   setDate: (d: string) => { const m = toMin(d); if (m != null) { current = m; render(); } },
   setSource: (s: string) => { opt.left = s; render(); },
   highlight: (list: string[]) => { highlighted.clear(); for (const g of list) { const o = ordinalOfGuid(g); if (o >= 0) highlighted.add(o); } render(); },
-  /** The sweep from..to a frame per step, without drawing it: how many frames, the codec this browser encodes it with and the
-   *  bitrate the encoder is given (QUALITY_HIGH at this size), from which the caller sizes a segment before the first one is made. */
-  plan: async (o: SweepOptions = {}): Promise<{ frames: number; mime: string; codec: 'avc' | 'vp9'; bitrate: number; fps: number }> => {
+  /** The sweep from..to a frame per step, without drawing it: how many frames and the codec this browser encodes it with. */
+  plan: async (o: SweepOptions = {}): Promise<{ frames: number; mime: string; codec: 'avc' | 'vp9'; fps: number }> => {
     await whenLoaded();
     const s = sweep(o);
     const codec = await videoCodec(o, s.w, s.h);
-    return { frames: s.total, mime: codec === 'avc' ? 'video/mp4' : 'video/webm', codec, bitrate: (QUALITY_HIGH as unknown as { _toVideoBitrate(c: string, w: number, h: number): number })._toVideoBitrate(codec, s.w, s.h), fps: s.fps };
+    return { frames: s.total, mime: codec === 'avc' ? 'video/mp4' : 'video/webm', codec, fps: s.fps };
   },
   /** An MP4 (H.264 when the browser can encode it, else WebM/VP9) of the sweep from..to, a frame per step, made here. With
-   *  first and count, only that run of frames (frame i is the date a + i * step): a file of its own, its timestamps from 0,
-   *  every segment starting on a key frame, so the caller can join the segments without encoding again. */
-  encode: async (o: SweepOptions & { first?: number; count?: number } = {}): Promise<{ bytes: Uint8Array; mime: string; frames: number }> => {
+   *  first and count, only that run of frames (frame i is the date a + i * step): its timestamps from 0, starting on a key frame, so
+   *  the caller can join runs without encoding again. With stream: true the video does not stay in the page: it is a fragmented MP4
+   *  (a WebM written append-only) whose whole chunks (the header, then each fragment or cluster, which the encoder starts on its own
+   *  key frames) are handed out by drain() as they are finished, and the answer has no bytes. Without it, the whole file is the answer
+   *  (the desktop app saves it). */
+  encode: async (o: SweepOptions & { first?: number; count?: number; stream?: boolean } = {}): Promise<{ bytes?: Uint8Array; mime: string; frames: number }> => {
     await whenLoaded();
     const { w, h, fps, step, a, b, total } = sweep(o);
     resize(w, h);
     const codec = await videoCodec(o, w, h);
     const first = Math.min(total, Math.max(0, Math.floor(o.first ?? 0))), last = Math.min(total, o.count == null ? total : first + Math.max(1, Math.floor(o.count)));
-    const output = new Output({ format: codec === 'avc' ? new Mp4OutputFormat() : new WebMOutputFormat(), target: new BufferTarget() });
+    const out = outbox = new Outbox();
+    const whole = (d: Uint8Array, at: number) => out.mark(at + d.length);
+    const output = o.stream
+      ? new Output({ format: codec === 'avc' ? new Mp4OutputFormat({ fastStart: 'fragmented', onMoov: whole, onMdat: whole }) : new WebMOutputFormat({ appendOnly: true, onSegmentHeader: whole, onCluster: whole }), target: new StreamTarget(new WritableStream({ write: (c) => out.write(c) })) })
+      : new Output({ format: codec === 'avc' ? new Mp4OutputFormat() : new WebMOutputFormat(), target: new BufferTarget() });
     const frame = document.createElement('canvas'); frame.width = w; frame.height = h;
     const src = new CanvasSource(frame, { codec, bitrate: QUALITY_HIGH });
     output.addVideoTrack(src, { frameRate: fps });
@@ -603,8 +626,11 @@ const api = {
     progress.done = 0; progress.total = last - first;
     for (let n = first; n < last; n++) { failedNow(); current = Math.min(a + n * step, b); render(); frame.getContext('2d')!.drawImage(composite(), 0, 0); await src.add((n - first) / fps, 1 / fps); progress.done = n - first + 1; }
     await output.finalize();
-    return { bytes: new Uint8Array((output.target as BufferTarget).buffer!), mime: codec === 'avc' ? 'video/mp4' : 'video/webm', frames: last - first };
+    return { ...(o.stream ? {} : { bytes: new Uint8Array((output.target as BufferTarget).buffer!) }), mime: codec === 'avc' ? 'video/mp4' : 'video/webm', frames: last - first };
   },
+  /** The whole chunks of a streaming encode finished since the last call, each as base64: the first is the container's header (no
+   *  frames), each later one a fragment or cluster. Bytes of a chunk still being written are not handed out. */
+  drain: (): string[] => outbox.take().map((c) => { let s = ''; for (let i = 0; i < c.length; i += 32768) s += String.fromCharCode.apply(null, c.subarray(i, i + 32768) as unknown as number[]); return btoa(s); }),
   /** One frame as PNG (data URL) at a date. */
   png: (d?: string) => { failedNow(); if (!loaded) throw new Error('The 4D model has not finished loading (P6C4D_API.ready() is still false).'); if (d) api.setDate(d); render(); return composite().toDataURL('image/png'); },
 };

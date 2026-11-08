@@ -727,7 +727,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     if (now - lastTick > 250) { lastTick = now; ctx.progress?.(done, total, message); }
     await checkpoint(ctx); // yields, and throws "cancelled" once the call or its job is cancelled
   };
-  const helpers = { projectIds, allIds, dd, writeOut, writeOutWith, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), applyAsync: <T,>(label: string, fn: (d: Db) => Promise<T>) => changeAsync(s, ctx.caller, label, fn), tick, keep: ctx.keep };
+  const helpers = { projectIds, allIds, dd, writeOut, writeOutWith, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), applyAsync: <T,>(label: string, fn: (d: Db) => Promise<T>) => changeAsync(s, ctx.caller, label, fn), tick, keep: ctx.keep, job: () => ctx.job?.id };
   const analysed = await runAnalysis(name, a, s, helpers);
   if (analysed !== undefined) return analysed;
   const fourd = await runFourD(name, a, s, helpers);

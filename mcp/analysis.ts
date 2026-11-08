@@ -45,6 +45,8 @@ export interface AnalysisHelpers {
   tick: Tick;
   /** a finished row of the answer, sent out as it is done (in a compute worker: kept if the worker is ended); absent elsewhere */
   keep?: (row: unknown) => void;
+  /** the id of the job this call runs as, when it is one (a second call that finds the work busy names it) */
+  job?: () => string | undefined;
 }
 
 // read-only for the project: an optional report path writes an HTML file and nothing else
