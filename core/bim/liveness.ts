@@ -177,21 +177,24 @@ function watchLoop(w: Watched, onStuck: (i: StuckInfo) => void, windowMs = liven
   const report = watchReport.getStore();
   let told = false;
   const tell = (line: string | null) => { if (!report || (!line && !told)) return; told = !!line; try { report.line(line); } catch { /* the job is gone */ } };
-  let stopped = false, busy = false, winStart = Date.now(), cpuThen: number | null = null, gotBase = false;
+  let stopped = false, winStart = Date.now(), cpuThen: number | null = null, gotBase = false, timer: ReturnType<typeof setTimeout> | undefined;
   const base = w.cpu ? w.cpu().then((v) => { cpuThen = v; gotBase = true; }, () => { gotBase = true; }) : Promise.resolve();
-  const timer = setInterval(async () => {
-    if (stopped || busy) return;
-    busy = true;
+  // One window after another, each starting where the last one ended (the time spent reading the processor time — PowerShell on
+  // Windows can take longer than a window under load — belongs to the next window, so progress made meanwhile always counts).
+  const next = () => { if (!stopped) { timer = setTimeout(check, Math.max(0, winStart + windowMs - Date.now())); timer.unref?.(); } };
+  const check = async () => {
+    if (stopped) return;
     try {
       await base;
       const now = Date.now();
-      // fired after a second window had begun: this process was busy and did not watch the window — not counted
-      if (now - winStart >= 2 * windowMs) { winStart = now; cpuThen = w.cpu ? await w.cpu().catch(() => null) : null; return; }
+      // this process did not get to look for a whole window or more (its own event loop was busy): that window is not counted
+      if (now - (winStart + windowMs) >= windowMs) { winStart = now; cpuThen = w.cpu ? await w.cpu().catch(() => null) : null; return; }
       await w.refresh?.().catch(() => undefined);
       const progressed = w.lastProgressAt() >= winStart;
+      const nextStart = Date.now();
       const cpuNow = w.cpu ? await w.cpu().catch(() => null) : null;
       const used = cpuNow != null && cpuThen != null && gotBase ? Math.max(0, cpuNow - cpuThen) : null;
-      cpuThen = cpuNow; winStart = Date.now();
+      cpuThen = cpuNow; winStart = nextStart;
       const v = verdict(c, progressed, used);
       // working without progress: said on the job's line (never a reason to stop it); taken back once it moves again
       if (!progressed && used != null && used >= BUSY_CPU_MS) tell(busyWords(w.lastProgressAt())); else if (progressed) tell(null);
@@ -201,13 +204,13 @@ function watchLoop(w: Watched, onStuck: (i: StuckInfo) => void, windowMs = liven
         try { report.silence({ step: at.step, ...(at.done != null ? { done: at.done } : {}), ...(at.total ? { total: at.total } : {}), silentMs: Date.now() - last, lastProgressAt: last, maxGapMs: w.maxGapMs(), expectMs: at.expectMs ?? 0, usingCpu: used == null ? null : used >= BUSY_CPU_MS, cpuMs: used }); } catch { /* the job is gone */ }
       }
       if (v === 'idle' || v === 'silent') {
-        stopped = true; clearInterval(timer);
+        stopped = true;
         onStuck({ kind: v, ...w.where(), silentMs: Date.now() - w.lastProgressAt(), windows: v === 'idle' ? c.idle : c.unread, windowMs, cpuMs: used });
       }
-    } finally { busy = false; }
-  }, windowMs);
-  timer.unref?.();
-  return () => { stopped = true; clearInterval(timer); tell(null); };
+    } finally { next(); }
+  };
+  next();
+  return () => { stopped = true; if (timer) clearTimeout(timer); tell(null); };
 }
 
 function dur(ms: number): string { return ms < 1000 ? `${Math.round(ms)} ms` : ms < 90_000 ? `${Math.round(ms / 100) / 10} s` : `${Math.round(ms / 6000) / 10} minutes`; }
