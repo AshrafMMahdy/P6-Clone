@@ -14,7 +14,8 @@ import { basename, dirname, join } from 'node:path';
 import { foldPath, hashOf } from '../core/bim/renderParts.ts';
 import type { IterationLayout, IterationStore } from '../core/risk/montecarlo.ts';
 import type { KeptScenario, RowStore } from '../core/analysis/batch.ts';
-import { pathArg, ToolError } from './runtime.ts';
+import { pathArg, ToolError, writeBase } from './runtime.ts';
+import { ensureCwd } from '../core/cwd.ts';
 
 /** The file's own layout: 2, each unit framed by its length and its CRC32 (1: by its length only, review 4L-13 L1). */
 const VERSION = 2;
@@ -151,7 +152,9 @@ export const keptPlace = (file: string): string => (/\.parts$/.test(basename(dir
 export const keepWords = (tool: string, resume: string, units: string) => `to continue, call ${tool} again with the same arguments and resume: "${resume}" (only the ${units} still missing are done, and the answer is the one an uninterrupted run gives); a call without resume starts over (it replaces the kept file of that name).`;
 
 /** The units of one call: kept in `resume` (the path a stopped call answered, read exactly as given) or, starting afresh, in the file
- *  named from the fingerprint, `<tool>-<name>.parts/<file>` in the write root (a relative path: the server's own rule). The file of a
+ *  named from the fingerprint, `<tool>-<name>.parts/<file>` in the write root (else the storage root, else the folder the server works
+ *  in), made absolute here: the server names this file itself and answers its path, so it is never a relative path left to a current
+ *  folder that may be gone (a launcher can delete the folder it started the server in, core/cwd.ts). The file of a
  *  fresh run is written when its first unit is. `onKept(path)` is told the file once it holds units (a compute worker sends it out:
  *  the answer of a worker that was ended names it). */
 class UnitFile {
@@ -168,7 +171,7 @@ class UnitFile {
   /** A run afresh: its head (written with its first unit) and its file's name, claimed (refused as run_busy, changing nothing, while
    *  another run of this server works on a file of that name). */
   async start(head: { fingerprint: string; [k: string]: unknown }, name: string): Promise<void> {
-    const f = new KeptFile(this.tool, pathArg(`${this.tool}-${name}.parts/${this.file}`, 'resume', 'write'), this.format, this.file);
+    const f = new KeptFile(this.tool, pathArg(join(writeBase() ?? ensureCwd(), `${this.tool}-${name}.parts`, this.file), 'resume', 'write'), this.format, this.file);
     this.claimed = await this.claim(this.tool, f.path);
     this.head = { format: this.format, version: VERSION, ...head };
     this.f = f;

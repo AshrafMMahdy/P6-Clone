@@ -262,6 +262,11 @@ test('lob_view: limit cuts the lists (their _totals say how many there are), the
   assert.ok(json.tasks.every((t: any) => t.locations.length === 8));
   assert.equal(csv.gaps.length, v.gaps_total); assert.equal(csv.collisions.length, v.collisions_total);
   assert.equal(csv.segments.length, json.tasks.reduce((s: number, t: any) => s + t.segments.length, 0));
+  // limit 0 lists everything, as max_ids 0 does elsewhere
+  const all = (await call('lob_view', { handle: np.handle, project: 'TOWER', limit: 0 })).d;
+  assert.ok(all.tasks.every((t: any) => t.locations.length === 8), JSON.stringify(all.tasks.map((t: any) => t.locations.length)));
+  assert.equal(all.gaps.length, all.gaps_total); assert.equal(all.collisions.length, all.collisions_total);
+  assert.match((await import('../mcp/server.ts')).toolsList().find((t: any) => t.name === 'lob_view')!.description, /limit \(default 200; 0 = all\)/);
 });
 
 test('optimize_schedule: the export lists every activity under CPM, P6 leveling and the reasoner, and the whole priority order', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
@@ -279,4 +284,43 @@ test('optimize_schedule: the export lists every activity under CPM, P6 leveling 
   assert.ok(csv.activities.every((x) => x.cpm_start && x.reasoner_finish && x.finish_delta_days !== ''));
   assert.equal(csv.activities.map((x) => x.reasoner_finish).sort().at(-1), r.reasoner_finish);
   assert.equal(csv.activities.map((x) => x.cpm_finish).sort().at(-1), r.cpm_finish);
+});
+
+test('kept runs of monte_carlo and evaluate_batch live at an absolute path: with no write root and the start folder deleted they still run, keep and resume', { timeout: 120_000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { rmSync } = await import('node:fs');
+  const cwd = mkdtempSync(join(tmpdir(), 'p6-kept-cwd-')), tmp = mkdtempSync(join(tmpdir(), 'p6-kept-tmp-'));
+  // a server started without any root, in a folder that is then removed
+  const p = spawn(process.execPath, [join(import.meta.dirname, '..', 'mcp', 'server.ts')], { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp, P6CLONE_COMPUTE_WORKERS: '0' } });
+  let buf = '', id = 0;
+  const waiting = new Map<number, (m: any) => void>();
+  p.stdout.setEncoding('utf8');
+  p.stdout.on('data', (c: string) => { buf += c; for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1); waiting.get(m.id)?.(m); } });
+  const rpc = (method: string, params: unknown) => new Promise<any>((res) => { const k = ++id; waiting.set(k, res); p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: k, method, params }) + '\n'); });
+  const tool = async (name: string, args: Record<string, unknown>) => { const r = await rpc('tools/call', { name, arguments: args }); return { err: !!r.result?.isError, d: r.result?.structuredContent }; };
+  try {
+    await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
+    rmSync(cwd, { recursive: true, force: true });
+    const np = (await tool('new_project', { id: 'K', start: '2026-03-02' })).d;
+    const H = { handle: np.handle, owner_key: np.owner_key };
+    assert.equal((await tool('edit', { ...H, operations: [{ op: 'add_activity', id: 'A', name: 'a', duration_days: 3 }, { op: 'add_activity', id: 'B', name: 'b', duration_days: 4 }, { op: 'add_relationship', pred: 'A', succ: 'B' }] })).err, false);
+    const mc = { ...H, iterations: 40, seed: 2, default_estimates: { min_pct: 90, max_pct: 125 } };
+    const full = await tool('monte_carlo', mc);
+    assert.equal(full.err, false, JSON.stringify(full.d).slice(0, 300));
+    assert.ok(full.d.parts_removed.startsWith('/') || /^[A-Za-z]:/.test(full.d.parts_removed), `an absolute path: ${full.d.parts_removed}`);
+    const b = await tool('evaluate_batch', { ...H, scenarios: [{ name: 's', overrides: [{ op: 'update_activity', id: 'A', duration_days: 1 }] }] });
+    assert.equal(b.err, false, JSON.stringify(b.d).slice(0, 300));
+    assert.ok(/^(\/|[A-Za-z]:)/.test(b.d.parts_removed), b.d.parts_removed);
+    // a run that is cancelled at once keeps nothing, and one cancelled later keeps its iterations at an absolute path it answers
+    const job = (await tool('monte_carlo', { ...mc, iterations: 20000, async: true })).d.job_id;
+    for (let i = 0; i < 100 && !/[1-9]\d* of/.test((await tool('job_status', { job_id: job })).d.progress ?? ''); i++) await new Promise((r) => setTimeout(r, 50));
+    await tool('cancel_job', { job_id: job });
+    let part: any;
+    for (let i = 0; i < 200; i++) { part = (await tool('job_status', { job_id: job, wait_seconds: 1 })).d; if (part.status !== 'running') break; }
+    assert.equal(part.result.partial, true, JSON.stringify(part).slice(0, 300));
+    assert.ok(/^(\/|[A-Za-z]:)/.test(part.result.resume) && existsSync(part.result.resume), part.result.resume);
+    const resumed = await tool('monte_carlo', { ...mc, iterations: 20000, resume: part.result.resume, async: true });
+    assert.equal(resumed.err, false, JSON.stringify(resumed.d).slice(0, 300));
+    await tool('cancel_job', { job_id: resumed.d.job_id });
+  } finally { p.stdin.end(); }
 });

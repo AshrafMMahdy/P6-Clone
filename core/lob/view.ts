@@ -18,9 +18,10 @@ export interface LobView {
   collisions_total: number; gaps_total: number;
 }
 
-/** A view's lists as an answer shows them: the first `limit` of each (a task's locations, collisions, gaps); the _totals say how many
- *  there are. */
+/** A view's lists as an answer shows them: the first `limit` of each (a task's locations, collisions, gaps; 0 = all); the _totals say
+ *  how many there are. */
 export function cutLobView(v: LobView, limit: number): LobView {
+  if (!(limit > 0)) return v;
   return { ...v, tasks: v.tasks.map((t) => ({ ...t, locations: t.locations.slice(0, limit) })), collisions: v.collisions.slice(0, limit), gaps: v.gaps.slice(0, limit) };
 }
 
