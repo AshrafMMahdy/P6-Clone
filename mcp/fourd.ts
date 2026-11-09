@@ -6,8 +6,7 @@ import { rows, type Db, type Row } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { writeP6XmlTo } from '../core/xml/p6xml.ts';
 import { fenceListedModels, isNavisworks } from '../core/bim/nwd.ts';
-import { cachedModel, discardKeptChunks, fileHash, ifcOf, keptChunks, loadModel, loadNeeds, modelBytes, releaseModels, type KeptChunkSet, type LoadNeeds, type Model } from '../core/bim/model.ts';
-import { meshEngine } from '../core/bim/parse.ts';
+import { cachedModel, discardKeptChunks, fileHash, ifcOf, keptChunks, keptChunkSets, loadModel, loadNeeds, modelBytes, releaseModels, type KeptChunkSet, type LoadNeeds, type Model } from '../core/bim/model.ts';
 import { checkRevitSize, isRevit, REVIT_MEMORY_PER_BYTE, RevitDiskFull, RevitTooLarge, rvtCached } from '../core/bim/rvt.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
@@ -146,11 +145,10 @@ const unreadableHint = (path: string) => (existsSync(path) && (isRevit(path) || 
 /** A chunk size in words (P6CLONE_GEOM_CHUNK_MB may be a fraction). */
 const chunkMb = (b: number) => { const x = b / 1048576; return `${x >= 10 ? Math.round(x) : Math.round(x * 10) / 10} MB`; };
 
-/** The kept chunks the next meshing of this model can take in: of this engine (or kept before kept.json named its engine), the set
- *  with the most chunks; null when there is none. */
+/** The kept chunks the next meshing of this model can take in: those of its full key (this engine and the model's products, model.ts
+ *  keptChunkSets), the set with the most chunks; null when there is none. */
 function keptToUse(hash: string): KeptChunkSet | null {
-  const engine = meshEngine();
-  const sets = (keptChunks(hash) ?? []).filter((k) => k.engine == null || k.engine === engine);
+  const sets = keptChunkSets(hash);
   return sets.length ? sets.reduce((a, b) => (b.kept > a.kept ? b : a)) : null;
 }
 

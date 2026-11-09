@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { chunkBytesOf, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type IfcElement, type IfcIndex, type KeptChunk } from './parse.ts';
+import { chunkBytesOf, keptChunkKey, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type IfcElement, type IfcIndex, type KeptChunk } from './parse.ts';
 import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, newGeomStore, type Extras, type GeomStore } from './element.ts';
 import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
@@ -160,8 +160,14 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
     memory.set(cacheName(hash), m);
     return m;
   }
-  const { index } = await parseIfc(path, { geometry: want, ...(want ? { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress } : {}) });
-  if (want) noteMeshing(index, o);
+  const { index } = await parseIfc(path, { geometry: false });
+  if (want) {
+    // the index is cached before the meshing: a meshing that stops leaves it (the next open meshes from it, not indexing again), so the
+    // chunks it kept are always of a known product list, matched by their full key before the next meshing is planned (keptChunkSets)
+    writeIndex(base, index);
+    await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
+    noteMeshing(index, o);
+  }
   writeIndex(base, index);
   if (want) dropKeptChunks(base, index); // (an open without geometry meshed nothing: what a stopped meshing kept is still to be used)
   if (index.elements.length > 200_000) compactHeap(); // what reading it left behind goes before the next call takes memory
@@ -186,7 +192,7 @@ function noteMeshing(index: IfcIndex, o: LoadOptions): void {
 /** One way a model was cut for meshing (parse.ts: <chunk bytes>-<engine and products key>): the chunks kept whole there, the chunk
  *  size, how many chunks the model was cut into and the engine that meshed them (parse.ts meshEngine; null: kept before kept.json
  *  named them). */
-export type KeptChunkSet = { kept: number; of: number | null; chunkBytes: number; engine: string | null };
+export type KeptChunkSet = { kept: number; of: number | null; chunkBytes: number; engine: string | null; /** its folder's chunkKey (engine and products) */ key: string };
 /** The chunks a stopped meshing of the IFC with this content (fileHash) kept in the model cache (parse.ts keepChunks), by the way the
  *  model was cut; null when none is kept. Read from the disk as it is now (the next meshing cut the same way takes them in). */
 export function keptChunks(hash: string): KeptChunkSet[] | null {
@@ -195,7 +201,7 @@ export function keptChunks(hash: string): KeptChunkSet[] | null {
   let ways: string[];
   try { ways = readdirSync(dir); } catch { return null; }
   for (const w of ways) {
-    const cut = /^(\d+(?:\.\d+)?)-[0-9a-f]+$/.exec(w); // (the chunk bytes as given: P6CLONE_GEOM_CHUNK_MB may be a fraction)
+    const cut = /^(\d+(?:\.\d+)?)-([0-9a-f]+)$/.exec(w); // (the chunk bytes as given: P6CLONE_GEOM_CHUNK_MB may be a fraction)
     if (!cut) continue;
     let names: string[];
     try { names = readdirSync(join(dir, w)); } catch { continue; }
@@ -205,9 +211,21 @@ export function keptChunks(hash: string): KeptChunkSet[] | null {
       if (!/^\d+$/.test(k)) continue;
       try { const m = JSON.parse(readFileSync(join(dir, w, k, 'kept.json'), 'utf8')) as KeptChunk; kept++; if (typeof m.of === 'number') of = m.of; if (typeof m.engine === 'string') engine = m.engine; } catch { /* not whole: not kept */ }
     }
-    if (kept) sets.push({ kept, of, chunkBytes: Number(cut[1]), engine });
+    if (kept) sets.push({ kept, of, chunkBytes: Number(cut[1]), engine, key: cut[2] });
   }
   return sets.length ? sets : null;
+}
+
+/** The kept chunks the next meshing of this model takes in: those whose full key (chunkKey: this engine and the products of the model's
+ *  cached index, in order) is the one it meshes with now; none when the model has no cached index (its products are not known before
+ *  it is indexed: a meshing that keeps chunks caches its index first) or there is no geometry worker. */
+export function keptChunkSets(hash: string): KeptChunkSet[] {
+  const sets = keptChunks(hash);
+  if (!sets) return [];
+  const base = join(cacheDir(), cacheName(hash));
+  const index = memory.get(cacheName(hash))?.index ?? (existsSync(`${base}.ndjson`) ? tryReadIndex(base)?.index : null);
+  const key = index ? keptChunkKey(productIdsOf(index)) : null;
+  return key ? sets.filter((k) => k.key === key) : [];
 }
 
 /** The chunks a stopped meshing of the IFC with this content kept, removed (the agent will not open the model again): what was kept

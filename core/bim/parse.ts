@@ -320,6 +320,12 @@ function chunkKey(engine: string, productIds: Uint32Array): string {
   h.update(new Uint8Array(productIds.buffer, productIds.byteOffset, productIds.byteLength));
   return h.digest('hex').slice(0, 16);
 }
+/** The key a model's kept chunks would have if meshed now with these products (chunkKey of this installation's engine), as their folder
+ *  <chunk bytes>-<key> names it; null without a geometry worker (nothing can be meshed, nothing kept is taken). */
+export function keptChunkKey(productIds: Uint32Array, opts: ParseIfcOptions = {}): string | null {
+  const s = workerScript(opts);
+  return s ? chunkKey(engineText(s), productIds) : null;
+}
 /** The engine a chunk is meshed by, as the text chunkKey hashes: each of ENGINE_SCRIPTS beside the worker and web-ifc's entry and
  *  WebAssembly where the worker finds them, by their contents. */
 function engineText(script: string): string {

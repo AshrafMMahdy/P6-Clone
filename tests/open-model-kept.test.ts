@@ -14,7 +14,8 @@ process.env.P6CLONE_GEOM_CHUNK_MB = '0.1'; // (Duplex cut into many chunks)
 const { callTool, toolResult } = await import('../mcp/server.ts');
 const { onJobChange } = await import('../mcp/runtime.ts');
 const { releaseModels } = await import('../core/bim/model.ts');
-const { meshEngine } = await import('../core/bim/parse.ts');
+const { keptChunkKey, meshEngine, productIdsOf } = await import('../core/bim/parse.ts');
+const { readIndex } = await import('../core/bim/indexFile.ts');
 const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal) => { const x = await callTool(name, args, undefined, signal); return { err: x.isError, d: toolResult(x.out, x.isError).structuredContent as any }; };
 
 /** A project, a copy of the model and a model cache of its own. */
@@ -141,8 +142,8 @@ test('kept chunks whose size does not fit the memory free now are not used: mesh
   releaseModels(new Set()); // (the index read from the file into this cache)
   assert.equal((await call('open_model', { handle: s.handle, owner_key: s.owner_key, path: s.file, geometry: false })).err, false);
   const base = readdirSync(s.cache).find((f) => f.endsWith('.ndjson'))!.replace(/\.ndjson$/, '');
-  // one chunk kept by this engine at a size no memory budget here holds (10,000,000 MB)
-  const way = join(s.cache, `${base}.chunks`, `${1e7 * 1048576}-0123456789abcdef`, '0');
+  // one chunk kept by this engine, for this model's products, at a size no memory budget here holds (10,000,000 MB)
+  const way = join(s.cache, `${base}.chunks`, `${1e7 * 1048576}-${keptChunkKey(productIdsOf(readIndex(join(s.cache, base))))}`, '0');
   mkdirSync(way, { recursive: true });
   writeFileSync(join(way, 'kept.json'), JSON.stringify({ files: [], tiles: [], of: 2, engine: meshEngine() }));
   const o = await openJob({ handle: s.handle, owner_key: s.owner_key, path: s.file });
@@ -152,6 +153,21 @@ test('kept chunks whose size does not fit the memory free now are not used: mesh
   assert.equal(o.meshed.size, o.total);
   assert.match(o.v.result.geometry_note, /the 1 chunk kept from an earlier meshing was not used: meshing in chunks of their size \(10000000 MB of the IFC\) needs about [\d,]+ MB of memory and [\d,]+ MB of the memory budget is free now, so the model was meshed from scratch/);
   assert.equal(existsSync(join(s.cache, `${base}.chunks`)), false, 'meshed: the kept chunks go');
+});
+
+test('kept chunks of this engine but of another product list are not taken, nor their chunk size: meshed as an open picks it', { timeout: 600_000 }, async () => {
+  const s = await setup('KEPT7');
+  releaseModels(new Set());
+  assert.equal((await call('open_model', { handle: s.handle, owner_key: s.owner_key, path: s.file, geometry: false })).err, false);
+  const base = readdirSync(s.cache).find((f) => f.endsWith('.ndjson'))!.replace(/\.ndjson$/, '');
+  // (a set whose key is not this model's products with this engine: its folder name says another chunkKey)
+  const other = join(s.cache, `${base}.chunks`, `${1e7 * 1048576}-0123456789abcdef`, '0');
+  mkdirSync(other, { recursive: true });
+  writeFileSync(join(other, 'kept.json'), JSON.stringify({ files: [], tiles: [], of: 2, engine: meshEngine() }));
+  const o = await openJob({ handle: s.handle, owner_key: s.owner_key, path: s.file });
+  assert.equal(o.v.status, 'done', JSON.stringify(o.v));
+  assert.equal(o.taken.size, 0);
+  assert.doesNotMatch(o.v.result.geometry_note ?? '', /kept from an earlier meshing/, 'the other set played no part');
 });
 
 test('render_4d meshing a model opened without geometry, cancelled part-way: cancelled, with the chunks kept and how to continue or discard', { timeout: 600_000 }, async () => {
