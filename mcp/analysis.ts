@@ -250,8 +250,8 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const objective = a.objective ?? 'makespan';
       if (objective !== 'makespan' && objective !== 'min_crash_cost') fail('bad_input', `Unknown objective "${objective}".`, 'Use makespan or min_crash_cost.');
       const maxChanges = countArg(a.max_changes, 'max_changes') ?? 25; // as max_ids: 0 = all; refused here, before the reasoner runs
-      const samples = countArg(a.samples, 'samples');
       if (objective === 'min_crash_cost') return runAnalysis('crash_schedule', a, s, h, 'optimize_schedule').then((r) => ({ objective, ...(r as object) }));
+      const samples = countArg(a.samples, 'samples'); // only where it is used: min_crash_cost (above) does not sample
       const ops = (d: Db, list: unknown[]) => { const x = applyOps(d, list, { hoursPerDay: s.hpd, calendarDays: true }); if (!x.ok) fail('bad_input', x.error!.message, ''); };
       let r;
       try { r = await optimizeSchedule(s.db, projIds, { samples, seed: a.seed != null ? Number(a.seed) : undefined, activities: a.activities, hoursPerDay: s.hpd, tick: h.tick }, nodeInfer, ops); }

@@ -176,12 +176,24 @@ test('lint fs_overlap ticks between the ladder simulations: progress counts them
   assert.equal(c.fixes!.filter((f) => f.activities.length === 4).length, 12, 'all twelve are still listed');
   assert.match(String(c.note), /^Partial: the call was cancelled after 5 of 12 ladder simulations; the ladders after them have no saves_days\./);
   assert.equal(cut.checks.length, full.checks.length, 'the rest of the lint was done as usual');
-  await assert.rejects(lintScheduleTicked(db, {}, async () => { throw cancelled(); }), (e: any) => e.code === 'cancelled');
+  // a cancel before the first simulation keeps every finished check (the ladders without saves_days), partial, none simulated
+  const early = await lintScheduleTicked(db, {}, async () => { throw cancelled(); });
+  assert.equal(early.partial, true); assert.equal(early.stopped, 'cancelled');
+  assert.equal(fs(early).ladders_simulated, 0); assert.equal(fs(early).ladders_to_simulate, 12);
+  assert.equal(early.checks.length, full.checks.length, 'every other check was done');
+  assert.deepEqual(early.checks.filter((x) => x.id !== 'fs_overlap'), full.checks.filter((x) => x.id !== 'fs_overlap'));
+  assert.ok(fs(early).fixes!.every((f) => f.saves_days == null), 'no ladder has saves_days');
+  assert.match(String(fs(early).note), /^Partial: the call was cancelled after 0 of 12 ladder simulations/);
   await assert.rejects(lintScheduleTicked(db, {}, async (d) => { if (d === 2) throw new Error('boom'); }), /boom/);
-  // simulate: false has nothing to tick
+  // simulate: false has no step to stop at: one look at the end; a cancel that arrived while it ran does not discard the result, and the note says so
   let ticks = 0;
-  await lintScheduleTicked(db, { simulate: false }, async () => { ticks++; });
-  assert.equal(ticks, 0);
+  const whole = await lintScheduleTicked(db, { simulate: false }, async () => { ticks++; });
+  assert.equal(ticks, 1); assert.equal(whole.partial, undefined); assert.equal(whole.note, undefined);
+  const late = await lintScheduleTicked(db, { simulate: false }, async () => { throw cancelled(); });
+  assert.equal(late.partial, undefined); assert.equal(late.stopped, undefined);
+  assert.deepEqual({ ...late, note: undefined }, { ...whole, note: undefined }, 'the complete result');
+  assert.match(String(late.note), /^The call was cancelled while the lint ran, when it had no further step to stop at \(no fix simulation to run\): the result is complete\.$/);
+  await assert.rejects(lintScheduleTicked(db, { simulate: false }, async () => { throw new Error('boom'); }), /boom/);
 });
 
 test('lint max_targets N simulates the first N critical ladders by size (the most activities first), not "the ones that save most"', async () => {

@@ -29,7 +29,7 @@ export function cutLintCheck(c: LintCheck, max: number): LintCheck {
   const kind = (v: string) => c.activities.filter((x) => x.value === v).slice(0, max);
   return { ...c, activities: c.id === 'connectivity' ? [...kind('no predecessor'), ...kind('no successor')] : c.activities.slice(0, max), ...(c.fixes_total != null && c.fixes ? { fixes: c.fixes.slice(0, max) } : {}) };
 }
-export interface LintReport { report: 'Schedule Lint'; profile: 'p6' | 'platform'; /** a simulation was cancelled: the check that says so (fs_overlap) holds the part that was done */ partial?: true; stopped?: 'cancelled'; score?: number; grade?: string; work_activities: number; relationships: number; checks: LintCheck[]; thresholds: LintThresholds; overridden: string[]; not_used?: string[] }
+export interface LintReport { report: 'Schedule Lint'; profile: 'p6' | 'platform'; /** a simulation was cancelled: the check that says so (fs_overlap) holds the part that was done */ partial?: true; stopped?: 'cancelled'; score?: number; grade?: string; /** said when a cancel did not stop the lint short: it arrived when the lint had no further step to stop at, and the result is complete */ note?: string; work_activities: number; relationships: number; checks: LintCheck[]; thresholds: LintThresholds; overridden: string[]; not_used?: string[] }
 /** What a lint reports to the tick of lintScheduleTicked between units of long work (the days-saved simulations) */
 export interface LintTick { done: number; total: number; message: string }
 export interface LintOptions { projIds?: string[]; hoursPerDay?: number; profile?: 'p6' | 'platform'; checks?: string[]; maxIds?: number; simulate?: boolean; thresholds?: Record<string, unknown> }
@@ -139,15 +139,23 @@ export function lintSchedule(db: Db, o: LintOptions = {}): LintReport {
   for (let r = g.next(); ; r = g.next()) if (r.done) return r.value;
 }
 /** The same lint, ticking between the fs_overlap fix simulations (one schedule of a scratch copy each: seconds for a long list of critical
- *  ladders): progress, a yield to the event loop and the call's cancellation. A cancellation after the first simulation stops the simulating
- *  and keeps what was done, said (partial, ladders_simulated of ladders_to_simulate); the rest of the lint is done as usual. */
+ *  ladders): progress, a yield to the event loop and the call's cancellation. A cancellation at a simulation (before the first or after
+ *  any) stops the simulating and keeps what was done, said (partial, ladders_simulated of ladders_to_simulate; none simulated is 0); every
+ *  other check is done as usual. A lint with no step to stop at (no simulation to run) looks once at the end: a cancel that arrived while
+ *  it ran does not discard it, the result is complete and the note says the cancel came when there was no further step to stop at. */
 export async function lintScheduleTicked(db: Db, o: LintOptions, tick: (done: number, total: number, message: string) => Promise<void>): Promise<LintReport> {
   const g = lintRun(db, o);
-  let r = g.next();
+  let r = g.next(), steps = 0;
   while (!r.done) {
+    steps++;
     let cancelled: unknown;
     try { await tick(r.value.done, r.value.total, r.value.message); } catch (e) { cancelled = e; }
     r = cancelled === undefined ? g.next() : g.throw(cancelled); // the run decides: stop and keep what is done, or rethrow
+  }
+  if (steps) return r.value;
+  try { await tick(0, 0, 'lint: complete'); } catch (e) {
+    if ((e as { code?: unknown })?.code !== 'cancelled') throw e;
+    return { ...r.value, note: 'The call was cancelled while the lint ran, when it had no further step to stop at (no fix simulation to run): the result is complete.' };
   }
   return r.value;
 }
@@ -282,10 +290,10 @@ function* fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshol
     const base = finishAfter([]);
     const cal = s.projs[0] ? s.projCal(s.projs[0]) : null;
     for (const [i, l] of toSim.entries()) {
-      // between simulations: progress and the cancellation. One after the first simulation stops here, keeping those done; one before it is the
-      // cancellation itself (nothing to keep)
+      // between simulations: progress and the cancellation. A cancellation stops here, keeping the simulations done (none, when it came before
+      // the first: the other checks are kept all the same, the ladders have no saves_days)
       try { yield { done: i, total: toSim.length, message: `fs_overlap: simulating critical ladder ${i + 1} of ${toSim.length}` }; }
-      catch (e) { if ((e as { code?: unknown })?.code === 'cancelled' && i > 0) { simulated = i; break; } throw e; }
+      catch (e) { if ((e as { code?: unknown })?.code === 'cancelled') { simulated = i; break; } throw e; }
       const f = finishAfter(l.ops); l.saves_days = base != null && f != null && cal ? Math.round(s.workDays(cal, f, base) * 10) / 10 : undefined;
     }
   }

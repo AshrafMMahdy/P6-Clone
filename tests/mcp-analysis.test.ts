@@ -94,5 +94,10 @@ test('MCP: count arguments are whole numbers: a value that is not one is refused
   assert.equal(dflt.err, false); assert.equal(all.err, false);
   const widest = (r: any) => Math.max(...r.d.checks.map((c: any) => c.activities.length));
   assert.ok(widest(dflt) <= 100 && widest(all) >= widest(dflt) && widest(all) > 2, `default ${widest(dflt)}, all ${widest(all)}`);
-  assert.equal((await call('check_schedule', { handle: h, max_ids: 2 })).d.checks.every((c: any) => c.activities.length <= 2), true);
+  assert.equal((await call('check_schedule', { handle: h, max_ids: 2 })).d.checks.every((c: any) => c.activities.length <= 2), true);  // samples is parsed only where it is used: min_crash_cost does not sample, so a bad samples does not refuse a crash run
+  for (const v of [-1, 2.5, '5']) {
+    const crash = await call('optimize_schedule', { handle: h, objective: 'min_crash_cost', target_days: 5, samples: v });
+    assert.equal(crash.err, false, `samples ${String(v)}: ${JSON.stringify(crash.d).slice(0, 200)}`);
+    assert.equal(crash.d.objective, 'min_crash_cost'); assert.ok(crash.d.stop, JSON.stringify(crash.d).slice(0, 200));
+  }
 });
