@@ -23,7 +23,11 @@ export const WORK: Record<string, Work> = {
   crash_schedule: { per: 1.8, label: 'crash_schedule', hint: 'lower max_steps' },
   level_resources: { per: 1.2, label: 'Resource levelling', hint: 'pass resources to level fewer' },
   evaluate_batch: { per: 1.8, label: 'evaluate_batch', hint: 'pass fewer scenarios' },
-  optimize_schedule: { per: 1.0, label: 'optimize_schedule', hint: 'pass project to optimise one project' },
+  // the reasoner: the model's runtime and one window of 512 activities (fixed), and beside the project the instance, two scratch copies
+  // for the P6 leveler comparison and every activity's dates three ways. Measured through the tool (the whole process, less the 175 to
+  // 196 MB it held with the file open): 129 trial (1,299 activities) 250 MB, Zone 2 (3,353) 270 MB, DHBL (5,608) 420 MB, JWM (11,425;
+  // counted here as 23 MB) 400 to 420 MB. 1.0 x the project reserved 23 MB for JWM.
+  optimize_schedule: { per: 10, fixed: 350 * 1048576, label: 'optimize_schedule', hint: 'pass project to optimise one project' },
   tia: { per: 1.8, label: 'The time impact analysis', hint: 'close other projects first' },
   windows_analysis: { per: 1.2, label: 'windows_analysis', hint: 'pass fewer updates' },
   export_excel: { per: 2.0, label: 'export_excel', hint: 'pass project to export one project' },
