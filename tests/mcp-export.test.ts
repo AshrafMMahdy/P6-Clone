@@ -309,7 +309,9 @@ test('optimize_schedule: the export lists every activity under CPM, P6 leveling 
   assert.equal(csv.activities.map((x) => x.cpm_finish).sort().at(-1), r.cpm_finish);
 });
 
-test('kept runs of monte_carlo and evaluate_batch live at an absolute path: with no write root and the start folder deleted they still run, keep and resume', { timeout: 120_000 }, async () => {
+// (not on Windows: a folder that is a running process's working folder cannot be deleted there (EPERM), so a server whose start folder
+// is gone cannot happen on Windows; the test runs everywhere it can happen)
+test('kept runs of monte_carlo and evaluate_batch live at an absolute path: with no write root and the start folder deleted they still run, keep and resume', { timeout: 120_000, skip: process.platform === 'win32' && 'Windows cannot delete a running process\u2019s working folder, so a deleted start folder cannot happen there' }, async () => {
   const { spawn } = await import('node:child_process');
   const { rmSync } = await import('node:fs');
   const cwd = mkdtempSync(join(tmpdir(), 'p6-kept-cwd-')), tmp = mkdtempSync(join(tmpdir(), 'p6-kept-tmp-'));
