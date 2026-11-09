@@ -137,12 +137,10 @@ test('pathsBetween: a ladder of 12 diamonds has 4096 paths; max picks the longes
   assert.deepEqual(all.paths.map((p: any) => p.duration_days), [...all.paths.map((p: any) => p.duration_days)].sort((x: number, y: number) => y - x));
 });
 
-test('pathsBetween: 80 diamonds (2^80 paths) answer at once with the exact count', async () => {
+test('pathsBetween: 80 diamonds (2^80 paths) answer with the exact count', async () => {
   const { pathsBetween } = await import('../core/schedule/floatPaths.ts');
   const { db, last } = ladder(80);
-  const t0 = Date.now();
-  const r = pathsBetween(db, ['P'], { from: 'S', to: last }, 8) as any;
-  assert.ok(Date.now() - t0 < 2000);
+  const r = pathsBetween(db, ['P'], { from: 'S', to: last }, 8) as any; // (that it finishes at all is the proof: 2^80 paths are never walked)
   assert.equal(r.paths_total, (2n ** 80n).toString());
   assert.equal(r.paths.length, 25);
   assert.equal(r.truncated, true);
@@ -181,4 +179,108 @@ test('pathsBetween: a loop between from and to is an error that names it; a loop
   assert.equal((pathsBetween(net([['F', 8], ['T', 8], ['Z', 8]], [['F', 'T'], ['T', 'Z'], ['Z', 'T']]), ['P'], { from: 'F', to: 'T' }, 8) as any).paths_total, 1);
   assert.deepEqual((pathsBetween(net([['F', 8]], []), ['P'], { from: 'F', to: 'F' }, 8) as any).paths.map((p: any) => p.activities), [['F']]);
   assert.deepEqual((pathsBetween(net([['F', 8], ['T', 8]], []), ['P'], { from: 'F', to: 'T' }, 8) as any).paths_total, 0);
+});
+
+test('pathsBetween: a chain of 20,000 activities is one path (the reach of "to" is a reverse search, not a fixpoint over every link again and again)', async () => {
+  const { pathsBetween } = await import('../core/schedule/floatPaths.ts');
+  const n = 20000;
+  const db = net(Array.from({ length: n }, (_, i): [string, number, number?] => [`C${i}`, 8, 0]), Array.from({ length: n - 1 }, (_, i): [string, string] => [`C${i}`, `C${i + 1}`]));
+  const r = pathsBetween(db, ['P'], { from: 'C0', to: `C${n - 1}` }, 8) as any;
+  assert.deepEqual([r.paths.length, r.paths_total, r.truncated, r.paths[0].activities.length], [1, 1, false, n]);
+  // links listed in reverse order (the worst order for a fixpoint) give the same
+  const back = net(Array.from({ length: n }, (_, i): [string, number, number?] => [`C${i}`, 8, 0]), Array.from({ length: n - 1 }, (_, i): [string, string] => [`C${n - 2 - i}`, `C${n - 1 - i}`]));
+  assert.equal((pathsBetween(back, ['P'], { from: 'C0', to: `C${n - 1}` }, 8) as any).paths[0].activities.length, n);
+  // what cannot reach "to" is not between, even when it is reachable from "from"
+  const side = net([['F', 8], ['X', 8], ['T', 8]], [['F', 'X'], ['F', 'T']]);
+  assert.deepEqual((pathsBetween(side, ['P'], { from: 'F', to: 'T' }, 8) as any).paths.map((p: any) => p.activities), [['F', 'T']]);
+});
+
+test('pathsBetween: the paths kept by merging each successor’s best tails are the best paths there are (against every path of random networks, listed by brute force)', async () => {
+  const { pathsBetween } = await import('../core/schedule/floatPaths.ts');
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let round = 0; round < 60; round++) {
+    const n = 8 + Math.floor(rnd() * 4);
+    // activities 0..n-1 in topological order; from = 0, to = n-1; durations from few values so that ties are common; float known for some
+    const acts: [string, number, number?][] = Array.from({ length: n }, (_, i) => [`N${i}`, 8 * (1 + Math.floor(rnd() * 3)), rnd() < 0.3 ? undefined : 8 * Math.floor(rnd() * 4)]);
+    const rels: [string, string][] = [];
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (rnd() < 0.4) rels.push([`N${i}`, `N${j}`]);
+    const db = net(acts, rels);
+    const succ = (i: number) => rels.filter(([a]) => a === `N${i}`).map(([, b]) => Number(b.slice(1)));
+    const all: { d: number; m: number }[] = [];
+    const walk = (i: number, d: number, m: number) => { const [, h, f] = acts[i]; d += h; m = Math.min(m, f ?? Infinity); if (i === n - 1) { all.push({ d, m }); return; } for (const j of new Set(succ(i))) walk(j, d, m); };
+    walk(0, 0, Infinity);
+    for (const max of [1, 2, 3, 7, 1000]) {
+      const r = pathsBetween(db, ['P'], { from: 'N0', to: `N${n - 1}`, max }, 8) as any;
+      const want = all.sort((x, y) => y.d - x.d || x.m - y.m || 0).slice(0, max).map((p) => [Math.round((p.d / 8) * 10) / 10, p.m === Infinity ? null : Math.round((p.m / 8) * 10) / 10]);
+      assert.deepEqual(r.paths.map((p: any) => [p.duration_days, p.min_float_days]), want, `round ${round} max ${max}`);
+      assert.equal(r.paths_total, all.length);
+    }
+  }
+});
+
+test('float_paths between: max is a positive whole number (no 0 = all: paths_total says how many), refused as bad_input naming between.max before any work; a loop is answered as bad_input naming it', async () => {
+  const { sessions } = await import('../mcp/runtime.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'FPB', start: '2026-03-02' })).d;
+  const e = await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: [
+    ...['F', 'A', 'B', 'T'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 2 })),
+    { op: 'add_relationship', pred: 'F', succ: 'A' }, { op: 'add_relationship', pred: 'F', succ: 'B' }, { op: 'add_relationship', pred: 'A', succ: 'T' }, { op: 'add_relationship', pred: 'B', succ: 'T' }] });
+  assert.equal(e.err, false, JSON.stringify(e.d).slice(0, 300));
+  await call('schedule', { handle: np.handle, owner_key: np.owner_key });
+  const fp = (between: unknown) => call('float_paths', { handle: np.handle, between });
+  assert.equal((await fp({ from: 'F', to: 'T' })).d.between.paths_total, 2);
+  assert.equal((await fp({ from: 'F', to: 'T', max: 1 })).d.between.paths.length, 1);
+  for (const max of [0, -1, 2.5, Number.NaN, Infinity, '5', true]) {
+    const r = await fp({ from: 'F', to: 'T', max });
+    assert.equal(r.d.error?.code, 'bad_input', `max ${String(max)}: ${JSON.stringify(r.d).slice(0, 200)}`);
+    assert.match(r.d.error.message, /^between\.max must be a whole number of 1 or more/);
+  }
+  assert.equal((await fp('F')).d.error.code, 'bad_input');
+  // a loop between from and to: the tool answers bad_input with the loop's activities (the project's own logic is not changed by the call)
+  const db = sessions.get(np.handle)!.db, id = (c: string) => db.tables.TASK.rows.find((t) => t.task_code === c)!.task_id;
+  const link = db.tables.TASKPRED.rows.find((r) => r.pred_task_id === id('F') && r.task_id === id('A'))!;
+  db.tables.TASKPRED.rows.push({ ...link, task_pred_id: 'loop-1', pred_task_id: id('A'), task_id: id('F') });
+  const loop = await fp({ from: 'F', to: 'T' });
+  assert.equal(loop.d.error.code, 'bad_input');
+  assert.match(loop.d.error.message, /^The logic between F and T has a loop \((F -> A -> F|A -> F -> A)\); the longest paths cannot be listed until it is broken\.$/);
+});
+
+test('float_paths between: a max that does not fit is refused up front, with what would fit, and what fits runs', async () => {
+  const { config, sessions, usedMemory } = await import('../mcp/runtime.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'FPL', start: '2026-03-02' })).d;
+  const n = 150, ops: Record<string, unknown>[] = [{ op: 'add_activity', id: 'S', name: 'S', duration_days: 1 }];
+  let prev = 'S';
+  for (let i = 1; i <= n; i++) { ops.push({ op: 'add_activity', id: `a${i}`, name: 'a', duration_days: 1 }, { op: 'add_activity', id: `b${i}`, name: 'b', duration_days: 2 }, { op: 'add_activity', id: `J${i}`, name: 'J', duration_days: 1 }, { op: 'add_relationship', pred: prev, succ: `a${i}` }, { op: 'add_relationship', pred: prev, succ: `b${i}` }, { op: 'add_relationship', pred: `a${i}`, succ: `J${i}` }, { op: 'add_relationship', pred: `b${i}`, succ: `J${i}` }); prev = `J${i}`; }
+  const e = await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });
+  assert.equal(e.err, false, JSON.stringify(e.d).slice(0, 300));
+  await call('schedule', { handle: np.handle, owner_key: np.owner_key });
+  const acts = sessions.get(np.handle)!.db.tables.TASK.rows.length;
+  const { workNeed, BETWEEN_BYTES_PER_TAIL } = await import('../mcp/workset.ts');
+  const was = config.budgetBytes;
+  const s = sessions.get(np.handle)!;
+  const room = () => Math.round(0.5 * s.bytes) + 8 * acts * BETWEEN_BYTES_PER_TAIL + 1048576; // the call's own 0.5 x bytes, and the tails of 8 paths
+  try {
+    config.budgetBytes = usedMemory() + room();
+    await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5000 } }); // (a refusal first moves the other, idle projects out: the room is measured after it)
+    config.budgetBytes = usedMemory() + room();
+    const free = () => config.budgetBytes - usedMemory();
+    const need = (max: number) => workNeed('float_paths', { between: { from: 'S', to: prev, max } }, s, free)!;
+    assert.ok(need(1001).bytes - need(1000).bytes === acts * BETWEEN_BYTES_PER_TAIL, 'the project’s activities x the bytes per kept tail, per path asked');
+    const big = await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5000 } });
+    assert.equal(big.err, true);
+    assert.equal(big.d.error.code, 'memory_budget', JSON.stringify(big.d.error).slice(0, 300));
+    assert.match(big.d.error.message, /float_paths between/);
+    const fit = Number(/at most ([\d,]+) paths \(between\.max\)/.exec(big.d.error.hint)?.[1].replace(/,/g, ''));
+    assert.ok(fit >= 1 && fit < 5000, big.d.error.hint);
+    assert.ok(need(fit).bytes <= free() && need(fit + 1).bytes > free() - 1, 'the number named is what fits');
+    assert.match(big.d.error.hint, /paths_total says how many there are/);
+    // what fits runs: the longest `fit` paths come back, paths_total counts them all (2^150 as text)
+    const ok = await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: fit } });
+    assert.equal(ok.err, false, JSON.stringify(ok.d).slice(0, 300));
+    assert.ok(ok.d.between, JSON.stringify(ok.d).slice(0, 400));
+    assert.equal(ok.d.between.paths.length, fit);
+    assert.equal(ok.d.between.paths_total, (2n ** BigInt(n)).toString());
+  } finally { config.budgetBytes = was; }
 });

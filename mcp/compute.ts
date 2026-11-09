@@ -51,9 +51,9 @@ let active = 0;
 const waiting: (() => void)[] = [];
 const IDLE_MS = 60_000;
 /** Tools that keep their finished work when cancelled: the worker is asked to stop at its next step and answers with what it has
- *  (partial). There is no fixed time limit and no stop while it works: it is ended only when FROZEN (no progress and no busy time of
+ *  (partial: monte_carlo's iterations, evaluate_batch's scenarios, crash_schedule's steps, lint's fix simulations). There is no fixed time limit and no stop while it works: it is ended only when FROZEN (no progress and no busy time of
  *  its thread for two windows in a row: the platform's rule, liveness.ts), and then the rows it had sent out (ctx.keep) are the answer. */
-const STOPS_GRACEFULLY = new Set(['monte_carlo', 'evaluate_batch']);
+const STOPS_GRACEFULLY = new Set(['monte_carlo', 'evaluate_batch', 'crash_schedule', 'lint']);
 /** A worker thread's own processor time so far (ms): Worker.cpuUsage (Node 22.19+). Undefined where it is not offered: no reading.
  *  (Not the event loop's busy time: a thread blocked waiting reads as busy there.) */
 export const threadCpu = (w: Worker): (() => Promise<number>) | undefined => (typeof (w as { cpuUsage?: unknown }).cpuUsage === 'function'

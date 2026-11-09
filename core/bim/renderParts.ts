@@ -20,11 +20,21 @@ export class ManifestUnreadable extends Error {
 /** The parts of an earlier render of this name could not be replaced now: a file in them (`path`) is locked or in use by another
  *  program. `whole`: it was their render.json, so nothing was removed and the earlier render can still be continued; else the
  *  render.json was removed (that render can no longer be continued) and `path` is a file that stayed. On Windows the error of a
- *  failed removal names the folder itself, not the file that was held: then `files` are the files still left in it after the
+ *  failed removal names the folder itself (or a folder inside it), not the file that was held: then `files` are the files still left in it after the
  *  failed removal (they are the ones that could not be removed); empty when `path` is not that folder. */
 export class PartsInUse extends Error {
   readonly path: string; readonly cause: Error; readonly whole: boolean; readonly files: string[];
   constructor(path: string, cause: Error, whole: boolean, files: string[] = []) { super(`${path} is locked or in use (${cause.message})`); this.path = path; this.cause = cause; this.whole = whole; this.files = files; }
+}
+/** Whether a failed removal's error path names the folder itself or a folder inside it (not a file that was held): the files still in the
+ *  folder are then what could not be removed. Decided by path.relative (on Windows it compares without regard to case and across the
+ *  slash kinds), after the extended-length prefix an error path may carry (\\?\C:\... and \\?\UNC\...) is taken off. */
+export function leftFilesApply(dir: string, at: string): boolean {
+  const plain = at.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '');
+  const rel = relative(resolve(dir), resolve(plain));
+  if (rel === '') return true;
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false;
+  try { return statSync(plain).isDirectory(); } catch { return false; }
 }
 /** Every file in `dir` and in the folders below it (full paths): what a failed removal of the folder left. Nothing when the folder
  *  cannot be read (or is gone). */
@@ -185,8 +195,8 @@ export class Parts {
     try { rmSync(manifest, { recursive: true, force: true }); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOTDIR') throw new PartsInUse(manifest, e as Error, true); } // (ENOTDIR: dir is a file, removed below)
     try { rmSync(dir, { recursive: true, force: true }); } catch (e) {
       const at = (e as NodeJS.ErrnoException).path ?? dir;
-      // the path reported is the folder itself (Windows): the files still in it are the ones that could not be removed
-      throw new PartsInUse(at, e as Error, false, resolve(at) === resolve(dir) ? filesLeftIn(dir) : []);
+      // the path reported is the folder itself or a folder inside it (Windows): the files still in it are the ones that could not be removed
+      throw new PartsInUse(at, e as Error, false, leftFilesApply(dir, at) ? filesLeftIn(dir) : []);
     }
     mkdirSync(dir, { recursive: true });
     const p = new Parts(dir, { format: 'p6c-4d-render', version: 1, ...o, segments: [], images: [] }, put, base);

@@ -168,11 +168,15 @@ export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?:
   const byCode = new Map(T.map((t) => [t.task_code, t])), byId = new Map(T.map((t) => [t.task_id, t]));
   const from = byCode.get(String(b.from ?? '')), to = byCode.get(String(b.to ?? ''));
   if (!from || !to) return null;
-  const succ = new Map<string, Set<string>>();
-  for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) { const l = succ.get(r.pred_task_id); if (l) l.add(r.task_id); else succ.set(r.pred_task_id, new Set([r.task_id])); }
-  // only activities that can reach "to" count, and "to" ends every path (what follows it is not between the two)
+  const succ = new Map<string, Set<string>>(), pred = new Map<string, string[]>();
+  for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) {
+    const l = succ.get(r.pred_task_id); if (l) l.add(r.task_id); else succ.set(r.pred_task_id, new Set([r.task_id]));
+    const p = pred.get(r.task_id); if (p) p.push(r.pred_task_id); else pred.set(r.task_id, [r.pred_task_id]);
+  }
+  // only activities that can reach "to" count, and "to" ends every path (what follows it is not between the two): a reverse
+  // breadth-first search from "to" along the predecessors, each link looked at once
   const reach = new Set<string>([to.task_id]);
-  for (let grew = true; grew;) { grew = false; for (const [p, ss] of succ) if (!reach.has(p) && [...ss].some((x) => reach.has(x))) { reach.add(p); grew = true; } }
+  for (const queue = [to.task_id], at = { i: 0 }; at.i < queue.length;) for (const p of pred.get(queue[at.i++]) ?? []) if (!reach.has(p)) { reach.add(p); queue.push(p); }
   // the activities between: reachable from "from" without passing "to", and able to reach "to"
   const seen = new Set<string>([from.task_id]);
   for (const stack = [from.task_id]; stack.length;) { const id = stack.pop()!; if (id === to.task_id) continue; for (const n of succ.get(id) ?? []) if (!seen.has(n)) { seen.add(n); stack.push(n); } }
@@ -195,14 +199,28 @@ export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?:
   const hrs = (t: Record<string, string>) => Number((t.act_end_date ? t.target_drtn_hr_cnt : t.remain_drtn_hr_cnt) || 0);
   const flt = (t: Record<string, string>) => (t.total_float_hr_cnt === '' || t.total_float_hr_cnt == null ? Infinity : Number(t.total_float_hr_cnt));
   type Tail = { d: number; m: number; next: string | null; at: number };
-  const rank = (x: Tail, y: Tail) => y.d - x.d || x.m - y.m;
   const tails = new Map<string, Tail[]>(), count = new Map<string, bigint>();
   for (const id of order) {
     const t = byId.get(id)!, d = hrs(t), m = flt(t);
     if (id === to.task_id) { tails.set(id, [{ d, m, next: null, at: 0 }]); count.set(id, 1n); continue; }
-    const cand: Tail[] = []; let total = 0n;
-    for (const n of next(id)) { total += count.get(n)!; tails.get(n)!.forEach((x, at) => cand.push({ d: d + x.d, m: Math.min(m, x.m), next: n, at })); }
-    tails.set(id, cand.sort(rank).slice(0, max)); count.set(id, total);
+    // each successor's tails are already best first, and putting this activity in front keeps their order, so the best `max` are
+    // taken by merging the lists (the earliest successor, then list position, first at a tie, as a stable sort would): only the tails
+    // kept are made, not every successor's tails to cut afterwards
+    const ns = next(id), lists = ns.map((n) => tails.get(n)!), pos = new Array<number>(ns.length).fill(0), kept: Tail[] = [];
+    let total = 0n;
+    for (const n of ns) total += count.get(n)!;
+    while (kept.length < max) {
+      let best = -1, bd = 0, bm = 0;
+      for (let k = 0; k < lists.length; k++) {
+        const x = lists[k][pos[k]];
+        if (!x) continue;
+        const xd = d + x.d, xm = Math.min(m, x.m);
+        if (best < 0 || xd > bd || (xd === bd && xm < bm)) { best = k; bd = xd; bm = xm; } // longer, then lower float
+      }
+      if (best < 0) break;
+      kept.push({ d: bd, m: bm, next: ns[best], at: pos[best]++ });
+    }
+    tails.set(id, kept); count.set(id, total);
   }
   const paths = tails.get(from.task_id)!.map((top) => {
     const ids = [from.task_id]; let t = top;

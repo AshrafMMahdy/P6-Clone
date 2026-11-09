@@ -183,3 +183,16 @@ test('a cancelled retry of a model whose meshing failed does not use up the retr
     assert.ok((m.index.geometryNote ?? '').includes(`; 3 of ${ref.total} chunks kept from an earlier meshing were used; the other ${ref.total - 3} were meshed now`), m.index.geometryNote ?? '');
   });
 });
+
+test('the geometry note counts what was meshed now without the chunks that failed, and says "all N chunks kept" when every one was kept', async () => {
+  const { keptChunksNote } = await import('../core/bim/parse.ts');
+  assert.equal(keptChunksNote(0, 8, 0), '', 'no kept chunk used: nothing to say');
+  assert.equal(keptChunksNote(3, 8, 0), '; 3 of 8 chunks kept from an earlier meshing were used; the other 5 were meshed now');
+  assert.equal(keptChunksNote(1, 8, 0), '; 1 of 8 chunks kept from an earlier meshing was used; the other 7 were meshed now');
+  assert.equal(keptChunksNote(3, 8, 2), '; 3 of 8 chunks kept from an earlier meshing were used; the other 3 were meshed now', '2 of the other 5 failed: 3 were meshed');
+  assert.equal(keptChunksNote(3, 8, 5), '; 3 of 8 chunks kept from an earlier meshing were used', 'every other chunk failed: none was meshed now');
+  assert.equal(keptChunksNote(1, 2, 1), '; 1 of 2 chunks kept from an earlier meshing was used');
+  assert.equal(keptChunksNote(8, 8, 0), '; all 8 chunks kept from an earlier meshing were used');
+  assert.equal(keptChunksNote(1, 1, 0), '; the 1 chunk kept from an earlier meshing was used');
+  assert.doesNotMatch(keptChunksNote(8, 8, 0), /meshed now/);
+});

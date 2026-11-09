@@ -239,3 +239,77 @@ test('crash: with no max_steps it runs to its natural end (past 100 steps); a ma
   assert.ok(room.ok);
   assert.equal(room.stop, 'EXHAUSTED');
 });
+
+/** A chain of n activities of 10 days: with no crash data every one may lose 3 days, one step each. */
+const chain = (n: number) => {
+  const db: Db = { tables: {} };
+  const ops: any[] = [{ op: 'add_project', id: 'CH', start: '2026-03-02' }];
+  for (let i = 0; i < n; i++) { ops.push({ op: 'add_activity', id: `L${i}`, name: `L${i}`, duration_days: 10 }); if (i) ops.push({ op: 'add_relationship', pred: `L${i - 1}`, succ: `L${i}` }); }
+  assert.ok(applyOps(db, ops, { calendarDays: true }).ok);
+  const pid = rows(db, 'PROJECT')[0].proj_id;
+  assert.ok(scheduleProjects(db, [pid]).ok);
+  return { db, pid, ops };
+};
+const cancelled = () => Object.assign(new Error('The call was cancelled.'), { code: 'cancelled' });
+
+test('crash: a cancellation between steps answers the steps done (CANCELLED, partial), the first of an uninterrupted run; one before the first step is the cancellation; the total is unknown without max_steps', async () => {
+  const { db, pid } = chain(40);
+  const before = JSON.stringify(db);
+  const full = await crashSchedule(db, [pid], { targetDays: 120 });
+  assert.ok(full.ok); assert.equal(full.stop, 'SUCCESS'); assert.ok(full.steps.length > 20);
+  const seen: [number, number, string][] = [];
+  const cut = await crashSchedule(db, [pid], { targetDays: 120, tick: async (done, total, message) => { seen.push([done, total, message]); if (done === 7) throw cancelled(); } });
+  assert.ok(cut.ok);
+  assert.equal(cut.stop, 'CANCELLED'); assert.equal((cut as any).partial, true); assert.equal((cut as any).steps_done, 7);
+  assert.deepEqual(cut.steps, full.steps.slice(0, 7), 'the steps done are the first steps of the uninterrupted run');
+  assert.equal(cut.changes.length, 7); assert.equal(cut.ops.length, 7);
+  assert.ok(cut.days_gained > 0 && cut.days_gained < full.days_gained, 'what was gained so far');
+  assert.equal(cut.finish, cut.steps.at(-1)!.finish);
+  assert.match(String(cut.note), /Partial: the call was cancelled after 7 steps; the steps, changes and edit operations are those of the steps done, and the target was not reached\./);
+  assert.equal(JSON.stringify(db), before, 'the project is the same');
+  // progress: the step about to run, and a total of 0 (unknown), never "n-1 of n"
+  assert.deepEqual(seen.slice(0, 2).map(([d, t]) => [d, t]), [[0, 0], [1, 0]]);
+  assert.match(seen[2][2], /^step 3: [\d.]+ working days gained so far$/);
+  // with max_steps the total is that
+  const capped: [number, number, string][] = [];
+  await crashSchedule(db, [pid], { targetDays: 120, maxSteps: 9, tick: async (done, total, message) => { capped.push([done, total, message]); } });
+  assert.deepEqual(capped[0].slice(0, 2), [0, 9]); assert.match(capped[3][2], /^step 4 of at most 9:/);
+  // cancelled before the first step: nothing to answer, the cancellation as it was
+  await assert.rejects(crashSchedule(db, [pid], { targetDays: 120, tick: async () => { throw cancelled(); } }), (e: any) => e.code === 'cancelled');
+  // another error from the tick is not taken for a cancellation
+  await assert.rejects(crashSchedule(db, [pid], { targetDays: 120, tick: async (done) => { if (done === 3) throw new Error('boom'); } }), /boom/);
+  assert.equal(JSON.stringify(db), before, 'and every run left the project as it was');
+});
+
+test('MCP crash_schedule: cancelled mid-crashing it answers the steps done, applies nothing even with apply: true, and max_steps is a whole number', async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal, progress?: (d: number, t: number, m: string) => void) => { const r = await callTool(name, args, undefined, signal, progress); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'CRC', start: '2026-03-02' })).d;
+  const { ops } = chain(150);
+  const e = await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops.slice(1).map((o: any) => ({ ...o })) });
+  assert.equal(e.err, false, JSON.stringify(e.d).slice(0, 300));
+  await call('schedule', { handle: np.handle, owner_key: np.owner_key });
+  const args = { handle: np.handle, target_days: 450, apply: true };
+  // cancelled by the first progress report that comes after a few steps (reports are 250 ms apart: the run is long enough to get there)
+  const abort = new AbortController(), totals: number[] = [];
+  const r = await call('crash_schedule', args, abort.signal, (done, total) => { totals.push(total); if (done >= 3) abort.abort(); });
+  assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+  assert.equal(r.d.stop, 'CANCELLED'); assert.equal(r.d.partial, true);
+  assert.ok(r.d.steps_done >= 3 && r.d.steps_done < 150, String(r.d.steps_done));
+  assert.equal(r.d.steps.length, r.d.steps_done); assert.equal(r.d.ops.length, r.d.steps_done);
+  assert.equal(r.d.applied, false);
+  assert.match(r.d.note, /Partial: the call was cancelled after \d+ steps/); assert.match(r.d.note, /apply was not done: a cancelled run changes nothing in the project/);
+  assert.ok(totals.length >= 2 && totals.every((t) => t === 0), `progress had no total: ${totals}`);
+  assert.equal((await call('get_activity', { handle: np.handle, activity_id: 'L0' })).d.orig_days, 10, 'the project is not changed');
+  // the same call run through: applied
+  const done = await call('crash_schedule', { handle: np.handle, target_days: 20, apply: true });
+  assert.equal(done.d.stop, 'SUCCESS'); assert.equal(done.d.applied, true);
+  assert.ok((await call('get_activity', { handle: np.handle, activity_id: 'L0' })).d.orig_days < 10, 'a finished run applied');
+  // max_steps: a whole number, refused naming it before any work; 0 stops at once (CAP), it is not "no cap"
+  for (const max_steps of [-1, 2.5, Number.NaN, Infinity, '3', true]) {
+    const bad = await call('crash_schedule', { handle: np.handle, target_days: 5, max_steps });
+    assert.equal(bad.d.error?.code, 'bad_input', `max_steps ${String(max_steps)}`);
+    assert.match(bad.d.error.message, /^max_steps must be a whole number of 0 or more/);
+  }
+  assert.equal((await call('crash_schedule', { handle: np.handle, target_days: 5, max_steps: 0 })).d.stop, 'CAP');
+});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { applyOps } from '../core/project/ops.ts';
 import { rows, type Db } from '../core/db.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
-import { DEFAULT_LINT_THRESHOLDS, lintSchedule } from '../core/analysis/lint.ts';
+import { DEFAULT_LINT_THRESHOLDS, lintSchedule, lintScheduleTicked } from '../core/analysis/lint.ts';
 import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
 
 const ok = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); };
@@ -144,4 +144,77 @@ test('lint fs_overlap: every ladder is simulated and listed by default (more tha
   const few = lintSchedule(db, { thresholds: { ladder: { max_targets: 3 } } });
   assert.equal(ladders(few).length, 3, 'a max_targets given is honoured');
   assert.equal(DEFAULT_LINT_THRESHOLDS.ladder.max_targets, 0, '0 = all, the default');
+});
+
+/** n critical ladders in series; ladder k has sizes[k] activities (names differ by letters: digits are masked in the look-alike match) */
+function ladders(sizes: number[]): Db {
+  const db: Db = { tables: {} };
+  const ops: unknown[] = [{ op: 'add_project', id: 'LT', start: '2026-03-02' }, { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
+  let prev = 'S';
+  sizes.forEach((size, k) => { for (let n = 1; n <= size; n++) { const id = `L${k}_${n}`; ops.push({ op: 'add_activity', id, name: `Zone ${String.fromCharCode(65 + (k % 26))}${String.fromCharCode(65 + Math.floor(k / 26))} pour ${n}`, duration_days: 5 }, { op: 'add_relationship', pred: prev, succ: id }); prev = id; } });
+  ops.push({ op: 'add_relationship', pred: prev, succ: 'H' });
+  ok(db, ops);
+  assert.ok(scheduleProjects(db, [pid(db)]).ok);
+  return db;
+}
+const fs = (r: Awaited<ReturnType<typeof lintScheduleTicked>>) => r.checks.find((x) => x.id === 'fs_overlap')!;
+const cancelled = () => Object.assign(new Error('The call was cancelled.'), { code: 'cancelled' });
+
+test('lint fs_overlap ticks between the ladder simulations: progress counts them, a cancellation after the first keeps those done (partial, said), one before it is the cancellation; lintSchedule gives the same answer without a tick', async () => {
+  const db = ladders(Array(12).fill(4));
+  const seen: [number, number, string][] = [];
+  const full = await lintScheduleTicked(db, {}, async (d, t, m) => { seen.push([d, t, m]); });
+  assert.deepEqual(seen.map(([d, t]) => [d, t]), Array.from({ length: 12 }, (_, i) => [i, 12]));
+  assert.equal(seen[4][2], 'fs_overlap: simulating critical ladder 5 of 12');
+  assert.deepEqual(full, lintSchedule(db), 'the same lint, with or without a tick');
+  assert.equal(full.partial, undefined); assert.equal(fs(full).partial, undefined);
+  const cut = await lintScheduleTicked(db, {}, async (d) => { if (d === 5) throw cancelled(); });
+  const c = fs(cut);
+  assert.equal(cut.partial, true); assert.equal(cut.stopped, 'cancelled');
+  assert.equal(c.partial, true); assert.equal(c.ladders_simulated, 5); assert.equal(c.ladders_to_simulate, 12);
+  assert.equal(c.fixes!.filter((f) => f.activities.length === 4 && f.saves_days != null).length, 5, 'the five simulated ladders have their days saved');
+  assert.equal(c.fixes!.filter((f) => f.activities.length === 4).length, 12, 'all twelve are still listed');
+  assert.match(String(c.note), /^Partial: the call was cancelled after 5 of 12 ladder simulations; the ladders after them have no saves_days\./);
+  assert.equal(cut.checks.length, full.checks.length, 'the rest of the lint was done as usual');
+  await assert.rejects(lintScheduleTicked(db, {}, async () => { throw cancelled(); }), (e: any) => e.code === 'cancelled');
+  await assert.rejects(lintScheduleTicked(db, {}, async (d) => { if (d === 2) throw new Error('boom'); }), /boom/);
+  // simulate: false has nothing to tick
+  let ticks = 0;
+  await lintScheduleTicked(db, { simulate: false }, async () => { ticks++; });
+  assert.equal(ticks, 0);
+});
+
+test('lint max_targets N simulates the first N critical ladders by size (the most activities first), not "the ones that save most"', async () => {
+  const db = ladders([3, 6, 4, 5]);
+  const r = lintSchedule(db, { thresholds: { ladder: { max_targets: 2 } } });
+  const c = r.checks.find((x) => x.id === 'fs_overlap')!;
+  assert.equal(c.ladders_total, 4);
+  assert.deepEqual(c.fixes!.map((f) => f.activities.length).sort(), [5, 6], 'the two largest are simulated and listed');
+  assert.ok(c.fixes!.every((f) => f.saves_days != null));
+});
+
+test('MCP lint: cancelled while simulating every critical ladder it answers what it has, partial; the description says every critical ladder is simulated by default and simulate: false skips it', async () => {
+  const { callTool, toolResult, toolsList } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal, progress?: (d: number, t: number, m: string) => void) => { const r = await callTool(name, args, undefined, signal, progress); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const desc = String((toolsList() as any[]).find((t) => t.name === 'lint').description);
+  assert.match(desc, /by default every critical ladder is simulated/); assert.match(desc, /simulate: false skips/); assert.match(desc, /first N critical ladders, the largest by number of activities first/);
+  assert.doesNotMatch(desc, /save most/);
+  const np = (await call('new_project', { id: 'LTC', start: '2026-03-02' })).d;
+  const sizes = Array(160).fill(4); // 160 critical ladders in series
+  const ops: unknown[] = [{ op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
+  let prev = 'S';
+  sizes.forEach((size, k) => { for (let n = 1; n <= size; n++) { const id = `L${k}_${n}`; ops.push({ op: 'add_activity', id, name: `Zone ${String.fromCharCode(65 + (k % 26))}${String.fromCharCode(65 + Math.floor(k / 26))} pour ${n}`, duration_days: 5 }, { op: 'add_relationship', pred: prev, succ: id }); prev = id; } });
+  ops.push({ op: 'add_relationship', pred: prev, succ: 'H' });
+  assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops })).err, false);
+  await call('schedule', { handle: np.handle, owner_key: np.owner_key });
+  const abort = new AbortController();
+  const r = await call('lint', { handle: np.handle, checks: ['fs_overlap'] }, abort.signal, (done) => { if (done >= 1) abort.abort(); }); // (a report 250 ms apart: the simulations are long enough to get there)
+  assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+  assert.equal(r.d.partial, true); assert.equal(r.d.stopped, 'cancelled');
+  const c = r.d.checks.find((x: any) => x.id === 'fs_overlap');
+  assert.ok(c.ladders_simulated >= 1 && c.ladders_simulated < 160, String(c.ladders_simulated)); assert.equal(c.ladders_to_simulate, 160);
+  assert.match(c.note, /Partial: the call was cancelled after \d+ of 160 ladder simulations/);
+  // not cancelled: whole, and no partial marks
+  const whole = await call('lint', { handle: np.handle, checks: ['fs_overlap'], simulate: false });
+  assert.equal(whole.d.partial, undefined);
 });

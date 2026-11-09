@@ -5,7 +5,8 @@
 // from (also after a stop and a resume): sorted, they give the reported percentiles exactly.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setRoots } from '../mcp/runtime.ts';
@@ -61,7 +62,9 @@ function files(d: any, tool: string) {
   return { json: JSON.parse(readFileSync(json, 'utf8')), csv };
 }
 /** The answer as it is without export. */
-const plain = (d: any) => { const { exported: _e, elapsed_seconds: _s, ...rest } = d; return rest; };
+// (and without the <list>_note an export adds beside a cut list: noteCuts, proved in E4)
+const unnoted = (v: any): any => (Array.isArray(v) ? v.map(unnoted) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([k]) => !/[a-z]_note$/.test(k) || k === 'redone_note' || k === 'resumed_note').map(([k, x]) => [k, unnoted(x)])) : v);
+const plain = (d: any) => { const { exported: _e, elapsed_seconds: _s, ...rest } = d; return unnoted(rest); };
 
 /** A chain of n activities ending in a milestone (A0 -> A1 -> ... -> M1). */
 async function chain(id: string, count: number, extra: unknown[] = []) {
@@ -175,7 +178,7 @@ test('monte_carlo: iterations.csv holds every iteration, whose sorted finishes g
   // and a partial run exports the iterations it did
   testHooks.failAt = 30;
   try { part = (await call('monte_carlo', { ...args, export: folder() })).d; } finally { testHooks.failAt = null; }
-  assert.equal(files(part, 'monte_carlo').csv.iterations.length, 30);
+  assert.equal(files(part, 'monte_carlo-partial').csv.iterations.length, 30);
   await call('close', { ...h, discard: true });
 });
 
@@ -467,4 +470,116 @@ test('earned_value exports every activity and figure (the answer lists the worst
   assert.equal(files(r, 'windows_analysis').csv.windows.at(-1)!.to, 'Update 3 (2026-03-09)');
   assert.equal((await call('windows_analysis', { handle: w.handle, updates: [{ baseline: 'project' }] })).d.updates.at(-1).name, 'current');
   await call('close', { ...w, discard: true });
+});
+
+const sha = (p: string) => createHash('sha256').update(readFileSync(p)).digest('hex');
+const names = (dir: string) => readdirSync(dir).sort();
+
+test('E1: a partial result is written as <tool>-partial and never replaces a complete run\'s files; a later complete run removes both', async () => {
+  const h = await chain('E1', 12);
+  const args = { ...h, iterations: 60, seed: 4, default_estimates: { min_pct: 80, max_pct: 150 } };
+  const dir = folder();
+  const full = (await call('monte_carlo', { ...args, export: dir })).d;
+  assert.ok(full.exported && full.partial === undefined);
+  const complete = names(dir), json = join(dir, 'monte_carlo.json'), before = sha(json), csvBefore = sha(join(dir, 'monte_carlo-iterations.csv'));
+  assert.ok(complete.includes('monte_carlo.json') && complete.includes('monte_carlo-iterations.csv') && !complete.some((f) => f.includes('partial')));
+  // a run that stopped after 25 iterations (an iteration failed), exported to the same folder
+  testHooks.failAt = 25;
+  let part;
+  try { part = (await call('monte_carlo', { ...args, iterations: 100, export: dir })).d; } finally { testHooks.failAt = null; }
+  assert.equal(part.partial, true); assert.equal(part.iterations_done, 25);
+  assert.equal(part.exported.replaced, undefined, 'nothing of an earlier partial to replace');
+  assert.ok(part.exported.files.every((f: any) => /monte_carlo-partial(\.json|-[a-z_]+\.csv)$/.test(f.path)), JSON.stringify(part.exported.files.map((f: any) => f.path)));
+  assert.equal(part.exported.files[0].path, join(dir, 'monte_carlo-partial.json'));
+  assert.equal(sha(json), before, 'the complete run\'s json is untouched');
+  assert.equal(sha(join(dir, 'monte_carlo-iterations.csv')), csvBefore, 'and its csv');
+  for (const f of complete) assert.ok(existsSync(join(dir, f)), `${f} is still there`);
+  assert.equal(JSON.parse(readFileSync(join(dir, 'monte_carlo-partial.json'), 'utf8')).iterations, 25);
+  assert.equal(readCsv(join(dir, 'monte_carlo-partial-iterations.csv')).length, 26, 'the 25 iterations done and the header');
+  // another partial replaces only the earlier partial's files
+  testHooks.failAt = 10;
+  let part2;
+  try { part2 = (await call('monte_carlo', { ...args, iterations: 100, export: dir })).d; } finally { testHooks.failAt = null; }
+  assert.equal(part2.exported.replaced.files, part.exported.files.length, 'the earlier partial\'s files');
+  assert.equal(readCsv(join(dir, 'monte_carlo-partial-iterations.csv')).length, 11);
+  assert.equal(sha(json), before, 'the complete run\'s json is still untouched');
+  // a complete run removes the old complete files and the partial ones
+  const again = (await call('monte_carlo', { ...args, seed: 9, export: dir })).d;
+  assert.equal(again.exported.replaced.files, complete.length + part2.exported.files.length, 'complete and partial files both');
+  assert.deepEqual(names(dir), complete, 'only the new complete run\'s files are left');
+  assert.notEqual(sha(json), before, 'a new run (another seed)');
+  // the other direction: a partial exported first, then a complete one removes it
+  const dir2 = folder();
+  testHooks.failAt = 10;
+  try { await call('monte_carlo', { ...args, iterations: 100, export: dir2 }); } finally { testHooks.failAt = null; }
+  assert.ok(existsSync(join(dir2, 'monte_carlo-partial.json')));
+  await call('monte_carlo', { ...args, export: dir2 });
+  assert.deepEqual(names(dir2), complete);
+});
+
+test('E2 and E3: exported.replaced says how many files an export removed and when the earlier json was written; every file says its bytes', async () => {
+  const h = await chain('E2', 8);
+  const dir = folder();
+  const first = (await call('crash_schedule', { ...h, target_days: 3, export: dir })).d;
+  assert.equal(first.exported.replaced, undefined, 'nothing was replaced');
+  for (const f of first.exported.files) assert.equal(f.bytes, statSync(f.path).size, f.path);
+  assert.ok(first.exported.files.every((f: any) => f.bytes > 0));
+  const written = statSync(join(dir, 'crash_schedule.json')).mtime.toISOString();
+  const second = (await call('crash_schedule', { ...h, target_days: 3, export: dir })).d;
+  assert.deepEqual(second.exported.replaced, { files: first.exported.files.length, written });
+  for (const f of second.exported.files) assert.equal(f.bytes, statSync(f.path).size);
+  // other tools' files are not counted
+  const other = (await call('crash_schedule', { ...h, target_days: 3, export: dir })).d;
+  assert.equal(other.exported.replaced.files, first.exported.files.length);
+});
+
+test('E4: every list the answer cut says where all of it is, when an export was written (the total of float_paths between printed as the string it is)', async () => {
+  const h = await chain('E4', 30);
+  const dir = folder();
+  const args = { ...h, iterations: 40, seed: 2, top: 3, default_estimates: { min_pct: 80, max_pct: 150 } };
+  const r = (await call('monte_carlo', { ...args, export: dir })).d;
+  assert.equal(r.criticality_note, `3 of 31 shown; all 31 in ${join(dir, 'monte_carlo-criticality.csv')}`);
+  assert.equal(r.sensitivity_note, `3 of ${r.sensitivity_total} shown; all ${r.sensitivity_total} in ${join(dir, 'monte_carlo-sensitivity.csv')}`);
+  assert.equal(r.milestones_note, undefined, 'nothing cut: no note');
+  const bare = (await call('monte_carlo', args)).d;
+  assert.ok(!Object.keys(bare).some((k) => k.endsWith('_note') && k !== 'note'), 'no export: no note');
+  // lint: a check's activities cut to max_ids, its total_activities
+  const c = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+  const lint = (await call('lint', { handle: c, max_ids: 1, simulate: false, export: folder() })).d;
+  const cut = lint.checks.filter((x: any) => x.total_activities > 1);
+  assert.ok(cut.length > 0);
+  for (const x of cut) assert.equal(x.activities_note, `1 of ${x.total_activities} shown; all ${x.total_activities} in ${lint.exported.files.find((f: any) => f.path.endsWith('lint-findings.csv')).path}`, x.id);
+  assert.ok(lint.checks.filter((x: any) => x.total_activities <= 1).every((x: any) => x.activities_note === undefined));
+  assert.equal((await call('lint', { handle: c, max_ids: 1, simulate: false })).d.checks.some((x: any) => 'activities_note' in x), false);
+  await call('close', { handle: c, discard: true });
+  // float_paths between on 80 diamonds: 2^80 paths, a decimal string, exactly
+  const np = (await call('new_project', { id: 'E4L', start: '2026-03-02' })).d;
+  const ops: unknown[] = [{ op: 'add_activity', id: 'S', name: 'S', duration_days: 1 }];
+  let prev = 'S';
+  for (let i = 1; i <= 80; i++) { ops.push({ op: 'add_activity', id: `a${i}`, name: 'a', duration_days: 1 }, { op: 'add_activity', id: `b${i}`, name: 'b', duration_days: 2 }, { op: 'add_activity', id: `J${i}`, name: 'J', duration_days: 1 }, { op: 'add_relationship', pred: prev, succ: `a${i}` }, { op: 'add_relationship', pred: prev, succ: `b${i}` }, { op: 'add_relationship', pred: `a${i}`, succ: `J${i}` }, { op: 'add_relationship', pred: `b${i}`, succ: `J${i}` }); prev = `J${i}`; }
+  assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops })).err, false);
+  await call('schedule', { handle: np.handle, owner_key: np.owner_key });
+  const fdir = folder();
+  const fp = (await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5 }, export: fdir })).d;
+  assert.equal(fp.between.paths_total, '1208925819614629174706176');
+  assert.equal(fp.between.paths_note, `5 of 1208925819614629174706176 shown (the most asked for); the export holds the same 5 in ${join(fdir, 'float_paths-between.csv')}, ask for more to have more`);
+  assert.equal(fp.paths_note, undefined, 'the top-level paths are not cut lists');
+  assert.equal((await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5 } })).d.between.paths_note, undefined, 'no export: no note');
+});
+
+test('E5: optimize_schedule with objective min_crash_cost exports under its own name, so one tool\'s files in a folder are replaced together', async () => {
+  const h = await chain('E5', 8);
+  const dir = folder();
+  mkdirSync(dir, { recursive: true });
+  // what a makespan run leaves in the folder
+  writeFileSync(join(dir, 'optimize_schedule-activities.csv'), 'stale'); writeFileSync(join(dir, 'optimize_schedule.json'), '{}'); writeFileSync(join(dir, 'crash_schedule-old.csv'), 'a crash_schedule export of its own');
+  const r = (await call('optimize_schedule', { ...h, objective: 'min_crash_cost', target_days: 3, export: dir })).d;
+  assert.equal(r.err, undefined, JSON.stringify(r).slice(0, 300));
+  assert.ok(r.exported, JSON.stringify(r).slice(0, 300));
+  assert.ok(r.exported.files.every((f: any) => /optimize_schedule(\.json|-[a-z_]+\.csv)$/.test(f.path)), JSON.stringify(r.exported.files.map((f: any) => f.path)));
+  assert.ok(!names(dir).some((f) => f.startsWith('crash_schedule') && f !== 'crash_schedule-old.csv'), 'no crash_schedule files of this call');
+  assert.equal(existsSync(join(dir, 'optimize_schedule-activities.csv')), false, 'the stale makespan table is gone');
+  assert.equal(r.exported.replaced.files, 2);
+  assert.ok(existsSync(join(dir, 'crash_schedule-old.csv')), 'the crash_schedule tool\'s own files stay');
+  assert.ok(existsSync(join(dir, 'optimize_schedule-steps.csv')));
 });

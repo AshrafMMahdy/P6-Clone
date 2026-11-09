@@ -215,15 +215,17 @@ function room(first: LoadNeeds, again: () => LoadNeeds): { need: LoadNeeds; budg
   return { need, budget, free };
 }
 /** The answer of a render_4d call without resume whose earlier parts could not all be removed (their render.json already gone). On
- *  Windows the error path is the .parts folder, not the file that was held: then the files still left in it (they are the ones that
- *  could not be removed) are named in the message and the next step, and data.locked_files lists them. */
+ *  Windows the error path is the .parts folder (or a folder inside it), not the file that was held: then the files still left in it (they are
+ *  the ones that could not be removed) are in data.locked_files, the first of them named in the message and the next step with how many more. */
 export function partsNotRemovedAnswer(name: string, partsDir: string, e: PartsInUse) {
   const left = e.files.length > 0;
-  const list = e.files.map((f) => `"${f}"`).join(', ');
+  // the first file left, and how many more there are (data.locked_files lists every one: the message is never cut by a count, it says it is short)
+  const more = e.files.length - 1, first = `"${e.files[0]}"`;
+  const list = more > 0 ? `${first} and ${more} more (data.locked_files lists them all)` : first;
   const message = left
     ? `The earlier parts of "${name}" at "${partsDir}" could not all be removed right now: the folder could not be removed (${e.cause.message}) and ${e.files.length === 1 ? 'a file is' : `${e.files.length} files are`} still in it, locked by another program: ${list}. Their render.json was removed, so that earlier render can no longer be continued; nothing of this render was made yet.`
     : `The earlier parts of "${name}" at "${partsDir}" could not all be removed right now: a file in them is locked by another program ("${e.path}": ${e.cause.message}). Their render.json was removed, so that earlier render can no longer be continued; nothing of this render was made yet.`;
-  const hint = `Close the program holding ${left ? (e.files.length === 1 ? list : `the ${e.files.length} files named above`) : `"${e.path}"`} (or wait for it to let go), then call render_4d again.`;
+  const hint = `Close the program holding ${left ? (more > 0 ? `${first} and the ${more} other file${more === 1 ? '' : 's'} (data.locked_files lists them)` : first) : `"${e.path}"`} (or wait for it to let go), then call render_4d again.`;
   return { message, hint, data: { parts: partsDir, locked: e.path, ...(left ? { locked_files: e.files } : {}) } };
 }
 /** The need, when it fits the memory free (idle projects moved out first, as for any file); else refused in words. */

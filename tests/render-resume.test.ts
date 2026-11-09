@@ -11,7 +11,7 @@ import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, 
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ALL_FORMATS, EncodedPacketSink, EncodedVideoPacketSource, FilePathSource, Input, Mp4OutputFormat, Output, StreamTarget, WebMOutputFormat } from 'mediabunny';
-import { filesLeftIn, joinSegments, Parts, PartsInUse, probeVideo } from '../core/bim/renderParts.ts';
+import { filesLeftIn, joinSegments, leftFilesApply, Parts, PartsInUse, probeVideo } from '../core/bim/renderParts.ts';
 import { renderRun } from '../core/bim/headless.ts';
 import { partsNotRemovedAnswer, testHooks } from '../mcp/fourd.ts';
 import { setRoots } from '../mcp/runtime.ts';
@@ -1075,10 +1075,10 @@ test('parts folder that cannot be removed, the error path being the folder itsel
   assert.equal(e.whole, false); assert.equal(e.path, dir);
   assert.deepEqual(e.files, [...held].sort(), 'the files left after the failed removal');
   const a = partsNotRemovedAnswer('held', dir, e);
-  for (const f of held) assert.ok(a.message.includes(`"${f}"`), a.message);
-  assert.match(a.message, /2 files are still in it, locked by another program/);
+  assert.match(a.message, /2 files are still in it, locked by another program: ".*frames.f-0002\.png" and 1 more \(data\.locked_files lists them all\)\./);
+  assert.ok(a.message.includes(`"${[...held].sort()[0]}"`) && !a.message.includes(`"${[...held].sort()[1]}"`), 'the first file left is named, the rest are counted');
   assert.match(a.message, /Their render\.json was removed, so that earlier render can no longer be continued/);
-  assert.match(a.hint, /Close the program holding the 2 files named above/);
+  assert.match(a.hint, /Close the program holding ".*f-0002\.png" and the 1 other file \(data\.locked_files lists them\)/);
   assert.deepEqual(a.data, { parts: dir, locked: dir, locked_files: [...held].sort() });
   // one file left: named in the next step too; a file reported (not the folder): the earlier words, no locked_files
   const one = partsNotRemovedAnswer('held', dir, new PartsInUse(dir, new Error('EBUSY'), false, [join(dir, 'run-0002.mp4')]));
@@ -1086,7 +1086,48 @@ test('parts folder that cannot be removed, the error path being the folder itsel
   const file = partsNotRemovedAnswer('held', dir, new PartsInUse(join(dir, 'run-0001.mp4'), new Error('EBUSY'), false));
   assert.match(file.message, /a file in them is locked by another program \(".*run-0001\.mp4": EBUSY\)/);
   assert.equal(file.data.locked_files, undefined); assert.equal(file.data.locked, join(dir, 'run-0001.mp4'));
+  // many files: the message is short (the first, and how many more), the list is whole in data.locked_files, whatever the count
+  const many = Array.from({ length: 40 }, (_, i) => join(dir, `run-${String(i).padStart(4, '0')}.mp4`));
+  const big = partsNotRemovedAnswer('held', dir, new PartsInUse(dir, new Error('EBUSY'), false, many));
+  assert.match(big.message, /40 files are still in it, locked by another program: ".*run-0000\.mp4" and 39 more \(data\.locked_files lists them all\)\./);
+  assert.ok(!big.message.includes('run-0001.mp4'));
+  assert.deepEqual(big.data.locked_files, many); assert.match(big.hint, /and the 39 other files \(data\.locked_files lists them\)/);
   // the lister: files in every folder below, nothing for a folder that is not there
   assert.deepEqual(filesLeftIn(dir), [...held].sort());
   assert.deepEqual(filesLeftIn(join(base, 'nothing')), []);
+});
+
+test('parts folder that cannot be removed: the files left are listed whether the error path is the folder, a folder inside it (any case, or with \\?\ in front on Windows), or a held file (not listed: that file is named as before)', () => {
+  const base = mkdtempSync(join(tmpdir(), 'p6-rr-sub-'));
+  const dir = join(base, 'held.parts');
+  mkdirSync(join(dir, 'frames'), { recursive: true });
+  for (const f of ['render.json', join('frames', 'f-0001.png'), join('frames', 'f-0002.png'), 'run-0001.mp4']) writeFileSync(join(dir, f), 'x');
+  const sub = join(dir, 'frames');
+  // as the folder, a folder inside it, a file inside it, a place outside it, and the extended-length spellings of Windows
+  assert.equal(leftFilesApply(dir, dir), true);
+  assert.equal(leftFilesApply(dir, sub), true, 'a subfolder inside the .parts folder');
+  assert.equal(leftFilesApply(dir, join(dir, 'run-0001.mp4')), false, 'a held file is not a folder: named as it was');
+  assert.equal(leftFilesApply(dir, join(base, 'other.parts')), false);
+  assert.equal(leftFilesApply(dir, join(base, 'held.parts-2')), false, 'a folder whose name only begins like it');
+  assert.equal(leftFilesApply(dir, base), false, 'the folder that holds it');
+  assert.equal(leftFilesApply(dir, join(sub, '..', '..', 'elsewhere')), false);
+  assert.equal(leftFilesApply(dir, `\\\\?\\${dir}`), true, '\\?\\ in front of the path');
+  assert.equal(leftFilesApply(dir, `\\\\?\\${sub}`), true);
+  // through Parts.create: the error names the subfolder (as Windows does when a file in it is held and the folder cannot go)
+  const fs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs');
+  const was = fs.rmSync;
+  fs.rmSync = ((path: string, o?: object) => {
+    if (String(path) !== dir) return was(path, o);
+    throw Object.assign(new Error(`EBUSY: resource busy or locked, rmdir '${sub}'`), { code: 'EBUSY', errno: -4082, syscall: 'rmdir', path: sub });
+  }) as typeof fs.rmSync;
+  syncBuiltinESMExports();
+  let e: unknown;
+  try { Parts.create(dir, { kind: 'video', arguments: {}, fingerprint: {}, frames_total: 3 }, () => {}, base); } catch (x) { e = x; } finally { fs.rmSync = was; syncBuiltinESMExports(); }
+  assert.ok(e instanceof PartsInUse, String(e));
+  assert.equal(e.path, sub);
+  assert.deepEqual(e.files, filesLeftIn(dir), 'the files left in the folder, though the path reported is a folder inside it');
+  assert.ok(e.files.length >= 3);
+  const a = partsNotRemovedAnswer('held', dir, e);
+  assert.match(a.message, /the folder could not be removed .* and \d+ files are still in it/);
+  assert.deepEqual(a.data.locked_files, e.files); assert.equal(a.data.locked, sub);
 });

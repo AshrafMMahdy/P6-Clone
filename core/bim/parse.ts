@@ -298,7 +298,17 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
     if (!r.ok) { failed.push(`chunk ${k + 1} (${c.products} products): ${r.note.split(' The model is indexed')[0]}`); state.failures += c.products; if (r.stuck) state.stuck ??= r.stuck; }
   }
   if (!state.meshed) return { ok: false, note: `no chunk could be meshed: ${failed.slice(0, 3).join('; ')}`, ...(state.stuck ? { stuck: state.stuck } : {}) };
-  return { ok: true, ...state, note: `meshed in ${chunks.length} chunk${chunks.length === 1 ? '' : 's'} of at most ${Math.round(target / 1048576)} MB of the IFC (the model is past one geometry run)${usedKept ? `; ${usedKept} of ${chunks.length} chunks kept from an earlier meshing ${usedKept === 1 ? 'was' : 'were'} used; the other ${chunks.length - usedKept} ${chunks.length - usedKept === 1 ? 'was' : 'were'} meshed now` : ''}${redone ? `; ${redone} chunk${redone === 1 ? '' : 's'} kept from an earlier meshing did not check out (damaged, as a power loss can leave a file) and ${redone === 1 ? 'was' : 'were'} meshed again` : ''}${failed.length ? `; ${failed.length} chunk(s) failed and their elements have no geometry: ${failed.slice(0, 3).join('; ')}` : ''}` };
+  return { ok: true, ...state, note: `meshed in ${chunks.length} chunk${chunks.length === 1 ? '' : 's'} of at most ${Math.round(target / 1048576)} MB of the IFC (the model is past one geometry run)${keptChunksNote(usedKept, chunks.length, failed.length)}${redone ? `; ${redone} chunk${redone === 1 ? '' : 's'} kept from an earlier meshing did not check out (damaged, as a power loss can leave a file) and ${redone === 1 ? 'was' : 'were'} meshed again` : ''}${failed.length ? `; ${failed.length} chunk(s) failed and their elements have no geometry: ${failed.slice(0, 3).join('; ')}` : ''}` };
+}
+
+/** What the geometry note says of the chunks kept from an earlier meshing (empty when none was used): how many were used, and how many of the
+ *  others were meshed now. A chunk that failed was not meshed, so it is not counted among those meshed (the note says it failed); when every
+ *  chunk was kept, all of them were used and none was meshed. */
+export function keptChunksNote(used: number, total: number, failed: number): string {
+  if (!used) return '';
+  if (used === total) return `; ${total === 1 ? 'the 1 chunk' : `all ${total} chunks`} kept from an earlier meshing ${total === 1 ? 'was' : 'were'} used`;
+  const meshed = total - used - failed;
+  return `; ${used} of ${total} chunks kept from an earlier meshing ${used === 1 ? 'was' : 'were'} used${meshed > 0 ? `; the other ${meshed} ${meshed === 1 ? 'was' : 'were'} meshed now` : ''}`;
 }
 
 /** The files that cut, mesh and tile a model (beside the geometry worker), and web-ifc as the worker loads it (its Node entry and its

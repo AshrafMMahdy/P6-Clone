@@ -18,7 +18,8 @@ export interface LintCheck extends CheckResult {
   severity: 'error' | 'warning' | 'info'; band: Band; fixes?: Fix[]; weight?: number; /** the thresholds this check was judged by */ applied?: object;
   /** a check whose fixes are cut to max_ids: how many there are */ fixes_total?: number;
   /** connectivity: how many open starts and open ends there are (each kind is listed up to max_ids) */ no_predecessor_total?: number; no_successor_total?: number;
-  /** fs_overlap: how many ladders were found (it lists all of them, or the ladder.max_targets that save most when that is above 0) */ ladders_total?: number;
+  /** fs_overlap: how many ladders were found (every ladder is simulated, or with ladder.max_targets N above 0 the first N critical ladders by size, the most activities first) */ ladders_total?: number;
+  /** fs_overlap, a simulation that was cancelled: the ladders simulated so far keep their saves_days, the rest have none (the rest of the lint was done as usual) */ partial?: true; ladders_simulated?: number; ladders_to_simulate?: number;
 }
 
 /** A check's lists as an answer shows them (max 0 = all): its first `max` activities (connectivity: the first `max` of each kind, open
@@ -28,7 +29,9 @@ export function cutLintCheck(c: LintCheck, max: number): LintCheck {
   const kind = (v: string) => c.activities.filter((x) => x.value === v).slice(0, max);
   return { ...c, activities: c.id === 'connectivity' ? [...kind('no predecessor'), ...kind('no successor')] : c.activities.slice(0, max), ...(c.fixes_total != null && c.fixes ? { fixes: c.fixes.slice(0, max) } : {}) };
 }
-export interface LintReport { report: 'Schedule Lint'; profile: 'p6' | 'platform'; score?: number; grade?: string; work_activities: number; relationships: number; checks: LintCheck[]; thresholds: LintThresholds; overridden: string[]; not_used?: string[] }
+export interface LintReport { report: 'Schedule Lint'; profile: 'p6' | 'platform'; /** a simulation was cancelled: the check that says so (fs_overlap) holds the part that was done */ partial?: true; stopped?: 'cancelled'; score?: number; grade?: string; work_activities: number; relationships: number; checks: LintCheck[]; thresholds: LintThresholds; overridden: string[]; not_used?: string[] }
+/** What a lint reports to the tick of lintScheduleTicked between units of long work (the days-saved simulations) */
+export interface LintTick { done: number; total: number; message: string }
 export interface LintOptions { projIds?: string[]; hoursPerDay?: number; profile?: 'p6' | 'platform'; checks?: string[]; maxIds?: number; simulate?: boolean; thresholds?: Record<string, unknown> }
 
 type Pair = [number, number];
@@ -45,7 +48,7 @@ export interface LintThresholds {
   constraints: { max_hard: number };
   /** look-alike activities chained FS: a ladder needs min_group_size of them, durations within max_duration_ratio, at
    *  least min_chained_share of the pairs chained by FS lags of 0..chain_lag_max; the SS lag offered is
-   *  max(lag_min, ceil(duration / lag_divisor)); every ladder is simulated and listed, or the max_targets that save most when max_targets is above 0 */
+   *  max(lag_min, ceil(duration / lag_divisor)); every critical ladder is simulated and listed (the days its fix saves), or with max_targets above 0 only the first max_targets critical ladders, by size (the most activities first), are */
   ladder: { min_group_size: number; max_duration_ratio: number; min_chained_share: number; chain_lag_max: number; lag_divisor: number; lag_min: number; max_targets: number };
   /** networks with fewer work activities than this get the small-network bands */
   small_network_below: number;
@@ -130,7 +133,25 @@ const check = (id: string, name: string, severity: LintCheck['severity'], found:
 const bandOf = (v: number, pass: [number, number], warn: [number, number]): Band => (v >= pass[0] && v <= pass[1] ? 'pass' : v >= warn[0] && v <= warn[1] ? 'warn' : 'fail');
 const nameKey = (t: Row) => t.task_name.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 
+/** The lint, run straight through (no tick: nothing to cancel or show progress of; the desktop app and the tests call it so). */
 export function lintSchedule(db: Db, o: LintOptions = {}): LintReport {
+  const g = lintRun(db, o);
+  for (let r = g.next(); ; r = g.next()) if (r.done) return r.value;
+}
+/** The same lint, ticking between the fs_overlap fix simulations (one schedule of a scratch copy each: seconds for a long list of critical
+ *  ladders): progress, a yield to the event loop and the call's cancellation. A cancellation after the first simulation stops the simulating
+ *  and keeps what was done, said (partial, ladders_simulated of ladders_to_simulate); the rest of the lint is done as usual. */
+export async function lintScheduleTicked(db: Db, o: LintOptions, tick: (done: number, total: number, message: string) => Promise<void>): Promise<LintReport> {
+  const g = lintRun(db, o);
+  let r = g.next();
+  while (!r.done) {
+    let cancelled: unknown;
+    try { await tick(r.value.done, r.value.total, r.value.message); } catch (e) { cancelled = e; }
+    r = cancelled === undefined ? g.next() : g.throw(cancelled); // the run decides: stop and keep what is done, or rethrow
+  }
+  return r.value;
+}
+function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void> {
   const s = makeScope(db, { projIds: o.projIds, hoursPerDay: o.hoursPerDay, calendarDays: true });
   const profile = o.profile ?? 'p6', maxIds = o.maxIds ?? 100;
   const { thresholds: T, overridden, not_used } = resolveLintThresholds(o.thresholds);
@@ -152,7 +173,7 @@ export function lintSchedule(db: Db, o: LintOptions = {}): LintReport {
     const f = live.filter((t) => succs(t).length && !succs(t).some((r) => type(r) === 'PR_FS' || type(r) === 'PR_FF')).map((t) => offender(t, s, `only ${succs(t).map((r) => type(r).slice(3)).join(', ')} out`));
     out.push(check('dangling_finish', 'Dangling finish (its finish drives no FS or FF successor)', 'warning', f, live.length, upTo(f.length, T.dangling_finish.max), maxIds, { applied: T.dangling_finish, note: 'If it ran late nothing would move: add a finish-to-start or finish-to-finish successor.' }));
   }
-  if (want('fs_overlap')) out.push(fsOverlap(s, o.simulate !== false, maxIds, T));
+  if (want('fs_overlap')) out.push(yield* fsOverlap(s, o.simulate !== false, maxIds, T));
   if (want('empty_wbs')) {
     const W2 = (s.db.tables.PROJWBS?.rows ?? []).filter((w) => s.projIds.has(w.proj_id) && w.proj_node_flag !== 'Y');
     const kids = new Map<string, string[]>(); for (const w of W2) { const l = kids.get(w.parent_wbs_id); if (l) l.push(w.wbs_id); else kids.set(w.parent_wbs_id, [w.wbs_id]); }
@@ -191,12 +212,13 @@ export function lintSchedule(db: Db, o: LintOptions = {}): LintReport {
   const grades = Object.entries(T.grades).sort((a, b) => b[1] - a[1]);
   const grade = score == null ? undefined : (grades.find(([, min]) => score >= min) ?? grades[grades.length - 1])?.[0];
   for (const c of out) if (c.weight != null) c.applied = { ...c.applied, weight: c.weight };
-  return { report: 'Schedule Lint', profile, ...(score != null ? { score, grade } : {}), work_activities: W.length, relationships: s.rels.length, checks: out, thresholds: T, overridden, ...(not_used.length ? { not_used } : {}) };
+  const stopped = out.some((c) => c.partial);
+  return { report: 'Schedule Lint', profile, ...(stopped ? { partial: true as const, stopped: 'cancelled' as const } : {}), ...(score != null ? { score, grade } : {}), work_activities: W.length, relationships: s.rels.length, checks: out, thresholds: T, overridden, ...(not_used.length ? { not_used } : {}) };
 }
 
 /** FS links that should overlap: leads (FS with negative lag: use SS plus lag), SS lags as long as the predecessor
  *  (really FS), and "ladders" (a run of look-alike activities chained FS that could start in step). */
-function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThresholds): LintCheck {
+function* fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThresholds): Generator<LintTick, LintCheck, void> {
   const L = T.ladder;
   const task = (id: string) => s.ctx.taskById.get(id)!;
   const durD = (t: Row) => Number(t.remain_drtn_hr_cnt || t.target_drtn_hr_cnt || 0) / s.dh.task(t);
@@ -236,7 +258,7 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
     ladders.push({ activities: g.map((t) => t.task_code), fix: `Overlap "${g[0].task_name}" and its ${g.length - 1} look-alikes: ${chain.length} FS links become SS + lag`, ops });
   }
   // Simulate what each fix saves: only ladders with a critical activity can move the finish (the others save 0), the
-  // biggest max_targets of them (every one by default); the base is scheduled once and each fix once, on a rolled-back copy.
+  // first max_targets of them, by size (the most activities first; every one by default); the base is scheduled once and each fix once, on a rolled-back copy.
   const code2task = new Map(s.tasks.map((t) => [t.task_code, t]));
   const critLadder = (l: Fix) => l.activities.some((c) => { const t = code2task.get(c); return t && isCritical(t, s.ctx); });
   ladders.sort((a, b) => Number(critLadder(b)) - Number(critLadder(a)) || b.activities.length - a.activities.length);
@@ -244,6 +266,7 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
   const top = ladders.slice(0, Math.max(20, maxTargets * 2));
   for (const l of top) if (!critLadder(l)) l.saves_days = 0;
   const toSim = top.filter(critLadder).slice(0, maxTargets);
+  let simulated = toSim.length; // fewer when a cancellation stopped the simulating
   if (simulate && toSim.length) {
     const ids = [...s.projIds];
     const finishAfter = (ops: Record<string, unknown>[]) => {
@@ -258,11 +281,17 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
     };
     const base = finishAfter([]);
     const cal = s.projs[0] ? s.projCal(s.projs[0]) : null;
-    for (const l of toSim) { const f = finishAfter(l.ops); l.saves_days = base != null && f != null && cal ? Math.round(s.workDays(cal, f, base) * 10) / 10 : undefined; }
+    for (const [i, l] of toSim.entries()) {
+      // between simulations: progress and the cancellation. One after the first simulation stops here, keeping those done; one before it is the
+      // cancellation itself (nothing to keep)
+      try { yield { done: i, total: toSim.length, message: `fs_overlap: simulating critical ladder ${i + 1} of ${toSim.length}` }; }
+      catch (e) { if ((e as { code?: unknown })?.code === 'cancelled' && i > 0) { simulated = i; break; } throw e; }
+      const f = finishAfter(l.ops); l.saves_days = base != null && f != null && cal ? Math.round(s.workDays(cal, f, base) * 10) / 10 : undefined;
+    }
   }
   top.sort((a, b) => (b.saves_days ?? 0) - (a.saves_days ?? 0));
   for (const l of top.slice(0, maxTargets)) { found.push({ id: l.activities[0], name: l.fix, value: l.saves_days != null ? `saves ${l.saves_days} d` : undefined }); fixes.push(l); }
-  return check('fs_overlap', 'Finish-to-start links that should overlap', 'warning', found, null, found.length ? 'warn' : 'pass', maxIds, { fixes, ladders_total: ladders.length, applied: { ...T.fs_overlap, ladder: L }, note: 'Leads hide an overlap inside an FS link; an SS lag as long as the predecessor is really an FS; a ladder of look-alike activities chained FS could run in step. Each fix is a list of edit operations; ladders show the days the fix saves.' });
+  return check('fs_overlap', 'Finish-to-start links that should overlap', 'warning', found, null, found.length ? 'warn' : 'pass', maxIds, { fixes, ladders_total: ladders.length, ...(simulated < toSim.length ? { partial: true as const, ladders_simulated: simulated, ladders_to_simulate: toSim.length } : {}), applied: { ...T.fs_overlap, ladder: L }, note: `${simulated < toSim.length ? `Partial: the call was cancelled after ${simulated} of ${toSim.length} ladder simulations; the ladders after them have no saves_days. ` : ''}Leads hide an overlap inside an FS link; an SS lag as long as the predecessor is really an FS; a ladder of look-alike activities chained FS could run in step. Each fix is a list of edit operations; ladders show the days the fix saves.` });
 }
 
 /** White Hat IQ's graded network checks (bands as in its schedule_lint; small networks have wider bands). */

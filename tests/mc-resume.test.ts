@@ -12,7 +12,7 @@ import { runMonteCarlo, testHooks, type MonteCarloOptions } from '../core/risk/m
 import { addRisk, linkActivity } from '../core/risk/register.ts';
 import { claimHere, IterationFile } from '../mcp/keptRuns.ts';
 const here = claimHere(() => undefined); // (a run's claim of its kept file, as the server's main thread makes it)
-import { getSession, setRoots } from '../mcp/runtime.ts';
+import { config, getSession, setRoots, usedMemory } from '../mcp/runtime.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'p6-mc-resume-'));
 setRoots(null, root);
@@ -324,7 +324,7 @@ test('…the same in compute workers: the claim is held on the server\'s main th
   } finally { s.p.kill('SIGKILL'); }
 });
 
-test('monte_carlo has no bound on top, buckets or iterations: top 0 = all, top 500 and buckets 250 are honoured, 20,100 iterations all run, and the memory reservation uses the iterations asked', async () => {
+test('monte_carlo has no bound on top, buckets or iterations: top 0 = all, top 500 and buckets 250 are honoured, 20,100 iterations all run', async () => {
   const h = await project(40);
   const a = { ...h, iterations: 20, seed: 3, default_estimates: est };
   const dflt = (await call('monte_carlo', a)).d;
@@ -343,11 +343,71 @@ test('monte_carlo has no bound on top, buckets or iterations: top 0 = all, top 5
   const many = (await call('monte_carlo', { ...h, iterations: 20100, seed: 3, default_estimates: est })).d;
   assert.equal(many.iterations, 20100, 'iterations above 20,000 all run');
   assert.equal(many.partial, undefined);
-  // the up-front reservation is worked out from the iterations asked
-  const { workNeed } = await import('../mcp/workset.ts');
-  const s = getSession(h.handle);
-  const need = (it: number) => workNeed('monte_carlo', { iterations: it }, s, () => 1e12)!;
-  assert.ok(need(100000).bytes - need(20000).bytes > 0, 'no clamp to 20,000 in the reservation');
-  assert.ok(Math.abs((need(100000).bytes - need(20000).bytes) * 1.25 - (need(120000).bytes - need(20000).bytes)) <= 2, 'the sample memory grows in step with the iterations asked');
-  assert.match(need(100000).what, /100,000 iterations/);
+  // (the up-front reservation of what is asked is proved in the test below: a request that cannot fit is refused before any iteration)
+});
+
+test('monte_carlo: a count that is not a whole number is refused as bad_input naming it, and a request that cannot fit (iterations, buckets, the export) is refused in words before any iteration, losing and writing nothing', async () => {
+  const h = await project(40);
+  const a = { ...h, iterations: 20, seed: 3, default_estimates: est };
+  const kept0 = keptFiles(); // (earlier tests leave their stopped runs here)
+  // L1: top, buckets and iterations are whole numbers; absent is the default; top 0 = all
+  for (const [arg, bad] of [['top', [-1, 2.5, Number.NaN, Infinity, '5', true]], ['buckets', [-1, 12.5, Number.NaN, Infinity, -Infinity, '20']], ['iterations', [-5, 10.5, Number.NaN, Infinity, '100']]] as const) {
+    for (const v of bad) {
+      const r = await call('monte_carlo', { ...a, [arg]: v });
+      assert.equal(r.err, true, `${arg} ${String(v)}`);
+      assert.equal(r.d.error.code, 'bad_input', `${arg} ${String(v)}: ${JSON.stringify(r.d.error).slice(0, 200)}`);
+      assert.match(r.d.error.message, new RegExp(`^${arg} must be a whole number`), r.d.error.message);
+    }
+  }
+  assert.equal((await call('monte_carlo', { ...a, top: 0, buckets: 7 })).d.histogram.length, 7);
+  assert.deepEqual(keptFiles(), kept0, 'a refused call ran nothing');
+
+  // a stopped run's kept file is not removed by a refusal, and a refusal writes nothing
+  testHooks.failAt = 6;
+  let stopped;
+  try { stopped = (await call('monte_carlo', { ...a, iterations: 12 })).d; } finally { testHooks.failAt = null; }
+  assert.equal(stopped.partial, true); assert.ok(existsSync(stopped.resume));
+  const before = keptFiles(), outDir = join(root, 'mc-refused-export');
+  const was = config.budgetBytes;
+  config.budgetBytes = usedMemory() + 300 * 1048576;
+  try {
+    // (a refusal first moves the other, idle projects out: one call does that, then the room is measured)
+    await call('monte_carlo', { ...a, buckets: 1e10 });
+    config.budgetBytes = usedMemory() + 300 * 1048576;
+    const free = () => config.budgetBytes - usedMemory();
+    const refused = async (extra: Record<string, unknown>) => {
+      const r = await call('monte_carlo', { ...a, ...extra });
+      assert.equal(r.err, true, JSON.stringify(extra));
+      assert.equal(r.d.error.code, 'memory_budget', JSON.stringify(r.d.error).slice(0, 300));
+      assert.deepEqual(keptFiles(), before, 'nothing was started, removed or kept');
+      assert.equal(existsSync(outDir), false, 'nothing was exported');
+      return r.d.error;
+    };
+    const { workNeed } = await import('../mcp/workset.ts');
+    const s = getSession(h.handle);
+    const need = (args: Record<string, unknown>) => workNeed('monte_carlo', { iterations: 20, ...args }, s, free)!;
+    // H1: a huge histogram is refused before the run (it used to fail with "Invalid array length" after the run), with the buckets that fit
+    for (const buckets of [1e10, 5e7]) {
+      const e = await refused({ buckets, resume: stopped.resume });
+      assert.match(e.message, /histogram buckets/); assert.ok(!/Infinity|NaN/.test(e.message), e.message);
+      const fit = Number(/at most ([\d,]+) histogram buckets \(buckets\)/.exec(e.hint)?.[1].replace(/,/g, ''));
+      assert.ok(fit >= 5, e.hint);
+      assert.ok(need({ buckets: fit }).bytes <= free(), 'the buckets named fit'); assert.ok(need({ buckets: fit + 1 }).bytes > free() - 1, 'and one more does not');
+    }
+    assert.ok(existsSync(stopped.resume), 'the stopped run is still resumable');
+    // M4: iterations that cannot fit, with and without the export, are refused; the hint is what fits (the per-iteration costs beside the activities')
+    const perIt = (x: Record<string, unknown>) => (need({ iterations: 2000, ...x }).bytes - need({ iterations: 1000, ...x }).bytes) / 1000;
+    const n = s.db.tables.TASK.rows.length;
+    assert.ok(perIt({}) > n * 12 + 30, `a plain iteration costs more than ${n} activities x 12 B: ${perIt({})}`);
+    assert.ok(perIt({ export: 'x' }) > perIt({}) + 90, 'the export adds its rows per iteration');
+    for (const extra of [{}, { export: outDir }]) {
+      const e = await refused({ iterations: 1e9, ...extra });
+      const fit = Number(/at most ([\d,]+) iterations \(iterations\)/.exec(e.hint)?.[1].replace(/,/g, ''));
+      assert.ok(fit >= 10 && fit < 1e9, e.hint);
+      assert.ok(need({ iterations: fit, ...extra }).bytes <= free(), `${fit} iterations fit${'export' in extra ? ' with the export' : ''}`);
+      assert.ok(need({ iterations: fit + 1, ...extra }).bytes > free() - 1, 'and one more does not');
+    }
+    // a run asked within what is free still runs (the reservation does not refuse what fits)
+    assert.equal((await call('monte_carlo', { ...a, iterations: 50, buckets: 30 })).d.histogram.length, 30);
+  } finally { config.budgetBytes = was; }
 });

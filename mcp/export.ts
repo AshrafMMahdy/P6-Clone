@@ -17,7 +17,11 @@ export type Rows = object[] | (() => Iterable<object>);
  *  row has beyond them (a nested object's parts, a milestone of Monte Carlo's) follows, in the order it first appears. */
 export interface Table { name: string; columns: string[]; rows: Rows }
 /** What an answer says it exported. */
-export interface Exported { folder: string; files: { path: string; rows?: number; columns?: string[] }[] }
+export interface Exported {
+  folder: string; files: { path: string; bytes: number; rows?: number; columns?: string[] }[];
+  /** this tool's files of an earlier export that this one replaced: how many, and when the earlier <tool>.json was written (ISO; the newest of them when it was not there). Absent when none was. */
+  replaced?: { files: number; written: string };
+}
 /** writeOutWith: a file made piece by piece, written atomically. */
 export type WriteWith = (path: string, make: (put: (piece: string) => void) => void) => void;
 
@@ -68,30 +72,89 @@ function jsonTo(put: (s: string) => void, v: unknown, depth = 0): void {
   put('}');
 }
 
-/** Write the full result and every table into the folder `arg` names (replacing this tool's files of an earlier export there); the
- *  answer's `exported`. */
-export function exportResult(tool: string, arg: unknown, full: unknown, tables: Table[], writeWith: WriteWith): Exported {
+/** Write the full result and every table into the folder `arg` names, as <tool>.json and <tool>-<table>.csv; the answer's `exported`.
+ *  A COMPLETE result replaces every file of this tool's earlier exports there, partial ones too (none left from it). A PARTIAL result
+ *  (a run that was stopped or cancelled: o.partial) is written as <tool>-partial.json and <tool>-partial-<table>.csv and replaces only an
+ *  earlier partial's files: it never removes the files of a complete run. o.as: the name the files carry when that is not the tool the
+ *  work is done by (optimize_schedule's crashing is exported as optimize_schedule, so one tool's files are replaced together).
+ *  What was replaced is said in `replaced`, and each file's size in `bytes`. */
+export function exportResult(tool: string, arg: unknown, full: unknown, tables: Table[], writeWith: WriteWith, o: { partial?: boolean; as?: string } = {}): Exported {
   const folder = exportFolder(arg);
-  // this tool's own files of an earlier export go (a table it no longer has is not left behind); other tools' stay
-  const mine = new RegExp(`^${tool}(\\.json|-.*\\.csv)$`);
-  for (const f of readdirSync(folder)) if (mine.test(f)) { const p = join(folder, f); try { if (statSync(p).isFile()) rmSync(p); } catch (e) { fail('file_unwritable', `Cannot replace ${p}: ${(e as Error).message}.`, 'Close the file where it is open, or give export another folder.'); } }
+  const name = `${o.as ?? tool}${o.partial ? '-partial' : ''}`, base = o.as ?? tool;
+  // a table it no longer has is not left behind; other tools' files stay
+  const mine = o.partial ? new RegExp(`^${base}-partial(\\.json|-.*\\.csv)$`) : new RegExp(`^${base}(-partial)?(\\.json|-.*\\.csv)$`);
+  let replaced = 0, json: Date | null = null, newest: Date | null = null;
+  for (const f of readdirSync(folder)) if (mine.test(f)) {
+    const p = join(folder, f);
+    try {
+      const st = statSync(p);
+      if (!st.isFile()) continue;
+      rmSync(p); replaced++;
+      if (f === `${name}.json`) json = st.mtime;
+      if (!newest || st.mtime > newest) newest = st.mtime;
+    } catch (e) { fail('file_unwritable', `Cannot replace ${p}: ${(e as Error).message}.`, 'Close the file where it is open, or give export another folder.'); }
+  }
   const files: Exported['files'] = [];
-  const json = join(folder, `${tool}.json`);
-  writeWith(json, (put) => jsonTo(put, full));
-  files.push({ path: json });
+  const sized = (path: string) => { try { return statSync(path).size; } catch { return 0; } };
+  const jsonPath = join(folder, `${name}.json`);
+  writeWith(jsonPath, (put) => jsonTo(put, full));
+  files.push({ path: jsonPath, bytes: sized(jsonPath) });
   for (const t of tables) {
     // the columns: those named, then any other key a row has (a first pass over the rows)
     const columns = [...t.columns], seen = new Set(columns);
     for (const r of each(t.rows)) for (const k of flat(r).keys()) if (!seen.has(k)) { seen.add(k); columns.push(k); }
-    const path = join(folder, `${tool}-${t.name}.csv`);
+    const path = join(folder, `${name}-${t.name}.csv`);
     let n = 0;
     writeWith(path, (put) => {
       put(`\ufeff${columns.map(csvQuote).join(',')}\r\n`);
       for (const r of each(t.rows)) { const c = flat(r); put(`${columns.map((k) => csvQuote(cell(c.get(k)))).join(',')}\r\n`); n++; }
     });
-    files.push({ path, rows: n, columns });
+    files.push({ path, bytes: sized(path), rows: n, columns });
   }
-  return { folder, files };
+  const when = json ?? newest;
+  return { folder, files, ...(replaced && when ? { replaced: { files: replaced, written: when.toISOString() } } : {}) };
+}
+
+/** A list in an answer that the clone cut, with the total beside it: `<list>_total` (or `total_<list>`, or the names a tool gives it:
+ *  CUT_LISTS), and the table of the export that holds it whole (table: default the list's name). */
+export interface CutList { list: string; total: string; table?: string; /** the export holds only the list as listed (float_paths between.max: the paths are never all made) */ listedOnly?: true }
+/** The cut lists whose names do not follow `<list>_total`, by tool. */
+export const CUT_LISTS: Record<string, CutList[]> = {
+  lint: [{ list: 'activities', total: 'total_activities', table: 'findings' }],
+  check_schedule: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],
+  dcma_14: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],
+  evaluate_batch: [{ list: 'changed', total: 'changed_total', table: 'dates_moved' }],
+  compare: [{ list: 'changes', total: 'changed' }],
+  float_paths: [{ list: 'paths', total: 'paths_total', table: 'between', listedOnly: true }],
+};
+/** Where the whole of every list this answer cut is, when an export was written: beside each `<list>_total` a `<list>_note`
+ *  "25 of 340 shown; all 340 in <the list's table CSV, else <tool>.json>". One place for every tool (callTool applies it to what a tool
+ *  answered): the lists the clone cuts (firstOf, top, max_ids, windows, changes pages...) all say it the same way. A total that is a
+ *  decimal string (a count beyond 2^53) is printed as it is, never through Number. Nothing is added when no export was written. */
+export function noteCuts<T>(answer: T, tool: string): T {
+  const ex = answer && typeof answer === 'object' ? (answer as { exported?: Exported }).exported : undefined;
+  if (!ex || !Array.isArray(ex.files) || !ex.files.length) return answer;
+  const extra = CUT_LISTS[tool] ?? [];
+  const where = (table: string) => ex.files.find((f) => f.path.endsWith(`-${table}.csv`))?.path ?? ex.files[0].path;
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) { for (const x of v) if (x && typeof x === 'object') walk(x); return; }
+    if (!v || typeof v !== 'object') return;
+    const o = v as Record<string, unknown>;
+    for (const k of Object.keys(o)) {
+      const list = o[k];
+      if (k === 'exported') continue;
+      if (!Array.isArray(list)) { if (list && typeof list === 'object') walk(list); continue; }
+      const x = extra.find((e) => e.list === k && e.total in o);
+      const total = o[x?.total ?? `${k}_total`] ?? o[`total_${k}`];
+      if ((typeof total === 'number' || typeof total === 'string') && (typeof total === 'string' ? /^\d+$/.test(total) : Number.isFinite(total) && total > list.length) && !(`${k}_note` in o)) {
+        const shown = list.length, path = where(x?.table ?? k);
+        o[`${k}_note`] = x?.listedOnly ? `${shown} of ${total} shown (the most asked for); the export holds the same ${shown} in ${path}, ask for more to have more` : `${shown} of ${total} shown; all ${total} in ${path}`;
+      }
+      for (const item of list) if (item && typeof item === 'object') walk(item);
+    }
+  };
+  walk(answer);
+  return answer;
 }
 
 /** An export after the tool changed the project: the change stays whatever happens to the files, so a failure to write them is said
@@ -104,4 +167,4 @@ export function exportAfterChange(make: () => Exported): { exported: Exported } 
 /** The `export` argument of a tool's input schema. */
 export const exportProp = { type: 'string', description: 'a folder (inside the write root) to write the full result to: <tool>.json and <tool>-<table>.csv for each table' };
 /** The sentence a tool's description gains on export, naming its CSV files. */
-export const exportDoc = (tool: string, csvs: string[]) => ` export: a folder (inside the write root) to write the full result to, for Excel sheets, Word reports or slides: ${tool}.json (every list whole, whatever this answer leaves out) and ${csvs.map((c) => c.replace(/^\w+/, (n) => `${tool}-${n}.csv`)).join(', ')} (UTF-8, a header row, dates as P6 writes them; an earlier export of this tool there is replaced); exported names each file with its rows and columns.`;
+export const exportDoc = (tool: string, csvs: string[]) => ` export: a folder (inside the write root) to write the full result to, for Excel sheets, Word reports or slides: ${tool}.json (every list whole, whatever this answer leaves out) and ${csvs.map((c) => c.replace(/^\w+/, (n) => `${tool}-${n}.csv`)).join(', ')} (UTF-8, a header row, dates as P6 writes them; an earlier export of this tool there is replaced, and exported.replaced says how many files and when they were written); exported names each file with its bytes, rows and columns. A stopped or cancelled run (partial) is written as ${tool}-partial.json and ${tool}-partial-<table>.csv and replaces only an earlier partial's files, never a complete run's. Each list the answer cut says where all of it is: <list>_note.`;

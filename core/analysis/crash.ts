@@ -31,7 +31,8 @@ export interface CrashOptions {
 export function crashOptionsOf(db: Db, a: Record<string, any>, hoursPerDay: number): CrashOptions {
   return { targetFinish: a.target_finish, targetDays: a.target_days != null ? Number(a.target_days) : undefined, activities: a.activities, defaultMaxPct: a.default_max_pct != null ? Number(a.default_max_pct) : undefined, indirectPerDay: a.indirect_cost_per_day != null ? Number(a.indirect_cost_per_day) : undefined, ldPerDay: a.ld_per_day != null ? Number(a.ld_per_day) : undefined, locked: [...(Array.isArray(a.locked) ? a.locked : []), ...lobActivityCodes(db)], maxSteps: a.max_steps != null ? Number(a.max_steps) : undefined, hoursPerDay };
 }
-export type CrashStop = 'SUCCESS' | 'PLATEAU' | 'EXHAUSTED' | 'CAP' | 'ALREADY_MET';
+/** CANCELLED: the call was cancelled between two steps; the steps done are the answer, marked partial (as monte_carlo answers the iterations done) */
+export type CrashStop = 'SUCCESS' | 'PLATEAU' | 'EXHAUSTED' | 'CAP' | 'ALREADY_MET' | 'CANCELLED';
 export interface CrashStep { step: number; activities: { id: string; days: number; cost: number }[]; days_gained: number; cost: number; finish: string | null; cumulative_direct_cost: number; total_cost: number }
 
 const INF = 1e15, EPS = 1e-6;
@@ -142,7 +143,12 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
     const ineffective = new Set<string>();
     for (let n = 1; ; n++) {
       if (n > maxSteps) { stop = 'CAP'; break; }
-      if (o.tick) await o.tick(n - 1, Number.isFinite(maxSteps) ? maxSteps : n, `step ${n}: ${r2(days(finish, baseFinish!))} working days gained`);
+      // progress: the step about to run; the total is max_steps, or 0 (unknown) when there is no cap. A cancellation, between steps, stops
+      // with the steps done as the answer (marked partial); one before the first step has nothing to answer and stays the cancellation
+      if (o.tick) {
+        try { await o.tick(n - 1, Number.isFinite(maxSteps) ? maxSteps : 0, `step ${n}${Number.isFinite(maxSteps) ? ` of at most ${maxSteps}` : ''}: ${r2(days(finish, baseFinish!))} working days gained so far`); }
+        catch (e) { if ((e as { code?: unknown })?.code === 'cancelled' && steps.length) { stop = 'CANCELLED'; note = `${note ? note + ' ' : ''}Partial: the call was cancelled after ${steps.length} step${steps.length === 1 ? '' : 's'}; the steps, changes and edit operations are those of the steps done, and the target was not reached.`; break; } throw e; }
+      }
       const ctx = makeCtx(d, { hoursPerDay: hpd0 });
       const rf = drivingFloat(d, ctx);
       // the critical network: what drives the project finish, walked back along driving links (negative float from
@@ -227,7 +233,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const ops = [...changed.values()].map((c) => ({ op: 'update_activity', id: c.task.task_code, project: projCode.get(c.task.proj_id), ...(c.started ? { remaining_hours: c.to } : { duration_hours: c.to }), assignments_follow: true }));
   return {
-    ok: true as const, stop, ...(note ? { note } : {}),
+    ok: true as const, stop, ...(stop === 'CANCELLED' ? { partial: true as const, steps_done: steps.length } : {}), ...(note ? { note } : {}),
     base_finish: baseFinish != null ? formatP6Date(baseFinish) : null, finish: finish != null ? formatP6Date(finish) : null,
     days_gained: baseFinish != null && finish != null ? r2(days(finish, baseFinish)) : 0,
     ...(target != null && finish != null ? { days_late: r2(Math.max(0, days(target, finish))) } : {}),

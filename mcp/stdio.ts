@@ -11,7 +11,7 @@ type Msg = { jsonrpc: '2.0'; id?: number | string; method?: string; params?: any
 const running = new Map<string, AbortController>();
 
 /** Answer one JSON-RPC message (shared by the stdio and HTTP transports). Returns undefined for notifications. */
-/** notify: sends a notification to the client while a call runs (notifications/progress for a progressToken). */
+/** notify: sends a notification to the client while a call runs (notifications/progress for a progressToken; a total of 0 is not known, and is left out: MCP's total is optional). */
 export async function handleMessage(m: Msg, sessionCaller?: string, notify?: (n: unknown) => void): Promise<unknown | undefined> {
   const reply = (result: unknown) => (m.id !== undefined ? { jsonrpc: '2.0', id: m.id, result } : undefined);
   const error = (code: number, message: string) => (m.id !== undefined ? { jsonrpc: '2.0', id: m.id, error: { code, message } } : undefined);
@@ -26,7 +26,7 @@ export async function handleMessage(m: Msg, sessionCaller?: string, notify?: (n:
       if (m.id !== undefined) running.set(key, abort);
       try {
         const token = m.params?._meta?.progressToken;
-        const progress = token != null && notify ? (done: number, total: number, message: string) => notify({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: done, total, message } }) : undefined;
+        const progress = token != null && notify ? (done: number, total: number, message: string) => notify({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: done, ...(total > 0 ? { total } : {}), message } }) : undefined;
         const { out, isError } = await callTool(String(m.params?.name ?? ''), (m.params?.arguments ?? {}) as Record<string, any>, sessionCaller, abort.signal, progress);
         return reply(toolResult(out, isError, String(m.params?.name ?? '')));
       } finally { if (running.get(key) === abort) running.delete(key); }

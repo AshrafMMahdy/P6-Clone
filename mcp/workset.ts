@@ -5,7 +5,7 @@
 // half again as margin), or for a call that ends before a full collection, what its process grew by; per byte of the
 // project's own estimate (Session.bytes), plus per activity and iteration where it has those. Garbage between
 // collections is not reserved: the budget stays at least 512 MB under the heap limit (effectiveBudget) for it.
-import type { Session } from './runtime.ts';
+import { countArg, fail, type Session } from './runtime.ts';
 
 export interface WorkNeed { bytes: number; what: string; hint: string }
 interface Work { per: number; fixed?: number; label: string; hint: string }
@@ -39,6 +39,40 @@ const SAVE: Record<string, Work> = {
 };
 /** Monte Carlo's samples per activity per iteration: its early finish (4 bytes) and, when it varies, its duration (8). */
 export const MC_BYTES_PER_SAMPLE = 12;
+/** What a Monte Carlo run holds per iteration whatever the activity count (measured, bytes per iteration, heap after a full collection):
+ *  the finishes (a Float64Array, 8), their sorted copy (8), the same in working days (8) and the finishSamples array the answer takes
+ *  (11.5 measured), 36 rounded up to 40. */
+export const MC_BYTES_PER_ITERATION = 40;
+/** What export adds per iteration, held beside the above while the answer's rows are made (measured the same way, 200,000 iterations):
+ *  the finish_days array 13 B, the iterations table's row object 72 B (iteration, finish, finish_days) and a milestone's samples 25 B in the
+ *  engine's array plus 28 B in the row (its finish text): 13 + 72 = 85 rounded up to 100, and 55 more per milestone. */
+export const MC_EXPORT_BYTES_PER_ITERATION = 100;
+export const MC_EXPORT_BYTES_PER_MILESTONE_ITERATION = 55;
+/** What a histogram bucket holds (measured, 200,000 buckets): its object with the two dates' texts 96 B in memory, and 76 B of JSON
+ *  text, which the answer holds twice (the text and the structured copy): 96 + 2 x 76 = 248, rounded up to 250. */
+export const MC_BYTES_PER_BUCKET = 250;
+/** What float_paths' between keeps per tail (the best paths from an activity on to the end: an object of the duration, the lowest float,
+ *  the next activity and the index there, with its slot in the list): measured 84 B with whole hours and 100 B with fractional hours
+ *  (200,000 lists of 100 tails each; a 10,000-activity ladder with max 5,000 held 3.5 GB in the reviewed build, 70 B a tail with the
+ *  candidates it sorted before cutting). Reserved for every activity of the project at `max` tails each. */
+export const BETWEEN_BYTES_PER_TAIL = 100;
+
+/** float_paths' between.max: a positive whole number (no 0 = all: paths_total says how many paths there are), default 25. between itself
+ *  must be an object; the one parser for the tool and its memory reservation. */
+export function between(b: unknown): number {
+  if (typeof b !== 'object' || b === null || Array.isArray(b)) return fail('bad_input', 'between must be an object {from, to, max?}.', 'e.g. {"from": "A1000", "to": "A9000"}');
+  return countArg((b as { max?: unknown }).max, 'between.max', { min: 1, hint: 'a positive whole number of paths (paths_total says how many there are between the two), or leave it out for 25' }) ?? 25;
+}
+
+/** The numbers monte_carlo is asked for: iterations (default 1000, at least 10), top (default 25; 0 = all: Infinity) and buckets
+ *  (default 20, at least 5). A value that is not a whole number of 0 or more is refused as bad_input, named, before anything runs; the
+ *  one parser for the tool and for its memory reservation. */
+export function monteCarloCounts(a: Record<string, any>): { iterations: number; top: number; buckets: number } {
+  const iterations = Math.max(10, countArg(a.iterations, 'iterations') ?? 1000);
+  const top = countArg(a.top, 'top') ?? 25;
+  const buckets = Math.max(5, countArg(a.buckets, 'buckets') ?? 20);
+  return { iterations, top: top === 0 ? Infinity : top, buckets };
+}
 
 /** What reading a file peaks at, per byte of the file (the text, the element being read, the rows, the import checks;
  *  measured on the hosted budget: an XER 5.4-6.7x (most of it the import checks' scheduling pass), read a chunk at a time; a 215 MB P6 XML 5.8x and a 137 MB MSPDI
@@ -52,6 +86,13 @@ const activities = (s: Session) => {
   const bl = new Set((s.db.tables.PROJECT?.rows ?? []).filter((p) => p._baseline_of).map((p) => p.proj_id));
   let n = 0;
   for (const t of s.db.tables.TASK?.rows ?? []) if (!bl.has(t.proj_id)) n++;
+  return n;
+};
+/** The milestones still to finish in those projects (each has samples of its own in a Monte Carlo export) */
+const milestones = (s: Session) => {
+  const bl = new Set((s.db.tables.PROJECT?.rows ?? []).filter((p) => p._baseline_of).map((p) => p.proj_id));
+  let n = 0;
+  for (const t of s.db.tables.TASK?.rows ?? []) if ((t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile') && !t.act_end_date && !bl.has(t.proj_id)) n++;
   return n;
 };
 const mbs = (b: number) => `${Math.round(b / MB)} MB`;
@@ -69,12 +110,28 @@ export function workNeed(tool: string, a: Record<string, any>, s: Session, free:
   if (!w) return null;
   let bytes = w.per * s.bytes + (w.fixed ?? 0), what = `${w.label} on this project (${n.toLocaleString('en-US')} activities)`, hint = w.hint;
   if (tool === 'monte_carlo') {
-    const it = Math.max(10, Math.floor(Number(a.iterations) || 1000)); // as monte_carlo runs it
-    bytes += n * it * MC_BYTES_PER_SAMPLE;
-    // how many iterations would fit in what is free now
-    const fit = Math.floor((free() - w.per * s.bytes) / Math.max(1, n * MC_BYTES_PER_SAMPLE));
-    what = `Monte Carlo of ${n.toLocaleString('en-US')} activities × ${it.toLocaleString('en-US')} iterations`;
-    hint = fit >= 50 ? `run at most ${fit.toLocaleString('en-US')} iterations (iterations), which fit in the ${mbs(Math.max(0, free()))} free now` : 'run it on fewer activities (a narrower project)';
+    const { iterations: it, buckets } = monteCarloCounts(a); // as monte_carlo runs it; a bad count is refused here, before anything runs
+    const perIt = n * MC_BYTES_PER_SAMPLE + MC_BYTES_PER_ITERATION + (a.export != null ? MC_EXPORT_BYTES_PER_ITERATION + milestones(s) * MC_EXPORT_BYTES_PER_MILESTONE_ITERATION : 0);
+    const base = w.per * s.bytes;
+    bytes += it * perIt + buckets * MC_BYTES_PER_BUCKET;
+    what = `Monte Carlo of ${n.toLocaleString('en-US')} activities × ${it.toLocaleString('en-US')} iterations${a.export != null ? ' with its export' : ''}${a.buckets != null ? ` and ${buckets.toLocaleString('en-US')} histogram buckets` : ''}`;
+    // what would fit in what is free now: iterations with the buckets as asked, buckets with the iterations as asked (the minimums are 10 and 5)
+    const room = Math.max(0, free() - base);
+    const fitIt = Math.floor((room - buckets * MC_BYTES_PER_BUCKET) / perIt), fitBk = Math.floor((room - it * perIt) / MC_BYTES_PER_BUCKET);
+    const ways = [
+      ...(fitIt >= 10 ? [`at most ${fitIt.toLocaleString('en-US')} iterations (iterations)`] : []),
+      ...(fitBk >= 5 ? [`at most ${fitBk.toLocaleString('en-US')} histogram buckets (buckets)`] : []),
+    ];
+    hint = ways.length ? `run ${ways.join(' or ')}, which fit in the ${mbs(room)} free now` : 'run it on fewer activities (a narrower project)';
+  }
+  if (tool === 'float_paths' && a.between != null) {
+    // the longest `max` paths between two activities: every activity keeps its best `max` tails (BETWEEN_BYTES_PER_TAIL each); at most
+    // the project's activities are between, so the project's activities x max bounds it. A bad max is refused here as in the tool.
+    const max = between(a.between);
+    bytes += n * max * BETWEEN_BYTES_PER_TAIL;
+    what = `float_paths between ${n.toLocaleString('en-US')} activities × the ${max.toLocaleString('en-US')} longest paths`;
+    const fit = Math.floor(Math.max(0, free() - w.per * s.bytes) / Math.max(1, n * BETWEEN_BYTES_PER_TAIL));
+    hint = fit >= 1 ? `ask for at most ${fit.toLocaleString('en-US')} paths (between.max), which fit in the ${mbs(Math.max(0, free()))} free now; paths_total says how many there are` : 'pass project to one project, or close other projects first';
   }
   return { bytes: Math.round(bytes), what, hint };
 }

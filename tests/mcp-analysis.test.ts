@@ -69,3 +69,30 @@ test('MCP: progress_curves and resource_histogram', async () => {
   assert.ok(r.d.resources.length > 0 && r.d.resources[0].periods.length > 0);
   assert.equal((await call('progress_curves', { handle: h, period: 'day' })).d.error.code, 'bad_input');
 });
+
+test('MCP: count arguments are whole numbers: a value that is not one is refused as bad_input naming the argument (never a default or "all"); 0 means all where documented; absent is the default', async () => {
+  const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'cairo festival city.xer') })).d.handle;
+  const bads: unknown[] = [-1, 2.5, Number.NaN, Infinity, '5', true, [3]];
+  const refused = async (tool: string, arg: string, v: unknown, extra: Record<string, unknown> = {}) => {
+    const r = await call(tool, { handle: h, ...extra, [arg]: v });
+    assert.equal(r.d.error?.code, 'bad_input', `${tool} ${arg} ${String(v)}: ${JSON.stringify(r.d).slice(0, 160)}`);
+    assert.match(r.d.error.message, new RegExp(`^${arg} must be a whole number of 0 or more`), r.d.error.message);
+  };
+  for (const v of bads) {
+    await refused('check_schedule', 'max_ids', v);
+    await refused('dcma_14', 'max_ids', v);
+    await refused('lint', 'max_ids', v);
+    await refused('float_paths', 'count', v);
+    await refused('optimize_schedule', 'max_changes', v);
+    await refused('optimize_schedule', 'samples', v);
+    await refused('transfer_progress', 'max_changes', v, { path: 'none.xer' });
+    await refused('transfer_progress', 'offset', v, { path: 'none.xer' });
+  }
+  // 0 = all, absent = the default
+  const dflt = await call('check_schedule', { handle: h });
+  const all = await call('check_schedule', { handle: h, max_ids: 0 });
+  assert.equal(dflt.err, false); assert.equal(all.err, false);
+  const widest = (r: any) => Math.max(...r.d.checks.map((c: any) => c.activities.length));
+  assert.ok(widest(dflt) <= 100 && widest(all) >= widest(dflt) && widest(all) > 2, `default ${widest(dflt)}, all ${widest(all)}`);
+  assert.equal((await call('check_schedule', { handle: h, max_ids: 2 })).d.checks.every((c: any) => c.activities.length <= 2), true);
+});
