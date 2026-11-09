@@ -16,8 +16,10 @@ import type { CrashActivity } from './crash.ts';
 import { isLoe, isWbs, type Tick } from './common.ts';
 
 export const REASONER_KMAX = 3;
-/** the precedence bias is n x n floats: past this the model gets slow and large */
-export const REASONER_MAX_ACTIVITIES = 3000;
+/** The most activities the model reads at once: the largest network it was trained on. Its inputs and its memory grow with the square
+ *  of the activities (11,425 at once does not fit any PC), so a larger schedule is read a window of this many at a time (reasonerOutput):
+ *  no schedule is too large for it (owner 2026-11-09; measured on real schedules: windows finish as soon as the whole network, or sooner). */
+export const REASONER_WINDOW = 512;
 
 export interface HrmMode { duration: number; crewSize: number; cost: number }
 export interface HrmPred { id: number; type: 'FS' | 'SS' | 'FF' | 'SF'; lag: number }
@@ -25,6 +27,8 @@ export interface HrmActivity { id: number; task: Row; duration: number; preds: H
 export interface HrmInstance { acts: HrmActivity[]; caps: Map<string, number> }
 export interface ReasonerInputs { n: number; feats: Float32Array; bias: Float32Array; modeMask: Uint8Array }
 export type Infer = (x: ReasonerInputs) => Promise<{ priority: Float32Array; modeLogits: Float32Array }>;
+/** The model's answer for a whole instance (reasonerOutput): a priority and the mode scores for every activity. */
+export interface ReasonerOutput { priority: ArrayLike<number>; modeLogits: ArrayLike<number>; windows: number }
 
 const TYPE: Record<string, HrmPred['type']> = { PR_FS: 'FS', PR_SS: 'SS', PR_FF: 'FF', PR_SF: 'SF' };
 
@@ -101,7 +105,7 @@ export function reasonerInputs(inst: HrmInstance): ReasonerInputs {
   }
   // symmetric reachability: 1 where two activities share a directed path
   const bias = new Float32Array(n * n);
-  // descendants as bit rows (n x n bits: 1.1 MB at 3,000 activities), OR-ed up in reverse precedence order
+  // descendants as bit rows (n x n bits), OR-ed up in reverse precedence order
   const W = (n + 31) >>> 5, reach = new Uint32Array(n * W);
   for (let k = order.length - 1; k >= 0; k--) {
     const u = order[k], ru = u * W;
@@ -143,8 +147,13 @@ export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, 
     }
     const u = usage.get(a.group) ?? usage.set(a.group, new Map()).get(a.group)!;
     if (d > 0 && crew > 0 && cap !== Infinity) {
-      const fits = (t0: number) => { for (let day = t0; day < t0 + d; day++) if ((u.get(day) ?? 0) + crew > cap + 1e-9) return false; return true; };
-      for (let guard = 0; !fits(t) && guard <= horizon; guard++) t++;
+      // a crew larger than the limit fits on no day: where the day-by-day search below would end (past the horizon), without the search
+      // (2,390 such activities made one placement of a 3,353-activity schedule take 2.9 s, and it is run 65 times)
+      if (crew > cap + 1e-9) t += horizon + 1;
+      else {
+        const fits = (t0: number) => { for (let day = t0; day < t0 + d; day++) if ((u.get(day) ?? 0) + crew > cap + 1e-9) return false; return true; };
+        for (let guard = 0; !fits(t) && guard <= horizon; guard++) t++;
+      }
     }
     start[id] = t; finish[id] = t + d;
     if (d > 0 && crew > 0) for (let day = t; day < t + d; day++) u.set(day, (u.get(day) ?? 0) + crew);
@@ -152,9 +161,44 @@ export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, 
   return { start, finish, makespan: Math.max(0, maxOf(finish)) };
 }
 
+/** The model's answer for the whole instance. Up to REASONER_WINDOW activities it reads the network at once. A larger one it reads a
+ *  window at a time: the activities in order of their earliest start with no resource limit (ties as listed), cut into consecutive windows
+ *  of REASONER_WINDOW; each window is its own small network (the links inside it), read by the model as it was trained. The windows are
+ *  then put in order: every activity of an earlier window ahead of every activity of a later one, and inside a window the model's own
+ *  priority. (The placement that follows, serialSgs and the P6 leveler, is always of the whole network: only the order comes from here.) */
+export async function reasonerOutput(inst: HrmInstance, infer: Infer, tick?: Tick): Promise<ReasonerOutput> {
+  const n = inst.acts.length;
+  if (n <= REASONER_WINDOW) return { ...(await infer(reasonerInputs(inst))), windows: 1 };
+  const early = serialSgs(inst.acts, inst.acts.map((a) => a.duration), new Map()).start;
+  const byStart = inst.acts.map((_, i) => i).sort((a, b) => early[a] - early[b] || a - b);
+  const windows = Math.ceil(n / REASONER_WINDOW);
+  const read: { ids: number[]; priority: Float32Array; lo: number; hi: number }[] = [];
+  const modeLogits = new Float32Array(n * REASONER_KMAX);
+  for (let w = 0; w < windows; w++) {
+    if (tick) await tick(w, windows, `reading window ${w + 1} of ${windows} (${REASONER_WINDOW} activities at a time)`);
+    const ids = byStart.slice(w * REASONER_WINDOW, (w + 1) * REASONER_WINDOW), at = new Map(ids.map((id, k) => [id, k]));
+    const acts = ids.map((id, k): HrmActivity => ({ ...inst.acts[id], id: k, preds: inst.acts[id].preds.filter((p) => at.has(p.id)).map((p) => ({ ...p, id: at.get(p.id)! })) }));
+    const r = await infer(reasonerInputs({ acts, caps: inst.caps }));
+    ids.forEach((id, k) => { for (let j = 0; j < REASONER_KMAX; j++) modeLogits[id * REASONER_KMAX + j] = r.modeLogits[k * REASONER_KMAX + j]; });
+    let lo = Infinity, hi = -Infinity;
+    for (let k = 0; k < ids.length; k++) { const v = r.priority[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
+    read.push({ ids, priority: r.priority, lo, hi });
+  }
+  // a window's priorities are lifted so its lowest is above the next window's highest (by 1): the order of the windows, then the model's
+  // (64-bit: a float32 would lose the model's small differences under the lift of a long schedule)
+  const priority = new Float64Array(n);
+  let lift = 0;
+  for (let w = windows - 1; w >= 0; w--) {
+    const x = read[w];
+    if (w < windows - 1) lift += read[w + 1].hi - x.lo + 1;
+    x.ids.forEach((id, k) => { priority[id] = x.priority[k] + lift; });
+  }
+  return { priority, modeLogits, windows };
+}
+
 /** Sampled decode around the net's answer (GRAM-style, as the platform): trajectory 0 is the net's argmax modes and
  *  priority; then `samples` more with sampled modes and jittered priority, each scored by the SGS; the best is kept. */
-export async function decode(inst: HrmInstance, out: { priority: Float32Array; modeLogits: Float32Array }, o: { samples?: number; seed?: number; tick?: Tick } = {}) {
+export async function decode(inst: HrmInstance, out: { priority: ArrayLike<number>; modeLogits: ArrayLike<number> }, o: { samples?: number; seed?: number; tick?: Tick } = {}) {
   const acts = inst.acts, n = acts.length;
   const valid: number[][] = [], probs: number[][] = [], argmax: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -200,11 +244,12 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   const inst = buildInstance(db, projIds, o);
   const n = inst.acts.length;
   if (!n) return { ok: false as const, error: { code: 'bad_input', message: 'No remaining activities to optimise.' } };
-  if (n > REASONER_MAX_ACTIVITIES) return { ok: false as const, error: { code: 'too_large', message: `${n} remaining activities; the reasoner takes up to ${REASONER_MAX_ACTIVITIES}. Use level_resources (P6's leveler) for this project, or optimise one project of the file.` } };
   const leveled = inst.acts.filter((a) => a.crewSize > 0).length, crashable = inst.acts.filter((a) => a.modes.length > 1).length;
   if (!leveled && !crashable) return { ok: false as const, error: { code: 'nothing_to_optimise', message: 'No activity uses a resource with a Max Units/Time limit and no crash data was given, so there is nothing for the reasoner to choose.' } };
-  const out = await infer(reasonerInputs(inst));
+  const out = await reasonerOutput(inst, infer, o.tick);
   const best = await decode(inst, out, o);
+  // a crew larger than its resource's limit fits on no day, whatever the order: said, because no placement of it means anything
+  const overLimit = inst.acts.filter((a) => a.duration > 0 && a.crewSize > (inst.caps.get(a.group) ?? Infinity) + 1e-9).length;
   const order = inst.acts.map((a, i) => [a.task.task_id, best.prio[i]] as const).sort((x, y) => y[1] - x[1]).map(([id]) => id);
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const ops = proposalOps(inst, best.modes, projIds.length > 1, projCode, o.hoursPerDay);
@@ -238,6 +283,9 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   return {
     ok: true as const,
     activities: n, leveled_activities: leveled, crashable_activities: crashable, trajectories: best.trajectories,
+    /** how the model read the network: at once (1), or this many windows of REASONER_WINDOW activities */
+    model_windows: out.windows,
+    ...(overLimit ? { over_limit_activities: overLimit, over_limit_note: `${overLimit} activit${overLimit === 1 ? 'y needs' : 'ies need'} more of a resource than its Max Units/Time allows on any day: no order can level ${overLimit === 1 ? 'it' : 'them'}, so the leveled finishes here say little until the limit or the assignment is corrected.` } : {}),
     cpm_finish: fmt(p6.cpm), p6_leveled_finish: fmt(p6.leveled), reasoner_finish: fmt(mine.leveled),
     better_than_p6_leveler: p6.leveled != null && mine.leveled != null ? mine.leveled < p6.leveled : null,
     sgs_makespan_days: best.makespan, crash_cost: Math.round(best.cost * 100) / 100,

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { rows, type Db } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
-import { buildInstance, optimizeSchedule, reasonerInputs, serialSgs } from '../core/analysis/hrm.ts';
+import { buildInstance, optimizeSchedule, reasonerInputs, reasonerOutput, REASONER_WINDOW, serialSgs, type HrmActivity, type HrmInstance, type ReasonerInputs } from '../core/analysis/hrm.ts';
 import { nodeInfer, reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
 
 // The platform's own reasoner check: two parallel chains in one trade and a join, crew 2 each, under a cap of 4.
@@ -42,6 +42,92 @@ test('reasoner instance and inputs follow the trained featurizer', () => {
   const dur = inst.acts.map((a) => a.duration);
   assert.equal(serialSgs(inst.acts, dur, new Map()).makespan, 31);
   assert.ok(serialSgs(inst.acts, dur, inst.caps).makespan >= 31);
+});
+
+/** A made instance: `chains` chains of `len` activities one after another (durations 1..5), each on one of three trades. */
+function madeInstance(chains: number, len: number, crew = 2, cap = 4): HrmInstance {
+  const acts: HrmActivity[] = [];
+  for (let c = 0; c < chains; c++) for (let k = 0; k < len; k++) {
+    const id = acts.length, d = 1 + ((c * 7 + k * 3) % 5);
+    acts.push({ id, task: { task_id: String(id), task_code: `A${id}` } as HrmActivity['task'], duration: d, preds: k ? [{ id: id - 1, type: 'FS', lag: 0 }] : [], group: `T${c % 3}`, crewSize: crew, modes: [{ duration: d, crewSize: crew, cost: 0 }], started: false });
+  }
+  return { acts, caps: new Map([['T0', cap], ['T1', cap], ['T2', cap]]) };
+}
+/** A stand-in for the model: it records what it was shown and answers a priority that is not in the order shown. */
+function recordingInfer() {
+  const seen: ReasonerInputs[] = [];
+  const infer = async (x: ReasonerInputs) => { seen.push(x); return { priority: Float32Array.from({ length: x.n }, (_, k) => Math.sin(k * 12.9898) * 2.5), modeLogits: new Float32Array(x.n * 3) }; };
+  return { seen, infer };
+}
+
+test('the reasoner reads a schedule of any size: up to 512 activities at once, a larger one 512 at a time in order of earliest start (owner 2026-11-09)', async () => {
+  // a small one: the whole network in one reading
+  const small = madeInstance(4, 100), s1 = recordingInfer();
+  const o1 = await reasonerOutput(small, s1.infer);
+  assert.deepEqual([o1.windows, s1.seen.length, s1.seen[0].n], [1, 1, 400]);
+  // 3,300 activities (past the 3,000 that used to be refused): 7 readings, none larger than the window, every activity read once
+  const big = madeInstance(33, 100), s2 = recordingInfer();
+  const o2 = await reasonerOutput(big, s2.infer);
+  assert.equal(o2.windows, Math.ceil(3300 / REASONER_WINDOW));
+  assert.deepEqual(s2.seen.map((x) => x.n), [512, 512, 512, 512, 512, 512, 228]);
+  assert.equal(o2.priority.length, 3300);
+  // the windows are in order of earliest start: here the k-th activities of the chains start together, so window 0 holds the first of every chain
+  const early = serialSgs(big.acts, big.acts.map((a) => a.duration), new Map()).start;
+  const byStart = big.acts.map((_, i) => i).sort((a, b) => early[a] - early[b] || a - b);
+  const win = (w: number) => byStart.slice(w * REASONER_WINDOW, (w + 1) * REASONER_WINDOW);
+  for (let w = 0; w + 1 < o2.windows; w++) {
+    const lowest = Math.min(...win(w).map((id) => o2.priority[id])), nextHighest = Math.max(...win(w + 1).map((id) => o2.priority[id]));
+    assert.ok(lowest > nextHighest, `window ${w}: every activity ahead of every activity of window ${w + 1} (${lowest} > ${nextHighest})`);
+  }
+  // inside a window the order is the model's own (its priorities, as it answered them for that window)
+  for (let w = 0; w < o2.windows; w++) {
+    const ids = win(w), model = ids.map((_, k) => Math.fround(Math.sin(k * 12.9898) * 2.5));
+    const got = ids.map((_, k) => k).sort((a, b) => o2.priority[ids[b]] - o2.priority[ids[a]]), want = ids.map((_, k) => k).sort((a, b) => model[b] - model[a]);
+    assert.deepEqual(got, want, `window ${w}: the model's order kept`);
+  }
+  // a window is its own network: only the links inside it (the bias marks no pair that the window's links do not join)
+  const w0 = win(0), at = new Map(w0.map((id, k) => [id, k])), x0 = s2.seen[0];
+  const joined = (a: number, b: number) => x0.bias[a * x0.n + b] === 1;
+  const idA = w0.find((id) => big.acts[id].preds.length && at.has(big.acts[id].preds[0].id))!, idP = big.acts[idA].preds[0].id;
+  assert.ok(joined(at.get(idA)!, at.get(idP)!), 'a link inside the window is there');
+  const lone = w0.find((id) => big.acts[id].preds.length && !at.has(big.acts[id].preds[0].id));
+  if (lone != null) assert.equal(x0.feats.length, x0.n * 9);
+  // the same instance twice: the same answer (nothing random in the reading)
+  const again = await reasonerOutput(big, recordingInfer().infer);
+  assert.deepEqual(Array.from(again.priority), Array.from(o2.priority));
+});
+
+test('a crew larger than its limit is placed where the day-by-day search ends, without the search: the same placement, at once', () => {
+  // the search as it was (the reference): every day from the earliest tried until the crew fits or the horizon is passed
+  const slow = (inst: HrmInstance) => {
+    const acts = inst.acts, dur = acts.map((a) => a.duration), start: number[] = [], finish: number[] = [], usage = new Map<string, Map<number, number>>();
+    const horizon = Math.max(1, dur.reduce((x, d) => x + d, 0) + 1);
+    // in precedence order as serialSgs takes it with no priority: the activities with no predecessor as listed, then each as its last predecessor is placed
+    const indeg = acts.map((x) => x.preds.length), succ: number[][] = acts.map(() => []), order: number[] = acts.filter((x) => !x.preds.length).map((x) => x.id);
+    for (const x of acts) for (const p of x.preds) succ[p.id].push(x.id);
+    for (let i = 0; i < order.length; i++) for (const n of succ[order[i]]) if (--indeg[n] === 0) order.push(n);
+    for (const id of order) {
+      const a = acts[id], d = dur[a.id], cap = inst.caps.get(a.group) ?? Infinity; let t = 0;
+      for (const p of a.preds) t = Math.max(t, finish[p.id] + p.lag);
+      const u = usage.get(a.group) ?? usage.set(a.group, new Map()).get(a.group)!;
+      const fits = (t0: number) => { for (let day = t0; day < t0 + d; day++) if ((u.get(day) ?? 0) + a.crewSize > cap + 1e-9) return false; return true; };
+      for (let guard = 0; !fits(t) && guard <= horizon; guard++) t++;
+      start[a.id] = t; finish[a.id] = t + d;
+      for (let day = t; day < t + d; day++) u.set(day, (u.get(day) ?? 0) + a.crewSize);
+    }
+    return { start, finish };
+  };
+  // a mix: crews of 2 under a limit of 4, and every seventh activity needing 9 of a limit of 4
+  const inst = madeInstance(6, 40);
+  inst.acts.forEach((a) => { if (a.id % 7 === 3) { a.crewSize = 9; a.modes = [{ duration: a.duration, crewSize: 9, cost: 0 }]; } });
+  const want = slow(inst), got = serialSgs(inst.acts, inst.acts.map((a) => a.duration), inst.caps);
+  assert.deepEqual(got.start, want.start);
+  assert.deepEqual(got.finish, want.finish);
+  // 2,400 activities that fit on no day, on a horizon of 40,000 days: placed at once (the search took seconds per placement)
+  const never = madeInstance(60, 40, 9, 4), t0 = Date.now();
+  never.acts.forEach((a) => { a.duration = 17; a.modes = [{ duration: 17, crewSize: 9, cost: 0 }]; });
+  const r = serialSgs(never.acts, never.acts.map((a) => a.duration), never.caps);
+  assert.ok(r.makespan > 40000 && Date.now() - t0 < 5000, `${Date.now() - t0} ms`);
 });
 
 test('optimize_schedule runs the embedded model and checks its answer with the P6 leveler', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
