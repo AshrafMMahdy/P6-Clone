@@ -125,14 +125,21 @@ export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, 
   else {
     const indeg = acts.map((a) => a.preds.length), succ: number[][] = acts.map(() => []);
     for (const a of acts) for (const p of a.preds) succ[p.id].push(a.id);
-    const eligible = new Set(acts.filter((a) => !indeg[a.id]).map((a) => a.id));
+    // next: the eligible activity of the highest priority, ties to the one that became eligible first. Kept in a heap: a wide network
+    // has thousands eligible at once, and looking through them all for every placement made the time grow with the square of the
+    // activities (40,000 all eligible: 6 s a placement run, and a proposal is 65 of them).
+    const heap: number[] = [], seq = new Int32Array(acts.length);
+    let nseq = 0;
+    const before = (a: number, b: number) => priority[a] > priority[b] || (priority[a] === priority[b] && seq[a] < seq[b]);
+    const push = (id: number) => { seq[id] = nseq++; let i = heap.push(id) - 1; while (i > 0) { const up = (i - 1) >> 1; if (!before(heap[i], heap[up])) break; [heap[i], heap[up]] = [heap[up], heap[i]]; i = up; } };
+    const pop = () => {
+      const top = heap[0], last = heap.pop()!;
+      if (heap.length) { heap[0] = last; for (let i = 0; ;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && before(heap[l], heap[m])) m = l; if (r < heap.length && before(heap[r], heap[m])) m = r; if (m === i) break; [heap[i], heap[m]] = [heap[m], heap[i]]; i = m; } }
+      return top;
+    };
+    for (const a of acts) if (!indeg[a.id]) push(a.id);
     order = [];
-    while (eligible.size) {
-      let pick = -1, best = -Infinity;
-      for (const id of eligible) if (priority[id] > best) { best = priority[id]; pick = id; }
-      eligible.delete(pick); order.push(pick);
-      for (const s of succ[pick]) if (--indeg[s] === 0) eligible.add(s);
-    }
+    while (heap.length) { const pick = pop(); order.push(pick); for (const s of succ[pick]) if (--indeg[s] === 0) push(s); }
     if (order.length < acts.length) { const seen = new Set(order); for (const a of acts) if (!seen.has(a.id)) order.push(a.id); }
   }
   const start = new Array(acts.length).fill(0), finish = new Array(acts.length).fill(0);
@@ -161,6 +168,15 @@ export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, 
   return { start, finish, makespan: Math.max(0, maxOf(finish)) };
 }
 
+/** How far the lowest priority of a window sits above the highest of the next one. The sampled placements jitter every priority by a
+ *  draw of spread 0.3 to 1.3 (decode), so at 1 the activities next to a window's border still change places in some trajectories and
+ *  those well inside a window never leave it: the windows stay in order, their borders are explored. */
+const WINDOW_GAP = 1;
+/** The model answered something that is not a number for an activity. */
+export class ReasonerBadAnswer extends Error {
+  readonly activity: string;
+  constructor(activity: string) { super(`The reasoner's model answered a value that is not a number for activity ${activity}: nothing can be ordered by it.`); this.activity = activity; }
+}
 /** The model's answer for the whole instance. Up to REASONER_WINDOW activities it reads the network at once. A larger one it reads a
  *  window at a time: the activities in order of their earliest start with no resource limit (ties as listed), cut into consecutive windows
  *  of REASONER_WINDOW; each window is its own small network (the links inside it), read by the model as it was trained. The windows are
@@ -168,7 +184,17 @@ export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, 
  *  priority. (The placement that follows, serialSgs and the P6 leveler, is always of the whole network: only the order comes from here.) */
 export async function reasonerOutput(inst: HrmInstance, infer: Infer, tick?: Tick): Promise<ReasonerOutput> {
   const n = inst.acts.length;
-  if (n <= REASONER_WINDOW) return { ...(await infer(reasonerInputs(inst))), windows: 1 };
+  // an answer that is not a number for an activity orders nothing (and one such value would lift every earlier window to it): refused
+  const read1 = async (acts: HrmActivity[]) => {
+    const r = await infer(reasonerInputs({ acts, caps: inst.caps }));
+    for (let k = 0; k < acts.length; k++) {
+      let ok = Number.isFinite(r.priority[k]);
+      for (let j = 0; ok && j < Math.min(REASONER_KMAX, acts[k].modes.length); j++) ok = Number.isFinite(r.modeLogits[k * REASONER_KMAX + j]);
+      if (!ok) throw new ReasonerBadAnswer(String(acts[k].task.task_code ?? acts[k].id));
+    }
+    return r;
+  };
+  if (n <= REASONER_WINDOW) return { ...(await read1(inst.acts)), windows: 1 };
   const early = serialSgs(inst.acts, inst.acts.map((a) => a.duration), new Map()).start;
   const byStart = inst.acts.map((_, i) => i).sort((a, b) => early[a] - early[b] || a - b);
   const windows = Math.ceil(n / REASONER_WINDOW);
@@ -178,19 +204,19 @@ export async function reasonerOutput(inst: HrmInstance, infer: Infer, tick?: Tic
     if (tick) await tick(w, windows, `reading window ${w + 1} of ${windows} (${REASONER_WINDOW} activities at a time)`);
     const ids = byStart.slice(w * REASONER_WINDOW, (w + 1) * REASONER_WINDOW), at = new Map(ids.map((id, k) => [id, k]));
     const acts = ids.map((id, k): HrmActivity => ({ ...inst.acts[id], id: k, preds: inst.acts[id].preds.filter((p) => at.has(p.id)).map((p) => ({ ...p, id: at.get(p.id)! })) }));
-    const r = await infer(reasonerInputs({ acts, caps: inst.caps }));
+    const r = await read1(acts);
     ids.forEach((id, k) => { for (let j = 0; j < REASONER_KMAX; j++) modeLogits[id * REASONER_KMAX + j] = r.modeLogits[k * REASONER_KMAX + j]; });
     let lo = Infinity, hi = -Infinity;
     for (let k = 0; k < ids.length; k++) { const v = r.priority[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
     read.push({ ids, priority: r.priority, lo, hi });
   }
-  // a window's priorities are lifted so its lowest is above the next window's highest (by 1): the order of the windows, then the model's
-  // (64-bit: a float32 would lose the model's small differences under the lift of a long schedule)
+  // a window's priorities are lifted so its lowest is above the next window's highest by WINDOW_GAP: the order of the windows, then the
+  // model's (64-bit: a float32 would lose the model's small differences under the lift of a long schedule)
   const priority = new Float64Array(n);
   let lift = 0;
   for (let w = windows - 1; w >= 0; w--) {
     const x = read[w];
-    if (w < windows - 1) lift += read[w + 1].hi - x.lo + 1;
+    if (w < windows - 1) lift += read[w + 1].hi - x.lo + WINDOW_GAP;
     x.ids.forEach((id, k) => { priority[id] = x.priority[k] + lift; });
   }
   return { priority, modeLogits, windows };
@@ -207,7 +233,8 @@ export async function decode(inst: HrmInstance, out: { priority: ArrayLike<numbe
     const ex = lg.map((v) => Math.exp(v - mx)), sum = ex.reduce((x, y) => x + y, 0) || 1;
     valid.push(vm); probs.push(ex.map((e) => e / sum)); argmax.push(vm[lg.indexOf(mx)]);
   }
-  // work already under way is placed first, where it is
+  // work already under way is placed first, where it is (1e6 is above every lifted priority of reasonerOutput: a window adds its
+  // range + WINDOW_GAP, about 6, so it holds to some 150,000 windows — 80 million activities)
   const netPrio = Array.from({ length: n }, (_, i) => out.priority[i] + (acts[i].started ? 1e6 : 0));
   let rs = (o.seed ?? 0x9e3779b9) >>> 0;
   const rand = () => { rs |= 0; rs = (rs + 0x6d2b79f5) | 0; let t = Math.imul(rs ^ (rs >>> 15), 1 | rs); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -216,7 +243,7 @@ export async function decode(inst: HrmInstance, out: { priority: ArrayLike<numbe
   let best = run(argmax, netPrio);
   const K = o.samples ?? (n > 120 ? 64 : 200);
   for (let k = 0; k < K; k++) {
-    if (o.tick && k % 16 === 0) await o.tick(k, K, `trajectory ${k} of ${K}`);
+    if (o.tick) await o.tick(k, K, `trajectory ${k} of ${K}`); // every trajectory: on a large schedule one takes seconds, and a cancel waits for the next tick
     const scale = 0.3 + rand(), sample = rand() < 0.5;
     const mc = argmax.map((am, i) => { if (!sample || valid[i].length === 1) return am; const r = rand(); let acc = 0; for (let j = 0; j < valid[i].length; j++) { acc += probs[i][j]; if (r <= acc) return valid[i][j]; } return valid[i].at(-1)!; });
     const c = run(mc, netPrio.map((p) => p + gauss() * scale));
@@ -246,10 +273,13 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   if (!n) return { ok: false as const, error: { code: 'bad_input', message: 'No remaining activities to optimise.' } };
   const leveled = inst.acts.filter((a) => a.crewSize > 0).length, crashable = inst.acts.filter((a) => a.modes.length > 1).length;
   if (!leveled && !crashable) return { ok: false as const, error: { code: 'nothing_to_optimise', message: 'No activity uses a resource with a Max Units/Time limit and no crash data was given, so there is nothing for the reasoner to choose.' } };
-  const out = await reasonerOutput(inst, infer, o.tick);
+  let out: ReasonerOutput;
+  try { out = await reasonerOutput(inst, infer, o.tick); }
+  catch (e) { if (e instanceof ReasonerBadAnswer) return { ok: false as const, error: { code: 'reasoner_failed', message: e.message } }; throw e; }
   const best = await decode(inst, out, o);
   // a crew larger than its resource's limit fits on no day, whatever the order: said, because no placement of it means anything
-  const overLimit = inst.acts.filter((a) => a.duration > 0 && a.crewSize > (inst.caps.get(a.group) ?? Infinity) + 1e-9).length;
+  // (counted as serialSgs places it: the crew of the mode chosen, a crashed mode's crew being larger)
+  const overLimit = inst.acts.filter((a, i) => { const d = a.modes[best.modes[i]]?.duration ?? a.duration, crew = a.crewSize * (a.duration && d ? a.duration / d : 1); return d > 0 && crew > (inst.caps.get(a.group) ?? Infinity) + 1e-9; }).length;
   const order = inst.acts.map((a, i) => [a.task.task_id, best.prio[i]] as const).sort((x, y) => y[1] - x[1]).map(([id]) => id);
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const ops = proposalOps(inst, best.modes, projIds.length > 1, projCode, o.hoursPerDay);

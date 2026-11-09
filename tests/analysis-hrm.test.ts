@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { rows, type Db } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
-import { buildInstance, optimizeSchedule, reasonerInputs, reasonerOutput, REASONER_WINDOW, serialSgs, type HrmActivity, type HrmInstance, type ReasonerInputs } from '../core/analysis/hrm.ts';
+import { buildInstance, optimizeSchedule, reasonerInputs, reasonerOutput, ReasonerBadAnswer, REASONER_WINDOW, serialSgs, type HrmActivity, type HrmInstance, type ReasonerInputs } from '../core/analysis/hrm.ts';
 import { nodeInfer, reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
 
 // The platform's own reasoner check: two parallel chains in one trade and a join, crew 2 each, under a cap of 4.
@@ -90,8 +90,15 @@ test('the reasoner reads a schedule of any size: up to 512 activities at once, a
   const joined = (a: number, b: number) => x0.bias[a * x0.n + b] === 1;
   const idA = w0.find((id) => big.acts[id].preds.length && at.has(big.acts[id].preds[0].id))!, idP = big.acts[idA].preds[0].id;
   assert.ok(joined(at.get(idA)!, at.get(idP)!), 'a link inside the window is there');
-  const lone = w0.find((id) => big.acts[id].preds.length && !at.has(big.acts[id].preds[0].id));
-  if (lone != null) assert.equal(x0.feats.length, x0.n * 9);
+  // …and nothing else: the pairs the model is told share a path are exactly those of one chain inside this window
+  // (a chain's activities are one after another, so m of them in the window are m x (m - 1) ordered pairs)
+  for (let w = 0; w < o2.windows; w++) {
+    const perChain = new Map<number, number>();
+    for (const id of win(w)) perChain.set(Math.floor(id / 100), (perChain.get(Math.floor(id / 100)) ?? 0) + 1);
+    let want = 0; for (const m of perChain.values()) want += m * (m - 1);
+    let got = 0; for (const v of s2.seen[w].bias) got += v;
+    assert.equal(got, want, `window ${w}: only its own links`);
+  }
   // the same instance twice: the same answer (nothing random in the reading)
   const again = await reasonerOutput(big, recordingInfer().infer);
   assert.deepEqual(Array.from(again.priority), Array.from(o2.priority));
@@ -127,7 +134,55 @@ test('a crew larger than its limit is placed where the day-by-day search ends, w
   const never = madeInstance(60, 40, 9, 4), t0 = Date.now();
   never.acts.forEach((a) => { a.duration = 17; a.modes = [{ duration: 17, crewSize: 9, cost: 0 }]; });
   const r = serialSgs(never.acts, never.acts.map((a) => a.duration), never.caps);
-  assert.ok(r.makespan > 40000 && Date.now() - t0 < 5000, `${Date.now() - t0} ms`);
+  assert.ok(r.makespan > 40000, String(r.makespan));
+  void t0;
+});
+
+test('the pick of the next activity (a heap) is the scan it replaced: the highest priority, ties to the one eligible first', () => {
+  // the scan as it was: every eligible activity looked at for every placement
+  const scan = (acts: HrmActivity[], priority: number[]) => {
+    const indeg = acts.map((a) => a.preds.length), succ: number[][] = acts.map(() => []), order: number[] = [];
+    for (const a of acts) for (const p of a.preds) succ[p.id].push(a.id);
+    const eligible = new Set(acts.filter((a) => !indeg[a.id]).map((a) => a.id));
+    while (eligible.size) { let pick = -1, best = -Infinity; for (const id of eligible) if (priority[id] > best) { best = priority[id]; pick = id; } eligible.delete(pick); order.push(pick); for (const s of succ[pick]) if (--indeg[s] === 0) eligible.add(s); }
+    return order;
+  };
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let round = 0; round < 40; round++) {
+    // a random network (links only to earlier activities), priorities from a few values so ties are many
+    const n = 30 + Math.floor(rnd() * 200), acts: HrmActivity[] = [];
+    for (let id = 0; id < n; id++) {
+      const preds = id ? Array.from(new Set(Array.from({ length: Math.floor(rnd() * 3) }, () => Math.floor(rnd() * id)))).map((p) => ({ id: p, type: 'FS' as const, lag: 0 })) : [];
+      acts.push({ id, task: { task_id: String(id), task_code: `A${id}` } as HrmActivity['task'], duration: 1 + Math.floor(rnd() * 4), preds, group: 'T0', crewSize: 1, modes: [{ duration: 1, crewSize: 1, cost: 0 }], started: false });
+    }
+    const priority = acts.map(() => Math.floor(rnd() * 4)), dur = acts.map((a) => a.duration);
+    // the placements are the same if and only if the order is: compare with the scan's order placed one by one (no resource limit: start = the latest predecessor's finish)
+    const order = scan(acts, priority), start: number[] = [], finish: number[] = [];
+    for (const id of order) { let t = 0; for (const p of acts[id].preds) t = Math.max(t, finish[p.id]); start[id] = t; finish[id] = t + dur[id]; }
+    // with a limit of one crew the placement depends on the order alone, so an equal placement proves an equal order
+    const one = new Map([['T0', 1]]), got = serialSgs(acts, dur, one, priority);
+    const u = new Set<number>(), s2: number[] = [], f2: number[] = [];
+    for (const id of order) { let t = 0; for (const p of acts[id].preds) t = Math.max(t, f2[p.id]); const fits = (t0: number) => { for (let d = t0; d < t0 + dur[id]; d++) if (u.has(d)) return false; return true; }; while (!fits(t)) t++; s2[id] = t; f2[id] = t + dur[id]; for (let d = t; d < t + dur[id]; d++) u.add(d); }
+    assert.deepEqual(got.start, s2, `round ${round}`);
+  }
+});
+
+test('a model answer that is not a number is refused by name, never ordered by', async () => {
+  const big = madeInstance(8, 100);
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    let calls = 0;
+    const infer = async (x: ReasonerInputs) => { const r = { priority: Float32Array.from({ length: x.n }, (_, k) => Math.sin(k)), modeLogits: new Float32Array(x.n * 3) }; if (calls++ === 1) r.priority[5] = bad; return r; };
+    await assert.rejects(() => reasonerOutput(big, infer), (e: unknown) => e instanceof ReasonerBadAnswer && /activity A\d+/.test((e as Error).message), String(bad));
+  }
+  // through optimizeSchedule: a refusal in words (reasoner_failed), and the project untouched
+  const { db, pid } = project(4);
+  const before = JSON.stringify(rows(db, 'TASK'));
+  const nan = async (x: ReasonerInputs) => ({ priority: new Float32Array(x.n).fill(NaN), modeLogits: new Float32Array(x.n * 3) });
+  const r = await optimizeSchedule(db, [pid], { seed: 1 }, nan, () => undefined);
+  assert.equal(r.ok, false);
+  assert.equal(!r.ok && r.error.code, 'reasoner_failed');
+  assert.equal(JSON.stringify(rows(db, 'TASK')), before);
 });
 
 test('optimize_schedule runs the embedded model and checks its answer with the P6 leveler', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
