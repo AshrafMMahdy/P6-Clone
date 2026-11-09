@@ -72,3 +72,25 @@ test('MCP float_paths: paths, near-critical, paths between two activities, write
   assert.equal(w.d.unsaved_changes, true);
   assert.equal((await call('float_paths', { handle: h, method: 'nope' })).d.error.code, 'bad_input');
 });
+
+test('paths between two activities: one function (core/schedule/floatPaths.ts) for float_paths and the Float paths panel; the panel’s call equals the tool’s between, and the tool’s refusal is as it was', async () => {
+  const { pathsBetween, BETWEEN_NEEDS } = await import('../core/schedule/floatPaths.ts');
+  const { sessions } = await import('../mcp/runtime.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'cairo festival city.xer') })).d.handle;
+  const db = sessions.get(h)!.db, ids = rows(db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id);
+  for (const between of [{ from: 'A1000', to: 'A1010', max: 3 }, { from: 'A1000', to: 'A1010' }, { from: 'A1010', to: 'A1000' }]) {
+    const tool = await call('float_paths', { handle: h, between });
+    assert.equal(tool.err, false, JSON.stringify(tool.d).slice(0, 300));
+    // the panel: the open projects (here all of them), the preference's hours per day (the tool's session has the same)
+    assert.deepEqual(JSON.parse(JSON.stringify(pathsBetween(db, ids, between, 8))), tool.d.between, JSON.stringify(between));
+  }
+  assert.ok((await call('float_paths', { handle: h, between: { from: 'A1000', to: 'A1010' } })).d.between.paths.length >= 1);
+  assert.equal(pathsBetween(db, ids, { from: 'A1000', to: 'NOPE' }, 8), null, 'not an activity of these projects');
+  assert.equal(pathsBetween(db, ids, { from: '', to: 'A1010' }, 8), null);
+  const bad = await call('float_paths', { handle: h, between: { from: 'A1000', to: 'NOPE' } });
+  assert.equal(bad.d.error.code, 'bad_input');
+  assert.equal(bad.d.error.message, BETWEEN_NEEDS);
+  assert.equal(bad.d.error.message, 'between needs from and to Activity IDs of this project.');
+  assert.equal(bad.d.error.hint, 'e.g. {"from": "A1000", "to": "A9000"}');
+});

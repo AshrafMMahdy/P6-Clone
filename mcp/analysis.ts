@@ -1,8 +1,7 @@
 // Schedule analysis tools of the MCP server (kept apart from server.ts so the two grow without stepping on each other):
 // P6 Check Schedule and DCMA 14-point; later lint, float paths, curves, what-ifs, crashing and delay analysis.
-import { minOf } from '../core/arrays.ts';
 import { progressCurves, resourceHistograms } from '../core/analysis/curves.ts';
-import { computeFloatPaths, writeFloatPaths } from '../core/schedule/floatPaths.ts';
+import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween, writeFloatPaths } from '../core/schedule/floatPaths.ts';
 import type { Db } from '../core/db.ts';
 import { checkSchedule, P6_CHECKS } from '../core/analysis/checkSchedule.ts';
 import { dcma14, DCMA_PROFILES } from '../core/analysis/dcma.ts';
@@ -141,7 +140,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const nearDays = a.near_critical_days != null ? Number(a.near_critical_days) : 10;
       const tasks = (s.db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
       const near = tasks.map((t) => ({ t, d: Number(t.total_float_hr_cnt) / s.hpd })).filter((x) => x.d > 0 && x.d <= nearDays).sort((x, y) => x.d - y.d).map((x) => ({ id: x.t.task_code, name: x.t.task_name, total_float_days: Math.round(x.d * 10) / 10 }));
-      const answer = { end: r.end, method: r.method, paths: r.paths, near_critical: near, ...(a.between ? { between: pathsBetween(s.db, projIds, a.between, s.hpd) } : {}), ...(a.write ? { written: true } : {}) };
+      const answer = { end: r.end, method: r.method, paths: r.paths, near_critical: near, ...(a.between ? { between: pathsBetween(s.db, projIds, a.between, s.hpd) ?? fail('bad_input', BETWEEN_NEEDS, 'e.g. {"from": "A1000", "to": "A9000"}') } : {}), ...(a.write ? { written: true } : {}) };
       return exported(answer, answer, [
         { name: 'paths', columns: ['path', 'float_hours', 'order', 'id', 'name', 'total_float_hours'], rows: r.paths.flatMap((p) => p.activities.map((x) => ({ path: p.path, float_hours: p.float_hours, ...x }))) },
         { name: 'near_critical', columns: ['id', 'name', 'total_float_days'], rows: near },
@@ -332,28 +331,3 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
   return undefined;
 }
 
-/** Every logic path from one activity to another (the platform's analyse_paths), capped: duration (days, summed) and the
- *  lowest total float on each, longest first. */
-function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string; max?: number }, hpd: number) {
-  const T = (db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id));
-  const byCode = new Map(T.map((t) => [t.task_code, t])), byId = new Map(T.map((t) => [t.task_id, t]));
-  const from = byCode.get(String(b.from ?? '')), to = byCode.get(String(b.to ?? ''));
-  if (!from || !to) return fail('bad_input', 'between needs from and to Activity IDs of this project.', 'e.g. {"from": "A1000", "to": "A9000"}');
-  const succ = new Map<string, string[]>();
-  for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) { const l = succ.get(r.pred_task_id); if (l) l.push(r.task_id); else succ.set(r.pred_task_id, [r.task_id]); }
-  // only activities that can reach "to" are walked, so the search does not wander
-  const reach = new Set<string>([to.task_id]);
-  for (let grew = true; grew;) { grew = false; for (const [p, ss] of succ) if (!reach.has(p) && ss.some((x) => reach.has(x))) { reach.add(p); grew = true; } }
-  const max = Math.max(1, Number(b.max) || 25), out: string[][] = [];
-  let steps = 0, truncated = false;
-  const walk = (id: string, path: string[]) => {
-    if (out.length >= max || ++steps > 200000) { truncated = true; return; }
-    if (id === to.task_id) { out.push([...path, id]); return; }
-    for (const n of succ.get(id) ?? []) if (reach.has(n) && !path.includes(n)) walk(n, [...path, id]);
-  };
-  if (reach.has(from.task_id)) walk(from.task_id, []);
-  const dur = (t: Record<string, string>) => Number((t.act_end_date ? t.target_drtn_hr_cnt : t.remain_drtn_hr_cnt) || 0) / hpd;
-  const rowsOut = out.map((p) => { const ts = p.map((id) => byId.get(id)!); const fl = ts.map((t) => t.total_float_hr_cnt).filter((x) => x !== '' && x != null).map(Number); return { activities: ts.map((t) => t.task_code), duration_days: Math.round(ts.reduce((a, t) => a + dur(t), 0) * 10) / 10, min_float_days: fl.length ? Math.round((minOf(fl) / hpd) * 10) / 10 : null }; })
-    .sort((x, y) => y.duration_days - x.duration_days || (x.min_float_days ?? 0) - (y.min_float_days ?? 0));
-  return { from: from.task_code, to: to.task_code, paths: rowsOut, truncated };
-}

@@ -8,7 +8,7 @@ import { rows, type Db } from '../../core/db.ts';
 import { parseP6Date } from '../../core/dates.ts';
 import { checkSchedule, P6_CHECKS, type CheckScheduleReport } from '../../core/analysis/checkSchedule.ts';
 import { progressCurves, resourceHistograms, type ProgressCurves, type ResourceHistogram } from '../../core/analysis/curves.ts';
-import { computeFloatPaths } from '../../core/schedule/floatPaths.ts';
+import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween } from '../../core/schedule/floatPaths.ts';
 import { compareComputed, evaluate } from '../../core/query/evaluate.ts';
 import { compareSchedules, type ScheduleChange } from '../../core/diff.ts';
 import { reviewSchedule, type Review } from '../../core/query/review.ts';
@@ -85,18 +85,27 @@ export function FloatPathsPanel() {
   const [end, setEnd] = useState('');
   const [method, setMethod] = useState<'free_float' | 'total_float'>('free_float');
   const [near, setNear] = useState('10');
-  const [res, setRes] = useState<{ r: ReturnType<typeof computeFloatPaths>; near: { id: string; name: string; total_float_days: number }[] } | null>(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [most, setMost] = useState('');
+  const [res, setRes] = useState<{ r: ReturnType<typeof computeFloatPaths>; near: { id: string; name: string; total_float_days: number }[]; between?: NonNullable<ReturnType<typeof pathsBetween>> } | null>(null);
   const hpd = ui.prefs.hoursPerDay;
-  /** The settings; a number that is not one is refused. */
-  const opts = () => ({ count: numberOf('The number of paths', count), endActivity: end.trim() || undefined, method, nearDays: numberOf('The near-critical float', near) ?? 10 });
+  /** The settings; a number that is not one is refused. between (the tool's between): when either activity is given. */
+  const opts = () => {
+    const f = from.trim(), t = to.trim(), max = numberOf('The most paths between', most);
+    return { count: numberOf('The number of paths', count), endActivity: end.trim() || undefined, method, nearDays: numberOf('The near-critical float', near) ?? 10, between: f || t ? { from: f, to: t, ...(max != null ? { max } : {}) } : undefined };
+  };
   const run = () => {
     let o: ReturnType<typeof opts>;
     try { o = opts(); } catch (e) { return toast((e as Error).message); }
     if (o.endActivity && !rows(getDb(), 'TASK').some((t) => t.task_code === o.endActivity && ui.openProjects.includes(t.proj_id))) return toast(`No activity "${o.endActivity}". Give the Activity ID of the activity the paths end with.`);
+    // the paths between two activities as float_paths finds them (core/schedule/floatPaths.ts)
+    const between = o.between ? pathsBetween(getDb(), ui.openProjects, o.between, hpd) : undefined;
+    if (between === null) return toast(`${BETWEEN_NEEDS.replace(/^between/, 'Between')} Give both, e.g. A1000 and A9000.`);
     const r = computeFloatPaths(getDb(), ui.openProjects, { count: o.count ?? 10, endActivity: o.endActivity, method: o.method });
     const nearDays = o.nearDays;
     const tasks = rows(getDb(), 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
-    setRes({ r, near: tasks.map((t) => ({ t, d: Number(t.total_float_hr_cnt) / hpd })).filter((x) => x.d > 0 && x.d <= nearDays).sort((x, y) => x.d - y.d).map((x) => ({ id: x.t.task_code, name: x.t.task_name, total_float_days: Math.round(x.d * 10) / 10 })) });
+    setRes({ r, near: tasks.map((t) => ({ t, d: Number(t.total_float_hr_cnt) / hpd })).filter((x) => x.d > 0 && x.d <= nearDays).sort((x, y) => x.d - y.d).map((x) => ({ id: x.t.task_code, name: x.t.task_name, total_float_days: Math.round(x.d * 10) / 10 })), ...(between ? { between } : {}) });
   };
   return (
     <div style={box}>
@@ -105,14 +114,21 @@ export function FloatPathsPanel() {
         <label>End activity <input style={{ width: 90 }} value={end} placeholder="latest finish" onChange={(e) => setEnd(e.target.value)} /></label>
         <label>Method <select value={method} onChange={(e) => setMethod(e.target.value as typeof method)}><option value="free_float">Free float (longest path first)</option><option value="total_float">Total float</option></select></label>
         <label>Near critical: up to <input style={{ width: 36 }} value={near} onChange={(e) => setNear(e.target.value)} /> days of float</label>
+        <label title="Every logic path from one activity to another, longest first; at most that many of them (blank: the tool's 25)">Between <input style={{ width: 80 }} value={from} placeholder="from" onChange={(e) => setFrom(e.target.value)} /> and <input style={{ width: 80 }} value={to} placeholder="to" onChange={(e) => setTo(e.target.value)} />, at most <input style={{ width: 36 }} value={most} placeholder="25" onChange={(e) => setMost(e.target.value)} /></label>
         <button className="btn primary" onClick={run}>Find paths</button>
-        <ExportButton tool="float_paths" args={() => { const o = opts(); return { ...projectArgs(), ...(o.count != null ? { count: o.count } : {}), ...(o.endActivity ? { end_activity: o.endActivity } : {}), method, near_critical_days: o.nearDays }; }} />
+        <ExportButton tool="float_paths" args={() => { const o = opts(); return { ...projectArgs(), ...(o.count != null ? { count: o.count } : {}), ...(o.endActivity ? { end_activity: o.endActivity } : {}), method, near_critical_days: o.nearDays, ...(o.between ? { between: o.between } : {}) }; }} />
       </div>
       {!res ? <div className="muted">P6's multiple float paths: path 1 follows the most critical links back from the end activity, each next path is the unassigned chain with the most critical link into the paths found. The Float Path columns are not written here.</div> : (
         <div style={panel}>
           <div className="muted">Paths end at {res.r.end ?? '-'} (method {res.r.method.replace('_', ' ')}).</div>
           <table className="tbl" style={{ marginTop: 4 }}><thead><tr><th>Path</th><th>Float (d)</th><th>Activities</th><th>Listed in order</th></tr></thead>
             <tbody>{res.r.paths.map((p) => <tr key={p.path} style={{ verticalAlign: 'top' }}><td>{p.path}</td><td>{p.float_hours == null ? '-' : n1(p.float_hours / hpd, 1)}</td><td>{p.activities.length}</td><td style={{ whiteSpace: 'normal' }}><Ids ids={p.activities.map((a) => a.id)} /></td></tr>)}</tbody></table>
+          {res.between && <div data-between style={{ marginTop: 10, border: '1px solid #e3e5e8', borderRadius: 14, background: '#f7f8f9', padding: 8 }}>
+            <div><b>Paths between {res.between.from} and {res.between.to}</b> ({res.between.paths.length}{res.between.truncated ? ', the search stopped before the end: more paths may exist' : ''})</div>
+            {!res.between.paths.length ? <div className="muted">No logic path leads from {res.between.from} to {res.between.to}.</div> :
+              <table className="tbl" style={{ marginTop: 4 }}><thead><tr><th>Path</th><th>Duration (d)</th><th>Lowest float (d)</th><th>Activities</th></tr></thead>
+                <tbody>{res.between.paths.map((p, i) => <tr key={i} style={{ verticalAlign: 'top' }}><td>{i + 1}</td><td style={{ textAlign: 'right' }}>{p.duration_days}</td><td style={{ textAlign: 'right' }}>{p.min_float_days ?? '-'}</td><td style={{ whiteSpace: 'normal' }}><Ids ids={p.activities} /></td></tr>)}</tbody></table>}
+          </div>}
           <div style={{ marginTop: 8 }}><b>Near critical</b> ({res.near.length})</div>
           <table className="tbl"><thead><tr><th>Activity</th><th>Name</th><th>Total float (d)</th></tr></thead><tbody>{res.near.slice(0, 200).map((x) => <tr key={x.id}><td><Id id={x.id} /></td><td>{x.name}</td><td style={{ textAlign: 'right' }}>{x.total_float_days}</td></tr>)}</tbody></table>
           {res.near.length > 200 && <div className="muted">{res.near.length - 200} more: Export… lists all.</div>}

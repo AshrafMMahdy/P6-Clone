@@ -150,3 +150,32 @@ function relationshipTotalFloat(db: Db, ctx: ReturnType<typeof makeCtx>): (r: Ro
     return calOf(a).workBetween(lag ? lagCal.addWork(from, lag) : from, to);
   };
 }
+
+/** What float_paths' between needs, in the tool's words (the Float paths panel says the same). */
+export const BETWEEN_NEEDS = 'between needs from and to Activity IDs of this project.';
+/** Every logic path from one activity to another (float_paths' between; the platform's analyse_paths), capped: duration (days, summed)
+ *  and the lowest total float on each, longest first. null when from or to is not an activity of these projects (BETWEEN_NEEDS). The
+ *  float_paths tool and the desktop app's Float paths panel both call it. */
+export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string; max?: number }, hpd: number): { from: string; to: string; paths: { activities: string[]; duration_days: number; min_float_days: number | null }[]; truncated: boolean } | null {
+  const T = (db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id));
+  const byCode = new Map(T.map((t) => [t.task_code, t])), byId = new Map(T.map((t) => [t.task_id, t]));
+  const from = byCode.get(String(b.from ?? '')), to = byCode.get(String(b.to ?? ''));
+  if (!from || !to) return null;
+  const succ = new Map<string, string[]>();
+  for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) { const l = succ.get(r.pred_task_id); if (l) l.push(r.task_id); else succ.set(r.pred_task_id, [r.task_id]); }
+  // only activities that can reach "to" are walked, so the search does not wander
+  const reach = new Set<string>([to.task_id]);
+  for (let grew = true; grew;) { grew = false; for (const [p, ss] of succ) if (!reach.has(p) && ss.some((x) => reach.has(x))) { reach.add(p); grew = true; } }
+  const max = Math.max(1, Number(b.max) || 25), out: string[][] = [];
+  let steps = 0, truncated = false;
+  const walk = (id: string, path: string[]) => {
+    if (out.length >= max || ++steps > 200000) { truncated = true; return; }
+    if (id === to.task_id) { out.push([...path, id]); return; }
+    for (const n of succ.get(id) ?? []) if (reach.has(n) && !path.includes(n)) walk(n, [...path, id]);
+  };
+  if (reach.has(from.task_id)) walk(from.task_id, []);
+  const dur = (t: Record<string, string>) => Number((t.act_end_date ? t.target_drtn_hr_cnt : t.remain_drtn_hr_cnt) || 0) / hpd;
+  const rowsOut = out.map((p) => { const ts = p.map((id) => byId.get(id)!); const fl = ts.map((t) => t.total_float_hr_cnt).filter((x) => x !== '' && x != null).map(Number); return { activities: ts.map((t) => t.task_code), duration_days: Math.round(ts.reduce((a, t) => a + dur(t), 0) * 10) / 10, min_float_days: fl.length ? Math.round((minOf(fl) / hpd) * 10) / 10 : null }; })
+    .sort((x, y) => y.duration_days - x.duration_days || (x.min_float_days ?? 0) - (y.min_float_days ?? 0));
+  return { from: from.task_code, to: to.task_code, paths: rowsOut, truncated };
+}

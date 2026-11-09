@@ -125,6 +125,17 @@ await exportFiles('review', 'Review', ['review-checks.csv', 'review-activities.c
 await panel('Float paths'); await win.click('button:has-text("Find paths")'); await win.waitForSelector('text=/Paths end at/');
 ok(await win.locator('.tbl >> nth=0 >> tbody tr').count() >= 1, 'Float paths: runs and lists the paths'); await shot('float-paths.png');
 await exportFiles('float_paths', 'Float paths', ['float_paths-paths.csv', 'float_paths-near_critical.csv']);
+// between two activities (float_paths' between): one of them alone is refused in the tool's words; both list the paths, as the Export
+await win.locator('input[placeholder="from"]').fill('A1000');
+await win.click('button:has-text("Find paths")'); await win.waitForTimeout(300);
+ok(/Between needs from and to Activity IDs of this project/.test(await toastText()), `Float paths: between with one activity is refused in the tool's words (${await toastText()})`);
+await win.locator('input[placeholder="to"]').fill('A1010');
+await win.click('button:has-text("Find paths")'); await win.waitForSelector('[data-between]');
+const betweenRows = await win.locator('[data-between] tbody tr').count();
+ok(betweenRows >= 1 && /Paths between A1000 and A1010/.test(await win.locator('[data-between]').innerText()), `Float paths: lists the paths between A1000 and A1010 (${betweenRows})`); await shot('float-paths-between.png');
+const fpb = JSON.parse(readFileSync(join(await exportFiles('float_paths', 'Float paths (between)', ['float_paths-between.csv']), 'float_paths.json'), 'utf8'));
+ok(fpb.between?.paths.length === betweenRows && fpb.between.from === 'A1000' && fpb.between.to === 'A1010', `Float paths: the screen's paths between are the Export's (${fpb.between?.paths.length})`);
+await win.locator('input[placeholder="from"]').fill(''); await win.locator('input[placeholder="to"]').fill('');
 await panel('Progress curves'); await win.click('button:has-text("Calculate curves")'); await win.waitForSelector('[data-card="BAC"]');
 ok(await win.locator('svg polyline').count() >= 3, 'Progress curves: runs, the cards and the S-curves are shown'); await shot('progress-curves.png');
 await exportFiles('progress_curves', 'Progress curves', ['progress_curves-periods.csv', 'progress_curves-totals.csv']);
