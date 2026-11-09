@@ -196,15 +196,15 @@ export function activitiesBetween(db: Db, projIds: string[] | null, b: { from?: 
   for (const id of sp.seen) if (sp.reach.has(id)) n++;
   return n;
 }
-export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string; max?: number }, hpd: number): PathsBetween | { error: string } | null {
-  const sp = spanBetween(db, projIds, b);
-  if (!sp) return null;
-  const { byId, from, to, succ, reach, seen } = sp;
-  const next = (id: string) => (id === to.task_id ? [] : [...(succ.get(id) ?? [])].filter((n) => seen.has(n) && reach.has(n)));
-  const max = Math.max(1, Number(b.max) || 25);
-  const empty = (): PathsBetween => ({ from: from.task_code, to: to.task_code, paths: [], paths_total: 0, truncated: false });
-  if (!reach.has(from.task_id)) return empty();
-  // reverse topological order (successors first) by a depth-first walk; a back edge is a loop
+/** The steps from an activity that stay between the two: successors that "from" reaches and that reach "to"; nothing follows "to". */
+function spanNext(sp: NonNullable<ReturnType<typeof spanBetween>>) {
+  const { to, succ, reach, seen } = sp;
+  return (id: string) => (id === to.task_id ? [] : [...(succ.get(id) ?? [])].filter((n) => seen.has(n) && reach.has(n)));
+}
+/** The activities between, in reverse topological order (successors first) by a depth-first walk from "from"; {error} naming one loop
+ *  when the logic between the two has one. Only meaningful when "from" can reach "to". */
+function spanOrder(sp: NonNullable<ReturnType<typeof spanBetween>>): { order: string[] } | { error: string } {
+  const { byId, from, to } = sp, next = spanNext(sp);
   const order: string[] = [], state = new Map<string, 1 | 2>();
   const stack: { id: string; ns: string[]; i: number }[] = [{ id: from.task_id, ns: next(from.task_id), i: 0 }];
   state.set(from.task_id, 1);
@@ -215,6 +215,51 @@ export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?:
     if (st === 1) { const at = stack.findIndex((f) => f.id === n), ids = stack.slice(at).map((f) => byId.get(f.id)!.task_code); return { error: `The logic between ${from.task_code} and ${to.task_code} has a loop (${[...ids, ids[0]].join(' -> ')}); the longest paths cannot be listed until it is broken.` }; }
     if (!st) { state.set(n, 1); stack.push({ id: n, ns: next(n), i: 0 }); }
   }
+  return { order };
+}
+/** What float_paths' between keeps, for the memory it is reserved: `activities` lie between the two and `tails(max)` is the number of
+ *  tails kept when `max` are asked for, the sum over those activities of min(max, the paths from it to "to") (counted in plain numbers
+ *  capped at max). `exact` is false when the paths could not be counted (a loop between the two: the call itself answers that), and
+ *  tails(max) is then every activity between x max. null when an end is not one activity of these projects (projIds null: of the
+ *  database's), where nothing can be told before the call. */
+export function betweenTails(db: Db, projIds: string[] | null, b: { from?: unknown; to?: unknown }): { activities: number; exact: boolean; tails: (max: number) => number } | null {
+  const sp = spanBetween(db, projIds, b);
+  if (!sp) return null;
+  let k = 0;
+  for (const id of sp.seen) if (sp.reach.has(id)) k++;
+  if (!sp.reach.has(sp.from.task_id)) return { activities: k, exact: true, tails: () => 0 };
+  const ord = spanOrder(sp);
+  if ('error' in ord) return { activities: k, exact: false, tails: (max) => k * max };
+  const next = spanNext(sp), order = ord.order;
+  const kids = order.map((id) => next(id));
+  const at = new Map(order.map((id, i) => [id, i]));
+  return {
+    activities: k, exact: true,
+    tails: (max) => {
+      const c = new Array<number>(order.length);
+      let sum = 0;
+      for (let i = 0; i < order.length; i++) {
+        let v = 0;
+        if (order[i] === sp.to.task_id) v = 1;
+        else for (const n of kids[i]) { v += c[at.get(n)!]; if (v >= max) { v = max; break; } }
+        c[i] = Math.min(max, v);
+        sum += c[i];
+      }
+      return sum;
+    },
+  };
+}
+export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string; max?: number }, hpd: number): PathsBetween | { error: string } | null {
+  const sp = spanBetween(db, projIds, b);
+  if (!sp) return null;
+  const { byId, from, to } = sp;
+  const next = spanNext(sp);
+  const max = Math.max(1, Number(b.max) || 25);
+  const empty = (): PathsBetween => ({ from: from.task_code, to: to.task_code, paths: [], paths_total: 0, truncated: false });
+  if (!sp.reach.has(from.task_id)) return empty();
+  const ord = spanOrder(sp);
+  if ('error' in ord) return ord;
+  const order = ord.order;
   // hours of an activity; lowest float of a path (hours, Infinity when none has one)
   const hrs = (t: Record<string, string>) => Number((t.act_end_date ? t.target_drtn_hr_cnt : t.remain_drtn_hr_cnt) || 0);
   const flt = (t: Record<string, string>) => (t.total_float_hr_cnt === '' || t.total_float_hr_cnt == null ? Infinity : Number(t.total_float_hr_cnt));

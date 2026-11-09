@@ -233,7 +233,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const ops = [...changed.values()].map((c) => ({ op: 'update_activity', id: c.task.task_code, project: projCode.get(c.task.proj_id), ...(c.started ? { remaining_hours: c.to } : { duration_hours: c.to }), assignments_follow: true }));
   return {
-    ok: true as const, stop, ...(stop === 'CANCELLED' ? { partial: true as const, steps_done: steps.length } : {}), ...(note ? { note } : {}),
+    ok: true as const, stop, ...(stop === 'CANCELLED' ? { partial: true as const, stopped: 'cancelled' as const, steps_done: steps.length } : {}), ...(note ? { note } : {}),
     base_finish: baseFinish != null ? formatP6Date(baseFinish) : null, finish: finish != null ? formatP6Date(finish) : null,
     days_gained: baseFinish != null && finish != null ? r2(days(finish, baseFinish)) : 0,
     ...(target != null && finish != null ? { days_late: r2(Math.max(0, days(target, finish))) } : {}),

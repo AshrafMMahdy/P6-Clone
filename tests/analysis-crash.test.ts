@@ -313,3 +313,43 @@ test('MCP crash_schedule: cancelled mid-crashing it answers the steps done, appl
   }
   assert.equal((await call('crash_schedule', { handle: np.handle, target_days: 5, max_steps: 0 })).d.stop, 'CAP');
 });
+
+test('MCP crash_schedule: a cancel that lands after the last step applies nothing and answers CANCELLED; a cancelled crash job is cancelled, not done', async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal) => { const r = await callTool(name, args, undefined, signal); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'CRL', start: '2026-03-02' })).d;
+  const { ops } = chain(6);
+  assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops.slice(1) })).err, false);
+  await call('schedule', { handle: np.handle, owner_key: np.owner_key });
+  const args = { handle: np.handle, target_days: 4 };
+  // count the checkpoints (each yields with setImmediate, seen by its stack) of a run that is not applied, then cancel at the one more that comes just before the change
+  const real = globalThis.setImmediate;
+  let count = 0, abortAt = Infinity;
+  const abort = new AbortController();
+  (globalThis as any).setImmediate = (fn: any, ...rest: any[]) => { if (new Error().stack!.includes('checkpoint') && ++count >= abortAt) abort.abort(); return real(fn, ...rest); };
+  process.env.P6CLONE_COMPUTE_WORKERS = '0'; // in this process, where the checkpoints can be counted
+  try {
+    const plain = await call('crash_schedule', args);
+    assert.equal(plain.d.stop, 'SUCCESS'); assert.ok(plain.d.steps.length >= 1);
+    abortAt = count + 1; count = 0;
+    const r = await call('crash_schedule', { ...args, apply: true }, abort.signal);
+    assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+    assert.equal(r.d.stop, 'CANCELLED'); assert.equal(r.d.partial, true); assert.equal(r.d.stopped, 'cancelled');
+    assert.equal(r.d.applied, false);
+    assert.equal(r.d.steps.length, plain.d.steps.length, 'the steps done are the answer');
+    assert.match(r.d.note, /Cancelled after the last of \d+ steps?, before the changes were made/); assert.match(r.d.note, /apply was not done: a cancelled run changes nothing in the project/);
+  } finally { (globalThis as any).setImmediate = real; delete process.env.P6CLONE_COMPUTE_WORKERS; }
+  assert.equal((await call('get_activity', { handle: np.handle, activity_id: 'L0' })).d.orig_days, 10, 'the project is not changed');
+  // as a job: cancelled part-way with steps done, the job reads cancelled
+  const big = (await call('new_project', { id: 'CRJ', start: '2026-03-02' })).d;
+  assert.equal((await call('edit', { handle: big.handle, owner_key: big.owner_key, operations: chain(150).ops.slice(1) })).err, false);
+  await call('schedule', { handle: big.handle, owner_key: big.owner_key });
+  const job = (await call('crash_schedule', { handle: big.handle, target_days: 450, async: true })).d.job_id;
+  assert.ok(job);
+  let view = (await call('job_status', { job_id: job })).d;
+  for (let k = 0; k < 500 && view.status === 'running' && !/step (\d{2,}|[3-9])\b/.test(String(view.progress ?? '')); k++) { await new Promise((r) => setTimeout(r, 5)); view = (await call('job_status', { job_id: job })).d; }
+  await call('cancel_job', { job_id: job });
+  view = (await call('job_status', { job_id: job, wait_seconds: 10 })).d;
+  assert.equal(view.status, 'cancelled', JSON.stringify(view).slice(0, 300));
+  assert.equal(view.result?.stop, 'CANCELLED');
+});

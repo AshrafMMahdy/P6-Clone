@@ -267,7 +267,8 @@ test('float_paths between: a max that does not fit is refused up front, with wha
     config.budgetBytes = usedMemory() + room();
     const free = () => config.budgetBytes - usedMemory();
     const need = (max: number) => workNeed('float_paths', { between: { from: 'S', to: prev, max } }, s, free)!;
-    assert.ok(need(1001).bytes - need(1000).bytes === acts * BETWEEN_BYTES_PER_TAIL, 'the project’s activities x the bytes per kept tail, per path asked');
+    // a ladder of two ways per rung: from the third rung on, an activity has more than 1,001 paths to the end, so one more path asked is one more tail kept there
+    assert.ok(need(1001).bytes - need(1000).bytes > 0.9 * acts * BETWEEN_BYTES_PER_TAIL && need(1001).bytes - need(1000).bytes <= acts * BETWEEN_BYTES_PER_TAIL, 'about the activities x the bytes per kept tail, per path asked');
     const big = await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5000 } });
     assert.equal(big.err, true);
     assert.equal(big.d.error.code, 'memory_budget', JSON.stringify(big.d.error).slice(0, 300));
@@ -283,4 +284,50 @@ test('float_paths between: a max that does not fit is refused up front, with wha
     assert.equal(ok.d.between.paths.length, fit);
     assert.equal(ok.d.between.paths_total, (2n ** BigInt(n)).toString());
   } finally { config.budgetBytes = was; }
+});
+
+test('float_paths between: the reservation is the tails really kept (a chain with max 5,000 fits), and says so when the ends are not found', async () => {
+  const { config, sessions, usedMemory } = await import('../mcp/runtime.ts');
+  const { workNeed, BETWEEN_BYTES_PER_TAIL } = await import('../mcp/workset.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'FPC', start: '2026-03-02' })).d;
+  const n = 5000, ops: Record<string, unknown>[] = [];
+  for (let i = 0; i < n; i++) ops.push({ op: 'add_activity', id: `c${i}`, name: 'c', duration_days: 1 });
+  for (let i = 1; i < n; i++) ops.push({ op: 'add_relationship', pred: `c${i - 1}`, succ: `c${i}` });
+  assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops })).err, false);
+  await call('schedule', { handle: np.handle, owner_key: np.owner_key });
+  const s = sessions.get(np.handle)!, was = config.budgetBytes;
+  const between = { from: 'c0', to: `c${n - 1}`, max: 5000 };
+  try {
+    const own = Math.round(0.5 * s.bytes);
+    // the old formula (activities between x max x bytes per tail) needs 5,000 x 5,000 x 100 B = 2.4 GB; the chain keeps 1 tail an activity
+    assert.ok(n * 5000 * BETWEEN_BYTES_PER_TAIL > 2e9);
+    config.budgetBytes = usedMemory() + own + n * BETWEEN_BYTES_PER_TAIL + 2 * 1048576;
+    const need = workNeed('float_paths', { between }, s, () => config.budgetBytes - usedMemory())!;
+    assert.equal(need.bytes, own + n * BETWEEN_BYTES_PER_TAIL);
+    assert.match(need.what, /5,000 activities between them/);
+    const r = await call('float_paths', { handle: np.handle, between });
+    assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+    assert.equal(r.d.between.paths_total, 1);
+    // ends not found as one activity each: the project's activities bound it, and the words say so
+    const lost = workNeed('float_paths', { between: { from: 'nope', to: 'c1', max: 7 } }, s, () => Infinity)!;
+    assert.match(lost.what, /the ends were not found as one activity each: reserved for the project's 5,000 activities/);
+    assert.equal(lost.bytes, own + n * 7 * BETWEEN_BYTES_PER_TAIL);
+  } finally { config.budgetBytes = was; }
+});
+
+test('float_paths between: the reservation counts the activities between even with a baseline saved (its copies share the Activity IDs)', async () => {
+  const { sessions } = await import('../mcp/runtime.ts');
+  const { workNeed } = await import('../mcp/workset.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'FPD', start: '2026-03-02' })).d;
+  const h = { handle: np.handle, owner_key: np.owner_key };
+  assert.equal((await call('edit', { ...h, operations: [{ op: 'add_activity', id: 'F', name: 'F', duration_days: 1 }, { op: 'add_activity', id: 'T', name: 'T', duration_days: 1 }, { op: 'add_relationship', pred: 'F', succ: 'T' }] })).err, false);
+  await call('schedule', h);
+  const s = sessions.get(np.handle)!, ask = { between: { from: 'F', to: 'T' } };
+  assert.match(workNeed('float_paths', ask, s, () => Infinity)!.what, /\(2 activities between them\)/);
+  assert.equal((await call('edit', { ...h, operations: [{ op: 'save_baseline', name: 'Plan', assign_as: 'project' }] })).err, false);
+  assert.ok(s.db.tables.PROJECT.rows.some((p) => p._baseline_of));
+  assert.match(workNeed('float_paths', ask, s, () => Infinity)!.what, /\(2 activities between them\)/);
+  assert.match(workNeed('float_paths', { ...ask, project: 'FPD' }, s, () => Infinity)!.what, /\(2 activities between them\)/);
 });

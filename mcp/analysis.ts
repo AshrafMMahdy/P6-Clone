@@ -228,8 +228,14 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
     }
     case 'crash_schedule': {
       // (an LOB plan's activities are locked: crashOptionsOf, as the Crashing panel calls it)
-      const r = await crashSchedule(s.db, projIds, { ...crashOptionsOf(s.db, a, s.hpd), maxSteps: countArg(a.max_steps, 'max_steps'), tick: h.tick });
-      if (!r.ok) return fail(r.error.code, r.error.message, r.error.code === 'bad_input' ? 'e.g. {"target_days": 10} or {"target_finish": "2026-12-31"}' : 'Fix the schedule errors first (schedule shows them).');
+      const run = await crashSchedule(s.db, projIds, { ...crashOptionsOf(s.db, a, s.hpd), maxSteps: countArg(a.max_steps, 'max_steps'), tick: h.tick });
+      if (!run.ok) return fail(run.error.code, run.error.message, run.error.code === 'bad_input' ? 'e.g. {"target_days": 10} or {"target_finish": "2026-12-31"}' : 'Fix the schedule errors first (schedule shows them).');
+      let r = run;
+      // one checkpoint just before the change is made: a cancel that came after the last step still cancels the call, and a cancelled call never changes the project
+      if (a.apply && r.stop !== 'CANCELLED' && r.ops.length) {
+        try { await h.tick(r.steps.length, 0, `${r.steps.length} steps done; making the changes`); }
+        catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; r = { ...r, stop: 'CANCELLED', partial: true, stopped: 'cancelled', steps_done: r.steps.length, note: `${'note' in r && r.note ? r.note + ' ' : ''}Cancelled after the last of ${r.steps.length} step${r.steps.length === 1 ? '' : 's'}, before the changes were made: the steps, changes and edit operations are those of the whole run.` }; }
+      }
       // a run that was cancelled changes nothing, apply or not: its steps are the answer, with the edit operations to apply by edit
       const cancelled = r.stop === 'CANCELLED', apply = !!a.apply && !cancelled;
       if (apply && r.ops.length) h.apply('Crash schedule', (d) => { const x = applyOps(d, r.ops, { hoursPerDay: s.hpd, calendarDays: true }); if (!x.ok) fail('bad_input', x.error!.message, ''); reschedule(d, projIds); });
