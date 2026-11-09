@@ -84,10 +84,10 @@ function relativeToCwd(s: string): string {
   return resolve(s);
 }
 /** A count argument (iterations, top, buckets, max_ids, max_changes, max_steps, between.max...): absent (null or undefined) is
- *  undefined, for the caller's documented default; anything else must be a whole number from `min` (0, or 1 for an argument that has
- *  no "0 = all") up to 2^53 - 1 (the largest a number holds exactly), or it is refused as bad_input naming the argument. NaN, a string,
+ *  undefined, for the caller's documented default; anything else must be a whole number from `min` (0; 1 for an argument that has
+ *  no "0 = all"; the tool's own least, as monte_carlo's 10 iterations) up to 2^53 - 1 (the largest a number holds exactly), or it is refused as bad_input naming the argument. NaN, a string,
  *  a negative, a fraction and Infinity are never turned into a default or into "all". */
-export function countArg(v: unknown, what: string, o: { min?: 0 | 1; hint?: string } = {}): number | undefined {
+export function countArg(v: unknown, what: string, o: { min?: number; hint?: string } = {}): number | undefined {
   if (v == null) return undefined;
   const min = o.min ?? 0;
   if (typeof v === 'number' && Number.isSafeInteger(v) && v >= min) return v;

@@ -6,6 +6,7 @@
 // project's own estimate (Session.bytes), plus per activity and iteration where it has those. Garbage between
 // collections is not reserved: the budget stays at least 512 MB under the heap limit (effectiveBudget) for it.
 import { countArg, fail, type Session } from './runtime.ts';
+import { activitiesBetween } from '../core/schedule/floatPaths.ts';
 
 export interface WorkNeed { bytes: number; what: string; hint: string }
 interface Work { per: number; fixed?: number; label: string; hint: string }
@@ -68,9 +69,9 @@ export function between(b: unknown): number {
  *  (default 20, at least 5). A value that is not a whole number of 0 or more is refused as bad_input, named, before anything runs; the
  *  one parser for the tool and for its memory reservation. */
 export function monteCarloCounts(a: Record<string, any>): { iterations: number; top: number; buckets: number } {
-  const iterations = Math.max(10, countArg(a.iterations, 'iterations') ?? 1000);
+  const iterations = countArg(a.iterations, 'iterations', { min: 10 }) ?? 1000;
   const top = countArg(a.top, 'top') ?? 25;
-  const buckets = Math.max(5, countArg(a.buckets, 'buckets') ?? 20);
+  const buckets = countArg(a.buckets, 'buckets', { min: 5 }) ?? 20;
   return { iterations, top: top === 0 ? Infinity : top, buckets };
 }
 
@@ -125,12 +126,14 @@ export function workNeed(tool: string, a: Record<string, any>, s: Session, free:
     hint = ways.length ? `run ${ways.join(' or ')}, which fit in the ${mbs(room)} free now` : 'run it on fewer activities (a narrower project)';
   }
   if (tool === 'float_paths' && a.between != null) {
-    // the longest `max` paths between two activities: every activity keeps its best `max` tails (BETWEEN_BYTES_PER_TAIL each); at most
-    // the project's activities are between, so the project's activities x max bounds it. A bad max is refused here as in the tool.
+    // the longest `max` paths between two activities: every activity between them keeps its best `max` tails (BETWEEN_BYTES_PER_TAIL
+    // each). The activities between are counted here (two searches over the links); where that cannot be told before the call (an end
+    // that is not one activity: the call answers that), the project's activities bound it. A bad max is refused here as in the tool.
     const max = between(a.between);
-    bytes += n * max * BETWEEN_BYTES_PER_TAIL;
-    what = `float_paths between ${n.toLocaleString('en-US')} activities × the ${max.toLocaleString('en-US')} longest paths`;
-    const fit = Math.floor(Math.max(0, free() - w.per * s.bytes) / Math.max(1, n * BETWEEN_BYTES_PER_TAIL));
+    const k = activitiesBetween(s.db, null, a.between) ?? n;
+    bytes += k * max * BETWEEN_BYTES_PER_TAIL;
+    what = `float_paths between two activities (${k.toLocaleString('en-US')} activities between them) × the ${max.toLocaleString('en-US')} longest paths`;
+    const fit = Math.floor(Math.max(0, free() - w.per * s.bytes) / Math.max(1, k * BETWEEN_BYTES_PER_TAIL));
     hint = fit >= 1 ? `ask for at most ${fit.toLocaleString('en-US')} paths (between.max), which fit in the ${mbs(Math.max(0, free()))} free now; paths_total says how many there are` : 'pass project to one project, or close other projects first';
   }
   return { bytes: Math.round(bytes), what, hint };

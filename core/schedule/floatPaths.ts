@@ -163,11 +163,16 @@ export const BETWEEN_NEEDS = 'between needs from and to Activity IDs of this pro
  *  {error} naming the activities of one loop when the logic between from and to has a loop (the longest path is not defined through a loop).
  *  The float_paths tool and the desktop app's Float paths panel both call it. */
 export interface PathsBetween { from: string; to: string; paths: { activities: string[]; duration_days: number; min_float_days: number | null }[]; paths_total: number | string; truncated: boolean }
-export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string; max?: number }, hpd: number): PathsBetween | { error: string } | null {
-  const T = (db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id));
+/** The logic between two activities, for pathsBetween and for the memory it is given beforehand: the activities of these projects (all
+ *  of the database's when projIds is null), the two ends, the links (two relationships between the same pair: one step), `reach` (what can
+ *  reach "to") and `seen` (what "from" reaches without passing "to"). null when an end is not one activity of them (not there, or, with
+ *  projIds null, an Activity ID two projects share). */
+function spanBetween(db: Db, projIds: string[] | null, b: { from?: unknown; to?: unknown }) {
+  const T = (db.tables.TASK?.rows ?? []).filter((t) => !projIds || projIds.includes(t.proj_id));
   const byCode = new Map(T.map((t) => [t.task_code, t])), byId = new Map(T.map((t) => [t.task_id, t]));
   const from = byCode.get(String(b.from ?? '')), to = byCode.get(String(b.to ?? ''));
   if (!from || !to) return null;
+  if (!projIds && T.some((t) => (t.task_code === from.task_code && t !== from) || (t.task_code === to.task_code && t !== to))) return null;
   const succ = new Map<string, Set<string>>(), pred = new Map<string, string[]>();
   for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) {
     const l = succ.get(r.pred_task_id); if (l) l.add(r.task_id); else succ.set(r.pred_task_id, new Set([r.task_id]));
@@ -180,6 +185,21 @@ export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?:
   // the activities between: reachable from "from" without passing "to", and able to reach "to"
   const seen = new Set<string>([from.task_id]);
   for (const stack = [from.task_id]; stack.length;) { const id = stack.pop()!; if (id === to.task_id) continue; for (const n of succ.get(id) ?? []) if (!seen.has(n)) { seen.add(n); stack.push(n); } }
+  return { byId, from, to, succ, reach, seen };
+}
+/** How many activities lie between the two (each keeps its best `max` tails in pathsBetween: what the call's memory is reserved from);
+ *  null when it cannot be told before the call (an end that is not one activity: the call itself answers that). */
+export function activitiesBetween(db: Db, projIds: string[] | null, b: { from?: unknown; to?: unknown }): number | null {
+  const sp = spanBetween(db, projIds, b);
+  if (!sp) return null;
+  let n = 0;
+  for (const id of sp.seen) if (sp.reach.has(id)) n++;
+  return n;
+}
+export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string; max?: number }, hpd: number): PathsBetween | { error: string } | null {
+  const sp = spanBetween(db, projIds, b);
+  if (!sp) return null;
+  const { byId, from, to, succ, reach, seen } = sp;
   const next = (id: string) => (id === to.task_id ? [] : [...(succ.get(id) ?? [])].filter((n) => seen.has(n) && reach.has(n)));
   const max = Math.max(1, Number(b.max) || 25);
   const empty = (): PathsBetween => ({ from: from.task_code, to: to.task_code, paths: [], paths_total: 0, truncated: false });

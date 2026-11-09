@@ -339,7 +339,10 @@ test('monte_carlo has no bound on top, buckets or iterations: top 0 = all, top 5
   assert.equal(three.criticality.length, 3);
   const hist = (await call('monte_carlo', { ...a, buckets: 250 })).d;
   assert.equal(hist.histogram.length, 250, 'buckets above 100 are honoured');
-  assert.equal((await call('monte_carlo', { ...a, buckets: 2 })).d.histogram.length, 5, 'the lower bound stays');
+  const low = await call('monte_carlo', { ...a, buckets: 2 });
+  assert.equal(low.d.error?.code, 'bad_input', 'fewer than the least is refused, never raised silently');
+  assert.match(low.d.error.message, /buckets must be a whole number of 5 or more/);
+  assert.equal((await call('monte_carlo', { ...a, iterations: 3 })).d.error?.code, 'bad_input');
   const many = (await call('monte_carlo', { ...h, iterations: 20100, seed: 3, default_estimates: est })).d;
   assert.equal(many.iterations, 20100, 'iterations above 20,000 all run');
   assert.equal(many.partial, undefined);
