@@ -5,6 +5,12 @@ import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { crashSchedule } from '../core/analysis/crash.ts';
 import { evaluateBatch } from '../core/analysis/batch.ts';
+import { tmpdir } from 'node:os';
+import { setRoots } from '../mcp/runtime.ts';
+import { sampleCopy } from './helpers.ts';
+
+// kept runs (4L-13) go to the write root: the test's temp folder, never the folder the tests run in
+setRoots(null, tmpdir());
 
 // Paths S-A-B-F = 16 d, S-A-D-F = 14 d, S-C-F = 10 d. Crashing A shortens both A paths; B only the first.
 function net(): { db: Db; pid: string } {
@@ -91,7 +97,7 @@ test('MCP evaluate_batch and crash_schedule (apply is one undoable change)', asy
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const { join } = await import('node:path');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const o = await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'cairo alex-road.xer') });
+  const o = await call('open_file', { path: sampleCopy('cairo alex-road.xer') });
   assert.equal(o.err, false, JSON.stringify(o.d));
   const h = o.d.handle;
   const { readFileSync } = await import('node:fs');
