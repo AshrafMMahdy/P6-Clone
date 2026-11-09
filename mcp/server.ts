@@ -113,7 +113,10 @@ const TOOLS = [
   ...ANALYSIS_TOOLS(withHandle),
   ...FOURD_TOOLS(withHandle),
   ...LOB_TOOLS(withHandle),
-  ...LOOKUPS.map((t) => ({ name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
+  // (earned_value is one of the analyses: it exports as they do)
+  ...LOOKUPS.map((t) => (t.name === 'earned_value'
+    ? { name: t.name, annotations: ro, description: t.description + exportDoc('earned_value', ['totals (each project)', 'by_wbs', 'activities (every activity with cost, every figure)', 'worst_cost_performance', 'worst_schedule_performance']), inputSchema: withHandle({ ...t.parameters, properties: { ...(t.parameters.properties as object), export: exportProp } }) }
+    : { name: t.name, annotations: ro, description: t.description, inputSchema: withHandle(t.parameters) })),
   { name: 'undo', annotations: edit, description: 'Undo your own last change on this project (edit, schedule, progress update, leveling, import). Refused only if someone else\'s later change touched the same items. any_caller: true (with owner_key) undoes the latest change whoever made it.', inputSchema: withHandle({ type: 'object', properties: { any_caller: { type: 'boolean' } } }, true) },
   { name: 'redo', annotations: edit, description: 'Re-apply your last undone change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'save', annotations: writes, description: 'Write the project (needs owner_key): XER (P6 version 5.0-24.12; default the version it was read in; a project with none (new, or read from a non-P6 file) is stamped 7.0 so every P6 since 7 imports it (P6 refuses a file stamped newer than itself, silently). Tell the user: P6 8 and later treat a few things differently (actual dates; a finish pushed into non-work time), so after F9 in a newer P6 a few dates may move slightly), P6 XML (.xml), Microsoft Project XML (format: mspdi) or MPX (.mpx). A Microsoft Project file holds one project: when the file has several, mspdi and mpx need project. repair: true (after a lenient open P6 would still reject) writes a repaired copy P6 imports to a new path (never over the file opened): impossible values taken from the activity\'s own other fields (else P6\'s neutral value), only actual dates P6 refuses cleared (unreadable, before 1753, a finish before its start; never invented), actual dates P6 imports kept and listed in invalid_dates (after the data date, a finish without a start), rows that cannot be identified removed with what pointed at them; the answer lists every change (table, row, key, field, old, new, reason) and check says whether the copy, opened again, would still be rejected. XER and MPX: encoding defaults to the file\'s own (the encoding it was read in, BOM as read; a new project: the code page P6 would use). A changed project is not written when this session\'s changes left it holding what P6 would reject on import (an Activity ID used twice in a project, a Resource / Project ID used twice, a row that is its own ancestor, an activity linked to itself): the save is refused, naming them (allow_invalid: true writes it anyway). What the file already had when it was opened is never a refusal: it is saved as it was and listed in the answer (p6_would_reject). Paths are inside the storage root.', inputSchema: withHandle({ type: 'object', properties: { allow_invalid: { type: 'boolean', description: 'Write even when the changes made in this session added something P6 rejects on import (an Activity ID used twice, a parent cycle, an activity linked to itself); default false: the save is refused and names them' }, path: { type: 'string', description: 'Default: the file it was opened from (requires overwrite: true)' }, project: { type: 'string', description: 'Project ID to write (default: all projects; required for mspdi and mpx when the file holds several)' }, format: { type: 'string', description: 'xer, p6xml, mspdi or mpx (default from the extension; .xml = P6 XML)' }, version: { type: 'string' }, repair: { type: 'boolean', description: 'write a repaired copy P6 imports (a new path)' }, encoding: { type: 'string', description: 'XER/MPX text encoding; encoding defaults to the file\'s own (the one it was read in, BOM as read) while the text fits it; else, and for a new project, the code page P6 would use, e.g. windows-1256 for Arabic' }, overwrite: { type: 'boolean' } } }, true) },
@@ -833,8 +836,20 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   const lobbed = await runLob(name, a, s, helpers);
   if (lobbed !== undefined) { regrow(s); return lobbed; }
   if (LOOKUPS.some((t) => t.name === name)) {
-    const { handle: _h, caller: _c, async: _a, ...args } = a;
-    return runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
+    const { handle: _h, caller: _c, async: _a, export: _x, ...args } = a;
+    const answer = runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
+    if (name !== 'earned_value' || a.export == null || (answer as { error?: unknown }).error) return answer;
+    // the export: every activity (the answer lists the `worst` few of each kind), each with every figure
+    type Ev = { projects: { project: string; data_date: string; totals: object; by_wbs: object[] }[]; worst_cost_performance: object[]; worst_schedule_performance: object[]; activities: object[] };
+    const full = runTool(name, { ...args, worst: 0, every_activity: true }, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true) as Ev;
+    const EV = ['bac', 'pv', 'ev', 'ac', 'sv', 'cv', 'spi', 'cpi', 'etc', 'eac', 'vac', 'schedule_pct', 'performance_pct'];
+    return { ...(answer as object), exported: exportResult('earned_value', a.export, full, [
+      { name: 'totals', columns: ['project', 'data_date', 'has_baseline', ...EV], rows: full.projects.map((p) => ({ project: p.project, data_date: p.data_date, has_baseline: (p as { has_baseline?: boolean }).has_baseline, ...p.totals })) },
+      { name: 'by_wbs', columns: ['project', 'wbs', 'name', ...EV], rows: full.projects.flatMap((p) => p.by_wbs.map((w) => ({ project: p.project, ...w }))) },
+      { name: 'activities', columns: ['project', 'id', 'name', 'wbs', ...EV], rows: full.activities },
+      { name: 'worst_cost_performance', columns: ['id', 'name', 'cpi', 'cv'], rows: full.worst_cost_performance },
+      { name: 'worst_schedule_performance', columns: ['id', 'name', 'spi', 'sv'], rows: full.worst_schedule_performance },
+    ], writeOutWith) };
   }
   return fail('unknown_tool', `Unknown tool ${name}.`, 'tools/list shows the tools.');
 }

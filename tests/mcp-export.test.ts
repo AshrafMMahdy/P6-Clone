@@ -417,3 +417,27 @@ test('CSV cells: text Excel would run as a formula starts with \', a lone CR is 
   assert.ok(csv.checks.every((c) => !('examples' in c)));
   await call('close', { ...H, discard: true });
 });
+
+test('earned_value exports every activity and figure (the answer lists the worst few, with totals); windows_analysis names the last state current_name', async () => {
+  const h = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+  const ev = await call('earned_value', { handle: h, worst: 2, export: folder() });
+  assert.equal(ev.err, false, JSON.stringify(ev.d).slice(0, 300));
+  assert.ok(ev.d.worst_cost_performance.length <= 2 && ev.d.worst_schedule_performance.length <= 2);
+  const { json, csv } = files(ev.d, 'earned_value');
+  assert.equal(csv.worst_schedule_performance.length, ev.d.worst_schedule_performance_total);
+  assert.equal(csv.worst_cost_performance.length, ev.d.worst_cost_performance_total);
+  assert.ok(csv.activities.length >= csv.worst_schedule_performance.length && csv.activities.length > 2, String(csv.activities.length));
+  assert.equal(csv.totals.length, json.projects.length);
+  assert.equal(csv.by_wbs.length, json.projects.reduce((n: number, p: any) => n + p.by_wbs.length, 0));
+  assert.deepEqual(plain(ev.d), plain((await call('earned_value', { handle: h, worst: 2 })).d));
+  await call('close', { handle: h, discard: true });
+  // windows_analysis: the handle's state named as the platform names it
+  const w = await chain('WNAME', 4);
+  await call('edit', { ...w, operations: [{ op: 'save_baseline', name: 'Plan', assign_as: 'project' }] });
+  const r = (await call('windows_analysis', { handle: w.handle, updates: [{ baseline: 'project' }], current_name: 'Update 3 (2026-03-09)', export: folder() })).d;
+  assert.equal(r.updates.at(-1).name, 'Update 3 (2026-03-09)');
+  assert.equal(r.windows.at(-1).to, 'Update 3 (2026-03-09)');
+  assert.equal(files(r, 'windows_analysis').csv.windows.at(-1)!.to, 'Update 3 (2026-03-09)');
+  assert.equal((await call('windows_analysis', { handle: w.handle, updates: [{ baseline: 'project' }] })).d.updates.at(-1).name, 'current');
+  await call('close', { ...w, discard: true });
+});
