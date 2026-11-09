@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { getDb, getUi, mutate, toast, useStore } from '../store.ts';
 import { rows, type Db } from '../../core/db.ts';
 import { applyOps } from '../../core/project/ops.ts';
-import { crashSchedule, type CrashActivity } from '../../core/analysis/crash.ts';
+import { crashOptionsOf, crashSchedule, type CrashActivity } from '../../core/analysis/crash.ts';
 import { evaluateBatch, type Scenario } from '../../core/analysis/batch.ts';
 import { optimizeSchedule } from '../../core/analysis/hrm.ts';
 import { levelResources } from '../../core/level/level.ts';
@@ -49,13 +49,13 @@ export function CrashPanel() {
   // the remaining critical activities are where crash data matters
   const crit = useMemo(() => rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) <= 0).slice(0, 300), [db, ui.openProjects]);
   const crashData = (): CrashActivity[] => Object.entries(data).filter(([, v]) => v.min !== '' || v.cost !== '').map(([id, v]) => ({ id, min_days: Number(v.min) || 0, cost_per_day: Number(v.cost) || 0 }));
-  const run = async () => {
+  /** crash_schedule's arguments from the panel's settings (Export runs the tool with them) */
+  const toolArgs = () => {
     const acts = crashData();
-    setRes(await crashSchedule(getDb(), ui.openProjects, {
-      targetDays: mode === 'days' ? Number(days) : undefined, targetFinish: mode === 'date' ? date.replace('T', ' ') : undefined,
-      indirectPerDay: Number(indirect) || undefined, ldPerDay: Number(ld) || undefined, activities: acts.length ? acts : undefined, defaultMaxPct: Number(pct) || 30, hoursPerDay: ui.prefs.hoursPerDay,
-    }));
+    return { ...(mode === 'days' ? { target_days: Number(days) } : {}), ...(mode === 'date' ? { target_finish: date.replace('T', ' ') } : {}), ...(Number(indirect) ? { indirect_cost_per_day: Number(indirect) } : {}), ...(Number(ld) ? { ld_per_day: Number(ld) } : {}), ...(acts.length ? { activities: acts } : {}), default_max_pct: Number(pct) || 30 };
   };
+  // the engine called with those arguments as the tool calls it (LOB activities locked), so the screen is what the Export writes
+  const run = async () => setRes(await crashSchedule(getDb(), ui.openProjects, crashOptionsOf(getDb(), toolArgs(), ui.prefs.hoursPerDay)));
   const apply = () => { if (res?.ok && res.ops.length && applyAndSchedule('Crash schedule', res.ops)) { toast(`Crashed ${res.ops.length} activities; Ctrl+Z undoes.`); setRes(null); } };
   const set = (id: string, k: 'min' | 'cost', v: string) => setData({ ...data, [id]: { min: data[id]?.min ?? '', cost: data[id]?.cost ?? '', [k]: v } });
   return (
@@ -69,10 +69,7 @@ export function CrashPanel() {
         <label title="Used when no crash data is entered below">Default max cut <input style={{ width: 36 }} value={pct} onChange={(e) => setPct(e.target.value)} />%</label>
         <button className="btn primary" onClick={run}>Crash</button>
         {res?.ok && res.ops.length > 0 && <button className="btn" onClick={apply}>Apply</button>}
-        <ExportButton tool="crash_schedule" args={() => {
-          const acts = crashData();
-          return { ...projectArgs(), ...(mode === 'days' ? { target_days: Number(days) } : {}), ...(mode === 'date' ? { target_finish: date.replace('T', ' ') } : {}), ...(Number(indirect) ? { indirect_cost_per_day: Number(indirect) } : {}), ...(Number(ld) ? { ld_per_day: Number(ld) } : {}), ...(acts.length ? { activities: acts } : {}), default_max_pct: Number(pct) || 30 };
-        }} />
+        <ExportButton tool="crash_schedule" args={() => ({ ...projectArgs(), ...toolArgs() })} />
       </div>
       <div style={{ display: 'flex', gap: 8, flex: 1, minHeight: 0 }}>
         <div style={{ width: 380, overflow: 'auto' }}>
@@ -117,7 +114,8 @@ export function WhatIfPanel() {
   const run = async () => {
     let sc: Scenario[];
     try { sc = scenarios(); } catch (e) { return toast((e as Error).message); }
-    setRes(await evaluateBatch(getDb(), ui.openProjects, sc, { hoursPerDay: ui.prefs.hoursPerDay, calendarDays: false }));
+    // as the evaluate_batch tool calls the engine (days on each activity's calendar), so the screen is what the Export writes
+    setRes(await evaluateBatch(getDb(), ui.openProjects, sc, { hoursPerDay: ui.prefs.hoursPerDay }));
   };
   return (
     <div style={box}>

@@ -8,7 +8,7 @@ import { applyOps } from '../../core/project/ops.ts';
 import { scheduleProjects } from '../../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../../core/resource/assign.ts';
 import { baselineOf } from '../../core/analysis/common.ts';
-import { timeImpact, windowsAnalysis } from '../../core/analysis/delay.ts';
+import { tiaBaseline, timeImpact, windowsAnalysis } from '../../core/analysis/delay.ts';
 import { goToActivity } from './AnalysisResults.tsx';
 import { ExportButton } from './ExportButton.tsx';
 
@@ -97,21 +97,21 @@ export function TiaPanel() {
     if (!cur) throw new Error('Open a project first.');
     return { project: cur.proj_short_name, fragnet: ops(), ...(dd ? { data_date: dd.replace('T', ' ') } : {}), ...(milestone.trim() ? { milestone: milestone.trim() } : {}), ...(bl ? { baseline: bl } : {}) };
   };
+  // the engine called with the tool's arguments (those Export gives) as the tia tool calls it, so the screen is what the Export writes
   const run = () => {
     if (!cur) return;
-    const b = bl ? baselineOf(getDb(), cur, bl as 'project') : null;
-    if (bl && !b) return toast(`The project has no ${bl} baseline.`);
-    let bf: number | null = null;
-    if (b) for (const t of b.tasks.values()) { if (milestone && t.task_code !== milestone) continue; const v = parseP6Date(t.act_end_date || t.early_end_date || t.target_end_date); if (v != null && (bf == null || v > bf)) bf = v; }
-    const d = dd ? parseP6Date(dd.replace('T', ' ')) : undefined;
-    setRes(timeImpact(getDb(), [cur.proj_id], ops(), { dataDate: d ?? undefined, milestone: milestone.trim() || undefined, hoursPerDay: ui.prefs.hoursPerDay, calendarDays: false, baseline: b ? { name: b.name, finish: bf } : undefined }));
+    const a = fragnet();
+    const b = a.baseline ? baselineOf(getDb(), cur, a.baseline as 'project') : null;
+    if (a.baseline && !b) return toast(`The project has no ${a.baseline} baseline.`);
+    const d = a.data_date ? parseP6Date(a.data_date) : undefined;
+    setRes(timeImpact(getDb(), [cur.proj_id], a.fragnet, { dataDate: d ?? undefined, milestone: a.milestone, hoursPerDay: ui.prefs.hoursPerDay, baseline: b ? tiaBaseline(b, a.milestone, parseP6Date) : undefined }));
   };
   const keep = () => {
     if (!cur) return;
     let id = `${cur.proj_short_name}-TIA`;
     for (let k = 2; rows(getDb(), 'PROJECT').some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase()); k++) id = `${cur.proj_short_name}-TIA${k}`;
     let err = '';
-    try { mutate(`TIA ${id}`, (d) => { const x = applyOps(d, [{ op: 'copy_project', from: cur.proj_short_name, id, keep_progress: true }, ...ops().map((o) => ({ ...o, project: id }))], { hoursPerDay: ui.prefs.hoursPerDay }); if (!x.ok) { err = x.error!.message; throw new Error(err); } const p = rows(d, 'PROJECT').find((q) => q.proj_short_name === id)!; const s = scheduleProjects(d, [p.proj_id], dd ? { dataDate: parseP6Date(dd.replace('T', ' ')) ?? undefined } : {}); if (!s.ok) { err = 'the impacted copy cannot be scheduled'; throw new Error(err); } syncAssignmentDates(d); }); } catch { /* reported */ }
+    try { mutate(`TIA ${id}`, (d) => { const x = applyOps(d, [{ op: 'copy_project', from: cur.proj_short_name, id, keep_progress: true }, ...ops().map((o) => ({ ...o, project: id }))], { hoursPerDay: ui.prefs.hoursPerDay, calendarDays: true }); if (!x.ok) { err = x.error!.message; throw new Error(err); } const p = rows(d, 'PROJECT').find((q) => q.proj_short_name === id)!; const s = scheduleProjects(d, [p.proj_id], dd ? { dataDate: parseP6Date(dd.replace('T', ' ')) ?? undefined } : {}); if (!s.ok) { err = 'the impacted copy cannot be scheduled'; throw new Error(err); } syncAssignmentDates(d); }); } catch { /* reported */ }
     toast(err ? `Not kept: ${err}` : `Impacted schedule kept as project ${id} (Ctrl+Z undoes).`);
   };
   const setA = (i: number, k: keyof FragAct, v: string) => setActs(acts.map((a, j) => (j === i ? { ...a, [k]: v } : a)));

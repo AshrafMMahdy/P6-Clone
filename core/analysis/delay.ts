@@ -148,6 +148,16 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
 const fmt = (v: number | null | undefined) => (v != null ? formatP6Date(v) : null);
 
 /** Time impact analysis on a copy: unimpacted and impacted schedules at the same data date. */
+/** The baseline a TIA's impact is compared with (tia's baseline): its latest finish (each activity's actual finish, else early, else
+ *  planned), or the milestone's when one is named (null when the baseline has no such activity); `date` reads a stored date. The tia
+ *  tool and the desktop app's TIA panel both work it out here. */
+export function tiaBaseline(bl: { name: string; tasks: Map<string, Row>; how: string }, milestone: string | undefined, date: (v: string) => number | null): { name: string; finish: number | null; how: string } {
+  let f: number | null = null;
+  for (const t of bl.tasks.values()) { const v = date(t.act_end_date || t.early_end_date || t.target_end_date); if (v != null && (f == null || v > f)) f = v; }
+  if (milestone) { const m = bl.tasks.get(milestone); f = m ? date(m.act_end_date || m.early_end_date || m.target_end_date) : null; }
+  return { name: bl.name, finish: f, how: bl.how };
+}
+
 export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { dataDate?: number; milestone?: string; hoursPerDay?: number; calendarDays?: boolean; baseline?: { name: string; finish: number | null; how?: string } } = {}) {
   const p0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');

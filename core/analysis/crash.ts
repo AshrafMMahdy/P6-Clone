@@ -13,6 +13,7 @@ import { calendarResolver, scheduleProjects } from '../schedule/cpm.ts';
 import { fitAssignmentsToDuration } from '../resource/assign.ts';
 import { drivingFloat } from './delay.ts';
 import { isLoe, isMilestone, isWbs, type Tick } from './common.ts';
+import { lobActivityCodes } from '../lob/view.ts';
 
 class ScheduleFailed extends Error {}
 
@@ -23,6 +24,12 @@ export interface CrashOptions {
   /** without an activities list every remaining critical activity may lose up to this share of its remaining duration, at an equal cost of 1 per day */
   defaultMaxPct?: number;
   indirectPerDay?: number; ldPerDay?: number; locked?: string[]; maxSteps?: number; hoursPerDay?: number; tick?: Tick;
+}
+/** crash_schedule's arguments as crashSchedule's options. The tool and the desktop app's Crashing panel both call the engine through
+ *  this, so the panel shows what the tool (and its Export) gives. An LOB plan's activities are always locked: they are crashed through
+ *  the plan (lob_edit set_crew / set_duration), never directly. */
+export function crashOptionsOf(db: Db, a: Record<string, any>, hoursPerDay: number): CrashOptions {
+  return { targetFinish: a.target_finish, targetDays: a.target_days != null ? Number(a.target_days) : undefined, activities: a.activities, defaultMaxPct: a.default_max_pct != null ? Number(a.default_max_pct) : undefined, indirectPerDay: a.indirect_cost_per_day != null ? Number(a.indirect_cost_per_day) : undefined, ldPerDay: a.ld_per_day != null ? Number(a.ld_per_day) : undefined, locked: [...(Array.isArray(a.locked) ? a.locked : []), ...lobActivityCodes(db)], maxSteps: a.max_steps != null ? Number(a.max_steps) : undefined, hoursPerDay };
 }
 export type CrashStop = 'SUCCESS' | 'PLATEAU' | 'EXHAUSTED' | 'CAP' | 'ALREADY_MET';
 export interface CrashStep { step: number; activities: { id: string; days: number; cost: number }[]; days_gained: number; cost: number; finish: string | null; cumulative_direct_cost: number; total_cost: number }

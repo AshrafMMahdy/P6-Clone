@@ -10,7 +10,7 @@ import { analysisReportHtml } from '../core/analysis/report.ts';
 import { cutLintCheck, DEFAULT_LINT_THRESHOLDS, lintSchedule, LINT_CHECKS, resolveLintThresholds } from '../core/analysis/lint.ts';
 import { evaluateBatch, type RowStore } from '../core/analysis/batch.ts';
 import { claimHere, keptPlace, keepWords, ScenarioFile, type Claim } from './keptRuns.ts';
-import { crashSchedule } from '../core/analysis/crash.ts';
+import { crashOptionsOf, crashSchedule } from '../core/analysis/crash.ts';
 import { optimizeSchedule } from '../core/analysis/hrm.ts';
 import { nodeInfer, ReasonerUnavailable } from '../core/analysis/hrmRuntime.ts';
 import { levelResources } from '../core/level/level.ts';
@@ -19,9 +19,8 @@ import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { nowStamp } from '../core/report/reports.ts';
 import { formatP6Date } from '../core/dates.ts';
-import { lobActivityCodes } from '../core/lob/view.ts';
 import { estimateBytes, fail, getSession, pathArg, reserveMemory, type Session } from './runtime.ts';
-import { cutWindow, timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
+import { cutWindow, tiaBaseline, timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
 import { exportAfterChange, exportDoc, exportProp, exportResult, firstOf, type Table } from './export.ts';
 import type { CheckResult } from '../core/analysis/common.ts';
 import { baselineOf, type Tick } from '../core/analysis/common.ts';
@@ -220,8 +219,8 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       return files ? { ...answer, exported: files } : answer;
     }
     case 'crash_schedule': {
-      // an LOB plan's activities are crashed through the plan (lob_edit set_crew / set_duration), never directly
-      const r = await crashSchedule(s.db, projIds, { targetFinish: a.target_finish, targetDays: a.target_days != null ? Number(a.target_days) : undefined, activities: a.activities, defaultMaxPct: a.default_max_pct != null ? Number(a.default_max_pct) : undefined, indirectPerDay: a.indirect_cost_per_day != null ? Number(a.indirect_cost_per_day) : undefined, ldPerDay: a.ld_per_day != null ? Number(a.ld_per_day) : undefined, locked: [...(Array.isArray(a.locked) ? a.locked : []), ...lobActivityCodes(s.db)], maxSteps: a.max_steps != null ? Number(a.max_steps) : undefined, hoursPerDay: s.hpd, tick: h.tick });
+      // (an LOB plan's activities are locked: crashOptionsOf, as the Crashing panel calls it)
+      const r = await crashSchedule(s.db, projIds, { ...crashOptionsOf(s.db, a, s.hpd), tick: h.tick });
       if (!r.ok) return fail(r.error.code, r.error.message, r.error.code === 'bad_input' ? 'e.g. {"target_days": 10} or {"target_finish": "2026-12-31"}' : 'Fix the schedule errors first (schedule shows them).');
       if (a.apply && r.ops.length) h.apply('Crash schedule', (d) => { const x = applyOps(d, r.ops, { hoursPerDay: s.hpd, calendarDays: true }); if (!x.ok) fail('bad_input', x.error!.message, ''); reschedule(d, projIds); });
       const answer = { ...r, ...(a.apply ? { applied: r.ops.length > 0 } : {}) };
@@ -299,10 +298,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       let baseline: { name: string; finish: number | null; how: string } | undefined;
       if (a.baseline) {
         const bl = baselineOf(s.db, cur, String(a.baseline) as 'project') ?? fail('bad_input', `The project has no ${a.baseline} baseline in this file.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(s.db, [cur.proj_id]).join(', ') || 'none saved'}.`);
-        let f: number | null = null;
-        for (const t of bl.tasks.values()) { const v = h.dd(t.act_end_date || t.early_end_date || t.target_end_date); if (v != null && (f == null || v > f)) f = v; }
-        if (a.milestone) { const m = bl.tasks.get(a.milestone); f = m ? h.dd(m.act_end_date || m.early_end_date || m.target_end_date) : null; }
-        baseline = { name: bl.name, finish: f, how: bl.how };
+        baseline = tiaBaseline(bl, a.milestone, h.dd); // (as the TIA panel works it out)
       }
       const dd = a.data_date != null ? h.dd(a.data_date) ?? fail('bad_input', 'data_date is not a date.', 'YYYY-MM-DD') : undefined;
       const r = timeImpact(s.db, [projIds[0]], a.fragnet, { dataDate: dd, milestone: a.milestone, hoursPerDay: s.hpd, baseline });
