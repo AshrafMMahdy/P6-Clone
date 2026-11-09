@@ -131,10 +131,18 @@ await exportFiles('progress_curves', 'Progress curves', ['progress_curves-period
 await panel('Resource histogram'); await win.click('button:has-text("Show histogram")'); await win.waitForSelector('th:has-text("Over-alloc. periods")');
 ok(await win.locator('tbody tr').count() >= 1, 'Resource histogram: runs and lists the resources'); await shot('resource-histogram.png');
 await exportFiles('resource_histogram', 'Resource histogram', ['resource_histogram-resources.csv', 'resource_histogram-periods.csv']);
-await panel('Level resources'); await win.click('button:has-text("Level (report)")'); await win.waitForSelector('[data-card="Activities delayed"]');
-ok(true, 'Level resources: runs on a copy and reports'); await shot('level-resources.png');
+// Level resources runs the tool in Export's child process (the window is never held): Cancel ends it, then a run reports
+await panel('Level resources'); await win.click('button:has-text("Level (report)")');
+await win.locator('button:text-is("Cancel")').click();
+await win.waitForFunction(() => /level_resources run was cancelled; nothing was changed/.test(document.querySelector('.toast')?.textContent ?? ''), undefined, { timeout: 30_000 });
+ok(await win.locator('[data-card="Activities delayed"]').count() === 0 && await win.locator('button:has-text("Level (report)")').count() === 1, `Level resources: Cancel ends the run in its process, nothing is shown (${await toastText()})`);
+await win.click('button:has-text("Level (report)")'); await win.waitForSelector('[data-card="Activities delayed"]', { timeout: 120_000 });
+ok(true, 'Level resources: runs the tool in a separate process and reports'); await shot('level-resources.png');
+const lvDelayed = await win.locator('[data-card="Activities delayed"]').innerText(), lvMoved = await win.locator('[data-card="Moved"]').innerText();
 const lvDir = await exportFiles('level_resources', 'Level resources', ['level_resources-moved.csv', 'level_resources-peaks.csv']);
-ok(JSON.parse(readFileSync(join(lvDir, 'level_resources.json'), 'utf8')).dry_run === true, 'Level resources: Export… ran the tool as a dry run (the project is not changed)');
+const lv = JSON.parse(readFileSync(join(lvDir, 'level_resources.json'), 'utf8'));
+ok(lv.dry_run === true, 'Level resources: Export… ran the tool as a dry run (the project is not changed)');
+ok(lvDelayed.endsWith(String(lv.delayed)) && lvMoved.endsWith(String(lv.moved.length)) && await win.locator('.tbl >> nth=0 >> tbody tr').count() === lv.peaks.length, `Level resources: the screen is the Export (${lvDelayed.replace(/\s+/g, ' ')}, ${lvMoved.replace(/\s+/g, ' ')}; exported ${lv.delayed} delayed, ${lv.moved.length} moved, ${lv.peaks.length} resources)`);
 await panel('Evaluate one change');
 await win.locator('label:has-text("Activity") input').fill('A1020'); await win.locator('label:has-text("to") input').fill('20');
 await win.click('button:has-text("Evaluate")'); await win.waitForSelector('[data-card="finish"]');

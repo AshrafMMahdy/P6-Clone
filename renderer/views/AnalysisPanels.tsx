@@ -1,14 +1,14 @@
 // Extensions for the analysis tools that had no screen: Check schedule, Float paths, Progress curves, Resource histogram, Level resources
 // (a report on a copy: nothing is changed), Evaluate one change, Compare and Review. Each computes with the core function its MCP tool
-// calls, with the options the tool passes, so the screen and the tool agree; Export… runs the tool itself (ExportButton.tsx).
-import { useMemo, useState } from 'react';
-import { getDb, toast, useStore } from '../store.ts';
+// calls, with the options the tool passes, so the screen and the tool agree; Export… runs the tool itself (ExportButton.tsx). Level
+// resources, too heavy for the window on a big schedule, runs the tool itself in Export's child process (main/analysis-export-ipc.ts).
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { getDb, getUi, saveNow, toast, useStore } from '../store.ts';
 import { rows, type Db } from '../../core/db.ts';
 import { parseP6Date } from '../../core/dates.ts';
 import { checkSchedule, P6_CHECKS, type CheckScheduleReport } from '../../core/analysis/checkSchedule.ts';
 import { progressCurves, resourceHistograms, type ProgressCurves, type ResourceHistogram } from '../../core/analysis/curves.ts';
 import { computeFloatPaths } from '../../core/schedule/floatPaths.ts';
-import { levelResources } from '../../core/level/level.ts';
 import { compareComputed, evaluate } from '../../core/query/evaluate.ts';
 import { compareSchedules, type ScheduleChange } from '../../core/diff.ts';
 import { reviewSchedule, type Review } from '../../core/query/review.ts';
@@ -16,7 +16,7 @@ import { baselineOf } from '../../core/analysis/common.ts';
 import { parseFileAsync } from '../io.ts';
 import { onlyProjects } from '../analysisDb.ts';
 import { AnalysisResults, goToActivity } from './AnalysisResults.tsx';
-import { ExportButton, numberOf, projectArgs } from './ExportButton.tsx';
+import { ExportButton, errorText, numberOf, projectArgs } from './ExportButton.tsx';
 import { card } from './MonteCarloPanel.tsx';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
@@ -238,51 +238,72 @@ export function ResourceHistogramPanel() {
 
 // ---------------------------------------------------------------- Level resources (level_resources, report only)
 const PRIORITY = { early_start: 'es', total_float: 'tf', priority: 'priority' } as const;
+/** level_resources' answer (a dry run): what the panel shows. */
+type LevelAnswer = { delayed: number; moved: { id: string; from: string; start: string; finish: string }[]; peaks: { resource: string; peak: number; limit: number; day: string | null; overallocated: boolean }[]; report: string };
 export function LevelPanel() {
   const [withinFloat, setWithinFloat] = useState(false);
   const [pct, setPct] = useState('');
   const [by, setBy] = useState<keyof typeof PRIORITY>('early_start');
   const [rs, setRs] = useState('');
   const [first, setFirst] = useState('');
-  const [res, setRes] = useState<ReturnType<typeof levelResources> | null>(null);
+  const [res, setRes] = useState<LevelAnswer | null>(null);
+  const [busy, setBusy] = useState(false);
+  // the run: going while it is (until its answer is in), stop when Cancel was clicked or the panel switched away from (a run still
+  // going then is ended, as Monte Carlo's); only this panel's run is cancelled, never an Export of the tool
+  const going = useRef(false), stop = useRef(false), mounted = useRef(true);
+  const cancel = () => { stop.current = true; void window.p6.analysisCancel({ tool: 'level_resources', exporting: false }); };
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (going.current) cancel(); }; }, []);
   const list = (v: string) => v.split(',').map((x) => x.trim()).filter(Boolean);
   const allIds = (d: Db) => rows(d, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id);
-  /** The tool's settings: the options of levelResources, as level_resources reads them (it levels every project of the database). */
-  const settings = (d: Db) => {
+  /** The panel's refusals before anything runs, in its words (the tool refuses the same, in its own). */
+  const check = (d: Db) => {
     const R = rows(d, 'RSRC'), T = rows(d, 'TASK').filter((t) => allIds(d).includes(t.proj_id));
-    const rsrcIds = list(rs).length ? list(rs).map((c) => R.find((r) => r.rsrc_short_name.toLowerCase() === c.toLowerCase())?.rsrc_id ?? (() => { throw new Error(`No resource "${c}". Use resource IDs.`); })()) : undefined;
-    const ordered = list(first).length ? list(first).map((c) => T.find((t) => t.task_code === c)?.task_id ?? (() => { throw new Error(`No activity "${c}". Use Activity IDs.`); })()) : undefined;
+    for (const c of list(rs)) if (!R.some((r) => r.rsrc_short_name.toLowerCase() === c.toLowerCase())) throw new Error(`No resource "${c}". Use resource IDs.`);
+    for (const c of list(first)) if (!T.some((t) => t.task_code === c)) throw new Error(`No activity "${c}". Use Activity IDs.`);
     const p = numberOf('The over-allocation allowed', pct);
     if (p != null && !(p >= 0)) throw new Error('Over-allocation must be 0 or more, e.g. 10 for 10 %.');
-    return { withinFloat, overAllocPct: p, priority: PRIORITY[by], rsrcIds, first: ordered };
   };
-  const run = () => {
-    // on a copy: leveling moves dates, and this only reports them
-    const d = structuredClone(getDb());
-    try { setRes(levelResources(d, allIds(d), settings(d))); } catch (e) { toast((e as Error).message); }
+  /** level_resources' arguments from the settings, as a dry run (it levels every project of the database; nothing is changed). */
+  const args = () => {
+    check(getDb());
+    return { dry_run: true, within_float: withinFloat, ...(numberOf('The over-allocation allowed', pct) != null ? { over_allocation_pct: numberOf('The over-allocation allowed', pct) } : {}), priority_by: by, ...(list(rs).length ? { resources: list(rs) } : {}), ...(list(first).length ? { activity_priority: list(first) } : {}) };
+  };
+  // the tool itself, in the Export's child process on the saved database (main/analysis-export-ipc.ts): leveling a big schedule never
+  // holds the window, and the screen is what Export… writes
+  const run = async () => {
+    let a: Record<string, unknown>;
+    try { a = args(); } catch (e) { return toast((e as Error).message); }
+    setBusy(true); going.current = true; stop.current = false;
+    try {
+      if (!(await saveNow())) return toast('The project changed while it was being saved, so nothing was leveled. Click Level (report) again.');
+      if (stop.current) { if (mounted.current) toast('The level_resources run was cancelled; nothing was changed.'); return; } // (before its child started)
+      const r = await window.p6.analysisRun('level_resources', a, getUi().prefs.hoursPerDay);
+      if (!mounted.current) return;
+      const code = r.out.error?.code;
+      if (code === 'export_busy' || code === 'cancelled') return toast(String(r.out.error.message));
+      if (r.isError) return toast(`Level resources failed: ${errorText(r.out)}`);
+      setRes(r.out as LevelAnswer);
+    } catch (e) { if (mounted.current) toast(`Level resources failed: ${(e as Error).message}`); } finally { going.current = false; if (mounted.current) setBusy(false); }
   };
   return (
     <div style={box}>
       <div style={bar}>
-        <label><input type="checkbox" checked={withinFloat} onChange={(e) => setWithinFloat(e.target.checked)} /> Only within total float</label>
-        <label>Over-allocation allowed <input style={{ width: 40 }} value={pct} placeholder="0" onChange={(e) => setPct(e.target.value)} /> %</label>
-        <label>Priority <select value={by} onChange={(e) => setBy(e.target.value as typeof by)}><option value="early_start">Early start</option><option value="total_float">Total float</option><option value="priority">Activity priority</option></select></label>
-        <label>Resources <input style={{ width: 130 }} value={rs} placeholder="all with a limit" onChange={(e) => setRs(e.target.value)} /></label>
-        <label>Placed first <input style={{ width: 130 }} value={first} placeholder="activity IDs" onChange={(e) => setFirst(e.target.value)} /></label>
-        <button className="btn primary" onClick={run}>Level (report)</button>
-        <ExportButton tool="level_resources" args={() => {
-          settings(getDb()); // the same refusals as the report
-          return { dry_run: true, within_float: withinFloat, ...(numberOf('The over-allocation allowed', pct) != null ? { over_allocation_pct: numberOf('The over-allocation allowed', pct) } : {}), priority_by: by, ...(list(rs).length ? { resources: list(rs) } : {}), ...(list(first).length ? { activity_priority: list(first) } : {}) };
-        }} />
+        <label><input type="checkbox" checked={withinFloat} disabled={busy} onChange={(e) => setWithinFloat(e.target.checked)} /> Only within total float</label>
+        <label>Over-allocation allowed <input style={{ width: 40 }} value={pct} placeholder="0" disabled={busy} onChange={(e) => setPct(e.target.value)} /> %</label>
+        <label>Priority <select value={by} disabled={busy} onChange={(e) => setBy(e.target.value as typeof by)}><option value="early_start">Early start</option><option value="total_float">Total float</option><option value="priority">Activity priority</option></select></label>
+        <label>Resources <input style={{ width: 130 }} value={rs} placeholder="all with a limit" disabled={busy} onChange={(e) => setRs(e.target.value)} /></label>
+        <label>Placed first <input style={{ width: 130 }} value={first} placeholder="activity IDs" disabled={busy} onChange={(e) => setFirst(e.target.value)} /></label>
+        {!busy ? <button className="btn primary" onClick={() => void run()}>Level (report)</button> : <><button className="btn" onClick={cancel}>Cancel</button><span className="muted">Leveling in a separate process…</span></>}
+        <ExportButton tool="level_resources" args={args} />
       </div>
-      {!res ? <div className="muted">Resource leveling on a copy of the database: which activities it would delay and the peak of each leveled resource afterwards. Nothing is changed here, and Export… always runs the tool as a dry run. Resources need a Max Units/Time limit.</div> : (
+      {!res ? <div className="muted">Resource leveling on a copy of the database: which activities it would delay and the peak of each leveled resource afterwards. Nothing is changed here, and Level (report) and Export… run the tool as a dry run, in a separate process. Resources need a Max Units/Time limit.</div> : (
         <div style={panel}>
           <div style={cards}><Card label="Activities delayed" value={String(res.delayed)} /><Card label="Moved" value={String(res.moved.length)} /></div>
-          <div className="muted" style={{ margin: '6px 0', whiteSpace: 'pre-wrap' }}>{res.log}</div>
+          <div className="muted" style={{ margin: '6px 0', whiteSpace: 'pre-wrap' }}>{res.report}</div>
           <table className="tbl"><thead><tr><th>Resource</th><th>Peak (unit-hours/day)</th><th>Limit</th><th>Peak day</th><th>Over-allocated</th></tr></thead>
-            <tbody>{res.peaks.map((p) => <tr key={p.code}><td>{p.code}</td><td style={{ textAlign: 'right' }}>{n1(p.peak)}</td><td style={{ textAlign: 'right' }}>{n1(p.limit)}</td><td>{date(p.day)}</td><td>{p.overallocated ? 'yes' : ''}</td></tr>)}</tbody></table>
+            <tbody>{res.peaks.map((p) => <tr key={p.resource}><td>{p.resource}</td><td style={{ textAlign: 'right' }}>{n1(p.peak)}</td><td style={{ textAlign: 'right' }}>{n1(p.limit)}</td><td>{date(p.day)}</td><td>{p.overallocated ? 'yes' : ''}</td></tr>)}</tbody></table>
           <table className="tbl" style={{ marginTop: 8 }}><thead><tr><th>Activity</th><th>Early start before</th><th>Start after</th><th>Finish after</th></tr></thead>
-            <tbody>{res.moved.slice(0, 500).map((m) => <tr key={m.taskId}><td><Id id={m.code} /></td><td>{m.from.slice(0, 16)}</td><td>{m.start.slice(0, 16)}</td><td>{m.finish.slice(0, 16)}</td></tr>)}</tbody></table>
+            <tbody>{res.moved.slice(0, 500).map((m) => <tr key={m.id}><td><Id id={m.id} /></td><td>{m.from.slice(0, 16)}</td><td>{m.start.slice(0, 16)}</td><td>{m.finish.slice(0, 16)}</td></tr>)}</tbody></table>
           {res.moved.length > 500 && <div className="muted">{res.moved.length - 500} more: Export… lists all.</div>}
         </div>
       )}

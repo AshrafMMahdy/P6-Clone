@@ -33,7 +33,7 @@ const setRunning = (t: string | null) => { running = t; for (const l of listener
 const useRunning = () => useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, () => running);
 
 /** The message of a tool's error answer (as callTool and the tools give it), whole. */
-function errorText(out: Record<string, any>): string {
+export function errorText(out: Record<string, any>): string {
   const e = out.error;
   if (typeof e === 'string') return e;
   const m = e?.message ?? e?.reason;
