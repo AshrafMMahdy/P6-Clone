@@ -18,6 +18,7 @@ export interface LintCheck extends CheckResult {
   severity: 'error' | 'warning' | 'info'; band: Band; fixes?: Fix[]; weight?: number; /** the thresholds this check was judged by */ applied?: object;
   /** a check whose fixes are cut to max_ids: how many there are */ fixes_total?: number;
   /** connectivity: how many open starts and open ends there are (each kind is listed up to max_ids) */ no_predecessor_total?: number; no_successor_total?: number;
+  /** fs_overlap: how many ladders were found (it lists the ladder.max_targets that save most) */ ladders_total?: number;
 }
 
 /** A check's lists as an answer shows them (max 0 = all): its first `max` activities (connectivity: the first `max` of each kind, open
@@ -260,7 +261,7 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
   }
   top.sort((a, b) => (b.saves_days ?? 0) - (a.saves_days ?? 0));
   for (const l of top.slice(0, L.max_targets)) { found.push({ id: l.activities[0], name: l.fix, value: l.saves_days != null ? `saves ${l.saves_days} d` : undefined }); fixes.push(l); }
-  return check('fs_overlap', 'Finish-to-start links that should overlap', 'warning', found, null, found.length ? 'warn' : 'pass', maxIds, { fixes, applied: { ...T.fs_overlap, ladder: L }, note: 'Leads hide an overlap inside an FS link; an SS lag as long as the predecessor is really an FS; a ladder of look-alike activities chained FS could run in step. Each fix is a list of edit operations; ladders show the days the fix saves.' });
+  return check('fs_overlap', 'Finish-to-start links that should overlap', 'warning', found, null, found.length ? 'warn' : 'pass', maxIds, { fixes, ladders_total: ladders.length, applied: { ...T.fs_overlap, ladder: L }, note: 'Leads hide an overlap inside an FS link; an SS lag as long as the predecessor is really an FS; a ladder of look-alike activities chained FS could run in step. Each fix is a list of edit operations; ladders show the days the fix saves.' });
 }
 
 /** White Hat IQ's graded network checks (bands as in its schedule_lint; small networks have wider bands). */

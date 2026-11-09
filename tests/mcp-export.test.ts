@@ -94,7 +94,15 @@ test('check_schedule, dcma_14 and lint: the answer lists max_ids per check, the 
     assert.equal(csv[found].length, total, `${tool}: ${found}.csv`);
     assert.equal(csv.checks.length, r.d.checks.length);
     assert.equal(csv.checks.find((c) => c.id === cut[0].id)!.total_activities, String(cut[0].total_activities));
-    if (tool === 'lint') assert.ok('fixes' in csv);
+    if (tool === 'lint') {
+      assert.ok('fixes' in csv);
+      // every list that can be cut says its total, cut or not: fs_overlap's ladders, connectivity's two kinds, redundant_links' fixes
+      const by = (id: string) => r.d.checks.find((c: any) => c.id === id);
+      assert.equal(typeof by('fs_overlap').ladders_total, 'number');
+      assert.equal(typeof by('connectivity').no_predecessor_total, 'number');
+      assert.equal(typeof by('redundant_links').fixes_total, 'number');
+      assert.ok(r.d.checks.every((c: any) => typeof c.total_activities === 'number'));
+    }
     if (tool === 'check_schedule') assert.ok(csv.checks[0].threshold_op && csv.projects.length);
   }
   // lint's answer is the engine's own with max_ids (as it answered before export existed): each check's fixes cut as the engine cuts them
@@ -123,6 +131,7 @@ test('monte_carlo: iterations.csv holds every iteration, whose sorted finishes g
   assert.deepEqual(plain(r), plain(without), 'the answer is the one without export');
   // the lists cut to top say how many there are
   assert.equal(r.criticality.length, 3); assert.equal(r.criticality_total, 31);
+  assert.equal(r.milestones.length, 1); assert.equal(r.milestones_total, 1, 'the total is given when nothing is cut too');
   assert.equal(r.sensitivity.length, 3); assert.ok(r.sensitivity_total > 3);
   assert.equal(r.milestones_total, 1);
   const { json, csv } = files(r, 'monte_carlo');
@@ -228,6 +237,7 @@ test('crash_schedule, float_paths, progress_curves, resource_histogram, tia, lev
   const rh = (await call('resource_histogram', { handle: h.handle, export: folder() })).d;
   f = files(rh, 'resource_histogram');
   assert.equal(f.csv.periods.length, rh.resources[0].periods.length); assert.equal(f.csv.resources[0].resource, 'crew');
+  assert.equal(rh.resources[0].periods_total, rh.resources[0].periods.length, 'a list that can be cut says its total, cut or not');
   const t = (await call('tia', { handle: h.handle, fragnet: [{ op: 'add_activity', id: 'X', name: 'Change', duration_days: 2 }, { op: 'add_relationship', pred: 'A3', succ: 'X' }, { op: 'add_relationship', pred: 'X', succ: 'A4' }], export: folder() })).d;
   f = files(t, 'tia');
   assert.equal(f.csv.fragnet_path.length, t.fragnet_path.length); assert.equal(f.csv.summary[0].delay_days, String(t.delay_days));

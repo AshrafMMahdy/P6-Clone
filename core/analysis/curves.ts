@@ -173,7 +173,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
 }
 
 export interface HistogramPeriod { start: string; end: string; budgeted: number; actual: number; remaining_early: number; remaining_late: number; limit: number | null; over_allocated: number; available: number | null }
-export interface ResourceHistogram { resource: string; name: string; units: 'hours' | 'cost'; peak: { start: string; demand: number; limit: number | null } | null; over_allocated_periods: number; severity: 'none' | 'minor' | 'moderate' | 'critical'; periods: HistogramPeriod[] }
+export interface ResourceHistogram { resource: string; name: string; units: 'hours' | 'cost'; peak: { start: string; demand: number; limit: number | null } | null; over_allocated_periods: number; severity: 'none' | 'minor' | 'moderate' | 'critical'; periods: HistogramPeriod[]; /** how many periods it has (an answer for many resources lists them for the 10 most over-allocated) */ periods_total: number }
 
 /** Resource Usage Profile per resource (units = hours by default, or cost). */
 export function resourceHistograms(db: Db, projIds: string[], o: { resources?: string[]; period?: 'week' | 'month'; cost?: boolean; threshold?: number } = {}): { report: 'Resource Histogram'; period: string; resources: ResourceHistogram[] } {
@@ -228,7 +228,7 @@ export function resourceHistograms(db: Db, projIds: string[], o: { resources?: s
       peak: periods.length ? { start: periods[peakI].start, demand: r2(periods[peakI].actual + periods[peakI].remaining_early), limit: periods[peakI].limit } : null,
       over_allocated_periods: periods.filter((p) => p.over_allocated > 0).length,
       severity: o.cost || ratio <= threshold ? 'none' : ratio >= 2 ? 'critical' : ratio >= 1.5 ? 'moderate' : 'minor',
-      periods,
+      periods, periods_total: periods.length,
     });
   }
   return { report: 'Resource Histogram', period, resources: out };

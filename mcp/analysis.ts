@@ -166,7 +166,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       if (a.resources?.length && !r.resources.length) fail('bad_input', `No assignments for ${a.resources.join(', ')}.`, 'Use resource IDs that are assigned in this project (list_dictionaries or resource_summary).');
       // the export: every resource with its periods
       const out = <T extends object>(answer: T) => exported(answer, r, [
-        { name: 'resources', columns: ['resource', 'name', 'units', 'peak_start', 'peak_demand', 'peak_limit', 'over_allocated_periods', 'severity'], rows: r.resources.map(({ periods: _p, ...x }) => x) },
+        { name: 'resources', columns: ['resource', 'name', 'units', 'peak_start', 'peak_demand', 'peak_limit', 'over_allocated_periods', 'severity', 'periods_total'], rows: r.resources.map(({ periods: _p, ...x }) => x) },
         { name: 'periods', columns: ['resource', 'start', 'end', 'budgeted', 'actual', 'remaining_early', 'remaining_late', 'limit', 'over_allocated', 'available'], rows: r.resources.flatMap((x) => x.periods.map((p) => ({ resource: x.resource, ...p }))) },
       ]);
       // many resources: every resource's summary, periods for the 10 most over-allocated (or all with detail: true)
