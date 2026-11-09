@@ -292,7 +292,7 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
     }
     if (took === 'damaged') redone++;
     await opts.onProgress?.(k, chunks.length, `meshing chunk ${k + 1} of ${chunks.length}${took === 'damaged' ? ' (its kept results did not check out)' : ''}`);
-    const r = await one(c.file, join(cdir, `g${k}`), keptDir ? { dir: join(keptDir, String(k)), of: chunks.length, engine: engineDigest(engine) } : undefined);
+    const r = await one(c.file, join(cdir, `g${k}`), keptDir ? { dir: join(keptDir, String(k)), chunk: k, of: chunks.length, engine: engineDigest(engine) } : undefined);
     rmSync(c.file, { force: true });
     if (!r.ok) { failed.push(`chunk ${k + 1} (${c.products} products): ${r.note.split(' The model is indexed')[0]}`); state.failures += c.products; if (r.stuck) state.stuck ??= r.stuck; }
   }
@@ -370,13 +370,19 @@ export async function absorbRun(dir: string, index: IfcIndex, tilesDir: string |
     if (!t.ok) return { ok: false, note: `the display tiles could not be written: ${t.note}` };
     state.tiles.push(...(JSON.parse(readFileSync(join(dir, 'tiles.json'), 'utf8')) as TileRecord[]));
   }
-  if (keepTo) keepChunk(dir, tilesDir, state.tiles.slice(before), keepTo);
+  if (keepTo) { try { keepChunk(dir, tilesDir, state.tiles.slice(before), keepTo); } catch (e) { throw new ChunkNotKept(keepTo, e as Error); } }
   rmSync(dir, { recursive: true, force: true });
   return { ok: true };
 }
 
-/** Where a chunk is kept (its folder), how many chunks the model was cut into, and the engine it was meshed by (meshEngine). */
-type KeepTo = { dir: string; of: number; engine: string };
+/** Where a chunk is kept (its folder), which chunk it is (0-based), how many chunks the model was cut into, and the engine it was meshed by (meshEngine). */
+type KeepTo = { dir: string; chunk: number; of: number; engine: string };
+/** A chunk the meshing finished could not be kept in the model cache (keepChunk failed: a file locked, a disk full): the meshing stops
+ *  as failed there (owner rule: a failed keep-write stops the run); the chunks kept before it stay. `chunk` is 1-based. */
+export class ChunkNotKept extends Error {
+  readonly chunk: number; readonly of: number; readonly cause: Error;
+  constructor(k: KeepTo, cause: Error) { super(`chunk ${k.chunk + 1} of ${k.of} of the model’s meshing could not be kept (${cause.message})`); this.chunk = k.chunk + 1; this.of = k.of; this.cause = cause; }
+}
 /** A kept chunk's manifest (kept.json): each of its files' length and CRC32, its tiles (null: kept without tiles), how many chunks
  *  the model was cut into and the engine that meshed it (keptChunks in model.ts reads them; absent in a chunk kept before they were written). */
 export interface KeptChunk { files: { name: string; bytes: number; crc: number }[]; tiles: TileRecord[] | null; of?: number; engine?: string }

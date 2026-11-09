@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 
 const FX = join(import.meta.dirname, 'fixtures', '4d', 'Duplex_A_20110907.ifc');
@@ -182,4 +183,39 @@ test('render_4d meshing a model opened without geometry, cancelled part-way: can
   assert.equal(e.next_step, `Calling this tool again (or open_model with the model’s path) continues from them: only the missing chunks are meshed (in chunks of their size, 0.1 MB of the IFC, when that fits the memory free then, else it is meshed from scratch and the model’s geometry note says why; chunks kept by another version of the clone are not used). If you will not open this model again, discard them: open_model with path "${s.file}" and discard_kept: true.`);
   assert.equal(e.kept_chunks, 3);
   assert.equal(keptOnDisk(s.cache), 3);
+});
+
+test('a finished chunk that cannot be kept (its temporary folder held by another program) stops the meshing as failed: chunk_not_kept with the cause, the chunks kept and the continue / discard words, not model_unreadable; opened again it continues', { timeout: 600_000 }, async () => {
+  const s = await setup('KEPT7');
+  // chunk 5's temporary folder (<k>.<pid>.tmp, k 0-based) cannot be made: as a file another program holds there would refuse it on Windows
+  const fs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs');
+  const was = fs.mkdirSync;
+  let held = '';
+  fs.mkdirSync = ((path: string, o?: object) => {
+    if (/[\\/]4\.\d+\.tmp$/.test(String(path))) { held = String(path); throw Object.assign(new Error(`EPERM: operation not permitted, mkdir '${path}'`), { code: 'EPERM', syscall: 'mkdir', path }); }
+    return was(path, o);
+  }) as typeof fs.mkdirSync;
+  syncBuiltinESMExports();
+  let stopped;
+  try { stopped = await openJob({ handle: s.handle, owner_key: s.owner_key, path: s.file }); } finally { fs.mkdirSync = was; syncBuiltinESMExports(); }
+  assert.ok(held, 'the keep of chunk 5 was tried');
+  assert.equal(stopped.v.status, 'failed', JSON.stringify(stopped.v));
+  const e = stopped.v.error;
+  assert.equal(e.code, 'chunk_not_kept', JSON.stringify(e));
+  assert.equal(e.reason, `open_model stopped as failed: chunk 5 of ${stopped.total} of the model’s meshing was finished but could not be kept in the clone’s model cache (EPERM: operation not permitted, mkdir '${held}'), and a chunk that cannot be kept stops the meshing. 4 of ${stopped.total} chunks of the model’s meshing are kept in the clone’s model cache (not in the project).`);
+  assert.equal(e.next_step, `Fix the cause (the file another program holds, or the disk where the model cache is). Calling open_model again with the same path, with geometry, continues from them: only the missing chunks are meshed (in chunks of their size, 0.1 MB of the IFC, when that fits the memory free then, else it is meshed from scratch and the model\u2019s geometry note says why; chunks kept by another version of the clone are not used). If you will not open this model again, discard them: open_model with path "${s.file}" and discard_kept: true.`);
+  assert.equal(e.cause, `EPERM: operation not permitted, mkdir '${held}'`);
+  assert.equal(e.chunk, 5);
+  assert.equal(e.kept_chunks, 4);
+  assert.equal(e.chunks_total, stopped.total);
+  assert.deepEqual(e.discard_with, { tool: 'open_model', path: s.file, discard_kept: true });
+  assert.equal(stopped.meshed.size, 5, 'nothing meshed after the chunk that could not be kept');
+  assert.equal(keptOnDisk(s.cache), 4);
+  // the file let go: opened again, the 4 kept chunks are taken in and only the rest is meshed
+  const again = await openJob({ handle: s.handle, owner_key: s.owner_key, path: s.file });
+  assert.equal(again.v.status, 'done', JSON.stringify(again.v));
+  assert.equal(again.v.result.geometry, 'ok');
+  assert.equal(again.taken.size, 4);
+  assert.equal(again.meshed.size, stopped.total - 4);
+  assert.equal(keptOnDisk(s.cache), 0);
 });
