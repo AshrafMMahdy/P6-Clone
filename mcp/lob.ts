@@ -152,7 +152,7 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
         { name: 'locations', columns: ['task', 'location', 'start', 'finish', 'float_days'], rows: full.tasks.flatMap((t) => t.locations.map(([location, start, finish, float_days]) => ({ task: t.code, location, start, finish, float_days }))) },
         { name: 'collisions', columns: ['location', 'a', 'b', 'from', 'to'], rows: full.collisions },
         { name: 'gaps', columns: ['task', 'after', 'before', 'days'], rows: full.gaps },
-      ], h.writeOut) };
+      ], h.writeOutWith) };
     }
     case 'lob_takt': {
       const { projId, model } = lobOf(a.project);

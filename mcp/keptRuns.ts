@@ -213,6 +213,13 @@ class UnitFile {
     if (this.f.fd == null) { this.f.create(this.head!); this.onKept?.(this.f.path); }
     this.f.append(unit);
   }
+  /** Every unit kept in the file now, in order, read from the start (whole ones only; the file stays as it is). */
+  *readAll(): Generator<Uint8Array> {
+    if (!this.f || !existsSync(this.f.path)) return;
+    const f = new KeptFile(this.tool, this.f.path, this.format, this.file);
+    f.readHead(this.f.path);
+    try { for (const u of f.units()) yield u.bytes; } finally { f.close(); }
+  }
   /** The run finished: its file goes (a message when it could not be removed), and its claim. */
   finish(): string | undefined { try { return this.f && (this.f.fd != null || existsSync(this.f.path)) ? this.f.remove() : undefined; } finally { this.release(); } }
   /** The run stopped after `done` units: where they are kept, or null (a file this run made with none goes; one loaded for a resume
@@ -263,6 +270,8 @@ export class ScenarioFile implements RowStore {
   resumeAt(count: number): number { return this.u.resumeAt(count); }
   get path(): string | null { return this.u.path; }
   add(kept: KeptScenario): void { this.u.add(Buffer.from(JSON.stringify(kept), 'utf8')); }
+  /** The scenarios kept in the file now, in order, each read as it is needed (an export lists every activity each one moved). */
+  *scenarios(): Generator<KeptScenario> { for (const b of this.u.readAll()) yield JSON.parse(Buffer.from(b).toString('utf8')) as KeptScenario; }
   finish(): string | undefined { return this.u.finish(); }
   stop(done: number): string | null { return this.u.stop(done); }
   /** The call has ended: its claim on the file goes. */

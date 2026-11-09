@@ -7,8 +7,8 @@ import type { Db } from '../core/db.ts';
 import { checkSchedule, P6_CHECKS } from '../core/analysis/checkSchedule.ts';
 import { dcma14, DCMA_PROFILES } from '../core/analysis/dcma.ts';
 import { analysisReportHtml } from '../core/analysis/report.ts';
-import { DEFAULT_LINT_THRESHOLDS, lintSchedule, LINT_CHECKS, resolveLintThresholds } from '../core/analysis/lint.ts';
-import { evaluateBatch } from '../core/analysis/batch.ts';
+import { cutLintCheck, DEFAULT_LINT_THRESHOLDS, lintSchedule, LINT_CHECKS, resolveLintThresholds } from '../core/analysis/lint.ts';
+import { evaluateBatch, type RowStore } from '../core/analysis/batch.ts';
 import { claimHere, keptPlace, keepWords, ScenarioFile, type Claim } from './keptRuns.ts';
 import { crashSchedule } from '../core/analysis/crash.ts';
 import { optimizeSchedule } from '../core/analysis/hrm.ts';
@@ -22,7 +22,7 @@ import { formatP6Date } from '../core/dates.ts';
 import { lobActivityCodes } from '../core/lob/view.ts';
 import { estimateBytes, fail, getSession, pathArg, reserveMemory, type Session } from './runtime.ts';
 import { cutWindow, timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
-import { exportDoc, exportProp, exportResult, firstOf, type Table } from './export.ts';
+import { exportAfterChange, exportDoc, exportProp, exportResult, firstOf, type Table } from './export.ts';
 import type { CheckResult } from '../core/analysis/common.ts';
 import { baselineOf, type Tick } from '../core/analysis/common.ts';
 import { detectFormat, readRaw } from '../renderer/io.ts';
@@ -77,7 +77,7 @@ export const ANALYSIS_TOOLS = (withHandle: (s: Record<string, unknown>) => Recor
   { name: 'check_schedule', annotations: ro, description: `P6's Tools > Check Schedule Report: ${P6_CHECKS.length} checks with P6's own populations and default targets (${P6_CHECKS.map((c) => c.id).join(', ')}). Each check answers metric, threshold {op, value, source}, result pass|fail|not_assessed, numerator/denominator and the activities (or relationships) it found. Thresholds in hours use the hours per day (44 days x 8 h = 352 h). Late activities and BEI need the project baseline. targets overrides a check's target (percent; ratio for bei).` + exportDoc('check_schedule', ['checks', 'failing_activities', 'projects']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, checks: { type: 'array', items: { type: 'string' } }, targets: { type: 'object' }, threshold_days: { type: 'number', description: 'long lag / large float / large duration limit in days (default 44)' }, max_ids: maxIds, path: reportPath } }) },
   { name: 'dcma_14', annotations: ro, description: `DCMA 14-Point Assessment (PAM 200.1): logic, leads, lags, relationship types, hard constraints, high float, negative float, high duration, invalid dates, resources, missed tasks, critical path test, CPLI, BEI. Tasks = incomplete activities that are not WBS summary, LOE or milestones; leads, lags and types count relationships; days are working days of each activity's calendar. Each check answers metric, threshold {op, value, source}, result, numerator/denominator and the activities it found. profile: ${Object.entries(DCMA_PROFILES).map(([k, v]) => `${k} (${v.label})`).join(', ')}; thresholds overrides single checks. baseline: project (default), bl1, bl2, bl3 (missed tasks, BEI, high duration). The critical path test adds cpt_slip_days (600) to the earliest critical task (or cpt_activity) on a scratch copy and passes when the finish moves by exactly that. CPLI: against target_finish, else the project's Must Finish By (contract), else the baseline finish; the other is reported beside it; with neither it is not assessed. limit_days: 44 or "dynamic" (max(20, 10% of the project length)).` + exportDoc('dcma_14', ['checks', 'failing_activities']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, profile: { type: 'string' }, thresholds: { type: 'object' }, baseline: { type: 'string' }, status_date: { type: 'string' }, target_finish: { type: 'string' }, cpt_slip_days: { type: 'number' }, cpt_activity: { type: 'string' }, limit_days: {}, exempt: { type: 'array', items: { type: 'string' } }, max_ids: maxIds, path: reportPath } }) },
   { name: 'lint', annotations: ro, description: `Schedule lint: problems P6 schedules without complaint, each with the activities it hits and, where there is one, the fix as edit operations (pass them to edit). Checks: dangling_start (no FS/SS predecessor drives the start), dangling_finish (the finish drives no FS/FF successor), fs_overlap (leads that should be SS + lag, SS lags as long as the predecessor that are really FS, and "ladders" of look-alike activities chained FS that could overlap; ladder fixes carry saves_days, found by scheduling the fix on a scratch copy), empty_wbs, milestone_duration (milestones with a duration, zero-duration tasks), constraints (every type), loe_on_critical, lag_calendar. profile: platform adds White Hat IQ's graded network metrics with score and grade: ${['connectivity', 'start_anchored', 'serialization', 'criticality', 'single_file', 'longest_chain', 'non_fs_share', 'edges_per_activity', 'redundant_links', 'ss_abuse'].join(', ')}. Each check: band pass|warn|fail, severity, activities, fixes and applied (the thresholds it was judged by). thresholds overrides any of them per call (an organisation's own, e.g. from its wiki): ${Object.keys(DEFAULT_LINT_THRESHOLDS).join(', ')}, each as in the answer's thresholds (the platform's LintConfig names, camelCase or snake_case, are read too); the answer gives every threshold applied and which were overridden. simulate: false skips the days-saved runs.` + exportDoc('lint', ['checks', 'findings', 'fixes']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, profile: { type: 'string', description: 'p6 (default) or platform' }, checks: { type: 'array', items: { type: 'string' } }, thresholds: { type: 'object', description: 'overrides, e.g. {"criticality": {"pass": [0.1, 0.3]}, "ladder": {"min_group_size": 4}, "dangling_start": {"max": 2}, "fs_overlap": {"max_lead_days": 1}, "weights": {"criticality": 20}}' }, simulate: { type: 'boolean' }, max_ids: maxIds, path: reportPath } }) },
-  { name: 'float_paths', annotations: writesFile, description: 'P6 multiple float paths (Schedule Options > Advanced): path 1 ends at the end activity (end_activity, default the open end with the latest finish) following the most critical links back (method free_float, the default: relationship free float, so path 1 is the longest path; total_float: relationship total float, then forward along the most critical successors, as Oracle describes); each next path is the unassigned chain with the most critical link into the paths found; each activity belongs to one path; completed work and activities not leading to the end activity get none. Answers paths [{path, float_hours, activities [{id, name, order, total_float_hours}]}], near_critical (incomplete activities with 0 < total float <= near_critical_days, default 10), and with between {from, to} up to between.max (default 25) logic paths between two activities (each with its duration and lowest float). write: true also fills the Float Path and Float Path Order columns (one undoable change); to have every F9 fill them, set_schedule_options float_paths: true.' + exportDoc('float_paths', ['paths', 'near_critical', 'between (with between)']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, count: { type: 'number', description: 'paths to calculate (default 10)' }, end_activity: { type: 'string' }, method: { type: 'string', description: 'free_float (default) or total_float' }, near_critical_days: { type: 'number' }, between: { type: 'object', description: '{from, to, max?}' }, write: { type: 'boolean' } } }) },
+  { name: 'float_paths', annotations: writesFile, description: 'P6 multiple float paths (Schedule Options > Advanced): path 1 ends at the end activity (end_activity, default the open end with the latest finish) following the most critical links back (method free_float, the default: relationship free float, so path 1 is the longest path; total_float: relationship total float, then forward along the most critical successors, as Oracle describes); each next path is the unassigned chain with the most critical link into the paths found; each activity belongs to one path; completed work and activities not leading to the end activity get none. Answers paths [{path, float_hours, activities [{id, name, order, total_float_hours}]}], near_critical (incomplete activities with 0 < total float <= near_critical_days, default 10), and with between {from, to} up to between.max (default 25) logic paths between two activities (each with its duration and lowest float). write: true also fills the Float Path and Float Path Order columns (one undoable change); to have every F9 fill them, set_schedule_options float_paths: true.' + exportDoc('float_paths', ['paths', 'near_critical', 'between (empty without between)']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, count: { type: 'number', description: 'paths to calculate (default 10)' }, end_activity: { type: 'string' }, method: { type: 'string', description: 'free_float (default) or total_float' }, near_critical_days: { type: 'number' }, between: { type: 'object', description: '{from, to, max?}' }, write: { type: 'boolean' } } }) },
   { name: 'progress_curves', annotations: ro, description: 'S-curves as the P6 Activity Usage Profile/Spreadsheet: per week or month, planned value (baseline budget along the baseline dates; current budget and planned dates without a baseline), earned value and actual cost up to the data date (spread evenly from the actual start; stored financial periods from the XER, P6 Store Period Performance, take precedence), remaining along the remaining early and late dates, cumulative values, per-period and cumulative SPI and CPI; totals BAC, PV, EV, AC, ETC, EAC, VAC, SPI, CPI, TCPI at the data date. units: cost (default) or hours (resource units). CPI is null when no actual is recorded (never assumed 1).' + exportDoc('progress_curves', ['periods', 'totals']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, period: { type: 'string', description: 'week or month (default)' }, units: { type: 'string', description: 'cost (default) or hours' }, from: { type: 'string' }, to: { type: 'string' } } }) },
   { name: 'resource_histogram', annotations: ro, description: 'Resource Usage Profile per resource and period: budgeted (planned dates), actual, remaining early (with P6 resource curves) and remaining late units (hours; cost: true for cost), the limit (max units/time over working time), over-allocation and available units, the peak, and severity of over-allocation (minor, moderate at 1.5x the limit, critical at 2x).' + exportDoc('resource_histogram', ['resources', 'periods (every resource)']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, resources: { type: 'array', items: { type: 'string' } }, period: { type: 'string', description: 'week (default) or month' }, cost: { type: 'boolean' }, threshold: { type: 'number', description: 'over-allocated when demand > limit x threshold (default 1)' }, detail: { type: 'boolean', description: 'periods for every resource (default: the 10 most over-allocated when there are more than 10)' } } }) },
   { name: 'evaluate_batch', annotations: ro, description: 'Many what-ifs in one call: the project is scheduled once as it is, then each scenario (a list of edit operations, as edit takes them) on a copy that is thrown away, so nothing changes. One row per scenario: ok or error, finish, finish_delta_days (working days on the project calendar; negative = earlier), critical count, became_critical and no_longer_critical, negative_float count, cost (at completion) and cost_delta; the best `top` (default 3; earliest finish, then cheapest) also list the activities whose dates moved (the first 200; changed_total says how many). best names the best scenario. Each scenario is kept as it finishes, in a file in the write root (evaluate_batch-<fingerprint>.parts/scenarios.ndjson). A batch that stops (cancelled, its worker ended, or a scenario that could not be kept) answers the rows done, marked partial, with resume: the path of that file; to continue, call evaluate_batch again with the same arguments and resume: that path, exactly as given (it is never searched for): only the scenarios still missing are scheduled, and best and the details of the best few are worked out over every scenario, so the answer is the one an uninterrupted batch gives (resumed_scenarios says how many came from the file; redone_scenarios how many kept ones did not check out, damaged as a power loss can leave a file or after a damaged one, and were done again). A resume whose project, scenarios or arguments differ is refused with resume_mismatch, removing nothing. A batch whose kept file another evaluate_batch call in this server is still working on (a cancelled job answers before it has stopped; the same project open under two handles) is refused as run_busy, naming that job when it is one. A call without resume starts over; a batch that finishes removes its file and names its folder in parts_removed (so a copy of it elsewhere can go too).' + exportDoc('evaluate_batch', ['scenarios', 'dates_moved (every scenario)']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, scenarios: { type: 'array', description: '[{name, overrides: [edit operations]}], any number', items: { type: 'object' } }, top: { type: 'number' }, resume: { type: 'string', description: 'the resume path a stopped evaluate_batch answered (its kept scenarios), to do only the scenarios still missing; same arguments as that call' } }, required: ['scenarios'] }) },
@@ -94,8 +94,13 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
   if (!ANALYSIS_NAMES.has(name)) return undefined;
   const projIds = a.project != null && a.project !== '' ? h.projectIds(s.db, a.project) : h.allIds(s.db);
   const maxIds = a.max_ids != null ? Math.max(0, Math.floor(Number(a.max_ids))) : undefined;
-  /** The answer, and with export the full result and its tables written (the answer names them in exported). */
-  const exported = <T extends object>(answer: T, full: unknown, tables: Table[]) => (a.export == null ? answer : { ...answer, exported: exportResult(name, a.export, full, tables, h.writeOut) });
+  /** The answer, and with export the full result and its tables written (the answer names them in exported). changed: the tool has
+   *  changed the project already (apply, keep, write), so a failure to write the export is said beside the result (export_error). */
+  const exported = <T extends object>(answer: T, full: unknown, tables: Table[], changed = false) => {
+    if (a.export == null) return answer;
+    const make = () => exportResult(name, a.export, full, tables, h.writeOutWith);
+    return { ...answer, ...(changed ? exportAfterChange(make) : { exported: make() }) };
+  };
   const withReport = <T extends { report: string; checks: unknown[]; summary: Record<string, number> }>(r: T) => {
     if (!a.path) return r;
     const path = pathArg(a.path, 'path', 'write');
@@ -104,9 +109,9 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
   };
   /** A report of checks, worked out with every activity listed (max_ids 0): the answer lists max_ids of them per check (default 100;
    *  total_activities says how many there are) and is the one the HTML report shows; the export has them all. */
-  const checked = <T extends { report: string; checks: (CheckResult & { fixes?: unknown[] })[]; summary: Record<string, number> }>(full: T, columns: string[], found: string, extra: Table[] = []) => {
+  const checked = <C extends CheckResult & { fixes?: unknown[] }, T extends { report: string; checks: C[]; summary: Record<string, number> }>(full: T, columns: string[], found: string, extra: Table[] = [], cut: (c: C, max: number) => C = (c, max) => ({ ...c, activities: firstOf(c.activities, max) })) => {
     const max = maxIds ?? 100;
-    const answer = withReport({ ...full, checks: full.checks.map((c) => ({ ...c, activities: firstOf(c.activities, max) })) });
+    const answer = withReport({ ...full, checks: full.checks.map((c) => cut(c, max)) });
     return exported(answer, full, [
       { name: 'checks', columns, rows: full.checks.map(({ activities: _a, fixes: _f, ...c }) => (c.threshold == null ? (({ threshold: _t, ...x }) => x)(c) : c)) },
       { name: found, columns: ['check', 'id', 'name', 'project', 'value'], rows: full.checks.flatMap((c) => c.activities.map((x) => ({ check: c.id, ...x }))) },
@@ -141,8 +146,8 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       return exported(answer, answer, [
         { name: 'paths', columns: ['path', 'float_hours', 'order', 'id', 'name', 'total_float_hours'], rows: r.paths.flatMap((p) => p.activities.map((x) => ({ path: p.path, float_hours: p.float_hours, ...x }))) },
         { name: 'near_critical', columns: ['id', 'name', 'total_float_days'], rows: near },
-        ...(answer.between ? [{ name: 'between', columns: ['path', 'duration_days', 'min_float_days', 'activities'], rows: answer.between.paths.map((p, i) => ({ path: i + 1, ...p })) }] : []),
-      ]);
+        { name: 'between', columns: ['path', 'duration_days', 'min_float_days', 'activities'], rows: (answer.between?.paths ?? []).map((p, i) => ({ path: i + 1, ...p })) },
+      ], !!a.write);
     }
     case 'progress_curves': {
       const period = a.period ?? 'month', units = a.units ?? 'cost';
@@ -177,21 +182,42 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       // worker that was ended names it
       // (one run at a time on a kept file: a second is refused as run_busy, naming the job that holds it)
       const store = new ScenarioFile(a.resume ?? null, h.claim ?? claimHere(h.job ?? (() => undefined)), h.keep ? (path) => h.keep!({ resume: path }) : undefined);
-      const r = await evaluateBatch(s.db, projIds, a.scenarios.map((x: any, i: number) => ({ name: String(x?.name ?? `scenario ${i + 1}`), overrides: Array.isArray(x?.overrides) ? x.overrides : [] })), { hoursPerDay: s.hpd, top: a.top != null ? Number(a.top) : undefined, tick: h.tick, onRow: h.keep, store, full: a.export != null }).finally(() => store.release());
+      // with export, the kept file (every activity each scenario moved: the batch holds only what the answer shows) is read for the
+      // export before it goes: a finished batch's finish, which removes it, waits until the export is written
+      let finishAsked = false;
+      const batchStore: RowStore = a.export == null ? store : { open: (x) => store.open(x), resumeAt: (n) => store.resumeAt(n), add: (k) => store.add(k), stop: (d) => store.stop(d), finish: () => { finishAsked = true; return undefined; } };
+      let r: Awaited<ReturnType<typeof evaluateBatch>>, files: ReturnType<typeof exportResult> | undefined, finished: string | undefined;
+      try {
+        r = await evaluateBatch(s.db, projIds, a.scenarios.map((x: any, i: number) => ({ name: String(x?.name ?? `scenario ${i + 1}`), overrides: Array.isArray(x?.overrides) ? x.overrides : [] })), { hoursPerDay: s.hpd, top: a.top != null ? Number(a.top) : undefined, tick: h.tick, onRow: h.keep, store: batchStore });
+        if (r.ok && a.export != null) {
+          const rows = r.scenarios;
+          // each scenario as answered, with every activity whose dates it moved, read from the kept file as it is written
+          const whole = function* () {
+            let i = 0;
+            for (const k of store.scenarios()) {
+              if (k.i !== i || i >= rows.length) break;
+              yield { ...rows[i], ...(k.changed ? { changed: k.changed, changed_total: k.changed.length } : {}) };
+              i++;
+            }
+            if (i !== rows.length) fail('export_failed', `The export of evaluate_batch could not be written: its kept file holds ${i} of the ${rows.length} scenarios done.`, 'Call evaluate_batch again (the batch itself is answered without export).');
+          };
+          const { kept, resumed: _r, redone: _d, keptNote: _k, ...rest } = r;
+          files = exportResult(name, a.export, { ...rest, ...(kept ? { resume: kept } : {}), scenarios: whole }, [
+            { name: 'scenarios', columns: ['name', 'ok', 'error', 'finish', 'finish_delta_days', 'critical', 'became_critical', 'no_longer_critical', 'negative_float', 'cost', 'cost_delta', 'dates_moved'], rows: function* () { for (const { changed: _c, changed_total: n, ...x } of whole()) yield { ...x, dates_moved: n ?? null }; } },
+            { name: 'dates_moved', columns: ['scenario', 'id', 'start_before', 'start_after', 'finish_before', 'finish_after'], rows: function* () { for (const x of whole()) for (const c of x.changed ?? []) yield { scenario: x.name, id: c.id, start_before: c.start[0], start_after: c.start[1], finish_before: c.finish[0], finish_after: c.finish[1] }; } },
+          ], h.writeOutWith);
+        }
+      } finally { if (finishAsked) finished = store.finish(); store.release(); }
       if (!r.ok) return fail(r.error.code, r.error.message, 'Fix the schedule errors first (schedule shows them).');
-      const { kept, resumed, redone, keptNote, dates_moved: moved, ...rest } = r;
+      const { kept, resumed, redone, ...rest } = r;
+      const keptNote = rest.keptNote ?? finished;
+      delete rest.keptNote;
       const answer = { ...rest, ...(kept ? { resume: kept, note: `Partial: ${rest.scenarios_done} of ${rest.scenarios_requested} scenarios were done${rest.error ? ` (it stopped: ${rest.error})` : ''}, and they are kept in ${kept}: ${keepWords('evaluate_batch', kept, 'scenarios')} best and the details of the best few are then worked out over every scenario.` } : {}), ...(resumed ? { resumed_scenarios: resumed } : {}),
         // kept scenarios that did not check out (a power loss can leave zeros or old bytes), with every one after them: done again, said
         ...(redone ? { redone_scenarios: redone, redone_note: `${redone} kept scenario${redone === 1 ? '' : 's'} did not check out (damaged, as a power loss can leave a file, or after a damaged one) and ${redone === 1 ? 'was' : 'were'} done again.` } : {}), ...(keptNote ? { note: keptNote } : {}),
         // a finished batch removed its kept file: named, so a copy of it elsewhere (the platform's mirror of the outputs) goes too
         ...(!rest.partial && !keptNote && store.path ? { parts_removed: keptPlace(store.path) } : {}) };
-      if (!moved) return answer;
-      // the export: every scenario with every activity whose dates it moved
-      const full = { ...answer, scenarios: rest.scenarios.map((x, i) => ({ ...x, ...(moved[i] ? { changed: moved[i], changed_total: moved[i]!.length } : {}) })) };
-      return exported(answer, full, [
-        { name: 'scenarios', columns: ['name', 'ok', 'error', 'finish', 'finish_delta_days', 'critical', 'became_critical', 'no_longer_critical', 'negative_float', 'cost', 'cost_delta', 'dates_moved'], rows: full.scenarios.map(({ changed: _c, changed_total: n, ...x }) => ({ ...x, dates_moved: n ?? null })) },
-        { name: 'dates_moved', columns: ['scenario', 'id', 'start_before', 'start_after', 'finish_before', 'finish_after'], rows: full.scenarios.flatMap((x) => (x.changed ?? []).map((c) => ({ scenario: x.name, id: c.id, start_before: c.start[0], start_after: c.start[1], finish_before: c.finish[0], finish_after: c.finish[1] }))) },
-      ]);
+      return files ? { ...answer, exported: files } : answer;
     }
     case 'crash_schedule': {
       // an LOB plan's activities are crashed through the plan (lob_edit set_crew / set_duration), never directly
@@ -203,7 +229,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
         { name: 'steps', columns: ['step', 'days_gained', 'cost', 'finish', 'cumulative_direct_cost', 'total_cost', 'activities'], rows: r.steps.map((x) => ({ ...x, activities: x.activities.map((y) => y.id) })) },
         { name: 'step_activities', columns: ['step', 'id', 'days', 'cost'], rows: r.steps.flatMap((x) => x.activities.map((y) => ({ step: x.step, ...y }))) },
         { name: 'changes', columns: ['id', 'remaining_days_from', 'remaining_days_to'], rows: r.changes },
-      ]);
+      ], !!(a.apply && r.ops.length));
     }
     case 'optimize_schedule': {
       const objective = a.objective ?? 'makespan';
@@ -221,13 +247,13 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       // the export: the whole placement order, and every activity's dates under CPM, P6's leveling and the reasoner's proposal
       const iso = (v: number | null) => (v != null ? formatP6Date(v) : null);
       const code = new Map(dates.map((x) => [x.taskId, x]));
-      const priority = order.map((id, i) => ({ rank: i + 1, id: code.get(id)?.code ?? id, name: code.get(id)?.name ?? '' }));
+      const priority = order.map((id, i) => ({ rank: i + 1, id: code.get(id)!.code, name: code.get(id)!.name }));
       const activities = dates.map((x) => ({ id: x.code, name: x.name, cpm_start: iso(x.cpm[0]), cpm_finish: iso(x.cpm[1]), p6_leveled_start: iso(x.p6[0]), p6_leveled_finish: iso(x.p6[1]), reasoner_start: iso(x.reasoner[0]), reasoner_finish: iso(x.reasoner[1]), start_delta_days: x.startDeltaDays, finish_delta_days: x.finishDeltaDays }));
       return exported(out, { ...out, priority: priority.map((x) => x.id), activity_dates: activities }, [
         { name: 'activities', columns: ['id', 'name', 'cpm_start', 'cpm_finish', 'p6_leveled_start', 'p6_leveled_finish', 'reasoner_start', 'reasoner_finish', 'start_delta_days', 'finish_delta_days'], rows: activities },
         { name: 'priority', columns: ['rank', 'id', 'name'], rows: priority },
         { name: 'changes', columns: ['id', 'from_days', 'to_days', 'cost'], rows: r.changes },
-      ]);
+      ], !!a.apply);
     }
     case 'windows_analysis': {
       if (!Array.isArray(a.updates) || !a.updates.length) fail('bad_input', 'updates must list the other updates.', 'e.g. [{"path": "Update 1.xer"}, {"handle": "..."}] or [{"baseline": "project"}]');
@@ -280,11 +306,11 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const dd = a.data_date != null ? h.dd(a.data_date) ?? fail('bad_input', 'data_date is not a date.', 'YYYY-MM-DD') : undefined;
       const r = timeImpact(s.db, [projIds[0]], a.fragnet, { dataDate: dd, milestone: a.milestone, hoursPerDay: s.hpd, baseline });
       if (!r.ok) return fail(r.error.code, r.error.message, 'Fix the fragnet operations (Activity IDs of this project).');
-      const tiaOut = <T extends object>(answer: T) => exported(answer, answer, [
+      const tiaOut = <T extends object>(answer: T, kept = false) => exported(answer, answer, [
         { name: 'summary', columns: ['measured', 'data_date', 'unimpacted_finish', 'impacted_finish', 'delay_days', 'fragnet_on_critical_path', 'baseline', 'baseline_finish', 'variance_to_baseline_days'], rows: [(({ ok: _o, fragnet_path: _p, became_critical: _b, no_longer_critical: _n, ...x }) => x)(r)] },
         { name: 'fragnet_path', columns: ['order', 'id'], rows: r.fragnet_path.map((id, i) => ({ order: i + 1, id })) },
         { name: 'critical_changes', columns: ['id', 'change'], rows: [...r.became_critical.map((id) => ({ id, change: 'became_critical' })), ...r.no_longer_critical.map((id) => ({ id, change: 'no_longer_critical' }))] },
-      ]);
+      ], kept);
       if (!a.keep) return tiaOut(r);
       let id = `${cur.proj_short_name}-TIA`;
       for (let k = 2; rows(s.db, 'PROJECT').some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase()); k++) id = `${cur.proj_short_name}-TIA${k}`;
@@ -294,7 +320,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
         const copy = rows(d, 'PROJECT').find((p) => p.proj_short_name === id)!;
         reschedule(d, [copy.proj_id], dd != null ? { dataDate: dd } : {});
       });
-      return tiaOut({ ...r, kept_as: id });
+      return tiaOut({ ...r, kept_as: id }, true);
     }
     case 'lint': {
       if (a.profile != null && a.profile !== 'p6' && a.profile !== 'platform') fail('bad_input', `Unknown profile "${a.profile}".`, 'Use p6 or platform.');
@@ -303,7 +329,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       try { resolveLintThresholds(a.thresholds); } catch (e) { fail('bad_input', (e as Error).message, 'e.g. {"criticality": {"pass": [0.1, 0.3]}}; the answer of a call without thresholds lists them all.'); }
       const r = lintSchedule(s.db, { projIds, hoursPerDay: s.hpd, profile: a.profile, checks: a.checks, simulate: a.simulate !== false, maxIds: 0, thresholds: a.thresholds });
       return checked(r as typeof r & { summary: Record<string, number> }, ['id', 'name', 'severity', 'band', 'result', 'metric', 'unit', 'numerator', 'denominator', 'total_activities', 'weight', 'note'], 'findings',
-        [{ name: 'fixes', columns: ['check', 'activities', 'fix', 'saves_days', 'ops'], rows: r.checks.flatMap((c) => (c.fixes ?? []).map((f) => ({ check: c.id, ...f }))) }]);
+        [{ name: 'fixes', columns: ['check', 'activities', 'fix', 'saves_days', 'ops'], rows: r.checks.flatMap((c) => (c.fixes ?? []).map((f) => ({ check: c.id, ...f }))) }], cutLintCheck);
     }
   }
   return undefined;

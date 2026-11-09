@@ -5,7 +5,7 @@
 // from (also after a stop and a resume): sorted, they give the reported percentiles exactly.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setRoots } from '../mcp/runtime.ts';
@@ -54,7 +54,9 @@ function files(d: any, tool: string) {
     assert.deepEqual(head, f.columns, `${f.path}: the header row is the columns answered`);
     assert.equal(rows.length, f.rows, `${f.path}: as many rows as answered`);
     assert.ok(rows.every((r) => r.length === head.length), `${f.path}: every row has every column`);
-    csv[f.path.split(/[\\/]/).pop()!.replace(/\.csv$/, '')] = rows.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
+    const file = f.path.split(/[\\/]/).pop()!;
+    assert.ok(file.startsWith(`${tool}-`) && file.endsWith('.csv'), `${file} is named <tool>-<table>.csv`);
+    csv[file.slice(tool.length + 1, -4)] = rows.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
   }
   return { json: JSON.parse(readFileSync(json, 'utf8')), csv };
 }
@@ -83,7 +85,9 @@ test('check_schedule, dcma_14 and lint: the answer lists max_ids per check, the 
     const { json, csv } = files(r.d, tool);
     const cut = r.d.checks.filter((c: any) => c.total_activities > 2);
     assert.ok(cut.length, `${tool}: some check found more than max_ids`);
-    assert.ok(r.d.checks.every((c: any) => c.activities.length === Math.min(2, c.total_activities)));
+    // (lint's connectivity lists max_ids of each kind: open starts, then open ends, each with its own total)
+    const kinds = (c: any, v: string) => c.activities.filter((x: any) => x.value === v).length;
+    assert.ok(r.d.checks.every((c: any) => (c.id === 'connectivity' ? kinds(c, 'no predecessor') === Math.min(2, c.no_predecessor_total) && kinds(c, 'no successor') === Math.min(2, c.no_successor_total) : c.activities.length === Math.min(2, c.total_activities))), tool);
     // the json holds every activity of every check, and the CSV one row for each
     assert.ok(json.checks.every((c: any) => c.activities.length === c.total_activities), tool);
     const total = json.checks.reduce((s: number, c: any) => s + c.total_activities, 0);
@@ -93,6 +97,15 @@ test('check_schedule, dcma_14 and lint: the answer lists max_ids per check, the 
     if (tool === 'lint') assert.ok('fixes' in csv);
     if (tool === 'check_schedule') assert.ok(csv.checks[0].threshold_op && csv.projects.length);
   }
+  // lint's answer is the engine's own with max_ids (as it answered before export existed): each check's fixes cut as the engine cuts them
+  // (redundant_links to max_ids, saying fixes_total; fs_overlap's never), connectivity each kind to max_ids
+  const { lintSchedule } = await import('../core/analysis/lint.ts');
+  const { getSession } = await import('../mcp/runtime.ts');
+  const lint = (await call('lint', { handle: h, max_ids: 2, profile: 'platform', simulate: false })).d;
+  const core = lintSchedule(getSession(h).db, { profile: 'platform', simulate: false, maxIds: 2, hoursPerDay: getSession(h).hpd });
+  assert.deepEqual(lint.checks, JSON.parse(JSON.stringify(core.checks)));
+  const red = lint.checks.find((c: any) => c.id === 'redundant_links');
+  assert.ok(red.fixes_total > 2 && red.fixes.length === 2, `redundant_links: ${red.fixes_total}`);
   // the HTML report is the answer's, as before
   const html = await call('dcma_14', { handle: h, max_ids: 1, path: join(root, 'dcma.html'), export: folder() });
   assert.ok(existsSync(html.d.saved) && html.d.exported.files.length === 3);
@@ -323,4 +336,84 @@ test('kept runs of monte_carlo and evaluate_batch live at an absolute path: with
     assert.equal(resumed.err, false, JSON.stringify(resumed.d).slice(0, 300));
     await tool('cancel_job', { job_id: resumed.d.job_id });
   } finally { p.stdin.end(); }
+});
+
+test('exports of several tools share a folder; a tool\'s earlier export there is replaced whole, every table written (header only when empty)', async () => {
+  const h = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+  const dir = folder();
+  const cs = (await call('check_schedule', { handle: h, export: dir })).d, dc = (await call('dcma_14', { handle: h, export: dir })).d;
+  assert.ok(existsSync(join(dir, 'check_schedule-checks.csv')) && existsSync(join(dir, 'dcma_14-checks.csv')));
+  assert.equal(files(cs, 'check_schedule').csv.checks.length, cs.checks.length, 'not overwritten by dcma_14');
+  assert.equal(files(dc, 'dcma_14').csv.checks.length, 14);
+  // a table with no rows has its header row; a re-run replaces this tool's files only (a table it no longer has is not left behind)
+  const end = (await call('float_paths', { handle: h, export: dir })).d.end;
+  const fp1 = (await call('float_paths', { handle: h, export: dir, between: { from: (await call('float_paths', { handle: h })).d.paths[0].activities[0].id, to: end } })).d;
+  assert.ok(fp1.exported.files.some((f: any) => f.path.endsWith('float_paths-between.csv') && f.rows > 0));
+  writeFileSync(join(dir, 'float_paths-old.csv'), 'stale');
+  const fp2 = (await call('float_paths', { handle: h, export: dir })).d;
+  const between = fp2.exported.files.find((f: any) => f.path.endsWith('float_paths-between.csv'));
+  assert.equal(between.rows, 0); assert.deepEqual(readCsv(between.path), [['path', 'duration_days', 'min_float_days', 'activities']]);
+  assert.equal(existsSync(join(dir, 'float_paths-old.csv')), false, 'this tool\'s stale file is gone');
+  assert.ok(existsSync(join(dir, 'dcma_14-checks.csv')) && existsSync(join(dir, 'check_schedule.json')), 'other tools\' files stay');
+  await call('close', { handle: h, discard: true });
+});
+
+test('an export that cannot be written: refused before any change when the folder cannot be made; after a change, said beside the result', async () => {
+  const h = await chain('EXF', 4);
+  const tia = { ...h, fragnet: [{ op: 'add_activity', id: 'X', name: 'Change', duration_days: 2 }, { op: 'add_relationship', pred: 'A1', succ: 'X' }], keep: true };
+  const file = join(root, 'not-a-folder.txt');
+  writeFileSync(file, 'x');
+  const refused = await call('tia', { ...tia, export: join(file, 'sub') });
+  assert.deepEqual([refused.err, refused.d.error.code], [true, 'file_unwritable']);
+  const { getSession } = await import('../mcp/runtime.ts');
+  const projects = () => getSession(h.handle).db.tables.PROJECT.rows.map((p) => p.proj_short_name);
+  assert.deepEqual(projects(), ['EXF'], 'nothing was changed');
+  // the folder is there, but its json cannot be written (a folder of that name is in the way): the kept copy stays, and the answer says so
+  const dir = folder();
+  mkdirSync(join(dir, 'tia.json'), { recursive: true }); writeFileSync(join(dir, 'tia.json', 'x'), 'x');
+  const t = await call('tia', { ...tia, export: dir });
+  assert.equal(t.err, false, JSON.stringify(t.d).slice(0, 300));
+  assert.equal(t.d.kept_as, 'EXF-TIA');
+  assert.match(t.d.export_error, /the change WAS made/);
+  assert.deepEqual(projects(), ['EXF', 'EXF-TIA']);
+  await call('close', { ...h, discard: true });
+});
+
+test('evaluate_batch: a batch started without export and resumed with it exports every activity of every scenario, as an uninterrupted one', async () => {
+  const h = await chain('BRX', 60);
+  const N = 120;
+  const scenarios = Array.from({ length: N }, (_, i) => ({ name: `s${i}`, overrides: [{ op: 'update_activity', id: `A${i % 60}`, duration_days: 4 + (i % 3) }] }));
+  const whole = (await call('evaluate_batch', { ...h, scenarios, export: folder() })).d;
+  const ref = files(whole, 'evaluate_batch');
+  assert.ok(ref.csv.dates_moved.length > N, String(ref.csv.dates_moved.length));
+  assert.ok(whole.parts_removed && !existsSync(whole.parts_removed), 'the kept file went once the export was written');
+  const job = (await call('evaluate_batch', { ...h, scenarios, async: true })).d.job_id;
+  for (let k = 0; k < 4000; k++) { const v = (await call('job_status', { job_id: job })).d; const m = /scenario (\d+) of/.exec(String(v.progress ?? '')); if (v.status !== 'running' || (m && Number(m[1]) > 10)) break; await new Promise((r) => setTimeout(r, 2)); }
+  await call('cancel_job', { job_id: job });
+  let part: any;
+  for (;;) { const v = (await call('job_status', { job_id: job, wait_seconds: 2 })).d; if (v.status !== 'running') { part = v.result ?? v; break; } }
+  assert.equal(part.partial, true, JSON.stringify(part).slice(0, 300));
+  const resumed = (await call('evaluate_batch', { ...h, scenarios, resume: part.resume, export: folder() })).d;
+  assert.equal(resumed.resumed_scenarios, part.scenarios_done);
+  const got = files(resumed, 'evaluate_batch');
+  assert.deepEqual(got.csv.dates_moved, ref.csv.dates_moved);
+  assert.deepEqual(got.csv.scenarios, ref.csv.scenarios);
+  assert.deepEqual(got.json.scenarios, ref.json.scenarios);
+  assert.equal(existsSync(part.resume), false);
+  await call('close', { ...h, discard: true });
+});
+
+test('CSV cells: text Excel would run as a formula starts with \', a lone CR is quoted; review lists activities by ID and name, saved dates apart', async () => {
+  const np = (await call('new_project', { id: 'CSVX', start: '2026-03-02' })).d;
+  const H = { handle: np.handle, owner_key: np.owner_key };
+  await call('edit', { ...H, operations: [{ op: 'add_activity', id: 'A1', name: '=HYPERLINK("x")', duration_days: 2 }, { op: 'add_activity', id: 'A2', name: '+1 crew', duration_days: 2 }, { op: 'add_activity', id: 'A3', name: 'one\rtwo', duration_days: 2 }, { op: 'add_activity', id: 'A4', name: '@home', duration_days: 2 }] });
+  await call('schedule', H);
+  const rv = (await call('review', { ...H, export: folder() })).d;
+  const { csv } = files(rv, 'review');
+  const logic = csv.activities.filter((x) => x.check === 'logic');
+  assert.deepEqual(logic.map((x) => [x.id, x.name]), [['A1', '\'=HYPERLINK("x")'], ['A2', '\'+1 crew'], ['A3', 'one\rtwo'], ['A4', '\'@home']]);
+  assert.equal(rv.checks.find((c: any) => c.id === 'logic').examples_total, 4);
+  assert.ok('saved_dates' in csv);
+  assert.ok(csv.checks.every((c) => !('examples' in c)));
+  await call('close', { ...H, discard: true });
 });

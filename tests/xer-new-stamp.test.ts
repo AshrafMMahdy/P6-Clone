@@ -22,8 +22,17 @@ test('a new project is saved as XER 7.0 and, opened again, finishes on the same 
   assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops })).ok, true);
   const before = await call('schedule', { handle: np.handle });
   const path = join(dir, 'new.xer');
-  await call('save', { handle: np.handle, owner_key: np.owner_key, path });
+  const saved = await call('save', { handle: np.handle, owner_key: np.owner_key, path });
   assert.deepEqual(head(path).slice(0, 2), ['ERMHDR', '7.0']);
+  // the answer names the version written, and says what the 7.0 stamp means for the user
+  assert.equal(saved.format, 'XER 7.0');
+  assert.ok(saved.notes?.some((n: string) => /written as XER 7\.0/.test(n) && /Tell the user: P6 8 and later/.test(n)), JSON.stringify(saved.notes));
+  // the CLI writes a project without a version the same way
+  const { writeOut } = await import('../cli/commands.ts');
+  const { getSession } = await import('../mcp/runtime.ts');
+  const cli = join(dir, 'cli.xer');
+  writeOut(cli, getSession(np.handle).db);
+  assert.equal(head(cli)[1], '7.0');
   const re = await call('open_file', { path });
   const after = await call('schedule', { handle: re.handle });
   assert.equal(after.finish, before.finish);
@@ -36,7 +45,9 @@ test('a file read in keeps its own version; an explicit version wins', async () 
   const own = join(dir, 'own.xer'), v19 = join(dir, 'v19.xer');
   const ver = head(src)[1];
   const sv = await call('save', { handle: s.handle, owner_key: s.owner_key, path: own }); assert.ok(!sv.error, JSON.stringify(sv).slice(0, 300));
-  await call('save', { handle: s.handle, owner_key: s.owner_key, path: v19, version: '19.12' });
+  assert.equal(sv.format, 'XER 6.2'); assert.ok(!(sv.notes ?? []).some((n: string) => /written as XER 7/.test(n)));
+  const s19 = await call('save', { handle: s.handle, owner_key: s.owner_key, path: v19, version: '19.12' });
+  assert.equal(s19.format, 'XER 19.12');
   assert.equal(ver, '6.2'); assert.equal(head(own)[1], ver);
   assert.equal(head(v19)[1], '19.12');
 });

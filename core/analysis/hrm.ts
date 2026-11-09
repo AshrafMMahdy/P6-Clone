@@ -218,7 +218,8 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   if (o.tick) await o.tick(2, 3, 'leveling in the proposed order');
   const mine = onScratch(db, (d) => { applyOps(d, ops); return measureLeveled(d, order); });
   const fmt = (v: number | null) => (v != null ? formatP6Date(v) : null);
-  const cals = calendarResolver(db, []), projCal = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.clndr_id]));
+  // (a day: the hours per day of the activity's calendar, as evaluate's shifts take it)
+  const cals = calendarResolver(db, []), projCal = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.clndr_id])), dh = dayHours(db, o.hoursPerDay ?? 8, true);
   const byTask = new Map(inst.acts.map((a) => [a.task.task_id, a]));
   return {
     ok: true as const,
@@ -234,7 +235,7 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     dates: rows(db, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => {
       const cpm = p6.cpmDates.get(t.task_id)!, mod = mine.dates.get(t.task_id)!, cal = cals.get(t.clndr_id) ?? cals.fallback(projCal.get(t.proj_id) ?? '');
       // reasoner against CPM, in working days of the activity's calendar (later: positive)
-      const wd = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round(((a <= b ? cal.workBetween(a, b) : -cal.workBetween(b, a)) / 60 / (cal.hoursPerDay() || (o.hoursPerDay ?? 8))) * 100) / 100);
+      const wd = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round(((a <= b ? cal.workBetween(a, b) : -cal.workBetween(b, a)) / 60 / dh.task(t)) * 100) / 100);
       return { taskId: t.task_id, code: t.task_code, name: t.task_name, cpm, p6: p6.dates.get(t.task_id)!, reasoner: mod, startDeltaDays: wd(cpm[0], mod[0]), finishDeltaDays: wd(cpm[1], mod[1]) };
     }),
   };

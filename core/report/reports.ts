@@ -129,9 +129,10 @@ export const REPORTS: ReportDef[] = [
   },
 ];
 
+/** A CSV cell: quoted when it holds a quote, a comma or a line break (a lone CR too). */
+export const csvQuote = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
 export function reportCsv(r: Report): string {
-  const q = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  return [r.columns.map(q).join(','), ...r.rows.map((x) => x.cells.map(q).join(','))].join('\r\n');
+  return [r.columns.map(csvQuote).join(','), ...r.rows.map((x) => x.cells.map(csvQuote).join(','))].join('\r\n');
 }
 
 export const nowStamp = () => formatP6Date(Date.now() / 60000);

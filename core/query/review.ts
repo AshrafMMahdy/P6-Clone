@@ -8,11 +8,12 @@ import { makeCtx, isCritical } from '../project/ctx.ts';
 import { checkStoredDates } from '../schedule/stored-dates.ts';
 
 export type Grade = 'pass' | 'warn' | 'fail';
-export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; detail: string; examples: string[]; /** a check listing activities: how many there are (examples shows the first 10) */ examples_total?: number }
+export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; detail: string; examples: string[]; /** how many examples there are (examples shows the first 10 of a check's activities; saved_dates gives all) */ examples_total?: number;
+  /** with opts.activities: every activity the check found, by Activity ID and name (an export) */ activities?: { id: string; name: string }[] }
 export interface Review { grade: Grade; projects: string[]; openActivities: number; relationships: number; checks: Check[] }
 
-/** examples: activities listed per check (default 10; 0 = all). */
-export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[]; calendarDays?: boolean; examples?: number } = {}): Review {
+/** examples: activities listed per check (default 10; 0 = all); activities: also each check's activities by ID and name. */
+export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[]; calendarDays?: boolean; examples?: number; activities?: boolean } = {}): Review {
   const hpd = opts.hoursPerDay ?? 8;
   const projs = rows(db, 'PROJECT').filter((p) => !p._baseline_of && (!opts.projIds?.length || opts.projIds.includes(p.proj_id)));
   const open = new Set(projs.map((p) => p.proj_id));
@@ -29,7 +30,9 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
     const p = percent ?? 0;
     const grade: Grade = failAt != null && (failAt === 0 ? count > 0 : p > failAt) ? 'fail' : warnAt != null && (warnAt === 0 ? count > 0 : p > warnAt) ? 'warn' : 'pass';
     const max = opts.examples ?? 10;
-    checks.push({ id, title, grade, count, of, percent, limit, detail, examples: (typeof list === 'number' ? examples : (max > 0 ? list.slice(0, max) : list).map(name)), ...(typeof list === 'number' ? {} : { examples_total: list.length }) });
+    checks.push({ id, title, grade, count, of, percent, limit, detail, examples: (typeof list === 'number' ? examples : (max > 0 ? list.slice(0, max) : list).map(name)),
+      ...(typeof list !== 'number' ? { examples_total: list.length } : examples.length ? { examples_total: examples.length } : {}),
+      ...(opts.activities && typeof list !== 'number' ? { activities: list.map((t) => ({ id: t.task_code, name: t.task_name })) } : {}) });
   };
   const dd = parseP6Date(projs.map((p) => p.last_recalc_date).find(Boolean));
 

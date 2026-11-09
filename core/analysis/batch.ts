@@ -73,7 +73,7 @@ export function batchData(db: Db, projIds: string[], scenarios: Scenario[], over
   return { data: dataDigest(tables, { PROJECT: eps ? ['_name'] : PROJECT_PLACE_FIELDS }), scheduler: projIds.map((id) => { const p = rows(db, 'PROJECT').find((r) => r.proj_id === id); return p ? optionsFor(db, p, over) : null; }) };
 }
 
-export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick; /** each finished scenario row, as it is done */ onRow?: (row: ScenarioResult) => void; store?: RowStore; /** also answer dates_moved: every activity each scenario moved (an export) */ full?: boolean } = {}) {
+export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick; /** each finished scenario row, as it is done */ onRow?: (row: ScenarioResult) => void; store?: RowStore } = {}) {
   const hpd = o.hoursPerDay ?? 8, top = o.top ?? 3;
   const base = onScratch(db, (d) => measure(d, projIds, o.options));
   if (!base.ok) return { ok: false as const, error: { code: 'schedule_failed', message: `The project as it is cannot be scheduled: ${base.error}` } };
@@ -81,8 +81,10 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
   const days = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round((cal.workBetween(a, b) / 60 / (cal.hoursPerDay() || hpd)) * 100) / 100);
   const results: ScenarioResult[] = [];
-  // the activities whose dates each scenario moved (worked out as it finishes, so a kept scenario carries them): the best few show them
-  const moved: (KeptScenario['changed'])[] = [];
+  // the activities whose dates each scenario moved (worked out as it finishes, so a kept scenario carries them all): the best few show
+  // the first 200 of them, so only those are held here, with how many there are (an export reads them all from the kept file)
+  const moved: (KeptScenario['changed'])[] = [], movedTotal: number[] = [];
+  const hold = (changed: KeptScenario['changed']) => { moved.push(changed ? changed.slice(0, 200) : null); movedTotal.push(changed?.length ?? 0); };
   // a batch continued from a store: its kept scenarios are taken in as they were, and only the rest are scheduled
   const store = o.store;
   let redone = 0;
@@ -92,7 +94,7 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
     for (const k of await store.open(inputs)) {
       // (a damaged one, and what follows it, are done again)
       if (k?.i !== results.length || results.length >= scenarios.length || !k.row || typeof k.row !== 'object' || (k.row.ok && !Array.isArray(k.changed))) break;
-      results.push(k.row); moved.push(k.changed ?? null);
+      results.push(k.row); hold(k.changed ?? null);
       o.onRow?.(k.row);
     }
     redone = store.resumeAt(results.length);
@@ -126,7 +128,7 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
     }); } catch (e) { row = { name, ok: false, error: `The scenario failed: ${(e as Error)?.message ?? e}` }; m = null; }
     const changed = row.ok && m ? [...(m as Measure).dates].filter(([k, v]) => { const b = base.m.dates.get(k); return !b || b[0] !== v[0] || b[1] !== v[1]; }).map(([k, v]) => { const b = base.m.dates.get(k) ?? [null, null]; return { id: k, start: [b[0], v[0]] as [string | null, string | null], finish: [b[1], v[1]] as [string | null, string | null] }; }) : null;
     try { store?.add({ i, row, changed }); } catch (e) { failed = e as Error; break; } // kept before it counts: a batch stopped later continues after it
-    results.push(row); moved.push(changed);
+    results.push(row); hold(changed);
     // sent out as soon as it is done (a compute worker ended after a cancel keeps it)
     o.onRow?.(row);
   }
@@ -139,8 +141,8 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   // the best few (earliest finish, then cheapest) carry the activities whose dates moved, over every scenario (those kept too)
   const order = results.map((_r, i) => i).filter((i) => results[i].ok).sort((a, b) => (parseP6Date(results[a].finish ?? '') ?? Infinity) - (parseP6Date(results[b].finish ?? '') ?? Infinity) || (results[a].cost ?? 0) - (results[b].cost ?? 0));
   const scenariosOut = results.map((r) => ({ ...r }));
-  for (const i of order.slice(0, top)) { scenariosOut[i].changed = moved[i]!.slice(0, 200); scenariosOut[i].changed_total = moved[i]!.length; }
-  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best: order.length ? results[order[0]].name : null, scenarios: scenariosOut, ...(o.full ? { dates_moved: moved } : {}),
+  for (const i of order.slice(0, top)) { scenariosOut[i].changed = moved[i]!; scenariosOut[i].changed_total = movedTotal[i]; }
+  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best: order.length ? results[order[0]].name : null, scenarios: scenariosOut,
     ...(stopped ? { partial: true as const, stopped, scenarios_done: results.length, scenarios_requested: scenarios.length, ...(failed ? { error: failed.message } : {}), ...(kept ? { kept } : {}) } : {}),
     ...(store ? { resumed } : {}), ...(redone ? { redone } : {}), ...(keptNote ? { keptNote } : {}) };
 }

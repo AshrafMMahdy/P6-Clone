@@ -14,7 +14,19 @@ import { isDone, isLoe, isMilestone, isWbs, makeScope, offender, pct, type Check
 
 export type Band = 'pass' | 'warn' | 'fail';
 export interface Fix { activities: string[]; fix: string; ops: Record<string, unknown>[]; saves_days?: number }
-export interface LintCheck extends CheckResult { severity: 'error' | 'warning' | 'info'; band: Band; fixes?: Fix[]; weight?: number; /** the thresholds this check was judged by */ applied?: object }
+export interface LintCheck extends CheckResult {
+  severity: 'error' | 'warning' | 'info'; band: Band; fixes?: Fix[]; weight?: number; /** the thresholds this check was judged by */ applied?: object;
+  /** a check whose fixes are cut to max_ids: how many there are */ fixes_total?: number;
+  /** connectivity: how many open starts and open ends there are (each kind is listed up to max_ids) */ no_predecessor_total?: number; no_successor_total?: number;
+}
+
+/** A check's lists as an answer shows them (max 0 = all): its first `max` activities (connectivity: the first `max` of each kind, open
+ *  starts and open ends), and its first `max` fixes when it says fixes_total (fs_overlap's fixes are never cut). */
+export function cutLintCheck(c: LintCheck, max: number): LintCheck {
+  if (!(max > 0)) return c;
+  const kind = (v: string) => c.activities.filter((x) => x.value === v).slice(0, max);
+  return { ...c, activities: c.id === 'connectivity' ? [...kind('no predecessor'), ...kind('no successor')] : c.activities.slice(0, max), ...(c.fixes_total != null && c.fixes ? { fixes: c.fixes.slice(0, max) } : {}) };
+}
 export interface LintReport { report: 'Schedule Lint'; profile: 'p6' | 'platform'; score?: number; grade?: string; work_activities: number; relationships: number; checks: LintCheck[]; thresholds: LintThresholds; overridden: string[]; not_used?: string[] }
 export interface LintOptions { projIds?: string[]; hoursPerDay?: number; profile?: 'p6' | 'platform'; checks?: string[]; maxIds?: number; simulate?: boolean; thresholds?: Record<string, unknown> }
 
@@ -271,7 +283,7 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
   if (want('connectivity')) {
     const np = s.tasks.filter((t) => !isWbs(t) && !preds(t).length), ns = s.tasks.filter((t) => !isWbs(t) && !succs(t).length);
     const v = Math.max(0, np.length - 1) + Math.max(0, ns.length - 1);
-    out.push({ ...check('connectivity', 'Connectivity (one start, one finish)', 'warning', [...np.map((t) => offender(t, s, 'no predecessor')), ...ns.map((t) => offender(t, s, 'no successor'))], null, v > T.connectivity.max_open_ends ? 'fail' : 'pass', maxIds, { weight: WEIGHTS.connectivity, applied: T.connectivity, note: `${np.length} activities without predecessors and ${ns.length} without successors; a sound network has one of each.` }), unit: 'ratio', metric: v });
+    out.push(cutLintCheck({ ...check('connectivity', 'Connectivity (one start, one finish)', 'warning', [...np.map((t) => offender(t, s, 'no predecessor')), ...ns.map((t) => offender(t, s, 'no successor'))], null, v > T.connectivity.max_open_ends ? 'fail' : 'pass', 0, { weight: WEIGHTS.connectivity, applied: T.connectivity, note: `${np.length} activities without predecessors and ${ns.length} without successors; a sound network has one of each.`, no_predecessor_total: np.length, no_successor_total: ns.length }), unit: 'ratio', metric: v }, maxIds));
   }
   if (want('start_anchored')) {
     const starts = s.tasks.filter((t) => !isWbs(t) && !preds(t).length);
@@ -332,7 +344,7 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
       }
     }
     const v = fsN ? red.length / fsN : 0;
-    out.push({ ...check('redundant_links', 'Redundant FS links', 'info', red, fsN, bandOf(v, [0, T.redundant_links.pass], [0, T.redundant_links.warn]), maxIds, { weight: WEIGHTS.redundant_links, applied: T.redundant_links, note: 'Links already implied by another chain; they clutter the network without adding logic.' }), fixes: red.slice(0, maxIds || red.length).map((x) => { const [a, b] = x.id.split(' -> '); return { activities: [a, b], fix: `Delete ${a} FS ${b}`, ops: [{ op: 'delete_relationship', pred: a, succ: b, type: 'FS' }] }; }) });
+    out.push({ ...check('redundant_links', 'Redundant FS links', 'info', red, fsN, bandOf(v, [0, T.redundant_links.pass], [0, T.redundant_links.warn]), maxIds, { weight: WEIGHTS.redundant_links, applied: T.redundant_links, note: 'Links already implied by another chain; they clutter the network without adding logic.' }), fixes_total: red.length, fixes: red.slice(0, maxIds || red.length).map((x) => { const [a, b] = x.id.split(' -> '); return { activities: [a, b], fix: `Delete ${a} FS ${b}`, ops: [{ op: 'delete_relationship', pred: a, succ: b, type: 'FS' }] }; }) });
   }
   if (want('ss_abuse')) {
     const bad = s.rels.filter((r) => { const a = s.ctx.taskById.get(r.pred_task_id), b = s.ctx.taskById.get(r.task_id); return a && b && (r.pred_type === 'PR_SS' || r.pred_type === 'PR_FF') && nameKey(a) !== nameKey(b) && a.wbs_id !== b.wbs_id; })
