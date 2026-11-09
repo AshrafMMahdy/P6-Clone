@@ -10,6 +10,7 @@ import { syncAssignmentDates } from '../../core/resource/assign.ts';
 import { baselineOf } from '../../core/analysis/common.ts';
 import { timeImpact, windowsAnalysis } from '../../core/analysis/delay.ts';
 import { goToActivity } from './AnalysisResults.tsx';
+import { ExportButton } from './ExportButton.tsx';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
 const Ids = ({ ids, max = 12 }: { ids: string[]; max?: number }) => <>{ids.slice(0, max).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{ids.length > max ? ` … +${ids.length - max}` : ''}</>;
@@ -26,6 +27,23 @@ export function WindowsPanel() {
   const [method, setMethod] = useState<'contemporaneous' | 'half_step'>('contemporaneous');
   const [milestone, setMilestone] = useState('');
   const [res, setRes] = useState<Awaited<ReturnType<typeof windowsAnalysis>> | null>(null);
+  /** The tool's arguments: the open project is the latest update (the session), the picks that are its baselines are named by baseline,
+   *  every other pick is a session of its own with only that project (main/analysis-export.ts). */
+  const spec = () => {
+    const picked = all.filter((p) => pick.has(p.id));
+    const proj = (id: string) => rows(getDb(), 'PROJECT').find((p) => p.proj_id === id)!;
+    const latest = picked.at(-1);
+    if (!latest) throw new Error('Pick two or more updates.');
+    if (proj(latest.id)._baseline_of) throw new Error('The windows tool takes the open project as the latest update: the latest pick by data date must be a project, not a baseline.');
+    const scope = [latest.id], others: Record<string, string[]> = {}, updates: Record<string, unknown>[] = [];
+    for (const p of picked.slice(0, -1)) {
+      const row = proj(p.id);
+      if (!row._baseline_of) { others[`u${p.id}`] = [p.id]; updates.push({ handle: `@u${p.id}`, name: p.name }); continue; }
+      if (row._baseline_of !== latest.id) throw new Error(`${p.name} is a baseline of another project: the windows tool takes baselines of the latest update only.`);
+      scope.push(p.id); updates.push({ baseline: row.proj_short_name, name: p.name });
+    }
+    return { args: { updates, method, ...(milestone.trim() ? { milestone: milestone.trim() } : {}), current_name: latest.name }, parts: { scope, others } };
+  };
   const run = async () => {
     const ups = all.filter((p) => pick.has(p.id)).map((p) => ({ name: p.name, db: getDb(), projId: p.id }));
     setRes(await windowsAnalysis(ups, { method, milestone: milestone.trim() || undefined, hoursPerDay: ui.prefs.hoursPerDay }));
@@ -40,6 +58,7 @@ export function WindowsPanel() {
         <label>Method <select value={method} onChange={(e) => setMethod(e.target.value as typeof method)}><option value="contemporaneous">Contemporaneous (MIP 3.3)</option><option value="half_step">Half-step (MIP 3.4)</option></select></label>
         <label>Milestone <input style={{ width: 90 }} value={milestone} placeholder="completion" onChange={(e) => setMilestone(e.target.value)} /></label>
         <button className="btn primary" onClick={run}>Analyse</button>
+        <ExportButton tool="windows_analysis" args={() => spec().args} parts={() => spec().parts} />
       </div>
       {res && !res.ok && <div style={red}>{res.error.message}</div>}
       {res?.ok && <div style={{ overflow: 'auto', flex: 1 }}>
@@ -74,6 +93,10 @@ export function TiaPanel() {
     ...acts.filter((a) => a.id.trim()).map((a) => ({ op: 'add_activity', id: a.id.trim(), name: a.name || a.id, duration_days: Number(a.days) || 0 })),
     ...rels.filter((r) => r.pred.trim() && r.succ.trim()).map((r) => ({ op: 'add_relationship', pred: r.pred.trim(), succ: r.succ.trim(), type: r.type, lag_days: Number(r.lag) || 0 })),
   ];
+  const fragnet = () => {
+    if (!cur) throw new Error('Open a project first.');
+    return { project: cur.proj_short_name, fragnet: ops(), ...(dd ? { data_date: dd.replace('T', ' ') } : {}), ...(milestone.trim() ? { milestone: milestone.trim() } : {}), ...(bl ? { baseline: bl } : {}) };
+  };
   const run = () => {
     if (!cur) return;
     const b = bl ? baselineOf(getDb(), cur, bl as 'project') : null;
@@ -110,6 +133,7 @@ export function TiaPanel() {
         <label>Baseline <select value={bl} onChange={(e) => setBl(e.target.value)}><option value="">none</option><option value="project">Project baseline</option><option value="bl1">BL1</option><option value="bl2">BL2</option><option value="bl3">BL3</option></select></label>
         <button className="btn primary" onClick={run}>Analyse</button>
         {res?.ok && <button className="btn" onClick={keep}>Keep impacted copy</button>}
+        <ExportButton tool="tia" args={fragnet} />
       </div>
       {res && !res.ok && <div style={red}>{res.error.message}</div>}
       {res?.ok && <div style={{ overflow: 'auto', flex: 1 }}>

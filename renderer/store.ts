@@ -131,20 +131,21 @@ function scheduleSave(): void {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveNow, 800);
 }
-export async function saveNow(): Promise<void> {
+/** Saves the database now; whether it was written (false: it changed while saving, so the old file stays and the save that change scheduled writes it). */
+export async function saveNow(): Promise<boolean> {
   clearTimeout(saveTimer);
   const { prefs, columns, layoutName, pxPerDay, bottom, bars, relLines, colWidths, hideTable, hideGantt, openProjects, view, groupBy, sortBy, filter } = state.ui;
   const db = state.db, version = state.dbVersion;
   const lines = dbLines(db, { prefs, columns, layoutName, pxPerDay, bottom, bars, relLines, colWidths, hideTable, hideGantt, openProjects, view, groupBy, sortBy, filter });
   // lines are made as they are sent (never all at once); a change in between would mix two states, so this save
   // stops and the save that change scheduled writes the file
-  await window.p6?.saveDb(() => {
+  return !!(await window.p6?.saveDb(() => {
     if (state.db !== db || state.dbVersion !== version) return false;
     const batch: string[] = [];
     let size = 0;
     for (let r = lines.next(); !r.done; r = lines.next()) { batch.push(r.value); size += r.value.length; if (size >= SAVE_BATCH) break; }
     return batch.length ? batch : null;
-  });
+  }));
 }
 const SAVE_BATCH = 32 * 1024 * 1024; // characters per batch to the main process
 export async function loadFromDisk(): Promise<void> {

@@ -11,6 +11,7 @@ import { nodeInfer, ReasonerUnavailable } from '../core/analysis/hrmRuntime.ts';
 import { registerBim, BIM_SCHEME } from './bim.ts';
 import { registerSandboxScheme } from './sandbox/pyodideService.ts';
 import { registerLob } from './lob.ts';
+import { registerAnalysisExport } from './analysis-export-ipc.ts';
 import { registerWhiq } from './whiq-ipc.ts';
 import { dataDir, dataFile, dataNote, dataRoot, moveLegacyData } from './dataPaths.ts';
 
@@ -253,5 +254,5 @@ ipcMain.handle('confirm',async (_e, message: string, detail?: string) => {
   return r.response === 0;
 });
 
-app.whenReady().then(() => { initModelsDev(dataFile('Cache', 'models-dev.json')); registerBim(() => win); registerLob(() => win); createWindow(); });
+app.whenReady().then(() => { initModelsDev(dataFile('Cache', 'models-dev.json')); registerBim(() => win); registerLob(() => win); registerAnalysisExport(() => win, DB_FILE); createWindow(); });
 app.on('window-all-closed', () => app.quit());

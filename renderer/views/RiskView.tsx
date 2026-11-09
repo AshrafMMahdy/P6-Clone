@@ -5,6 +5,7 @@ import { Grid, type EditorSpec, type GridCol, type GridItem } from '../component
 import { Split, Tabs, showContextMenu } from '../components/Layout.tsx';
 import { getDb, mutate, setUi, toast, useStore, type Prefs } from '../store.ts';
 import { useCtx } from '../hooks.ts';
+import { ExportButton, projectArgs } from './ExportButton.tsx';
 import { fmtDate, STATUS, statusOf } from '../model.ts';
 import { taskFinish, taskStart } from './activityRows.ts';
 import { rows, type Row } from '../../core/db.ts';
@@ -537,6 +538,12 @@ function AnalysisTab() {
         </select></label>
         {!run.running ? <button className="tbtn" onClick={go}><span className="lbl"><b>Run Risk Analysis</b></span></button>
           : <button className="tbtn" onClick={() => run.controller?.abort()}><span className="lbl">Cancel</span></button>}
+        <ExportButton toolbar tool="monte_carlo" args={() => {
+          const n = Math.floor(iterations), sd = seed.trim() === '' ? undefined : Number(seed);
+          if (!(n >= 10 && n <= 20000)) throw new Error('Iterations must be between 10 and 20,000.');
+          if (sd != null && !Number.isInteger(sd)) throw new Error('Seed must be a whole number (or blank for a random seed).');
+          return { ...projectArgs(), iterations: n, ...(res ? { seed: res.seed } : sd != null ? { seed: sd } : {}), risk_events: events };
+        }} />
         {run.running && <span><progress value={run.done} max={run.total} style={{ width: 160, verticalAlign: 'middle' }} /> {run.done} / {run.total}</span>}
         <span className="muted">{nEst} activities with estimates, {nRisk} risks with linked activities.</span>
         {res && <span>Last run: {res.iterations} iterations, seed {res.seed}, {(res.elapsedMs / 1000).toFixed(1)} s{run.dbVersion !== dbVersion ? ' (schedule changed since)' : ''}</span>}
@@ -561,7 +568,7 @@ const CRIT_COLS: GridCol[] = [
   { id: 'dur', title: 'Duration min / mean / max (d)', width: 120, align: 'right' },
 ];
 
-function Results({ res, prefs }: { res: MonteCarloResult; prefs: Prefs }) {
+export function Results({ res, prefs }: { res: MonteCarloResult; prefs: Prefs }) {
   const hpd = prefs.hoursPerDay;
   const [sel, setSel] = useState<string | null>(null);
   const critItems: GridItem[] = useMemo(() => res.activities.filter((a) => !a.milestone || a.criticality > 0).map((a) => ({

@@ -11,6 +11,7 @@ import { calendarResolver } from '../../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../../core/resource/assign.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { applyLobOps, buildLocations, type LobOp } from '../../core/lob/input.ts';
+import { ExportButton } from './ExportButton.tsx';
 import { expandLob } from '../../core/lob/expand.ts';
 import { scheduleLob } from '../../core/lob/pace.ts';
 import { loadLobModels, saveLobOps } from '../../core/lob/store.ts';
@@ -69,6 +70,7 @@ export function LobPanel() {
         <NewPlan />
         <button onClick={() => void importPlan()}>Import Vico / Tactplan…</button>
         {plan && <button onClick={() => void window.p6.bimWriteFiles({ title: 'Folder for the Tactplan files', files: writeTactplan(plan.model, { decimal: 'dot', date: 'dd/MM/yyyy', scheduled: lobView(db, plan.projId, plan.model, { hoursPerDay: ui.prefs.hoursPerDay, limit: Infinity }).tasks }).map((f) => ({ name: f.name, data: f.text })) }).then((w) => w && toast(`Wrote ${w.length} files for Tactplan.`))}>Export to Tactplan…</button>}
+        {plan && <ExportButton tool="lob_view" args={() => ({ project: plan.code })} />}
         {plan && <span className="seg"><button className={tab === 'flow' ? 'on' : ''} onClick={() => setTab('flow')}>Flowline</button><button className={tab === 'takt' ? 'on' : ''} onClick={() => setTab('takt')}>Takt grid</button></span>}
         {plan && plan.from !== 'notebook' && <span style={{ color: '#b00' }}>{plan.problems.join(' ')}</span>}
       </div>

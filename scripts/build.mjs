@@ -16,6 +16,8 @@ const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node22'
 await esbuild({ ...common, entryPoints: [join(root, 'main/main.ts')], outfile: join(root, 'dist/main.cjs') });
 copyFileSync(await buildViewer(), join(root, 'dist/viewer4d.js')); // 4D: the viewer (Extensions > 4D, render_4d)
 await esbuild({ ...common, entryPoints: [join(root, 'main/preload.ts')], outfile: join(root, 'dist/preload.cjs') });
+// the analysis Export… child (main/analysis-export.ts): the MCP server's engine; the file name must match /p6clone-mcp/ (mcp/compute.ts finds its worker file by it)
+await esbuild({ ...common, entryPoints: [join(root, 'main/analysis-export.ts')], outfile: join(root, 'dist/p6clone-mcp-app.cjs') });
 buildSandboxPage(); // dist/sandbox-page: the code sandbox's page (main/sandbox/pyodideService.ts)
 copyIfc(root, join(root, 'dist')); // dist/ifc: 4D's IFC engine and its geometry worker beside the built app (core/bim/runtime.ts looks there)
 // the PQ-VAE engine the embedded agent's schedule review and forecast use (its own process: main/pqvae/start.ts)

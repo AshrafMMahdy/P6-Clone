@@ -11,6 +11,7 @@ import { levelResources } from '../../core/level/level.ts';
 import { scheduleProjects } from '../../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../../core/resource/assign.ts';
 import { goToActivity } from './AnalysisResults.tsx';
+import { ExportButton, numberOf, projectArgs } from './ExportButton.tsx';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
 const box = { display: 'flex', flexDirection: 'column', gap: 6, height: '100%', minHeight: 0 } as const;
@@ -47,8 +48,9 @@ export function CrashPanel() {
   const [res, setRes] = useState<Awaited<ReturnType<typeof crashSchedule>> | null>(null);
   // the remaining critical activities are where crash data matters
   const crit = useMemo(() => rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) <= 0).slice(0, 300), [db, ui.openProjects]);
+  const crashData = (): CrashActivity[] => Object.entries(data).filter(([, v]) => v.min !== '' || v.cost !== '').map(([id, v]) => ({ id, min_days: Number(v.min) || 0, cost_per_day: Number(v.cost) || 0 }));
   const run = async () => {
-    const acts: CrashActivity[] = Object.entries(data).filter(([, v]) => v.min !== '' || v.cost !== '').map(([id, v]) => ({ id, min_days: Number(v.min) || 0, cost_per_day: Number(v.cost) || 0 }));
+    const acts = crashData();
     setRes(await crashSchedule(getDb(), ui.openProjects, {
       targetDays: mode === 'days' ? Number(days) : undefined, targetFinish: mode === 'date' ? date.replace('T', ' ') : undefined,
       indirectPerDay: Number(indirect) || undefined, ldPerDay: Number(ld) || undefined, activities: acts.length ? acts : undefined, defaultMaxPct: Number(pct) || 30, hoursPerDay: ui.prefs.hoursPerDay,
@@ -67,6 +69,10 @@ export function CrashPanel() {
         <label title="Used when no crash data is entered below">Default max cut <input style={{ width: 36 }} value={pct} onChange={(e) => setPct(e.target.value)} />%</label>
         <button className="btn primary" onClick={run}>Crash</button>
         {res?.ok && res.ops.length > 0 && <button className="btn" onClick={apply}>Apply</button>}
+        <ExportButton tool="crash_schedule" args={() => {
+          const acts = crashData();
+          return { ...projectArgs(), ...(mode === 'days' ? { target_days: Number(days) } : {}), ...(mode === 'date' ? { target_finish: date.replace('T', ' ') } : {}), ...(Number(indirect) ? { indirect_cost_per_day: Number(indirect) } : {}), ...(Number(ld) ? { ld_per_day: Number(ld) } : {}), ...(acts.length ? { activities: acts } : {}), default_max_pct: Number(pct) || 30 };
+        }} />
       </div>
       <div style={{ display: 'flex', gap: 8, flex: 1, minHeight: 0 }}>
         <div style={{ width: 380, overflow: 'auto' }}>
@@ -97,15 +103,21 @@ export function WhatIfPanel() {
   const [list, setList] = useState<Row[]>([{ scenario: 'Scenario 1', id: '', days: '' }]);
   const [res, setRes] = useState<Awaited<ReturnType<typeof evaluateBatch>> | null>(null);
   const set = (i: number, k: keyof Row, v: string) => setList(list.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
-  const run = async () => {
+  /** The scenarios the rows make: rows with the same scenario name form one. */
+  const scenarios = (): Scenario[] => {
     const by = new Map<string, Scenario>();
     for (const r of list) {
       if (!r.id.trim() || r.days === '') continue;
       const s = by.get(r.scenario) ?? by.set(r.scenario, { name: r.scenario, overrides: [] }).get(r.scenario)!;
       s.overrides.push({ op: 'update_activity', id: r.id.trim(), duration_days: Number(r.days) });
     }
-    if (!by.size) return toast('Enter an activity ID and a new duration.');
-    setRes(await evaluateBatch(getDb(), ui.openProjects, [...by.values()], { hoursPerDay: ui.prefs.hoursPerDay, calendarDays: false }));
+    if (!by.size) throw new Error('Enter an activity ID and a new duration.');
+    return [...by.values()];
+  };
+  const run = async () => {
+    let sc: Scenario[];
+    try { sc = scenarios(); } catch (e) { return toast((e as Error).message); }
+    setRes(await evaluateBatch(getDb(), ui.openProjects, sc, { hoursPerDay: ui.prefs.hoursPerDay, calendarDays: false }));
   };
   return (
     <div style={box}>
@@ -116,6 +128,7 @@ export function WhatIfPanel() {
         <button className="btn" onClick={() => setList([...list, { scenario: list.at(-1)?.scenario ?? 'Scenario 1', id: '', days: '' }])}>Add change</button>
         <button className="btn" onClick={() => setList([...list, { scenario: `Scenario ${new Set(list.map((r) => r.scenario)).size + 1}`, id: '', days: '' }])}>Add scenario</button>
         <button className="btn primary" onClick={run}>Evaluate</button>
+        <ExportButton tool="evaluate_batch" args={() => ({ ...projectArgs(), scenarios: scenarios() })} />
       </div>
       {res && !res.ok && <div style={{ color: "#b00020" }}>{res.error.message}</div>}
       {res?.ok && <div style={{ overflow: 'auto', flex: 1 }}>
@@ -154,6 +167,7 @@ export function OptimizePanel() {
         <label title="Same seed, same answer">Seed <input style={{ width: 70 }} value={seed} onChange={(e) => setSeed(e.target.value)} /></label>
         <button className="btn primary" disabled={busy} onClick={run}>{busy ? 'Thinking…' : 'Optimise'}</button>
         {res?.ok && <button className="btn" onClick={apply}>Apply</button>}
+        <ExportButton tool="optimize_schedule" args={() => ({ ...projectArgs(), ...(numberOf('Samples', samples) != null ? { samples: numberOf('Samples', samples) } : {}), ...(numberOf('Seed', seed) != null ? { seed: numberOf('Seed', seed) } : {}) })} />
       </div>
       {err && <div style={{ color: "#b00020" }}>{err}</div>}
       {res && !res.ok && <div style={{ color: "#b00020" }}>{res.error.message}</div>}

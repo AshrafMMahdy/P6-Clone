@@ -16,6 +16,9 @@ import { CrashPanel, OptimizePanel, WhatIfPanel } from './RecoveryPanels.tsx';
 import { TiaPanel, WindowsPanel } from './DelayPanels.tsx';
 import { FourDPanel } from './FourDView.tsx';
 import { LobPanel } from './LobView.tsx';
+import { MonteCarloPanel } from './MonteCarloPanel.tsx';
+import { CheckSchedulePanel, ComparePanel, EvaluatePanel, FloatPathsPanel, LevelPanel, ProgressCurvesPanel, ResourceHistogramPanel, ReviewPanel } from './AnalysisPanels.tsx';
+import { ExportButton, projectArgs } from './ExportButton.tsx';
 
 export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'dcma', title: 'DCMA 14-point', blurb: 'The 14 DCMA schedule checks, with the critical path test, CPLI and BEI.' },
@@ -27,6 +30,15 @@ export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'tia', title: 'Time impact analysis', blurb: 'A fragnet added to a copy: the delay it causes at the data date.' },
   { id: 'lob', title: 'LOB', blurb: 'Line of Balance: a location-based plan beside the CPM one, flowlines edited by hand, takt, Vico and Tactplan exchange.' },
   { id: '4d', title: '4D', blurb: 'An IFC model linked to the activities: the build by date, Navisworks / SYNCHRO / IFC4 exchange, video.' },
+  { id: 'montecarlo', title: 'Monte Carlo', blurb: 'Schedule risk analysis: finish distribution with P10 to P90, criticality and sensitivity.' },
+  { id: 'check', title: 'Check schedule', blurb: "P6's Check Schedule Report: the checks with P6's targets." },
+  { id: 'review', title: 'Review', blurb: 'A schedule quality review: pass, warning or fail per check.' },
+  { id: 'floatpaths', title: 'Float paths', blurb: 'The longest path and the next most critical chains.' },
+  { id: 'curves', title: 'Progress curves', blurb: 'Planned, earned and actual value by period, with SPI and CPI.' },
+  { id: 'histogram', title: 'Resource histogram', blurb: 'Resource demand against its limit, by period.' },
+  { id: 'level', title: 'Level resources', blurb: 'What leveling would delay, on a copy: nothing is changed.' },
+  { id: 'evaluate', title: 'Evaluate one change', blurb: 'The effect of one duration change on the finish, without changing the project.' },
+  { id: 'compare', title: 'Compare', blurb: 'Two projects, a file, or a baseline: what changed.' },
 ];
 
 export function ExtensionsView() {
@@ -36,11 +48,11 @@ export function ExtensionsView() {
     <>
       <div className="layoutbar"><span>Extensions</span><span className="muted">Capabilities beyond P6, for planners and the AI assistant alike.</span></div>
       <div className="winbody" style={{ flexDirection: 'row' }}>
-        <div style={{ width: 200, borderRight: '1px solid #c4cfe0', padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {EXTENSIONS.map((e) => <div key={e.id} className={`dirbtn ${cur.id === e.id ? 'on' : ''}`} style={{ flexDirection: 'column', alignItems: 'flex-start', padding: 6 }} onClick={() => setUi({ extension: e.id })}><b>{e.title}</b><span className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>{e.blurb}</span></div>)}
+        <div style={{ width: 200, borderRight: '1px solid #c4cfe0', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+          {EXTENSIONS.map((e) => <div key={e.id} className={`dirbtn ${cur.id === e.id ? 'on' : ''}`} style={{ flexDirection: 'column', alignItems: 'flex-start', padding: 6, flex: 'none' }} onClick={() => setUi({ extension: e.id })}><b>{e.title}</b><span className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>{e.blurb}</span></div>)}
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 8, minWidth: 0 }}>
-          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : cur.id === 'crash' ? <CrashPanel /> : cur.id === 'whatif' ? <WhatIfPanel /> : cur.id === 'optimize' ? <OptimizePanel /> : cur.id === 'windows' ? <WindowsPanel /> : cur.id === 'tia' ? <TiaPanel /> : cur.id === '4d' ? <FourDPanel /> : cur.id === 'lob' ? <LobPanel /> : null}
+          {!ui.openProjects.length ? <div className="muted">Open a project first (Projects window, double-click).</div> : cur.id === 'dcma' ? <DcmaPanel /> : cur.id === 'lint' ? <LintPanel /> : cur.id === 'crash' ? <CrashPanel /> : cur.id === 'whatif' ? <WhatIfPanel /> : cur.id === 'optimize' ? <OptimizePanel /> : cur.id === 'windows' ? <WindowsPanel /> : cur.id === 'tia' ? <TiaPanel /> : cur.id === '4d' ? <FourDPanel /> : cur.id === 'lob' ? <LobPanel /> : cur.id === 'montecarlo' ? <MonteCarloPanel /> : cur.id === 'check' ? <CheckSchedulePanel /> : cur.id === 'review' ? <ReviewPanel /> : cur.id === 'floatpaths' ? <FloatPathsPanel /> : cur.id === 'curves' ? <ProgressCurvesPanel /> : cur.id === 'histogram' ? <ResourceHistogramPanel /> : cur.id === 'level' ? <LevelPanel /> : cur.id === 'evaluate' ? <EvaluatePanel /> : cur.id === 'compare' ? <ComparePanel /> : null}
         </div>
       </div>
     </>
@@ -79,6 +91,10 @@ function DcmaPanel() {
         <label><input type="checkbox" checked={dynamic} onChange={(e) => setDynamic(e.target.checked)} /> Dynamic 44-day limit</label>
         <button className="btn primary" onClick={run}>Run assessment</button>
         {report && <button className="btn" onClick={save}>Save Report...</button>}
+        <ExportButton tool="dcma_14" args={() => {
+          if ((status && parseP6Date(status.replace('T', ' ')) == null) || (target && parseP6Date(target.replace('T', ' ')) == null)) throw new Error('Enter valid dates.');
+          return { ...projectArgs(), profile, ...(baseline !== 'project' ? { baseline } : {}), ...(status ? { status_date: status.replace('T', ' ') } : {}), ...(target ? { target_finish: target.replace('T', ' ') } : {}), cpt_slip_days: Number(slip) || 600, limit_days: dynamic ? 'dynamic' : 44 };
+        }} />
       </div>
       {report && <div><b>{report.summary.failed}</b> failed · {report.summary.passed} passed{report.summary.not_assessed ? ` · ${report.summary.not_assessed} not assessed` : ''} · {report.tasks} tasks, {report.relationships} relationships · status date {report.status_date?.slice(0, 16) ?? 'not set'}{report.baseline ? ` · baseline ${report.baseline.name}${/project baseline$/.test(report.baseline.how) ? '' : ` (${report.baseline.how})`}` : ' · no baseline'}</div>}
       {report ? <AnalysisResults checks={report.checks} /> : <div className="muted">Runs the 14 DCMA checks on the open project(s). The critical path test runs on a copy; the project is not changed.</div>}
@@ -105,6 +121,7 @@ function LintPanel() {
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <label>Profile <select value={profile} onChange={(e) => setProfile(e.target.value as 'p6' | 'platform')}><option value="p6">P6 checks</option><option value="platform">P6 checks + network score (White Hat IQ)</option></select></label>
         <button className="btn primary" onClick={run}>Run lint</button>
+        <ExportButton tool="lint" args={() => ({ ...projectArgs(), profile })} />
       </div>
       {report && <div>{report.score != null ? <><b>Score {report.score}</b> (grade {report.grade}) · </> : null}{report.checks.filter((c) => c.band === 'fail').length} failing · {report.checks.filter((c) => c.band === 'warn').length} warnings · {report.work_activities} work activities, {report.relationships} relationships</div>}
       {report ? <AnalysisResults checks={report.checks} onApplyFix={apply} /> : <div className="muted">Finds logic and modelling problems P6 schedules without complaint. Fixes are edit operations: Apply makes the change, reschedules, and can be undone with Ctrl+Z.</div>}
