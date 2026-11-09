@@ -13,7 +13,8 @@ import { applyLobOps, buildLocations, type LobOp } from '../core/lob/input.ts';
 import { expandPlan } from '../core/lob/expand.ts';
 import { scheduleLob } from '../core/lob/pace.ts';
 import { isLobProject, loadLobModels, reconcile, saveLobOps } from '../core/lob/store.ts';
-import { lobView } from '../core/lob/view.ts';
+import { cutLobView, lobView } from '../core/lob/view.ts';
+import { exportDoc, exportProp, exportResult } from './export.ts';
 import { flowlineSvg } from '../core/lob/svg.ts';
 import { taktApply, taktCheck } from '../core/lob/takt.ts';
 import { forecastLob } from '../core/lob/forecast.ts';
@@ -33,7 +34,7 @@ const OPS_HELP = 'Operations, applied in order (one refused refuses all): set_cr
 export const LOB_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<string, unknown>) => [
   { name: 'lob_create', annotations: edit, description: `Create a location-based (Line of Balance) plan as a new project in this file, beside its CPM projects; it schedules with them and travels in the XER (real P6 reads it as an ordinary, fully linked project). id, name?, start (YYYY-MM-DD), calendar?, locations: {levels: [names, top first], grid: [count per level] (codes P1, P1F2...) | tree: [{code, name, children}] | list: [{code, name, level, parent}]}, tasks: [task], links?: [add_link fields], takt?: {takt_days, ...}. ${TASK_HELP} Or from_cpm: {project, location_code, trade_code}: a new LOB project from a CPM project's activities grouped by two activity code types (the CPM project stays as it was, to compare); dry_run: true shows the grouping. Answers the plan as lob_view does.`, inputSchema: withHandle({ type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, start: { type: 'string' }, calendar: { type: 'string' }, locations: obj, tasks: arr(), links: arr(), takt: obj, from_cpm: obj, dry_run: { type: 'boolean' } }, required: ['id'] }) },
   { name: 'lob_edit', annotations: edit, description: `Change an LOB plan. ${OPS_HELP} One undoable change: the plan is expanded into its activities and logic, saved into the file and scheduled. Answers changes (every value that moved, old → new: nothing changes silently), notes, and the schedule (finish, trades that could not be paced).`, inputSchema: withHandle({ type: 'object', properties: { project, operations: arr() }, required: ['operations'] }) },
-  { name: 'lob_view', annotations: ro, description: 'An LOB plan as scheduled: each trade with its segments (crew, driver, timing, rate), dates and float, and its locations [location, start, finish, float days]; the critical trades; collisions (two trades in a location at the same time); gaps (a crew waiting between locations); and anything changed outside the clone (reconcile). svg: a path to write the flowline picture to. limit (default 200) per list.', inputSchema: withHandle({ type: 'object', properties: { project, limit: { type: 'number' }, svg: { type: 'string' } } }) },
+  { name: 'lob_view', annotations: ro, description: 'An LOB plan as scheduled: each trade with its segments (crew, driver, timing, rate), dates and float, and its locations [location, start, finish, float days]; the critical trades; collisions (two trades in a location at the same time); gaps (a crew waiting between locations); and anything changed outside the clone (reconcile). svg: a path to write the flowline picture to. limit (default 200) per list.' + exportDoc('lob_view', ['trades', 'segments', 'locations', 'collisions', 'gaps']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, project, limit: { type: 'number' }, svg: { type: 'string' } } }) },
   { name: 'lob_takt', annotations: edit, description: 'Takt on an LOB plan (set_takt first, with lob_edit). Without apply: the balance check, each trade × zone that does not fit the takt and what would make it fit (read only). apply: true sizes the crews to fit, holds every zone to one takt period, paces the trades and links them as a train with the buffer periods; one undoable change, every value that moved listed.', inputSchema: withHandle({ type: 'object', properties: { project, apply: { type: 'boolean' } } }) },
   { name: 'lob_forecast', annotations: ro, description: 'Control: each trade forecast at the rate it actually achieved over the last window_days (default 21: actual against planned days of the locations finished then, else all finished), with its planned crew; and alarms where a predecessor’s forecast runs into a successor’s planned start (lag counted, buffers absorbed), nearest first with the working days left to react. The plan is not changed.', inputSchema: withHandle({ type: 'object', properties: { project, window_days: { type: 'number' } } }) },
   { name: 'lob_import', annotations: edit, description: 'Bring an LOB plan from another tool into this file as a new project: a Vico Schedule Planner / Vico Control project (.dpp: locations, tasks, quantities, consumption, crews, each line with its start, the calendar; Vico files seen so far carry no logic, and the notes say so), or a Tactplan export (a folder of its Locations, Grid and Quantities CSVs). id: the new Project ID.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, id: { type: 'string' } }, required: ['path'] }) },
@@ -135,11 +136,23 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
     }
     case 'lob_view': {
       const { projId, model, from, problems } = lobOf(a.project);
-      const v = view(projId, model, a.limit);
+      // worked out whole: the answer lists `limit` of each list (default 200; the _totals say how many there are), the export all
+      const full = view(projId, model, Infinity);
+      const v = { project: full.project, ...cutLobView(full, a.limit ?? 200) };
       const outside = reconcile(s.db, projId, model, { hoursPerDay: s.hpd });
       let written: string | undefined;
       if (a.svg) { written = pathArg(a.svg, 'svg', 'write'); h.writeOut(written, flowlineSvg(s.db, projId, model, { critical: v.critical, title: `${v.project}: flowline` })); }
-      return { ...v, ...(from !== 'notebook' ? { model_from: from, problems } : {}), ...(outside.length ? { changed_outside: outside } : {}), ...(written ? { svg: written } : {}) };
+      const extra = { ...(from !== 'notebook' ? { model_from: from, problems } : {}), ...(outside.length ? { changed_outside: outside } : {}), ...(written ? { svg: written } : {}) };
+      const answer = { ...v, ...extra };
+      if (a.export == null) return answer;
+      const crit = new Set(full.critical);
+      return { ...answer, exported: exportResult('lob_view', a.export, { ...full, ...extra }, [
+        { name: 'trades', columns: ['code', 'name', 'trade', 'start', 'finish', 'floatDays', 'critical', 'locations_total'], rows: full.tasks.map(({ segments: _s, locations: _l, ...t }) => ({ ...t, critical: crit.has(t.code) })) },
+        { name: 'segments', columns: ['task', 'from', 'to', 'crew', 'driver', 'timing', 'rate'], rows: full.tasks.flatMap((t) => t.segments.map((x) => ({ task: t.code, ...x }))) },
+        { name: 'locations', columns: ['task', 'location', 'start', 'finish', 'float_days'], rows: full.tasks.flatMap((t) => t.locations.map(([location, start, finish, float_days]) => ({ task: t.code, location, start, finish, float_days }))) },
+        { name: 'collisions', columns: ['location', 'a', 'b', 'from', 'to'], rows: full.collisions },
+        { name: 'gaps', columns: ['task', 'after', 'before', 'days'], rows: full.gaps },
+      ], h.writeOut) };
     }
     case 'lob_takt': {
       const { projId, model } = lobOf(a.project);

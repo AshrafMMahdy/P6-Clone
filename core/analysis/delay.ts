@@ -79,6 +79,14 @@ const predCodes = (u: Update, t: Row) => { const byId = new Map(tasksOf(u).map((
 
 const PROGRESS = ['act_start_date', 'act_end_date', 'remain_drtn_hr_cnt', 'phys_complete_pct', 'status_code', 'restart_date', 'reend_date', 'suspend_date', 'resume_date', 'expect_end_date', 'act_work_qty', 'remain_work_qty'];
 
+/** A window's lists as an answer shows them: the first `max` activities of each (0 = all); the _total beside each list says how many
+ *  there are (and driving_path_more how many the path has beyond those shown). */
+export function cutWindow(w: Record<string, unknown>, max: number): Record<string, unknown> {
+  if (!(max > 0)) return w;
+  const path = w.driving_path as string[];
+  return { ...w, driving_path: path.slice(0, max), ...(path.length > max ? { driving_path_more: path.length - max } : {}), lost_time: (w.lost_time as unknown[]).slice(0, max), added: (w.added as unknown[]).slice(0, max) };
+}
+
 export async function windowsAnalysis(updates: Update[], o: { milestone?: string; method?: 'contemporaneous' | 'half_step'; hoursPerDay?: number; maxIds?: number; tick?: Tick } = {}) {
   const list = [...updates].sort((x, y) => (dataDate(x) ?? 0) - (dataDate(y) ?? 0));
   if (list.length < 2) return { ok: false as const, error: { code: 'bad_input', message: 'A windows analysis needs at least two updates.' } };
@@ -96,6 +104,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
     const fa = finOf(ea), fb = finOf(eb);
     const match = matchActivities(tasksOf(A), tasksOf(B));
     const path = drivingPath(A, ea);
+    const added = (() => { const m = new Set(match.values()); return tasksOf(B).filter((t) => !m.has(t)); })();
     const lost = path.map((a) => {
       const b = match.get(a);
       if (!b) return { id: a.task_code, name: a.task_name, lost_days: null, causes: ['deleted'] };
@@ -111,8 +120,8 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
     const w: Record<string, unknown> = {
       window: i, from: A.name, to: B.name, data_date_from: fmt(dataDate(A)), data_date_to: fmt(dataDate(B)),
       finish_from: fmt(fa), finish_to: fmt(fb), slip_days: wd(fa, fb),
-      driving_path: path.slice(0, max).map((t) => t.task_code), ...(path.length > max ? { driving_path_more: path.length - max } : {}),
-      lost_time: lost.slice(0, max), added: (() => { const m = new Set(match.values()); return tasksOf(B).filter((t) => !m.has(t)).slice(0, max).map((t) => t.task_code); })(),
+      driving_path: path.map((t) => t.task_code), driving_path_total: path.length,
+      lost_time: lost, lost_time_total: lost.length, added: added.map((t) => t.task_code), added_total: added.length,
     };
     if (o.method === 'half_step') {
       // update n-1 with only update n's progress, rescheduled at update n's data date
@@ -125,7 +134,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
       });
       w.half_step = { finish: fmt(half), progress_days: wd(fa, half), revision_days: wd(half, fb) };
     }
-    windows.push(w);
+    windows.push(cutWindow(w, max));
   }
   const fl = finishActivity(list.at(-1)!, o.milestone), ff = finishActivity(first, o.milestone);
   const total = wd(ff ? finOf(ff) : null, fl ? finOf(fl) : null);

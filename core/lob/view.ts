@@ -11,9 +11,17 @@ import type { LobModel } from './model.ts';
 
 export interface LobView {
   finish: string | null; dataDate: string | null; critical: string[];
-  tasks: { code: string; name: string; trade: string; start: string | null; finish: string | null; floatDays: number | null; segments: { from: string; to: string; crew: string; driver: string; timing: string; rate: number | null }[]; locations: [string, string, string, number][] }[];
+  tasks: { code: string; name: string; trade: string; start: string | null; finish: string | null; floatDays: number | null; segments: { from: string; to: string; crew: string; driver: string; timing: string; rate: number | null }[]; locations: [string, string, string, number][]; /** how many locations it has (locations lists the first `limit`) */ locations_total: number }[];
   collisions: { location: string; a: string; b: string; from: string; to: string }[];
   gaps: { task: string; after: string; before: string; days: number }[];
+  /** how many there are (each list shows the first `limit`) */
+  collisions_total: number; gaps_total: number;
+}
+
+/** A view's lists as an answer shows them: the first `limit` of each (a task's locations, collisions, gaps); the _totals say how many
+ *  there are. */
+export function cutLobView(v: LobView, limit: number): LobView {
+  return { ...v, tasks: v.tasks.map((t) => ({ ...t, locations: t.locations.slice(0, limit) })), collisions: v.collisions.slice(0, limit), gaps: v.gaps.slice(0, limit) };
 }
 
 export function lobView(db: Db, projId: string, m: LobModel, o: { hoursPerDay: number; limit?: number }): LobView {
@@ -21,8 +29,7 @@ export function lobView(db: Db, projId: string, m: LobModel, o: { hoursPerDay: n
   const cal = calendarResolver(db, []).fallback(proj.clndr_id);
   const acts = new Map(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => [t.task_code, t]));
   const day = (s: string) => (s ? s.slice(0, 10) : '');
-  const out: LobView = { finish: null, dataDate: proj.last_recalc_date || null, critical: [], tasks: [], collisions: [], gaps: [] };
-  const limit = o.limit ?? 200;
+  const out: LobView = { finish: null, dataDate: proj.last_recalc_date || null, critical: [], tasks: [], collisions: [], gaps: [], collisions_total: 0, gaps_total: 0 };
   const spans: { task: string; loc: string; s: number; f: number }[] = [];
   for (const t of m.tasks) {
     const d = locationDurations(m, t);
@@ -36,7 +43,8 @@ export function lobView(db: Db, projId: string, m: LobModel, o: { hoursPerDay: n
       start: locs.length ? day(locs.map(start).sort()[0]) : null, finish: locs.length ? day(locs.map(finish).sort().at(-1)!) : null,
       floatDays: minFloat == null ? null : Math.round(minFloat * 10) / 10,
       segments: t.segments.map((s) => ({ from: s.from, to: s.to, crew: `${s.crews} × ${s.crewSize}${s.productivity !== 1 ? ` at ${s.productivity}` : ''}`, driver: s.driver, timing: s.timing, rate: s.rate ?? null })),
-      locations: locs.slice(0, limit).map((a) => [a.task_code.slice(t.code.length + 1), day(start(a)), day(finish(a)), a.total_float_hr_cnt === '' ? NaN : Math.round((Number(a.total_float_hr_cnt) / o.hoursPerDay) * 10) / 10]),
+      locations_total: locs.length,
+      locations: locs.map((a) => [a.task_code.slice(t.code.length + 1), day(start(a)), day(finish(a)), a.total_float_hr_cnt === '' ? NaN : Math.round((Number(a.total_float_hr_cnt) / o.hoursPerDay) * 10) / 10]),
     });
     for (let k = 1; k < locs.length; k++) {
       const gap = cal.workBetween(parseP6Date(finish(locs[k - 1]))!, parseP6Date(start(locs[k]))!) / 60 / o.hoursPerDay;
@@ -54,8 +62,8 @@ export function lobView(db: Db, projId: string, m: LobModel, o: { hoursPerDay: n
     const from = Math.max(a.s, b.s), to = Math.min(a.f, b.f);
     if (cal.workBetween(from, to) > 0) out.collisions.push({ location: a.loc.length >= b.loc.length ? a.loc : b.loc, a: a.task, b: b.task, from: new Date(from * 60000).toISOString().slice(0, 10), to: new Date(to * 60000).toISOString().slice(0, 10) });
   }
-  out.gaps = out.gaps.slice(0, limit); out.collisions = out.collisions.slice(0, limit);
-  return out;
+  out.gaps_total = out.gaps.length; out.collisions_total = out.collisions.length;
+  return cutLobView(out, o.limit ?? 200);
 }
 
 /** An edit (MCP edit, the Activities window, Global Change) may not change what the LOB plan sets: an LOB activity's

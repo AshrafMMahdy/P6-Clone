@@ -8,10 +8,11 @@ import { makeCtx, isCritical } from '../project/ctx.ts';
 import { checkStoredDates } from '../schedule/stored-dates.ts';
 
 export type Grade = 'pass' | 'warn' | 'fail';
-export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; detail: string; examples: string[] }
+export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; detail: string; examples: string[]; /** a check listing activities: how many there are (examples shows the first 10) */ examples_total?: number }
 export interface Review { grade: Grade; projects: string[]; openActivities: number; relationships: number; checks: Check[] }
 
-export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[]; calendarDays?: boolean } = {}): Review {
+/** examples: activities listed per check (default 10; 0 = all). */
+export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[]; calendarDays?: boolean; examples?: number } = {}): Review {
   const hpd = opts.hoursPerDay ?? 8;
   const projs = rows(db, 'PROJECT').filter((p) => !p._baseline_of && (!opts.projIds?.length || opts.projIds.includes(p.proj_id)));
   const open = new Set(projs.map((p) => p.proj_id));
@@ -27,7 +28,8 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
     const percent = of ? Math.round((1000 * count) / of) / 10 : null;
     const p = percent ?? 0;
     const grade: Grade = failAt != null && (failAt === 0 ? count > 0 : p > failAt) ? 'fail' : warnAt != null && (warnAt === 0 ? count > 0 : p > warnAt) ? 'warn' : 'pass';
-    checks.push({ id, title, grade, count, of, percent, limit, detail, examples: (typeof list === 'number' ? examples : list.slice(0, 10).map(name)) });
+    const max = opts.examples ?? 10;
+    checks.push({ id, title, grade, count, of, percent, limit, detail, examples: (typeof list === 'number' ? examples : (max > 0 ? list.slice(0, max) : list).map(name)), ...(typeof list === 'number' ? {} : { examples_total: list.length }) });
   };
   const dd = parseP6Date(projs.map((p) => p.last_recalc_date).find(Boolean));
 
@@ -52,7 +54,7 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   const oos = live.filter((t) => t.act_start_date && (ctx.predsOf.get(t.task_id) ?? []).some((r) => { const p = ctx.taskById.get(r.pred_task_id); return r.pred_type === 'PR_FS' && p && !p.act_end_date; }));
   add('out_of_sequence', 'Started out of sequence', oos, live.filter((t) => t.act_start_date).length, 0, null, 'none', 'Started before a finish-to-start predecessor finished.');
   const crit = live.filter((t) => isCritical(t, ctx));
-  add('critical', 'Critical activities', crit.length, live.length, null, null, 'informational', `${crit.length} critical of ${live.length} open activities.`, crit.slice(0, 10).map(name));
+  add('critical', 'Critical activities', crit, live.length, null, null, 'informational', `${crit.length} critical of ${live.length} open activities.`);
   const dates = checkStoredDates(db);
   const head = dates.find((f) => f.code === 'DATES_NOT_CURRENT');
   const n = head ? Number(/^(\d+) of/.exec(head.message)?.[1] ?? 0) : 0;

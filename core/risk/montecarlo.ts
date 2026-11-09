@@ -193,6 +193,8 @@ export interface MonteCarloOptions {
   /** Where each finished iteration is kept as it is done (the MCP server: a file in the write root, mcp/keptRuns.ts): a run that
    *  stops (cancelled, failed, its process ended) is continued from it by a later run, which gives what an uninterrupted run gives. */
   store?: IterationStore;
+  /** Also answer samples: each iteration's finish in working days and each milestone's finish (an export lists every iteration). */
+  samples?: boolean;
 }
 /** The shape of one kept iteration (records are made and read here; the store only keeps them). */
 export interface IterationLayout { activities: number; estimable: number; /** the estimable activities whose duration varies (kept) */ durations: number; risks: number; events: number }
@@ -289,6 +291,9 @@ export interface MonteCarloResult {
   sensitivity: { taskId: string; code: string; name: string; rho: number }[];
   milestones: MilestoneResult[];
   risks: RiskEventResult[];
+  /** With opts.samples, per iteration in the order finishSamples has them: the finish in working days from the data date (as days
+   *  takes it) and each milestone's finish (minutes; null when it has none that iteration), in the order milestones lists them. */
+  samples?: { finishDays: number[]; milestones: (number | null)[][] };
 }
 
 /** Nearest-rank percentile of an ascending array. */
@@ -689,10 +694,12 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   });
   const sensitivity = activities.filter((a) => a.sensitivity != null).map((a) => ({ taskId: a.taskId, code: a.code, name: a.name, rho: a.sensitivity! }))
     .sort((a, b) => Math.abs(b.rho) - Math.abs(a.rho));
+  const mileK: number[] = [];
   const milestones: MilestoneResult[] = prep.base.flatMap((t, k) => {
     if (!isMile(t) || t.act_end_date) return [];
     const efs = finishesOf(k);
     if (!efs.length) return [];
+    mileK.push(k);
     return [{
       taskId: t.task_id, code: t.task_code || t.task_id, name: t.task_name ?? '', deterministic: detEF[k], mean: efs.reduce((a, b) => a + b, 0) / efs.length,
       P10: percentile(efs, 0.1), P50: percentile(efs, 0.5), P80: percentile(efs, 0.8), P90: percentile(efs, 0.9),
@@ -726,5 +733,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
     probDeterministic: onTime / iterations, histogram, cumulative, activities, sensitivity, milestones, risks,
     ...(stopped ? { partial: { stopped: stopped.by, requested, ...(stopped.error && stopped.by === 'failed' ? { error: stopped.error.message } : {}), ...(kept ? { kept } : {}) } } : {}),
     ...(store ? { resumed } : {}), ...(redone ? { redone } : {}), ...(keptNote ? { keptNote } : {}),
+    // (each milestone's finish exactly as finishesOf makes it, before sorting)
+    ...(opts.samples ? { samples: { finishDays: Array.from(finishes, wd), milestones: mileK.map((k) => Array.from(efSamples[k], (x) => (Number.isFinite(x) ? x + efAnchor[k] : null))) } } : {}),
   };
 }

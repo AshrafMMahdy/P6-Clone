@@ -271,7 +271,7 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
   if (want('connectivity')) {
     const np = s.tasks.filter((t) => !isWbs(t) && !preds(t).length), ns = s.tasks.filter((t) => !isWbs(t) && !succs(t).length);
     const v = Math.max(0, np.length - 1) + Math.max(0, ns.length - 1);
-    out.push({ ...check('connectivity', 'Connectivity (one start, one finish)', 'warning', [...np.slice(0, 20).map((t) => offender(t, s, 'no predecessor')), ...ns.slice(0, 20).map((t) => offender(t, s, 'no successor'))], null, v > T.connectivity.max_open_ends ? 'fail' : 'pass', maxIds, { weight: WEIGHTS.connectivity, applied: T.connectivity, note: `${np.length} activities without predecessors and ${ns.length} without successors; a sound network has one of each.` }), unit: 'ratio', metric: v });
+    out.push({ ...check('connectivity', 'Connectivity (one start, one finish)', 'warning', [...np.map((t) => offender(t, s, 'no predecessor')), ...ns.map((t) => offender(t, s, 'no successor'))], null, v > T.connectivity.max_open_ends ? 'fail' : 'pass', maxIds, { weight: WEIGHTS.connectivity, applied: T.connectivity, note: `${np.length} activities without predecessors and ${ns.length} without successors; a sound network has one of each.` }), unit: 'ratio', metric: v });
   }
   if (want('start_anchored')) {
     const starts = s.tasks.filter((t) => !isWbs(t) && !preds(t).length);

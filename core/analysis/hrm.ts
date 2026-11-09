@@ -9,7 +9,7 @@ import { maxOf, minOf } from '../arrays.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { dayHours } from '../project/units.ts';
-import { scheduleProjects } from '../schedule/cpm.ts';
+import { calendarResolver, scheduleProjects } from '../schedule/cpm.ts';
 import { levelResources } from '../level/level.ts';
 import { onScratch } from './batch.ts';
 import type { CrashActivity } from './crash.ts';
@@ -209,12 +209,16 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const ops = proposalOps(inst, best.modes, projIds.length > 1, projCode, o.hoursPerDay);
   // real dates: CPM, P6's default leveling (early start priority), and the reasoner's modes and order through the same leveler
-  const measureLeveled = (d: Db, first?: string[]) => { const s = scheduleProjects(d, projIds, {}); if (!s.ok) throw new Error('The schedule failed.'); const cpm = finishOf(d, projIds); if (leveled) levelResources(d, projIds, { first }); return { cpm, leveled: finishOf(d, projIds) }; };
+  // (and every activity's dates at each stage: an export lists them side by side)
+  const open = new Set(projIds);
+  const datesOf = (d: Db) => new Map(rows(d, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => [t.task_id, [parseP6Date(t.act_start_date || t.early_start_date), parseP6Date(t.act_end_date || t.early_end_date)] as const]));
+  const measureLeveled = (d: Db, first?: string[]) => { const s = scheduleProjects(d, projIds, {}); if (!s.ok) throw new Error('The schedule failed.'); const cpm = finishOf(d, projIds), cpmDates = datesOf(d); if (leveled) levelResources(d, projIds, { first }); return { cpm, leveled: finishOf(d, projIds), cpmDates, dates: datesOf(d) }; };
   if (o.tick) await o.tick(1, 3, 'P6 leveling for comparison');
   const p6 = onScratch(db, (d) => measureLeveled(d));
   if (o.tick) await o.tick(2, 3, 'leveling in the proposed order');
   const mine = onScratch(db, (d) => { applyOps(d, ops); return measureLeveled(d, order); });
   const fmt = (v: number | null) => (v != null ? formatP6Date(v) : null);
+  const cals = calendarResolver(db, []), projCal = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.clndr_id]));
   const byTask = new Map(inst.acts.map((a) => [a.task.task_id, a]));
   return {
     ok: true as const,
@@ -223,7 +227,15 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     better_than_p6_leveler: p6.leveled != null && mine.leveled != null ? mine.leveled < p6.leveled : null,
     sgs_makespan_days: best.makespan, crash_cost: Math.round(best.cost * 100) / 100,
     changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
-    priority: order.slice(0, 100).map((id) => byTask.get(id)!.task.task_code),
+    priority: order.slice(0, 100).map((id) => byTask.get(id)!.task.task_code), priority_total: order.length,
     ops, order,
+    /** every activity of the projects: its dates under CPM (no leveling), P6's default leveling, and the reasoner's modes and order
+     *  (minutes; start and finish, actual where it has one) */
+    dates: rows(db, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => {
+      const cpm = p6.cpmDates.get(t.task_id)!, mod = mine.dates.get(t.task_id)!, cal = cals.get(t.clndr_id) ?? cals.fallback(projCal.get(t.proj_id) ?? '');
+      // reasoner against CPM, in working days of the activity's calendar (later: positive)
+      const wd = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round(((a <= b ? cal.workBetween(a, b) : -cal.workBetween(b, a)) / 60 / (cal.hoursPerDay() || (o.hoursPerDay ?? 8))) * 100) / 100);
+      return { taskId: t.task_id, code: t.task_code, name: t.task_name, cpm, p6: p6.dates.get(t.task_id)!, reasoner: mod, startDeltaDays: wd(cpm[0], mod[0]), finishDeltaDays: wd(cpm[1], mod[1]) };
+    }),
   };
 }
