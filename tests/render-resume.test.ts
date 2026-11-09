@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, truncateSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -460,6 +461,57 @@ test('video: a changed link or schedule is a resume_mismatch; a render without r
   assert.match(String(link.d.error.hint), /afresh/);
   const fresh = await call('render_4d', args);
   assert.equal(fresh.err, false, JSON.stringify(fresh.d).slice(0, 300));
+  noParts(out);
+});
+
+/** Another program holds `locked` (Windows: a delete of it, or of a folder holding it, fails EBUSY): fs.rmSync of it or of a folder above it
+ *  throws as it would there, before anything is removed. The returned function lets go. */
+const lockFile = (locked: string) => {
+  const fs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs');
+  const was = fs.rmSync;
+  fs.rmSync = ((path: string, o?: object) => {
+    const p = String(path);
+    if (p === locked || locked.startsWith(p + '/') || locked.startsWith(p + '\\')) throw Object.assign(new Error(`EBUSY: resource busy or locked, unlink '${locked}'`), { code: 'EBUSY', errno: -4082, syscall: 'unlink', path: locked });
+    return was(path, o);
+  }) as typeof fs.rmSync;
+  syncBuiltinESMExports();
+  return () => { fs.rmSync = was; syncBuiltinESMExports(); };
+};
+
+test('a render without resume over parts whose render.json another program holds is answered in words: nothing lost or removed, the file named; once let go, resume continues', { skip: !CHROME && 'no Chromium here', timeout: 600_000 }, async () => {
+  const { args, out, e } = await failVideo('held');
+  const manifest = e.resume as string, before = tree(out).sort(), text = readFileSync(manifest, 'utf8');
+  const go = lockFile(manifest);
+  let r;
+  try { r = await call('render_4d', args); } finally { go(); }
+  assert.equal(r.err, true);
+  assert.equal(r.d.error.code, 'parts_not_replaceable_now', JSON.stringify(r.d).slice(0, 500));
+  assert.match(r.d.error.message, /cannot be replaced right now: a file in them is locked by another program \(".*held\.parts.render\.json": EBUSY/);
+  assert.match(r.d.error.message, /Nothing was lost or removed\./);
+  assert.match(String(r.d.error.hint), /Close the program holding ".*render\.json".*call render_4d again; or, to continue, call render_4d again with the same arguments and resume: ".*held\.parts.render\.json"/);
+  assert.equal(r.d.error.locked, manifest);
+  assert.deepEqual(tree(out).sort(), before, 'no file removed or added');
+  assert.equal(readFileSync(manifest, 'utf8'), text, 'render.json as it was');
+  const done = await call('render_4d', { ...args, resume: manifest });
+  assert.equal(done.err, false, JSON.stringify(done.d).slice(0, 400));
+  assert.equal(done.d.resumed_frames, e.frames_done);
+  assert.equal((await probeVideo(done.d.written[0])).frames, e.frames_total);
+  noParts(out);
+});
+
+test('a render without resume over parts where a kept run is held: render.json is removed first, the answer says that render can no longer be continued, names the file; once let go, a render starts over and finishes', { skip: !CHROME && 'no Chromium here', timeout: 600_000 }, async () => {
+  const { args, out, e } = await failVideo('runheld');
+  const run = e.kept_segments[0] as string;
+  const go = lockFile(run);
+  let r;
+  try { r = await call('render_4d', args); } finally { go(); }
+  assert.equal(r.d.error.code, 'parts_not_replaceable_now', JSON.stringify(r.d).slice(0, 500));
+  assert.match(r.d.error.message, /could not all be removed right now: a file in them is locked by another program \(".*run-0001\.(mp4|webm)": EBUSY.*Their render\.json was removed, so that earlier render can no longer be continued/);
+  assert.equal(r.d.error.locked, run);
+  assert.ok(!existsSync(e.resume) && existsSync(run));
+  const fresh = await call('render_4d', args);
+  assert.equal(fresh.err, false, JSON.stringify(fresh.d).slice(0, 400));
+  assert.equal((await probeVideo(fresh.d.written[0])).frames, e.frames_total);
   noParts(out);
 });
 

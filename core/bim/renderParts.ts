@@ -17,6 +17,13 @@ export class ManifestUnreadable extends Error {
   readonly path: string; readonly cause: Error;
   constructor(path: string, cause: Error) { super(`${path} could not be read now (${cause.message})`); this.path = path; this.cause = cause; }
 }
+/** The parts of an earlier render of this name could not be replaced now: a file in them (`path`) is locked or in use by another
+ *  program. `whole`: it was their render.json, so nothing was removed and the earlier render can still be continued; else the
+ *  render.json was removed (that render can no longer be continued) and `path` is a file that stayed. */
+export class PartsInUse extends Error {
+  readonly path: string; readonly cause: Error; readonly whole: boolean;
+  constructor(path: string, cause: Error, whole: boolean) { super(`${path} is locked or in use (${cause.message})`); this.path = path; this.cause = cause; this.whole = whole; }
+}
 /** A run of frames in a file of this folder: `bytes` is its whole length (the file may be longer: a chunk being written when the
  *  process died), `frames` what those bytes hold, `config` a hash of the decoder configuration of the encoder that drew it. A
  *  segment of an earlier version (seg-N.mp4, a whole file, no config) reads the same way. */
@@ -158,7 +165,11 @@ export class Parts {
   constructor(dir: string, m: PartsManifest, put: (path: string, data: string | Uint8Array) => void, base: string) { this.dir = dir; this.m = m; this.put = put; this.base = base; }
   get manifestPath() { return join(this.dir, PARTS_MANIFEST); }
   static create(dir: string, o: Pick<PartsManifest, 'kind' | 'arguments' | 'fingerprint' | 'frames_total'> & { mime?: string; fps?: number }, put: Parts['put'], base: string): Parts {
-    rmSync(dir, { recursive: true, force: true }); // an earlier render of this name that was not continued
+    // an earlier render of this name that was not continued goes, its render.json first: while that stays the earlier render can still be
+    // continued, so a file another program holds there (a lock) leaves it whole, whatever order the folder's files are removed in
+    const manifest = join(dir, PARTS_MANIFEST);
+    try { rmSync(manifest, { recursive: true, force: true }); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOTDIR') throw new PartsInUse(manifest, e as Error, true); } // (ENOTDIR: dir is a file, removed below)
+    try { rmSync(dir, { recursive: true, force: true }); } catch (e) { throw new PartsInUse((e as NodeJS.ErrnoException).path ?? dir, e as Error, false); }
     mkdirSync(dir, { recursive: true });
     const p = new Parts(dir, { format: 'p6c-4d-render', version: 1, ...o, segments: [], images: [] }, put, base);
     p.save();

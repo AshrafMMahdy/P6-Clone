@@ -198,7 +198,8 @@ returns the whole file.
 A failure or cancel keeps what is whole; the `render_failed` error (or the cancelled job's partial answer) carries `frames_done`, `frames_total`,
 `kept_segments` (video: the run files) or `kept` (images: the frames), `resume` (the render.json), `redrawn`, and says: *to continue, call
 render_4d again with the same arguments and resume: "<x>.parts/render.json"; a call without resume starts over* (a call without resume
-replaces the old parts of that name). The tool reads exactly the resume path given (compared as a path: resolved, case-folded on Windows)
+replaces the old parts of that name, render.json first; a file in them another program holds answers `parts_not_replaceable_now`, naming it:
+nothing was removed when it is render.json, so that render can still be continued, else render.json was removed and the answer says so). The tool reads exactly the resume path given (compared as a path: resolved, case-folded on Windows)
 and never searches for one. On a resume, the manifest is checked (shape, names, ranges, that each run reads back as its frames and decoder
 configuration up to its `bytes`) and **nothing is changed on disk until the resume is accepted**: a refused resume (`resume_mismatch`,
 `resume_unreadable` when there is no render.json of a render there, `resume_not_readable_now` when one is there but cannot be read now: a

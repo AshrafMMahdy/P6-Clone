@@ -30,7 +30,7 @@ import { runSynchroCloud, SYNCHRO_CLOUD_TOOL } from './synchroCloud.ts';
 import { diffIndexes } from '../core/bim/diff.ts';
 import { chromiumPath, ffmpegPath, inChromium, isGpuFailure, noteGpuFailure, planVideo, probeRenderer, RenderFailed, renderPngs, renderRun, webmToMp4, type Renderer, type VideoPlan } from '../core/bim/headless.ts';
 import { aboutMinutes, planRender, renderMinutes } from '../core/bim/renderplan.ts';
-import { fingerprintDiff, foldPath, hashOf, joinSegments, keptPicture, ManifestUnreadable, moveInto, Parts, verifyVideo } from '../core/bim/renderParts.ts';
+import { fingerprintDiff, foldPath, hashOf, joinSegments, keptPicture, ManifestUnreadable, moveInto, Parts, PartsInUse, verifyVideo } from '../core/bim/renderParts.ts';
 import { StuckError } from '../core/bim/liveness.ts';
 import { activityCosts, earnedValue } from '../core/cost/rollup.ts';
 import { mkdtempSync, writeFileSync as writeRaw } from 'node:fs';
@@ -687,7 +687,16 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         }
         // every check has passed: only now is a chunk that was being written when a process died cut off, and the manifest written as read
         if (parts) parts.settle();
-        else { fresh = true; parts = Parts.create(partsDir, { kind: kind as 'images' | 'video', arguments: args, fingerprint: fp, frames_total: framesTotal, ...extra }, put, base); }
+        else {
+          // a call without resume replaces the earlier parts of this name; a file in them that another program holds (a lock) is answered in words
+          try { parts = Parts.create(partsDir, { kind: kind as 'images' | 'video', arguments: args, fingerprint: fp, frames_total: framesTotal, ...extra }, put, base); }
+          catch (e) {
+            if (!(e instanceof PartsInUse)) throw e;
+            if (e.whole) fail('parts_not_replaceable_now', `The earlier parts of "${name}" at "${partsDir}" cannot be replaced right now: a file in them is locked by another program ("${e.path}": ${e.cause.message}). Nothing was lost or removed.`, `Close the program holding "${e.path}" (or wait for it to let go), then call render_4d again; or, ${keepWords(e.path)}.`, { data: { parts: partsDir, locked: e.path } });
+            return fail('parts_not_replaceable_now', `The earlier parts of "${name}" at "${partsDir}" could not all be removed right now: a file in them is locked by another program ("${e.path}": ${e.cause.message}). Their render.json was removed, so that earlier render can no longer be continued; nothing of this render was made yet.`, `Close the program holding "${e.path}" (or wait for it to let go), then call render_4d again.`, { data: { parts: partsDir, locked: e.path } });
+          }
+          fresh = true;
+        }
         return parts;
       };
       if (kind === 'images') {
