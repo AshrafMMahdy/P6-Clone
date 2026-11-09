@@ -153,29 +153,63 @@ function relationshipTotalFloat(db: Db, ctx: ReturnType<typeof makeCtx>): (r: Ro
 
 /** What float_paths' between needs, in the tool's words (the Float paths panel says the same). */
 export const BETWEEN_NEEDS = 'between needs from and to Activity IDs of this project.';
-/** Every logic path from one activity to another (float_paths' between; the platform's analyse_paths), capped: duration (days, summed)
- *  and the lowest total float on each, longest first. null when from or to is not an activity of these projects (BETWEEN_NEEDS). The
- *  float_paths tool and the desktop app's Float paths panel both call it. */
-export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string; max?: number }, hpd: number): { from: string; to: string; paths: { activities: string[]; duration_days: number; min_float_days: number | null }[]; truncated: boolean } | null {
+/** The longest logic paths from one activity to another (float_paths' between; the platform's analyse_paths): the `max` (default 25, any
+ *  positive number is honoured) paths with the greatest duration (days, summed), each with its lowest total float, longest first and, at
+ *  equal duration, the lowest float first. Calculated directly on the precedence network, not by walking: each activity between the two keeps
+ *  its `max` best tails to "to" (ranked by duration, then lowest float, which both carry over unchanged when an activity is put in front, so
+ *  nothing that belongs in the final list is dropped), and the paths are rebuilt from them. paths_total is every distinct path there is
+ *  (counted exactly; a decimal string when it is not a safe integer); truncated is paths_total greater than the paths listed. Two
+ *  relationships between the same two activities are one step. null when from or to is not an activity of these projects (BETWEEN_NEEDS);
+ *  {error} naming the activities of one loop when the logic between from and to has a loop (the longest path is not defined through a loop).
+ *  The float_paths tool and the desktop app's Float paths panel both call it. */
+export interface PathsBetween { from: string; to: string; paths: { activities: string[]; duration_days: number; min_float_days: number | null }[]; paths_total: number | string; truncated: boolean }
+export function pathsBetween(db: Db, projIds: string[], b: { from?: string; to?: string; max?: number }, hpd: number): PathsBetween | { error: string } | null {
   const T = (db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id));
   const byCode = new Map(T.map((t) => [t.task_code, t])), byId = new Map(T.map((t) => [t.task_id, t]));
   const from = byCode.get(String(b.from ?? '')), to = byCode.get(String(b.to ?? ''));
   if (!from || !to) return null;
-  const succ = new Map<string, string[]>();
-  for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) { const l = succ.get(r.pred_task_id); if (l) l.push(r.task_id); else succ.set(r.pred_task_id, [r.task_id]); }
-  // only activities that can reach "to" are walked, so the search does not wander
+  const succ = new Map<string, Set<string>>();
+  for (const r of db.tables.TASKPRED?.rows ?? []) if (byId.has(r.pred_task_id) && byId.has(r.task_id)) { const l = succ.get(r.pred_task_id); if (l) l.add(r.task_id); else succ.set(r.pred_task_id, new Set([r.task_id])); }
+  // only activities that can reach "to" count, and "to" ends every path (what follows it is not between the two)
   const reach = new Set<string>([to.task_id]);
-  for (let grew = true; grew;) { grew = false; for (const [p, ss] of succ) if (!reach.has(p) && ss.some((x) => reach.has(x))) { reach.add(p); grew = true; } }
-  const max = Math.max(1, Number(b.max) || 25), out: string[][] = [];
-  let steps = 0, truncated = false;
-  const walk = (id: string, path: string[]) => {
-    if (out.length >= max || ++steps > 200000) { truncated = true; return; }
-    if (id === to.task_id) { out.push([...path, id]); return; }
-    for (const n of succ.get(id) ?? []) if (reach.has(n) && !path.includes(n)) walk(n, [...path, id]);
-  };
-  if (reach.has(from.task_id)) walk(from.task_id, []);
-  const dur = (t: Record<string, string>) => Number((t.act_end_date ? t.target_drtn_hr_cnt : t.remain_drtn_hr_cnt) || 0) / hpd;
-  const rowsOut = out.map((p) => { const ts = p.map((id) => byId.get(id)!); const fl = ts.map((t) => t.total_float_hr_cnt).filter((x) => x !== '' && x != null).map(Number); return { activities: ts.map((t) => t.task_code), duration_days: Math.round(ts.reduce((a, t) => a + dur(t), 0) * 10) / 10, min_float_days: fl.length ? Math.round((minOf(fl) / hpd) * 10) / 10 : null }; })
-    .sort((x, y) => y.duration_days - x.duration_days || (x.min_float_days ?? 0) - (y.min_float_days ?? 0));
-  return { from: from.task_code, to: to.task_code, paths: rowsOut, truncated };
+  for (let grew = true; grew;) { grew = false; for (const [p, ss] of succ) if (!reach.has(p) && [...ss].some((x) => reach.has(x))) { reach.add(p); grew = true; } }
+  // the activities between: reachable from "from" without passing "to", and able to reach "to"
+  const seen = new Set<string>([from.task_id]);
+  for (const stack = [from.task_id]; stack.length;) { const id = stack.pop()!; if (id === to.task_id) continue; for (const n of succ.get(id) ?? []) if (!seen.has(n)) { seen.add(n); stack.push(n); } }
+  const next = (id: string) => (id === to.task_id ? [] : [...(succ.get(id) ?? [])].filter((n) => seen.has(n) && reach.has(n)));
+  const max = Math.max(1, Number(b.max) || 25);
+  const empty = (): PathsBetween => ({ from: from.task_code, to: to.task_code, paths: [], paths_total: 0, truncated: false });
+  if (!reach.has(from.task_id)) return empty();
+  // reverse topological order (successors first) by a depth-first walk; a back edge is a loop
+  const order: string[] = [], state = new Map<string, 1 | 2>();
+  const stack: { id: string; ns: string[]; i: number }[] = [{ id: from.task_id, ns: next(from.task_id), i: 0 }];
+  state.set(from.task_id, 1);
+  while (stack.length) {
+    const top = stack[stack.length - 1];
+    if (top.i === top.ns.length) { state.set(top.id, 2); order.push(top.id); stack.pop(); continue; }
+    const n = top.ns[top.i++], st = state.get(n);
+    if (st === 1) { const at = stack.findIndex((f) => f.id === n), ids = stack.slice(at).map((f) => byId.get(f.id)!.task_code); return { error: `The logic between ${from.task_code} and ${to.task_code} has a loop (${[...ids, ids[0]].join(' -> ')}); the longest paths cannot be listed until it is broken.` }; }
+    if (!st) { state.set(n, 1); stack.push({ id: n, ns: next(n), i: 0 }); }
+  }
+  // hours of an activity; lowest float of a path (hours, Infinity when none has one)
+  const hrs = (t: Record<string, string>) => Number((t.act_end_date ? t.target_drtn_hr_cnt : t.remain_drtn_hr_cnt) || 0);
+  const flt = (t: Record<string, string>) => (t.total_float_hr_cnt === '' || t.total_float_hr_cnt == null ? Infinity : Number(t.total_float_hr_cnt));
+  type Tail = { d: number; m: number; next: string | null; at: number };
+  const rank = (x: Tail, y: Tail) => y.d - x.d || x.m - y.m;
+  const tails = new Map<string, Tail[]>(), count = new Map<string, bigint>();
+  for (const id of order) {
+    const t = byId.get(id)!, d = hrs(t), m = flt(t);
+    if (id === to.task_id) { tails.set(id, [{ d, m, next: null, at: 0 }]); count.set(id, 1n); continue; }
+    const cand: Tail[] = []; let total = 0n;
+    for (const n of next(id)) { total += count.get(n)!; tails.get(n)!.forEach((x, at) => cand.push({ d: d + x.d, m: Math.min(m, x.m), next: n, at })); }
+    tails.set(id, cand.sort(rank).slice(0, max)); count.set(id, total);
+  }
+  const paths = tails.get(from.task_id)!.map((top) => {
+    const ids = [from.task_id]; let t = top;
+    while (t.next) { ids.push(t.next); t = tails.get(t.next)![t.at]; }
+    return { top, ids };
+  });
+  const total = count.get(from.task_id)!;
+  const rowsOut = paths.map(({ top, ids }) => ({ activities: ids.map((id) => byId.get(id)!.task_code), duration_days: Math.round((top.d / hpd) * 10) / 10, min_float_days: top.m === Infinity ? null : Math.round((top.m / hpd) * 10) / 10 }));
+  return { from: from.task_code, to: to.task_code, paths: rowsOut, paths_total: total <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(total) : total.toString(), truncated: total > BigInt(rowsOut.length) };
 }

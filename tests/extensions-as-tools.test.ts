@@ -97,3 +97,28 @@ test('Time impact analysis: the panel counts the fragnet’s days on the activit
   assert.ok(atPreference.ok);
   assert.notEqual(atPreference.delay_days, screen.delay_days);
 });
+
+test('Time impact analysis: with two projects open the screen’s fragnet names the open project, so it runs (without it the engine asks "say which with project")', async () => {
+  const { tiaFragnetOps } = await import('../renderer/views/tiaFragnet.ts');
+  const { applyOps } = await import('../core/project/ops.ts');
+  const { h, db, cpm } = await file(false);
+  // a second project with the same Activity IDs open beside P (what a kept TIA, or a copy, is)
+  const c = applyOps(db, [{ op: 'copy_project', from: 'P', id: 'P2', keep_progress: true }], { hoursPerDay: HPD, calendarDays: true });
+  assert.ok(c.ok, JSON.stringify(c.error));
+  // the panel's own rows, as it ships them
+  const acts = [{ id: 'TIA-01', name: 'Delay event', days: '10' }];
+  const rels = [{ pred: 'A', succ: 'TIA-01', type: 'FS', lag: '0' }, { pred: 'TIA-01', succ: 'C', type: 'FS', lag: '0' }, { pred: '', succ: 'C', type: 'FS', lag: '0' }];
+  const ops = tiaFragnetOps(acts, rels, cpm.proj_short_name);
+  assert.equal(ops.length, 3, 'the row with no predecessor is not sent');
+  assert.ok(ops.every((o) => o.project === 'P'), 'every operation names the open project');
+  const screen = timeImpact(db, [cpm.proj_id], ops, { hoursPerDay: HPD });
+  assert.ok(screen.ok, JSON.stringify(screen).slice(0, 300));
+  // the tool, given the same arguments (what Export writes), answers the same
+  const tool = await call('tia', { handle: h, project: 'P', fragnet: ops });
+  assert.equal(tool.err, false, JSON.stringify(tool.d).slice(0, 300));
+  sameAs(tool.d, screen, 'tia', ['unsaved_changes']);
+  // what the screen sent before: no project on the operations
+  const before = timeImpact(db, [cpm.proj_id], ops.map(({ project: _p, ...o }) => o), { hoursPerDay: HPD });
+  assert.equal(before.ok, false);
+  assert.match(JSON.stringify(before), /say which with \\"project\\"/);
+});

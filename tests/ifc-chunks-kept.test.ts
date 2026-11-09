@@ -52,6 +52,7 @@ test('a meshing stopped at a chunk keeps the chunks it finished: the next open m
     const m = await loadModel(file, { onProgress: (_d, _t, n) => { notes.push(n); } });
     assert.equal(notes.filter((n) => /kept from an earlier meshing/.test(n)).length, 3, notes.join(' | '));
     assert.equal(notes.filter((n) => /^meshing chunk/.test(n)).length, total - 3);
+    assert.match(m.index.geometryNote ?? '', new RegExp(`3 of ${total} chunks kept from an earlier meshing were used; the other ${total - 3} were meshed now`));
     assert.deepEqual(picture(m), picture(ref.m));
     assert.equal(existsSync(join(cache, chunks[0])), false, 'once the model is cached its kept chunks go');
   });
@@ -133,6 +134,7 @@ test('L1 / L2: a kept chunk damaged in place (zeros of the right length) is mesh
     assert.deepEqual(meshed(notes), { kept: 2, meshed: ref.total - 2 }, notes.join(' | '));
     assert.ok(notes.includes(`meshing chunk 2 of ${ref.total} (its kept results did not check out)`), notes.join(' | '));
     assert.match(m.index.geometryNote ?? '', /1 chunk kept from an earlier meshing did not check out \(damaged, as a power loss can leave a file\) and was meshed again/);
+    assert.ok((m.index.geometryNote ?? '').includes(`; 2 of ${ref.total} chunks kept from an earlier meshing were used; the other ${ref.total - 2} were meshed now; 1 chunk kept`), m.index.geometryNote ?? '');
     assert.deepEqual(picture(m), ref.picture);
   });
 });
@@ -178,5 +180,6 @@ test('a cancelled retry of a model whose meshing failed does not use up the retr
     assert.equal(m.index.geometryStatus, 'ok', m.index.geometryNote ?? '');
     assert.deepEqual(meshed(notes), { kept: 3, meshed: ref.total - 3 }, notes.join(' | '));
     assert.deepEqual(picture(m), ref.picture);
+    assert.ok((m.index.geometryNote ?? '').includes(`; 3 of ${ref.total} chunks kept from an earlier meshing were used; the other ${ref.total - 3} were meshed now`), m.index.geometryNote ?? '');
   });
 });

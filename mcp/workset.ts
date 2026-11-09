@@ -69,7 +69,7 @@ export function workNeed(tool: string, a: Record<string, any>, s: Session, free:
   if (!w) return null;
   let bytes = w.per * s.bytes + (w.fixed ?? 0), what = `${w.label} on this project (${n.toLocaleString('en-US')} activities)`, hint = w.hint;
   if (tool === 'monte_carlo') {
-    const it = Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000))); // as monte_carlo runs it
+    const it = Math.max(10, Math.floor(Number(a.iterations) || 1000)); // as monte_carlo runs it
     bytes += n * it * MC_BYTES_PER_SAMPLE;
     // how many iterations would fit in what is free now
     const fit = Math.floor((free() - w.per * s.bytes) / Math.max(1, n * MC_BYTES_PER_SAMPLE));

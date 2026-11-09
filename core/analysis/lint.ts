@@ -18,7 +18,7 @@ export interface LintCheck extends CheckResult {
   severity: 'error' | 'warning' | 'info'; band: Band; fixes?: Fix[]; weight?: number; /** the thresholds this check was judged by */ applied?: object;
   /** a check whose fixes are cut to max_ids: how many there are */ fixes_total?: number;
   /** connectivity: how many open starts and open ends there are (each kind is listed up to max_ids) */ no_predecessor_total?: number; no_successor_total?: number;
-  /** fs_overlap: how many ladders were found (it lists the ladder.max_targets that save most) */ ladders_total?: number;
+  /** fs_overlap: how many ladders were found (it lists all of them, or the ladder.max_targets that save most when that is above 0) */ ladders_total?: number;
 }
 
 /** A check's lists as an answer shows them (max 0 = all): its first `max` activities (connectivity: the first `max` of each kind, open
@@ -45,7 +45,7 @@ export interface LintThresholds {
   constraints: { max_hard: number };
   /** look-alike activities chained FS: a ladder needs min_group_size of them, durations within max_duration_ratio, at
    *  least min_chained_share of the pairs chained by FS lags of 0..chain_lag_max; the SS lag offered is
-   *  max(lag_min, ceil(duration / lag_divisor)); max_targets ladders are listed */
+   *  max(lag_min, ceil(duration / lag_divisor)); every ladder is simulated and listed, or the max_targets that save most when max_targets is above 0 */
   ladder: { min_group_size: number; max_duration_ratio: number; min_chained_share: number; chain_lag_max: number; lag_divisor: number; lag_min: number; max_targets: number };
   /** networks with fewer work activities than this get the small-network bands */
   small_network_below: number;
@@ -67,7 +67,7 @@ export interface LintThresholds {
 export const DEFAULT_LINT_THRESHOLDS: LintThresholds = {
   dangling_start: { max: 0 }, dangling_finish: { max: 0 }, empty_wbs: { max: 0 }, milestone_duration: { max: 0 }, loe_on_critical: { max: 0 },
   fs_overlap: { max_lead_days: 0 }, constraints: { max_hard: 0 },
-  ladder: { min_group_size: 3, max_duration_ratio: 2, min_chained_share: 0.7, chain_lag_max: 2, lag_divisor: 3, lag_min: 2, max_targets: 10 },
+  ladder: { min_group_size: 3, max_duration_ratio: 2, min_chained_share: 0.7, chain_lag_max: 2, lag_divisor: 3, lag_min: 2, max_targets: 0 },
   small_network_below: 25,
   connectivity: { max_open_ends: 0 },
   start_anchored: { min_peer_gap_days: 30, warn_max: 2 },
@@ -236,13 +236,14 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
     ladders.push({ activities: g.map((t) => t.task_code), fix: `Overlap "${g[0].task_name}" and its ${g.length - 1} look-alikes: ${chain.length} FS links become SS + lag`, ops });
   }
   // Simulate what each fix saves: only ladders with a critical activity can move the finish (the others save 0), the
-  // biggest 10 of them; the base is scheduled once and each fix once, on a rolled-back copy.
+  // biggest max_targets of them (every one by default); the base is scheduled once and each fix once, on a rolled-back copy.
   const code2task = new Map(s.tasks.map((t) => [t.task_code, t]));
   const critLadder = (l: Fix) => l.activities.some((c) => { const t = code2task.get(c); return t && isCritical(t, s.ctx); });
   ladders.sort((a, b) => Number(critLadder(b)) - Number(critLadder(a)) || b.activities.length - a.activities.length);
-  const top = ladders.slice(0, Math.max(20, L.max_targets * 2));
+  const maxTargets = L.max_targets > 0 ? L.max_targets : Infinity; // 0 (the default) = every ladder
+  const top = ladders.slice(0, Math.max(20, maxTargets * 2));
   for (const l of top) if (!critLadder(l)) l.saves_days = 0;
-  const toSim = top.filter(critLadder).slice(0, L.max_targets);
+  const toSim = top.filter(critLadder).slice(0, maxTargets);
   if (simulate && toSim.length) {
     const ids = [...s.projIds];
     const finishAfter = (ops: Record<string, unknown>[]) => {
@@ -260,7 +261,7 @@ function fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshold
     for (const l of toSim) { const f = finishAfter(l.ops); l.saves_days = base != null && f != null && cal ? Math.round(s.workDays(cal, f, base) * 10) / 10 : undefined; }
   }
   top.sort((a, b) => (b.saves_days ?? 0) - (a.saves_days ?? 0));
-  for (const l of top.slice(0, L.max_targets)) { found.push({ id: l.activities[0], name: l.fix, value: l.saves_days != null ? `saves ${l.saves_days} d` : undefined }); fixes.push(l); }
+  for (const l of top.slice(0, maxTargets)) { found.push({ id: l.activities[0], name: l.fix, value: l.saves_days != null ? `saves ${l.saves_days} d` : undefined }); fixes.push(l); }
   return check('fs_overlap', 'Finish-to-start links that should overlap', 'warning', found, null, found.length ? 'warn' : 'pass', maxIds, { fixes, ladders_total: ladders.length, applied: { ...T.fs_overlap, ladder: L }, note: 'Leads hide an overlap inside an FS link; an SS lag as long as the predecessor is really an FS; a ladder of look-alike activities chained FS could run in step. Each fix is a list of edit operations; ladders show the days the fix saves.' });
 }
 

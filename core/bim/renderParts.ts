@@ -7,7 +7,7 @@
 // are joined into the one video without encoding again (Mediabunny, in Node: the packets are copied into a new, normal MP4 or
 // WebM with their timestamps moved), the join is checked, and only then are the parts removed.
 import { createHash } from 'node:crypto';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { ALL_FORMATS, BufferSource, CustomSource, EncodedPacketSink, EncodedVideoPacketSource, FilePathTarget, Input, Mp4OutputFormat, Output, WebMOutputFormat, type InputVideoTrack } from 'mediabunny';
 
@@ -19,10 +19,24 @@ export class ManifestUnreadable extends Error {
 }
 /** The parts of an earlier render of this name could not be replaced now: a file in them (`path`) is locked or in use by another
  *  program. `whole`: it was their render.json, so nothing was removed and the earlier render can still be continued; else the
- *  render.json was removed (that render can no longer be continued) and `path` is a file that stayed. */
+ *  render.json was removed (that render can no longer be continued) and `path` is a file that stayed. On Windows the error of a
+ *  failed removal names the folder itself, not the file that was held: then `files` are the files still left in it after the
+ *  failed removal (they are the ones that could not be removed); empty when `path` is not that folder. */
 export class PartsInUse extends Error {
-  readonly path: string; readonly cause: Error; readonly whole: boolean;
-  constructor(path: string, cause: Error, whole: boolean) { super(`${path} is locked or in use (${cause.message})`); this.path = path; this.cause = cause; this.whole = whole; }
+  readonly path: string; readonly cause: Error; readonly whole: boolean; readonly files: string[];
+  constructor(path: string, cause: Error, whole: boolean, files: string[] = []) { super(`${path} is locked or in use (${cause.message})`); this.path = path; this.cause = cause; this.whole = whole; this.files = files; }
+}
+/** Every file in `dir` and in the folders below it (full paths): what a failed removal of the folder left. Nothing when the folder
+ *  cannot be read (or is gone). */
+export function filesLeftIn(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    let list;
+    try { list = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of list) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else out.push(p); }
+  };
+  walk(dir);
+  return out.sort();
 }
 /** A run of frames in a file of this folder: `bytes` is its whole length (the file may be longer: a chunk being written when the
  *  process died), `frames` what those bytes hold, `config` a hash of the decoder configuration of the encoder that drew it. A
@@ -169,7 +183,11 @@ export class Parts {
     // continued, so a file another program holds there (a lock) leaves it whole, whatever order the folder's files are removed in
     const manifest = join(dir, PARTS_MANIFEST);
     try { rmSync(manifest, { recursive: true, force: true }); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOTDIR') throw new PartsInUse(manifest, e as Error, true); } // (ENOTDIR: dir is a file, removed below)
-    try { rmSync(dir, { recursive: true, force: true }); } catch (e) { throw new PartsInUse((e as NodeJS.ErrnoException).path ?? dir, e as Error, false); }
+    try { rmSync(dir, { recursive: true, force: true }); } catch (e) {
+      const at = (e as NodeJS.ErrnoException).path ?? dir;
+      // the path reported is the folder itself (Windows): the files still in it are the ones that could not be removed
+      throw new PartsInUse(at, e as Error, false, resolve(at) === resolve(dir) ? filesLeftIn(dir) : []);
+    }
     mkdirSync(dir, { recursive: true });
     const p = new Parts(dir, { format: 'p6c-4d-render', version: 1, ...o, segments: [], images: [] }, put, base);
     p.save();

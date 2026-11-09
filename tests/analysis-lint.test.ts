@@ -126,3 +126,22 @@ test('schedule log as data: F9 sections plus invalid milestone links, critical, 
   assert.ok(sec('exceptions', 'RELATIONSHIP_UNMET')!.activities.some((a) => a.id === 'Q'), JSON.stringify(log.exceptions.map((s) => [s.code, s.activities.map((a) => a.id)])));
   assert.equal(log.statistics.activities, rows(db, 'TASK').filter((t) => t.proj_id === pid(db)).length);
 });
+
+test('lint fs_overlap: every ladder is simulated and listed by default (more than 10); a max_targets given is still honoured', () => {
+  const db: Db = { tables: {} };
+  const ops: unknown[] = [{ op: 'add_project', id: 'LD', start: '2026-03-02' }, { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
+  const groups = 'ABCDEFGHIJKL'; // twelve ladders in series, all critical (names differ by letters: digits are masked in the look-alike match)
+  let prev = 'S';
+  for (const g of groups) for (let n = 1; n <= 4; n++) { const id = `${g}${n}`; ops.push({ op: 'add_activity', id, name: `Zone ${g} pour ${n}`, duration_days: 5 }, { op: 'add_relationship', pred: prev, succ: id }); prev = id; }
+  ops.push({ op: 'add_relationship', pred: prev, succ: 'H' });
+  ok(db, ops);
+  assert.ok(scheduleProjects(db, [pid(db)]).ok);
+  const ladders = (r: ReturnType<typeof lintSchedule>) => r.checks.find((x) => x.id === 'fs_overlap')!.fixes!.filter((f) => f.activities.length === 4);
+  const all = lintSchedule(db);
+  assert.equal(all.checks.find((x) => x.id === 'fs_overlap')!.ladders_total, 12);
+  assert.equal(ladders(all).length, 12, 'all twelve are listed');
+  assert.ok(ladders(all).every((l) => l.saves_days! > 0), 'and every one was simulated');
+  const few = lintSchedule(db, { thresholds: { ladder: { max_targets: 3 } } });
+  assert.equal(ladders(few).length, 3, 'a max_targets given is honoured');
+  assert.equal(DEFAULT_LINT_THRESHOLDS.ladder.max_targets, 0, '0 = all, the default');
+});

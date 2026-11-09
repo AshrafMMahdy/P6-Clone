@@ -74,7 +74,7 @@ function minCut(n: number, edges: [number, number, number][], s: number, t: numb
 }
 
 export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) {
-  const hpd0 = o.hoursPerDay ?? 8, maxSteps = o.maxSteps ?? 100;
+  const hpd0 = o.hoursPerDay ?? 8, maxSteps = o.maxSteps ?? Infinity; // no max_steps: runs to its natural end (target reached, ALREADY_MET, EXHAUSTED or PLATEAU)
   const open = new Set(projIds);
   const p0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
   const pcal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
@@ -142,7 +142,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
     const ineffective = new Set<string>();
     for (let n = 1; ; n++) {
       if (n > maxSteps) { stop = 'CAP'; break; }
-      if (o.tick) await o.tick(n - 1, maxSteps, `step ${n}: ${r2(days(finish, baseFinish!))} working days gained`);
+      if (o.tick) await o.tick(n - 1, Number.isFinite(maxSteps) ? maxSteps : n, `step ${n}: ${r2(days(finish, baseFinish!))} working days gained`);
       const ctx = makeCtx(d, { hoursPerDay: hpd0 });
       const rf = drivingFloat(d, ctx);
       // the critical network: what drives the project finish, walked back along driving links (negative float from

@@ -56,6 +56,13 @@ test('optimize_schedule runs the embedded model and checks its answer with the P
   assert.ok(r.reasoner_finish && r.p6_leveled_finish && r.cpm_finish);
   assert.ok(r.sgs_makespan_days >= 31);
   assert.equal(r.order.length, 12);
+  // biggest_changes: the activities whose dates differ between cpm and the reasoner, the largest finish shift first, then the start shift
+  assert.equal(r.biggest_changes_total, r.dates.filter((x) => x.cpm[0] !== x.reasoner[0] || x.cpm[1] !== x.reasoner[1]).length);
+  assert.equal(r.biggest_changes.length, r.biggest_changes_total);
+  assert.ok(r.biggest_changes_total > 0);
+  assert.deepEqual(Object.keys(r.biggest_changes[0]), ['id', 'name', 'cpm_start', 'cpm_finish', 'reasoner_start', 'reasoner_finish', 'start_delta_days', 'finish_delta_days']);
+  const keys = r.biggest_changes.map((x) => [Math.abs(x.finish_delta_days ?? 0), Math.abs(x.start_delta_days ?? 0)]);
+  assert.deepEqual(keys, [...keys].sort((x, y) => y[0] - x[0] || y[1] - x[1]));
   // same seed, same answer
   const again = await optimizeSchedule(db, [pid], { seed: 7, samples: 50 }, nodeInfer, apply);
   assert.ok(again.ok);

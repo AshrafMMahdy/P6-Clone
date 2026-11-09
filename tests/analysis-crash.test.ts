@@ -216,3 +216,26 @@ test('platform review 2: crash ops name the project (replayable in a multi-proje
   assert.ok(r.days_gained >= 10, `gained ${r.days_gained}`);
   assert.ok(r.steps.length > 5);
 });
+
+test('crash: with no max_steps it runs to its natural end (past 100 steps); a max_steps given still stops it with CAP', async () => {
+  const db: Db = { tables: {} };
+  const ops: any[] = [{ op: 'add_project', id: 'LG', start: '2026-03-02' }];
+  const n = 130;
+  for (let i = 0; i < n; i++) { ops.push({ op: 'add_activity', id: `L${i}`, name: `L${i}`, duration_days: 10 }); if (i) ops.push({ op: 'add_relationship', pred: `L${i - 1}`, succ: `L${i}` }); }
+  assert.ok(applyOps(db, ops, { calendarDays: true }).ok);
+  const pid = rows(db, 'PROJECT')[0].proj_id;
+  assert.ok(scheduleProjects(db, [pid]).ok);
+  // every activity may lose 30% (3 d): the chain needs one step per activity to gain 390 days
+  const all = await crashSchedule(db, [pid], { targetDays: 390 });
+  assert.ok(all.ok);
+  assert.equal(all.stop, 'SUCCESS');
+  assert.ok(all.steps.length > 100, `${all.steps.length} steps`);
+  const capped = await crashSchedule(db, [pid], { targetDays: 390, maxSteps: 7 });
+  assert.ok(capped.ok);
+  assert.equal(capped.stop, 'CAP');
+  assert.equal(capped.steps.length, 7);
+  // nothing to gain more than the crash room: it ends on its own as EXHAUSTED, again with no cap
+  const room = await crashSchedule(db, [pid], { targetDays: 5000 });
+  assert.ok(room.ok);
+  assert.equal(room.stop, 'EXHAUSTED');
+});

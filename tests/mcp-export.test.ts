@@ -307,6 +307,21 @@ test('optimize_schedule: the export lists every activity under CPM, P6 leveling 
   assert.ok(csv.activities.every((x) => x.cpm_start && x.reasoner_finish && x.finish_delta_days !== ''));
   assert.equal(csv.activities.map((x) => x.reasoner_finish).sort().at(-1), r.reasoner_finish);
   assert.equal(csv.activities.map((x) => x.cpm_finish).sort().at(-1), r.cpm_finish);
+  // biggest_changes: the answer shows the first 25 (max_changes), the export every activity whose dates differ from CPM, largest first
+  assert.ok(r.biggest_changes_total > 25, `${r.biggest_changes_total} activities changed`);
+  assert.equal(r.biggest_changes.length, 25);
+  assert.equal(csv.biggest_changes.length, r.biggest_changes_total); assert.equal(json.biggest_changes.length, r.biggest_changes_total);
+  assert.deepEqual(csv.biggest_changes.slice(0, 25).map((x) => x.id), r.biggest_changes.map((x: any) => x.id));
+  const fin = csv.biggest_changes.map((x) => Math.abs(Number(x.finish_delta_days)));
+  assert.deepEqual(fin, [...fin].sort((x, y) => y - x), 'largest finish shift first');
+  assert.ok(csv.biggest_changes.every((x) => x.cpm_start !== x.reasoner_start || x.cpm_finish !== x.reasoner_finish), 'only activities whose dates differ');
+  const act = new Map(csv.activities.map((x) => [x.id, x]));
+  assert.equal(act.get(r.biggest_changes[0].id)!.finish_delta_days, String(r.biggest_changes[0].finish_delta_days));
+  const some = (await call('optimize_schedule', { handle: np.handle, seed: 1, samples: 4, max_changes: 4 })).d;
+  assert.equal(some.biggest_changes.length, 4); assert.equal(some.biggest_changes_total, r.biggest_changes_total);
+  const every = (await call('optimize_schedule', { handle: np.handle, seed: 1, samples: 4, max_changes: 0 })).d;
+  assert.equal(every.biggest_changes.length, r.biggest_changes_total, 'max_changes 0 = all');
+  assert.match((await import('../mcp/server.ts')).toolsList().find((t: any) => t.name === 'optimize_schedule')!.description, /review biggest_changes[^]*undo takes the apply back[^]*better_than_p6_leveler: false means P6/);
 });
 
 // (not on Windows: a folder that is a running process's working folder cannot be deleted there (EPERM), so a server whose start folder

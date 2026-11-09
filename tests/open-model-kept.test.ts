@@ -135,6 +135,7 @@ test('kept at one chunk size, the default now another: the model is meshed in ch
     assert.equal(again.taken.size, 3);
     assert.equal(again.meshed.size, stopped.total - 3);
     assert.doesNotMatch(again.v.result.geometry_note ?? '', /not used/);
+    assert.match(again.v.result.geometry_note ?? '', new RegExp(`3 of ${stopped.total} chunks kept from an earlier meshing were used; the other ${stopped.total - 3} were meshed now`));
   } finally { process.env.P6CLONE_GEOM_CHUNK_MB = '0.1'; }
 });
 

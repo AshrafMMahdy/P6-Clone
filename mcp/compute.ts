@@ -81,7 +81,7 @@ export const FROM_KEPT: Record<string, (rows: unknown[], a: Record<string, any>)
     const f = done.map(Number).filter(Number.isFinite).sort((x, y) => x - y), n = f.length;
     const at = (p: number) => formatP6Date(f[Math.min(n - 1, Math.max(0, Math.ceil(p * n) - 1))]);
     const mean = f.reduce((x, y) => x + y, 0) / n;
-    return { partial: true, stopped: 'cancelled', iterations_done: done.length, iterations_requested: Math.min(20000, Math.max(10, Math.floor(Number(a.iterations) || 1000))),
+    return { partial: true, stopped: 'cancelled', iterations_done: done.length, iterations_requested: Math.max(10, Math.floor(Number(a.iterations) || 1000)),
       finish: { P10: at(0.1), P50: at(0.5), P80: at(0.8), P90: at(0.9), mean: formatP6Date(mean), min: formatP6Date(f[0]), max: formatP6Date(f[n - 1]) }, ...(resume ? { resume } : {}),
       note: `The worker stopped responding after the cancel and was ended; these finish dates are of the ${done.length} iterations it had finished (criticality, sensitivity, milestones and the histogram need every activity's samples and are not worked out here).${resume ? ` The iterations are kept in ${resume}: ${keepWords('monte_carlo', resume, 'iterations')}` : ''}` };
   },

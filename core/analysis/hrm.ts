@@ -221,6 +221,20 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   // (a day: the hours per day of the activity's calendar, as evaluate's shifts take it)
   const cals = calendarResolver(db, []), projCal = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.clndr_id])), dh = dayHours(db, o.hoursPerDay ?? 8, true);
   const byTask = new Map(inst.acts.map((a) => [a.task.task_id, a]));
+  /** every activity of the projects: its dates under CPM (no leveling), P6's default leveling, and the reasoner's modes and order
+   *  (minutes; start and finish, actual where it has one) */
+  const dates = rows(db, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => {
+    const cpm = p6.cpmDates.get(t.task_id)!, mod = mine.dates.get(t.task_id)!, cal = cals.get(t.clndr_id) ?? cals.fallback(projCal.get(t.proj_id) ?? '');
+    // reasoner against CPM, in working days of the activity's calendar (later: positive)
+    const wd = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round(((a <= b ? cal.workBetween(a, b) : -cal.workBetween(b, a)) / 60 / dh.task(t)) * 100) / 100);
+    return { taskId: t.task_id, code: t.task_code, name: t.task_name, cpm, p6: p6.dates.get(t.task_id)!, reasoner: mod, startDeltaDays: wd(cpm[0], mod[0]), finishDeltaDays: wd(cpm[1], mod[1]) };
+  });
+  // the activities whose dates the reasoner's proposal moves against CPM, the largest finish shift first, then the largest start shift
+  // (all of them: the answer shows the first max_changes, the export every one)
+  const shift = (v: number | null) => Math.abs(v ?? 0);
+  const biggest = dates.filter((x) => x.cpm[0] !== x.reasoner[0] || x.cpm[1] !== x.reasoner[1])
+    .sort((x, y) => shift(y.finishDeltaDays) - shift(x.finishDeltaDays) || shift(y.startDeltaDays) - shift(x.startDeltaDays))
+    .map((x) => ({ id: x.code, name: x.name, cpm_start: fmt(x.cpm[0]), cpm_finish: fmt(x.cpm[1]), reasoner_start: fmt(x.reasoner[0]), reasoner_finish: fmt(x.reasoner[1]), start_delta_days: x.startDeltaDays, finish_delta_days: x.finishDeltaDays }));
   return {
     ok: true as const,
     activities: n, leveled_activities: leveled, crashable_activities: crashable, trajectories: best.trajectories,
@@ -230,13 +244,7 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
     priority: order.slice(0, 100).map((id) => byTask.get(id)!.task.task_code), priority_total: order.length,
     ops, order,
-    /** every activity of the projects: its dates under CPM (no leveling), P6's default leveling, and the reasoner's modes and order
-     *  (minutes; start and finish, actual where it has one) */
-    dates: rows(db, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => {
-      const cpm = p6.cpmDates.get(t.task_id)!, mod = mine.dates.get(t.task_id)!, cal = cals.get(t.clndr_id) ?? cals.fallback(projCal.get(t.proj_id) ?? '');
-      // reasoner against CPM, in working days of the activity's calendar (later: positive)
-      const wd = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round(((a <= b ? cal.workBetween(a, b) : -cal.workBetween(b, a)) / 60 / dh.task(t)) * 100) / 100);
-      return { taskId: t.task_id, code: t.task_code, name: t.task_name, cpm, p6: p6.dates.get(t.task_id)!, reasoner: mod, startDeltaDays: wd(cpm[0], mod[0]), finishDeltaDays: wd(cpm[1], mod[1]) };
-    }),
+    biggest_changes: biggest, biggest_changes_total: biggest.length,
+    dates,
   };
 }

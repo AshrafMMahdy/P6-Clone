@@ -11,6 +11,7 @@ import { baselineOf } from '../../core/analysis/common.ts';
 import { tiaBaseline, timeImpact, windowsAnalysis } from '../../core/analysis/delay.ts';
 import { goToActivity } from './AnalysisResults.tsx';
 import { ExportButton } from './ExportButton.tsx';
+import { tiaFragnetOps, type FragAct, type FragRel } from './tiaFragnet.ts';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
 const Ids = ({ ids, max = 12 }: { ids: string[]; max?: number }) => <>{ids.slice(0, max).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{ids.length > max ? ` … +${ids.length - max}` : ''}</>;
@@ -76,9 +77,6 @@ export function WindowsPanel() {
   );
 }
 
-interface FragAct { id: string; name: string; days: string }
-interface FragRel { pred: string; succ: string; type: string; lag: string }
-
 export function TiaPanel() {
   const ui = useStore((s) => s.ui);
   const db = getDb();
@@ -89,10 +87,8 @@ export function TiaPanel() {
   const [milestone, setMilestone] = useState('');
   const [bl, setBl] = useState('');
   const [res, setRes] = useState<ReturnType<typeof timeImpact> | null>(null);
-  const ops = () => [
-    ...acts.filter((a) => a.id.trim()).map((a) => ({ op: 'add_activity', id: a.id.trim(), name: a.name || a.id, duration_days: Number(a.days) || 0 })),
-    ...rels.filter((r) => r.pred.trim() && r.succ.trim()).map((r) => ({ op: 'add_relationship', pred: r.pred.trim(), succ: r.succ.trim(), type: r.type, lag_days: Number(r.lag) || 0 })),
-  ];
+  // every operation names the open project (as the tia tool's keep names the copy), so a second open project is never ambiguous
+  const ops = () => tiaFragnetOps(acts, rels, cur!.proj_short_name);
   const fragnet = () => {
     if (!cur) throw new Error('Open a project first.');
     return { project: cur.proj_short_name, fragnet: ops(), ...(dd ? { data_date: dd.replace('T', ' ') } : {}), ...(milestone.trim() ? { milestone: milestone.trim() } : {}), ...(bl ? { baseline: bl } : {}) };

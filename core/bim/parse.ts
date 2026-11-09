@@ -282,10 +282,11 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
   // chunk of an older engine would mix its tessellation with the new one's)
   const engine = opts.keepChunks ? engineText(script) : '';
   const keptDir = opts.keepChunks ? join(opts.keepChunks, `${target}-${chunkKey(engine, productIds)}`) : null;
-  let redone = 0;
+  let redone = 0, usedKept = 0;
   for (const [k, c] of chunks.entries()) {
     const took = keptDir ? takeKeptChunk(join(keptDir, String(k)), index, tilesDir, state) : 'none';
     if (took === 'taken') {
+      usedKept++;
       await opts.onProgress?.(k, chunks.length, `chunk ${k + 1} of ${chunks.length} kept from an earlier meshing`);
       rmSync(c.file, { force: true });
       continue;
@@ -297,7 +298,7 @@ async function buildGeometry(ifc: string, outDir: string, tilesDir: string | nul
     if (!r.ok) { failed.push(`chunk ${k + 1} (${c.products} products): ${r.note.split(' The model is indexed')[0]}`); state.failures += c.products; if (r.stuck) state.stuck ??= r.stuck; }
   }
   if (!state.meshed) return { ok: false, note: `no chunk could be meshed: ${failed.slice(0, 3).join('; ')}`, ...(state.stuck ? { stuck: state.stuck } : {}) };
-  return { ok: true, ...state, note: `meshed in ${chunks.length} chunk${chunks.length === 1 ? '' : 's'} of at most ${Math.round(target / 1048576)} MB of the IFC (the model is past one geometry run)${redone ? `; ${redone} chunk${redone === 1 ? '' : 's'} kept from an earlier meshing did not check out (damaged, as a power loss can leave a file) and ${redone === 1 ? 'was' : 'were'} meshed again` : ''}${failed.length ? `; ${failed.length} chunk(s) failed and their elements have no geometry: ${failed.slice(0, 3).join('; ')}` : ''}` };
+  return { ok: true, ...state, note: `meshed in ${chunks.length} chunk${chunks.length === 1 ? '' : 's'} of at most ${Math.round(target / 1048576)} MB of the IFC (the model is past one geometry run)${usedKept ? `; ${usedKept} of ${chunks.length} chunks kept from an earlier meshing ${usedKept === 1 ? 'was' : 'were'} used; the other ${chunks.length - usedKept} ${chunks.length - usedKept === 1 ? 'was' : 'were'} meshed now` : ''}${redone ? `; ${redone} chunk${redone === 1 ? '' : 's'} kept from an earlier meshing did not check out (damaged, as a power loss can leave a file) and ${redone === 1 ? 'was' : 'were'} meshed again` : ''}${failed.length ? `; ${failed.length} chunk(s) failed and their elements have no geometry: ${failed.slice(0, 3).join('; ')}` : ''}` };
 }
 
 /** The files that cut, mesh and tile a model (beside the geometry worker), and web-ifc as the worker loads it (its Node entry and its

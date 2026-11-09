@@ -8,7 +8,7 @@ import { rows, type Db } from '../../core/db.ts';
 import { parseP6Date } from '../../core/dates.ts';
 import { checkSchedule, P6_CHECKS, type CheckScheduleReport } from '../../core/analysis/checkSchedule.ts';
 import { progressCurves, resourceHistograms, type ProgressCurves, type ResourceHistogram } from '../../core/analysis/curves.ts';
-import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween } from '../../core/schedule/floatPaths.ts';
+import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween, type PathsBetween } from '../../core/schedule/floatPaths.ts';
 import { compareComputed, evaluate } from '../../core/query/evaluate.ts';
 import { compareSchedules, type ScheduleChange } from '../../core/diff.ts';
 import { reviewSchedule, type Review } from '../../core/query/review.ts';
@@ -88,7 +88,7 @@ export function FloatPathsPanel() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [most, setMost] = useState('');
-  const [res, setRes] = useState<{ r: ReturnType<typeof computeFloatPaths>; near: { id: string; name: string; total_float_days: number }[]; between?: NonNullable<ReturnType<typeof pathsBetween>> } | null>(null);
+  const [res, setRes] = useState<{ r: ReturnType<typeof computeFloatPaths>; near: { id: string; name: string; total_float_days: number }[]; between?: PathsBetween } | null>(null);
   const hpd = ui.prefs.hoursPerDay;
   /** The settings; a number that is not one is refused. between (the tool's between): when either activity is given. */
   const opts = () => {
@@ -102,6 +102,7 @@ export function FloatPathsPanel() {
     // the paths between two activities as float_paths finds them (core/schedule/floatPaths.ts)
     const between = o.between ? pathsBetween(getDb(), ui.openProjects, o.between, hpd) : undefined;
     if (between === null) return toast(`${BETWEEN_NEEDS.replace(/^between/, 'Between')} Give both, e.g. A1000 and A9000.`);
+    if (between && 'error' in between) return toast(between.error);
     const r = computeFloatPaths(getDb(), ui.openProjects, { count: o.count ?? 10, endActivity: o.endActivity, method: o.method });
     const nearDays = o.nearDays;
     const tasks = rows(getDb(), 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
@@ -124,7 +125,7 @@ export function FloatPathsPanel() {
           <table className="tbl" style={{ marginTop: 4 }}><thead><tr><th>Path</th><th>Float (d)</th><th>Activities</th><th>Listed in order</th></tr></thead>
             <tbody>{res.r.paths.map((p) => <tr key={p.path} style={{ verticalAlign: 'top' }}><td>{p.path}</td><td>{p.float_hours == null ? '-' : n1(p.float_hours / hpd, 1)}</td><td>{p.activities.length}</td><td style={{ whiteSpace: 'normal' }}><Ids ids={p.activities.map((a) => a.id)} /></td></tr>)}</tbody></table>
           {res.between && <div data-between style={{ marginTop: 10, border: '1px solid #e3e5e8', borderRadius: 14, background: '#f7f8f9', padding: 8 }}>
-            <div><b>Paths between {res.between.from} and {res.between.to}</b> ({res.between.paths.length}{res.between.truncated ? ', the search stopped before the end: more paths may exist' : ''})</div>
+            <div><b>Paths between {res.between.from} and {res.between.to}</b> (the longest {res.between.paths.length} of {res.between.paths_total}{res.between.truncated ? ': raise max to list more' : ''})</div>
             {!res.between.paths.length ? <div className="muted">No logic path leads from {res.between.from} to {res.between.to}.</div> :
               <table className="tbl" style={{ marginTop: 4 }}><thead><tr><th>Path</th><th>Duration (d)</th><th>Lowest float (d)</th><th>Activities</th></tr></thead>
                 <tbody>{res.between.paths.map((p, i) => <tr key={i} style={{ verticalAlign: 'top' }}><td>{i + 1}</td><td style={{ textAlign: 'right' }}>{p.duration_days}</td><td style={{ textAlign: 'right' }}>{p.min_float_days ?? '-'}</td><td style={{ whiteSpace: 'normal' }}><Ids ids={p.activities} /></td></tr>)}</tbody></table>}

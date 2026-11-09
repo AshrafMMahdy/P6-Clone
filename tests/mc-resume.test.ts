@@ -323,3 +323,31 @@ test('…the same in compute workers: the claim is held on the server\'s main th
     assert.equal(again.resumed_iterations, st.result.iterations_done, JSON.stringify(again).slice(0, 300));
   } finally { s.p.kill('SIGKILL'); }
 });
+
+test('monte_carlo has no bound on top, buckets or iterations: top 0 = all, top 500 and buckets 250 are honoured, 20,100 iterations all run, and the memory reservation uses the iterations asked', async () => {
+  const h = await project(40);
+  const a = { ...h, iterations: 20, seed: 3, default_estimates: est };
+  const dflt = (await call('monte_carlo', a)).d;
+  assert.equal(dflt.criticality.length, 25, 'default top stays 25');
+  assert.ok(dflt.criticality_total > 25);
+  const all = (await call('monte_carlo', { ...a, top: 0 })).d;
+  assert.equal(all.criticality.length, all.criticality_total, 'top 0 = every activity');
+  assert.equal(all.criticality_total, dflt.criticality_total);
+  const big = (await call('monte_carlo', { ...a, top: 500 })).d;
+  assert.equal(big.criticality.length, big.criticality_total, 'top 500 is honoured, not cut to 200');
+  const three = (await call('monte_carlo', { ...a, top: 3 })).d;
+  assert.equal(three.criticality.length, 3);
+  const hist = (await call('monte_carlo', { ...a, buckets: 250 })).d;
+  assert.equal(hist.histogram.length, 250, 'buckets above 100 are honoured');
+  assert.equal((await call('monte_carlo', { ...a, buckets: 2 })).d.histogram.length, 5, 'the lower bound stays');
+  const many = (await call('monte_carlo', { ...h, iterations: 20100, seed: 3, default_estimates: est })).d;
+  assert.equal(many.iterations, 20100, 'iterations above 20,000 all run');
+  assert.equal(many.partial, undefined);
+  // the up-front reservation is worked out from the iterations asked
+  const { workNeed } = await import('../mcp/workset.ts');
+  const s = getSession(h.handle);
+  const need = (it: number) => workNeed('monte_carlo', { iterations: it }, s, () => 1e12)!;
+  assert.ok(need(100000).bytes - need(20000).bytes > 0, 'no clamp to 20,000 in the reservation');
+  assert.ok(Math.abs((need(100000).bytes - need(20000).bytes) * 1.25 - (need(120000).bytes - need(20000).bytes)) <= 2, 'the sample memory grows in step with the iterations asked');
+  assert.match(need(100000).what, /100,000 iterations/);
+});
