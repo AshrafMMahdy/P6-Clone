@@ -25,6 +25,18 @@ const argv = process.argv;
 const argVal = (name: string) => { const i = argv.indexOf(name); return i > 0 ? argv[i + 1] : undefined; };
 const userData = argVal('--user-data');
 if (userData) app.setPath('userData', userData);
+// One running copy per data folder: two copies would each save the whole database file (the last save silently wins)
+// and each start its own agent. A second start hands over to the first, whose window comes to the front, and ends here
+// before it touches any data. Electron keys the lock on the userData folder, so runs with their own --user-data (tests,
+// automation) still run side by side.
+// ponytail: keyed on userData, not on the data root; two installs in different folders share AppData and so count as
+// one copy. Key on dataRoot() with an own lock file if two installs must ever run together.
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', () => {
+  if (!win || background) return;   // a background run (tests) never takes the front of the screen
+  if (win.isMinimized()) win.restore();
+  win.show(); win.focus();
+});
 // the app's data beside the program (main/dataPaths.ts); the first start of that layout moves the AppData layout's data there
 for (const m of moveLegacyData()) console.log(`[data] moved ${m} into ${dataRoot()}`);
 if (dataNote) console.log(`[data] ${dataNote}`);
