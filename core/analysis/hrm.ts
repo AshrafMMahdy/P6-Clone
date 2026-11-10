@@ -84,6 +84,36 @@ function topoOrder(acts: HrmActivity[]): number[] {
   return out;
 }
 
+/** Descendants as bit rows (n x n bits): row u has bit v set when v is reached from u, OR-ed up in reverse precedence order. */
+function descendantRows(succ: number[][], order: number[]) {
+  const n = succ.length, W = (n + 31) >>> 5, reach = new Uint32Array(n * W);
+  for (let k = order.length - 1; k >= 0; k--) {
+    const u = order[k], ru = u * W;
+    for (const s of succ[u]) { reach[ru + (s >>> 5)] |= 1 << (s & 31); const rs = s * W; for (let w = 0; w < W; w++) reach[ru + w] |= reach[rs + w]; }
+  }
+  return { W, reach };
+}
+
+/** The four classic priority rules, exactly as the research code computes them (baselines.py _priority_from_rule: a higher number is
+ *  placed first), on the clone's instance. Like the research they read the precedence structure (who comes before whom), not the link
+ *  types or lags: the placement that follows (serialSgs) honours those. A duration is taken over every mode the activity has.
+ *  LFT: the latest finish of a backward pass on each activity's shortest duration, negated (the most urgent first). MTS: the number of
+ *  activities that follow it, through any chain. GRPW: its longest duration plus that number. SPT: its shortest duration, negated. */
+export function classicPriorities(inst: HrmInstance): Record<'LFT' | 'MTS' | 'GRPW' | 'SPT', number[]> {
+  const acts = inst.acts, n = acts.length;
+  const succ: number[][] = acts.map(() => []);
+  for (const a of acts) for (const p of a.preds) succ[p.id].push(a.id);
+  const order = topoOrder(acts);
+  const shortest = acts.map((a) => minOf(a.modes.map((m) => m.duration))), longest = acts.map((a) => maxOf(a.modes.map((m) => m.duration)));
+  const ef = new Array<number>(n).fill(0);
+  for (const u of order) { let est = 0; for (const p of acts[u].preds) if (ef[p.id] > est) est = ef[p.id]; ef[u] = est + shortest[u]; }
+  const cmax = n ? maxOf(ef) : 0, lf = new Array<number>(n).fill(cmax);
+  for (let k = n - 1; k >= 0; k--) { const u = order[k]; if (succ[u].length) lf[u] = minOf(succ[u].map((s) => lf[s] - shortest[s])); }
+  const { W, reach } = descendantRows(succ, order);
+  const following = acts.map((_, u) => { let c = 0; for (let w = 0; w < W; w++) { let v = reach[u * W + w]; while (v) { v &= v - 1; c++; } } return c; });
+  return { LFT: lf.map((v) => -v), MTS: following, GRPW: longest.map((d, i) => d + following[i]), SPT: shortest.map((d) => -d) };
+}
+
 /** The model's four inputs (featurize and precedence_bias of model.py; column order and normalisation as trained). */
 export function reasonerInputs(inst: HrmInstance): ReasonerInputs {
   const acts = inst.acts, n = acts.length;
@@ -105,12 +135,7 @@ export function reasonerInputs(inst: HrmInstance): ReasonerInputs {
   }
   // symmetric reachability: 1 where two activities share a directed path
   const bias = new Float32Array(n * n);
-  // descendants as bit rows (n x n bits), OR-ed up in reverse precedence order
-  const W = (n + 31) >>> 5, reach = new Uint32Array(n * W);
-  for (let k = order.length - 1; k >= 0; k--) {
-    const u = order[k], ru = u * W;
-    for (const s of succ[u]) { reach[ru + (s >>> 5)] |= 1 << (s & 31); const rs = s * W; for (let w = 0; w < W; w++) reach[ru + w] |= reach[rs + w]; }
-  }
+  const { W, reach } = descendantRows(succ, order);
   for (let u = 0; u < n; u++) for (let w = 0; w < W; w++) for (let bits = reach[u * W + w]; bits; bits &= bits - 1) { const v = (w << 5) + (31 - Math.clz32(bits & -bits)); bias[u * n + v] = 1; bias[v * n + u] = 1; }
   const modeMask = new Uint8Array(n * REASONER_KMAX);
   acts.forEach((a, i) => { for (let j = 0; j < Math.min(REASONER_KMAX, a.modes.length); j++) modeMask[i * REASONER_KMAX + j] = 1; });
@@ -222,8 +247,16 @@ export async function reasonerOutput(inst: HrmInstance, infer: Infer, tick?: Tic
   return { priority, modeLogits, windows };
 }
 
-/** Sampled decode around the net's answer (GRAM-style, as the platform): trajectory 0 is the net's argmax modes and
- *  priority; then `samples` more with sampled modes and jittered priority, each scored by the SGS; the best is kept. */
+/** Where the best placement came from: the model's own answer, a sampled trajectory around it, a classic starting rule (its name and the
+ *  modes it was placed with, or the earliest start with no resource limit), or the final pass over the modes. */
+export type BestFrom = 'model' | 'sampled' | 'mode pass' | (string & {});
+
+/** The search of the research's decode_gram, in its parts: the model's answer; the nine starting placements (the four classic priority
+ *  rules, each with every activity in its normal mode and with every activity in its shortest mode, and the plain earliest start with no
+ *  resource limit); `samples` trajectories with sampled modes and jittered priority around the model's answer; then a final pass over
+ *  the modes. Each is scored by the SGS and the best is kept: the shortest makespan, then the lowest cost, the earlier one on a tie.
+ *  Work already under way is placed first in every one of them. A cancel (the tick throws code 'cancelled') in the sampling is the
+ *  caller's, as it always was; one in the final pass stops it there, and the best so far is the answer (cancelled: true). */
 export async function decode(inst: HrmInstance, out: { priority: ArrayLike<number>; modeLogits: ArrayLike<number> }, o: { samples?: number; seed?: number; tick?: Tick } = {}) {
   const acts = inst.acts, n = acts.length;
   const valid: number[][] = [], probs: number[][] = [], argmax: number[] = [];
@@ -235,21 +268,58 @@ export async function decode(inst: HrmInstance, out: { priority: ArrayLike<numbe
   }
   // work already under way is placed first, where it is (1e6 is above every lifted priority of reasonerOutput: a window adds its
   // range + WINDOW_GAP, about 6, so it holds to some 150,000 windows — 80 million activities)
-  const netPrio = Array.from({ length: n }, (_, i) => out.priority[i] + (acts[i].started ? 1e6 : 0));
+  const first = (i: number) => (acts[i].started ? 1e6 : 0);
+  const netPrio = Array.from({ length: n }, (_, i) => out.priority[i] + first(i));
   let rs = (o.seed ?? 0x9e3779b9) >>> 0;
   const rand = () => { rs |= 0; rs = (rs + 0x6d2b79f5) | 0; let t = Math.imul(rs ^ (rs >>> 15), 1 | rs); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-9, rand()))) * Math.cos(2 * Math.PI * rand());
-  const run = (modes: number[], prio: number[]) => { const dur = acts.map((a, i) => a.modes[modes[i]]?.duration ?? a.duration); return { modes, prio, makespan: serialSgs(acts, dur, inst.caps, prio).makespan, cost: acts.reduce((s, a, i) => s + (a.modes[modes[i]]?.cost ?? 0), 0) }; };
-  let best = run(argmax, netPrio);
+  const run = (modes: number[], prio: number[], from: BestFrom) => { const dur = acts.map((a, i) => a.modes[modes[i]]?.duration ?? a.duration); return { modes, prio, from, makespan: serialSgs(acts, dur, inst.caps, prio).makespan, cost: acts.reduce((s, a, i) => s + (a.modes[modes[i]]?.cost ?? 0), 0) }; };
+  type Placed = ReturnType<typeof run>;
+  const better = (c: Placed, than: Placed) => c.makespan < than.makespan || (c.makespan === than.makespan && c.cost < than.cost);
+  let best = run(argmax, netPrio, 'model');
+  // the starting placements: each classic rule with the normal modes and with the shortest, and the earliest start with no limit
+  const normal = acts.map(() => 0), shortest = acts.map((a) => a.modes.reduce((k, m, j) => (m.duration < a.modes[k].duration ? j : k), 0));
+  const rules = classicPriorities(inst);
+  let starts = 0;
+  for (const rule of ['LFT', 'MTS', 'GRPW', 'SPT'] as const) {
+    const prio = rules[rule].map((v, i) => v + first(i));
+    for (const [label, modes] of [['normal modes', normal], ['shortest modes', shortest]] as const) { const c = run(modes, prio, `${rule} (${label})`); starts++; if (better(c, best)) best = c; }
+  }
+  const early = serialSgs(acts, acts.map((a) => a.duration), new Map()).start;
+  { const c = run(normal, early.map((v, i) => -v + first(i)), 'earliest start (no resource limit)'); starts++; if (better(c, best)) best = c; }
   const K = o.samples ?? (n > 120 ? 64 : 200);
   for (let k = 0; k < K; k++) {
     if (o.tick) await o.tick(k, K, `trajectory ${k} of ${K}`); // every trajectory: on a large schedule one takes seconds, and a cancel waits for the next tick
     const scale = 0.3 + rand(), sample = rand() < 0.5;
     const mc = argmax.map((am, i) => { if (!sample || valid[i].length === 1) return am; const r = rand(); let acc = 0; for (let j = 0; j < valid[i].length; j++) { acc += probs[i][j]; if (r <= acc) return valid[i][j]; } return valid[i].at(-1)!; });
-    const c = run(mc, netPrio.map((p) => p + gauss() * scale));
-    if (c.makespan < best.makespan || (c.makespan === best.makespan && c.cost < best.cost)) best = c;
+    const c = run(mc, netPrio.map((p) => p + gauss() * scale), 'sampled');
+    if (better(c, best)) best = c;
   }
-  return { ...best, trajectories: K + 1 };
+  // The final pass over the modes (the research's local search): with the best priority, for each activity that has a second mode (the
+  // ones with crash data) try each other mode and keep it when the makespan, then the cost, is strictly lower; again from the first
+  // until a whole pass changes nothing. No limit on the passes and no cut of the activities: it runs to its end.
+  // It ends: a kept change strictly lowers the pair (makespan, cost), which orders the finite set of mode choices (every activity has a
+  // fixed number of modes) strictly, so no choice is reached twice, and a pass that keeps nothing is the last.
+  const improvable = acts.map((_, i) => i).filter((i) => valid[i].length > 1);
+  let trials = 0, passes = 0, cancelled = false;
+  if (improvable.length) {
+    try {
+      for (let changed = true; changed;) {
+        changed = false; passes++;
+        for (let j = 0; j < improvable.length; j++) {
+          const i = improvable[j];
+          for (const k of valid[i]) {
+            if (k === best.modes[i]) continue;
+            await o.tick?.(trials, 0, `improving the modes: activity ${j + 1} of ${improvable.length}, pass ${passes}`); // every trial: a cancel lands at once
+            const trial = best.modes.slice(); trial[i] = k; trials++;
+            const c = run(trial, best.prio, 'mode pass');
+            if (better(c, best)) { best = c; changed = true; }
+          }
+        }
+      }
+    } catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; cancelled = true; }
+  }
+  return { ...best, trajectories: starts + K + 1, best_from: best.from, improvable: improvable.length, mode_trials: trials, mode_passes: passes, cancelled };
 }
 
 /** Durations of the crashed modes and the placement order (Activity task_ids, highest priority first). */
@@ -277,6 +347,9 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   try { out = await reasonerOutput(inst, infer, o.tick); }
   catch (e) { if (e instanceof ReasonerBadAnswer) return { ok: false as const, error: { code: 'reasoner_failed', message: e.message } }; throw e; }
   const best = await decode(inst, out, o);
+  // a cancel in the final pass over the modes keeps the best found so far; what is left (the checks in real dates) is not ticked, since a
+  // cancelled call would stop at the first tick and there would be no answer
+  const cancelled = best.cancelled, tick = cancelled ? undefined : o.tick;
   // a crew larger than its resource's limit fits on no day, whatever the order: said, because no placement of it means anything
   // (counted as serialSgs places it: the crew of the mode chosen, a crashed mode's crew being larger)
   const overLimit = inst.acts.filter((a, i) => { const d = a.modes[best.modes[i]]?.duration ?? a.duration, crew = a.crewSize * (a.duration && d ? a.duration / d : 1); return d > 0 && crew > (inst.caps.get(a.group) ?? Infinity) + 1e-9; }).length;
@@ -288,9 +361,9 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   const open = new Set(projIds);
   const datesOf = (d: Db) => new Map(rows(d, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => [t.task_id, [parseP6Date(t.act_start_date || t.early_start_date), parseP6Date(t.act_end_date || t.early_end_date)] as const]));
   const measureLeveled = (d: Db, first?: string[]) => { const s = scheduleProjects(d, projIds, {}); if (!s.ok) throw new Error('The schedule failed.'); const cpm = finishOf(d, projIds), cpmDates = datesOf(d); if (leveled) levelResources(d, projIds, { first }); return { cpm, leveled: finishOf(d, projIds), cpmDates, dates: datesOf(d) }; };
-  if (o.tick) await o.tick(1, 3, 'P6 leveling for comparison');
+  if (tick) await tick(1, 3, 'P6 leveling for comparison');
   const p6 = onScratch(db, (d) => measureLeveled(d));
-  if (o.tick) await o.tick(2, 3, 'leveling in the proposed order');
+  if (tick) await tick(2, 3, 'leveling in the proposed order');
   const mine = onScratch(db, (d) => { applyOps(d, ops); return measureLeveled(d, order); });
   const fmt = (v: number | null) => (v != null ? formatP6Date(v) : null);
   // (a day: the hours per day of the activity's calendar, as evaluate's shifts take it)
@@ -313,6 +386,11 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   return {
     ok: true as const,
     activities: n, leveled_activities: leveled, crashable_activities: crashable, trajectories: best.trajectories,
+    /** what won: 'model', 'sampled', a classic rule with its modes, 'earliest start (no resource limit)', or 'mode pass' */
+    best_from: best.best_from,
+    ...(best.improvable ? { mode_trials: best.mode_trials, mode_passes: best.mode_passes } : {}),
+    ...(!crashable ? { note: o.activities?.length ? "Crash data was given, but no activity in it can be shortened (an id that is not an activity of the schedule, or crash_days not below its remaining days), so there was no mode to choose: this is the best order of the model's and the classic rules'." : "No crash data was given, so there was no mode to choose: this is the best order of the model's and the classic rules'. Give crash data (activities: [{id, crash_days, crash_cost} \u2026]) for the reasoner to choose what to shorten." } : {}),
+    ...(cancelled ? { partial: true as const, stopped: 'cancelled' as const, partial_note: `Cancelled in the final pass over the modes (${best.mode_trials} trial${best.mode_trials === 1 ? '' : 's'} of pass ${best.mode_passes} done): this is the best found before the stop, a valid proposal but not the pass's end. Nothing was applied; pass ops to edit to make the changes, or run again for the full pass.` } : {}),
     /** how the model read the network: at once (1), or this many windows of REASONER_WINDOW activities */
     model_windows: out.windows,
     ...(overLimit ? { over_limit_activities: overLimit, over_limit_note: `${overLimit} activit${overLimit === 1 ? 'y needs' : 'ies need'} more of a resource than its Max Units/Time allows on any day: no order can level ${overLimit === 1 ? 'it' : 'them'}, so the leveled finishes here say little until the limit or the assignment is corrected.` } : {}),

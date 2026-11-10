@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { rows, type Db } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
-import { buildInstance, optimizeSchedule, reasonerInputs, reasonerOutput, ReasonerBadAnswer, REASONER_WINDOW, serialSgs, type HrmActivity, type HrmInstance, type ReasonerInputs } from '../core/analysis/hrm.ts';
+import { buildInstance, classicPriorities, decode, optimizeSchedule, reasonerInputs, reasonerOutput, ReasonerBadAnswer, REASONER_WINDOW, serialSgs, type HrmActivity, type HrmInstance, type ReasonerInputs } from '../core/analysis/hrm.ts';
 import { nodeInfer, reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
 
 // The platform's own reasoner check: two parallel chains in one trade and a join, crew 2 each, under a cap of 4.
@@ -192,7 +192,8 @@ test('optimize_schedule runs the embedded model and checks its answer with the P
   const r = await optimizeSchedule(db, [pid], { seed: 7, samples: 50 }, nodeInfer, apply);
   assert.ok(r.ok, JSON.stringify(r));
   assert.equal(JSON.stringify(db), before, 'nothing is kept');
-  assert.equal(r.trajectories, 51);
+  assert.equal(r.trajectories, 60, '50 sampled, the model\'s own answer and the nine starting placements');
+  assert.ok(r.best_from && r.note?.startsWith('No crash data was given'));
   assert.equal(r.better_than_p6_leveler, true, 'beats P6 default leveling on this network (2026-07-15 against 2026-07-21)');
   assert.ok(r.reasoner_finish && r.p6_leveled_finish && r.cpm_finish);
   assert.ok(r.sgs_makespan_days >= 31);
@@ -244,4 +245,113 @@ test('MCP optimize_schedule: proposal, apply as one undoable change, min_crash_c
   const prev = process.env.P6CLONE_REASONER;
   process.env.P6CLONE_REASONER = 'Z:/nowhere/reasoner.onnx';
   try { /* the session is already loaded, so this checks only the path lookup */ assert.equal((await import('../core/analysis/hrmRuntime.ts')).reasonerModelPath(), null); } finally { if (prev == null) delete process.env.P6CLONE_REASONER; else process.env.P6CLONE_REASONER = prev; }
+});
+
+// ---- the reasoner's search: the starting rules and the final pass over the modes (owner 2026-11-10) ----
+
+/** A made activity: `modes` are [duration, cost] pairs after the normal one; the crew grows as the days shrink, as buildInstance makes it. */
+function act(id: number, d: number, preds: number[], crash: [number, number][] = [], group = 'T', crew = 1, started = false): HrmActivity {
+  return { id, task: { task_id: String(id), task_code: `A${id}` } as HrmActivity['task'], duration: d, preds: preds.map((p) => ({ id: p, type: 'FS' as const, lag: 0 })), group, crewSize: crew, started,
+    modes: [{ duration: d, crewSize: crew, cost: 0 }, ...crash.map(([days, cost]) => ({ duration: days, crewSize: crew * (d / days), cost }))] };
+}
+const neutral = (n: number, k = 3) => ({ priority: new Float32Array(n), modeLogits: new Float32Array(n * k) });
+const stand = (priority: number[]) => ({ priority: Float32Array.from(priority), modeLogits: new Float32Array(priority.length * 3) });
+
+test('the four classic priority rules are the research code\'s, equal to hand-computed values on a small network', () => {
+  // A(3) -> B(2), A -> C(4; crashable to 2), B -> D(1), C -> D, and E(5) alone
+  const inst: HrmInstance = { acts: [act(0, 3, []), act(1, 2, [0]), act(2, 4, [0], [[2, 10]]), act(3, 1, [1, 2]), act(4, 5, [])], caps: new Map() };
+  const r = classicPriorities(inst);
+  // shortest durations 3,2,2,1,5: earliest finishes 3,5,5,6,5 so the finish is 6; latest finishes D 6, B 5, C 5, A min(5-2, 5-2) = 3, E 6
+  assert.deepEqual(r.LFT, [-3, -5, -5, -6, -6]);
+  // activities after each: A has B, C, D; B and C have D; D and E none
+  assert.deepEqual(r.MTS, [3, 1, 1, 0, 0]);
+  // longest duration (C: 4, the normal mode) plus that count
+  assert.deepEqual(r.GRPW, [6, 3, 5, 1, 5]);
+  assert.deepEqual(r.SPT, [-3, -2, -2, -1, -5]);
+});
+
+test('the search is never worse than the best of its nine starting placements, whatever the model answers', async () => {
+  // three chains on one trade under a limit of 2 crews of 2: the order matters
+  const inst = madeInstance(6, 8, 2, 4);
+  inst.acts.forEach((a, i) => { if (i % 3 === 0) a.modes.push({ duration: Math.max(1, a.duration - 1), crewSize: 2, cost: 5 }); });
+  const n = inst.acts.length, early = serialSgs(inst.acts, inst.acts.map((a) => a.duration), new Map()).start;
+  // the model's answer is deliberately bad: the activities that start last first
+  const bad = stand(early.map((v) => v * 3));
+  const rules = classicPriorities(inst), normal = inst.acts.map(() => 0), shortest = inst.acts.map((a) => a.modes.length > 1 ? 1 : 0);
+  const place = (modes: number[], prio: number[]) => serialSgs(inst.acts, inst.acts.map((a, i) => a.modes[modes[i]].duration), inst.caps, prio).makespan;
+  const nine = [...(['LFT', 'MTS', 'GRPW', 'SPT'] as const).flatMap((k) => [place(normal, rules[k]), place(shortest, rules[k])]), place(normal, early.map((v) => -v))];
+  assert.equal(nine.length, 9);
+  const modelOnly = await decode(inst, bad, { samples: 0 });
+  assert.equal(modelOnly.trajectories, 10);
+  assert.ok(modelOnly.makespan <= Math.min(...nine), `${modelOnly.makespan} against the best starting placement ${Math.min(...nine)}`);
+  assert.ok(modelOnly.makespan <= place(normal, Array.from(bad.priority)), 'and no worse than the bad answer on its own');
+  assert.equal(n, 48);
+  // the sampled trajectories are counted beside them
+  assert.equal((await decode(inst, bad, { samples: 7, seed: 3 })).trajectories, 17);
+});
+
+test('the final pass over the modes finds what the sampling and the starting rules missed, and stops on its own', async () => {
+  // two chains into a join: X (10 days, crashable to 6 for 100) is critical, Y (4 days, crashable to 2 for 50) has float. Every starting
+  // placement is all-normal (10 days) or all-crashed (6 days, cost 150): the best choice, X crashed and Y not (6 days, cost 100), is in none.
+  const inst: HrmInstance = { acts: [act(0, 10, [], [[6, 100]]), act(1, 4, [], [[2, 50]]), act(2, 1, [0, 1])], caps: new Map() };
+  const r = await decode(inst, neutral(3), { samples: 0 });
+  assert.equal(r.makespan, 7);
+  assert.deepEqual(r.modes, [1, 0, 0]);
+  assert.equal(r.cost, 100);
+  assert.equal(r.best_from, 'mode pass');
+  assert.equal(r.cancelled, false);
+  assert.equal(r.improvable, 2);
+  // two passes: the first changes Y back, the second changes nothing (4 trials: each of the two activities is tried in the other mode)
+  assert.equal(r.mode_passes, 2);
+  assert.ok(r.mode_trials >= 4);
+  // every trial is ticked with the pass it belongs to
+  const said: string[] = [];
+  await decode(inst, neutral(3), { samples: 0, tick: async (_d, _t, m) => { said.push(m); } });
+  assert.equal(said.length, r.mode_trials);
+  assert.ok(said.every((m) => /^improving the modes: activity \d of 2, pass \d$/.test(m)));
+});
+
+test('a cancel in the final pass keeps the best found so far and says it was stopped; optimize_schedule answers it partial and applies nothing', async () => {
+  const inst: HrmInstance = { acts: [act(0, 10, [], [[6, 100]]), act(1, 4, [], [[2, 50]]), act(2, 1, [0, 1])], caps: new Map() };
+  const stopAt = (nth: number) => { let k = 0; return async (_d: number, _t: number, m: string) => { if (m.startsWith('improving the modes') && ++k === nth) throw Object.assign(new Error('cancelled'), { code: 'cancelled' }); }; };
+  // stopped before the first trial: the best of the starting placements stands (all crashed, 6 + 1 days, cost 150)
+  const none = await decode(inst, neutral(3), { samples: 0, tick: stopAt(1) });
+  assert.deepEqual([none.cancelled, none.mode_trials, none.makespan, none.cost], [true, 0, 7, 150]);
+  // stopped at the third trial: the second one was kept (X back to normal was worse; Y back to normal kept: cost 100)
+  const some = await decode(inst, neutral(3), { samples: 0, tick: stopAt(3) });
+  assert.deepEqual([some.cancelled, some.mode_trials, some.makespan, some.cost], [true, 2, 7, 100]);
+  // a cancel in the sampling is the caller's, as before
+  await assert.rejects(() => decode(inst, neutral(3), { samples: 5, tick: async (_d, _t, m) => { if (m.startsWith('trajectory')) throw Object.assign(new Error('cancelled'), { code: 'cancelled' }); } }), (e: unknown) => (e as { code?: string }).code === 'cancelled');
+  // through optimizeSchedule: a partial answer with its proposal, finishes in real dates, and a note
+  const { db, pid } = project(4);
+  const crash = [{ id: 'A5', crash_days: 4, crash_cost: 900 }, { id: 'A2', crash_days: 4, crash_cost: 500 }];
+  const done = await optimizeSchedule(db, [pid], { samples: 3, seed: 1, activities: crash }, async (x) => stand(Array.from({ length: x.n }, (_, k) => k)), () => undefined);
+  assert.ok(done.ok && !done.partial);
+  const before = JSON.stringify(db);
+  const cut = await optimizeSchedule(db, [pid], { samples: 3, seed: 1, activities: crash, tick: stopAt(2) }, async (x) => stand(Array.from({ length: x.n }, (_, k) => k)), (d, ops) => { assert.ok(applyOps(d, ops as never, { calendarDays: true }).ok); });
+  assert.ok(cut.ok);
+  assert.equal(cut.ok && cut.partial, true);
+  assert.equal(cut.ok && cut.stopped, 'cancelled');
+  assert.match(cut.ok ? cut.partial_note! : '', /Cancelled in the final pass over the modes/);
+  assert.ok(cut.ok && cut.reasoner_finish && cut.p6_leveled_finish, 'the checks in real dates are made');
+  assert.equal(JSON.stringify(db), before, 'nothing was changed');
+});
+
+test('the answer says what won, and with no crash data why there was no mode to choose', async () => {
+  const { db, pid } = project(4);
+  const infer = async (x: ReasonerInputs) => stand(Array.from({ length: x.n }, (_, k) => Math.sin(k)));
+  const plain = await optimizeSchedule(db, [pid], { samples: 5, seed: 1 }, infer, () => undefined);
+  assert.ok(plain.ok);
+  assert.equal(plain.note, "No crash data was given, so there was no mode to choose: this is the best order of the model's and the classic rules'. Give crash data (activities: [{id, crash_days, crash_cost} \u2026]) for the reasoner to choose what to shorten.");
+  assert.match(plain.best_from, /^(model|sampled|(LFT|MTS|GRPW|SPT) \((normal|shortest) modes\)|earliest start \(no resource limit\))$/);
+  assert.equal(plain.mode_trials, undefined);
+  assert.equal(plain.trajectories, 15);
+  // crash data on an id that is not there: said, not the same note
+  const ghost = await optimizeSchedule(db, [pid], { samples: 1, activities: [{ id: 'NOPE', crash_days: 1, crash_cost: 1 }] }, infer, () => undefined);
+  assert.ok(ghost.ok && /^Crash data was given, but no activity in it can be shortened/.test(ghost.note!));
+  // with crash data: no note, the pass ran
+  const crash = await optimizeSchedule(db, [pid], { samples: 1, activities: [{ id: 'A5', crash_days: 4, crash_cost: 900 }] }, infer, () => undefined);
+  assert.ok(crash.ok);
+  assert.equal(crash.note, undefined);
+  assert.ok(crash.mode_passes! >= 1 && crash.mode_trials! >= 1);
 });
