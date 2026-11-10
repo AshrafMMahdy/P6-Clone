@@ -14,6 +14,7 @@ import { testHooks } from '../core/risk/montecarlo.ts';
 import { percentile } from '../core/risk/montecarlo.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
+import { exportResult } from '../mcp/export.ts';
 import { sampleCopy } from './helpers.ts';
 
 setRoots(null, tmpdir());
@@ -582,4 +583,72 @@ test('E5: optimize_schedule with objective min_crash_cost exports under its own 
   assert.equal(r.exported.replaced.files, 2);
   assert.ok(existsSync(join(dir, 'crash_schedule-old.csv')), 'the crash_schedule tool\'s own files stay');
   assert.ok(existsSync(join(dir, 'optimize_schedule-steps.csv')));
+});
+
+test('export_name: an experiment keeps its own files in the folder; the same name replaces only its own; no name replaces only the unnamed set (owner 2026-11-10)', async () => {
+  const h = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+  const dir = folder(), ls = () => readdirSync(dir).sort();
+  const run = async (name?: string) => (await call('dcma_14', { handle: h, export: dir, ...(name != null ? { export_name: name } : {}) })).d;
+  const names = (d: any) => d.exported.files.map((f: any) => f.path.split(/[\\/]/).pop() as string);
+  const a = await run('option-a');
+  assert.deepEqual(names(a).slice(0, 2), ['dcma_14-option-a.json', 'dcma_14-option-a-checks.csv'], 'exported lists the real paths');
+  for (const f of a.exported.files) assert.ok(existsSync(f.path));
+  const b = await run('option-b'), none = await run(), opt = await run('option');
+  const set = { a: names(a), b: names(b), none: names(none), opt: names(opt) };
+  assert.equal(new Set(Object.values(set).flat()).size, set.a.length * 4, 'four sets of files side by side');
+  const all = ls();
+  assert.equal(all.length, set.a.length * 4);
+  // "option" and "option-a" are told apart: a re-run of "option" leaves option-a's files alone (and a stale table of its own goes)
+  const stamp = (f: string) => statSync(join(dir, f)).mtimeMs;
+  const keep = [...set.a, ...set.b, ...set.none], before = keep.map(stamp);
+  writeFileSync(join(dir, 'dcma_14-option-old.csv'), 'stale');
+  await new Promise((r) => setTimeout(r, 20));
+  const again = await run('option');
+  assert.equal(again.exported.replaced.files, set.opt.length + 1, 'its own files and its stale one');
+  assert.deepEqual(keep.map(stamp), before, 'every other name and the unnamed set untouched');
+  assert.equal(existsSync(join(dir, 'dcma_14-option-old.csv')), false);
+  // no name: the unnamed set is replaced and every named one stays
+  await new Promise((r) => setTimeout(r, 20));
+  const unnamed = await run();
+  assert.equal(unnamed.exported.replaced.files, set.none.length);
+  const namedKeep = [...set.a, ...set.b, ...set.opt];
+  assert.ok(set.none.every((f) => stamp(f) > Math.max(...before)), 'the unnamed files are new');
+  assert.deepEqual(namedKeep.map(stamp), [...before.slice(0, set.a.length + set.b.length), ...set.opt.map(stamp)]);
+  assert.equal(readdirSync(dir).length, all.length);
+  // another tool's named files are its own: check_schedule with the same name beside them
+  const cs = (await call('check_schedule', { handle: h, export: dir, export_name: 'option-a' })).d;
+  assert.ok(existsSync(join(dir, 'check_schedule-option-a.json')) && existsSync(join(dir, 'dcma_14-option-a.json')));
+  assert.ok(cs.exported.files.length >= 2);
+  // the name is made file-safe: letters (also non-Latin), digits, marks and . _ - stay, anything else becomes -
+  const odd = await run(' Option A/1:\u00e9\u0645 ');
+  assert.ok(odd.exported.files[0].path.endsWith('dcma_14-Option-A-1-\u00e9\u0645.json'), odd.exported.files[0].path);
+  await call('close', { handle: h, discard: true });
+});
+
+test('export_name: a name that is empty, one with no folder, one that clashes with a stopped run\'s files, and a non-text one are refused as bad_input before anything is written', async () => {
+  const h = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+  const dir = folder();
+  for (const bad of ['', '   ', 'partial', 'x-partial']) {
+    const r = await call('dcma_14', { handle: h, export: dir, export_name: bad });
+    assert.equal(r.d.error.code, 'bad_input', `"${bad}": ${JSON.stringify(r.d)}`);
+  }
+  assert.equal((await call('dcma_14', { handle: h, export: dir, export_name: 7 })).d.error.code, 'bad_input');
+  const nofolder = await call('dcma_14', { handle: h, export_name: 'option-a' });
+  assert.equal(nofolder.d.error.code, 'bad_input');
+  assert.match(nofolder.d.error.message, /no export folder/);
+  assert.equal(existsSync(dir) ? readdirSync(dir).length : 0, 0, 'nothing written');
+  await call('close', { handle: h, discard: true });
+});
+
+test('export_name: a stopped run keeps its -partial rule within the name and replaces only that name\'s partial files', () => {
+  const dir = folder(); mkdirSync(dir, { recursive: true });
+  const write = (p: string, make: (put: (s: string) => void) => void) => { let t = ''; make((x) => { t += x; }); writeFileSync(p, t); };
+  const tables = [{ name: 'steps', columns: ['a'], rows: [{ a: 1 }] }];
+  const put = (o: { partial?: boolean; name?: string }) => exportResult('crash_schedule', dir, { ok: 1 }, tables, write as never, o).files.map((f) => f.path.split(/[\\/]/).pop());
+  assert.deepEqual(put({ name: 'x' }), ['crash_schedule-x.json', 'crash_schedule-x-steps.csv']);
+  assert.deepEqual(put({ name: 'x', partial: true }), ['crash_schedule-x-partial.json', 'crash_schedule-x-partial-steps.csv']);
+  put({ partial: true });
+  assert.equal(readdirSync(dir).length, 6, 'a partial run replaces no complete run');
+  put({ name: 'x' });
+  assert.deepEqual(readdirSync(dir).sort(), ['crash_schedule-partial-steps.csv', 'crash_schedule-partial.json', 'crash_schedule-x-steps.csv', 'crash_schedule-x.json'], 'a complete run of the name replaces its partial too, no other');
 });

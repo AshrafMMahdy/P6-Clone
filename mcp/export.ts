@@ -6,6 +6,8 @@
 // an earlier export there are replaced, none left from it. Everything goes to the files a piece at a time (never one string the size of
 // the result), and a list given as a function is read as it is written (evaluate_batch reads its kept file). The folder is a write path
 // like the tool's others: inside the write root, never outside, and made before the tool works (exportFolder).
+// export_name (owner 2026-11-10): a what-if keeps its own files: <tool>-<name>.json and <tool>-<name>-<table>.csv beside the others, and a
+// re-run with the same name replaces only that name's files.
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { csvQuote } from '../core/report/reports.ts';
@@ -72,17 +74,36 @@ function jsonTo(put: (s: string) => void, v: unknown, depth = 0): void {
   put('}');
 }
 
+/** The `export_name` argument as it goes into a file name: letters, digits, marks, `.`, `_` and `-` stay, anything else becomes `-`.
+ *  Absent: undefined (the unnamed files). Refused as bad_input: a name that is empty, one with no export folder to go in, and "partial"
+ *  (or one ending in -partial), which is how a stopped run's files are told from a complete run's. */
+export function exportName(v: unknown, folderGiven = true): string | undefined {
+  if (v == null) return undefined;
+  if (typeof v !== 'string') return fail('bad_input', 'export_name must be a short text, e.g. "option-a".', 'Pass export_name as a string, or leave it out for the unnamed files.');
+  if (!folderGiven) fail('bad_input', 'export_name names files inside the export folder, and no export folder was given.', 'Pass export: "<folder>" with export_name, or leave export_name out.');
+  const safe = v.trim().replace(/[^\p{L}\p{N}\p{M}._-]/gu, '-');
+  if (!safe) fail('bad_input', 'export_name is empty.', 'Give a short name such as "option-a", or leave export_name out to write the unnamed files.');
+  if (/(^|-)partial$/i.test(safe)) fail('bad_input', `export_name "${v.trim()}" cannot end in "partial": a stopped run's files are named -partial.`, 'Choose another name, e.g. "option-a".');
+  return safe;
+}
+
+const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /** Write the full result and every table into the folder `arg` names, as <tool>.json and <tool>-<table>.csv; the answer's `exported`.
  *  A COMPLETE result replaces every file of this tool's earlier exports there, partial ones too (none left from it). A PARTIAL result
  *  (a run that was stopped or cancelled: o.partial) is written as <tool>-partial.json and <tool>-partial-<table>.csv and replaces only an
  *  earlier partial's files: it never removes the files of a complete run. o.as: the name the files carry when that is not the tool the
  *  work is done by (optimize_schedule's crashing is exported as optimize_schedule, so one tool's files are replaced together).
+ *  o.name (export_name): the files are <tool>-<name>.json and <tool>-<name>-<table>.csv (-partial within the name), and only that
+ *  name's files are replaced; without it only the unnamed files are, never a named set. (A table's name has no hyphen, which is how
+ *  <tool>-<table>.csv is told from <tool>-<name>-<table>.csv.)
  *  What was replaced is said in `replaced`, and each file's size in `bytes`. */
-export function exportResult(tool: string, arg: unknown, full: unknown, tables: Table[], writeWith: WriteWith, o: { partial?: boolean; as?: string } = {}): Exported {
-  const folder = exportFolder(arg);
-  const name = `${o.as ?? tool}${o.partial ? '-partial' : ''}`, base = o.as ?? tool;
-  // a table it no longer has is not left behind; other tools' files stay
-  const mine = o.partial ? new RegExp(`^${base}-partial(\\.json|-.*\\.csv)$`) : new RegExp(`^${base}(-partial)?(\\.json|-.*\\.csv)$`);
+export function exportResult(tool: string, arg: unknown, full: unknown, tables: Table[], writeWith: WriteWith, o: { partial?: boolean; as?: string; name?: unknown } = {}): Exported {
+  const folder = exportFolder(arg), given = exportName(o.name);
+  const base = `${o.as ?? tool}${given ? `-${given}` : ''}`, name = `${base}${o.partial ? '-partial' : ''}`;
+  // a table it no longer has is not left behind; other tools' files, and the files of another name, stay
+  const re = reEscape(base);
+  const mine = o.partial ? new RegExp(`^${re}-partial(\\.json|-[^-]+\\.csv)$`) : new RegExp(`^${re}(-partial)?(\\.json|-[^-]+\\.csv)$`);
   let replaced = 0, json: Date | null = null, newest: Date | null = null;
   for (const f of readdirSync(folder)) if (mine.test(f)) {
     const p = join(folder, f);
@@ -164,7 +185,9 @@ export function exportAfterChange(make: () => Exported): { exported: Exported } 
   catch (e) { return { export_error: `The export was not written (${(e as Error)?.message ?? e}); the change WAS made to the project (undo takes it back).` }; }
 }
 
+/** The `export_name` argument of a tool's input schema, beside `export`. */
+export const exportNameProp = { type: 'string', description: 'a short name for this run\u2019s files (e.g. "option-a"): they are <tool>-<name>.json and <tool>-<name>-<table>.csv, kept beside the others, and a re-run with the same name replaces only that name\u2019s files; without it the files are <tool>.json and <tool>-<table>.csv, replaced on a re-run. Letters, digits, . _ - are kept, anything else becomes -' };
 /** The `export` argument of a tool's input schema. */
 export const exportProp = { type: 'string', description: 'a folder (inside the write root) to write the full result to: <tool>.json and <tool>-<table>.csv for each table' };
 /** The sentence a tool's description gains on export, naming its CSV files. */
-export const exportDoc = (tool: string, csvs: string[]) => ` export: a folder (inside the write root) to write the full result to, for Excel sheets, Word reports or slides: ${tool}.json (every list whole, whatever this answer leaves out) and ${csvs.map((c) => c.replace(/^\w+/, (n) => `${tool}-${n}.csv`)).join(', ')} (UTF-8, a header row, dates as P6 writes them; an earlier export of this tool there is replaced, and exported.replaced says how many files and when they were written); exported names each file with its bytes, rows and columns. A stopped or cancelled run (partial) is written as ${tool}-partial.json and ${tool}-partial-<table>.csv and replaces only an earlier partial's files, never a complete run's. Each list the answer cut says where all of it is: <list>_note.`;
+export const exportDoc = (tool: string, csvs: string[]) => ` export: a folder (inside the write root) to write the full result to, for Excel sheets, Word reports or slides: ${tool}.json (every list whole, whatever this answer leaves out) and ${csvs.map((c) => c.replace(/^\w+/, (n) => `${tool}-${n}.csv`)).join(', ')} (UTF-8, a header row, dates as P6 writes them; a re-run replaces this tool\u2019s files in the folder; give export_name to keep an experiment\u2019s files beside the others (<tool>-<name>.json, <tool>-<name>-<table>.csv; only that name\u2019s files are replaced); exported.replaced says how many files and when they were written); exported names each file with its bytes, rows and columns. A stopped or cancelled run (partial) is written as ${tool}-partial.json and ${tool}-partial-<table>.csv and replaces only an earlier partial's files, never a complete run's. Each list the answer cut says where all of it is: <list>_note.`;
