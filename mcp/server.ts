@@ -310,7 +310,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   // export (the analysis tools): a folder outside the write root, or one that cannot be made, is refused before anything is worked out or changed
   if ((TOOLS.find((t) => t.name === name)?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties?.export) {
     if (a.export != null) exportFolder(a.export);
-    exportName(a.export_name, a.export != null); // export_name: a bad name, or one with no folder, is refused here too
+    exportName(a.export_name, a.export != null, name); // export_name: a bad name, or one with no folder, is refused here too
   }
   switch (name) {
     case 'list_open': return { open: [...sessions.values()].map((s) => ({ handle: s.handle, file: s.path, projects: allIds(s.db).map((id) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), unsaved_changes: s.dirty, changes: s.history.length })), moved_out: evictedList() };

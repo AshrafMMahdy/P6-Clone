@@ -9,6 +9,7 @@
 // export_name (owner 2026-11-10): a what-if keeps its own files: <tool>-<name>.json and <tool>-<name>-<table>.csv beside the others, and a
 // re-run with the same name replaces only that name's files.
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { csvQuote } from '../core/report/reports.ts';
 import { fail, pathArg } from './runtime.ts';
@@ -21,6 +22,8 @@ export interface Table { name: string; columns: string[]; rows: Rows }
 /** What an answer says it exported. */
 export interface Exported {
   folder: string; files: { path: string; bytes: number; rows?: number; columns?: string[] }[];
+  /** present when the name given is not the name the files carry: it was changed by cleaning (letters, digits, marks and . _ - stay) and/or cut to fit a file name */
+  export_name_used?: { given: string; used: string; note: string };
   /** this tool's files of an earlier export that this one replaced: how many, and when the earlier <tool>.json was written (ISO; the newest of them when it was not there). Absent when none was. */
   replaced?: { files: number; written: string };
 }
@@ -74,18 +77,37 @@ function jsonTo(put: (s: string) => void, v: unknown, depth = 0): void {
   put('}');
 }
 
+/** The longest a file name may be (owner 2026-11-10: "file names must be 250 characters or less; a longer name is cut off at 250
+ *  characters automatically"). */
+export const EXPORT_FILE_NAME_MAX = 250;
+/** A file name's length as the system it is written on counts it: Windows in UTF-16 characters, the others (Linux, macOS) in the bytes
+ *  of its UTF-8, so the 250 holds there too (an Arabic or Chinese name takes 2 to 3 bytes a character and would otherwise fail as ENAMETOOLONG). */
+export const fileNameLength = (s: string): number => (process.platform === 'win32' ? s.length : Buffer.byteLength(s));
+/** What a table name may add to a file name: `-partial-<table>.csv`. The tables of the tools are at most 26 characters; the room is
+ *  kept so the name can be cut before any work is done, whichever table is written. */
+const TABLE_ROOM = 32 + '-partial-'.length + '.csv'.length;
+
+export interface ExportNameParts { /** the name as the files carry it */ name: string; given: string; /** letters, digits, marks, . _ - kept, anything else became - */ cleaned: boolean; /** cut to the file name length, with a short code of the whole name */ cut: boolean }
 /** The `export_name` argument as it goes into a file name: letters, digits, marks, `.`, `_` and `-` stay, anything else becomes `-`.
+ *  A name too long for the files (<tool>-<name>-partial-<table>.csv at most EXPORT_FILE_NAME_MAX characters) is cut at a character, and
+ *  a short code of the whole name (lower-cased: names that differ only in case are one name) follows so two long names stay apart.
  *  Absent: undefined (the unnamed files). Refused as bad_input: a name that is empty, one with no export folder to go in, and "partial"
  *  (or one ending in -partial), which is how a stopped run's files are told from a complete run's. */
-export function exportName(v: unknown, folderGiven = true): string | undefined {
+export function exportNameParts(v: unknown, folderGiven = true, tool = ''): ExportNameParts | undefined {
   if (v == null) return undefined;
   if (typeof v !== 'string') return fail('bad_input', 'export_name must be a short text, e.g. "option-a".', 'Pass export_name as a string, or leave it out for the unnamed files.');
   if (!folderGiven) fail('bad_input', 'export_name names files inside the export folder, and no export folder was given.', 'Pass export: "<folder>" with export_name, or leave export_name out.');
-  const safe = v.trim().replace(/[^\p{L}\p{N}\p{M}._-]/gu, '-');
+  const given = v.trim(), safe = given.replace(/[^\p{L}\p{N}\p{M}._-]/gu, '-');
   if (!safe) fail('bad_input', 'export_name is empty.', 'Give a short name such as "option-a", or leave export_name out to write the unnamed files.');
-  if (/(^|-)partial$/i.test(safe)) fail('bad_input', `export_name "${v.trim()}" cannot end in "partial": a stopped run's files are named -partial.`, 'Choose another name, e.g. "option-a".');
-  return safe;
+  if (/(^|-)partial$/i.test(safe)) fail('bad_input', `export_name "${given}" cannot end in "partial": a stopped run's files are named -partial.`, 'Choose another name, e.g. "option-a".');
+  const room = EXPORT_FILE_NAME_MAX - fileNameLength(`${tool}-`) - TABLE_ROOM;
+  if (fileNameLength(safe) <= room) return { name: safe, given, cleaned: safe !== given, cut: false };
+  const code = createHash('sha256').update(given.toLowerCase()).digest('hex').slice(0, 8);
+  let kept = '', used = fileNameLength(`-${code}`);
+  for (const ch of safe) { const w = fileNameLength(ch); if (used + w > room) break; kept += ch; used += w; }
+  return { name: `${kept}-${code}`, given, cleaned: safe !== given, cut: true };
 }
+export const exportName = (v: unknown, folderGiven = true, tool = ''): string | undefined => exportNameParts(v, folderGiven, tool)?.name;
 
 const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -99,11 +121,12 @@ const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  *  <tool>-<table>.csv is told from <tool>-<name>-<table>.csv.)
  *  What was replaced is said in `replaced`, and each file's size in `bytes`. */
 export function exportResult(tool: string, arg: unknown, full: unknown, tables: Table[], writeWith: WriteWith, o: { partial?: boolean; as?: string; name?: unknown } = {}): Exported {
-  const folder = exportFolder(arg), given = exportName(o.name);
+  const folder = exportFolder(arg), info = exportNameParts(o.name, true, o.as ?? tool), given = info?.name;
   const base = `${o.as ?? tool}${given ? `-${given}` : ''}`, name = `${base}${o.partial ? '-partial' : ''}`;
   // a table it no longer has is not left behind; other tools' files, and the files of another name, stay
   const re = reEscape(base);
-  const mine = o.partial ? new RegExp(`^${re}-partial(\\.json|-[^-]+\\.csv)$`) : new RegExp(`^${re}(-partial)?(\\.json|-[^-]+\\.csv)$`);
+  // (case-insensitive: Windows does not tell "Option-A" from "option-a", so they are one name here too)
+  const mine = o.partial ? new RegExp(`^${re}-partial(\\.json|-[^-]+\\.csv)$`, 'i') : new RegExp(`^${re}(-partial)?(\\.json|-[^-]+\\.csv)$`, 'i');
   let replaced = 0, json: Date | null = null, newest: Date | null = null;
   for (const f of readdirSync(folder)) if (mine.test(f)) {
     const p = join(folder, f);
@@ -111,7 +134,7 @@ export function exportResult(tool: string, arg: unknown, full: unknown, tables: 
       const st = statSync(p);
       if (!st.isFile()) continue;
       rmSync(p); replaced++;
-      if (f === `${name}.json`) json = st.mtime;
+      if (f.toLowerCase() === `${name}.json`.toLowerCase()) json = st.mtime;
       if (!newest || st.mtime > newest) newest = st.mtime;
     } catch (e) { fail('file_unwritable', `Cannot replace ${p}: ${(e as Error).message}.`, 'Close the file where it is open, or give export another folder.'); }
   }
@@ -133,7 +156,10 @@ export function exportResult(tool: string, arg: unknown, full: unknown, tables: 
     files.push({ path, bytes: sized(path), rows: n, columns });
   }
   const when = json ?? newest;
-  return { folder, files, ...(replaced && when ? { replaced: { files: replaced, written: when.toISOString() } } : {}) };
+  const used = info && (info.cleaned || info.cut) ? { export_name_used: { given: info.given, used: info.name, note: [
+    info.cleaned ? 'letters, digits, marks and . _ - are kept in file names and anything else became -' : '',
+    info.cut ? `file names are at most ${EXPORT_FILE_NAME_MAX} characters, so the name was cut and a short code of the whole name added (two long names stay apart; the same long name, in any case, is the same experiment)` : ''].filter(Boolean).join('; ') } } : {};
+  return { folder, files, ...used, ...(replaced && when ? { replaced: { files: replaced, written: when.toISOString() } } : {}) };
 }
 
 /** A list in an answer that the clone cut, with the total beside it: `<list>_total` (or `total_<list>`, or the names a tool gives it:
@@ -186,8 +212,8 @@ export function exportAfterChange(make: () => Exported): { exported: Exported } 
 }
 
 /** The `export_name` argument of a tool's input schema, beside `export`. */
-export const exportNameProp = { type: 'string', description: 'a short name for this run\u2019s files (e.g. "option-a"): they are <tool>-<name>.json and <tool>-<name>-<table>.csv, kept beside the others, and a re-run with the same name replaces only that name\u2019s files; without it the files are <tool>.json and <tool>-<table>.csv, replaced on a re-run. Letters, digits, . _ - are kept, anything else becomes -' };
+export const exportNameProp = { type: 'string', description: 'a short name for this run\u2019s files (e.g. "option-a"): they are <tool>-<name>.json and <tool>-<name>-<table>.csv, kept beside the others, and a re-run with the same name (in any case) replaces only that name\u2019s files; without it the files are <tool>.json and <tool>-<table>.csv, replaced on a re-run. Letters, digits, . _ - are kept, anything else becomes - (export_name_used says so). File names must be 250 characters or less: a longer name is cut off at that automatically, with a short code of the whole name added so two long names stay apart (export_name_used says so)' };
 /** The `export` argument of a tool's input schema. */
 export const exportProp = { type: 'string', description: 'a folder (inside the write root) to write the full result to: <tool>.json and <tool>-<table>.csv for each table' };
 /** The sentence a tool's description gains on export, naming its CSV files. */
-export const exportDoc = (tool: string, csvs: string[]) => ` export: a folder (inside the write root) to write the full result to, for Excel sheets, Word reports or slides: ${tool}.json (every list whole, whatever this answer leaves out) and ${csvs.map((c) => c.replace(/^\w+/, (n) => `${tool}-${n}.csv`)).join(', ')} (UTF-8, a header row, dates as P6 writes them; a re-run replaces this tool\u2019s files in the folder; give export_name to keep an experiment\u2019s files beside the others (<tool>-<name>.json, <tool>-<name>-<table>.csv; only that name\u2019s files are replaced); exported.replaced says how many files and when they were written); exported names each file with its bytes, rows and columns. A stopped or cancelled run (partial) is written as ${tool}-partial.json and ${tool}-partial-<table>.csv and replaces only an earlier partial's files, never a complete run's. Each list the answer cut says where all of it is: <list>_note.`;
+export const exportDoc = (tool: string, csvs: string[]) => ` export: a folder (inside the write root) to write the full result to, for Excel sheets, Word reports or slides: ${tool}.json (every list whole, whatever this answer leaves out) and ${csvs.map((c) => c.replace(/^\w+/, (n) => `${tool}-${n}.csv`)).join(', ')} (UTF-8, a header row, dates as P6 writes them; a re-run replaces this tool\u2019s files in the folder; give export_name to keep an experiment\u2019s files beside the others (<tool>-<name>.json, <tool>-<name>-<table>.csv; only that name\u2019s files are replaced, whatever the case; file names are at most 250 characters, a longer name is cut off automatically and a name changed by cleaning is told: exported.export_name_used); exported.replaced says how many files and when they were written); exported names each file with its bytes, rows and columns. A stopped or cancelled run (partial) is written as ${tool}-partial.json and ${tool}-partial-<table>.csv and replaces only an earlier partial's files, never a complete run's. Each list the answer cut says where all of it is: <list>_note.`;

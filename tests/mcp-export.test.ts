@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setRoots } from '../mcp/runtime.ts';
@@ -14,7 +14,7 @@ import { testHooks } from '../core/risk/montecarlo.ts';
 import { percentile } from '../core/risk/montecarlo.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
-import { exportResult } from '../mcp/export.ts';
+import { exportResult, fileNameLength } from '../mcp/export.ts';
 import { sampleCopy } from './helpers.ts';
 
 setRoots(null, tmpdir());
@@ -652,3 +652,60 @@ test('export_name: a stopped run keeps its -partial rule within the name and rep
   put({ name: 'x' });
   assert.deepEqual(readdirSync(dir).sort(), ['crash_schedule-partial-steps.csv', 'crash_schedule-partial.json', 'crash_schedule-x-steps.csv', 'crash_schedule-x.json'], 'a complete run of the name replaces its partial too, no other');
 });
+
+test('export_name: the same name in another case is the same experiment (Windows does not tell them apart): its files are replaced and replaced says so; a name changed by cleaning says what it became', async () => {
+  const h = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+  const dir = folder();
+  const run = async (name: string) => (await call('dcma_14', { handle: h, export: dir, export_name: name })).d;
+  const first = await run('Option-A'), count = first.exported.files.length;
+  assert.equal(first.exported.export_name_used, undefined, 'a name that needed no change says nothing');
+  const second = await run('option-a');
+  assert.equal(second.exported.replaced.files, count, 'the files of "Option-A" were replaced by those of "option-a"');
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('dcma_14-Option-A')), [], 'not left beside them');
+  assert.equal(readdirSync(dir).length, count);
+  // names that become the same after cleaning replace one another, and each answer says what the name became
+  const a = await run('a b');
+  assert.deepEqual([a.exported.export_name_used.given, a.exported.export_name_used.used], ['a b', 'a-b']);
+  assert.match(a.exported.export_name_used.note, /anything else became -/);
+  const b = await run('a/b');
+  assert.equal(b.exported.replaced.files, count, 'a/b is a-b: it replaced the files of "a b"');
+  assert.deepEqual([b.exported.export_name_used.given, b.exported.export_name_used.used], ['a/b', 'a-b']);
+  assert.equal((await run('a-b')).exported.export_name_used, undefined);
+  await call('close', { handle: h, discard: true });
+});
+
+test('export_name: file names are at most 250 characters, a longer name is cut off automatically at a character with a short code of the whole name, before any work; two long names stay apart (owner rule)', async () => {
+  const h = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+  const dir = folder();
+  const run = async (name: string, tool = 'dcma_14') => (await call(tool, { handle: h, export: dir, export_name: name })).d;
+  for (const [label, name] of [['Latin', 'x'.repeat(300)], ['Arabic', 'م'.repeat(300)], ['CJK pairs and Latin', '\u{20BB7}a'.repeat(150)]] as const) {
+    const r = await run(name);
+    assert.ok(!r.error, `${label}: ${JSON.stringify(r).slice(0, 300)}`);
+    for (const f of r.exported.files) {
+      const file = f.path.split(/[\\/]/).pop() as string;
+      assert.ok(fileNameLength(file) <= 250, `${label}: ${file.length} characters`);
+      assert.ok(existsSync(f.path), `${label}: written`);
+    }
+    const u = r.exported.export_name_used;
+    assert.equal(u.given, name);
+    assert.match(u.note, /file names are at most 250 characters, so the name was cut/);
+    assert.match(u.used, /-[0-9a-f]{8}$/);
+    assert.ok(name.startsWith(u.used.slice(0, -9)), 'the start of the name, at a character boundary (no half of a pair)');
+    assert.equal([...u.used].includes('�'), false);
+    // the same long name again, in any case, is the same experiment: replaced
+    assert.equal((await run(name.toUpperCase())).exported.replaced?.files, r.exported.files.length, label);
+    assert.equal(readdirSync(dir).length, r.exported.files.length, label);
+    for (const f of readdirSync(dir)) rmSyncQuiet(join(dir, f));
+  }
+  // two long names that are the same up to the cut stay apart; a stopped run's -partial files of the name fit too
+  const x = 'y'.repeat(299), a = await run(`${x}a`), b = await run(`${x}b`);
+  assert.notEqual(a.exported.export_name_used.used, b.exported.export_name_used.used);
+  assert.equal(b.exported.replaced, undefined, 'the second long name did not replace the first');
+  assert.equal(readdirSync(dir).length, a.exported.files.length * 2);
+  const written: string[] = [];
+  const sink = (p: string, make: (put: (s: string) => void) => void) => { let t = ''; make((s) => { t += s; }); writeFileSync(p, t); written.push(p.split(/[\\/]/).pop() as string); };
+  exportResult('optimize_schedule', folder(), {}, [{ name: 'worst_schedule_performance', columns: ['a'], rows: [] }], sink as never, { partial: true, name: 'z'.repeat(400) });
+  assert.ok(written.length === 2 && written.every((f) => fileNameLength(f) <= 250 && f.length > 200), written.map((f) => f.length).join());
+  await call('close', { handle: h, discard: true });
+});
+function rmSyncQuiet(p: string) { try { rmSync(p); } catch { /* gone */ } }
