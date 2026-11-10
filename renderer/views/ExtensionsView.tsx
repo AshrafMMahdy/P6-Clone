@@ -17,8 +17,8 @@ import { TiaPanel, WindowsPanel } from './DelayPanels.tsx';
 import { FourDPanel } from './FourDView.tsx';
 import { LobPanel } from './LobView.tsx';
 import { MonteCarloPanel } from './MonteCarloPanel.tsx';
-import { lintArgs, lintStopped, refusal } from './toolAnswers.ts';
-import { useToolRun } from './toolRun.ts';
+import { CHANGED_SINCE, lintArgs, lintStopped, refusal, staleReason, type RunStamp } from './toolAnswers.ts';
+import { stampNow, useChangedSince, useToolRun } from './toolRun.ts';
 import { RunStatus } from './RunStatus.tsx';
 import { CheckSchedulePanel, ComparePanel, EvaluatePanel, FloatPathsPanel, LevelPanel, ProgressCurvesPanel, ResourceHistogramPanel, ReviewPanel } from './AnalysisPanels.tsx';
 import { ExportButton, projectArgs } from './ExportButton.tsx';
@@ -110,25 +110,30 @@ function LintPanel() {
   const [profile, setProfile] = useState<'p6' | 'platform'>('p6');
   const [report, setReport] = useState<LintReport | null>(null);
   const [err, setErr] = useState('');
+  const [stamp, setStamp] = useState<RunStamp | null>(null);
+  const changed = useChangedSince(stamp);
   // the tool itself, in the Export's child process on the saved database (main/analysis-export-ipc.ts): every critical ladder is simulated
   // (the tool's default), which can take a while, so the window is never held; the run shows the tool's progress and Cancel stops it
   // at its next simulation and shows the checks finished
   const lint = useToolRun('lint', true);
   const run = async () => {
     let a: Record<string, unknown>;
-    try { a = lintArgs(projectArgs(), profile); } catch (e) { return toast((e as Error).message); }
-    setErr('');
+    try { a = lintArgs({}, profile); } catch (e) { return toast((e as Error).message); }
+    setErr(''); setStamp(null);
     const r = await lint.start(a);
     if (!r) return;
     const why = refusal(r);
     if (why) return setErr(why);
-    setReport(r.out as unknown as LintReport);
+    setReport(r.out as unknown as LintReport); setStamp(r.stamp);
   };
   const apply = (f: Fix) => {
+    // a fix is made of the run's findings: refused, as text, when the project changed since (run lint again)
+    const stale = stamp && staleReason(stamp, stampNow());
+    if (stale) return setErr(stale);
     let err = '';
     // a refused fix rolls back inside mutate (nothing recorded) and is reported
     try { mutate(`Lint fix: ${f.fix}`, (d) => { const r = applyOps(d, f.ops, { hoursPerDay: ui.prefs.hoursPerDay }); if (!r.ok) { err = r.error!.message; throw new Error(err); } }); } catch { /* reported below */ }
-    if (err) return toast(`Not applied: ${err}`);
+    if (err) return setErr(`Not applied: ${err}`);
     const r = runSchedule({});
     toast(`Applied: ${f.fix}${r?.ok ? ' (rescheduled; Ctrl+Z undoes)' : ''}`);
     run();
@@ -137,11 +142,12 @@ function LintPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, height: '100%' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <label>Profile <select value={profile} onChange={(e) => setProfile(e.target.value as 'p6' | 'platform')}><option value="p6">P6 checks</option><option value="platform">P6 checks + network score (White Hat IQ)</option></select></label>
-        {!lint.running ? <button className="btn primary" onClick={() => void run()}>Run lint</button> : <button className="btn" onClick={lint.cancel} title="Stops at the next simulation and shows the checks finished">Cancel</button>}
-        {lint.running && <RunStatus progress={lint.progress} waiting="Starting the run in a separate process…" />}
+        {!lint.running ? <button className="btn primary" onClick={() => void run()}>Run lint</button> : <button className="btn" onClick={lint.cancel} title="Stops at the next simulation and shows the checks finished. A second click ends the run if it does not stop (its work is not kept)">Cancel</button>}
+        {lint.running && <RunStatus progress={lint.progress} waiting="Starting the run in a separate process…" asked={lint.asked} />}
         <ExportButton tool="lint" args={() => lintArgs(projectArgs(), profile)} />
       </div>
       {err && <div style={{ color: '#b00020', whiteSpace: 'pre-wrap' }}>{err}</div>}
+      {report && changed && <div className="muted">({CHANGED_SINCE}; applying a fix is refused)</div>}
       {report && lintStopped(report) && <div><b>{lintStopped(report)}</b></div>}
       {report && <div>{report.score != null ? <><b>Score {report.score}</b> (grade {report.grade}) · </> : null}{report.checks.filter((c) => c.band === 'fail').length} failing · {report.checks.filter((c) => c.band === 'warn').length} warnings · {report.work_activities} work activities, {report.relationships} relationships</div>}
       {report ? <AnalysisResults checks={report.checks} onApplyFix={apply} /> : <div className="muted">Finds logic and modelling problems P6 schedules without complaint. Fixes are edit operations: Apply makes the change, reschedules, and can be undone with Ctrl+Z.</div>}

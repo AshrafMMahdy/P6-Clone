@@ -14,9 +14,9 @@ const COLOR = { pass: '#1d6b2d', fail: '#a01818', not_assessed: '#777', warn: '#
 /** A lint check shows its band (pass, warning, fail); the others their result. */
 const shown = (c: CheckResult | LintCheck): keyof typeof RESULT => ('band' in c ? c.band : c.result);
 
-export function goToActivity(code: string): void {
-  const open = new Set(getUi().openProjects);
-  const t = rows(getDb(), 'TASK').find((x) => x.task_code === code && open.has(x.proj_id));
+export function goToActivity(code: string, project?: string): void {
+  const open = new Set(getUi().openProjects), name = new Map(rows(getDb(), 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
+  const t = rows(getDb(), 'TASK').find((x) => x.task_code === code && open.has(x.proj_id) && (project == null || name.get(x.proj_id) === project));
   if (t) setUi({ view: 'activities', selTasks: [t.task_id], selTask: t.task_id, revealTask: t.task_id });
 }
 

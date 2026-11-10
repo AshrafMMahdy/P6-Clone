@@ -12,26 +12,24 @@
 // process tree) by Cancel and shows that nothing was changed.
 import { app, dialog, ipcMain, type BrowserWindow } from 'electron';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExportRequest } from './analysis-export.ts';
-
-/** What the child answered (callTool's answer), or why it could not: always an answer the panel can show. */
-export type ExportAnswer = { isError: boolean; out: Record<string, any> };
-const refused = (code: string, message: string): ExportAnswer => ({ isError: true, out: { error: { code, message } } });
+import { answerOf, cancelRun, endedAnswer, matchesCancel, makeRunDir, refused, removeLeftBehind, removeRunDir, type ExportAnswer } from './analysis-run-control.ts';
+export type { ExportAnswer };
 
 /** The child's own file, beside this bundle (dist/ in development and in the packaged app). */
 const ENTRY = () => join(__dirname, 'p6clone-mcp-app.cjs');
 
 /** The export or run that is going: its tool, its child, its private folder, whether it was cancelled, and whether it is an export. */
-type Current = { tool: string; child: ChildProcess | null; dir: string | null; cancelled: boolean; exporting: boolean; keepWork: boolean };
+type Current = { tool: string; id?: string; child: ChildProcess | null; dir: string | null; cancelled: boolean; ended: boolean; exporting: boolean; keepWork: boolean };
 let current: Current | null = null;
 const busy = (c: Current) => refused('export_busy', `${c.exporting ? 'An export' : 'A run'} of ${c.tool} is already running: wait for it, or cancel it.`);
 /** The snapshot of the saved database in the private folder, for the child; false when cancelled meanwhile. */
 async function snapshot(mine: Current, dbFile: string): Promise<boolean> {
-  mine.dir = mkdtempSync(join(tmpdir(), 'p6export-'));
+  mine.dir = makeRunDir(tmpdir(), process.pid);
   await copyFile(dbFile, join(mine.dir, 'database.json'));
   return !mine.cancelled;
 }
@@ -60,12 +58,12 @@ function runChild(req: ExportRequest, dir: string, onProgress?: (p: { done: numb
     const child = spawn(process.execPath, ['-e', `require(${JSON.stringify(entry)})`], { cwd: dir, env: { ...process.env, ...mpxj, ELECTRON_RUN_AS_NODE: '1', TEMP: dir, TMP: dir, TMPDIR: dir }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     if (current) current.child = child;
     // stdout: progress lines ({"progress": ...}), then the answer (the last line)
-    const answer: string[] = [], err: Buffer[] = [];
+    const others: string[] = [], err: Buffer[] = [];
     let pending = '';
     const line = (l: string) => {
       if (!l.trim()) return;
       if (l.startsWith('{"progress":')) { try { onProgress?.(JSON.parse(l).progress); } catch { /* a damaged progress line shows nothing */ } return; }
-      answer.push(l);
+      others.push(l);
     };
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (t: string) => { const parts = (pending + t).split('\n'); pending = parts.pop()!; parts.forEach(line); });
@@ -73,8 +71,8 @@ function runChild(req: ExportRequest, dir: string, onProgress?: (p: { done: numb
     child.on('error', (e) => resolve(refused('export_failed', `The export program could not start: ${e.message}`)));
     child.on('close', (code) => {
       line(pending); pending = '';
-      try { resolve(JSON.parse(answer.join('\n')) as ExportAnswer); }
-      catch { resolve(refused('export_failed', `The export program stopped (exit ${code}) without an answer.${err.length ? ` ${Buffer.concat(err).toString('utf8').slice(-600)}` : ''}`)); }
+      // the answer is the last non-empty line; any other line (a dependency's stray output) is ignored, and said only when there is no answer
+      resolve(answerOf(others, code, Buffer.concat(err).toString('utf8')));
     });
     child.stdin.on('error', () => { /* the child ended first: its close says why */ });
     // a run that keeps its work keeps stdin open: a later "cancel" line reaches the child; an export ends it after the request
@@ -92,7 +90,7 @@ export function registerAnalysisExport(getWin: () => BrowserWindow | null, dbFil
   /** null when the folder dialog is cancelled. */
   ipcMain.handle('analysis:export', async (_e, tool: string, args: Record<string, unknown>, hoursPerDay: number, parts?: { scope?: string[]; others?: Record<string, string[]> }): Promise<ExportAnswer | null> => {
     if (current) return busy(current);
-    const mine: Current = current = { tool, child: null, dir: null, cancelled: false, exporting: true, keepWork: false };
+    const mine: Current = current = { tool, child: null, dir: null, cancelled: false, ended: false, exporting: true, keepWork: false };
     try {
       const r = await dialog.showOpenDialog(getWin()!, { title: 'Folder for the exported files', properties: ['openDirectory', 'createDirectory'] });
       if (r.canceled || !r.filePaths[0]) return null;
@@ -108,28 +106,38 @@ export function registerAnalysisExport(getWin: () => BrowserWindow | null, dbFil
   });
   /** A panel's analysis run as its tool, without export, in the same child on the saved database: the tool's answer (the panel
    *  passes the arguments of a call that changes nothing, as Export does). */
-  ipcMain.handle('analysis:run', async (_e, tool: string, args: Record<string, unknown>, hoursPerDay: number, parts?: { scope?: string[]; others?: Record<string, string[]> }, keepWork?: boolean): Promise<ExportAnswer> => {
+  ipcMain.handle('analysis:run', async (_e, tool: string, args: Record<string, unknown>, hoursPerDay: number, parts?: { scope?: string[]; others?: Record<string, string[]> }, keepWork?: boolean, id?: string): Promise<ExportAnswer> => {
     if (current) return busy(current);
-    const mine: Current = current = { tool, child: null, dir: null, cancelled: false, exporting: false, keepWork: !!keepWork };
+    const mine: Current = current = { tool, id, child: null, dir: null, cancelled: false, ended: false, exporting: false, keepWork: !!keepWork };
     const stopped = () => refused('cancelled', `The ${tool} run was cancelled; nothing was changed.`);
     try {
       if (!(await snapshot(mine, dbFile()))) return stopped();
-      const send = (p: { done: number; total: number; message: string }) => getWin()?.webContents.send('analysis:progress', { tool, ...p });
+      const send = (p: { done: number; total: number; message: string }) => getWin()?.webContents.send('analysis:progress', { tool, id, ...p });
       const answer = await runChild({ file: join(mine.dir!, 'database.json'), tool, args, hoursPerDay, ...parts, ...(mine.keepWork ? { progress: true } : {}) }, mine.dir!, mine.keepWork ? send : undefined);
       // a run that keeps its work answers what it did when cancelled: that answer is shown, not a cancellation
+      if (mine.ended) return endedAnswer(tool);
       return mine.cancelled && !mine.keepWork ? stopped() : answer;
     } catch (e) {
       return refused('export_failed', `The ${tool} run could not start: ${(e as Error).message}`);
     } finally { end(mine); }
   });
-  /** Ends the running export's or run's child (and its tree); its answer says it was cancelled. With only, just that tool's run (or export).
+  /** Cancels the running export or run (a run that keeps its work is asked to stop and answers what it did; any other has its child ended, tree
+   *  and all). With only, just the run that has that id (a panel's own: another panel's run is never cancelled by it). A second Cancel, while
+   *  the first has not stopped the run, ends the child's process tree: the run says it was ended and its work was not kept (analysis-run-control.ts).
    *  One cancelled while its database is still being copied stops before its child starts (snapshot). */
-  ipcMain.handle('analysis:cancel', (_e, only?: { tool: string; exporting: boolean }) => {
-    if (!current || (only && (current.tool !== only.tool || current.exporting !== only.exporting))) return false;
-    current.cancelled = true;
-    if (current.keepWork) { if (current.child?.stdin?.writable) current.child.stdin.write('cancel\n'); } // the tool answers what it did
-    else if (current.child) killTree(current.child);
+  ipcMain.handle('analysis:cancel', (_e, only?: { id: string }) => {
+    if (!current || !matchesCancel(current, only)) return false;
+    const c = current;
+    cancelRun(c, c.child ? { askToStop: () => { if (!c.child?.stdin?.writable) return false; c.child.stdin.write('cancel\n'); return true; }, end: () => killTree(c.child!) } : null);
     return true;
   });
-  app.on('before-quit', () => { if (current?.child) killTree(current.child); });
+  // a run that is still going when the app quits: its child ended, and its private folder (the whole database) removed now, not in the
+  // close of a child that may never run; a folder that cannot be removed yet is removed by the next start
+  app.on('before-quit', () => {
+    if (!current) return;
+    if (current.child) killTree(current.child);
+    if (current.dir) removeRunDir(current.dir); // (a folder that cannot be removed yet: removeLeftBehind removes it at the next start)
+  });
+  // folders an earlier run of this app left (it quit or crashed mid-run) that no running app owns
+  removeLeftBehind(tmpdir());
 }

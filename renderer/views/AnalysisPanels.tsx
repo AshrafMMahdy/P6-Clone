@@ -18,8 +18,8 @@ import { onlyProjects } from '../analysisDb.ts';
 import { AnalysisResults, goToActivity } from './AnalysisResults.tsx';
 import { ExportButton, errorText, numberOf, projectArgs } from './ExportButton.tsx';
 import { card } from './MonteCarloPanel.tsx';
-import { betweenCount, floatPathsArgs, refusal } from './toolAnswers.ts';
-import { useToolRun } from './toolRun.ts';
+import { betweenCount, CHANGED_SINCE, floatPathsArgs, refusal, wasCancelled, type RunStamp } from './toolAnswers.ts';
+import { stampNow, useChangedSince, useToolRun } from './toolRun.ts';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
 const Ids = ({ ids, max = 30 }: { ids: string[]; max?: number }) => <>{ids.slice(0, max).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{ids.length > max ? ` … +${ids.length - max}` : ''}</>;
@@ -80,6 +80,7 @@ export function CheckSchedulePanel() {
   );
 }
 
+let levelRuns = 0;
 // ---------------------------------------------------------------- Float paths (float_paths)
 /** float_paths' answer (the Float Path columns are not written by the screen). */
 type FloatAnswer = { end: string | null; method: string; paths: ReturnType<typeof computeFloatPaths>['paths']; near_critical: { id: string; name: string; total_float_days: number }[]; between?: { from: string; to: string; paths: { duration_days: number; min_float_days: number | null; activities: string[] }[]; paths_total: number | string; truncated?: boolean } };
@@ -94,6 +95,9 @@ export function FloatPathsPanel() {
   const [most, setMost] = useState('');
   const [res, setRes] = useState<FloatAnswer | null>(null);
   const [err, setErr] = useState('');
+  const [note, setNote] = useState(''); // a cancelled run: a status line, not a failure
+  const [stamp, setStamp] = useState<RunStamp | null>(null);
+  const changed = useChangedSince(stamp);
   // the tool itself, in the Export's child process on the saved database (main/analysis-export-ipc.ts), as Level resources runs: a large `max` on
   // a dense network is refused by the tool in words before it starts (how many paths fit), a loop in the logic comes back as its error, and
   // the window is never held. Cancel ends the process (there is nothing the tool keeps).
@@ -107,13 +111,13 @@ export function FloatPathsPanel() {
   const args = () => floatPathsArgs(opts(), projectArgs());
   const run = async () => {
     let a: Record<string, unknown>;
-    try { a = args(); } catch (e) { return toast((e as Error).message); }
-    setErr(''); setRes(null);
+    try { a = floatPathsArgs(opts(), {}); } catch (e) { return toast((e as Error).message); }
+    setErr(''); setNote(''); setRes(null); setStamp(null);
     const r = await fp.start(a);
     if (!r) return;
     const why = refusal(r);
-    if (why) return setErr(why);
-    setRes(r.out as FloatAnswer);
+    if (why) return wasCancelled(r) ? setNote(why) : setErr(why);
+    setRes(r.out as FloatAnswer); setStamp(r.stamp);
   };
   return (
     <div style={box}>
@@ -126,9 +130,10 @@ export function FloatPathsPanel() {
         {!fp.running ? <button className="btn primary" onClick={() => void run()}>Find paths</button> : <><button className="btn" onClick={fp.cancel} title="Ends the run; nothing is changed">Cancel</button><span className="muted">Finding the paths in a separate process…</span></>}
         <ExportButton tool="float_paths" args={args} />
       </div>
+      {note && !err && <div className="muted">{note}</div>}
       {err ? <div style={{ ...red, whiteSpace: 'pre-wrap' }}>{err}</div> : !res ? <div className="muted">P6's multiple float paths: path 1 follows the most critical links back from the end activity, each next path is the unassigned chain with the most critical link into the paths found. The Float Path columns are not written here.</div> : (
         <div style={panel}>
-          <div className="muted">Paths end at {res.end ?? '-'} (method {res.method.replace('_', ' ')}).</div>
+          <div className="muted">Paths end at {res.end ?? '-'} (method {res.method.replace('_', ' ')}).{changed ? ` (${CHANGED_SINCE})` : ''}</div>
           <table className="tbl" style={{ marginTop: 4 }}><thead><tr><th>Path</th><th>Float (d)</th><th>Activities</th><th>Listed in order</th></tr></thead>
             <tbody>{res.paths.map((p) => <tr key={p.path} style={{ verticalAlign: 'top' }}><td>{p.path}</td><td>{p.float_hours == null ? '-' : n1(p.float_hours / hpd, 1)}</td><td>{p.activities.length}</td><td style={{ whiteSpace: 'normal' }}><Ids ids={p.activities.map((a) => a.id)} /></td></tr>)}</tbody></table>
           {res.between && <div data-between style={{ marginTop: 10, border: '1px solid #e3e5e8', borderRadius: 14, background: '#f7f8f9', padding: 8 }}>
@@ -272,10 +277,12 @@ export function LevelPanel() {
   const [first, setFirst] = useState('');
   const [res, setRes] = useState<LevelAnswer | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stamp, setStamp] = useState<RunStamp | null>(null);
+  const changed = useChangedSince(stamp);
   // the run: going while it is (until its answer is in), stop when Cancel was clicked or the panel switched away from (a run still
   // going then is ended, as Monte Carlo's); only this panel's run is cancelled, never an Export of the tool
-  const going = useRef(false), stop = useRef(false), mounted = useRef(true);
-  const cancel = () => { stop.current = true; void window.p6.analysisCancel({ tool: 'level_resources', exporting: false }); };
+  const going = useRef(false), stop = useRef(false), mounted = useRef(true), runId = useRef('');
+  const cancel = () => { stop.current = true; void window.p6.analysisCancel({ id: runId.current }); };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (going.current) cancel(); }; }, []);
   const list = (v: string) => v.split(',').map((x) => x.trim()).filter(Boolean);
   const allIds = (d: Db) => rows(d, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id);
@@ -298,15 +305,17 @@ export function LevelPanel() {
     let a: Record<string, unknown>;
     try { a = args(); } catch (e) { return toast((e as Error).message); }
     setBusy(true); going.current = true; stop.current = false;
+    const started = stampNow();
     try {
       if (!(await saveNow())) return toast('The project changed while it was being saved, so nothing was leveled. Click Level (report) again.');
       if (stop.current) { if (mounted.current) toast('The level_resources run was cancelled; nothing was changed.'); return; } // (before its child started)
-      const r = await window.p6.analysisRun('level_resources', a, getUi().prefs.hoursPerDay);
+      runId.current = `level_resources#${++levelRuns}`; // (this panel's own run: another panel's Cancel never ends it)
+      const r = await window.p6.analysisRun('level_resources', a, getUi().prefs.hoursPerDay, undefined, undefined, runId.current);
       if (!mounted.current) return;
       const code = r.out.error?.code;
       if (code === 'export_busy' || code === 'cancelled') return toast(String(r.out.error.message));
       if (r.isError) return toast(`Level resources failed: ${errorText(r.out)}`);
-      setRes(r.out as LevelAnswer);
+      setRes(r.out as LevelAnswer); setStamp(started);
     } catch (e) { if (mounted.current) toast(`Level resources failed: ${(e as Error).message}`); } finally { going.current = false; if (mounted.current) setBusy(false); }
   };
   return (
@@ -323,6 +332,7 @@ export function LevelPanel() {
       {!res ? <div className="muted">Resource leveling on a copy of the database: which activities it would delay and the peak of each leveled resource afterwards. Nothing is changed here, and Level (report) and Export… run the tool as a dry run, in a separate process. Resources need a Max Units/Time limit.</div> : (
         <div style={panel}>
           <div style={cards}><Card label="Activities delayed" value={String(res.delayed)} /><Card label="Moved" value={String(res.moved.length)} /></div>
+          {changed && <div className="muted">({CHANGED_SINCE})</div>}
           <div className="muted" style={{ margin: '6px 0', whiteSpace: 'pre-wrap' }}>{res.report}</div>
           <table className="tbl"><thead><tr><th>Resource</th><th>Peak (unit-hours/day)</th><th>Limit</th><th>Peak day</th><th>Over-allocated</th></tr></thead>
             <tbody>{res.peaks.map((p) => <tr key={p.resource}><td>{p.resource}</td><td style={{ textAlign: 'right' }}>{n1(p.peak)}</td><td style={{ textAlign: 'right' }}>{n1(p.limit)}</td><td>{date(p.day)}</td><td>{p.overallocated ? 'yes' : ''}</td></tr>)}</tbody></table>

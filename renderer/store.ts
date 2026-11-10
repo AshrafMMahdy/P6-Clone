@@ -78,6 +78,8 @@ export function useStore<T>(sel: (s: typeof state) => T): T {
 }
 export const getDb = () => state.db;
 export const getUi = () => state.ui;
+/** The database's version: it changes with every edit, undo, redo and load (a result computed at one version is of that state only). */
+export const getDbVersion = () => state.dbVersion;
 setColumnDb(getDb, () => state.ui.prefs);
 
 export function setUi(patch: Partial<UiState> | ((u: UiState) => Partial<UiState>)): void {

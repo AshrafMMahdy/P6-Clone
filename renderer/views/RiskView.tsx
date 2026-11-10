@@ -6,7 +6,7 @@ import { Split, Tabs, showContextMenu } from '../components/Layout.tsx';
 import { getDb, mutate, setUi, toast, useStore, type Prefs } from '../store.ts';
 import { useCtx } from '../hooks.ts';
 import { ExportButton, projectArgs } from './ExportButton.tsx';
-import { monteCarloArgs, monteCarloResult, monteCarloStopped, refusal } from './toolAnswers.ts';
+import { criticalityCell, monteCarloArgs, monteCarloResult, monteCarloStopped, probabilityText, refusal, riskRowText, rowKey, sensitivityText, stdDevText } from './toolAnswers.ts';
 import { startToolRun, taskIdLookup } from './toolRun.ts';
 import { RunStatus } from './RunStatus.tsx';
 import { fmtDate, STATUS, statusOf } from '../model.ts';
@@ -525,7 +525,7 @@ function AnalysisTab() {
     if (s != null && !Number.isInteger(s)) return toast('Seed must be a whole number (or blank for a random seed).');
     if (!nEst && !(nRisk && events !== 'off')) toast('No duration estimates or linked risks: every iteration will give the deterministic finish. Use Estimates > Set defaults.');
     let args: Record<string, unknown>;
-    try { args = monteCarloArgs({ iterations, seed: s, riskEvents: events, project: projectArgs() }); } catch (e) { return toast((e as Error).message); }
+    try { args = monteCarloArgs({ iterations, seed: s, riskEvents: events }); } catch (e) { return toast((e as Error).message); }
     void startRun(args, ui.openProjects, iterations, dbVersion);
   };
 
@@ -572,18 +572,22 @@ const CRIT_COLS: GridCol[] = [
 export function Results({ res, prefs }: { res: MonteCarloResult; prefs: Prefs }) {
   const hpd = prefs.hoursPerDay;
   const [sel, setSel] = useState<string | null>(null);
+  // an activity is found by its Activity ID and its project (the pair the tool names it with), now: one deleted since the run is shown, not clickable
+  const dbVersion = useStore((s) => s.dbVersion), openProjects = useStore((s) => s.ui.openProjects);
+  const find = useMemo(() => taskIdLookup(), [dbVersion, openProjects]);
   const critItems: GridItem[] = useMemo(() => res.activities.filter((a) => !a.milestone || a.criticality > 0).map((a) => ({
-    key: a.taskId, kind: 'row', level: 0, className: a.criticality >= 50 ? 'crit' : '',
+    key: rowKey(a as typeof a & { project?: string }), kind: 'row', level: 0, className: criticalityCell(a).critical ? 'crit' : '',
     cells: {
       code: a.code, name: a.name,
       crit: <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <div style={{ flex: 1, height: 9, background: '#eee', border: '1px solid #ccc' }}><div style={{ width: `${a.criticality}%`, height: '100%', background: a.criticality >= 50 ? '#d03030' : '#e89a3c' }} /></div>
-        <span style={{ width: 34, textAlign: 'right' }}>{Math.round(a.criticality)}%</span></div>,
-      sens: a.sensitivity == null ? '' : a.sensitivity.toFixed(2),
+        <div style={{ flex: 1, height: 9, background: '#eee', border: '1px solid #ccc' }}><div style={{ width: criticalityCell(a).bar, height: '100%', background: criticalityCell(a).critical ? '#d03030' : '#e89a3c' }} /></div>
+        <span style={{ width: 34, textAlign: 'right' }}>{criticalityCell(a).text}</span></div>,
+      sens: sensitivityText(a.sensitivity),
       det: fmtDate(a.deterministicFinish, prefs), p50: fmtDate(a.p50Finish, prefs), p80: fmtDate(a.p80Finish, prefs),
       dur: a.maxDur > 0 ? `${days(a.minDur, hpd)} / ${days(a.meanDur, hpd)} / ${days(a.maxDur, hpd)}` : '',
     },
   })), [res, prefs]);
+  const goTo = (k: string) => { const a = res.activities.find((x) => rowKey(x as typeof x & { project?: string }) === k); const t = a && find(a.code, (a as typeof a & { project?: string }).project || undefined); if (t) setUi({ view: 'activities', selTask: t.taskId, selTasks: [t.taskId] }); };
   const diff = (t: number): string => {
     const d = Math.round((t - res.deterministicFinish) / MIN_PER_DAY);
     return d === 0 ? '' : (d > 0 ? '+' : '') + d + ' cd';
@@ -608,17 +612,17 @@ export function Results({ res, prefs }: { res: MonteCarloResult; prefs: Prefs })
               {prow('Mean', res.mean)}
               {prow('Minimum', res.min)}
               {prow('Maximum', res.max)}
-              <tr><td>Standard deviation</td><td colSpan={2}>{r2(res.stdDevDays)} calendar days</td></tr>
-              <tr><td>Probability of meeting deterministic</td><td colSpan={2}><b>{Math.round(res.probDeterministic * 100)}%</b></td></tr>
+              <tr><td>Standard deviation</td><td colSpan={2}>{stdDevText(res)}</td></tr>
+              <tr><td>Probability of meeting deterministic</td><td colSpan={2}><b>{probabilityText(res)}</b></td></tr>
             </tbody>
           </table>
           {res.milestones.length > 0 && <table className="tbl" style={{ marginBottom: 8 }}>
             <thead><tr><th>Milestone</th><th>Deterministic</th><th>P50</th><th>P80</th><th>P90</th></tr></thead>
-            <tbody>{res.milestones.map((m) => <tr key={m.taskId} title={m.name}><td>{m.code} {m.name}</td><td>{fmtDate(m.deterministic, prefs)}</td><td>{fmtDate(m.P50, prefs)}</td><td>{fmtDate(m.P80, prefs)}</td><td>{fmtDate(m.P90, prefs)}</td></tr>)}</tbody>
+            <tbody>{res.milestones.map((m) => <tr key={rowKey(m as typeof m & { project?: string })} title={m.name}><td>{m.code} {m.name}</td><td>{fmtDate(m.deterministic, prefs)}</td><td>{fmtDate(m.P50, prefs)}</td><td>{fmtDate(m.P80, prefs)}</td><td>{fmtDate(m.P90, prefs)}</td></tr>)}</tbody>
           </table>}
           {res.risks.length > 0 && <table className="tbl">
             <thead><tr><th>Risk</th><th>Probability</th><th>Impact (d)</th><th>Activities</th><th>Occurred</th></tr></thead>
-            <tbody>{res.risks.map((r) => <tr key={r.projRiskId}><td>{r.code} {r.name}</td><td style={{ textAlign: 'right' }}>{Math.round(r.probability * 100)}%</td><td style={{ textAlign: 'right' }}>{days(r.hours, hpd)}</td><td style={{ textAlign: 'right' }}>{r.activities}</td><td style={{ textAlign: 'right' }}>{Math.round(r.triggeredPct)}%</td></tr>)}</tbody>
+            <tbody>{res.risks.map((r) => <tr key={r.projRiskId}><td>{r.code} {r.name}</td><td style={{ textAlign: 'right' }}>{riskRowText(r, hpd).probability}</td><td style={{ textAlign: 'right' }}>{riskRowText(r, hpd).impact}</td><td style={{ textAlign: 'right' }}>{riskRowText(r, hpd).activities}</td><td style={{ textAlign: 'right' }}>{riskRowText(r, hpd).occurred}</td></tr>)}</tbody>
           </table>}
         </div>
       </Split>
@@ -626,7 +630,7 @@ export function Results({ res, prefs }: { res: MonteCarloResult; prefs: Prefs })
         <div className="details">
           <div className="layoutbar" style={{ color: '#000' }}><b>Criticality Index</b><span className="muted">% of iterations in which the activity was critical (total float &lt;= 0). Double-click to go to the activity.</span></div>
           <Grid cols={CRIT_COLS} items={critItems} selected={new Set(sel ? [sel] : [])} onSelect={(k) => setSel(k)}
-            onActivate={(k) => setUi({ view: 'activities', selTask: k, selTasks: [k] })} emptyText="No activities." />
+            onActivate={goTo} emptyText="No activities." />
         </div>
         <Tornado res={res} />
       </Split>
@@ -644,7 +648,7 @@ function Tornado({ res }: { res: MonteCarloResult }) {
           {top.map((s) => {
             const w = Math.min(1, Math.abs(s.rho)) * 50;
             return (
-              <div key={s.taskId} style={{ display: 'flex', alignItems: 'center', height: 22 }} title={`${s.code} ${s.name}: ${s.rho.toFixed(3)}`}>
+              <div key={rowKey(s as typeof s & { project?: string })} style={{ display: 'flex', alignItems: 'center', height: 22 }} title={`${s.code} ${s.name}: ${s.rho.toFixed(3)}`}>
                 <div style={{ width: 190, flex: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 6 }}><b>{s.code}</b> {s.name}</div>
                 <div style={{ flex: 1, position: 'relative', height: 16, minWidth: 120 }}>
                   <div style={{ position: 'absolute', left: '50%', top: -3, bottom: -3, borderLeft: '1px solid #666' }} />

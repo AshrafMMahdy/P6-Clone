@@ -10,8 +10,8 @@ import { getEstimates, isEstimable, type MonteCarloResult } from '../../core/ris
 import type { RiskPhase } from '../../core/risk/register.ts';
 import { ExportButton, projectArgs } from './ExportButton.tsx';
 import { Results } from './RiskView.tsx';
-import { monteCarloArgs, monteCarloResult, monteCarloStopped, refusal } from './toolAnswers.ts';
-import { taskIdLookup, useToolRun } from './toolRun.ts';
+import { CHANGED_SINCE, monteCarloArgs, monteCarloResult, monteCarloStopped, probabilityText, refusal, type RunStamp } from './toolAnswers.ts';
+import { taskIdLookup, useChangedSince, useToolRun } from './toolRun.ts';
 import { RunStatus } from './RunStatus.tsx';
 
 const bar = { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' } as const;
@@ -23,7 +23,9 @@ export function MonteCarloPanel() {
   const [iterations, setIterations] = useState(500);
   const [seed, setSeed] = useState('');
   const [events, setEvents] = useState<RiskPhase | 'off'>('pre');
-  const [res, setRes] = useState<(MonteCarloResult & { dbVersion: number }) | null>(null);
+  const [res, setRes] = useState<MonteCarloResult | null>(null);
+  const [stamp, setStamp] = useState<RunStamp | null>(null);
+  const changed = useChangedSince(stamp);
   const [stopped, setStopped] = useState<string | null>(null);
   const [err, setErr] = useState('');
   // the tool itself, in the Export's child process on the saved database (main/analysis-export-ipc.ts): the window is never held, a
@@ -39,13 +41,13 @@ export function MonteCarloPanel() {
   };
   const go = async () => {
     let a: Record<string, unknown>;
-    try { const s = settings(); a = monteCarloArgs({ iterations: s.n, seed: s.sd, riskEvents: events, project: projectArgs() }); } catch (e) { return toast((e as Error).message); }
+    try { const s = settings(); a = monteCarloArgs({ iterations: s.n, seed: s.sd, riskEvents: events }); } catch (e) { return toast((e as Error).message); }
     setErr(''); setStopped(null);
     const r = await mc.start(a);
     if (!r) return;
     const why = refusal(r);
     if (why) return setErr(why);
-    setRes({ ...monteCarloResult(r.out, taskIdLookup()), dbVersion }); setStopped(monteCarloStopped(r.out));
+    setRes(monteCarloResult(r.out, taskIdLookup())); setStamp(r.stamp); setStopped(monteCarloStopped(r.out));
   };
   const nEst = useMemo(() => { const ests = getEstimates(getDb()); return rows(getDb(), 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && ests.has(t.task_id) && isEstimable(t)).length; }, [dbVersion, ui.openProjects]);
   return (
@@ -54,8 +56,8 @@ export function MonteCarloPanel() {
         <label>Iterations <input type="number" value={iterations} min={10} step={100} style={{ width: 70 }} disabled={run} onChange={(e) => setIterations(Number(e.target.value))} /></label>
         <label>Seed <input value={seed} placeholder="random" style={{ width: 80 }} disabled={run} onChange={(e) => setSeed(e.target.value)} /></label>
         <label>Risk events <select value={events} disabled={run} onChange={(e) => setEvents(e.target.value as RiskPhase | 'off')}><option value="pre">Pre-response</option><option value="post">Post-response</option><option value="off">Ignore</option></select></label>
-        {!run ? <button className="btn primary" onClick={() => void go()}>Run Monte Carlo</button> : <button className="btn" onClick={mc.cancel} title="Stops the run and shows the iterations done">Cancel</button>}
-        {run && <RunStatus progress={mc.progress} waiting="Starting the run in a separate process…" />}
+        {!run ? <button className="btn primary" onClick={() => void go()}>Run Monte Carlo</button> : <button className="btn" onClick={mc.cancel} title="Stops the run and shows the iterations done. A second click ends the run if it does not stop (its work is not kept)">Cancel</button>}
+        {run && <RunStatus progress={mc.progress} waiting="Starting the run in a separate process…" asked={mc.asked} />}
         <ExportButton tool="monte_carlo" args={() => { const s = settings(); return { ...projectArgs(), iterations: s.n, ...(res ? { seed: res.seed } : s.sd != null ? { seed: s.sd } : {}), risk_events: events }; }} />
       </div>
       {err && <div style={{ color: '#b00020', whiteSpace: 'pre-wrap' }}>{err}</div>}
@@ -68,8 +70,8 @@ export function MonteCarloPanel() {
               <div style={{ fontSize: 16, fontWeight: 600 }}>{fmtDate(res.percentiles[k], ui.prefs)}</div>
             </div>
           ))}
-          <div style={card}><div className="muted" style={{ fontSize: 11 }}>Chance of meeting the deterministic finish</div><div style={{ fontSize: 16, fontWeight: 600 }}>{Math.round(res.probDeterministic * 100)}%</div></div>
-          <div className="muted" style={{ alignSelf: 'center' }}>{res.iterations} iterations, seed {res.seed}, {(res.elapsedMs / 1000).toFixed(1)} s{res.dbVersion !== dbVersion ? ' (schedule changed since)' : ''}</div>
+          <div style={card}><div className="muted" style={{ fontSize: 11 }}>Chance of meeting the deterministic finish</div><div style={{ fontSize: 16, fontWeight: 600 }}>{probabilityText(res)}</div></div>
+          <div className="muted" style={{ alignSelf: 'center' }}>{res.iterations} iterations, seed {res.seed}, {(res.elapsedMs / 1000).toFixed(1)} s{changed ? ` (${CHANGED_SINCE})` : ''}</div>
         </div>
         <div className="winbody" style={{ border: '1px solid #d9dce1', borderRadius: 14, overflow: 'hidden' }}><Results res={res} prefs={ui.prefs} /></div>
       </>}

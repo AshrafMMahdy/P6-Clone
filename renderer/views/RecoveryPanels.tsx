@@ -1,41 +1,22 @@
 // Extensions for recovery: least-cost crashing, many what-ifs at once, and the schedule reasoner (the trained
 // optimiser, run by the main process). Each works on a copy until Apply, which is one undoable change.
 import { useMemo, useState } from 'react';
-import { getDb, getUi, mutate, toast, useStore } from '../store.ts';
-import { rows, type Db } from '../../core/db.ts';
-import { applyOps } from '../../core/project/ops.ts';
-import { writeWhiqFields, type FieldData } from '../../core/analysis/whiq-fields.ts';
+import { getDb, toast, useStore } from '../store.ts';
+import { rows } from '../../core/db.ts';
+import type { FieldData } from '../../core/analysis/whiq-fields.ts';
 import type { crashSchedule } from '../../core/analysis/crash.ts';
 import { evaluateBatch, type Scenario } from '../../core/analysis/batch.ts';
-import { scheduleProjects } from '../../core/schedule/cpm.ts';
-import { syncAssignmentDates } from '../../core/resource/assign.ts';
 import { goToActivity } from './AnalysisResults.tsx';
 import { ExportButton, numberOf, projectArgs } from './ExportButton.tsx';
-import { crashArgs, crashStopped, levelInProposedOrder, optimizeArgs, optimizeNotes, OPTIMIZE_ADVICE, refusal, type BiggestChange } from './toolAnswers.ts';
-import { useToolRun } from './toolRun.ts';
+import { CHANGED_SINCE, crashArgs, crashStopped, optimizeArgs, optimizeNotes, OPTIMIZE_ADVICE, priorityShown, refusal, type BiggestChange, type PriorityEntry, type RunStamp } from './toolAnswers.ts';
+import { useChangedSince, useToolRun } from './toolRun.ts';
+import { afterCrash, afterOptimize, applyResult } from './applyResult.ts';
 import { RunStatus } from './RunStatus.tsx';
 
-const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
+const Id = ({ id, project }: { id: string; project?: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id, project); }}>{id}</a>;
+const red = { color: '#b00020', whiteSpace: 'pre-wrap' } as const;
 const box = { display: 'flex', flexDirection: 'column', gap: 6, height: '100%', minHeight: 0 } as const;
 const bar = { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' } as const;
-
-/** Edit operations, F9 and anything after it (leveling) as one undoable change; a refused step leaves nothing. */
-export function applyAndSchedule(label: string, ops: unknown[], after?: (d: Db) => void): boolean {
-  const ui = getUi();
-  let err = '';
-  try {
-    mutate(label, (d) => {
-      const r = applyOps(d, ops, { hoursPerDay: ui.prefs.hoursPerDay });
-      if (!r.ok) { err = r.error!.message; throw new Error(err); }
-      const s = scheduleProjects(d, ui.openProjects, {});
-      if (!s.ok) { err = s.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ') || 'the changed schedule cannot be scheduled'; throw new Error(err); }
-      after?.(d);
-      syncAssignmentDates(d);
-    });
-  } catch (e) { err ||= (e as Error).message; } // (reported below: a refusal in words, nothing changed)
-  if (err) { toast(`Not applied: ${err}`); return false; }
-  return true;
-}
 
 export function CrashPanel() {
   const ui = useStore((s) => s.ui);
@@ -49,6 +30,9 @@ export function CrashPanel() {
   const [data, setData] = useState<Record<string, { min: string; cost: string }>>({});
   const [res, setRes] = useState<(Extract<Awaited<ReturnType<typeof crashSchedule>>, { ok: true }> & { field_data?: FieldData }) | null>(null);
   const [err, setErr] = useState('');
+  const [stamp, setStamp] = useState<RunStamp | null>(null);
+  const [applyErr, setApplyErr] = useState('');
+  const changed = useChangedSince(stamp);
   // the remaining critical activities are where crash data matters
   const crit = useMemo(() => rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) <= 0).slice(0, 300), [db, ui.openProjects]);
   /** crash_schedule's arguments from the panel's settings (Export runs the tool with them too) */
@@ -58,15 +42,21 @@ export function CrashPanel() {
   const crash = useToolRun('crash_schedule', true);
   const run = async () => {
     let a: Record<string, unknown>;
-    try { a = { ...projectArgs(), ...toolArgs(), field_data: true }; } catch (e) { return toast((e as Error).message); }
-    setErr(''); setRes(null);
+    try { a = { ...toolArgs(), field_data: true }; } catch (e) { return toast((e as Error).message); }
+    setErr(''); setApplyErr(''); setRes(null); setStamp(null);
     const r = await crash.start(a);
     if (!r) return;
     const why = refusal(r);
     if (why) return setErr(why);
-    setRes(r.out as NonNullable<typeof res>);
+    setRes(r.out as NonNullable<typeof res>); setStamp(r.stamp);
   };
-  const apply = () => { if (res && res.stop !== 'CANCELLED' && res.ops.length && applyAndSchedule('Crash schedule', res.ops, (d) => { writeWhiqFields(d, res.field_data!, { hoursPerDay: getUi().prefs.hoursPerDay }); })) { toast(`Crashed ${res.ops.length} activities; Ctrl+Z undoes.`); setRes(null); } };
+  // Apply writes the durations the run computed from the project as it was: refused, as text, when the project changed since; a refusal keeps the result
+  const apply = () => {
+    if (!res || !stamp || res.stop === 'CANCELLED' || !res.ops.length) return;
+    const why = applyResult(stamp, 'Crash schedule', res.ops, afterCrash(res, stamp));
+    if (why) return setApplyErr(why);
+    setApplyErr(''); toast(`Crashed ${res.ops.length} activities; Ctrl+Z undoes.`); setRes(null);
+  };
   const set = (id: string, k: 'min' | 'cost', v: string) => setData({ ...data, [id]: { min: data[id]?.min ?? '', cost: data[id]?.cost ?? '', [k]: v } });
   return (
     <div style={box}>
@@ -77,11 +67,12 @@ export function CrashPanel() {
         <label>Indirect cost/day <input style={{ width: 70 }} value={indirect} onChange={(e) => setIndirect(e.target.value)} /></label>
         <label>LDs/day <input style={{ width: 70 }} value={ld} onChange={(e) => setLd(e.target.value)} /></label>
         <label title="Used when no crash data is entered below">Default max cut <input style={{ width: 36 }} value={pct} onChange={(e) => setPct(e.target.value)} />%</label>
-        {!crash.running ? <button className="btn primary" onClick={() => void run()}>Crash</button> : <button className="btn" onClick={crash.cancel} title="Stops at the next step and shows the steps done; nothing is applied">Cancel</button>}
-        {crash.running && <RunStatus progress={crash.progress} waiting="Starting the run in a separate process…" />}
+        {!crash.running ? <button className="btn primary" onClick={() => void run()}>Crash</button> : <button className="btn" onClick={crash.cancel} title="Stops at the next step and shows the steps done; nothing is applied. A second click ends the run if it does not stop (its work is not kept)">Cancel</button>}
+        {crash.running && <RunStatus progress={crash.progress} waiting="Starting the run in a separate process…" asked={crash.asked} />}
         {res && res.stop !== 'CANCELLED' && res.ops.length > 0 && <button className="btn" onClick={apply}>Apply</button>}
         <ExportButton tool="crash_schedule" args={() => ({ ...projectArgs(), ...toolArgs() })} />
       </div>
+      {applyErr && <div style={red}>{applyErr}</div>}
       <div style={{ display: 'flex', gap: 8, flex: 1, minHeight: 0 }}>
         <div style={{ width: 380, overflow: 'auto' }}>
           <div className="muted" style={{ fontSize: 11 }}>Crash data for critical activities (leave empty to use the default cut at equal cost):</div>
@@ -91,6 +82,7 @@ export function CrashPanel() {
         <div style={{ flex: 1, overflow: 'auto' }}>
           {err ? <div style={{ color: "#b00020", whiteSpace: 'pre-wrap' }}>{err}</div> : !res ? <div className="muted">Least-cost crashing: each step shortens the cheapest set of activities that shortens every path driving the finish, by as much as the next near-critical path allows. Runs on a copy; Apply makes the changes (Ctrl+Z undoes).</div>
             : <>
+              {changed && <div className="muted">({CHANGED_SINCE}: Apply is refused)</div>}
               {crashStopped(res) && <div><b>{crashStopped(res)}</b></div>}
               <div><b>{res.stop}</b> · {res.days_gained} working days gained · finish {res.base_finish?.slice(0, 10)} → {res.finish?.slice(0, 10)} · direct cost {res.direct_cost.toLocaleString()} · total {res.total_cost.toLocaleString()}</div>
               {res.note && <div className="muted">{res.note}</div>}
@@ -152,7 +144,7 @@ export function WhatIfPanel() {
 /** optimize_schedule's answer (a plan, nothing applied by the tool): what the panel shows. best_from, mode_trials, note and partial_note are there when the tool says them. */
 type OptimizeAnswer = {
   activities: number; leveled_activities: number; trajectories: number; crash_cost?: number; cpm_finish?: string; p6_leveled_finish?: string; reasoner_finish?: string; better_than_p6_leveler: boolean | null;
-  changes: { id: string; from_days: number; to_days: number }[]; priority: string[]; priority_total: number; ops: unknown[]; biggest_changes: BiggestChange[]; biggest_changes_total?: number;
+  changes: { id: string; from_days: number; to_days: number }[]; priority: PriorityEntry[]; priority_total: number; ops: unknown[]; biggest_changes: BiggestChange[]; biggest_changes_total?: number;
   best_from?: string; partial?: true; field_data?: FieldData; [k: string]: unknown;
 };
 const day = (v: string | null | undefined) => (v ?? '').slice(0, 16);
@@ -164,41 +156,49 @@ export function OptimizePanel() {
   const [seed, setSeed] = useState('');
   const [res, setRes] = useState<OptimizeAnswer | null>(null);
   const [err, setErr] = useState('');
+  const [stamp, setStamp] = useState<RunStamp | null>(null);
+  const [applyErr, setApplyErr] = useState('');
+  const changed = useChangedSince(stamp);
   // the tool itself, in the Export's child process on the saved database (main/analysis-export-ipc.ts): a big schedule takes about a minute
   // and never holds the window; the run shows the tool's progress and Cancel stops it at its next step
   const opt = useToolRun('optimize_schedule', true);
-  const args = () => optimizeArgs(projectArgs(), numberOf('Samples', samples), numberOf('Seed', seed));
+  const args = (project: { project?: string }) => optimizeArgs(project, numberOf('Samples', samples), numberOf('Seed', seed));
   const run = async () => {
     let a: Record<string, unknown>;
-    try { a = { ...args(), field_data: true }; } catch (e) { return toast((e as Error).message); }
-    setErr(''); setRes(null);
+    try { a = { ...args({}), field_data: true }; } catch (e) { return toast((e as Error).message); }
+    setErr(''); setApplyErr(''); setRes(null); setStamp(null);
     const r = await opt.start(a);
     if (!r) return;
     const why = refusal(r);
     if (why) return setErr(why);
-    setRes(r.out as OptimizeAnswer);
+    setRes(r.out as OptimizeAnswer); setStamp(r.stamp);
   };
   /** Apply levels in the placement order when activities are on limited resources: the answer carries the whole order (the panel asks
    *  with max_priority 0), so Apply works on a schedule of any size and does what the tool's apply: true does. */
-  const lev = !!res && res.leveled_activities > 0;
   const apply = () => {
-    if (!res) return;
-    if (applyAndSchedule('Optimize schedule (reasoner)', res.ops, (d) => { writeWhiqFields(d, res.field_data!, { hoursPerDay: getUi().prefs.hoursPerDay }); if (lev) levelInProposedOrder(d, ui.openProjects, res.priority); })) { toast('Applied the reasoner proposal; Ctrl+Z undoes.'); setRes(null); }
+    if (!res || !stamp) return;
+    // refused, as text, when the project changed since the run; a refusal keeps the result
+    const why = applyResult(stamp, 'Optimize schedule (reasoner)', res.ops, afterOptimize(res, stamp));
+    if (why) return setApplyErr(why);
+    setApplyErr(''); toast('Applied the reasoner proposal; Ctrl+Z undoes.'); setRes(null);
   };
   const notes = res ? optimizeNotes(res) : null;
+  const shown = priorityShown(res?.priority ?? [], res?.priority_total ?? 0);
   return (
     <div style={box}>
       <div style={bar}>
         <label title="Trajectories sampled around the model's answer (default 200, 64 above 120 activities)">Samples <input style={{ width: 50 }} value={samples} disabled={opt.running} onChange={(e) => setSamples(e.target.value)} /></label>
         <label title="Same seed, same answer">Seed <input style={{ width: 70 }} value={seed} disabled={opt.running} onChange={(e) => setSeed(e.target.value)} /></label>
-        {!opt.running ? <button className="btn primary" onClick={() => void run()}>Optimise</button> : <button className="btn" onClick={opt.cancel} title="Stops at the next step; nothing is applied">Cancel</button>}
-        {opt.running && <RunStatus progress={opt.progress} waiting="Starting the run in a separate process…" />}
+        {!opt.running ? <button className="btn primary" onClick={() => void run()}>Optimise</button> : <button className="btn" onClick={opt.cancel} title="Stops at the next step; nothing is applied. A second click ends the run if it does not stop (its work is not kept)">Cancel</button>}
+        {opt.running && <RunStatus progress={opt.progress} waiting="Starting the run in a separate process…" asked={opt.asked} />}
         {res && !res.partial && <><button className="btn" onClick={apply}>Apply</button><span className="muted">{OPTIMIZE_ADVICE}</span></>}
-        <ExportButton tool="optimize_schedule" args={args} />
+        <ExportButton tool="optimize_schedule" args={() => args(projectArgs())} />
       </div>
       {err && <div style={{ color: "#b00020", whiteSpace: 'pre-wrap' }}>{err}</div>}
+      {applyErr && <div style={red}>{applyErr}</div>}
       {!res && !err && <div className="muted">The White Hat IQ schedule reasoner, a trained model running on this computer: it picks a placement priority (and crashed modes, when crash data exists) so the resource-limited schedule finishes soonest. Its proposal is checked with P6 leveling and compared with P6's default leveling. Resources need a Max Units/Time limit.</div>}
       {res && notes && <div style={{ overflow: 'auto', flex: 1 }}>
+        {changed && <div className="muted" style={{ marginBottom: 4 }}>({CHANGED_SINCE}: Apply is refused)</div>}
         {notes.notes.map((n) => <div key={n} className="muted" style={{ marginBottom: 4 }}>{n}</div>)}
         <table className="tbl"><tbody>
           <tr><td>Without leveling (F9)</td><td>{res.cpm_finish?.slice(0, 16)}</td></tr>
@@ -212,7 +212,8 @@ export function OptimizePanel() {
           <table className="tbl"><thead><tr><th>Activity</th><th>Name</th><th>Start before</th><th>Start after</th><th>Finish before</th><th>Finish after</th><th>Start shift (d)</th><th>Finish shift (d)</th></tr></thead>
             <tbody>{res.biggest_changes.map((c) => <tr key={c.id}><td><Id id={c.id} /></td><td>{c.name}</td><td>{day(c.cpm_start)}</td><td>{day(c.reasoner_start)}</td><td>{day(c.cpm_finish)}</td><td>{day(c.reasoner_finish)}</td><td style={{ textAlign: 'right' }}>{shift(c.start_delta_days)}</td><td style={{ textAlign: 'right' }}>{shift(c.finish_delta_days)}</td></tr>)}</tbody></table>
         </>}
-        <div>Priority ({res.priority_total}): {res.priority.map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}</div>
+        {/* the first ones, as before (Apply levels in the whole order the answer holds, not in these) */}
+        <div>{shown.heading}: {shown.entries.map((c, i) => <span key={i}>{i ? ', ' : ''}<Id id={typeof c === 'string' ? c : c.id} project={typeof c === 'string' ? undefined : c.project} /></span>)}</div>
       </div>}
     </div>
   );
