@@ -12,10 +12,13 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { rows } from '../core/db.ts';
 import { dbToLines } from '../core/db-file.ts';
+import { applyOps } from '../core/project/ops.ts';
+import { scheduleProjects } from '../core/schedule/cpm.ts';
+import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { runMonteCarlo } from '../core/risk/montecarlo.ts';
 import { sessions, setRoots } from '../mcp/runtime.ts';
 import { reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
-import { betweenCount, crashArgs, crashStopped, errorText, floatPathsArgs, lintArgs, lintStopped, monteCarloArgs, monteCarloResult, monteCarloStopped, optimizeArgs, optimizeNotes, OPTIMIZE_ADVICE, refusal, type ToolAnswer } from '../renderer/views/toolAnswers.ts';
+import { betweenCount, crashArgs, crashStopped, errorText, floatPathsArgs, lintArgs, lintStopped, monteCarloArgs, monteCarloResult, monteCarloStopped, optimizeArgs, levelInProposedOrder, optimizeNotes, OPTIMIZE_ADVICE, refusal, type ToolAnswer } from '../renderer/views/toolAnswers.ts';
 
 setRoots(null, tmpdir());
 const { callTool } = await import('../mcp/server.ts');
@@ -163,7 +166,7 @@ test('Optimize: the panel’s call is optimize_schedule’s; the table, "the fir
   ok(await run('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops }));
   ok(await run('schedule', { handle: np.handle, owner_key: np.owner_key }));
   const args = optimizeArgs({ project: 'OPT' }, 20, 1);
-  assert.deepEqual(args, { project: 'OPT', samples: 20, seed: 1 });
+  assert.deepEqual(args, { project: 'OPT', samples: 20, seed: 1, max_priority: 0 }, 'the whole placement order, which Apply levels in');
   const out = ok(await run('optimize_schedule', { handle: np.handle, ...args }));
   const n = optimizeNotes(out);
   assert.equal(out.biggest_changes_total, out.biggest_changes.length);
@@ -172,7 +175,8 @@ test('Optimize: the panel’s call is optimize_schedule’s; the table, "the fir
   assert.deepEqual(n.notes, [out.note, out.partial_note, out.over_limit_note].filter(Boolean).sort((a, b) => [out.over_limit_note, out.partial_note, out.note].indexOf(a) - [out.over_limit_note, out.partial_note, out.note].indexOf(b)), 'the notes the answer has, in the panel’s order');
   for (const c of out.biggest_changes) for (const k of ['id', 'name', 'cpm_start', 'cpm_finish', 'reasoner_start', 'reasoner_finish', 'start_delta_days', 'finish_delta_days']) assert.ok(k in c, `${k} is in each row of the table`);
   assert.match(OPTIMIZE_ADVICE, /^Review the biggest changes before applying; Undo takes the apply back\.$/);
-  assert.equal(out.order, undefined, 'the tool’s answer lists the first 100 of the placement order (priority, priority_total), not the whole order');
+  assert.equal(out.order, undefined, 'the placement order is listed as priority (here all of it: max_priority 0), not as the engine’s order');
+  assert.equal(out.priority.length, out.priority_total);
 });
 
 test('Optimize notes: the first N of the total, the windows of 512, and each note only when the answer has it', () => {
@@ -222,4 +226,63 @@ test('the app’s child process: an Export (the request, then stdin ended, no pr
   assert.equal(text.includes('"progress"'), false, 'no progress lines unless asked');
   const r = JSON.parse(text) as ToolAnswer;
   assert.equal(ok(r).stop !== 'CANCELLED', true); assert.ok(r.out.steps.length >= 1);
+});
+
+test('Monte Carlo: the Risks grid and the S-curve read from the tool’s answer every column and point the engine’s result gave, on a seeded run (the page looks as before)', async () => {
+  const np = (await run('new_project', { id: 'G', start: '2026-03-02' })).out as any;
+  ok(await run('edit', { handle: np.handle, owner_key: np.owner_key, operations: [
+    { op: 'add_activity', id: 'A', name: 'A', duration_days: 10 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_activity', id: 'S', name: 'Side', duration_days: 2 },
+    { op: 'add_activity', id: 'M', name: 'Milestone', duration_days: 0, type: 'finish_milestone' },
+    { op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_relationship', pred: 'S', succ: 'M' },
+    { op: 'set_estimates', activity: 'A', min_days: 8, most_likely_days: 10, max_days: 20 }, { op: 'set_estimates', activity: 'B', min_days: 4, most_likely_days: 5, max_days: 9 }, { op: 'set_estimates', activity: 'S', min_days: 1, most_likely_days: 2, max_days: 4 },
+  ] }));
+  ok(await run('schedule', { handle: np.handle, owner_key: np.owner_key }));
+  const db = sessions.get(np.handle)!.db, ids = rows(db, 'PROJECT').map((p) => p.proj_id);
+  const out = ok(await run('monte_carlo', { handle: np.handle, ...monteCarloArgs({ iterations: 700, seed: 11, riskEvents: 'pre' }) }));
+  const screen = monteCarloResult(out, (c) => `id-${c}`);
+  const engine = await runMonteCarlo(db, ids, { iterations: 700, seed: 11, riskEvents: 'pre' });
+  assert.equal(screen.activities.length, engine.activities.length);
+  const min = (v: number | null) => (v == null ? null : Math.round(v)); // (the tool's dates are to the minute)
+  for (const e of engine.activities) {
+    const g = screen.activities.find((x) => x.code === e.code)!;
+    assert.ok(g, e.code);
+    assert.deepEqual([g.name, g.milestone, g.criticality, g.sensitivity, g.minDur, g.meanDur, g.maxDur], [e.name, e.milestone, e.criticality, e.sensitivity, e.minDur, e.meanDur, e.maxDur], `${e.code}: name, milestone, criticality, sensitivity and the remaining hours are the engine's`);
+    assert.deepEqual([g.deterministicFinish, g.meanFinish, g.p50Finish, g.p80Finish], [min(e.deterministicFinish), min(e.meanFinish), min(e.p50Finish), min(e.p80Finish)], `${e.code}: the finish columns`);
+  }
+  assert.ok(screen.activities.some((a) => a.milestone && a.criticality === 0), 'a milestone with no criticality is flagged, so the grid leaves it out as before');
+  assert.ok(screen.activities.some((a) => a.maxDur > 0) && screen.activities.some((a) => a.p50Finish != null));
+  // the tornado: the engine's list, in its order
+  assert.deepEqual(screen.sensitivity.map((x) => [x.code, x.rho]), engine.sensitivity.map((x) => [x.code, x.rho]));
+  // the S-curve: the engine's own points (a point for each finish, thinned), not one made from the bars
+  assert.equal(screen.cumulative.length, engine.cumulative.length);
+  assert.deepEqual(screen.cumulative.map((p) => [p.t, p.pct]), engine.cumulative.map((p) => [Math.round(p.t), p.pct]));
+  assert.ok(screen.cumulative.length > screen.histogram.length, 'smoother than the bars');
+  // the answer's rows are the export's table's columns, and `top` still decides how many are listed
+  const few = ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11, top: 2 }));
+  assert.equal(few.criticality.length, 2); assert.equal(few.criticality_total, engine.activities.length);
+  assert.deepEqual(Object.keys(few.criticality[0]), ['id', 'name', 'milestone', 'critical_pct', 'deterministic_finish', 'mean_finish', 'p50_finish', 'p80_finish', 'sensitivity', 'min_remaining_hours', 'mean_remaining_hours', 'max_remaining_hours']);
+});
+
+test('Optimize: Apply works on any schedule (the answer has the whole placement order, 130 activities here) and the project it makes has the dates of the tool’s apply: true', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
+  const np = (await run('new_project', { id: 'OPA', start: '2026-06-01' })).out as any;
+  const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 12 }];
+  for (let i = 0; i < 130; i++) ops.push({ op: 'add_activity', id: `T${i}`, name: `T${i}`, duration_days: 2 + (i % 5) }, { op: 'assign_resource', activity: `T${i}`, resource: 'civil', units_per_day: 16 });
+  for (let i = 0; i < 130; i += 3) if (i + 3 < 130) ops.push({ op: 'add_relationship', pred: `T${i}`, succ: `T${i + 3}` });
+  ok(await run('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops }));
+  ok(await run('schedule', { handle: np.handle, owner_key: np.owner_key }));
+  const db = sessions.get(np.handle)!.db, screenDb = structuredClone(db), ids = rows(db, 'PROJECT').map((p) => p.proj_id);
+  const args = optimizeArgs({}, 3, 5);
+  const out = ok(await run('optimize_schedule', { handle: np.handle, ...args }));
+  assert.ok(out.leveled_activities === 130 && out.priority_total === 130);
+  assert.equal(out.priority.length, 130, 'the whole order: more than 100, so Apply is not disabled');
+  // the panel's Apply (applyAndSchedule: the proposal's ops, F9, then the leveling in the order, then the assignment dates), on its copy
+  assert.ok(applyOps(screenDb, out.ops, { hoursPerDay: 8 }).ok);
+  assert.ok(scheduleProjects(screenDb, ids, {}).ok);
+  levelInProposedOrder(screenDb, ids, out.priority);
+  syncAssignmentDates(screenDb);
+  // the tool's own apply, the same seed
+  const applied = ok(await run('optimize_schedule', { handle: np.handle, ...args, apply: true }));
+  assert.equal(applied.applied, true);
+  const dates = (d: typeof db) => rows(d, 'TASK').map((t) => [t.task_code, t.early_start_date, t.early_end_date, t.remain_drtn_hr_cnt]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  assert.deepEqual(dates(screenDb), dates(db), 'the same dates as the tool’s apply');
 });

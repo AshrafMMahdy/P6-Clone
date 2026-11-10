@@ -6,12 +6,11 @@ import { rows, type Db } from '../../core/db.ts';
 import { applyOps } from '../../core/project/ops.ts';
 import type { crashSchedule } from '../../core/analysis/crash.ts';
 import { evaluateBatch, type Scenario } from '../../core/analysis/batch.ts';
-import { levelResources } from '../../core/level/level.ts';
 import { scheduleProjects } from '../../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../../core/resource/assign.ts';
 import { goToActivity } from './AnalysisResults.tsx';
 import { ExportButton, numberOf, projectArgs } from './ExportButton.tsx';
-import { crashArgs, crashStopped, optimizeArgs, optimizeNotes, OPTIMIZE_ADVICE, refusal, type BiggestChange } from './toolAnswers.ts';
+import { crashArgs, crashStopped, levelInProposedOrder, optimizeArgs, optimizeNotes, OPTIMIZE_ADVICE, refusal, type BiggestChange } from './toolAnswers.ts';
 import { useToolRun } from './toolRun.ts';
 import { RunStatus } from './RunStatus.tsx';
 
@@ -178,16 +177,12 @@ export function OptimizePanel() {
     if (why) return setErr(why);
     setRes(r.out as OptimizeAnswer);
   };
-  /** Apply levels in the placement order when activities are on limited resources, and the tool's answer lists only the first 100 of it
-   *  (priority_total says how many there are): the whole order is needed, so Apply waits for the owner's decision (see the report). */
+  /** Apply levels in the placement order when activities are on limited resources: the answer carries the whole order (the panel asks
+   *  with max_priority 0), so Apply works on a schedule of any size and does what the tool's apply: true does. */
   const lev = !!res && res.leveled_activities > 0;
-  const orderMissing = !!res && lev && res.priority.length < res.priority_total;
   const apply = () => {
-    if (!res || orderMissing) return;
-    const open = new Set(ui.openProjects), byCode = new Map<string, string[]>();
-    for (const t of rows(getDb(), 'TASK')) if (open.has(t.proj_id)) byCode.set(t.task_code, [...(byCode.get(t.task_code) ?? []), t.task_id]);
-    const order = res.priority.flatMap((c) => byCode.get(c) ?? []);
-    if (applyAndSchedule('Optimize schedule (reasoner)', res.ops, lev ? (d) => { levelResources(d, ui.openProjects, { first: order }); } : undefined)) { toast('Applied the reasoner proposal; Ctrl+Z undoes.'); setRes(null); }
+    if (!res) return;
+    if (applyAndSchedule('Optimize schedule (reasoner)', res.ops, lev ? (d) => levelInProposedOrder(d, ui.openProjects, res.priority) : undefined)) { toast('Applied the reasoner proposal; Ctrl+Z undoes.'); setRes(null); }
   };
   const notes = res ? optimizeNotes(res) : null;
   return (
@@ -197,7 +192,7 @@ export function OptimizePanel() {
         <label title="Same seed, same answer">Seed <input style={{ width: 70 }} value={seed} disabled={opt.running} onChange={(e) => setSeed(e.target.value)} /></label>
         {!opt.running ? <button className="btn primary" onClick={() => void run()}>Optimise</button> : <button className="btn" onClick={opt.cancel} title="Stops at the next step; nothing is applied">Cancel</button>}
         {opt.running && <RunStatus progress={opt.progress} waiting="Starting the run in a separate process…" />}
-        {res && !res.partial && <><button className="btn" onClick={apply} disabled={orderMissing} title={orderMissing ? `Apply needs the whole placement order; the tool's answer lists the first ${res.priority.length} of ${res.priority_total}` : undefined}>Apply</button><span className="muted">{OPTIMIZE_ADVICE}</span></>}
+        {res && !res.partial && <><button className="btn" onClick={apply}>Apply</button><span className="muted">{OPTIMIZE_ADVICE}</span></>}
         <ExportButton tool="optimize_schedule" args={args} />
       </div>
       {err && <div style={{ color: "#b00020", whiteSpace: 'pre-wrap' }}>{err}</div>}
@@ -216,7 +211,7 @@ export function OptimizePanel() {
           <table className="tbl"><thead><tr><th>Activity</th><th>Name</th><th>Start before</th><th>Start after</th><th>Finish before</th><th>Finish after</th><th>Start shift (d)</th><th>Finish shift (d)</th></tr></thead>
             <tbody>{res.biggest_changes.map((c) => <tr key={c.id}><td><Id id={c.id} /></td><td>{c.name}</td><td>{day(c.cpm_start)}</td><td>{day(c.reasoner_start)}</td><td>{day(c.cpm_finish)}</td><td>{day(c.reasoner_finish)}</td><td style={{ textAlign: 'right' }}>{shift(c.start_delta_days)}</td><td style={{ textAlign: 'right' }}>{shift(c.finish_delta_days)}</td></tr>)}</tbody></table>
         </>}
-        <div>Priority (first {res.priority.length} of {res.priority_total}): {res.priority.map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}</div>
+        <div>Priority ({res.priority_total}): {res.priority.map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}</div>
       </div>}
     </div>
   );

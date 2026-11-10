@@ -61,7 +61,10 @@ test('Crashing: the panel locks the LOB plan’s activities as crash_schedule do
   const tool = await call('crash_schedule', { handle: h, ...args });
   assert.equal(tool.err, false, JSON.stringify(tool.d).slice(0, 300));
   assert.ok(screen.ok);
-  sameAs(tool.d, screen, 'crash_schedule', ['unsaved_changes']);
+  // (field_changes is the engine's input to the fields an apply writes beside each activity, a8b25c5: the tool does not answer it, and the screen does not show it)
+  const { field_changes: forFields, ...shown } = screen;
+  assert.ok(Array.isArray(forFields) && tool.d.field_changes === undefined);
+  sameAs(tool.d, shown, 'crash_schedule', ['unsaved_changes']);
   // (why it matters here: without the lock the engine crashes the LOB plan's activities, which the tool never does)
   const unlocked = await crashSchedule(db, all, { targetDays: 5, defaultMaxPct: 30, hoursPerDay: HPD });
   assert.ok(unlocked.ok && unlocked.ops.some((o) => /^(CS|DW)-/.test(String(o.id))), JSON.stringify(unlocked.ok && unlocked.ops).slice(0, 300));

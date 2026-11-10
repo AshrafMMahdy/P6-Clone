@@ -6,6 +6,8 @@
 import { parseP6Date } from '../../core/dates.ts';
 import type { MonteCarloResult } from '../../core/risk/montecarlo.ts';
 import { REASONER_WINDOW } from '../../core/analysis/hrm.ts';
+import { rows, type Db } from '../../core/db.ts';
+import { levelResources } from '../../core/level/level.ts';
 
 /** What the child answered (callTool's answer): see main/analysis-export-ipc.ts. */
 export type ToolAnswer = { isError: boolean; out: Record<string, any> };
@@ -43,12 +45,14 @@ export function monteCarloStopped(out: Record<string, any>): string | null {
 const at = (s: unknown): number => (typeof s === 'string' ? parseP6Date(s) : null) as number;
 const atOrNull = (s: unknown): number | null => (typeof s === 'string' ? parseP6Date(s) : null);
 
-/** monte_carlo's answer as the Risks window's results take it (core/risk/montecarlo.ts MonteCarloResult). What the tool's answer does not
- *  carry stays empty there: each activity's deterministic and P50 finish and its shortest, mean and longest duration (the tool's export has
- *  them), and the per-iteration finishes. taskIdOf: the Activity ID's row in the open projects (a click goes to the activity). */
+/** monte_carlo's answer as the Risks window's results take it (core/risk/montecarlo.ts MonteCarloResult). The criticality rows carry every
+ *  column the grid shows (milestone, the deterministic, P50, mean and P80 finish, the sensitivity, the shortest, mean and longest remaining
+ *  hours) and the answer carries the S-curve, so the page reads as it did from the engine's result; only the per-iteration finishes stay
+ *  empty (the tool's export has them). taskIdOf: the Activity ID's row in the open projects (a click goes to the activity). */
 export function monteCarloResult(out: Record<string, any>, taskIdOf: (code: string) => string): MonteCarloResult {
   const f = out.finish ?? {}, w = out.working_days ?? {};
-  const rho = new Map<string, number>((out.sensitivity ?? []).map((x: any) => [x.id, x.correlation]));
+  const activities = (out.criticality ?? []).map((x: any) => ({ taskId: taskIdOf(x.id), code: x.id, name: x.name, projId: '', milestone: x.milestone === true, criticality: x.critical_pct, sensitivity: x.sensitivity ?? null,
+    deterministicFinish: atOrNull(x.deterministic_finish), meanFinish: atOrNull(x.mean_finish), p50Finish: atOrNull(x.p50_finish), p80Finish: atOrNull(x.p80_finish), minDur: x.min_remaining_hours, meanDur: x.mean_remaining_hours, maxDur: x.max_remaining_hours }));
   const hist = (out.histogram ?? []).map((b: any) => ({ start: at(b.start), end: at(b.end), count: b.count, cumPct: b.cum_pct }));
   return {
     iterations: out.iterations, seed: out.seed, elapsedMs: out.elapsed_seconds * 1000, projIds: [], dataDate: atOrNull(out.data_date),
@@ -60,9 +64,10 @@ export function monteCarloResult(out: Record<string, any>, taskIdOf: (code: stri
     days: { from: atOrNull(w.from), hoursPerDay: w.hours_per_day, deterministic: w.deterministic, mean: w.mean, std: w.std, min: w.min, max: w.max, P10: w.P10, P50: w.P50, P80: w.P80, P90: w.P90, sigma: (w.sigma ?? []).map((x: any) => ({ k: x.k, days: x.days, date: at(x.date) })) },
     events: (out.events ?? []).map((x: any) => ({ name: x.name, probability: x.probability_pct / 100, triggeredPct: x.triggered_pct })),
     histogram: hist,
-    cumulative: hist.length ? [{ t: hist[0].start, pct: 0 }, ...hist.map((b: any) => ({ t: b.end, pct: b.cumPct }))] : [],
-    activities: (out.criticality ?? []).map((x: any) => ({ taskId: taskIdOf(x.id), code: x.id, name: x.name, projId: '', milestone: false, criticality: x.critical_pct, sensitivity: rho.get(x.id) ?? null, deterministicFinish: null, meanFinish: null, p50Finish: null, p80Finish: atOrNull(x.p80_finish), minDur: 0, meanDur: 0, maxDur: 0 })),
-    sensitivity: (out.sensitivity ?? []).map((x: any) => ({ taskId: taskIdOf(x.id), code: x.id, name: x.name, rho: x.correlation })),
+    cumulative: (out.cumulative ?? []).map((p: any) => ({ t: at(p.finish), pct: p.cum_pct })),
+    activities,
+    // the tornado: the activities whose duration varied, the strongest correlation first (as the engine lists them)
+    sensitivity: activities.filter((a: any) => a.sensitivity != null).map((a: any) => ({ taskId: a.taskId, code: a.code, name: a.name, rho: a.sensitivity })).sort((a: any, b: any) => Math.abs(b.rho) - Math.abs(a.rho)),
     milestones: (out.milestones ?? []).map((m: any) => ({ taskId: taskIdOf(m.id), code: m.id, name: m.name, deterministic: atOrNull(m.deterministic), mean: NaN, P10: at(m.P10), P50: at(m.P50), P80: at(m.P80), P90: at(m.P90) })),
     risks: (out.risk_events ?? []).map((r: any) => ({ projRiskId: r.id, code: r.id, name: r.name, probability: r.probability_pct / 100, hours: r.impact_days * w.hours_per_day, activities: r.activities, triggeredPct: r.triggered_pct })),
     ...(out.partial ? { partial: { stopped: out.stopped, requested: out.iterations_requested, ...(out.error ? { error: out.error } : {}) } } : {}),
@@ -100,8 +105,15 @@ export function floatPathsArgs(s: FloatPathsSettings, project: { project?: strin
 export const betweenCount = (b: { paths: unknown[]; paths_total: number | string }): string => `the longest ${b.paths.length} of ${b.paths_total}`;
 
 // ---------------------------------------------------------------- Optimize (optimize_schedule)
-/** optimize_schedule's arguments from the panel (as the Export gives them). */
-export const optimizeArgs = (project: { project?: string }, samples?: number, seed?: number): Record<string, unknown> => ({ ...project, ...(samples != null ? { samples } : {}), ...(seed != null ? { seed } : {}) });
+/** optimize_schedule's arguments from the panel (as the Export gives them). max_priority 0: the whole placement order, which Apply levels in. */
+export const optimizeArgs = (project: { project?: string }, samples?: number, seed?: number): Record<string, unknown> => ({ ...project, ...(samples != null ? { samples } : {}), ...(seed != null ? { seed } : {}), max_priority: 0 });
+/** The leveling the Optimize panel's Apply does after the crash changes and F9: P6's leveler given the tool's placement order (`priority`, the
+ *  whole order: max_priority 0), as optimize_schedule's apply: true does. Activity IDs shared by several open projects name each of them. */
+export function levelInProposedOrder(d: Db, projIds: string[], priority: string[]): void {
+  const open = new Set(projIds), byCode = new Map<string, string[]>();
+  for (const t of rows(d, 'TASK')) if (open.has(t.proj_id)) byCode.set(t.task_code, [...(byCode.get(t.task_code) ?? []), t.task_id]);
+  levelResources(d, projIds, { first: priority.flatMap((c) => byCode.get(c) ?? []) });
+}
 export interface BiggestChange { id: string; name: string; cpm_start: string | null; cpm_finish: string | null; reasoner_start: string | null; reasoner_finish: string | null; start_delta_days: number | null; finish_delta_days: number | null }
 /** What the Optimize panel shows besides the dates: the table's heading line, how the model read the network, and the tool's notes, each only when the answer has it. */
 export function optimizeNotes(out: Record<string, any>): { changes: string | null; windows: string | null; notes: string[] } {
