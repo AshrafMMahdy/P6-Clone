@@ -375,7 +375,8 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   const overLimit = inst.acts.filter((a, i) => { const d = a.modes[best.modes[i]]?.duration ?? a.duration, crew = a.crewSize * (a.duration && d ? a.duration / d : 1); return d > 0 && crew > (inst.caps.get(a.group) ?? Infinity) + 1e-9; }).length;
   const order = inst.acts.map((a, i) => [a.task.task_id, best.prio[i]] as const).sort((x, y) => y[1] - x[1]).map(([id]) => id);
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
-  const ops = proposalOps(inst, best.modes, projIds.length > 1, projCode, o.hoursPerDay);
+  const multi = projIds.length > 1;
+  const ops = proposalOps(inst, best.modes, multi, projCode, o.hoursPerDay);
   // real dates: CPM, P6's default leveling (early start priority), and the reasoner's modes and order through the same leveler
   // (and every activity's dates at each stage: an export lists them side by side)
   const open = new Set(projIds);
@@ -427,8 +428,9 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     ...(p6 && mine ? { better_than_p6_leveler: p6.leveled != null && mine.leveled != null ? mine.leveled < p6.leveled : null } : {}),
     sgs_makespan_days: best.makespan, crash_cost: Math.round(best.cost * 100) / 100,
     changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
-    priority: (o.maxPriority ? order.slice(0, o.maxPriority) : o.maxPriority === 0 ? order : order.slice(0, 100)).map((id) => byTask.get(id)!.task.task_code), priority_total: order.length,
-    ops, order, priority_rows: order.map((id) => { const t = byTask.get(id)!.task; return { id: t.task_code as string, name: t.task_name as string }; }),
+    // more than one project in the run: an Activity ID can be in several, so each entry names its project (priority: {id, project}; priority_rows: {id, project, name})
+    priority: (o.maxPriority ? order.slice(0, o.maxPriority) : o.maxPriority === 0 ? order : order.slice(0, 100)).map((id) => { const t = byTask.get(id)!.task; return multi ? { id: t.task_code as string, project: projCode.get(t.proj_id) as string } : (t.task_code as string); }), priority_total: order.length,
+    ops, order, priority_rows: order.map((id) => { const t = byTask.get(id)!.task; return { id: t.task_code as string, ...(multi ? { project: projCode.get(t.proj_id) as string } : {}), name: t.task_name as string }; }),
     /** for the fields an apply writes beside each activity (whiq-fields.ts): the activities whose duration the run changed, and the
      *  placement order of every leveled activity (its place in `order`, 1 = first) */
     field_changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [fieldChange(db, a.task, projCode.get(a.task.proj_id), Number(a.task.remain_drtn_hr_cnt || 0), writtenHours(a, best.modes[i], o.hoursPerDay), a.modes[best.modes[i]].cost, o.hoursPerDay ?? 8)] : [])),

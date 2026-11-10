@@ -51,10 +51,11 @@ export function whiqFieldClash(db: Db, o: { changes: unknown[]; ranks?: unknown[
 /** The edit operations that write the fields, and what they write (`fields_written`: each field with the number of activities written
  *  now, and kept_from_earlier: the activities that still hold a value an earlier run wrote and this one did not).
  *  who: how the note names the run ("Crashed by the schedule reasoner"); on: the date of the run (YYYY-MM-DD). */
-export function whiqFieldOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldRank[]; who: string; on: string }) {
+export function whiqFieldOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldRank[]; who: string; on: string; projIds?: string[] }) {
   const ops: Record<string, unknown>[] = [], written: { name: string; activities: number; kept_from_earlier: number }[] = [];
   /** the value each activity holds of a field now (empty = none) */
-  const held = (label: string) => { const u = typeOf(db, label); return new Map(u ? rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === u.udf_type_id).map((v) => [v.fk_id, v] as const) : []); };
+  const mine = o.projIds ? new Set(rows(db, 'TASK').filter((t) => o.projIds!.includes(t.proj_id)).map((t) => t.task_id)) : null; // the run's own projects (a file can hold others: their values are not this run's to count)
+  const held = (label: string) => { const u = typeOf(db, label); return new Map(u ? rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === u.udf_type_id && (!mine || mine.has(v.fk_id))).map((v) => [v.fk_id, v] as const) : []); };
   const field = (key: keyof typeof FIELDS, values: { task_id: string; id: string; project: string; value: string | number }[]) => {
     const name = FIELDS[key], now = new Set(values.map((v) => v.task_id));
     const kept = [...held(name).keys()].filter((fk) => !now.has(fk)).length;
@@ -78,10 +79,10 @@ export function whiqFieldOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldR
 export interface FieldData { changes: FieldChange[]; ranks?: FieldRank[]; who: string }
 /** Write the fields into `d` (inside the apply's own undoable change): the one function the tools' apply and the screens' Apply both call.
  *  Returns what it wrote (fields_written); throws an Error in words when a field of the project has another data type (nothing is written). */
-export function writeWhiqFields(d: Db, data: FieldData, o: { hoursPerDay?: number; calendarDays?: boolean } = {}) {
+export function writeWhiqFields(d: Db, data: FieldData, o: { hoursPerDay?: number; calendarDays?: boolean; projIds?: string[] } = {}) {
   const clash = whiqFieldClash(d, data);
   if (clash) throw new Error(`${clash.message} ${clash.hint}`);
-  const w = whiqFieldOps(d, { ...data, on: today() });
+  const w = whiqFieldOps(d, { ...data, on: today(), projIds: o.projIds });
   const r = applyOps(d, w.ops, { hoursPerDay: o.hoursPerDay, calendarDays: o.calendarDays });
   if (!r.ok) throw new Error(r.error!.message);
   return w.fields_written;

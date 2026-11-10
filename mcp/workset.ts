@@ -56,6 +56,9 @@ export const MC_EXPORT_BYTES_PER_MILESTONE_ITERATION = 55;
 /** What a histogram bucket holds (measured, 200,000 buckets): its object with the two dates' texts 96 B in memory, and 76 B of JSON
  *  text, which the answer holds twice (the text and the structured copy): 96 + 2 x 76 = 248, rounded up to 250. */
 export const MC_BYTES_PER_BUCKET = 250;
+/** What a listed criticality row holds (measured, 200,000 rows of 12 fields): its object 256 B in memory and 359 B of JSON text, which the answer
+ *  holds twice (the text and the structured copy): 256 + 2 x 359 = 974, rounded up to 1,000. With top: 0 every activity is a row. */
+export const MC_BYTES_PER_LISTED_ROW = 1000;
 /** The most bins the engine's whole-day histogram has (histogram: "days"): a bin of whole days, wide enough for at most 40. */
 export const MC_DAY_BINS = 40;
 /** What float_paths' between keeps per tail (the best paths from an activity on to the end: an object of the duration, the lowest float,
@@ -79,6 +82,7 @@ export function monteCarloCounts(a: Record<string, any>): { iterations: number; 
   const top = countArg(a.top, 'top') ?? 25;
   if (a.histogram != null && a.histogram !== 'days') fail('bad_input', `histogram must be "days" (got ${JSON.stringify(a.histogram)}).`, 'Leave histogram out for `buckets` equal bins, or pass "days" for whole-day bins.');
   const days = a.histogram === 'days';
+  if (days && a.buckets != null) fail('bad_input', 'histogram "days" and buckets cannot be given together.', 'Pass histogram: "days" for whole-day bins, or buckets for that many equal bins, not both.');
   // whole-day bins (the engine's: a bin of 1 day or more so that there are at most 40): counted like buckets in the reservation
   const buckets = days ? MC_DAY_BINS : countArg(a.buckets, 'buckets', { min: 5 }) ?? 20;
   return { iterations, top: top === 0 ? Infinity : top, buckets, days };
@@ -120,17 +124,18 @@ export function workNeed(tool: string, a: Record<string, any>, s: Session, free:
   if (!w) return null;
   let bytes = w.per * s.bytes + (w.fixed ?? 0), what = `${w.label} on this project (${n.toLocaleString('en-US')} activities)`, hint = w.hint;
   if (tool === 'monte_carlo') {
-    const { iterations: it, buckets } = monteCarloCounts(a); // as monte_carlo runs it; a bad count is refused here, before anything runs
+    const { iterations: it, buckets, top, days } = monteCarloCounts(a); // as monte_carlo runs it; a bad count is refused here, before anything runs
     const perIt = n * MC_BYTES_PER_SAMPLE + MC_BYTES_PER_ITERATION + (a.export != null ? MC_EXPORT_BYTES_PER_ITERATION + milestones(s) * MC_EXPORT_BYTES_PER_MILESTONE_ITERATION : 0);
     const base = w.per * s.bytes;
-    bytes += it * perIt + buckets * MC_BYTES_PER_BUCKET;
-    what = `Monte Carlo of ${n.toLocaleString('en-US')} activities × ${it.toLocaleString('en-US')} iterations${a.export != null ? ' with its export' : ''}${a.buckets != null ? ` and ${buckets.toLocaleString('en-US')} histogram buckets` : ''}`;
+    const listed = Math.min(top, n) * MC_BYTES_PER_LISTED_ROW; // the criticality rows the answer lists (top 0: every activity)
+    bytes += it * perIt + buckets * MC_BYTES_PER_BUCKET + listed;
+    what = `Monte Carlo of ${n.toLocaleString('en-US')} activities × ${it.toLocaleString('en-US')} iterations${a.export != null ? ' with its export' : ''}${days ? ` and its whole-day histogram (${MC_DAY_BINS} bins at most)` : a.buckets != null ? ` and ${buckets.toLocaleString('en-US')} histogram buckets` : ''}${a.top != null ? ` and ${Math.min(top, n).toLocaleString('en-US')} listed activity rows` : ''}`;
     // what would fit in what is free now: iterations with the buckets as asked, buckets with the iterations as asked (the minimums are 10 and 5)
     const room = Math.max(0, free() - base);
-    const fitIt = Math.floor((room - buckets * MC_BYTES_PER_BUCKET) / perIt), fitBk = Math.floor((room - it * perIt) / MC_BYTES_PER_BUCKET);
+    const fitIt = Math.floor((room - buckets * MC_BYTES_PER_BUCKET - listed) / perIt), fitBk = Math.floor((room - it * perIt - listed) / MC_BYTES_PER_BUCKET);
     const ways = [
       ...(fitIt >= 10 ? [`at most ${fitIt.toLocaleString('en-US')} iterations (iterations)`] : []),
-      ...(fitBk >= 5 ? [`at most ${fitBk.toLocaleString('en-US')} histogram buckets (buckets)`] : []),
+      ...(!days && fitBk >= 5 ? [`at most ${fitBk.toLocaleString('en-US')} histogram buckets (buckets)`] : []),
     ];
     hint = ways.length ? `run ${ways.join(' or ')}, which fit in the ${mbs(room)} free now` : 'run it on fewer activities (a narrower project)';
   }

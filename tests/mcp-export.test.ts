@@ -727,3 +727,27 @@ test('export_name room: no table declared in the code has a name longer than the
   // a table written under a name made dynamically (the cut lists' `found` table) is a plain word
   assert.ok(['findings', 'failing_activities'].every((n) => n.length <= EXPORT_TABLE_NAME_MAX));
 });
+
+test('A-L3: the cut name’s code is of the cleaned, lower-cased name: two long names that clean to the same name are one experiment, and different long names stay apart', async () => {
+  const { exportNameParts } = await import('../mcp/export.ts');
+  const long = 'x'.repeat(400);
+  const a = exportNameParts(`my option ${long}`, true, 'monte_carlo')!, b = exportNameParts(`my-option-${long}`, true, 'monte_carlo')!, c = exportNameParts(`MY OPTION ${long}`, true, 'monte_carlo')!;
+  assert.equal(a.cut && b.cut && c.cut, true);
+  assert.equal(a.name, b.name, 'only characters that became - differ: the same name');
+  assert.equal(a.name.toLowerCase(), c.name.toLowerCase(), 'only case differs: the same name (file names are compared without case)');
+  assert.notEqual(a.name, exportNameParts(`my option ${long}y`, true, 'monte_carlo')!.name, 'a different long name stays apart');
+  // short names: the same cleaned name is the same files
+  assert.equal(exportNameParts('a b', true, 'lint')!.name, exportNameParts('a-b', true, 'lint')!.name);
+});
+
+test('A-L4: every export passes the table-name check: a table named longer than the room reserved is an internal error naming the table, before any file is touched', async () => {
+  const { exportResult, EXPORT_TABLE_NAME_MAX } = await import('../mcp/export.ts');
+  const folder = mkdtempSync(join(tmpdir(), 'p6mcp-tn-'));
+  const written: string[] = [];
+  const sink = (p: string, make: (put: (s: string) => void) => void) => { make(() => {}); written.push(p); };
+  const tooLong = 'a_table_name_that_is_far_too_long_for_the_room';
+  assert.ok(tooLong.length > EXPORT_TABLE_NAME_MAX);
+  assert.throws(() => exportResult('lint', folder, {}, [{ name: 'ok_table', columns: ['a'], rows: [] }, { name: tooLong, columns: ['a'], rows: [] }], sink as never), (e: Error) => /^internal: the export table "a_table_name_that_is_far_too_long_for_the_room" of lint/.test(e.message) && e.message.includes(String(EXPORT_TABLE_NAME_MAX)));
+  assert.deepEqual(written, [], 'nothing was written');
+  assert.doesNotThrow(() => exportResult('lint', folder, {}, [{ name: 'x'.repeat(EXPORT_TABLE_NAME_MAX), columns: ['a'], rows: [] }], sink as never), 'a name of exactly the room is fine');
+});

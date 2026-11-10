@@ -92,7 +92,7 @@ const TABLE_ROOM = EXPORT_TABLE_NAME_MAX + '-partial-'.length + '.csv'.length;
 export interface ExportNameParts { /** the name as the files carry it */ name: string; given: string; /** letters, digits, marks, . _ - kept, anything else became - */ cleaned: boolean; /** cut to the file name length, with a short code of the whole name */ cut: boolean }
 /** The `export_name` argument as it goes into a file name: letters, digits, marks, `.`, `_` and `-` stay, anything else becomes `-`.
  *  A name too long for the files (<tool>-<name>-partial-<table>.csv at most EXPORT_FILE_NAME_MAX characters) is cut at a character, and
- *  a short code of the whole name (lower-cased: names that differ only in case are one name) follows so two long names stay apart.
+ *  a short code of the name as cleaned (lower-cased: names that differ only in case, or only in characters that became -, are one name) follows so two long names stay apart.
  *  Absent: undefined (the unnamed files). Refused as bad_input: a name that is empty, one with no export folder to go in, and "partial"
  *  (or one ending in -partial), which is how a stopped run's files are told from a complete run's. */
 export function exportNameParts(v: unknown, folderGiven = true, tool = ''): ExportNameParts | undefined {
@@ -104,7 +104,7 @@ export function exportNameParts(v: unknown, folderGiven = true, tool = ''): Expo
   if (/(^|-)partial$/i.test(safe)) fail('bad_input', `export_name "${given}" cannot end in "partial": a stopped run's files are named -partial.`, 'Choose another name, e.g. "option-a".');
   const room = EXPORT_FILE_NAME_MAX - fileNameLength(`${tool}-`) - TABLE_ROOM;
   if (fileNameLength(safe) <= room) return { name: safe, given, cleaned: safe !== given, cut: false };
-  const code = createHash('sha256').update(given.toLowerCase()).digest('hex').slice(0, 8);
+  const code = createHash('sha256').update(safe.toLowerCase()).digest('hex').slice(0, 8);
   let kept = '', used = fileNameLength(`-${code}`);
   for (const ch of safe) { const w = fileNameLength(ch); if (used + w > room) break; kept += ch; used += w; }
   return { name: `${kept}-${code}`, given, cleaned: safe !== given, cut: true };
@@ -123,6 +123,8 @@ const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  *  <tool>-<table>.csv is told from <tool>-<name>-<table>.csv.)
  *  What was replaced is said in `replaced`, and each file's size in `bytes`. */
 export function exportResult(tool: string, arg: unknown, full: unknown, tables: Table[], writeWith: WriteWith, o: { partial?: boolean; as?: string; name?: unknown } = {}): Exported {
+  // every export passes here: a table whose name is longer than the room the cut name reserved would make a file name over the limit, so no table can slip past
+  for (const t of tables) if (fileNameLength(t.name) > EXPORT_TABLE_NAME_MAX) throw new Error(`internal: the export table "${t.name}" of ${o.as ?? tool} has a name of ${fileNameLength(t.name)} characters, longer than the ${EXPORT_TABLE_NAME_MAX} reserved for it (EXPORT_TABLE_NAME_MAX in mcp/export.ts): shorten the table's name or raise the constant.`);
   const folder = exportFolder(arg), info = exportNameParts(o.name, true, o.as ?? tool), given = info?.name;
   const base = `${o.as ?? tool}${given ? `-${given}` : ''}`, name = `${base}${o.partial ? '-partial' : ''}`;
   // a table it no longer has is not left behind; other tools' files, and the files of another name, stay
@@ -160,7 +162,7 @@ export function exportResult(tool: string, arg: unknown, full: unknown, tables: 
   const when = json ?? newest;
   const used = info && (info.cleaned || info.cut) ? { export_name_used: { given: info.given, used: info.name, note: [
     info.cleaned ? 'letters, digits, marks and . _ - are kept in file names and anything else became -' : '',
-    info.cut ? `file names are at most ${EXPORT_FILE_NAME_MAX} characters, so the name was cut and a short code of the whole name added (two long names stay apart; the same long name, in any case, is the same experiment)` : ''].filter(Boolean).join('; ') } } : {};
+    info.cut ? `file names are at most ${EXPORT_FILE_NAME_MAX} characters, so the name was cut and a short code of the whole name added (two long names stay apart; the same name once cleaned, in any case, is the same experiment)` : ''].filter(Boolean).join('; ') } } : {};
   return { folder, files, ...used, ...(replaced && when ? { replaced: { files: replaced, written: when.toISOString() } } : {}) };
 }
 

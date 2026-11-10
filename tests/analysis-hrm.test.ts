@@ -558,6 +558,23 @@ test('whiqFieldOps: the original is written once, the change is measured from it
   assert.equal(whiqFieldClash(db, { changes: [] }), undefined, 'a field this run does not write is not looked at');
 });
 
+test('A-L2: kept_from_earlier counts the values on the activities of the run’s projects only, not those of other projects in the file', async () => {
+  const { whiqFieldOps } = await import('../core/analysis/whiq-fields.ts');
+  const db: Db = { tables: {} };
+  assert.ok(applyOps(db, [{ op: 'add_project', id: 'W', start: '2026-06-01' }, { op: 'add_project', id: 'X', start: '2026-06-01' },
+    ...['A', 'B'].map((id) => ({ op: 'add_activity', project: 'W', id, name: id, duration_days: 10 })), ...['A', 'B', 'C'].map((id) => ({ op: 'add_activity', project: 'X', id, name: id, duration_days: 10 }))], { calendarDays: true }).ok);
+  const pid = (n: string) => rows(db, 'PROJECT').find((p) => p.proj_short_name === n)!.proj_id;
+  const task = (proj: string, code: string) => rows(db, 'TASK').find((t) => t.task_code === code && t.proj_id === pid(proj))!.task_id;
+  const run = (changes: { proj: string; id: string }[], projIds?: string[]) => {
+    const w = whiqFieldOps(db, { changes: changes.map((c) => ({ task_id: task(c.proj, c.id), id: c.id, project: c.proj, from_days: 10, to_days: 6, cost: 5 })), who: 'Crashed', on: '2026-11-10', projIds });
+    assert.ok(applyOps(db, w.ops as never, { calendarDays: true }).ok);
+    return w.fields_written.find((f) => f.name === 'WHIQ duration change (d)')!;
+  };
+  run([{ proj: 'W', id: 'A' }, { proj: 'X', id: 'A' }, { proj: 'X', id: 'B' }, { proj: 'X', id: 'C' }]); // an earlier run: A in W, and A, B, C in X
+  assert.deepEqual(run([{ proj: 'W', id: 'B' }], [pid('W')]), { name: 'WHIQ duration change (d)', activities: 1, kept_from_earlier: 1 }, 'of W only: A kept; X’s three are not this run’s');
+  assert.deepEqual(run([{ proj: 'X', id: 'A' }], [pid('X')]), { name: 'WHIQ duration change (d)', activities: 1, kept_from_earlier: 2 }, 'of X only: B and C kept; W’s two are not counted');
+});
+
 test('MCP optimize_schedule and crash_schedule apply: a field of another type with a WHIQ label refuses the apply before anything changes; a cancel just before the change applies nothing', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal) => { const r = await callTool(name, args, undefined, signal); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };

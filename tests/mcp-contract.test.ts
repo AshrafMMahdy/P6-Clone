@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { mkdtempSync, mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { callTool, toolResult } from '../mcp/server.ts';
+import { callTool, toolResult, outsideRoute } from '../mcp/server.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { parseXer } from '../core/xer/parse.ts';
@@ -292,4 +292,16 @@ test('import_file and transfer_progress say what P6 would refuse in the file the
   const len = await call('open_file', { path: big, lenient: true });
   assert.deepEqual([len.data.file_as_given.fatal_total, len.data.file_as_given.fatal_listed, len.data.file_as_given.fatal_kinds[0].count], [60, 5, 60]);
   assert.equal(len.data.diagnostics.counts.fatal ?? len.data.diagnostics.before_repairs?.counts.fatal, 60, 'the counts of the diagnostics are real too');
+});
+
+test('a real .mpp that was read but refused, or holds no project, keeps the "save as Project XML" route; only a file that is not an .mpp is told it is binary (A-M1)', () => {
+  const dir = join(process.cwd(), 'Sample MPPs'), name = readdirSync(dir).find((f) => /\.mpp$/i.test(f))!;
+  const head = new Uint8Array(readFileSync(join(dir, name))).subarray(0, 4000);
+  assert.deepEqual([...head.subarray(0, 8)], [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  const r = outsideRoute('mpp', head);
+  assert.match(r, /save it as Microsoft Project XML/);
+  assert.doesNotMatch(r, /not one of the schedule formats/);
+  // a file only named .mpp whose bytes are a PDF is still told for what it is
+  assert.match(outsideRoute('mpp', new TextEncoder().encode('%PDF-1.7 ...')), /the file is a PDF/);
+  assert.match(outsideRoute('mpp', undefined), /save it as Microsoft Project XML/);
 });
