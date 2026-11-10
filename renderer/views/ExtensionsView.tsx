@@ -8,7 +8,7 @@ import { dcma14, DCMA_PROFILES, type DcmaReport } from '../../core/analysis/dcma
 import { analysisReportHtml } from '../../core/analysis/report.ts';
 import { nowStamp } from '../../core/report/reports.ts';
 import { AnalysisResults } from './AnalysisResults.tsx';
-import { lintSchedule, type Fix, type LintReport } from '../../core/analysis/lint.ts';
+import type { Fix, LintReport } from '../../core/analysis/lint.ts';
 import { applyOps } from '../../core/project/ops.ts';
 import { mutate } from '../store.ts';
 import { runSchedule } from '../commands.ts';
@@ -17,6 +17,9 @@ import { TiaPanel, WindowsPanel } from './DelayPanels.tsx';
 import { FourDPanel } from './FourDView.tsx';
 import { LobPanel } from './LobView.tsx';
 import { MonteCarloPanel } from './MonteCarloPanel.tsx';
+import { lintArgs, lintStopped, refusal } from './toolAnswers.ts';
+import { useToolRun } from './toolRun.ts';
+import { RunStatus } from './RunStatus.tsx';
 import { CheckSchedulePanel, ComparePanel, EvaluatePanel, FloatPathsPanel, LevelPanel, ProgressCurvesPanel, ResourceHistogramPanel, ReviewPanel } from './AnalysisPanels.tsx';
 import { ExportButton, projectArgs } from './ExportButton.tsx';
 
@@ -106,7 +109,21 @@ function LintPanel() {
   const ui = useStore((s) => s.ui);
   const [profile, setProfile] = useState<'p6' | 'platform'>('p6');
   const [report, setReport] = useState<LintReport | null>(null);
-  const run = () => setReport(lintSchedule(getDb(), { projIds: ui.openProjects, hoursPerDay: ui.prefs.hoursPerDay, profile }));
+  const [err, setErr] = useState('');
+  // the tool itself, in the Export's child process on the saved database (main/analysis-export-ipc.ts): every critical ladder is simulated
+  // (the tool's default), which can take a while, so the window is never held; the run shows the tool's progress and Cancel stops it
+  // at its next simulation and shows the checks finished
+  const lint = useToolRun('lint', true);
+  const run = async () => {
+    let a: Record<string, unknown>;
+    try { a = lintArgs(projectArgs(), profile); } catch (e) { return toast((e as Error).message); }
+    setErr('');
+    const r = await lint.start(a);
+    if (!r) return;
+    const why = refusal(r);
+    if (why) return setErr(why);
+    setReport(r.out as unknown as LintReport);
+  };
   const apply = (f: Fix) => {
     let err = '';
     // a refused fix rolls back inside mutate (nothing recorded) and is reported
@@ -120,9 +137,12 @@ function LintPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, height: '100%' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <label>Profile <select value={profile} onChange={(e) => setProfile(e.target.value as 'p6' | 'platform')}><option value="p6">P6 checks</option><option value="platform">P6 checks + network score (White Hat IQ)</option></select></label>
-        <button className="btn primary" onClick={run}>Run lint</button>
-        <ExportButton tool="lint" args={() => ({ ...projectArgs(), profile })} />
+        {!lint.running ? <button className="btn primary" onClick={() => void run()}>Run lint</button> : <button className="btn" onClick={lint.cancel} title="Stops at the next simulation and shows the checks finished">Cancel</button>}
+        {lint.running && <RunStatus progress={lint.progress} waiting="Starting the run in a separate process…" />}
+        <ExportButton tool="lint" args={() => lintArgs(projectArgs(), profile)} />
       </div>
+      {err && <div style={{ color: '#b00020', whiteSpace: 'pre-wrap' }}>{err}</div>}
+      {report && lintStopped(report) && <div><b>{lintStopped(report)}</b></div>}
       {report && <div>{report.score != null ? <><b>Score {report.score}</b> (grade {report.grade}) · </> : null}{report.checks.filter((c) => c.band === 'fail').length} failing · {report.checks.filter((c) => c.band === 'warn').length} warnings · {report.work_activities} work activities, {report.relationships} relationships</div>}
       {report ? <AnalysisResults checks={report.checks} onApplyFix={apply} /> : <div className="muted">Finds logic and modelling problems P6 schedules without complaint. Fixes are edit operations: Apply makes the change, reschedules, and can be undone with Ctrl+Z.</div>}
     </div>

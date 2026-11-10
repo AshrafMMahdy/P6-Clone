@@ -127,8 +127,8 @@ ok(await win.locator('.tbl >> nth=0 >> tbody tr').count() >= 1, 'Float paths: ru
 await exportFiles('float_paths', 'Float paths', ['float_paths-paths.csv', 'float_paths-near_critical.csv']);
 // between two activities (float_paths' between): one of them alone is refused in the tool's words; both list the paths, as the Export
 await win.locator('input[placeholder="from"]').fill('A1000');
-await win.click('button:has-text("Find paths")'); await win.waitForTimeout(300);
-ok(/Between needs from and to Activity IDs of this project/.test(await toastText()), `Float paths: between with one activity is refused in the tool's words (${await toastText()})`);
+await win.click('button:has-text("Find paths")'); await win.waitForSelector('text=/Between needs from and to Activity IDs of this project/', { timeout: 60_000 }); // (the tool runs off the window: its refusal is text in the panel)
+ok(true, `Float paths: between with one activity is refused in the tool's words, as text in the panel`);
 await win.locator('input[placeholder="to"]').fill('A1010');
 await win.click('button:has-text("Find paths")'); await win.waitForSelector('[data-between]');
 const betweenRows = await win.locator('[data-between] tbody tr').count();
