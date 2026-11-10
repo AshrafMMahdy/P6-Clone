@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { rows, type Db } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
-import { buildInstance, classicPriorities, decode, optimizeSchedule, reasonerInputs, reasonerOutput, ReasonerBadAnswer, REASONER_WINDOW, serialSgs, type HrmActivity, type HrmInstance, type ReasonerInputs } from '../core/analysis/hrm.ts';
+import { buildInstance, classicPriorities, decode, instanceHorizon, optimizeSchedule, reasonerInputs, reasonerOutput, ReasonerBadAnswer, REASONER_WINDOW, serialSgs, type HrmActivity, type HrmInstance, type ReasonerInputs } from '../core/analysis/hrm.ts';
 import { nodeInfer, reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
 
 // The platform's own reasoner check: two parallel chains in one trade and a join, crew 2 each, under a cap of 4.
@@ -200,10 +200,10 @@ test('optimize_schedule runs the embedded model and checks its answer with the P
   assert.equal(r.order.length, 12);
   // biggest_changes: the activities whose dates differ between cpm and the reasoner, the largest finish shift first, then the start shift
   assert.equal(r.biggest_changes_total, r.dates.filter((x) => x.cpm[0] !== x.reasoner[0] || x.cpm[1] !== x.reasoner[1]).length);
-  assert.equal(r.biggest_changes.length, r.biggest_changes_total);
+  assert.equal(r.biggest_changes!.length, r.biggest_changes_total);
   assert.ok(r.biggest_changes_total > 0);
-  assert.deepEqual(Object.keys(r.biggest_changes[0]), ['id', 'name', 'cpm_start', 'cpm_finish', 'reasoner_start', 'reasoner_finish', 'start_delta_days', 'finish_delta_days']);
-  const keys = r.biggest_changes.map((x) => [Math.abs(x.finish_delta_days ?? 0), Math.abs(x.start_delta_days ?? 0)]);
+  assert.deepEqual(Object.keys(r.biggest_changes![0]), ['id', 'name', 'cpm_start', 'cpm_finish', 'reasoner_start', 'reasoner_finish', 'start_delta_days', 'finish_delta_days']);
+  const keys = r.biggest_changes!.map((x) => [Math.abs(x.finish_delta_days ?? 0), Math.abs(x.start_delta_days ?? 0)]);
   assert.deepEqual(keys, [...keys].sort((x, y) => y[0] - x[0] || y[1] - x[1]));
   // same seed, same answer
   const again = await optimizeSchedule(db, [pid], { seed: 7, samples: 50 }, nodeInfer, apply);
@@ -307,8 +307,12 @@ test('the final pass over the modes finds what the sampling and the starting rul
   // every trial is ticked with the pass it belongs to
   const said: string[] = [];
   await decode(inst, neutral(3), { samples: 0, tick: async (_d, _t, m) => { said.push(m); } });
-  assert.equal(said.length, r.mode_trials);
-  assert.ok(said.every((m) => /^improving the modes: activity \d of 2, pass \d$/.test(m)));
+  const trials = said.filter((m) => m.startsWith('improving the modes'));
+  assert.equal(trials.length, r.mode_trials);
+  assert.ok(trials.every((m) => /^improving the modes: activity \d of 2, pass \d$/.test(m)));
+  // and each of the nine starting placements is ticked before it is made (a cancel there is the caller's, as in the sampling)
+  assert.equal(said.length - trials.length, 9);
+  assert.ok(said.slice(0, 9).every((m, k) => m.startsWith(`starting placement ${k + 1} of 9: `)));
 });
 
 test('a cancel in the final pass keeps the best found so far and says it was stopped; optimize_schedule answers it partial and applies nothing', async () => {
@@ -342,7 +346,7 @@ test('the answer says what won, and with no crash data why there was no mode to 
   const infer = async (x: ReasonerInputs) => stand(Array.from({ length: x.n }, (_, k) => Math.sin(k)));
   const plain = await optimizeSchedule(db, [pid], { samples: 5, seed: 1 }, infer, () => undefined);
   assert.ok(plain.ok);
-  assert.equal(plain.note, "No crash data was given, so there was no mode to choose: this is the best order of the model's and the classic rules'. Give crash data (activities: [{id, crash_days, crash_cost} \u2026]) for the reasoner to choose what to shorten.");
+  assert.equal(plain.note, "No crash data was given, so there was no mode to choose: this is the best placement found among the model's own answer, the classic rules' orders and the sampled variations of the model's answer. Give crash data (activities: [{id, crash_days, crash_cost} \u2026]) for the reasoner to choose what to shorten.");
   assert.match(plain.best_from, /^(model|sampled|(LFT|MTS|GRPW|SPT) \((normal|shortest) modes\)|earliest start \(no resource limit\))$/);
   assert.equal(plain.mode_trials, undefined);
   assert.equal(plain.trajectories, 15);
@@ -403,14 +407,18 @@ test('apply writes the WHIQ fields beside each changed activity in the same undo
   // the same change as the apply: one undo takes the fields back too (and the crashed duration)
   assert.equal((await call('undo', { handle: h, owner_key })).err, false);
   assert.deepEqual(await fields(), { labels: [], values: {} });
-  // applied again, then a second apply replaces the values (the activity is now 6 d: its original is 6, crashed to 4 on the new data)
+  // applied again, then a second apply: the original stays the first one (10: the activity is now 6 d, crashed to 3), the change is measured from it
   await call('optimize_schedule', { handle: h, owner_key, seed: 1, samples: 5, activities: crash, apply: true });
   const again = await call('optimize_schedule', { handle: h, owner_key, seed: 1, samples: 5, activities: [{ id: 'A', crash_days: 3, crash_cost: 700 }], apply: true });
   assert.equal(again.err, false, JSON.stringify(again.d));
   const f2 = await fields();
-  assert.equal(f2.values.A['WHIQ original duration (d)'], '6', 'replaced, not added beside');
-  assert.equal(f2.values.A['WHIQ duration change (d)'], '-3');
-  assert.match(f2.values.A['WHIQ change note'], /: 6 d to 3 d, cost 700$/);
+  assert.equal(f2.values.A['WHIQ original duration (d)'], '10', 'the original is written once: the second apply does not turn it into the crashed 6');
+  assert.equal(f2.values.A['WHIQ duration change (d)'], '-7', 'the latest duration (3) minus the original (10)');
+  assert.match(f2.values.A['WHIQ change note'], /: 6 d to 3 d, cost 700 \(original 10 d\)$/);
+  const named2 = new Map((again.d.fields_written as { name: string; activities: number; kept_from_earlier: number }[]).map((x) => [x.name, x]));
+  // the note and rank are the latest run's; A holds the original of the earlier run (kept, not written again)
+  assert.deepEqual([named2.get('WHIQ change note')!.activities, named2.get('WHIQ change note')!.kept_from_earlier], [1, 0]);
+  assert.deepEqual([named2.get('WHIQ original duration (d)')!.activities, named2.get('WHIQ original duration (d)')!.kept_from_earlier], [0, 1]);
   assert.equal(f2.labels.length, 4, 'each field once');
   // the XER saved and read again still has them
   const dir = mkdtempSync(join(tmpdir(), 'p6-whiq-')), file = join(dir, 'whiq.xer');
@@ -433,4 +441,168 @@ test('apply writes the WHIQ fields beside each changed activity in the same undo
   assert.ok(tv.rows.some((r: string[]) => r.some((c) => /^Crashed \(least cost\) \d{4}-\d{2}-\d{2}: 10 d to \d+(\.\d+)? d, cost [\d,.]+$/.test(c))), JSON.stringify(tv.rows).slice(0, 400));
   assert.equal((await call('undo', { handle: np2.handle, owner_key: np2.owner_key })).err, false);
   assert.equal((await call('read_table', { handle: np2.handle, table: 'UDFVALUE' })).d.rows?.length ?? 0, 0, 'undo removes them');
+});
+
+// ---- the reasoner round 2b: over-limit placement, cancels after the search, the whole order, the WHIQ fields ----
+
+const cancelledError = () => Object.assign(new Error('cancelled'), { code: 'cancelled' });
+
+test('an activity whose crew exceeds its limit is placed past a horizon of the instance, not of the modes chosen: a crash that changes nothing else is not kept', async () => {
+  // A needs 5 of a limit of 3 (it fits on no day); B (10 d, crashable to 5 for 1000) has 20 d of float beside C (30 d)
+  const make = (withA: boolean): HrmInstance => ({ acts: [...(withA ? [act(0, 10, [], [], 'T', 5)] : []), act(withA ? 1 : 0, 10, [], [[5, 1000]], 'U'), act(withA ? 2 : 1, 30, [], [], 'V')].map((a, i) => ({ ...a, id: i })), caps: new Map([['T', 3]]) });
+  const withA = make(true), alone = make(false);
+  const r = await decode(withA, neutral(3), { samples: 0 });
+  assert.deepEqual(r.modes, [0, 0, 0], 'B is not crashed: it only moved the over-limit activity earlier');
+  assert.equal(r.cost, 0);
+  assert.deepEqual((await decode(alone, neutral(2), { samples: 0 })).modes, [0, 0], 'without A, B stays normal too');
+  // the same makespan whatever the modes: one horizon for the instance
+  const horizon = instanceHorizon(withA.acts);
+  assert.equal(horizon, 10 + 10 + 30 + 1, 'from the longest mode of each activity');
+  const place = (dur: number[]) => serialSgs(withA.acts, dur, withA.caps, undefined, horizon).makespan;
+  assert.equal(place([10, 10, 30]), place([10, 5, 30]));
+  // with no horizon given, serialSgs keeps its own (the sum of the durations it is given): the default for other callers
+  assert.notEqual(serialSgs(withA.acts, [10, 10, 30], withA.caps).makespan, serialSgs(withA.acts, [10, 5, 30], withA.caps).makespan);
+});
+
+test('optimize_schedule: a cancel at either check in real dates keeps the proposal and names what was not run; the starting placements are ticked', async () => {
+  const { db, pid } = project(4);
+  const crash = [{ id: 'A5', crash_days: 4, crash_cost: 900 }, { id: 'A2', crash_days: 4, crash_cost: 500 }];
+  const infer = async (x: ReasonerInputs) => stand(Array.from({ length: x.n }, (_, k) => k));
+  const before = JSON.stringify(db);
+  const at = (re: RegExp) => async (_d: number, _t: number, m: string) => { if (re.test(m)) throw cancelledError(); };
+  // before the comparison with P6's leveling: neither check was run
+  const one = await optimizeSchedule(db, [pid], { samples: 2, seed: 1, activities: crash, tick: at(/^P6 leveling for comparison/) }, infer, () => undefined);
+  assert.ok(one.ok && one.partial && one.stopped === 'cancelled');
+  assert.match(one.partial_note!, /Cancelled before the comparison with P6's leveling/);
+  assert.ok(Array.isArray(one.ops) && one.priority.length === 12 && one.mode_passes, 'the proposal found is kept');
+  for (const k of ['cpm_finish', 'p6_leveled_finish', 'reasoner_finish', 'better_than_p6_leveler', 'biggest_changes', 'biggest_changes_total']) assert.equal(k in one, false, `${k} was not computed: absent, not invented`);
+  assert.deepEqual(one.dates, []);
+  // before the leveling in the proposed order: P6's was done
+  const two = await optimizeSchedule(db, [pid], { samples: 2, seed: 1, activities: crash, tick: at(/^leveling in the proposed order/) }, infer, () => undefined);
+  assert.ok(two.ok && two.partial);
+  assert.match(two.partial_note!, /Cancelled before the leveling in the proposed order/);
+  assert.ok(two.p6_leveled_finish && two.cpm_finish);
+  for (const k of ['reasoner_finish', 'better_than_p6_leveler', 'biggest_changes']) assert.equal(k in two, false, k);
+  // a cancel that landed in the final pass stays (the tick throws again): the two checks are not run, the answer is at once
+  let calls = 0;
+  const sticky = await optimizeSchedule(db, [pid], { samples: 2, seed: 1, activities: crash, tick: async (_d, _t, m) => { if (m.startsWith('improving the modes') && ++calls === 1) { cancelledFlag = true; } if (cancelledFlag) throw cancelledError(); } }, infer, () => undefined);
+  assert.ok(sticky.ok && sticky.partial);
+  assert.match(sticky.partial_note!, /Cancelled in the final pass over the modes/);
+  assert.match(sticky.partial_note!, /Cancelled before the comparison with P6's leveling/);
+  assert.equal('p6_leveled_finish' in sticky, false);
+  assert.equal(JSON.stringify(db), before, 'nothing was changed');
+  // a cancel between the starting placements is the caller's (as in the sampling)
+  await assert.rejects(() => optimizeSchedule(db, [pid], { samples: 2, seed: 1, activities: crash, tick: at(/^starting placement 4 of 9/) }, infer, () => undefined), (e: unknown) => (e as { code?: string }).code === 'cancelled');
+  // and a run that is not cancelled answers every check, with none of this
+  const done = await optimizeSchedule(db, [pid], { samples: 2, seed: 1, activities: crash }, infer, () => undefined);
+  assert.ok(done.ok && !done.partial && done.reasoner_finish && done.p6_leveled_finish && done.biggest_changes);
+});
+let cancelledFlag = false;
+
+test('optimize_schedule max_priority: the order listed is as long as asked (default 100, 0 = all), priority_total and the whole order stay', async () => {
+  const { db, pid } = project(4);
+  const infer = async (x: ReasonerInputs) => stand(Array.from({ length: x.n }, (_, k) => Math.sin(k)));
+  const crash = [{ id: 'A5', crash_days: 4, crash_cost: 900 }];
+  const dflt = await optimizeSchedule(db, [pid], { samples: 1, seed: 1, activities: crash }, infer, () => undefined);
+  const three = await optimizeSchedule(db, [pid], { samples: 1, seed: 1, activities: crash, maxPriority: 3 }, infer, () => undefined);
+  const all = await optimizeSchedule(db, [pid], { samples: 1, seed: 1, activities: crash, maxPriority: 0 }, infer, () => undefined);
+  assert.ok(dflt.ok && three.ok && all.ok);
+  assert.equal(dflt.priority.length, 12, 'fewer than 100: all of them');
+  assert.deepEqual(three.priority, all.priority.slice(0, 3));
+  assert.equal(three.priority_total, 12);
+  assert.equal(all.priority.length, 12);
+  assert.equal(all.priority_rows.length, 12);
+  assert.deepEqual(all.priority_rows.map((x) => x.id), all.priority);
+  const big = madeInstance(1, 1); void big;
+});
+
+test('the fields of a change are the hours actually written: 20 h on an 8 h day crashed from 3 rounded days to 2 is 2.5 d to 1.67 d', async () => {
+  const db: Db = { tables: {} };
+  assert.ok(applyOps(db, [{ op: 'add_project', id: 'F', start: '2026-06-01' }, { op: 'add_activity', id: 'X', name: 'X', duration_days: 2.5 }], { calendarDays: true }).ok);
+  const pid = rows(db, 'PROJECT')[0].proj_id;
+  assert.ok(scheduleProjects(db, [pid]).ok);
+  const r = await optimizeSchedule(db, [pid], { samples: 1, seed: 1, activities: [{ id: 'X', crash_days: 2, crash_cost: 10 }] }, async (x) => stand(Array.from({ length: x.n }, () => 0)), () => undefined);
+  assert.ok(r.ok);
+  assert.deepEqual(r.field_changes.map(({ task_id: _t, ...c }) => c), [{ id: 'X', project: 'F', from_days: 2.5, to_days: 1.67, cost: 10 }]);
+  const op = r.ops[0] as { duration_hours: number };
+  assert.ok(Math.abs(op.duration_hours - 40 / 3) < 1e-9, `the hours written ${op.duration_hours} are the ones the fields show`);
+});
+
+test('whiqFieldOps: the original is written once, the change is measured from it, the note says so, and values of earlier runs on other activities are counted', async () => {
+  const { whiqFieldOps, whiqFieldClash } = await import('../core/analysis/whiq-fields.ts');
+  const db: Db = { tables: {} };
+  assert.ok(applyOps(db, [{ op: 'add_project', id: 'W', start: '2026-06-01' }, ...['A', 'B'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 10 }))], { calendarDays: true }).ok);
+  const task = (code: string) => rows(db, 'TASK').find((t) => t.task_code === code)!.task_id;
+  const run = (changes: { id: string; from: number; to: number }[], ranks: string[]) => {
+    const w = whiqFieldOps(db, { changes: changes.map((c) => ({ task_id: task(c.id), id: c.id, project: 'W', from_days: c.from, to_days: c.to, cost: 5 })), ranks: ranks.map((id, k) => ({ task_id: task(id), id, project: 'W', rank: k + 1 })), who: 'Crashed', on: '2026-11-10' });
+    assert.ok(applyOps(db, w.ops as never, { calendarDays: true }).ok);
+    return w.fields_written;
+  };
+  const value = (code: string, label: string) => { const t = rows(db, 'UDFTYPE').find((u) => u.udf_type_label === label)!, v = rows(db, 'UDFVALUE').find((x) => x.udf_type_id === t.udf_type_id && x.fk_id === task(code)); return v ? v.udf_number || v.udf_text : undefined; };
+  run([{ id: 'A', from: 10, to: 6 }], ['A', 'B']);
+  const second = run([{ id: 'A', from: 6, to: 3 }], ['B']);
+  assert.equal(value('A', 'WHIQ original duration (d)'), '10');
+  assert.equal(value('A', 'WHIQ duration change (d)'), '-7');
+  assert.equal(value('A', 'WHIQ change note'), 'Crashed 2026-11-10: 6 d to 3 d, cost 5 (original 10 d)');
+  // A's rank is of the earlier run and stays (not cleared); B's is the latest
+  assert.equal(value('A', 'WHIQ leveling rank'), '1');
+  assert.equal(value('B', 'WHIQ leveling rank'), '1');
+  assert.deepEqual(second.find((f) => f.name === 'WHIQ leveling rank'), { name: 'WHIQ leveling rank', activities: 1, kept_from_earlier: 1 });
+  assert.deepEqual(second.find((f) => f.name === 'WHIQ original duration (d)'), { name: 'WHIQ original duration (d)', activities: 0, kept_from_earlier: 1 });
+  // a field with the label and another type: found before anything is written
+  assert.equal(whiqFieldClash(db, { changes: [1] }), undefined);
+  assert.ok(applyOps(db, [{ op: 'delete_udf', udf: 'WHIQ change note' }, { op: 'add_udf', name: 'whiq change note', data_type: 'number' }], { calendarDays: true }).ok);
+  const clash = whiqFieldClash(db, { changes: [1] })!;
+  assert.deepEqual([clash.field, clash.found, clash.needed], ['whiq change note', 'number', 'text']);
+  assert.match(clash.hint, /update_udf.*delete_udf.*ops/);
+  assert.equal(whiqFieldClash(db, { changes: [] }), undefined, 'a field this run does not write is not looked at');
+});
+
+test('MCP optimize_schedule and crash_schedule apply: a field of another type with a WHIQ label refuses the apply before anything changes; a cancel just before the change applies nothing', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal) => { const r = await callTool(name, args, undefined, signal); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'CL', start: '2026-06-01' })).d, h = np.handle, owner_key = np.owner_key;
+  const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 20 }];
+  for (const [id, d] of [['A', 10], ['B', 5], ['C', 6]] as const) ops.push({ op: 'add_activity', id, name: `Activity ${id}`, duration_days: d }, { op: 'assign_resource', activity: id, resource: 'civil', units_per_day: 16 });
+  ops.push({ op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_udf', name: 'WHIQ change note', data_type: 'number' });
+  assert.equal((await call('edit', { handle: h, owner_key, operations: ops })).err, false);
+  await call('schedule', { handle: h, owner_key });
+  const days = async () => ['A', 'B', 'C'].map(async (id) => (await call('get_activity', { handle: h, activity_id: id })).d.orig_days);
+  const crash = [{ id: 'A', crash_days: 6, crash_cost: 4500 }];
+  const durations = async () => Promise.all(await days());
+  const was = await durations();
+  const bad = await call('optimize_schedule', { handle: h, owner_key, seed: 1, samples: 3, activities: crash, apply: true });
+  assert.equal(bad.d.error?.code, 'field_type_clash', JSON.stringify(bad.d).slice(0, 300));
+  assert.match(bad.d.error.message, /"WHIQ change note" of type number; the apply writes text/);
+  assert.match(bad.d.error.hint, /update_udf.*delete_udf.*ops/);
+  assert.deepEqual(await durations(), was, 'nothing was changed');
+  const badCrash = await call('crash_schedule', { handle: h, owner_key, target_days: 10, apply: true });
+  assert.equal(badCrash.d.error?.code, 'field_type_clash');
+  assert.deepEqual(await durations(), was);
+  // the field renamed away: the apply works; but first a cancel that lands just before the change (the checkpoint added to the call)
+  assert.equal((await call('edit', { handle: h, owner_key, operations: [{ op: 'delete_udf', udf: 'WHIQ change note' }] })).err, false);
+  const args = { handle: h, owner_key, seed: 1, samples: 3, activities: crash };
+  const real = globalThis.setImmediate;
+  let count = 0, abortAt = Infinity;
+  const abort = new AbortController();
+  (globalThis as any).setImmediate = (fn: any, ...rest: any[]) => { if (new Error().stack!.includes('checkpoint') && ++count >= abortAt) abort.abort(); return real(fn, ...rest); };
+  process.env.P6CLONE_COMPUTE_WORKERS = '0';
+  try {
+    const plain = await call('optimize_schedule', args);
+    assert.equal(plain.err, false, JSON.stringify(plain.d).slice(0, 300));
+    abortAt = count + 1; count = 0;
+    const r = await call('optimize_schedule', { ...args, apply: true }, abort.signal);
+    assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+    assert.equal(r.d.partial, true); assert.equal(r.d.stopped, 'cancelled'); assert.equal(r.d.applied, false);
+    assert.match(r.d.partial_note, /Cancelled after the leveling in the proposed order, before the changes were made/);
+    assert.ok(r.d.reasoner_finish && r.d.ops.length, 'the proposal and its checks are complete');
+  } finally { (globalThis as any).setImmediate = real; delete process.env.P6CLONE_COMPUTE_WORKERS; }
+  assert.deepEqual(await durations(), was, 'a cancel after the leveling in the proposed order applied nothing');
+  const ok = await call('optimize_schedule', { ...args, apply: true });
+  assert.equal(ok.d.applied, true, JSON.stringify(ok.d).slice(0, 300));
+  // max_priority through the tool
+  const two = await call('optimize_schedule', { ...args, max_priority: 2 }), every = await call('optimize_schedule', { ...args, max_priority: 0 });
+  assert.equal(two.d.priority.length, 2); assert.equal(two.d.priority_total, 3);
+  assert.equal(every.d.priority.length, 3);
+  assert.equal((await call('optimize_schedule', { ...args, max_priority: -1 })).d.error?.code, 'bad_input');
 });

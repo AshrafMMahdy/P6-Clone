@@ -14,6 +14,7 @@ import { fitAssignmentsToDuration } from '../resource/assign.ts';
 import { drivingFloat } from './delay.ts';
 import { isLoe, isMilestone, isWbs, type Tick } from './common.ts';
 import { lobActivityCodes } from '../lob/view.ts';
+import { fieldChange } from './whiq-fields.ts';
 
 class ScheduleFailed extends Error {}
 
@@ -243,6 +244,6 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
     steps, changes: [...changed.values()].map((c) => ({ id: c.task.task_code, remaining_days_from: r2(c.from / (dayHours(db, hpd0, true).task(c.task))), remaining_days_to: r2(c.to / dayHours(db, hpd0, true).task(c.task)) })),
     ops, warnings,
     /** each activity whose duration the run changed, for the fields an apply writes beside it (whiq-fields.ts) */
-    field_changes: [...changed.values()].map((c) => { const h = dayHours(db, hpd0, true).task(c.task); return { id: c.task.task_code as string, project: projCode.get(c.task.proj_id) as string, from_days: r2(c.from / h), to_days: r2(c.to / h), cost: r2(costOf.get(c.task.task_id) ?? 0) }; }),
+    field_changes: [...changed.values()].map((c) => fieldChange(db, c.task, projCode.get(c.task.proj_id), c.from, c.to, costOf.get(c.task.task_id) ?? 0, hpd0)),
   };
 }

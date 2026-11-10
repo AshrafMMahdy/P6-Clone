@@ -14,6 +14,7 @@ import { levelResources } from '../level/level.ts';
 import { onScratch } from './batch.ts';
 import type { CrashActivity } from './crash.ts';
 import { isLoe, isWbs, type Tick } from './common.ts';
+import { fieldChange } from './whiq-fields.ts';
 
 export const REASONER_KMAX = 3;
 /** The most activities the model reads at once: the largest network it was trained on. Its inputs and its memory grow with the square
@@ -142,9 +143,18 @@ export function reasonerInputs(inst: HrmInstance): ReasonerInputs {
   return { n, feats, bias, modeMask };
 }
 
+/** The horizon an activity whose crew fits on no day is placed past: one per instance, from each activity's LONGEST mode (not the modes a
+ *  placement chose), so shortening one activity never moves another's over-limit placement and a crash that changes nothing else
+ *  cannot lower the makespan. A search computes it once and passes it into every serialSgs call it makes. */
+export function instanceHorizon(acts: HrmActivity[]): number {
+  const fin = (d: number) => (Number.isFinite(d) ? d : 0);
+  return Math.max(1, acts.reduce((s, a) => s + Math.max(fin(a.duration), ...a.modes.map((m) => fin(m.duration))), 0) + 1);
+}
+
 /** Serial schedule generation with renewable crews (the platform's sgs.ts): activities in precedence order, ties by
- *  priority (higher first), each at the earliest day its predecessors allow where its crew fits under the cap. */
-export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, number>, priority?: number[]): { start: number[]; finish: number[]; makespan: number } {
+ *  priority (higher first), each at the earliest day its predecessors allow where its crew fits under the cap. `horizon`: where an
+ *  over-limit crew is placed past (instanceHorizon); absent, the sum of the durations given (right for one fixed choice of modes). */
+export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, number>, priority?: number[], horizon?: number): { start: number[]; finish: number[]; makespan: number } {
   let order: number[];
   if (!priority) order = topoOrder(acts);
   else {
@@ -169,7 +179,7 @@ export function serialSgs(acts: HrmActivity[], dur: number[], caps: Map<string, 
   }
   const start = new Array(acts.length).fill(0), finish = new Array(acts.length).fill(0);
   const usage = new Map<string, Map<number, number>>();
-  const horizon = Math.max(1, dur.reduce((s, d) => s + (Number.isFinite(d) ? d : 0), 0) + 1);
+  horizon ??= Math.max(1, dur.reduce((s, d) => s + (Number.isFinite(d) ? d : 0), 0) + 1);
   for (const id of order) {
     const a = acts[id], d = dur[id], crew = a.crewSize * (a.duration && d ? a.duration / d : 1), cap = caps.get(a.group) ?? Infinity;
     let t = 0;
@@ -220,7 +230,7 @@ export async function reasonerOutput(inst: HrmInstance, infer: Infer, tick?: Tic
     return r;
   };
   if (n <= REASONER_WINDOW) return { ...(await read1(inst.acts)), windows: 1 };
-  const early = serialSgs(inst.acts, inst.acts.map((a) => a.duration), new Map()).start;
+  const early = serialSgs(inst.acts, inst.acts.map((a) => a.duration), new Map(), undefined, instanceHorizon(inst.acts)).start;
   const byStart = inst.acts.map((_, i) => i).sort((a, b) => early[a] - early[b] || a - b);
   const windows = Math.ceil(n / REASONER_WINDOW);
   const read: { ids: number[]; priority: Float32Array; lo: number; hi: number }[] = [];
@@ -255,8 +265,8 @@ export type BestFrom = 'model' | 'sampled' | 'mode pass' | (string & {});
  *  rules, each with every activity in its normal mode and with every activity in its shortest mode, and the plain earliest start with no
  *  resource limit); `samples` trajectories with sampled modes and jittered priority around the model's answer; then a final pass over
  *  the modes. Each is scored by the SGS and the best is kept: the shortest makespan, then the lowest cost, the earlier one on a tie.
- *  Work already under way is placed first in every one of them. A cancel (the tick throws code 'cancelled') in the sampling is the
- *  caller's, as it always was; one in the final pass stops it there, and the best so far is the answer (cancelled: true). */
+ *  Work already under way is placed first in every one of them. A cancel (the tick throws code 'cancelled') between the starting
+ *  placements or in the sampling is the caller's, as it always was; one in the final pass stops it there, and the best so far is the answer (cancelled: true). */
 export async function decode(inst: HrmInstance, out: { priority: ArrayLike<number>; modeLogits: ArrayLike<number> }, o: { samples?: number; seed?: number; tick?: Tick } = {}) {
   const acts = inst.acts, n = acts.length;
   const valid: number[][] = [], probs: number[][] = [], argmax: number[] = [];
@@ -273,7 +283,8 @@ export async function decode(inst: HrmInstance, out: { priority: ArrayLike<numbe
   let rs = (o.seed ?? 0x9e3779b9) >>> 0;
   const rand = () => { rs |= 0; rs = (rs + 0x6d2b79f5) | 0; let t = Math.imul(rs ^ (rs >>> 15), 1 | rs); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const gauss = () => Math.sqrt(-2 * Math.log(Math.max(1e-9, rand()))) * Math.cos(2 * Math.PI * rand());
-  const run = (modes: number[], prio: number[], from: BestFrom) => { const dur = acts.map((a, i) => a.modes[modes[i]]?.duration ?? a.duration); return { modes, prio, from, makespan: serialSgs(acts, dur, inst.caps, prio).makespan, cost: acts.reduce((s, a, i) => s + (a.modes[modes[i]]?.cost ?? 0), 0) }; };
+  const horizon = instanceHorizon(acts); // one for the whole search: the placements of different mode choices are comparable
+  const run = (modes: number[], prio: number[], from: BestFrom) => { const dur = acts.map((a, i) => a.modes[modes[i]]?.duration ?? a.duration); return { modes, prio, from, makespan: serialSgs(acts, dur, inst.caps, prio, horizon).makespan, cost: acts.reduce((s, a, i) => s + (a.modes[modes[i]]?.cost ?? 0), 0) }; };
   type Placed = ReturnType<typeof run>;
   const better = (c: Placed, than: Placed) => c.makespan < than.makespan || (c.makespan === than.makespan && c.cost < than.cost);
   let best = run(argmax, netPrio, 'model');
@@ -283,9 +294,10 @@ export async function decode(inst: HrmInstance, out: { priority: ArrayLike<numbe
   let starts = 0;
   for (const rule of ['LFT', 'MTS', 'GRPW', 'SPT'] as const) {
     const prio = rules[rule].map((v, i) => v + first(i));
-    for (const [label, modes] of [['normal modes', normal], ['shortest modes', shortest]] as const) { const c = run(modes, prio, `${rule} (${label})`); starts++; if (better(c, best)) best = c; }
+    for (const [label, modes] of [['normal modes', normal], ['shortest modes', shortest]] as const) { await o.tick?.(starts, 9, `starting placement ${starts + 1} of 9: ${rule} (${label})`); const c = run(modes, prio, `${rule} (${label})`); starts++; if (better(c, best)) best = c; }
   }
-  const early = serialSgs(acts, acts.map((a) => a.duration), new Map()).start;
+  const early = serialSgs(acts, acts.map((a) => a.duration), new Map(), undefined, horizon).start;
+  await o.tick?.(starts, 9, `starting placement ${starts + 1} of 9: earliest start (no resource limit)`);
   { const c = run(normal, early.map((v, i) => -v + first(i)), 'earliest start (no resource limit)'); starts++; if (better(c, best)) best = c; }
   const K = o.samples ?? (n > 120 ? 64 : 200);
   for (let k = 0; k < K; k++) {
@@ -322,12 +334,19 @@ export async function decode(inst: HrmInstance, out: { priority: ArrayLike<numbe
   return { ...best, trajectories: starts + K + 1, best_from: best.from, improvable: improvable.length, mode_trials: trials, mode_passes: passes, cancelled };
 }
 
+/** The hours an apply writes for an activity in a mode: the mode's days at the hours its remaining work spreads over each of the
+ *  instance's (rounded whole) days, so 20 h over 3 days crashed to 2 days is 13.33 h. The fields beside the activity show these hours. */
+export function writtenHours(a: HrmActivity, mode: number, hoursPerDay = 8): number {
+  const h = Number(a.task.remain_drtn_hr_cnt || 0) / (a.duration || 1) || hoursPerDay;
+  return a.modes[mode].duration * h;
+}
+
 /** Durations of the crashed modes and the placement order (Activity task_ids, highest priority first). */
 export function proposalOps(inst: HrmInstance, modes: number[], multi: boolean, projCode: Map<string, string>, hoursPerDay = 8) {
   const ops: Record<string, unknown>[] = [];
   inst.acts.forEach((a, i) => {
     if (!modes[i]) return;
-    const h = Number(a.task.remain_drtn_hr_cnt || 0) / (a.duration || 1) || hoursPerDay, hours = a.modes[modes[i]].duration * h;
+    const hours = writtenHours(a, modes[i], hoursPerDay);
     ops.push({ op: 'update_activity', id: a.task.task_code, project: projCode.get(a.task.proj_id), ...(a.started ? { remaining_hours: hours } : { duration_hours: hours }), assignments_follow: true });
   });
   return ops;
@@ -335,7 +354,8 @@ export function proposalOps(inst: HrmInstance, modes: number[], multi: boolean, 
 
 const finishOf = (d: Db, projIds: string[]) => { const open = new Set(projIds); let f = -Infinity; for (const t of rows(d, 'TASK')) if (open.has(t.proj_id)) { const v = parseP6Date(t.act_end_date || t.early_end_date); if (v != null && v > f) f = v; } return Number.isFinite(f) ? f : null; };
 
-export interface OptimizeOptions { samples?: number; seed?: number; activities?: CrashActivity[]; hoursPerDay?: number; tick?: Tick }
+/** maxPriority: how many of the placement order `priority` lists (default 100; 0 = all); the whole order is in `priority_rows` and `order`. */
+export interface OptimizeOptions { samples?: number; seed?: number; activities?: CrashActivity[]; hoursPerDay?: number; tick?: Tick; maxPriority?: number }
 
 export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOptions, infer: Infer, applyOps: (d: Db, ops: unknown[]) => void) {
   const inst = buildInstance(db, projIds, o);
@@ -347,9 +367,9 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   try { out = await reasonerOutput(inst, infer, o.tick); }
   catch (e) { if (e instanceof ReasonerBadAnswer) return { ok: false as const, error: { code: 'reasoner_failed', message: e.message } }; throw e; }
   const best = await decode(inst, out, o);
-  // a cancel in the final pass over the modes keeps the best found so far; what is left (the checks in real dates) is not ticked, since a
-  // cancelled call would stop at the first tick and there would be no answer
-  const cancelled = best.cancelled, tick = cancelled ? undefined : o.tick;
+  // a cancel in the final pass over the modes keeps the best found so far. The checks in real dates are ticked: a cancel at either one
+  // (and one that came in the pass stays, the tick throws again) keeps the proposal found and says which checks were not run
+  const cancelled = best.cancelled;
   // a crew larger than its resource's limit fits on no day, whatever the order: said, because no placement of it means anything
   // (counted as serialSgs places it: the crew of the mode chosen, a crashed mode's crew being larger)
   const overLimit = inst.acts.filter((a, i) => { const d = a.modes[best.modes[i]]?.duration ?? a.duration, crew = a.crewSize * (a.duration && d ? a.duration / d : 1); return d > 0 && crew > (inst.caps.get(a.group) ?? Infinity) + 1e-9; }).length;
@@ -361,21 +381,26 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   const open = new Set(projIds);
   const datesOf = (d: Db) => new Map(rows(d, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => [t.task_id, [parseP6Date(t.act_start_date || t.early_start_date), parseP6Date(t.act_end_date || t.early_end_date)] as const]));
   const measureLeveled = (d: Db, first?: string[]) => { const s = scheduleProjects(d, projIds, {}); if (!s.ok) throw new Error('The schedule failed.'); const cpm = finishOf(d, projIds), cpmDates = datesOf(d); if (leveled) levelResources(d, projIds, { first }); return { cpm, leveled: finishOf(d, projIds), cpmDates, dates: datesOf(d) }; };
-  if (tick) await tick(1, 3, 'P6 leveling for comparison');
-  const p6 = onScratch(db, (d) => measureLeveled(d));
-  if (tick) await tick(2, 3, 'leveling in the proposed order');
-  const mine = onScratch(db, (d) => { applyOps(d, ops); return measureLeveled(d, order); });
+  const cancelledAt = async (k: number, say: string) => { try { await o.tick?.(k, 3, say); return false; } catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; return true; } };
+  type Measured = ReturnType<typeof measureLeveled>;
+  let p6: Measured | undefined, mine: Measured | undefined, skipped: string | undefined;
+  if (await cancelledAt(1, 'P6 leveling for comparison')) skipped = "Cancelled before the comparison with P6's leveling: neither it nor the leveling in the proposed order was run, so cpm_finish, p6_leveled_finish, reasoner_finish, better_than_p6_leveler, biggest_changes and the activities' dates are not given.";
+  else {
+    p6 = onScratch(db, (d) => measureLeveled(d));
+    if (await cancelledAt(2, 'leveling in the proposed order')) skipped = "Cancelled before the leveling in the proposed order: it was not run, so reasoner_finish, better_than_p6_leveler, biggest_changes and the activities' dates are not given (cpm_finish and p6_leveled_finish are).";
+    else mine = onScratch(db, (d) => { applyOps(d, ops); return measureLeveled(d, order); });
+  }
   const fmt = (v: number | null) => (v != null ? formatP6Date(v) : null);
   // (a day: the hours per day of the activity's calendar, as evaluate's shifts take it)
   const cals = calendarResolver(db, []), projCal = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.clndr_id])), dh = dayHours(db, o.hoursPerDay ?? 8, true);
   const byTask = new Map(inst.acts.map((a) => [a.task.task_id, a]));
   /** every activity of the projects: its dates under CPM (no leveling), P6's default leveling, and the reasoner's modes and order
    *  (minutes; start and finish, actual where it has one) */
-  const dates = rows(db, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => {
+  const dates = !p6 || !mine ? [] : rows(db, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => {
     const cpm = p6.cpmDates.get(t.task_id)!, mod = mine.dates.get(t.task_id)!, cal = cals.get(t.clndr_id) ?? cals.fallback(projCal.get(t.proj_id) ?? '');
     // reasoner against CPM, in working days of the activity's calendar (later: positive)
     const wd = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round(((a <= b ? cal.workBetween(a, b) : -cal.workBetween(b, a)) / 60 / dh.task(t)) * 100) / 100);
-    return { taskId: t.task_id, code: t.task_code, name: t.task_name, cpm, p6: p6.dates.get(t.task_id)!, reasoner: mod, startDeltaDays: wd(cpm[0], mod[0]), finishDeltaDays: wd(cpm[1], mod[1]) };
+    return { taskId: t.task_id, code: t.task_code, name: t.task_name, cpm, p6: p6!.dates.get(t.task_id)!, reasoner: mod, startDeltaDays: wd(cpm[0], mod[0]), finishDeltaDays: wd(cpm[1], mod[1]) };
   });
   // the activities whose dates the reasoner's proposal moves against CPM, the largest finish shift first, then the largest start shift
   // (all of them: the answer shows the first max_changes, the export every one)
@@ -389,22 +414,26 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     /** what won: 'model', 'sampled', a classic rule with its modes, 'earliest start (no resource limit)', or 'mode pass' */
     best_from: best.best_from,
     ...(best.improvable ? { mode_trials: best.mode_trials, mode_passes: best.mode_passes } : {}),
-    ...(!crashable ? { note: o.activities?.length ? "Crash data was given, but no activity in it can be shortened (an id that is not an activity of the schedule, or crash_days not below its remaining days), so there was no mode to choose: this is the best order of the model's and the classic rules'." : "No crash data was given, so there was no mode to choose: this is the best order of the model's and the classic rules'. Give crash data (activities: [{id, crash_days, crash_cost} \u2026]) for the reasoner to choose what to shorten." } : {}),
-    ...(cancelled ? { partial: true as const, stopped: 'cancelled' as const, partial_note: `Cancelled in the final pass over the modes (${best.mode_trials} trial${best.mode_trials === 1 ? '' : 's'} of pass ${best.mode_passes} done): this is the best found before the stop, a valid proposal but not the pass's end. Nothing was applied; pass ops to edit to make the changes, or run again for the full pass.` } : {}),
+    ...(!crashable ? { note: o.activities?.length ? "Crash data was given, but no activity in it can be shortened (an id that is not an activity of the schedule, or crash_days not below its remaining days), so there was no mode to choose: this is the best placement found among the model's own answer, the classic rules' orders and the sampled variations of the model's answer." : "No crash data was given, so there was no mode to choose: this is the best placement found among the model's own answer, the classic rules' orders and the sampled variations of the model's answer. Give crash data (activities: [{id, crash_days, crash_cost} \u2026]) for the reasoner to choose what to shorten." } : {}),
+    ...(cancelled || skipped ? { partial: true as const, stopped: 'cancelled' as const, partial_note: [
+      cancelled ? `Cancelled in the final pass over the modes (${best.mode_trials} trial${best.mode_trials === 1 ? '' : 's'} of pass ${best.mode_passes} done): this is the best found before the stop, a valid proposal but not the pass's end.` : '',
+      skipped ?? '', 'Nothing was applied; pass ops to edit to make the changes, or run again for the full result.'].filter(Boolean).join(' ') } : {}),
     /** how the model read the network: at once (1), or this many windows of REASONER_WINDOW activities */
     model_windows: out.windows,
     ...(overLimit ? { over_limit_activities: overLimit, over_limit_note: `${overLimit} activit${overLimit === 1 ? 'y needs' : 'ies need'} more of a resource than its Max Units/Time allows on any day: no order can level ${overLimit === 1 ? 'it' : 'them'}, so the leveled finishes here say little until the limit or the assignment is corrected.` } : {}),
-    cpm_finish: fmt(p6.cpm), p6_leveled_finish: fmt(p6.leveled), reasoner_finish: fmt(mine.leveled),
-    better_than_p6_leveler: p6.leveled != null && mine.leveled != null ? mine.leveled < p6.leveled : null,
+    // (a check that was cancelled before it ran is absent, never invented)
+    ...(p6 ? { cpm_finish: fmt(p6.cpm), p6_leveled_finish: fmt(p6.leveled) } : {}),
+    ...(mine ? { reasoner_finish: fmt(mine.leveled) } : {}),
+    ...(p6 && mine ? { better_than_p6_leveler: p6.leveled != null && mine.leveled != null ? mine.leveled < p6.leveled : null } : {}),
     sgs_makespan_days: best.makespan, crash_cost: Math.round(best.cost * 100) / 100,
     changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
-    priority: order.slice(0, 100).map((id) => byTask.get(id)!.task.task_code), priority_total: order.length,
-    ops, order,
+    priority: (o.maxPriority ? order.slice(0, o.maxPriority) : o.maxPriority === 0 ? order : order.slice(0, 100)).map((id) => byTask.get(id)!.task.task_code), priority_total: order.length,
+    ops, order, priority_rows: order.map((id) => { const t = byTask.get(id)!.task; return { id: t.task_code as string, name: t.task_name as string }; }),
     /** for the fields an apply writes beside each activity (whiq-fields.ts): the activities whose duration the run changed, and the
      *  placement order of every leveled activity (its place in `order`, 1 = first) */
-    field_changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code as string, project: projCode.get(a.task.proj_id) as string, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
-    field_ranks: leveled ? order.flatMap((id, k) => { const a = byTask.get(id)!; return a.crewSize > 0 ? [{ id: a.task.task_code as string, project: projCode.get(a.task.proj_id) as string, rank: k + 1 }] : []; }) : [],
-    biggest_changes: biggest, biggest_changes_total: biggest.length,
+    field_changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [fieldChange(db, a.task, projCode.get(a.task.proj_id), Number(a.task.remain_drtn_hr_cnt || 0), writtenHours(a, best.modes[i], o.hoursPerDay), a.modes[best.modes[i]].cost, o.hoursPerDay ?? 8)] : [])),
+    field_ranks: leveled ? order.flatMap((id, k) => { const a = byTask.get(id)!; return a.crewSize > 0 ? [{ task_id: a.task.task_id as string, id: a.task.task_code as string, project: projCode.get(a.task.proj_id) as string, rank: k + 1 }] : []; }) : [],
+    ...(p6 && mine ? { biggest_changes: biggest, biggest_changes_total: biggest.length } : {}),
     dates,
   };
 }
