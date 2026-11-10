@@ -612,7 +612,7 @@ test('export_name: an experiment keeps its own files in the folder; the same nam
   const unnamed = await run();
   assert.equal(unnamed.exported.replaced.files, set.none.length);
   const namedKeep = [...set.a, ...set.b, ...set.opt];
-  assert.ok(set.none.every((f) => stamp(f) > Math.max(...before)), 'the unnamed files are new');
+  assert.ok(set.none.every((f: string) => stamp(f) > Math.max(...before)), 'the unnamed files are new');
   assert.deepEqual(namedKeep.map(stamp), [...before.slice(0, set.a.length + set.b.length), ...set.opt.map(stamp)]);
   assert.equal(readdirSync(dir).length, all.length);
   // another tool's named files are its own: check_schedule with the same name beside them
