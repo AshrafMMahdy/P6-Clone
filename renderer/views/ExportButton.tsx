@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from 'react';
 import { getDb, getUi, saveNow, toast } from '../store.ts';
 import { rows } from '../../core/db.ts';
+import { errorText } from './toolAnswers.ts';
 
 /** The `project` argument that makes a tool analyse the open projects: none when they are all the projects of the database (the
  *  tool's default), the project's ID when one is open; several open out of more refuse (a tool takes one project or all). */
@@ -32,13 +33,7 @@ const listeners = new Set<() => void>();
 const setRunning = (t: string | null) => { running = t; for (const l of listeners) l(); };
 const useRunning = () => useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, () => running);
 
-/** The message of a tool's error answer (as callTool and the tools give it), whole. */
-export function errorText(out: Record<string, any>): string {
-  const e = out.error;
-  if (typeof e === 'string') return e;
-  const m = e?.message ?? e?.reason;
-  return m ? `${m}${e.hint ? ` ${e.hint}` : ''}` : JSON.stringify(out).slice(0, 400);
-}
+export { errorText } from './toolAnswers.ts';
 
 /** tool: the MCP tool; args: its arguments from the panel's settings (throw an Error to say why there is nothing to export); parts:
  *  the projects the session holds and the other sessions its arguments name (main/analysis-export.ts). */

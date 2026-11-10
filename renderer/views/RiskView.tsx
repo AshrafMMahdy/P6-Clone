@@ -6,6 +6,9 @@ import { Split, Tabs, showContextMenu } from '../components/Layout.tsx';
 import { getDb, mutate, setUi, toast, useStore, type Prefs } from '../store.ts';
 import { useCtx } from '../hooks.ts';
 import { ExportButton, projectArgs } from './ExportButton.tsx';
+import { monteCarloArgs, monteCarloResult, monteCarloStopped, refusal } from './toolAnswers.ts';
+import { startToolRun, taskIdLookup } from './toolRun.ts';
+import { RunStatus } from './RunStatus.tsx';
 import { fmtDate, STATUS, statusOf } from '../model.ts';
 import { taskFinish, taskStart } from './activityRows.ts';
 import { rows, type Row } from '../../core/db.ts';
@@ -16,7 +19,7 @@ import {
   RISK_STATUS, riskScore, risksOf, SCHED_IMPACT_RANGE, unlinkActivity, updateRisk, type RiskPhase,
 } from '../../core/risk/register.ts';
 import {
-  clearEstimates, defaultEstimates, DISTS, getEstimates, isEstimable, remainingHours, runMonteCarlo, setEstimate, type Dist, type MonteCarloResult,
+  clearEstimates, defaultEstimates, DISTS, getEstimates, isEstimable, remainingHours, setEstimate, type Dist, type MonteCarloResult,
 } from '../../core/risk/montecarlo.ts';
 
 type TabId = 'register' | 'estimates' | 'analysis';
@@ -477,7 +480,7 @@ function EstimatesTab() {
 
 // ================================================================ Analysis
 
-interface RunState { running: boolean; done: number; total: number; error?: string; result?: MonteCarloResult; key?: string; dbVersion?: number; controller?: AbortController }
+interface RunState { running: boolean; done: number; total: number; message?: string; error?: string; stopped?: string; result?: MonteCarloResult; key?: string; dbVersion?: number; cancel?: () => void }
 let runState: RunState = { running: false, done: 0, total: 0 };
 const runListeners = new Set<() => void>();
 function setRun(patch: Partial<RunState>) { runState = { ...runState, ...patch }; for (const l of runListeners) l(); }
@@ -486,20 +489,18 @@ function useRun(): RunState {
 }
 let lastSettings = { iterations: 500, seed: '', events: 'pre' as RiskPhase | 'off' };
 
-async function startRun(projIds: string[], iterations: number, seed: number | undefined, events: RiskPhase | 'off', dbVersion: number) {
-  const controller = new AbortController();
-  setRun({ running: true, done: 0, total: iterations, error: undefined, controller });
-  let last = 0;
-  try {
-    const result = await runMonteCarlo(getDb(), projIds, {
-      iterations, seed, riskEvents: events, signal: controller.signal,
-      onProgress: (i) => { const now = Date.now(); if (now - last > 80 || i === iterations) { last = now; setRun({ done: i }); } },
-    });
-    setRun({ running: false, result, key: projIds.join(','), dbVersion, controller: undefined });
-    toast(`Risk analysis complete: ${iterations} iterations in ${(result.elapsedMs / 1000).toFixed(1)} s.`);
-  } catch (e) {
-    setRun({ running: false, error: (e as Error).message, controller: undefined });
-  }
+/** The analysis is the monte_carlo tool itself, run in the Export's child process on the saved database (main/analysis-export-ipc.ts,
+ *  renderer/views/toolRun.ts): the window is never held, the tool refuses a run that does not fit in memory in words before it starts (shown
+ *  here as text), and Cancel keeps the iterations done (the tool's partial answer). The run goes on when another tab is shown. */
+async function startRun(args: Record<string, unknown>, projIds: string[], iterations: number, dbVersion: number) {
+  const run = startToolRun('monte_carlo', args, { keepWork: true, onProgress: (p) => setRun({ done: p.done, total: p.total, message: p.message }) });
+  setRun({ running: true, done: 0, total: iterations, message: undefined, error: undefined, stopped: undefined, cancel: run.cancel });
+  const r = await run.done;
+  const why = refusal(r);
+  if (why) return setRun({ running: false, error: why, cancel: undefined });
+  const result = monteCarloResult(r.out, taskIdLookup());
+  setRun({ running: false, result, key: projIds.join(','), dbVersion, stopped: monteCarloStopped(r.out) ?? undefined, cancel: undefined });
+  toast(r.out.partial ? `Risk analysis stopped: ${result.iterations} of ${iterations} iterations are shown.` : `Risk analysis complete: ${result.iterations} iterations in ${(result.elapsedMs / 1000).toFixed(1)} s.`);
 }
 
 function AnalysisTab() {
@@ -520,35 +521,35 @@ function AnalysisTab() {
 
   const go = () => {
     if (run.running) return;
-    const n = Math.floor(iterations);
-    if (!(n >= 10 && n <= 20000)) return toast('Iterations must be between 10 and 20,000.');
     const s = seed.trim() === '' ? undefined : Number(seed);
     if (s != null && !Number.isInteger(s)) return toast('Seed must be a whole number (or blank for a random seed).');
     if (!nEst && !(nRisk && events !== 'off')) toast('No duration estimates or linked risks: every iteration will give the deterministic finish. Use Estimates > Set defaults.');
-    void startRun(ui.openProjects, n, s, events, dbVersion);
+    let args: Record<string, unknown>;
+    try { args = monteCarloArgs({ iterations, seed: s, riskEvents: events, project: projectArgs() }); } catch (e) { return toast((e as Error).message); }
+    void startRun(args, ui.openProjects, iterations, dbVersion);
   };
 
   return (
     <>
       <div className="layoutbar">
-        <label>Iterations <input type="number" value={iterations} min={10} max={20000} step={100} onChange={(e) => setIterations(Number(e.target.value))} style={{ width: 64 }} disabled={run.running} /></label>
+        <label>Iterations <input type="number" value={iterations} min={10} step={100} onChange={(e) => setIterations(Number(e.target.value))} style={{ width: 64 }} disabled={run.running} /></label>
         <label>Seed <input value={seed} placeholder="random" onChange={(e) => setSeed(e.target.value)} style={{ width: 70 }} disabled={run.running} /></label>
         <label>Risk events <select value={events} onChange={(e) => setEvents(e.target.value as RiskPhase | 'off')} disabled={run.running}>
           <option value="pre">Pre-response</option><option value="post">Post-response</option><option value="off">Ignore</option>
         </select></label>
         {!run.running ? <button className="tbtn" onClick={go}><span className="lbl"><b>Run Risk Analysis</b></span></button>
-          : <button className="tbtn" onClick={() => run.controller?.abort()}><span className="lbl">Cancel</span></button>}
+          : <button className="tbtn" onClick={() => run.cancel?.()} title="Stops the run and shows the iterations done"><span className="lbl">Cancel</span></button>}
         <ExportButton toolbar tool="monte_carlo" args={() => {
-          const n = Math.floor(iterations), sd = seed.trim() === '' ? undefined : Number(seed);
-          if (!(n >= 10 && n <= 20000)) throw new Error('Iterations must be between 10 and 20,000.');
+          const n = iterations, sd = seed.trim() === '' ? undefined : Number(seed);
           if (sd != null && !Number.isInteger(sd)) throw new Error('Seed must be a whole number (or blank for a random seed).');
           return { ...projectArgs(), iterations: n, ...(res ? { seed: res.seed } : sd != null ? { seed: sd } : {}), risk_events: events };
         }} />
-        {run.running && <span><progress value={run.done} max={run.total} style={{ width: 160, verticalAlign: 'middle' }} /> {run.done} / {run.total}</span>}
+        {run.running && <RunStatus progress={{ done: run.done, total: run.total, message: run.message ?? '' }} waiting="Starting the run in a separate process…" />}
         <span className="muted">{nEst} activities with estimates, {nRisk} risks with linked activities.</span>
         {res && <span>Last run: {res.iterations} iterations, seed {res.seed}, {(res.elapsedMs / 1000).toFixed(1)} s{run.dbVersion !== dbVersion ? ' (schedule changed since)' : ''}</span>}
       </div>
-      {run.error && <div className="layoutbar" style={{ color: '#c00000' }}>{run.error}</div>}
+      {run.error && <div className="layoutbar" style={{ color: '#c00000', whiteSpace: 'pre-wrap' }}>{run.error}</div>}
+      {run.stopped && !run.error && <div className="layoutbar muted">{run.stopped}</div>}
       <div className="winbody">
         {!res ? <div className="empty">{run.running ? 'Running the risk analysis…' : 'Set duration estimates (Estimates tab) and link risks to activities (Risk Register), then click Run Risk Analysis. Each iteration samples remaining durations and risk events and reschedules the projects with the CPM scheduler; the database is not changed.'}</div>
           : <Results res={res} prefs={ctx.prefs} />}

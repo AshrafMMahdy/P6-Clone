@@ -49,8 +49,11 @@ const api = {
   lobImport: (): Promise<import('./lob.ts').LobImport | { error: string } | null> => ipcRenderer.invoke('lob:import'),
   /** Export… on an analysis panel: asks for a folder, runs the tool with export (a child process on the saved database); null when cancelled. scope / others: see main/analysis-export.ts. */
   analysisExport: (tool: string, args: Record<string, unknown>, hoursPerDay: number, parts?: { scope?: string[]; others?: Record<string, string[]> }): Promise<import('./analysis-export-ipc.ts').ExportAnswer | null> => ipcRenderer.invoke('analysis:export', tool, args, hoursPerDay, parts),
-  /** A panel's analysis run as its tool (no export) in the same child process on the saved database: the tool's answer. */
-  analysisRun: (tool: string, args: Record<string, unknown>, hoursPerDay: number, parts?: { scope?: string[]; others?: Record<string, string[]> }): Promise<import('./analysis-export-ipc.ts').ExportAnswer> => ipcRenderer.invoke('analysis:run', tool, args, hoursPerDay, parts),
+  /** A panel's analysis run as its tool (no export) in the same child process on the saved database: the tool's answer. keepWork: the run
+   *  sends its progress (onAnalysisProgress) and Cancel asks the tool to stop and answer what it did (partial); without it Cancel ends the process. */
+  analysisRun: (tool: string, args: Record<string, unknown>, hoursPerDay: number, parts?: { scope?: string[]; others?: Record<string, string[]> }, keepWork?: boolean): Promise<import('./analysis-export-ipc.ts').ExportAnswer> => ipcRenderer.invoke('analysis:run', tool, args, hoursPerDay, parts, keepWork),
+  /** The tool's progress of a keepWork run ({tool, done, total, message}); total 0 = not known. Returns the function that stops listening. */
+  onAnalysisProgress: (cb: (p: { tool: string; done: number; total: number; message: string }) => void): (() => void) => { const f = (_e: unknown, p: { tool: string; done: number; total: number; message: string }) => cb(p); ipcRenderer.on('analysis:progress', f); return () => { ipcRenderer.removeListener('analysis:progress', f); }; },
   /** Ends the running Export… or panel run (its child process tree); with only, just that tool's run (exporting false) or export; false when none is running. */
   analysisCancel: (only?: { tool: string; exporting: boolean }): Promise<boolean> => ipcRenderer.invoke('analysis:cancel', only),
   bimVideo: (o: { hash: string; timeline: unknown; options: Record<string, unknown>; from?: string; to?: string; step?: number; fps?: number; width?: number; height?: number; name: string }): Promise<{ ok: true; saved: string | null; frames: number; mime?: string } | { ok: false; error: string }> => ipcRenderer.invoke('bim:video', o),
