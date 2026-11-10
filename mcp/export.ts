@@ -83,9 +83,11 @@ export const EXPORT_FILE_NAME_MAX = 250;
 /** A file name's length as the system it is written on counts it: Windows in UTF-16 characters, the others (Linux, macOS) in the bytes
  *  of its UTF-8, so the 250 holds there too (an Arabic or Chinese name takes 2 to 3 bytes a character and would otherwise fail as ENAMETOOLONG). */
 export const fileNameLength = (s: string): number => (process.platform === 'win32' ? s.length : Buffer.byteLength(s));
-/** What a table name may add to a file name: `-partial-<table>.csv`. The tables of the tools are at most 26 characters; the room is
- *  kept so the name can be cut before any work is done, whichever table is written. */
-const TABLE_ROOM = 32 + '-partial-'.length + '.csv'.length;
+/** The longest table name a tool may declare. The tables are known only when a tool has run, and the name is cut before any work, so
+ *  the room is fixed here; tests/mcp-export.test.ts fails when any table declared in the code is longer. */
+export const EXPORT_TABLE_NAME_MAX = 32;
+/** What a table name may add to a file name: `-partial-<table>.csv`. */
+const TABLE_ROOM = EXPORT_TABLE_NAME_MAX + '-partial-'.length + '.csv'.length;
 
 export interface ExportNameParts { /** the name as the files carry it */ name: string; given: string; /** letters, digits, marks, . _ - kept, anything else became - */ cleaned: boolean; /** cut to the file name length, with a short code of the whole name */ cut: boolean }
 /** The `export_name` argument as it goes into a file name: letters, digits, marks, `.`, `_` and `-` stay, anything else becomes `-`.

@@ -709,3 +709,21 @@ test('export_name: file names are at most 250 characters, a longer name is cut o
   await call('close', { handle: h, discard: true });
 });
 function rmSyncQuiet(p: string) { try { rmSync(p); } catch { /* gone */ } }
+
+test('export_name room: no table declared in the code has a name longer than the room the cut reserves (EXPORT_TABLE_NAME_MAX)', async () => {
+  const { EXPORT_TABLE_NAME_MAX } = await import('../mcp/export.ts');
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const names = new Set<string>();
+  for (const dir of ['../mcp', '../core']) {
+    const base = join(import.meta.dirname, dir);
+    for (const f of readdirSync(base, { recursive: true }) as string[]) {
+      if (!/\.ts$/.test(f)) continue;
+      for (const m of readFileSync(join(base, f), 'utf8').matchAll(/\{ name: '([A-Za-z0-9_]+)', columns:/g)) names.add(m[1]);
+    }
+  }
+  assert.ok(names.size > 30, `${names.size} table declarations found`);
+  const longest = [...names].sort((a, b) => b.length - a.length)[0];
+  assert.ok(longest.length <= EXPORT_TABLE_NAME_MAX, `${longest} (${longest.length}) is longer than ${EXPORT_TABLE_NAME_MAX}: raise EXPORT_TABLE_NAME_MAX`);
+  // a table written under a name made dynamically (the cut lists' `found` table) is a plain word
+  assert.ok(['findings', 'failing_activities'].every((n) => n.length <= EXPORT_TABLE_NAME_MAX));
+});
