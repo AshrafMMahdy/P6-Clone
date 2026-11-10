@@ -93,6 +93,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
   const steps: CrashStep[] = [];
   let stop = 'SUCCESS' as CrashStop, note = '', baseFinish: number | null = null, finish: number | null = null;
   const changed = new Map<string, { task: Row; from: number; to: number; started: boolean }>();
+  const costOf = new Map<string, number>(); // what each activity's crashing cost over the steps kept (for the fields an apply writes beside it)
 
   let j;
   try { j = await recordAsync(db, async (d) => {
@@ -220,6 +221,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
       stalls = 0; minStep = 0; grown = 0; ineffective.clear();
       const cost = acts.reduce((s, t) => s + limit.get(t.task_id)!.slope * step, 0);
       direct += cost; finish = f!;
+      for (const t of acts) costOf.set(t.task_id, (costOf.get(t.task_id) ?? 0) + limit.get(t.task_id)!.slope * step);
       steps.push({
         step: n, activities: acts.map((t) => ({ id: t.task_code, days: r2(step), cost: r2(limit.get(t.task_id)!.slope * step) })), days_gained: r2(gained), cost: r2(cost),
         finish: formatP6Date(finish), cumulative_direct_cost: r2(direct),
@@ -240,5 +242,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
     direct_cost: steps.at(-1)?.cumulative_direct_cost ?? 0, total_cost: steps.at(-1)?.total_cost ?? 0,
     steps, changes: [...changed.values()].map((c) => ({ id: c.task.task_code, remaining_days_from: r2(c.from / (dayHours(db, hpd0, true).task(c.task))), remaining_days_to: r2(c.to / dayHours(db, hpd0, true).task(c.task)) })),
     ops, warnings,
+    /** each activity whose duration the run changed, for the fields an apply writes beside it (whiq-fields.ts) */
+    field_changes: [...changed.values()].map((c) => { const h = dayHours(db, hpd0, true).task(c.task); return { id: c.task.task_code as string, project: projCode.get(c.task.proj_id) as string, from_days: r2(c.from / h), to_days: r2(c.to / h), cost: r2(costOf.get(c.task.task_id) ?? 0) }; }),
   };
 }

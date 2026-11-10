@@ -355,3 +355,82 @@ test('the answer says what won, and with no crash data why there was no mode to 
   assert.equal(crash.note, undefined);
   assert.ok(crash.mode_passes! >= 1 && crash.mode_trials! >= 1);
 });
+
+// ---- apply writes down what it changed: user-defined fields beside each activity (owner 2026-11-10) ----
+
+test('apply writes the WHIQ fields beside each changed activity in the same undoable change: written, undone, replaced on a second apply, and kept by a saved XER', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const { mkdtempSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { setRoots } = await import('../mcp/runtime.ts');
+  setRoots(null, tmpdir());
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const np = (await call('new_project', { id: 'WQ', start: '2026-06-01' })).d, h = np.handle, owner_key = np.owner_key;
+  // A (10 days) then B (5 days) in a chain, C (6 days) alone: A is critical and cheap to crash
+  const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 20 }];
+  for (const [id, d] of [['A', 10], ['B', 5], ['C', 6]] as const) ops.push({ op: 'add_activity', id, name: `Activity ${id}`, duration_days: d }, { op: 'assign_resource', activity: id, resource: 'civil', units_per_day: 16 });
+  ops.push({ op: 'add_relationship', pred: 'A', succ: 'B' });
+  assert.equal((await call('edit', { handle: h, owner_key, operations: ops })).err, false);
+  await call('schedule', { handle: h, owner_key });
+  // what the project holds of the fields: UDF type labels, and each activity's values by label
+  const fields = async () => {
+    const tbl = async (table: string) => { const r = (await call('read_table', { handle: h, table })).d; return r.rows ? r : { columns: [], rows: [] }; }; // (a table the project has not got yet: empty)
+    const types = await tbl('UDFTYPE'), vals = await tbl('UDFVALUE'), tasks = await tbl('TASK');
+    const col = (t: any, c: string) => t.columns.indexOf(c);
+    const label = new Map<string, string>(types.rows.map((r: string[]) => [r[col(types, 'udf_type_id')], r[col(types, 'udf_type_label')]]));
+    const code = new Map<string, string>(tasks.rows.map((r: string[]) => [r[col(tasks, 'task_id')], r[col(tasks, 'task_code')]]));
+    const out: Record<string, Record<string, string>> = {};
+    for (const r of vals.rows) { const l = label.get(r[col(vals, 'udf_type_id')]); if (!l?.startsWith('WHIQ')) continue; (out[code.get(r[col(vals, 'fk_id')])!] ??= {})[l] = r[col(vals, 'udf_number')] || r[col(vals, 'udf_text')]; }
+    return { labels: [...label.values()].filter((l) => l.startsWith('WHIQ')).sort(), values: out };
+  };
+  assert.deepEqual((await fields()).labels, []);
+  const crash = [{ id: 'A', crash_days: 6, crash_cost: 4500 }, { id: 'C', crash_days: 4, crash_cost: 100 }];
+  const ap = await call('optimize_schedule', { handle: h, owner_key, seed: 1, samples: 5, activities: crash, apply: true });
+  assert.equal(ap.err, false, JSON.stringify(ap.d));
+  assert.equal(ap.d.applied, true);
+  const f1 = await fields();
+  assert.deepEqual(f1.labels, ['WHIQ change note', 'WHIQ duration change (d)', 'WHIQ leveling rank', 'WHIQ original duration (d)']);
+  // A was crashed (10 to 6 d, cost 4,500); the fields are on the activities the run changed, the rank on every leveled one (all three)
+  assert.equal(f1.values.A['WHIQ original duration (d)'], '10');
+  assert.equal(f1.values.A['WHIQ duration change (d)'], '-4');
+  assert.match(f1.values.A['WHIQ change note'], /^Crashed by the schedule reasoner \d{4}-\d{2}-\d{2}: 10 d to 6 d, cost 4,500$/);
+  assert.equal(f1.values.B['WHIQ change note'], undefined, 'B was not changed');
+  assert.deepEqual(['A', 'B', 'C'].map((k) => Number(f1.values[k]['WHIQ leveling rank'])).sort(), [1, 2, 3]);
+  const named = new Map((ap.d.fields_written as { name: string; activities: number }[]).map((x) => [x.name, x.activities]));
+  assert.equal(named.get('WHIQ original duration (d)'), Object.values(f1.values).filter((v) => v['WHIQ original duration (d)'] != null).length);
+  assert.equal(named.get('WHIQ leveling rank'), 3);
+  // the same change as the apply: one undo takes the fields back too (and the crashed duration)
+  assert.equal((await call('undo', { handle: h, owner_key })).err, false);
+  assert.deepEqual(await fields(), { labels: [], values: {} });
+  // applied again, then a second apply replaces the values (the activity is now 6 d: its original is 6, crashed to 4 on the new data)
+  await call('optimize_schedule', { handle: h, owner_key, seed: 1, samples: 5, activities: crash, apply: true });
+  const again = await call('optimize_schedule', { handle: h, owner_key, seed: 1, samples: 5, activities: [{ id: 'A', crash_days: 3, crash_cost: 700 }], apply: true });
+  assert.equal(again.err, false, JSON.stringify(again.d));
+  const f2 = await fields();
+  assert.equal(f2.values.A['WHIQ original duration (d)'], '6', 'replaced, not added beside');
+  assert.equal(f2.values.A['WHIQ duration change (d)'], '-3');
+  assert.match(f2.values.A['WHIQ change note'], /: 6 d to 3 d, cost 700$/);
+  assert.equal(f2.labels.length, 4, 'each field once');
+  // the XER saved and read again still has them
+  const dir = mkdtempSync(join(tmpdir(), 'p6-whiq-')), file = join(dir, 'whiq.xer');
+  assert.equal((await call('save', { handle: h, owner_key, path: file })).err, false);
+  const text = readFileSync(file, 'utf8');
+  for (const l of ['WHIQ original duration (d)', 'WHIQ duration change (d)', 'WHIQ change note', 'WHIQ leveling rank']) assert.ok(text.includes(l), l);
+  const re = (await call('open_file', { path: file })).d;
+  const types = (await call('read_table', { handle: re.handle, table: 'UDFTYPE' })).d;
+  assert.ok(['WHIQ original duration (d)', 'WHIQ change note'].every((l) => types.rows.some((r: string[]) => r.includes(l))));
+  const vals = (await call('read_table', { handle: re.handle, table: 'UDFVALUE' })).d;
+  assert.ok(vals.rows.length >= 6);
+  // crash_schedule's apply writes the same three, noted as least-cost crashing
+  const np2 = (await call('new_project', { id: 'WQ2', start: '2026-06-01' })).d;
+  await call('edit', { handle: np2.handle, owner_key: np2.owner_key, operations: [{ op: 'add_activity', id: 'X', name: 'X', duration_days: 10 }, { op: 'add_activity', id: 'Y', name: 'Y', duration_days: 5 }, { op: 'add_relationship', pred: 'X', succ: 'Y' }] });
+  await call('schedule', { handle: np2.handle, owner_key: np2.owner_key });
+  const cs = await call('crash_schedule', { handle: np2.handle, owner_key: np2.owner_key, target_days: 12, activities: [{ id: 'X', crash_days: 6, crash_cost: 400 }], apply: true });
+  assert.equal(cs.err, false, JSON.stringify(cs.d));
+  assert.deepEqual(cs.d.fields_written.map((x: any) => x.name), ['WHIQ original duration (d)', 'WHIQ duration change (d)', 'WHIQ change note']);
+  const tv = (await call('read_table', { handle: np2.handle, table: 'UDFVALUE' })).d;
+  assert.ok(tv.rows.some((r: string[]) => r.some((c) => /^Crashed \(least cost\) \d{4}-\d{2}-\d{2}: 10 d to \d+(\.\d+)? d, cost [\d,.]+$/.test(c))), JSON.stringify(tv.rows).slice(0, 400));
+  assert.equal((await call('undo', { handle: np2.handle, owner_key: np2.owner_key })).err, false);
+  assert.equal((await call('read_table', { handle: np2.handle, table: 'UDFVALUE' })).d.rows?.length ?? 0, 0, 'undo removes them');
+});

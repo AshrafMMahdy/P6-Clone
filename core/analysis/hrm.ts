@@ -400,6 +400,10 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
     priority: order.slice(0, 100).map((id) => byTask.get(id)!.task.task_code), priority_total: order.length,
     ops, order,
+    /** for the fields an apply writes beside each activity (whiq-fields.ts): the activities whose duration the run changed, and the
+     *  placement order of every leveled activity (its place in `order`, 1 = first) */
+    field_changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code as string, project: projCode.get(a.task.proj_id) as string, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
+    field_ranks: leveled ? order.flatMap((id, k) => { const a = byTask.get(id)!; return a.crewSize > 0 ? [{ id: a.task.task_code as string, project: projCode.get(a.task.proj_id) as string, rank: k + 1 }] : []; }) : [],
     biggest_changes: biggest, biggest_changes_total: biggest.length,
     dates,
   };
