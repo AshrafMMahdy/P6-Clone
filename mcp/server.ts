@@ -147,17 +147,19 @@ const projectIds = (db: Db, id: unknown) => {
  *  installation cannot (no MPXJ, no Java) or the file cannot be read. */
 /** The other side of compare, import_file and transfer_progress: another open project (other_handle) or a file (path),
  *  read for this call only and counted in the memory budget while it is held (C14). */
-async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db; release: () => void; bytes: number }> {
+async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db; release: () => void; bytes: number; /** what P6 would refuse in the file read (path), as open_file says it */ asGiven?: ReturnType<typeof fileAsGiven> }> {
   if (a.other_handle) { const o = getSession(a.other_handle); return { db: o.db, release: () => {}, bytes: o.bytes }; }
   if (!a.path) fail('bad_input', 'Give other_handle or path.', `other_handle: another open project; path: a file to ${what}.`);
   const p = pathArg(a.path), bytes = estimateBytes(fileSize(p));
   const release = reserveMemory(bytes, `Reading ${basename(p)} to ${what}`, `open the other file with open_file and pass other_handle when there is room`);
   try {
-    let db: Db;
-    if (detectFormat(p, readHead(p)) === 'xer') db = readXerFile(p).db;
-    else { const b = readBytes(p), f = detectFormat(p, b); db = f === 'mpp' ? (await readMpp(p)).db : readRaw(b, f).db; }
-    if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to ${what}.`, `Give an XER, P6 XML or Microsoft Project file. If this is the file the user asked about: ${outsideRoute(detectFormat(p, readHead(p)))}.`);
-    return { db, release, bytes };
+    let db: Db, findings: Finding[], format: ReturnType<typeof detectFormat>;
+    const head = readHead(p);
+    if ((format = detectFormat(p, head)) === 'xer') ({ db, findings } = readXerFile(p));
+    else { const b = readBytes(p); format = detectFormat(p, b); ({ db, findings } = format === 'mpp' ? await readMpp(p) : readRaw(b, format)); }
+    if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to ${what}.`, `Give an XER, P6 XML or Microsoft Project file. If this is the file the user asked about: ${outsideRoute(format, head)}.`);
+    // the checks open_file runs on the file read: what P6 would refuse in it, said beside the answer (the call goes on as it always did)
+    return { db, release, bytes, asGiven: fileAsGiven(importChecks(db, findings, format), 'The file as given is one P6 itself would refuse (fatal_kinds); this call used what the clone could read from it: tell the user.') };
   } catch (e) { release(); throw e; }
 }
 /** A project of this file by Project ID (default: its only non-baseline project). */
@@ -185,10 +187,26 @@ function importActions<T extends string>(v: unknown, names: Record<string, strin
 /** A file the clone cannot open (task continuity): the second route, outside the clone. A text file (an XER, XML, MPX) can still be read
  *  by the agent's own file tools and the work done from its tables directly, said to the user as work done outside the P6 engine. */
 const TEXT_FORMAT: Record<string, string> = { xer: 'an XER is tab-separated tables: %T table, %F fields, %R rows', xml: 'P6 XML: elements for the project, its WBS, activities, relationships and resources', mspdi: 'Microsoft Project XML: a Task element for each activity, with its predecessor links', mpx: 'MPX is comma-separated records, one kind of record per line' };
-const outsideRoute = (format: string) => format === 'mpp'
+const startsWith = (h: Uint8Array, ...b: number[]) => b.every((x, i) => h[i] === x);
+/** What the first bytes of a file say it is, when it is not a schedule text: each its own true sentence and route. A text file (and a
+ *  UTF-16 one, which has zero bytes) is not one of these. */
+const notText = (head: Uint8Array | undefined): string | undefined => {
+  if (!head) return undefined;
+  if (!head.length) return 'the file is empty (0 bytes): there is nothing in it to read, and it is not damaged, nothing was ever written to it (a copy or download that failed leaves one); tell the user it is empty and ask for the file again';
+  if (startsWith(head, 0x50, 0x4b)) return 'the file is a zip-packed Office file (an Excel workbook or another Office document), not a schedule file: a P6 Excel export (the P6 spreadsheet layout) is read by the import_excel tool, which updates a project that is open (open or create that project first, then call import_excel with this path); any other workbook or document holds no schedule the clone reads, so tell the user what it is and ask for the schedule as an XER, P6 XML or Microsoft Project XML file';
+  if (startsWith(head, 0x25, 0x50, 0x44, 0x46)) return 'the file is a PDF: a document, not a schedule file, and it is not damaged. Read it with the document reader (your PDF or file-reading tool) as any document, and tell the user it is a PDF, so it holds no schedule the clone can open and whatever was taken from it was done outside the P6 engine; ask for the schedule as an XER, P6 XML or Microsoft Project XML file if the analysis needs one';
+  const utf16 = startsWith(head, 0xff, 0xfe) || startsWith(head, 0xfe, 0xff);
+  if (!utf16 && head.includes(0)) return 'the file is binary (not text) and not one of the schedule formats the clone reads (XER, P6 XML, Microsoft Project XML, MPX, .mpp): it cannot be read as text either. Tell the user the file is not a schedule file the clone can open, what it appears to be if you can tell from its name, and ask for the schedule as an XER, P6 XML or Microsoft Project XML file';
+  return undefined;
+};
+const outsideRoute = (format: string, head?: Uint8Array) => notText(head) ?? (format === 'mpp'
   ? 'this .mpp is a binary file that cannot be read as text: open it in Microsoft Project and save it as Microsoft Project XML, then open that; if that cannot be done, tell the user the file could not be read, the cause given, and that no analysis of it was possible'
-  : `the file is text (${TEXT_FORMAT[format] ?? TEXT_FORMAT.xer}): read it with your file-reading tool, do what the user asked from the tables directly (code or a spreadsheet), and tell the user the file is damaged, what is wrong with it, and that the analysis was done outside the P6 engine`;
+  : `the file is text (${TEXT_FORMAT[format] ?? TEXT_FORMAT.xer}): read it with your file-reading tool, do what the user asked from the tables directly (code or a spreadsheet), and tell the user the file is damaged, what is wrong with it, and that the analysis was done outside the P6 engine`);
 /** The fatal findings of a file by kind, with counts, in the order first met. */
+/** Every fatal finding, in words (open_file's refusal lists them all in data.fatal, and a lenient open in file_as_given.fatal). */
+const fatalList = (f: Finding[]) => f.filter((x) => x.severity === 'fatal').map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 }));
+/** What P6 would refuse in a file as it was given: said every time a file is read, so the answer to the user can say it. */
+const fileAsGiven = (f: Finding[], tell: string, o: { list?: boolean } = {}) => { const fatal = worst(f) === 'fatal'; return { p6_would_reject: fatal, ...(fatal ? { fatal_total: f.filter((x) => x.severity === 'fatal').length, fatal_kinds: fatalKinds(f), ...(o.list ? { fatal: fatalList(f) } : {}), tell_the_user: tell } : {}) }; };
 const fatalKinds = (f: Finding[]) => { const m = new Map<string, number>(); for (const x of f) if (x.severity === 'fatal') m.set(x.code, (m.get(x.code) ?? 0) + 1); return [...m].map(([code, count]) => ({ code, count })); };
 
 async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
@@ -351,11 +369,11 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           // carry on: lenient first when there is a project to repair, else (or if that fails) the file read as text outside the clone
           const bad = f.filter((x) => x.severity === 'fatal'), kinds = fatalKinds(f), shown = 3;
           const noProject = !allIds(r.db).length, cause = bad.slice(0, shown).map((x) => x.message).join(' ');
-          fail('p6_would_reject', `P6 would reject ${basename(path)}: ${bad.length} fatal finding${bad.length === 1 ? '' : 's'} (${kinds.map((k) => `${k.code} x${k.count}`).join(', ')}). ${cause}${bad.length > shown ? ` (the first ${shown} of ${bad.length}; the rest are in data.fatal, up to 40)` : ''}`,
+          fail('p6_would_reject', `P6 would reject ${basename(path)}: ${bad.length} fatal finding${bad.length === 1 ? '' : 's'} (${kinds.map((k) => `${k.code} x${k.count}`).join(', ')}). ${cause}${bad.length > shown ? ` (the first ${shown} of ${bad.length}; all ${bad.length} are in data.fatal)` : ''}`,
             noProject
-              ? `The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: ${outsideRoute(format)}.`
-              : `1. Call open_file again with lenient: true: the clone repairs what it can and opens it, and says what it repaired; work on that, and tell the user the file as given is one P6 itself would refuse and why. 2. If it still cannot be opened, ${outsideRoute(format)}.`,
-            { data: { fatal_total: bad.length, fatal_kinds: kinds, fatal: bad.slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
+              ? `The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: ${outsideRoute(format, head)}.`
+              : `1. Call open_file again with lenient: true: the clone repairs what it can and opens it, and says what it repaired; work on that, and tell the user the file as given is one P6 itself would refuse and why. 2. If it still cannot be opened, ${outsideRoute(format, head)}.`,
+            { data: { fatal_total: bad.length, fatal_kinds: kinds, fatal: fatalList(f), diagnostics: brief(f) } });
         }
         s0.db = r.db; s0.openProblems = openProblemsOf(r.db); s0.format = format; /* (openProblems: what P6 would reject in the file as it is; save refuses only what edits add) */ s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
         if (size >= MEASURE_FILE_BYTES) { s0.bytes = retainedBytes(heap0); } // what the project really holds (heap after a full gc, +25 % for undo and schedule work), and the parse's garbage given back
@@ -386,7 +404,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         for (const x of g) if (x.severity === 'fatal' || x.severity === 'error') { const l = left.get(x.code); if (l) l.push(x); else left.set(x.code, [x]); }
         for (const [code, xs] of left) fix.not_repaired.push(`${code} x${xs.length} (${xs[0].severity}) not repaired: ${xs[0].message}${xs[0].p6 ? ` P6: ${xs[0].p6}` : ''}`);
         // the file as given: said every time, so the answer to the user can say it (a repaired copy is not the user's file)
-        const asGiven = { p6_would_reject: fatal, ...(fatal ? { fatal_total: f.filter((x) => x.severity === 'fatal').length, fatal_kinds: fatalKinds(f), tell_the_user: 'The file as given is one P6 itself would refuse (fatal_kinds); this project is the clone\'s repaired copy of it (diagnostics.repaired says what was repaired, not_repaired what was left).' } : {}) };
+        // (every fatal finding is listed here: diagnostics.findings shows the first 40 findings only)
+        const asGiven = fileAsGiven(f, 'The file as given is one P6 itself would refuse (fatal_kinds, every one in fatal); this project is the clone\'s repaired copy of it (diagnostics.repaired says what was repaired, not_repaired what was left).', { list: true });
         return {
           handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still, file_as_given: asGiven,
           note: (fatal ? 'The file as given is one P6 itself would refuse (file_as_given says why): tell the user so. ' : '') + (still ? 'P6 would still reject this project if it were saved now: the fatal findings in diagnostics (and not_repaired) were not repaired automatically. Fix them with edit operations before P6 gets the file.'
@@ -499,7 +518,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const dict = importActions(a.dictionaries, IMPORT_DICT, ['keep', 'update', 'insert', 'skip'] as const, 'dictionaries');
       const target = action === 'new' ? undefined : projectOf(s.db, a.project, 'This file');
       if (target?._baseline_of) fail('bad_input', `${target.proj_short_name} is a baseline.`, 'Import into the project itself.');
-      const { db: src, release } = await readOther(a, 'import');
+      const { db: src, release, asGiven } = await readOther(a, 'import');
       try {
         const theirs = (src.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
         const from = a.from_project != null ? [projectOf(src, a.from_project, 'The file')] : action === 'new' ? theirs : [projectOf(src, undefined, 'The file')];
@@ -512,10 +531,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const plan: ImportPlan = { projects: from.map((p) => ({ srcProjId: p.proj_id, action: action as ProjectAction, targetProjId: target?.proj_id, wbsId })), dict, data };
         if (action === 'new') for (const b of (src.tables.PROJECT?.rows ?? []).filter((p) => p._baseline_of && from.some((f) => f.proj_id === p._baseline_of))) plan.projects.push({ srcProjId: b.proj_id, action: 'new' }); // their baselines come with them
         const run = (d: Db) => { const r = importIntoDb(d, src, plan); return { projects: r.projIds.map((id) => d.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), counts: r.counts, findings: r.findings.map((f) => ({ severity: f.severity, code: f.code, message: f.message })) }; };
-        if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...out }; }
+        if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...out, ...(asGiven ? { file_as_given: asGiven } : {}) }; }
         const out = change(s, ctx.caller, `Import (${action})`, run);
         regrow(s); // what the project now holds with the imported rows
-        return out;
+        return { ...out, ...(asGiven ? { file_as_given: asGiven } : {}) };
       } finally { release(); }
     }
     case 'transfer_progress': {
@@ -531,7 +550,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (a.data_date != null && a.data_date !== 'from' && !dd(a.data_date)) fail('bad_input', 'data_date must be "from" or a date.', 'e.g. "from" or 2026-03-02.');
       const target = projectOf(s.db, a.project, 'This file');
       if (target._baseline_of) fail('bad_input', `${target.proj_short_name} is a baseline.`, 'Transfer onto the project itself.');
-      const { db: src, release } = await readOther(a, 'transfer progress from');
+      const { db: src, release, asGiven } = await readOther(a, 'transfer progress from');
       try {
         const from = a.from_project != null ? [projectOf(src, a.from_project, 'Their file')] : (src.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
         const spec: TransferSpec = { from: src, fromProjIds: from.map((p) => p.proj_id), toProjId: target.proj_id, by, codeType: a.code_type, fromCodeType: a.from_code_type, udf: a.udf, fromUdf: a.from_udf, pairs: a.pairs?.map((x: any) => ({ from: String(x?.from ?? ''), to: String(x?.to ?? '') })), include, costs: a.costs, addAssignments: a.add_assignments === true, dataDate: a.data_date == null ? undefined : String(a.data_date) };
@@ -545,8 +564,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           return { ...r, changed_fields: fields, ...changesPage(r.changes, { max_changes: a.max_changes ?? 100, offset: a.offset }), unmatched_from: cap(r.unmatched_from), unmatched_from_count: r.unmatched_from.length, ambiguous: cap(r.ambiguous), ambiguous_count: r.ambiguous.length,
             assignments: { ...r.assignments, unmatched: cap(r.assignments.unmatched), unmatched_count: r.assignments.unmatched.length }, expenses: { ...r.expenses, unmatched: cap(r.expenses.unmatched), unmatched_count: r.expenses.unmatched.length }, steps: { ...r.steps, unmatched: cap(r.steps.unmatched), unmatched_count: r.steps.unmatched.length } };
         };
-        if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...brief(out) }; }
-        return brief(change(s, ctx.caller, 'Transfer Progress', run));
+        if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...brief(out), ...(asGiven ? { file_as_given: asGiven } : {}) }; }
+        return { ...brief(change(s, ctx.caller, 'Transfer Progress', run)), ...(asGiven ? { file_as_given: asGiven } : {}) };
       } finally { release(); }
     }
     case 'level_resources': {

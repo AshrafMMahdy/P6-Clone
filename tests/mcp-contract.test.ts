@@ -235,3 +235,57 @@ test('a file P6 would reject, or that is no schedule: the answer lists what P6 r
   assert.match(m.data.error.message, /^Cannot read broken\.mpp: /);
   assert.match(m.data.error.next_step, /binary file that cannot be read as text: open it in Microsoft Project and save it as Microsoft Project XML.*tell the user the file could not be read, the cause given/);
 });
+
+test('a file that is no schedule is told for what it is: an Office file, a PDF, an empty file and other binary each have their own true route; only text gets the read-the-tables route (owner 2026-11-10)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6mcp-nt-'));
+  const put = (name: string, bytes: number[] | string) => { const p = join(dir, name); writeFileSync(p, typeof bytes === 'string' ? bytes : Buffer.from(bytes)); return p; };
+  const nextStep = async (path: string, lenient = false) => { const r = await call('open_file', { path, ...(lenient ? { lenient } : {}) }); assert.equal(r.isError, true, path); return r.data.error.next_step as string; };
+  const xlsx = await nextStep(put('plan.xlsx', [0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0, 1, 2, 3, 4]));
+  assert.match(xlsx, /zip-packed Office file/); assert.match(xlsx, /import_excel tool/);
+  const pdf = await nextStep(put('plan.pdf', '%PDF-1.7\n%âãÏÓ\n1 0 obj'));
+  assert.match(pdf, /^.*the file is a PDF: a document, not a schedule file/); assert.match(pdf, /document reader/);
+  const empty = await nextStep(put('empty.xer', ''));
+  assert.match(empty, /the file is empty \(0 bytes\)/);
+  const bin = await nextStep(put('thing.dat', [0, 1, 2, 3, 0, 255, 254, 0, 9, 9]));
+  assert.match(bin, /the file is binary \(not text\)/);
+  for (const t of [xlsx, pdf, empty, bin]) { assert.doesNotMatch(t, /tell the user the file is damaged/); assert.doesNotMatch(t, /an XER is tab-separated tables/); }
+  // a lenient open of them says the same (there is no project to repair)
+  assert.match(await nextStep(join(dir, 'plan.pdf'), true), /the file is a PDF/);
+  // text keeps the read-the-tables route
+  assert.match(await nextStep(put('junk.xer', 'this is not a schedule')), /the file is text \(an XER is tab-separated tables/);
+});
+
+test('import_file and transfer_progress say what P6 would refuse in the file they read (file_as_given, as the lenient open does); the import goes on as before; open_file lists every fatal finding', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6mcp-ga-'));
+  const f = files(dir);
+  const np = (await call('new_project', { id: 'IMP', start: '2026-03-02' })).data;
+  const dry = await call('import_file', { handle: np.handle, owner_key: np.owner_key, path: f.dup, action: 'new', dry_run: true });
+  assert.equal(dry.isError, false, JSON.stringify(dry.data).slice(0, 300));
+  assert.equal(dry.data.file_as_given.p6_would_reject, true);
+  assert.ok(dry.data.file_as_given.fatal_kinds.some((k: { code: string; count: number }) => k.code === 'DUP_KEY' && k.count >= 1));
+  assert.equal(dry.data.file_as_given.fatal_total, dry.data.file_as_given.fatal_kinds.reduce((x: number, k: { count: number }) => x + k.count, 0));
+  assert.match(dry.data.file_as_given.tell_the_user, /one P6 itself would refuse/);
+  const done = await call('import_file', { handle: np.handle, owner_key: np.owner_key, path: f.dup, action: 'new' });
+  assert.equal(done.isError, false); assert.equal(done.data.file_as_given.p6_would_reject, true);
+  assert.ok(done.data.projects?.length >= 1, 'the import went on');
+  // a clean file: said too, as not refused
+  const clean = await call('import_file', { handle: np.handle, owner_key: np.owner_key, path: f.good, action: 'new', dry_run: true });
+  assert.deepEqual(clean.data.file_as_given, { p6_would_reject: false });
+  const tp = await call('transfer_progress', { handle: np.handle, owner_key: np.owner_key, path: f.dup, dry_run: true, from_project: 'R1', project: 'IMP' });
+  if (!tp.isError) assert.equal(tp.data.file_as_given.p6_would_reject, true);
+  // many fatal findings (every table with a key twice): the refusal lists every one (data.fatal) where the old cut was 40, says so, and the lenient open lists them in file_as_given.fatal (its diagnostics keep the first 40 findings)
+  const db: Db = { tables: {} };
+  assert.ok(applyOps(db, [{ op: 'add_project', id: 'BIG', start: '2026-03-02' }, ...Array.from({ length: 60 }, (_, i) => ({ op: 'add_activity', id: `A${i}`, name: `N${i}`, duration_days: 2 }))], { calendarDays: true }).ok);
+  const lines = new TextDecoder().decode(writeXer(db, { version: '19.12', encoding: 'utf-8' })).split('\r\n');
+  const out: string[] = [];
+  for (const l of lines) { out.push(l); if (l.startsWith('%R')) out.push(l); } // every row of every table twice: a DUP_KEY in each table with a key (the validator keeps 5 of a kind and a line for the rest)
+  const big = join(dir, 'big.xer'); writeFileSync(big, out.join('\r\n'));
+  const rej = await call('open_file', { path: big });
+  assert.equal(rej.data.error.code, 'p6_would_reject');
+  assert.ok(rej.data.error.fatal_total > 3, String(rej.data.error.fatal_total));
+  assert.equal(rej.data.error.fatal.length, rej.data.error.fatal_total, 'every fatal finding is listed');
+  assert.match(rej.data.error.message, new RegExp(`all ${rej.data.error.fatal_total} are in data\\.fatal`));
+  const len = await call('open_file', { path: big, lenient: true });
+  assert.equal(len.data.file_as_given.fatal.length, len.data.file_as_given.fatal_total);
+  assert.ok(len.data.diagnostics.findings.length <= 40, 'the findings of the diagnostics are the first 40');
+});
