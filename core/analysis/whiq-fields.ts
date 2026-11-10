@@ -6,6 +6,7 @@
 // activities this run did not touch stay (nothing is cleared); fields_written says how many (kept_from_earlier).
 import { rows, type Db, type Row } from '../db.ts';
 import { dayHours } from '../project/units.ts';
+import { applyOps } from '../project/ops.ts';
 
 /** An activity whose duration the run changed: its task_id, Activity ID, its project's ID, the remaining days before and after (of its
  *  own calendar's days, to 2 decimals), the crash cost. */
@@ -71,4 +72,17 @@ export function whiqFieldOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldR
   field('note', o.changes.map((c) => { const og = origin(c); return { task_id: c.task_id, id: c.id, project: c.project, value: `${o.who} ${o.on}: ${r2(c.from_days)} d to ${r2(c.to_days)} d, cost ${money(c.cost)}${og != null && og !== r2(c.from_days) ? ` (original ${r2(og)} d)` : ''}` }; }));
   field('rank', (o.ranks ?? []).map((r) => ({ task_id: r.task_id, id: r.id, project: r.project, value: r.rank })));
   return { ops, fields_written: written };
+}
+
+/** What a run hands to whoever applies it so the fields can be written (the tool answers it under `field_data: true`; the desktop screens pass that). */
+export interface FieldData { changes: FieldChange[]; ranks?: FieldRank[]; who: string }
+/** Write the fields into `d` (inside the apply's own undoable change): the one function the tools' apply and the screens' Apply both call.
+ *  Returns what it wrote (fields_written); throws an Error in words when a field of the project has another data type (nothing is written). */
+export function writeWhiqFields(d: Db, data: FieldData, o: { hoursPerDay?: number; calendarDays?: boolean } = {}) {
+  const clash = whiqFieldClash(d, data);
+  if (clash) throw new Error(`${clash.message} ${clash.hint}`);
+  const w = whiqFieldOps(d, { ...data, on: today() });
+  const r = applyOps(d, w.ops, { hoursPerDay: o.hoursPerDay, calendarDays: o.calendarDays });
+  if (!r.ok) throw new Error(r.error!.message);
+  return w.fields_written;
 }

@@ -10,9 +10,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { rows } from '../core/db.ts';
+import { rows, type Db } from '../core/db.ts';
 import { dbToLines } from '../core/db-file.ts';
 import { applyOps } from '../core/project/ops.ts';
+import { writeWhiqFields } from '../core/analysis/whiq-fields.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { runMonteCarlo } from '../core/risk/montecarlo.ts';
@@ -278,6 +279,12 @@ test('Monte Carlo: the Risks grid and the S-curve read from the tool’s answer 
   assert.deepEqual(Object.keys(few.criticality[0]), ['id', 'name', 'milestone', 'critical_pct', 'deterministic_finish', 'mean_finish', 'p50_finish', 'p80_finish', 'sensitivity', 'min_remaining_hours', 'mean_remaining_hours', 'max_remaining_hours']);
 });
 
+/** the WHIQ fields of a project: label, activity, value */
+const whiq = (d: Db) => {
+  const label = new Map(rows(d, 'UDFTYPE').map((u) => [u.udf_type_id, u.udf_type_label])), code = new Map(rows(d, 'TASK').map((t) => [t.task_id, t.task_code]));
+  return rows(d, 'UDFVALUE').filter((v) => String(label.get(v.udf_type_id)).startsWith('WHIQ')).map((v) => `${label.get(v.udf_type_id)}|${code.get(v.fk_id)}|${v.udf_number || v.udf_text}`).sort();
+};
+
 test('Optimize: Apply works on any schedule (the answer has the whole placement order, 130 activities here) and the project it makes has the dates of the tool’s apply: true', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
   const np = (await run('new_project', { id: 'OPA', start: '2026-06-01' })).out as any;
   const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 12 }];
@@ -287,12 +294,13 @@ test('Optimize: Apply works on any schedule (the answer has the whole placement 
   ok(await run('schedule', { handle: np.handle, owner_key: np.owner_key }));
   const db = sessions.get(np.handle)!.db, screenDb = structuredClone(db), ids = rows(db, 'PROJECT').map((p) => p.proj_id);
   const args = optimizeArgs({}, 3, 5);
-  const out = ok(await run('optimize_schedule', { handle: np.handle, ...args }));
+  const out = ok(await run('optimize_schedule', { handle: np.handle, ...args, field_data: true }));
   assert.ok(out.leveled_activities === 130 && out.priority_total === 130);
   assert.equal(out.priority.length, 130, 'the whole order: more than 100, so Apply is not disabled');
   // the panel's Apply (applyAndSchedule: the proposal's ops, F9, then the leveling in the order, then the assignment dates), on its copy
   assert.ok(applyOps(screenDb, out.ops, { hoursPerDay: 8 }).ok);
   assert.ok(scheduleProjects(screenDb, ids, {}).ok);
+  writeWhiqFields(screenDb, out.field_data, { hoursPerDay: 8 });
   levelInProposedOrder(screenDb, ids, out.priority);
   syncAssignmentDates(screenDb);
   // the tool's own apply, the same seed
@@ -300,4 +308,26 @@ test('Optimize: Apply works on any schedule (the answer has the whole placement 
   assert.equal(applied.applied, true);
   const dates = (d: typeof db) => rows(d, 'TASK').map((t) => [t.task_code, t.early_start_date, t.early_end_date, t.remain_drtn_hr_cnt]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   assert.deepEqual(dates(screenDb), dates(db), 'the same dates as the tool’s apply');
+  assert.deepEqual(whiq(screenDb), whiq(db), 'the same WHIQ fields and values as the tool’s apply');
+  assert.equal(whiq(db).length, 130, 'a rank on each leveled activity');
+});
+
+test('Crashing: the panel’s Apply on a copy leaves the WHIQ fields and values of the tool’s apply: true', async () => {
+  const h = await chain(6);
+  const db = sessions.get(h)!.db, screenDb = structuredClone(db), ids = rows(db, 'PROJECT').map((p) => p.proj_id);
+  const args = { target_days: 40 };
+  const out = ok(await run('crash_schedule', { handle: h, ...args, field_data: true }));
+  assert.ok(out.ops.length > 0 && out.field_data.changes.length > 0);
+  assert.equal(ok(await run('crash_schedule', { handle: h, ...args })).field_data, undefined, 'only when asked');
+  assert.ok(applyOps(screenDb, out.ops, { hoursPerDay: 8 }).ok);
+  assert.ok(scheduleProjects(screenDb, ids, {}).ok);
+  writeWhiqFields(screenDb, out.field_data, { hoursPerDay: 8 });
+  syncAssignmentDates(screenDb);
+  assert.equal(ok(await run('crash_schedule', { handle: h, ...args, apply: true })).applied, true);
+  assert.deepEqual(whiq(screenDb), whiq(db));
+  assert.ok(whiq(db).some((x) => x.startsWith('WHIQ duration change (d)|')));
+  // a field of another type refuses in words, nothing written
+  const bad = structuredClone(screenDb);
+  assert.ok(applyOps(bad, [{ op: 'delete_udf', udf: 'WHIQ change note' }, { op: 'add_udf', name: 'WHIQ change note', data_type: 'number' }], {}).ok);
+  assert.throws(() => writeWhiqFields(bad, out.field_data, {}), /"WHIQ change note" of type number/);
 });

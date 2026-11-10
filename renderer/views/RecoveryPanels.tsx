@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { getDb, getUi, mutate, toast, useStore } from '../store.ts';
 import { rows, type Db } from '../../core/db.ts';
 import { applyOps } from '../../core/project/ops.ts';
+import { writeWhiqFields, type FieldData } from '../../core/analysis/whiq-fields.ts';
 import type { crashSchedule } from '../../core/analysis/crash.ts';
 import { evaluateBatch, type Scenario } from '../../core/analysis/batch.ts';
 import { scheduleProjects } from '../../core/schedule/cpm.ts';
@@ -31,7 +32,7 @@ export function applyAndSchedule(label: string, ops: unknown[], after?: (d: Db) 
       after?.(d);
       syncAssignmentDates(d);
     });
-  } catch { /* reported below */ }
+  } catch (e) { err ||= (e as Error).message; } // (reported below: a refusal in words, nothing changed)
   if (err) { toast(`Not applied: ${err}`); return false; }
   return true;
 }
@@ -46,7 +47,7 @@ export function CrashPanel() {
   const [ld, setLd] = useState('');
   const [pct, setPct] = useState('30');
   const [data, setData] = useState<Record<string, { min: string; cost: string }>>({});
-  const [res, setRes] = useState<Extract<Awaited<ReturnType<typeof crashSchedule>>, { ok: true }> | null>(null);
+  const [res, setRes] = useState<(Extract<Awaited<ReturnType<typeof crashSchedule>>, { ok: true }> & { field_data?: FieldData }) | null>(null);
   const [err, setErr] = useState('');
   // the remaining critical activities are where crash data matters
   const crit = useMemo(() => rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) <= 0).slice(0, 300), [db, ui.openProjects]);
@@ -57,7 +58,7 @@ export function CrashPanel() {
   const crash = useToolRun('crash_schedule', true);
   const run = async () => {
     let a: Record<string, unknown>;
-    try { a = { ...projectArgs(), ...toolArgs() }; } catch (e) { return toast((e as Error).message); }
+    try { a = { ...projectArgs(), ...toolArgs(), field_data: true }; } catch (e) { return toast((e as Error).message); }
     setErr(''); setRes(null);
     const r = await crash.start(a);
     if (!r) return;
@@ -65,7 +66,7 @@ export function CrashPanel() {
     if (why) return setErr(why);
     setRes(r.out as NonNullable<typeof res>);
   };
-  const apply = () => { if (res && res.stop !== 'CANCELLED' && res.ops.length && applyAndSchedule('Crash schedule', res.ops)) { toast(`Crashed ${res.ops.length} activities; Ctrl+Z undoes.`); setRes(null); } };
+  const apply = () => { if (res && res.stop !== 'CANCELLED' && res.ops.length && applyAndSchedule('Crash schedule', res.ops, (d) => { writeWhiqFields(d, res.field_data!, { hoursPerDay: getUi().prefs.hoursPerDay }); })) { toast(`Crashed ${res.ops.length} activities; Ctrl+Z undoes.`); setRes(null); } };
   const set = (id: string, k: 'min' | 'cost', v: string) => setData({ ...data, [id]: { min: data[id]?.min ?? '', cost: data[id]?.cost ?? '', [k]: v } });
   return (
     <div style={box}>
@@ -152,7 +153,7 @@ export function WhatIfPanel() {
 type OptimizeAnswer = {
   activities: number; leveled_activities: number; trajectories: number; crash_cost?: number; cpm_finish?: string; p6_leveled_finish?: string; reasoner_finish?: string; better_than_p6_leveler: boolean | null;
   changes: { id: string; from_days: number; to_days: number }[]; priority: string[]; priority_total: number; ops: unknown[]; biggest_changes: BiggestChange[]; biggest_changes_total?: number;
-  best_from?: string; partial?: true; [k: string]: unknown;
+  best_from?: string; partial?: true; field_data?: FieldData; [k: string]: unknown;
 };
 const day = (v: string | null | undefined) => (v ?? '').slice(0, 16);
 const shift = (v: number | null | undefined) => (v == null ? '' : v > 0 ? `+${v}` : String(v));
@@ -169,7 +170,7 @@ export function OptimizePanel() {
   const args = () => optimizeArgs(projectArgs(), numberOf('Samples', samples), numberOf('Seed', seed));
   const run = async () => {
     let a: Record<string, unknown>;
-    try { a = args(); } catch (e) { return toast((e as Error).message); }
+    try { a = { ...args(), field_data: true }; } catch (e) { return toast((e as Error).message); }
     setErr(''); setRes(null);
     const r = await opt.start(a);
     if (!r) return;
@@ -182,7 +183,7 @@ export function OptimizePanel() {
   const lev = !!res && res.leveled_activities > 0;
   const apply = () => {
     if (!res) return;
-    if (applyAndSchedule('Optimize schedule (reasoner)', res.ops, lev ? (d) => levelInProposedOrder(d, ui.openProjects, res.priority) : undefined)) { toast('Applied the reasoner proposal; Ctrl+Z undoes.'); setRes(null); }
+    if (applyAndSchedule('Optimize schedule (reasoner)', res.ops, (d) => { writeWhiqFields(d, res.field_data!, { hoursPerDay: getUi().prefs.hoursPerDay }); if (lev) levelInProposedOrder(d, ui.openProjects, res.priority); })) { toast('Applied the reasoner proposal; Ctrl+Z undoes.'); setRes(null); }
   };
   const notes = res ? optimizeNotes(res) : null;
   return (
