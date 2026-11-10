@@ -91,7 +91,7 @@ const writes = { readOnlyHint: false, destructiveHint: true, openWorldHint: fals
 const ERRORS_DOC = ' Errors come back as {error: {code, reason, next_step, retry_after_ms?}} (also message, hint, retry_after in seconds): follow next_step (e.g. busy -> retry, unknown_handle -> open_file again). Answers of tools that can change a project carry unsaved_changes.';
 
 const TOOLS = [
-  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML, MPX or Microsoft Project .mpp file (read without Microsoft Project, through MPXJ) and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read and repairs what it safely can (a misspelled key column with unique ids is renamed; empty, missing or repeated ids nothing points at get fresh ones): diagnostics.repaired lists each repair, diagnostics.not_repaired what was left, and still_rejected says whether a save would still be refused by P6. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
+  { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML, MPX or Microsoft Project .mpp file (read without Microsoft Project, through MPXJ) and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read (the answer to the refusal says what P6 refuses, by kind and count, and how to carry on; the lenient answer says in file_as_given that the original is one P6 would refuse, and the user is to be told) and repairs what it safely can (a misspelled key column with unique ids is renamed; empty, missing or repeated ids nothing points at get fresh ones): diagnostics.repaired lists each repair, diagnostics.not_repaired what was left, and still_rejected says whether a save would still be refused by P6. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
   { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, must_finish_by: { type: 'string', description: 'Must finish by (YYYY-MM-DD): late dates and float are measured to it' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
   { name: 'compute_schedule', annotations: ro, description: `Compute a schedule from a description, with no handle and nothing kept: P6's F9 (calendars, constraints, milestones, progress, retained logic and the other schedule options) on the activities and links given. Takes: ${COMPUTE_GUIDE}.`, inputSchema: { type: 'object', properties: { start: { type: 'string' }, data_date: { type: 'string' }, must_finish_by: { type: 'string' }, hours_per_day: { type: 'number' }, calendar: { type: 'string' }, calendars: { type: 'array', items: { type: 'object' } }, activities: { type: 'array', items: { type: 'object' } }, relationships: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, break_loops: { type: 'boolean' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' }, ...common }, required: ['start', 'activities'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
@@ -156,7 +156,7 @@ async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db
     let db: Db;
     if (detectFormat(p, readHead(p)) === 'xer') db = readXerFile(p).db;
     else { const b = readBytes(p), f = detectFormat(p, b); db = f === 'mpp' ? (await readMpp(p)).db : readRaw(b, f).db; }
-    if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to ${what}.`, 'Give an XER, P6 XML or Microsoft Project file.');
+    if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to ${what}.`, `Give an XER, P6 XML or Microsoft Project file. If this is the file the user asked about: ${outsideRoute(detectFormat(p, readHead(p)))}.`);
     return { db, release, bytes };
   } catch (e) { release(); throw e; }
 }
@@ -182,13 +182,22 @@ function importActions<T extends string>(v: unknown, names: Record<string, strin
   return out;
 }
 
+/** A file the clone cannot open (task continuity): the second route, outside the clone. A text file (an XER, XML, MPX) can still be read
+ *  by the agent's own file tools and the work done from its tables directly, said to the user as work done outside the P6 engine. */
+const TEXT_FORMAT: Record<string, string> = { xer: 'an XER is tab-separated tables: %T table, %F fields, %R rows', xml: 'P6 XML: elements for the project, its WBS, activities, relationships and resources', mspdi: 'Microsoft Project XML: a Task element for each activity, with its predecessor links', mpx: 'MPX is comma-separated records, one kind of record per line' };
+const outsideRoute = (format: string) => format === 'mpp'
+  ? 'this .mpp is a binary file that cannot be read as text: open it in Microsoft Project and save it as Microsoft Project XML, then open that; if that cannot be done, tell the user the file could not be read, the cause given, and that no analysis of it was possible'
+  : `the file is text (${TEXT_FORMAT[format] ?? TEXT_FORMAT.xer}): read it with your file-reading tool, do what the user asked from the tables directly (code or a spreadsheet), and tell the user the file is damaged, what is wrong with it, and that the analysis was done outside the P6 engine`;
+/** The fatal findings of a file by kind, with counts, in the order first met. */
+const fatalKinds = (f: Finding[]) => { const m = new Map<string, number>(); for (const x of f) if (x.severity === 'fatal') m.set(x.code, (m.get(x.code) ?? 0) + 1); return [...m].map(([code, count]) => ({ code, count })); };
+
 async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
   let xml: Awaited<ReturnType<typeof mppToMspdi>>;
   try { xml = await mppToMspdi(path); }
   catch (e) {
     if (e instanceof StuckError) return fail('file_unreadable', `Cannot read ${basename(path)}: ${e.message}`, e.stuck.alternatives, { data: { cause: 'stuck', stuck: e.stuck } });
     if (e instanceof MppReaderMissing) return fail('mpp_reader_missing', e.message, 'Save the file as Microsoft Project XML in Microsoft Project (File > Save As > XML) and open that.');
-    return fail('file_unreadable', `Cannot read ${basename(path)}: ${(e as Error).message}`, 'Open it in Microsoft Project and save it as Microsoft Project XML, then open that.');
+    return fail('file_unreadable', `Cannot read ${basename(path)}: ${(e as Error).message}`, `Carry on outside the clone: ${outsideRoute('mpp')}.`);
   }
   const r = parseMspdi(xml);
   r.findings.push({ severity: 'info', code: 'MPP_READ', message: 'Read without Microsoft Project: MPXJ turned the .mpp into Microsoft Project XML, read as such (every task, resource, assignment and calendar element is kept: read_table, msp:<Name>).', p6: 'P6 imports .mpp through an installed Microsoft Project.' });
@@ -338,9 +347,15 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const fatal = worst(f) === 'fatal';
         // lenient: the file is opened to be repaired, when there is a project to hold (a file that could not be read has none)
         if (fatal && !(a.lenient === true && allIds(r.db).length)) {
-          fail('p6_would_reject', `P6 would reject ${basename(path)}: ${f.filter((x) => x.severity === 'fatal').slice(0, 3).map((x) => x.message).join(' ')}`,
-            a.lenient === true ? 'No project could be read from the file, so it cannot be opened even leniently; fix the file (the findings say what is wrong) or rebuild it.' : 'Pass lenient: true to open it anyway and repair it (the findings say what P6 refuses), or fix the file.',
-            { data: { fatal: f.filter((x) => x.severity === 'fatal').slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
+          // what P6 refuses (every kind, with its count, and the first few in words; the total is said when the words are cut), and how to
+          // carry on: lenient first when there is a project to repair, else (or if that fails) the file read as text outside the clone
+          const bad = f.filter((x) => x.severity === 'fatal'), kinds = fatalKinds(f), shown = 3;
+          const noProject = !allIds(r.db).length, cause = bad.slice(0, shown).map((x) => x.message).join(' ');
+          fail('p6_would_reject', `P6 would reject ${basename(path)}: ${bad.length} fatal finding${bad.length === 1 ? '' : 's'} (${kinds.map((k) => `${k.code} x${k.count}`).join(', ')}). ${cause}${bad.length > shown ? ` (the first ${shown} of ${bad.length}; the rest are in data.fatal, up to 40)` : ''}`,
+            noProject
+              ? `The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: ${outsideRoute(format)}.`
+              : `1. Call open_file again with lenient: true: the clone repairs what it can and opens it, and says what it repaired; work on that, and tell the user the file as given is one P6 itself would refuse and why. 2. If it still cannot be opened, ${outsideRoute(format)}.`,
+            { data: { fatal_total: bad.length, fatal_kinds: kinds, fatal: bad.slice(0, 40).map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })), diagnostics: brief(f) } });
         }
         s0.db = r.db; s0.openProblems = openProblemsOf(r.db); s0.format = format; /* (openProblems: what P6 would reject in the file as it is; save refuses only what edits add) */ s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
         if (size >= MEASURE_FILE_BYTES) { s0.bytes = retainedBytes(heap0); } // what the project really holds (heap after a full gc, +25 % for undo and schedule work), and the parse's garbage given back
@@ -370,10 +385,12 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const left = new Map<string, Finding[]>();
         for (const x of g) if (x.severity === 'fatal' || x.severity === 'error') { const l = left.get(x.code); if (l) l.push(x); else left.set(x.code, [x]); }
         for (const [code, xs] of left) fix.not_repaired.push(`${code} x${xs.length} (${xs[0].severity}) not repaired: ${xs[0].message}${xs[0].p6 ? ` P6: ${xs[0].p6}` : ''}`);
+        // the file as given: said every time, so the answer to the user can say it (a repaired copy is not the user's file)
+        const asGiven = { p6_would_reject: fatal, ...(fatal ? { fatal_total: f.filter((x) => x.severity === 'fatal').length, fatal_kinds: fatalKinds(f), tell_the_user: 'The file as given is one P6 itself would refuse (fatal_kinds); this project is the clone\'s repaired copy of it (diagnostics.repaired says what was repaired, not_repaired what was left).' } : {}) };
         return {
-          handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still,
-          note: still ? 'P6 would still reject this project if it were saved now: the fatal findings in diagnostics (and not_repaired) were not repaired automatically. Fix them with edit operations before P6 gets the file.'
-            : fix.repaired.length ? 'Opened with repairs (diagnostics.repaired): a save writes a file P6 imports.' : 'Opened; nothing needed repairing.',
+          handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still, file_as_given: asGiven,
+          note: (fatal ? 'The file as given is one P6 itself would refuse (file_as_given says why): tell the user so. ' : '') + (still ? 'P6 would still reject this project if it were saved now: the fatal findings in diagnostics (and not_repaired) were not repaired automatically. Fix them with edit operations before P6 gets the file.'
+            : fix.repaired.length ? 'Opened with repairs (diagnostics.repaired): a save writes a file P6 imports.' : 'Opened; nothing needed repairing.'),
           diagnostics: { ...brief(g), repaired: fix.repaired, not_repaired: fix.not_repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0), ...unreadable(), ...lob,
         };
       } catch (e) { closeSession(s0); throw e; } finally { reading(); }

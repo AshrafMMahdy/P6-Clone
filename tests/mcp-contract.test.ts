@@ -11,7 +11,7 @@ import { applyOps } from '../core/project/ops.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { parseXer } from '../core/xer/parse.ts';
 import { readXlsx, writeXlsx } from '../core/excel/xlsx.ts';
-import { SAMPLES_DIR } from './helpers.ts';
+import { SAMPLES_DIR, sampleCopy } from './helpers.ts';
 import type { Db } from '../core/db.ts';
 
 const SERVER = join(import.meta.dirname, '..', 'mcp', 'server.ts');
@@ -186,4 +186,52 @@ test('MCP contract: a lenient open repairs a misspelled key column (the platform
   assert.match(fix.not_repaired[0], /^TASK has no task_id column.*other tables point at its rows/);
   const ids = db.tables.TASKPRED.rows.map((r) => r.task_pred_id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+test('a file P6 would reject, or that is no schedule: the answer lists what P6 refuses and tells the agent how to carry on (owner 2026-11-10)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6mcp-r-'));
+  const f = files(dir);
+  const second = 'the file is text (an XER is tab-separated tables: %T table, %F fields, %R rows): read it with your file-reading tool, do what the user asked from the tables directly (code or a spreadsheet), and tell the user the file is damaged, what is wrong with it, and that the analysis was done outside the P6 engine.';
+  const first = 'Call open_file again with lenient: true: the clone repairs what it can and opens it, and says what it repaired; work on that, and tell the user the file as given is one P6 itself would refuse and why.';
+  // a duplicate-ID XER (a made one, and the real one): every kind with its count, the first few in words, the way forward in order
+  for (const path of [f.dup, sampleCopy('CCA R03 dt 24Oct11SC.xer')]) {
+    const rej = await call('open_file', { path });
+    assert.equal(rej.data.error.code, 'p6_would_reject');
+    const e = rej.data.error, kinds = e.fatal_kinds as { code: string; count: number }[];
+    assert.equal(e.fatal_total, kinds.reduce((x, k) => x + k.count, 0));
+    assert.ok(kinds.some((k) => k.code === 'DUP_KEY'));
+    assert.match(e.message, new RegExp(`${e.fatal_total} fatal finding`));
+    for (const k of kinds) assert.ok(e.message.includes(`${k.code} x${k.count}`), `${k.code} x${k.count} in ${e.message}`);
+    assert.match(e.message, /Duplicate TASK\.task_id/);
+    assert.equal(e.next_step, `1. ${first} 2. If it still cannot be opened, ${second}`);
+    // the lenient open says what it repaired and that the original is one P6 would refuse
+    const len = await call('open_file', { path, lenient: true });
+    assert.equal(len.isError, false);
+    assert.equal(len.data.file_as_given.p6_would_reject, true);
+    assert.deepEqual(len.data.file_as_given.fatal_kinds, kinds);
+    assert.match(len.data.file_as_given.tell_the_user, /one P6 itself would refuse/);
+    assert.match(len.data.note, /^The file as given is one P6 itself would refuse/);
+    assert.ok(Array.isArray(len.data.diagnostics.repaired) && Array.isArray(len.data.diagnostics.not_repaired));
+    await call('close', { handle: len.data.handle, discard: true });
+  }
+  // a clean file opened leniently: nothing to tell
+  const ok = await call('open_file', { path: f.good, lenient: true });
+  assert.equal(ok.data.file_as_given.p6_would_reject, false);
+  assert.doesNotMatch(ok.data.note, /as given/);
+  await call('close', { handle: ok.data.handle, discard: true });
+  // a file that is not a schedule: nothing to repair, so no lenient route, straight to the second, with the cause
+  for (const lenient of [false, true]) {
+    const bad = await call('open_file', { path: f.junk, ...(lenient ? { lenient } : {}) });
+    assert.equal(bad.data.error.code, 'p6_would_reject');
+    assert.match(bad.data.error.message, /NO_HEADER x1, NO_PROJECT x1/);
+    assert.match(bad.data.error.message, /First line is not an ERMHDR header/);
+    assert.equal(bad.data.error.next_step, `The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: ${second}`);
+  }
+  // a binary .mpp the reader cannot take: the cause, and the way on (Project XML, else tell the user)
+  const mpp = join(dir, 'broken.mpp');
+  writeFileSync(mpp, Buffer.from(Array.from({ length: 600 }, (_, i) => (i * 37 + 11) & 255)));
+  const m = await call('open_file', { path: mpp });
+  assert.equal(m.data.error.code, 'file_unreadable');
+  assert.match(m.data.error.message, /^Cannot read broken\.mpp: /);
+  assert.match(m.data.error.next_step, /binary file that cannot be read as text: open it in Microsoft Project and save it as Microsoft Project XML.*tell the user the file could not be read, the cause given/);
 });
