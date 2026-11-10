@@ -29,10 +29,10 @@ export const notRun = (code: string, message: string): ToolAnswer => ({ isError:
 
 // ---------------------------------------------------------------- Monte Carlo (monte_carlo)
 /** monte_carlo's arguments from the settings. The iterations go to the tool as typed: it takes any whole number of 10 or more and refuses
- *  the rest, and a run that does not fit in memory, in words before it starts. top 0 lists every activity as the screen always did; buckets
- *  40 is the chart's resolution (the screen's histogram has had at most 40 bars). `project` as the Export's (projectArgs). */
+ *  the rest, and a run that does not fit in memory, in words before it starts. top 0 lists every activity as the screen always did; histogram
+ *  "days" is the engine's whole-day bins (the screen's bars have always been these, at most 40). `project` as the Export's (projectArgs). */
 export function monteCarloArgs(s: { iterations: number; seed?: number; riskEvents: string; project?: { project?: string } }): Record<string, unknown> {
-  return { ...(s.project ?? {}), iterations: s.iterations, ...(s.seed != null ? { seed: s.seed } : {}), risk_events: s.riskEvents, top: 0, buckets: 40 };
+  return { ...(s.project ?? {}), iterations: s.iterations, ...(s.seed != null ? { seed: s.seed } : {}), risk_events: s.riskEvents, top: 0, histogram: 'days' };
 }
 
 /** The line a stopped monte_carlo run shows (the tool's partial answer: the statistics are of the iterations that finished); null when the run was complete. */

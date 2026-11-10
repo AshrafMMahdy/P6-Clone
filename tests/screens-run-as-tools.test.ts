@@ -246,11 +246,21 @@ test('Monte Carlo: the Risks grid and the S-curve read from the tool’s answer 
   for (const e of engine.activities) {
     const g = screen.activities.find((x) => x.code === e.code)!;
     assert.ok(g, e.code);
-    assert.deepEqual([g.name, g.milestone, g.criticality, g.sensitivity, g.minDur, g.meanDur, g.maxDur], [e.name, e.milestone, e.criticality, e.sensitivity, e.minDur, e.meanDur, e.maxDur], `${e.code}: name, milestone, criticality, sensitivity and the remaining hours are the engine's`);
+    assert.deepEqual([g.name, g.milestone, g.sensitivity, g.minDur, g.meanDur, g.maxDur], [e.name, e.milestone, e.sensitivity, e.minDur, e.meanDur, e.maxDur], `${e.code}: name, milestone, sensitivity and the remaining hours are the engine's`);
+    assert.ok(Math.abs(g.criticality - e.criticality) <= 0.005 + 1e-9, `${e.code}: raw criticality within 0.005`);
+    // what the grid shows of it: the whole percent, the bar's class
+    assert.deepEqual([Math.round(g.criticality), g.criticality >= 50], [Math.round(e.criticality), e.criticality >= 50], `${e.code}: the grid shows the same`);
     assert.deepEqual([g.deterministicFinish, g.meanFinish, g.p50Finish, g.p80Finish], [min(e.deterministicFinish), min(e.meanFinish), min(e.p50Finish), min(e.p80Finish)], `${e.code}: the finish columns`);
   }
   assert.ok(screen.activities.some((a) => a.milestone && a.criticality === 0), 'a milestone with no criticality is flagged, so the grid leaves it out as before');
   assert.ok(screen.activities.some((a) => a.maxDur > 0) && screen.activities.some((a) => a.p50Finish != null));
+  // the bars: the engine's whole-day histogram, bin for bin (histogram: "days"), and the same call with no option keeps `buckets`
+  assert.deepEqual(screen.histogram, engine.histogram.map((b) => ({ start: b.start, end: b.end, count: b.count, cumPct: b.cumPct })));
+  const equal = ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11, buckets: 7 }));
+  assert.equal(equal.histogram.length, 7);
+  const { monteCarloCounts } = await import('../mcp/workset.ts');
+  assert.equal(monteCarloCounts({ histogram: 'days', buckets: 9000 }).buckets, 40, 'the reservation counts the day bins like buckets');
+  assert.equal((await run('monte_carlo', { handle: np.handle, iterations: 700, histogram: 'weeks' })).out.error.code, 'bad_input');
   // the tornado: the engine's list, in its order
   assert.deepEqual(screen.sensitivity.map((x) => [x.code, x.rho]), engine.sensitivity.map((x) => [x.code, x.rho]));
   // the S-curve: the engine's own points (a point for each finish, thinned), not one made from the bars
@@ -260,6 +270,11 @@ test('Monte Carlo: the Risks grid and the S-curve read from the tool’s answer 
   // the answer's rows are the export's table's columns, and `top` still decides how many are listed
   const few = ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11, top: 2 }));
   assert.equal(few.criticality.length, 2); assert.equal(few.criticality_total, engine.activities.length);
+  assert.equal(few.criticality[0].critical_pct, Math.round(few.criticality[0].critical_pct * 100) / 100, 'the answer’s percent is to 2 decimals');
+  const dir = mkdtempSync(join(tmpdir(), 'p6-crit-'));
+  const ex = ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11, export: dir }));
+  const whole = JSON.parse((await import('node:fs')).readFileSync(ex.exported.files[0].path, 'utf8'));
+  for (const e of engine.activities) assert.equal(whole.criticality.find((x: { id: string }) => x.id === e.code).critical_pct, e.criticality, 'the export keeps the exact value');
   assert.deepEqual(Object.keys(few.criticality[0]), ['id', 'name', 'milestone', 'critical_pct', 'deterministic_finish', 'mean_finish', 'p50_finish', 'p80_finish', 'sensitivity', 'min_remaining_hours', 'mean_remaining_hours', 'max_remaining_hours']);
 });
 

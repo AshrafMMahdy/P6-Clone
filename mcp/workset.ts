@@ -56,6 +56,8 @@ export const MC_EXPORT_BYTES_PER_MILESTONE_ITERATION = 55;
 /** What a histogram bucket holds (measured, 200,000 buckets): its object with the two dates' texts 96 B in memory, and 76 B of JSON
  *  text, which the answer holds twice (the text and the structured copy): 96 + 2 x 76 = 248, rounded up to 250. */
 export const MC_BYTES_PER_BUCKET = 250;
+/** The most bins the engine's whole-day histogram has (histogram: "days"): a bin of whole days, wide enough for at most 40. */
+export const MC_DAY_BINS = 40;
 /** What float_paths' between keeps per tail (the best paths from an activity on to the end: an object of the duration, the lowest float,
  *  the next activity and the index there, with its slot in the list): measured 84 B with whole hours and 100 B with fractional hours
  *  (200,000 lists of 100 tails each; a 10,000-activity ladder with max 5,000 held 3.5 GB in the reviewed build, 70 B a tail with the
@@ -72,11 +74,14 @@ export function between(b: unknown): number {
 /** The numbers monte_carlo is asked for: iterations (default 1000, at least 10), top (default 25; 0 = all: Infinity) and buckets
  *  (default 20, at least 5). A value that is not a whole number of 0 or more is refused as bad_input, named, before anything runs; the
  *  one parser for the tool and for its memory reservation. */
-export function monteCarloCounts(a: Record<string, any>): { iterations: number; top: number; buckets: number } {
+export function monteCarloCounts(a: Record<string, any>): { iterations: number; top: number; buckets: number; days: boolean } {
   const iterations = countArg(a.iterations, 'iterations', { min: 10 }) ?? 1000;
   const top = countArg(a.top, 'top') ?? 25;
-  const buckets = countArg(a.buckets, 'buckets', { min: 5 }) ?? 20;
-  return { iterations, top: top === 0 ? Infinity : top, buckets };
+  if (a.histogram != null && a.histogram !== 'days') fail('bad_input', `histogram must be "days" (got ${JSON.stringify(a.histogram)}).`, 'Leave histogram out for `buckets` equal bins, or pass "days" for whole-day bins.');
+  const days = a.histogram === 'days';
+  // whole-day bins (the engine's: a bin of 1 day or more so that there are at most 40): counted like buckets in the reservation
+  const buckets = days ? MC_DAY_BINS : countArg(a.buckets, 'buckets', { min: 5 }) ?? 20;
+  return { iterations, top: top === 0 ? Infinity : top, buckets, days };
 }
 
 /** What reading a file peaks at, per byte of the file (the text, the element being read, the rows, the import checks;
