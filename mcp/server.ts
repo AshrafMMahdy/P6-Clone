@@ -56,7 +56,7 @@ import { baselineOf } from '../core/analysis/common.ts';
 import { reasonerModelPath, reasonerStatus } from '../core/analysis/hrmRuntime.ts';
 import { record, rollback, rollbackRunning } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
-import { worst, type Finding } from '../core/findings.ts';
+import { findingCount, worst, type Finding } from '../core/findings.ts';
 import { addField, type Db, type Row } from '../core/db.ts';
 import { findUnicodeFont } from '../renderer/print/system-font.ts';
 import { compareSchedules } from '../core/diff.ts';
@@ -134,7 +134,7 @@ const TOOLS = [
 // ---------------------------------------------------------------- helpers
 const allIds = (db: Db) => (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_id);
 const summary = (s: Session) => runTool('project_summary', {}, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
-const brief = (f: Finding[]) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + 1), a), {}), findings: f.filter((x) => x.severity !== 'info').slice(0, 40).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })) });
+const brief = (f: Finding[]) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + findingCount(x)), a), {}), findings: f.filter((x) => x.severity !== 'info').slice(0, 40).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })) });
 const dd = (v: unknown) => { if (v == null || v === '') return null; const t = parseP6Date(String(v)); if (t == null) fail('bad_input', `"${v}" is not a date.`, 'Use YYYY-MM-DD or YYYY-MM-DD HH:MM.'); return t; };
 const projectIds = (db: Db, id: unknown) => {
   const ps = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
@@ -206,8 +206,12 @@ const outsideRoute = (format: string, head?: Uint8Array) => notText(head) ?? (fo
 /** Every fatal finding, in words (open_file's refusal lists them all in data.fatal, and a lenient open in file_as_given.fatal). */
 const fatalList = (f: Finding[]) => f.filter((x) => x.severity === 'fatal').map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 }));
 /** What P6 would refuse in a file as it was given: said every time a file is read, so the answer to the user can say it. */
-const fileAsGiven = (f: Finding[], tell: string, o: { list?: boolean } = {}) => { const fatal = worst(f) === 'fatal'; return { p6_would_reject: fatal, ...(fatal ? { fatal_total: f.filter((x) => x.severity === 'fatal').length, fatal_kinds: fatalKinds(f), ...(o.list ? { fatal: fatalList(f) } : {}), tell_the_user: tell } : {}) }; };
-const fatalKinds = (f: Finding[]) => { const m = new Map<string, number>(); for (const x of f) if (x.severity === 'fatal') m.set(x.code, (m.get(x.code) ?? 0) + 1); return [...m].map(([code, count]) => ({ code, count })); };
+/** The real number of fatal findings (the validator keeps 5 of a kind and a line that says how many more). */
+const fatalTotal = (f: Finding[]) => f.filter((x) => x.severity === 'fatal').reduce((n, x) => n + findingCount(x), 0);
+/** How many fatal findings are listed in words of the real total (a "…and N more" line stands for the rest of its kind). */
+const fatalListed = (f: Finding[]) => f.filter((x) => x.severity === 'fatal' && x.omitted == null).length;
+const fileAsGiven = (f: Finding[], tell: string, o: { list?: boolean } = {}) => { const fatal = worst(f) === 'fatal'; return { p6_would_reject: fatal, ...(fatal ? { fatal_total: fatalTotal(f), fatal_kinds: fatalKinds(f), ...(o.list ? { fatal_listed: fatalListed(f), fatal: fatalList(f) } : {}), tell_the_user: tell } : {}) }; };
+const fatalKinds = (f: Finding[]) => { const m = new Map<string, number>(); for (const x of f) if (x.severity === 'fatal') m.set(x.code, (m.get(x.code) ?? 0) + findingCount(x)); return [...m].map(([code, count]) => ({ code, count })); };
 
 async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
   let xml: Awaited<ReturnType<typeof mppToMspdi>>;
@@ -367,13 +371,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         if (fatal && !(a.lenient === true && allIds(r.db).length)) {
           // what P6 refuses (every kind, with its count, and the first few in words; the total is said when the words are cut), and how to
           // carry on: lenient first when there is a project to repair, else (or if that fails) the file read as text outside the clone
-          const bad = f.filter((x) => x.severity === 'fatal'), kinds = fatalKinds(f), shown = 3;
+          const bad = f.filter((x) => x.severity === 'fatal'), total = fatalTotal(f), listed = fatalListed(f), kinds = fatalKinds(f), shown = 3;
           const noProject = !allIds(r.db).length, cause = bad.slice(0, shown).map((x) => x.message).join(' ');
-          fail('p6_would_reject', `P6 would reject ${basename(path)}: ${bad.length} fatal finding${bad.length === 1 ? '' : 's'} (${kinds.map((k) => `${k.code} x${k.count}`).join(', ')}). ${cause}${bad.length > shown ? ` (the first ${shown} of ${bad.length}; all ${bad.length} are in data.fatal)` : ''}`,
+          fail('p6_would_reject', `P6 would reject ${basename(path)}: ${total} fatal finding${total === 1 ? '' : 's'} (${kinds.map((k) => `${k.code} x${k.count}`).join(', ')}). ${cause}${bad.length > shown ? ` (the first ${shown} of ${total}; data.fatal lists ${listed} of the ${total} in words, a \u201c\u2026and N more\u201d line standing for the rest of its kind)` : ''}`,
             noProject
               ? `The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: ${outsideRoute(format, head)}.`
               : `1. Call open_file again with lenient: true: the clone repairs what it can and opens it, and says what it repaired; work on that, and tell the user the file as given is one P6 itself would refuse and why. 2. If it still cannot be opened, ${outsideRoute(format, head)}.`,
-            { data: { fatal_total: bad.length, fatal_kinds: kinds, fatal: fatalList(f), diagnostics: brief(f) } });
+            { data: { fatal_total: total, fatal_kinds: kinds, fatal_listed: listed, fatal: fatalList(f), diagnostics: brief(f) } });
         }
         s0.db = r.db; s0.openProblems = openProblemsOf(r.db); s0.format = format; /* (openProblems: what P6 would reject in the file as it is; save refuses only what edits add) */ s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
         if (size >= MEASURE_FILE_BYTES) { s0.bytes = retainedBytes(heap0); } // what the project really holds (heap after a full gc, +25 % for undo and schedule work), and the parse's garbage given back

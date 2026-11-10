@@ -273,19 +273,23 @@ test('import_file and transfer_progress say what P6 would refuse in the file the
   assert.deepEqual(clean.data.file_as_given, { p6_would_reject: false });
   const tp = await call('transfer_progress', { handle: np.handle, owner_key: np.owner_key, path: f.dup, dry_run: true, from_project: 'R1', project: 'IMP' });
   if (!tp.isError) assert.equal(tp.data.file_as_given.p6_would_reject, true);
-  // many fatal findings (every table with a key twice): the refusal lists every one (data.fatal) where the old cut was 40, says so, and the lenient open lists them in file_as_given.fatal (its diagnostics keep the first 40 findings)
+  // 60 duplicate IDs: the validator keeps 5 findings and a line for the rest, and the counts are the real ones
   const db: Db = { tables: {} };
   assert.ok(applyOps(db, [{ op: 'add_project', id: 'BIG', start: '2026-03-02' }, ...Array.from({ length: 60 }, (_, i) => ({ op: 'add_activity', id: `A${i}`, name: `N${i}`, duration_days: 2 }))], { calendarDays: true }).ok);
   const lines = new TextDecoder().decode(writeXer(db, { version: '19.12', encoding: 'utf-8' })).split('\r\n');
   const out: string[] = [];
-  for (const l of lines) { out.push(l); if (l.startsWith('%R')) out.push(l); } // every row of every table twice: a DUP_KEY in each table with a key (the validator keeps 5 of a kind and a line for the rest)
+  let inTask = false;
+  for (const l of lines) { if (l.startsWith('%T')) inTask = l.endsWith('\tTASK'); out.push(l); if (inTask && l.startsWith('%R')) out.push(l); } // every TASK row twice
   const big = join(dir, 'big.xer'); writeFileSync(big, out.join('\r\n'));
   const rej = await call('open_file', { path: big });
-  assert.equal(rej.data.error.code, 'p6_would_reject');
-  assert.ok(rej.data.error.fatal_total > 3, String(rej.data.error.fatal_total));
-  assert.equal(rej.data.error.fatal.length, rej.data.error.fatal_total, 'every fatal finding is listed');
-  assert.match(rej.data.error.message, new RegExp(`all ${rej.data.error.fatal_total} are in data\\.fatal`));
+  const e = rej.data.error;
+  assert.equal(e.code, 'p6_would_reject');
+  assert.deepEqual(e.fatal_kinds, [{ code: 'DUP_KEY', count: 60 }]);
+  assert.equal(e.fatal_total, 60);
+  assert.match(e.message, /60 fatal findings \(DUP_KEY x60\)/);
+  assert.equal(e.fatal_listed, 5, 'the findings in words: 5 of the 60');
+  assert.match(e.message, /data\.fatal lists 5 of the 60 in words/);
   const len = await call('open_file', { path: big, lenient: true });
-  assert.equal(len.data.file_as_given.fatal.length, len.data.file_as_given.fatal_total);
-  assert.ok(len.data.diagnostics.findings.length <= 40, 'the findings of the diagnostics are the first 40');
+  assert.deepEqual([len.data.file_as_given.fatal_total, len.data.file_as_given.fatal_listed, len.data.file_as_given.fatal_kinds[0].count], [60, 5, 60]);
+  assert.equal(len.data.diagnostics.counts.fatal ?? len.data.diagnostics.before_repairs?.counts.fatal, 60, 'the counts of the diagnostics are real too');
 });

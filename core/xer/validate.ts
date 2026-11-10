@@ -56,7 +56,7 @@ class Collector {
     for (const [k, n] of this.counts) {
       if (n <= PER_KIND_CAP) continue;
       const first = this.out.find((f) => `${f.code}|${f.table ?? ''}|${f.field ?? ''}` === k)!;
-      this.out.push({ ...first, row: undefined, key: undefined, message: `…and ${n - PER_KIND_CAP} more ${first.code} in ${first.table ?? 'file'}${first.field ? '.' + first.field : ''} (${n} total).` });
+      this.out.push({ ...first, row: undefined, key: undefined, omitted: n - PER_KIND_CAP, message: `…and ${n - PER_KIND_CAP} more ${first.code} in ${first.table ?? 'file'}${first.field ? '.' + first.field : ''} (${n} total).` });
     }
     return this.out;
   }
