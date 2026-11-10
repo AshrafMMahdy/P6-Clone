@@ -10,7 +10,7 @@ import { cachedModel, discardKeptChunks, fileHash, ifcOf, keptChunks, keptChunkS
 import { checkRevitSize, isRevit, REVIT_MEMORY_PER_BYTE, RevitDiskFull, RevitTooLarge, rvtCached } from '../core/bim/rvt.ts';
 import { attachModel, elementValue, export4dState, import4dState, linkByRules, linkElements, linkMaps, links, linkStatus, modelRow, t4d, T4D, type Rule } from '../core/bim/link4d.ts';
 import { items4d, README, searchSetsXml, timelinerCsv, type Imported4d } from '../core/bim/exchange4d.ts';
-import { admit, countMemory, effectiveBudget, fail, ToolError, freeMemory, pathArg, readFenced, reserveMemory, sessions, writeBase, type Session } from './runtime.ts';
+import { admit, countMemory, effectiveBudget, fail, readCause, ToolError, freeMemory, pathArg, readFenced, reserveMemory, sessions, writeBase, type Session } from './runtime.ts';
 
 // a server with a storage root reads an .nwf's models only beside it and inside the root (realpath checked by pathArg)
 fenceListedModels(() => (readFenced() ? (p) => { try { pathArg(p); return true; } catch { return false; } } : null));
@@ -822,13 +822,14 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const path = pathArg(a.path);
       // the file is read whole, with its text and what is read from it: counted in the budget while it is held (C16);
       // past the longest string a JavaScript engine holds (about 512 MB) an IFC or CSV cannot be read as text at all
-      const size = (() => { try { return statSync(path).size; } catch { return -1; } })();
-      if (size < 0) return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.');
+      let statError: unknown;
+      const size = (() => { try { return statSync(path).size; } catch (e) { statError = e; return -1; } })();
+      if (size < 0) return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.', { data: readCause(statError) });
       if (size > 0x1fffffe8 && !/\.(nwf|nwd|sp|xlsx)$/i.test(path)) return fail('too_large', `${basename(path)} is ${Math.round(size / 1048576)} MB: more text than one string can hold (about 512 MB), so it cannot be read as a 4D file.`, 'Export the 4D data on its own (the links or the TimeLiner list, without the model geometry), or split it.');
       const releaseRead = reserveMemory(size * 4 + 8 * 1048576, `Reading ${basename(path)} (${Math.round(size / 1048576)} MB) for import_4d`, 'export the 4D data on its own (without the model geometry), or split it', s.handle);
       let imp: Imported4d;
       try {
-      try { closeSync(openSync(path, 'r')); } catch { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.'); }
+      try { closeSync(openSync(path, 'r')); } catch (e) { return fail('file_unreadable', `Cannot read ${path}.`, 'Check the path.', { data: readCause(e) }); }
       try { imp = await readImport4dWatched(path); } catch (e) { if (e instanceof StuckError) return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${e.message}`, e.stuck.alternatives, { data: { reason: 'stuck', stuck: e.stuck } }); return fail('bad_input', `Cannot read ${basename(path)} as 4D: ${(e as Error).message}`, 'Give an IFC 4D, search-set XML, TimeLiner CSV/xlsx, Navisworks .nwf/.nwd or SYNCHRO .sp file.'); }
       const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf' || imp.source === 'nwd';
       const m = await modelOf(s.db, projId, !tasksOnly);

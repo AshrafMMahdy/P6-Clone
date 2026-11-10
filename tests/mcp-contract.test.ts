@@ -305,3 +305,21 @@ test('a real .mpp that was read but refused, or holds no project, keeps the "sav
   assert.match(outsideRoute('mpp', new TextEncoder().encode('%PDF-1.7 ...')), /the file is a PDF/);
   assert.match(outsideRoute('mpp', undefined), /save it as Microsoft Project XML/);
 });
+
+test('read failures say why in data.cause (and data.os_code): a missing path is not_found/ENOENT, a folder is_a_folder, a file that is not a schedule is damaged; the messages are as they were', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6mcp-cause-'));
+  const missing = await call('open_file', { path: join(dir, 'nope.xer') });
+  assert.equal(missing.data.error.code, 'file_unreadable');
+  assert.match(missing.data.error.message, /^Cannot read .*nope\.xer: no such file\.$/);
+  assert.deepEqual([missing.data.error.cause, missing.data.error.os_code], ['not_found', 'ENOENT']);
+  const folder = await call('open_file', { path: dir });
+  assert.equal(folder.data.error.code, 'file_unreadable');
+  assert.deepEqual([folder.data.error.cause, folder.data.error.os_code], ['is_a_folder', 'EISDIR']);
+  const junk = join(dir, 'junk.xer'); writeFileSync(junk, 'this is not a schedule');
+  const bad = await call('open_file', { path: junk });
+  assert.equal(bad.data.error.code, 'p6_would_reject'); assert.equal(bad.data.error.cause, 'damaged');
+  const { readCause } = await import('../mcp/runtime.ts');
+  assert.deepEqual(readCause(Object.assign(new Error('x'), { code: 'EACCES' })), { cause: 'no_permission', os_code: 'EACCES' });
+  assert.deepEqual(readCause(Object.assign(new Error('x'), { code: 'EMFILE' })), { cause: 'system', os_code: 'EMFILE' });
+  assert.deepEqual(readCause(new Error('bad bytes')), { cause: 'damaged' });
+});

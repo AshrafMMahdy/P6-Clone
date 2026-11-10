@@ -32,6 +32,14 @@ export class ToolError extends Error {
     super(message); this.code = code; this.hint = hint; this.retryAfter = extra.retryAfter; this.data = extra.data;
   }
 }
+/** Why a file could not be read, for the `data` of a read failure: cause not_found (ENOENT, ENOTDIR), no_permission (EACCES, EPERM), is_a_folder (EISDIR),
+ *  system (any other operating-system error), or damaged (no system error: the bytes were read, or the reader refused them, and are not a readable schedule);
+ *  os_code is the system's code when there is one. */
+export function readCause(e: unknown): { cause: 'not_found' | 'no_permission' | 'is_a_folder' | 'system' | 'damaged'; os_code?: string } {
+  const code = (e as NodeJS.ErrnoException | undefined)?.code;
+  if (typeof code !== 'string' || !/^E[A-Z0-9]+$/.test(code)) return { cause: 'damaged' };
+  return { cause: code === 'ENOENT' || code === 'ENOTDIR' ? 'not_found' : code === 'EACCES' || code === 'EPERM' ? 'no_permission' : code === 'EISDIR' ? 'is_a_folder' : 'system', os_code: code };
+}
 export const fail = (code: string, message: string, hint?: string, extra?: { retryAfter?: number; data?: Record<string, unknown> }): never => { throw new ToolError(code, message, hint, extra); };
 
 // ---------------------------------------------------------------- configuration
