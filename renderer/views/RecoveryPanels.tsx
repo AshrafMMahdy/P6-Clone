@@ -196,7 +196,7 @@ export function OptimizePanel() {
       </div>
       {err && <div style={{ color: "#b00020", whiteSpace: 'pre-wrap' }}>{err}</div>}
       {applyErr && <div style={red}>{applyErr}</div>}
-      {!res && !err && <div className="muted">The White Hat IQ schedule reasoner, a trained model running on this computer: it picks a placement priority (and crashed modes, when crash data exists) so the resource-limited schedule finishes soonest. Its proposal is checked with P6 leveling and compared with P6's default leveling. Resources need a Max Units/Time limit.</div>}
+      {!res && !err && <div className="muted">The White Hat IQ schedule reasoner, a trained model running on this computer: it picks a placement priority (and crashed modes, when crash data exists) so the resource-limited schedule finishes soonest. Its proposal is checked with P6 leveling and compared with P6's default leveling. Resources need a Max Units/Time limit. The reasoner plans work that has not started: a schedule in progress (an actual start or finish, progress above 0, or a data date after the planned start) is refused. To shorten the remaining work use Crashing; to level resources use Level Resources.</div>}
       {res && notes && <div style={{ overflow: 'auto', flex: 1 }}>
         {changed && <div className="muted" style={{ marginBottom: 4 }}>({CHANGED_SINCE}: Apply is refused)</div>}
         {notes.notes.map((n) => <div key={n} className="muted" style={{ marginBottom: 4 }}>{n}</div>)}

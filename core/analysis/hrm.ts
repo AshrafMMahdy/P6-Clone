@@ -341,13 +341,13 @@ export function writtenHours(a: HrmActivity, mode: number, hoursPerDay = 8): num
   return a.modes[mode].duration * h;
 }
 
-/** Durations of the crashed modes and the placement order (Activity task_ids, highest priority first). */
+/** Durations of the crashed modes (the reasoner plans work that has not started only: optimize_schedule refuses a schedule in progress, so every one is a duration) and the placement order (Activity task_ids, highest priority first). */
 export function proposalOps(inst: HrmInstance, modes: number[], multi: boolean, projCode: Map<string, string>, hoursPerDay = 8) {
   const ops: Record<string, unknown>[] = [];
   inst.acts.forEach((a, i) => {
     if (!modes[i]) return;
     const hours = writtenHours(a, modes[i], hoursPerDay);
-    ops.push({ op: 'update_activity', id: a.task.task_code, project: projCode.get(a.task.proj_id), ...(a.started ? { remaining_hours: hours } : { duration_hours: hours }), assignments_follow: true });
+    ops.push({ op: 'update_activity', id: a.task.task_code, project: projCode.get(a.task.proj_id), duration_hours: hours, assignments_follow: true });
   });
   return ops;
 }

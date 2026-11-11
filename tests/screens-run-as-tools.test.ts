@@ -182,7 +182,7 @@ test('Optimize: the panel’s call is optimize_schedule’s; the table, "the fir
   assert.equal(n.windows, null, 'one window: nothing said');
   assert.deepEqual(n.notes, [out.note, out.partial_note, out.over_limit_note].filter(Boolean).sort((a, b) => [out.over_limit_note, out.partial_note, out.note].indexOf(a) - [out.over_limit_note, out.partial_note, out.note].indexOf(b)), 'the notes the answer has, in the panel’s order');
   for (const c of out.biggest_changes) for (const k of ['id', 'name', 'cpm_start', 'cpm_finish', 'reasoner_start', 'reasoner_finish', 'start_delta_days', 'finish_delta_days']) assert.ok(k in c, `${k} is in each row of the table`);
-  assert.match(OPTIMIZE_ADVICE, /^Review the biggest changes before applying; Undo takes the apply back\.$/);
+  assert.match(OPTIMIZE_ADVICE, /^Review the biggest changes before applying; Undo takes the apply back\. Apply makes the new durations current .*WHIQ original duration \(d\).*WHIQ run <N> duration \(d\).*WHIQ duration change \(d\), WHIQ change note and WHIQ leveling rank\.$/);
   assert.equal(out.order, undefined, 'the placement order is listed as priority (here all of it: max_priority 0), not as the engine’s order');
   assert.equal(out.priority.length, out.priority_total);
 });
@@ -317,6 +317,28 @@ test('Optimize: Apply works on any schedule (the answer has the whole placement 
   assert.deepEqual(dates(screenDb), dates(db), 'the same dates as the tool’s apply');
   assert.deepEqual(whiq(screenDb), whiq(db), 'the same WHIQ fields and values as the tool’s apply');
   assert.equal(whiq(db).length, 130, 'a rank on each leveled activity');
+});
+
+test('Optimize: the screen’s Apply writes the reasoner’s run rule through writeWhiqFields (field_data says so), a second Apply is run 2 as the tool’s is, and a schedule in progress is refused in the tool’s words', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
+  const h = await chain(6);
+  const db = sessions.get(h)!.db, screenDb = structuredClone(db), ids = rows(db, 'PROJECT').map((p) => p.proj_id);
+  const screenApply = (out: any) => { assert.ok(applyOps(screenDb, out.ops, { hoursPerDay: 8 }).ok); assert.ok(scheduleProjects(screenDb, ids, {}).ok); writeWhiqFields(screenDb, out.field_data, { hoursPerDay: 8 }); syncAssignmentDates(screenDb); };
+  // the shared function: Apply’s after-step is writeWhiqFields, and the answer asks for the run rule
+  assert.match(readFileSync(new URL('../renderer/views/applyResult.ts', import.meta.url), 'utf8'), /afterOptimize[^]*writeWhiqFields\(d, res\.field_data!/);
+  for (const crash of [[{ id: 'L1', crash_days: 6, crash_cost: 10 }, { id: 'L2', crash_days: 7, crash_cost: 10 }], [{ id: 'L1', crash_days: 4, crash_cost: 10 }, { id: 'L3', crash_days: 8, crash_cost: 10 }]]) {
+    const args = { seed: 1, samples: 3, activities: crash };
+    const out = ok(await run('optimize_schedule', { handle: h, ...args, field_data: true }));
+    assert.equal(out.field_data.reasoner, true);
+    screenApply(out);
+    assert.equal(ok(await run('optimize_schedule', { handle: h, ...args, apply: true })).applied, true);
+    assert.deepEqual(whiq(screenDb), whiq(db), 'the screen’s Apply and the tool’s apply leave the same fields');
+  }
+  assert.ok(whiq(db).some((x) => x.startsWith('WHIQ run 1 duration (d)|L1|')), 'the second apply is run 2');
+  // a schedule in progress: the panel’s run shows the tool’s refusal as text
+  ok(await run('edit', { handle: h, operations: [{ op: 'update_activity', id: 'L5', actual_start: '2026-03-02' }] }));
+  const why = refusal(await run('optimize_schedule', { handle: h, ...optimizeArgs({}, 3, 1), field_data: true }));
+  assert.match(why!, /nothing was run\. The schedule is in progress \(1 activity has actual dates or progress\), and the schedule reasoner plans only work that has not started\./);
+  assert.match(why!, /crash_schedule.*level_resources/);
 });
 
 test('Crashing: the panel’s Apply on a copy leaves the WHIQ fields and values of the tool’s apply: true', async () => {

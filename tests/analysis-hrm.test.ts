@@ -419,7 +419,9 @@ test('apply writes the WHIQ fields beside each changed activity in the same undo
   // the note and rank are the latest run's; A holds the original of the earlier run (kept, not written again)
   assert.deepEqual([named2.get('WHIQ change note')!.activities, named2.get('WHIQ change note')!.kept_from_earlier], [1, 0]);
   assert.deepEqual([named2.get('WHIQ original duration (d)')!.activities, named2.get('WHIQ original duration (d)')!.kept_from_earlier], [0, 1]);
-  assert.equal(f2.labels.length, 4, 'each field once');
+  // the run rule (owner 2026-11-11): the second apply is run 2, so it declares WHIQ run 1 duration (d) and moves the number it replaced (6) there; the original stays 10
+  assert.equal(f2.values.A['WHIQ run 1 duration (d)'], '6');
+  assert.deepEqual(f2.labels, ['WHIQ change note', 'WHIQ duration change (d)', 'WHIQ leveling rank', 'WHIQ original duration (d)', 'WHIQ run 1 duration (d)']);
   // the XER saved and read again still has them
   const dir = mkdtempSync(join(tmpdir(), 'p6-whiq-')), file = join(dir, 'whiq.xer');
   assert.equal((await call('save', { handle: h, owner_key, path: file })).err, false);

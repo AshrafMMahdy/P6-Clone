@@ -175,4 +175,4 @@ export function optimizeNotes(out: Record<string, any>): { changes: string | nul
   };
 }
 /** The advice beside Apply: the tool's, in one line. */
-export const OPTIMIZE_ADVICE = 'Review the biggest changes before applying; Undo takes the apply back.';
+export const OPTIMIZE_ADVICE = 'Review the biggest changes before applying; Undo takes the apply back. Apply makes the new durations current and keeps the numbers they replace in custom fields: the first apply in WHIQ original duration (d), a later one in WHIQ run <N> duration (d). It also writes WHIQ duration change (d), WHIQ change note and WHIQ leveling rank.';
