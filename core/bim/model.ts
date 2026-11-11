@@ -104,11 +104,13 @@ async function loadModelNow(path: string, o: LoadOptions): Promise<Model> {
 /** A Navisworks model: its index and tiles from the cache, else read from the file (in the reader's own process) into
  *  it; cached by the files' content and the reader's format. */
 async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
-  pruneCache();
   const hash = await navisworksKey(path), name = cacheName(hash), base = join(cacheDir(), name);
   const want = o.geometry !== false;
   const hit = memory.get(name);
-  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; touch(base); return hit; }   // a model open in memory is in use: its files on disk are read by the viewer and render_4d
+  // a model open in memory is in use: touched FIRST (before any prune can age it out); its files on disk are read by the viewer and render_4d, so a hit whose files are gone is dropped and loaded again
+  if (hit && !existsSync(`${base}.ndjson`)) memory.delete(name);
+  else if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; touch(base); pruneCache(); return hit; }
+  pruneCache();
   setAsideOld(hash);
   let index = existsSync(`${base}.ndjson`) && existsSync(`${base}.nw.json`) ? tryReadIndex(base)?.index ?? null : null;
   // a model read without geometry, or whose geometry failed (once a run of the app), is read again with it
@@ -127,15 +129,17 @@ async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
 }
 
 async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
-  pruneCache();
   // an IFC is a STEP file with an IFC schema; anything else (an XER, a GLB, an .rvt) is refused before it replaces a model
   const head = (() => { const fd = openSync(path, 'r'); try { const b = Buffer.alloc(65536); return b.subarray(0, readSync(fd, b, 0, 65536, 0)).toString('latin1'); } finally { closeSync(fd); } })();
   if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit (.rvt / .rfa) and Navisworks (.nwd / .nwc / .nwf) files are read as they are; other formats have to be exported to IFC first.`);
   const hash = o.hash ?? await fileHash(path);
   const want = o.geometry !== false;
-  const hit = memory.get(cacheName(hash));
+  let hit = memory.get(cacheName(hash));
   const base = join(cacheDir(), cacheName(hash));
-  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; touch(base); return hit; }   // a model open in memory is in use: its files on disk are read by the viewer and render_4d
+  // a model open in memory is in use: touched FIRST (before any prune can age it out); its files on disk are read by the viewer and render_4d, so a hit whose files are gone is dropped and loaded again
+  if (hit && !existsSync(`${base}.ndjson`)) { memory.delete(cacheName(hash)); hit = undefined; }
+  else if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; touch(base); pruneCache(); return hit; }
+  pruneCache();
   // a meshing that runs past the 24 hours must not lose its index or its kept chunks to the clean: they are touched at every chunk
   const working: LoadOptions = { ...o, onProgress: (...a: Parameters<NonNullable<LoadOptions['onProgress']>>) => { touch(base); return o.onProgress?.(...a); } };
   setAsideOld(hash);
@@ -344,7 +348,7 @@ let pruned = 0;
 const retried = new Set<string>();
 
 export function pruneCache(now = Date.now()): number {
-  if (now - pruned < 3_600_000) return 0;   // AGREED LIMIT (owner, 2026-11-11): once an hour — how often the clean looks — why: each thing goes 24 to 25 hours after its last use — arbitrary by agreement, harmless. `pruned` starts at 0: the first call of a process always prunes, once at start
+  if (now - pruned < 3_600_000) return 0;   // AGREED LIMIT (owner, 2026-11-11): once an hour — how often the clean looks — why: each thing goes 24 to 25 hours after its last use — arbitrary by agreement, harmless. `pruned` starts at 0: the first load of a process prunes (a process that loads no model prunes nothing: the platform's hourly sweep covers the server)
   pruned = now;
   const dir = cacheDir();
   let removed = 0;

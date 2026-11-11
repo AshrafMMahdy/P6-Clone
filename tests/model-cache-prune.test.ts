@@ -88,3 +88,29 @@ test('a Revit conversion that is reused is touched (a model opened daily is not 
     for (const x of ['.ifc', '.json']) assert.ok(Date.now() - statSync(`${base}${x}`).mtimeMs < H, `${x} touched`);
   });
 });
+
+test('an open model whose files are old is touched BEFORE the hourly prune can age it out (a memory hit two hours later keeps its files)', async () => {
+  await withCache(async (dir) => {
+    const { loadModel } = await import('../core/bim/model.ts');
+    const ifc = join(dir, 'duplex2.ifc'); copyFileSync(FX, ifc);
+    await loadModel(ifc, { geometry: false });
+    const index = readdirSync(dir).find((f) => f.endsWith('.ndjson'))!;
+    const old = new Date(Date.now() - 30 * H); utimesSync(join(dir, index), old, old);
+    const real = Date.now;
+    Date.now = () => real() + 2 * H;   // two hours later: the hourly gate is open
+    try { const m = await loadModel(ifc, { geometry: false }); assert.ok(m); } finally { Date.now = real; }
+    assert.equal(existsSync(join(dir, index)), true, 'the open model\'s index was not pruned');
+  });
+});
+
+test('a memory hit whose files are gone is dropped and the model is loaded again', async () => {
+  await withCache(async (dir) => {
+    const { loadModel } = await import('../core/bim/model.ts');
+    const ifc = join(dir, 'duplex3.ifc'); copyFileSync(FX, ifc);
+    await loadModel(ifc, { geometry: false });
+    const index = readdirSync(dir).find((f) => f.endsWith('.ndjson'))!;
+    rmSync(join(dir, index), { force: true });
+    await loadModel(ifc, { geometry: false });
+    assert.equal(existsSync(join(dir, index)), true, 'the model was read again, its cache written anew');
+  });
+});
