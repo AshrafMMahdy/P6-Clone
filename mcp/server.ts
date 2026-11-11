@@ -400,7 +400,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           const list = [...unidentified(r.db).why].map(([t, why]) => { const i = at.get(t) ?? -1; return { table: 'TASK', row: i + 1, ...(r.meta?.taskLines?.[i] ? { line: r.meta.taskLines[i] } : {}), task_id: t.task_id ?? '', activity_id: String(t.task_code ?? '').slice(0, 60), reason: why }; }).sort((x, y) => x.row - y.row);
           return list.length ? { unreadable_rows: { total: list.length, rows: list.slice(0, 500), note: 'TASK rows P6 does not load as activities (read_table still lists them as they are in the file); save with repair: true removes them.' } } : {};
         };
-        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0), ...unreadable(), ...lob };
+        // (a fact of the file a caller must not miss, so it is a field of its own: diagnostics.findings lists the first 40 findings only)
+        const noUid = f.some((x) => x.code === 'MPX_NO_UNIQUE_ID') ? { tasks_without_unique_id: true } : {};
+        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0), ...noUid, ...unreadable(), ...lob };
         // lenient: repair what can be repaired without guessing (key columns, ids), then judge the file again
         const fix = repairKeys(r.db);
         const g = fix.repaired.length ? importChecks(r.db, r.findings, format) : f;
@@ -418,7 +420,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still, file_as_given: asGiven,
           note: (fatal ? 'The file as given is one P6 itself would refuse (file_as_given says why): tell the user so. ' : '') + (still ? 'P6 would still reject this project if it were saved now: the fatal findings in diagnostics (and not_repaired) were not repaired automatically. Fix them with edit operations before P6 gets the file.'
             : fix.repaired.length ? 'Opened with repairs (diagnostics.repaired): a save writes a file P6 imports.' : 'Opened; nothing needed repairing.'),
-          diagnostics: { ...brief(g), repaired: fix.repaired, not_repaired: fix.not_repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0), ...unreadable(), ...lob,
+          diagnostics: { ...brief(g), repaired: fix.repaired, not_repaired: fix.not_repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0), ...noUid, ...unreadable(), ...lob,
         };
       } catch (e) { closeSession(s0); throw e; } finally { reading(); }
     }

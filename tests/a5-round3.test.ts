@@ -206,7 +206,14 @@ test('a Microsoft Project import from before v0.1.14 (task UIDs, no source mark)
   const ids = (await call('find_activities', { handle: o.handle })).activities.map((x: any) => x.id);
   const r = await call('edit', { handle: o.handle, operations: [{ op: 'add_relationship', pred: ids[0], succ: ids[1], type: 'SS' }] });
   assert.match(r.warnings[0], /Microsoft Project keeps one per pair/);
+  assert.equal(o.tasks_without_unique_id, undefined, 'the clone writes Unique IDs into its MPX');
   await call('close', { handle: o.handle, discard: true });
+  // an MPX whose tasks carry no Unique ID: said in a field of its own (diagnostics lists the first 40 findings only), however many findings come before it
+  const bare = join(mkdtempSync(join(tmpdir(), 'p6mpx-')), 'bare.mpx');
+  writeFileSync(bare, ['MPX,Microsoft Project for Windows,4.0,ANSI', '30,Demo,,,,,,,,,,,,,,03/02/26', '60,ID,Name,Outline Level,Duration', '61,90,1,3,40', '70,1,One,1,5d', '70,2,Two,1,5d'].join('\r\n'));
+  const b = await call('open_file', { path: bare });
+  assert.equal(b.tasks_without_unique_id, true);
+  await call('close', { handle: b.handle, discard: true });
 });
 
 test('copy_project of a project from Microsoft Project is a P6 project: its mark says so, so one relationship per pair and type, whatever its UIDs', () => {
