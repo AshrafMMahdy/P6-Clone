@@ -23,3 +23,48 @@
 **The platform's own note must be updated when this release is pinned:** the note that "a Microsoft Project XML file written by the P6 clone does not carry ... custom fields ..." is no longer true. It carries them, except what the notes above name (more fields of a kind than the format has slots; project, WBS, assignment, expense and role fields; integer, indicator and code fields come back as number / text).
 
 **Cost fields** are written in hundredths of the currency unit (1234.50 as 123450), the scale Microsoft Project and MPXJ use for a custom Cost field. The clone's other Microsoft Project cost elements (Cost, ActualCost ...) are written and read in plain units; that was not changed here.
+
+## Microsoft Project money, rates and material units: one definition of the format's value types (next release)
+
+**What was wrong.** Microsoft Project XML stores each kind of value its own way: currency in hundredths of the currency unit (1234.50 is `123450`;
+`<CurrencyDigits>` only says how many decimals Project shows), durations and work as ISO strings, slack and lag in tenths of a minute. The reader and the
+writer converted each value by hand where it was read or written, and the assignment costs (`Cost`, `ActualCost`, `RemainingCost`) were never given their
+type: they were read and written as plain numbers. So every cost from a Microsoft Project file (an `.mpp` through MPXJ, or XML) was 100 times too high in the
+clone (`AIStudio App schedule.mpp`: assignment `<Cost>2000000</Cost>` showed as a target cost of 2000000 and a rate of 10000 per quantity), and every cost the
+clone wrote was 100 times too low in Microsoft Project. It stayed hidden because the hand-made fixture `tests/fixtures/rich-mspdi.xml` had plain-unit costs,
+so the tests agreed with the code. The reference check (below) found two more of the same kind: a **rate** is per hour whatever `<StandardRateFormat>` says
+(the format only names the unit Project shows it in), but the clone divided or multiplied it by the unit of the format; and a **material** assignment's
+`<Units>` is its quantity (500 % is 5 units), which the clone wrote as a fraction per hour.
+
+**Since when.** Commit `07c6485` (2026-10-16, "Microsoft Project formats: MSPDI XML and MPX import/export ..."): the same commit that first read and wrote the
+assignment costs, the rate format switch and the material units. The custom Cost fields (commits `ae7f264`, `9a5bda5`) had their own private copy of the
+currency rule and were right; that copy is gone.
+
+**The method.** `core/msp/values.ts` is the one definition: a small codec per value type (read the text into the model value, the model value into text) and a
+table that says which element of Project / Task / Resource / Assignment / PredecessorLink / Baseline / ExtendedAttribute is which type. The reader and writer
+(`mspdi.ts`, `shared.ts`, `baselines.ts`, `custom-fields.ts`) take every conversion from it and do no unit arithmetic of their own; an element that is not in the
+table is an error, not a text. Currency elements the clone neither reads nor writes (task and resource `Cost`, `FixedCost`, overtime and earned-value
+elements, baseline `Cost`, timephased values) stay in a file as written; they are listed in `KEPT_AS_WRITTEN` there. The `.mpp` path (MPXJ to Project XML) and
+`baselines.ts` go through the same module. MPX (the old text format) has plain amounts by its own definition and is unchanged.
+
+**What changes for a caller.**
+- Costs read from a Microsoft Project file are right (hundredths read as the currency); costs the clone writes open right in Microsoft Project.
+- Rates of resources whose rate format is minute, day, week or month are read as the per-hour rate the file holds (before: converted again).
+- A material's quantity is written as the assignment's `<Units>` (and its `<Work>` as before).
+- A file the clone wrote before this release has its currency in plain units and no format stamp. The writer now stamps the revision in the alias of the
+  "P6 Schedule Rules" custom field definition (`P6 Schedule Rules 25.0 legacy, format 2`). A file of the clone without the stamp is read as plain units, with
+  one info finding (`MSP_OLD_CLONE_FILE`), and saving it again writes Microsoft Project's representation and the stamp. (A file of the clone that Microsoft
+  Project saved since has a `<BuildNumber>`, which the clone never writes; it holds hundredths and is read by the format's rule.) A file not written by the
+  clone is read by the format's rule.
+- A P6 custom field whose data type the clone does not know is no longer written from its text column alone: it is written as the Microsoft Project kind of the
+  one value column its rows hold (text, number, date, code); with values in more than one column it is not carried and the save's notes name it, its data type
+  and the reason.
+
+**The reference check.** `tests/msp-reference.test.ts` asks MPXJ itself (the pinned jars of `scripts/mpxj-files.mjs`, the same Java process as `core/msp/mpp.ts`,
+writing its JSON) for every task, resource and assignment of a file and compares each quantity with the clone's: costs (budget, actual, remaining), work and
+units, rates, durations and remaining durations, lag, total and free slack, percent complete, start / finish / actual dates. READ: six sample `.mpp` files (with
+money, progress, slack, lags, work and material resources), the hand-made XML fixture (percentage and elapsed lags) and a project with every rate format and a
+non-default day, week and month. WRITE: a P6 project (`130 TRIAL.xer`: costs, material, progress, lags), a hand-computed assignment, and an old-format file saved
+again. Compared exactly except where the converted file carries less (whole minutes for durations, tenths of a minute for slack, four decimals for units), stated
+in the test. It skips, saying why, where Java or the jars are missing. Before this change it failed on costs (READ and WRITE), on rates and on material units;
+everything else it compares (durations, slack, lags, percent, dates, work, units) already agreed.

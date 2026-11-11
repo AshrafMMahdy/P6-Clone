@@ -7,9 +7,10 @@ import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../
 import { parseXml, type Chunked, type XNode } from '../xml/p6xml.ts';
 import { isLegacyLayout, p6num } from '../schedule/cpm.ts';
 import { baselineNumbers, baselineXml, importMspBaselines, scanTaskBaselines, type FoundBaselines } from './baselines.ts';
-import { ASG_DEPS, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
-import { defaultShifts, emptyTask, linkKey, num, projectFromDb, projectToDb, toP6Date, type MCustom, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
+import { ASG_DEPS, WORK, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
+import { defaultShifts, emptyTask, linkKey, projectFromDb, projectToDb, type MCustom, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
 import { CF_KINDS, CF_SLOTS, longTextNote, planCustomFields, slotName, slotOfField, valueReader, type CfSubject } from './custom-fields.ts';
+import { FORMAT_REVISION, LAG_FORMAT, RATE_PER_HOUR, defaultCtx, lagIsElapsed, lagIsPercent, percentLagHours, readDate, readFlag, readLag, readNumber, readRate, readText, readUnits, revisionText, toP6Date, writeLag, writeValue, type Ctx, type Entity } from './values.ts';
 
 export const MSPDI_NS = 'http://schemas.microsoft.com/project';
 
@@ -32,27 +33,13 @@ const RES_TYPE_FIELD = ['205520904', 'Text1', 'P6 Resource Type'];
 /** A definition with no values, naming the P6 build whose scheduling rules made the dates (so F9 after reading the file
  *  back applies the same: P6 5-7 builds place milestones one minute into a period). */
 const RULES_FIELD = ['188743746', 'Text6'];
-const rulesAlias = (ver: string, legacy: boolean) => `P6 Schedule Rules ${ver || '?'}${legacy ? ' legacy' : ''}`;
+/** The definition's alias: the P6 build, whether its layout is the legacy one, and the revision of how the clone wrote the file's values (values.ts
+ *  FORMAT_REVISION): a file of the clone without the revision is one written before currency was stored as Microsoft Project stores it. */
+const RULES_ALIAS = /^P6 Schedule Rules (\S+)( legacy)?(?:, format (\d+))?$/;
+const rulesAlias = (ver: string, legacy: boolean) => `P6 Schedule Rules ${ver || '?'}${legacy ? ' legacy' : ''}, ${revisionText()}`;
 
-// ---------- durations and times
+// ---------- times of day
 
-/** ISO-8601 duration (PT40H0M0S, P1DT2H, -PT8H) -> hours. Days count as working days of minutesPerDay. */
-export function isoDurationHours(s: string, minutesPerDay = 480): number | null {
-  const m = /^(-)?P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)W)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(s.trim());
-  if (!m) return null;
-  const n = (i: number) => Number(m[i] ?? 0);
-  const dayH = minutesPerDay / 60;
-  const h = n(2) * 52 * 5 * dayH + n(3) * 20 * dayH + n(4) * 5 * dayH + n(5) * dayH + n(6) + n(7) / 60 + n(8) / 3600;
-  return m[1] ? -h : h;
-}
-
-export function hoursToIso(h: number): string {
-  const neg = h < 0;
-  const secs = Math.round(Math.abs(h) * 3600);
-  return `${neg ? '-' : ''}PT${Math.floor(secs / 3600)}H${Math.floor((secs % 3600) / 60)}M${secs % 60}S`;
-}
-
-const xmlDate = (s: string) => { const t = parseP6Date(s); return t == null ? '' : formatP6Date(t).replace(' ', 'T') + ':00'; };
 const hms = (m: number) => `${String(Math.floor((m % 1440) / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`;
 const parseTime = (s: string, isEnd: boolean): number | null => {
   const m = /^(\d{1,2}):(\d{2})/.exec(s.trim());
@@ -116,7 +103,7 @@ export function parseMspdi(text: string | Chunked): { db: Db; findings: Finding[
     const db = projectToDb(m, findings, 'The Microsoft Project XML file');
     snapshotKept(db);
     // Baseline and Baseline1-10: saved baselines of the project (after the snapshot: they are not edits of the file)
-    const bl = importMspBaselines(db, typeof src === 'string' ? src : reader.baselines);
+    const bl = importMspBaselines(db, typeof src === 'string' ? src : reader.baselines, m.minutesPerDay);
     if (bl.length) findings.push({ severity: 'info', code: 'MSP_BASELINES', message: `${bl.length} baseline(s) read: ${bl.join(', ')}.`, p6: 'P6 imports Microsoft Project baselines only through its own conversion; the clone keeps each as a saved baseline.' });
     return { db, findings };
   } catch (e) {
@@ -130,12 +117,16 @@ export function parseMspdi(text: string | Chunked): { db: Db; findings: Finding[
 function projectReader(findings: Finding[], src: string | Chunked) {
   const baselines: FoundBaselines = new Map(); // (a document in pieces: collected task by task as they are read)
   let doc: XNode | null = null, p: XNode | null = null, headDone = false;
-  let minutesPerDay = 480;
+  // what the conversions of values.ts need of the file: the length of its day (set by head), whether it is a file of the clone's revision 1
+  const ctx: Ctx = defaultCtx();
+  // an element's value as the model holds it, by the type values.ts gives the element (the conversion is never done here)
+  const rNum = (e: Entity, n: XNode, name: string) => readNumber(e, name, val(n, name), ctx);
+  const rDate = (e: Entity, n: XNode, name: string) => readDate(e, name, val(n, name));
+  const rFlag = (e: Entity, n: XNode, name: string) => readFlag(e, name, val(n, name));
   // every element is also kept as written, so what the model does not hold goes back into the file unchanged (keep.ts)
   const raw = (n: XNode) => src.slice(n.s, n.e);
   const kidsOf = (n: XNode): [string, string][] => n.children.map((c) => [c.name, raw(c)]);
   const ghosts: Ghosts = { tasks: [], resources: [], assignments: [], calendars: [] };
-  const hrs = (s: string) => (s ? isoDurationHours(s, minutesPerDay) : null);
   const extKey = new Map<string, keyof P6Extra | 'rsrcType'>();
   // custom fields of the file that are not the clone's own (custom-fields.ts): the definitions of the slots it carries (FieldID -> alias),
   // the FieldIDs with a value, every FieldID the file has, and the aliased fields of kinds P6 has no field type for
@@ -150,22 +141,30 @@ function projectReader(findings: Finding[], src: string | Chunked) {
       sumTasks.add(uid);
     }
   };
-  let p6rules: { ver: string; legacy: boolean; known: boolean } | null = null;
+  let p6rules: { ver: string; legacy: boolean; known: boolean } | null = null, revision = 1;
   const calendars: MCal[] = [];
   const head = (p: XNode) => {
   headDone = true;
-  minutesPerDay = num(val(p, 'MinutesPerDay')) || 480;
+  ctx.minutesPerDay = readNumber('Project', 'MinutesPerDay', val(p, 'MinutesPerDay'), ctx) || 480;
+  ctx.minutesPerWeek = readNumber('Project', 'MinutesPerWeek', val(p, 'MinutesPerWeek'), ctx) || ctx.minutesPerDay * 5;
   // custom field aliases
   for (const e of kids(child(p, 'ExtendedAttributes'), 'ExtendedAttribute')) {
     const alias = val(e, 'Alias'), fid = val(e, 'FieldID');
     cfUsed.add(fid);
     const hit = TASK_TEXT.find((x) => x[3] === alias);
-    const rules = /^P6 Schedule Rules (\S+)( legacy)?$/.exec(alias);
-    if (rules) { p6rules = { ver: rules[1] === '?' ? '' : rules[1], legacy: !!rules[2], known: true }; continue; }
+    const rules = RULES_ALIAS.exec(alias);
+    if (rules) { p6rules = { ver: rules[1] === '?' ? '' : rules[1], legacy: !!rules[2], known: true }; revision = Number(rules[3] ?? 1); continue; }
     if (hit) extKey.set(fid, hit[0]);
     else if (alias === RES_TYPE_FIELD[2]) extKey.set(fid, 'rsrcType');
     else if (slotOfField(fid)) cfDefs.set(fid, alias);
     else if (alias) cfUnread.push(`${alias} (${val(e, 'FieldName') || fid})`);
+  }
+  // A file the clone wrote (its own custom field definitions are there) without the stamp of the current revision was written before the clone stored
+  // currency as Microsoft Project does: its currency elements are plain units. (One Microsoft Project saved since has a <BuildNumber>, which the clone
+  // never writes, and holds Microsoft Project's representation whatever it was before.) Files of other tools are read by the format's rule.
+  if ((extKey.size > 0 || p6rules) && revision < FORMAT_REVISION && !val(p, 'BuildNumber')) {
+    ctx.plainCurrency = true;
+    findings.push({ severity: 'info', code: 'MSP_OLD_CLONE_FILE', message: 'This file was written by an earlier version of the clone: its costs were stored in plain units (not in hundredths of the currency unit, as Microsoft Project stores them) and were read accordingly. Saving it again writes Microsoft Project\'s representation.', p6: 'P6 has no such files: Microsoft Project would show these costs one hundredth of what they are.' });
   }
 
   // calendars
@@ -210,41 +209,40 @@ function projectReader(findings: Finding[], src: string | Chunked) {
     const uid = val(t, 'UID');
     const eas = kids(t, 'ExtendedAttribute');
     for (const e of eas) cfUsed.add(val(e, 'FieldID'));
-    const seq = num(val(t, 'ID')) ?? i;
+    const seq = rNum('Task', t, 'ID') ?? i;
     // the project summary task (UID 0) and blank rows are not activities: kept as they are, in their place
-    if (flag(val(t, 'IsNull')) || uid === '0' || val(t, 'OutlineLevel') === '0') { if (uid) { ghosts.tasks.push({ seq, uid, xml: raw(t) }); if (!flag(val(t, 'IsNull'))) summaryValues(eas, uid); } return; }
+    if (rFlag('Task', t, 'IsNull') || uid === '0' || val(t, 'OutlineLevel') === '0') { if (uid) { ghosts.tasks.push({ seq, uid, xml: raw(t) }); if (!rFlag('Task', t, 'IsNull')) summaryValues(eas, uid); } return; }
     if (!uid) return;
-    const m = emptyTask(uid, num(val(t, 'ID')) ?? tasks.length + 1);
+    const m = emptyTask(uid, rNum('Task', t, 'ID') ?? tasks.length + 1);
     m.keep = { kids: kidsOf(t), xml: '', seq, id: val(t, 'ID') };
     const outline = val(t, 'OutlineNumber');
     m.name = val(t, 'Name');
-    m.level = num(val(t, 'OutlineLevel')) ?? (outline ? outline.split('.').length : 1);
+    m.level = rNum('Task', t, 'OutlineLevel') ?? (outline ? outline.split('.').length : 1);
     m.outline = outline;
     m.wbs = val(t, 'WBS');
-    m.summary = flag(val(t, 'Summary'));
-    m.milestone = flag(val(t, 'Milestone'));
-    m.type = num(val(t, 'Type'));
-    m.durHrs = hrs(val(t, 'Duration'));
-    m.remHrs = hrs(val(t, 'RemainingDuration'));
-    m.actHrs = hrs(val(t, 'ActualDuration'));
-    m.pct = num(val(t, 'PercentComplete'));
-    m.start = toP6Date(val(t, 'Start'));
-    m.finish = toP6Date(val(t, 'Finish'));
-    m.earlyStart = toP6Date(val(t, 'EarlyStart'));
-    m.earlyFinish = toP6Date(val(t, 'EarlyFinish'));
-    m.lateStart = toP6Date(val(t, 'LateStart'));
-    m.lateFinish = toP6Date(val(t, 'LateFinish'));
-    m.actualStart = toP6Date(val(t, 'ActualStart'));
-    m.actualFinish = toP6Date(val(t, 'ActualFinish'));
-    m.constraintType = num(val(t, 'ConstraintType'));
-    m.constraintDate = toP6Date(val(t, 'ConstraintDate'));
-    m.deadline = toP6Date(val(t, 'Deadline'));
+    m.summary = !!rFlag('Task', t, 'Summary');
+    m.milestone = !!rFlag('Task', t, 'Milestone');
+    m.type = rNum('Task', t, 'Type');
+    m.durHrs = rNum('Task', t, 'Duration');
+    m.remHrs = rNum('Task', t, 'RemainingDuration');
+    m.actHrs = rNum('Task', t, 'ActualDuration');
+    m.pct = rNum('Task', t, 'PercentComplete');
+    m.start = rDate('Task', t, 'Start');
+    m.finish = rDate('Task', t, 'Finish');
+    m.earlyStart = rDate('Task', t, 'EarlyStart');
+    m.earlyFinish = rDate('Task', t, 'EarlyFinish');
+    m.lateStart = rDate('Task', t, 'LateStart');
+    m.lateFinish = rDate('Task', t, 'LateFinish');
+    m.actualStart = rDate('Task', t, 'ActualStart');
+    m.actualFinish = rDate('Task', t, 'ActualFinish');
+    m.constraintType = rNum('Task', t, 'ConstraintType');
+    m.constraintDate = rDate('Task', t, 'ConstraintDate');
+    m.deadline = rDate('Task', t, 'Deadline');
     const cu = val(t, 'CalendarUID');
     m.calUid = cu && cu !== '-1' ? cu : '';
-    const ts = num(val(t, 'TotalSlack')), fs = num(val(t, 'FreeSlack'));
-    m.totalSlackHrs = ts == null ? null : ts / 600;
-    m.freeSlackHrs = fs == null ? null : fs / 600;
-    m.critical = val(t, 'Critical') ? flag(val(t, 'Critical')) : null;
+    m.totalSlackHrs = rNum('Task', t, 'TotalSlack');
+    m.freeSlackHrs = rNum('Task', t, 'FreeSlack');
+    m.critical = rFlag('Task', t, 'Critical');
     if (m.summary) summaryValues(eas, uid);
     for (const e of eas) {
       const fid = val(e, 'FieldID'), k = extKey.get(fid);
@@ -258,16 +256,14 @@ function projectReader(findings: Finding[], src: string | Chunked) {
       m.links.push(null); // replaced below by the link read from it; null: a link the clone does not import
       const pu = val(l, 'PredecessorUID');
       if (!pu) continue;
-      if (flag(val(l, 'CrossProject'))) { findings.push({ severity: 'warning', code: 'MSP_CROSS_PROJECT_LINK', table: 'TASKPRED', key: uid, message: `"${m.name}" has a cross-project predecessor (${val(l, 'CrossProjectName')}); link dropped.`, p6: 'P6 cannot resolve links to other MS Project files.' }); continue; }
-      const type = (['FF', 'FS', 'SF', 'SS'] as RelType[])[num(val(l, 'Type')) ?? 1] ?? 'FS';
-      const lag = num(val(l, 'LinkLag')) ?? 0;
-      const fmt = num(val(l, 'LagFormat')) ?? 7;
-      const base = fmt > 32 ? fmt - 32 : fmt; // 35.. = estimated variants
-      const lagHrs = lag / 600; // tenths of minutes
+      if (rFlag('PredecessorLink', l, 'CrossProject')) { findings.push({ severity: 'warning', code: 'MSP_CROSS_PROJECT_LINK', table: 'TASKPRED', key: uid, message: `"${m.name}" has a cross-project predecessor (${val(l, 'CrossProjectName')}); link dropped.`, p6: 'P6 cannot resolve links to other MS Project files.' }); continue; }
+      const type = (['FF', 'FS', 'SF', 'SS'] as RelType[])[rNum('PredecessorLink', l, 'Type') ?? 1] ?? 'FS';
+      const fmt = rNum('PredecessorLink', l, 'LagFormat') ?? LAG_FORMAT;
+      const { hours: lagHrs, percent } = readLag(val(l, 'LinkLag'), fmt);
       // Assumption (as MPXJ reads it): percentage lags store the plain percentage in LinkLag.
-      if (base === 19 || base === 20) { lagFormats.add('percent'); m.preds.push({ uid: pu, type, lagHrs: 0, lagPct: lag, lagFile: { value: val(l, 'LinkLag'), format: String(fmt) } }); m.links[m.links.length - 1] = m.preds[m.preds.length - 1]; continue; }
-      if ([4, 6, 8, 10, 12].includes(base) && lag) lagFormats.add('elapsed');
-      m.preds.push({ uid: pu, type, lagHrs, ...(lag && [4, 6, 8, 10, 12].includes(base) ? { lagFile: { value: val(l, 'LinkLag'), format: String(fmt) } } : {}) });
+      if (lagIsPercent(fmt)) { lagFormats.add('percent'); m.preds.push({ uid: pu, type, lagHrs: 0, lagPct: percent, lagFile: { value: val(l, 'LinkLag'), format: String(fmt) } }); m.links[m.links.length - 1] = m.preds[m.preds.length - 1]; continue; }
+      if (lagIsElapsed(fmt) && lagHrs) lagFormats.add('elapsed');
+      m.preds.push({ uid: pu, type, lagHrs, ...(lagHrs && lagIsElapsed(fmt) ? { lagFile: { value: val(l, 'LinkLag'), format: String(fmt) } } : {}) });
       m.links[m.links.length - 1] = m.preds[m.preds.length - 1];
     }
     tasks.push(m);
@@ -282,8 +278,8 @@ function projectReader(findings: Finding[], src: string | Chunked) {
     const eas = kids(r, 'ExtendedAttribute');
     for (const e of eas) cfUsed.add(val(e, 'FieldID'));
     const name = val(r, 'Name');
-    if (flag(val(r, 'IsNull')) || !uid || (uid === '0' && !name)) { if (uid) ghosts.resources.push({ seq, uid, xml: raw(r) }); return; }
-    const t = num(val(r, 'Type')) ?? 1;
+    if (rFlag('Resource', r, 'IsNull') || !uid || (uid === '0' && !name)) { if (uid) ghosts.resources.push({ seq, uid, xml: raw(r) }); return; }
+    const t = rNum('Resource', r, 'Type') ?? 1;
     const cu = val(r, 'CalendarUID');
     let p6Type: string | undefined;
     const udf: [string, string][] = [];
@@ -292,12 +288,9 @@ function projectReader(findings: Finding[], src: string | Chunked) {
       if (extKey.get(fid) === 'rsrcType') p6Type = val(e, 'Value');
       else if (!extKey.has(fid) && slotOfField(fid)?.subject === 'Resource' && text.trim()) { udf.push([fid, text]); cfValued.add(fid); }
     }
-    const fmt = num(val(r, 'StandardRateFormat')) ?? 2;
-    let rate = num(val(r, 'StandardRate'));
-    // StandardRateFormat: 1 per minute, 2 hour, 3 day, 4 week, 5 month (8 h days assumed for day/week/month)
-    if (rate != null && t !== 0) rate = fmt === 1 ? rate * 60 : fmt === 3 ? rate / (minutesPerDay / 60) : fmt === 4 ? rate / (minutesPerDay / 12) : fmt === 5 ? rate / (minutesPerDay / 3) : rate;
+    const rate = readRate(val(r, 'StandardRate'));
     resType?.set(uid, t === 0 ? 'material' : t === 2 ? 'cost' : 'work'); // (an assignment written before its resource)
-    resources.push({ uid, id: num(val(r, 'ID')) ?? resources.length + 1, name, code: val(r, 'Code') || val(r, 'Initials'), type: t === 0 ? 'material' : t === 2 ? 'cost' : 'work', maxUnits: num(val(r, 'MaxUnits')), rate, calUid: cu && cu !== '-1' ? cu : '', p6Type, ...(udf.length ? { udf } : {}), keep: { kids: kidsOf(r), xml: '', seq, id: val(r, 'ID') } });
+    resources.push({ uid, id: rNum('Resource', r, 'ID') ?? resources.length + 1, name, code: val(r, 'Code') || val(r, 'Initials'), type: t === 0 ? 'material' : t === 2 ? 'cost' : 'work', maxUnits: rNum('Resource', r, 'MaxUnits'), rate, calUid: cu && cu !== '-1' ? cu : '', p6Type, ...(udf.length ? { udf } : {}), keep: { kids: kidsOf(r), xml: '', seq, id: val(r, 'ID') } });
   };
 
   // assignments
@@ -310,12 +303,12 @@ function projectReader(findings: Finding[], src: string | Chunked) {
     const uid = val(a, 'UID');
     if (!uid) return;
     const ru = val(a, 'ResourceUID');
-    const work = hrs(val(a, 'Work'));
+    const work = rNum('Assignment', a, 'Work');
     assignments.push({
-      uid, taskUid: val(a, 'TaskUID'), resUid: ru, units: resType!.get(ru) === 'material' && work != null ? null : num(val(a, 'Units')),
-      workHrs: work, actualWorkHrs: hrs(val(a, 'ActualWork')), remainingWorkHrs: hrs(val(a, 'RemainingWork')),
-      cost: num(val(a, 'Cost')), actualCost: num(val(a, 'ActualCost')), remainingCost: num(val(a, 'RemainingCost')),
-      start: toP6Date(val(a, 'Start')), finish: toP6Date(val(a, 'Finish')), actualStart: toP6Date(val(a, 'ActualStart')), actualFinish: toP6Date(val(a, 'ActualFinish')),
+      uid, taskUid: val(a, 'TaskUID'), resUid: ru, units: readUnits(val(a, 'Units'), resType!.get(ru) === 'material', work),
+      workHrs: work, actualWorkHrs: rNum('Assignment', a, 'ActualWork'), remainingWorkHrs: rNum('Assignment', a, 'RemainingWork'),
+      cost: rNum('Assignment', a, 'Cost'), actualCost: rNum('Assignment', a, 'ActualCost'), remainingCost: rNum('Assignment', a, 'RemainingCost'),
+      start: rDate('Assignment', a, 'Start'), finish: rDate('Assignment', a, 'Finish'), actualStart: rDate('Assignment', a, 'ActualStart'), actualFinish: rDate('Assignment', a, 'ActualFinish'),
       keep: { kids: kidsOf(a), xml: raw(a), seq },
     });
   };
@@ -323,14 +316,14 @@ function projectReader(findings: Finding[], src: string | Chunked) {
   const split = (parents: string[], name: string) => parents.length === 2 && parents[0] === 'Project' && ((parents[1] === 'Tasks' && name === 'Task') || (parents[1] === 'Resources' && name === 'Resource') || (parents[1] === 'Assignments' && name === 'Assignment'));
   const emit = (_parents: string[], n: XNode) => {
     if (!headDone) { p = doc?.children.find((c) => c.name === 'Project') ?? null; if (p) head(p); }
-    if (n.name === 'Task') { task(n); if (typeof src !== 'string') { const x = raw(n); if (x.includes('<Baseline>')) scanTaskBaselines(x, baselines); } } else if (n.name === 'Resource') resource(n); else assignment(n);
+    if (n.name === 'Task') { task(n); if (typeof src !== 'string') { const x = raw(n); if (x.includes('<Baseline>')) scanTaskBaselines(x, baselines, ctx.minutesPerDay); } } else if (n.name === 'Resource') resource(n); else assignment(n);
   };
   const finish = (p: XNode): MProject => {
   if (!headDone) head(p);
   tasks.sort((a, b) => a.id - b.id);
   // percentage lags: percent of the predecessor's duration
   const byUid = new Map(tasks.map((t) => [t.uid, t]));
-  for (const t of tasks) for (const l of t.preds) if (l.lagPct != null) l.lagHrs = (l.lagPct / 100) * (byUid.get(l.uid)?.durHrs ?? 0);
+  for (const t of tasks) for (const l of t.preds) if (l.lagPct != null) l.lagHrs = percentLagHours(l.lagPct, byUid.get(l.uid)?.durHrs ?? 0);
   if (lagFormats.has('elapsed')) findings.push({ severity: 'info', code: 'MSP_ELAPSED_LAG', table: 'TASKPRED', message: 'Some links use elapsed lags; they were converted to working-hour lags.', p6: 'P6 has no elapsed lags; P6 converts them and counts lags on the scheduling option\'s lag calendar.' });
   if (lagFormats.has('percent')) findings.push({ severity: 'info', code: 'MSP_PERCENT_LAG', table: 'TASKPRED', message: 'Some links use percentage lags; they were converted to hours of the predecessor\'s duration.', p6: 'P6 has no percentage lags.' });
 
@@ -352,17 +345,16 @@ function projectReader(findings: Finding[], src: string | Chunked) {
   if (sumFields.size) findings.push({ severity: 'info', code: 'MSP_CUSTOM_FIELD_SUMMARY', message: `Custom field values on summary tasks were not read as P6 custom fields: ${[...sumFields].map(([fid, n]) => { const { kind, n: i } = slotOfField(fid)!; return `${cfDefs.get(fid) || slotName(kind, i)} (${slotName(kind, i)}, ${n} value${n === 1 ? '' : 's'})`; }).join(', ')} on ${sumTasks.size} summary task(s) (the project summary task counts as one). They stay in the Microsoft Project file when it is saved again as Microsoft Project XML, but they are not in the P6 data, so an XER or P6 XML made from it does not have them.`, p6: 'P6 activities are the non-summary tasks; a summary task is a WBS element, which the clone does not carry custom values on.' });
   if (cfUnread.length) findings.push({ severity: 'info', code: 'MSP_CUSTOM_FIELD_KIND', message: `${cfUnread.length} Microsoft Project custom field(s) of a kind P6 has no custom field type for (flag, duration, outline code) were not read as P6 custom fields: ${cfUnread.join(', ')}. They stay in the file as they are when it is saved again as Microsoft Project XML.`, p6: 'P6 maps Microsoft Project custom fields only through a template set up by hand; the clone reads those with a P6 equivalent (text, number, cost, date) as P6 custom fields.' });
 
-  const sip = val(p, 'SplitsInProgressTasks');
   return {
-    name: val(p, 'Name'), title: val(p, 'Title'), start: toP6Date(val(p, 'StartDate')), finish: toP6Date(val(p, 'FinishDate')),
-    statusDate: toP6Date(val(p, 'StatusDate')), calUid: val(p, 'CalendarUID'), minutesPerDay, minutesPerWeek: num(val(p, 'MinutesPerWeek')) || minutesPerDay * 5,
-    splitsInProgress: sip ? flag(sip) : null, criticalHrs: (num(val(p, 'CriticalSlackLimit')) ?? 0) * (minutesPerDay / 60),
+    name: val(p, 'Name'), title: val(p, 'Title'), start: rDate('Project', p, 'StartDate'), finish: rDate('Project', p, 'FinishDate'),
+    statusDate: rDate('Project', p, 'StatusDate'), calUid: val(p, 'CalendarUID'), minutesPerDay: ctx.minutesPerDay, minutesPerWeek: ctx.minutesPerWeek!,
+    splitsInProgress: rFlag('Project', p, 'SplitsInProgressTasks'), criticalHrs: rNum('Project', p, 'CriticalSlackLimit') ?? 0,
     calendars, tasks, resources, assignments, custom,
-    keep: { kids: p.children.map((c): [string, string | null] => [c.name, COLLECTIONS.has(c.name) ? null : raw(c)]), ghosts, p6ext: extKey.size > 0, cfUsed: [...cfUsed], cfRead: custom.map((c) => c.fieldId) },
+    keep: { kids: p.children.map((c): [string, string | null] => [c.name, COLLECTIONS.has(c.name) ? null : raw(c)]), ghosts, p6ext: extKey.size > 0, plainCurrency: !!ctx.plainCurrency, cfUsed: [...cfUsed], cfRead: custom.map((c) => c.fieldId) },
     // dates made by P6 (a file the clone wrote from P6): F9 keeps P6's rules; dates made by Microsoft Project: its rule
     // for started tasks, unless the file moves remaining work after the status date (then it is P6's rule too)
     // (a file the clone wrote before it named the rules: P6 5-7 builds leave dates one minute into or before a period)
-    rules: p6rules ?? (extKey.size > 0 ? { ver: '', legacy: tasks.some((t) => [t.earlyStart, t.earlyFinish, t.lateStart, t.lateFinish].some((d) => /:(01|59)$/.test(d))), known: true } : { resume: val(p, 'MoveRemainingStartsForward') !== '1' && val(p, 'MoveRemainingStartsForward').toLowerCase() !== 'true' }),
+    rules: p6rules ?? (extKey.size > 0 ? { ver: '', legacy: tasks.some((t) => [t.earlyStart, t.earlyFinish, t.lateStart, t.lateFinish].some((d) => /:(01|59)$/.test(d))), known: true } : { resume: !rFlag('Project', p, 'MoveRemainingStartsForward') }),
   };
   };
   return { split, emit, finish, baselines, onRoot: (r: XNode) => { doc = r; } };
@@ -373,8 +365,8 @@ function projectReader(findings: Finding[], src: string | Chunked) {
 /** A link read from the file whose type or lag an edit changed: the same element with the new type and lag, in its own
  *  lag format (a percentage lag stays a percentage of the predecessor's duration). */
 function relink(xml: string, l: MPred, predHrs: number): string {
-  const fmt = Number(/<LagFormat>\s*(\d+)/.exec(xml)?.[1] ?? 7), base = fmt > 32 ? fmt - 32 : fmt;
-  const lag = base === 19 || base === 20 ? Math.round(predHrs > 0 ? (l.lagHrs / predHrs) * 100 : 0) : Math.round(l.lagHrs * 600);
+  const fmt = Number(/<LagFormat>\s*(\d+)/.exec(xml)?.[1] ?? LAG_FORMAT);
+  const lag = writeLag(l.lagHrs, fmt, predHrs);
   let x = xml.replace(/<Type>[^<]*<\/Type>/, `<Type>${['FF', 'FS', 'SF', 'SS'].indexOf(l.type)}</Type>`);
   x = /<LinkLag>/.test(x) ? x.replace(/<LinkLag>[^<]*<\/LinkLag>/, `<LinkLag>${lag}</LinkLag>`) : x.replace(/<\/Type>/, `</Type><LinkLag>${lag}</LinkLag>`);
   return x;
@@ -462,9 +454,11 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   // each element's children are collected as [name, xml] pairs, so a project read from MSPDI can be merged back
   // into what the file had (keep.ts): unchanged elements go out as they came in
   let cur: [string, string][] = [];
-  const el = (tag: string, v: string | number | null | undefined) => { if (v != null && v !== '') cur.push([tag, `<${tag}>${esc(String(v))}</${tag}>`]); };
-  const dt = (tag: string, s: string) => el(tag, xmlDate(s));
-  const b = (x: boolean) => (x ? 1 : 0);
+  // the value of an element is the model's: the text is made by values.ts from the type it gives the element of the entity being written
+  let ent: Entity = 'Project';
+  const wctx: Ctx = { minutesPerDay: m.minutesPerDay, minutesPerWeek: m.minutesPerWeek };
+  const el = (tag: string, v: string | number | boolean | null | undefined) => { const x = writeValue(ent, tag, v, wctx); if (x !== '') cur.push([tag, `<${tag}>${esc(x)}</${tag}>`]); };
+  const dt = el;
   const now = formatP6Date(Math.floor(Date.now() / 60000));
   const k = keepCtx(db);
   const fromMsp = !!m.keep;
@@ -474,7 +468,7 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   const ourField = new Set([...TASK_TEXT.map((x) => x[1]), RES_TYPE_FIELD[0]]);
   // the P6 custom fields (custom-fields.ts): the slot of each in a free custom field of its kind, never one of the clone's own fields or
   // one the file this was read from already has
-  const ownName = (n: string) => TASK_TEXT.some((x) => x[3] === n) || n === RES_TYPE_FIELD[2] || /^P6 Schedule Rules (\S+)( legacy)?$/.test(n);
+  const ownName = (n: string) => TASK_TEXT.some((x) => x[3] === n) || n === RES_TYPE_FIELD[2] || RULES_ALIAS.test(n);
   const rawDefs = m.keep?.kids.find((x) => x[0] === 'ExtendedAttributes')?.[1] ?? null;
   const oldDefs = rawDefs ? parseXml(rawDefs).children[0].children.filter((c) => c.name === 'ExtendedAttribute').map((c) => ({ fid: val(c, 'FieldID'), alias: val(c, 'Alias'), name: val(c, 'FieldName'), xml: rawDefs.slice(c.s, c.e) })) : [];
   const fileHas = new Set([...(m.keep?.cfUsed ?? []), ...oldDefs.map((d) => d.fid)]);
@@ -482,10 +476,14 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   const written = { TASK: new Set(m.tasks.flatMap((t) => (t.row?.task_id ? [t.row.task_id] : []))), RSRC: new Set(m.resources.flatMap((r) => (r.row?.rsrc_id ? [r.row.rsrc_id] : []))) };
   const typeTable = new Map(rows(db, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
   const valued = new Set(rows(db, 'UDFVALUE').filter((v) => (v.udf_text || v.udf_number || v.udf_date || v.udf_code_id) && written[typeTable.get(v.udf_type_id) as 'TASK' | 'RSRC']?.has(v.fk_id)).map((v) => v.udf_type_id));
-  const cf = planCustomFields(db, { valued, newFile: !fromMsp, reserved: { Task: new Set(fromMsp ? [] : [...TASK_TEXT.map((x) => x[1]), RULES_FIELD[0]]), Resource: new Set(fromMsp ? [] : [RES_TYPE_FIELD[0]]) }, used: fileHas, own: ownName });
+  // the revision stamp lives in the rules definition's alias; a file of the clone that never had that definition gets it in its own slot (or the first free text one)
+  const rulesDef = oldDefs.find((d) => RULES_ALIAS.test(d.alias));
+  const stampNew = fromMsp && p6ext && !rulesDef;
+  const rulesId = stampNew ? [RULES_FIELD[0], ...CF_SLOTS.Task.Text.map(String)].find((id) => !fileHas.has(id)) : RULES_FIELD[0];
+  const cf = planCustomFields(db, { valued, newFile: !fromMsp, reserved: { Task: new Set(fromMsp ? (stampNew && rulesId ? [rulesId] : []) : [...TASK_TEXT.map((x) => x[1]), RULES_FIELD[0]]), Resource: new Set(fromMsp ? [] : [RES_TYPE_FIELD[0]]) }, used: fileHas, own: ownName });
   for (const n of cf.notes) opts.report?.push(n);
   const cfRead = new Set(m.keep?.cfRead ?? []), cfCarried = new Set(cf.fields.map((f) => f.fieldId));
-  const cfValue = valueReader(db, cf.fields, xmlDate);
+  const cfValue = valueReader(db, cf.fields, wctx);
   const cfTask = cf.fields.filter((f) => f.subject === 'Task'), cfRes = cf.fields.filter((f) => f.subject === 'Resource');
   // A file's own element of a custom field whose value did not change goes back untouched (a lookup-table link, <ValueGUID>, and any other
   // child stays); only the element of a field whose value changed is made anew, and what it drops of the file's element is named in the notes.
@@ -534,6 +532,7 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
 
   const proj: [string, string][] = [];
   cur = proj;
+  ent = 'Project';
   el('SaveVersion', 14);
   el('Name', m.name);
   el('Title', m.title);
@@ -543,7 +542,7 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   el('ScheduleFromStart', 1);
   dt('StartDate', m.start);
   dt('FinishDate', m.finish || m.start);
-  el('CriticalSlackLimit', Math.round((m.criticalHrs / (m.minutesPerDay / 60)) || 0));
+  el('CriticalSlackLimit', m.criticalHrs);
   el('CalendarUID', m.calUid);
   el('DefaultStartTime', '08:00:00');
   el('DefaultFinishTime', '17:00:00');
@@ -557,12 +556,12 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   el('MultipleCriticalPaths', 0);
   el('NewTasksEffortDriven', 0);
   el('NewTasksEstimated', 0);
-  el('SplitsInProgressTasks', b(m.splitsInProgress ?? true));
+  el('SplitsInProgressTasks', m.splitsInProgress ?? true);
   el('WeekStartDay', 1);
   dt('StatusDate', m.statusDate);
   el('NewTaskStartDate', 0);
   const pr = m.row ?? {};
-  const rules = `<ExtendedAttribute><FieldID>${RULES_FIELD[0]}</FieldID><FieldName>${RULES_FIELD[1]}</FieldName><Alias>${esc(rulesAlias(pr._p6_ver || db.header?.version || '', pr._legacy_ms ? pr._legacy_ms === 'Y' : isLegacyLayout(db)))}</Alias></ExtendedAttribute>`;
+  const rules = `<ExtendedAttribute><FieldID>${rulesId}</FieldID><FieldName>${slotName('Text', CF_SLOTS.Task.Text.indexOf(Number(rulesId)) + 1)}</FieldName><Alias>${esc(rulesAlias(pr._p6_ver || db.header?.version || '', pr._legacy_ms ? pr._legacy_ms === 'Y' : isLegacyLayout(db)))}</Alias></ExtendedAttribute>`;
   let defsChanged = false;
   if (!fromMsp) proj.push(['ExtendedAttributes', `<ExtendedAttributes>${TASK_TEXT.map(([, id, name, alias]) => `<ExtendedAttribute><FieldID>${id}</FieldID><FieldName>${name}</FieldName><Alias>${alias}</Alias></ExtendedAttribute>`).join('')}<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><FieldName>${RES_TYPE_FIELD[1]}</FieldName><Alias>${RES_TYPE_FIELD[2]}</Alias></ExtendedAttribute>${rules}${cf.fields.map(cfDef).join('')}</ExtendedAttributes>`]);
   else {
@@ -577,8 +576,11 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
       const f = byId.get(d.fid);
       if (!f && cfRead.has(d.fid)) { defsChanged = true; continue; }
       if (f && cfRead.has(d.fid) && f.alias !== readName(f, d.alias)) { defsChanged = true; out.push(/<Alias>/.test(d.xml) ? d.xml.replace(/<Alias>[\s\S]*?<\/Alias>/, `<Alias>${esc(f.alias)}</Alias>`) : d.xml.replace(/<\/ExtendedAttribute>\s*$/, `<Alias>${esc(f.alias)}</Alias></ExtendedAttribute>`)); continue; }
+      // a file of the clone from before the revision stamp: stamped now, as its currency is written as Microsoft Project stores it from here on
+      if (d === rulesDef && !d.alias.endsWith(`, ${revisionText()}`)) { defsChanged = true; out.push(d.xml.replace(/<Alias>[\s\S]*?<\/Alias>/, `<Alias>${esc(d.alias.replace(/(, format \d+)?$/, `, ${revisionText()}`))}</Alias>`)); continue; }
       out.push(d.xml);
     }
+    if (stampNew) { if (rulesId) { out.push(rules); defsChanged = true; } else opts.report?.push(`The file was written by the clone but has no free Text custom field for the clone's format stamp (${revisionText()}): without it, opening this file again reads its costs as plain units. Free a Text field of the tasks and save again.`); }
     const have = new Set(oldDefs.map((d) => d.fid));
     for (const f of cf.fields) if (!have.has(f.fieldId) && (!cfRead.has(f.fieldId) || f.alias !== readName(f, ''))) { out.push(cfDef(f)); defsChanged = true; }
     if (defsChanged) proj.push(['ExtendedAttributes', `<ExtendedAttributes>${out.join('')}</ExtendedAttributes>`]);
@@ -645,41 +647,42 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
 
   const taskXml = (t: MProject['tasks'][number]) => {
     cur = [];
+    ent = 'Task';
     el('UID', t.uid);
     el('ID', t.id);
     el('Name', t.name);
     el('Type', t.type ?? 1);
-    el('IsNull', 0);
+    el('IsNull', false);
     if (t.summary) el('WBS', t.wbs);
     el('OutlineNumber', t.outline);
     el('OutlineLevel', t.level);
     el('Priority', 500);
     dt('Start', t.start);
     dt('Finish', t.finish);
-    el('Duration', hoursToIso(t.summary ? 0 : t.durHrs ?? 0));
+    el('Duration', t.summary ? 0 : t.durHrs ?? 0);
     el('DurationFormat', 7);
-    el('EffortDriven', 0);
-    el('Estimated', 0);
-    el('Milestone', b(t.milestone));
-    el('Summary', b(t.summary));
+    el('EffortDriven', false);
+    el('Estimated', false);
+    el('Milestone', t.milestone);
+    el('Summary', t.summary);
     if (!t.summary) {
-      if (t.critical != null) el('Critical', b(t.critical));
+      if (t.critical != null) el('Critical', t.critical);
       dt('EarlyStart', t.earlyStart);
       dt('EarlyFinish', t.earlyFinish);
       dt('LateStart', t.lateStart);
       dt('LateFinish', t.lateFinish);
-      if (t.freeSlackHrs != null) el('FreeSlack', Math.round(t.freeSlackHrs * 600));
-      if (t.totalSlackHrs != null) el('TotalSlack', Math.round(t.totalSlackHrs * 600));
+      el('FreeSlack', t.freeSlackHrs);
+      el('TotalSlack', t.totalSlackHrs);
       el('PercentComplete', t.pct ?? 0);
       dt('ActualStart', t.actualStart);
       dt('ActualFinish', t.actualFinish);
-      el('RemainingDuration', hoursToIso(t.remHrs ?? t.durHrs ?? 0));
+      el('RemainingDuration', t.remHrs ?? t.durHrs ?? 0);
       el('ConstraintType', t.constraintType ?? 0);
       el('CalendarUID', t.calUid || -1);
       if (t.constraintType && t.constraintType > 1) dt('ConstraintDate', t.constraintDate);
       dt('Deadline', t.deadline);
-      el('IgnoreResourceCalendar', b(t.ignoreRsrcCal ?? true));
-      const ourLink = (l: MPred) => `<PredecessorLink><PredecessorUID>${esc(l.uid)}</PredecessorUID><Type>${['FF', 'FS', 'SF', 'SS'].indexOf(l.type)}</Type><CrossProject>0</CrossProject><LinkLag>${Math.round(l.lagHrs * 600)}</LinkLag><LagFormat>7</LagFormat></PredecessorLink>`;
+      el('IgnoreResourceCalendar', t.ignoreRsrcCal ?? true);
+      const ourLink = (l: MPred) => `<PredecessorLink><PredecessorUID>${esc(l.uid)}</PredecessorUID><Type>${['FF', 'FS', 'SF', 'SS'].indexOf(l.type)}</Type><CrossProject>0</CrossProject><LinkLag>${writeLag(l.lagHrs)}</LinkLag><LagFormat>${LAG_FORMAT}</LagFormat></PredecessorLink>`;
       if (t.keep && t.row?._msp_links) {
         // a task read from the file: each link as it was written unless an edit changed it (then only its type and
         // lag, in its own lag format); removed links go, added ones follow; links the clone does not read stay
@@ -712,9 +715,9 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
     const started = !finished && m.row?._msp_resume === 'Y' && !!t.row?.act_start_date;
     const never = () => false;
     const datesDeps: Parameters<typeof mergeKids>[2] = finished ? { EarlyStart: never, EarlyFinish: never, LateStart: never, LateFinish: never, TotalSlack: never, FreeSlack: never, Critical: never } : started ? { EarlyStart: ['act_start_date'], LateStart: ['act_start_date'] } : {};
-    if (started) for (const c of cur) if (c[0] === 'EarlyStart' || c[0] === 'LateStart') c[1] = `<${c[0]}>${xmlDate(t.actualStart)}</${c[0]}>`;
+    if (started) for (const c of cur) if (c[0] === 'EarlyStart' || c[0] === 'LateStart') c[1] = `<${c[0]}>${writeValue('Task', c[0], t.actualStart, wctx)}</${c[0]}>`;
     // the clone's saved baselines, unless the file's own <Baseline> elements are kept for this task
-    if (t.row && blNumbers.size && !t.keep?.kids.some((x) => x[0] === 'Baseline')) for (const x of baselineXml(db, blNumbers, t.row, xmlDate)) cur.push(['Baseline', x]);
+    if (t.row && blNumbers.size && !t.keep?.kids.some((x) => x[0] === 'Baseline')) for (const x of baselineXml(db, blNumbers, t.row, wctx)) cur.push(['Baseline', x]);
     return element('Task', t.keep, t.row, 'TASK', { ...TASK_DEPS, ...datesDeps, WBS: () => moved && !masked, ExtendedAttribute: () => (p6ext && ch(P6_FIELDS)) || ch(['~udf']) }, notOurs);
   };
   // Microsoft Project's ID is the row number: after the outline and the kept rows are in place, rows are numbered in
@@ -735,17 +738,18 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
 
   const resXml = (r: MProject['resources'][number]) => {
     cur = [];
+    ent = 'Resource';
     el('UID', r.uid);
     el('ID', r.id);
     el('Name', r.name);
     el('Type', r.type === 'material' ? 0 : r.type === 'cost' ? 2 : 1);
-    el('IsNull', 0);
+    el('IsNull', false);
     el('Code', r.code);
-    if (r.type !== 'material') el('MaxUnits', p6num(r.maxUnits ?? 1));
-    el('StandardRate', p6num(r.rate ?? 0));
-    el('StandardRateFormat', 2);
+    if (r.type !== 'material') el('MaxUnits', r.maxUnits ?? 1);
+    el('StandardRate', r.rate ?? 0);
+    el('StandardRateFormat', RATE_PER_HOUR);
     el('OvertimeRate', 0);
-    el('OvertimeRateFormat', 2);
+    el('OvertimeRateFormat', RATE_PER_HOUR);
     el('CalendarUID', resCal.get(r.uid));
     if (r.p6Type && p6ext) cur.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><Value>${esc(r.p6Type)}</Value></ExtendedAttribute>`]);
     if (r.row) cur.push(...cfValues(cfRes, r.row.rsrc_id, { table: 'RSRC', row: r.row, kept: r.keep, label: r.name }));
@@ -754,23 +758,28 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   };
   { const r = withGhosts(m.resources.map((r, i) => ({ seq: seqOf(r, i), xml: () => resXml(r) })), ghosts.resources); r.unshift('<Resources>'); r.push('</Resources>'); proj.push(['Resources', section(r)]); }
 
+  // a file of the clone from before the revision stamp holds plain currency in the assignments' elements: all three are written anew
+  const asgDeps = m.keep?.plainCurrency ? { ...ASG_DEPS, Cost: () => true, ActualCost: () => true, RemainingCost: () => true } : ASG_DEPS;
+  const materialUids = new Set(m.resources.filter((r) => r.type === 'material').map((r) => r.uid));
   const asgXml = (a: MProject['assignments'][number]) => {
     cur = [];
+    ent = 'Assignment';
     el('UID', a.uid);
     el('TaskUID', a.taskUid);
     el('ResourceUID', a.resUid);
-    if (a.actualCost != null) el('ActualCost', p6num(a.actualCost));
+    el('ActualCost', a.actualCost);
     dt('ActualFinish', a.actualFinish);
     dt('ActualStart', a.actualStart);
-    if (a.actualWorkHrs != null) el('ActualWork', hoursToIso(a.actualWorkHrs));
-    if (a.cost != null) el('Cost', p6num(a.cost));
+    el('ActualWork', a.actualWorkHrs);
+    el('Cost', a.cost);
     dt('Finish', a.finish);
-    if (a.remainingCost != null) el('RemainingCost', p6num(a.remainingCost));
-    if (a.remainingWorkHrs != null) el('RemainingWork', hoursToIso(a.remainingWorkHrs));
+    el('RemainingCost', a.remainingCost);
+    el('RemainingWork', a.remainingWorkHrs);
     dt('Start', a.start);
-    if (a.units != null) el('Units', p6num(a.units));
-    if (a.workHrs != null) el('Work', hoursToIso(a.workHrs));
-    return element('Assignment', a.keep, a.row, 'TASKRSRC', ASG_DEPS);
+    el('Units', a.units);
+    el('Work', a.workHrs);
+    // a material's Units are its quantity (values.ts): they follow the quantity (and a file of the clone from before wrote them as a fraction per hour)
+    return element('Assignment', a.keep, a.row, 'TASKRSRC', materialUids.has(a.resUid) ? { ...asgDeps, Units: m.keep?.plainCurrency ? () => true : [...(ASG_DEPS.Units as string[]), ...WORK] } : asgDeps);
   };
   // a kept assignment goes with its task; a task's "unassigned" placeholder (resource -65535) goes once an edit assigns
   // a resource to it (Microsoft Project keeps the placeholder only while a task has no resource)

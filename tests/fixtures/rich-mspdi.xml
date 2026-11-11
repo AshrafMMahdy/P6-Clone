@@ -168,7 +168,7 @@
 			<Finish>2026-03-19T12:00:00</Finish>
 			<Duration>PT100H0M0S</Duration>
 			<Summary>1</Summary>
-			<Cost>12450</Cost>
+			<Cost>1245000</Cost>
 		</Task>
 		<Task>
 			<UID>101</UID>
@@ -189,7 +189,7 @@
 			<Duration>PT80H0M0S</Duration>
 			<DurationFormat>21</DurationFormat>
 			<Summary>1</Summary>
-			<FixedCost>250</FixedCost>
+			<FixedCost>25000</FixedCost>
 			<FixedCostAccrual>2</FixedCostAccrual>
 			<Notes>Phase notes: works by night where needed.</Notes>
 		</Task>
@@ -223,11 +223,11 @@
 			<LateFinish>2026-03-06T17:00:00</LateFinish>
 			<FreeSlack>0</FreeSlack>
 			<TotalSlack>0</TotalSlack>
-			<FixedCost>1200</FixedCost>
+			<FixedCost>120000</FixedCost>
 			<FixedCostAccrual>3</FixedCostAccrual>
 			<PercentComplete>50</PercentComplete>
 			<PercentWorkComplete>50</PercentWorkComplete>
-			<Cost>4800</Cost>
+			<Cost>480000</Cost>
 			<ActualStart>2026-03-02T08:00:00</ActualStart>
 			<ActualDuration>PT20H0M0S</ActualDuration>
 			<RemainingDuration>PT20H0M0S</RemainingDuration>
@@ -239,8 +239,8 @@
 			<Notes>Asbestos survey cleared 2026-02-20.</Notes>
 			<ExtendedAttribute><FieldID>188743731</FieldID><Value>Rooms 201-210</Value></ExtendedAttribute>
 			<ExtendedAttribute><FieldID>188743767</FieldID><Value>10</Value></ExtendedAttribute>
-			<Baseline><Number>0</Number><Start>2026-03-02T08:00:00</Start><Finish>2026-03-05T17:00:00</Finish><Duration>PT32H0M0S</Duration><DurationFormat>7</DurationFormat><Work>PT64H0M0S</Work><Cost>4000</Cost></Baseline>
-			<Baseline><Number>1</Number><Start>2026-03-03T08:00:00</Start><Finish>2026-03-06T17:00:00</Finish><Duration>PT32H0M0S</Duration><Cost>4100</Cost></Baseline>
+			<Baseline><Number>0</Number><Start>2026-03-02T08:00:00</Start><Finish>2026-03-05T17:00:00</Finish><Duration>PT32H0M0S</Duration><DurationFormat>7</DurationFormat><Work>PT64H0M0S</Work><Cost>400000</Cost></Baseline>
+			<Baseline><Number>1</Number><Start>2026-03-03T08:00:00</Start><Finish>2026-03-06T17:00:00</Finish><Duration>PT32H0M0S</Duration><Cost>410000</Cost></Baseline>
 			<OutlineCode><FieldID>188744096</FieldID><ValueID>1</ValueID></OutlineCode>
 		</Task>
 		<Task>
@@ -283,7 +283,7 @@
 			<PredecessorLink><PredecessorUID>101</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
 			<PredecessorLink><PredecessorUID>9001</PredecessorUID><Type>1</Type><CrossProject>1</CrossProject><CrossProjectName>Services.mpp\12</CrossProjectName><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
 			<ExtendedAttribute><FieldID>188743731</FieldID><Value>Rooms 201-206</Value></ExtendedAttribute>
-			<Baseline><Number>0</Number><Start>2026-03-06T08:00:00</Start><Finish>2026-03-12T17:00:00</Finish><Duration>PT40H0M0S</Duration><Cost>3000</Cost></Baseline>
+			<Baseline><Number>0</Number><Start>2026-03-06T08:00:00</Start><Finish>2026-03-12T17:00:00</Finish><Duration>PT40H0M0S</Duration><Cost>300000</Cost></Baseline>
 		</Task>
 		<Task>
 			<UID>162</UID>
@@ -347,7 +347,7 @@
 			<StandardRateFormat>2</StandardRateFormat>
 			<OvertimeRate>90</OvertimeRate>
 			<OvertimeRateFormat>2</OvertimeRateFormat>
-			<CostPerUse>25</CostPerUse>
+			<CostPerUse>2500</CostPerUse>
 			<AccrueAt>3</AccrueAt>
 			<CalendarUID>27</CalendarUID>
 			<Notes>Subcontract JN-14.</Notes>
@@ -375,18 +375,18 @@
 			<TaskUID>140</TaskUID>
 			<ResourceUID>7</ResourceUID>
 			<PercentWorkComplete>50</PercentWorkComplete>
-			<ActualCost>1200</ActualCost>
+			<ActualCost>120000</ActualCost>
 			<ActualStart>2026-03-02T08:00:00</ActualStart>
 			<ActualWork>PT40H0M0S</ActualWork>
-			<Cost>4800</Cost>
+			<Cost>480000</Cost>
 			<Finish>2026-03-06T17:00:00</Finish>
-			<RemainingCost>3600</RemainingCost>
+			<RemainingCost>360000</RemainingCost>
 			<RemainingWork>PT40H0M0S</RemainingWork>
 			<Start>2026-03-02T08:00:00</Start>
 			<Units>2</Units>
 			<Work>PT80H0M0S</Work>
 			<WorkContour>3</WorkContour>
-			<Baseline><TimephasedData><Type>4</Type><UID>51</UID><Start>2026-03-02T08:00:00</Start><Finish>2026-03-03T08:00:00</Finish><Unit>2</Unit><Value>PT16H0M0S</Value></TimephasedData><Number>0</Number><Start>2026-03-02T08:00:00</Start><Finish>2026-03-05T17:00:00</Finish><Work>PT64H0M0S</Work><Cost>3840</Cost></Baseline>
+			<Baseline><TimephasedData><Type>4</Type><UID>51</UID><Start>2026-03-02T08:00:00</Start><Finish>2026-03-03T08:00:00</Finish><Unit>2</Unit><Value>PT16H0M0S</Value></TimephasedData><Number>0</Number><Start>2026-03-02T08:00:00</Start><Finish>2026-03-05T17:00:00</Finish><Work>PT64H0M0S</Work><Cost>384000</Cost></Baseline>
 			<TimephasedData><Type>2</Type><UID>51</UID><Start>2026-03-02T08:00:00</Start><Finish>2026-03-03T08:00:00</Finish><Unit>2</Unit><Value>PT16H0M0S</Value></TimephasedData>
 		</Assignment>
 		<Assignment>
@@ -404,9 +404,9 @@
 			<GUID>44444444-0000-4000-8000-000000000059</GUID>
 			<TaskUID>155</TaskUID>
 			<ResourceUID>9</ResourceUID>
-			<Cost>3000</Cost>
+			<Cost>300000</Cost>
 			<Finish>2026-03-16T17:00:00</Finish>
-			<RemainingCost>3000</RemainingCost>
+			<RemainingCost>300000</RemainingCost>
 			<RemainingWork>PT40H0M0S</RemainingWork>
 			<Start>2026-03-09T08:00:00</Start>
 			<Units>1</Units>

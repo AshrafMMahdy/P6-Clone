@@ -5,34 +5,33 @@
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import { assignBaseline, saveBaseline } from '../progress/baseline.ts';
 import { p6num } from '../schedule/cpm.ts';
-
-const day = (s: string) => s.replace('T', ' ').slice(0, 16);
+import { readDate, readNumber, writeValue, type Ctx } from './values.ts';
 
 export type FoundBaselines = Map<number, Map<string, { start: string; finish: string; hours: number | null }>>;
 /** The baselines of one task's XML (the inside of its <Task>), added to out. */
-export function scanTaskBaselines(task: string, out: FoundBaselines): void {
+export function scanTaskBaselines(task: string, out: FoundBaselines, minutesPerDay = 480): void {
+  const ctx: Ctx = { minutesPerDay };
   const uid = /<UID>\s*(\d+)\s*<\/UID>/.exec(task)?.[1];
   if (!uid || uid === '0') return;
   for (const b of task.matchAll(/<Baseline>([\s\S]*?)<\/Baseline>/g)) {
-    const n = Number(/<Number>\s*(\d+)\s*<\/Number>/.exec(b[1])?.[1]);
-    const start = /<Start>([^<]+)<\/Start>/.exec(b[1])?.[1], finish = /<Finish>([^<]+)<\/Finish>/.exec(b[1])?.[1];
-    if (!Number.isFinite(n) || !start || !finish) continue;
-    const dur = /<Duration>PT(\d+)H(\d+)M/.exec(b[1]);
-    (out.get(n) ?? out.set(n, new Map()).get(n)!).set(uid, { start: day(start), finish: day(finish), hours: dur ? Number(dur[1]) + Number(dur[2]) / 60 : null });
+    const text = (name: string) => new RegExp(`<${name}>([^<]*)</${name}>`).exec(b[1])?.[1];
+    const n = readNumber('Baseline', 'Number', text('Number'), ctx);
+    const start = readDate('Baseline', 'Start', text('Start')), finish = readDate('Baseline', 'Finish', text('Finish'));
+    if (n == null || !start || !finish) continue;
+    (out.get(n) ?? out.set(n, new Map()).get(n)!).set(uid, { start, finish, hours: readNumber('Baseline', 'Duration', text('Duration'), ctx) });
   }
 }
 /** Baselines found in an MSPDI text, by number: task UID -> {start, finish, hours}. */
 export function scanMspBaselines(xml: string, minutesPerDay = 480): FoundBaselines {
   const out: FoundBaselines = new Map();
   const tasks = /<Tasks>([\s\S]*?)<\/Tasks>/.exec(xml)?.[1] ?? '';
-  for (const t of tasks.matchAll(/<Task>([\s\S]*?)<\/Task>/g)) scanTaskBaselines(t[1], out);
-  void minutesPerDay;
+  for (const t of tasks.matchAll(/<Task>([\s\S]*?)<\/Task>/g)) scanTaskBaselines(t[1], out, minutesPerDay);
   return out;
 }
 
 /** Save each baseline of the file as a baseline copy of the project and assign Baseline / Baseline1-3. */
-export function importMspBaselines(db: Db, xml: string | FoundBaselines): string[] {
-  const found = typeof xml === 'string' ? scanMspBaselines(xml) : xml; // (a document read in pieces: the reader collected them task by task)
+export function importMspBaselines(db: Db, xml: string | FoundBaselines, minutesPerDay = 480): string[] {
+  const found = typeof xml === 'string' ? scanMspBaselines(xml, minutesPerDay) : xml; // (a document read in pieces: the reader collected them task by task)
   if (!found.size) return [];
   const proj = rows(db, 'PROJECT').find((p) => !p._baseline_of);
   if (!proj) return [];
@@ -71,7 +70,7 @@ export function baselineNumbers(db: Db, proj: Row): Map<number, string> {
   return out;
 }
 
-export function baselineXml(db: Db, numbers: Map<number, string>, task: Row, iso: (s: string) => string): string[] {
+export function baselineXml(db: Db, numbers: Map<number, string>, task: Row, ctx: Ctx): string[] {
   const out: string[] = [];
   for (const [n, bid] of [...numbers].sort((a, b) => a[0] - b[0])) {
     const b = rows(db, 'TASK').find((t) => t.proj_id === bid && t.task_code === task.task_code);
@@ -79,7 +78,8 @@ export function baselineXml(db: Db, numbers: Map<number, string>, task: Row, iso
     const s = b.target_start_date || b.early_start_date, f = b.target_end_date || b.early_end_date;
     if (!s || !f) continue;
     const h = Number(b.target_drtn_hr_cnt || 0);
-    out.push(`<Baseline><Number>${n}</Number><Start>${iso(s)}</Start><Finish>${iso(f)}</Finish><Duration>PT${Math.floor(h)}H${Math.round((h % 1) * 60)}M0S</Duration><DurationFormat>7</DurationFormat><EstimatedDuration>0</EstimatedDuration></Baseline>`);
+    const w = (name: string, v: number | string | boolean) => writeValue('Baseline', name, v, ctx);
+    out.push(`<Baseline><Number>${w('Number', n)}</Number><Start>${w('Start', s)}</Start><Finish>${w('Finish', f)}</Finish><Duration>${w('Duration', h)}</Duration><DurationFormat>${w('DurationFormat', 7)}</DurationFormat><EstimatedDuration>${w('EstimatedDuration', false)}</EstimatedDuration></Baseline>`);
   }
   return out;
 }

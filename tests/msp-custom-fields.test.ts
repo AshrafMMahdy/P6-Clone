@@ -447,3 +447,29 @@ test('guard: for every logical type the clone knows, a value written is the valu
     if (!named) assert.ok(back[`T ${t}`], `${t}: no definition without its value`);
   }
 });
+
+test('guard: a custom field of a data type the clone does not know is written from the value column its rows hold, never dropped; several columns, and it is named as not carried', async () => {
+  const { table } = await import('../core/db.ts');
+  const db = load('small_villa_g_1_schedule.xer');
+  const [a, b] = taskCodes(db);
+  const id = (c: string) => rows(db, 'TASK').find((x) => x.task_code === c)!.task_id;
+  ok(db, ['W text', 'W number', 'W date', 'W mixed'].map((name) => ({ op: 'add_udf', name })));
+  const pid = rows(db, 'TASK')[0].proj_id;
+  const put = (label: string, fk: string, col: string, v: string) => {
+    const u = rows(db, 'UDFTYPE').find((x) => x.udf_type_label === label)!;
+    u.logical_data_type = 'FT_WEIRD';
+    table(db, 'UDFVALUE').rows.push({ udf_type_id: u.udf_type_id, fk_id: fk, proj_id: pid, udf_date: '', udf_number: '', udf_text: '', udf_code_id: '', [col]: v });
+  };
+  put('W text', id(a), 'udf_text', 'abc'); put('W number', id(a), 'udf_number', '7.5'); put('W date', id(a), 'udf_date', '2026-03-02 08:00');
+  put('W mixed', id(a), 'udf_text', 'x'); put('W mixed', id(b), 'udf_number', '3');
+  const report: string[] = [];
+  const xml = writeMspdi(db, { report });
+  const back = fieldsOf(parseMspdi(xml).db, 'TASK');
+  assert.deepEqual(back['W text'], { type: 'FT_TEXT', values: { [a]: 'abc' } });
+  assert.deepEqual(back['W number'], { type: 'FT_FLOAT_2_DECIMALS', values: { [a]: '7.5' } });
+  assert.deepEqual(back['W date'], { type: 'FT_DATE', values: { [a]: '2026-03-02 08:00' } });
+  assert.ok(!back['W mixed'], 'two value columns: not written');
+  assert.ok(report.some((n) => /NOT carried/.test(n) && n.includes('"W mixed"') && n.includes('FT_WEIRD') && /more than one value column/.test(n)), report.join(' | '));
+  const said = report.find((n) => /because their data type has no Microsoft Project kind/.test(n))!;
+  for (const [l, k] of [['W text', 'Text'], ['W number', 'Number'], ['W date', 'Date']]) assert.ok(said.includes(`"${l}" (FT_WEIRD, written as a ${k} field)`), said);
+});

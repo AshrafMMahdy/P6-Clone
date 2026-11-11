@@ -14,7 +14,7 @@ export interface Ghost { seq: number; uid: string; xml: string }
 export interface Ghosts { tasks: Ghost[]; resources: Ghost[]; assignments: Ghost[]; calendars: Ghost[] }
 /** cfUsed: every custom field FieldID the file had (definitions and values): a slot of the file's own, never handed to a P6 custom field;
  *  cfRead: the ones read as P6 custom fields (custom-fields.ts), which an edit of that field rewrites or removes. */
-export interface ProjectKept { kids: [string, string | null][]; ghosts: Ghosts; p6ext: boolean; cfUsed: string[]; cfRead: string[] }
+export interface ProjectKept { kids: [string, string | null][]; ghosts: Ghosts; p6ext: boolean; plainCurrency?: boolean; cfUsed: string[]; cfRead: string[] }
 export const COLLECTIONS = new Set(['Calendars', 'Tasks', 'Resources', 'Assignments']);
 
 /** What decides an element: row fields (written anew only when one of them changed), 'struct' (written anew when
@@ -39,7 +39,7 @@ export const TASK_DEPS: Record<string, Dep> = {
 /** A summary task (a WBS element): the clone edits its name and place; its dates and totals are Microsoft Project's. */
 export const SUMMARY_DEPS: Record<string, Dep> = { ID: 'struct', OutlineNumber: 'struct', OutlineLevel: 'struct', Summary: 'struct', Name: ['wbs_name'], WBS: ['wbs_short_name', 'parent_wbs_id'] };
 export const RES_DEPS: Record<string, Dep> = { ID: 'struct', Name: ['rsrc_name'], Code: ['rsrc_short_name'], Type: ['rsrc_type'], MaxUnits: ['~max'], StandardRate: ['~cost'], StandardRateFormat: ['~cost'], CalendarUID: ['clndr_id'] };
-const WORK = ['target_qty', 'remain_qty', 'act_reg_qty', 'act_ot_qty'];
+export const WORK = ['target_qty', 'remain_qty', 'act_reg_qty', 'act_ot_qty'];
 export const ASG_DEPS: Record<string, Dep> = {
   TaskUID: ['task_id'], ResourceUID: ['rsrc_id'], Units: ['target_qty_per_hr', 'remain_qty_per_hr'], Work: WORK, ActualWork: ['act_reg_qty', 'act_ot_qty'], RemainingWork: ['remain_qty'],
   Cost: ['target_cost', 'remain_cost', 'act_reg_cost', 'act_ot_cost'], ActualCost: ['act_reg_cost', 'act_ot_cost'], RemainingCost: ['remain_cost'],

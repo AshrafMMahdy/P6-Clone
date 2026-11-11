@@ -13,7 +13,8 @@ import { hoursPerWeek, inheritExceptions, parseClndrData, scheduledCalendarDef, 
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num, progressKey } from '../schedule/cpm.ts';
 import type { Ghosts, Kept, ProjectKept } from './keep.ts';
-import { costFromMsp, TYPE_OF_KIND, type CfKind, type CfSubject } from './custom-fields.ts';
+import { TYPE_OF_KIND, type CfKind, type CfSubject } from './custom-fields.ts';
+import { defaultCtx, hoursOfMinutes, minutesOfHours, num, readValue, toP6Date, unitsToWrite } from './values.ts';
 
 export type RelType = 'FS' | 'SS' | 'FF' | 'SF';
 
@@ -134,19 +135,6 @@ const DT_TO_MSP_TYPE: Record<string, number> = { DT_FixedRate: 0, DT_FixedDUR2: 
 
 // ---------- small helpers
 
-export const num = (s: string | undefined): number | null => {
-  if (s == null || s.trim() === '') return null;
-  const n = Number(s.trim());
-  return Number.isFinite(n) ? n : null;
-};
-
-/** Accepts 'yyyy-mm-ddThh:mm[:ss[.fff]][Z]' or P6 format; returns P6 'yyyy-mm-dd hh:mm' or ''. */
-export function toP6Date(s: string | undefined): string {
-  if (!s) return '';
-  const t = parseP6Date(s.trim().replace(/(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/, '').slice(0, 19));
-  return t == null ? '' : formatP6Date(t);
-}
-
 /** Natural sort for Activity IDs (A1000 < A1010 < A10000). */
 export const natural = (a: string, b: string) => a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' });
 
@@ -213,7 +201,7 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
   const wbsAll = get('PROJWBS').filter((w) => w.proj_id === pid);
   const root = wbsAll.find((w) => w.proj_node_flag === 'Y');
   // read from Microsoft Project XML: what the file had beyond the rows (keep.ts)
-  const keep: ProjectKept | undefined = proj._msp_keep ? { kids: JSON.parse(proj._msp_keep), ghosts: JSON.parse(proj._msp_ghosts || '{}'), p6ext: proj._msp_p6ext === 'Y', cfUsed: JSON.parse(proj._msp_cfused || '[]'), cfRead: JSON.parse(proj._msp_cfread || '[]') } : undefined;
+  const keep: ProjectKept | undefined = proj._msp_keep ? { kids: JSON.parse(proj._msp_keep), ghosts: JSON.parse(proj._msp_ghosts || '{}'), p6ext: proj._msp_p6ext === 'Y', plainCurrency: proj._msp_plain_currency === 'Y', cfUsed: JSON.parse(proj._msp_cfused || '[]'), cfRead: JSON.parse(proj._msp_cfread || '[]') } : undefined;
   const ghosts: Ghosts = { tasks: [], resources: [], assignments: [], calendars: [], ...keep?.ghosts };
   const keptOf = (r: Row): Kept | undefined => (r._msp_keep ? { kids: JSON.parse(r._msp_keep), xml: '', seq: Number(r._msp_seq), id: r._msp_id || undefined } : r._msp_xml ? { kids: [], xml: r._msp_xml, seq: Number(r._msp_seq) || 0 } : undefined);
 
@@ -344,6 +332,7 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
     s.finish = fi || s.start;
   }
 
+  const resKind = new Map(resources.map((x) => [x.uid, x.type]));
   const assignments: MAssign[] = [];
   const asgUidFor = uidMaker([...get('TASKRSRC').map((a) => a._msp_uid), ...ghosts.assignments.map((g) => g.uid)]);
   for (const a of get('TASKRSRC')) {
@@ -351,9 +340,10 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
     if (!t || !r) continue;
     const target = num(a.target_qty), act = (num(a.act_reg_qty) ?? 0) + (num(a.act_ot_qty) ?? 0), rem = num(a.remain_qty);
     const actCost = (num(a.act_reg_cost) ?? 0) + (num(a.act_ot_cost) ?? 0), remCost = num(a.remain_cost);
+    const workHrs = rem != null ? act + rem : target;
     assignments.push({
-      uid: asgUidFor(a), taskUid: t, resUid: r, units: num(a.target_qty_per_hr) ?? num(a.remain_qty_per_hr),
-      workHrs: rem != null ? act + rem : target, actualWorkHrs: act, remainingWorkHrs: rem,
+      uid: asgUidFor(a), taskUid: t, resUid: r, units: unitsToWrite(resKind.get(r) === 'material', num(a.target_qty_per_hr) ?? num(a.remain_qty_per_hr), workHrs),
+      workHrs, actualWorkHrs: act, remainingWorkHrs: rem,
       cost: remCost != null ? actCost + remCost : num(a.target_cost), actualCost: actCost, remainingCost: remCost,
       start: a.act_start_date || a.restart_date || a.target_start_date || '', finish: a.act_end_date || a.reend_date || a.target_end_date || '',
       actualStart: a.act_start_date ?? '', actualFinish: a.act_end_date ?? '', keep: keptOf(a), row: a,
@@ -365,7 +355,7 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
   return {
     name: proj.proj_short_name || 'Project', title: root?.wbs_name || proj.proj_short_name || 'Project',
     start: proj.plan_start_date || tasks.reduce((m, t) => (t.start && (!m || t.start < m) ? t.start : m), ''), finish,
-    statusDate: proj.last_recalc_date ?? '', calUid: projCal, minutesPerDay: Math.round(dayHrs * 60), minutesPerWeek: Math.round((weekHrs || dayHrs * 5) * 60),
+    statusDate: proj.last_recalc_date ?? '', calUid: projCal, minutesPerDay: minutesOfHours(dayHrs), minutesPerWeek: minutesOfHours(weekHrs || dayHrs * 5),
     splitsInProgress: so ? so.sched_progress_override !== 'Y' : null, criticalHrs: Number(proj.critical_drtn_hr_cnt) || 0,
     calendars, tasks, resources, assignments, keep, row: proj,
   };
@@ -437,7 +427,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
     push('CALENDAR', {
       ...(c.keep ? { _msp_uid: c.uid, _msp_xml: c.keep.xml, _msp_seq: String(c.keep.seq) } : {}),
       clndr_id: c.uid, default_flag: c.uid === m.calUid ? 'Y' : 'N', clndr_name: c.name, proj_id: '', base_clndr_id: !c.isBase && c.baseUid && calById.has(c.baseUid) ? c.baseUid : '',
-      last_chng_date: '', clndr_type: c.isBase ? 'CA_Base' : 'CA_Rsrc', day_hr_cnt: p6num(c.uid === m.calUid && m.minutesPerDay ? m.minutesPerDay / 60 : wh / days || 8),
+      last_chng_date: '', clndr_type: c.isBase ? 'CA_Base' : 'CA_Rsrc', day_hr_cnt: p6num(c.uid === m.calUid && m.minutesPerDay ? hoursOfMinutes(m.minutesPerDay) : wh / days || 8),
       week_hr_cnt: p6num(wh), month_hr_cnt: p6num((wh / days || 8) * 21.5), year_hr_cnt: p6num(wh * 52), rsrc_private: 'N', clndr_data: serializeClndrData(def),
     });
   }
@@ -560,8 +550,8 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
     const value = (fid: string, fk: string, projId: string, text: string) => {
       const kind = kindOf.get(fid)!, row: Row = { udf_type_id: udfType.get(fid)!, fk_id: fk, proj_id: projId, udf_date: '', udf_number: '', udf_text: '', udf_code_id: '' };
       if (kind === 'Text') { if (!text.trim()) return; row.udf_text = text; }
-      else if (kind === 'Number' || kind === 'Cost') { const n = num(text); if (n == null) return; row.udf_number = p6num(kind === 'Cost' ? costFromMsp(n) : n); }
-      else { const d = toP6Date(text); if (!d) return; row.udf_date = d; }
+      else if (kind === 'Number' || kind === 'Cost') { const n = readValue('ExtendedAttribute', `Value:${kind}`, text, defaultCtx()) as number | null; if (n == null) return; row.udf_number = p6num(n); }
+      else { const d = readValue('ExtendedAttribute', `Value:${kind}`, text, defaultCtx()) as string; if (!d) return; row.udf_date = d; }
       push('UDFVALUE', row);
     };
     for (const t of tasks) { const r = taskRows.get(t.uid); if (r) for (const [fid, v] of t.udf ?? []) value(fid, r.task_id, pid, v); }
@@ -599,12 +589,12 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
   if (db.tables.TASK) { addField(db.tables.TASK, 'rsrc_id'); for (const r of db.tables.TASK.rows) r.rsrc_id = firstRsrc.get(r.task_id) ?? ''; }
   if (m.keep) {
     const P = table(db, 'PROJECT');
-    for (const k of ['_msp_keep', '_msp_ghosts', '_msp_p6ext', '_msp_ntasks', '_msp_cfused', '_msp_cfread']) addField(P, k);
+    for (const k of ['_msp_keep', '_msp_ghosts', '_msp_p6ext', '_msp_ntasks', '_msp_cfused', '_msp_cfread', '_msp_plain_currency']) addField(P, k);
     for (const k of ['_msp_resume', '_p6_ver', '_legacy_ms']) addField(P, k);
     if (m.rules?.resume) P.rows[0]._msp_resume = 'Y';
     if (m.rules?.ver) P.rows[0]._p6_ver = m.rules.ver;
     if (m.rules?.known) P.rows[0]._legacy_ms = m.rules.legacy ? 'Y' : 'N';
-    Object.assign(P.rows[0], { _msp_keep: JSON.stringify(m.keep.kids), _msp_ghosts: JSON.stringify(ghosts), _msp_p6ext: m.keep.p6ext ? 'Y' : '', _msp_ntasks: String(rows(db, 'TASK').length), _msp_cfused: JSON.stringify(m.keep.cfUsed), _msp_cfread: JSON.stringify(m.keep.cfRead) });
+    Object.assign(P.rows[0], { _msp_keep: JSON.stringify(m.keep.kids), _msp_ghosts: JSON.stringify(ghosts), _msp_p6ext: m.keep.p6ext ? 'Y' : '', _msp_plain_currency: m.keep.plainCurrency ? 'Y' : '', _msp_ntasks: String(rows(db, 'TASK').length), _msp_cfused: JSON.stringify(m.keep.cfUsed), _msp_cfread: JSON.stringify(m.keep.cfRead) });
   }
   return db;
 }

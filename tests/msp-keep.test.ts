@@ -30,7 +30,7 @@ test('MSPDI: an untouched file comes back element for element, in order, every U
   const out = writeMspdi(parseMspdi(src).db);
   assert.deepEqual(leaves(out), leaves(src));
   // the things a blind review found stripped, by name
-  for (const s of ['<Notes>Asbestos survey cleared 2026-02-20.</Notes>', '<Baseline><Number>1</Number>', '<FixedCost>1200</FixedCost>', '<FixedCostAccrual>3</FixedCostAccrual>', '<Deadline>2026-03-09T17:00:00</Deadline>',
+  for (const s of ['<Notes>Asbestos survey cleared 2026-02-20.</Notes>', '<Baseline><Number>1</Number>', '<FixedCost>120000</FixedCost>', '<FixedCostAccrual>3</FixedCostAccrual>', '<Deadline>2026-03-09T17:00:00</Deadline>',
     '<WorkContour>3</WorkContour>', '<Alias>Room</Alias>', '<Value>Rooms 201-210</Value>', '<WBS>1.1</WBS>', '<Initials>J</Initials>', '<Views>', '<Filters>', '<OutlineCodes>',
     '<UID>27</UID>', '<UID>31</UID>', '<ResourceUID>-65535</ResourceUID>', '<IsNull>1</IsNull>', '<Name>Clinic Fitout</Name>', '<TimephasedData><Type>2</Type>']) assert.ok(out.includes(s), s);
   assert.ok(!out.includes('P6 Activity ID'), 'the clone\'s own custom fields are not written into a customer\'s Text1');
@@ -51,7 +51,7 @@ test('MSPDI: edits change only what they touch; what changed is the clone\'s, ev
   const removed = d.filter((x) => x.startsWith('-'));
   assert.deepEqual(removed, [
     // Partitions: name, duration and the dates it moves
-    '- Assignments/Assignment/ActualCost=1200', '- Assignments/Assignment/Cost=4800', '- Assignments/Assignment/PercentWorkComplete=50', '- Assignments/Assignment/RemainingCost=3600', '- Assignments/Assignment/RemainingWork=PT40H0M0S',
+    '- Assignments/Assignment/ActualCost=120000', '- Assignments/Assignment/Cost=480000', '- Assignments/Assignment/PercentWorkComplete=50', '- Assignments/Assignment/RemainingCost=360000', '- Assignments/Assignment/RemainingWork=PT40H0M0S',
     // the Joiner's work spread over time no longer holds: left for Microsoft Project to spread again
     '- Assignments/Assignment/TimephasedData/Finish=2026-03-03T08:00:00', '- Assignments/Assignment/TimephasedData/Start=2026-03-02T08:00:00', '- Assignments/Assignment/TimephasedData/Type=2', '- Assignments/Assignment/TimephasedData/UID=51', '- Assignments/Assignment/TimephasedData/Unit=2', '- Assignments/Assignment/TimephasedData/Value=PT16H0M0S',
     '- Assignments/Assignment/Work=PT80H0M0S',
@@ -193,7 +193,7 @@ test('MSPDI F9: a file the clone wrote from P6 schedules by the rules of the P6 
   const { SAMPLES_DIR } = await import('./helpers.ts');
   const xer = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, 'Baseline 15-11-2010.xer')))).db; // P6 6.x: milestones one minute into a period
   const xml = writeMspdi(xer);
-  assert.match(xml, /<Alias>P6 Schedule Rules 6\.0\.0 legacy<\/Alias>/);
+  assert.match(xml, /<Alias>P6 Schedule Rules 6\.0\.0 legacy, format 2<\/Alias>/);
   for (const file of [xml, xml.replace(/<ExtendedAttribute><FieldID>188743746<\/FieldID>[\s\S]*?<\/ExtendedAttribute>/, '')]) { // with the rules named, and as v0.1.8 wrote it
     const { db } = parseMspdi(file);
     const pid = db.tables.PROJECT.rows[0].proj_id;

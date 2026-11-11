@@ -34,7 +34,7 @@ export function javaPath(home = mpxjHome()): string {
   const shipped = home ? join(home, 'jre', platformDir(), 'bin', exe) : null;
   return shipped && existsSync(shipped) ? shipped : 'java';
 }
-const classPath = (home: string) => (existsSync(join(home, 'lib')) ? join(home, 'lib', '*') : join(home, '*'));
+export const classPath = (home: string) => (existsSync(join(home, 'lib')) ? join(home, 'lib', '*') : join(home, '*'));
 
 /** The .mpp reader is not here (no MPXJ, or no Java): refused in words, with what to do. */
 export class MppReaderMissing extends Error {}

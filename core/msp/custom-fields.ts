@@ -6,6 +6,7 @@
 // Resource Text1 are also what real files and the clone's earlier files carry) and FieldNames. The format has a fixed
 // number of slots of each kind; the fields that do not fit are named in the save's answer (planCustomFields' notes).
 import { rows, type Db, type Row } from '../db.ts';
+import { writeValue, type Ctx } from './values.ts';
 
 export type CfSubject = 'Task' | 'Resource';
 export type CfKind = 'Text' | 'Number' | 'Cost' | 'Start' | 'Finish' | 'Date';
@@ -58,7 +59,10 @@ function kindOfType(logical: string): { kind: CfKind; as?: 'integer' | 'indicato
   }
 }
 
-export interface CfField { type: Row; subject: CfSubject; kind: CfKind; fieldId: string; fieldName: string; alias: string; as?: 'integer' | 'indicator' | 'code' | 'other' }
+export interface CfField { type: Row; subject: CfSubject; kind: CfKind; fieldId: string; fieldName: string; alias: string; as?: 'integer' | 'indicator' | 'code' | 'other'; column?: ValueColumn }
+/** The value columns of a UDFVALUE row, and the Microsoft Project kind each is carried as when the field's data type says nothing of its kind. */
+type ValueColumn = 'udf_text' | 'udf_number' | 'udf_date' | 'udf_code_id';
+const COLUMNS: Record<ValueColumn, CfKind> = { udf_text: 'Text', udf_number: 'Number', udf_date: 'Date', udf_code_id: 'Text' };
 export interface CfPlan { fields: CfField[]; notes: string[] }
 
 const byId = (a: Row, b: Row) => Number(a.udf_type_id) - Number(b.udf_type_id) || a.udf_type_id.localeCompare(b.udf_type_id);
@@ -86,16 +90,32 @@ const quoted = (l: string[]) => l.map((x) => `"${x}"`).join(', ');
 export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<string>>; used: Set<string>; own: (name: string) => boolean; valued: Set<string>; newFile: boolean }): CfPlan {
   const fields: CfField[] = [], notes: string[] = [];
   const unfit: { subject: CfSubject; kind: CfKind; names: string[] }[] = [];
-  const clash: string[] = [];
+  const clash: string[] = [], unknownType: string[] = [];
   const all = rows(db, 'UDFTYPE');
+  // the value columns each field's rows hold (text, number, date, code)
+  const valueColumns = new Map<string, Set<ValueColumn>>();
+  for (const v of rows(db, 'UDFVALUE')) for (const c of Object.keys(COLUMNS) as ValueColumn[]) if (v[c]) (valueColumns.get(v.udf_type_id) ?? valueColumns.set(v.udf_type_id, new Set()).get(v.udf_type_id)!).add(c);
   for (const subject of ['Task', 'Resource'] as const) {
     const types = all.filter((u) => u.table_name === TABLE[subject]).sort(byId);
     const held = new Set<string>(), placed = new Map<Row, CfField>();
-    const make = (u: Row, kind: CfKind, id: number, as: CfField['as']): CfField => ({ type: u, subject, kind, fieldId: String(id), fieldName: slotName(kind, CF_SLOTS[subject][kind].indexOf(id) + 1), alias: u.udf_type_label, ...(as ? { as } : {}) });
-    const todo = types.filter((u) => { if (!o.own(u.udf_type_label)) return true; clash.push(`${subject === 'Task' ? 'activity' : 'resource'} "${u.udf_type_label}"`); return false; });
+    const make = (u: Row, kind: CfKind, id: number, as: CfField['as']): CfField => ({ type: u, subject, kind, fieldId: String(id), fieldName: slotName(kind, CF_SLOTS[subject][kind].indexOf(id) + 1), alias: u.udf_type_label, ...(as ? { as } : {}), ...(kinds.get(u)?.column ? { column: kinds.get(u)!.column } : {}) });
+    const kinds = new Map<Row, { kind: CfKind; as?: CfField['as']; column?: ValueColumn }>();
+    const todo = types.filter((u) => {
+      if (o.own(u.udf_type_label)) { clash.push(`${subject === 'Task' ? 'activity' : 'resource'} "${u.udf_type_label}"`); return false; }
+      const k: { kind: CfKind; as?: CfField['as']; column?: ValueColumn } = kindOfType(u.logical_data_type);
+      if (k.as === 'other') {
+        // a data type the clone does not know: nothing is dropped. The field is carried as the kind of the value column its values are held in
+        // (the one column a value of any type lives in on the row: P6 XML and XER write the column the row holds); several columns, or no way to say: not carried
+        const cols = (valueColumns.get(u.udf_type_id) ?? new Set<ValueColumn>());
+        if (cols.size > 1) { unknownType.push(`${subject === 'Task' ? 'activity' : 'resource'} "${u.udf_type_label}" (data type ${u.logical_data_type || '(none)'}: its values are held in more than one value column (${[...cols].map((c) => c.replace('udf_', '')).join(', ')}), so which one is the field's cannot be established)`); return false; }
+        if (cols.size === 1) { const [c] = cols; k.kind = COLUMNS[c]; k.column = c; }
+      }
+      kinds.set(u, k);
+      return true;
+    });
     // a field read from the file keeps its slot (when it is still the kind of that slot and nothing else holds it)
     for (const u of todo) {
-      const { kind, as } = kindOfType(u.logical_data_type), pin = u._msp_field;
+      const { kind, as } = kinds.get(u)!, pin = u._msp_field;
       if (!pin || o.reserved[subject].has(pin) || held.has(pin) || !CF_SLOTS[subject][kind].includes(Number(pin))) continue;
       held.add(pin);
       placed.set(u, make(u, kind, Number(pin), as));
@@ -103,7 +123,7 @@ export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<st
     const taken = (id: number) => o.reserved[subject].has(String(id)) || o.used.has(String(id)) || held.has(String(id));
     const rest = todo.filter((u) => !placed.has(u));
     for (const u of [...rest.filter((u) => o.valued.has(u.udf_type_id)), ...(o.newFile ? rest.filter((u) => !o.valued.has(u.udf_type_id)) : [])]) {
-      const { kind, as } = kindOfType(u.logical_data_type), id = CF_SLOTS[subject][kind].find((x) => !taken(x));
+      const { kind, as } = kinds.get(u)!, id = CF_SLOTS[subject][kind].find((x) => !taken(x));
       if (id == null) {
         let g = unfit.find((x) => x.subject === subject && x.kind === kind);
         if (!g) unfit.push(g = { subject, kind, names: [] });
@@ -122,7 +142,11 @@ export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<st
   if (ints.length) notes.push(`Custom fields written as Microsoft Project Number fields: ${ints.join(', ')} (integer fields; Microsoft Project has no integer-only custom field, so they open again as number fields with the same values).`);
   if (inds.length) notes.push(`Custom fields written as Microsoft Project Text fields: ${inds.join(', ')} (indicator fields; Microsoft Project has no indicator custom field, so the text holds P6's icon code, UDF_G0 to UDF_G4, and they open again as text fields).`);
   if (codes.length) notes.push(`Custom fields written as Microsoft Project Text fields: ${codes.join(', ')} (code fields; Microsoft Project has no code-list custom field here, so the text holds the code value and they open again as text fields).`);
-  if (others.length) notes.push(`Custom fields written as Microsoft Project Text fields: ${others.join(', ')} (a data type with no Microsoft Project kind).`);
+  if (others.length) {
+    const label = (f: CfField) => `${word(f.subject)} "${f.alias}" (${f.type.logical_data_type || 'no data type'}, written as a ${f.kind} field)`;
+    notes.push(`Custom fields written as Microsoft Project fields of the kind of the value column their values are held in, because their data type has no Microsoft Project kind: ${fields.filter((f) => f.as === 'other').map(label).join(', ')}.`);
+  }
+  if (unknownType.length) notes.push(`Custom fields NOT carried to the Microsoft Project XML: ${unknownType.join(', ')}.`);
   for (const g of unfit) {
     const total = CF_SLOTS[g.subject][g.kind].length, carried = fields.filter((f) => f.subject === g.subject && f.kind === g.kind).length;
     notes.push(`Custom fields NOT carried to the Microsoft Project XML: ${word(g.subject)} ${g.kind} fields ${quoted(g.names)} (Microsoft Project has ${total} ${g.kind} custom fields on a ${g.subject.toLowerCase()}: ${carried} carry P6 custom fields here and ${total - carried} are in use by the clone's own fields or by fields already in the file, so none was free).`);
@@ -137,17 +161,13 @@ export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<st
   return { fields, notes };
 }
 
-/** A cost custom field's value in Microsoft Project XML is in hundredths of the currency unit (1234.50 is 123450: what MPXJ, calibrated on
- *  Microsoft Project's own files, writes and reads for it), unlike a number field's plain value. */
-export const costFromMsp = (text: number) => text / 100;
-
 /** The size of a Microsoft Project Text custom field: 255 characters. It is Microsoft Project's field size, not a limit of ours: a longer
  *  value is written whole, the file holds all of it, and the save's notes say Microsoft Project shows only the first 255. */
 export const MSP_TEXT_FIELD_SIZE = 255;
 
 /** The value a P6 custom field holds on a row, as the text of the Microsoft Project element (undefined: none). `date` formats a P6 date.
  *  The reader's `long` counts, by field, the text values it gave out that are longer than MSP_TEXT_FIELD_SIZE. */
-export function valueReader(db: Db, fields: CfField[], date: (s: string) => string): ((f: CfField, fk: string) => string | undefined) & { long: Map<CfField, number> } {
+export function valueReader(db: Db, fields: CfField[], ctx: Ctx): ((f: CfField, fk: string) => string | undefined) & { long: Map<CfField, number> } {
   const long = new Map<CfField, number>();
   const byType = new Map<string, Map<string, Row>>(fields.map((f) => [f.type.udf_type_id, new Map<string, Row>()]));
   for (const v of rows(db, 'UDFVALUE')) byType.get(v.udf_type_id)?.set(v.fk_id, v);
@@ -156,9 +176,11 @@ export function valueReader(db: Db, fields: CfField[], date: (s: string) => stri
     const v = byType.get(f.type.udf_type_id)?.get(fk);
     if (!v) return undefined;
     const t = f.type.logical_data_type;
-    const n = v.udf_number !== '' && Number.isFinite(Number(v.udf_number)) ? v.udf_number : '';
-    const x = f.kind === 'Number' ? n : f.kind === 'Cost' ? (n === '' ? '' : String(Math.round(Number(n) * 100)))
-      : f.kind === 'Text' ? (t === 'FT_CODE' ? (v.udf_code_id ? codes.get(v.udf_code_id) ?? '' : '') : v.udf_text ?? '') : date(v.udf_date ?? '');
+    const n = v.udf_number !== '' && Number.isFinite(Number(v.udf_number)) ? Number(v.udf_number) : null;
+    const w = (kind: CfKind, value: string | number | null) => writeValue('ExtendedAttribute', `Value:${kind}`, value, ctx);
+    const x = f.kind === 'Number' || f.kind === 'Cost' ? w(f.kind, n)
+      : f.kind === 'Text' ? (t === 'FT_CODE' || f.column === 'udf_code_id' ? (v.udf_code_id ? codes.get(v.udf_code_id) ?? '' : '') : w('Text', v.udf_text ?? ''))
+      : w(f.kind, v.udf_date ?? '');
     if (f.kind === 'Text' && typeof x === 'string' && x.length > MSP_TEXT_FIELD_SIZE && [...x].length > MSP_TEXT_FIELD_SIZE) long.set(f, (long.get(f) ?? 0) + 1);
     return x === '' || x == null ? undefined : x;
   };
