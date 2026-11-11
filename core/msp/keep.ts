@@ -2,7 +2,7 @@
 // resource, assignment and calendar (and the project) read from MSPDI keeps its elements as written, with a snapshot
 // of the row it became. Writing the file back, an element goes out exactly as it came in unless something it is made
 // from changed since (then the clone writes its own); elements the clone has no model for (notes, baselines, fixed
-// costs, contours, custom fields, timephased data, outline codes, views...) always go out as they came in. Elements
+// costs, contours, custom fields of kinds P6 has none for, timephased data, outline codes, views...) always go out as they came in. Elements
 // the clone would add that the file did not have are left out unless they carry a change. UIDs are kept.
 import type { Db, Row } from '../db.ts';
 
@@ -12,7 +12,9 @@ export interface Kept { kids: [string, string][]; xml: string; seq: number; id?:
  *  resource calendars folded into their base): written back in their place. */
 export interface Ghost { seq: number; uid: string; xml: string }
 export interface Ghosts { tasks: Ghost[]; resources: Ghost[]; assignments: Ghost[]; calendars: Ghost[] }
-export interface ProjectKept { kids: [string, string | null][]; ghosts: Ghosts; p6ext: boolean }
+/** cfUsed: every custom field FieldID the file had (definitions and values): a slot of the file's own, never handed to a P6 custom field;
+ *  cfRead: the ones read as P6 custom fields (custom-fields.ts), which an edit of that field rewrites or removes. */
+export interface ProjectKept { kids: [string, string | null][]; ghosts: Ghosts; p6ext: boolean; cfUsed: string[]; cfRead: string[] }
 export const COLLECTIONS = new Set(['Calendars', 'Tasks', 'Resources', 'Assignments']);
 
 /** What decides an element: row fields (written anew only when one of them changed), 'struct' (written anew when
@@ -93,23 +95,27 @@ export function mergeKids(orig: [string, string | null][], ours: [string, string
 }
 
 /** What lies in other tables, looked up once per file (links per activity, rates, WBS roots). */
-export interface KeepCtx { preds: Map<string, string>; rates: Map<string, Row>; roots: Map<string, string> }
+export interface KeepCtx { preds: Map<string, string>; rates: Map<string, Row>; roots: Map<string, string>; udfs: Map<string, string> }
 export function keepCtx(db: Db): KeepCtx {
   const uid = new Map((db.tables.TASK?.rows ?? []).map((t) => [t.task_id, t._msp_uid || t.task_id]));
   const by = new Map<string, string[]>();
   for (const p of db.tables.TASKPRED?.rows ?? []) { const k = `${uid.get(p.pred_task_id)}:${p.pred_type}:${Number(p.lag_hr_cnt) || 0}`; const l = by.get(p.task_id); if (l) l.push(k); else by.set(p.task_id, [k]); }
   const rates = new Map<string, Row>();
   for (const x of db.tables.RSRCRATE?.rows ?? []) if (!rates.has(x.rsrc_id)) rates.set(x.rsrc_id, x);
-  return { preds: new Map([...by].map(([k, l]) => [k, l.sort().join(',')])), rates, roots: new Map((db.tables.PROJWBS?.rows ?? []).filter((w) => w.proj_node_flag === 'Y').map((w) => [w.proj_id, w.wbs_name])) };
+  // the custom field values of each activity and resource (a change of one rewrites that element's custom field values)
+  const udfOf = new Map((db.tables.UDFTYPE?.rows ?? []).filter((u) => u.table_name === 'TASK' || u.table_name === 'RSRC').map((u) => [u.udf_type_id, u.table_name]));
+  const udfs = new Map<string, string[]>();
+  for (const v of db.tables.UDFVALUE?.rows ?? []) { const t = udfOf.get(v.udf_type_id); if (!t) continue; const key = `${t}|${v.fk_id}`, x = `${v.udf_type_id}=${v.udf_text || v.udf_number || v.udf_date || v.udf_code_id || ''}`, l = udfs.get(key); if (l) l.push(x); else udfs.set(key, [x]); }
+  return { preds: new Map([...by].map(([k, l]) => [k, l.sort().join(',')])), udfs: new Map([...udfs].map(([k, l]) => [k, l.sort().join('|')])), rates, roots: new Map((db.tables.PROJWBS?.rows ?? []).filter((w) => w.proj_node_flag === 'Y').map((w) => [w.proj_id, w.wbs_name])) };
 }
 
 /** The values an element of a row is made from: the row, plus what lies in other tables (rates, the WBS root, links). */
 export function snapshotOf(table: string, r: Row, k: KeepCtx): Record<string, string> {
   const s: Record<string, string> = {};
   for (const [f, v] of Object.entries(r)) if (!f.startsWith('_')) s[f] = v;
-  if (table === 'RSRC') { const rate = k.rates.get(r.rsrc_id); s['~max'] = rate?.max_qty_per_hr ?? ''; s['~cost'] = rate?.cost_per_qty ?? ''; }
+  if (table === 'RSRC') { const rate = k.rates.get(r.rsrc_id); s['~max'] = rate?.max_qty_per_hr ?? ''; s['~cost'] = rate?.cost_per_qty ?? ''; s['~udf'] = k.udfs.get(`RSRC|${r.rsrc_id}`) ?? ''; }
   if (table === 'PROJECT') s['~title'] = k.roots.get(r.proj_id) ?? '';
-  if (table === 'TASK') s['~preds'] = k.preds.get(r.task_id) ?? '';
+  if (table === 'TASK') { s['~preds'] = k.preds.get(r.task_id) ?? ''; s['~udf'] = k.udfs.get(`TASK|${r.task_id}`) ?? ''; }
   return s;
 }
 

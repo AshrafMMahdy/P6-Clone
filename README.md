@@ -53,7 +53,11 @@ Automation flags: `npm start -- --import "path\file.xer"` opens the Import wizar
   inputs were edited is written by the clone (and work figures Microsoft Project derives from it, such as an
   assignment's timephased data, are left for Project to recalculate); elements the file did not have are added only when
   they carry a change; the clone's own custom fields (P6 Activity ID...) are not written into a file that did not have
-  them. A task's links are kept one by one: an edit rewrites only the link it changed (type and lag, in that link's own
+  them. P6 custom fields (UDFs) of activities and resources are carried both ways (`core/msp/custom-fields.ts`): each is
+  written into a free Microsoft Project custom field of its kind (Text, Number, Cost, Start, Finish, Date) under its P6
+  name, a file's aliased custom fields open as P6 custom fields, and the fields that do not fit the format's slots (or
+  have no Microsoft Project counterpart: project, WBS, assignment, expense, role) are named in the save's notes. A task's links are kept one by one: an edit rewrites
+  only the link it changed (type and lag, in that link's own
   lag format, a percentage staying a percentage); links the clone does not import (from summary tasks, other projects)
   stay. An edited calendar keeps its UID, GUID, base calendar, work weeks and exceptions: only the week days whose hours
   changed and the exceptions on changed days are written anew (an exception covering a changed day goes on for its

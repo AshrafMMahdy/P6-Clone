@@ -977,7 +977,7 @@ Not features, but wrong behaviour seen while tracing:
 | Resources and assignments | Labor/nonlabor/material | done | 4 RSRC/81 TASKRSRC kept; cost resources → labor with a finding | — | — |
 | P6 extras (Activity ID, type, duration type) | Configurable MSP template mapping | partial | Fixed mapping Text1-Text6 (mpx.ts:33); no template editor. Tower-A lost duration_type, complete_pct_type, priority_type on 4/4 activities | — | — |
 | Baselines | Baseline fields | missing | No Baseline elements written/read | — | — |
-| Activity codes, notes, UDFs, expenses, steps | Custom fields / notes | missing | TASKACTV, TASKMEMO, WBSMEMO, UDFVALUE, PROJCOST, TASKPROC, ROLES, OBS all → 0 (msp.mjs) | — | — |
+| Activity codes, notes, UDFs, expenses, steps | Custom fields / notes | missing (UDFs of activities and resources: carried since the MSPDI custom field mapping, core/msp/custom-fields.ts) | TASKACTV, TASKMEMO, WBSMEMO, UDFVALUE, PROJCOST, TASKPROC, ROLES, OBS all → 0 (msp.mjs) | — | — |
 | Export MSPDI / MPX | One project per file | done | Wizard only; first selected project | UI only | — |
 | MPP read/write | Via installed MS Project | done | COM bridge both ways (msproject.ts:186-215) | UI only | — |
 | MSP version choice on export | 2003/2007… | missing | — | — | — |

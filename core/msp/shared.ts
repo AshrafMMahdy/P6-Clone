@@ -13,6 +13,7 @@ import { hoursPerWeek, inheritExceptions, parseClndrData, scheduledCalendarDef, 
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num, progressKey } from '../schedule/cpm.ts';
 import type { Ghosts, Kept, ProjectKept } from './keep.ts';
+import { costFromMsp, TYPE_OF_KIND, type CfKind, type CfSubject } from './custom-fields.ts';
 
 export type RelType = 'FS' | 'SS' | 'FF' | 'SF';
 
@@ -61,13 +62,15 @@ export interface MTask {
   ignoreRsrcCal: boolean | null;
   critical: boolean | null;
   extra: P6Extra;
+  /** read from MSPDI: the values of the custom fields it holds (FieldID, the element's text), see MProject.custom */
+  udf?: [fieldId: string, value: string][];
   preds: MPred[];
   /** read from MSPDI: the task as written (keep.ts); written from this TASK or (summary) PROJWBS row; its links in
    *  the order of its <PredecessorLink> elements (null: one the clone does not read) */
   keep?: Kept; row?: Row; links?: (MPred | null)[];
 }
 
-export interface MRes { uid: string; id: number; name: string; code: string; type: 'work' | 'material' | 'cost'; maxUnits: number | null; rate: number | null; calUid: string; p6Type?: string; keep?: Kept; row?: Row }
+export interface MRes { uid: string; id: number; name: string; code: string; type: 'work' | 'material' | 'cost'; maxUnits: number | null; rate: number | null; calUid: string; p6Type?: string; udf?: [fieldId: string, value: string][]; keep?: Kept; row?: Row }
 
 export interface MAssign {
   uid: string; taskUid: string; resUid: string; units: number | null;
@@ -76,6 +79,10 @@ export interface MAssign {
   start: string; finish: string; actualStart: string; actualFinish: string;
   keep?: Kept; row?: Row;
 }
+
+/** A Microsoft Project custom field of a task or resource that becomes a P6 custom field (custom-fields.ts): its FieldID, its
+ *  P6 name (the alias, else its Microsoft Project name), and whether the file defines it (a field with values and no definition is not). */
+export interface MCustom { fieldId: string; subject: CfSubject; kind: CfKind; name: string; defined: boolean }
 
 export interface MProject {
   name: string;
@@ -96,6 +103,8 @@ export interface MProject {
   tasks: MTask[];
   resources: MRes[];
   assignments: MAssign[];
+  /** read from MSPDI: the custom fields that become P6 custom fields */
+  custom?: MCustom[];
   /** read from MSPDI: the project's own elements, the elements that are not rows, whether the clone's custom fields
    *  were in the file; written from this PROJECT row */
   keep?: ProjectKept; row?: Row;
@@ -204,7 +213,7 @@ export function projectFromDb(db: Db, projIds?: string[]): MProject {
   const wbsAll = get('PROJWBS').filter((w) => w.proj_id === pid);
   const root = wbsAll.find((w) => w.proj_node_flag === 'Y');
   // read from Microsoft Project XML: what the file had beyond the rows (keep.ts)
-  const keep: ProjectKept | undefined = proj._msp_keep ? { kids: JSON.parse(proj._msp_keep), ghosts: JSON.parse(proj._msp_ghosts || '{}'), p6ext: proj._msp_p6ext === 'Y' } : undefined;
+  const keep: ProjectKept | undefined = proj._msp_keep ? { kids: JSON.parse(proj._msp_keep), ghosts: JSON.parse(proj._msp_ghosts || '{}'), p6ext: proj._msp_p6ext === 'Y', cfUsed: JSON.parse(proj._msp_cfused || '[]'), cfRead: JSON.parse(proj._msp_cfread || '[]') } : undefined;
   const ghosts: Ghosts = { tasks: [], resources: [], assignments: [], calendars: [], ...keep?.ghosts };
   const keptOf = (r: Row): Kept | undefined => (r._msp_keep ? { kids: JSON.parse(r._msp_keep), xml: '', seq: Number(r._msp_seq), id: r._msp_id || undefined } : r._msp_xml ? { kids: [], xml: r._msp_xml, seq: Number(r._msp_seq) || 0 } : undefined);
 
@@ -539,6 +548,25 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
     });
     push('RSRCRATE', { rsrc_rate_id: r.uid, rsrc_id: r.uid, max_qty_per_hr: p6num(r.maxUnits ?? 1), cost_per_qty: p6num(r.rate ?? 0), start_date: start });
   }
+  // Custom fields (custom-fields.ts): a P6 custom field of the matching type for each, its values on the activities and resources
+  const udfType = new Map<string, string>();
+  for (const c of m.custom ?? []) {
+    const id = String(udfType.size + 1);
+    udfType.set(c.fieldId, id);
+    push('UDFTYPE', { udf_type_id: id, table_name: c.subject === 'Task' ? 'TASK' : 'RSRC', udf_type_name: `user_field_${id}`, udf_type_label: c.name, logical_data_type: TYPE_OF_KIND[c.kind], super_flag: 'N', indicator_expression: '', summary_indicator_expression: '', export_flag: 'Y', _msp_field: c.fieldId, _msp_def: c.defined ? 'Y' : '' });
+  }
+  if (udfType.size) {
+    const kindOf = new Map((m.custom ?? []).map((c) => [c.fieldId, c.kind]));
+    const value = (fid: string, fk: string, projId: string, text: string) => {
+      const kind = kindOf.get(fid)!, row: Row = { udf_type_id: udfType.get(fid)!, fk_id: fk, proj_id: projId, udf_date: '', udf_number: '', udf_text: '', udf_code_id: '' };
+      if (kind === 'Text') { if (!text.trim()) return; row.udf_text = text; }
+      else if (kind === 'Number' || kind === 'Cost') { const n = num(text); if (n == null) return; row.udf_number = p6num(kind === 'Cost' ? costFromMsp(n) : n); }
+      else { const d = toP6Date(text); if (!d) return; row.udf_date = d; }
+      push('UDFVALUE', row);
+    };
+    for (const t of tasks) { const r = taskRows.get(t.uid); if (r) for (const [fid, v] of t.udf ?? []) value(fid, r.task_id, pid, v); }
+    for (const r of m.resources) if (resIds.has(r.uid)) for (const [fid, v] of r.udf ?? []) value(fid, r.uid, '', v);
+  }
   const rsrcType = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
   for (const a of m.assignments) {
     const t = taskRows.get(a.taskUid);
@@ -571,12 +599,12 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
   if (db.tables.TASK) { addField(db.tables.TASK, 'rsrc_id'); for (const r of db.tables.TASK.rows) r.rsrc_id = firstRsrc.get(r.task_id) ?? ''; }
   if (m.keep) {
     const P = table(db, 'PROJECT');
-    for (const k of ['_msp_keep', '_msp_ghosts', '_msp_p6ext', '_msp_ntasks']) addField(P, k);
+    for (const k of ['_msp_keep', '_msp_ghosts', '_msp_p6ext', '_msp_ntasks', '_msp_cfused', '_msp_cfread']) addField(P, k);
     for (const k of ['_msp_resume', '_p6_ver', '_legacy_ms']) addField(P, k);
     if (m.rules?.resume) P.rows[0]._msp_resume = 'Y';
     if (m.rules?.ver) P.rows[0]._p6_ver = m.rules.ver;
     if (m.rules?.known) P.rows[0]._legacy_ms = m.rules.legacy ? 'Y' : 'N';
-    Object.assign(P.rows[0], { _msp_keep: JSON.stringify(m.keep.kids), _msp_ghosts: JSON.stringify(ghosts), _msp_p6ext: m.keep.p6ext ? 'Y' : '', _msp_ntasks: String(rows(db, 'TASK').length) });
+    Object.assign(P.rows[0], { _msp_keep: JSON.stringify(m.keep.kids), _msp_ghosts: JSON.stringify(ghosts), _msp_p6ext: m.keep.p6ext ? 'Y' : '', _msp_ntasks: String(rows(db, 'TASK').length), _msp_cfused: JSON.stringify(m.keep.cfUsed), _msp_cfread: JSON.stringify(m.keep.cfRead) });
   }
   return db;
 }
