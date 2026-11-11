@@ -9,7 +9,7 @@ import { isLegacyLayout, p6num } from '../schedule/cpm.ts';
 import { baselineNumbers, baselineXml, importMspBaselines, scanTaskBaselines, type FoundBaselines } from './baselines.ts';
 import { ASG_DEPS, WORK, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
 import { defaultShifts, emptyTask, linkKey, projectFromDb, projectToDb, type MCustom, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
-import { CF_KINDS, CF_SLOTS, longTextNote, planCustomFields, slotName, slotOfField, taskFieldSlots, valueReader, type CfSubject } from './custom-fields.ts';
+import { CF_KINDS, CF_SLOTS, longTextNote, notNumberNote, planCustomFields, slotName, slotOfField, taskFieldSlots, valueReader, type CfSubject } from './custom-fields.ts';
 import { FORMAT_REVISION, LAG_FORMAT, RATE_PER_HOUR, defaultCtx, lagIsElapsed, lagIsPercent, percentLagHours, readDate, readFlag, readLag, readNumber, readRate, readText, readUnits, revisionText, toP6Date, writeLag, writeValue, type Ctx, type Entity } from './values.ts';
 
 export const MSPDI_NS = 'http://schemas.microsoft.com/project';
@@ -535,6 +535,8 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   // (m.keep.plainCurrency: the file was read as one of the old writer's, so unstamped it would be read so again)
   if (stampNew && !stampSlot && m.keep?.plainCurrency) throw new MspSaveRefused('msp_no_free_custom_field', `Not saved: this Microsoft Project file has no free custom field left to mark it as written in the current format (${revisionText()}), and without that mark the clone would read its costs back a hundred times too low.`, 'Free one custom field of the tasks in the file (in Microsoft Project, clear its name and values), or save the project as XER or P6 XML.');
   const rulesId = stampSlot?.id;
+  // the stamp in a field other than the clone's own Text6 sits in a field of the customer's file: say which, what it is for, and that it stays
+  if (stampNew && stampSlot && stampSlot.id !== RULES_FIELD[0]) opts.report?.push(`Microsoft Project field ${stampSlot.name} holds the clone's format mark (its name starts "P6 Schedule Rules"), because ${RULES_FIELD[1]} is already in use in this file. It marks the file as written in the current format (${revisionText()}), so its costs are read correctly; leave ${stampSlot.name} as it is.`);
   if (stampNew && !stampSlot) opts.report?.push(`The clone's format stamp (${revisionText()}) was not written: the file has no free custom field for it. This file is not one of the clone's earlier writer's, so it is read back by Microsoft Project's representation without it.`);
   const cf = planCustomFields(db, { valued, newFile: !fromMsp, reserved: { Task: new Set(fromMsp ? (stampNew && rulesId ? [rulesId] : []) : [...TASK_TEXT.map((x) => x[1]), RULES_FIELD[0]]), Resource: new Set(fromMsp ? [] : [RES_TYPE_FIELD[0]]) }, used: fileHas, own: ownName });
   for (const n of cf.notes) opts.report?.push(n);
@@ -846,6 +848,8 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   for (const [f, l] of dropped) opts.report?.push(`Custom field "${f.alias}": the value on ${l.map((x) => `${f.subject === 'Task' ? 'activity' : 'resource'} "${x.row}"`).join(', ')} was edited, so it is written as a plain value; the lookup-table link the file held for it (${[...new Set(l.flatMap((x) => x.what))].join(', ')}) was dropped.`);
   const longNote = longTextNote(cfValue.long);
   if (longNote) opts.report?.push(longNote);
+  const notNumber = notNumberNote(cfValue.notNumber);
+  if (notNumber) opts.report?.push(notNumber);
   if (followed.length) opts.report?.push(`This file has no WBS code mask, so Microsoft Project's WBS code is the outline number: the WBS of ${followed.length} moved task(s) follows the new place: ${followed.slice(0, 20).join('; ')}.`);
   const body = m.keep && m.row ? mergeKids(m.keep.kids, proj, { ...PROJECT_DEPS, ExtendedAttributes: () => defsChanged }, changedSince('PROJECT', m.row, k), ORDER.Project) : proj.map((x) => x[1]).join('\n');
   put(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Project xmlns="${MSPDI_NS}">\n`);

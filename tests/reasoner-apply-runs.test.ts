@@ -9,7 +9,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rows, type Db } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
-import { saveBaseline } from '../core/progress/baseline.ts';
+import { baselineProjectIds, markBaselines, saveBaseline } from '../core/progress/baseline.ts';
+import { writeXer } from '../core/xer/write.ts';
+import { parseXer } from '../core/xer/parse.ts';
+import { record, rollback } from '../core/journal.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { reasonerRefusal, runNumbers, whiqFieldClash, writeWhiqFields } from '../core/analysis/whiq-fields.ts';
 import { reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
@@ -381,4 +384,33 @@ test('B-undo: undo of an apply that declared a field takes back its values and t
   assert.deepEqual(await udf(handle), f1, 'values and the declared field are gone');
   assert.equal((await call('redo', { handle, owner_key })).err, false);
   assert.deepEqual(await udf(handle), f2, 'and back');
+});
+
+// A baseline that came from an XER (orig_proj_id names its project) and was then restored is a project in every respect.
+test('a restored baseline is a project: not in baselineProjectIds, refused by the reasoner when in progress, written by a crash apply, still a project after save as XER and open; undo brings the baseline back as it was', () => {
+  let db = plan();
+  good(db, [{ op: 'save_baseline', project: 'R', name: 'BL', assign_as: 'project' }]);
+  const reopen = (d: Db) => { const x = writeXer(d, { version: '19.12', projIds: rows(d, 'PROJECT').map((p) => p.proj_id) } as never); const n = parseXer(typeof x === 'string' ? new TextEncoder().encode(x) : x).db; markBaselines(n); return n; };
+  db = reopen(db);
+  const bl = () => rows(db, 'PROJECT').find((p) => p.proj_short_name === 'BL')!;
+  assert.ok(bl().orig_proj_id && baselineProjectIds(db).has(bl().proj_id), 'read from the XER: a baseline');
+  const was = { of: bl()._baseline_of, orig: bl().orig_proj_id, slot: rows(db, 'PROJECT').find((p) => p.proj_short_name === 'R')!.sum_base_proj_id };
+  good(db, [{ op: 'restore_baseline', baseline: 'BL' }]);
+  assert.ok(!baselineProjectIds(db).has(bl().proj_id), '(a) not a baseline');
+  assert.equal(bl().orig_proj_id, '');
+  assert.equal(rows(db, 'PROJECT').find((p) => p.proj_short_name === 'R')!.sum_base_proj_id, '', 'no project names it as its baseline');
+  for (const t of rows(db, 'TASK').filter((t) => t.proj_id === bl().proj_id)) t.act_start_date = '2026-06-01 08:00';
+  assert.equal(reasonerRefusal(db, [bl().proj_id])?.code, 'schedule_in_progress', '(b) refused as in progress');
+  const t = rows(db, 'TASK').find((t) => t.proj_id === bl().proj_id && t.task_code === 'A')!;
+  const w = writeWhiqFields(db, { changes: [{ task_id: t.task_id, id: 'A', project: 'BL', from_days: 10, to_days: 8, cost: 5 }], who: 'Crashed (least cost)' }, { calendarDays: true, projIds: [bl().proj_id] });
+  assert.ok(Array.isArray(w) && w.length > 0, `(c) fields written: ${JSON.stringify(w)}`);
+  db = reopen(db);
+  assert.ok(!baselineProjectIds(db).has(bl().proj_id) && !bl()._baseline_of, '(d) a project after save as XER and open');
+  // undo: a second copy read from the XER, restored, then rolled back
+  let db2 = plan(); good(db2, [{ op: 'save_baseline', project: 'R', name: 'BL', assign_as: 'project' }]); db2 = reopen(db2);
+  const b2 = () => rows(db2, 'PROJECT').find((p) => p.proj_short_name === 'BL')!;
+  const j2 = record(db2, (v) => { assert.ok(applyOps(v, [{ op: 'restore_baseline', baseline: 'BL' }] as never, { calendarDays: true }).ok); });
+  rollback(j2);
+  assert.deepEqual({ of: b2()._baseline_of, orig: b2().orig_proj_id, slot: rows(db2, 'PROJECT').find((p) => p.proj_short_name === 'R')!.sum_base_proj_id }, was);
+  assert.ok(baselineProjectIds(db2).has(b2().proj_id), 'undone: a baseline again');
 });

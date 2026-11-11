@@ -178,10 +178,19 @@ export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<st
  *  value is written whole, the file holds all of it, and the save's notes say Microsoft Project shows only the first 255. */
 export const MSP_TEXT_FIELD_SIZE = 255;
 
+/** XML Schema `double` lexical form without the special values: optional sign, digits with an optional fraction (or a fraction alone), optional exponent. */
+const PLAIN_DOUBLE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+/** The text of a stored number for a Number / Cost element: a plain decimal number as stored; any other text that has a numeric value ("0x10", " 5 ") as the decimal text of that value; none: not a number. */
+export function numberText(stored: string): string | null {
+  if (PLAIN_DOUBLE.test(stored)) return stored;
+  const n = Number(stored);
+  return stored.trim() !== '' && Number.isFinite(n) ? String(n) : null;
+}
+
 /** The value a P6 custom field holds on a row, as the text of the Microsoft Project element (undefined: none). `date` formats a P6 date.
  *  The reader's `long` counts, by field, the text values it gave out that are longer than MSP_TEXT_FIELD_SIZE. */
-export function valueReader(db: Db, fields: CfField[], ctx: Ctx): ((f: CfField, fk: string) => string | undefined) & { long: Map<CfField, number> } {
-  const long = new Map<CfField, number>();
+export function valueReader(db: Db, fields: CfField[], ctx: Ctx): ((f: CfField, fk: string) => string | undefined) & { long: Map<CfField, number>; notNumber: Map<CfField, string[]> } {
+  const long = new Map<CfField, number>(), notNumber = new Map<CfField, string[]>();
   const byType = new Map<string, Map<string, Row>>(fields.map((f) => [f.type.udf_type_id, new Map<string, Row>()]));
   for (const v of rows(db, 'UDFVALUE')) byType.get(v.udf_type_id)?.set(v.fk_id, v);
   const codes = new Map(rows(db, 'UDFCODE').map((c) => [c.udf_code_id, c.short_name || c.udf_code_name]));
@@ -189,7 +198,9 @@ export function valueReader(db: Db, fields: CfField[], ctx: Ctx): ((f: CfField, 
     const v = byType.get(f.type.udf_type_id)?.get(fk);
     if (!v) return undefined;
     const t = f.type.logical_data_type;
-    const n = v.udf_number !== '' && Number.isFinite(Number(v.udf_number)) ? v.udf_number : null; // (as stored: a Number field is written unchanged, a Cost field by the currency codec)
+    // (a plain decimal number is written as stored, any other text with a numeric value as that value; a Cost field by the currency codec; text that is no number is not written and is named)
+    const n = v.udf_number ? numberText(v.udf_number) : null;
+    if (v.udf_number && n == null && (f.kind === 'Number' || f.kind === 'Cost')) notNumber.set(f, [...(notNumber.get(f) ?? []), v.udf_number]);
     const w = (kind: CfKind, value: string | number | null) => writeValue('ExtendedAttribute', `Value:${kind}`, value, ctx);
     const x = f.kind === 'Number' ? w('Number', n) : f.kind === 'Cost' ? w('Cost', n == null ? null : Number(n))
       : f.kind === 'Text' ? (t === 'FT_CODE' || f.column === 'udf_code_id' ? (v.udf_code_id ? codes.get(v.udf_code_id) ?? '' : '') : w('Text', v.udf_text ?? ''))
@@ -197,7 +208,14 @@ export function valueReader(db: Db, fields: CfField[], ctx: Ctx): ((f: CfField, 
     if (f.kind === 'Text' && typeof x === 'string' && x.length > MSP_TEXT_FIELD_SIZE && [...x].length > MSP_TEXT_FIELD_SIZE) long.set(f, (long.get(f) ?? 0) + 1);
     return x === '' || x == null ? undefined : x;
   };
-  return Object.assign(read, { long });
+  return Object.assign(read, { long, notNumber });
+}
+
+/** The save's note for the number values that are not numbers (none: undefined): they are not written. */
+export function notNumberNote(bad: Map<CfField, string[]>): string | undefined {
+  if (!bad.size) return undefined;
+  const list = [...bad].map(([f, v]) => `${f.subject === 'Task' ? 'activity' : 'resource'} "${f.alias}" (${v.map((x) => JSON.stringify(x)).join(', ')})`).join('; ');
+  return `Custom field values NOT carried to the Microsoft Project XML: ${list} are not numbers, so they are left out of the file.`;
 }
 
 /** The save's note for the text values longer than a Microsoft Project Text field holds (none: undefined). */

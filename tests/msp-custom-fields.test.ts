@@ -9,7 +9,7 @@ import { parseXer } from '../core/xer/parse.ts';
 import { parseMspdi, writeMspdi } from '../core/msp/mspdi.ts';
 import { CF_SLOTS } from '../core/msp/custom-fields.ts';
 import { applyOps } from '../core/project/ops.ts';
-import { rows, type Db } from '../core/db.ts';
+import { rows, table, type Db } from '../core/db.ts';
 import { parseXml, type XNode } from '../core/xml/p6xml.ts';
 import { samples } from './helpers.ts';
 
@@ -411,6 +411,22 @@ test('L8: a P6 FT_FLOAT field is a Number field and its value is carried', () =>
   assert.ok(xml.includes('<Value>4.75</Value>'));
   assert.deepEqual(report, []);
   assert.deepEqual(fieldsOf(parseMspdi(xml).db, 'TASK').Dbl, { type: 'FT_FLOAT_2_DECIMALS', values: { [a]: '4.75' } });
+});
+
+test('L9: a Number value is written as stored when it is a plain decimal number (XML Schema double), else as the decimal text of its value; a value that is no number is named', () => {
+  const db = load('small_villa_g_1_schedule.xer');
+  const codes = taskCodes(db);
+  ok(db, [{ op: 'add_udf', name: 'Num', data_type: 'number' }]);
+  const type = rows(db, 'UDFTYPE').find((u) => u.udf_type_label === 'Num')!;
+  const cases: [string, string | null][] = [['4.75', '4.75'], ['-3', '-3'], ['+2.50', '+2.50'], ['.5', '.5'], ['7.', '7.'], ['1e3', '1e3'], ['2.5E-2', '2.5E-2'], ['0x10', '16'], [' 5 ', '5'], ['1_000', null], ['abc', null], ['Infinity', null], ['NaN', null]];
+  cases.forEach(([v], i) => table(db, 'UDFVALUE').rows.push({ udf_type_id: type.udf_type_id, fk_id: rows(db, 'TASK').find((x) => x.task_code === codes[i])!.task_id, proj_id: rows(db, 'TASK')[0].proj_id, udf_date: '', udf_number: v, udf_text: '', udf_code_id: '' }));
+  const report: string[] = [];
+  const xml = writeMspdi(db, { report });
+  const out = [...xml.matchAll(/<ExtendedAttribute><FieldID>188743767<\/FieldID><Value>([^<]*)<\/Value>/g)].map((m) => m[1]);
+  assert.deepEqual([...out].sort(), cases.filter((c) => c[1] != null).map((c) => c[1]!).sort()); // (in the order of the activities in the file)
+  const named = report.find((n) => n.startsWith('Custom field values NOT carried'))!;
+  assert.match(named, /^Custom field values NOT carried to the Microsoft Project XML: activity "Num" \((?:"[^"]*"(?:, )?){4}\) are not numbers, so they are left out of the file\.$/);
+  for (const v of ['1_000', 'abc', 'Infinity', 'NaN']) assert.ok(named.includes(`"${v}"`), v);
 });
 
 test('guard: for every logical type the clone knows, a value written is the value read back, or the field is named as not carried', async () => {

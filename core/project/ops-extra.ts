@@ -714,7 +714,6 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     case 'restore_baseline': {
       const b = baseline(str(op.baseline, 'baseline'));
       const name = b.proj_short_name;
-      for (const p of rows(db, 'PROJECT')) { if (p.sum_base_proj_id === b.proj_id) p.sum_base_proj_id = ''; for (const f of ['_bl1', '_bl2', '_bl3']) if (p[f] === b.proj_id) p[f] = ''; }
       restoreBaseline(db, b.proj_id);
       return { restored: name, note: 'It is now a normal project with this Project ID.' };
     }

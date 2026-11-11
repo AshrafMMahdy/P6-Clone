@@ -35,10 +35,12 @@ export function deleteBaseline(db: Db, baselineId: string): void {
   deleteProject(db, baselineId);
 }
 
-/** Restore: the baseline becomes a normal project again. */
+/** Restore: the baseline becomes a normal project again, in every respect: it is no baseline of any project (no project's baseline slot names it), and its
+ *  orig_proj_id (how an XER marks a baseline, and what baselineProjectIds reads) is cleared, so saving it as XER and opening that does not turn it back into one. */
 export function restoreBaseline(db: Db, baselineId: string): void {
+  for (const p of rows(db, 'PROJECT')) { if (p.sum_base_proj_id === baselineId) p.sum_base_proj_id = ''; for (const f of ['_bl1', '_bl2', '_bl3']) if (p[f] === baselineId) p[f] = ''; }
   const b = rows(db, 'PROJECT').find((x) => x.proj_id === baselineId);
-  if (b) b._baseline_of = '';
+  if (b) { b._baseline_of = ''; if (b.orig_proj_id) b.orig_proj_id = ''; }
 }
 
 /** The baseline projects of a file: a project saved as a baseline (_baseline_of) or, in an XER read without markBaselines (the desktop's reader), a project row whose

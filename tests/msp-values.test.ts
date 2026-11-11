@@ -136,14 +136,18 @@ test('A4: the stamp stays on the clone\'s own slot when it has one; with every T
   assert.equal(slots.length, 120, 'Text 30, Number 20, Cost 10, Start 10, Finish 10, Date 10, Flag 20, Duration 10');
   assert.equal(new Set(slots.map((x) => x.id)).size, 120);
   const own = await usedUpTo(0);
-  assert.deepEqual(stampOf(writeMspdi(parseMspdi(own).db)), ['188743746', 'Text6'], 'the clone\'s own slot');
+  const ownReport: string[] = [];
+  assert.deepEqual(stampOf(writeMspdi(parseMspdi(own).db, { report: ownReport })), ['188743746', 'Text6'], 'the clone\'s own slot');
+  assert.ok(!ownReport.some((n) => /format mark/.test(n)), 'on Text6, the clone\'s own slot: no note');
   // Text6..Text30 are the customer's: 25 fields; the next free in the order is Number1; after the 20 Number fields Cost1; after Cost, Start, Finish, Date and the 20 Flag fields Duration1
-  for (const [n, want] of [[25, ['188743767', 'Number1']], [45, ['188743786', 'Cost1']], [105, ['188743783', 'Duration1']], [114, ['188743961', 'Duration10']]] as [number, string[]][]) {
+  for (const [n, want] of [[1, ['188743747', 'Text7']], [25, ['188743767', 'Number1']], [45, ['188743786', 'Cost1']], [105, ['188743783', 'Duration1']], [114, ['188743961', 'Duration10']]] as [number, string[]][]) {
     const x = await usedUpTo(n);
     assert.equal(oldFindings(x).length, 1, `${n} used: still the old writer's file`);
     const report: string[] = [];
     const saved = writeMspdi(parseMspdi(x).db, { report });
     assert.deepEqual(stampOf(saved), want, `${n} custom fields used: the stamp is in ${want[1]}`);
+    // the mark is in a field of the customer's file other than Text6 (a Text slot, or another kind): the save says which, what it is for, and to leave it
+    assert.deepEqual(report.filter((l) => /format mark/.test(l)), [`Microsoft Project field ${want[1]} holds the clone's format mark (its name starts "P6 Schedule Rules"), because Text6 is already in use in this file. It marks the file as written in the current format (format 2), so its costs are read correctly; leave ${want[1]} as it is.`]);
     assert.deepEqual(asgCosts(saved), ['123450', '20000', '103450']);
     // read back there by its alias (whatever the kind of the field), then saved again: nothing moves, nothing is added
     const back = parseMspdi(saved);
