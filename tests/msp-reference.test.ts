@@ -5,8 +5,8 @@
 //          of the same file: costs (budget, actual, remaining), work and units, rates, durations and remaining durations, lags, total and free slack,
 //          percent complete, start / finish / actual dates.
 //   WRITE  a P6 project -> the clone writes Microsoft Project XML -> MPXJ reads it -> MPXJ's values must equal the P6 values.
-// Skipped, with the reason, where Java or MPXJ's pinned jars are not available (the release workflow fetches the jars before its tests; see the notes
-// in docs/agentic/2026-11-11-msp-custom-fields-release-notes.md).
+// Skipped, with the reason, where Java or MPXJ's pinned jars are not available, unless P6CLONE_REQUIRE_REFERENCE=1: then the skip is a failure with the same
+// message (the release workflow sets it, after fetching the jars and installing Java, so the reference check cannot be skipped there).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,11 +14,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseMspdi, writeMspdi } from '../core/msp/mspdi.ts';
 import { mppToMspdi } from '../core/msp/mpp.ts';
-import { projectFromDb } from '../core/msp/shared.ts';
 import { parseXer } from '../core/xer/parse.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { rows, type Db } from '../core/db.ts';
-import { mpxjRead, referenceMissing, type MpxjProject } from './mpxj-reference.ts';
+import { mpxjRead, mpxjResave, skipWithoutReference, type MpxjProject } from './mpxj-reference.ts';
+import { compare, compared, report, viewOf } from './mpxj-compare.ts';
 import { samples } from './helpers.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -36,135 +36,24 @@ const MPPS: [file: string, why: string][] = [
   ['Bel-Egypt Schedule Rev.1.mpp', 'no resources: 135 tasks with 62 lags and 84 slacks (the schedule side alone)'],
 ];
 
-// ---------- what each side holds, in the same terms
-
-interface View {
-  tasks: Map<string, { name: string; dur: number; rem: number; total: number; free: number; start: string; finish: string; as: string; af: string; pct: number }>;
-  links: { key: string; lagHrs: number }[];
-  resources: Map<string, { name: string; rate: number; max: number | null }>;
-  assigns: Map<string, { material: boolean; cost: number; actual: number; remaining: number; work: number; actualWork: number; remainingWork: number; units: number; qty: number }>;
-}
-/** The clone's values of a project, by the Microsoft Project UID each task, resource and assignment has (one the file had, or the one the writer gives
- *  it). P6 fields where P6 has them. Dates: for a file read, the row's (what the clone holds of the file's Start / Finish / actuals); for a file written,
- *  the dates the writer puts in the file (projectFromDb); the percent complete is always the writer's own (P6 holds it as durations). */
-function viewOf(db: Db, mode: 'read' | 'write'): View {
-  const pid = rows(db, 'PROJECT').find((p) => !p._baseline_of)!.proj_id;
-  const m = projectFromDb(db, [pid]);
-  const n = (s: string | undefined) => Number(s || 0);
-  const v: View = { tasks: new Map(), links: [], resources: new Map(), assigns: new Map() };
-  const uidOfTask = new Map<string, string>();
-  for (const t of m.tasks) if (t.row && !t.summary) {
-    uidOfTask.set(t.row.task_id, t.uid);
-    v.tasks.set(t.uid, { name: t.name, dur: n(t.row.target_drtn_hr_cnt), rem: n(t.row.remain_drtn_hr_cnt), total: n(t.row.total_float_hr_cnt), free: n(t.row.free_float_hr_cnt), ...(mode === 'read' ? { start: t.row.target_start_date, finish: t.row.target_end_date, as: t.row.act_start_date, af: t.row.act_end_date } : { start: t.start, finish: t.finish, as: t.actualStart, af: t.actualFinish }), pct: t.pct ?? 0 });
-  }
-  for (const l of rows(db, 'TASKPRED').filter((x) => x.proj_id === pid)) { const s = uidOfTask.get(l.task_id), p = uidOfTask.get(l.pred_task_id); if (s && p) v.links.push({ key: `${p}->${s}`, lagHrs: n(l.lag_hr_cnt) }); }
-  for (const r of m.resources) if (r.row) v.resources.set(r.uid, { name: r.name, rate: r.rate ?? 0, max: r.maxUnits });
-  const kind = new Map(m.resources.map((r) => [r.uid, r.type]));
-  for (const a of m.assignments) if (a.row) {
-    const r = a.row;
-    v.assigns.set(a.uid, {
-      material: kind.get(a.resUid) === 'material', cost: n(r.act_reg_cost) + n(r.act_ot_cost) + n(r.remain_cost) || n(r.target_cost), actual: n(r.act_reg_cost) + n(r.act_ot_cost), remaining: n(r.remain_cost),
-      work: n(r.act_reg_qty) + n(r.act_ot_qty) + n(r.remain_qty), actualWork: n(r.act_reg_qty) + n(r.act_ot_qty), remainingWork: n(r.remain_qty), units: n(r.target_qty_per_hr), qty: n(r.act_reg_qty) + n(r.act_ot_qty) + n(r.remain_qty),
-    });
-  }
-  return v;
-}
-
-export interface Diff { what: string; key: string; clone: unknown; ref: unknown }
-/** The precision the converted file itself carries (stated, not tolerated silently): MPXJ's XML writer rounds a duration or work to whole minutes
- *  (a 27 h 59 min 59.9 s reading in MPXJ is PT28H0M0S in the file), a slack is in tenths of a minute, a units value has 4 decimals, and a material's
- *  quantity is also the file's Work, whole seconds of an hour (a file the clone read and saved again may carry it that way). */
-const PRECISION = { hours: 1 / 60 + 1e-9, slack: 1 / 600 + 1e-9, units: 5e-5 + 1e-12, quantity: 1 / 3600 + 1e-9, exact: 1e-9 };
-const h = (s: number | undefined | null) => (s == null ? 0 : s / 3600);
-const day = (s: string | undefined) => (s ? s.replace('T', ' ').slice(0, 16) : '');
-
-export function compare(ref: MpxjProject, v: View, opts: { exactDurations?: boolean } = {}): { diffs: Diff[]; compared: Record<string, number> } {
-  const diffs: Diff[] = [], compared: Record<string, number> = {};
-  const eq = (what: string, key: string, clone: number | string, r: number | string, tol = PRECISION.exact) => {
-    compared[what] = (compared[what] ?? 0) + 1;
-    const same = typeof r === 'number' ? Math.abs(Number(clone) - r) <= tol * Math.max(1, tol === PRECISION.exact ? Math.abs(r) : 1) : String(clone) === r;
-    if (!same) diffs.push({ what, key, clone, ref: r });
-  };
-  const hrs = opts.exactDurations ? PRECISION.exact : PRECISION.hours, slack = opts.exactDurations ? PRECISION.exact : PRECISION.slack, units = opts.exactDurations ? PRECISION.exact : PRECISION.units;
-  const pp = ref.property_values as any;
-  void pp;
-  const tasks = new Map(ref.tasks.map((t) => [String(t.unique_id), t]));
-  for (const [uid, t] of v.tasks) {
-    const r = tasks.get(uid), k = `task ${uid} ${t.name}`;
-    if (!r) { diffs.push({ what: 'task', key: k, clone: 'present', ref: 'absent' }); continue; }
-    eq('task duration (h)', k, t.dur, h(r.duration), hrs);
-    eq('task remaining duration (h)', k, t.rem, h(r.remaining_duration), hrs);
-    eq('task total slack (h)', k, t.total, h(r.total_slack), slack);
-    eq('task free slack (h)', k, t.free, h(r.free_slack), slack);
-    eq('task start', k, t.start, day(r.start));
-    eq('task finish', k, t.finish, day(r.finish));
-    eq('task actual start', k, t.as, day(r.actual_start));
-    eq('task actual finish', k, t.af, day(r.actual_finish));
-    eq('task percent complete', k, t.pct, Number(r.percent_complete ?? 0));
-  }
-  for (const l of v.links) {
-    const [p, s] = l.key.split('->');
-    const link = tasks.get(s)?.predecessors?.find((q: any) => String(q.predecessor_task_unique_id) === p);
-    if (!link) { diffs.push({ what: 'link', key: l.key, clone: 'present', ref: 'absent' }); continue; }
-    // a percentage lag: that percentage of the predecessor's duration (MPXJ holds the percentage x 60 in its seconds)
-    const refHrs = /%/.test(link.lag_units ?? '') ? (link.lag / 60 / 100) * h(tasks.get(p)?.duration) : h(link.lag);
-    eq('link lag (h)', l.key, l.lagHrs, refHrs, hrs);
-  }
-  const resources = new Map(ref.resources.map((r) => [String(r.unique_id), r]));
-  for (const [uid, r] of v.resources) {
-    const m = resources.get(uid);
-    if (!m) { diffs.push({ what: 'resource', key: `resource ${uid} ${r.name}`, clone: 'present', ref: 'absent' }); continue; }
-    const rate = /^([\d.]+)\/(\w+)$/.exec(m.standard_rate ?? '');
-    // MPXJ holds the rate in the unit of its format: per hour is the clone's (and the file's) unit
-    if (rate && m.type !== 'MATERIAL') {
-      const per = ({ m: 1 / 60, h: 1, d: pp.minutes_per_day / 60, w: pp.minutes_per_week / 60, mo: pp.minutes_per_month / 60, y: pp.minutes_per_year / 60 } as Record<string, number>)[rate[2]];
-      eq('resource rate (per hour)', `resource ${uid} ${m.name}`, r.rate, Number(rate[1]) / per, 0.006 / per + PRECISION.exact);
-    } else if (m.type !== 'MATERIAL') eq('resource rate (per hour)', `resource ${uid} ${m.name}`, r.rate, 0);
-    // (a P6 resource with no max units per hour is written as 100 %: the writer's default for an unknown, named here, not compared)
-    if (m.type !== 'MATERIAL' && r.max != null) eq('resource max units', `resource ${uid} ${m.name}`, r.max, (m.max_units ?? 0) / 100, units);
-  }
-  const asg = new Map(ref.assignments.map((a) => [String(a.unique_id), a]));
-  for (const [uid, a] of v.assigns) {
-    const m = asg.get(uid), k = `assignment ${uid}`;
-    if (!m) { diffs.push({ what: 'assignment', key: k, clone: 'present', ref: 'absent' }); continue; }
-    eq('assignment cost', k, a.cost, m.cost ?? 0, 1e-6);
-    eq('assignment actual cost', k, a.actual, m.actual_cost ?? 0, 1e-6);
-    eq('assignment remaining cost', k, a.remaining, m.remaining_cost ?? 0, 1e-6);
-    eq('assignment work (h)', k, a.work, h(m.work), hrs);
-    eq('assignment actual work (h)', k, a.actualWork, h(m.actual_work), hrs);
-    eq('assignment remaining work (h)', k, a.remainingWork, h(m.remaining_work), hrs);
-    // Deliberately modelled differently, by name: a material assignment's Microsoft Project units ARE its quantity (500 % = 5 units of the material);
-    // the clone's units per hour are the quantity over the duration, as P6's are. So a material's quantity is compared, not its units per hour.
-    if (a.material) eq('material assignment quantity', k, a.qty, (m.assignment_units ?? 0) / 100, PRECISION.quantity);
-    else eq('assignment units', k, a.units, (m.assignment_units ?? 0) / 100, units);
-  }
-  return { diffs, compared };
-}
-
-const report = (name: string, r: { diffs: Diff[]; compared: Record<string, number> }) => {
-  const by: Record<string, Diff[]> = {};
-  for (const d of r.diffs) (by[d.what] ??= []).push(d);
-  return `${name}: ${Object.entries(by).map(([w, l]) => `${w} x${l.length} e.g. ${JSON.stringify(l.slice(0, 2))}`).join('; ') || 'equal'}`;
-};
-const compared = (r: { compared: Record<string, number> }, ...what: string[]) => { for (const w of what) assert.ok((r.compared[w] ?? 0) > 0, `${w}: nothing was compared`); };
-
 test('READ: the clone reads the sample .mpp files with the values MPXJ reads from the same files', { timeout: 900_000 }, async (t) => {
-  const why = referenceMissing();
-  if (why) return t.skip(`needs the reference (MPXJ and Java): ${why}`);
+  if (skipWithoutReference(t)) return;
   const total: Record<string, number> = {};
   for (const [f] of MPPS) {
     const path = join(SAMPLE_MPPS, f);
-    const { db } = parseMspdi(await mppToMspdi(path));
+    const xml = await mppToMspdi(path), { db, findings } = parseMspdi(xml, { converted: true });
+    // an .mpp is never one of the clone's old files, with the conversion's flag or by its own bytes (MPXJ's writer adds what the old writer never wrote)
+    assert.equal(findings.filter((x) => x.code === 'MSP_OLD_CLONE_FILE').length, 0, f);
+    assert.equal(parseMspdi(xml).findings.filter((x) => x.code === 'MSP_OLD_CLONE_FILE').length, 0, `${f}: also without the flag`);
     const r = compare(mpxjRead(path), viewOf(db, 'read'));
     for (const [k, n] of Object.entries(r.compared)) total[k] = (total[k] ?? 0) + n;
     assert.equal(r.diffs.length, 0, report(f, r));
   }
-  for (const w of ['assignment cost', 'assignment actual cost', 'assignment remaining cost', 'assignment work (h)', 'assignment units', 'material assignment quantity', 'resource rate (per hour)', 'resource max units', 'task remaining duration (h)', 'task total slack (h)', 'task free slack (h)', 'task percent complete', 'task actual start', 'task actual finish', 'link lag (h)']) assert.ok((total[w] ?? 0) > 0, `${w}: nothing was compared in any file`);
+  for (const w of ['assignment cost', 'assignment actual cost', 'assignment remaining cost', 'assignment work (h)', 'assignment units', 'material assignment quantity', 'resource rate (per hour)', 'resource max units', 'task remaining duration (h)', 'task total slack (h)', 'task free slack (h)', 'task percent complete', 'task actual start', 'task actual finish', 'link lag (h)', 'baseline start', 'baseline finish', 'baseline duration (h)']) assert.ok((total[w] ?? 0) > 0, `${w}: nothing was compared in any file`);
 });
 
 test('READ: a Microsoft Project XML file (the hand-made fixture: percentage and elapsed lags, fixed costs, money in hundredths) reads as MPXJ reads it', { timeout: 120_000 }, (t) => {
-  const why = referenceMissing();
-  if (why) return t.skip(`needs the reference (MPXJ and Java): ${why}`);
+  if (skipWithoutReference(t)) return;
   const r = compare(mpxjRead(RICH), viewOf(parseMspdi(readFileSync(RICH, 'utf8')).db, 'read'), { exactDurations: true });
   assert.equal(r.diffs.length, 0, report('rich-mspdi.xml', r));
   compared(r, 'assignment cost', 'assignment actual cost', 'assignment remaining cost', 'link lag (h)');
@@ -176,8 +65,7 @@ const RATES = (rows5: string) => `<?xml version="1.0" encoding="UTF-8" standalon
 <Tasks><Task><UID>1</UID><ID>1</ID><Name>T</Name><Duration>PT36H0M0S</Duration><RemainingDuration>PT36H0M0S</RemainingDuration><Start>2026-03-02T08:00:00</Start><Finish>2026-03-09T17:00:00</Finish></Task></Tasks>
 <Resources>${rows5}</Resources><Assignments/></Project>`;
 test('READ: a rate is per hour whatever its StandardRateFormat (minute, hour, day, week, month) in a project whose day, week and month are not the defaults', { timeout: 120_000 }, (t) => {
-  const why = referenceMissing();
-  if (why) return t.skip(`needs the reference (MPXJ and Java): ${why}`);
+  if (skipWithoutReference(t)) return;
   const res = [[1, 'perMinute', 1], [2, 'perHour', 2], [3, 'perDay', 3], [4, 'perWeek', 4], [5, 'perMonth', 5]].map(([u, n, f]) => `<Resource><UID>${u}</UID><ID>${u}</ID><Name>${n}</Name><Type>1</Type><MaxUnits>1</MaxUnits><StandardRate>60</StandardRate><StandardRateFormat>${f}</StandardRateFormat></Resource>`).join('');
   const dir = mkdtempSync(join(tmpdir(), 'p6rates-'));
   try {
@@ -201,8 +89,7 @@ function viaClone(db: Db): { ref: MpxjProject; xml: string } {
 const sample = (name: string) => parseXer(samples().find((s) => s.name === name)!.bytes).db;
 
 test('WRITE: a P6 project with costs, work, material, progress, lags and slack is written, and MPXJ reads the P6 values from the file', { timeout: 300_000 }, (t) => {
-  const why = referenceMissing();
-  if (why) return t.skip(`needs the reference (MPXJ and Java): ${why}`);
+  if (skipWithoutReference(t)) return;
   const db = sample('130 TRIAL.xer');
   const { ref } = viaClone(db);
   const r = compare(ref, viewOf(db, 'write'));
@@ -211,8 +98,7 @@ test('WRITE: a P6 project with costs, work, material, progress, lags and slack i
 });
 
 test('WRITE: money of one assignment, known by hand: 1234.50 with 200 spent is 123450 / 20000 / 103450 in the file and 1234.5 / 200 / 1034.5 for MPXJ', { timeout: 120_000 }, (t) => {
-  const why = referenceMissing();
-  if (why) return t.skip(`needs the reference (MPXJ and Java): ${why}`);
+  if (skipWithoutReference(t)) return;
   const db = sample('small_villa_g_1_schedule.xer');
   const code = rows(db, 'TASK').find((x) => x.task_type === 'TT_Task')!.task_code;
   assert.equal(applyOps(db, [{ op: 'add_resource', id: 'CARP', name: 'Carpenter' }, { op: 'assign_resource', activity: code, resource: 'CARP', units_per_day: 8 }], { calendarDays: true }).ok, true);
@@ -224,8 +110,7 @@ test('WRITE: money of one assignment, known by hand: 1234.50 with 200 spent is 1
 });
 
 test('an old file of the clone (plain units, no stamp), saved again, is read by MPXJ with the right money; the same file read by the clone first says it is old', { timeout: 120_000 }, (t) => {
-  const why = referenceMissing();
-  if (why) return t.skip(`needs the reference (MPXJ and Java): ${why}`);
+  if (skipWithoutReference(t)) return;
   const db = sample('130 TRIAL.xer');
   // the file as the clone wrote it before this revision: currency in plain units, no format stamp
   const old = writeMspdi(db).replace(', format 2</Alias>', '</Alias>').replace(/<(Cost|ActualCost|RemainingCost)>([^<]*)<\/\1>/g, (_x, tag, v) => `<${tag}>${Number(v) / 100}</${tag}>`);
@@ -235,4 +120,92 @@ test('an old file of the clone (plain units, no stamp), saved again, is read by 
   const r = compare(ref, viewOf(db, 'write'));
   assert.equal(r.diffs.length, 0, report('old file saved again', r));
   compared(r, 'assignment cost');
+});
+
+test('READ: custom Number and Cost fields of tasks (a hand-written file: amounts with fractions of a hundredth, a negative, a large one) read as MPXJ reads them', { timeout: 120_000 }, (t) => {
+  if (skipWithoutReference(t)) return;
+  // (own text: the values of a Cost custom field are hundredths, a Number field's are plain)
+  // (amounts with at most 2 decimals of a hundredth and numbers with at most 4 decimals: MPXJ itself reads no more than that)
+  const costs = ['1234.5', '0.4', '100000000000', '-550', '1234.56', '12'], numbers = ['1.5', '0.0001', '123456.789', '-7', '3', '2.25'];
+  const task = (i: number) => `<Task><UID>${i + 1}</UID><ID>${i + 1}</ID><Name>T${i + 1}</Name><Duration>PT8H0M0S</Duration><RemainingDuration>PT8H0M0S</RemainingDuration><Start>2026-03-02T08:00:00</Start><Finish>2026-03-02T17:00:00</Finish><ExtendedAttribute><FieldID>188743786</FieldID><Value>${costs[i]}</Value></ExtendedAttribute><ExtendedAttribute><FieldID>188743767</FieldID><Value>${numbers[i]}</Value></ExtendedAttribute></Task>`;
+  const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Project xmlns="http://schemas.microsoft.com/project"><SaveVersion>14</SaveVersion><Name>cf</Name><MinutesPerDay>480</MinutesPerDay><MinutesPerWeek>2400</MinutesPerWeek><CalendarUID>1</CalendarUID>
+<ExtendedAttributes><ExtendedAttribute><FieldID>188743786</FieldID><FieldName>Cost1</FieldName><Alias>Budget</Alias></ExtendedAttribute><ExtendedAttribute><FieldID>188743767</FieldID><FieldName>Number1</FieldName><Alias>Weight</Alias></ExtendedAttribute></ExtendedAttributes>
+<Calendars><Calendar><UID>1</UID><Name>Standard</Name><IsBaseCalendar>1</IsBaseCalendar><BaseCalendarUID>-1</BaseCalendarUID></Calendar></Calendars>
+<Tasks>${costs.map((_c, i) => task(i)).join('')}</Tasks><Resources/><Assignments/></Project>`;
+  const dir = mkdtempSync(join(tmpdir(), 'p6cf-'));
+  try {
+    const file = join(dir, 'cf.xml');
+    writeFileSync(file, xml);
+    const r = compare(mpxjRead(file), viewOf(parseMspdi(xml).db, 'read'), { exactDurations: true });
+    assert.equal(r.diffs.length, 0, report('custom fields', r));
+    assert.equal(r.compared['custom cost field'], 6);
+    assert.equal(r.compared['custom number field'], 6);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('WRITE: money text is the reference\'s: an assignment\'s costs and a custom Cost field\'s values are written with the text MPXJ writes for the same values (12.345, 0.004, 1e9, a negative, fractions of a hundredth), and a Number field as stored', { timeout: 300_000 }, (t) => {
+  if (skipWithoutReference(t)) return;
+  const amounts = [12.345, 0.004, 1e9, -5.5, 1.2345678, 0.0049, 7.12345, 0.03125, 2992.64789, 0.1, 1234.5, 99999999.99995];
+  const numbers = ['2.123456789', '0.0000001', '1e3', '-0', '123456789.987654321', '7', '0.1', '5.00', '1.5e-7', '42', '3.14159', '0.30000000000000004'];
+  const db = sample('small_villa_g_1_schedule.xer');
+  const tasks = rows(db, 'TASK').filter((x) => x.task_type === 'TT_Task').slice(0, amounts.length);
+  assert.equal(tasks.length, amounts.length);
+  const ops: unknown[] = [{ op: 'add_resource', id: 'CARP', name: 'Carpenter' }, { op: 'add_udf', name: 'Budget', subject: 'activity', data_type: 'cost' }, { op: 'add_udf', name: 'Weight', subject: 'activity', data_type: 'number' }];
+  tasks.forEach((x, i) => ops.push({ op: 'assign_resource', activity: x.task_code, resource: 'CARP', units_per_day: 8 }, { op: 'set_udf', udf: 'Budget', activity: x.task_code, value: amounts[i] }, { op: 'set_udf', udf: 'Weight', activity: x.task_code, value: numbers[i] }));
+  assert.equal(applyOps(db, ops as never, { calendarDays: true }).ok, true);
+  const carp = rows(db, 'RSRC').find((q) => q.rsrc_short_name === 'CARP')!.rsrc_id;
+  tasks.forEach((x, i) => { const a = rows(db, 'TASKRSRC').find((q) => q.task_id === x.task_id && q.rsrc_id === carp)!; Object.assign(a, { target_cost: String(amounts[i]), act_reg_cost: '0', act_ot_cost: '0', remain_cost: String(amounts[i]) }); });
+  const dir = mkdtempSync(join(tmpdir(), 'p6money-'));
+  try {
+    const file = join(dir, 'money.xml'), mine = writeMspdi(db);
+    writeFileSync(file, mine);
+    const theirs = mpxjResave(file); // the reference writing the same file again: what MPXJ prints for each value
+    const texts = (xml: string) => ({
+      asg: [...xml.matchAll(/<Assignment>([\s\S]*?)<\/Assignment>/g)].map((m) => /<Cost>([^<]*)<\/Cost>/.exec(m[1])?.[1]),
+      cost: [...xml.matchAll(/<Task>([\s\S]*?)<\/Task>/g)].map((m) => /<FieldID>188743786<\/FieldID>\s*<Value>([^<]*)<\/Value>/.exec(m[1])?.[1]),
+      num: [...xml.matchAll(/<Task>([\s\S]*?)<\/Task>/g)].map((m) => /<FieldID>188743767<\/FieldID>\s*<Value>([^<]*)<\/Value>/.exec(m[1])?.[1]),
+    });
+    const a = texts(mine), b = texts(theirs);
+    const asgOf = (x: (string | undefined)[]) => x.filter((v) => v !== undefined);
+    assert.deepEqual(asgOf(a.asg), asgOf(b.asg), 'assignment costs: the same text as the reference');
+    assert.deepEqual(a.cost.filter(Boolean), b.cost.filter(Boolean), 'custom Cost values: the same text as the reference');
+    assert.equal(a.cost.filter(Boolean).length, amounts.length);
+    // a Number field is written as it is stored (the reference normalises its own text; the clone does not round what it was given)
+    const stored = tasks.map((x) => rows(db, 'UDFVALUE').find((q) => q.fk_id === x.task_id && q.udf_type_id === rows(db, 'UDFTYPE').find((u) => u.udf_type_label === 'Weight')!.udf_type_id)!.udf_number);
+    assert.deepEqual(a.num.filter(Boolean).sort(), [...stored].sort(), 'Number custom values: as stored in the project (the edit that set them keeps up to 6 decimals; the writer adds no rounding of its own)');
+    assert.ok(stored.some((x) => /\.\d{4,}/.test(x)), `a value with more than 3 decimals is among them: ${stored.join(' ')}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('A1: the same old-writer file after a re-save through MPXJ (no BuildNumber, the clone aliases kept) is Microsoft Project\'s representation: format rule, no finding, the reference\'s values', { timeout: 120_000 }, (t) => {
+  if (skipWithoutReference(t)) return;
+  const old = readFileSync(join(import.meta.dirname, 'fixtures', 'old-clone-writer.xml'), 'utf8');
+  const dir = mkdtempSync(join(tmpdir(), 'p6old-'));
+  try {
+    const file = join(dir, 'old.xml'), again = join(dir, 'resaved.xml');
+    writeFileSync(file, old);
+    const via = mpxjResave(file);
+    writeFileSync(again, via);
+    // the premise: MPXJ's writer never writes BuildNumber and keeps the aliases of the clone's custom fields
+    assert.ok(!/<BuildNumber>/.test(via) && /P6 Activity ID/.test(via) && /P6 Schedule Rules/.test(via));
+    const opened = parseMspdi(via);
+    assert.equal(opened.findings.filter((f) => f.code === 'MSP_OLD_CLONE_FILE').length, 0, 'not read as the old writer\'s');
+    // read by the format's rule: the same amounts as MPXJ reads from that file
+    const r = compare(mpxjRead(again), viewOf(opened.db, 'read'), { exactDurations: true });
+    // (the old writer's material Units are per hour, which Microsoft Project / MPXJ read as a percentage: the material's quantity is the one value the format rule reads differently from
+    //  an old file; it is the Work of the assignment, 70 units here, and the re-save keeps the Units the old writer wrote)
+    r.diffs = r.diffs.filter((d) => d.what !== 'material assignment quantity');
+    assert.equal(r.diffs.length, 0, report('old file re-saved by MPXJ', r));
+    compared(r, 'assignment cost');
+    assert.equal(mpxjRead(again).assignments.find((x) => x.cost)!.cost, 12.345);
+    // and saved in place by the clone, its costs are not multiplied again
+    const saved = writeMspdi(opened.db);
+    assert.deepEqual([...saved.matchAll(/<Assignment>(?:(?!<\/Assignment>)[\s\S])*?<Cost>([^<]*)<\/Cost>/g)].map((m) => m[1]), [...via.matchAll(/<Assignment>(?:(?!<\/Assignment>)[\s\S])*?<Cost>([^<]*)<\/Cost>/g)].map((m) => m[1]));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the server reads an .mpp as a conversion (parseMspdi\'s converted flag), so no .mpp is ever read as one of the old writer\'s files', () => {
+  assert.match(readFileSync(join(ROOT, 'mcp', 'server.ts'), 'utf8'), /parseMspdi\(xml, \{ converted: true \}\)/);
+  assert.match(readFileSync(join(ROOT, 'renderer', 'io.ts'), 'utf8'), /parseFile\(name, xml, 'mspdi', undefined, true\)/);
 });

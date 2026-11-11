@@ -1,18 +1,17 @@
-// What an apply writes down beside each activity it changed (owner 2026-11-10): user-defined fields P6 can show as columns, so the
-// plan's reader sees which durations the reasoner or the crashing changed, from what, and why, without the chat. Written in the same
-// undoable change as the apply itself, so undo takes them back. A field that is not in the project yet is added. The ORIGINAL duration is
-// written once: an activity that already holds one keeps it (a second apply must not turn "10" into the crashed "6"), the change is
-// always the latest duration minus that original, the note the latest change, the rank the latest order. Values an earlier run wrote on
-// activities this run did not touch stay (nothing is cleared); fields_written says how many (kept_from_earlier).
-// That is crash_schedule's rule. The schedule reasoner's apply (optimize_schedule, and the Optimise screen's Apply) follows the owner's run rule of
-// 2026-11-11 instead (whiqRunOps, below; FieldData.reasoner): each run's numbers become the current ones and the numbers they replace move into a
-// column per run (WHIQ run <N> duration (d)), the same field names and types as the platform's stored-schedule apply, so a file applied by either is
-// continued correctly by the other.
+// What an apply writes down beside each activity it changed (owner 2026-11-10, run rule 2026-11-11): user-defined fields P6 can show as columns, so the
+// plan's reader sees which durations a run changed, from what, and why, without the chat. One rule for every apply that writes them (optimize_schedule,
+// crash_schedule, the Optimise and Crashing screens' Apply): each run's numbers become the current ones and the numbers they replace move into
+// WHIQ original duration (d) (an activity's first change) or a column per run (WHIQ run <N> duration (d)), the same field names and types as the
+// platform's stored-schedule apply, so a file applied by either is continued correctly by the other. Written in the same undoable change as the apply
+// itself, so undo takes them back. A field that is not in the project yet is added.
+// In a file with several projects the run number is the file's, not the project's: a project's run can skip numbers, and "WHIQ run N duration (d)" holds the
+// duration an activity had before the file's run N+1 was applied to it.
 import { rows, type Db, type Row } from '../db.ts';
 import { dayHours } from '../project/units.ts';
 import { applyOps } from '../project/ops.ts';
 import { percentComplete } from '../cost/rollup.ts';
 import { isWbs } from './common.ts';
+import { baselineProjectIds } from '../progress/baseline.ts';
 
 /** An activity whose duration the run changed: its task_id, Activity ID, its project's ID, the remaining days before and after (of its
  *  own calendar's days, to 2 decimals), the crash cost. */
@@ -41,11 +40,11 @@ const typeWords = (logical: string) => (/^FT_FLOAT/.test(logical) ? 'number' : l
 
 /** A field of the project that has one of the fields' labels with another data type: an apply would fail half way (a text value into a
  *  number field), so it is refused before anything is changed. Only the fields this run would write are looked at. */
-export function whiqFieldClash(db: Db, o: { changes: unknown[]; ranks?: unknown[]; reasoner?: boolean; projIds?: string[] }): { field: string; found: string; needed: string; message: string; hint: string } | undefined {
+export function whiqFieldClash(db: Db, o: { changes: unknown[]; ranks?: unknown[]; projIds?: string[] }): { field: string; found: string; needed: string; message: string; hint: string } | undefined {
   const writes: (keyof typeof FIELDS)[] = [...(o.changes.length ? (['original', 'change', 'note'] as const) : []), ...(o.ranks?.length ? (['rank'] as const) : [])];
-  // a reasoner run that is not the project's first also writes the column of the run before it (a number field)
+  // a run that is not the project's first also writes the column of the run before it (a number field)
   const wanted: { label: string; type: 'number' | 'integer' | 'text'; is: RegExp }[] = writes.map((k) => ({ label: FIELDS[k], ...NEEDS[k] }));
-  if (o.reasoner && o.changes.length) for (const k of new Set(runNumbers(db, runProjects(db, o as RunInput)).values())) if (k >= 2) wanted.push({ label: runFieldName(k - 1), type: 'number', is: /^FT_FLOAT/ });
+  if (o.changes.length) for (const k of new Set(runNumbers(db, runProjects(db, o as RunInput)).values())) if (k >= 2) wanted.push({ label: runFieldName(k - 1), type: 'number', is: /^FT_FLOAT/ });
   for (const w of wanted) {
     const u = typeOf(db, w.label);
     if (!u || w.is.test(u.logical_data_type)) continue;
@@ -57,56 +56,32 @@ export function whiqFieldClash(db: Db, o: { changes: unknown[]; ranks?: unknown[
   return undefined;
 }
 
-/** The edit operations that write the fields, and what they write (`fields_written`: each field with the number of activities written
- *  now, and kept_from_earlier: the activities that still hold a value an earlier run wrote and this one did not).
- *  who: how the note names the run ("Crashed by the schedule reasoner"); on: the date of the run (YYYY-MM-DD). */
-export function whiqFieldOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldRank[]; who: string; on: string; projIds?: string[] }) {
-  const ops: Record<string, unknown>[] = [], written: { name: string; activities: number; kept_from_earlier: number }[] = [];
-  /** the value each activity holds of a field now (empty = none) */
-  const mine = o.projIds ? new Set(rows(db, 'TASK').filter((t) => o.projIds!.includes(t.proj_id)).map((t) => t.task_id)) : null; // the run's own projects (a file can hold others: their values are not this run's to count)
-  const held = (label: string) => { const u = typeOf(db, label); return new Map(u ? rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === u.udf_type_id && (!mine || mine.has(v.fk_id))).map((v) => [v.fk_id, v] as const) : []); };
-  const field = (key: keyof typeof FIELDS, values: { task_id: string; id: string; project: string; value: string | number }[]) => {
-    const name = FIELDS[key], now = new Set(values.map((v) => v.task_id));
-    const kept = [...held(name).keys()].filter((fk) => !now.has(fk)).length;
-    if (values.length) {
-      if (!typeOf(db, name)) ops.push({ op: 'add_udf', name, subject: 'activity', data_type: NEEDS[key].type });
-      for (const v of values) ops.push({ op: 'set_udf', udf: name, value: v.value, activity: v.id, project: v.project });
-    }
-    if (values.length || kept) written.push({ name, activities: values.length, kept_from_earlier: kept });
-  };
-  const had = held(FIELDS.original);
-  const origin = (c: FieldChange) => { const v = had.get(c.task_id); return v && v.udf_number !== '' && v.udf_number != null ? Number(v.udf_number) : undefined; };
-  // the original: only where the activity has none yet (the first change's "before"); every later one is measured against it
-  field('original', o.changes.filter((c) => origin(c) == null).map((c) => ({ task_id: c.task_id, id: c.id, project: c.project, value: r2(c.from_days) })));
-  field('change', o.changes.map((c) => ({ task_id: c.task_id, id: c.id, project: c.project, value: r2(c.to_days - (origin(c) ?? c.from_days)) })));
-  field('note', o.changes.map((c) => { const og = origin(c); return { task_id: c.task_id, id: c.id, project: c.project, value: `${o.who} ${o.on}: ${r2(c.from_days)} d to ${r2(c.to_days)} d, cost ${money(c.cost)}${og != null && og !== r2(c.from_days) ? ` (original ${r2(og)} d)` : ''}` }; }));
-  field('rank', (o.ranks ?? []).map((r) => ({ task_id: r.task_id, id: r.id, project: r.project, value: r.rank })));
-  return { ops, fields_written: written };
-}
-
 /** What a run hands to whoever applies it so the fields can be written (the tool answers it under `field_data: true`; the desktop screens pass that). */
-export interface FieldData { changes: FieldChange[]; ranks?: FieldRank[]; who: string; /** the schedule reasoner's run rule (whiqRunOps) instead of crash_schedule's (whiqFieldOps) */ reasoner?: true }
+/** `ranks`: the order a run gave the leveler (optimize_schedule: every activity it ranked, an empty list when it ranked none). A run that gives no order (crash_schedule: no `ranks`) leaves every rank an earlier run wrote as it is. */
+export interface FieldData { changes: FieldChange[]; ranks?: FieldRank[]; who: string }
 /** Write the fields into `d` (inside the apply's own undoable change): the one function the tools' apply and the screens' Apply both call.
  *  Returns what it wrote (fields_written); throws an Error in words when a field of the project has another data type (nothing is written). */
 export function writeWhiqFields(d: Db, data: FieldData, o: { hoursPerDay?: number; calendarDays?: boolean; projIds?: string[] } = {}) {
   const clash = whiqFieldClash(d, { ...data, projIds: o.projIds });
   if (clash) throw new Error(`${clash.message} ${clash.hint}`);
-  const w = data.reasoner ? whiqRunOps(d, { ...data, on: today(), projIds: o.projIds, hoursPerDay: o.hoursPerDay }) : whiqFieldOps(d, { ...data, on: today(), projIds: o.projIds });
+  const w = whiqRunOps(d, { ...data, on: today(), projIds: o.projIds, hoursPerDay: o.hoursPerDay });
   const r = applyOps(d, w.ops, { hoursPerDay: o.hoursPerDay, calendarDays: o.calendarDays });
   if (!r.ok) throw new Error(r.error!.message);
   return w.fields_written;
 }
 
-// ── the schedule reasoner's run rule (owner 2026-11-11): the same field names and types as the platform's stored-schedule apply ──────────────────────
+// ── the run rule (owner 2026-11-11): the same field names and types as the platform's stored-schedule apply ──────────────────────
 /** The column the numbers a run replaces move into: `WHIQ run <N> duration (d)` (a number field of the activities), N = the run before the one applied. */
 export const runFieldName = (n: number): string => `WHIQ run ${n} duration (d)`;
 const RUN_FIELD = /^WHIQ run (\d+) duration \(d\)$/;
 type RunInput = { changes: FieldChange[]; ranks?: FieldRank[]; projIds?: string[] };
-/** The projects a run writes into: the ones it was given, else those of the activities it changed or ranked. */
+/** The projects a run writes into: the ones it was given, else those of the activities it changed or ranked. A baseline project (baselineProjectIds) is never
+ *  one of them: its activities get no field, and no number is decided for it. */
 function runProjects(db: Db, o: RunInput): string[] {
-  if (o.projIds) return o.projIds;
+  const baselines = baselineProjectIds(db);
+  if (o.projIds) return o.projIds.filter((id) => !baselines.has(id));
   const changed = new Set([...o.changes.map((c) => c.task_id), ...(o.ranks ?? []).map((r) => r.task_id)]);
-  return [...new Set(rows(db, 'TASK').filter((t) => changed.has(t.task_id)).map((t) => t.proj_id))];
+  return [...new Set(rows(db, 'TASK').filter((t) => changed.has(t.task_id)).map((t) => t.proj_id))].filter((id) => !baselines.has(id));
 }
 /** The number K of the run an apply is, for each project (proj_id → K), decided from what the file declares BEFORE this apply writes anything.
  *  A project's FIRST run is 1 and declares no numbered field: the file does not declare `WHIQ original duration (d)` (the platform's isReasonerCopy test),
@@ -116,7 +91,9 @@ function runProjects(db: Db, o: RunInput): string[] {
  *  for a project (the column numbers are the file's, so a project that skipped some keeps its own gaps). */
 export function runNumbers(db: Db, projIds: string[]): Map<string, number> {
   const original = typeOf(db, FIELDS.original);
-  const several = rows(db, 'PROJECT').filter((p) => !p._baseline_of).length > 1;
+  // (a project with baselines is ONE project: the saved baselines of a project are copies of it, not further projects of the file)
+  const baselines = baselineProjectIds(db);
+  const several = rows(db, 'PROJECT').filter((p) => !baselines.has(p.proj_id)).length > 1;
   const carrying = new Set<string>();
   if (original && several) {
     const has = new Set(rows(db, 'UDFVALUE').filter((v) => v.udf_type_id === original.udf_type_id && v.udf_number !== '' && v.udf_number != null).map((v) => v.fk_id));
@@ -126,12 +103,12 @@ export function runNumbers(db: Db, projIds: string[]): Map<string, number> {
   return new Map(projIds.map((id) => [id, !original || (several && !carrying.has(id)) ? 1 : top + 2]));
 }
 
-/** The edit operations of the schedule reasoner's apply, written AFTER its duration changes are made. The run's number becomes the activity's duration; the OLD
+/** The edit operations of an apply (optimize_schedule, crash_schedule), written AFTER its duration changes are made. The run's number becomes the activity's duration; the OLD
  *  number moves into `WHIQ original duration (d)` when the activity has none yet (never changed once set), else into `WHIQ run <K-1> duration (d)`; an activity
  *  the run does not change moves nothing (its cell stays empty). A project's first run declares no numbered field; a later run declares its column whether or
  *  not any cell is filled (runNumbers). `WHIQ duration change (d)` is the current duration minus the original on every activity that has one (recomputed, so a
  *  duration edited by hand between runs shows). The note and the rank are the latest run's: an activity the run does not change keeps its note; a rank the run
- *  does not give is removed. A run that changes no duration is no run in the numbering: it declares no numbered field. Returns the ops and fields_written. */
+ *  does not give is removed (a run that gives no `ranks` at all, crash_schedule, leaves the ranks as they are). For an activity under way (it has an actual start) the duration is its remaining duration, the number crash_schedule changes. A run that changes no duration is no run in the numbering: it declares no numbered field. Returns the ops and fields_written. */
 export function whiqRunOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldRank[]; who: string; on: string; projIds?: string[]; hoursPerDay?: number }) {
   const ops: Record<string, unknown>[] = [], written: { name: string; activities: number; kept_from_earlier: number }[] = [];
   const projIds = runProjects(db, o), inRun = new Set(projIds);
@@ -158,11 +135,12 @@ export function whiqRunOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldRan
       put.note.push({ ...at, value: `${o.who} ${o.on}: ${from} d to ${r2(c.to_days)} d, cost ${money(c.cost)}${original !== from ? ` (original ${r2(original)} d)` : ''}` });
     }
     const rk = rankOf.get(t.task_id);
-    if (rk) put.rank.push({ ...at, value: rk.rank }); else if (had.rank.has(t.task_id)) dropRank.push({ ...at, value: '' });
+    if (rk) put.rank.push({ ...at, value: rk.rank }); else if (o.ranks && had.rank.has(t.task_id)) dropRank.push({ ...at, value: '' });
     if (original != null) {
       const now = c ? r2(c.to_days) : r2(Number(t.remain_drtn_hr_cnt || 0) / hours.task(t));
       const value = r2(now - original);
-      if (c || numberOf(had.change.get(t.task_id)) !== value) put.change.push({ ...at, value });
+      // (an activity under way: its remaining duration shrinks with progress, which is no edit, so its change is written only when a run changes it)
+      if (c || (!t.act_start_date && numberOf(had.change.get(t.task_id)) !== value)) put.change.push({ ...at, value });
     }
   }
   // the columns this run declares: one per later-run project that changed an activity, whether or not a cell is filled
@@ -193,7 +171,7 @@ export function whiqRunOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldRan
  *  that an activity with no actual start is 0 — or whose physical percent is above 0 whatever its type; OR a project whose data date (last_recalc_date) is after
  *  its planned start (plan_start_date), compared as days, strictly after. */
 export function reasonerRefusal(db: Db, projIds: string[]): { code: 'schedule_in_progress'; message: string; hint: string } | undefined {
-  const inRun = new Set(projIds), asg = new Map<string, Row[]>();
+  const baselines = baselineProjectIds(db), inRun = new Set(projIds.filter((id) => !baselines.has(id))), asg = new Map<string, Row[]>();
   for (const a of rows(db, 'TASKRSRC')) (asg.get(a.task_id) ?? asg.set(a.task_id, []).get(a.task_id)!).push(a);
   let n = 0;
   for (const t of rows(db, 'TASK')) {
@@ -203,7 +181,7 @@ export function reasonerRefusal(db: Db, projIds: string[]): { code: 'schedule_in
     if ((t.status_code ?? '') !== '' && t.status_code !== 'TK_NotStart' || t.act_start_date || t.act_end_date || byType > 0 || (Number(t.phys_complete_pct) || 0) > 0) n++;
   }
   const late = rows(db, 'PROJECT').filter((p) => inRun.has(p.proj_id) && p.last_recalc_date && p.plan_start_date && p.last_recalc_date.slice(0, 10) > p.plan_start_date.slice(0, 10))
-    .map((p) => `${p.last_recalc_date.slice(0, 10)} is after the planned start ${p.plan_start_date.slice(0, 10)}${projIds.length > 1 ? ` (project ${p.proj_short_name})` : ''}`);
+    .map((p) => `${p.last_recalc_date.slice(0, 10)} is after the planned start ${p.plan_start_date.slice(0, 10)}${inRun.size > 1 ? ` (project ${p.proj_short_name})` : ''}`);
   if (!n && !late.length) return undefined;
   const why = [n ? `${n} activit${n === 1 ? 'y has' : 'ies have'} actual dates or progress` : '', ...late.map((l) => `the data date ${l}`)].filter(Boolean).join('; ');
   return {

@@ -25,7 +25,7 @@ import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid, unidentified } from '../core/xer/repair-valid.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { p6xmlLossNotes, p6xmlLosses, writeP6Xml, writeP6XmlTo } from '../core/xml/p6xml.ts';
-import { writeMspdiTo } from '../core/msp/mspdi.ts';
+import { MspSaveRefused, writeMspdiTo } from '../core/msp/mspdi.ts';
 import { monteCarloCounts, readPeak, workNeed } from './workset.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
 import type { ParseMeta } from '../core/xer/parse.ts';
@@ -225,7 +225,7 @@ async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
     if (e instanceof MppReaderMissing) return fail('mpp_reader_missing', e.message, 'Save the file as Microsoft Project XML in Microsoft Project (File > Save As > XML) and open that.');
     return fail('file_unreadable', `Cannot read ${basename(path)}: ${(e as Error).message}`, `Carry on outside the clone: ${outsideRoute('mpp')}.`, { data: readCause(e) });
   }
-  const r = parseMspdi(xml);
+  const r = parseMspdi(xml, { converted: true }); // (what MPXJ made of the .mpp: the format's own representation)
   r.findings.push({ severity: 'info', code: 'MPP_READ', message: 'Read without Microsoft Project: MPXJ turned the .mpp into Microsoft Project XML, read as such (every task, resource, assignment and calendar element is kept: read_table, msp:<Name>).', p6: 'P6 imports .mpp through an installed Microsoft Project.' });
   return r;
 }
@@ -764,7 +764,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       else return fail('bad_input', `Unknown format "${a.format}".`, 'Use xer, p6xml, mspdi or mpx.');
       await checkpoint(ctx); // nothing is written once the call is cancelled; the write itself is one step
       if (xerOut) writeOutWith(path, xerOut);
-      else if (bytes == null && fmt === 'mspdi') writeOutWith(path, (put) => writeMspdiTo(s.db, { projIds: projIds ?? allIds(s.db).slice(0, 1), report: notes }, put));
+      else if (bytes == null && fmt === 'mspdi') writeOutWith(path, (put) => { try { writeMspdiTo(s.db, { projIds: projIds ?? allIds(s.db).slice(0, 1), report: notes }, put); } catch (e) { if (e instanceof MspSaveRefused) fail(e.code, e.message, e.hint); throw e; } });
       else if (bytes == null) writeOutWith(path, (put) => writeP6XmlTo(s.db, { version: a.version ?? '19.12', projIds }, put));
       else writeOut(path, bytes);
       // what P6's XML has no place for, with values in this data: said in the answer, never silent (structured in not_in_p6_xml, plainly in notes)

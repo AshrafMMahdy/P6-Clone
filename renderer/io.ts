@@ -9,7 +9,7 @@ import { worst } from '../core/findings.ts';
 const withDateCheck = (db: Db, f: Finding[]): Finding[] => (worst(f) === 'fatal' ? f : [...f, ...checkStoredDates(db)]);
 import { writeXer } from '../core/xer/write.ts';
 import { p6xmlLossNotes, p6xmlLosses, parseP6Xml, writeP6Xml } from '../core/xml/p6xml.ts';
-import { parseMspdi, writeMspdi } from '../core/msp/mspdi.ts';
+import { MspSaveRefused, parseMspdi, writeMspdi } from '../core/msp/mspdi.ts';
 import { parseMpx, writeMpx } from '../core/msp/mpx.ts';
 import { decodeText, encodeText, encodingLabel, keepOrChoose, type TextEncodingName } from '../core/encoding.ts';
 import type { Db } from '../core/db.ts';
@@ -52,11 +52,11 @@ export function detectFormat(name: string, bytes: Uint8Array): Format {
 }
 
 /** Parse and validate the way P6's import would. .mpp needs Microsoft Project: use parseFileAsync. */
-export function parseFile(name: string, bytes: Uint8Array, format = detectFormat(name, bytes), encoding?: TextEncodingName | 'auto'): ParsedFile {
+export function parseFile(name: string, bytes: Uint8Array, format = detectFormat(name, bytes), encoding?: TextEncodingName | 'auto', converted = false): ParsedFile {
   if (format === 'mpp') {
     return { format, db: { tables: {} }, findings: [{ severity: 'fatal', code: 'MPP_NEEDS_PROJECT', message: '.mpp files are converted by Microsoft Project; open it with File > Import > Microsoft Project.', p6: 'P6 imports .mpp only through an installed Microsoft Project.' }] };
   }
-  const r = readRaw(bytes, format, encoding);
+  const r = readRaw(bytes, format, encoding, converted);
   return { format, db: r.db, findings: importChecks(r.db, r.findings, format) };
 }
 
@@ -67,10 +67,11 @@ export function importChecks(db: Db, parsed: Finding[], format: Format, dates = 
 }
 
 /** Parse only (no P6 import checks) for any format but .mpp. Used by parseFile, the CLI and the MCP server. */
-export function readRaw(bytes: Uint8Array, format: Format, encoding?: TextEncodingName | 'auto'): { db: Db; findings: Finding[] } {
+/** `converted`: Microsoft Project XML that a converter made of an .mpp (always the format's own representation, see parseMspdi). */
+export function readRaw(bytes: Uint8Array, format: Format, encoding?: TextEncodingName | 'auto', converted = false): { db: Db; findings: Finding[] } {
   if (format === 'mpp') throw new Error('.mpp files need Microsoft Project: save them as Microsoft Project XML (or import them in the desktop app).');
   if (format === 'xml') return parseP6Xml(xmlText(bytes));
-  if (format === 'mspdi') return parseMspdi(xmlText(bytes));
+  if (format === 'mspdi') return parseMspdi(xmlText(bytes), { converted });
   if (format === 'mpx') return parseMpx(decodeText(bytes, encoding).text);
   const r = parseXer(bytes, { encoding });
   markBaselines(r.db);
@@ -96,14 +97,17 @@ export async function parseFileAsync(name: string, bytes: Uint8Array, format = d
   const b = bridge ?? (globalThis as { p6?: MppBridge }).p6;
   if (!b?.mppToXml) throw new Error('Microsoft Project must be installed to import/export .mpp files (Primavera P6 has the same requirement).');
   const xml = await b.mppToXml(bytes);
-  return { ...parseFile(name, xml, 'mspdi'), format: 'mpp' };
+  return { ...parseFile(name, xml, 'mspdi', undefined, true), format: 'mpp' };
 }
 
 /** File bytes for an export. For 'mpp' this is the Microsoft Project XML that Microsoft Project converts to .mpp. */
 /** readAs: the encoding the file was read in, kept for XER / MPX when no encoding is given (and the text fits it). */
 export function exportFile(db: Db, format: Format, opts: { version: string; projIds: string[]; encoding?: TextEncodingName | 'auto'; readAs?: TextEncodingName; report?: string[] }): Uint8Array {
   if (format === 'xml') { opts.report?.push(...p6xmlLossNotes(p6xmlLosses(db, opts.projIds))); return new TextEncoder().encode(writeP6Xml(db, { projIds: opts.projIds, version: opts.version })); }
-  if (format === 'mspdi' || format === 'mpp') return new TextEncoder().encode(writeMspdi(db, { projIds: opts.projIds, report: opts.report }));
+  if (format === 'mspdi' || format === 'mpp') {
+    try { return new TextEncoder().encode(writeMspdi(db, { projIds: opts.projIds, report: opts.report })); }
+    catch (e) { if (e instanceof MspSaveRefused) throw new Error(`${e.message} ${e.hint}`); throw e; }
+  }
   if (format === 'mpx') {
     const t = writeMpx(db, { projIds: opts.projIds });
     const enc = !opts.encoding || opts.encoding === 'auto' ? keepOrChoose(t, opts.readAs) : opts.encoding;

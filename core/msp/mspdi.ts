@@ -9,7 +9,7 @@ import { isLegacyLayout, p6num } from '../schedule/cpm.ts';
 import { baselineNumbers, baselineXml, importMspBaselines, scanTaskBaselines, type FoundBaselines } from './baselines.ts';
 import { ASG_DEPS, WORK, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
 import { defaultShifts, emptyTask, linkKey, projectFromDb, projectToDb, type MCustom, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
-import { CF_KINDS, CF_SLOTS, longTextNote, planCustomFields, slotName, slotOfField, valueReader, type CfSubject } from './custom-fields.ts';
+import { CF_KINDS, CF_SLOTS, longTextNote, planCustomFields, slotName, slotOfField, taskFieldSlots, valueReader, type CfSubject } from './custom-fields.ts';
 import { FORMAT_REVISION, LAG_FORMAT, RATE_PER_HOUR, defaultCtx, lagIsElapsed, lagIsPercent, percentLagHours, readDate, readFlag, readLag, readNumber, readRate, readText, readUnits, revisionText, toP6Date, writeLag, writeValue, type Ctx, type Entity } from './values.ts';
 
 export const MSPDI_NS = 'http://schemas.microsoft.com/project';
@@ -37,6 +37,43 @@ const RULES_FIELD = ['188743746', 'Text6'];
  *  FORMAT_REVISION): a file of the clone without the revision is one written before currency was stored as Microsoft Project stores it. */
 const RULES_ALIAS = /^P6 Schedule Rules (\S+)( legacy)?(?:, format (\d+))?$/;
 const rulesAlias = (ver: string, legacy: boolean) => `P6 Schedule Rules ${ver || '?'}${legacy ? ' legacy' : ''}, ${revisionText()}`;
+
+// ---------- the signature of the clone's OLD writer (every version before values.ts FORMAT_REVISION 2)
+// Costs in those files are plain units, not hundredths. A file is read that way only when its bytes are the old writer's own, shown by ALL of:
+//   1. <Author> is "Primavera P6 Clone";
+//   2. the project's own elements (outside the collections ExtendedAttributes, Calendars, Tasks, Resources, Assignments) are exactly the old writer's list, in its order
+//      (OLD_HEADER; the optional ones may be absent). Microsoft Project and MPXJ both add elements to it on every save (CurrencyDigits, CurrencySymbol, FYStartDate,
+//      CurrentDate, OutlineCodes, WBSMasks, BuildNumber ...), so a re-saved file no longer has this list;
+//   3. the first Task, the first Resource and the first Assignment have no element outside OLD_ELEMENTS (a re-save adds Active, Manual, ResumeValid, ExternalTask,
+//      FixedCostAccrual, PeakUnits, CanLevel, IsGeneric, PercentWorkComplete, HasFixedRateUnits, RateScale ... to each of them);
+//   4. the file's first six custom field definitions are the clone's own, in its order, with its FieldIDs (OLD_DEFS);
+//   5. it has no format stamp (a stamp says revision 2 or later), and it is not an .mpp / MPX read through MPXJ (a conversion is always the format's representation).
+// The list of every element the old writer ever wrote is the same in every version of the clone (core/msp/mspdi.ts since its first commit).
+const OLD_HEADER = ['SaveVersion', 'Name', 'Title', 'Author', 'CreationDate', 'LastSaved', 'ScheduleFromStart', 'StartDate', 'FinishDate', 'CriticalSlackLimit', 'CalendarUID', 'DefaultStartTime', 'DefaultFinishTime', 'MinutesPerDay', 'MinutesPerWeek', 'DaysPerMonth', 'DefaultTaskType', 'DurationFormat', 'WorkFormat', 'HonorConstraints', 'MultipleCriticalPaths', 'NewTasksEffortDriven', 'NewTasksEstimated', 'SplitsInProgressTasks', 'WeekStartDay', 'StatusDate', 'NewTaskStartDate'];
+const OLD_HEADER_OPTIONAL = new Set(['Name', 'Title', 'StartDate', 'FinishDate', 'CalendarUID', 'StatusDate']); // (the writer leaves out an element with no value)
+const CLONE_COLLECTIONS = new Set(['ExtendedAttributes', 'Calendars', 'Tasks', 'Resources', 'Assignments']);
+const OLD_ELEMENTS: Record<'Task' | 'Resource' | 'Assignment', Set<string>> = {
+  Task: new Set(['UID', 'ID', 'Name', 'Type', 'IsNull', 'WBS', 'OutlineNumber', 'OutlineLevel', 'Priority', 'Start', 'Finish', 'Duration', 'DurationFormat', 'EffortDriven', 'Estimated', 'Milestone', 'Summary', 'Critical', 'EarlyStart', 'EarlyFinish', 'LateStart', 'LateFinish', 'FreeSlack', 'TotalSlack', 'PercentComplete', 'ActualStart', 'ActualFinish', 'RemainingDuration', 'ConstraintType', 'CalendarUID', 'ConstraintDate', 'Deadline', 'IgnoreResourceCalendar', 'PredecessorLink', 'ExtendedAttribute', 'Baseline']),
+  Resource: new Set(['UID', 'ID', 'Name', 'Type', 'IsNull', 'Code', 'MaxUnits', 'StandardRate', 'StandardRateFormat', 'OvertimeRate', 'OvertimeRateFormat', 'CalendarUID', 'ExtendedAttribute']),
+  Assignment: new Set(['UID', 'TaskUID', 'ResourceUID', 'ActualCost', 'ActualFinish', 'ActualStart', 'ActualWork', 'Cost', 'Finish', 'RemainingCost', 'RemainingWork', 'Start', 'Units', 'Work']),
+};
+const OLD_DEFS: [fieldId: string, alias: string][] = [...TASK_TEXT.map((x): [string, string] => [x[1], x[3]]), [RES_TYPE_FIELD[0], RES_TYPE_FIELD[2]]];
+/** Whether the project's own elements and custom field definitions are those of the old writer (points 1, 2 and 4 above). */
+function oldWriterHeader(p: XNode): boolean {
+  if (val(p, 'Author') !== 'Primavera P6 Clone') return false;
+  const own = p.children.map((c) => c.name).filter((n) => !CLONE_COLLECTIONS.has(n));
+  if (!own.every((n) => OLD_HEADER.includes(n)) || new Set(own).size !== own.length) return false;
+  const required = OLD_HEADER.filter((n) => !OLD_HEADER_OPTIONAL.has(n));
+  if (own.filter((n) => !OLD_HEADER_OPTIONAL.has(n)).join() !== required.join()) return false;
+  if (own.join() !== OLD_HEADER.filter((n) => own.includes(n)).join()) return false; // (the old writer's order)
+  const defs = kids(child(p, 'ExtendedAttributes'), 'ExtendedAttribute');
+  return OLD_DEFS.every(([id, alias], i) => defs[i] && val(defs[i], 'FieldID') === id && val(defs[i], 'Alias') === alias);
+}
+/** A refused save: said in words (the MCP server answers it as a tool error with this message and hint; the desktop shows both). */
+export class MspSaveRefused extends Error {
+  code: string; hint: string;
+  constructor(code: string, message: string, hint: string) { super(message); this.code = code; this.hint = hint; }
+}
 
 // ---------- times of day
 
@@ -79,13 +116,14 @@ function exceptionDays(ex: XNode): { days: Map<number, Shift[]>; known: boolean;
 // ---------- parser
 
 /** Microsoft Project XML as text, or as pieces (Chunked: a document larger than one string, e.g. what MPXJ writes for a big .mpp; its first piece has no BOM). */
-export function parseMspdi(text: string | Chunked): { db: Db; findings: Finding[] } {
+/** `converted`: the XML is what MPXJ (or Microsoft Project) made of an .mpp / MPX file: always the format's own representation, never a file of the clone's earlier writer. */
+export function parseMspdi(text: string | Chunked, opts: { converted?: boolean } = {}): { db: Db; findings: Finding[] } {
   const findings: Finding[] = [];
   const empty: Db = { tables: {} };
   let root: XNode;
   const src = typeof text === 'string' ? text.replace(/^﻿/, '') : text;
   // read as it goes: each task, resource and assignment is read as soon as it closes and let go (readProject)
-  const reader = projectReader(findings, src);
+  const reader = projectReader(findings, src, opts);
   try {
     root = parseXml(src, reader.split, reader.emit, reader.onRoot);
   } catch (e) {
@@ -114,7 +152,7 @@ export function parseMspdi(text: string | Chunked): { db: Db; findings: Finding[
 
 /** The project read element by element: the project's own fields, its custom fields and its calendars when the first
  *  task, resource or assignment arrives (Microsoft Project writes them first), then each of those as it closes. */
-function projectReader(findings: Finding[], src: string | Chunked) {
+function projectReader(findings: Finding[], src: string | Chunked, opts: { converted?: boolean }) {
   const baselines: FoundBaselines = new Map(); // (a document in pieces: collected task by task as they are read)
   let doc: XNode | null = null, p: XNode | null = null, headDone = false;
   // what the conversions of values.ts need of the file: the length of its day (set by head), whether it is a file of the clone's revision 1
@@ -142,6 +180,17 @@ function projectReader(findings: Finding[], src: string | Chunked) {
     }
   };
   let p6rules: { ver: string; legacy: boolean; known: boolean } | null = null, revision = 1;
+  let headSig = false, shapeOk = true, plainDecided = false;
+  const shapeSeen = new Set<string>();
+  /** the first Task, Resource and Assignment must have only the elements the old writer wrote */
+  const shape = (kind: 'Task' | 'Resource' | 'Assignment', n: XNode) => { if (shapeSeen.has(kind)) return; shapeSeen.add(kind); if (!n.children.every((c) => OLD_ELEMENTS[kind].has(c.name))) shapeOk = false; };
+  const decidePlain = () => {
+    if (plainDecided) return;
+    plainDecided = true;
+    if (!headSig || !shapeOk) return;
+    ctx.plainCurrency = true;
+    findings.push({ severity: 'info', code: 'MSP_OLD_CLONE_FILE', message: 'This file was written by an earlier version of the clone: its costs were stored in plain units (not in hundredths of the currency unit, as Microsoft Project stores them) and were read accordingly. Saving it again writes Microsoft Project\'s representation.', p6: 'P6 has no such files: Microsoft Project would show these costs one hundredth of what they are.' });
+  };
   const calendars: MCal[] = [];
   const head = (p: XNode) => {
   headDone = true;
@@ -159,13 +208,9 @@ function projectReader(findings: Finding[], src: string | Chunked) {
     else if (slotOfField(fid)) cfDefs.set(fid, alias);
     else if (alias) cfUnread.push(`${alias} (${val(e, 'FieldName') || fid})`);
   }
-  // A file the clone wrote (its own custom field definitions are there) without the stamp of the current revision was written before the clone stored
-  // currency as Microsoft Project does: its currency elements are plain units. (One Microsoft Project saved since has a <BuildNumber>, which the clone
-  // never writes, and holds Microsoft Project's representation whatever it was before.) Files of other tools are read by the format's rule.
-  if ((extKey.size > 0 || p6rules) && revision < FORMAT_REVISION && !val(p, 'BuildNumber')) {
-    ctx.plainCurrency = true;
-    findings.push({ severity: 'info', code: 'MSP_OLD_CLONE_FILE', message: 'This file was written by an earlier version of the clone: its costs were stored in plain units (not in hundredths of the currency unit, as Microsoft Project stores them) and were read accordingly. Saving it again writes Microsoft Project\'s representation.', p6: 'P6 has no such files: Microsoft Project would show these costs one hundredth of what they are.' });
-  }
+  // A file of the clone's OLD writer (oldWriterHeader and the shape of its first elements: see "the signature" above) without the stamp of the current revision
+  // holds currency in plain units, not hundredths: decided when the first assignment is read (decidePlain). Any other file is read by the format's rule.
+  headSig = revision < FORMAT_REVISION && !opts.converted && oldWriterHeader(p);
 
   // calendars
   for (const c of kids(child(p, 'Calendars'), 'Calendar')) {
@@ -206,6 +251,7 @@ function projectReader(findings: Finding[], src: string | Chunked) {
   let taskNo = 0;
   const task = (t: XNode) => {
     const i = taskNo++;
+    shape('Task', t);
     const uid = val(t, 'UID');
     const eas = kids(t, 'ExtendedAttribute');
     for (const e of eas) cfUsed.add(val(e, 'FieldID'));
@@ -274,6 +320,7 @@ function projectReader(findings: Finding[], src: string | Chunked) {
   let resNo = 0;
   const resource = (r: XNode) => {
     const seq = resNo++;
+    shape('Resource', r);
     const uid = val(r, 'UID');
     const eas = kids(r, 'ExtendedAttribute');
     for (const e of eas) cfUsed.add(val(e, 'FieldID'));
@@ -299,6 +346,8 @@ function projectReader(findings: Finding[], src: string | Chunked) {
   let asgNo = 0;
   const assignment = (a: XNode) => {
     const seq = asgNo++;
+    shape('Assignment', a);
+    decidePlain();
     resType ??= new Map(resources.map((r) => [r.uid, r.type]));
     const uid = val(a, 'UID');
     if (!uid) return;
@@ -320,6 +369,7 @@ function projectReader(findings: Finding[], src: string | Chunked) {
   };
   const finish = (p: XNode): MProject => {
   if (!headDone) head(p);
+  decidePlain();
   tasks.sort((a, b) => a.id - b.id);
   // percentage lags: percent of the predecessor's duration
   const byUid = new Map(tasks.map((t) => [t.uid, t]));
@@ -476,10 +526,16 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   const written = { TASK: new Set(m.tasks.flatMap((t) => (t.row?.task_id ? [t.row.task_id] : []))), RSRC: new Set(m.resources.flatMap((r) => (r.row?.rsrc_id ? [r.row.rsrc_id] : []))) };
   const typeTable = new Map(rows(db, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
   const valued = new Set(rows(db, 'UDFVALUE').filter((v) => (v.udf_text || v.udf_number || v.udf_date || v.udf_code_id) && written[typeTable.get(v.udf_type_id) as 'TASK' | 'RSRC']?.has(v.fk_id)).map((v) => v.udf_type_id));
-  // the revision stamp lives in the rules definition's alias; a file of the clone that never had that definition gets it in its own slot (or the first free text one)
+  // the revision stamp lives in the rules definition's alias, wherever that definition is (read by its alias text); a file of the clone that never had that definition gets it in
+  // the clone's own slot, else in the first custom field of ANY kind (Text, Number, Cost, Start, Finish, Date, Flag, Duration) that the file does not use. With none free the
+  // file would be read back as one the old writer made (costs 100 times too low), so it is not written.
   const rulesDef = oldDefs.find((d) => RULES_ALIAS.test(d.alias));
   const stampNew = fromMsp && p6ext && !rulesDef;
-  const rulesId = stampNew ? [RULES_FIELD[0], ...CF_SLOTS.Task.Text.map(String)].find((id) => !fileHas.has(id)) : RULES_FIELD[0];
+  const stampSlot = stampNew ? [{ id: RULES_FIELD[0], name: RULES_FIELD[1] }, ...taskFieldSlots()].find((x) => !fileHas.has(x.id)) : { id: RULES_FIELD[0], name: RULES_FIELD[1] };
+  // (m.keep.plainCurrency: the file was read as one of the old writer's, so unstamped it would be read so again)
+  if (stampNew && !stampSlot && m.keep?.plainCurrency) throw new MspSaveRefused('msp_no_free_custom_field', `Not saved: this Microsoft Project file has no free custom field left to mark it as written in the current format (${revisionText()}), and without that mark the clone would read its costs back a hundred times too low.`, 'Free one custom field of the tasks in the file (in Microsoft Project, clear its name and values), or save the project as XER or P6 XML.');
+  const rulesId = stampSlot?.id;
+  if (stampNew && !stampSlot) opts.report?.push(`The clone's format stamp (${revisionText()}) was not written: the file has no free custom field for it. This file is not one of the clone's earlier writer's, so it is read back by Microsoft Project's representation without it.`);
   const cf = planCustomFields(db, { valued, newFile: !fromMsp, reserved: { Task: new Set(fromMsp ? (stampNew && rulesId ? [rulesId] : []) : [...TASK_TEXT.map((x) => x[1]), RULES_FIELD[0]]), Resource: new Set(fromMsp ? [] : [RES_TYPE_FIELD[0]]) }, used: fileHas, own: ownName });
   for (const n of cf.notes) opts.report?.push(n);
   const cfRead = new Set(m.keep?.cfRead ?? []), cfCarried = new Set(cf.fields.map((f) => f.fieldId));
@@ -561,7 +617,7 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   dt('StatusDate', m.statusDate);
   el('NewTaskStartDate', 0);
   const pr = m.row ?? {};
-  const rules = `<ExtendedAttribute><FieldID>${rulesId}</FieldID><FieldName>${slotName('Text', CF_SLOTS.Task.Text.indexOf(Number(rulesId)) + 1)}</FieldName><Alias>${esc(rulesAlias(pr._p6_ver || db.header?.version || '', pr._legacy_ms ? pr._legacy_ms === 'Y' : isLegacyLayout(db)))}</Alias></ExtendedAttribute>`;
+  const rules = !stampSlot ? '' : `<ExtendedAttribute><FieldID>${rulesId}</FieldID><FieldName>${stampSlot.name}</FieldName><Alias>${esc(rulesAlias(pr._p6_ver || db.header?.version || '', pr._legacy_ms ? pr._legacy_ms === 'Y' : isLegacyLayout(db)))}</Alias></ExtendedAttribute>`;
   let defsChanged = false;
   if (!fromMsp) proj.push(['ExtendedAttributes', `<ExtendedAttributes>${TASK_TEXT.map(([, id, name, alias]) => `<ExtendedAttribute><FieldID>${id}</FieldID><FieldName>${name}</FieldName><Alias>${alias}</Alias></ExtendedAttribute>`).join('')}<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><FieldName>${RES_TYPE_FIELD[1]}</FieldName><Alias>${RES_TYPE_FIELD[2]}</Alias></ExtendedAttribute>${rules}${cf.fields.map(cfDef).join('')}</ExtendedAttributes>`]);
   else {
@@ -580,7 +636,7 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
       if (d === rulesDef && !d.alias.endsWith(`, ${revisionText()}`)) { defsChanged = true; out.push(d.xml.replace(/<Alias>[\s\S]*?<\/Alias>/, `<Alias>${esc(d.alias.replace(/(, format \d+)?$/, `, ${revisionText()}`))}</Alias>`)); continue; }
       out.push(d.xml);
     }
-    if (stampNew) { if (rulesId) { out.push(rules); defsChanged = true; } else opts.report?.push(`The file was written by the clone but has no free Text custom field for the clone's format stamp (${revisionText()}): without it, opening this file again reads its costs as plain units. Free a Text field of the tasks and save again.`); }
+    if (stampNew && stampSlot) { out.push(rules); defsChanged = true; }
     const have = new Set(oldDefs.map((d) => d.fid));
     for (const f of cf.fields) if (!have.has(f.fieldId) && (!cfRead.has(f.fieldId) || f.alias !== readName(f, ''))) { out.push(cfDef(f)); defsChanged = true; }
     if (defsChanged) proj.push(['ExtendedAttributes', `<ExtendedAttributes>${out.join('')}</ExtendedAttributes>`]);

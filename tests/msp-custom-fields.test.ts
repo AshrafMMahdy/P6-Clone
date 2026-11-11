@@ -271,7 +271,7 @@ test('H1: the WHIQ leveling rank field, an integer field in the XER, comes back 
   assert.equal(whiqFieldClash(back, { changes: [], ranks: [1] }), undefined, 'a number field holds a whole-number rank');
   const proj = rows(back, 'PROJECT')[0].proj_short_name;
   const task = (code: string) => rows(back, 'TASK').find((t) => t.task_code === code)!.task_id;
-  const w = writeWhiqFields(back, { changes: [], ranks: [{ task_id: task(b), id: b, project: proj, rank: 2 }], who: 'test' }, { calendarDays: true });
+  const w = writeWhiqFields(back, { changes: [], ranks: [{ task_id: task(a), id: a, project: proj, rank: 1 }, { task_id: task(b), id: b, project: proj, rank: 2 }], who: 'test' }, { calendarDays: true });
   assert.deepEqual(w.map((x) => x.name), ['WHIQ leveling rank']);
   assert.deepEqual(fieldsOf(back, 'TASK')['WHIQ leveling rank'].values, { [a]: '1', [b]: '2' });
   // any other type of that name is still refused; a project without the field still makes it as an integer

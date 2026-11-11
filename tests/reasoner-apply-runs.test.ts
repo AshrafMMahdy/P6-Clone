@@ -1,6 +1,7 @@
 // The schedule reasoner's apply (optimize_schedule apply, and the Optimise screen's Apply through writeWhiqFields) follows the owner's run rule of
 // 2026-11-11, the one the platform applies to its stored schedules: the run's numbers become the current ones, the numbers they replace move into
 // WHIQ original duration (d) (the first change of an activity) or WHIQ run <K-1> duration (d); and the reasoner is refused on a schedule in progress.
+// crash_schedule's apply follows the same rule (one rule for every apply that writes these fields).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
@@ -8,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rows, type Db } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
+import { saveBaseline } from '../core/progress/baseline.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { reasonerRefusal, runNumbers, whiqFieldClash, writeWhiqFields } from '../core/analysis/whiq-fields.ts';
 import { reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
@@ -26,12 +28,13 @@ const projId = (db: Db, id: string) => rows(db, 'PROJECT').find((p) => p.proj_sh
 const taskOf = (db: Db, project: string, code: string) => rows(db, 'TASK').find((t) => t.task_code === code && t.proj_id === projId(db, project))!;
 const daysOf = (db: Db, project: string, code: string) => Number(taskOf(db, project, code).remain_drtn_hr_cnt) / 8;
 /** What the tool's apply does for a run: the new durations are written (the proposal's ops), then writeWhiqFields (the same call the screen's Apply makes). */
-function apply(db: Db, changes: Record<string, number>, o: { project?: string; ranks?: string[]; extra?: boolean } = {}) {
+function apply(db: Db, changes: Record<string, number>, o: { project?: string; ranks?: string[]; crash?: boolean } = {}) {
   const project = o.project ?? 'R', pid = projId(db, project);
   const list = Object.entries(changes).map(([id, to]) => ({ task_id: taskOf(db, project, id).task_id, id, project, from_days: daysOf(db, project, id), to_days: to, cost: 5 }));
   good(db, list.map((c) => ({ op: 'update_activity', project, id: c.id, duration_days: c.to_days })));
   const ranks = (o.ranks ?? []).map((id, k) => ({ task_id: taskOf(db, project, id).task_id, id, project, rank: k + 1 }));
-  return writeWhiqFields(db, { changes: list, ranks, who: 'Crashed by the schedule reasoner', reasoner: true }, { calendarDays: true, projIds: [pid] });
+  // crash_schedule gives no ranks (no `ranks` at all); the reasoner always does (an empty list when it ranked none)
+  return writeWhiqFields(db, o.crash ? { changes: list, who: 'Crashed (least cost)' } : { changes: list, ranks, who: 'Crashed by the schedule reasoner' }, { calendarDays: true, projIds: [pid] });
 }
 const labels = (db: Db) => rows(db, 'UDFTYPE').map((u) => u.udf_type_label).filter((l) => l.startsWith('WHIQ')).sort();
 /** value of a field on an activity ('' none) */
@@ -132,14 +135,117 @@ test('several projects in one file: the run number is decided per project from w
   assert.deepEqual([...runNumbers(db, [w])].map(([, k]) => k), [4], 'W’s next run is above everything declared');
 });
 
+// ---- one rule for every apply: crash_schedule's apply is a run in the numbering ----
+const cell = (db: Db, code: string, label: string, project = 'R') => val(db, code, label, project);
+
+test('reasoner, crash, reasoner: original 10, run 1 = 8 (what the crash replaced), run 2 = 6 (what the last reasoner run replaced), current 4; the crash is run 2 and declares its column', () => {
+  const db = plan();
+  apply(db, { A: 8 });                      // run 1 (reasoner): replaces 10 -> original
+  apply(db, { A: 6 }, { crash: true });     // run 2 (crash): replaces 8 -> run 1 column
+  assert.equal(cell(db, 'A', runField(1)), '8');
+  assert.ok(labels(db).includes(runField(1)) && !labels(db).includes(runField(2)));
+  apply(db, { A: 4 });                      // run 3 (reasoner): replaces 6 -> run 2 column
+  assert.deepEqual([ORIGINAL, runField(1), runField(2), CHANGE].map((l) => cell(db, 'A', l)), ['10', '8', '6', '-6']);
+  assert.equal(daysOf(db, 'R', 'A'), 4);
+  assert.match(cell(db, 'A', NOTE)!, /: 6 d to 4 d, cost 5 \(original 10 d\)$/);
+});
+
+test('crash first, then the reasoner: the crash is run 1 (original 10, no numbered field), the reasoner is run 2 and puts the 8 the crash gave into run 1', () => {
+  const db = plan();
+  const w = apply(db, { A: 8 }, { crash: true });
+  assert.deepEqual(labels(db), [NOTE, CHANGE, ORIGINAL].sort(), 'a first apply declares no numbered field, and a crash gives no rank');
+  assert.deepEqual(w.map((f) => f.name), [ORIGINAL, CHANGE, NOTE]);
+  apply(db, { A: 6, B: 7 });                // run 2
+  assert.deepEqual([ORIGINAL, runField(1), CHANGE].map((l) => cell(db, 'A', l)), ['10', '8', '-4']);
+  assert.deepEqual([ORIGINAL, runField(1), CHANGE].map((l) => cell(db, 'B', l)), ['8', undefined, '-1'], 'B is changed for the first time in run 2: an original and no run-1 cell');
+});
+
+test('the reviewer’s p3 sequence: a crash between two reasoner runs, and a crash first (the old rule lost the 8 and numbered the reasoner as run 2 with an empty run 1)', () => {
+  const r = plan('R'), q = plan('Q');
+  apply(r, { A: 8 }); apply(r, { A: 6 }, { crash: true }); apply(r, { A: 4 });
+  assert.deepEqual([ORIGINAL, runField(1), runField(2)].map((l) => cell(r, 'A', l)), ['10', '8', '6']);
+  apply(q, { A: 8 }, { project: 'Q', crash: true }); apply(q, { B: 6 }, { project: 'Q' });
+  assert.deepEqual([ORIGINAL, runField(1)].map((l) => cell(q, 'A', l, 'Q')), ['10', undefined], 'A: changed by run 1 only');
+  assert.deepEqual([ORIGINAL, runField(1)].map((l) => cell(q, 'B', l, 'Q')), ['8', undefined], 'B: changed first by run 2: its original');
+  assert.ok(labels(q).includes(runField(1)), 'run 2 declares the run-1 column');
+});
+
+test('crash gives no ranks: the ranks a reasoner run left stay; the reasoner removes the ranks it does not give', () => {
+  const db = plan();
+  apply(db, { A: 8 }, { ranks: ['A', 'B', 'C'] });
+  const w = apply(db, { A: 6 }, { crash: true });
+  assert.deepEqual(['A', 'B', 'C'].map((c) => cell(db, c, RANK)), ['1', '2', '3']);
+  assert.equal(w.find((f) => f.name === RANK), undefined, 'no rank field written');
+  apply(db, { A: 4 }, { ranks: ['C'] });
+  assert.deepEqual(['A', 'B', 'C'].map((c) => cell(db, c, RANK)), [undefined, undefined, '1']);
+});
+
+test('crash on a schedule in progress: for an activity under way the number it replaces is its remaining duration; the move into the run column is the same; progress is no edit', () => {
+  const db = plan();
+  good(db, [{ op: 'update_activity', id: 'A', actual_start: '2026-06-01' }, { op: 'update_activity', id: 'B', actual_start: '2026-06-01' }]);
+  const rem = (c: string, h: number) => { taskOf(db, 'R', c).remain_drtn_hr_cnt = String(h); }; // progress: the remaining duration of A and B shrinks
+  rem('A', 40); rem('B', 24);
+  assert.equal(daysOf(db, 'R', 'A'), 5);
+  // run 1: A is under way, its remaining 5 d is crashed to 3 d (the ops of crash_schedule write remaining_hours for a started activity)
+  const list = (c: string, from: number, to: number) => ({ task_id: taskOf(db, 'R', c).task_id, id: c, project: 'R', from_days: from, to_days: to, cost: 5 });
+  const write = (changes: ReturnType<typeof list>[]) => { for (const c of changes) taskOf(db, 'R', c.id).remain_drtn_hr_cnt = String(c.to_days * 8); return writeWhiqFields(db, { changes, who: 'Crashed (least cost)' }, { calendarDays: true, projIds: [projId(db, 'R')] }); };
+  write([list('A', 5, 3), list('B', 3, 3 - 1)]);
+  assert.deepEqual([ORIGINAL, CHANGE].map((l) => cell(db, 'A', l)), ['5', '-2'], 'the original is the remaining duration it had');
+  assert.match(cell(db, 'A', NOTE)!, /: 5 d to 3 d, cost 5$/);
+  // B keeps its values while progress moves its remaining duration; a later crash of A moves A's 3 into run 1 and leaves B's change as written
+  rem('B', 8);
+  write([list('A', 3, 2)]);
+  assert.deepEqual([ORIGINAL, runField(1), CHANGE].map((l) => cell(db, 'A', l)), ['5', '3', '-3']);
+  assert.deepEqual([ORIGINAL, CHANGE].map((l) => cell(db, 'B', l)), ['3', '-1'], 'B was not changed by run 2 and its remaining duration moved by progress: its change is not recomputed');
+  assert.equal(cell(db, 'B', runField(1)), undefined);
+});
+
+test('several projects in one file (the reviewer’s p3 sequence): the run number is the file’s, a project’s run can skip numbers; no value is lost and no column holds two runs’ values of one activity', () => {
+  const db = plan('X'); plan('Y', ['A', 'B', 'C', 'D', 'E'], db);
+  const seen: Record<string, Set<string>> = { X: new Set(['10']), Y: new Set(['10']) };   // every duration activity A of each project ever had
+  const step = (project: string, to: number) => { apply(db, { A: to }, { project }); seen[project].add(String(to)); };
+  step('X', 9); step('X', 8); step('Y', 7); step('Y', 6); step('X', 5);
+  const col = (project: string) => Object.fromEntries([ORIGINAL, runField(1), runField(2), runField(3)].map((l) => [l, cell(db, 'A', l, project)]));
+  assert.deepEqual(col('X'), { [ORIGINAL]: '10', [runField(1)]: '9', [runField(2)]: undefined, [runField(3)]: '8' }, 'X ran as runs 1, 2, 4 of the file’s numbering: it holds 9 (before run 2) and 8 (before run 4)');
+  assert.deepEqual(col('Y'), { [ORIGINAL]: '10', [runField(1)]: undefined, [runField(2)]: '7', [runField(3)]: undefined }, 'Y ran as runs 1 and 3: it holds 7 (before run 3)');
+  // nothing lost: every number an activity ever had, except its current one, is in exactly one cell of its own; the current one is its duration
+  for (const project of ['X', 'Y']) {
+    const held = Object.values(col(project)).filter((v) => v != null) as string[];
+    assert.equal(new Set(held).size, held.length, `${project}: no number held twice`);
+    assert.deepEqual([...new Set(held)].sort(), [...seen[project]].filter((v) => v !== String(daysOf(db, project, 'A'))).sort(), `${project}: every earlier number is held`);
+  }
+  assert.deepEqual([daysOf(db, 'X', 'A'), daysOf(db, 'Y', 'A')], [5, 6]);
+});
+
+test('a project with baselines is ONE project: its numbering is the single-schedule rule, whether the baseline is tagged (_baseline_of) or only has orig_proj_id as an XER read without markBaselines; baselines get no field and never count as progress', () => {
+  for (const tagged of [true, false]) {
+    const db = plan();
+    const bid = saveBaseline(db, projId(db, 'R'), 'BL');
+    const b = rows(db, 'PROJECT').find((p) => p.proj_id === bid)!;
+    if (!tagged) { b.orig_proj_id = projId(db, 'R'); b._baseline_of = ''; }
+    // the four fields declared (as a file from the platform's apply carries them), no activity of R holding a value
+    good(db, [{ op: 'add_udf', name: ORIGINAL, data_type: 'number' }]);
+    assert.deepEqual([...runNumbers(db, [projId(db, 'R')]).values()], [2], `${tagged ? 'tagged' : 'untagged'} baseline: the platform's rule (the original is declared: run 2)`);
+    // the baseline's activities are in progress: not the run's concern
+    for (const t of rows(db, 'TASK').filter((t) => t.proj_id === bid)) t.act_start_date = '2026-06-01 08:00';
+    assert.equal(reasonerRefusal(db, [projId(db, 'R'), bid]), undefined);
+    assert.equal(reasonerRefusal(db, [projId(db, 'R')]), undefined);
+    apply(db, { A: 8 });
+    assert.equal(cell(db, 'A', ORIGINAL), '10', 'A had no original yet: the number it replaced is its original');
+    assert.ok(labels(db).includes(runField(1)), 'it is run 2: it declares the run-1 column');
+    const blIds = new Set(rows(db, 'TASK').filter((t) => t.proj_id === bid).map((t) => t.task_id));
+    const orig = rows(db, 'UDFTYPE').filter((u) => /^WHIQ/.test(u.udf_type_label)).map((u) => u.udf_type_id);
+    assert.equal(rows(db, 'UDFVALUE').filter((v) => orig.includes(v.udf_type_id) && blIds.has(v.fk_id)).length, 0, 'no field on a baseline activity');
+  }
+});
+
 test('a numbered field of another type refuses the apply before anything is written (field_type_clash words)', () => {
   const db = plan();
   apply(db, { A: 8 });
   good(db, [{ op: 'add_udf', name: runField(1).toLowerCase(), data_type: 'text' }]); // (field names are matched without case; the numbering reads the exact name, so the next run is 2 and writes run 1)
-  const o = { changes: [1], reasoner: true, projIds: [projId(db, 'R')] };
+  const o = { changes: [1], projIds: [projId(db, 'R')] };
   const c = whiqFieldClash(db, o)!;
   assert.deepEqual([c.field, c.found, c.needed], [runField(1).toLowerCase(), 'text', 'number']);
-  assert.equal(whiqFieldClash(db, { ...o, reasoner: false }), undefined, 'crash_schedule does not write it');
 });
 
 // ---- the MCP tool: two real applies, undo, XER, and the refusal of a schedule in progress ----
@@ -186,6 +292,10 @@ test('optimize_schedule apply: run 1, run 2 (the run-1 field), undo of run 2 tak
   // undo: one change takes everything of the apply back, the field it declared too
   assert.equal((await call('undo', { handle, owner_key })).err, false);
   assert.deepEqual(await udf(handle), f1);
+  // redo brings the values and the field back
+  assert.equal((await call('redo', { handle, owner_key })).err, false);
+  assert.deepEqual(await udf(handle), f2);
+  assert.equal((await call('undo', { handle, owner_key })).err, false);
   assert.equal((await call('optimize_schedule', { handle, owner_key, seed: 1, samples: 5, activities: [{ id: 'A', crash_days: 3, crash_cost: 700 }], apply: true })).err, false);
   // save as XER and open: the numbering is read from the declared fields, so the next apply is run 3
   const file = join(mkdtempSync(join(tmpdir(), 'p6-runs-')), 'runs.xer');
@@ -238,19 +348,37 @@ test('a project not started, with the data date on its planned start (a later ti
   assert.equal(reasonerRefusal(db, rows(db, 'PROJECT').map((p) => p.proj_id)), undefined);
 });
 
-test('optimize_schedule with objective min_crash_cost applies by the same run rule (crash_schedule itself keeps its own: no numbered field)', async () => {
+test('optimize_schedule with objective min_crash_cost and crash_schedule itself apply by the same run rule', async () => {
   const { handle, owner_key } = await mcpProject('MC');
   const go = (tool: string, extra: Record<string, unknown>) => call(tool, { handle, owner_key, apply: true, ...extra });
   const one = await go('optimize_schedule', { objective: 'min_crash_cost', target_days: 4, activities: [{ id: 'A', crash_days: 6, crash_cost: 40 }] });
   assert.equal(one.err, false, JSON.stringify(one.d).slice(0, 300));
   assert.equal((await udf(handle)).values.A[ORIGINAL], '10');
-  const two = await go('optimize_schedule', { objective: 'min_crash_cost', target_days: 2, activities: [{ id: 'A', crash_days: 3, crash_cost: 20 }] });
+  const two = await go('crash_schedule', { target_days: 2, activities: [{ id: 'A', crash_days: 3, crash_cost: 20 }] });
   assert.equal(two.err, false, JSON.stringify(two.d).slice(0, 300));
   const f = await udf(handle);
-  assert.equal(f.values.A[runField(1)], '6');
+  assert.equal(f.values.A[runField(1)], '6', 'crash_schedule after the reasoner objective is run 2');
   assert.equal(f.values.A[ORIGINAL], '10');
-  // crash_schedule on its own project: the old rule, no numbered field however many times it is applied
+  assert.ok(two.d.fields_written.some((x: any) => x.name === runField(1)));
+  // crash_schedule on its own project: run 1 declares no numbered field, run 2 declares the run-1 field
   const other = await mcpProject('MD');
   for (const [d, c] of [[4, 6], [2, 3]]) assert.equal((await call('crash_schedule', { handle: other.handle, owner_key: other.owner_key, apply: true, target_days: d, activities: [{ id: 'A', crash_days: c, crash_cost: 10 }] })).err, false);
-  assert.deepEqual((await udf(other.handle)).labels, [NOTE, CHANGE, ORIGINAL].sort());
+  const fo = await udf(other.handle);
+  assert.deepEqual(fo.labels, [NOTE, CHANGE, ORIGINAL, runField(1)].sort());
+  assert.equal(fo.values.A[runField(1)], '6');
+});
+
+test('B-undo: undo of an apply that declared a field takes back its values and the declaration; redo brings both back (crash_schedule, then crash_schedule)', async () => {
+  const { handle, owner_key } = await mcpProject('UD');
+  const crash = (target: number, to: number) => call('crash_schedule', { handle, owner_key, apply: true, target_days: target, activities: [{ id: 'A', crash_days: to, crash_cost: 10 }] });
+  assert.equal((await crash(4, 6)).err, false);
+  const f1 = await udf(handle);
+  assert.ok(!f1.labels.includes(runField(1)));
+  assert.equal((await crash(2, 3)).err, false);
+  const f2 = await udf(handle);
+  assert.ok(f2.labels.includes(runField(1)) && f2.values.A[runField(1)] === '6');
+  assert.equal((await call('undo', { handle, owner_key })).err, false);
+  assert.deepEqual(await udf(handle), f1, 'values and the declared field are gone');
+  assert.equal((await call('redo', { handle, owner_key })).err, false);
+  assert.deepEqual(await udf(handle), f2, 'and back');
 });

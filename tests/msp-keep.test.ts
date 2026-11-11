@@ -36,6 +36,19 @@ test('MSPDI: an untouched file comes back element for element, in order, every U
   assert.ok(!out.includes('P6 Activity ID'), 'the clone\'s own custom fields are not written into a customer\'s Text1');
 });
 
+test('MSPDI: the elements the clone neither reads nor writes (task costs and fixed cost, baseline cost, resource cost per use, timephased values) are byte-identical after an in-place save that edits something else', () => {
+  const src = readFileSync(FILE, 'utf8');
+  const { db } = parseMspdi(src);
+  assert.equal(applyOps(db, [{ op: 'update_activity', id: 'uid:155', name: 'Partitions and doors' }, { op: 'add_activity', id: 'N2', name: 'Extra', wbs: '1', duration_days: 1 }]).ok, true);
+  const out = writeMspdi(db);
+  const kept = (xml: string) => leaves(xml).filter((l) => /\/Tasks\/Task\/(FixedCost|Cost|OvertimeCost|ActualCost|RemainingCost)=|\/Task\/Baseline\/(Cost|Work)=|\/Resources\/Resource\/(CostPerUse|Cost)=|TimephasedData\/Value=/.test(l));
+  const before = kept(src);
+  assert.ok(before.length >= 11, `the file has them: ${before.length}`);
+  assert.deepEqual(kept(out), before, 'every one as written, in its place');
+  // and as bytes of the file (not only as parsed text): each element\'s own text appears in the output unchanged
+  for (const x of src.match(/<(FixedCost|CostPerUse)>[^<]*<\/\1>|<Baseline>(?:(?!<\/Baseline>)[\s\S])*<\/Baseline>/g) ?? []) assert.ok(out.replace(/>\s+</g, '><').includes(x.replace(/>\s+</g, '><')), x.slice(0, 80));
+});
+
 test('MSPDI: edits change only what they touch; what changed is the clone\'s, everything else stays the file\'s', () => {
   const src = readFileSync(FILE, 'utf8');
   const { db } = parseMspdi(src);

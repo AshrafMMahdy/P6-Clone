@@ -268,7 +268,8 @@ export function ExportWizard(props: { projIds?: string[] }) {
     // A Microsoft Project file holds one project (P6 exports one project per MS Project file).
     const ids = msp ? sel.slice(0, 1) : sel;
     const report: string[] = []; // what the file cannot hold (P6 XML: fields with values it has no place for), said after the export
-    const bytes = exportFile(getDb(), format, { version, projIds: ids, encoding, report });
+    let bytes: Uint8Array;
+    try { bytes = exportFile(getDb(), format, { version, projIds: ids, encoding, report }); } catch (e) { setError((e as Error).message); return; } // (a save the clone refuses says why and what to do)
     const first = projects.find((p) => p.proj_id === ids[0]);
     const base = (first?.proj_short_name ?? 'export').replace(/[\\/:*?"<>|]/g, '_');
     setError(null);

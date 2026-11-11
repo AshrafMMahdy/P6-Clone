@@ -432,7 +432,7 @@ test('apply writes the WHIQ fields beside each changed activity in the same undo
   assert.ok(['WHIQ original duration (d)', 'WHIQ change note'].every((l) => types.rows.some((r: string[]) => r.includes(l))));
   const vals = (await call('read_table', { handle: re.handle, table: 'UDFVALUE' })).d;
   assert.ok(vals.rows.length >= 6);
-  // crash_schedule's apply writes the same three, noted as least-cost crashing
+  // crash_schedule's apply writes the same three (its first apply: no numbered field, no rank), noted as least-cost crashing
   const np2 = (await call('new_project', { id: 'WQ2', start: '2026-06-01' })).d;
   await call('edit', { handle: np2.handle, owner_key: np2.owner_key, operations: [{ op: 'add_activity', id: 'X', name: 'X', duration_days: 10 }, { op: 'add_activity', id: 'Y', name: 'Y', duration_days: 5 }, { op: 'add_relationship', pred: 'X', succ: 'Y' }] });
   await call('schedule', { handle: np2.handle, owner_key: np2.owner_key });
@@ -530,13 +530,14 @@ test('the fields of a change are the hours actually written: 20 h on an 8 h day 
   assert.ok(Math.abs(op.duration_hours - 40 / 3) < 1e-9, `the hours written ${op.duration_hours} are the ones the fields show`);
 });
 
-test('whiqFieldOps: the original is written once, the change is measured from it, the note says so, and values of earlier runs on other activities are counted', async () => {
-  const { whiqFieldOps, whiqFieldClash } = await import('../core/analysis/whiq-fields.ts');
+test('whiqRunOps (the one rule of every apply): the original is written once, the change is measured from it, the note says so, and values of earlier runs on other activities are counted', async () => {
+  const { whiqRunOps, whiqFieldClash } = await import('../core/analysis/whiq-fields.ts');
   const db: Db = { tables: {} };
   assert.ok(applyOps(db, [{ op: 'add_project', id: 'W', start: '2026-06-01' }, ...['A', 'B'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 10 }))], { calendarDays: true }).ok);
   const task = (code: string) => rows(db, 'TASK').find((t) => t.task_code === code)!.task_id;
   const run = (changes: { id: string; from: number; to: number }[], ranks: string[]) => {
-    const w = whiqFieldOps(db, { changes: changes.map((c) => ({ task_id: task(c.id), id: c.id, project: 'W', from_days: c.from, to_days: c.to, cost: 5 })), ranks: ranks.map((id, k) => ({ task_id: task(id), id, project: 'W', rank: k + 1 })), who: 'Crashed', on: '2026-11-10' });
+    assert.ok(applyOps(db, changes.map((c) => ({ op: 'update_activity', id: c.id, duration_days: c.to })), { calendarDays: true }).ok); // (the run's own durations are in before its fields are written)
+    const w = whiqRunOps(db, { changes: changes.map((c) => ({ task_id: task(c.id), id: c.id, project: 'W', from_days: c.from, to_days: c.to, cost: 5 })), ranks: ranks.map((id, k) => ({ task_id: task(id), id, project: 'W', rank: k + 1 })), who: 'Crashed', on: '2026-11-10' });
     assert.ok(applyOps(db, w.ops as never, { calendarDays: true }).ok);
     return w.fields_written;
   };
@@ -544,12 +545,12 @@ test('whiqFieldOps: the original is written once, the change is measured from it
   run([{ id: 'A', from: 10, to: 6 }], ['A', 'B']);
   const second = run([{ id: 'A', from: 6, to: 3 }], ['B']);
   assert.equal(value('A', 'WHIQ original duration (d)'), '10');
+  assert.equal(value('A', 'WHIQ run 1 duration (d)'), '6', 'the second apply is run 2: the number it replaced');
   assert.equal(value('A', 'WHIQ duration change (d)'), '-7');
   assert.equal(value('A', 'WHIQ change note'), 'Crashed 2026-11-10: 6 d to 3 d, cost 5 (original 10 d)');
-  // A's rank is of the earlier run and stays (not cleared); B's is the latest
-  assert.equal(value('A', 'WHIQ leveling rank'), '1');
+  // a rank the latest run does not give is removed (the run gave ranks: the reasoner's); B's is the latest
+  assert.equal(value('A', 'WHIQ leveling rank'), undefined);
   assert.equal(value('B', 'WHIQ leveling rank'), '1');
-  assert.deepEqual(second.find((f) => f.name === 'WHIQ leveling rank'), { name: 'WHIQ leveling rank', activities: 1, kept_from_earlier: 1 });
   assert.deepEqual(second.find((f) => f.name === 'WHIQ original duration (d)'), { name: 'WHIQ original duration (d)', activities: 0, kept_from_earlier: 1 });
   // a field with the label and another type: found before anything is written
   assert.equal(whiqFieldClash(db, { changes: [1] }), undefined);
@@ -561,14 +562,15 @@ test('whiqFieldOps: the original is written once, the change is measured from it
 });
 
 test('A-L2: kept_from_earlier counts the values on the activities of the run’s projects only, not those of other projects in the file', async () => {
-  const { whiqFieldOps } = await import('../core/analysis/whiq-fields.ts');
+  const { whiqRunOps } = await import('../core/analysis/whiq-fields.ts');
   const db: Db = { tables: {} };
   assert.ok(applyOps(db, [{ op: 'add_project', id: 'W', start: '2026-06-01' }, { op: 'add_project', id: 'X', start: '2026-06-01' },
     ...['A', 'B'].map((id) => ({ op: 'add_activity', project: 'W', id, name: id, duration_days: 10 })), ...['A', 'B', 'C'].map((id) => ({ op: 'add_activity', project: 'X', id, name: id, duration_days: 10 }))], { calendarDays: true }).ok);
   const pid = (n: string) => rows(db, 'PROJECT').find((p) => p.proj_short_name === n)!.proj_id;
   const task = (proj: string, code: string) => rows(db, 'TASK').find((t) => t.task_code === code && t.proj_id === pid(proj))!.task_id;
   const run = (changes: { proj: string; id: string }[], projIds?: string[]) => {
-    const w = whiqFieldOps(db, { changes: changes.map((c) => ({ task_id: task(c.proj, c.id), id: c.id, project: c.proj, from_days: 10, to_days: 6, cost: 5 })), who: 'Crashed', on: '2026-11-10', projIds });
+    for (const c of changes) assert.ok(applyOps(db, [{ op: 'update_activity', project: c.proj, id: c.id, duration_days: 6 }], { calendarDays: true }).ok);
+    const w = whiqRunOps(db, { changes: changes.map((c) => ({ task_id: task(c.proj, c.id), id: c.id, project: c.proj, from_days: 10, to_days: 6, cost: 5 })), who: 'Crashed', on: '2026-11-10', projIds });
     assert.ok(applyOps(db, w.ops as never, { calendarDays: true }).ok);
     return w.fields_written.find((f) => f.name === 'WHIQ duration change (d)')!;
   };

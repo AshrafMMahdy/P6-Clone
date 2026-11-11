@@ -34,6 +34,19 @@ export const CF_SLOTS: Record<CfSubject, Record<CfKind, number[]>> = {
   },
 };
 
+/** The Flag and Duration custom fields of a task: slots the clone does not carry P6 custom fields in (P6 has no flag or duration custom field to put in them), listed so a file's
+ *  format stamp (mspdi.ts) can take any custom field that is free, whatever its kind. FieldIDs as MPXJ numbers them: FieldTypeHelper.getFieldID(TaskField.FLAG1..FLAG20 /
+ *  DURATION1..DURATION10) in the jar the clone reads .mpp files with (the Text, Number, Cost, Start, Finish and Date lists above are the same function's values). */
+const STAMP_ONLY: { kind: string; ids: number[] }[] = [
+  { kind: 'Flag', ids: [188743752, 188743753, 188743754, 188743755, 188743756, 188743757, 188743758, 188743759, 188743760, 188743761, 188743972, 188743973, 188743974, 188743975, 188743976, 188743977, 188743978, 188743979, 188743980, 188743981] },
+  { kind: 'Duration', ids: [188743783, 188743784, 188743785, 188743955, 188743956, 188743957, 188743958, 188743959, 188743960, 188743961] },
+];
+/** Every custom field of a task, as [FieldID, FieldName], Text first, then Number, Cost, Start, Finish, Date, Flag, Duration: the places the format stamp can go. */
+export const taskFieldSlots = (): { id: string; name: string }[] => [
+  ...CF_KINDS.flatMap((k) => CF_SLOTS.Task[k].map((id, i) => ({ id: String(id), name: slotName(k, i + 1) }))),
+  ...STAMP_ONLY.flatMap((g) => g.ids.map((id, i) => ({ id: String(id), name: `${g.kind}${i + 1}` }))),
+];
+
 const SLOT_OF = new Map<string, { subject: CfSubject; kind: CfKind; n: number }>();
 for (const s of ['Task', 'Resource'] as const) for (const k of CF_KINDS) CF_SLOTS[s][k].forEach((id, i) => SLOT_OF.set(String(id), { subject: s, kind: k, n: i + 1 }));
 /** The slot a FieldID names (undefined: not a custom field the clone carries: Flag, Duration, another entity's). */
@@ -176,9 +189,9 @@ export function valueReader(db: Db, fields: CfField[], ctx: Ctx): ((f: CfField, 
     const v = byType.get(f.type.udf_type_id)?.get(fk);
     if (!v) return undefined;
     const t = f.type.logical_data_type;
-    const n = v.udf_number !== '' && Number.isFinite(Number(v.udf_number)) ? Number(v.udf_number) : null;
+    const n = v.udf_number !== '' && Number.isFinite(Number(v.udf_number)) ? v.udf_number : null; // (as stored: a Number field is written unchanged, a Cost field by the currency codec)
     const w = (kind: CfKind, value: string | number | null) => writeValue('ExtendedAttribute', `Value:${kind}`, value, ctx);
-    const x = f.kind === 'Number' || f.kind === 'Cost' ? w(f.kind, n)
+    const x = f.kind === 'Number' ? w('Number', n) : f.kind === 'Cost' ? w('Cost', n == null ? null : Number(n))
       : f.kind === 'Text' ? (t === 'FT_CODE' || f.column === 'udf_code_id' ? (v.udf_code_id ? codes.get(v.udf_code_id) ?? '' : '') : w('Text', v.udf_text ?? ''))
       : w(f.kind, v.udf_date ?? '');
     if (f.kind === 'Text' && typeof x === 'string' && x.length > MSP_TEXT_FIELD_SIZE && [...x].length > MSP_TEXT_FIELD_SIZE) long.set(f, (long.get(f) ?? 0) + 1);

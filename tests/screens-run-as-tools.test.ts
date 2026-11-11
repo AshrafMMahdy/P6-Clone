@@ -319,7 +319,7 @@ test('Optimize: Apply works on any schedule (the answer has the whole placement 
   assert.equal(whiq(db).length, 130, 'a rank on each leveled activity');
 });
 
-test('Optimize: the screen’s Apply writes the reasoner’s run rule through writeWhiqFields (field_data says so), a second Apply is run 2 as the tool’s is, and a schedule in progress is refused in the tool’s words', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
+test('Optimize: the screen’s Apply writes the run rule through writeWhiqFields, a second Apply is run 2 as the tool’s is, and a schedule in progress is refused in the tool’s words', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
   const h = await chain(6);
   const db = sessions.get(h)!.db, screenDb = structuredClone(db), ids = rows(db, 'PROJECT').map((p) => p.proj_id);
   const screenApply = (out: any) => { assert.ok(applyOps(screenDb, out.ops, { hoursPerDay: 8 }).ok); assert.ok(scheduleProjects(screenDb, ids, {}).ok); writeWhiqFields(screenDb, out.field_data, { hoursPerDay: 8 }); syncAssignmentDates(screenDb); };
@@ -328,7 +328,7 @@ test('Optimize: the screen’s Apply writes the reasoner’s run rule through wr
   for (const crash of [[{ id: 'L1', crash_days: 6, crash_cost: 10 }, { id: 'L2', crash_days: 7, crash_cost: 10 }], [{ id: 'L1', crash_days: 4, crash_cost: 10 }, { id: 'L3', crash_days: 8, crash_cost: 10 }]]) {
     const args = { seed: 1, samples: 3, activities: crash };
     const out = ok(await run('optimize_schedule', { handle: h, ...args, field_data: true }));
-    assert.equal(out.field_data.reasoner, true);
+    assert.equal(out.field_data.reasoner, undefined, 'one rule for every apply: field_data carries no rule flag');
     screenApply(out);
     assert.equal(ok(await run('optimize_schedule', { handle: h, ...args, apply: true })).applied, true);
     assert.deepEqual(whiq(screenDb), whiq(db), 'the screen’s Apply and the tool’s apply leave the same fields');

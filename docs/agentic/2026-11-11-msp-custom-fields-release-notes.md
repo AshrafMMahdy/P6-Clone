@@ -52,10 +52,21 @@ elements, baseline `Cost`, timephased values) stay in a file as written; they ar
 - Rates of resources whose rate format is minute, day, week or month are read as the per-hour rate the file holds (before: converted again).
 - A material's quantity is written as the assignment's `<Units>` (and its `<Work>` as before).
 - A file the clone wrote before this release has its currency in plain units and no format stamp. The writer now stamps the revision in the alias of the
-  "P6 Schedule Rules" custom field definition (`P6 Schedule Rules 25.0 legacy, format 2`). A file of the clone without the stamp is read as plain units, with
-  one info finding (`MSP_OLD_CLONE_FILE`), and saving it again writes Microsoft Project's representation and the stamp. (A file of the clone that Microsoft
-  Project saved since has a `<BuildNumber>`, which the clone never writes; it holds hundredths and is read by the format's rule.) A file not written by the
-  clone is read by the format's rule.
+  "P6 Schedule Rules" custom field definition (`P6 Schedule Rules 25.0 legacy, format 2`). A file is read as plain units, with one info finding
+  (`MSP_OLD_CLONE_FILE`), only when its bytes are the OLD CLONE WRITER's own (all of: `<Author>Primavera P6 Clone</Author>`; the project's own elements exactly the
+  old writer's list in its order; the first Task, Resource and Assignment having only the elements the old writer wrote; the file's first six custom field
+  definitions the clone's own, in its order; no stamp). Microsoft Project and MPXJ add elements to every project, task, resource and assignment on every save
+  (`CurrencyDigits`, `CurrencySymbol`, `FYStartDate`, `CurrentDate`, `Active`, `Manual`, `PeakUnits`, `PercentWorkComplete` ...), so a re-saved file no longer matches;
+  an `.mpp` (or any XML MPXJ made of one: the server passes `converted: true`) is never read as an old file. Saving a file read this way writes Microsoft Project's
+  representation and the stamp. A file not written by the clone is read by the format's rule. (Not detectable, by nature: a file Microsoft Project saved from a
+  clone file that the old writer had edited in place holds the old writer's plain costs for the assignments it edited next to Project's own hundredths.)
+- The stamp does not depend on a free Text field: it stays on the clone's own slot (Task Text6) when the file has it; otherwise it goes into the first custom field
+  of any kind the file does not use (Text, Number, Cost, Start, Finish, Date, Flag, Duration of a task; FieldIDs as MPXJ numbers them) and is read by its alias
+  wherever it is. When none of the 120 task fields is free the save of a file of the old writer is refused (`msp_no_free_custom_field`: not saved; no free custom
+  field left to mark it as written in the current format; free one custom field of the tasks, or save as XER or P6 XML); any other file is saved and the save's
+  notes say the stamp was not written.
+- Money is written as MPXJ writes it: an assignment's costs with at most 4 decimals of the hundredths and a custom Cost field's value with at most 2 (12.345 is
+  `1234.5`, 0.004 is `0.4`, 1e9 is `100000000000`, -5.5 is `-550`; half-even rounding), a custom Number field as stored (no rounding).
 - A P6 custom field whose data type the clone does not know is no longer written from its text column alone: it is written as the Microsoft Project kind of the
   one value column its rows hold (text, number, date, code); with values in more than one column it is not carried and the save's notes name it, its data type
   and the reason.
@@ -66,5 +77,5 @@ units, rates, durations and remaining durations, lag, total and free slack, perc
 money, progress, slack, lags, work and material resources), the hand-made XML fixture (percentage and elapsed lags) and a project with every rate format and a
 non-default day, week and month. WRITE: a P6 project (`130 TRIAL.xer`: costs, material, progress, lags), a hand-computed assignment, and an old-format file saved
 again. Compared exactly except where the converted file carries less (whole minutes for durations, tenths of a minute for slack, four decimals for units), stated
-in the test. It skips, saying why, where Java or the jars are missing. Before this change it failed on costs (READ and WRITE), on rates and on material units;
+in the test. It skips, saying why, where Java or the jars are missing, unless `P6CLONE_REQUIRE_REFERENCE=1`, which turns every skip into a failure with the same message; the release workflow (`whiq-release.yml`) sets it for its test step and installs Temurin 21 (`actions/setup-java@v4`) after fetching the jars. Also compared: custom Number and Cost fields of tasks and each saved baseline's start, finish and duration (read), and the text of every written amount against MPXJ's own re-save (write). Calibration on Microsoft Project's own XML (the MPXJ project's generated test data, run locally, not committed): the hundredths rule, the per-hour rate rule and the lag rule held on every file; see the report of that change. Before this change it failed on costs (READ and WRITE), on rates and on material units;
 everything else it compares (durations, slack, lags, percent, dates, work, units) already agreed.

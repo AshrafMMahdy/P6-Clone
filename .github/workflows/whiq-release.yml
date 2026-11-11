@@ -75,8 +75,13 @@ jobs:
           mkdir linux win && tar -xzf linux.tar.gz -C linux --strip-components=1 && unzip -q win.zip -d win
           echo "P6CLONE_JLINK=$PWD/linux/bin/jlink" >> "$GITHUB_ENV"
           echo "P6CLONE_JRE_TARGETS={\"linux-x64\":\"$PWD/linux/jmods\",\"win-x64\":\"$(echo $PWD/win/*/jmods)\"}" >> "$GITHUB_ENV"
+      # Java for the MPXJ reference check of tests/msp-reference.test.ts (MPXJ's jars are Java 8 class files; the Temurin 21 line is the one the jlink step above pins)
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
       - name: Tests (a failure is also written as annotations, which the run page shows without signing in)
         shell: bash
+        # the MPXJ reference check must run here: without Java or the jars it fails instead of skipping (tests/mpxj-reference.ts skipWithoutReference)
+        env: { P6CLONE_REQUIRE_REFERENCE: "1" }
         run: |
           node scripts/build-viewer4d.mjs
           node --import ./tests/setup.ts --test --test-reporter=spec "tests/*.test.ts" > test.log 2>&1 && { grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log; echo "skipped here (a sample or Chromium this machine does not have):"; grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | sed -n 1,60p; exit 0; }

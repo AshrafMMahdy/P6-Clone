@@ -122,7 +122,42 @@ export const xmlDate = (s: string) => { const t = parseP6Date(s); return t == nu
 
 /** Currency: hundredths of the unit. `plain`: a file the clone wrote before revision 2, whose currency elements hold plain units. */
 export const currencyFromText = (s: string, plain = false): number | null => { const n = num(s); return n == null ? null : plain ? n : n / 100; };
-export const currencyToText = (v: number): string => p6num(v * 100);
+/** The decimals of the hundredths MPXJ's MSPDI writer prints: an assignment's Cost / ActualCost / RemainingCost with 4, a custom field's Cost value with 2. */
+export interface CurrencyForm { decimals: number; negativeZero: boolean }
+/** (a negative amount that rounds to nothing is written "-0" in a custom field and "0" in an assignment, as MPXJ prints them) */
+export const ASSIGNMENT_COST: CurrencyForm = { decimals: 4, negativeZero: false }, CUSTOM_FIELD_COST: CurrencyForm = { decimals: 2, negativeZero: true };
+/** Currency as text, as MPXJ's MSPDI writer prints it (calibrated on its output for the same values: it multiplies the amount by 100 and prints it with at most 4
+ *  decimals for an assignment's cost and 2 for a custom field's, none when whole, no exponent, "0" for zero (MPXJ leaves a zero out; the clone writes the 0)): 12.345 is 1234.5, 0.004 is 0.4, 1e9 is 100000000000, -5.5 is -550, 1.2345678 is 123.45678 -> 123.4568. The
+ *  rounding is DecimalFormat's: half-even, on the shortest decimal form of the number, with an exact tie of the binary value (j/32) going to the even digit. */
+export function currencyToText(v: number, { decimals, negativeZero }: CurrencyForm = ASSIGNMENT_COST): string {
+  const x = v * 100;
+  if (!Number.isFinite(x) || x === 0) return '0';
+  const neg = x < 0;
+  let [int, dec = ''] = plainDecimal(Math.abs(x)).split('.');
+  if (dec.length > decimals) {
+    const keep = dec.slice(0, decimals), rest = dec.slice(decimals);
+    let up: boolean;
+    if (rest[0] !== '5' || /[1-9]/.test(rest.slice(1))) up = rest[0] > '5' || (rest[0] === '5');
+    else {
+      // the shortest form ends exactly in a 5: the binary value decides (above the tie: up, below: down, exactly on it: the even digit)
+      const exact = Math.abs(x).toFixed(80), tie = `${int}.${keep}5`.padEnd(exact.length, '0');
+      up = exact > tie || (exact === tie && Number(keep.at(-1) ?? int.at(-1)) % 2 === 1);
+    }
+    let n = BigInt(int + keep) + (up ? 1n : 0n);
+    const t = n.toString().padStart(decimals + 1, '0');
+    int = t.slice(0, t.length - decimals); dec = t.slice(t.length - decimals);
+  }
+  const body = `${int}${dec.replace(/0+$/, '') ? '.' + dec.replace(/0+$/, '') : ''}`;
+  return `${neg && (negativeZero || /[1-9]/.test(body)) ? '-' : ''}${body}`;
+}
+/** A finite non-negative number as plain decimal digits (its shortest form, without an exponent). */
+function plainDecimal(x: number): string {
+  const m = /^(\d)(?:\.(\d+))?e([+-]\d+)$/.exec(x.toExponential());
+  const digits = m![1] + (m![2] ?? ''), e = Number(m![3]);
+  if (e >= digits.length - 1) return digits + '0'.repeat(e - digits.length + 1);
+  if (e >= 0) return `${digits.slice(0, e + 1)}.${digits.slice(e + 1)}`;
+  return `0.${'0'.repeat(-e - 1)}${digits}`;
+}
 
 /** The kinds of lag format: percentage (19, 20: the plain percentage of the predecessor's duration) and elapsed (4, 6, 8, 10, 12, with the
  *  elapsed percentage 20; 32 is added for an estimated one). */
@@ -172,16 +207,16 @@ const READ: Record<Exclude<ValueType, 'rate' | 'lag'>, (s: string, c: Ctx, entit
   // a custom field's cost is in hundredths in every revision of the clone's files; its element currency was plain in revision 1
   currency: (s, c, entity) => currencyFromText(s, !!c.plainCurrency && entity !== 'ExtendedAttribute'),
 };
-const WRITE: Record<Exclude<ValueType, 'rate' | 'lag'>, (v: never, c: Ctx) => string> = {
+const WRITE: Record<Exclude<ValueType, 'rate' | 'lag'>, (v: never, c: Ctx, entity: Entity) => string> = {
   text: (v: string) => String(v),
   int: (v: number) => String(v),
-  number: (v: number) => p6num(v),
+  number: (v: number | string) => (typeof v === 'string' ? v : p6num(v)), // (a stored custom-field number is written as it is stored)
   flag: (v: boolean | number) => (v ? '1' : '0'),
   date: (v: string) => xmlDate(v),
   duration: (v: number) => hoursToIso(v),
   tenths: (v: number) => String(Math.round(v * 600)),
   days: (v: number, c: Ctx) => String(Math.round(v / (c.minutesPerDay / 60)) || 0),
-  currency: (v: number) => currencyToText(v),
+  currency: (v: number, _c, entity) => currencyToText(v, entity === 'ExtendedAttribute' ? CUSTOM_FIELD_COST : ASSIGNMENT_COST),
 };
 
 /** The model value of an element's text (null: none; a date '' for none). A rate or a lag has its own reader (readRate, readLag): they need the
@@ -202,7 +237,7 @@ export function writeValue(entity: Entity, name: string, v: Value | undefined, c
   if (v == null || v === '') return '';
   if (t === 'rate') return p6num(v as number);
   if (t === 'lag') return writeLag(v as number);
-  return (WRITE[t] as (v: Value, c: Ctx) => string)(v, c);
+  return (WRITE[t] as (v: Value, c: Ctx, entity: Entity) => string)(v, c, entity);
 }
 
 // ---------- the revision of the clone's own files

@@ -2,6 +2,8 @@
 // for its own reading of a file as JSON (org.mpxj.sample.MpxjConvert writes .json by the output's extension: every task, resource and
 // assignment with the values MPXJ holds, durations in seconds). No Java class of ours: nothing to compile.
 import { spawnSync } from 'node:child_process';
+import assert from 'node:assert/strict';
+import type { TestContext } from 'node:test';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
@@ -27,5 +29,28 @@ export function mpxjRead(path: string): MpxjProject {
     const r = spawnSync(javaPath(home), ['-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory', '-Djava.awt.headless=true', '-cp', classPath(home), 'org.mpxj.sample.MpxjConvert', input, out], { encoding: 'utf8', maxBuffer: 1 << 28 });
     if (r.status !== 0 || !existsSync(out)) throw new Error(`MPXJ could not read ${path}: ${(r.stderr || r.stdout).slice(-400)}`);
     return JSON.parse(readFileSync(out, 'utf8'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+/** Whether a test that needs the reference has to stop here. Without Java / the jars it is skipped with the reason, unless P6CLONE_REQUIRE_REFERENCE=1 (the release
+ *  workflow sets it): then the missing reference is a failure with the same message, so a release cannot go green without the reference check having run. */
+export function skipWithoutReference(t: TestContext): boolean {
+  const why = referenceMissing();
+  if (!why) return false;
+  const message = `needs the reference (MPXJ and Java): ${why}`;
+  if (process.env.P6CLONE_REQUIRE_REFERENCE === '1') assert.fail(`${message} (P6CLONE_REQUIRE_REFERENCE=1: the reference check is required here, not skipped)`);
+  t.skip(message);
+  return true;
+}
+
+/** MPXJ's own conversion of a Microsoft Project XML file into Microsoft Project XML (what a re-save through MPXJ writes). */
+export function mpxjResave(path: string): string {
+  const home = mpxjHome()!, dir = mkdtempSync(join(tmpdir(), 'p6resave-'));
+  try {
+    const input = join(dir, 'in.xml'), out = join(dir, 'out.xml');
+    copyFileSync(path, input);
+    const r = spawnSync(javaPath(home), ['-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory', '-Djava.awt.headless=true', '-cp', classPath(home), 'org.mpxj.sample.MpxjConvert', input, out], { encoding: 'utf8', maxBuffer: 1 << 28 });
+    if (r.status !== 0 || !existsSync(out)) throw new Error(`MPXJ could not re-save ${path}: ${(r.stderr || r.stdout).slice(-400)}`);
+    return readFileSync(out, 'utf8');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
