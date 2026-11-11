@@ -43,9 +43,10 @@ export const slotName = (kind: CfKind, n: number) => `${kind}${n}`;
 export const TYPE_OF_KIND: Record<CfKind, string> = { Text: 'FT_TEXT', Number: 'FT_FLOAT_2_DECIMALS', Cost: 'FT_MONEY', Start: 'FT_START_DATE', Finish: 'FT_END_DATE', Date: 'FT_DATE' };
 /** The Microsoft Project kind a P6 data type is written as, and (`as`) what the type loses when it has no kind of its own. */
 function kindOfType(logical: string): { kind: CfKind; as?: 'integer' | 'indicator' | 'code' | 'other' } {
+  // every number type with decimals (FT_FLOAT, FT_FLOAT_2_DECIMALS ...: P6 and the clone's XML reader/writer name them FT_FLOAT*) is a Number field
+  if (/^FT_FLOAT/.test(logical)) return { kind: 'Number' };
   switch (logical) {
     case 'FT_TEXT': return { kind: 'Text' };
-    case 'FT_FLOAT_2_DECIMALS': return { kind: 'Number' };
     case 'FT_INT': return { kind: 'Number', as: 'integer' };
     case 'FT_MONEY': return { kind: 'Cost' };
     case 'FT_START_DATE': return { kind: 'Start' };
@@ -75,10 +76,14 @@ const quoted = (l: string[]) => l.map((x) => `"${x}"`).join(', ');
  * Which Microsoft Project custom field each P6 custom field of an activity or a resource is written into. Deterministic
  * (the fields in the order of their UDF type ID take the first free slot of their kind) and stable across a save, open,
  * save: a field read from a Microsoft Project file keeps the slot it had there (`_msp_field` on its UDFTYPE row).
+ * The order of allocation: (a) the fields pinned to a slot by the file they were read from; (b) the fields that have a value in the project
+ * being written (`valued`: their UDF type IDs), in UDF type ID order; (c) only for a NEW file (`newFile`), the declared fields with no value
+ * in that project, in UDF type ID order, while slots remain. In a customer's own file saved in place, a field with no value in the project is
+ * not added to the file (it was never that file's) and is not reported as not carried.
  * `reserved`: slots the clone uses for its own fields; `used`: every FieldID the file this project was read from already
  * has (a customer's own fields: never taken); `own`: whether a name is one the clone's own fields go by.
  */
-export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<string>>; used: Set<string>; own: (name: string) => boolean }): CfPlan {
+export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<string>>; used: Set<string>; own: (name: string) => boolean; valued: Set<string>; newFile: boolean }): CfPlan {
   const fields: CfField[] = [], notes: string[] = [];
   const unfit: { subject: CfSubject; kind: CfKind; names: string[] }[] = [];
   const clash: string[] = [];
@@ -96,8 +101,8 @@ export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<st
       placed.set(u, make(u, kind, Number(pin), as));
     }
     const taken = (id: number) => o.reserved[subject].has(String(id)) || o.used.has(String(id)) || held.has(String(id));
-    for (const u of todo) {
-      if (placed.has(u)) continue;
+    const rest = todo.filter((u) => !placed.has(u));
+    for (const u of [...rest.filter((u) => o.valued.has(u.udf_type_id)), ...(o.newFile ? rest.filter((u) => !o.valued.has(u.udf_type_id)) : [])]) {
       const { kind, as } = kindOfType(u.logical_data_type), id = CF_SLOTS[subject][kind].find((x) => !taken(x));
       if (id == null) {
         let g = unfit.find((x) => x.subject === subject && x.kind === kind);
@@ -136,18 +141,33 @@ export function planCustomFields(db: Db, o: { reserved: Record<CfSubject, Set<st
  *  Microsoft Project's own files, writes and reads for it), unlike a number field's plain value. */
 export const costFromMsp = (text: number) => text / 100;
 
-/** The value a P6 custom field holds on a row, as the text of the Microsoft Project element (undefined: none). `date` formats a P6 date. */
-export function valueReader(db: Db, fields: CfField[], date: (s: string) => string): (f: CfField, fk: string) => string | undefined {
+/** The size of a Microsoft Project Text custom field: 255 characters. It is Microsoft Project's field size, not a limit of ours: a longer
+ *  value is written whole, the file holds all of it, and the save's notes say Microsoft Project shows only the first 255. */
+export const MSP_TEXT_FIELD_SIZE = 255;
+
+/** The value a P6 custom field holds on a row, as the text of the Microsoft Project element (undefined: none). `date` formats a P6 date.
+ *  The reader's `long` counts, by field, the text values it gave out that are longer than MSP_TEXT_FIELD_SIZE. */
+export function valueReader(db: Db, fields: CfField[], date: (s: string) => string): ((f: CfField, fk: string) => string | undefined) & { long: Map<CfField, number> } {
+  const long = new Map<CfField, number>();
   const byType = new Map<string, Map<string, Row>>(fields.map((f) => [f.type.udf_type_id, new Map<string, Row>()]));
   for (const v of rows(db, 'UDFVALUE')) byType.get(v.udf_type_id)?.set(v.fk_id, v);
   const codes = new Map(rows(db, 'UDFCODE').map((c) => [c.udf_code_id, c.short_name || c.udf_code_name]));
-  return (f, fk) => {
+  const read = (f: CfField, fk: string) => {
     const v = byType.get(f.type.udf_type_id)?.get(fk);
     if (!v) return undefined;
     const t = f.type.logical_data_type;
     const n = v.udf_number !== '' && Number.isFinite(Number(v.udf_number)) ? v.udf_number : '';
     const x = f.kind === 'Number' ? n : f.kind === 'Cost' ? (n === '' ? '' : String(Math.round(Number(n) * 100)))
       : f.kind === 'Text' ? (t === 'FT_CODE' ? (v.udf_code_id ? codes.get(v.udf_code_id) ?? '' : '') : v.udf_text ?? '') : date(v.udf_date ?? '');
+    if (f.kind === 'Text' && typeof x === 'string' && x.length > MSP_TEXT_FIELD_SIZE && [...x].length > MSP_TEXT_FIELD_SIZE) long.set(f, (long.get(f) ?? 0) + 1);
     return x === '' || x == null ? undefined : x;
   };
+  return Object.assign(read, { long });
+}
+
+/** The save's note for the text values longer than a Microsoft Project Text field holds (none: undefined). */
+export function longTextNote(long: Map<CfField, number>): string | undefined {
+  if (!long.size) return undefined;
+  const list = [...long].map(([f, n]) => `${f.subject === 'Task' ? 'activity' : 'resource'} "${f.alias}" (${n} value${n === 1 ? '' : 's'})`).join(', ');
+  return `Custom field text longer than ${MSP_TEXT_FIELD_SIZE} characters: ${list}. Microsoft Project's Text custom fields hold ${MSP_TEXT_FIELD_SIZE} characters, so it shows the first ${MSP_TEXT_FIELD_SIZE} of each of these values; the file holds the whole value and nothing was cut.`;
 }

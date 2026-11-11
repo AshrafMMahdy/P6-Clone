@@ -9,6 +9,16 @@
 - `Custom fields NOT carried ...: project / WBS / resource assignment / activity expense / role custom fields "..." (<why>).` Those subjects have no Microsoft Project custom fields the clone can use.
 - `Custom fields written as Microsoft Project Number fields: activity "..." (integer ...)` and `... Text fields: ... (indicator / code fields ...)`: the type has no Microsoft Project kind of its own, so it opens again as number / text.
 - On open, an info finding `MSP_CUSTOM_FIELD_KIND` names the aliased flag, duration and outline-code fields, which stay in the file untouched.
+- On open, an info finding `MSP_CUSTOM_FIELD_SUMMARY` when summary tasks (or the project summary task) carry custom field values: it names the fields and how many summary tasks carry values, and says they stay in the Microsoft Project file but are not in the P6 data, so an XER / P6 XML made from it does not have them. Summary tasks are WBS elements here; no WBS mapping was built.
+- On open, an info finding `MSP_CUSTOM_FIELD_UNNAMED` names the fields that were read under their Microsoft Project field name (for example `activity Text8`) because the file gives them no alias.
+- `Custom field text longer than 255 characters: activity "Long" (2 values). Microsoft Project's Text custom fields hold 255 characters, so it shows the first 255 of each of these values; the file holds the whole value and nothing was cut.` (the 255 is Microsoft Project's field size, the constant `MSP_TEXT_FIELD_SIZE`, not a limit of the clone's).
+- `Custom field "Room": the value on activity "A1010" was edited, so it is written as a plain value; the lookup-table link the file held for it (ValueGUID) was dropped.` In a customer's file saved in place, the custom field elements of a task whose value did not change go back exactly as the file had them (lookup links included); only an edited field's element is made anew.
+
+**Which fields get a slot (order).** (1) fields read from the file keep their slot; (2) fields with a value in the project being written, in UDF type ID order; (3) only when writing a NEW file, declared fields with no value, in ID order, while slots remain. A customer's file saved in place gets no definition of a field that has no value in that project, and says nothing of it. What gets no slot in (2) or (3) is named in the first note above.
+
+**Number types.** Every `FT_FLOAT*` P6 type is written as a Number field. An integer field comes back from Microsoft Project as a number field; the schedule reasoner's "WHIQ leveling rank" check accepts a number field as well as an integer one (any other type is still refused; a missing one is still created as integer).
+
+**Aliases.** A customer's alias is written back as it was unless the user renamed the field (two aliases that differ only by case no longer get a `(Number1)` suffix in the file).
 
 **The platform's own note must be updated when this release is pinned:** the note that "a Microsoft Project XML file written by the P6 clone does not carry ... custom fields ..." is no longer true. It carries them, except what the notes above name (more fields of a kind than the format has slots; project, WBS, assignment, expense and role fields; integer, indicator and code fields come back as number / text).
 

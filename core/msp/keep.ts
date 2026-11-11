@@ -95,7 +95,7 @@ export function mergeKids(orig: [string, string | null][], ours: [string, string
 }
 
 /** What lies in other tables, looked up once per file (links per activity, rates, WBS roots). */
-export interface KeepCtx { preds: Map<string, string>; rates: Map<string, Row>; roots: Map<string, string>; udfs: Map<string, string> }
+export interface KeepCtx { preds: Map<string, string>; rates: Map<string, Row>; roots: Map<string, string>; udfs: Map<string, string>; udfOf: Map<string, [typeId: string, value: string][]> }
 export function keepCtx(db: Db): KeepCtx {
   const uid = new Map((db.tables.TASK?.rows ?? []).map((t) => [t.task_id, t._msp_uid || t.task_id]));
   const by = new Map<string, string[]>();
@@ -104,18 +104,18 @@ export function keepCtx(db: Db): KeepCtx {
   for (const x of db.tables.RSRCRATE?.rows ?? []) if (!rates.has(x.rsrc_id)) rates.set(x.rsrc_id, x);
   // the custom field values of each activity and resource (a change of one rewrites that element's custom field values)
   const udfOf = new Map((db.tables.UDFTYPE?.rows ?? []).filter((u) => u.table_name === 'TASK' || u.table_name === 'RSRC').map((u) => [u.udf_type_id, u.table_name]));
-  const udfs = new Map<string, string[]>();
-  for (const v of db.tables.UDFVALUE?.rows ?? []) { const t = udfOf.get(v.udf_type_id); if (!t) continue; const key = `${t}|${v.fk_id}`, x = `${v.udf_type_id}=${v.udf_text || v.udf_number || v.udf_date || v.udf_code_id || ''}`, l = udfs.get(key); if (l) l.push(x); else udfs.set(key, [x]); }
-  return { preds: new Map([...by].map(([k, l]) => [k, l.sort().join(',')])), udfs: new Map([...udfs].map(([k, l]) => [k, l.sort().join('|')])), rates, roots: new Map((db.tables.PROJWBS?.rows ?? []).filter((w) => w.proj_node_flag === 'Y').map((w) => [w.proj_id, w.wbs_name])) };
+  const udfs = new Map<string, string[]>(), udfBy = new Map<string, [string, string][]>();
+  for (const v of db.tables.UDFVALUE?.rows ?? []) { const t = udfOf.get(v.udf_type_id); if (!t) continue; const key = `${t}|${v.fk_id}`, x = `${v.udf_type_id}=${v.udf_text || v.udf_number || v.udf_date || v.udf_code_id || ''}`, l = udfs.get(key); if (l) l.push(x); else udfs.set(key, [x]); const w = udfBy.get(key); if (w) w.push([v.udf_type_id, x]); else udfBy.set(key, [[v.udf_type_id, x]]); }
+  return { preds: new Map([...by].map(([k, l]) => [k, l.sort().join(',')])), udfs: new Map([...udfs].map(([k, l]) => [k, l.sort().join('|')])), rates, roots: new Map((db.tables.PROJWBS?.rows ?? []).filter((w) => w.proj_node_flag === 'Y').map((w) => [w.proj_id, w.wbs_name])), udfOf: udfBy };
 }
 
 /** The values an element of a row is made from: the row, plus what lies in other tables (rates, the WBS root, links). */
 export function snapshotOf(table: string, r: Row, k: KeepCtx): Record<string, string> {
   const s: Record<string, string> = {};
   for (const [f, v] of Object.entries(r)) if (!f.startsWith('_')) s[f] = v;
-  if (table === 'RSRC') { const rate = k.rates.get(r.rsrc_id); s['~max'] = rate?.max_qty_per_hr ?? ''; s['~cost'] = rate?.cost_per_qty ?? ''; s['~udf'] = k.udfs.get(`RSRC|${r.rsrc_id}`) ?? ''; }
+  if (table === 'RSRC') { const rate = k.rates.get(r.rsrc_id); s['~max'] = rate?.max_qty_per_hr ?? ''; s['~cost'] = rate?.cost_per_qty ?? ''; s['~udf'] = k.udfs.get(`RSRC|${r.rsrc_id}`) ?? ''; for (const [id, x] of k.udfOf.get(`RSRC|${r.rsrc_id}`) ?? []) s[`~udf:${id}`] = x; }
   if (table === 'PROJECT') s['~title'] = k.roots.get(r.proj_id) ?? '';
-  if (table === 'TASK') { s['~preds'] = k.preds.get(r.task_id) ?? ''; s['~udf'] = k.udfs.get(`TASK|${r.task_id}`) ?? ''; }
+  if (table === 'TASK') { s['~preds'] = k.preds.get(r.task_id) ?? ''; s['~udf'] = k.udfs.get(`TASK|${r.task_id}`) ?? ''; for (const [id, x] of k.udfOf.get(`TASK|${r.task_id}`) ?? []) s[`~udf:${id}`] = x; }
   return s;
 }
 

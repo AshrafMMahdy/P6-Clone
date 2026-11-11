@@ -82,7 +82,7 @@ export interface MAssign {
 
 /** A Microsoft Project custom field of a task or resource that becomes a P6 custom field (custom-fields.ts): its FieldID, its
  *  P6 name (the alias, else its Microsoft Project name), and whether the file defines it (a field with values and no definition is not). */
-export interface MCustom { fieldId: string; subject: CfSubject; kind: CfKind; name: string; defined: boolean }
+export interface MCustom { fieldId: string; subject: CfSubject; kind: CfKind; name: string }
 
 export interface MProject {
   name: string;
@@ -553,7 +553,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
   for (const c of m.custom ?? []) {
     const id = String(udfType.size + 1);
     udfType.set(c.fieldId, id);
-    push('UDFTYPE', { udf_type_id: id, table_name: c.subject === 'Task' ? 'TASK' : 'RSRC', udf_type_name: `user_field_${id}`, udf_type_label: c.name, logical_data_type: TYPE_OF_KIND[c.kind], super_flag: 'N', indicator_expression: '', summary_indicator_expression: '', export_flag: 'Y', _msp_field: c.fieldId, _msp_def: c.defined ? 'Y' : '' });
+    push('UDFTYPE', { udf_type_id: id, table_name: c.subject === 'Task' ? 'TASK' : 'RSRC', udf_type_name: `user_field_${id}`, udf_type_label: c.name, logical_data_type: TYPE_OF_KIND[c.kind], super_flag: 'N', indicator_expression: '', summary_indicator_expression: '', export_flag: 'Y', _msp_field: c.fieldId, _msp_name: c.name });
   }
   if (udfType.size) {
     const kindOf = new Map((m.custom ?? []).map((c) => [c.fieldId, c.kind]));

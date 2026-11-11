@@ -26,9 +26,9 @@ export function fieldChange(db: Db, task: Row, project: string | undefined, from
 }
 const money = (v: number) => r2(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
 
-/** The UDF data type each field needs, as add_udf names it, and the logical types of the file that hold it. */
+/** The UDF data type each field needs, as add_udf names it (made as that when it does not exist), and the logical types of the file that hold it. */
 const NEEDS: Record<keyof typeof FIELDS, { type: 'number' | 'integer' | 'text'; is: RegExp }> = {
-  original: { type: 'number', is: /^FT_FLOAT/ }, change: { type: 'number', is: /^FT_FLOAT/ }, note: { type: 'text', is: /^FT_TEXT$/ }, rank: { type: 'integer', is: /^FT_INT$/ },
+  original: { type: 'number', is: /^FT_FLOAT/ }, change: { type: 'number', is: /^FT_FLOAT/ }, note: { type: 'text', is: /^FT_TEXT$/ }, rank: { type: 'integer', is: /^(FT_INT$|FT_FLOAT)/ }, // (a whole-number rank fits a number field exactly: an integer field comes back from Microsoft Project as one)
 };
 const typeOf = (db: Db, label: string) => rows(db, 'UDFTYPE').find((u) => u.table_name === 'TASK' && u.udf_type_label.toLowerCase() === label.toLowerCase());
 const typeWords = (logical: string) => (/^FT_FLOAT/.test(logical) ? 'number' : logical === 'FT_INT' ? 'integer' : logical === 'FT_TEXT' ? 'text' : logical === 'FT_MONEY' ? 'cost' : /DATE/.test(logical) ? 'date' : logical === 'FT_STATICTYPE' ? 'indicator' : logical.replace(/^FT_/, '').toLowerCase());

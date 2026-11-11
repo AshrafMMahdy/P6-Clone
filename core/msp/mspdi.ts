@@ -1,6 +1,6 @@
 // Microsoft Project XML (MSPDI, namespace http://schemas.microsoft.com/project) import/export.
 // Elements are written in the order of the MSPDI schema (mspdi_pj12.xsd), which Microsoft Project enforces.
-import type { Db, Row } from '../db.ts';
+import { rows, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { parseClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../dates.ts';
@@ -9,7 +9,7 @@ import { isLegacyLayout, p6num } from '../schedule/cpm.ts';
 import { baselineNumbers, baselineXml, importMspBaselines, scanTaskBaselines, type FoundBaselines } from './baselines.ts';
 import { ASG_DEPS, COLLECTIONS, ORDER, PROJECT_DEPS, RES_DEPS, SUMMARY_DEPS, TASK_DEPS, changedSince, keepCtx, mergeKids, snapshotKept, type Ghosts, type Kept } from './keep.ts';
 import { defaultShifts, emptyTask, linkKey, num, projectFromDb, projectToDb, toP6Date, type MCustom, type MPred, type MAssign, type MCal, type MProject, type MRes, type MTask, type P6Extra, type RelType } from './shared.ts';
-import { CF_KINDS, CF_SLOTS, planCustomFields, slotName, slotOfField, valueReader, type CfSubject } from './custom-fields.ts';
+import { CF_KINDS, CF_SLOTS, longTextNote, planCustomFields, slotName, slotOfField, valueReader, type CfSubject } from './custom-fields.ts';
 
 export const MSPDI_NS = 'http://schemas.microsoft.com/project';
 
@@ -140,6 +140,16 @@ function projectReader(findings: Finding[], src: string | Chunked) {
   // custom fields of the file that are not the clone's own (custom-fields.ts): the definitions of the slots it carries (FieldID -> alias),
   // the FieldIDs with a value, every FieldID the file has, and the aliased fields of kinds P6 has no field type for
   const cfDefs = new Map<string, string>(), cfValued = new Set<string>(), cfUsed = new Set<string>(), cfUnread: string[] = [];
+  // custom field values on summary tasks (and the project summary task): not activities, so not read; they stay in the file
+  const sumFields = new Map<string, number>(), sumTasks = new Set<string>();
+  const summaryValues = (eas: XNode[], uid: string) => {
+    for (const e of eas) {
+      const fid = val(e, 'FieldID');
+      if (extKey.has(fid) || slotOfField(fid)?.subject !== 'Task' || !(child(e, 'Value')?.text ?? '').trim()) continue;
+      sumFields.set(fid, (sumFields.get(fid) ?? 0) + 1);
+      sumTasks.add(uid);
+    }
+  };
   let p6rules: { ver: string; legacy: boolean; known: boolean } | null = null;
   const calendars: MCal[] = [];
   const head = (p: XNode) => {
@@ -202,7 +212,7 @@ function projectReader(findings: Finding[], src: string | Chunked) {
     for (const e of eas) cfUsed.add(val(e, 'FieldID'));
     const seq = num(val(t, 'ID')) ?? i;
     // the project summary task (UID 0) and blank rows are not activities: kept as they are, in their place
-    if (flag(val(t, 'IsNull')) || uid === '0' || val(t, 'OutlineLevel') === '0') { if (uid) ghosts.tasks.push({ seq, uid, xml: raw(t) }); return; }
+    if (flag(val(t, 'IsNull')) || uid === '0' || val(t, 'OutlineLevel') === '0') { if (uid) { ghosts.tasks.push({ seq, uid, xml: raw(t) }); if (!flag(val(t, 'IsNull'))) summaryValues(eas, uid); } return; }
     if (!uid) return;
     const m = emptyTask(uid, num(val(t, 'ID')) ?? tasks.length + 1);
     m.keep = { kids: kidsOf(t), xml: '', seq, id: val(t, 'ID') };
@@ -235,6 +245,7 @@ function projectReader(findings: Finding[], src: string | Chunked) {
     m.totalSlackHrs = ts == null ? null : ts / 600;
     m.freeSlackHrs = fs == null ? null : fs / 600;
     m.critical = val(t, 'Critical') ? flag(val(t, 'Critical')) : null;
+    if (m.summary) summaryValues(eas, uid);
     for (const e of eas) {
       const fid = val(e, 'FieldID'), k = extKey.get(fid);
       if (k) { if (k !== 'rsrcType') m.extra[k] = val(e, 'Value'); continue; }
@@ -326,16 +337,19 @@ function projectReader(findings: Finding[], src: string | Chunked) {
   // the custom fields that become P6 custom fields: the file's aliased ones in its order, then those with values and no alias, each under its
   // alias (else its Microsoft Project name, as Text7); two of one subject never share a name
   const custom: MCustom[] = [], names = new Set<string>();
-  const add = (fieldId: string, alias: string, defined: boolean) => {
+  const add = (fieldId: string, alias: string) => {
     const { subject, kind, n } = slotOfField(fieldId)!;
     let name = alias || slotName(kind, n);
     if (names.has(`${subject}|${name.toLowerCase()}`)) name = `${name} (${slotName(kind, n)})`;
     names.add(`${subject}|${name.toLowerCase()}`);
-    custom.push({ fieldId, subject, kind, name, defined });
+    custom.push({ fieldId, subject, kind, name });
   };
-  for (const [fid, alias] of cfDefs) if (alias) add(fid, alias, true);
+  for (const [fid, alias] of cfDefs) if (alias) add(fid, alias);
   const order = (['Task', 'Resource'] as CfSubject[]).flatMap((s) => CF_KINDS.flatMap((k) => CF_SLOTS[s][k].map(String)));
-  for (const fid of order) if (!cfDefs.get(fid) && cfValued.has(fid)) add(fid, '', cfDefs.has(fid));
+  const unnamed: string[] = [];
+  for (const fid of order) if (!cfDefs.get(fid) && cfValued.has(fid)) { add(fid, ''); unnamed.push(`${custom[custom.length - 1].subject === 'Task' ? 'activity' : 'resource'} ${custom[custom.length - 1].name}`); }
+  if (unnamed.length) findings.push({ severity: 'info', code: 'MSP_CUSTOM_FIELD_UNNAMED', message: `${unnamed.length} Microsoft Project custom field(s) have values but no name (alias) in the file, so they were read as P6 custom fields under their Microsoft Project field name (the name Microsoft Project itself shows): ${unnamed.join(', ')}.`, p6: 'P6 custom fields always have a name; a Microsoft Project custom field without an alias is shown under its field name.' });
+  if (sumFields.size) findings.push({ severity: 'info', code: 'MSP_CUSTOM_FIELD_SUMMARY', message: `Custom field values on summary tasks were not read as P6 custom fields: ${[...sumFields].map(([fid, n]) => { const { kind, n: i } = slotOfField(fid)!; return `${cfDefs.get(fid) || slotName(kind, i)} (${slotName(kind, i)}, ${n} value${n === 1 ? '' : 's'})`; }).join(', ')} on ${sumTasks.size} summary task(s) (the project summary task counts as one). They stay in the Microsoft Project file when it is saved again as Microsoft Project XML, but they are not in the P6 data, so an XER or P6 XML made from it does not have them.`, p6: 'P6 activities are the non-summary tasks; a summary task is a WBS element, which the clone does not carry custom values on.' });
   if (cfUnread.length) findings.push({ severity: 'info', code: 'MSP_CUSTOM_FIELD_KIND', message: `${cfUnread.length} Microsoft Project custom field(s) of a kind P6 has no custom field type for (flag, duration, outline code) were not read as P6 custom fields: ${cfUnread.join(', ')}. They stay in the file as they are when it is saved again as Microsoft Project XML.`, p6: 'P6 maps Microsoft Project custom fields only through a template set up by hand; the clone reads those with a P6 equivalent (text, number, cost, date) as P6 custom fields.' });
 
   const sip = val(p, 'SplitsInProgressTasks');
@@ -464,12 +478,34 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   const rawDefs = m.keep?.kids.find((x) => x[0] === 'ExtendedAttributes')?.[1] ?? null;
   const oldDefs = rawDefs ? parseXml(rawDefs).children[0].children.filter((c) => c.name === 'ExtendedAttribute').map((c) => ({ fid: val(c, 'FieldID'), alias: val(c, 'Alias'), name: val(c, 'FieldName'), xml: rawDefs.slice(c.s, c.e) })) : [];
   const fileHas = new Set([...(m.keep?.cfUsed ?? []), ...oldDefs.map((d) => d.fid)]);
-  const cf = planCustomFields(db, { reserved: { Task: new Set(fromMsp ? [] : [...TASK_TEXT.map((x) => x[1]), RULES_FIELD[0]]), Resource: new Set(fromMsp ? [] : [RES_TYPE_FIELD[0]]) }, used: fileHas, own: ownName });
+  // which P6 custom fields have a value in the project being written (a customer's file saved in place gets no definition of one that has none)
+  const written = { TASK: new Set(m.tasks.flatMap((t) => (t.row?.task_id ? [t.row.task_id] : []))), RSRC: new Set(m.resources.flatMap((r) => (r.row?.rsrc_id ? [r.row.rsrc_id] : []))) };
+  const typeTable = new Map(rows(db, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
+  const valued = new Set(rows(db, 'UDFVALUE').filter((v) => (v.udf_text || v.udf_number || v.udf_date || v.udf_code_id) && written[typeTable.get(v.udf_type_id) as 'TASK' | 'RSRC']?.has(v.fk_id)).map((v) => v.udf_type_id));
+  const cf = planCustomFields(db, { valued, newFile: !fromMsp, reserved: { Task: new Set(fromMsp ? [] : [...TASK_TEXT.map((x) => x[1]), RULES_FIELD[0]]), Resource: new Set(fromMsp ? [] : [RES_TYPE_FIELD[0]]) }, used: fileHas, own: ownName });
   for (const n of cf.notes) opts.report?.push(n);
   const cfRead = new Set(m.keep?.cfRead ?? []), cfCarried = new Set(cf.fields.map((f) => f.fieldId));
   const cfValue = valueReader(db, cf.fields, xmlDate);
   const cfTask = cf.fields.filter((f) => f.subject === 'Task'), cfRes = cf.fields.filter((f) => f.subject === 'Resource');
-  const cfValues = (fields: typeof cf.fields, fk: string): [string, string][] => fields.flatMap((f) => { const v = cfValue(f, fk); return v == null ? [] : [['ExtendedAttribute', `<ExtendedAttribute><FieldID>${f.fieldId}</FieldID><Value>${esc(v)}</Value></ExtendedAttribute>`] as [string, string]]; });
+  // A file's own element of a custom field whose value did not change goes back untouched (a lookup-table link, <ValueGUID>, and any other
+  // child stays); only the element of a field whose value changed is made anew, and what it drops of the file's element is named in the notes.
+  const dropped = new Map<(typeof cf.fields)[number], { row: string; what: string[] }[]>();
+  const cfValues = (fields: typeof cf.fields, fk: string, who: { table: 'TASK' | 'RSRC'; row: Row; kept?: Kept; label: string }): [string, string][] => {
+    const own = new Map<string, string>();
+    for (const [n, x] of who.kept?.kids ?? []) if (n === 'ExtendedAttribute' && x) { const id = /<FieldID>\s*(\d+)\s*<\/FieldID>/.exec(x)?.[1]; if (id) own.set(id, x); }
+    const ch = changedSince(who.table, who.row, k), out: [string, string][] = [];
+    for (const f of fields) {
+      const was = own.get(f.fieldId);
+      if (was != null && !ch([`~udf:${f.type.udf_type_id}`])) { out.push(['ExtendedAttribute', was]); continue; }
+      if (was != null) {
+        const lost = parseXml(was).children[0].children.map((c) => c.name).filter((n) => n !== 'FieldID' && n !== 'Value');
+        if (lost.length) { const l = dropped.get(f) ?? []; l.push({ row: who.label, what: lost }); dropped.set(f, l); }
+      }
+      const v = cfValue(f, fk);
+      if (v != null) out.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${f.fieldId}</FieldID><Value>${esc(v)}</Value></ExtendedAttribute>`]);
+    }
+    return out;
+  };
   const cfDef = (f: (typeof cf.fields)[number]) => `<ExtendedAttribute><FieldID>${f.fieldId}</FieldID><FieldName>${f.fieldName}</FieldName><Alias>${esc(f.alias)}</Alias></ExtendedAttribute>`;
   // a file's own custom field elements go back as they were, except the P6 custom fields read from it (written anew from the fields)
   const ownIds = p6ext ? ourField : new Set<string>();
@@ -534,14 +570,17 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
     // takes its new name, and the fields added since come after them
     const byId = new Map(cf.fields.map((f) => [f.fieldId, f]));
     const out: string[] = [];
+    // the name the field was given when it was read: the file's own alias (or its Microsoft Project name), with a suffix where two aliases
+    // differ only by case; only a name the user changed since is written back
+    const readName = (f: (typeof cf.fields)[number], alias: string) => f.type._msp_name || alias || f.fieldName;
     for (const d of oldDefs) {
       const f = byId.get(d.fid);
       if (!f && cfRead.has(d.fid)) { defsChanged = true; continue; }
-      if (f && cfRead.has(d.fid) && f.alias !== (d.alias || f.fieldName)) { defsChanged = true; out.push(/<Alias>/.test(d.xml) ? d.xml.replace(/<Alias>[\s\S]*?<\/Alias>/, `<Alias>${esc(f.alias)}</Alias>`) : d.xml.replace(/<\/ExtendedAttribute>\s*$/, `<Alias>${esc(f.alias)}</Alias></ExtendedAttribute>`)); continue; }
+      if (f && cfRead.has(d.fid) && f.alias !== readName(f, d.alias)) { defsChanged = true; out.push(/<Alias>/.test(d.xml) ? d.xml.replace(/<Alias>[\s\S]*?<\/Alias>/, `<Alias>${esc(f.alias)}</Alias>`) : d.xml.replace(/<\/ExtendedAttribute>\s*$/, `<Alias>${esc(f.alias)}</Alias></ExtendedAttribute>`)); continue; }
       out.push(d.xml);
     }
     const have = new Set(oldDefs.map((d) => d.fid));
-    for (const f of cf.fields) if (!have.has(f.fieldId) && (!cfRead.has(f.fieldId) || f.alias !== f.fieldName)) { out.push(cfDef(f)); defsChanged = true; }
+    for (const f of cf.fields) if (!have.has(f.fieldId) && (!cfRead.has(f.fieldId) || f.alias !== readName(f, ''))) { out.push(cfDef(f)); defsChanged = true; }
     if (defsChanged) proj.push(['ExtendedAttributes', `<ExtendedAttributes>${out.join('')}</ExtendedAttributes>`]);
   }
 
@@ -656,7 +695,7 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
         for (const l of t.preds) if (!done.has(l.uid)) cur.push(['PredecessorLink', ourLink(l)]);
       } else for (const l of t.preds) cur.push(['PredecessorLink', ourLink(l)]);
       if (p6ext) for (const [key, id] of TASK_TEXT) { const v = t.extra[key]; if (v) cur.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${id}</FieldID><Value>${esc(v)}</Value></ExtendedAttribute>`]); }
-      if (t.row) cur.push(...cfValues(cfTask, t.row.task_id));
+      if (t.row) cur.push(...cfValues(cfTask, t.row.task_id, { table: 'TASK', row: t.row, kept: t.keep, label: t.row.task_code }));
     } else {
       el('CalendarUID', -1);
     }
@@ -709,7 +748,7 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
     el('OvertimeRateFormat', 2);
     el('CalendarUID', resCal.get(r.uid));
     if (r.p6Type && p6ext) cur.push(['ExtendedAttribute', `<ExtendedAttribute><FieldID>${RES_TYPE_FIELD[0]}</FieldID><Value>${esc(r.p6Type)}</Value></ExtendedAttribute>`]);
-    if (r.row) cur.push(...cfValues(cfRes, r.row.rsrc_id));
+    if (r.row) cur.push(...cfValues(cfRes, r.row.rsrc_id, { table: 'RSRC', row: r.row, kept: r.keep, label: r.name }));
     const ch = r.row ? changedSince('RSRC', r.row, k) : () => true;
     return element('Resource', r.keep, r.row, 'RSRC', { ...RES_DEPS, ...(reusedCal.has(r.uid) ? { CalendarUID: () => false } : {}), ExtendedAttribute: () => (p6ext && ch(['rsrc_type'])) || ch(['~udf']) }, notOurs);
   };
@@ -739,6 +778,9 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   const keptAsg = ghosts.assignments.filter((g) => { const tu = tag(g.xml, 'TaskUID'); return !tu || (taskUids.has(tu) && !(tag(g.xml, 'ResourceUID') === '-65535' && assigned.has(tu))); });
   { const r = withGhosts(m.assignments.map((a, i) => ({ seq: seqOf(a, i), xml: () => asgXml(a) })), keptAsg); r.unshift('<Assignments>'); r.push('</Assignments>'); proj.push(['Assignments', section(r)]); }
 
+  for (const [f, l] of dropped) opts.report?.push(`Custom field "${f.alias}": the value on ${l.map((x) => `${f.subject === 'Task' ? 'activity' : 'resource'} "${x.row}"`).join(', ')} was edited, so it is written as a plain value; the lookup-table link the file held for it (${[...new Set(l.flatMap((x) => x.what))].join(', ')}) was dropped.`);
+  const longNote = longTextNote(cfValue.long);
+  if (longNote) opts.report?.push(longNote);
   if (followed.length) opts.report?.push(`This file has no WBS code mask, so Microsoft Project's WBS code is the outline number: the WBS of ${followed.length} moved task(s) follows the new place: ${followed.slice(0, 20).join('; ')}.`);
   const body = m.keep && m.row ? mergeKids(m.keep.kids, proj, { ...PROJECT_DEPS, ExtendedAttributes: () => defsChanged }, changedSince('PROJECT', m.row, k), ORDER.Project) : proj.map((x) => x[1]).join('\n');
   put(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Project xmlns="${MSPDI_NS}">\n`);
