@@ -205,4 +205,11 @@ test('a percent above 0 with no actual start is progress: the task starts at its
   assert.equal(f.length, 1); assert.match(f[0].message, /"Partitions" is 40 % complete but has no actual start; actual start set to its start, /);
   const { reasonerRefusal } = await import('../core/analysis/whiq-fields.ts');
   assert.equal(reasonerRefusal(db, rows(db, 'PROJECT').map((p) => p.proj_id))?.code, 'schedule_in_progress');
+  // a milestone with a percent and no dates is complete (no part-done milestone), with no such finding
+  const hm = src.indexOf('<Name>Handover</Name>'), hp = src.indexOf('<PercentComplete>0</PercentComplete>', hm);
+  const m = parseMspdi(src.slice(0, hp) + '<PercentComplete>40</PercentComplete>' + src.slice(hp + '<PercentComplete>0</PercentComplete>'.length));
+  const h = rows(m.db, 'TASK').find((x) => x.task_name === 'Handover')!;
+  assert.match(h.task_type, /Mile/, 'Handover is a milestone');
+  assert.equal(h.status_code, 'TK_Complete');
+  assert.equal(m.findings.filter((x) => x.code === 'MSP_PERCENT_WITHOUT_START').length, 0);
 });

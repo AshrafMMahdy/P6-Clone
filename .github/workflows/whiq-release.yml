@@ -137,9 +137,15 @@ jobs:
             echo "P6CLONE_CHROMIUM=C:/Program Files/Google/Chrome/Application/chrome.exe" >> "$GITHUB_ENV"
             echo "P6CLONE_FFMPEG=C:/ProgramData/chocolatey/bin/ffmpeg.exe" >> "$GITHUB_ENV"
           else
-            command -v ffmpeg > /dev/null || (sudo apt-get update -q && sudo apt-get install -y -q ffmpeg)
+            # the runner's own ffmpeg when it has one, else a static build from npm (ffmpeg-static), not apt: on 2026-11-11 the
+            # runner could not resolve its Ubuntu mirror for hours and the install stalled every release
+            if command -v ffmpeg > /dev/null; then echo "P6CLONE_FFMPEG=$(command -v ffmpeg)" >> "$GITHUB_ENV"; else
+              npm install --prefix "$RUNNER_TEMP/ffmpeg" --no-save --no-audit --no-fund ffmpeg-static@5.3.0
+              ff="$(cd "$RUNNER_TEMP/ffmpeg" && node -p "require('ffmpeg-static')")"
+              "$ff" -version | head -1
+              echo "P6CLONE_FFMPEG=$ff" >> "$GITHUB_ENV"
+            fi
             echo "P6CLONE_CHROMIUM=$(command -v google-chrome || command -v chromium)" >> "$GITHUB_ENV"
-            echo "P6CLONE_FFMPEG=$(command -v ffmpeg)" >> "$GITHUB_ENV"
           fi
           # record WebM as Chromium for Testing does, so the smoke covers the MP4 conversion with ffmpeg
           echo "P6CLONE_RECORD_WEBM=1" >> "$GITHUB_ENV"

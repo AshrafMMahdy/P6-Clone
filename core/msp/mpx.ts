@@ -98,6 +98,7 @@ function readMpx(text: string, findings: Finding[]): MProject {
   const calByName = new Map<string, MCal>();
   let cal: MCal | null = null;
   let taskModel: number[] | null = null, resModel: number[] | null = null;
+  let noUid = 0; // tasks the file gives no Unique ID: identified by their ID (row number) instead
   let task: MTask | null = null, res: MRes | null = null;
   let marked = false, projCalName = '';
   const resCalName = new Map<MRes, string>();
@@ -223,6 +224,7 @@ function readMpx(text: string, findings: Finding[]): MProject {
         const mod = taskModel;
         const v = (n: number) => { const i = mod.indexOf(n); return i >= 0 ? f[i + 1] ?? '' : ''; };
         const id = numv(v(TASK_FIELDS.id)) ?? m.tasks.length + 1;
+        if (!v(TASK_FIELDS.uid)) noUid++;
         const t = emptyTask(v(TASK_FIELDS.uid) || String(id), id);
         const F = TASK_FIELDS;
         t.name = v(F.name); t.wbs = v(F.wbs); t.outline = v(F.outline);
@@ -278,6 +280,7 @@ function readMpx(text: string, findings: Finding[]): MProject {
   m.minutesPerDay = Math.round(hpd * 60);
   m.minutesPerWeek = Math.round(hpw * 60);
   m.splitsInProgress = splits;
+  if (noUid) findings.push({ severity: 'warning', code: 'MPX_NO_UNIQUE_ID', table: 'TASK', message: `${noUid === m.tasks.length ? 'The tasks of this MPX file have' : `${noUid} task(s) of this MPX file have`} no Unique ID; each is identified by its ID, which is its row number in Microsoft Project and changes when tasks are inserted or removed there.`, p6: 'P6 needs a stable key to match an activity between two versions of a file.' });
   return m;
 }
 

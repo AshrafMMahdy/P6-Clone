@@ -364,3 +364,15 @@ test('Microsoft Project task UIDs stay on the activities: source_uid, uid:<UID> 
     assert.ok(rel.includes('114>142') && rel.includes(`142>${u.get('New one')}`));
   }
 });
+
+test('an MPX whose tasks carry no Unique ID says so (MPX_NO_UNIQUE_ID): each task is identified by its ID, its row number; with Unique IDs there is no such finding', () => {
+  const head = ['MPX,Microsoft Project for Windows,4.0,ANSI', '30,Demo,,,,,,,,,,,,,,03/02/26', '60,ID,Name,Outline Level,Duration'];
+  const none = parseMpx([...head, '61,90,1,3,40', '70,1,One,1,5d', '70,2,Two,1,5d'].join('\r\n'));
+  const f = none.findings.filter((x) => x.code === 'MPX_NO_UNIQUE_ID');
+  assert.equal(f.length, 1); assert.equal(f[0].severity, 'warning');
+  assert.match(f[0].message, /^The tasks of this MPX file have no Unique ID; each is identified by its ID, which is its row number/);
+  assert.deepEqual(rows(none.db, 'TASK').map((t) => t._msp_uid), ['1', '2']);
+  const some = parseMpx([...head.slice(0, 2), '60,ID,Unique ID,Name,Outline Level,Duration', '61,90,98,1,3,40', '70,1,101,One,1,5d', '70,2,102,Two,1,5d'].join('\r\n'));
+  assert.equal(some.findings.filter((x) => x.code === 'MPX_NO_UNIQUE_ID').length, 0);
+  assert.deepEqual(rows(some.db, 'TASK').map((t) => t._msp_uid), ['101', '102']);
+});
