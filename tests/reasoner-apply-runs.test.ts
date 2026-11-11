@@ -318,7 +318,6 @@ const FACTS: Record<string, { ops: unknown[]; says: RegExp; direct?: (db: Db) =>
   'an actual start': { ops: [{ op: 'update_activity', id: 'C', actual_start: '2026-06-01' }], says: /1 activity has actual dates or progress/ },
   'an actual finish': { ops: [{ op: 'update_activity', id: 'C', actual_start: '2026-06-01', actual_finish: '2026-06-02' }], says: /1 activity has actual dates or progress/ },
   'percent complete above 0, no dates (physical)': { ops: [{ op: 'set_fields', table: 'TASK', where: { task_code: 'C' }, fields: { complete_pct_type: 'CP_Phys', phys_complete_pct: '25' } }], says: /1 activity has actual dates or progress/ },
-  'percent complete above 0, no dates (duration)': { ops: [{ op: 'set_fields', table: 'TASK', where: { task_code: 'C' }, fields: { remain_drtn_hr_cnt: '16' } }], says: /1 activity has actual dates or progress/ },
   // (the status follows the actual dates in every edit, so a status with no dates is how an imported file can state it: set on the row)
   'status active, no dates': { ops: [], direct: (db) => { rows(db, 'TASK').find((t) => t.task_code === 'C')!.status_code = 'TK_Active'; }, says: /1 activity has actual dates or progress/ },
   'a data date after the planned start': { ops: [{ op: 'set_fields', table: 'PROJECT', all: true, fields: { last_recalc_date: '2026-06-10 08:00' } }], says: /the data date 2026-06-10 is after the planned start 2026-06-01/ },
@@ -340,6 +339,21 @@ for (const [fact, { ops, says }] of Object.entries(FACTS)) {
     assert.equal(crash.err, false, JSON.stringify(crash.d).slice(0, 300));
     assert.equal(crash.d.error, undefined);
     assert.equal((await call('level_resources', { handle, owner_key, dry_run: true })).err, false, 'level_resources takes work in progress');
+  });
+}
+
+/** not progress by the one rule (the platform's import rule, P6's definition by the activity's percent-complete type): the reasoner runs */
+const NOT_PROGRESS: Record<string, Record<string, string>> = {
+  'a Duration type activity not started whose remaining duration is below the original': { complete_pct_type: 'CP_Drtn', remain_drtn_hr_cnt: '16' },
+  'a Duration type activity not started with a physical percent left on it': { complete_pct_type: 'CP_Drtn', phys_complete_pct: '40' },
+  'a Units type activity not started with a physical percent left on it': { complete_pct_type: 'CP_Units', phys_complete_pct: '40' },
+};
+for (const [fact, fields] of Object.entries(NOT_PROGRESS)) {
+  test(`${fact} is not a schedule in progress: no refusal`, async () => {
+    const { handle } = await mcpProject(`NP${Object.keys(NOT_PROGRESS).indexOf(fact)}`, [{ op: 'set_fields', table: 'TASK', where: { task_code: 'C' }, fields }]);
+    const db = (await import('../mcp/runtime.ts')).sessions.get(handle)!.db;
+    for (const [k, v] of Object.entries(fields)) assert.equal(rows(db, 'TASK').find((t) => t.task_code === 'C')![k], v, `${k} is on the row`);
+    assert.equal(reasonerRefusal(db, rows(db, 'PROJECT').map((p) => p.proj_id)), undefined);
   });
 }
 

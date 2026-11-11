@@ -9,7 +9,6 @@
 import { rows, type Db, type Row } from '../db.ts';
 import { dayHours } from '../project/units.ts';
 import { applyOps } from '../project/ops.ts';
-import { percentComplete } from '../cost/rollup.ts';
 import { isWbs } from './common.ts';
 import { baselineProjectIds } from '../progress/baseline.ts';
 
@@ -165,20 +164,20 @@ export function whiqRunOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldRan
 }
 
 // ── the reasoner plans work that has not started only (owner 2026-11-11) ─────────────────────────────────────────────────────────────────────────────
-/** Why the schedule reasoner refuses these projects (undefined: it may run). "In progress" is read as: any activity (not a WBS summary) whose status_code is
- *  not "not started" (TK_NotStart; an empty one is not read), or that has an actual start or an actual finish, or whose percent complete is above 0 — the percent
- *  of its own type as the clone's earned value reads it (percentComplete in core/cost/rollup.ts: physical, duration, units), here without that function's rule
- *  that an activity with no actual start is 0 — or whose physical percent is above 0 whatever its type; OR a project whose data date (last_recalc_date) is after
- *  its planned start (plan_start_date), compared as days, strictly after. */
+/** Why the schedule reasoner refuses these projects (undefined: it may run). "In progress" is read by ONE rule, the same one the White Hat IQ platform's import
+ *  applies to a file (its taskProgress), so a file and the schedule imported from it always get the same answer: an activity (not a WBS summary) whose status is
+ *  in progress or complete (TK_Active, TK_Progress, TK_Complete), or that has an actual start or an actual finish, or whose percent complete is above 0 — the
+ *  percent as P6 defines it for the activity's own percent-complete type: a Duration or Units type activity that has not started is at 0 whatever numbers the
+ *  row holds (a remaining duration below the original is no progress, nor is a physical percent left on it); any other type reads the physical percent (else
+ *  complete_pct). OR a project whose data date (last_recalc_date) is after its planned start (plan_start_date), compared as days, strictly after. */
 export function reasonerRefusal(db: Db, projIds: string[]): { code: 'schedule_in_progress'; message: string; hint: string } | undefined {
-  const baselines = baselineProjectIds(db), inRun = new Set(projIds.filter((id) => !baselines.has(id))), asg = new Map<string, Row[]>();
-  for (const a of rows(db, 'TASKRSRC')) (asg.get(a.task_id) ?? asg.set(a.task_id, []).get(a.task_id)!).push(a);
+  const baselines = baselineProjectIds(db), inRun = new Set(projIds.filter((id) => !baselines.has(id)));
+  const isDate = (v: string | undefined) => !!v && /\d{4}-\d{2}-\d{2}/.test(v), pct = (v: string | undefined) => (v == null || v === '' || !Number.isFinite(Number(v)) ? undefined : Number(v));
   let n = 0;
   for (const t of rows(db, 'TASK')) {
     if (!inRun.has(t.proj_id) || isWbs(t)) continue;
-    // (a duration percent needs a stated remaining duration: an empty one is not "100 % done")
-    const byType = t.complete_pct_type === 'CP_Phys' || t.complete_pct_type === 'CP_Units' || (t.remain_drtn_hr_cnt ?? '') !== '' ? percentComplete({ ...t, act_start_date: t.act_start_date || 'none yet', act_end_date: '' }, asg.get(t.task_id) ?? []) : 0;
-    if ((t.status_code ?? '') !== '' && t.status_code !== 'TK_NotStart' || t.act_start_date || t.act_end_date || byType > 0 || (Number(t.phys_complete_pct) || 0) > 0) n++;
+    const type = (t.complete_pct_type ?? '').trim(), byType = type === 'CP_Drtn' || type === 'CP_Units' ? 0 : pct(t.phys_complete_pct) ?? pct(t.complete_pct) ?? 0;
+    if (t.status_code === 'TK_Complete' || t.status_code === 'TK_Active' || t.status_code === 'TK_Progress' || isDate(t.act_start_date) || isDate(t.act_end_date) || byType > 0) n++;
   }
   const late = rows(db, 'PROJECT').filter((p) => inRun.has(p.proj_id) && p.last_recalc_date && p.plan_start_date && p.last_recalc_date.slice(0, 10) > p.plan_start_date.slice(0, 10))
     .map((p) => `${p.last_recalc_date.slice(0, 10)} is after the planned start ${p.plan_start_date.slice(0, 10)}${inRun.size > 1 ? ` (project ${p.proj_short_name})` : ''}`);
