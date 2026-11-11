@@ -164,3 +164,23 @@ test('a Revit model used daily through the 4D tools (memory hit, never re-opened
     void rvtToIfc;
   });
 });
+
+test('a Revit model reached through cachedModel after a restart (memory emptied) keeps its conversion in use: the .ifc and .json survive a prune 23 hours on', async () => {
+  await withCache(async (dir, prune) => {
+    const { loadModel, cachedModel, releaseModels, fileHash } = await import('../core/bim/model.ts');
+    const { RVT_FORMAT } = await import('../core/bim/rvt.ts');
+    const rvt = join(dir, 'm.rvt'); writeFileSync(rvt, Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.from('not a real Revit file')]));   // an OLE header: isRevit says yes, the conversion is the stand-in beside it
+    const base = join(dir, `${await fileHash(rvt)}-rvt${RVT_FORMAT}`);
+    copyFileSync(FX, `${base}.ifc`); writeFileSync(`${base}.json`, JSON.stringify({ mode: 'test', diagnostics: {}, metadata: {} }));
+    const m = await loadModel(rvt, { geometry: false });
+    assert.equal(m.conversion, base);
+    releaseModels(new Set());   // the process restarted: nothing in memory
+    const old = new Date(Date.now() - 30 * H);
+    for (const x of ['.ifc', '.json', `.ndjson`]) { const p = x === '.ndjson' ? join(dir, readdirSync(dir).find((f) => f.endsWith('.ndjson'))!) : `${base}${x}`; utimesSync(p, old, old); }
+    const again = cachedModel(m.hash);
+    assert.ok(again && again !== m, 'rebuilt from the cached index');
+    assert.equal(again!.conversion, base);
+    assert.equal(prune(Date.now() + 23 * H), 0, 'nothing was old enough to go');
+    for (const x of ['.ifc', '.json']) assert.equal(existsSync(`${base}${x}`), true, `${x} survived`);
+  });
+});

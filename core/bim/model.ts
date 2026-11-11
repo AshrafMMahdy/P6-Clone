@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { chunkBytesOf, keptChunkKey, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type IfcElement, type IfcIndex, type KeptChunk } from './parse.ts';
 import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, newGeomStore, type Extras, type GeomStore } from './element.ts';
 import { elementsByGuid } from './lookup.ts';
@@ -278,7 +278,15 @@ export function cachedModel(hash: string): Model | null {
   const hit = liveHit(cacheName(hash), base);
   if (hit) return hit;
   const c = existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
-  if (c) { touch(base); const m = wrap(hash, c.index, `${base}.tiles`); memory.set(cacheName(hash), m); return m; }
+  if (c) {
+    touch(base);
+    const m = wrap(hash, c.index, `${base}.tiles`);
+    // a Revit model's index was written from its conversion's IFC (<cache>/<hash>-rvtN.ifc), and keeps that path: after a restart the conversion is found again from it, so it is touched with the model (an index of an IFC opened from anywhere else gives none)
+    const conv = resolve(c.index.sourcePath);
+    if (dirname(conv) === resolve(cacheDir()) && /-rvt\d+\.ifc$/.test(conv)) { m.conversion = conv.slice(0, -'.ifc'.length); touchConversion(m.conversion); }
+    memory.set(cacheName(hash), m);
+    return m;
+  }
   return null;
 }
 
