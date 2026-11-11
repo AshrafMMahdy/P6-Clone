@@ -144,3 +144,23 @@ test('a cachedModel memory hit whose tiles folder is gone is dropped (read again
     assert.ok(again.tiles && readManifest(again.tiles), 'loaded again: the tiles are rebuilt');
   });
 });
+
+test('a Revit model used daily through the 4D tools (memory hit, never re-opened) keeps its conversion: liveHit touches the .ifc and .json, so a prune 23 hours on leaves them', async () => {
+  await withCache(async (dir, prune) => {
+    const { loadModel, cachedModel } = await import('../core/bim/model.ts');
+    const { rvtToIfc, RVT_FORMAT } = await import('../core/bim/rvt.ts');
+    const { fileHash } = await import('../core/bim/model.ts');
+    const ifcSrc = join(dir, 'src.ifc'); copyFileSync(FX, ifcSrc);
+    const rvt = join(dir, 'm.rvt'); writeFileSync(rvt, Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.from('not a real Revit file')]));   // an OLE header: isRevit says yes, the conversion is the stand-in beside it
+    const base = join(dir, `${await fileHash(rvt)}-rvt${RVT_FORMAT}`);
+    copyFileSync(FX, `${base}.ifc`); writeFileSync(`${base}.json`, JSON.stringify({ mode: 'test', diagnostics: {}, metadata: {}, confidence: null }));
+    const m = await loadModel(rvt, { geometry: false });
+    assert.equal(m.conversion, base, 'the model knows its conversion');
+    const old = new Date(Date.now() - 30 * H); for (const x of ['.ifc', '.json']) utimesSync(`${base}${x}`, old, old);
+    assert.ok(cachedModel(m.hash) === m, 'a memory hit through a 4D tool');
+    for (const x of ['.ifc', '.json']) assert.ok(Date.now() - statSync(`${base}${x}`).mtimeMs < H, `${x} touched by the memory hit`);
+    const now = Date.now() + 23 * H; prune(now);
+    for (const x of ['.ifc', '.json']) assert.equal(existsSync(`${base}${x}`), true, `${x} survives a prune 23 hours on`);
+    void rvtToIfc;
+  });
+});

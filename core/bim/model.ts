@@ -21,6 +21,8 @@ export interface Model {
   byGuid: Map<string, IfcElement>; bytes: number;
   /** a Revit file (read through IFC) or a Navisworks file (read as it is): what was read */
   source?: RevitSource | NavisworksSource;
+  /** a Revit model: the base path of its conversion in the cache (<hash>-rvtN; the .ifc and .json beside it), touched with the model's own files whenever the model is in use (liveHit) */
+  conversion?: string;
 }
 
 const memory = new Map<string, Model>();
@@ -95,7 +97,7 @@ async function loadModelNow(path: string, o: LoadOptions): Promise<Model> {
   if (!isRevit(path)) return loadIfc(path, o);
   const { ifc, source } = await rvtToIfc(path);
   const m = await loadIfc(ifc, { ...o, hash: undefined });
-  m.index.sourcePath = path; m.source = source;
+  m.index.sourcePath = path; m.source = source; m.conversion = ifc.slice(0, -'.ifc'.length);
   const boxes = m.index.elements.filter(boxOnly).length;
   source.geometry = { from_the_file: m.index.elements.length - boxes, bounding_box_only: boxes, note: 'bounding-box elements are placed for 4D but give no derived volume (quantities counts them as unquantified)' };
   return m;
@@ -109,6 +111,7 @@ function liveHit(name: string, base: string): Model | undefined {
   if (!hit) return undefined;
   if (!existsSync(`${base}.ndjson`) || (hit.tiles && !existsSync(join(hit.tiles, 'manifest.json')))) { memory.delete(name); return undefined; }
   touch(base);
+  if (hit.conversion) touchConversion(hit.conversion);
   return hit;
 }
 
@@ -349,7 +352,9 @@ export function loadEstimate(path: string, o: { geometry?: boolean } = {}): numb
 // rule (the agent is told to delete what it no longer needs). It replaced "14 days, and the oldest first over 10 GB".
 // If asked why it is 24 hours: because he wanted aggressive cleaning; change the number here if he wants it otherwise.
 // AGREED LIMIT (owner, 2026-11-11): 24 hours — a cached model not used for longer is deleted (the check runs at most once an hour: also agreed, harmless) — why: the owner wants aggressive cleaning — arbitrary by agreement (his own word); replaces 14 days / 10 GB.
-const UNUSED_MS = 24 * 3_600_000;
+export const UNUSED_HOURS = 24;
+const UNUSED_MS = UNUSED_HOURS * 3_600_000;
+const touchConversion = (base: string) => { const now = new Date(); for (const x of ['.ifc', '.json']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
 const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles', '.nw.json', '.chunks']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
 let pruned = 0;
 const retried = new Set<string>();
