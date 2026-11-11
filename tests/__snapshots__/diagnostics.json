@@ -293,7 +293,7 @@
   "fatal:NO_PROJ_NODE": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 16,
-  "warning:FIELD_UNKNOWN": 8,
+  "warning:FIELD_UNKNOWN": 7,
   "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
@@ -304,7 +304,7 @@
   "info:CAL_HOURS_MISMATCH": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 15,
-  "warning:FIELD_UNKNOWN": 8,
+  "warning:FIELD_UNKNOWN": 7,
   "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
@@ -315,7 +315,7 @@
   "info:CAL_HOURS_MISMATCH": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 16,
-  "warning:FIELD_UNKNOWN": 8,
+  "warning:FIELD_UNKNOWN": 7,
   "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
@@ -418,7 +418,7 @@
   "info:CAL_HOURS_MISMATCH": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 15,
-  "warning:FIELD_UNKNOWN": 8,
+  "warning:FIELD_UNKNOWN": 7,
   "warning:FORECAST_BEFORE_DD": 1,
   "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1

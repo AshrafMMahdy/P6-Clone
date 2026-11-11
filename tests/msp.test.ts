@@ -370,6 +370,7 @@ test('an MPX whose tasks carry no Unique ID says so (MPX_NO_UNIQUE_ID): each tas
   const none = parseMpx([...head, '61,90,1,3,40', '70,1,One,1,5d', '70,2,Two,1,5d'].join('\r\n'));
   const f = none.findings.filter((x) => x.code === 'MPX_NO_UNIQUE_ID');
   assert.equal(f.length, 1); assert.equal(f[0].severity, 'warning');
+  assert.equal(none.findings[0].code, 'MPX_NO_UNIQUE_ID', 'the first finding, so the 40 an answer lists always hold it');
   assert.match(f[0].message, /^The tasks of this MPX file have no Unique ID; each is identified by its ID, which is its row number/);
   assert.deepEqual(rows(none.db, 'TASK').map((t) => t._msp_uid), ['1', '2']);
   const some = parseMpx([...head.slice(0, 2), '60,ID,Unique ID,Name,Outline Level,Duration', '61,90,98,1,3,40', '70,1,101,One,1,5d', '70,2,102,Two,1,5d'].join('\r\n'));

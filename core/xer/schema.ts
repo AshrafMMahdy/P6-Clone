@@ -58,7 +58,9 @@ export function knownFields(tableName: string): Set<string> {
  *  FINTMPL (fintmpl_id, fintmpl_name, default_flag) as real P6 6.0 / 20.12 / 24.12 XERs write it (downloaded XERs/),
  *  PROJECT.fintmpl_id from Oracle's XER Import/Export Data Map (v23); FINDATES.fintmpl_id after P6's API
  *  (FinancialPeriod.FinancialPeriodTemplateId; no real XER seen with periods and calendars together). */
-const MODERN_FIELDS: Record<string, string[]> = { FINTMPL: ['fintmpl_id', 'fintmpl_name', 'default_flag'], FINDATES: ['fintmpl_id'], PROJECT: ['fintmpl_id'] };
+const MODERN_FIELDS: Record<string, string[]> = { FINTMPL: ['fintmpl_id', 'fintmpl_name', 'default_flag'], FINDATES: ['fintmpl_id'], PROJECT: ['fintmpl_id'],
+  // UDFTYPE.export_flag: written by current P6 (and by the clone's own add_udf and Microsoft Project reader), absent from the old sample layouts
+  UDFTYPE: ['export_flag'] };
 
 export function knownTables(): Set<string> {
   const s = new Set<string>(observed.tableOrder);

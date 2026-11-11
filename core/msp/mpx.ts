@@ -280,7 +280,8 @@ function readMpx(text: string, findings: Finding[]): MProject {
   m.minutesPerDay = Math.round(hpd * 60);
   m.minutesPerWeek = Math.round(hpw * 60);
   m.splitsInProgress = splits;
-  if (noUid) findings.push({ severity: 'warning', code: 'MPX_NO_UNIQUE_ID', table: 'TASK', message: `${noUid === m.tasks.length ? 'The tasks of this MPX file have' : `${noUid} task(s) of this MPX file have`} no Unique ID; each is identified by its ID, which is its row number in Microsoft Project and changes when tasks are inserted or removed there.`, p6: 'P6 needs a stable key to match an activity between two versions of a file.' });
+  // (first of the findings: an answer lists the first 40, and this one decides whether a changed file's tasks can be matched at all)
+  if (noUid) findings.unshift({ severity: 'warning', code: 'MPX_NO_UNIQUE_ID', table: 'TASK', message: `${noUid === m.tasks.length ? 'The tasks of this MPX file have' : `${noUid} task(s) of this MPX file have`} no Unique ID; each is identified by its ID, which is its row number in Microsoft Project and changes when tasks are inserted or removed there.`, p6: 'P6 needs a stable key to match an activity between two versions of a file.' });
   return m;
 }
 
