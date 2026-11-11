@@ -397,6 +397,6 @@ What this shows, and what is still over:
   `.tiles/` (the tile folder).
 - Caches of other formats (the GLB of format 9, other tile sizes) are **renamed** into `<cache>/superseded/` the first
   time the model is opened again; the model is then read and meshed afresh. `superseded/` is pruned by age only (the
-  same 14 days), never by size.
+  same 24 hours without use as the rest of the cache: the owner's own choice, 2026-11-11, for aggressive cleaning), never by size.
 - Two loads of one file in one server share the one run (the second waits for it); a model whose meshing failed is
   meshed again once per run of the server when geometry is asked for, from its cached index.

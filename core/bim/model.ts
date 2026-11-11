@@ -327,9 +327,15 @@ export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; 
 /** The bytes loadNeeds would reserve with no memory limit (the default chunk). */
 export function loadEstimate(path: string, o: { geometry?: boolean } = {}): number { return loadNeeds(path, o).total; }
 
-// ── the disk cache (OS temp folder unless P6CLONE_MODEL_CACHE): models not used for P6CLONE_MODEL_CACHE_DAYS (14) go,
-// and the oldest go first while it is over P6CLONE_MODEL_CACHE_MB (10240); checked at most once an hour. The
-// superseded/ folder (older formats, set aside) is pruned by age only.
+// ── the disk cache (OS temp folder unless P6CLONE_MODEL_CACHE): a cached model not used for more than 24 hours is deleted
+// ("used" = the touch above, on every use). There is NO size limit: a cache of any size loses nothing that was used within
+// 24 hours. Checked at most once an hour. The superseded/ folder (older formats, set aside) follows the same 24 hours.
+//
+// WHY 24 HOURS: it is the owner's own choice (Ashraf, 2026-11-11): he wants AGGRESSIVE cleaning, so the cache holds only
+// what is in use now. The number is arbitrary by his own word, not derived from anything. This is the BACKUP to the main
+// rule (the agent is told to delete what it no longer needs). It replaced "14 days, and the oldest first over 10 GB".
+// If asked why it is 24 hours: because he wanted aggressive cleaning; change the number here if he wants it otherwise.
+const UNUSED_MS = 24 * 3_600_000;
 const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles', '.nw.json']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
 let pruned = 0;
 const retried = new Set<string>();
@@ -337,19 +343,18 @@ const retried = new Set<string>();
 export function pruneCache(now = Date.now()): number {
   if (now - pruned < 3_600_000) return 0;
   pruned = now;
-  const dir = cacheDir(), days = Number(process.env.P6CLONE_MODEL_CACHE_DAYS) || 14, cap = (Number(process.env.P6CLONE_MODEL_CACHE_MB) || 10240) * 1048576;
-  const sizeOf = (p: string): number => { try { const st = statSync(p); return st.isDirectory() ? readdirSync(p).reduce((n, f) => n + sizeOf(join(p, f)), 0) : st.size; } catch { return 0; } };
-  const files = readdirSync(dir).filter((f) => /\.(json|ndjson|geom|glb|tiles|ifc|chunks)$/.test(f)).map((f) => { const p = join(dir, f); try { const st = statSync(p); return { p, at: st.mtimeMs, size: sizeOf(p) }; } catch { return null; } }).filter((x): x is { p: string; at: number; size: number } => !!x).sort((a, b) => a.at - b.at);
-  let total = files.reduce((n, f) => n + f.size, 0), removed = 0;
-  for (const f of files) {
-    if (now - f.at < days * 86_400_000 && total <= cap) break;
-    try { rmSync(f.p, { recursive: true, force: true }); total -= f.size; removed++; } catch { /* in use */ }
+  const dir = cacheDir();
+  let removed = 0;
+  const goes = (p: string): boolean => { try { return now - statSync(p).mtimeMs > UNUSED_MS; } catch { return false; } };
+  for (const f of readdirSync(dir).filter((f) => /\.(json|ndjson|geom|glb|tiles|ifc|chunks)$/.test(f))) {
+    const p = join(dir, f);
+    try { if (goes(p)) { rmSync(p, { recursive: true, force: true }); removed++; } } catch { /* in use */ }
   }
-  // what was set aside (older formats) goes on the same days: it is never read again, only kept a while
+  // what was set aside (older formats) goes on the same 24 hours: it is never read again, only kept a while
   const old = join(dir, SUPERSEDED);
   for (const f of existsSync(old) ? readdirSync(old) : []) {
     const p = join(old, f);
-    try { if (now - statSync(p).mtimeMs >= days * 86_400_000) { rmSync(p, { recursive: true, force: true }); removed++; } } catch { /* in use */ }
+    try { if (goes(p)) { rmSync(p, { recursive: true, force: true }); removed++; } } catch { /* in use */ }
   }
   return removed;
 }

@@ -402,8 +402,8 @@ model revision that changes GlobalIds). The links travel with the schedule in `<
 in `addins/navisworks` (source and build script; needs a Navisworks licence, untested without one).
 Server settings for 4D: `P6CLONE_CHROMIUM` (a Chromium or Chrome for `render_4d` images and video on the server; a
 tool argument never names a program), `P6CLONE_FFMPEG` (turns a WebM recording into MP4), `P6CLONE_MODEL_CACHE`
-(the parsed-model cache, default the OS temp folder) with `P6CLONE_MODEL_CACHE_DAYS` (14) and `P6CLONE_MODEL_CACHE_MB`
-(10240). Models count in the memory budget, estimated before a model is read (the index, and one geometry run) and
+(the parsed-model cache, default the OS temp folder; a cached model not used for more than 24 hours is deleted, checked
+at most once an hour, with no size limit: the owner's own choice, 2026-11-11, for aggressive cleaning). Models count in the memory budget, estimated before a model is read (the index, and one geometry run) and
 refused in words naming what it needs and the budget. The index streams and is compact (a 2.5 million element model
 in about 0.5 GB); linking, rules, keys and every `export_4d` package need only the index (the tagged IFC is streamed
 from the model file), so a model too big to mesh still links and exports in full. Meshing runs chunk by chunk in its
