@@ -188,3 +188,21 @@ test('A4: with not one custom field of the tasks free, the save of an old writer
   assert.ok(report.some((x) => /format stamp \(format 2\) was not written: the file has no free custom field for it/.test(x)), report.join(' | '));
   assert.equal(stampOf(saved), undefined);
 });
+
+test('a percent above 0 with no actual start is progress: the task starts at its Start (as Microsoft Project does when a percent is typed), said in a finding; the reasoner refuses the project', async () => {
+  const src = readFileSync(FILE, 'utf8');
+  const at = src.indexOf('<Name>Partitions</Name>'), pc = src.indexOf('<PercentComplete>0</PercentComplete>', at);
+  assert.ok(at > 0 && pc > at);
+  const was = '<PercentComplete>0</PercentComplete>\n\t\t\t<RemainingDuration>PT40H0M0S</RemainingDuration>';
+  assert.equal(src.slice(pc, pc + was.length), was, 'the fixture\'s Partitions task: 0 %, 40 h remaining');
+  const { db, findings } = parseMspdi(src.slice(0, pc) + '<PercentComplete>40</PercentComplete><RemainingDuration>PT24H0M0S</RemainingDuration>' + src.slice(pc + was.length));
+  const t = rows(db, 'TASK').find((x) => x.task_name === 'Partitions')!, plain = rows(parseMspdi(src).db, 'TASK').find((x) => x.task_name === 'Partitions')!;
+  assert.equal(plain.status_code, 'TK_NotStart'); assert.equal(plain.act_start_date ?? '', '');
+  assert.equal(t.status_code, 'TK_Active');
+  assert.match(t.act_start_date, /^2026-03-09 08:00/, 'the actual start is the task\'s Start');
+  assert.ok(Math.abs(Number(t.remain_drtn_hr_cnt) - Number(t.target_drtn_hr_cnt) * 0.6) < 1e-6, `remaining is 60 % of ${t.target_drtn_hr_cnt}: ${t.remain_drtn_hr_cnt}`);
+  const f = findings.filter((x) => x.code === 'MSP_PERCENT_WITHOUT_START');
+  assert.equal(f.length, 1); assert.match(f[0].message, /"Partitions" is 40 % complete but has no actual start; actual start set to its start, /);
+  const { reasonerRefusal } = await import('../core/analysis/whiq-fields.ts');
+  assert.equal(reasonerRefusal(db, rows(db, 'PROJECT').map((p) => p.proj_id))?.code, 'schedule_in_progress');
+});

@@ -612,6 +612,8 @@ function taskRow(t: MTask, pid: string, wbsId: string, clndr: string, code: stri
   let as = t.actualStart, af = t.actualFinish;
   if (af && !as) { as = t.start || af; findings.push({ severity: 'warning', code: 'MSP_FINISH_WITHOUT_START', table: 'TASK', key: t.uid, message: `"${t.name}" has an actual finish but no actual start; start set to ${as}.`, p6: 'P6 requires an actual start on completed activities.' }); }
   if (!af && !as && (t.pct ?? 0) >= 100 && t.start && t.finish) { as = t.start; af = t.finish; }
+  // a percent above 0 with no actual start: Microsoft Project itself starts a task at its Start when a percent is typed, so the file's progress is kept that way (and said) rather than read as 0
+  if (!af && !as && (t.pct ?? 0) > 0 && t.start) { as = t.start; findings.push({ severity: 'warning', code: 'MSP_PERCENT_WITHOUT_START', table: 'TASK', key: t.uid, message: `"${t.name}" is ${p6num(t.pct ?? 0)} % complete but has no actual start; actual start set to its start, ${as}.`, p6: 'P6 holds progress only on an activity that has an actual start.' }); }
   const status = af ? 'TK_Complete' : as ? 'TK_Active' : 'TK_NotStart';
   const rem = mile || af ? 0 : t.remHrs != null ? Math.max(0, t.remHrs) : as ? dur * (1 - Math.min(100, Math.max(0, t.pct ?? 0)) / 100) : dur;
   let cstr = '', cdate = '';
