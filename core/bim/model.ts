@@ -101,15 +101,24 @@ async function loadModelNow(path: string, o: LoadOptions): Promise<Model> {
   return m;
 }
 
+/** A model held in memory that is in use: its cache files are touched FIRST (before any prune can age them out), because the viewer and
+ *  render_4d read them from disk; a hit whose .ndjson, or whose tiles it holds, are gone is dropped (undefined) so the caller loads or
+ *  rebuilds it. Shared by loadModel and cachedModel (every 4D tool reaches the model through one of them). */
+function liveHit(name: string, base: string): Model | undefined {
+  const hit = memory.get(name);
+  if (!hit) return undefined;
+  if (!existsSync(`${base}.ndjson`) || (hit.tiles && !existsSync(join(hit.tiles, 'manifest.json')))) { memory.delete(name); return undefined; }
+  touch(base);
+  return hit;
+}
+
 /** A Navisworks model: its index and tiles from the cache, else read from the file (in the reader's own process) into
  *  it; cached by the files' content and the reader's format. */
 async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
   const hash = await navisworksKey(path), name = cacheName(hash), base = join(cacheDir(), name);
   const want = o.geometry !== false;
-  const hit = memory.get(name);
-  // a model open in memory is in use: touched FIRST (before any prune can age it out); its files on disk are read by the viewer and render_4d, so a hit whose files are gone is dropped and loaded again
-  if (hit && !existsSync(`${base}.ndjson`)) memory.delete(name);
-  else if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; touch(base); pruneCache(); return hit; }
+  const hit = liveHit(name, base);
+  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; pruneCache(); return hit; }
   pruneCache();
   setAsideOld(hash);
   let index = existsSync(`${base}.ndjson`) && existsSync(`${base}.nw.json`) ? tryReadIndex(base)?.index ?? null : null;
@@ -134,11 +143,9 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit (.rvt / .rfa) and Navisworks (.nwd / .nwc / .nwf) files are read as they are; other formats have to be exported to IFC first.`);
   const hash = o.hash ?? await fileHash(path);
   const want = o.geometry !== false;
-  let hit = memory.get(cacheName(hash));
   const base = join(cacheDir(), cacheName(hash));
-  // a model open in memory is in use: touched FIRST (before any prune can age it out); its files on disk are read by the viewer and render_4d, so a hit whose files are gone is dropped and loaded again
-  if (hit && !existsSync(`${base}.ndjson`)) { memory.delete(cacheName(hash)); hit = undefined; }
-  else if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; touch(base); pruneCache(); return hit; }
+  const hit = liveHit(cacheName(hash), base);
+  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; pruneCache(); return hit; }
   pruneCache();
   // a meshing that runs past the 24 hours must not lose its index or its kept chunks to the clean: they are touched at every chunk
   const working: LoadOptions = { ...o, onProgress: (...a: Parameters<NonNullable<LoadOptions['onProgress']>>) => { touch(base); return o.onProgress?.(...a); } };
@@ -264,9 +271,9 @@ export function setAsideOld(hash: string): string[] {
 
 /** A model by hash, from memory or the disk cache (null when it has to be opened again from its file). */
 export function cachedModel(hash: string): Model | null {
-  const hit = memory.get(cacheName(hash));
-  if (hit) return hit;
   const base = join(cacheDir(), cacheName(hash));
+  const hit = liveHit(cacheName(hash), base);
+  if (hit) return hit;
   const c = existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
   if (c) { touch(base); const m = wrap(hash, c.index, `${base}.tiles`); memory.set(cacheName(hash), m); return m; }
   return null;

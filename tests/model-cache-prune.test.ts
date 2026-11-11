@@ -114,3 +114,33 @@ test('a memory hit whose files are gone is dropped and the model is loaded again
     assert.equal(existsSync(join(dir, index)), true, 'the model was read again, its cache written anew');
   });
 });
+
+test('a model held in memory and read only through cachedModel (every 4D tool) has its files touched: they survive a 24-hour prune', async () => {
+  await withCache(async (dir, prune) => {
+    const { loadModel, cachedModel } = await import('../core/bim/model.ts');
+    const ifc = join(dir, 'duplex4.ifc'); copyFileSync(FX, ifc);
+    const m = await loadModel(ifc, { geometry: false });
+    const index = readdirSync(dir).find((f) => f.endsWith('.ndjson'))!;
+    const old = new Date(Date.now() - 30 * H); utimesSync(join(dir, index), old, old);
+    assert.ok(cachedModel(m.hash) === m, 'a memory hit');
+    assert.ok(Date.now() - statSync(join(dir, index)).mtimeMs < H, 'the memory hit touched the cached files');
+    const now = Date.now() + 23 * H; assert.equal(prune(now), 0, 'a prune 23 hours on (mocked clock): the touched file is within 24 hours');
+  });
+});
+
+test('a cachedModel memory hit whose tiles folder is gone is dropped (read again from the cached index, with no tiles, so the caller meshes them), never a model whose tiles are missing', async () => {
+  await withCache(async (dir) => {
+    const { loadModel, cachedModel } = await import('../core/bim/model.ts');
+    const { readManifest } = await import('../core/bim/tiles.ts');
+    const ifc = join(dir, 'duplex5.ifc'); copyFileSync(FX, ifc);
+    const m = await loadModel(ifc, { geometry: true });
+    assert.ok(m.tiles, 'the model was meshed');
+    assert.ok(cachedModel(m.hash) === m, 'with its tiles in place the memory hit stands');
+    rmSync(m.tiles!, { recursive: true, force: true });
+    assert.equal(readManifest(m.tiles!), null, 'a render_4d reading the manifest now gets null (its answer is in words, not a TypeError)');
+    const fresh = cachedModel(m.hash);
+    assert.ok(fresh && fresh !== m && fresh.tiles === null, 'the hit was dropped: what comes back is read from the cached index, with no tiles (modelWithTiles meshes them again)');
+    const again = await loadModel(ifc, { geometry: true });
+    assert.ok(again.tiles && readManifest(again.tiles), 'loaded again: the tiles are rebuilt');
+  });
+});
