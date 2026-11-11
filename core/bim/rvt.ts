@@ -2,14 +2,14 @@
 // the file's content hash beside the IFC cache, then read like any IFC. What rvt-rs read, approximated or left out goes
 // with it (<hash>-rvt.json), so the answer that opens the model can say so.
 import { spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, type StuckInfo } from './liveness.ts';
 import { fileHash } from './model.ts';
 import { rvtWorkerPath } from './runtime.ts';
 
-const RVT_FORMAT = 2; // the conversion: a new rvt-rs build or a change here bumps it, so old conversions are not reused (2: rvt-rs 0.10.0, base quantities and Revit's own property sets)
+export const RVT_FORMAT = 2; // the conversion: a new rvt-rs build or a change here bumps it, so old conversions are not reused (2: rvt-rs 0.10.0, base quantities and Revit's own property sets)
 /** The memory rvt-rs's reader takes per byte of Revit file: about 8x, the ONE number every limit and message here comes
  *  from. Measured with p6clone.patch, rvt-rs 0.10.0, Node 24.14.0: the whole process peaked at 173, 225 and 264 MB for
  *  7, 12 and 19 MB projects (a slope of 7.6 MB per MB of file over a program of about 120 MB; WebAssembly's own memory
@@ -94,7 +94,10 @@ export async function rvtToIfc(path: string): Promise<{ ifc: string; source: Rev
   const dir = cacheDir();
   mkdirSync(dir, { recursive: true });
   const hash = await fileHash(path), base = join(dir, `${hash}-rvt${RVT_FORMAT}`);
-  if (!existsSync(`${base}.ifc`) || !existsSync(`${base}.json`)) {
+  if (existsSync(`${base}.ifc`) && existsSync(`${base}.json`)) {
+    // reused: in use, so the clean (a cached model unused for more than 24 hours goes) leaves it: a Revit model opened daily is not converted again
+    const now = new Date(); for (const x of ['.ifc', '.json']) try { utimesSync(`${base}${x}`, now, now); } catch { /* gone */ }
+  } else {
     checkRevitSize(path);
     const worker = rvtWorkerPath();
     if (!worker) throw new Error('The Revit reader (rvtWorker.mjs with rvt/ beside it) is missing from this installation.');

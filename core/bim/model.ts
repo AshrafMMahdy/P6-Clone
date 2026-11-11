@@ -27,7 +27,7 @@ const memory = new Map<string, Model>();
 // the tiles depend on their size setting, so it is part of the name
 const cacheName = (hash: string) => `${hash}-v${INDEX_FORMAT}-t${Math.round(tileBytesOf() / 1048576)}`;
 const cacheDir = () => { const d = process.env.P6CLONE_MODEL_CACHE || join(tmpdir(), 'p6clone-ifc-cache'); mkdirSync(d, { recursive: true }); return d; };
-/** Caches of an older format are set aside here (renamed, kept for the cache's days, then pruned): opening the model again reads it afresh. */
+/** Caches of an older format are set aside here (renamed, then deleted with the rest once unused for more than 24 hours, see pruneCache): opening the model again reads it afresh. */
 export const SUPERSEDED = 'superseded';
 
 export function fileHash(path: string): Promise<string> {
@@ -108,7 +108,7 @@ async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
   const hash = await navisworksKey(path), name = cacheName(hash), base = join(cacheDir(), name);
   const want = o.geometry !== false;
   const hit = memory.get(name);
-  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; return hit; }
+  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; touch(base); return hit; }   // a model open in memory is in use: its files on disk are read by the viewer and render_4d
   setAsideOld(hash);
   let index = existsSync(`${base}.ndjson`) && existsSync(`${base}.nw.json`) ? tryReadIndex(base)?.index ?? null : null;
   // a model read without geometry, or whose geometry failed (once a run of the app), is read again with it
@@ -134,8 +134,10 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   const hash = o.hash ?? await fileHash(path);
   const want = o.geometry !== false;
   const hit = memory.get(cacheName(hash));
-  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; return hit; }
   const base = join(cacheDir(), cacheName(hash));
+  if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; touch(base); return hit; }   // a model open in memory is in use: its files on disk are read by the viewer and render_4d
+  // a meshing that runs past the 24 hours must not lose its index or its kept chunks to the clean: they are touched at every chunk
+  const working: LoadOptions = { ...o, onProgress: (...a: Parameters<NonNullable<LoadOptions['onProgress']>>) => { touch(base); return o.onProgress?.(...a); } };
   setAsideOld(hash);
   let cached = hit ? { index: hit.index } : existsSync(`${base}.ndjson`) ? tryReadIndex(base) : null;
   // a model indexed without geometry: meshed now from its cached index (the STEP pass is not run again); so is one whose
@@ -145,7 +147,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   if (cached && want && (cached.index.geometryStatus === 'skipped' || retry)) {
     const index = cached.index;
     // a cancel is the caller's choice, not a failure: a retry it stopped has not been tried (the next open tries it)
-    try { await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress }); }
+    try { await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: working.onProgress }); }
     catch (e) { if (retry && (e as { code?: string } | null)?.code === 'cancelled') retried.delete(hash); throw e; }
     noteMeshing(index, o);
     writeIndex(base, index);
@@ -165,7 +167,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
     // the index is cached before the meshing: a meshing that stops leaves it (the next open meshes from it, not indexing again), so the
     // chunks it kept are always of a known product list, matched by their full key before the next meshing is planned (keptChunkSets)
     writeIndex(base, index);
-    await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: o.onProgress });
+    await meshIndex(path, index, productIdsOf(index), { tilesOut: `${base}.tiles`, keepChunks: `${base}.chunks`, chunkBytes: o.chunkBytes, onProgress: working.onProgress });
     noteMeshing(index, o);
   }
   writeIndex(base, index);
@@ -336,12 +338,12 @@ export function loadEstimate(path: string, o: { geometry?: boolean } = {}): numb
 // rule (the agent is told to delete what it no longer needs). It replaced "14 days, and the oldest first over 10 GB".
 // If asked why it is 24 hours: because he wanted aggressive cleaning; change the number here if he wants it otherwise.
 const UNUSED_MS = 24 * 3_600_000;
-const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles', '.nw.json']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
+const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles', '.nw.json', '.chunks']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
 let pruned = 0;
 const retried = new Set<string>();
 
 export function pruneCache(now = Date.now()): number {
-  if (now - pruned < 3_600_000) return 0;
+  if (now - pruned < 3_600_000) return 0;   // `pruned` starts at 0: the first call of a process always prunes, once at start
   pruned = now;
   const dir = cacheDir();
   let removed = 0;
