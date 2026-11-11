@@ -337,13 +337,14 @@ export function loadEstimate(path: string, o: { geometry?: boolean } = {}): numb
 // what is in use now. The number is arbitrary by his own word, not derived from anything. This is the BACKUP to the main
 // rule (the agent is told to delete what it no longer needs). It replaced "14 days, and the oldest first over 10 GB".
 // If asked why it is 24 hours: because he wanted aggressive cleaning; change the number here if he wants it otherwise.
+// AGREED LIMIT (owner, 2026-11-11): 24 hours — a cached model not used for longer is deleted (the check runs at most once an hour: also agreed, harmless) — why: the owner wants aggressive cleaning — arbitrary by agreement (his own word); replaces 14 days / 10 GB.
 const UNUSED_MS = 24 * 3_600_000;
 const touch = (base: string) => { const now = new Date(); for (const x of ['.ndjson', '.geom', '.tiles/manifest.json', '.tiles', '.nw.json', '.chunks']) try { utimesSync(`${base}${x}`, now, now); } catch { /* not there */ } };
 let pruned = 0;
 const retried = new Set<string>();
 
 export function pruneCache(now = Date.now()): number {
-  if (now - pruned < 3_600_000) return 0;   // `pruned` starts at 0: the first call of a process always prunes, once at start
+  if (now - pruned < 3_600_000) return 0;   // AGREED LIMIT (owner, 2026-11-11): once an hour — how often the clean looks — why: each thing goes 24 to 25 hours after its last use — arbitrary by agreement, harmless. `pruned` starts at 0: the first call of a process always prunes, once at start
   pruned = now;
   const dir = cacheDir();
   let removed = 0;
