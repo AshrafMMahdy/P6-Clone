@@ -49,8 +49,11 @@ export const RISK_METHOD = [
   'float risk = 100 x (0.5 x negative-float share + 0.3 x near-critical share + 0.2 x critical share), at most 100 (:87)',
   'logic risk = 100 - the logic-audit score; progress integrity risk = 100 - the integrity score (:103, :165); logic-audit score = 100 x (1 - (open ends x 1.0 + leads x 0.8 + lags x 0.3 + hard constraints x 0.6 + out-of-sequence x 1.0 + redundant links x 0.4) / activities) (logicAudit.ts:86-94); integrity score = 100 x (1 - sum of severity weights (critical 1.0, high 0.7, medium 0.4, low 0.2) / activities examined) (progressAudit.ts:49, :163-169)',
   'baseline drift risk = at most 100 of: 2 x average finish variance (working days, not below 0) + 40 x (1 - BEI, at most 1) + critical-path delay (latest finish minus latest baseline finish, working days, at most 30) (:149)',
+  'a part of the baseline drift that cannot be assessed (the BEI when no task was due, the delay when a side has no finish) adds nothing to the sum, as the source adds nothing for an absent one, and the answer says which parts the drift score counts (it is not an invented BEI of 1)',
+  'a schedule with a loop cannot be calculated and its stored float is not valid: the whole risk index is not assessed and names the loop (as health gives no score)',
   'resource risk = 50 x over-allocated share of the resources that have a limit + 35 x share of work activities with no resource + 15 when an over-allocated resource is assigned to a critical activity, over the parts assessed (resourceAnalysis.ts:255-261)',
   'grade: 100 - risk >= 90 A, 80 B, 70 C, 60 D, else F (enums.ts:61-66); level: risk < 20 low, < 40 moderate, < 60 elevated, < 80 high, else critical (:65-71); status: < 20 pass, < 50 warning, else fail (:247)',
+  'progress rule 005 (forecast in the past) differs from the source in one way: the source tests a forecast date ON OR BEFORE the status date (progressAudit.ts:136), the clone tests BEFORE the data date (in P6 remaining work starts ON the data date, so a date equal to it is not in the past; the rule dcma_14 check 9 already uses); a started activity\u2019s start is its actual start, so only its finish is a forecast',
   'driver severity: score >= 60 high, >= 30 medium, else low (:212); recommendation expected reduction = 0.5 x the driver’s contribution (:225)',
 ];
 
@@ -81,7 +84,8 @@ function health(float: ReturnType<typeof F.floatFigures>, logic: ReturnType<type
   } else { b.density = { ...gone(float.note), weight: W.density }; b.float_erosion = { ...gone(float.note), weight: W.float_erosion }; }
   if (logic.result === 'assessed') {
     b.structural = { score: r1(clamp(100 * (1 - logic.open_ends / logic.considered))), weight: W.structural, assessed: true };
-    b.relationship = logic.fs_share != null ? { score: r1(clamp((logic.fs_share / 0.9) * 100)), weight: W.relationship, assessed: true } : { ...gone('The activities have no relationships (the source gives an FS share of 1 then; not carried over).'), weight: W.relationship };
+    // judged on the exact share (fs / relationships); the rounded fs_share is for display
+    b.relationship = logic.relationships ? { score: r1(clamp(((logic.fs / logic.relationships) / 0.9) * 100)), weight: W.relationship, assessed: true } : { ...gone('The activities have no relationships (the source gives an FS share of 1 then; not carried over).'), weight: W.relationship };
   } else { b.structural = { ...gone(logic.note), weight: W.structural }; b.relationship = { ...gone(logic.note), weight: W.relationship }; }
   const on = (Object.keys(b) as (keyof typeof W)[]).filter((k) => b[k].assessed);
   const left = (Object.keys(b) as (keyof typeof W)[]).filter((k) => !b[k].assessed).map((k) => ({ part: k, reason: b[k].reason! }));
@@ -91,11 +95,11 @@ function health(float: ReturnType<typeof F.floatFigures>, logic: ReturnType<type
   const signals: string[] = [];
   if (float.result === 'assessed') {
     if (float.negative_float > 0) signals.push(`${float.negative_float} activit${float.negative_float === 1 ? 'y' : 'ies'} with negative float`);
-    if (float.critical_share > 0.5) signals.push(`High critical-path density (${Math.round(float.critical_share * 100)}%)`);
+    if (float.critical / float.activities > 0.5) signals.push(`High critical-path density (${Math.round(float.critical_share * 100)}%)`);
   }
   if (logic.result === 'assessed') {
     if (logic.open_ends > 0) signals.push(`${logic.open_ends} open end${logic.open_ends === 1 ? '' : 's'} / missing logic`);
-    if (logic.fs_share != null && logic.fs_share < 0.9) signals.push(`Only ${Math.round(logic.fs_share * 100)}% Finish-to-Start relationships`);
+    if (logic.relationships && logic.fs / logic.relationships < 0.9) signals.push(`Only ${Math.round((logic.fs / logic.relationships) * 100)}% Finish-to-Start relationships`);
   }
   return { result: 'assessed', score, grade: F.gradeOf(score), breakdown: b, top_signals: signals, connected_share: logic.result === 'assessed' ? r3((logic.considered - logic.missing_logic.length) / logic.considered) : null, ...(left.length ? { left_out: left } : {}) };
 }
@@ -126,7 +130,8 @@ function logicRisk(logic: ReturnType<typeof F.logicFigures>): SubMetric {
 function driftRisk(s: Scope, which: string, bls: Map<string, ReturnType<typeof baselineOf>>, pairs: ReturnType<typeof F.baselinePairs>): { metric: SubMetric; baseline: { which: string; name: string; how: string } | null } {
   if (pairs.result !== 'assessed') return { metric: inactive('baseline_drift', pairs.note), baseline: null };
   const baseline = { which, name: pairs.name, how: pairs.how };
-  const vars = F.varianceRows(s, pairs).map((v) => v.finish_variance_days).filter((v): v is number => v != null);
+  // the exact finish variances, in working days (the rounded days of the variance rows are for display)
+  const vars = F.varianceDetail(s, pairs).map((v) => (v.exact.finish == null ? null : v.exact.finish / v.exact.day)).filter((v): v is number => v != null);
   if (!vars.length) return { metric: inactive('baseline_drift', 'No activity is in both the schedule and its baseline with finish dates on both sides.'), baseline };
   const avg = vars.reduce((a, b) => a + b, 0) / vars.length;
   // the critical-path delay: the latest current finish less the latest baseline finish (working days of the first project's calendar, as dcma_14 reads the project length)
@@ -141,9 +146,11 @@ function driftRisk(s: Scope, which: string, bls: Map<string, ReturnType<typeof b
   ];
   // a part that cannot be assessed is left out of the sum (it adds nothing), and the answer says so; it is not given a value
   const raw = Math.min(100, Math.max(0, avg * DRIFT.variance_factor) + (bei.result === 'assessed' ? (1 - Math.min(1, bei.value)) * DRIFT.bei_factor : 0) + (delay != null ? Math.min(DRIFT.delay_cap, delay) : 0));
-  const out = parts.filter((p) => !p.assessed);
+  const out = parts.filter((p) => !p.assessed), label: Record<string, string> = { average_finish_variance_days: 'the finish variance', bei: 'the BEI', critical_path_delay_days: 'the critical-path delay' };
+  const counted = `the drift score therefore counts ${parts.filter((p) => p.assessed).map((p) => label[p.part]).join(' and ')} only (the part adds nothing to it; it is not taken as a value of its own, a BEI of 1 for example)`;
+  for (const p of out) p.note = `${p.note} Not assessed: ${counted}.`;
   return { baseline, metric: sub('baseline_drift', { active: true, score: r1(raw), parts,
-    summary: `Average finish variance ${r1(avg)} d${bei.result === 'assessed' ? `, BEI ${bei.value}` : ''}${delay != null ? `, critical-path delay ${delay} d` : ''}${out.length ? `; left out of the sum: ${out.map((p) => `${p.part} (${p.note})`).join('; ')}` : ''}` }) };
+    summary: `Average finish variance ${r1(avg)} d${bei.result === 'assessed' ? `, BEI ${bei.value}` : ''}${delay != null ? `, critical-path delay ${delay} d` : ''}${out.length ? `; ${out.map((p) => `${label[p.part]} not assessed (${bei.result !== 'assessed' && p.part === 'bei' ? bei.note : p.note})`).join('; ')}; ${counted}` : ''}` }) };
 }
 
 function integrityRisk(prog: ReturnType<typeof F.progressAnomalies>): SubMetric {
@@ -202,7 +209,11 @@ export interface Risk {
 
 export interface ScheduleIndexResult {
   report: 'Schedule index';
-  status_date: string | null; baseline: { which: string; name: string; how: string } | null;
+  /** the data date (or status date) of the projects; null when the projects in scope have different ones (status_dates then says each) */
+  status_date: string | null;
+  /** each project's data date, given when the scope has more than one project */
+  status_dates?: { project: string; status_date: string | null }[];
+  baseline: { which: string; name: string; how: string } | null;
   /** the loops found in the logic (a schedule with a loop has no health score and no valid float) */
   loops: { activities: string[]; message: string }[];
   health: Health; risk: Risk;
@@ -219,10 +230,12 @@ export function scheduleIndex(db: Parameters<typeof makeScope>[0], o: ScheduleIn
   const drift = driftRisk(s, which, bls, F.baselinePairs(s, which));
   const res = resourceRisk(s);
   const subs: Record<SubKey, SubMetric> = { float: floatRisk(float, loops), logic: logicRisk(logic), baseline_drift: drift.metric, progress_integrity: integrityRisk(prog), resource: res.metric };
+  // a schedule with a loop cannot be calculated: its stored float is not valid, so no part of the risk index stands (as health gives no score); every sub-metric says so
+  if (loops.length) for (const k of Object.keys(subs) as SubKey[]) subs[k] = inactive(k, `The logic has ${loops.length === 1 ? 'a loop' : `${loops.length} loops`}, so the schedule cannot be calculated and its stored float is not valid (P6: "Circular relationship (loop) detected"): ${loops.map(F.loopMessage).join('; ')}. Remove the loop (break one relationship of it), schedule the project (F9) and run this again.`);
   const keys = Object.keys(subs) as SubKey[], active = keys.filter((k) => subs[k].active);
   const left = keys.filter((k) => !subs[k].active).map((k) => ({ sub_metric: k, reason: subs[k].reason! }));
   let risk: Risk;
-  if (!active.length) risk = { result: 'not_assessed', note: `No sub-metric could be assessed: ${left.map((l) => `${l.sub_metric}: ${l.reason}`).join(' ')}`, sub_metrics: subs, assessed_sub_metrics: 0, left_out: left, drivers: [], recommendations: [] };
+  if (!active.length) risk = { result: 'not_assessed', note: loops.length ? `The risk index is not assessed: ${left[0].reason}` : `No sub-metric could be assessed: ${left.map((l) => `${l.sub_metric}: ${l.reason}`).join(' ')}`, sub_metrics: subs, assessed_sub_metrics: 0, left_out: left, drivers: [], recommendations: [] };
   else {
     const wsum = active.reduce((a, k) => a + subs[k].weight, 0);
     const score = r1(active.reduce((a, k) => a + subs[k].weight * subs[k].score!, 0) / wsum);
@@ -231,9 +244,10 @@ export function scheduleIndex(db: Parameters<typeof makeScope>[0], o: ScheduleIn
     const recommendations: Recommendation[] = drivers.map((d) => ({ priority: d.severity, action: `Reduce ${d.sub_metric.replace(/_/g, ' ')} risk: ${d.description}`, target_sub_metric: d.sub_metric, expected_score_reduction: r1(d.contribution * REDUCTION), standards_citation: d.sub_metric === 'logic' ? 'DCMA-PAM-200.1' : 'AACE-RP-27R-03' }));
     risk = { result: 'assessed', score, grade: F.riskGradeOf(score), level: F.riskLevelOf(score), status: F.riskStatusOf(score), sub_metrics: subs, assessed_sub_metrics: active.length, left_out: left, drivers, recommendations };
   }
-  const dd = s.projs.map((p) => s.dataDate(p.proj_id)).find((x) => x != null) ?? null;
+  const dates = s.projs.map((p) => ({ project: p.proj_short_name, status_date: s.dataDate(p.proj_id) != null ? formatP6Date(s.dataDate(p.proj_id)!) : null }));
+  const same = new Set(dates.map((d) => d.status_date)).size <= 1;
   return {
-    report: 'Schedule index', status_date: dd != null ? formatP6Date(dd) : null, baseline: drift.baseline,
+    report: 'Schedule index', status_date: same ? dates[0]?.status_date ?? null : null, ...(dates.length > 1 ? { status_dates: dates } : {}), baseline: drift.baseline,
     loops: loops.map((l) => ({ activities: l, message: F.loopMessage(l) })),
     health: health(float, logic, loops), risk, logic, progress: prog,
     resources: res.figures ? { result: 'assessed', ...res.figures } : { result: 'not_assessed', note: subs.resource.reason },
@@ -269,7 +283,7 @@ export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) =>
   const risk = r.risk;
   const { drivers: _drivers, recommendations: _recs, ...riskRest } = risk;
   const summary = {
-    status_date: r.status_date, baseline: r.baseline,
+    status_date: r.status_date, ...(r.status_dates ? { status_dates: r.status_dates } : {}), baseline: r.baseline,
     health: r.health.result === 'assessed' ? { score: r.health.score, grade: r.health.grade } : { result: 'not_assessed', note: r.health.note },
     risk: risk.result === 'assessed' ? { score: risk.score, grade: risk.grade, level: risk.level, status: risk.status, sub_metrics_assessed: `${risk.assessed_sub_metrics} of 5`, left_out: risk.left_out } : { result: 'not_assessed', note: risk.note },
     loops: r.loops.length,

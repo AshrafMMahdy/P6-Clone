@@ -203,3 +203,64 @@ test('through the tool: units duration is accepted, the answer and the result fi
   const desc = String((toolsList() as any[]).find((t) => t.name === 'progress_curves').description);
   for (const w of ['Earned Schedule (Lipke)', 'es = the time at which the cumulative planned value equals the earned value now', 'spi_t = es / at', 'sv_t = es - at', 'SPI(t) stays meaningful to the end of a project', 'units: cost (default), hours (resource units) or duration']) assert.ok(desc.includes(w), w);
 });
+
+test('Tower-A (a small real file with progress), duration basis in weeks: Earned Schedule worked out by hand from the file\'s rows', () => {
+  // rows (project 10, data date Wed 1 Apr 2026 08:00; its baseline TOWER-A-BL1 is the project 11 held in the file):
+  //   A1010 Site 5-Day (8 h): baseline 40 h = 5 d, Mon 2 Mar 08:00 - Fri 6 Mar 17:00; complete.        A1020 Night Shift 7-Day (10 h): baseline 80 h = 8 d, Sat 7 Mar 07:00 - Sat 14 Mar 18:00; 40 %.
+  //   A1030 and M1000 are not in the baseline: their own planned values (A1030 80 h = 10 d, Thu 19 Mar - Wed 1 Apr; M1000 none).
+  // BAC = 5 + 8 + 10 = 23 days. Earned = 5 (A1010) + 0.4 x 8 (A1020) = 8.2 days.
+  // Planned value per week (Monday weeks): A1010 5 d in the week of 2 Mar; A1020 2 d on Sat 7 and Sun 8 Mar (week of 2 Mar) and 6 d on 9 - 14 Mar (week of 9 Mar); A1030 2 d on 19 - 20 Mar (week of 16 Mar),
+  // 5 d in the week of 23 Mar, 3 d on 30 - 31 Mar and 1 Apr. So 7, 6, 2, 5, 3: cumulative 7, 13, 15, 20, 23.
+  // 8.2 is passed in the week of 9 Mar (cumulative 7 before it, 6 in it): ES = 9 Mar + (8.2 - 7) / 6 of the week's span, 9 Mar - 16 Mar (7 days) = 9 Mar + 1.4 d = Tue 10 Mar 09:36.
+  // In weeks from the planned start (2 Mar 08:00 = 8 h of 168 into the week): ES = 1 + 1.4 / 7 - 8 / 168 = 1.15238; AT (to 1 Apr 08:00: week 4 + 2 d 8 h of 7 d = 4 + 56 / 168) = 4.33333 - 0.04762 = 4.28571;
+  // PD (to the planned finish Wed 1 Apr 17:00 = 4 + 65 / 168) = 4.33929; SPI(t) = 1.15238 / 4.28571 = 0.26889; SV(t) = 1.15238 - 4.28571 = -3.13333.
+  // In working days of the project calendar (Site 5-Day, 8 h): from 2 Mar 08:00 to 10 Mar 09:36 = 5 + 1 + 1.6 / 8 = 6.2 d; to 1 Apr 08:00 = 4 weeks of 5 + 2 = 22 d; SV(t) = 6.2 - 22 = -15.8 d.
+  const db = readXerFile(sampleCopy('Tower-A.xer')).db;
+  const c = progressCurves(db, rows(db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id), { period: 'week', units: 'duration' });
+  assert.equal(c.baseline, 'TOWER-A-BL1');
+  assert.equal(c.totals.bac, 23);
+  assert.equal(c.totals.ev, 8.2);
+  assert.deepEqual(c.periods.map((p) => p.cum_pv).slice(0, 5), [7, 13, 15, 20, 23]);
+  near(c.totals.es, 1 + 1.4 / 7 - 8 / 168, 'ES', 5e-4); near(c.totals.at, 4 + 56 / 168 - 8 / 168, 'AT', 5e-4); near(c.totals.pd, 4 + 65 / 168 - 8 / 168, 'PD', 5e-4);
+  near(c.totals.spi_t, 0.269, 'SPI(t)', 5e-4); near(c.totals.sv_t, -3.133, 'SV(t)', 5e-4);
+  assert.equal(c.totals.es_date, '2026-03-10');
+  near(c.totals.es_days, 6.2, 'ES in working days', 5e-4); near(c.totals.at_days, 22, 'AT in working days'); near(c.totals.sv_t_days, -15.8, 'SV(t) in working days', 5e-4);
+});
+
+test('projects with different data dates: SPI, CPI and Earned Schedule are not assessed with the reason and the next step; one project, or projects that share a data date, work as before', () => {
+  const db = readXerFile(sampleCopy('Enppi.xer')).db;
+  const ps = rows(db, 'PROJECT').filter((p) => !p._baseline_of), all = ps.map((p) => p.proj_id);
+  assert.equal(new Set(ps.map((p) => p.last_recalc_date)).size, 2, 'the two projects of Enppi have different data dates');
+  // the whole file (it used to answer SPI(t) 2.826 and SPI 5.01, the second project measured at the first one\'s date)
+  const w = progressCurves(db, all, { period: 'month', units: 'duration' });
+  for (const k of ['spi', 'cpi', 'es', 'at', 'pd', 'spi_t', 'sv_t', 'es_date', 'es_days', 'at_days', 'sv_t_days'] as const) assert.equal(w.totals[k], null, k);
+  assert.match(w.totals.es_note, /^Earned Schedule is not assessed\. The projects in scope have different data dates \(Master Rev\.F-N-4 2011-11-30 00:00, 4229 update 2-6-12 2012-06-02 00:00\)/);
+  assert.match(w.totals.es_note, /Pass project: Master Rev\.F-N-4, 4229 update 2-6-12 \(one of them at a time\)\.$/);
+  assert.ok(w.warnings.some((x) => /^SPI, CPI and Earned Schedule are not assessed\. The projects in scope have different data dates/.test(x)));
+  assert.ok(w.totals.bac > 0, 'the sums that need no date stay');
+  // the cost basis too
+  assert.equal(progressCurves(db, all, { period: 'month' }).totals.spi, null);
+  // the project alone: its own figures (SPI(t) 1.035, SPI 0.91)
+  const one = progressCurves(db, [ps[1].proj_id], { period: 'month', units: 'duration' });
+  near(one.totals.spi_t, 1.035, 'SPI(t) of the project alone', 5e-4); near(one.totals.spi, 0.91, 'SPI of the project alone'); assert.equal(one.warnings.some((x) => /different data dates/.test(x)), false);
+  // the same data date on both: assessed, as today (and no warning about dates)
+  ps[0].last_recalc_date = ps[1].last_recalc_date;
+  const same = progressCurves(db, all, { period: 'month', units: 'duration' });
+  assert.ok(same.totals.spi_t != null && same.totals.spi != null && same.totals.cpi != null);
+  assert.equal(same.warnings.some((x) => /different data dates/.test(x)), false);
+  // a project with no data date next to one with: different, not assessed
+  ps[0].last_recalc_date = '';
+  assert.equal(progressCurves(db, all, { period: 'month', units: 'duration' }).totals.spi_t, null);
+});
+
+test('the duration basis says what its totals mean (basis_note); the other bases carry no such note', () => {
+  const b = build({ costs: false });
+  const d = progressCurves(b.db, [b.projId], { period: 'week', units: 'duration' });
+  assert.match(d.basis_note!, /^Duration basis: every figure is in working days of each activity's own calendar, summed over the activities/);
+  for (const w of ['bac = the baseline (else planned) duration', 'ac = the working time actually spent', 'ev = duration x % complete (the earned duration)', 'etc = the remaining duration', 'eac = ac + etc', 'vac = bac - eac', 'cpi = ev / ac, the earned duration per working day spent', 'tcpi = (bac - ev) / (bac - ac)', 'SPI(t)']) assert.ok(d.basis_note!.includes(w), w);
+  // the figures it describes, by hand on this file: A 7 d, B 7 d, C 14 d; earned 17.5; spent 7 + 7 + 7 = 21; remaining 10.5
+  assert.deepEqual([d.totals.bac, d.totals.ev, d.totals.ac, d.totals.etc, d.totals.eac, d.totals.vac], [28, 17.5, 21, 10.5, 31.5, -3.5]);
+  near(d.totals.cpi, 0.83, 'cpi = 17.5 / 21', 5e-3); near(d.totals.tcpi, (28 - 17.5) / (28 - 21), 'tcpi', 5e-3);
+  assert.equal('basis_note' in progressCurves(b.db, [b.projId], { period: 'week' }), false);
+  assert.equal('basis_note' in progressCurves(b.db, [b.projId], { period: 'week', units: 'hours' }), false);
+});

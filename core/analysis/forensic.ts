@@ -31,8 +31,6 @@ export const gradeOf = (score: number | null | undefined): Grade | null => (scor
 export const riskGradeOf = (risk: number): Grade | null => gradeOf(100 - risk);
 /** Risk score -> level. endpoints/forensics/scheduleRiskIndex.ts:65-71 (< 20 low, < 40 moderate, < 60 elevated, < 80 high, else critical). */
 export const riskLevelOf = (risk: number): 'low' | 'moderate' | 'elevated' | 'high' | 'critical' => (risk < 20 ? 'low' : risk < 40 ? 'moderate' : risk < 60 ? 'elevated' : risk < 80 ? 'high' : 'critical');
-/** A score where higher is better (logic score, integrity score) -> pass / warning / fail. logicAudit.ts:180 and progressAudit.ts:216 (>= 90 pass, >= 70 warning). */
-export const scoreStatusOf = (score: number): 'pass' | 'warning' | 'fail' => (score >= 90 ? 'pass' : score >= 70 ? 'warning' : 'fail');
 /** A risk where lower is better (schedule risk index, resource risk) -> pass / warning / fail. scheduleRiskIndex.ts:247 and resourceAnalysis.ts:320 (< 20 pass, < 50 warning). */
 export const riskStatusOf = (risk: number): 'pass' | 'warning' | 'fail' => (risk < 20 ? 'pass' : risk < 50 ? 'warning' : 'fail');
 
@@ -101,28 +99,70 @@ export interface LogicFigures {
   score: number; grade: Grade;
 }
 
-/** An edge a -> b that is also reachable from a through a path of two or more steps, whatever the relationship types (source rule, logicAudit.ts:195-232: the walk starts from the
- *  other successors of a and looks for b). Exact: only an activity with another successor and a successor with another predecessor can have one, so only those are walked. */
+/** An edge a -> b that is also implied by a path of two or more steps, whatever the relationship types (source rule, logicAudit.ts:195-232: the walk starts from the other successors of a and looks for b): b is reachable from
+ *  another successor of a. Exact, and worked out once for the whole schedule instead of once per edge: the activities are taken in logic order (strongly connected groups, sinks first: Tarjan's order, so a group with a
+ *  loop is handled as the walk handles it), each group's set of the activities reachable from it is a bitset built from its successors' sets, and an edge of a is redundant when b is in the set of another successor of a
+ *  (counted per successor: "once" and "twice" bitsets, so that b reaching only itself round a loop does not count), when b has another relationship into it. A group's set is given back as soon as the last group that points at it has been read. The answer is
+ *  the same as the walk's, in the same order (the order of the first appearance of the predecessor, then of its links). */
 export function redundantLinks(rels: Row[]): Row[] {
-  const out = new Map<string, Row[]>(), inDeg = new Map<string, number>();
-  for (const r of rels) { (out.get(r.pred_task_id) ?? out.set(r.pred_task_id, []).get(r.pred_task_id)!).push(r); inDeg.set(r.task_id, (inDeg.get(r.task_id) ?? 0) + 1); }
-  const found: Row[] = [];
-  for (const [from, links] of out) {
-    if (links.length < 2) continue;
-    for (const r of links) {
-      if ((inDeg.get(r.task_id) ?? 0) < 2) continue;
-      const seen = new Set<string>(), stack = links.filter((x) => x.task_id !== r.task_id).map((x) => x.task_id);
-      let reached = false;
-      while (stack.length) {
-        const v = stack.pop()!;
-        if (v === r.task_id) { reached = true; break; }
-        if (seen.has(v)) continue;
-        seen.add(v);
-        for (const x of out.get(v) ?? []) stack.push(x.task_id);
+  const out = new Map<string, Row[]>(), index = new Map<string, number>();
+  const at = (id: string) => index.get(id) ?? (index.set(id, index.size), index.size - 1);
+  for (const r of rels) { (out.get(r.pred_task_id) ?? out.set(r.pred_task_id, []).get(r.pred_task_id)!).push(r); at(r.pred_task_id); at(r.task_id); }
+  const n = index.size;
+  if (!n) return [];
+  // relationships into each activity: a successor with a single one has no other way in (the walk skips it; a loop could otherwise lead back through the link itself)
+  const inDeg = new Int32Array(n);
+  for (const r of rels) inDeg[index.get(r.task_id)!]++;
+  // distinct successors of every activity
+  const succ: number[][] = Array.from({ length: n }, () => []);
+  for (const [from, links] of out) { const f = index.get(from)!; succ[f] = [...new Set(links.map((l) => index.get(l.task_id)!))]; }
+  // strongly connected groups, iteratively (Tarjan); group ids come out sinks first = the order the sets are built in
+  const idx = new Int32Array(n).fill(-1), low = new Int32Array(n), comp = new Int32Array(n).fill(-1), onStack = new Uint8Array(n);
+  const members: number[][] = [], stack: number[] = [], call: number[] = [], ptr = new Int32Array(n);
+  let counter = 0;
+  for (let root = 0; root < n; root++) {
+    if (idx[root] !== -1) continue;
+    call.push(root); idx[root] = low[root] = counter++; stack.push(root); onStack[root] = 1;
+    while (call.length) {
+      const v = call[call.length - 1];
+      if (ptr[v] < succ[v].length) {
+        const w = succ[v][ptr[v]++];
+        if (idx[w] === -1) { idx[w] = low[w] = counter++; stack.push(w); onStack[w] = 1; call.push(w); }
+        else if (onStack[w]) low[v] = Math.min(low[v], idx[w]);
+      } else {
+        call.pop();
+        if (call.length) { const u = call[call.length - 1]; low[u] = Math.min(low[u], low[v]); }
+        if (low[v] === idx[v]) { const g: number[] = []; let w: number; do { w = stack.pop()!; onStack[w] = 0; comp[w] = members.length; g.push(w); } while (w !== v); members.push(g); }
       }
-      if (reached) found.push(r);
     }
   }
+  // how many groups point at each group (a set is freed when they have all been read)
+  const readers = new Int32Array(members.length);
+  members.forEach((g, c) => { const to = new Set<number>(); for (const u of g) for (const w of succ[u]) if (comp[w] !== c) to.add(comp[w]); for (const t of to) readers[t]++; });
+  const W = (n + 31) >>> 5;
+  const reach: (Uint32Array | null)[] = new Array(members.length).fill(null);
+  const has = (set: Uint32Array, v: number) => (set[v >>> 5] & (1 << (v & 31))) !== 0;
+  const once = new Uint32Array(W), twice = new Uint32Array(W);
+  const redundantTo = new Map<number, Set<number>>();
+  members.forEach((g, c) => {
+    const R = new Uint32Array(W);
+    // what is reachable in one step or more: the group itself when it has a loop, and each successor outside it with everything it reaches
+    if (g.length > 1 || succ[g[0]].includes(g[0])) for (const u of g) R[u >>> 5] |= 1 << (u & 31);
+    for (const u of g) for (const w of succ[u]) if (comp[w] !== c) { R[w >>> 5] |= 1 << (w & 31); const Rw = reach[comp[w]]!; for (let i = 0; i < W; i++) R[i] |= Rw[i]; }
+    reach[c] = R;
+    for (const a of g) {
+      if (succ[a].length < 2) continue;
+      once.fill(0); twice.fill(0);
+      for (const x of succ[a]) { const Rx = reach[comp[x]]!; for (let i = 0; i < W; i++) { twice[i] |= once[i] & Rx[i]; once[i] |= Rx[i]; } }
+      for (const b of succ[a]) if (inDeg[b] >= 2 && (has(reach[comp[b]]!, b) ? has(twice, b) : has(once, b))) (redundantTo.get(a) ?? redundantTo.set(a, new Set()).get(a)!).add(b);
+    }
+    // give back the sets of the groups this one pointed at, and this one's own when nothing points at it
+    const to = new Set<number>(); for (const u of g) for (const w of succ[u]) if (comp[w] !== c) to.add(comp[w]);
+    for (const t of to) if (--readers[t] === 0) reach[t] = null;
+    if (readers[c] === 0) reach[c] = null;
+  });
+  const found: Row[] = [];
+  for (const [from, links] of out) { const hit = redundantTo.get(index.get(from)!); if (hit) for (const r of links) if (hit.has(index.get(r.task_id)!)) found.push(r); }
   return found;
 }
 
@@ -245,15 +285,27 @@ export const currentStart = (t: Row) => parseP6Date(t.act_start_date || t.early_
 /** A reference (baseline or as-planned) activity's start: its actual start, else early, else planned (the start counterpart of common.ts baselineFinish). */
 export const referenceStart = (b: Row | undefined) => (b ? parseP6Date(b.act_start_date || b.early_start_date || b.target_start_date) : null);
 
-/** One activity against its reference counterpart: start, finish and duration variance in working days of the activity's calendar (variance.ts:50-76 computeTaskVariance, in calendar days there). Current =
- *  actual, else forecast (forecastFinish), else planned; reference = baselineFinish and referenceStart. Duration = start to finish in working days on both sides. */
-export function activityVariance(s: Scope, t: Row, ref: Row | undefined): ActivityVariance {
+/** The exact variance of one activity against its reference: working MINUTES of the activity's calendar (positive = later / longer), null when a date is missing; `day` is the minutes of one working day of that calendar. Nothing is rounded here. */
+export interface ExactVariance { start: number | null; finish: number | null; duration: number | null; day: number }
+/** The working time from a to b on the activity's calendar in minutes, signed (b before a: negative), exact. */
+const workMinutes = (s: Scope, t: Row, a: number | null, b: number | null): number | null => (a == null || b == null ? null : (a <= b ? 1 : -1) * s.cal(t).workBetween(Math.min(a, b), Math.max(a, b)));
+
+/** One activity against its reference counterpart, the clone's ONE variance (activity variance of baseline_variance, change in schedule_index's baseline drift): start, finish and duration variance in working time of the activity's
+ *  calendar (variance.ts:50-76 computeTaskVariance, in calendar days there), worked out exactly in minutes; the slip class is judged on the exact finish variance, and only the days shown are rounded (two decimals). Current = actual,
+ *  else forecast (forecastFinish), else planned; reference = baselineFinish and referenceStart. Duration = start to finish in working time on both sides. */
+export function varianceOf(s: Scope, t: Row, ref: Row | undefined): { row: ActivityVariance; exact: ExactVariance } {
   const base = { id: t.task_code, name: t.task_name, ...(s.projs.length > 1 ? { project: s.ctx.proj.get(t.proj_id)?.proj_short_name } : {}) };
   const rs = referenceStart(ref), rf = ref ? baselineFinish(ref) : null, cs = currentStart(t), cf = forecastFinish(t);
-  const cal = s.cal(t), wd = (a: number | null, b: number | null) => (a != null && b != null ? s.workDays(cal, a, b) : null);
-  const sv = wd(rs, cs), fv = wd(rf, cf), rd = wd(rs, rf), cd = wd(cs, cf);
-  return { ...base, reference_start: stamp(rs), reference_finish: stamp(rf), current_start: stamp(cs), current_finish: stamp(cf), start_variance_days: sv, finish_variance_days: fv, duration_variance_days: rd != null && cd != null ? Math.round((cd - rd) * 100) / 100 : null, slip_class: fv != null ? slipClassOf(fv) : null };
+  const start = workMinutes(s, t, rs, cs), finish = workMinutes(s, t, rf, cf), rd = workMinutes(s, t, rs, rf), cd = workMinutes(s, t, cs, cf);
+  const day = (s.cal(t).hoursPerDay() || s.hpd) * 60, days = (m: number | null) => (m == null ? null : Math.round((m / day) * 100) / 100);
+  const duration = rd != null && cd != null ? cd - rd : null;
+  return {
+    exact: { start, finish, duration, day },
+    row: { ...base, reference_start: stamp(rs), reference_finish: stamp(rf), current_start: stamp(cs), current_finish: stamp(cf), start_variance_days: days(start), finish_variance_days: days(finish), duration_variance_days: days(duration), slip_class: finish != null ? slipClassOf(finish / day) : null },
+  };
 }
+/** The row alone (the display of varianceOf). */
+export const activityVariance = (s: Scope, t: Row, ref: Row | undefined): ActivityVariance => varianceOf(s, t, ref).row;
 
 export interface ReferencePairs {
   /** what the activities are compared with */
@@ -282,8 +334,10 @@ export function schedulePairs(s: Scope, other: { name: string; db: Scope['db']; 
   return { result: 'assessed', name: other.name, how: 'a schedule of its own, matched by Activity ID, then by a unique name', pairs: new Map(mine.map((t) => [t, m.get(t)])), projects_without: [] };
 }
 
-/** The variance of every paired activity (rows in the order of the pairs). */
-export const varianceRows = (s: Scope, ref: ReferencePairs): ActivityVariance[] => [...ref.pairs].map(([t, b]) => activityVariance(s, t, b));
+/** The variance of every paired activity, exact and as shown (in the order of the pairs; the activity and its counterpart beside each). */
+export const varianceDetail = (s: Scope, ref: ReferencePairs) => [...ref.pairs].map(([t, b]) => ({ task: t, ref: b, ...varianceOf(s, t, b) }));
+/** The rows of varianceDetail alone. */
+export const varianceRows = (s: Scope, ref: ReferencePairs): ActivityVariance[] => varianceDetail(s, ref).map((x) => x.row);
 
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Loops, and the clone's one BEI (shared by schedule_index, decm and planning_horizon)
@@ -302,12 +356,19 @@ export const loopMessage = (loop: string[]): string => `Loop: ${loop.join(' → 
 export interface BeiFigures { value: number; /** value before rounding: what a threshold is judged on */ exact: number; completed: number; due: number; not_completed: Offender[] }
 export type BeiResult = ({ result: 'assessed' } & BeiFigures) | { result: 'not_assessed'; /** why: no baseline, no data date, or nothing baselined to finish by the date */ reason: 'no_baseline' | 'no_data_date' | 'none_due'; note: string; /** the tasks completed, counted all the same */ completed?: number };
 /** The Baseline Execution Index, the clone's ONE definition (dcma_14 check 14, check_schedule's bei, schedule_index, decm, baseline_variance): tasks (not WBS summary, level of effort or milestones) completed, early ones included,
- *  over the tasks baselined to finish by the data date. Not assessed when no project has the baseline, or nothing was due (never 1). `value` is shown (three decimals), `exact` is what a threshold is judged on.
+ *  over the tasks baselined to finish by the data date; completed counts only the tasks that have a counterpart in the other side (the due ones can only be those), so both are over the same activities. Not assessed when no project has the baseline, or nothing was due (never 1). `value` is shown (three decimals), `exact` is what a threshold is judged on.
  *  `before`: a task baselined to finish ON the data date is not yet due (check_schedule's rule, "before the data date"); default: due on or before it (dcma_14's rule). */
 export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project', o: { before?: boolean } = {}): BeiResult {
   if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.` };
   const ok = (t: Row) => !isWbs(t) && !isLoe(t) && !isMilestone(t);
-  const completed = s.tasks.filter((t) => ok(t) && isDone(t)).length;
+  // completed and due are counted over the SAME activities: those of a project that has the other side and a date to judge by, and, for completed, those that have a counterpart there (an activity that is not in the other
+  // side was never due, so finishing it is not a due task done: an as-planned schedule that holds 18 of 453 activities counts 18, not every completed task of the open project)
+  let completed = 0;
+  for (const p of s.projs) {
+    const b = bls.get(p.proj_id);
+    if (!b || s.dataDate(p.proj_id) == null) continue;
+    completed += s.tasks.filter((t) => t.proj_id === p.proj_id && ok(t) && isDone(t) && b.tasks.has(t.task_code)).length;
+  }
   const dueList: Offender[] = []; let due = 0;
   for (const p of s.projs) {
     const b = bls.get(p.proj_id), dd = s.dataDate(p.proj_id);

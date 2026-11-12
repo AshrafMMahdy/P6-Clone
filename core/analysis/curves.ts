@@ -26,6 +26,8 @@ const n = (s: string | undefined) => Number(s || 0) || 0;
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const iso = (t: number) => formatP6Date(t).slice(0, 10);
 
+/** What the totals mean on the duration basis (every figure is a sum of the activities' working days, none is the length of the project; the project's time performance is SPI(t) / Earned Schedule). All of them are kept: each has a plain meaning in working days. */
+const DURATION_NOTE = 'Duration basis: every figure is in working days of each activity\'s own calendar, summed over the activities (a sum of durations, not the length of the project: the project\'s time performance is SPI(t) in es / at). bac = the baseline (else planned) duration; ac = the working time actually spent, from each actual start to its actual finish or the data date; ev = duration x % complete (the earned duration); etc = the remaining duration; eac = ac + etc (the working time the activities will have taken); vac = bac - eac (negative: they take more working time than planned); cpi = ev / ac, the earned duration per working day spent (below 1: work is taking longer than its planned duration allows; empty when nothing is spent yet); tcpi = (bac - ev) / (bac - ac), the pace needed over what is left of the planned duration after the time already spent (above 1: later work must go faster than planned to finish within bac). spi = ev / pv, as on the other bases.';
 export interface Grid { starts: number[]; ends: number[] }
 export function makeGrid(from: number, to: number, period: 'week' | 'month'): Grid {
   const starts: number[] = [];
@@ -58,6 +60,8 @@ export interface EarnedSchedule { es: number | null; at: number | null; pd: numb
 export interface ProgressCurves {
   report: 'Progress Curves'; units: 'cost' | 'hours' | 'duration'; period: 'week' | 'month'; data_date: string | null; baseline: string | null; baseline_how?: string;
   stored_periods: number;
+  /** on the duration basis only: what bac, ac, ev, etc, eac, vac, cpi and tcpi mean there */
+  basis_note?: string;
   totals: { bac: number; pv: number; ev: number; ac: number; etc: number; eac: number; vac: number; spi: number | null; cpi: number | null; tcpi: number | null } & EarnedSchedule;
   periods: CurvePeriod[]; warnings: string[];
 }
@@ -76,6 +80,11 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   const dd = minOf(projs.map((p) => parseP6Date(p.last_recalc_date) ?? Infinity));
   const dataDate = Number.isFinite(dd) ? dd : null;
   const warnings: string[] = [];
+  // projects with different data dates have no single "now": SPI, CPI and Earned Schedule of them together are not assessed (one project at a time says what each is)
+  const dates = projs.map((p) => parseP6Date(p.last_recalc_date) ?? null);
+  const mixedDates = projs.length > 1 && new Set(dates).size > 1;
+  const mixedReason = `The projects in scope have different data dates (${projs.map((p, i) => `${p.proj_short_name} ${dates[i] != null ? formatP6Date(dates[i]!) : 'none'}`).join(', ')}), so there is no single date to measure SPI, CPI and Earned Schedule at for them together. Pass project: ${projs.map((p) => p.proj_short_name).join(', ')} (one of them at a time).`;
+  if (mixedDates) warnings.push(`SPI, CPI and Earned Schedule are not assessed. ${mixedReason} The curve's periods before the data date follow the earliest of the dates.`);
 
   // baseline counterparts (dates of the planned value)
   const bl = new Map<string, Row>();
@@ -189,11 +198,14 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   }
   if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost' : units === 'duration' ? 'duration' : 'units'} are recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
   if (!totals.bac) warnings.push(units === 'cost' ? 'The schedule has no budgeted cost (no costed resources or expenses): use units: duration (planned durations, which need neither costs nor resources) or hours, or load costs.' : units === 'duration' ? 'The schedule has no planned duration (every activity is a milestone or has none).' : 'The schedule has no budgeted units (no resource assignments): use units: duration, or load resources.');
-  const sched = earnedSchedule({ g, pv, period, units, baseline: blName, plannedBac, undatedBac, plannedEv, p0, p1, dataDate, cal: projs[0] ? cals.fallback(projs[0].clndr_id) : null });
-  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, totals: { ...totals, ...sched }, periods, warnings };
+  if (mixedDates) { totals.spi = null; totals.cpi = null; }
+  const sched = mixedDates ? noEarnedSchedule(`Earned Schedule is not assessed. ${mixedReason}`) : earnedSchedule({ g, pv, period, units, baseline: blName, plannedBac, undatedBac, plannedEv, p0, p1, dataDate, cal: projs[0] ? cals.fallback(projs[0].clndr_id) : null });
+  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, ...(units === 'duration' ? { basis_note: DURATION_NOTE } : {}), totals: { ...totals, ...sched }, periods, warnings };
 }
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
+/** Earned Schedule not assessed, with the reason. */
+const noEarnedSchedule = (es_note: string): EarnedSchedule => ({ es: null, at: null, pd: null, spi_t: null, sv_t: null, es_date: null, es_days: null, at_days: null, sv_t_days: null, es_note });
 
 /** Earned Schedule (Lipke) from the planned-value curve: ES = the time at which the cumulative planned value equals the earned value now, found in the period where the cumulative curve passes it and interpolated
  *  linearly across the part of that period the planned value is spread over (the whole period, except where the plan starts or ends inside it); AT = the actual time from the planned start to the data date;
@@ -201,13 +213,14 @@ const r3 = (x: number) => Math.round(x * 1000) / 1000;
  *  (a finished project: SPI(t) = PD / AT, which stays meaningful where cost-based SPI returns to 1). Not assessed, with the reason: no planned value, no data date, no planned dates, a window that cuts the planned curve,
  *  a data date that is not after the planned start. */
 function earnedSchedule(o: { g: Grid; pv: number[]; period: 'week' | 'month'; units: 'cost' | 'hours' | 'duration'; baseline: string | null; plannedBac: number; undatedBac: number; plannedEv: number; p0: number; p1: number; dataDate: number | null; cal: WorkCalendar | null }): EarnedSchedule {
-  const none = (es_note: string): EarnedSchedule => ({ es: null, at: null, pd: null, spi_t: null, sv_t: null, es_date: null, es_days: null, at_days: null, sv_t_days: null, es_note });
+  const none = noEarnedSchedule;
   const { g, pv, period, dataDate } = o;
   if (!(o.plannedBac > 0) && o.undatedBac > 0) return none('Earned Schedule is not assessed: there is no planned curve (the activities with a planned value have no planned dates).');
   if (!(o.plannedBac > 0)) return none(`Earned Schedule is not assessed: the planned value is 0 (${o.units === 'cost' ? 'no budgeted cost: use units: duration, which needs neither costs nor resources' : o.units === 'duration' ? 'no activity has a planned duration' : 'no budgeted units: use units: duration, which needs no resources'}).`);
   if (dataDate == null) return none('Earned Schedule is not assessed: the project has no data date, so the actual time is not known.');
   if (!g.starts.length || !(o.p1 > o.p0)) return none('Earned Schedule is not assessed: there is no planned curve (the planned value all falls on one instant).');
   const planned = pv.reduce((a, x) => a + x, 0);
+  // 1e-9 (relative): floating-point tolerance. The planned value summed period by period can fall a rounding error short of the budget that was spread, which would read a whole curve as cut by the window
   if (planned < o.plannedBac * (1 - 1e-9)) return none('Earned Schedule is not assessed: the from/to window cuts the planned curve, so the planned value up to now is not all in it. Leave from and to out.');
   // positions in periods from the first period of the grid: the periods whole, then the share of the period elapsed
   const pos = (t: number) => {
@@ -221,10 +234,12 @@ function earnedSchedule(o: { g: Grid; pv: number[]; period: 'week' | 'month'; un
   const earned = Math.min(o.plannedEv, planned);
   // the period where the cumulative planned value passes the earned value
   let tStar = o.p0;
+  // the same 1e-9 tolerance: an earned value equal to the whole planned value up to rounding is all of it (the planned finish)
   if (earned >= planned * (1 - 1e-9)) tStar = o.p1;
   else if (earned > 0) {
     let cum = 0;
     for (let i = 0; i < pv.length; i++) {
+      // 1e-12 (relative): floating-point tolerance, tighter because it compares a running sum with one value: an earned value that equals a cumulative planned value up to rounding is found in the period where the curve reaches it, not the next
       if (cum + pv[i] >= earned * (1 - 1e-12) && pv[i] > 0) {
         const lo = Math.max(g.starts[i], o.p0), hi = Math.min(g.ends[i], o.p1);
         tStar = lo + ((earned - cum) / pv[i]) * (hi - lo);

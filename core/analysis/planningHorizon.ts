@@ -4,10 +4,10 @@
 // (the source falls back to the earliest start, or to 2000-01-01); a P6 file has no approval field, so the approvals dimension is not assessed and its weight is spread over the others (the rule the risk index uses); an empty window has
 // no score (the source gives it 100).
 import { groupBy, rows } from '../db.ts';
-import { formatP6Date, parseP6Date as parseDate } from '../dates.ts';
+import { formatP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { isCritical } from '../project/ctx.ts';
-import { forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope } from './common.ts';
+import { baselineFinish, baselineOf, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope } from './common.ts';
 import { currentStart, logicLoops, loopMessage } from './forensic.ts';
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -36,9 +36,9 @@ const overallOf = (score: number): 'pass' | 'warning' | 'fail' => (score >= 85 ?
 const TREND = 5;
 
 export const HORIZON_METHOD = [
-  'windows: activities whose forecast start (else planned start) is 0-30, 31-60 or 61-90 calendar days after the anchor, the data date or status_date (the source: planningHorizon.ts:92-96, :108-113, :137-141); finished and started work, WBS summaries and level of effort are not in a window',
+  'windows: activities whose forecast start (else planned start) is 0-30, 31-60 or 61-90 calendar days after the anchor, the data date or status_date (the source: planningHorizon.ts:92-96, :108-113, :137-141); finished and started work (any activity with an actual start: it is not work about to start), WBS summaries and level of effort are not in a window',
   'readiness of an activity = sum of weight x dimension score / sum of the weights of the dimensions assessed for it: logic 0.25, resources 0.30, approvals 0.20, float 0.10, forecast stability 0.15 (planningHorizon.ts:36, :116-119); the approvals dimension is never assessed (a P6 file has no approval field), so its 0.20 is spread over the others',
-  'logic: 60 with no predecessor, 70 while a finish-to-start predecessor is not complete, else 100 (:248-257); resources: 100 with a resource or expense loaded, else 0 (:261-262); float: total float under 5 working days scores float / 5 x 100, negative float 0 (:282-291); forecast stability: forecast finish against planned finish over 3 working days loses 5 points a day beyond 3 (:297-303)',
+  'logic: 60 with no predecessor, 70 while a finish-to-start predecessor is not complete, else 100 (:248-257); resources: 100 with a resource or expense loaded, else 0 (:261-262); float: total float under 5 working days scores float / 5 x 100, negative float 0 (:282-291); forecast stability: forecast finish against the BASELINE finish (the project’s assigned baseline, or the one named by baseline) over 3 working days loses 5 points a day beyond 3 (:297-303); the source’s planned finish is not used: after a schedule calculation P6 sets the planned dates of unstarted work equal to the early dates, so against them the drift is 0 for almost every activity. A file with no baseline, or an activity that is not in it (added since), is not assessed for this dimension and its weight is spread over the others',
   'status: readiness >= 90 ready, >= 75 mostly ready, >= 50 at risk, else not ready (:79-84); a window’s score is the mean of its activities; overall pass >= 85, warning >= 65, else fail (:222)',
   'risks: the at-risk and not-ready activities, lowest readiness first, each with the first issue of its weakest dimension (:161-170, :318-329); impact critical when the activity is critical, else medium',
   'systemic issue: a dimension scored under 50 for at least max(2, 30 %) of the activities it is assessed for (:182-183); trend: the last scored window against the first, more than 5 points above improving, below degrading, else stable (:330-337)',
@@ -80,7 +80,7 @@ export interface HorizonResult {
   method: string[];
 }
 
-export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projIds?: string[]; hoursPerDay?: number; statusDate?: number | null } = {}): HorizonResult {
+export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projIds?: string[]; hoursPerDay?: number; statusDate?: number | null; /** project (default), bl1-bl3 or a saved baseline's name */ baseline?: string } = {}): HorizonResult {
   const s = makeScope(db, { projIds: o.projIds, hoursPerDay: o.hoursPerDay, statusDate: o.statusDate, calendarDays: true });
   const noDate = s.projs.filter((p) => s.dataDate(p.proj_id) == null).map((p) => p.proj_short_name);
   const dd = s.projs.map((p) => s.dataDate(p.proj_id)).find((x) => x != null) ?? null;
@@ -97,16 +97,21 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
   const loaded = new Set([...asgRows, ...cost].map((a) => a.task_id));
   const hasResources = asgRows.length > 0;
   const asg = groupBy(rows(s.db, 'TASKRSRC'), 'task_id');
+  const which = o.baseline ?? 'project';
+  const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(s.db, p, which)]));
+  const anyBaseline = [...bls.values()].some(Boolean);
   const global: { dimension: Dim; weight: number; reason: string }[] = [
     { dimension: 'approvals', weight: WEIGHTS.approvals, reason: 'A P6 file carries no approval field (the source reads an approval status the platform never sent).' },
     ...(!hasResources ? [{ dimension: 'resources' as Dim, weight: WEIGHTS.resources, reason: 'The file has no resource assignments, so no activity can be told to have or lack one.' }] : []),
+    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned, so the forecast finish has nothing to be compared with (P6 sets the planned dates of unstarted work equal to the early dates, so they cannot stand in for it). Assign a baseline (Project > Assign Baselines).` }] : []),
     ...(loops.length ? [{ dimension: 'float' as Dim, weight: WEIGHTS.float, reason: `The logic has a loop, so P6's stored float is not valid: ${loops.map((l) => l.message).join('; ')}.` }] : []),
   ];
   const off = new Set(global.map((g) => g.dimension));
 
   const acts: HorizonActivity[] = [];
   for (const t of s.tasks) {
-    if (isWbs(t) || isLoe(t) || isDone(t)) continue;
+    // work with an actual start (finished or under way) is not work about to start
+    if (isWbs(t) || isLoe(t) || t.act_start_date || isDone(t)) continue;
     const anchor = s.dataDate(t.proj_id), start = currentStart(t);
     if (anchor == null || start == null) continue;
     const days = Math.floor(start / DAY) - Math.floor(anchor / DAY); // calendar days: a look-ahead window is calendar time
@@ -140,10 +145,12 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
         dims.float = { score, issues };
       }
     }
-    // forecast stability (:293-304): forecast finish against the planned finish, working days of the activity's calendar
-    {
-      const fc = forecastFinish(t), pl = parseDate(t.target_end_date);
-      if (fc == null || pl == null) na.push({ dimension: 'forecast_stability', reason: fc == null ? 'No forecast finish.' : 'No planned finish.' });
+    // forecast stability (:293-304): forecast finish against the baseline finish, working days of the activity's calendar
+    if (!off.has('forecast_stability')) {
+      const bl = bls.get(t.proj_id), bt = bl?.tasks.get(t.task_code), fc = forecastFinish(t), pl = baselineFinish(bt);
+      if (!bl) na.push({ dimension: 'forecast_stability', reason: `The project has no ${which === 'project' ? 'project' : which.toUpperCase()} baseline.` });
+      else if (!bt) na.push({ dimension: 'forecast_stability', reason: `Not in the ${bl.name} baseline (added since).` });
+      else if (fc == null || pl == null) na.push({ dimension: 'forecast_stability', reason: fc == null ? 'No forecast finish.' : 'No baseline finish.' });
       else {
         const drift = Math.abs(s.workDays(s.cal(t), pl, fc)), issues: string[] = [];
         let score = 100;

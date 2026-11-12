@@ -105,7 +105,7 @@ export const forecastFinish = (t: Row) => parseP6Date(t.act_end_date || t.reend_
 // The same constant is also the list size of: the activities and fixes per check of lint, dcma_14 and check_schedule; the resources resource_histogram lists; the changed activities of evaluate and evaluate_batch; the activities per window of windows_analysis; the worst lists of earned_value; the Monte Carlo S-curve points and ranked lists; the activity names in crash_schedule's notes.
 export const LISTED = 25;
 
-/** A share (n of d) as a percent, for display: one decimal; a share that is not zero but would show as 0.0 shows its first two significant digits (1 of 2,068 reads 0.048, never 0). Never judged on: judge with `shareOf`. */
+/** A share (n of d) as a percent, FOR DISPLAY ONLY: one decimal, and a share that is not zero but would show as 0.0 shows its first two significant digits (1 of 2,068 reads 0.048, never 0); that two-significant-digit rule is only how a small share is shown. Every check is judged on the exact count: use `exactPct` (below), never this rounded figure. */
 export const pct = (n: number, d: number) => {
   if (!d) return null;
   const v = Math.round((1000 * n) / d) / 10;

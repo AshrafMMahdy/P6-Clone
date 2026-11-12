@@ -59,6 +59,17 @@ test('health: a schedule with a loop has no score; the loop is named the way the
   // P6's stored float is not valid with a loop: the float sub-metric is not assessed, and the answer says why
   assert.equal(r.risk.sub_metrics.float.active, false);
   assert.match(r.risk.sub_metrics.float.reason!, /loop/);
+  // and so is the WHOLE risk index (it used to read risk 0, grade A, "low", "pass" on a schedule that cannot be calculated): not assessed, naming the loop, no score, no grade, nothing to rank
+  assert.equal(r.risk.result, 'not_assessed');
+  assert.equal(r.risk.score, undefined);
+  assert.equal(r.risk.grade, undefined);
+  assert.equal(r.risk.level, undefined);
+  assert.equal(r.risk.status, undefined);
+  assert.match(r.risk.note!, /^The risk index is not assessed: The logic has a loop.*Loop: [XYZ] → [XYZ] → [XYZ] → [XYZ].*Remove the loop/);
+  assert.equal(r.risk.assessed_sub_metrics, 0);
+  assert.deepEqual(r.risk.drivers, []);
+  assert.ok(Object.values(r.risk.sub_metrics).every((m) => !m.active && m.score === null && /loop/.test(m.reason!)));
+  assert.deepEqual(r.risk.left_out.map((l) => l.sub_metric), ['float', 'logic', 'baseline_drift', 'progress_integrity', 'resource']);
 });
 
 test('health: parts the file cannot supply are left out with the reason and the score is re-weighted (no relationships: the source says FS share 1)', () => {
@@ -147,6 +158,35 @@ test('risk: grade, level and status by the source\'s bands; drivers ranked by we
   assert.deepEqual(srcDrivers, ['logic_risk', 'float_risk', 'baseline_drift_risk'], 'the source ranks them the same way');
 });
 
+test('health judges the relationship score and the signals on the EXACT shares: 899 finish-to-start of 999 relationships (0.8999) raise the signal, though it rounds to 0.9', () => {
+  // a chain of 1000 activities; every 10th link (from the 6th) is start-to-start: 100 of the 999 relationships, so the finish-to-start share is 899 / 999 = 0.89990, which a 3-decimal rounding turns into 0.9 (not under 0.9)
+  const tasks = Array.from({ length: 1000 }, (_, i) => ({ id: `A${i}`, duration_days: 1, ...(i ? { predecessors: [i % 10 === 5 ? `A${i - 1}:SS` : `A${i - 1}`] } : {}) }));
+  const r = scheduleIndex(B.project('SHARE', tasks).db, {});
+  const l = r.logic as Extract<typeof r.logic, { result: 'assessed' }>;
+  assert.deepEqual([l.fs, l.relationships, l.fs_share], [899, 999, 0.9], 'shown rounded: 0.9');
+  assert.ok(r.health.top_signals!.some((x) => /Only 90% Finish-to-Start relationships/.test(x)), 'judged on 899 / 999 < 0.9, not on the rounded 0.9');
+  assert.equal(r.health.breakdown!.relationship.score, Math.round((899 / 999 / 0.9) * 1000) / 10);
+});
+
+test('schedule_index on a file of several projects shows each project\'s data date, and no single one when they differ', () => {
+  // Enppi: several projects (the sample); the first project's date used to stand for all
+  const db = readXerFile(sampleCopy('Enppi.xer')).db;
+  const mains = rows(db, 'PROJECT').filter((p) => !p._baseline_of);
+  assert.ok(mains.length > 1);
+  const r = scheduleIndex(db, {});
+  assert.deepEqual(r.status_dates!.map((d) => d.project), mains.map((p) => p.proj_short_name));
+  const dates = new Set(mains.map((p) => p.last_recalc_date));
+  assert.equal(dates.size > 1, true, 'the projects have different data dates');
+  assert.equal(r.status_date, null, 'no single date');
+  for (const p of mains) assert.equal(r.status_dates!.find((d) => d.project === p.proj_short_name)!.status_date, p.last_recalc_date.slice(0, 16));
+  // one project: the one date, as before, and no list
+  const one = scheduleIndex(db, { projIds: [mains[0].proj_id] });
+  assert.equal(one.status_dates, undefined);
+  assert.equal(one.status_date, mains[0].last_recalc_date.slice(0, 16));
+  // projects with the same date (a status date given): the one date
+  assert.equal(scheduleIndex(db, { statusDate: at('2012-01-01') }).status_date, '2012-01-01 00:00');
+});
+
 // ------------------------------------------------------------------------------------------------ not assessed paths
 
 test('not assessed: no baseline, no data date, no resources, nothing due, and the composite re-weighted over what is assessed', () => {
@@ -180,7 +220,10 @@ test('not assessed: no baseline, no data date, no resources, nothing due, and th
   assert.equal(bei.value, null);
   assert.match(bei.note!, /No task was baselined to finish by the data date/);
   assert.equal(score(early, 'baseline_drift'), 11.7, 'the variance and delay parts stand: 6.67 + 5');
-  assert.match(early.risk.sub_metrics.baseline_drift.summary, /left out of the sum: bei/);
+  // the summary and the part both say it: the BEI was not assessed (why), so the drift score counts the finish variance and the critical-path delay only (the same arithmetic as before: the part adds nothing)
+  assert.match(early.risk.sub_metrics.baseline_drift.summary, /the BEI not assessed \(No task was baselined to finish by the data date\.\); the drift score therefore counts the finish variance and the critical-path delay only/);
+  assert.match(bei.note!, /^No task was baselined to finish by the data date\. Not assessed: the drift score therefore counts the finish variance and the critical-path delay only/);
+  assert.equal(early.risk.sub_metrics.baseline_drift.parts.filter((p) => p.assessed).map((p) => p.part).join(), 'average_finish_variance_days,critical_path_delay_days');
   // nothing assessable: not assessed, with every reason
   const none = scheduleIndex(B.project('BARE', []).db, {});
   assert.equal(none.risk.result, 'not_assessed');

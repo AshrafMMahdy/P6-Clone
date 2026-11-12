@@ -118,17 +118,21 @@ export const overAllocated = (): Built => project('OVER', [
   { id: 'A', duration_days: 10, resources: ['Crew'] }, { id: 'B', duration_days: 10, resources: ['Crew'] }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'], resources: ['Crew'] }], { resources: [{ id: 'Crew', max_units_per_day: 1 }] });
 
 /** The planning-horizon fixture (golden: horizon.tasks, the source's tasks with dates): P0 complete before the data date (3-5 Jan), then A..K, resources R on A B D E G I, data date 2026-01-05. Every start and finish is the CPM's
- *  from 5 Jan on the 7-day calendar (so the source's planned/forecast dates and the clone's early dates are the same days); the planned finish (the file's target end) is earlier than the forecast for C (10 days), F (6) and I (6): forecast drift. */
+ *  from 5 Jan on the 7-day calendar (so the source's forecast dates and the clone's early dates are the same days). The source's "planned finish" is the project's BASELINE here (a real one, assigned to the project): it was saved from a
+ *  schedule in which C had no predecessor A (it finished on day 3), F was 6 days shorter (27 -> 21), I 6 days shorter (10 -> 4) and J 6 days longer (so that J's finish is the same); the project was then changed to what the fixture says and scheduled again, so against the baseline
+ *  the forecast finish of C is 10 days later, F 6 and I 6: forecast drift. (The planned dates P6 keeps equal the early dates after a calculation; they are not what drifts.) */
 export function horizon(): Built {
   const R = ['A', 'B', 'D', 'E', 'G', 'I'];
-  const defs: [string, number, string[], number][] = [['A', 10, ['P0'], 0], ['B', 10, ['A'], 10], ['C', 3, ['A'], 10], ['D', 5, ['B', 'C'], 20], ['E', 30, ['D'], 25], ['F', 27, ['D'], 25], ['G', 5, ['E', 'F'], 55], ['H', 10, ['G'], 60], ['I', 10, ['H'], 70], ['J', 20, ['I'], 80], ['K', 5, ['J'], 100]];
-  const b = project('HORIZON', [{ id: 'P0', duration_days: 2 }, ...defs.map(([id, d, p]) => ({ id, duration_days: d, predecessors: p, ...(R.includes(id) ? { resources: ['R'] } : {}) }))], {
+  const defs: [string, number, string[]][] = [['A', 10, ['P0']], ['B', 10, ['A']], ['C', 3, ['A']], ['D', 5, ['B', 'C']], ['E', 30, ['D']], ['F', 27, ['D']], ['G', 5, ['E', 'F']], ['H', 10, ['G']], ['I', 10, ['H']], ['J', 20, ['I']], ['K', 5, ['J']]];
+  const earlier: Record<string, number> = { F: 21, I: 4, J: 26 }; // (J is 6 days longer there, so that I's change does not move it)
+  const b = project('HORIZON', [{ id: 'P0', duration_days: 2 }, ...defs.map(([id, d, p]) => ({ id, duration_days: earlier[id] ?? d, predecessors: id === 'C' ? [] : p, ...(R.includes(id) ? { resources: ['R'] } : {}) }))], {
     start: '2026-01-05', resources: [{ id: 'R', max_units_per_day: 1 }], schedule: false,
     ops: [{ op: 'update_activity', id: 'P0', actual_start: '2026-01-03 00:00', actual_finish: '2026-01-05 00:00' }] });
-  const r = scheduleProjects(b.db, [b.projId], { dataDate: parseP6Date('2026-01-05 00:00')! });
+  const at = { dataDate: parseP6Date('2026-01-05 00:00')! };
+  if (!scheduleProjects(b.db, [b.projId], at).ok) throw new Error('horizon: baseline state does not schedule');
+  apply(b.db, [{ op: 'save_baseline', name: 'BL', assign_as: 'project' }, { op: 'update_activity', id: 'F', duration_days: 27 }, { op: 'update_activity', id: 'I', duration_days: 10 }, { op: 'update_activity', id: 'J', duration_days: 20 }, { op: 'add_relationship', pred: 'A', succ: 'C', type: 'FS' }]);
+  const r = scheduleProjects(b.db, [b.projId], at);
   if (!r.ok) throw new Error('horizon: ' + JSON.stringify(r.findings));
-  const day = (n: number) => new Date(Date.UTC(2026, 0, 5 + n)).toISOString().slice(0, 10) + ' 00:00';
-  for (const [id, d, , s, drift] of [['C', 3, 0, 10, 10], ['F', 27, 0, 25, 6], ['I', 10, 0, 70, 6]] as const) rows(b.db, 'TASK').find((t) => t.proj_id === b.projId && t.task_code === id)!.target_end_date = day(s + d - drift);
   return b;
 }
 

@@ -46,6 +46,9 @@ const r3 = (v: number) => Math.round(v * 1000) / 1000;
 
 // ------------------------------------------------------------------------------------------------ the fixtures hold what the source says
 
+/** The source's status of a score where higher is better (logicAudit.ts:180, progressAudit.ts:216: >= 90 pass, >= 70 warning, else fail). The clone has no use for it (no tool answers this status), so it lives here, to check the source's own statuses. */
+const scoreStatus = (score: number): 'pass' | 'warning' | 'fail' => (score >= 90 ? 'pass' : score >= 70 ? 'warning' : 'fail');
+
 test('fixtures: the P6 projects schedule to the source\'s CPM (7-day 24-hour calendar: working days = days), the loop is refused', () => {
   for (const [name, build] of [['cleanChain', B.cleanChain], ['withFloat', B.withFloat], ['withLogicIssues', B.withLogicIssues], ['overAllocated', B.overAllocated]] as const) {
     const b = build(), cpm = G(name, 'cpm');
@@ -133,7 +136,7 @@ test('logic figures: open ends, leads, lags, hard constraints, redundant links, 
     assert.deepEqual(ids(l.out_of_sequence), g.data.checks.out_of_sequence, `${name} out of sequence`);
     assert.equal(l.score, g.data.logic_score, `${name} score`);
     assert.equal(l.grade, g.data.grade, `${name} grade`);
-    assert.equal(F.scoreStatusOf(l.score), g.status, `${name} status`);
+    assert.equal(scoreStatus(l.score), g.status, `${name} status`);
   }
 });
 
@@ -197,7 +200,7 @@ test('progress anomalies: the source\'s score where the P6 file reads the same',
   const s = assessed(F.progressAnomalies(scopeOf(B.gamingStarted()))), g = G('gaming', 'progress_audit_t2_started_status_2026_01_29');
   assert.deepEqual(s.anomalies.map((a) => [a.rule, a.id, a.severity, a.predecessor]), g.data.anomalies.map((a: any) => [a.type, a.task_id, a.severity, a.predecessor_id]));
   assert.equal(s.integrity_score, g.data.integrity_score);
-  assert.equal(F.scoreStatusOf(s.integrity_score), g.status);
+  assert.equal(scoreStatus(s.integrity_score), g.status);
 });
 
 test('progress anomalies: progress with no actual start reads the raw %; the out-of-sequence part of the source\'s gamingCurrent needs a start', () => {
@@ -333,7 +336,7 @@ test('grades and bands: the source\'s tables, against the numbers it produced', 
   for (const f of ['cleanChain', 'withFloat', 'withLogicIssues', 'delayed', 'overAllocated', 'logicVariety']) {
     const a = G(f, 'logic_audit');
     assert.equal(F.gradeOf(a.data.logic_score), a.data.grade, f);
-    assert.equal(F.scoreStatusOf(a.data.logic_score), a.status, f);
+    assert.equal(scoreStatus(a.data.logic_score), a.status, f);
   }
   for (const f of ['cleanChain', 'withFloat', 'withLogicIssues', 'delayed', 'gamingCurrent', 'overAllocated']) {
     const r = G(f, 'risk_index_status'), idx = r.data.schedule_risk_index;
@@ -347,7 +350,7 @@ test('grades and bands: the source\'s tables, against the numbers it produced', 
   assert.equal(F.gradeOf(null), null);
   assert.equal(F.gradeOf(NaN), null);
   assert.deepEqual([0, 19.9, 20, 39.9, 40, 59.9, 60, 79.9, 80, 100].map(F.riskLevelOf), ['low', 'low', 'moderate', 'moderate', 'elevated', 'elevated', 'high', 'high', 'critical', 'critical']);
-  assert.deepEqual([[89.9, 'warning'], [90, 'pass'], [69.9, 'fail'], [70, 'warning']].map(([v]) => F.scoreStatusOf(v as number)), ['warning', 'pass', 'fail', 'warning']);
+  assert.deepEqual([[89.9, 'warning'], [90, 'pass'], [69.9, 'fail'], [70, 'warning']].map(([v]) => scoreStatus(v as number)), ['warning', 'pass', 'fail', 'warning']);
   assert.deepEqual([19.9, 20, 49.9, 50].map(F.riskStatusOf), ['pass', 'warning', 'warning', 'fail']);
 });
 
@@ -452,7 +455,7 @@ test('registration, end to end through the server: listed read-only, run on a pr
 test('the five benchmark tools have a measured memory entry (workset.ts WORK): each reserves per x the project\'s bytes before it runs', async () => {
   const { workNeed, WORK } = await import('../mcp/workset.ts');
   const s = { db: { tables: { TASK: { rows: [] }, PROJECT: { rows: [] } } }, bytes: 20 * 1048576 } as never;
-  const per: Record<string, number> = { schedule_index: 1.5, planning_horizon: 1.2, decm: 2.8, change_tracking: 2.3, baseline_variance: 2.0 };
+  const per: Record<string, number> = { schedule_index: 1.7, planning_horizon: 1.2, decm: 2.8, change_tracking: 2.3, baseline_variance: 2.1 };
   for (const [tool, p] of Object.entries(per)) {
     assert.equal(WORK[tool].per, p, tool);
     const need = workNeed(tool, {}, s, () => Infinity)!;
