@@ -6,6 +6,7 @@ import { baselineOf, LISTED } from '../core/analysis/common.ts';
 import { scheduleIndex, shapeScheduleIndex } from '../core/analysis/scheduleIndex.ts';
 import { decm, DECM_IDS, DECM_PROFILES } from '../core/analysis/decm.ts';
 import { planningHorizon, shapeHorizon } from '../core/analysis/planningHorizon.ts';
+import { baselineVariance, shapeVariance, DRIVER_MIN_DAYS } from '../core/analysis/baselineVariance.ts';
 import { changeTracking, shapeChanges, MODES, DATE_MATERIAL_DAYS, PROGRESS_MATERIAL_POINTS } from '../core/analysis/changeTracking.ts';
 import { config, fail, type Session } from './runtime.ts';
 import { exportDoc, exportNameProp, exportProp, RESULT_FILE_TOOLS, firstOf, type Table } from './export.ts';
@@ -123,6 +124,32 @@ export const FORENSIC_REGISTRY: ForensicTool[] = [
         const { answer, whole, tables } = shapeChanges(changeTracking({ updates: loaded.updates, mode: c.a.mode, hoursPerDay: c.s.hpd }), c.first);
         return c.exported(answer, whole, tables);
       } finally { loaded.release(); }
+    },
+  },
+  {
+    name: 'baseline_variance',
+    description: `The schedule as planned against the schedule as it stands, and who and what delayed it (the Bellator Schedule Intelligence as-planned-vs-as-built, delay-analysis and baseline-compare variance, as the clone\u2019s own: P6\u2019s stored total float and critical flag, working days of each activity\u2019s calendar, the real baselines and actual dates). The open project is the later (as-built) side; the other side is baseline (project, bl1, bl2, bl3 or a saved baseline\u2019s name, as dcma_14 takes it; the baseline is the earlier side) or as_planned: {handle} or {path}, another schedule matched by Activity ID, then by a name unique on both sides. Neither given: the project\u2019s assigned baseline; none assigned: refused, with the two ways to give one. Per activity: start, finish and duration variance in working days and the slip class (ahead, on_time, minor_slip up to 5 days, moderate_slip up to 15, major_slip up to 30, severe_slip over), counts per class in slip_classes. critical_overlay: critical in each side\u2019s own stored float and newly critical (not assessed when the other side carries no float). project_slip: the latest current finish less the latest finish of the other side, in working days and dates. Delay drivers: activities finishing ${DRIVER_MIN_DAYS} working day or more later, each with its variance type (start_delay, finish_delay, duration_overrun, compound_delay, concurrent_delay), critical or not (finished work is neither: P6 keeps no float for it), the successors it reaches, the causal score and the critical drivers that overlap it; chains: each critical driver along its critical successors to the first milestone. totals gives two figures side by side that are not the same thing: project_slip_working_days and critical_drivers_delay_days (the sum of the critical drivers\u2019 own delays; concurrent drivers delay the same days). Where two critical drivers overlap, the overlapping days are shown and the source\u2019s equal split of their days between the responsible party and concurrent_days_split_equally; the AACE windows method and half-step are what windows_analysis does. responsibility_code: the name of an activity code type (for example "Responsibility") whose value on each driver is its party; responsibility sums driver days per value and no value; without it responsibility is not assessed (a P6 file has no such field) and says how to give it; a name the file does not have is refused with the file\u2019s activity code types. bei is the clone\u2019s one BEI; duration_weighted_percent_complete is the source\u2019s \u201cSPI\u201d under its honest name (SPI(t) is Earned Schedule in progress_curves). Read-only. Lists (variances worst first, drivers, chains, critical_overlay newly critical first, and each driver\u2019s overlaps and each chain\u2019s path): 25 in the answer, <list>_total the true number, the whole list in the result file. method lists every number with its source line.`,
+    properties: {
+      baseline: { type: 'string', description: 'project (default), bl1, bl2, bl3 or a saved baseline\u2019s name, as dcma_14 takes it: the earlier side. Not with as_planned.' },
+      as_planned: { type: 'object', description: 'another schedule as the earlier side: {handle} of an open project, or {path} of a file. Not with baseline.' },
+      responsibility_code: { type: 'string', description: 'the name of an activity code type whose value on each delay driver is its responsible party (e.g. "Responsibility")' },
+    },
+    tables: ['variances', 'drivers', 'chains', 'critical_overlay'],
+    readsFiles: ['as_planned.path'], readsHandles: true,
+    run: (c) => {
+      const ap = c.a.as_planned;
+      if (ap != null) {
+        if (c.a.baseline != null) fail('bad_input', 'Pass baseline or as_planned, not both.', 'baseline names a baseline in this file; as_planned is another schedule.');
+        if (typeof ap !== 'object' || Array.isArray(ap) || (!ap.handle === !ap.path)) fail('bad_input', 'as_planned must be {"handle": ...} or {"path": ...}.', 'e.g. {"path": "As planned.xer"}');
+      }
+      if (c.a.responsibility_code != null && typeof c.a.responsibility_code !== 'string') fail('bad_input', 'responsibility_code must be the name of an activity code type.', 'e.g. "Responsibility"');
+      const loaded = ap ? loadUpdates({ updates: [ap] }, c.s, c.h, { tool: 'baseline_variance', includeCurrent: false }) : null;
+      try {
+        const r = baselineVariance(c.s.db, { projIds: c.projIds, hoursPerDay: c.s.hpd, baseline: c.a.baseline != null ? String(c.a.baseline) : undefined, asPlanned: loaded?.updates[0], responsibilityCode: c.a.responsibility_code });
+        if ('refused' in r) return fail('bad_input', r.message, r.next);
+        const { answer, whole, tables } = shapeVariance(r, c.first);
+        return c.exported(answer, whole, tables);
+      } finally { loaded?.release(); }
     },
   },
 ];

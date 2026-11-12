@@ -132,8 +132,8 @@ export const workerPeak = (sessionBytes: number) => WORKER_PEAK_PER_SESSION_BYTE
  *  (the tool's own working-set check still refuses what cannot fit). */
 export const RUN_HERE = Symbol('run here');
 const snapshotOf = (s: Session): Snapshot => ({ handle: s.handle, ownerKey: s.ownerKey, db: s.db, path: s.path, format: s.format, hpd: s.hpd, ...(s.encoding ? { encoding: s.encoding } : {}), ...(s.savedTo ? { savedTo: s.savedTo } : {}), dirty: s.dirty, bytes: s.bytes });
-/** The other open projects a call reads by handle (windows_analysis: updates[].handle). */
-const readsHandles = (name: string, a: Record<string, any>): string[] => ((name === 'windows_analysis' || forensicReadsHandles(name)) && Array.isArray(a.updates) ? a.updates.filter((u: any) => u?.handle).map((u: any) => String(u.handle))
+/** The other open projects a call reads by handle (windows_analysis and the forensic tools: updates[].handle; baseline_variance also as_planned.handle). */
+const readsHandles = (name: string, a: Record<string, any>): string[] => ((name === 'windows_analysis' || forensicReadsHandles(name)) ? [...(Array.isArray(a.updates) ? a.updates.filter((u: any) => u?.handle).map((u: any) => String(u.handle)) : []), ...(a.as_planned?.handle ? [String(a.as_planned.handle)] : [])]
   : (name === 'import_file' || name === 'transfer_progress') && a.other_handle ? [String(a.other_handle)] : []);
 /** A file the worker was writing: "<folder>/.<name>.<tag><hex>.p6clone-tmp" is the temporary file of "<folder>/<name>" (server.ts writeOutWith). */
 export const targetOf = (tmp: string) => join(dirname(tmp), basename(tmp).replace(/^\./, '').replace(/\.(?:j[0-9a-f]{6}-)?[0-9a-f]{8}\.p6clone-tmp$/, ''));
