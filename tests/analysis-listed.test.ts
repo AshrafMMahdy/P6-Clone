@@ -389,3 +389,88 @@ test('B11: a too-large answer also carries its note, partial, resume and next_of
     assert.ok(!('answer_note' in plain) && !('resume' in plain));
   } finally { config.maxResponseChars = was; }
 });
+
+// ── compare: progress_integrity (ported from the platform's wrapper) ─────────────────────────────────────────────────────────────────────
+const integrityPair = async (id: string, early: unknown[], late: unknown[], base: unknown[]) => {
+  const h = await build(id, base);
+  const ed = async (ops: unknown[]) => assert.equal((await call('edit', { ...h, operations: ops })).err, false);
+  await ed(early);
+  const p1 = join(root, `${id}-early.xer`), p2 = join(root, `${id}-late.xer`);
+  await call('save', { ...h, path: p1 });
+  await ed(late);
+  await call('save', { ...h, path: p2 });
+  const E = (await call('open_file', { path: p1 })).d;
+  return { E, p1, p2, h };
+};
+const setType = (code: string, t: string) => ({ op: 'set_fields', table: 'TASK', where: { task_code: code }, fields: { complete_pct_type: t } });
+
+test('compare mode all carries progress_integrity: retroactive actuals, % complete down for every type, status regressions', async () => {
+  const codes = ['DUR', 'PHY', 'UNI', 'RET', 'STA', 'OK'];
+  const { E, p2 } = await integrityPair('PIN',
+    [...['DUR', 'PHY', 'UNI', 'OK'].map((c) => ({ op: 'update_activity', id: c, actual_start: '2026-03-02', percent_complete: c === 'DUR' ? 20 : 50 })), { op: 'update_activity', id: 'RET', actual_start: '2026-03-02' },
+      { op: 'update_activity', id: 'STA', actual_start: '2026-03-02', actual_finish: '2026-03-06' }, { op: 'set_fields', table: 'TASKRSRC', where: { taskrsrc_id: '1' }, fields: { act_reg_qty: '20' } }],
+    [{ op: 'update_activity', id: 'DUR', percent_complete: 10 }, { op: 'update_activity', id: 'PHY', percent_complete: 30 }, { op: 'update_activity', id: 'RET', actual_start: '2026-03-03' }, { op: 'update_activity', id: 'OK', percent_complete: 60 },
+      { op: 'set_fields', table: 'TASKRSRC', where: { taskrsrc_id: '1' }, fields: { act_reg_qty: '10' } }, { op: 'set_fields', table: 'TASK', where: { task_code: 'STA' }, fields: { act_end_date: '' } }],
+    [...codes.map((c) => ({ op: 'add_activity', id: c, name: c, duration_days: 10 })), { op: 'add_resource', id: 'LAB', price_per_unit: 10 }, { op: 'assign_resource', activity: 'UNI', resource: 'LAB', units: 40 }, setType('PHY', 'CP_Phys'), setType('UNI', 'CP_Units')]);
+  const d = (await call('compare', { handle: E.handle, path: p2 })).d;
+  const pi = d.progress_integrity;
+  assert.deepEqual(Object.keys(pi).sort(), ['clean', 'note', 'progress_decreases', 'progress_decreases_total', 'retroactive_actuals', 'retroactive_actuals_total', 'status_regressions', 'status_regressions_total']);
+  assert.equal(pi.clean, false);
+  assert.deepEqual(pi.retroactive_actuals.map((x: any) => [x.id, x.field, x.a, x.b]), [['RET', 'actual_start', '2026-03-02 00:00', '2026-03-03 00:00'], ['STA', 'actual_finish', '2026-03-06 00:00', '']]);
+  assert.deepEqual(pi.progress_decreases.map((x: any) => [x.id, x.field, x.a, x.b]), [['DUR', 'duration_pct', 20, 10], ['PHY', 'physical_pct', 50, 30], ['UNI', 'units_pct', 50, 25]]);
+  assert.deepEqual(pi.status_regressions.map((x: any) => [x.id, x.a, x.b]), [['STA', 'TK_Complete', 'TK_Active']]);
+  assert.equal(pi.progress_decreases_total, 3);
+  assert.match(pi.note, /^2 retroactive actual-date change\(s\), 3 progress decrease\(s\), 1 status regression\(s\) between the updates/);
+  // the whole lists are in the result files
+  assert.ok(csv(d, 'progress_decreases') && csv(d, 'retroactive_actuals') && csv(d, 'status_regressions'));
+  // not given in mode computed
+  assert.equal((await call('compare', { handle: E.handle, path: p2, mode: 'computed' })).d.progress_integrity, undefined);
+});
+
+test('compare progress_integrity: the same file is clean; a list over LISTED shows 25 with its total and the note naming the file', async () => {
+  const ops = Array.from({ length: 27 }, (_, i) => ({ op: 'add_activity', id: `P${String(i).padStart(2, '0')}`, name: `P${i}`, duration_days: 10 }));
+  const { E, p1, p2 } = await integrityPair('PIL', ops.map((o) => ({ op: 'update_activity', id: o.id, actual_start: '2026-03-02', percent_complete: 40 })), ops.map((o) => ({ op: 'update_activity', id: o.id, percent_complete: 30 })), ops);
+  const same = (await call('compare', { handle: E.handle, path: p1 })).d.progress_integrity;
+  assert.equal(same.clean, true); assert.equal(same.progress_decreases_total, 0);
+  assert.match(same.note, /^no actual date the earlier update held was changed or cleared/);
+  const d = (await call('compare', { handle: E.handle, path: p2 })).d, pi = d.progress_integrity;
+  assert.equal(pi.progress_decreases.length, LISTED); assert.equal(pi.progress_decreases_total, 27);
+  assert.equal(pi.progress_decreases_note, `25 of 27 shown; all 27 in ${csv(d, 'progress_decreases')}`);
+  assert.equal(readFileSync(csv(d, 'progress_decreases'), 'utf8').trim().split('\n').length, 28);
+  assert.equal(JSON.parse(readFileSync(d.exported.files[0].path, 'utf8')).progress_integrity.progress_decreases.length, 27);
+});
+
+// ── a scenario or enum value the tool cannot use is refused, not run as "no change" ────────────────────────────────────────────────────────
+test('evaluate_batch refuses a scenario that is not {name, overrides: [...]}, naming it; an empty overrides list stays allowed', async () => {
+  const h = await build('EBS', [{ op: 'add_activity', id: 'A50', name: 'A', duration_days: 5 }]);
+  const op = { op: 'update_activity', id: 'A50', duration_days: 10 };
+  const bare = await call('evaluate_batch', { ...h, scenarios: [[op]] });
+  assert.equal(bare.err, true);
+  assert.match(bare.d.error.message, /^scenarios\[0\] \(scenario 1\) is not a scenario: received a bare list\. A scenario is an object \{"name": "\.\.\.", "overrides": \[edit operations\]\}\.$/);
+  const keys = await call('evaluate_batch', { ...h, scenarios: [{ name: 'ok', overrides: [op] }, { name: 'x', operations: [op] }] });
+  assert.equal(keys.err, true);
+  assert.match(keys.d.error.message, /^scenarios\[1\] \(scenario 2\) is not a scenario: received an object with the keys "name", "operations", no "overrides" list\./);
+  assert.match((await call('evaluate_batch', { ...h, scenarios: [{ name: 'x', overrides: 'nope' }] })).d.error.message, /"overrides" is not a list/);
+  assert.match((await call('evaluate_batch', { ...h, scenarios: ['x'] })).d.error.message, /received string "x"/);
+  const good = await call('evaluate_batch', { ...h, scenarios: [{ name: 'as it stands', overrides: [] }, { name: 'longer', overrides: [op] }] });
+  assert.equal(good.err, false);
+  assert.equal(good.d.scenarios[0].finish_delta_days, 0); assert.ok(good.d.scenarios[1].finish_delta_days > 0);
+});
+
+test('evaluate refuses overrides that are not a list of operations', async () => {
+  const h = await build('EVO', [{ op: 'add_activity', id: 'A50', name: 'A', duration_days: 5 }]);
+  const obj = await call('evaluate', { ...h, overrides: { op: 'update_activity' } });
+  assert.equal(obj.err, true); assert.match(obj.d.error.message, /received an object with the keys "op"/);
+  const nested = await call('evaluate', { ...h, overrides: [[{ op: 'update_activity', id: 'A50', duration_days: 10 }]] });
+  assert.equal(nested.err, true, JSON.stringify(nested.d).slice(0, 300));
+});
+
+test('an argument value outside its declared enum is refused for every tool, naming the accepted values', async () => {
+  const h = await build('ENU', [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }]);
+  const bad = await call('find_activities', { ...h, status: 'inprogress' });
+  assert.equal(bad.err, true);
+  assert.equal(bad.d.error.message, 'find_activities: status "inprogress" is not an accepted value. status is one of: not_started, in_progress, completed.');
+  assert.match((await call('find_activities', { ...h, sort: 'name' })).d.error.message, /sort "name" is not an accepted value\. sort is one of: start, finish, total_float, duration\./);
+  assert.match((await call('render_4d', { ...h, path: root, format: 'gif' })).d.error.message, /render_4d: format "gif" is not an accepted value\. format is one of: mp4, webm\./);
+  for (const status of ['not_started', 'in_progress', 'completed', '', null, undefined]) assert.equal((await call('find_activities', { ...h, status })).err, false);
+});

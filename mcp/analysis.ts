@@ -193,6 +193,13 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
     }
     case 'evaluate_batch': {
       if (!Array.isArray(a.scenarios) || !a.scenarios.length) fail('bad_input', 'scenarios must be a non-empty list.', 'e.g. [{"name": "A shorter", "overrides": [{"op": "update_activity", "id": "A1000", "duration_days": 5}]}]');
+      // a scenario is {name, overrides: [edit operations]}: anything else would run as "no change" and answer ok, so it is refused, naming the scenario
+      // (an empty overrides list is the scenario "as it stands" and stays allowed)
+      a.scenarios.forEach((x: unknown, i: number) => {
+        if (x && typeof x === 'object' && !Array.isArray(x) && Array.isArray((x as { overrides?: unknown }).overrides)) return;
+        const got = Array.isArray(x) ? 'a bare list' : x && typeof x === 'object' ? `an object with the keys ${Object.keys(x).map((k) => `"${k}"`).join(', ') || '(none)'}, ${'overrides' in x ? '"overrides" is not a list' : 'no "overrides" list'}` : `${x === null ? 'null' : typeof x} ${JSON.stringify(x)}`;
+        fail('bad_input', `scenarios[${i}] (scenario ${i + 1}) is not a scenario: received ${got}. A scenario is an object {"name": "...", "overrides": [edit operations]}.`, 'e.g. [{"name": "A shorter", "overrides": [{"op": "update_activity", "id": "A1000", "duration_days": 5}]}]. An empty overrides list is the project as it stands. Nothing was run.');
+      });
       if (a.resume != null && (typeof a.resume !== 'string' || !a.resume.trim())) fail('bad_input', 'resume must be the path a stopped evaluate_batch answered.', 'Pass that path exactly as given, or leave resume out to start over.');
       // every scenario is kept as it finishes (keptRuns.ts); in a compute worker the file's path goes out first, so the answer of a
       // worker that was ended names it
@@ -204,7 +211,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const batchStore: RowStore = a.export == null ? store : { open: (x) => store.open(x), resumeAt: (n) => store.resumeAt(n), add: (k) => store.add(k), stop: (d) => store.stop(d), finish: () => { finishAsked = true; return undefined; } };
       let r: Awaited<ReturnType<typeof evaluateBatch>>, files: ReturnType<typeof exportResult> | undefined, finished: string | undefined;
       try {
-        r = await evaluateBatch(s.db, projIds, a.scenarios.map((x: any, i: number) => ({ name: String(x?.name ?? `scenario ${i + 1}`), overrides: Array.isArray(x?.overrides) ? x.overrides : [] })), { hoursPerDay: s.hpd, top: a.top != null ? Number(a.top) : undefined, tick: h.tick, onRow: h.keep, store: batchStore });
+        r = await evaluateBatch(s.db, projIds, a.scenarios.map((x: any, i: number) => ({ name: String(x?.name ?? `scenario ${i + 1}`), overrides: x.overrides })), { hoursPerDay: s.hpd, top: a.top != null ? Number(a.top) : undefined, tick: h.tick, onRow: h.keep, store: batchStore });
         if (r.ok && a.export != null) {
           const rows = r.scenarios;
           // each scenario as answered, with every activity whose dates it moved, read from the kept file as it is written
