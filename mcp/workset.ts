@@ -38,15 +38,21 @@ export const WORK: Record<string, Work> = {
   // Files (Session.bytes; activities): Copy of JWM - Baseline Programme Rev 05A 22.7 MB (11,426), DHBL-24FEB13_VER-7.0 28.8 MB (5,608), CCA R03 dt 24Oct11SC 73.2 MB (16,143); the figure is the worst of the three
   // (per activity the tools hold about the same on JWM and CCA, 3.6 KB for decm; JWM has the fewest bytes a row, so its per-byte figure is the highest).
   // schedule_index: live JWM 15.4 MB (x1.5 = 1.0 x), DHBL no full collection, grew 30 MB (1.05 x), CCA 69.3 MB (x1.5 = 1.4 x).
-  schedule_index: { per: 1.5, label: 'schedule_index', hint: 'close other projects first' },
+  //   Re-measured 2026-11-12 after the redundant-link search became one pass over bitsets (they are held until the last activity that reads them has been read), the same way but with a ballast of live objects that keeps the heap near its
+  //   limit, so that full collections run during the call (the ballast is in "before", and the largest of several runs with different ballasts is taken): JWM 19.1 MB (x1.5 = 1.26 x), DHBL 15.1 MB (0.79 x), CCA 81.6 MB (x1.5 / 73.2 MB = 1.67 x).
+  //   The old code measured the same way gave JWM 15.9 MB and CCA 80.3 MB, so the change is JWM +3 MB (the bitsets) and nothing on CCA; the earlier CCA figure was a single run and read lower than the largest of several. The worst is CCA: 1.67, recorded rounded UP as the neighbours are: 1.7.
+  schedule_index: { per: 1.7, label: 'schedule_index', hint: 'close other projects first' },
   // planning_horizon: no full collection in any run; grew JWM 27 MB (1.2 x), DHBL 18 MB (0.6 x), CCA 35 MB (0.5 x).
   planning_horizon: { per: 1.2, label: 'planning_horizon', hint: 'close other projects first' },
-  // decm (dcma_14 run inside with every activity listed, and the series compare): live JWM 41.3 MB (x1.5 = 2.7 x), DHBL 26.5 MB (1.4 x), CCA 57.7 MB (1.2 x).
+  // decm (measured when it ran the whole of dcma_14 inside with every activity listed, and the series compare; it now calls only the four checks it reuses, so it holds no more than this and the entry stands as the safe side): live JWM 41.3 MB (x1.5 = 2.7 x), DHBL 26.5 MB (1.4 x), CCA 57.7 MB (1.2 x).
   decm: { per: 2.8, label: 'decm', hint: 'close other projects first, or leave updates out' },
   // change_tracking: live, every activity changed, JWM 33.9 MB (x1.5 = 2.2 x; 56,955 changes), DHBL 18.8 MB (1.0 x), CCA 28.5 MB (0.6 x); the other side identical: JWM 10.8 MB, CCA 38.7 MB (0.8 x).
   change_tracking: { per: 2.3, label: 'change_tracking', hint: 'close other projects first, or pass mode latest (the last pair only)' },
   // baseline_variance: live, every activity delayed, JWM 30.5 MB (x1.5 = 2.0 x; 11,425 drivers), DHBL 19.0 MB (1.0 x), CCA 38.1 MB (0.8 x); the other side identical: CCA no full collection, grew 71 MB (1.0 x).
-  baseline_variance: { per: 2.0, label: 'baseline_variance', hint: 'close other projects first' },
+  //   Re-measured 2026-11-12 after the concurrency became a sweep over the periods (no pair list) and the variance one exact function, the same way as schedule_index above (ballast, the largest of several runs; the other side held as a second
+  //   open project with every activity of it ten days earlier, so every activity is a driver): JWM 31.6 MB (x1.5 / 22.7 MB = 2.09 x), DHBL 28.9 MB (1.5 x), CCA at least 21 MB (the heap limit I could give it was reached: 0.4 x or more). The old code measured
+  //   the same way: JWM 33.1 MB, DHBL 23.8 MB. JWM is the worst: 2.088, which the neighbours' rule (round UP) records as 2.1, not 2.0.
+  baseline_variance: { per: 2.1, label: 'baseline_variance', hint: 'close other projects first' },
   windows_analysis: { per: 1.2, label: 'windows_analysis', hint: 'pass fewer updates' },
   export_excel: { per: 2.0, label: 'export_excel', hint: 'pass project to export one project' },
   export_pdf: { per: 1.0, label: 'export_pdf', hint: 'print a filtered layout (fewer rows), or export to .html' },
