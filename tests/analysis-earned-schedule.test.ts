@@ -6,7 +6,7 @@ import { rows, type Db } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { parseP6Date } from '../core/dates.ts';
-import { progressCurves } from '../core/analysis/curves.ts';
+import { CurvesRefused, progressCurves } from '../core/analysis/curves.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
 import { project, type Built } from './benchmark-fixtures.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
@@ -227,30 +227,24 @@ test('Tower-A (a small real file with progress), duration basis in weeks: Earned
   near(c.totals.es_days, 6.2, 'ES in working days', 5e-4); near(c.totals.at_days, 22, 'AT in working days'); near(c.totals.sv_t_days, -15.8, 'SV(t) in working days', 5e-4);
 });
 
-test('projects with different data dates: SPI, CPI and Earned Schedule are not assessed with the reason and the next step; one project, or projects that share a data date, work as before', () => {
+test('projects with different data dates: the call is refused before anything is computed, naming each Project ID with its data date and the next step; one project, or projects that share a data date, work as before', () => {
   const db = readXerFile(sampleCopy('Enppi.xer')).db;
   const ps = rows(db, 'PROJECT').filter((p) => !p._baseline_of), all = ps.map((p) => p.proj_id);
   assert.equal(new Set(ps.map((p) => p.last_recalc_date)).size, 2, 'the two projects of Enppi have different data dates');
-  // the whole file (it used to answer SPI(t) 2.826 and SPI 5.01, the second project measured at the first one\'s date)
-  const w = progressCurves(db, all, { period: 'month', units: 'duration' });
-  for (const k of ['spi', 'cpi', 'es', 'at', 'pd', 'spi_t', 'sv_t', 'es_date', 'es_days', 'at_days', 'sv_t_days'] as const) assert.equal(w.totals[k], null, k);
-  assert.match(w.totals.es_note, /^Earned Schedule is not assessed\. The projects in scope have different data dates \(Master Rev\.F-N-4 2011-11-30 00:00, 4229 update 2-6-12 2012-06-02 00:00\)/);
-  assert.match(w.totals.es_note, /Pass project: Master Rev\.F-N-4, 4229 update 2-6-12 \(one of them at a time\)\.$/);
-  assert.ok(w.warnings.some((x) => /^SPI, CPI and Earned Schedule are not assessed\. The projects in scope have different data dates/.test(x)));
-  assert.ok(w.totals.bac > 0, 'the sums that need no date stay');
-  // the cost basis too
-  assert.equal(progressCurves(db, all, { period: 'month' }).totals.spi, null);
-  // the project alone: its own figures (SPI(t) 1.035, SPI 0.91)
+  // the whole file, on every basis (it used to answer SPI(t) 2.826 and SPI 5.01, pv, ac, eac, vac and tcpi at the wrong date)
+  for (const units of ['cost', 'hours', 'duration'] as const) assert.throws(() => progressCurves(db, all, { period: 'month', units }), (e: unknown) => e instanceof CurvesRefused
+    && /^The projects in scope have different data dates \(Master Rev\.F-N-4 2011-11-30 00:00; 4229 update 2-6-12 2012-06-02 00:00\)/.test(e.message) && e.next === 'Pass project: Master Rev.F-N-4 or 4229 update 2-6-12 (one of them at a time).', units);
+  // the project alone: its own figures (SPI(t) 1.035)
   const one = progressCurves(db, [ps[1].proj_id], { period: 'month', units: 'duration' });
-  near(one.totals.spi_t, 1.035, 'SPI(t) of the project alone', 5e-4); near(one.totals.spi, 0.91, 'SPI of the project alone'); assert.equal(one.warnings.some((x) => /different data dates/.test(x)), false);
+  near(one.totals.spi_t, 1.035, 'SPI(t) of the project alone', 5e-4); assert.equal(one.warnings.some((x) => /different data dates/.test(x)), false);
   // the same data date on both: assessed, as today (and no warning about dates)
   ps[0].last_recalc_date = ps[1].last_recalc_date;
   const same = progressCurves(db, all, { period: 'month', units: 'duration' });
   assert.ok(same.totals.spi_t != null && same.totals.spi != null && same.totals.cpi != null);
   assert.equal(same.warnings.some((x) => /different data dates/.test(x)), false);
-  // a project with no data date next to one with: different, not assessed
+  // a project with no data date next to one with: different, refused, the missing one named
   ps[0].last_recalc_date = '';
-  assert.equal(progressCurves(db, all, { period: 'month', units: 'duration' }).totals.spi_t, null);
+  assert.throws(() => progressCurves(db, all, { period: 'month', units: 'duration' }), /Master Rev\.F-N-4 none; 4229 update 2-6-12 2012-06-02/);
 });
 
 test('the duration basis says what its totals mean (basis_note); the other bases carry no such note', () => {

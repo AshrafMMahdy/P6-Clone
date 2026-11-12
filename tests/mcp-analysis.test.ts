@@ -80,6 +80,17 @@ test('MCP: progress_curves and resource_histogram', async () => {
   assert.equal((await call('progress_curves', { handle: h, period: 'day' })).d.error.code, 'bad_input');
 });
 
+test('MCP: progress_curves on projects with different data dates is refused naming each Project ID with its data date and "Pass project"; one project answers', async () => {
+  const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'Enppi.xer') })).d.handle;
+  const r = await call('progress_curves', { handle: h, units: 'duration' });
+  assert.equal(r.err, true);
+  assert.equal(r.d.error.code, 'bad_input');
+  assert.match(r.d.error.message, /different data dates \(Master Rev\.F-N-4 2011-11-30 00:00; 4229 update 2-6-12 2012-06-02 00:00\)/);
+  assert.match(r.d.error.next_step ?? r.d.error.hint, /Pass project: Master Rev\.F-N-4 or 4229 update 2-6-12/);
+  const one = await call('progress_curves', { handle: h, units: 'duration', project: '4229 update 2-6-12' });
+  assert.equal(one.err, false, JSON.stringify(one.d).slice(0, 300));
+});
+
 test('MCP: count arguments are whole numbers: a value that is not one is refused as bad_input naming the argument (never a default or "all"); 0 means all where documented; absent is the default', async () => {
   const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'cairo festival city.xer') })).d.handle;
   const bads: unknown[] = [-1, 2.5, Number.NaN, Infinity, '5', true, [3]];

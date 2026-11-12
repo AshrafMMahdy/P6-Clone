@@ -66,10 +66,16 @@ export interface ProgressCurves {
   periods: CurvePeriod[]; warnings: string[];
 }
 
+/** The call is refused (progressCurves throws this): the message says why, next what to do. The MCP layer turns it into the tool's refusal. */
+export class CurvesRefused extends Error { next: string; constructor(message: string, next: string) { super(message); this.next = next; } }
+
 export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' | 'month'; units?: 'cost' | 'hours' | 'duration'; from?: number; to?: number; taskIds?: Set<string> } = {}): ProgressCurves {
   const period = o.period ?? 'month', units = o.units ?? 'cost';
   const open = new Set(projIds);
   const projs = rows(db, 'PROJECT').filter((p) => open.has(p.proj_id));
+  // projects with different data dates have no single "now": every figure at the data date (planned value, actuals, EAC, VAC, TCPI, SPI, CPI, Earned Schedule) and the per-period curve would measure one project at another's date. There is no sound answer, so the call is refused before anything is computed
+  const dates = projs.map((p) => parseP6Date(p.last_recalc_date) ?? null);
+  if (projs.length > 1 && new Set(dates).size > 1) throw new CurvesRefused(`The projects in scope have different data dates (${projs.map((p, i) => `${p.proj_short_name} ${dates[i] != null ? formatP6Date(dates[i]!) : 'none'}`).join('; ')}), so there is no single date to measure planned value, earned value and actual cost at for them together.`, `Pass project: ${projs.map((p) => p.proj_short_name).join(' or ')} (one of them at a time).`);
   // (duration: level of effort has no duration of its own, it spans other activities', so it carries no planned duration)
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id) && t.task_type !== 'TT_WBS' && !(units === 'duration' && t.task_type === 'TT_LOE') && (!o.taskIds || o.taskIds.has(t.task_id)));
   const cals = calendarResolver(db, []);
@@ -80,12 +86,6 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   const dd = minOf(projs.map((p) => parseP6Date(p.last_recalc_date) ?? Infinity));
   const dataDate = Number.isFinite(dd) ? dd : null;
   const warnings: string[] = [];
-  // projects with different data dates have no single "now": SPI, CPI and Earned Schedule of them together are not assessed (one project at a time says what each is)
-  const dates = projs.map((p) => parseP6Date(p.last_recalc_date) ?? null);
-  const mixedDates = projs.length > 1 && new Set(dates).size > 1;
-  const mixedReason = `The projects in scope have different data dates (${projs.map((p, i) => `${p.proj_short_name} ${dates[i] != null ? formatP6Date(dates[i]!) : 'none'}`).join(', ')}), so there is no single date to measure SPI, CPI and Earned Schedule at for them together. Pass project: ${projs.map((p) => p.proj_short_name).join(', ')} (one of them at a time).`;
-  if (mixedDates) warnings.push(`SPI, CPI and Earned Schedule are not assessed. ${mixedReason} The curve's periods before the data date follow the earliest of the dates.`);
-
   // baseline counterparts (dates of the planned value)
   const bl = new Map<string, Row>();
   // the project baseline, else the primary user baseline (BL1), as P6 Professional's baseline bars fall back
@@ -198,8 +198,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   }
   if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost' : units === 'duration' ? 'duration' : 'units'} are recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
   if (!totals.bac) warnings.push(units === 'cost' ? 'The schedule has no budgeted cost (no costed resources or expenses): use units: duration (planned durations, which need neither costs nor resources) or hours, or load costs.' : units === 'duration' ? 'The schedule has no planned duration (every activity is a milestone or has none).' : 'The schedule has no budgeted units (no resource assignments): use units: duration, or load resources.');
-  if (mixedDates) { totals.spi = null; totals.cpi = null; }
-  const sched = mixedDates ? noEarnedSchedule(`Earned Schedule is not assessed. ${mixedReason}`) : earnedSchedule({ g, pv, period, units, baseline: blName, plannedBac, undatedBac, plannedEv, p0, p1, dataDate, cal: projs[0] ? cals.fallback(projs[0].clndr_id) : null });
+  const sched = earnedSchedule({ g, pv, period, units, baseline: blName, plannedBac, undatedBac, plannedEv, p0, p1, dataDate, cal: projs[0] ? cals.fallback(projs[0].clndr_id) : null });
   return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, ...(units === 'duration' ? { basis_note: DURATION_NOTE } : {}), totals: { ...totals, ...sched }, periods, warnings };
 }
 
