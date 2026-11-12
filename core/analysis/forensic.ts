@@ -10,6 +10,7 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentComplete, reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
+import { findLoops } from '../xer/validate.ts';
 import { baselineOf, baselineFinish, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, offender, type Offender, type Scope } from './common.ts';
 import { matchActivities } from './delay.ts';
 
@@ -283,3 +284,35 @@ export function schedulePairs(s: Scope, other: { name: string; db: Scope['db']; 
 
 /** The variance of every paired activity (rows in the order of the pairs). */
 export const varianceRows = (s: Scope, ref: ReferencePairs): ActivityVariance[] => [...ref.pairs].map(([t, b]) => activityVariance(s, t, b));
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Loops, and the clone's one BEI (shared by schedule_index, decm and planning_horizon)
+
+/** The loops in the logic of the scope: the groups of two or more activities that lead back to themselves, found as the scheduler finds them (cpm.ts loopsOf: relationships between activities that are neither WBS summary
+ *  nor level of effort), each as the Activity IDs in it. A schedule with a loop has no valid float and cannot be calculated (P6: "Circular relationship (loop) detected"). */
+export function logicLoops(s: Scope): string[][] {
+  const main = new Set(s.tasks.filter((t) => !isWbs(t) && !isLoe(t)).map((t) => t.task_id));
+  const succ = new Map<string, string[]>();
+  for (const r of s.rels) if (main.has(r.pred_task_id) && main.has(r.task_id)) (succ.get(r.pred_task_id) ?? succ.set(r.pred_task_id, []).get(r.pred_task_id)!).push(r.task_id);
+  return findLoops(succ).map((l) => l.map((id) => s.ctx.taskById.get(id)?.task_code ?? id));
+}
+/** A loop as the scheduler words it (cpm.ts: "Loop: A → B → C → A"). */
+export const loopMessage = (loop: string[]): string => `Loop: ${loop.join(' → ')} → ${loop[0]}`;
+
+export interface BeiFigures { value: number; completed: number; due: number; not_completed: Offender[] }
+/** The Baseline Execution Index, the clone's one definition (dcma_14 check 14, dcma.ts:150-165, kept equal to it by a test): tasks (not WBS summary, level of effort or milestones) completed, early ones included, over the tasks
+ *  baselined to finish by the data date. Not assessed when no project has the baseline, or nothing was due (never 1). */
+export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project'): Assessed<BeiFigures> {
+  if (![...bls.values()].some(Boolean)) return notAssessed(`No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.`);
+  const ok = (t: Row) => !isWbs(t) && !isLoe(t) && !isMilestone(t);
+  const completed = s.tasks.filter((t) => ok(t) && isDone(t)).length;
+  const dueList: Offender[] = []; let due = 0;
+  for (const p of s.projs) {
+    const b = bls.get(p.proj_id), dd = s.dataDate(p.proj_id);
+    if (!b || dd == null) continue;
+    const cur = new Map(s.tasks.filter((t) => t.proj_id === p.proj_id).map((t) => [t.task_code, t]));
+    for (const bt of b.tasks.values()) if (ok(bt) && (baselineFinish(bt) ?? Infinity) <= dd) { due++; const c = cur.get(bt.task_code); if (!c || !isDone(c)) dueList.push({ id: bt.task_code, name: bt.task_name, value: c ? 'not completed' : 'not in the current schedule' }); }
+  }
+  if (!due) return notAssessed(s.projs.every((p) => s.dataDate(p.proj_id) == null) ? 'The project has no data date: give a status_date.' : 'No task was baselined to finish by the data date.');
+  return { result: 'assessed', value: r3(completed / due), completed, due, not_completed: dueList };
+}

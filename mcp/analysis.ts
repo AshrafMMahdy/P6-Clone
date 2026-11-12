@@ -77,7 +77,7 @@ function reschedule(d: Db, projIds: string[], over: Parameters<typeof schedulePr
 }
 
 /** The names of the baselines saved from these projects (any number; BL1-BL3 are only the assigned ones). */
-const savedBaselines = (db: Db, projIds: string[]) => rows(db, 'PROJECT').filter((p) => projIds.includes(p._baseline_of ?? '')).map((p) => p.proj_short_name);
+export const savedBaselines = (db: Db, projIds: string[]) => rows(db, 'PROJECT').filter((p) => projIds.includes(p._baseline_of ?? '')).map((p) => p.proj_short_name);
 
 /** The answer, and with export the full result and its tables written (the answer names them in exported). changed: the tool has
  *  changed the project already (apply, keep, write), so a failure to write the export is said beside the result (export_error).

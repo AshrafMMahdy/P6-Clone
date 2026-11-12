@@ -1,11 +1,12 @@
 // The place the benchmark-derived analyses are registered (schedule_index, decm, planning_horizon, change_tracking, baseline_variance: each its own core file under core/analysis/, built by its own package).
 // The wiring is done ONCE: this file's list is spread into the server's tools (server.ts), its runner is called after the analysis runner (server.ts), its names join the analysis group, the offload set and the
 // result-file set (server.ts, export.ts), and the files and handles a tool reads are named from here (server.ts FILES, compute.ts). A tool is added by ONE entry in FORENSIC_REGISTRY below and its core file:
-// nothing else changes. The registry is empty until a tool is built; tests/analysis-forensic.test.ts proves the wiring with a throwaway entry.
-import { LISTED } from '../core/analysis/common.ts';
-import { config, type Session } from './runtime.ts';
+// nothing else changes. tests/analysis-forensic.test.ts proves the wiring with a throwaway entry.
+import { baselineOf, LISTED } from '../core/analysis/common.ts';
+import { scheduleIndex, shapeScheduleIndex } from '../core/analysis/scheduleIndex.ts';
+import { config, fail, type Session } from './runtime.ts';
 import { exportDoc, exportNameProp, exportProp, RESULT_FILE_TOOLS, firstOf, type Table } from './export.ts';
-import { loadUpdates, resultExporter, type AnalysisHelpers } from './analysis.ts';
+import { loadUpdates, resultExporter, savedBaselines, type AnalysisHelpers } from './analysis.ts';
 import { WORK, type Work } from './workset.ts';
 
 /** What a tool's `run` is given besides its arguments: the answer-and-files helper the analysis tools use, the list rule, the series loader. */
@@ -45,8 +46,30 @@ export interface ForensicTool {
   run: (c: ForensicCall) => unknown | Promise<unknown>;
 }
 
+const STATUS_DATE = { type: 'string', description: 'the date the schedule is judged at (default: each project\u2019s data date), as dcma_14 takes it' };
+const BASELINE = { type: 'string', description: 'project (default), bl1, bl2, bl3 or a saved baseline\u2019s name, as dcma_14 takes it' };
+/** status_date as dcma_14 takes it; baseline refused when no project in scope has it, as dcma_14 refuses it. */
+function dateAndBaseline(c: ForensicCall): { statusDate: number | null; baseline?: string } {
+  const statusDate = c.h.dd(c.a.status_date); // (a value that is not a date is refused by dd itself)
+  const db = c.s.db;
+  if (c.a.baseline != null && !c.projIds.some((id) => baselineOf(db, db.tables.PROJECT.rows.find((p) => p.proj_id === id)!, String(c.a.baseline)))) fail('bad_input', `No baseline "${c.a.baseline}" for this project.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(db, c.projIds).join(', ') || 'none saved'}.`);
+  return { statusDate, baseline: c.a.baseline != null ? String(c.a.baseline) : undefined };
+}
+
 /** Every benchmark-derived tool. One entry per tool: add it here with its core file. */
-export const FORENSIC_REGISTRY: ForensicTool[] = [];
+export const FORENSIC_REGISTRY: ForensicTool[] = [
+  {
+    name: 'schedule_index',
+    description: 'The schedule health score and the schedule risk index, from the same figures, on the open file\u2019s own tables (the Bellator Schedule Intelligence analyses, as the clone\u2019s own: P6\u2019s stored total float and critical flag, working days of each activity\u2019s calendar, the real baselines, actual dates and data date). health (0-100, grade A-F, signals): 0.40 critical-path density + 0.35 float erosion + 0.15 structural (open ends) + 0.10 relationship (finish-to-start share); a schedule with a loop cannot be calculated and has no score (the loop is named). risk (0-100, lower is better, grade, level, status): the weighted sum of five sub-metrics, each with score, active, reason when not assessed and its parts: float 0.30, logic 0.25 (100 - the logic-audit score), baseline drift 0.20 (needs a baseline: average finish variance, BEI, critical-path delay), progress integrity 0.15 (needs a data date: 100 - the integrity score), resource 0.10 (needs resource assignments: over-allocation against the real limits, work activities with no resource, an over-allocated resource on a critical activity). A part the file cannot supply is not assessed, with the reason, and the composite is re-weighted over the sub-metrics assessed (left_out says which were left out); nothing is invented. drivers rank the sub-metrics by weight x score, each with its recommendation; logic_findings, progress_anomalies, resources and unresourced_activities list what lies behind the scores (25 each in the answer, the true total beside it, the whole list in the result file). method lists every weight and threshold used, so a score can be quoted with how it was made; the numbers are the benchmark\u2019s, carried over as they are. baseline: project, bl1-bl3 or a saved baseline\u2019s name; status_date: the date to judge at.',
+    properties: { status_date: STATUS_DATE, baseline: BASELINE },
+    tables: ['sub_metrics', 'drivers (with each recommendation)', 'logic_findings (every finding\u2019s activities)', 'progress_anomalies', 'resources (every resource)'],
+    run: (c) => {
+      const { statusDate, baseline } = dateAndBaseline(c);
+      const { answer, whole, tables } = shapeScheduleIndex(scheduleIndex(c.s.db, { projIds: c.projIds, hoursPerDay: c.s.hpd, statusDate, baseline }), c.first);
+      return c.exported(answer, whole, tables);
+    },
+  },
+];
 
 const ro = { readOnlyHint: true, openWorldHint: false };
 const project = { type: 'string', description: 'Project ID (default: every project in the file)' };
