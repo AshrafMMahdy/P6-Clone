@@ -135,13 +135,15 @@ test('calendar days for the windows, working days for float and drift (Monday to
   assert.ok(ok.ok, JSON.stringify(ok.error));
   const pid = rows(db, 'PROJECT').find((p) => !p._baseline_of)!.proj_id;
   assert.ok(scheduleProjects(db, [pid], { dataDate: at('2026-03-02') }).ok);
-  rows(db, 'TASK').find((t) => t.task_code === 'A')!.target_end_date = '2026-02-27 17:00';
+  // the baseline (assigned to the project) has A finishing Fri 27 Feb 17:00, a week before its forecast finish
+  const bl = applyOps(db, [{ op: 'build_baseline', name: 'BL', assign_as: 'project', activities: [{ activity: 'A', start: '2026-02-23 08:00', finish: '2026-02-27 17:00', duration_days: 5 }, { activity: 'B', start: '2026-04-02 08:00', finish: '2026-04-06 17:00', duration_days: 3 }] }], { calendarDays: true });
+  assert.ok(bl.ok, JSON.stringify(bl.error));
   const r = planningHorizon(db, {});
   const m = byId(r);
   assert.equal(m.A.band, '0-30 days');
   assert.equal(m.B.days_until_start, 31, 'calendar days');
   assert.equal(m.B.band, '31-60 days');
-  // drift: Fri 27 Feb 17:00 to Fri 6 Mar 17:00 = 5 working days: 100 - (5 - 3) x 5 = 90 (7 calendar days would give 80)
+  // drift (against the baseline finish): Fri 27 Feb 17:00 to Fri 6 Mar 17:00 = 5 working days: 100 - (5 - 3) x 5 = 90 (7 calendar days would give 80)
   assert.equal(m.A.dimensions.forecast_stability!.score, 90);
   assert.deepEqual(m.A.dimensions.forecast_stability!.issues, ['Forecast drift 5d']);
   // float in working days of the activity's 8-hour calendar: a stored float of 24 hours is 3 working days (60), not 1
@@ -164,35 +166,75 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   assert.deepEqual(none.summary.projects_without_data_date, ['aurora_tower']);
   // no resources anywhere in the file: the resources dimension is not assessed for any activity (not 0 for all)
   const r = planningHorizon(B.cleanChain().db, {});
-  assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources']);
+  // and no baseline: forecast stability has nothing to be compared with (the planned dates equal the early dates after a calculation, so they cannot stand in)
+  assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'forecast_stability']);
   assert.match(r.summary.dimensions_not_assessed[1].reason, /no resource assignments/);
-  // T1 by hand: logic 60 (no predecessor), float 0 (critical), stability 100 (planned = forecast): (0.25 x 60 + 0.10 x 0 + 0.15 x 100) / (0.25 + 0.10 + 0.15) = 30 / 0.5 = 60
-  assert.equal(byId(r).T1.readiness_score, 60);
+  assert.match(r.summary.dimensions_not_assessed[2].reason, /^No project baseline is assigned, so the forecast finish has nothing to be compared with/);
+  // T1 by hand: logic 60 (no predecessor), float 0 (critical); resources and stability not assessed: (0.25 x 60 + 0.10 x 0) / (0.25 + 0.10) = 15 / 0.35 = 42.9
+  assert.equal(byId(r).T1.readiness_score, 42.9);
   assert.equal(byId(r).T1.dimensions.resources, undefined);
-  // a milestone in a file that has resources: nothing to resource (re-weighted over logic, float, stability): M: logic 70 (A not complete), float 0, stability 100: (17.5 + 0 + 15) / 0.5 = 65
+  assert.equal(byId(r).T1.dimensions.forecast_stability, undefined);
+  // a milestone in a file that has resources: nothing to resource (re-weighted over logic and float; the file has no baseline, so no stability): M: logic 70 (A not complete), float 0: (17.5 + 0) / 0.35 = 50
   const b = B.project('MS', [{ id: 'A', duration_days: 5, resources: ['R'] }, { id: 'M', duration_days: 0, predecessors: ['A'], task_type: 'milestone' }], { resources: [{ id: 'R', max_units_per_day: 1 }] });
   const m = byId(planningHorizon(b.db, {}));
   assert.deepEqual(m.M.not_assessed, [{ dimension: 'resources', reason: 'A milestone carries no work to resource.' }]);
-  assert.equal(m.M.readiness_score, 65);
+  assert.equal(m.M.readiness_score, 50);
   assert.equal(m.A.dimensions.resources!.score, 100);
-  // no stored float / no planned finish: those dimensions are not assessed for that activity alone
+  // no stored float: that dimension is not assessed for that activity alone
   const x = B.cleanChain();
   const t2 = rows(x.db, 'TASK').find((t) => t.task_code === 'T2')!;
-  t2.total_float_hr_cnt = ''; t2.target_end_date = '';
+  t2.total_float_hr_cnt = '';
   const xr = byId(planningHorizon(x.db, {}));
-  assert.deepEqual(xr.T2.not_assessed.map((n) => [n.dimension, n.reason]), [['float', 'No stored total float: schedule the project (F9) first.'], ['forecast_stability', 'No planned finish.']]);
+  assert.deepEqual(xr.T2.not_assessed.map((n) => [n.dimension, n.reason]), [['float', 'No stored total float: schedule the project (F9) first.']]);
   // T2: logic 70 (T1 not complete) only: 70
   assert.equal(xr.T2.readiness_score, 70);
   assert.equal(xr.T1.dimensions.float!.score, 0, 'the others are unaffected');
+  // a baseline in the file but an activity that is not in it (added since): forecast stability is not assessed for that activity alone, and its weight goes to the others
+  const h = B.horizon();
+  assert.ok(applyOps(h.db, [{ op: 'add_activity', id: 'NEW', name: 'NEW', duration_days: 3, calendar: 'D7' }, { op: 'add_relationship', pred: 'A', succ: 'NEW', type: 'FS' }], { calendarDays: true }).ok);
+  assert.ok(scheduleProjects(h.db, [h.projId], { dataDate: at('2026-01-05') }).ok);
+  const hr = byId(planningHorizon(h.db, {}));
+  assert.deepEqual(hr.NEW.not_assessed.filter((n) => n.dimension === 'forecast_stability').map((n) => n.reason), ['Not in the BL baseline (added since).']);
+  assert.equal(hr.NEW.dimensions.forecast_stability, undefined);
+  assert.ok(hr.C.dimensions.forecast_stability!.score < 100, 'an activity that is in the baseline is assessed');
+  // the dimension is not assessed file-wide only when no baseline exists; the named baseline that is not there is refused by the tool (below)
+  assert.equal(planningHorizon(h.db, {}).summary.dimensions_not_assessed.some((d) => d.dimension === 'forecast_stability'), false);
   // a loop: P6's float is not valid; the loop is named and the float dimension is left out (the logic dimension still reads the links)
   const c = B.withCycle();
   for (const t of rows(c.db, 'TASK').filter((t) => t.proj_id === c.projId)) { t.early_start_date = '2026-01-10 00:00'; t.early_end_date = '2026-01-14 00:00'; t.target_end_date = '2026-01-14 00:00'; t.total_float_hr_cnt = '0'; }
   const l = planningHorizon(c.db, { statusDate: at('2026-01-05') });
   assert.equal(l.loops.length, 1);
   assert.match(l.loops[0].message, /^Loop: [XYZ] → [XYZ] → [XYZ] → [XYZ]$/);
-  assert.deepEqual(l.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'float']);
-  assert.match(l.summary.dimensions_not_assessed[2].reason, /The logic has a loop/);
+  assert.deepEqual(l.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'forecast_stability', 'float']);
+  assert.match(l.summary.dimensions_not_assessed[3].reason, /The logic has a loop/);
   assert.equal(all(l).every((a) => a.dimensions.float === undefined), true);
+});
+
+test('forecast stability compares with the BASELINE finish: P6\'s planned finish equals the early finish after a calculation, so it never shows the drift the baseline shows', () => {
+  const h = B.horizon(), T = (c: string) => rows(h.db, 'TASK').find((t) => t.proj_id === h.projId && t.task_code === c)!;
+  // after the calculation the planned finish of every unstarted activity IS its early finish (this is what made the dimension read 100 on real files)
+  for (const c of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']) assert.equal(T(c).target_end_date, T(c).early_end_date, `${c}: planned finish = early finish`);
+  const m = byId(planningHorizon(h.db, {}));
+  // against the baseline: C 10 working days later (100 - (10 - 3) x 5 = 65), F and I 6 days later (85), the rest on the baseline (100)
+  assert.deepEqual(['C', 'F', 'I', 'A', 'B'].map((c) => m[c].dimensions.forecast_stability!.score), [65, 85, 85, 100, 100]);
+  assert.deepEqual(m.C.dimensions.forecast_stability!.issues, ['Forecast drift 10d']);
+  // the drift comes from the baseline: the same project with the baseline taken away is not assessed for it, not 100
+  const bl = rows(h.db, 'PROJECT').find((p) => p.proj_id === h.projId)!; bl.sum_base_proj_id = '';
+  rows(h.db, 'PROJECT').filter((p) => p._baseline_of).forEach((p) => { p._baseline_of = 'x'; });
+  const none = planningHorizon(h.db, {});
+  assert.deepEqual(none.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'forecast_stability']);
+  assert.ok(all(none).every((a) => a.dimensions.forecast_stability === undefined));
+});
+
+test('work with an actual start (under way) is not work about to start: it is in no window; finished work neither', () => {
+  const b = B.project('ST', [{ id: 'A', duration_days: 4 }, { id: 'B', duration_days: 3, predecessors: ['A'] }, { id: 'C', duration_days: 3 }], { start: '2026-01-05', dataDate: '2026-01-07', schedule: false,
+    ops: [{ op: 'update_activity', id: 'A', actual_start: '2026-01-05 00:00', percent_complete: 50 }] });
+  assert.ok(scheduleProjects(b.db, [b.projId], { dataDate: at('2026-01-07') }).ok);
+  const r = planningHorizon(b.db, {});
+  assert.deepEqual(Object.keys(byId(r)).sort(), ['B', 'C'], 'A has an actual start (its start, the actual one, is before the data date; the rule is "no actual start", not "start before the anchor")');
+  // an activity that has an actual start dated AT or after the data date (the window it would have been counted in) is also left out
+  rows(b.db, 'TASK').find((t) => t.task_code === 'C')!.act_start_date = '2026-01-07 00:00';
+  assert.deepEqual(Object.keys(byId(planningHorizon(b.db, {}))).sort(), ['B']);
 });
 
 test('statuses and the systemic rule by the source\'s numbers', () => {
@@ -211,12 +253,12 @@ test('statuses and the systemic rule by the source\'s numbers', () => {
 
 // ------------------------------------------------------------------------------------------------ the real samples
 
-/** The activities that start in each window counted straight from a file's rows: not finished, not WBS summary or level of effort, start = actual, else early, else planned, calendar days from the data date. */
+/** The activities that start in each window counted straight from a file's rows: no actual start, not WBS summary or level of effort, start = early, else planned, calendar days from the data date. */
 function rawBands(db: B.Built['db'], dd: number) {
   const out = [0, 0, 0];
   for (const t of rows(db, 'TASK')) {
-    if (t.act_end_date || t.task_type === 'TT_WBS' || t.task_type === 'TT_LOE') continue;
-    const s = parseP6Date(t.act_start_date || t.early_start_date || t.target_start_date);
+    if (t.act_start_date || t.task_type === 'TT_WBS' || t.task_type === 'TT_LOE') continue; // (an activity with an actual start, finished or under way, is not work about to start)
+    const s = parseP6Date(t.early_start_date || t.target_start_date);
     if (s == null) continue;
     const d = Math.floor(s / 1440) - Math.floor(dd / 1440);
     if (d >= 0 && d <= 30) out[0]++; else if (d >= 31 && d <= 60) out[1]++; else if (d >= 61 && d <= 90) out[2]++;
@@ -251,14 +293,15 @@ test('129 trial and Detailed Program (progress): the windows counted from the ro
 
 test('Tower-A (a baseline in the file): the one activity in a window, by hand', () => {
   // data date 1 Apr 2026 08:00. A1030 (forecast start 19 Mar) lies before it, A1010 is complete, A1020 started: only the milestone M1000 (1 Apr 17:00, day 0) is in the first window.
-  // M1000: logic 70 (its predecessor A1030 is not complete), resources not assessed (a milestone), float 0 (total float 0), stability 100 (planned = forecast 1 Apr 17:00): (0.25 x 70 + 0.10 x 0 + 0.15 x 100) / 0.50 = 65 -> at risk
+  // M1000: logic 70 (its predecessor A1030 is not complete), resources not assessed (a milestone), float 0 (total float 0), stability not assessed (M1000 is not in the file's baseline: added since): (0.25 x 70 + 0.10 x 0) / 0.35 = 50 -> at risk
   const r = planningHorizon(readXerFile(sampleCopy('Tower-A.xer')).db, {});
   assert.equal(r.summary.activities_in_horizon, 1);
   const m = r.bands[0].activities[0];
   assert.equal(m.id, 'M1000');
   assert.equal(m.days_until_start, 0);
-  assert.equal(m.readiness_score, 65);
+  assert.equal(m.readiness_score, 50);
   assert.equal(m.status, 'at_risk');
+  assert.deepEqual(m.not_assessed.map((n) => [n.dimension, n.reason]), [['resources', 'A milestone carries no work to resource.'], ['forecast_stability', 'Not in the TOWER-A-BL1 baseline (added since).']]);
   assert.deepEqual(m.issues, ['Predecessor A1030 only 0% complete', 'Low float (0d < 5d)']);
   assert.equal(r.bands[0].risks[0].risk, 'Low float (0d < 5d)', 'the weakest dimension is float (0, against logic 70): its first issue');
   assert.equal(r.bands[0].risks[0].impact, 'critical', 'the milestone has no float');
@@ -270,7 +313,7 @@ test('Aurora_Tower_Baseline with a status_date (the file has no data date): coun
   assert.equal(r.result, 'assessed');
   assert.equal(r.status_date, '2026-06-22 00:00');
   assert.deepEqual(r.bands.map((b) => b.activities_total), rawBands(db, at('2026-06-22')));
-  assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources'], 'no resources in this file');
+  assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'forecast_stability'], 'no resources and no baseline in this file');
 });
 
 // ------------------------------------------------------------------------------------------------ the tool
@@ -280,21 +323,26 @@ test('planning_horizon through the server: read-only, status_date the only argum
   const t = (toolsList() as any[]).find((x) => x.name === 'planning_horizon');
   assert.ok(t, 'listed');
   assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
-  assert.deepEqual(Object.keys(t.inputSchema.properties), ['handle', 'export', 'export_name', 'project', 'status_date', 'caller', 'async']);
+  assert.deepEqual(Object.keys(t.inputSchema.properties), ['handle', 'export', 'export_name', 'project', 'status_date', 'baseline', 'caller', 'async']);
   const h = await openSample('129 trial.xer');
-  const r = await call('planning_horizon', { handle: h, bogus: 1, baseline: 'project' });
+  const r = await call('planning_horizon', { handle: h, bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
-  assert.equal(r.d.arguments_not_used.length, 2);
+  assert.equal(r.d.arguments_not_used.length, 1);
   assert.match(r.d.arguments_not_used.join(' '), /planning_horizon has no argument "bogus"/);
-  assert.match(r.d.arguments_not_used.join(' '), /planning_horizon has no argument "baseline"/);
+  // baseline as dcma_14 takes it: refused when no project in scope has it, with the saved baselines named
+  const nobl = await call('planning_horizon', { handle: h, baseline: 'project' });
+  assert.equal(nobl.err, true);
+  assert.match(nobl.d.error.message, /No baseline "project" for this project\./);
+  assert.match(r.d.summary.dimensions_not_assessed.map((d: any) => d.reason).join(' '), /No project baseline is assigned, so the forecast finish has nothing to be compared with/);
   assert.deepEqual(Object.keys(r.d).slice(0, 4), ['report', 'status_date', 'result', 'summary'], 'summary first');
   const b = r.d.bands[1];
   assert.equal(b.activities.length, 25);
   assert.equal(b.activities_total, 369);
   assert.match(b.activities_note, /^25 of 369 shown; all 369 in .*planning_horizon-activities\.csv$/);
-  assert.equal(b.risks.length, 8);
+  assert.equal(b.risks.length, 25);
+  assert.equal(b.risks_total, 34, 'the file has no baseline: forecast stability is not assessed, its weight goes to the others, and more activities read at risk');
   const csv = r.d.exported.files.find((f: any) => f.path.endsWith('-activities.csv'));
-  assert.equal(csv.rows, 785);
+  assert.equal(csv.rows, 783, '785 before the activities with an actual start were left out of the windows');
   const whole = JSON.parse(readFileSync(r.d.exported.files.find((f: any) => f.path.endsWith('planning_horizon.json')).path, 'utf8'));
   assert.equal(whole.bands[1].activities.length, 369);
   assert.equal(r.d.exported.files.find((f: any) => f.path.endsWith('-bands.csv')).rows, 3);

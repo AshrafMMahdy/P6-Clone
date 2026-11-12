@@ -37,9 +37,12 @@ test('a population of 2,500 with exactly one failing activity fails every 0 %-th
   assert.deepEqual(c.negative_float.activities.map((a) => a.id), ['T20']);
   assert.deepEqual(c.invalid_dates.activities.map((a) => a.id), ['T30']);
   assert.deepEqual(c.resources.activities.map((a) => a.id), ['T10']);
-  // the same checks in decm, which always judged exactly, agree (06A506c is dcma_14's invalid dates, forecast part; its threshold is 10 %, so it passes there)
-  const d = Object.fromEntries(decm(b.db, { statusDate: parseP6Date('2026-01-05 00:00')!, thresholds: { '06A506c': 0 } }).checks.map((x) => [x.id, x]));
-  assert.equal(d['06A506c'].result, 'fail');
+  // the same activity in decm (the profile is the only way to change a threshold there): 06A506c finds the same one in the same population, and judges its exact share against the profile's 10 %: 1 of 2,500 passes
+  const d = Object.fromEntries(decm(b.db, { statusDate: parseP6Date('2026-01-05 00:00')! }).checks.map((x) => [x.id, x]));
+  assert.deepEqual([d['06A506c'].numerator, d['06A506c'].denominator], [1, c.invalid_dates.denominator]);
+  assert.deepEqual(d['06A506c'].activities.map((a) => a.id), ['T30']);
+  assert.equal(d['06A506c'].result, 'pass');
+  assert.equal(d['06A506c'].threshold!.value, 10);
 });
 
 test('percentCheck judges the count, and shows a share that is not zero as not zero', () => {

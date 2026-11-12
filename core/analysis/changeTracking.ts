@@ -42,7 +42,8 @@ export interface ChangeTrackingResult {
   report: 'Change tracking';
   status: 'fail' | 'warning' | 'pass'; summary: string;
   mode: Mode;
-  updates: { name: string; data_date: string | null }[];
+  /** the series in the data-date order used (in mode latest, the last two), with the one that is the open project marked */
+  updates: { name: string; data_date: string | null; open_project: boolean }[];
   totals: { changes: number; material: number; not_material: number };
   categories: Record<Category, CategoryResult>;
   flags: Flag[];
@@ -53,7 +54,7 @@ export interface ChangeTrackingResult {
 }
 
 export const CHANGE_METHOD = [
-  'the updates are put in data-date order and each consecutive pair is a period (changeTracking.ts:77-79, :100-103); mode latest compares only the last pair, all_periods every pair (:81, :86); the open project is the latest update',
+  'the updates are put in data-date order and each consecutive pair is a period (changeTracking.ts:77-79, :100-103); mode latest compares only the last pair, all_periods every pair (:81, :86); every update, this open project included, is ordered by its data date (so the open project is the last only when its data date is the latest); the answer’s updates lists the order used and marks the open project',
   'activities are matched by Activity ID (compareSchedules); an activity in only one update of a pair is counted (activities_added / activities_deleted) and not tracked (:106 skips it)',
   'baseline dates: the start and finish the baseline each update carries gives the activity (baselineOf: the project baseline), a change per date (:109-110); a pair where either update has no baseline is not assessed',
   `actual dates: actual start and actual finish, a change per date (:114-115); a date that appears or is cleared is a change and always material (:246)`,
@@ -193,7 +194,7 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
   return {
     report: 'Change tracking',
     status, summary: `${totals.changes} change(s) (${totals.material} material) across ${series.length} updates (${periods.length} period${periods.length === 1 ? '' : 's'}); ${flags.length} flag(s) raised`,
-    mode, updates: series.map((u) => ({ name: u.name, data_date: text(updateDate(u)) })),
+    mode, updates: series.map((u) => ({ name: u.name, data_date: text(updateDate(u)), open_project: !!u.open })),
     totals, categories, flags, periods,
     changes: changeRows, logic_changes: logicRows, resource_changes: resourceRows, retroactive_actuals: retro, progress_decreases: down, status_regressions: back,
     method: CHANGE_METHOD,

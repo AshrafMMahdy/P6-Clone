@@ -356,3 +356,65 @@ test('change_tracking through the server: read-only, mode and updates, refusals,
   assert.equal(lat.d.periods.length, 1);
   assert.equal(lat.d.updates.length, 2);
 });
+
+// ------------------------------------------------------------------------------------------------ the open project in the series
+
+test('every update, the open project included, is ordered by data date: the open project is not always the latest, and the answer says the order and which one it is', async () => {
+  const ups = gamingSeries();
+  // the open project is the 22 January update; "current" (29 January) is another update, handed in first
+  const open = { ...ups[1], name: 'open', open: true };
+  const r = changeTracking({ updates: [ups[2], open, ups[0]] });
+  assert.deepEqual(r.updates, [{ name: '2026-01-15', data_date: '2026-01-15 00:00', open_project: false }, { name: 'open', data_date: '2026-01-22 00:00', open_project: true }, { name: 'current', data_date: '2026-01-29 00:00', open_project: false }]);
+  assert.match(r.method.join(' '), /every update, this open project included, is ordered by its data date \(so the open project is the last only when its data date is the latest\)/);
+  // latest = the last pair in DATA-DATE order, whichever one the open project is
+  const latest = changeTracking({ updates: [ups[2], open, ups[0]], mode: 'latest' });
+  assert.deepEqual(latest.updates.map((u) => [u.name, u.open_project]), [['open', true], ['current', false]]);
+  assert.deepEqual([latest.periods[0].from, latest.periods[0].to], ['open', 'current']);
+  // through the server: 129 trial is open (data date 31 October 2010) and 130 TRIAL (10 November) is the other update: the open project comes FIRST
+  const h = await openSample('129 trial.xer');
+  const s = await call('change_tracking', { handle: h, updates: [{ path: sampleCopy('130 TRIAL.xer') }] });
+  assert.equal(s.err, false, JSON.stringify(s.d).slice(0, 300));
+  assert.deepEqual(s.d.updates.map((u: any) => [u.data_date.slice(0, 10), u.open_project]), [['2010-10-31', true], ['2010-11-10', false]]);
+  // and the descriptions no longer say the open project is the latest (change_tracking, decm; windows_analysis says it is last only when its data date is)
+  const { toolsList } = await import('../mcp/server.ts');
+  const tools = Object.fromEntries((toolsList() as any[]).map((t) => [t.name, t]));
+  for (const n of ['change_tracking', 'decm']) assert.doesNotMatch(tools[n].description + JSON.stringify(tools[n].inputSchema), /(project|handle) is the (LATEST|latest|last) update|this project is the (last|latest)/, n);
+  assert.match(tools.windows_analysis.description, /every update, this handle included unless include_current is false, is put in data-date order \(this handle is the last only when its data date is the latest\)/);
+  assert.match(tools.change_tracking.description, /every update, this open project included, is put in data-date order \(the open project is the last only when its data date is the latest; the answer's updates lists the order used and marks the open project\)/);
+});
+
+test('a series on a file with several projects is refused, naming the Project IDs and "pass project" (change_tracking, decm 06A504, windows_analysis); a baseline stored in the file is not a second project', async () => {
+  const db = readXerFile(sampleCopy('Enppi.xer')).db;
+  const ids = rows(db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_short_name);
+  assert.ok(ids.length > 1);
+  const h = await openSample('Enppi.xer');
+  for (const [tool, args] of [['change_tracking', { updates: [{ path: sampleCopy('Enppi.xer') }] }], ['decm', { updates: [{ path: sampleCopy('Enppi.xer') }] }], ['windows_analysis', { updates: [{ path: sampleCopy('Enppi.xer') }] }]] as const) {
+    const r = await call(tool, { handle: h, ...args });
+    assert.equal(r.err, true, tool);
+    assert.equal(r.d.error.code, 'bad_input', tool);
+    assert.match(r.d.error.message, new RegExp(`^This file has ${ids.length} projects \\(${ids.join(', ')}\\) and a series compares one project\\.`), tool);
+    assert.match(JSON.stringify(r.d.error), new RegExp(`Pass project: ${ids.join(', ')}`), tool);
+  }
+  // the update file with several projects is refused the same way (the open file has one project: Tower-A)
+  const tw = await openSample('Tower-A.xer');
+  const other = await call('change_tracking', { handle: tw, updates: [{ path: sampleCopy('Enppi.xer' ) }] });
+  assert.equal(other.err, true);
+  assert.match(other.d.error.message, new RegExp(`^Update 1 \\(Enppi\\.xer\\) has ${ids.length} projects`));
+  // with project given the series runs (the project is looked for in every schedule of the series)
+  const ok = await call('change_tracking', { handle: h, project: ids[0], updates: [{ path: sampleCopy('Enppi.xer') }] });
+  assert.equal(ok.err, false, JSON.stringify(ok.d).slice(0, 300));
+  assert.equal(ok.d.totals.changes, 0, 'the project against itself');
+  const win = await call('windows_analysis', { handle: h, project: ids[0], updates: [{ path: sampleCopy('Enppi.xer') }] });
+  assert.equal(win.err, false, JSON.stringify(win.d).slice(0, 300));
+  // a project that is not there
+  const none = await call('change_tracking', { handle: h, project: 'NOPE', updates: [{ path: sampleCopy('Enppi.xer') }] });
+  assert.match(none.d.error.message, /No project "NOPE"\./);
+  // Tower-A holds a baseline as a project of its own in the file (_baseline_of): that is not a second project, so a series with the baseline still runs without project
+  assert.equal(rows(readXerFile(sampleCopy('Tower-A.xer')).db, 'PROJECT').length > 1, true, 'the baseline copy is a row of PROJECT');
+  for (const tool of ['change_tracking', 'windows_analysis', 'decm']) assert.equal((await call(tool, { handle: tw, updates: [{ baseline: 'project' }] })).err, false, tool);
+  // baseline_variance's as_planned file with several projects: refused, with its own next step
+  const bv = await call('baseline_variance', { handle: tw, as_planned: { path: sampleCopy('Enppi.xer') } });
+  assert.equal(bv.err, true);
+  assert.match(bv.d.error.message, new RegExp(`has ${ids.length} projects`));
+  assert.match(JSON.stringify(bv.d.error), /as_planned must be a schedule with one project/);
+});

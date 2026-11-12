@@ -84,11 +84,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   const bl = (t: Row) => bls.get(t.proj_id)?.tasks.get(t.task_code);
   const anyBl = [...bls.values()].some(Boolean);
 
-  // the tasks DCMA assesses: incomplete, not WBS summary, LOE or milestones
-  const T = s.tasks.filter((t) => !isDone(t) && !isWbs(t) && !isLoe(t) && !isMilestone(t));
-  const inT = new Set(T.map((t) => t.task_id));
-  // the relationships of incomplete tasks
-  const L = s.rels.filter((r) => inT.has(r.task_id) || inT.has(r.pred_task_id));
+  const { T, L } = dcmaPopulations(s);
 
   // high float / high duration limit
   const projLen = (() => {
@@ -100,19 +96,17 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   const limit = o.limitDays === 'dynamic' ? Math.max(20, Math.ceil(0.1 * projLen)) : o.limitDays ?? 44;
 
   const out: CheckResult[] = [];
-  const exempt = new Set(o.exempt ?? []);
-  const preds = (t: Row) => s.ctx.predsOf.get(t.task_id) ?? [], succs = (t: Row) => s.ctx.succsOf.get(t.task_id) ?? [];
-  out.push(percentCheck('logic', NAMES.logic, T.filter((t) => !exempt.has(t.task_code) && (!preds(t).length || !succs(t).length)).map((t) => offender(t, s, !preds(t).length && !succs(t).length ? 'no predecessor, no successor' : !preds(t).length ? 'no predecessor' : 'no successor')), T.length, th('logic')!, maxIds, 'Incomplete tasks missing a predecessor or a successor.'));
   const lag = (r: Row) => Number(r.lag_hr_cnt || 0);
+  out.push(logicCheck(s, T, th('logic')!, maxIds, new Set(o.exempt ?? [])));
   out.push(percentCheck('leads', NAMES.leads, L.filter((r) => lag(r) < 0).map((r) => relOffender(r, s)), L.length, th('leads')!, maxIds, 'Relationships with a negative lag.'));
-  out.push(percentCheck('lags', NAMES.lags, L.filter((r) => lag(r) > 0).map((r) => relOffender(r, s)), L.length, th('lags')!, maxIds, 'Relationships with a positive lag.'));
+  out.push(lagsCheck(s, L, th('lags')!, maxIds));
   {
     const fs = L.filter((r) => (r.pred_type || 'PR_FS') === 'PR_FS').length, t = th('relationship_types')!;
     const metric = L.length ? pct(fs, L.length) : null;
     const other = L.filter((r) => (r.pred_type || 'PR_FS') !== 'PR_FS').map((r) => relOffender(r, s));
     out.push({ id: 'relationship_types', name: NAMES.relationship_types, unit: '%', metric, threshold: t, numerator: fs, denominator: L.length, result: !L.length || passes(exactPct(fs, L.length), t) ? 'pass' : 'fail', activities: maxIds ? other.slice(0, maxIds) : other, total_activities: other.length, note: 'Share of finish-to-start relationships; listed are the others.' });
   }
-  out.push(percentCheck('hard_constraints', NAMES.hard_constraints, T.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c))).map((t) => offender(t, s, constraintsOf(t).join(', '))), T.length, th('hard_constraints')!, maxIds, 'Must Start/Finish On, Start/Finish No Later Than (P6: Start On, Finish On, On or Before, Mandatory).'));
+  out.push(hardConstraintsCheck(s, T, th('hard_constraints')!, maxIds));
   out.push(percentCheck('high_float', NAMES.high_float, T.filter((t) => (days(t, t.total_float_hr_cnt) ?? -Infinity) > limit).map((t) => offender(t, s, `${Math.round(days(t, t.total_float_hr_cnt)! * 10) / 10} d`)), T.length, th('high_float')!, maxIds, `Total float over ${limit} working days.`));
   out.push(percentCheck('negative_float', NAMES.negative_float, T.filter((t) => (days(t, t.total_float_hr_cnt) ?? 0) < 0).map((t) => offender(t, s, `${Math.round(days(t, t.total_float_hr_cnt)! * 10) / 10} d`)), T.length, th('negative_float')!, maxIds));
   {
@@ -156,6 +150,26 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   };
 }
 
+/** The populations DCMA divides by, the one definition (decm reuses it): the tasks (incomplete, not WBS summary, level of effort or milestone) and the relationships of incomplete tasks (either end is one). */
+export function dcmaPopulations(s: Scope): { T: Row[]; L: Row[] } {
+  const T = s.tasks.filter((t) => !isDone(t) && !isWbs(t) && !isLoe(t) && !isMilestone(t));
+  const inT = new Set(T.map((t) => t.task_id));
+  return { T, L: s.rels.filter((r) => inT.has(r.task_id) || inT.has(r.pred_task_id)) };
+}
+/** DCMA check 1, logic: the tasks missing a predecessor or a successor (exempt: Activity IDs left out). */
+export function logicCheck(s: Scope, T: Row[], th: Threshold, maxIds: number, exempt: Set<string> = new Set()): CheckResult {
+  const preds = (t: Row) => s.ctx.predsOf.get(t.task_id) ?? [], succs = (t: Row) => s.ctx.succsOf.get(t.task_id) ?? [];
+  return percentCheck('logic', NAMES.logic, T.filter((t) => !exempt.has(t.task_code) && (!preds(t).length || !succs(t).length)).map((t) => offender(t, s, !preds(t).length && !succs(t).length ? 'no predecessor, no successor' : !preds(t).length ? 'no predecessor' : 'no successor')), T.length, th, maxIds, 'Incomplete tasks missing a predecessor or a successor.');
+}
+/** DCMA check 3, lags: the relationships (of incomplete tasks) with a positive lag. */
+export function lagsCheck(s: Scope, L: Row[], th: Threshold, maxIds: number): CheckResult {
+  return percentCheck('lags', NAMES.lags, L.filter((r) => Number(r.lag_hr_cnt || 0) > 0).map((r) => relOffender(r, s)), L.length, th, maxIds, 'Relationships with a positive lag.');
+}
+/** DCMA check 5, hard constraints: the tasks with Must Start/Finish On or Start/Finish No Later Than. */
+export function hardConstraintsCheck(s: Scope, T: Row[], th: Threshold, maxIds: number): CheckResult {
+  return percentCheck('hard_constraints', NAMES.hard_constraints, T.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c))).map((t) => offender(t, s, constraintsOf(t).join(', '))), T.length, th, maxIds, 'Must Start/Finish On, Start/Finish No Later Than (P6: Start On, Finish On, On or Before, Mandatory).');
+}
+
 export interface DateFlags { task: Row; actual_start_after: boolean; actual_finish_after: boolean; forecast_before: boolean }
 /** DCMA check 9, the one rule (dcma_14's invalid dates; decm's 06A506a / b / c split it in three): of the activities that are not WBS summaries, those in a project with a data date (the status date) whose
  *  actual start is after it, whose actual finish is after it, or (unfinished) whose forecast date is before it: the forecast start for work not yet started (restart, else early start), the forecast finish
@@ -183,7 +197,7 @@ function projectFinish(s: Scope): number | null {
 }
 
 /** DCMA check 12: delay one early critical task by a large amount and see the project finish move by exactly that. */
-function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: string): CheckResult {
+export function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: string): CheckResult {
   const name = NAMES.critical_path_test;
   const crit = T.filter((t) => isCritical(t, s.ctx)).sort((a, b) => (parseP6Date(a.restart_date || a.early_start_date) ?? 0) - (parseP6Date(b.restart_date || b.early_start_date) ?? 0));
   // nothing critical by float (a Must Finish By later than the forecast gives every task float): the first task on the

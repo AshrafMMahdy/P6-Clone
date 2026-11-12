@@ -12,7 +12,7 @@ import { calendarResolver, relationshipFloat, scheduleProjects } from '../schedu
 import { onScratch } from './batch.ts';
 import { isLoe, isWbs, type Tick } from './common.ts';
 
-export interface Update { name: string; db: Db; projId: string }
+export interface Update { name: string; db: Db; projId: string; /** true on the state of the project open in the session (loadUpdates sets it); the analyses that order the series by data date show which one it is */ open?: boolean }
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const finOf = (t: Row) => parseP6Date(t.act_end_date || t.early_end_date || t.target_end_date);

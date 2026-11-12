@@ -1,14 +1,14 @@
 // decm: the DCMA DECM schedule checks (guidelines 6, 8 and 10), shaped like dcma_14, on the open file's own tables. Ported from our copy of the Bellator Schedule Intelligence benchmark ("Bellatorsi API/src/endpoints/
-// forensics/dcmaDecm.ts": 17 checks, each a percentage of a population, grouped by guideline). The clone reuses what it has: the logic, lag and hard-constraint populations, the invalid dates (split in three) and the
-// critical path test are dcma_14's; the baseline is baselineOf; out-of-sequence progress is the review rule; retroactive actual dates are progressIntegrity (core/diff.ts) between consecutive updates. A check with no
+// forensics/dcmaDecm.ts": 17 checks, each a percentage of a population, grouped by guideline). The clone reuses what it has: the logic, lag and hard-constraint checks, the invalid dates (split in three) and the
+// critical path test are dcma_14's own functions (dcma.ts), called one by one (not the whole of dcma_14); the baseline is baselineOf; out-of-sequence progress is the review rule; retroactive actual dates are progressIntegrity (core/diff.ts) between consecutive updates. A check with no
 // population is not assessed (the source "skips" it), and so is one the file cannot supply an input for (no baseline, no data date, no earlier update, no SLPP or planning-package activity type in P6), with the reason.
-// The threshold values are the source's, carried over as they are (dcmaDecm.ts:53-58); they have NOT been checked against the DCMA DECM workbook.
+// The threshold values are the source's, carried over as they are (dcmaDecm.ts:53-58); they have NOT been checked against the DCMA DECM workbook. The profile (default | strict) is the only way to change them.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { compareSchedules, progressIntegrity } from '../diff.ts';
-import { dcma14, invalidDateFlags } from './dcma.ts';
+import { criticalPathTest, dcmaPopulations, hardConstraintsCheck, invalidDateFlags, lagsCheck, logicCheck } from './dcma.ts';
 import type { Update } from './delay.ts';
 import { baselineOf, baselineFinish, isLoe, isWbs, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
 import { loopMessage, logicLoops, referenceStart, updateDate, updateView } from './forensic.ts';
@@ -28,7 +28,7 @@ export const DECM_PROFILES: Record<string, { label: string; t: Profile }> = {
 const NAMES: Record<DecmId, string> = {
   '06A204b': 'Dangling starts/finishes', '06A205a': 'Lags', '06A208a': 'Summary tasks with logic', '06A209a': 'Hard constraints', '06A210a': 'LOE with discrete successors', '06A212a': 'Out-of-sequence progress',
   '06A401a': 'Critical path validity', '06A501a': 'Missing baseline dates', '06A504a': 'Actual start retroactively changed', '06A504b': 'Actual finish retroactively changed', '06A505a': 'In-progress missing actual start',
-  '06A505b': 'Completed missing actual finish', '06A506a': 'Actual start after status date', '06A506b': 'Actual finish after status date', '06A506c': 'Incomplete forecast on/before status date',
+  '06A505b': 'Completed missing actual finish', '06A506a': 'Actual start after status date', '06A506b': 'Actual finish after status date', '06A506c': 'Incomplete forecast before the data date',
   '08I101a': 'SLPP baseline duration integrity', '10A303a': 'PP baseline integrity',
 };
 /** The guideline of a check is the first two digits of its id; the names. dcmaDecm.ts:321-330. */
@@ -37,9 +37,12 @@ const GUIDELINES: Record<number, string> = { 6: 'Schedule (Guideline 6)', 8: 'Bu
 
 export const DECM_METHOD = [
   'each check = the share (%) of its population that breaks the rule, judged on the exact share (shown to two decimals) and passing when it is at or under its threshold; a check with an empty population is not assessed (the source skips it, dcmaDecm.ts:266-271)',
-  'thresholds (default): 06A205a lags 5 %, 06A209a hard constraints 5 %, 06A506c forecast on or before the status date 10 %, every other percentage check 0 % (dcmaDecm.ts:53-57); strict: 06A205a 2 %, 06A209a 2 %, 06A506c 5 % (:58). These values are the source’s and have not been checked against the DCMA DECM workbook.',
+  'thresholds (default): 06A205a lags 5 %, 06A209a hard constraints 5 %, 06A506c forecast before the data date 10 %, every other percentage check 0 % (dcmaDecm.ts:53-57); strict: 06A205a 2 %, 06A209a 2 %, 06A506c 5 % (:58). These values are the source’s and have not been checked against the DCMA DECM workbook.',
   'compliance ratio = checks passed / checks assessed (dcmaDecm.ts:223-224); overall fail when any check fails',
-  'populations: 06A204b, 06A205a, 06A209a as dcma_14 checks 1, 3 and 5 (incomplete tasks; relationships of incomplete tasks); 06A506a/b/c are dcma_14 check 9 split in three (every activity that is not a WBS summary, in a project with a data date); 06A401a is dcma_14 check 12 (the critical path test; a loop fails it)',
+  'populations: 06A204b, 06A205a, 06A209a are dcma_14 checks 1, 3 and 5 with dcma_14’s own populations (incomplete tasks; relationships of incomplete tasks): ONE definition in the clone. DIFFERENCE from the source, which counts every discrete task and every relationship (dcmaDecm.ts:107 and following), so a finished task or a link between finished tasks is in the source’s denominator and not here',
+  '06A506a/b/c are dcma_14 check 9 split in three (every activity that is not a WBS summary, in a project with a data date); 06A401a is dcma_14 check 12 (the critical path test; a loop fails it)',
+  'DIFFERENCES from the source in 06A506c (and in progress rule 005 of schedule_index, which has the first): the source tests a forecast date ON OR BEFORE the status date (dcmaDecm.ts:186), the clone BEFORE the data date (in P6 remaining work starts ON the data date, so a date equal to it is not in the past; the rule dcma_14 check 9 uses); and the clone tests the forecast START of work not yet started as well as the forecast finish of unfinished work, where the source tests the finish only',
+  'the updates (06A504a / b): this open project and the earlier updates are all put in data-date order (windows_analysis and change_tracking do the same); the answer’s updates lists them in the order used and says which one is the open project',
   '06A208a: WBS summary activities with a relationship; 06A210a: level-of-effort activities with a successor that is neither level of effort nor a WBS summary; 06A212a, 06A501a, 06A504a/b, 06A505a/b: activities that are neither WBS summary nor level of effort',
 ];
 
@@ -48,17 +51,17 @@ export interface DecmOptions {
   projIds?: string[]; hoursPerDay?: number;
   /** default | strict */
   profile?: string;
-  /** threshold overrides by check id (percent of the population) */
-  thresholds?: Partial<Record<DecmId, number>>;
   /** project, bl1-bl3, or any saved baseline's name */
   baseline?: string;
   statusDate?: number | null;
-  /** the series of schedules the retroactive-actuals checks read: the earlier updates and this project (last), from loadUpdates; absent = no earlier update */
+  /** the series of schedules the retroactive-actuals checks read: this project and the other updates, from loadUpdates (put in data-date order here); absent = no other update */
   updates?: Update[];
 }
 export interface DecmReport {
   report: 'DCMA DECM schedule checks';
   profile: string; status_date: string | null; baseline: { which: string; name: string; how: string } | null;
+  /** the series the retroactive-actuals checks read, in the data-date order used (empty when no updates were given) */
+  updates: { name: string; data_date: string | null; open_project: boolean }[];
   summary: { passed: number; failed: number; not_assessed: number; /** passed / (passed + failed); null when nothing was assessed */ compliance_ratio: number | null; overall: 'pass' | 'fail' | null };
   guidelines: { guideline: number; name: string; checks: string[]; passed: number; failed: number; not_assessed: number }[];
   checks: DecmCheck[];
@@ -70,14 +73,13 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   const prof = DECM_PROFILES[o.profile ?? 'default'] ?? DECM_PROFILES.default;
   const profName = DECM_PROFILES[o.profile ?? 'default'] ? (o.profile ?? 'default') : 'default';
   const th = (id: DecmId): Threshold | null => {
-    const ov = o.thresholds?.[id];
-    if (ov != null) return { op: '<=', value: ov, source: 'override' };
     const v = prof.t[id];
     return v == null ? null : { op: '<=', value: v, source: prof.label };
   };
   const which = o.baseline ?? 'project';
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(db, p, which)]));
   const out: DecmCheck[] = [];
+  const ordered = [...(o.updates ?? [])].sort((x, y) => (updateDate(x) ?? 0) - (updateDate(y) ?? 0));
   const add = (c: CheckResult) => out.push({ ...c, guideline: guidelineOf(c.id) });
   const na = (id: DecmId, note: string) => add(notAssessed(id, NAMES[id], '%', th(id), note));
   /** a percentage check: found of a population; an empty population is not assessed */
@@ -89,20 +91,19 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
     add({ id, name: NAMES[id], unit: '%', metric, threshold: t, numerator: found.length, denominator, result: passes((100 * found.length) / denominator, t) ? 'pass' : 'fail', activities: found, total_activities: found.length, note });
   };
 
-  // dcma_14 once, every activity listed: its logic, lag and hard-constraint populations and its critical path test are reused as they are
-  const dcma = dcma14(db, { projIds: o.projIds, hoursPerDay: o.hoursPerDay, statusDate: o.statusDate, baseline: o.baseline, maxIds: 0 });
-  const D = (id: string) => dcma.checks.find((c) => c.id === id)!;
+  // dcma_14's own checks, one by one with every activity listed (not the whole of dcma_14): its populations, logic, lag and hard-constraint checks, and below its critical path test and invalid dates rule
+  const { T, L } = dcmaPopulations(s);
   const fromDcma = (id: DecmId, c: CheckResult, note: string, emptyNote: string) => percent(id, c.activities, c.denominator ?? 0, note, emptyNote);
 
-  fromDcma('06A204b', D('logic'), 'Incomplete tasks (not WBS summary, level of effort or milestones) with no predecessor or no successor: dcma_14 check 1.', 'No incomplete task.');
-  fromDcma('06A205a', D('lags'), 'Relationships (of incomplete tasks) with a positive lag, over those relationships: dcma_14 check 3.', 'No relationship of an incomplete task.');
+  fromDcma('06A204b', logicCheck(s, T, th('06A204b')!, 0), 'Incomplete tasks (not WBS summary, level of effort or milestones) with no predecessor or no successor: dcma_14 check 1.', 'No incomplete task.');
+  fromDcma('06A205a', lagsCheck(s, L, th('06A205a')!, 0), 'Relationships (of incomplete tasks) with a positive lag, over those relationships: dcma_14 check 3.', 'No relationship of an incomplete task.');
   // 06A208a: WBS summary activities carrying logic
   {
     const W = s.tasks.filter(isWbs);
     const preds = (t: Row) => s.ctx.predsOf.get(t.task_id) ?? [], succs = (t: Row) => s.ctx.succsOf.get(t.task_id) ?? [];
     percent('06A208a', W.filter((t) => preds(t).length || succs(t).length).map((t) => offender(t, s)), W.length, 'WBS summary activities with a predecessor or a successor, over all WBS summary activities.', 'The project has no WBS summary activity.');
   }
-  fromDcma('06A209a', D('hard_constraints'), 'Incomplete tasks with a hard constraint (Start/Finish On, On or Before, Mandatory): dcma_14 check 5.', 'No incomplete task.');
+  fromDcma('06A209a', hardConstraintsCheck(s, T, th('06A209a')!, 0), 'Incomplete tasks with a hard constraint (Start/Finish On, On or Before, Mandatory): dcma_14 check 5.', 'No incomplete task.');
   // 06A210a: level of effort with a discrete successor
   {
     const L = s.tasks.filter(isLoe);
@@ -114,9 +115,10 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   percent('06A212a', discrete.filter((t) => startedBeforeFsPredecessor(t, s.ctx)).map((t) => offender(t, s)), discrete.length, 'Activities started while a finish-to-start predecessor has not finished, over all activities that are neither WBS summary nor level of effort.', 'The project has no activity.');
   // 06A401a: dcma_14 check 12; a loop fails it
   {
-    const loops = logicLoops(s), c = D('critical_path_test');
-    if (loops.length) add({ ...c, id: '06A401a', name: NAMES['06A401a'], result: 'fail', metric: null, activities: loops.flat().map((code) => ({ id: code, name: [...s.tasks].find((t) => t.task_code === code)?.task_name ?? '' })), total_activities: loops.flat().length, note: `The logic has ${loops.length === 1 ? 'a loop' : `${loops.length} loops`}, so there is no valid critical path (P6: "Circular relationship (loop) detected"): ${loops.map(loopMessage).join('; ')}.` });
-    else add({ ...c, id: '06A401a', name: NAMES['06A401a'], note: `dcma_14 check 12, the critical path test. ${c.note ?? ''}`.trim() });
+    const loops = logicLoops(s);
+    // a loop cannot be scheduled, so the test is not run (it could only say that it could not)
+    if (loops.length) add({ ...notAssessed('06A401a', NAMES['06A401a'], 'days', null, ''), id: '06A401a', name: NAMES['06A401a'], result: 'fail', metric: null, activities: loops.flat().map((code) => ({ id: code, name: [...s.tasks].find((t) => t.task_code === code)?.task_name ?? '' })), total_activities: loops.flat().length, note: `The logic has ${loops.length === 1 ? 'a loop' : `${loops.length} loops`}, so there is no valid critical path (P6: "Circular relationship (loop) detected"): ${loops.map(loopMessage).join('; ')}.` });
+    else { const c = criticalPathTest(s, T, 600, undefined); add({ ...c, id: '06A401a', name: NAMES['06A401a'], note: `dcma_14 check 12, the critical path test. ${c.note ?? ''}`.trim() }); }
   }
   // 06A501a: missing baseline dates (an activity not in the baseline, or in it with no start or no finish)
   {
@@ -127,7 +129,8 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   }
   // 06A504a / 06A504b: an actual start / finish that differs from the one an earlier update held (progressIntegrity between consecutive updates, in data-date order)
   {
-    const chain = [...(o.updates ?? [])].sort((x, y) => (updateDate(x) ?? 0) - (updateDate(y) ?? 0));
+    // every update, this open project included, in data-date order (the order windows_analysis and change_tracking use)
+    const chain = ordered;
     if (chain.length < 2) { const why = 'No earlier update was given: pass updates (the earlier schedules, as windows_analysis takes them).'; na('06A504a', why); na('06A504b', why); }
     else {
       const start = new Map<string, Offender>(), finish = new Map<string, Offender>();
@@ -170,7 +173,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   const dd = s.projs.map((p) => s.dataDate(p.proj_id)).find((x) => x != null) ?? null;
   const first = [...bls.values()].find(Boolean);
   return {
-    report: 'DCMA DECM schedule checks', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, baseline: first ? { which, name: first.name, how: first.how } : null,
+    report: 'DCMA DECM schedule checks', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, baseline: first ? { which, name: first.name, how: first.how } : null, updates: ordered.map((u) => ({ name: u.name, data_date: updateDate(u) != null ? formatP6Date(updateDate(u)!) : null, open_project: !!u.open })),
     summary: { passed, failed, not_assessed: out.length - passed - failed, compliance_ratio: passed + failed ? Math.round((passed / (passed + failed)) * 1000) / 1000 : null, overall: passed + failed ? (failed ? 'fail' : 'pass') : null },
     guidelines: gs.map((g) => { const cs = out.filter((c) => c.guideline === g); return { guideline: g, name: GUIDELINES[g] ?? `Guideline ${g}`, checks: cs.map((c) => c.id), passed: cs.filter((c) => c.result === 'pass').length, failed: cs.filter((c) => c.result === 'fail').length, not_assessed: cs.filter((c) => c.result === 'not_assessed').length }; }),
     checks: out, method: DECM_METHOD,

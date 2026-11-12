@@ -38,7 +38,9 @@ test('the 17 checks, grouped by guideline, in the source\'s order with its names
   assert.deepEqual(r.guidelines.map((g) => [g.guideline, g.name, g.checks.length]), [[6, 'Schedule (Guideline 6)', 15], [8, 'Budgeting (Guideline 8)', 1], [10, 'Accounting/Planning Package (Guideline 10)', 1]]);
   assert.equal(r.summary.passed + r.summary.failed + r.summary.not_assessed, 17);
   const names = Object.fromEntries(Object.values(golden.delayed.decm.data.checks_by_guideline).flatMap((g: any) => g.checks).map((c: any) => [c.check_id, c.check_name]));
-  for (const c of r.checks) assert.equal(c.name, names[c.id], c.id);
+  // 06A506c is named for the clone's rule (a forecast date BEFORE the data date: remaining work starts ON it in P6); the source's name says on/before the status date
+  for (const c of r.checks) assert.equal(c.name, c.id === '06A506c' ? 'Incomplete forecast before the data date' : names[c.id], c.id);
+  assert.equal(names['06A506c'], 'Incomplete forecast on/before status date');
   assert.equal(r.report, 'DCMA DECM schedule checks');
   assert.equal(r.profile, 'default');
 });
@@ -186,6 +188,39 @@ test('06A504a/b: an actual start / finish that differs from the one an earlier u
   assert.deepEqual(ids(viaBaseline['06A504a']), ['T1']);
 });
 
+test('the series is ordered by data date with the OPEN project in it: the open project is not always the latest, and the answer says the order used and which one it is', () => {
+  const { history, current } = B.gaming();
+  // the open project is the 22 Jan update; the 15 Jan update and the 29 Jan one (the "current" of the fixture) are the other updates
+  const open = { name: 'open', db: history[1].build.db, projId: history[1].build.projId, open: true };
+  const upd = [{ name: 'latest', db: current.db, projId: current.projId }, open, { name: 'first', db: history[0].build.db, projId: history[0].build.projId }];
+  const r = decm(open.db, { statusDate: at('2026-01-29'), updates: upd });
+  assert.deepEqual(r.updates, [{ name: 'first', data_date: '2026-01-15 00:00', open_project: false }, { name: 'open', data_date: '2026-01-22 00:00', open_project: true }, { name: 'latest', data_date: '2026-01-29 00:00', open_project: false }]);
+  // the same checks as when the open project is last: T1's actual start was 5 Jan, then 7 Jan
+  assert.deepEqual(ids(by(r)['06A504a']), ['T1']);
+  assert.match(String(by(r)['06A504a'].activities[0].value), /^first: 2026-01-05 00:00 -> open: 2026-01-07 00:00$|^first: .* -> /);
+  // no updates given: an empty list
+  assert.deepEqual(decm(current.db, {}).updates, []);
+  assert.match(r.method.join(' '), /this open project and the earlier updates are all put in data-date order/);
+});
+
+test('06A506c is "before the data date": a forecast ON the data date is not flagged, one before is (the forecast START of unstarted work counts too); the method note lists both differences from the source, and the populations of 06A204b / 06A205a / 06A209a', () => {
+  const b = B.project('DD', [{ id: 'A', duration_days: 3 }, { id: 'B', duration_days: 3 }, { id: 'C', duration_days: 3 }], { start: '2026-01-05', dataDate: '2026-01-10' });
+  const T = Object.fromEntries(rows(b.db, 'TASK').filter((t) => t.proj_id === b.projId).map((t) => [t.task_code, t]));
+  // A: forecast start 5 Jan (before the data date 10 Jan), finish 12 Jan; B: starts ON 10 Jan; C: starts 11 Jan
+  Object.assign(T.A, { early_start_date: '2026-01-05 00:00', restart_date: '2026-01-05 00:00', early_end_date: '2026-01-12 00:00', reend_date: '2026-01-12 00:00' });
+  Object.assign(T.B, { early_start_date: '2026-01-10 00:00', restart_date: '2026-01-10 00:00', early_end_date: '2026-01-10 00:00', reend_date: '2026-01-10 00:00' });
+  Object.assign(T.C, { early_start_date: '2026-01-11 00:00', restart_date: '2026-01-11 00:00', early_end_date: '2026-01-12 00:00', reend_date: '2026-01-12 00:00' });
+  const r = decm(b.db, {}), c = by(r)['06A506c'];
+  assert.equal(c.name, 'Incomplete forecast before the data date');
+  assert.deepEqual(ids(c), ['A'], 'A starts before the data date (its finish is later: the source, testing the finish only, would not flag it); B, ON the date in start and finish, is not before it');
+  const m = r.method.join(' ');
+  assert.match(m, /ON OR BEFORE the status date \(dcmaDecm\.ts:186\), the clone BEFORE the data date/);
+  assert.match(m, /forecast START of work not yet started as well as the forecast finish of unfinished work, where the source tests the finish only/);
+  assert.match(m, /dcma_14.s own populations \(incomplete tasks; relationships of incomplete tasks\): ONE definition in the clone\. DIFFERENCE from the source, which counts every discrete task and every relationship/);
+  assert.match(m, /06A506c forecast before the data date 10 %/);
+  assert.doesNotMatch(m, /on or before the status date 10/);
+});
+
 test('06A401a: a loop fails it and names the loop; otherwise it is dcma_14\'s critical path test, unchanged', () => {
   const b = B.cleanChain();
   const r = by(decm(b.db, {})), t = dcma14(b.db, {}).checks.find((c) => c.id === 'critical_path_test')!;
@@ -232,7 +267,7 @@ test('a threshold of 0 % is failed by one activity in any population (dcma_14 ro
 
 // ------------------------------------------------------------------------------------------------ profiles and thresholds
 
-test('profiles: default and strict differ in three thresholds; thresholds override single checks; the answer says where each came from', () => {
+test('profiles: default and strict differ in three thresholds; the profile is the only way to change them; the answer says where each came from', () => {
   assert.deepEqual(Object.keys(DECM_PROFILES), ['default', 'strict']);
   // 25 tasks in a chain, one with a hard constraint (4 %): passes the default 5 %, fails strict 2 %; the same one lag in 25 relationships
   const tasks = Array.from({ length: 25 }, (_, i) => ({ id: `A${i + 1}`, duration_days: 2, predecessors: i ? [`A${i}${i === 5 ? ':FS+1' : ''}`] : [], ...(i === 3 ? { constraint: { type: 'start_on', date: '2026-02-01 00:00' } } : {}) }));
@@ -252,11 +287,8 @@ test('profiles: default and strict differ in three thresholds; thresholds overri
   assert.equal(d['06A204b'].threshold!.value, 0);
   assert.equal(s['06A204b'].threshold!.value, 0);
   assert.equal(d['06A401a'].threshold!.op, '=', 'the critical path test keeps dcma_14\'s own threshold');
-  // an override: a check by id, marked as an override
-  const o = by(decm(b.db, { profile: 'strict', thresholds: { '06A209a': 10 } }));
-  assert.equal(o['06A209a'].result, 'pass');
-  assert.deepEqual(o['06A209a'].threshold, { op: '<=', value: 10, source: 'override' });
-  assert.equal(o['06A205a'].result, 'fail', 'the others stay on the profile');
+  // no override by check id: a thresholds option is not part of the options at all (the agent picks default or strict)
+  assert.deepEqual(by(decm(b.db, { profile: 'strict', ...({ thresholds: { '06A209a': 10 } } as object) }))['06A209a'].threshold, { op: '<=', value: 2, source: DECM_PROFILES.strict.label }, 'a thresholds value is ignored: the strict profile stands');
   assert.equal(decm(b.db, { profile: 'strict' }).profile, 'strict');
   // the method note says the values are the source's and unchecked against the DCMA workbook
   assert.match(decm(b.db, {}).method.join(' '), /have not been checked against the DCMA DECM workbook/);
@@ -325,9 +357,13 @@ test('decm through the server: read-only, summary first, 25 activities per check
   const t = (toolsList() as any[]).find((x) => x.name === 'decm');
   assert.ok(t, 'listed');
   assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
-  assert.deepEqual(Object.keys(t.inputSchema.properties), ['handle', 'export', 'export_name', 'project', 'profile', 'thresholds', 'baseline', 'status_date', 'updates', 'caller', 'async']);
+  assert.deepEqual(Object.keys(t.inputSchema.properties), ['handle', 'export', 'export_name', 'project', 'profile', 'baseline', 'status_date', 'updates', 'caller', 'async']);
   assert.deepEqual(t._meta, { 'whiq/files': { read: ['updates[].path'], opens: false } });
   assert.match(t.description, /have NOT been checked against the DCMA DECM workbook/);
+  assert.doesNotMatch(t.description, /thresholds overrides/);
+  assert.match(t.description, /the profile is the only way to change the thresholds/);
+  assert.match(t.description, /all put in data-date order/);
+  assert.doesNotMatch(t.description + JSON.stringify(t.inputSchema), /this project is the (last|latest)/);
   const h = await openSample('129 trial.xer');
   const r = await call('decm', { handle: h, bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
@@ -342,7 +378,7 @@ test('decm through the server: read-only, summary first, 25 activities per check
   assert.ok(csv.rows >= 535);
   assert.equal(JSON.parse(readFileSync(r.d.exported.files.find((f: any) => f.path.endsWith('decm.json')).path, 'utf8')).checks.find((c: any) => c.id === '06A205a').activities.length, 535);
   // refusals
-  for (const [args, msg] of [[{ profile: 'nope' }, /Unknown profile "nope"\./], [{ thresholds: { '06A999': 1 } }, /No threshold for "06A999"/], [{ thresholds: { '06A401a': 1 } }, /No threshold for "06A401a"/], [{ thresholds: { '06A205a': -1 } }, /must be a number of 0 or more/], [{ thresholds: [] }, /thresholds must be an object/], [{ baseline: 'bl3' }, /No baseline "bl3" for this project/], [{ updates: [] }, /updates must list the other updates\./]] as const) {
+  for (const [args, msg] of [[{ profile: 'nope' }, /Unknown profile "nope"\./], [{ baseline: 'bl3' }, /No baseline "bl3" for this project/], [{ updates: [] }, /updates must list the other updates\./]] as const) {
     const bad = await call('decm', { handle: h, ...args });
     assert.equal(bad.err, true, JSON.stringify(args));
     assert.match(bad.d.error.message, msg);
@@ -355,10 +391,11 @@ test('decm through the server: read-only, summary first, 25 activities per check
   const viaHandle = await call('decm', { handle: cur, updates: [{ handle: earlier, name: 'first' }] });
   assert.equal(viaHandle.err, false);
   assert.match(viaHandle.d.checks.find((c: any) => c.id === '06A504b').activities[0].value, /^first: /);
-  // profile and thresholds are used
+  // the profile is used; a thresholds argument is not one (reported as not used)
   const strict = await call('decm', { handle: cur, profile: 'strict', thresholds: { '06A205a': 50 } });
+  assert.match(strict.d.arguments_not_used.join(' '), /decm has no argument "thresholds"/);
   const lag = strict.d.checks.find((c: any) => c.id === '06A205a');
-  assert.deepEqual(lag.threshold, { op: '<=', value: 50, source: 'override' });
+  assert.deepEqual(lag.threshold, { op: '<=', value: 2, source: DECM_PROFILES.strict.label });
   assert.equal(strict.d.profile, 'strict');
   assert.equal(strict.d.checks.find((c: any) => c.id === '06A209a').threshold.source, DECM_PROFILES.strict.label);
   // a few activities fit: no note
