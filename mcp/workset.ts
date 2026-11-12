@@ -78,11 +78,13 @@ export function between(b: unknown): number {
  *  (default 20, at least 5). A value that is not a whole number of 0 or more is refused as bad_input, named, before anything runs; the
  *  one parser for the tool and for its memory reservation. */
 export function monteCarloCounts(a: Record<string, any>): { iterations: number; top: number; buckets: number; days: boolean } {
+  // AGREED LIMIT (owner, 2026-11-12; first agreed with the kept-iterations work): 10 — the fewest Monte Carlo iterations — why: below it the result says nothing about slip dates — arbitrary by agreement.
   const iterations = countArg(a.iterations, 'iterations', { min: 10 }) ?? 1000;
   const top = countArg(a.top, 'top') ?? 25;
   if (a.histogram != null && a.histogram !== 'days') fail('bad_input', `histogram must be "days" (got ${JSON.stringify(a.histogram)}).`, 'Leave histogram out for `buckets` equal bins, or pass "days" for whole-day bins.');
   const days = a.histogram === 'days';
   if (days && a.buckets != null) fail('bad_input', 'histogram "days" and buckets cannot be given together.', 'Pass histogram: "days" for whole-day bins, or buckets for that many equal bins, not both.');
+  // AGREED LIMIT (owner, 2026-11-12): 5 — the fewest chart bars this tool accepts, default 20 (the platform always asks for 20, see its own mark) — why: under 5 bars the chart shows no shape; 5 is what the usual rule of thumb gives for 10 iterations — arbitrary by agreement.
   // whole-day bins (the engine's: a bin of 1 day or more so that there are at most 40): counted like buckets in the reservation
   const buckets = days ? MC_DAY_BINS : countArg(a.buckets, 'buckets', { min: 5 }) ?? 20;
   return { iterations, top: top === 0 ? Infinity : top, buckets, days };
