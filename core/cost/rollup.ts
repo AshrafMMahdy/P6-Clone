@@ -13,6 +13,12 @@ const n = (s: string | undefined) => Number(s || 0) || 0;
 export function percentComplete(t: Row, asg: Row[]): number {
   if (t.act_end_date) return 1;
   if (!t.act_start_date) return 0;
+  return reportedPercent(t, asg);
+}
+
+/** The same % as the file carries it, whether or not the activity has an actual start (percentComplete reads 0 without one): for finding progress recorded on an activity that never started. */
+export function reportedPercent(t: Row, asg: Row[]): number {
+  if (t.act_end_date) return 1;
   if (t.complete_pct_type === 'CP_Phys') return n(t.phys_complete_pct) / 100;
   if (t.complete_pct_type === 'CP_Units') {
     const bud = asg.reduce((a, x) => a + n(x.target_qty), 0);

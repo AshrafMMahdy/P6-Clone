@@ -47,6 +47,7 @@ import { compareComputed, evaluate } from '../core/query/evaluate.ts';
 import { parseScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../core/schedule/options.ts';
 import { reviewSchedule } from '../core/query/review.ts';
 import { ANALYSIS_TOOLS, runAnalysis } from './analysis.ts';
+import { FORENSIC_TOOLS, forensicFiles, forensicNames, runForensics } from './forensics.ts';
 import { discardKeptMeshing, FOURD_FILES, FOURD_NAMES, FOURD_TOOLS, load4dSidecar, runFourD, save4dSidecar } from './fourd.ts';
 import { LOB_FILES, LOB_NAMES, LOB_TOOLS, lobSidecars, lobSidecarText, readLobSidecar, runLob, scheduleWithLob } from './lob.ts';
 import { lobGuard } from '../core/lob/view.ts';
@@ -117,6 +118,7 @@ const TOOLS = [
   { name: 'validate', annotations: ro, description: 'P6 import diagnostics for the project as it is now (what real P6 would accept, warn about or reject), plus saved dates that P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'review', annotations: ro, description: 'Schedule quality review (DCMA-style checks graded pass/warn/fail): missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence, saved dates P6 would change. For the full DCMA 14-point (critical path test, CPLI, BEI, missed tasks, profiles, activity lists) use dcma_14; for the P6 Check Schedule report use check_schedule.' + exportDoc('review', ['checks', 'activities (every activity each check found, by ID and name)', 'saved_dates']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp } }) },
   ...ANALYSIS_TOOLS(withHandle),
+  ...FORENSIC_TOOLS(withHandle),
   ...FOURD_TOOLS(withHandle),
   ...LOB_TOOLS(withHandle),
   // (earned_value is one of the analyses: it exports as they do)
@@ -956,6 +958,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   const helpers = { projectIds, allIds, dd, writeOut, writeOutWith, apply: <T,>(label: string, fn: (d: Db) => T) => change(s, ctx.caller, label, fn), applyAsync: <T,>(label: string, fn: (d: Db) => Promise<T>) => changeAsync(s, ctx.caller, label, fn), tick, keep: ctx.keep, job: () => ctx.job?.id, claim: ctx.claim };
   const analysed = await runAnalysis(name, a, s, helpers);
   if (analysed !== undefined) return analysed;
+  const forensic = await runForensics(name, a, s, helpers);
+  if (forensic !== undefined) return forensic;
   const fourd = await runFourD(name, a, s, helpers);
   if (fourd !== undefined) return fourd;
   const lobbed = await runLob(name, a, s, helpers);
@@ -1189,6 +1193,7 @@ const FILES: Record<string, { read: string[]; opens: boolean }> = {
   open_file: { read: ['path'], opens: true }, compare: { read: ['path'], opens: false }, import_excel: { read: ['path'], opens: false },
   export_pdf: { read: ['settings.font_path'], opens: false }, run_report: { read: ['settings.font_path'], opens: false },
   windows_analysis: { read: ['updates[].path'], opens: false },
+  ...forensicFiles(),
   ...FOURD_FILES,
   ...LOB_FILES,
 };
@@ -1202,7 +1207,7 @@ const FILES: Record<string, { read: string[]; opens: boolean }> = {
 export const WRITES_WHEN: Record<string, string[]> = { float_paths: ['write'], crash_schedule: ['apply'], optimize_schedule: ['apply'], tia: ['keep'] };
 /** P6CLONE_TOOLSETS (e.g. "core,analysis,4d,lob"): a host that wants fewer tools lists only some groups; default all. */
 const toolsetOf = (name: string) => (FOURD_NAMES.has(name) ? '4d' : LOB_NAMES.has(name) ? 'lob' : ANALYSIS_NAMES.has(name) ? 'analysis' : 'core');
-const ANALYSIS_NAMES = new Set(ANALYSIS_TOOLS((x) => x).map((t) => t.name));
+const ANALYSIS_NAMES = new Set([...ANALYSIS_TOOLS((x) => x).map((t) => t.name), ...forensicNames()]);
 /** Tools that can run long on a project (the analysis tools; Monte Carlo, levelling, F9, progress updates, imports into the project and progress transfers, what-if evaluation; LOB plans;
  *  PDF, Excel and report files): they run in a worker thread on a copy of the project (compute.ts). Not here, and why: file opens and saves
  *  (they create or serialise the session's database), edit/undo/redo (finite, fast operations on the database itself), the lookups, and the 4D

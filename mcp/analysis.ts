@@ -79,6 +79,54 @@ function reschedule(d: Db, projIds: string[], over: Parameters<typeof schedulePr
 /** The names of the baselines saved from these projects (any number; BL1-BL3 are only the assigned ones). */
 const savedBaselines = (db: Db, projIds: string[]) => rows(db, 'PROJECT').filter((p) => projIds.includes(p._baseline_of ?? '')).map((p) => p.proj_short_name);
 
+/** The answer, and with export the full result and its tables written (the answer names them in exported). changed: the tool has
+ *  changed the project already (apply, keep, write), so a failure to write the export is said beside the result (export_error).
+ *  The same for every analysis tool, forensics.ts' too. */
+export const resultExporter = (name: string, a: Record<string, any>, h: Pick<AnalysisHelpers, 'writeOutWith'>, asTool?: string) => <T extends object>(answer: T, full: unknown, tables: Table[], changed = false) => {
+  if (a.export == null) return answer;
+  // files are named by the tool the caller called (optimize_schedule's crashing: its own), and a stopped run's answer is written as -partial
+  const make = () => exportResult(name, a.export, full, tables, h.writeOutWith, exportOf(a, { as: asTool, partial: (answer as { partial?: unknown }).partial === true }));
+  return { ...answer, ...(changed ? exportAfterChange(make) : { exported: make() }) };
+};
+
+/** The updates a series-taking tool reads: updates: [{baseline: project|bl1|bl2|bl3|<saved baseline name>} | {path} | {handle} | {data_date, progress: [edit ops]}] (windows_analysis;
+ *  the same shapes for every tool that takes a series), each as the project of its own schedule, in the order given (the analysis puts them in data-date order), and with includeCurrent
+ *  this handle's project as the last one (named currentName, default "current"). Each update read from a file, or built as a copy, is held for the call: counted in the memory
+ *  budget (C14), and release() gives it back (the caller calls it when the call ends; a refusal in here has given back what was held). tool names the caller in the memory refusals. */
+export function loadUpdates(a: Record<string, any>, s: Session, h: Pick<AnalysisHelpers, 'dd'>, o: { tool: string; includeCurrent: boolean; currentName?: unknown }): { updates: Update[]; release: () => void } {
+  requireUpdates(a);
+  const mainProj = (db: Db) => rows(db, 'PROJECT').find((p) => !p._baseline_of && (a.project == null || p.proj_short_name === a.project)) ?? fail('bad_input', a.project ? `No project "${a.project}".` : 'The file has no project.', 'Pass project.');
+  const updates: Update[] = [];
+  const cur = mainProj(s.db);
+  const releases: (() => void)[] = [];
+  const release = () => { for (const r of releases) r(); };
+  try {
+    for (const [i, u] of (a.updates as Record<string, unknown>[]).entries()) {
+      if (u?.handle) { const o = getSession(u.handle); updates.push({ name: String(u.name ?? o.path ?? u.handle), db: o.db, projId: mainProj(o.db).proj_id }); }
+      else if (u?.path) { const p = pathArg(u.path); releases.push(reserveMemory(estimateBytes(sizeOf(p)), `Reading update ${i + 1} (${basename(p)}) for ${o.tool}`, 'open the updates with open_file and pass their handles when there is room')); let db: Db; try { db = detectFormat(p, headOf(p)) === 'xer' ? readXerFile(p).db : (() => { const b = new Uint8Array(readFileSync(p)); return readRaw(b, detectFormat(p, b)).db; })(); } catch (e) { if (e instanceof Error && /^E[A-Z]+$/.test(String((e as { code?: unknown }).code ?? ''))) return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.', { data: readCause(e) }); return fail('bad_input', `Cannot read update ${i + 1} (${basename(p)}): ${(e as Error).message}`, 'Give an XER, P6 XML or Microsoft Project XML (.xml) file, or open it with open_file and pass its handle.'); } updates.push({ name: String(u.name ?? p), db, projId: mainProj(db).proj_id }); }
+      else if (u?.baseline) { const bl = baselineOf(s.db, cur, String(u.baseline) as 'project') ?? fail('bad_input', `The project has no ${u.baseline} baseline in this file.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(s.db, [cur.proj_id]).join(', ') || 'none saved'}.`); updates.push({ name: String(u.name ?? bl.name), db: s.db, projId: bl.projId }); }
+      else if (u?.data_date && Array.isArray(u.progress)) {
+        // built from the last update that is a schedule of its own (a stored baseline is a snapshot, not edited), else the current project
+        const prev = [...updates].reverse().find((x) => x.db !== s.db || x.projId === cur.proj_id) ?? { name: 'current', db: s.db, projId: cur.proj_id };
+        releases.push(reserveMemory(s.bytes, `Building update ${i + 1} (a copy of the project) for ${o.tool}`, 'pass fewer progress updates, or save them as files and open them'));
+        const db = structuredClone(prev.db) as Db, dd = h.dd(u.data_date) ?? fail('bad_input', `updates[${i}].data_date is not a date.`, 'YYYY-MM-DD');
+        const r = applyOps(db, u.progress, { hoursPerDay: s.hpd, calendarDays: true });
+        if (!r.ok) fail('bad_input', `updates[${i}] operation ${r.error!.index + 1}: ${r.error!.message}`, '');
+        if (!scheduleProjects(db, [prev.projId], { dataDate: dd }).ok) fail('schedule_failed', `updates[${i}] cannot be scheduled.`, '');
+        updates.push({ name: String(u.name ?? `update at ${String(u.data_date)}`), db, projId: prev.projId });
+      } else fail('bad_input', `updates[${i}] needs handle, path, baseline, or data_date with progress.`, '');
+    }
+    // the last state's name in the answer and the files (the platform names its progress-log states)
+    if (o.includeCurrent) updates.push({ name: o.currentName != null ? String(o.currentName) : 'current', db: s.db, projId: cur.proj_id });
+    return { updates, release };
+  } catch (e) { release(); throw e; }
+}
+
+/** updates must be a list with at least one update (every tool that takes a series refuses it the same way). */
+export function requireUpdates(a: Record<string, any>): void {
+  if (!Array.isArray(a.updates) || !a.updates.length) fail('bad_input', 'updates must list the other updates.', 'e.g. [{"path": "Update 1.xer"}, {"handle": "..."}] or [{"baseline": "project"}]');
+}
+
 export const ANALYSIS_TOOLS = (withHandle: (s: Record<string, unknown>) => Record<string, unknown>) => [
   { name: 'check_schedule', annotations: ro, description: `P6's Tools > Check Schedule Report: ${P6_CHECKS.length} checks with P6's own populations and default targets (${P6_CHECKS.map((c) => c.id).join(', ')}). Each check answers metric, threshold {op, value, source}, result pass|fail|not_assessed, numerator/denominator and the activities (or relationships) it found. Thresholds in hours use the hours per day (44 days x 8 h = 352 h). Late activities and BEI need the project baseline. targets overrides a check's target (percent; ratio for bei).` + exportDoc('check_schedule', ['checks', 'failing_activities', 'projects']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp, project, checks: { type: 'array', items: { type: 'string' } }, targets: { type: 'object' }, threshold_days: { type: 'number', description: 'long lag / large float / large duration limit in days (default 44)' }, path: reportPath } }) },
   { name: 'dcma_14', annotations: ro, description: `DCMA 14-Point Assessment (PAM 200.1): logic, leads, lags, relationship types, hard constraints, high float, negative float, high duration, invalid dates, resources, missed tasks, critical path test, CPLI, BEI. Tasks = incomplete activities that are not WBS summary, LOE or milestones; leads, lags and types count relationships; days are working days of each activity's calendar. Each check answers metric, threshold {op, value, source}, result, numerator/denominator and the activities it found. profile: ${Object.entries(DCMA_PROFILES).map(([k, v]) => `${k} (${v.label})`).join(', ')}; thresholds overrides single checks. baseline: project (default), bl1, bl2, bl3 (missed tasks, BEI, high duration). The critical path test adds cpt_slip_days (600) to the earliest critical task (or cpt_activity) on a scratch copy and passes when the finish moves by exactly that. CPLI: against target_finish, else the project's Must Finish By (contract), else the baseline finish; the other is reported beside it; with neither it is not assessed. limit_days: 44 or "dynamic" (max(20, 10% of the project length)).` + exportDoc('dcma_14', ['checks', 'failing_activities']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp, project, profile: { type: 'string' }, thresholds: { type: 'object' }, baseline: { type: 'string' }, status_date: { type: 'string' }, target_finish: { type: 'string' }, cpt_slip_days: { type: 'number' }, cpt_activity: { type: 'string' }, limit_days: {}, exempt: { type: 'array', items: { type: 'string' } }, path: reportPath } }) },
@@ -99,14 +147,7 @@ export const ANALYSIS_NAMES = new Set(['check_schedule', 'dcma_14', 'lint', 'flo
 export async function runAnalysis(name: string, a: Record<string, any>, s: Session, h: AnalysisHelpers, asTool?: string): Promise<unknown> {
   if (!ANALYSIS_NAMES.has(name)) return undefined;
   const projIds = a.project != null && a.project !== '' ? h.projectIds(s.db, a.project) : h.allIds(s.db);
-  /** The answer, and with export the full result and its tables written (the answer names them in exported). changed: the tool has
-   *  changed the project already (apply, keep, write), so a failure to write the export is said beside the result (export_error). */
-  const exported = <T extends object>(answer: T, full: unknown, tables: Table[], changed = false) => {
-    if (a.export == null) return answer;
-    // files are named by the tool the caller called (optimize_schedule's crashing: its own), and a stopped run's answer is written as -partial
-    const make = () => exportResult(name, a.export, full, tables, h.writeOutWith, exportOf(a, { as: asTool, partial: (answer as { partial?: unknown }).partial === true }));
-    return { ...answer, ...(changed ? exportAfterChange(make) : { exported: make() }) };
-  };
+  const exported = resultExporter(name, a, h, asTool);
   const withReport = <T extends { report: string; checks: unknown[]; summary: Record<string, number> }>(r: T) => {
     if (!a.path) return r;
     const path = pathArg(a.path, 'path', 'write');
@@ -320,31 +361,10 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       ], !!a.apply);
     }
     case 'windows_analysis': {
-      if (!Array.isArray(a.updates) || !a.updates.length) fail('bad_input', 'updates must list the other updates.', 'e.g. [{"path": "Update 1.xer"}, {"handle": "..."}] or [{"baseline": "project"}]');
+      requireUpdates(a);
       if (a.method != null && a.method !== 'contemporaneous' && a.method !== 'half_step') fail('bad_input', `Unknown method "${a.method}".`, 'Use contemporaneous or half_step.');
-      const mainProj = (db: Db) => rows(db, 'PROJECT').find((p) => !p._baseline_of && (a.project == null || p.proj_short_name === a.project)) ?? fail('bad_input', a.project ? `No project "${a.project}".` : 'The file has no project.', 'Pass project.');
-      const updates: Update[] = [];
-      const cur = mainProj(s.db);
-      // each update read from a file, or built as a copy, is held for this call: counted in the memory budget (C14)
-      const releases: (() => void)[] = [];
+      const { updates, release } = loadUpdates(a, s, h, { tool: 'windows_analysis', includeCurrent: a.include_current !== false, currentName: a.current_name });
       try {
-      for (const [i, u] of (a.updates as Record<string, unknown>[]).entries()) {
-        if (u?.handle) { const o = getSession(u.handle); updates.push({ name: String(u.name ?? o.path ?? u.handle), db: o.db, projId: mainProj(o.db).proj_id }); }
-        else if (u?.path) { const p = pathArg(u.path); releases.push(reserveMemory(estimateBytes(sizeOf(p)), `Reading update ${i + 1} (${basename(p)}) for windows_analysis`, 'open the updates with open_file and pass their handles when there is room')); let db: Db; try { db = detectFormat(p, headOf(p)) === 'xer' ? readXerFile(p).db : (() => { const b = new Uint8Array(readFileSync(p)); return readRaw(b, detectFormat(p, b)).db; })(); } catch (e) { if (e instanceof Error && /^E[A-Z]+$/.test(String((e as { code?: unknown }).code ?? ''))) return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.', { data: readCause(e) }); return fail('bad_input', `Cannot read update ${i + 1} (${basename(p)}): ${(e as Error).message}`, 'Give an XER, P6 XML or Microsoft Project XML (.xml) file, or open it with open_file and pass its handle.'); } updates.push({ name: String(u.name ?? p), db, projId: mainProj(db).proj_id }); }
-        else if (u?.baseline) { const bl = baselineOf(s.db, cur, String(u.baseline) as 'project') ?? fail('bad_input', `The project has no ${u.baseline} baseline in this file.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(s.db, [cur.proj_id]).join(', ') || 'none saved'}.`); updates.push({ name: String(u.name ?? bl.name), db: s.db, projId: bl.projId }); }
-        else if (u?.data_date && Array.isArray(u.progress)) {
-          // built from the last update that is a schedule of its own (a stored baseline is a snapshot, not edited), else the current project
-          const prev = [...updates].reverse().find((x) => x.db !== s.db || x.projId === cur.proj_id) ?? { name: 'current', db: s.db, projId: cur.proj_id };
-          releases.push(reserveMemory(s.bytes, `Building update ${i + 1} (a copy of the project) for windows_analysis`, 'pass fewer progress updates, or save them as files and open them'));
-          const db = structuredClone(prev.db) as Db, dd = h.dd(u.data_date) ?? fail('bad_input', `updates[${i}].data_date is not a date.`, 'YYYY-MM-DD');
-          const r = applyOps(db, u.progress, { hoursPerDay: s.hpd, calendarDays: true });
-          if (!r.ok) fail('bad_input', `updates[${i}] operation ${r.error!.index + 1}: ${r.error!.message}`, '');
-          if (!scheduleProjects(db, [prev.projId], { dataDate: dd }).ok) fail('schedule_failed', `updates[${i}] cannot be scheduled.`, '');
-          updates.push({ name: String(u.name ?? `update at ${String(u.data_date)}`), db, projId: prev.projId });
-        } else fail('bad_input', `updates[${i}] needs handle, path, baseline, or data_date with progress.`, '');
-      }
-      // the last state's name in the answer and the files (the platform names its progress-log states)
-      if (a.include_current !== false) updates.push({ name: a.current_name != null ? String(a.current_name) : 'current', db: s.db, projId: cur.proj_id });
       // worked out with every activity listed: the answer lists 25 of them per window (LISTED), the export all
       const r = await windowsAnalysis(updates, { milestone: a.milestone, method: a.method, hoursPerDay: s.hpd, maxIds: 0, tick: h.tick });
       if (!r.ok) return fail(r.error.code, r.error.message, 'Check the milestone and the updates.');
@@ -355,7 +375,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
         { name: 'lost_time', columns: ['window', 'id', 'name', 'now', 'lost_days', 'finish_from', 'finish_to', 'causes'], rows: W.flatMap((w) => w.lost_time.map((x) => ({ window: w.window, ...x }))) },
         { name: 'added', columns: ['window', 'id'], rows: W.flatMap((w) => w.added.map((id) => ({ window: w.window, id }))) },
       ]);
-      } finally { for (const r of releases) r(); }
+      } finally { release(); }
     }
     case 'tia': {
       if (!Array.isArray(a.fragnet) || !a.fragnet.length) fail('bad_input', 'fragnet must list edit operations.', 'e.g. [{"op": "add_activity", "id": "X1", "name": "Design change", "duration_days": 10}, {"op": "add_relationship", "pred": "A1000", "succ": "X1"}]');

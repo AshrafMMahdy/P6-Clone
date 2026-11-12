@@ -10,7 +10,7 @@ import { LISTED } from '../core/analysis/common.ts';
 import { betweenTails } from '../core/schedule/floatPaths.ts';
 
 export interface WorkNeed { bytes: number; what: string; hint: string }
-interface Work { per: number; fixed?: number; label: string; hint: string }
+export interface Work { per: number; fixed?: number; label: string; hint: string }
 
 const MB = 1048576;
 /** The tools whose working set is larger than a few MB on a big schedule. per: bytes per byte of Session.bytes. */

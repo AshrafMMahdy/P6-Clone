@@ -7,6 +7,10 @@ import { parseP6Date } from '../dates.ts';
 import { makeCtx, isCritical } from '../project/ctx.ts';
 import { checkStoredDates } from '../schedule/stored-dates.ts';
 
+/** Out-of-sequence progress, the one rule: the activity has started while a finish-to-start predecessor has not finished. */
+export const startedBeforeFsPredecessor = (t: Row, ctx: Pick<ReturnType<typeof makeCtx>, 'predsOf' | 'taskById'>): boolean =>
+  !!t.act_start_date && (ctx.predsOf.get(t.task_id) ?? []).some((r) => { const p = ctx.taskById.get(r.pred_task_id); return r.pred_type === 'PR_FS' && !!p && !p.act_end_date; });
+
 export type Grade = 'pass' | 'warn' | 'fail';
 export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; detail: string; examples: string[]; /** how many examples there are (examples shows the first 10 of a check's activities; saved_dates gives all) */ examples_total?: number;
   /** with opts.activities: every activity the check found, by Activity ID and name (an export) */ activities?: { id: string; name: string }[] }
@@ -54,7 +58,7 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   const withRsrc = new Set(rows(db, 'TASKRSRC').map((a) => a.task_id));
   const noRes = live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && !withRsrc.has(t.task_id));
   add('resources', 'Activities without resources', noRes, live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile').length, withRsrc.size ? 0 : null, null, 'all resourced (if the schedule is resource-loaded)', withRsrc.size ? 'The schedule is resource-loaded, but these activities have no resources.' : 'The schedule is not resource-loaded (informational).');
-  const oos = live.filter((t) => t.act_start_date && (ctx.predsOf.get(t.task_id) ?? []).some((r) => { const p = ctx.taskById.get(r.pred_task_id); return r.pred_type === 'PR_FS' && p && !p.act_end_date; }));
+  const oos = live.filter((t) => startedBeforeFsPredecessor(t, ctx));
   add('out_of_sequence', 'Started out of sequence', oos, live.filter((t) => t.act_start_date).length, 0, null, 'none', 'Started before a finish-to-start predecessor finished.');
   const crit = live.filter((t) => isCritical(t, ctx));
   add('critical', 'Critical activities', crit, live.length, null, null, 'informational', `${crit.length} critical of ${live.length} open activities.`);
