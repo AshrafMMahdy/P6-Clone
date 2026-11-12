@@ -155,9 +155,11 @@ function driftRisk(s: Scope, which: string, bls: Map<string, ReturnType<typeof b
     summary: `Average finish variance ${r1(avg)} d${bei.result === 'assessed' ? `, BEI ${bei.value}` : ''}${delay != null ? `, critical-path delay ${delay} d` : ''}${out.length ? `; ${out.map((p) => `${label[p.part]} not assessed (${bei.result !== 'assessed' && p.part === 'bei' ? bei.note : p.note})`).join('; ')}; ${counted}` : ''}` }) };
 }
 
-/** A share as a percent for display where the exact share is below a limit: the display helper's figure (pct, one decimal), with as many more decimals as it takes for the text never to read as the limit itself (89.96 % is not "90 %" under a 90 % rule). */
+/** A share below a limit, as a percent for display: the whole percent as before, and only where that rounds up to the limit itself (89.96 % is not "90 %" under a 90 % rule) the display helper's one decimal (pct), and more decimals while it still reads as the limit. */
 function shownBelow(n: number, d: number, limit: number): number {
-  let v = pct(n, d)!;
+  let v = Math.round(exactPct(n, d));
+  if (v < limit) return v;
+  v = pct(n, d)!;
   for (let dec = 2; v >= limit; dec++) v = Number(exactPct(n, d).toFixed(dec));
   return v;
 }

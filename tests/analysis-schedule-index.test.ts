@@ -166,10 +166,10 @@ test('health judges the relationship score and the signals on the EXACT shares: 
   const l = r.logic as Extract<typeof r.logic, { result: 'assessed' }>;
   assert.deepEqual([l.fs, l.relationships, l.fs_share], [899, 999, 0.9], 'shown rounded: 0.9');
   assert.ok(r.health.top_signals!.some((x) => x === 'Only 89.99% Finish-to-Start relationships'), 'judged on 899 / 999 < 0.9, not on the rounded 0.9; and shown with the decimals that keep the text from reading as the 90 % limit');
-  // a share that rounds to 89.9 shows that; one far under the limit as before
+  // a share whose whole percent is under the limit is shown as before (the whole percent)
   const lower = scheduleIndex(B.project('SHARE2', Array.from({ length: 1000 }, (_, i) => ({ id: `A${i}`, duration_days: 1, ...(i ? { predecessors: [i % 5 === 3 ? `A${i - 1}:SS` : `A${i - 1}`] } : {}) }))).db, {});
   const ll = lower.logic as Extract<typeof lower.logic, { result: 'assessed' }>;
-  assert.ok(lower.health.top_signals!.some((x) => x === `Only ${Math.round(((ll.fs / ll.relationships) * 1000)) / 10}% Finish-to-Start relationships`), lower.health.top_signals!.join(' | '));
+  assert.ok(lower.health.top_signals!.some((x) => x === `Only ${Math.round((ll.fs / ll.relationships) * 100)}% Finish-to-Start relationships`), lower.health.top_signals!.join(' | '));
   assert.equal(r.health.breakdown!.relationship.score, Math.round((899 / 999 / 0.9) * 1000) / 10);
 });
 
