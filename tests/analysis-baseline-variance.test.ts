@@ -6,11 +6,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { rows, type Db } from '../core/db.ts';
-import { parseP6Date } from '../core/dates.ts';
+import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
 import { baselineVariance, DRIVER_MIN_DAYS, type BaselineVarianceResult } from '../core/analysis/baselineVariance.ts';
+import { dcma14 } from '../core/analysis/dcma.ts';
+import { makeScope } from '../core/analysis/common.ts';
+import * as F from '../core/analysis/forensic.ts';
 import * as B from './benchmark-fixtures.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
 
@@ -103,7 +106,7 @@ test('EXPECTED DIFFERENCES from the source on that fixture, each with its reason
   const blId = rows(b.db, 'PROJECT').find((p) => p._baseline_of === b.projId)!.proj_id;
   for (const t of rows(b.db, 'TASK').filter((x) => x.proj_id === blId)) t.total_float_hr_cnt = '0';
   const o = run(b.db);
-  assert.deepEqual(o.critical_overlay, { result: 'assessed', reference_critical_total: 3, current_critical_total: 2, newly_critical_total: 0, no_longer_critical_total: 0 });
+  assert.deepEqual(o.critical_overlay, { result: 'assessed', reference_critical_total: 3, current_critical_total: 2, newly_critical_total: 0, added_and_critical_total: 0, no_longer_critical_total: 0 });
   assert.deepEqual(o.overlay.map((x) => [x.id, x.critical_in_reference, x.critical_now]), [['T2', true, true], ['T3', true, true], ['T1', true, null]]);
   // 3. the source's status: asPlannedVsBuilt says warning (no class over 15 days), delayAnalysis fail (project slip over 0); the clone has one status, fail by either rule
   assert.equal(golden.as_planned_vs_built.status, 'warning');
@@ -120,7 +123,7 @@ test('EXPECTED DIFFERENCES from the source on that fixture, each with its reason
 
 // ------------------------------------------------------------------------------------------------ scenarios
 
-test('two critical drivers that overlap: the overlapping days, the equal split, the responsible party; the two totals side by side', () => {
+test('two critical drivers that overlap: each keeps its own type, the concurrent days and the others it overlaps, the party sums in full; the totals side by side', () => {
   // A and B (15 days each, in parallel, baseline 10) then C (5): all critical, each 5 days late; the project finishes 5 days late
   const b = scenario([{ id: 'A', duration_days: 10 }, { id: 'B', duration_days: 10 }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'] }], { A: 15, B: 15 }, [
     { op: 'add_code_type', name: 'Responsibility' }, { op: 'add_code_value', type: 'Responsibility', code: 'OWN', name: 'Owner' }, { op: 'add_code_value', type: 'Responsibility', code: 'CON', name: 'Contractor' },
@@ -128,29 +131,56 @@ test('two critical drivers that overlap: the overlapping days, the equal split, 
   const r = run(b.db, { responsibilityCode: 'responsibility' });
   assert.deepEqual([r.totals.project_slip_working_days, r.totals.critical_drivers_delay_days], [5, 15], 'the slip is 5 days; the critical drivers delayed 15 days between them (A and B delay the same days)');
   const d = byId(r.drivers);
-  assert.deepEqual(r.drivers.map((x) => [x.id, x.delay_days, x.on_critical_path, x.variance_type]), [['A', 5, true, 'concurrent_delay'], ['B', 5, true, 'concurrent_delay'], ['C', 5, true, 'start_delay']]);
-  // A and B run 5 Jan - 20 Jan together: 15 shared days, ratio 15 / max(5, 5, 1) = 3 (delayAnalysis.ts:155)
-  assert.deepEqual(d.A.concurrent_overlaps, [{ with: 'B', shared_days: 15, concurrency_ratio: 3 }]);
-  assert.deepEqual(d.B.concurrent_overlaps, [{ with: 'A', shared_days: 15, concurrency_ratio: 3 }]);
-  assert.deepEqual(d.C.concurrent_overlaps, [], 'C starts when A and B finish: no shared day');
+  // no driver is reclassified: A and B keep their own type (their duration grew), C its own (it starts late)
+  assert.deepEqual(r.drivers.map((x) => [x.id, x.delay_days, x.on_critical_path, x.variance_type]), [['A', 5, true, 'duration_overrun'], ['B', 5, true, 'duration_overrun'], ['C', 5, true, 'start_delay']]);
+  assert.equal(JSON.stringify(r).includes('concurrent_delay'), false, 'no concurrent_delay type');
+  // the delay period of A and of B is 15 - 20 Jan (the baseline finish to the current finish): the same 5 days, so each runs concurrently with the other for all 5 of its delay days; C's is 20 - 25 Jan, which touches theirs at a point only
+  assert.deepEqual([d.A.concurrent_days, d.A.concurrent_with, d.B.concurrent_days, d.B.concurrent_with, d.C.concurrent_days, d.C.concurrent_with], [5, 1, 5, 1, 0, 0]);
+  assert.ok(r.drivers.every((x) => (x.concurrent_days ?? 0) <= x.delay_days), 'concurrent days are part of the delay days');
   assert.deepEqual([d.A.successors_reached, d.A.causal_score], [1, 1.333]);
-  // chains: A -> C and B -> C and C; the concurrency score is the overlapping drivers over all drivers (1 / 3)
-  assert.deepEqual(r.chains.map((c) => [c.root, c.path, c.overlap_share_of_drivers]), [['A', ['A', 'C'], 0.333], ['B', ['B', 'C'], 0.333], ['C', ['C'], 0]]);
-  // the responsible party: A owner 5, B contractor 5, C no value 5; A and B overlap, so half of each (2.5) goes to the party and 5 days in all to concurrent_days_split_equally
-  assert.equal(r.responsibility.result, 'assessed');
+  assert.deepEqual(r.chains.map((c) => [c.root, c.path, c.concurrent_with]), [['A', ['A', 'C'], 1], ['B', ['B', 'C'], 1], ['C', ['C'], 0]]);
+  // the responsible party: A owner 5, B contractor 5, C no value 5, each in full; beside them, the concurrent days of each party's critical drivers; nothing is split
   const resp = r.responsibility as Extract<BaselineVarianceResult['responsibility'], { result: 'assessed' }>;
   assert.equal(resp.code_type, 'Responsibility');
-  assert.deepEqual(resp.parties, [{ party: 'no value', drivers: 1, delay_days: 5 }, { party: 'Contractor', drivers: 1, delay_days: 2.5 }, { party: 'Owner', drivers: 1, delay_days: 2.5 }]);
-  assert.equal(resp.concurrent_days_split_equally, 5);
-  assert.equal(resp.parties.reduce((a, p) => a + p.delay_days, 0) + resp.concurrent_days_split_equally, 15, 'every driver day is in exactly one place');
+  assert.deepEqual([...resp.parties].sort((x, y) => x.party.localeCompare(y.party)), [{ party: 'Contractor', drivers: 1, delay_days: 5, of_which_concurrent_days: 5 }, { party: 'no value', drivers: 1, delay_days: 5, of_which_concurrent_days: 0 }, { party: 'Owner', drivers: 1, delay_days: 5, of_which_concurrent_days: 5 }].sort((x, y) => x.party.localeCompare(y.party)));
+  assert.equal(resp.parties.reduce((a, p) => a + p.delay_days, 0), 15, 'the parties together have every driver day, once, in full');
+  assert.equal('concurrent_days_split_equally' in resp, false);
+  assert.deepEqual([r.totals.critical_drivers_delay_days, r.totals.of_which_concurrent_days], [15, 10], 'of the 15 critical driver days, 10 were days another critical driver was also delayed');
   assert.deepEqual(r.drivers.map((x) => x.responsible), ['Owner', 'Contractor', null]);
+  assert.match(r.method.join(' '), /AACE windows method and half-step are what windows_analysis does/);
+  assert.equal(JSON.stringify(r).includes('concurrent_overlaps'), false, 'no pair list anywhere');
+});
+
+test('concurrency by the sweep equals the brute-force pair count on 60 critical drivers whose delay periods overlap in every way, and no pair is listed', () => {
+  // 60 chains of the same length (40 days) are all critical: A_i of d_i days then B_i of 40 - d_i. Now A_i takes x_i days longer and B_i the same shorter: A_i's delay period is [d_i, d_i + x_i] (the baseline finish to the current finish), B_i finishes when it did.
+  const n = 60, d = (i: number) => 5 + ((i * 7) % 23), x = (i: number) => 1 + ((i * 5) % 9);
+  const tasks: B.Source[] = [], now: Record<string, number> = {};
+  for (let i = 0; i < n; i++) { tasks.push({ id: `A${i}`, duration_days: d(i) }, { id: `B${i}`, duration_days: 40 - d(i), predecessors: [`A${i}`] }); now[`A${i}`] = d(i) + x(i); now[`B${i}`] = 40 - d(i) - x(i); }
+  const r = run(scenario(tasks, now).db);
+  const dr = r.drivers.filter((q) => q.on_critical_path);
+  assert.equal(dr.length, n, 'every A is a critical driver');
+  const at = (i: number): [number, number] => [d(i), d(i) + x(i)];
+  for (let i = 0; i < n; i++) {
+    const q = byId(r.drivers)[`A${i}`], [a, f] = at(i);
+    // brute force: the part of [a, f] that at least one other period covers (days on the 7-day calendar), by the pairs
+    const cells = new Set<number>(); let others = 0;
+    for (let j = 0; j < n; j++) { if (j === i) continue; const [c, e] = at(j); const lo = Math.max(a, c), hi = Math.min(f, e); if (hi > lo) { others++; for (let t = lo; t < hi; t++) cells.add(t); } }
+    assert.deepEqual([q.concurrent_days, q.concurrent_with], [cells.size, others], `A${i}`);
+  }
+  assert.ok(dr.some((q) => (q.concurrent_with ?? 0) > 3) && dr.some((q) => q.concurrent_days === 0 || q.concurrent_days! < q.delay_days), 'the periods overlap in every way');
+  assert.equal(JSON.stringify(r).includes('concurrent_overlaps'), false);
+  assert.equal(r.totals.of_which_concurrent_days, Math.round(dr.reduce((a, q) => a + q.concurrent_days!, 0) * 100) / 100);
+  // a driver that is not critical carries none of the two facts
+  const nc = scenario([{ id: 'A', duration_days: 10 }, { id: 'B', duration_days: 5 }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'] }], { B: 7 });
+  const rn = run(nc.db);
+  assert.deepEqual(rn.drivers.filter((q) => q.on_critical_path === false).map((q) => [q.id, q.concurrent_days, q.concurrent_with]), [['B', null, null]]);
 });
 
 test('newly critical: a branch that had float in the baseline and is critical now (and the one that stopped being critical)', () => {
   // baseline: A 10 days (critical), B 5 days (5 days of float), C 5 after both. Now B is 12 days: B critical, A 2 days of float
   const b = scenario([{ id: 'A', duration_days: 10 }, { id: 'B', duration_days: 5 }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'] }], { B: 12 });
   const r = run(b.db);
-  assert.deepEqual(r.critical_overlay, { result: 'assessed', reference_critical_total: 2, current_critical_total: 2, newly_critical_total: 1, no_longer_critical_total: 1 });
+  assert.deepEqual(r.critical_overlay, { result: 'assessed', reference_critical_total: 2, current_critical_total: 2, newly_critical_total: 1, added_and_critical_total: 0, no_longer_critical_total: 1 });
   const o = byId(r.overlay);
   assert.deepEqual([o.B.critical_in_reference, o.B.critical_now, o.B.newly_critical], [false, true, true]);
   assert.deepEqual([o.A.critical_in_reference, o.A.critical_now, o.A.no_longer_critical], [true, false, true]);
@@ -175,6 +205,51 @@ test('each slip class, on the working days of the finish variance', () => {
   assert.equal(r.status, 'fail');
 });
 
+test('BEI against another schedule counts completed tasks only among those the other schedule holds (not every completed task of the open project)', () => {
+  // the open project has 10 tasks, T1 - T6 complete by the data date (20 Jan); the schedule as planned holds T1 - T4 only, all due by then (finish 7 Jan): 4 due, and of them 4 completed. Counting every completed task (6) against the 4 due read 1.5.
+  const ids = Array.from({ length: 10 }, (_, i) => `T${i + 1}`);
+  const cur = B.project('CUR', ids.map((id) => ({ id, duration_days: 2 })), { start: '2026-01-05', dataDate: '2026-01-20', schedule: false, ops: ids.slice(0, 6).map((id) => ({ op: 'update_activity', id, actual_start: '2026-01-05 00:00', actual_finish: '2026-01-07 00:00' })) });
+  assert.ok(scheduleProjects(cur.db, [cur.projId], { dataDate: parseP6Date('2026-01-20 00:00')! }).ok);
+  const plan = B.project('PLAN', ids.slice(0, 4).map((id) => ({ id, duration_days: 2 })), { start: '2026-01-05' });
+  const r = run(cur.db, { asPlanned: { name: 'PLAN', db: plan.db, projId: plan.projId } });
+  assert.deepEqual(r.bei, { result: 'assessed', value: 1, completed: 4, due: 4 });
+  // one of the four not done: 3 of 4 (the two completed tasks the other schedule does not hold are not counted)
+  const t4 = rows(cur.db, 'TASK').find((t) => t.task_code === 'T4')!;
+  t4.act_end_date = ''; t4.status_code = 'TK_Active'; t4.remain_drtn_hr_cnt = '24';
+  assert.deepEqual(run(cur.db, { asPlanned: { name: 'PLAN', db: plan.db, projId: plan.projId } }).bei, { result: 'assessed', value: 0.75, completed: 3, due: 4 });
+});
+
+test('dcma_14\'s BEI does not change: with a baseline saved from the same project every activity has its counterpart, so completed = every completed task (Tower-A, the one sample with a baseline: 1 of 2)', () => {
+  const ids = ['T1', 'T2', 'T3', 'T4', 'T5'];
+  const b = B.project('BE', ids.map((id) => ({ id, duration_days: 2 })), { start: '2026-01-05', dataDate: '2026-01-20', schedule: false });
+  assert.ok(applyOps(b.db, [{ op: 'save_baseline', name: 'BL', assign_as: 'project' }, ...ids.slice(0, 3).map((id) => ({ op: 'update_activity', id, actual_start: '2026-01-05 00:00', actual_finish: '2026-01-07 00:00' }))], { calendarDays: true }).ok);
+  assert.ok(scheduleProjects(b.db, [b.projId], { dataDate: parseP6Date('2026-01-20 00:00')! }).ok);
+  const bei = dcma14(b.db, {}).checks.find((c) => c.id === 'bei')!;
+  assert.deepEqual([bei.numerator, bei.denominator, bei.metric], [3, 5, 0.6], 'all 5 are due by 20 Jan, 3 completed: the count of every completed task');
+  assert.deepEqual(run(b.db).bei, { result: 'assessed', value: 0.6, completed: 3, due: 5 }, 'baseline_variance says the same');
+  const tw = dcma14(sample('Tower-A.xer').db, {}).checks.find((c) => c.id === 'bei')!;
+  assert.deepEqual([tw.numerator, tw.denominator, tw.metric], [1, 2, 0.5]);
+});
+
+test('the slip class is judged on the exact variance: an activity one minute behind its baseline shows 0 days and is a minor slip, not on time (one variance function, exact)', () => {
+  const b = scenario([{ id: 'A', duration_days: 10 }, { id: 'B', duration_days: 10 }], {});
+  const T = rows(b.db, 'TASK').find((t) => t.proj_id === b.projId && t.task_code === 'A')!;
+  const later = formatP6Date(parseP6Date(T.reend_date || T.early_end_date)! + 1); // 1 minute later than the baseline's finish
+  T.early_end_date = later; T.reend_date = later;
+  const r = run(b.db), v = byId(r.variances);
+  assert.deepEqual([v.A.finish_variance_days, v.A.slip_class, v.B.finish_variance_days, v.B.slip_class], [0, 'minor_slip', 0, 'on_time']);
+  assert.equal(r.drivers_total, 0, 'a driver needs a working day');
+  // the one function: the rows of the forensic helper are the rows baseline_variance lists, and schedule_index's drift averages the exact days
+  const s = makeScope(b.db, { calendarDays: true }), pairs = F.baselinePairs(s);
+  assert.ok(pairs.result === 'assessed');
+  if (pairs.result === 'assessed') {
+    assert.deepEqual(F.varianceRows(s, pairs).map((x) => [x.id, x.finish_variance_days, x.slip_class]), [['A', 0, 'minor_slip'], ['B', 0, 'on_time']]);
+    const d = F.varianceDetail(s, pairs).find((x) => x.task.task_code === 'A')!;
+    assert.equal(d.exact.finish, 1, 'exact working minutes');
+    assert.equal(d.exact.day, 24 * 60);
+  }
+});
+
 // ------------------------------------------------------------------------------------------------ real files
 
 test('Tower-A (its baseline is stored in the file): counted from the rows', () => {
@@ -197,7 +272,10 @@ test('Tower-A (its baseline is stored in the file): counted from the rows', () =
   assert.deepEqual(r.chains.map((c) => [c.root, c.path, c.impacted_milestone]), [['A1020', ['A1020', 'A1030', 'M1000'], 'M1000']]);
   assert.equal(r.chains[0].path_total, 3);
   // critical overlay: baseline A1010, A1020 critical (float 0, not complete in the baseline); now A1020, A1030, M1000 (A1010 is finished); none newly critical among the activities the baseline has
-  assert.deepEqual(r.critical_overlay, { result: 'assessed', reference_critical_total: 2, current_critical_total: 3, newly_critical_total: 0, no_longer_critical_total: 0 });
+  assert.deepEqual(r.critical_overlay, { result: 'assessed', reference_critical_total: 2, current_critical_total: 3, newly_critical_total: 0, added_and_critical_total: 2, no_longer_critical_total: 0 });
+  // A1030 and M1000 were added since the baseline and are critical now: not "newly critical" (they have no counterpart), listed apart
+  assert.deepEqual(r.overlay.filter((x) => x.added_and_critical).map((x) => [x.id, x.critical_in_reference, x.critical_now, x.newly_critical]), [['A1030', null, true, false], ['M1000', null, true, false]]);
+  assert.match(r.summary, /0 newly critical, 2 added since and critical/);
   // BEI: baselined to finish by the data date (1 Apr 08:00): A1010 (6 Mar) and A1020 (14 Mar) = 2 due, 1 completed
   assert.deepEqual(r.bei, { result: 'assessed', value: 0.5, completed: 1, due: 2 });
   // duration-weighted % complete: A1010 5 d x 100 % + A1020 8 d x 40 % + A1030 10 d (its own 80 h: not in the baseline) x 0 + M1000 0 = 8.2 of 23 days
@@ -208,8 +286,8 @@ test('Tower-A (its baseline is stored in the file): counted from the rows', () =
   assert.match((r.responsibility as any).note, /Pass responsibility_code.*Activity code types in this file: Phase/);
   // given: the activity code type Phase; A1020 carries the value Enabling (TASKACTV: task 1001, type 50, value 51 "Enabling")
   const p = run(tw.db, { responsibilityCode: 'phase' });
-  assert.deepEqual((p.responsibility as any).parties, [{ party: 'Enabling', drivers: 1, delay_days: 2 }]);
-  assert.equal((p.responsibility as any).concurrent_days_split_equally, 0);
+  assert.deepEqual((p.responsibility as any).parties, [{ party: 'Enabling', drivers: 1, delay_days: 2, of_which_concurrent_days: 0 }]);
+  assert.equal('concurrent_days_split_equally' in (p.responsibility as object), false, 'no split of any kind');
   assert.equal(p.drivers[0].responsible, 'Enabling');
 });
 
@@ -274,7 +352,7 @@ test('baseline_variance through the server: arguments, refusals in words, respon
   const ok = await call('baseline_variance', { handle: tw, responsibility_code: 'Phase', bogus: 1 });
   assert.equal(ok.err, false, JSON.stringify(ok.d).slice(0, 300));
   assert.match(ok.d.arguments_not_used.join(' '), /baseline_variance has no argument "bogus"/);
-  assert.deepEqual(ok.d.responsibility.parties, [{ party: 'Enabling', drivers: 1, delay_days: 2 }]);
+  assert.deepEqual(ok.d.responsibility.parties, [{ party: 'Enabling', drivers: 1, delay_days: 2, of_which_concurrent_days: 0 }]);
   assert.deepEqual(ok.d.exported.files.map((f: any) => f.path.replace(/^.*baseline_variance/, '')).sort(), ['-chains.csv', '-critical_overlay.csv', '-drivers.csv', '-variances.csv', '.json']);
   // as_planned by path and by handle give the same answer
   const cur = await openSample('Tower-A_edited.xer');
@@ -316,5 +394,5 @@ test('the list rule on a real sample (31 buidings, 2,142 activities, against ano
   assert.deepEqual(dd, [...dd].sort((x: number, y: number) => y - x));
   assert.ok(r.d.drivers.every((x: any) => x.delay_days >= 1));
   // the critical drivers' days beside the project slip: two figures, named for what they are
-  assert.deepEqual(Object.keys(r.d.totals), ['project_slip_working_days', 'critical_drivers_delay_days', 'finished_drivers']);
+  assert.deepEqual(Object.keys(r.d.totals), ['project_slip_working_days', 'critical_drivers_delay_days', 'of_which_concurrent_days', 'finished_drivers']);
 });
