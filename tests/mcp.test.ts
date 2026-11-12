@@ -177,8 +177,14 @@ test('MCP: compare two revisions by Activity ID, and trace an activity\'s logic'
     assert.equal(cmp.isError, false, cmp.content?.[0]?.text);
     assert.deepEqual([cmp.data.summary.activity.added, cmp.data.summary.activity.deleted], [1, 1]);
     assert.ok(cmp.data.summary.activity.changed >= 1 && cmp.data.changes.some((x: { id: string; field?: string }) => x.id === 'A2410'));
+    assert.match(cmp.data.compared, /\(the open project\) \(earlier\) \u2192 .*\(the other open project\) \(later\)$/);
     const same = await c.tool('compare', { handle: a, path: sampleCopy('cairo festival city.xer') });
     assert.equal(same.data.changes.length, 0);
+    assert.match(same.data.compared, /\(earlier\) \u2192 cairo festival city\.xer \(the file\) \(later\)$/);
+    const comp = await c.tool('compare', { handle: a, other_handle: b, mode: 'computed' });
+    assert.match(comp.data.sign_note, /positive finish_shift_days.*later revision is later/);
+    const tools = (await c.rpc('tools/list')).result.tools as { name: string; description: string }[];
+    assert.match(tools.find((t) => t.name === 'compare')!.description, /open project \(handle\) is always the EARLIER revision.*other_handle.*path.*baseline.*positive finish_shift_days/);
     const tr = await c.tool('trace_logic', { handle: a, activity_id: 'A2410', predecessors: 2, successors: 1 });
     assert.ok(tr.data.levels.some((l: { level: number }) => l.level === -1) && tr.data.links.some((x: { driving: boolean }) => x.driving));
   } finally { await c.close(); }

@@ -143,7 +143,7 @@ test('R1: lists of lint fixes, windows, earned value and the other cut lists sho
   assert.deepEqual(m.arguments_not_used.map((x: string) => x.match(/argument "(\w+)"/)![1]), ['top', 'buckets', 'histogram']);
   // (no estimates: every run finishes at the same moment, so the chart is one bar holding all 20 runs, and the answer says so)
   assert.equal(m.histogram.length, 1); assert.equal(m.histogram[0].count, 20); assert.equal(m.histogram[0].cum_pct, 100);
-  assert.equal(m.histogram_note, `All 20 runs finish at the same moment (${m.finish.min}), so the chart is one bar holding all of them, not 20.`);
+  assert.equal(m.histogram_note, `All 20 runs finish at the same moment (${m.finish.min}), so the chart is one bar holding all of them, not 20. They coincide because no activity's duration varies: no activity has a three-point estimate and no sampler or default_estimates was given, so every run is the deterministic schedule. To get a spread, set three-point estimates (edit set_estimates), or pass default_estimates ({min_pct, max_pct, dist}), or pass a sampler.`);
   assert.equal(m.arguments_not_used[0], `monte_carlo has no argument "top": it was not used and the call ran without it. Its arguments are: handle, export, export_name, iterations, resume, events, sampler, re_anchor, deadline, seed, risk_events, project, default_estimates, exact, caller, async.`);
   const ev = (await call('earned_value', { ...h, worst: 1 })).d;
   assert.match(ev.arguments_not_used[0], /^earned_value has no argument "worst"/);
@@ -290,6 +290,18 @@ test('B6: the Monte Carlo file\'s histogram is the answer\'s chart; with estimat
   assert.deepEqual(one.histogram[0], { start: one.finish.max, end: one.finish.max, count: 15, cum_pct: 100 });
   assert.match(one.histogram_note, /^All 15 runs finish at the same moment/);
   assert.equal(readFileSync(csv(one, 'histogram'), 'utf8').trim().split('\r\n').length, 2);
+  assert.match(one.histogram_note, /no activity's duration varies.*set_estimates.*default_estimates.*sampler/);
+  assert.match(one.note, /set_estimates.*default_estimates.*sampler/);
+  // durations that vary: no reason given (the runs differ)
+  assert.doesNotMatch(r.note ?? '', /no activity/i);
+});
+
+test('earned_value says in a note when the schedule carries no costs (budget at completion 0)', async () => {
+  const h = await build('EVN', [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }]);
+  const ev = (await call('earned_value', h)).d;
+  assert.equal(ev.projects[0].totals.bac, 0);
+  assert.equal(ev.projects[0].totals.spi, 0);
+  assert.match(ev.note, /^The schedule carries no costs \(budget at completion is 0\), so SPI, CPI and EAC are not meaningful.*resource price.*budgeted cost on an assignment.*expense.*dates\. BAC = /);
 });
 
 test('B8: compare says how many changes there are and where all of them are', async () => {

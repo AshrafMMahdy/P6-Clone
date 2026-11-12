@@ -222,8 +222,14 @@ test('MCP: export_excel describe / sheets / columns, import_excel skips a refuse
   T.rows.find((r) => r[1] === 'A1320')![5] = 5; // a milestone: refused
   T.rows.find((r) => r[1] === 'A2410')![5] = 33;
   writeFileSync(join(dir, 'b.xlsx'), await writeXlsx(sheets));
+  // dry run: the refusal the real run gives is listed row by row, the same message, and nothing changes
+  const dry = (await call('import_excel', { ...H, path: join(dir, 'b.xlsx'), dry_run: true })).d;
+  assert.equal(dry.applied, false);
+  assert.deepEqual(dry.refused.map((r: any) => [r.sheet, r.op]), [['TASK', 'update_activity']]);
+  assert.notEqual((await call('get_activity', { ...H, activity_id: 'A2410' })).d.orig_days, 33, 'a dry run changes nothing');
   const imp = (await call('import_excel', { ...H, path: join(dir, 'b.xlsx') })).d;
   assert.equal(imp.applied, true, JSON.stringify(imp));
+  assert.deepEqual(dry.refused.map((r: any) => r.message), imp.refused.map((r: any) => r.message), 'the dry run gives the real run\'s message');
   assert.deepEqual(imp.refused.map((r: any) => [r.sheet, r.op]), [['TASK', 'update_activity']]);
   assert.equal((await call('get_activity', { ...H, activity_id: 'A2410' })).d.orig_days, 33);
   await call('undo', H);
@@ -240,4 +246,32 @@ test('a 32,000-relationship programme re-imports unchanged in seconds (relations
   const plan = planImport(db, sheets, p.proj_short_name, 8, true);
   assert.equal(plan.ops.length, 0, JSON.stringify(plan.ops.slice(0, 3)));
   assert.ok(Date.now() - t0 < 5000, `planned in ${Date.now() - t0} ms`);
+});
+
+test('MCP: import_excel dry run refuses a new activity under a WBS that does not exist, as the real run does; a relationship type written out names the accepted values', { timeout: 120_000 }, async () => {
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  const dir = mkdtempSync(join(tmpdir(), 'xl-dry-'));
+  copyFileSync(join(SAMPLES_DIR, 'cairo festival city.xer'), join(dir, 'c.xer'));
+  const o = (await call('open_file', { path: join(dir, 'c.xer') })).d, H = { handle: o.handle, owner_key: o.owner_key };
+  await call('export_excel', { ...H, path: join(dir, 'a.xlsx'), sheets: ['TASK', 'TASKPRED'] });
+  const sheets = await readXlsx(new Uint8Array(readFileSync(join(dir, 'a.xlsx'))));
+  const T = sheets.find((x) => x.name === 'TASK')!, hdr = T.rows[0].map(String);
+  const row = T.rows.find((r) => r[hdr.indexOf('task_code')] === 'A2410')!.slice();
+  row[hdr.indexOf('task_code')] = 'NEWX'; row[hdr.indexOf('wbs_id')] = 'ROOF';
+  T.rows.push(row);
+  const R = sheets.find((x) => x.name === 'TASKPRED')!, rh = R.rows[0].map(String);
+  const rel = R.rows[R.rows.length - 1].slice();
+  rel[rh.indexOf('pred_type')] = 'Finish to Start';
+  R.rows.push(rel);
+  writeFileSync(join(dir, 'b.xlsx'), await writeXlsx(sheets));
+  const dry = (await call('import_excel', { ...H, path: join(dir, 'b.xlsx'), dry_run: true })).d;
+  const hit = dry.refused.find((r: any) => /NEWX|ROOF/.test(r.message) || r.op === 'add_activity');
+  assert.ok(hit, JSON.stringify(dry));
+  assert.match(hit.message, /No WBS "ROOF"/);
+  assert.match(hit.next, /add_wbs/);
+  assert.ok(dry.warnings.some((w: string) => /unknown type "Finish to Start"; the accepted values are FS, SS, FF, SF/.test(w)), JSON.stringify(dry.warnings));
+  const real = (await call('import_excel', { ...H, path: join(dir, 'b.xlsx') })).d;
+  assert.deepEqual(real.refused.map((r: any) => r.message), dry.refused.map((r: any) => r.message));
+  await call('close', { ...H, discard: true });
 });

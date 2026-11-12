@@ -336,7 +336,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         worst_schedule_performance: bySpi.slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, spi: round(x.e.spi), sv: round(x.e.sv) })), worst_schedule_performance_total: bySpi.length,
         // (every_activity, an export: each activity with cost, every earned value figure of it)
         ...(args.every_activity === true ? { activities: tasks.filter((t) => t.task_type !== 'TT_WBS' && costs.get(t.task_id)).map((t) => ({ project: ctx.proj.get(t.proj_id)?.proj_short_name, id: t.task_code, name: t.task_name, wbs: wbsPath(t.wbs_id), ...pack(sumLines([costs.get(t.task_id)!])) })) } : {}),
-        note: 'BAC = baseline budget (current budget when no baseline is assigned). PV = BAC x baseline time elapsed at the data date. EV = BAC x % complete. SPI = EV/PV, CPI = EV/AC, EAC = AC + remaining cost, VAC = BAC - EAC.',
+        note: `${projects.length && projects.every((p) => p.totals.bac === 0) ? 'The schedule carries no costs (budget at completion is 0), so SPI, CPI and EAC are not meaningful (0 here means nothing was measured, not poor performance). Load costs (a resource price, a budgeted cost on an assignment, or an expense) or judge progress from the dates. ' : ''}BAC = baseline budget (current budget when no baseline is assigned). PV = BAC x baseline time elapsed at the data date. EV = BAC x % complete. SPI = EV/PV, CPI = EV/AC, EAC = AC + remaining cost, VAC = BAC - EAC.`,
       };
     }
     case 'resource_summary': {

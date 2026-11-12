@@ -546,7 +546,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
     const pp = str(r.pred_proj_id), sp = str(r.proj_id);
     if ((pp && !projByName.has(pp)) || (sp && !projByName.has(sp))) { warnings.push(`Relationship ${pred} -> ${succ}: no project ${pp && !projByName.has(pp) ? pp : sp} in this file; skipped.`); continue; }
     const type = str(r.pred_type).toUpperCase().replace(/^PR_/, '') || 'FS';
-    if (!['FS', 'SS', 'FF', 'SF'].includes(type)) { warnings.push(`Relationship ${pred} -> ${succ}: unknown type "${type}".`); continue; }
+    if (!['FS', 'SS', 'FF', 'SF'].includes(type)) { warnings.push(`Relationship ${pred} -> ${succ}: unknown type "${str(r.pred_type)}"; the accepted values are FS, SS, FF, SF (or PR_FS, PR_SS, PR_FF, PR_SF); the row was skipped. Write the type as one of them.`); continue; }
     // operations name an end in another project by that project (the edit's own project otherwise)
     const ends = { ...(pp && pp !== projectId ? { pred_project: pp } : {}), ...(sp && sp !== projectId ? { succ_project: sp } : {}) };
     recs.push({ pred, succ, type, r, ref, ends, k: `${pp}|${pred}|${sp}|${succ}` });
