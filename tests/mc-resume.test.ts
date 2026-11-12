@@ -324,6 +324,18 @@ test('…the same in compute workers: the claim is held on the server\'s main th
   } finally { s.p.kill('SIGKILL'); }
 });
 
+test('monte_carlo counts the activities critical in every run and in at least one run from the full list, not the top rows', async () => {
+  const h = await project(40);
+  const a = { ...h, iterations: 20, seed: 3, default_estimates: est };
+  const all = (await call('monte_carlo', { ...a, top: 0 })).d;
+  const every = all.criticality.filter((x: any) => x.critical_pct === 100).length, any = all.criticality.filter((x: any) => x.critical_pct > 0).length;
+  assert.ok(any > 0 && any <= all.criticality_total);
+  assert.equal(all.critical_in_every_run, every); assert.equal(all.critical_in_any_run, any);
+  const three = (await call('monte_carlo', { ...a, top: 3 })).d;
+  assert.equal(three.criticality.length, 3);
+  assert.equal(three.critical_in_every_run, every, 'the same counts whatever top is'); assert.equal(three.critical_in_any_run, any);
+});
+
 test('monte_carlo has no bound on top, buckets or iterations: top 0 = all, top 500 and buckets 250 are honoured, 20,100 iterations all run', async () => {
   const h = await project(40);
   const a = { ...h, iterations: 20, seed: 3, default_estimates: est };
