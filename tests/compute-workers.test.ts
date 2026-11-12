@@ -29,7 +29,7 @@ const env = (vars: Record<string, string | undefined>) => {
 const open = async (name = 'cairo alex-road.xer') => { const o = await call('open_file', { path: sampleCopy(name) }); assert.equal(o.err, false, JSON.stringify(o.d).slice(0, 200)); return { handle: o.d.handle as string, owner_key: o.d.owner_key as string }; };
 const dates = async (h: { handle: string; owner_key: string }) => JSON.stringify((await call('activity_table', { ...h, limit: 5000 })).d);
 // (two open copies of one file write to folders told apart by their handles: the handle is not part of what is compared)
-const strip = (v: unknown) => JSON.parse(JSON.stringify(v, (k, x) => (/elapsed|seconds|ms$|^exported$/i.test(k) ? undefined : typeof x === 'string' ? x.replace(/h_[A-Za-z0-9_-]{8,}/g, 'h_') : x)));
+const strip = (v: unknown) => JSON.parse(JSON.stringify(v, (k, x) => (/elapsed|seconds|ms$|^exported$/i.test(k) ? undefined : typeof x === 'string' ? x.replace(/__h_[A-Za-z0-9_-]{8,}/g, '').replace(/h_[A-Za-z0-9_-]{8,}/g, 'h_') : x)));
 
 // ---- the patch -------------------------------------------------------------------------------------------------------------------
 const mk = (): Db => ({ header: { version: '19.12', exportDate: 'x', raw: ['a'] }, tables: { TASK: { name: 'TASK', fields: ['task_id', 'name'], rows: [{ task_id: '1', name: 'a' }, { task_id: '2', name: 'b' }, { task_id: '3', name: 'c' }] }, PROJECT: { name: 'PROJECT', fields: ['proj_id'], rows: [{ proj_id: 'P' }] } } });

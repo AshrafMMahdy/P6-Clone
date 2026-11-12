@@ -83,6 +83,10 @@ const VERSION = '2.0.0';
 const prefsOf = (s: Session) => ({ hoursPerDay: s.hpd, dateFormat: 'dd-MMM-yy' as const, showTime: false, durationDecimals: 0, calendarDays: true });
 
 // ---------------------------------------------------------------- tool list
+/** The default result folder each session was given (session handle, tool, project argument -> folder), and which session holds each folder. A session's folder is decided at its
+ *  first default write and never changes while it lives; closing the session frees its folders. */
+const sessionFolders = new Map<string, string>(), folderHolders = new Map<string, string>();
+const releaseFolders = (handle: string) => { for (const [k, f] of sessionFolders) if (k.startsWith(`${handle}\u0000`)) { sessionFolders.delete(k); if (folderHolders.get(f) === handle) folderHolders.delete(f); } };
 const handleProp = { handle: { type: 'string', description: 'The handle returned by open_file or new_project' } };
 const common = { caller: { type: 'string', description: 'Who is calling (set by the bridge); undo and redo act on your own changes' }, async: { type: 'boolean', description: 'Run as a job and return a job_id at once (job_status gives the result)' } };
 const ownerProp = { owner_key: { type: 'string', description: 'The owner key returned when the project was opened' } };
@@ -443,10 +447,15 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   // refused call. The marker that it is the default folder is a symbol on the call's arguments (DEFAULT_FOLDER), never a key a caller can send.
   if (RESULT_FILE_TOOLS.has(name) && a.export == null) {
     const namesOf = (x: Session) => { try { return (a.project != null && a.project !== '' ? projectIds(x.db, a.project) : allIds(x.db)).map((id) => x.db.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name).filter((n): n is string => !!n); } catch { return []; /* the tool refuses the project itself */ } };
-    const names = namesOf(s), plain = defaultResultFolder(name, names, s.path);
-    // another open project that would write to the same folder (the same project and file name: next month's update of the same project): the handle tells them apart
-    const clash = [...sessions.values()].some((o) => o !== s && defaultResultFolder(name, namesOf(o), o.path) === plain);
-    const folder = clash ? defaultResultFolder(name, names, s.path, s.handle) : plain;
+    const names = namesOf(s), key = `${s.handle}\u0000${name}\u0000${a.project ?? ''}`;
+    // decided once, at the session's first default write, and kept as long as the session lives (the handle outlives a move out of memory): a later session that would
+    // write to a folder another session holds gets the handle added to its own; so two sessions never share a default folder and no session's folder changes
+    let folder = sessionFolders.get(key);
+    if (folder === undefined) {
+      const plain = defaultResultFolder(name, names, s.path);
+      folder = plain && folderHolders.has(plain) && folderHolders.get(plain) !== s.handle ? defaultResultFolder(name, names, s.path, s.handle) : plain;
+      if (folder) { sessionFolders.set(key, folder); folderHolders.set(folder, s.handle); }
+    }
     if (folder) a = { ...a, export: folder, [DEFAULT_FOLDER]: true };
   }
   // the main thread only routes: a tool that can run long works on a copy of its project in a worker thread (compute.ts)
@@ -823,7 +832,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'close': {
       requireOwner(s, a.owner_key, 'Closing');
       if (s.dirty && a.discard !== true) fail('unsaved_changes', 'This project has unsaved changes, so it was not closed.', 'Save it first (save), or close with discard: true to drop the changes.');
-      closeSession(s); forgetEvicted(s.handle); return { closed: s.handle, had_unsaved_changes: s.dirty };
+      closeSession(s); forgetEvicted(s.handle); releaseFolders(s.handle); return { closed: s.handle, had_unsaved_changes: s.dirty };
     }
     case 'export_pdf': {
       const path = pathArg(a.path, 'path', 'write');
@@ -1136,7 +1145,7 @@ export function toolResult(out: unknown, isError: boolean, tool?: string) {
     const asks = ['limit', 'offset', 'max_rows', 'max_changes', 'project'].filter((k) => known.includes(k));
     const ask = asks.length ? `, or ask for less (this tool's ${asks.join(', ')})` : '';
     structured = { truncated: true, size_chars: text.length, ...(saved ? { saved, written: [saved] } : {}),
-      ...(answer.exported !== undefined ? { exported: answer.exported } : {}), ...(Object.keys(notes).length ? { notes } : {}), ...(answer.arguments_not_used !== undefined ? { arguments_not_used: answer.arguments_not_used } : {}),
+      ...(answer.exported !== undefined ? { exported: answer.exported } : {}), ...Object.fromEntries(['partial', 'resume', 'next_offset'].filter((k) => answer[k] !== undefined).map((k) => [k, answer[k]])), ...(answer.note !== undefined ? { answer_note: answer.note } : {}), ...(Object.keys(notes).length ? { notes } : {}), ...(answer.arguments_not_used !== undefined ? { arguments_not_used: answer.arguments_not_used } : {}),
       note: saved ? `The result was too large to return whole (${text.length} characters); all of it is in ${saved} (JSON). Read that file${ask}.`
         : `The result was too large to return whole and could not be written to a file${ask}; or write it to a file (run_report / export_* with path).`,
       preview: text.slice(0, 20000) };

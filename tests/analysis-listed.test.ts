@@ -198,7 +198,7 @@ test('B3: the desktop screens (config.screens, set only by the app\'s own proces
   assert.equal(l25.checks.find((c: any) => c.id === 'connectivity').activities.length, 25);
 });
 
-test('B5: two open projects never share a result folder: the file name tells them apart, and the handle when the file name is the same too', async () => {
+test('B5: two open projects never share a result folder: the file name tells them apart, and the handle (on the later one) when the file name is the same too', async () => {
   const ops = [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 2 }];
   const first = await build('NEXTMONTH', ops);
   const folderOf = async (h: object) => { const r = (await call('lint', { ...h, simulate: false })).d; assert.equal(r.exported.error, undefined, JSON.stringify(r.exported)); return r.exported.folder as string; };
@@ -219,13 +219,13 @@ test('B5: two open projects never share a result folder: the file name tells the
   const again = (await call('open_file', { path: join(root, 'update-1.xer') })).d;
   const a = await folderOf(one), b = await folderOf(again);
   assert.notEqual(a, b);
-  assert.equal(a, join(root, 'analysis', `NEXTMONTH__update-1__${one.handle}`, 'lint'));
+  assert.equal(a, f1); // the first session keeps the folder it had (B8)
   assert.equal(b, join(root, 'analysis', `NEXTMONTH__update-1__${again.handle}`, 'lint'));
   assert.ok(existsSync(join(a, 'lint.json')) && existsSync(join(b, 'lint.json')));
   const m1 = await build('TWIN', ops), m2 = await build('TWIN', ops);
   const t1 = await folderOf(m1), t2 = await folderOf(m2);
   assert.notEqual(t1, t2);
-  assert.equal(t1, join(root, 'analysis', `TWIN__${m1.handle}`, 'lint')); assert.equal(t2, join(root, 'analysis', `TWIN__${m2.handle}`, 'lint'));
+  assert.equal(t1, join(root, 'analysis', 'TWIN', 'lint')); assert.equal(t2, join(root, 'analysis', `TWIN__${m2.handle}`, 'lint'));
   // (a file whose name ends in -partial is no reason to refuse the call: that rule is for export_name)
   await call('save', { ...m1, path: join(root, 'x-partial.xer') });
   const part = (await call('open_file', { path: join(root, 'x-partial.xer') })).d;
@@ -311,4 +311,69 @@ test('B8: compare says how many changes there are and where all of them are', as
   // the computed mode names the same total
   const c = (await call('compare', { ...h, path: was, mode: 'computed', max_changes: 1 })).d;
   assert.equal(c.changes_total, c.changed);
+});
+
+test('B8: a session\'s default result folder is decided once and never changes; two sessions never share one', async () => {
+  const { evict, sessions } = await import('../mcp/runtime.ts') as any;
+  const ops = [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 2 }];
+  const folderOf = async (h: object) => { const r = (await call('lint', { ...h, simulate: false })).d; assert.equal(r.exported.error, undefined); return r.exported.folder as string; };
+  const first = await build('KEEP', ops);
+  await call('save', { ...first, path: join(root, 'keep.xer') });
+  await call('close', { ...first, discard: true });
+  const A = (await call('open_file', { path: join(root, 'keep.xer') })).d;
+  const a1 = await folderOf(A);
+  assert.equal(a1, join(root, 'analysis', 'KEEP__keep', 'lint'));
+  // a second open of the same file: A's folder is unchanged, B's is distinct
+  const B = (await call('open_file', { path: join(root, 'keep.xer') })).d;
+  assert.equal(await folderOf(A), a1);
+  const b1 = await folderOf(B);
+  assert.equal(b1, join(root, 'analysis', `KEEP__keep__${B.handle}`, 'lint'));
+  // A moved out of memory and brought back: still A's folder; B never writes into it
+  evict(sessions.get(A.handle), 'test');
+  assert.equal(await folderOf(A), a1);
+  assert.equal(await folderOf(B), b1);
+  // B moved out and back, A still holds the plain one
+  evict(sessions.get(B.handle), 'test');
+  assert.equal(await folderOf(B), b1); assert.equal(await folderOf(A), a1);
+});
+
+test('B9: the default folder name is never ., .., empty or ending in a dot or space, and does not repeat the file\'s name', async () => {
+  const { defaultResultFolder } = await import('../mcp/export.ts') as any;
+  for (const n of ['.', '..', '...', ' ', 'X.', 'X ', 'X. .']) {
+    const f = defaultResultFolder('lint', [n]) as string;
+    const dir = f.split(/[\\/]/)[1];
+    assert.ok(dir && dir !== '.' && dir !== '..' && !/[. ]$/.test(dir), `${JSON.stringify(n)} -> ${f}`);
+  }
+  assert.equal(defaultResultFolder('lint', ['..']), join('analysis', 'project', 'lint'));
+  assert.equal(defaultResultFolder('lint', ['X'], '/a/X.xer'), join('analysis', 'X', 'lint'));
+  assert.equal(defaultResultFolder('lint', ['X'], '/a/Y.xer'), join('analysis', 'X__Y', 'lint'));
+  const dots = await build('..', [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 2 }]);
+  const r = (await call('lint', { ...dots, simulate: false })).d;
+  assert.equal(r.exported.folder, join(root, 'analysis', 'project', 'lint'));
+});
+
+test('B10: resource_histogram lists by severity, then over-allocated periods, then name; a limit-0 resource does not push real ones out', async () => {
+  const rops: unknown[] = [{ op: 'add_activity', id: 'T', name: 'T', duration_days: 20 }, { op: 'add_resource', id: 'AA', name: 'AA', max_units_per_hour: 0 }, { op: 'assign_resource', activity: 'T', resource: 'AA', units_per_day: 8 },
+    { op: 'add_resource', id: 'MID', name: 'MID', max_units_per_hour: 1 }, { op: 'assign_resource', activity: 'T', resource: 'MID', units_per_day: 14 },
+    { op: 'add_resource', id: 'HI', name: 'HI', max_units_per_hour: 1 }, { op: 'assign_resource', activity: 'T', resource: 'HI', units_per_day: 20 }];
+  const h = await build('SEV', rops);
+  const r = (await call('resource_histogram', h)).d;
+  const whole = JSON.parse(readFileSync(r.exported.files[0].path, 'utf8')).resources;
+  const zero = whole.find((x: any) => x.resource === 'AA');
+  assert.equal(zero.severity, 'none'); assert.ok(zero.over_allocated_periods > 0, 'counted over-allocated though its severity is none');
+  assert.deepEqual(r.resources.map((x: any) => x.resource), ['HI', 'MID', 'AA']);
+  assert.match(r.resources_order_note, /severity of over-allocation first/);
+});
+
+test('B11: a too-large answer also carries its note, partial, resume and next_offset', async () => {
+  const { toolResult } = await import('../mcp/server.ts') as any;
+  const was = config.maxResponseChars;
+  try {
+    config.maxResponseChars = 200;
+    const t = toolResult({ note: 'continue with resume', partial: true, resume: '/x/y.p6mc', next_offset: 50, rows: 'z'.repeat(500) }, false, 'lint').structuredContent;
+    assert.equal(t.truncated, true);
+    assert.equal(t.answer_note, 'continue with resume'); assert.equal(t.partial, true); assert.equal(t.resume, '/x/y.p6mc'); assert.equal(t.next_offset, 50);
+    const plain = toolResult({ rows: 'z'.repeat(500) }, false, 'lint').structuredContent;
+    assert.ok(!('answer_note' in plain) && !('resume' in plain));
+  } finally { config.maxResponseChars = was; }
 });

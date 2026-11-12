@@ -152,8 +152,11 @@ export const RESULT_FILE_TOOLS = new Set(['lint', 'float_paths', 'evaluate', 'ev
 export function defaultResultFolder(tool: string, projectNames: string[], file?: string | null, handle?: string): string | undefined {
   if (!projectNames.length) return undefined;
   const stem = file ? basename(file).replace(/\.[^.]+$/, '') : '';
-  const label = [projectNames.join('+'), stem, handle].filter(Boolean).join('__').trim();
-  return join('analysis', cleanedName(label.replace(/[^\p{L}\p{N}\p{M}._-]/gu, '-'), label, tool).name, tool);
+  const project = projectNames.join('+');
+  const label = [project, stem === project ? '' : stem, handle].filter(Boolean).join('__').trim();
+  // never `.`, `..`, empty, or ending in a dot or a space (Windows strips those, so the folder would be another one): trailing dots and spaces go, and a name of nothing else is "project"
+  const safe = label.replace(/[^\p{L}\p{N}\p{M}._-]/gu, '-').replace(/[. ]+$/, '');
+  return join('analysis', cleanedName(/^\.*$/.test(safe) ? 'project' : safe, label, tool).name, tool);
 }
 
 function writeExport(tool: string, arg: unknown, full: unknown, tables: Table[], writeWith: WriteWith, o: { partial?: boolean; as?: string; name?: unknown }): Exported {
