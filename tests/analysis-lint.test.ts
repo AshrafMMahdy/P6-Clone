@@ -5,6 +5,9 @@ import { rows, type Db } from '../core/db.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { DEFAULT_LINT_THRESHOLDS, lintSchedule, lintScheduleTicked } from '../core/analysis/lint.ts';
 import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
+import { testRoots } from './helpers.ts';
+
+testRoots(); // (the analysis tools' result files go to the run's temporary folder, never into the repository)
 
 const ok = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); };
 const pid = (db: Db) => rows(db, 'PROJECT').find((p) => !p._baseline_of)!.proj_id;

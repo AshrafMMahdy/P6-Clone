@@ -167,10 +167,12 @@ test('monte_carlo: iterations.csv holds every iteration, whose sorted finishes g
   assert.equal(Math.round(Number(P.prob_deterministic.value) * 10) / 10, r.chance_of_meeting_deterministic);
   assert.equal(Math.round(Number(P.prob_deadline.value) * 10) / 10, r.deadline.probability_pct);
   assert.equal(Number(P.prob_deadline.value), (100 * fin.filter((f) => f <= '2026-07-15 00:00').length) / 120);
-  // the histogram in whole days counts every iteration
+  // the file's histogram is the chart the answer shows: the same 20 bars, counting every iteration
+  assert.equal(csv.histogram.length, 20);
+  assert.deepEqual(csv.histogram.map((b) => [b.start, b.end, Number(b.count), Number(b.cum_pct)]), r.histogram.map((b: any) => [b.start, b.end, b.count, b.cum_pct]));
+  assert.deepEqual(json.histogram, r.histogram);
   assert.equal(csv.histogram.reduce((s, b) => s + Number(b.count), 0), 120);
   assert.equal(csv.histogram.at(-1)!.cum_pct, '100');
-  assert.ok(csv.histogram.every((b) => b.start.endsWith('00:00')));
 
   // stopped part-way, then resumed with export: the iterations are those of the uninterrupted run, the kept ones first
   testHooks.failAt = 47;
@@ -249,8 +251,12 @@ test('crash_schedule, float_paths, progress_curves, resource_histogram, tia, lev
   assert.equal(f.csv.periods.length, pc.periods.length); assert.equal(f.csv.totals.length, 1);
   const rh = (await call('resource_histogram', { handle: h.handle, export: folder() })).d;
   f = files(rh, 'resource_histogram');
-  assert.equal(f.csv.periods.length, rh.resources[0].periods.length); assert.equal(f.csv.resources[0].resource, 'crew');
-  assert.equal(rh.resources[0].periods_total, rh.resources[0].periods.length, 'a list that can be cut says its total, cut or not');
+  // the answer is a summary: no per-period series in it, the periods of every resource are in the file, and periods_total says how many each has
+  assert.equal(rh.resources[0].periods, undefined);
+  assert.equal(f.csv.periods.length, f.json.resources.reduce((n: number, x: any) => n + x.periods.length, 0)); assert.equal(f.csv.resources[0].resource, 'crew');
+  assert.equal(rh.resources[0].periods_total, f.csv.periods.filter((p: any) => p.resource === 'crew').length);
+  assert.equal(rh.resources_total, 1);
+  assert.match(rh.periods_note, /only in the result file .*resource_histogram-periods\.csv \(table periods; columns resource, start, end, budgeted, actual, remaining_early, remaining_late, limit, over_allocated, available\)/);
   const t = (await call('tia', { handle: h.handle, fragnet: [{ op: 'add_activity', id: 'X', name: 'Change', duration_days: 2 }, { op: 'add_relationship', pred: 'A3', succ: 'X' }, { op: 'add_relationship', pred: 'X', succ: 'A4' }], export: folder() })).d;
   f = files(t, 'tia');
   assert.equal(f.csv.fragnet_path.length, t.fragnet_path.length); assert.equal(f.csv.summary[0].delay_days, String(t.delay_days));

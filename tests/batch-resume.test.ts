@@ -29,7 +29,8 @@ const chain = async (n: number) => {
 // the best scenario is early (it is kept by the stopped batch), the next best ones are the last two (done by the resume)
 const N = 300;
 const scenarios = Array.from({ length: N }, (_, i) => ({ name: `s${i}`, overrides: [{ op: 'update_activity', id: `A${i % 60}`, duration_days: i === 1 ? 1 : i >= N - 2 ? 2 : 4 + (i % 3) }] }));
-const same = (d: any) => { const { resumed_scenarios: _r, redone_scenarios: _d, redone_note: _n, exported: _x, ...rest } = d; return rest; };
+// (the result folder is named by the project and the file it was opened from: the notes that name a file are compared without that folder name)
+const same = (d: any) => { const { resumed_scenarios: _r, redone_scenarios: _d, redone_note: _n, exported: _x, ...rest } = d; return JSON.parse(JSON.stringify(rest).replace(/analysis[\\/][^\\/"]+[\\/]/g, 'analysis/-/')); };
 
 /** A batch (a job) cancelled once it has started scenario `at` or later. */
 const stopped = async (h: object, at: number) => {

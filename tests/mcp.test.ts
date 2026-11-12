@@ -11,7 +11,7 @@ const SERVER = join(import.meta.dirname, '..', 'mcp', 'server.ts');
 function client(args: string[] = []) {
   // its own temp folder: a server adopts the recovery folders of servers that are gone, so tests must not share one
   const tmp = mkdtempSync(join(tmpdir(), 'p6mcp-tmp-'));
-  const p = spawn(process.execPath, [SERVER, ...args], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp } });
+  const p = spawn(process.execPath, [SERVER, ...args], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp }, cwd: tmp }); // (cwd: the result files an analysis writes without a write root go beside the server, here)
   let err = '';
   p.stderr.setEncoding('utf8');
   p.stderr.on('data', (c: string) => { err += c; });
@@ -277,7 +277,7 @@ test('MCP: the lines of one read are handled in one turn, so a notifications/can
   assert.deepEqual(existsSync(join(out, 'r3.xer')), false);
   // the server process: its stdin reader sends the lines of one read to the main thread as ONE message
   assert.match(readFileSync(join(import.meta.dirname, '..', 'mcp', 'stdio.ts'), 'utf8'), /postMessage\(\{ type: 'lines', lines: batch \}\)/);
-  const p = spawn(process.execPath, [SERVER], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: out, TMP: out, TEMP: out } });
+  const p = spawn(process.execPath, [SERVER], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: out, TMP: out, TEMP: out }, cwd: out });
   const got = new Map<number, any>();
   let buf = '';
   p.stdout.setEncoding('utf8');

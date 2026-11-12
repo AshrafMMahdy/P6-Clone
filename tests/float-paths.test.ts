@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { detectFormat, readRaw } from '../renderer/io.ts';
 import { rows, type Db } from '../core/db.ts';
@@ -8,6 +9,10 @@ import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { computeFloatPaths, storedFloatPathOptions } from '../core/schedule/floatPaths.ts';
 import { callTool, toolResult } from '../mcp/server.ts';
+import { setRoots } from '../mcp/runtime.ts';
+
+// the result files every analysis writes go to a temporary write root, never into the repository; the samples are read from the repository
+setRoots(join(import.meta.dirname, '..'), mkdtempSync(join(tmpdir(), 'p6-float-')));
 
 const open = (f: string) => { const p = join(import.meta.dirname, '..', 'Sample XERs', f); const b = new Uint8Array(readFileSync(p)); return readRaw(b, detectFormat(p, b)).db; };
 

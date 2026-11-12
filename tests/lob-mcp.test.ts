@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { testRoots } from './helpers.ts';
+
+testRoots(); // (the analysis tools' result files go to the run's temporary folder, never into the repository)
 
 const call = async (name: string, args: Record<string, unknown>) => {
   const { callTool, toolResult } = await import('../mcp/server.ts');

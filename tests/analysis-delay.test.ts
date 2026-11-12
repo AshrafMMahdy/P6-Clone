@@ -6,6 +6,9 @@ import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { parseP6Date } from '../core/dates.ts';
 import { timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
 import { compareComputed } from '../core/query/evaluate.ts';
+import { testRoots } from './helpers.ts';
+
+testRoots(); // (the analysis tools' result files go to the run's temporary folder, never into the repository)
 
 // S -> A(5) -> B(5) -> F, S -> C(3) -> F; planned 2 Mar 2026, finish 13 Mar.
 function update(name: string, dd: string, progress: unknown[] = []): Update {

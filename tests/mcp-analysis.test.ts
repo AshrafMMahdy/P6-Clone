@@ -5,6 +5,11 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { callTool, toolResult, toolsList } from '../mcp/server.ts';
+import { setRoots } from '../mcp/runtime.ts';
+
+// the result files every analysis writes go to a temporary write root, never into the repository; the samples are read from the repository
+const writeRoot = mkdtempSync(join(tmpdir(), 'p6-analysis-'));
+setRoots(join(import.meta.dirname, '..'), writeRoot);
 
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
 
@@ -23,7 +28,7 @@ test('MCP: check_schedule and dcma_14 on a real XER, with a report file and clea
   assert.equal(dc.d.checks.length, 14);
   assert.equal(dc.d.profile, 'gao');
   assert.equal(dc.d.checks.find((c: { id: string }) => c.id === 'relationship_types').threshold.value, 85);
-  const dir = mkdtempSync(join(tmpdir(), 'p6dcma-'));
+  const dir = mkdtempSync(join(writeRoot, 'p6dcma-'));
   const withFile = await call('dcma_14', { handle: h, path: join(dir, 'dcma.html') });
   assert.ok(existsSync(withFile.d.saved));
   assert.match(readFileSync(withFile.d.saved, 'utf8'), /DCMA 14-Point Assessment/);
@@ -69,7 +74,9 @@ test('MCP: progress_curves and resource_histogram', async () => {
   assert.equal(c.err, false, JSON.stringify(c.d).slice(0, 300));
   assert.ok(c.d.periods.length > 3 && c.d.totals.bac > 0);
   const r = await call('resource_histogram', { handle: h, period: 'month' });
-  assert.ok(r.d.resources.length > 0 && r.d.resources[0].periods.length > 0);
+  // the answer is a summary (no per-period series); the periods of every resource are in the result file
+  assert.ok(r.d.resources.length > 0 && r.d.resources.every((x: any) => x.periods === undefined && x.periods_total > 0));
+  assert.ok(existsSync(r.d.exported.files.find((f: any) => f.path.endsWith('-periods.csv')).path));
   assert.equal((await call('progress_curves', { handle: h, period: 'day' })).d.error.code, 'bad_input');
 });
 

@@ -12,6 +12,8 @@ import { readRaw, detectFormat } from '../renderer/io.ts';
 import { parseP6Xml, writeP6Xml, writeP6XmlTo } from '../core/xml/p6xml.ts';
 import { writeMspdi, writeMspdiTo } from '../core/msp/mspdi.ts';
 
+// the result files every analysis writes go to a temporary write root, never into the repository; fixtures and samples are read from the repository
+const READ = join(import.meta.dirname, '..'), WRITE = mkdtempSync(join(tmpdir(), 'p6-large-write-'));
 const FIX = join(import.meta.dirname, 'fixtures', 'seed-aurora.xer');
 const call = async (name: string, a: Record<string, unknown>) => { const r = await callTool(name, a); return { err: r.isError, d: toolResult(r.out, r.isError, name).structuredContent as any }; };
 const open = async () => { const o = await call('open_file', { path: FIX }); assert.equal(o.err, false, JSON.stringify(o.d)); return o.d as { handle: string; owner_key: string }; };
@@ -51,8 +53,8 @@ test('a P6 XML is read element by element: the same rows, also when a project na
 });
 
 test('save writes P6 XML and MSPDI that open again; lists page with offset / next_offset', { timeout: 120_000 }, async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'p6-large-'));
-  setRoots(null, null);
+  const dir = mkdtempSync(join(WRITE, 'p6-large-'));
+  setRoots(READ, WRITE);
   const { handle, owner_key } = await open();
   for (const [file, format] of [['a.xml', undefined], ['b.xml', 'mspdi']] as const) {
     const s = await call('save', { handle, owner_key, path: join(dir, file), ...(format ? { format } : {}) });
@@ -98,11 +100,11 @@ test('an answer too large to return is written whole to a JSON file whose path t
     assert.match(r.d.note, /all of it is in/);
     config.maxResponseChars = was;
     await call('close', { handle, owner_key, discard: true });
-  } finally { config.maxResponseChars = was; setRoots(null, null); }
+  } finally { config.maxResponseChars = was; setRoots(READ, WRITE); }
 });
 
 test('a call whose working set does not fit is refused up front, in words, with what would fit; nothing running: no retry', { timeout: 60_000 }, async () => {
-  setRoots(null, null);
+  setRoots(READ, WRITE);
   const was = config.budgetBytes;
   const { handle, owner_key } = await open();
   try {

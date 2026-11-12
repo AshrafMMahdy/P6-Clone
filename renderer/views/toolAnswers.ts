@@ -128,7 +128,8 @@ export const crashStopped = (out: Record<string, any>): string | null =>
   out.stop === 'CANCELLED' ? `Cancelled after ${out.steps_done ?? out.steps?.length ?? 0} steps: these are the steps done, and nothing was applied.` : null;
 
 // ---------------------------------------------------------------- Lint (lint)
-/** lint's arguments from the panel (every critical ladder is simulated: the tool's default). */
+/** lint's arguments from the panel (every critical ladder is simulated: the tool's default). The panel lists every activity and fix of every check: in the app's own
+ *  process (config.screens, main/analysis-export.ts) the tool's answer carries whole lists, where an agent's carries 25 of each. */
 export const lintArgs = (project: { project?: string }, profile: string): Record<string, unknown> => ({ ...project, profile });
 /** The line a lint that was cancelled shows: the checks finished and, of the fix simulations, how many were done; null for a complete lint. */
 export function lintStopped(out: Record<string, any>): string | null {

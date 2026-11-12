@@ -43,7 +43,7 @@ const project = async (n: number) => {
 const est = { min_pct: 80, max_pct: 140 };
 const mcArgs = (h: { handle: string }, extra: Record<string, unknown> = {}) => ({ ...h, iterations: 120, seed: 11, default_estimates: est, events: [{ name: 'Late permit', probability: 0.3, delay_days: 4 }, { name: 'Crane', probability: 0.2, delay_days: 2, activities: ['A5'] }], deadline: '2026-07-01', ...extra });
 /** The answer without what may differ between two equal runs (time taken, how much came from a file). */
-const same = (d: any) => { const { elapsed_seconds: _e, resumed_iterations: _r, redone_iterations: _d, redone_note: _n, exported: _x, ...rest } = d; return rest; };
+const same = (d: any) => { const { elapsed_seconds: _e, resumed_iterations: _r, redone_iterations: _d, redone_note: _n, exported: _x, ...rest } = d; return JSON.parse(JSON.stringify(rest).replace(/analysis[\\/][^\\/"]+[\\/]/g, 'analysis/-/')); }; // (the notes name the result folder, which carries the project's and the file's names)
 const keptFiles = () => readdirSync(root).filter((f) => f.startsWith('monte_carlo-'));
 
 test('a run that failed part-way is continued from its kept iterations: the answer equals an uninterrupted run (same seed)', async () => {

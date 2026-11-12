@@ -5,6 +5,9 @@ import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { buildInstance, classicPriorities, decode, instanceHorizon, optimizeSchedule, reasonerInputs, reasonerOutput, ReasonerBadAnswer, REASONER_WINDOW, serialSgs, type HrmActivity, type HrmInstance, type ReasonerInputs } from '../core/analysis/hrm.ts';
 import { nodeInfer, reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
+import { testRoots } from './helpers.ts';
+
+testRoots(); // (the analysis tools' result files go to the run's temporary folder, never into the repository)
 
 // The platform's own reasoner check: two parallel chains in one trade and a join, crew 2 each, under a cap of 4.
 function project(cap: number): { db: Db; pid: string } {

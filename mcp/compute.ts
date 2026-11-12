@@ -24,12 +24,13 @@ import { unitWatch } from '../core/bim/liveness.ts';
 import { formatP6Date } from '../core/dates.ts';
 import { monteCarloCounts } from './workset.ts';
 import { claimNow, keepWords, type Claim } from './keptRuns.ts';
+import { DEFAULT_FOLDER } from './export.ts';
 
 type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void; /** a finished row of the answer, sent out as it is done (kept if the worker is ended) */ keep?: (row: unknown) => void; /** in the worker: how a run claims its kept file here, on the main thread (keptRuns.ts) */ claim?: Claim };
 /** The main thread's answer to a worker's claim of a kept file: given, or refused (run_busy, as a ToolError's parts). */
 type Claimed = { claimed: number; refused?: { code: string; message: string; hint?: string; data?: Record<string, unknown> } };
 interface Snapshot { handle: string; ownerKey: string; db: Session['db']; path: string | null; format: Session['format']; hpd: number; encoding?: Session['encoding']; savedTo?: string; dirty: boolean; bytes: number }
-interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { cwdLost: string | null; root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean; screens: boolean } }
+interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; /** the call's export folder is the default one (DEFAULT_FOLDER in export.ts is a symbol: it does not cross with the arguments) */ softExport: boolean; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { cwdLost: string | null; root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean; screens: boolean } }
 type Answer =
   | { id: number; type: 'progress'; done: number; total: number; message: string }
   | { id: number; type: 'note'; text: string }
@@ -200,7 +201,7 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
     const w = worker;
     const id = ++jobSeq;
     const job: Job = {
-      id, token, tmpLog, name, a, caller: ctx.caller, lobSide: lobSidecars.get(s.handle) ?? null,
+      id, token, tmpLog, name, a, softExport: (a as Record<symbol, unknown>)[DEFAULT_FOLDER] === true, caller: ctx.caller, lobSide: lobSidecars.get(s.handle) ?? null,
       snap: snapshotOf(s), others: others.map(snapshotOf), externalUsed: Math.max(0, usedMemory() - 2 * s.bytes),
       cfg: { cwdLost: cwdLost(), root: config.root, readRoot: config.readRoot, writeRoot: config.writeRoot, requireOwnerKey: config.requireOwnerKey, screens: config.screens },
     };
@@ -337,7 +338,7 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
       job: { set progress(text: string | undefined) { const now = Date.now(); if (now - last > 250) { last = now; post({ id: job.id, type: 'note', text: String(text) }); } } },
     };
     try {
-      const result = await run(job.name, job.a, ctx);
+      const result = await run(job.name, job.softExport ? { ...job.a, [DEFAULT_FOLDER]: true } : job.a, ctx);
       const patch = s.history.length ? patchFrom(s.db, s.history.map((c) => c.j)) : null;
       post({ id: job.id, type: 'done', result, patch, label: s.history[0]?.label ?? job.name, lobSide: lobSidecars.get(s.handle) ?? null });
     } catch (e) {

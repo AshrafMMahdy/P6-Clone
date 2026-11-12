@@ -13,7 +13,7 @@
 // re-run with the same name replaces only that name's files.
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { csvQuote } from '../core/report/reports.ts';
 import { fail, pathArg } from './runtime.ts';
 
@@ -107,6 +107,10 @@ export function exportNameParts(v: unknown, folderGiven = true, tool = ''): Expo
   const given = v.trim(), safe = given.replace(/[^\p{L}\p{N}\p{M}._-]/gu, '-');
   if (!safe) fail('bad_input', 'export_name is empty.', 'Give a short name such as "option-a", or leave export_name out to write the unnamed files.');
   if (/(^|-)partial$/i.test(safe)) fail('bad_input', `export_name "${given}" cannot end in "partial": a stopped run's files are named -partial.`, 'Choose another name, e.g. "option-a".');
+  return cleanedName(safe, given, tool);
+}
+/** A name as a file or folder name carries it: cut to the file name length with a short code of the whole name when it is too long (see exportNameParts). */
+function cleanedName(safe: string, given: string, tool: string): ExportNameParts {
   const room = EXPORT_FILE_NAME_MAX - fileNameLength(`${tool}-`) - TABLE_ROOM;
   if (fileNameLength(safe) <= room) return { name: safe, given, cleaned: safe !== given, cut: false };
   const code = createHash('sha256').update(safe.toLowerCase()).digest('hex').slice(0, 8);
@@ -133,16 +137,23 @@ export function exportResult(tool: string, arg: unknown, full: unknown, tables: 
   catch (e) { return { folder: String(arg), files: [], error: `The result file could not be written to ${String(arg)}: ${(e as Error)?.message ?? e}. The answer is complete, but the whole lists are not on disk. Next step: call again with export set to a folder inside the write root that can be written to.` }; }
 }
 /** The arguments every export call passes besides the tool's own: the file-name label, and whether the folder is the default one. */
-export const exportOf = (a: Record<string, any>, more: { partial?: boolean; as?: string } = {}) => ({ name: a.export_name, soft: a.export_default === true, ...more });
+export const exportOf = (a: Record<string, any>, more: { partial?: boolean; as?: string } = {}) => ({ name: a.export_name, soft: (a as Record<symbol, unknown>)[DEFAULT_FOLDER] === true, ...more });
+/** Marks the arguments of a call whose `export` folder is the default one the server chose (not one the caller gave): a failure to write there is said in
+ *  exported.error and never refuses the call. A symbol, never a key a caller can send (JSON has no symbols), so a caller's own `export` is always held
+ *  to the write root. It does not cross to a compute worker with the arguments: the job carries it (mcp/compute.ts). */
+export const DEFAULT_FOLDER = Symbol('default result folder');
 
 /** The tools whose whole result is written to a file every time (the analysis tools). */
 export const RESULT_FILE_TOOLS = new Set(['lint', 'float_paths', 'evaluate', 'evaluate_batch', 'crash_schedule', 'windows_analysis', 'tia', 'compare', 'earned_value', 'progress_curves', 'resource_histogram', 'monte_carlo', 'optimize_schedule', 'dcma_14', 'check_schedule']);
 /** The folder a call writes its result to when it gives no export: analysis/<project short name>/<tool>, relative as an export is (the write
- *  root, else the storage root, else where the server runs). The project names are cleaned and cut as export_name is (exportNameParts). */
-export function defaultResultFolder(tool: string, projectNames: string[]): string | undefined {
+ *  root, else the storage root, else where the server runs). What tells two open projects apart goes into the project's folder name: the
+ *  opened file's name, and (only when another open project would still have the same folder: the caller says so) the handle. The whole name
+ *  is cleaned and cut as export_name is (letters, digits, marks and . _ - stay; a long one is cut with a short code of the whole). */
+export function defaultResultFolder(tool: string, projectNames: string[], file?: string | null, handle?: string): string | undefined {
   if (!projectNames.length) return undefined;
-  const clean = exportNameParts(projectNames.join('+'), true, tool)!.name;
-  return join('analysis', clean, tool);
+  const stem = file ? basename(file).replace(/\.[^.]+$/, '') : '';
+  const label = [projectNames.join('+'), stem, handle].filter(Boolean).join('__').trim();
+  return join('analysis', cleanedName(label.replace(/[^\p{L}\p{N}\p{M}._-]/gu, '-'), label, tool).name, tool);
 }
 
 function writeExport(tool: string, arg: unknown, full: unknown, tables: Table[], writeWith: WriteWith, o: { partial?: boolean; as?: string; name?: unknown }): Exported {
@@ -191,15 +202,17 @@ function writeExport(tool: string, arg: unknown, full: unknown, tables: Table[],
 
 /** A list in an answer that the clone cut, with the total beside it: `<list>_total` (or `total_<list>`, or the names a tool gives it:
  *  CUT_LISTS), and the table of the export that holds it whole (table: default the list's name). */
-export interface CutList { list: string; total: string; table?: string; /** the export holds only the list as listed (float_paths between.max: the paths are never all made) */ listedOnly?: true }
+export interface CutList { list: string; total: string; table?: string; /** the export holds only the list as listed (float_paths between.max: the paths are never all made) */ listedOnly?: true;
+  /** the table has more rows than the list has items, because it has one row per this (evaluate: per changed field): the note says so, with the table's row count */ rowsAre?: string;
+  /** the list is a page the caller asked for (compare: max_changes, offset): the note says from where */ paged?: true }
 /** The cut lists whose names do not follow `<list>_total`, by tool. */
 export const CUT_LISTS: Record<string, CutList[]> = {
   lint: [{ list: 'activities', total: 'total_activities', table: 'findings' }],
   check_schedule: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],
   dcma_14: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],
+  evaluate: [{ list: 'changed', total: 'changed_total', table: 'changed', rowsAre: 'changed field of an activity' }],
   evaluate_batch: [{ list: 'changed', total: 'changed_total', table: 'dates_moved' }],
-  compare: [{ list: 'changes', total: 'changed' }],
-  resource_histogram: [{ list: 'periods_shown_for', total: 'periods_shown_for_total', table: 'periods' }],
+  compare: [{ list: 'changes', total: 'changes_total', table: 'changes', paged: true }],
   float_paths: [{ list: 'paths', total: 'paths_total', table: 'between', listedOnly: true }],
 };
 /** Where the whole of every list this answer cut is, when an export was written: beside each `<list>_total` a `<list>_note`
@@ -225,7 +238,9 @@ export function noteCuts<T>(answer: T, tool: string): T {
       const total = o[x?.total ?? `${k}_total`] ?? o[`total_${k}`];
       if ((typeof total === 'number' || typeof total === 'string') && (typeof total === 'string' ? /^\d+$/.test(total) : Number.isFinite(total) && total > list.length) && !(`${k}_note` in o)) {
         const shown = list.length, path = where(x?.table ?? k);
-        o[`${k}_note`] = failed ? `${shown} of ${total} shown` : x?.listedOnly ? `${shown} of ${total} shown (the most asked for); the export holds the same ${shown} in ${path}, ask for more to have more` : `${shown} of ${total} shown; all ${total} in ${path}`;
+        const rows = x?.rowsAre ? ex?.files.find((f) => f.path.endsWith(`-${x.table ?? k}.csv`))?.rows : undefined;
+        const page = x?.paged ? ` (the page from offset ${typeof o.offset === 'number' ? o.offset : 0})` : '';
+        o[`${k}_note`] = failed ? `${shown} of ${total} shown${page}` : x?.listedOnly ? `${shown} of ${total} shown (the most asked for); the export holds the same ${shown} in ${path}, ask for more to have more` : `${shown} of ${total} shown${page}; all ${total} in ${path}${rows != null ? ` (that file has one row per ${x!.rowsAre}, ${rows} rows)` : ''}`;
       }
       for (const item of list) if (item && typeof item === 'object') walk(item);
     }

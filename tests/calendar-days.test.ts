@@ -17,6 +17,9 @@ import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { runReport, runSpec, parseSpec } from '../renderer/reports/engine.ts';
 import { COLUMN_BY_ID, makeCtx } from '../renderer/model.ts';
 import { rows, type Db } from '../core/db.ts';
+import { testRoots } from './helpers.ts';
+
+testRoots(); // (the analysis tools' result files go to the run's temporary folder, never into the repository)
 
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError).structuredContent as any; };
 const ten = Object.fromEntries(['mon', 'tue', 'wed', 'thu', 'fri'].map((d) => [d, [['07:00', '17:00']]]));

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { record, rollback } from '../core/journal.ts';
 import { applyPatch, isEmptyPatch, patchFrom } from '../core/journalPatch.ts';
@@ -28,7 +28,8 @@ const env = (vars: Record<string, string | undefined>) => {
 };
 const open = async (name = 'cairo alex-road.xer') => { const o = await call('open_file', { path: sampleCopy(name) }); assert.equal(o.err, false, JSON.stringify(o.d).slice(0, 200)); return { handle: o.d.handle as string, owner_key: o.d.owner_key as string }; };
 const dates = async (h: { handle: string; owner_key: string }) => JSON.stringify((await call('activity_table', { ...h, limit: 5000 })).d);
-const strip = (v: unknown) => JSON.parse(JSON.stringify(v, (k, x) => (/elapsed|seconds|ms$|^exported$/i.test(k) ? undefined : x)));
+// (two open copies of one file write to folders told apart by their handles: the handle is not part of what is compared)
+const strip = (v: unknown) => JSON.parse(JSON.stringify(v, (k, x) => (/elapsed|seconds|ms$|^exported$/i.test(k) ? undefined : typeof x === 'string' ? x.replace(/h_[A-Za-z0-9_-]{8,}/g, 'h_') : x)));
 
 // ---- the patch -------------------------------------------------------------------------------------------------------------------
 const mk = (): Db => ({ header: { version: '19.12', exportDate: 'x', raw: ['a'] }, tables: { TASK: { name: 'TASK', fields: ['task_id', 'name'], rows: [{ task_id: '1', name: 'a' }, { task_id: '2', name: 'b' }, { task_id: '3', name: 'c' }] }, PROJECT: { name: 'PROJECT', fields: ['proj_id'], rows: [{ proj_id: 'P' }] } } });
@@ -291,7 +292,7 @@ test('workers running together never add up past the budget: each reserves its e
     console.log('RESULT ' + JSON.stringify(out));
     process.exit(0);`;
   const script = join(mkdtempSync(join(tmpdir(), 'p6-budget-')), 'run.mjs'); writeFileSync(script, code); // (a file: a worker inherits the flags of an -e script)
-  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env } });
+  const r = spawnSync(process.execPath, [script], { encoding: 'utf8', env: { ...process.env }, cwd: dirname(script) }); // (cwd: the result files every run writes go beside the script, in the temporary folder)
   assert.equal(r.status, 0, r.stderr.slice(-500));
   const out = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('RESULT '))!.slice(7));
   assert.ok(out.reservedForFirst >= out.peak + out.runtime, `the first worker's reservation (${out.peak} MB) and its runtime (${out.runtime} MB) are counted before it starts: ${JSON.stringify(out)} ${r.stderr.slice(-300)}`);
@@ -320,4 +321,21 @@ test('server_status does not load the reasoner model on the server\'s main threa
   assert.equal(out.first.reasoner.loaded, null);
   assert.equal(out.later.reasoner.checking, undefined);
   assert.equal(out.later.reasoner.loaded, true, JSON.stringify(out.later));
+});
+
+test('the default result folder is a failure to say, never a refusal, also in a worker; a caller\'s own export is held to the write root there too', { timeout: 120_000 }, async () => {
+  const bad = mkdtempSync(join(tmpdir(), 'p6-default-folder-'));
+  writeFileSync(join(bad, 'analysis'), 'x'); // (the default folder cannot be made: "analysis" is a file)
+  const restore = env({ P6CLONE_COMPUTE_WORKERS: undefined });
+  const h = await open();
+  setRoots(null, bad);
+  try {
+    const r = await call('lint', { ...h, simulate: false });
+    assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+    assert.match(r.d.exported.error, /could not be written/);
+    // the same call with a folder of the caller's own, outside the write root, is refused, flag or not
+    const outside = join(tmpdir(), 'p6-outside-default-folder');
+    const refused = await call('lint', { ...h, simulate: false, export: outside, export_default: true });
+    assert.equal(refused.err, true); assert.equal(refused.d.error.code, 'path_outside_root', JSON.stringify(refused.d).slice(0, 300));
+  } finally { restore(); setRoots(null, tmpdir()); }
 });

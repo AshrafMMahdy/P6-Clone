@@ -1,6 +1,12 @@
 import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setRoots } from '../mcp/runtime.ts';
+
+/** For a test that calls the analysis tools in-process without a write root of its own: every analysis writes its result files to analysis/<project>/<tool>
+ *  under the write root (else where the server runs: the repository). Reads: the repository (samples, fixtures) and the run's private temp folder (tests/setup.ts);
+ *  writes: that temp folder, which the run removes at its end. */
+export const testRoots = (): void => setRoots(join(import.meta.dirname, '..'), process.env.P6CLONE_TEST_TMP ?? tmpdir());
 
 export const SAMPLES_DIR = join(import.meta.dirname, '..', 'Sample XERs');
 

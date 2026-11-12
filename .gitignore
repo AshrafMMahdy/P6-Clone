@@ -22,4 +22,4 @@ vendor/pyodide/
 
 # the app's data in a development run (main/dataPaths.ts: projects, settings, the agent's files)
 /Data/
-analysis/
+/analysis/
