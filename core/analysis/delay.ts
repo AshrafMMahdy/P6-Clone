@@ -140,7 +140,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
   const total = wd(ff ? finOf(ff) : null, fl ? finOf(fl) : null);
   return {
     ok: true as const, method: o.method ?? 'contemporaneous', measured: o.milestone ? `milestone ${o.milestone}` : 'project completion', calendar_hours_per_day: hpd,
-    updates: list.map((u) => ({ name: u.name, data_date: fmt(dataDate(u)) })), windows, total_slip_days: total,
+    updates: list.map((u) => ({ name: u.name, data_date: fmt(dataDate(u)), open_project: !!u.open })), windows, total_slip_days: total,
     ...(o.method === 'half_step' ? { total_progress_days: r2(windows.reduce((s, w) => s + (((w.half_step as { progress_days: number | null }).progress_days) ?? 0), 0)), total_revision_days: r2(windows.reduce((s, w) => s + (((w.half_step as { revision_days: number | null }).revision_days) ?? 0), 0)) } : {}),
   };
 }

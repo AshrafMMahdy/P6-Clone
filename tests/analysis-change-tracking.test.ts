@@ -401,10 +401,15 @@ test('a series on a file with several projects is refused, naming the Project ID
   assert.equal(other.err, true);
   assert.match(other.d.error.message, new RegExp(`^Update 1 \\(Enppi\\.xer\\) has ${ids.length} projects`));
   // with project given the series runs (the project is looked for in every schedule of the series)
-  const ok = await call('change_tracking', { handle: h, project: ids[0], updates: [{ path: sampleCopy('Enppi.xer') }] });
+  // (project is the open file's; the update file with several projects takes project in its own entry, and is refused without it, whatever the top-level project is)
+  const noOwn = await call('change_tracking', { handle: h, project: ids[0], updates: [{ path: sampleCopy('Enppi.xer') }] });
+  assert.equal(noOwn.err, true);
+  assert.match(noOwn.d.error.message, new RegExp(`^Update 1 \\(Enppi\\.xer\\) has ${ids.length} projects \\(${ids.join(', ')}\\)`));
+  assert.match(noOwn.d.error.next_step ?? noOwn.d.error.hint, /Add project to THAT update entry/);
+  const ok = await call('change_tracking', { handle: h, project: ids[0], updates: [{ path: sampleCopy('Enppi.xer'), project: ids[0] }] });
   assert.equal(ok.err, false, JSON.stringify(ok.d).slice(0, 300));
   assert.equal(ok.d.totals.changes, 0, 'the project against itself');
-  const win = await call('windows_analysis', { handle: h, project: ids[0], updates: [{ path: sampleCopy('Enppi.xer') }] });
+  const win = await call('windows_analysis', { handle: h, project: ids[0], updates: [{ path: sampleCopy('Enppi.xer'), project: ids[0] }] });
   assert.equal(win.err, false, JSON.stringify(win.d).slice(0, 300));
   // a project that is not there
   const none = await call('change_tracking', { handle: h, project: 'NOPE', updates: [{ path: sampleCopy('Enppi.xer') }] });
@@ -415,6 +420,58 @@ test('a series on a file with several projects is refused, naming the Project ID
   // baseline_variance's as_planned file with several projects: refused, with its own next step
   const bv = await call('baseline_variance', { handle: tw, as_planned: { path: sampleCopy('Enppi.xer') } });
   assert.equal(bv.err, true);
-  assert.match(bv.d.error.message, new RegExp(`has ${ids.length} projects`));
-  assert.match(JSON.stringify(bv.d.error), /as_planned must be a schedule with one project/);
+  assert.match(bv.d.error.message, new RegExp(`^The as_planned file Enppi\\.xer has ${ids.length} projects \\(${ids.join(', ')}\\) and the comparison needs one\\.$`));
+  assert.match(JSON.stringify(bv.d.error), /Add project to as_planned/);
+  assert.equal(/Update 1|a series/.test(JSON.stringify(bv.d.error)), false, 'as_planned is not "Update 1" of "a series"');
+});
+
+test('an update takes its own project: {path | handle, project}; the top-level project is the open file\'s; a project that is not in that file is refused with its Project IDs; baseline_variance as_planned takes project the same way', async () => {
+  const ids = rows(readXerFile(sampleCopy('Enppi.xer')).db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_short_name);
+  assert.ok(ids.length > 1);
+  const tw = await openSample('Tower-A.xer'); // one project, whose Project ID is none of Enppi's
+  const en = await openSample('Enppi.xer');
+  for (const tool of ['change_tracking', 'windows_analysis', 'decm']) {
+    // by path and by handle, each naming its project; the open file has one project and is not asked
+    for (const upd of [{ path: sampleCopy('Enppi.xer'), project: ids[1] }, { handle: en, project: ids[1] }]) {
+      const r = await call(tool, { handle: tw, updates: [upd] });
+      assert.equal(r.err, false, `${tool} ${Object.keys(upd)[0]}: ${JSON.stringify(r.d).slice(0, 300)}`);
+    }
+    // the same file without its project: refused naming that file's Project IDs and where to put project
+    const bare = await call(tool, { handle: tw, updates: [{ handle: en }] });
+    assert.equal(bare.err, true, tool);
+    assert.match(bare.d.error.message, new RegExp(`^Update 1 \\(.*\\) has ${ids.length} projects \\(${ids.join(', ')}\\) and a series compares one project\\.`), tool);
+    assert.match(bare.d.error.next_step ?? bare.d.error.hint, /Add project to THAT update entry/, tool);
+    // a project that is not in the update file
+    const wrong = await call(tool, { handle: tw, updates: [{ handle: en, project: 'NOPE' }] });
+    assert.match(wrong.d.error.message, /^No project "NOPE" in Update 1 \(/, tool);
+    assert.match(JSON.stringify(wrong.d.error), new RegExp(`Its Project IDs: ${ids.join(', ')}`), tool);
+  }
+  // the top-level project names the open file's project, whatever the update's
+  const both = await call('change_tracking', { handle: en, project: ids[0], updates: [{ handle: tw }] });
+  assert.equal(both.err, false, JSON.stringify(both.d).slice(0, 300));
+  // baseline_variance: as_planned {path | handle, project}; project (top level) is the open file's
+  for (const ap of [{ path: sampleCopy('Enppi.xer'), project: ids[1] }, { handle: en, project: ids[1] }]) {
+    const r = await call('baseline_variance', { handle: en, project: ids[0], as_planned: ap });
+    assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
+    assert.equal(r.d.compared_with.kind, 'as_planned');
+  }
+  const noOwn = await call('baseline_variance', { handle: en, project: ids[0], as_planned: { handle: en } });
+  assert.equal(noOwn.err, true);
+  assert.equal(/Update 1|a series/.test(JSON.stringify(noOwn.d.error)), false);
+  assert.match(noOwn.d.error.message, /^The as_planned file .* has \d+ projects/);
+  // each tool says in its description that a file with several projects needs project and how an update gives it
+  const { toolsList } = await import('../mcp/server.ts');
+  const desc = (t: string) => (toolsList() as { name: string; description: string }[]).find((x) => x.name === t)!.description;
+  for (const t of ['windows_analysis', 'change_tracking', 'decm']) assert.match(desc(t), /several projects needs project[^.]*\{path \| handle, project\}/, t);
+  assert.match(desc('baseline_variance'), /as_planned: \{handle \| path, project\}[^.]*several projects needs project/);
+});
+
+test('windows_analysis marks the open project in its updates list, as change_tracking and decm do; nothing else of its answer changes', async () => {
+  const h = await openSample('Tower-A.xer');
+  const withCur = await call('windows_analysis', { handle: h, updates: [{ baseline: 'project' }] });
+  assert.equal(withCur.err, false, JSON.stringify(withCur.d).slice(0, 300));
+  assert.deepEqual(withCur.d.updates.map((u: { open_project: boolean }) => u.open_project), [false, true]);
+  assert.deepEqual(Object.keys(withCur.d.updates[0]), ['name', 'data_date', 'open_project']);
+  const without = await call('windows_analysis', { handle: h, include_current: false, updates: [{ baseline: 'project' }, { baseline: 'project' }] });
+  assert.equal(without.d.updates.every((u: { open_project: boolean }) => u.open_project === false), true);
 });
