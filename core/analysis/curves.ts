@@ -5,6 +5,11 @@
 //    Period Performance: TASKFIN with FINDATES) take precedence for the past; remaining cost along the remaining early
 //    dates and along the remaining late dates; per-period and cumulative SPI and CPI; EAC, ETC, VAC and TCPI at the
 //    data date;
+//  - Earned Schedule (Lipke) in the totals: ES, the time at which the cumulative planned value equals the earned value now (interpolated inside the
+//    period it falls in), AT, the actual time from the planned start to the data date, SPI(t) = ES / AT and SV(t) = ES - AT, in the curve's period
+//    unit and as a date and working days of the project calendar; "not assessed" with the reason, never 1, where they cannot be worked out;
+//  - a third basis, units: duration: planned value = each activity's baseline (else planned) duration spread evenly over its baseline (else planned) dates
+//    on its calendar, earned = that duration x its % complete, so a schedule without costs or resource units has a planned value too;
 //  - resource histograms: budgeted (planned dates), actual, remaining early (with P6 resource curves) and remaining
 //    late units or cost per period, the limit, over-allocation and its severity.
 // Spreading is linear over each activity's working time. Values are hours (units) or the project currency (cost).
@@ -47,18 +52,22 @@ export interface CurvePeriod {
   cum_pv: number; cum_ev: number | null; cum_ac: number | null; cum_forecast_early: number; cum_forecast_late: number;
   spi: number | null; cpi: number | null; cum_spi: number | null; cum_cpi: number | null;
 }
+/** Earned Schedule at the data date (Lipke), added to the curve's totals. es, at, pd, sv_t are in periods (weeks or months, as the curve's period); es_date is the date at which the planned value equals the earned value now;
+ *  the _days are working days of the first project's calendar from the planned start. All null, with the reason in es_note, when they cannot be worked out. */
+export interface EarnedSchedule { es: number | null; at: number | null; pd: number | null; spi_t: number | null; sv_t: number | null; es_date: string | null; es_days: number | null; at_days: number | null; sv_t_days: number | null; es_note: string }
 export interface ProgressCurves {
-  report: 'Progress Curves'; units: 'cost' | 'hours'; period: 'week' | 'month'; data_date: string | null; baseline: string | null; baseline_how?: string;
+  report: 'Progress Curves'; units: 'cost' | 'hours' | 'duration'; period: 'week' | 'month'; data_date: string | null; baseline: string | null; baseline_how?: string;
   stored_periods: number;
-  totals: { bac: number; pv: number; ev: number; ac: number; etc: number; eac: number; vac: number; spi: number | null; cpi: number | null; tcpi: number | null };
+  totals: { bac: number; pv: number; ev: number; ac: number; etc: number; eac: number; vac: number; spi: number | null; cpi: number | null; tcpi: number | null } & EarnedSchedule;
   periods: CurvePeriod[]; warnings: string[];
 }
 
-export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' | 'month'; units?: 'cost' | 'hours'; from?: number; to?: number; taskIds?: Set<string> } = {}): ProgressCurves {
+export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' | 'month'; units?: 'cost' | 'hours' | 'duration'; from?: number; to?: number; taskIds?: Set<string> } = {}): ProgressCurves {
   const period = o.period ?? 'month', units = o.units ?? 'cost';
   const open = new Set(projIds);
   const projs = rows(db, 'PROJECT').filter((p) => open.has(p.proj_id));
-  const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id) && t.task_type !== 'TT_WBS' && (!o.taskIds || o.taskIds.has(t.task_id)));
+  // (duration: level of effort has no duration of its own, it spans other activities', so it carries no planned duration)
+  const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id) && t.task_type !== 'TT_WBS' && !(units === 'duration' && t.task_type === 'TT_LOE') && (!o.taskIds || o.taskIds.has(t.task_id)));
   const cals = calendarResolver(db, []);
   const projById = indexBy(projs, 'proj_id');
   const calOf = (t: Row) => cals.get(t.clndr_id) ?? cals.fallback(projById.get(t.proj_id)?.clndr_id);
@@ -76,14 +85,23 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   if (!blName) warnings.push('The project has no baseline in this file: planned value follows the current budget and planned dates, so it shows the current plan, not a baseline.');
   else if (!/project baseline$/.test(blHow)) warnings.push(`Planned value follows ${blName}, ${blHow}.`);
 
-  // the quantities per activity
-  const q = (t: Row) => {
+  // the quantities per activity (the planned quantity from the baseline activity when there is one; duration: in working days of the activity's calendar)
+  const qOf = (t: Row) => {
     if (units === 'cost') { const l = lines.get(t.task_id)!; return { bac: l.bac, actual: l.ac, remaining: l.remaining }; }
+    if (units === 'duration') {
+      const cal = calOf(t), hpd = cal.hoursPerDay(), b = bl.get(`${t.proj_id}|${t.task_code}`) ?? t;
+      if (!hpd) return { bac: 0, actual: 0, remaining: 0 };
+      // actual = the working time from the actual start to the actual finish, or to the data date while it is under way
+      const as = parseP6Date(t.act_start_date), end = Math.min(parseP6Date(t.act_end_date) ?? dataDate ?? -Infinity, dataDate ?? Infinity);
+      return { bac: n(b.target_drtn_hr_cnt) / hpd, actual: as != null && end > as ? cal.workBetween(as, end) / 60 / hpd : 0, remaining: t.act_end_date ? 0 : n(t.remain_drtn_hr_cnt) / hpd };
+    }
     const a = asgBy.get(t.task_id) ?? [];
     const b = bl.get(`${t.proj_id}|${t.task_code}`);
     const bacUnits = b ? (asgBy.get(b.task_id) ?? []).reduce((s, x) => s + n(x.target_qty), 0) : a.reduce((s, x) => s + n(x.target_qty), 0);
     return { bac: bacUnits, actual: a.reduce((s, x) => s + n(x.act_reg_qty) + n(x.act_ot_qty), 0), remaining: a.reduce((s, x) => s + n(x.remain_qty), 0) };
   };
+  const qCache = new Map<string, ReturnType<typeof qOf>>();
+  const q = (t: Row) => qCache.get(t.task_id) ?? (qCache.set(t.task_id, qOf(t)), qCache.get(t.task_id)!);
   const d = (v?: string) => parseP6Date(v);
   const spanOf = (t: Row) => {
     const b = bl.get(`${t.proj_id}|${t.task_code}`) ?? t;
@@ -97,6 +115,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   }
   const g = Number.isFinite(from) && Number.isFinite(to) && to > from ? makeGrid(from, to, period) : { starts: [], ends: [] };
   const N = g.starts.length;
+  let plannedBac = 0, undatedBac = 0, plannedEv = 0, p0 = Infinity, p1 = -Infinity; // the planned value that was spread, the value earned on it, and the span it is spread over (Earned Schedule)
   const pv = new Array(N).fill(0), ev = new Array(N).fill(0), ac = new Array(N).fill(0), early = new Array(N).fill(0), late = new Array(N).fill(0);
 
   // stored financial periods (P6 Tools > Store Period Performance) for the past
@@ -111,8 +130,9 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
     const { bac, actual, remaining } = q(t);
     const cal = calOf(t);
     const [ps, pf] = spanOf(t);
-    if (bac && ps != null && pf != null) spreadLinear(pv, g, bac, ps, pf, cal);
     const pct = percentComplete(t, asgBy.get(t.task_id) ?? []);
+    if (bac && ps != null && pf != null) { spreadLinear(pv, g, bac, ps, pf, cal); plannedBac += bac; plannedEv += bac * pct; p0 = Math.min(p0, ps); p1 = Math.max(p1, pf); }
+    else if (bac) undatedBac += bac;
     const evTotal = bac * pct;
     const as = d(t.act_start_date);
     let evLeft = evTotal, acLeft = actual, lastFinEnd = as;
@@ -157,7 +177,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   }
 
   // totals at the data date (the same figures as the earned value lookup, in cost; or in hours)
-  let totals: ProgressCurves['totals'];
+  let totals: Omit<ProgressCurves['totals'], keyof EarnedSchedule>;
   if (units === 'cost') {
     const e = earnedValue(sumLines(tasks.map((t) => lines.get(t.task_id)!).filter(Boolean)));
     totals = { bac: r2(e.bac), pv: r2(e.pv), ev: r2(e.ev), ac: r2(e.ac), etc: r2(e.etc), eac: r2(e.eac), vac: r2(e.vac), spi: e.pv ? r2(e.spi) : null, cpi: e.ac ? r2(e.cpi) : null, tcpi: e.bac - e.ac ? r2(e.tcpi) : null };
@@ -167,9 +187,59 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
     const pvH = periods.filter((p) => p.cum_ev != null).at(-1)?.cum_pv ?? 0;
     totals = { bac: r2(s.bac), pv: r2(pvH), ev: r2(evH), ac: r2(s.actual), etc: r2(s.remaining), eac: r2(s.actual + s.remaining), vac: r2(s.bac - s.actual - s.remaining), spi: pvH ? r2(evH / pvH) : null, cpi: s.actual ? r2(evH / s.actual) : null, tcpi: s.bac - s.actual ? r2((s.bac - evH) / (s.bac - s.actual)) : null };
   }
-  if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost' : 'units'} are recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
-  if (!totals.bac) warnings.push(units === 'cost' ? 'The schedule has no budgeted cost (no costed resources or expenses): use units: hours, or load costs.' : 'The schedule has no budgeted units (no resource assignments).');
-  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, totals, periods, warnings };
+  if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost' : units === 'duration' ? 'duration' : 'units'} are recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
+  if (!totals.bac) warnings.push(units === 'cost' ? 'The schedule has no budgeted cost (no costed resources or expenses): use units: duration (planned durations, which need neither costs nor resources) or hours, or load costs.' : units === 'duration' ? 'The schedule has no planned duration (every activity is a milestone or has none).' : 'The schedule has no budgeted units (no resource assignments): use units: duration, or load resources.');
+  const sched = earnedSchedule({ g, pv, period, units, baseline: blName, plannedBac, undatedBac, plannedEv, p0, p1, dataDate, cal: projs[0] ? cals.fallback(projs[0].clndr_id) : null });
+  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, totals: { ...totals, ...sched }, periods, warnings };
+}
+
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+
+/** Earned Schedule (Lipke) from the planned-value curve: ES = the time at which the cumulative planned value equals the earned value now, found in the period where the cumulative curve passes it and interpolated
+ *  linearly across the part of that period the planned value is spread over (the whole period, except where the plan starts or ends inside it); AT = the actual time from the planned start to the data date;
+ *  SPI(t) = ES / AT; SV(t) = ES - AT. Positions are in periods from the grid, with the fraction of a period counted by the calendar time elapsed in it. Earned value at or above the whole planned value = the planned duration
+ *  (a finished project: SPI(t) = PD / AT, which stays meaningful where cost-based SPI returns to 1). Not assessed, with the reason: no planned value, no data date, no planned dates, a window that cuts the planned curve,
+ *  a data date that is not after the planned start. */
+function earnedSchedule(o: { g: Grid; pv: number[]; period: 'week' | 'month'; units: 'cost' | 'hours' | 'duration'; baseline: string | null; plannedBac: number; undatedBac: number; plannedEv: number; p0: number; p1: number; dataDate: number | null; cal: WorkCalendar | null }): EarnedSchedule {
+  const none = (es_note: string): EarnedSchedule => ({ es: null, at: null, pd: null, spi_t: null, sv_t: null, es_date: null, es_days: null, at_days: null, sv_t_days: null, es_note });
+  const { g, pv, period, dataDate } = o;
+  if (!(o.plannedBac > 0) && o.undatedBac > 0) return none('Earned Schedule is not assessed: there is no planned curve (the activities with a planned value have no planned dates).');
+  if (!(o.plannedBac > 0)) return none(`Earned Schedule is not assessed: the planned value is 0 (${o.units === 'cost' ? 'no budgeted cost: use units: duration, which needs neither costs nor resources' : o.units === 'duration' ? 'no activity has a planned duration' : 'no budgeted units: use units: duration, which needs no resources'}).`);
+  if (dataDate == null) return none('Earned Schedule is not assessed: the project has no data date, so the actual time is not known.');
+  if (!g.starts.length || !(o.p1 > o.p0)) return none('Earned Schedule is not assessed: there is no planned curve (the planned value all falls on one instant).');
+  const planned = pv.reduce((a, x) => a + x, 0);
+  if (planned < o.plannedBac * (1 - 1e-9)) return none('Earned Schedule is not assessed: the from/to window cuts the planned curve, so the planned value up to now is not all in it. Leave from and to out.');
+  // positions in periods from the first period of the grid: the periods whole, then the share of the period elapsed
+  const pos = (t: number) => {
+    const b = bucketStart(t, period), e = nextBucket(b, period);
+    let k = 0;
+    if (b >= g.starts[0]) for (let x = g.starts[0]; x < b; x = nextBucket(x, period)) k++;
+    else for (let x = b; x < g.starts[0]; x = nextBucket(x, period)) k--;
+    return k + (t - b) / (e - b);
+  };
+  if (!(dataDate > o.p0)) return none('Earned Schedule is not assessed: the data date is not after the planned start, so no time has passed to measure against.');
+  const earned = Math.min(o.plannedEv, planned);
+  // the period where the cumulative planned value passes the earned value
+  let tStar = o.p0;
+  if (earned >= planned * (1 - 1e-9)) tStar = o.p1;
+  else if (earned > 0) {
+    let cum = 0;
+    for (let i = 0; i < pv.length; i++) {
+      if (cum + pv[i] >= earned * (1 - 1e-12) && pv[i] > 0) {
+        const lo = Math.max(g.starts[i], o.p0), hi = Math.min(g.ends[i], o.p1);
+        tStar = lo + ((earned - cum) / pv[i]) * (hi - lo);
+        break;
+      }
+      cum += pv[i];
+    }
+  }
+  const origin = pos(o.p0), es = pos(tStar) - origin, at = pos(dataDate) - origin, pd = pos(o.p1) - origin;
+  const hpd = o.cal?.hoursPerDay() || 0, days = (a: number, b: number) => (o.cal && hpd ? r3(o.cal.workBetween(a, b) / 60 / hpd) : null);
+  const esDays = days(o.p0, tStar), atDays = days(o.p0, dataDate);
+  return {
+    es: r3(es), at: r3(at), pd: r3(pd), spi_t: r3(es / at), sv_t: r3(es - at), es_date: iso(tStar), es_days: esDays, at_days: atDays, sv_t_days: esDays != null && atDays != null ? r3(esDays - atDays) : null,
+    es_note: `Earned Schedule against ${o.baseline ? `baseline ${o.baseline}` : 'the planned dates (this file has no baseline)'}, in ${period}s from the planned start (${iso(o.p0)}); days are working days of the project calendar.`,
+  };
 }
 
 export interface HistogramPeriod { start: string; end: string; budgeted: number; actual: number; remaining_early: number; remaining_late: number; limit: number | null; over_allocated: number; available: number | null }

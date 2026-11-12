@@ -361,7 +361,7 @@ one undo step; `dry_run`), `compare` (`mode: computed`: per activity duration de
 delta, became / no longer critical), `list_reports`, `run_report`, `create_report`, `close`. Schedule analysis: `check_schedule` (P6 Professional's 14 checks), `dcma_14` (profiles, baseline, status date,
 contract finish, critical path test, CPLI decided by the contract finish with the baseline figure beside it, BEI), `lint`
 (with fixes as edit operations; `thresholds` overrides any band, count or ladder setting per call, and the answer names those it applied), `float_paths` (P6 multiple float paths, near-critical, paths between two activities),
-`progress_curves` (PV, EV, AC, remaining early and late, SPI/CPI per period), `resource_histogram`; `schedule` returns
+`progress_curves` (PV, EV, AC, remaining early and late, SPI/CPI per period; Earned Schedule ES, AT, SPI(t), SV(t) in the totals; units cost, hours or duration, the last for a schedule with no costs or resources), `resource_histogram`; `schedule` returns
 the P6 schedule log with `log: true`. Recovery: `evaluate_batch` (many what-ifs, the base scheduled once),
 `crash_schedule` (least-cost cut sets across parallel paths, every step, `apply`), `optimize_schedule` (the embedded
 reasoner; `objective: min_crash_cost` runs crash_schedule). Delay analysis: `windows_analysis` (contemporaneous or

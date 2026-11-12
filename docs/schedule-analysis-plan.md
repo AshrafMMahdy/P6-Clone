@@ -251,7 +251,7 @@ they are P6's own scheduling behaviour, which F9 already implements.
 histogram in the export workbook, and over-allocation severity in Bellator. Neither system has per-period SPI or CPI.
 
 **Tools**
-- **`progress_curves`** `{handle, period: week|month, from?, to?, units?: cost|hours, baseline?}`:
+- **`progress_curves`** `{handle, period: week|month, from?, to?, units?: cost|hours|duration, baseline?}`:
   - per period and cumulative: PV, EV, AC, remaining early and late, per-period and cumulative SPI and CPI, plus TCPI,
     EAC and VAC at the data date;
   - computed with P6's spreading rules, using stored financial-period values when the XER has them;
