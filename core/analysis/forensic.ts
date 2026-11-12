@@ -102,7 +102,8 @@ export interface LogicFigures {
 /** An edge a -> b that is also implied by a path of two or more steps, whatever the relationship types (source rule, logicAudit.ts:195-232: the walk starts from the other successors of a and looks for b): b is reachable from
  *  another successor of a. Exact, and worked out once for the whole schedule instead of once per edge: the activities are taken in logic order (strongly connected groups, sinks first: Tarjan's order, so a group with a
  *  loop is handled as the walk handles it), each group's set of the activities reachable from it is a bitset built from its successors' sets, and an edge of a is redundant when b is in the set of another successor of a
- *  (counted per successor: "once" and "twice" bitsets, so that b reaching only itself round a loop does not count), when b has another relationship into it. A group's set is given back as soon as the last group that points at it has been read. The answer is
+ *  (counted per successor: "once" and "twice" bitsets, so that b reaching only itself round a loop does not count), when b has another relationship into it. A group's set is given back as soon as the last group that points at it has been read.
+ *  The sets have a column for each activity that is asked about, taken a block of columns at a time, so what is held is bounded by the number of groups times the width of a block, whatever the shape of the schedule. The answer is
  *  the same as the walk's, in the same order (the order of the first appearance of the predecessor, then of its links). */
 export function redundantLinks(rels: Row[]): Row[] {
   const out = new Map<string, Row[]>(), index = new Map<string, number>();
@@ -136,31 +137,49 @@ export function redundantLinks(rels: Row[]): Row[] {
       }
     }
   }
-  // how many groups point at each group (a set is freed when they have all been read)
+  // the groups each group points at, and how many groups point at each group (a set is freed when they have all been read)
+  const pointsAt: number[][] = members.map((g, c) => { const to = new Set<number>(); for (const u of g) for (const w of succ[u]) if (comp[w] !== c) to.add(comp[w]); return [...to]; });
   const readers = new Int32Array(members.length);
-  members.forEach((g, c) => { const to = new Set<number>(); for (const u of g) for (const w of succ[u]) if (comp[w] !== c) to.add(comp[w]); for (const t of to) readers[t]++; });
-  const W = (n + 31) >>> 5;
-  const reach: (Uint32Array | null)[] = new Array(members.length).fill(null);
-  const has = (set: Uint32Array, v: number) => (set[v >>> 5] & (1 << (v & 31))) !== 0;
-  const once = new Uint32Array(W), twice = new Uint32Array(W);
+  for (const to of pointsAt) for (const t of to) readers[t]++;
+  // The question "is b reached from another successor of a" is asked only of an activity b with another relationship into it that is a successor of an activity with two or more successors: the candidates. Every
+  // other activity is never looked up, so the sets carry one column per candidate, not per activity.
+  const col = new Int32Array(n).fill(-1);
+  let C = 0;
+  for (let a = 0; a < n; a++) if (succ[a].length >= 2) for (const b of succ[a]) if (inDeg[b] >= 2 && col[b] === -1) col[b] = C++;
   const redundantTo = new Map<number, Set<number>>();
-  members.forEach((g, c) => {
-    const R = new Uint32Array(W);
-    // what is reachable in one step or more: the group itself when it has a loop, and each successor outside it with everything it reaches
-    if (g.length > 1 || succ[g[0]].includes(g[0])) for (const u of g) R[u >>> 5] |= 1 << (u & 31);
-    for (const u of g) for (const w of succ[u]) if (comp[w] !== c) { R[w >>> 5] |= 1 << (w & 31); const Rw = reach[comp[w]]!; for (let i = 0; i < W; i++) R[i] |= Rw[i]; }
-    reach[c] = R;
-    for (const a of g) {
-      if (succ[a].length < 2) continue;
-      once.fill(0); twice.fill(0);
-      for (const x of succ[a]) { const Rx = reach[comp[x]]!; for (let i = 0; i < W; i++) { twice[i] |= once[i] & Rx[i]; once[i] |= Rx[i]; } }
-      for (const b of succ[a]) if (inDeg[b] >= 2 && (has(reach[comp[b]]!, b) ? has(twice, b) : has(once, b))) (redundantTo.get(a) ?? redundantTo.set(a, new Set()).get(a)!).add(b);
-    }
-    // give back the sets of the groups this one pointed at, and this one's own when nothing points at it
-    const to = new Set<number>(); for (const u of g) for (const w of succ[u]) if (comp[w] !== c) to.add(comp[w]);
-    for (const t of to) if (--readers[t] === 0) reach[t] = null;
-    if (readers[c] === 0) reach[c] = null;
-  });
+  // The columns are taken BLOCK at a time, the whole walk over the groups once for each block, so that what is held at any moment is at most one set of BLOCK bits per group (n x BLOCK bits), whatever the shape of the
+  // schedule: a set of every candidate for every group grew with the square of the schedule (a start milestone linked to every activity and every activity linked to a finish milestone: 296 MB at 50,000 activities).
+  // The width of a block changes the speed and the memory, never the answer: each column is worked out alone, a block only does 1,024 of them in one pass.
+  const BLOCK = 1024;
+  for (let k0 = 0; k0 < C; k0 += BLOCK) {
+    const width = Math.min(BLOCK, C - k0), W = (width + 31) >>> 5;
+    const reach: (Uint32Array | null)[] = new Array(members.length).fill(null);
+    const pool: Uint32Array[] = []; // sets given back, reused (a set is cleared when it is taken)
+    const take = () => { const x = pool.pop(); if (x) { x.fill(0); return x; } return new Uint32Array(W); };
+    const give = (x: Uint32Array | null) => { if (x) pool.push(x); };
+    const bit = (v: number) => col[v] - k0; // the column of v in this block (outside 0..width-1: not in it)
+    const mark = (set: Uint32Array, v: number) => { const k = bit(v); if (k >= 0 && k < width) set[k >>> 5] |= 1 << (k & 31); };
+    const has = (set: Uint32Array, v: number) => { const k = bit(v); return (set[k >>> 5] & (1 << (k & 31))) !== 0; };
+    const once = new Uint32Array(W), twice = new Uint32Array(W);
+    members.forEach((g, c) => {
+      const R = take();
+      // what is reachable in one step or more: the group itself when it has a loop, and each successor outside it with everything it reaches
+      if (g.length > 1 || succ[g[0]].includes(g[0])) for (const u of g) mark(R, u);
+      for (const u of g) for (const w of succ[u]) if (comp[w] !== c) { mark(R, w); const Rw = reach[comp[w]]!; for (let i = 0, e = R.length; i < e; i++) R[i] |= Rw[i]; }
+      reach[c] = R;
+      for (const a of g) {
+        if (succ[a].length < 2) continue;
+        once.fill(0); twice.fill(0);
+        for (const x of succ[a]) { const Rx = reach[comp[x]]!; for (let i = 0, e = once.length; i < e; i++) { twice[i] |= once[i] & Rx[i]; once[i] |= Rx[i]; } }
+        for (const b of succ[a]) { const k = bit(b); if (inDeg[b] >= 2 && k >= 0 && k < width && (has(reach[comp[b]]!, b) ? has(twice, b) : has(once, b))) (redundantTo.get(a) ?? redundantTo.set(a, new Set()).get(a)!).add(b); }
+      }
+      // give back the sets of the groups this one pointed at, and this one's own when nothing points at it
+      for (const t of pointsAt[c]) if (--readers[t] === 0) { give(reach[t]); reach[t] = null; }
+      if (readers[c] === 0) { give(reach[c]); reach[c] = null; }
+    });
+    // the next block counts the readers again
+    members.forEach((_, c) => { for (const t of pointsAt[c]) readers[t]++; });
+  }
   const found: Row[] = [];
   for (const [from, links] of out) { const hit = redundantTo.get(index.get(from)!); if (hit) for (const r of links) if (hit.has(index.get(r.task_id)!)) found.push(r); }
   return found;

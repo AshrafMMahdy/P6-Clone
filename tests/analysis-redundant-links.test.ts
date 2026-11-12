@@ -99,3 +99,26 @@ test('a ladder of 4,000, 8,000 and 16,000 activities: the redundant links are fo
   for (let i = 0; i < 300; i++) for (let k = 1; k <= 40 && i + k < 300; k++) wide.push(link(i, i + k));
   same(F.redundantLinks(wide), walk(wide), 'wide ladder');
 });
+
+test('more candidate links than one block of columns holds: the same links as the walk on large random graphs (loops, parallel links, self-links, all four relationship types), and on stars and ladders', () => {
+  let seed = 987;
+  const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const types = ['PR_FS', 'PR_SS', 'PR_FF', 'PR_SF'];
+  for (const [n, m] of [[2600, 7000], [3000, 4000], [1500, 9000]]) {
+    const rels: Row[] = [];
+    for (let i = 0; i < m; i++) rels.push({ pred_task_id: `T${rnd(n)}`, task_id: `T${rnd(n)}`, pred_type: types[rnd(4)] });
+    // forward links added on top so that long redundant chains exist beside the loops
+    for (let i = 0; i < n * 2; i++) { const p = rnd(n - 1), s = p + 1 + rnd(Math.min(40, n - 1 - p)); rels.push({ pred_task_id: `T${p}`, task_id: `T${s}`, pred_type: types[rnd(4)] }); }
+    const fast = F.redundantLinks(rels);
+    assert.ok(fast.length > 100, `${n}/${m}: ${fast.length} redundant links`);
+    same(fast, walk(rels), `random ${n} activities, ${m} links`);
+  }
+  // a start milestone linked to every activity and every activity linked to a finish milestone (the finish milestone is the one candidate), plus a few links that are redundant
+  const star: Row[] = [];
+  for (let i = 1; i <= 3000; i++) { star.push(link(0, i)); star.push(link(i, 3001)); }
+  assert.deepEqual(F.redundantLinks(star), [], 'the plain star: no link is also reached another way');
+  star.push(link(0, 3001)); // start -> finish, also reached through any activity
+  star.push(link(1, 2)); // 0 -> 2 is also reached through 1, and 1 -> 3001 through 2
+  same(F.redundantLinks(star), walk(star), 'star with extra links');
+  assert.equal(F.redundantLinks(star).length, 3, '0 -> 3001, 0 -> 2 and 1 -> 3001');
+});

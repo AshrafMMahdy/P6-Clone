@@ -41,6 +41,9 @@ export const WORK: Record<string, Work> = {
   //   Re-measured 2026-11-12 after the redundant-link search became one pass over bitsets (they are held until the last activity that reads them has been read), the same way but with a ballast of live objects that keeps the heap near its
   //   limit, so that full collections run during the call (the ballast is in "before", and the largest of several runs with different ballasts is taken): JWM 19.1 MB (x1.5 = 1.26 x), DHBL 15.1 MB (0.79 x), CCA 81.6 MB (x1.5 / 73.2 MB = 1.67 x).
   //   The old code measured the same way gave JWM 15.9 MB and CCA 80.3 MB, so the change is JWM +3 MB (the bitsets) and nothing on CCA; the earlier CCA figure was a single run and read lower than the largest of several. The worst is CCA: 1.67, recorded rounded UP as the neighbours are: 1.7.
+  //   The redundant-link bitsets are typed arrays, which are outside the JavaScript heap and so outside every figure above. They now hold one block of columns per group (n x 1,024 bits at most) instead of n bits per group, whatever the schedule's shape.
+  //   Measured 2026-11-12 as the peak resident size (process.resourceUsage().maxRSS in a fresh node, after two full collections, with the links built, around the one call; the growth, JS structures of the search included): the star
+  //   (a start milestone linked to every activity, every activity to a finish milestone) 16,000 activities 57 -> 31 MB, 50,000 370 -> 58 MB; JWM 8 -> 2 MB, CCA 8 -> 0 MB. The real files hold no more than before, so 1.7 stands.
   schedule_index: { per: 1.7, label: 'schedule_index', hint: 'close other projects first' },
   // planning_horizon: no full collection in any run; grew JWM 27 MB (1.2 x), DHBL 18 MB (0.6 x), CCA 35 MB (0.5 x).
   planning_horizon: { per: 1.2, label: 'planning_horizon', hint: 'close other projects first' },
