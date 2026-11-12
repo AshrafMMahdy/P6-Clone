@@ -8,9 +8,9 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { compareSchedules, progressIntegrity } from '../diff.ts';
-import { criticalPathTest, dcmaPopulations, hardConstraintsCheck, invalidDateFlags, lagsCheck, logicCheck } from './dcma.ts';
+import { CPT_SLIP_DAYS, criticalPathTest, dcmaPopulations, hardConstraintsCheck, invalidDateFlags, lagsCheck, logicCheck } from './dcma.ts';
 import type { Update } from './delay.ts';
-import { baselineOf, baselineFinish, isLoe, isWbs, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
+import { baselineOf, baselineFinish, namesText, isLoe, isWbs, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
 import { loopMessage, logicLoops, referenceStart, updateDate, updateView } from './forensic.ts';
 
 export type DecmId = '06A204b' | '06A205a' | '06A208a' | '06A209a' | '06A210a' | '06A212a' | '06A401a' | '06A501a' | '06A504a' | '06A504b' | '06A505a' | '06A505b' | '06A506a' | '06A506b' | '06A506c' | '08I101a' | '10A303a';
@@ -118,14 +118,14 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
     const loops = logicLoops(s);
     // a loop cannot be scheduled, so the test is not run (it could only say that it could not)
     if (loops.length) add({ ...notAssessed('06A401a', NAMES['06A401a'], 'days', null, ''), id: '06A401a', name: NAMES['06A401a'], result: 'fail', metric: null, activities: loops.flat().map((code) => ({ id: code, name: [...s.tasks].find((t) => t.task_code === code)?.task_name ?? '' })), total_activities: loops.flat().length, note: `The logic has ${loops.length === 1 ? 'a loop' : `${loops.length} loops`}, so there is no valid critical path (P6: "Circular relationship (loop) detected"): ${loops.map(loopMessage).join('; ')}.` });
-    else { const c = criticalPathTest(s, T, 600, undefined); add({ ...c, id: '06A401a', name: NAMES['06A401a'], note: `dcma_14 check 12, the critical path test. ${c.note ?? ''}`.trim() }); }
+    else { const c = criticalPathTest(s, T, CPT_SLIP_DAYS, undefined); add({ ...c, id: '06A401a', name: NAMES['06A401a'], note: `dcma_14 check 12, the critical path test. ${c.note ?? ''}`.trim() }); }
   }
   // 06A501a: missing baseline dates (an activity not in the baseline, or in it with no start or no finish)
   {
     const inBl = discrete.filter((t) => bls.get(t.proj_id));
     if (!inBl.length) na('06A501a', `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.`);
     else percent('06A501a', inBl.filter((t) => { const b = bls.get(t.proj_id)!.tasks.get(t.task_code); return !b || referenceStart(b) == null || baselineFinish(b) == null; }).map((t) => offender(t, s)), inBl.length,
-      `Activities that are not in the ${bls.get(inBl[0].proj_id)!.name} baseline, or are in it without a start or a finish date, over all activities that are neither WBS summary nor level of effort${s.projs.some((p) => !bls.get(p.proj_id)) ? ` (projects with no such baseline are not assessed: ${s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name).join(', ')})` : ''}.`, 'No activity.');
+      `Activities that are not in the ${bls.get(inBl[0].proj_id)!.name} baseline, or are in it without a start or a finish date, over all activities that are neither WBS summary nor level of effort${s.projs.some((p) => !bls.get(p.proj_id)) ? ` (projects with no such baseline are not assessed: ${namesText(s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name))})` : ''}.`, 'No activity.');
   }
   // 06A504a / 06A504b: an actual start / finish that differs from the one an earlier update held (progressIntegrity between consecutive updates, in data-date order)
   {
@@ -154,7 +154,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   // 06A506a / b / c: dcma_14 check 9 (dcma.ts invalidDateFlags, the one rule) split in three, over the activities of the projects that have a data date
   {
     const { with_data_date: pop, flagged } = invalidDateFlags(s);
-    if (!pop.length) { const why = `No data date in ${s.projs.map((p) => p.proj_short_name).join(', ')}: give a status_date.`; na('06A506a', why); na('06A506b', why); na('06A506c', why); }
+    if (!pop.length) { const why = `No data date in ${namesText(s.projs.map((p) => p.proj_short_name))}: give a status_date.`; na('06A506a', why); na('06A506b', why); na('06A506c', why); }
     else {
       const w = 'over all activities that are not WBS summaries, in projects with a data date.';
       percent('06A506a', flagged.filter((f) => f.actual_start_after).map((f) => offender(f.task, s, 'actual start after the status date')), pop.length, `Activities with an actual start after the status date, ${w}`, '');

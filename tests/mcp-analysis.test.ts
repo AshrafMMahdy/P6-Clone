@@ -85,8 +85,8 @@ test('MCP: progress_curves on projects with different data dates is refused nami
   const r = await call('progress_curves', { handle: h, units: 'duration' });
   assert.equal(r.err, true);
   assert.equal(r.d.error.code, 'bad_input');
-  assert.match(r.d.error.message, /different data dates \(Master Rev\.F-N-4 2011-11-30 00:00; 4229 update 2-6-12 2012-06-02 00:00\)/);
-  assert.match(r.d.error.next_step ?? r.d.error.hint, /Pass project: Master Rev\.F-N-4 or 4229 update 2-6-12/);
+  assert.match(r.d.error.message, /different data dates \(Master Rev\.F-N-4 2011-11-30 00:00, 4229 update 2-6-12 2012-06-02 00:00\)/);
+  assert.match(r.d.error.next_step ?? r.d.error.hint, /Pass project: <ID>, one of Master Rev\.F-N-4, 4229 update 2-6-12/);
   const one = await call('progress_curves', { handle: h, units: 'duration', project: '4229 update 2-6-12' });
   assert.equal(one.err, false, JSON.stringify(one.d).slice(0, 300));
 });

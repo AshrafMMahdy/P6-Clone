@@ -14,7 +14,7 @@
 //    late units or cost per period, the limit, over-allocation and its severity.
 // Spreading is linear over each activity's working time. Values are hours (units) or the project currency (cost).
 import { maxOf, minOf } from '../arrays.ts';
-import { baselineOf } from './common.ts';
+import { baselineOf, namesText } from './common.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { activityCosts, earnedValue, percentComplete, plannedShare, sumLines } from '../cost/rollup.ts';
@@ -75,7 +75,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   const projs = rows(db, 'PROJECT').filter((p) => open.has(p.proj_id));
   // projects with different data dates have no single "now": every figure at the data date (planned value, actuals, EAC, VAC, TCPI, SPI, CPI, Earned Schedule) and the per-period curve would measure one project at another's date. There is no sound answer, so the call is refused before anything is computed
   const dates = projs.map((p) => parseP6Date(p.last_recalc_date) ?? null);
-  if (projs.length > 1 && new Set(dates).size > 1) throw new CurvesRefused(`The projects in scope have different data dates (${projs.map((p, i) => `${p.proj_short_name} ${dates[i] != null ? formatP6Date(dates[i]!) : 'none'}`).join('; ')}), so there is no single date to measure planned value, earned value and actual cost at for them together.`, `Pass project: ${projs.map((p) => p.proj_short_name).join(' or ')} (one of them at a time).`);
+  if (projs.length > 1 && new Set(dates).size > 1) throw new CurvesRefused(`The projects in scope have different data dates (${namesText(projs.map((p, i) => `${p.proj_short_name} ${dates[i] != null ? formatP6Date(dates[i]!) : 'none'}`))}), so there is no single date to measure planned value, earned value and actual cost at for them together.`, `Pass project: <ID>, one of ${namesText(projs.map((p) => p.proj_short_name))} (one project at a time).`);
   // (duration: level of effort has no duration of its own, it spans other activities', so it carries no planned duration)
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id) && t.task_type !== 'TT_WBS' && !(units === 'duration' && t.task_type === 'TT_LOE') && (!o.taskIds || o.taskIds.has(t.task_id)));
   const cals = calendarResolver(db, []);

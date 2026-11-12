@@ -9,10 +9,11 @@ import { tmpdir } from 'node:os';
 import { rows } from '../core/db.ts';
 import { parseP6Date } from '../core/dates.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
-import { dcma14 } from '../core/analysis/dcma.ts';
-import { makeScope, baselineOf } from '../core/analysis/common.ts';
+import { CPT_SLIP_DAYS, dcma14 } from '../core/analysis/dcma.ts';
+import { decm } from '../core/analysis/decm.ts';
+import { makeScope, baselineOf, namesText } from '../core/analysis/common.ts';
 import * as F from '../core/analysis/forensic.ts';
-import { scheduleIndex, logicFindings } from '../core/analysis/scheduleIndex.ts';
+import { scheduleIndex, logicFindings, shapeScheduleIndex } from '../core/analysis/scheduleIndex.ts';
 import * as B from './benchmark-fixtures.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
 
@@ -164,7 +165,11 @@ test('health judges the relationship score and the signals on the EXACT shares: 
   const r = scheduleIndex(B.project('SHARE', tasks).db, {});
   const l = r.logic as Extract<typeof r.logic, { result: 'assessed' }>;
   assert.deepEqual([l.fs, l.relationships, l.fs_share], [899, 999, 0.9], 'shown rounded: 0.9');
-  assert.ok(r.health.top_signals!.some((x) => /Only 90% Finish-to-Start relationships/.test(x)), 'judged on 899 / 999 < 0.9, not on the rounded 0.9');
+  assert.ok(r.health.top_signals!.some((x) => x === 'Only 89.99% Finish-to-Start relationships'), 'judged on 899 / 999 < 0.9, not on the rounded 0.9; and shown with the decimals that keep the text from reading as the 90 % limit');
+  // a share that rounds to 89.9 shows that; one far under the limit as before
+  const lower = scheduleIndex(B.project('SHARE2', Array.from({ length: 1000 }, (_, i) => ({ id: `A${i}`, duration_days: 1, ...(i ? { predecessors: [i % 5 === 3 ? `A${i - 1}:SS` : `A${i - 1}`] } : {}) }))).db, {});
+  const ll = lower.logic as Extract<typeof lower.logic, { result: 'assessed' }>;
+  assert.ok(lower.health.top_signals!.some((x) => x === `Only ${Math.round(((ll.fs / ll.relationships) * 1000)) / 10}% Finish-to-Start relationships`), lower.health.top_signals!.join(' | '));
   assert.equal(r.health.breakdown!.relationship.score, Math.round((899 / 999 / 0.9) * 1000) / 10);
 });
 
@@ -224,6 +229,10 @@ test('not assessed: no baseline, no data date, no resources, nothing due, and th
   assert.match(early.risk.sub_metrics.baseline_drift.summary, /the BEI not assessed \(No task was baselined to finish by the data date\.\); the drift score therefore counts the finish variance and the critical-path delay only/);
   assert.match(bei.note!, /^No task was baselined to finish by the data date\. Not assessed: the drift score therefore counts the finish variance and the critical-path delay only/);
   assert.equal(early.risk.sub_metrics.baseline_drift.parts.filter((p) => p.assessed).map((p) => p.part).join(), 'average_finish_variance_days,critical_path_delay_days');
+  // said plainly: the part adds nothing, the same as the part at its best value (a BEI of 1); never "not taken as a BEI of 1"
+  assert.match(bei.note!, /only: the BEI part adds nothing to the score \(the same as a BEI of 1\)\.$/);
+  assert.match(early.risk.sub_metrics.baseline_drift.summary, /only: the BEI part adds nothing to the score \(the same as a BEI of 1\)$/);
+  assert.equal(/not taken as/.test(JSON.stringify(early.risk.sub_metrics.baseline_drift)), false);
   // nothing assessable: not assessed, with every reason
   const none = scheduleIndex(B.project('BARE', []).db, {});
   assert.equal(none.risk.result, 'not_assessed');
@@ -395,4 +404,31 @@ test('schedule_index: a mid-size mock of the list rule on a fixture (fewer than 
   assert.equal(r.d.resources.length, 1);
   assert.equal('resources_note' in r.d, false);
   assert.equal(r.d.risk.sub_metrics.resource.score, 65);
+});
+
+test('the lists in the answer and in the sentences follow the list rule: status_dates and project names by 25, the total, and a note where cut', () => {
+  const r = scheduleIndex(B.delayed().db, {});
+  const many = { ...r, status_dates: Array.from({ length: 30 }, (_, i) => ({ project: `P${i}`, status_date: '2026-01-01 00:00' })) };
+  const { answer, whole } = shapeScheduleIndex(many, (l) => l.slice(0, 25));
+  assert.equal(answer.summary.status_dates!.length, 25);
+  assert.equal(answer.summary.status_dates_total, 30);
+  assert.match(answer.summary.status_dates_note!, /^The first 25 of 30 projects; the data date of every project is in the result file\.$/);
+  assert.equal(whole.summary.status_dates!.length, 30, 'the result file holds every project');
+  assert.equal(whole.summary.status_dates_total, 30);
+  // within the rule: whole, with the total and no note
+  const few = shapeScheduleIndex({ ...r, status_dates: many.status_dates.slice(0, 3) }, (l) => l.slice(0, 25));
+  assert.deepEqual([few.answer.summary.status_dates!.length, few.answer.summary.status_dates_total, 'status_dates_note' in few.answer.summary], [3, 3, false]);
+  // the names in a sentence
+  const names = Array.from({ length: 30 }, (_, i) => `P${i}`);
+  assert.equal(namesText(names), `${names.slice(0, 25).join(', ')} and 5 more (30 in total)`);
+  assert.equal(namesText(names.slice(0, 25)), names.slice(0, 25).join(', '));
+  assert.equal(namesText(['A', 'B']), 'A, B');
+});
+
+test('decm runs dcma_14\'s critical path test with the one shared constant (CPT_SLIP_DAYS = 600)', async () => {
+  assert.equal(CPT_SLIP_DAYS, 600);
+  const b = B.cleanChain();
+  const d = dcma14(b.db, { projIds: [b.projId] }).checks.find((c) => c.id === 'critical_path_test')!;
+  const k = decm(b.db, { projIds: [b.projId] }).checks.find((c) => c.id === '06A401a')!;
+  assert.deepEqual([k.result, k.metric, k.numerator, k.denominator], [d.result, d.metric, d.numerator, d.denominator]);
 });

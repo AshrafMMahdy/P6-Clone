@@ -35,6 +35,9 @@ const NAMES: Record<Key, string> = {
 };
 const OPS: Record<Key, Threshold['op']> = { logic: '<=', leads: '<=', lags: '<=', relationship_types: '>=', hard_constraints: '<=', high_float: '<=', negative_float: '<=', high_duration: '<=', invalid_dates: '<=', resources: '<=', missed_tasks: '<=', critical_path_test: '=', cpli: '>=', bei: '>=' };
 
+/** The working days dcma_14's critical path test (check 12) adds to the activity it delays when cptSlipDays is not given; decm's 06A401a runs the same test with the same value. */
+export const CPT_SLIP_DAYS = 600;
+
 export interface DcmaOptions {
   projIds?: string[]; hoursPerDay?: number;
   profile?: string;
@@ -131,7 +134,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
     const missed = due.filter((t) => (forecastFinish(t) ?? -Infinity) > (baselineFinish(bl(t)) ?? Infinity)).map((t) => offender(t, s, `baseline ${formatP6Date(baselineFinish(bl(t))!).slice(0, 10)}`));
     out.push(due.length ? percentCheck('missed_tasks', NAMES.missed_tasks, missed, due.length, th('missed_tasks')!, maxIds, 'Tasks baselined to finish by the status date that finished (or will finish) after their baseline finish.') : notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), 'No task was baselined to finish by the status date.'));
   }
-  out.push(criticalPathTest(s, T, o.cptSlipDays ?? 600, o.cptActivity));
+  out.push(criticalPathTest(s, T, o.cptSlipDays ?? CPT_SLIP_DAYS, o.cptActivity));
   out.push(cpli(s, o.targetFinish ?? null, bls, which, th('cpli')));
   // BEI: tasks completed over tasks baselined to finish by the status date (forensic.ts beiFigures, the clone's one definition; judged on the exact ratio)
   {

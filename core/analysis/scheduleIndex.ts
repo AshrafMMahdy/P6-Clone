@@ -7,7 +7,7 @@ import { groupBy, rows } from '../db.ts';
 import { formatP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { resourceHistograms } from './curves.ts';
-import { baselineOf, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope, offender, baselineFinish, type Offender, type Scope } from './common.ts';
+import { baselineOf, exactPct, namesText, pct, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope, offender, baselineFinish, type Offender, type Scope } from './common.ts';
 import * as F from './forensic.ts';
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -99,7 +99,7 @@ function health(float: ReturnType<typeof F.floatFigures>, logic: ReturnType<type
   }
   if (logic.result === 'assessed') {
     if (logic.open_ends > 0) signals.push(`${logic.open_ends} open end${logic.open_ends === 1 ? '' : 's'} / missing logic`);
-    if (logic.relationships && logic.fs / logic.relationships < 0.9) signals.push(`Only ${Math.round((logic.fs / logic.relationships) * 100)}% Finish-to-Start relationships`);
+    if (logic.relationships && logic.fs / logic.relationships < 0.9) signals.push(`Only ${shownBelow(logic.fs, logic.relationships, 90)}% Finish-to-Start relationships`);
   }
   return { result: 'assessed', score, grade: F.gradeOf(score), breakdown: b, top_signals: signals, connected_share: logic.result === 'assessed' ? r3((logic.considered - logic.missing_logic.length) / logic.considered) : null, ...(left.length ? { left_out: left } : {}) };
 }
@@ -147,17 +147,26 @@ function driftRisk(s: Scope, which: string, bls: Map<string, ReturnType<typeof b
   // a part that cannot be assessed is left out of the sum (it adds nothing), and the answer says so; it is not given a value
   const raw = Math.min(100, Math.max(0, avg * DRIFT.variance_factor) + (bei.result === 'assessed' ? (1 - Math.min(1, bei.value)) * DRIFT.bei_factor : 0) + (delay != null ? Math.min(DRIFT.delay_cap, delay) : 0));
   const out = parts.filter((p) => !p.assessed), label: Record<string, string> = { average_finish_variance_days: 'the finish variance', bei: 'the BEI', critical_path_delay_days: 'the critical-path delay' };
-  const counted = `the drift score therefore counts ${parts.filter((p) => p.assessed).map((p) => label[p.part]).join(' and ')} only (the part adds nothing to it; it is not taken as a value of its own, a BEI of 1 for example)`;
+  // each part left out adds 0 to the sum, which is the same arithmetic as a part at its best value: say that plainly
+  const asBest: Record<string, string> = { average_finish_variance_days: 'a finish variance of 0 days', bei: 'a BEI of 1', critical_path_delay_days: 'a critical-path delay of 0 days' };
+  const counted = `the drift score therefore counts ${parts.filter((p) => p.assessed).map((p) => label[p.part]).join(' and ')} only: ${out.map((p) => `${label[p.part]} part adds nothing to the score (the same as ${asBest[p.part]})`).join('; ')}`;
   for (const p of out) p.note = `${p.note} Not assessed: ${counted}.`;
   return { baseline, metric: sub('baseline_drift', { active: true, score: r1(raw), parts,
     summary: `Average finish variance ${r1(avg)} d${bei.result === 'assessed' ? `, BEI ${bei.value}` : ''}${delay != null ? `, critical-path delay ${delay} d` : ''}${out.length ? `; ${out.map((p) => `${label[p.part]} not assessed (${bei.result !== 'assessed' && p.part === 'bei' ? bei.note : p.note})`).join('; ')}; ${counted}` : ''}` }) };
+}
+
+/** A share as a percent for display where the exact share is below a limit: the display helper's figure (pct, one decimal), with as many more decimals as it takes for the text never to read as the limit itself (89.96 % is not "90 %" under a 90 % rule). */
+function shownBelow(n: number, d: number, limit: number): number {
+  let v = pct(n, d)!;
+  for (let dec = 2; v >= limit; dec++) v = Number(exactPct(n, d).toFixed(dec));
+  return v;
 }
 
 function integrityRisk(prog: ReturnType<typeof F.progressAnomalies>): SubMetric {
   if (prog.result !== 'assessed') return inactive('progress_integrity', prog.note);
   const parts: Part[] = [{ part: 'integrity_score', value: prog.integrity_score, assessed: true }, { part: 'anomalies', value: prog.anomalies.length, assessed: true }, ...(['critical', 'high', 'medium', 'low'] as const).map((k) => ({ part: `${k}_anomalies`, value: prog.by_severity[k], assessed: true }))];
   return sub('progress_integrity', { active: true, score: r1(100 - prog.integrity_score), parts,
-    summary: `${prog.anomalies.length} progress anomal${prog.anomalies.length === 1 ? 'y' : 'ies'} in ${prog.examined} activities examined${prog.projects_without_data_date.length ? `; not examined (no data date): ${prog.projects_without_data_date.join(', ')}` : ''}` });
+    summary: `${prog.anomalies.length} progress anomal${prog.anomalies.length === 1 ? 'y' : 'ies'} in ${prog.examined} activities examined${prog.projects_without_data_date.length ? `; not examined (no data date): ${namesText(prog.projects_without_data_date)}` : ''}` });
 }
 
 export interface ResourceRow { resource: string; name: string; limit_set: boolean; over_allocated: boolean; severity: string; over_allocated_periods: number; periods_total: number; peak_demand: number | null; peak_limit: number | null; on_critical_activity: boolean }
@@ -283,7 +292,7 @@ export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) =>
   const risk = r.risk;
   const { drivers: _drivers, recommendations: _recs, ...riskRest } = risk;
   const summary = {
-    status_date: r.status_date, ...(r.status_dates ? { status_dates: r.status_dates } : {}), baseline: r.baseline,
+    status_date: r.status_date, ...(r.status_dates ? { status_dates: r.status_dates, status_dates_total: r.status_dates.length } : {}), baseline: r.baseline,
     health: r.health.result === 'assessed' ? { score: r.health.score, grade: r.health.grade } : { result: 'not_assessed', note: r.health.note },
     risk: risk.result === 'assessed' ? { score: risk.score, grade: risk.grade, level: risk.level, status: risk.status, sub_metrics_assessed: `${risk.assessed_sub_metrics} of 5`, left_out: risk.left_out } : { result: 'not_assessed', note: risk.note },
     loops: r.loops.length,
@@ -301,8 +310,11 @@ export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) =>
     resources: resourceRows, resources_total: resourceRows.length, unresourced_activities: unresourced, unresourced_activities_total: unresourced.length,
     method: r.method,
   };
+  // each project's data date by the list rule: the first of them, the true total and a note where it is cut (the whole list is in the result file)
+  const cutDates = r.status_dates && r.status_dates.length > first(r.status_dates).length ? { status_dates: first(r.status_dates), status_dates_note: `The first ${first(r.status_dates).length} of ${r.status_dates.length} projects; the data date of every project is in the result file.` } : {};
   const answer = {
     ...whole,
+    summary: { ...summary, ...cutDates },
     // the sub-metric breakdown of the risk stays whole (five entries); the lists are cut to the clone's rule
     drivers: first(whole.drivers), recommendations: first(whole.recommendations),
     logic_findings: whole.logic_findings.map((f) => ({ ...f, activities: first(f.activities) })),

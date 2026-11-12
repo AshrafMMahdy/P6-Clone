@@ -11,7 +11,7 @@ import { isCritical } from '../project/ctx.ts';
 import { percentComplete, reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { findLoops } from '../xer/validate.ts';
-import { baselineOf, baselineFinish, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, offender, type Offender, type Scope } from './common.ts';
+import { baselineOf, baselineFinish, namesText, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, offender, type Offender, type Scope } from './common.ts';
 import { matchActivities, type Update } from './delay.ts';
 
 /** What a figure answers: its numbers, or that it could not be worked out and why (as a dcma_14 check does: result not_assessed with a note). */
@@ -256,7 +256,7 @@ export function progressAnomalies(s: Scope): Assessed<ProgressFigures> {
   const pool = s.tasks.filter((t) => !isWbs(t) && !isMilestone(t) && s.dataDate(t.proj_id) != null);
   const asg = groupBy(s.db.tables.TASKRSRC?.rows ?? [], 'task_id');
   const without = noDate.map((p) => p.proj_short_name);
-  if (!pool.length) return notAssessed(noDate.length ? `No data date in ${without.join(', ')}: give a status_date.` : 'The project has no activity to examine (WBS summaries and milestones are not examined).');
+  if (!pool.length) return notAssessed(noDate.length ? `No data date in ${namesText(without)}: give a status_date.` : 'The project has no activity to examine (WBS summaries and milestones are not examined).');
   const out: ProgressAnomaly[] = [];
   const add = (rule: ProgressRule, t: Row, message: string, predecessor?: string) => out.push({ rule, severity: PROGRESS_RULES[rule].severity, id: t.task_code, name: t.task_name, ...(s.projs.length > 1 ? { project: s.ctx.proj.get(t.proj_id)?.proj_short_name } : {}), message, ...(predecessor ? { predecessor } : {}) });
   for (const t of pool) {

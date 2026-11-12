@@ -233,7 +233,7 @@ test('projects with different data dates: the call is refused before anything is
   assert.equal(new Set(ps.map((p) => p.last_recalc_date)).size, 2, 'the two projects of Enppi have different data dates');
   // the whole file, on every basis (it used to answer SPI(t) 2.826 and SPI 5.01, pv, ac, eac, vac and tcpi at the wrong date)
   for (const units of ['cost', 'hours', 'duration'] as const) assert.throws(() => progressCurves(db, all, { period: 'month', units }), (e: unknown) => e instanceof CurvesRefused
-    && /^The projects in scope have different data dates \(Master Rev\.F-N-4 2011-11-30 00:00; 4229 update 2-6-12 2012-06-02 00:00\)/.test(e.message) && e.next === 'Pass project: Master Rev.F-N-4 or 4229 update 2-6-12 (one of them at a time).', units);
+    && /^The projects in scope have different data dates \(Master Rev\.F-N-4 2011-11-30 00:00, 4229 update 2-6-12 2012-06-02 00:00\)/.test(e.message) && e.next === 'Pass project: <ID>, one of Master Rev.F-N-4, 4229 update 2-6-12 (one project at a time).', units);
   // the project alone: its own figures (SPI(t) 1.035)
   const one = progressCurves(db, [ps[1].proj_id], { period: 'month', units: 'duration' });
   near(one.totals.spi_t, 1.035, 'SPI(t) of the project alone', 5e-4); near(one.totals.spi, 1.06, 'SPI at the data date (it was 0.91 by month, 1.05 by week)', 5e-3); assert.equal(progressCurves(db, [ps[1].proj_id], { period: 'week', units: 'duration' }).totals.spi, one.totals.spi); assert.equal(one.warnings.some((x) => /different data dates/.test(x)), false);
@@ -244,7 +244,7 @@ test('projects with different data dates: the call is refused before anything is
   assert.equal(same.warnings.some((x) => /different data dates/.test(x)), false);
   // a project with no data date next to one with: different, refused, the missing one named
   ps[0].last_recalc_date = '';
-  assert.throws(() => progressCurves(db, all, { period: 'month', units: 'duration' }), /Master Rev\.F-N-4 none; 4229 update 2-6-12 2012-06-02/);
+  assert.throws(() => progressCurves(db, all, { period: 'month', units: 'duration' }), /Master Rev\.F-N-4 none, 4229 update 2-6-12 2012-06-02/);
 });
 
 test('SPI and the planned value in the totals are taken AT the data date on every basis: the same by week and by month, and the same as the cost basis; by hand', () => {
@@ -277,4 +277,11 @@ test('the duration basis says what its totals mean (basis_note); the other bases
   near(d.totals.cpi, 0.83, 'cpi = 17.5 / 21', 5e-3); near(d.totals.tcpi, (28 - 17.5) / (28 - 21), 'tcpi', 5e-3);
   assert.equal('basis_note' in progressCurves(b.db, [b.projId], { period: 'week' }), false);
   assert.equal('basis_note' in progressCurves(b.db, [b.projId], { period: 'week', units: 'hours' }), false);
+});
+
+test('the refusal for different data dates lists the Project IDs by the list rule when there are many: 25, how many more, the total', () => {
+  const db = readXerFile(sampleCopy('Enppi.xer')).db;
+  const first = rows(db, 'PROJECT').filter((p) => !p._baseline_of)[0], ids: string[] = [];
+  for (let i = 0; i < 30; i++) { const p = { ...first, proj_id: `X${i}`, proj_short_name: `PRJ${i}`, last_recalc_date: `2026-01-${String(1 + i % 28).padStart(2, '0')} 00:00` }; db.tables.PROJECT.rows.push(p); ids.push(p.proj_id); }
+  assert.throws(() => progressCurves(db, ids, { period: 'month' }), (e: unknown) => e instanceof CurvesRefused && /PRJ24 2026-01-25 00:00 and 5 more \(30 in total\)\), so there is no single date/.test(e.message) && !/PRJ25 /.test(e.message) && /one of PRJ0, PRJ1.*PRJ24 and 5 more \(30 in total\) \(one project at a time\)/.test(e.next));
 });
