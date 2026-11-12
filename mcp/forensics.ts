@@ -4,6 +4,7 @@
 // nothing else changes. tests/analysis-forensic.test.ts proves the wiring with a throwaway entry.
 import { baselineOf, LISTED } from '../core/analysis/common.ts';
 import { scheduleIndex, shapeScheduleIndex } from '../core/analysis/scheduleIndex.ts';
+import { decm, DECM_IDS, DECM_PROFILES } from '../core/analysis/decm.ts';
 import { config, fail, type Session } from './runtime.ts';
 import { exportDoc, exportNameProp, exportProp, RESULT_FILE_TOOLS, firstOf, type Table } from './export.ts';
 import { loadUpdates, resultExporter, savedBaselines, type AnalysisHelpers } from './analysis.ts';
@@ -67,6 +68,34 @@ export const FORENSIC_REGISTRY: ForensicTool[] = [
       const { statusDate, baseline } = dateAndBaseline(c);
       const { answer, whole, tables } = shapeScheduleIndex(scheduleIndex(c.s.db, { projIds: c.projIds, hoursPerDay: c.s.hpd, statusDate, baseline }), c.first);
       return c.exported(answer, whole, tables);
+    },
+  },
+  {
+    name: 'decm',
+    description: `The DCMA DECM schedule checks (guidelines 6, 8 and 10; 17 checks), shaped like dcma_14 and run on the open file's own tables. Each check answers metric (% of its population), threshold {op, value, source}, result pass | fail | not_assessed, numerator / denominator and the activities it found (25 in the answer, total_activities the true number, the whole list in the result file); summary gives passed, failed, not_assessed, compliance_ratio (passed / assessed) and overall; guidelines groups the checks. Reused from dcma_14: 06A204b (dangling starts and finishes), 06A205a (lags), 06A209a (hard constraints), 06A506a / b / c (actual start after the status date, actual finish after it, incomplete forecast before it: dcma_14's invalid dates split in three), 06A401a (critical path validity: dcma_14's critical path test; a loop in the logic fails it and is named). Also: 06A208a (WBS summary activities carrying logic), 06A210a (level of effort with a discrete successor), 06A212a (out-of-sequence progress), 06A501a (missing baseline dates, against the baseline), 06A505a (under way with no actual start), 06A505b (complete with no actual finish), 06A504a / b (an actual start / finish that differs from the one an earlier update held: needs updates, the earlier schedules given as windows_analysis takes them, [{handle} | {path} | {baseline} | {data_date, progress}]; this project is the last). Not assessed, with the reason: 08I101a (SLPP) and 10A303a (planning package) because P6 has no such activity types; 06A501a without a baseline; 06A506a / b / c without a data date; 06A504a / b without an earlier update; a check whose population is empty. profile: ${Object.entries(DECM_PROFILES).map(([k, v]) => `${k} (${v.label})`).join(', ')}; thresholds overrides single checks by id (percent of the population: ${DECM_IDS.filter((i) => i !== '06A401a').join(', ')}). The DECM threshold values are the benchmark's, carried over as they are, and have NOT been checked against the DCMA DECM workbook. baseline: project (default), bl1, bl2, bl3 or a saved baseline's name; status_date: the date to judge at (default each project's data date). method lists the numbers used.`,
+    properties: { profile: { type: 'string', description: 'default or strict' }, thresholds: { type: 'object', description: 'overrides by check id, e.g. {"06A205a": 10}: percent of the population allowed' }, baseline: BASELINE, status_date: STATUS_DATE, updates: { type: 'array', items: { type: 'object' }, description: 'the earlier updates for 06A504a / b: [{handle} | {path} | {baseline: project|bl1|bl2|bl3|<saved baseline name>} | {data_date, progress: [edit ops]}]; this project is the latest' } },
+    tables: ['checks', 'failing_activities'],
+    readsFiles: ['updates[].path'], readsHandles: true,
+    run: (c) => {
+      if (c.a.profile != null && !DECM_PROFILES[c.a.profile]) fail('bad_input', `Unknown profile "${c.a.profile}".`, `Profiles: ${Object.keys(DECM_PROFILES).join(', ')}.`);
+      if (c.a.thresholds != null) {
+        const t = c.a.thresholds;
+        if (typeof t !== 'object' || Array.isArray(t)) fail('bad_input', 'thresholds must be an object of check id and percent.', 'e.g. {"06A205a": 10}');
+        for (const [k, v] of Object.entries(t)) {
+          if (!(DECM_IDS as string[]).includes(k) || k === '06A401a') fail('bad_input', `No threshold for "${k}".`, `Checks with a threshold: ${DECM_IDS.filter((i) => i !== '06A401a').join(', ')}.`);
+          if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) fail('bad_input', `thresholds.${k} must be a number of 0 or more (percent of the population).`, 'e.g. {"06A205a": 10}');
+        }
+      }
+      const { statusDate, baseline } = dateAndBaseline(c);
+      const loaded = c.a.updates != null ? c.updates({ includeCurrent: true }) : null;
+      try {
+        const full = decm(c.s.db, { projIds: c.projIds, hoursPerDay: c.s.hpd, profile: c.a.profile, thresholds: c.a.thresholds, baseline, statusDate, updates: loaded?.updates });
+        const answer = { ...full, checks: full.checks.map((k) => ({ ...k, activities: c.first(k.activities) })) };
+        return c.exported(answer, full, [
+          { name: 'checks', columns: ['id', 'name', 'guideline', 'result', 'metric', 'unit', 'threshold_op', 'threshold_value', 'threshold_source', 'numerator', 'denominator', 'total_activities', 'note'], rows: full.checks.map(({ activities: _a, ...k }) => (k.threshold == null ? (({ threshold: _t, ...x }) => x)(k) : k)) },
+          { name: 'failing_activities', columns: ['check', 'id', 'name', 'project', 'value'], rows: full.checks.flatMap((k) => k.activities.map((x) => ({ check: k.id, ...x }))) },
+        ]);
+      } finally { loaded?.release(); }
     },
   },
 ];

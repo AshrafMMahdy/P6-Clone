@@ -213,6 +213,7 @@ export const CUT_LISTS: Record<string, CutList[]> = {
   lint: [{ list: 'activities', total: 'total_activities', table: 'findings' }],
   check_schedule: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],
   dcma_14: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],
+  decm: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],
   evaluate: [{ list: 'changed', total: 'changed_total', table: 'changed', rowsAre: 'changed field of an activity' }],
   evaluate_batch: [{ list: 'changed', total: 'changed_total', table: 'dates_moved' }],
   compare: [{ list: 'changes', total: 'changes_total', table: 'changes', paged: true }],
