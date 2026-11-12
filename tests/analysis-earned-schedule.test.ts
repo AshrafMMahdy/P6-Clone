@@ -236,7 +236,7 @@ test('projects with different data dates: the call is refused before anything is
     && /^The projects in scope have different data dates \(Master Rev\.F-N-4 2011-11-30 00:00; 4229 update 2-6-12 2012-06-02 00:00\)/.test(e.message) && e.next === 'Pass project: Master Rev.F-N-4 or 4229 update 2-6-12 (one of them at a time).', units);
   // the project alone: its own figures (SPI(t) 1.035)
   const one = progressCurves(db, [ps[1].proj_id], { period: 'month', units: 'duration' });
-  near(one.totals.spi_t, 1.035, 'SPI(t) of the project alone', 5e-4); assert.equal(one.warnings.some((x) => /different data dates/.test(x)), false);
+  near(one.totals.spi_t, 1.035, 'SPI(t) of the project alone', 5e-4); near(one.totals.spi, 1.06, 'SPI at the data date (it was 0.91 by month, 1.05 by week)', 5e-3); assert.equal(progressCurves(db, [ps[1].proj_id], { period: 'week', units: 'duration' }).totals.spi, one.totals.spi); assert.equal(one.warnings.some((x) => /different data dates/.test(x)), false);
   // the same data date on both: assessed, as today (and no warning about dates)
   ps[0].last_recalc_date = ps[1].last_recalc_date;
   const same = progressCurves(db, all, { period: 'month', units: 'duration' });
@@ -245,6 +245,26 @@ test('projects with different data dates: the call is refused before anything is
   // a project with no data date next to one with: different, refused, the missing one named
   ps[0].last_recalc_date = '';
   assert.throws(() => progressCurves(db, all, { period: 'month', units: 'duration' }), /Master Rev\.F-N-4 none; 4229 update 2-6-12 2012-06-02/);
+});
+
+test('SPI and the planned value in the totals are taken AT the data date on every basis: the same by week and by month, and the same as the cost basis; by hand', () => {
+  // data date Wednesday 25 March, in the middle of a week and of a month. Planned: A 2-9 Mar, B 9-16 Mar, C 16-30 Mar (14 days). At the data date: A 7 + B 7 + C 14 x 9/14 = 9 -> PV 23 working days (the cost basis: 700 + 700 + 1400 x 9/14 = 2300).
+  // Earned: A 7 + B 7 + C 25 % of 14 = 3.5 -> 17.5 (cost 1750). SPI = 17.5 / 23 = 0.76 on both. (To the end of the week of the data date, 30 Mar, the planned value would be 28 and SPI 0.63; to the end of the month 28 again.)
+  const d = build({ costs: false }), c = build({ costs: true });
+  resched(d, '2026-03-25'); resched(c, '2026-03-25');
+  const dw = progressCurves(d.db, [d.projId], { period: 'week', units: 'duration' }), dm = progressCurves(d.db, [d.projId], { period: 'month', units: 'duration' });
+  for (const x of [dw, dm]) { assert.equal(x.totals.pv, 23); assert.equal(x.totals.ev, 17.5); assert.equal(x.totals.spi, 0.76); }
+  assert.equal(dw.totals.spi, dm.totals.spi);
+  const cw = progressCurves(c.db, [c.projId], { period: 'week' }), cm = progressCurves(c.db, [c.projId], { period: 'month' });
+  assert.equal(cw.totals.pv, 2300); assert.equal(cm.totals.pv, 2300);
+  assert.equal(cw.totals.spi, dw.totals.spi, 'the cost basis and the duration basis cut the planned value the same way');
+  // the curve itself still runs to the end of its periods (cum_pv 28 at the end of the last week), only the totals are at the data date
+  assert.equal(dw.periods.at(-1)!.cum_pv, 28);
+  // the data date at or before the planned start: nothing planned yet, SPI not assessed (never 0 from a period-end planned value)
+  const e = build({ costs: false });
+  resched(e, '2026-03-02');
+  const early = progressCurves(e.db, [e.projId], { period: 'month', units: 'duration' });
+  assert.equal(early.totals.pv, 0); assert.equal(early.totals.spi, null);
 });
 
 test('the duration basis says what its totals mean (basis_note); the other bases carry no such note', () => {

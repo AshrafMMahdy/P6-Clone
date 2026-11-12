@@ -17,7 +17,7 @@ import { maxOf, minOf } from '../arrays.ts';
 import { baselineOf } from './common.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
-import { activityCosts, earnedValue, percentComplete, sumLines } from '../cost/rollup.ts';
+import { activityCosts, earnedValue, percentComplete, plannedShare, sumLines } from '../cost/rollup.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
 import { bucketStart, nextBucket, spreadUsage, type UsageBucket } from '../resource/usage.ts';
 import type { WorkCalendar } from '../calendar/calendar.ts';
@@ -193,7 +193,8 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   } else {
     const s = tasks.map(q).reduce((a, x) => ({ bac: a.bac + x.bac, actual: a.actual + x.actual, remaining: a.remaining + x.remaining }), { bac: 0, actual: 0, remaining: 0 });
     const evH = tasks.reduce((a, t) => a + q(t).bac * percentComplete(t, asgBy.get(t.task_id) ?? []), 0);
-    const pvH = periods.filter((p) => p.cum_ev != null).at(-1)?.cum_pv ?? 0;
+    // the planned value AT the data date, as the cost basis cuts it (rollup.ts plannedShare: the share of the activity's baseline, else planned, dates elapsed at the data date), not to the end of the period that holds the data date: SPI does not depend on the period length
+    const pvH = dataDate == null ? 0 : tasks.reduce((a, t) => a + q(t).bac * plannedShare(t, bl.get(`${t.proj_id}|${t.task_code}`), dataDate), 0);
     totals = { bac: r2(s.bac), pv: r2(pvH), ev: r2(evH), ac: r2(s.actual), etc: r2(s.remaining), eac: r2(s.actual + s.remaining), vac: r2(s.bac - s.actual - s.remaining), spi: pvH ? r2(evH / pvH) : null, cpi: s.actual ? r2(evH / s.actual) : null, tcpi: s.bac - s.actual ? r2((s.bac - evH) / (s.bac - s.actual)) : null };
   }
   if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost' : units === 'duration' ? 'duration' : 'units'} are recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
