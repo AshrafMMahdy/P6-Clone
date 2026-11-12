@@ -1,4 +1,4 @@
-// baseline_variance (core/analysis/baselineVariance.ts, registered in mcp/forensics.ts): the schedule as planned against the schedule as it stands, the slip classes, the critical-path overlay, the delay drivers, concurrency,
+// baseline_variance (core/analysis/baselineVariance.ts, registered in mcp/forensics.ts): the schedule as planned against the schedule as it stands, the slip classes, the critical-path overlay, the delay drivers,
 // causal chains and the responsible party. The source's delayed fixture against the benchmark's own numbers (tests/fixtures/benchmark-golden.json: delayed.as_planned_vs_built, delay_analysis, baseline_compare) with every expected
 // difference stated; scenarios built as P6 projects for the overlap, the newly critical and the responsible party; Tower-A (a baseline stored in the file) and an as_planned file by hand from their rows; the refusals; the list rule.
 import { test } from 'node:test';
@@ -116,7 +116,7 @@ test('EXPECTED DIFFERENCES from the source on that fixture, each with its reason
   //    activity's finish variance, ahead ones negative), worst_offenders (the list is sorted worst first), float_analysis, recommendations, processing_metadata, confidence and chain_confidence (constants 1.0), SPI(t) (Earned Schedule is in progress_curves)
   for (const k of ['methodology', 'use_half_step', 'total_finish_variance_days', 'worst_offenders', 'float_analysis', 'recommendations', 'processing_metadata', 'spi_t']) assert.equal(k in r, false, k);
   assert.equal(JSON.stringify(r).includes('half_step'), false, 'no method name the code does not perform');
-  assert.ok(r.method.some((m) => /half-step are what windows_analysis does/.test(m)));
+  assert.ok(r.method.some((m) => /concurrent delay is not assessed.*windows_analysis apportions delay between causes/.test(m)));
   assert.ok(r.method.some((m) => /duration_weighted_percent_complete \(the source’s schedule_performance_index, :240-247/.test(m)));
   // 5. the impacted milestone: the source says "(project finish)" when no milestone is reached; the clone says null (no milestone) and where the chain ends
   assert.deepEqual([r.chains[0].impacted_milestone, r.chains[0].ends_at], [null, 'T3']);
@@ -124,57 +124,37 @@ test('EXPECTED DIFFERENCES from the source on that fixture, each with its reason
 
 // ------------------------------------------------------------------------------------------------ scenarios
 
-test('two critical drivers that overlap: each keeps its own type, the concurrent days and the others it overlaps, the party sums in full; the totals side by side', () => {
+test('two critical drivers that overlap: each keeps its own type and own days, the party sums in full; the two totals side by side; no concurrency fact anywhere', () => {
   // A and B (15 days each, in parallel, baseline 10) then C (5): all critical, each 5 days late; the project finishes 5 days late
   const b = scenario([{ id: 'A', duration_days: 10 }, { id: 'B', duration_days: 10 }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'] }], { A: 15, B: 15 }, [
     { op: 'add_code_type', name: 'Responsibility' }, { op: 'add_code_value', type: 'Responsibility', code: 'OWN', name: 'Owner' }, { op: 'add_code_value', type: 'Responsibility', code: 'CON', name: 'Contractor' },
     { op: 'assign_code', type: 'Responsibility', value: 'OWN', activity: 'A' }, { op: 'assign_code', type: 'Responsibility', value: 'CON', activity: 'B' }]);
   const r = run(b.db, { responsibilityCode: 'responsibility' });
   assert.deepEqual([r.totals.project_slip_working_days, r.totals.critical_drivers_delay_days], [5, 15], 'the slip is 5 days; the critical drivers delayed 15 days between them (A and B delay the same days)');
+  assert.deepEqual(Object.keys(r.totals), ['project_slip_working_days', 'critical_drivers_delay_days', 'finished_drivers']);
   const d = byId(r.drivers);
   // no driver is reclassified: A and B keep their own type (their duration grew), C its own (it starts late)
   assert.deepEqual(r.drivers.map((x) => [x.id, x.delay_days, x.on_critical_path, x.variance_type]), [['A', 5, true, 'duration_overrun'], ['B', 5, true, 'duration_overrun'], ['C', 5, true, 'start_delay']]);
-  assert.equal(JSON.stringify(r).includes('concurrent_delay'), false, 'no concurrent_delay type');
-  // the delay period of A and of B is 15 - 20 Jan (the baseline finish to the current finish): the same 5 days, so each runs concurrently with the other for all 5 of its delay days; C's is 20 - 25 Jan, which touches theirs at a point only
-  assert.deepEqual([d.A.concurrent_days, d.A.concurrent_with, d.B.concurrent_days, d.B.concurrent_with, d.C.concurrent_days, d.C.concurrent_with], [5, 1, 5, 1, 0, 0]);
-  assert.ok(r.drivers.every((x) => (x.concurrent_days ?? 0) <= x.delay_days), 'concurrent days are part of the delay days');
   assert.deepEqual([d.A.successors_reached, d.A.causal_score], [1, 1.333]);
-  assert.deepEqual(r.chains.map((c) => [c.root, c.path, c.concurrent_with]), [['A', ['A', 'C'], 1], ['B', ['B', 'C'], 1], ['C', ['C'], 0]]);
-  // the responsible party: A owner 5, B contractor 5, C no value 5, each in full; beside them, the concurrent days of each party's critical drivers; nothing is split
+  assert.deepEqual(r.chains.map((c) => [c.root, c.path]), [['A', ['A', 'C']], ['B', ['B', 'C']], ['C', ['C']]]);
+  // the responsible party: A owner 5, B contractor 5, C no value 5, each in full; nothing is split
   const resp = r.responsibility as Extract<BaselineVarianceResult['responsibility'], { result: 'assessed' }>;
   assert.equal(resp.code_type, 'Responsibility');
-  assert.deepEqual([...resp.parties].sort((x, y) => x.party.localeCompare(y.party)), [{ party: 'Contractor', drivers: 1, delay_days: 5, of_which_concurrent_days: 5 }, { party: 'no value', drivers: 1, delay_days: 5, of_which_concurrent_days: 0 }, { party: 'Owner', drivers: 1, delay_days: 5, of_which_concurrent_days: 5 }].sort((x, y) => x.party.localeCompare(y.party)));
+  assert.deepEqual([...resp.parties].sort((x, y) => x.party.localeCompare(y.party)), [{ party: 'Contractor', drivers: 1, delay_days: 5 }, { party: 'no value', drivers: 1, delay_days: 5 }, { party: 'Owner', drivers: 1, delay_days: 5 }].sort((x, y) => x.party.localeCompare(y.party)));
   assert.equal(resp.parties.reduce((a, p) => a + p.delay_days, 0), 15, 'the parties together have every driver day, once, in full');
-  assert.equal('concurrent_days_split_equally' in resp, false);
-  assert.deepEqual([r.totals.critical_drivers_delay_days, r.totals.of_which_concurrent_days], [15, 10], 'of the 15 critical driver days, 10 were days another critical driver was also delayed');
   assert.deepEqual(r.drivers.map((x) => x.responsible), ['Owner', 'Contractor', null]);
-  assert.match(r.method.join(' '), /AACE windows method and half-step are what windows_analysis does/);
-  assert.equal(JSON.stringify(r).includes('concurrent_overlaps'), false, 'no pair list anywhere');
+  assert.match(r.method.join(' '), /concurrent delay is not assessed.*windows_analysis apportions delay between causes/);
+  assert.match(resp.note, /Concurrent delay is not assessed here: windows_analysis apportions delay between causes\./);
+  // the facts that were removed are nowhere: not in a driver, a chain, the responsibility table, the totals, the answer, the method
+  assert.equal(/concurrent_days|concurrent_with|of_which_concurrent|concurrent_overlaps|concurrent_delay/.test(JSON.stringify(r)), false);
 });
 
-test('concurrency by the sweep equals the brute-force pair count on 60 critical drivers whose delay periods overlap in every way, and no pair is listed', () => {
-  // 60 chains of the same length (40 days) are all critical: A_i of d_i days then B_i of 40 - d_i. Now A_i takes x_i days longer and B_i the same shorter: A_i's delay period is [d_i, d_i + x_i] (the baseline finish to the current finish), B_i finishes when it did.
-  const n = 60, d = (i: number) => 5 + ((i * 7) % 23), x = (i: number) => 1 + ((i * 5) % 9);
-  const tasks: B.Source[] = [], now: Record<string, number> = {};
-  for (let i = 0; i < n; i++) { tasks.push({ id: `A${i}`, duration_days: d(i) }, { id: `B${i}`, duration_days: 40 - d(i), predecessors: [`A${i}`] }); now[`A${i}`] = d(i) + x(i); now[`B${i}`] = 40 - d(i) - x(i); }
-  const r = run(scenario(tasks, now).db);
-  const dr = r.drivers.filter((q) => q.on_critical_path);
-  assert.equal(dr.length, n, 'every A is a critical driver');
-  const at = (i: number): [number, number] => [d(i), d(i) + x(i)];
-  for (let i = 0; i < n; i++) {
-    const q = byId(r.drivers)[`A${i}`], [a, f] = at(i);
-    // brute force: the part of [a, f] that at least one other period covers (days on the 7-day calendar), by the pairs
-    const cells = new Set<number>(); let others = 0;
-    for (let j = 0; j < n; j++) { if (j === i) continue; const [c, e] = at(j); const lo = Math.max(a, c), hi = Math.min(f, e); if (hi > lo) { others++; for (let t = lo; t < hi; t++) cells.add(t); } }
-    assert.deepEqual([q.concurrent_days, q.concurrent_with], [cells.size, others], `A${i}`);
-  }
-  assert.ok(dr.some((q) => (q.concurrent_with ?? 0) > 3) && dr.some((q) => q.concurrent_days === 0 || q.concurrent_days! < q.delay_days), 'the periods overlap in every way');
-  assert.equal(JSON.stringify(r).includes('concurrent_overlaps'), false);
-  assert.equal(r.totals.of_which_concurrent_days, Math.round(dr.reduce((a, q) => a + q.concurrent_days!, 0) * 100) / 100);
-  // a driver that is not critical carries none of the two facts
-  const nc = scenario([{ id: 'A', duration_days: 10 }, { id: 'B', duration_days: 5 }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'] }], { B: 7 });
-  const rn = run(nc.db);
-  assert.deepEqual(rn.drivers.filter((q) => q.on_critical_path === false).map((q) => [q.id, q.concurrent_days, q.concurrent_with]), [['B', null, null]]);
+test('one delay passed down a chain is not concurrent delay: X1 > X2 > X3 pushed 10 days by X1 shows each driver with its own days and nothing "concurrent"', () => {
+  const b = scenario([{ id: 'X1', duration_days: 10 }, { id: 'X2', duration_days: 10, predecessors: ['X1'] }, { id: 'X3', duration_days: 10, predecessors: ['X2'] }], { X1: 20 });
+  const r = run(b.db);
+  assert.deepEqual(r.drivers.map((x) => [x.id, x.delay_days, x.on_critical_path]), [['X1', 10, true], ['X2', 10, true], ['X3', 10, true]]);
+  assert.deepEqual([r.totals.project_slip_working_days, r.totals.critical_drivers_delay_days], [10, 30]);
+  assert.equal(/concurren/.test(JSON.stringify({ ...r, method: [] })), false);
 });
 
 test('newly critical: a branch that had float in the baseline and is critical now (and the one that stopped being critical)', () => {
@@ -301,7 +281,7 @@ test('Tower-A (its baseline is stored in the file): counted from the rows', () =
   assert.match((r.responsibility as any).note, /Pass responsibility_code.*Activity code types in this file: Phase/);
   // given: the activity code type Phase; A1020 carries the value Enabling (TASKACTV: task 1001, type 50, value 51 "Enabling")
   const p = run(tw.db, { responsibilityCode: 'phase' });
-  assert.deepEqual((p.responsibility as any).parties, [{ party: 'Enabling', drivers: 1, delay_days: 2, of_which_concurrent_days: 0 }]);
+  assert.deepEqual((p.responsibility as any).parties, [{ party: 'Enabling', drivers: 1, delay_days: 2 }]);
   assert.equal('concurrent_days_split_equally' in (p.responsibility as object), false, 'no split of any kind');
   assert.equal(p.drivers[0].responsible, 'Enabling');
 });
@@ -343,7 +323,8 @@ test('baseline_variance through the server: arguments, refusals in words, respon
   assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
   assert.deepEqual(Object.keys(t.inputSchema.properties), ['handle', 'export', 'export_name', 'project', 'baseline', 'as_planned', 'responsibility_code', 'caller', 'async']);
   assert.deepEqual(t._meta['whiq/files'], { read: ['as_planned.path'], opens: false });
-  assert.match(t.description, /AACE windows method and half-step are what windows_analysis does/);
+  assert.match(t.description, /Concurrent delay is not assessed here: windows_analysis apportions delay between causes/);
+  assert.equal(/concurrent_days|concurrent_with|of_which_concurrent/.test(t.description), false);
   assert.equal(JSON.stringify(t.inputSchema).includes('methodology'), false);
   // no baseline and no other schedule: refused, with the two ways
   const trial = await openSample('129 trial.xer');
@@ -367,7 +348,7 @@ test('baseline_variance through the server: arguments, refusals in words, respon
   const ok = await call('baseline_variance', { handle: tw, responsibility_code: 'Phase', bogus: 1 });
   assert.equal(ok.err, false, JSON.stringify(ok.d).slice(0, 300));
   assert.match(ok.d.arguments_not_used.join(' '), /baseline_variance has no argument "bogus"/);
-  assert.deepEqual(ok.d.responsibility.parties, [{ party: 'Enabling', drivers: 1, delay_days: 2, of_which_concurrent_days: 0 }]);
+  assert.deepEqual(ok.d.responsibility.parties, [{ party: 'Enabling', drivers: 1, delay_days: 2 }]);
   assert.deepEqual(ok.d.exported.files.map((f: any) => f.path.replace(/^.*baseline_variance/, '')).sort(), ['-chains.csv', '-critical_overlay.csv', '-drivers.csv', '-variances.csv', '.json']);
   // as_planned by path and by handle give the same answer
   const cur = await openSample('Tower-A_edited.xer');
@@ -409,5 +390,5 @@ test('the list rule on a real sample (31 buidings, 2,142 activities, against ano
   assert.deepEqual(dd, [...dd].sort((x: number, y: number) => y - x));
   assert.ok(r.d.drivers.every((x: any) => x.delay_days >= 1));
   // the critical drivers' days beside the project slip: two figures, named for what they are
-  assert.deepEqual(Object.keys(r.d.totals), ['project_slip_working_days', 'critical_drivers_delay_days', 'of_which_concurrent_days', 'finished_drivers']);
+  assert.deepEqual(Object.keys(r.d.totals), ['project_slip_working_days', 'critical_drivers_delay_days', 'finished_drivers']);
 });

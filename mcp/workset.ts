@@ -55,6 +55,7 @@ export const WORK: Record<string, Work> = {
   //   Re-measured 2026-11-12 after the concurrency became a sweep over the periods (no pair list) and the variance one exact function, the same way as schedule_index above (ballast, the largest of several runs; the other side held as a second
   //   open project with every activity of it ten days earlier, so every activity is a driver): JWM 31.6 MB (x1.5 / 22.7 MB = 2.09 x), DHBL 28.9 MB (1.5 x), CCA at least 21 MB (the heap limit I could give it was reached: 0.4 x or more). The old code measured
   //   the same way: JWM 33.1 MB, DHBL 23.8 MB. JWM is the worst: 2.088, which the neighbours' rule (round UP) records as 2.1, not 2.0.
+  //   The concurrency sweep was removed afterwards (concurrent delay is not assessed by this tool): the working set can only be smaller, and the entry stands as the safe side.
   baseline_variance: { per: 2.1, label: 'baseline_variance', hint: 'close other projects first' },
   windows_analysis: { per: 1.2, label: 'windows_analysis', hint: 'pass fewer updates' },
   export_excel: { per: 2.0, label: 'export_excel', hint: 'pass project to export one project' },

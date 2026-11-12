@@ -1,6 +1,6 @@
 // baseline_variance: the schedule as planned (a baseline, or another schedule) against the schedule as it stands, and who and what delayed it, on the open file's own tables. Ported from our copy of the Bellator
-// Schedule Intelligence benchmark ("Bellatorsi API/src/endpoints/forensics/": asPlannedVsBuilt.ts for the per-activity variance, slip classes and critical-path overlay; delayAnalysis.ts for the delay drivers, concurrency
-// and causal chains; baselineCompare.ts only for its per-activity variance, whose SPI(t) is the Earned Schedule of progress_curves and whose BEI is the clone's one BEI, forensic.ts beiFigures). The clone reads the real thing:
+// Schedule Intelligence benchmark ("Bellatorsi API/src/endpoints/forensics/": asPlannedVsBuilt.ts for the per-activity variance, slip classes and critical-path overlay; delayAnalysis.ts for the delay drivers
+// and causal chains (its concurrency options are off by default and not carried over: windows_analysis apportions delay between causes); baselineCompare.ts only for its per-activity variance, whose SPI(t) is the Earned Schedule of progress_curves and whose BEI is the clone's one BEI, forensic.ts beiFigures). The clone reads the real thing:
 // P6's stored total float and critical flag (no second CPM), working days of each activity's calendar, the real baselines, the actual dates and the data date. Where an input is absent the part is not assessed with the
 // reason. The other side is a baseline (the earlier side) or another schedule (as_planned); the open project is the later, as-built side.
 import { rows, groupBy, type Db, type Row } from '../db.ts';
@@ -8,7 +8,7 @@ import { formatP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentOf } from '../diff.ts';
 import type { Update } from './delay.ts';
-import { baselineOf, baselineFinish, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope, type Scope } from './common.ts';
+import { baselineOf, baselineFinish, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope } from './common.ts';
 import { baselinePairs, beiFigures, currentStart, schedulePairs, varianceDetail, type ActivityVariance, type Assessed, type ReferencePairs, type SlipClass } from './forensic.ts';
 
 /** A delay driver is an activity whose finish is this many working days or more behind the other side (delayAnalysis.ts:96, :113-114: min_impact_days default 1; the source's number, not yet agreed with the owner: ledger item 26). */
@@ -33,21 +33,15 @@ export interface Driver {
   share_of_driver_days: number;
   /** the value of the activity code named in responsibility_code, null for none; absent when no code was named */
   responsible?: string | null;
-  /** critical drivers only (null for the others): the working days (of the driver's own calendar) of its delay period (the other side's finish to its current finish) during which at least one OTHER critical driver's delay period also runs; never more than delay_days */
-  concurrent_days: number | null;
-  /** critical drivers only (null for the others): how many other critical drivers' delay periods overlap this one's by working time of the project calendar */
-  concurrent_with: number | null;
 }
 export interface Chain {
   root: string; impacted_milestone: string | null; ends_at: string; path: string[]; path_total: number;
   /** the root driver's delay days (delayAnalysis.ts:227) */
   delay_days: number;
-  /** how many other critical drivers' periods overlap the root's (the root's own concurrent_with) */
-  concurrent_with: number;
 }
 export interface OverlayRow { id: string; name: string; project?: string; critical_in_reference: boolean | null; critical_now: boolean | null; newly_critical: boolean; no_longer_critical: boolean; /** critical now, and not in the other side at all (added since): not "newly critical", which needs a counterpart that was not critical */ added_and_critical: boolean }
 
-export type Responsibility = { result: 'assessed'; code_type: string; parties: { party: string; drivers: number; delay_days: number; of_which_concurrent_days: number }[]; note: string } | { result: 'not_assessed'; note: string };
+export type Responsibility = { result: 'assessed'; code_type: string; parties: { party: string; drivers: number; delay_days: number }[]; note: string } | { result: 'not_assessed'; note: string };
 
 export interface BaselineVarianceResult {
   report: 'Baseline variance';
@@ -57,7 +51,7 @@ export interface BaselineVarianceResult {
   activities: { compared: number; not_in_reference: number; without_dates: number };
   slip_classes: Record<SlipClass, number>;
   project_slip: Assessed<{ current_finish: string; reference_finish: string; working_days: number }>;
-  totals: { project_slip_working_days: number | null; critical_drivers_delay_days: number; of_which_concurrent_days: number; finished_drivers: { count: number; delay_days: number; note: string } };
+  totals: { project_slip_working_days: number | null; critical_drivers_delay_days: number; finished_drivers: { count: number; delay_days: number; note: string } };
   critical_overlay: Assessed<{ reference_critical_total: number; current_critical_total: number; newly_critical_total: number; added_and_critical_total: number; no_longer_critical_total: number }>;
   bei: Assessed<{ value: number; completed: number; due: number }>;
   duration_weighted_percent_complete: Assessed<{ value: number; earned_days: number; planned_days: number }>;
@@ -77,8 +71,8 @@ export const VARIANCE_METHOD = [
   `delay drivers: activities whose finish is ${DRIVER_MIN_DAYS} working day or more later than the other side (delayAnalysis.ts:96, :113-114), level of effort left out (its dates follow the work it spans); variance type from the start and duration variances: both later = compound_delay, duration longer = duration_overrun, start later = start_delay, else finish_delay (:121-124)`,
   'successors reached = activities after the driver in the logic, any relationship, each once (:303-313); causal score = (critical 1, else 0.5) x (1 + successors reached / activities) (:141)',
   'critical = P6’s stored float rule (the project’s critical-float limit or longest path); finished work has no float, so a finished driver is neither critical nor not: it is counted apart (finished_drivers) and has no causal score',
-  'concurrency (no option, no split): a driver keeps its own variance type, and the responsibility table sums each party’s driver days in full: the source’s default numbers (its concurrency classification and its 50/50 split are both OFF by default, delayAnalysis.ts:98-99, :203-214, and run only when the options for them are switched on). Beside them, for each CRITICAL driver, two facts about its delay period (from the other side’s finish to its current finish: the stretch of time the activity is late, whose working days on its own calendar are its delay_days): concurrent_days = the working days of that period during which at least one OTHER critical driver’s delay period also runs (so never more than its delay_days), and concurrent_with = how many other critical drivers’ delay periods overlap it by working time of the project calendar; worked out with one pass over the periods sorted by start (the interval union), never pair by pair, so no pair list exists. of_which_concurrent_days (per party, and in totals) = the sum of its critical drivers’ concurrent_days, so it reads as “of which concurrent” beside the delay days. Apportioning concurrent delay between the parties is not done here: the AACE windows method and half-step are what windows_analysis does',
-  'two totals, side by side and not the same thing: project_slip_working_days (the schedule as a whole) and critical_drivers_delay_days (the sum of the critical drivers’ own delays; concurrent drivers delay the same days, so it can exceed the slip), with of_which_concurrent_days beside the second',
+  'concurrent delay is not assessed: the source’s concurrency classification and its 50/50 split are both OFF by default (delayAnalysis.ts:98-99, :203-214), and so is here. A driver keeps its own variance type, and the responsibility table sums each party’s driver days in full. The days of a delay passed down a chain are not concurrent delay (that needs independent causes in the same window): windows_analysis apportions delay between causes',
+  'two totals, side by side and not the same thing: project_slip_working_days (the schedule as a whole) and critical_drivers_delay_days (the sum of the critical drivers’ own delays; drivers delaying the same days each count theirs, so it can exceed the slip)',
   'responsibility: a P6 file has no delay-category field; the value of the activity code named in responsibility_code on each driver is its party, driver days summed per value (and no value)',
   'causal chain of a critical driver: along its critical successors, the smallest Activity ID first, to the first milestone (a milestone type or a zero duration), else to the end of the critical chain (:315-335)',
   'duration_weighted_percent_complete (the source’s schedule_performance_index, :240-247, a duration-weighted % complete, not SPI; SPI(t) is Earned Schedule in progress_curves): sum of (duration x % complete) over the sum of durations, durations in working days (the other side’s, else the original duration), level of effort and WBS summaries left out',
@@ -188,7 +182,7 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
       ...base(t), delay_days: v.finish_variance_days!, start_variance_days: v.start_variance_days, duration_variance_days: v.duration_variance_days, variance_type: vtype,
       reference_start: v.reference_start, reference_finish: v.reference_finish, current_start: v.current_start, current_finish: v.current_finish,
       on_critical_path: crit, successors_reached: n, causal_score: crit == null ? null : r3((crit ? 1 : 0.5) * (1 + n / Math.max(1, activities.length))), share_of_driver_days: 0,
-      ...(party ? { responsible: party.get(t.task_id) ?? null } : {}), concurrent_days: null, concurrent_with: null,
+      ...(party ? { responsible: party.get(t.task_id) ?? null } : {}),
     });
   }
   const byTask = new Map<Driver, Row>(); const taskOfDriver = new Map<string, Row>();
@@ -198,53 +192,24 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
   for (const d of drivers) d.share_of_driver_days = sumAll ? r3(d.delay_days / sumAll) : 0;
   drivers.sort((a, b) => b.delay_days - a.delay_days);
 
-  // concurrency between critical drivers, in one pass over the delay periods (no pair is ever formed): a critical driver's delay period runs from the other side's finish to its current finish. The boundaries of all the periods cut
-  // time into segments; the segments that two or more periods cover are the concurrent ones, and a driver's concurrent days are its own calendar's working time in the concurrent segments between its two boundaries (prefix sums)
   const crit = drivers.filter((d) => d.on_critical_path === true);
-  const pcal = s.projs[0] ? s.projCal(s.projs[0]) : null;
-  {
-    const periods: { d: Driver; a: number; f: number; cal: ReturnType<Scope['cal']>; day: number }[] = [];
-    for (const d of crit) { const t = byTask.get(d)!, a = baselineFinish(ref.pairs.get(t)), f = forecastFinish(t); if (a != null && f != null && f > a) periods.push({ d, a, f, cal: s.cal(t), day: exact.get(t)!.day }); }
-    for (const d of crit) { d.concurrent_days = 0; d.concurrent_with = 0; }
-    if (pcal && periods.length > 1) {
-      const cuts = [...new Set(periods.flatMap((x) => [x.a, x.f]))].sort((x, y) => x - y), at = new Map(cuts.map((c, i) => [c, i]));
-      const m = cuts.length - 1, cover = new Array<number>(m + 1).fill(0), concurrent = new Array<boolean>(m).fill(false);
-      for (const x of periods) { cover[at.get(x.a)!]++; cover[at.get(x.f)!]--; }
-      for (let i = 0, k = 0; i < m; i++) { k += cover[i]; concurrent[i] = k >= 2; }
-      // Q[calendar][i]: the working minutes of that calendar before cut i that lie in concurrent segments
-      const Q = new Map<ReturnType<Scope['cal']>, number[]>();
-      for (const x of periods) if (!Q.has(x.cal)) { const q = new Array<number>(m + 1).fill(0); for (let i = 0; i < m; i++) q[i + 1] = q[i] + (concurrent[i] ? x.cal.workBetween(cuts[i], cuts[i + 1]) : 0); Q.set(x.cal, q); }
-      // W[i]: the working minutes of the PROJECT calendar from the first cut to cut i: two periods overlap when their [W of start, W of finish] intervals meet in more than a point, so the others that overlap one
-      // are counted from the sorted starts and finishes (those starting before it ends, less those finished by the time it starts, less itself)
-      const W = new Array<number>(m + 1).fill(0);
-      for (let i = 0; i < m; i++) W[i + 1] = W[i] + pcal.workBetween(cuts[i], cuts[i + 1]);
-      const live = periods.filter((x) => W[at.get(x.f)!] > W[at.get(x.a)!]);
-      const starts = live.map((x) => W[at.get(x.a)!]).sort((x, y) => x - y), ends = live.map((x) => W[at.get(x.f)!]).sort((x, y) => x - y);
-      const countLess = (sorted: number[], v: number, orEqual: boolean) => { let lo = 0, hi = sorted.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] < v || (orEqual && sorted[mid] === v)) lo = mid + 1; else hi = mid; } return lo; };
-      for (const x of periods) {
-        const ia = at.get(x.a)!, ifin = at.get(x.f)!, q = Q.get(x.cal)!;
-        x.d.concurrent_days = r2((q[ifin] - q[ia]) / x.day);
-        if (W[ifin] > W[ia]) x.d.concurrent_with = countLess(starts, W[ifin], false) - countLess(ends, W[ia], true) - 1;
-      }
-    }
-  }
 
   // ---- totals
   const criticalSum = r2(crit.reduce((a, d) => a + d.delay_days, 0));
   const finished = drivers.filter((d) => d.on_critical_path === null);
-  const totals = { project_slip_working_days: slipDays, critical_drivers_delay_days: criticalSum, of_which_concurrent_days: r2(crit.reduce((a, d) => a + (d.concurrent_days ?? 0), 0)), finished_drivers: { count: finished.length, delay_days: r2(finished.reduce((a, d) => a + d.delay_days, 0)), note: 'Finished work has no float in P6: whether these were critical cannot be told, so their days are not in critical_drivers_delay_days.' } };
+  const totals = { project_slip_working_days: slipDays, critical_drivers_delay_days: criticalSum, finished_drivers: { count: finished.length, delay_days: r2(finished.reduce((a, d) => a + d.delay_days, 0)), note: 'Finished work has no float in P6: whether these were critical cannot be told, so their days are not in critical_drivers_delay_days.' } };
 
   // ---- responsibility
   let responsibility: Responsibility;
   if (!party) responsibility = { result: 'not_assessed', note: `A P6 file has no field for who is responsible for a delay. Pass responsibility_code: the name of an activity code type whose value on each activity is its party (for example "Responsibility"). Activity code types in this file: ${[...new Set(rows(db, 'ACTVTYPE').map((t) => t.actv_code_type))].join(', ') || 'none (add one and assign it to the activities)'}.` };
   else {
-    // each party's driver days in full (the source's default, delayAnalysis.ts:203-214 with both options off), and beside them the concurrent days of its critical drivers
-    const sums = new Map<string, { drivers: number; days: number; concurrent: number }>();
+    // each party's driver days in full (the source's default, delayAnalysis.ts:203-214 with both options off)
+    const sums = new Map<string, { drivers: number; days: number }>();
     for (const d of drivers) {
-      const key = d.responsible ?? 'no value', e = sums.get(key) ?? sums.set(key, { drivers: 0, days: 0, concurrent: 0 }).get(key)!;
-      e.drivers++; e.days += d.delay_days; e.concurrent += d.concurrent_days ?? 0;
+      const key = d.responsible ?? 'no value', e = sums.get(key) ?? sums.set(key, { drivers: 0, days: 0 }).get(key)!;
+      e.drivers++; e.days += d.delay_days;
     }
-    responsibility = { result: 'assessed', code_type: codeTypeName, parties: [...sums].map(([k, e]) => ({ party: k, drivers: e.drivers, delay_days: r2(e.days), of_which_concurrent_days: r2(e.concurrent) })).sort((a, b) => b.delay_days - a.delay_days || a.party.localeCompare(b.party)), note: `Driver days per value of the activity code "${codeTypeName}", each driver's days in full; "no value" is a driver with no value of it. of_which_concurrent_days: the part of those days (its critical drivers' delay periods, working days of each driver's calendar) during which another critical driver's delay period also ran. Apportioning concurrent delay between parties is what windows_analysis does.` };
+    responsibility = { result: 'assessed', code_type: codeTypeName, parties: [...sums].map(([k, e]) => ({ party: k, drivers: e.drivers, delay_days: r2(e.days) })).sort((a, b) => b.delay_days - a.delay_days || a.party.localeCompare(b.party)), note: `Driver days per value of the activity code "${codeTypeName}", each driver's days in full; "no value" is a driver with no value of it. Concurrent delay is not assessed here: windows_analysis apportions delay between causes.` };
   }
 
   // ---- causal chains: critical drivers along their critical successors to the first milestone
@@ -259,7 +224,7 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
       if (isMile(next)) { mile = next; break; }
     }
     if (!mile && isMile(cur)) mile = cur;
-    return { root: d.id, impacted_milestone: mile?.task_code ?? null, ends_at: cur.task_code, path: path.map((t) => t.task_code), path_total: path.length, delay_days: d.delay_days, concurrent_with: d.concurrent_with ?? 0 };
+    return { root: d.id, impacted_milestone: mile?.task_code ?? null, ends_at: cur.task_code, path: path.map((t) => t.task_code), path_total: path.length, delay_days: d.delay_days };
   });
 
   // ---- BEI and the duration-weighted percent complete
@@ -302,9 +267,9 @@ export function shapeVariance(r: BaselineVarianceResult, first: <T>(l: T[]) => T
   const whole = { ...r, variances_total: r.variances.length, chains_total: r.chains.length, overlay_total: r.overlay.length };
   const tables = [
     { name: 'variances', columns: ['id', 'name', 'project', 'reference_start', 'reference_finish', 'current_start', 'current_finish', 'start_variance_days', 'finish_variance_days', 'duration_variance_days', 'slip_class'], rows: r.variances },
-    { name: 'drivers', columns: ['id', 'name', 'project', 'delay_days', 'variance_type', 'on_critical_path', 'successors_reached', 'causal_score', 'share_of_driver_days', 'start_variance_days', 'duration_variance_days', 'reference_start', 'reference_finish', 'current_start', 'current_finish', 'responsible', 'concurrent_days', 'concurrent_with'],
+    { name: 'drivers', columns: ['id', 'name', 'project', 'delay_days', 'variance_type', 'on_critical_path', 'successors_reached', 'causal_score', 'share_of_driver_days', 'start_variance_days', 'duration_variance_days', 'reference_start', 'reference_finish', 'current_start', 'current_finish', 'responsible'],
       rows: r.drivers },
-    { name: 'chains', columns: ['root', 'impacted_milestone', 'ends_at', 'delay_days', 'concurrent_with', 'path_total', 'path'], rows: r.chains.map((c) => ({ ...c, path: c.path.join(' > ') })) },
+    { name: 'chains', columns: ['root', 'impacted_milestone', 'ends_at', 'delay_days', 'path_total', 'path'], rows: r.chains.map((c) => ({ ...c, path: c.path.join(' > ') })) },
     { name: 'critical_overlay', columns: ['id', 'name', 'project', 'critical_in_reference', 'critical_now', 'newly_critical', 'added_and_critical', 'no_longer_critical'], rows: r.overlay },
   ];
   return { answer, whole, tables };
