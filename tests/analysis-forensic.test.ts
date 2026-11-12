@@ -448,3 +448,15 @@ test('registration, end to end through the server: listed read-only, run on a pr
   // an explicit export folder is held to the write root
   assert.equal((await call('forensic_probe', { handle: h.handle, export: '/etc/forensic' })).err, true);
 });
+
+test('the five benchmark tools have a measured memory entry (workset.ts WORK): each reserves per x the project\'s bytes before it runs', async () => {
+  const { workNeed, WORK } = await import('../mcp/workset.ts');
+  const s = { db: { tables: { TASK: { rows: [] }, PROJECT: { rows: [] } } }, bytes: 20 * 1048576 } as never;
+  const per: Record<string, number> = { schedule_index: 1.5, planning_horizon: 1.2, decm: 2.8, change_tracking: 2.3, baseline_variance: 2.0 };
+  for (const [tool, p] of Object.entries(per)) {
+    assert.equal(WORK[tool].per, p, tool);
+    const need = workNeed(tool, {}, s, () => Infinity)!;
+    assert.equal(need.bytes, Math.round(p * 20 * 1048576), tool);
+    assert.match(need.what, new RegExp(`^${tool} on this project`));
+  }
+});
