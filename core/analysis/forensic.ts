@@ -356,19 +356,14 @@ export const loopMessage = (loop: string[]): string => `Loop: ${loop.join(' → 
 export interface BeiFigures { value: number; /** value before rounding: what a threshold is judged on */ exact: number; completed: number; due: number; not_completed: Offender[] }
 export type BeiResult = ({ result: 'assessed' } & BeiFigures) | { result: 'not_assessed'; /** why: no baseline, no data date, or nothing baselined to finish by the date */ reason: 'no_baseline' | 'no_data_date' | 'none_due'; note: string; /** the tasks completed, counted all the same */ completed?: number };
 /** The Baseline Execution Index, the clone's ONE definition (dcma_14 check 14, check_schedule's bei, schedule_index, decm, baseline_variance): tasks (not WBS summary, level of effort or milestones) completed, early ones included,
- *  over the tasks baselined to finish by the data date; completed counts only the tasks that have a counterpart in the other side (the due ones can only be those), so both are over the same activities. Not assessed when no project has the baseline, or nothing was due (never 1). `value` is shown (three decimals), `exact` is what a threshold is judged on.
+ *  over the tasks baselined to finish by the data date; completed is every completed task, except with `matched` (the other side is another schedule, as_planned): then only the tasks that have a counterpart in it. Not assessed when no project has the baseline, or nothing was due (never 1). `value` is shown (three decimals), `exact` is what a threshold is judged on.
  *  `before`: a task baselined to finish ON the data date is not yet due (check_schedule's rule, "before the data date"); default: due on or before it (dcma_14's rule). */
-export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project', o: { before?: boolean } = {}): BeiResult {
+export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project', o: { before?: boolean; matched?: boolean } = {}): BeiResult {
   if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.` };
   const ok = (t: Row) => !isWbs(t) && !isLoe(t) && !isMilestone(t);
-  // completed and due are counted over the SAME activities: those of a project that has the other side and a date to judge by, and, for completed, those that have a counterpart there (an activity that is not in the other
-  // side was never due, so finishing it is not a due task done: an as-planned schedule that holds 18 of 453 activities counts 18, not every completed task of the open project)
-  let completed = 0;
-  for (const p of s.projs) {
-    const b = bls.get(p.proj_id);
-    if (!b || s.dataDate(p.proj_id) == null) continue;
-    completed += s.tasks.filter((t) => t.proj_id === p.proj_id && ok(t) && isDone(t) && b.tasks.has(t.task_code)).length;
-  }
+  // completed: every completed task of the population, as always (a baseline). With `matched` (the other side is another schedule, as_planned) only the tasks that have a counterpart there are counted, so completed and due are over the
+  // same activities: an as-planned schedule that holds 18 of 453 activities counts 18, not every completed task of the open project.
+  const completed = s.tasks.filter((t) => ok(t) && isDone(t) && (!o.matched || bls.get(t.proj_id)?.tasks.has(t.task_code))).length;
   const dueList: Offender[] = []; let due = 0;
   for (const p of s.projs) {
     const b = bls.get(p.proj_id), dd = s.dataDate(p.proj_id);

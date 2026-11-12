@@ -263,7 +263,7 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
   });
 
   // ---- BEI and the duration-weighted percent complete
-  const bei = beiFigures(s, bls, which);
+  const bei = beiFigures(s, bls, which, { matched: !!o.asPlanned });
   const asg = groupBy(rows(db, 'TASKRSRC'), 'task_id');
   let earned = 0, planned = 0;
   for (const [t, b] of ref.pairs) {

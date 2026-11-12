@@ -12,6 +12,7 @@ import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
 import { baselineVariance, DRIVER_MIN_DAYS, type BaselineVarianceResult } from '../core/analysis/baselineVariance.ts';
 import { dcma14 } from '../core/analysis/dcma.ts';
+import { checkSchedule } from '../core/analysis/checkSchedule.ts';
 import { makeScope } from '../core/analysis/common.ts';
 import * as F from '../core/analysis/forensic.ts';
 import * as B from './benchmark-fixtures.ts';
@@ -229,6 +230,20 @@ test('dcma_14\'s BEI does not change: with a baseline saved from the same projec
   assert.deepEqual(run(b.db).bei, { result: 'assessed', value: 0.6, completed: 3, due: 5 }, 'baseline_variance says the same');
   const tw = dcma14(sample('Tower-A.xer').db, {}).checks.find((c) => c.id === 'bei')!;
   assert.deepEqual([tw.numerator, tw.denominator, tw.metric], [1, 2, 0.5]);
+});
+
+test('a baseline, one activity added after it and completed: dcma_14 and check_schedule keep their BEI (every completed task counts); only as_planned counts completed among matched activities', () => {
+  // T1 - T4 are in the baseline (finish 7 Jan, due by 20 Jan); T1 and T2 are completed, and N is ADDED after the baseline and completed too.
+  // By hand, as at dd15694: completed = every completed task = T1, T2, N = 3; due = the 4 baselined tasks; BEI = 3 / 4 = 0.75 (check_schedule, which counts a task finishing ON the date as not due, has the same 4 due: 0.75).
+  const b = B.project('BA', ['T1', 'T2', 'T3', 'T4'].map((id) => ({ id, duration_days: 2 })), { start: '2026-01-05', dataDate: '2026-01-20', schedule: false });
+  assert.ok(applyOps(b.db, [{ op: 'save_baseline', name: 'BL', assign_as: 'project' }, { op: 'add_activity', id: 'N', name: 'N', duration_days: 2, calendar: 'D7' },
+    ...['T1', 'T2', 'N'].map((id) => ({ op: 'update_activity', id, actual_start: '2026-01-05 00:00', actual_finish: '2026-01-07 00:00' }))], { calendarDays: true }).ok);
+  assert.ok(scheduleProjects(b.db, [b.projId], { dataDate: parseP6Date('2026-01-20 00:00')! }).ok);
+  const d = dcma14(b.db, {}).checks.find((c) => c.id === 'bei')!;
+  assert.deepEqual([d.numerator, d.denominator, d.metric], [3, 4, 0.75]);
+  const cs = checkSchedule(b.db, {}).checks.find((c) => c.id === 'bei')!;
+  assert.deepEqual([cs.numerator, cs.denominator, cs.metric], [3, 4, 0.75]);
+  assert.deepEqual(run(b.db).bei, { result: 'assessed', value: 0.75, completed: 3, due: 4 });
 });
 
 test('the slip class is judged on the exact variance: an activity one minute behind its baseline shows 0 days and is a minor slip, not on time (one variance function, exact)', () => {
