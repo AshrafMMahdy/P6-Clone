@@ -54,11 +54,12 @@ export const rowKey = (x: { code: string; project?: string }): string => `${x.pr
 
 // ---------------------------------------------------------------- Monte Carlo (monte_carlo)
 /** monte_carlo's arguments from the settings. The iterations go to the tool as typed: it takes any whole number of 10 or more and refuses
- *  the rest, and a run that does not fit in memory, in words before it starts. top 0 lists every activity as the screen always did; histogram
- *  "days" is the engine's whole-day bins (the screen's bars have always been these, at most 40), and exact: true gives the engine's own
- *  figures, which the page shows as it always did. No `project`: the run covers the open projects (runScope). */
+ *  the rest, and a run that does not fit in memory, in words before it starts. The screen needs every activity listed and the engine's whole-day
+ *  bars: the Export's child process (main/analysis-export.ts) sets config.screens, which gives the tool's answer exactly that (the tool itself has
+ *  no list-size or bars argument: an agent always gets 25 per list and 20 bars). exact: true gives the engine's own figures, which the page shows as
+ *  it always did. No `project`: the run covers the open projects (runScope). */
 export function monteCarloArgs(s: { iterations: number; seed?: number; riskEvents: string }): Record<string, unknown> {
-  return { iterations: s.iterations, ...(s.seed != null ? { seed: s.seed } : {}), risk_events: s.riskEvents, top: 0, histogram: 'days', exact: true };
+  return { iterations: s.iterations, ...(s.seed != null ? { seed: s.seed } : {}), risk_events: s.riskEvents, exact: true };
 }
 
 /** The line a stopped monte_carlo run shows (the tool's partial answer: the statistics are of the iterations that finished); null when the run was complete. */

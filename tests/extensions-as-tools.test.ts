@@ -64,7 +64,7 @@ test('Crashing: the panel locks the LOB plan’s activities as crash_schedule do
   // (field_changes is the engine's input to the fields an apply writes beside each activity, a8b25c5: the tool does not answer it, and the screen does not show it)
   const { field_changes: forFields, ...shown } = screen;
   assert.ok(Array.isArray(forFields) && tool.d.field_changes === undefined);
-  sameAs(tool.d, shown, 'crash_schedule', ['unsaved_changes']);
+  sameAs(tool.d, shown, 'crash_schedule', ['exported', 'unsaved_changes']);
   // (why it matters here: without the lock the engine crashes the LOB plan's activities, which the tool never does)
   const unlocked = await crashSchedule(db, all, { targetDays: 5, defaultMaxPct: 30, hoursPerDay: HPD });
   assert.ok(unlocked.ok && unlocked.ops.some((o) => /^(CS|DW)-/.test(String(o.id))), JSON.stringify(unlocked.ok && unlocked.ops).slice(0, 300));
@@ -78,7 +78,7 @@ test('What-ifs: the panel counts days on each activity’s calendar as evaluate_
   const tool = await call('evaluate_batch', { handle: h, project: 'P', scenarios });
   assert.equal(tool.err, false, JSON.stringify(tool.d).slice(0, 300));
   assert.ok(screen.ok);
-  sameAs(tool.d, screen, 'evaluate_batch', ['parts_removed']); // (a finished batch names the kept file it removed)
+  sameAs(tool.d, screen, 'evaluate_batch', ['exported', 'parts_removed']); // (a finished batch names the kept file it removed)
   // (why it matters here: days at the preference's 8 hours on a 10-hour calendar are other durations)
   const atPreference = await evaluateBatch(db, [cpm.proj_id], scenarios, { hoursPerDay: HPD, calendarDays: false });
   assert.ok(atPreference.ok);
@@ -94,7 +94,7 @@ test('Time impact analysis: the panel counts the fragnet’s days on the activit
   const tool = await call('tia', { handle: h, ...a });
   assert.equal(tool.err, false, JSON.stringify(tool.d).slice(0, 300));
   assert.ok(screen.ok);
-  sameAs(tool.d, screen, 'tia', ['unsaved_changes']);
+  sameAs(tool.d, screen, 'tia', ['exported', 'unsaved_changes']);
   // (why it matters here: the fragnet's 10 days at the preference's 8 hours are 8 days of the 10-hour calendar)
   const atPreference = timeImpact(db, [cpm.proj_id], a.fragnet, { dataDate: parseP6Date(a.data_date) ?? undefined, milestone: a.milestone, hoursPerDay: HPD, calendarDays: false, baseline: tiaBaseline(b, a.milestone, parseP6Date) });
   assert.ok(atPreference.ok);
@@ -119,7 +119,7 @@ test('Time impact analysis: with two projects open the screen’s fragnet names 
   // the tool, given the same arguments (what Export writes), answers the same
   const tool = await call('tia', { handle: h, project: 'P', fragnet: ops });
   assert.equal(tool.err, false, JSON.stringify(tool.d).slice(0, 300));
-  sameAs(tool.d, screen, 'tia', ['unsaved_changes']);
+  sameAs(tool.d, screen, 'tia', ['exported', 'unsaved_changes']);
   // what the screen sent before: no project on the operations
   const before = timeImpact(db, [cpm.proj_id], ops.map(({ project: _p, ...o }) => o), { hoursPerDay: HPD });
   assert.equal(before.ok, false);

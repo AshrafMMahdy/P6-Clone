@@ -28,7 +28,7 @@ const env = (vars: Record<string, string | undefined>) => {
 };
 const open = async (name = 'cairo alex-road.xer') => { const o = await call('open_file', { path: sampleCopy(name) }); assert.equal(o.err, false, JSON.stringify(o.d).slice(0, 200)); return { handle: o.d.handle as string, owner_key: o.d.owner_key as string }; };
 const dates = async (h: { handle: string; owner_key: string }) => JSON.stringify((await call('activity_table', { ...h, limit: 5000 })).d);
-const strip = (v: unknown) => JSON.parse(JSON.stringify(v, (k, x) => (/elapsed|seconds|ms$/i.test(k) ? undefined : x)));
+const strip = (v: unknown) => JSON.parse(JSON.stringify(v, (k, x) => (/elapsed|seconds|ms$|^exported$/i.test(k) ? undefined : x)));
 
 // ---- the patch -------------------------------------------------------------------------------------------------------------------
 const mk = (): Db => ({ header: { version: '19.12', exportDate: 'x', raw: ['a'] }, tables: { TASK: { name: 'TASK', fields: ['task_id', 'name'], rows: [{ task_id: '1', name: 'a' }, { task_id: '2', name: 'b' }, { task_id: '3', name: 'c' }] }, PROJECT: { name: 'PROJECT', fields: ['proj_id'], rows: [{ proj_id: 'P' }] } } });

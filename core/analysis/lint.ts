@@ -16,18 +16,24 @@ export type Band = 'pass' | 'warn' | 'fail';
 export interface Fix { activities: string[]; fix: string; ops: Record<string, unknown>[]; saves_days?: number }
 export interface LintCheck extends CheckResult {
   severity: 'error' | 'warning' | 'info'; band: Band; fixes?: Fix[]; weight?: number; /** the thresholds this check was judged by */ applied?: object;
-  /** a check whose fixes are cut to max_ids: how many there are */ fixes_total?: number;
-  /** connectivity: how many open starts and open ends there are (each kind is listed up to max_ids) */ no_predecessor_total?: number; no_successor_total?: number;
+  /** a check whose fixes are cut to the 25 an answer lists: how many there are */ fixes_total?: number;
+  /** connectivity: how many open starts and open ends there are (the activities listed are shared between the two kinds) */ no_predecessor_total?: number; no_successor_total?: number;
   /** fs_overlap: how many ladders were found (every ladder is simulated, or with ladder.max_targets N above 0 the first N critical ladders by size, the most activities first) */ ladders_total?: number;
   /** fs_overlap, a simulation that was cancelled: the ladders simulated so far keep their saves_days, the rest have none (the rest of the lint was done as usual) */ partial?: true; ladders_simulated?: number; ladders_to_simulate?: number;
 }
 
 /** A check's lists as an answer shows them (max 0 = all): its first `max` activities (connectivity: the first `max` of each kind, open
- *  starts and open ends), and its first `max` fixes when it says fixes_total (fs_overlap's fixes are never cut). */
+ *  starts and open ends), and its first `max` fixes, with fixes_total beside them when there are more. */
 export function cutLintCheck(c: LintCheck, max: number): LintCheck {
   if (!(max > 0)) return c;
-  const kind = (v: string) => c.activities.filter((x) => x.value === v).slice(0, max);
-  return { ...c, activities: c.id === 'connectivity' ? [...kind('no predecessor'), ...kind('no successor')] : c.activities.slice(0, max), ...(c.fixes_total != null && c.fixes ? { fixes: c.fixes.slice(0, max) } : {}) };
+  // connectivity: the `max` are shared between the two kinds, one of each in turn, so the check never lists more than `max` and shows both kinds
+  let activities = c.activities.slice(0, max);
+  if (c.id === 'connectivity') {
+    const a = c.activities.filter((x) => x.value === 'no predecessor'), b = c.activities.filter((x) => x.value === 'no successor');
+    activities = [];
+    for (let i = 0; activities.length < max && (i < a.length || i < b.length); i++) { if (i < a.length && activities.length < max) activities.push(a[i]); if (i < b.length && activities.length < max) activities.push(b[i]); }
+  }
+  return { ...c, activities, ...(c.fixes && c.fixes.length > max ? { fixes: c.fixes.slice(0, max), fixes_total: c.fixes.length } : {}) };
 }
 export interface LintReport { report: 'Schedule Lint'; profile: 'p6' | 'platform'; /** a simulation was cancelled: the check that says so (fs_overlap) holds the part that was done */ partial?: true; stopped?: 'cancelled'; score?: number; grade?: string; /** said when a cancel did not stop the lint short: it arrived when the lint had no further step to stop at, and the result is complete */ note?: string; work_activities: number; relationships: number; checks: LintCheck[]; thresholds: LintThresholds; overridden: string[]; not_used?: string[] }
 /** What a lint reports to the tick of lintScheduleTicked between units of long work (the days-saved simulations) */

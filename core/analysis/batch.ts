@@ -7,7 +7,7 @@ import { applyOps } from '../project/ops.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
 import { activityCosts, sumLines } from '../cost/rollup.ts';
 import { calendarResolver, optionsFor, scheduleProjects, type SchedOptions } from '../schedule/cpm.ts';
-import type { Tick } from './common.ts';
+import { LISTED, type Tick } from './common.ts';
 
 /** Test-only: make the scenario at this index throw. */
 export const testHooks: { failScenario: number | null } = { failScenario: null };
@@ -82,9 +82,9 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   const days = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round((cal.workBetween(a, b) / 60 / (cal.hoursPerDay() || hpd)) * 100) / 100);
   const results: ScenarioResult[] = [];
   // the activities whose dates each scenario moved (worked out as it finishes, so a kept scenario carries them all): the best few show
-  // the first 200 of them, so only those are held here, with how many there are (an export reads them all from the kept file)
+  // the first LISTED (25) of them, so only those are held here, with how many there are (an export reads them all from the kept file)
   const moved: (KeptScenario['changed'])[] = [], movedTotal: number[] = [];
-  const hold = (changed: KeptScenario['changed']) => { moved.push(changed ? changed.slice(0, 200) : null); movedTotal.push(changed?.length ?? 0); };
+  const hold = (changed: KeptScenario['changed']) => { moved.push(changed ? changed.slice(0, LISTED) : null); movedTotal.push(changed?.length ?? 0); };
   // a batch continued from a store: its kept scenarios are taken in as they were, and only the rest are scheduled
   const store = o.store;
   let redone = 0;

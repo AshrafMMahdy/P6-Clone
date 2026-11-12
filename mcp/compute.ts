@@ -22,13 +22,14 @@ import { cwdLost, ensureCwd, markCwdLost, safeCwd } from '../core/cwd.ts';
 import { lobSidecars } from './lob.ts';
 import { unitWatch } from '../core/bim/liveness.ts';
 import { formatP6Date } from '../core/dates.ts';
+import { monteCarloCounts } from './workset.ts';
 import { claimNow, keepWords, type Claim } from './keptRuns.ts';
 
 type Ctx = { caller: string; job?: any; signal: AbortSignal; progress?: (done: number, total: number, message: string) => void; /** a finished row of the answer, sent out as it is done (kept if the worker is ended) */ keep?: (row: unknown) => void; /** in the worker: how a run claims its kept file here, on the main thread (keptRuns.ts) */ claim?: Claim };
 /** The main thread's answer to a worker's claim of a kept file: given, or refused (run_busy, as a ToolError's parts). */
 type Claimed = { claimed: number; refused?: { code: string; message: string; hint?: string; data?: Record<string, unknown> } };
 interface Snapshot { handle: string; ownerKey: string; db: Session['db']; path: string | null; format: Session['format']; hpd: number; encoding?: Session['encoding']; savedTo?: string; dirty: boolean; bytes: number }
-interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { cwdLost: string | null; root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean } }
+interface Job { id: number; /** this job's tag in its temporary files' names, and where the worker logs them (readable even after the worker is ended) */ token: string; tmpLog: SharedArrayBuffer; name: string; a: Record<string, any>; caller: string; snap: Snapshot; /** other open projects the call reads (windows_analysis updates by handle): their data goes with the job, read only */ others: Snapshot[]; /** the memory budget in use on the main thread besides this call's own copy */ externalUsed: number; lobSide: unknown; cfg: { cwdLost: string | null; root: string | null; readRoot: string | null; writeRoot: string | null; requireOwnerKey: boolean; screens: boolean } }
 type Answer =
   | { id: number; type: 'progress'; done: number; total: number; message: string }
   | { id: number; type: 'note'; text: string }
@@ -81,7 +82,7 @@ export const FROM_KEPT: Record<string, (rows: unknown[], a: Record<string, any>)
     const f = done.map(Number).filter(Number.isFinite).sort((x, y) => x - y), n = f.length;
     const at = (p: number) => formatP6Date(f[Math.min(n - 1, Math.max(0, Math.ceil(p * n) - 1))]);
     const mean = f.reduce((x, y) => x + y, 0) / n;
-    return { partial: true, stopped: 'cancelled', iterations_done: done.length, iterations_requested: Math.max(10, Math.floor(Number(a.iterations) || 1000)),
+    return { partial: true, stopped: 'cancelled', iterations_done: done.length, iterations_requested: monteCarloCounts(a).iterations,
       finish: { P10: at(0.1), P50: at(0.5), P80: at(0.8), P90: at(0.9), mean: formatP6Date(mean), min: formatP6Date(f[0]), max: formatP6Date(f[n - 1]) }, ...(resume ? { resume } : {}),
       note: `The worker stopped responding after the cancel and was ended; these finish dates are of the ${done.length} iterations it had finished (criticality, sensitivity, milestones and the histogram need every activity's samples and are not worked out here).${resume ? ` The iterations are kept in ${resume}: ${keepWords('monte_carlo', resume, 'iterations')}` : ''}` };
   },
@@ -201,7 +202,7 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
     const job: Job = {
       id, token, tmpLog, name, a, caller: ctx.caller, lobSide: lobSidecars.get(s.handle) ?? null,
       snap: snapshotOf(s), others: others.map(snapshotOf), externalUsed: Math.max(0, usedMemory() - 2 * s.bytes),
-      cfg: { cwdLost: cwdLost(), root: config.root, readRoot: config.readRoot, writeRoot: config.writeRoot, requireOwnerKey: config.requireOwnerKey },
+      cfg: { cwdLost: cwdLost(), root: config.root, readRoot: config.readRoot, writeRoot: config.writeRoot, requireOwnerKey: config.requireOwnerKey, screens: config.screens },
     };
     const done = await new Promise<Extract<Answer, { type: 'done' }>>((resolve, reject) => {
       // watched from the start (its line says when it works without progress); ended only once a stop was asked AND it is frozen
@@ -318,7 +319,7 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
     workerBudget({ externalUsed: job.externalUsed, notice: (delta) => post({ id: job.id, type: 'reserved', delta }) });
     markCwdLost(job.cfg.cwdLost); // (the worker cannot move the process; the main thread says that the folder it started in is gone)
     const key = JSON.stringify(job.cfg);
-    if (key !== rooted) { rooted = key; setRoot(job.cfg.root); setRoots(job.cfg.readRoot, job.cfg.writeRoot); config.requireOwnerKey = job.cfg.requireOwnerKey; }
+    if (key !== rooted) { rooted = key; setRoot(job.cfg.root); setRoots(job.cfg.readRoot, job.cfg.writeRoot); config.requireOwnerKey = job.cfg.requireOwnerKey; config.screens = !!job.cfg.screens; }
     const t = job.snap;
     const s: Session = { handle: t.handle, ownerKey: t.ownerKey, db: t.db, path: t.path, format: t.format, hpd: t.hpd, ...(t.encoding ? { encoding: t.encoding } : {}), ...(t.savedTo ? { savedTo: t.savedTo } : {}), history: [], redo: new Map(), dirty: t.dirty, lastUsed: Date.now(), bytes: t.bytes };
     sessions.set(s.handle, s);

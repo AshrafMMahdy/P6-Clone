@@ -49,6 +49,9 @@ export interface Config {
   /** Write each changed project to the recovery folder this long after its last change (0: never; the server sets it),
    *  so a crash loses at most that much and a restart brings every handle back. */
   checkpointMs: number;
+  /** This process runs the desktop app's own screens (the Export's child process, main/analysis-export.ts), not an agent: the Monte Carlo answer
+   *  lists every activity and gives the engine's own whole-day histogram, which the Risks window reads whole. Never set for an MCP server. */
+  screens: boolean;
 }
 const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
 export const config: Config = {
@@ -61,6 +64,7 @@ export const config: Config = {
   softTimeoutMs: num(process.env.P6CLONE_SOFT_TIMEOUT_MS, 25000),
   maxResponseChars: num(process.env.P6CLONE_MAX_RESPONSE_CHARS, 400000),
   checkpointMs: 0,
+  screens: false,
 };
 /** What the process can really hold: the budget, but never more than V8's heap limit allows. */
 export const effectiveBudget = () => Math.min(config.budgetBytes, getHeapStatistics().heap_size_limit - 512 * 1048576);

@@ -47,6 +47,7 @@ async function main(): Promise<{ out: unknown; isError: boolean }> {
   if (!db?.tables) throw new Error(`${req.file} holds no database.`);
   // a call that outlasts the soft time becomes a job there; here the answer is what is waited for
   config.softTimeoutMs = 2 ** 31 - 1;
+  config.screens = true; // this child answers the app's own screens (the Monte Carlo grid and chart read whole lists)
   // each session is charged for what it holds (as runtime.ts regrow estimates a grown project: from its row count), and the handle
   // limit is what this call needs: the base and the others
   const held = (d: typeof db) => estimateBytes(Object.values(d.tables).reduce((n, t) => n + t.rows.length, 0) * 250);

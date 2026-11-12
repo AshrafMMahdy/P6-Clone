@@ -79,7 +79,7 @@ const predCodes = (u: Update, t: Row) => { const byId = new Map(tasksOf(u).map((
 
 const PROGRESS = ['act_start_date', 'act_end_date', 'remain_drtn_hr_cnt', 'phys_complete_pct', 'status_code', 'restart_date', 'reend_date', 'suspend_date', 'resume_date', 'expect_end_date', 'act_work_qty', 'remain_work_qty'];
 
-/** A window's lists as an answer shows them: the first `max` activities of each (0 = all); the _total beside each list says how many
+/** A window's lists as an answer shows them: the first `max` activities of each (the tool passes LISTED, 25); the _total beside each list says how many
  *  there are (and driving_path_more how many the path has beyond those shown). */
 export function cutWindow(w: Record<string, unknown>, max: number): Record<string, unknown> {
   if (!(max > 0)) return w;

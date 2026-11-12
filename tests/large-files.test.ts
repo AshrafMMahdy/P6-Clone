@@ -112,7 +112,7 @@ test('a call whose working set does not fit is refused up front, in words, with 
     const r = await call('monte_carlo', { handle, iterations: 20000, default_estimates: { min_pct: 90, max_pct: 125 } });
     assert.equal(r.err, true);
     assert.equal(r.d.error.code, 'memory_budget');
-    assert.match(r.d.error.reason, /Monte Carlo of [\d,]+ activities × 20,000 iterations needs about \d+ MB of memory/);
+    assert.match(r.d.error.reason, /Monte Carlo of [\d,]+ activities × 20,000 iterations with its result files needs about \d+ MB of memory/);
     assert.match(r.d.error.reason, /budget \(P6CLONE_MEM_BUDGET_MB\) is free/);
     assert.match(r.d.error.next_step, /at most [\d,]+ iterations/);
     assert.equal(r.d.error.retry_after_ms, undefined, 'nothing else is running: retrying would not help');

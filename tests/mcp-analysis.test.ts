@@ -13,9 +13,12 @@ test('MCP: check_schedule and dcma_14 on a real XER, with a report file and clea
   for (const n of ['check_schedule', 'dcma_14']) assert.ok(names.includes(n), n);
   const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'cairo festival city.xer') })).d.handle;
   const cs = await call('check_schedule', { handle: h, max_ids: 3 });
+  // max_ids is gone (a fixed 25 per list): the call ran without it and the answer says so, in words (R6)
+  assert.equal(cs.d.arguments_not_used.length, 1);
+  assert.match(cs.d.arguments_not_used[0], /^check_schedule has no argument "max_ids": it was not used and the call ran without it\. Its arguments are: handle, export, export_name, project, checks, targets, threshold_days, path, caller, async\.$/);
   assert.equal(cs.err, false, JSON.stringify(cs.d));
   assert.equal(cs.d.checks.length, 14);
-  assert.ok(cs.d.checks.every((c: { activities: unknown[] }) => c.activities.length <= 3));
+  assert.ok(cs.d.checks.every((c: { activities: unknown[] }) => c.activities.length <= 25));
   const dc = await call('dcma_14', { handle: h, profile: 'gao' });
   assert.equal(dc.d.checks.length, 14);
   assert.equal(dc.d.profile, 'gao');
@@ -79,22 +82,17 @@ test('MCP: count arguments are whole numbers: a value that is not one is refused
     assert.match(r.d.error.message, new RegExp(`^${arg} must be a whole number of 0 or more`), r.d.error.message);
   };
   for (const v of bads) {
-    await refused('check_schedule', 'max_ids', v);
-    await refused('dcma_14', 'max_ids', v);
-    await refused('lint', 'max_ids', v);
     await refused('float_paths', 'count', v);
     await refused('optimize_schedule', 'max_changes', v);
     await refused('optimize_schedule', 'samples', v);
     await refused('transfer_progress', 'max_changes', v, { path: 'none.xer' });
     await refused('transfer_progress', 'offset', v, { path: 'none.xer' });
   }
-  // 0 = all, absent = the default
+  // every check lists at most 25 activities, whatever max_ids says, and total_activities says how many there are
   const dflt = await call('check_schedule', { handle: h });
-  const all = await call('check_schedule', { handle: h, max_ids: 0 });
-  assert.equal(dflt.err, false); assert.equal(all.err, false);
-  const widest = (r: any) => Math.max(...r.d.checks.map((c: any) => c.activities.length));
-  assert.ok(widest(dflt) <= 100 && widest(all) >= widest(dflt) && widest(all) > 2, `default ${widest(dflt)}, all ${widest(all)}`);
-  assert.equal((await call('check_schedule', { handle: h, max_ids: 2 })).d.checks.every((c: any) => c.activities.length <= 2), true);  // samples is parsed only where it is used: min_crash_cost does not sample, so a bad samples does not refuse a crash run
+  assert.equal(dflt.err, false);
+  assert.ok(dflt.d.checks.every((c: any) => c.activities.length <= 25 && c.activities.length === Math.min(25, c.total_activities)));
+  // samples is parsed only where it is used: min_crash_cost does not sample, so a bad samples does not refuse a crash run
   for (const v of [-1, 2.5, '5']) {
     const crash = await call('optimize_schedule', { handle: h, objective: 'min_crash_cost', target_days: 5, samples: v });
     assert.equal(crash.err, false, `samples ${String(v)}: ${JSON.stringify(crash.d).slice(0, 200)}`);

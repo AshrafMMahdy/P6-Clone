@@ -83,7 +83,8 @@ test('paths between two activities: one function (core/schedule/floatPaths.ts) f
     const tool = await call('float_paths', { handle: h, between });
     assert.equal(tool.err, false, JSON.stringify(tool.d).slice(0, 300));
     // the panel: the open projects (here all of them), the preference's hours per day (the tool's session has the same)
-    assert.deepEqual(JSON.parse(JSON.stringify(pathsBetween(db, ids, between, 8))), tool.d.between, JSON.stringify(between));
+    const { paths_note: _n, ...shown } = tool.d.between; // (the note that says where all the paths are: the result file, written without being asked)
+    assert.deepEqual(JSON.parse(JSON.stringify(pathsBetween(db, ids, between, 8))), shown, JSON.stringify(between));
   }
   assert.ok((await call('float_paths', { handle: h, between: { from: 'A1000', to: 'A1010' } })).d.between.paths.length >= 1);
   assert.equal(pathsBetween(db, ids, { from: 'A1000', to: 'NOPE' }, 8), null, 'not an activity of these projects');

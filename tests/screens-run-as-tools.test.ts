@@ -18,7 +18,7 @@ import { writeWhiqFields } from '../core/analysis/whiq-fields.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { runMonteCarlo } from '../core/risk/montecarlo.ts';
-import { sessions, setRoots } from '../mcp/runtime.ts';
+import { config, sessions, setRoots } from '../mcp/runtime.ts';
 import { reasonerModelPath } from '../core/analysis/hrmRuntime.ts';
 import { replaceDb, setUi, mutate, getDb, getDbVersion, getUi } from '../renderer/store.ts';
 import { startToolRun, stampNow, taskIdLookup } from '../renderer/views/toolRun.ts';
@@ -29,6 +29,7 @@ import { fmtDate } from '../renderer/model.ts';
 import { criticalityCell, impactText, priorityShown, probabilityText, riskRowText, sensitivityText, stdDevText, staleReason, changedSince, wasCancelled, betweenCount, crashArgs, crashStopped, errorText, floatPathsArgs, lintArgs, lintStopped, monteCarloArgs, monteCarloResult, monteCarloStopped, optimizeArgs, levelInProposedOrder, optimizeNotes, OPTIMIZE_ADVICE, refusal, type ToolAnswer } from '../renderer/views/toolAnswers.ts';
 
 setRoots(null, tmpdir());
+config.screens = true; // (this file plays the app's screens: the Export's child process sets it, main/analysis-export.ts)
 const { callTool } = await import('../mcp/server.ts');
 /** the tool's answer as the child gives it to the screen */
 const run = async (tool: string, args: Record<string, unknown>, signal?: AbortSignal, progress?: (done: number, total: number, message: string) => void): Promise<ToolAnswer> => callTool(tool, args, undefined, signal, progress) as Promise<ToolAnswer>;
@@ -262,22 +263,19 @@ test('Monte Carlo: the Risks grid and the S-curve read from the tool’s answer 
   }
   assert.ok(screen.activities.some((a) => a.milestone && a.criticality === 0), 'a milestone with no criticality is flagged, so the grid leaves it out as before');
   assert.ok(screen.activities.some((a) => a.maxDur > 0) && screen.activities.some((a) => a.p50Finish != null));
-  // the bars: the engine's whole-day histogram, bin for bin (histogram: "days"), and the same call with no option keeps `buckets`
+  // the bars: the engine's whole-day histogram, bin for bin (the screens' process, config.screens); an agent's call has 20 equal bars
   assert.deepEqual(screen.histogram, engine.histogram.map((b) => ({ start: b.start, end: b.end, count: b.count, cumPct: b.cumPct })));
-  const equal = ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11, buckets: 7 }));
-  assert.equal(equal.histogram.length, 7);
-  const { monteCarloCounts } = await import('../mcp/workset.ts');
-  assert.equal(monteCarloCounts({ histogram: 'days' }).buckets, 40, 'the reservation counts the day bins like buckets');
-  assert.equal((await run('monte_carlo', { handle: np.handle, iterations: 700, histogram: 'weeks' })).out.error.code, 'bad_input');
+  config.screens = false;
+  try { assert.equal(ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11 })).histogram.length, 20); } finally { config.screens = true; }
   // the tornado: the engine's list, in its order
   assert.deepEqual(screen.sensitivity.map((x) => [x.code, x.rho]), engine.sensitivity.map((x) => [x.code, x.rho]));
   // the S-curve: the engine's own points (a point for each finish, thinned), not one made from the bars
   assert.equal(screen.cumulative.length, engine.cumulative.length);
   assert.deepEqual(screen.cumulative.map((p) => [p.t, p.pct]), engine.cumulative.map((p) => [Math.round(p.t), p.pct]));
   assert.ok(screen.cumulative.length > screen.histogram.length, 'smoother than the bars');
-  // the answer's rows are the export's table's columns, and `top` still decides how many are listed
-  const few = ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11, top: 2 }));
-  assert.equal(few.criticality.length, 2); assert.equal(few.criticality_total, engine.activities.length);
+  // the answer's rows are the export's table's columns; the screens' process lists every activity, an agent's call 25 (here 4 activities: all)
+  const few = ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11 }));
+  assert.equal(few.criticality.length, engine.activities.length);
   assert.equal(few.criticality[0].critical_pct, Math.round(few.criticality[0].critical_pct * 100) / 100, 'the answer’s percent is to 2 decimals');
   const dir = mkdtempSync(join(tmpdir(), 'p6-crit-'));
   const ex = ok(await run('monte_carlo', { handle: np.handle, iterations: 700, seed: 11, export: dir }));
@@ -619,19 +617,18 @@ test('B-L5: main/preload.ts keeps its original line endings (CRLF throughout, as
   assert.ok(lf > 100 && lf === crlf, `${crlf} of ${lf} line ends are CRLF`);
 });
 
-test('A-L1 and A-L5: histogram "days" with buckets is refused naming both, and its memory words are of day bins; the listed criticality rows are in the reservation (1,000 bytes a row)', async () => {
+test('A-L1 and A-L5: the memory words of a Monte Carlo are of its 20 bars and its listed rows (1,000 bytes a row: 25 for an agent, every activity for the screens)', async () => {
   const { h } = await mcProject();
-  const both = await run('monte_carlo', { handle: h, iterations: 100, histogram: 'days', buckets: 10 });
-  assert.equal(both.isError, true); assert.equal(both.out.error.code, 'bad_input');
-  assert.match(both.out.error.message, /histogram "days" and buckets cannot be given together/);
-  assert.equal(ok(await run('monte_carlo', { handle: h, iterations: 100, histogram: 'days' })).histogram.length > 0, true, 'each alone is fine');
   const { workNeed, MC_BYTES_PER_LISTED_ROW } = await import('../mcp/workset.ts');
   const s = sessions.get(h)!;
-  const days = workNeed('monte_carlo', { iterations: 20, histogram: 'days' }, s, () => 1e12)!;
-  assert.match(days.what, /whole-day histogram/); assert.doesNotMatch(days.what, /histogram buckets/);
-  assert.doesNotMatch(workNeed('monte_carlo', { iterations: 1e9, histogram: 'days' }, s, () => 5e8)!.hint, /histogram buckets/, 'no advice to change the number of buckets that day bins do not have');
   const n = rows(s.db, 'TASK').length;
-  const some = workNeed('monte_carlo', { iterations: 20, top: 1 }, s, () => 1e12)!.bytes, all = workNeed('monte_carlo', { iterations: 20, top: 0 }, s, () => 1e12)!.bytes;
-  assert.equal(all - some, (n - 1) * MC_BYTES_PER_LISTED_ROW, 'top 0 reserves a row for every activity');
+  config.screens = false;
+  try {
+    const agent = workNeed('monte_carlo', { iterations: 20 }, s, () => 1e12)!;
+    assert.match(agent.what, /with its result files/); assert.doesNotMatch(agent.what, /histogram/);
+    config.screens = true;
+    const screens = workNeed('monte_carlo', { iterations: 20 }, s, () => 1e12)!;
+    assert.equal(screens.bytes - agent.bytes, (n - Math.min(25, n)) * MC_BYTES_PER_LISTED_ROW, 'the screens reserve a row for every activity, an agent for 25');
+  } finally { config.screens = true; }
   assert.equal(MC_BYTES_PER_LISTED_ROW, 1000);
 });

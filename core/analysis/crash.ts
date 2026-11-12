@@ -12,7 +12,7 @@ import { dayHours } from '../project/units.ts';
 import { calendarResolver, scheduleProjects } from '../schedule/cpm.ts';
 import { fitAssignmentsToDuration } from '../resource/assign.ts';
 import { drivingFloat } from './delay.ts';
-import { isLoe, isMilestone, isWbs, type Tick } from './common.ts';
+import { isLoe, isMilestone, isWbs, LISTED, type Tick } from './common.ts';
 import { lobActivityCodes } from '../lob/view.ts';
 import { fieldChange } from './whiq-fields.ts';
 
@@ -180,10 +180,10 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
       });
       const cut = minCut(N, edges, S, T);
       if (!crit.length || cut.flow >= INF) {
-        if (ineffective.size) { stop = 'PLATEAU'; note = `Crashing the remaining cut sets did not move the finish (tried ${[...ineffective].slice(0, 5).map((id) => crit.find((t) => t.task_id === id)?.task_code ?? id).join(', ')}).`; break; }
+        if (ineffective.size) { stop = 'PLATEAU'; note = `Crashing the remaining cut sets did not move the finish (tried ${[...ineffective].slice(0, LISTED).map((id) => crit.find((t) => t.task_id === id)?.task_code ?? id).join(', ')}${ineffective.size > LISTED ? ` and ${ineffective.size - LISTED} more` : ''}).`; break; }
         stop = 'EXHAUSTED';
-        const stuck = crit.filter((t) => !(limit.has(t.task_id) && capDays(t) > EPS)).sort((a, b) => (b.early_end_date ?? '').localeCompare(a.early_end_date ?? '')).slice(0, 5).map((t) => t.task_code);
-        note = `${note ? note + ' ' : ''}No path to the finish can be shortened further: it runs through ${stuck.join(', ')}${crit.length > 5 ? ' and others' : ''} (milestones, locked, without crash data or at their limit).`;
+        const stuck = crit.filter((t) => !(limit.has(t.task_id) && capDays(t) > EPS)).sort((a, b) => (b.early_end_date ?? '').localeCompare(a.early_end_date ?? '')).map((t) => t.task_code);
+        note = `${note ? note + ' ' : ''}No path to the finish can be shortened further: it runs through ${stuck.slice(0, LISTED).join(', ')}${stuck.length > LISTED ? ` and ${stuck.length - LISTED} more` : ''} (milestones, locked, without crash data or at their limit).`;
         break;
       }
       const acts = crit.filter((_, i) => cut.side[2 * i] && !cut.side[2 * i + 1]);

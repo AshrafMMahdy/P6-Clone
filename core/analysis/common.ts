@@ -101,6 +101,9 @@ export const baselineFinish = (b: Row | undefined) => (b ? parseP6Date(b.act_end
 /** An activity's forecast finish: actual finish, else remaining early finish, else early finish. */
 export const forecastFinish = (t: Row) => parseP6Date(t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date);
 
+// AGREED LIMIT (owner, 2026-11-12): 25 — activities and fixes an analysis answer lists per check, and per ranked list of the Monte Carlo answer (criticality, sensitivity, milestones) — fixed, no agent argument — why: enough examples to see the pattern; a round number with no calculation behind it; harmless because the full lists are always written to the result file and named in the answer — arbitrary by agreement.
+export const LISTED = 25;
+
 export const pct = (n: number, d: number) => (d ? Math.round((1000 * n) / d) / 10 : null);
 export const offender = (t: Row, s: Scope, value?: string | number): Offender => ({ id: t.task_code, name: t.task_name, ...(s.projs.length > 1 ? { project: s.ctx.proj.get(t.proj_id)?.proj_short_name } : {}), ...(value != null ? { value } : {}) });
 

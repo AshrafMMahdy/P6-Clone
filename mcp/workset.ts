@@ -5,7 +5,8 @@
 // half again as margin), or for a call that ends before a full collection, what its process grew by; per byte of the
 // project's own estimate (Session.bytes), plus per activity and iteration where it has those. Garbage between
 // collections is not reserved: the budget stays at least 512 MB under the heap limit (effectiveBudget) for it.
-import { countArg, fail, type Session } from './runtime.ts';
+import { config, countArg, fail, type Session } from './runtime.ts';
+import { LISTED } from '../core/analysis/common.ts';
 import { betweenTails } from '../core/schedule/floatPaths.ts';
 
 export interface WorkNeed { bytes: number; what: string; hint: string }
@@ -57,10 +58,9 @@ export const MC_EXPORT_BYTES_PER_MILESTONE_ITERATION = 55;
  *  text, which the answer holds twice (the text and the structured copy): 96 + 2 x 76 = 248, rounded up to 250. */
 export const MC_BYTES_PER_BUCKET = 250;
 /** What a listed criticality row holds (measured, 200,000 rows of 12 fields): its object 256 B in memory and 359 B of JSON text, which the answer
- *  holds twice (the text and the structured copy): 256 + 2 x 359 = 974, rounded up to 1,000. With top: 0 every activity is a row. */
+ *  holds twice (the text and the structured copy): 256 + 2 x 359 = 974, rounded up to 1,000. In the desktop screens (config.screens) every activity is a row. */
 export const MC_BYTES_PER_LISTED_ROW = 1000;
-/** The most bins the engine's whole-day histogram has (histogram: "days"): a bin of whole days, wide enough for at most 40. */
-export const MC_DAY_BINS = 40;
+
 /** What float_paths' between keeps per tail (the best paths from an activity on to the end: an object of the duration, the lowest float,
  *  the next activity and the index there, with its slot in the list): measured 84 B with whole hours and 100 B with fractional hours
  *  (200,000 lists of 100 tails each; a 10,000-activity ladder with max 5,000 held 3.5 GB in the reviewed build, 70 B a tail with the
@@ -74,21 +74,17 @@ export function between(b: unknown): number {
   return countArg((b as { max?: unknown }).max, 'between.max', { min: 1, hint: 'a positive whole number of paths (paths_total says how many there are between the two), or leave it out for 25' }) ?? 25;
 }
 
-/** The numbers monte_carlo is asked for: iterations (default 1000, at least 10), top (default 25; 0 = all: Infinity) and buckets
- *  (default 20, at least 5). A value that is not a whole number of 0 or more is refused as bad_input, named, before anything runs; the
- *  one parser for the tool and for its memory reservation. */
-export function monteCarloCounts(a: Record<string, any>): { iterations: number; top: number; buckets: number; days: boolean } {
+/** The one number monte_carlo is asked for: iterations (default 2,000, at least 10). A value that is not a whole number of 10 or more is refused
+ *  as bad_input, named, before anything runs; the one parser for the tool and for its memory reservation. The chart's bars and the list sizes
+ *  are not arguments: MC_BARS bars, LISTED rows (the desktop screens, config.screens, list every activity). */
+export function monteCarloCounts(a: Record<string, any>): { iterations: number } {
   // AGREED LIMIT (owner, 2026-11-12; first agreed with the kept-iterations work): 10 — the fewest Monte Carlo iterations — why: below it the result says nothing about slip dates — arbitrary by agreement.
-  const iterations = countArg(a.iterations, 'iterations', { min: 10 }) ?? 1000;
-  const top = countArg(a.top, 'top') ?? 25;
-  if (a.histogram != null && a.histogram !== 'days') fail('bad_input', `histogram must be "days" (got ${JSON.stringify(a.histogram)}).`, 'Leave histogram out for `buckets` equal bins, or pass "days" for whole-day bins.');
-  const days = a.histogram === 'days';
-  if (days && a.buckets != null) fail('bad_input', 'histogram "days" and buckets cannot be given together.', 'Pass histogram: "days" for whole-day bins, or buckets for that many equal bins, not both.');
-  // AGREED LIMIT (owner, 2026-11-12): 5 — the fewest chart bars this tool accepts, default 20 (the platform always asks for 20, see its own mark) — why: under 5 bars the chart shows no shape; 5 is what the usual rule of thumb gives for 10 iterations — arbitrary by agreement.
-  // whole-day bins (the engine's: a bin of 1 day or more so that there are at most 40): counted like buckets in the reservation
-  const buckets = days ? MC_DAY_BINS : countArg(a.buckets, 'buckets', { min: 5 }) ?? 20;
-  return { iterations, top: top === 0 ? Infinity : top, buckets, days };
+  // AGREED LIMIT (owner, 2026-11-12): 2,000 — the Monte Carlo's iterations when the caller gives none — why: enough for a steady answer (at 2,000 runs the chance read at a percentile such as P80 is within about 2 points 95 times in 100; 1,000 gives about 2.5 points, 10,000 about 0.8) and what the platform's users got before its own tool was removed — arbitrary by agreement.
+  const iterations = countArg(a.iterations, 'iterations', { min: 10 }) ?? 2000;
+  return { iterations };
 }
+// AGREED LIMIT (owner, 2026-11-12): 20 — the bars of the Monte Carlo finish-date chart, fixed, no agent argument — why: a bar's height is how strongly the simulations finish in that period, so more bars keep each bar to days or a week or two, and the planner points at the tallest bar for "when are we most likely to finish"; very late runs stretch the range and leave some bars empty, 20 still shows the shape — arbitrary by agreement.
+export const MC_BARS = 20;
 
 /** What reading a file peaks at, per byte of the file (the text, the element being read, the rows, the import checks;
  *  measured on the hosted budget: an XER 5.4-6.7x (most of it the import checks' scheduling pass), read a chunk at a time; a 215 MB P6 XML 5.8x and a 137 MB MSPDI
@@ -126,20 +122,17 @@ export function workNeed(tool: string, a: Record<string, any>, s: Session, free:
   if (!w) return null;
   let bytes = w.per * s.bytes + (w.fixed ?? 0), what = `${w.label} on this project (${n.toLocaleString('en-US')} activities)`, hint = w.hint;
   if (tool === 'monte_carlo') {
-    const { iterations: it, buckets, top, days } = monteCarloCounts(a); // as monte_carlo runs it; a bad count is refused here, before anything runs
-    const perIt = n * MC_BYTES_PER_SAMPLE + MC_BYTES_PER_ITERATION + (a.export != null ? MC_EXPORT_BYTES_PER_ITERATION + milestones(s) * MC_EXPORT_BYTES_PER_MILESTONE_ITERATION : 0);
+    const { iterations: it } = monteCarloCounts(a); // as monte_carlo runs it; a bad count is refused here, before anything runs
+    // (every run writes its result files, the iterations too: the export's bytes are always counted)
+    const perIt = n * MC_BYTES_PER_SAMPLE + MC_BYTES_PER_ITERATION + MC_EXPORT_BYTES_PER_ITERATION + milestones(s) * MC_EXPORT_BYTES_PER_MILESTONE_ITERATION;
     const base = w.per * s.bytes;
-    const listed = Math.min(top, n) * MC_BYTES_PER_LISTED_ROW; // the criticality rows the answer lists (top 0: every activity)
-    bytes += it * perIt + buckets * MC_BYTES_PER_BUCKET + listed;
-    what = `Monte Carlo of ${n.toLocaleString('en-US')} activities × ${it.toLocaleString('en-US')} iterations${a.export != null ? ' with its export' : ''}${days ? ` and its whole-day histogram (${MC_DAY_BINS} bins at most)` : a.buckets != null ? ` and ${buckets.toLocaleString('en-US')} histogram buckets` : ''}${a.top != null ? ` and ${Math.min(top, n).toLocaleString('en-US')} listed activity rows` : ''}`;
-    // what would fit in what is free now: iterations with the buckets as asked, buckets with the iterations as asked (the minimums are 10 and 5)
+    const listed = (config.screens ? n : Math.min(LISTED, n)) * MC_BYTES_PER_LISTED_ROW; // the criticality rows the answer lists
+    bytes += it * perIt + MC_BARS * MC_BYTES_PER_BUCKET + listed;
+    what = `Monte Carlo of ${n.toLocaleString('en-US')} activities × ${it.toLocaleString('en-US')} iterations with its result files`;
+    // what would fit in what is free now: the iterations
     const room = Math.max(0, free() - base);
-    const fitIt = Math.floor((room - buckets * MC_BYTES_PER_BUCKET - listed) / perIt), fitBk = Math.floor((room - it * perIt - listed) / MC_BYTES_PER_BUCKET);
-    const ways = [
-      ...(fitIt >= 10 ? [`at most ${fitIt.toLocaleString('en-US')} iterations (iterations)`] : []),
-      ...(!days && fitBk >= 5 ? [`at most ${fitBk.toLocaleString('en-US')} histogram buckets (buckets)`] : []),
-    ];
-    hint = ways.length ? `run ${ways.join(' or ')}, which fit in the ${mbs(room)} free now` : 'run it on fewer activities (a narrower project)';
+    const fitIt = Math.floor((room - MC_BARS * MC_BYTES_PER_BUCKET - listed) / perIt);
+    hint = fitIt >= 10 ? `run at most ${fitIt.toLocaleString('en-US')} iterations (iterations), which fit in the ${mbs(room)} free now` : 'run it on fewer activities (a narrower project)';
   }
   if (tool === 'float_paths' && a.between != null) {
     // the longest `max` paths between two activities: every activity between them keeps its best min(max, paths from it to "to") tails

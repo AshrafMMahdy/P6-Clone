@@ -79,19 +79,24 @@ async function chain(id: string, count: number, extra: unknown[] = []) {
   return { handle: np.handle as string, owner_key: np.owner_key as string };
 }
 
-test('check_schedule, dcma_14 and lint: the answer lists max_ids per check, the export every activity of every check', async () => {
-  const h = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+test('check_schedule, dcma_14 and lint: the answer lists 25 per check, the files (written without being asked) hold every activity of every check', async () => {
+  const h0 = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
+  const hBig = (await call('open_file', { path: sampleCopy('Baseline Zone 2 Rev.01.xer') })).d.handle; // (lint finds more than 25 here)
   for (const [tool, found, extra] of [['check_schedule', 'failing_activities', {}], ['dcma_14', 'failing_activities', {}], ['lint', 'findings', { profile: 'platform', simulate: false }]] as const) {
-    const without = (await call(tool, { handle: h, max_ids: 2, ...extra })).d;
-    const r = await call(tool, { handle: h, max_ids: 2, ...extra, export: folder() });
+    const h = tool === 'lint' ? hBig : h0;
+    // no export given: the same files go to analysis/<project short name>/<tool> (R3)
+    const without = (await call(tool, { handle: h, ...extra })).d;
+    assert.ok(without.exported.files.length > 1, `${tool}: files written by default`);
+    assert.match(without.exported.folder.replace(/\\/g, '/'), new RegExp(`/analysis/[^/]+/${tool}$`), without.exported.folder);
+    const r = await call(tool, { handle: h, ...extra, export: folder() });
     assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
-    assert.deepEqual(plain(r.d), plain(without), `${tool}: the answer is the one without export`);
+    assert.deepEqual(plain(r.d), plain(without), `${tool}: the answer is the one of the default folder`);
     const { json, csv } = files(r.d, tool);
-    const cut = r.d.checks.filter((c: any) => c.total_activities > 2);
-    assert.ok(cut.length, `${tool}: some check found more than max_ids`);
-    // (lint's connectivity lists max_ids of each kind: open starts, then open ends, each with its own total)
-    const kinds = (c: any, v: string) => c.activities.filter((x: any) => x.value === v).length;
-    assert.ok(r.d.checks.every((c: any) => (c.id === 'connectivity' ? kinds(c, 'no predecessor') === Math.min(2, c.no_predecessor_total) && kinds(c, 'no successor') === Math.min(2, c.no_successor_total) : c.activities.length === Math.min(2, c.total_activities))), tool);
+    const cut = r.d.checks.filter((c: any) => c.total_activities > 25);
+    assert.ok(cut.length, `${tool}: some check found more than 25`);
+    assert.ok(r.d.checks.every((c: any) => c.activities.length === Math.min(25, c.total_activities)), tool);
+    // each cut check says where all of them are: the file given by export, holding every one
+    assert.ok(cut.every((c: any) => c.activities_note === `25 of ${c.total_activities} shown; all ${c.total_activities} in ${r.d.exported.files.find((f: any) => f.path.endsWith(`-${found}.csv`)).path}`), tool);
     // the json holds every activity of every check, and the CSV one row for each
     assert.ok(json.checks.every((c: any) => c.activities.length === c.total_activities), tool);
     const total = json.checks.reduce((s: number, c: any) => s + c.total_activities, 0);
@@ -100,43 +105,44 @@ test('check_schedule, dcma_14 and lint: the answer lists max_ids per check, the 
     assert.equal(csv.checks.find((c) => c.id === cut[0].id)!.total_activities, String(cut[0].total_activities));
     if (tool === 'lint') {
       assert.ok('fixes' in csv);
-      // every list that can be cut says its total, cut or not: fs_overlap's ladders, connectivity's two kinds, redundant_links' fixes
       const by = (id: string) => r.d.checks.find((c: any) => c.id === id);
       assert.equal(typeof by('fs_overlap').ladders_total, 'number');
       assert.equal(typeof by('connectivity').no_predecessor_total, 'number');
       assert.equal(typeof by('redundant_links').fixes_total, 'number');
       assert.ok(r.d.checks.every((c: any) => typeof c.total_activities === 'number'));
+      // every list of fixes shows at most 25, says fixes_total and names the file that holds them all (the fixes table)
+      for (const c of r.d.checks.filter((x: any) => x.fixes)) {
+        assert.ok(c.fixes.length <= 25, c.id);
+        if (c.fixes_total > 25) assert.equal(c.fixes_note, `25 of ${c.fixes_total} shown; all ${c.fixes_total} in ${r.d.exported.files.find((f: any) => f.path.endsWith('-fixes.csv')).path}`);
+      }
+      assert.equal(csv.fixes.length, json.checks.reduce((s: number, c: any) => s + (c.fixes?.length ?? 0), 0));
     }
     if (tool === 'check_schedule') assert.ok(csv.checks[0].threshold_op && csv.projects.length);
   }
-  // lint's answer is the engine's own with max_ids (as it answered before export existed): each check's fixes cut as the engine cuts them
-  // (redundant_links to max_ids, saying fixes_total; fs_overlap's never), connectivity each kind to max_ids
-  const { lintSchedule } = await import('../core/analysis/lint.ts');
-  const { getSession } = await import('../mcp/runtime.ts');
-  const lint = (await call('lint', { handle: h, max_ids: 2, profile: 'platform', simulate: false })).d;
-  const core = lintSchedule(getSession(h).db, { profile: 'platform', simulate: false, maxIds: 2, hoursPerDay: getSession(h).hpd });
-  assert.deepEqual(lint.checks, JSON.parse(JSON.stringify(core.checks)));
-  const red = lint.checks.find((c: any) => c.id === 'redundant_links');
-  assert.ok(red.fixes_total > 2 && red.fixes.length === 2, `redundant_links: ${red.fixes_total}`);
   // the HTML report is the answer's, as before
-  const html = await call('dcma_14', { handle: h, max_ids: 1, path: join(root, 'dcma.html'), export: folder() });
+  const h = h0;
+  const html = await call('dcma_14', { handle: h, path: join(root, 'dcma.html'), export: folder() });
   assert.ok(existsSync(html.d.saved) && html.d.exported.files.length === 3);
   // a folder outside the write root is refused
   const out = await call('dcma_14', { handle: h, export: join(tmpdir(), '..', 'elsewhere-p6-export') });
   assert.deepEqual([out.err, out.d.error.code], [true, 'path_outside_root']);
   await call('close', { handle: h, discard: true });
+  await call('close', { handle: hBig, discard: true });
 });
 
 test('monte_carlo: iterations.csv holds every iteration, whose sorted finishes give the reported percentiles exactly, also after a stop and a resume', async () => {
   const h = await chain('MCX', 30);
-  const args = { ...h, iterations: 120, seed: 5, top: 3, default_estimates: { min_pct: 80, max_pct: 150 }, deadline: '2026-07-15', events: [{ name: 'Permit', probability: 0.3, delay_days: 3 }] };
+  const args = { ...h, iterations: 120, seed: 5, default_estimates: { min_pct: 80, max_pct: 150 }, deadline: '2026-07-15', events: [{ name: 'Permit', probability: 0.3, delay_days: 3 }] };
   const without = (await call('monte_carlo', args)).d;
   const r = (await call('monte_carlo', { ...args, export: folder() })).d;
-  assert.deepEqual(plain(r), plain(without), 'the answer is the one without export');
-  // the lists cut to top say how many there are
-  assert.equal(r.criticality.length, 3); assert.equal(r.criticality_total, 31);
+  assert.deepEqual(plain(r), plain(without), 'the answer is the one of the default folder');
+  // the lists cut to 25 say how many there are
+  assert.equal(r.criticality.length, 25); assert.equal(r.criticality_total, 31);
   assert.equal(r.milestones.length, 1); assert.equal(r.milestones_total, 1, 'the total is given when nothing is cut too');
-  assert.equal(r.sensitivity.length, 3); assert.ok(r.sensitivity_total > 3);
+  assert.equal(r.sensitivity.length, Math.min(25, r.sensitivity_total));
+  // the chart is always 20 equal date bars; the S-curve shows at most 25 points of cumulative_total
+  assert.equal(r.histogram.length, 20);
+  assert.ok(r.cumulative.length <= 25 && r.cumulative_total >= r.cumulative.length);
   assert.equal(r.milestones_total, 1);
   const { json, csv } = files(r, 'monte_carlo');
   assert.equal(csv.iterations.length, 120, 'one row per iteration');
@@ -183,37 +189,40 @@ test('monte_carlo: iterations.csv holds every iteration, whose sorted finishes g
   await call('close', { ...h, discard: true });
 });
 
-test('windows_analysis: max_ids 0 lists every activity, a cut list says how many there are, the export has them all', async () => {
+test('windows_analysis: each window lists 25 of each list, a cut list says how many there are and where all of them are, the files (written by default) have them all', async () => {
   const h = await chain('WINX', 60);
   await call('edit', { ...h, operations: [{ op: 'save_baseline', name: 'Plan', assign_as: 'project' }] });
   const updates = [{ baseline: 'project' }, { name: 'U1', data_date: '2026-03-09', progress: [{ op: 'update_activity', id: 'A0', actual_start: '2026-03-04 08:00', remaining_days: 4 }] }];
-  const all = (await call('windows_analysis', { handle: h.handle, include_current: false, updates, max_ids: 0 })).d;
-  const w = all.windows[0];
-  assert.ok(w.driving_path.length > 50, `max_ids 0: every activity (${w.driving_path.length})`);
-  assert.equal(w.driving_path.length, w.driving_path_total);
-  assert.equal(w.lost_time.length, w.lost_time_total);
-  assert.ok(w.lost_time_total > 50);
-  const dflt = (await call('windows_analysis', { handle: h.handle, include_current: false, updates })).d.windows[0];
-  assert.deepEqual([dflt.driving_path.length, dflt.lost_time.length, dflt.driving_path_more, dflt.driving_path_total], [50, 50, w.driving_path_total - 50, w.driving_path_total], 'default 50');
+  // no export given: the files are written to the default folder and hold every activity
+  const dflt = (await call('windows_analysis', { handle: h.handle, include_current: false, updates })).d;
+  const w = dflt.windows[0];
+  assert.ok(dflt.exported.files.length > 1 && /windows_analysis$/.test(dflt.exported.folder.replace(/\\/g, '/')));
+  assert.ok(w.driving_path_total > 25 && w.lost_time_total > 25);
+  assert.deepEqual([w.driving_path.length, w.lost_time.length], [25, 25]);
+  const where = (t: string) => dflt.exported.files.find((f: any) => f.path.endsWith(`-${t}.csv`)).path;
+  assert.equal(w.driving_path_note, `25 of ${w.driving_path_total} shown; all ${w.driving_path_total} in ${where('driving_path')}`);
+  assert.equal(w.lost_time_note, `25 of ${w.lost_time_total} shown; all ${w.lost_time_total} in ${where('lost_time')}`);
   const r = (await call('windows_analysis', { handle: h.handle, include_current: false, updates, max_ids: 3, export: folder() })).d;
-  assert.deepEqual([r.windows[0].driving_path.length, r.windows[0].lost_time.length, r.windows[0].lost_time_total], [3, 3, w.lost_time_total]);
+  assert.deepEqual([r.windows[0].driving_path.length, r.windows[0].lost_time.length, r.windows[0].lost_time_total], [25, 25, w.lost_time_total]);
+  assert.match(r.arguments_not_used[0], /^windows_analysis has no argument "max_ids"/);
   const { json, csv } = files(r, 'windows_analysis');
-  assert.deepEqual(json.windows[0].driving_path, w.driving_path);
+  assert.equal(json.windows[0].driving_path.length, w.driving_path_total);
   assert.equal(csv.driving_path.length, w.driving_path_total);
   assert.equal(csv.lost_time.length, w.lost_time_total);
   assert.equal(csv.windows.length, 1);
   await call('close', { ...h, discard: true });
 });
 
-test('evaluate_batch: the export lists every activity every scenario moved; the answer the first 200 of the best, with changed_total', async () => {
+test('evaluate_batch: the export lists every activity every scenario moved; the answer the first 25 of the best, with changed_total', async () => {
   const h = await chain('BATX', 230);
   const scenarios = [{ name: 'first longer', overrides: [{ op: 'update_activity', id: 'A0', duration_days: 9 }] }, { name: 'last longer', overrides: [{ op: 'update_activity', id: 'A229', duration_days: 9 }] }, { name: 'bad', overrides: [{ op: 'nope' }] }];
   const without = (await call('evaluate_batch', { ...h, scenarios, top: 2 })).d;
+  assert.ok(without.exported.files.length > 1, 'written without being asked');
   const r = (await call('evaluate_batch', { ...h, scenarios, top: 1, export: folder() })).d;
   const withTop = (await call('evaluate_batch', { ...h, scenarios, top: 1 })).d;
   assert.deepEqual(plain(r), plain(withTop));
   const first = without.scenarios[0];
-  assert.deepEqual([first.changed.length, first.changed_total], [200, 231], 'every later activity and the milestone moved');
+  assert.deepEqual([first.changed.length, first.changed_total], [25, 231], 'every later activity and the milestone moved');
   const { json, csv } = files(r, 'evaluate_batch');
   assert.equal(r.scenarios[0].changed, undefined, 'not among the best 1');
   assert.equal(json.scenarios[0].changed.length, 231);
@@ -248,10 +257,12 @@ test('crash_schedule, float_paths, progress_curves, resource_histogram, tia, lev
   const lv = (await call('level_resources', { handle: h.handle, dry_run: true, export: folder() })).d;
   f = files(lv, 'level_resources');
   assert.equal(f.csv.moved.length, lv.moved.length); assert.ok(lv.moved.length); assert.equal(f.csv.peaks.length, lv.peaks.length);
-  // evaluate: changed cut by max_rows, the export has every field of every activity that changed
-  const ev = (await call('evaluate', { handle: h.handle, overrides: [{ op: 'update_activity', id: 'A0', duration_days: 6 }], max_rows: 2, export: folder() })).d;
-  assert.deepEqual(plain(ev), plain((await call('evaluate', { handle: h.handle, overrides: [{ op: 'update_activity', id: 'A0', duration_days: 6 }], max_rows: 2 })).d));
-  assert.equal(ev.changed.length, 2); assert.ok(ev.changed_total > 2);
+  // evaluate: changed cut to 25, the files (default folder or export) have every field of every activity that changed
+  const hb = await chain('EVBIG', 40);
+  const ev = (await call('evaluate', { handle: hb.handle, overrides: [{ op: 'update_activity', id: 'A0', duration_days: 6 }], export: folder() })).d;
+  assert.deepEqual(plain(ev), plain((await call('evaluate', { handle: hb.handle, overrides: [{ op: 'update_activity', id: 'A0', duration_days: 6 }] })).d));
+  assert.equal(ev.changed.length, 25); assert.ok(ev.changed_total > 25);
+  await call('close', { ...hb, discard: true });
   f = files(ev, 'evaluate');
   assert.equal(f.json.changed.length, ev.changed_total);
   assert.equal(f.csv.changed.length, f.json.changed.reduce((s: number, x: any) => s + Object.values(x).filter(Array.isArray).length, 0));
@@ -537,21 +548,22 @@ test('E2 and E3: exported.replaced says how many files an export removed and whe
 test('E4: every list the answer cut says where all of it is, when an export was written (the total of float_paths between printed as the string it is)', async () => {
   const h = await chain('E4', 30);
   const dir = folder();
-  const args = { ...h, iterations: 40, seed: 2, top: 3, default_estimates: { min_pct: 80, max_pct: 150 } };
+  const args = { ...h, iterations: 40, seed: 2, default_estimates: { min_pct: 80, max_pct: 150 } };
   const r = (await call('monte_carlo', { ...args, export: dir })).d;
-  assert.equal(r.criticality_note, `3 of 31 shown; all 31 in ${join(dir, 'monte_carlo-criticality.csv')}`);
-  assert.equal(r.sensitivity_note, `3 of ${r.sensitivity_total} shown; all ${r.sensitivity_total} in ${join(dir, 'monte_carlo-sensitivity.csv')}`);
+  // 31 activities all critical in every run, 25 shown: the platform's note (more ever-critical than shown, every one critical in every run)
+  assert.equal(r.criticality_note, `25 of the 31 activities that were critical in at least one run are shown, highest first (31 critical in every run); all 31 activities are in ${join(dir, 'monte_carlo-criticality.csv')}; the 25 shown are all critical in every run, in activity-code order`);
+  assert.equal(r.sensitivity_note, `25 of ${r.sensitivity_total} activities with a varying duration shown, strongest first; all ${r.sensitivity_total} in ${join(dir, 'monte_carlo-sensitivity.csv')}`);
   assert.equal(r.milestones_note, undefined, 'nothing cut: no note');
+  // without export the notes name the file of the default folder
   const bare = (await call('monte_carlo', args)).d;
-  assert.ok(!Object.keys(bare).some((k) => k.endsWith('_note') && k !== 'note'), 'no export: no note');
-  // lint: a check's activities cut to max_ids, its total_activities
-  const c = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
-  const lint = (await call('lint', { handle: c, max_ids: 1, simulate: false, export: folder() })).d;
-  const cut = lint.checks.filter((x: any) => x.total_activities > 1);
+  assert.equal(bare.sensitivity_note, `25 of ${r.sensitivity_total} activities with a varying duration shown, strongest first; all ${r.sensitivity_total} in ${bare.exported.files.find((f: any) => f.path.endsWith('-sensitivity.csv')).path}`);
+  // lint: a check's activities cut to 25, its total_activities
+  const c = (await call('open_file', { path: sampleCopy('Baseline Zone 2 Rev.01.xer') })).d.handle;
+  const lint = (await call('lint', { handle: c, simulate: false, export: folder() })).d;
+  const cut = lint.checks.filter((x: any) => x.total_activities > 25);
   assert.ok(cut.length > 0);
-  for (const x of cut) assert.equal(x.activities_note, `1 of ${x.total_activities} shown; all ${x.total_activities} in ${lint.exported.files.find((f: any) => f.path.endsWith('lint-findings.csv')).path}`, x.id);
-  assert.ok(lint.checks.filter((x: any) => x.total_activities <= 1).every((x: any) => x.activities_note === undefined));
-  assert.equal((await call('lint', { handle: c, max_ids: 1, simulate: false })).d.checks.some((x: any) => 'activities_note' in x), false);
+  for (const x of cut) assert.equal(x.activities_note, `25 of ${x.total_activities} shown; all ${x.total_activities} in ${lint.exported.files.find((f: any) => f.path.endsWith('lint-findings.csv')).path}`, x.id);
+  assert.ok(lint.checks.filter((x: any) => x.total_activities <= 25).every((x: any) => x.activities_note === undefined));
   await call('close', { handle: c, discard: true });
   // float_paths between on 80 diamonds: 2^80 paths, a decimal string, exactly
   const np = (await call('new_project', { id: 'E4L', start: '2026-03-02' })).d;
@@ -565,7 +577,8 @@ test('E4: every list the answer cut says where all of it is, when an export was 
   assert.equal(fp.between.paths_total, '1208925819614629174706176');
   assert.equal(fp.between.paths_note, `5 of 1208925819614629174706176 shown (the most asked for); the export holds the same 5 in ${join(fdir, 'float_paths-between.csv')}, ask for more to have more`);
   assert.equal(fp.paths_note, undefined, 'the top-level paths are not cut lists');
-  assert.equal((await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5 } })).d.between.paths_note, undefined, 'no export: no note');
+  const dflt = (await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5 } })).d;
+  assert.equal(dflt.between.paths_note, `5 of 1208925819614629174706176 shown (the most asked for); the export holds the same 5 in ${join(dflt.exported.folder, 'float_paths-between.csv')}, ask for more to have more`);
 });
 
 test('E5: optimize_schedule with objective min_crash_cost exports under its own name, so one tool\'s files in a folder are replaced together', async () => {
@@ -633,7 +646,10 @@ test('export_name: a name that is empty, one with no folder, one that clashes wi
     assert.equal(r.d.error.code, 'bad_input', `"${bad}": ${JSON.stringify(r.d)}`);
   }
   assert.equal((await call('dcma_14', { handle: h, export: dir, export_name: 7 })).d.error.code, 'bad_input');
-  const nofolder = await call('dcma_14', { handle: h, export_name: 'option-a' });
+  // (an analysis tool writes to its default folder, so export_name needs no export there; a tool with an export of its own still needs the folder)
+  const named = await call('dcma_14', { handle: h, export_name: 'option-a' });
+  assert.ok(named.d.exported.files[0].path.endsWith('dcma_14-option-a.json'), named.d.exported.files[0].path);
+  const nofolder = await call('level_resources', { handle: h, dry_run: true, export_name: 'option-a' });
   assert.equal(nofolder.d.error.code, 'bad_input');
   assert.match(nofolder.d.error.message, /no export folder/);
   assert.equal(existsSync(dir) ? readdirSync(dir).length : 0, 0, 'nothing written');

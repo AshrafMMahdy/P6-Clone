@@ -392,7 +392,7 @@ function finishOf(res: ReturnType<typeof scheduleProjects>, projIds: string[]): 
 function scheduleOrThrow(db: Db, projIds: string[], over: Partial<SchedOptions>) {
   const res = scheduleProjects(db, projIds, over);
   if (!res.ok) {
-    const why = res.findings.filter((f) => f.severity === 'error' || f.severity === 'fatal').map((f) => f.message).slice(0, 3).join('; ');
+    const why = res.findings.filter((f) => f.severity === 'error' || f.severity === 'fatal').map((f) => f.message).join('; ');
     throw new Error(`The schedule cannot be calculated${why ? `: ${why}` : '.'}`);
   }
   return res;
