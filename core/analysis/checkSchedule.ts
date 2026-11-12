@@ -10,8 +10,9 @@ import { rows, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import {
   baselineOf, baselineFinish, constraintsOf, isDone, isLoe, isMilestone, isStarted, isWbs, makeScope, notAssessed, offender,
-  P6_HARD, P6_SOFT, pct, percentCheck, relOffender, START_CONSTRAINTS, passes, type CheckResult, type Offender, type Threshold,
+  P6_HARD, P6_SOFT, exactPct, pct, percentCheck, relOffender, START_CONSTRAINTS, passes, type CheckResult, type Offender, type Threshold,
 } from './common.ts';
+import { beiFigures } from './forensic.ts';
 
 const SRC = 'P6 Professional default (Check Schedule Report)';
 export const P6_CHECKS: { id: string; name: string; th: Threshold }[] = [
@@ -81,7 +82,7 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
     const fs = links.filter((r) => (r.pred_type || 'PR_FS') === 'PR_FS').length;
     const metric = pct(fs, links.length), t = th('relationship_types');
     const other = links.filter((r) => (r.pred_type || 'PR_FS') !== 'PR_FS').map((r) => relOffender(r, s));
-    return { id: 'relationship_types', name: name('relationship_types'), unit: '%', metric, threshold: t, numerator: fs, denominator: links.length, result: !links.length || passes(metric!, t) ? 'pass' : 'fail', activities: maxIds ? other.slice(0, maxIds) : other, total_activities: other.length, note: 'The listed relationships are the ones that are not finish to start.' };
+    return { id: 'relationship_types', name: name('relationship_types'), unit: '%', metric, threshold: t, numerator: fs, denominator: links.length, result: !links.length || passes(exactPct(fs, links.length), t) ? 'pass' : 'fail', activities: maxIds ? other.slice(0, maxIds) : other, total_activities: other.length, note: 'The listed relationships are the ones that are not finish to start.' };
   });
 
   // Constraints: completed, WBS summary and LOE activities are not examined, nor start constraints on started activities.
@@ -136,22 +137,11 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
   });
   add('bei', () => {
     if (!anyBaseline) return notAssessed('bei', name('bei'), 'ratio', th('bei'), 'No project baseline is assigned (Project > Assign Baselines).');
-    const ok = (t: Row) => !isMilestone(t) && !isWbs(t) && !isLoe(t);
-    const done = s.tasks.filter((t) => ok(t) && isDone(t)).length;
-    const due: Offender[] = [];
-    for (const p of s.projs) {
-      const b = bls.get(p.proj_id), dd = s.dataDate(p.proj_id);
-      if (!b || dd == null) continue;
-      const byCode = new Map(s.tasks.filter((t) => t.proj_id === p.proj_id).map((t) => [t.task_code, t]));
-      for (const bt of b.tasks.values()) if (ok(bt) && (baselineFinish(bt) ?? Infinity) < dd) {
-        const cur = byCode.get(bt.task_code);
-        if (!cur || !isDone(cur)) due.push({ id: bt.task_code, name: bt.task_name, value: 'baselined to finish before the data date, not completed' });
-      }
-    }
-    const dueN = s.projs.reduce((n, p) => { const b = bls.get(p.proj_id), dd = s.dataDate(p.proj_id); return n + (b && dd != null ? [...b.tasks.values()].filter((bt) => ok(bt) && (baselineFinish(bt) ?? Infinity) < dd).length : 0); }, 0);
-    if (!dueN) return { ...notAssessed('bei', name('bei'), 'ratio', th('bei'), 'No baseline activity was due to finish before the data date.'), numerator: done, denominator: 0 };
-    const metric = Math.round((done / dueN) * 1000) / 1000;
-    return { id: 'bei', name: name('bei'), unit: 'ratio', metric, threshold: th('bei'), numerator: done, denominator: dueN, result: passes(metric, th('bei')) ? 'pass' : 'fail', activities: maxIds ? due.slice(0, maxIds) : due, total_activities: due.length, note: 'Completed activities over baseline activities due to finish before the data date (milestones, WBS summary and LOE excluded). Listed: due but not completed.' };
+    // forensic.ts beiFigures, the clone's one definition; here a task baselined to finish on the data date is not yet due
+    const bei = beiFigures(s, bls, 'project', { before: true });
+    if (bei.result === 'not_assessed') return bei.reason === 'no_baseline' ? notAssessed('bei', name('bei'), 'ratio', th('bei'), bei.note) : { ...notAssessed('bei', name('bei'), 'ratio', th('bei'), 'No baseline activity was due to finish before the data date.'), numerator: bei.completed!, denominator: 0 };
+    const due = bei.not_completed.map((o) => ({ ...o, value: 'baselined to finish before the data date, not completed' }));
+    return { id: 'bei', name: name('bei'), unit: 'ratio', metric: bei.value, threshold: th('bei'), numerator: bei.completed, denominator: bei.due, result: passes(bei.exact, th('bei')) ? 'pass' : 'fail', activities: maxIds ? due.slice(0, maxIds) : due, total_activities: due.length, note: 'Completed activities over baseline activities due to finish before the data date (milestones, WBS summary and LOE excluded). Listed: due but not completed.' };
   });
 
   const order = new Map(P6_CHECKS.map((c, i) => [c.id, i]));

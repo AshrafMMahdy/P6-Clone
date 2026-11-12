@@ -299,11 +299,13 @@ export function logicLoops(s: Scope): string[][] {
 /** A loop as the scheduler words it (cpm.ts: "Loop: A → B → C → A"). */
 export const loopMessage = (loop: string[]): string => `Loop: ${loop.join(' → ')} → ${loop[0]}`;
 
-export interface BeiFigures { value: number; completed: number; due: number; not_completed: Offender[] }
-/** The Baseline Execution Index, the clone's one definition (dcma_14 check 14, dcma.ts:150-165, kept equal to it by a test): tasks (not WBS summary, level of effort or milestones) completed, early ones included, over the tasks
- *  baselined to finish by the data date. Not assessed when no project has the baseline, or nothing was due (never 1). */
-export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project'): Assessed<BeiFigures> {
-  if (![...bls.values()].some(Boolean)) return notAssessed(`No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.`);
+export interface BeiFigures { value: number; /** value before rounding: what a threshold is judged on */ exact: number; completed: number; due: number; not_completed: Offender[] }
+export type BeiResult = ({ result: 'assessed' } & BeiFigures) | { result: 'not_assessed'; /** why: no baseline, no data date, or nothing baselined to finish by the date */ reason: 'no_baseline' | 'no_data_date' | 'none_due'; note: string; /** the tasks completed, counted all the same */ completed?: number };
+/** The Baseline Execution Index, the clone's ONE definition (dcma_14 check 14, check_schedule's bei, schedule_index, decm, baseline_variance): tasks (not WBS summary, level of effort or milestones) completed, early ones included,
+ *  over the tasks baselined to finish by the data date. Not assessed when no project has the baseline, or nothing was due (never 1). `value` is shown (three decimals), `exact` is what a threshold is judged on.
+ *  `before`: a task baselined to finish ON the data date is not yet due (check_schedule's rule, "before the data date"); default: due on or before it (dcma_14's rule). */
+export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project', o: { before?: boolean } = {}): BeiResult {
+  if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.` };
   const ok = (t: Row) => !isWbs(t) && !isLoe(t) && !isMilestone(t);
   const completed = s.tasks.filter((t) => ok(t) && isDone(t)).length;
   const dueList: Offender[] = []; let due = 0;
@@ -311,8 +313,11 @@ export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baseline
     const b = bls.get(p.proj_id), dd = s.dataDate(p.proj_id);
     if (!b || dd == null) continue;
     const cur = new Map(s.tasks.filter((t) => t.proj_id === p.proj_id).map((t) => [t.task_code, t]));
-    for (const bt of b.tasks.values()) if (ok(bt) && (baselineFinish(bt) ?? Infinity) <= dd) { due++; const c = cur.get(bt.task_code); if (!c || !isDone(c)) dueList.push({ id: bt.task_code, name: bt.task_name, value: c ? 'not completed' : 'not in the current schedule' }); }
+    for (const bt of b.tasks.values()) {
+      const f = baselineFinish(bt) ?? Infinity;
+      if (ok(bt) && (o.before ? f < dd : f <= dd)) { due++; const c = cur.get(bt.task_code); if (!c || !isDone(c)) dueList.push({ id: bt.task_code, name: bt.task_name, value: c ? 'not completed' : 'not in the current schedule' }); }
+    }
   }
-  if (!due) return notAssessed(s.projs.every((p) => s.dataDate(p.proj_id) == null) ? 'The project has no data date: give a status_date.' : 'No task was baselined to finish by the data date.');
-  return { result: 'assessed', value: r3(completed / due), completed, due, not_completed: dueList };
+  if (!due) { const none = s.projs.every((p) => s.dataDate(p.proj_id) == null); return { result: 'not_assessed', reason: none ? 'no_data_date' : 'none_due', note: none ? 'The project has no data date: give a status_date.' : 'No task was baselined to finish by the data date.', completed }; }
+  return { result: 'assessed', value: r3(completed / due), exact: completed / due, completed, due, not_completed: dueList };
 }

@@ -8,9 +8,9 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { compareSchedules, progressIntegrity } from '../diff.ts';
-import { dcma14 } from './dcma.ts';
+import { dcma14, invalidDateFlags } from './dcma.ts';
 import type { Update } from './delay.ts';
-import { baselineOf, baselineFinish, isDone, isLoe, isWbs, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
+import { baselineOf, baselineFinish, isLoe, isWbs, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
 import { loopMessage, logicLoops, referenceStart } from './forensic.ts';
 
 export type DecmId = '06A204b' | '06A205a' | '06A208a' | '06A209a' | '06A210a' | '06A212a' | '06A401a' | '06A501a' | '06A504a' | '06A504b' | '06A505a' | '06A505b' | '06A506a' | '06A506b' | '06A506c' | '08I101a' | '10A303a';
@@ -96,7 +96,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   const percent = (id: DecmId, found: Offender[], denominator: number, note: string, emptyNote: string) => {
     const t = th(id)!;
     if (!denominator) return na(id, emptyNote);
-    // judged on the exact share, shown to two decimals: a threshold of 0 % is failed by one activity in any population (dcma_14 rounds to one decimal first, so one activity in a population over 2000 reads 0.0 and passes)
+    // judged on the exact share, shown to two decimals: a threshold of 0 % is failed by one activity in any population (dcma_14 judges the same way now, common.ts percentCheck)
     const metric = Math.round((10000 * found.length) / denominator) / 100;
     add({ id, name: NAMES[id], unit: '%', metric, threshold: t, numerator: found.length, denominator, result: passes((100 * found.length) / denominator, t) ? 'pass' : 'fail', activities: found, total_activities: found.length, note });
   };
@@ -160,25 +160,15 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
     percent('06A505a', discrete.filter((t) => !t.act_start_date && !t.act_end_date && ((p(t) > 0 && p(t) < 1) || t.status_code === 'TK_Active')).map((t) => offender(t, s)), discrete.length, 'Activities under way (a % complete above 0 and below 100, or the status Started) with no actual start, over all activities that are neither WBS summary nor level of effort.', 'No activity.');
     percent('06A505b', discrete.filter((t) => !t.act_end_date && (p(t) >= 1 || t.status_code === 'TK_Complete')).map((t) => offender(t, s)), discrete.length, 'Activities complete (100 %, or the status Completed) with no actual finish, over all activities that are neither WBS summary nor level of effort.', 'No activity.');
   }
-  // 06A506a / b / c: dcma_14 check 9 (dcma.ts:122-136) split in three, over the activities of the projects that have a data date
+  // 06A506a / b / c: dcma_14 check 9 (dcma.ts invalidDateFlags, the one rule) split in three, over the activities of the projects that have a data date
   {
-    const pop = s.tasks.filter((t) => !isWbs(t) && s.dataDate(t.proj_id) != null);
+    const { with_data_date: pop, flagged } = invalidDateFlags(s);
     if (!pop.length) { const why = `No data date in ${s.projs.map((p) => p.proj_short_name).join(', ')}: give a status_date.`; na('06A506a', why); na('06A506b', why); na('06A506c', why); }
     else {
-      const sa: Offender[] = [], fa: Offender[] = [], fc: Offender[] = [];
-      for (const t of pop) {
-        const dd = s.dataDate(t.proj_id)!;
-        const aS = parseP6Date(t.act_start_date), aF = parseP6Date(t.act_end_date);
-        if (aS != null && aS > dd) sa.push(offender(t, s, 'actual start after the status date'));
-        if (aF != null && aF > dd) fa.push(offender(t, s, 'actual finish after the status date'));
-        if (isDone(t)) continue;
-        const fS = t.act_start_date ? null : parseP6Date(t.restart_date || t.early_start_date), fF = parseP6Date(t.reend_date || t.early_end_date);
-        if ((fS != null && fS < dd) || (fF != null && fF < dd)) fc.push(offender(t, s, 'forecast date before the status date'));
-      }
       const w = 'over all activities that are not WBS summaries, in projects with a data date.';
-      percent('06A506a', sa, pop.length, `Activities with an actual start after the status date, ${w}`, '');
-      percent('06A506b', fa, pop.length, `Activities with an actual finish after the status date, ${w}`, '');
-      percent('06A506c', fc, pop.length, `Incomplete activities with a forecast start (not yet started) or finish before the status date, ${w}`, '');
+      percent('06A506a', flagged.filter((f) => f.actual_start_after).map((f) => offender(f.task, s, 'actual start after the status date')), pop.length, `Activities with an actual start after the status date, ${w}`, '');
+      percent('06A506b', flagged.filter((f) => f.actual_finish_after).map((f) => offender(f.task, s, 'actual finish after the status date')), pop.length, `Activities with an actual finish after the status date, ${w}`, '');
+      percent('06A506c', flagged.filter((f) => f.forecast_before).map((f) => offender(f.task, s, 'forecast date before the status date')), pop.length, `Incomplete activities with a forecast start (not yet started) or finish before the status date, ${w}`, '');
     }
   }
   // 08I101a, 10A303a: P6 has no such activity types

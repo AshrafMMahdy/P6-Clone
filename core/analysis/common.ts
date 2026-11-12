@@ -105,7 +105,14 @@ export const forecastFinish = (t: Row) => parseP6Date(t.act_end_date || t.reend_
 // The same constant is also the list size of: the activities and fixes per check of lint, dcma_14 and check_schedule; the resources resource_histogram lists; the changed activities of evaluate and evaluate_batch; the activities per window of windows_analysis; the worst lists of earned_value; the Monte Carlo S-curve points and ranked lists; the activity names in crash_schedule's notes.
 export const LISTED = 25;
 
-export const pct = (n: number, d: number) => (d ? Math.round((1000 * n) / d) / 10 : null);
+/** A share (n of d) as a percent, for display: one decimal; a share that is not zero but would show as 0.0 shows its first two significant digits (1 of 2,068 reads 0.048, never 0). Never judged on: judge with `shareOf`. */
+export const pct = (n: number, d: number) => {
+  if (!d) return null;
+  const v = Math.round((1000 * n) / d) / 10;
+  return v === 0 && n > 0 ? Number(((100 * n) / d).toPrecision(2)) : v;
+};
+/** A share (n of d) as an exact percent: what a threshold is judged against (a check that finds one activity fails a 0 % threshold whatever the population; the rounded display above must never decide). */
+export const exactPct = (n: number, d: number) => (100 * n) / d;
 export const offender = (t: Row, s: Scope, value?: string | number): Offender => ({ id: t.task_code, name: t.task_name, ...(s.projs.length > 1 ? { project: s.ctx.proj.get(t.proj_id)?.proj_short_name } : {}), ...(value != null ? { value } : {}) });
 
 /** Grade a ratio or percentage against a threshold. */
@@ -118,7 +125,7 @@ export function percentCheck(id: string, name: string, found: Offender[], denomi
   const metric = pct(found.length, denominator);
   return {
     id, name, unit: '%', metric, threshold: th, numerator: found.length, denominator,
-    result: denominator === 0 ? 'pass' : passes(metric!, th) ? 'pass' : 'fail',
+    result: denominator === 0 ? 'pass' : passes(exactPct(found.length, denominator), th) ? 'pass' : 'fail',
     activities: maxIds > 0 ? found.slice(0, maxIds) : found, total_activities: found.length,
     ...(note ? { note } : {}),
   };
