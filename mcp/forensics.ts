@@ -5,6 +5,7 @@
 import { baselineOf, LISTED } from '../core/analysis/common.ts';
 import { scheduleIndex, shapeScheduleIndex } from '../core/analysis/scheduleIndex.ts';
 import { decm, DECM_IDS, DECM_PROFILES } from '../core/analysis/decm.ts';
+import { planningHorizon, shapeHorizon } from '../core/analysis/planningHorizon.ts';
 import { config, fail, type Session } from './runtime.ts';
 import { exportDoc, exportNameProp, exportProp, RESULT_FILE_TOOLS, firstOf, type Table } from './export.ts';
 import { loadUpdates, resultExporter, savedBaselines, type AnalysisHelpers } from './analysis.ts';
@@ -96,6 +97,16 @@ export const FORENSIC_REGISTRY: ForensicTool[] = [
           { name: 'failing_activities', columns: ['check', 'id', 'name', 'project', 'value'], rows: full.checks.flatMap((k) => k.activities.map((x) => ({ check: k.id, ...x }))) },
         ]);
       } finally { loaded?.release(); }
+    },
+  },
+  {
+    name: 'planning_horizon',
+    description: 'How ready is the work that starts in the next 30, 60 and 90 days (the Bellator Schedule Intelligence planning-horizon analysis, as the clone’s own). The anchor is the data date (or status_date); a file with no data date has no windows and is not assessed, with the reason. The windows are fixed: activities whose forecast start (else planned start) falls 0-30, 31-60 and 61-90 calendar days after the anchor (finished and started work, WBS summaries and level of effort are not in a window). Each activity is scored on five readiness dimensions, 0-100: logic 0.25 (60 with no predecessor, 70 while a finish-to-start predecessor is not complete), resources 0.30 (a resource or expense loaded: 100, else 0; a milestone carries no work to resource), approvals 0.20, float 0.10 (total float under 5 working days scores float / 5; negative 0), forecast stability 0.15 (forecast finish against the planned finish: 5 points off a working day beyond 3). A P6 file carries no approval field, so approvals is not assessed and its weight is spread over the others; a file with no resource assignments is not assessed for resources, an activity with no stored float or no planned finish for those dimensions, and the readiness of an activity is re-weighted over the dimensions assessed for it (summary.dimensions_not_assessed says which and why). Per window: the readiness score (the mean of its activities) and status (>= 90 ready, >= 75 mostly ready, >= 50 at risk, else not ready), the count ready and at risk, the mean of each dimension, every activity with its dimension scores and issues (lowest readiness first), and the risks ranked (the at-risk and not-ready activities with the weakest dimension’s first issue); a window with no activities has no score (it says so). systemic_issues: a dimension weak (< 50) across at least max(2, 30 %) of the activities it applies to. The lists show 25 each, the true total beside them, the whole list in the result file. method lists every weight and threshold; the numbers are the benchmark’s, carried over as they are. status_date: the date the windows are counted from (default each project’s data date).',
+    properties: { status_date: STATUS_DATE },
+    tables: ['bands', 'activities (every activity of every window)'],
+    run: (c) => {
+      const { answer, whole, tables } = shapeHorizon(planningHorizon(c.s.db, { projIds: c.projIds, hoursPerDay: c.s.hpd, statusDate: c.h.dd(c.a.status_date) }), c.first);
+      return c.exported(answer, whole, tables);
     },
   },
 ];

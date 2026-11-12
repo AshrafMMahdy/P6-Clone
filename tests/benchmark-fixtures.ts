@@ -117,6 +117,21 @@ export const logicVariety = (): Built => project('VARIETY', [
 export const overAllocated = (): Built => project('OVER', [
   { id: 'A', duration_days: 10, resources: ['Crew'] }, { id: 'B', duration_days: 10, resources: ['Crew'] }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'], resources: ['Crew'] }], { resources: [{ id: 'Crew', max_units_per_day: 1 }] });
 
+/** The planning-horizon fixture (golden: horizon.tasks, the source's tasks with dates): P0 complete before the data date (3-5 Jan), then A..K, resources R on A B D E G I, data date 2026-01-05. Every start and finish is the CPM's
+ *  from 5 Jan on the 7-day calendar (so the source's planned/forecast dates and the clone's early dates are the same days); the planned finish (the file's target end) is earlier than the forecast for C (10 days), F (6) and I (6): forecast drift. */
+export function horizon(): Built {
+  const R = ['A', 'B', 'D', 'E', 'G', 'I'];
+  const defs: [string, number, string[], number][] = [['A', 10, ['P0'], 0], ['B', 10, ['A'], 10], ['C', 3, ['A'], 10], ['D', 5, ['B', 'C'], 20], ['E', 30, ['D'], 25], ['F', 27, ['D'], 25], ['G', 5, ['E', 'F'], 55], ['H', 10, ['G'], 60], ['I', 10, ['H'], 70], ['J', 20, ['I'], 80], ['K', 5, ['J'], 100]];
+  const b = project('HORIZON', [{ id: 'P0', duration_days: 2 }, ...defs.map(([id, d, p]) => ({ id, duration_days: d, predecessors: p, ...(R.includes(id) ? { resources: ['R'] } : {}) }))], {
+    start: '2026-01-05', resources: [{ id: 'R', max_units_per_day: 1 }], schedule: false,
+    ops: [{ op: 'update_activity', id: 'P0', actual_start: '2026-01-03 00:00', actual_finish: '2026-01-05 00:00' }] });
+  const r = scheduleProjects(b.db, [b.projId], { dataDate: parseP6Date('2026-01-05 00:00')! });
+  if (!r.ok) throw new Error('horizon: ' + JSON.stringify(r.findings));
+  const day = (n: number) => new Date(Date.UTC(2026, 0, 5 + n)).toISOString().slice(0, 10) + ' 00:00';
+  for (const [id, d, , s, drift] of [['C', 3, 0, 10, 10], ['F', 27, 0, 25, 6], ['I', 10, 0, 70, 6]] as const) rows(b.db, 'TASK').find((t) => t.proj_id === b.projId && t.task_code === id)!.target_end_date = day(s + d - drift);
+  return b;
+}
+
 export const FIXTURES = { cleanChain, withFloat, withLogicIssues, withCycle, delayed, logicVariety, overAllocated } as const;
 export type FixtureName = keyof typeof FIXTURES;
 /** The status dates the source's tests use with these fixtures. */
