@@ -118,6 +118,20 @@ export function compareText(cs: ScheduleChange[]): string {
   return L.join('\n');
 }
 
+const has = (v: unknown) => v != null && String(v).trim() !== '';
+const num = (v: string | undefined) => Number(v || 0) || 0;
+const assignmentsOf = (d: Db) => { const m = new Map<string, Row[]>(); for (const r of d.tables.TASKRSRC?.rows ?? []) (m.get(r.task_id) ?? m.set(r.task_id, []).get(r.task_id)!).push(r); return m; };
+/** Which percent complete the activity reports (P6's percent complete type): physical, units (actual over budgeted units of its assignments) or duration. */
+export const percentKind = (t: Row): 'physical' | 'units' | 'duration' => (t.complete_pct_type === 'CP_Phys' ? 'physical' : t.complete_pct_type === 'CP_Units' ? 'units' : 'duration');
+/** The activity's % complete by its own type (0-100, one decimal), null when a physical % is blank. */
+export function percentOf(t: Row, asg: Row[]): number | null {
+  const round = (x: number) => Math.round(x * 10) / 10;
+  if (t.complete_pct_type === 'CP_Phys') return has(t.phys_complete_pct) ? round(num(t.phys_complete_pct)) : null;
+  if (t.complete_pct_type === 'CP_Units') { const bud = asg.reduce((s, x) => s + num(x.target_qty), 0); return bud ? round((100 * asg.reduce((s, x) => s + num(x.act_reg_qty) + num(x.act_ot_qty), 0)) / bud) : 0; }
+  const o = num(t.target_drtn_hr_cnt);
+  return o ? round(Math.max(0, Math.min(100, (100 * (o - num(t.remain_drtn_hr_cnt))) / o))) : 0;
+}
+
 /** One finding of progress_integrity: the compare's own row (or, for a % complete that went down, the figures the compare does not carry). */
 export interface IntegrityFinding { object: 'activity'; kind: 'changed'; id: string; name?: string; field: string; a?: string | number; b?: string | number; via?: string }
 export interface ProgressIntegrity { retroactive_actuals: IntegrityFinding[]; progress_decreases: IntegrityFinding[]; status_regressions: IntegrityFinding[]; clean: boolean; note: string }
@@ -133,25 +147,14 @@ export interface ProgressIntegrity { retroactive_actuals: IntegrityFinding[]; pr
  */
 export function progressIntegrity(a: Db, b: Db, changes: ScheduleChange[]): ProgressIntegrity {
   const acts = changes.filter((c) => c.object === 'activity' && c.kind === 'changed');
-  const has = (v: unknown) => v != null && String(v).trim() !== '';
   const finding = (c: ScheduleChange): IntegrityFinding => ({ object: 'activity', kind: 'changed', id: c.id, ...(c.name != null ? { name: c.name } : {}), field: c.field!, a: c.a, b: c.b });
   const retro = acts.filter((c) => (c.field === 'actual_start' || c.field === 'actual_finish') && has(c.a) && String(c.a) !== String(c.b ?? '')).map(finding);
   const rank: Record<string, number> = { TK_NotStart: 0, TK_Active: 1, TK_Complete: 2 };
   const back = acts.filter((c) => c.field === 'status' && rank[String(c.a)] != null && rank[String(c.b)] != null && rank[String(c.b)] < rank[String(c.a)]).map(finding);
   const backIds = new Set(back.map((c) => c.id));
   const down: IntegrityFinding[] = [];
-  const num = (v: string | undefined) => Number(v || 0) || 0;
-  const asgOf = (d: Db) => { const m = new Map<string, Row[]>(); for (const r of d.tables.TASKRSRC?.rows ?? []) (m.get(r.task_id) ?? m.set(r.task_id, []).get(r.task_id)!).push(r); return m; };
-  const asgA = asgOf(a), asgB = asgOf(b);
-  /** The activity's % complete by its own type (0-100), null when a physical % is blank. */
-  const pctOf = (t: Row, asg: Row[]): number | null => {
-    const round = (x: number) => Math.round(x * 10) / 10;
-    if (t.complete_pct_type === 'CP_Phys') return has(t.phys_complete_pct) ? round(num(t.phys_complete_pct)) : null;
-    if (t.complete_pct_type === 'CP_Units') { const bud = asg.reduce((s, x) => s + num(x.target_qty), 0); return bud ? round((100 * asg.reduce((s, x) => s + num(x.act_reg_qty) + num(x.act_ot_qty), 0)) / bud) : 0; }
-    const o = num(t.target_drtn_hr_cnt);
-    return o ? round(Math.max(0, Math.min(100, (100 * (o - num(t.remain_drtn_hr_cnt))) / o))) : 0;
-  };
-  const type = (t: Row) => (t.complete_pct_type === 'CP_Phys' ? 'physical' : t.complete_pct_type === 'CP_Units' ? 'units' : 'duration');
+  const asgA = assignmentsOf(a), asgB = assignmentsOf(b);
+  const type = percentKind;
   const pairs = pairProjects(a, b);
   for (const [x, y] of pairs) {
     if (!x || !y) continue;
@@ -161,7 +164,7 @@ export function progressIntegrity(a: Db, b: Db, changes: ScheduleChange[]): Prog
     for (const [code, ra] of ta) {
       const rb = tb.get(code);
       if (!rb) continue;
-      const pa = pctOf(ra, asgA.get(ra.task_id) ?? []), pb = pctOf(rb, asgB.get(rb.task_id) ?? []);
+      const pa = percentOf(ra, asgA.get(ra.task_id) ?? []), pb = percentOf(rb, asgB.get(rb.task_id) ?? []);
       if (pa == null || pb == null || !(pb < pa)) continue;
       const id = pre + code, kind = type(rb);
       if (backIds.has(id) && kind !== 'physical') continue; // a status that went back is counted there, not twice
@@ -172,4 +175,66 @@ export function progressIntegrity(a: Db, b: Db, changes: ScheduleChange[]): Prog
   return { retroactive_actuals: retro, progress_decreases: down, status_regressions: back, clean,
     note: clean ? 'no actual date the earlier update held was changed or cleared, no % complete went down, no status went back'
       : `${retro.length} retroactive actual-date change(s), ${down.length} progress decrease(s), ${back.length} status regression(s) between the updates \u2014 evidence-integrity findings that MUST be disclosed (a claim relies on contemporaneous records)` };
+}
+
+/** An activity's % complete (by its own type, percentOf) that differs between an earlier and a later update, activities matched by Activity ID as compareSchedules matches them. A physical % blank on either side is not compared (as progressIntegrity). */
+export interface PercentChange { id: string; name: string; kind: 'physical' | 'units' | 'duration'; a: number; b: number }
+export function percentChanges(a: Db, b: Db): PercentChange[] {
+  const asgA = assignmentsOf(a), asgB = assignmentsOf(b), out: PercentChange[] = [];
+  const pairs = pairProjects(a, b);
+  for (const [x, y] of pairs) {
+    if (!x || !y) continue;
+    const pre = pairs.length > 1 ? `${y.proj_short_name}:` : '';
+    const byCode = (d: Db, p: Row) => new Map((d.tables.TASK?.rows ?? []).filter((t) => t.proj_id === p.proj_id).map((t) => [t.task_code, t]));
+    const ta = byCode(a, x), tb = byCode(b, y);
+    for (const [code, ra] of ta) {
+      const rb = tb.get(code);
+      if (!rb) continue;
+      const pa = percentOf(ra, asgA.get(ra.task_id) ?? []), pb = percentOf(rb, asgB.get(rb.task_id) ?? []);
+      if (pa == null || pb == null || pa === pb) continue;
+      out.push({ id: pre + code, name: rb.task_name ?? '', kind: percentKind(rb), a: pa, b: pb });
+    }
+  }
+  return out;
+}
+
+/** A resource (or role) on an activity in one update and not the other. */
+export interface AssignmentChange { id: string; name: string; kind: 'added' | 'removed'; resource: string }
+/** The assignments (TASKRSRC) that were added to or removed from an activity between an earlier (a) and a later (b) update, activities matched by Activity ID as compareSchedules matches them,
+ *  a resource told by its short name in each file (so renumbered resource ids still match), a role-only assignment by the role's. Quantities and costs are not compared: only who is assigned. */
+export function assignmentChanges(a: Db, b: Db): AssignmentChange[] {
+  const label = (d: Db) => {
+    const rs = new Map((d.tables.RSRC?.rows ?? []).map((r) => [r.rsrc_id, r.rsrc_short_name || r.rsrc_name || r.rsrc_id]));
+    const ro = new Map((d.tables.ROLES?.rows ?? []).map((r) => [r.role_id, r.role_short_name || r.role_name || r.role_id]));
+    return (r: Row) => (r.rsrc_id ? rs.get(r.rsrc_id) ?? r.rsrc_id : r.role_id ? `role ${ro.get(r.role_id) ?? r.role_id}` : '');
+  };
+  const la = label(a), lb = label(b), asgA = assignmentsOf(a), asgB = assignmentsOf(b), out: AssignmentChange[] = [];
+  const pairs = pairProjects(a, b);
+  for (const [x, y] of pairs) {
+    if (!x || !y) continue;
+    const pre = pairs.length > 1 ? `${y.proj_short_name}:` : '';
+    const byCode = (d: Db, p: Row) => new Map((d.tables.TASK?.rows ?? []).filter((t) => t.proj_id === p.proj_id).map((t) => [t.task_code, t]));
+    const ta = byCode(a, x), tb = byCode(b, y);
+    for (const [code, ra] of ta) {
+      const rb = tb.get(code);
+      if (!rb) continue;
+      const before = new Set((asgA.get(ra.task_id) ?? []).map(la).filter(Boolean)), after = new Set((asgB.get(rb.task_id) ?? []).map(lb).filter(Boolean));
+      for (const r of after) if (!before.has(r)) out.push({ id: pre + code, name: rb.task_name ?? '', kind: 'added', resource: r });
+      for (const r of before) if (!after.has(r)) out.push({ id: pre + code, name: rb.task_name ?? '', kind: 'removed', resource: r });
+    }
+  }
+  return out;
+}
+
+/** The baseline start / finish of an activity that differ between the baseline an earlier update carries and the one a later update carries (a and b: each baseline's activities by Activity ID; start and
+ *  finish: how a baseline activity's date is read, the caller's: referenceStart / baselineFinish). Only activities in both baselines; times in minutes, null where a baseline activity has no such date. */
+export interface BaselineDateChange { id: string; name: string; field: 'baseline_start' | 'baseline_finish'; a: number | null; b: number | null }
+export function baselineDateChanges(a: Map<string, Row>, b: Map<string, Row>, start: (r: Row) => number | null, finish: (r: Row) => number | null): BaselineDateChange[] {
+  const out: BaselineDateChange[] = [];
+  for (const [code, ra] of a) {
+    const rb = b.get(code);
+    if (!rb) continue;
+    for (const [field, read] of [['baseline_start', start], ['baseline_finish', finish]] as const) { const x = read(ra), y = read(rb); if (x !== y) out.push({ id: code, name: rb.task_name ?? '', field, a: x, b: y }); }
+  }
+  return out;
 }

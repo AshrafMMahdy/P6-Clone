@@ -11,7 +11,7 @@ import { compareSchedules, progressIntegrity } from '../diff.ts';
 import { dcma14, invalidDateFlags } from './dcma.ts';
 import type { Update } from './delay.ts';
 import { baselineOf, baselineFinish, isLoe, isWbs, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
-import { loopMessage, logicLoops, referenceStart } from './forensic.ts';
+import { loopMessage, logicLoops, referenceStart, updateDate, updateView } from './forensic.ts';
 
 export type DecmId = '06A204b' | '06A205a' | '06A208a' | '06A209a' | '06A210a' | '06A212a' | '06A401a' | '06A501a' | '06A504a' | '06A504b' | '06A505a' | '06A505b' | '06A506a' | '06A506b' | '06A506c' | '08I101a' | '10A303a';
 export const DECM_IDS: DecmId[] = ['06A204b', '06A205a', '06A208a', '06A209a', '06A210a', '06A212a', '06A401a', '06A501a', '06A504a', '06A504b', '06A505a', '06A505b', '06A506a', '06A506b', '06A506c', '08I101a', '10A303a'];
@@ -63,18 +63,6 @@ export interface DecmReport {
   guidelines: { guideline: number; name: string; checks: string[]; passed: number; failed: number; not_assessed: number }[];
   checks: DecmCheck[];
   method: string[];
-}
-
-const dateOf = (u: Update) => { const p = rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId); return parseP6Date(p?.last_recalc_date || p?.plan_start_date) ?? null; };
-/** An update as a database of its one project, as compareSchedules reads a file (a baseline copy held in the same database as the project is such an update: its rows are shown as a project of their own). */
-function viewOf(u: Update): Db {
-  const main = rows(u.db, 'PROJECT').filter((p) => !p._baseline_of);
-  if (main.length === 1 && main[0].proj_id === u.projId) return u.db;
-  const p = rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId)!;
-  const { _baseline_of: _b, ...row } = p;
-  const tasks = rows(u.db, 'TASK').filter((t) => t.proj_id === u.projId), ids = new Set(tasks.map((t) => t.task_id));
-  const T = u.db.tables;
-  return { tables: { ...T, PROJECT: { ...T.PROJECT, rows: [row] }, TASK: { ...T.TASK, rows: tasks }, TASKPRED: { ...T.TASKPRED, rows: rows(u.db, 'TASKPRED').filter((r) => ids.has(r.task_id)) }, TASKRSRC: { ...T.TASKRSRC, rows: rows(u.db, 'TASKRSRC').filter((r) => ids.has(r.task_id)) }, PROJWBS: { ...T.PROJWBS, rows: rows(u.db, 'PROJWBS').filter((w) => w.proj_id === u.projId) } } as Db['tables'] };
 }
 
 export function decm(db: Db, o: DecmOptions = {}): DecmReport {
@@ -139,12 +127,12 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   }
   // 06A504a / 06A504b: an actual start / finish that differs from the one an earlier update held (progressIntegrity between consecutive updates, in data-date order)
   {
-    const chain = [...(o.updates ?? [])].sort((x, y) => (dateOf(x) ?? 0) - (dateOf(y) ?? 0));
+    const chain = [...(o.updates ?? [])].sort((x, y) => (updateDate(x) ?? 0) - (updateDate(y) ?? 0));
     if (chain.length < 2) { const why = 'No earlier update was given: pass updates (the earlier schedules, as windows_analysis takes them).'; na('06A504a', why); na('06A504b', why); }
     else {
       const start = new Map<string, Offender>(), finish = new Map<string, Offender>();
       for (let i = 1; i < chain.length; i++) {
-        const a = viewOf(chain[i - 1]), b = viewOf(chain[i]);
+        const a = updateView(chain[i - 1]), b = updateView(chain[i]);
         const f = progressIntegrity(a, b, compareSchedules(a, b, s.hpd, true)).retroactive_actuals;
         for (const x of f) { const m = x.field === 'actual_start' ? start : x.field === 'actual_finish' ? finish : null; if (m && !m.has(x.id)) m.set(x.id, { id: x.id, name: x.name ?? '', value: `${chain[i - 1].name}: ${x.a || '(blank)'} -> ${chain[i].name}: ${x.b || '(blank)'}` }); }
       }

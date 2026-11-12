@@ -6,6 +6,7 @@ import { baselineOf, LISTED } from '../core/analysis/common.ts';
 import { scheduleIndex, shapeScheduleIndex } from '../core/analysis/scheduleIndex.ts';
 import { decm, DECM_IDS, DECM_PROFILES } from '../core/analysis/decm.ts';
 import { planningHorizon, shapeHorizon } from '../core/analysis/planningHorizon.ts';
+import { changeTracking, shapeChanges, MODES, DATE_MATERIAL_DAYS, PROGRESS_MATERIAL_POINTS } from '../core/analysis/changeTracking.ts';
 import { config, fail, type Session } from './runtime.ts';
 import { exportDoc, exportNameProp, exportProp, RESULT_FILE_TOOLS, firstOf, type Table } from './export.ts';
 import { loadUpdates, resultExporter, savedBaselines, type AnalysisHelpers } from './analysis.ts';
@@ -107,6 +108,21 @@ export const FORENSIC_REGISTRY: ForensicTool[] = [
     run: (c) => {
       const { answer, whole, tables } = shapeHorizon(planningHorizon(c.s.db, { projIds: c.projIds, hoursPerDay: c.s.hpd, statusDate: c.h.dd(c.a.status_date) }), c.first);
       return c.exported(answer, whole, tables);
+    },
+  },
+  {
+    name: 'change_tracking',
+    description: `What changed between a series of updates (the Bellator Schedule Intelligence change-tracking analysis, as the clone\u2019s own). updates is the series taken as windows_analysis takes it ([{handle} | {path} | {baseline: project|bl1|bl2|bl3|<saved baseline name>}]); this open project is the LATEST update; the updates are put in data-date order and each consecutive pair is a period. mode: latest (the last pair only) or all_periods (every pair, the default). Per period and overall, per category {total, material}: baseline_dates (the baseline each update carries: a pair where either update has none is not assessed, with the reason), actual_dates, forecast_dates (the start of work not started and the finish of work not finished in both updates), logic (a relationship added, removed, or kept with another type or lag), resources (an assignment added or removed) and progress (percent complete by the activity\u2019s own type). A date change is material from ${DATE_MATERIAL_DAYS} working day of the activity\u2019s calendar and a percent change from ${PROGRESS_MATERIAL_POINTS} points (the source\u2019s numbers, fixed; a smaller change is counted as not material); logic and resource changes are always material. flags (only those raised): retroactive_actual_dates (an actual start or finish an earlier update held, changed or cleared: DECM 06A504a / b), progress_decreases, baseline_dates_revised (a material baseline date change) and status_regressions; status is fail when a retroactive actual date or a material baseline revision was found, warning when any change is material, else pass. Activities in only one update of a pair are counted (activities_added / activities_deleted), not tracked. Read-only. Lists (changes, logic_changes, resource_changes, retroactive_actuals, progress_decreases, status_regressions): 25 in the answer, <list>_total the true number, the whole list in the result file; changes holds the date and percent changes of every category but logic and resources, which have their own lists. method lists every number with its source line.`,
+    properties: { mode: { type: 'string', enum: MODES, description: 'latest (compare the last update with this one only) or all_periods (every consecutive pair, the default)' }, updates: { type: 'array', items: { type: 'object' }, description: 'the earlier updates, as windows_analysis takes them: [{handle} | {path} | {baseline: project|bl1|bl2|bl3|<saved baseline name>} | {data_date, progress: [edit ops]}]; this project is the latest' } },
+    required: ['updates'],
+    tables: ['changes (date and percent changes by category)', 'retroactive_actuals', 'progress_decreases', 'status_regressions', 'logic_changes', 'resource_changes'],
+    readsFiles: ['updates[].path'], readsHandles: true,
+    run: (c) => {
+      const loaded = c.updates({ includeCurrent: true });
+      try {
+        const { answer, whole, tables } = shapeChanges(changeTracking({ updates: loaded.updates, mode: c.a.mode, hoursPerDay: c.s.hpd }), c.first);
+        return c.exported(answer, whole, tables);
+      } finally { loaded.release(); }
     },
   },
 ];

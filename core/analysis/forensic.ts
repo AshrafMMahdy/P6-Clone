@@ -5,14 +5,14 @@
 // activity's calendar, the project's baselines, actual dates and data date. Every number carried over from the source says where it is
 // (file:line); none is a choice of this clone. Where the source falls back to an invented value (no data date -> the earliest start,
 // a ratio of 1 for an empty population, a divisor of 1 for no activities) the helper answers `not_assessed` with the reason instead.
-import { groupBy, type Row } from '../db.ts';
+import { groupBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentComplete, reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { findLoops } from '../xer/validate.ts';
 import { baselineOf, baselineFinish, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, offender, type Offender, type Scope } from './common.ts';
-import { matchActivities } from './delay.ts';
+import { matchActivities, type Update } from './delay.ts';
 
 /** What a figure answers: its numbers, or that it could not be worked out and why (as a dcma_14 check does: result not_assessed with a note). */
 export type Assessed<T> = ({ result: 'assessed' } & T) | { result: 'not_assessed'; note: string };
@@ -321,3 +321,20 @@ export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baseline
   if (!due) { const none = s.projs.every((p) => s.dataDate(p.proj_id) == null); return { result: 'not_assessed', reason: none ? 'no_data_date' : 'none_due', note: none ? 'The project has no data date: give a status_date.' : 'No task was baselined to finish by the data date.', completed }; }
   return { result: 'assessed', value: r3(completed / due), exact: completed / due, completed, due, not_completed: dueList };
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// A series of updates (decm, change_tracking)
+
+/** The data date of an update's project (else its planned start). */
+export const updateDate = (u: Update) => { const p = rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId); return parseP6Date(p?.last_recalc_date || p?.plan_start_date) ?? null; };
+/** An update as a database of its one project, as compareSchedules reads a file (a baseline copy held in the same database as the project is such an update: its rows are shown as a project of their own). */
+export function updateView(u: Update): Db {
+  const main = rows(u.db, 'PROJECT').filter((p) => !p._baseline_of);
+  if (main.length === 1 && main[0].proj_id === u.projId) return u.db;
+  const p = rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId)!;
+  const { _baseline_of: _b, ...row } = p;
+  const tasks = rows(u.db, 'TASK').filter((t) => t.proj_id === u.projId), ids = new Set(tasks.map((t) => t.task_id));
+  const T = u.db.tables;
+  return { tables: { ...T, PROJECT: { ...T.PROJECT, rows: [row] }, TASK: { ...T.TASK, rows: tasks }, TASKPRED: { ...T.TASKPRED, rows: rows(u.db, 'TASKPRED').filter((r) => ids.has(r.task_id)) }, TASKRSRC: { ...T.TASKRSRC, rows: rows(u.db, 'TASKRSRC').filter((r) => ids.has(r.task_id)) }, PROJWBS: { ...T.PROJWBS, rows: rows(u.db, 'PROJWBS').filter((w) => w.proj_id === u.projId) } } as Db['tables'] };
+}
+
