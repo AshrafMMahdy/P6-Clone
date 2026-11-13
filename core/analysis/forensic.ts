@@ -6,6 +6,7 @@
 // (file:line); none is a choice of this clone. Where the source falls back to an invented value (no data date -> the earliest start,
 // a ratio of 1 for an empty population, a divisor of 1 for no activities) the helper answers `not_assessed` with the reason instead.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
+import { cstrName } from '../notes.ts';
 import { noBaselineOf } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
@@ -202,7 +203,7 @@ export function logicFigures(s: Scope): Assessed<LogicFigures> {
     if (noPred && !mile) openStarts.push(offender(t, s));
     if (noSucc && !mile) openFinishes.push(offender(t, s));
     if (noPred && noSucc && !mile) missing.push(offender(t, s));
-    if (constraintsOf(t).some((c) => DCMA_HARD.has(c))) hard.push(offender(t, s, constraintsOf(t).join(', ')));
+    if (constraintsOf(t).some((c) => DCMA_HARD.has(c))) hard.push(offender(t, s, constraintsOf(t).map(cstrName).join(', ')));
   }
   const leads = s.tasks.filter((t) => preds(t).some((r) => lag(r) < 0)).map((t) => offender(t, s));
   const lags = s.tasks.filter((t) => preds(t).some((r) => lag(r) > 0)).map((t) => offender(t, s));

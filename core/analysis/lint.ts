@@ -4,6 +4,7 @@
 // work, chain length, link mix and density, redundant links, disguised orphans, SS abuse) with a score and grade.
 // Days are working days of each activity's calendar (the platform's version used calendar days).
 import { maxOf, minOf } from '../arrays.ts';
+import { cstrName } from '../notes.ts';
 import { type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
@@ -206,7 +207,7 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
   }
   if (want('constraints')) {
     const HARD = new Set(['CS_MANDSTART', 'CS_MANDFIN', 'CS_MSO', 'CS_MEO']);
-    const f = live.filter((t) => t.cstr_type || t.cstr_type2).map((t) => offender(t, s, [t.cstr_type, t.cstr_type2].filter(Boolean).map((c) => c.slice(3)).join(', ')));
+    const f = live.filter((t) => t.cstr_type || t.cstr_type2).map((t) => offender(t, s, [t.cstr_type, t.cstr_type2].filter(Boolean).map((c) => cstrName(c)).join(', ')));
     const hard = live.filter((t) => HARD.has(t.cstr_type) || HARD.has(t.cstr_type2)).length;
     out.push(check('constraints', 'Constrained activities (every type)', hard > T.constraints.max_hard ? 'warning' : 'info', f, live.length, hard > T.constraints.max_hard ? 'warn' : 'pass', maxIds, { applied: T.constraints, note: `${hard} hard (Start On, Finish On, Mandatory Start, Mandatory Finish; On or Before is not counted here), over the incomplete activities that are not WBS summaries or level of effort. Constraints should stand for real dates, not replace logic.` }));
   }

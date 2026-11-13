@@ -284,6 +284,7 @@ test('41, 42: each tool says what it counts; change_tracking says what changed; 
   await call('schedule', { handle: h });
   const d = await call('dcma_14', { handle: h });
   assert.match(d.checks.find((c: any) => c.id === 'hard_constraints').note, /^Hard constraints here: Start On, Finish On, Start On or Before, Finish On or Before, Mandatory Start and Mandatory Finish .* over the incomplete tasks \(not WBS summaries, level of effort or milestones\)\.$/);
+  assert.equal(d.checks.find((c: any) => c.id === 'hard_constraints').activities[0].value, 'Finish On or Before', 'a constraint is named by P6, never by its code');
   assert.match(d.checks.find((c: any) => c.id === 'logic').note, /^Open ends here: incomplete tasks \(not WBS summaries, level of effort or milestones\)/);
   const c = await call('check_schedule', { handle: h });
   assert.match(c.checks.find((x: any) => x.id === 'hard_constraints').note, /^Hard constraints here: Mandatory Start and Mandatory Finish only, over the incomplete activities/);

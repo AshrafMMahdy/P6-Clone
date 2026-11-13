@@ -7,7 +7,7 @@
 // Large Float is < 1 % (Oracle and p6consulting; one walkthrough says < 5 %), BEI > 0.95 as the dialog shows it. EPPM's extra Dangling Start/Finish checks are not in P6 Professional: the
 // lint extension has them.
 import { rows, type Db, type Row } from '../db.ts';
-import { noBaseline } from '../notes.ts';
+import { cstrName, noBaseline } from '../notes.ts';
 import { parseP6Date } from '../dates.ts';
 import {
   baselineOf, baselineFinish, constraintsOf, isDone, isLoe, isMilestone, isStarted, isWbs, makeScope, notAssessed, offender,
@@ -89,8 +89,8 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
   // Constraints: completed, WBS summary and LOE activities are not examined, nor start constraints on started activities.
   const cPop = s.tasks.filter((t) => !isDone(t) && !isWbs(t) && !isLoe(t));
   const live = (t: Row) => constraintsOf(t).filter((c) => !(isStarted(t) && START_CONSTRAINTS.has(c)));
-  add('hard_constraints', () => percentCheck('hard_constraints', name('hard_constraints'), cPop.filter((t) => live(t).some((c) => P6_HARD.has(c))).map((t) => offender(t, s, live(t).join(', '))), cPop.length, th('hard_constraints'), maxIds, 'Hard constraints here: Mandatory Start and Mandatory Finish only, over the incomplete activities that are not WBS summaries or level of effort (a Start On constraint on an activity that has started is not counted at all).'));
-  add('soft_constraints', () => percentCheck('soft_constraints', name('soft_constraints'), cPop.filter((t) => live(t).some((c) => P6_SOFT.has(c))).map((t) => offender(t, s, live(t).join(', '))), cPop.length, th('soft_constraints'), maxIds, 'Start/Finish On, On or Before, On or After, As Late As Possible.'));
+  add('hard_constraints', () => percentCheck('hard_constraints', name('hard_constraints'), cPop.filter((t) => live(t).some((c) => P6_HARD.has(c))).map((t) => offender(t, s, live(t).map(cstrName).join(', '))), cPop.length, th('hard_constraints'), maxIds, 'Hard constraints here: Mandatory Start and Mandatory Finish only, over the incomplete activities that are not WBS summaries or level of effort (a Start On constraint on an activity that has started is not counted at all).'));
+  add('soft_constraints', () => percentCheck('soft_constraints', name('soft_constraints'), cPop.filter((t) => live(t).some((c) => P6_SOFT.has(c))).map((t) => offender(t, s, live(t).map(cstrName).join(', '))), cPop.length, th('soft_constraints'), maxIds, 'Start/Finish On, On or Before, On or After, As Late As Possible.'));
 
   // Float and durations: completed, WBS summary and LOE activities are not examined.
   const tf = (t: Row) => (t.total_float_hr_cnt === '' || t.total_float_hr_cnt == null ? null : Number(t.total_float_hr_cnt));

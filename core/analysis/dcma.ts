@@ -3,6 +3,7 @@
 // and relationship types count relationships. Durations and float are in working days of each activity's calendar.
 // The Critical Path Test runs on a scratch copy (a journal that is rolled back); CPLI and BEI use a chosen baseline.
 import { maxOf, minOf } from '../arrays.ts';
+import { cstrName } from '../notes.ts';
 import { noBaselineOf } from '../notes.ts';
 import { type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
@@ -171,7 +172,7 @@ export function lagsCheck(s: Scope, L: Row[], th: Threshold, maxIds: number): Ch
 }
 /** DCMA check 5, hard constraints: the tasks with Must Start/Finish On or Start/Finish No Later Than. */
 export function hardConstraintsCheck(s: Scope, T: Row[], th: Threshold, maxIds: number): CheckResult {
-  return percentCheck('hard_constraints', NAMES.hard_constraints, T.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c))).map((t) => offender(t, s, constraintsOf(t).join(', '))), T.length, th, maxIds, 'Hard constraints here: Start On, Finish On, Start On or Before, Finish On or Before, Mandatory Start and Mandatory Finish (either constraint of an activity), over the incomplete tasks (not WBS summaries, level of effort or milestones).');
+  return percentCheck('hard_constraints', NAMES.hard_constraints, T.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c))).map((t) => offender(t, s, constraintsOf(t).map(cstrName).join(', '))), T.length, th, maxIds, 'Hard constraints here: Start On, Finish On, Start On or Before, Finish On or Before, Mandatory Start and Mandatory Finish (either constraint of an activity), over the incomplete tasks (not WBS summaries, level of effort or milestones).');
 }
 
 export interface DateFlags { task: Row; actual_start_after: boolean; actual_finish_after: boolean; forecast_before: boolean }
