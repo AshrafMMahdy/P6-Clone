@@ -138,3 +138,20 @@ export function spreadUsage(db: Db, projIds: string[], opts: { start: number; en
   const name = (id: string) => rsrcs.get(id)?.rsrc_short_name ?? id;
   return { buckets, rows: [...out.values()].sort((x, y) => name(x.rsrcId).localeCompare(name(y.rsrcId), undefined, { numeric: true })) };
 }
+
+/** The resources that have a limit set (Max Units/Time above 0, on the resource or on a price row of it): the ONE predicate for "has no limit". A resource with no limit set is not judged for over-allocation by
+ *  resource_histogram, schedule_index and level_resources alike. The limit of each, in units per hour (the latest price row that has one wins over the resource's own). */
+export function resourceLimits(db: Db): Map<string, number> {
+  const cap = new Map<string, number>();
+  const rates = new Map<string, Row[]>();
+  for (const rr of rows(db, 'RSRCRATE')) if (rr.max_qty_per_hr !== '' && rr.max_qty_per_hr != null) { let l = rates.get(rr.rsrc_id); if (!l) rates.set(rr.rsrc_id, (l = [])); l.push(rr); }
+  for (const r of rows(db, 'RSRC')) {
+    if (r.rsrc_type === 'RT_Mat') continue; // a material has no capacity (the usage profile skips it; level_resources never levels it)
+    // the price rows that state a Max Units/Time decide (as the usage profile reads them: even a 0 there is "no limit"); else the resource's own
+    const own = rates.get(r.rsrc_id);
+    const vals = own ? own.map((x) => Number(x.max_qty_per_hr)).filter((v) => Number.isFinite(v)) : [Number(r.max_qty_per_hr)];
+    const best = [...vals].reverse().find((v) => v > 0);
+    if (best != null) cap.set(r.rsrc_id, best);
+  }
+  return cap;
+}
