@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { callTool, toolResult, toolsList } from '../mcp/server.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
@@ -322,9 +323,12 @@ test('a report that reads the project baseline says when a project has none in t
   // the baseline assigned: the columns are filled and nothing is said
   const e = await call('edit', { handle: h, operations: [{ op: 'assign_baseline', baseline: 'TOWER-A-BL1' }] });
   assert.ok(!e.error, JSON.stringify(e.error));
-  const v2 = await call('run_report', { handle: h, report: 'variance' });
-  assert.equal(v2.notes, undefined);
+  // (what is still said: the two activities the baseline does not hold, whose baseline cells are the empty ones: read from the rows)
+  const v2 = await call('run_report', { handle: h, report: 'variance', max_rows: 1000 });
+  assert.deepEqual(v2.notes, ['BL Start, BL Finish and Finish Var (d) are empty for 2 activities of TOWER-A that are not in its baseline TOWER-A-BL1: A1030, M1000.']);
+  assert.deepEqual(v2.rows.filter((r: any) => r.cells[at(v2, 'BL Finish')] === '').map((r: any) => r.cells[at(v2, 'Activity ID')]).sort(), ['A1030', 'M1000']);
   assert.ok(v2.rows.some((r: any) => r.cells[at(v2, 'BL Finish')] !== ''), 'baseline dates are shown');
+  // (Late Activities lists neither of the two, so it says nothing)
   assert.equal((await call('run_report', { handle: h, report: 'std-late' })).notes, undefined);
   // 130 TRIAL: the project names a baseline the file does not hold
   const t = await open('130 TRIAL.xer');
@@ -350,12 +354,14 @@ test('a loop in the logic (owner 2026-11-13): every analysis that reads the save
   const o = await call('open_file', { path }), h = o.handle;
   assert.ok(h, JSON.stringify(o).slice(0, 300));
   const named = (s: string) => pair.every((c) => s.includes(c));
-  const sentence = (figures: boolean) => new RegExp(`^.+ are in a loop: the dates of ${proj.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} cannot be recalculated${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of the loop \\(edit update_relationship or delete_relationship\\)\\.$`);
-  for (const tool of ['critical_path', 'float_paths', 'dcma_14', 'check_schedule', 'decm', 'schedule_health', 'lint', 'schedule_index', 'planning_horizon', 'earned_value', 'progress_curves', 'resource_histogram', 'project_summary']) {
+  const sentenceOf = (figures: boolean) => `${proj} has a loop in its logic (${[codeOf(first[col('pred_task_id')]), codeOf(first[col('task_id')])].join(', ')}): its dates cannot be recalculated${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of the loop (edit update_relationship or delete_relationship).`;
+  const sentence = (figures: boolean) => ({ test: (n: string) => n === sentenceOf(figures) || n === sentenceOf(figures).replace(/\(([^ ,]+), ([^)]+)\)/, '($2, $1)') });
+  for (const tool of ['critical_path', 'float_paths', 'dcma_14', 'check_schedule', 'decm', 'schedule_health', 'lint', 'schedule_index', 'planning_horizon', 'baseline_variance', 'earned_value', 'progress_curves', 'resource_histogram', 'project_summary']) {
     const a = await call(tool, { handle: h, ...(tool === 'lint' ? { simulate: false } : {}) });
+    if (tool === 'baseline_variance') { assert.equal(a.error?.code, 'bad_input', 'no baseline in this file: its own refusal stands'); continue; }
     assert.ok(!a.error, `${tool} still answers: ${JSON.stringify(a.error)}`);
-    const said = ((a.notes ?? []) as string[]).filter((n) => / in a loop: /.test(n));
-    assert.equal(said.length, 1, `${tool}: ${JSON.stringify(a.notes)}`);
+    const said = ((a.notes ?? []) as string[]).filter((n) => /loop/.test(n) && !/not assessed/.test(n));
+    assert.equal(said.length, 1, `${tool}: the loop is said once: ${JSON.stringify(a.notes)}`);
     assert.ok(sentence(true).test(said[0]) && named(said[0]), `${tool}: ${said[0]}`);
     assert.ok(!JSON.stringify(a.notes).includes('are not what a recalculation gives'), `${tool}: nothing is said of a recalculation that cannot be made`);
   }
@@ -366,16 +372,15 @@ test('a loop in the logic (owner 2026-11-13): every analysis that reads the save
   const rv = await call('review', { handle: h });
   const rc = rv.checks.find((c: any) => c.id === 'loops');
   assert.deepEqual([rc.grade, rc.count], ['fail', 2]);
-  assert.equal(rv.grade ?? rv.overall ?? 'fail', 'fail');
   assert.ok((rv.notes as string[]).some((n) => sentence(false).test(n) && named(n)), JSON.stringify(rv.notes));
   // schedule refuses, as before; an edit that moves dates says the dates cannot be recalculated
-  assert.match((await call('schedule', { handle: h })).error.message, / in a loop\.$/);
+  assert.match((await call('schedule', { handle: h })).error.message, / are in a loop\.$/);
   const e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: pair[0], duration_days: 77 }] });
   assert.ok(!e.error && (e.notes as string[]).some((n) => sentence(false).test(n)), JSON.stringify(e.notes ?? e.error));
   // the loop removed: none of them says it, and lint and review pass the check
   const fix = await call('edit', { handle: h, operations: [{ op: 'delete_relationship', pred: codeOf(rev[col('pred_task_id')]), succ: codeOf(rev[col('task_id')]) }] });
   assert.ok(!fix.error, JSON.stringify(fix.error));
-  for (const tool of ['critical_path', 'dcma_14', 'project_summary']) assert.ok(!JSON.stringify((await call(tool, { handle: h })).notes ?? []).includes('in a loop'), tool);
+  for (const tool of ['critical_path', 'dcma_14', 'project_summary']) assert.ok(!/loop/.test(JSON.stringify((await call(tool, { handle: h })).notes ?? [])), tool);
   assert.equal((await call('lint', { handle: h, simulate: false })).checks.find((c: any) => c.id === 'loops').result, 'pass');
   assert.equal((await call('review', { handle: h })).checks.find((c: any) => c.id === 'loops').grade, 'pass');
   // a file with no loop (as shipped): the check passes with nothing listed
@@ -390,19 +395,72 @@ test('a report over several projects says whose baseline columns are empty; a PD
   const e = await call('edit', { handle: h, operations: [{ op: 'assign_baseline', baseline: 'TOWER-A-BL1' }, { op: 'add_project', id: 'NOBL', start: '2026-03-02' }, { op: 'add_activity', project: 'NOBL', id: 'N1', name: 'N1', duration_days: 3 }] });
   assert.ok(!e.error, JSON.stringify(e.error));
   const v = await call('run_report', { handle: h, report: 'variance' });
-  assert.deepEqual(v.notes, ['BL Start, BL Finish and Finish Var (d) are empty for the activities of NOBL: no baseline is assigned to NOBL; assign one with edit assign_baseline.']);
+  assert.deepEqual(v.notes, ['For the activities of NOBL, BL Start, BL Finish and Finish Var (d) are empty: no baseline is assigned to NOBL; assign one with edit assign_baseline.', 'BL Start, BL Finish and Finish Var (d) are empty for 2 activities of TOWER-A that are not in its baseline TOWER-A-BL1: A1030, M1000.']);
   const blFinish = v.columns.indexOf('BL Finish'), id = v.columns.indexOf('Activity ID');
   assert.ok(v.rows.some((r: any) => r.cells[id] !== 'N1' && r.cells[blFinish] !== ''), 'TOWER-A’s rows show their baseline');
   assert.equal(v.rows.find((r: any) => r.cells[id] === 'N1').cells[blFinish], '');
   const late = await call('run_report', { handle: h, report: 'std-late' });
-  assert.match(late.notes[0], /^BL Project Finish and Variance - BL Project Finish Date are empty for the activities of NOBL and the activities of NOBL listed are those with negative total float: no baseline is assigned to NOBL; /);
+  assert.match(late.notes[0], /^For the activities of NOBL, BL Project Finish and Variance - BL Project Finish Date are empty and those listed are the ones with negative total float: no baseline is assigned to NOBL; /);
   // one project asked for: no qualifier is needed, and the project that has its baseline says nothing
-  assert.equal((await call('run_report', { handle: h, report: 'variance', project: 'TOWER-A' })).notes, undefined);
+  assert.deepEqual((await call('run_report', { handle: h, report: 'variance', project: 'TOWER-A' })).notes, ['BL Start, BL Finish and Finish Var (d) are empty for 2 activities of TOWER-A that are not in its baseline TOWER-A-BL1: A1030, M1000.']);
   assert.deepEqual((await call('run_report', { handle: h, report: 'variance', project: 'NOBL' })).notes, ['BL Start, BL Finish and Finish Var (d) are empty: no baseline is assigned to NOBL; assign one with edit assign_baseline.']);
   // written to a file: the same sentence, PDF included
   for (const ext of ['pdf', 'csv', 'xlsx', 'html']) {
     const w = await call('run_report', { handle: h, report: 'variance', path: `variance-out.${ext}` });
     assert.ok(!w.error, `${ext}: ${JSON.stringify(w.error)}`);
     assert.deepEqual(w.notes, v.notes, ext);
+  }
+});
+
+test('loops, the harder cases: two loops are one sentence; a loop in one project leaves the other judged and unburdened; a loop across two projects is said of both', async () => {
+  // a file built here and saved, then relationships that close loops are written into the file itself (edit refuses to make one)
+  const p = await call('new_project', { id: 'LP', start: '2026-01-05' });
+  const e = await call('edit', { handle: p.handle, operations: [
+    act('A', 3), act('B', 3), act('C', 3), act('D', 3), { op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_relationship', pred: 'C', succ: 'D' },
+    { op: 'add_project', id: 'LQ', start: '2026-01-05' }, { op: 'add_activity', project: 'LQ', id: 'X', name: 'X', duration_days: 4 }, { op: 'add_activity', project: 'LQ', id: 'Y', name: 'Y', duration_days: 4 }, { op: 'add_relationship', pred: 'X', succ: 'Y', project: 'LQ' }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  await call('schedule', { handle: p.handle });
+  await call('edit', { handle: p.handle, operations: [{ op: 'update_activity', id: 'X', project: 'LQ', duration_days: 9 }] });   // LQ's saved dates are now not current
+  const saved = await call('save', { handle: p.handle, owner_key: p.owner_key, path: 'loops-base.xer' });
+  assert.ok(!saved.error, JSON.stringify(saved.error));
+  const base = readFileSync(saved.saved ?? saved.path, 'latin1');
+  const withLinks = (name: string, links: [string, string][]): string => {
+    const lines = base.split(/\r?\n/), db = readXerFile(saved.saved ?? saved.path).db;
+    const at = lines.findIndex((l) => l.startsWith('%T\tTASKPRED')), fields = lines[at + 1].split('\t'), first = lines[at + 2].split('\t');
+    const col = (n: string) => fields.indexOf(n), task = (code: string) => db.tables.TASK.rows.find((t) => t.task_code === code)!;
+    links.forEach(([pred, succ], i) => { const r = [...first]; r[col('task_pred_id')] = String(900000 + i); r[col('pred_task_id')] = task(pred).task_id; r[col('task_id')] = task(succ).task_id; r[col('proj_id')] = task(succ).proj_id; r[col('pred_proj_id')] = task(pred).proj_id; lines.splice(at + 3, 0, r.join('\t')); });
+    const out = join(dirname(saved.saved ?? saved.path), name);
+    writeFileSync(out, lines.join('\r\n'), 'latin1');
+    return out;
+  };
+  const loopsSaid = (a: any) => ((a.notes ?? []) as string[]).filter((n) => /loop/.test(n) && !/not assessed/.test(n));
+  const openIt = async (path: string) => { const o = await call('open_file', { path }); assert.ok(o.handle, JSON.stringify(o).slice(0, 300)); return o.handle as string; };
+
+  // two loops in LP (B back to A, D back to C), none in LQ
+  let h = await openIt(withLinks('two-loops.xer', [['B', 'A'], ['D', 'C']]));
+  let a = await call('critical_path', { handle: h, project: 'LP' });
+  assert.equal(loopsSaid(a).length, 1, JSON.stringify(a.notes));
+  assert.match(loopsSaid(a)[0], /^LP has 2 loops in its logic \((?:[AB], [AB]; [CD], [CD]|[CD], [CD]; [AB], [AB])\): its dates cannot be recalculated, so these figures are of the saved dates; change or delete one relationship of each loop \(edit update_relationship or delete_relationship\)\.$/);
+  for (const tool of ['dcma_14', 'decm', 'schedule_index', 'planning_horizon']) assert.equal(loopsSaid(await call(tool, { handle: h, project: 'LP' })).length, 1, tool);
+  // LQ has no loop: nothing is said of one, its saved dates are still judged (they are not current), and its lint check passes
+  a = await call('critical_path', { handle: h, project: 'LQ' });
+  assert.equal(loopsSaid(a).length, 0, JSON.stringify(a.notes));
+  assert.ok((a.notes as string[]).some((n) => /^The saved dates of LQ are not what a recalculation gives \(\d of 2 open activities differ\)/.test(n)), JSON.stringify(a.notes));
+  assert.equal((await call('lint', { handle: h, project: 'LQ', simulate: false })).checks.find((c: any) => c.id === 'loops').result, 'pass');
+  const lp = (await call('lint', { handle: h, project: 'LP', simulate: false })).checks.find((c: any) => c.id === 'loops');
+  assert.deepEqual([lp.result, lp.activities.map((x: any) => x.id).sort()], ['fail', ['A', 'B', 'C', 'D']]);
+  const rv = await call('review', { handle: h, project: 'LQ' });
+  assert.equal(rv.checks.find((c: any) => c.id === 'loops').grade, 'pass');
+  assert.equal(rv.checks.find((c: any) => c.id === 'saved_dates').grade, 'warn');
+
+  // a loop that runs through both projects (B of LP to X of LQ, Y of LQ back to A of LP): said of each project, the other project's activities with their Project ID
+  h = await openIt(withLinks('cross-loop.xer', [['B', 'X'], ['Y', 'A']]));
+  for (const [proj, own, other] of [['LP', ['A', 'B'], ['X in LQ', 'Y in LQ']], ['LQ', ['X', 'Y'], ['A in LP', 'B in LP']]] as const) {
+    a = await call('critical_path', { handle: h, project: proj });
+    assert.equal(loopsSaid(a).length, 1, `${proj}: ${JSON.stringify(a.notes)}`);
+    assert.ok(loopsSaid(a)[0].startsWith(`${proj} has a loop in its logic (`), loopsSaid(a)[0]);
+    for (const n of [...own.map((c) => `${c} in ${proj}`), ...other]) assert.ok(loopsSaid(a)[0].includes(n), `${proj}: ${n} in ${loopsSaid(a)[0]}`);
+    const lc = (await call('lint', { handle: h, project: proj, simulate: false })).checks.find((c: any) => c.id === 'loops');
+    assert.deepEqual([lc.result, lc.activities.map((x: any) => x.id).sort()], ['fail', [...own]], `${proj}: its own activities of the loop`);
   }
 });

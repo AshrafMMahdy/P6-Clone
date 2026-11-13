@@ -481,7 +481,7 @@ export function ReviewPanel() {
         <button className="btn primary" onClick={run}>Review schedule</button>
         <ExportButton tool="review" args={() => ({})} />
       </div>
-      {!res ? <div className="muted">A schedule quality review of the whole database: missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence work, and whether the saved dates are the ones P6 would calculate. Each check passes, warns or fails.</div> : (
+      {!res ? <div className="muted">A schedule quality review of the whole database: missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence work, loops in the logic, and whether the saved dates are the ones P6 would calculate. Each check passes, warns or fails.</div> : (
         <div style={panel}>
           <div style={cards}><Card label="Overall" value={res.grade.toUpperCase()} /><Card label="Open activities" value={String(res.openActivities)} /><Card label="Relationships" value={String(res.relationships)} /></div>
           <div className="muted" style={{ margin: '6px 0' }}>{res.projects.join(', ')}</div>

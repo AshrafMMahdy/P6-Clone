@@ -30,7 +30,7 @@ export const NEW_XER_NOTE = `Written as XER ${NEW_XER_VERSION}, as the project h
 
 const CHILD_OF: Record<string, string> = {
   RSRCRATE: 'rsrc_id', ROLERATE: 'role_id', RSRCROLE: 'rsrc_id', ACTVCODE: 'actv_code_type_id',
-  PCATVAL: 'proj_catg_type_id', RCATVAL: 'rsrc_catg_type_id', RSRCRCAT: 'rsrc_id', SHIFTPER: 'shift_id',
+  PCATVAL: 'proj_catg_type_id', RCATVAL: 'rsrc_catg_type_id', RSRCRCAT: 'rsrc_id', SHIFTPER: 'shift_id', ASGNMNTCATVAL: 'asgnmnt_catg_type_id',
 };
 // P6 writes these dictionary tables whole in a project export (the real samples carry every POBS row)
 const ALWAYS = new Set(['CURRTYPE', 'POBS', 'PHASE']);

@@ -11,6 +11,10 @@ export function saveBaseline(db: Db, projId: string, name?: string): string {
   // read-only copy: read the real rows, not the undo journal's recording view
   const rdb = rawOf(db);
   for (const [t, rs] of selectRows(rdb, [projId])) src.tables[t] = { name: t, fields: [...(rdb.tables[t]?.fields ?? [])], rows: rs.map((r) => ({ ...r })) };
+  // a baseline is a snapshot of this project alone: a relationship to an activity of another project is not copied (it would tie
+  // that project's activity to the baseline's saved dates); the baseline's activities keep the dates they were saved with
+  const own = new Set((src.tables.TASK?.rows ?? []).map((t) => t.task_id));
+  if (src.tables.TASKPRED) src.tables.TASKPRED.rows = src.tables.TASKPRED.rows.filter((r) => own.has(r.task_id) && own.has(r.pred_task_id));
   const { projIds: [bid] } = importIntoDb(db, src, { projects: [{ srcProjId: projId, action: 'new' }] });
   const p = rows(db, 'PROJECT').find((x) => x.proj_id === projId)!;
   const b = rows(db, 'PROJECT').find((x) => x.proj_id === bid)!;

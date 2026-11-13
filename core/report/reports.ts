@@ -8,7 +8,8 @@ import { activityCosts, sumLines, spi, cpi, percentComplete, type CostLine } fro
 export interface ReportOpts { hoursPerDay: number; fmtDate: (s: string | number | null | undefined) => string; weeks?: number; dayHours?: DayHours }
 export interface Report { title: string; subtitle?: string; columns: string[]; rows: { cells: string[]; level?: number; bold?: boolean }[]; text?: string;
   /** the columns (by title) that read the project baseline: empty for a project with none in the file, which the answer then says */ baselineColumns?: string[];
-  /** the rows were chosen by a rule that reads the project baseline and falls to another without one (Late Activities: negative total float) */ baselineRule?: string }
+  /** the rows were chosen by a rule that reads the project baseline and falls to another without one (Late Activities: negative total float) */ baselineRule?: string;
+  /** the activities listed whose project has its baseline in the file and that are not in it (their baseline columns are empty): Activity IDs by project (proj_id) */ notInBaseline?: Record<string, string[]> }
 export interface ReportDef { id: string; title: string; group: string; build: (db: Db, projIds: string[], o: ReportOpts) => Report }
 
 const days = (h: string | number | undefined, o: ReportOpts, t?: Row) => (h === '' || h == null ? '' : String(Math.round((Number(h) / (t && o.dayHours ? o.dayHours.task(t) : o.hoursPerDay)) * 10) / 10));
@@ -71,17 +72,18 @@ export const REPORTS: ReportDef[] = [
   {
     id: 'variance', group: 'Schedule', title: 'Baseline Variance',
     build: (db, projIds, o) => {
-      const out: Report['rows'] = [];
+      const out: Report['rows'] = [], notInBaseline: Record<string, string[]> = {};
       for (const pid of projIds) {
         const p = rows(db, 'PROJECT').find((x) => x.proj_id === pid);
         const bl = new Map(rows(db, 'TASK').filter((t) => t.proj_id === p?.sum_base_proj_id).map((t) => [t.task_code, t]));
         for (const t of rows(db, 'TASK').filter((x) => x.proj_id === pid)) {
           const b = bl.get(t.task_code);
+          if (!b && bl.size) (notInBaseline[pid] ??= []).push(t.task_code);
           const bf = parseP6Date(b?.act_end_date || b?.target_end_date), f = parseP6Date(t.act_end_date || t.early_end_date);
           out.push({ cells: [t.task_code, t.task_name, b ? o.fmtDate(b.act_start_date || b.target_start_date) : '', b ? o.fmtDate(b.act_end_date || b.target_end_date) : '', start(t, o), finish(t, o), bf != null && f != null ? String(Math.round((bf - f) / MIN_PER_DAY)) : ''] });
         }
       }
-      return { title: 'Baseline Variance', subtitle: 'Variance in calendar days (negative = later than baseline)', columns: ['Activity ID', 'Activity Name', 'BL Start', 'BL Finish', 'Start', 'Finish', 'Finish Var (d)'], rows: out, baselineColumns: ['BL Start', 'BL Finish', 'Finish Var (d)'] };
+      return { title: 'Baseline Variance', subtitle: 'Variance in calendar days (negative = later than baseline)', columns: ['Activity ID', 'Activity Name', 'BL Start', 'BL Finish', 'Start', 'Finish', 'Finish Var (d)'], rows: out, baselineColumns: ['BL Start', 'BL Finish', 'Finish Var (d)'], notInBaseline };
     },
   },
   {

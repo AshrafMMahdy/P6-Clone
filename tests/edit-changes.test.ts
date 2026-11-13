@@ -47,7 +47,7 @@ test('an assignment edited: its units a day, old -> new', async () => {
   const h = await project([{ op: 'assign_resource', activity: 'A', resource: 'R1', units_per_day: 4 }]);
   const e = await call('edit', { handle: h, operations: [{ op: 'update_assignment', activity: 'A', resource: 'R1', units_per_day: 6 }] });
   // every value that moved: the units a day, and the totals that follow them over the activity's 3 days
-  assert.deepEqual(e.changes, [{ id: 'A R1', field: 'Budgeted Units/Time (units a day)', old: 4, new: 6 }, { id: 'A R1', field: 'Budgeted Units', old: 12, new: 18 }, { id: 'A R1', field: 'Remaining Units', old: 12, new: 18 }]);
+  assert.deepEqual(e.changes, [{ id: 'A R1', field: 'Budgeted Units/Time (units a day)', old: 4, new: 6 }, { id: 'A R1', field: 'Budgeted Units', old: 12, new: 18 }, { id: 'A R1', field: 'Remaining Units', old: 12, new: 18 }, { id: 'A R1', field: 'Remaining Units/Time (units a day)', old: 4, new: 6 }]);
 });
 
 test('more than 25 changes: 25 shown, the total, the cut note naming a CSV that holds all of them', async () => {
@@ -150,12 +150,14 @@ test('every named operation confirms its change in P6’s words: no column name,
     { op: 'dissolve_activity', id: 'B', project: 'P' }, { op: 'delete_activity', id: 'D9', project: 'P' }, { op: 'delete_wbs', code: 'W1', project: 'P' },
     { op: 'delete_financial_period', name: 'Jan 26', clear_stored: true }, { op: 'add_financial_period_calendar', name: 'Spare' }, { op: 'delete_financial_period_calendar', name: 'Spare' }, { op: 'delete_calendar', name: 'Six days', replace_with: 'Standard 5 Day Workweek' },
   ];
+  const silent: string[] = [];
   for (const op of ops) {
     const name = String(op.op);
     ran.add(name);
     const e = await call('edit', { handle: h, operations: [op] });
     assert.ok(!e.error, `${name}: ${JSON.stringify(e.error)}`);
     answers.push(e);
+    if (!(e.changes ?? []).length) silent.push(name);
     const s = getSession(h);
     // the columns no P6 name is recorded for: none for a named operation
     if (!RAW.has(name)) assert.deepEqual(describeChanges(s.db, s.history[s.history.length - 1].j, s.hpd).unnamed, [], `${name}: columns named by their own words`);
@@ -167,6 +169,11 @@ test('every named operation confirms its change in P6’s words: no column name,
   }
   // every named operation was run (a new one added to the engine fails here until it is in the list above)
   assert.deepEqual(OP_NAMES.filter((n) => !ran.has(n) && !RAW.has(n)), []);
+  // every operation that changed the file says at least one change. The two that say none: the schedule option set to what it already is (nothing
+  // changed), and clear_authors, which empties who added or changed a row (no P6 column of the schedule; its own answer counts the fields it cleared)
+  assert.deepEqual(silent, ['set_schedule_options', 'clear_authors']);
+  assert.ok(lines.length > 150, 'the checks below read real lines');
+  assert.deepEqual(lines.filter((l) => /(\[|: |-> )"\d+"( @|\]| ->|$)/.test(l) && !/number|Number|Units|Cost|Price|Weight|Hours|days|Duration|Lag|%|Float|paths|Year|Sequence|Limit|Probability|Level/.test(l)), [], 'no bare internal number as a row or a value');
   const said = (line: string) => assert.ok(lines.includes(line), `not said: ${line}\n${lines.filter((l) => l.startsWith(line.split(':')[0] + ':')).join('\n')}`);
   const count = (start: string) => lines.filter((l) => l.startsWith(start)).length;
 
@@ -195,7 +202,7 @@ test('every named operation confirms its change in P6’s words: no column name,
   said('update_activity: [B @P] Primary Resource: null -> "R2X"');
   said('update_expense: [A / Permit @P] Vendor: null -> "V"');
   said('update_expense: [A / Permit @Q] Vendor: null -> "V"');
-  // an assignment: what a person set is said (units a day, the totals, a cost entered); a role assignment by its role
+  // an assignment: every named value that moved is said, whether a person set it or it followed (the platform does not guess which); a role assignment by its role
   said('update_assignment: [A R1 @P] Remaining Units: 10 -> 12');
   said('update_assignment: [A R1 @P] Actual Regular Units: 0 -> 6');
   said('update_assignment: [A R1 @P] Budgeted Units: 10 -> 30');
@@ -204,7 +211,7 @@ test('every named operation confirms its change in P6’s words: no column name,
   said('update_assignment: [A R1 @P] Budgeted Cost: 300 -> 500');
   said('update_assignment: [A R1 @P] Actual Regular Cost: 60 -> 123');
   said('update_assignment: [B RO2 @P] Budgeted Units/Time (units a day): 8 -> 4');
-  assert.equal(lines.filter((l) => l.startsWith('update_assignment: ') && /Cost: 0 -> 60|Cost: 100 -> 120/.test(l)).length, 0, 'a cost that followed the units (costs calculated from units) is not said as set');
+  assert.equal(lines.filter((l) => l.startsWith('update_assignment: ') && /Cost: 0 -> 60|Cost: 100 -> 120/.test(l)).length, 2, 'a cost that followed the units (costs calculated from units) moved, so it is said');
   // a calendar, codes of the three subjects, a custom field, notebooks (the text), an expense, a step, estimates in days, the dictionaries with their parents
   said('update_calendar: [Six days] Hours per Year: 208 -> 416');
   said('update_code_type: [Sector 2] Project Code Name: "Sector" -> "Sector 2"');
@@ -224,7 +231,7 @@ test('every named operation confirms its change in P6’s words: no column name,
   said('set_period_actuals: [A R1 / Jan 26 @P] Actual Units: 3 -> 4');
   said('store_period_performance: [P] Last Financial Period Stored: null -> "Jan 26"');
   // a baseline: renamed once, its rows named with it; deleted as ONE line; what pointed at a deleted row is said by that row's name
-  said('update_baseline: [BL1X @P] Project ID: "BL1" -> "BL1X"');
+  said('update_baseline: [BL1X] Project ID: "BL1" -> "BL1X"');
   said('update_wbs: [W1 in baseline BL1X @P] WBS Name: "Area 1" -> "Area one in baseline"');
   said('update_activity: [C in baseline BL1X @P] Activity Name: "C" -> "C in baseline"');
   said('delete_baseline: [BL1X] baseline: "exists" -> "deleted"');

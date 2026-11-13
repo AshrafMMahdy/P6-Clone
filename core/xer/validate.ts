@@ -21,15 +21,20 @@ export function loopsOfLinks(links: Iterable<[string, string]>): string[][] {
   return findLoops(succ);
 }
 
-/** The loops in the logic of the file's projects (a stored baseline is not judged: F9 never runs on it), each with the project it is in and its activities:
- *  the same rule as the scheduler's (inLoopCheck). `only`: these projects. */
-export function logicLoops(db: Db, only?: string[]): { projId: string; proj: string; tasks: Row[] }[] {
+/** The loops in the logic of the file (a stored baseline is not judged: F9 never runs on it), by the scheduler's own rule (inLoopCheck): each with its activities
+ *  and every project it runs through (relationships between projects can close a loop that no one project holds alone). */
+export function projectLoops(db: Db): { projIds: string[]; tasks: Row[] }[] {
   const P = db.tables.PROJECT?.rows ?? [], baselines = new Set(P.filter((p) => p._baseline_of).map((p) => p.proj_id));
   const byId = new Map<string, Row>();
-  for (const t of db.tables.TASK?.rows ?? []) if (!baselines.has(t.proj_id) && (!only || only.includes(t.proj_id)) && !byId.has(t.task_id)) byId.set(t.task_id, t);
+  for (const t of db.tables.TASK?.rows ?? []) if (!baselines.has(t.proj_id) && !byId.has(t.task_id)) byId.set(t.task_id, t);
   const links: [string, string][] = [];
   for (const r of db.tables.TASKPRED?.rows ?? []) { const a = byId.get(r.pred_task_id), b = byId.get(r.task_id); if (a && b && inLoopCheck(a.task_type) && inLoopCheck(b.task_type)) links.push([r.pred_task_id, r.task_id]); }
-  return loopsOfLinks(links).map((ids) => { const tasks = ids.map((id) => byId.get(id)!); const p = P.find((x) => x.proj_id === tasks[0].proj_id); return { projId: tasks[0].proj_id, proj: p?.proj_short_name || tasks[0].proj_id, tasks }; });
+  return loopsOfLinks(links).map((ids) => { const tasks = ids.map((id) => byId.get(id)!); return { projIds: [...new Set(tasks.map((t) => t.proj_id))], tasks }; });
+}
+/** The loops that run through a project, as the agent reads them: each loop's Activity IDs (an activity of another project with its Project ID). */
+export function loopsOf(db: Db, projId: string, loops = projectLoops(db)): string[][] {
+  const name = new Map((db.tables.PROJECT?.rows ?? []).map((p) => [p.proj_id, p.proj_short_name || p.proj_id]));
+  return loops.filter((l) => l.projIds.includes(projId)).map((l) => l.tasks.map((t) => (l.projIds.length > 1 ? `${t.task_code} in ${name.get(t.proj_id) ?? t.proj_id}` : t.task_code)));
 }
 
 const KNOWN_VERSION = /^(3\.5|4\.[01]|5\.0(\.\d+)?|6\.[0-2](\.\d+)?|7\.0(\.\d+)?|8\.[1-4](\.\d+)?|1[5-9]\.\d+|2[0-6]\.\d+)$/;

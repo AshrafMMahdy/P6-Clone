@@ -3,6 +3,7 @@
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { assignedBaselineId, baselineNotInFile } from '../cost/rollup.ts';
+import { baselineProjectIds } from '../progress/baseline.ts';
 import { baselineReason, currentPlanUsed, tidyNotes, differentDataDates, namesText, noDataDateNotAssessed, noDataDateUsed, noDateNoStart, projectsText, notAssessed as notAssessedNote } from '../notes.ts';
 import { makeCtx, type Ctx } from '../project/ctx.ts';
 import { dayHours, type DayHours } from '../project/units.ts';
@@ -91,7 +92,9 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
   const projs = rows(db, 'PROJECT').filter((p) => !p._baseline_of && (!o.projIds?.length || o.projIds.includes(p.proj_id)));
   const projIds = new Set(projs.map((p) => p.proj_id));
   const tasks = rows(db, 'TASK').filter((t) => projIds.has(t.proj_id));
-  const rels = rows(db, 'TASKPRED').filter((r) => projIds.has(r.proj_id) || projIds.has(r.pred_proj_id));
+  // (a relationship between a baseline and a current project is no logic of the current project: the scheduler leaves it out, and so do the analyses)
+  const snapshots = baselineProjectIds(db);
+  const rels = rows(db, 'TASKPRED').filter((r) => (projIds.has(r.proj_id) || projIds.has(r.pred_proj_id)) && !snapshots.has(r.proj_id) && !snapshots.has(r.pred_proj_id));
   const ctx = makeCtx(db, { hoursPerDay: hpd });
   const cals = calendarResolver(db, []);
   const projById = new Map(projs.map((p) => [p.proj_id, p]));

@@ -4,6 +4,12 @@ import { parseXer } from '../core/xer/parse.ts';
 import { importIntoDb, defaultPlan, deleteProject } from '../core/xer/import.ts';
 import { emptyDb, KEYS, refTarget, type Db } from '../core/db.ts';
 import { samples } from './helpers.ts';
+import { copyProject } from '../core/project/copy.ts';
+import { saveBaseline } from '../core/progress/baseline.ts';
+import { applyOps } from '../core/project/ops.ts';
+import { writeXer } from '../core/xer/write.ts';
+import { scheduleProjects } from '../core/schedule/cpm.ts';
+import { makeScope } from '../core/analysis/common.ts';
 
 const load = (name: string) => parseXer(samples().find((s) => s.name === name)!.bytes).db;
 
@@ -200,4 +206,68 @@ test('do not import: resources the project lacks are left out with their assignm
   assert.ok(res.counts.TASKRSRC.skipped > 0);
   db.tables.PROJECT.rows.push({ ...db.tables.PROJECT.rows[0], proj_id: '777', proj_short_name: 'BL', _baseline_of: pid });
   assert.throws(() => importIntoDb(db, fresh(), plan1(fresh(), 'update', '777')), /baseline/);
+});
+
+// A shared row (a resource's role or code, an assignment code, a threshold parameter, a resource's UDF value) belongs to no project:
+// a copy, a baseline and a second import of the same file bring the very same row, and it is there once.
+test('a copy, a baseline and a second import do not add a shared row twice', () => {
+  const shared = (db: Db) => {
+    const projCodes = new Set((db.tables.ACTVTYPE?.rows ?? []).filter((t) => t.proj_id).map((t) => t.actv_code_type_id));
+    const out: Record<string, number> = {};
+    for (const t of Object.values(db.tables)) { const n = t.rows.filter((r) => !r.proj_id && !(t.name === 'ACTVCODE' && projCodes.has(r.actv_code_type_id)) && t.name !== 'PROJECT').length; if (n) out[t.name] = n; }
+    return out;
+  };
+  for (const name of ['129 trial.xer', 'EBCF-4 070127 Forecast Original.xer', 'DHBL-24FEB13_VER-7.0.xer']) {
+    const db = load(name), before = shared(db), p = db.tables.PROJECT.rows[0], loose = danglingRefs(db); // (what the file itself points at and does not hold)
+    assert.ok(['RSRCROLE', 'RSRCRCAT', 'THRSPARM', 'UDFVALUE'].some((t) => before[t]), `${name} holds shared rows of the kinds that were doubled`);
+    copyProject(db, p.proj_id, { id: 'COPY', keepProgress: true });
+    assert.deepEqual(shared(db), before, `${name}: copy`);
+    saveBaseline(db, p.proj_id, 'BL');
+    assert.deepEqual(shared(db), before, `${name}: baseline`);
+    const again = load(name);
+    importIntoDb(db, again, defaultPlan(again));
+    assert.deepEqual(shared(db), before, `${name}: second import`);
+    assert.deepEqual(danglingRefs(db), loose);
+  }
+});
+
+test('assignment codes are matched by name like the other code kinds; a baseline shares them', () => {
+  const db: Db = { tables: {} };
+  const ok = (ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); };
+  ok([{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'assign_resource', activity: 'A', resource: 'R1', units_per_day: 8 },
+    { op: 'add_code_type', name: 'Trade', subject: 'resource', values: [{ code: 'T1' }] }, { op: 'add_code_type', name: 'Kind', subject: 'assignment', values: [{ code: 'K1' }, { code: 'K2' }] },
+    { op: 'assign_code', type: 'Trade', value: 'T1', resource: 'R1' }, { op: 'assign_code', type: 'Kind', value: 'K1', activity: 'A', resource: 'R1' }]);
+  const n = (t: string) => db.tables[t].rows.length;
+  ok([{ op: 'save_baseline', name: 'BL1' }, { op: 'copy_project', from: 'P', id: 'P2' }]);
+  assert.deepEqual([n('RSRCRCAT'), n('ASGNMNTCATTYPE'), n('ASGNMNTCATVAL'), n('ASGNMNTACAT')], [1, 1, 2, 3]);
+  assert.equal(new Set(db.tables.ASGNMNTACAT.rows.map((r) => r.asgnmnt_catg_id)).size, 1, 'the three assignments carry the one value');
+  // an export of the project carries the whole code (both values), and importing it elsewhere by name adds nothing twice
+  const file = parseXer(writeXer(db, { version: '18.8', projIds: [db.tables.PROJECT.rows[0].proj_id] })).db;
+  assert.equal(file.tables.ASGNMNTCATVAL.rows.length, 2);
+  importIntoDb(db, file, defaultPlan(file));
+  assert.deepEqual([n('ASGNMNTCATTYPE'), n('ASGNMNTCATVAL'), n('RSRCRCAT')], [1, 2, 1]);
+});
+
+// A baseline is a snapshot of its project alone. Saved while its project is tied to another project, it does not take that tie with it:
+// the other project's activity would be held at the baseline's saved dates for good.
+test('a baseline never holds an activity of another project', () => {
+  const db: Db = { tables: {} };
+  const ok = (ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); };
+  ok([{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 20 }, { op: 'add_project', id: 'Q', start: '2026-01-05' },
+    { op: 'add_activity', project: 'Q', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', pred_project: 'P', succ: 'B', project: 'Q' }]);
+  const live = () => db.tables.PROJECT.rows.filter((p) => !p._baseline_of).map((p) => p.proj_id);
+  const finishB = () => { assert.ok(scheduleProjects(db, live()).ok); return db.tables.TASK.rows.find((t) => t.task_code === 'B' )!.early_end_date; };
+  assert.equal(finishB(), '2026-02-06 17:00');
+  ok([{ op: 'save_baseline', project: 'P', name: 'BL1' }]);
+  assert.equal(db.tables.TASKPRED.rows.length, 1, 'the tie to Q stays with P; the baseline has none');
+  ok([{ op: 'update_activity', project: 'P', id: 'A', duration_days: 2 }]);
+  assert.equal(finishB(), '2026-01-13 17:00', 'B follows A, not the baseline of A');
+  // a file that already holds such a tie (P6 can leave one): it is there, and it never drives the current project
+  const blA = db.tables.TASK.rows.find((t) => t.task_code === 'A' && t.proj_id !== live()[0])!, b = db.tables.TASK.rows.find((t) => t.task_code === 'B')!;
+  db.tables.TASKPRED.rows.push({ task_pred_id: '99', task_id: b.task_id, pred_task_id: blA.task_id, proj_id: b.proj_id, pred_proj_id: blA.proj_id, pred_type: 'PR_FS', lag_hr_cnt: '0' });
+  assert.equal(finishB(), '2026-01-13 17:00');
+  assert.deepEqual(makeScope(db).rels.map((r) => r.task_pred_id), ['1'], 'nor is it logic the analyses read');
+  // restored, the baseline is a project like any other, and the tie counts
+  ok([{ op: 'restore_baseline', baseline: 'BL1' }]);
+  assert.equal(finishB(), '2026-02-06 17:00');
 });

@@ -77,9 +77,13 @@ export const noDataDateReason = (proj: string, arg: string | null = 'status_date
 export const noDataDateNotAssessed = (proj: string, part = 'checks that need a data date', arg: string | null = 'status_date'): string => notAssessed(part, noDataDateReason(proj, arg));
 /** A report whose baseline columns have nothing to show, or whose rows were chosen without a baseline: what, and why (the shared baseline reason). */
 export const reportWithoutBaseline = (columns: string[], rule: string | undefined, reason: string, only: string[] = []): string => {
-  const whose = only.length ? ` for the activities of ${projectsText(only)}` : '', of = only.length ? ` of ${projectsText(only)}` : '';
-  return `${[columns.length ? `${andList(columns)} ${columns.length === 1 ? 'is' : 'are'} empty${whose}` : '', rule ? rule.replace('the activities listed', `the activities${of} listed`) : ''].filter(Boolean).join(' and ')}: ${reason}.`.replace(/^./, (c) => c.toUpperCase());
+  const cols = columns.length ? `${andList(columns)} ${columns.length === 1 ? 'is' : 'are'} empty` : '';
+  const chosen = rule && only.length ? rule.replace('the activities listed are those', 'those listed are the ones') : rule ?? '';
+  return `${only.length ? `for the activities of ${projectsText(only)}, ` : ''}${[cols, chosen].filter(Boolean).join(' and ')}: ${reason}.`.replace(/^./, (c) => c.toUpperCase());
 };
+/** A report's baseline columns, for the activities of a project that HAS its baseline and are not in it (added since it was saved): empty, and why. */
+export const reportNotInBaseline = (columns: string[], proj: string, baseline: string, ids: string[]): string =>
+  `${andList(columns)} ${columns.length === 1 ? 'is' : 'are'} empty for ${ids.length} ${ids.length === 1 ? 'activity' : 'activities'} of ${proj} that ${ids.length === 1 ? 'is' : 'are'} not in its baseline ${baseline}: ${namesText(ids)}.`;
 /** CPLI has no remaining critical path length to divide by: the reason, read from the activities (`open` = activities with no actual finish;
  *  `finish` = the latest finish of the project's rows, actual or forecast). Never "the project is complete" unless every activity is: saved dates
  *  that were not calculated for this data date give the same zero. The length is working time of the project's default calendar, so that is said. */
@@ -147,8 +151,10 @@ export const datesNotCurrent = (proj: string, differ: number, open: number, figu
 export const loopNote = (ids: string[]): string => `${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
 /** A loop stops the calculation of a project's dates: said by every analysis that judges from the saved dates (it still answers: owner 2026-11-13, as P6's reports open on a
  *  schedule F9 refuses). `figures`: the answer holds figures of those dates. */
-export const loopStopsDates = (proj: string, ids: string[], figures = false): string =>
-  `${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop: the dates of ${proj} cannot be recalculated${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of the loop (edit update_relationship or delete_relationship).`;
+export const loopStopsDates = (proj: string, loops: string[][], figures = false): string =>
+  `${proj} has ${loops.length === 1 ? 'a loop' : `${loops.length} loops`} in its logic (${loops.map((l) => namesText(l)).join('; ')}): its dates cannot be recalculated${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of ${loops.length === 1 ? 'the loop' : 'each loop'} (edit update_relationship or delete_relationship).`;
+/** The scheduler's short loop sentence ("A and B are in a loop."): an answer that carries the sentence above does not repeat it. */
+export const isShortLoopNote = (n: string): boolean => /^[^:]+ (?:is|are) in a loop\.$/.test(n);
 /** Resources that are Material: a material is a quantity, not a crew, so its over-allocation is not judged. `ids` are Resource IDs. */
 export const materialNote = (ids: string[]): string => `${plural(ids.length, 'resource')} ${ids.length === 1 ? 'is' : 'are'} Material: over-allocation is not assessed for a Material resource: ${namesText([...ids].sort())}.`;
 /** Labor / Nonlabor resources with no Max Units/Time (0 or blank): their over-allocation is not judged. `ids` are Resource IDs. */

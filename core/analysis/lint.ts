@@ -11,7 +11,7 @@ import { isCritical } from '../project/ctx.ts';
 import { record, rollback } from '../journal.ts';
 import { applyOps } from '../project/ops.ts';
 import { scheduleProjects } from '../schedule/cpm.ts';
-import { logicLoops } from '../xer/validate.ts';
+import { projectLoops } from '../xer/validate.ts';
 import { isDone, isLoe, isMilestone, isWbs, makeScope, offender, pct, type CheckResult, type Offender, type Scope } from './common.ts';
 
 export type Band = 'pass' | 'warn' | 'fail';
@@ -183,7 +183,8 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
 
   if (want('loops')) {
     // a loop is not a matter of degree: P6 cannot calculate a schedule that has one, so one loop fails the check (no threshold to set)
-    const f = logicLoops(s.db, [...s.projIds]).flatMap((l, i) => l.tasks.map((t) => offender(t, s, `loop ${i + 1}`)));
+    // (a loop that runs through another project too is a loop of this one: its activities here are listed)
+    const f = projectLoops(s.db).filter((l) => l.projIds.some((id) => s.projIds.has(id))).flatMap((l, i) => l.tasks.filter((t) => s.projIds.has(t.proj_id)).map((t) => offender(t, s, `loop ${i + 1}`)));
     out.push(check('loops', 'Loops in the logic (P6 cannot calculate the schedule)', 'error', f, live.length, f.length ? 'fail' : 'pass', maxIds, {}));
   }
   if (want('dangling_start')) {

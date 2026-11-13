@@ -150,14 +150,16 @@ export function runSpec(db: Db, projIds: string[], spec: ReportSpec, o: RunOptio
     const all = new Map([...COLUMNS, ...extraColumns(db)].map((c) => [c.id, c]));
     const cols = spec.columns.map((id) => all.get(id)).filter((c): c is Column => !!c);
     const sort = spec.sortBy ? `col:${spec.sortBy}${spec.sortDesc ? ':desc' : ''}` : '';
+    // (the activities listed that their project's baseline does not hold: told to the caller with the baseline columns)
+    const notInBaseline: Record<string, string[]> = {}, hasBl = new Map(projIds.map((id) => [id, [...ctx.baseline.keys()].some((k) => k.endsWith(`|${id}`))]));
     for (const r of buildActivityRows(ctx, projIds, {}, spec.filter || 'all', spec.groupBy === 'none' ? 'none' : spec.groupBy || 'wbs', sort)) {
       if (r.kind === 'group') out.push({ cells: cols.map((c, i) => (i === 0 ? r.label ?? '' : c.id === 'start' ? fmtDate(r.es, prefs) : c.id === 'finish' ? fmtDate(r.ef, prefs) : '')), level: r.level, bold: true });
-      else out.push({ cells: cols.map((c) => c.get(r.task!, ctx)), level: r.level });
+      else { out.push({ cells: cols.map((c) => c.get(r.task!, ctx)), level: r.level }); if (hasBl.get(r.task!.proj_id) && !ctx.baseline.has(`${r.task!.task_code}|${r.task!.proj_id}`)) (notInBaseline[r.task!.proj_id] ??= []).push(r.task!.task_code); }
     }
     // drop group bands left without activities by the filter
     // the columns that read the project baseline, and the Late Activities rule that falls to negative float without one: told to the caller, who says it
     const fromBaseline = cols.filter((c) => ['bl_start', 'bl_finish', 'var_bl_finish'].includes(c.id)).map((c) => c.title);
-    return { title: titleOf, subtitle, columns: cols.map((c) => c.title), rows: spec.filter && spec.filter !== 'all' ? dropEmptyBands(out) : out, ...(fromBaseline.length ? { baselineColumns: fromBaseline } : {}), ...(spec.filter === 'late' ? { baselineRule: 'the activities listed are those with negative total float' } : {}) };
+    return { title: titleOf, subtitle, columns: cols.map((c) => c.title), rows: spec.filter && spec.filter !== 'all' ? dropEmptyBands(out) : out, ...(fromBaseline.length ? { baselineColumns: fromBaseline, notInBaseline } : {}), ...(spec.filter === 'late' ? { baselineRule: 'the activities listed are those with negative total float' } : {}) };
   }
 
   const activityOk = (() => {

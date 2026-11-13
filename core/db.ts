@@ -76,7 +76,7 @@ const KEY_TO_TABLE: Record<string, string> = Object.fromEntries(Object.entries(K
 const ALIASES: Record<string, string> = {
   pred_task_id: 'TASK', parent_wbs_id: 'PROJWBS', pred_proj_id: 'PROJECT', base_clndr_id: 'CALENDAR',
   parent_rsrc_id: 'RSRC', parent_actv_code_id: 'ACTVCODE', parent_acct_id: 'ACCOUNT', parent_obs_id: 'OBS',
-  parent_role_id: 'ROLES', pobs_parent_id: 'POBS', parent_proj_catg_id: 'PCATVAL', parent_rsrc_catg_id: 'RCATVAL',
+  parent_role_id: 'ROLES', pobs_parent_id: 'POBS', parent_proj_catg_id: 'PCATVAL', parent_rsrc_catg_id: 'RCATVAL', parent_asgnmnt_catg_id: 'ASGNMNTCATVAL',
   orig_proj_id: 'PROJECT', source_proj_id: 'PROJECT', sum_base_proj_id: 'PROJECT', parent_eps_id: 'EPS',
   last_fin_dates_id: 'FINDATES', new_fin_dates_id: 'FINDATES', _eps_id: 'EPS', _baseline_of: 'PROJECT',
 };

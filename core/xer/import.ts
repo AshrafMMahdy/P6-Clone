@@ -43,7 +43,7 @@ const MATCH: Record<string, (r: Row) => string> = {
   ACTVTYPE: (r) => `${r.actv_code_type}|${r.actv_code_type_scope ?? ''}`, UDFTYPE: (r) => `${r.table_name}|${r.udf_type_label}`,
   OBS: (r) => r.obs_name, CURRTYPE: (r) => r.curr_short_name, UMEASURE: (r) => r.unit_abbrev, MEMOTYPE: (r) => r.memo_type,
   COSTTYPE: (r) => r.cost_type, RSRCCURVDATA: (r) => r.curv_name, PCATTYPE: (r) => r.proj_catg_type, RCATTYPE: (r) => r.rsrc_catg_type,
-  POBS: (r) => r.pobs_name, FINDATES: (r) => r.fin_dates_name, FINTMPL: (r) => r.fintmpl_name,
+  POBS: (r) => r.pobs_name, FINDATES: (r) => r.fin_dates_name, FINTMPL: (r) => r.fintmpl_name, ASGNMNTCATTYPE: (r) => r.asgnmnt_catg_type,
   EPS: (r) => r.eps_short_name, // (an EPS ID is unique in P6: the node of the same ID is the one used, so a baseline or a merged file does not add a second "Enterprise")
 };
 /** Child dictionary rows matched within their (mapped) parent. */
@@ -51,6 +51,7 @@ const CHILD: Record<string, { parent: string; name: (r: Row) => string }> = {
   ACTVCODE: { parent: 'actv_code_type_id', name: (r) => r.short_name },
   PCATVAL: { parent: 'proj_catg_type_id', name: (r) => r.proj_catg_short_name },
   RCATVAL: { parent: 'rsrc_catg_type_id', name: (r) => r.rsrc_catg_short_name },
+  ASGNMNTCATVAL: { parent: 'asgnmnt_catg_type_id', name: (r) => r.asgnmnt_catg_short_name },
   RSRCRATE: { parent: 'rsrc_id', name: (r) => r.start_date ?? '' },
   ROLERATE: { parent: 'role_id', name: (r) => r.start_date ?? '' },
 };
@@ -224,11 +225,18 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
     return indexOf(t, target, key).get(key(remap(t, r, true)));
   };
 
+  // A shared row (no project) as its values, without its own key: a copy, a baseline or a second import of the same file
+  // brings the very same row again, and it is not added twice (resource roles and codes, a resource's UDF values).
+  const whole = (t: string, r: Row) => JSON.stringify(Object.keys(r).filter((f) => f !== KEYS[t] && r[f] != null && r[f] !== '').sort().map((f) => [f, r[f]]));
+  const sameIx = new Map<string, Map<string, Row>>();
+  const same = (t: string) => { let ix = sameIx.get(t); if (!ix) { ix = new Map(); for (const x of rows(db, t)) if (!x.proj_id) ix.set(whole(t, x), x); sameIx.set(t, ix); } return ix; };
+
   // Pass 1: allocate keys, match dictionaries and (update) the merged projects' rows; parents before their children
   // (child dictionaries last: a code type can name a WBS, so it comes after PROJWBS, and its values after it)
   const names = Object.keys(src.tables);
   // (periods after their financial period calendars: a period is matched within its calendar)
-  const rank = (n: string) => (CHILD[n] ? 6 : n === 'FINDATES' ? 1 : n === 'PROJWBS' ? 2 : n === 'TASK' ? 3 : n === 'TASKRSRC' ? 4 : src.tables[n].fields.includes('task_id') || src.tables[n].fields.includes('wbs_id') ? 5 : 0);
+  // (shared tables matched as whole rows come last as well: what they point at is mapped by then)
+  const rank = (n: string) => (CHILD[n] || (KEYS[n] && !MATCH[n] && !src.tables[n].fields.includes('proj_id')) ? 6 : n === 'FINDATES' ? 1 : n === 'PROJWBS' ? 2 : n === 'TASK' ? 3 : n === 'TASKRSRC' ? 4 : src.tables[n].fields.includes('task_id') || src.tables[n].fields.includes('wbs_id') ? 5 : 0);
   const order = [...names].sort((x, y) => rank(x) - rank(y));
   for (const t of order) {
     const k = KEYS[t];
@@ -278,6 +286,10 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
           continue;
         }
         if (a === 'skip') { dropped.add(`${t}|${r[k]}`); count(t, 'skipped'); continue; }
+      } else if (dictRow) {
+        // a shared row P6 has no name to match by (a threshold parameter, a shift, a location, a UDF code): the row that is the same in every value is the one used
+        const hit = same(t).get(whole(t, remap(t, r, true)));
+        if (hit) { m(t)[r[k]] = hit[k]; keepExisting.add(`${t}|${r[k]}`); continue; }
       }
       m(t)[r[k]] = (t === 'TASK' || t === 'PROJWBS') && reuse[t].get(r[k]) ? reuse[t].get(r[k])! : alloc(t);
     }
@@ -301,6 +313,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
       if (k && (keepExisting.has(`${t}|${r[k]}`) || dropped.has(`${t}|${r[k]}`))) continue;
       if (!k && goneRef(t, r)) { count(t, 'skipped'); continue; }
       const nr = remap(t, r);
+      if (!k && !nr.proj_id && same(t).has(whole(t, nr))) { count(t, 'kept'); continue; }
       if (t === 'PROJECT') {
         const a = actions.get(r.proj_id)!;
         if (a.action === 'add_into') continue; // its WBS and activities go into the target

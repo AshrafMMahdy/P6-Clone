@@ -9,6 +9,7 @@ import { isCritical, makeCtx } from '../project/ctx.ts';
 import { calendarResolver, relationshipFloat, type ScheduleResult } from '../schedule/cpm.ts';
 import { constraintNotMet } from '../schedule/constraints.ts';
 import { dayHours } from '../project/units.ts';
+import { baselineProjectIds } from '../progress/baseline.ts';
 import { cstrName, daysText, differentDataDates, duplicateRow, LISTED, listCut } from '../notes.ts';
 
 export interface LogSection { code: string; title: string; count: number; activities: { id: string; name: string; detail?: string }[] }
@@ -30,7 +31,7 @@ const FROM_F9: [string, string, 'errors' | 'warnings' | 'exceptions'][] = [
 
 /** Sections P6 prints that are computed from the scheduled dates (shared by the MCP log and the desktop Schedule Log). */
 export function extraLogSections(db: Db, projIds: string[], maxIds = 100, leftOut: Row[] = []): { warnings: LogSection[]; exceptions: LogSection[] } {
-  const open = new Set(projIds);
+  const open = new Set(projIds), snapshots = baselineProjectIds(db);
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const ctx = makeCtx(db, { hoursPerDay: 8 });
   const relFF = relationshipFloat(db, ctx), dh = dayHours(db, 8, true);
@@ -70,6 +71,7 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100, leftOu
     if (!open.has(r.proj_id) || gone.has(r.task_pred_id)) continue;
     const ff = relFF(r);
     const t = ctx.taskById.get(r.task_id), p = ctx.taskById.get(r.pred_task_id);
+    if (p && snapshots.has(p.proj_id)) continue; // from a baseline: not in the schedule
     if (ff != null && ff < 0 && t && p && !t.act_end_date) unsatRel.push({ t, detail: `${p.task_code} ${(r.pred_type || 'PR_FS').slice(3)} ${t.task_code} is not met by ${daysText(Math.abs(Math.round((ff / 60 / dh.rel(r)) * 100) / 100))}.` });
   }
   const external = tasks.filter((t) => t.external_early_start_date || t.external_late_end_date).map((t) => ({ t, detail: [t.external_early_start_date && `${t.task_code} has an external early start ${t.external_early_start_date.slice(0, 16)}.`, t.external_late_end_date && `${t.task_code} has an external late finish ${t.external_late_end_date.slice(0, 16)}.`].filter(Boolean).join(' ') }));

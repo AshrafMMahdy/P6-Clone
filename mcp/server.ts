@@ -58,7 +58,7 @@ import { lobGuard } from '../core/lob/view.ts';
 import { loadLobModels } from '../core/lob/store.ts';
 import { describeChanges, type FieldChange } from '../core/project/changes.ts';
 import { storedDatesState } from '../core/schedule/stored-dates.ts';
-import { loopStopsDates, reportWithoutBaseline, tidyNotes } from '../core/notes.ts';
+import { isShortLoopNote, loopStopsDates, reportNotInBaseline, reportWithoutBaseline, tidyNotes } from '../core/notes.ts';
 import { differentDatesNote, duplicateRowNotes, scheduleLogReport, scheduleNotes } from '../core/analysis/scheduleLog.ts';
 import { baselineOf, dataDateUsedNotes, noBaselineReason } from '../core/analysis/common.ts';
 import { assignedBaselineId } from '../core/cost/rollup.ts';
@@ -1015,10 +1015,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (a.definition) { const spec = parseSpec({ name: 'Ad hoc report', ...a.definition }) ?? fail('bad_input', 'definition needs a name and subject.', 'subject: activities, assignments, wbs, resources or relationships.'); report = runSpec(s.db, ids, spec, { prefs }); rname = spec.name; }
       else { try { const r = runReport(s.db, ids, String(a.report ?? ''), { prefs, weeks: Number(a.weeks) || undefined }); report = r.report; rname = r.entry.name; } catch (e) { fail('bad_input', (e as Error).message, 'Use an id or name from list_reports.'); } }
       // a report that reads the project baseline says when a project in it has none in the file (its baseline columns are then empty, Late Activities fall to negative float)
-      const noBl = (s.db.tables.PROJECT?.rows ?? []).filter((p) => ids.includes(p.proj_id) && !assignedBaselineId(s.db, p));
-      // (with several projects in the report it says whose rows: a project that has its baseline shows it)
-      const inScope = (s.db.tables.PROJECT?.rows ?? []).filter((p) => ids.includes(p.proj_id) && !p._baseline_of);
+      // (with several projects in the report it says whose rows: a project that has its baseline shows it; a project with no activity has no row to say it of)
+      const withRows = new Set((s.db.tables.TASK?.rows ?? []).map((t) => t.proj_id));
+      const inScope = (s.db.tables.PROJECT?.rows ?? []).filter((p) => ids.includes(p.proj_id) && !p._baseline_of && withRows.has(p.proj_id));
+      const noBl = inScope.filter((p) => !assignedBaselineId(s.db, p));
       const blNotes = noBl.length && (report!.baselineColumns?.length || report!.baselineRule) ? [reportWithoutBaseline(report!.baselineColumns ?? [], report!.baselineRule, noBaselineReason(s.db, noBl, false), noBl.length < inScope.length ? noBl.map((p) => p.proj_short_name) : [])] : [];
+      // and the activities a project's baseline does not hold (added since it was saved): their baseline columns are empty too
+      for (const p of inScope) { const out = report!.notInBaseline?.[p.proj_id]; if (out?.length && report!.baselineColumns?.length) blNotes.push(reportNotInBaseline(report!.baselineColumns, p.proj_short_name, s.db.tables.PROJECT.rows.find((b) => b.proj_id === assignedBaselineId(s.db, p))?.proj_short_name ?? '', out)); }
       if (!a.path) { const max = Math.max(1, Number(a.max_rows) || 200), off = Math.max(0, Math.floor(Number(a.offset) || 0)), n = report!.rows.length, next = off + max < n ? off + max : undefined; return { ...(blNotes.length ? { notes: blNotes } : {}), report: rname!, title: report!.title, subtitle: report!.subtitle, columns: report!.columns, total_rows: n, offset: off, rows: report!.rows.slice(off, off + max).map((r) => ({ cells: r.cells, ...(r.bold ? { group: true, level: r.level ?? 0 } : r.level ? { level: r.level } : {}) })), truncated: next != null, ...(next != null ? { next_offset: next } : {}) }; }
       const path = pathArg(a.path, 'path', 'write');
       const ext = (/\.(\w+)$/.exec(path)?.[1] ?? '').toLowerCase();
@@ -1107,7 +1110,7 @@ function savedDatesNotes(s: Session, project: unknown, loopsOnly = false): strin
   let ids: string[];
   try { ids = projectIds(s.db, project); } catch { return []; } // (a project the call could not name: the call's own refusal stands)
   const names = new Set((s.db.tables.PROJECT?.rows ?? []).filter((p) => ids.includes(p.proj_id)).map((p) => p.proj_short_name || p.proj_id));
-  const loops = k.state.loops.filter((l) => names.has(l.proj)).map((l) => loopStopsDates(l.proj, l.activities, true));
+  const loops = k.state.loops.filter((l) => names.has(l.proj)).map((l) => loopStopsDates(l.proj, l.loops, true));
   if (loopsOnly) return loops;
   return [...loops, ...k.state.notStored.filter((n) => names.has(n)).map(datesNotStored), ...k.state.stale.filter((x) => names.has(x.proj)).map((x) => datesNotCurrent(x.proj, x.differ, x.open, true))];
 }
@@ -1154,7 +1157,9 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
     // (project_summary gives the saved finish and critical counts: it says a loop, which stops them being recalculated; whether the saved dates are current is the analyses' to say)
     if (plain && handle && (READS_SAVED_DATES.has(name) || name === 'project_summary') && !(out as { error?: unknown }).error && !(out as { job_id?: unknown }).job_id) {
       const s0 = sessions.get(handle), said = s0 ? savedDatesNotes(s0, a.project, name === 'project_summary') : [];
-      if (said.length) out = { ...(out as object), notes: [...said, ...(Array.isArray((out as { notes?: unknown }).notes) ? (out as { notes: string[] }).notes : [])] };
+      // (an analysis that names a loop in the scheduler's short words does not say it a second time beside the sentence)
+      const own = Array.isArray((out as { notes?: unknown }).notes) ? (out as { notes: string[] }).notes : [];
+      if (said.length) out = { ...(out as object), notes: [...said, ...(said.some((x) => / in its logic \(/.test(x)) ? own.filter((n) => !isShortLoopNote(n)) : own)] };
     }
     // the notes of the answer as they are told: each sentence once, parts not assessed for one reason in one sentence (core/notes.ts tidyNotes); an answer with none carries no `notes`
     if (plain && out && typeof out === 'object' && !Array.isArray(out) && Array.isArray((out as { notes?: unknown }).notes)) { const t = tidyNotes((out as { notes: string[] }).notes); if (t.length) (out as { notes: string[] }).notes = t; else delete (out as { notes?: unknown }).notes; }
@@ -1283,7 +1288,7 @@ function confirmChanges(s: Session): { changes?: FieldChange[]; changes_total?: 
   if (!last) return { stale: [] };
   const { changes, datesAffected } = describeChanges(s.db, last.j, s.hpd);
   const state = datesAffected ? storedDatesState(s.db) : null;
-  const stale = state ? [...state.loops.map((l) => loopStopsDates(l.proj, l.activities)), ...state.stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open))] : [];
+  const stale = state ? [...state.loops.map((l) => loopStopsDates(l.proj, l.loops)), ...state.stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open))] : [];
   if (!changes.length) return { stale };
   if (changes.length <= LISTED) return { changes, stale };
   // (the project column is there when the file has several projects: the same Activity ID can be in more than one)
