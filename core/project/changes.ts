@@ -25,15 +25,25 @@ export function describeChanges(db: Db, j: Journal): { changes: FieldChange[]; d
   const dh = dayHours(db, 8, true);
   const tasks = new Map<string, Row>();
   const task = (id: string) => { if (!tasks.size) for (const t of db.tables.TASK?.rows ?? []) tasks.set(t.task_id, t); return tasks.get(id); };
-  const code = (id: string) => task(id)?.task_code ?? id;
-  // rows added or removed (an array that grew or shrank)
-  const added = new Set<unknown>();
+  const code = (id: string) => task(id)?.task_code ?? gone.get(id)?.task_code ?? id;
+  // rows added or removed: a table made or dropped by this edit (its rows), or an array that grew or shrank
+  const added = new Set<unknown>(), gone = new Map<string, Row>(), seen = new Set<unknown>();
+  for (const [row, keys] of j.fields) {
+    if (row !== db.tables) continue;
+    for (let i = 0; i < keys.length; i += 2) {
+      const k = keys[i] as string, was = keys[i + 1] as { rows?: Obj[] } | typeof ABSENT, now = db.tables[k] as { rows?: Obj[] } | undefined;
+      if (was === ABSENT && now?.rows) for (const x of now.rows) { added.add(x); seen.add(x); add('added', x); }
+      else if (was !== ABSENT && was?.rows && !now) for (const x of was.rows) { seen.add(x); add('removed', x); }
+    }
+  }
+  for (const [, before] of j.arrays) for (const r of before as Obj[]) if (r && typeof r === 'object' && 'task_id' in r && 'task_code' in r) gone.set(text(r.task_id), r as Row); // the activities an edit deleted: their code still names their relationships
   for (const [arr, before] of j.arrays) {
     const was = new Set(before as Obj[]), now = new Set(arr as Obj[]);
-    for (const r of arr as Obj[]) if (!was.has(r)) { added.add(r); add('added', r); }
-    for (const r of before as Obj[]) if (!now.has(r)) add('removed', r);
+    for (const r of arr as Obj[]) if (!was.has(r) && !seen.has(r)) { seen.add(r); added.add(r); add('added', r); }
+    for (const r of before as Obj[]) if (!now.has(r) && !seen.has(r)) { seen.add(r); add('removed', r); }
   }
   function add(what: 'added' | 'removed', r: Obj) {
+    if (!r || typeof r !== 'object') return; // a table's field list grew (a column name), not a row
     if ('task_code' in r && 'task_id' in r && 'proj_id' in r && !('pred_task_id' in r)) { out.push({ id: text(r.task_code), field: 'activity', old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' }); datesAffected = true; }
     else if ('pred_task_id' in r) { out.push({ id: `${code(text(r.pred_task_id))} ${text(r.pred_type || 'PR_FS').slice(3)} ${code(text(r.task_id))}`, field: 'relationship', old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' }); datesAffected = true; }
     else if ('rsrc_id' in r && 'task_id' in r) out.push({ id: `${code(text(r.task_id))} ${text((db.tables.RSRC?.rows ?? []).find((x) => x.rsrc_id === r.rsrc_id)?.rsrc_short_name ?? r.rsrc_id)}`, field: 'resource assignment', old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' });
@@ -44,6 +54,7 @@ export function describeChanges(db: Db, j: Journal): { changes: FieldChange[]; d
   // fields a person set on a row that existed
   for (const [row, keys] of j.fields) {
     const r = row as Obj;
+    if (row === db.tables) continue; // said above
     if (added.has(r) && !('task_code' in r)) continue; // a row made by this edit is said as added
     if ('task_code' in r && 'task_id' in r && 'proj_id' in r && !('pred_task_id' in r)) {
       if (added.has(r)) continue;
@@ -53,6 +64,7 @@ export function describeChanges(db: Db, j: Journal): { changes: FieldChange[]; d
         if (!f) continue;
         const was = text(keys[i + 1]), now = text(r[k]);
         if (was === now) continue;
+        if (k === 'remain_drtn_hr_cnt' && !r.act_start_date && keys.some((x, n) => n % 2 === 0 && x === 'target_drtn_hr_cnt')) continue; // a task not started: its remaining duration follows the duration, said once
         const id = text(r.task_code);
         out.push({ id: k === 'task_code' ? text(keys[i + 1]) : id, field: f.label, old: f.days ? (was === '' ? null : Math.round((Number(was) / hpd) * 100) / 100) : was, new: f.days ? Math.round((Number(now) / hpd) * 100) / 100 : now });
         if (DATE_DRIVING.has(k)) datesAffected = true;
@@ -68,12 +80,16 @@ export function describeChanges(db: Db, j: Journal): { changes: FieldChange[]; d
       }
     } else {
       // any other row (a resource, an assignment, a calendar, a project ...): the id is its short name or code, the fields as they are named in the file
-      const id = text(r.rsrc_short_name ?? r.proj_short_name ?? r.wbs_short_name ?? r.clndr_name ?? r.actv_code_name ?? r.udf_type_label ?? r.task_pred_id ?? r.taskrsrc_id ?? r.rsrc_id ?? '');
+      const assignment = 'rsrc_id' in r && 'task_id' in r && 'taskrsrc_id' in r;
+      const id = assignment ? `${code(text(r.task_id))} ${text((db.tables.RSRC?.rows ?? []).find((x) => x.rsrc_id === r.rsrc_id)?.rsrc_short_name ?? r.rsrc_id)}` : text(r.rsrc_short_name ?? r.proj_short_name ?? r.wbs_short_name ?? r.clndr_name ?? r.actv_code_name ?? r.udf_type_label ?? r.task_pred_id ?? r.taskrsrc_id ?? r.rsrc_id ?? '');
       for (let i = 0; i < keys.length; i += 2) {
         const k = keys[i] as string;
         if (k.startsWith('_') || /(?:^|_)(?:early|late|total_float|free_float|reend|restart|rem_late|rem_early|scd_)/.test(k)) continue;
+        if (assignment && /^(target|remain|act)_(qty|cost|equip_qty|drtn|work_qty|ot_qty|reg_qty)|^remain_qty_per_hr$|_per_hr_rate$/.test(k) && k !== 'target_qty_per_hr') continue; // the quantities and costs worked out from the units a day
         const was = text(keys[i + 1]), now = text(r[k]);
-        if (was !== now) out.push({ id, field: k, old: was, new: now });
+        if (was === now) continue;
+        if (assignment && k === 'target_qty_per_hr') { const hpd = dh.task((task(text(r.task_id)) ?? {}) as Row); out.push({ id, field: 'units per day', old: was === '' ? null : Math.round(Number(was) * hpd * 100) / 100, new: Math.round(Number(now) * hpd * 100) / 100 }); continue; }
+        out.push({ id, field: k, old: was, new: now });
       }
     }
   }

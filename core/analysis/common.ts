@@ -147,13 +147,12 @@ export function passes(v: number, th: Threshold): boolean {
 }
 
 /** A percentage check: count of activities (or links) found over a population. */
-export function percentCheck(id: string, name: string, found: Offender[], denominator: number, th: Threshold, maxIds: number, note?: string): CheckResult {
+export function percentCheck(id: string, name: string, found: Offender[], denominator: number, th: Threshold, maxIds: number): CheckResult {
   const metric = pct(found.length, denominator);
   return {
     id, name, unit: '%', metric, threshold: th, numerator: found.length, denominator,
     result: denominator === 0 ? 'pass' : passes(exactPct(found.length, denominator), th) ? 'pass' : 'fail',
     activities: maxIds > 0 ? found.slice(0, maxIds) : found, total_activities: found.length,
-    ...(note ? { note } : {}),
   };
 }
 

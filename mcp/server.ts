@@ -441,7 +441,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         for (const [code, xs] of left) {
           const n = xs.reduce((k, x) => k + findingCount(x), 0), fixable = SAVE_REPAIRS.has(code);
           notRepairedNotes.push(xs[0].severity === 'fatal'
-            ? notRepaired(n === 1 ? xs[0].message : `${xs[0].message.replace(/\.$/, '')} (${n} of this kind)`, fixable ? 'save with repair: true fixes it' : 'no repair fixes it; edit the rows (edit set_fields; read_table shows them)')
+            ? notRepaired(n === 1 ? xs[0].message : `${xs[0].message.replace(/\.$/, '')} (${n} of this kind)`, /save with repair/.test(xs[0].message) ? null : fixable ? 'save with repair: true fixes it' : 'no repair fixes it; edit the rows (edit set_fields; read_table shows them)')
             : notRepaired(xs[0].message, null));
         }
         // the file as given: said every time, so the answer to the user can say it (a repaired copy is not the user's file)

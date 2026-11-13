@@ -73,7 +73,7 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
   add('logic', () => percentCheck('logic', name('logic'), relPop.filter((t) => {
     const needPred = !isStarted(t) && t.task_type !== 'TT_Mile', needSucc = t.task_type !== 'TT_FinMile';
     return (needPred && !preds(t).length) || (needSucc && !succs(t).length);
-  }).map((t) => offender(t, s, !preds(t).length && !succs(t).length ? 'no predecessor, no successor' : !preds(t).length ? 'no predecessor' : 'no successor')), relPop.length, th('logic'), maxIds, 'Open ends here: incomplete activities (level of effort included, WBS summaries not) with no predecessor (a started activity or a start milestone needs none) or no successor (a finish milestone needs none).'));
+  }).map((t) => offender(t, s, !preds(t).length && !succs(t).length ? 'no predecessor, no successor' : !preds(t).length ? 'no predecessor' : 'no successor')), relPop.length, th('logic'), maxIds));
 
   // Lags and relationship types: relationships between two completed activities are not examined.
   const links = s.rels.filter((r) => { const a = task(r.pred_task_id), b = task(r.task_id); return !(a && b && isDone(a) && isDone(b)); });

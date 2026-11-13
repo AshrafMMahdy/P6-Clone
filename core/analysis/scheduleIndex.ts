@@ -302,7 +302,7 @@ export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) =>
     report: r.report, summary, ...loopsNote, health: bareHealth(r.health), risk: bareRisk(riskRest),
     drivers: driverRows, drivers_total: driverRows.length, recommendations: risk.recommendations, recommendations_total: risk.recommendations.length,
     logic_findings: findings.map((f) => ({ ...f, activities_total: f.activities.length })),
-    progress_summary: r.progress.result === 'assessed' ? { result: 'assessed', examined: r.progress.examined, integrity_score: r.progress.integrity_score, grade: r.progress.grade, by_severity: r.progress.by_severity, by_rule: r.progress.by_rule, projects_without_data_date: r.progress.projects_without_data_date } : r.progress,
+    progress_summary: r.progress.result === 'assessed' ? { result: 'assessed', examined: r.progress.examined, integrity_score: r.progress.integrity_score, grade: r.progress.grade, by_severity: r.progress.by_severity, by_rule: r.progress.by_rule, projects_without_data_date: r.progress.projects_without_data_date } : { result: 'not_assessed' },
     progress_anomalies: anomalies, progress_anomalies_total: anomalies.length,
     resource_summary: r.resources.result === 'assessed' ? { result: 'assessed', resources: resourceRows.length, with_limit: r.resources.limited, over_allocated: r.resources.over_allocated!.length, work_activities: r.resources.work_activities, without_resource: unresourced.length } : r.resources,
     resources: resourceRows, resources_total: resourceRows.length, unresourced_activities: unresourced, unresourced_activities_total: unresourced.length,
