@@ -119,12 +119,14 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
 export function noBaselineReason(db: Db, projs: Row[], argument: boolean, which = 'project'): string {
   const gone = projs.filter((p) => baselineNotInFile(db, p, which)), none = projs.filter((p) => !gone.includes(p));
   const of = (l: Row[]) => projectsText(l.map((p) => p.proj_short_name));
-  return [none.length ? baselineReason(of(none), argument, which) : '', gone.length ? baselineReason(of(gone), argument, which, true) : ''].filter(Boolean).join('; ');
+  return [none.length ? baselineReason(of(none), argument, which, false, which === 'project' ? savedBaselines(db, none) : []) : '', gone.length ? baselineReason(of(gone), argument, which, true) : ''].filter(Boolean).join('; ');
 }
+/** The baselines saved in the file from these projects (their names): what a project with none assigned could assign or name. */
+export const savedBaselines = (db: Db, projs: Row[]): string[] => rows(db, 'PROJECT').filter((p) => p._baseline_of && projs.some((x) => x.proj_id === p._baseline_of)).map((p) => p.proj_short_name);
 /** The same for the tools where the current plan stands in (earned value, the curves): one sentence per case. */
 export function currentPlanNotes(db: Db, projs: Row[], argument = false): string[] {
   const gone = projs.filter((p) => baselineNotInFile(db, p)), none = projs.filter((p) => !gone.includes(p));
-  return [...(none.length ? [currentPlanUsed(none.map((p) => p.proj_short_name), argument)] : []), ...(gone.length ? [currentPlanUsed(gone.map((p) => p.proj_short_name), argument, true)] : [])];
+  return [...(none.length ? [currentPlanUsed(none.map((p) => p.proj_short_name), argument, false, savedBaselines(db, none))] : []), ...(gone.length ? [currentPlanUsed(gone.map((p) => p.proj_short_name), argument, true)] : [])];
 }
 
 /** A project's baseline: the project baseline P6 stores (sum_base_proj_id) or a user baseline BL1-BL3. */
@@ -136,15 +138,14 @@ export function baselineOf(db: Db, proj: Row, which: 'project' | 'bl1' | 'bl2' |
     if (!b) return null;
     return { projId: b.proj_id, name: b.proj_short_name, tasks: new Map(rows(db, 'TASK').filter((t) => t.proj_id === b.proj_id).map((t) => [t.task_code, t])), how: 'saved baseline, chosen by name' };
   }
-  // the project baseline: sum_base_proj_id, else the one baseline copy saved from this project (files that carry the
-  // baseline project but not the assignment, e.g. Tower-A)
-  const copies = which === 'project' && !proj.sum_base_proj_id ? rows(db, 'PROJECT').filter((p) => p._baseline_of === proj.proj_id) : [];
-  const id = which === 'project' ? proj.sum_base_proj_id || (copies.length === 1 ? copies[0].proj_id : '') : proj[`_${which}`];
+  // the project baseline is the one ASSIGNED (sum_base_proj_id), as in P6. A baseline that is only saved in the file (Tower-A) is never picked (owner 2026-11-13): the reason names it,
+  // so the caller assigns it or passes it by name
+  const id = which === 'project' ? proj.sum_base_proj_id : proj[`_${which}`];
   if (!id || id === proj.proj_id) return null;
   const b = rows(db, 'PROJECT').find((p) => p.proj_id === id);
   if (!b) return null;
   const tasks = new Map(rows(db, 'TASK').filter((t) => t.proj_id === id).map((t) => [t.task_code, t]));
-  const how = which !== 'project' ? `assigned as ${which.toUpperCase()}` : proj.sum_base_proj_id ? 'the project baseline' : 'the only baseline saved from this project (none is assigned as the project baseline)';
+  const how = which !== 'project' ? `assigned as ${which.toUpperCase()}` : 'the project baseline';
   return { projId: id, name: b.proj_short_name, tasks, how };
 }
 

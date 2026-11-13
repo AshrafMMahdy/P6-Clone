@@ -207,7 +207,7 @@ test('dcma_14\'s BEI does not change: with a baseline saved from the same projec
   const bei = dcma14(b.db, {}).checks.find((c) => c.id === 'bei')!;
   assert.deepEqual([bei.numerator, bei.denominator, bei.metric], [3, 5, 0.6], 'all 5 are due by 20 Jan, 3 completed: the count of every completed task');
   assert.deepEqual(run(b.db).bei, { result: 'assessed', value: 0.6, completed: 3, due: 5 }, 'baseline_variance says the same');
-  const tw = dcma14(sample('Tower-A.xer').db, {}).checks.find((c) => c.id === 'bei')!;
+  const tw = dcma14(sample('Tower-A.xer').db, { baseline: 'TOWER-A-BL1' }).checks.find((c) => c.id === 'bei')!;
   assert.deepEqual([tw.numerator, tw.denominator, tw.metric], [1, 2, 0.5]);
 });
 
@@ -249,9 +249,9 @@ test('the slip class is judged on the exact variance: an activity one minute beh
 test('Tower-A (its baseline is stored in the file): counted from the rows', () => {
   // rows: the saved baseline TOWER-A-BL1 (project 11) holds A1010 (2 Mar 08:00 - 6 Mar 17:00, 40 h, Site 5-Day 8 h/day) and A1020 (7 Mar 07:00 - 14 Mar 18:00, 80 h, Night Shift 7-Day 10 h/day) with float 0, not assigned as the project baseline;
   // the project holds A1010 (complete: actual 2 - 6 Mar 17:00), A1020 (started 7 Mar 07:00, early finish 16 Mar 18:00, 40 %), A1030 and M1000 (finish 1 Apr 17:00), float 0 on all
-  const tw = sample('Tower-A.xer'), r = run(tw.db);
+  const tw = sample('Tower-A.xer'), r = run(tw.db, { baseline: 'TOWER-A-BL1' }); // (saved in the file, not assigned: named, since an unassigned baseline is never picked)
   assert.equal(r.compared_with.name, 'TOWER-A-BL1');
-  assert.match(r.compared_with.how, /the only baseline saved from this project/);
+  assert.match(r.compared_with.how, /saved baseline, chosen by name/);
   assert.deepEqual(r.activities, { compared: 2, not_in_reference: 2, without_dates: 0 }, 'A1030 and M1000 are not in the baseline');
   const v = byId(r.variances);
   assert.deepEqual([v.A1010.finish_variance_days, v.A1010.slip_class], [0, 'on_time']);
@@ -279,7 +279,7 @@ test('Tower-A (its baseline is stored in the file): counted from the rows', () =
   assert.equal(r.responsibility.result, 'not_assessed');
 
   // given: the activity code type Phase; A1020 carries the value Enabling (TASKACTV: task 1001, type 50, value 51 "Enabling")
-  const p = run(tw.db, { responsibilityCode: 'phase' });
+  const p = run(tw.db, { baseline: 'TOWER-A-BL1', responsibilityCode: 'phase' });
   assert.deepEqual((p.responsibility as any).parties, [{ party: 'Enabling', drivers: 1, delay_days: 2 }]);
   assert.equal('concurrent_days_split_equally' in (p.responsibility as object), false, 'no split of any kind');
   assert.equal(p.drivers[0].responsible, 'Enabling');
@@ -341,11 +341,11 @@ test('baseline_variance through the server: arguments, refusals in words, respon
   for (const shape of [{}, { handle: 'a', path: 'b' }, 'x', []]) assert.match((await call('baseline_variance', { handle: trial, as_planned: shape })).d.error.message, /as_planned must be \{"handle": \.\.\.\} or \{"path": \.\.\.\}/);
   // responsibility_code: unknown -> the file's code types named; given -> the table
   const tw = await openSample('Tower-A.xer');
-  const unk = await call('baseline_variance', { handle: tw, responsibility_code: 'Responsibilty' });
+  const unk = await call('baseline_variance', { handle: tw, baseline: 'TOWER-A-BL1', responsibility_code: 'Responsibilty' });
   assert.equal(unk.err, true);
   assert.match(unk.d.error.message, /No activity code type "Responsibilty" in this file\./);
   assert.match(JSON.stringify(unk.d.error), /The file's activity code types: Phase\./);
-  const ok = await call('baseline_variance', { handle: tw, responsibility_code: 'Phase', bogus: 1 });
+  const ok = await call('baseline_variance', { handle: tw, baseline: 'TOWER-A-BL1', responsibility_code: 'Phase', bogus: 1 });
   assert.equal(ok.err, false, JSON.stringify(ok.d).slice(0, 300));
   assert.match(ok.d.notes.join(' '), /baseline_variance has no argument "bogus"/);
   assert.deepEqual(ok.d.responsibility.parties, [{ party: 'Enabling', drivers: 1, delay_days: 2 }]);

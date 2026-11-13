@@ -10,7 +10,7 @@ import { baselineNotInFile } from '../cost/rollup.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentOf } from '../diff.ts';
 import type { Update } from './delay.ts';
-import { baselineOf, baselineFinish, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope } from './common.ts';
+import { baselineOf, baselineFinish, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope, savedBaselines } from './common.ts';
 import { baselinePairs, beiFigures, currentStart, schedulePairs, varianceDetail, type ActivityVariance, type Assessed, type ReferencePairs, type SlipClass } from './forensic.ts';
 
 /** A delay driver is an activity whose finish is this many working days or more behind the other side (delayAnalysis.ts:96, :113-114: min_impact_days default 1; the source's number, not yet agreed with the owner: ledger item 26). */
@@ -88,7 +88,7 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
     bls = new Map([[p.proj_id, { projId: u.projId, name: u.name, tasks, how: ref.how }]]);
   } else {
     const pr = baselinePairs(s, which);
-    if (pr.result === 'not_assessed') return { refused: true, message: o.baseline != null ? `No baseline "${o.baseline}" for this project.` : (() => { const gone = s.projs.filter((x) => baselineNotInFile(db, x, which)), names = projectsText((gone.length ? gone : s.projs).map((x) => x.proj_short_name)); return gone.length ? `The ${baselineWord(which)} of ${names} is not in this file (the file was exported without it), and no other schedule was given.` : `No baseline is assigned to ${names}, and no other schedule was given.`; })(), next: `${how.charAt(0).toUpperCase()}${how.slice(1)}.` };
+    if (pr.result === 'not_assessed') return { refused: true, message: o.baseline != null ? `No baseline "${o.baseline}" for this project.` : (() => { const gone = s.projs.filter((x) => baselineNotInFile(db, x, which)), names = projectsText((gone.length ? gone : s.projs).map((x) => x.proj_short_name)); return gone.length ? `The ${baselineWord(which)} of ${names} is not in this file (the file was exported without it), and no other schedule was given.` : (() => { const saved = savedBaselines(db, s.projs); return `No baseline is assigned to ${names}${saved.length ? ` (${saved.join(', ')} ${saved.length === 1 ? 'is' : 'are'} saved in the file)` : ''}, and no other schedule was given.`; })(); })(), next: `${how.charAt(0).toUpperCase()}${how.slice(1)}.` };
     ref = pr; kind = 'baseline';
     bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(db, p, which)]));
     refRows = [...bls.values()].flatMap((b) => (b ? [...b.tasks.values()].filter((t) => !isWbs(t)) : []));

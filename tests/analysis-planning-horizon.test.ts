@@ -294,7 +294,7 @@ test('129 trial and Detailed Program (progress): the windows counted from the ro
 test('Tower-A (a baseline in the file): the one activity in a window, by hand', () => {
   // data date 1 Apr 2026 08:00. A1030 (forecast start 19 Mar) lies before it, A1010 is complete, A1020 started: only the milestone M1000 (1 Apr 17:00, day 0) is in the first window.
   // M1000: logic 70 (its predecessor A1030 is not complete), resources not assessed (a milestone), float 0 (total float 0), stability not assessed (M1000 is not in the file's baseline: added since): (0.25 x 70 + 0.10 x 0) / 0.35 = 50 -> at risk
-  const r = planningHorizon(readXerFile(sampleCopy('Tower-A.xer')).db, {});
+  const r = planningHorizon(readXerFile(sampleCopy('Tower-A.xer')).db, { baseline: 'TOWER-A-BL1' }); // (saved in the file, not assigned: named)
   assert.equal(r.summary.activities_in_horizon, 1);
   const m = r.bands[0].activities[0];
   assert.equal(m.id, 'M1000');

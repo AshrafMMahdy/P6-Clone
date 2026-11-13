@@ -329,7 +329,7 @@ test('129 trial and Detailed Program (progress, no baseline): every figure count
 
 test('Tower-A (a baseline in the file) and the series Tower-A -> Tower-A_edited: by hand from the files\' rows', () => {
   const tw = readXerFile(sampleCopy('Tower-A.xer')).db;
-  const r = by(decm(tw, {}));
+  const r = by(decm(tw, { baseline: 'TOWER-A-BL1' })); // (saved in the file, not assigned: named)
   // data date 1 Apr 2026 08:00. Baseline TOWER-A-BL1 holds A1010 and A1020 only: of the 4 activities (A1010, A1020, A1030, M1000) A1030 and the milestone are not in it: 2 of 4
   assert.deepEqual(ids(r['06A501a']).sort(), ['A1030', 'M1000']);
   assert.deepEqual([r['06A501a'].numerator, r['06A501a'].denominator], [2, 4]);

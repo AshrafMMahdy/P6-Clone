@@ -214,7 +214,7 @@ test('12a: with no baseline assigned, progress_curves and earned_value both use 
   const o = await call('open_file', { path: join(SAMPLES_DIR, 'Tower-A_edited.xer'), lenient: true });
   const pc = await call('progress_curves', { handle: o.handle, units: 'duration' });
   const ev = await call('earned_value', { handle: o.handle });
-  const S = 'No baseline is assigned to tower_a: the current budget and dates were used; assign one with edit assign_baseline.';
+  const S = 'No baseline is assigned to tower_a: the current budget and dates were used; tower_a_bl1 is saved in the file: assign it with edit assign_baseline.';
   assert.ok(pc.notes.includes(S), JSON.stringify(pc.notes)); assert.ok(ev.notes.includes(S), JSON.stringify(ev.notes));
   assert.equal(pc.baseline, null);
   assert.ok(!JSON.stringify([pc.notes, ev.notes]).includes('only saved baseline'));

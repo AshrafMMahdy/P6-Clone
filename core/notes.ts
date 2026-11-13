@@ -43,17 +43,20 @@ export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) :
 export const andList = (parts: string[]): string => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
 /** Missing baseline, as the reason of a part that is not assessed. `argument`: the tool takes a `baseline` argument. `notInFile`: one IS assigned, and the file was exported without it. */
-export const baselineReason = (proj: string, argument: boolean, which = 'project', notInFile = false): string => (notInFile
+export const baselineReason = (proj: string, argument: boolean, which = 'project', notInFile = false, saved: string[] = []): string => (notInFile
   ? `the ${baselineWord(which)} of ${proj} is not in this file (the file was exported without it); export the file with its baselines${argument ? ', or pass baseline to name one that is in it' : ''}`
+  : saved.length ? `no ${which === 'project' ? 'baseline' : baselineWord(which)} is assigned to ${proj}; ${savedText(saved)}: assign ${saved.length === 1 ? 'it' : 'one'} with edit assign_baseline${argument ? `, or pass ${saved.length === 1 ? 'it' : 'one'} as baseline` : ''}`
   : `no ${which === 'project' ? 'baseline' : baselineWord(which)} is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`);
+/** The baselines saved in the file and not assigned, as a clause. */
+const savedText = (saved: string[]): string => `${namesText(saved)} ${saved.length === 1 ? 'is' : 'are'} saved in the file`;
 /** Missing baseline, a check left out. */
 export const baselineLeftOut = (part: string, proj: string, argument: boolean, which = 'project'): string => notAssessed(part, baselineReason(proj, argument, which));
 /** Missing baseline, the current budget and dates stood in. */
-export const currentPlanUsed = (projs: string[], argument = false, notInFile = false): string => (notInFile
+export const currentPlanUsed = (projs: string[], argument = false, notInFile = false, saved: string[] = []): string => (notInFile
   ? `The project baseline of ${projectsText(projs)} is not in this file (the file was exported without it): the current budget and dates were used; export the file with its baselines to measure against it.`
-  : `No baseline is assigned to ${projectsText(projs)}: the current budget and dates were used; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}.`);
-/** Missing baseline, the one saved baseline the engine chose. */
-export const baselineChosen = (proj: string, baseline: string, which = 'its only saved baseline'): string => `No baseline is assigned to ${proj}: ${baseline}, ${which}, was used.`;
+  : `No baseline is assigned to ${projectsText(projs)}: the current budget and dates were used; ${saved.length ? `${savedText(saved)}: assign ${saved.length === 1 ? 'it' : 'one'}` : 'assign one'} with edit assign_baseline${argument ? ', or pass baseline' : ''}.`);
+/** No project baseline is assigned and another assigned one stood in (the primary baseline, BL1): which one. */
+export const baselineChosen = (proj: string, baseline: string, which: string): string => `No baseline is assigned to ${proj}: ${baseline}, ${which}, was used.`;
 /** A baseline by its argument value (`project`, `bl1`, a saved name) for the sentences above. */
 export const baselineWord = (which: string): string => (which === 'project' ? 'project baseline' : /^bl\d$/i.test(which) ? `${which.toUpperCase()} baseline` : `baseline ${which}`);
 

@@ -80,7 +80,8 @@ test('a baseline saved in the file but not assigned (Tower-A: no sum_base_proj_i
   const p = join(import.meta.dirname, '..', 'Sample XERs', 'Tower-A.xer'), b = new Uint8Array(readFileSync(p));
   const tw = readRaw(b, detectFormat(p, b)).db;
   const main = rows(tw, 'PROJECT').find((x) => !x._baseline_of)!;
-  assert.equal(baselineOf(tw, main, 'project')?.name, 'TOWER-A-BL1');
+  assert.equal(baselineOf(tw, main, 'project'), null, 'saved in the file, not assigned: never picked');
+  assert.equal(baselineOf(tw, main, 'TOWER-A-BL1')?.name, 'TOWER-A-BL1', 'named: used');
   assert.ok(progressCurves(tw, [main.proj_id], {}).notes.some((w: string) => /the current budget and dates were used/.test(w)), 'no baseline assigned: the current plan');
   main.sum_base_proj_id = '11'; // assigned (Project > Assign Baselines): now it is the baseline
   assert.ok(!progressCurves(tw, [main.proj_id], {}).notes.some((w: string) => /the current budget and dates were used/.test(w)));

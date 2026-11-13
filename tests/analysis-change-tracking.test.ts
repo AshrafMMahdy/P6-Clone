@@ -233,7 +233,9 @@ const sample = (name: string) => { const db: Db = readXerFile(sampleCopy(name)).
 test('Tower-A -> Tower-A_edited -> Tower-A_costloaded -> tower_a_schedule: counted from the files\' rows', () => {
   // The four files are the same project at the same data date (1 April 2026 08:00 in each); they are not later updates of one another by data date (the order given is kept, ties sort stably), they are the same
   // schedule saved after edits. Tower-A_edited differs from Tower-A in the rows below; costloaded and tower_a_schedule carry the same activity, relationship and assignment rows as Tower-A_edited (cost fields apart).
-  const ups = ['Tower-A.xer', 'Tower-A_edited.xer', 'Tower-A_costloaded.xer', 'tower_a_schedule.xer'].map(sample);
+  // (each file carries its baseline as a saved copy that is not assigned; an unassigned baseline is never picked, so it is assigned here as edit assign_baseline would: the baseline dates are then compared)
+  const assigned = <T extends { db: Db; projId: string }>(u: T): T => { const b = rows(u.db, 'PROJECT').find((x) => x._baseline_of === u.projId); if (b) rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId)!.sum_base_proj_id = b.proj_id; return u; };
+  const ups = ['Tower-A.xer', 'Tower-A_edited.xer', 'Tower-A_costloaded.xer', 'tower_a_schedule.xer'].map(sample).map(assigned);
   assert.deepEqual(ups.map((u) => rows(u.db, 'PROJECT').find((p) => p.proj_id === u.projId)!.last_recalc_date), Array(4).fill('2026-04-01 08:00'));
   const r = changeTracking({ updates: ups });
   assert.equal(r.periods.length, 3);
@@ -352,7 +354,7 @@ test('change_tracking through the server: read-only, mode and updates, refusals,
   // the series by handle and in latest mode: the same file as an update (a copy), nothing changed
   const twin = await openSample('Tower-A.xer');
   const h2 = await call('open_file', { path: sampleCopy('Tower-A_edited.xer'), lenient: true });
-  const lat = await call('change_tracking', { handle: twin, mode: 'latest', updates: [{ handle: h2.d.handle }, { baseline: 'project' }] });
+  const lat = await call('change_tracking', { handle: twin, mode: 'latest', updates: [{ handle: h2.d.handle }, { baseline: 'TOWER-A-BL1' }] });
   assert.equal(lat.err, false, JSON.stringify(lat.d).slice(0, 300));
   assert.equal(lat.d.mode, 'latest');
   assert.equal(lat.d.periods.length, 1);
@@ -418,7 +420,7 @@ test('a series on a file with several projects is refused, naming the Project ID
   assert.match(none.d.error.message, /No project "NOPE"\./);
   // Tower-A holds a baseline as a project of its own in the file (_baseline_of): that is not a second project, so a series with the baseline still runs without project
   assert.equal(rows(readXerFile(sampleCopy('Tower-A.xer')).db, 'PROJECT').length > 1, true, 'the baseline copy is a row of PROJECT');
-  for (const tool of ['change_tracking', 'windows_analysis', 'decm']) assert.equal((await call(tool, { handle: tw, updates: [{ baseline: 'project' }] })).err, false, tool);
+  for (const tool of ['change_tracking', 'windows_analysis', 'decm']) assert.equal((await call(tool, { handle: tw, updates: [{ baseline: 'TOWER-A-BL1' }] })).err, false, tool);
   // baseline_variance's as_planned file with several projects: refused, with its own next step
   const bv = await call('baseline_variance', { handle: tw, as_planned: { path: sampleCopy('Enppi.xer') } });
   assert.equal(bv.err, true);
@@ -470,10 +472,10 @@ test('an update takes its own project: {path | handle, project}; the top-level p
 
 test('windows_analysis marks the open project in its updates list, as change_tracking and decm do; nothing else of its answer changes', async () => {
   const h = await openSample('Tower-A.xer');
-  const withCur = await call('windows_analysis', { handle: h, updates: [{ baseline: 'project' }] });
+  const withCur = await call('windows_analysis', { handle: h, updates: [{ baseline: 'TOWER-A-BL1' }] });
   assert.equal(withCur.err, false, JSON.stringify(withCur.d).slice(0, 300));
   assert.deepEqual(withCur.d.updates.map((u: { open_project: boolean }) => u.open_project), [false, true]);
   assert.deepEqual(Object.keys(withCur.d.updates[0]), ['name', 'data_date', 'open_project']);
-  const without = await call('windows_analysis', { handle: h, include_current: false, updates: [{ baseline: 'project' }, { baseline: 'project' }] });
+  const without = await call('windows_analysis', { handle: h, include_current: false, updates: [{ baseline: 'TOWER-A-BL1' }, { baseline: 'TOWER-A-BL1' }] });
   assert.equal(without.d.updates.every((u: { open_project: boolean }) => u.open_project === false), true);
 });

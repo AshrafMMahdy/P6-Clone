@@ -291,7 +291,7 @@ test('logic findings: the source\'s four findings with its severities; lags and 
 test('Tower-A (a baseline in the file): every sub-metric by hand from the file\'s rows', () => {
   // TOWER-A: A1010 complete 2-6 Mar, A1020 started 7 Mar (40 %), A1030 not started, M1000 a finish milestone; data date 1 Apr 2026 08:00; links A1010 -> A1020 FS, A1020 -> A1030 SS +20 h, A1030 -> M1000 FS; resources on A1020 and A1030
   const db = readXerFile(sampleCopy('Tower-A.xer')).db;
-  const r = scheduleIndex(db, {});
+  const r = scheduleIndex(db, { baseline: 'TOWER-A-BL1' }); // (saved in the file, not assigned: named)
   assert.equal(r.status_date, '2026-04-01 08:00');
   assert.equal(r.baseline!.name, 'TOWER-A-BL1');
   // float: 3 incomplete activities (A1020, A1030, M1000), all with total float 0 = critical: 100 x 0.2 x 1 = 20
@@ -389,7 +389,7 @@ test('schedule_index through the server: read-only, summary first, 25 listed wit
   assert.match(nodate.d.error.message, /"soon" is not a date/);
   // a baseline in the file and a status date are taken as dcma_14 takes them
   const tw = await openSample('Tower-A.xer');
-  const t1 = await call('schedule_index', { handle: tw, status_date: '2026-03-10', baseline: 'project' });
+  const t1 = await call('schedule_index', { handle: tw, status_date: '2026-03-10', baseline: 'TOWER-A-BL1' });
   assert.equal(t1.err, false, JSON.stringify(t1.d).slice(0, 300));
   assert.equal(t1.d.summary.status_date, '2026-03-10 00:00');
   assert.equal(t1.d.summary.baseline.name, 'TOWER-A-BL1');

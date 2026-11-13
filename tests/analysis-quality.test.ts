@@ -133,11 +133,13 @@ test('platform review 2: critical path test with nothing critical by float (130 
   assert.notEqual(cpt.result, 'not_assessed', String(cpt.note));
   assert.match(cpt.note!, /^No incomplete task is critical by total float \(milestones are not tested\): /);
   assert.match(cpt.note!, /^No incomplete task is critical by total float \(milestones are not tested\): BTAF34033, the one with the least float, was tested\.$/);
-  // Tower-A: a baseline saved in the file but not assigned is not picked by progress_curves (P6: with none assigned the current project is its own baseline); the tools that read the project baseline still choose the only saved copy
+  // Tower-A: a baseline saved in the file but not assigned is not picked by progress_curves (P6: with none assigned the current project is its own baseline); no tool picks it: each says it is saved in the file, to assign or to name
   const tw = open('Tower-A.xer');
   const tp = rows(tw, 'PROJECT').filter((x) => !x._baseline_of).map((x) => x.proj_id);
   const c = progressCurves(tw, tp, {});
   assert.equal(c.baseline, null);
-  assert.deepEqual(c.notes.filter((w: string) => /baseline/.test(w)), ['No baseline is assigned to TOWER-A: the current budget and dates were used; assign one with edit assign_baseline.']);
-  assert.match(dcma14(tw, { projIds: tp, hoursPerDay: 8 }).baseline!.how, /only baseline/);
+  assert.deepEqual(c.notes.filter((w: string) => /baseline/.test(w)), ['No baseline is assigned to TOWER-A: the current budget and dates were used; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
+  assert.equal(dcma14(tw, { projIds: tp, hoursPerDay: 8 }).baseline, null);
+  assert.ok(dcma14(tw, { projIds: tp, hoursPerDay: 8 }).notes.includes('Missed tasks and Baseline execution index (BEI) not assessed: no baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline, or pass it as baseline.'));
+  assert.match(dcma14(tw, { projIds: tp, hoursPerDay: 8, baseline: 'TOWER-A-BL1' }).baseline!.how, /saved baseline, chosen by name/);
 });
