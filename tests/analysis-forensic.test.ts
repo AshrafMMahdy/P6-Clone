@@ -104,7 +104,7 @@ test('float figures: not assessed without a stored float, or when everything is 
   const c = B.withCycle(); // never scheduled: no total float
   const r = F.floatFigures(scopeOf(c));
   assert.equal(r.result, 'not_assessed');
-  assert.match((r as { note: string }).note, /schedule the project/i);
+  assert.match((r as { note: string }).note, /^no incomplete activity carries a total float; run schedule first$/);
   const done = B.project('DONE', [{ id: 'A', duration_days: 2 }], { ops: [{ op: 'update_activity', id: 'A', actual_start: '2026-01-05 00:00', actual_finish: '2026-01-07 00:00' }] });
   const d = F.floatFigures(scopeOf(done));
   assert.equal(d.result, 'not_assessed');
@@ -250,7 +250,7 @@ test('progress anomalies: not assessed without a data date; a status date makes 
   for (const p of rows(b.db, 'PROJECT')) p.last_recalc_date = '';
   const r = F.progressAnomalies(scopeOf(b));
   assert.equal(r.result, 'not_assessed');
-  assert.match((r as { note: string }).note, /No data date in CLEAN/);
+  assert.match((r as { note: string }).note, /^CLEAN has no data date; pass status_date$/);
   const ok = assessed(F.progressAnomalies(scopeOf(b, { statusDate: parseP6Date('2026-01-05 00:00') })));
   assert.equal(ok.integrity_score, 100);
   assert.deepEqual(ok.projects_without_data_date, []);
@@ -326,7 +326,7 @@ test('variance: against another schedule (an as-planned schedule, an earlier upd
   // no baseline in the file: not assessed, with the reason (as dcma_14 words it)
   const nb = F.baselinePairs(scopeOf(B.cleanChain()));
   assert.equal(nb.result, 'not_assessed');
-  assert.match((nb as { note: string }).note, /No project baseline is assigned/);
+  assert.match((nb as { note: string }).note, /^no baseline is assigned to CLEAN; assign one with edit assign_baseline, or pass baseline$/);
   assert.equal(F.baselinePairs(s, 'bl2').result, 'not_assessed');
 });
 
@@ -433,7 +433,7 @@ test('registration, end to end through the server: listed read-only, run on a pr
   assert.equal(r.d.listed, LISTED);
   assert.equal(r.d.rows.length, LISTED, 'the clone\'s list rule');
   assert.equal(r.d.notes.length, 1);
-  assert.match(r.d.notes[0], /^forensic_probe has no argument "bogus": it was not used and the call ran without it\. Its arguments are: handle, export, export_name, project, n, mode, caller, async\.$/);
+  assert.match(r.d.notes[0], /^forensic_probe has no argument "bogus"; the call ran without it\. Its arguments are: handle, export, export_name, project, n, mode, caller, async\.$/);
   // the whole result without being asked, in the default result folder (analysis/<project>/<tool>)
   assert.ok(r.d.exported.folder.replace(/\\/g, '/').endsWith('analysis/CLEAN__CLEAN/forensic_probe') || /analysis\/CLEAN/.test(r.d.exported.folder.replace(/\\/g, '/')), r.d.exported.folder);
   const csv = r.d.exported.files.find((f: any) => f.path.endsWith('-rows.csv'));

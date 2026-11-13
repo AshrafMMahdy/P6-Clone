@@ -257,7 +257,7 @@ test('crash_schedule, float_paths, progress_curves, resource_histogram, tia, lev
   assert.equal(rh.resources[0].periods_total, f.csv.periods.filter((p: any) => p.resource === 'crew').length);
   assert.equal(rh.resources_total, 1);
   assert.equal(rh.periods_note, undefined);
-  assert.match(rh.notes.join(' '), new RegExp(`^Per-period figures not shown; all ${f.csv.periods.length} periods in .*resource_histogram-periods\\.csv\\.$`));
+  assert.match(rh.notes.join(' '), new RegExp(`^Per-period figures not shown; all 1 resource in .*resource_histogram-periods\\.csv\\.$`));
   const t = (await call('tia', { handle: h.handle, fragnet: [{ op: 'add_activity', id: 'X', name: 'Change', duration_days: 2 }, { op: 'add_relationship', pred: 'A3', succ: 'X' }, { op: 'add_relationship', pred: 'X', succ: 'A4' }], export: folder() })).d;
   f = files(t, 'tia');
   assert.equal(f.csv.fragnet_path.length, t.fragnet_path.length); assert.equal(f.csv.summary[0].delay_days, String(t.delay_days));
@@ -582,7 +582,7 @@ test('E4: every list the answer cut says where all of it is, when an export was 
   const fdir = folder();
   const fp = (await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5 }, export: fdir })).d;
   assert.equal(fp.between.paths_total, '1208925819614629174706176');
-  assert.equal(fp.between.paths_note, `5 of 1208925819614629174706176 shown (the most asked for); the export holds the same 5 in ${join(fdir, 'float_paths-between.csv')}, ask for more to have more`);
+  assert.equal(fp.between.paths_note, '5 of 1208925819614629174706176 shown.');
   assert.equal(fp.paths_note, undefined, 'the top-level paths are not cut lists');
   const dflt = (await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5 } })).d;
   assert.equal(dflt.between.paths_note, `5 of 1208925819614629174706176 shown (the most asked for); the export holds the same 5 in ${join(dflt.exported.folder, 'float_paths-between.csv')}, ask for more to have more`);

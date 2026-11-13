@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { mkdtempSync, mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { callTool, toolResult, outsideRoute } from '../mcp/server.ts';
@@ -67,9 +67,8 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
   // a repeated TASK id that relationships point at, whose copy differs, cannot be told apart: left, and said so once
   const ld = await call('open_file', { path: f.diff, lenient: true });
   assert.equal(ld.data.still_rejected, true);
-  assert.ok(ld.data.diagnostics.not_repaired.some((x: string) => /^1 activity row repeats an id that other rows point at and differs from its twin/.test(x)), JSON.stringify(ld.data.diagnostics));
-  assert.ok(ld.data.diagnostics.not_repaired.some((x: string) => /^DUP_KEY x1 \(fatal\) is still in the project \(listed in file_as_given.fatal\): save with repair: true repairs it\./.test(x)), JSON.stringify(ld.data.diagnostics.not_repaired));
-  assert.match(ld.data.note, /save with repair: true repairs DUP_KEY and writes a copy P6 imports\./);
+  assert.ok(ld.data.notes.some((x: string) => /^Not repaired: .*(appears twice|repeats)/.test(x)), JSON.stringify(ld.data.notes));
+  assert.ok(ld.data.file_as_given.fatal.some((x: any) => x.code === 'DUP_KEY'), 'the fault is listed once, in file_as_given.fatal');
   assert.equal(ld.data.diagnostics.findings.filter((x: { severity: string }) => x.severity === 'fatal').length, 0, 'each fatal finding is listed once: in file_as_given.fatal');
   await call('close', { handle: ld.data.handle, owner_key: ld.data.owner_key, discard: true });
   const unreadable = await call('open_file', { path: f.junk, lenient: true });
@@ -93,7 +92,7 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
   const imp = await call('import_excel', { handle: g, path: join(dir, 'g2.xlsx') });
   assert.equal(imp.data.applied, true, JSON.stringify(imp.data));
   assert.deepEqual([imp.data.summary.relationshipsUpdated, imp.data.summary.relationshipsAdded], [1, 0]);
-  assert.ok(!imp.data.warnings.some((w: string) => /skipped/.test(w)), JSON.stringify(imp.data.warnings));
+  assert.ok(!(imp.data.notes ?? []).some((w: string) => /skipped/.test(w)), JSON.stringify(imp.data.notes));
   assert.deepEqual((await call('get_activity', { handle: g, activity_id: 'A2' })).data.predecessors.filter((p: any) => p.id === 'A1').map((p: any) => p.type), ['SS']);
   // a new row beside it (FF) adds a link: the pair then holds SS + FF, and a re-import of that sheet changes nothing
   const tp2 = sheets.find((s) => s.name === 'TASKPRED')!;
@@ -104,10 +103,12 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
   writeFileSync(join(dir, 'g3.xlsx'), await writeXlsx(sheets));
   const imp2 = await call('import_excel', { handle: g, path: join(dir, 'g3.xlsx') });
   assert.deepEqual([imp2.data.summary.relationshipsAdded, imp2.data.summary.relationshipsUpdated], [1, 0]);
-  assert.ok(imp2.data.warnings.some((w: string) => /unknown type "XX"/.test(w)), JSON.stringify(imp2.data.warnings));
+  assert.ok(imp2.data.notes.some((w: string) => /unknown type "XX"/.test(w)), JSON.stringify(imp2.data.notes));
   assert.deepEqual((await call('get_activity', { handle: g, activity_id: 'A2' })).data.predecessors.filter((p: any) => p.id === 'A1').map((p: any) => p.type).sort(), ['FF', 'SS']);
   await call('export_excel', { handle: g, path: join(dir, 'g4.xlsx') });
-  assert.equal((await call('import_excel', { handle: g, path: join(dir, 'g4.xlsx'), dry_run: true })).data.note, 'Nothing to change.');
+  const nothing = (await call('import_excel', { handle: g, path: join(dir, 'g4.xlsx'), dry_run: true })).data;
+  assert.equal(nothing.notes, undefined, 'nothing was left out, so there is no note');
+  assert.equal(Object.entries(nothing.summary).filter(([k, v]) => k !== 'unchanged' && v !== 0).length, 0, 'nothing to change');
 });
 
 /** A stdio server with arguments; tools and the way it ends. */
@@ -203,41 +204,39 @@ test('MCP contract: a lenient open repairs a misspelled key column (the platform
 test('a file P6 would reject, or that is no schedule: the answer lists what P6 refuses and tells the agent how to carry on (owner 2026-11-10)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'p6mcp-r-'));
   const f = files(dir);
-  const second = 'the file is text (an XER is tab-separated tables: %T table, %F fields, %R rows): read it with your file-reading tool, do what the user asked from the tables directly (code or a spreadsheet), and tell the user the file is damaged, what is wrong with it, and that the analysis was done outside the P6 engine.';
-  const first = 'Call open_file again with lenient: true: the clone repairs what it can and opens it, and says what it repaired; work on that (save with repair: true writes a copy P6 imports), and tell the user the file as given is one P6 itself would refuse and why.';
-  // a duplicate-ID XER (a made one, and the real one): every kind with its count, the first few in words, the way forward in order
+  // a duplicate-ID XER (a made one, and the real one): the refusal says it once, in one sentence (every kind with its count in fatal_kinds, each fault in fatal), and the next step is the repaired copy
   for (const path of [f.dup, sampleCopy('CCA R03 dt 24Oct11SC.xer')]) {
     const rej = await call('open_file', { path });
     assert.equal(rej.data.error.code, 'p6_would_reject');
     const e = rej.data.error, kinds = e.fatal_kinds as { code: string; count: number }[];
     assert.equal(e.fatal_total, kinds.reduce((x, k) => x + k.count, 0));
     assert.ok(kinds.some((k) => k.code === 'DUP_KEY'));
-    assert.match(e.message, new RegExp(`${e.fatal_total} fatal finding`));
-    for (const k of kinds) assert.ok(e.message.includes(`${k.code} x${k.count}`), `${k.code} x${k.count} in ${e.message}`);
-    assert.match(e.message, /is in the file twice|shares its internal id with another activity row/);
-    assert.equal(e.next_step, `1. ${first} 2. If it still cannot be opened, ${second}`);
+    assert.match(e.message, new RegExp(`^Not opened: P6 would refuse ${basename(path)} \\(${e.fatal_total} faults?: `));
+    assert.equal(e.reason, e.message, 'one sentence, said once');
+    assert.equal(e.next_step, 'Call open_file again with lenient: true to open a repaired copy.');
+    assert.ok(e.fatal.some((x: any) => x.code === 'DUP_KEY'));
     // the lenient open says what it repaired and that the original is one P6 would refuse
     const len = await call('open_file', { path, lenient: true });
     assert.equal(len.isError, false);
     assert.equal(len.data.file_as_given.p6_would_reject, true);
     assert.deepEqual(len.data.file_as_given.fatal_kinds, kinds);
-    assert.match(len.data.file_as_given.tell_the_user, /one P6 itself would refuse/);
-    assert.match(len.data.note, /^The file as given is one P6 itself would refuse/);
-    assert.ok(Array.isArray(len.data.diagnostics.repaired) && Array.isArray(len.data.diagnostics.not_repaired));
+    assert.equal(len.data.file_as_given.tell_the_user, undefined);
+    assert.match(len.data.notes[0], new RegExp(`^Opened a repaired copy: P6 would refuse ${basename(path)} as given \\(`));
+    assert.ok(Array.isArray(len.data.diagnostics.repaired));
     await call('close', { handle: len.data.handle, discard: true });
   }
   // a clean file opened leniently: nothing to tell
   const ok = await call('open_file', { path: f.good, lenient: true });
   assert.equal(ok.data.file_as_given.p6_would_reject, false);
-  assert.doesNotMatch(ok.data.note, /as given/);
+  assert.equal(ok.data.notes?.some((n: string) => /as given/.test(n)) ?? false, false);
   await call('close', { handle: ok.data.handle, discard: true });
-  // a file that is not a schedule: nothing to repair, so no lenient route, straight to the second, with the cause
+  // a file that is not a schedule: nothing to repair, so no lenient route, with the cause
   for (const lenient of [false, true]) {
     const bad = await call('open_file', { path: f.junk, ...(lenient ? { lenient } : {}) });
     assert.equal(bad.data.error.code, 'p6_would_reject');
-    assert.match(bad.data.error.message, /NO_HEADER x1, NO_PROJECT x1/);
     assert.match(bad.data.error.message, /First line is not an ERMHDR header/);
-    assert.equal(bad.data.error.next_step, `The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: ${second}`);
+    assert.ok(bad.data.error.fatal_kinds.some((k: any) => k.code === 'NO_HEADER') && bad.data.error.fatal_kinds.some((k: any) => k.code === 'NO_PROJECT'));
+    assert.equal(bad.data.error.next_step, 'The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: the file is text (an XER is tab-separated tables: %T table, %F fields, %R rows): read it with your file-reading tool, do what the user asked from the tables directly (code or a spreadsheet), and tell the user the file is damaged, what is wrong with it, and that the analysis was done outside the P6 engine.');
   }
   // a binary .mpp the reader cannot take: the cause, and the way on (Project XML, else tell the user)
   const mpp = join(dir, 'broken.mpp');
@@ -276,7 +275,8 @@ test('import_file and transfer_progress say what P6 would refuse in the file the
   assert.equal(dry.data.file_as_given.p6_would_reject, true);
   assert.ok(dry.data.file_as_given.fatal_kinds.some((k: { code: string; count: number }) => k.code === 'DUP_KEY' && k.count >= 1));
   assert.equal(dry.data.file_as_given.fatal_total, dry.data.file_as_given.fatal_kinds.reduce((x: number, k: { count: number }) => x + k.count, 0));
-  assert.match(dry.data.file_as_given.tell_the_user, /one P6 itself would refuse/);
+  assert.match(dry.data.notes[0], /^P6 would refuse dup\.xer as given \(.*\); this call used what could be read\.$/);
+  assert.equal(dry.data.file_as_given.tell_the_user, undefined);
   const done = await call('import_file', { handle: np.handle, owner_key: np.owner_key, path: f.dup, action: 'new' });
   assert.equal(done.isError, false); assert.equal(done.data.file_as_given.p6_would_reject, true);
   assert.ok(done.data.projects?.length >= 1, 'the import went on');
@@ -298,9 +298,8 @@ test('import_file and transfer_progress say what P6 would refuse in the file the
   assert.equal(e.code, 'p6_would_reject');
   assert.deepEqual(e.fatal_kinds, [{ code: 'DUP_KEY', count: 60 }]);
   assert.equal(e.fatal_total, 60);
-  assert.match(e.message, /60 fatal findings \(DUP_KEY x60\)/);
+  assert.match(e.message, /^Not opened: P6 would refuse big\.xer \(60 faults: .*; and 57 more\)\.$/);
   assert.equal(e.fatal_listed, 5, 'the findings in words: 5 of the 60');
-  assert.match(e.message, /data\.fatal lists 5 of the 60 in words/);
   const len = await call('open_file', { path: big, lenient: true });
   assert.deepEqual([len.data.file_as_given.fatal_total, len.data.file_as_given.fatal_listed, len.data.file_as_given.fatal_kinds[0].count], [60, 5, 60]);
   assert.equal(len.data.diagnostics.counts.fatal ?? len.data.diagnostics.before_repairs?.counts.fatal, 60, 'the counts of the diagnostics are real too');

@@ -399,7 +399,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           // carry on: lenient first when there is a project to repair, else (or if that fails) the file read as text outside the clone
           const bad = f.filter((x) => x.severity === 'fatal'), total = fatalTotal(f), listed = fatalListed(f), kinds = fatalKinds(f), shown = 3;
           const noProject = !allIds(r.db).length, cause = bad.slice(0, shown).map((x) => x.message).join(' ');
-          fail('p6_would_reject', `Not opened: P6 would refuse ${basename(path)} (${plural(total, 'fault')}: ${bad.slice(0, shown).map((x) => x.message.replace(/\.$/, '')).join('; ')}${bad.length > shown ? `; ${total - shown} more in data.fatal` : ''}).`,
+          fail('p6_would_reject', `Not opened: P6 would refuse ${basename(path)} (${plural(total, 'fault')}: ${bad.slice(0, shown).map((x) => x.message.replace(/\.$/, '')).join('; ')}${bad.length > shown ? `; and ${total - shown} more` : ''}).`,
             noProject
               ? `The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: ${outsideRoute(format, head)}.`
               : `Call open_file again with lenient: true to open a repaired copy.`,

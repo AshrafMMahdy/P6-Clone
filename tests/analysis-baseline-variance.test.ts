@@ -116,8 +116,7 @@ test('EXPECTED DIFFERENCES from the source on that fixture, each with its reason
   //    activity's finish variance, ahead ones negative), worst_offenders (the list is sorted worst first), float_analysis, recommendations, processing_metadata, confidence and chain_confidence (constants 1.0), SPI(t) (Earned Schedule is in progress_curves)
   for (const k of ['methodology', 'use_half_step', 'total_finish_variance_days', 'worst_offenders', 'float_analysis', 'recommendations', 'processing_metadata', 'spi_t']) assert.equal(k in r, false, k);
   assert.equal(JSON.stringify(r).includes('half_step'), false, 'no method name the code does not perform');
-  assert.ok(r.method.some((m) => /concurrent delay is not assessed.*windows_analysis apportions delay between causes/.test(m)));
-  assert.ok(r.method.some((m) => /duration_weighted_percent_complete \(the source’s schedule_performance_index, :240-247/.test(m)));
+  assert.equal((r as any).method, undefined, 'the methods and what is not assessed (concurrent delay) are in the tool description');
   // 5. the impacted milestone: the source says "(project finish)" when no milestone is reached; the clone says null (no milestone) and where the chain ends
   assert.deepEqual([r.chains[0].impacted_milestone, r.chains[0].ends_at], [null, 'T3']);
 });
@@ -367,7 +366,7 @@ test('the list rule on a real sample (31 buidings, 2,142 activities, against ano
   const acts = rows(db, 'TASK').filter((x) => x.proj_id === main && x.task_type !== 'TT_WBS');
   assert.equal(r.d.variances_total, acts.length, 'one variance row per activity that is not a WBS summary');
   assert.equal(r.d.variances.length, 25);
-  assert.match(r.d.variances_note, new RegExp(`^25 of ${acts.length} shown; all ${acts.length} in .*baseline_variance-variances\\.csv$`));
+  assert.match(r.d.variances_note, new RegExp(`^25 of ${acts.length} shown; all ${acts.length} in .*baseline_variance-variances\\.csv\\.$`));
   const jungle = readXerFile(sampleCopy('baseline of jungle.xer')).db, jm = rows(jungle, 'PROJECT').find((p) => !p._baseline_of)!.proj_id;
   const codes = new Set(rows(jungle, 'TASK').filter((x) => x.proj_id === jm && x.task_type !== 'TT_WBS').map((x) => x.task_code));
   const matchedById = acts.filter((x) => codes.has(x.task_code)).length;

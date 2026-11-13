@@ -182,7 +182,7 @@ test('MCP: compare two revisions by Activity ID, and trace an activity\'s logic'
     assert.equal(same.data.changes.length, 0);
     assert.match(same.data.compared, /\(earlier\) \u2192 cairo festival city\.xer \(the file\) \(later\)$/);
     const comp = await c.tool('compare', { handle: a, other_handle: b, mode: 'computed' });
-    assert.match(comp.data.sign_note, /positive finish_shift_days.*later revision is later/);
+    assert.equal(comp.data.sign_note, undefined, 'the sign of the shifts is in the tool description, below');
     const tools = (await c.rpc('tools/list')).result.tools as { name: string; description: string }[];
     assert.match(tools.find((t) => t.name === 'compare')!.description, /open project \(handle\) is always the EARLIER revision.*other_handle.*path.*baseline.*positive finish_shift_days/);
     const tr = await c.tool('trace_logic', { handle: a, activity_id: 'A2410', predecessors: 2, successors: 1 });
@@ -217,7 +217,7 @@ test('MCP: Microsoft Project task UIDs (source_uid, uid:), one data date per pro
     assert.equal((await c.tool('get_activity', { handle: m, activity_id: `uid:${two.source_uid}` })).data.name, 'Two');
     const ed = await c.tool('edit', { handle: m, operations: [{ op: 'update_activity', id: `uid:${two.source_uid}`, name: 'Two b' }, { op: 'add_relationship', pred: acts.find((a) => a.name === 'One')!.id, succ: `uid:${two.source_uid}`, type: 'SS' }] });
     assert.equal(ed.isError, false);
-    assert.match(ed.data.warnings[0], /skipped: .* already has a FS relationship/);
+    assert.match(ed.data.notes[0], /skipped: .* already has a FS relationship/);
     // schedule: data_date on one project only, or (as before) on every project
     const dates = async () => Object.fromEntries((await c.tool('list_projects', { handle: h })).data.projects.map((p: { id: string; data_date: string }) => [p.id, p.data_date]));
     const sc = await c.tool('schedule', { handle: h, data_date: '2026-04-01', project: 'P2' });
