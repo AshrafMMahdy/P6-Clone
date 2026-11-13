@@ -13,7 +13,7 @@ export const startedBeforeFsPredecessor = (t: Row, ctx: Pick<ReturnType<typeof m
   !!t.act_start_date && (ctx.predsOf.get(t.task_id) ?? []).some((r) => { const p = ctx.taskById.get(r.pred_task_id); return r.pred_type === 'PR_FS' && !!p && !p.act_end_date; });
 
 export type Grade = 'pass' | 'warn' | 'fail';
-export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; detail: string; examples: string[]; /** how many examples there are (examples shows the first 10 of a check's activities; saved_dates gives all) */ examples_total?: number;
+export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; /** a sentence about what was found, only where there is one */ detail?: string; examples: string[]; /** how many examples there are (examples shows the first 10 of a check's activities; saved_dates gives all) */ examples_total?: number;
   /** with opts.activities: every activity the check found, by Activity ID and name (an export) */ activities?: { id: string; name: string }[] }
 export interface Review { grade: Grade; projects: string[]; openActivities: number; relationships: number; checks: Check[] }
 
@@ -35,7 +35,7 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
     const p = percent ?? 0;
     const grade: Grade = failAt != null && (failAt === 0 ? count > 0 : p > failAt) ? 'fail' : warnAt != null && (warnAt === 0 ? count > 0 : p > warnAt) ? 'warn' : 'pass';
     const max = opts.examples ?? 10;
-    checks.push({ id, title, grade, count, of, percent, limit, detail, examples: (typeof list === 'number' ? examples : (max > 0 ? list.slice(0, max) : list).map(name)),
+    checks.push({ id, title, grade, count, of, percent, limit, ...(detail ? { detail } : {}), examples: (typeof list === 'number' ? examples : (max > 0 ? list.slice(0, max) : list).map(name)),
       ...(typeof list !== 'number' ? { examples_total: list.length } : examples.length ? { examples_total: examples.length } : {}),
       ...(opts.activities && typeof list !== 'number' ? { activities: list.map((t) => ({ id: t.task_code, name: t.task_name })) } : {}) });
   };
@@ -47,24 +47,24 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   const noPred = live.filter((t) => t.task_type !== 'TT_Mile' && !(ctx.predsOf.get(t.task_id) ?? []).length);
   const noSucc = live.filter((t) => t.task_type !== 'TT_FinMile' && !(ctx.succsOf.get(t.task_id) ?? []).length);
   const missing = new Set([...noPred, ...noSucc]);
-  add('logic', 'Missing logic (no predecessor or no successor)', [...missing], live.length, null, 5, 'at most 5%', `${noPred.length} without predecessors, ${noSucc.length} without successors (start milestones without predecessors and finish milestones without successors are not counted).`);
-  add('leads', 'Leads (negative lags)', P.filter((r) => Number(r.lag_hr_cnt) < 0).length, P.length, null, 0, 'none', 'Negative lags hide logic; model the overlap with SS/FF relationships instead.');
-  add('lags', 'Positive lags', P.filter((r) => Number(r.lag_hr_cnt) > 0).length, P.length, 5, null, 'at most 5% of relationships', 'Lags are not visible as work; long lags often stand in for missing activities.');
-  add('rel_types', 'Relationships other than finish-to-start', P.filter((r) => r.pred_type !== 'PR_FS').length, P.length, 10, null, 'at most 10%', 'Mostly FS logic keeps the critical path readable.');
+  add('logic', 'Missing logic (no predecessor or no successor)', [...missing], live.length, null, 5, 'at most 5%', `${noPred.length} without predecessors, ${noSucc.length} without successors.`);
+  add('leads', 'Leads (negative lags)', P.filter((r) => Number(r.lag_hr_cnt) < 0).length, P.length, null, 0, 'none', '');
+  add('lags', 'Positive lags', P.filter((r) => Number(r.lag_hr_cnt) > 0).length, P.length, 5, null, 'at most 5% of relationships', '');
+  add('rel_types', 'Relationships other than finish-to-start', P.filter((r) => r.pred_type !== 'PR_FS').length, P.length, 10, null, 'at most 10%', '');
   const hard = live.filter((t) => /^(CS_MSO|CS_MEO|CS_MANDSTART|CS_MANDFIN)$/.test(t.cstr_type ?? '') || /^(CS_MANDSTART|CS_MANDFIN)$/.test(t.cstr_type2 ?? ''));
-  add('hard_constraints', 'Hard constraints (Start On, Finish On, Mandatory)', hard, live.length, null, 5, 'at most 5%', 'Hard constraints override logic and can create negative float.');
-  add('high_float', 'High total float (over 44 working days)', live.filter((t) => Number(t.total_float_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', 'Usually a sign of missing successors.');
-  add('negative_float', 'Negative total float', live.filter((t) => t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) < 0), live.length, null, 0, 'none', 'The plan cannot meet a constraint or the must-finish date.');
-  add('long_durations', 'Long remaining durations (over 44 working days)', live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && Number(t.remain_drtn_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', 'Break long activities down so progress can be measured.');
+  add('hard_constraints', 'Hard constraints (Start On, Finish On, Mandatory)', hard, live.length, null, 5, 'at most 5%', '');
+  add('high_float', 'High total float (over 44 working days)', live.filter((t) => Number(t.total_float_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', '');
+  add('negative_float', 'Negative total float', live.filter((t) => t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) < 0), live.length, null, 0, 'none', '');
+  add('long_durations', 'Long remaining durations (over 44 working days)', live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && Number(t.remain_drtn_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', '');
   const invalid = tasks.filter((t) => { const dd = ddOf.get(t.proj_id); return dd != null && ((!t.act_start_date && t.early_start_date && (parseP6Date(t.early_start_date) ?? Infinity) < dd) || (t.act_start_date && (parseP6Date(t.act_start_date) ?? 0) > dd) || (t.act_end_date && (parseP6Date(t.act_end_date) ?? 0) > dd)); });
-  add('invalid_dates', 'Invalid dates (forecast before the data date, or actuals after it)', invalid, tasks.length, null, 0, 'none', !hasDd ? 'The project has no data date.' : 'Work not done yet must be planned after the data date; actuals must be on or before it.');
+  add('invalid_dates', 'Invalid dates (forecast before the data date, or actuals after it)', invalid, tasks.length, null, 0, 'none', !hasDd ? 'The project has no data date.' : '');
   const withRsrc = new Set(rows(db, 'TASKRSRC').map((a) => a.task_id));
   const noRes = live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && !withRsrc.has(t.task_id));
-  add('resources', 'Activities without resources', noRes, live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile').length, withRsrc.size ? 0 : null, null, 'all resourced (if the schedule is resource-loaded)', withRsrc.size ? 'The schedule is resource-loaded, but these activities have no resources.' : 'The schedule is not resource-loaded (informational).');
+  add('resources', 'Activities without resources', noRes, live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile').length, withRsrc.size ? 0 : null, null, 'all resourced (if the schedule is resource-loaded)', withRsrc.size ? '' : 'The schedule carries no resource assignments: not judged.');
   const oos = live.filter((t) => startedBeforeFsPredecessor(t, ctx));
-  add('out_of_sequence', 'Started out of sequence', oos, live.filter((t) => t.act_start_date).length, 0, null, 'none', 'Started before a finish-to-start predecessor finished.');
+  add('out_of_sequence', 'Started out of sequence', oos, live.filter((t) => t.act_start_date).length, 0, null, 'none', '');
   const crit = live.filter((t) => isCritical(t, ctx));
-  add('critical', 'Critical activities', crit, live.length, null, null, 'informational', `${crit.length} critical of ${live.length} open activities.`);
+  add('critical', 'Critical activities', crit, live.length, null, null, 'informational', '');
   const { stale } = storedDatesState(db, [...open]);
   add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), live.length, 0, null, 'none', stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open)).join(' '), stale.flatMap((x) => x.examples.map((f) => f.message)));
 
@@ -77,7 +77,7 @@ export function reviewText(r: Review): string {
   const out = [`Schedule review: ${r.projects.join(', ')} (${r.openActivities} open activities, ${r.relationships} relationships)`, ''];
   for (const c of r.checks) {
     out.push(`${mark[c.grade]}  ${c.title}: ${c.count}${c.percent != null && c.of ? ` of ${c.of} (${c.percent}%)` : ''}  [limit: ${c.limit}]`);
-    if (c.grade !== 'pass') { out.push(`      ${c.detail}`); for (const e of c.examples.slice(0, 5)) out.push(`      - ${e}`); }
+    if (c.grade !== 'pass') { if (c.detail) out.push(`      ${c.detail}`); for (const e of c.examples.slice(0, 5)) out.push(`      - ${e}`); }
   }
   out.push('', `Overall: ${mark[r.grade]}`);
   return out.join('\n');
