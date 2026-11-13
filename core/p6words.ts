@@ -7,7 +7,7 @@ export const TABLE_WORD: Record<string, string> = {
   POBS: 'Project OBS', OBS: 'OBS', ERMHDR: 'Export header', UDFTYPE: 'User-defined field', UDFVALUE: 'User-defined field value', ROLES: 'Role', RSRCROLE: 'Resource role', PROJCOST: 'Project expense',
   ACTVCODE: 'Activity code value', ACTVTYPE: 'Activity code type', TASKACTV: 'Activity code assignment', PCATTYPE: 'Project code type', PCATVAL: 'Project code value', TASKPROC: 'Activity step', CURRTYPE: 'Currency',
   SCHEDOPTIONS: 'Schedule option', FINDATES: 'Financial period', TASKMEMO: 'Activity notebook topic', WBSMEMO: 'WBS notebook topic', MEMOTYPE: 'Notebook topic', RSRCCURVDATA: 'Resource curve', ACCOUNT: 'Cost account',
-  RISKTYPE: 'Risk type', DOCUMENT: 'Document', RSRCROLE_RATE: 'Role price',
+  RISKTYPE: 'Risk type', DOCUMENT: 'Document', RSRCROLE_RATE: 'Role price', APPLYACTOPTIONS: 'Apply Actuals option', THRSPARM: 'Threshold parameter', WBSRSRC: 'WBS resource summary',
 };
 /** A column's words: the trailing "_id", "_flag", "_cnt", "_date", "_num" dropped, the rest as words ("risk_level" -> "Risk level"). */
 export const humanizeField = (column: string): string => { const w = column.replace(/_(id|flag|cnt|date|num|hr_cnt)$/, '').split('_').filter(Boolean); return w.length ? w[0][0].toUpperCase() + w.join(' ').slice(1) : column; };
