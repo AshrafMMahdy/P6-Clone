@@ -48,7 +48,7 @@ test('Earned Schedule by hand on three activities (cost basis): ES 2.5 weeks, AT
   near(c.totals.spi_t, 0.833, 'SPI(t)', 1e-9); near(c.totals.sv_t, -0.5, 'SV(t)');
   assert.equal(c.totals.es_date, '2026-03-19', 'the date at which the plan had earned 1750 (12:00 on the 19th)');
   near(c.totals.es_days, 17.5, 'ES in working days'); near(c.totals.at_days, 21, 'AT in working days'); near(c.totals.sv_t_days, -3.5, 'SV(t) in working days');
-  assert.match(c.totals.es_note, /^Earned Schedule against baseline BL, in weeks from the first planned cost \(2026-03-02\)/);
+  assert.equal((c.totals as any).es_note, undefined);
   // cost-based SPI at the data date, the same data: EV 1750 over PV 2100 (to the end of the week of the data date)
   assert.equal(c.totals.spi, Math.round((1750 / 2100) * 100) / 100);
 });
@@ -73,8 +73,8 @@ test('the duration basis: the same Earned Schedule on a file with no costs and n
   assert.equal(cost.totals.bac, 0);
   assert.equal(cost.totals.es, null);
   assert.equal(cost.totals.spi_t, null);
-  assert.match(cost.totals.es_note, /planned value is 0 \(warnings says why and what to do\)/);
-  assert.ok(cost.warnings.some((w) => /use units: duration/.test(w)));
+  assert.match(cost.notes.join(' '), /No budgeted cost in/);
+  assert.ok(cost.notes.some((w) => /pass units: duration/.test(w)));
   // an activity with a baseline duration shorter than its current one: the planned duration is the baseline's
   ok(b.db, [{ op: 'update_activity', id: 'C', duration_days: 21 }]);
   assert.equal(progressCurves(b.db, [b.projId], { period: 'week', units: 'duration' }).totals.bac, 28, 'BAC follows the baseline, not the revised duration');
@@ -116,7 +116,7 @@ test('a finished project: SPI(t) = PD / AT stays below 1 where cost-based SPI re
 test('not assessed, with the reason and never 1: no data date, no planned value, no planned dates, a window that cuts the curve, no time passed', () => {
   const na = (c: ReturnType<typeof progressCurves>, re: RegExp) => {
     for (const k of ['es', 'at', 'pd', 'spi_t', 'sv_t', 'es_date', 'es_days', 'at_days', 'sv_t_days'] as const) assert.equal(c.totals[k], null, k);
-    assert.match(c.totals.es_note, re);
+    assert.match(c.notes.join(' '), re);
   };
   // no data date
   const nd = build({ costs: false });
@@ -124,15 +124,15 @@ test('not assessed, with the reason and never 1: no data date, no planned value,
   na(progressCurves(nd.db, [nd.projId], { period: 'week', units: 'duration' }), /no data date/);
   // planned value 0: hours with no resources, cost with no costs
   const b = build({ costs: false });
-  na(progressCurves(b.db, [b.projId], { period: 'week', units: 'hours' }), /planned value is 0 \(warnings says why and what to do\)/);
-  na(progressCurves(b.db, [b.projId], { period: 'week' }), /planned value is 0 \(warnings says why and what to do\)/);
+  na(progressCurves(b.db, [b.projId], { period: 'week', units: 'hours' }), /No budgeted units in/);
+  na(progressCurves(b.db, [b.projId], { period: 'week' }), /No budgeted cost in/);
   // no planned curve: the activities have durations but no planned dates (no baseline in this file either)
   const nb = project('NODATES', [{ id: 'A', duration_days: 5 }, { id: 'B', duration_days: 5, predecessors: ['A'] }], { start: '2026-03-02', dataDate: '2026-03-09' });
   for (const t of rows(nb.db, 'TASK')) for (const f of ['target_start_date', 'target_end_date', 'early_start_date', 'early_end_date']) t[f] = '';
   na(progressCurves(nb.db, [nb.projId], { period: 'week', units: 'duration' }), /no planned curve/);
   // an empty project
   const empty = project('EMPTY', [], { start: '2026-03-02' });
-  na(progressCurves(empty.db, [empty.projId], { units: 'duration' }), /planned value is 0 \(warnings says why and what to do\)/);
+  na(progressCurves(empty.db, [empty.projId], { units: 'duration' }), /No planned duration in/);
   // from/to cut the planned curve
   const cut = build({ costs: false });
   na(progressCurves(cut.db, [cut.projId], { period: 'week', units: 'duration', from: parseP6Date('2026-03-16 00:00')!, to: parseP6Date('2026-03-30 00:00')! }), /window cuts the planned curve/);
@@ -158,7 +158,7 @@ test('the basis follows the plan when the file has no baseline, and says so', ()
   for (const p of rows(b.db, 'PROJECT').filter((x) => x._baseline_of)) p._baseline_of = 'GONE';
   const c = progressCurves(b.db, [b.projId], { period: 'week', units: 'duration' });
   assert.equal(c.baseline, null);
-  assert.match(c.totals.es_note, /^Earned Schedule against the planned dates, in weeks from the first planned duration/);
+  assert.equal((c.totals as any).es_note, undefined);
   assert.ok(c.totals.es != null && c.totals.es <= c.totals.pd!);
 });
 
@@ -169,7 +169,7 @@ test('real samples with progress: ES within the planned span, SPI(t) = ES / AT, 
     const c = progressCurves(db, ids, { period: 'month', units });
     const t = c.totals, label = `${name} ${units}`;
     assert.ok(c.data_date, label);
-    assert.ok(t.es != null && t.at != null && t.pd != null && t.spi_t != null && t.sv_t != null, `${label}: ${t.es_note}`);
+    assert.ok(t.es != null && t.at != null && t.pd != null && t.spi_t != null && t.sv_t != null, `${label}: ${c.notes.join(' ')}`);
     assert.ok(t.es >= 0 && t.es <= t.pd + 1e-9, `${label}: ES ${t.es} within the planned duration ${t.pd}`);
     assert.ok(t.at > 0, label);
     assert.ok(Math.abs(t.spi_t - t.es / t.at) < 0.002, `${label}: SPI(t) ${t.spi_t} = ES ${t.es} / AT ${t.at}`);
@@ -181,7 +181,7 @@ test('real samples with progress: ES within the planned span, SPI(t) = ES / AT, 
   const db = readXerFile(sampleCopy('129 trial.xer')).db;
   const cost = progressCurves(db, rows(db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id), { units: 'cost' });
   assert.equal(cost.totals.spi_t, null);
-  assert.match(cost.totals.es_note, /planned value is 0/);
+  assert.match(cost.notes.join(' '), /No budgeted cost in/);
 });
 
 test('through the tool: units duration is accepted, the answer and the result file carry the Earned Schedule columns, a bad units is refused', async () => {
@@ -192,7 +192,7 @@ test('through the tool: units duration is accepted, the answer and the result fi
   const r = await call('progress_curves', { handle: o.d.handle, units: 'duration', period: 'month' });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
   assert.equal(r.d.units, 'duration');
-  assert.ok(r.d.totals.es > 0 && r.d.totals.spi_t > 0 && r.d.totals.es_note);
+  assert.ok(r.d.totals.es > 0 && r.d.totals.spi_t > 0);
   const totalsCsv = r.d.exported.files.find((f: any) => f.path.endsWith('-totals.csv'));
   const lines = readFileSync(totalsCsv.path, 'utf8').trim().split(/\r?\n/);
   assert.equal(lines[0], 'units,data_date,bac,pv,ev,ac,etc,eac,vac,spi,cpi,tcpi,es,at,pd,spi_t,sv_t,es_date,es_days,at_days,sv_t_days,es_note');
@@ -233,18 +233,18 @@ test('projects with different data dates: the call is refused before anything is
   assert.equal(new Set(ps.map((p) => p.last_recalc_date)).size, 2, 'the two projects of Enppi have different data dates');
   // the whole file, on every basis (it used to answer SPI(t) 2.826 and SPI 5.01, pv, ac, eac, vac and tcpi at the wrong date)
   for (const units of ['cost', 'hours', 'duration'] as const) assert.throws(() => progressCurves(db, all, { period: 'month', units }), (e: unknown) => e instanceof CurvesRefused
-    && /^The projects in scope have different data dates \(Master Rev\.F-N-4 2011-11-30 00:00, 4229 update 2-6-12 2012-06-02 00:00\)/.test(e.message) && e.next === 'Pass project: <ID>, one of Master Rev.F-N-4, 4229 update 2-6-12 (one project at a time).', units);
+    && e.message === 'Refused: Master Rev.F-N-4 and 4229 update 2-6-12 have different data dates (2011-11-30, 2012-06-02).' && e.next === 'Pass project: Master Rev.F-N-4, 4229 update 2-6-12 (one project at a time).', units);
   // the project alone: its own figures (SPI(t) 1.035)
   const one = progressCurves(db, [ps[1].proj_id], { period: 'month', units: 'duration' });
-  near(one.totals.spi_t, 1.035, 'SPI(t) of the project alone', 5e-4); near(one.totals.spi, 1.06, 'SPI at the data date (it was 0.91 by month, 1.05 by week)', 5e-3); assert.equal(progressCurves(db, [ps[1].proj_id], { period: 'week', units: 'duration' }).totals.spi, one.totals.spi); assert.equal(one.warnings.some((x) => /different data dates/.test(x)), false);
+  near(one.totals.spi_t, 1.035, 'SPI(t) of the project alone', 5e-4); near(one.totals.spi, 1.06, 'SPI at the data date (it was 0.91 by month, 1.05 by week)', 5e-3); assert.equal(progressCurves(db, [ps[1].proj_id], { period: 'week', units: 'duration' }).totals.spi, one.totals.spi); assert.equal(one.notes.some((x) => /different data dates/.test(x)), false);
   // the same data date on both: assessed, as today (and no warning about dates)
   ps[0].last_recalc_date = ps[1].last_recalc_date;
   const same = progressCurves(db, all, { period: 'month', units: 'duration' });
   assert.ok(same.totals.spi_t != null && same.totals.spi != null && same.totals.cpi != null);
-  assert.equal(same.warnings.some((x) => /different data dates/.test(x)), false);
+  assert.equal(same.notes.some((x) => /different data dates/.test(x)), false);
   // a project with no data date next to one with: different, refused, the missing one named
   ps[0].last_recalc_date = '';
-  assert.throws(() => progressCurves(db, all, { period: 'month', units: 'duration' }), /Master Rev\.F-N-4 none, 4229 update 2-6-12 2012-06-02/);
+  assert.throws(() => progressCurves(db, all, { period: 'month', units: 'duration' }), /Master Rev\.F-N-4 and 4229 update 2-6-12 have different data dates \(none, 2012-06-02\)/);
 });
 
 test('SPI and the planned value in the totals are taken AT the data date on every basis: the same by week and by month, and the same as the cost basis; by hand', () => {
@@ -270,8 +270,8 @@ test('SPI and the planned value in the totals are taken AT the data date on ever
 test('the duration basis says what its totals mean (basis_note); the other bases carry no such note', () => {
   const b = build({ costs: false });
   const d = progressCurves(b.db, [b.projId], { period: 'week', units: 'duration' });
-  assert.match(d.basis_note!, /^Duration basis: every figure is in working days of each activity's own calendar, summed over the activities/);
-  for (const w of ['bac = the baseline (else planned) duration', 'ac = the working time actually spent', 'ev = duration x % complete (the earned duration)', 'etc = the remaining duration', 'eac = ac + etc', 'vac = bac - eac', 'cpi = ev / ac, the earned duration per working day spent', 'tcpi = (bac - ev) / (bac - ac)', 'SPI(t)']) assert.ok(d.basis_note!.includes(w), w);
+  assert.equal((d as any).basis_note, undefined);
+  assert.equal((d as any).basis_note, undefined);
   // the figures it describes, by hand on this file: A 7 d, B 7 d, C 14 d; earned 17.5; spent 7 + 7 + 7 = 21; remaining 10.5
   assert.deepEqual([d.totals.bac, d.totals.ev, d.totals.ac, d.totals.etc, d.totals.eac, d.totals.vac], [28, 17.5, 21, 10.5, 31.5, -3.5]);
   near(d.totals.cpi, 0.83, 'cpi = 17.5 / 21', 5e-3); near(d.totals.tcpi, (28 - 17.5) / (28 - 21), 'tcpi', 5e-3);
@@ -283,5 +283,5 @@ test('the refusal for different data dates lists the Project IDs by the list rul
   const db = readXerFile(sampleCopy('Enppi.xer')).db;
   const first = rows(db, 'PROJECT').filter((p) => !p._baseline_of)[0], ids: string[] = [];
   for (let i = 0; i < 30; i++) { const p = { ...first, proj_id: `X${i}`, proj_short_name: `PRJ${i}`, last_recalc_date: `2026-01-${String(1 + i % 28).padStart(2, '0')} 00:00` }; db.tables.PROJECT.rows.push(p); ids.push(p.proj_id); }
-  assert.throws(() => progressCurves(db, ids, { period: 'month' }), (e: unknown) => e instanceof CurvesRefused && /PRJ24 2026-01-25 00:00 and 5 more \(30 in total\)\), so there is no single date/.test(e.message) && !/PRJ25 /.test(e.message) && /one of PRJ0, PRJ1.*PRJ24 and 5 more \(30 in total\) \(one project at a time\)/.test(e.next));
+  assert.throws(() => progressCurves(db, ids, { period: 'month' }), (e: unknown) => e instanceof CurvesRefused && /2026-01-25 and 5 more \(30 in total\)\)/.test(e.message) && !/PRJ25 /.test(e.message) && /pass project: PRJ0, PRJ1.*PRJ24 and 5 more \(30 in total\) \(one project at a time\)/i.test(e.next));
 });

@@ -91,7 +91,8 @@ test('EXPECTED DIFFERENCES from the source on that fixture, each with its reason
   // 2. baseline dates: the source's fixture has none and reports 0 changes; the clone has no baseline in any update, so the category is not assessed (not 0), with the reason
   assert.equal(src.changes_by_category.baseline_changes.total_changes, 0);
   assert.equal(cat(r, 'baseline_dates').result, 'not_assessed');
-  assert.match(cat(r, 'baseline_dates').note, /Neither 2026-01-15 nor 2026-01-22 carries a project baseline/);
+  assert.equal(cat(r, 'baseline_dates').note, undefined);
+  assert.ok(r.notes.includes('Baseline dates not assessed in period 2026-01-15 to 2026-01-22: neither 2026-01-15 nor 2026-01-22 carries a project baseline; assign one with edit assign_baseline on that update\u2019s project.'), JSON.stringify(r.notes));
   assert.equal(r.status, 'fail');
   // 3. totals: the source counts 3 (1 actual + 2 percent); the clone 9 (the same 3 and the 6 forecast changes)
   assert.equal(src.comparison_summary.total_changes_detected, 3);
@@ -193,7 +194,7 @@ test('baseline dates: the baseline each update carries; a revision is flagged an
   const bare = B.cleanChain();
   const n = changeTracking({ updates: [upd('bare', bare), upd('delayed', a)] });
   assert.equal(cat(n, 'baseline_dates').result, 'not_assessed');
-  assert.match(cat(n, 'baseline_dates').note, /^bare does not carry a project baseline/);
+  assert.ok(n.notes.some((x) => /^Baseline dates not assessed in period bare to .+: .*bare .*carries a project baseline/.test(x) || /^Baseline dates not assessed.*bare/.test(x)), JSON.stringify(n.notes));
   assert.equal(cat(n, 'actual_dates').result, 'assessed');
   assert.equal(n.categories.baseline_dates.result, 'not_assessed');
   // a series where only one of its pairs has baselines: the overall category adds the pairs it could and names the other
@@ -201,7 +202,7 @@ test('baseline dates: the baseline each update carries; a revision is flagged an
   assert.equal(three.periods[0].categories.baseline_dates.result, 'not_assessed');
   assert.equal(three.periods[1].categories.baseline_dates.result, 'assessed');
   assert.equal((three.categories.baseline_dates as any).total, 2);
-  assert.match((three.categories.baseline_dates as any).note, /not assessed in period 1: bare does not carry a project baseline/);
+  assert.ok(three.notes.some((x) => /^Baseline dates not assessed in period bare to a: /.test(x)), JSON.stringify(three.notes));
 });
 
 test('the modes, the data-date order and the status rule', () => {
@@ -308,8 +309,9 @@ test('change_tracking through the server: read-only, mode and updates, refusals,
   // a real pair: 129 trial (the open file) and 130 TRIAL (by path), put in data-date order (2010-10-31 and 2010-11-10)
   const r = await call('change_tracking', { handle: h, updates: [{ path: sampleCopy('130 TRIAL.xer') }], bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
-  assert.match(r.d.arguments_not_used.join(' '), /change_tracking has no argument "bogus"/);
-  assert.deepEqual(Object.keys(r.d).slice(0, 3), ['report', 'status', 'summary'], 'summary first');
+  assert.match(r.d.notes.join(' '), /change_tracking has no argument "bogus"/);
+  assert.deepEqual(Object.keys(r.d).slice(0, 3), ['report', 'status', 'notes'], 'status and the notes first');
+  assert.equal(r.d.summary, undefined);
   // counted independently from the two files' rows: the activities in both (by Activity ID), the relationships and assignments among them
   const A = readXerFile(sampleCopy('129 trial.xer')).db, Bf = readXerFile(sampleCopy('130 TRIAL.xer')).db;
   const main = (d: Db) => rows(d, 'PROJECT').find((p) => !p._baseline_of)!.proj_id;
@@ -339,14 +341,14 @@ test('change_tracking through the server: read-only, mode and updates, refusals,
   assert.equal(r.d.categories.resources.total, resTotal, 'resource changes counted from the two files\' assignment rows');
   assert.equal(r.d.resource_changes_total, resTotal);
   assert.equal(r.d.resource_changes.length, 25);
-  assert.match(r.d.resource_changes_note, new RegExp(`^25 of ${resTotal} shown; all ${resTotal} in .*change_tracking-resource_changes\\.csv$`));
+  assert.match(r.d.resource_changes_note, new RegExp(`^25 of ${resTotal} shown; all ${resTotal} in .*change_tracking-resource_changes\\.csv\\.$`));
   const csv = r.d.exported.files.find((f: any) => f.path.endsWith('-resource_changes.csv'));
   assert.equal(csv.rows, resTotal);
   const whole = JSON.parse(readFileSync(r.d.exported.files.find((f: any) => f.path.endsWith('change_tracking.json')).path, 'utf8'));
   assert.equal(whole.resource_changes.length, resTotal);
   assert.equal(whole.logic_changes.length, logicTotal);
   assert.deepEqual(r.d.exported.files.map((f: any) => f.path.replace(/^.*change_tracking/, '')).sort(), ['-changes.csv', '-logic_changes.csv', '-progress_decreases.csv', '-resource_changes.csv', '-retroactive_actuals.csv', '-status_regressions.csv', '.json']);
-  assert.match(r.d.method.join(' '), /1 working day .* \(the source: 1 calendar day/);
+  assert.equal(r.d.method, undefined, 'what a change counts is in the tool description');
   // the series by handle and in latest mode: the same file as an update (a copy), nothing changed
   const twin = await openSample('Tower-A.xer');
   const h2 = await call('open_file', { path: sampleCopy('Tower-A_edited.xer'), lenient: true });
@@ -365,7 +367,7 @@ test('every update, the open project included, is ordered by data date: the open
   const open = { ...ups[1], name: 'open', open: true };
   const r = changeTracking({ updates: [ups[2], open, ups[0]] });
   assert.deepEqual(r.updates, [{ name: '2026-01-15', data_date: '2026-01-15 00:00', open_project: false }, { name: 'open', data_date: '2026-01-22 00:00', open_project: true }, { name: 'current', data_date: '2026-01-29 00:00', open_project: false }]);
-  assert.match(r.method.join(' '), /every update, this open project included, is ordered by its data date \(so the open project is the last only when its data date is the latest\)/);
+  assert.equal((r as any).method, undefined);
   // latest = the last pair in DATA-DATE order, whichever one the open project is
   const latest = changeTracking({ updates: [ups[2], open, ups[0]], mode: 'latest' });
   assert.deepEqual(latest.updates.map((u) => [u.name, u.open_project]), [['open', true], ['current', false]]);

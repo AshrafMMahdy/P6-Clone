@@ -1,12 +1,10 @@
 {
  "129 trial.xer": {
-  "info:CAL_HOURS_MISMATCH": 3,
   "info:ENCODING_CODEPAGE": 1,
   "warning:ACTUAL_AFTER_DD": 3,
   "warning:DANGLING_REF": 1
  },
  "130 TRIAL.xer": {
-  "info:CAL_HOURS_MISMATCH": 3,
   "info:ENCODING_CODEPAGE": 1,
   "warning:ACTUAL_AFTER_DD": 1,
   "warning:DANGLING_REF": 1
@@ -17,7 +15,6 @@
   "info:MISSING_FIELD": 10,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -27,7 +24,6 @@
   "info:MISSING_FIELD": 10,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -40,7 +36,6 @@
   "info:MISSING_FIELD": 10,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -51,9 +46,7 @@
   "info:MISSING_FIELD": 5,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
-  "warning:REL_DUP": 2,
   "warning:VERSION_UNKNOWN": 1
  },
  "Aurora_Tower_Baseline_Schedule.xer": {
@@ -62,24 +55,14 @@
   "info:MISSING_FIELD": 5,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
-  "warning:REL_DUP": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "Baseline 15-11-2010.xer": {},
- "Baseline Zone 2 Rev.01(2).xer": {
-  "info:CAL_HOURS_MISMATCH": 4
- },
- "Baseline Zone 2 Rev.01.xer": {
-  "info:CAL_HOURS_MISMATCH": 4
- },
- "Beyti plant baseline -C(baseline).xer": {
-  "info:CAL_HOURS_MISMATCH": 2
- },
- "Beyti plant baseline -b(fm-baseline).xer": {
-  "info:CAL_HOURS_MISMATCH": 2
- },
+ "Baseline Zone 2 Rev.01(2).xer": {},
+ "Baseline Zone 2 Rev.01.xer": {},
+ "Beyti plant baseline -C(baseline).xer": {},
+ "Beyti plant baseline -b(fm-baseline).xer": {},
  "CCA R03 dt 24Oct11SC.xer": {
   "error:BAD_DATE": 104,
   "error:BAD_ENUM": 35,
@@ -90,22 +73,17 @@
   "error:EMPTY_TASK_CODE": 1,
   "error:FIELD_TOO_LONG": 6,
   "fatal:DUP_KEY": 3,
-  "info:CAL_HOURS_MISMATCH": 2,
   "info:MISSING_FIELD": 7,
   "warning:ACTUAL_AFTER_DD": 6,
   "warning:DANGLING_REF": 13,
   "warning:FIELD_COUNT_SHORT": 6,
-  "warning:REL_DUP": 6,
   "warning:STATUS_MISMATCH": 1
  },
  "CfC.xer": {},
  "Copy of JWM - Baseline Programme Rev 05A.xer": {
-  "info:CAL_HOURS_MISMATCH": 1,
   "info:MISSING_FIELD": 3
  },
- "DHBL-24FEB13_VER-7.0.xer": {
-  "info:CAL_HOURS_MISMATCH": 6
- },
+ "DHBL-24FEB13_VER-7.0.xer": {},
  "Detailed Program.xer": {
   "info:ENCODING_CODEPAGE": 1,
   "warning:ACTUAL_AFTER_DD": 1
@@ -114,16 +92,13 @@
   "info:ENCODING_UTF8": 1,
   "warning:ACTUAL_AFTER_DD": 6,
   "warning:DANGLING_REF": 1,
-  "warning:LEGACY_REL_TYPE": 6,
-  "warning:REL_DUP": 2
+  "warning:LEGACY_REL_TYPE": 6
  },
  "Enppi.xer": {},
  "Haiku_PRE-01_Polaris_DC1_Baseline_CPM.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
-  "info:CAL_HOURS_MISMATCH": 2,
   "info:MISSING_FIELD": 11,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "Luna_PRE-01_Polaris_DC1_DRAFT_Baseline.xer": {
@@ -131,7 +106,6 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 11,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "PDC-BL-001_Baseline_Programme.xer": {
@@ -139,13 +113,11 @@
   "error:CAL_PARSE": 4,
   "info:MISSING_FIELD": 4,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:FORECAST_BEFORE_DD": 1,
   "warning:HEADER_DATE": 1
  },
  "PDC-PRG-001_Polaris_DC-1_Baseline_Programme_Rev0.xer": {
   "info:MISSING_FIELD": 2,
-  "warning:FIELD_UNKNOWN": 11,
-  "warning:FORECAST_BEFORE_DD": 1
+  "warning:FIELD_UNKNOWN": 11
  },
  "PDC-PRG-001_RevA_Polaris_DC1_Baseline.xer": {
   "error:BAD_ENUM": 1,
@@ -159,8 +131,7 @@
   "error:CAL_PARSE": 2,
   "error:FIELD_TOO_LONG": 6,
   "info:MISSING_FIELD": 9,
-  "warning:FIELD_UNKNOWN": 1,
-  "warning:FORECAST_BEFORE_DD": 1
+  "warning:FIELD_UNKNOWN": 1
  },
  "PDC1_Baseline_Rev0.xer": {
   "error:BAD_ENUM": 14,
@@ -172,8 +143,6 @@
   "warning:DANGLING_REF": 13,
   "warning:FIELD_COUNT_SHORT": 6,
   "warning:FIELD_UNKNOWN": 18,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:WBS_ORPHAN": 6
  },
  "Polaris_Baseline.xer": {
@@ -192,7 +161,6 @@
   "info:MISSING_FIELD": 11,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -202,7 +170,6 @@
   "info:MISSING_FIELD": 11,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -210,9 +177,7 @@
   "error:CAL_PARSE": 1,
   "error:FIELD_TOO_LONG": 6,
   "info:MISSING_FIELD": 2,
-  "warning:FIELD_UNKNOWN": 2,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1
+  "warning:FIELD_UNKNOWN": 2
  },
  "Polaris_DC-1_Baseline_Programme_RevA.xer": {
   "error:FIELD_TOO_LONG": 1,
@@ -221,7 +186,6 @@
   "info:MISSING_FIELD": 11,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -231,32 +195,26 @@
   "info:MISSING_FIELD": 10,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "Polaris_DC1_Baseline.xer": {
-  "info:CAL_HOURS_MISMATCH": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 2,
-  "warning:FIELD_UNKNOWN": 15,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1
+  "warning:FIELD_UNKNOWN": 15
  },
  "Polaris_DC1_Baseline_CPM.xer": {
   "error:BAD_ENUM": 1,
   "error:CAL_PARSE": 3,
   "info:MISSING_FIELD": 7,
-  "warning:CAL_EMPTY": 1,
+  "warning:CAL_NO_DATA": 1,
   "warning:DATE_FORMAT": 2,
-  "warning:FIELD_UNKNOWN": 5,
-  "warning:FORECAST_BEFORE_DD": 1
+  "warning:FIELD_UNKNOWN": 5
  },
  "Polaris_DC1_Baseline_Rev0.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
   "info:MISSING_FIELD": 11,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "Polaris_DC1_Baseline_Schedule.xer": {
@@ -265,7 +223,6 @@
   "info:MISSING_FIELD": 10,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -274,14 +231,12 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 11,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "Sonnet_PRE-01_Polaris_DC1_Baseline_Rev0.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
   "info:MISSING_FIELD": 11,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "Tower-A.xer": {
@@ -290,30 +245,22 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 16,
   "warning:FIELD_UNKNOWN": 7,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "Tower-A_costloaded.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
   "fatal:NO_PROJ_NODE": 1,
-  "info:CAL_HOURS_MISMATCH": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 15,
   "warning:FIELD_UNKNOWN": 7,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "Tower-A_edited.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
   "fatal:NO_PROJ_NODE": 1,
-  "info:CAL_HOURS_MISMATCH": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 16,
   "warning:FIELD_UNKNOWN": 7,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "badra oil.xer": {},
@@ -322,9 +269,7 @@
   "warning:DANGLING_REF": 1
  },
  "baseline of jungle.xer": {},
- "beyti phase-2.xer": {
-  "info:CAL_HOURS_MISMATCH": 3
- },
+ "beyti phase-2.xer": {},
  "building a-2.xer": {
   "info:ENCODING_CODEPAGE": 1
  },
@@ -337,9 +282,7 @@
  "damac-hyde park.xer": {
   "info:ENCODING_CODEPAGE": 1
  },
- "el ezz warehouse.xer": {
-  "info:CAL_HOURS_MISMATCH": 1
- },
+ "el ezz warehouse.xer": {},
  "polaris_dc_1_aviapolis_data_campus_baseline_schedule.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
   "info:ENCODING_UTF8": 1,
@@ -364,7 +307,6 @@
   "info:MISSING_FIELD": 10,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
@@ -382,8 +324,6 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 12,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "small_villa_g_1_schedule.xer": {
@@ -392,31 +332,24 @@
   "info:MISSING_FIELD": 5,
   "warning:CAL_NO_DATA": 1,
   "warning:FIELD_UNKNOWN": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:NO_DATA_DATE": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "subA_structures.xer": {
   "fatal:NO_PROJECT": 1,
-  "info:MISSING_FIELD": 1,
-  "warning:LF_ENDINGS": 1
+  "info:MISSING_FIELD": 1
  },
  "test_schedule.xer": {
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 4,
-  "warning:FIELD_UNKNOWN": 20,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:NO_END": 1
+  "warning:FIELD_UNKNOWN": 20
  },
  "tower_a_schedule.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
   "fatal:NO_PROJ_NODE": 1,
-  "info:CAL_HOURS_MISMATCH": 1,
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 15,
   "warning:FIELD_UNKNOWN": 7,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  },
  "verify_fidelity_schedule.xer": {
@@ -424,8 +357,6 @@
   "info:ENCODING_UTF8": 1,
   "info:MISSING_FIELD": 11,
   "warning:FIELD_UNKNOWN": 4,
-  "warning:FORECAST_BEFORE_DD": 1,
-  "warning:LF_ENDINGS": 1,
   "warning:VERSION_UNKNOWN": 1
  }
 }

@@ -19,8 +19,7 @@ test('MCP: check_schedule and dcma_14 on a real XER, with a report file and clea
   const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'cairo festival city.xer') })).d.handle;
   const cs = await call('check_schedule', { handle: h, max_ids: 3 });
   // max_ids is gone (a fixed 25 per list): the call ran without it and the answer says so, in words (R6)
-  assert.equal(cs.d.arguments_not_used.length, 1);
-  assert.match(cs.d.arguments_not_used[0], /^check_schedule has no argument "max_ids": it was not used and the call ran without it\. Its arguments are: handle, export, export_name, project, checks, targets, threshold_days, path, caller, async\.$/);
+  assert.ok(cs.d.notes.some((n: string) => /^check_schedule has no argument "max_ids"; the call ran without it\. Its arguments are: handle, export, export_name, project, checks, targets, threshold_days, path, caller, async\.$/.test(n)), JSON.stringify(cs.d.notes));
   assert.equal(cs.err, false, JSON.stringify(cs.d));
   assert.equal(cs.d.checks.length, 14);
   assert.ok(cs.d.checks.every((c: { activities: unknown[] }) => c.activities.length <= 25));
@@ -85,8 +84,8 @@ test('MCP: progress_curves on projects with different data dates is refused nami
   const r = await call('progress_curves', { handle: h, units: 'duration' });
   assert.equal(r.err, true);
   assert.equal(r.d.error.code, 'bad_input');
-  assert.match(r.d.error.message, /different data dates \(Master Rev\.F-N-4 2011-11-30 00:00, 4229 update 2-6-12 2012-06-02 00:00\)/);
-  assert.match(r.d.error.next_step ?? r.d.error.hint, /Pass project: <ID>, one of Master Rev\.F-N-4, 4229 update 2-6-12/);
+  assert.equal(r.d.error.message, 'Refused: Master Rev.F-N-4 and 4229 update 2-6-12 have different data dates (2011-11-30, 2012-06-02).');
+  assert.equal(r.d.error.next_step ?? r.d.error.hint, 'Pass project: Master Rev.F-N-4, 4229 update 2-6-12 (one project at a time).');
   const one = await call('progress_curves', { handle: h, units: 'duration', project: '4229 update 2-6-12' });
   assert.equal(one.err, false, JSON.stringify(one.d).slice(0, 300));
 });

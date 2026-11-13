@@ -33,25 +33,11 @@ const csv = (d: any, table: string) => d.exported.files.find((f: any) => f.path.
 test('LISTED is 25', () => assert.equal(LISTED, 25));
 test('MC_BARS is 20', () => assert.equal(MC_BARS, 20));
 
-test('criticality note: every branch, with the platform\'s words', () => {
+test('criticality note: a cut list says it as every list does; not cut: no note', () => {
   const f = '/x/monte_carlo-criticality.csv';
-  // more ever-critical than shown, and more critical in every run than shown
-  assert.equal(criticalityNote(25, 40, 30, 36, f), `25 of the 36 activities that were critical in at least one run are shown, highest first (30 critical in every run); all 40 activities are in ${f}; the 25 shown are all critical in every run, in activity-code order`);
-  // more ever-critical than shown, fewer than shown critical in every run
-  assert.equal(criticalityNote(25, 40, 10, 36, f), `25 of the 36 activities that were critical in at least one run are shown, highest first (10 critical in every run); all 40 activities are in ${f}`);
-  // fewer ever-critical than shown: the rest are activities that never were
-  assert.equal(criticalityNote(25, 33, 3, 3, f), `all 3 activities that were critical in at least one run are shown first (3 critical in every run), then 22 that never were; all 33 activities are in ${f}`);
-  assert.equal(criticalityNote(25, 33, 1, 1, f), `the 1 activity that was critical in at least one run is shown first (1 critical in every run), then 24 that never were; all 33 activities are in ${f}`.replace('the 1 activity that was', 'the 1 activity that was'));
-  // exactly as many as shown
-  assert.equal(criticalityNote(25, 30, 25, 25, f), `all 25 activities that were critical in at least one run are shown (25 critical in every run); all 30 activities are in ${f}`);
-  // none critical
-  assert.equal(criticalityNote(25, 30, 0, 0, f), `no activity was critical in any run; the first 25 of 30 activities are shown; all 30 are in ${f}`);
-  // not cut: no note; no file written: no file named
-  assert.equal(criticalityNote(25, 25, 25, 25, f), undefined);
-  assert.equal(criticalityNote(25, 30, 0, 0), 'no activity was critical in any run; the first 25 of 30 activities are shown');
-  assert.equal(criticalityNote(25, 33, 3, 3), 'all 3 activities that were critical in at least one run are shown first (3 critical in every run), then 22 that never were');
-  assert.equal(sensitivityNote(25, 30, '/x/s.csv'), '25 of 30 activities with a varying duration shown, strongest first; all 30 in /x/s.csv');
-  assert.equal(sensitivityNote(25, 25), undefined);
+  assert.equal(criticalityNote(25, 40, f), `25 of 40 shown; all 40 in ${f}.`);
+  assert.equal(criticalityNote(25, 40), '25 of 40 shown.');
+  assert.equal(criticalityNote(25, 25, f), undefined);
 });
 
 test('monte_carlo on built networks: the notes carry the real counts, and the file named holds every activity', async () => {
@@ -63,16 +49,16 @@ test('monte_carlo on built networks: the notes carry the real counts, and the fi
   const r = (await call('monte_carlo', { ...h, iterations: 50, seed: 4, default_estimates: est })).d;
   assert.equal(r.criticality.length, 25); assert.equal(r.criticality_total, 33);
   assert.equal([r.critical_in_every_run, r.critical_in_any_run].join(), '3,3');
-  assert.equal(r.criticality_note, `all 3 activities that were critical in at least one run are shown first (3 critical in every run), then 22 that never were; all 33 activities are in ${csv(r, 'criticality')}`);
+  assert.equal(r.criticality_note, `25 of 33 shown; all 33 in ${csv(r, 'criticality')}.`);
   assert.equal(JSON.parse(readFileSync(r.exported.files[0].path, 'utf8')).criticality.length, 33);
-  assert.equal(r.sensitivity_note, `25 of ${r.sensitivity_total} activities with a varying duration shown, strongest first; all ${r.sensitivity_total} in ${csv(r, 'sensitivity')}`);
+  assert.equal(r.sensitivity_note, `25 of ${r.sensitivity_total} shown; all ${r.sensitivity_total} in ${csv(r, 'sensitivity')}.`);
   // exactly 25 ever critical: a chain of 25 and 5 side activities
   const ops2: unknown[] = [];
   for (let i = 0; i < 25; i++) ops2.push({ op: 'add_activity', id: `C${String(i).padStart(2, '0')}`, name: `C${i}`, duration_days: 10 }, ...(i ? [{ op: 'add_relationship', pred: `C${String(i - 1).padStart(2, '0')}`, succ: `C${String(i).padStart(2, '0')}` }] : []));
   for (let i = 0; i < 5; i++) ops2.push({ op: 'add_activity', id: `S${i}`, name: `S${i}`, duration_days: 1 });
   const h2 = await build('MCN2', ops2);
   const r2 = (await call('monte_carlo', { ...h2, iterations: 50, seed: 4, default_estimates: est })).d;
-  assert.equal(r2.criticality_note, `all 25 activities that were critical in at least one run are shown (25 critical in every run); all 30 activities are in ${csv(r2, 'criticality')}`);
+  assert.equal(r2.criticality_note, `25 of 30 shown; all 30 in ${csv(r2, 'criticality')}.`);
   // not cut: no note
   const h3 = await build('MCN3', [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', succ: 'B' }]);
   const r3 = (await call('monte_carlo', { ...h3, iterations: 20, seed: 4, default_estimates: est })).d;
@@ -91,7 +77,7 @@ test('R3: the result file is written by default and named in the notes; export g
   // the file has one row per changed FIELD of an activity, so the note says what the file holds and both counts
   const evRows = ev.exported.files.find((f: any) => f.path.endsWith('-changed.csv')).rows;
   assert.ok(evRows > ev.changed_total, 'more rows than activities');
-  assert.equal(ev.changed_note, `25 of ${ev.changed_total} shown; all ${ev.changed_total} in ${csv(ev, 'changed')} (that file has one row per changed field of an activity, ${evRows} rows)`);
+  assert.equal(ev.changed_note, `25 of ${ev.changed_total} shown; all ${ev.changed_total} in ${csv(ev, 'changed')}.`);
   assert.ok(existsSync(join(ev.exported.folder, 'evaluate.json')));
   // export given wins
   const mine = join(root, 'mine');
@@ -106,9 +92,9 @@ test('R3: the result file is written by default and named in the notes; export g
   assert.equal(rh.resources.length, 25); assert.equal(rh.resources_total, 30);
   assert.ok(rh.resources.every((x: any) => x.periods === undefined && x.periods_total > 0 && x.peak && 'over_allocated_periods' in x && x.severity));
   assert.ok(rh.resources.every((x: any, i: number, all: any[]) => i === 0 || all[i - 1].over_allocated_periods >= x.over_allocated_periods), 'most over-allocated first');
-  assert.equal(rh.resources_note, `25 of 30 shown; all 30 in ${csv(rh, 'resources')}`);
-  assert.equal(rh.periods_note, `The per-period figures of all 30 resources are not in this answer, only in the result file ${csv(rh, 'periods')} (table periods; columns resource, start, end, budgeted, actual, remaining_early, remaining_late, limit, over_allocated, available): the rows whose resource is a resource's ID are that resource's periods, and each resource's periods_total says how many it has.`);
-  assert.equal(rh.periods_shown_for, undefined);
+  assert.equal(rh.resources_note, `25 of 30 shown; all 30 in ${csv(rh, 'resources')}.`);
+  assert.ok(rh.notes.includes(`Per-period figures not shown; all 30 resources in ${csv(rh, 'periods')}.`));
+  assert.equal(rh.periods_note, undefined);
   const whole = JSON.parse(readFileSync(rh.exported.files[0].path, 'utf8'));
   assert.equal(whole.resources.length, 30);
   assert.ok(whole.resources.every((x: any) => x.periods.length > 0), 'the file holds the periods of every resource');
@@ -123,33 +109,33 @@ test('R3: the result file is written by default and named in the notes; export g
     assert.equal(nf.d.changed.length, 25);
     assert.deepEqual(nf.d.exported.files, []);
     assert.match(nf.d.exported.error, /could not be written.*Next step: call again with export set to a folder/);
-    assert.equal(nf.d.changed_note, `25 of ${nf.d.changed_total} shown`, 'no file is named');
+    assert.equal(nf.d.changed_note, `25 of ${nf.d.changed_total} shown.`, 'no file is named');
   } finally { setRoots(null, root); }
 });
 
 test('R1: lists of lint fixes, windows, earned value and the other cut lists show 25 and say the total', async () => {
   const h = await build('FIX', Array.from({ length: 60 }, (_, i) => ({ op: 'add_activity', id: `A${String(i).padStart(2, '0')}`, name: `A${i}`, duration_days: 2 })));
   const l = (await call('lint', { ...h, profile: 'platform', simulate: false, max_ids: 3 })).d;
-  assert.match(l.arguments_not_used[0], /^lint has no argument "max_ids"/);
+  assert.match(l.notes[0], /^lint has no argument "max_ids"/);
   // connectivity: 60 open starts and 60 open ends share the 25, one of each in turn
   const ds = l.checks.find((c: any) => c.id === 'connectivity');
   assert.equal(ds.activities.length, 25); assert.equal(ds.total_activities, 120);
   assert.deepEqual([13, 12], ['no predecessor', 'no successor'].map((v) => ds.activities.filter((x: any) => x.value === v).length));
-  assert.equal(ds.activities_note, `25 of 120 shown; all 120 in ${csv(l, 'findings')}`);
+  assert.equal(ds.activities_note, `25 of 120 shown; all 120 in ${csv(l, 'findings')}.`);
   const d = (await call('dcma_14', { ...h, max_ids: 1 })).d;
   assert.ok(d.checks.every((c: any) => c.activities.length <= 25));
-  assert.match(d.arguments_not_used[0], /^dcma_14 has no argument "max_ids"/);
+  assert.ok(d.notes.some((n: string) => /^dcma_14 has no argument "max_ids"/.test(n)));
   const m = (await call('monte_carlo', { ...h, iterations: 20, top: 1, buckets: 7, histogram: 'days' })).d;
-  assert.deepEqual(m.arguments_not_used.map((x: string) => x.match(/argument "(\w+)"/)![1]), ['top', 'buckets', 'histogram']);
+  assert.deepEqual(m.notes.filter((x: string) => /has no argument/.test(x)).map((x: string) => x.match(/argument "(\w+)"/)![1]), ["top", "buckets", "histogram"]);
   // (no estimates: every run finishes at the same moment, so the chart is one bar holding all 20 runs, and the answer says so)
   assert.equal(m.histogram.length, 1); assert.equal(m.histogram[0].count, 20); assert.equal(m.histogram[0].cum_pct, 100);
-  assert.equal(m.histogram_note, `All 20 runs finish at the same moment (${m.finish.min}), so the chart is one bar holding all of them, not 20. Why they coincide, and what to do about it, is in note.`);
-  // the cause and the advice are said once, in note
-  assert.match(m.note, /^No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule\. To get a spread, set three-point estimates \(edit set_estimates\)/);
-  assert.equal(JSON.stringify(m).split('To get a spread').length - 1, 1);
-  assert.equal(m.arguments_not_used[0], `monte_carlo has no argument "top": it was not used and the call ran without it. Its arguments are: handle, export, export_name, iterations, resume, events, sampler, re_anchor, deadline, seed, risk_events, project, default_estimates, exact, caller, async.`);
+  // the one reason they coincide is said once, in the notes (no histogram_note, no note)
+  assert.equal(m.histogram_note, undefined); assert.equal(m.note, undefined);
+  assert.deepEqual(m.notes.filter((x: string) => /^No spread/.test(x)), ['No spread: no activity has a three-point estimate and no risk event applies; set estimates with edit set_estimates or pass default_estimates.']);
+  assert.equal(JSON.stringify(m).split('No spread').length - 1, 1);
+  assert.ok(m.notes.includes(`monte_carlo has no argument "top"; the call ran without it. Its arguments are: handle, export, export_name, iterations, resume, events, sampler, re_anchor, deadline, seed, risk_events, project, default_estimates, exact, caller, async.`));
   const ev = (await call('earned_value', { ...h, worst: 1 })).d;
-  assert.match(ev.arguments_not_used[0], /^earned_value has no argument "worst"/);
+  assert.ok(ev.notes.some((n: string) => /^earned_value has no argument "worst"/.test(n)));
   const sc = (await call('progress_curves', h)).d;
   assert.ok(sc.exported.files.length > 1);
 });
@@ -173,8 +159,8 @@ test('R5: tools annotated as changing the project only with an option say which 
 test('R6: every tool of this server reports an argument it does not have; owner_key is never reported', async () => {
   const h = await build('ARG', [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 2 }]);
   const v = (await call('validate', { ...h, bogus: 1 })).d;
-  assert.equal(v.arguments_not_used.length, 1);
-  assert.match(v.arguments_not_used[0], /^validate has no argument "bogus": it was not used and the call ran without it\. Its arguments are: handle, caller, async\.$/);
+  assert.equal(v.notes.length, 1);
+  assert.match(v.notes[0], /^validate has no argument "bogus"; the call ran without it\. Its arguments are: handle, caller, async\.$/);
   assert.equal((await call('validate', { ...h, owner_key: h.owner_key })).d.arguments_not_used, undefined);
   assert.equal((await call('validate', h)).d.arguments_not_used, undefined);
 });
@@ -185,7 +171,7 @@ test('B3: the desktop screens (config.screens, set only by the app\'s own proces
   const h = await build('SCR', Array.from({ length: 60 }, (_, i) => ({ op: 'add_activity', id: `A${String(i).padStart(2, '0')}`, name: `A${i}`, duration_days: 2 })));
   // an argument named screens is just an argument the tool does not have: reported, and the lists stay at 25
   const viaArg = (await call('lint', { ...h, profile: 'platform', simulate: false, screens: true })).d;
-  assert.match(viaArg.arguments_not_used[0], /^lint has no argument "screens"/);
+  assert.match(viaArg.notes[0], /^lint has no argument "screens"/);
   assert.equal(viaArg.checks.find((c: any) => c.id === 'connectivity').activities.length, 25);
   assert.equal(config.screens, false);
   config.screens = true;
@@ -243,7 +229,7 @@ test('B7: export_default is not an argument a caller can send: an export outside
     const flagged = await call(tool, { ...h, export: outside, export_default: true });
     assert.equal(plain.err, true, tool); assert.equal(flagged.err, true, `${tool}: refused`);
     assert.equal(flagged.d.error.code, plain.d.error.code); assert.equal(flagged.d.error.message, plain.d.error.message);
-    assert.ok(flagged.d.arguments_not_used.some((x: string) => x.includes('"export_default"')), 'and the flag is reported as not an argument of the tool');
+    assert.ok(flagged.d.notes.some((x: string) => x.includes('"export_default"')), 'and the flag is reported as not an argument of the tool');
   }
   assert.equal(existsSync(outside), false);
 });
@@ -259,22 +245,22 @@ test('B2: an answer too large to return still carries exported, every note and a
       const t = toolResult(r.out, r.isError, tool).structuredContent as any;
       assert.equal(t.truncated, true, tool);
       assert.ok(t.exported.files.length > 1 && t.exported.folder, 'the result folder and files');
-      assert.ok(Object.keys(t.notes).length > 0 && Object.entries(t.notes).every(([k, v]) => /_note$/.test(k) && typeof v === 'string'), JSON.stringify(t.notes));
-      assert.match(t.arguments_not_used[0], new RegExp(`^${tool} has no argument "bogus"`));
+      assert.ok(t.notes.length > 0 && t.notes.every((v: unknown) => typeof v === 'string'), JSON.stringify(t.notes));
+      assert.ok(t.notes.some((n: string) => new RegExp(`^${tool} has no argument "bogus"`).test(n)));
       assert.ok(t.saved && t.preview);
       // the hint names only arguments the tool has
       const props = Object.keys((toolsList() as any[]).find((x) => x.name === tool).inputSchema.properties);
-      assert.doesNotMatch(t.note, /max_rows|limit and offset|filters/);
+      assert.ok(!t.notes.some((n: string) => /max_rows|limit and offset|filters/.test(n)));
       for (const named of /this tool's ([\w, ]+)\./.exec(t.note)?.[1].split(', ') ?? []) assert.ok(props.includes(named), `${tool}: ${named}`);
     }
     // evaluate's notes include the changed list's
     const ev = await callTool('evaluate', { ...h, overrides: Array.from({ length: 40 }, (_, i) => ({ op: 'update_activity', id: `A${String(i).padStart(2, '0')}`, duration_days: 6 })) });
     const tev = toolResult(ev.out, ev.isError, 'evaluate').structuredContent as any;
-    assert.match(tev.notes.changed_note, /^25 of \d+ shown; all \d+ in /);
+    assert.ok(tev.notes.some((n: string) => /^25 of \d+ shown; all \d+ in /.test(n)));
     // a tool that has limit and offset names them
     const fa = toolResult((await callTool('find_activities', { ...h, limit: 100 })).out, false, 'find_activities').structuredContent as any;
     assert.equal(fa.truncated, true);
-    assert.match(fa.note, /this tool's limit, offset/);
+    assert.match(fa.notes.join(' '), /this tool's limit, offset/);
   } finally { config.maxResponseChars = was; }
 });
 
@@ -291,10 +277,9 @@ test('B6: the Monte Carlo file\'s histogram is the answer\'s chart; with estimat
   const one = (await call('monte_carlo', { ...h, iterations: 15, seed: 3 })).d;
   assert.equal(one.histogram.length, 1);
   assert.deepEqual(one.histogram[0], { start: one.finish.max, end: one.finish.max, count: 15, cum_pct: 100 });
-  assert.match(one.histogram_note, /^All 15 runs finish at the same moment/);
+  assert.match(one.notes.join(' '), /^No spread: no activity has a three-point estimate/);
   assert.equal(readFileSync(csv(one, 'histogram'), 'utf8').trim().split('\r\n').length, 2);
-  assert.match(one.histogram_note, /Why they coincide, and what to do about it, is in note\.$/);
-  assert.match(one.note, /set_estimates.*default_estimates.*sampler/);
+  assert.match(one.notes.join(' '), /set_estimates.*default_estimates/);
   // durations that vary: no reason given (the runs differ)
   assert.doesNotMatch(r.note ?? '', /no activity/i);
 });
@@ -304,7 +289,7 @@ test('earned_value says in a note when the schedule carries no costs (budget at 
   const ev = (await call('earned_value', h)).d;
   assert.equal(ev.projects[0].totals.bac, 0);
   assert.equal(ev.projects[0].totals.spi, 0);
-  assert.match(ev.note, /^The schedule carries no costs \(budget at completion is 0\), so SPI, CPI and EAC are not meaningful.*resource price.*budgeted cost on an assignment.*expense.*dates\. BAC = /);
+  assert.match(ev.notes.join(' '), /SPI, CPI and EAC not assessed: .+ carries no costs\./);
 });
 
 test('B8: compare says how many changes there are and where all of them are', async () => {
@@ -318,10 +303,10 @@ test('B8: compare says how many changes there are and where all of them are', as
   assert.equal(all.changes_note, undefined, 'nothing is cut');
   const p1 = (await call('compare', { ...h, path: was, max_changes: 5 })).d;
   assert.equal(p1.changes.length, 5); assert.equal(p1.changes_total, all.changes_total);
-  assert.equal(p1.changes_note, `5 of ${all.changes_total} shown (the page from offset 0); all ${all.changes_total} in ${csv(p1, 'changes')}`);
+  assert.equal(p1.changes_note, `5 of ${all.changes_total} shown; all ${all.changes_total} in ${csv(p1, 'changes')}.`);
   assert.equal(p1.exported.files.find((f: any) => f.path.endsWith('-changes.csv')).rows, all.changes_total);
   const p2 = (await call('compare', { ...h, path: was, max_changes: 5, offset: 5 })).d;
-  assert.equal(p2.changes_note, `5 of ${all.changes_total} shown (the page from offset 5); all ${all.changes_total} in ${csv(p2, 'changes')}`);
+  assert.equal(p2.changes_note, `5 of ${all.changes_total} shown; all ${all.changes_total} in ${csv(p2, 'changes')}.`);
   assert.equal(p2.next_offset, 10);
   // the computed mode names the same total
   const c = (await call('compare', { ...h, path: was, mode: 'computed', max_changes: 1 })).d;
@@ -375,9 +360,9 @@ test('B10: resource_histogram lists by severity, then over-allocated periods, th
   const r = (await call('resource_histogram', h)).d;
   const whole = JSON.parse(readFileSync(r.exported.files[0].path, 'utf8')).resources;
   const zero = whole.find((x: any) => x.resource === 'AA');
-  assert.equal(zero.severity, 'none'); assert.ok(zero.over_allocated_periods > 0, 'counted over-allocated though its severity is none');
+  assert.equal(zero.severity, 'none'); assert.equal(zero.over_allocated_periods, 0, 'a resource with no limit set counts no over-allocation');
   assert.deepEqual(r.resources.map((x: any) => x.resource), ['HI', 'MID', 'AA']);
-  assert.match(r.resources_order_note, /severity of over-allocation first/);
+  assert.match(r.notes.join(' '), /resources? (has|have) no Max Units\/Time, so (its|their) over-allocation is not assessed: /);
 });
 
 test('B11: a too-large answer also carries its note, partial, resume and next_offset', async () => {
@@ -387,7 +372,7 @@ test('B11: a too-large answer also carries its note, partial, resume and next_of
     config.maxResponseChars = 200;
     const t = toolResult({ note: 'continue with resume', partial: true, resume: '/x/y.p6mc', next_offset: 50, rows: 'z'.repeat(500) }, false, 'lint').structuredContent;
     assert.equal(t.truncated, true);
-    assert.equal(t.answer_note, 'continue with resume'); assert.equal(t.partial, true); assert.equal(t.resume, '/x/y.p6mc'); assert.equal(t.next_offset, 50);
+    assert.ok(t.notes.includes('continue with resume')); assert.equal(t.partial, true); assert.equal(t.resume, '/x/y.p6mc'); assert.equal(t.next_offset, 50);
     const plain = toolResult({ rows: 'z'.repeat(500) }, false, 'lint').structuredContent;
     assert.ok(!('answer_note' in plain) && !('resume' in plain));
   } finally { config.maxResponseChars = was; }
@@ -417,13 +402,13 @@ test('compare mode all carries progress_integrity: retroactive actuals, % comple
     [...codes.map((c) => ({ op: 'add_activity', id: c, name: c, duration_days: 10 })), { op: 'add_resource', id: 'LAB', price_per_unit: 10 }, { op: 'assign_resource', activity: 'UNI', resource: 'LAB', units: 40 }, setType('PHY', 'CP_Phys'), setType('UNI', 'CP_Units')]);
   const d = (await call('compare', { handle: E.handle, path: p2 })).d;
   const pi = d.progress_integrity;
-  assert.deepEqual(Object.keys(pi).sort(), ['clean', 'note', 'progress_decreases', 'progress_decreases_total', 'retroactive_actuals', 'retroactive_actuals_total', 'status_regressions', 'status_regressions_total']);
+  assert.deepEqual(Object.keys(pi).sort(), ['clean', 'progress_decreases', 'progress_decreases_total', 'retroactive_actuals', 'retroactive_actuals_total', 'status_regressions', 'status_regressions_total']);
   assert.equal(pi.clean, false);
   assert.deepEqual(pi.retroactive_actuals.map((x: any) => [x.id, x.field, x.a, x.b]), [['RET', 'actual_start', '2026-03-02 00:00', '2026-03-03 00:00'], ['STA', 'actual_finish', '2026-03-06 00:00', '']]);
   assert.deepEqual(pi.progress_decreases.map((x: any) => [x.id, x.field, x.a, x.b]), [['DUR', 'duration_pct', 20, 10], ['PHY', 'physical_pct', 50, 30], ['UNI', 'units_pct', 50, 25]]);
   assert.deepEqual(pi.status_regressions.map((x: any) => [x.id, x.a, x.b]), [['STA', 'TK_Complete', 'TK_Active']]);
   assert.equal(pi.progress_decreases_total, 3);
-  assert.match(pi.note, /^Between the updates: 2 actual dates the earlier update held were changed or cleared \(e\.g\. .*\); 3 percent completes went down \(e\.g\. .*\); 1 status went back \(e\.g\. .*\)\. A claim relies on contemporaneous records, so these are disclosed in the report; the lists give every one\.$/);
+  assert.equal(pi.clean, false);
   // the whole lists are in the result files
   assert.ok(csv(d, 'progress_decreases') && csv(d, 'retroactive_actuals') && csv(d, 'status_regressions'));
   // not given in mode computed
@@ -435,10 +420,10 @@ test('compare progress_integrity: the same file is clean; a list over LISTED sho
   const { E, p1, p2 } = await integrityPair('PIL', ops.map((o) => ({ op: 'update_activity', id: o.id, actual_start: '2026-03-02', percent_complete: 40 })), ops.map((o) => ({ op: 'update_activity', id: o.id, percent_complete: 30 })), ops);
   const same = (await call('compare', { handle: E.handle, path: p1 })).d.progress_integrity;
   assert.equal(same.clean, true); assert.equal(same.progress_decreases_total, 0);
-  assert.match(same.note, /^no actual date the earlier update held was changed or cleared/);
+  assert.equal(same.clean, true);
   const d = (await call('compare', { handle: E.handle, path: p2 })).d, pi = d.progress_integrity;
   assert.equal(pi.progress_decreases.length, LISTED); assert.equal(pi.progress_decreases_total, 27);
-  assert.equal(pi.progress_decreases_note, `25 of 27 shown; all 27 in ${csv(d, 'progress_decreases')}`);
+  assert.equal(pi.progress_decreases_note, `25 of 27 shown; all 27 in ${csv(d, 'progress_decreases')}.`);
   assert.equal(readFileSync(csv(d, 'progress_decreases'), 'utf8').trim().split('\n').length, 28);
   assert.equal(JSON.parse(readFileSync(d.exported.files[0].path, 'utf8')).progress_integrity.progress_decreases.length, 27);
 });

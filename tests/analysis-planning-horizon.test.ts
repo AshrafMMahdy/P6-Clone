@@ -44,14 +44,14 @@ test('the horizon fixture: the same windows, the same activities, the same five 
     for (const d of ['logic', 'resources', 'float', 'forecast_stability'] as const) assert.equal(a.dimensions[d]!.score, s.prerequisites[d].score, `${id} ${d}`);
     assert.deepEqual(a.issues, [...s.prerequisites.logic.issues, ...s.prerequisites.resources.issues, ...s.prerequisites.float.issues, ...s.prerequisites.forecast_stability.issues], `${id} issues`);
     assert.equal(a.on_critical_path, s.on_critical_path, `${id} critical`);
-    assert.equal(a.dimensions.approvals, undefined);
+    assert.equal((a.dimensions as Record<string, unknown>).approvals, undefined);
   }
   // window by window: counts, and the mean of every dimension but approvals
   src.bands.forEach((sb: any, i: number) => {
     const b = r.bands[i];
     assert.equal(b.activities_total, sb.tasks_in_band, sb.band_name);
     for (const d of ['logic', 'resources', 'float', 'forecast_stability'] as const) assert.equal(b.breakdown[d], sb.readiness_breakdown[d], `${sb.band_name} ${d}`);
-    assert.equal(b.breakdown.approvals, null);
+    assert.equal((b.breakdown as Record<string, unknown>).approvals, undefined);
   });
   // the systemic issues (the same dimensions, the same activities) and the trend
   assert.deepEqual(r.systemic_issues.map((x) => x.issue), src.cross_band_insights.systemic_issues.map((x: any) => x.issue));
@@ -84,8 +84,8 @@ test('EXPECTED DIFFERENCE: approvals are not assessed, so an activity\'s readine
   assert.equal(byId(r).A.status, 'mostly_ready');
   assert.equal(srcTasks.A.readiness_status, 'ready');
   // the file-wide reason, with the weight that is spread
-  assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => [d.dimension, d.weight]), [['approvals', 0.2]]);
-  assert.match(r.summary.dimensions_not_assessed[0].reason, /no approval status for an activity/);
+  assert.deepEqual(Object.keys(r.bands[0].breakdown), ['logic', 'resources', 'float', 'forecast_stability']);
+  assert.deepEqual(r.notes, []);
   // the window's score is the mean of its activities: 30-day (45.3, 46.6, 78.1, 78.1, 78.1, 87.5) = 69.0 (the source's 75.2)
   assert.equal(r.bands[0].readiness_score, 69);
   assert.equal(src.bands[0].band_readiness_score, 75.2);
@@ -98,14 +98,14 @@ test('EXPECTED DIFFERENCE: an empty window has no score (the source gives it 100
   // cleanChain from 5 Jan: all four activities start within 23 days, so the 31-60 and 61-90 windows are empty
   const r = planningHorizon(B.cleanChain().db, {});
   assert.equal(r.result, 'assessed');
-  for (const b of r.bands.slice(1)) { assert.equal(b.result, 'not_assessed'); assert.equal(b.readiness_score, null); assert.equal(b.status, null); assert.equal(b.note, 'No activities start in this window.'); assert.equal(b.activities_total, 0); assert.deepEqual(b.activities, []); assert.deepEqual(b.risks, []); }
+  for (const b of r.bands.slice(1)) { assert.equal(b.result, 'not_assessed'); assert.equal(b.readiness_score, null); assert.equal(b.status, null); assert.equal(b.activities_total, 0); assert.deepEqual(b.activities, []); assert.deepEqual(b.risks, []); }
   const empty = golden.withFloat.planning_horizon.data.bands[0];
   assert.equal(empty.tasks_in_band, 0);
   assert.equal(empty.band_readiness_score, 100, 'the source: an empty window scores 100');
   // nothing in any window: the whole analysis is not assessed, with the reason; the source: overall 100
   const none = planningHorizon(B.cleanChain().db, { statusDate: at('2025-06-01') });
   assert.equal(none.result, 'not_assessed');
-  assert.equal(none.note, 'No activities start in the next 90 days.');
+  assert.equal(none.notes.length, 2);
   assert.equal(none.summary.readiness_score, null);
   assert.equal(none.summary.status, null);
   assert.equal(golden.withFloat.planning_horizon.data.analysis_summary.overall_readiness_score, 100);
@@ -160,16 +160,16 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   const aurora = readXerFile(sampleCopy('Aurora_Tower_Baseline.xer')).db;
   const none = planningHorizon(aurora, {});
   assert.equal(none.result, 'not_assessed');
-  assert.match(none.note!, /^No data date in aurora_tower: give a status_date\./);
+  assert.deepEqual(none.notes, ['Not assessed: aurora_tower has no data date; pass status_date.']);
   assert.equal(none.status_date, null);
   assert.deepEqual(none.bands, []);
   assert.deepEqual(none.summary.projects_without_data_date, ['aurora_tower']);
   // no resources anywhere in the file: the resources dimension is not assessed for any activity (not 0 for all)
   const r = planningHorizon(B.cleanChain().db, {});
   // and no baseline: forecast stability has nothing to be compared with (the planned dates equal the early dates after a calculation, so they cannot stand in)
-  assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'forecast_stability']);
-  assert.match(r.summary.dimensions_not_assessed[1].reason, /no resource assignments/);
-  assert.match(r.summary.dimensions_not_assessed[2].reason, /^No project baseline is assigned\. Assign one with edit assign_baseline.* Without one the forecast finish has nothing to be compared with/);
+  assert.deepEqual(r.notes.length, 2);
+  assert.match(r.notes.join(' '), /Resources not assessed: the file has no resource assignments\./);
+  assert.match(r.notes.join(' '), /Forecast stability not assessed: no baseline is assigned to .+; assign one with edit assign_baseline, or pass baseline\./);
   // T1 by hand: logic 60 (no predecessor), float 0 (critical); resources and stability not assessed: (0.25 x 60 + 0.10 x 0) / (0.25 + 0.10) = 15 / 0.35 = 42.9
   assert.equal(byId(r).T1.readiness_score, 42.9);
   assert.equal(byId(r).T1.dimensions.resources, undefined);
@@ -177,7 +177,7 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   // a milestone in a file that has resources: nothing to resource (re-weighted over logic and float; the file has no baseline, so no stability): M: logic 70 (A not complete), float 0: (17.5 + 0) / 0.35 = 50
   const b = B.project('MS', [{ id: 'A', duration_days: 5, resources: ['R'] }, { id: 'M', duration_days: 0, predecessors: ['A'], task_type: 'milestone' }], { resources: [{ id: 'R', max_units_per_day: 1 }] });
   const m = byId(planningHorizon(b.db, {}));
-  assert.deepEqual(m.M.not_assessed, [{ dimension: 'resources', reason: 'A milestone carries no work to resource.' }]);
+  assert.deepEqual(m.M.not_assessed, ['resources']);
   assert.equal(m.M.readiness_score, 50);
   assert.equal(m.A.dimensions.resources!.score, 100);
   // no stored float: that dimension is not assessed for that activity alone
@@ -185,7 +185,7 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   const t2 = rows(x.db, 'TASK').find((t) => t.task_code === 'T2')!;
   t2.total_float_hr_cnt = '';
   const xr = byId(planningHorizon(x.db, {}));
-  assert.deepEqual(xr.T2.not_assessed.map((n) => [n.dimension, n.reason]), [['float', 'No stored total float: schedule the project (F9) first.']]);
+  assert.deepEqual(xr.T2.not_assessed, ['float']);
   // T2: logic 70 (T1 not complete) only: 70
   assert.equal(xr.T2.readiness_score, 70);
   assert.equal(xr.T1.dimensions.float!.score, 0, 'the others are unaffected');
@@ -194,19 +194,19 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   assert.ok(applyOps(h.db, [{ op: 'add_activity', id: 'NEW', name: 'NEW', duration_days: 3, calendar: 'D7' }, { op: 'add_relationship', pred: 'A', succ: 'NEW', type: 'FS' }], { calendarDays: true }).ok);
   assert.ok(scheduleProjects(h.db, [h.projId], { dataDate: at('2026-01-05') }).ok);
   const hr = byId(planningHorizon(h.db, {}));
-  assert.deepEqual(hr.NEW.not_assessed.filter((n) => n.dimension === 'forecast_stability').map((n) => n.reason), ['Not in the BL baseline (added since).']);
+  assert.deepEqual(hr.NEW.not_assessed.filter((n) => n === 'forecast_stability'), ['forecast_stability']);
   assert.equal(hr.NEW.dimensions.forecast_stability, undefined);
   assert.ok(hr.C.dimensions.forecast_stability!.score < 100, 'an activity that is in the baseline is assessed');
   // the dimension is not assessed file-wide only when no baseline exists; the named baseline that is not there is refused by the tool (below)
-  assert.equal(planningHorizon(h.db, {}).summary.dimensions_not_assessed.some((d) => d.dimension === 'forecast_stability'), false);
+  assert.equal(planningHorizon(h.db, {}).notes.some((n) => /^Forecast stability not assessed: /.test(n)), false);
   // a loop: P6's float is not valid; the loop is named and the float dimension is left out (the logic dimension still reads the links)
   const c = B.withCycle();
   for (const t of rows(c.db, 'TASK').filter((t) => t.proj_id === c.projId)) { t.early_start_date = '2026-01-10 00:00'; t.early_end_date = '2026-01-14 00:00'; t.target_end_date = '2026-01-14 00:00'; t.total_float_hr_cnt = '0'; }
   const l = planningHorizon(c.db, { statusDate: at('2026-01-05') });
   assert.equal(l.loops.length, 1);
-  assert.match(l.loops[0].message, /^These activities are in a loop: [XYZ], [XYZ], [XYZ]$/);
-  assert.deepEqual(l.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'forecast_stability', 'float']);
-  assert.match(l.summary.dimensions_not_assessed[3].reason, /The logic has a loop/);
+  assert.deepEqual(l.loops[0].activities.slice().sort(), ['X', 'Y', 'Z']);
+  assert.match(l.notes.join(' '), /Float not assessed: [XYZ], [XYZ], [XYZ] are in a loop\./);
+  assert.match(l.notes.join(' '), /Resources not assessed/);
   assert.equal(all(l).every((a) => a.dimensions.float === undefined), true);
 });
 
@@ -222,7 +222,7 @@ test('forecast stability compares with the BASELINE finish: P6\'s planned finish
   const bl = rows(h.db, 'PROJECT').find((p) => p.proj_id === h.projId)!; bl.sum_base_proj_id = '';
   rows(h.db, 'PROJECT').filter((p) => p._baseline_of).forEach((p) => { p._baseline_of = 'x'; });
   const none = planningHorizon(h.db, {});
-  assert.deepEqual(none.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'forecast_stability']);
+  assert.match(none.notes.join(' '), /Forecast stability not assessed/);
   assert.ok(all(none).every((a) => a.dimensions.forecast_stability === undefined));
 });
 
@@ -239,8 +239,8 @@ test('work with an actual start (under way) is not work about to start: it is in
 
 test('statuses and the systemic rule by the source\'s numbers', () => {
   assert.deepEqual([100, 90, 89.9, 75, 74.9, 50, 49.9, 0].map(statusOf), ['ready', 'ready', 'mostly_ready', 'mostly_ready', 'at_risk', 'at_risk', 'not_ready', 'not_ready']);
-  assert.deepEqual(WEIGHTS, { logic: 0.25, resources: 0.3, approvals: 0.2, float: 0.1, forecast_stability: 0.15 });
-  assert.ok(Math.abs(Object.values(WEIGHTS).reduce((a, b) => a + b, 0) - 1) < 1e-9);
+  assert.deepEqual(WEIGHTS, { logic: 0.25, resources: 0.3, float: 0.1, forecast_stability: 0.15 });
+  assert.ok(Math.abs(Object.values(WEIGHTS).reduce((a, b) => a + b, 0) - 0.8) < 1e-9);
   // a dimension is a systemic gap at max(2, 30 %) of the activities it is assessed for: one weak activity of 4 is not (min 2); two of 4 is
   const mk = (weak: number) => B.project('SYS', Array.from({ length: 4 }, (_, i) => ({ id: `A${i}`, duration_days: 3, resources: i >= weak ? ['R'] : [] })), { resources: [{ id: 'R', max_units_per_day: 1 }] });
   assert.deepEqual(planningHorizon(mk(1).db, {}).systemic_issues.filter((x) => x.dimension === 'resources'), []);
@@ -301,7 +301,7 @@ test('Tower-A (a baseline in the file): the one activity in a window, by hand', 
   assert.equal(m.days_until_start, 0);
   assert.equal(m.readiness_score, 50);
   assert.equal(m.status, 'at_risk');
-  assert.deepEqual(m.not_assessed.map((n) => [n.dimension, n.reason]), [['resources', 'A milestone carries no work to resource.'], ['forecast_stability', 'Not in the TOWER-A-BL1 baseline (added since).']]);
+  assert.deepEqual(m.not_assessed, ['resources', 'forecast_stability']);
   assert.deepEqual(m.issues, ['Predecessor A1030 only 0% complete', 'Low float (0d < 5d)']);
   assert.equal(r.bands[0].risks[0].risk, 'Low float (0d < 5d)', 'the weakest dimension is float (0, against logic 70): its first issue');
   assert.equal(r.bands[0].risks[0].impact, 'critical', 'the milestone has no float');
@@ -313,7 +313,7 @@ test('Aurora_Tower_Baseline with a status_date (the file has no data date): coun
   assert.equal(r.result, 'assessed');
   assert.equal(r.status_date, '2026-06-22 00:00');
   assert.deepEqual(r.bands.map((b) => b.activities_total), rawBands(db, at('2026-06-22')));
-  assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'forecast_stability'], 'no resources and no baseline in this file');
+  assert.match(r.notes.join(' '), /Resources not assessed.*Forecast stability not assessed/);
 });
 
 // ------------------------------------------------------------------------------------------------ the tool
@@ -327,18 +327,17 @@ test('planning_horizon through the server: read-only, status_date the only argum
   const h = await openSample('129 trial.xer');
   const r = await call('planning_horizon', { handle: h, bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
-  assert.equal(r.d.arguments_not_used.length, 1);
-  assert.match(r.d.arguments_not_used.join(' '), /planning_horizon has no argument "bogus"/);
+  assert.match(r.d.notes.join(' '), /planning_horizon has no argument "bogus"/);
   // baseline as dcma_14 takes it: refused when no project in scope has it, with the saved baselines named
   const nobl = await call('planning_horizon', { handle: h, baseline: 'project' });
   assert.equal(nobl.err, true);
   assert.match(nobl.d.error.message, /No baseline "project" for this project\./);
-  assert.match(r.d.summary.dimensions_not_assessed.map((d: any) => d.reason).join(' '), /No project baseline is assigned\..* Without one the forecast finish has nothing to be compared with/);
-  assert.deepEqual(Object.keys(r.d).slice(0, 4), ['report', 'status_date', 'result', 'summary'], 'summary first');
+  assert.match(r.d.notes.join(' '), /Forecast stability not assessed: no baseline is assigned to/);
+  assert.deepEqual(Object.keys(r.d).slice(0, 5), ['report', 'status_date', 'result', 'notes', 'summary'], 'summary before the lists');
   const b = r.d.bands[1];
   assert.equal(b.activities.length, 25);
   assert.equal(b.activities_total, 369);
-  assert.match(b.activities_note, /^25 of 369 shown; all 369 in .*planning_horizon-activities\.csv$/);
+  assert.match(b.activities_note, /^25 of 369 shown; all 369 in .*planning_horizon-activities\.csv\.$/);
   assert.equal(b.risks.length, 25);
   assert.equal(b.risks_total, 34, 'the file has no baseline: forecast stability is not assessed, its weight goes to the others, and more activities read at risk');
   const csv = r.d.exported.files.find((f: any) => f.path.endsWith('-activities.csv'));
@@ -346,7 +345,7 @@ test('planning_horizon through the server: read-only, status_date the only argum
   const whole = JSON.parse(readFileSync(r.d.exported.files.find((f: any) => f.path.endsWith('planning_horizon.json')).path, 'utf8'));
   assert.equal(whole.bands[1].activities.length, 369);
   assert.equal(r.d.exported.files.find((f: any) => f.path.endsWith('-bands.csv')).rows, 3);
-  assert.match(r.d.method.join(' '), /logic 0\.25, resources 0\.30, approvals 0\.20, float 0\.10, forecast stability 0\.15/);
+  assert.equal(r.d.method, undefined);
   // a status date is taken as dcma_14 takes it; one that is not a date is refused
   const early = await call('planning_horizon', { handle: h, status_date: '2010-12-01' });
   assert.equal(early.err, false);
@@ -359,5 +358,18 @@ test('planning_horizon through the server: read-only, status_date the only argum
   const n = await call('planning_horizon', { handle: au });
   assert.equal(n.err, false);
   assert.equal(n.d.result, 'not_assessed');
-  assert.match(n.d.note, /No data date in aurora_tower: give a status_date/);
+  assert.match(n.d.notes.join(' '), /aurora_tower has no data date; pass status_date/);
+});
+
+test('the systemic issue\'s activity list names the file that holds all of it: its own CSV, not the activities of the windows', async () => {
+  const h = await openSample('Detailed Program.xer');
+  const r = (await call('planning_horizon', { handle: h })).d;
+  const x = r.systemic_issues.find((s: any) => s.dimension === 'resources');
+  assert.equal(x.activities.length, 25); assert.equal(x.activities_total, 102);
+  const m = /^25 of 102 shown; all 102 in (.+planning_horizon-systemic_activities\.csv)\.$/.exec(x.activities_note);
+  assert.ok(m, x.activities_note);
+  const lines = readFileSync(m![1], 'utf8').trim().split(/\r?\n/);
+  assert.equal(lines.filter((l) => l.startsWith('resources_gap,resources,')).length, 102, 'every activity of the issue is in it');
+  // the activities of a window keep theirs
+  assert.match(r.bands.find((b: any) => b.activities_total > 25).activities_note, /planning_horizon-activities\.csv\.$/);
 });

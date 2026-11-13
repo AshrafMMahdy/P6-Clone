@@ -43,7 +43,7 @@ const project = async (n: number) => {
 const est = { min_pct: 80, max_pct: 140 };
 const mcArgs = (h: { handle: string }, extra: Record<string, unknown> = {}) => ({ ...h, iterations: 120, seed: 11, default_estimates: est, events: [{ name: 'Late permit', probability: 0.3, delay_days: 4 }, { name: 'Crane', probability: 0.2, delay_days: 2, activities: ['A5'] }], deadline: '2026-07-01', ...extra });
 /** The answer without what may differ between two equal runs (time taken, how much came from a file). */
-const same = (d: any) => { const { elapsed_seconds: _e, resumed_iterations: _r, redone_iterations: _d, redone_note: _n, exported: _x, ...rest } = d; return JSON.parse(JSON.stringify(rest).replace(/analysis[\\/][^\\/"]+[\\/]/g, 'analysis/-/')); }; // (the notes name the result folder, which carries the project's and the file's names)
+const same = (d: any) => { const { elapsed_seconds: _e, resumed_iterations: _r, redone_iterations: _d, exported: _x, ...rest } = d; if (rest.notes) { rest.notes = rest.notes.filter((n: string) => !/kept iterations? did not check out/.test(n)); if (!rest.notes.length) delete rest.notes; } return JSON.parse(JSON.stringify(rest).replace(/analysis[\\/][^\\/"]+[\\/]/g, 'analysis/-/')); }; // (the notes name the result folder, which carries the project's and the file's names)
 const keptFiles = () => readdirSync(root).filter((f) => f.startsWith('monte_carlo-'));
 
 test('a run that failed part-way is continued from its kept iterations: the answer equals an uninterrupted run (same seed)', async () => {
@@ -57,7 +57,7 @@ test('a run that failed part-way is continued from its kept iterations: the answ
   try { part = (await call('monte_carlo', mcArgs(h))).d; } finally { testHooks.failAt = null; }
   assert.equal(part.partial, true); assert.equal(part.iterations_done, 47);
   assert.ok(typeof part.resume === 'string' && existsSync(part.resume), JSON.stringify(part).slice(0, 400));
-  assert.match(part.note, /to continue, call monte_carlo again with the same arguments and resume/);
+  assert.equal(part.note, 'Stopped after 47 of 120 iterations (test failure): the result covers those only.');
   const resumed = (await call('monte_carlo', mcArgs(h, { resume: part.resume }))).d;
   assert.equal(resumed.resumed_iterations, 47);
   assert.equal(resumed.partial, undefined);
@@ -247,7 +247,7 @@ test('a kept iteration damaged in place (zeros of the right length, or a stretch
   const ra = (await call('monte_carlo', mcArgs(h, { resume: a.resume }))).d;
   assert.equal(ra.resumed_iterations, 10);
   assert.equal(ra.redone_iterations, 20);
-  assert.match(ra.redone_note, /20 kept iterations did not check out/);
+  assert.ok(ra.notes.includes('20 kept iterations did not check out (damaged) and were run again.'), JSON.stringify(ra.notes));
   assert.deepEqual(same(ra), same(full));
   // a stretch of zeros from the 26th on (the file's length was written, its data was not)
   const c = await stop(30);
@@ -346,7 +346,7 @@ test('monte_carlo has no list size, bars or whole-day arguments: 25 per list, 20
   // top, buckets and histogram are gone: the call runs without them and says so
   const old = (await call('monte_carlo', { ...a, top: 0, buckets: 250, histogram: 'days' })).d;
   assert.equal(old.criticality.length, 25); assert.equal(old.histogram.length, 20);
-  assert.deepEqual(old.arguments_not_used.map((x: string) => /^monte_carlo has no argument "(\w+)": it was not used and the call ran without it\. Its arguments are: /.exec(x)?.[1]), ['top', 'buckets', 'histogram']);
+  assert.deepEqual(old.notes.map((x: string) => /^monte_carlo has no argument "(\w+)"; the call ran without it\. Its arguments are: /.exec(x)?.[1]), ['top', 'buckets', 'histogram']);
   // the bars run from the earliest to the latest simulated finish, equal in width
   const w = (b: any) => parseP6Date(b.end)! - parseP6Date(b.start)!;
   assert.ok(dflt.histogram.every((b: any) => Math.abs(w(b) - w(dflt.histogram[0])) <= 1));

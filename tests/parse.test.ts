@@ -16,12 +16,13 @@ test('parses tables, fields, rows', () => {
 
 test('structural findings', () => {
   assert.ok(codes('%T\tTASK\n%F\ta\n%R\t1\n%E\n').includes('NO_HEADER'));
-  assert.ok(codes(new TextEncoder().encode('ERMHDR\t7.0\n%T\tX\n%F\ta\n%R\t1\n%E\n')).includes('LF_ENDINGS'));
-  assert.ok(codes('ERMHDR\t7.0\n%T\tX\n%F\ta\n%R\t1\n').includes('NO_END'));
+  // harmless remarks (LF line endings, a missing %E, a table given twice) are not findings: nothing is lost
+  assert.ok(!codes(new TextEncoder().encode('ERMHDR\t7.0\n%T\tX\n%F\ta\n%R\t1\n%E\n')).includes('LF_ENDINGS'));
+  assert.ok(!codes('ERMHDR\t7.0\n%T\tX\n%F\ta\n%R\t1\n').includes('NO_END'));
   assert.ok(codes('ERMHDR\t7.0\n%T\tX\n%R\t1\n%E\n').includes('ROW_BEFORE_FIELDS'));
   assert.ok(codes('ERMHDR\t7.0\n%T\tX\n%F\ta\n%R\t1\t2\n%E\n').includes('FIELD_COUNT'));
   assert.ok(codes('ERMHDR\t7.0\n%T\tX\n%F\ta\tb\n%R\t1\n%E\n').includes('FIELD_COUNT_SHORT'));
-  assert.ok(codes('ERMHDR\t7.0\n%T\tX\n%F\ta\n%R\t1\n%T\tX\n%F\ta\n%R\t2\n%E\n').includes('DUP_TABLE'));
+  assert.ok(codes('ERMHDR\t7.0\n%T\tX\n%F\ta\n%R\t1\n%T\tX\n%F\ta\n%R\t2\n%E\n').includes('DUP_TABLE') === false);
   assert.ok(codes('ERMHDR\t7.0\n%T\tX\n%F\ta\nxR\t1\n%E\n').includes('BAD_LINE'));
 });
 

@@ -390,8 +390,10 @@ test('save refuses only what this session\'s edits added: what the file already 
   const saved = await call('save', { ...H, path: join(dir, 'a.xer') });
   assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 400));
   assert.ok(existsSync(join(dir, 'a.xer')));
-  assert.ok(saved.d.p6_would_reject.total >= 2 && saved.d.p6_would_reject.in_the_file_as_opened === saved.d.p6_would_reject.total, JSON.stringify(saved.d.p6_would_reject));
-  assert.ok(saved.d.p6_would_reject.findings.some((m: string) => /Activity ID/.test(m)) && saved.d.p6_would_reject.findings.some((m: string) => /its own predecessor/.test(m)));
+  assert.equal(saved.d.p6_would_reject, undefined);
+  assert.equal(saved.d.notes.length, 1, JSON.stringify(saved.d.notes));
+  assert.match(saved.d.notes[0], /^a\.xer has [2-9] faults P6 refuses, already in the file when it was opened: /, 'every fault listed was in the file as opened');
+  assert.match(saved.d.notes[0], /Activity ID/); assert.match(saved.d.notes[0], /its own predecessor/);
   // an edit that makes a NEW duplicate is refused (written straight into the table: set_fields itself would not allow it)
   const s = sessions.get(o.d.handle)!;
   const t = s.db.tables.TASK.rows.filter((x) => x.proj_id === P.proj_id).find((x) => x.task_code !== mine[0].task_code && x.task_code !== 'UNRELATED')!;
@@ -424,17 +426,14 @@ test('an imported EPS node whose ID matches an existing one takes the existing n
   const res = importIntoDb(db, src, defaultPlan(src));
   assert.deepEqual(rows(db, 'EPS').map((e) => `${e.eps_short_name}|${e.eps_name}`), before, 'no second node, and the existing name is kept');
   const matched = res.findings.filter((f) => f.code === 'IMPORT_EPS_MATCHED');
-  assert.equal(matched.length, rows(src, 'EPS').length, 'every node is reported');
+  assert.ok(matched.length >= 1 && matched.every((f) => f.severity === 'warning'), 'only the nodes that differ are reported');
   const m = matched.find((f) => f.key === rows(db, 'EPS')[1].eps_id)!;
-  assert.equal(m.severity, 'warning');
-  assert.match(m.message, new RegExp(`EPS "${first.eps_short_name}".*name "A different name", parent \\(top level\\).*existing one is kept \\(name "${keptName}", parent Enterprise\\)`));
-  assert.match(m.message, /NOT applied/);
-  // identical nodes are reported too, as information
+  assert.equal(m.message, `EPS "${first.eps_short_name}": the existing node of that ID is kept (name "${keptName}", parent Enterprise); the imported name "A different name" and parent (top level) were not applied.`);
+  // identical nodes are not reported: nothing was left out
   const same = load();
   addRow(same, 'EPS', node('1', '', 'Enterprise', 'All Initiatives')); addRow(same, 'EPS', node('2', '1', 'Region', 'Region North'));
   const again = importIntoDb(db, same, defaultPlan(same)).findings.filter((f) => f.code === 'IMPORT_EPS_MATCHED');
-  assert.equal(again.length, 2);
-  assert.ok(again.every((f) => f.severity === 'info'));
+  assert.equal(again.length, 0);
 });
 
 // ------------------------------------------------------------------ the leftovers of the save check
@@ -472,7 +471,7 @@ test('an ID the file already had twice may not become three: the edit and the sa
   third.task_code = 'BACK-TO-ONE';
   const saved = await call('save', { ...H, path: join(dir, 'y.xer') });
   assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 300));
-  assert.equal(saved.d.p6_would_reject.in_the_file_as_opened, saved.d.p6_would_reject.total);
+  assert.match(saved.d.notes[0], /^y\.xer has \d+ faults? P6 refuses, already in the file when it was opened: /);
 });
 
 test('a child added under a cycle the file already had is not blamed on the edit; a new cycle is', { timeout: 60_000 }, async () => {
@@ -490,8 +489,7 @@ test('a child added under a cycle the file already had is not blamed on the edit
   assert.equal(e.err, false, JSON.stringify(e.d).slice(0, 300));
   const saved = await call('save', { ...H, path: join(dir, 'a.xer') });
   assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 300));
-  assert.equal(saved.d.p6_would_reject.total, 2, 'only the two nodes ON the cycle are reported');
-  assert.equal(saved.d.p6_would_reject.in_the_file_as_opened, 2);
+  assert.match(saved.d.notes[0], /^a\.xer has 2 faults P6 refuses, already in the file when it was opened: /, 'only the two nodes ON the cycle are reported');
   // a NEW cycle (CC and a fresh node) is refused
   const root = s.db.tables.PROJWBS.rows.find((x) => x.proj_id === P.proj_id && x.proj_node_flag === 'Y')!;
   const fresh = { ...w('CC'), wbs_id: '99999', wbs_short_name: 'CD', parent_wbs_id: w('CC').wbs_id };
@@ -513,8 +511,7 @@ test('a project restored without the open-time list rebuilds it from the file it
   s.openProblems = undefined; s.dirty = true;
   const saved = await call('save', { ...H, path: join(dir, 'a.xer') });
   assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 300));
-  assert.ok(saved.d.p6_would_reject.in_the_file_as_opened >= 1);
-  assert.match(saved.d.p6_would_reject.note, /read again from the file it was opened from/);
+  assert.match(saved.d.notes[0], /^a\.xer has \d+ faults? P6 refuses, already in the file when it was opened: /, 'the list was rebuilt from the file it was opened from');
   // rebuilt: a new duplicate is refused again
   mine[3].task_code = mine[4].task_code; s.dirty = true;
   const refused = await call('save', { ...H, path: join(dir, 'b.xer') });
@@ -530,8 +527,9 @@ test('a project restored without the open-time list rebuilds it from the file it
   m.db.tables.TASK.rows.find((t) => t.task_code === 'M2')!.task_code = 'M1';
   const unknown = await call('save', { ...N, path: join(dir, 'mem.xer') });
   assert.equal(unknown.err, false, JSON.stringify(unknown.d).slice(0, 300));
-  assert.equal(unknown.d.p6_would_reject.in_the_file_as_opened, null);
-  assert.match(unknown.d.p6_would_reject.note, /nothing could be told apart, so nothing was refused and everything found is listed/);
+  const fault = unknown.d.notes.find((n: string) => /^mem\.xer has /.test(n));
+  assert.match(fault, /^mem\.xer has 1 fault P6 refuses: /, 'nothing could be told apart: saved, and the fault listed without "already in the file"');
+  assert.doesNotMatch(fault, /already in the file/);
 });
 
 test('child Node processes on Node 24 start without the concurrent compilers (the exit deadlock of V8 13.6 that left the tiler hanging after its work)', async () => {

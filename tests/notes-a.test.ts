@@ -27,7 +27,7 @@ test('1: an unmet relationship is given in days, not minutes called hours', asyn
   const sec = s.log.exceptions.find((x: any) => x.code === 'RELATIONSHIP_UNMET');
   assert.ok(sec, JSON.stringify(s.log.exceptions.map((x: any) => x.code)));
   const detail: string = sec.activities[0].detail;
-  assert.match(detail, /^A1 FS A5: relationship float -\d+(\.\d+)? days$/);
+  assert.match(detail, /^A1 FS A5 is not met by \d+(\.\d+)? days\.$/);
   assert.doesNotMatch(detail, / h /);
   // the same function in trace_logic: days, not hours of minutes
   const t = await call('trace_logic', { handle: h, activity_id: 'A5' });
@@ -42,14 +42,13 @@ test('38: constraints are named by P6 and the scheduled date stands beside the c
   const text = JSON.stringify(unmet);
   assert.match(text, /Finish On or Before 2026-01-09/);
   assert.match(text, /Mandatory Finish 2026-01-06/);
-  assert.match(text, /scheduled finish 2026-01-/);
+  assert.match(text, /\(scheduled 2026-01-\d\d \d\d:\d\d\)/);
   assert.doesNotMatch(text, /MEOB|MANDFIN|CS_/);
-  // 31: warnings[] points to the log instead of repeating every activity; the mandatory constraint and the unmet relationship are counted
-  const w: string = s.warnings.join('\n');
-  assert.doesNotMatch(w, /CS_|MEOB|cannot be met \(early/);
-  assert.match(w, /activit(y|ies) ha(s|ve) a constraint the scheduled dates do not meet, listed with the scheduled date in log\.exceptions \(CONSTRAINT_UNMET\)/);
-  assert.match(w, /relationship(s)? (is|are) not met by the scheduled dates, listed in log\.exceptions \(RELATIONSHIP_UNMET\)/);
-  assert.equal(count(w, 'CONSTRAINT_UNMET'), 1);
+  // 31: the log is P6's own content, said once there: no second list of it in the answer
+  assert.equal(s.warnings, undefined);
+  assert.equal(s.notes, undefined);
+  assert.ok(s.log.exceptions.some((x: any) => x.code === 'RELATIONSHIP_UNMET'));
+  assert.equal(count(text, 'MEOB'), 0);
   // 36: statistics once, with dates
   assert.equal(s.log.statistics, undefined);
   assert.match(s.stats.finish, /^2026-/);
@@ -60,17 +59,18 @@ test('39: negative float is given in days, like every other answer', async () =>
   const h = await built('2026-01-05', [act('A1', 10), act('A5', 2, { constraint: { type: 'finish_on_or_before', date: '2026-01-09' } }), rel('A1', 'A5')]);
   const s = await call('schedule', { handle: h });
   const neg = s.log.exceptions.find((x: any) => x.code === 'NEGATIVE_FLOAT');
-  assert.match(neg.activities[0].detail, /^A\d has total float of -\d+(\.\d+)? days?\.$/);
+  assert.match(neg.activities[0].detail, /^A\d has -\d+(\.\d+)? days? of total float\.$/);
   assert.doesNotMatch(neg.activities[0].detail, / h /);
-  assert.match(s.warnings.join('\n'), /negative total float, listed in log\.exceptions \(NEGATIVE_FLOAT\)/);
+  assert.equal(s.warnings, undefined);
 });
 
 test('3: a loop is described as a set of activities, not as a path', async () => {
   const r = await call('compute_schedule', { start: '2026-01-05', break_loops: false, activities: [{ id: 'A', duration_days: 1 }, { id: 'B', duration_days: 1 }, { id: 'C', duration_days: 1 }, { id: 'D', duration_days: 1 }], relationships: [{ pred: 'A', succ: 'B' }, { pred: 'B', succ: 'C' }, { pred: 'B', succ: 'D' }, { pred: 'C', succ: 'A' }, { pred: 'D', succ: 'A' }] });
   assert.equal(r.ok, false);
-  assert.match(r.error.message, /^These activities are in a loop: [A-D], [A-D], [A-D], [A-D]\./);
+  assert.equal(r.error.message, 'Loop: A, B, C, D are in a loop.');
   assert.doesNotMatch(r.error.message, /→/);
-  assert.match(r.error.message, /pass break_loops: true/);
+  assert.match(r.error.hint, /pass break_loops: true/);
+  assert.deepEqual(r.error.loops, [['A', 'B', 'C', 'D']]);
 });
 
 test('2 and 28: validate follows the scheduler on loops through a level of effort, and names Activity IDs', async () => {
@@ -97,7 +97,9 @@ test('4: evaluate_batch names no best when no scenario finishes the project earl
   await call('schedule', { handle: h });
   const worse = await call('evaluate_batch', { handle: h, scenarios: [{ name: 's1', overrides: [{ op: 'update_activity', id: 'A', duration_days: 30 }] }, { name: 'bad', overrides: [{ op: 'update_activity', id: 'NOPE', duration_days: 1 }] }] });
   assert.equal(worse.best, null);
-  assert.match(worse.best_note, /^No scenario improves on the schedule as it stands \(finish 2026-01-\d\d \d\d:\d\d\): the earliest, "s1", finishes 20 days later\./);
+  assert.equal(worse.best_note, undefined);
+  assert.equal(worse.scenarios.find((s: any) => s.name === 's1').finish_delta_days, 20, 'the earliest scenario finishes 20 days later');
+  assert.match(worse.scenarios.find((s: any) => s.name === 'bad').error, /No activity "NOPE"/);
   assert.deepEqual(worse.ranked, ['s1']);
   const better = await call('evaluate_batch', { handle: h, scenarios: [{ name: 'shorter', overrides: [{ op: 'update_activity', id: 'A', duration_days: 4 }] }] });
   assert.equal(better.best, 'shorter');
@@ -120,12 +122,12 @@ test('6: a schedule that cannot be calculated stops monte_carlo with a refusal, 
   if (r.error) { assert.equal(r.error.code, 'schedule_failed'); assert.doesNotMatch(JSON.stringify(r), /bug in the server/); assert.match(r.error.message, /loop/); }
 });
 
-test('7: schedule_health says what it is, and its hard constraints are the DCMA set it names', async () => {
+test('7: schedule_health counts the hard constraints of the DCMA set, with no note of its own', async () => {
   const h = await built('2026-01-05', [act('A', 2, { constraint: { type: 'finish_on_or_before', date: '2026-02-01' } }), act('B', 2)]);
   const r = await call('schedule_health', { handle: h });
-  assert.equal(r.hard_constraints.count, 1, 'Finish On or Before counts: it is in the DCMA set the note names');
-  assert.match(r.note, /^Counts only, with no pass or fail: dcma_14 grades them against the DCMA limits\./);
-  assert.doesNotMatch(r.note, /5% limits/);
+  assert.equal(r.hard_constraints.count, 1, 'Finish On or Before counts: it is in the DCMA set the tool description names');
+  assert.equal(r.note, undefined);
+  assert.equal(r.notes, undefined);
 });
 
 test('9: validate does not warn about the clone\'s own in-memory EPS table', async () => {
@@ -134,37 +136,46 @@ test('9: validate does not warn about the clone\'s own in-memory EPS table', asy
   assert.ok(!JSON.stringify(v).includes('Unknown table EPS'));
 });
 
-test('10 and 34: progress_curves names the first planned cost, and says "no budgeted cost" once', async () => {
+test('10 and 34: progress_curves says the current plan was used and "no budgeted cost" once; Earned Schedule says why it is not assessed', async () => {
   const h = await built('2026-03-02', [act('A', 5), act('B', 5), rel('A', 'B')]);
   const c = await call('progress_curves', { handle: h, units: 'cost' });
   const all = JSON.stringify(c);
-  assert.equal(count(all, 'no budgeted cost'), 1, 'said once (in warnings), not again in es_note');
-  assert.match(c.totals.es_note, /Earned Schedule is not assessed: the planned value is 0 \(warnings says why and what to do\)\./);
-  assert.match(c.warnings.join(' '), /Assign one with edit assign_baseline\./);
+  assert.equal(count(all, 'No budgeted cost'), 1, 'said once, in notes');
+  assert.equal(c.warnings, undefined);
+  assert.equal(c.totals.es_note, undefined);
+  assert.deepEqual(c.notes, ['No baseline is assigned to P: the current budget and dates were used.', 'No budgeted cost in P: pass units: duration or hours, or load costs.']);
   const withCost = await built('2026-03-02', [{ op: 'add_resource', id: 'R', price_per_unit: 10 }, act('A', 5), { op: 'assign_resource', activity: 'A', resource: 'R' }], 'Q');
   const d = await call('progress_curves', { handle: withCost, units: 'cost' });
-  assert.doesNotMatch(d.totals.es_note ?? '', /from the planned start/);
+  assert.equal(d.totals.es_note, undefined);
+  assert.equal(d.totals.bac, 400);
+  assert.ok(d.notes.includes('Earned Schedule not assessed: the data date is not after the planned start.'), JSON.stringify(d.notes));
 });
 
-test('11: the three tools say what they do with a resource that has no limit, each in the same sentence; level_resources says when nothing was leveled', async () => {
+test('11: a resource with no limit is not judged: level_resources does not level it and says so, resource_histogram lists it once and counts no over-allocation, schedule_index leaves it out', async () => {
   const h = await built('2026-01-05', [{ op: 'add_resource', id: 'R1' }, act('A', 5), act('B', 5), { op: 'assign_resource', activity: 'A', resource: 'R1' }, { op: 'assign_resource', activity: 'B', resource: 'R1' }]);
   // clear the limit: a resource with no Max Units/Time
   await call('edit', { handle: h, operations: [{ op: 'set_fields', table: 'RSRCRATE', where: { rsrc_id: '1' }, fields: { max_qty_per_hr: '0' } }] });
   await call('schedule', { handle: h });
   const l = await call('level_resources', { handle: h, dry_run: true });
-  assert.match(l.report, /No resource has a limit set \(Max Units\/Time\), so nothing was leveled\. A resource with no limit set \(Max Units\/Time 0\) is not leveled\. Set a limit with edit update_resource max_units_per_day\./);
+  assert.deepEqual(l.notes, ['No resource has a limit: nothing to level.']); assert.doesNotMatch(l.report, /No resource has a limit/, 'said once, in notes');
+  assert.equal(l.delayed, 0);
   const hist = await call('resource_histogram', { handle: h });
-  assert.match(hist.resources_order_note, /A resource with no limit set \(Max Units\/Time 0\) counts as over-allocated in every period in which it has work, with severity none, so it comes after the resources that really exceed a limit\. Set a limit with edit update_resource max_units_per_day\./);
+  assert.ok(hist.notes.includes('1 resource has no Max Units/Time, so its over-allocation is not assessed: R1.'), JSON.stringify(hist.notes));
+  assert.equal(hist.resources_order_note, undefined);
+  assert.equal(hist.resources[0].over_allocated_periods, 0);
   const si = await call('schedule_index', { handle: h });
-  assert.match(JSON.stringify(si), /A resource with no limit set \(Max Units\/Time 0\) is left out of the over-allocation figures\. Set a limit with edit update_resource max_units_per_day\./);
+  assert.ok(si.notes.includes('1 resource has no Max Units/Time, so its over-allocation is not assessed: R1.'), JSON.stringify(si.notes));
+  assert.equal(si.resource_summary.over_allocated, 0);
 });
 
 test('11: a resource added with no maximum says what limit it was given', async () => {
   const p = await call('new_project', { id: 'RR', start: '2026-01-05' });
   const e = await call('edit', { handle: p.handle, operations: [{ op: 'add_resource', id: 'R2' }, { op: 'add_resource', id: 'R3', units_per_day: 4 }, { op: 'add_resource', id: 'R4', max_units_per_day: 6 }] });
-  assert.equal(e.warnings.length, 2);
-  assert.match(e.warnings[0], /^Resource R2 was given no limit, so its Max Units\/Time is the default: 8 units a day \(1 unit an hour on a day of 8 hours\)\. Give max_units_per_day/);
-  assert.match(e.warnings[1], /^Resource R3 was given no limit, so its Max Units\/Time is the default: 4 units a day \(its units_per_day\)/);
+  assert.equal(e.warnings, undefined);
+  assert.equal(e.notes.length, 2);
+  assert.match(e.notes[0], /^Resource R2 was given no limit, so its Max Units\/Time is the default: 8 units a day \(1 unit an hour on a day of 8 hours\)\. Give max_units_per_day/);
+  assert.match(e.notes[1], /^Resource R3 was given no limit, so its Max Units\/Time is the default: 4 units a day \(its units_per_day\)/);
+  assert.deepEqual(e.changes.map((c: any) => [c.id, c.field, c.new]), [['R2', 'resource', 'added'], ['R3', 'resource', 'added'], ['R4', 'resource', 'added']]);
 });
 
 test('26: level_resources says when one activity alone needs more than the limit', async () => {

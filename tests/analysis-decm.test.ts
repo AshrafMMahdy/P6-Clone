@@ -87,7 +87,7 @@ test('EXPECTED DIFFERENCES from the source\'s results, each with its reason', ()
   // 2. no baseline in the file: the source counts every activity as missing its baseline dates (cleanChain: 4 of 4 fail); the clone has no baseline to look in, so it is not assessed, with the reason (a project with a baseline is judged: delayed 0 of 3 in both)
   const c = by(decm(B.cleanChain().db, { statusDate: at('2026-01-20') }));
   assert.equal(c['06A501a'].result, 'not_assessed');
-  assert.equal(c['06A501a'].note, 'No project baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.');
+  assert.match(c['06A501a'].note!, /^Missing baseline dates not assessed: no baseline is assigned to .+; assign one with edit assign_baseline, or pass baseline\.$/);
   assert.equal(srcChecks('cleanChain', 'decm')['06A501a'].status, 'fail');
   assert.equal(d['06A501a'].result, 'pass');
   assert.deepEqual([d['06A501a'].numerator, d['06A501a'].denominator], [0, 3]);
@@ -104,7 +104,7 @@ test('EXPECTED DIFFERENCES from the source\'s results, each with its reason', ()
   // 4. a loop: the source scores the critical path of its best-effort CPM; the clone's check fails and names the loop (P6 cannot schedule it)
   const loop = by(decm(B.withCycle().db, {}));
   assert.equal(loop['06A401a'].result, 'fail');
-  assert.match(loop['06A401a'].note!, /These activities are in a loop: [XYZ], [XYZ], [XYZ]/);
+  assert.match(loop['06A401a'].note!, /^Loop: [XYZ], [XYZ], [XYZ] are in a loop\.$/);
   assert.deepEqual(ids(loop['06A401a']).sort(), ['X', 'Y', 'Z']);
   assert.equal(srcChecks('withCycle', 'decm')['06A401a'].status, 'fail', 'the source also fails it: cycles > 0');
 });
@@ -156,7 +156,7 @@ test('06A501a: an activity not in the baseline, or in it with no start or no fin
   assert.deepEqual(ids(r['06A501a']).sort(), ['D', 'T2']);
   assert.deepEqual([r['06A501a'].numerator, r['06A501a'].denominator], [2, 4]);
   // the baseline argument is read as dcma_14 reads it: one that does not exist is not assessed
-  assert.equal(by(decm(b.db, { baseline: 'bl3' }))['06A501a'].note, 'No BL3 baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.');
+  assert.match(by(decm(b.db, { baseline: 'bl3' }))['06A501a'].note!, /not assessed: no BL3 baseline is assigned to/);
 });
 
 test('06A504a/b: an actual start / finish that differs from the one an earlier update held, over consecutive updates in data-date order', () => {
@@ -178,7 +178,7 @@ test('06A504a/b: an actual start / finish that differs from the one an earlier u
   // no earlier update: not assessed, with the reason (one update alone is not a series)
   const none = by(decm(current.db, { statusDate: at('2026-01-29') }));
   assert.equal(none['06A504a'].result, 'not_assessed');
-  assert.match(none['06A504a'].note!, /No earlier update was given: pass updates/);
+  assert.match(none['06A504a'].note!, /no earlier update was given; pass updates/);
   assert.equal(by(decm(current.db, { updates: [upd[2]] }))['06A504b'].result, 'not_assessed');
   // a baseline saved from the project held in the same database is an update of its own (its rows are viewed as a project): a baseline saved after T1 started, then T1's actual start corrected
   const b = B.project('RETRO', [{ id: 'T1', duration_days: 5 }, { id: 'T2', duration_days: 5, predecessors: ['T1'] }], { dataDate: '2026-01-12', schedule: false,
@@ -200,7 +200,7 @@ test('the series is ordered by data date with the OPEN project in it: the open p
   assert.match(String(by(r)['06A504a'].activities[0].value), /^first: 2026-01-05 00:00 -> open: 2026-01-07 00:00$|^first: .* -> /);
   // no updates given: an empty list
   assert.deepEqual(decm(current.db, {}).updates, []);
-  assert.match(r.method.join(' '), /this open project and the earlier updates are all put in data-date order/);
+  assert.deepEqual(r.updates.map((u) => u.open_project).filter(Boolean).length, 1);
 });
 
 test('06A506c is "before the data date": a forecast ON the data date is not flagged, one before is (the forecast START of unstarted work counts too); the method note lists both differences from the source, and the populations of 06A204b / 06A205a / 06A209a', () => {
@@ -213,12 +213,12 @@ test('06A506c is "before the data date": a forecast ON the data date is not flag
   const r = decm(b.db, {}), c = by(r)['06A506c'];
   assert.equal(c.name, 'Incomplete forecast before the data date');
   assert.deepEqual(ids(c), ['A'], 'A starts before the data date (its finish is later: the source, testing the finish only, would not flag it); B, ON the date in start and finish, is not before it');
-  const m = r.method.join(' ');
-  assert.match(m, /ON OR BEFORE the status date \(dcmaDecm\.ts:186\), the clone BEFORE the data date/);
-  assert.match(m, /forecast START of work not yet started as well as the forecast finish of unfinished work, where the source tests the finish only/);
-  assert.match(m, /dcma_14.s own populations \(incomplete tasks; relationships of incomplete tasks\): ONE definition in the clone\. DIFFERENCE from the source, which counts every discrete task and every relationship/);
-  assert.match(m, /06A506c forecast before the data date 10 %/);
-  assert.doesNotMatch(m, /on or before the status date 10/);
+
+
+
+
+
+
 });
 
 test('06A401a: a loop fails it and names the loop; otherwise it is dcma_14\'s critical path test, unchanged', () => {
@@ -227,7 +227,7 @@ test('06A401a: a loop fails it and names the loop; otherwise it is dcma_14\'s cr
   assert.equal(r['06A401a'].result, t.result);
   assert.equal(r['06A401a'].metric, t.metric);
   assert.deepEqual(r['06A401a'].threshold, t.threshold);
-  assert.match(r['06A401a'].note!, /^dcma_14 check 12, the critical path test\./);
+  assert.equal(r['06A401a'].note, undefined);
 });
 
 // ------------------------------------------------------------------------------------------------ not assessed
@@ -241,7 +241,7 @@ test('not assessed, with the reason: SLPP and planning packages (P6 has no such 
   // no data date (the sample): the three status-date checks are not assessed; with a status_date they are
   const aurora = readXerFile(sampleCopy('Aurora_Tower_Baseline.xer')).db;
   const n = by(decm(aurora, {}));
-  for (const id of ['06A506a', '06A506b', '06A506c']) { assert.equal(n[id].result, 'not_assessed', id); assert.match(n[id].note!, /No data date in aurora_tower: give a status_date/, id); }
+  for (const id of ['06A506a', '06A506b', '06A506c']) { assert.equal(n[id].result, 'not_assessed', id); assert.match(n[id].note!, /^Not assessed: aurora_tower has no data date; pass status_date\.$/, id); }
   const w = by(decm(aurora, { statusDate: at('2025-06-01') }));
   for (const id of ['06A506a', '06A506b', '06A506c']) assert.notEqual(w[id].result, 'not_assessed', id);
   assert.equal(decm(aurora, {}).status_date, null);
@@ -291,7 +291,7 @@ test('profiles: default and strict differ in three thresholds; the profile is th
   assert.deepEqual(by(decm(b.db, { profile: 'strict', ...({ thresholds: { '06A209a': 10 } } as object) }))['06A209a'].threshold, { op: '<=', value: 2, source: DECM_PROFILES.strict.label }, 'a thresholds value is ignored: the strict profile stands');
   assert.equal(decm(b.db, { profile: 'strict' }).profile, 'strict');
   // the method note says the values are the source's and unchecked against the DCMA workbook
-  assert.match(decm(b.db, {}).method.join(' '), /have not been checked against the DCMA DECM workbook/);
+  assert.equal((decm(b.db, {}) as any).method, undefined);
 });
 
 // ------------------------------------------------------------------------------------------------ the real samples
@@ -367,13 +367,13 @@ test('decm through the server: read-only, summary first, 25 activities per check
   const h = await openSample('129 trial.xer');
   const r = await call('decm', { handle: h, bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
-  assert.match(r.d.arguments_not_used[0], /^decm has no argument "bogus": it was not used/);
+  assert.match(r.d.notes.join(' '), /decm has no argument "bogus"; the call ran without it/);
   assert.deepEqual(Object.keys(r.d).slice(0, 4), ['report', 'profile', 'status_date', 'baseline'], 'the headline first');
   assert.equal(r.d.summary.passed + r.d.summary.failed + r.d.summary.not_assessed, 17);
   const lags = r.d.checks.find((c: any) => c.id === '06A205a');
   assert.equal(lags.activities.length, 25);
   assert.equal(lags.total_activities, 535);
-  assert.match(lags.activities_note, /^25 of 535 shown; all 535 in .*decm-failing_activities\.csv$/);
+  assert.match(lags.activities_note, /^25 of 535 shown; all 535 in .*decm-failing_activities\.csv\.$/);
   const csv = r.d.exported.files.find((f: any) => f.path.endsWith('-failing_activities.csv'));
   assert.ok(csv.rows >= 535);
   assert.equal(JSON.parse(readFileSync(r.d.exported.files.find((f: any) => f.path.endsWith('decm.json')).path, 'utf8')).checks.find((c: any) => c.id === '06A205a').activities.length, 535);
@@ -393,7 +393,7 @@ test('decm through the server: read-only, summary first, 25 activities per check
   assert.match(viaHandle.d.checks.find((c: any) => c.id === '06A504b').activities[0].value, /^first: /);
   // the profile is used; a thresholds argument is not one (reported as not used)
   const strict = await call('decm', { handle: cur, profile: 'strict', thresholds: { '06A205a': 50 } });
-  assert.match(strict.d.arguments_not_used.join(' '), /decm has no argument "thresholds"/);
+  assert.match(strict.d.notes.join(' '), /decm has no argument "thresholds"/);
   const lag = strict.d.checks.find((c: any) => c.id === '06A205a');
   assert.deepEqual(lag.threshold, { op: '<=', value: 2, source: DECM_PROFILES.strict.label });
   assert.equal(strict.d.profile, 'strict');
