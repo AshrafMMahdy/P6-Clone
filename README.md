@@ -167,7 +167,7 @@ its lookups all count every day at the hours per day of Edit > User Preferences.
 | `update_activity` | `id, new_id?, name?, wbs?, duration_days?, remaining_days?, type?, calendar?, constraint?, start?, finish?, actual_start?, actual_finish?, percent_complete?, expected_finish?, priority?, primary_resource?` (an assigned resource; `""` clears it) |
 | `delete_activity`, `dissolve_activity` | `id` (dissolve links its predecessors to its successors, like P6) |
 | `set_predecessors` | `activity, links: [{pred, type?, lag_days?}]`: every predecessor of the activity replaced in one step (`[]` removes them) |
-| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities, as real P6 files hold them); Microsoft Project one per pair (a project read from an MSPDI / MPX file, also one imported before v0.1.14, known by its task UIDs; the same rule in the desktop app's own relationship commands). One already there is skipped and listed in the result's `warnings`. A relationship that closes a loop refuses the edit (checked once per edit, naming the first that closed one) |
+| `add_relationship`, `update_relationship`, `delete_relationship` | `pred, succ, type?: FS\|SS\|FF\|SF, lag_days?` (update: `new_type?`). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities, as real P6 files hold them); Microsoft Project one per pair (a project read from an MSPDI / MPX file, also one imported before v0.1.14, known by its task UIDs; the same rule in the desktop app's own relationship commands). One already there is skipped and listed in the result's `notes`. A relationship that closes a loop refuses the edit (checked once per edit, naming the first that closed one) |
 | `add_resource` | `id, name?, type?: labor\|nonlabor\|material, units_per_day?, max_units_per_day? \| max_units_per_hour?, price_per_unit?, calendar?` |
 | `assign_resource`, `unassign_resource` | `activity, resource, units_per_day?, units?, curve?`, `allow_duplicate?` (assign a resource already on the activity again, as P6 allows) |
 | `add_resource_curve`, `update_resource_curve` | `name, new_name` to rename; `name, values` (21 percentages totalling 100: the start, then each 5% of the assignment's time, like P6 Resource Curves) |
@@ -264,7 +264,7 @@ with `offset` / `next_offset`.
   with `fatal` findings); `lenient: true` opens it anyway when a project could be read from it, and repairs what it
   safely can: a misspelled key column whose values are unique ids is renamed (e.g. `taskpred_id` -> `task_pred_id`),
   empty, missing or repeated ids that nothing points at get fresh ones. `diagnostics.repaired` lists each repair,
-  `diagnostics.not_repaired` what was left, and `still_rejected` says whether a save would still be refused.
+  the notes say what was left and what to do about it, and `still_rejected` says whether a save would still be refused.
   `save {repair: true, path}` then writes a repaired copy P6 imports, to a new path (never the file opened), field by
   field and never by guessing: impossible or unreadable durations from the activity's own other fields (remaining
   duration, planned span), else P6's 5-day default; only actual dates P6 refuses are cleared (unreadable, before 1753,

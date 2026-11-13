@@ -12,7 +12,7 @@ import { financialPeriods, periodCalendar, projectCalendar } from '../progress/p
 import { dayHours } from '../project/units.ts';
 import { constraintsOf, DCMA_HARD } from '../analysis/common.ts';
 import { dataDateAssumedNotes, dataDateGaps } from '../analysis/common.ts';
-import { LISTED } from '../notes.ts';
+import { LISTED, listCut } from '../notes.ts';
 import { baselineLeftOut, currentPlanUsed, datesNotCurrent, differentDataDates, namesText, noDataDateNotAssessed, noDataDateWouldUse, notAssessed, tidyNotes } from '../notes.ts';
 import { duplicateRowNotes } from '../analysis/scheduleLog.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
@@ -86,10 +86,10 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
   switch (name) {
     case 'list_dictionaries': {
       const want = (k: string) => !args.only || String(args.only).toLowerCase() === k;
-      const maxV = args.max_values === 0 ? Infinity : Math.max(1, Number(args.max_values) || 50);
+      const maxV = args.max_values === 0 ? Infinity : Math.max(1, Number(args.max_values) || LISTED);
       const P = rows(db, 'PROJECT');
       const nameOf = (id: string) => P.find((p) => p.proj_id === id)?.proj_short_name ?? null;
-      const codes = (type: string, tid: string, tname: string, val: string, vshort: string, vname: string) => rows(db, type).map((t) => { const vs = rows(db, val).filter((v) => v[tid] === t[tid]); return { type: t[tname], values: vs.slice(0, maxV).map((v) => ({ code: v[vshort], name: v[vname] })), total_values: vs.length }; });
+      const codes = (type: string, tid: string, tname: string, val: string, vshort: string, vname: string) => rows(db, type).map((t) => { const vs = rows(db, val).filter((v) => v[tid] === t[tid]); return { type: t[tname], values: vs.slice(0, maxV).map((v) => ({ code: v[vshort], name: v[vname] })), total_values: vs.length, ...(vs.length > maxV ? { values_note: listCut(maxV, vs.length) } : {}) }; });
       const tree = (tb: string, key: string, name: string, id: string, parent: string) => { const R = rows(db, tb); return R.map((r) => ({ id: r[key], name: r[name], parent: R.find((x) => x[id] === r[parent])?.[key] ?? null })); };
       return {
         ...(want('baselines') ? { baselines: all.filter((p) => open.has(p.proj_id)).map((p) => ({ project: p.proj_short_name, project_baseline: nameOf(p.sum_base_proj_id), bl1: nameOf(p._bl1), bl2: nameOf(p._bl2), bl3: nameOf(p._bl3), saved: P.filter((b) => b._baseline_of === p.proj_id).map((b) => ({ name: b.proj_short_name, saved_on: d(b._baseline_date), finish: d(b.scd_end_date || b.plan_end_date) })) })) } : {}),

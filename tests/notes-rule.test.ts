@@ -14,18 +14,36 @@ const call = async (name: string, args: Record<string, unknown>) => { const r = 
 const ROW_KEYS = new Set(['message', 'detail', 'reason', 'where', 'what', 'description', 'action']);
 const BANNED_FIELDS = new Set(['note', 'warnings', 'method', 'definition', 'logic_definitions', 'tell_the_user', 'es_note', 'es_reason', 'histogram_note', 'best_note', 'stats_note', 'data_date_note', 'data_dates_note', 'status_dates_note', 'partial_note', 'redone_note', 'kept_note', 'refused_note', 'over_limit_note', 'warnings_note', 'volume_note', 'sign_note', 'days_are', 'basis_note', 'resources_order_note', 'periods_note', 'answer_note', 'quality_note', 'calendar_note', 'prefixed_note', 'geometry_note', 'activities_note_all']);
 const WORDS = /\bthe source\b|Bellator|\bplatform\b|\btask_id\b|\bproj_id\b|\bwbs_id\b|\brsrc_id\b|\bclndr_id\b|internal id/i;
+/** A table or column name of the file in a sentence (the agent knows Activities, Resources and P6's field names, never the table or column the file keeps them in): table names in capitals, a *_id / *_flag / *_cnt / *_date column
+ *  (except the arguments a tool takes: data_date, status_date, job_id), and the clone's internal names. */
+const TABLE_COLUMN = /\b(?:TASK|TASKPRED|TASKRSRC|PROJWBS|PROJECT|RSRC|RSRCRATE|CALENDAR|ERMHDR|UDFTYPE|PROJCOST|ROLES|RSRCROLE)\b|\b(?!data_date\b|status_date\b|job_id\b)[a-z]+(?:_[a-z]+)*_(?:id|flag|cnt|date)\b/;
+/** A raw handle, or an absolute path of a temporary folder (a cut list's note names its result file: that one is the exception). */
+const RAW = /\bh_[A-Za-z0-9_-]{8,}|\/tmp\/|\/var\/folders|\\Temp\\|p6-test-|p6-notes|p6-fix3/;
+/** The family of a sentence and its subject: two sentences of one family about one subject in one answer say one fact twice. A helper per family of core/notes.ts. */
+const FAMILIES: [string, RegExp][] = [
+  ['no-data-date', /^(?:.+ not assessed: )?(.+?) (?:has|have) no data date\b/], ['baseline-not-assigned', /[Nn]o baseline is assigned to (.+?)[:;]/], ['dates-not-current', /^The saved dates of (.+?) are not current/],
+  ['root-wbs', /Project (.+?) has no root WBS/], ['material', /^(\d+) resources? (?:is|are) Material/], ['no-limit', /^(\d+) resources? (?:has|have) no Max Units\/Time/], ['loop', /^(Loop): /], ['links-left-out', /^(Left out of this schedule)/],
+  ['planned-start-used', /^(.+?) has no data date: the planned start .* was used/],
+];
+export const familyKeys = (sentence: string): string[] => FAMILIES.flatMap(([f, re]) => { const m = re.exec(sentence); return m ? [`${f}:${m[1]}`] : []; });
 
-interface Walked { notes: string[]; sentences: string[]; cuts: string[]; problems: string[] }
+interface Walked { notes: string[]; sentences: string[]; cuts: string[]; problems: string[]; errors: string[] }
 function walk(tool: string, answer: any): Walked {
-  const w: Walked = { notes: [], sentences: [], cuts: [], problems: [] };
+  const w: Walked = { notes: [], sentences: [], cuts: [], problems: [], errors: [] };
   const isRefusal = !!answer?.error;
   const visit = (v: unknown, path: string, inRow: boolean, siblings: Record<string, unknown> | null) => {
     if (Array.isArray(v)) { v.forEach((x, i) => visit(x, `${path}[${i}]`, true, null)); return; }
     if (!v || typeof v !== 'object') return;
     const o = v as Record<string, unknown>;
+    // a list that has fewer items than its total says so beside it
+    for (const [k, x] of Object.entries(o)) {
+      if (!Array.isArray(x) || k === 'exported') continue;
+      const total = o[`${k}_total`] ?? o[`total_${k}`];
+      if (typeof total === 'number' && total > x.length && typeof o[`${k}_note`] !== 'string') w.problems.push(`${path ? `${path}.` : ''}${k}: ${x.length} items of ${total} with no "_note" beside it`);
+    }
     for (const [k, x] of Object.entries(o)) {
       const here = path ? `${path}.${k}` : k;
-      if (k === 'error' && path === '') continue; // the refusal's own fields stay as they are
+      if (k === 'error' && path === '') { for (const f of ['reason', 'message', 'hint', 'next_step']) if (typeof (x as any)?.[f] === 'string') w.errors.push(String((x as any)[f])); continue; } // the refusal's own fields: judged as sentences too
       if (k === 'log' && (tool === 'schedule' || tool === 'update_progress')) { collectLog(x, here); continue; } // P6's schedule log
       if (k === 'exported') continue;
       if (k === 'notes') {
@@ -60,9 +78,14 @@ function walk(tool: string, answer: any): Walked {
     for (const area of ['errors', 'warnings', 'exceptions']) for (const sec of log?.[area] ?? []) for (const a of sec.activities ?? []) if (a.detail) w.sentences.push(a.detail);
   };
   visit(answer, '', false, null);
-  for (const s of [...w.notes, ...w.cuts]) if (WORDS.test(s)) w.problems.push(`banned word in a note: ${s}`);
+  for (const s of [...w.notes, ...w.cuts, ...w.errors]) if (WORDS.test(s)) w.problems.push(`banned word in a note: ${s}`);
+  for (const s of [...w.notes, ...w.errors]) { const t = TABLE_COLUMN.exec(s); if (t) w.problems.push(`a table or column name (${t[0]}) in: ${s}`); if (RAW.test(s.replace(/\bin \S+\.(?:csv|json)\b/g, 'in <result file>'))) w.problems.push(`a raw handle or temporary path in: ${s}`); } // (a note that names the result file holding a whole list is the list rule)
+  for (const s of w.errors) if ((s.match(/\bRefused: /g) ?? []).length > 1) w.problems.push(`a refusal inside a refusal: ${s}`);
   const seen = new Set<string>();
   for (const s of w.sentences) { if (seen.has(s)) w.problems.push(`said twice: ${s}`); seen.add(s); }
+  // the same fact said twice in different words: two sentences of one family about one subject
+  const byKey = new Map<string, string>();
+  for (const s of [...w.notes, ...w.errors]) for (const key of familyKeys(s)) { const before = byKey.get(key); if (before && before !== s) w.problems.push(`one fact twice (${key}): ${before} / ${s}`); byKey.set(key, s); }
   return w;
 }
 
@@ -114,7 +137,7 @@ const MORE = async (c: (tool: string, args: Record<string, unknown>) => Promise<
  *  close / list_open / server_status / job_status / cancel_job (they answer about the session, not about a schedule), the 4D and model tools (open_model ... compare_4d: they answer about a building model; their notes are walked in tests/fourd-*.test.ts) and lob_* (walked in tests/lob-mcp.test.ts). */
 
 const seenTools = new Set<string>();
-for (const sample of ['130 TRIAL.xer', 'Tower-A.xer']) {
+for (const sample of ['130 TRIAL.xer', 'Tower-A.xer', 'Enppi.xer', 'Detailed Program.xer', 'Aurora_Tower_Baseline.xer']) {
   test(`the contract of the notes holds for every tool's answer on ${sample}`, { timeout: 600000 }, async () => {
     const o = await call('open_file', { path: sampleCopy(sample), lenient: true });
     const o2 = await call('open_file', { path: sampleCopy(sample), lenient: true });
@@ -141,4 +164,29 @@ test('the contract of the notes holds for the answers on a built project, and ea
   const u = await call('update_progress', { handle: p.handle, data_date: '2026-03-04' });
   check('update_progress', u, 'built', seenTools);
   for (const t of ['find_activities', 'get_activity', 'trace_logic', 'evaluate', 'transfer_progress', 'import_file', 'compute_schedule', 'schedule', 'dcma_14', 'decm', 'check_schedule', 'schedule_index', 'planning_horizon', 'resource_histogram', 'level_resources', 'baseline_variance']) assert.ok(seenTools.has(t), `${t} was walked`);
+});
+
+/** The edge cases of the data date, the loop, the stale dates and the baseline: built, and every tool's answer walked. */
+test('the contract of the notes holds on the built edge cases: no data date, no planned start, an assumed data date, a loop, a stale schedule, an unassigned baseline', async () => {
+  const mk = async (id: string, ops: unknown[] = []) => {
+    const p = await call('new_project', { id, start: '2026-03-02' });
+    const e = await call('edit', { handle: p.handle, operations: [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 4 }, { op: 'add_relationship', pred: 'A', succ: 'B' }, ...ops] });
+    assert.ok(!e.error, JSON.stringify(e));
+    return p.handle as string;
+  };
+  const other = await call('open_file', { path: sampleCopy('Tower-A.xer'), lenient: true });
+  const cases: [string, string][] = [];
+  cases.push(['no data date, no planned start', await mk('N1', [{ op: 'set_fields', table: 'PROJECT', all: true, fields: { plan_start_date: '', last_recalc_date: '' } }])]);
+  cases.push(['no data date, a planned start', await mk('N2', [{ op: 'set_fields', table: 'PROJECT', all: true, fields: { last_recalc_date: '' } }])]);
+  const assumed = await mk('N3', [{ op: 'set_fields', table: 'PROJECT', all: true, fields: { last_recalc_date: '' } }]);
+  await call('schedule', { handle: assumed });
+  cases.push(['an assumed data date', assumed]);
+  const stale = await mk('N4');
+  await call('schedule', { handle: stale }); await call('edit', { handle: stale, operations: [{ op: 'update_activity', id: 'A', duration_days: 9 }] });
+  cases.push(['a stale schedule', stale]);
+  for (const [label, h] of cases) {
+    for (const [tool, args] of OPS(call, h, other.handle)) if (!['compare', 'windows_analysis', 'change_tracking'].includes(tool)) check(tool, await call(tool, args), label, new Set());
+    for (const tool of ['windows_analysis', 'change_tracking']) check(tool, await call(tool, { handle: h, updates: [{ handle: other.handle }] }), label, new Set());
+    check('edit', await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', name: 'A renamed' }] }), label, new Set());
+  }
 });

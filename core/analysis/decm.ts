@@ -22,8 +22,8 @@ type Profile = Record<DecmId, number | null>;
 const DEFAULTS: Profile = { '06A204b': 0, '06A205a': 5, '06A208a': 0, '06A209a': 5, '06A210a': 0, '06A212a': 0, '06A401a': null, '06A501a': 0, '06A504a': 0, '06A504b': 0, '06A505a': 0, '06A505b': 0, '06A506a': 0, '06A506b': 0, '06A506c': 10, '08I101a': 0, '10A303a': 0 };
 /** The strict profile differs from the default in three: 06A205a 2, 06A209a 2, 06A506c 5. dcmaDecm.ts:58. */
 export const DECM_PROFILES: Record<string, { label: string; t: Profile }> = {
-  default: { label: 'DECM default (Bellator benchmark values, not checked against the DCMA DECM workbook)', t: DEFAULTS },
-  strict: { label: 'DECM strict (Bellator benchmark values, not checked against the DCMA DECM workbook)', t: { ...DEFAULTS, '06A205a': 2, '06A209a': 2, '06A506c': 5 } },
+  default: { label: 'DECM default (benchmark values, not checked against the DCMA DECM workbook)', t: DEFAULTS },
+  strict: { label: 'DECM strict (benchmark values, not checked against the DCMA DECM workbook)', t: { ...DEFAULTS, '06A205a': 2, '06A209a': 2, '06A506c': 5 } },
 };
 /** The check names. dcmaDecm.ts:60-68. */
 const NAMES: Record<DecmId, string> = {

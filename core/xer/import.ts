@@ -5,6 +5,7 @@ import type { Finding } from '../findings.ts';
 import { isLegacyLayout } from '../schedule/cpm.ts';
 import { deleteActivities } from '../project/edit.ts';
 import { defaultCalendarId, financialPeriods } from '../progress/period.ts';
+import { wordOf } from './validate.ts';
 
 /**
  * P6's import action for a project in the file.
@@ -202,7 +203,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
             : target === 'PROJWBS' && t === 'TASK' ? rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y')?.wbs_id ?? '' : '';
           continue;
         }
-        if (nv == null && !quiet && target !== 'PROJECT' && src.tables[target]) findings.push({ severity: 'warning', code: 'IMPORT_UNRESOLVED', table: t, field: f, key: r[k ?? ''] ?? '', message: `${t}.${f} = ${v} has no matching ${target} row; kept as is.`, p6: 'P6 would drop or default this reference.' });
+        if (nv == null && !quiet && target !== 'PROJECT' && src.tables[target]) findings.push({ severity: 'warning', code: 'IMPORT_UNRESOLVED', table: t, field: f, key: r[k ?? ''] ?? '', message: `A ${wordOf(t)} points at a ${wordOf(target)} that is not in the file (${f.replace(/_id$/, '').replace(/_/g, ' ')} id ${v}); the reference is kept as it is.`, p6: 'P6 would drop or default this reference.' });
         out[f] = nv ?? (target === 'PROJWBS' && f === 'parent_wbs_id' && r.proj_node_flag === 'Y' ? '' : v);
       } else out[f] = v;
     }
