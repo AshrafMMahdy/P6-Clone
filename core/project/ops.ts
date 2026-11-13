@@ -295,7 +295,9 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       const p = project(op.project);
       const set = writeScheduleOptions(db, p, parseScheduleOptions(op, fail, hpd));
       if (!set.length) fail(`Give at least one schedule option: ${SCHEDULE_OPTIONS_GUIDE}.`);
-      return { project: p.proj_short_name, set };
+      // the critical float is echoed in the unit it was given in (the file keeps hours)
+      const given = (x: string) => (x.startsWith('critical_float_hours ') && op.critical_float_hours == null && op.critical_float_days != null ? `critical_float_days ${Number(op.critical_float_days)}` : x);
+      return { project: p.proj_short_name, set: set.map(given) };
     }
     case 'copy_project': {
       const from = project(str(op.from, 'from'));
