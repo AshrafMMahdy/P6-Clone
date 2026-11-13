@@ -2,7 +2,7 @@ name: whiq-release
 
 # The P6 clone's MCP server as the White Hat IQ platform runs it: one Node bundle (dist-cli/p6clone-mcp.cjs, node18 target, no
 # dependencies) plus the schedule reasoner's models/ and ort/ (WebAssembly runtime, licences), built by scripts/build-cli.mjs,
-# tested on Node 24.14.0, and the archive itself extracted and smoked (scripts/release-smoke.mjs: every analysis tool, the
+# tested on Node 24.14.0 (the whole suite, in four parallel jobs), and the archive itself extracted and smoked (scripts/release-smoke.mjs: every analysis tool, the
 # reasoner loaded) on Windows with Node 24.14.0 (the pilot install) and on Node 20 (the hosted box), and published with SHA256SUMS and an engines.lock the platform's
 # scripts/engines-pin.mjs reads. Copy this file to .github/workflows/whiq-release.yml in AshrafMMahdy/p6-clone, then:
 #
@@ -49,6 +49,40 @@ jobs:
           fi
           case "$tag" in whiq-v*) echo "name=$APP-$tag" >> "$GITHUB_OUTPUT" ;; *) echo "name=$APP-dev" >> "$GITHUB_OUTPUT" ;; esac
 
+  # The tests, in four parts that run at the same time (owner 2026-11-13: one job took 7 to 12 of a release's 8 to 15 minutes). Every test file runs,
+  # in exactly one part (node --test-shard deals the files out in turn); the build does not wait for them, the release does.
+  test:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ needs.plan.outputs.ref }}" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "24.14.0" }
+      - run: npm ci
+        env: { ONNXRUNTIME_NODE_INSTALL: "false" }
+      - name: The .mpp reader's jars (MPXJ, pinned by SHA-256)
+        run: node -e "import('./scripts/mpxj-files.mjs').then((m) => m.fetchMpxj('.'))"
+      # Java for the MPXJ reference check of tests/msp-reference.test.ts (MPXJ's jars are Java 8 class files; the Temurin 21 line is the one the jlink step above pins)
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - name: Tests (a failure is also written as annotations, which the run page shows without signing in)
+        shell: bash
+        # the MPXJ reference check must run here: without Java or the jars it fails instead of skipping (tests/mpxj-reference.ts skipWithoutReference)
+        env: { P6CLONE_REQUIRE_REFERENCE: "1" }
+        run: |
+          node scripts/build-viewer4d.mjs
+          node --import ./tests/setup.ts --test --test-shard=${{ matrix.part }}/4 --test-reporter=spec "tests/*.test.ts" > test.log 2>&1 && { grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log; echo "skipped here (a sample or Chromium this machine does not have):"; grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | sed -n 1,60p; exit 0; }
+          grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log
+          grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | sed -n 1,60p | sed 's/^ */::warning::skipped /'
+          # one annotation per failing test with its error (GitHub shows at most 10 per step, so the details go in each one)
+          awk '/^✖ failing tests:/{f=1;next} f' test.log | awk '/^✖ /{if(b!="")print b; b=$0; next} b=="" {next} {gsub(/%/,"%25"); b=b"%0A"$0} END{if(b!="")print b}' | cut -c1-4000 | sed 's/^/::error::/'
+          exit 1
+
   # The archive is made once, here; the smoke tests that very archive, extracted, and the release publishes it.
   build:
     needs: plan
@@ -75,21 +109,6 @@ jobs:
           mkdir linux win && tar -xzf linux.tar.gz -C linux --strip-components=1 && unzip -q win.zip -d win
           echo "P6CLONE_JLINK=$PWD/linux/bin/jlink" >> "$GITHUB_ENV"
           echo "P6CLONE_JRE_TARGETS={\"linux-x64\":\"$PWD/linux/jmods\",\"win-x64\":\"$(echo $PWD/win/*/jmods)\"}" >> "$GITHUB_ENV"
-      # Java for the MPXJ reference check of tests/msp-reference.test.ts (MPXJ's jars are Java 8 class files; the Temurin 21 line is the one the jlink step above pins)
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: "21" }
-      - name: Tests (a failure is also written as annotations, which the run page shows without signing in)
-        shell: bash
-        # the MPXJ reference check must run here: without Java or the jars it fails instead of skipping (tests/mpxj-reference.ts skipWithoutReference)
-        env: { P6CLONE_REQUIRE_REFERENCE: "1" }
-        run: |
-          node scripts/build-viewer4d.mjs
-          node --import ./tests/setup.ts --test --test-reporter=spec "tests/*.test.ts" > test.log 2>&1 && { grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log; echo "skipped here (a sample or Chromium this machine does not have):"; grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | sed -n 1,60p; exit 0; }
-          grep -E "^ℹ (tests|pass|fail|cancelled|skipped|todo)" test.log
-          grep -E "^\s*﹣" test.log | sed 's/ *(.*ms)$//' | sort | uniq -c | sed -n 1,60p | sed 's/^ */::warning::skipped /'
-          # one annotation per failing test with its error (GitHub shows at most 10 per step, so the details go in each one)
-          awk '/^✖ failing tests:/{f=1;next} f' test.log | awk '/^✖ /{if(b!="")print b; b=$0; next} b=="" {next} {gsub(/%/,"%25"); b=b"%0A"$0} END{if(b!="")print b}' | cut -c1-4000 | sed 's/^/::error::/'
-          exit 1
       - run: node scripts/build-cli.mjs
       - name: Archive (bundles, the 4D viewer, fonts, the reasoner's models/ and ort/ with its licences, the IFC engine, the .mpp reader)
         shell: bash
@@ -155,7 +174,7 @@ jobs:
           node repo/scripts/release-smoke.mjs "extracted/$name"
 
   release:
-    needs: [plan, smoke]
+    needs: [plan, smoke, test]
     if: github.ref_type == 'tag' || inputs.tag != ''
     runs-on: ubuntu-22.04
     steps:
