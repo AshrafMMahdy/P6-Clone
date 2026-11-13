@@ -20,13 +20,13 @@ const STALE = /^The saved dates of EC are not current: \d+ of \d+ open activitie
 test('a duration change is old -> new in days; the saved dates are then not current, said once', async () => {
   const h = await project();
   const e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', duration_days: 5 }] });
-  assert.deepEqual(e.changes, [{ id: 'A', field: 'duration (days)', old: 3, new: 5 }]);
+  assert.deepEqual(e.changes, [{ id: 'A', field: 'Original Duration (days)', old: 3, new: 5 }]);
   assert.equal(e.notes.filter((n: string) => STALE.test(n)).length, 1, JSON.stringify(e.notes));
   assert.equal(e.changes_total, undefined); assert.equal(e.changes_note, undefined);
   // schedule makes them current again: the next edit that moves no date says nothing about them
   await call('schedule', { handle: h });
   const n = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', name: 'Renamed' }] });
-  assert.deepEqual(n.changes, [{ id: 'A', field: 'name', old: 'A', new: 'Renamed' }]);
+  assert.deepEqual(n.changes, [{ id: 'A', field: 'Activity Name', old: 'A', new: 'Renamed' }]);
   assert.equal((n.notes ?? []).filter((x: string) => STALE.test(x)).length, 0);
 });
 
@@ -42,7 +42,7 @@ test('a relationship added and deleted, an activity added and deleted, an assign
 test('an assignment edited: its units a day, old -> new', async () => {
   const h = await project([{ op: 'assign_resource', activity: 'A', resource: 'R1', units_per_day: 4 }]);
   const e = await call('edit', { handle: h, operations: [{ op: 'update_assignment', activity: 'A', resource: 'R1', units_per_day: 6 }] });
-  assert.deepEqual(e.changes, [{ id: 'A R1', field: 'units per day', old: 4, new: 6 }]);
+  assert.deepEqual(e.changes, [{ id: 'A R1', field: 'Budgeted Units/Time (units a day)', old: 4, new: 6 }]);
 });
 
 test('more than 25 changes: 25 shown, the total, the cut note naming a CSV that holds all of them', async () => {
@@ -63,7 +63,7 @@ test('more than 25 changes: 25 shown, the total, the cut note naming a CSV that 
 test('an edit that moves no date says nothing about the saved dates', async () => {
   const h = await project();
   const e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'C', name: 'Third' }] });
-  assert.deepEqual(e.changes, [{ id: 'C', field: 'name', old: 'C', new: 'Third' }]);
+  assert.deepEqual(e.changes, [{ id: 'C', field: 'Activity Name', old: 'C', new: 'Third' }]);
   assert.equal(e.notes, undefined);
 });
 

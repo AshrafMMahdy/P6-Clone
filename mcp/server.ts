@@ -1214,7 +1214,7 @@ function writeResultFile(tool: string, text: string, ext = 'json'): string | nul
 function confirmChanges(s: Session): { changes?: FieldChange[]; changes_total?: number; changes_note?: string; stale: string[] } {
   const last = s.history[s.history.length - 1];
   if (!last) return { stale: [] };
-  const { changes, datesAffected } = describeChanges(s.db, last.j);
+  const { changes, datesAffected } = describeChanges(s.db, last.j, s.hpd);
   const stale = datesAffected ? storedDatesState(s.db).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open)) : [];
   if (!changes.length) return { stale };
   if (changes.length <= LISTED) return { changes, stale };

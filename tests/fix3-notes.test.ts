@@ -149,3 +149,25 @@ test('7: a stored baseline is never "saved dates not current"; the stale note af
   assert.equal(stale(dur).length, 1, JSON.stringify(dur).slice(0, 500));
   assert.match(stale(dur)[0], /^The saved dates of TOWER-A are not current/);
 });
+
+test('8: edit changes are named as P6 names them, in the units the operation takes, with the ids the agent uses, each change once', async () => {
+  const o = await call('open_file', { path: join(SAMPLES_DIR, 'Tower-A.xer'), lenient: true });
+  const h = o.handle as string;
+  const ch = async (ops: unknown[]) => { const e = await call('edit', { handle: h, operations: ops }); assert.ok(!e.error, JSON.stringify(e)); return e.changes as { id: string; field: string; old: unknown; new: unknown }[]; };
+  const proj = await ch([{ op: 'set_project', data_date: '2026-04-08', planned_start: '2026-03-02', must_finish_by: '2026-12-31' }]);
+  assert.deepEqual(proj.map((c) => [c.id, c.field]), [['TOWER-A', 'Data Date'], ['TOWER-A', 'Planned Start'], ['TOWER-A', 'Must Finish By']]);
+  const res = await ch([{ op: 'update_resource', id: 'PILE', name: 'Renamed R', max_units_per_day: 12 }]);
+  assert.deepEqual(res.map((c) => [c.id, c.field, c.old, c.new]), [['PILE', 'Resource Name', 'Piling Crew', 'Renamed R'], ['PILE', 'Max Units/Time (units a day)', 48, 12]], 'the limit in units a day, once, under the Resource ID');
+  const pr = await ch([{ op: 'set_fields', table: 'TASK', where: { task_code: 'A1030', proj_id: '10' }, fields: { priority_type: 'PT_High' } }]);
+  assert.deepEqual(pr, [{ id: 'A1030', field: 'Leveling Priority', old: null, new: 'High' }]);
+  const hol = await ch([{ op: 'add_holidays', calendar: 'Site 5-Day', dates: ['2026-05-04', '2026-05-05'] }]);
+  assert.equal(hol.length, 1); assert.equal(hol[0].id, 'Site 5-Day'); assert.equal(hol[0].field, 'Calendar Exceptions Added'); assert.equal(hol[0].new, '2026-05-04, 2026-05-05');
+  const lag = await ch([{ op: 'update_relationship', pred: 'A1020', succ: 'A1030', lag_days: 3 }]);
+  assert.deepEqual(lag, [{ id: 'A1020 SS A1030', field: 'Lag (days)', old: 2, new: 3 }]);
+  const txt = await ch([{ op: 'replace_text', pairs: [{ find: 'Drive piles', replace: 'Bore piles' }] }]);
+  assert.deepEqual(txt.map((c) => c.id), ['A1020', 'A1020 in baseline TOWER-A-BL1'], 'the stored baseline copy is named as such');
+  const con = await ch([{ op: 'update_activity', id: 'A1030', constraint: { type: 'finish_on_or_before', date: '2026-07-01' } }]);
+  assert.deepEqual(con.map((c) => [c.field, c.old, c.new]), [['Primary Constraint', 'Start On or After', 'Finish On or Before'], ['Primary Constraint Date', '2026-03-19 08:00', '2026-07-01 00:00']]);
+  const all = JSON.stringify([proj, res, pr, hol, lag, txt, con]);
+  assert.doesNotMatch(all, /last_recalc|plan_end|rsrc_name|max_qty|PT_|PR_|TT_|TK_|CS_|clndr_data|\(hours\)/);
+});
