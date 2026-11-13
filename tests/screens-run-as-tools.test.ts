@@ -26,7 +26,7 @@ import { afterCrash, afterOptimize, applyResult } from '../renderer/views/applyR
 import { answerOf, cancelRun, endedAnswer, makeRunDir, matchesCancel, removeLeftBehind, removeRunDir, refused } from '../main/analysis-run-control.ts';
 import { addRisk, linkActivity } from '../core/risk/register.ts';
 import { fmtDate } from '../renderer/model.ts';
-import { criticalityCell, impactText, priorityShown, probabilityText, riskRowText, sensitivityText, stdDevText, staleReason, changedSince, wasCancelled, betweenCount, crashArgs, crashStopped, errorText, floatPathsArgs, lintArgs, lintStopped, monteCarloArgs, monteCarloResult, monteCarloStopped, optimizeArgs, levelInProposedOrder, optimizeNotes, OPTIMIZE_ADVICE, refusal, type ToolAnswer } from '../renderer/views/toolAnswers.ts';
+import { floatPathText, criticalityCell, impactText, priorityShown, probabilityText, riskRowText, sensitivityText, stdDevText, staleReason, changedSince, wasCancelled, betweenCount, crashArgs, crashStopped, errorText, floatPathsArgs, lintArgs, lintStopped, monteCarloArgs, monteCarloResult, monteCarloStopped, optimizeArgs, levelInProposedOrder, optimizeNotes, OPTIMIZE_ADVICE, refusal, type ToolAnswer } from '../renderer/views/toolAnswers.ts';
 
 setRoots(null, tmpdir());
 config.screens = true; // (this file plays the app's screens: the Export's child process sets it, main/analysis-export.ts)
@@ -159,6 +159,9 @@ test('Float paths: the panel’s call is float_paths’ with between; "the longe
   const out = ok(await run('float_paths', { handle: np.handle, ...args }));
   assert.equal(out.between.paths.length, 10); assert.equal(out.between.paths_total, 64);
   assert.equal(betweenCount(out.between), 'the longest 10 of 64');
+  // the Float path rows show the float the answer carries (float_days): none of them is "-" on a scheduled network
+  assert.ok(out.paths.length > 0);
+  for (const p of out.paths) { assert.equal(typeof p.float_days, 'number', JSON.stringify(p).slice(0, 200)); assert.notEqual(floatPathText(p), '-'); assert.equal(floatPathText(p), String(Math.round(p.float_days * 10) / 10)); }
   assert.equal(betweenCount({ paths: Array(5), paths_total: (2n ** 150n).toString() }), `the longest 5 of ${2n ** 150n}`, 'a total beyond 2^53 is the decimal string, as the tool gives it');
   // what the panel used to refuse in its own words is the tool's: the answer is text in the panel
   const none = await run('float_paths', { handle: np.handle, ...floatPathsArgs({ method: 'free_float', nearDays: 10, between: { from: 'S', to: '' } }, {}) });

@@ -8,7 +8,6 @@ import { rows, type Db } from '../../core/db.ts';
 import { parseP6Date } from '../../core/dates.ts';
 import { checkSchedule, P6_CHECKS, type CheckScheduleReport } from '../../core/analysis/checkSchedule.ts';
 import { progressCurves, resourceHistograms, type ProgressCurves, type ResourceHistogram } from '../../core/analysis/curves.ts';
-import type { computeFloatPaths } from '../../core/schedule/floatPaths.ts';
 import { compareComputed, evaluate } from '../../core/query/evaluate.ts';
 import { compareSchedules, type ScheduleChange } from '../../core/diff.ts';
 import { reviewSchedule, type Review } from '../../core/query/review.ts';
@@ -18,7 +17,7 @@ import { onlyProjects } from '../analysisDb.ts';
 import { AnalysisResults, goToActivity } from './AnalysisResults.tsx';
 import { ExportButton, errorText, numberOf, projectArgs } from './ExportButton.tsx';
 import { card } from './MonteCarloPanel.tsx';
-import { betweenCount, CHANGED_SINCE, floatPathsArgs, refusal, wasCancelled, type RunStamp } from './toolAnswers.ts';
+import { betweenCount, CHANGED_SINCE, floatPathsArgs, floatPathText, refusal, wasCancelled, type FloatPath, type RunStamp } from './toolAnswers.ts';
 import { stampNow, useChangedSince, useToolRun } from './toolRun.ts';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
@@ -83,7 +82,7 @@ export function CheckSchedulePanel() {
 let levelRuns = 0;
 // ---------------------------------------------------------------- Float paths (float_paths)
 /** float_paths' answer (the Float Path columns are not written by the screen). */
-type FloatAnswer = { end: string | null; method: string; paths: ReturnType<typeof computeFloatPaths>['paths']; near_critical: { id: string; name: string; total_float_days: number }[]; between?: { from: string; to: string; paths: { duration_days: number; min_float_days: number | null; activities: string[] }[]; paths_total: number | string; truncated?: boolean } };
+type FloatAnswer = { end: string | null; method: string; paths: FloatPath[]; near_critical: { id: string; name: string; total_float_days: number }[]; between?: { from: string; to: string; paths: { duration_days: number; min_float_days: number | null; activities: string[] }[]; paths_total: number | string; truncated?: boolean } };
 export function FloatPathsPanel() {
   const ui = useStore((s) => s.ui);
   const [count, setCount] = useState('10');
@@ -102,7 +101,6 @@ export function FloatPathsPanel() {
   // a dense network is refused by the tool in words before it starts (how many paths fit), a loop in the logic comes back as its error, and
   // the window is never held. Cancel ends the process (there is nothing the tool keeps).
   const fp = useToolRun('float_paths', false);
-  const hpd = ui.prefs.hoursPerDay;
   /** The settings; a number that is not one is refused. between (the tool's between): when either activity is given. */
   const opts = () => {
     const f = from.trim(), t = to.trim(), max = numberOf('The most paths between', most);
@@ -135,7 +133,7 @@ export function FloatPathsPanel() {
         <div style={panel}>
           <div className="muted">Paths end at {res.end ?? '-'} (method {res.method.replace('_', ' ')}).{changed ? ` (${CHANGED_SINCE})` : ''}</div>
           <table className="tbl" style={{ marginTop: 4 }}><thead><tr><th>Path</th><th>Float (d)</th><th>Activities</th><th>Listed in order</th></tr></thead>
-            <tbody>{res.paths.map((p) => <tr key={p.path} style={{ verticalAlign: 'top' }}><td>{p.path}</td><td>{p.float_hours == null ? '-' : n1(p.float_hours / hpd, 1)}</td><td>{p.activities.length}</td><td style={{ whiteSpace: 'normal' }}><Ids ids={p.activities.map((a) => a.id)} /></td></tr>)}</tbody></table>
+            <tbody>{res.paths.map((p) => <tr key={p.path} style={{ verticalAlign: 'top' }}><td>{p.path}</td><td>{floatPathText(p)}</td><td>{p.activities.length}</td><td style={{ whiteSpace: 'normal' }}><Ids ids={p.activities.map((a) => a.id)} /></td></tr>)}</tbody></table>
           {res.between && <div data-between style={{ marginTop: 10, border: '1px solid #e3e5e8', borderRadius: 14, background: '#f7f8f9', padding: 8 }}>
             <div><b>Paths between {res.between.from} and {res.between.to}</b> ({betweenCount(res.between)}{res.between.truncated ? ': raise max to list more' : ''})</div>
             {!res.between.paths.length ? <div className="muted">No logic path leads from {res.between.from} to {res.between.to}.</div> :

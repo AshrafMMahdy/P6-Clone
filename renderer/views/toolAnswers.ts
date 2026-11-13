@@ -144,6 +144,10 @@ export interface FloatPathsSettings { count?: number; endActivity?: string; meth
 export function floatPathsArgs(s: FloatPathsSettings, project: { project?: string }): Record<string, unknown> {
   return { ...project, ...(s.count != null ? { count: s.count } : {}), ...(s.endActivity ? { end_activity: s.endActivity } : {}), method: s.method, near_critical_days: s.nearDays, ...(s.between ? { between: s.between } : {}) };
 }
+/** A path of float_paths' answer, as the Float paths screen reads it: the float in days (null: none of its activities has a total float), its activities with theirs. */
+export type FloatPath = { path: number; float_days: number | null; activities: { id: string; name: string; order: number; total_float_days: number | null }[] };
+/** The float of a path, in days, as the Float paths screen shows it ("-" when the answer has none). */
+export const floatPathText = (p: FloatPath): string => (p.float_days == null ? '-' : String(Math.round(p.float_days * 10) / 10));
 /** "the longest N of TOTAL" for the paths between two activities (paths_total is a decimal string beyond 2^53). */
 export const betweenCount = (b: { paths: unknown[]; paths_total: number | string }): string => `the longest ${b.paths.length} of ${b.paths_total}`;
 

@@ -140,7 +140,7 @@ export function WhatIfPanel() {
   );
 }
 
-/** optimize_schedule's answer (a plan, nothing applied by the tool): what the panel shows. best_from, mode_trials, note and partial_note are there when the tool says them. */
+/** optimize_schedule's answer (a plan, nothing applied by the tool): what the panel shows. best_from, mode_trials and notes are there when the tool says them. */
 type OptimizeAnswer = {
   activities: number; leveled_activities: number; trajectories: number; crash_cost?: number; cpm_finish?: string; p6_leveled_finish?: string; reasoner_finish?: string; better_than_p6_leveler: boolean | null;
   changes: { id: string; from_days: number; to_days: number }[]; priority: PriorityEntry[]; priority_total: number; ops: unknown[]; biggest_changes: BiggestChange[]; biggest_changes_total?: number;
