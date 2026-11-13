@@ -416,13 +416,17 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     /** what won: 'model', 'sampled', a classic rule with its modes, 'earliest start (no resource limit)', or 'mode pass' */
     best_from: best.best_from,
     ...(best.improvable ? { mode_trials: best.mode_trials, mode_passes: best.mode_passes } : {}),
-    ...(!crashable ? { note: o.activities?.length ? "Crash data was given, but no activity in it can be shortened (an id that is not an activity of the schedule, or crash_days not below its remaining days), so there was no mode to choose: this is the best placement found among the model's own answer, the classic rules' orders and the sampled variations of the model's answer." : "No crash data was given, so there was no mode to choose: this is the best placement found among the model's own answer, the classic rules' orders and the sampled variations of the model's answer. Give crash data (activities: [{id, crash_days, crash_cost} \u2026]) for the reasoner to choose what to shorten." } : {}),
-    ...(cancelled || skipped ? { partial: true as const, stopped: 'cancelled' as const, partial_note: [
-      cancelled ? `Cancelled in the final pass over the modes (${best.mode_trials} trial${best.mode_trials === 1 ? '' : 's'} of pass ${best.mode_passes} done): this is the best found before the stop, a valid proposal but not the pass's end.` : '',
-      skipped ?? '', 'Nothing was applied; pass ops to edit to make the changes, or run again for the full result.'].filter(Boolean).join(' ') } : {}),
+    ...(cancelled || skipped ? { partial: true as const, stopped: 'cancelled' as const } : {}),
     /** how the model read the network: at once (1), or this many windows of REASONER_WINDOW activities */
     model_windows: out.windows,
-    ...(overLimit ? { over_limit_activities: overLimit, over_limit_note: `${overLimit} activit${overLimit === 1 ? 'y needs' : 'ies need'} more of a resource than its Max Units/Time allows on any day: no order can level ${overLimit === 1 ? 'it' : 'them'}, so the leveled finishes here say little until the limit or the assignment is corrected.` } : {}),
+    ...(overLimit ? { over_limit_activities: overLimit } : {}),
+    // what was left out or could not be done, once
+    notes: [
+      ...(!crashable ? [o.activities?.length ? 'The crash data given cannot shorten any activity: nothing was shortened.' : 'No crash data given: nothing was shortened.'] : []),
+      ...(cancelled ? [`Cancelled in the final pass over the modes (${best.mode_trials} ${best.mode_trials === 1 ? 'trial' : 'trials'} of pass ${best.mode_passes} done): the result is the best found before the stop; nothing was applied.`] : []),
+      ...(skipped ? [`${skipped} Nothing was applied.`] : []),
+      ...(overLimit ? [`${overLimit} ${overLimit === 1 ? 'activity needs' : 'activities need'} more of a resource than its Max Units/Time on any day: no order can level ${overLimit === 1 ? 'it' : 'them'}.`] : []),
+    ],
     // (a check that was cancelled before it ran is absent, never invented)
     ...(p6 ? { cpm_finish: fmt(p6.cpm), p6_leveled_finish: fmt(p6.leveled) } : {}),
     ...(mine ? { reasoner_finish: fmt(mine.leveled) } : {}),

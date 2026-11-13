@@ -206,7 +206,7 @@ test('windows_analysis: each window lists 25 of each list, a cut list says how m
   assert.equal(w.lost_time_note, `25 of ${w.lost_time_total} shown; all ${w.lost_time_total} in ${where('lost_time')}`);
   const r = (await call('windows_analysis', { handle: h.handle, include_current: false, updates, max_ids: 3, export: folder() })).d;
   assert.deepEqual([r.windows[0].driving_path.length, r.windows[0].lost_time.length, r.windows[0].lost_time_total], [25, 25, w.lost_time_total]);
-  assert.match(r.arguments_not_used[0], /^windows_analysis has no argument "max_ids"/);
+  assert.match(r.notes[0], /^windows_analysis has no argument "max_ids"/);
   const { json, csv } = files(r, 'windows_analysis');
   assert.equal(json.windows[0].driving_path.length, w.driving_path_total);
   assert.equal(csv.driving_path.length, w.driving_path_total);

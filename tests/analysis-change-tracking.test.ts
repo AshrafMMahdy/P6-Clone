@@ -308,7 +308,7 @@ test('change_tracking through the server: read-only, mode and updates, refusals,
   // a real pair: 129 trial (the open file) and 130 TRIAL (by path), put in data-date order (2010-10-31 and 2010-11-10)
   const r = await call('change_tracking', { handle: h, updates: [{ path: sampleCopy('130 TRIAL.xer') }], bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
-  assert.match(r.d.arguments_not_used.join(' '), /change_tracking has no argument "bogus"/);
+  assert.match(r.d.notes.join(' '), /change_tracking has no argument "bogus"/);
   assert.deepEqual(Object.keys(r.d).slice(0, 3), ['report', 'status', 'summary'], 'summary first');
   // counted independently from the two files' rows: the activities in both (by Activity ID), the relationships and assignments among them
   const A = readXerFile(sampleCopy('129 trial.xer')).db, Bf = readXerFile(sampleCopy('130 TRIAL.xer')).db;

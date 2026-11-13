@@ -196,7 +196,7 @@ export function ProgressCurvesPanel() {
             { name: 'Cum. actual', color: '#a14b4b', v: res.periods.map((p) => p.cum_ac) },
             { name: 'Forecast (early)', color: '#4a6fa5', dash: '5 3', v: res.periods.map((p) => p.cum_forecast_early) },
           ]} />
-          {res.warnings.map((w) => <div key={w} className="muted">{w}</div>)}
+          {res.notes.map((w) => <div key={w} className="muted">{w}</div>)}
           <table className="tbl" style={{ marginTop: 6 }}><thead><tr><th>Start</th><th>PV</th><th>EV</th><th>AC</th><th>Remaining (early)</th><th>Cum. PV</th><th>Cum. EV</th><th>Cum. AC</th><th>SPI</th><th>CPI</th></tr></thead>
             <tbody>{res.periods.map((p) => <tr key={p.start}><td>{date(p.start)}</td><td>{n1(p.pv, 0)}</td><td>{n1(p.ev, 0)}</td><td>{n1(p.ac, 0)}</td><td>{n1(p.remaining_early, 0)}</td><td>{n1(p.cum_pv, 0)}</td><td>{n1(p.cum_ev, 0)}</td><td>{n1(p.cum_ac, 0)}</td><td>{n1(p.spi)}</td><td>{n1(p.cpi)}</td></tr>)}</tbody></table>
         </div>
@@ -382,7 +382,7 @@ export function EvaluatePanel() {
       {res?.ok && <div style={panel}>
         <div style={cards}><Card label="Finish as it is" value={date(res.base_finish)} id="base" /><Card label="Finish with the change" value={date(res.finish)} id="finish" /><Card label="Change (working days)" value={String(res.finish_delta_days ?? '-')} id="delta" /><Card label="Critical" value={String(res.critical.length)} /></div>
         <div style={{ margin: '6px 0' }}>Became critical: {res.became_critical.length ? <Ids ids={res.became_critical} /> : 'none'} · No longer critical: {res.no_longer_critical.length ? <Ids ids={res.no_longer_critical} /> : 'none'}</div>
-        {res.warnings.map((w) => <div key={w} className="muted">{w}</div>)}
+        {res.notes.map((w) => <div key={w} className="muted">{w}</div>)}
         <table className="tbl"><thead><tr><th>Activity</th><th>Field</th><th>Before</th><th>After</th></tr></thead>
           <tbody>{rowsOut.map((r, i) => <tr key={i}><td><Id id={r.id} /></td><td>{r.field}</td><td>{r.before}</td><td>{r.after}</td></tr>)}</tbody></table>
         {res.changed_total > res.changed.length && <div className="muted">{res.changed_total - res.changed.length} more activities changed: Export… lists all.</div>}

@@ -432,8 +432,8 @@ test('registration, end to end through the server: listed read-only, run on a pr
   assert.equal(r.d.total, 60);
   assert.equal(r.d.listed, LISTED);
   assert.equal(r.d.rows.length, LISTED, 'the clone\'s list rule');
-  assert.equal(r.d.arguments_not_used.length, 1);
-  assert.match(r.d.arguments_not_used[0], /^forensic_probe has no argument "bogus": it was not used and the call ran without it\. Its arguments are: handle, export, export_name, project, n, mode, caller, async\.$/);
+  assert.equal(r.d.notes.length, 1);
+  assert.match(r.d.notes[0], /^forensic_probe has no argument "bogus": it was not used and the call ran without it\. Its arguments are: handle, export, export_name, project, n, mode, caller, async\.$/);
   // the whole result without being asked, in the default result folder (analysis/<project>/<tool>)
   assert.ok(r.d.exported.folder.replace(/\\/g, '/').endsWith('analysis/CLEAN__CLEAN/forensic_probe') || /analysis\/CLEAN/.test(r.d.exported.folder.replace(/\\/g, '/')), r.d.exported.folder);
   const csv = r.d.exported.files.find((f: any) => f.path.endsWith('-rows.csv'));

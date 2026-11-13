@@ -1,7 +1,7 @@
 // Schedule analysis tools of the MCP server (kept apart from server.ts so the two grow without stepping on each other):
 // P6 Check Schedule and DCMA 14-point; later lint, float paths, curves, what-ifs, crashing and delay analysis.
 import { dayHours } from '../core/project/units.ts';
-import { noLimitSentence } from '../core/notes.ts';
+import { cancelledAfter, noLimitNote } from '../core/notes.ts';
 import { CurvesRefused, progressCurves, resourceHistograms } from '../core/analysis/curves.ts';
 import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween, writeFloatPaths } from '../core/schedule/floatPaths.ts';
 import type { Db, Row } from '../core/db.ts';
@@ -168,10 +168,10 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
   if (!ANALYSIS_NAMES.has(name)) return undefined;
   const projIds = a.project != null && a.project !== '' ? h.projectIds(s.db, a.project) : h.allIds(s.db);
   const exported = resultExporter(name, a, h, asTool);
-  const withReport = <T extends { report: string; checks: unknown[]; summary: Record<string, number> }>(r: T) => {
+  const withReport = <T extends { report: string; checks: unknown[]; summary: Record<string, number> }>(r: T, forReport: unknown = r) => {
     if (!a.path) return r;
     const path = pathArg(a.path, 'path', 'write');
-    h.writeOut(path, analysisReportHtml(r as never, nowStamp()));
+    h.writeOut(path, analysisReportHtml(forReport as never, nowStamp()));
     return { ...r, saved: path };
   };
   /** A report of checks, worked out with every activity listed: the answer lists LISTED (25) of them per check (total_activities
@@ -179,7 +179,9 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
   const checked = <C extends CheckResult & { fixes?: unknown[] }, T extends { report: string; checks: C[]; summary: Record<string, number> }>(full: T, columns: string[], found: string, extra: Table[] = [], cut: (c: C, max: number) => C = (c, max) => ({ ...c, activities: firstOf(c.activities, max) })) => {
     // (the desktop screens, config.screens, which only the app's own process sets, list everything: 0 = all)
     const max = config.screens ? 0 : LISTED;
-    const answer = withReport({ ...full, checks: full.checks.map((c) => cut(c, max)) });
+    // (a check's note is its not-assessed reason, said once in `notes`; the desktop screens and the HTML report show it beside the check)
+    const cutChecks = full.checks.map((c) => cut(c, max));
+    const answer = withReport({ ...full, checks: config.screens ? cutChecks : cutChecks.map((x) => { const { note: _n, ...rest } = x as typeof x & { note?: string }; return rest as typeof x; }) }, { ...full, checks: cutChecks });
     return exported(answer, full, [
       { name: 'checks', columns, rows: full.checks.map(({ activities: _a, fixes: _f, ...c }) => (c.threshold == null ? (({ threshold: _t, ...x }) => x)(c) : c)) },
       { name: found, columns: ['check', 'id', 'name', 'project', 'value'], rows: full.checks.flatMap((c) => c.activities.map((x) => ({ check: c.id, ...x }))) },
@@ -245,19 +247,17 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
         { name: 'resources', columns: ['resource', 'name', 'units', 'peak_start', 'peak_demand', 'peak_limit', 'over_allocated_periods', 'severity', 'periods_total'], rows: r.resources.map(({ periods: _p, ...x }) => x) },
         { name: 'periods', columns: PERIOD_COLUMNS, rows: r.resources.flatMap((x) => x.periods.map((p) => ({ resource: x.resource, ...p }))) },
       ]);
-      // large by nature (resources x periods): the answer is a summary and the path. It lists the LISTED most over-allocated resources with their summary
-      // figures only (resources_total says how many there are); the per-period series of EVERY resource is in the result file only, and periods_note says so
-      // the order: severity first (the engine's own: critical, moderate, minor, none), then over-allocated periods, then name. A resource whose limit is 0 (a quantity
-      // or cost resource with no limit set) counts as over-allocated in every period while its severity is none, so periods alone would put it above real over-allocations.
+      // large by nature (resources x periods): the answer lists the LISTED most over-allocated resources with their summary figures (resources_total says how many there are);
+      // the per-period series of EVERY resource is in the result file only (the notes say so). The order: severity first, then over-allocated periods, then resource ID.
       const SEVERITY_RANK = { critical: 3, moderate: 2, minor: 1, none: 0 } as const;
       const rank = [...r.resources].sort((x, y) => SEVERITY_RANK[y.severity] - SEVERITY_RANK[x.severity] || y.over_allocated_periods - x.over_allocated_periods || (x.resource < y.resource ? -1 : x.resource > y.resource ? 1 : 0));
-      const done = out({ report: r.report, period: r.period, resources: rank.slice(0, LISTED).map(({ periods: _p, ...x }) => x), resources_total: r.resources.length, ...(r.resources.length ? { resources_order_note: `The resources are listed by severity of over-allocation first (critical, then moderate, then minor, then none), then by how many periods are over-allocated (most first), then by resource ID. ${noLimitSentence('counts as over-allocated in every period in which it has work, with severity none, so it comes after the resources that really exceed a limit')}` } : {}) }) as { exported?: { files: { path: string }[]; error?: string } };
+      const unlimited = r.resources.filter((x) => !x.limit_set).map((x) => x.resource).sort();
+      const notes: string[] = [...(unlimited.length ? [noLimitNote(unlimited)] : [])];
+      const done = out({ report: r.report, period: r.period, resources: rank.slice(0, LISTED).map(({ periods: _p, ...x }) => x), resources_total: r.resources.length }) as { exported?: { files: { path: string }[]; error?: string } };
       const file = done.exported?.files.find((f) => f.path.endsWith('-periods.csv'))?.path;
-      if (!r.resources.length) return { ...done, resources_note: 'The open projects have no resource assignments (in this project, if you named one), so there is nothing to chart. Assign resources with edit assign_resource.' };
-      const all = r.resources.length === 1 ? 'the 1 resource' : `all ${r.resources.length} resources`;
-      return { ...done, periods_note: file
-        ? `The per-period figures of ${all} are not in this answer, only in the result file ${file} (table periods; columns ${PERIOD_COLUMNS.join(', ')}): the rows whose resource is a resource's ID are that resource's periods, and each resource's periods_total says how many it has.`
-        : `The per-period figures of ${all} are not in this answer, and the result file that holds them could not be written${done.exported?.error ? ' (exported.error says why)' : ''}: call again with export set to a folder inside the write root (table periods; columns ${PERIOD_COLUMNS.join(', ')}).` };
+      if (!r.resources.length) return { ...done, notes: [`No resource is assigned in ${projIds.length === 1 ? 'the open project' : 'the open projects'}: there is nothing to chart.`] };
+      notes.push(file ? `Per-period figures not shown; all ${r.resources.length} ${r.resources.length === 1 ? 'resource' : 'resources'} in ${file}.` : `Per-period figures not shown, and the file that holds them could not be written; call again with export set to a folder inside the write root.`);
+      return { ...done, notes };
     }
     case 'evaluate_batch': {
       if (!Array.isArray(a.scenarios) || !a.scenarios.length) fail('bad_input', 'scenarios must be a non-empty list.', 'e.g. [{"name": "A shorter", "overrides": [{"op": "update_activity", "id": "A1000", "duration_days": 5}]}]');
@@ -303,9 +303,9 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const { kept, resumed, redone, ...rest } = r;
       const keptNote = rest.keptNote ?? finished;
       delete rest.keptNote;
-      const answer = { ...rest, ...(kept ? { resume: kept, note: `Partial: ${rest.scenarios_done} of ${rest.scenarios_requested} scenarios were done${rest.error ? ` (it stopped: ${rest.error})` : ''}, and they are kept in ${kept}: ${keepWords('evaluate_batch', kept, 'scenarios')} best and the details of the best few are then worked out over every scenario.` } : {}), ...(resumed ? { resumed_scenarios: resumed } : {}),
+      const answer = { ...rest, ...(kept ? { resume: kept, note: rest.error ? `Stopped after ${rest.scenarios_done} of ${rest.scenarios_requested} scenarios (${String(rest.error).replace(/\.$/, '')}): the result covers those only.` : cancelledAfter(rest.scenarios_done as number, rest.scenarios_requested as number, 'scenarios', false) } : {}), ...(resumed ? { resumed_scenarios: resumed } : {}),
         // kept scenarios that did not check out (a power loss can leave zeros or old bytes), with every one after them: done again, said
-        ...(redone ? { redone_scenarios: redone, redone_note: `${redone} kept scenario${redone === 1 ? '' : 's'} did not check out (damaged, as a power loss can leave a file, or after a damaged one) and ${redone === 1 ? 'was' : 'were'} done again.` } : {}), ...(keptNote ? { note: keptNote } : {}),
+        ...(redone ? { redone_scenarios: redone } : {}), ...(redone || keptNote ? { notes: [...(redone ? [`${redone} kept scenario${redone === 1 ? '' : 's'} did not check out (damaged) and ${redone === 1 ? 'was' : 'were'} run again.`] : []), ...(keptNote ? [keptNote] : [])] } : {}),
         // a finished batch removed its kept file: named, so a copy of it elsewhere (the platform's mirror of the outputs) goes too
         ...(!rest.partial && !keptNote && store.path ? { parts_removed: keptPlace(store.path) } : {}) };
       return files ? { ...answer, exported: files } : answer;
@@ -319,7 +319,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       // one checkpoint just before the change is made: a cancel that came after the last step still cancels the call, and a cancelled call never changes the project
       if (a.apply && r.stop !== 'CANCELLED' && r.ops.length) {
         try { await h.tick(r.steps.length, 0, `${r.steps.length} steps done; making the changes`); }
-        catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; r = { ...r, stop: 'CANCELLED', partial: true, stopped: 'cancelled', steps_done: r.steps.length, note: `${'note' in r && r.note ? r.note + ' ' : ''}Cancelled after the last of ${r.steps.length} step${r.steps.length === 1 ? '' : 's'}, before the changes were made: the steps, changes and edit operations are those of the whole run.` }; }
+        catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; r = { ...r, stop: 'CANCELLED', partial: true, stopped: 'cancelled', steps_done: r.steps.length, notes: [...r.notes, cancelledAfter(r.steps.length, null, r.steps.length === 1 ? 'step' : 'steps', false)] }; }
       }
       // a run that was cancelled changes nothing, apply or not: its steps are the answer, with the edit operations to apply by edit
       const cancelled = r.stop === 'CANCELLED', apply = !!a.apply && !cancelled;
@@ -333,7 +333,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
         fields = writeWhiqFields(d, crashFieldData, { hoursPerDay: s.hpd, calendarDays: true, projIds }); reschedule(d, projIds);
       });
       // field_data: true (the desktop screens): what an apply needs to write the same fields (writeWhiqFields), for a run that can be applied
-      const answer = { ...r, ...(a.field_data === true && !cancelled ? { field_data: crashFieldData } : {}), ...(a.apply ? { applied: apply && r.ops.length > 0 } : {}), ...(fields.length ? { fields_written: fields } : {}), ...(cancelled && a.apply ? { note: `${'note' in r ? r.note + ' ' : ''}apply was not done: a cancelled run changes nothing in the project. The ops are the changes of the steps done; pass them to edit to make them.` } : {}) };
+      const answer = { ...r, ...(a.field_data === true && !cancelled ? { field_data: crashFieldData } : {}), ...(a.apply ? { applied: apply && r.ops.length > 0 } : {}), ...(fields.length ? { fields_written: fields } : {}), ...(cancelled && a.apply ? { notes: [...r.notes, 'Not applied: a cancelled run changes nothing in the project; the ops are the changes of the steps done.'] } : {}) };
       return exported(answer, answer, [
         { name: 'steps', columns: ['step', 'days_gained', 'cost', 'finish', 'cumulative_direct_cost', 'total_cost', 'activities'], rows: r.steps.map((x) => ({ ...x, activities: x.activities.map((y) => y.id) })) },
         { name: 'step_activities', columns: ['step', 'id', 'days', 'cost'], rows: r.steps.flatMap((x) => x.activities.map((y) => ({ step: x.step, ...y }))) },
@@ -357,12 +357,12 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       if (!r.ok) return fail(r.error.code, r.error.message, r.error.code === 'reasoner_failed' ? 'Use level_resources (P6 leveling) or crash_schedule meanwhile.' : 'Give resources a Max Units/Time limit (add_resource max_units_per_hour) or pass crash data in activities.');
       const { order, dates, biggest_changes, priority_rows: priorityRows, field_changes: fieldChanges, field_ranks: fieldRanks, ...answer } = r;
       // a cancelled run changes nothing, apply or not (as crash_schedule): the proposal is the answer, with the edit operations to apply by edit
-      let stopped = r.partial === true, lateCancel: { partial: true; stopped: 'cancelled'; partial_note: string } | undefined;
+      let stopped = r.partial === true, lateCancel: { partial: true; stopped: 'cancelled'; late: true } | undefined;
       // one checkpoint just before the change is made (as crash_schedule): a cancel that came after the last tick still cancels the call,
       // and a cancelled call never changes the project
       if (a.apply && !stopped) {
         try { await h.tick(1, 1, 'the proposal is made; making the changes'); }
-        catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; stopped = true; lateCancel = { partial: true, stopped: 'cancelled', partial_note: 'Cancelled after the leveling in the proposed order, before the changes were made: the proposal and its checks are complete, nothing was applied; pass ops to edit to make the crash changes, or run again with apply.' }; }
+        catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; stopped = true; lateCancel = { partial: true, stopped: 'cancelled', late: true }; }
       }
       // (a field of the project with a WHIQ label and another data type would fail the apply half way: refused first, nothing changed)
       if (a.apply && !stopped) fieldClash(s.db, { changes: fieldChanges, ranks: fieldRanks, projIds }, ' (ops hold the crash changes only, not the leveling in the proposed order)');
@@ -374,7 +374,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
         fields = writeWhiqFields(d, optimizeFieldData, { hoursPerDay: s.hpd, calendarDays: true, projIds });
         reschedule(d, projIds); if (r.leveled_activities) { levelResources(d, projIds, { first: order }); syncAssignmentDates(d); }
       });
-      const out = { objective, ...answer, ...(lateCancel ?? {}), ...(a.field_data === true && !stopped ? { field_data: optimizeFieldData } : {}), ...(biggest_changes ? { biggest_changes: firstOf(biggest_changes, maxChanges) } : {}), ...(a.apply ? { applied: !stopped } : {}), ...(fields.length ? { fields_written: fields } : {}) };
+      const out = { objective, ...answer, ...(lateCancel ? { partial: true, stopped: 'cancelled', notes: [...((answer as { notes?: string[] }).notes ?? []), 'Cancelled after the leveling in the proposed order, before the changes were made: nothing was applied.'] } : {}), ...(a.field_data === true && !stopped ? { field_data: optimizeFieldData } : {}), ...(biggest_changes ? { biggest_changes: firstOf(biggest_changes, maxChanges) } : {}), ...(a.apply ? { applied: !stopped } : {}), ...(fields.length ? { fields_written: fields } : {}) };
       if (a.export == null) return out;
       // the export: the whole placement order, and every activity's dates under CPM, P6's leveling and the reasoner's proposal
       const iso = (v: number | null) => (v != null ? formatP6Date(v) : null);

@@ -362,14 +362,14 @@ test('schedule_index through the server: read-only, summary first, 25 listed wit
   const h = await openSample('129 trial.xer');
   const r = await call('schedule_index', { handle: h, bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
-  assert.match(r.d.arguments_not_used[0], /^schedule_index has no argument "bogus": it was not used/);
+  assert.match(r.d.notes[0], /^schedule_index has no argument "bogus": it was not used/);
   assert.deepEqual(Object.keys(r.d).slice(0, 3), ['report', 'summary', 'health'], 'summary first');
   assert.equal(r.d.summary.risk.sub_metrics_assessed, '4 of 5');
   assert.equal(r.d.summary.risk.left_out[0], 'baseline_drift', 'the summary names what was left out; its reason is said once, in risk.left_out');
   assert.equal(r.d.risk.left_out[0].sub_metric, 'baseline_drift');
   assert.equal(r.d.progress_anomalies.length, 25);
   assert.equal(r.d.progress_anomalies_total, 81);
-  assert.match(r.d.progress_anomalies_note, /^25 of 81 shown; all 81 in .*schedule_index-progress_anomalies\.csv$/);
+  assert.match(r.d.progress_anomalies_note, /^25 of 81 shown; all 81 in .*schedule_index-progress_anomalies\.csv\.$/);
   assert.equal(r.d.resources.length, 25);
   assert.equal(r.d.resources_total, 277);
   const csv = r.d.exported.files.find((f: any) => f.path.endsWith('-progress_anomalies.csv'));

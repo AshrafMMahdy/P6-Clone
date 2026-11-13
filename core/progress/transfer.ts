@@ -4,6 +4,7 @@
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num } from '../schedule/cpm.ts';
+import { namesText, plural } from '../notes.ts';
 import { calOf, refreshOwnDates, statusOf } from '../project/edit.ts';
 import { assignResource, recomputeCosts } from '../resource/assign.ts';
 
@@ -34,7 +35,7 @@ export interface TransferResult {
   assignments: { updated: number; added: number; unmatched: { activity: string; resource: string }[] };
   expenses: { updated: number; unmatched: { activity: string; expense: string }[] };
   steps: { updated: number; unmatched: { activity: string; step: string }[] };
-  data_date?: string; warnings: string[];
+  data_date?: string; notes: string[];
 }
 
 const norm = (s: string | undefined) => (s ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
@@ -66,7 +67,7 @@ export function transferProgress(db: Db, spec: TransferSpec): TransferResult | {
   const on = (p: Part) => spec.include?.[p] !== false;
   const theirs = rows(spec.from, 'TASK').filter((t) => spec.fromProjIds.includes(t.proj_id));
   const mine = rows(db, 'TASK').filter((t) => t.proj_id === spec.toProjId);
-  const warnings: string[] = [];
+  const notes: string[] = [], noStart: string[] = []; // what was not taken, and what was left as it was
 
   // their key -> my activities
   const toKey = new Map<string, Row[]>(), fromKey = (t: Row): string | undefined => t.task_code;
@@ -99,7 +100,7 @@ export function transferProgress(db: Db, spec: TransferSpec): TransferResult | {
     for (const h of hits) { const g = groups.get(h); if (g) g.push(t); else groups.set(h, [t]); }
   }
 
-  const res: TransferResult = { matched: groups.size, updated: 0, changes: [], unmatched_from: unmatched, ambiguous, assignments: { updated: 0, added: 0, unmatched: [] }, expenses: { updated: 0, unmatched: [] }, steps: { updated: 0, unmatched: [] }, warnings };
+  const res: TransferResult = { matched: groups.size, updated: 0, changes: [], unmatched_from: unmatched, ambiguous, assignments: { updated: 0, added: 0, unmatched: [] }, expenses: { updated: 0, unmatched: [] }, steps: { updated: 0, unmatched: [] }, notes };
   const theirDataDates = [...new Set(rows(spec.from, 'PROJECT').filter((p) => spec.fromProjIds.includes(p.proj_id)).map((p) => p.last_recalc_date).filter(Boolean))];
   const theirDD = parseP6Date(maxOf(theirDataDates));
   const T = table(db, 'TASK');
@@ -142,7 +143,7 @@ export function transferProgress(db: Db, spec: TransferSpec): TransferResult | {
     if (on('suspend') && one) { t.suspend_date = one.suspend_date ?? ''; t.resume_date = one.resume_date ?? ''; }
     if (on('units')) for (const f of ['act_work_qty', 'remain_work_qty', 'act_equip_qty', 'remain_equip_qty']) t[f] = p6num(subs.reduce((a, s) => a + num(s[f]), 0));
     t.status_code = statusOf(t);
-    if (!t.act_start_date && t.act_end_date) { t.act_end_date = before.act_end_date ?? ''; warnings.push(`${t.task_code}: their activities have a finish without a start; the finish was not taken.`); }
+    if (!t.act_start_date && t.act_end_date) { t.act_end_date = before.act_end_date ?? ''; noStart.push(t.task_code); }
     refreshOwnDates(db, t);
 
     if (on('assignments')) {
@@ -200,12 +201,13 @@ export function transferProgress(db: Db, spec: TransferSpec): TransferResult | {
   const p = rows(db, 'PROJECT').find((x) => x.proj_id === spec.toProjId)!;
   if (spec.dataDate) {
     const d = spec.dataDate === 'from' ? (theirDataDates.length === 1 ? theirDataDates[0] : theirDataDates.length ? null : '') : formatP6Date(parseP6Date(spec.dataDate) ?? NaN);
-    if (d === null) warnings.push(`Their projects have different data dates (${theirDataDates.join(', ')}): the data date was not moved; give one.`);
-    else if (!d || d.includes('NaN')) warnings.push('Their schedule has no data date: the data date was not moved.');
+    if (d === null) notes.push(`Data date not moved: their projects have different data dates (${theirDataDates.join(', ')}); pass data_date.`);
+    else if (!d || d.includes('NaN')) notes.push('Data date not moved: their schedule has no data date; pass data_date.');
     else { addField(table(db, 'PROJECT'), 'last_recalc_date'); p.last_recalc_date = d; res.data_date = d; }
   }
   const dd = p.last_recalc_date ?? '';
   const after = res.changes.filter((c) => [c.changed.act_start_date?.[1], c.changed.act_end_date?.[1]].some((x) => x && dd && x > dd)).map((c) => c.id);
-  if (after.length) warnings.push(`${after.length} activit${after.length === 1 ? 'y has' : 'ies have'} actual dates after this project's data date (${dd}): move it (data_date) before scheduling, as P6's log would report them (${after.slice(0, 20).join(', ')}${after.length > 20 ? '…' : ''}).`);
+  if (after.length) notes.push(`${plural(after.length, 'activity', 'activities')} ${after.length === 1 ? 'has an actual date' : 'have actual dates'} after the data date ${dd}: ${namesText(after)}.`);
+  if (noStart.length) notes.unshift(`Not taken: ${namesText(noStart)} ${noStart.length === 1 ? 'has a finish without a start' : 'have a finish without a start'}.`);
   return res;
 }

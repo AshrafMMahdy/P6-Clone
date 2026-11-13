@@ -36,7 +36,7 @@ export function ActivityUsageProfile({ sheet }: { sheet: boolean }) {
         <button className={`tbtn ${sheet ? 'on' : ''}`} onClick={() => setUi({ bottom: 'actSheet' })}><span className="lbl">Spreadsheet</span></button>
         <button className="tbtn" onClick={() => setUi({ bottom: 'details' })}><span className="lbl">Activity Details</span></button>
       </div>
-      {c.warnings.length > 0 && <div className="muted" style={{ padding: '2px 8px', fontSize: 11 }}>{c.warnings.join(' ')}</div>}
+      {c.notes.length > 0 && <div className="muted" style={{ padding: "2px 8px", fontSize: 11 }}>{c.notes.join(" ")}</div>}
       {!c.periods.length ? <div className="empty">No dates to show.</div> : sheet ? <Sheet c={c} fmt={fmt} /> : <Chart c={c} on={on} fmt={fmt} />}
     </div>
   );

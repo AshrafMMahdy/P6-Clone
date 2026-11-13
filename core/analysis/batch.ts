@@ -76,7 +76,7 @@ export function batchData(db: Db, projIds: string[], scenarios: Scenario[], over
 export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick; /** each finished scenario row, as it is done */ onRow?: (row: ScenarioResult) => void; store?: RowStore } = {}) {
   const hpd = o.hoursPerDay ?? 8, top = o.top ?? 3;
   const base = onScratch(db, (d) => measure(d, projIds, o.options));
-  if (!base.ok) return { ok: false as const, error: { code: 'schedule_failed', message: `The project as it is cannot be scheduled: ${base.error}` } };
+  if (!base.ok) return { ok: false as const, error: { code: 'schedule_failed', message: `Refused: the project as it is cannot be scheduled (${String(base.error).replace(/\.$/, '')}).` } };
   const p0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
   const days = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round((cal.workBetween(a, b) / 60 / (cal.hoursPerDay() || hpd)) * 100) / 100);
@@ -116,7 +116,7 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
     try { row = onScratch(db, (d): ScenarioResult => {
       if (testHooks.failScenario === i) throw new Error('test failure');
       const r = applyOps(d, sc.overrides ?? [], { hoursPerDay: hpd, calendarDays: o.calendarDays ?? true }); // days as the caller edits
-      if (!r.ok) return { name, ok: false, error: `operation ${r.error!.index + 1}: ${r.error!.message}` };
+      if (!r.ok) return { name, ok: false, error: `Scenario ${name} not run: operation ${r.error!.index + 1}: ${r.error!.message.replace(/\.$/, '')}.` };
       const x = measure(d, projIds, o.options);
       if (!x.ok) return { name, ok: false, error: x.error };
       m = x.m;
@@ -125,7 +125,7 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
         critical: x.m.critical.size, became_critical: [...x.m.critical].filter((c) => !base.m.critical.has(c)), no_longer_critical: [...base.m.critical].filter((c) => !x.m.critical.has(c)),
         negative_float: x.m.negative, cost: Math.round(x.m.cost * 100) / 100, cost_delta: Math.round((x.m.cost - base.m.cost) * 100) / 100,
       };
-    }); } catch (e) { row = { name, ok: false, error: `The scenario failed: ${(e as Error)?.message ?? e}` }; m = null; }
+    }); } catch (e) { row = { name, ok: false, error: `Scenario ${name} not run: ${String((e as Error)?.message ?? e).replace(/\.$/, '')}.` }; m = null; }
     const changed = row.ok && m ? [...(m as Measure).dates].filter(([k, v]) => { const b = base.m.dates.get(k); return !b || b[0] !== v[0] || b[1] !== v[1]; }).map(([k, v]) => { const b = base.m.dates.get(k) ?? [null, null]; return { id: k, start: [b[0], v[0]] as [string | null, string | null], finish: [b[1], v[1]] as [string | null, string | null] }; }) : null;
     try { store?.add({ i, row, changed }); } catch (e) { failed = e as Error; break; } // kept before it counts: a batch stopped later continues after it
     results.push(row); hold(changed);
@@ -144,11 +144,9 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   const top1 = order.length ? results[order[0]] : null, top1Finish = top1 ? parseP6Date(top1.finish ?? '') : null;
   const improves = top1 != null && top1Finish != null && base.m.finish != null && top1Finish <= base.m.finish;
   const best = improves ? top1!.name : null;
-  const bestNote = !order.length ? 'No scenario ran, so there is no best: see each scenario\'s error.' : improves ? null
-    : `No scenario improves on the schedule as it stands (finish ${base.m.finish != null ? formatP6Date(base.m.finish).slice(0, 16) : 'unknown'}): the earliest, "${top1!.name}", finishes ${top1!.finish_delta_days} days later. \`ranked\` lists them by finish; try other scenarios.`;
   const scenariosOut = results.map((r) => ({ ...r }));
   for (const i of order.slice(0, top)) { scenariosOut[i].changed = moved[i]!; scenariosOut[i].changed_total = movedTotal[i]; }
-  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best, ...(bestNote ? { best_note: bestNote } : {}), ranked: order.map((i) => results[i].name), scenarios: scenariosOut,
+  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best, ranked: order.map((i) => results[i].name), scenarios: scenariosOut,
     ...(stopped ? { partial: true as const, stopped, scenarios_done: results.length, scenarios_requested: scenarios.length, ...(failed ? { error: failed.message } : {}), ...(kept ? { kept } : {}) } : {}),
     ...(store ? { resumed } : {}), ...(redone ? { redone } : {}), ...(keptNote ? { keptNote } : {}) };
 }

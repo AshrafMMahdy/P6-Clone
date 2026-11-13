@@ -346,7 +346,7 @@ test('monte_carlo has no list size, bars or whole-day arguments: 25 per list, 20
   // top, buckets and histogram are gone: the call runs without them and says so
   const old = (await call('monte_carlo', { ...a, top: 0, buckets: 250, histogram: 'days' })).d;
   assert.equal(old.criticality.length, 25); assert.equal(old.histogram.length, 20);
-  assert.deepEqual(old.arguments_not_used.map((x: string) => /^monte_carlo has no argument "(\w+)": it was not used and the call ran without it\. Its arguments are: /.exec(x)?.[1]), ['top', 'buckets', 'histogram']);
+  assert.deepEqual(old.notes.map((x: string) => /^monte_carlo has no argument "(\w+)": it was not used and the call ran without it\. Its arguments are: /.exec(x)?.[1]), ['top', 'buckets', 'histogram']);
   // the bars run from the earliest to the latest simulated finish, equal in width
   const w = (b: any) => parseP6Date(b.end)! - parseP6Date(b.start)!;
   assert.ok(dflt.histogram.every((b: any) => Math.abs(w(b) - w(dflt.histogram[0])) <= 1));

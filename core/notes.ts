@@ -46,28 +46,50 @@ export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) :
 /** A list of parts as words: "a", "a and b", "a, b and c". */
 export const andList = (parts: string[]): string => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
-/** Missing baseline, a check left out. `argument`: the tool takes a `baseline` argument. */
-export const baselineLeftOut = (part: string, proj: string, argument: boolean): string => `${cap(part)} not assessed: no baseline is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}.`;
+/** Missing baseline, as the reason of a part that is not assessed. `argument`: the tool takes a `baseline` argument. */
+export const baselineReason = (proj: string, argument: boolean): string => `no baseline is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`;
+/** Missing baseline, a check left out. */
+export const baselineLeftOut = (part: string, proj: string, argument: boolean): string => notAssessed(part, baselineReason(proj, argument));
 /** Missing baseline, the current budget and dates stood in. */
 export const currentPlanUsed = (proj: string): string => `No baseline is assigned to ${proj}: the current budget and dates were used.`;
 /** Missing baseline, the one saved baseline the engine chose. */
-export const baselineChosen = (proj: string, baseline: string): string => `No baseline is assigned to ${proj}: ${baseline}, its only saved baseline, was used.`;
+export const baselineChosen = (proj: string, baseline: string, which = 'its only saved baseline'): string => `No baseline is assigned to ${proj}: ${baseline}, ${which}, was used.`;
 /** A baseline by its argument value (`project`, `bl1`, a saved name) for the sentences above. */
 export const baselineWord = (which: string): string => (which === 'project' ? 'project baseline' : /^bl\d$/i.test(which) ? `${which.toUpperCase()} baseline` : `baseline ${which}`);
 
 /** No data date: the planned start stood in. */
 export const noDataDateUsed = (proj: string, plannedStart: string): string => `${proj} has no data date: the planned start ${plannedStart} was used. Set one with schedule data_date.`;
-/** No data date, in a tool that needs one and takes `status_date`: not assessed. */
+/** No data date, said by a tool that only reports it (the schedule, not this tool, uses the planned start). */
+export const noDataDateWouldUse = (proj: string, plannedStart: string): string => `${proj} has no data date: schedule uses the planned start ${plannedStart}. Set one with schedule data_date.`;
+/** No data date, in a tool that needs one and takes `status_date`: not assessed. The one sentence for every such tool. */
 export const noDataDateNotAssessed = (proj: string): string => `Not assessed: ${proj} has no data date; pass status_date.`;
 /** Projects with different data dates: which date was used. `dates` is "<Project ID> <date>" pairs. */
-export const differentDataDates = (dates: { proj: string; date: string }[], used: string): string => `${andList(dates.map((d) => d.proj))} have different data dates (${dates.map((d) => d.date).join(', ')}): ${used} was used; pass project to work on one.`;
+export const differentDataDates = (dates: { proj: string; date: string }[], used: string): string => `${projectsText(dates.map((d) => d.proj))} have different data dates (${namesText(dates.map((d) => d.date))}): ${used} was used; pass project to work on one.`;
+/** Project IDs in a sentence: "A", "A and B", then the list rule (the first LISTED, how many more, the total). */
+export const projectsText = (ids: string[]): string => (ids.length === 2 ? andList(ids) : namesText(ids));
 
 /** A list cut: n of N shown, the file that holds all of them (none: said without a file). */
 export const listCut = (shown: number, total: number | string, file?: string): string => `${shown} of ${total} shown${file ? `; all ${total} in ${file}` : ''}.`;
-/** A part of an analysis that could not be computed, with its reason. */
-export const notAssessed = (part: string, reason: string): string => `${cap(part)} not assessed: ${reason}.`;
+/** A part of an analysis that could not be computed, with its reason (a trailing full stop of the reason is dropped). */
+export function notAssessed(part: string, reason: string): string { return `${cap(part)} not assessed: ${reason.replace(/\.$/, '')}.`; }
+/** The notes of an answer as they are told: each sentence once, and the parts that are not assessed for the same reason in one sentence ("A, B and C not assessed: reason."). */
+export function tidyNotes(list: string[]): string[] {
+  const seen = new Set<string>(), out: (string | { parts: string[]; reason: string })[] = [], by = new Map<string, { parts: string[]; reason: string }>();
+  for (const n of list) {
+    if (typeof n !== 'string' || !n || seen.has(n)) continue;
+    seen.add(n);
+    const m = /^(.+?) not assessed: (.+)\.$/.exec(n);
+    if (!m || /^Not$/.test(m[1]) ) { out.push(n); continue; }
+    let g = by.get(m[2]);
+    if (!g) { g = { parts: [], reason: m[2] }; by.set(m[2], g); out.push(g); }
+    g.parts.push(m[1]);
+  }
+  return out.map((x) => (typeof x === 'string' ? x : `${cap(andList(x.parts))} not assessed: ${x.reason}.`));
+}
 /** A call that is refused: what is wrong, and what to send instead (one sentence, said once). */
 export const refused = (wrong: string, instead: string): string => `Refused: ${wrong}; ${instead}.`;
+/** A refusal as the two halves of an error answer: what is wrong, and what to send instead (said once each). */
+export const refusal = (wrong: string, instead: string): { message: string; hint: string } => ({ message: `Refused: ${wrong}.`, hint: `${cap(instead)}.` });
 /** An empty project. */
 export const emptyProject = (proj: string): string => refused(`${proj} has no activities`, 'add activities first');
 /** A repaired copy opened. */
@@ -93,7 +115,7 @@ export const outOfSequence = (id: string, pred: string): string => `${id} starte
 /** A duplicate row. `did` is what the tool did with it ("scheduled once", "counted once"). */
 export const duplicateRow = (id: string, did: string): string => `Activity ${id} appears twice in the file; it was ${did} once; save with repair: true fixes it.`;
 /** A run that was cancelled. */
-export const cancelledAfter = (done: number, total: number, steps: string, changed = false): string => `Cancelled after ${done} of ${total} ${steps}: the result covers those only${changed ? '' : '; nothing was changed'}.`;
+export const cancelledAfter = (done: number, total: number | null, steps: string, nothingChanged = true): string => `Cancelled after ${done}${total != null ? ` of ${total}` : ''} ${steps}: the result covers those only${nothingChanged ? '; nothing was changed' : ''}.`;
 /** An edit confirms what changed. */
 export const edited = (id: string, field: string, from: string, to: string): string => `${id} ${field}: ${from} \u2192 ${to}.`;
 /** A job that is still running. */

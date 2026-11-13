@@ -14,13 +14,13 @@
 //    late units or cost per period, the limit, over-allocation and its severity.
 // Spreading is linear over each activity's working time. Values are hours (units) or the project currency (cost).
 import { maxOf, minOf } from '../arrays.ts';
-import { noBaseline } from '../notes.ts';
+import { andList, projectsText, baselineChosen, cap, currentPlanUsed, notAssessed, refusal, tidyNotes } from '../notes.ts';
 import { baselineOf, namesText } from './common.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { activityCosts, earnedValue, percentComplete, plannedShare, sumLines } from '../cost/rollup.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
-import { bucketStart, nextBucket, spreadUsage, type UsageBucket } from '../resource/usage.ts';
+import { bucketStart, nextBucket, resourceLimits, spreadUsage, type UsageBucket } from '../resource/usage.ts';
 import type { WorkCalendar } from '../calendar/calendar.ts';
 
 const n = (s: string | undefined) => Number(s || 0) || 0;
@@ -28,7 +28,6 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 const iso = (t: number) => formatP6Date(t).slice(0, 10);
 
 /** What the totals mean on the duration basis (every figure is a sum of the activities' working days, none is the length of the project; the project's time performance is SPI(t) / Earned Schedule). All of them are kept: each has a plain meaning in working days. */
-const DURATION_NOTE = 'Duration basis: every figure is in working days of each activity\'s own calendar, summed over the activities (a sum of durations, not the length of the project: the project\'s time performance is SPI(t) in es / at). bac = the baseline (else planned) duration; ac = the working time actually spent, from each actual start to its actual finish or the data date; ev = duration x % complete (the earned duration); etc = the remaining duration; eac = ac + etc (the working time the activities will have taken); vac = bac - eac (negative: they take more working time than planned); cpi = ev / ac, the earned duration per working day spent (below 1: work is taking longer than its planned duration allows; empty when nothing is spent yet); tcpi = (bac - ev) / (bac - ac), the pace needed over what is left of the planned duration after the time already spent (above 1: later work must go faster than planned to finish within bac). spi = ev / pv, as on the other bases.';
 export interface Grid { starts: number[]; ends: number[] }
 export function makeGrid(from: number, to: number, period: 'week' | 'month'): Grid {
   const starts: number[] = [];
@@ -56,15 +55,13 @@ export interface CurvePeriod {
   spi: number | null; cpi: number | null; cum_spi: number | null; cum_cpi: number | null;
 }
 /** Earned Schedule at the data date (Lipke), added to the curve's totals. es, at, pd, sv_t are in periods (weeks or months, as the curve's period); es_date is the date at which the planned value equals the earned value now;
- *  the _days are working days of the first project's calendar from the planned start. All null, with the reason in es_note, when they cannot be worked out. */
-export interface EarnedSchedule { es: number | null; at: number | null; pd: number | null; spi_t: number | null; sv_t: number | null; es_date: string | null; es_days: number | null; at_days: number | null; sv_t_days: number | null; es_note: string }
+ *  the _days are working days of the first project's calendar from the planned start. All null, with the reason in notes, when they cannot be worked out. */
+export interface EarnedSchedule { es: number | null; at: number | null; pd: number | null; spi_t: number | null; sv_t: number | null; es_date: string | null; es_days: number | null; at_days: number | null; sv_t_days: number | null; /** why it is not assessed (said once, in the notes), else null */ es_reason: string | null }
 export interface ProgressCurves {
   report: 'Progress Curves'; units: 'cost' | 'hours' | 'duration'; period: 'week' | 'month'; data_date: string | null; baseline: string | null; baseline_how?: string;
   stored_periods: number;
-  /** on the duration basis only: what bac, ac, ev, etc, eac, vac, cpi and tcpi mean there */
-  basis_note?: string;
-  totals: { bac: number; pv: number; ev: number; ac: number; etc: number; eac: number; vac: number; spi: number | null; cpi: number | null; tcpi: number | null } & EarnedSchedule;
-  periods: CurvePeriod[]; warnings: string[];
+  totals: { bac: number; pv: number; ev: number; ac: number; etc: number; eac: number; vac: number; spi: number | null; cpi: number | null; tcpi: number | null } & Omit<EarnedSchedule, 'es_reason'>;
+  periods: CurvePeriod[]; /** what was left out or replaced, each sentence once */ notes: string[];
 }
 
 /** The call is refused (progressCurves throws this): the message says why, next what to do. The MCP layer turns it into the tool's refusal. */
@@ -76,7 +73,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   const projs = rows(db, 'PROJECT').filter((p) => open.has(p.proj_id));
   // projects with different data dates have no single "now": every figure at the data date (planned value, actuals, EAC, VAC, TCPI, SPI, CPI, Earned Schedule) and the per-period curve would measure one project at another's date. There is no sound answer, so the call is refused before anything is computed
   const dates = projs.map((p) => parseP6Date(p.last_recalc_date) ?? null);
-  if (projs.length > 1 && new Set(dates).size > 1) throw new CurvesRefused(`The projects in scope have different data dates (${namesText(projs.map((p, i) => `${p.proj_short_name} ${dates[i] != null ? formatP6Date(dates[i]!) : 'none'}`))}), so there is no single date to measure planned value, earned value and actual cost at for them together.`, `Pass project: <ID>, one of ${namesText(projs.map((p) => p.proj_short_name))} (one project at a time).`);
+  if (projs.length > 1 && new Set(dates).size > 1) { const r = refusal(`${projectsText(projs.map((p) => p.proj_short_name))} have different data dates (${namesText(projs.map((p, i) => (dates[i] != null ? formatP6Date(dates[i]!).slice(0, 10) : 'none')))})`, `pass project: ${namesText(projs.map((p) => p.proj_short_name))} (one project at a time)`); throw new CurvesRefused(r.message, r.hint); }
   // (duration: level of effort has no duration of its own, it spans other activities', so it carries no planned duration)
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id) && t.task_type !== 'TT_WBS' && !(units === 'duration' && t.task_type === 'TT_LOE') && (!o.taskIds || o.taskIds.has(t.task_id)));
   const cals = calendarResolver(db, []);
@@ -86,14 +83,12 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   const lines = activityCosts(db, projIds);
   const dd = minOf(projs.map((p) => parseP6Date(p.last_recalc_date) ?? Infinity));
   const dataDate = Number.isFinite(dd) ? dd : null;
-  const warnings: string[] = [];
+  const notes: string[] = [];
   // baseline counterparts (dates of the planned value)
   const bl = new Map<string, Row>();
   // the project baseline, else the primary user baseline (BL1), as P6 Professional's baseline bars fall back
   let blName: string | null = null, blHow = '';
-  for (const p of projs) { const b = baselineOf(db, p, 'project') ?? baselineOf(db, p, 'bl1'); if (b) { blName = b.name; blHow = b.how; for (const t of b.tasks.values()) bl.set(`${p.proj_id}|${t.task_code}`, t); } }
-  if (!blName) warnings.push(`${noBaseline(false, 'The project has no baseline in this file')} Until then planned value follows the current budget and planned dates, so it shows the current plan, not a baseline.`);
-  else if (!/project baseline$/.test(blHow)) warnings.push(`Planned value follows ${blName}, ${blHow}.`);
+  for (const p of projs) { const b = baselineOf(db, p, 'project') ?? baselineOf(db, p, 'bl1'); if (b) { blName = b.name; blHow = b.how; for (const t of b.tasks.values()) bl.set(`${p.proj_id}|${t.task_code}`, t); if (!/project baseline$/.test(b.how)) notes.push(baselineChosen(p.proj_short_name, b.name, /^the only baseline/.test(b.how) ? 'its only saved baseline' : b.how)); } else notes.push(currentPlanUsed(p.proj_short_name)); }
 
   // the quantities per activity (the planned quantity from the baseline activity when there is one; duration: in working days of the activity's calendar)
   const qOf = (t: Row) => {
@@ -198,15 +193,16 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
     const pvH = dataDate == null ? 0 : tasks.reduce((a, t) => a + q(t).bac * plannedShare(t, bl.get(`${t.proj_id}|${t.task_code}`), dataDate), 0);
     totals = { bac: r2(s.bac), pv: r2(pvH), ev: r2(evH), ac: r2(s.actual), etc: r2(s.remaining), eac: r2(s.actual + s.remaining), vac: r2(s.bac - s.actual - s.remaining), spi: pvH ? r2(evH / pvH) : null, cpi: s.actual ? r2(evH / s.actual) : null, tcpi: s.bac - s.actual ? r2((s.bac - evH) / (s.bac - s.actual)) : null };
   }
-  if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost is' : units === 'duration' ? 'duration is' : 'units are'} recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
-  if (!totals.bac) warnings.push(units === 'cost' ? 'The schedule has no budgeted cost (no costed resources or expenses): use units: duration (planned durations, which need neither costs nor resources) or hours, or load costs.' : units === 'duration' ? 'The schedule has no planned duration (every activity is a milestone or has none).' : 'The schedule has no budgeted units (no resource assignments): use units: duration, or load resources.');
+  if (totals.ev > 0 && totals.ac === 0) notes.push(notAssessed('CPI', `no actual ${units === 'cost' ? 'cost' : units === 'duration' ? 'duration' : 'units'} is recorded`));
+  if (!totals.bac) notes.push(units === 'cost' ? `No budgeted cost in ${andList(projs.map((p) => p.proj_short_name))}: pass units: duration or hours, or load costs.` : units === 'duration' ? `No planned duration in ${andList(projs.map((p) => p.proj_short_name))}: every activity is a milestone or has none.` : `No budgeted units in ${andList(projs.map((p) => p.proj_short_name))}: pass units: duration, or load resources.`);
   const sched = earnedSchedule({ g, pv, period, units, baseline: blName, plannedBac, undatedBac, plannedEv, p0, p1, dataDate, cal: projs[0] ? cals.fallback(projs[0].clndr_id) : null });
-  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, ...(units === 'duration' ? { basis_note: DURATION_NOTE } : {}), totals: { ...totals, ...sched }, periods, warnings };
+  const { es_reason: _reason, ...schedFigures } = sched;
+  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, totals: { ...totals, ...schedFigures }, periods, notes: tidyNotes([...notes, ...(sched.es_reason && totals.bac ? [notAssessed('Earned Schedule', sched.es_reason)] : [])]) };
 }
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 /** Earned Schedule not assessed, with the reason. */
-const noEarnedSchedule = (es_note: string): EarnedSchedule => ({ es: null, at: null, pd: null, spi_t: null, sv_t: null, es_date: null, es_days: null, at_days: null, sv_t_days: null, es_note });
+const noEarnedSchedule = (es_reason: string): EarnedSchedule => ({ es: null, at: null, pd: null, spi_t: null, sv_t: null, es_date: null, es_days: null, at_days: null, sv_t_days: null, es_reason });
 
 /** Earned Schedule (Lipke) from the planned-value curve: ES = the time at which the cumulative planned value equals the earned value now, found in the period where the cumulative curve passes it and interpolated
  *  linearly across the part of that period the planned value is spread over (the whole period, except where the plan starts or ends inside it); AT = the actual time from the planned start to the data date;
@@ -216,13 +212,13 @@ const noEarnedSchedule = (es_note: string): EarnedSchedule => ({ es: null, at: n
 function earnedSchedule(o: { g: Grid; pv: number[]; period: 'week' | 'month'; units: 'cost' | 'hours' | 'duration'; baseline: string | null; plannedBac: number; undatedBac: number; plannedEv: number; p0: number; p1: number; dataDate: number | null; cal: WorkCalendar | null }): EarnedSchedule {
   const none = noEarnedSchedule;
   const { g, pv, period, dataDate } = o;
-  if (!(o.plannedBac > 0) && o.undatedBac > 0) return none('Earned Schedule is not assessed: there is no planned curve (the activities with a planned value have no planned dates).');
-  if (!(o.plannedBac > 0)) return none('Earned Schedule is not assessed: the planned value is 0 (warnings says why and what to do).');
-  if (dataDate == null) return none('Earned Schedule is not assessed: the project has no data date, so the actual time is not known.');
-  if (!g.starts.length || !(o.p1 > o.p0)) return none('Earned Schedule is not assessed: there is no planned curve (the planned value all falls on one instant).');
+  if (!(o.plannedBac > 0) && o.undatedBac > 0) return none('there is no planned curve (the activities with a planned value have no planned dates)');
+  if (!(o.plannedBac > 0)) return none('the planned value is 0');
+  if (dataDate == null) return none('the project has no data date');
+  if (!g.starts.length || !(o.p1 > o.p0)) return none('there is no planned curve (the planned value all falls on one instant)');
   const planned = pv.reduce((a, x) => a + x, 0);
   // 1e-9 (relative): floating-point tolerance. The planned value summed period by period can fall a rounding error short of the budget that was spread, which would read a whole curve as cut by the window
-  if (planned < o.plannedBac * (1 - 1e-9)) return none('Earned Schedule is not assessed: the from/to window cuts the planned curve, so the planned value up to now is not all in it. Leave from and to out.');
+  if (planned < o.plannedBac * (1 - 1e-9)) return none('the from/to window cuts the planned curve; leave from and to out');
   // positions in periods from the first period of the grid: the periods whole, then the share of the period elapsed
   const pos = (t: number) => {
     const b = bucketStart(t, period), e = nextBucket(b, period);
@@ -231,7 +227,7 @@ function earnedSchedule(o: { g: Grid; pv: number[]; period: 'week' | 'month'; un
     else for (let x = b; x < g.starts[0]; x = nextBucket(x, period)) k--;
     return k + (t - b) / (e - b);
   };
-  if (!(dataDate > o.p0)) return none('Earned Schedule is not assessed: the data date is not after the planned start, so no time has passed to measure against.');
+  if (!(dataDate > o.p0)) return none('the data date is not after the planned start');
   const earned = Math.min(o.plannedEv, planned);
   // the period where the cumulative planned value passes the earned value
   let tStar = o.p0;
@@ -254,12 +250,12 @@ function earnedSchedule(o: { g: Grid; pv: number[]; period: 'week' | 'month'; un
   const esDays = days(o.p0, tStar), atDays = days(o.p0, dataDate);
   return {
     es: r3(es), at: r3(at), pd: r3(pd), spi_t: r3(es / at), sv_t: r3(es - at), es_date: iso(tStar), es_days: esDays, at_days: atDays, sv_t_days: esDays != null && atDays != null ? r3(esDays - atDays) : null,
-    es_note: `Earned Schedule against ${o.baseline ? `baseline ${o.baseline}` : 'the planned dates'}, in ${period}s from the first planned ${o.units === 'cost' ? 'cost' : o.units === 'hours' ? 'hours' : 'duration'} (${iso(o.p0)}); days are working days of the project calendar.`,
+    es_reason: null,
   };
 }
 
 export interface HistogramPeriod { start: string; end: string; budgeted: number; actual: number; remaining_early: number; remaining_late: number; limit: number | null; over_allocated: number; available: number | null }
-export interface ResourceHistogram { resource: string; name: string; units: 'hours' | 'cost'; peak: { start: string; demand: number; limit: number | null } | null; over_allocated_periods: number; severity: 'none' | 'minor' | 'moderate' | 'critical'; periods: HistogramPeriod[]; /** how many periods it has (an answer for many resources lists them for the 10 most over-allocated) */ periods_total: number }
+export interface ResourceHistogram { resource: string; name: string; units: 'hours' | 'cost'; /** false: Max Units/Time is 0 (no limit set): the demand is shown and no over-allocation is counted */ limit_set: boolean; peak: { start: string; demand: number; limit: number | null } | null; over_allocated_periods: number; severity: 'none' | 'minor' | 'moderate' | 'critical'; periods: HistogramPeriod[]; /** how many periods it has (an answer for many resources lists them for the 10 most over-allocated) */ periods_total: number }
 
 /** Resource Usage Profile per resource (units = hours by default, or cost). */
 export function resourceHistograms(db: Db, projIds: string[], o: { resources?: string[]; period?: 'week' | 'month'; cost?: boolean; threshold?: number } = {}): { report: 'Resource Histogram'; period: string; resources: ResourceHistogram[] } {
@@ -275,6 +271,7 @@ export function resourceHistograms(db: Db, projIds: string[], o: { resources?: s
   if (!Number.isFinite(from) || !(to > from)) return { report: 'Resource Histogram', period, resources: [] };
   const g = makeGrid(from, to, period);
   const cals = calendarResolver(db, []);
+  const limits = resourceLimits(db);
   const projOf = (t?: Row) => rows(db, 'PROJECT').find((p) => p.proj_id === t?.proj_id);
   const out: ResourceHistogram[] = [];
   for (const id of ids) {
@@ -303,17 +300,18 @@ export function resourceHistograms(db: Db, projIds: string[], o: { resources?: s
         if (rs != null && re != null) spreadLinear(early, g, rq, rs, re, cal);
       }
     }
+    const limitSet = limits.has(id); // no limit set (Max Units/Time 0): the demand is shown, no over-allocation is counted for it
     const periods: HistogramPeriod[] = g.starts.map((s, i) => {
-      const demand = actual[i] + early[i], limit = cap ? cap[i] : null;
+      const demand = actual[i] + early[i], limit = cap && limitSet ? cap[i] : null;
       return { start: iso(s), end: iso(g.ends[i]), budgeted: r2(budgeted[i]), actual: r2(actual[i]), remaining_early: r2(early[i]), remaining_late: r2(late[i]), limit: limit != null ? r2(limit) : null, over_allocated: limit != null && demand > limit * threshold ? r2(demand - limit) : 0, available: limit != null ? r2(Math.max(0, limit - demand)) : null };
     });
     const peakI = periods.reduce((m, p, i) => (p.actual + p.remaining_early > periods[m].actual + periods[m].remaining_early ? i : m), 0);
     const ratio = Math.max(0, maxOf(periods.map((p) => (p.limit ? (p.actual + p.remaining_early) / p.limit : 0))));
     out.push({
-      resource: R.get(id)?.rsrc_short_name ?? id, name: R.get(id)?.rsrc_name ?? '', units: o.cost ? 'cost' : 'hours',
+      resource: R.get(id)?.rsrc_short_name ?? id, name: R.get(id)?.rsrc_name ?? '', units: o.cost ? 'cost' : 'hours', limit_set: limitSet,
       peak: periods.length ? { start: periods[peakI].start, demand: r2(periods[peakI].actual + periods[peakI].remaining_early), limit: periods[peakI].limit } : null,
       over_allocated_periods: periods.filter((p) => p.over_allocated > 0).length,
-      severity: o.cost || ratio <= threshold ? 'none' : ratio >= 2 ? 'critical' : ratio >= 1.5 ? 'moderate' : 'minor',
+      severity: o.cost || !limitSet || ratio <= threshold ? 'none' : ratio >= 2 ? 'critical' : ratio >= 1.5 ? 'moderate' : 'minor',
       periods, periods_total: periods.length,
     });
   }

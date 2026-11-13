@@ -12,7 +12,8 @@ import { dayHours } from '../project/units.ts';
 import { calendarResolver, scheduleProjects } from '../schedule/cpm.ts';
 import { fitAssignmentsToDuration } from '../resource/assign.ts';
 import { drivingFloat } from './delay.ts';
-import { isLoe, isMilestone, isWbs, LISTED, type Tick } from './common.ts';
+import { isLoe, isMilestone, isWbs, type Tick } from './common.ts';
+import { cancelledAfter, namesText } from '../notes.ts';
 import { lobActivityCodes } from '../lob/view.ts';
 import { fieldChange } from './whiq-fields.ts';
 
@@ -85,14 +86,14 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
   const target = o.targetFinish ? parseP6Date(o.targetFinish) : null;
   if (o.targetFinish && target == null) return { ok: false as const, error: { code: 'bad_input', message: `target_finish "${o.targetFinish}" is not a date.` } };
   const locked = new Set(o.locked ?? []);
-  const warnings: string[] = [];
+  const notes: string[] = []; // what was ignored or replaced, said once
   // liquidated damages run from a contract date: without target_finish there is nothing they are owed against
   const ld = target != null ? o.ldPerDay ?? 0 : 0;
-  if (o.ldPerDay && target == null) warnings.push('ld_per_day needs target_finish (the date damages run from); ignored.');
+  if (o.ldPerDay && target == null) notes.push('Ignored: ld_per_day (it needs target_finish, the date damages run from).');
   if (target == null && o.targetDays == null && !o.indirectPerDay) return { ok: false as const, error: { code: 'bad_input', message: 'Give target_finish or target_days, or indirect_cost_per_day to crash to the least total cost.' } };
   const given = new Map((o.activities ?? []).map((a) => [a.id, a]));
   const steps: CrashStep[] = [];
-  let stop = 'SUCCESS' as CrashStop, note = '', baseFinish: number | null = null, finish: number | null = null;
+  let stop = 'SUCCESS' as CrashStop, why = '', baseFinish: number | null = null, finish: number | null = null;
   const changed = new Map<string, { task: Row; from: number; to: number; started: boolean }>();
   const costOf = new Map<string, number>(); // what each activity's crashing cost over the steps kept (for the fields an apply writes beside it)
 
@@ -103,7 +104,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
     const tasks = rows(d, 'TASK').filter((t) => open.has(t.proj_id));
     const byCode = new Map<string, Row>();
     for (const t of tasks) if (!byCode.has(t.task_code)) byCode.set(t.task_code, t);
-    for (const id of given.keys()) if (!byCode.has(id)) warnings.push(`Activity ${id} is not in the open project(s); ignored.`);
+    for (const id of given.keys()) if (!byCode.has(id)) notes.push(`Ignored: activity ${id} (not in the open projects).`);
     // crash limits in hours and cost per day, per task_id
     const limit = new Map<string, { minH: number; slope: number }>();
     const eligible = (t: Row) => !t.act_end_date && !isWbs(t) && !isLoe(t) && !isMilestone(t) && !locked.has(t.task_code);
@@ -114,14 +115,14 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
         const h = dh.task(t), rem = Number(t.remain_drtn_hr_cnt || 0);
         if (a.crash_days != null) {
           const gain = rem / h - a.crash_days;
-          if (gain <= 0) { warnings.push(`${a.id}: crash_days ${a.crash_days} is not below the remaining ${r2(rem / h)} d; ignored.`); continue; }
+          if (gain <= 0) { notes.push(`Ignored: crash_days of ${a.id} (${a.crash_days} is not below the remaining ${r2(rem / h)} d).`); continue; }
           limit.set(t.task_id, { minH: a.crash_days * h, slope: (a.crash_cost ?? 0) / gain });
         } else limit.set(t.task_id, { minH: (a.min_days ?? 0) * h, slope: a.cost_per_day ?? 0 });
       }
     } else {
       const pct = Math.min(100, Math.max(0, o.defaultMaxPct ?? 30)) / 100;
       for (const t of tasks) if (eligible(t)) limit.set(t.task_id, { minH: Number(t.remain_drtn_hr_cnt || 0) * (1 - pct), slope: 1 });
-      note = `No crash data given: every remaining activity may lose up to ${Math.round(pct * 100)}% of its remaining duration at an equal cost of 1 per day, so costs are crash-days.`;
+      notes.push(`No crash data given: each open activity may lose up to ${Math.round(pct * 100)}% of its remaining duration at a cost of 1 per day, so costs are in crash-days.`);
     }
     const remH = (t: Row) => Number(t.remain_drtn_hr_cnt || 0);
     const capDays = (t: Row) => { const l = limit.get(t.task_id); return l ? Math.max(0, (remH(t) - l.minH) / dh.task(t)) : 0; };
@@ -149,7 +150,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
       // with the steps done as the answer (marked partial); one before the first step has nothing to answer and stays the cancellation
       if (o.tick) {
         try { await o.tick(n - 1, Number.isFinite(maxSteps) ? maxSteps : 0, `step ${n}${Number.isFinite(maxSteps) ? ` of at most ${maxSteps}` : ''}: ${r2(days(finish, baseFinish!))} working days gained so far`); }
-        catch (e) { if ((e as { code?: unknown })?.code === 'cancelled' && steps.length) { stop = 'CANCELLED'; note = `${note ? note + ' ' : ''}Partial: the call was cancelled after ${steps.length} step${steps.length === 1 ? '' : 's'}; the steps, changes and edit operations are those of the steps done, and the target was not reached.`; break; } throw e; }
+        catch (e) { if ((e as { code?: unknown })?.code === 'cancelled' && steps.length) { stop = 'CANCELLED'; notes.push(cancelledAfter(steps.length, null, steps.length === 1 ? 'step' : 'steps', false)); break; } throw e; }
       }
       const ctx = makeCtx(d, { hoursPerDay: hpd0 });
       const rf = drivingFloat(d, ctx);
@@ -180,15 +181,15 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
       });
       const cut = minCut(N, edges, S, T);
       if (!crit.length || cut.flow >= INF) {
-        if (ineffective.size) { stop = 'PLATEAU'; note = `Crashing the remaining cut sets did not move the finish (tried ${[...ineffective].slice(0, LISTED).map((id) => crit.find((t) => t.task_id === id)?.task_code ?? id).join(', ')}${ineffective.size > LISTED ? ` and ${ineffective.size - LISTED} more` : ''}).`; break; }
+        if (ineffective.size) { stop = 'PLATEAU'; why = `crashing the remaining cut sets did not move the finish (tried ${namesText([...ineffective].map((id) => crit.find((t) => t.task_id === id)?.task_code ?? id))})`; break; }
         stop = 'EXHAUSTED';
         const stuck = crit.filter((t) => !(limit.has(t.task_id) && capDays(t) > EPS)).sort((a, b) => (b.early_end_date ?? '').localeCompare(a.early_end_date ?? '')).map((t) => t.task_code);
-        note = `${note ? note + ' ' : ''}${stuck.length ? `No path to the finish can be shortened further: it runs through ${stuck.slice(0, LISTED).join(', ')}${stuck.length > LISTED ? ` and ${stuck.length - LISTED} more` : ''} (milestones, locked, without crash data or at their limit).` : 'There is nothing to shorten: no activity drives the finish (the project has no open activities on a path to its finish).'}`;
+        why = stuck.length ? `no remaining path through ${namesText(stuck)} can be shortened` : 'no activity drives the finish';
         break;
       }
       const acts = crit.filter((_, i) => cut.side[2 * i] && !cut.side[2 * i + 1]);
       const slope = acts.reduce((s, t) => s + limit.get(t.task_id)!.slope, 0);
-      if (target == null && o.targetDays == null && slope >= save) { stop = 'SUCCESS'; note = `Least total cost reached: the next cut costs ${r2(slope)}/day, more than the ${r2(save)}/day it would save.`; break; }
+      if (target == null && o.targetDays == null && slope >= save) { stop = 'SUCCESS'; break; }
       // the next near-critical path: the smallest float above the critical network's
       let near = Infinity;
       for (const t of tasks) {
@@ -216,7 +217,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
         for (const [a, rd, td, q] of beforeAsg) { a.remain_drtn_hr_cnt = rd; a.target_drtn_hr_cnt = td; a.remain_qty_per_hr = q; }
         if (again) { minStep = Math.min(room, Math.max(1, step * 2)); grown++; } else { minStep = 0; grown = 0; }
         sched();
-        if (++stalls >= 5) { stop = 'PLATEAU'; note = 'Crashing the cheapest cut sets no longer moved the finish.'; break; }
+        if (++stalls >= 5) { stop = 'PLATEAU'; why = 'crashing the cheapest cut sets no longer moved the finish'; break; }
         n--; continue;
       }
       stalls = 0; minStep = 0; grown = 0; ineffective.clear();
@@ -229,25 +230,25 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
         total_cost: r2(direct - (o.indirectPerDay ?? 0) * days(finish, baseFinish!) - ld * (late(baseFinish!) - late(finish))),
       });
       if (needed(finish) <= 0.005) { stop = 'SUCCESS'; break; }
-      if (target == null && o.targetDays == null && steps.length >= 2 && steps.at(-1)!.total_cost > steps.at(-2)!.total_cost) { stop = 'PLATEAU'; note = `Stopped because the total cost started rising: step ${steps.length} took it from ${steps.at(-2)!.total_cost} to ${steps.at(-1)!.total_cost}, so more crashing costs more than it saves. The result is the cheapest finish found: ${r2(days(finish, baseFinish!))} working days gained at a total cost of ${steps.at(-1)!.total_cost}.`; break; }
+      if (target == null && o.targetDays == null && steps.length >= 2 && steps.at(-1)!.total_cost > steps.at(-2)!.total_cost) { stop = 'PLATEAU'; break; }
     }
   }); } catch (e) { if (!(e instanceof ScheduleFailed)) throw e; return { ok: false as const, error: { code: 'schedule_failed', message: e.message } }; }
   rollback(j);
   // a target that was not reached says so, and by how much
   if ((target != null || o.targetDays != null) && finish != null && baseFinish != null && stop !== 'SUCCESS' && stop !== 'ALREADY_MET' && stop !== 'CANCELLED') {
     const miss = target != null ? days(target, finish) : (o.targetDays as number) - days(finish, baseFinish);
-    if (miss > 0.005) note = `${note ? note + ' ' : ''}The target was missed by ${r2(miss)} working days (${r2(days(finish, baseFinish))} gained).`;
+    if (miss > 0.005) notes.push(`Target ${target != null ? formatP6Date(target).slice(0, 10) : `${o.targetDays} days`} not reached: ${r2(days(finish, baseFinish))} days gained${why ? `; ${why}` : ''}.`);
   }
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const ops = [...changed.values()].map((c) => ({ op: 'update_activity', id: c.task.task_code, project: projCode.get(c.task.proj_id), ...(c.started ? { remaining_hours: c.to } : { duration_hours: c.to }), assignments_follow: true }));
   return {
-    ok: true as const, stop, ...(stop === 'CANCELLED' ? { partial: true as const, stopped: 'cancelled' as const, steps_done: steps.length } : {}), ...(note ? { note } : {}),
+    ok: true as const, stop, ...(stop === 'CANCELLED' ? { partial: true as const, stopped: 'cancelled' as const, steps_done: steps.length } : {}),
     base_finish: baseFinish != null ? formatP6Date(baseFinish) : null, finish: finish != null ? formatP6Date(finish) : null,
     days_gained: baseFinish != null && finish != null ? r2(days(finish, baseFinish)) : 0,
     ...(target != null && finish != null ? { days_late: r2(Math.max(0, days(target, finish))) } : {}),
     direct_cost: steps.at(-1)?.cumulative_direct_cost ?? 0, total_cost: steps.at(-1)?.total_cost ?? 0,
     steps, changes: [...changed.values()].map((c) => ({ id: c.task.task_code, remaining_days_from: r2(c.from / (dayHours(db, hpd0, true).task(c.task))), remaining_days_to: r2(c.to / dayHours(db, hpd0, true).task(c.task)) })),
-    ops, warnings,
+    ops, notes,
     /** each activity whose duration the run changed, for the fields an apply writes beside it (whiq-fields.ts) */
     field_changes: [...changed.values()].map((c) => fieldChange(db, c.task, projCode.get(c.task.proj_id), c.from, c.to, costOf.get(c.task.task_id) ?? 0, hpd0)),
   };

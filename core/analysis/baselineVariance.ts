@@ -5,6 +5,7 @@
 // reason. The other side is a baseline (the earlier side) or another schedule (as_planned); the open project is the later, as-built side.
 import { rows, groupBy, type Db, type Row } from '../db.ts';
 import { formatP6Date } from '../dates.ts';
+import { notAssessed, plural, tidyNotes } from '../notes.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentOf } from '../diff.ts';
 import type { Update } from './delay.ts';
@@ -41,44 +42,30 @@ export interface Chain {
 }
 export interface OverlayRow { id: string; name: string; project?: string; critical_in_reference: boolean | null; critical_now: boolean | null; newly_critical: boolean; no_longer_critical: boolean; /** critical now, and not in the other side at all (added since): not "newly critical", which needs a counterpart that was not critical */ added_and_critical: boolean }
 
-export type Responsibility = { result: 'assessed'; code_type: string; parties: { party: string; drivers: number; delay_days: number }[]; note: string } | { result: 'not_assessed'; note: string };
+/** A figure that was worked out, or says it was not (the reason is in the notes, once). */
+export type Done<T> = ({ result: 'assessed' } & T) | { result: 'not_assessed' };
+export type Responsibility = { result: 'assessed'; code_type: string; parties: { party: string; drivers: number; delay_days: number }[] } | { result: 'not_assessed' };
 
 export interface BaselineVarianceResult {
   report: 'Baseline variance';
-  status: 'fail' | 'warning' | 'pass'; summary: string;
+  status: 'fail' | 'warning' | 'pass';
+  /** what was left out or could not be assessed, each sentence once */
+  notes: string[];
   compared_with: { kind: 'baseline' | 'as_planned'; name: string; how: string; projects_without?: string[] };
   data_date: string | null;
   activities: { compared: number; not_in_reference: number; without_dates: number };
   slip_classes: Record<SlipClass, number>;
-  project_slip: Assessed<{ current_finish: string; reference_finish: string; working_days: number }>;
-  totals: { project_slip_working_days: number | null; critical_drivers_delay_days: number; finished_drivers: { count: number; delay_days: number; note: string } };
-  critical_overlay: Assessed<{ reference_critical_total: number; current_critical_total: number; newly_critical_total: number; added_and_critical_total: number; no_longer_critical_total: number }>;
-  bei: Assessed<{ value: number; completed: number; due: number }>;
-  duration_weighted_percent_complete: Assessed<{ value: number; earned_days: number; planned_days: number }>;
+  project_slip: Done<{ current_finish: string; reference_finish: string; working_days: number }>;
+  totals: { project_slip_working_days: number | null; critical_drivers_delay_days: number; finished_drivers: { count: number; delay_days: number } };
+  critical_overlay: Done<{ reference_critical_total: number; current_critical_total: number; newly_critical_total: number; added_and_critical_total: number; no_longer_critical_total: number }>;
+  bei: Done<{ value: number; completed: number; due: number }>;
+  duration_weighted_percent_complete: Done<{ value: number; earned_days: number; planned_days: number }>;
   drivers_total: number;
   responsibility: Responsibility;
   variances: ActivityVariance[]; drivers: Driver[]; chains: Chain[]; overlay: OverlayRow[];
-  method: string[];
 }
 export type Refusal = { refused: true; message: string; next: string };
 
-export const VARIANCE_METHOD = [
-  'the other side is the baseline (project, bl1-bl3 or a saved baseline’s name) or another schedule (as_planned, matched by Activity ID, then by a name unique on both sides); the open project is the later, as-built side (asPlannedVsBuilt.ts:33-37)',
-  'start, finish and duration variance per activity in working days of its calendar (positive = later or longer): current = actual, else forecast, else planned; other side = its actual / early / planned date (core/variance.ts:50-76, in calendar days there); duration = start to finish on each side',
-  'slip classes of the finish variance: under 0 ahead, 0 on time, up to 5 days minor, up to 15 moderate, up to 30 major, more severe (variance.ts:19-26)',
-  'critical path overlay: critical in each side’s own stored float (the source ran a CPM on each: asPlannedVsBuilt.ts:50-52); newly critical = critical now and in the other side with a counterpart that was not critical; an activity added since (critical now, no counterpart in the other side) is not newly critical, it is listed apart as added_and_critical; the other side must carry total float, else not assessed',
-  'project slip = the latest current finish less the latest finish of the other side, working days of the project calendar, signed (delayAnalysis.ts:168-170 floors it at 0: not carried over, an early finish shows as a negative number)',
-  `delay drivers: activities whose finish is ${DRIVER_MIN_DAYS} working day or more later than the other side (delayAnalysis.ts:96, :113-114), level of effort left out (its dates follow the work it spans); variance type from the start and duration variances: both later = compound_delay, duration longer = duration_overrun, start later = start_delay, else finish_delay (:121-124)`,
-  'successors reached = activities after the driver in the logic, any relationship, each once (:303-313); causal score = (critical 1, else 0.5) x (1 + successors reached / activities) (:141)',
-  'critical = P6’s stored float rule (the project’s critical-float limit or longest path); finished work has no float, so a finished driver is neither critical nor not: it is counted apart (finished_drivers) and has no causal score',
-  'concurrent delay is not assessed: the source’s concurrency classification and its 50/50 split are both OFF by default (delayAnalysis.ts:98-99, :203-214), and so is here. A driver keeps its own variance type, and the responsibility table sums each party’s driver days in full. The days of a delay passed down a chain are not concurrent delay (that needs independent causes in the same window): windows_analysis apportions delay between causes',
-  'two totals, side by side and not the same thing: project_slip_working_days (the schedule as a whole) and critical_drivers_delay_days (the sum of the critical drivers’ own delays; drivers delaying the same days each count theirs, so it can exceed the slip)',
-  'responsibility: a P6 file has no delay-category field; the value of the activity code named in responsibility_code on each driver is its party, driver days summed per value (and no value)',
-  'causal chain of a critical driver: along its critical successors, the smallest Activity ID first, to the first milestone (a milestone type or a zero duration), else to the end of the critical chain (:315-335)',
-  'duration_weighted_percent_complete (the source’s schedule_performance_index, :240-247, a duration-weighted % complete, not SPI; SPI(t) is Earned Schedule in progress_curves): sum of (duration x % complete) over the sum of durations, durations in working days (the other side’s, else the original duration), level of effort and WBS summaries left out',
-  'BEI: the clone’s one definition (dcma_14 check 14): tasks completed over tasks the other side planned to finish by the data date',
-  'status: fail when the project slip is over 0 or any activity slipped by more than 15 working days (the source’s fail rules, asPlannedVsBuilt.ts:75 and delayAnalysis.ts:290), warning when any activity slipped, else pass',
-];
 
 export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: number; baseline?: string; asPlanned?: Update; responsibilityCode?: string }): BaselineVarianceResult | Refusal {
   const s = makeScope(db, { projIds: o.projIds, hoursPerDay: o.hoursPerDay, calendarDays: true });
@@ -141,8 +128,8 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
   const refHasFloat = live.some(([, b]) => b && !isDone(b) && b.total_float_hr_cnt !== '' && b.total_float_hr_cnt != null);
   const curHasFloat = live.some(([t]) => !isDone(t) && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
   let overlay: OverlayRow[] = [];
-  let overlaySummary: BaselineVarianceResult['critical_overlay'];
-  if (!refHasFloat || !curHasFloat) overlaySummary = { result: 'not_assessed', note: !curHasFloat ? 'No incomplete activity carries a total float: schedule the project (F9) first.' : `The ${kind === 'baseline' ? `${ref.name} baseline` : ref.name} carries no total float on its activities, so what was critical in it cannot be told (a baseline saved from a scheduled project does).` };
+  let overlaySummary: Assessed<{ reference_critical_total: number; current_critical_total: number; newly_critical_total: number; added_and_critical_total: number; no_longer_critical_total: number }>;
+  if (!refHasFloat || !curHasFloat) overlaySummary = { result: 'not_assessed', note: !curHasFloat ? 'no open activity has a stored total float; run schedule first' : `the ${kind === 'baseline' ? `${ref.name} baseline` : ref.name} carries no total float on its activities, so what was critical in it cannot be told` };
   else {
     for (const [t, b] of ref.pairs) {
       if (isLoe(t)) continue;
@@ -157,7 +144,7 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
   const latest = (xs: (number | null)[]) => xs.reduce<number | null>((m, x) => (x != null && (m == null || x > m) ? x : m), null);
   const curLatest = latest(activities.map(forecastFinish)), refLatest = latest(refRows.map(baselineFinish));
   const slipDays = curLatest != null && refLatest != null && s.projs[0] ? s.workDays(s.projCal(s.projs[0]), refLatest, curLatest) : null;
-  const projectSlip: BaselineVarianceResult['project_slip'] = slipDays != null ? { result: 'assessed', current_finish: formatP6Date(curLatest!), reference_finish: formatP6Date(refLatest!), working_days: slipDays } : { result: 'not_assessed', note: 'The schedule or the other side has no finish date.' };
+  const projectSlip: Assessed<{ current_finish: string; reference_finish: string; working_days: number }> = slipDays != null ? { result: 'assessed', current_finish: formatP6Date(curLatest!), reference_finish: formatP6Date(refLatest!), working_days: slipDays } : { result: 'not_assessed', note: 'the schedule or the other side has no finish date' };
 
   // ---- delay drivers
   const succs = s.ctx.succsOf, taskById = s.ctx.taskById;
@@ -197,11 +184,11 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
   // ---- totals
   const criticalSum = r2(crit.reduce((a, d) => a + d.delay_days, 0));
   const finished = drivers.filter((d) => d.on_critical_path === null);
-  const totals = { project_slip_working_days: slipDays, critical_drivers_delay_days: criticalSum, finished_drivers: { count: finished.length, delay_days: r2(finished.reduce((a, d) => a + d.delay_days, 0)), note: 'Finished work has no float in P6: whether these were critical cannot be told, so their days are not in critical_drivers_delay_days.' } };
+  const totals = { project_slip_working_days: slipDays, critical_drivers_delay_days: criticalSum, finished_drivers: { count: finished.length, delay_days: r2(finished.reduce((a, d) => a + d.delay_days, 0)) } };
 
   // ---- responsibility
   let responsibility: Responsibility;
-  if (!party) responsibility = { result: 'not_assessed', note: `A P6 file has no field for who is responsible for a delay. Pass responsibility_code: the name of an activity code type whose value on each activity is its party (for example "Responsibility"). Activity code types in this file: ${[...new Set(rows(db, 'ACTVTYPE').map((t) => t.actv_code_type))].join(', ') || 'none (add one and assign it to the activities)'}.` };
+  if (!party) responsibility = { result: 'not_assessed' };
   else {
     // each party's driver days in full (the source's default, delayAnalysis.ts:203-214 with both options off)
     const sums = new Map<string, { drivers: number; days: number }>();
@@ -209,7 +196,7 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
       const key = d.responsible ?? 'no value', e = sums.get(key) ?? sums.set(key, { drivers: 0, days: 0 }).get(key)!;
       e.drivers++; e.days += d.delay_days;
     }
-    responsibility = { result: 'assessed', code_type: codeTypeName, parties: [...sums].map(([k, e]) => ({ party: k, drivers: e.drivers, delay_days: r2(e.days) })).sort((a, b) => b.delay_days - a.delay_days || a.party.localeCompare(b.party)), note: `Driver days per value of the activity code "${codeTypeName}", each driver's days in full; "no value" is a driver with no value of it. Concurrent delay is not assessed here: windows_analysis apportions delay between causes.` };
+    responsibility = { result: 'assessed', code_type: codeTypeName, parties: [...sums].map(([k, e]) => ({ party: k, drivers: e.drivers, delay_days: r2(e.days) })).sort((a, b) => b.delay_days - a.delay_days || a.party.localeCompare(b.party))} ;
   }
 
   // ---- causal chains: critical drivers along their critical successors to the first milestone
@@ -240,15 +227,22 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
   const slipped = classes.minor_slip + classes.moderate_slip + classes.major_slip + classes.severe_slip;
   const status = (slipDays != null && slipDays > 0) || classes.major_slip > 0 || classes.severe_slip > 0 ? 'fail' : slipped > 0 ? 'warning' : 'pass';
   const newly = overlaySummary.result === 'assessed' ? overlaySummary.newly_critical_total : null, added = overlaySummary.result === 'assessed' ? overlaySummary.added_and_critical_total : 0;
+  const notes = tidyNotes([
+    ...(finished.length ? [`${plural(finished.length, 'finished activity', 'finished activities')} ${finished.length === 1 ? 'is' : 'are'} left out of critical_drivers_delay_days: finished work has no float, so whether ${finished.length === 1 ? 'it was' : 'they were'} critical cannot be told.`] : []),
+    ...(projectSlip.result === 'not_assessed' ? [notAssessed('project slip', projectSlip.note)] : []),
+    ...(overlaySummary.result === 'not_assessed' ? [notAssessed('critical overlay', overlaySummary.note)] : []),
+    ...(bei.result === 'not_assessed' ? [notAssessed('BEI', bei.note)] : []),
+    ...(planned > 0 ? [] : [notAssessed('duration-weighted percent complete', 'no activity has a duration')]),
+  ]);
+  const bare = <T extends { result: string }>(x: T): T => { const { note: _n, ...rest } = x as T & { note?: string }; return rest as unknown as T; };
   return {
-    report: 'Baseline variance', status,
-    summary: `${slipped} activit${slipped === 1 ? 'y' : 'ies'} slipped of ${compared} compared; project slip ${slipDays != null ? `${slipDays} working days` : 'not assessed'}; ${drivers.length} delay driver(s), ${criticalSum} working days on critical drivers; ${newly != null ? `${newly} newly critical${added ? `, ${added} added since and critical` : ''}` : 'newly critical not assessed'}`,
+    report: 'Baseline variance', status, notes,
     compared_with: { kind, name: ref.name, how: ref.how, ...(ref.projects_without.length ? { projects_without: ref.projects_without } : {}) },
     data_date: text(dd), activities: { compared, not_in_reference: notIn, without_dates: noDates }, slip_classes: classes,
-    project_slip: projectSlip, totals, critical_overlay: overlaySummary,
-    bei: bei.result === 'assessed' ? { result: 'assessed', value: bei.value, completed: bei.completed, due: bei.due } : { result: 'not_assessed', note: bei.note },
-    duration_weighted_percent_complete: planned > 0 ? { result: 'assessed', value: r3(earned / planned), earned_days: r2(earned), planned_days: r2(planned) } : { result: 'not_assessed', note: 'No activity has a duration.' },
-    drivers_total: drivers.length, responsibility, variances: rowsV, drivers, chains, overlay, method: VARIANCE_METHOD,
+    project_slip: bare(projectSlip), totals, critical_overlay: bare(overlaySummary),
+    bei: bei.result === 'assessed' ? { result: 'assessed', value: bei.value, completed: bei.completed, due: bei.due } : { result: 'not_assessed' },
+    duration_weighted_percent_complete: planned > 0 ? { result: 'assessed', value: r3(earned / planned), earned_days: r2(earned), planned_days: r2(planned) } : { result: 'not_assessed' },
+    drivers_total: drivers.length, responsibility, variances: rowsV, drivers, chains, overlay,
   };
 }
 

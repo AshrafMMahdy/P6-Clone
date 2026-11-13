@@ -4,14 +4,14 @@
 // population is not assessed (the source "skips" it), and so is one the file cannot supply an input for (no baseline, no data date, no earlier update, no SLPP or planning-package activity type in P6), with the reason.
 // The threshold values are the source's, carried over as they are (dcmaDecm.ts:53-58); they have NOT been checked against the DCMA DECM workbook. The profile (default | strict) is the only way to change them.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
-import { noBaselineOf } from '../notes.ts';
+import { baselineReason, loopNote, noDataDateNotAssessed, notAssessed as notAssessedNote } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { compareSchedules, progressIntegrity } from '../diff.ts';
 import { CPT_SLIP_DAYS, criticalPathTest, dcmaPopulations, hardConstraintsCheck, invalidDateFlags, lagsCheck, logicCheck } from './dcma.ts';
 import type { Update } from './delay.ts';
-import { baselineOf, baselineFinish, namesText, isLoe, isWbs, dateFields, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
+import { baselineOf, baselineFinish, namesText, isLoe, isWbs, dateFields, checkNotes, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
 import { loopMessage, logicLoops, referenceStart, updateDate, updateView } from './forensic.ts';
 
 export type DecmId = '06A204b' | '06A205a' | '06A208a' | '06A209a' | '06A210a' | '06A212a' | '06A401a' | '06A501a' | '06A504a' | '06A504b' | '06A505a' | '06A505b' | '06A506a' | '06A506b' | '06A506c' | '08I101a' | '10A303a';
@@ -36,16 +36,6 @@ const NAMES: Record<DecmId, string> = {
 export const guidelineOf = (id: string) => parseInt(id.slice(0, 2), 10);
 const GUIDELINES: Record<number, string> = { 6: 'Schedule (Guideline 6)', 8: 'Budgeting (Guideline 8)', 10: 'Accounting/Planning Package (Guideline 10)' };
 
-export const DECM_METHOD = [
-  'each check = the share (%) of its population that breaks the rule, judged on the exact share (shown to two decimals) and passing when it is at or under its threshold; a check with an empty population is not assessed (the source skips it, dcmaDecm.ts:266-271)',
-  'thresholds (default): 06A205a lags 5 %, 06A209a hard constraints 5 %, 06A506c forecast before the data date 10 %, every other percentage check 0 % (dcmaDecm.ts:53-57); strict: 06A205a 2 %, 06A209a 2 %, 06A506c 5 % (:58). These values are the source’s and have not been checked against the DCMA DECM workbook.',
-  'compliance ratio = checks passed / checks assessed (dcmaDecm.ts:223-224); overall fail when any check fails',
-  'populations: 06A204b, 06A205a, 06A209a are dcma_14 checks 1, 3 and 5 with dcma_14’s own populations (incomplete tasks; relationships of incomplete tasks): ONE definition in the clone. DIFFERENCE from the source, which counts every discrete task and every relationship (dcmaDecm.ts:107 and following), so a finished task or a link between finished tasks is in the source’s denominator and not here',
-  '06A506a/b/c are dcma_14 check 9 split in three (every activity that is not a WBS summary, in a project with a data date); 06A401a is dcma_14 check 12 (the critical path test; a loop fails it)',
-  'DIFFERENCES from the source in 06A506c (and in progress rule 005 of schedule_index, which has the first): the source tests a forecast date ON OR BEFORE the status date (dcmaDecm.ts:186), the clone BEFORE the data date (in P6 remaining work starts ON the data date, so a date equal to it is not in the past; the rule dcma_14 check 9 uses); and the clone tests the forecast START of work not yet started as well as the forecast finish of unfinished work, where the source tests the finish only',
-  'the updates (06A504a / b): this open project and the earlier updates are all put in data-date order (windows_analysis and change_tracking do the same); the answer’s updates lists them in the order used and says which one is the open project',
-  '06A208a: WBS summary activities with a relationship; 06A210a: level-of-effort activities with a successor that is neither level of effort nor a WBS summary; 06A212a, 06A501a, 06A504a/b, 06A505a/b: activities that are neither WBS summary nor level of effort',
-];
 
 export interface DecmCheck extends CheckResult { guideline: number }
 export interface DecmOptions {
@@ -66,7 +56,8 @@ export interface DecmReport {
   summary: { passed: number; failed: number; not_assessed: number; /** passed / (passed + failed); null when nothing was assessed */ compliance_ratio: number | null; overall: 'pass' | 'fail' | null };
   guidelines: { guideline: number; name: string; checks: string[]; passed: number; failed: number; not_assessed: number }[];
   checks: DecmCheck[];
-  method: string[];
+  /** every sentence the checks and the data dates have to say, once */
+  notes: string[];
 }
 
 export function decm(db: Db, o: DecmOptions = {}): DecmReport {
@@ -82,57 +73,57 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   const out: DecmCheck[] = [];
   const ordered = [...(o.updates ?? [])].sort((x, y) => (updateDate(x) ?? 0) - (updateDate(y) ?? 0));
   const add = (c: CheckResult) => out.push({ ...c, guideline: guidelineOf(c.id) });
-  const na = (id: DecmId, note: string) => add(notAssessed(id, NAMES[id], '%', th(id), note));
+  const na = (id: DecmId, reason: string) => add(reason.startsWith('Not assessed: ') ? { ...notAssessed(id, NAMES[id], '%', th(id), ''), note: reason } : notAssessed(id, NAMES[id], '%', th(id), reason));
   /** a percentage check: found of a population; an empty population is not assessed */
-  const percent = (id: DecmId, found: Offender[], denominator: number, note: string, emptyNote: string) => {
+  const percent = (id: DecmId, found: Offender[], denominator: number, emptyNote: string) => {
     const t = th(id)!;
     if (!denominator) return na(id, emptyNote);
     // judged on the exact share, shown to two decimals: a threshold of 0 % is failed by one activity in any population (dcma_14 judges the same way now, common.ts percentCheck)
     const metric = Math.round((10000 * found.length) / denominator) / 100;
-    add({ id, name: NAMES[id], unit: '%', metric, threshold: t, numerator: found.length, denominator, result: passes((100 * found.length) / denominator, t) ? 'pass' : 'fail', activities: found, total_activities: found.length, note });
+    add({ id, name: NAMES[id], unit: '%', metric, threshold: t, numerator: found.length, denominator, result: passes((100 * found.length) / denominator, t) ? 'pass' : 'fail', activities: found, total_activities: found.length });
   };
 
   // dcma_14's own checks, one by one with every activity listed (not the whole of dcma_14): its populations, logic, lag and hard-constraint checks, and below its critical path test and invalid dates rule
   const { T, L } = dcmaPopulations(s);
-  const fromDcma = (id: DecmId, c: CheckResult, note: string, emptyNote: string) => percent(id, c.activities, c.denominator ?? 0, note, emptyNote);
+  const fromDcma = (id: DecmId, c: CheckResult, emptyNote: string) => percent(id, c.activities, c.denominator ?? 0, emptyNote);
 
-  fromDcma('06A204b', logicCheck(s, T, th('06A204b')!, 0), 'Incomplete tasks (not WBS summary, level of effort or milestones) with no predecessor or no successor: dcma_14 check 1.', 'No incomplete task.');
-  fromDcma('06A205a', lagsCheck(s, L, th('06A205a')!, 0), 'Relationships (of incomplete tasks) with a positive lag, over those relationships: dcma_14 check 3.', 'No relationship of an incomplete task.');
+  fromDcma('06A204b', logicCheck(s, T, th('06A204b')!, 0), 'there is no incomplete task');
+  fromDcma('06A205a', lagsCheck(s, L, th('06A205a')!, 0), 'no incomplete task has a relationship');
   // 06A208a: WBS summary activities carrying logic
   {
     const W = s.tasks.filter(isWbs);
     const preds = (t: Row) => s.ctx.predsOf.get(t.task_id) ?? [], succs = (t: Row) => s.ctx.succsOf.get(t.task_id) ?? [];
-    percent('06A208a', W.filter((t) => preds(t).length || succs(t).length).map((t) => offender(t, s)), W.length, 'WBS summary activities with a predecessor or a successor, over all WBS summary activities.', 'The project has no WBS summary activity.');
+    percent('06A208a', W.filter((t) => preds(t).length || succs(t).length).map((t) => offender(t, s)), W.length, 'the project has no WBS summary activity');
   }
-  fromDcma('06A209a', hardConstraintsCheck(s, T, th('06A209a')!, 0), 'Incomplete tasks with a hard constraint (Start/Finish On, On or Before, Mandatory): dcma_14 check 5.', 'No incomplete task.');
+  fromDcma('06A209a', hardConstraintsCheck(s, T, th('06A209a')!, 0), 'there is no incomplete task');
   // 06A210a: level of effort with a discrete successor
   {
     const L = s.tasks.filter(isLoe);
     const hit = L.filter((t) => (s.ctx.succsOf.get(t.task_id) ?? []).some((r) => { const x = s.ctx.taskById.get(r.task_id); return !!x && !isLoe(x) && !isWbs(x); }));
-    percent('06A210a', hit.map((t) => offender(t, s)), L.length, 'Level-of-effort activities with a successor that is neither level of effort nor a WBS summary, over all level-of-effort activities.', 'The project has no level-of-effort activity.');
+    percent('06A210a', hit.map((t) => offender(t, s)), L.length, 'the project has no level-of-effort activity');
   }
   // the activities that are neither WBS summary nor level of effort (the source's "discrete" tasks, dcmaDecm.ts:107)
   const discrete = s.tasks.filter((t) => !isWbs(t) && !isLoe(t));
-  percent('06A212a', discrete.filter((t) => startedBeforeFsPredecessor(t, s.ctx)).map((t) => offender(t, s)), discrete.length, 'Activities started while a finish-to-start predecessor has not finished, over all activities that are neither WBS summary nor level of effort.', 'The project has no activity.');
+  percent('06A212a', discrete.filter((t) => startedBeforeFsPredecessor(t, s.ctx)).map((t) => offender(t, s)), discrete.length, 'the project has no activity');
   // 06A401a: dcma_14 check 12; a loop fails it
   {
     const loops = logicLoops(s);
     // a loop cannot be scheduled, so the test is not run (it could only say that it could not)
-    if (loops.length) add({ ...notAssessed('06A401a', NAMES['06A401a'], 'days', null, ''), id: '06A401a', name: NAMES['06A401a'], result: 'fail', metric: null, activities: loops.flat().map((code) => ({ id: code, name: [...s.tasks].find((t) => t.task_code === code)?.task_name ?? '' })), total_activities: loops.flat().length, note: `The logic has ${loops.length === 1 ? 'a loop' : `${loops.length} loops`}, so there is no valid critical path (P6: "Circular relationship (loop) detected"): ${loops.map(loopMessage).join('; ')}.` });
-    else { const c = criticalPathTest(s, T, CPT_SLIP_DAYS, undefined); add({ ...c, id: '06A401a', name: NAMES['06A401a'], note: `dcma_14 check 12, the critical path test. ${c.note ?? ''}`.trim() }); }
+    if (loops.length) add({ ...notAssessed('06A401a', NAMES['06A401a'], 'days', null, ''), id: '06A401a', name: NAMES['06A401a'], result: 'fail', metric: null, activities: loops.flat().map((code) => ({ id: code, name: [...s.tasks].find((t) => t.task_code === code)?.task_name ?? '' })), total_activities: loops.flat().length, note: loopNote(loops.flat()) });
+    else { const c = criticalPathTest(s, T, CPT_SLIP_DAYS, undefined); add({ ...c, id: '06A401a', name: NAMES['06A401a'] }); }
   }
   // 06A501a: missing baseline dates (an activity not in the baseline, or in it with no start or no finish)
   {
     const inBl = discrete.filter((t) => bls.get(t.proj_id));
-    if (!inBl.length) na('06A501a', noBaselineOf(which, true));
-    else percent('06A501a', inBl.filter((t) => { const b = bls.get(t.proj_id)!.tasks.get(t.task_code); return !b || referenceStart(b) == null || baselineFinish(b) == null; }).map((t) => offender(t, s)), inBl.length,
-      `Activities that are not in the ${bls.get(inBl[0].proj_id)!.name} baseline, or are in it without a start or a finish date, over all activities that are neither WBS summary nor level of effort${s.projs.some((p) => !bls.get(p.proj_id)) ? ` (projects with no such baseline are not assessed: ${namesText(s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name))})` : ''}.`, 'No activity.');
+    if (!inBl.length) na('06A501a', baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true));
+    else percent('06A501a', inBl.filter((t) => { const b = bls.get(t.proj_id)!.tasks.get(t.task_code); return !b || referenceStart(b) == null || baselineFinish(b) == null; }).map((t) => offender(t, s)), inBl.length, 'the project has no activity');
+    if (inBl.length && s.projs.some((p) => !bls.get(p.proj_id))) { const left = namesText(s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name)); out[out.length - 1].note = notAssessedNote(`${NAMES['06A501a']} for ${left}`, baselineReason(left, true)); }
   }
   // 06A504a / 06A504b: an actual start / finish that differs from the one an earlier update held (progressIntegrity between consecutive updates, in data-date order)
   {
     // every update, this open project included, in data-date order (the order windows_analysis and change_tracking use)
     const chain = ordered;
-    if (chain.length < 2) { const why = 'No earlier update was given: pass updates (the earlier schedules, as windows_analysis takes them).'; na('06A504a', why); na('06A504b', why); }
+    if (chain.length < 2) { const why = 'no earlier update was given; pass updates'; na('06A504a', why); na('06A504b', why); }
     else {
       const start = new Map<string, Offender>(), finish = new Map<string, Offender>();
       for (let i = 1; i < chain.length; i++) {
@@ -141,31 +132,31 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
         for (const x of f) { const m = x.field === 'actual_start' ? start : x.field === 'actual_finish' ? finish : null; if (m && !m.has(x.id)) m.set(x.id, { id: x.id, name: x.name ?? '', value: `${chain[i - 1].name}: ${x.a || '(blank)'} -> ${chain[i].name}: ${x.b || '(blank)'}` }); }
       }
       const series = chain.map((u) => u.name).join(' -> ');
-      percent('06A504a', [...start.values()], discrete.length, `Activities whose actual start differs from the one an earlier update held (${series}), over the activities of this project that are neither WBS summary nor level of effort.`, 'No activity.');
-      percent('06A504b', [...finish.values()], discrete.length, `Activities whose actual finish differs from the one an earlier update held (${series}), over the activities of this project that are neither WBS summary nor level of effort.`, 'No activity.');
+      percent('06A504a', [...start.values()], discrete.length, 'the project has no activity');
+      percent('06A504b', [...finish.values()], discrete.length, 'the project has no activity');
     }
   }
   // 06A505a / 06A505b: progress with no actual start; complete with no actual finish
   {
     const asg = groupBy(db.tables.TASKRSRC?.rows ?? [], 'task_id');
     const p = (t: Row) => reportedPercent(t, asg.get(t.task_id) ?? []);
-    percent('06A505a', discrete.filter((t) => !t.act_start_date && !t.act_end_date && ((p(t) > 0 && p(t) < 1) || t.status_code === 'TK_Active')).map((t) => offender(t, s)), discrete.length, 'Activities under way (a % complete above 0 and below 100, or the status Started) with no actual start, over all activities that are neither WBS summary nor level of effort.', 'No activity.');
-    percent('06A505b', discrete.filter((t) => !t.act_end_date && (p(t) >= 1 || t.status_code === 'TK_Complete')).map((t) => offender(t, s)), discrete.length, 'Activities complete (100 %, or the status Completed) with no actual finish, over all activities that are neither WBS summary nor level of effort.', 'No activity.');
+    percent('06A505a', discrete.filter((t) => !t.act_start_date && !t.act_end_date && ((p(t) > 0 && p(t) < 1) || t.status_code === 'TK_Active')).map((t) => offender(t, s)), discrete.length, 'the project has no activity');
+    percent('06A505b', discrete.filter((t) => !t.act_end_date && (p(t) >= 1 || t.status_code === 'TK_Complete')).map((t) => offender(t, s)), discrete.length, 'the project has no activity');
   }
   // 06A506a / b / c: dcma_14 check 9 (dcma.ts invalidDateFlags, the one rule) split in three, over the activities of the projects that have a data date
   {
     const { with_data_date: pop, flagged } = invalidDateFlags(s);
-    if (!pop.length) { const why = `No data date in ${namesText(s.projs.map((p) => p.proj_short_name))}: give a status_date.`; na('06A506a', why); na('06A506b', why); na('06A506c', why); }
+    if (!pop.length) { const why = noDataDateNotAssessed(namesText(s.projs.map((p) => p.proj_short_name))); na('06A506a', why); na('06A506b', why); na('06A506c', why); }
     else {
       const w = 'over all activities that are not WBS summaries, in projects with a data date.';
-      percent('06A506a', flagged.filter((f) => f.actual_start_after).map((f) => offender(f.task, s, 'actual start after the status date')), pop.length, `Activities with an actual start after the status date, ${w}`, '');
-      percent('06A506b', flagged.filter((f) => f.actual_finish_after).map((f) => offender(f.task, s, 'actual finish after the status date')), pop.length, `Activities with an actual finish after the status date, ${w}`, '');
-      percent('06A506c', flagged.filter((f) => f.forecast_before).map((f) => offender(f.task, s, 'forecast date before the status date')), pop.length, `Incomplete activities with a forecast start (not yet started) or finish before the status date, ${w}`, '');
+      percent('06A506a', flagged.filter((f) => f.actual_start_after).map((f) => offender(f.task, s, 'actual start after the status date')), pop.length, 'no activity has a data date');
+      percent('06A506b', flagged.filter((f) => f.actual_finish_after).map((f) => offender(f.task, s, 'actual finish after the status date')), pop.length, 'no activity has a data date');
+      percent('06A506c', flagged.filter((f) => f.forecast_before).map((f) => offender(f.task, s, 'forecast date before the status date')), pop.length, 'no activity has a data date');
     }
   }
   // 08I101a, 10A303a: P6 has no such activity types
-  na('08I101a', 'P6 has no summary-level planning package (SLPP) activity type: there is nothing to assess.');
-  na('10A303a', 'P6 has no planning-package activity type: there is nothing to assess.');
+  na('08I101a', 'P6 has no summary-level planning package (SLPP) activity type');
+  na('10A303a', 'P6 has no planning-package activity type');
 
   const order = (c: DecmCheck) => DECM_IDS.indexOf(c.id as DecmId);
   out.sort((a, b) => order(a) - order(b));
@@ -174,9 +165,9 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   const dd = s.projs.map((p) => s.dataDate(p.proj_id)).find((x) => x != null) ?? null;
   const first = [...bls.values()].find(Boolean);
   return {
-    report: 'DCMA DECM schedule checks', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, ...dateFields(s, 'give status_date to set one'), baseline: first ? { which, name: first.name, how: first.how } : null, updates: ordered.map((u) => ({ name: u.name, data_date: updateDate(u) != null ? formatP6Date(updateDate(u)!) : null, open_project: !!u.open })),
+    report: 'DCMA DECM schedule checks', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, ...dateFields(s), baseline: first ? { which, name: first.name, how: first.how } : null, updates: ordered.map((u) => ({ name: u.name, data_date: updateDate(u) != null ? formatP6Date(updateDate(u)!) : null, open_project: !!u.open })),
     summary: { passed, failed, not_assessed: out.length - passed - failed, compliance_ratio: passed + failed ? Math.round((passed / (passed + failed)) * 1000) / 1000 : null, overall: passed + failed ? (failed ? 'fail' : 'pass') : null },
     guidelines: gs.map((g) => { const cs = out.filter((c) => c.guideline === g); return { guideline: g, name: GUIDELINES[g] ?? `Guideline ${g}`, checks: cs.map((c) => c.id), passed: cs.filter((c) => c.result === 'pass').length, failed: cs.filter((c) => c.result === 'fail').length, not_assessed: cs.filter((c) => c.result === 'not_assessed').length }; }),
-    checks: out, method: DECM_METHOD,
+    checks: out, notes: checkNotes(s, out),
   };
 }

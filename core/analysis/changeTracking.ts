@@ -4,7 +4,7 @@
 // type, status regressions) of core/diff.ts; the assignment diff, the baseline-date diff and the percent diff are small pure functions beside them. Activities are matched by Activity ID as compareSchedules matches them;
 // dates are compared in working days of the activity's calendar. Where an input is absent (an update with no baseline) the category of that period is not assessed, with the reason.
 import { rows, type Db, type Row } from '../db.ts';
-import { plural } from '../notes.ts';
+import { cap, tidyNotes } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { assignmentChanges, baselineDateChanges, compareSchedules, percentChanges, progressIntegrity, type IntegrityFinding, type ScheduleChange } from '../diff.ts';
 import { dayHours } from '../project/units.ts';
@@ -24,7 +24,8 @@ export type Category = 'baseline_dates' | 'actual_dates' | 'forecast_dates' | 'l
 export const CATEGORIES: Category[] = ['baseline_dates', 'actual_dates', 'forecast_dates', 'logic', 'resources', 'progress'];
 
 export interface Counted { result: 'assessed'; total: number; material: number; not_material: number; [detail: string]: number | string }
-export type CategoryResult = Counted | { result: 'not_assessed'; note: string };
+/** `note` (the reason) is carried while the periods are worked out; the answer drops it: it is said once, in the notes. */
+export type CategoryResult = (Counted & { note?: string }) | { result: 'not_assessed'; note?: string };
 
 /** A changed date or percent (the date and progress categories), one row. change: working days (dates) or points (percent), null when one side has no value. */
 export interface ChangeRow { period: number; from_update: string; to_update: string; category: 'baseline_dates' | 'actual_dates' | 'forecast_dates' | 'progress'; id: string; name: string; field: string; from: string | number | null; to: string | number | null; change: number | null; unit: 'working days' | 'points'; material: boolean; basis?: string }
@@ -41,7 +42,9 @@ export interface Period {
 export interface Flag { flag: 'retroactive_actual_dates' | 'progress_decreases' | 'baseline_dates_revised' | 'status_regressions'; severity: 'high' | 'medium'; count: number; activities_total: number; what: string; table: string }
 export interface ChangeTrackingResult {
   report: 'Change tracking';
-  status: 'fail' | 'warning' | 'pass'; summary: string;
+  status: 'fail' | 'warning' | 'pass';
+  /** what could not be assessed, with its reason, each sentence once */
+  notes: string[];
   mode: Mode;
   /** the series in the data-date order used (in mode latest, the last two), with the one that is the open project marked */
   updates: { name: string; data_date: string | null; open_project: boolean }[];
@@ -51,25 +54,8 @@ export interface ChangeTrackingResult {
   periods: Period[];
   changes: ChangeRow[]; logic_changes: LogicRow[]; resource_changes: ResourceRow[];
   retroactive_actuals: GamingRow[]; progress_decreases: GamingRow[]; status_regressions: GamingRow[];
-  method: string[];
 }
 
-export const CHANGE_METHOD = [
-  'the updates are put in data-date order and each consecutive pair is a period (changeTracking.ts:77-79, :100-103); mode latest compares only the last pair, all_periods every pair (:81, :86); every update, this open project included, is ordered by its data date (so the open project is the last only when its data date is the latest); the answer’s updates lists the order used and marks the open project',
-  'activities are matched by Activity ID (compareSchedules); an activity in only one update of a pair is counted (activities_added / activities_deleted) and not tracked (:106 skips it)',
-  'baseline dates: the start and finish the baseline each update carries gives the activity (baselineOf: the project baseline), a change per date (:109-110); a pair where either update has no baseline is not assessed',
-  `actual dates: actual start and actual finish, a change per date (:114-115); a date that appears or is cleared is a change and always material (:246)`,
-  'forecast dates: the start of work not started and the finish of work not finished in both updates (the forecast is the early date), a change per date (:125-126)',
-  `date materiality: a change of ${DATE_MATERIAL_DAYS} working day or more of the activity's calendar (the source: 1 calendar day, :82, :246), judged on the exact days; a date with no counterpart is material; a change below it is counted as not material, as the source counts it`,
-  'logic: a relationship added, removed, or kept with another type or lag (a pair of activities whose one relationship changed type is one change); all material (:251-264)',
-  'resources: an assignment (resource, or role when there is no resource) added to or removed from an activity; quantities and costs are not compared; all material (:266-271)',
-  `percent complete: by the activity's own percent complete type; a change is material from ${PROGRESS_MATERIAL_POINTS} points (:83, :135-139); a physical % that is blank on either side is not compared`,
-  'flag retroactive_actual_dates (severity high; DECM 06A504a / b; :117-122, :169-175): an actual start or finish the earlier update held that the later one changes or clears (progressIntegrity; the source flags only a changed date, not a cleared one)',
-  'flag progress_decreases (severity medium; the source calls it progress_reversal, :177-184): a percent complete that went down (progressIntegrity; one already listed as a status regression is counted there)',
-  'flag baseline_dates_revised (severity high; the source calls it baseline_drift, GAO BP-10, :185-193): any material baseline date change',
-  'flag status_regressions (severity medium; not in the source: from the clone’s progress_integrity): a status that went back (complete to under way or not started, under way to not started)',
-  'status = fail when a retroactive actual date or a material baseline date change was found, warning when any change is material, else pass (:229)',
-];
 
 const minutes = (v: string | undefined | null) => (v ? parseP6Date(v) : null);
 const text = (m: number | null) => (m == null ? null : formatP6Date(m));
@@ -137,7 +123,7 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
     const proj = (u: Update) => rows(u.db, 'PROJECT').find((p) => p.proj_id === u.projId)!;
     const blA = baselineOf(A.db, proj(A), 'project'), blB = baselineOf(B.db, proj(B), 'project');
     let baseline: CategoryResult;
-    if (!blA || !blB) baseline = { result: 'not_assessed', note: `${!blA && !blB ? `Neither ${from} nor ${to} carries` : !blA ? `${from} does not carry` : `${to} does not carry`} a project baseline, so its baseline dates cannot be compared. Assign one with edit assign_baseline on that update\u2019s project.` };
+    if (!blA || !blB) baseline = { result: 'not_assessed', note: `${!blA && !blB ? `neither ${from} nor ${to} carries` : !blA ? `${from} does not carry` : `${to} does not carry`} a project baseline; assign one with edit assign_baseline on that update\u2019s project` };
     else {
       const rowsB = baselineDateChanges(blA.tasks, blB.tasks, referenceStart, baselineFinish).map((c) => date('baseline_dates', c.id, c.name, c.field, c.a, c.b));
       changeRows.push(...rowsB);
@@ -157,7 +143,7 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
     // the integrity findings of this pair
     const pi = progressIntegrity(va, vb, changes);
     const keep = (f: IntegrityFinding) => both.has(f.id);
-    retro.push(...pi.retroactive_actuals.filter(keep).map((f) => gaming(f, period, from, to, f.b == null || String(f.b).trim() === '' ? `${f.field.replace('_', ' ')} ${f.a} was cleared in ${to}` : `${f.field.replace('_', ' ')} changed from ${f.a} to ${f.b}`)));
+    retro.push(...pi.retroactive_actuals.filter(keep).map((f) => gaming(f, period, from, to)));
     down.push(...pi.progress_decreases.filter(keep).map((f) => gaming(f, period, from, to, f.via)));
     back.push(...pi.status_regressions.filter(keep).map((f) => gaming(f, period, from, to)));
     changeRows.push(...actual, ...forecast, ...progress);
@@ -177,7 +163,7 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
   // overall: the sum over the periods where the category could be assessed
   const categories = Object.fromEntries(CATEGORIES.map((k) => {
     const ok = periods.map((p) => p.categories[k]).filter((c): c is Counted => c.result === 'assessed'), skipped = periods.filter((p) => p.categories[k].result === 'not_assessed').map((p) => p.period);
-    if (!ok.length) return [k, { result: 'not_assessed' as const, note: periods.length ? (periods[0].categories[k] as { note: string }).note : 'There is no period to compare.' }];
+    if (!ok.length) return [k, { result: 'not_assessed' as const, note: periods.length ? (periods[0].categories[k] as { note: string }).note : 'there is no period to compare' }];
     const sum: Counted = { result: 'assessed', total: 0, material: 0, not_material: 0 };
     for (const c of ok) for (const [d, v] of Object.entries(c)) if (typeof v === 'number') sum[d] = ((sum[d] as number) ?? 0) + v;
     return [k, skipped.length ? { ...sum, note: `not assessed in period ${skipped.join(', ')}: ${(periods.find((p) => p.period === skipped[0])!.categories[k] as { note: string }).note}` } : sum];
@@ -192,13 +178,16 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
     ...(back.length ? [{ flag: 'status_regressions' as const, severity: 'medium' as const, count: back.length, activities_total: uniq(back), what: 'a status that went back (complete to under way or not started, under way to not started)', table: 'status_regressions' }] : []),
   ];
   const status = retro.length || baselineRevised.length ? 'fail' : totals.material ? 'warning' : 'pass';
+  const label = (k: Category) => k.replace(/_/g, ' ');
+  const notes = tidyNotes(periods.flatMap((p) => CATEGORIES.flatMap((k) => { const c = p.categories[k]; return c.result === 'not_assessed' && c.note ? [`${cap(label(k))} not assessed in period ${p.from} to ${p.to}: ${c.note}.`] : []; })));
+  const bare = (c: CategoryResult): CategoryResult => { const { note: _n, ...rest } = c; return rest as CategoryResult; };
+  const bareCats = (m: Record<Category, CategoryResult>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, bare(v)])) as Record<Category, CategoryResult>;
   return {
     report: 'Change tracking',
-    status, summary: `${plural(totals.changes, 'change')} (${totals.material} material) across ${series.length} updates (${plural(periods.length, 'period')}); ${plural(flags.length, 'flag')} raised`,
+    status, notes,
     mode, updates: series.map((u) => ({ name: u.name, data_date: text(updateDate(u)), open_project: !!u.open })),
-    totals, categories, flags, periods,
+    totals, categories: bareCats(categories), flags, periods: periods.map((p) => ({ ...p, categories: bareCats(p.categories) })),
     changes: changeRows, logic_changes: logicRows, resource_changes: resourceRows, retroactive_actuals: retro, progress_decreases: down, status_regressions: back,
-    method: CHANGE_METHOD,
   };
 }
 

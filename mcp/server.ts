@@ -23,7 +23,7 @@ import { NEW_XER_NOTE, NEW_XER_VERSION, writeXer, writeXerTo } from '../core/xer
 import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid, unidentified } from '../core/xer/repair-valid.ts';
-import { argumentNotUsed, droppedOnSave, listCut, stillWorking, tooLarge, namesText, notRepaired, openedRepaired, plural } from '../core/notes.ts';
+import { argumentNotUsed, cancelledAfter, datesNotCurrent, droppedOnSave, listCut, stillWorking, tooLarge, namesText, notRepaired, openedRepaired, plural } from '../core/notes.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { mspLossNote } from '../core/msp/shared.ts';
@@ -55,6 +55,9 @@ import { discardKeptMeshing, FOURD_FILES, FOURD_NAMES, FOURD_TOOLS, load4dSideca
 import { LOB_FILES, LOB_NAMES, LOB_TOOLS, lobSidecars, lobSidecarText, readLobSidecar, runLob, scheduleWithLob } from './lob.ts';
 import { lobGuard } from '../core/lob/view.ts';
 import { loadLobModels } from '../core/lob/store.ts';
+import { describeChanges, type FieldChange } from '../core/project/changes.ts';
+import { storedDatesState } from '../core/schedule/stored-dates.ts';
+import { tidyNotes } from '../core/notes.ts';
 import { differentDatesNote, duplicateRowNotes, scheduleLogReport, scheduleNotes } from '../core/analysis/scheduleLog.ts';
 import { baselineOf } from '../core/analysis/common.ts';
 import { reasonerModelPath, reasonerStatus } from '../core/analysis/hrmRuntime.ts';
@@ -368,7 +371,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       for (const t0 = Date.now(); !job.done && Date.now() - t0 < wait;) await new Promise((r) => setTimeout(r, 200));
       return jobView(job);
     }
-    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: ['monte_carlo', 'open_file', 'save', 'schedule', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'lint', 'render_4d', 'lob_create', 'lob_edit', 'lob_takt', 'lob_import'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
+    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, notes: [['monte_carlo', 'open_file', 'save', 'schedule', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'lint', 'render_4d', 'lob_create', 'lob_edit', 'lob_takt', 'lob_import'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.'] }; }
     case 'open_file': {
       const path = pathArg(a.path);
       // an XER is read from its file a chunk at a time; the other formats are read whole (XML trees, MPX)
@@ -504,7 +507,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true }); if (!r.ok) throw new Error('refused'); }); }
       catch (e) { if (r && !r.ok) return { ok: false, error: { code: 'op_failed', ...r.error, hint: 'Fix that operation (the message says what is wrong) and send the list again; nothing was changed.' } }; throw e; }
       s.history[s.history.length - 1].label = `Edit (${r.applied} operation${r.applied === 1 ? '' : 's'})`;
-      return r;
+      const { warnings: opWarnings, ...applied } = r as typeof r & { warnings?: string[] };
+      const { stale, ...confirmed } = confirmChanges(s);
+      const notes = tidyNotes([...(opWarnings ?? []), ...stale]);
+      return { ...applied, ...confirmed, ...(notes.length ? { notes } : {}) };
     }
     case 'evaluate': {
       let options: ReturnType<typeof parseScheduleOptions> = {};
@@ -697,7 +703,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         // the chart: MC_BARS equal date bars from the earliest to the latest finish (the desktop screens, config.screens, read the engine's own whole-day bins)
         // (every run finishing at the same moment leaves no range to divide: one bar holds all the runs, and histogram_note says so)
         const oneMoment = lo === hi;
-        const noVariation = !(r.sensitivity.length || r.events.length), MC_VARY = 'To get a spread, set three-point estimates (edit set_estimates), or pass default_estimates ({min_pct, max_pct, dist}), or pass a sampler.';
+        const noVariation = !(r.sensitivity.length || r.events.length);
         const hist = config.screens ? r.histogram.map((b) => ({ start: iso(b.start), end: iso(b.end), count: b.count, cum_pct: b.cumPct })) : oneMoment ? [{ start: iso(lo), end: iso(hi), count: r.finishSamples.length, cum_pct: 100 }] : bins(lo, (hi - lo) / MC_BARS, MC_BARS);
         // more than one project in the run: an Activity ID can be in several, so each row names its project (as the other answers do)
         const multi = ids.length > 1, projOfTask = new Map<string, string>();
@@ -723,7 +729,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           iterations: r.iterations, seed: r.seed, elapsed_seconds: Math.round(r.elapsedMs / 100) / 10, data_date: iso(r.dataDate),
           deterministic_finish: iso(r.deterministicFinish), chance_of_meeting_deterministic: Math.round(r.probDeterministic * 1000) / 10,
           finish: { P10: iso(r.percentiles.P10), P50: iso(r.percentiles.P50), P80: iso(r.percentiles.P80), P90: iso(r.percentiles.P90), mean: iso(r.mean), min: iso(r.min), max: iso(r.max), std_dev_days: Math.round(r.stdDevDays * 10) / 10 },
-          histogram: hist, ...(oneMoment && !config.screens ? { histogram_note: `All ${r.finishSamples.length} runs finish at the same moment (${iso(lo)}), so the chart is one bar holding all of them, not ${MC_BARS}.${noVariation ? ' Why they coincide, and what to do about it, is in note.' : ''}` } : {}), cumulative, ...(config.screens ? {} : { cumulative_total: fullCurve.length }),
+          histogram: hist, cumulative, ...(config.screens ? {} : { cumulative_total: fullCurve.length }),
           // exact: true (the screens pass it): the engine's own figures, not rounded, in its own units (the rows above carry theirs too: critical_pct, correlation)
           ...(a.exact === true ? { exact: { std_dev_days: r.stdDevDays, prob_deterministic: r.probDeterministic, ...(r.probDeadline != null ? { prob_deadline: r.probDeadline } : {}), risk_events: r.risks.map((x) => ({ id: x.code, probability: x.probability, hours: x.hours, triggered_pct: x.triggeredPct })), events: r.events.map((x) => ({ name: x.name, probability: x.probability, triggered_pct: x.triggeredPct })) } } : {}),
           ...listed('milestones', milestones), ...listed('criticality', criticality), ...criticalCounts, ...listed('sensitivity', sensitivity),
@@ -734,10 +740,11 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           ...(r.partial ? { partial: true, stopped: r.partial.stopped, iterations_done: r.iterations, iterations_requested: r.partial.requested, ...(r.partial.error ? { error: r.partial.error } : {}), ...(r.partial.kept ? { resume: r.partial.kept } : {}) } : {}),
           ...(r.resumed ? { resumed_iterations: r.resumed } : {}),
           // kept iterations that did not check out (a power loss can leave zeros or old bytes), with every one after them: run again, said
-          ...(r.redone ? { redone_iterations: r.redone, redone_note: `${r.redone} kept iteration${r.redone === 1 ? '' : 's'} did not check out (damaged, as a power loss can leave a file, or after a damaged one) and ${r.redone === 1 ? 'was' : 'were'} run again.` } : {}),
+          ...(r.redone ? { redone_iterations: r.redone } : {}),
           // a finished run removed its kept file: named, so a copy of it elsewhere (the platform's mirror of the outputs) goes too
           ...(!r.partial && !r.keptNote && store.path ? { parts_removed: keptPlace(store.path) } : {}),
-          note: r.partial ? `Partial: the run ${r.partial.stopped === 'cancelled' ? 'was cancelled' : 'failed'} after ${r.iterations} of ${r.partial.requested} iterations${r.partial.error ? ` (${r.partial.error})` : ''}; these statistics are of the ${r.iterations} that finished.${r.partial.kept ? ` The ${r.iterations} iterations are kept in ${r.partial.kept}: ${keepWords('monte_carlo', r.partial.kept, 'iterations')}` : ''}` : [r.keptNote, noVariation ? `No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule. ${MC_VARY}` : undefined].filter(Boolean).join(' ') || undefined,
+          ...(r.partial ? { note: r.partial.error ? `Stopped after ${r.iterations} of ${r.partial.requested} iterations (${String(r.partial.error).replace(/\.$/, '')}): the result covers those only.` : cancelledAfter(r.iterations, r.partial.requested, 'iterations', false) } : {}),
+          ...(() => { const n = [...(r.redone ? [`${r.redone} kept iteration${r.redone === 1 ? '' : 's'} did not check out (damaged) and ${r.redone === 1 ? 'was' : 'were'} run again.`] : []), ...(!r.partial && r.keptNote ? [r.keptNote] : []), ...(noVariation ? ['No spread: no activity has a three-point estimate and no risk event applies; set estimates with edit set_estimates or pass default_estimates.'] : [])]; return n.length ? { notes: n } : {}; })(),
         };
         if (a.export == null) return answer;
         // the result files: every list whole, every iteration in the order it ran (a resumed run's kept ones first), the engine's own values
@@ -778,7 +785,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         ], writeOutWith, exportOf(a, { partial: !!r.partial }));
         // the notes of the two ranked lists, as the platform's own tool built them (mcNotes.ts): they name the CSV that holds every row, when it was written
         const csv = (table: string) => exp.files.find((f) => f.path.endsWith(`-${table}.csv`))?.path;
-        const cNote = config.screens ? undefined : criticalityNote(criticality.length > LISTED ? LISTED : criticality.length, criticality.length, criticalCounts.critical_in_every_run, criticalCounts.critical_in_any_run, csv('criticality'));
+        const cNote = config.screens ? undefined : criticalityNote(criticality.length > LISTED ? LISTED : criticality.length, criticality.length, csv('criticality'));
         const sNote = config.screens ? undefined : sensitivityNote(Math.min(LISTED, sensitivity.length), sensitivity.length, csv('sensitivity'));
         return { ...answer, ...(cNote ? { criticality_note: cNote } : {}), ...(sNote ? { sensitivity_note: sNote } : {}), exported: exp };
       } catch (e) { if (ctx.signal.aborted) fail('cancelled', 'The Monte Carlo run was cancelled.', 'Start it again when needed.'); throw e; }
@@ -799,9 +806,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'undo': {
       if (a.any_caller) requireOwner(s, a.owner_key ?? fail('owner_key_required', 'any_caller undo needs the owner key.', 'Pass owner_key, or undo only your own changes.'), 'Undoing other callers\' changes');
       const r = undo(s, ctx.caller, !!a.any_caller);
-      return r.undone ? { undone: r.undone, by: r.by, your_remaining_changes: s.history.filter((h) => h.caller === ctx.caller).length } : { undone: null, note: a.any_caller ? 'Nothing to undo.' : `You (${ctx.caller}) have no change to undo on this project.` };
+      return r.undone ? { undone: r.undone, by: r.by, your_remaining_changes: s.history.filter((h) => h.caller === ctx.caller).length } : { undone: null, notes: [a.any_caller ? 'Nothing to undo.' : `You (${ctx.caller}) have no change to undo on this project.`] };
     }
-    case 'redo': { const r = redo(s, ctx.caller); return r.redone ? r : { redone: null, note: 'Nothing to redo (redo is cleared when you make a new change).' }; }
+    case 'redo': { const r = redo(s, ctx.caller); return r.redone ? r : { redone: null, notes: ['Nothing to redo.'] }; }
     case 'save': {
       requireOwner(s, a.owner_key, 'Saving');
       const path = a.path ? pathArg(a.path, 'path', 'write') : s.path ?? fail('bad_input', 'Give "path" (this project was created in memory).', 'Pass a file path inside the storage root.');
@@ -918,18 +925,18 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         let res = undefined as ReturnType<typeof applyImport> | undefined;
         if (plan.ops.length && !lobRefusal) { const j = record(s.db, (d) => { res = applyImport(d, plan, { hoursPerDay: s.hpd, calendarDays: true }); }); rollback(j); }
         const refused = refusedRows((res as ReturnType<typeof applyImport> | undefined)?.refused ?? []);
-        return { applied: false, ...(plan.ops.length ? {} : { note: 'Nothing to change.' }), summary: plan.summary, warnings: plan.warnings, ...(lobRefusal ? { refused_all: lobRefusal } : {}), ...(refused.length ? { refused, refused_note: `${refused.length} row(s) would be refused and skipped by the real run (the same refusals it gives); the rest would be applied. Fix those rows first (a row's next says what to do).` } : {}), operations: plan.ops.slice(0, 200).map((o, i) => ({ ...o, sheet_row: `${plan.rows[i].sheet}!${plan.rows[i].row}` })) };
+        return { applied: false, summary: plan.summary, notes: tidyNotes([...plan.warnings, ...(refused.length ? [`${plural(refused.length, 'row')} would be refused and skipped by the real run; the rest would be applied.`] : [])]), ...(lobRefusal ? { refused_all: lobRefusal } : {}), ...(refused.length ? { refused } : {}), operations: plan.ops.slice(0, 200).map((o, i) => ({ ...o, sheet_row: `${plan.rows[i].sheet}!${plan.rows[i].row}` })) };
       }
       if (lobRefusal) return { ok: false, error: { code: 'op_failed', message: lobRefusal, hint: 'Use lob_edit for an LOB plan\u2019s durations, crews, locations and logic; progress, notes, resources and other codes edit as usual.' } };
       const res = change(s, ctx.caller, `Import ${basename(path)}`, (d) => applyImport(d, plan, { hoursPerDay: s.hpd, calendarDays: true }));
       if (!res.applied) dropLast(s);
       const refused = refusedRows(res.refused);
-      return { applied: res.applied > 0, operations_applied: res.applied, summary: plan.summary, warnings: [...plan.warnings, ...res.warnings], ...(refused.length ? { refused } : {}), note: res.applied ? `Undo with undo (one step).${refused.length ? ` ${refused.length} row(s) were refused and skipped; the rest was applied.` : ''} Run schedule to recalculate dates.` : 'Every row with a change was refused; nothing was changed.' };
+      const { stale, ...confirmed } = res.applied ? confirmChanges(s) : { stale: [] as string[] };
+      return { applied: res.applied > 0, operations_applied: res.applied, summary: plan.summary, ...confirmed, ...(refused.length ? { refused } : {}), notes: tidyNotes([...plan.warnings, ...res.warnings, ...(refused.length ? [`${plural(refused.length, 'row')} ${refused.length === 1 ? 'was' : 'were'} refused and skipped; the rest was applied.`] : []), ...(res.applied ? [] : ['Every row with a change was refused; nothing was changed.']), ...stale]) };
     }
     case 'compare': {
       // the export: every change (the answer pages them, max_changes a page) and the activities on one side only
       const COMPUTED = ['id', 'duration_delta_days', 'remaining_delta_days', 'start_shift_days', 'finish_shift_days', 'total_float_delta_days', 'became_critical', 'no_longer_critical'];
-      const SIGN = 'A positive finish_shift_days (likewise start_shift_days, duration_delta_days, remaining_delta_days, total_float_delta_days) means the later revision is later (longer, more float) than the earlier one; negative means earlier.';
       const names = (d: Db) => (d.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_short_name).join(', ');
       const sides = (earlier: string, later: string) => `${earlier} (earlier) \u2192 ${later} (later)`;
       // whole: the answer's lists as they are before the answer cuts them (progress_integrity's three lists); the result files hold them whole
@@ -943,13 +950,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const cur = (s.db.tables.PROJECT?.rows ?? []).find((p) => !p._baseline_of && (a.project == null || p.proj_short_name === a.project)) ?? fail('bad_input', 'No project to compare.', 'Pass project.');
         const bl = baselineOf(s.db, cur, String(a.baseline) as 'project') ?? fail('bad_input', `The project has no ${a.baseline} baseline in this file.`, 'Use project, bl1, bl2, bl3 or the name of a saved baseline.');
         const c = compareComputed(s.db, s.db, s.hpd, { aProjIds: [bl.projId], bProjIds: [cur.proj_id] });
-        return compared({ compared: sides(`${cur.proj_short_name} baseline ${bl.name}`, `${cur.proj_short_name} as it is now`), mode: 'computed', sign_note: SIGN, baseline: bl.name, ...c, changed: c.changes.length, ...changesPage(c.changes, a) }, c.changes, COMPUTED, c);
+        return compared({ compared: sides(`${cur.proj_short_name} baseline ${bl.name}`, `${cur.proj_short_name} as it is now`), mode: 'computed', baseline: bl.name, ...c, changed: c.changes.length, ...changesPage(c.changes, a) }, c.changes, COMPUTED, c);
       }
       // a file compared against is read for this call only, and counted in the memory budget while it is held (C14)
       const { db: other, release } = await readOther(a, 'compare with');
       try {
       const theSides = sides(`${names(s.db)} (the open project)`, a.other_handle ? `${names(other)} (the other open project)` : `${basename(String(a.path))} (the file)`);
-      if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return compared({ compared: theSides, mode: 'computed', sign_note: SIGN, changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }, c.changes, COMPUTED, c); }
+      if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return compared({ compared: theSides, mode: 'computed', changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }, c.changes, COMPUTED, c); }
       if (a.mode != null && a.mode !== 'all') fail('bad_input', 'mode must be all or computed.', 'Leave it out to compare everything.');
       const cs = compareSchedules(s.db, other, s.hpd, true);
       const count = (o: string, k: string) => cs.filter((c) => c.object === o && c.kind === k).length;
@@ -1078,6 +1085,8 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
     let out = handle != null ? await exclusive(handle, () => withWorkingSet(name, a, handle, () => run(name, a, ctx))) : await run(name, a, ctx);
     const plain = !!out && typeof out === 'object' && !Array.isArray(out);
     if (plain) out = noteCuts(out, name); // where the whole of each cut list is, when an export was written (export.ts)
+    // the notes of the answer as they are told: each sentence once, parts not assessed for one reason in one sentence (core/notes.ts tidyNotes); an answer with none carries no `notes`
+    if (plain && out && typeof out === 'object' && !Array.isArray(out) && Array.isArray((out as { notes?: unknown }).notes)) { const t = tidyNotes((out as { notes: string[] }).notes); if (t.length) (out as { notes: string[] }).notes = t; else delete (out as { notes?: unknown }).notes; }
     // a tool that can change a project says whether that project now has unsaved changes
     const h = handle ?? (plain && typeof (out as { handle?: unknown }).handle === 'string' ? (out as { handle: string }).handle : undefined);
     if (plain && h && MUTATES.has(name) && !(name === 'lob_takt' && a.apply !== true)) { // lob_takt's check reads only (L-9)
@@ -1197,6 +1206,18 @@ function writeResultFile(tool: string, text: string, ext = 'json'): string | nul
     return file;
   } catch { return null; /* the caller still answers */ }
 }
+/** What an edit changed, as the answer says it: each changed field with its old and new value (the first LISTED; all of them in a file when there are more), and, when the edit leaves the saved dates not current, the one shared sentence. */
+function confirmChanges(s: Session): { changes?: FieldChange[]; changes_total?: number; changes_note?: string; stale: string[] } {
+  const last = s.history[s.history.length - 1];
+  if (!last) return { stale: [] };
+  const { changes, datesAffected } = describeChanges(s.db, last.j);
+  const stale = datesAffected ? storedDatesState(s.db).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open)) : [];
+  if (!changes.length) return { stale };
+  if (changes.length <= LISTED) return { changes, stale };
+  const csv = ['id,field,old,new', ...changes.map((c) => [c.id, c.field, c.old ?? '', c.new ?? ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\r\n');
+  const file = writeResultFile('edit_changes', csv, 'csv');
+  return { changes: changes.slice(0, LISTED), changes_total: changes.length, changes_note: listCut(LISTED, changes.length, file ?? undefined), stale };
+}
 export function toolResult(out: unknown, isError: boolean, tool?: string) {
   let text = JSON.stringify(out);
   releaseIfGrown();
@@ -1223,7 +1244,7 @@ export function toolResult(out: unknown, isError: boolean, tool?: string) {
     const ask = asks.length ? (via ? `, or call ${via} again asking for less (its ${asks.join(', ')})` : `, or ask for less (this tool's ${asks.join(', ')})`) : '';
     structured = { truncated: true, size_chars: text.length, ...(saved ? { saved, written: [saved] } : {}),
       ...(answer.exported !== undefined ? { exported: answer.exported } : {}), ...Object.fromEntries(['partial', 'resume', 'next_offset'].filter((k) => answer[k] !== undefined).map((k) => [k, answer[k]])),
-      notes: [tooLarge(text.length, saved, ask), ...(Array.isArray(answer.notes) ? answer.notes.filter((n): n is string => typeof n === 'string') : []), ...cuts],
+      notes: [tooLarge(text.length, saved, ask), ...(typeof answer.note === 'string' ? [answer.note] : []), ...(Array.isArray(answer.notes) ? answer.notes.filter((n): n is string => typeof n === 'string') : []), ...cuts],
       preview: text.slice(0, 20000) };
     text = JSON.stringify(structured);
   }

@@ -19,8 +19,8 @@ test('MCP: check_schedule and dcma_14 on a real XER, with a report file and clea
   const h = (await call('open_file', { path: join(import.meta.dirname, '..', 'Sample XERs', 'cairo festival city.xer') })).d.handle;
   const cs = await call('check_schedule', { handle: h, max_ids: 3 });
   // max_ids is gone (a fixed 25 per list): the call ran without it and the answer says so, in words (R6)
-  assert.equal(cs.d.arguments_not_used.length, 1);
-  assert.match(cs.d.arguments_not_used[0], /^check_schedule has no argument "max_ids": it was not used and the call ran without it\. Its arguments are: handle, export, export_name, project, checks, targets, threshold_days, path, caller, async\.$/);
+  assert.equal(cs.d.notes.length, 1);
+  assert.match(cs.d.notes[0], /^check_schedule has no argument "max_ids": it was not used and the call ran without it\. Its arguments are: handle, export, export_name, project, checks, targets, threshold_days, path, caller, async\.$/);
   assert.equal(cs.err, false, JSON.stringify(cs.d));
   assert.equal(cs.d.checks.length, 14);
   assert.ok(cs.d.checks.every((c: { activities: unknown[] }) => c.activities.length <= 25));

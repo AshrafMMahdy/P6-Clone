@@ -5,7 +5,8 @@
 // rescheduled at the same data date; the delay is impacted less unimpacted completion. All in working days on the
 // first update's project calendar, so the windows add up to the total.
 import { rows, type Db, type Row } from '../db.ts';
-import { checkStoredDates } from '../schedule/stored-dates.ts';
+import { storedDatesState } from '../schedule/stored-dates.ts';
+import { datesNotCurrent } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { applyOps } from '../project/ops.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
@@ -115,7 +116,12 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
       if (predCodes(A, a) !== predCodes(B, b)) causes.push('logic revised');
       const planStart = parseP6Date(a.act_start_date || a.early_start_date), ddB = dataDate(B);
       if (!a.act_start_date && planStart != null && ddB != null && planStart < ddB && (!b.act_start_date || (parseP6Date(b.act_start_date) ?? 0) > planStart)) causes.push('started late');
-      if (!causes.length && (days ?? 0) > 0) causes.push('progressed slower than planned');
+      if (!causes.length && (days ?? 0) > 0) {
+        // 'progressed slower than planned' only where measured: the activity was under way at the earlier update and its remaining duration fell by less than the working time between the two data dates
+        const ddA = dataDate(A), elapsedH = ddA != null && ddB != null ? cal.workBetween(ddA, ddB) / 60 : null, remA = Number(a.remain_drtn_hr_cnt || 0), remB = Number(b.remain_drtn_hr_cnt || 0);
+        if (a.act_start_date && elapsedH != null && elapsedH > 0 && remA - remB < elapsedH - 1e-6) causes.push(`progressed slower than planned (remaining ${r2(remA / hpd)} d to ${r2(remB / hpd)} d over ${r2(elapsedH / hpd)} d between the data dates)`);
+        else causes.push(`no single cause identified: its finish moved ${days} d with its duration, logic and start unchanged`);
+      }
       return { id: a.task_code, name: a.task_name, ...(b.task_code !== a.task_code ? { now: b.task_code } : {}), lost_days: days, finish_from: a.act_end_date || a.early_end_date || null, finish_to: b.act_end_date || b.early_end_date || null, causes };
     }).filter((x) => x.lost_days == null || x.lost_days > 0).sort((x, y) => (y.lost_days ?? Infinity) - (x.lost_days ?? Infinity));
     const w: Record<string, unknown> = {
@@ -141,18 +147,10 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
   const total = wd(ff ? finOf(ff) : null, fl ? finOf(fl) : null);
   // notes on what the figures stand on: an update whose saved dates are not current (a recalculation gives other dates), and two updates with one data date (a window of 0 days)
   const notes: string[] = [];
-  for (const u of list) {
-    const e = finishActivity(u, o.milestone);
-    const stale = checkStoredDates(u.db).some((f) => f.code === 'DATES_NOT_CURRENT');
-    if (stale && e) {
-      let calc: number | null = null;
-      scheduleProjects(u.db, [u.projId], {}, (row, v) => { if (row === e && 'early_end_date' in v) calc = parseP6Date(v.early_end_date); });
-      notes.push(`${u.name}: the dates it saved are not current (a recalculation gives other dates), and the slip here is measured on the saved ones: its finish is saved as ${fmt(finOf(e))}${calc != null && calc !== finOf(e) ? `, a recalculation gives ${fmt(calc)}` : ''}. Schedule it first (schedule) for a slip measured on current dates.`);
-    }
-  }
+  for (const u of list) { const st = storedDatesState(u.db, [u.projId]).stale[0]; if (st) notes.push(datesNotCurrent(`${u.name} (${st.proj})`, st.differ, st.open)); }
   for (let i = 1; i < list.length; i++) {
     const x = dataDate(list[i - 1]), y = dataDate(list[i]);
-    if (x != null && x === y) notes.push(`Window ${i} (${list[i - 1].name} to ${list[i].name}): both updates have the data date ${fmt(x)}, so the window is 0 days long: its slip is the difference between two versions saved at one date, not progress between dates.`);
+    if (x != null && x === y) notes.push(`${list[i - 1].name} and ${list[i].name} have the same data date ${fmt(x)}: the window is 0 days.`);
   }
   return {
     ok: true as const, ...(notes.length ? { notes } : {}), method: o.method ?? 'contemporaneous', measured: o.milestone ? `milestone ${o.milestone}` : 'project completion', calendar_hours_per_day: hpd,

@@ -10,8 +10,11 @@ import { statusOf, projectName } from '../project/edit.ts';
 import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
 import { financialPeriods, periodCalendar, projectCalendar } from '../progress/period.ts';
 import { dayHours } from '../project/units.ts';
-import { constraintsOf, DCMA_HARD, dataDateNote } from '../analysis/common.ts';
-import { plural } from '../notes.ts';
+import { constraintsOf, DCMA_HARD } from '../analysis/common.ts';
+import { baselineLeftOut, currentPlanUsed, datesNotCurrent, differentDataDates, namesText, noDataDateNotAssessed, noDataDateWouldUse, notAssessed, tidyNotes } from '../notes.ts';
+import { duplicateRowNotes } from '../analysis/scheduleLog.ts';
+import { storedDatesState } from '../schedule/stored-dates.ts';
+import { formatP6Date } from '../dates.ts';
 
 /** A lookup described for a language model (JSON Schema parameters). */
 export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
@@ -125,8 +128,8 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const notebook = (p: Row) => { const root = rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y'); return root ? rows(db, 'WBSMEMO').filter((m) => m.wbs_id === root.wbs_id).map((m) => ({ topic: topics.get(m.memo_type_id) ?? '', text: plain(m.wbs_memo) })) : []; };
       return {
         projects: projs.map((p) => { const nb = notebook(p); return { id: p.proj_short_name, name: projectName(db, p), data_date: d(p.last_recalc_date), planned_start: d(p.plan_start_date), must_finish_by: d(p.plan_end_date), scheduled_finish: d(p.scd_end_date), ...(nb.length ? { notebook: nb } : {}) }; }),
-        ...(dataDateNote(projs, 'set one with edit set_project data_date, or schedule with data_date', 'shown blank here; schedule uses the planned start for it') ? { data_date_note: dataDateNote(projs, 'set one with edit set_project data_date, or schedule with data_date', 'shown blank here; schedule uses the planned start for it') } : {}),
-        activities: tasks.length, ...(tasks.length > new Set(tasks.map((t) => t.task_id)).size ? { activities_note: `${plural(tasks.length - new Set(tasks.map((t) => t.task_id)).size, 'activity row')} repeat${tasks.length - new Set(tasks.map((t) => t.task_id)).size === 1 ? 's' : ''} another row\u2019s internal id: schedule merges them and counts ${new Set(tasks.map((t) => t.task_id)).size} activities here. save {repair: true} removes a repeat that is an identical copy.` } : {}), not_started: count('TK_NotStart'), in_progress: count('TK_Active'), completed: count('TK_Complete'),
+        activities: tasks.length,
+        ...(() => { const n = tidyNotes([...projs.filter((p) => parseP6Date(p.last_recalc_date) == null).map((p) => noDataDateWouldUse(p.proj_short_name, parseP6Date(p.plan_start_date) != null ? formatP6Date(parseP6Date(p.plan_start_date)!).slice(0, 16) : '(no planned start either)')), ...(tasks.length > new Set(tasks.map((t) => t.task_id)).size ? duplicateRowNotes(db, [...open], 'counted') : [])]); return n.length ? { notes: n } : {}; })(),
         critical: tasks.filter((t) => !t.act_end_date && isCritical(t, ctx)).length,
         negative_float: tasks.filter((t) => !t.act_end_date && Number(t.total_float_hr_cnt) < 0).length,
         milestones: tasks.filter((t) => t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile').length,
@@ -135,7 +138,6 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         wbs_top_level: top.slice(0, 40).map((w) => `${w.wbs_short_name} ${w.wbs_name}`),
         calendars: rows(db, 'CALENDAR').length, resources: new Set(rows(db, 'TASKRSRC').filter((a) => open.has(a.proj_id)).map((a) => a.rsrc_id)).size,
         hours_per_day_used_for_days: hpd,
-        days_are: calendarDays ? 'working days of each activity\'s own calendar (its hours per day; lags: the relationship-lag calendar); hours_per_day_used_for_days only where a calendar has none' : 'hours_per_day_used_for_days hours each',
       };
     }
     case 'find_activities': {
@@ -181,7 +183,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
     case 'get_activity': {
       const many = Array.isArray(args.activity_ids);
       const found = many ? (args.activity_ids as unknown[]).map((id) => [String(id), byCode(String(id))] as const) : [[String(args.activity_id ?? ''), byCode(String(args.activity_id ?? ''))] as const];
-      if (!many && !found[0][1]) return { error: `No activity with ID "${args.activity_id}" in the open project(s).` };
+      if (!many && !found[0][1]) return { error: `Refused: no activity with ID "${args.activity_id}" in the open projects.` };
       const byId = ctx.taskById;
       const relFF = relationshipFloat(db, ctx);
       const rel = (r: Row, other: string) => {
@@ -264,14 +266,16 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const limit = Math.max(1, Number(args.limit) || 50);
       const crit = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && (t.driving_path_flag === 'Y' || isCritical(t, ctx))).sort((a, b) => start(a).localeCompare(start(b)));
       const pg = pageOf(crit, args, limit);
-      return { total: crit.length, longest_path_flags_present: tasks.some((t) => t.driving_path_flag === 'Y'), offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map(brief) };
+      const stale = storedDatesState(db, [...open]).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open));
+      return { total: crit.length, longest_path_flags_present: tasks.some((t) => t.driving_path_flag === 'Y'), offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map(brief), ...(stale.length ? { notes: stale } : {}) };
     }
     case 'schedule_health': {
       const live = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
       const P = rows(db, 'TASKPRED').filter((r) => open.has(r.proj_id));
       const nEx = args.max_examples === 0 ? undefined : Math.max(1, Number(args.max_examples) || 8);
       const ex = (l: Row[]) => ({ count: l.length, examples: l.slice(0, nEx).map((t) => `${t.task_code} ${t.task_name}`) });
-      const dd = parseP6Date([...open].map((id) => ctx.proj.get(id)?.last_recalc_date).find(Boolean));
+      // each project is judged against its own data date (as the scheduler does)
+      const ddOf = (t: Row) => parseP6Date(ctx.proj.get(t.proj_id)?.last_recalc_date);
       const noPred = live.filter((t) => !(ctx.predsOf.get(t.task_id)?.length));
       const noSucc = live.filter((t) => !(ctx.succsOf.get(t.task_id)?.length));
       const hard = live.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c)));
@@ -281,7 +285,9 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const highTf = live.filter((t) => Number(t.total_float_hr_cnt) / dh.task(t) > 44);
       const leads = P.filter((r) => Number(r.lag_hr_cnt) < 0), lags = P.filter((r) => Number(r.lag_hr_cnt) > 0);
       const types = P.reduce<Record<string, number>>((a, r) => ((a[r.pred_type] = (a[r.pred_type] ?? 0) + 1), a), {});
-      const stale = dd == null ? [] : live.filter((t) => !t.act_start_date && (parseP6Date(t.early_start_date) ?? Infinity) < dd);
+      const stale = live.filter((t) => { const dd = ddOf(t); return dd != null && !t.act_start_date && (parseP6Date(t.early_start_date) ?? Infinity) < dd; });
+      const healthProjs = [...open].map((id) => ctx.proj.get(id)).filter((p): p is Row => !!p), noDd = healthProjs.filter((p) => parseP6Date(p.last_recalc_date) == null), withDd = healthProjs.filter((p) => parseP6Date(p.last_recalc_date) != null);
+      const ddDiffer = new Set(withDd.map((p) => p.last_recalc_date)).size > 1;
       const oos = live.filter((t) => t.act_start_date && (ctx.predsOf.get(t.task_id) ?? []).some((r) => { const p = ctx.taskById.get(r.pred_task_id); return r.pred_type === 'PR_FS' && p && !p.act_end_date; }));
       return {
         open_activities: live.length, relationships: P.length,
@@ -291,13 +297,13 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         remaining_duration_over_44_days: ex(longDur),
         leads_negative_lag: leads.length, positive_lags: lags.length, relationship_types: types,
         started_out_of_sequence: ex(oos), not_started_but_dated_before_data_date: ex(stale),
-        note: 'Counts only, with no pass or fail: dcma_14 grades them against the DCMA limits. The population is the open activities (not completed, WBS summary or level of effort). Hard constraints are Start On, Finish On, Start On or Before, Finish On or Before and Mandatory Start / Finish, primary or secondary (DCMA\u2019s set); "over 44 days" is working days on the activity\u2019s calendar.',
+        ...(noDd.length || ddDiffer ? { notes: [...(noDd.length ? [notAssessed('activities dated before the data date', `${namesText(noDd.map((p) => p.proj_short_name))} ${noDd.length === 1 ? 'has' : 'have'} no data date`)] : []), ...(ddDiffer ? [differentDataDates(withDd.map((p) => ({ proj: p.proj_short_name, date: p.last_recalc_date.slice(0, 10) })), 'each project\u2019s own date')] : [])] } : {}),
       };
     }
     case 'trace_logic': {
       const many = Array.isArray(args.activity_ids);
       const found = many ? (args.activity_ids as unknown[]).map((id) => [String(id), byCode(String(id))] as const) : [[String(args.activity_id ?? ''), byCode(String(args.activity_id ?? ''))] as const];
-      if (!many && !found[0][1]) return { error: `No activity with ID "${args.activity_id}" in the open project(s).` };
+      if (!many && !found[0][1]) return { error: `Refused: no activity with ID "${args.activity_id}" in the open projects.` };
       const lv = (v: unknown) => Math.max(0, Number.isFinite(Number(v)) && v != null ? Number(v) : 3);
       const relFF = relationshipFloat(db, ctx);
       const perLevel = args.max_per_level === 0 ? Infinity : Math.max(1, Number(args.max_per_level) || 40);
@@ -339,7 +345,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         worst_schedule_performance: bySpi.slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, spi: round(x.e.spi), sv: round(x.e.sv) })), worst_schedule_performance_total: bySpi.length,
         // (every_activity, an export: each activity with cost, every earned value figure of it)
         ...(args.every_activity === true ? { activities: tasks.filter((t) => t.task_type !== 'TT_WBS' && costs.get(t.task_id)).map((t) => ({ project: ctx.proj.get(t.proj_id)?.proj_short_name, id: t.task_code, name: t.task_name, wbs: wbsPath(t.wbs_id), ...pack(sumLines([costs.get(t.task_id)!])) })) } : {}),
-        note: `${projects.length && projects.every((p) => p.totals.bac === 0) ? 'The schedule carries no costs (budget at completion is 0), so SPI, CPI and EAC are not meaningful (0 here means nothing was measured, not poor performance). Load costs (a resource price, a budgeted cost on an assignment, or an expense) or judge progress from the dates. ' : ''}BAC = baseline budget (current budget when no baseline is assigned). PV = BAC x baseline time elapsed at the data date. EV = BAC x % complete. SPI = EV/PV, CPI = EV/AC, EAC = AC + remaining cost, VAC = BAC - EAC.`,
+        ...(() => { const n = tidyNotes([...projects.filter((p) => p.totals.bac === 0).map((p) => notAssessed('SPI, CPI and EAC', `${p.project} carries no costs`)), ...projects.filter((p) => !p.has_baseline).map((p) => currentPlanUsed(p.project ?? ''))]); return n.length ? { notes: n } : {}; })(),
       };
     }
     case 'resource_summary': {

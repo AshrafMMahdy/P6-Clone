@@ -138,3 +138,12 @@ export function spreadUsage(db: Db, projIds: string[], opts: { start: number; en
   const name = (id: string) => rsrcs.get(id)?.rsrc_short_name ?? id;
   return { buckets, rows: [...out.values()].sort((x, y) => name(x.rsrcId).localeCompare(name(y.rsrcId), undefined, { numeric: true })) };
 }
+
+/** The resources that have a limit set (Max Units/Time above 0, on the resource or on a price row of it): the ONE predicate for "has no limit". A resource with no limit set is not judged for over-allocation by
+ *  resource_histogram, schedule_index and level_resources alike. The limit of each, in units per hour (the latest price row that has one wins over the resource's own). */
+export function resourceLimits(db: Db): Map<string, number> {
+  const cap = new Map<string, number>();
+  for (const r of rows(db, 'RSRC')) if (Number(r.max_qty_per_hr) > 0) cap.set(r.rsrc_id, Number(r.max_qty_per_hr));
+  for (const rate of rows(db, 'RSRCRATE')) if (Number(rate.max_qty_per_hr) > 0) cap.set(rate.rsrc_id, Number(rate.max_qty_per_hr));
+  return cap;
+}

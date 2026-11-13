@@ -58,13 +58,13 @@ const fallback = (id) => {
     // once a state was posted: a loaded host's short pauses still get the main thread's own, current answer
     if (Date.now() - beat < 1500 || !lastStatus) { w.timer = setTimeout(() => fallback(id), 150); return; }
     waiting.delete(id); w.answered = true; answered.add(id);
-    write(JSON.stringify({ jsonrpc: '2.0', id, result: result({ ...lastStatus, busy: true, status_age_seconds: Math.round((Date.now() - lastStatus.at) / 1000), at: undefined, note: 'The server is in a long step of a call (still working); this is its state as of status_age_seconds ago.' }) }));
+    write(JSON.stringify({ jsonrpc: '2.0', id, result: result({ ...lastStatus, busy: true, status_age_seconds: Math.round((Date.now() - lastStatus.at) / 1000), at: undefined, notes: ['This is the state of a long step as of status_age_seconds ago.'] }) }));
     return;
   }
   const j = jobs.get(String(w.job));
   if (!j) { w.timer = setTimeout(() => fallback(id), 150); return; }
   waiting.delete(id); w.answered = true; answered.add(id);
-  write(JSON.stringify({ jsonrpc: '2.0', id, result: result({ ...j, running_seconds: Math.round((Date.now() - j.started) / 1000), started: undefined, busy: true, note: 'The server is in a long step of this job (still working); this is its last progress. Call job_status again shortly.' }) }));
+  write(JSON.stringify({ jsonrpc: '2.0', id, result: result({ ...j, running_seconds: Math.round((Date.now() - j.started) / 1000), started: undefined, busy: true, notes: ['This is the last progress of the job.'] }) }));
 };
 const answered = new Set();
 parentPort.on('message', (m) => {

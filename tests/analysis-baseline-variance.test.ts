@@ -50,7 +50,7 @@ test('the source\'s delayed fixture (T2 five days late): slip classes, project s
   const r = run(b.db);
   const ap = golden.as_planned_vs_built.data, da = golden.delay_analysis.data, bc = golden.baseline_compare.data;
   assert.equal(r.report, 'Baseline variance');
-  assert.deepEqual(Object.keys(r).slice(0, 3), ['report', 'status', 'summary'], 'summary first');
+  assert.deepEqual(Object.keys(r).slice(0, 3), ['report', 'status', 'notes'], 'notes first');
   assert.equal(r.compared_with.kind, 'baseline');
   assert.equal(r.compared_with.name, 'BL');
   // slip classes: T1 on time, T2 and T3 minor slips (as_planned_vs_built.classification_counts)
@@ -100,7 +100,7 @@ test('EXPECTED DIFFERENCES from the source on that fixture, each with its reason
   //    critical in it cannot be told: not assessed, with the reason
   assert.equal(golden.as_planned_vs_built.data.critical_path_overlay.newly_critical.length, 0);
   assert.equal(r.critical_overlay.result, 'not_assessed');
-  assert.match((r.critical_overlay as any).note, /The BL baseline carries no total float/);
+  assert.match(r.notes.join(' '), /Critical overlay not assessed: the BL baseline carries no total float/i);
   assert.equal(r.overlay.length, 0);
   // with the baseline's float written as the scheduler would (0 on each activity): reference T1 T2 T3 critical, now T2 and T3 (T1 is finished: P6 keeps no float for finished work), nothing newly critical
   const b = B.delayed();
@@ -143,8 +143,8 @@ test('two critical drivers that overlap: each keeps its own type and own days, t
   assert.deepEqual([...resp.parties].sort((x, y) => x.party.localeCompare(y.party)), [{ party: 'Contractor', drivers: 1, delay_days: 5 }, { party: 'no value', drivers: 1, delay_days: 5 }, { party: 'Owner', drivers: 1, delay_days: 5 }].sort((x, y) => x.party.localeCompare(y.party)));
   assert.equal(resp.parties.reduce((a, p) => a + p.delay_days, 0), 15, 'the parties together have every driver day, once, in full');
   assert.deepEqual(r.drivers.map((x) => x.responsible), ['Owner', 'Contractor', null]);
-  assert.match(r.method.join(' '), /concurrent delay is not assessed.*windows_analysis apportions delay between causes/);
-  assert.match(resp.note, /Concurrent delay is not assessed here: windows_analysis apportions delay between causes\./);
+  assert.equal((r as any).method, undefined);
+
   // the facts that were removed are nowhere: not in a driver, a chain, the responsibility table, the totals, the answer, the method
   assert.equal(/concurrent_days|concurrent_with|of_which_concurrent|concurrent_overlaps|concurrent_delay/.test(JSON.stringify(r)), false);
 });
@@ -167,7 +167,7 @@ test('newly critical: a branch that had float in the baseline and is critical no
   assert.deepEqual([o.A.critical_in_reference, o.A.critical_now, o.A.no_longer_critical], [true, false, true]);
   assert.equal(r.overlay[0].id, 'B', 'newly critical first');
   assert.deepEqual(r.drivers.map((x) => [x.id, x.delay_days, x.on_critical_path]), [['B', 7, true], ['C', 2, true]]);
-  assert.match(r.summary, /1 newly critical/);
+  assert.equal((r.critical_overlay as any).newly_critical_total, 1);
   // a driver below one working day is not a driver; ahead of plan is a class of its own
   const e = scenario([{ id: 'A', duration_days: 10 }, { id: 'B', duration_days: 10 }], { B: 8 });
   const re = run(e.db);
@@ -270,7 +270,7 @@ test('Tower-A (its baseline is stored in the file): counted from the rows', () =
   assert.deepEqual(r.critical_overlay, { result: 'assessed', reference_critical_total: 2, current_critical_total: 3, newly_critical_total: 0, added_and_critical_total: 2, no_longer_critical_total: 0 });
   // A1030 and M1000 were added since the baseline and are critical now: not "newly critical" (they have no counterpart), listed apart
   assert.deepEqual(r.overlay.filter((x) => x.added_and_critical).map((x) => [x.id, x.critical_in_reference, x.critical_now, x.newly_critical]), [['A1030', null, true, false], ['M1000', null, true, false]]);
-  assert.match(r.summary, /0 newly critical, 2 added since and critical/);
+  assert.equal((r.critical_overlay as any).newly_critical_total, 0); assert.equal((r.critical_overlay as any).added_and_critical_total, 2);
   // BEI: baselined to finish by the data date (1 Apr 08:00): A1010 (6 Mar) and A1020 (14 Mar) = 2 due, 1 completed
   assert.deepEqual(r.bei, { result: 'assessed', value: 0.5, completed: 1, due: 2 });
   // duration-weighted % complete: A1010 5 d x 100 % + A1020 8 d x 40 % + A1030 10 d (its own 80 h: not in the baseline) x 0 + M1000 0 = 8.2 of 23 days
@@ -278,7 +278,7 @@ test('Tower-A (its baseline is stored in the file): counted from the rows', () =
   assert.equal(r.status, 'fail');
   // the responsible party: not given
   assert.equal(r.responsibility.result, 'not_assessed');
-  assert.match((r.responsibility as any).note, /Pass responsibility_code.*Activity code types in this file: Phase/);
+
   // given: the activity code type Phase; A1020 carries the value Enabling (TASKACTV: task 1001, type 50, value 51 "Enabling")
   const p = run(tw.db, { responsibilityCode: 'phase' });
   assert.deepEqual((p.responsibility as any).parties, [{ party: 'Enabling', drivers: 1, delay_days: 2 }]);
@@ -347,7 +347,7 @@ test('baseline_variance through the server: arguments, refusals in words, respon
   assert.match(JSON.stringify(unk.d.error), /The file's activity code types: Phase\./);
   const ok = await call('baseline_variance', { handle: tw, responsibility_code: 'Phase', bogus: 1 });
   assert.equal(ok.err, false, JSON.stringify(ok.d).slice(0, 300));
-  assert.match(ok.d.arguments_not_used.join(' '), /baseline_variance has no argument "bogus"/);
+  assert.match(ok.d.notes.join(' '), /baseline_variance has no argument "bogus"/);
   assert.deepEqual(ok.d.responsibility.parties, [{ party: 'Enabling', drivers: 1, delay_days: 2 }]);
   assert.deepEqual(ok.d.exported.files.map((f: any) => f.path.replace(/^.*baseline_variance/, '')).sort(), ['-chains.csv', '-critical_overlay.csv', '-drivers.csv', '-variances.csv', '.json']);
   // as_planned by path and by handle give the same answer
@@ -377,7 +377,7 @@ test('the list rule on a real sample (31 buidings, 2,142 activities, against ano
   assert.equal(Object.values(r.d.slip_classes).reduce((x: number, y: any) => x + y, 0), a.compared, 'a class for every activity compared');
   assert.ok(r.d.drivers_total > 25, 'more drivers than the list holds');
   assert.equal(r.d.drivers.length, 25);
-  assert.match(r.d.drivers_note, /^25 of \d+ shown; all \d+ in .*baseline_variance-drivers\.csv$/);
+  assert.match(r.d.drivers_note, /^25 of \d+ shown; all \d+ in .*baseline_variance-drivers\.csv\.$/);
   const csv = (n: string) => r.d.exported.files.find((f: any) => f.path.endsWith(`-${n}.csv`));
   assert.equal(csv('variances').rows, acts.length);
   assert.equal(csv('drivers').rows, r.d.drivers_total);
