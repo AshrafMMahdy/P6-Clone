@@ -795,6 +795,8 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
         const dayH = Math.round((weekH / Math.max(1, def.week.filter((d) => d.length).length)) * 100) / 100;
         Object.assign(c, { day_hr_cnt: p6num(dayH), week_hr_cnt: p6num(weekH), month_hr_cnt: p6num(weekH * 4.3), year_hr_cnt: p6num(weekH * 52) });
       }
+      for (const f of ['holidays', 'remove_exceptions']) if (op[f] != null && !Array.isArray(op[f])) fail(`${f} must be a list of dates.`);
+      if (op.work_exceptions != null && (typeof op.work_exceptions !== 'object' || Array.isArray(op.work_exceptions))) fail('work_exceptions must map dates to lists of ["08:00","17:00"] periods.');
       for (const d of (Array.isArray(op.holidays) ? op.holidays : [])) def.exceptions.set(h.ole(date(d, 'holidays[]')), []);
       for (const [k, v] of Object.entries((op.work_exceptions ?? {}) as Record<string, unknown>)) def.exceptions.set(h.ole(date(k, 'work_exceptions key')), h.periods(v));
       for (const d of (Array.isArray(op.remove_exceptions) ? op.remove_exceptions : [])) def.exceptions.delete(h.ole(date(d, 'remove_exceptions[]')));

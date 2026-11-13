@@ -19,7 +19,7 @@ export const startedBeforeFsPredecessor = (t: Row, ctx: Pick<ReturnType<typeof m
 export type Grade = 'pass' | 'warn' | 'fail' | 'not_assessed';
 export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; /** a sentence about what was found, only where there is one */ detail?: string; examples: string[]; /** how many examples there are (examples shows the first 10 of a check's activities; saved_dates gives all) */ examples_total?: number;
   /** with opts.activities: every activity the check found, by Activity ID and name (an export) */ activities?: { id: string; name: string }[] }
-export interface Review { grade: Exclude<Grade, 'not_assessed'>; projects: string[]; openActivities: number; relationships: number; checks: Check[] }
+export interface Review { grade: Exclude<Grade, 'not_assessed'>; projects: string[]; openActivities: number; relationships: number; checks: Check[]; /** the sentences of a check whose detail holds several, by check id */ sentences?: Record<string, string[]> }
 
 /** Every check lists every activity it found as `examples` (the answer of a tool cuts the list by the list rule); activities: also each check's activities by ID and name. */
 export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[]; calendarDays?: boolean; activities?: boolean } = {}): Review {
@@ -72,16 +72,19 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   // a loop in the logic: P6 cannot calculate the schedule (F9 stops), so a programme with one fails the review, each loop named
   const state = storedDatesState(db, [...open]), stale = state.stale;
   const inLoops = projectLoops(db).filter((l) => l.projIds.some((id) => open.has(id))).flatMap((l) => l.tasks.filter((t) => open.has(t.proj_id)));
-  add('loops', 'Loops in the logic (P6 cannot calculate the schedule)', inLoops, tasks.length, null, 0, 'none', state.loops.map((l) => loopStopsDates(l.projs, l.loops)).join('\n'));
+  const loopsSaid = state.loops.map((l) => loopStopsDates(l.projs, l.loops));
+  add('loops', 'Loops in the logic (P6 cannot calculate the schedule)', inLoops, tasks.length, null, 0, 'none', loopsSaid.join(' '));
   // saved dates: of the open activities that could be compared (those of a project a loop runs through cannot: with none left, the check is not assessed)
   // (the dates sentence sends the reader to schedule, which calculates every project of the file: a loop in a project outside this review stops it, so it is said with it)
   const elsewhere = loopGroups(db).filter((l) => !l.projIds.some((id) => open.has(id)));
+  const datesSaid = [...stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true)), ...(stale.length ? elsewhere.map((l) => loopStopsDates(l.projs, l.loops)) : [])];
   const noneJudged = state.judged === 0 && (live.length > 0 || state.loops.length > 0);
   const why = state.loops.length ? 'a loop in the logic stops the calculation' : state.notStored.length ? 'the open activities have no calculated dates' : 'the schedule cannot be calculated';
-  add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), state.judged, 0, null, 'none', noneJudged ? notAssessedNote('Saved dates P6 would change on F9', why) : [...stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true)), ...(stale.length ? elsewhere.map((l) => loopStopsDates(l.projs, l.loops)) : [])].join('\n'), stale.flatMap((x) => x.examples.map((f) => f.message)), noneJudged);
+  add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), state.judged, 0, null, 'none', noneJudged ? notAssessedNote('Saved dates P6 would change on F9', why) : datesSaid.join(' '), stale.flatMap((x) => x.examples.map((f) => f.message)), noneJudged);
 
   const grade = checks.some((c) => c.grade === 'fail') ? 'fail' as const : checks.some((c) => c.grade === 'warn') ? 'warn' as const : 'pass' as const;
-  return { grade, projects: projs.map((p) => p.proj_short_name), openActivities: live.length, relationships: P.length, checks };
+  // (a check's detail is one text; where it holds several sentences they are also given one by one, for an answer that says each as a note of its own)
+  return { grade, projects: projs.map((p) => p.proj_short_name), openActivities: live.length, relationships: P.length, checks, sentences: { loops: loopsSaid, ...(noneJudged ? {} : { saved_dates: datesSaid }) } };
 }
 
 export function reviewText(r: Review): string {

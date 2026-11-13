@@ -821,7 +821,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const full = reviewSchedule(s.db, { hoursPerDay: s.hpd, calendarDays: true, activities: a.export != null, ...(a.project != null && a.project !== '' ? { projIds: projectIds(s.db, a.project) } : {}) });
       // what a check could not assess, the data date the schedule put in and the saved dates that are not current are notes of the answer (said once, in `notes`), not a check's detail
       const noted = (c: { id: string; grade: string; detail?: string }) => !!c.detail && (c.grade === 'not_assessed' || c.id === 'invalid_dates' || c.id === 'saved_dates' || c.id === 'loops');
-      const said = full.checks.filter(noted).flatMap((c) => c.detail!.split('\n')); // (a check's sentences, one to a line: each is a note of its own)
+      const sentences = full.sentences ?? {}; delete full.sentences; // (each sentence of a check is a note of its own; the answer and its export carry the checks, not this list)
+      const said = full.checks.filter(noted).flatMap((c) => (sentences[c.id]?.length ? sentences[c.id] : [c.detail!]));
       const answer = { ...full, checks: full.checks.map(({ activities: _a, ...c }) => { const { detail: _d, ...rest } = c; const k = noted(c) ? rest : c; return k.examples.length > LISTED ? { ...k, examples: k.examples.slice(0, LISTED), examples_total: k.examples.length } : k; }), ...(said.length ? { notes: said } : {}) };
       if (a.export == null) return answer;
       return { ...answer, exported: exportResult('review', a.export, full, [

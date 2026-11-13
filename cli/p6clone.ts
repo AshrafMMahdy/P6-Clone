@@ -320,6 +320,7 @@ async function main(): Promise<number> {
       const pre = validateXer(db, findings);
       if (worst(pre) === 'fatal') { printFindings(pre.filter((f) => f.severity === 'fatal')); return 2; }
       const r = reviewSchedule(db, { hoursPerDay: hpd(), calendarDays: true });
+      delete r.sentences; // (the checks carry their details: the sentence list is for the MCP answer's notes)
       console.log(flag('json') ? JSON.stringify(r, null, 2) : reviewText(r));
       return r.grade === 'fail' ? 3 : r.grade === 'warn' ? 1 : 0;
     }

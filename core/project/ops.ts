@@ -161,7 +161,8 @@ export function expandSelects(db: Db, ops: unknown[]): unknown[] {
     const op = raw as Op;
     const key = op && typeof op === 'object' && op.select !== undefined ? (op.op === 'link_activities' || op.op === 'renumber_activities' ? '' : SELECT_KEY[op.op]) : undefined;
     if (key === undefined) { out.push(raw); continue; }
-    const r = applyOps(db, [{ op: '_selected', select: op.select, ...(op.project != null ? { project: op.project } : {}), order: op.op === 'link_activities' ? 'start' : 'id' }]);
+    // (the same activities in the same order as the edit will take them: the operation's own order_by on link_activities and renumber_activities)
+    const r = applyOps(db, [{ op: '_selected', select: op.select, ...(op.project != null ? { project: op.project } : {}), ...((op.op === 'link_activities' || op.op === 'renumber_activities') && op.order_by != null ? { order_by: op.order_by } : {}), order: op.op === 'link_activities' ? 'start' : 'id' }]);
     if (!r.ok) { out.push(raw); continue; }
     const picked = (r.results[0] as string[]).map((id) => T.get(id)!).filter(Boolean);
     const { select: _s, ...one } = op;
@@ -258,7 +259,7 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
   const projectId = (t: Row) => projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name;
   /** The activities op.select picks; the op's own "project" limits them when the select names none. */
   // (link_activities and renumber_activities take order_by on the operation, as their guide says; one given inside select is the same thing)
-  const selected = (dflt = 'id') => { const s0 = op.select && typeof op.select === 'object' && !Array.isArray(op.select) ? { ...(op.project != null && (op.select as Row).project == null ? { project: op.project } : {}), ...(op.order_by != null && (op.select as Row).order_by == null ? { order_by: op.order_by } : {}), ...(op.select as object) } : op.select; return selectActivities(db, s0, sel, dflt); };
+  const selected = (dflt = 'id') => { const s0 = op.select && typeof op.select === 'object' && !Array.isArray(op.select) ? { ...(op.project != null && (op.select as Row).project == null ? { project: op.project } : {}), ...((op.op === 'link_activities' || op.op === 'renumber_activities' || op.op === '_selected') && op.order_by != null && (op.select as Row).order_by == null ? { order_by: op.order_by } : {}), ...(op.select as object) } : op.select; return selectActivities(db, s0, sel, dflt); };
 
   // (expandSelects: what a select picks, in its order, without changing anything)
   if (op.op === '_selected') return selected(String(op.order ?? 'id')).map((t) => t.task_id);

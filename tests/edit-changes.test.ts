@@ -336,8 +336,12 @@ test('a field an operation does not have is said, not taken in silence', async (
   const s2 = await call('edit', { handle: h, operations: [{ op: 'update_activity', select: { ids: ['A', 'B'] }, name: 'N', bogus: 1 }, { op: 'update_activity', select: { where: { task_name: 'no such name' } }, name: 'x' }] });
   assert.deepEqual((s2.notes as string[]).filter((n) => /did not use|picked no/.test(n)), ['update_activity did not use "bogus": it is not a field of the operation, or this case had no use for it.', 'update_activity: select picked no activity; nothing changed.']);
   // link_activities takes order_by on the operation (its guide says so): the order asked for is the order linked
-  const l = await call('edit', { handle: h, operations: [{ op: 'link_activities', select: { ids: ['A', 'B', 'C'] }, order_by: 'id', type: 'SS' }] });
+  const l = await call('edit', { handle: h, operations: [{ op: 'link_activities', select: { ids: ['C', 'B', 'A'] }, order_by: 'id', type: 'SS' }] });
   assert.deepEqual(((l.notes ?? []) as string[]).filter((n) => /did not use/.test(n)), []);
+  assert.deepEqual((l.changes as any[]).filter((c) => c.field === 'relationship').map((c) => c.id), ['A SS B', 'B SS C'], 'linked in the order asked for (by Activity ID), not as listed');
+  // on any other operation order_by is not a field (the activities are done one by one, in no order that matters): it is said, and not applied
+  const o = await call('edit', { handle: h, operations: [{ op: 'update_activity', select: { ids: ['A', 'B'] }, order_by: 'name', priority: 'high' }] });
+  assert.deepEqual(((o.notes ?? []) as string[]).filter((n) => /did not use/.test(n)), ['update_activity did not use "order_by": it is not a field of the operation, or this case had no use for it.']);
   assert.deepEqual(e.changes.map((c: any) => [c.id, c.field, c.new]), [['R1', 'Resource Name', 'Crew 2']]);
 });
 

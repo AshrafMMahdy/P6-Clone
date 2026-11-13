@@ -70,7 +70,7 @@ const NATURAL: Record<string, (r: Row) => string> = {
   ASGNMNTACAT: (r) => `${r.taskrsrc_id}|${r.asgnmnt_catg_type_id}`, // one value per code per assignment
   SCHEDOPTIONS: () => 'the project\u2019s schedule options', // one row per project
 };
-const an = (noun: string): string => `${/^[aeiou]/i.test(noun) ? 'An' : 'A'} ${noun}`;
+const an = (noun: string): string => `${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun}`;
 /** Shared rows without a key of their own that are ONE value of a resource (or a role): how the value is recognised in the target. */
 const SHARED_NATURAL: Record<string, (r: Row) => string> = {
   RSRCRCAT: (r) => `${r.rsrc_id}|${r.rsrc_catg_type_id}`, RSRCROLE: (r) => `${r.rsrc_id}|${r.role_id}`, UDFVALUE: (r) => `${r.udf_type_id}|${r.fk_id}`,
@@ -211,7 +211,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
             : target === 'PROJWBS' && t === 'TASK' ? rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y')?.wbs_id ?? '' : '';
           continue;
         }
-        if (nv == null && !quiet && target !== 'PROJECT' && src.tables[target]) findings.push({ severity: 'warning', code: 'IMPORT_UNRESOLVED', table: t, field: f, key: r[k ?? ''] ?? '', message: `${an(wordOf(t))} points at ${an(wordOf(target)).toLowerCase()} that is not in the file; the reference is kept as it is.`, p6: 'P6 would drop or default this reference.' });
+        if (nv == null && !quiet && target !== 'PROJECT' && src.tables[target]) unresolved.set(`${t}|${target}`, (unresolved.get(`${t}|${target}`) ?? 0) + 1);
         out[f] = nv ?? (target === 'PROJWBS' && f === 'parent_wbs_id' && r.proj_node_flag === 'Y' ? '' : v);
       } else out[f] = v;
     }
@@ -252,8 +252,9 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
     const k = KEYS[t];
     if (!k || t === 'PROJECT') continue;
     for (const r of src.tables[t].rows) {
-      // (a row of a project that is not imported is left out with what hangs on it: the values of that project's own activity codes)
-      if (inSkipped(t, r)) { if (r[k]) dropped.add(`${t}|${r[k]}`); continue; }
+      // (the activity codes of a project that is not imported are that project's own: their values are left out with them. Nothing else follows a project out:
+      // a relationship to one of its activities is kept, and said, as before)
+      if (inSkipped(t, r)) { if (t === 'ACTVTYPE' && r[k]) dropped.add(`${t}|${r[k]}`); continue; }
       if (!r[k]) continue;
       // (a project added INTO another brings its activities, not its schedule options: the target keeps its own)
       if (goneRef(t, r) || (t === 'SCHEDOPTIONS' && addInto.has(r.proj_id))) { dropped.add(`${t}|${r[k]}`); count(t, 'skipped'); continue; }
@@ -308,6 +309,8 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
     }
   }
 
+  // (references to something the file does not hold: counted per kind while the rows are copied, said once each below)
+  const unresolved = new Map<string, number>();
   // Pass 2: copy rows with remapped references
   for (const t of names) { const dst = table(db, t); for (const f of src.tables[t].fields) if (!dst.fields.includes(f)) dst.fields.push(f); }
   for (const [t, hit, r] of updates) {
@@ -389,6 +392,8 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
     // attach in one step (one undo record instead of one per row on million-row tables)
     if (add.length) { dst.rows = rawOf(dst.rows).concat(add); count(t, 'inserted', add.length); }
   }
+
+  for (const [key, n] of unresolved) { const [t, target] = key.split('|'); findings.push({ severity: 'warning', code: 'IMPORT_UNRESOLVED', table: t, message: `${n === 1 ? `${an(wordOf(t)).replace(/^a/, 'A')} points` : `${n} ${wordOf(t).replace(/y$/, 'ie')}s point`} at ${an(wordOf(target))} that is not in the file; ${n === 1 ? 'the reference is kept as it is' : 'the references are kept as they are'}.`, p6: 'P6 would drop or default this reference.' }); }
 
   // Update with remove_missing: what the project has and the file does not is taken out (activities with their own rows)
   for (const a of plan.projects.filter((p) => p.action === 'update')) {

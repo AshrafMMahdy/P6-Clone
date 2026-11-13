@@ -28,7 +28,7 @@ const TASK_FIELDS: Record<string, { label: string; days?: boolean; number?: bool
   task_name: { label: 'Activity Name' }, task_code: { label: 'Activity ID' }, target_drtn_hr_cnt: { label: 'Original Duration (days)', days: true }, remain_drtn_hr_cnt: { label: 'Remaining Duration (days)', days: true },
   proj_id: { label: 'Project' }, act_start_date: { label: 'Actual Start' }, act_end_date: { label: 'Actual Finish' }, status_code: { label: 'Activity Status' }, task_type: { label: 'Activity Type' }, clndr_id: { label: 'Calendar' }, wbs_id: { label: 'WBS' },
   cstr_type: { label: 'Primary Constraint' }, cstr_date: { label: 'Primary Constraint Date' }, cstr_type2: { label: 'Secondary Constraint' }, cstr_date2: { label: 'Secondary Constraint Date' },
-  complete_pct_type: { label: 'Percent Complete Type' }, phys_complete_pct: { label: 'Physical % Complete' }, priority_type: { label: 'Leveling Priority' },
+  complete_pct_type: { label: 'Percent Complete Type' }, phys_complete_pct: { label: 'Physical % Complete', number: true }, priority_type: { label: 'Leveling Priority' },
   expect_end_date: { label: 'Expected Finish' }, rsrc_id: { label: 'Primary Resource' },
   act_this_per_work_qty: { label: 'Actual This Period Labor Units', number: true }, act_this_per_equip_qty: { label: 'Actual This Period Nonlabor Units', number: true },
   duration_type: { label: 'Duration Type' }, suspend_date: { label: 'Suspend Date' }, resume_date: { label: 'Resume Date' }, est_wt: { label: 'Est Weight', number: true },
@@ -133,7 +133,7 @@ const logicChoice = (retained: string, override: string): string => (override ==
 /** Notebook text as a person reads it: the HTML P6 stores without its tags. */
 const plainText = (html: string): string => html.replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001f\u007f]+/g, ' ') /* (P6 writes a line break in a file as two DEL characters) */.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
 /** The fields that decide the dates F9 gives: an edit of one leaves the saved dates not current. */
-const DATE_DRIVING = new Set(['target_drtn_hr_cnt', 'remain_drtn_hr_cnt', 'act_start_date', 'act_end_date', 'status_code', 'task_type', 'clndr_id', 'cstr_type', 'cstr_date', 'cstr_type2', 'cstr_date2', 'lag_hr_cnt', 'pred_type']);
+const DATE_DRIVING = new Set(['external_early_start_date', 'external_late_end_date', 'target_drtn_hr_cnt', 'remain_drtn_hr_cnt', 'act_start_date', 'act_end_date', 'status_code', 'task_type', 'clndr_id', 'cstr_type', 'cstr_date', 'cstr_type2', 'cstr_date2', 'lag_hr_cnt', 'pred_type']);
 const text = (v: unknown): string => (v === ABSENT || v == null ? '' : String(v));
 /** The columns of an activity the scheduler writes (its dates, floats and float paths; the planned dates of work not started follow them). */
 const SCHEDULED = new Set(['early_start_date', 'early_end_date', 'late_start_date', 'late_end_date', 'restart_date', 'reend_date', 'rem_late_start_date', 'rem_late_end_date', 'target_start_date', 'target_end_date',
@@ -223,7 +223,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     const pids = ['proj_id' in r ? text(r.proj_id) : '', 'task_id' in r ? text((task(text(r.task_id)) ?? gone.get(text(r.task_id)))?.proj_id) : ''].filter(Boolean);
     return pids.some(changed);
   };
-  const assignmentName = (a: Obj): string => `${code(text(a.task_id))} ${a.rsrc_id ? rsrcName(a.rsrc_id) : roleId(a.role_id)}`;
+  const assignmentName = (a: Obj): string => `${code(text(a.task_id))} ${a.rsrc_id ? rsrcName(a.rsrc_id) : a.role_id ? roleId(a.role_id) : '(no resource)'}`;
   const assignmentOf = (id: unknown): string => ((x) => (x ? assignmentName(x) : missing('assignment')))(find('TASKRSRC', 'taskrsrc_id', id));
   /** The row a custom field's value belongs to, by the name the agent uses for it. */
   const udfOwner = (v: Obj): string => {
@@ -298,7 +298,8 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     // the project's own line (its ID is the name of the row): the project, its schedule options, its root WBS node, its codes and its custom fields
     const itsOwn = kind === 'PROJECT' || kind === 'SCHEDOPTIONS' || kind === 'PROJPCAT' || (kind === 'PROJWBS' && o!.proj_node_flag === 'Y') || (kind === 'UDFVALUE' && find('UDFTYPE', 'udf_type_id', o!.udf_type_id)?.table_name === 'PROJECT');
     if (c.old === c.new) return; // (the file's text changed and the value did not: "450.00" to "450")
-    if (c.id === '') c = { ...c, id: 'a row with no name' };
+    // (a row whose own ID a raw edit emptied: said as what it is, by P6's word for it)
+    if (c.id === '') c = { ...c, id: kind === 'TASK' ? 'an activity with no Activity ID' : kind === 'RSRC' || kind === 'RSRCRATE' ? 'a resource with no Resource ID' : kind === 'PROJWBS' ? 'a WBS element with no WBS Code' : kind === 'PROJECT' ? 'a project with no Project ID' : kind === 'CALENDAR' ? 'a calendar with no name' : `${/^[aeiou]/i.test(ROW_KIND[kind] ?? TABLE_WORD[kind] ?? 'x') ? 'an' : 'a'} ${(ROW_KIND[kind] ?? TABLE_WORD[kind]?.toLowerCase() ?? `${kind} row`)} with no name` };
     // a relationship between two projects names the project of each end: it belongs to both, and carries no project of its own
     const twoProjects = kind === 'TASKPRED' && ((a, b) => !!a && !!b && a.proj_id !== b.proj_id)(task(text(o!.pred_task_id)) ?? gone.get(text(o!.pred_task_id)), task(text(o!.task_id)) ?? gone.get(text(o!.task_id)));
     const ch = several && owner && c.project == null && !itsOwn && !twoProjects ? { id: c.id, project: text(owner.proj_short_name), field: c.field, old: c.old, new: c.new } : c;
