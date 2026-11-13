@@ -26,7 +26,7 @@ export interface WriteOptions {
  *  schedules such a project with the pre-8 rules, so a reopened file calculates as it did here. */
 export const NEW_XER_VERSION = '7.0';
 /** What the user is told when a project without a version is stamped NEW_XER_VERSION (the save tool's description says the same). */
-export const NEW_XER_NOTE = `This project had no P6 version (new, or read from a non-P6 file), so it was written as XER ${NEW_XER_VERSION}: every P6 since 7 imports it (P6 refuses a file stamped newer than itself, silently). Tell the user: P6 8 and later treat a few things differently (actual dates; a finish pushed into non-work time), so after F9 in a newer P6 a few dates may move slightly.`;
+export const NEW_XER_NOTE = `Written as XER ${NEW_XER_VERSION}, as the project had no P6 version; after F9 in P6 8 or later a few dates may move slightly.`;
 
 const CHILD_OF: Record<string, string> = {
   RSRCRATE: 'rsrc_id', ROLERATE: 'role_id', RSRCROLE: 'rsrc_id', ACTVCODE: 'actv_code_type_id',

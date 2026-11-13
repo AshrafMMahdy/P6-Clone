@@ -8,18 +8,10 @@ import type { Finding } from '../findings.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
 import { relationshipFloat, type ScheduleResult } from '../schedule/cpm.ts';
 import { dayHours } from '../project/units.ts';
-import { cstrName, daysText, plural } from '../notes.ts';
+import { cstrName, daysText, differentDataDates, duplicateRow, LISTED, listCut } from '../notes.ts';
 
-export interface LogSection { code: string; title: string; count: number; /** exactly which activities the section takes in (other tools count the same words over other activities) */ definition?: string; activities: { id: string; name: string; detail?: string }[] }
+export interface LogSection { code: string; title: string; count: number; activities: { id: string; name: string; detail?: string }[] }
 
-/** What each section of the log counts, over which activities. */
-const DEFINITION: Record<string, string> = {
-  OPEN_START: 'incomplete activities (milestones included; level of effort and WBS summaries not) with no predecessor',
-  OPEN_FINISH: 'incomplete activities (milestones included; level of effort and WBS summaries not) with no successor',
-  OUT_OF_SEQUENCE: 'one entry for each finish-to-start relationship whose predecessor has not finished although its successor has started (incomplete activities)',
-  ACTUAL_AFTER_DD: 'activities (completed ones included) with an actual start or finish after the data date of their project',
-  NEGATIVE_FLOAT: 'incomplete activities with total float below zero, in days of the activity\u2019s own calendar',
-};
 export interface ScheduleLogReport { statistics: ScheduleResult['stats']; errors: LogSection[]; warnings: LogSection[]; exceptions: LogSection[] }
 
 const START_TYPES = new Set(['CS_MSO', 'CS_MSOB', 'CS_MSOA', 'CS_MANDSTART']);
@@ -48,12 +40,12 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
   const codeOf = (id: string) => ctx.taskById.get(id)?.task_code ?? '(outside the open projects)';
   for (const t of tasks) {
     if (t.task_type === 'TT_Mile') {
-      for (const r of ctx.predsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_SF') badMs.push({ t, detail: `start milestone with a ${r.pred_type.slice(3)} predecessor, ${codeOf(r.pred_task_id)}` });
-      for (const r of ctx.succsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_FS') { if (r.pred_type === 'PR_FF') badMs.push({ t, detail: `start milestone driving an FF successor, ${codeOf(r.task_id)}` }); }
+      for (const r of ctx.predsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_SF') badMs.push({ t, detail: `Start milestone ${t.task_code} has an ${r.pred_type.slice(3)} predecessor ${codeOf(r.pred_task_id)}.` });
+      for (const r of ctx.succsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_FS') { if (r.pred_type === 'PR_FF') badMs.push({ t, detail: `Start milestone ${t.task_code} has an FF successor ${codeOf(r.task_id)}.` }); }
     }
     if (t.task_type === 'TT_FinMile') {
-      for (const r of ctx.succsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_SS' || r.pred_type === 'PR_SF') badMs.push({ t, detail: `finish milestone driving an ${r.pred_type.slice(3)} successor, ${codeOf(r.task_id)}` });
-      for (const r of ctx.predsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_SS') badMs.push({ t, detail: `finish milestone with an SS predecessor, ${codeOf(r.pred_task_id)}` });
+      for (const r of ctx.succsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_SS' || r.pred_type === 'PR_SF') badMs.push({ t, detail: `Finish milestone ${t.task_code} has an ${r.pred_type.slice(3)} successor ${codeOf(r.task_id)}.` });
+      for (const r of ctx.predsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_SS') badMs.push({ t, detail: `Finish milestone ${t.task_code} has an SS predecessor ${codeOf(r.pred_task_id)}.` });
     }
   }
 
@@ -71,7 +63,7 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
         : (ty === 'CS_MEO' || ty === 'CS_MANDFIN') ? ef != null && ef !== c
         : ty === 'CS_MEOB' ? ef != null && ef > c
         : ty === 'CS_MEOA' ? ef != null && ef < c : false;
-      if (bad) { const onStart = START_TYPES.has(ty); unmet.push({ t, detail: `${cstrName(ty)} ${formatP6Date(c).slice(0, 16)}, scheduled ${onStart ? 'start' : 'finish'} ${formatP6Date((onStart ? es : ef)!).slice(0, 16)}` }); }
+      if (bad) { const onStart = START_TYPES.has(ty); unmet.push({ t, detail: `${t.task_code}: ${cstrName(ty)} ${formatP6Date(c).slice(0, 16)} is not met (scheduled ${formatP6Date((onStart ? es : ef)!).slice(0, 16)}).` }); }
     }
   }
   const unsatRel: { t: Row; detail: string }[] = [];
@@ -79,9 +71,9 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
     if (!open.has(r.proj_id)) continue;
     const ff = relFF(r);
     const t = ctx.taskById.get(r.task_id), p = ctx.taskById.get(r.pred_task_id);
-    if (ff != null && ff < 0 && t && p && !t.act_end_date) unsatRel.push({ t, detail: `${p.task_code} ${(r.pred_type || 'PR_FS').slice(3)} ${t.task_code}: relationship float ${daysText(Math.round((ff / 60 / dh.rel(r)) * 100) / 100)}` });
+    if (ff != null && ff < 0 && t && p && !t.act_end_date) unsatRel.push({ t, detail: `${p.task_code} ${(r.pred_type || 'PR_FS').slice(3)} ${t.task_code} is not met by ${daysText(Math.abs(Math.round((ff / 60 / dh.rel(r)) * 100) / 100))}.` });
   }
-  const external = tasks.filter((t) => t.external_early_start_date || t.external_late_end_date).map((t) => ({ t, detail: [t.external_early_start_date && `external early start ${t.external_early_start_date.slice(0, 16)}`, t.external_late_end_date && `external late finish ${t.external_late_end_date.slice(0, 16)}`].filter(Boolean).join(', ') }));
+  const external = tasks.filter((t) => t.external_early_start_date || t.external_late_end_date).map((t) => ({ t, detail: [t.external_early_start_date && `${t.task_code} has an external early start ${t.external_early_start_date.slice(0, 16)}.`, t.external_late_end_date && `${t.task_code} has an external late finish ${t.external_late_end_date.slice(0, 16)}.`].filter(Boolean).join(' ') }));
   const critical = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && isCritical(t, ctx)).map((t) => ({ t }));
   return {
     warnings: [sec('MILESTONE_REL', 'Milestones with invalid relationships', badMs)],
@@ -102,7 +94,7 @@ export function scheduleLogReport(db: Db, projIds: string[], res: Pick<ScheduleR
   for (const [code, title, where] of FROM_F9) {
     const fs = byCode(code);
     if (!fs.length) continue;
-    out[where].push({ code, title, count: fs.length, ...(DEFINITION[code] ? { definition: DEFINITION[code] } : {}), activities: (maxIds ? fs.slice(0, maxIds) : fs).map((f) => ({ id: f.key ?? '', name: names.get(f.key ?? '') ?? '', detail: f.message })) });
+    out[where].push({ code, title, count: fs.length, activities: (maxIds ? fs.slice(0, maxIds) : fs).map((f) => ({ id: f.key ?? '', name: names.get(f.key ?? '') ?? '', detail: f.message })) });
   }
   const ex = extraLogSections(db, projIds, maxIds);
   out.warnings.push(...ex.warnings.filter((s) => s.count));
@@ -126,37 +118,42 @@ export function extraLogText(db: Db, projIds: string[]): string {
   return L.join('\r\n');
 }
 
-/** The warnings of an `schedule` answer: one sentence for each kind of thing that is wrong, with its count, where the list of activities is (the log: the one home of every
- *  list) and the next call, so no fact is said twice. `withLog` false (the caller left the log out): the sentence says the list is left out. */
-export function scheduleWarnings(res: Pick<ScheduleResult, 'findings'>, report: ScheduleLogReport, withLog: boolean): string[] {
+/** The links the run left out to break loops, in one sentence (a loop the run did not break is in the log's errors). */
+export const loopLinksLeftOut = (links: string[]): string => `Left out of this schedule to break loops: ${links.join(', ')}; the saved logic is unchanged.`;
+
+/** The notes of a `schedule` answer: what the run left out or replaced (a data date, a calendar, links that closed a loop). The log holds what P6's schedule log says (out of sequence, actuals after the
+ *  data date, constraints and relationships not met, negative float): none of that is said twice. */
+export function scheduleNotes(res: Pick<ScheduleResult, 'findings'>, noDataDate = true): string[] {
   const out: string[] = [];
-  const at = (area: 'warnings' | 'exceptions', code: string) => (withLog ? `log.${area} (${code})` : 'the log (left out by log: false)');
-  for (const f of res.findings) if (f.code === 'NO_DATA_DATE') out.push(f.message.replace(/\.$/, '; give data_date to set one.'));
-  for (const f of res.findings) if (f.code === 'SCHED_CAL_INVALID') out.push(f.message);
-  const n = (area: 'warnings' | 'exceptions', code: string) => report[area].find((s) => s.code === code)?.count ?? 0;
-  let k = n('warnings', 'OUT_OF_SEQUENCE');
-  if (k) out.push(`${plural(k, 'relationship')} out of sequence (an activity started before its predecessor finished), listed in ${at('warnings', 'OUT_OF_SEQUENCE')}. Choose how the schedule treats them with options {logic: retained | override | actual}.`);
-  k = n('warnings', 'ACTUAL_AFTER_DD');
-  if (k) out.push(`${plural(k, 'activity', 'activities')} ${k === 1 ? 'has' : 'have'} an actual date after the data date, listed in ${at('warnings', 'ACTUAL_AFTER_DD')}: give a later data date (data_date) or correct the actuals (edit update_activity).`);
-  k = n('exceptions', 'CONSTRAINT_UNMET');
-  if (k) out.push(`${plural(k, 'activity', 'activities')} ${k === 1 ? 'has' : 'have'} a constraint the scheduled dates do not meet, listed with the scheduled date in ${at('exceptions', 'CONSTRAINT_UNMET')}: change or remove the constraint with edit update_activity.`);
-  k = n('exceptions', 'RELATIONSHIP_UNMET');
-  if (k) out.push(`${plural(k, 'relationship')} ${k === 1 ? 'is' : 'are'} not met by the scheduled dates, listed in ${at('exceptions', 'RELATIONSHIP_UNMET')}: a mandatory constraint or an actual date overrides the logic; change it with edit update_activity.`);
-  k = n('exceptions', 'NEGATIVE_FLOAT');
-  if (k) out.push(`${plural(k, 'activity', 'activities')} ${k === 1 ? 'has' : 'have'} negative total float, listed in ${at('exceptions', 'NEGATIVE_FLOAT')}: the dates cannot meet a constraint or the project's must-finish-by date; critical_path shows what drives them.`);
-  const broken = res.findings.filter((f) => f.code === 'SCHED_LOOP_BROKEN').length;
-  if (broken) out.push(`${plural(broken, 'relationship')} that closed a loop ${broken === 1 ? 'was' : 'were'} left out of this run (broken_links names them): remove them for good with edit delete_relationship.`);
+  for (const f of res.findings) if ((noDataDate && f.code === 'NO_DATA_DATE') || f.code === 'SCHED_CAL_INVALID') out.push(f.message);
+  const broken = res.findings.filter((f) => f.code === 'SCHED_LOOP_BROKEN');
+  if (broken.length) out.push(loopLinksLeftOut(broken.map((f) => f.message)));
   return out;
 }
 
-/** Every warning of a computed schedule (compute_schedule has no log): one sentence for each activity or relationship, in the order of the kinds above. */
-export function computeWarnings(db: Db, pid: string, res: Pick<ScheduleResult, 'findings'>, mustFinishBy: number | null, finish: number | null): string[] {
+/** compute_schedule has no log: its notes carry the schedule log's sentences in full, each once, then what the run left out or replaced. */
+export function computeNotes(db: Db, pid: string, res: Pick<ScheduleResult, 'findings'>): string[] {
   const out: string[] = [];
-  for (const f of res.findings) if (f.code === 'SCHED_CAL_INVALID' || f.code === 'OUT_OF_SEQUENCE' || f.code === 'ACTUAL_AFTER_DD' || f.code === 'NEGATIVE_FLOAT') out.push(f.message);
+  for (const f of res.findings) if (f.code === 'OUT_OF_SEQUENCE' || f.code === 'ACTUAL_AFTER_DD' || f.code === 'NEGATIVE_FLOAT') out.push(f.message);
   const ex = extraLogSections(db, [pid], 0);
-  for (const s of ex.exceptions) if (s.code === 'CONSTRAINT_UNMET' || s.code === 'RELATIONSHIP_UNMET') for (const a of s.activities) out.push(s.code === 'CONSTRAINT_UNMET' ? `${a.id} does not meet its constraint: ${a.detail}.` : `${a.id}: the relationship ${a.detail} is not met by the dates.`);
-  if (mustFinishBy != null && finish != null && finish > mustFinishBy) out.push(`The project finishes ${formatP6Date(finish).slice(0, 16)}, after its must-finish-by date ${formatP6Date(mustFinishBy).slice(0, 16)}.`);
-  const broken = res.findings.filter((f) => f.code === 'SCHED_LOOP_BROKEN').length;
-  if (broken) out.push(`${plural(broken, 'relationship')} that closed a loop ${broken === 1 ? 'was' : 'were'} left out of this run (broken_links names them): remove ${broken === 1 ? 'it' : 'them'} for good by changing the activity's predecessors.`);
-  return out;
+  for (const s of ex.exceptions) if (s.code === 'CONSTRAINT_UNMET' || s.code === 'RELATIONSHIP_UNMET') for (const a of s.activities) out.push(a.detail ?? '');
+  return [...out, ...scheduleNotes(res, false)];
+}
+
+/** One note per Activity ID that two or more TASK rows of these projects carry (the scheduler and the counts take it once). `did`: what was done once ("scheduled", "counted"); at most LISTED sentences, then the cut. */
+export function duplicateRowNotes(db: Db, projIds: string[], did: string): string[] {
+  const seen = new Map<string, Row>(), dup = new Map<string, string>();
+  for (const t of rows(db, 'TASK')) {
+    if (!projIds.includes(t.proj_id)) continue;
+    if (seen.has(t.task_id)) dup.set(t.task_id, t.task_code || t.task_id); else seen.set(t.task_id, t);
+  }
+  const ids = [...dup.values()];
+  const shown = ids.slice(0, LISTED).map((id) => duplicateRow(id, did));
+  return ids.length > LISTED ? [...shown, listCut(LISTED, ids.length)] : shown;
+}
+
+/** Projects that schedule from different data dates: the one sentence (the shared wording), by Project ID. */
+export function differentDatesNote(own: Record<string, string | null>, used: string): string | null {
+  const entries = Object.entries(own).filter(([, d]) => d != null).map(([proj, date]) => ({ proj, date: String(date).slice(0, 10) }));
+  return new Set(entries.map((e) => e.date)).size > 1 ? differentDataDates(entries, used) : null;
 }

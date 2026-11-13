@@ -95,10 +95,6 @@ export function parseXerSource(src: ByteSource, opts: { encoding?: TextEncodingN
     severity: 'info', code: 'ENCODING_CODEPAGE', message: `File is ${encodingLabel(encoding)} (read as such; the code page was recognised from the text).`,
     p6: `P6 imports it correctly on a computer whose Windows language for non-Unicode programs uses ${encodingLabel(encoding)}; elsewhere the text appears garbled. P6 XML is Unicode and keeps every language.`,
   });
-  if (lineEnding !== 'CRLF') findings.push({
-    severity: 'warning', code: 'LF_ENDINGS', message: `Line endings are ${lineEnding}; P6 writes CRLF.`,
-    p6: 'P6 import accepts LF-only files.',
-  });
 
   /** Lines from pos on (split at LF, a CR before it dropped), with their 1-based numbers; empty lines skipped. Each
    *  is decoded with its LF, so a broken multi-byte character at the end of a line reads as in the whole text. */
@@ -146,7 +142,6 @@ export function parseXerSource(src: ByteSource, opts: { encoding?: TextEncodingN
       const name = flat((parts[1] ?? '').trim());
       blockFields = [];
       if (db.tables[name]) {
-        findings.push({ severity: 'warning', code: 'DUP_TABLE', table: name, message: `Table ${name} appears more than once.`, p6: 'P6 processes both blocks.' });
         cur = db.tables[name];
       } else {
         cur = db.tables[name] = { name, fields: [], rows: [] };
@@ -203,6 +198,5 @@ export function parseXerSource(src: ByteSource, opts: { encoding?: TextEncodingN
     });
   }
   if (!sawHeader) findings.push({ severity: 'fatal', code: 'NO_HEADER', message: 'First line is not an ERMHDR header.', p6: 'P6 rejects the file as not a valid XER file.' });
-  if (!meta.hasEnd) findings.push({ severity: 'warning', code: 'NO_END', message: 'Missing %E end marker.', p6: 'P6 imports up to end of file.' });
   return { db, findings, meta };
 }
