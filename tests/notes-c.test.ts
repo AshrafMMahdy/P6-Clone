@@ -2,7 +2,7 @@
 // recomputed here from the file's own rows (never with the helper the tool uses).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { callTool, toolResult, toolsList } from '../mcp/server.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
@@ -274,12 +274,21 @@ test('a user defined field and a calendar are answered in the words the operatio
   const back = await call('edit', { handle: p.handle, operations: d.udfs.map((u: any) => ({ op: 'delete_udf', udf: u.name, subject: u.subject })) });
   assert.ok(!back.error, JSON.stringify(back.error));
   assert.ok(d.calendars.length > 0 && d.calendars.every((c: any) => ['Global', 'Project', 'Resource'].includes(c.type)), JSON.stringify(d.calendars));
-  // a real file: no table name and no FT_ code among its custom fields
-  const o = await open('Detailed Program.xer');
-  const real = await call('list_dictionaries', { handle: o.handle });
-  assert.ok(real.udfs.length > 0 || real.calendars.length > 0);
-  for (const u of real.udfs) assert.ok(!/^FT_|^[A-Z]{4,}$/.test(`${u.data_type}`) && !/^[A-Z]{4,}$/.test(`${u.subject}`), JSON.stringify(u));
-  for (const c of real.calendars) assert.ok(['Global', 'Project', 'Resource'].includes(c.type), JSON.stringify(c));
+  // real files that hold custom fields (18 and 8 of them): each subject and type is a word add_udf knows or P6's "indicator", the count is the file's own
+  const WORDS = new Set(['text', 'number', 'integer', 'cost', 'start_date', 'finish_date', 'indicator']), SUBJECTS = new Set(['activity', 'wbs', 'project', 'resource', 'assignment', 'expense']);
+  for (const sample of ['EBCF-4 070127 Forecast Original.xer', 'DHBL-24FEB13_VER-7.0.xer']) {
+    const inFile = readXerFile(sampleCopy(sample)).db.tables.UDFTYPE.rows.length;
+    const real = await call('list_dictionaries', { handle: (await open(sample)).handle });
+    assert.ok(inFile > 0 && real.udfs.length === inFile, `${sample}: ${real.udfs.length} of ${inFile}`);
+    for (const u of real.udfs) assert.ok(WORDS.has(u.data_type) && SUBJECTS.has(u.subject), `${sample}: ${JSON.stringify(u)}`);
+    assert.ok(real.calendars.length > 0);
+    for (const c of real.calendars) assert.ok(['Global', 'Project', 'Resource'].includes(c.type), JSON.stringify(c));
+  }
+  // files written by other tools with codes P6 does not have ("FT_DATE", "CA_Global"): said in small words, never as the code
+  const odd = await call('list_dictionaries', { handle: (await open('PDC1_Baseline_Rev0.xer')).handle });
+  assert.ok(odd.udfs.length > 0 && odd.udfs.every((u: any) => !/^FT_|[A-Z]{3}/.test(u.data_type) && !/[A-Z]{3}/.test(u.subject)), JSON.stringify(odd.udfs));
+  const oddCal = await call('list_dictionaries', { handle: (await open('Polaris_DC1_Baseline_CPM.xer')).handle });
+  assert.ok(oddCal.calendars.length > 0 && oddCal.calendars.every((c: any) => !/^CA_/.test(c.type)), JSON.stringify(oddCal.calendars));
 });
 
 test('save and close say they need the owner key only where this server requires it, and each statement is what the server does', async () => {
@@ -322,4 +331,78 @@ test('a report that reads the project baseline says when a project has none in t
   const v3 = await call('run_report', { handle: t.handle, report: 'variance', max_rows: 5 });
   assert.equal(v3.notes.length, 1);
   assert.match(v3.notes[0], /^BL Start, BL Finish and Finish Var \(d\) are empty: the project baseline of .+ is not in this file \(the file was exported without it\); export the file with its baselines\.$/);
+});
+
+test('a loop in the logic (owner 2026-11-13): every analysis that reads the saved dates says it and still answers; lint and review fail on it; an edit that moves dates says it', async () => {
+  // Detailed Program.xer with ONE relationship added that closes a loop: the reverse of its first relationship
+  const path = sampleCopy('Detailed Program.xer');
+  const lines = readFileSync(path, 'latin1').split(/\r?\n/);
+  const at = lines.findIndex((l) => l.startsWith('%T\tTASKPRED')), fields = lines[at + 1].split('\t'), first = lines[at + 2].split('\t');
+  const col = (n: string) => fields.indexOf(n);
+  const rev = [...first]; rev[col('task_pred_id')] = '99999999'; rev[col('task_id')] = first[col('pred_task_id')]; rev[col('pred_task_id')] = first[col('task_id')];
+  lines.splice(at + 3, 0, rev.join('\t'));
+  writeFileSync(path, lines.join('\r\n'), 'latin1');
+  // the two activities of the loop, from the file's own rows
+  const db = readXerFile(path).db;
+  const codeOf = (id: string) => String(db.tables.TASK.rows.find((t) => t.task_id === id)!.task_code);
+  const pair = [codeOf(first[col('pred_task_id')]), codeOf(first[col('task_id')])].sort();
+  const proj = String(db.tables.PROJECT.rows[0].proj_short_name);
+  const o = await call('open_file', { path }), h = o.handle;
+  assert.ok(h, JSON.stringify(o).slice(0, 300));
+  const named = (s: string) => pair.every((c) => s.includes(c));
+  const sentence = (figures: boolean) => new RegExp(`^.+ are in a loop: the dates of ${proj.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} cannot be recalculated${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of the loop \\(edit update_relationship or delete_relationship\\)\\.$`);
+  for (const tool of ['critical_path', 'float_paths', 'dcma_14', 'check_schedule', 'decm', 'schedule_health', 'lint', 'schedule_index', 'planning_horizon', 'earned_value', 'progress_curves', 'resource_histogram', 'project_summary']) {
+    const a = await call(tool, { handle: h, ...(tool === 'lint' ? { simulate: false } : {}) });
+    assert.ok(!a.error, `${tool} still answers: ${JSON.stringify(a.error)}`);
+    const said = ((a.notes ?? []) as string[]).filter((n) => / in a loop: /.test(n));
+    assert.equal(said.length, 1, `${tool}: ${JSON.stringify(a.notes)}`);
+    assert.ok(sentence(true).test(said[0]) && named(said[0]), `${tool}: ${said[0]}`);
+    assert.ok(!JSON.stringify(a.notes).includes('are not what a recalculation gives'), `${tool}: nothing is said of a recalculation that cannot be made`);
+  }
+  // lint: a check that fails, with the two activities; review: a check graded fail, its sentence in notes
+  const lint = await call('lint', { handle: h, simulate: false });
+  const lc = lint.checks.find((c: any) => c.id === 'loops');
+  assert.deepEqual([lc.result, lc.band, lc.activities.map((x: any) => x.id).sort()], ['fail', 'fail', pair]);
+  const rv = await call('review', { handle: h });
+  const rc = rv.checks.find((c: any) => c.id === 'loops');
+  assert.deepEqual([rc.grade, rc.count], ['fail', 2]);
+  assert.equal(rv.grade ?? rv.overall ?? 'fail', 'fail');
+  assert.ok((rv.notes as string[]).some((n) => sentence(false).test(n) && named(n)), JSON.stringify(rv.notes));
+  // schedule refuses, as before; an edit that moves dates says the dates cannot be recalculated
+  assert.match((await call('schedule', { handle: h })).error.message, / in a loop\.$/);
+  const e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: pair[0], duration_days: 77 }] });
+  assert.ok(!e.error && (e.notes as string[]).some((n) => sentence(false).test(n)), JSON.stringify(e.notes ?? e.error));
+  // the loop removed: none of them says it, and lint and review pass the check
+  const fix = await call('edit', { handle: h, operations: [{ op: 'delete_relationship', pred: codeOf(rev[col('pred_task_id')]), succ: codeOf(rev[col('task_id')]) }] });
+  assert.ok(!fix.error, JSON.stringify(fix.error));
+  for (const tool of ['critical_path', 'dcma_14', 'project_summary']) assert.ok(!JSON.stringify((await call(tool, { handle: h })).notes ?? []).includes('in a loop'), tool);
+  assert.equal((await call('lint', { handle: h, simulate: false })).checks.find((c: any) => c.id === 'loops').result, 'pass');
+  assert.equal((await call('review', { handle: h })).checks.find((c: any) => c.id === 'loops').grade, 'pass');
+  // a file with no loop (as shipped): the check passes with nothing listed
+  const clean = await open('130 TRIAL.xer');
+  const cl = (await call('lint', { handle: clean.handle, simulate: false })).checks.find((c: any) => c.id === 'loops');
+  assert.deepEqual([cl.result, cl.total_activities], ['pass', 0]);
+});
+
+test('a report over several projects says whose baseline columns are empty; a PDF report says it too', async () => {
+  // TOWER-A with its saved baseline assigned, and a second project with none
+  const o = await open('Tower-A.xer'), h = o.handle;
+  const e = await call('edit', { handle: h, operations: [{ op: 'assign_baseline', baseline: 'TOWER-A-BL1' }, { op: 'add_project', id: 'NOBL', start: '2026-03-02' }, { op: 'add_activity', project: 'NOBL', id: 'N1', name: 'N1', duration_days: 3 }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  const v = await call('run_report', { handle: h, report: 'variance' });
+  assert.deepEqual(v.notes, ['BL Start, BL Finish and Finish Var (d) are empty for the activities of NOBL: no baseline is assigned to NOBL; assign one with edit assign_baseline.']);
+  const blFinish = v.columns.indexOf('BL Finish'), id = v.columns.indexOf('Activity ID');
+  assert.ok(v.rows.some((r: any) => r.cells[id] !== 'N1' && r.cells[blFinish] !== ''), 'TOWER-A’s rows show their baseline');
+  assert.equal(v.rows.find((r: any) => r.cells[id] === 'N1').cells[blFinish], '');
+  const late = await call('run_report', { handle: h, report: 'std-late' });
+  assert.match(late.notes[0], /^BL Project Finish and Variance - BL Project Finish Date are empty for the activities of NOBL and the activities of NOBL listed are those with negative total float: no baseline is assigned to NOBL; /);
+  // one project asked for: no qualifier is needed, and the project that has its baseline says nothing
+  assert.equal((await call('run_report', { handle: h, report: 'variance', project: 'TOWER-A' })).notes, undefined);
+  assert.deepEqual((await call('run_report', { handle: h, report: 'variance', project: 'NOBL' })).notes, ['BL Start, BL Finish and Finish Var (d) are empty: no baseline is assigned to NOBL; assign one with edit assign_baseline.']);
+  // written to a file: the same sentence, PDF included
+  for (const ext of ['pdf', 'csv', 'xlsx', 'html']) {
+    const w = await call('run_report', { handle: h, report: 'variance', path: `variance-out.${ext}` });
+    assert.ok(!w.error, `${ext}: ${JSON.stringify(w.error)}`);
+    assert.deepEqual(w.notes, v.notes, ext);
+  }
 });

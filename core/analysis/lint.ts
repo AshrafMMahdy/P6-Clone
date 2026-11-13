@@ -11,6 +11,7 @@ import { isCritical } from '../project/ctx.ts';
 import { record, rollback } from '../journal.ts';
 import { applyOps } from '../project/ops.ts';
 import { scheduleProjects } from '../schedule/cpm.ts';
+import { logicLoops } from '../xer/validate.ts';
 import { isDone, isLoe, isMilestone, isWbs, makeScope, offender, pct, type CheckResult, type Offender, type Scope } from './common.ts';
 
 export type Band = 'pass' | 'warn' | 'fail';
@@ -129,7 +130,7 @@ export function resolveLintThresholds(input: Record<string, unknown> | undefined
   return { thresholds: t as unknown as LintThresholds, overridden, not_used };
 }
 
-export const LINT_CHECKS = ['dangling_start', 'dangling_finish', 'fs_overlap', 'empty_wbs', 'milestone_duration', 'constraints', 'loe_on_critical', 'lag_calendar',
+export const LINT_CHECKS = ['loops', 'dangling_start', 'dangling_finish', 'fs_overlap', 'empty_wbs', 'milestone_duration', 'constraints', 'loe_on_critical', 'lag_calendar',
   'connectivity', 'start_anchored', 'serialization', 'criticality', 'single_file', 'longest_chain', 'non_fs_share', 'edges_per_activity', 'redundant_links', 'ss_abuse'] as const;
 const PLATFORM_ONLY = new Set(['connectivity', 'start_anchored', 'serialization', 'criticality', 'single_file', 'longest_chain', 'non_fs_share', 'edges_per_activity', 'redundant_links', 'ss_abuse']);
 
@@ -180,6 +181,11 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
   const live = s.tasks.filter((t) => !isDone(t) && !isWbs(t) && !isLoe(t));
   const out: LintCheck[] = [];
 
+  if (want('loops')) {
+    // a loop is not a matter of degree: P6 cannot calculate a schedule that has one, so one loop fails the check (no threshold to set)
+    const f = logicLoops(s.db, [...s.projIds]).flatMap((l, i) => l.tasks.map((t) => offender(t, s, `loop ${i + 1}`)));
+    out.push(check('loops', 'Loops in the logic (P6 cannot calculate the schedule)', 'error', f, live.length, f.length ? 'fail' : 'pass', maxIds, {}));
+  }
   if (want('dangling_start')) {
     const f = live.filter((t) => !t.act_start_date && preds(t).length && !preds(t).some((r) => type(r) === 'PR_FS' || type(r) === 'PR_SS')).map((t) => offender(t, s, `only ${preds(t).map((r) => type(r).slice(3)).join(', ')} in`));
     out.push(check('dangling_start', 'Dangling start (no FS or SS predecessor drives the start)', 'warning', f, live.length, upTo(f.length, T.dangling_start.max), maxIds, { applied: T.dangling_start }));

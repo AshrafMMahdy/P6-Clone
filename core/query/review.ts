@@ -6,7 +6,8 @@ import { rows } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { makeCtx, isCritical } from '../project/ctx.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
-import { datesNotCurrent, NO_RESOURCE_ASSIGNED, notAssessed as notAssessedNote } from '../notes.ts';
+import { logicLoops } from '../xer/validate.ts';
+import { datesNotCurrent, loopStopsDates, NO_RESOURCE_ASSIGNED, notAssessed as notAssessedNote } from '../notes.ts';
 import { differentDatesNote } from '../analysis/scheduleLog.ts';
 import { constraintsOf, DCMA_HARD, dataDateAssumedNotes, dataDateGaps } from '../analysis/common.ts';
 
@@ -68,6 +69,9 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   add('out_of_sequence', 'Started out of sequence', oos, live.filter((t) => t.act_start_date).length, 0, null, 'none', '');
   const crit = live.filter((t) => isCritical(t, ctx));
   add('critical', 'Critical activities', crit, live.length, null, null, 'informational', '');
+  // a loop in the logic: P6 cannot calculate the schedule (F9 stops), so a programme with one fails the review, each loop named
+  const loops = logicLoops(db, [...open]);
+  add('loops', 'Loops in the logic (P6 cannot calculate the schedule)', loops.flatMap((l) => l.tasks), live.length, null, 0, 'none', loops.map((l) => loopStopsDates(l.proj, l.tasks.map((t) => t.task_code))).join(' '));
   const { stale } = storedDatesState(db, [...open]);
   add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), live.length, 0, null, 'none', stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true)).join(' '), stale.flatMap((x) => x.examples.map((f) => f.message)));
 

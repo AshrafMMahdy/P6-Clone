@@ -76,8 +76,10 @@ export const noDataDateReason = (proj: string, arg: string | null = 'status_date
 /** No data date, in a tool that needs one and takes `status_date`: the part that is not assessed, with its reason. The one sentence for every such tool. */
 export const noDataDateNotAssessed = (proj: string, part = 'checks that need a data date', arg: string | null = 'status_date'): string => notAssessed(part, noDataDateReason(proj, arg));
 /** A report whose baseline columns have nothing to show, or whose rows were chosen without a baseline: what, and why (the shared baseline reason). */
-export const reportWithoutBaseline = (columns: string[], rule: string | undefined, reason: string): string =>
-  `${[columns.length ? `${andList(columns)} ${columns.length === 1 ? 'is' : 'are'} empty` : '', rule ?? ''].filter(Boolean).join(' and ')}: ${reason}.`.replace(/^./, (c) => c.toUpperCase());
+export const reportWithoutBaseline = (columns: string[], rule: string | undefined, reason: string, only: string[] = []): string => {
+  const whose = only.length ? ` for the activities of ${projectsText(only)}` : '', of = only.length ? ` of ${projectsText(only)}` : '';
+  return `${[columns.length ? `${andList(columns)} ${columns.length === 1 ? 'is' : 'are'} empty${whose}` : '', rule ? rule.replace('the activities listed', `the activities${of} listed`) : ''].filter(Boolean).join(' and ')}: ${reason}.`.replace(/^./, (c) => c.toUpperCase());
+};
 /** CPLI has no remaining critical path length to divide by: the reason, read from the activities (`open` = activities with no actual finish;
  *  `finish` = the latest finish of the project's rows, actual or forecast). Never "the project is complete" unless every activity is: saved dates
  *  that were not calculated for this data date give the same zero. The length is working time of the project's default calendar, so that is said. */
@@ -143,6 +145,10 @@ export const datesNotStored = (proj: string): string => `${proj} has no calculat
 export const datesNotCurrent = (proj: string, differ: number, open: number, figures = false): string => `The saved dates of ${proj} are not what a recalculation gives (${differ} of ${open} open ${open === 1 ? 'activity' : 'activities'} ${differ === 1 ? 'differs' : 'differ'})${figures ? ': these figures are of the saved dates' : ''}; run schedule to recalculate them.`;
 /** A loop. */
 export const loopNote = (ids: string[]): string => `${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
+/** A loop stops the calculation of a project's dates: said by every analysis that judges from the saved dates (it still answers: owner 2026-11-13, as P6's reports open on a
+ *  schedule F9 refuses). `figures`: the answer holds figures of those dates. */
+export const loopStopsDates = (proj: string, ids: string[], figures = false): string =>
+  `${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop: the dates of ${proj} cannot be recalculated${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of the loop (edit update_relationship or delete_relationship).`;
 /** Resources that are Material: a material is a quantity, not a crew, so its over-allocation is not judged. `ids` are Resource IDs. */
 export const materialNote = (ids: string[]): string => `${plural(ids.length, 'resource')} ${ids.length === 1 ? 'is' : 'are'} Material: over-allocation is not assessed for a Material resource: ${namesText([...ids].sort())}.`;
 /** Labor / Nonlabor resources with no Max Units/Time (0 or blank): their over-allocation is not judged. `ids` are Resource IDs. */

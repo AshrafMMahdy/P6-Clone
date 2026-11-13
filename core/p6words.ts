@@ -25,8 +25,9 @@ export const UDF_SUBJECT: Record<string, string> = { activity: 'TASK', wbs: 'PRO
 export const UDF_TYPE: Record<string, string> = { text: 'FT_TEXT', number: 'FT_FLOAT_2_DECIMALS', integer: 'FT_INT', cost: 'FT_MONEY', start_date: 'FT_START_DATE', finish_date: 'FT_END_DATE', date: 'FT_START_DATE' };
 /** A UDF's subject and data type as add_udf takes them (the file keeps a table name and an FT_ code), so an answer names what a caller can send back.
  *  An indicator (P6's traffic light) cannot be made by add_udf: it is named by P6's word. */
-export const udfSubjectWord = (table: string): string => Object.keys(UDF_SUBJECT).find((k) => UDF_SUBJECT[k] === table) ?? table;
-export const udfTypeWord = (ft: string): string => (ft === 'FT_STATICTYPE' ? 'indicator' : /^FT_FLOAT/.test(ft) ? 'number' : Object.keys(UDF_TYPE).find((k) => UDF_TYPE[k] === ft) ?? ft);
+/** (A table or a type that is none of P6's: the file's own word without its prefix, in small letters: "FT_DATE" is said "date", never the code.) */
+export const udfSubjectWord = (table: string): string => Object.keys(UDF_SUBJECT).find((k) => UDF_SUBJECT[k] === table) ?? (TABLE_WORD[table] ?? table).toLowerCase();
+export const udfTypeWord = (ft: string): string => (ft === 'FT_STATICTYPE' ? 'indicator' : /^FT_FLOAT/.test(ft) ? 'number' : Object.keys(UDF_TYPE).find((k) => UDF_TYPE[k] === ft) ?? String(ft ?? '').replace(/^FT_/, '').toLowerCase());
 
 /** P6's words for an activity's status (the file keeps codes). */
 export const STATUS_WORDS: Record<string, string> = { TK_NotStart: 'Not Started', TK_Active: 'In Progress', TK_Complete: 'Completed' };

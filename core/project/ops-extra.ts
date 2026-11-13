@@ -583,8 +583,9 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const only = Array.isArray(op.tables) ? new Set(op.tables.map((t: unknown) => String(t).toUpperCase())) : null;
       const cleared: Record<string, number> = {};
       for (const [name, t] of Object.entries(db.tables)) {
-        if (only && !only.has(name) || /MEMO$/.test(name)) continue; // notebooks: clear_notebooks
-        const fields = [...new Set([...(t.fields ?? []), ...Object.keys(t.rows[0] ?? {})])].filter((f) => /(_descr|_notes|memo)$/i.test(f) || /^memo/i.test(f));
+        // notebooks: clear_notebooks. The notebook TOPICS (MEMOTYPE) are a dictionary, not a description: their names and keys stay (blanking them cut every notebook loose from its topic)
+        if (only && !only.has(name) || /MEMO$/.test(name) || name === 'MEMOTYPE') continue;
+        const fields = [...new Set([...(t.fields ?? []), ...Object.keys(t.rows[0] ?? {})])].filter((f) => (/(_descr|_notes|memo)$/i.test(f) || /^memo/i.test(f)) && !/_(id|type)$/i.test(f));
         if (!fields.length) continue;
         let n = 0;
         for (const r of rows(db, name)) for (const f of fields) if (r[f] != null && r[f] !== '') { r[f] = ''; n++; } // through the edit's view: undoable
