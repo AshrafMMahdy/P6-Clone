@@ -23,7 +23,7 @@ const STATUS: Record<string, string> = { TK_NotStart: 'not started', TK_Active: 
 const TYPE: Record<string, string> = { TT_Task: 'task', TT_Rsrc: 'resource dependent', TT_Mile: 'start milestone', TT_FinMile: 'finish milestone', TT_LOE: 'level of effort', TT_WBS: 'WBS summary' };
 
 export const TOOLS: ToolDef[] = [
-  { name: 'project_summary', description: 'Overview of the open project(s): names, data date, start/finish, activity counts by status, critical and negative-float counts, WBS top level, calendars and resources. Call this first.', parameters: { type: 'object', properties: {} } },
+  { name: 'project_summary', description: 'Overview of the open project(s): names, data date, start/finish, activity counts by status, critical and negative-float counts, WBS top level, calendars and resources. Call this first. Days in every answer of this server are working days of each activity\u2019s own calendar (its hours per day; lags: the relationship-lag calendar).', parameters: { type: 'object', properties: {} } },
   { name: 'find_activities', description: 'Search activities. All filters are optional and combined. Returns up to `limit` rows (ID, name, status, start, finish, durations in days, total float in days, WBS; source_uid = the Microsoft Project task UID for activities read from an MSPDI/MPX file).', parameters: { type: 'object', properties: {
     text: { type: 'string', description: 'Text in the activity ID or name (case-insensitive)' },
     status: { type: 'string', enum: ['not_started', 'in_progress', 'completed'] },

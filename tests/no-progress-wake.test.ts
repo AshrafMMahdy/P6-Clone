@@ -23,7 +23,7 @@ test('the wake fires once, when the silence passes the job\'s own longest gap; n
   assert.equal(w.no_progress.longest_gap_before_s, 10);
   assert.equal(w.no_progress.silent_s, 11);
   assert.equal(w.no_progress.using_cpu, true);
-  assert.match(w.no_progress.note, /not stopped/);
+  assert.equal(w.no_progress.note, undefined, 'the facts are fields; no advice beside them');
   assert.ok(!('result' in w));
   noteSilence(job, silence({ silentMs: 600_000, maxGapMs: 10_000 }));
   assert.equal(wakes().length, 1, 'once per job: the agent decides after that');

@@ -97,7 +97,7 @@ test('an answer too large to return is written whole to a JSON file whose path t
     assert.deepEqual(r.d.written, [r.d.saved]);
     const whole = JSON.parse(readFileSync(r.d.saved, 'utf8'));
     assert.equal(whole.activities.length, 100);
-    assert.match(r.d.note, /all of it is in/);
+    assert.match(r.d.notes[0], /all of it is in/);
     config.maxResponseChars = was;
     await call('close', { handle, owner_key, discard: true });
   } finally { config.maxResponseChars = was; setRoots(READ, WRITE); }

@@ -123,8 +123,8 @@ test('G-3 set_schedule_options writes P6\'s Schedule Options; schedule options o
 test('G-4 one relationship per pair and type for XER / P6 (SS + FF pairs kept through save); one per pair for Microsoft Project; a true duplicate is skipped with a warning', async () => {
   const h = await handleFor(NET.slice(0, 3));
   const dup = await call('edit', { handle: h, operations: [{ op: 'add_relationship', pred: 'A', succ: 'B', type: 'SS' }] });
-  assert.deepEqual([dup.results[0].skipped, dup.warnings.length], ['A SS B', 1]);
-  assert.match(dup.warnings[0], /already exists/);
+  assert.deepEqual([dup.results[0].skipped, dup.notes.length], ['A SS B', 1]);
+  assert.match(dup.notes[0], /already exists/);
   assert.deepEqual((await call('get_activity', { handle: h, activity_id: 'B' })).predecessors.map((p: any) => p.type).sort(), ['FF', 'SS']);
   // saved and opened again: both kept
   const path = join(dir, 'pairs.xer');
@@ -139,7 +139,7 @@ test('G-4 one relationship per pair and type for XER / P6 (SS + FF pairs kept th
   const one = preds.find((p: any) => p.id !== '(outside the open projects)');
   const r = await call('edit', { handle: m.handle, operations: [{ op: 'add_relationship', pred: one.id, succ: 'uid:162', type: one.type === 'SS' ? 'FF' : 'SS' }] });
   assert.equal(r.ok, true);
-  assert.match(r.warnings[0], /Microsoft Project keeps one per pair/);
+  assert.match(r.notes[0], /Microsoft Project keeps one per pair/);
 });
 
 test('G-5 assign_resource allow_duplicate: the same resource twice on an activity', () => {

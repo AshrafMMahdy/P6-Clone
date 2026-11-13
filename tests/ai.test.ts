@@ -65,7 +65,7 @@ test('project lookup tools answer from the database', () => {
   const health = runTool('schedule_health', {}, db, ctx, ids, 8) as any;
   assert.equal(typeof health.missing_predecessors.count, 'number');
   assert.ok((runTool('list_wbs', {}, db, ctx, ids, 8) as any).wbs.length > 0);
-  assert.match((runTool('get_activity', { activity_id: 'NOPE' }, db, ctx, ids, 8) as any).error, /No activity/);
+  assert.match((runTool('get_activity', { activity_id: 'NOPE' }, db, ctx, ids, 8) as any).error, /^Refused: no activity with ID "NOPE"/);
 });
 
 test('extra headers and request parameters are merged, validated, and headers stored encrypted', () => {

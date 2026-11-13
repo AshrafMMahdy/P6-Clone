@@ -205,7 +205,7 @@ test('a Microsoft Project import from before v0.1.14 (task UIDs, no source mark)
   const o = await call('open_file', { path });
   const ids = (await call('find_activities', { handle: o.handle })).activities.map((x: any) => x.id);
   const r = await call('edit', { handle: o.handle, operations: [{ op: 'add_relationship', pred: ids[0], succ: ids[1], type: 'SS' }] });
-  assert.match(r.warnings[0], /Microsoft Project keeps one per pair/);
+  assert.match(r.notes[0], /Microsoft Project keeps one per pair/);
   assert.equal(o.tasks_without_unique_id, undefined, 'the clone writes Unique IDs into its MPX');
   await call('close', { handle: o.handle, discard: true });
   // an MPX whose tasks carry no Unique ID: said in a field of its own (diagnostics lists the first 40 findings only), however many findings come before it

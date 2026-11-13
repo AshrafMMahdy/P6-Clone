@@ -270,7 +270,7 @@ test('MCP: import_excel dry run refuses a new activity under a WBS that does not
   assert.ok(hit, JSON.stringify(dry));
   assert.match(hit.message, /No WBS "ROOF"/);
   assert.match(hit.next, /add_wbs/);
-  assert.ok(dry.warnings.some((w: string) => /unknown type "Finish to Start"; the accepted values are FS, SS, FF, SF/.test(w)), JSON.stringify(dry.warnings));
+  assert.ok(dry.notes.some((w: string) => /unknown type "Finish to Start"; the accepted values are FS, SS, FF, SF/.test(w)), JSON.stringify(dry.notes));
   const real = (await call('import_excel', { ...H, path: join(dir, 'b.xlsx') })).d;
   assert.deepEqual(real.refused.map((r: any) => r.message), dry.refused.map((r: any) => r.message));
   await call('close', { ...H, discard: true });

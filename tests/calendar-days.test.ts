@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { callTool, toolResult } from '../mcp/server.ts';
+import { callTool, toolResult, toolsList } from '../mcp/server.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { runTool } from '../core/query/tools.ts';
 import { exportSheets, planImport } from '../core/excel/p6sheets.ts';
@@ -49,7 +49,8 @@ test('MCP: 5 d on a 10-h calendar reads back as 5 d in every result that shows d
   assert.deepEqual((await call('critical_path', { handle: h })).activities.map((x: any) => [x.id, x.orig_days]), [['A', 5], ['B', 5]]);
   const tr = await call('trace_logic', { handle: h, activity_id: 'B' });
   assert.deepEqual([tr.activity.orig_days, tr.levels[0].activities[0].orig_days, tr.links[0].lag_days], [5, 5, 1]);
-  assert.match((await call('project_summary', { handle: h })).days_are, /each activity's own calendar/);
+  assert.equal((await call('project_summary', { handle: h })).days_are, undefined);
+  assert.match((toolsList() as any[]).find((t) => t.name === 'project_summary').description, /working days of each activity\u2019s own calendar/);
   // reports: built-in and defined
   const sr = await call('run_report', { handle: h, report: 'Schedule Report' });
   assert.deepEqual(sr.rows.filter((x: any) => !x.group).map((x: any) => [x.cells[0], x.cells[2], x.cells[3], x.cells[7]]), [['A', '5', '5', '0'], ['D', '2', '2', '9'], ['C', '5', '5', '6'], ['B', '5', '5', '0']]);
@@ -65,7 +66,8 @@ test('MCP: 5 d on a 10-h calendar reads back as 5 d in every result that shows d
   const col = (f: string) => T[0].indexOf(f);
   assert.deepEqual(T.slice(2).filter((r) => r[col('task_code')] === 'A').map((r) => [r[col('target_drtn_hr_cnt')], r[col('remain_drtn_hr_cnt')]]), [[5, 5]]);
   assert.equal(P[2][P[0].indexOf('lag_hr_cnt')], 1);
-  assert.equal((await call('import_excel', { handle: h, path: xlsx, dry_run: true })).note, 'Nothing to change.');
+  const nothing = await call('import_excel', { handle: h, path: xlsx, dry_run: true });
+  assert.deepEqual([nothing.applied, nothing.operations, nothing.notes, Object.entries(nothing.summary).filter(([k, v]) => k !== 'unchanged' && v !== 0)], [false, [], undefined, []], 'an unchanged file plans nothing');
   // compare: the edit of A from 5 to 6 days is 5 -> 6
   const other = (await call('new_project', { id: 'CD', start: '2026-03-02' })).handle;
   await call('edit', { handle: other, operations: [...OPS.slice(0, 1), { ...OPS[1], duration_days: 6 }, ...OPS.slice(2)] });
@@ -110,7 +112,7 @@ test('the desktop app (no calendarDays): days at the fixed hours per day, edits 
   assert.deepEqual([t('A').target_drtn_hr_cnt, t('C').target_drtn_hr_cnt, rows(db, 'TASKPRED')[0].lag_hr_cnt], ['40', '40', '8']);
   const g = runTool('get_activity', { activity_id: 'A' }, db, makeCtx(db, prefs()), [], 8) as any;
   assert.deepEqual([g.orig_days, g.rem_days, g.successors[0].lag_days], [5, 5, 1]);
-  assert.equal((runTool('project_summary', {}, db, makeCtx(db, prefs()), [], 8) as any).days_are, 'hours_per_day_used_for_days hours each');
+  assert.equal((runTool('project_summary', {}, db, makeCtx(db, prefs()), [], 8) as any).days_are, undefined);
   const ctx = makeCtx(db, prefs());
   assert.deepEqual(['orig_dur', 'rem_dur'].map((c) => col(c).get(t('A'), ctx)), ['5', '5']);
   // a 50-h activity: 6.3 d in the table, in lookups and in reports, as before

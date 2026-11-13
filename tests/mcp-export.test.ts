@@ -585,7 +585,7 @@ test('E4: every list the answer cut says where all of it is, when an export was 
   assert.equal(fp.between.paths_note, '5 of 1208925819614629174706176 shown.');
   assert.equal(fp.paths_note, undefined, 'the top-level paths are not cut lists');
   const dflt = (await call('float_paths', { handle: np.handle, between: { from: 'S', to: prev, max: 5 } })).d;
-  assert.equal(dflt.between.paths_note, `5 of 1208925819614629174706176 shown (the most asked for); the export holds the same 5 in ${join(dflt.exported.folder, 'float_paths-between.csv')}, ask for more to have more`);
+  assert.equal(dflt.between.paths_note, '5 of 1208925819614629174706176 shown.', 'no file holds all of them: said without one');
 });
 
 test('E5: optimize_schedule with objective min_crash_cost exports under its own name, so one tool\'s files in a folder are replaced together', async () => {
