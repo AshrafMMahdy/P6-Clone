@@ -99,7 +99,7 @@ export const datesNotCurrent = (proj: string, differ: number, open: number): str
 /** A loop. */
 export const loopNote = (ids: string[]): string => `Loop: ${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
 /** Resources with no limit set (Max Units/Time 0): their over-allocation is not judged. `ids` are Resource IDs. */
-export const noLimitNote = (ids: string[]): string => `${plural(ids.length, 'resource')} ${ids.length === 1 ? 'has' : 'have'} no Max Units/Time, so ${ids.length === 1 ? 'its' : 'their'} over-allocation is not assessed: ${namesText(ids)}.`;
+export const noLimitNote = (ids: string[]): string => `${plural(ids.length, 'resource')} ${ids.length === 1 ? 'has' : 'have'} no Max Units/Time, so ${ids.length === 1 ? 'its' : 'their'} over-allocation is not assessed: ${namesText([...ids].sort())}.`;
 /** An actual date after the data date. */
 export const actualAfterDataDate = (id: string, kind: 'start' | 'finish' | 'start and finish', dates: string, dataDate: string): string => `${id} has an actual ${kind} ${dates} after the data date ${dataDate}.`;
 /** An activity that started before its predecessor finished. */

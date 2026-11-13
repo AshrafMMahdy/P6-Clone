@@ -23,7 +23,7 @@ export interface LevelOptions {
 }
 /** moved: activities leveling delayed (early start before and after, finish after); peaks: per leveled resource, the
  *  highest use in a day after leveling (unit-hours) against its limit (Max Units/Time x 8 h x the allowed overallocation). */
-export interface LevelResult { log: string; delayed: number; findings: Finding[]; /** what the run did not do, in words (also in `log`): a resource with no limit is not leveled */ notes: string[]; moved: { taskId: string; code: string; from: string; start: string; finish: string }[]; peaks: { rsrcId: string; code: string; peak: number; limit: number; day: string; overallocated: boolean }[] }
+export interface LevelResult { /** the leveling report as the desktop dialog shows it, the notes included */ log: string; /** the same report without the notes (a tool answer gives them once, in its own notes) */ report: string; delayed: number; findings: Finding[]; /** what the run did not do, in words (also in `log`): a resource with no limit is not leveled */ notes: string[]; moved: { taskId: string; code: string; from: string; start: string; finish: string }[]; peaks: { rsrcId: string; code: string; peak: number; limit: number; day: string; overallocated: boolean }[] }
 
 const PRIO: Record<string, number> = { PT_Top: 0, PT_High: 1, PT_Normal: 2, PT_Low: 3, PT_Lowest: 4 };
 const HORIZON_DAYS = 366 * 10;
@@ -194,8 +194,9 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
   if (inScope.size && !limited.length) notes.push('No resource has a limit: nothing to level.');
   else if (noLimit.size) notes.push(noLimitNote([...noLimit].map((id) => rsrcs.get(id)?.rsrc_short_name ?? id).sort()));
   if (inScope.size && limited.length && !new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size) notes.push('Nothing was leveled: the resources that have a limit are marked not to be leveled (their Leveling flag is off).');
-  const text = ['Leveling Report', '', `Activities delayed .......... ${delayed}`, `Resources leveled ........... ${new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size}`, `Level within float .......... ${opts.withinFloat ? 'Yes' : 'No'}`,
-    ...(notes.length ? ['', ...notes] : []),
+  const report = (withNotes: boolean) => ['Leveling Report', '', `Activities delayed .......... ${delayed}`, `Resources leveled ........... ${new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size}`, `Level within float .......... ${opts.withinFloat ? 'Yes' : 'No'}`,
+    ...(withNotes && notes.length ? ['', ...notes] : []),
     '', ...log, '', 'End of report'].join('\r\n');
-  return { log: text, delayed, findings, notes, moved: movedList, peaks };
+  // log: the report as the desktop dialog shows it, notes included; report: the same without them (a tool answer says them once, in its notes)
+  return { log: report(true), report: report(false), delayed, findings, notes, moved: movedList, peaks };
 }

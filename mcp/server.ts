@@ -662,7 +662,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const pct = a.over_allocation_pct == null ? undefined : Number(a.over_allocation_pct);
       if (pct != null && !(pct >= 0)) fail('bad_input', 'over_allocation_pct must be 0 or more.', 'e.g. 10 for 10 %.');
       const opts = { withinFloat: !!a.within_float, overAllocPct: pct, priority: by, rsrcIds, first };
-      const answer = (r: ReturnType<typeof levelResources>) => ({ delayed: r.delayed, moved: r.moved.map((m) => ({ id: m.code, from: m.from, start: m.start, finish: m.finish })), peaks: r.peaks.map((p) => ({ resource: p.code, peak: p.peak, limit: p.limit, day: p.day, overallocated: p.overallocated })), report: r.log });
+      const answer = (r: ReturnType<typeof levelResources>) => ({ delayed: r.delayed, moved: r.moved.map((m) => ({ id: m.code, from: m.from, start: m.start, finish: m.finish })), peaks: r.peaks.map((p) => ({ resource: p.code, peak: p.peak, limit: p.limit, day: p.day, overallocated: p.overallocated })), report: r.report, ...(r.notes.length ? { notes: r.notes } : {}) });
       // (leveling for real has changed the project before the export is written: a failure to write it is said beside the result)
       const levelOut = <T extends ReturnType<typeof answer>>(r: T) => {
         if (a.export == null) return r;
