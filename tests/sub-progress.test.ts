@@ -2,6 +2,7 @@
 // (by Activity ID, or several of theirs onto one package activity by an activity code), and their file imported into
 // the open project (Update Existing Project, a new project beside it), each one undoable change.
 import { test } from 'node:test';
+import { PROGRESS_FIELDS } from '../core/p6words.ts';
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,8 +47,18 @@ test('transfer_progress: a subcontractor\'s progress onto the GC programme in on
   assert.ok(untouched.filter((r) => codes.includes(r[0])).every((r) => r[1] === ''), 'a dry run changes nothing');
 
   const t = await ok('transfer_progress', { ...G, path: w2, data_date: 'from' });
-  assert.ok(t.changes.some((c: any) => c.id === codes[0] && c.changed.act_end_date));
+  assert.ok(t.changes.some((c: any) => c.id === codes[0] && c.changed['Actual Finish']));
   const gc = new Map((await rowsOf(g.handle, 'TASK', ['task_code', 'act_start_date', 'act_end_date', 'remain_drtn_hr_cnt', 'status_code'])).map((r) => [r[0], r]));
+  // what changed is named as P6 names it, with values a person reads: no column name, no status code, the remaining duration in days (from the file's own hours)
+  const P6_NAMES = new Set(Object.values(PROGRESS_FIELDS)), WORDS = new Set(['Not Started', 'In Progress', 'Completed']);
+  assert.ok(Object.keys(t.changed_fields).length >= 2 && Object.keys(t.changed_fields).every((f) => P6_NAMES.has(f)), JSON.stringify(t.changed_fields));
+  let statuses = 0, durations = 0;
+  for (const c of t.changes) for (const [f, [, now]] of Object.entries(c.changed as Record<string, [unknown, unknown]>)) {
+    assert.ok(P6_NAMES.has(f), f);
+    if (f === 'Activity Status') { statuses++; assert.ok(WORDS.has(String(now)), String(now)); }
+    if (f === 'Remaining Duration (days)') { durations++; assert.equal(now, Math.round((Number(gc.get(c.id)![3]) / 8) * 100) / 100, `${c.id}: days of the hours the file holds`); }
+  }
+  assert.ok(statuses > 0 && durations > 0, `${statuses} statuses and ${durations} remaining durations were read`);
   for (const c of codes) assert.deepEqual(gc.get(c)!.slice(1, 4), sub.get(c)!.slice(1, 4), c);
   assert.equal(gc.get(codes[0])![4], 'TK_Complete');
   const sch = await ok('schedule', { ...G, log: false });

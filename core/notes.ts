@@ -75,6 +75,9 @@ export const dataDateWritten = (proj: string, date: string): string => `${proj} 
 export const noDataDateReason = (proj: string, arg: string | null = 'status_date'): string => `${proj} has no data date; ${arg ? `pass ${arg}` : 'set one with schedule data_date'}`;
 /** No data date, in a tool that needs one and takes `status_date`: the part that is not assessed, with its reason. The one sentence for every such tool. */
 export const noDataDateNotAssessed = (proj: string, part = 'checks that need a data date', arg: string | null = 'status_date'): string => notAssessed(part, noDataDateReason(proj, arg));
+/** A report whose baseline columns have nothing to show, or whose rows were chosen without a baseline: what, and why (the shared baseline reason). */
+export const reportWithoutBaseline = (columns: string[], rule: string | undefined, reason: string): string =>
+  `${[columns.length ? `${andList(columns)} ${columns.length === 1 ? 'is' : 'are'} empty` : '', rule ?? ''].filter(Boolean).join(' and ')}: ${reason}.`.replace(/^./, (c) => c.toUpperCase());
 /** CPLI has no remaining critical path length to divide by: the reason, read from the activities (`open` = activities with no actual finish;
  *  `finish` = the latest finish of the project's rows, actual or forecast). Never "the project is complete" unless every activity is: saved dates
  *  that were not calculated for this data date give the same zero. The length is working time of the project's default calendar, so that is said. */

@@ -155,7 +155,9 @@ export function runSpec(db: Db, projIds: string[], spec: ReportSpec, o: RunOptio
       else out.push({ cells: cols.map((c) => c.get(r.task!, ctx)), level: r.level });
     }
     // drop group bands left without activities by the filter
-    return { title: titleOf, subtitle, columns: cols.map((c) => c.title), rows: spec.filter && spec.filter !== 'all' ? dropEmptyBands(out) : out };
+    // the columns that read the project baseline, and the Late Activities rule that falls to negative float without one: told to the caller, who says it
+    const fromBaseline = cols.filter((c) => ['bl_start', 'bl_finish', 'var_bl_finish'].includes(c.id)).map((c) => c.title);
+    return { title: titleOf, subtitle, columns: cols.map((c) => c.title), rows: spec.filter && spec.filter !== 'all' ? dropEmptyBands(out) : out, ...(fromBaseline.length ? { baselineColumns: fromBaseline } : {}), ...(spec.filter === 'late' ? { baselineRule: 'the activities listed are those with negative total float' } : {}) };
   }
 
   const activityOk = (() => {

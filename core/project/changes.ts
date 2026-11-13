@@ -4,7 +4,7 @@ import { ABSENT, type Journal } from '../journal.ts';
 import type { Db, Row } from '../db.ts';
 import { dayHours } from './units.ts';
 import { cstrName, namesText } from '../notes.ts';
-import { humanizeField } from '../p6words.ts';
+import { humanizeField, STATUS_WORDS } from '../p6words.ts';
 import { parseClndrDataLeniently } from '../calendar/clndr-data.ts';
 
 export interface FieldChange { id: string; field: string; old: string | number | null; new: string | number | null }
@@ -13,7 +13,7 @@ type Obj = Record<string, unknown>;
 /** P6's words for the coded values an edit can change (the file keeps codes). */
 const WORDS: Record<string, Record<string, string>> = {
   priority_type: { PT_Top: 'Top', PT_High: 'High', PT_Normal: 'Normal', PT_Low: 'Low', PT_Lowest: 'Lowest' },
-  status_code: { TK_NotStart: 'Not Started', TK_Active: 'In Progress', TK_Complete: 'Completed' },
+  status_code: STATUS_WORDS,
   task_type: { TT_Task: 'Task Dependent', TT_Rsrc: 'Resource Dependent', TT_LOE: 'Level of Effort', TT_Mile: 'Start Milestone', TT_FinMile: 'Finish Milestone', TT_WBS: 'WBS Summary' },
   complete_pct_type: { CP_Drtn: 'Duration', CP_Phys: 'Physical', CP_Units: 'Units' },
   duration_type: { DT_FixedDUR2: 'Fixed Duration & Units/Time', DT_FixedQty: 'Fixed Units', DT_FixedDrtn: 'Fixed Duration & Units', DT_FixedRate: 'Fixed Units/Time' },

@@ -1,6 +1,7 @@
 // More edit operations (see ops.ts): WBS changes, codes, UDFs, notebooks, cost accounts and expenses, steps,
 // risk estimates, baselines, EPS/OBS/roles, calendar changes and assignment details. Same rules as ops.ts:
 // addressed by IDs and names a scheduler sees, durations in days, one transaction per list.
+import { UDF_SUBJECT, UDF_TYPE, udfSubjectWord, udfTypeWord } from '../p6words.ts';
 import { addField, dropIndexes, nextId, refTarget, rowIndex, rows, rowsBy, table, ermhdrFields, ermhdrIdentity, type Db, type Row } from '../db.ts';
 import { p6num } from '../schedule/cpm.ts';
 import { parseClndrData, scheduledCalendarDef, serializeClndrData, type Shift } from '../calendar/clndr-data.ts';
@@ -99,8 +100,6 @@ const CODE_SUBJECTS = {
   // P6's assignment codes (ASGNMNTCATTYPE / ASGNMNTCATVAL / ASGNMNTACAT, on a resource assignment)
   assignment: { type: 'ASGNMNTCATTYPE', tid: 'asgnmnt_catg_type_id', tname: 'asgnmnt_catg_type', tlen: 'asgnmnt_catg_short_len', val: 'ASGNMNTCATVAL', vid: 'asgnmnt_catg_id', vparent: 'parent_asgnmnt_catg_id', vshort: 'asgnmnt_catg_short_name', vname: 'asgnmnt_catg_name', link: 'ASGNMNTACAT', fk: 'taskrsrc_id' },
 } as const;
-const UDF_SUBJECT: Record<string, string> = { activity: 'TASK', wbs: 'PROJWBS', project: 'PROJECT', resource: 'RSRC', assignment: 'TASKRSRC', expense: 'PROJCOST' };
-const UDF_TYPE: Record<string, string> = { text: 'FT_TEXT', number: 'FT_FLOAT_2_DECIMALS', integer: 'FT_INT', cost: 'FT_MONEY', start_date: 'FT_START_DATE', finish_date: 'FT_END_DATE', date: 'FT_START_DATE' };
 const TREES = {
   eps: { table: 'EPS', id: 'eps_id', parent: 'parent_eps_id', key: 'eps_short_name', name: 'eps_name', fields: ['eps_id', 'parent_eps_id', 'eps_short_name', 'eps_name', 'seq_num'] },
   obs: { table: 'OBS', id: 'obs_id', parent: 'parent_obs_id', key: 'obs_name', name: 'obs_name', fields: ['obs_id', 'parent_obs_id', 'seq_num', 'obs_name', 'obs_descr'] },
@@ -521,7 +520,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const T = ensure(db, 'UDFTYPE', ['udf_type_id', 'table_name', 'udf_type_name', 'udf_type_label', 'logical_data_type', 'super_flag', 'indicator_expression', 'summary_indicator_expression', 'export_flag']);
       const id = String(nextId(db, 'UDFTYPE'));
       T.rows.push({ udf_type_id: id, table_name: tbl, udf_type_name: `user_field_${id}`, udf_type_label: name, logical_data_type: dt, super_flag: 'N', indicator_expression: '', summary_indicator_expression: '', export_flag: 'Y' });
-      return { udf: name, data_type: dt };
+      return { udf: name, subject: udfSubjectWord(tbl), data_type: udfTypeWord(dt) };
     }
     case 'set_udf': {
       const tg = target(op);

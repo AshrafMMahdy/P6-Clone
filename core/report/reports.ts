@@ -6,7 +6,9 @@ import { activityCosts, sumLines, spi, cpi, percentComplete, type CostLine } fro
 
 /** dayHours: days per activity (units.ts); hoursPerDay without it */
 export interface ReportOpts { hoursPerDay: number; fmtDate: (s: string | number | null | undefined) => string; weeks?: number; dayHours?: DayHours }
-export interface Report { title: string; subtitle?: string; columns: string[]; rows: { cells: string[]; level?: number; bold?: boolean }[]; text?: string }
+export interface Report { title: string; subtitle?: string; columns: string[]; rows: { cells: string[]; level?: number; bold?: boolean }[]; text?: string;
+  /** the columns (by title) that read the project baseline: empty for a project with none in the file, which the answer then says */ baselineColumns?: string[];
+  /** the rows were chosen by a rule that reads the project baseline and falls to another without one (Late Activities: negative total float) */ baselineRule?: string }
 export interface ReportDef { id: string; title: string; group: string; build: (db: Db, projIds: string[], o: ReportOpts) => Report }
 
 const days = (h: string | number | undefined, o: ReportOpts, t?: Row) => (h === '' || h == null ? '' : String(Math.round((Number(h) / (t && o.dayHours ? o.dayHours.task(t) : o.hoursPerDay)) * 10) / 10));
@@ -79,7 +81,7 @@ export const REPORTS: ReportDef[] = [
           out.push({ cells: [t.task_code, t.task_name, b ? o.fmtDate(b.act_start_date || b.target_start_date) : '', b ? o.fmtDate(b.act_end_date || b.target_end_date) : '', start(t, o), finish(t, o), bf != null && f != null ? String(Math.round((bf - f) / MIN_PER_DAY)) : ''] });
         }
       }
-      return { title: 'Baseline Variance', subtitle: 'Variance in calendar days (negative = later than baseline)', columns: ['Activity ID', 'Activity Name', 'BL Start', 'BL Finish', 'Start', 'Finish', 'Finish Var (d)'], rows: out };
+      return { title: 'Baseline Variance', subtitle: 'Variance in calendar days (negative = later than baseline)', columns: ['Activity ID', 'Activity Name', 'BL Start', 'BL Finish', 'Start', 'Finish', 'Finish Var (d)'], rows: out, baselineColumns: ['BL Start', 'BL Finish', 'Finish Var (d)'] };
     },
   },
   {

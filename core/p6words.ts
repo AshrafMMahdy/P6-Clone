@@ -19,3 +19,19 @@ export function lostKinds(lost: { table: string; field: string; rows: number }[]
 }
 /** A value of the file as P6 names it: "Project risk level", "Project OBS" (a whole table: "(whole table)"), "Export header database name". */
 export const p6Name = (table: string, field: string): string => { const t = TABLE_WORD[table] ?? `${table.toLowerCase()} value`; return /^\(/.test(field) ? t : `${t} ${humanizeField(field).toLowerCase()}`; };
+
+/** The subjects and data types of a user defined field as the add_udf operation takes them, against what the file keeps. */
+export const UDF_SUBJECT: Record<string, string> = { activity: 'TASK', wbs: 'PROJWBS', project: 'PROJECT', resource: 'RSRC', assignment: 'TASKRSRC', expense: 'PROJCOST' };
+export const UDF_TYPE: Record<string, string> = { text: 'FT_TEXT', number: 'FT_FLOAT_2_DECIMALS', integer: 'FT_INT', cost: 'FT_MONEY', start_date: 'FT_START_DATE', finish_date: 'FT_END_DATE', date: 'FT_START_DATE' };
+/** A UDF's subject and data type as add_udf takes them (the file keeps a table name and an FT_ code), so an answer names what a caller can send back.
+ *  An indicator (P6's traffic light) cannot be made by add_udf: it is named by P6's word. */
+export const udfSubjectWord = (table: string): string => Object.keys(UDF_SUBJECT).find((k) => UDF_SUBJECT[k] === table) ?? table;
+export const udfTypeWord = (ft: string): string => (ft === 'FT_STATICTYPE' ? 'indicator' : /^FT_FLOAT/.test(ft) ? 'number' : Object.keys(UDF_TYPE).find((k) => UDF_TYPE[k] === ft) ?? ft);
+
+/** P6's words for an activity's status (the file keeps codes). */
+export const STATUS_WORDS: Record<string, string> = { TK_NotStart: 'Not Started', TK_Active: 'In Progress', TK_Complete: 'Completed' };
+/** The progress fields transfer_progress can change, by P6's names (the remaining duration in days of the activity's calendar). */
+export const PROGRESS_FIELDS: Record<string, string> = {
+  act_start_date: 'Actual Start', act_end_date: 'Actual Finish', phys_complete_pct: 'Physical % Complete', remain_drtn_hr_cnt: 'Remaining Duration (days)', expect_end_date: 'Expected Finish',
+  suspend_date: 'Suspend Date', resume_date: 'Resume Date', status_code: 'Activity Status', act_work_qty: 'Actual Labor Units', remain_work_qty: 'Remaining Labor Units', act_equip_qty: 'Actual Nonlabor Units', remain_equip_qty: 'Remaining Nonlabor Units',
+};

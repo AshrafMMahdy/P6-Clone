@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { callTool, toolResult, toolsList } from '../mcp/server.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
+import { config } from '../mcp/runtime.ts';
 
 process.env.P6CLONE_COMPUTE_WORKERS = '0';
 testRoots();
@@ -261,4 +262,64 @@ test('dcma_14: a CPLI with no remaining critical path length says why from the a
   assert.ok(!e5.error, JSON.stringify(e5).slice(0, 300));
   await call('schedule', { handle: two });
   assert.equal(reason(await call('dcma_14', { handle: two })), `Critical path length index (CPLI) not assessed: every activity of P1 is complete, so there is no remaining critical path to measure.${whose('P1', 2)}`);
+});
+
+test('a user defined field and a calendar are answered in the words the operations take, not the file’s codes', async () => {
+  const p = await call('new_project', { id: 'UD', start: '2026-01-05' });
+  const e = await call('edit', { handle: p.handle, operations: [{ op: 'add_udf', name: 'Zone' }, { op: 'add_udf', name: 'Handover', subject: 'wbs', data_type: 'finish_date' }, { op: 'add_udf', name: 'Weight', subject: 'resource', data_type: 'number' }] });
+  assert.deepEqual(e.results, [{ udf: 'Zone', subject: 'activity', data_type: 'text' }, { udf: 'Handover', subject: 'wbs', data_type: 'finish_date' }, { udf: 'Weight', subject: 'resource', data_type: 'number' }]);
+  const d = await call('list_dictionaries', { handle: p.handle });
+  assert.deepEqual(d.udfs, [{ name: 'Zone', subject: 'activity', data_type: 'text' }, { name: 'Handover', subject: 'wbs', data_type: 'finish_date' }, { name: 'Weight', subject: 'resource', data_type: 'number' }]);
+  // each of them can be sent straight back
+  const back = await call('edit', { handle: p.handle, operations: d.udfs.map((u: any) => ({ op: 'delete_udf', udf: u.name, subject: u.subject })) });
+  assert.ok(!back.error, JSON.stringify(back.error));
+  assert.ok(d.calendars.length > 0 && d.calendars.every((c: any) => ['Global', 'Project', 'Resource'].includes(c.type)), JSON.stringify(d.calendars));
+  // a real file: no table name and no FT_ code among its custom fields
+  const o = await open('Detailed Program.xer');
+  const real = await call('list_dictionaries', { handle: o.handle });
+  assert.ok(real.udfs.length > 0 || real.calendars.length > 0);
+  for (const u of real.udfs) assert.ok(!/^FT_|^[A-Z]{4,}$/.test(`${u.data_type}`) && !/^[A-Z]{4,}$/.test(`${u.subject}`), JSON.stringify(u));
+  for (const c of real.calendars) assert.ok(['Global', 'Project', 'Resource'].includes(c.type), JSON.stringify(c));
+});
+
+test('save and close say they need the owner key only where this server requires it, and each statement is what the server does', async () => {
+  const text = (name: string) => toolsList().find((t) => t.name === name)!.description;
+  const was = config.requireOwnerKey;
+  try {
+    config.requireOwnerKey = false;   // a stdio server (the platform's): no key needed, a wrong one refused
+    for (const t of ['save', 'close']) assert.ok(!text(t).includes('(needs owner_key)') && text(t).includes('owner_key is not required by this server'), text(t).slice(0, 160));
+    const p = await call('new_project', { id: 'OK1', start: '2026-01-05' });
+    assert.equal((await call('close', { handle: p.handle, owner_key: 'not-the-key', discard: true })).error.code, 'invalid_owner_key');
+    assert.equal((await call('close', { handle: p.handle, discard: true })).closed, p.handle);
+    config.requireOwnerKey = true;    // an HTTP server: the key is needed, and the description says so
+    for (const t of ['save', 'close']) assert.ok(text(t).includes('(needs owner_key)'), text(t).slice(0, 160));
+    const q = await call('new_project', { id: 'OK2', start: '2026-01-05' });
+    assert.equal((await call('close', { handle: q.handle, discard: true })).error.code, 'owner_key_required');
+    assert.equal((await call('close', { handle: q.handle, owner_key: q.owner_key, discard: true })).closed, q.handle);
+  } finally { config.requireOwnerKey = was; }
+});
+
+test('a report that reads the project baseline says when a project has none in the file: its baseline columns are empty, Late Activities fall to negative float', async () => {
+  // Tower-A: a baseline saved in the file, none assigned
+  const o = await open('Tower-A.xer'), h = o.handle;
+  const v = await call('run_report', { handle: h, report: 'variance' });
+  const at = (r: any, col: string) => r.columns.indexOf(col);
+  assert.ok(v.rows.length > 0 && v.rows.every((r: any) => r.cells[at(v, 'BL Start')] === '' && r.cells[at(v, 'BL Finish')] === '' && r.cells[at(v, 'Finish Var (d)')] === ''), 'the baseline columns are empty');
+  assert.deepEqual(v.notes, ['BL Start, BL Finish and Finish Var (d) are empty: no baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
+  const late = await call('run_report', { handle: h, report: 'std-late' });
+  assert.deepEqual(late.notes, ['BL Project Finish and Variance - BL Project Finish Date are empty and the activities listed are those with negative total float: no baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
+  // a report with no baseline column says nothing of it
+  assert.equal((await call('run_report', { handle: h, report: 'schedule' })).notes, undefined);
+  // the baseline assigned: the columns are filled and nothing is said
+  const e = await call('edit', { handle: h, operations: [{ op: 'assign_baseline', baseline: 'TOWER-A-BL1' }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  const v2 = await call('run_report', { handle: h, report: 'variance' });
+  assert.equal(v2.notes, undefined);
+  assert.ok(v2.rows.some((r: any) => r.cells[at(v2, 'BL Finish')] !== ''), 'baseline dates are shown');
+  assert.equal((await call('run_report', { handle: h, report: 'std-late' })).notes, undefined);
+  // 130 TRIAL: the project names a baseline the file does not hold
+  const t = await open('130 TRIAL.xer');
+  const v3 = await call('run_report', { handle: t.handle, report: 'variance', max_rows: 5 });
+  assert.equal(v3.notes.length, 1);
+  assert.match(v3.notes[0], /^BL Start, BL Finish and Finish Var \(d\) are empty: the project baseline of .+ is not in this file \(the file was exported without it\); export the file with its baselines\.$/);
 });
