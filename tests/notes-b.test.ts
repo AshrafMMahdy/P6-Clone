@@ -99,7 +99,7 @@ test('5, 30: a lenient open names save repair for what it repairs, ignores an id
   const o = await call('open_file', { path: sampleCopy('Aurora_Tower_Baseline.xer'), lenient: true });
   assert.ok(o.diagnostics.repaired.some((x: string) => /^1 identical duplicate activity row was ignored \(Activity ID 102\)\.$/.test(x)), JSON.stringify(o.diagnostics.repaired));
   assert.equal(o.still_rejected, false);
-  assert.match(o.notes[0], /^Opened a repaired copy: P6 would refuse Aurora_Tower_Baseline\.xer as given \(/);
+  assert.match(o.notes[0], /^Opened a repaired copy: P6 would refuse Aurora_Tower_Baseline\.xer as given; 2 repairs made in memory, written only by save\.$/);
   assert.equal(o.notes.length, 1, JSON.stringify(o.notes));
   assert.equal(o.file_as_given.fatal.filter((x: any) => x.code === 'DUP_KEY').length, 1);
   const t = await call('open_file', { path: sampleCopy('Tower-A.xer'), lenient: true });

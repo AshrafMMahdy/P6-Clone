@@ -18,8 +18,8 @@ export interface Check { id: string; title: string; grade: Grade; count: number;
   /** with opts.activities: every activity the check found, by Activity ID and name (an export) */ activities?: { id: string; name: string }[] }
 export interface Review { grade: Grade; projects: string[]; openActivities: number; relationships: number; checks: Check[] }
 
-/** examples: activities listed per check (default 10; 0 = all); activities: also each check's activities by ID and name. */
-export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[]; calendarDays?: boolean; examples?: number; activities?: boolean } = {}): Review {
+/** Every check lists every activity it found as `examples` (the answer of a tool cuts the list by the list rule); activities: also each check's activities by ID and name. */
+export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: string[]; calendarDays?: boolean; activities?: boolean } = {}): Review {
   const hpd = opts.hoursPerDay ?? 8;
   const projs = rows(db, 'PROJECT').filter((p) => !p._baseline_of && (!opts.projIds?.length || opts.projIds.includes(p.proj_id)));
   const open = new Set(projs.map((p) => p.proj_id));
@@ -35,8 +35,7 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
     const percent = of ? Math.round((1000 * count) / of) / 10 : null;
     const p = percent ?? 0;
     const grade: Grade = failAt != null && (failAt === 0 ? count > 0 : p > failAt) ? 'fail' : warnAt != null && (warnAt === 0 ? count > 0 : p > warnAt) ? 'warn' : 'pass';
-    const max = opts.examples ?? 10;
-    checks.push({ id, title, grade, count, of, percent, limit, ...(detail ? { detail } : {}), examples: (typeof list === 'number' ? examples : (max > 0 ? list.slice(0, max) : list).map(name)),
+    checks.push({ id, title, grade, count, of, percent, limit, ...(detail ? { detail } : {}), examples: (typeof list === 'number' ? examples : list.map(name)),
       ...(typeof list !== 'number' ? { examples_total: list.length } : examples.length ? { examples_total: examples.length } : {}),
       ...(opts.activities && typeof list !== 'number' ? { activities: list.map((t) => ({ id: t.task_code, name: t.task_name })) } : {}) });
   };

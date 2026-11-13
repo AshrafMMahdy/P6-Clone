@@ -23,7 +23,8 @@ import { NEW_XER_NOTE, NEW_XER_VERSION, writeXer, writeXerTo } from '../core/xer
 import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid, unidentified } from '../core/xer/repair-valid.ts';
-import { argumentNotUsed, cancelledAfter, cap, dataDateWritten, splitRefusal, datesNotCurrent, droppedOnSave, listCut, stillWorking, tooLarge, namesText, notRepaired, openedRepaired, plural } from '../core/notes.ts';
+import { lostKinds } from '../core/p6words.ts';
+import { argumentNotUsed, cancelledAfter, cap, dataDateWritten, splitRefusal, datesNotCurrent, droppedOnSave, listCut, stillWorking, tooLarge, namesText, notRepaired, openedRepaired, plural, withoutAdvice } from '../core/notes.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { mspLossNote } from '../core/msp/shared.ts';
@@ -148,7 +149,9 @@ const TOOLS = [
 // ---------------------------------------------------------------- helpers
 const allIds = (db: Db) => (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_id);
 const summary = (s: Session) => runTool('project_summary', {}, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
-const brief = (f: Finding[], o: { fatalListedElsewhere?: string } = {}) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + findingCount(x)), a), {}), ...(o.fatalListedElsewhere && f.some((x) => x.severity === 'fatal') ? { fatal_listed_in: o.fatalListedElsewhere } : {}), findings: f.filter((x) => x.severity !== 'info' && !(o.fatalListedElsewhere && x.severity === 'fatal')).slice(0, 40).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message })) });
+/** The findings of an answer by the list rule: the first LISTED, findings_total beside them when there are more (noteCuts says where the whole list is; `all`: every one, for the result file). */
+const cutFindings = <T,>(list: T[], all?: boolean): { findings: T[]; findings_total?: number } => (all || list.length <= LISTED ? { findings: list } : { findings: list.slice(0, LISTED), findings_total: list.length });
+const brief = (f: Finding[], o: { fatalListedElsewhere?: string; all?: boolean } = {}) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + findingCount(x)), a), {}), ...(o.fatalListedElsewhere && f.some((x) => x.severity === 'fatal') ? { fatal_listed_in: o.fatalListedElsewhere } : {}), ...cutFindings(f.filter((x) => x.severity !== 'info' && !(o.fatalListedElsewhere && x.severity === 'fatal')).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message })), o.all) });
 const dd = (v: unknown) => { if (v == null || v === '') return null; const t = parseP6Date(String(v)); if (t == null) fail('bad_input', `"${v}" is not a date.`, 'Use YYYY-MM-DD or YYYY-MM-DD HH:MM.'); return t; };
 const projectIds = (db: Db, id: unknown) => {
   const ps = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
@@ -223,13 +226,13 @@ export const outsideRoute = (format: string, head?: Uint8Array) => (format === '
   : `the file is text (${TEXT_FORMAT[format] ?? TEXT_FORMAT.xer}): read it with your file-reading tool, do what the user asked from the tables directly (code or a spreadsheet), and tell the user the file is damaged, what is wrong with it, and that the analysis was done outside the P6 engine`);
 /** The fatal findings of a file by kind, with counts, in the order first met. */
 /** Every fatal finding, in words (open_file's refusal lists them all in data.fatal, and a lenient open in file_as_given.fatal). */
-const fatalList = (f: Finding[]) => f.filter((x) => x.severity === 'fatal').map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message }));
+const fatalList = (f: Finding[], advice = true) => f.filter((x) => x.severity === 'fatal').map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: advice ? x.message : withoutAdvice(x.message) }));
 /** What P6 would refuse in a file as it was given: said every time a file is read, so the answer to the user can say it. */
 /** The real number of fatal findings (the validator keeps 5 of a kind and a line that says how many more). */
 const fatalTotal = (f: Finding[]) => f.filter((x) => x.severity === 'fatal').reduce((n, x) => n + findingCount(x), 0);
 /** How many fatal findings are listed in words of the real total (a "…and N more" line stands for the rest of its kind). */
 const fatalListed = (f: Finding[]) => f.filter((x) => x.severity === 'fatal' && x.omitted == null).length;
-const fileAsGiven = (f: Finding[], tell: string, o: { list?: boolean } = {}) => { const fatal = worst(f) === 'fatal'; return { p6_would_reject: fatal, ...(fatal ? { fatal_total: fatalTotal(f), fatal_kinds: fatalKinds(f), ...(o.list ? { fatal_listed: fatalListed(f), fatal: fatalList(f) } : {}), ...(tell ? { tell_the_user: tell } : {}) } : {}) }; };
+const fileAsGiven = (f: Finding[], tell: string, o: { list?: boolean; advice?: boolean } = {}) => { const fatal = worst(f) === 'fatal'; return { p6_would_reject: fatal, ...(fatal ? { fatal_total: fatalTotal(f), fatal_kinds: fatalKinds(f), ...(o.list ? { fatal_listed: fatalListed(f), fatal: fatalList(f, o.advice !== false) } : {}), ...(tell ? { tell_the_user: tell } : {}) } : {}) }; };
 const fatalKinds = (f: Finding[]) => { const m = new Map<string, number>(); for (const x of f) if (x.severity === 'fatal') m.set(x.code, (m.get(x.code) ?? 0) + findingCount(x)); return [...m].map(([code, count]) => ({ code, count })); };
 
 async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
@@ -420,7 +423,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const unreadable = () => {
           const T = r.db.tables.TASK?.rows ?? [], at = new Map(T.map((t, i) => [t, i]));
           const list = [...unidentified(r.db).why].map(([t, why]) => { const i = at.get(t) ?? -1; return { table: 'TASK', row: i + 1, ...(r.meta?.taskLines?.[i] ? { line: r.meta.taskLines[i] } : {}), task_id: t.task_id ?? '', activity_id: String(t.task_code ?? '').slice(0, 60), reason: why }; }).sort((x, y) => x.row - y.row);
-          return list.length ? { unreadable_rows: { total: list.length, rows: list.slice(0, 500) } } : {};
+          return list.length ? { unreadable_rows: { total: list.length, rows: list.slice(0, LISTED), ...(list.length > LISTED ? { rows_total: list.length } : {}) } } : {};
         };
         const unreadableNote = () => { const u = unreadable().unreadable_rows; return u ? [`${plural(u.total, 'line')} of the file ${u.total === 1 ? 'is' : 'are'} not loaded as ${u.total === 1 ? 'an activity' : 'activities'} (damaged, no Activity ID): rows ${namesText(u.rows.map((x: any) => String(x.row)))}; save with repair: true removes ${u.total === 1 ? 'it' : 'them'}.`] : []; };
         // (a fact of the file a caller must not miss, so it is a field of its own: diagnostics.findings lists the first 40 findings only)
@@ -446,11 +449,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         }
         // the file as given: said every time, so the answer to the user can say it (a repaired copy is not the user's file)
         // (every fatal finding is listed here: diagnostics.findings shows the first 40 findings only)
-        const asGiven = fileAsGiven(f, '', { list: true });
-        const faults = f.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => x.message.replace(/\.$/, ''));
+        const asGiven = fileAsGiven(f, '', { list: true, advice: false }); // (the next step of each fault is in the notes: not repaired)
         return {
           handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still, file_as_given: asGiven,
-          ...(fatal || notRepairedNotes.length || unreadableNote().length ? { notes: [...(fatal ? [openedRepaired(basename(path), namesText(faults))] : []), ...notRepairedNotes, ...unreadableNote()] } : {}),
+          ...(fatal || notRepairedNotes.length || unreadableNote().length ? { notes: [...(fatal && fix.repaired.length ? [openedRepaired(basename(path), fix.repaired.length)] : []), ...notRepairedNotes, ...unreadableNote()] } : {}),
           diagnostics: { ...brief(g, { fatalListedElsewhere: 'file_as_given.fatal' }), repaired: fix.repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0), ...noUid, ...unreadable(), ...lob,
         };
       } catch (e) { closeSession(s0); throw e; } finally { reading(); }
@@ -642,12 +644,12 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const spec: TransferSpec = { from: src, fromProjIds: from.map((p) => p.proj_id), toProjId: target.proj_id, by, codeType: a.code_type, fromCodeType: a.from_code_type, udf: a.udf, fromUdf: a.from_udf, pairs: a.pairs?.map((x: any) => ({ from: String(x?.from ?? ''), to: String(x?.to ?? '') })), include, costs: a.costs, addAssignments: a.add_assignments === true, dataDate: a.data_date == null ? undefined : String(a.data_date) };
         const run = (d: Db) => { const r = transferProgress(d, spec); if ('error' in r) throw new ToolError('bad_input', r.error, 'Check the match options (list_dictionaries lists code types and UDFs).'); return r; };
         // the answer sized for an agent: counts per changed field, the first max_changes changes (offset pages a dry run)
-        // and the first 100 of each unmatched list with its count; thousands of activities stay a few kilobytes
+        // and the first 25 of each unmatched list with its count; thousands of activities stay a few kilobytes
         const brief = (r: ReturnType<typeof run>) => {
           const fields: Record<string, number> = {};
           for (const c of r.changes) for (const f of Object.keys(c.changed)) fields[f] = (fields[f] ?? 0) + 1;
-          const cap = <T,>(l: T[]) => l.slice(0, 100);
-          return { ...r, changed_fields: fields, ...changesPage(r.changes, { max_changes: a.max_changes ?? 100, offset: a.offset }), unmatched_from: cap(r.unmatched_from), unmatched_from_count: r.unmatched_from.length, ambiguous: cap(r.ambiguous), ambiguous_count: r.ambiguous.length,
+          const cap = <T,>(l: T[]) => l.slice(0, LISTED); // (each list below says its total: *_count)
+          return { ...r, changed_fields: fields, ...changesPage(r.changes, { max_changes: a.max_changes ?? LISTED, offset: a.offset }), unmatched_from: cap(r.unmatched_from), unmatched_from_count: r.unmatched_from.length, ambiguous: cap(r.ambiguous), ambiguous_count: r.ambiguous.length,
             assignments: { ...r.assignments, unmatched: cap(r.assignments.unmatched), unmatched_count: r.assignments.unmatched.length }, expenses: { ...r.expenses, unmatched: cap(r.expenses.unmatched), unmatched_count: r.expenses.unmatched.length }, steps: { ...r.steps, unmatched: cap(r.steps.unmatched), unmatched_count: r.steps.unmatched.length } };
         };
         if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...brief(out), ...(asGiven ? { file_as_given: asGiven } : {}) }; }
@@ -793,17 +795,21 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       } catch (e) { if (ctx.signal.aborted) fail('cancelled', 'The Monte Carlo run was cancelled.', 'Start it again when needed.'); throw e; }
       finally { if (j) rollback(j); }
     }
-    case 'validate': return brief(importChecks(s.db, [], s.format));
+    case 'validate': {
+      const found = importChecks(s.db, [], s.format), all = brief(found, { all: true }), answer = brief(found);
+      if (a.export == null) return answer;
+      return { ...answer, exported: exportResult('validate', a.export, all, [{ name: 'findings', columns: ['severity', 'code', 'where', 'message'], rows: all.findings }], writeOutWith, exportOf(a)) };
+    }
     case 'review': {
-      // worked out with every activity listed: the answer shows 10 per check (examples_total says how many there are), the export all
-      const full = reviewSchedule(s.db, { hoursPerDay: s.hpd, calendarDays: true, examples: 0, activities: a.export != null });
-      const answer = { ...full, checks: full.checks.map(({ activities: _a, ...c }) => (c.id !== 'saved_dates' && c.examples_total != null ? { ...c, examples: c.examples.slice(0, 10) } : c)) };
+      // worked out with every activity listed: the answer shows LISTED (25) per check (examples_total says how many there are, examples_note where the file is), the result file all
+      const full = reviewSchedule(s.db, { hoursPerDay: s.hpd, calendarDays: true, activities: a.export != null });
+      const answer = { ...full, checks: full.checks.map(({ activities: _a, ...c }) => (c.examples.length > LISTED ? { ...c, examples: c.examples.slice(0, LISTED), examples_total: c.examples.length } : c)) };
       if (a.export == null) return answer;
       return { ...answer, exported: exportResult('review', a.export, full, [
         { name: 'checks', columns: ['id', 'title', 'grade', 'count', 'of', 'percent', 'limit', 'detail', 'examples_total'], rows: full.checks.map(({ examples: _e, activities: _a, ...c }) => c) },
         { name: 'activities', columns: ['check', 'id', 'name'], rows: full.checks.flatMap((c) => (c.activities ?? []).map((x) => ({ check: c.id, ...x }))) },
         { name: 'saved_dates', columns: ['message'], rows: (full.checks.find((c) => c.id === 'saved_dates')?.examples ?? []).map((message) => ({ message })) },
-      ], writeOutWith, { name: a.export_name }) };
+      ], writeOutWith, exportOf(a)) };
     }
     case 'undo': {
       if (a.any_caller) requireOwner(s, a.owner_key ?? fail('owner_key_required', 'any_caller undo needs the owner key.', 'Pass owner_key, or undo only your own changes.'), 'Undoing other callers\' changes');
@@ -862,9 +868,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       else if (bytes == null && fmt === 'mspdi') writeOutWith(path, (put) => { try { writeMspdiTo(s.db, { projIds: projIds ?? allIds(s.db).slice(0, 1), report: notes }, put); } catch (e) { if (e instanceof MspSaveRefused) fail(e.code, e.message, e.hint); throw e; } });
       else if (bytes == null) writeOutWith(path, (put) => writeP6XmlTo(s.db, { version: a.version ?? '19.12', projIds }, put));
       else writeOut(path, bytes);
-      // what P6's XML has no place for, with values in this data: said in the answer, never silent (structured in not_in_p6_xml, plainly in notes)
+      // what P6's XML has no place for, with values in this data: said once in the notes, in P6's words, never silent
       let xmlLosses: ReturnType<typeof p6xmlLosses> = [];
-      if (fmt === 'p6xml' || fmt === 'xml') { xmlLosses = p6xmlLosses(s.db, projIds); if (xmlLosses.length) notes.push(droppedOnSave('P6 XML', xmlLosses.map((l) => `${l.table}${l.field.startsWith('(') ? '' : `.${l.field}`} (${l.rows})`))); }
+      if (fmt === 'p6xml' || fmt === 'xml') { xmlLosses = p6xmlLosses(s.db, projIds); if (xmlLosses.length) notes.push(droppedOnSave('P6 XML', lostKinds(xmlLosses))); }
       // a schedule that put the planned start in as the data date: the file now carries it as if it had been there, said once (and no longer assumed: the saved file has it)
       for (const p of s.db.tables.PROJECT.rows.filter((x: Record<string, string>) => (projIds ?? allIds(s.db)).includes(x.proj_id) && x._dd_assumed && x._dd_assumed === x.last_recalc_date)) { notes.push(dataDateWritten(p.proj_short_name, p.last_recalc_date.slice(0, 16))); p._dd_assumed = ''; }
       // the 4D model, links and rules travel beside the file (<file>.4d.json); XER and P6 XML have no place for them
@@ -887,7 +893,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           invalid_dates: repairs.findings, check: { ...brief(g), still_rejected: still },
           notes: [...notes, still ? `Repaired copy written, but P6 would still refuse it: ${namesText(g.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => x.message.replace(/\.$/, '')))}.` : `Repaired copy written: ${plural(repairs.changes.length, 'repair')} (changes lists them)${clearedActual ? `; ${plural(repairs.changes.filter((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '').length, 'actual date')} cleared: run schedule` : ''}.`] };
       }
-      return { saved: path, format: label, ...(notes.length || p6found.length || stillFatal.length ? { notes: [...notes, ...(p6found.length || stillFatal.length ? [`${basename(path)} has ${plural(p6found.length + stillFatal.length, 'fault')} P6 refuses${s.openProblems ? ', already in the file when it was opened' : ''}: ${namesText([...p6found.map((x) => x.message), ...stillFatal].map((m) => m.replace(/\.$/, '')))}; save with repair: true fixes it.`] : [])] } : {}), ...(xmlLosses.length ? { not_in_p6_xml: xmlLosses } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
+      return { saved: path, format: label, ...(notes.length || p6found.length || stillFatal.length ? { notes: [...notes, ...(p6found.length || stillFatal.length ? [`${basename(path)} has ${plural(p6found.length + stillFatal.length, 'fault')} P6 refuses${s.openProblems ? ', already in the file when it was opened' : ''}: ${namesText([...p6found.map((x) => x.message), ...stillFatal].map((m) => withoutAdvice(m).replace(/\.$/, '')))}; save with repair: true fixes it.`] : [])] } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
     case 'close': {
       requireOwner(s, a.owner_key, 'Closing');
@@ -929,7 +935,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         let res = undefined as ReturnType<typeof applyImport> | undefined;
         if (plan.ops.length && !lobRefusal) { const j = record(s.db, (d) => { res = applyImport(d, plan, { hoursPerDay: s.hpd, calendarDays: true }); }); rollback(j); }
         const refused = refusedRows((res as ReturnType<typeof applyImport> | undefined)?.refused ?? []);
-        return { applied: false, summary: plan.summary, notes: tidyNotes([...plan.warnings, ...(refused.length ? [`${plural(refused.length, 'row')} would be refused and skipped by the real run; the rest would be applied.`] : [])]), ...(lobRefusal ? { refused_all: lobRefusal } : {}), ...(refused.length ? { refused } : {}), operations: plan.ops.slice(0, 200).map((o, i) => ({ ...o, sheet_row: `${plan.rows[i].sheet}!${plan.rows[i].row}` })) };
+        return { applied: false, summary: plan.summary, notes: tidyNotes([...plan.warnings, ...(refused.length ? [`${plural(refused.length, 'row')} would be refused and skipped by the real run; the rest would be applied.`] : [])]), ...(lobRefusal ? { refused_all: lobRefusal } : {}), ...(refused.length ? { refused } : {}), operations: plan.ops.slice(0, LISTED).map((o, i) => ({ ...o, sheet_row: `${plan.rows[i].sheet}!${plan.rows[i].row}` })), ...(plan.ops.length > LISTED ? { operations_total: plan.ops.length } : {}) };
       }
       if (lobRefusal) return { ok: false, error: { code: 'op_failed', message: lobRefusal, hint: 'Use lob_edit for an LOB plan\u2019s durations, crews, locations and logic; progress, notes, resources and other codes edit as usual.' } };
       const res = change(s, ctx.caller, `Import ${basename(path)}`, (d) => applyImport(d, plan, { hoursPerDay: s.hpd, calendarDays: true }));
@@ -1017,6 +1023,14 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   if (LOOKUPS.some((t) => t.name === name)) {
     const { handle: _h, caller: _c, async: _a, export: _x, export_name: _n, ...args } = a;
     const answer = runTool(name, name === 'earned_value' ? { ...args, worst: LISTED } : args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
+    if (name === 'schedule_health' && a.export != null && !(answer as { error?: unknown }).error) {
+      const full = runTool(name, { ...args, every_example: true }, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true) as Record<string, { count?: number; examples?: string[] }>;
+      const lists = Object.entries(full).filter(([, v]) => v && typeof v === 'object' && Array.isArray((v as { examples?: unknown }).examples));
+      return { ...(answer as object), exported: exportResult('schedule_health', a.export, full, [
+        { name: 'checks', columns: ['check', 'count'], rows: lists.map(([k, v]) => ({ check: k, count: v.count })) },
+        { name: 'examples', columns: ['check', 'activity'], rows: lists.flatMap(([k, v]) => v.examples!.map((activity) => ({ check: k, activity }))) },
+      ], writeOutWith, exportOf(a)) };
+    }
     if (name !== 'earned_value' || a.export == null || (answer as { error?: unknown }).error) return answer;
     // the export: every activity (the answer lists the `worst` few of each kind), each with every figure
     type Ev = { projects: { project: string; data_date: string; totals: object; by_wbs: object[] }[]; worst_cost_performance: object[]; worst_schedule_performance: object[]; activities: object[] };

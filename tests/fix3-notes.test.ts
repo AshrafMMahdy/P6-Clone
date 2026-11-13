@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { callTool, toolResult } from '../mcp/server.ts';
 import { setRoots } from '../mcp/runtime.ts';
 import { SAMPLES_DIR } from './helpers.ts';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { applyOps } from '../core/project/ops.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { rows, type Db } from '../core/db.ts';
@@ -170,4 +170,42 @@ test('8: edit changes are named as P6 names them, in the units the operation tak
   assert.deepEqual(con.map((c) => [c.field, c.old, c.new]), [['Primary Constraint', 'Start On or After', 'Finish On or Before'], ['Primary Constraint Date', '2026-03-19 08:00', '2026-07-01 00:00']]);
   const all = JSON.stringify([proj, res, pr, hol, lag, txt, con]);
   assert.doesNotMatch(all, /last_recalc|plan_end|rsrc_name|max_qty|PT_|PR_|TT_|TK_|CS_|clndr_data|\(hours\)/);
+});
+
+test('11: review, validate and schedule_health cut their lists by the one list rule: 25 shown, the true total, "N of M shown; all M in <file>", the file holds every one', async () => {
+  const o = await call('open_file', { path: join(SAMPLES_DIR, 'badra oil.xer'), lenient: true });
+  const rv = await call('review', { handle: o.handle });
+  const sd = rv.checks.find((c: any) => c.id === 'saved_dates');
+  assert.equal(sd.count, 26);
+  assert.equal(sd.examples.length, 25); assert.equal(sd.examples_total, 26, 'the count and the total agree');
+  const m = /^25 of 26 shown; all 26 in (.+)\.$/.exec(sd.examples_note);
+  assert.ok(m, JSON.stringify(sd));
+  assert.ok(readFileSync(m![1], 'utf8').length > 0);
+  for (const c of rv.checks) if (c.examples.length < (c.examples_total ?? 0)) assert.ok(c.examples_note, `${c.id}: a cut list says so`);
+  for (const c of rv.checks) assert.ok(c.examples.length <= 25, c.id);
+  const sh = await call('schedule_health', { handle: o.handle });
+  for (const [k, v] of Object.entries(sh) as [string, any][]) if (v && typeof v === 'object' && Array.isArray(v.examples)) { assert.ok(v.examples.length <= 25, k); if (v.count > 25) { assert.equal(v.examples_total, v.count, k); assert.match(v.examples_note, /^25 of \d+ shown; all \d+ in /, k); } }
+  assert.ok(sh.exported?.files?.length, 'the whole lists are in the result file');
+  const va = await call('validate', { handle: o.handle });
+  if (va.findings_total != null) { assert.equal(va.findings.length, 25); assert.match(va.findings_note, /^25 of \d+ shown; all \d+ in /); } else assert.ok(va.findings.length <= 25);
+  assert.ok(va.exported?.files?.length);
+});
+
+test('10: the open and save fault is said once, in one place, with advice that still applies; a save as P6 XML says each loss once, in P6 words', async () => {
+  const o = await call('open_file', { path: join(SAMPLES_DIR, 'Tower-A.xer'), lenient: true });
+  const text = JSON.stringify(o);
+  assert.equal(text.split('has no root WBS node').length - 1, 2, 'once as given (file_as_given.fatal), once as what is left (the note): not three times');
+  assert.doesNotMatch(JSON.stringify(o.notes), /lenient: true/, 'no advice to open leniently in an answer that was');
+  assert.doesNotMatch(JSON.stringify(o.file_as_given), /lenient: true|save with repair/, 'the as-given list says what is wrong, the notes say what to do');
+  assert.match(o.notes[0], /^Opened a repaired copy: P6 would refuse Tower-A\.xer as given; 1 repair made in memory, written only by save\.$/);
+  const a = await call('open_file', { path: join(SAMPLES_DIR, 'Aurora_Tower_Baseline.xer'), lenient: true });
+  assert.doesNotMatch(JSON.stringify(a.notes), /removes the identical copy/, 'the duplicate was ignored at open: no advice to remove it');
+  const sv = await call('save', { handle: o.handle, path: join(W, 'tower.xer'), overwrite: true });
+  assert.equal((sv.notes ?? []).length, 1, JSON.stringify(sv.notes));
+  assert.equal(((sv.notes[0] as string).match(/save with repair: true/g) ?? []).length, 1, 'the advice once: ' + sv.notes[0]);
+  const sx = await call('save', { handle: o.handle, path: join(W, 'tower.xml'), overwrite: true });
+  const lost = (sx.notes as string[]).find((n) => /^Not written to P6 XML/.test(n))!;
+  assert.ok(lost, JSON.stringify(sx.notes));
+  assert.doesNotMatch(lost, /ERMHDR|PROJWBS|RSRC|UDFTYPE|PROJCOST|\.[a-z_]+ \(\d/, 'P6 words, no table or column');
+  assert.equal(sx.not_in_p6_xml, undefined, 'one place');
 });

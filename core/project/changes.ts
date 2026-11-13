@@ -4,6 +4,7 @@ import { ABSENT, type Journal } from '../journal.ts';
 import type { Db, Row } from '../db.ts';
 import { dayHours } from './units.ts';
 import { cstrName, namesText } from '../notes.ts';
+import { humanizeField } from '../p6words.ts';
 import { parseClndrDataLeniently } from '../calendar/clndr-data.ts';
 
 export interface FieldChange { id: string; field: string; old: string | number | null; new: string | number | null }
@@ -36,7 +37,7 @@ const OTHER_FIELDS: Record<string, string> = {
   clndr_name: 'Calendar Name', day_hr_cnt: 'Hours per Day', week_hr_cnt: 'Hours per Week', wbs_name: 'WBS Name', wbs_short_name: 'WBS Code', task_name: 'Activity Name',
   target_qty: 'Budgeted Units', remain_qty: 'Remaining Units', act_reg_qty: 'Actual Regular Units', cost_per_qty_rate: 'Price / Unit',
 };
-const humanize = (column: string): string => { const w = column.replace(/_(id|flag|cnt|date|num)$/, '').split('_').filter(Boolean); return w.length ? w[0][0].toUpperCase() + w.join(' ').slice(1) : column; };
+const humanize = humanizeField;
 const fieldName = (column: string): string => OTHER_FIELDS[column] ?? humanize(column);
 /** The fields that decide the dates F9 gives: an edit of one leaves the saved dates not current. */
 const DATE_DRIVING = new Set(['target_drtn_hr_cnt', 'remain_drtn_hr_cnt', 'act_start_date', 'act_end_date', 'status_code', 'task_type', 'clndr_id', 'cstr_type', 'cstr_date', 'cstr_type2', 'cstr_date2', 'lag_hr_cnt', 'pred_type']);

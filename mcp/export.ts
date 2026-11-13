@@ -145,7 +145,7 @@ export const exportOf = (a: Record<string, any>, more: { partial?: boolean; as?:
 export const DEFAULT_FOLDER = Symbol('default result folder');
 
 /** The tools whose whole result is written to a file every time (the analysis tools). */
-export const RESULT_FILE_TOOLS = new Set(['lint', 'float_paths', 'evaluate', 'evaluate_batch', 'crash_schedule', 'windows_analysis', 'tia', 'compare', 'earned_value', 'progress_curves', 'resource_histogram', 'monte_carlo', 'optimize_schedule', 'dcma_14', 'check_schedule']);
+export const RESULT_FILE_TOOLS = new Set(['lint', 'float_paths', 'evaluate', 'evaluate_batch', 'crash_schedule', 'windows_analysis', 'tia', 'compare', 'earned_value', 'progress_curves', 'resource_histogram', 'monte_carlo', 'optimize_schedule', 'dcma_14', 'check_schedule', 'review', 'validate', 'schedule_health']);
 /** The folder a call writes its result to when it gives no export: analysis/<project short name>/<tool>, relative as an export is (the write
  *  root, else the storage root, else where the server runs). What tells two open projects apart goes into the project's folder name: the
  *  opened file's name, and (only when another open project would still have the same folder: the caller says so) the handle. The whole name

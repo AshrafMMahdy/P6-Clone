@@ -1,5 +1,6 @@
 // 4D tools of the MCP server: an IFC model attached to the project, element links (by hand and by rules), their
 // gaps, the 4D key, and the packages for Navisworks, SYNCHRO and IFC4 4D tools (and back). Kept apart from server.ts.
+import { LISTED } from '../core/analysis/common.ts';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { rows, type Db, type Row } from '../core/db.ts';
@@ -529,7 +530,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
           const r = applyOps(d, ops, { hoursPerDay: s.hpd });
           if (!r.ok) fail('bad_input', r.error!.message, '');
         }
-        return { recorded: ok.length, ...(unknown.length ? { unknown_guids: unknown.slice(0, 100) } : {}), activities: proposals, applied_percent: a.apply_percent === true };
+        return { recorded: ok.length, ...(unknown.length ? { unknown_guids: unknown.slice(0, LISTED), ...(unknown.length > LISTED ? { unknown_guids_total: unknown.length } : {}) } : {}), activities: proposals, applied_percent: a.apply_percent === true };
       });
     }
     case 'render_4d': {
@@ -810,7 +811,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const linkedGuids = new Set(rows(s.db, T4D.link).filter((r) => r.proj_id === projId).map((r) => r.guid));
       const plan = relinkPlan(old.index, m.index, linkedGuids, a.tolerance_m != null ? Number(a.tolerance_m) : undefined);
       const diff = diffIndexes(old.index, m.index);
-      const report = { model: basename(path), linked_elements: linkedGuids.size, kept: plan.kept, matched: plan.matched.length, by_name_and_storey: plan.matched.filter((x) => x.how === 'name+storey').length, by_shape: plan.matched.filter((x) => x.how === 'shape').length, lost: plan.lost.length, lost_elements: plan.lost.slice(0, 200), matched_examples: plan.matched.slice(0, 50), model_diff: diff.summary };
+      const report = { model: basename(path), linked_elements: linkedGuids.size, kept: plan.kept, matched: plan.matched.length, by_name_and_storey: plan.matched.filter((x) => x.how === 'name+storey').length, by_shape: plan.matched.filter((x) => x.how === 'shape').length, lost: plan.lost.length, lost_elements: plan.lost.slice(0, LISTED), ...(plan.lost.length > LISTED ? { lost_elements_total: plan.lost.length } : {}), matched_examples: plan.matched.slice(0, 50), model_diff: diff.summary };
       if (a.dry_run === true) return { ...report, dry_run: true };
       h.apply(`Relink to ${basename(path)}`, (d) => {
         const T = t4d(d, T4D.link);
@@ -837,7 +838,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf' || imp.source === 'nwd';
       const m = await modelOf(s.db, projId, !tasksOnly);
       const plan = planImport4d(s.db, projId, imp, m?.index ?? null, { createActivities: a.create_activities === true });
-      const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: plan.matched.size, activities_with_links: new Set(plan.proposals.map((p) => p.activity)).size, unmatched_tasks: plan.unmatchedTasks.slice(0, 100), proposed_links: plan.proposals.reduce((n, p) => n + p.guids.length, 0), ...(plan.elementsNotInModel ? { elements_not_in_model: plan.elementsNotInModel } : {}), ...(plan.sets.length ? { sets: plan.sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: plan.attachedSets } : {}), notes: imp.notes };
+      const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: plan.matched.size, activities_with_links: new Set(plan.proposals.map((p) => p.activity)).size, unmatched_tasks: plan.unmatchedTasks.slice(0, LISTED), ...(plan.unmatchedTasks.length > LISTED ? { unmatched_tasks_total: plan.unmatchedTasks.length } : {}), proposed_links: plan.proposals.reduce((n, p) => n + p.guids.length, 0), ...(plan.elementsNotInModel ? { elements_not_in_model: plan.elementsNotInModel } : {}), ...(plan.sets.length ? { sets: plan.sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: plan.attachedSets } : {}), notes: imp.notes };
       // a dry run is also the review of the other tool's schedule: its tasks as that tool holds them
       const setSize = new Map(plan.sets.map((x) => [x.name, x.guids.length]));
       const taskList = imp.tasks.map((t) => ({ name: t.name, ...(t.id !== t.name ? { id: t.id } : {}), start: t.start ?? null, finish: t.finish ?? null, ...(t.actualStart || t.actualFinish ? { actual_start: t.actualStart ?? null, actual_finish: t.actualFinish ?? null } : {}), ...(t.type ? { type: t.type } : {}), ...(t.attached ? { attached: t.attached, elements: setSize.get(t.attached) ?? null } : {}) }));

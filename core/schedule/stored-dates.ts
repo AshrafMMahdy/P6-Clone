@@ -11,7 +11,6 @@ const FIELDS: [string, string][] = [
   ['early_start_date', 'early start'], ['early_end_date', 'early finish'], ['late_start_date', 'late start'],
   ['late_end_date', 'late finish'], ['total_float_hr_cnt', 'total float (h)'], ['free_float_hr_cnt', 'free float (h)'],
 ];
-const EXAMPLES = 10; // one example per activity
 
 /** One project whose saved dates differ from what F9 gives: how many of its open activities differ, out of how many are open. */
 export interface StoredDatesState { proj: string; differ: number; open: number; values: number; examples: Finding[] }
@@ -48,7 +47,7 @@ export function storedDatesState(db: Db, only?: string[]): { stale: StoredDatesS
       const old = t[f], a = now ? now[k] : old;
       const same = f.endsWith('_cnt') ? Math.abs(Number(old || 0) - Number(a || 0)) < 0.02 : (old ?? '') === (a ?? '');
       if (same) return;
-      if (st.examples.length < EXAMPLES && !differs) st.examples.push({ severity: 'info', code: 'DATE_NOT_CURRENT', message: `${t0.task_code}: ${label} saved as ${old || '(blank)'}, F9 gives ${a || '(blank)'}.`, p6: '', table: 'TASK', key: t0.task_code, field: f });
+      if (!differs) st.examples.push({ severity: 'info', code: 'DATE_NOT_CURRENT', message: `${t0.task_code}: ${label} saved as ${old || '(blank)'}, F9 gives ${a || '(blank)'}.`, p6: '', table: 'TASK', key: t0.task_code, field: f });
       differs = true; st.values++;
     });
     if (differs) st.differ++;

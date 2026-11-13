@@ -110,7 +110,9 @@ export function scheduleRefusal(what: string, reasons: string[]): { message: str
   return { message: `Refused: ${what}: ${parts.map((p) => p.wrong).join('; ')}.`, hint: instead ? `${cap(instead)}.` : null };
 }
 /** A repaired copy opened. */
-export const openedRepaired = (file: string, faults: string): string => `Opened a repaired copy: P6 would refuse ${file} as given (${faults}).`;
+export const openedRepaired = (file: string, repairs: number): string => `Opened a repaired copy: P6 would refuse ${file} as given; ${plural(repairs, 'repair')} made in memory, written only by save.`;
+/** A finding's message without the advice it ends with ("; save with repair: true adds it", "; open_file lenient: true repairs it"): for a place that says what is wrong and leaves the next step to a note. */
+export const withoutAdvice = (message: string): string => message.replace(/; (?:save with repair|open_file lenient|edit )[^;]*$/, '').replace(/([^.])$/, '$1.');
 /** A fault the repair did not touch. */
 export const notRepaired = (fault: string, how: string | null = 'save with repair: true fixes it'): string => `Not repaired: ${fault.replace(/\.$/, '')}${how ? `; ${how}` : ''}.`;
 /** What a save to a format with no place for it did not write. `kinds` is "<kind> (<n>)". */

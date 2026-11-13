@@ -474,7 +474,7 @@ export function ReviewPanel() {
   const [res, setRes] = useState<Review | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   // as the tool works it: every project of the database, days of each activity's own calendar, 10 examples a check
-  const run = () => { const r = reviewSchedule(getDb(), { hoursPerDay: ui.prefs.hoursPerDay, calendarDays: true, examples: 0 }); setRes(r); setOpen(r.checks.find((c) => c.grade === 'fail')?.id ?? null); };
+  const run = () => { const r = reviewSchedule(getDb(), { hoursPerDay: ui.prefs.hoursPerDay, calendarDays: true }); setRes(r); setOpen(r.checks.find((c) => c.grade === 'fail')?.id ?? null); };
   return (
     <div style={box}>
       <div style={bar}>

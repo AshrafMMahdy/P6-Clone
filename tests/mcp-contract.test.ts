@@ -221,7 +221,9 @@ test('a file P6 would reject, or that is no schedule: the answer lists what P6 r
     assert.equal(len.data.file_as_given.p6_would_reject, true);
     assert.deepEqual(len.data.file_as_given.fatal_kinds, kinds);
     assert.equal(len.data.file_as_given.tell_the_user, undefined);
-    assert.match(len.data.notes[0], new RegExp(`^Opened a repaired copy: P6 would refuse ${basename(path)} as given \\(`));
+    // (a repaired copy is said when something was repaired; a file nothing could repair is not called one)
+    if (len.data.diagnostics.repaired.length) assert.match(len.data.notes[0], new RegExp(`^Opened a repaired copy: P6 would refuse ${basename(path)} as given; \\d+ repairs? made in memory, written only by save\\.$`));
+    else assert.ok(!(len.data.notes ?? []).some((n: string) => /^Opened a repaired copy/.test(n)));
     assert.ok(Array.isArray(len.data.diagnostics.repaired));
     await call('close', { handle: len.data.handle, discard: true });
   }

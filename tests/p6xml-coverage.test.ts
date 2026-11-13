@@ -288,14 +288,11 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
   s.db.tables.POBS = { name: 'POBS', fields: ['pobs_id', 'pobs_name'], rows: [{ pobs_id: '1', pobs_name: 'x' }, { pobs_id: '2', pobs_name: 'y' }] };
   const x = await call('save', { ...H, path: join(dir, 'a.xml') });
   assert.equal(x.err, false, JSON.stringify(x.d));
-  const risk = x.d.not_in_p6_xml.find((l: any) => l.table === 'PROJECT' && l.field === 'risk_level');
-  assert.deepEqual([risk.rows, risk.reason], [1, 'P6 XML field exists, its texts are not verified']);
-  assert.equal(x.d.not_in_p6_xml.find((l: any) => l.table === 'POBS')?.rows, 2);
+  assert.equal(x.d.not_in_p6_xml, undefined, 'one place: the notes, in P6 words');
   const said = x.d.notes.join('\n');
-  // the notes say what was not written, with its count, in the one shared sentence; not_in_p6_xml gives each with its reason
-  assert.match(said, /^Not written to P6 XML: .*POBS \(2\).*PROJECT\.risk_level \(1\).*; save as XER to keep them\.$/);
-  assert.ok(x.d.not_in_p6_xml.some((l: any) => l.table === 'PROJECT' && l.field === 'risk_level' && l.rows === 1));
-  assert.ok(x.d.not_in_p6_xml.some((l: any) => /no element in P6 XML/.test(l.reason)) && x.d.not_in_p6_xml.some((l: any) => /texts are not verified/.test(l.reason)));
+  // the notes say what was not written, with its count, in P6's words (no table or column names), in the one shared sentence
+  assert.match(said, /^Not written to P6 XML: .*Project OBS rows \(2\).*Project fields \(\d+\).*; save as XER to keep them\.$/);
+  assert.doesNotMatch(said, /POBS|PROJECT|risk_level|ERMHDR|\.[a-z_]+ \(/);
   const r = await call('save', { ...H, path: join(dir, 'a.xer') });
   assert.equal(r.err, false);
   assert.equal(r.d.not_in_p6_xml, undefined, 'an XER keeps every field');
