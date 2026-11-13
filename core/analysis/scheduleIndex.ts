@@ -7,7 +7,8 @@ import { groupBy, rows } from '../db.ts';
 import { formatP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { resourceHistograms } from './curves.ts';
-import { baselineReason, loopNote, namesText as namesTextN, noLimitNote, notAssessed as notAssessedNote, plural, tidyNotes } from '../notes.ts';
+import { notJudged } from '../resource/usage.ts';
+import { baselineReason, loopNote, namesText as namesTextN, notJudgedNotes, notAssessed as notAssessedNote, plural, tidyNotes } from '../notes.ts';
 import { baselineOf, exactPct, namesText, pct, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope, offender, baselineFinish, type Offender, type Scope } from './common.ts';
 import * as F from './forensic.ts';
 
@@ -238,7 +239,7 @@ export function scheduleIndex(db: Parameters<typeof makeScope>[0], o: ScheduleIn
   const same = new Set(dates.map((d) => d.status_date)).size <= 1;
   const health0 = health(float, logic, loops);
   // what could not be assessed, each part with its reason (parts with the same reason share a sentence); a resource with no limit set is not judged for over-allocation
-  const noLimit = (res.figures?.resources ?? []).filter((r) => !r.limit_set).map((r) => r.resource);
+  const assigned = res.figures ? rows(s.db, 'TASKRSRC').filter((a) => a.rsrc_id && s.projIds.has(a.proj_id || s.ctx.taskById.get(a.task_id)?.proj_id || '')).map((a) => a.rsrc_id) : [];
   const notes = tidyNotes([
     ...s.dateNotes(false),
     ...(health0.result === 'not_assessed' ? [notAssessedNote('health score', health0.note!)] : (health0.left_out ?? []).map((l) => notAssessedNote(`health ${l.part.replace(/_/g, ' ')}`, l.reason))),
@@ -247,7 +248,7 @@ export function scheduleIndex(db: Parameters<typeof makeScope>[0], o: ScheduleIn
     ...(Object.values(subs) as SubMetric[]).filter((m) => m.active).flatMap((m) => m.parts.filter((p) => !p.assessed && p.note).map((p) => notAssessedNote(`${p.part.replace(/_/g, ' ')} (${m.sub_metric.replace(/_/g, ' ')})`, p.note!))),
     ...(logic.result === 'not_assessed' ? [notAssessedNote('logic findings', logic.note)] : []),
     ...(prog.result === 'not_assessed' ? [notAssessedNote('progress anomalies', prog.note)] : []),
-    ...(noLimit.length ? [noLimitNote(noLimit)] : []),
+    ...notJudgedNotes(notJudged(s.db, assigned)),
   ]);
   return {
     report: 'Schedule index', status_date: same ? dates[0]?.status_date ?? null : null, notes, ...(dates.length > 1 ? { status_dates: dates } : {}), baseline: drift.baseline,

@@ -1,8 +1,9 @@
 // Schedule analysis tools of the MCP server (kept apart from server.ts so the two grow without stepping on each other):
 // P6 Check Schedule and DCMA 14-point; later lint, float paths, curves, what-ifs, crashing and delay analysis.
 import { dayHours } from '../core/project/units.ts';
-import { cancelledAfter, datesNotCurrent, noLimitNote } from '../core/notes.ts';
+import { cancelledAfter, datesNotCurrent, notJudgedNotes } from '../core/notes.ts';
 import { storedDatesState } from '../core/schedule/stored-dates.ts';
+import { notJudged } from '../core/resource/usage.ts';
 import { CurvesRefused, progressCurves, resourceHistograms } from '../core/analysis/curves.ts';
 import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween, writeFloatPaths } from '../core/schedule/floatPaths.ts';
 import type { Db, Row } from '../core/db.ts';
@@ -253,8 +254,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       // the per-period series of EVERY resource is in the result file only (the notes say so). The order: severity first, then over-allocated periods, then resource ID.
       const SEVERITY_RANK = { critical: 3, moderate: 2, minor: 1, none: 0 } as const;
       const rank = [...r.resources].sort((x, y) => SEVERITY_RANK[y.severity] - SEVERITY_RANK[x.severity] || y.over_allocated_periods - x.over_allocated_periods || (x.resource < y.resource ? -1 : x.resource > y.resource ? 1 : 0));
-      const unlimited = r.resources.filter((x) => !x.limit_set).map((x) => x.resource).sort();
-      const notes: string[] = [...(unlimited.length ? [noLimitNote(unlimited)] : [])];
+      const notes: string[] = [...notJudgedNotes(notJudged(s.db, (() => { const names = new Set(r.resources.map((x) => x.resource)); return rows(s.db, 'RSRC').filter((x) => names.has(x.rsrc_short_name)).map((x) => x.rsrc_id); })()))];
       const done = out({ report: r.report, period: r.period, resources: rank.slice(0, LISTED).map(({ periods: _p, ...x }) => x), resources_total: r.resources.length }) as { exported?: { files: { path: string }[]; error?: string } };
       const file = done.exported?.files.find((f) => f.path.endsWith('-periods.csv'))?.path;
       if (!r.resources.length) return { ...done, notes: [`No resource is assigned in ${projIds.length === 1 ? 'the open project' : 'the open projects'}: there is nothing to chart.`] };

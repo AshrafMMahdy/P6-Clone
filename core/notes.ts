@@ -98,8 +98,12 @@ export const defaultCalendarWeek = (name: string): string => `Calendar ${name} h
 export const datesNotCurrent = (proj: string, differ: number, open: number): string => `The saved dates of ${proj} are not current: ${differ} of ${open} open activities differ from what F9 gives; run schedule first.`;
 /** A loop. */
 export const loopNote = (ids: string[]): string => `Loop: ${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
-/** Resources with no limit set (Max Units/Time 0): their over-allocation is not judged. `ids` are Resource IDs. */
+/** Resources that are Material: a material is a quantity, not a crew, so its over-allocation is not judged. `ids` are Resource IDs. */
+export const materialNote = (ids: string[]): string => `${plural(ids.length, 'resource')} ${ids.length === 1 ? 'is' : 'are'} Material: over-allocation is not assessed for a Material resource: ${namesText([...ids].sort())}.`;
+/** Labor / Nonlabor resources with no Max Units/Time (0 or blank): their over-allocation is not judged. `ids` are Resource IDs. */
 export const noLimitNote = (ids: string[]): string => `${plural(ids.length, 'resource')} ${ids.length === 1 ? 'has' : 'have'} no Max Units/Time, so ${ids.length === 1 ? 'its' : 'their'} over-allocation is not assessed: ${namesText([...ids].sort())}.`;
+/** The two sentences above for a pair of lists, each only when it has a resource. */
+export const notJudgedNotes = (x: { material: string[]; noLimit: string[] }): string[] => [...(x.material.length ? [materialNote(x.material)] : []), ...(x.noLimit.length ? [noLimitNote(x.noLimit)] : [])];
 /** An actual date after the data date. */
 export const actualAfterDataDate = (id: string, kind: 'start' | 'finish' | 'start and finish', dates: string, dataDate: string): string => `${id} has an actual ${kind} ${dates} after the data date ${dataDate}.`;
 /** An activity that started before its predecessor finished. */

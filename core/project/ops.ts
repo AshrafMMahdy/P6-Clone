@@ -481,7 +481,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       for (const f of ['rsrc_rate_id', 'rsrc_id', 'max_qty_per_hr', 'cost_per_qty', 'start_date']) addField(RR, f);
       RR.rows.push({ rsrc_rate_id: String(nextId(db, 'RSRCRATE')), rsrc_id: rid, max_qty_per_hr: p6num(op.max_units_per_hour != null ? num(op.max_units_per_hour, 'max_units_per_hour') : op.max_units_per_day != null ? num(op.max_units_per_day, 'max_units_per_day') / hpd : perHr), cost_per_qty: p6num(op.price_per_unit != null ? num(op.price_per_unit, 'price_per_unit') : 0), start_date: '' });
       // no limit given: the resource gets the default Max Units/Time (its default units per time, else 1 unit an hour), and the answer says so
-      if (op.max_units_per_hour == null && op.max_units_per_day == null) warnings.push(`Resource ${id} was given no limit, so its Max Units/Time is the default: ${p6num(Math.round(perHr * hpd * 100) / 100)} units a day (${op.units_per_day != null ? 'its units_per_day' : '1 unit an hour on a day of ' + hpd + ' hours'}). Give max_units_per_day (or max_units_per_hour) to set another.`);
+      if (type !== 'RT_Mat' && op.max_units_per_hour == null && op.max_units_per_day == null) warnings.push(`Resource ${id} was given no limit, so its Max Units/Time is the default: ${p6num(Math.round(perHr * hpd * 100) / 100)} units a day (${op.units_per_day != null ? 'its units_per_day' : '1 unit an hour on a day of ' + hpd + ' hours'}). Give max_units_per_day (or max_units_per_hour) to set another.`);
       return { resource: id };
     }
     case 'assign_resource': {

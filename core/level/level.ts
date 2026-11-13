@@ -6,8 +6,8 @@ import { formatP6Date, parseP6Date, MIN_PER_DAY } from '../dates.ts';
 import type { Finding } from '../findings.ts';
 import { calendarResolver, p6num } from '../schedule/cpm.ts';
 import type { WorkCalendar } from '../calendar/calendar.ts';
-import { noLimitNote } from '../notes.ts';
-import { resourceLimits } from '../resource/usage.ts';
+import { notJudgedNotes } from '../notes.ts';
+import { notJudged, resourceLimits } from '../resource/usage.ts';
 
 export interface LevelOptions {
   /** Only delay within total float. */
@@ -41,11 +41,9 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
   // Max Units/Time: from the resource's price/unit rows (or the resource). A resource with no limit defined cannot be
   // overallocated, so it is not leveled (it is listed in the report) rather than given an invented limit.
   const cap = resourceLimits(db); // the one predicate for "has a limit" (resource_histogram and schedule_index use it too)
-  const noLimit = new Set<string>();
   const leveled = (id: string) => {
     const want = opts.rsrcIds ? opts.rsrcIds.includes(id) : rsrcs.get(id)?.level_flag !== 'N' && rsrcs.get(id)?.rsrc_type !== 'RT_Mat';
-    if (want && !cap.has(id)) { noLimit.add(id); return false; }
-    return want;
+    return want && cap.has(id);
   };
 
   const assigns = new Map<string, Row[]>();
@@ -189,10 +187,10 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
   // what was not leveled, and why (a resource with no limit is not leveled: said every time it applies)
   const notes: string[] = [];
   const inScope = new Set<string>();
-  for (const a of rows(db, 'TASKRSRC')) if (byId.has(a.task_id) && a.rsrc_id && rsrcs.get(a.rsrc_id)?.rsrc_type !== 'RT_Mat' && (!opts.rsrcIds || opts.rsrcIds.includes(a.rsrc_id))) inScope.add(a.rsrc_id);
+  for (const a of rows(db, 'TASKRSRC')) if (byId.has(a.task_id) && a.rsrc_id && (!opts.rsrcIds || opts.rsrcIds.includes(a.rsrc_id))) inScope.add(a.rsrc_id);
   const limited = [...inScope].filter((id) => cap.has(id));
-  if (inScope.size && !limited.length) notes.push('No resource has a limit: nothing to level.');
-  else if (noLimit.size) notes.push(noLimitNote([...noLimit].map((id) => rsrcs.get(id)?.rsrc_short_name ?? id).sort()));
+  notes.push(...notJudgedNotes(notJudged(db, inScope)));
+  if (inScope.size && !limited.length) notes.push('No resource is judged for over-allocation: nothing to level.');
   if (inScope.size && limited.length && !new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size) notes.push('Nothing was leveled: the resources that have a limit are marked not to be leveled (their Leveling flag is off).');
   const report = (withNotes: boolean) => ['Leveling Report', '', `Activities delayed .......... ${delayed}`, `Resources leveled ........... ${new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size}`, `Level within float .......... ${opts.withinFloat ? 'Yes' : 'No'}`,
     ...(withNotes && notes.length ? ['', ...notes] : []),

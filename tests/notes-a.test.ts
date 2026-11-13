@@ -157,7 +157,7 @@ test('11: a resource with no limit is not judged: level_resources does not level
   await call('edit', { handle: h, operations: [{ op: 'set_fields', table: 'RSRCRATE', where: { rsrc_id: '1' }, fields: { max_qty_per_hr: '0' } }] });
   await call('schedule', { handle: h });
   const l = await call('level_resources', { handle: h, dry_run: true });
-  assert.deepEqual(l.notes, ['No resource has a limit: nothing to level.']); assert.doesNotMatch(l.report, /No resource has a limit/, 'said once, in notes');
+  assert.ok(l.notes.includes('No resource is judged for over-allocation: nothing to level.'), JSON.stringify(l.notes)); assert.doesNotMatch(l.report, /nothing to level/, 'said once, in notes');
   assert.equal(l.delayed, 0);
   const hist = await call('resource_histogram', { handle: h });
   assert.ok(hist.notes.includes('1 resource has no Max Units/Time, so its over-allocation is not assessed: R1.'), JSON.stringify(hist.notes));

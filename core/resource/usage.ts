@@ -155,3 +155,15 @@ export function resourceLimits(db: Db): Map<string, number> {
   }
   return cap;
 }
+
+/** Of the given resources (internal ids), the ones that are not judged for over-allocation, each with its reason: a Material resource (a quantity, not a crew), and a Labor / Nonlabor resource whose Max Units/Time is 0 or blank.
+ *  The ONE predicate for the three tools (resource_histogram, schedule_index, level_resources); the lists are Resource IDs, sorted. */
+export function notJudged(db: Db, ids: Iterable<string>): { material: string[]; noLimit: string[] } {
+  const limits = resourceLimits(db), R = indexBy(rows(db, 'RSRC'), 'rsrc_id');
+  const material: string[] = [], noLimit: string[] = [];
+  for (const id of new Set(ids)) {
+    const name = R.get(id)?.rsrc_short_name ?? id;
+    if (R.get(id)?.rsrc_type === 'RT_Mat') material.push(name); else if (!limits.has(id)) noLimit.push(name);
+  }
+  return { material: material.sort(), noLimit: noLimit.sort() };
+}
