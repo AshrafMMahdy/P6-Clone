@@ -1,7 +1,8 @@
-// decm: the DCMA DECM schedule checks (guidelines 6, 8 and 10), shaped like dcma_14, on the open file's own tables. Ported from our copy of the Bellator Schedule Intelligence benchmark ("Bellatorsi API/src/endpoints/
-// forensics/dcmaDecm.ts": 17 checks, each a percentage of a population, grouped by guideline). The clone reuses what it has: the logic, lag and hard-constraint checks, the invalid dates (split in three) and the
+// decm: the DCMA DECM schedule checks (the 15 of guideline 6, Schedule), shaped like dcma_14, on the open file's own tables. Ported from our copy of the Bellator Schedule Intelligence benchmark ("Bellatorsi API/src/endpoints/
+// forensics/dcmaDecm.ts": 17 checks, each a percentage of a population, grouped by guideline; its two checks of guidelines 8 and 10, 08I101a and 10A303a, judge summary-level planning packages and planning
+// packages, activity types P6 does not have, so they could never be assessed on a P6 file and are not in the clone, and with them the grouping by guideline has gone: every check here is guideline 6). The clone reuses what it has: the logic, lag and hard-constraint checks, the invalid dates (split in three) and the
 // critical path test are dcma_14's own functions (dcma.ts), called one by one (not the whole of dcma_14); the baseline is baselineOf; out-of-sequence progress is the review rule; retroactive actual dates are progressIntegrity (core/diff.ts) between consecutive updates. A check with no
-// population is not assessed (the source "skips" it), and so is one the file cannot supply an input for (no baseline, no data date, no earlier update, no SLPP or planning-package activity type in P6), with the reason.
+// population is not assessed (the source "skips" it), and so is one the file cannot supply an input for (no baseline, no data date, no earlier update), with the reason.
 // The threshold values are the source's, carried over as they are (dcmaDecm.ts:53-58); they have NOT been checked against the DCMA DECM workbook. The profile (default | strict) is the only way to change them.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
 import { baselineReason, loopNote, noDataDateReason, projectsText, notAssessed as notAssessedNote } from '../notes.ts';
@@ -14,12 +15,12 @@ import type { Update } from './delay.ts';
 import { baselineOf, baselineFinish, namesText, isLoe, isWbs, dateFields, checkNotes, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
 import { loopMessage, logicLoops, referenceStart, updateDate, updateView } from './forensic.ts';
 
-export type DecmId = '06A204b' | '06A205a' | '06A208a' | '06A209a' | '06A210a' | '06A212a' | '06A401a' | '06A501a' | '06A504a' | '06A504b' | '06A505a' | '06A505b' | '06A506a' | '06A506b' | '06A506c' | '08I101a' | '10A303a';
-export const DECM_IDS: DecmId[] = ['06A204b', '06A205a', '06A208a', '06A209a', '06A210a', '06A212a', '06A401a', '06A501a', '06A504a', '06A504b', '06A505a', '06A505b', '06A506a', '06A506b', '06A506c', '08I101a', '10A303a'];
+export type DecmId = '06A204b' | '06A205a' | '06A208a' | '06A209a' | '06A210a' | '06A212a' | '06A401a' | '06A501a' | '06A504a' | '06A504b' | '06A505a' | '06A505b' | '06A506a' | '06A506b' | '06A506c';
+export const DECM_IDS: DecmId[] = ['06A204b', '06A205a', '06A208a', '06A209a', '06A210a', '06A212a', '06A401a', '06A501a', '06A504a', '06A504b', '06A505a', '06A505b', '06A506a', '06A506b', '06A506c'];
 type Profile = Record<DecmId, number | null>;
 
 /** The default thresholds, percent of the population allowed: 06A205a 5, 06A209a 5, 06A506c 10, every other 0 (06A401a has none: it is a test). dcmaDecm.ts:53-57. */
-const DEFAULTS: Profile = { '06A204b': 0, '06A205a': 5, '06A208a': 0, '06A209a': 5, '06A210a': 0, '06A212a': 0, '06A401a': null, '06A501a': 0, '06A504a': 0, '06A504b': 0, '06A505a': 0, '06A505b': 0, '06A506a': 0, '06A506b': 0, '06A506c': 10, '08I101a': 0, '10A303a': 0 };
+const DEFAULTS: Profile = { '06A204b': 0, '06A205a': 5, '06A208a': 0, '06A209a': 5, '06A210a': 0, '06A212a': 0, '06A401a': null, '06A501a': 0, '06A504a': 0, '06A504b': 0, '06A505a': 0, '06A505b': 0, '06A506a': 0, '06A506b': 0, '06A506c': 10 };
 /** The strict profile differs from the default in three: 06A205a 2, 06A209a 2, 06A506c 5. dcmaDecm.ts:58. */
 export const DECM_PROFILES: Record<string, { label: string; t: Profile }> = {
   default: { label: 'DECM default (benchmark values, not checked against the DCMA DECM workbook)', t: DEFAULTS },
@@ -30,14 +31,10 @@ const NAMES: Record<DecmId, string> = {
   '06A204b': 'Dangling starts/finishes', '06A205a': 'Lags', '06A208a': 'Summary tasks with logic', '06A209a': 'Hard constraints', '06A210a': 'LOE with discrete successors', '06A212a': 'Out-of-sequence progress',
   '06A401a': 'Critical path validity', '06A501a': 'Missing baseline dates', '06A504a': 'Actual start retroactively changed', '06A504b': 'Actual finish retroactively changed', '06A505a': 'In-progress missing actual start',
   '06A505b': 'Completed missing actual finish', '06A506a': 'Actual start after status date', '06A506b': 'Actual finish after status date', '06A506c': 'Incomplete forecast before the data date',
-  '08I101a': 'SLPP baseline duration integrity', '10A303a': 'PP baseline integrity',
 };
-/** The guideline of a check is the first two digits of its id; the names. dcmaDecm.ts:321-330. */
-export const guidelineOf = (id: string) => parseInt(id.slice(0, 2), 10);
-const GUIDELINES: Record<number, string> = { 6: 'Schedule (Guideline 6)', 8: 'Budgeting (Guideline 8)', 10: 'Accounting/Planning Package (Guideline 10)' };
 
 
-export interface DecmCheck extends CheckResult { guideline: number }
+export type DecmCheck = CheckResult;
 export interface DecmOptions {
   projIds?: string[]; hoursPerDay?: number;
   /** default | strict */
@@ -54,7 +51,6 @@ export interface DecmReport {
   /** the series the retroactive-actuals checks read, in the data-date order used (empty when no updates were given) */
   updates: { name: string; data_date: string | null; open_project: boolean }[];
   summary: { passed: number; failed: number; not_assessed: number; /** passed / (passed + failed); null when nothing was assessed */ compliance_ratio: number | null; overall: 'pass' | 'fail' | null };
-  guidelines: { guideline: number; name: string; checks: string[]; passed: number; failed: number; not_assessed: number }[];
   checks: DecmCheck[];
   /** every sentence the checks and the data dates have to say, once */
   notes: string[];
@@ -72,7 +68,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(db, p, which)]));
   const out: DecmCheck[] = [];
   const ordered = [...(o.updates ?? [])].sort((x, y) => (updateDate(x) ?? 0) - (updateDate(y) ?? 0));
-  const add = (c: CheckResult) => out.push({ ...c, guideline: guidelineOf(c.id) });
+  const add = (c: CheckResult) => out.push(c);
   const na = (id: DecmId, reason: string) => add(reason.startsWith('Not assessed: ') ? { ...notAssessed(id, NAMES[id], '%', th(id), ''), note: reason } : notAssessed(id, NAMES[id], '%', th(id), reason));
   /** a percentage check: found of a population; an empty population is not assessed */
   const percent = (id: DecmId, found: Offender[], denominator: number, emptyNote: string) => {
@@ -154,20 +150,15 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
       percent('06A506c', flagged.filter((f) => f.forecast_before).map((f) => offender(f.task, s, 'forecast date before the status date')), pop.length, 'no activity has a data date');
     }
   }
-  // 08I101a, 10A303a: P6 has no such activity types
-  na('08I101a', 'P6 has no summary-level planning package (SLPP) activity type');
-  na('10A303a', 'P6 has no planning-package activity type');
 
   const order = (c: DecmCheck) => DECM_IDS.indexOf(c.id as DecmId);
   out.sort((a, b) => order(a) - order(b));
   const passed = out.filter((c) => c.result === 'pass').length, failed = out.filter((c) => c.result === 'fail').length;
-  const gs = [...new Set(out.map((c) => c.guideline))].sort((a, b) => a - b);
   const dd = s.projs.map((p) => s.dataDate(p.proj_id)).find((x) => x != null) ?? null;
   const first = [...bls.values()].find(Boolean);
   return {
     report: 'DCMA DECM schedule checks', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, ...dateFields(s), baseline: first ? { which, name: first.name, how: first.how } : null, updates: ordered.map((u) => ({ name: u.name, data_date: updateDate(u) != null ? formatP6Date(updateDate(u)!) : null, open_project: !!u.open })),
     summary: { passed, failed, not_assessed: out.length - passed - failed, compliance_ratio: passed + failed ? Math.round((passed / (passed + failed)) * 1000) / 1000 : null, overall: passed + failed ? (failed ? 'fail' : 'pass') : null },
-    guidelines: gs.map((g) => { const cs = out.filter((c) => c.guideline === g); return { guideline: g, name: GUIDELINES[g] ?? `Guideline ${g}`, checks: cs.map((c) => c.id), passed: cs.filter((c) => c.result === 'pass').length, failed: cs.filter((c) => c.result === 'fail').length, not_assessed: cs.filter((c) => c.result === 'not_assessed').length }; }),
     checks: out, notes: checkNotes(s, out),
   };
 }

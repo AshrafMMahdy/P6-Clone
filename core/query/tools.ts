@@ -13,7 +13,7 @@ import { dayHours } from '../project/units.ts';
 import { constraintsOf, DCMA_HARD } from '../analysis/common.ts';
 import { dataDateAssumedNotes, dataDateGaps } from '../analysis/common.ts';
 import { LISTED, listCut } from '../notes.ts';
-import { baselineLeftOut, currentPlanUsed, datesNotCurrent, differentDataDates, namesText, noDataDateNotAssessed, noDataDateWouldUse, notAssessed, tidyNotes } from '../notes.ts';
+import { baselineLeftOut, currentPlanUsed, datesNotCurrent, differentDataDates, namesText, projectsText, noDataDateNotAssessed, noDataDateWouldUse, notAssessed, tidyNotes } from '../notes.ts';
 import { duplicateRowNotes } from '../analysis/scheduleLog.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
 import { formatP6Date } from '../dates.ts';
@@ -86,7 +86,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
   switch (name) {
     case 'list_dictionaries': {
       const want = (k: string) => !args.only || String(args.only).toLowerCase() === k;
-      const maxV = args.max_values === 0 ? Infinity : Math.max(1, Number(args.max_values) || LISTED);
+      const maxV = args.max_values === 0 ? Infinity : Math.max(1, Number(args.max_values) || 50);
       const P = rows(db, 'PROJECT');
       const nameOf = (id: string) => P.find((p) => p.proj_id === id)?.proj_short_name ?? null;
       const codes = (type: string, tid: string, tname: string, val: string, vshort: string, vname: string) => rows(db, type).map((t) => { const vs = rows(db, val).filter((v) => v[tid] === t[tid]); return { type: t[tname], values: vs.slice(0, maxV).map((v) => ({ code: v[vshort], name: v[vname] })), total_values: vs.length, ...(vs.length > maxV ? { values_note: listCut(maxV, vs.length) } : {}) }; });
@@ -346,7 +346,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         worst_schedule_performance: bySpi.slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, spi: round(x.e.spi), sv: round(x.e.sv) })), worst_schedule_performance_total: bySpi.length,
         // (every_activity, an export: each activity with cost, every earned value figure of it)
         ...(args.every_activity === true ? { activities: tasks.filter((t) => t.task_type !== 'TT_WBS' && costs.get(t.task_id)).map((t) => ({ project: ctx.proj.get(t.proj_id)?.proj_short_name, id: t.task_code, name: t.task_name, wbs: wbsPath(t.wbs_id), ...pack(sumLines([costs.get(t.task_id)!])) })) } : {}),
-        ...(() => { const pRows = [...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean); const n = tidyNotes([...dataDateAssumedNotes(pRows), ...dataDateGaps(pRows, 'planned value and earned value at the data date', null), ...projects.filter((p) => p.totals.bac === 0).map((p) => notAssessed('SPI, CPI and EAC', `${p.project} carries no costs`)), ...(projects.some((p) => !p.has_baseline) ? [currentPlanUsed(projects.filter((p) => !p.has_baseline).map((p) => p.project ?? ''))] : [])]); return n.length ? { notes: n } : {}; })(),
+        ...(() => { const pRows = [...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean); const n = tidyNotes([...dataDateAssumedNotes(pRows), ...dataDateGaps(pRows, 'planned value and earned value at the data date', null), ...(() => { const none = projects.filter((p) => p.totals.bac === 0).map((p) => p.project ?? ''); return none.length ? [notAssessed('SPI, CPI and EAC', `${projectsText(none)} ${none.length === 1 ? 'carries' : 'carry'} no costs`)] : []; })(), ...(projects.some((p) => !p.has_baseline) ? [currentPlanUsed(projects.filter((p) => !p.has_baseline).map((p) => p.project ?? ''))] : [])]); return n.length ? { notes: n } : {}; })(),
       };
     }
     case 'resource_summary': {

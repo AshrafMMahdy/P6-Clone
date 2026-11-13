@@ -190,6 +190,7 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
   for (const a of rows(db, 'TASKRSRC')) if (byId.has(a.task_id) && a.rsrc_id && (!opts.rsrcIds || opts.rsrcIds.includes(a.rsrc_id))) inScope.add(a.rsrc_id);
   const limited = [...inScope].filter((id) => cap.has(id));
   notes.push(...notJudgedNotes(notJudged(db, inScope)));
+  if (!inScope.size) notes.push(opts.rsrcIds ? 'None of the resources named is assigned to an activity: nothing to level.' : 'No resource is assigned to an activity: nothing to level.');
   if (inScope.size && !limited.length) notes.push('No resource is judged for over-allocation: nothing to level.');
   if (inScope.size && limited.length && !new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size) notes.push('Nothing was leveled: the resources that have a limit are marked not to be leveled (their Leveling flag is off).');
   const report = (withNotes: boolean) => ['Leveling Report', '', `Activities delayed .......... ${delayed}`, `Resources leveled ........... ${new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size}`, `Level within float .......... ${opts.withinFloat ? 'Yes' : 'No'}`,

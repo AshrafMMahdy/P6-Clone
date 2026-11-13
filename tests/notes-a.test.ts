@@ -184,3 +184,24 @@ test('26: level_resources says when one activity alone needs more than the limit
   const l = await call('level_resources', { handle: h, dry_run: true });
   assert.match(l.report, /Resource R1 still overallocated by \d+ h on 2026-01-\d\d: activity A alone needs 16 h in a day against the limit of 8 h, so delaying it cannot fix this: lower its assignment \(edit update_assignment\) or raise the limit \(edit update_resource max_units_per_day\)/);
 });
+
+test('said once for the file: earned_value names every project that carries no costs in one sentence; level_resources says when no resource is assigned (and when none of the named ones is)', async () => {
+  // Enppi.xer holds two projects, neither with a budgeted cost (their TASK and TASKRSRC rows carry no target cost)
+  const o = await call('open_file', { path: join(SAMPLES_DIR, 'Enppi.xer') });
+  const ev = await call('earned_value', { handle: o.handle });
+  assert.deepEqual(ev.projects.map((p: any) => p.totals.bac), [0, 0]);
+  assert.deepEqual(ev.notes.filter((n: string) => /no costs/.test(n)), ['SPI, CPI and EAC not assessed: Master Rev.F-N-4 and 4229 update 2-6-12 carry no costs.']);
+  const one = await call('earned_value', { handle: o.handle, project: 'Master Rev.F-N-4' });
+  assert.deepEqual(one.notes.filter((n: string) => /no costs/.test(n)), ['SPI, CPI and EAC not assessed: Master Rev.F-N-4 carries no costs.']);
+  await call('close', { handle: o.handle, discard: true });
+  // no assignment at all: nothing to level, said (it was silent); a named resource that is assigned nowhere: said of the named ones
+  const h = await built('2026-01-05', [{ op: 'add_resource', id: 'R1' }, { op: 'add_resource', id: 'R2' }, act('A', 5), act('B', 5)], 'LV0');
+  await call('schedule', { handle: h });
+  const none = await call('level_resources', { handle: h, dry_run: true });
+  assert.deepEqual(none.notes, ['No resource is assigned to an activity: nothing to level.']); assert.equal(none.delayed, 0);
+  await call('edit', { handle: h, operations: [{ op: 'assign_resource', activity: 'A', resource: 'R1' }] });
+  const named = await call('level_resources', { handle: h, dry_run: true, resources: ['R2'] });
+  assert.deepEqual(named.notes, ['None of the resources named is assigned to an activity: nothing to level.']);
+  const some = await call('level_resources', { handle: h, dry_run: true });
+  assert.ok(!(some.notes ?? []).some((n: string) => /is assigned to an activity/.test(n)), JSON.stringify(some.notes));
+});

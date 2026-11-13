@@ -35,11 +35,11 @@ function walk(tool: string, answer: any): Walked {
     if (Array.isArray(v)) { v.forEach((x, i) => visit(x, `${path}[${i}]`, true, null)); return; }
     if (!v || typeof v !== 'object') return;
     const o = v as Record<string, unknown>;
-    // a list that has fewer items than its total says so beside it
+    // a list that has fewer items than its total says so beside it (a page of a paged reader says it with next_offset: run_report, as activity_table and read_table do)
     for (const [k, x] of Object.entries(o)) {
       if (!Array.isArray(x) || k === 'exported') continue;
       const total = o[`${k}_total`] ?? o[`total_${k}`];
-      if (typeof total === 'number' && total > x.length && typeof o[`${k}_note`] !== 'string') w.problems.push(`${path ? `${path}.` : ''}${k}: ${x.length} items of ${total} with no "_note" beside it`);
+      if (typeof total === 'number' && total > x.length && typeof o[`${k}_note`] !== 'string' && typeof o.next_offset !== 'number') w.problems.push(`${path ? `${path}.` : ''}${k}: ${x.length} items of ${total} with no "_note" beside it`);
     }
     for (const [k, x] of Object.entries(o)) {
       const here = path ? `${path}.${k}` : k;

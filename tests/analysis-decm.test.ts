@@ -1,4 +1,4 @@
-// decm (core/analysis/decm.ts, registered in mcp/forensics.ts): the 17 DECM checks against the benchmark's own numbers (tests/fixtures/benchmark-golden.json) on the fixtures rebuilt as P6 projects (tests/benchmark-fixtures.ts), every
+// decm (core/analysis/decm.ts, registered in mcp/forensics.ts): the 15 DECM checks (guideline 6) against the benchmark's own numbers (tests/fixtures/benchmark-golden.json) on the fixtures rebuilt as P6 projects (tests/benchmark-fixtures.ts), every
 // expected difference stated with its reason, each not-assessed path, the profiles and overrides, the series of updates, the list rule, and the real samples (numbers verified by hand from the file's own rows, in the comments).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,12 +31,16 @@ const FIXTURES = [['cleanChain', B.cleanChain], ['withFloat', B.withFloat], ['wi
 
 // ------------------------------------------------------------------------------------------------ against the source
 
-test('the 17 checks, grouped by guideline, in the source\'s order with its names; the answer says passed, failed, not assessed', () => {
+test('the 15 checks of guideline 6, in the source\'s order with its names (its two checks of planning-package types, which P6 does not have, are not in the clone); the answer says passed, failed, not assessed', () => {
   const r = decm(B.delayed().db, {});
   assert.deepEqual(r.checks.map((c) => c.id), DECM_IDS);
-  assert.equal(DECM_IDS.length, 17);
-  assert.deepEqual(r.guidelines.map((g) => [g.guideline, g.name, g.checks.length]), [[6, 'Schedule (Guideline 6)', 15], [8, 'Budgeting (Guideline 8)', 1], [10, 'Accounting/Planning Package (Guideline 10)', 1]]);
-  assert.equal(r.summary.passed + r.summary.failed + r.summary.not_assessed, 17);
+  assert.equal(DECM_IDS.length, 15);
+  // the source's own list of guideline 6 is these 15, in this order; its guidelines 8 and 10 hold only 08I101a and 10A303a
+  const src = golden.delayed.decm.data.checks_by_guideline as Record<string, { checks: { check_id: string }[] }>;
+  assert.deepEqual(Object.values(src).flatMap((g) => g.checks.map((c) => c.check_id)).filter((id) => id.startsWith('06')), DECM_IDS);
+  assert.deepEqual(Object.values(src).flatMap((g) => g.checks.map((c) => c.check_id)).filter((id) => !id.startsWith('06')).sort(), ['08I101a', '10A303a']);
+  assert.ok(!('guidelines' in r) && r.checks.every((c) => !('guideline' in c)));
+  assert.equal(r.summary.passed + r.summary.failed + r.summary.not_assessed, 15);
   const names = Object.fromEntries(Object.values(golden.delayed.decm.data.checks_by_guideline).flatMap((g: any) => g.checks).map((c: any) => [c.check_id, c.check_name]));
   // 06A506c is named for the clone's rule (a forecast date BEFORE the data date: remaining work starts ON it in P6); the source's name says on/before the status date
   for (const c of r.checks) assert.equal(c.name, c.id === '06A506c' ? 'Incomplete forecast before the data date' : names[c.id], c.id);
@@ -232,12 +236,9 @@ test('06A401a: a loop fails it and names the loop; otherwise it is dcma_14\'s cr
 
 // ------------------------------------------------------------------------------------------------ not assessed
 
-test('not assessed, with the reason: SLPP and planning packages (P6 has no such types), no data date, no baseline, no earlier update, empty populations', () => {
+test('not assessed, with the reason: no data date, no baseline, no earlier update, empty populations', () => {
   const r = by(decm(B.cleanChain().db, {}));
-  assert.equal(r['08I101a'].result, 'not_assessed');
-  assert.match(r['08I101a'].note!, /P6 has no summary-level planning package \(SLPP\) activity type/);
-  assert.match(r['10A303a'].note!, /P6 has no planning-package activity type/);
-  for (const id of ['08I101a', '10A303a', '06A501a', '06A504a', '06A504b', '06A208a', '06A210a']) { assert.equal(r[id].result, 'not_assessed', id); assert.equal(r[id].metric, null, id); assert.equal(r[id].denominator, null, id); }
+  for (const id of ['06A501a', '06A504a', '06A504b', '06A208a', '06A210a']) { assert.equal(r[id].result, 'not_assessed', id); assert.equal(r[id].metric, null, id); assert.equal(r[id].denominator, null, id); }
   // no data date (the sample): the three status-date checks are not assessed; with a status_date they are
   const aurora = readXerFile(sampleCopy('Aurora_Tower_Baseline.xer')).db;
   const n = by(decm(aurora, {}));
@@ -247,7 +248,7 @@ test('not assessed, with the reason: SLPP and planning packages (P6 has no such 
   assert.equal(decm(aurora, {}).status_date, null);
   // the summary counts them
   const sum = decm(aurora, {}).summary;
-  assert.equal(sum.passed + sum.failed + sum.not_assessed, 17);
+  assert.equal(sum.passed + sum.failed + sum.not_assessed, 15);
   assert.ok(sum.not_assessed >= 7);
   // nothing assessed at all: no ratio, no overall
   const none = decm(B.project('BARE', []).db, {});
@@ -369,7 +370,7 @@ test('decm through the server: read-only, summary first, 25 activities per check
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
   assert.match(r.d.notes.join(' '), /decm has no argument "bogus"; the call ran without it/);
   assert.deepEqual(Object.keys(r.d).slice(0, 4), ['report', 'profile', 'status_date', 'baseline'], 'the headline first');
-  assert.equal(r.d.summary.passed + r.d.summary.failed + r.d.summary.not_assessed, 17);
+  assert.equal(r.d.summary.passed + r.d.summary.failed + r.d.summary.not_assessed, 15);
   const lags = r.d.checks.find((c: any) => c.id === '06A205a');
   assert.equal(lags.activities.length, 25);
   assert.equal(lags.total_activities, 535);
