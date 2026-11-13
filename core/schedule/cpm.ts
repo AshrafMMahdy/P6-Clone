@@ -8,7 +8,7 @@ import { WorkCalendar, CalendarHorizonError } from '../calendar/calendar.ts';
 import { calendarDefOfRow, hoursPerWeek, inheritExceptions, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
 import { inLoopCheck, loopsOfLinks } from '../xer/validate.ts';
 import { buildScheduleLog } from './log.ts';
-import { actualAfterDataDate, cstrName, daysText, loopNote, minutesToDays, namesText, noDataDateUsed, noDateNoStartInstead, noDateNoStartWrong, outOfSequence, plural, refused } from '../notes.ts';
+import { actualAfterDataDate, cstrName, daysText, defaultCalendarWeek, loopNote, minutesToDays, namesText, noDataDateUsed, noDateNoStartInstead, noDateNoStartWrong, outOfSequence, plural, refused } from '../notes.ts';
 
 export type LogicMode = 'retained' | 'override' | 'actual';
 export type FloatType = 'start' | 'finish' | 'smallest';
@@ -147,6 +147,7 @@ export function calendarResolver(db: Db, findings: Finding[]) {
     let d: CalendarDef | null = null;
     try {
       d = calendarDefOfRow(r); // no calendar data: the week P6 gives it (its hours per day and week)
+      if (!r.clndr_data) findings.push({ severity: 'warning', code: 'SCHED_CAL_DEFAULT', table: 'CALENDAR', key: id, message: defaultCalendarWeek(r.clndr_name), p6: 'P6 creates it with the default work week.' }); // (a default the dates rest on: said by the calculation, as the import check says it)
     } catch (e) {
       findings.push({ severity: 'warning', code: 'SCHED_CAL_INVALID', table: 'CALENDAR', key: id, message: `Calendar ${r.clndr_name} cannot be read (${(e as Error).message}): the standard 5-day calendar was used for ${plural(db.tables.TASK?.rows.filter((t) => t.clndr_id === id).length ?? 0, 'activity', 'activities')}.`, p6: 'P6 cannot use the calendar.' });
     }

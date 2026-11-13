@@ -12,6 +12,7 @@ import { parseP6Date } from '../dates.ts';
 import {
   baselineOf, baselineFinish, constraintsOf, isDone, isLoe, isMilestone, isStarted, isWbs, makeScope, notAssessed, offender,
   dateFields, checkNotes, P6_HARD, P6_SOFT, exactPct, pct, percentCheck, relOffender, START_CONSTRAINTS, passes, type CheckResult, type Offender, type Threshold,
+  noBaselineReason,
 } from './common.ts';
 import { beiFigures } from './forensic.ts';
 
@@ -128,7 +129,7 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(db, p, 'project')]));
   const anyBaseline = [...bls.values()].some(Boolean);
   add('late_activities', () => {
-    if (!anyBaseline) return notAssessed('late_activities', name('late_activities'), '%', th('late_activities'), baselineReason(projectsText(s.projs.map((p) => p.proj_short_name)), false));
+    if (!anyBaseline) return notAssessed('late_activities', name('late_activities'), '%', th('late_activities'), noBaselineReason(s.db, s.projs, false));
     const pop = s.tasks.filter((t) => !isDone(t) && !isWbs(t) && !isLoe(t));
     const late = pop.filter((t) => {
       const b = bls.get(t.proj_id)?.tasks.get(t.task_code);
@@ -139,10 +140,10 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
     return percentCheck('late_activities', name('late_activities'), late, pop.length, th('late_activities'), maxIds);
   });
   add('bei', () => {
-    if (!anyBaseline) return notAssessed('bei', name('bei'), 'ratio', th('bei'), baselineReason(projectsText(s.projs.map((p) => p.proj_short_name)), false));
+    if (!anyBaseline) return notAssessed('bei', name('bei'), 'ratio', th('bei'), noBaselineReason(s.db, s.projs, false));
     // forensic.ts beiFigures, the clone's one definition; here a task baselined to finish on the data date is not yet due
     const bei = beiFigures(s, bls, 'project', { before: true });
-    if (bei.result === 'not_assessed') return bei.reason === 'no_baseline' ? notAssessed('bei', name('bei'), 'ratio', th('bei'), baselineReason(projectsText(s.projs.map((p) => p.proj_short_name)), false)) : { ...notAssessed('bei', name('bei'), 'ratio', th('bei'), 'no baseline activity was due to finish before the data date'), numerator: bei.completed!, denominator: 0 };
+    if (bei.result === 'not_assessed') return bei.reason === 'no_baseline' ? notAssessed('bei', name('bei'), 'ratio', th('bei'), noBaselineReason(s.db, s.projs, false)) : { ...notAssessed('bei', name('bei'), 'ratio', th('bei'), 'no baseline activity was due to finish before the data date'), numerator: bei.completed!, denominator: 0 };
     const due = bei.not_completed.map((o) => ({ ...o, value: 'baselined to finish before the data date, not completed' }));
     return { id: 'bei', name: name('bei'), unit: 'ratio', metric: bei.value, threshold: th('bei'), numerator: bei.completed, denominator: bei.due, result: passes(bei.exact, th('bei')) ? 'pass' : 'fail', activities: maxIds ? due.slice(0, maxIds) : due, total_activities: due.length };
   });

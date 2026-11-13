@@ -4,7 +4,7 @@
 // move those dates.
 import type { Db, Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
-import { datesNotCurrent } from '../notes.ts';
+import { datesNotCurrent, datesNotStored } from '../notes.ts';
 import { scheduleProjects } from './cpm.ts';
 
 const FIELDS: [string, string][] = [
@@ -59,7 +59,7 @@ export function storedDatesState(db: Db, only?: string[]): { stale: StoredDatesS
 export function checkStoredDates(db: Db): Finding[] {
   const { stale, notStored } = storedDatesState(db);
   const out: Finding[] = [];
-  for (const id of notStored) out.push({ severity: 'info', code: 'DATES_NOT_STORED', message: `${id} has no calculated dates for its open activities; run schedule first.`, p6: '', table: 'TASK' });
+  for (const id of notStored) out.push({ severity: 'info', code: 'DATES_NOT_STORED', message: datesNotStored(id), p6: '', table: 'TASK' });
   for (const st of stale) out.push({ severity: 'warning', code: 'DATES_NOT_CURRENT', message: datesNotCurrent(st.proj, st.differ, st.open), p6: '', table: 'TASK' }, ...st.examples);
   return out;
 }

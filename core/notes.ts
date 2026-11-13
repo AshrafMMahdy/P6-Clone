@@ -42,12 +42,16 @@ export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) :
 /** A list of parts as words: "a", "a and b", "a, b and c". */
 export const andList = (parts: string[]): string => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
-/** Missing baseline, as the reason of a part that is not assessed. `argument`: the tool takes a `baseline` argument. */
-export const baselineReason = (proj: string, argument: boolean, which = 'project'): string => `no ${which === 'project' ? 'baseline' : baselineWord(which)} is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`;
+/** Missing baseline, as the reason of a part that is not assessed. `argument`: the tool takes a `baseline` argument. `notInFile`: one IS assigned, and the file was exported without it. */
+export const baselineReason = (proj: string, argument: boolean, which = 'project', notInFile = false): string => (notInFile
+  ? `the ${baselineWord(which)} of ${proj} is not in this file (the file was exported without it); export the file with its baselines${argument ? ', or pass baseline to name one that is in it' : ''}`
+  : `no ${which === 'project' ? 'baseline' : baselineWord(which)} is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`);
 /** Missing baseline, a check left out. */
 export const baselineLeftOut = (part: string, proj: string, argument: boolean, which = 'project'): string => notAssessed(part, baselineReason(proj, argument, which));
 /** Missing baseline, the current budget and dates stood in. */
-export const currentPlanUsed = (projs: string[], argument = false): string => `No baseline is assigned to ${projectsText(projs)}: the current budget and dates were used; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}.`;
+export const currentPlanUsed = (projs: string[], argument = false, notInFile = false): string => (notInFile
+  ? `The project baseline of ${projectsText(projs)} is not in this file (the file was exported without it): the current budget and dates were used; export the file with its baselines to measure against it.`
+  : `No baseline is assigned to ${projectsText(projs)}: the current budget and dates were used; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}.`);
 /** Missing baseline, the one saved baseline the engine chose. */
 export const baselineChosen = (proj: string, baseline: string, which = 'its only saved baseline'): string => `No baseline is assigned to ${proj}: ${baseline}, ${which}, was used.`;
 /** A baseline by its argument value (`project`, `bl1`, a saved name) for the sentences above. */
@@ -116,13 +120,15 @@ export const withoutAdvice = (message: string): string => message.replace(/; (?:
 /** A fault the repair did not touch. */
 export const notRepaired = (fault: string, how: string | null = 'save with repair: true fixes it'): string => `Not repaired: ${fault.replace(/\.$/, '')}${how ? `; ${how}` : ''}.`;
 /** What a save to a format with no place for it did not write. `kinds` is "<kind> (<n>)". */
-export const droppedOnSave = (format: string, kinds: string[]): string => `Not written to ${format}: ${kinds.join(', ')}; save as XER to keep ${kinds.length === 1 ? 'it' : 'them'}.`;
+export const droppedOnSave = (format: string, kinds: string[], file?: string | null): string => `Not written to ${format}: ${kinds.join(', ')}; save as XER to keep ${kinds.length === 1 ? 'it' : 'them'}${file ? `; each field is listed in ${file}` : ''}.`;
 /** A calendar the file does not define. */
 export const defaultCalendarWeek = (name: string): string => `Calendar ${name} has no work week in the file: the default 5-day week (no holidays) is used.`;
 /** The saved dates are not current (a tool that reads them). */
+/** A project whose open activities carry no calculated dates at all (never scheduled). */
+export const datesNotStored = (proj: string): string => `${proj} has no calculated dates for its open activities; run schedule first.`;
 export const datesNotCurrent = (proj: string, differ: number, open: number): string => `The saved dates of ${proj} are not current: ${differ} of ${open} open ${open === 1 ? 'activity' : 'activities'} ${differ === 1 ? 'differs' : 'differ'} from what F9 gives; run schedule first.`;
 /** A loop. */
-export const loopNote = (ids: string[]): string => `Loop: ${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
+export const loopNote = (ids: string[]): string => `${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
 /** Resources that are Material: a material is a quantity, not a crew, so its over-allocation is not judged. `ids` are Resource IDs. */
 export const materialNote = (ids: string[]): string => `${plural(ids.length, 'resource')} ${ids.length === 1 ? 'is' : 'are'} Material: over-allocation is not assessed for a Material resource: ${namesText([...ids].sort())}.`;
 /** Labor / Nonlabor resources with no Max Units/Time (0 or blank): their over-allocation is not judged. `ids` are Resource IDs. */
@@ -133,8 +139,13 @@ export const notJudgedNotes = (x: { material: string[]; noLimit: string[] }): st
 export const actualAfterDataDate = (id: string, kind: 'start' | 'finish' | 'start and finish', dates: string, dataDate: string): string => `${id} has an actual ${kind} ${dates} after the data date ${dataDate}.`;
 /** An activity that started before its predecessor finished. */
 export const outOfSequence = (id: string, pred: string): string => `${id} started before its predecessor ${pred} finished.`;
+/** No resource is assigned to any activity: as the reason of a part that is not assessed, and as the sentence of a tool that then has nothing to do (`verb`: chart, level). */
+export const NO_RESOURCE_ASSIGNED = 'no resource is assigned to an activity';
+export const noResourceAssigned = (verb: string): string => `${cap(NO_RESOURCE_ASSIGNED)}: nothing to ${verb}.`;
 /** A duplicate row. `did` is what the tool did with it ("scheduled once", "counted once"). */
 export const duplicateRow = (id: string, did: string): string => `Activity ${id} appears twice in the file; it was ${did} once; save with repair: true fixes it.`;
+/** Whether a sentence is one of those (an answer that already names the repeated rows in full does not say them again). */
+export const isDuplicateRowNote = (s: string): boolean => /^Activity .+ appears twice in the file; it was .+ once; save with repair: true fixes it\.$/.test(s);
 /** A run that was cancelled. */
 export const cancelledAfter = (done: number, total: number | null, steps: string, nothingChanged = true): string => `Cancelled after ${done}${total != null ? ` of ${total}` : ''} ${steps}: the result covers those only${nothingChanged ? '; nothing was changed' : ''}.`;
 /** A job that is still running. */

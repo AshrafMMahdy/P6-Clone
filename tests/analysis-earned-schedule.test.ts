@@ -177,11 +177,19 @@ test('real samples with progress: ES within the planned span, SPI(t) = ES / AT, 
     assert.ok(t.es_days != null && t.at_days != null && t.es_days <= t.at_days + 1e-9 === t.es <= t.at + 1e-9, `${label}: days and periods agree on ahead or behind`);
     assert.ok(t.es_date! <= c.data_date!.slice(0, 10) || t.es > t.at, label);
   }
-  // 129 trial has costs only on actuals and remaining work: no budget, so the cost basis is not assessed (not 1)
+  // 129 trial names a project baseline the file does not hold (it was exported without it): the file's own budget and dates stand in, as with no baseline assigned (the budget read as 0 before,
+  // and the cost basis as "no budgeted cost"). The budget, from the rows: the budgeted cost of the project's assignments and expenses.
   const db = readXerFile(sampleCopy('129 trial.xer')).db;
-  const cost = progressCurves(db, rows(db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id), { units: 'cost' });
-  assert.equal(cost.totals.spi_t, null);
-  assert.match(cost.notes.join(' '), /No budgeted cost in/);
+  const p = rows(db, 'PROJECT').filter((x) => !x._baseline_of);
+  assert.ok(p[0].sum_base_proj_id && !rows(db, 'PROJECT').some((x) => x.proj_id === p[0].sum_base_proj_id));
+  const mine = new Set(rows(db, 'TASK').filter((t) => t.proj_id === p[0].proj_id).map((t) => t.task_id));
+  const budget = rows(db, 'TASKRSRC').filter((a) => mine.has(a.task_id)).reduce((s, a) => s + Number(a.target_cost || 0), 0) + rows(db, 'PROJCOST').filter((e) => mine.has(e.task_id)).reduce((s, e) => s + Number(e.target_cost || 0), 0);
+  assert.ok(budget > 0);
+  const cost = progressCurves(db, p.map((x) => x.proj_id), { units: 'cost' });
+  assert.ok(Math.abs(cost.totals.bac - budget) < 1, `${cost.totals.bac} is the file's budget ${budget}`);
+  assert.ok(cost.totals.spi_t != null && cost.totals.spi_t > 0);
+  assert.doesNotMatch(cost.notes.join(' '), /No budgeted cost in/);
+  assert.match(cost.notes.join(' '), /^The project baseline of R29BT-modefied-10 is not in this file \(the file was exported without it\): the current budget and dates were used; export the file with its baselines to measure against it\./);
 });
 
 test('through the tool: units duration is accepted, the answer and the result file carry the Earned Schedule columns, a bad units is refused', async () => {

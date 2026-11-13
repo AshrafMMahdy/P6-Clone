@@ -7,14 +7,14 @@ import { parseP6Date } from '../dates.ts';
 import { isCritical, traceLogic, type Ctx } from '../project/ctx.ts';
 import { calendarResolver, relationshipFloat } from '../schedule/cpm.ts';
 import { statusOf, projectName } from '../project/edit.ts';
-import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
+import { activityCosts, assignedBaselineId, earnedValue, sumLines } from '../cost/rollup.ts';
 import { financialPeriods, periodCalendar, projectCalendar } from '../progress/period.ts';
 import { dayHours } from '../project/units.ts';
 import { constraintsOf, DCMA_HARD } from '../analysis/common.ts';
-import { dataDateAssumedNotes, dataDateGaps } from '../analysis/common.ts';
+import { currentPlanNotes, dataDateAssumedNotes, dataDateGaps } from '../analysis/common.ts';
 import { LISTED, listCut } from '../notes.ts';
 import { baselineLeftOut, currentPlanUsed, datesNotCurrent, differentDataDates, namesText, projectsText, noDataDateNotAssessed, noDataDateWouldUse, notAssessed, tidyNotes } from '../notes.ts';
-import { duplicateRowNotes } from '../analysis/scheduleLog.ts';
+import { differentDatesNote, duplicateRowNotes } from '../analysis/scheduleLog.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
 import { formatP6Date } from '../dates.ts';
 
@@ -22,6 +22,7 @@ import { formatP6Date } from '../dates.ts';
 export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
 
 const STATUS: Record<string, string> = { TK_NotStart: 'not started', TK_Active: 'in progress', TK_Complete: 'completed' };
+const RSRC_TYPE: Record<string, string> = { RT_Labor: 'labor', RT_Equip: 'nonlabor', RT_Mat: 'material' };
 const TYPE: Record<string, string> = { TT_Task: 'task', TT_Rsrc: 'resource dependent', TT_Mile: 'start milestone', TT_FinMile: 'finish milestone', TT_LOE: 'level of effort', TT_WBS: 'WBS summary' };
 
 export const TOOLS: ToolDef[] = [
@@ -49,7 +50,7 @@ export const TOOLS: ToolDef[] = [
   { name: 'trace_logic', description: 'Trace Logic (View > Show on Bottom > Trace Logic): an activity\'s (or, with activity_ids, each of many activities\') predecessors and successors several levels deep, with each link\'s type, lag, relationship free float and whether it is driving. Use it to explain why an activity is where it is.', parameters: { type: 'object', properties: { activity_id: { type: 'string' }, activity_ids: { type: 'array', items: { type: 'string' }, description: 'many activities in one call (instead of activity_id)' }, predecessors: { type: 'number', description: 'levels back (default 3; no cap)' }, successors: { type: 'number', description: 'levels forward (default 3; no cap)' }, driving_only: { type: 'boolean' }, max_per_level: { type: 'number', description: 'activities listed per level (default 40; 0 = every one)' } } } },
   { name: 'earned_value', description: 'Earned value as P6 calculates it (baseline budget, planned value at the data date, earned value from % complete, actual cost): project totals, each top-level WBS, and the activities with the worst cost and schedule performance (CPI/SPI). Money in the project currency.', parameters: { type: 'object', properties: { worst: { type: 'number', description: 'how many weakest activities to list (default 10; 0 = every one); worst_cost_performance_total and worst_schedule_performance_total say how many there are' } } } },
   { name: 'list_dictionaries', description: 'The dictionaries edit operations refer to by name: baselines (with which is the project baseline and BL1-BL3), activity/project/resource/assignment code types and their values, UDFs, cost accounts, calendars, financial periods (with how many activities have period performance stored in each), resource curves, EPS, OBS, performing organisations (POBS) and roles.', parameters: { type: 'object', properties: { only: { type: 'string', description: 'one of baselines, codes, udfs, accounts, calendars, periods, curves, eps, obs, pobs, roles' }, max_values: { type: 'number', description: 'code values listed per type (default 50; 0 = every one)' } } } },
-  { name: 'resource_summary', description: 'Resources with their assignments: total budgeted/remaining units and cost, first/last use. With `resource`, the activities that resource is assigned to.', parameters: { type: 'object', properties: { resource: { type: 'string' }, limit: { type: 'number', description: 'Default 30; no cap' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
+  { name: 'resource_summary', description: 'Resources with their assignments: each resource\u2019s type (labor, nonlabor, material), number of assignments, budgeted and remaining units and budgeted cost, most assignments first. With `resource`, the activities that resource is assigned to, with the units and cost of each assignment.', parameters: { type: 'object', properties: { resource: { type: 'string' }, limit: { type: 'number', description: 'rows a page: default 80 resources, or 30 activities with `resource`; no cap' }, offset: { type: 'number', description: 'rows to skip (paging: pass the next_offset of the previous answer)' } } } },
 ];
 // every lookup can read a project other than the open one
 /** One page of a list: `offset` rows skipped, at most `limit`; next_offset is null once the list is done. */
@@ -298,7 +299,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         remaining_duration_over_44_days: ex(longDur),
         leads_negative_lag: leads.length, positive_lags: lags.length, relationship_types: types,
         started_out_of_sequence: ex(oos), not_started_but_dated_before_data_date: ex(stale),
-        ...(noDd.length || ddDiffer ? { notes: [...dataDateGaps(noDd, 'activities dated before the data date', null), ...(ddDiffer ? [differentDataDates(withDd.map((p) => ({ proj: p.proj_short_name, date: p.last_recalc_date.slice(0, 10) })), 'each project\u2019s own date')] : [])] } : {}),
+        ...(() => { const assumed = dataDateAssumedNotes(withDd); return noDd.length || ddDiffer || assumed.length ? { notes: [...assumed, ...dataDateGaps(noDd, 'activities dated before the data date', null), ...(ddDiffer ? [differentDataDates(withDd.map((p) => ({ proj: p.proj_short_name, date: p.last_recalc_date.slice(0, 10) })), 'each project\u2019s own date')] : [])] } : {}; })(),
       };
     }
     case 'trace_logic': {
@@ -331,7 +332,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         const root = rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y');
         const top = root ? (kids.get(root.wbs_id) ?? []).filter((w) => w.proj_id === pid) : [];
         return {
-          project: ctx.proj.get(pid)?.proj_short_name, data_date: d(ctx.proj.get(pid)?.last_recalc_date), has_baseline: !!ctx.proj.get(pid)?.sum_base_proj_id,
+          project: ctx.proj.get(pid)?.proj_short_name, data_date: d(ctx.proj.get(pid)?.last_recalc_date), has_baseline: !!assignedBaselineId(db, ctx.proj.get(pid)),
           totals: pack(sumLines(tasks.filter((t) => t.proj_id === pid).map((t) => costs.get(t.task_id)!).filter(Boolean))),
           by_wbs: top.map((w) => { const ids = new Set(under(w.wbs_id)); return { wbs: w.wbs_short_name, name: w.wbs_name, ...pack(sumLines(tasks.filter((t) => ids.has(t.wbs_id)).map((t) => costs.get(t.task_id)!).filter(Boolean))) }; }),
         };
@@ -346,7 +347,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         worst_schedule_performance: bySpi.slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, spi: round(x.e.spi), sv: round(x.e.sv) })), worst_schedule_performance_total: bySpi.length,
         // (every_activity, an export: each activity with cost, every earned value figure of it)
         ...(args.every_activity === true ? { activities: tasks.filter((t) => t.task_type !== 'TT_WBS' && costs.get(t.task_id)).map((t) => ({ project: ctx.proj.get(t.proj_id)?.proj_short_name, id: t.task_code, name: t.task_name, wbs: wbsPath(t.wbs_id), ...pack(sumLines([costs.get(t.task_id)!])) })) } : {}),
-        ...(() => { const pRows = [...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean); const n = tidyNotes([...dataDateAssumedNotes(pRows), ...dataDateGaps(pRows, 'planned value and earned value at the data date', null), ...(() => { const none = projects.filter((p) => p.totals.bac === 0).map((p) => p.project ?? ''); return none.length ? [notAssessed('SPI, CPI and EAC', `${projectsText(none)} ${none.length === 1 ? 'carries' : 'carry'} no costs`)] : []; })(), ...(projects.some((p) => !p.has_baseline) ? [currentPlanUsed(projects.filter((p) => !p.has_baseline).map((p) => p.project ?? ''))] : [])]); return n.length ? { notes: n } : {}; })(),
+        ...(() => { const pRows = [...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean); const differ = differentDatesNote(Object.fromEntries(pRows.map((p) => [p.proj_short_name, parseP6Date(p.last_recalc_date) != null ? p.last_recalc_date : null])), 'each project\u2019s own date'); const n = tidyNotes([...dataDateAssumedNotes(pRows), ...dataDateGaps(pRows, 'planned value and earned value at the data date', null), ...(differ ? [differ] : []), ...(() => { const none = projects.filter((p) => p.totals.bac === 0).map((p) => p.project ?? ''); return none.length ? [notAssessed('SPI, CPI and EAC', `${projectsText(none)} ${none.length === 1 ? 'carries' : 'carry'} no costs`)] : []; })(), ...currentPlanNotes(db, pRows.filter((p) => !assignedBaselineId(db, p)))]); return n.length ? { notes: n } : {}; })(),
       };
     }
     case 'resource_summary': {
@@ -357,11 +358,11 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         if (!r) return { error: `No resource "${args.resource}".` };
         const mine = A.filter((a) => a.rsrc_id === r.rsrc_id);
         const pg = pageOf(mine, args, Math.max(1, Number(args.limit) || 30));
-        return { resource: r.rsrc_short_name, name: r.rsrc_name, type: r.rsrc_type, assignments: mine.length, offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map((a) => { const t = ctx.taskById.get(a.task_id); return { ...(t ? brief(t) : { id: a.task_id }), budgeted_units: Number(a.target_qty || 0), remaining_units: Number(a.remain_qty || 0) }; }) };
+        return { resource: r.rsrc_short_name, name: r.rsrc_name, type: RSRC_TYPE[r.rsrc_type] ?? r.rsrc_type, assignments: mine.length, offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map((a) => { const t = ctx.taskById.get(a.task_id); return { ...(t ? brief(t) : { id: a.task_id }), budgeted_units: Number(a.target_qty || 0), remaining_units: Number(a.remain_qty || 0) }; }) };
       }
       const by = new Map<string, Row[]>();
       for (const a of A) { let l = by.get(a.rsrc_id); if (!l) by.set(a.rsrc_id, (l = [])); l.push(a); }
-      const all = [...by].map(([id, l]) => ({ resource: ctx.rsrc.get(id)?.rsrc_short_name ?? id, name: ctx.rsrc.get(id)?.rsrc_name ?? '', type: ctx.rsrc.get(id)?.rsrc_type ?? '', assignments: l.length, budgeted_units: Math.round(l.reduce((x, a) => x + Number(a.target_qty || 0), 0)), remaining_units: Math.round(l.reduce((x, a) => x + Number(a.remain_qty || 0), 0)), budgeted_cost: Math.round(l.reduce((x, a) => x + Number(a.target_cost || 0), 0)) })).sort((a, b) => b.assignments - a.assignments);
+      const all = [...by].map(([id, l]) => ({ resource: ctx.rsrc.get(id)?.rsrc_short_name ?? id, name: ctx.rsrc.get(id)?.rsrc_name ?? '', type: RSRC_TYPE[ctx.rsrc.get(id)?.rsrc_type ?? ''] ?? ctx.rsrc.get(id)?.rsrc_type ?? '', assignments: l.length, budgeted_units: Math.round(l.reduce((x, a) => x + Number(a.target_qty || 0), 0)), remaining_units: Math.round(l.reduce((x, a) => x + Number(a.remain_qty || 0), 0)), budgeted_cost: Math.round(l.reduce((x, a) => x + Number(a.target_cost || 0), 0)) })).sort((a, b) => b.assignments - a.assignments);
       const pg = pageOf(all, args, 80);
       return { resources: pg.rows, total: all.length, offset: pg.offset, next_offset: pg.next_offset };
     }

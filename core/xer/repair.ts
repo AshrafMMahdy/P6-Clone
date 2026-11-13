@@ -50,7 +50,8 @@ export function repairKeys(db: Db): Repairs {
       out.repaired.push(`${plural(ignored.length, `identical duplicate ${wordOf(t.name)} row`)} ${ignored.length === 1 ? 'was' : 'were'} ignored (${who}).`);
     }
     if (minted) out.repaired.push(`${plural(minted, wordOf(t.name))} with an empty, missing or repeated id ${minted === 1 ? 'was' : 'were'} given a fresh id.`);
-    if (dup) out.not_repaired.push(`${plural(dup, `${wordOf(t.name)} row`)} ${dup === 1 ? 'repeats' : 'repeat'} an id that other rows point at and ${dup === 1 ? 'differs' : 'differ'} from ${dup === 1 ? 'its' : 'their'} twin, so which row is meant cannot be told: ${dup === 1 ? 'it was' : 'they were'} left (P6 refuses repeated ids). Compare them with read_table, then keep one.`);
+    // (a repeated id that other rows point at, on a row that differs from its twin, is left: the import check's own finding names each such row and what save with repair does with it, so it is not said here too)
+    void dup;
   }
   return out;
 }

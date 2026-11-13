@@ -291,7 +291,7 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
   assert.equal(x.d.not_in_p6_xml, undefined, 'one place: the notes, in P6 words');
   const said = x.d.notes.join('\n');
   // the notes say what was not written, with its count, in P6's words (no table or column names), in the one shared sentence
-  assert.match(said, /^Not written to P6 XML: .*Project OBS rows \(2\).*Project fields \(\d+\).*; save as XER to keep them\.$/);
+  assert.match(said, /^Not written to P6 XML: .*Project OBS rows \(2\).*Project fields \(\d+\).*; save as XER to keep them; each field is listed in .+not_written_to_p6_xml-result-.+\.csv\.$/);
   assert.doesNotMatch(said, /POBS|PROJECT|risk_level|ERMHDR|\.[a-z_]+ \(/);
   const r = await call('save', { ...H, path: join(dir, 'a.xer') });
   assert.equal(r.err, false);

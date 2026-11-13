@@ -153,7 +153,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
             c.add({ severity: 'warning', code: 'LEGACY_REL_TYPE', table: t.name, row, field: f, message: `TASKPRED.pred_type = "${v}" is a legacy numbered code (seen in P6 5.0 exports).`, p6: 'Old P6 builds accept it as the base type; current P6 expects PR_FS/PR_SS/PR_FF/PR_SF.' });
             continue;
           }
-          if (!en.includes(v)) c.add({ severity: 'error', code: 'BAD_ENUM', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${f === 'task_id' ? '' : ''}${t.name === 'TASK' && r.task_code ? `${r.task_code} ` : ''}${t.name}.${f} is "${v}", not a valid code: P6 refuses the file.`, p6: 'P6 import fails on an invalid code value.' });
+          if (!en.includes(v)) c.add({ severity: 'error', code: 'BAD_ENUM', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name === 'TASK' && r.task_code ? `${r.task_code} ` : ''}${t.name}.${f} is "${v}", not a valid code (valid: ${en.filter(Boolean).join(', ')}): P6 refuses the file.`, p6: 'P6 import fails on an invalid code value.' });
           continue;
         }
         if (ty === 'date') {

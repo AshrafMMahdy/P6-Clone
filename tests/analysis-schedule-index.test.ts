@@ -124,7 +124,7 @@ test('risk: EXPECTED DIFFERENCES from the source\'s numbers, each with its reaso
   // 1. no resource in the file: the source scores the resource sub-metric (0 or its coverage part, with capacity 1 for any name); the clone has nothing to assess and says so, so its composite is over fewer sub-metrics
   const d = scheduleIndex(B.delayed().db, {}), src = G('delayed', 'risk_index_status').data.schedule_risk_index;
   assert.equal(d.risk.sub_metrics.resource.active, false);
-  assert.match(d.risk.sub_metrics.resource.reason!, /no resource assignments/);
+  assert.match(d.risk.sub_metrics.resource.reason!, /no resource is assigned to an activity/);
   // (0.30 x 20 + 0.25 x 66.7 + 0.20 x 11.7 + 0.15 x 0) / (0.30 + 0.25 + 0.20 + 0.15) = 25 / 0.9 = 27.8 by hand; the source: the same four plus its resource 0 over weight 1.0 = 25
   assert.equal(d.risk.score, 27.8);
   assert.equal(src.score, 25);
@@ -319,9 +319,11 @@ test('129 trial and Detailed Program (progress, no baseline in the file): counts
   for (const name of ['129 trial.xer', 'Detailed Program.xer']) {
     const db = readXerFile(sampleCopy(name)).db;
     const r = scheduleIndex(db, {});
-    // the file has no baseline project: drift not assessed with the reason
+    // the file has no baseline project: drift not assessed with the reason (Detailed Program names none; 129 trial names one, 909, that the file does not hold)
+    const p0 = rows(db, 'PROJECT')[0];
+    assert.equal(!!p0.sum_base_proj_id, name === '129 trial.xer', name);
     assert.equal(r.risk.sub_metrics.baseline_drift.active, false, name);
-    assert.equal(r.risk.sub_metrics.baseline_drift.reason, `no baseline is assigned to ${rows(db, 'PROJECT')[0].proj_short_name}; assign one with edit assign_baseline, or pass baseline`, name);
+    assert.equal(r.risk.sub_metrics.baseline_drift.reason, p0.sum_base_proj_id ? `the project baseline of ${p0.proj_short_name} is not in this file (the file was exported without it); export the file with its baselines, or pass baseline to name one that is in it` : `no baseline is assigned to ${p0.proj_short_name}; assign one with edit assign_baseline, or pass baseline`, name);
     // float counts from the rows: incomplete activities that are not WBS summary or level of effort, with a stored float
     const T = rows(db, 'TASK').filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
     const neg = T.filter((t) => Number(t.total_float_hr_cnt) < 0).length;

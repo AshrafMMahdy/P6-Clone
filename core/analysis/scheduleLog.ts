@@ -124,7 +124,7 @@ export const loopLinksLeftOut = (links: string[], saves = true): string => `Left
  *  data date, constraints and relationships not met, negative float): none of that is said twice. */
 export function scheduleNotes(res: Pick<ScheduleResult, 'findings'>, noDataDate = true, saves = true): string[] {
   const out: string[] = [];
-  for (const f of res.findings) if ((noDataDate && f.code === 'NO_DATA_DATE') || f.code === 'SCHED_CAL_INVALID') out.push(f.message);
+  for (const f of res.findings) if ((noDataDate && f.code === 'NO_DATA_DATE') || f.code === 'SCHED_CAL_INVALID' || f.code === 'SCHED_CAL_DEFAULT') out.push(f.message);
   const broken = res.findings.filter((f) => f.code === 'SCHED_LOOP_BROKEN');
   if (broken.length) out.push(loopLinksLeftOut(broken.map((f) => f.message), saves));
   return out;

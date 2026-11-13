@@ -131,8 +131,8 @@ test('platform review 2: critical path test with nothing critical by float (130 
   assert.ok(scheduleProjects(db, pids).ok);
   const cpt = dcma14(db, { projIds: pids, hoursPerDay: 8 }).checks.find((c) => c.id === 'critical_path_test')!;
   assert.notEqual(cpt.result, 'not_assessed', String(cpt.note));
-  assert.match(cpt.note!, /^No activity is critical by total float: /);
-  assert.match(cpt.note!, /^No activity is critical by total float: BTAF34033, the one with the least float, was tested\.$/);
+  assert.match(cpt.note!, /^No incomplete task is critical by total float \(milestones are not tested\): /);
+  assert.match(cpt.note!, /^No incomplete task is critical by total float \(milestones are not tested\): BTAF34033, the one with the least float, was tested\.$/);
   // Tower-A: a baseline saved in the file but not assigned is not picked by progress_curves (P6: with none assigned the current project is its own baseline); the tools that read the project baseline still choose the only saved copy
   const tw = open('Tower-A.xer');
   const tp = rows(tw, 'PROJECT').filter((x) => !x._baseline_of).map((x) => x.proj_id);

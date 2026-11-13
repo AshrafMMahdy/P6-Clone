@@ -8,7 +8,7 @@ import { formatP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { resourceHistograms } from './curves.ts';
 import { notJudged } from '../resource/usage.ts';
-import { baselineReason, loopNote, namesText as namesTextN, notJudgedNotes, notAssessed as notAssessedNote, plural, tidyNotes } from '../notes.ts';
+import { baselineReason, loopNote, NO_RESOURCE_ASSIGNED, namesText as namesTextN, notJudgedNotes, notAssessed as notAssessedNote, plural, tidyNotes } from '../notes.ts';
 import { baselineOf, exactPct, namesText, pct, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope, offender, baselineFinish, type Offender, type Scope } from './common.ts';
 import * as F from './forensic.ts';
 
@@ -55,7 +55,7 @@ export interface Health {
 
 function health(float: ReturnType<typeof F.floatFigures>, logic: ReturnType<typeof F.logicFigures>, loops: string[][]): Health {
   // a P6 schedule with a loop cannot be calculated: no score (the source goes on with a best-effort CPM and caps its confidence, healthScore.ts:87)
-  if (loops.length) return { result: 'not_assessed', note: loopNote(loops.flat()).replace(/^Loop: /, '').replace(/\.$/, '') };
+  if (loops.length) return { result: 'not_assessed', note: loopNote(loops.flat()).replace(/\.$/, '') };
   const gone = (note: string) => ({ score: null, weight: 0, assessed: false, reason: note });
   const b = {} as Record<keyof typeof HEALTH_WEIGHTS, HealthPart>;
   const W = HEALTH_WEIGHTS;
@@ -93,7 +93,7 @@ const sub = (key: SubKey, o: Omit<SubMetric, 'sub_metric' | 'weight'>): SubMetri
 const inactive = (key: SubKey, reason: string, parts: Part[] = []): SubMetric => sub(key, { active: false, score: null, summary: '', reason, parts });
 
 function floatRisk(float: ReturnType<typeof F.floatFigures>, loops: string[][]): SubMetric {
-  if (loops.length) return inactive('float', loopNote(loops.flat()).replace(/^Loop: /, '').replace(/\.$/, ''));
+  if (loops.length) return inactive('float', loopNote(loops.flat()).replace(/\.$/, ''));
   if (float.result !== 'assessed') return inactive('float', float.note);
   const n = float.activities, neg = float.negative_float / n, near = float.near_critical / n, crit = float.critical / n;
   const score = r1(Math.min(100, 100 * (FLOAT_RISK.negative * neg + FLOAT_RISK.near_critical * near + FLOAT_RISK.critical * crit)));
@@ -157,7 +157,7 @@ export interface ResourceFigures { resources: ResourceRow[]; limited: number; ov
  *  population and loading rule (an incomplete task that is not WBS summary, level of effort or a milestone, with no resource or expense loaded), and whether an over-allocated resource is on a critical activity. */
 function resourceRisk(s: Scope): { metric: SubMetric; figures: ResourceFigures | null } {
   const asg = rows(s.db, 'TASKRSRC').filter((a) => a.rsrc_id && s.projIds.has(a.proj_id || s.ctx.taskById.get(a.task_id)?.proj_id || ''));
-  if (!asg.length) return { metric: inactive('resource', 'the file has no resource assignments'), figures: null };
+  if (!asg.length) return { metric: inactive('resource', NO_RESOURCE_ASSIGNED), figures: null };
   const T = s.tasks.filter((t) => !isDone(t) && !isWbs(t) && !isLoe(t) && !isMilestone(t));
   const loaded = new Set([...asg, ...rows(s.db, 'PROJCOST').filter((c) => s.projIds.has(c.proj_id || s.ctx.taskById.get(c.task_id)?.proj_id || ''))].map((a) => a.task_id));
   const unresourced = T.filter((t) => !loaded.has(t.task_id)).map((t) => offender(t, s));
@@ -222,7 +222,7 @@ export function scheduleIndex(db: Parameters<typeof makeScope>[0], o: ScheduleIn
   const res = resourceRisk(s);
   const subs: Record<SubKey, SubMetric> = { float: floatRisk(float, loops), logic: logicRisk(logic), baseline_drift: drift.metric, progress_integrity: integrityRisk(prog), resource: res.metric };
   // a schedule with a loop cannot be calculated: its stored float is not valid, so no part of the risk index stands (as health gives no score); every sub-metric says so
-  if (loops.length) for (const k of Object.keys(subs) as SubKey[]) subs[k] = inactive(k, loopNote(loops.flat()).replace(/^Loop: /, '').replace(/\.$/, ''));
+  if (loops.length) for (const k of Object.keys(subs) as SubKey[]) subs[k] = inactive(k, loopNote(loops.flat()).replace(/\.$/, ''));
   const keys = Object.keys(subs) as SubKey[], active = keys.filter((k) => subs[k].active);
   const left = keys.filter((k) => !subs[k].active).map((k) => ({ sub_metric: k, reason: subs[k].reason! }));
   let risk: Risk;

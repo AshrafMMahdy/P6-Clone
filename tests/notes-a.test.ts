@@ -66,7 +66,7 @@ test('39: negative float is given in days, like every other answer', async () =>
 test('3: a loop is described as a set of activities, not as a path', async () => {
   const r = await call('compute_schedule', { start: '2026-01-05', break_loops: false, activities: [{ id: 'A', duration_days: 1 }, { id: 'B', duration_days: 1 }, { id: 'C', duration_days: 1 }, { id: 'D', duration_days: 1 }], relationships: [{ pred: 'A', succ: 'B' }, { pred: 'B', succ: 'C' }, { pred: 'B', succ: 'D' }, { pred: 'C', succ: 'A' }, { pred: 'D', succ: 'A' }] });
   assert.equal(r.ok, false);
-  assert.equal(r.error.message, 'Loop: A, B, C, D are in a loop.');
+  assert.equal(r.error.message, 'A, B, C, D are in a loop.');
   assert.doesNotMatch(r.error.message, /→/);
   assert.match(r.error.hint, /pass break_loops: true/);
   assert.deepEqual(r.error.loops, [['A', 'B', 'C', 'D']]);

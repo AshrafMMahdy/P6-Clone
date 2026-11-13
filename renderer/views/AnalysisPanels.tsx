@@ -487,7 +487,7 @@ export function ReviewPanel() {
           <div className="muted" style={{ margin: '6px 0' }}>{res.projects.join(', ')}</div>
           <table className="tbl"><thead><tr><th>Check</th><th>Result</th><th>Found</th><th>Of</th><th>%</th><th>Limit</th></tr></thead>
             <tbody>{res.checks.map((c) => [
-              <tr key={c.id} className={open === c.id ? 'sel' : ''} style={{ cursor: 'pointer' }} onMouseDown={() => setOpen(open === c.id ? null : c.id)}><td>{c.title}</td><td style={{ color: open === c.id ? undefined : GRADE[c.grade], fontWeight: c.grade === 'fail' ? 'bold' : undefined }}>{c.grade}</td><td>{c.count}</td><td>{c.of}</td><td>{c.percent ?? '-'}</td><td>{c.limit}</td></tr>,
+              <tr key={c.id} className={open === c.id ? 'sel' : ''} style={{ cursor: 'pointer' }} onMouseDown={() => setOpen(open === c.id ? null : c.id)}><td>{c.title}</td><td style={{ color: open === c.id || c.grade === 'not_assessed' ? undefined : GRADE[c.grade], fontWeight: c.grade === 'fail' ? 'bold' : undefined }}>{c.grade === 'not_assessed' ? 'not assessed' : c.grade}</td><td>{c.count}</td><td>{c.of}</td><td>{c.percent ?? '-'}</td><td>{c.limit}</td></tr>,
               open === c.id && <tr key={`${c.id}:d`}><td colSpan={6} style={{ whiteSpace: 'normal', background: '#f7f8fa' }}>{c.detail}{c.examples.length > 0 && <ul style={{ margin: '4px 0', paddingLeft: 18 }}>{(c.id === 'saved_dates' ? c.examples : c.examples.slice(0, 10)).map((x) => <li key={x}>{x}</li>)}</ul>}{c.examples_total != null && c.examples_total > 10 && <div className="muted">{c.examples_total - 10} more: Export… lists all.</div>}</td></tr>,
             ])}</tbody></table>
         </div>

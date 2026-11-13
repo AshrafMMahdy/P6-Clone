@@ -14,6 +14,7 @@ import { beiFigures } from './forensic.ts';
 import {
   baselineOf, baselineFinish, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, dateFields, checkNotes, makeScope, notAssessed,
   exactPct, offender, passes, pct, percentCheck, relOffender, type CheckResult, type Offender, type Scope, type Threshold,
+  noBaselineReason,
 } from './common.ts';
 
 type Key = 'logic' | 'leads' | 'lags' | 'relationship_types' | 'hard_constraints' | 'high_float' | 'negative_float' | 'high_duration' | 'invalid_dates' | 'resources' | 'missed_tasks' | 'critical_path_test' | 'cpli' | 'bei';
@@ -131,7 +132,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
     out.push(percentCheck('resources', NAMES.resources, T.filter((t) => !loaded.has(t.task_id)).map((t) => offender(t, s)), T.length, th('resources')!, maxIds));
   }
   // missed tasks: of the tasks baselined to finish by the status date, those finishing (actually or forecast) after their baseline finish
-  if (!anyBl) out.push(notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), baselineReason(projectsText(s.projs.map((p) => p.proj_short_name)), true, which)));
+  if (!anyBl) out.push(notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), noBaselineReason(s.db, s.projs, true, which)));
   else {
     const due = s.tasks.filter((t) => { const b = bl(t), dd = s.dataDate(t.proj_id); return b && !isWbs(t) && !isLoe(t) && !isMilestone(t) && dd != null && (baselineFinish(b) ?? Infinity) <= dd; });
     const missed = due.filter((t) => (forecastFinish(t) ?? -Infinity) > (baselineFinish(bl(t)) ?? Infinity)).map((t) => offender(t, s, `baseline ${formatP6Date(baselineFinish(bl(t))!).slice(0, 10)}`));
@@ -142,7 +143,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   // BEI: tasks completed over tasks baselined to finish by the status date (forensic.ts beiFigures, the clone's one definition; judged on the exact ratio)
   {
     const t = th('bei')!, bei = beiFigures(s, bls, which);
-    if (bei.result === 'not_assessed') out.push(bei.reason === 'no_baseline' ? notAssessed('bei', NAMES.bei, 'ratio', th('bei'), baselineReason(projectsText(s.projs.map((p) => p.proj_short_name)), true, which)) : { ...notAssessed('bei', NAMES.bei, 'ratio', t, 'no task was baselined to finish by the status date'), numerator: bei.completed!, denominator: 0 });
+    if (bei.result === 'not_assessed') out.push(bei.reason === 'no_baseline' ? notAssessed('bei', NAMES.bei, 'ratio', th('bei'), noBaselineReason(s.db, s.projs, true, which)) : { ...notAssessed('bei', NAMES.bei, 'ratio', t, 'no task was baselined to finish by the status date'), numerator: bei.completed!, denominator: 0 });
     else out.push({ id: 'bei', name: NAMES.bei, unit: 'ratio', metric: bei.value, threshold: t, numerator: bei.completed, denominator: bei.due, result: passes(bei.exact, t) ? 'pass' : 'fail', activities: maxIds ? bei.not_completed.slice(0, maxIds) : bei.not_completed, total_activities: bei.not_completed.length });
   }
 
@@ -240,7 +241,7 @@ export function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: st
   return {
     id: 'critical_path_test', name, unit: 'days', metric: moved, threshold: { op: '=', value: slipDays, source: 'DCMA (project finish must move by the delay added)' },
     numerator: null, denominator: null, result: pass ? 'pass' : 'fail', activities: [offender(test, s, `+${slipDays} d`)], total_activities: 1,
-    ...(viaLongest ? { note: `No activity is critical by total float: ${test.task_code}, the first on the longest path, was tested.` } : !crit.length && !pick ? { note: `No activity is critical by total float: ${test.task_code}, the one with the least float, was tested.` } : {}),
+    ...(viaLongest ? { note: `No incomplete task is critical by total float (milestones are not tested): ${test.task_code}, the first on the longest path, was tested.` } : !crit.length && !pick ? { note: `No incomplete task is critical by total float (milestones are not tested): ${test.task_code}, the one with the least float, was tested.` } : {}),
     detail: { finish_before: formatP6Date(before), finish_after: formatP6Date(after) },
   };
 }

@@ -108,7 +108,7 @@ test('EXPECTED DIFFERENCES from the source\'s results, each with its reason', ()
   // 4. a loop: the source scores the critical path of its best-effort CPM; the clone's check fails and names the loop (P6 cannot schedule it)
   const loop = by(decm(B.withCycle().db, {}));
   assert.equal(loop['06A401a'].result, 'fail');
-  assert.match(loop['06A401a'].note!, /^Loop: [XYZ], [XYZ], [XYZ] are in a loop\.$/);
+  assert.match(loop['06A401a'].note!, /^[XYZ], [XYZ], [XYZ] are in a loop\.$/);
   assert.deepEqual(ids(loop['06A401a']).sort(), ['X', 'Y', 'Z']);
   assert.equal(srcChecks('withCycle', 'decm')['06A401a'].status, 'fail', 'the source also fails it: cycles > 0');
 });

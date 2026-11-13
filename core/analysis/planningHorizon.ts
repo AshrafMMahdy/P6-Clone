@@ -5,11 +5,11 @@
 // no score (the source gives it 100).
 import { groupBy, rows } from '../db.ts';
 import { dataDateGaps } from './common.ts';
-import { baselineReason, cap, loopNote, namesText, noDataDateNotAssessed, notAssessed, projectsText, tidyNotes } from '../notes.ts';
+import { baselineReason, cap, loopNote, NO_RESOURCE_ASSIGNED, namesText, noDataDateNotAssessed, notAssessed, projectsText, tidyNotes } from '../notes.ts';
 import { formatP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { isCritical } from '../project/ctx.ts';
-import { baselineFinish, baselineOf, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope } from './common.ts';
+import { baselineFinish, baselineOf, noBaselineReason, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope } from './common.ts';
 import { currentStart, logicLoops } from './forensic.ts';
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -97,9 +97,9 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(s.db, p, which)]));
   const anyBaseline = [...bls.values()].some(Boolean);
   const global: { dimension: Dim; weight: number; reason: string }[] = [
-    ...(!hasResources ? [{ dimension: 'resources' as Dim, weight: WEIGHTS.resources, reason: 'the file has no resource assignments' }] : []),
-    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: baselineReason(projectsText(s.projs.map((p) => p.proj_short_name)), true, which) }] : []),
-    ...(loops.length ? [{ dimension: 'float' as Dim, weight: WEIGHTS.float, reason: loopNote(loops.flatMap((l) => l.activities)).replace(/^Loop: /, '').replace(/\.$/, '') }] : []),
+    ...(!hasResources ? [{ dimension: 'resources' as Dim, weight: WEIGHTS.resources, reason: NO_RESOURCE_ASSIGNED }] : []),
+    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: noBaselineReason(s.db, s.projs, true, which) }] : []),
+    ...(loops.length ? [{ dimension: 'float' as Dim, weight: WEIGHTS.float, reason: loopNote(loops.flatMap((l) => l.activities)).replace(/\.$/, '') }] : []),
   ];
   const off = new Set(global.map((g) => g.dimension));
 
@@ -143,7 +143,7 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
     // forecast stability (:293-304): forecast finish against the baseline finish, working days of the activity's calendar
     if (!off.has('forecast_stability')) {
       const bl = bls.get(t.proj_id), bt = bl?.tasks.get(t.task_code), fc = forecastFinish(t), pl = baselineFinish(bt);
-      if (!bl) na.push({ dimension: 'forecast_stability', reason: baselineReason(s.ctx.proj.get(t.proj_id)?.proj_short_name ?? '', true, which) });
+      if (!bl) na.push({ dimension: 'forecast_stability', reason: noBaselineReason(s.db, [s.ctx.proj.get(t.proj_id)!], true, which) });
       else if (!bt) na.push({ dimension: 'forecast_stability', reason: `not in the ${bl.name} baseline (added since)` });
       else if (fc == null || pl == null) na.push({ dimension: 'forecast_stability', reason: fc == null ? 'no forecast finish' : 'no baseline finish' });
       else {

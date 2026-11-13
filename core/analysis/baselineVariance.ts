@@ -5,7 +5,8 @@
 // reason. The other side is a baseline (the earlier side) or another schedule (as_planned); the open project is the later, as-built side.
 import { rows, groupBy, type Db, type Row } from '../db.ts';
 import { formatP6Date } from '../dates.ts';
-import { notAssessed, plural, tidyNotes } from '../notes.ts';
+import { baselineWord, notAssessed, plural, projectsText, tidyNotes } from '../notes.ts';
+import { baselineNotInFile } from '../cost/rollup.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentOf } from '../diff.ts';
 import type { Update } from './delay.ts';
@@ -87,7 +88,7 @@ export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: 
     bls = new Map([[p.proj_id, { projId: u.projId, name: u.name, tasks, how: ref.how }]]);
   } else {
     const pr = baselinePairs(s, which);
-    if (pr.result === 'not_assessed') return { refused: true, message: o.baseline != null ? `No baseline "${o.baseline}" for this project.` : `The project has no baseline assigned, and no other schedule was given.`, next: `${how.charAt(0).toUpperCase()}${how.slice(1)}.` };
+    if (pr.result === 'not_assessed') return { refused: true, message: o.baseline != null ? `No baseline "${o.baseline}" for this project.` : (() => { const gone = s.projs.filter((x) => baselineNotInFile(db, x, which)), names = projectsText((gone.length ? gone : s.projs).map((x) => x.proj_short_name)); return gone.length ? `The ${baselineWord(which)} of ${names} is not in this file (the file was exported without it), and no other schedule was given.` : `No baseline is assigned to ${names}, and no other schedule was given.`; })(), next: `${how.charAt(0).toUpperCase()}${how.slice(1)}.` };
     ref = pr; kind = 'baseline';
     bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(db, p, which)]));
     refRows = [...bls.values()].flatMap((b) => (b ? [...b.tasks.values()].filter((t) => !isWbs(t)) : []));

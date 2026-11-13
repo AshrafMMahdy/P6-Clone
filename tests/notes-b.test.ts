@@ -276,7 +276,7 @@ test('32, 37: schedule_index says each reason once and without internal words', 
   assert.equal(count(text, 'no baseline is assigned to P'), 1, 'the baseline reason is said once, in notes');
   assert.doesNotMatch(text, /Bellator|the source|healthScore|scheduleRiskIndex|\.ts:\d/);
   assert.equal(si.method, undefined, 'the weights and the logic definitions are in the tool description');
-  assert.deepEqual(si.notes, ['Baseline drift risk not assessed: no baseline is assigned to P; assign one with edit assign_baseline, or pass baseline.', 'Resource risk not assessed: the file has no resource assignments.']);
+  assert.deepEqual(si.notes, ['Baseline drift risk not assessed: no baseline is assigned to P; assign one with edit assign_baseline, or pass baseline.', 'Resource risk not assessed: no resource is assigned to an activity.']);
   assert.deepEqual(si.summary.risk.left_out, ['baseline_drift', 'resource']);
   const e = await call('new_project', { id: 'EMPTY', start: '2026-01-05' });
   const es = await call('schedule_index', { handle: e.handle });

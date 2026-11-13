@@ -330,7 +330,8 @@ test('baseline_variance through the server: arguments, refusals in words, respon
   const none = await call('baseline_variance', { handle: trial });
   assert.equal(none.err, true);
   assert.equal(none.d.error.code, 'bad_input');
-  assert.match(none.d.error.message, /The project has no baseline assigned, and no other schedule was given\./);
+  // (129 trial names a project baseline that the file does not hold: said as that, not as "none assigned")
+  assert.match(none.d.error.message, /^The project baseline of R29BT-modefied-10 is not in this file \(the file was exported without it\), and no other schedule was given\.$/);
   assert.match(JSON.stringify(none.d.error), /assign a baseline to the project .*or pass as_planned, another schedule as \{handle\} or \{path\}/);
   const bad = await call('baseline_variance', { handle: trial, baseline: 'bl2' });
   assert.equal(bad.err, true);

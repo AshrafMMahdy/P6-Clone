@@ -83,11 +83,11 @@ const predCodes = (u: Update, t: Row) => { const byId = new Map(tasksOf(u).map((
 const PROGRESS = ['act_start_date', 'act_end_date', 'remain_drtn_hr_cnt', 'phys_complete_pct', 'status_code', 'restart_date', 'reend_date', 'suspend_date', 'resume_date', 'expect_end_date', 'act_work_qty', 'remain_work_qty'];
 
 /** A window's lists as an answer shows them: the first `max` activities of each (the tool passes LISTED, 25); the _total beside each list says how many
- *  there are (and driving_path_more how many the path has beyond those shown). */
+ *  there are. */
 export function cutWindow(w: Record<string, unknown>, max: number): Record<string, unknown> {
   if (!(max > 0)) return w;
   const path = w.driving_path as string[];
-  return { ...w, driving_path: path.slice(0, max), ...(path.length > max ? { driving_path_more: path.length - max } : {}), lost_time: (w.lost_time as unknown[]).slice(0, max), added: (w.added as unknown[]).slice(0, max) };
+  return { ...w, driving_path: path.slice(0, max), lost_time: (w.lost_time as unknown[]).slice(0, max), added: (w.added as unknown[]).slice(0, max) };
 }
 
 export async function windowsAnalysis(updates: Update[], o: { milestone?: string; method?: 'contemporaneous' | 'half_step'; hoursPerDay?: number; maxIds?: number; tick?: Tick } = {}) {
@@ -99,6 +99,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
   const wd = (a: number | null, b: number | null) => (a == null || b == null ? null : r2(cal.workBetween(a, b) / 60 / hpd));
   const max = o.maxIds ?? 50;
   const windows = [];
+  const slipNotes: string[] = [];
   for (let i = 1; i < list.length; i++) {
     const A = list[i - 1], B = list[i];
     if (o.tick) await o.tick(i - 1, list.length - 1, `window ${i} of ${list.length - 1}`);
@@ -131,6 +132,8 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
       driving_path: path.map((t) => t.task_code), driving_path_total: path.length,
       lost_time: lost, lost_time_total: lost.length, added: added.map((t) => t.task_code), added_total: added.length,
     };
+    // a slip with nothing lost on the earlier driving path: the delay is not on that path, said so (an empty list alone reads as "nothing lost")
+    if ((wd(fa, fb) ?? 0) > 0 && !lost.length) slipNotes.push(`Window ${i} (${A.name} to ${B.name}): the finish slipped ${wd(fa, fb)} d and no activity on the driving path of ${A.name} lost time; the delay is in work that was not on that path.`);
     if (o.method === 'half_step') {
       // update n-1 with only update n's progress, rescheduled at update n's data date
       const back = new Map([...match].map(([a, b]) => [a.task_id, b]));
@@ -147,7 +150,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
   const fl = finishActivity(list.at(-1)!, o.milestone), ff = finishActivity(first, o.milestone);
   const total = wd(ff ? finOf(ff) : null, fl ? finOf(fl) : null);
   // notes on what the figures stand on: an update whose saved dates are not current (a recalculation gives other dates), and two updates with one data date (a window of 0 days)
-  const notes: string[] = [];
+  const notes: string[] = [...slipNotes];
   for (const u of list) { const st = storedDatesState(u.db, [u.projId]).stale[0]; if (st) notes.push(datesNotCurrent(u.name, st.differ, st.open)); }
   // an update with no data date is dated by its planned start: said once
   notes.push(...dataDateUsedNotes(list.map((u) => rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId)).filter((p): p is Row => !!p)));

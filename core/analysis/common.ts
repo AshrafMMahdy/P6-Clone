@@ -2,7 +2,8 @@
 // activity kinds, baselines, constraint groups, and the result shape every check returns.
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
-import { tidyNotes, differentDataDates, namesText, noDataDateNotAssessed, noDataDateUsed, noDateNoStart, projectsText, notAssessed as notAssessedNote } from '../notes.ts';
+import { assignedBaselineId, baselineNotInFile } from '../cost/rollup.ts';
+import { baselineReason, currentPlanUsed, tidyNotes, differentDataDates, namesText, noDataDateNotAssessed, noDataDateUsed, noDateNoStart, projectsText, notAssessed as notAssessedNote } from '../notes.ts';
 import { makeCtx, type Ctx } from '../project/ctx.ts';
 import { dayHours, type DayHours } from '../project/units.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
@@ -112,6 +113,18 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
     return [...dataDateNotes(projs, noneNotAssessed), ...(by ? [differentDataDates(Object.entries(by).filter(([, d]) => d != null).map(([proj, d]) => ({ proj, date: String(d).slice(0, 10) })), 'each project\u2019s own date')] : [])];
   };
   return { db, ctx, dh: dayHours(db, hpd, o.calendarDays ?? true), hpd, projs, projIds, tasks, rels, dataDate: (id) => dd.get(id) ?? null, dataDatesByProject, dateNotes, cal, projCal, workDays };
+}
+
+/** Why these projects have no baseline to compare with, as the reason of a part that is not assessed: none is assigned, or one is assigned and the file was exported without it (said apart). */
+export function noBaselineReason(db: Db, projs: Row[], argument: boolean, which = 'project'): string {
+  const gone = projs.filter((p) => baselineNotInFile(db, p, which)), none = projs.filter((p) => !gone.includes(p));
+  const of = (l: Row[]) => projectsText(l.map((p) => p.proj_short_name));
+  return [none.length ? baselineReason(of(none), argument, which) : '', gone.length ? baselineReason(of(gone), argument, which, true) : ''].filter(Boolean).join('; ');
+}
+/** The same for the tools where the current plan stands in (earned value, the curves): one sentence per case. */
+export function currentPlanNotes(db: Db, projs: Row[], argument = false): string[] {
+  const gone = projs.filter((p) => baselineNotInFile(db, p)), none = projs.filter((p) => !gone.includes(p));
+  return [...(none.length ? [currentPlanUsed(none.map((p) => p.proj_short_name), argument)] : []), ...(gone.length ? [currentPlanUsed(gone.map((p) => p.proj_short_name), argument, true)] : [])];
 }
 
 /** A project's baseline: the project baseline P6 stores (sum_base_proj_id) or a user baseline BL1-BL3. */

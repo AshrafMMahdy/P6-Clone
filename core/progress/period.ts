@@ -9,7 +9,7 @@
 import { addField, groupBy, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { removeWhere } from '../journal.ts';
-import { activityCosts, baselineActivities, percentComplete, plannedShare } from '../cost/rollup.ts';
+import { activityCosts, assignedBaselineId, baselineActivities, percentComplete, plannedShare } from '../cost/rollup.ts';
 import { p6num } from '../schedule/cpm.ts';
 
 export const FINDATES_FIELDS = ['fin_dates_id', 'fin_dates_name', 'start_date', 'end_date'] as const;
@@ -103,7 +103,8 @@ export function storePeriodPerformance(db: Db, projId: string, finDatesId: strin
   // earned and planned value as the earned value report has them; labor units by the same baseline and shares
   const costs = activityCosts(db, [projId]);
   const bl = baselineActivities(db, [projId]), dd = parseP6Date(p.last_recalc_date) ?? 0;
-  const blAsg = p.sum_base_proj_id ? groupBy(rows(db, 'TASKRSRC').filter((a) => a.proj_id === p.sum_base_proj_id), 'task_id') : null;
+  const blId = assignedBaselineId(db, p); // (a baseline assigned but not in the file is no baseline: rollup.ts)
+  const blAsg = blId ? groupBy(rows(db, 'TASKRSRC').filter((a) => a.proj_id === blId), 'task_id') : null;
   // the labor units budget at completion: the baseline activity's (none when it was added after the baseline), as BAC
   const laborBudget = (t: Row) => {
     const b = bl.get(`${projId}|${t.task_code}`);

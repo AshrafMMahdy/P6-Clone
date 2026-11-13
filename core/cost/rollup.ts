@@ -28,12 +28,24 @@ export function reportedPercent(t: Row, asg: Row[]): number {
   return o ? Math.max(0, Math.min(1, (o - n(t.remain_drtn_hr_cnt)) / o)) : 0;
 }
 
-/** Each project's baseline activities by `${projId}|${Activity ID}` (projects with a project baseline assigned). */
+/** The id of the baseline a project names (`which`: project, bl1, bl2, bl3) when the file holds that baseline; '' when none is assigned, and when one is assigned but the file was exported
+ *  without it (the project row keeps the pointer, the baseline's rows are not there): P6 then has no baseline to read, and neither has the clone. */
+export function assignedBaselineId(db: Db, proj: Row | undefined, which = 'project'): string {
+  const id = !proj ? '' : which === 'project' ? proj.sum_base_proj_id : /^bl[123]$/.test(which) ? proj[`_${which}`] : '';
+  return id && id !== proj!.proj_id && rows(db, 'PROJECT').some((p) => p.proj_id === id) ? id : '';
+}
+/** A baseline is assigned (`which`) and is not in the file. */
+export function baselineNotInFile(db: Db, proj: Row | undefined, which = 'project'): boolean {
+  const id = !proj ? '' : which === 'project' ? proj.sum_base_proj_id : /^bl[123]$/.test(which) ? proj[`_${which}`] : '';
+  return !!id && id !== proj!.proj_id && !assignedBaselineId(db, proj, which);
+}
+
+/** Each project's baseline activities by `${projId}|${Activity ID}` (projects with a project baseline assigned and in the file). */
 export function baselineActivities(db: Db, projIds: string[]): Map<string, Row> {
   const projects = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p]));
   const bl = new Map<string, Row>();
   for (const pid of projIds) {
-    const bid = projects.get(pid)?.sum_base_proj_id;
+    const bid = assignedBaselineId(db, projects.get(pid));
     if (bid) for (const t of rows(db, 'TASK')) if (t.proj_id === bid) bl.set(`${pid}|${t.task_code}`, t);
   }
   return bl;
@@ -54,13 +66,14 @@ export function activityCosts(db: Db, projIds: string[]): Map<string, CostLine> 
   const projects = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p]));
   const costOf = (taskId: string) => (asgBy.get(taskId) ?? []).reduce((s, x) => s + n(x.target_cost), 0) + (expBy.get(taskId) ?? []).reduce((s, x) => s + n(x.target_cost), 0);
   const bl = baselineActivities(db, projIds);
+  const hasBaseline = new Map(projIds.map((pid) => [pid, !!assignedBaselineId(db, projects.get(pid))]));
   const out = new Map<string, CostLine>();
   for (const t of rows(db, 'TASK')) {
     if (!projIds.includes(t.proj_id)) continue;
     const a = asgBy.get(t.task_id) ?? [], e = expBy.get(t.task_id) ?? [];
     const budget = a.reduce((s, x) => s + n(x.target_cost), 0) + e.reduce((s, x) => s + n(x.target_cost), 0);
     const blt = bl.get(`${t.proj_id}|${t.task_code}`);
-    const hasBl = !!projects.get(t.proj_id)?.sum_base_proj_id;
+    const hasBl = hasBaseline.get(t.proj_id)!;
     const bac = hasBl ? (blt ? costOf(blt.task_id) : 0) : budget; // an activity added after the baseline has no baseline budget
     const actual = a.reduce((s, x) => s + n(x.act_reg_cost) + n(x.act_ot_cost), 0) + e.reduce((s, x) => s + n(x.act_cost), 0);
     const remaining = a.reduce((s, x) => s + n(x.remain_cost), 0) + e.reduce((s, x) => s + n(x.remain_cost), 0);

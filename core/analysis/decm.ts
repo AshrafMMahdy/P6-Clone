@@ -12,7 +12,7 @@ import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { compareSchedules, progressIntegrity } from '../diff.ts';
 import { CPT_SLIP_DAYS, criticalPathTest, dcmaPopulations, hardConstraintsCheck, invalidDateFlags, lagsCheck, logicCheck } from './dcma.ts';
 import type { Update } from './delay.ts';
-import { baselineOf, baselineFinish, namesText, isLoe, isWbs, dateFields, checkNotes, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
+import { baselineOf, noBaselineReason, baselineFinish, namesText, isLoe, isWbs, dateFields, checkNotes, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
 import { loopMessage, logicLoops, referenceStart, updateDate, updateView } from './forensic.ts';
 
 export type DecmId = '06A204b' | '06A205a' | '06A208a' | '06A209a' | '06A210a' | '06A212a' | '06A401a' | '06A501a' | '06A504a' | '06A504b' | '06A505a' | '06A505b' | '06A506a' | '06A506b' | '06A506c';
@@ -111,9 +111,9 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   // 06A501a: missing baseline dates (an activity not in the baseline, or in it with no start or no finish)
   {
     const inBl = discrete.filter((t) => bls.get(t.proj_id));
-    if (!inBl.length) na('06A501a', baselineReason(projectsText(s.projs.map((p) => p.proj_short_name)), true, which));
+    if (!inBl.length) na('06A501a', noBaselineReason(s.db, s.projs, true, which));
     else percent('06A501a', inBl.filter((t) => { const b = bls.get(t.proj_id)!.tasks.get(t.task_code); return !b || referenceStart(b) == null || baselineFinish(b) == null; }).map((t) => offender(t, s)), inBl.length, 'the project has no activity');
-    if (inBl.length && s.projs.some((p) => !bls.get(p.proj_id))) { const left = namesText(s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name)); out[out.length - 1].note = notAssessedNote(`${NAMES['06A501a']} for ${left}`, baselineReason(left, true)); }
+    if (inBl.length && s.projs.some((p) => !bls.get(p.proj_id))) { const without = s.projs.filter((p) => !bls.get(p.proj_id)), left = namesText(without.map((p) => p.proj_short_name)); out[out.length - 1].note = notAssessedNote(`${NAMES['06A501a']} for ${left}`, noBaselineReason(s.db, without, true, which)); }
   }
   // 06A504a / 06A504b: an actual start / finish that differs from the one an earlier update held (progressIntegrity between consecutive updates, in data-date order)
   {

@@ -168,7 +168,7 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   const r = planningHorizon(B.cleanChain().db, {});
   // and no baseline: forecast stability has nothing to be compared with (the planned dates equal the early dates after a calculation, so they cannot stand in)
   assert.deepEqual(r.notes.length, 2);
-  assert.match(r.notes.join(' '), /Resources not assessed: the file has no resource assignments\./);
+  assert.match(r.notes.join(' '), /Resources not assessed: no resource is assigned to an activity\./);
   assert.match(r.notes.join(' '), /Forecast stability not assessed: no baseline is assigned to .+; assign one with edit assign_baseline, or pass baseline\./);
   // T1 by hand: logic 60 (no predecessor), float 0 (critical); resources and stability not assessed: (0.25 x 60 + 0.10 x 0) / (0.25 + 0.10) = 15 / 0.35 = 42.9
   assert.equal(byId(r).T1.readiness_score, 42.9);
@@ -332,7 +332,7 @@ test('planning_horizon through the server: read-only, status_date the only argum
   const nobl = await call('planning_horizon', { handle: h, baseline: 'project' });
   assert.equal(nobl.err, true);
   assert.match(nobl.d.error.message, /No baseline "project" for this project\./);
-  assert.match(r.d.notes.join(' '), /Forecast stability not assessed: no baseline is assigned to/);
+  assert.match(r.d.notes.join(' '), /Forecast stability not assessed: the project baseline of R29BT-modefied-10 is not in this file \(the file was exported without it\); export the file with its baselines, or pass baseline to name one that is in it\./);
   assert.deepEqual(Object.keys(r.d).slice(0, 5), ['report', 'status_date', 'result', 'notes', 'summary'], 'summary before the lists');
   const b = r.d.bands[1];
   assert.equal(b.activities.length, 25);

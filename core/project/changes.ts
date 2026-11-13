@@ -37,6 +37,8 @@ const OTHER_FIELDS: Record<string, string> = {
   clndr_name: 'Calendar Name', day_hr_cnt: 'Hours per Day', week_hr_cnt: 'Hours per Week', wbs_name: 'WBS Name', wbs_short_name: 'WBS Code', task_name: 'Activity Name',
   target_qty: 'Budgeted Units', remain_qty: 'Remaining Units', act_reg_qty: 'Actual Regular Units', cost_per_qty_rate: 'Price / Unit',
 };
+/** The baselines a project names, as P6 names them (the project baseline, and the user's primary, secondary and tertiary baselines). */
+const BASELINE_SLOTS: Record<string, string> = { sum_base_proj_id: 'Project Baseline', _bl1: 'Primary Baseline', _bl2: 'Secondary Baseline', _bl3: 'Tertiary Baseline' };
 const humanize = humanizeField;
 const fieldName = (column: string): string => OTHER_FIELDS[column] ?? humanize(column);
 /** The fields that decide the dates F9 gives: an edit of one leaves the saved dates not current. */
@@ -75,13 +77,27 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
   const rsrcName = (id: unknown) => text(resources.get(text(id))?.rsrc_short_name ?? id);
   const out = (c: FieldChange) => all.push(c);
   // rows added or removed: a table made or dropped by this edit (its rows), or an array that grew or shrank
-  const added = new Set<unknown>(), seen = new Set<unknown>();
+  const added = new Set<unknown>(), seen = new Set<unknown>(), madeProjects = new Set<string>();
+  // (the project rows first: what belongs to a project this edit made is not listed row by row)
+  for (const [row, keys] of j.fields) { const tbl = row as { name?: unknown; rows?: Obj[] }; if (tbl.name !== 'PROJECT' || !Array.isArray(tbl.rows)) continue; for (let i = 0; i < keys.length; i += 2) if (keys[i] === 'rows' && Array.isArray(keys[i + 1])) { const was = new Set(keys[i + 1] as Obj[]); for (const r of tbl.rows) if (!was.has(r)) madeProjects.add(text(r.proj_id)); } }
+  for (const [arr, before] of j.arrays) if (arr === db.tables.PROJECT?.rows) { const was = new Set(before as Obj[]); for (const r of arr as Obj[]) if (!was.has(r)) madeProjects.add(text(r.proj_id)); }
   for (const [row, keys] of j.fields) {
     if (row !== db.tables) continue;
     for (let i = 0; i < keys.length; i += 2) {
       const k = keys[i] as string, was = keys[i + 1] as { rows?: Obj[] } | typeof ABSENT, now = db.tables[k] as { rows?: Obj[] } | undefined;
       if (was === ABSENT && now?.rows) for (const x of now.rows) { added.add(x); seen.add(x); add('added', x); }
       else if (was !== ABSENT && was?.rows && !now) for (const x of was.rows) { seen.add(x); add('removed', x); }
+    }
+  }
+  // a table whose list of rows was replaced by a new list (a copy made, rows filtered out): the rows only the new list has are added, the ones only the old list had are removed
+  for (const [row, keys] of j.fields) {
+    const tbl = row as { rows?: Obj[]; fields?: unknown };
+    if (row === db.tables || !Array.isArray(tbl.rows) || !Array.isArray(tbl.fields)) continue;
+    for (let i = 0; i < keys.length; i += 2) {
+      if (keys[i] !== 'rows' || !Array.isArray(keys[i + 1])) continue;
+      const was = new Set(keys[i + 1] as Obj[]), now = new Set(tbl.rows);
+      for (const r of tbl.rows) if (!was.has(r) && !seen.has(r)) { seen.add(r); added.add(r); add('added', r); }
+      for (const r of was) if (!now.has(r) && !seen.has(r)) { seen.add(r); add('removed', r); }
     }
   }
   for (const [, before] of j.arrays) for (const r of before as Obj[]) if (r && typeof r === 'object' && 'task_id' in r && 'task_code' in r) gone.set(text(r.task_id), r as Row); // the activities an edit deleted: their code still names their relationships
@@ -92,6 +108,8 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
   }
   function add(what: 'added' | 'removed', r: Obj) {
     if (!r || typeof r !== 'object') return; // a table's field list grew (a column name), not a row
+    if ('proj_short_name' in r && 'proj_id' in r && !('task_id' in r) && !('wbs_id' in r)) { if (what === 'added') madeProjects.add(text(r.proj_id)); out({ id: text(r.proj_short_name), field: r._baseline_of ? 'baseline' : 'project', old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' }); return; }
+    if ('proj_id' in r && madeProjects.has(text(r.proj_id))) return; // the contents of a project this edit made (a baseline's copy of every activity): said by the project's own line
     const row = (id: string, field: string) => out({ id, field, old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' });
     if ('task_code' in r && 'task_id' in r && 'proj_id' in r && !('pred_task_id' in r)) { row(taskName(r), 'activity'); datesAffected = true; }
     else if ('pred_task_id' in r) { row(`${code(text(r.pred_task_id))} ${text(r.pred_type || 'PR_FS').slice(3)} ${code(text(r.task_id))}`, 'relationship'); datesAffected = true; }
@@ -103,7 +121,8 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
   // fields a person set on a row that existed
   for (const [row, keys] of j.fields) {
     const r = row as Obj;
-    if (row === db.tables) continue; // said above
+    if (row === db.tables || (Array.isArray(r.rows) && Array.isArray(r.fields))) continue; // said above (a table, or its list of rows)
+    if ('proj_id' in r && madeProjects.has(text(r.proj_id))) continue; // a project this edit made: its one line says it
     if (added.has(r) && !('task_code' in r)) continue; // a row made by this edit is said as added
     if ('task_code' in r && 'task_id' in r && 'proj_id' in r && !('pred_task_id' in r)) {
       if (added.has(r)) continue;
@@ -134,9 +153,13 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       const id = assignment ? `${code(text(r.task_id))} ${rsrcName(r.rsrc_id)}` : rate ? rsrcName(r.rsrc_id) : text(r.rsrc_short_name ?? r.proj_short_name ?? r.wbs_short_name ?? r.clndr_name ?? r.actv_code_name ?? r.udf_type_label ?? r.task_pred_id ?? r.taskrsrc_id ?? r.rsrc_id ?? '');
             for (let i = 0; i < keys.length; i += 2) {
         const k = keys[i] as string;
-        if (k.startsWith('_') || /(?:^|_)(?:early|late|total_float|free_float|reend|restart|rem_late|rem_early|scd_)/.test(k)) continue;
+        const baselineSlot = 'proj_short_name' in r ? BASELINE_SLOTS[k] : undefined;
+        if ((k.startsWith('_') && !baselineSlot) || /(?:^|_)(?:early|late|total_float|free_float|reend|restart|rem_late|rem_early|scd_)/.test(k)) continue;
+        if (keys[i + 1] !== ABSENT && keys[i + 1] != null && typeof keys[i + 1] === 'object') continue; // not a value a person sets
         const was = text(keys[i + 1]), now = text(r[k]);
         if (was === now) continue;
+        if (baselineSlot) { const bl = (v: string) => (v === '' ? null : text(projects.get(v)?.proj_short_name ?? v)); out({ id, field: baselineSlot, old: bl(was), new: bl(now) }); continue; }
+        if (k === 'critical_drtn_hr_cnt' && 'proj_short_name' in r) { const days = (v: string) => Math.round((Number(v || 0) / hoursPerDay) * 100) / 100; out({ id, field: 'Critical activities: Total Float at or below (days)', old: days(was), new: days(now) }); continue; }
         if (('proj_short_name' in r && /^(last_recalc_date|plan_start_date|plan_end_date)$/.test(k)) || ('clndr_name' in r && k === 'clndr_data')) datesAffected = true; // the data date, the planned start, Must Finish By and the work time of a calendar decide the dates F9 gives
         if (assignment && /^(target|remain|act)_(qty|cost|equip_qty|drtn|work_qty|ot_qty|reg_qty)|^remain_qty_per_hr$|_per_hr_rate$/.test(k) && k !== 'target_qty_per_hr') continue; // the quantities and costs worked out from the units a day
         if (assignment && k === 'target_qty_per_hr') { const hpd = hoursPerDay; out({ id, field: 'Budgeted Units/Time (units a day)', old: was === '' ? null : Math.round(Number(was) * hpd * 100) / 100, new: Math.round(Number(now) * hpd * 100) / 100 }); continue; }
