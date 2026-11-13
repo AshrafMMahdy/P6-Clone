@@ -104,7 +104,7 @@ test('monte_carlo cancelled in a worker returns the statistics of the iterations
   assert.equal(r.iterations, r.iterations_done);
   assert.ok(r.iterations_done >= 1 && r.iterations_done < 20000, String(r.iterations_done));
   assert.ok(r.finish.P50 && r.finish.P80 && r.histogram.length);
-  assert.match(r.note, /Partial/);
+  assert.equal(r.note, `Cancelled after ${r.iterations_done} of 20000 iterations: the result covers those only.`);
   // a job that kept its work is a normal answer to job_status, not an error
   const again = await call('job_status', { job_id: job });
   assert.equal(again.err, false);

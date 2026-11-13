@@ -82,7 +82,7 @@ test('a file with two MEMOTYPE tables (an earlier platform bug) opens as one, re
     .replace('%T\tOBS\r\n', `${head}%R\t90\t1\tN\tY\tY\tN\tReview Status\r\n%T\tOBS\r\n`);
   assert.equal(tableCount(text, 'MEMOTYPE'), 2);
   const { db, findings } = parseXer(new TextEncoder().encode(text));
-  assert.ok(findings.some((f) => f.code === 'DUP_TABLE' && f.table === 'MEMOTYPE'));
+  assert.ok(!findings.some((f) => f.code === 'DUP_TABLE'), 'P6 processes both blocks: not a finding');
   const code = rows(db, 'PROJECT')[0].proj_short_name;
   ok(db, [{ op: 'set_notebook', project: code, topic: 'Review Status', text: DRAFT }]);
   assert.equal(rows(db, 'MEMOTYPE').filter((m) => m.memo_type === 'Review Status').length, 1);

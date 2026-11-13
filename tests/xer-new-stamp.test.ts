@@ -26,7 +26,7 @@ test('a new project is saved as XER 7.0 and, opened again, finishes on the same 
   assert.deepEqual(head(path).slice(0, 2), ['ERMHDR', '7.0']);
   // the answer names the version written, and says what the 7.0 stamp means for the user
   assert.equal(saved.format, 'XER 7.0');
-  assert.ok(saved.notes?.some((n: string) => /written as XER 7\.0/.test(n) && /Tell the user: P6 8 and later/.test(n)), JSON.stringify(saved.notes));
+  assert.ok(saved.notes?.includes('Written as XER 7.0, as the project had no P6 version; after F9 in P6 8 or later a few dates may move slightly.'), JSON.stringify(saved.notes));
   // the CLI writes a project without a version the same way
   const { writeOut } = await import('../cli/commands.ts');
   const { getSession } = await import('../mcp/runtime.ts');

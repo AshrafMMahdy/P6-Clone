@@ -76,7 +76,7 @@ test('save repair: one of each damage, repaired field by field, every change lis
   assert.deepEqual([ch(id('ANCIENT'), 'act_start_date').new, ch(id('ANCIENT'), 'status_code').new], ['', 'TK_NotStart']);
   assert.match(ch(id('ANCIENT'), 'act_start_date').reason, /before 1753, outside what a P6 database stores \(P6 refuses it\)/);
   assert.deepEqual([ch(id('ORDER'), 'act_end_date').new, ch(id('ORDER'), 'status_code').new, ch(id('ORDER'), 'act_start_date')], ['', 'TK_Active', undefined]);
-  assert.equal(r.cleared_actuals_rule.length, 3);
+  assert.equal(r.notes.length, 1); assert.match(r.notes[0], /^Repaired copy written: \d+ repairs \(changes lists them\); 3 actual dates cleared: run schedule\.$/);
   assert.deepEqual([ch(id('BADFIN'), 'act_end_date').new, ch(id('BADFIN'), 'status_code').new], ['', 'TK_Active']);
   assert.match(code('SHIFT').reason, /damaged line: its name is the number "362.016667"/);
   assert.equal(r.changes.filter((c: any) => c.table === 'TASKPRED' && c.field === '*').length, 2, 'its two relationships go with it');
