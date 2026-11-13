@@ -6,6 +6,7 @@
 // (file:line); none is a choice of this clone. Where the source falls back to an invented value (no data date -> the earliest start,
 // a ratio of 1 for an empty population, a divisor of 1 for no activities) the helper answers `not_assessed` with the reason instead.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
+import { noBaselineOf } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentComplete, reportedPercent } from '../cost/rollup.ts';
@@ -339,7 +340,7 @@ export interface ReferencePairs {
 export function baselinePairs(s: Scope, which = 'project'): Assessed<ReferencePairs> {
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(s.db, p, which)]));
   const first = [...bls.values()].find(Boolean);
-  if (!first) return notAssessed(`No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.`);
+  if (!first) return notAssessed(noBaselineOf(which, true));
   const pairs = new Map<Row, Row | undefined>(s.tasks.filter((t) => !isWbs(t)).map((t) => [t, bls.get(t.proj_id)?.tasks.get(t.task_code)]));
   return { result: 'assessed', name: first.name, how: first.how, pairs, projects_without: s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name) };
 }
@@ -369,8 +370,8 @@ export function logicLoops(s: Scope): string[][] {
   for (const r of s.rels) if (main.has(r.pred_task_id) && main.has(r.task_id)) (succ.get(r.pred_task_id) ?? succ.set(r.pred_task_id, []).get(r.pred_task_id)!).push(r.task_id);
   return findLoops(succ).map((l) => l.map((id) => s.ctx.taskById.get(id)?.task_code ?? id));
 }
-/** A loop as the scheduler words it (cpm.ts: "Loop: A → B → C → A"). */
-export const loopMessage = (loop: string[]): string => `Loop: ${loop.join(' → ')} → ${loop[0]}`;
+/** A loop as the scheduler words it (cpm.ts): a set of activities, not a path. */
+export const loopMessage = (loop: string[]): string => `These activities are in a loop: ${namesText(loop)}`;
 
 export interface BeiFigures { value: number; /** value before rounding: what a threshold is judged on */ exact: number; completed: number; due: number; not_completed: Offender[] }
 export type BeiResult = ({ result: 'assessed' } & BeiFigures) | { result: 'not_assessed'; /** why: no baseline, no data date, or nothing baselined to finish by the date */ reason: 'no_baseline' | 'no_data_date' | 'none_due'; note: string; /** the tasks completed, counted all the same */ completed?: number };
@@ -378,7 +379,7 @@ export type BeiResult = ({ result: 'assessed' } & BeiFigures) | { result: 'not_a
  *  over the tasks baselined to finish by the data date; completed is every completed task, except with `matched` (the other side is another schedule, as_planned): then only the tasks that have a counterpart in it. Not assessed when no project has the baseline, or nothing was due (never 1). `value` is shown (three decimals), `exact` is what a threshold is judged on.
  *  `before`: a task baselined to finish ON the data date is not yet due (check_schedule's rule, "before the data date"); default: due on or before it (dcma_14's rule). */
 export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project', o: { before?: boolean; matched?: boolean } = {}): BeiResult {
-  if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.` };
+  if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: noBaselineOf(which, true) };
   const ok = (t: Row) => !isWbs(t) && !isLoe(t) && !isMilestone(t);
   // completed: every completed task of the population, as always (a baseline). With `matched` (the other side is another schedule, as_planned) only the tasks that have a counterpart there are counted, so completed and due are over the
   // same activities: an as-planned schedule that holds 18 of 453 activities counts 18, not every completed task of the open project.

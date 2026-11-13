@@ -6,7 +6,8 @@
 // Used by the command-line `edit` command and the MCP server.
 import { addField, dropIndexes, nextId, rowIndex, rows, table, tableCache, withIdCache, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
-import { p6num } from '../schedule/cpm.ts';
+import { calendarsWithNoWork, noWorkTimeText, p6num } from '../schedule/cpm.ts';
+import { CalendarHorizonError } from '../calendar/calendar.ts';
 import { findLoops, MAX_LEN } from '../xer/validate.ts';
 import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
@@ -130,7 +131,12 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
   const batch: Batch = { calDays: !!o.calendarDays, added: [] };
   try {
     withIdCache(() => record(db, (d) => {
-      for (at = 0; at < list.length; at++) { batch.at = at; results.push(apply(d, list[at] as Op, hpd, warnings, batch)); }
+      for (at = 0; at < list.length; at++) {
+        batch.at = at;
+        // a calendar with no work time is a fact of the data, not a fault of the clone: named (while the change is still in place), with the way out
+        try { results.push(apply(d, list[at] as Op, hpd, warnings, batch)); }
+        catch (e) { if (e instanceof CalendarHorizonError && calendarsWithNoWork(d).length) fail(noWorkTimeText(calendarsWithNoWork(d))); throw e; }
+      }
       // loops: checked once for the whole edit (a check per relationship made a 30,000-link load quadratic); the
       // error names the first relationship of the list that closed one
       if (batch.added.length && !o.allowLoops) { const k = firstLoop(d, batch.added); if (k != null) { at = k; fail(LOOP_MESSAGE); } }
@@ -474,6 +480,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       const RR = table(db, 'RSRCRATE');
       for (const f of ['rsrc_rate_id', 'rsrc_id', 'max_qty_per_hr', 'cost_per_qty', 'start_date']) addField(RR, f);
       RR.rows.push({ rsrc_rate_id: String(nextId(db, 'RSRCRATE')), rsrc_id: rid, max_qty_per_hr: p6num(op.max_units_per_hour != null ? num(op.max_units_per_hour, 'max_units_per_hour') : op.max_units_per_day != null ? num(op.max_units_per_day, 'max_units_per_day') / hpd : perHr), cost_per_qty: p6num(op.price_per_unit != null ? num(op.price_per_unit, 'price_per_unit') : 0), start_date: '' });
+      // no limit given: the resource gets the default Max Units/Time (its default units per time, else 1 unit an hour), and the answer says so
+      if (op.max_units_per_hour == null && op.max_units_per_day == null) warnings.push(`Resource ${id} was given no limit, so its Max Units/Time is the default: ${p6num(Math.round(perHr * hpd * 100) / 100)} units a day (${op.units_per_day != null ? 'its units_per_day' : '1 unit an hour on a day of ' + hpd + ' hours'}). Give max_units_per_day (or max_units_per_hour) to set another.`);
       return { resource: id };
     }
     case 'assign_resource': {

@@ -7,6 +7,7 @@
 // In a file with several projects the run number is the file's, not the project's: a project's run can skip numbers, and "WHIQ run N duration (d)" holds the
 // duration an activity had before the file's run N+1 was applied to it.
 import { rows, type Db, type Row } from '../db.ts';
+import { DataError } from '../notes.ts';
 import { dayHours } from '../project/units.ts';
 import { applyOps } from '../project/ops.ts';
 import { isWbs } from './common.ts';
@@ -62,7 +63,7 @@ export interface FieldData { changes: FieldChange[]; ranks?: FieldRank[]; who: s
  *  Returns what it wrote (fields_written); throws an Error in words when a field of the project has another data type (nothing is written). */
 export function writeWhiqFields(d: Db, data: FieldData, o: { hoursPerDay?: number; calendarDays?: boolean; projIds?: string[] } = {}) {
   const clash = whiqFieldClash(d, { ...data, projIds: o.projIds });
-  if (clash) throw new Error(`${clash.message} ${clash.hint}`);
+  if (clash) throw new DataError('field_type_clash', clash.message, clash.hint);
   const w = whiqRunOps(d, { ...data, on: today(), projIds: o.projIds, hoursPerDay: o.hoursPerDay });
   const r = applyOps(d, w.ops, { hoursPerDay: o.hoursPerDay, calendarDays: o.calendarDays });
   if (!r.ok) throw new Error(r.error!.message);

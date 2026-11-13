@@ -11,6 +11,7 @@
 // risk impacts, runs the normal CPM (`scheduleProjects`) and records the project finish, each activity's
 // early finish and whether it was critical (total float <= 0).
 import { dataDigest, PROJECT_PLACE_FIELDS, rows, type Db, type Row, type Table } from '../db.ts';
+import { DataError } from '../notes.ts';
 import { MIN_PER_DAY, parseP6Date } from '../dates.ts';
 import { calendarResolver, optionsFor, scheduleProjects, p6num, type SchedOptions } from '../schedule/cpm.ts';
 import { linkedTasks, riskProbability, riskScheduleHours, risksOf, type RiskPhase } from './register.ts';
@@ -393,7 +394,7 @@ function scheduleOrThrow(db: Db, projIds: string[], over: Partial<SchedOptions>)
   const res = scheduleProjects(db, projIds, over);
   if (!res.ok) {
     const why = res.findings.filter((f) => f.severity === 'error' || f.severity === 'fatal').map((f) => f.message).join('; ');
-    throw new Error(`The schedule cannot be calculated${why ? `: ${why}` : '.'}`);
+    throw new DataError('schedule_failed', `The schedule cannot be calculated${why ? `: ${why}` : '.'}`, 'Fix what the message names (a loop, or a calendar with no work time), then call monte_carlo again; nothing was changed.');
   }
   return res;
 }
@@ -427,7 +428,7 @@ export async function runMonteCarlo(db: Db, projIds: string[], opts: MonteCarloO
   const yieldEvery = Math.max(1, opts.yieldEvery ?? 5);
   const prep = prepare(db, projIds);
   const n = prep.base.length;
-  if (!n) throw new Error('The projects have no activities.');
+  if (!n) throw new DataError('bad_input', `${projIds.length === 1 ? 'The project has' : 'The projects have'} no activities, so there is nothing to simulate.`, 'Add activities first (edit add_activity), then call monte_carlo again.');
 
   // Deterministic run (current remaining durations)
   const det = scratch(prep);

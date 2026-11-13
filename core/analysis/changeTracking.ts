@@ -136,7 +136,7 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
     const proj = (u: Update) => rows(u.db, 'PROJECT').find((p) => p.proj_id === u.projId)!;
     const blA = baselineOf(A.db, proj(A), 'project'), blB = baselineOf(B.db, proj(B), 'project');
     let baseline: CategoryResult;
-    if (!blA || !blB) baseline = { result: 'not_assessed', note: `${!blA && !blB ? `Neither ${from} nor ${to} carries` : !blA ? `${from} does not carry` : `${to} does not carry`} a project baseline (Project > Assign Baselines), so its baseline dates cannot be compared.` };
+    if (!blA || !blB) baseline = { result: 'not_assessed', note: `${!blA && !blB ? `Neither ${from} nor ${to} carries` : !blA ? `${from} does not carry` : `${to} does not carry`} a project baseline, so its baseline dates cannot be compared. Assign one with edit assign_baseline on that update\u2019s project.` };
     else {
       const rowsB = baselineDateChanges(blA.tasks, blB.tasks, referenceStart, baselineFinish).map((c) => date('baseline_dates', c.id, c.name, c.field, c.a, c.b));
       changeRows.push(...rowsB);

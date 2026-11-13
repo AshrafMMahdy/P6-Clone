@@ -101,11 +101,8 @@ export const baselineFinish = (b: Row | undefined) => (b ? parseP6Date(b.act_end
 /** An activity's forecast finish: actual finish, else remaining early finish, else early finish. */
 export const forecastFinish = (t: Row) => parseP6Date(t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date);
 
-// AGREED LIMIT (owner, 2026-11-12): 25 — activities and fixes an analysis answer lists per check, and per ranked list of the Monte Carlo answer (criticality, sensitivity, milestones) — fixed, no agent argument — why: enough examples to see the pattern; a round number with no calculation behind it; harmless because the full lists are always written to the result file and named in the answer — arbitrary by agreement.
-// The same constant is also the list size of: the activities and fixes per check of lint, dcma_14 and check_schedule; the resources resource_histogram lists; the changed activities of evaluate and evaluate_batch; the activities per window of windows_analysis; the worst lists of earned_value; the Monte Carlo S-curve points and ranked lists; the activity names in crash_schedule's notes.
-export const LISTED = 25;
-/** Names in a sentence (a refusal, a reason) by the list rule: the first LISTED, then how many more and the total. Short lists are given whole. */
-export const namesText = (names: string[]): string => (names.length > LISTED ? `${names.slice(0, LISTED).join(', ')} and ${names.length - LISTED} more (${names.length} in total)` : names.join(', '));
+// (LISTED and namesText live in core/notes.ts, with the agreed-limit mark; re-exported here for the analyses)
+export { LISTED, namesText } from '../notes.ts';
 
 /** A share (n of d) as a percent, FOR DISPLAY ONLY: one decimal, and a share that is not zero but would show as 0.0 shows its first two significant digits (1 of 2,068 reads 0.048, never 0); that two-significant-digit rule is only how a small share is shown. Every check is judged on the exact count: use `exactPct` (below), never this rounded figure. */
 export const pct = (n: number, d: number) => {

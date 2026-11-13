@@ -202,7 +202,7 @@ test('a file P6 would reject, or that is no schedule: the answer lists what P6 r
     assert.ok(kinds.some((k) => k.code === 'DUP_KEY'));
     assert.match(e.message, new RegExp(`${e.fatal_total} fatal finding`));
     for (const k of kinds) assert.ok(e.message.includes(`${k.code} x${k.count}`), `${k.code} x${k.count} in ${e.message}`);
-    assert.match(e.message, /Duplicate TASK\.task_id/);
+    assert.match(e.message, /is in the file twice|shares its internal id with another activity row/);
     assert.equal(e.next_step, `1. ${first} 2. If it still cannot be opened, ${second}`);
     // the lenient open says what it repaired and that the original is one P6 would refuse
     const len = await call('open_file', { path, lenient: true });

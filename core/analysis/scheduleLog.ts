@@ -7,9 +7,13 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import type { Finding } from '../findings.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
 import { relationshipFloat, type ScheduleResult } from '../schedule/cpm.ts';
+import { dayHours } from '../project/units.ts';
+import { cstrName, daysText, plural } from '../notes.ts';
 
 export interface LogSection { code: string; title: string; count: number; activities: { id: string; name: string; detail?: string }[] }
 export interface ScheduleLogReport { statistics: ScheduleResult['stats']; errors: LogSection[]; warnings: LogSection[]; exceptions: LogSection[] }
+
+const START_TYPES = new Set(['CS_MSO', 'CS_MSOB', 'CS_MSOA', 'CS_MANDSTART']);
 
 const FROM_F9: [string, string, 'errors' | 'warnings' | 'exceptions'][] = [
   ['SCHED_LOOP', 'Activities that have invalid relationship loops', 'errors'],
@@ -27,7 +31,7 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
   const open = new Set(projIds);
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const ctx = makeCtx(db, { hoursPerDay: 8 });
-  const relFF = relationshipFloat(db, ctx);
+  const relFF = relationshipFloat(db, ctx), dh = dayHours(db, 8, true);
   const sec = (code: string, title: string, list: { t: Row; detail?: string }[]): LogSection => ({ code, title, count: list.length, activities: (maxIds ? list.slice(0, maxIds) : list).map((x) => ({ id: x.t.task_code, name: x.t.task_name, ...(x.detail ? { detail: x.detail } : {}) })) });
 
   // a start milestone has no finish and a finish milestone no start: links that use them are invalid in P6
@@ -57,7 +61,7 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
         : (ty === 'CS_MEO' || ty === 'CS_MANDFIN') ? ef != null && ef !== c
         : ty === 'CS_MEOB' ? ef != null && ef > c
         : ty === 'CS_MEOA' ? ef != null && ef < c : false;
-      if (bad) unmet.push({ t, detail: `${ty.slice(3)} ${formatP6Date(c).slice(0, 16)}` });
+      if (bad) { const onStart = START_TYPES.has(ty); unmet.push({ t, detail: `${cstrName(ty)} ${formatP6Date(c).slice(0, 16)}, scheduled ${onStart ? 'start' : 'finish'} ${formatP6Date((onStart ? es : ef)!).slice(0, 16)}` }); }
     }
   }
   const unsatRel: { t: Row; detail: string }[] = [];
@@ -65,7 +69,7 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
     if (!open.has(r.proj_id)) continue;
     const ff = relFF(r);
     const t = ctx.taskById.get(r.task_id), p = ctx.taskById.get(r.pred_task_id);
-    if (ff != null && ff < 0 && t && p && !t.act_end_date) unsatRel.push({ t, detail: `${p.task_code} ${(r.pred_type || 'PR_FS').slice(3)} ${t.task_code}: ${Math.round(ff * 10) / 10} h relationship float` });
+    if (ff != null && ff < 0 && t && p && !t.act_end_date) unsatRel.push({ t, detail: `${p.task_code} ${(r.pred_type || 'PR_FS').slice(3)} ${t.task_code}: relationship float ${daysText(Math.round((ff / 60 / dh.rel(r)) * 100) / 100)}` });
   }
   const external = tasks.filter((t) => t.external_early_start_date || t.external_late_end_date).map((t) => ({ t, detail: [t.external_early_start_date && `external early start ${t.external_early_start_date.slice(0, 16)}`, t.external_late_end_date && `external late finish ${t.external_late_end_date.slice(0, 16)}`].filter(Boolean).join(', ') }));
   const critical = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && isCritical(t, ctx)).map((t) => ({ t }));
@@ -110,4 +114,39 @@ export function extraLogText(db: Db, projIds: string[]): string {
     }
   }
   return L.join('\r\n');
+}
+
+/** The warnings of an `schedule` answer: one sentence for each kind of thing that is wrong, with its count, where the list of activities is (the log: the one home of every
+ *  list) and the next call, so no fact is said twice. `withLog` false (the caller left the log out): the sentence says the list is left out. */
+export function scheduleWarnings(res: Pick<ScheduleResult, 'findings'>, report: ScheduleLogReport, withLog: boolean): string[] {
+  const out: string[] = [];
+  const at = (area: 'warnings' | 'exceptions', code: string) => (withLog ? `log.${area} (${code})` : 'the log (left out by log: false)');
+  for (const f of res.findings) if (f.code === 'NO_DATA_DATE') out.push(f.message.replace(/\.$/, '; give data_date to set one.'));
+  for (const f of res.findings) if (f.code === 'SCHED_CAL_INVALID') out.push(f.message);
+  const n = (area: 'warnings' | 'exceptions', code: string) => report[area].find((s) => s.code === code)?.count ?? 0;
+  let k = n('warnings', 'OUT_OF_SEQUENCE');
+  if (k) out.push(`${plural(k, 'relationship')} out of sequence (an activity started before its predecessor finished), listed in ${at('warnings', 'OUT_OF_SEQUENCE')}. Choose how the schedule treats them with options {logic: retained | override | actual}.`);
+  k = n('warnings', 'ACTUAL_AFTER_DD');
+  if (k) out.push(`${plural(k, 'activity', 'activities')} ${k === 1 ? 'has' : 'have'} an actual date after the data date, listed in ${at('warnings', 'ACTUAL_AFTER_DD')}: give a later data date (data_date) or correct the actuals (edit update_activity).`);
+  k = n('exceptions', 'CONSTRAINT_UNMET');
+  if (k) out.push(`${plural(k, 'activity', 'activities')} ${k === 1 ? 'has' : 'have'} a constraint the scheduled dates do not meet, listed with the scheduled date in ${at('exceptions', 'CONSTRAINT_UNMET')}: change or remove the constraint with edit update_activity.`);
+  k = n('exceptions', 'RELATIONSHIP_UNMET');
+  if (k) out.push(`${plural(k, 'relationship')} ${k === 1 ? 'is' : 'are'} not met by the scheduled dates, listed in ${at('exceptions', 'RELATIONSHIP_UNMET')}: a mandatory constraint or an actual date overrides the logic; change it with edit update_activity.`);
+  k = n('exceptions', 'NEGATIVE_FLOAT');
+  if (k) out.push(`${plural(k, 'activity', 'activities')} ${k === 1 ? 'has' : 'have'} negative total float, listed in ${at('exceptions', 'NEGATIVE_FLOAT')}: the dates cannot meet a constraint or the project's must-finish-by date; critical_path shows what drives them.`);
+  const broken = res.findings.filter((f) => f.code === 'SCHED_LOOP_BROKEN').length;
+  if (broken) out.push(`${plural(broken, 'relationship')} that closed a loop ${broken === 1 ? 'was' : 'were'} left out of this run (broken_links names them): remove them for good with edit delete_relationship.`);
+  return out;
+}
+
+/** Every warning of a computed schedule (compute_schedule has no log): one sentence for each activity or relationship, in the order of the kinds above. */
+export function computeWarnings(db: Db, pid: string, res: Pick<ScheduleResult, 'findings'>, mustFinishBy: number | null, finish: number | null): string[] {
+  const out: string[] = [];
+  for (const f of res.findings) if (f.code === 'SCHED_CAL_INVALID' || f.code === 'OUT_OF_SEQUENCE' || f.code === 'ACTUAL_AFTER_DD' || f.code === 'NEGATIVE_FLOAT') out.push(f.message);
+  const ex = extraLogSections(db, [pid], 0);
+  for (const s of ex.exceptions) if (s.code === 'CONSTRAINT_UNMET' || s.code === 'RELATIONSHIP_UNMET') for (const a of s.activities) out.push(s.code === 'CONSTRAINT_UNMET' ? `${a.id} does not meet its constraint: ${a.detail}.` : `${a.id}: the relationship ${a.detail} is not met by the dates.`);
+  if (mustFinishBy != null && finish != null && finish > mustFinishBy) out.push(`The project finishes ${formatP6Date(finish).slice(0, 16)}, after its must-finish-by date ${formatP6Date(mustFinishBy).slice(0, 16)}.`);
+  const broken = res.findings.filter((f) => f.code === 'SCHED_LOOP_BROKEN').length;
+  if (broken) out.push(`${plural(broken, 'relationship')} that closed a loop ${broken === 1 ? 'was' : 'were'} left out of this run (broken_links names them): remove ${broken === 1 ? 'it' : 'them'} for good by changing the activity's predecessors.`);
+  return out;
 }

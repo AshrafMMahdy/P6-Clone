@@ -52,7 +52,7 @@ import { discardKeptMeshing, FOURD_FILES, FOURD_NAMES, FOURD_TOOLS, load4dSideca
 import { LOB_FILES, LOB_NAMES, LOB_TOOLS, lobSidecars, lobSidecarText, readLobSidecar, runLob, scheduleWithLob } from './lob.ts';
 import { lobGuard } from '../core/lob/view.ts';
 import { loadLobModels } from '../core/lob/store.ts';
-import { scheduleLogReport } from '../core/analysis/scheduleLog.ts';
+import { computeWarnings, scheduleLogReport, scheduleWarnings } from '../core/analysis/scheduleLog.ts';
 import { baselineOf } from '../core/analysis/common.ts';
 import { reasonerModelPath, reasonerStatus } from '../core/analysis/hrmRuntime.ts';
 import { record, rollback, rollbackRunning } from '../core/journal.ts';
@@ -76,7 +76,7 @@ import { LISTED } from '../core/analysis/common.ts';
 import { criticalityNote, sensitivityNote } from './mcNotes.ts';
 import { dayHours } from '../core/project/units.ts';
 import {
-  MEASURE_FILE_BYTES, heapNow, releaseIfGrown, retainedBytes, ToolError, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, countArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
+  MEASURE_FILE_BYTES, heapNow, releaseIfGrown, retainedBytes, ToolError, asRefusal, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, countArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
   exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, noteSilence, askWake, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, readCause, type Session,
 } from './runtime.ts';
 
@@ -439,7 +439,14 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         };
       } catch (e) { closeSession(s0); throw e; } finally { reading(); }
     }
-    case 'compute_schedule': { const r = computeSchedule(a); return r.ok ? r : { ok: false, error: { ...r.error, hint: r.error.code === 'schedule_failed' ? 'Fix the reported problem (or pass break_loops: true for loops) and call again.' : 'Fix that part of the input (where says which) and call again.' } }; }
+    case 'compute_schedule': {
+      const r = computeSchedule(a);
+      if (r.ok && r.warnings.length > LISTED) {
+        // the list rule: the first 25, the true total, a note, and the whole list in a file
+        const file = writeResultFile('compute_schedule_warnings', JSON.stringify(r.warnings));
+        return { ...r, warnings: r.warnings.slice(0, LISTED), warnings_total: r.warnings.length, warnings_note: `${LISTED} of ${r.warnings.length} shown${file ? `; all ${r.warnings.length} in ${file}` : ''}` };
+      }
+      return r.ok ? r : { ok: false, error: { ...r.error, hint: r.error.code === 'schedule_failed' ? 'Fix the reported problem (or pass break_loops: true for loops) and call again.' : 'Fix that part of the input (where says which) and call again.' } }; }
     case 'new_project': {
       const db: Db = { tables: {} };
       const r = applyOps(db, [{ op: 'add_project', id: a.id, name: a.name ?? a.id, start: a.start, ...(a.must_finish_by ? { must_finish_by: a.must_finish_by } : {}) }]);
@@ -528,7 +535,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const ids = new Set(keptMsp), tasks = (s.db.tables.TASK?.rows ?? []).filter((x) => ids.has(x.proj_id));
         const finish = tasks.reduce((m, x) => Math.max(m, parseP6Date(x.act_end_date || x.early_end_date || x.target_end_date) ?? -Infinity), -Infinity);
         const dataDate = minOf(keptMsp.map((id) => parseP6Date(s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!.last_recalc_date) ?? Infinity));
-        return { ok: true, ...kept, loops: [], data_date: iso(dataDate), finish: iso(finish), stats: { activities: tasks.length, dataDate, finish: Number.isFinite(finish) ? finish : null, kept_msp_dates: true }, warnings: [] };
+        return { ok: true, ...kept, loops: [], data_date: iso(dataDate), finish: iso(finish), stats: { activities: tasks.length, dataDate: iso(dataDate), finish: iso(Number.isFinite(finish) ? finish : null), kept_msp_dates: true }, warnings: [] };
       }
       const was = s.dirty;
       const res = change(s, ctx.caller, 'Schedule', (d) => {
@@ -543,7 +550,12 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       // F9 on a project from Microsoft Project XML: say which of Microsoft Project's dates the clone's schedule replaced
       const fromMsp = todo.filter((id) => mspUntouched(s.db, id) !== null);
       const mspChanged = fromMsp.length ? { msp_dates_changed: Object.fromEntries(fromMsp.map((id) => [name(id), mspDateChanges(s.db, id)])) } : {};
-      return { ok: true, ...kept, ...mspChanged, ...loopInfo, ...(only ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === only)!.proj_short_name } : {}), data_date: iso(only ? res.projects[only].dataDate : res.stats.dataDate), finish: iso(res.stats.finish), stats: res.stats, log: a.log === false ? undefined : scheduleLogReport(s.db, todo, res, a.log_max_ids != null ? Math.max(0, Number(a.log_max_ids)) : 100), warnings: res.findings.filter((f) => f.severity !== 'info').map((f) => f.message) };
+      // the log is the one home of every list of activities (statistics are the answer's `stats`, in dates); `warnings` says each kind once, with its count and where the list is
+      const report = scheduleLogReport(s.db, todo, res, a.log_max_ids != null ? Math.max(0, Number(a.log_max_ids)) : 100);
+      const { statistics: _stats, ...logOnly } = report;
+      const ownDates = Object.fromEntries(todo.map((id) => [name(id), iso(res.projects[id]?.dataDate)]));
+      const differ = new Set(Object.values(ownDates)).size > 1;
+      return { ok: true, ...kept, ...mspChanged, ...loopInfo, ...(only ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === only)!.proj_short_name } : {}), data_date: iso(only ? res.projects[only].dataDate : res.stats.dataDate), ...(differ ? { data_dates: ownDates, data_dates_note: 'The projects have different data dates (data_dates): each is scheduled from its own; data_date is the earliest.' } : {}), finish: iso(res.stats.finish), stats: { ...res.stats, finish: iso(res.stats.finish), dataDate: iso(res.stats.dataDate) }, log: a.log === false ? undefined : logOnly, warnings: scheduleWarnings(res, report, a.log !== false) };
     }
     case 'update_progress': {
       const t = dd(a.data_date) ?? fail('bad_input', 'Give data_date.', 'The new data date, YYYY-MM-DD.');
@@ -1062,7 +1074,8 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
     const isError = !!(o && typeof o === 'object' && (o.ok === false || (name === 'job_status' && (o.status === 'failed' || o.status === 'cancelled') && !('result' in o))));
     if (isError && o!.error) return { out: { ...o, error: keptNote(contractError(o!.error), handle) }, isError };
     return { out: r, isError };
-  } catch (e) {
+  } catch (e0) {
+    const e = asRefusal(e0) as Error;
     if (e instanceof ToolError) return { out: { error: keptNote(contractError({ code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) }), handle) }, isError: true };
     return { out: { error: contractError({ code: 'internal', message: (e as Error).message, hint: 'This is a bug in the server; the project was not changed by this call. Retry, or report it with the message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') }) }, isError: true };
   }
@@ -1144,21 +1157,25 @@ export function shutdown(reason: string): void {
  *  result is written to a JSON file (in the write root, else the storage root, else the system's temporary folder)
  *  whose path the answer gives, so none of it is out of reach. */
 /** Every answer is compact JSON in the text part (no pretty-printing) beside structuredContent: the MCP spec asks for the serialized result in a text block, and a client that reads only text must not lose the rows. */
+/** A result written whole to a JSON file in the write root (else the storage root, else the system's temporary folder): its path, or null when it cannot be written. */
+function writeResultFile(tool: string, text: string): string | null {
+  try {
+    const dir = writeBase() ?? join(tmpdir(), 'p6clone-results');
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+    const base = tool.replace(/[^\w-]+/g, '_');
+    let file = join(dir, `${base}-result-${stamp}.json`);
+    for (let i = 2; existsSync(file); i++) file = join(dir, `${base}-result-${stamp}-${i}.json`);
+    writeOutWith(file, (put) => { for (let at = 0; at < text.length; at += 1 << 22) put(text.slice(at, at + (1 << 22))); });
+    return file;
+  } catch { return null; /* the caller still answers */ }
+}
 export function toolResult(out: unknown, isError: boolean, tool?: string) {
   let text = JSON.stringify(out);
   releaseIfGrown();
   let structured = out && typeof out === 'object' && !Array.isArray(out) ? out : { result: out };
   if (text.length > config.maxResponseChars) {
-    let saved: string | null = null;
-    try {
-      const dir = writeBase() ?? join(tmpdir(), 'p6clone-results');
-      mkdirSync(dir, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-      let file = join(dir, `${(tool ?? 'result').replace(/[^\w-]+/g, '_')}-result-${stamp}.json`);
-      for (let i = 2; existsSync(file); i++) file = join(dir, `${(tool ?? 'result').replace(/[^\w-]+/g, '_')}-result-${stamp}-${i}.json`);
-      writeOutWith(file, (put) => { for (let at = 0; at < text.length; at += 1 << 22) put(text.slice(at, at + (1 << 22))); });
-      saved = file;
-    } catch { /* the preview below still answers */ }
+    const saved = writeResultFile(tool ?? 'result', text);
     // what the caller needs beside the preview: the result files (exported), every <list>_note wherever it is in the answer, and arguments_not_used; and a hint
     // naming only arguments this tool has
     const answer = out && typeof out === 'object' && !Array.isArray(out) ? (out as Record<string, unknown>) : {};

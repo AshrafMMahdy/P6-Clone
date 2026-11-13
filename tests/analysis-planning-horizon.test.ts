@@ -85,7 +85,7 @@ test('EXPECTED DIFFERENCE: approvals are not assessed, so an activity\'s readine
   assert.equal(srcTasks.A.readiness_status, 'ready');
   // the file-wide reason, with the weight that is spread
   assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => [d.dimension, d.weight]), [['approvals', 0.2]]);
-  assert.match(r.summary.dimensions_not_assessed[0].reason, /no approval field/);
+  assert.match(r.summary.dimensions_not_assessed[0].reason, /no approval status for an activity/);
   // the window's score is the mean of its activities: 30-day (45.3, 46.6, 78.1, 78.1, 78.1, 87.5) = 69.0 (the source's 75.2)
   assert.equal(r.bands[0].readiness_score, 69);
   assert.equal(src.bands[0].band_readiness_score, 75.2);
@@ -169,7 +169,7 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   // and no baseline: forecast stability has nothing to be compared with (the planned dates equal the early dates after a calculation, so they cannot stand in)
   assert.deepEqual(r.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'forecast_stability']);
   assert.match(r.summary.dimensions_not_assessed[1].reason, /no resource assignments/);
-  assert.match(r.summary.dimensions_not_assessed[2].reason, /^No project baseline is assigned, so the forecast finish has nothing to be compared with/);
+  assert.match(r.summary.dimensions_not_assessed[2].reason, /^No project baseline is assigned\. Assign one with edit assign_baseline.* Without one the forecast finish has nothing to be compared with/);
   // T1 by hand: logic 60 (no predecessor), float 0 (critical); resources and stability not assessed: (0.25 x 60 + 0.10 x 0) / (0.25 + 0.10) = 15 / 0.35 = 42.9
   assert.equal(byId(r).T1.readiness_score, 42.9);
   assert.equal(byId(r).T1.dimensions.resources, undefined);
@@ -204,7 +204,7 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   for (const t of rows(c.db, 'TASK').filter((t) => t.proj_id === c.projId)) { t.early_start_date = '2026-01-10 00:00'; t.early_end_date = '2026-01-14 00:00'; t.target_end_date = '2026-01-14 00:00'; t.total_float_hr_cnt = '0'; }
   const l = planningHorizon(c.db, { statusDate: at('2026-01-05') });
   assert.equal(l.loops.length, 1);
-  assert.match(l.loops[0].message, /^Loop: [XYZ] → [XYZ] → [XYZ] → [XYZ]$/);
+  assert.match(l.loops[0].message, /^These activities are in a loop: [XYZ], [XYZ], [XYZ]$/);
   assert.deepEqual(l.summary.dimensions_not_assessed.map((d) => d.dimension), ['approvals', 'resources', 'forecast_stability', 'float']);
   assert.match(l.summary.dimensions_not_assessed[3].reason, /The logic has a loop/);
   assert.equal(all(l).every((a) => a.dimensions.float === undefined), true);
@@ -333,7 +333,7 @@ test('planning_horizon through the server: read-only, status_date the only argum
   const nobl = await call('planning_horizon', { handle: h, baseline: 'project' });
   assert.equal(nobl.err, true);
   assert.match(nobl.d.error.message, /No baseline "project" for this project\./);
-  assert.match(r.d.summary.dimensions_not_assessed.map((d: any) => d.reason).join(' '), /No project baseline is assigned, so the forecast finish has nothing to be compared with/);
+  assert.match(r.d.summary.dimensions_not_assessed.map((d: any) => d.reason).join(' '), /No project baseline is assigned\..* Without one the forecast finish has nothing to be compared with/);
   assert.deepEqual(Object.keys(r.d).slice(0, 4), ['report', 'status_date', 'result', 'summary'], 'summary first');
   const b = r.d.bands[1];
   assert.equal(b.activities.length, 25);

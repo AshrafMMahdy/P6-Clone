@@ -4,6 +4,7 @@
 // population is not assessed (the source "skips" it), and so is one the file cannot supply an input for (no baseline, no data date, no earlier update, no SLPP or planning-package activity type in P6), with the reason.
 // The threshold values are the source's, carried over as they are (dcmaDecm.ts:53-58); they have NOT been checked against the DCMA DECM workbook. The profile (default | strict) is the only way to change them.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
+import { noBaselineOf } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
@@ -123,7 +124,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   // 06A501a: missing baseline dates (an activity not in the baseline, or in it with no start or no finish)
   {
     const inBl = discrete.filter((t) => bls.get(t.proj_id));
-    if (!inBl.length) na('06A501a', `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.`);
+    if (!inBl.length) na('06A501a', noBaselineOf(which, true));
     else percent('06A501a', inBl.filter((t) => { const b = bls.get(t.proj_id)!.tasks.get(t.task_code); return !b || referenceStart(b) == null || baselineFinish(b) == null; }).map((t) => offender(t, s)), inBl.length,
       `Activities that are not in the ${bls.get(inBl[0].proj_id)!.name} baseline, or are in it without a start or a finish date, over all activities that are neither WBS summary nor level of effort${s.projs.some((p) => !bls.get(p.proj_id)) ? ` (projects with no such baseline are not assessed: ${namesText(s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name))})` : ''}.`, 'No activity.');
   }

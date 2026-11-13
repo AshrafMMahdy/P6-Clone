@@ -14,6 +14,7 @@
 //    late units or cost per period, the limit, over-allocation and its severity.
 // Spreading is linear over each activity's working time. Values are hours (units) or the project currency (cost).
 import { maxOf, minOf } from '../arrays.ts';
+import { noBaseline } from '../notes.ts';
 import { baselineOf, namesText } from './common.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
@@ -91,7 +92,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   // the project baseline, else the primary user baseline (BL1), as P6 Professional's baseline bars fall back
   let blName: string | null = null, blHow = '';
   for (const p of projs) { const b = baselineOf(db, p, 'project') ?? baselineOf(db, p, 'bl1'); if (b) { blName = b.name; blHow = b.how; for (const t of b.tasks.values()) bl.set(`${p.proj_id}|${t.task_code}`, t); } }
-  if (!blName) warnings.push('The project has no baseline in this file: planned value follows the current budget and planned dates, so it shows the current plan, not a baseline.');
+  if (!blName) warnings.push(`${noBaseline(false, 'The project has no baseline in this file')} Until then planned value follows the current budget and planned dates, so it shows the current plan, not a baseline.`);
   else if (!/project baseline$/.test(blHow)) warnings.push(`Planned value follows ${blName}, ${blHow}.`);
 
   // the quantities per activity (the planned quantity from the baseline activity when there is one; duration: in working days of the activity's calendar)
@@ -197,7 +198,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
     const pvH = dataDate == null ? 0 : tasks.reduce((a, t) => a + q(t).bac * plannedShare(t, bl.get(`${t.proj_id}|${t.task_code}`), dataDate), 0);
     totals = { bac: r2(s.bac), pv: r2(pvH), ev: r2(evH), ac: r2(s.actual), etc: r2(s.remaining), eac: r2(s.actual + s.remaining), vac: r2(s.bac - s.actual - s.remaining), spi: pvH ? r2(evH / pvH) : null, cpi: s.actual ? r2(evH / s.actual) : null, tcpi: s.bac - s.actual ? r2((s.bac - evH) / (s.bac - s.actual)) : null };
   }
-  if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost' : units === 'duration' ? 'duration' : 'units'} are recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
+  if (totals.ev > 0 && totals.ac === 0) warnings.push(`Earned value is ${totals.ev} but no actual ${units === 'cost' ? 'cost is' : units === 'duration' ? 'duration is' : 'units are'} recorded: CPI cannot be measured (it is left empty, not taken as 1).`);
   if (!totals.bac) warnings.push(units === 'cost' ? 'The schedule has no budgeted cost (no costed resources or expenses): use units: duration (planned durations, which need neither costs nor resources) or hours, or load costs.' : units === 'duration' ? 'The schedule has no planned duration (every activity is a milestone or has none).' : 'The schedule has no budgeted units (no resource assignments): use units: duration, or load resources.');
   const sched = earnedSchedule({ g, pv, period, units, baseline: blName, plannedBac, undatedBac, plannedEv, p0, p1, dataDate, cal: projs[0] ? cals.fallback(projs[0].clndr_id) : null });
   return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, ...(units === 'duration' ? { basis_note: DURATION_NOTE } : {}), totals: { ...totals, ...sched }, periods, warnings };
@@ -216,7 +217,7 @@ function earnedSchedule(o: { g: Grid; pv: number[]; period: 'week' | 'month'; un
   const none = noEarnedSchedule;
   const { g, pv, period, dataDate } = o;
   if (!(o.plannedBac > 0) && o.undatedBac > 0) return none('Earned Schedule is not assessed: there is no planned curve (the activities with a planned value have no planned dates).');
-  if (!(o.plannedBac > 0)) return none(`Earned Schedule is not assessed: the planned value is 0 (${o.units === 'cost' ? 'no budgeted cost: use units: duration, which needs neither costs nor resources' : o.units === 'duration' ? 'no activity has a planned duration' : 'no budgeted units: use units: duration, which needs no resources'}).`);
+  if (!(o.plannedBac > 0)) return none('Earned Schedule is not assessed: the planned value is 0 (warnings says why and what to do).');
   if (dataDate == null) return none('Earned Schedule is not assessed: the project has no data date, so the actual time is not known.');
   if (!g.starts.length || !(o.p1 > o.p0)) return none('Earned Schedule is not assessed: there is no planned curve (the planned value all falls on one instant).');
   const planned = pv.reduce((a, x) => a + x, 0);
@@ -253,7 +254,7 @@ function earnedSchedule(o: { g: Grid; pv: number[]; period: 'week' | 'month'; un
   const esDays = days(o.p0, tStar), atDays = days(o.p0, dataDate);
   return {
     es: r3(es), at: r3(at), pd: r3(pd), spi_t: r3(es / at), sv_t: r3(es - at), es_date: iso(tStar), es_days: esDays, at_days: atDays, sv_t_days: esDays != null && atDays != null ? r3(esDays - atDays) : null,
-    es_note: `Earned Schedule against ${o.baseline ? `baseline ${o.baseline}` : 'the planned dates (this file has no baseline)'}, in ${period}s from the planned start (${iso(o.p0)}); days are working days of the project calendar.`,
+    es_note: `Earned Schedule against ${o.baseline ? `baseline ${o.baseline}` : 'the planned dates'}, in ${period}s from the first planned ${o.units === 'cost' ? 'cost' : o.units === 'hours' ? 'hours' : 'duration'} (${iso(o.p0)}); days are working days of the project calendar.`,
   };
 }
 

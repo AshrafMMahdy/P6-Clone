@@ -48,7 +48,7 @@ test('Earned Schedule by hand on three activities (cost basis): ES 2.5 weeks, AT
   near(c.totals.spi_t, 0.833, 'SPI(t)', 1e-9); near(c.totals.sv_t, -0.5, 'SV(t)');
   assert.equal(c.totals.es_date, '2026-03-19', 'the date at which the plan had earned 1750 (12:00 on the 19th)');
   near(c.totals.es_days, 17.5, 'ES in working days'); near(c.totals.at_days, 21, 'AT in working days'); near(c.totals.sv_t_days, -3.5, 'SV(t) in working days');
-  assert.match(c.totals.es_note, /^Earned Schedule against baseline BL, in weeks from the planned start \(2026-03-02\)/);
+  assert.match(c.totals.es_note, /^Earned Schedule against baseline BL, in weeks from the first planned cost \(2026-03-02\)/);
   // cost-based SPI at the data date, the same data: EV 1750 over PV 2100 (to the end of the week of the data date)
   assert.equal(c.totals.spi, Math.round((1750 / 2100) * 100) / 100);
 });
@@ -73,7 +73,7 @@ test('the duration basis: the same Earned Schedule on a file with no costs and n
   assert.equal(cost.totals.bac, 0);
   assert.equal(cost.totals.es, null);
   assert.equal(cost.totals.spi_t, null);
-  assert.match(cost.totals.es_note, /planned value is 0 \(no budgeted cost: use units: duration/);
+  assert.match(cost.totals.es_note, /planned value is 0 \(warnings says why and what to do\)/);
   assert.ok(cost.warnings.some((w) => /use units: duration/.test(w)));
   // an activity with a baseline duration shorter than its current one: the planned duration is the baseline's
   ok(b.db, [{ op: 'update_activity', id: 'C', duration_days: 21 }]);
@@ -124,15 +124,15 @@ test('not assessed, with the reason and never 1: no data date, no planned value,
   na(progressCurves(nd.db, [nd.projId], { period: 'week', units: 'duration' }), /no data date/);
   // planned value 0: hours with no resources, cost with no costs
   const b = build({ costs: false });
-  na(progressCurves(b.db, [b.projId], { period: 'week', units: 'hours' }), /planned value is 0 \(no budgeted units: use units: duration/);
-  na(progressCurves(b.db, [b.projId], { period: 'week' }), /planned value is 0 \(no budgeted cost/);
+  na(progressCurves(b.db, [b.projId], { period: 'week', units: 'hours' }), /planned value is 0 \(warnings says why and what to do\)/);
+  na(progressCurves(b.db, [b.projId], { period: 'week' }), /planned value is 0 \(warnings says why and what to do\)/);
   // no planned curve: the activities have durations but no planned dates (no baseline in this file either)
   const nb = project('NODATES', [{ id: 'A', duration_days: 5 }, { id: 'B', duration_days: 5, predecessors: ['A'] }], { start: '2026-03-02', dataDate: '2026-03-09' });
   for (const t of rows(nb.db, 'TASK')) for (const f of ['target_start_date', 'target_end_date', 'early_start_date', 'early_end_date']) t[f] = '';
   na(progressCurves(nb.db, [nb.projId], { period: 'week', units: 'duration' }), /no planned curve/);
   // an empty project
   const empty = project('EMPTY', [], { start: '2026-03-02' });
-  na(progressCurves(empty.db, [empty.projId], { units: 'duration' }), /planned value is 0 \(no activity has a planned duration\)/);
+  na(progressCurves(empty.db, [empty.projId], { units: 'duration' }), /planned value is 0 \(warnings says why and what to do\)/);
   // from/to cut the planned curve
   const cut = build({ costs: false });
   na(progressCurves(cut.db, [cut.projId], { period: 'week', units: 'duration', from: parseP6Date('2026-03-16 00:00')!, to: parseP6Date('2026-03-30 00:00')! }), /window cuts the planned curve/);
@@ -158,7 +158,7 @@ test('the basis follows the plan when the file has no baseline, and says so', ()
   for (const p of rows(b.db, 'PROJECT').filter((x) => x._baseline_of)) p._baseline_of = 'GONE';
   const c = progressCurves(b.db, [b.projId], { period: 'week', units: 'duration' });
   assert.equal(c.baseline, null);
-  assert.match(c.totals.es_note, /against the planned dates \(this file has no baseline\)/);
+  assert.match(c.totals.es_note, /^Earned Schedule against the planned dates, in weeks from the first planned duration/);
   assert.ok(c.totals.es != null && c.totals.es <= c.totals.pd!);
 });
 

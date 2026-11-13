@@ -3,6 +3,20 @@ import { parseP6Date } from '../dates.ts';
 import { sortFindings, type Finding, type Severity } from '../findings.ts';
 import { parseClndrData, hoursPerWeek } from '../calendar/clndr-data.ts';
 import { ENUMS, fieldType, fieldsFor, knownFields, knownTables } from './schema.ts';
+import { hoursAsDays, namesText, noDataDateUsed, plural } from '../notes.ts';
+
+/** What a table's row is called in a message (the Activity, relationship, resource... the planner knows, never the table's name). */
+const WORD: Record<string, string> = { TASK: 'activity', TASKPRED: 'relationship', PROJWBS: 'WBS element', PROJECT: 'project', RSRC: 'resource', TASKRSRC: 'resource assignment', CALENDAR: 'calendar', ACTVCODE: 'activity code value', ACTVTYPE: 'activity code type', UDFTYPE: 'user-defined field', UDFVALUE: 'user-defined field value', TASKACTV: 'activity code assignment', PROJCOST: 'expense', TASKMEMO: 'activity notebook topic', OBS: 'OBS element', CURRTYPE: 'currency', RSRCRATE: 'resource rate' };
+const wordOf = (table: string) => WORD[table] ?? `${table} row`;
+
+/** The scheduler's rule for loops (one place for it): level of effort and WBS summary activities are not part of a loop, so a chain through one is not a loop. */
+export const inLoopCheck = (taskType: string | undefined): boolean => taskType !== 'TT_LOE' && taskType !== 'TT_WBS';
+/** The loops of a set of relationships (pred -> succ pairs): the strongly connected sets of more than one activity. */
+export function loopsOfLinks(links: Iterable<[string, string]>): string[][] {
+  const succ = new Map<string, string[]>();
+  for (const [a, b] of links) { let l = succ.get(a); if (!l) succ.set(a, (l = [])); l.push(b); }
+  return findLoops(succ);
+}
 
 const KNOWN_VERSION = /^(3\.5|4\.[01]|5\.0(\.\d+)?|6\.[0-2](\.\d+)?|7\.0(\.\d+)?|8\.[1-4](\.\d+)?|1[5-9]\.\d+|2[0-6]\.\d+)$/;
 const PER_KIND_CAP = 5;
@@ -69,6 +83,15 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   const T = db.tables;
   const version = db.header?.version ?? '';
   const raw = db.header?.raw ?? [];
+  // activities and projects are named by their Activity ID and Project ID in every message (never an internal id)
+  const projShort = new Map((T.PROJECT?.rows ?? []).map((p) => [p.proj_id, p.proj_short_name || p.proj_id]));
+  const manyProj = projShort.size > 1;
+  const firstTask = new Map<string, Row>();
+  for (const t of T.TASK?.rows ?? []) if (!firstTask.has(t.task_id)) firstTask.set(t.task_id, t);
+  const actName = (t: Row) => `${t.task_code || '(no Activity ID)'}${manyProj ? ` (project ${projShort.get(t.proj_id) ?? t.proj_id})` : ''}`;
+  const act = (id: string) => { const t = firstTask.get(id); return t ? actName(t) : `(an activity that is not in the file, internal id ${id})`; };
+  const dupTaskRows = new Set<Row>(); // TASK rows reported as a repeated key: not reported again as a repeated Activity ID
+  const sameRow = (a: Row, b: Row) => { const ks = new Set([...Object.keys(a), ...Object.keys(b)]); for (const k of ks) if ((a[k] ?? '') !== (b[k] ?? '')) return false; return true; };
 
   // Header
   if (db.header) {
@@ -81,6 +104,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   const known = knownTables();
   const ref = fieldsFor(KNOWN_VERSION.test(version) ? version : '19.12', 'TASK') ? (KNOWN_VERSION.test(version) ? version : '19.12') : '7.0';
   for (const t of Object.values(T)) {
+    if (t.name === 'EPS' || t.name.startsWith('_')) continue; // the clone's own in-memory tables (never written to a file)
     if (!known.has(t.name)) {
       c.add({ severity: 'warning', code: 'TABLE_UNKNOWN', table: t.name, message: `Unknown table ${t.name}.`, p6: 'P6 ignores tables it does not recognise.' });
       continue;
@@ -94,14 +118,14 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
     for (const f of t.fields) {
       if (kf.size && !kf.has(f) && !f.startsWith('_')) { // _fields are the clone's own, never written to a file
         const s = suggest(f, kf);
-        c.add({ severity: 'warning', code: 'FIELD_UNKNOWN', table: t.name, field: f, message: `${t.name}.${f} is not a P6 field${s ? `; did you mean ${s}?` : ''}.`, p6: 'P6 ignores unknown columns, so this data is lost on import.' });
+        c.add({ severity: 'warning', code: 'FIELD_UNKNOWN', table: t.name, field: f, message: `${t.name}.${f} is not a P6 field${s ? ` (did you mean ${s}?)` : '.'}`, p6: 'P6 ignores unknown columns, so this data is lost on import.' });
       }
     }
     const expected = fieldsFor(ref, t.name) ?? [];
     const missing = expected.filter((f) => !t.fields.includes(f));
     if (missing.length) c.add({ severity: 'info', code: 'MISSING_FIELD', table: t.name, message: `${t.name} lacks ${missing.length} of ${expected.length} P6 ${ref} fields: ${missing.slice(0, 12).join(', ')}${missing.length > 12 ? ', …' : ''}.`, p6: 'P6 fills missing columns with defaults.' });
 
-    const seen = new Set<string>();
+    const seen = new Map<string, Row>();
     // each column's rule, worked out once per table (not per value: a big file has millions of values)
     const cols = t.fields.filter((f) => kf.has(f)).map((f) => ({ f, max: MAX_LEN[`${t.name}.${f}`], en: ENUMS[`${t.name}.${f}`], ty: fieldType(f) }));
     const hasKey = !!key && t.fields.includes(key);
@@ -110,8 +134,13 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
       if (hasKey) {
         const k = r[key];
         if (!k) c.add({ severity: 'error', code: 'EMPTY_KEY', table: t.name, row, field: key, message: `${t.name} row ${row} has empty ${key}.`, p6: 'P6 rejects the row.' });
-        else if (seen.has(k)) c.add({ severity: 'fatal', code: 'DUP_KEY', table: t.name, row, key: k, field: key, message: `Duplicate ${t.name}.${key} = ${k}.`, p6: 'P6 import fails with a unique constraint error.' });
-        seen.add(k);
+        else if (seen.has(k)) {
+          const same = sameRow(seen.get(k)!, r);
+          if (t.name === 'TASK') dupTaskRows.add(r);
+          c.add({ severity: 'fatal', code: 'DUP_KEY', table: t.name, row, key: k, field: key, message: t.name === 'TASK'
+            ? (same ? `Activity ${actName(r)} is in the file twice, as two identical rows. save {repair: true} keeps one.` : `Activity ${actName(r)} shares its internal id with another activity row. save {repair: true} gives this one a fresh id when its Activity ID tells the two apart.`)
+            : `Two ${wordOf(t.name)}s have the same id (${k}). save {repair: true} ${same ? 'keeps one' : 'gives the second a fresh id when nothing points at it'}.`, p6: 'P6 import fails with a unique constraint error.' });
+        } else seen.set(k, r);
       }
       for (const { f, max, en, ty } of cols) {
         const v = r[f];
@@ -148,9 +177,20 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
         if (!v || keys.has(v)) return;
         if (t.name === 'PROJWBS' && f === 'parent_wbs_id' && r.proj_node_flag === 'Y') return; // EPS parent, not exported
         if (t.name === 'CALENDAR' && f === 'proj_id') return;
-        c.add({ severity: sev, code: 'DANGLING_REF', table: t.name, row: i + 1, field: f, key: key ? r[key] : undefined, message: `${t.name}.${f} = ${v} not found in ${target}${T[target] ? '' : ' (table missing)'}.`, p6: REF_P6[sev] });
+        c.add({ severity: sev, code: 'DANGLING_REF', table: t.name, row: i + 1, field: f, key: key ? r[key] : undefined, message: dangling(t.name, r, f, v, target, !!T[target]), p6: REF_P6[sev] });
       });
     }
+  }
+
+  // a reference that points at nothing, in words (the rows are named by Activity ID where they can be)
+  function dangling(table: string, r: Row, f: string, v: string, target: string, targetKept: boolean): string {
+    const what = `${wordOf(target)}${targetKept ? '' : ' (the file has no such table)'}`;
+    if (table === 'TASKPRED') {
+      const other = f === 'pred_task_id' ? `the successor ${act(r.task_id)}` : `the predecessor ${act(r.pred_task_id)}`;
+      if (f === 'pred_task_id' || f === 'task_id') return `A relationship of ${other} points at an activity that is not in the file (internal id ${v}). ${f === 'task_id' ? 'save {repair: true} removes it.' : 'It is kept as an external link; edit delete_relationship removes it once the activity is known.'}`;
+    }
+    const owner = table === 'TASK' ? `Activity ${actName(r)}` : `A ${wordOf(table)}${r[KEYS[table]] ? ` (id ${r[KEYS[table]]})` : ''}`;
+    return `${owner} points at a ${what} that is not in the file (${f.replace(/_id$/, '').replace(/_/g, ' ')} id ${v}).${table === 'TASK' ? '' : ''}`;
   }
 
   // Project structure
@@ -160,10 +200,10 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   const wbs = T.PROJWBS?.rows ?? [];
   for (const p of projects) {
     const nodes = wbs.filter((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y');
-    if (!nodes.length) c.add({ severity: 'fatal', code: 'NO_PROJ_NODE', table: 'PROJWBS', key: p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has no PROJWBS row with proj_node_flag = Y.`, p6: 'P6 import fails: every project needs its root WBS node.' });
-    if (nodes.length > 1) c.add({ severity: 'error', code: 'MULTI_PROJ_NODE', table: 'PROJWBS', key: p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has ${nodes.length} root WBS nodes.`, p6: 'P6 import fails.' });
+    if (!nodes.length) c.add({ severity: 'fatal', code: 'NO_PROJ_NODE', table: 'PROJWBS', key: p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has no root WBS element. save {repair: true} adds it.`, p6: 'P6 import fails: every project needs its root WBS node.' });
+    if (nodes.length > 1) c.add({ severity: 'error', code: 'MULTI_PROJ_NODE', table: 'PROJWBS', key: p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has ${nodes.length} root WBS elements.`, p6: 'P6 import fails.' });
     if (!p.plan_start_date) c.add({ severity: 'error', code: 'NO_PLAN_START', table: 'PROJECT', key: p.proj_id, field: 'plan_start_date', message: `Project ${p.proj_short_name || p.proj_id} has no planned start.`, p6: 'P6 requires a project planned start.' });
-    if (!p.last_recalc_date) c.add({ severity: 'warning', code: 'NO_DATA_DATE', table: 'PROJECT', key: p.proj_id, field: 'last_recalc_date', message: `Project ${p.proj_short_name || p.proj_id} has no data date (last_recalc_date).`, p6: 'P6 uses the planned start as data date.' });
+    if (!p.last_recalc_date) c.add({ severity: 'warning', code: 'NO_DATA_DATE', table: 'PROJECT', key: p.proj_id, field: 'last_recalc_date', message: `Project ${p.proj_short_name || p.proj_id} has no data date. ${noDataDateUsed(p.plan_start_date ? p.plan_start_date.slice(0, 16) : '(none either)')} Set one with edit set_project data_date, or schedule with data_date.`, p6: 'P6 uses the planned start as data date.' });
   }
 
   // WBS tree
@@ -172,27 +212,27 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
     const visited = new Set<string>();
     let cur: Row | undefined = w;
     while (cur && cur.proj_node_flag !== 'Y') {
-      if (visited.has(cur.wbs_id)) { c.add({ severity: 'fatal', code: 'WBS_CYCLE', table: 'PROJWBS', key: w.wbs_id, message: `WBS ${w.wbs_short_name || w.wbs_id} is in a parent cycle.`, p6: 'P6 import fails.' }); break; }
+      if (visited.has(cur.wbs_id)) { c.add({ severity: 'fatal', code: 'WBS_CYCLE', table: 'PROJWBS', key: w.wbs_id, message: `WBS element ${w.wbs_short_name || w.wbs_id} is in a parent cycle (each is the parent of the other).`, p6: 'P6 import fails.' }); break; }
       visited.add(cur.wbs_id);
       const parent = wbsById.get(cur.parent_wbs_id);
-      if (!parent) { c.add({ severity: 'warning', code: 'WBS_ORPHAN', table: 'PROJWBS', key: w.wbs_id, message: `WBS ${w.wbs_short_name || w.wbs_id} does not lead to its project root node.`, p6: 'P6 places it directly under the project.' }); break; }
-      if (parent.proj_id !== w.proj_id) { c.add({ severity: 'error', code: 'WBS_CROSS_PROJECT', table: 'PROJWBS', key: w.wbs_id, message: `WBS ${w.wbs_short_name || w.wbs_id} has a parent in another project.`, p6: 'P6 import fails.' }); break; }
+      if (!parent) { c.add({ severity: 'warning', code: 'WBS_ORPHAN', table: 'PROJWBS', key: w.wbs_id, message: `WBS element ${w.wbs_short_name || w.wbs_id} does not lead up to its project's root WBS element. save {repair: true} puts it under the root.`, p6: 'P6 places it directly under the project.' }); break; }
+      if (parent.proj_id !== w.proj_id) { c.add({ severity: 'error', code: 'WBS_CROSS_PROJECT', table: 'PROJWBS', key: w.wbs_id, message: `WBS element ${w.wbs_short_name || w.wbs_id} has a parent in another project.`, p6: 'P6 import fails.' }); break; }
       cur = parent;
     }
   }
 
   // Calendars
   if (T.CALENDAR?.rows.length && !T.CALENDAR.fields.includes('clndr_data')) {
-    c.add({ severity: 'warning', code: 'CAL_NO_DATA', table: 'CALENDAR', message: 'CALENDAR has no clndr_data column, so no calendar defines work hours or holidays.', p6: 'P6 creates the calendars with its default work week and no holidays.' });
+    c.add({ severity: 'warning', code: 'CAL_NO_DATA', table: 'CALENDAR', message: 'The file\'s calendars carry no work-week definition (no clndr_data column), so none defines work hours or holidays: the standard week (Monday to Friday, 8 hours a day) is used.', p6: 'P6 creates the calendars with its default work week and no holidays.' });
   }
   for (const [i, r] of (T.CALENDAR?.rows ?? []).entries()) {
     if (!T.CALENDAR.fields.includes('clndr_data')) break;
-    if (!r.clndr_data) { c.add({ severity: 'warning', code: 'CAL_EMPTY', table: 'CALENDAR', row: i + 1, key: r.clndr_id, message: `Calendar ${r.clndr_name} has no clndr_data.`, p6: 'P6 creates it with the default work week.' }); continue; }
+    if (!r.clndr_data) { c.add({ severity: 'warning', code: 'CAL_EMPTY', table: 'CALENDAR', row: i + 1, key: r.clndr_id, message: `Calendar ${r.clndr_name} carries no work-week definition (clndr_data is empty): the standard week (Monday to Friday, 8 hours a day) is used.`, p6: 'P6 creates it with the default work week.' }); continue; }
     try {
       const cal = parseClndrData(r.clndr_data);
       const wh = hoursPerWeek(cal);
-      if (wh === 0) c.add({ severity: 'warning', code: 'CAL_NO_WORK', table: 'CALENDAR', row: i + 1, key: r.clndr_id, message: `Calendar ${r.clndr_name} has no work hours in its week.`, p6: 'P6 imports it; activities on it cannot be scheduled.' });
-      if (r.week_hr_cnt && Math.abs(Number(r.week_hr_cnt) - wh) > 0.01) c.add({ severity: 'info', code: 'CAL_HOURS_MISMATCH', table: 'CALENDAR', row: i + 1, key: r.clndr_id, message: `Calendar ${r.clndr_name}: week_hr_cnt ${r.week_hr_cnt} but work week has ${wh} h.`, p6: 'P6 uses week_hr_cnt only for display/unit conversion.' });
+      if (wh === 0) c.add({ severity: 'warning', code: 'CAL_NO_WORK', table: 'CALENDAR', row: i + 1, key: r.clndr_id, message: `Calendar ${r.clndr_name} has no work hours in its week, so an activity on it cannot be scheduled. Give it a work week (edit add_calendar) or move its activities to another calendar (edit update_activity calendar).`, p6: 'P6 imports it; activities on it cannot be scheduled.' });
+      if (r.week_hr_cnt && Math.abs(Number(r.week_hr_cnt) - wh) > 0.01) c.add({ severity: 'info', code: 'CAL_HOURS_MISMATCH', table: 'CALENDAR', row: i + 1, key: r.clndr_id, message: `Calendar ${r.clndr_name}: the hours per week it states (${r.week_hr_cnt}) differ from the work week it defines (${wh}).`, p6: 'P6 uses week_hr_cnt only for display/unit conversion.' });
     } catch (e) {
       c.add({ severity: 'error', code: 'CAL_PARSE', table: 'CALENDAR', row: i + 1, key: r.clndr_id, field: 'clndr_data', message: `Calendar ${r.clndr_name}: clndr_data does not parse (${(e as Error).message}); read_table gives clndr_data as it is, with the week and exceptions read from it as far as the text allows.`, p6: 'P6 import fails or the calendar is unusable.' });
     }
@@ -200,26 +240,27 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
 
   // Activities
   const projById = new Map(projects.map((p) => [p.proj_id, p]));
+  const calHours = new Map((T.CALENDAR?.rows ?? []).map((c) => [c.clndr_id, c.day_hr_cnt]));
   const codes = new Map<string, string>();
   for (const [i, r] of (T.TASK?.rows ?? []).entries()) {
     const row = i + 1;
     const id = r.task_code || r.task_id;
     const ck = `${r.proj_id}|${r.task_code}`;
     if (r.task_code) {
-      if (codes.has(ck)) c.add({ severity: 'error', code: 'DUP_TASK_CODE', table: 'TASK', row, key: r.task_id, field: 'task_code', message: `Activity ID ${r.task_code} is used twice in project ${r.proj_id}.`, p6: 'P6 requires unique Activity IDs within a project.' });
+      if (codes.has(ck) && !dupTaskRows.has(r)) c.add({ severity: 'error', code: 'DUP_TASK_CODE', table: 'TASK', row, key: r.task_id, field: 'task_code', message: `Activity ID ${r.task_code} is used twice in project ${projShort.get(r.proj_id) ?? r.proj_id}. Give one of them another ID (edit update_activity new_id).`, p6: 'P6 requires unique Activity IDs within a project.' });
       codes.set(ck, r.task_id);
-    } else if (T.TASK.fields.includes('task_code')) c.add({ severity: 'error', code: 'EMPTY_TASK_CODE', table: 'TASK', row, key: r.task_id, message: `Activity ${r.task_id} has no Activity ID.`, p6: 'P6 rejects activities without an ID.' });
-    if (!r.clndr_id && T.TASK.fields.includes('clndr_id')) c.add({ severity: 'warning', code: 'NO_CALENDAR', table: 'TASK', row, key: id, message: `Activity ${id} has no calendar.`, p6: 'P6 assigns the project default calendar.' });
+    } else if (T.TASK.fields.includes('task_code')) c.add({ severity: 'error', code: 'EMPTY_TASK_CODE', table: 'TASK', row, key: r.task_id, message: `An activity of project ${projShort.get(r.proj_id) ?? r.proj_id}${r.task_name ? ` ("${String(r.task_name).slice(0, 40)}")` : ''} has no Activity ID. save {repair: true} cannot name it: give it one with edit update_activity new_id.`, p6: 'P6 rejects activities without an ID.' });
+    if (!r.clndr_id && T.TASK.fields.includes('clndr_id')) c.add({ severity: 'warning', code: 'NO_CALENDAR', table: 'TASK', row, key: id, message: `Activity ${actName(r)} has no calendar: the project's default calendar is used.`, p6: 'P6 assigns the project default calendar.' });
     const isMile = r.task_type === 'TT_Mile' || r.task_type === 'TT_FinMile';
-    if (isMile && Number(r.target_drtn_hr_cnt || 0) > 0) c.add({ severity: 'warning', code: 'MILESTONE_DURATION', table: 'TASK', row, key: id, message: `Milestone ${id} has duration ${r.target_drtn_hr_cnt} h.`, p6: 'P6 sets milestone durations to zero.' });
-    for (const f of ['target_drtn_hr_cnt', 'remain_drtn_hr_cnt']) if (Number(r[f]) < 0) c.add({ severity: 'error', code: 'NEG_DURATION', table: 'TASK', row, field: f, key: id, message: `Activity ${id} has negative ${f}.`, p6: 'P6 rejects negative durations.' });
+    if (isMile && Number(r.target_drtn_hr_cnt || 0) > 0) c.add({ severity: 'warning', code: 'MILESTONE_DURATION', table: 'TASK', row, key: id, message: `Milestone ${actName(r)} has a duration of ${hoursAsDays(Number(r.target_drtn_hr_cnt), Number(calHours.get(r.clndr_id)) || 8)}: P6 sets a milestone's duration to zero. save {repair: true} sets it, or edit update_activity duration_days 0.`, p6: 'P6 sets milestone durations to zero.' });
+    for (const f of ['target_drtn_hr_cnt', 'remain_drtn_hr_cnt']) if (Number(r[f]) < 0) c.add({ severity: 'error', code: 'NEG_DURATION', table: 'TASK', row, field: f, key: id, message: `Activity ${actName(r)} has a negative ${f === 'target_drtn_hr_cnt' ? 'original' : 'remaining'} duration. save {repair: true} takes it from the activity's other fields; or edit update_activity ${f === 'target_drtn_hr_cnt' ? 'duration_days' : 'remaining_days'}.`, p6: 'P6 rejects negative durations.' });
     const as = parseP6Date(r.act_start_date), ae = parseP6Date(r.act_end_date);
-    if (as != null && ae != null && ae < as) c.add({ severity: 'error', code: 'ACT_DATES_ORDER', table: 'TASK', row, key: id, message: `Activity ${id}: actual finish before actual start.`, p6: 'P6 rejects the actual dates.' });
-    if (r.status_code === 'TK_Complete' && (as == null || ae == null)) c.add({ severity: 'warning', code: 'STATUS_MISMATCH', table: 'TASK', row, key: id, message: `Activity ${id} is Completed without both actual dates.`, p6: 'P6 fills missing actuals from early dates.' });
-    if (r.status_code === 'TK_Active' && (as == null || ae != null)) c.add({ severity: 'warning', code: 'STATUS_MISMATCH', table: 'TASK', row, key: id, message: `Activity ${id} is In Progress but ${as == null ? 'has no actual start' : 'has an actual finish'}.`, p6: 'P6 derives status from actual dates.' });
-    if (r.status_code === 'TK_NotStart' && (as != null || ae != null)) c.add({ severity: 'warning', code: 'STATUS_MISMATCH', table: 'TASK', row, key: id, message: `Activity ${id} is Not Started but has actual dates.`, p6: 'P6 derives status from actual dates.' });
+    if (as != null && ae != null && ae < as) c.add({ severity: 'error', code: 'ACT_DATES_ORDER', table: 'TASK', row, key: id, message: `Activity ${actName(r)}: the actual finish is before the actual start. save {repair: true} clears the finish (the activity stays in progress), or correct it with edit update_activity actual_finish.`, p6: 'P6 rejects the actual dates.' });
+    if (r.status_code === 'TK_Complete' && (as == null || ae == null)) c.add({ severity: 'warning', code: 'STATUS_MISMATCH', table: 'TASK', row, key: id, message: `Activity ${actName(r)} is Completed without both actual dates. Give them with edit update_activity actual_start / actual_finish.`, p6: 'P6 fills missing actuals from early dates.' });
+    if (r.status_code === 'TK_Active' && (as == null || ae != null)) c.add({ severity: 'warning', code: 'STATUS_MISMATCH', table: 'TASK', row, key: id, message: `Activity ${actName(r)} is In Progress but ${as == null ? 'has no actual start' : 'has an actual finish'}. Correct it with edit update_activity (actual_start / actual_finish).`, p6: 'P6 derives status from actual dates.' });
+    if (r.status_code === 'TK_NotStart' && (as != null || ae != null)) c.add({ severity: 'warning', code: 'STATUS_MISMATCH', table: 'TASK', row, key: id, message: `Activity ${actName(r)} is Not Started but has actual dates. Correct it with edit update_activity (clear the actuals, or start it).`, p6: 'P6 derives status from actual dates.' });
     const dd = parseP6Date(projById.get(r.proj_id)?.last_recalc_date);
-    if (dd != null && ((as != null && as > dd) || (ae != null && ae > dd))) c.add({ severity: 'warning', code: 'ACTUAL_AFTER_DD', table: 'TASK', row, key: id, message: `Activity ${id} has actual dates after the data date.`, p6: 'P6 imports them; the schedule log reports actuals in the future.' });
+    if (dd != null && ((as != null && as > dd) || (ae != null && ae > dd))) c.add({ severity: 'warning', code: 'ACTUAL_AFTER_DD', table: 'TASK', row, key: id, message: `Activity ${actName(r)} has ${[as != null && as > dd! ? `an actual start ${r.act_start_date.slice(0, 16)}` : '', ae != null && ae > dd! ? `an actual finish ${r.act_end_date.slice(0, 16)}` : ''].filter(Boolean).join(' and ')}, after the data date ${projById.get(r.proj_id)!.last_recalc_date.slice(0, 16)}. Give a later data date (schedule data_date) or correct the actuals (edit update_activity).`, p6: 'P6 imports them; its schedule log lists actual dates after the data date.' });
   }
 
   // Remaining work planned before the data date (one finding per project)
@@ -232,26 +273,26 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
     const first = early.reduce((a, r) => (parseP6Date(r.early_start_date)! < parseP6Date(a.early_start_date)! ? r : a));
     const ps = parseP6Date(p.plan_start_date);
     const hint = !mine.some((r) => r.act_start_date) && ps != null && ps < dd ? ` No activity has progress, so the data date was probably meant to be the project start (${p.plan_start_date}).` : '';
-    c.add({ severity: 'warning', code: 'FORECAST_BEFORE_DD', table: 'TASK', key: first.task_code || first.task_id, field: 'early_start_date', message: `Project ${p.proj_short_name || p.proj_id}: data date is ${p.last_recalc_date}, but ${early.length} of ${mine.length} activities without an actual start are planned to start before it (earliest ${first.task_code || first.task_id} on ${first.early_start_date}).${hint}`, p6: 'P6 schedules remaining work from the data date: on F9 these activities move to the data date or later.' });
+    c.add({ severity: 'warning', code: 'FORECAST_BEFORE_DD', table: 'TASK', key: first.task_code || first.task_id, field: 'early_start_date', message: `Project ${p.proj_short_name || p.proj_id}: data date is ${p.last_recalc_date}, but ${early.length} of ${plural(mine.length, 'activity', 'activities')} without an actual start ${early.length === 1 ? 'is' : 'are'} planned to start before it (earliest ${first.task_code || first.task_id} on ${first.early_start_date}).${hint} Schedule (schedule) to move them to the data date or later.`, p6: 'P6 schedules remaining work from the data date: on F9 these activities move to the data date or later.' });
   }
 
   // Relationships
   const preds = T.TASKPRED?.rows ?? [];
   const pairs = new Set<string>();
-  const succOf = new Map<string, string[]>();
+  const links: [string, string][] = [];
   for (const [i, r] of preds.entries()) {
     const row = i + 1;
-    if (r.task_id && r.task_id === r.pred_task_id) c.add({ severity: 'error', code: 'REL_SELF', table: 'TASKPRED', row, key: r.task_pred_id, message: `Activity ${r.task_id} is linked to itself.`, p6: 'P6 rejects the relationship.' });
+    if (r.task_id && r.task_id === r.pred_task_id) c.add({ severity: 'error', code: 'REL_SELF', table: 'TASKPRED', row, key: r.task_pred_id, message: `Activity ${act(r.task_id)} is linked to itself. Remove it: edit delete_relationship pred ${firstTask.get(r.task_id)?.task_code ?? r.task_id} succ ${firstTask.get(r.task_id)?.task_code ?? r.task_id}.`, p6: 'P6 rejects the relationship.' });
     // P6 allows several relationships between one pair (e.g. SS + FF), but not two of the same type.
     const pk = `${r.pred_task_id}>${r.task_id}>${r.pred_type}`;
-    if (pairs.has(pk)) c.add({ severity: 'warning', code: 'REL_DUP', table: 'TASKPRED', row, key: r.task_pred_id, message: `Two ${r.pred_type} relationships between ${r.pred_task_id} and ${r.task_id}.`, p6: 'P6 normally prevents this when editing, but imports it (seen in real P6 exports); both links are scheduled.' });
+    if (pairs.has(pk)) c.add({ severity: 'warning', code: 'REL_DUP', table: 'TASKPRED', row, key: r.task_pred_id, message: `Two ${r.pred_type.slice(3)} relationships between ${act(r.pred_task_id)} and ${act(r.task_id)}: both are scheduled. edit set_predecessors on ${firstTask.get(r.task_id)?.task_code ?? r.task_id} replaces its links with the ones you want.`, p6: 'P6 normally prevents this when editing, but imports it (seen in real P6 exports); both links are scheduled.' });
     pairs.add(pk);
-    let a = succOf.get(r.pred_task_id);
-    if (!a) succOf.set(r.pred_task_id, (a = []));
-    a.push(r.task_id);
+    const a1 = firstTask.get(r.pred_task_id), b1 = firstTask.get(r.task_id);
+    if (a1 && b1 && inLoopCheck(a1.task_type) && inLoopCheck(b1.task_type)) links.push([r.pred_task_id, r.task_id]);
   }
-  for (const loop of findLoops(succOf)) {
-    c.add({ severity: 'warning', code: 'REL_LOOP', table: 'TASKPRED', message: `Relationship loop: ${loop.slice(0, 10).join(' → ')}${loop.length > 10 ? ' → …' : ''}.`, p6: 'P6 imports the file, but scheduling stops with a loop error.' });
+  // loops follow the scheduler's rule (inLoopCheck): a chain through a level of effort or a WBS summary is not a loop, and does not stop scheduling
+  for (const loop of loopsOfLinks(links)) {
+    c.add({ severity: 'warning', code: 'REL_LOOP', table: 'TASKPRED', message: `These activities are in a loop: ${namesText(loop.map((id) => act(id)))}. Scheduling stops on a loop: remove one relationship between them (edit delete_relationship), or schedule with break_loops: true.`, p6: 'P6 imports the file, but scheduling stops with a loop error.' });
   }
 
   return sortFindings(c.finish());

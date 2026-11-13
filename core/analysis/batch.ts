@@ -140,9 +140,15 @@ export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenar
   const keptNote = !stopped && store ? store.finish() : undefined;
   // the best few (earliest finish, then cheapest) carry the activities whose dates moved, over every scenario (those kept too)
   const order = results.map((_r, i) => i).filter((i) => results[i].ok).sort((a, b) => (parseP6Date(results[a].finish ?? '') ?? Infinity) - (parseP6Date(results[b].finish ?? '') ?? Infinity) || (results[a].cost ?? 0) - (results[b].cost ?? 0));
+  // a best is named only when it finishes no later than the schedule as it stands
+  const top1 = order.length ? results[order[0]] : null, top1Finish = top1 ? parseP6Date(top1.finish ?? '') : null;
+  const improves = top1 != null && top1Finish != null && base.m.finish != null && top1Finish <= base.m.finish;
+  const best = improves ? top1!.name : null;
+  const bestNote = !order.length ? 'No scenario ran, so there is no best: see each scenario\'s error.' : improves ? null
+    : `No scenario improves on the schedule as it stands (finish ${base.m.finish != null ? formatP6Date(base.m.finish).slice(0, 16) : 'unknown'}): the earliest, "${top1!.name}", finishes ${top1!.finish_delta_days} days later. \`ranked\` lists them by finish; try other scenarios.`;
   const scenariosOut = results.map((r) => ({ ...r }));
   for (const i of order.slice(0, top)) { scenariosOut[i].changed = moved[i]!; scenariosOut[i].changed_total = movedTotal[i]; }
-  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best: order.length ? results[order[0]].name : null, scenarios: scenariosOut,
+  return { ok: true as const, base: { finish: base.m.finish != null ? formatP6Date(base.m.finish) : null, critical: base.m.critical.size, cost: Math.round(base.m.cost * 100) / 100 }, best, ...(bestNote ? { best_note: bestNote } : {}), ranked: order.map((i) => results[i].name), scenarios: scenariosOut,
     ...(stopped ? { partial: true as const, stopped, scenarios_done: results.length, scenarios_requested: scenarios.length, ...(failed ? { error: failed.message } : {}), ...(kept ? { kept } : {}) } : {}),
     ...(store ? { resumed } : {}), ...(redone ? { redone } : {}), ...(keptNote ? { keptNote } : {}) };
 }

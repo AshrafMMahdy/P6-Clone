@@ -1,5 +1,6 @@
 // Schedule analysis tools of the MCP server (kept apart from server.ts so the two grow without stepping on each other):
 // P6 Check Schedule and DCMA 14-point; later lint, float paths, curves, what-ifs, crashing and delay analysis.
+import { noLimitSentence } from '../core/notes.ts';
 import { CurvesRefused, progressCurves, resourceHistograms } from '../core/analysis/curves.ts';
 import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween, writeFloatPaths } from '../core/schedule/floatPaths.ts';
 import type { Db, Row } from '../core/db.ts';
@@ -245,11 +246,13 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       // or cost resource with no limit set) counts as over-allocated in every period while its severity is none, so periods alone would put it above real over-allocations.
       const SEVERITY_RANK = { critical: 3, moderate: 2, minor: 1, none: 0 } as const;
       const rank = [...r.resources].sort((x, y) => SEVERITY_RANK[y.severity] - SEVERITY_RANK[x.severity] || y.over_allocated_periods - x.over_allocated_periods || (x.resource < y.resource ? -1 : x.resource > y.resource ? 1 : 0));
-      const done = out({ report: r.report, period: r.period, resources: rank.slice(0, LISTED).map(({ periods: _p, ...x }) => x), resources_total: r.resources.length, resources_order_note: 'The resources are listed by severity of over-allocation first (critical, then moderate, then minor, then none), then by how many periods are over-allocated (most first), then by resource ID. A resource with no limit set counts as over-allocated in every period but has severity none, so it comes after the ones that really exceed their limit.' }) as { exported?: { files: { path: string }[]; error?: string } };
+      const done = out({ report: r.report, period: r.period, resources: rank.slice(0, LISTED).map(({ periods: _p, ...x }) => x), resources_total: r.resources.length, ...(r.resources.length ? { resources_order_note: `The resources are listed by severity of over-allocation first (critical, then moderate, then minor, then none), then by how many periods are over-allocated (most first), then by resource ID. ${noLimitSentence('counts as over-allocated in every period in which it has work, with severity none, so it comes after the resources that really exceed a limit')}` } : {}) }) as { exported?: { files: { path: string }[]; error?: string } };
       const file = done.exported?.files.find((f) => f.path.endsWith('-periods.csv'))?.path;
+      if (!r.resources.length) return { ...done, resources_note: 'The open projects have no resource assignments (in this project, if you named one), so there is nothing to chart. Assign resources with edit assign_resource.' };
+      const all = r.resources.length === 1 ? 'the 1 resource' : `all ${r.resources.length} resources`;
       return { ...done, periods_note: file
-        ? `The per-period figures of all ${r.resources.length} resources are not in this answer, only in the result file ${file} (table periods; columns ${PERIOD_COLUMNS.join(', ')}): the rows whose resource is a resource's ID are that resource's periods, and each resource's periods_total says how many it has.`
-        : `The per-period figures of all ${r.resources.length} resources are not in this answer, and the result file that holds them could not be written${done.exported?.error ? ' (exported.error says why)' : ''}: call again with export set to a folder inside the write root (table periods; columns ${PERIOD_COLUMNS.join(', ')}).` };
+        ? `The per-period figures of ${all} are not in this answer, only in the result file ${file} (table periods; columns ${PERIOD_COLUMNS.join(', ')}): the rows whose resource is a resource's ID are that resource's periods, and each resource's periods_total says how many it has.`
+        : `The per-period figures of ${all} are not in this answer, and the result file that holds them could not be written${done.exported?.error ? ' (exported.error says why)' : ''}: call again with export set to a folder inside the write root (table periods; columns ${PERIOD_COLUMNS.join(', ')}).` };
     }
     case 'evaluate_batch': {
       if (!Array.isArray(a.scenarios) || !a.scenarios.length) fail('bad_input', 'scenarios must be a non-empty list.', 'e.g. [{"name": "A shorter", "overrides": [{"op": "update_activity", "id": "A1000", "duration_days": 5}]}]');

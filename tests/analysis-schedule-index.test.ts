@@ -54,7 +54,7 @@ test('health: a schedule with a loop has no score; the loop is named the way the
   assert.ok(G('withCycle', 'cpm').cycles.length > 0, 'the source finds the loop and goes on');
   assert.equal(r.health.result, 'not_assessed');
   assert.equal(r.health.score, undefined);
-  assert.match(r.health.note!, /has a loop.*Loop: [XYZ] → [XYZ] → [XYZ] → [XYZ]/);
+  assert.match(r.health.note!, /has a loop.*These activities are in a loop: [XYZ], [XYZ], [XYZ]\./);
   assert.equal(r.loops.length, 1);
   assert.deepEqual([...r.loops[0].activities].sort(), ['X', 'Y', 'Z']);
   // P6's stored float is not valid with a loop: the float sub-metric is not assessed, and the answer says why
@@ -66,7 +66,7 @@ test('health: a schedule with a loop has no score; the loop is named the way the
   assert.equal(r.risk.grade, undefined);
   assert.equal(r.risk.level, undefined);
   assert.equal(r.risk.status, undefined);
-  assert.match(r.risk.note!, /^The risk index is not assessed: The logic has a loop.*Loop: [XYZ] → [XYZ] → [XYZ] → [XYZ].*Remove the loop/);
+  assert.match(r.risk.note!, /^The risk index is not assessed: the logic has a loop \(loops names it\)\./);
   assert.equal(r.risk.assessed_sub_metrics, 0);
   assert.deepEqual(r.risk.drivers, []);
   assert.ok(Object.values(r.risk.sub_metrics).every((m) => !m.active && m.score === null && /loop/.test(m.reason!)));
@@ -199,10 +199,10 @@ test('not assessed: no baseline, no data date, no resources, nothing due, and th
   const a = scheduleIndex(B.cleanChain().db, {});
   assert.equal(a.risk.sub_metrics.baseline_drift.active, false);
   assert.equal(a.risk.sub_metrics.baseline_drift.score, null);
-  assert.equal(a.risk.sub_metrics.baseline_drift.reason, 'No project baseline is assigned.');
+  assert.equal(a.risk.sub_metrics.baseline_drift.reason, 'No project baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.');
   assert.equal(a.baseline, null);
   // a baseline that is not there is named in the reason the way dcma_14 words it
-  assert.equal(scheduleIndex(B.delayed().db, { baseline: 'bl2' }).risk.sub_metrics.baseline_drift.reason, 'No BL2 baseline is assigned.');
+  assert.equal(scheduleIndex(B.delayed().db, { baseline: 'bl2' }).risk.sub_metrics.baseline_drift.reason, 'No BL2 baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.');
   // no data date (the sample): progress integrity and BEI cannot be assessed; with a status date they can
   const aurora = readXerFile(sampleCopy('Aurora_Tower_Baseline.xer')).db;
   const noDate = scheduleIndex(aurora, {});
@@ -243,7 +243,7 @@ test('resource: no limit set = left out of over-allocation (as the histogram lea
   const tasks = (limit: number) => B.project('LIM', [{ id: 'A', duration_days: 10, resources: ['Crew'] }, { id: 'B', duration_days: 10, resources: ['Crew'] }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'] }], { resources: [{ id: 'Crew', max_units_per_day: limit }] });
   const none = scheduleIndex(tasks(0).db, {}).risk.sub_metrics.resource;
   assert.deepEqual(none.parts.map((p) => [p.part, p.assessed, p.value]), [['over_allocated_share', false, null], ['coverage_gap', true, 0.333], ['critical_path_conflict', false, null]]);
-  assert.match(none.parts[0].note!, /No resource has a limit set/);
+  assert.match(none.parts[0].note!, /no limit set \(Max Units\/Time 0\) is left out of the over-allocation figures\. Set a limit with edit update_resource max_units_per_day/);
   // only the coverage part is assessed: 35 x 0.333 / 35 x 100 = 33.3 (C has no resource)
   assert.equal(none.score, 33.3);
   // with a limit the same file: 50 + 35 x 0.333 + 15 over 100 = 76.7
@@ -326,7 +326,7 @@ test('129 trial and Detailed Program (progress, no baseline in the file): counts
     const r = scheduleIndex(db, {});
     // the file has no baseline project: drift not assessed with the reason
     assert.equal(r.risk.sub_metrics.baseline_drift.active, false, name);
-    assert.equal(r.risk.sub_metrics.baseline_drift.reason, 'No project baseline is assigned.', name);
+    assert.equal(r.risk.sub_metrics.baseline_drift.reason, 'No project baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.', name);
     // float counts from the rows: incomplete activities that are not WBS summary or level of effort, with a stored float
     const T = rows(db, 'TASK').filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
     const neg = T.filter((t) => Number(t.total_float_hr_cnt) < 0).length;
@@ -365,7 +365,8 @@ test('schedule_index through the server: read-only, summary first, 25 listed wit
   assert.match(r.d.arguments_not_used[0], /^schedule_index has no argument "bogus": it was not used/);
   assert.deepEqual(Object.keys(r.d).slice(0, 3), ['report', 'summary', 'health'], 'summary first');
   assert.equal(r.d.summary.risk.sub_metrics_assessed, '4 of 5');
-  assert.equal(r.d.summary.risk.left_out[0].sub_metric, 'baseline_drift');
+  assert.equal(r.d.summary.risk.left_out[0], 'baseline_drift', 'the summary names what was left out; its reason is said once, in risk.left_out');
+  assert.equal(r.d.risk.left_out[0].sub_metric, 'baseline_drift');
   assert.equal(r.d.progress_anomalies.length, 25);
   assert.equal(r.d.progress_anomalies_total, 81);
   assert.match(r.d.progress_anomalies_note, /^25 of 81 shown; all 81 in .*schedule_index-progress_anomalies\.csv$/);

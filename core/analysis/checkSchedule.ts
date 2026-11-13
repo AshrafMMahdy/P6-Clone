@@ -7,6 +7,7 @@
 // Large Float is < 1 % (Oracle and p6consulting; one walkthrough says < 5 %), BEI > 0.95 as the dialog shows it. EPPM's extra Dangling Start/Finish checks are not in P6 Professional: the
 // lint extension has them.
 import { rows, type Db, type Row } from '../db.ts';
+import { noBaseline } from '../notes.ts';
 import { parseP6Date } from '../dates.ts';
 import {
   baselineOf, baselineFinish, constraintsOf, isDone, isLoe, isMilestone, isStarted, isWbs, makeScope, notAssessed, offender,
@@ -125,7 +126,7 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(db, p, 'project')]));
   const anyBaseline = [...bls.values()].some(Boolean);
   add('late_activities', () => {
-    if (!anyBaseline) return notAssessed('late_activities', name('late_activities'), '%', th('late_activities'), 'No project baseline is assigned (Project > Assign Baselines).');
+    if (!anyBaseline) return notAssessed('late_activities', name('late_activities'), '%', th('late_activities'), noBaseline(false));
     const pop = s.tasks.filter((t) => !isDone(t) && !isWbs(t) && !isLoe(t));
     const late = pop.filter((t) => {
       const b = bls.get(t.proj_id)?.tasks.get(t.task_code);
@@ -136,7 +137,7 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
     return percentCheck('late_activities', name('late_activities'), late, pop.length, th('late_activities'), maxIds);
   });
   add('bei', () => {
-    if (!anyBaseline) return notAssessed('bei', name('bei'), 'ratio', th('bei'), 'No project baseline is assigned (Project > Assign Baselines).');
+    if (!anyBaseline) return notAssessed('bei', name('bei'), 'ratio', th('bei'), noBaseline(false));
     // forensic.ts beiFigures, the clone's one definition; here a task baselined to finish on the data date is not yet due
     const bei = beiFigures(s, bls, 'project', { before: true });
     if (bei.result === 'not_assessed') return bei.reason === 'no_baseline' ? notAssessed('bei', name('bei'), 'ratio', th('bei'), bei.note) : { ...notAssessed('bei', name('bei'), 'ratio', th('bei'), 'No baseline activity was due to finish before the data date.'), numerator: bei.completed!, denominator: 0 };

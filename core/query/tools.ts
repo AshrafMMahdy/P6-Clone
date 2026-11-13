@@ -10,6 +10,7 @@ import { statusOf, projectName } from '../project/edit.ts';
 import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
 import { financialPeriods, periodCalendar, projectCalendar } from '../progress/period.ts';
 import { dayHours } from '../project/units.ts';
+import { constraintsOf, DCMA_HARD } from '../analysis/common.ts';
 
 /** A lookup described for a language model (JSON Schema parameters). */
 export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
@@ -271,7 +272,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const dd = parseP6Date([...open].map((id) => ctx.proj.get(id)?.last_recalc_date).find(Boolean));
       const noPred = live.filter((t) => !(ctx.predsOf.get(t.task_id)?.length));
       const noSucc = live.filter((t) => !(ctx.succsOf.get(t.task_id)?.length));
-      const hard = live.filter((t) => /MANDSTART|MANDFIN|CS_MSO$|CS_MEO$/.test(t.cstr_type ?? '') || /MANDSTART|MANDFIN/.test(t.cstr_type2 ?? ''));
+      const hard = live.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c)));
       const anyCstr = live.filter((t) => t.cstr_type || t.cstr_type2);
       const longDur = live.filter((t) => Number(t.remain_drtn_hr_cnt) / dh.task(t) > 44);
       const neg = live.filter((t) => Number(t.total_float_hr_cnt) < 0);
@@ -288,7 +289,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         remaining_duration_over_44_days: ex(longDur),
         leads_negative_lag: leads.length, positive_lags: lags.length, relationship_types: types,
         started_out_of_sequence: ex(oos), not_started_but_dated_before_data_date: ex(stale),
-        note: 'Thresholds follow the common DCMA 14-point guidance (44 working days, 5% limits).',
+        note: 'Counts only, with no pass or fail: dcma_14 grades them against the DCMA limits. The population is the open activities (not completed, WBS summary or level of effort). Hard constraints are Start On, Finish On, Start On or Before, Finish On or Before and Mandatory Start / Finish, primary or secondary (DCMA\u2019s set); "over 44 days" is working days on the activity\u2019s calendar.',
       };
     }
     case 'trace_logic': {
@@ -304,7 +305,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         return {
         activity: brief(t),
         levels: [...tr.levels].sort((a, b) => a[0] - b[0]).filter(([l]) => l !== 0).map(([l, ids]) => ({ level: l, direction: l < 0 ? 'predecessors' : 'successors', activities: ids.map((id) => brief(ctx.taskById.get(id)!)), ...(tr.more.get(l) ? { more_not_listed: tr.more.get(l) } : {}) })),
-        links: tr.links.map((x) => ({ pred: code(x.from), succ: code(x.to), type: (x.rel.pred_type || 'PR_FS').slice(3), lag_days: days(x.rel.lag_hr_cnt || '0', dh.rel(x.rel)), free_float_days: x.ff == null ? null : days(x.ff, dh.rel(x.rel)), driving: x.ff === 0 })),
+        links: tr.links.map((x) => ({ pred: code(x.from), succ: code(x.to), type: (x.rel.pred_type || 'PR_FS').slice(3), lag_days: days(x.rel.lag_hr_cnt || '0', dh.rel(x.rel)), free_float_days: x.ff == null ? null : days(x.ff / 60, dh.rel(x.rel)), driving: x.ff === 0 })),
         };
       };
       if (!many) return one(found[0][1]!);

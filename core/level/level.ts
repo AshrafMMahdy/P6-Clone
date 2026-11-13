@@ -6,6 +6,7 @@ import { formatP6Date, parseP6Date, MIN_PER_DAY } from '../dates.ts';
 import type { Finding } from '../findings.ts';
 import { calendarResolver, p6num } from '../schedule/cpm.ts';
 import type { WorkCalendar } from '../calendar/calendar.ts';
+import { noLimitSentence, plural } from '../notes.ts';
 
 export interface LevelOptions {
   /** Only delay within total float. */
@@ -21,7 +22,7 @@ export interface LevelOptions {
 }
 /** moved: activities leveling delayed (early start before and after, finish after); peaks: per leveled resource, the
  *  highest use in a day after leveling (unit-hours) against its limit (Max Units/Time x 8 h x the allowed overallocation). */
-export interface LevelResult { log: string; delayed: number; findings: Finding[]; moved: { taskId: string; code: string; from: string; start: string; finish: string }[]; peaks: { rsrcId: string; code: string; peak: number; limit: number; day: string; overallocated: boolean }[] }
+export interface LevelResult { log: string; delayed: number; findings: Finding[]; /** what the run did not do, in words (also in `log`): a resource with no limit is not leveled */ notes: string[]; moved: { taskId: string; code: string; from: string; start: string; finish: string }[]; peaks: { rsrcId: string; code: string; peak: number; limit: number; day: string; overallocated: boolean }[] }
 
 const PRIO: Record<string, number> = { PT_Top: 0, PT_High: 1, PT_Normal: 2, PT_Low: 3, PT_Lowest: 4 };
 const HORIZON_DAYS = 366 * 10;
@@ -75,6 +76,8 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
 
   // fixed load: completed and in-progress activities stay where they are
   const placed = new Map<string, { s: number; f: number }>();
+  // an activity whose own daily demand is over the limit: delaying it cannot help (the biggest such demand per resource)
+  const alone = new Map<string, { code: string; need: number; limit: number }>();
   for (const t of tasks) {
     if (t.act_end_date) { placed.set(t.task_id, { s: parseP6Date(t.act_start_date)!, f: parseP6Date(t.act_end_date)! }); continue; }
     if (t.act_start_date) {
@@ -153,7 +156,11 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
       if (limit != null && nf > limit) break;
       s = ns; f = nf;
     }
-    for (const a of as) for (const [d, h] of demand(t, a, s, f)) use(a.rsrc_id).set(d, (use(a.rsrc_id).get(d) ?? 0) + h);
+    for (const a of as) for (const [d, h] of demand(t, a, s, f)) {
+      use(a.rsrc_id).set(d, (use(a.rsrc_id).get(d) ?? 0) + h);
+      const lim = capOn(a.rsrc_id, d, cal);
+      if (h > lim + 1e-6 && h - lim > ((alone.get(a.rsrc_id)?.need ?? 0) - (alone.get(a.rsrc_id)?.limit ?? 0))) alone.set(a.rsrc_id, { code: t.task_code, need: h, limit: lim });
+    }
     placed.set(t.task_id, { s, f });
     if (s > es0 + 1) {
       moved.add(t.task_id);
@@ -174,12 +181,22 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
     let worst = 0, day = 0, peak = 0, pday = 0;
     const c = cap.get(rid)! * 8 * tol;
     for (const [d, h] of u) { if (h - c > worst) { worst = h - c; day = d; } if (h > peak) { peak = h; pday = d; } }
-    if (worst > 0.01) log.push(`  Resource ${rsrcs.get(rid)?.rsrc_short_name ?? rid} still overallocated by ${p6num(worst)} h on ${formatP6Date(day * MIN_PER_DAY).slice(0, 10)}`);
+    const al = alone.get(rid);
+    const cause = worst > 0.01 && al ? `activity ${al.code} alone needs ${p6num(Math.round(al.need * 100) / 100)} h in a day against the limit of ${p6num(Math.round(al.limit * 100) / 100)} h, so delaying it cannot fix this: lower its assignment (edit update_assignment) or raise the limit (edit update_resource max_units_per_day)` : undefined;
+    if (worst > 0.01) log.push(`  Resource ${rsrcs.get(rid)?.rsrc_short_name ?? rid} still overallocated by ${p6num(worst)} h on ${formatP6Date(day * MIN_PER_DAY).slice(0, 10)}${cause ? `: ${cause}` : ''}`);
     peaks.push({ rsrcId: rid, code: rsrcs.get(rid)?.rsrc_short_name ?? rid, peak: Math.round(peak * 100) / 100, limit: Math.round(c * 100) / 100, day: formatP6Date(pday * MIN_PER_DAY).slice(0, 10), overallocated: worst > 0.01 });
   }
   peaks.sort((a, b) => a.code.localeCompare(b.code));
+  // what was not leveled, and why (a resource with no limit is not leveled: said every time it applies)
+  const notes: string[] = [];
+  const inScope = new Set<string>();
+  for (const a of rows(db, 'TASKRSRC')) if (byId.has(a.task_id) && a.rsrc_id && rsrcs.get(a.rsrc_id)?.rsrc_type !== 'RT_Mat' && (!opts.rsrcIds || opts.rsrcIds.includes(a.rsrc_id))) inScope.add(a.rsrc_id);
+  const limited = [...inScope].filter((id) => cap.has(id));
+  if (inScope.size && !limited.length) notes.push(`No resource has a limit set (Max Units/Time), so nothing was leveled. ${noLimitSentence('is not leveled')}`);
+  else if (noLimit.size) notes.push(`${plural(noLimit.size, 'resource')} had no limit set and ${noLimit.size === 1 ? 'was' : 'were'} not leveled (${[...noLimit].map((id) => rsrcs.get(id)?.rsrc_short_name ?? id).sort().slice(0, 25).join(', ')}${noLimit.size > 25 ? `, and ${noLimit.size - 25} more` : ''}). ${noLimitSentence('is not leveled')}`);
+  if (inScope.size && limited.length && !new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size) notes.push('Nothing was leveled: the resources that have a limit are marked not to be leveled (their Leveling flag is off).');
   const text = ['Leveling Report', '', `Activities delayed .......... ${delayed}`, `Resources leveled ........... ${new Set([...assigns.values()].flat().map((a) => a.rsrc_id)).size}`, `Level within float .......... ${opts.withinFloat ? 'Yes' : 'No'}`,
-    ...(noLimit.size ? ['', `Not leveled: ${noLimit.size} resource(s) have no Max Units/Time (set it in Enterprise > Resources > Units & Prices): ${[...noLimit].map((id) => rsrcs.get(id)?.rsrc_short_name ?? id).sort().slice(0, 40).join(', ')}${noLimit.size > 40 ? ', ...' : ''}`] : []),
+    ...(notes.length ? ['', ...notes] : []),
     '', ...log, '', 'End of report'].join('\r\n');
-  return { log: text, delayed, findings, moved: movedList, peaks };
+  return { log: text, delayed, findings, notes, moved: movedList, peaks };
 }

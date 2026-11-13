@@ -45,7 +45,6 @@
   "warning:VERSION_UNKNOWN": 1
  },
  "Aurora_Tower_Baseline.xer": {
-  "error:DUP_TASK_CODE": 1,
   "fatal:DUP_KEY": 1,
   "fatal:MISSING_KEY_FIELD": 1,
   "info:ENCODING_UTF8": 1,
@@ -97,7 +96,6 @@
   "warning:DANGLING_REF": 13,
   "warning:FIELD_COUNT_SHORT": 6,
   "warning:REL_DUP": 6,
-  "warning:REL_LOOP": 6,
   "warning:STATUS_MISMATCH": 1
  },
  "CfC.xer": {},
@@ -119,9 +117,7 @@
   "warning:LEGACY_REL_TYPE": 6,
   "warning:REL_DUP": 2
  },
- "Enppi.xer": {
-  "warning:REL_LOOP": 1
- },
+ "Enppi.xer": {},
  "Haiku_PRE-01_Polaris_DC1_Baseline_CPM.xer": {
   "fatal:MISSING_KEY_FIELD": 1,
   "info:CAL_HOURS_MISMATCH": 2,

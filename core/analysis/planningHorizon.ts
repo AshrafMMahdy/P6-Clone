@@ -4,6 +4,7 @@
 // (the source falls back to the earliest start, or to 2000-01-01); a P6 file has no approval field, so the approvals dimension is not assessed and its weight is spread over the others (the rule the risk index uses); an empty window has
 // no score (the source gives it 100).
 import { groupBy, rows } from '../db.ts';
+import { noBaselineOf } from '../notes.ts';
 import { formatP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { isCritical } from '../project/ctx.ts';
@@ -36,12 +37,12 @@ const overallOf = (score: number): 'pass' | 'warning' | 'fail' => (score >= 85 ?
 const TREND = 5;
 
 export const HORIZON_METHOD = [
-  'windows: activities whose forecast start (else planned start) is 0-30, 31-60 or 61-90 calendar days after the anchor, the data date or status_date (the source: planningHorizon.ts:92-96, :108-113, :137-141); finished and started work (any activity with an actual start: it is not work about to start), WBS summaries and level of effort are not in a window',
-  'readiness of an activity = sum of weight x dimension score / sum of the weights of the dimensions assessed for it: logic 0.25, resources 0.30, approvals 0.20, float 0.10, forecast stability 0.15 (planningHorizon.ts:36, :116-119); the approvals dimension is never assessed (a P6 file has no approval field), so its 0.20 is spread over the others',
-  'logic: 60 with no predecessor, 70 while a finish-to-start predecessor is not complete, else 100 (:248-257); resources: 100 with a resource or expense loaded, else 0 (:261-262); float: total float under 5 working days scores float / 5 x 100, negative float 0 (:282-291); forecast stability: forecast finish against the BASELINE finish (the project’s assigned baseline, or the one named by baseline) over 3 working days loses 5 points a day beyond 3 (:297-303); the source’s planned finish is not used: after a schedule calculation P6 sets the planned dates of unstarted work equal to the early dates, so against them the drift is 0 for almost every activity. A file with no baseline, or an activity that is not in it (added since), is not assessed for this dimension and its weight is spread over the others',
-  'status: readiness >= 90 ready, >= 75 mostly ready, >= 50 at risk, else not ready (:79-84); a window’s score is the mean of its activities; overall pass >= 85, warning >= 65, else fail (:222)',
-  'risks: the at-risk and not-ready activities, lowest readiness first, each with the first issue of its weakest dimension (:161-170, :318-329); impact critical when the activity is critical, else medium',
-  'systemic issue: a dimension scored under 50 for at least max(2, 30 %) of the activities it is assessed for (:182-183); trend: the last scored window against the first, more than 5 points above improving, below degrading, else stable (:330-337)',
+  'windows: activities whose forecast start (else planned start) is 0-30, 31-60 or 61-90 calendar days after the anchor, the data date or status_date; finished and started work (any activity with an actual start: it is not work about to start), WBS summaries and level of effort are not in a window',
+  'readiness of an activity = sum of weight x dimension score / sum of the weights of the dimensions assessed for it: logic 0.25, resources 0.30, approvals 0.20, float 0.10, forecast stability 0.15; the approvals dimension is never assessed (a P6 file has no approval field), so its 0.20 is spread over the others',
+  'logic: 60 with no predecessor, 70 while a finish-to-start predecessor is not complete, else 100; resources: 100 with a resource or expense loaded, else 0; float: total float under 5 working days scores float / 5 x 100, negative float 0; forecast stability: forecast finish against the BASELINE finish (the project’s assigned baseline, or the one named by baseline) over 3 working days loses 5 points a day beyond 3; the planned finish is not used: after a schedule calculation P6 sets the planned dates of unstarted work equal to the early dates, so against them the drift is 0 for almost every activity. A file with no baseline, or an activity that is not in it (added since), is not assessed for this dimension and its weight is spread over the others',
+  'status: readiness >= 90 ready, >= 75 mostly ready, >= 50 at risk, else not ready; a window’s score is the mean of its activities; overall pass >= 85, warning >= 65, else fail',
+  'risks: the at-risk and not-ready activities, lowest readiness first, each with the first issue of its weakest dimension; impact critical when the activity is critical, else medium',
+  'systemic issue: a dimension scored under 50 for at least max(2, 30 %) of the activities it is assessed for; trend: the last scored window against the first, more than 5 points above improving, below degrading, else stable',
 ];
 
 export interface DimScore { score: number; issues: string[] }
@@ -101,9 +102,9 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(s.db, p, which)]));
   const anyBaseline = [...bls.values()].some(Boolean);
   const global: { dimension: Dim; weight: number; reason: string }[] = [
-    { dimension: 'approvals', weight: WEIGHTS.approvals, reason: 'A P6 file carries no approval field (the source reads an approval status the platform never sent).' },
+    { dimension: 'approvals', weight: WEIGHTS.approvals, reason: 'A P6 file carries no approval status for an activity, so approvals are not assessed and their weight goes to the other dimensions.' },
     ...(!hasResources ? [{ dimension: 'resources' as Dim, weight: WEIGHTS.resources, reason: 'The file has no resource assignments, so no activity can be told to have or lack one.' }] : []),
-    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned, so the forecast finish has nothing to be compared with (P6 sets the planned dates of unstarted work equal to the early dates, so they cannot stand in for it). Assign a baseline (Project > Assign Baselines).` }] : []),
+    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: `${noBaselineOf(which, true)} Without one the forecast finish has nothing to be compared with (P6 sets the planned dates of unstarted work equal to the early dates, so they cannot stand in for it).` }] : []),
     ...(loops.length ? [{ dimension: 'float' as Dim, weight: WEIGHTS.float, reason: `The logic has a loop, so P6's stored float is not valid: ${loops.map((l) => l.message).join('; ')}.` }] : []),
   ];
   const off = new Set(global.map((g) => g.dimension));

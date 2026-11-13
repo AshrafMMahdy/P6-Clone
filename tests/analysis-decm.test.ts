@@ -87,7 +87,7 @@ test('EXPECTED DIFFERENCES from the source\'s results, each with its reason', ()
   // 2. no baseline in the file: the source counts every activity as missing its baseline dates (cleanChain: 4 of 4 fail); the clone has no baseline to look in, so it is not assessed, with the reason (a project with a baseline is judged: delayed 0 of 3 in both)
   const c = by(decm(B.cleanChain().db, { statusDate: at('2026-01-20') }));
   assert.equal(c['06A501a'].result, 'not_assessed');
-  assert.equal(c['06A501a'].note, 'No project baseline is assigned.');
+  assert.equal(c['06A501a'].note, 'No project baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.');
   assert.equal(srcChecks('cleanChain', 'decm')['06A501a'].status, 'fail');
   assert.equal(d['06A501a'].result, 'pass');
   assert.deepEqual([d['06A501a'].numerator, d['06A501a'].denominator], [0, 3]);
@@ -104,7 +104,7 @@ test('EXPECTED DIFFERENCES from the source\'s results, each with its reason', ()
   // 4. a loop: the source scores the critical path of its best-effort CPM; the clone's check fails and names the loop (P6 cannot schedule it)
   const loop = by(decm(B.withCycle().db, {}));
   assert.equal(loop['06A401a'].result, 'fail');
-  assert.match(loop['06A401a'].note!, /Loop: [XYZ] → [XYZ] → [XYZ] → [XYZ]/);
+  assert.match(loop['06A401a'].note!, /These activities are in a loop: [XYZ], [XYZ], [XYZ]/);
   assert.deepEqual(ids(loop['06A401a']).sort(), ['X', 'Y', 'Z']);
   assert.equal(srcChecks('withCycle', 'decm')['06A401a'].status, 'fail', 'the source also fails it: cycles > 0');
 });
@@ -156,7 +156,7 @@ test('06A501a: an activity not in the baseline, or in it with no start or no fin
   assert.deepEqual(ids(r['06A501a']).sort(), ['D', 'T2']);
   assert.deepEqual([r['06A501a'].numerator, r['06A501a'].denominator], [2, 4]);
   // the baseline argument is read as dcma_14 reads it: one that does not exist is not assessed
-  assert.equal(by(decm(b.db, { baseline: 'bl3' }))['06A501a'].note, 'No BL3 baseline is assigned.');
+  assert.equal(by(decm(b.db, { baseline: 'bl3' }))['06A501a'].note, 'No BL3 baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.');
 });
 
 test('06A504a/b: an actual start / finish that differs from the one an earlier update held, over consecutive updates in data-date order', () => {

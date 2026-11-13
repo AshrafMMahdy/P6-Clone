@@ -82,7 +82,7 @@ export const VARIANCE_METHOD = [
 
 export function baselineVariance(db: Db, o: { projIds?: string[]; hoursPerDay?: number; baseline?: string; asPlanned?: Update; responsibilityCode?: string }): BaselineVarianceResult | Refusal {
   const s = makeScope(db, { projIds: o.projIds, hoursPerDay: o.hoursPerDay, calendarDays: true });
-  const how = 'give the other side one of two ways: assign a baseline to the project (Project > Assign Baselines; baseline then names project, bl1, bl2, bl3 or a saved baseline’s name) or pass as_planned, another schedule as {handle} or {path}';
+  const how = 'give the other side one of two ways: assign a baseline to the project (edit assign_baseline; baseline then names project, bl1, bl2, bl3 or a saved baseline’s name) or pass as_planned, another schedule as {handle} or {path}';
   // ---- the other side
   let ref: ReferencePairs, refRows: Row[], refCritical: (r: Row) => boolean, kind: 'baseline' | 'as_planned', bls: Map<string, ReturnType<typeof baselineOf>>, which = o.baseline ?? 'project';
   if (o.asPlanned) {

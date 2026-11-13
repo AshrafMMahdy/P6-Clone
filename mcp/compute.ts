@@ -14,7 +14,7 @@ import { cpus } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyPatch, isEmptyPatch, patchFrom, type DbPatch } from '../core/journalPatch.ts';
-import { ToolError, adjustReserved, change, config, countMemory, effectiveBudget, getSession, regrow, reserveMemory, sessions, setRoot, setRoots, usedMemory, workerBudget, type Session } from './runtime.ts';
+import { ToolError, adjustReserved, asRefusal, change, config, countMemory, effectiveBudget, getSession, regrow, reserveMemory, sessions, setRoot, setRoots, usedMemory, workerBudget, type Session } from './runtime.ts';
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -342,8 +342,8 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
       const result = await run(job.name, job.softExport ? { ...job.a, [DEFAULT_FOLDER]: true } : job.a, ctx);
       const patch = s.history.length ? patchFrom(s.db, s.history.map((c) => c.j)) : null;
       post({ id: job.id, type: 'done', result, patch, label: s.history[0]?.label ?? job.name, lobSide: lobSidecars.get(s.handle) ?? null });
-    } catch (e) {
-      const t2 = e as ToolError;
+    } catch (e0) {
+      const e = asRefusal(e0), t2 = e as ToolError;
       post({ id: job.id, type: 'error', tool: e instanceof ToolError ? { code: t2.code, message: t2.message, ...(t2.hint ? { hint: t2.hint } : {}), ...(t2.retryAfter ? { retryAfter: t2.retryAfter } : {}), ...(t2.data ? { data: t2.data } : {}) } : null, message: (e as Error)?.message ?? String(e), stack: (e as Error)?.stack });
     } finally { stopJob = null; sessions.delete(s.handle); for (const o of job.others) sessions.delete(o.handle); lobSidecars.delete(s.handle); }
   });

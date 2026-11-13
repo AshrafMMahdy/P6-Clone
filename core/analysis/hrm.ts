@@ -6,6 +6,7 @@
 // P6's default leveling, so the answer is in real dates. Inference is passed in (infer), so this file stays pure: the
 // MCP server and CLI run the model in Node (hrmRuntime.ts), the desktop app through its main process.
 import { maxOf, minOf } from '../arrays.ts';
+import { DataError } from '../notes.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { dayHours } from '../project/units.ts';
@@ -381,7 +382,7 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   // (and every activity's dates at each stage: an export lists them side by side)
   const open = new Set(projIds);
   const datesOf = (d: Db) => new Map(rows(d, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => [t.task_id, [parseP6Date(t.act_start_date || t.early_start_date), parseP6Date(t.act_end_date || t.early_end_date)] as const]));
-  const measureLeveled = (d: Db, first?: string[]) => { const s = scheduleProjects(d, projIds, {}); if (!s.ok) throw new Error('The schedule failed.'); const cpm = finishOf(d, projIds), cpmDates = datesOf(d); if (leveled) levelResources(d, projIds, { first }); return { cpm, leveled: finishOf(d, projIds), cpmDates, dates: datesOf(d) }; };
+  const measureLeveled = (d: Db, first?: string[]) => { const s = scheduleProjects(d, projIds, {}); if (!s.ok) throw new DataError('schedule_failed', 'The schedule cannot be calculated, so the finish after leveling could not be measured.', 'Call schedule to see what stops it (a loop, or a calendar with no work time), fix that, then call again.'); const cpm = finishOf(d, projIds), cpmDates = datesOf(d); if (leveled) levelResources(d, projIds, { first }); return { cpm, leveled: finishOf(d, projIds), cpmDates, dates: datesOf(d) }; };
   const cancelledAt = async (k: number, say: string) => { try { await o.tick?.(k, 3, say); return false; } catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; return true; } };
   type Measured = ReturnType<typeof measureLeveled>;
   let p6: Measured | undefined, mine: Measured | undefined, skipped: string | undefined;

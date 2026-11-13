@@ -3,6 +3,7 @@
 // and relationship types count relationships. Durations and float are in working days of each activity's calendar.
 // The Critical Path Test runs on a scratch copy (a journal that is rolled back); CPLI and BEI use a chosen baseline.
 import { maxOf, minOf } from '../arrays.ts';
+import { noBaselineOf } from '../notes.ts';
 import { type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
@@ -128,7 +129,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
     out.push(percentCheck('resources', NAMES.resources, T.filter((t) => !loaded.has(t.task_id)).map((t) => offender(t, s)), T.length, th('resources')!, maxIds, 'Tasks with no resource or expense (hours or cost) loaded.'));
   }
   // missed tasks: of the tasks baselined to finish by the status date, those finishing (actually or forecast) after their baseline finish
-  if (!anyBl) out.push(notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned.`));
+  if (!anyBl) out.push(notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), noBaselineOf(which, true)));
   else {
     const due = s.tasks.filter((t) => { const b = bl(t), dd = s.dataDate(t.proj_id); return b && !isWbs(t) && !isLoe(t) && !isMilestone(t) && dd != null && (baselineFinish(b) ?? Infinity) <= dd; });
     const missed = due.filter((t) => (forecastFinish(t) ?? -Infinity) > (baselineFinish(bl(t)) ?? Infinity)).map((t) => offender(t, s, `baseline ${formatP6Date(baselineFinish(bl(t))!).slice(0, 10)}`));

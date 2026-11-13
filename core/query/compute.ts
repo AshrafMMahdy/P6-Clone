@@ -7,6 +7,8 @@ import { applyOps, type Op } from '../project/ops.ts';
 import { scheduleProjects } from '../schedule/cpm.ts';
 import { SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { activityTable, TABLE_GUIDE, type ActivityTable } from './table.ts';
+import { computeWarnings } from '../analysis/scheduleLog.ts';
+import { parseP6Date } from '../dates.ts';
 
 export const COMPUTE_GUIDE = `start (planned start, YYYY-MM-DD), [data_date] (default start), [must_finish_by], [hours_per_day] (default 8: days where a calendar has no day length), [calendar] (default calendar name), `
   + `[calendars [{name, work_week, holidays, work_exceptions}] as add_calendar], activities [{id, [name], [type], [duration_days] or [duration_hours], [calendar], [constraint {type, date}], [secondary_constraint], `
@@ -38,18 +40,20 @@ export function computeSchedule(a: Record<string, any>): ComputeAnswer {
   for (const op of ops) for (const k of Object.keys(op)) if (op[k] === undefined) delete op[k];
   const db: Db = { tables: {} };
   const r = applyOps(db, ops, { hoursPerDay: hpd, calendarDays: true, allowLoops: true });
-  if (!r.ok) return bad(r.error!.message, where[r.error!.index]);
+  // (compute_schedule has no project to edit: the calendar and the activity's calendar are the inputs it names)
+  if (!r.ok) return bad(r.error!.message.replace('edit add_calendar with a work_week', 'a work_week in calendars').replace('edit update_activity calendar', 'activities[].calendar'), where[r.error!.index]);
   const pid = rows(db, 'PROJECT')[0].proj_id;
   const s = scheduleProjects(db, [pid], { breakLoops: a.break_loops !== false });
   const loops = s.loops ?? [];
-  if (!s.ok) return { ok: false, error: { code: 'schedule_failed', message: s.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), ...(loops.length ? { loops } : {}) } };
+  if (!s.ok) return { ok: false, error: { code: 'schedule_failed', message: s.findings.filter((f) => f.severity === 'error').map((f) => f.message.replace('(edit delete_relationship)', '(in predecessors or relationships)').replace('schedule with break_loops: true', 'pass break_loops: true')).join(' '), ...(loops.length ? { loops } : {}) } };
   const code = new Map(rows(db, 'TASK').map((t) => [t.task_id, t.task_code]));
   const table = activityTable(db, [pid], { offset: a.offset, limit: a.limit, names: a.names === true, hoursPerDay: hpd });
   const iso = (t: number | null) => (t == null ? null : formatP6Date(t));
   return {
     ok: true, finish: iso(s.stats.finish), data_date: iso(s.stats.dataDate), loops,
     broken_links: (s.broken ?? []).map((x) => ({ pred: code.get(x.pred_task_id) ?? x.pred_task_id, succ: code.get(x.task_id) ?? x.task_id, type: (x.pred_type || 'PR_FS').slice(3) })),
-    warnings: [...(r.warnings ?? []), ...s.findings.filter((f) => f.severity === 'warning' || f.severity === 'error').map((f) => f.message)].slice(0, 50),
+    // every warning, whole (the MCP answer lists the first 25 by the list rule and keeps the whole list in a file)
+    warnings: [...(r.warnings ?? []), ...computeWarnings(db, pid, s, parseP6Date(rows(db, 'PROJECT')[0].plan_end_date), s.stats.finish)],
     ...table,
   };
 }

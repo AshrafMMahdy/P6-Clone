@@ -11,6 +11,7 @@
 //    fence reads (read or write root) and writes (write root) separately, like the craft forks.
 //  - Every failure is a ToolError with a code and a next step.
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { DataError } from '../core/notes.ts';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { cwdLost } from '../core/cwd.ts';
@@ -40,6 +41,8 @@ export function readCause(e: unknown): { cause: 'not_found' | 'no_permission' | 
   if (typeof code !== 'string' || !/^E[A-Z0-9]+$/.test(code)) return { cause: 'damaged' };
   return { cause: code === 'ENOENT' || code === 'ENOTDIR' ? 'not_found' : code === 'EACCES' || code === 'EPERM' ? 'no_permission' : code === 'EISDIR' ? 'is_a_folder' : 'system', os_code: code };
 }
+/** A data condition (core/notes.ts DataError) as the refusal it is; any other error as it was. */
+export const asRefusal = (e: unknown): unknown => (e instanceof DataError ? new ToolError(e.code, e.message, e.hint) : e);
 export const fail = (code: string, message: string, hint?: string, extra?: { retryAfter?: number; data?: Record<string, unknown> }): never => { throw new ToolError(code, message, hint, extra); };
 
 // ---------------------------------------------------------------- configuration
