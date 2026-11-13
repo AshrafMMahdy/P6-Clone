@@ -1,7 +1,8 @@
 // Schedule analysis tools of the MCP server (kept apart from server.ts so the two grow without stepping on each other):
 // P6 Check Schedule and DCMA 14-point; later lint, float paths, curves, what-ifs, crashing and delay analysis.
 import { dayHours } from '../core/project/units.ts';
-import { cancelledAfter, noLimitNote } from '../core/notes.ts';
+import { cancelledAfter, datesNotCurrent, noLimitNote } from '../core/notes.ts';
+import { storedDatesState } from '../core/schedule/stored-dates.ts';
 import { CurvesRefused, progressCurves, resourceHistograms } from '../core/analysis/curves.ts';
 import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween, writeFloatPaths } from '../core/schedule/floatPaths.ts';
 import type { Db, Row } from '../core/db.ts';
@@ -210,6 +211,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const maxPaths = a.between != null ? betweenMax(a.between) : undefined; // refused, before any work, when it is not a positive whole number
       const opts = { count: countArg(a.count, 'count') ?? 10, endActivity: a.end_activity, method: method as 'free_float' | 'total_float' };
       const r = computeFloatPaths(s.db, projIds, opts);
+      const stale = storedDatesState(s.db, projIds).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open)); // the paths read the saved float
       if (a.write) h.apply('Float paths', (d) => writeFloatPaths(d, projIds, computeFloatPaths(d, projIds, opts).assign));
       const nearDays = a.near_critical_days != null ? Number(a.near_critical_days) : 10;
       const tasks = (s.db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
@@ -218,7 +220,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const dhx = dayHours(s.db, s.hpd, true), byCode = new Map((s.db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id)).map((t) => [t.task_code, t]));
       const inDays = (id: string, h: number | null) => (h == null ? null : Math.round((h / dhx.task(byCode.get(id))) * 100) / 100);
       const pathsDays = r.paths.map((p) => { const acts = p.activities.map((x) => ({ id: x.id, name: x.name, order: x.order, total_float_days: inDays(x.id, x.total_float_hours) })); const fl = acts.map((x) => x.total_float_days).filter((x): x is number => x != null); return { path: p.path, float_days: fl.length ? Math.min(...fl) : null, activities: acts }; });
-      const answer = { end: r.end, method: r.method, paths: pathsDays, near_critical: near, ...(a.between != null ? { between: betweenOrFail(pathsBetween(s.db, projIds, { ...a.between, max: maxPaths }, s.hpd)) } : {}), ...(a.write ? { written: true } : {}) };
+      const answer = { end: r.end, method: r.method, paths: pathsDays, near_critical: near, ...(a.between != null ? { between: betweenOrFail(pathsBetween(s.db, projIds, { ...a.between, max: maxPaths }, s.hpd)) } : {}), ...(a.write ? { written: true } : {}), ...(stale.length ? { notes: stale } : {}) };
       return exported(answer, answer, [
         { name: 'paths', columns: ['path', 'float_days', 'order', 'id', 'name', 'total_float_days'], rows: pathsDays.flatMap((p) => p.activities.map((x) => ({ path: p.path, float_days: p.float_days, ...x }))) },
         { name: 'near_critical', columns: ['id', 'name', 'total_float_days'], rows: near },

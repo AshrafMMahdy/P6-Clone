@@ -96,8 +96,10 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
     const sc = scheduleWithLob(d, h.allIds(d), s.hpd, {}, undefined);
     if (!sc.schedule.ok) throw new LobRefused(`the plan cannot be scheduled: ${sc.schedule.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ')}`);
     const fin = sc.schedule.projects[projId]?.finish;
-    return { activities: { added: ex.added, updated: ex.updated, deleted: ex.deleted, ...(ex.keptWithProgress.length ? { kept_with_progress: ex.keptWithProgress } : {}) }, schedule: { finish: fin != null ? new Date(fin * 60000).toISOString().slice(0, 16).replace('T', ' ') : null, ...(sc.unpaced.length ? { unpaced: sc.unpaced, note: 'continuity fights the logic for these trades: they were left as soon as possible' } : {}) } };
+    return { activities: { added: ex.added, updated: ex.updated, deleted: ex.deleted, ...(ex.keptWithProgress.length ? { kept_with_progress: ex.keptWithProgress } : {}) }, schedule: { finish: fin != null ? new Date(fin * 60000).toISOString().slice(0, 16).replace('T', ' ') : null, ...(sc.unpaced.length ? { unpaced: sc.unpaced } : {}) }, paceNotes: sc.unpaced.length ? [`Trades ${sc.unpaced.join(', ')}: continuity fights the logic, so they were left as soon as possible.`] : [] };
   };
+  /** The notes of an answer, in the one `notes` field: none, no field. */
+  const notesOf = (...lists: string[][]) => { const n = lists.flat(); return n.length ? { notes: n } : {}; };
   const refused = (e: unknown) => { if (e instanceof LobRefused) return fail('lob_refused', e.message, 'Change the operation (the message says what holds it) and send it again; nothing was changed.'); throw e; };
   const view = (projId: string, m: LobModel, limit?: number) => ({ project: rows(s.db, 'PROJECT').find((p) => p.proj_id === projId)!.proj_short_name, ...lobView(s.db, projId, m, { hoursPerDay: s.hpd, limit }) });
 
@@ -122,8 +124,8 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
         try {
           const ops: LobOp[] = [...(a.from_cpm ? [] : (a.tasks ?? []).map((t: object) => ({ op: 'add_task', ...t }))), ...(a.links ?? []).map((l: object) => ({ op: 'add_link', ...l })), ...(a.takt ? [{ op: 'set_takt', ...a.takt }] : [])];
           const built = ops.length ? applyLobOps(model, ops) : { model, changes: [], notes: [] };
-          const c = await commit(d, projId, built.model, null);
-          return { created: id, ...c, notes: built.notes };
+          const { paceNotes, ...c } = await commit(d, projId, built.model, null);
+          return { created: id, ...c, ...notesOf(built.notes, paceNotes) };
         } catch (e) { return refused(e); }
       });
     }
@@ -132,7 +134,7 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
       if (!Array.isArray(a.operations) || !a.operations.length) fail('bad_input', 'operations: a list of operations.', OPS_HELP);
       let next;
       try { next = applyLobOps(model, a.operations); } catch (e) { return refused(e); }
-      return h.applyAsync(`LOB edit (${a.operations.length} operation${a.operations.length === 1 ? '' : 's'})`, async (d) => { try { return { changes: next.changes, notes: next.notes, ...(await commit(d, projId, next.model, model)) }; } catch (e) { return refused(e); } });
+      return h.applyAsync(`LOB edit (${a.operations.length} operation${a.operations.length === 1 ? '' : 's'})`, async (d) => { try { const { paceNotes, ...c } = await commit(d, projId, next.model, model); return { changes: next.changes, ...notesOf(next.notes, paceNotes), ...c }; } catch (e) { return refused(e); } });
     }
     case 'lob_view': {
       const { projId, model, from, problems } = lobOf(a.project);
@@ -184,7 +186,7 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
         const r = applyOps(d, [...calOps, { op: 'add_project', id, name: model.project === id ? id : id, start, ...(cal ? { calendar: cal } : {}) }], { hoursPerDay: hpd });
         if (!r.ok) fail('bad_input', r.error!.message, '');
         const projId = rows(d, 'PROJECT').find((p) => p.proj_short_name === id)!.proj_id;
-        try { return { imported: id, tasks: model.tasks.length, locations: model.locations.length, ...(await commit(d, projId, model, null)), notes }; } catch (e) { return refused(e); }
+        try { const { paceNotes, ...c } = await commit(d, projId, model, null); return { imported: id, tasks: model.tasks.length, locations: model.locations.length, ...c, ...notesOf(notes, paceNotes) }; } catch (e) { return refused(e); }
       });
     }
     case 'lob_export': {
@@ -193,7 +195,7 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
       mkdirSync(dir, { recursive: true }); // inside the write root (pathArg checked it)
       const files = writeTactplan(model, { decimal: a.decimal === 'comma' ? 'comma' : 'dot', date: a.date ?? 'dd/MM/yyyy', scheduled: lobView(s.db, projId, model, { hoursPerDay: s.hpd, limit: Infinity }).tasks });
       const written = files.map((f) => { const p = join(dir, f.name); h.writeOut(p, f.text); return p; });
-      return { written, note: 'Tactplan imports each grid from its Import dialog (paste or choose the file); links between tasks have no import there: links-not-exported.txt lists them.' };
+      return { written, ...notesOf(model.links.length ? ['Links between tasks are not in the grid files, Tactplan has no import for them: links-not-exported.txt lists them.'] : []) };
     }
   }
   return undefined;

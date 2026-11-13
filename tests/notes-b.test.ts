@@ -96,7 +96,7 @@ test('22: a calendar with no work time is named, with the way out; not an intern
 
 test('5, 30: a lenient open names save repair for what it repairs, ignores an identical duplicate row, and lists each fatal finding once', async () => {
   const o = await call('open_file', { path: sampleCopy('Aurora_Tower_Baseline.xer'), lenient: true });
-  assert.ok(o.diagnostics.repaired.some((x: string) => /^1 identical duplicate activity row was ignored \(Activity ID 102\): the same row twice is one row\.$/.test(x)), JSON.stringify(o.diagnostics.repaired));
+  assert.ok(o.diagnostics.repaired.some((x: string) => /^1 identical duplicate activity row was ignored \(Activity ID 102\)\.$/.test(x)), JSON.stringify(o.diagnostics.repaired));
   assert.equal(o.still_rejected, false);
   assert.match(o.notes[0], /^Opened a repaired copy: P6 would refuse Aurora_Tower_Baseline\.xer as given \(/);
   assert.equal(o.notes.length, 1, JSON.stringify(o.notes));

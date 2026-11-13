@@ -426,17 +426,14 @@ test('an imported EPS node whose ID matches an existing one takes the existing n
   const res = importIntoDb(db, src, defaultPlan(src));
   assert.deepEqual(rows(db, 'EPS').map((e) => `${e.eps_short_name}|${e.eps_name}`), before, 'no second node, and the existing name is kept');
   const matched = res.findings.filter((f) => f.code === 'IMPORT_EPS_MATCHED');
-  assert.equal(matched.length, rows(src, 'EPS').length, 'every node is reported');
+  assert.ok(matched.length >= 1 && matched.every((f) => f.severity === 'warning'), 'only the nodes that differ are reported');
   const m = matched.find((f) => f.key === rows(db, 'EPS')[1].eps_id)!;
-  assert.equal(m.severity, 'warning');
-  assert.match(m.message, new RegExp(`EPS "${first.eps_short_name}".*name "A different name", parent \\(top level\\).*existing one is kept \\(name "${keptName}", parent Enterprise\\)`));
-  assert.match(m.message, /NOT applied/);
-  // identical nodes are reported too, as information
+  assert.equal(m.message, `EPS "${first.eps_short_name}": the existing node of that ID is kept (name "${keptName}", parent Enterprise); the imported name "A different name" and parent (top level) were not applied.`);
+  // identical nodes are not reported: nothing was left out
   const same = load();
   addRow(same, 'EPS', node('1', '', 'Enterprise', 'All Initiatives')); addRow(same, 'EPS', node('2', '1', 'Region', 'Region North'));
   const again = importIntoDb(db, same, defaultPlan(same)).findings.filter((f) => f.code === 'IMPORT_EPS_MATCHED');
-  assert.equal(again.length, 2);
-  assert.ok(again.every((f) => f.severity === 'info'));
+  assert.equal(again.length, 0);
 });
 
 // ------------------------------------------------------------------ the leftovers of the save check

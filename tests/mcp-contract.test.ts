@@ -63,7 +63,7 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
   const len = await call('open_file', { path: f.dup, lenient: true });
   assert.deepEqual([len.isError, len.data.lenient, len.data.diagnostics.verdict, len.data.unsaved_changes, len.data.still_rejected], [false, true, 'warning', true, false]); // the file's one duplicate was an identical row: ignored, so nothing fatal is left
   // an identical duplicate row is one row: ignored, and said so
-  assert.deepEqual(len.data.diagnostics.repaired, ['1 identical duplicate activity row was ignored (Activity ID A1): the same row twice is one row.'], JSON.stringify(len.data.diagnostics));
+  assert.deepEqual(len.data.diagnostics.repaired, ['1 identical duplicate activity row was ignored (Activity ID A1).'], JSON.stringify(len.data.diagnostics));
   // a repeated TASK id that relationships point at, whose copy differs, cannot be told apart: left, and said so once
   const ld = await call('open_file', { path: f.diff, lenient: true });
   assert.equal(ld.data.still_rejected, true);

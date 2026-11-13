@@ -5,10 +5,6 @@
 
 /** "1 activity", "0 activities", "2 activities": the count and its noun, grammar right for 0, 1 and many. */
 export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
-/** The noun alone for a count: "activity" for 1, "activities" otherwise. */
-export const noun = (n: number, one: string, many = `${one}s`): string => (n === 1 ? one : many);
-/** "is" / "are" for a count. */
-export const isAre = (n: number): string => (n === 1 ? 'is' : 'are');
 
 /** P6's names for the constraint codes (the one place that spells them). */
 export const CSTR_NAME: Record<string, string> = {
@@ -90,16 +86,12 @@ export function tidyNotes(list: string[]): string[] {
 export const refused = (wrong: string, instead: string): string => `Refused: ${wrong}; ${instead}.`;
 /** A refusal as the two halves of an error answer: what is wrong, and what to send instead (said once each). */
 export const refusal = (wrong: string, instead: string): { message: string; hint: string } => ({ message: `Refused: ${wrong}.`, hint: `${cap(instead)}.` });
-/** An empty project. */
-export const emptyProject = (proj: string): string => refused(`${proj} has no activities`, 'add activities first');
 /** A repaired copy opened. */
 export const openedRepaired = (file: string, faults: string): string => `Opened a repaired copy: P6 would refuse ${file} as given (${faults}).`;
 /** A fault the repair did not touch. */
 export const notRepaired = (fault: string, how: string | null = 'save with repair: true fixes it'): string => `Not repaired: ${fault.replace(/\.$/, '')}${how ? `; ${how}` : ''}.`;
 /** What a save to a format with no place for it did not write. `kinds` is "<kind> (<n>)". */
 export const droppedOnSave = (format: string, kinds: string[]): string => `Not written to ${format}: ${kinds.join(', ')}; save as XER to keep ${kinds.length === 1 ? 'it' : 'them'}.`;
-/** Data the format has no place for, dropped when a file is opened (or by P6 on import). */
-export const droppedOnOpen = (what: string, why: string): string => `Dropped on open: ${what} (${why}).`;
 /** A calendar the file does not define. */
 export const defaultCalendarWeek = (name: string): string => `Calendar ${name} has no work week in the file: the default 5-day week (no holidays) is used.`;
 /** The saved dates are not current (a tool that reads them). */
@@ -116,8 +108,6 @@ export const outOfSequence = (id: string, pred: string): string => `${id} starte
 export const duplicateRow = (id: string, did: string): string => `Activity ${id} appears twice in the file; it was ${did} once; save with repair: true fixes it.`;
 /** A run that was cancelled. */
 export const cancelledAfter = (done: number, total: number | null, steps: string, nothingChanged = true): string => `Cancelled after ${done}${total != null ? ` of ${total}` : ''} ${steps}: the result covers those only${nothingChanged ? '; nothing was changed' : ''}.`;
-/** An edit confirms what changed. */
-export const edited = (id: string, field: string, from: string, to: string): string => `${id} ${field}: ${from} \u2192 ${to}.`;
 /** A job that is still running. */
 export const stillWorking = (jobId: string): string => `Still working: call job_status with job_id ${jobId} for the result.`;
 /** An answer too large to return whole: where all of it is. */
@@ -125,7 +115,3 @@ export const tooLarge = (chars: number, file: string | null, ask: string): strin
 /** A tool given an argument it does not have. */
 export const argumentNotUsed = (tool: string, arg: string, has: string[]): string => `${tool} has no argument "${arg}"; the call ran without it. Its arguments are: ${has.join(', ')}.`;
 
-// TEMP (removed in the analysis group of this pass): the old family functions, until their callers use the ones above.
-export const noBaseline = (argument: boolean, what = 'No project baseline is assigned'): string => `${what}. Assign one with edit assign_baseline${argument ? ', or name a saved baseline in this tool’s baseline argument' : ''}.`;
-export const noBaselineOf = (which: string, argument: boolean): string => noBaseline(argument, `No ${which === 'project' ? 'project' : which.toUpperCase()} baseline is assigned`);
-export const noLimitSentence = (does: string): string => `A resource with no limit set (Max Units/Time 0) ${does}. Set a limit with edit update_resource max_units_per_day.`;

@@ -222,6 +222,7 @@ export function shapeHorizon(r: HorizonResult, first: <T>(l: T[]) => T[]) {
     { name: 'activities', columns: ['band', 'id', 'name', 'project', 'start', 'days_until_start', 'duration_days', 'on_critical_path', 'readiness_score', 'status', 'logic', 'resources', 'float', 'forecast_stability', 'issues', 'not_assessed', 'risk_rank'],
       rows: r.bands.flatMap((b) => b.activities.map((a) => ({ band: a.band, id: a.id, name: a.name, project: a.project ?? '', start: a.start, days_until_start: a.days_until_start, duration_days: a.duration_days, on_critical_path: a.on_critical_path, readiness_score: a.readiness_score, status: a.status,
         logic: a.dimensions.logic?.score ?? null, resources: a.dimensions.resources?.score ?? null, float: a.dimensions.float?.score ?? null, forecast_stability: a.dimensions.forecast_stability?.score ?? null, issues: a.issues.join('; '), not_assessed: a.not_assessed.join('; '), risk_rank: a.risk_rank ?? null }))) },
+    { name: 'systemic_activities', columns: ['issue', 'dimension', 'id', 'name', 'project', 'score'], rows: r.systemic_issues.flatMap((x) => x.activities.map((a) => ({ issue: x.issue, dimension: x.dimension, id: a.id, name: a.name, project: a.project ?? '', score: a.score }))) },
   ];
   return { answer, whole, tables };
 }
