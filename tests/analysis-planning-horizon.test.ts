@@ -360,3 +360,16 @@ test('planning_horizon through the server: read-only, status_date the only argum
   assert.equal(n.d.result, 'not_assessed');
   assert.match(n.d.notes.join(' '), /aurora_tower has no data date; pass status_date/);
 });
+
+test('the systemic issue\'s activity list names the file that holds all of it: its own CSV, not the activities of the windows', async () => {
+  const h = await openSample('Detailed Program.xer');
+  const r = (await call('planning_horizon', { handle: h })).d;
+  const x = r.systemic_issues.find((s: any) => s.dimension === 'resources');
+  assert.equal(x.activities.length, 25); assert.equal(x.activities_total, 102);
+  const m = /^25 of 102 shown; all 102 in (.+planning_horizon-systemic_activities\.csv)\.$/.exec(x.activities_note);
+  assert.ok(m, x.activities_note);
+  const lines = readFileSync(m![1], 'utf8').trim().split(/\r?\n/);
+  assert.equal(lines.filter((l) => l.startsWith('resources_gap,resources,')).length, 102, 'every activity of the issue is in it');
+  // the activities of a window keep theirs
+  assert.match(r.bands.find((b: any) => b.activities_total > 25).activities_note, /planning_horizon-activities\.csv\.$/);
+});

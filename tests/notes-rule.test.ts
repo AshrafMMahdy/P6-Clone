@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { callTool, toolResult } from '../mcp/server.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
 
@@ -98,6 +99,20 @@ const OPS = (c: (tool: string, args: Record<string, unknown>) => Promise<any>, h
   ['change_tracking', { handle: h, updates: [{ handle: h2 }] }], ['crash_schedule', { handle: h, target_days: 2 }], ['evaluate_batch', { handle: h, scenarios: [{ name: 'same', overrides: [] }] }],
 ] as [string, Record<string, unknown>][];
 
+/** The lookups, the what-if and the transfer / import dry runs: every other tool of the server that answers about a schedule (see the list of what is not walked, at the end of this file). */
+const MORE = async (c: (tool: string, args: Record<string, unknown>) => Promise<any>, h: string, h2: string, dir: string) => {
+  const first = (await c('find_activities', { handle: h, limit: 1 })).activities?.[0]?.id as string;
+  return [
+    ['find_activities', { handle: h, limit: 3 }], ['get_activity', { handle: h, activity_id: first }], ['trace_logic', { handle: h, activity_id: first }], ['activity_table', { handle: h, limit: 3 }],
+    ['list_wbs', { handle: h }], ['list_dictionaries', { handle: h }], ['resource_summary', { handle: h }], ['list_projects', { handle: h }], ['list_tables', { handle: h }], ['read_table', { handle: h, table: 'TASK', limit: 3 }],
+    ['run_report', { handle: h, report: 'Schedule Report' }], ['export_excel', { handle: h, path: `${dir}/rules.xlsx` }], ['evaluate', { handle: h, overrides: [{ op: 'update_activity', id: first, duration_days: 3 }] }],
+    ['transfer_progress', { handle: h, other_handle: h2, dry_run: true }], ['import_file', { handle: h, other_handle: h2, action: 'update', dry_run: true }],
+    ['compute_schedule', { start: '2026-03-02', activities: [{ id: 'A', duration_days: 2 }, { id: 'B', duration_days: 3 }], relationships: [{ pred: 'A', succ: 'B' }] }],
+  ] as [string, Record<string, unknown>][];
+};
+/** Not walked, and why: tia (needs a fragnet built for the case), optimize_schedule (runs the embedded reasoner model for minutes; its notes are walked in tests/analysis-hrm.test.ts), export_pdf (renders pages; its notes are those of export_excel's family), undo / redo /
+ *  close / list_open / server_status / job_status / cancel_job (they answer about the session, not about a schedule), the 4D and model tools (open_model ... compare_4d: they answer about a building model; their notes are walked in tests/fourd-*.test.ts) and lob_* (walked in tests/lob-mcp.test.ts). */
+
 const seenTools = new Set<string>();
 for (const sample of ['130 TRIAL.xer', 'Tower-A.xer']) {
   test(`the contract of the notes holds for every tool's answer on ${sample}`, { timeout: 600000 }, async () => {
@@ -105,6 +120,7 @@ for (const sample of ['130 TRIAL.xer', 'Tower-A.xer']) {
     const o2 = await call('open_file', { path: sampleCopy(sample), lenient: true });
     check('open_file', o, sample, seenTools);
     for (const [tool, args] of OPS(call, o.handle, o2.handle)) check(tool, await call(tool, args), sample, seenTools);
+    for (const [tool, args] of await MORE(call, o.handle, o2.handle, dirname(sampleCopy(sample)))) check(tool, await call(tool, args), sample, seenTools);
   });
 }
 
@@ -120,8 +136,9 @@ test('the contract of the notes holds for the answers on a built project, and ea
   await call('edit', { handle: p.handle, operations: [{ op: 'set_fields', table: 'RSRCRATE', where: { rsrc_id: '2' }, fields: { max_qty_per_hr: '0' } }] });
   const q = await call('open_file', { path: sampleCopy('Tower-A.xer'), lenient: true });
   for (const [tool, args] of OPS(call, p.handle, q.handle)) check(tool, await call(tool, args), 'built', seenTools);
+  for (const [tool, args] of await MORE(call, p.handle, q.handle, dirname(sampleCopy('Tower-A.xer')))) check(tool, await call(tool, args), 'built', seenTools);
   check('save', await call('save', { handle: p.handle, owner_key: p.owner_key, path: sampleCopy('Tower-A.xer').replace(/Tower-A\.xer$/, 'built-out.xer') }), 'built', seenTools);
   const u = await call('update_progress', { handle: p.handle, data_date: '2026-03-04' });
   check('update_progress', u, 'built', seenTools);
-  for (const t of ['schedule', 'dcma_14', 'decm', 'check_schedule', 'schedule_index', 'planning_horizon', 'resource_histogram', 'level_resources', 'baseline_variance']) assert.ok(seenTools.has(t), `${t} was walked`);
+  for (const t of ['find_activities', 'get_activity', 'trace_logic', 'evaluate', 'transfer_progress', 'import_file', 'compute_schedule', 'schedule', 'dcma_14', 'decm', 'check_schedule', 'schedule_index', 'planning_horizon', 'resource_histogram', 'level_resources', 'baseline_variance']) assert.ok(seenTools.has(t), `${t} was walked`);
 });
