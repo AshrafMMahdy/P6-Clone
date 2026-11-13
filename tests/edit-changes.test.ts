@@ -24,7 +24,8 @@ const STALE = /^The saved dates of EC are not what a recalculation gives \(\d+ o
 test('a duration change is old -> new in days; the saved dates are then not current, said once', async () => {
   const h = await project();
   const e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', duration_days: 5 }] });
-  assert.deepEqual(e.changes, [{ id: 'A', field: 'Original Duration (days)', old: 3, new: 5 }]);
+  // (the activity is not started: its remaining duration follows, and it moved, so it is said)
+  assert.deepEqual(e.changes, [{ id: 'A', field: 'Original Duration (days)', old: 3, new: 5 }, { id: 'A', field: 'Remaining Duration (days)', old: 3, new: 5 }]);
   assert.equal(e.notes.filter((n: string) => STALE.test(n)).length, 1, JSON.stringify(e.notes));
   assert.equal(e.changes_total, undefined); assert.equal(e.changes_note, undefined);
   // schedule makes them current again: the next edit that moves no date says nothing about them
@@ -173,7 +174,10 @@ test('every named operation confirms its change in P6’s words: no column name,
   // changed), and clear_authors, which empties who added or changed a row (no P6 column of the schedule; its own answer counts the fields it cleared)
   assert.deepEqual(silent, ['set_schedule_options', 'clear_authors']);
   assert.ok(lines.length > 150, 'the checks below read real lines');
-  assert.deepEqual(lines.filter((l) => /(\[|: |-> )"\d+"( @|\]| ->|$)/.test(l) && !/number|Number|Units|Cost|Price|Weight|Hours|days|Duration|Lag|%|Float|paths|Year|Sequence|Limit|Probability|Level/.test(l)), [], 'no bare internal number as a row or a value');
+  assert.deepEqual(lines.filter((l) => /(: |-> )"\d+"( ->|$)/.test(l) && !/number|Number|Units|Cost|Price|Weight|Hours|days|Duration|Lag|%|Float|paths|Year|Sequence|Limit|Probability|Level/.test(l)), [], 'no bare internal number as a value');
+  assert.deepEqual(lines.filter((l) => /^[a-z_]+: \[(\d+|[^\]]* \d{3,})?( @[^\]]*)?\]/.test(l) || /\[(|[^\]]* \/ )\]/.test(l)), [], 'no row named by an internal number, or by nothing');
+  assert.deepEqual(lines.filter((l) => { const m = /: ("[^"]*"|[^" ]+) -> ("[^"]*"|[^" ]+)$/.exec(l); return !!m && m[1] === m[2]; }), [], 'no line says a value changed to itself');
+  assert.deepEqual(lines.filter((l) => /that is not in the file/.test(l)), [], 'everything a row points at is in this file');
   const said = (line: string) => assert.ok(lines.includes(line), `not said: ${line}\n${lines.filter((l) => l.startsWith(line.split(':')[0] + ':')).join('\n')}`);
   const count = (start: string) => lines.filter((l) => l.startsWith(start)).length;
 
@@ -182,7 +186,7 @@ test('every named operation confirms its change in P6’s words: no column name,
   said('set_project: [P] EPS: "Enterprise" -> "E2"');
   said('set_project: [P] Default Calendar: "Standard 5 Day Workweek" -> "Six"');
   said('add_financial_period_calendar: [P] Financial Period Calendar: null -> "Fiscal"');
-  said('set_project: [P] Internal project number: "1" -> "77"');
+  said('set_project: [P] Internal project number: 1 -> 77');
   assert.equal(count('set_project: ') , 7, 'a new internal number is one line, not one per row of the project');
   // Schedule Options as the dialog words them; the two whose columns look like calculated ones are said too; "progressed activities" is one
   // option read as the scheduler reads its two columns
@@ -274,4 +278,49 @@ test('schedule options changed through the raw table are read as the scheduler r
   e = await call('edit', { handle: h, operations: [{ op: 'update_assignment', activity: 'A', resource: 'R', nth: 1, units_per_day: 4 }, { op: 'update_assignment', activity: 'A', resource: 'R', nth: 2, units_per_day: 4 }] });
   assert.ok(!e.error, JSON.stringify(e.error));
   assert.equal(e.changes.filter((c: any) => c.field === 'Budgeted Units/Time (units a day)' && c.old === 8 && c.new === 4).length, 2, JSON.stringify(e.changes));
+});
+
+// The same rules on files P6 wrote (its rows carry columns a built file does not: a resource row has role_id, numbers are written "450.00") and on the states a built file
+// does not reach: a day of another length, a baseline read from a file, a relationship to a project the same edit made.
+test('real files: a deleted resource by its ID, no line from a value to itself, days of the session, a restored baseline, a tie to a new project', async () => {
+  const lines = (e: any) => ((e.changes ?? []) as any[]).map((c) => `[${c.id}${c.project ? ` @${c.project}` : ''}] ${c.field}: ${JSON.stringify(c.old)} -> ${JSON.stringify(c.new)}`);
+  const unnamedOf = (h: string) => { const s = getSession(h); return describeChanges(s.db, s.history[s.history.length - 1].j, s.hpd).unnamed; };
+  const noRawRow = (l: string[], what: string) => assert.deepEqual(l.filter((x) => /^\[\d+( @[^\]]*)?\]/.test(x) || /"\d+" -> |-> "\d+"$/.test(x)), [], what);
+  // 129 trial: a resource P6 wrote, with a role and 22 assignments
+  let h = (await call('open_file', { path: sampleCopy('129 trial.xer') })).handle as string;
+  let e = await call('edit', { handle: h, operations: [{ op: 'delete_resource', id: 'SV', clear_references: true }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  const all = readFileSync(/all \d+ in (.+\.csv)\.$/.exec(e.changes_note)![1], 'utf8').trim().split(/\r?\n/);
+  assert.equal(all.filter((l) => l.startsWith('"SV","resource",')).length, 1, 'the resource is named by its Resource ID');
+  assert.equal(all.filter((l) => /^"[^"]+ SV","resource assignment",/.test(l)).length, 22);
+  assert.deepEqual(unnamedOf(h), []);
+  noRawRow(lines(e), 'delete_resource');
+  // a baseline and a copy of a project with 212 project-level activity code values: one line each
+  e = await call('edit', { handle: h, operations: [{ op: 'save_baseline', name: 'BLX' }] });
+  assert.deepEqual(lines(e), ['[BLX] baseline: null -> "added"']);
+  // 130 TRIAL: units changed on an assignment whose money P6 wrote as "450.00": the price did not change, and is not said
+  h = (await call('open_file', { path: sampleCopy('130 TRIAL.xer') })).handle as string;
+  e = await call('edit', { handle: h, operations: [{ op: 'update_assignment', activity: 'BTAB1416', resource: 'CM', units: 99 }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual(lines(e).filter((l) => /Price|Actual/.test(l)), []);
+  assert.ok(lines(e).includes('[BTAB1416 CM] Budgeted Units: 9 -> 99') && lines(e).includes('[BTAB1416 CM] Budgeted Cost: 4050 -> 44550'), JSON.stringify(lines(e)));
+  // Enppi opened with a 10-hour day (its calendars give no day length): 1,344 hours are 134.4 days, as get_activity says
+  h = (await call('open_file', { path: sampleCopy('Enppi.xer'), hours_per_day: 10 })).handle as string;
+  const before = Number(getSession(h).db.tables.TASK.rows.find((t) => t.task_code === '4229PPC140')!.target_drtn_hr_cnt) / 10; // (the row's own hours)
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: '4229PPC140', project: '4229 update 2-6-12', duration_days: 5 }] });
+  assert.deepEqual([before, lines(e)[0]], [134.4, '[4229PPC140 @4229 update 2-6-12] Original Duration (days): 134.4 -> 5']);
+  // Tower-A: a baseline read from the file, restored: it says so, in one line, with no column word and no internal number
+  { let o = await call('open_file', { path: sampleCopy('Tower-A.xer') }); if (!o.handle) o = await call('open_file', { path: sampleCopy('Tower-A.xer'), lenient: true }); h = o.handle as string; }
+  e = await call('edit', { handle: h, operations: [{ op: 'restore_baseline', baseline: 'TOWER-A-BL1' }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual(lines(e), ['[TOWER-A-BL1] baseline: "baseline of TOWER-A" -> "restored as a project"']);
+  assert.deepEqual(unnamedOf(h), []);
+  // a project made in the edit that ties an existing project to it: the relationship is the existing project's logic too, so it is said, and its dates are no longer current
+  h = (await call('new_project', { id: 'EC', start: '2026-03-02' })).handle as string;
+  await call('edit', { handle: h, operations: [act('A'), act('B'), { op: 'add_relationship', pred: 'A', succ: 'B' }] });
+  await call('schedule', { handle: h });
+  e = await call('edit', { handle: h, operations: [{ op: 'add_project', id: 'Q', start: '2026-03-02' }, { op: 'add_activity', id: 'X', name: 'X', duration_days: 30, project: 'Q' }, { op: 'add_relationship', pred: 'X', pred_project: 'Q', succ: 'A', succ_project: 'EC' }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual(lines(e), ['[Q] project: null -> "added"', '[X in Q FS A in EC] relationship: null -> "added"']);
+  assert.ok((e.notes as string[]).some((n) => /^The saved dates of EC are not what a recalculation gives/.test(n)), JSON.stringify(e.notes));
 });

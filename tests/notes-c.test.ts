@@ -354,7 +354,7 @@ test('a loop in the logic (owner 2026-11-13): every analysis that reads the save
   const o = await call('open_file', { path }), h = o.handle;
   assert.ok(h, JSON.stringify(o).slice(0, 300));
   const named = (s: string) => pair.every((c) => s.includes(c));
-  const sentenceOf = (figures: boolean) => `${proj} has a loop in its logic (${[codeOf(first[col('pred_task_id')]), codeOf(first[col('task_id')])].join(', ')}): its dates cannot be recalculated${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of the loop (edit update_relationship or delete_relationship).`;
+  const sentenceOf = (figures: boolean) => `${proj} has a loop in its logic (${[codeOf(first[col('pred_task_id')]), codeOf(first[col('task_id')])].join(', ')}): schedule cannot calculate the file as it stands${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of the loop.`;
   const sentence = (figures: boolean) => ({ test: (n: string) => n === sentenceOf(figures) || n === sentenceOf(figures).replace(/\(([^ ,]+), ([^)]+)\)/, '($2, $1)') });
   for (const tool of ['critical_path', 'float_paths', 'dcma_14', 'check_schedule', 'decm', 'schedule_health', 'lint', 'schedule_index', 'planning_horizon', 'baseline_variance', 'earned_value', 'progress_curves', 'resource_histogram', 'project_summary']) {
     const a = await call(tool, { handle: h, ...(tool === 'lint' ? { simulate: false } : {}) });
@@ -440,11 +440,13 @@ test('loops, the harder cases: two loops are one sentence; a loop in one project
   let h = await openIt(withLinks('two-loops.xer', [['B', 'A'], ['D', 'C']]));
   let a = await call('critical_path', { handle: h, project: 'LP' });
   assert.equal(loopsSaid(a).length, 1, JSON.stringify(a.notes));
-  assert.match(loopsSaid(a)[0], /^LP has 2 loops in its logic \((?:[AB], [AB]; [CD], [CD]|[CD], [CD]; [AB], [AB])\): its dates cannot be recalculated, so these figures are of the saved dates; change or delete one relationship of each loop \(edit update_relationship or delete_relationship\)\.$/);
+  assert.match(loopsSaid(a)[0], /^LP has 2 loops in its logic \((?:[AB], [AB]; [CD], [CD]|[CD], [CD]; [AB], [AB])\): schedule cannot calculate the file as it stands, so these figures are of the saved dates; change or delete one relationship of each loop\.$/);
   for (const tool of ['dcma_14', 'decm', 'schedule_index', 'planning_horizon']) assert.equal(loopsSaid(await call(tool, { handle: h, project: 'LP' })).length, 1, tool);
-  // LQ has no loop: nothing is said of one, its saved dates are still judged (they are not current), and its lint check passes
+  // LQ has no loop: its saved dates are still judged (they are not current), and its lint check passes. The dates sentence sends the agent to schedule, which
+  // calculates every project of the file and stops on LP's loops: so those are said with it, once, and not as a matter of LQ's figures
   a = await call('critical_path', { handle: h, project: 'LQ' });
-  assert.equal(loopsSaid(a).length, 0, JSON.stringify(a.notes));
+  assert.equal(loopsSaid(a).length, 1, JSON.stringify(a.notes));
+  assert.match(loopsSaid(a)[0], /^LP has 2 loops in its logic \([^)]+\): schedule cannot calculate the file as it stands; change or delete one relationship of each loop\.$/);
   assert.ok((a.notes as string[]).some((n) => /^The saved dates of LQ are not what a recalculation gives \(\d of 2 open activities differ\)/.test(n)), JSON.stringify(a.notes));
   assert.equal((await call('lint', { handle: h, project: 'LQ', simulate: false })).checks.find((c: any) => c.id === 'loops').result, 'pass');
   const lp = (await call('lint', { handle: h, project: 'LP', simulate: false })).checks.find((c: any) => c.id === 'loops');
@@ -453,14 +455,31 @@ test('loops, the harder cases: two loops are one sentence; a loop in one project
   assert.equal(rv.checks.find((c: any) => c.id === 'loops').grade, 'pass');
   assert.equal(rv.checks.find((c: any) => c.id === 'saved_dates').grade, 'warn');
 
-  // a loop that runs through both projects (B of LP to X of LQ, Y of LQ back to A of LP): said of each project, the other project's activities with their Project ID
+  // a loop that runs through both projects (B of LP to X of LQ, Y of LQ back to A of LP): ONE sentence that names both projects, each activity with its Project ID,
+  // whether one project is asked for or the whole file (the call an agent makes first)
   h = await openIt(withLinks('cross-loop.xer', [['B', 'X'], ['Y', 'A']]));
-  for (const [proj, own, other] of [['LP', ['A', 'B'], ['X in LQ', 'Y in LQ']], ['LQ', ['X', 'Y'], ['A in LP', 'B in LP']]] as const) {
+  for (const tool of ['critical_path', 'dcma_14', 'check_schedule', 'schedule_health', 'project_summary', 'schedule_index', 'lint']) {
+    a = await call(tool, { handle: h, ...(tool === 'lint' ? { simulate: false } : {}) });
+    assert.equal(loopsSaid(a).length, 1, `${tool}, the whole file: ${JSON.stringify(a.notes)}`);
+  }
+  const rvAll = await call('review', { handle: h });
+  assert.equal((rvAll.notes as string[]).join(' ').split(' have a loop in their logic').length - 1, 1, JSON.stringify(rvAll.notes));
+  assert.equal(rvAll.checks.find((c: any) => c.id === 'saved_dates').grade, 'not_assessed', 'no project could be recalculated: the saved dates are not judged');
+  for (const [proj, own] of [['LP', ['A', 'B']], ['LQ', ['X', 'Y']]] as const) {
     a = await call('critical_path', { handle: h, project: proj });
     assert.equal(loopsSaid(a).length, 1, `${proj}: ${JSON.stringify(a.notes)}`);
-    assert.ok(loopsSaid(a)[0].startsWith(`${proj} has a loop in its logic (`), loopsSaid(a)[0]);
-    for (const n of [...own.map((c) => `${c} in ${proj}`), ...other]) assert.ok(loopsSaid(a)[0].includes(n), `${proj}: ${n} in ${loopsSaid(a)[0]}`);
+    assert.ok(loopsSaid(a)[0].startsWith('LP and LQ have a loop in their logic ('), loopsSaid(a)[0]);
+    for (const n of ['A in LP', 'B in LP', 'X in LQ', 'Y in LQ']) assert.ok(loopsSaid(a)[0].includes(n), `${proj}: ${n} in ${loopsSaid(a)[0]}`);
     const lc = (await call('lint', { handle: h, project: proj, simulate: false })).checks.find((c: any) => c.id === 'loops');
     assert.deepEqual([lc.result, lc.activities.map((x: any) => x.id).sort()], ['fail', [...own]], `${proj}: its own activities of the loop`);
   }
+  // a report shows the saved float and finish: it says the loop too (and nothing of whether the saved dates are current: that is the analyses' to say)
+  const rep = await call('run_report', { handle: h, report: 'critical' });
+  assert.deepEqual([loopsSaid(rep).length, (rep.notes as string[]).filter((n) => /recalculation/.test(n)).length], [1, 0], JSON.stringify(rep.notes));
+  // after schedule with break_loops the dates are of a calculation that left a relationship out: the loop is still in the logic, and the sentence still true
+  h = await openIt(withLinks('one-loop.xer', [['B', 'A']]));
+  const broken = await call('schedule', { handle: h, break_loops: true, log: false });
+  assert.ok(!broken.error, JSON.stringify(broken.error));
+  a = await call('critical_path', { handle: h, project: 'LP' });
+  assert.equal(loopsSaid(a)[0], 'LP has a loop in its logic (A, B): schedule cannot calculate the file as it stands, so these figures are of the saved dates; change or delete one relationship of the loop.');
 });

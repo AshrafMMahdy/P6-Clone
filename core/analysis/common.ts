@@ -3,7 +3,7 @@
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { assignedBaselineId, baselineNotInFile } from '../cost/rollup.ts';
-import { baselineProjectIds } from '../progress/baseline.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 import { baselineReason, currentPlanUsed, tidyNotes, differentDataDates, namesText, noDataDateNotAssessed, noDataDateUsed, noDateNoStart, projectsText, notAssessed as notAssessedNote } from '../notes.ts';
 import { makeCtx, type Ctx } from '../project/ctx.ts';
 import { dayHours, type DayHours } from '../project/units.ts';
@@ -92,9 +92,7 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
   const projs = rows(db, 'PROJECT').filter((p) => !p._baseline_of && (!o.projIds?.length || o.projIds.includes(p.proj_id)));
   const projIds = new Set(projs.map((p) => p.proj_id));
   const tasks = rows(db, 'TASK').filter((t) => projIds.has(t.proj_id));
-  // (a relationship between a baseline and a current project is no logic of the current project: the scheduler leaves it out, and so do the analyses)
-  const snapshots = baselineProjectIds(db);
-  const rels = rows(db, 'TASKPRED').filter((r) => (projIds.has(r.proj_id) || projIds.has(r.pred_proj_id)) && !snapshots.has(r.proj_id) && !snapshots.has(r.pred_proj_id));
+  const rels = logicRelationships(db).filter((r) => projIds.has(r.proj_id) || projIds.has(r.pred_proj_id));
   const ctx = makeCtx(db, { hoursPerDay: hpd });
   const cals = calendarResolver(db, []);
   const projById = new Map(projs.map((p) => [p.proj_id, p]));
@@ -122,7 +120,10 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
 export function noBaselineReason(db: Db, projs: Row[], argument: boolean, which = 'project'): string {
   const gone = projs.filter((p) => baselineNotInFile(db, p, which)), none = projs.filter((p) => !gone.includes(p));
   const of = (l: Row[]) => projectsText(l.map((p) => p.proj_short_name));
-  return [none.length ? baselineReason(of(none), argument, which, false, which === 'project' ? savedBaselines(db, none) : []) : '', gone.length ? baselineReason(of(gone), argument, which, true) : ''].filter(Boolean).join('; ');
+  // (a project with a primary, secondary or tertiary baseline and no project baseline is said apart: "no baseline" would be false of it)
+  const other = which === 'project' ? none.filter((p) => p._bl1 || p._bl2 || p._bl3) : [], plain = none.filter((p) => !other.includes(p));
+  return [plain.length ? baselineReason(of(plain), argument, which, false, which === 'project' ? savedBaselines(db, plain) : []) : '', other.length ? baselineReason(of(other), argument, which, false, savedBaselines(db, other), true) : '',
+    gone.length ? baselineReason(of(gone), argument, which, true) : ''].filter(Boolean).join('; ');
 }
 /** The baselines saved in the file from these projects (their names): what a project with none assigned could assign or name. */
 export const savedBaselines = (db: Db, projs: Row[]): string[] => rows(db, 'PROJECT').filter((p) => p._baseline_of && projs.some((x) => x.proj_id === p._baseline_of)).map((p) => p.proj_short_name);

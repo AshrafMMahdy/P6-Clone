@@ -18,6 +18,7 @@ import { differentDatesNote, duplicateRowNotes } from '../analysis/scheduleLog.t
 import { storedDatesState } from '../schedule/stored-dates.ts';
 import { formatP6Date } from '../dates.ts';
 import { udfSubjectWord, udfTypeWord } from '../p6words.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 /** A lookup described for a language model (JSON Schema parameters). */
 export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
@@ -137,7 +138,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         critical: tasks.filter((t) => !t.act_end_date && isCritical(t, ctx)).length,
         negative_float: tasks.filter((t) => !t.act_end_date && Number(t.total_float_hr_cnt) < 0).length,
         milestones: tasks.filter((t) => t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile').length,
-        relationships: rows(db, 'TASKPRED').filter((r) => open.has(r.proj_id)).length,
+        relationships: logicRelationships(db).filter((r) => open.has(r.proj_id)).length,
         earliest_start: d(tasks.map(start).filter(Boolean).sort()[0]), latest_finish: d(tasks.map(finish).filter(Boolean).sort().pop()),
         wbs_top_level: top.slice(0, LISTED).map((w) => `${w.wbs_short_name} ${w.wbs_name}`), ...(top.length > LISTED ? { wbs_top_level_total: top.length } : {}),
         calendars: rows(db, 'CALENDAR').length, resources: new Set(rows(db, 'TASKRSRC').filter((a) => open.has(a.proj_id)).map((a) => a.rsrc_id)).size,
@@ -275,7 +276,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
     }
     case 'schedule_health': {
       const live = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
-      const P = rows(db, 'TASKPRED').filter((r) => open.has(r.proj_id));
+      const P = logicRelationships(db).filter((r) => open.has(r.proj_id));
       const ex = (l: Row[]) => ({ count: l.length, examples: (args.every_example === true || l.length <= LISTED ? l : l.slice(0, LISTED)).map((t) => `${t.task_code} ${t.task_name}`), ...(args.every_example !== true && l.length > LISTED ? { examples_total: l.length } : {}) }); // (every_example: the result file's whole lists)
       // each project is judged against its own data date (as the scheduler does)
       const ddOf = (t: Row) => parseP6Date(ctx.proj.get(t.proj_id)?.last_recalc_date);

@@ -8,7 +8,7 @@ import { WorkCalendar, CalendarHorizonError } from '../calendar/calendar.ts';
 import { calendarDefOfRow, hoursPerWeek, inheritExceptions, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
 import { inLoopCheck, loopsOfLinks } from '../xer/validate.ts';
 import { buildScheduleLog } from './log.ts';
-import { baselineProjectIds } from '../progress/baseline.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 import { actualAfterDataDate, cstrName, daysText, defaultCalendarWeek, loopNote, minutesToDays, namesText, noDataDateUsed, noDateNoStartInstead, noDateNoStartWrong, outOfSequence, plural, refused } from '../notes.ts';
 
 export type LogicMode = 'retained' | 'override' | 'actual';
@@ -257,17 +257,13 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
   // Relationships
   const rels: Rel[] = [];
-  const baselines = baselineProjectIds(db), allProj = new Map(baselines.size ? rows(db, 'TASK').map((t) => [t.task_id, t.proj_id]) : []);
-  for (const row of rows(db, 'TASKPRED')) {
+  for (const row of logicRelationships(db)) {
     const succ = acts.get(row.task_id) ?? null, pred = acts.get(row.pred_task_id) ?? null;
     if (!succ && !pred) continue;
     if (succ && pred && succ === pred) continue;
     if ((!succ || !pred)) {
       const inSet = (succ ?? pred)!;
       if (inSet.proj.opts.ignoreExternal) continue;
-      // a baseline is a snapshot: a relationship between it and a current project never drives the current project (as in P6)
-      const other = allProj.get(succ ? row.pred_task_id : row.task_id);
-      if (other && baselines.has(other) && !baselines.has(inSet.proj.id)) continue;
     }
     const r: Rel = { pred, succ, type: relType(row.pred_type), lag: Math.round(Number(row.lag_hr_cnt || 0) * H), row, slack: BIG };
     rels.push(r);

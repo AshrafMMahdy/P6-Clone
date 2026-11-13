@@ -43,10 +43,11 @@ export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) :
 export const andList = (parts: string[]): string => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
 /** Missing baseline, as the reason of a part that is not assessed. `argument`: the tool takes a `baseline` argument. `notInFile`: one IS assigned, and the file was exported without it. */
-export const baselineReason = (proj: string, argument: boolean, which = 'project', notInFile = false, saved: string[] = []): string => (notInFile
+export const baselineReason = (proj: string, argument: boolean, which = 'project', notInFile = false, saved: string[] = [], another = false): string => (notInFile
   ? `the ${baselineWord(which)} of ${proj} is not in this file (the file was exported without it); export the file with its baselines${argument ? ', or pass baseline to name one that is in it' : ''}`
-  : saved.length ? `no ${which === 'project' ? 'baseline' : baselineWord(which)} is assigned to ${proj}; ${savedText(saved)}: assign ${saved.length === 1 ? 'it' : 'one'} with edit assign_baseline${argument ? `, or pass ${saved.length === 1 ? 'it' : 'one'} as baseline` : ''}`
-  : `no ${which === 'project' ? 'baseline' : baselineWord(which)} is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`);
+  // (`another`: the project has a primary, secondary or tertiary baseline, so "no baseline" would be false: it is the PROJECT baseline it has none of)
+  : saved.length ? `no ${which === 'project' && !another ? 'baseline' : baselineWord(which)} is assigned to ${proj}; ${savedText(saved)}: assign ${saved.length === 1 ? 'it' : 'one'} with edit assign_baseline${argument ? `, or pass ${saved.length === 1 ? 'it' : 'one'} as baseline` : ''}`
+  : `no ${which === 'project' && !another ? 'baseline' : baselineWord(which)} is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`);
 /** The baselines saved in the file and not assigned, as a clause. */
 const savedText = (saved: string[]): string => `${namesText(saved)} ${saved.length === 1 ? 'is' : 'are'} saved in the file`;
 /** Missing baseline, a check left out. */
@@ -151,8 +152,8 @@ export const datesNotCurrent = (proj: string, differ: number, open: number, figu
 export const loopNote = (ids: string[]): string => `${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
 /** A loop stops the calculation of a project's dates: said by every analysis that judges from the saved dates (it still answers: owner 2026-11-13, as P6's reports open on a
  *  schedule F9 refuses). `figures`: the answer holds figures of those dates. */
-export const loopStopsDates = (proj: string, loops: string[][], figures = false): string =>
-  `${proj} has ${loops.length === 1 ? 'a loop' : `${loops.length} loops`} in its logic (${loops.map((l) => namesText(l)).join('; ')}): its dates cannot be recalculated${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of ${loops.length === 1 ? 'the loop' : 'each loop'} (edit update_relationship or delete_relationship).`;
+export const loopStopsDates = (projs: string[], loops: string[][], figures = false): string =>
+  `${projectsText(projs)} ${projs.length === 1 ? 'has' : 'have'} ${loops.length === 1 ? 'a loop' : `${loops.length} loops`} in ${projs.length === 1 ? 'its' : 'their'} logic (${loops.map((l) => namesText(l)).join('; ')}): schedule cannot calculate the file as it stands${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of ${loops.length === 1 ? 'the loop' : 'each loop'}.`;
 /** The scheduler's short loop sentence ("A and B are in a loop."): an answer that carries the sentence above does not repeat it. */
 export const isShortLoopNote = (n: string): boolean => /^[^:]+ (?:is|are) in a loop\.$/.test(n);
 /** Resources that are Material: a material is a quantity, not a crew, so its over-allocation is not judged. `ids` are Resource IDs. */

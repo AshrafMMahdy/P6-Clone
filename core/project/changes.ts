@@ -3,7 +3,7 @@
 import { ABSENT, realOf, type Journal } from '../journal.ts';
 import { KEYS, type Db, type Row } from '../db.ts';
 import { dayHours } from './units.ts';
-import { cstrName, namesText } from '../notes.ts';
+import { cstrName } from '../notes.ts';
 import { humanizeField, STATUS_WORDS, TABLE_WORD } from '../p6words.ts';
 import { parseClndrDataLeniently } from '../calendar/clndr-data.ts';
 
@@ -24,12 +24,13 @@ const WORDS: Record<string, Record<string, string>> = {
 const wordOf = (column: string, v: string): string => (column === 'cstr_type' || column === 'cstr_type2' ? (v === '' ? '' : cstrName(v)) : WORDS[column]?.[v] ?? v);
 
 /** The fields of an activity a person sets, with the name the answer gives them (hours as days on the activity's calendar). */
-const TASK_FIELDS: Record<string, { label: string; days?: boolean }> = {
+const TASK_FIELDS: Record<string, { label: string; days?: boolean; number?: boolean }> = {
   task_name: { label: 'Activity Name' }, task_code: { label: 'Activity ID' }, target_drtn_hr_cnt: { label: 'Original Duration (days)', days: true }, remain_drtn_hr_cnt: { label: 'Remaining Duration (days)', days: true },
   proj_id: { label: 'Project' }, act_start_date: { label: 'Actual Start' }, act_end_date: { label: 'Actual Finish' }, status_code: { label: 'Activity Status' }, task_type: { label: 'Activity Type' }, clndr_id: { label: 'Calendar' }, wbs_id: { label: 'WBS' },
   cstr_type: { label: 'Primary Constraint' }, cstr_date: { label: 'Primary Constraint Date' }, cstr_type2: { label: 'Secondary Constraint' }, cstr_date2: { label: 'Secondary Constraint Date' },
   complete_pct_type: { label: 'Percent Complete Type' }, phys_complete_pct: { label: 'Physical % Complete' }, priority_type: { label: 'Leveling Priority' },
   expect_end_date: { label: 'Expected Finish' }, rsrc_id: { label: 'Primary Resource' },
+  act_this_per_work_qty: { label: 'Actual This Period Labor Units', number: true }, act_this_per_equip_qty: { label: 'Actual This Period Nonlabor Units', number: true },
 };
 /** The fields of the other rows an edit can change, by the name P6 gives them (a column not here is named by its words). */
 const OTHER_FIELDS: Record<string, string> = {
@@ -79,11 +80,13 @@ const TABLE_FIELDS: Record<string, Record<string, string>> = {
   OBS: { obs_name: 'OBS Name', obs_descr: 'OBS Description', parent_obs_id: 'Parent OBS' },
   POBS: { pobs_name: 'Performing Organization Name', pobs_descr: 'Performing Organization Description', pobs_manager: 'Performing Organization Manager' },
   ROLES: { role_short_name: 'Role ID', role_name: 'Role Name', role_descr: 'Role Description', parent_role_id: 'Parent Role' },
+  RSRCROLE: { skill_level: 'Proficiency' }, ROLERATE: { cost_per_qty: 'Price / Unit', start_date: 'Effective Date', max_qty_per_hr: 'Max Units/Time (units an hour)' }, THRSPARM: { thresh_parm_name: 'Threshold Parameter' },
   RSRCCURVDATA: { curv_name: 'Resource Curve Name' },
   FINDATES: { fin_dates_name: 'Financial Period Name', start_date: 'Start Date', end_date: 'End Date' }, FINTMPL: { fintmpl_name: 'Financial Period Calendar Name', default_flag: 'Default' },
   TASKMEMO: { task_memo: 'Notebook Text' }, WBSMEMO: { wbs_memo: 'Notebook Text' },
 };
 const TABLE_WORDS: Record<string, Record<string, (v: string) => string>> = {
+  RSRCROLE: { skill_level: (v) => ({ 1: '1 - Master', 2: '2 - Expert', 3: '3 - Skilled', 4: '4 - Proficient', 5: '5 - Inexperienced' } as Record<string, string>)[v] ?? v },
   SCHEDOPTIONS: {
     sched_calendar_on_relationship_lag: (v) => ({ rcal_Predecessor: 'Predecessor Activity Calendar', rcal_Successor: 'Successor Activity Calendar', rcal_24Hour: '24 Hour Calendar', rcal_ProjDefault: 'Project Default Calendar' } as Record<string, string>)[v] ?? v,
     sched_float_type: (v) => ({ FT_SS: 'Start Float = Late Start - Early Start', FT_FF: 'Finish Float = Late Finish - Early Finish', FT_Min: 'Smallest of Start Float and Finish Float' } as Record<string, string>)[v] ?? v,
@@ -105,7 +108,7 @@ const ROW_KIND: Record<string, string> = {
   PROJCOST: 'expense', TASKPROC: 'step', ACTVTYPE: 'activity code', PCATTYPE: 'project code', RCATTYPE: 'resource code', ASGNMNTCATTYPE: 'assignment code',
   ACTVCODE: 'activity code value', PCATVAL: 'project code value', RCATVAL: 'resource code value', ASGNMNTCATVAL: 'assignment code value', UDFTYPE: 'user defined field',
   ACCOUNT: 'cost account', EPS: 'EPS', OBS: 'OBS', POBS: 'performing organization', ROLES: 'role', RSRCCURVDATA: 'resource curve', FINDATES: 'financial period', FINTMPL: 'financial period calendar',
-  CURRTYPE: 'currency', MEMOTYPE: 'notebook topic',
+  CURRTYPE: 'currency', MEMOTYPE: 'notebook topic', ROLERATE: 'role price', THRSPARM: 'threshold parameter',
 };
 /** The rows that ARE a value of another row (a custom field's value, a code assigned, a notebook's text, a period's actuals): said as that value, from nothing or to nothing. */
 const CODE_ASSIGNED: Record<string, { type: string; typeKey: string; typeName: string; val: string; valKey: string; valName: string; field: string }> = {
@@ -136,11 +139,16 @@ function calendarChange(was: string, now: string): { field: string; old: string 
   const a = parseClndrDataLeniently(was), b = parseClndrDataLeniently(now), out: { field: string; old: string | null; new: string }[] = [];
   if (!a || !b) return [{ field: 'Work Time', old: null, new: 'changed' }];
   const shifts = (l: { start: number; end: number }[]) => l.map((x) => `${x.start}-${x.end}`).join(',');
-  if (a.week.map(shifts).join('|') !== b.week.map(shifts).join('|')) out.push({ field: 'Standard Work Week', old: null, new: 'changed' });
+  // the work week as its work hours per day, Sunday to Saturday (as P6's Workweek dialog lists them)
+  const hours = (w: { start: number; end: number }[][]) => w.map((d, i) => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i]} ${Math.round((d.reduce((n, x) => n + x.end - x.start, 0) / 60) * 100) / 100}`).join(', ');
+  const times = (w: { start: number; end: number }[][]) => w.map((d, i) => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i]} ${d.map((x) => `${clock(x.start)}-${clock(x.end)}`).join(' ') || 'no work'}`).join(', ');
+  const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  if (a.week.map(shifts).join('|') !== b.week.map(shifts).join('|')) out.push(hours(a.week) !== hours(b.week) ? { field: 'Standard Work Week (hours a day)', old: hours(a.week), new: hours(b.week) } : { field: 'Standard Work Week (work time)', old: times(a.week), new: times(b.week) });
   const added = [...b.exceptions].filter(([d, sh]) => shifts(a.exceptions.get(d) ?? [{ start: -1, end: -1 }]) !== shifts(sh)).map(([d]) => dayText(d)).sort();
   const removed = [...a.exceptions.keys()].filter((d) => !b.exceptions.has(d)).map(dayText).sort();
-  if (added.length) out.push({ field: 'Calendar Exceptions Added', old: null, new: namesText(added) });
-  if (removed.length) out.push({ field: 'Calendar Exceptions Removed', old: null, new: namesText(removed) });
+  // (every date: the change is one value, and the list of changes is what is cut, into a file that holds all of them)
+  if (added.length) out.push({ field: 'Calendar Exceptions Added', old: null, new: added.join(', ') });
+  if (removed.length) out.push({ field: 'Calendar Exceptions Removed', old: null, new: removed.join(', ') });
   return out;
 }
 
@@ -148,7 +156,7 @@ function calendarChange(was: string, now: string): { field: string; old: string 
 export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes: FieldChange[]; datesAffected: boolean; /** columns named by their own words: no P6 name is recorded for them */ unnamed: string[] } {
   const all: FieldChange[] = [], rowOfChange = new Map<FieldChange, unknown>();
   let datesAffected = false;
-  const dh = dayHours(db, 8, true);
+  const dh = dayHours(db, hoursPerDay, true);
   const tasks = new Map<string, Row>();
   const task = (id: string) => { if (!tasks.size) for (const t of db.tables.TASK?.rows ?? []) tasks.set(t.task_id, t); return tasks.get(id); };
   const projects = new Map((db.tables.PROJECT?.rows ?? []).map((p) => [p.proj_id, p]));
@@ -156,7 +164,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
   const resources = new Map((db.tables.RSRC?.rows ?? []).map((r) => [r.rsrc_id, r]));
   const gone = new Map<string, Row>();
   /** rows this edit removed, by table-like kind: an id that pointed at one is still named by what the agent called it */
-  const goneProjects = new Map<string, Row>(), goneCalendars = new Map<string, Row>(), goneAccounts = new Map<string, Row>(), goneCurves = new Map<string, Row>(), goneResources = new Map<string, Row>();
+  const goneProjects = new Map<string, Row>(), goneResources = new Map<string, Row>();
   const unnamed = new Set<string>();
   const removedRows: Obj[] = [], removedTable = new Map<unknown, string>();
   // which table a row is of (looked up only when a row of another kind than an activity or a relationship changed)
@@ -165,42 +173,59 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     if (!tableByRow) { tableByRow = new Map(); for (const [name, t] of Object.entries(db.tables)) if (name !== 'TASK' && name !== 'TASKPRED') for (const x of t.rows) tableByRow.set(x, name); }
     return tableByRow.get(r) ?? removedTable.get(r) ?? '';
   };
+  /** The table a row is of. An activity and a relationship are known by their columns (no other table has them, and a large file is not walked for a plain edit); every other row by the table that holds it. */
+  const kindOf = (r: Obj): string => ('pred_task_id' in r ? 'TASKPRED' : 'task_code' in r && 'task_id' in r ? 'TASK' : tableOf(r));
   // (a row this edit removed is still found by its key: what pointed at it is named by what the agent called it)
-  const find = (tbl: string, key: string, v: unknown): Row | undefined => (db.tables[tbl]?.rows ?? []).find((x) => x[key] === text(v)) ?? (removedRows.find((x) => key in x && x[key] === text(v) && (removedTable.get(x) ? removedTable.get(x) === tbl : (key !== 'role_id' || 'role_short_name' in x) && (key !== 'fin_dates_id' || 'fin_dates_name' in x))) as Row | undefined);
-  const projectId = (id: unknown): string => text((projects.get(text(id)) ?? goneProjects.get(text(id)))?.proj_short_name ?? id);
-  const calendarName = (id: unknown): string => text((calendars.get(text(id)) ?? goneCalendars.get(text(id)))?.clndr_name ?? id);
-  const accountId = (id: unknown): string => text((find('ACCOUNT', 'acct_id', id) ?? goneAccounts.get(text(id)))?.acct_short_name ?? id);
-  const curveName = (id: unknown): string => text((find('RSRCCURVDATA', 'curv_id', id) ?? goneCurves.get(text(id)))?.curv_name ?? id);
-  const roleId = (id: unknown): string => text(find('ROLES', 'role_id', id)?.role_short_name ?? id);
-  const topicName = (id: unknown): string => text(find('MEMOTYPE', 'memo_type_id', id)?.memo_type ?? 'Notes');
+  const byKey = new Map<string, Map<string, Row>>();
+  const find = (tbl: string, key: string, v: unknown): Row | undefined => {
+    let ix = byKey.get(`${tbl}|${key}`);
+    if (!ix) { ix = new Map(); for (const x of removedRows) if (removedTable.get(x) === tbl && key in x) ix.set(text(x[key]), x as Row); for (const x of db.tables[tbl]?.rows ?? []) ix.set(text(x[key]), x); byKey.set(`${tbl}|${key}`, ix); }
+    return ix.get(text(v));
+  };
+  /** What a row points at when the file does not hold it (a baseline exported without, a calendar left out): said as that, never by its internal number. */
+  const missing = (what: string): string => `${/^[aeiou]/i.test(what) ? 'an' : 'a'} ${what} that is not in the file`;
+  const named = (r: Row | undefined, column: string, what: string): string => (r ? text(r[column]) : missing(what));
+  const projectId = (id: unknown, what = 'project'): string => named(projects.get(text(id)) ?? goneProjects.get(text(id)), 'proj_short_name', what);
+  const calendarName = (id: unknown): string => named(calendars.get(text(id)) ?? find('CALENDAR', 'clndr_id', id), 'clndr_name', 'calendar');
+  const accountId = (id: unknown): string => named(find('ACCOUNT', 'acct_id', id), 'acct_short_name', 'cost account');
+  const curveName = (id: unknown): string => named(find('RSRCCURVDATA', 'curv_id', id), 'curv_name', 'resource curve');
+  const roleId = (id: unknown): string => named(find('ROLES', 'role_id', id), 'role_short_name', 'role');
+  const topicName = (id: unknown): string => named(find('MEMOTYPE', 'memo_type_id', id), 'memo_type', 'notebook topic');
   /** A WBS element as the agent names it: its dotted code path under the project (the project's own node by its code), with the baseline it is a row of when it is one. */
   const wbsPath = (w: Obj): string => {
-    const W = db.tables.PROJWBS?.rows ?? [], parts: string[] = [];
+    const parts: string[] = [];
     // (a node already passed ends the walk: a damaged file can make a node its own ancestor)
-    for (let x: Obj | undefined = w, passed = new Set<Obj>(); x && !passed.has(x); ) { passed.add(x); if (x.proj_node_flag === 'Y' && parts.length) break; parts.unshift(text(x.wbs_short_name)); if (x.proj_node_flag === 'Y') break; const up = text(x.parent_wbs_id); x = W.find((y) => y.wbs_id === up) ?? (removedRows.find((y) => 'wbs_short_name' in y && y.wbs_id === up)); }
+    for (let x: Obj | undefined = w, passed = new Set<Obj>(); x && !passed.has(x); ) { passed.add(x); if (x.proj_node_flag === 'Y' && parts.length) break; parts.unshift(text(x.wbs_short_name)); if (x.proj_node_flag === 'Y') break; const up = text(x.parent_wbs_id); x = find('PROJWBS', 'wbs_id', up); }
     const p = projects.get(text(w.proj_id)) ?? goneProjects.get(text(w.proj_id));
     return `${parts.join('.')}${p?._baseline_of ? ` in baseline ${p.proj_short_name}` : ''}`;
   };
-  const wbsCode = (id: unknown): string => { const w = find('PROJWBS', 'wbs_id', id); return w ? wbsPath(w) : text(id); };
+  const wbsCode = (id: unknown): string => { const w = find('PROJWBS', 'wbs_id', id); return w ? wbsPath(w) : missing('WBS'); };
   /** A relationship as the agent names it: predecessor, type, successor; an end that is in another project than the other says its Project ID. */
   const relName = (r: Obj): string => {
     const a = task(text(r.pred_task_id)) ?? gone.get(text(r.pred_task_id)), b = task(text(r.task_id)) ?? gone.get(text(r.task_id));
     const cross = !!a && !!b && a.proj_id !== b.proj_id;
-    const end = (t: Row | undefined, id: unknown) => (t ? `${taskName(t)}${cross ? ` in ${projectId(t.proj_id)}` : ''}` : text(id));
-    return `${end(a, r.pred_task_id)} ${text(r.pred_type || 'PR_FS').slice(3)} ${end(b, r.task_id)}`;
+    const end = (t: Row | undefined) => (t ? `${taskName(t)}${cross && !projects.get(t.proj_id)?._baseline_of ? ` in ${projectId(t.proj_id)}` : ''}` : missing('activity'));
+    return `${end(a)} ${text(r.pred_type || 'PR_FS').slice(3)} ${end(b)}`;
   };
   const inChangedProject = (r: Obj): boolean => {
-    const pids = ['proj_id' in r ? text(r.proj_id) : '', 'pred_proj_id' in r ? text(r.pred_proj_id) : '', ...['task_id', 'pred_task_id'].map((k) => (k in r ? text((task(text(r[k])) ?? gone.get(text(r[k])))?.proj_id) : ''))].filter(Boolean);
-    return pids.some((id) => madeProjects.has(id) || removedProjects.has(id));
+    const changed = (id: string) => madeProjects.has(id) || removedProjects.has(id);
+    // a relationship: both its ends (one that ties the project to ANOTHER project is that project's logic too, and is said)
+    if ('pred_task_id' in r) return ['task_id', 'pred_task_id'].every((k) => changed(text((task(text(r[k])) ?? gone.get(text(r[k])))?.proj_id)));
+    // a value of a project-level activity code belongs to the code's project
+    if (!('proj_id' in r) && 'actv_code_type_id' in r && 'short_name' in r) return changed(text(find('ACTVTYPE', 'actv_code_type_id', r.actv_code_type_id)?.proj_id));
+    const pids = ['proj_id' in r ? text(r.proj_id) : '', 'task_id' in r ? text((task(text(r.task_id)) ?? gone.get(text(r.task_id)))?.proj_id) : ''].filter(Boolean);
+    return pids.some(changed);
   };
   const assignmentName = (a: Obj): string => `${code(text(a.task_id))} ${a.rsrc_id ? rsrcName(a.rsrc_id) : roleId(a.role_id)}`;
+  const assignmentOf = (id: unknown): string => ((x) => (x ? assignmentName(x) : missing('assignment')))(find('TASKRSRC', 'taskrsrc_id', id));
   /** The row a custom field's value belongs to, by the name the agent uses for it. */
   const udfOwner = (v: Obj): string => {
     const tbl = text(find('UDFTYPE', 'udf_type_id', v.udf_type_id)?.table_name), id = v.fk_id;
-    return tbl === 'TASK' ? code(text(id)) : tbl === 'PROJWBS' ? wbsCode(id) : tbl === 'PROJECT' ? projectId(id) : tbl === 'RSRC' ? rsrcName(id)
-      : tbl === 'TASKRSRC' ? ((x) => (x ? assignmentName(x) : text(id)))(find('TASKRSRC', 'taskrsrc_id', id)) : tbl === 'PROJCOST' ? ((x) => (x ? `${code(text(x.task_id))} / ${text(x.cost_name)}` : text(id)))(find('PROJCOST', 'cost_item_id', id)) : text(id);
+    return tbl === 'TASK' ? code(text(id)) : tbl === 'PROJWBS' ? wbsCode(id) : tbl === 'PROJECT' ? projectId(id) : tbl === 'RSRC' ? rsrcName(id) : tbl === 'ROLE' ? roleId(id)
+      : tbl === 'TASKRSRC' ? assignmentOf(id) : tbl === 'PROJCOST' ? ((x) => (x ? `${code(text(x.task_id))} / ${text(x.cost_name)}` : missing('expense')))(find('PROJCOST', 'cost_item_id', id))
+      : tbl === 'TASKPROC' ? ((x) => (x ? `${code(text(x.task_id))} / ${text(x.proc_name)}` : missing('step')))(find('TASKPROC', 'proc_id', id)) : missing('row');
   };
-  const udfValue = (v: Obj): string | number | null => (text(v.udf_text) !== '' ? text(v.udf_text) : text(v.udf_number) !== '' ? Number(v.udf_number) : text(v.udf_date) !== '' ? text(v.udf_date) : text(v.udf_code_id) !== '' ? text(find('UDFCODE', 'udf_code_id', v.udf_code_id)?.short_name ?? v.udf_code_id) : null);
+  const udfValue = (v: Obj): string | number | null => (text(v.udf_text) !== '' ? text(v.udf_text) : text(v.udf_number) !== '' ? Number(v.udf_number) : text(v.udf_date) !== '' ? text(v.udf_date) : text(v.udf_code_id) !== '' ? named(find('UDFCODE', 'udf_code_id', v.udf_code_id), 'short_name', 'code value') : null);
   /** A row of another table, as the agent names it. */
   const rowId = (tbl: string, r: Obj): string => {
     switch (tbl) {
@@ -214,9 +239,9 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       case 'RCATVAL': return `${text(find('RCATTYPE', 'rsrc_catg_type_id', r.rsrc_catg_type_id)?.rsrc_catg_type)} = ${text(r.rsrc_catg_short_name)}`;
       case 'ASGNMNTCATVAL': return `${text(find('ASGNMNTCATTYPE', 'asgnmnt_catg_type_id', r.asgnmnt_catg_type_id)?.asgnmnt_catg_type)} = ${text(r.asgnmnt_catg_short_name)}`;
       case 'UDFTYPE': return text(r.udf_type_label);
-      case 'UDFVALUE': return `${udfOwner(r)} / ${text(find('UDFTYPE', 'udf_type_id', r.udf_type_id)?.udf_type_label ?? r.udf_type_id)}`;
-      case 'TASKACTV': case 'PROJPCAT': case 'RSRCRCAT': case 'ASGNMNTACAT': { const c = CODE_ASSIGNED[tbl]; const owner = tbl === 'TASKACTV' ? code(text(r.task_id)) : tbl === 'PROJPCAT' ? projectId(r.proj_id) : tbl === 'RSRCRCAT' ? rsrcName(r.rsrc_id) : ((x) => (x ? assignmentName(x) : text(r.taskrsrc_id)))(find('TASKRSRC', 'taskrsrc_id', r.taskrsrc_id)); return `${owner} / ${text(find(c.type, c.typeKey, r[c.typeKey])?.[c.typeName] ?? r[c.typeKey])}`; }
-      case 'RSRCRATE': { const n = (db.tables.RSRCRATE?.rows ?? []).filter((x) => x.rsrc_id === r.rsrc_id).length; return `${rsrcName(r.rsrc_id)}${n > 1 && text(r.start_date) !== '' ? ` (price from ${text(r.start_date).slice(0, 10)})` : ''}`; }
+      case 'UDFVALUE': return `${udfOwner(r)} / ${named(find('UDFTYPE', 'udf_type_id', r.udf_type_id), 'udf_type_label', 'user defined field')}`;
+      case 'TASKACTV': case 'PROJPCAT': case 'RSRCRCAT': case 'ASGNMNTACAT': { const c = CODE_ASSIGNED[tbl]; const owner = tbl === 'TASKACTV' ? code(text(r.task_id)) : tbl === 'PROJPCAT' ? projectId(r.proj_id) : tbl === 'RSRCRCAT' ? rsrcName(r.rsrc_id) : assignmentOf(r.taskrsrc_id); return `${owner} / ${named(find(c.type, c.typeKey, r[c.typeKey]), c.typeName, 'code')}`; }
+      case 'RSRCRATE': { const n = prices().get(text(r.rsrc_id)) ?? 0; return `${rsrcName(r.rsrc_id)}${n > 1 && text(r.start_date) !== '' ? ` (price from ${text(r.start_date).slice(0, 10)})` : ''}`; }
       case 'PROJCOST': return `${code(text(r.task_id))} / ${text(r.cost_name)}`;
       case 'TASKPROC': return `${code(text(r.task_id))} / ${text(r.proc_name)}`;
       case 'TASKMEMO': return `${code(text(r.task_id))} / ${topicName(r.memo_type_id)}`;
@@ -231,17 +256,27 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       case 'FINTMPL': return text(r.fintmpl_name);
       case 'PROJWBS': return wbsPath(r);
       case '_RISKEST': return code(text(r.task_id));
-      case 'TASKFIN': return `${code(text(r.task_id))} / ${text(find('FINDATES', 'fin_dates_id', r.fin_dates_id)?.fin_dates_name ?? r.fin_dates_id)}`;
-      case 'TRSRCFIN': { const a = find('TASKRSRC', 'taskrsrc_id', r.taskrsrc_id); return `${code(text(r.task_id ?? a?.task_id))} ${a ? (a.rsrc_id ? rsrcName(a.rsrc_id) : roleId(a.role_id)) : ''} / ${text(find('FINDATES', 'fin_dates_id', r.fin_dates_id)?.fin_dates_name ?? r.fin_dates_id)}`; }
+      case 'TASKFIN': return `${code(text(r.task_id))} / ${named(find('FINDATES', 'fin_dates_id', r.fin_dates_id), 'fin_dates_name', 'financial period')}`;
+      case 'TRSRCFIN': return `${assignmentOf(r.taskrsrc_id)} / ${named(find('FINDATES', 'fin_dates_id', r.fin_dates_id), 'fin_dates_name', 'financial period')}`;
       case 'CURRTYPE': return text(r.curr_short_name ?? r.curr_type);
       case 'MEMOTYPE': return text(r.memo_type);
-      default: return text(r.rsrc_short_name ?? r.proj_short_name ?? r.wbs_short_name ?? r.clndr_name ?? r.actv_code_name ?? r.udf_type_label ?? r.task_pred_id ?? r.taskrsrc_id ?? r.rsrc_id ?? '');
+      case 'RSRC': return text(r.rsrc_short_name);
+      case 'PROJECT': return text(r.proj_short_name);
+      case 'CALENDAR': return text(r.clndr_name);
+      case 'TASKRSRC': return assignmentName(r);
+      case 'RSRCROLE': return `${rsrcName(r.rsrc_id)} / ${roleId(r.role_id)}`;
+      case 'ROLERATE': return `${roleId(r.role_id)}${text(r.start_date) !== '' ? ` (price from ${text(r.start_date).slice(0, 10)})` : ''}`;
+      case 'THRSPARM': return text(r.thresh_parm_name);
+      // a table no operation of edit names (reached by add_row, set_fields, delete_rows, which name the table themselves): the table and the row's key, as read_table shows them
+      default: return `${tbl} ${KEYS[tbl] ? text(r[KEYS[tbl]]) : 'row'}`;
     }
   };
   /** An activity as the agent names it: its Activity ID, and the baseline it is a row of when it is one (an edit reaches a stored baseline's copy, e.g. replace_text). */
   const taskName = (t: Obj): string => { const p = projects.get(text(t.proj_id)); return p?._baseline_of ? `${text(t.task_code)} in baseline ${p.proj_short_name}` : text(t.task_code); };
-  const code = (id: string) => { const t = task(id) ?? gone.get(id); return t ? taskName(t) : id; };
-  const rsrcName = (id: unknown) => text((resources.get(text(id)) ?? goneResources.get(text(id)))?.rsrc_short_name ?? id);
+  const code = (id: string) => { const t = task(id) ?? gone.get(id); return t ? taskName(t) : missing('activity'); };
+  const rsrcName = (id: unknown) => named(resources.get(text(id)) ?? find('RSRC', 'rsrc_id', id), 'rsrc_short_name', 'resource');
+  let priceRows: Map<string, number> | null = null;
+  const prices = () => { if (!priceRows) { priceRows = new Map(); for (const x of db.tables.RSRCRATE?.rows ?? []) priceRows.set(x.rsrc_id, (priceRows.get(x.rsrc_id) ?? 0) + 1); } return priceRows; };
   // a file with several projects: each change says whose it is (an Activity ID, a WBS code or an expense name can be in more than one)
   const several = [...projects.values()].filter((p) => !p._baseline_of).length > 1;
   const out = (c: FieldChange, r?: unknown) => {
@@ -249,15 +284,20 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     const pid = o ? text('proj_id' in o ? o.proj_id : 'task_id' in o ? (task(text(o.task_id)) ?? gone.get(text(o.task_id)))?.proj_id : '') : '';
     const p = pid ? projects.get(pid) ?? goneProjects.get(pid) : undefined;
     const owner = p ? (p._baseline_of ? projects.get(text(p._baseline_of)) ?? p : p) : undefined;
-    const itsOwn = !!o && (('proj_short_name' in o && !('wbs_id' in o) && !('task_id' in o)) || 'schedoptions_id' in o || o.proj_node_flag === 'Y'); // the project's own line (its ID is the name of the row)
-    const ch = several && owner && c.project == null && !itsOwn ? { id: c.id, project: text(owner.proj_short_name), field: c.field, old: c.old, new: c.new } : c;
+    const kind = o ? kindOf(o) : '';
+    // the project's own line (its ID is the name of the row): the project, its schedule options, its root WBS node, its codes and its custom fields
+    const itsOwn = kind === 'PROJECT' || kind === 'SCHEDOPTIONS' || kind === 'PROJPCAT' || (kind === 'PROJWBS' && o!.proj_node_flag === 'Y') || (kind === 'UDFVALUE' && find('UDFTYPE', 'udf_type_id', o!.udf_type_id)?.table_name === 'PROJECT');
+    if (c.old === c.new) return; // (the file's text changed and the value did not: "450.00" to "450")
+    // a relationship between two projects names the project of each end: it belongs to both, and carries no project of its own
+    const twoProjects = kind === 'TASKPRED' && ((a, b) => !!a && !!b && a.proj_id !== b.proj_id)(task(text(o!.pred_task_id)) ?? gone.get(text(o!.pred_task_id)), task(text(o!.task_id)) ?? gone.get(text(o!.task_id)));
+    const ch = several && owner && c.project == null && !itsOwn && !twoProjects ? { id: c.id, project: text(owner.proj_short_name), field: c.field, old: c.old, new: c.new } : c;
     all.push(ch); rowOfChange.set(ch, r);
   };
   /** the value lines of a row that IS a value (a custom field's value, a code assigned, a notebook's text, estimates, period actuals): from nothing when added, to nothing when removed */
   const valueLines = (tbl: string, r: Obj): { field: string; value: string | number | null }[] => {
     if (tbl === 'UDFVALUE') return [{ field: 'User Defined Field Value', value: udfValue(r) }];
     const c = CODE_ASSIGNED[tbl];
-    if (c) return [{ field: c.field, value: text(find(c.val, c.valKey, r[c.valKey])?.[c.valName] ?? r[c.valKey]) }];
+    if (c) return [{ field: c.field, value: named(find(c.val, c.valKey, r[c.valKey]), c.valName, 'code value') }];
     if (tbl === 'TASKMEMO' || tbl === 'WBSMEMO') return [{ field: 'Notebook Text', value: plainText(text(tbl === 'TASKMEMO' ? r.task_memo : r.wbs_memo)) }];
     if (tbl === '_RISKEST') { const t = task(text(r.task_id)) ?? gone.get(text(r.task_id)); const hpd = t ? dh.task(t) : hoursPerDay; return Object.entries(TABLE_FIELDS._RISKEST).map(([k, field]) => ({ field, value: text(r[k]) === '' ? null : k === 'dist' ? text(r[k]) : Math.round((Number(r[k]) / hpd) * 100) / 100 })); }
     if (tbl === 'TASKFIN' || tbl === 'TRSRCFIN') return Object.entries(TABLE_FIELDS[tbl]).filter(([k]) => Number(r[k] || 0) !== 0).map(([k, field]) => ({ field, value: Number(r[k]) }));
@@ -265,6 +305,8 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
   };
   const VALUE_ROWS = new Set(['UDFVALUE', 'TASKACTV', 'PROJPCAT', 'RSRCRCAT', 'ASGNMNTACAT', 'TASKMEMO', 'WBSMEMO', '_RISKEST', 'TASKFIN', 'TRSRCFIN']);
   const valueChange = new Set<FieldChange>();
+  // (a resource's price rows and roles wait until every added row is known: those of a resource this edit made or deleted are said by the resource's own line)
+  const ofResource: ['added' | 'removed', Obj, string][] = [];
   // rows added or removed: a table made or dropped by this edit (its rows), or an array that grew or shrank
   const added = new Set<unknown>(), seen = new Set<unknown>(), madeProjects = new Set<string>();
   // (the project rows first: what belongs to a project this edit made is not listed row by row)
@@ -284,16 +326,10 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     if (!Array.isArray(tbl.rows) || !Array.isArray(tbl.fields)) continue;
     for (let i = 0; i < keys.length; i += 2) if (keys[i] === 'rows' && Array.isArray(keys[i + 1])) { const now = new Set(tbl.rows); for (const r of keys[i + 1] as Obj[]) if (!now.has(r)) gather(r, text(tbl.name)); }
   }
-  for (const r of removedRows) {
-    if ('proj_short_name' in r && 'proj_id' in r && !('task_id' in r) && !('wbs_id' in r)) goneProjects.set(text(r.proj_id), r as Row);
-    else if ('clndr_name' in r && 'clndr_id' in r) goneCalendars.set(text(r.clndr_id), r as Row);
-    else if ('acct_short_name' in r) goneAccounts.set(text(r.acct_id), r as Row);
-    else if ('curv_name' in r) goneCurves.set(text(r.curv_id), r as Row);
-    else if ('rsrc_short_name' in r && 'rsrc_id' in r) goneResources.set(text(r.rsrc_id), r as Row);
-  }
+  for (const r of removedRows) { const t = removedTable.get(r); if (t === 'PROJECT') goneProjects.set(text(r.proj_id), r as Row); else if (t === 'RSRC') goneResources.set(text(r.rsrc_id), r as Row); }
   // the projects whose Project ID this edit changed: their root WBS node's code follows it and is not said a second time
   const renamedProjects = new Set<string>();
-  for (const [row, keys] of j.fields) { const r = row as Obj; if (!('proj_short_name' in r) || 'wbs_id' in r || 'task_id' in r) continue; for (let i = 0; i < keys.length; i += 2) if (keys[i] === 'proj_short_name') renamedProjects.add(text(r.proj_id)); }
+  for (const [row, keys] of j.fields) { const r = row as Obj; if (!('proj_short_name' in r) || 'wbs_id' in r || 'task_id' in r || 'rows' in r) continue; for (let i = 0; i < keys.length; i += 2) if (keys[i] === 'proj_short_name') renamedProjects.add(text(r.proj_id)); }
   for (const [row, keys] of j.fields) {
     if (row !== db.tables) continue;
     for (let i = 0; i < keys.length; i += 2) {
@@ -319,19 +355,22 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     for (const r of before as Obj[]) if (!now.has(r) && !seen.has(r)) { seen.add(r); add('removed', r); }
     for (const r of arr as Obj[]) if (!was.has(r) && !seen.has(r)) { seen.add(r); added.add(r); add('added', r); }
   }
+  { const madeResources = new Set([...added].filter((x) => tableOf(x) === 'RSRC').map((x) => text((x as Obj).rsrc_id)));
+    for (const [what, r, tbl] of ofResource) if (!madeResources.has(text(r.rsrc_id)) && !goneResources.has(text(r.rsrc_id))) out({ id: rowId(tbl, r), field: tbl === 'RSRCRATE' ? 'resource price' : 'resource role', old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' }, r); }
   function add(what: 'added' | 'removed', r: Obj) {
     if (!r || typeof r !== 'object') return; // a table's field list grew (a column name), not a row
-    if ('proj_short_name' in r && 'proj_id' in r && !('task_id' in r) && !('wbs_id' in r)) { if (what === 'added') madeProjects.add(text(r.proj_id)); out({ id: text(r.proj_short_name), field: r._baseline_of ? 'baseline' : 'project', old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' }, r); return; }
+    const tbl = kindOf(r);
+    if (tbl === 'PROJECT') { if (what === 'added') madeProjects.add(text(r.proj_id)); out({ id: text(r.proj_short_name), field: r._baseline_of ? 'baseline' : 'project', old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' }, r); return; }
     // the contents of a project this edit made or deleted (a baseline's copy of every activity), and what ties another project to it: said by the project's own line
     if (inChangedProject(r)) return;
     const row = (id: string, field: string) => out({ id, field, old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' }, r);
-    if ('task_code' in r && 'task_id' in r && 'proj_id' in r && !('pred_task_id' in r)) { row(taskName(r), 'activity'); datesAffected = true; return; }
-    if ('pred_task_id' in r) { row(relName(r), 'relationship'); datesAffected = true; return; }
-    if ('rsrc_id' in r && 'task_id' in r && 'taskrsrc_id' in r) { row(assignmentName(r), 'resource assignment'); return; }
-    if ('rsrc_short_name' in r && 'rsrc_id' in r && !('rsrc_rate_id' in r) && !('role_id' in r)) { row(text(r.rsrc_short_name), 'resource'); return; }
-    if ('wbs_short_name' in r) { row(wbsPath(r), 'WBS'); return; }
-    if ('clndr_name' in r) { row(text(r.clndr_name), 'calendar'); return; }
-    if ('schedoptions_id' in r) {
+    if (tbl === 'TASK') { row(taskName(r), 'activity'); datesAffected = true; return; }
+    if (tbl === 'TASKPRED') { row(relName(r), 'relationship'); datesAffected = true; return; }
+    if (tbl === 'TASKRSRC') { row(assignmentName(r), 'resource assignment'); return; }
+    if (tbl === 'RSRC') { row(text(r.rsrc_short_name), 'resource'); return; }
+    if (tbl === 'PROJWBS') { row(wbsPath(r), 'WBS'); return; }
+    if (tbl === 'CALENDAR') { row(text(r.clndr_name), 'calendar'); return; }
+    if (tbl === 'SCHEDOPTIONS') {
       if (what !== 'added') return;
       // a project's first saved schedule options (the file held none): each option now saved is said, from nothing saved
       const labels = TABLE_FIELDS.SCHEDOPTIONS, words = TABLE_WORDS.SCHEDOPTIONS, id = projectId(r.proj_id);
@@ -339,25 +378,25 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       for (const [k, label] of Object.entries(labels)) { const v = text(r[k]); if (v !== '') out({ id, field: label, old: null, new: k === 'key_activity_for_multiple_longest_paths' ? code(v) : words[k] ? words[k](v) : NUMERIC.test(k) && Number.isFinite(Number(v)) ? Number(v) : v }, r); }
       return;
     }
-    const tbl = tableOf(r);
     if (VALUE_ROWS.has(tbl)) {
       const id = rowId(tbl, r);
       for (const v of valueLines(tbl, r)) { if (v.value == null || v.value === '') continue; const c = { id, field: v.field, old: what === 'added' ? null : v.value, new: what === 'added' ? v.value : null }; out(c, r); valueChange.add(all[all.length - 1]); }
       return;
     }
-    if (tbl === 'RSRCRATE') { if (![...added].some((x) => x && typeof x === 'object' && 'rsrc_short_name' in (x as Obj) && (x as Obj).rsrc_id === r.rsrc_id) && !goneResources.has(text(r.rsrc_id))) row(rowId(tbl, r), 'resource price'); return; } // (a new resource's first price row, a deleted resource's rows: said by the resource)
+    // (a new resource's first price row, a deleted resource's price rows and roles: said by the resource)
+    if (tbl === 'RSRCRATE' || tbl === 'RSRCROLE') { ofResource.push([what, r, tbl]); return; }
     if (ROW_KIND[tbl]) { row(rowId(tbl, r), ROW_KIND[tbl]); return; }
-    // any other table: the row by P6's word for it when there is one (its key names it); a table with none is one the named operations do not write
-    if (TABLE_WORD[tbl] && KEYS[tbl]) row(text(r[KEYS[tbl]]), TABLE_WORD[tbl].toLowerCase()); else if (tbl) unnamed.add(`${tbl} (a row ${what})`);
+    // any other table (one that add_row and delete_rows reach, and no named operation writes): the row by P6's word for its table when there is one, else by the table
+    if (!tbl) return;
+    if (!TABLE_WORD[tbl]) unnamed.add(`${tbl} (a row ${what})`);
+    row(rowId(tbl, r), TABLE_WORD[tbl] ? TABLE_WORD[tbl].toLowerCase() : `${tbl} row`);
   }
   // fields a person set on a row that existed
-  const durationChanged = new Set<string>();
-  for (const [row, keys] of j.fields) { const r = row as Obj; if ('task_code' in r && 'task_id' in r && !('pred_task_id' in r) && keys.some((x, n) => n % 2 === 0 && (x === 'target_drtn_hr_cnt' || x === 'remain_drtn_hr_cnt' || x === 'act_start_date' || x === 'act_end_date'))) durationChanged.add(text(r.task_id)); }
   for (const [row, keys] of j.fields) {
     const r = row as Obj;
     if (row === db.tables || (Array.isArray(r.rows) && Array.isArray(r.fields))) continue; // said above (a table, or its list of rows)
     if ('proj_id' in r && madeProjects.has(text(r.proj_id))) continue; // a project this edit made: its one line says it
-    if ('task_code' in r && 'task_id' in r && 'proj_id' in r && !('pred_task_id' in r)) {
+    if (kindOf(r) === 'TASK') {
       if (added.has(r)) continue;
       const hpd = dh.task(r as Row);
       for (let i = 0; i < keys.length; i += 2) {
@@ -366,12 +405,11 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         const was = text(keys[i + 1]), now = text(r[k]);
         if (was === now) continue;
         if (k === 'proj_id' && !projects.has(was) && !goneProjects.has(was)) continue; // its project's internal number changed (said once, on the project): the activity has not moved
-        if (k === 'remain_drtn_hr_cnt' && !r.act_start_date && keys.some((x, n) => n % 2 === 0 && x === 'target_drtn_hr_cnt')) continue; // a task not started: its remaining duration follows the duration, said once
-        const name = (v: string) => (v === '' ? null : k === 'clndr_id' ? calendarName(v) : k === 'wbs_id' ? wbsCode(v) : k === 'rsrc_id' ? rsrcName(v) : k === 'proj_id' ? projectId(v) : wordOf(k, v));
-        out({ id: k === 'task_code' ? text(keys[i + 1]) : taskName(r), field: f.label, old: f.days ? (was === '' ? null : Math.round((Number(was) / hpd) * 100) / 100) : name(was), new: f.days ? Math.round((Number(now) / hpd) * 100) / 100 : name(now) }, r);
+        const name = (v: string) => (v === '' ? null : f.number ? Number(v) : k === 'clndr_id' ? calendarName(v) : k === 'wbs_id' ? wbsCode(v) : k === 'rsrc_id' ? rsrcName(v) : k === 'proj_id' ? projectId(v) : wordOf(k, v));
+        out({ id: taskName(r), field: f.label, old: f.days ? (was === '' ? null : Math.round((Number(was) / hpd) * 100) / 100) : name(was), new: f.days ? Math.round((Number(now) / hpd) * 100) / 100 : name(now) }, r);
         if (DATE_DRIVING.has(k)) datesAffected = true;
       }
-    } else if ('pred_task_id' in r) {
+    } else if (kindOf(r) === 'TASKPRED') {
       if (added.has(r)) continue; // a relationship made by this edit is said as added
       for (let i = 0; i < keys.length; i += 2) {
         const k = keys[i] as string;
@@ -385,18 +423,18 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     } else {
       // any other row (a resource, an assignment, a calendar, a project, a schedule option, a code, an expense ...): named by what the agent uses
       // (Resource ID, calendar name, Project ID, "activity / expense" ...), the fields and their coded values as P6 names them
-      const assignment = 'rsrc_id' in r && 'task_id' in r && 'taskrsrc_id' in r, rate = 'rsrc_rate_id' in r;
       const tbl = tableOf(r), labels = TABLE_FIELDS[tbl], words = TABLE_WORDS[tbl];
+      const assignment = tbl === 'TASKRSRC', rate = tbl === 'RSRCRATE';
       if ('proj_id' in r && removedProjects.has(text(r.proj_id))) continue; // a project this edit deleted: its one line says it
       if (added.has(r)) continue; // a row made by this edit is said as added (a project's first schedule options: option by option, in add)
-      const id = assignment ? `${code(text(r.task_id))} ${r.rsrc_id ? rsrcName(r.rsrc_id) : roleId(r.role_id)}` : rate ? rsrcName(r.rsrc_id) : rowId(tbl, r);
+      const id = rate ? rsrcName(r.rsrc_id) : rowId(tbl, r);
       const projectNode = tbl === 'PROJWBS' && r.proj_node_flag === 'Y';
       const changed = (k: string): boolean => keys.some((x, n) => n % 2 === 0 && x === k);
       const wasOf = (k: string): string => { const at = keys.findIndex((x, n) => n % 2 === 0 && x === k); return at < 0 ? text(r[k]) : text(keys[at + 1]); };
       const cols = keys.filter((_, n) => n % 2 === 0) as string[];
-      let logicSaid = false;
+      let logicSaid = false, restoreSaid = false;
       for (const k of cols) {
-        const baselineSlot = 'proj_short_name' in r ? BASELINE_SLOTS[k] : undefined;
+        const baselineSlot = tbl === 'PROJECT' ? BASELINE_SLOTS[k] : undefined;
         if (!labels?.[k] && BOOKKEEPING.test(k)) continue; // the file's own bookkeeping (who and when, generated keys): the operation's answer says what it did
         const label = labels?.[k] ?? (tbl === 'PROJECT' || tbl === 'RSRC' || tbl === 'CALENDAR' || tbl === 'PROJWBS' || tbl === 'RSRCRATE' || tbl === 'TASKRSRC' || tbl === 'PROJCOST' ? OTHER_FIELDS[k] : undefined) ?? nameByKind(tbl, k) ?? undefined;
         // the file's own bookkeeping, and the dates and floats the scheduler works out (a column P6 names for a person is never one of these)
@@ -410,7 +448,10 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         // (a text that reads as nothing — an empty HTML body, blanks — is nothing: a change from nothing to nothing is not said)
         const seen = (v: FieldChange['old']): FieldChange['old'] => (typeof v === 'string' && v.trim() === '' ? null : v);
         const say = (field: string, old: FieldChange['old'], nw: FieldChange['new']) => { const o = seen(old), n = seen(nw); if (o == null && n == null) return; out({ id, field, old: o, new: n }, r); };
-        if (baselineSlot) { const bl = (v: string) => (v === '' ? null : projectId(v)); say(baselineSlot, bl(was), bl(now)); continue; }
+        if (baselineSlot) { const bl = (v: string) => (v === '' ? null : projectId(v, 'baseline')); say(baselineSlot, bl(was), bl(now)); continue; }
+        // a baseline restored: it is a project again (the file marks a baseline in two columns: both are this one change)
+        if (tbl === 'PROJECT' && (k === '_baseline_of' || k === 'orig_proj_id')) { if (!restoreSaid && was !== '' && now === '') { restoreSaid = true; say('baseline', `baseline of ${projectId(was)}`, 'restored as a project'); datesAffected = true; } continue; }
+        if (tbl === 'PROJECT' && k === 'proj_id') { say(labels![k], Number(was), Number(now)); continue; }
         if (k === 'critical_drtn_hr_cnt' && tbl === 'PROJECT') { const days = (v: string) => Math.round((Number(v || 0) / hoursPerDay) * 100) / 100; say('Critical activities: Total Float at or below (days)', days(was), days(now)); continue; }
         if ((tbl === 'PROJECT' && /^(last_recalc_date|plan_start_date|plan_end_date)$/.test(k)) || (tbl === 'CALENDAR' && k === 'clndr_data')) datesAffected = true; // the data date, the planned start, Must Finish By and the work time of a calendar decide the dates F9 gives
         // P6's one option "When scheduling progressed activities use" is two columns in the file: said once, by its three choices, read as the scheduler reads them (optionsFor in cpm.ts)
@@ -442,8 +483,8 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         if (tbl === '_RISKEST' && /_hr$/.test(k)) { const t = task(text(r.task_id)); const hpd = t ? dh.task(t) : hoursPerDay; say(labels![k], was === '' ? null : Math.round((Number(was) / hpd) * 100) / 100, Math.round((Number(now) / hpd) * 100) / 100); continue; }
         const name = (v: string) => (v === '' ? null
           : k === 'clndr_id' || k === 'base_clndr_id' ? calendarName(v) : k === 'acct_id' || k === 'parent_acct_id' ? accountId(v) : k === 'curv_id' ? curveName(v) : k === 'role_id' || k === 'parent_role_id' ? roleId(v)
-          : k === 'rsrc_id' || k === 'parent_rsrc_id' ? rsrcName(v) : k === 'parent_wbs_id' ? wbsCode(v) : k === 'parent_eps_id' ? text(find('EPS', 'eps_id', v)?.eps_short_name ?? v) : k === 'parent_obs_id' ? text(find('OBS', 'obs_id', v)?.obs_name ?? v)
-          : k === '_eps_id' ? text(find('EPS', 'eps_id', v)?.eps_short_name ?? v) : k === 'fintmpl_id' ? text(find('FINTMPL', 'fintmpl_id', v)?.fintmpl_name ?? v) : k === 'last_fin_dates_id' ? text(find('FINDATES', 'fin_dates_id', v)?.fin_dates_name ?? v)
+          : k === 'rsrc_id' || k === 'parent_rsrc_id' ? rsrcName(v) : k === 'parent_wbs_id' ? wbsCode(v) : k === 'parent_eps_id' || k === '_eps_id' ? named(find('EPS', 'eps_id', v), 'eps_short_name', 'EPS') : k === 'parent_obs_id' ? named(find('OBS', 'obs_id', v), 'obs_name', 'OBS')
+          : k === 'fintmpl_id' ? named(find('FINTMPL', 'fintmpl_id', v), 'fintmpl_name', 'financial period calendar') : k === 'last_fin_dates_id' ? named(find('FINDATES', 'fin_dates_id', v), 'fin_dates_name', 'financial period')
           : words?.[k] ? words[k](v) : NUMERIC.test(k) && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : /(_descr|_notes)$/.test(k) && /<[a-zA-Z!\/][^>]*>/.test(v) ? plainText(v) || null : wordOf(k, v));
         if (label == null) unnamed.add(`${tbl || '?'}.${k}`);
         say(label ?? humanize(k), name(was), name(now));
@@ -451,13 +492,17 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     }
   }
   // a value replaced by another (the value row removed and a new one added in its place: a custom field's value, a code assigned, a notebook's text) is ONE change, old -> new
-  for (const c of [...valueChange].filter((x) => x.new === null)) {
-    const at = all.indexOf(c); if (at < 0) continue;
-    const put = all.findIndex((x) => valueChange.has(x) && x.old === null && x.id === c.id && x.project === c.project && x.field === c.field);
-    if (put < 0) continue;
-    const merged: FieldChange = { ...all[put], old: c.old };
-    rowOfChange.set(merged, rowOfChange.get(all[put]));
-    if (merged.old === merged.new) { all.splice(Math.max(at, put), 1); all.splice(Math.min(at, put), 1); } else { all[Math.min(at, put)] = merged; all.splice(Math.max(at, put), 1); }
+  {
+    const at = (c: FieldChange) => `${c.id}\u0000${c.project ?? ''}\u0000${c.field}`;
+    const put = new Map<string, FieldChange>(); for (const c of all) if (valueChange.has(c) && c.old === null && !put.has(at(c))) put.set(at(c), c);
+    const drop = new Set<FieldChange>(), instead = new Map<FieldChange, FieldChange>();
+    for (const c of all) {
+      if (!valueChange.has(c) || c.new !== null) continue;
+      const p = put.get(at(c)); if (!p || drop.has(p) || instead.has(p)) continue;
+      drop.add(c);
+      if (c.old === p.new) drop.add(p); else { const merged: FieldChange = { ...p, old: c.old }; rowOfChange.set(merged, rowOfChange.get(p)); instead.set(p, merged); }
+    }
+    if (drop.size || instead.size) { const kept = all.filter((c) => !drop.has(c)).map((c) => instead.get(c) ?? c); all.length = 0; for (const c of kept) all.push(c); }
   }
   // each change once (the same row can be journalled twice, a resource's limit lives on the resource and on its price row)
   const seenChange = new Set<string>(), rowNo = new Map<unknown, number>();

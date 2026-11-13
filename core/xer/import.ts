@@ -68,6 +68,10 @@ const NATURAL: Record<string, (r: Row) => string> = {
   TASKFIN: (r) => `${r.task_id}|${r.fin_dates_id}`, TRSRCFIN: (r) => `${r.taskrsrc_id}|${r.fin_dates_id}`,
   PROJPCAT: (r) => `${r.proj_id}|${r.proj_catg_type_id}`, TASKDOC: (r) => `${r.task_id}|${r.doc_id}`,
 };
+/** Shared rows without a key of their own that are ONE value of a resource (or a role): how the value is recognised in the target. */
+const SHARED_NATURAL: Record<string, (r: Row) => string> = {
+  RSRCRCAT: (r) => `${r.rsrc_id}|${r.rsrc_catg_type_id}`, RSRCROLE: (r) => `${r.rsrc_id}|${r.role_id}`, UDFVALUE: (r) => `${r.udf_type_id}|${r.fk_id}`,
+};
 const UDF_FK_TABLE: Record<string, string> = { TASK: 'TASK', PROJWBS: 'PROJWBS', PROJECT: 'PROJECT', RSRC: 'RSRC', TASKRSRC: 'TASKRSRC', ROLE: 'ROLES', PROJCOST: 'PROJCOST', TASKPROC: 'TASKPROC', PROJISSU: 'PROJISSU' };
 /** Fields kept out of refTarget (they often point outside the file, so they are not checked or pulled in on export) that still follow their row when it is renumbered. */
 const SOFT_REFS: Record<string, string> = { 'TASK|rsrc_id': 'RSRC', pobs_id: 'POBS', shift_id: 'SHIFT' };
@@ -231,6 +235,9 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
   const sameIx = new Map<string, Map<string, Row>>();
   const same = (t: string) => { let ix = sameIx.get(t); if (!ix) { ix = new Map(); for (const x of rows(db, t)) if (!x.proj_id) ix.set(whole(t, x), x); sameIx.set(t, ix); } return ix; };
 
+  const sharedIx = new Map<string, Map<string, Row>>();
+  const sharedBy = (t: string, key: (r: Row) => string) => { let ix = sharedIx.get(t); if (!ix) { ix = new Map(); for (const x of rows(db, t)) if (!x.proj_id) ix.set(key(x), x); sharedIx.set(t, ix); } return ix; };
+
   // Pass 1: allocate keys, match dictionaries and (update) the merged projects' rows; parents before their children
   // (child dictionaries last: a code type can name a WBS, so it comes after PROJWBS, and its values after it)
   const names = Object.keys(src.tables);
@@ -313,7 +320,15 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
       if (k && (keepExisting.has(`${t}|${r[k]}`) || dropped.has(`${t}|${r[k]}`))) continue;
       if (!k && goneRef(t, r)) { count(t, 'skipped'); continue; }
       const nr = remap(t, r);
-      if (!k && !nr.proj_id && same(t).has(whole(t, nr))) { count(t, 'kept'); continue; }
+      if (!k && !nr.proj_id) {
+        // a shared row without a key of its own. What a resource carries (a code, a role, a custom field's value) is one value per resource and code / role / field:
+        // the one already here is the resource's, kept or updated as the import treats the resource (never a second value beside it). Any other such row: not added when it is here in every value.
+        const natural = SHARED_NATURAL[t];
+        if (natural) {
+          const hit = sharedBy(t, natural).get(natural(nr));
+          if (hit) { const owner = t === 'UDFVALUE' ? UDF_FK_TABLE[udfTable.get(r.udf_type_id) ?? ''] ?? '' : 'RSRC'; if ((plan.dict?.[t] ?? plan.dict?.[owner]) === 'update') { Object.assign(hit, nr); count(t, 'updated'); } else count(t, 'kept'); continue; }
+        } else if (same(t).has(whole(t, nr))) { count(t, 'kept'); continue; }
+      }
       if (t === 'PROJECT') {
         const a = actions.get(r.proj_id)!;
         if (a.action === 'add_into') continue; // its WBS and activities go into the target

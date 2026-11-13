@@ -29,6 +29,7 @@ export function copyProject(db: Db, srcProjId: string, o: CopyOptions): string {
   delete p._baseline_of;
   p.proj_short_name = o.id;
   p.sum_base_proj_id = '';
+  for (const f of ['_bl1', '_bl2', '_bl3']) if (p[f]) p[f] = ''; // (the source's primary, secondary and tertiary baselines are baselines of the source: the copy has none)
   const root = rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y');
   if (root) { root.wbs_short_name = o.id; root.wbs_name = o.name ?? `${projectName(db, srcProj)} (copy)`; }
   const tasks = rows(db, 'TASK').filter((t) => t.proj_id === pid);

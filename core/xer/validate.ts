@@ -31,10 +31,20 @@ export function projectLoops(db: Db): { projIds: string[]; tasks: Row[] }[] {
   for (const r of db.tables.TASKPRED?.rows ?? []) { const a = byId.get(r.pred_task_id), b = byId.get(r.task_id); if (a && b && inLoopCheck(a.task_type) && inLoopCheck(b.task_type)) links.push([r.pred_task_id, r.task_id]); }
   return loopsOfLinks(links).map((ids) => { const tasks = ids.map((id) => byId.get(id)!); return { projIds: [...new Set(tasks.map((t) => t.proj_id))], tasks }; });
 }
-/** The loops that run through a project, as the agent reads them: each loop's Activity IDs (an activity of another project with its Project ID). */
-export function loopsOf(db: Db, projId: string, loops = projectLoops(db)): string[][] {
+/** The loops as the agent reads them, grouped by the projects they run through (a loop is said once, whatever the number of its projects): the Project IDs, and each
+ *  loop's Activity IDs (with its Project ID where the loop runs through several). `only`: the loops that touch one of these projects. */
+export interface LoopGroup { projIds: string[]; projs: string[]; loops: string[][] }
+export function loopGroups(db: Db, only?: string[], loops = projectLoops(db)): LoopGroup[] {
   const name = new Map((db.tables.PROJECT?.rows ?? []).map((p) => [p.proj_id, p.proj_short_name || p.proj_id]));
-  return loops.filter((l) => l.projIds.includes(projId)).map((l) => l.tasks.map((t) => (l.projIds.length > 1 ? `${t.task_code} in ${name.get(t.proj_id) ?? t.proj_id}` : t.task_code)));
+  const out = new Map<string, LoopGroup>();
+  for (const l of loops) {
+    if (only && !l.projIds.some((id) => only.includes(id))) continue;
+    const key = [...l.projIds].sort().join('|');
+    const g = out.get(key) ?? { projIds: l.projIds, projs: l.projIds.map((id) => name.get(id) ?? id), loops: [] };
+    out.set(key, g);
+    g.loops.push(l.tasks.map((t) => (l.projIds.length > 1 ? `${t.task_code} in ${name.get(t.proj_id) ?? t.proj_id}` : t.task_code)));
+  }
+  return [...out.values()];
 }
 
 const KNOWN_VERSION = /^(3\.5|4\.[01]|5\.0(\.\d+)?|6\.[0-2](\.\d+)?|7\.0(\.\d+)?|8\.[1-4](\.\d+)?|1[5-9]\.\d+|2[0-6]\.\d+)$/;

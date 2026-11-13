@@ -1,6 +1,6 @@
 // MCP over stdio: JSON-RPC 2.0, one message per line (one agent per process).
 import { Worker } from 'node:worker_threads';
-import { callTool, toolResult, toolsList, shutdown, SERVER_INFO, INSTRUCTIONS } from './server.ts';
+import { callTool, toolResult, toolsList, shutdown, SERVER_INFO, instructions } from './server.ts';
 import { onJobChange, onJobPulse } from './runtime.ts';
 /** notifications/job (WHIQ 4L-13): {job_id, tool, handle, status: running | done | failed | cancelled, progress?, error?} —
  *  sent as a job's progress changes and once when it ends. */
@@ -16,7 +16,7 @@ export async function handleMessage(m: Msg, sessionCaller?: string, notify?: (n:
   const reply = (result: unknown) => (m.id !== undefined ? { jsonrpc: '2.0', id: m.id, result } : undefined);
   const error = (code: number, message: string) => (m.id !== undefined ? { jsonrpc: '2.0', id: m.id, error: { code, message } } : undefined);
   switch (m.method) {
-    case 'initialize': return reply({ protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
+    case 'initialize': return reply({ protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: instructions() });
     case 'notifications/initialized': return undefined;
     case 'notifications/cancelled': running.get(`${sessionCaller ?? ''}|${m.params?.requestId}`)?.abort(); return undefined;
     case 'ping': return reply({});

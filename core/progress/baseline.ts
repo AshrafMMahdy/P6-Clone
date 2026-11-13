@@ -47,12 +47,7 @@ export function restoreBaseline(db: Db, baselineId: string): void {
   if (b) { b._baseline_of = ''; if (b.orig_proj_id) b.orig_proj_id = ''; }
 }
 
-/** The baseline projects of a file: a project saved as a baseline (_baseline_of) or, in an XER read without markBaselines (the desktop's reader), a project row whose
- *  orig_proj_id names another project of the file (the way P6 writes a baseline). Every project not in this set is a project of its own. */
-export function baselineProjectIds(db: Db): Set<string> {
-  const P = rows(db, 'PROJECT'), ids = new Set(P.map((p) => p.proj_id));
-  return new Set(P.filter((p) => p._baseline_of || (p.orig_proj_id && p.orig_proj_id !== p.proj_id && ids.has(p.orig_proj_id))).map((p) => p.proj_id));
-}
+export { baselineProjectIds, logicRelationships } from './snapshots.ts';
 
 /** Baselines in an XER: P6 writes each as a PROJECT row whose orig_proj_id names the project it is a baseline of. */
 export function markBaselines(db: Db): void {

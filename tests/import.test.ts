@@ -10,6 +10,8 @@ import { applyOps } from '../core/project/ops.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { makeScope } from '../core/analysis/common.ts';
+import { makeCtx } from '../core/project/ctx.ts';
+import { reviewSchedule } from '../core/query/review.ts';
 
 const load = (name: string) => parseXer(samples().find((s) => s.name === name)!.bytes).db;
 
@@ -267,7 +269,43 @@ test('a baseline never holds an activity of another project', () => {
   db.tables.TASKPRED.rows.push({ task_pred_id: '99', task_id: b.task_id, pred_task_id: blA.task_id, proj_id: b.proj_id, pred_proj_id: blA.proj_id, pred_type: 'PR_FS', lag_hr_cnt: '0' });
   assert.equal(finishB(), '2026-01-13 17:00');
   assert.deepEqual(makeScope(db).rels.map((r) => r.task_pred_id), ['1'], 'nor is it logic the analyses read');
+  // (what every check and query reads an activity's predecessors from: B has the one, from A of P)
+  assert.deepEqual((makeCtx(db, { hoursPerDay: 8 }).predsOf.get(b.task_id) ?? []).map((r) => r.task_pred_id), ['1']);
+  assert.equal(reviewSchedule(db).relationships, 1);
+  assert.equal(db.tables.TASKPRED.rows.length, 2, 'the row stays in the file');
   // restored, the baseline is a project like any other, and the tie counts
   ok([{ op: 'restore_baseline', baseline: 'BL1' }]);
   assert.equal(finishB(), '2026-02-06 17:00');
+});
+
+// What a resource carries is one value per code, role and custom field. A file that brings another value for a resource already here does not leave the resource
+// with two: the value here is kept, or replaced when the import is told to update resources.
+test('a second import with other shared values leaves one value per resource: kept, or updated when resources are updated', () => {
+  const build = (): Db => {
+    const db: Db = { tables: {} };
+    const r = applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'add_role', id: 'RO' },
+      { op: 'add_code_type', name: 'Trade', subject: 'resource', values: [{ code: 'T1' }, { code: 'T2' }] }, { op: 'assign_code', type: 'Trade', value: 'T1', resource: 'R1' },
+      { op: 'add_udf', name: 'Grade', subject: 'resource' }, { op: 'set_udf', udf: 'Grade', resource: 'R1', value: 'A' },
+      { op: 'add_row', table: 'RSRCROLE', fields: { rsrc_id: '1', role_id: '1', skill_level: '3' } }]);
+    assert.ok(r.ok, JSON.stringify(r.error));
+    return db;
+  };
+  const values = (db: Db) => ({ code: db.tables.RSRCRCAT.rows.map((r) => db.tables.RCATVAL.rows.find((v) => v.rsrc_catg_id === r.rsrc_catg_id)!.rsrc_catg_short_name), udf: db.tables.UDFVALUE.rows.filter((v) => !v.proj_id).map((v) => v.udf_text), skill: db.tables.RSRCROLE.rows.map((r) => r.skill_level) });
+  for (const [dict, expected] of [[undefined, { code: ['T2'], udf: ['B'], skill: ['5'] }], [{ RSRC: 'update' as const }, { code: ['T1'], udf: ['A'], skill: ['3'] }]] as const) {
+    const file = parseXer(writeXer(build(), { version: '18.8' })).db, db = build();
+    const r = applyOps(db, [{ op: 'assign_code', type: 'Trade', value: 'T2', resource: 'R1' }, { op: 'set_udf', udf: 'Grade', resource: 'R1', value: 'B' }, { op: 'set_fields', table: 'RSRCROLE', fields: { skill_level: '5' }, all: true }]);
+    assert.ok(r.ok, JSON.stringify(r.error));
+    assert.deepEqual(values(db), { code: ['T2'], udf: ['B'], skill: ['5'] });
+    importIntoDb(db, file, { ...defaultPlan(file), ...(dict ? { dict } : {}) });
+    assert.deepEqual(values(db), expected, dict ? 'resources updated: the file\'s values' : 'resources kept: the values here');
+  }
+});
+
+test('a copy of a project has no baseline of its own: the source\'s project, primary, secondary and tertiary baselines stay the source\'s', () => {
+  const db: Db = { tables: {} };
+  const r = applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'save_baseline', name: 'BL0', assign_as: 'project' }, { op: 'save_baseline', name: 'BL1', assign_as: 'bl1' }, { op: 'copy_project', from: 'P', id: 'CP' }]);
+  assert.ok(r.ok, JSON.stringify(r.error));
+  const of = (id: string) => { const p = db.tables.PROJECT.rows.find((x) => x.proj_short_name === id)!; return [p.sum_base_proj_id, p._bl1, p._bl2, p._bl3].map((v) => v || ''); };
+  assert.ok(of('P')[0] !== '' && of('P')[1] !== '', 'P keeps its two');
+  assert.deepEqual(of('CP'), ['', '', '', '']);
 });
