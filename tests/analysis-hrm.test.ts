@@ -196,7 +196,7 @@ test('optimize_schedule runs the embedded model and checks its answer with the P
   assert.ok(r.ok, JSON.stringify(r));
   assert.equal(JSON.stringify(db), before, 'nothing is kept');
   assert.equal(r.trajectories, 60, '50 sampled, the model\'s own answer and the nine starting placements');
-  assert.ok(r.best_from && r.note?.startsWith('No crash data was given'));
+  assert.ok(r.best_from && r.notes.includes('No crash data given: nothing was shortened.'), JSON.stringify(r.notes));
   assert.equal(r.better_than_p6_leveler, true, 'beats P6 default leveling on this network (2026-07-15 against 2026-07-21)');
   assert.ok(r.reasoner_finish && r.p6_leveled_finish && r.cpm_finish);
   assert.ok(r.sgs_makespan_days >= 31);
@@ -339,7 +339,7 @@ test('a cancel in the final pass keeps the best found so far and says it was sto
   assert.ok(cut.ok);
   assert.equal(cut.ok && cut.partial, true);
   assert.equal(cut.ok && cut.stopped, 'cancelled');
-  assert.match(cut.ok ? cut.partial_note! : '', /Cancelled in the final pass over the modes/);
+  assert.match(cut.ok ? cut.notes.join(' ') : '', /Cancelled in the final pass over the modes/);
   assert.ok(cut.ok && cut.reasoner_finish && cut.p6_leveled_finish, 'the checks in real dates are made');
   assert.equal(JSON.stringify(db), before, 'nothing was changed');
 });
@@ -349,17 +349,18 @@ test('the answer says what won, and with no crash data why there was no mode to 
   const infer = async (x: ReasonerInputs) => stand(Array.from({ length: x.n }, (_, k) => Math.sin(k)));
   const plain = await optimizeSchedule(db, [pid], { samples: 5, seed: 1 }, infer, () => undefined);
   assert.ok(plain.ok);
-  assert.equal(plain.note, "No crash data was given, so there was no mode to choose: this is the best placement found among the model's own answer, the classic rules' orders and the sampled variations of the model's answer. Give crash data (activities: [{id, crash_days, crash_cost} \u2026]) for the reasoner to choose what to shorten.");
+  assert.deepEqual(plain.notes, ['No crash data given: nothing was shortened.']);
+  assert.equal(plain.note, undefined);
   assert.match(plain.best_from, /^(model|sampled|(LFT|MTS|GRPW|SPT) \((normal|shortest) modes\)|earliest start \(no resource limit\))$/);
   assert.equal(plain.mode_trials, undefined);
   assert.equal(plain.trajectories, 15);
   // crash data on an id that is not there: said, not the same note
   const ghost = await optimizeSchedule(db, [pid], { samples: 1, activities: [{ id: 'NOPE', crash_days: 1, crash_cost: 1 }] }, infer, () => undefined);
-  assert.ok(ghost.ok && /^Crash data was given, but no activity in it can be shortened/.test(ghost.note!));
+  assert.ok(ghost.ok && ghost.notes.includes('The crash data given cannot shorten any activity: nothing was shortened.'), JSON.stringify(ghost.ok && ghost.notes));
   // with crash data: no note, the pass ran
   const crash = await optimizeSchedule(db, [pid], { samples: 1, activities: [{ id: 'A5', crash_days: 4, crash_cost: 900 }] }, infer, () => undefined);
   assert.ok(crash.ok);
-  assert.equal(crash.note, undefined);
+  assert.deepEqual(crash.notes, []);
   assert.ok(crash.mode_passes! >= 1 && crash.mode_trials! >= 1);
 });
 
@@ -478,22 +479,22 @@ test('optimize_schedule: a cancel at either check in real dates keeps the propos
   // before the comparison with P6's leveling: neither check was run
   const one = await optimizeSchedule(db, [pid], { samples: 2, seed: 1, activities: crash, tick: at(/^P6 leveling for comparison/) }, infer, () => undefined);
   assert.ok(one.ok && one.partial && one.stopped === 'cancelled');
-  assert.match(one.partial_note!, /Cancelled before the comparison with P6's leveling/);
+  assert.match(one.notes.join(' '), /Cancelled before the comparison with P6's leveling/);
   assert.ok(Array.isArray(one.ops) && one.priority.length === 12 && one.mode_passes, 'the proposal found is kept');
   for (const k of ['cpm_finish', 'p6_leveled_finish', 'reasoner_finish', 'better_than_p6_leveler', 'biggest_changes', 'biggest_changes_total']) assert.equal(k in one, false, `${k} was not computed: absent, not invented`);
   assert.deepEqual(one.dates, []);
   // before the leveling in the proposed order: P6's was done
   const two = await optimizeSchedule(db, [pid], { samples: 2, seed: 1, activities: crash, tick: at(/^leveling in the proposed order/) }, infer, () => undefined);
   assert.ok(two.ok && two.partial);
-  assert.match(two.partial_note!, /Cancelled before the leveling in the proposed order/);
+  assert.match(two.notes.join(' '), /Cancelled before the leveling in the proposed order/);
   assert.ok(two.p6_leveled_finish && two.cpm_finish);
   for (const k of ['reasoner_finish', 'better_than_p6_leveler', 'biggest_changes']) assert.equal(k in two, false, k);
   // a cancel that landed in the final pass stays (the tick throws again): the two checks are not run, the answer is at once
   let calls = 0;
   const sticky = await optimizeSchedule(db, [pid], { samples: 2, seed: 1, activities: crash, tick: async (_d, _t, m) => { if (m.startsWith('improving the modes') && ++calls === 1) { cancelledFlag = true; } if (cancelledFlag) throw cancelledError(); } }, infer, () => undefined);
   assert.ok(sticky.ok && sticky.partial);
-  assert.match(sticky.partial_note!, /Cancelled in the final pass over the modes/);
-  assert.match(sticky.partial_note!, /Cancelled before the comparison with P6's leveling/);
+  assert.match(sticky.notes.join(' '), /Cancelled in the final pass over the modes/);
+  assert.match(sticky.notes.join(' '), /Cancelled before the comparison with P6's leveling/);
   assert.equal('p6_leveled_finish' in sticky, false);
   assert.equal(JSON.stringify(db), before, 'nothing was changed');
   // a cancel between the starting placements is the caller's (as in the sampling)
@@ -618,7 +619,7 @@ test('MCP optimize_schedule and crash_schedule apply: a field of another type wi
     const r = await call('optimize_schedule', { ...args, apply: true }, abort.signal);
     assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 300));
     assert.equal(r.d.partial, true); assert.equal(r.d.stopped, 'cancelled'); assert.equal(r.d.applied, false);
-    assert.match(r.d.partial_note, /Cancelled after the leveling in the proposed order, before the changes were made/);
+    assert.match(r.d.notes.join(' '), /Cancelled after the leveling in the proposed order, before the changes were made/);
     assert.ok(r.d.reasoner_finish && r.d.ops.length, 'the proposal and its checks are complete');
   } finally { (globalThis as any).setImmediate = real; delete process.env.P6CLONE_COMPUTE_WORKERS; }
   assert.deepEqual(await durations(), was, 'a cancel after the leveling in the proposed order applied nothing');

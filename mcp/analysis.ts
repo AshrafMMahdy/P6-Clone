@@ -1,7 +1,7 @@
 // Schedule analysis tools of the MCP server (kept apart from server.ts so the two grow without stepping on each other):
 // P6 Check Schedule and DCMA 14-point; later lint, float paths, curves, what-ifs, crashing and delay analysis.
 import { dayHours } from '../core/project/units.ts';
-import { cancelledAfter, noLimitNote } from '../core/notes.ts';
+import { cancelledAfter, noLimitNote, plural } from '../core/notes.ts';
 import { CurvesRefused, progressCurves, resourceHistograms } from '../core/analysis/curves.ts';
 import { BETWEEN_NEEDS, computeFloatPaths, pathsBetween, writeFloatPaths } from '../core/schedule/floatPaths.ts';
 import type { Db, Row } from '../core/db.ts';
@@ -256,7 +256,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const done = out({ report: r.report, period: r.period, resources: rank.slice(0, LISTED).map(({ periods: _p, ...x }) => x), resources_total: r.resources.length }) as { exported?: { files: { path: string }[]; error?: string } };
       const file = done.exported?.files.find((f) => f.path.endsWith('-periods.csv'))?.path;
       if (!r.resources.length) return { ...done, notes: [`No resource is assigned in ${projIds.length === 1 ? 'the open project' : 'the open projects'}: there is nothing to chart.`] };
-      notes.push(file ? `Per-period figures not shown; all ${r.resources.length} ${r.resources.length === 1 ? 'resource' : 'resources'} in ${file}.` : `Per-period figures not shown, and the file that holds them could not be written; call again with export set to a folder inside the write root.`);
+      notes.push(file ? `Per-period figures not shown; all ${plural(r.resources.reduce((n, x) => n + x.periods.length, 0), 'period')} in ${file}.` : `Per-period figures not shown, and the file that holds them could not be written; call again with export set to a folder inside the write root.`);
       return { ...done, notes };
     }
     case 'evaluate_batch': {

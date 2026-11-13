@@ -70,7 +70,7 @@ test('crash: exhausted, already met, least total cost, no data defaults', async 
   assert.equal(opt.days_gained, 2);
   assert.equal(opt.total_cost, 200 - 240);
   const def = await crashSchedule(db, [pid], { targetDays: 2 });
-  assert.ok(def.ok && def.stop === 'SUCCESS' && def.note);
+  assert.ok(def.ok && def.stop === 'SUCCESS' && def.notes.some((n) => /^No crash data given: each open activity may lose up to \d+% of its remaining duration/.test(n)), JSON.stringify(def.ok && def.notes));
   assert.equal((await crashSchedule(db, [pid], {})).ok, false);
 });
 
@@ -154,7 +154,7 @@ test('crash: an LOE ending at the finish does not block; LDs need a contract dat
   const ld = await crashSchedule(db, [pid], { indirectPerDay: 10, ldPerDay: 1000, activities: [{ id: 'B', min_days: 3, cost_per_day: 100 }] });
   assert.ok(ld.ok);
   assert.equal(ld.days_gained, 0, 'without target_finish the LDs do not pay for crashing');
-  assert.ok(ld.warnings.some((w) => /ld_per_day needs target_finish/.test(w)));
+  assert.ok(ld.notes.some((w) => /^Ignored: ld_per_day \(it needs target_finish/.test(w)), JSON.stringify(ld.notes));
   assert.equal((await crashSchedule(db, [pid], { ldPerDay: 1000 })).ok, false);
 });
 
@@ -265,7 +265,8 @@ test('crash: a cancellation between steps answers the steps done (CANCELLED, par
   assert.equal(cut.changes.length, 7); assert.equal(cut.ops.length, 7);
   assert.ok(cut.days_gained > 0 && cut.days_gained < full.days_gained, 'what was gained so far');
   assert.equal(cut.finish, cut.steps.at(-1)!.finish);
-  assert.match(String(cut.note), /Partial: the call was cancelled after 7 steps; the steps, changes and edit operations are those of the steps done, and the target was not reached\./);
+  assert.ok(cut.notes.includes('Cancelled after 7 steps: the result covers those only.'), JSON.stringify(cut.notes));
+  assert.equal((cut as any).note, undefined);
   assert.equal(JSON.stringify(db), before, 'the project is the same');
   // progress: the step about to run, and a total of 0 (unknown), never "n-1 of n"
   assert.deepEqual(seen.slice(0, 2).map(([d, t]) => [d, t]), [[0, 0], [1, 0]]);
@@ -298,7 +299,7 @@ test('MCP crash_schedule: cancelled mid-crashing it answers the steps done, appl
   assert.ok(r.d.steps_done >= 3 && r.d.steps_done < 150, String(r.d.steps_done));
   assert.equal(r.d.steps.length, r.d.steps_done); assert.equal(r.d.ops.length, r.d.steps_done);
   assert.equal(r.d.applied, false);
-  assert.match(r.d.note, /Partial: the call was cancelled after \d+ steps/); assert.match(r.d.note, /apply was not done: a cancelled run changes nothing in the project/);
+  assert.ok(r.d.notes.some((n: string) => /^Cancelled after \d+ steps: the result covers those only\.$/.test(n)), JSON.stringify(r.d.notes)); assert.ok(r.d.notes.includes('Not applied: a cancelled run changes nothing in the project; the ops are the changes of the steps done.')); assert.equal(r.d.note, undefined);
   assert.ok(totals.length >= 2 && totals.every((t) => t === 0), `progress had no total: ${totals}`);
   assert.equal((await call('get_activity', { handle: np.handle, activity_id: 'L0' })).d.orig_days, 10, 'the project is not changed');
   // the same call run through: applied
@@ -337,7 +338,7 @@ test('MCP crash_schedule: a cancel that lands after the last step applies nothin
     assert.equal(r.d.stop, 'CANCELLED'); assert.equal(r.d.partial, true); assert.equal(r.d.stopped, 'cancelled');
     assert.equal(r.d.applied, false);
     assert.equal(r.d.steps.length, plain.d.steps.length, 'the steps done are the answer');
-    assert.match(r.d.note, /Cancelled after the last of \d+ steps?, before the changes were made/); assert.match(r.d.note, /apply was not done: a cancelled run changes nothing in the project/);
+    assert.ok(r.d.notes.some((n: string) => /^Cancelled after \d+ steps: the result covers those only\.$/.test(n)), JSON.stringify(r.d.notes)); assert.ok(r.d.notes.includes('Not applied: a cancelled run changes nothing in the project; the ops are the changes of the steps done.'));
   } finally { (globalThis as any).setImmediate = real; delete process.env.P6CLONE_COMPUTE_WORKERS; }
   assert.equal((await call('get_activity', { handle: np.handle, activity_id: 'L0' })).d.orig_days, 10, 'the project is not changed');
   // as a job: cancelled part-way with steps done, the job reads cancelled

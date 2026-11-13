@@ -47,9 +47,9 @@ export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) :
 export const andList = (parts: string[]): string => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
 /** Missing baseline, as the reason of a part that is not assessed. `argument`: the tool takes a `baseline` argument. */
-export const baselineReason = (proj: string, argument: boolean): string => `no baseline is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`;
+export const baselineReason = (proj: string, argument: boolean, which = 'project'): string => `no ${which === 'project' ? 'baseline' : baselineWord(which)} is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`;
 /** Missing baseline, a check left out. */
-export const baselineLeftOut = (part: string, proj: string, argument: boolean): string => notAssessed(part, baselineReason(proj, argument));
+export const baselineLeftOut = (part: string, proj: string, argument: boolean, which = 'project'): string => notAssessed(part, baselineReason(proj, argument, which));
 /** Missing baseline, the current budget and dates stood in. */
 export const currentPlanUsed = (proj: string): string => `No baseline is assigned to ${proj}: the current budget and dates were used.`;
 /** Missing baseline, the one saved baseline the engine chose. */

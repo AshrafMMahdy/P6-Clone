@@ -308,8 +308,8 @@ export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) =>
     resources: resourceRows, resources_total: resourceRows.length, unresourced_activities: unresourced, unresourced_activities_total: unresourced.length,
     notes: r.notes,
   };
-  // each project's data date by the list rule: the first of them, the true total and a note where it is cut (the whole list is in the result file)
-  const cutDates = r.status_dates && r.status_dates.length > first(r.status_dates).length ? { status_dates: first(r.status_dates), status_dates_note: `The first ${first(r.status_dates).length} of ${r.status_dates.length} projects; the data date of every project is in the result file.` } : {};
+  // each project's data date by the list rule: the first of them and the true total (the cut note beside it is added with the result file's name)
+  const cutDates = r.status_dates && r.status_dates.length > first(r.status_dates).length ? { status_dates: first(r.status_dates) } : {};
   const answer = {
     ...whole,
     summary: { ...summary, ...cutDates },

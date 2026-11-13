@@ -341,7 +341,7 @@ export interface ReferencePairs {
 export function baselinePairs(s: Scope, which = 'project'): Assessed<ReferencePairs> {
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(s.db, p, which)]));
   const first = [...bls.values()].find(Boolean);
-  if (!first) return notAssessed(baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true));
+  if (!first) return notAssessed(baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which));
   const pairs = new Map<Row, Row | undefined>(s.tasks.filter((t) => !isWbs(t)).map((t) => [t, bls.get(t.proj_id)?.tasks.get(t.task_code)]));
   return { result: 'assessed', name: first.name, how: first.how, pairs, projects_without: s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name) };
 }
@@ -380,7 +380,7 @@ export type BeiResult = ({ result: 'assessed' } & BeiFigures) | { result: 'not_a
  *  over the tasks baselined to finish by the data date; completed is every completed task, except with `matched` (the other side is another schedule, as_planned): then only the tasks that have a counterpart in it. Not assessed when no project has the baseline, or nothing was due (never 1). `value` is shown (three decimals), `exact` is what a threshold is judged on.
  *  `before`: a task baselined to finish ON the data date is not yet due (check_schedule's rule, "before the data date"); default: due on or before it (dcma_14's rule). */
 export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project', o: { before?: boolean; matched?: boolean } = {}): BeiResult {
-  if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true) };
+  if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which) };
   const ok = (t: Row) => !isWbs(t) && !isLoe(t) && !isMilestone(t);
   // completed: every completed task of the population, as always (a baseline). With `matched` (the other side is another schedule, as_planned) only the tasks that have a counterpart there are counted, so completed and due are over the
   // same activities: an as-planned schedule that holds 18 of 453 activities counts 18, not every completed task of the open project.

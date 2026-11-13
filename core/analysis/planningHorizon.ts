@@ -97,7 +97,7 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
   const anyBaseline = [...bls.values()].some(Boolean);
   const global: { dimension: Dim; weight: number; reason: string }[] = [
     ...(!hasResources ? [{ dimension: 'resources' as Dim, weight: WEIGHTS.resources, reason: 'the file has no resource assignments' }] : []),
-    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true) }] : []),
+    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which) }] : []),
     ...(loops.length ? [{ dimension: 'float' as Dim, weight: WEIGHTS.float, reason: loopNote(loops.flatMap((l) => l.activities)).replace(/^Loop: /, '').replace(/\.$/, '') }] : []),
   ];
   const off = new Set(global.map((g) => g.dimension));
@@ -142,7 +142,7 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
     // forecast stability (:293-304): forecast finish against the baseline finish, working days of the activity's calendar
     if (!off.has('forecast_stability')) {
       const bl = bls.get(t.proj_id), bt = bl?.tasks.get(t.task_code), fc = forecastFinish(t), pl = baselineFinish(bt);
-      if (!bl) na.push({ dimension: 'forecast_stability', reason: baselineReason(s.ctx.proj.get(t.proj_id)?.proj_short_name ?? '', true) });
+      if (!bl) na.push({ dimension: 'forecast_stability', reason: baselineReason(s.ctx.proj.get(t.proj_id)?.proj_short_name ?? '', true, which) });
       else if (!bt) na.push({ dimension: 'forecast_stability', reason: `not in the ${bl.name} baseline (added since)` });
       else if (fc == null || pl == null) na.push({ dimension: 'forecast_stability', reason: fc == null ? 'no forecast finish' : 'no baseline finish' });
       else {

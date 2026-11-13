@@ -131,7 +131,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
     out.push(percentCheck('resources', NAMES.resources, T.filter((t) => !loaded.has(t.task_id)).map((t) => offender(t, s)), T.length, th('resources')!, maxIds));
   }
   // missed tasks: of the tasks baselined to finish by the status date, those finishing (actually or forecast) after their baseline finish
-  if (!anyBl) out.push(notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true)));
+  if (!anyBl) out.push(notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which)));
   else {
     const due = s.tasks.filter((t) => { const b = bl(t), dd = s.dataDate(t.proj_id); return b && !isWbs(t) && !isLoe(t) && !isMilestone(t) && dd != null && (baselineFinish(b) ?? Infinity) <= dd; });
     const missed = due.filter((t) => (forecastFinish(t) ?? -Infinity) > (baselineFinish(bl(t)) ?? Infinity)).map((t) => offender(t, s, `baseline ${formatP6Date(baselineFinish(bl(t))!).slice(0, 10)}`));
@@ -142,7 +142,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   // BEI: tasks completed over tasks baselined to finish by the status date (forensic.ts beiFigures, the clone's one definition; judged on the exact ratio)
   {
     const t = th('bei')!, bei = beiFigures(s, bls, which);
-    if (bei.result === 'not_assessed') out.push(bei.reason === 'no_baseline' ? notAssessed('bei', NAMES.bei, 'ratio', th('bei'), baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true)) : { ...notAssessed('bei', NAMES.bei, 'ratio', t, 'no task was baselined to finish by the status date'), numerator: bei.completed!, denominator: 0 });
+    if (bei.result === 'not_assessed') out.push(bei.reason === 'no_baseline' ? notAssessed('bei', NAMES.bei, 'ratio', th('bei'), baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which)) : { ...notAssessed('bei', NAMES.bei, 'ratio', t, 'no task was baselined to finish by the status date'), numerator: bei.completed!, denominator: 0 });
     else out.push({ id: 'bei', name: NAMES.bei, unit: 'ratio', metric: bei.value, threshold: t, numerator: bei.completed, denominator: bei.due, result: passes(bei.exact, t) ? 'pass' : 'fail', activities: maxIds ? bei.not_completed.slice(0, maxIds) : bei.not_completed, total_activities: bei.not_completed.length });
   }
 

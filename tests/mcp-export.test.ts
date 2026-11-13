@@ -96,7 +96,7 @@ test('check_schedule, dcma_14 and lint: the answer lists 25 per check, the files
     assert.ok(cut.length, `${tool}: some check found more than 25`);
     assert.ok(r.d.checks.every((c: any) => c.activities.length === Math.min(25, c.total_activities)), tool);
     // each cut check says where all of them are: the file given by export, holding every one
-    assert.ok(cut.every((c: any) => c.activities_note === `25 of ${c.total_activities} shown; all ${c.total_activities} in ${r.d.exported.files.find((f: any) => f.path.endsWith(`-${found}.csv`)).path}`), tool);
+    assert.ok(cut.every((c: any) => c.activities_note === `25 of ${c.total_activities} shown; all ${c.total_activities} in ${r.d.exported.files.find((f: any) => f.path.endsWith(`-${found}.csv`)).path}.`), tool);
     // the json holds every activity of every check, and the CSV one row for each
     assert.ok(json.checks.every((c: any) => c.activities.length === c.total_activities), tool);
     const total = json.checks.reduce((s: number, c: any) => s + c.total_activities, 0);
@@ -113,7 +113,7 @@ test('check_schedule, dcma_14 and lint: the answer lists 25 per check, the files
       // every list of fixes shows at most 25, says fixes_total and names the file that holds them all (the fixes table)
       for (const c of r.d.checks.filter((x: any) => x.fixes)) {
         assert.ok(c.fixes.length <= 25, c.id);
-        if (c.fixes_total > 25) assert.equal(c.fixes_note, `25 of ${c.fixes_total} shown; all ${c.fixes_total} in ${r.d.exported.files.find((f: any) => f.path.endsWith('-fixes.csv')).path}`);
+        if (c.fixes_total > 25) assert.equal(c.fixes_note, `25 of ${c.fixes_total} shown; all ${c.fixes_total} in ${r.d.exported.files.find((f: any) => f.path.endsWith('-fixes.csv')).path}.`);
       }
       assert.equal(csv.fixes.length, json.checks.reduce((s: number, c: any) => s + (c.fixes?.length ?? 0), 0));
     }
@@ -202,8 +202,8 @@ test('windows_analysis: each window lists 25 of each list, a cut list says how m
   assert.ok(w.driving_path_total > 25 && w.lost_time_total > 25);
   assert.deepEqual([w.driving_path.length, w.lost_time.length], [25, 25]);
   const where = (t: string) => dflt.exported.files.find((f: any) => f.path.endsWith(`-${t}.csv`)).path;
-  assert.equal(w.driving_path_note, `25 of ${w.driving_path_total} shown; all ${w.driving_path_total} in ${where('driving_path')}`);
-  assert.equal(w.lost_time_note, `25 of ${w.lost_time_total} shown; all ${w.lost_time_total} in ${where('lost_time')}`);
+  assert.equal(w.driving_path_note, `25 of ${w.driving_path_total} shown; all ${w.driving_path_total} in ${where('driving_path')}.`);
+  assert.equal(w.lost_time_note, `25 of ${w.lost_time_total} shown; all ${w.lost_time_total} in ${where('lost_time')}.`);
   const r = (await call('windows_analysis', { handle: h.handle, include_current: false, updates, max_ids: 3, export: folder() })).d;
   assert.deepEqual([r.windows[0].driving_path.length, r.windows[0].lost_time.length, r.windows[0].lost_time_total], [25, 25, w.lost_time_total]);
   assert.match(r.notes[0], /^windows_analysis has no argument "max_ids"/);
@@ -256,7 +256,8 @@ test('crash_schedule, float_paths, progress_curves, resource_histogram, tia, lev
   assert.equal(f.csv.periods.length, f.json.resources.reduce((n: number, x: any) => n + x.periods.length, 0)); assert.equal(f.csv.resources[0].resource, 'crew');
   assert.equal(rh.resources[0].periods_total, f.csv.periods.filter((p: any) => p.resource === 'crew').length);
   assert.equal(rh.resources_total, 1);
-  assert.match(rh.periods_note, /only in the result file .*resource_histogram-periods\.csv \(table periods; columns resource, start, end, budgeted, actual, remaining_early, remaining_late, limit, over_allocated, available\)/);
+  assert.equal(rh.periods_note, undefined);
+  assert.match(rh.notes.join(' '), new RegExp(`^Per-period figures not shown; all ${f.csv.periods.length} periods in .*resource_histogram-periods\\.csv\\.$`));
   const t = (await call('tia', { handle: h.handle, fragnet: [{ op: 'add_activity', id: 'X', name: 'Change', duration_days: 2 }, { op: 'add_relationship', pred: 'A3', succ: 'X' }, { op: 'add_relationship', pred: 'X', succ: 'A4' }], export: folder() })).d;
   f = files(t, 'tia');
   assert.equal(f.csv.fragnet_path.length, t.fragnet_path.length); assert.equal(f.csv.summary[0].delay_days, String(t.delay_days));
@@ -557,18 +558,18 @@ test('E4: every list the answer cut says where all of it is, when an export was 
   const args = { ...h, iterations: 40, seed: 2, default_estimates: { min_pct: 80, max_pct: 150 } };
   const r = (await call('monte_carlo', { ...args, export: dir })).d;
   // 31 activities all critical in every run, 25 shown: the platform's note (more ever-critical than shown, every one critical in every run)
-  assert.equal(r.criticality_note, `25 of the 31 activities that were critical in at least one run are shown, highest first (31 critical in every run); all 31 activities are in ${join(dir, 'monte_carlo-criticality.csv')}; the 25 shown are all critical in every run, in activity-code order`);
-  assert.equal(r.sensitivity_note, `25 of ${r.sensitivity_total} activities with a varying duration shown, strongest first; all ${r.sensitivity_total} in ${join(dir, 'monte_carlo-sensitivity.csv')}`);
+  assert.equal(r.criticality_note, `25 of 31 shown; all 31 in ${join(dir, 'monte_carlo-criticality.csv')}.`);
+  assert.equal(r.sensitivity_note, `25 of ${r.sensitivity_total} shown; all ${r.sensitivity_total} in ${join(dir, 'monte_carlo-sensitivity.csv')}.`);
   assert.equal(r.milestones_note, undefined, 'nothing cut: no note');
   // without export the notes name the file of the default folder
   const bare = (await call('monte_carlo', args)).d;
-  assert.equal(bare.sensitivity_note, `25 of ${r.sensitivity_total} activities with a varying duration shown, strongest first; all ${r.sensitivity_total} in ${bare.exported.files.find((f: any) => f.path.endsWith('-sensitivity.csv')).path}`);
+  assert.equal(bare.sensitivity_note, `25 of ${r.sensitivity_total} shown; all ${r.sensitivity_total} in ${bare.exported.files.find((f: any) => f.path.endsWith('-sensitivity.csv')).path}.`);
   // lint: a check's activities cut to 25, its total_activities
   const c = (await call('open_file', { path: sampleCopy('Baseline Zone 2 Rev.01.xer') })).d.handle;
   const lint = (await call('lint', { handle: c, simulate: false, export: folder() })).d;
   const cut = lint.checks.filter((x: any) => x.total_activities > 25);
   assert.ok(cut.length > 0);
-  for (const x of cut) assert.equal(x.activities_note, `25 of ${x.total_activities} shown; all ${x.total_activities} in ${lint.exported.files.find((f: any) => f.path.endsWith('lint-findings.csv')).path}`, x.id);
+  for (const x of cut) assert.equal(x.activities_note, `25 of ${x.total_activities} shown; all ${x.total_activities} in ${lint.exported.files.find((f: any) => f.path.endsWith('lint-findings.csv')).path}.`, x.id);
   assert.ok(lint.checks.filter((x: any) => x.total_activities <= 25).every((x: any) => x.activities_note === undefined));
   await call('close', { handle: c, discard: true });
   // float_paths between on 80 diamonds: 2^80 paths, a decimal string, exactly

@@ -115,7 +115,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   // 06A501a: missing baseline dates (an activity not in the baseline, or in it with no start or no finish)
   {
     const inBl = discrete.filter((t) => bls.get(t.proj_id));
-    if (!inBl.length) na('06A501a', baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true));
+    if (!inBl.length) na('06A501a', baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which));
     else percent('06A501a', inBl.filter((t) => { const b = bls.get(t.proj_id)!.tasks.get(t.task_code); return !b || referenceStart(b) == null || baselineFinish(b) == null; }).map((t) => offender(t, s)), inBl.length, 'the project has no activity');
     if (inBl.length && s.projs.some((p) => !bls.get(p.proj_id))) { const left = namesText(s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name)); out[out.length - 1].note = notAssessedNote(`${NAMES['06A501a']} for ${left}`, baselineReason(left, true)); }
   }

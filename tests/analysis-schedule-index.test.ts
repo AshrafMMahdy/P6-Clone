@@ -54,7 +54,7 @@ test('health: a schedule with a loop has no score; the loop is named the way the
   assert.ok(G('withCycle', 'cpm').cycles.length > 0, 'the source finds the loop and goes on');
   assert.equal(r.health.result, 'not_assessed');
   assert.equal(r.health.score, undefined);
-  assert.match(r.health.note!, /has a loop.*These activities are in a loop: [XYZ], [XYZ], [XYZ]\./);
+  assert.match(r.health.note!, /^[XYZ], [XYZ], [XYZ] are in a loop$/);
   assert.equal(r.loops.length, 1);
   assert.deepEqual([...r.loops[0].activities].sort(), ['X', 'Y', 'Z']);
   // P6's stored float is not valid with a loop: the float sub-metric is not assessed, and the answer says why
@@ -66,7 +66,7 @@ test('health: a schedule with a loop has no score; the loop is named the way the
   assert.equal(r.risk.grade, undefined);
   assert.equal(r.risk.level, undefined);
   assert.equal(r.risk.status, undefined);
-  assert.match(r.risk.note!, /^The risk index is not assessed: the logic has a loop \(loops names it\)\./);
+  assert.equal(r.risk.note, 'the logic has a loop');
   assert.equal(r.risk.assessed_sub_metrics, 0);
   assert.deepEqual(r.risk.drivers, []);
   assert.ok(Object.values(r.risk.sub_metrics).every((m) => !m.active && m.score === null && /loop/.test(m.reason!)));
@@ -199,16 +199,16 @@ test('not assessed: no baseline, no data date, no resources, nothing due, and th
   const a = scheduleIndex(B.cleanChain().db, {});
   assert.equal(a.risk.sub_metrics.baseline_drift.active, false);
   assert.equal(a.risk.sub_metrics.baseline_drift.score, null);
-  assert.equal(a.risk.sub_metrics.baseline_drift.reason, 'No project baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.');
+  assert.equal(a.risk.sub_metrics.baseline_drift.reason, 'no baseline is assigned to CLEAN; assign one with edit assign_baseline, or pass baseline');
   assert.equal(a.baseline, null);
   // a baseline that is not there is named in the reason the way dcma_14 words it
-  assert.equal(scheduleIndex(B.delayed().db, { baseline: 'bl2' }).risk.sub_metrics.baseline_drift.reason, 'No BL2 baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.');
+  assert.equal(scheduleIndex(B.delayed().db, { baseline: 'bl2' }).risk.sub_metrics.baseline_drift.reason, 'no BL2 baseline is assigned to DELAYED; assign one with edit assign_baseline, or pass baseline');
   // no data date (the sample): progress integrity and BEI cannot be assessed; with a status date they can
   const aurora = readXerFile(sampleCopy('Aurora_Tower_Baseline.xer')).db;
   const noDate = scheduleIndex(aurora, {});
   assert.equal(noDate.status_date, null);
   assert.equal(noDate.risk.sub_metrics.progress_integrity.active, false);
-  assert.match(noDate.risk.sub_metrics.progress_integrity.reason!, /No data date in aurora_tower: give a status_date/);
+  assert.match(noDate.risk.sub_metrics.progress_integrity.reason!, /^aurora_tower has no data date; pass status_date$/);
   assert.equal(noDate.risk.sub_metrics.resource.active, false);
   assert.deepEqual(noDate.risk.left_out.map((l) => l.sub_metric), ['baseline_drift', 'progress_integrity', 'resource']);
   assert.equal(noDate.risk.assessed_sub_metrics, 2);
@@ -223,27 +223,22 @@ test('not assessed: no baseline, no data date, no resources, nothing due, and th
   const bei = early.risk.sub_metrics.baseline_drift.parts.find((p) => p.part === 'bei')!;
   assert.equal(bei.assessed, false);
   assert.equal(bei.value, null);
-  assert.match(bei.note!, /No task was baselined to finish by the data date/);
+  assert.equal(bei.note, 'no task was baselined to finish by the data date; the drift score counts the finish variance and the critical-path delay only');
   assert.equal(score(early, 'baseline_drift'), 11.7, 'the variance and delay parts stand: 6.67 + 5');
-  // the summary and the part both say it: the BEI was not assessed (why), so the drift score counts the finish variance and the critical-path delay only (the same arithmetic as before: the part adds nothing)
-  assert.match(early.risk.sub_metrics.baseline_drift.summary, /the BEI not assessed \(No task was baselined to finish by the data date\.\); the drift score therefore counts the finish variance and the critical-path delay only/);
-  assert.match(bei.note!, /^No task was baselined to finish by the data date\. Not assessed: the drift score therefore counts the finish variance and the critical-path delay only/);
+  assert.equal(early.risk.sub_metrics.baseline_drift.summary, 'Average finish variance 3.3 d, critical-path delay 5 d');
   assert.equal(early.risk.sub_metrics.baseline_drift.parts.filter((p) => p.assessed).map((p) => p.part).join(), 'average_finish_variance_days,critical_path_delay_days');
-  // said plainly: the part adds nothing, the same as the part at its best value (a BEI of 1); never "not taken as a BEI of 1"
-  assert.match(bei.note!, /only: the BEI part adds nothing to the score \(the same as a BEI of 1\)\.$/);
-  assert.match(early.risk.sub_metrics.baseline_drift.summary, /only: the BEI part adds nothing to the score \(the same as a BEI of 1\)$/);
   assert.equal(/not taken as/.test(JSON.stringify(early.risk.sub_metrics.baseline_drift)), false);
   // nothing assessable: not assessed, with every reason
   const none = scheduleIndex(B.project('BARE', []).db, {});
   assert.equal(none.risk.result, 'not_assessed');
-  assert.match(none.risk.note!, /No sub-metric could be assessed/);
+  assert.equal(none.risk.note, 'no sub-metric could be assessed');
 });
 
 test('resource: no limit set = left out of over-allocation (as the histogram leaves it); the coverage gap is dcma_14 check 10\'s population; re-weighted over the parts assessed', () => {
   const tasks = (limit: number) => B.project('LIM', [{ id: 'A', duration_days: 10, resources: ['Crew'] }, { id: 'B', duration_days: 10, resources: ['Crew'] }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'] }], { resources: [{ id: 'Crew', max_units_per_day: limit }] });
   const none = scheduleIndex(tasks(0).db, {}).risk.sub_metrics.resource;
   assert.deepEqual(none.parts.map((p) => [p.part, p.assessed, p.value]), [['over_allocated_share', false, null], ['coverage_gap', true, 0.333], ['critical_path_conflict', false, null]]);
-  assert.match(none.parts[0].note!, /no limit set \(Max Units\/Time 0\) is left out of the over-allocation figures\. Set a limit with edit update_resource max_units_per_day/);
+  assert.equal(none.parts[0].note, 'no resource has a Max Units/Time');
   // only the coverage part is assessed: 35 x 0.333 / 35 x 100 = 33.3 (C has no resource)
   assert.equal(none.score, 33.3);
   // with a limit the same file: 50 + 35 x 0.333 + 15 over 100 = 76.7
@@ -326,7 +321,7 @@ test('129 trial and Detailed Program (progress, no baseline in the file): counts
     const r = scheduleIndex(db, {});
     // the file has no baseline project: drift not assessed with the reason
     assert.equal(r.risk.sub_metrics.baseline_drift.active, false, name);
-    assert.equal(r.risk.sub_metrics.baseline_drift.reason, 'No project baseline is assigned. Assign one with edit assign_baseline, or name a saved baseline in this tool\u2019s baseline argument.', name);
+    assert.equal(r.risk.sub_metrics.baseline_drift.reason, `no baseline is assigned to ${rows(db, 'PROJECT')[0].proj_short_name}; assign one with edit assign_baseline, or pass baseline`, name);
     // float counts from the rows: incomplete activities that are not WBS summary or level of effort, with a stored float
     const T = rows(db, 'TASK').filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
     const neg = T.filter((t) => Number(t.total_float_hr_cnt) < 0).length;
@@ -362,11 +357,12 @@ test('schedule_index through the server: read-only, summary first, 25 listed wit
   const h = await openSample('129 trial.xer');
   const r = await call('schedule_index', { handle: h, bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
-  assert.match(r.d.notes[0], /^schedule_index has no argument "bogus": it was not used/);
+  assert.ok(r.d.notes.some((n: string) => /^schedule_index has no argument "bogus"; the call ran without it\./.test(n)), JSON.stringify(r.d.notes));
+  assert.equal(r.d.arguments_not_used, undefined);
   assert.deepEqual(Object.keys(r.d).slice(0, 3), ['report', 'summary', 'health'], 'summary first');
   assert.equal(r.d.summary.risk.sub_metrics_assessed, '4 of 5');
-  assert.equal(r.d.summary.risk.left_out[0], 'baseline_drift', 'the summary names what was left out; its reason is said once, in risk.left_out');
-  assert.equal(r.d.risk.left_out[0].sub_metric, 'baseline_drift');
+  assert.equal(r.d.summary.risk.left_out[0], 'baseline_drift', 'the summary names what was left out; its reason is said once, in notes');
+  assert.equal(r.d.risk.left_out[0], 'baseline_drift');
   assert.equal(r.d.progress_anomalies.length, 25);
   assert.equal(r.d.progress_anomalies_total, 81);
   assert.match(r.d.progress_anomalies_note, /^25 of 81 shown; all 81 in .*schedule_index-progress_anomalies\.csv\.$/);
@@ -377,10 +373,11 @@ test('schedule_index through the server: read-only, summary first, 25 listed wit
   const whole = JSON.parse(readFileSync(r.d.exported.files.find((f: any) => f.path.endsWith('schedule_index.json')).path, 'utf8'));
   assert.equal(whole.progress_anomalies.length, 81);
   assert.equal(whole.resources.length, 277);
-  assert.deepEqual(r.d.exported.files.map((f: any) => f.path.split('schedule_index').pop()).sort(), ['-drivers.csv', '-logic_findings.csv', '-progress_anomalies.csv', '-resources.csv', '-sub_metrics.csv', '.json']);
+  assert.deepEqual(r.d.exported.files.map((f: any) => f.path.split('schedule_index').pop()).sort(), ['-drivers.csv', '-logic_findings.csv', '-progress_anomalies.csv', '-resources.csv', '-sub_metrics.csv', '-unresourced_activities.csv', '.json']);
   assert.ok(existsSync(csv.path));
-  // the method note lists the numbers
-  assert.match(r.d.method.risk.join(' '), /float 0\.30, logic 0\.25, baseline drift 0\.20, progress integrity 0\.15, resource 0\.10/);
+  // the weights are in the tool description, not in the answer
+  assert.equal(r.d.method, undefined);
+  assert.match(t.description, /float 0\.30, logic 0\.25, baseline drift 0\.20, progress integrity 0\.15, resource 0\.10/);
   // refusals: a baseline the file does not have, a date that is not one
   const bad = await call('schedule_index', { handle: h, baseline: 'bl3' });
   assert.equal(bad.err, true);
@@ -413,7 +410,7 @@ test('the lists in the answer and in the sentences follow the list rule: status_
   const { answer, whole } = shapeScheduleIndex(many, (l) => l.slice(0, 25));
   assert.equal(answer.summary.status_dates!.length, 25);
   assert.equal(answer.summary.status_dates_total, 30);
-  assert.match(answer.summary.status_dates_note!, /^The first 25 of 30 projects; the data date of every project is in the result file\.$/);
+  assert.equal((answer.summary as any).status_dates_note, undefined, 'the cut note is put beside the list with the result file named, by the server');
   assert.equal(whole.summary.status_dates!.length, 30, 'the result file holds every project');
   assert.equal(whole.summary.status_dates_total, 30);
   // within the rule: whole, with the total and no note
