@@ -228,7 +228,8 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
   const grade = score == null ? undefined : (grades.find(([, min]) => score >= min) ?? grades[grades.length - 1])?.[0];
   for (const c of out) if (c.weight != null) c.applied = { ...c.applied, weight: c.weight };
   const stopped = out.some((c) => c.partial);
-  return { report: 'Schedule Lint', profile, ...(stopped ? { partial: true as const, stopped: 'cancelled' as const } : {}), ...(score != null ? { score, grade } : {}), work_activities: W.length, relationships: s.rels.length, checks: out, thresholds: T, overridden, ...(not_used.length ? { not_used } : {}) };
+  const cut = out.find((c) => c.partial);
+  return { report: 'Schedule Lint', profile, ...(stopped ? { partial: true as const, stopped: 'cancelled' as const, notes: [`Cancelled after ${cut!.ladders_simulated} of ${cut!.ladders_to_simulate} ladder simulations: the fixes of the other ladders have no saves_days.`] } : {}), ...(score != null ? { score, grade } : {}), work_activities: W.length, relationships: s.rels.length, checks: out, thresholds: T, overridden, ...(not_used.length ? { not_used } : {}) };
 }
 
 /** FS links that should overlap: leads (FS with negative lag: use SS plus lag), SS lags as long as the predecessor

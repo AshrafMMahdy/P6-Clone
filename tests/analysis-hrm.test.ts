@@ -350,7 +350,6 @@ test('the answer says what won, and with no crash data why there was no mode to 
   const plain = await optimizeSchedule(db, [pid], { samples: 5, seed: 1 }, infer, () => undefined);
   assert.ok(plain.ok);
   assert.deepEqual(plain.notes, ['No crash data given: nothing was shortened.']);
-  assert.equal(plain.note, undefined);
   assert.match(plain.best_from, /^(model|sampled|(LFT|MTS|GRPW|SPT) \((normal|shortest) modes\)|earliest start \(no resource limit\))$/);
   assert.equal(plain.mode_trials, undefined);
   assert.equal(plain.trajectories, 15);

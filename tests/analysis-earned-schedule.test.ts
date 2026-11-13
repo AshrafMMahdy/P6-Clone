@@ -169,7 +169,7 @@ test('real samples with progress: ES within the planned span, SPI(t) = ES / AT, 
     const c = progressCurves(db, ids, { period: 'month', units });
     const t = c.totals, label = `${name} ${units}`;
     assert.ok(c.data_date, label);
-    assert.ok(t.es != null && t.at != null && t.pd != null && t.spi_t != null && t.sv_t != null, `${label}: ${t.es_note}`);
+    assert.ok(t.es != null && t.at != null && t.pd != null && t.spi_t != null && t.sv_t != null, `${label}: ${c.notes.join(' ')}`);
     assert.ok(t.es >= 0 && t.es <= t.pd + 1e-9, `${label}: ES ${t.es} within the planned duration ${t.pd}`);
     assert.ok(t.at > 0, label);
     assert.ok(Math.abs(t.spi_t - t.es / t.at) < 0.002, `${label}: SPI(t) ${t.spi_t} = ES ${t.es} / AT ${t.at}`);

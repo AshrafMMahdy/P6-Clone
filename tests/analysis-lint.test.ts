@@ -177,7 +177,6 @@ test('lint fs_overlap ticks between the ladder simulations: progress counts them
   assert.equal(c.partial, true); assert.equal(c.ladders_simulated, 5); assert.equal(c.ladders_to_simulate, 12);
   assert.equal(c.fixes!.filter((f) => f.activities.length === 4 && f.saves_days != null).length, 5, 'the five simulated ladders have their days saved');
   assert.equal(c.fixes!.filter((f) => f.activities.length === 4).length, 12, 'all twelve are still listed');
-console.log('LN', JSON.stringify({ n: (cut as any).notes, cn: c.note }));
   assert.equal(cut.checks.length, full.checks.length, 'the rest of the lint was done as usual');
   // a cancel before the first simulation keeps every finished check (the ladders without saves_days), partial, none simulated
   const early = await lintScheduleTicked(db, {}, async () => { throw cancelled(); });
@@ -186,16 +185,17 @@ console.log('LN', JSON.stringify({ n: (cut as any).notes, cn: c.note }));
   assert.equal(early.checks.length, full.checks.length, 'every other check was done');
   assert.deepEqual(early.checks.filter((x) => x.id !== 'fs_overlap'), full.checks.filter((x) => x.id !== 'fs_overlap'));
   assert.ok(fs(early).fixes!.every((f) => f.saves_days == null), 'no ladder has saves_days');
-  assert.match(String(fs(early).note), /^Partial: the call was cancelled after 0 of 12 ladder simulations/);
+  assert.deepEqual(cut.notes, ['Cancelled after 5 of 12 ladder simulations: the fixes of the other ladders have no saves_days.']);
+  assert.deepEqual(early.notes, ['Cancelled after 0 of 12 ladder simulations: the fixes of the other ladders have no saves_days.']);
   await assert.rejects(lintScheduleTicked(db, {}, async (d) => { if (d === 2) throw new Error('boom'); }), /boom/);
   // simulate: false has no step to stop at: one look at the end; a cancel that arrived while it ran does not discard the result, and the note says so
   let ticks = 0;
   const whole = await lintScheduleTicked(db, { simulate: false }, async () => { ticks++; });
-  assert.equal(ticks, 1); assert.equal(whole.partial, undefined); assert.equal(whole.note, undefined);
+  assert.equal(ticks, 1); assert.equal(whole.partial, undefined); assert.equal(whole.notes, undefined);
   const late = await lintScheduleTicked(db, { simulate: false }, async () => { throw cancelled(); });
   assert.equal(late.partial, undefined); assert.equal(late.stopped, undefined);
-  assert.deepEqual({ ...late, note: undefined }, { ...whole, note: undefined }, 'the complete result');
-  assert.match(String(late.note), /^The call was cancelled while the lint ran, when it had no further step to stop at \(no fix simulation to run\): the result is complete\.$/);
+  assert.deepEqual({ ...late, notes: undefined }, { ...whole, notes: undefined }, 'the complete result');
+  assert.deepEqual(late.notes, ['Cancel came when the lint had no further step to stop at: the result is complete.']);
   await assert.rejects(lintScheduleTicked(db, { simulate: false }, async () => { throw new Error('boom'); }), /boom/);
 });
 
@@ -228,7 +228,6 @@ test('MCP lint: cancelled while simulating every critical ladder it answers what
   assert.equal(r.d.partial, true); assert.equal(r.d.stopped, 'cancelled');
   const c = r.d.checks.find((x: any) => x.id === 'fs_overlap');
   assert.ok(c.ladders_simulated >= 1 && c.ladders_simulated < 160, String(c.ladders_simulated)); assert.equal(c.ladders_to_simulate, 160);
-console.log('LN2', JSON.stringify({ n: r.d.notes, cn: c.note }));
   // not cancelled: whole, and no partial marks
   const whole = await call('lint', { handle: np.handle, checks: ['fs_overlap'], simulate: false });
   assert.equal(whole.d.partial, undefined);

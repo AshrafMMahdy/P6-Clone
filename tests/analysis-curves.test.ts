@@ -51,7 +51,7 @@ test('CPI is left empty (not 1) when no actual cost is recorded, with a warning'
   for (const a of rows(db, 'TASKRSRC')) { a.act_reg_qty = '0'; a.act_reg_cost = '0'; a.act_ot_cost = '0'; }
   const c = progressCurves(db, [pid(db)]);
   assert.equal(c.totals.cpi, null);
-  assert.ok(c.warnings.some((w) => /CPI cannot be measured/.test(w)));
+  assert.ok(c.notes.some((w: string) => /^CPI not assessed: no actual cost is recorded\.$/.test(w)));
 });
 
 test('resource histogram: budgeted, actual, remaining early/late, limit and over-allocation severity', () => {
@@ -81,7 +81,7 @@ test('baseline found by its copy link (Tower-A: no sum_base_proj_id); EV of an a
   const tw = readRaw(b, detectFormat(p, b)).db;
   const main = rows(tw, 'PROJECT').find((x) => !x._baseline_of)!;
   assert.equal(baselineOf(tw, main, 'project')?.name, 'TOWER-A-BL1');
-  assert.ok(!progressCurves(tw, [main.proj_id], {}).warnings.some((w) => /No project baseline/.test(w)));
+  assert.ok(!progressCurves(tw, [main.proj_id], {}).notes.some((w: string) => /the current budget and dates were used/.test(w)));
   // an activity whose actual start and finish are after the data date: its EV is still counted by the data date
   const db: Db = { tables: {} };
   const r = applyOps(db, [

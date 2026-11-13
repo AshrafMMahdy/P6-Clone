@@ -44,7 +44,7 @@ test('the horizon fixture: the same windows, the same activities, the same five 
     for (const d of ['logic', 'resources', 'float', 'forecast_stability'] as const) assert.equal(a.dimensions[d]!.score, s.prerequisites[d].score, `${id} ${d}`);
     assert.deepEqual(a.issues, [...s.prerequisites.logic.issues, ...s.prerequisites.resources.issues, ...s.prerequisites.float.issues, ...s.prerequisites.forecast_stability.issues], `${id} issues`);
     assert.equal(a.on_critical_path, s.on_critical_path, `${id} critical`);
-    assert.equal(a.dimensions.approvals, undefined);
+    assert.equal((a.dimensions as Record<string, unknown>).approvals, undefined);
   }
   // window by window: counts, and the mean of every dimension but approvals
   src.bands.forEach((sb: any, i: number) => {
@@ -333,7 +333,7 @@ test('planning_horizon through the server: read-only, status_date the only argum
   assert.equal(nobl.err, true);
   assert.match(nobl.d.error.message, /No baseline "project" for this project\./);
   assert.match(r.d.notes.join(' '), /Forecast stability not assessed: no baseline is assigned to/);
-  assert.deepEqual(Object.keys(r.d).slice(0, 4), ['report', 'status_date', 'result', 'summary'], 'summary first');
+  assert.deepEqual(Object.keys(r.d).slice(0, 5), ['report', 'status_date', 'result', 'notes', 'summary'], 'summary before the lists');
   const b = r.d.bands[1];
   assert.equal(b.activities.length, 25);
   assert.equal(b.activities_total, 369);
