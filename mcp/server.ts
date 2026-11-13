@@ -1111,7 +1111,7 @@ function savedDatesNotes(s: Session, project: unknown, loopsOnly = false): strin
   try { ids = projectIds(s.db, project); } catch { return []; } // (a project the call could not name: the call's own refusal stands)
   const names = new Set((s.db.tables.PROJECT?.rows ?? []).filter((p) => ids.includes(p.proj_id)).map((p) => p.proj_short_name || p.proj_id));
   const mine = (l: { projIds: string[] }) => l.projIds.some((id) => ids.includes(id));
-  const loops = k.state.loops.filter(mine).map((l) => loopStopsDates(l.projs, l.loops, !l.projs.every((p) => k!.state.notStored.includes(p))));
+  const loops = k.state.loops.filter(mine).map((l) => loopStopsDates(l.projs, l.loops, !l.projs.filter((p) => names.has(p)).every((p) => k!.state.notStored.includes(p))));
   if (loopsOnly) return loops;
   const dates = [...k.state.notStored.filter((n) => names.has(n)).map(datesNotStored), ...k.state.stale.filter((x) => names.has(x.proj)).map((x) => datesNotCurrent(x.proj, x.differ, x.open, true))];
   // (the dates sentences send the agent to schedule, which calculates every project of the file: a loop in another project stops it, so that loop is said too)

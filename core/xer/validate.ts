@@ -40,9 +40,9 @@ export function loopGroups(db: Db, only?: string[], loops = projectLoops(db)): L
   for (const l of loops) {
     if (only && !l.projIds.some((id) => only.includes(id))) continue;
     const key = [...l.projIds].sort().join('|');
-    const g = out.get(key) ?? { projIds: l.projIds, projs: l.projIds.map((id) => name.get(id) ?? id), loops: [] };
+    const g = out.get(key) ?? { projIds: l.projIds, projs: l.projIds.map((id) => name.get(id) ?? 'a project that is not in the file'), loops: [] };
     out.set(key, g);
-    g.loops.push(l.tasks.map((t) => (l.projIds.length > 1 ? `${t.task_code} in ${name.get(t.proj_id) ?? t.proj_id}` : t.task_code)));
+    g.loops.push(l.tasks.map((t) => (l.projIds.length > 1 ? `${t.task_code} in ${name.get(t.proj_id) ?? 'a project that is not in the file'}` : t.task_code)));
   }
   return [...out.values()];
 }

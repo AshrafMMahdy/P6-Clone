@@ -1,6 +1,6 @@
 // File-format plumbing shared by wizards and the CLI-like Validate tool.
 import { parseXer } from '../core/xer/parse.ts';
-import { markBaselines } from '../core/progress/baseline.ts';
+import { baselineTiesFinding, dropBaselineTies, markBaselines } from '../core/progress/baseline.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { checkStoredDates } from '../core/schedule/stored-dates.ts';
 import { worst } from '../core/findings.ts';
@@ -70,11 +70,13 @@ export function importChecks(db: Db, parsed: Finding[], format: Format, dates = 
 /** `converted`: Microsoft Project XML that a converter made of an .mpp (always the format's own representation, see parseMspdi). */
 export function readRaw(bytes: Uint8Array, format: Format, encoding?: TextEncodingName | 'auto', converted = false): { db: Db; findings: Finding[] } {
   if (format === 'mpp') throw new Error('.mpp files need Microsoft Project: save them as Microsoft Project XML (or import them in the desktop app).');
-  if (format === 'xml') return parseP6Xml(xmlText(bytes));
+  if (format === 'xml') { const x = parseP6Xml(xmlText(bytes)); const ties = dropBaselineTies(x.db); if (ties.length) x.findings.push(baselineTiesFinding(ties.length)); return x; }
   if (format === 'mspdi') return parseMspdi(xmlText(bytes), { converted });
   if (format === 'mpx') return parseMpx(decodeText(bytes, encoding).text);
   const r = parseXer(bytes, { encoding });
   markBaselines(r.db);
+  const ties = dropBaselineTies(r.db);
+  if (ties.length) r.findings.push(baselineTiesFinding(ties.length));
   return r;
 }
 
@@ -87,6 +89,8 @@ export async function parseFileAsync(name: string, bytes: Uint8Array, format = d
     const stage = onStage ?? (async () => {});
     await stage(`Reading ${(bytes.length / 1048576).toFixed(1)} MB...`);
     const r = format === 'xml' ? parseP6Xml(xmlText(bytes)) : parseXer(bytes, { encoding });
+    const ties = dropBaselineTies(r.db);
+    if (ties.length) r.findings.push(baselineTiesFinding(ties.length));
     await stage(`Checking ${(r.db.tables.TASK?.rows.length ?? 0).toLocaleString()} activities the way P6 would...`);
     const f = importChecks(r.db, r.findings, format, false);
     if (worst(f) === 'fatal') return { format, db: r.db, findings: f };

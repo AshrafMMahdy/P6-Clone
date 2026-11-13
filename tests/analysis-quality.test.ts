@@ -138,8 +138,8 @@ test('platform review 2: critical path test with nothing critical by float (130 
   const tp = rows(tw, 'PROJECT').filter((x) => !x._baseline_of).map((x) => x.proj_id);
   const c = progressCurves(tw, tp, {});
   assert.equal(c.baseline, null);
-  assert.deepEqual(c.notes.filter((w: string) => /baseline/.test(w)), ['No baseline is assigned to TOWER-A: the current budget and dates were used; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
+  assert.deepEqual(c.notes.filter((w: string) => /baseline/.test(w)), ['No project baseline is assigned to TOWER-A: the current budget and dates were used; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
   assert.equal(dcma14(tw, { projIds: tp, hoursPerDay: 8 }).baseline, null);
-  assert.ok(dcma14(tw, { projIds: tp, hoursPerDay: 8 }).notes.includes('Missed tasks and Baseline execution index (BEI) not assessed: no baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline, or pass it as baseline.'));
+  assert.ok(dcma14(tw, { projIds: tp, hoursPerDay: 8 }).notes.includes('Missed tasks and Baseline execution index (BEI) not assessed: no project baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline, or pass it as baseline.'));
   assert.match(dcma14(tw, { projIds: tp, hoursPerDay: 8, baseline: 'TOWER-A-BL1' }).baseline!.how, /saved baseline, chosen by name/);
 });

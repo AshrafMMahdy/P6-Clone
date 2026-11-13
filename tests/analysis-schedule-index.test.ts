@@ -199,7 +199,7 @@ test('not assessed: no baseline, no data date, no resources, nothing due, and th
   const a = scheduleIndex(B.cleanChain().db, {});
   assert.equal(a.risk.sub_metrics.baseline_drift.active, false);
   assert.equal(a.risk.sub_metrics.baseline_drift.score, null);
-  assert.equal(a.risk.sub_metrics.baseline_drift.reason, 'no baseline is assigned to CLEAN; assign one with edit assign_baseline, or pass baseline');
+  assert.equal(a.risk.sub_metrics.baseline_drift.reason, 'no project baseline is assigned to CLEAN; assign one with edit assign_baseline, or pass baseline');
   assert.equal(a.baseline, null);
   // a baseline that is not there is named in the reason the way dcma_14 words it
   assert.equal(scheduleIndex(B.delayed().db, { baseline: 'bl2' }).risk.sub_metrics.baseline_drift.reason, 'no BL2 baseline is assigned to DELAYED; assign one with edit assign_baseline, or pass baseline');
@@ -323,7 +323,7 @@ test('129 trial and Detailed Program (progress, no baseline in the file): counts
     const p0 = rows(db, 'PROJECT')[0];
     assert.equal(!!p0.sum_base_proj_id, name === '129 trial.xer', name);
     assert.equal(r.risk.sub_metrics.baseline_drift.active, false, name);
-    assert.equal(r.risk.sub_metrics.baseline_drift.reason, p0.sum_base_proj_id ? `the project baseline of ${p0.proj_short_name} is not in this file (the file was exported without it); export the file with its baselines, or pass baseline to name one that is in it` : `no baseline is assigned to ${p0.proj_short_name}; assign one with edit assign_baseline, or pass baseline`, name);
+    assert.equal(r.risk.sub_metrics.baseline_drift.reason, p0.sum_base_proj_id ? `the project baseline of ${p0.proj_short_name} is not in this file (the file was exported without it); export the file with its baselines, or pass baseline to name one that is in it` : `no project baseline is assigned to ${p0.proj_short_name}; assign one with edit assign_baseline, or pass baseline`, name);
     // float counts from the rows: incomplete activities that are not WBS summary or level of effort, with a stored float
     const T = rows(db, 'TASK').filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
     const neg = T.filter((t) => Number(t.total_float_hr_cnt) < 0).length;

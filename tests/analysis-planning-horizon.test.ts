@@ -169,7 +169,7 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   // and no baseline: forecast stability has nothing to be compared with (the planned dates equal the early dates after a calculation, so they cannot stand in)
   assert.deepEqual(r.notes.length, 2);
   assert.match(r.notes.join(' '), /Resources not assessed: no resource is assigned to an activity\./);
-  assert.match(r.notes.join(' '), /Forecast stability not assessed: no baseline is assigned to .+; assign one with edit assign_baseline, or pass baseline\./);
+  assert.match(r.notes.join(' '), /Forecast stability not assessed: no project baseline is assigned to .+; assign one with edit assign_baseline, or pass baseline\./);
   // T1 by hand: logic 60 (no predecessor), float 0 (critical); resources and stability not assessed: (0.25 x 60 + 0.10 x 0) / (0.25 + 0.10) = 15 / 0.35 = 42.9
   assert.equal(byId(r).T1.readiness_score, 42.9);
   assert.equal(byId(r).T1.dimensions.resources, undefined);

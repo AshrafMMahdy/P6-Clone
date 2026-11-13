@@ -144,7 +144,7 @@ test('10 and 34: progress_curves says the current plan was used and "no budgeted
   assert.equal(count(all, 'No budgeted cost'), 1, 'said once, in notes');
   assert.equal(c.warnings, undefined);
   assert.equal(c.totals.es_note, undefined);
-  assert.deepEqual(c.notes, ['No baseline is assigned to P: the current budget and dates were used; assign one with edit assign_baseline.', 'No budgeted cost in P: pass units: duration or hours, or load costs.']);
+  assert.deepEqual(c.notes, ['No project baseline is assigned to P: the current budget and dates were used; assign one with edit assign_baseline.', 'No budgeted cost in P: pass units: duration or hours, or load costs.']);
   const withCost = await built('2026-03-02', [{ op: 'add_resource', id: 'R', price_per_unit: 10 }, act('A', 5), { op: 'assign_resource', activity: 'A', resource: 'R' }], 'Q');
   const d = await call('progress_curves', { handle: withCost, units: 'cost' });
   assert.equal(d.totals.es_note, undefined);

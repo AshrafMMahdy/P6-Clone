@@ -1,7 +1,7 @@
 // An XER read from its file a chunk at a time (Node only: the desktop's renderer reads bytes with parseXer).
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { parseXerSource, type ParseResult } from './parse.ts';
-import { markBaselines } from '../progress/baseline.ts';
+import { baselineTiesFinding, dropBaselineTies, markBaselines } from '../progress/baseline.ts';
 import { compactHeap } from '../bim/element.ts';
 import type { TextEncodingName } from '../encoding.ts';
 
@@ -31,5 +31,7 @@ export function parseXerFile(path: string, opts: { encoding?: TextEncodingName |
 export function readXerFile(path: string, encoding?: TextEncodingName | 'auto'): ParseResult {
   const r = parseXerFile(path, { encoding });
   markBaselines(r.db);
+  const ties = dropBaselineTies(r.db);
+  if (ties.length) r.findings.push(baselineTiesFinding(ties.length));
   return r;
 }

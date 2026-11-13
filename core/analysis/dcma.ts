@@ -3,7 +3,7 @@
 // and relationship types count relationships. Durations and float are in working days of each activity's calendar.
 // The Critical Path Test runs on a scratch copy (a journal that is rolled back); CPLI and BEI use a chosen baseline.
 import { maxOf, minOf } from '../arrays.ts';
-import { baselineReason, cstrName, namesText, noCriticalPathLeft, noDataDateReason, projectsText } from '../notes.ts';
+import { baselineReason, cstrName, namesText, noCriticalPathLeft, noDataDateReason, projectsText, baselineWord } from '../notes.ts';
 import { type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
@@ -269,7 +269,7 @@ function cpli(s: Scope, given: number | null, bls: Map<string, ReturnType<typeof
   const one = (target: number) => { const tf = s.workDays(cal, fin, target); return { target: formatP6Date(target), total_float_days: tf, cpli: cpl > 0 ? Math.round(((cpl + tf) / cpl) * 1000) / 1000 : null }; };
   const vsContract = contract != null ? one(contract) : null, vsBaseline = blFin != null && Number.isFinite(blFin) ? one(blFin) : null;
   const primary = vsContract ?? vsBaseline;
-  if (!primary) return na(`no contract finish (Must Finish By, or target_finish) and no baseline to measure against`);
+  if (!primary) return na(`no contract finish (Must Finish By, or target_finish) and no ${baselineWord(which)} to measure against`);
   // no length to divide by. WHY is read from the activities, never assumed: all complete, or open work whose latest finish is not after the status date
   // (saved dates that were never calculated or are of an earlier data date, or open work with no working time left on the project's calendar)
   if (cpl <= 0 || primary.cpli == null) return na(noCriticalPathLeft(p.proj_short_name, formatP6Date(dd), formatP6Date(fin), acts.filter((t) => !isDone(t)).length));

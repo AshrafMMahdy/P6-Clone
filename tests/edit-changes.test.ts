@@ -174,6 +174,8 @@ test('every named operation confirms its change in P6’s words: no column name,
   // changed), and clear_authors, which empties who added or changed a row (no P6 column of the schedule; its own answer counts the fields it cleared)
   assert.deepEqual(silent, ['set_schedule_options', 'clear_authors']);
   assert.ok(lines.length > 150, 'the checks below read real lines');
+  // every field these operations were given is one they have: none is reported as not used
+  assert.deepEqual(answers.flatMap((e) => ((e.notes ?? []) as string[]).filter((n) => /has no field/.test(n))), []);
   assert.deepEqual(lines.filter((l) => /(: |-> )"\d+"( ->|$)/.test(l) && !/number|Number|Units|Cost|Price|Weight|Hours|days|Duration|Lag|%|Float|paths|Year|Sequence|Limit|Probability|Level/.test(l)), [], 'no bare internal number as a value');
   assert.deepEqual(lines.filter((l) => /^[a-z_]+: \[(\d+|[^\]]* \d{3,})?( @[^\]]*)?\]/.test(l) || /\[(|[^\]]* \/ )\]/.test(l)), [], 'no row named by an internal number, or by nothing');
   assert.deepEqual(lines.filter((l) => { const m = /: ("[^"]*"|[^" ]+) -> ("[^"]*"|[^" ]+)$/.exec(l); return !!m && m[1] === m[2]; }), [], 'no line says a value changed to itself');
@@ -235,7 +237,7 @@ test('every named operation confirms its change in P6’s words: no column name,
   said('set_period_actuals: [A R1 / Jan 26 @P] Actual Units: 3 -> 4');
   said('store_period_performance: [P] Last Financial Period Stored: null -> "Jan 26"');
   // a baseline: renamed once, its rows named with it; deleted as ONE line; what pointed at a deleted row is said by that row's name
-  said('update_baseline: [BL1X] Project ID: "BL1" -> "BL1X"');
+  said('update_baseline: [BL1X] Baseline Name: "BL1" -> "BL1X"');
   said('update_wbs: [W1 in baseline BL1X @P] WBS Name: "Area 1" -> "Area one in baseline"');
   said('update_activity: [C in baseline BL1X @P] Activity Name: "C" -> "C in baseline"');
   said('delete_baseline: [BL1X] baseline: "exists" -> "deleted"');
@@ -323,4 +325,34 @@ test('real files: a deleted resource by its ID, no line from a value to itself, 
   assert.ok(!e.error, JSON.stringify(e.error));
   assert.deepEqual(lines(e), ['[Q] project: null -> "added"', '[X in Q FS A in EC] relationship: null -> "added"']);
   assert.ok((e.notes as string[]).some((n) => /^The saved dates of EC are not what a recalculation gives/.test(n)), JSON.stringify(e.notes));
+});
+
+test('a field an operation does not have is said, not taken in silence', async () => {
+  const h = await project();
+  const e = await call('edit', { handle: h, operations: [{ op: 'update_resource', id: 'R1', name: 'Crew 2', calendar: 'Six days', price_per_unit: 55 }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual((e.notes as string[]).filter((n) => /has no field/.test(n)), ['update_resource has no field "calendar"; the operation ran without it.', 'update_resource has no field "price_per_unit"; the operation ran without it.']);
+  assert.deepEqual(e.changes.map((c: any) => [c.id, c.field, c.new]), [['R1', 'Resource Name', 'Crew 2']]);
+});
+
+test('a baseline saved in the session and restored says so; schedule options that change the dates mark them; a completed activity keeps its 100 %', async () => {
+  const h = await project();
+  await call('schedule', { handle: h });
+  let e = await call('edit', { handle: h, operations: [{ op: 'save_baseline', name: 'B1' }] });
+  e = await call('edit', { handle: h, operations: [{ op: 'restore_baseline', baseline: 'B1' }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual(e.changes, [{ id: 'B1', field: 'baseline', old: 'baseline of EC', new: 'restored as a project' }]);
+  // an option that changes what the scheduler gives: the saved dates are compared again, and said when they differ
+  const g = await project([{ op: 'update_activity', id: 'A', actual_start: '2026-03-02 08:00', remaining_days: 2 }, { op: 'update_activity', id: 'C', actual_start: '2026-03-03 08:00', remaining_days: 3 }]);
+  await call('schedule', { handle: g, data_date: '2026-03-09' });
+  e = await call('edit', { handle: g, operations: [{ op: 'set_schedule_options', logic: 'override' }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  const sched = await call('schedule', { handle: g, dry_run: true });
+  const differs = await call('critical_path', { handle: g });
+  assert.equal(((e.notes ?? []) as string[]).some((n) => STALE.test(n)), ((differs.notes ?? []) as string[]).some((n) => /are not what a recalculation gives/.test(n)), `the edit says what the next analysis would: ${JSON.stringify([e.notes, differs.notes, sched.error])}`);
+  // a completed activity: a % complete below 100 is refused (it set a remaining duration on finished work)
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', project: 'EC', actual_start: '2026-03-02 08:00', actual_finish: '2026-03-04 17:00' }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', project: 'EC', percent_complete: 55 }] });
+  assert.match(e.error?.message ?? '', /The activity is complete \(it has an actual finish\)/);
 });

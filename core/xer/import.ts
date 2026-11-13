@@ -67,6 +67,8 @@ const NATURAL: Record<string, (r: Row) => string> = {
   TASKPROC: (r) => `${r.task_id}|${r.proc_name}`, PROJCOST: (r) => `${r.task_id}|${r.cost_name}`,
   TASKFIN: (r) => `${r.task_id}|${r.fin_dates_id}`, TRSRCFIN: (r) => `${r.taskrsrc_id}|${r.fin_dates_id}`,
   PROJPCAT: (r) => `${r.proj_id}|${r.proj_catg_type_id}`, TASKDOC: (r) => `${r.task_id}|${r.doc_id}`,
+  ASGNMNTACAT: (r) => `${r.taskrsrc_id}|${r.asgnmnt_catg_type_id}`, // one value per code per assignment
+  SCHEDOPTIONS: () => 'the project\u2019s schedule options', // one row per project
 };
 /** Shared rows without a key of their own that are ONE value of a resource (or a role): how the value is recognised in the target. */
 const SHARED_NATURAL: Record<string, (r: Row) => string> = {
@@ -76,7 +78,7 @@ const UDF_FK_TABLE: Record<string, string> = { TASK: 'TASK', PROJWBS: 'PROJWBS',
 /** Fields kept out of refTarget (they often point outside the file, so they are not checked or pulled in on export) that still follow their row when it is renumbered. */
 const SOFT_REFS: Record<string, string> = { 'TASK|rsrc_id': 'RSRC', pobs_id: 'POBS', shift_id: 'SHIFT' };
 /** A reference that a row cannot exist without: when what it points at is left out, the row is left out too. */
-const OWNER = new Set(['task_id', 'pred_task_id', 'taskrsrc_id', 'udf_type_id', 'actv_code_type_id', 'memo_type_id', 'fin_dates_id', 'proj_catg_type_id', 'rsrc_catg_type_id',
+const OWNER = new Set(['task_id', 'pred_task_id', 'taskrsrc_id', 'udf_type_id', 'actv_code_type_id', 'memo_type_id', 'fin_dates_id', 'proj_catg_type_id', 'rsrc_catg_type_id', 'asgnmnt_catg_type_id', 'ASGNMNTACAT|asgnmnt_catg_id',
   'TASKACTV|actv_code_id', 'TASKRSRC|rsrc_id', 'RSRCRATE|rsrc_id', 'RSRCROLE|rsrc_id', 'RSRCROLE|role_id', 'ROLERATE|role_id', 'PROJPCAT|proj_catg_id', 'RSRCRCAT|rsrc_catg_id', 'RSRCRCAT|rsrc_id', 'TASKDOC|doc_id']);
 
 /** Default plan: every project in the file as a new project. */
@@ -353,7 +355,6 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
         // remember which P6 build wrote the file: 6.x builds place milestones differently
         nr._legacy_ms = isLegacyLayout(src) ? 'Y' : 'N';
         nr._p6_ver = src.header?.version ?? '';
-        if (nr._baseline_of) nr._baseline_of = m('PROJECT')[nr._baseline_of] ?? nr._baseline_of;
         if (r.sum_base_proj_id && !m('PROJECT')[r.sum_base_proj_id]) nr.sum_base_proj_id = kept?.sum_base_proj_id ?? ''; // its baseline is not in the file: the one it had (replace), or none
       } else if (r.proj_id && addInto.has(r.proj_id)) {
         const target = merging.get(r.proj_id)!;

@@ -1,5 +1,6 @@
 // Project > Maintain Baselines: a baseline is a copy of the project stored as its own (hidden) project.
-import { addField, rows, table, type Db } from '../db.ts';
+import { addField, rows, table, type Db, type Row } from '../db.ts';
+import type { Finding } from '../findings.ts';
 import { selectRows } from '../xer/write.ts';
 import { importIntoDb, deleteProject } from '../xer/import.ts';
 import { formatP6Date } from '../dates.ts';
@@ -47,7 +48,27 @@ export function restoreBaseline(db: Db, baselineId: string): void {
   if (b) { b._baseline_of = ''; if (b.orig_proj_id) b.orig_proj_id = ''; }
 }
 
-export { baselineProjectIds, logicRelationships } from './snapshots.ts';
+/** The baseline projects of a file: a project saved as a baseline (_baseline_of) or, in an XER read without markBaselines (the desktop's reader), a project row whose
+ *  orig_proj_id names another project of the file (the way P6 writes a baseline). Every project not in this set is a project of its own. */
+export function baselineProjectIds(db: Db): Set<string> {
+  const P = rows(db, 'PROJECT'), ids = new Set(P.map((p) => p.proj_id));
+  return new Set(P.filter((p) => p._baseline_of || (p.orig_proj_id && p.orig_proj_id !== p.proj_id && ids.has(p.orig_proj_id))).map((p) => p.proj_id));
+}
+
+/** A baseline is a snapshot of its project alone: a relationship between a baseline and another project is not part of it. A file can hold one (this engine made
+ *  them before whiq-v0.1.80 when it saved a baseline of a project tied to another project; P6 is reported to leave them too), and it would tie the other project's
+ *  activity to the baseline's saved dates. Such relationships are taken out when a file is read, and the reader says how many (the returned rows). */
+export function dropBaselineTies(db: Db): Row[] {
+  const snapshots = baselineProjectIds(db), T = db.tables.TASKPRED;
+  if (!snapshots.size || !T) return [];
+  const proj = new Map(rows(db, 'TASK').map((t) => [t.task_id, t.proj_id]));
+  const tie = (r: Row) => { const a = proj.get(r.task_id), b = proj.get(r.pred_task_id); return a != null && b != null && a !== b && (snapshots.has(a) || snapshots.has(b)); };
+  const gone = T.rows.filter(tie);
+  if (gone.length) T.rows = T.rows.filter((r) => !tie(r));
+  return gone;
+}
+/** The reader's sentence for them. */
+export const baselineTiesFinding = (n: number): Finding => ({ severity: 'warning', code: 'BASELINE_TIE_LEFT_OUT', table: 'TASKPRED', message: `${n} ${n === 1 ? 'relationship' : 'relationships'} between a baseline and another project ${n === 1 ? 'was' : 'were'} left out: a baseline is a snapshot of its own project and takes no part in the schedule.`, p6: '' });
 
 /** Baselines in an XER: P6 writes each as a PROJECT row whose orig_proj_id names the project it is a baseline of. */
 export function markBaselines(db: Db): void {

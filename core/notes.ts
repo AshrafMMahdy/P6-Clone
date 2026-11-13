@@ -43,11 +43,11 @@ export const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) :
 export const andList = (parts: string[]): string => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
 /** Missing baseline, as the reason of a part that is not assessed. `argument`: the tool takes a `baseline` argument. `notInFile`: one IS assigned, and the file was exported without it. */
-export const baselineReason = (proj: string, argument: boolean, which = 'project', notInFile = false, saved: string[] = [], another = false): string => (notInFile
+export const baselineReason = (proj: string, argument: boolean, which = 'project', notInFile = false, saved: string[] = []): string => (notInFile
   ? `the ${baselineWord(which)} of ${proj} is not in this file (the file was exported without it); export the file with its baselines${argument ? ', or pass baseline to name one that is in it' : ''}`
-  // (`another`: the project has a primary, secondary or tertiary baseline, so "no baseline" would be false: it is the PROJECT baseline it has none of)
-  : saved.length ? `no ${which === 'project' && !another ? 'baseline' : baselineWord(which)} is assigned to ${proj}; ${savedText(saved)}: assign ${saved.length === 1 ? 'it' : 'one'} with edit assign_baseline${argument ? `, or pass ${saved.length === 1 ? 'it' : 'one'} as baseline` : ''}`
-  : `no ${which === 'project' && !another ? 'baseline' : baselineWord(which)} is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`);
+  // ("project baseline", P6's name for it: a project can have a primary, secondary or tertiary baseline and no project baseline, and "no baseline" would be false of it)
+  : saved.length ? `no ${baselineWord(which)} is assigned to ${proj}; ${savedText(saved)}: assign ${saved.length === 1 ? 'it' : 'one'} with edit assign_baseline${argument ? `, or pass ${saved.length === 1 ? 'it' : 'one'} as baseline` : ''}`
+  : `no ${baselineWord(which)} is assigned to ${proj}; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}`);
 /** The baselines saved in the file and not assigned, as a clause. */
 const savedText = (saved: string[]): string => `${namesText(saved)} ${saved.length === 1 ? 'is' : 'are'} saved in the file`;
 /** Missing baseline, a check left out. */
@@ -55,9 +55,9 @@ export const baselineLeftOut = (part: string, proj: string, argument: boolean, w
 /** Missing baseline, the current budget and dates stood in. */
 export const currentPlanUsed = (projs: string[], argument = false, notInFile = false, saved: string[] = []): string => (notInFile
   ? `The project baseline of ${projectsText(projs)} is not in this file (the file was exported without it): the current budget and dates were used; export the file with its baselines to measure against it.`
-  : `No baseline is assigned to ${projectsText(projs)}: the current budget and dates were used; ${saved.length ? `${savedText(saved)}: assign ${saved.length === 1 ? 'it' : 'one'}` : 'assign one'} with edit assign_baseline${argument ? ', or pass baseline' : ''}.`);
+  : `No project baseline is assigned to ${projectsText(projs)}: the current budget and dates were used; ${saved.length ? `${savedText(saved)}: assign ${saved.length === 1 ? 'it' : 'one'}` : 'assign one'} with edit assign_baseline${argument ? ', or pass baseline' : ''}.`);
 /** No project baseline is assigned and another assigned one stood in (the primary baseline, BL1): which one. */
-export const baselineChosen = (proj: string, baseline: string, which: string): string => `No baseline is assigned to ${proj}: ${baseline}, ${which}, was used.`;
+export const baselineChosen = (proj: string, baseline: string, which: string): string => `No project baseline is assigned to ${proj}: ${baseline}, ${which}, was used.`;
 /** A baseline by its argument value (`project`, `bl1`, a saved name) for the sentences above. */
 export const baselineWord = (which: string): string => (which === 'project' ? 'project baseline' : /^bl\d$/i.test(which) ? `${which.toUpperCase()} baseline` : `baseline ${which}`);
 
@@ -153,7 +153,7 @@ export const loopNote = (ids: string[]): string => `${namesText(ids)} ${ids.leng
 /** A loop stops the calculation of a project's dates: said by every analysis that judges from the saved dates (it still answers: owner 2026-11-13, as P6's reports open on a
  *  schedule F9 refuses). `figures`: the answer holds figures of those dates. */
 export const loopStopsDates = (projs: string[], loops: string[][], figures = false): string =>
-  `${projectsText(projs)} ${projs.length === 1 ? 'has' : 'have'} ${loops.length === 1 ? 'a loop' : `${loops.length} loops`} in ${projs.length === 1 ? 'its' : 'their'} logic (${loops.map((l) => namesText(l)).join('; ')}): schedule cannot calculate the file as it stands${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of ${loops.length === 1 ? 'the loop' : 'each loop'}.`;
+  `${projectsText(projs)} ${projs.length === 1 ? 'has' : 'have'} ${loops.length === 1 ? 'a loop' : `${loops.length} loops`} in ${projs.length === 1 ? 'its' : 'their'} logic (${loops.map((l) => namesText(l)).join('; ')}): schedule stops on ${loops.length === 1 ? 'it' : 'them'}${figures ? ', so these figures are of the saved dates' : ''}; change or delete one relationship of ${loops.length === 1 ? 'the loop' : 'each loop'}.`;
 /** The scheduler's short loop sentence ("A and B are in a loop."): an answer that carries the sentence above does not repeat it. */
 export const isShortLoopNote = (n: string): boolean => /^[^:]+ (?:is|are) in a loop\.$/.test(n);
 /** Resources that are Material: a material is a quantity, not a crew, so its over-allocation is not judged. `ids` are Resource IDs. */
@@ -180,5 +180,7 @@ export const stillWorking = (jobId: string): string => `Still working: call job_
 /** An answer too large to return whole: where all of it is. */
 export const tooLarge = (chars: number, file: string | null, ask: string): string => file ? `The answer is too large to return (${chars} characters); all of it is in ${file}${ask}.` : `The answer is too large to return (${chars} characters) and could not be written to a file${ask}.`;
 /** A tool given an argument it does not have. */
+/** A field an edit operation does not have (or did not read in the state it ran in): the operation ran without it. */
+export const fieldNotUsed = (op: string, field: string): string => `${op} has no field "${field}"; the operation ran without it.`;
 export const argumentNotUsed = (tool: string, arg: string, has: string[]): string => `${tool} has no argument "${arg}"; the call ran without it. Its arguments are: ${has.join(', ')}.`;
 

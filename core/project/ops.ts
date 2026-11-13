@@ -8,6 +8,7 @@ import { addField, dropIndexes, nextId, rowIndex, rows, table, tableCache, withI
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { calendarsWithNoWork, noWorkTimeText, p6num } from '../schedule/cpm.ts';
 import { CalendarHorizonError } from '../calendar/calendar.ts';
+import { fieldNotUsed } from '../notes.ts';
 import { findLoops, MAX_LEN } from '../xer/validate.ts';
 import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
@@ -134,7 +135,13 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
       for (at = 0; at < list.length; at++) {
         batch.at = at;
         // a calendar with no work time is a fact of the data, not a fault of the clone: named (while the change is still in place), with the way out
-        try { results.push(apply(d, list[at] as Op, hpd, warnings, batch)); }
+        // a field the operation never read is one it does not have: said, never taken in silence (an operation given whole to another counts as read)
+        const given = list[at], read = new Set<PropertyKey>(['op']);
+        const seen = given && typeof given === 'object' && !Array.isArray(given) ? new Proxy(given as object, { get: (t, k, r) => { read.add(k); return Reflect.get(t, k, r); }, has: (t, k) => { read.add(k); return Reflect.has(t, k); }, ownKeys: (t) => { for (const k of Reflect.ownKeys(t)) read.add(k); return Reflect.ownKeys(t); } }) : given;
+        try {
+          results.push(apply(d, seen as Op, hpd, warnings, batch));
+          if (seen !== given) for (const k of Object.keys(given as object)) if (!read.has(k)) warnings.push(fieldNotUsed(String((given as Op).op), k));
+        }
         catch (e) { if (e instanceof CalendarHorizonError && calendarsWithNoWork(d).length) fail(`Refused: ${noWorkTimeText(calendarsWithNoWork(d), d)}.`); throw e; }
       }
       // loops: checked once for the whole edit (a check per relationship made a 30,000-link load quadratic); the

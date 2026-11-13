@@ -91,7 +91,7 @@ test('EXPECTED DIFFERENCES from the source\'s results, each with its reason', ()
   // 2. no baseline in the file: the source counts every activity as missing its baseline dates (cleanChain: 4 of 4 fail); the clone has no baseline to look in, so it is not assessed, with the reason (a project with a baseline is judged: delayed 0 of 3 in both)
   const c = by(decm(B.cleanChain().db, { statusDate: at('2026-01-20') }));
   assert.equal(c['06A501a'].result, 'not_assessed');
-  assert.match(c['06A501a'].note!, /^Missing baseline dates not assessed: no baseline is assigned to .+; assign one with edit assign_baseline, or pass baseline\.$/);
+  assert.match(c['06A501a'].note!, /^Missing baseline dates not assessed: no project baseline is assigned to .+; assign one with edit assign_baseline, or pass baseline\.$/);
   assert.equal(srcChecks('cleanChain', 'decm')['06A501a'].status, 'fail');
   assert.equal(d['06A501a'].result, 'pass');
   assert.deepEqual([d['06A501a'].numerator, d['06A501a'].denominator], [0, 3]);

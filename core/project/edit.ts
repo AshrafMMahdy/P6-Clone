@@ -103,6 +103,7 @@ export function setActual(r: Row, which: 'start' | 'finish', v: string): string 
 export function setPercent(r: Row, pct: number): string | void {
   if (!(pct >= 0 && pct <= 100)) return 'Enter 0 to 100.';
   if (pct > 0 && !r.act_start_date) return 'Mark the activity as started (actual start) before entering % complete.';
+  if (r.act_end_date && pct < 100) return 'The activity is complete (it has an actual finish): clear the actual finish before entering a % complete below 100.';
   if (r.complete_pct_type === 'CP_Phys') { r.phys_complete_pct = p6num(pct); return; }
   const orig = Number(r.target_drtn_hr_cnt || 0);
   r.remain_drtn_hr_cnt = p6num(orig * (1 - pct / 100));

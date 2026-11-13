@@ -9,9 +9,7 @@ import { saveBaseline } from '../core/progress/baseline.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
-import { makeScope } from '../core/analysis/common.ts';
-import { makeCtx } from '../core/project/ctx.ts';
-import { reviewSchedule } from '../core/query/review.ts';
+import { readRaw } from '../renderer/io.ts';
 
 const load = (name: string) => parseXer(samples().find((s) => s.name === name)!.bytes).db;
 
@@ -264,18 +262,14 @@ test('a baseline never holds an activity of another project', () => {
   assert.equal(db.tables.TASKPRED.rows.length, 1, 'the tie to Q stays with P; the baseline has none');
   ok([{ op: 'update_activity', project: 'P', id: 'A', duration_days: 2 }]);
   assert.equal(finishB(), '2026-01-13 17:00', 'B follows A, not the baseline of A');
-  // a file that already holds such a tie (P6 can leave one): it is there, and it never drives the current project
+  // a file that already holds such a tie (this engine made them before; P6 is reported to leave them): read, the file is without it, and the reader says so
   const blA = db.tables.TASK.rows.find((t) => t.task_code === 'A' && t.proj_id !== live()[0])!, b = db.tables.TASK.rows.find((t) => t.task_code === 'B')!;
   db.tables.TASKPRED.rows.push({ task_pred_id: '99', task_id: b.task_id, pred_task_id: blA.task_id, proj_id: b.proj_id, pred_proj_id: blA.proj_id, pred_type: 'PR_FS', lag_hr_cnt: '0' });
-  assert.equal(finishB(), '2026-01-13 17:00');
-  assert.deepEqual(makeScope(db).rels.map((r) => r.task_pred_id), ['1'], 'nor is it logic the analyses read');
-  // (what every check and query reads an activity's predecessors from: B has the one, from A of P)
-  assert.deepEqual((makeCtx(db, { hoursPerDay: 8 }).predsOf.get(b.task_id) ?? []).map((r) => r.task_pred_id), ['1']);
-  assert.equal(reviewSchedule(db).relationships, 1);
-  assert.equal(db.tables.TASKPRED.rows.length, 2, 'the row stays in the file');
-  // restored, the baseline is a project like any other, and the tie counts
-  ok([{ op: 'restore_baseline', baseline: 'BL1' }]);
-  assert.equal(finishB(), '2026-02-06 17:00');
+  const read = readRaw(writeXer(db, { version: '18.8' }), 'xer');
+  assert.deepEqual(read.findings.filter((f) => f.code === 'BASELINE_TIE_LEFT_OUT').map((f) => f.message), ['1 relationship between a baseline and another project was left out: a baseline is a snapshot of its own project and takes no part in the schedule.']);
+  assert.deepEqual(read.db.tables.TASKPRED.rows.map((r) => r.task_pred_id), ['1']);
+  // (a relationship between two current projects, and one inside a baseline, are untouched: the file read back holds the one tie of P and Q)
+  assert.equal(readRaw(writeXer(read.db, { version: '18.8' }), 'xer').findings.filter((f) => f.code === 'BASELINE_TIE_LEFT_OUT').length, 0);
 });
 
 // What a resource carries is one value per code, role and custom field. A file that brings another value for a resource already here does not leave the resource
@@ -308,4 +302,34 @@ test('a copy of a project has no baseline of its own: the source\'s project, pri
   const of = (id: string) => { const p = db.tables.PROJECT.rows.find((x) => x.proj_short_name === id)!; return [p.sum_base_proj_id, p._bl1, p._bl2, p._bl3].map((v) => v || ''); };
   assert.ok(of('P')[0] !== '' && of('P')[1] !== '', 'P keeps its two');
   assert.deepEqual(of('CP'), ['', '', '', '']);
+});
+
+// Three cases of the same family: what a file brings is matched to what is here, never set beside it, and nothing is left pointing at what was not brought.
+test('import: baselines keep their own project; update leaves one schedule-options row and one value per assignment code; a skipped assignment code takes its assignments with it', () => {
+  const build = (id: string): Db => {
+    const db: Db = { tables: {} };
+    const r = applyOps(db, [{ op: 'add_project', id, start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'assign_resource', activity: 'A', resource: 'R1', units_per_day: 8 },
+      { op: 'add_code_type', name: 'Kind', subject: 'assignment', values: [{ code: 'K1' }, { code: 'K2' }] }, { op: 'assign_code', type: 'Kind', value: 'K1', activity: 'A', resource: 'R1' }]);
+    assert.ok(r.ok, JSON.stringify(r.error));
+    return db;
+  };
+  // (1) a file with two projects and a baseline of each, imported into a file that already has a project: each baseline is still its own project's
+  const two = build('P');
+  assert.ok(applyOps(two, [{ op: 'add_project', id: 'Q', start: '2026-01-05' }, { op: 'add_activity', project: 'Q', id: 'B', name: 'B', duration_days: 5 }, { op: 'save_baseline', project: 'P', name: 'BLP' }, { op: 'save_baseline', project: 'Q', name: 'BLQ' }]).ok);
+  const file = readRaw(writeXer(two, { version: '18.8' }), 'xer').db, into = build('Z');
+  importIntoDb(into, file, defaultPlan(file));
+  const owner = (bl: string) => { const b = into.tables.PROJECT.rows.find((p) => p.proj_short_name === bl)!; return into.tables.PROJECT.rows.find((p) => p.proj_id === b._baseline_of)?.proj_short_name; };
+  assert.deepEqual([owner('BLP'), owner('BLQ')], ['P', 'Q']);
+  // (2) update of the project from a file that carries another value of the assignment code, twice: one value, one schedule-options row
+  const here = build('P'), src = readRaw(writeXer(build('P'), { version: '18.8' }), 'xer').db;
+  assert.ok(applyOps(here, [{ op: 'assign_code', type: 'Kind', value: 'K2', activity: 'A', resource: 'R1' }]).ok);
+  const pid = here.tables.PROJECT.rows[0].proj_id;
+  for (let i = 0; i < 2; i++) importIntoDb(here, src, { projects: [{ srcProjId: src.tables.PROJECT.rows[0].proj_id, action: 'update', targetProjId: pid }] });
+  assert.deepEqual([here.tables.ASGNMNTACAT.rows.length, here.tables.SCHEDOPTIONS.rows.length], [1, 1]);
+  assert.equal(here.tables.ASGNMNTCATVAL.rows.find((v) => v.asgnmnt_catg_id === here.tables.ASGNMNTACAT.rows[0].asgnmnt_catg_id)!.asgnmnt_catg_short_name, 'K1', 'updated to the file\'s value');
+  // (3) assignment codes not imported: the assignment comes without its code, nothing points at a code that is not there
+  const fresh: Db = { tables: {} };
+  assert.ok(applyOps(fresh, [{ op: 'add_project', id: 'Z', start: '2026-01-05' }]).ok);
+  importIntoDb(fresh, src, { ...defaultPlan(src), dict: { ASGNMNTCATTYPE: 'skip', ASGNMNTCATVAL: 'skip' } });
+  assert.deepEqual([fresh.tables.ASGNMNTCATTYPE?.rows.length ?? 0, fresh.tables.ASGNMNTCATVAL?.rows.length ?? 0, fresh.tables.ASGNMNTACAT?.rows.length ?? 0, fresh.tables.TASKRSRC.rows.length], [0, 0, 0, 1]);
 });

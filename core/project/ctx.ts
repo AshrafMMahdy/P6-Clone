@@ -1,7 +1,6 @@
 // Lookup maps built once over a database (indexes by key, predecessors/successors, baselines) and the
 // critical test. Shared by the desktop app, the AI assistant tools and the command-line tool.
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
-import { logicRelationships } from '../progress/snapshots.ts';
 
 /** Context computed once for column getters and lookups. */
 export interface Ctx<P = { hoursPerDay: number }> {
@@ -20,7 +19,7 @@ export interface Ctx<P = { hoursPerDay: number }> {
 
 export function makeCtx<P>(db: Db, prefs: P): Ctx<P> {
   const tasks = rows(db, 'TASK');
-  const baseline = new Map<string, Row>(), logic = logicRelationships(db);
+  const baseline = new Map<string, Row>();
   for (const p of rows(db, 'PROJECT')) {
     const bl = p.sum_base_proj_id && p.sum_base_proj_id !== p.proj_id ? p.sum_base_proj_id : '';
     if (!bl) continue;
@@ -33,8 +32,8 @@ export function makeCtx<P>(db: Db, prefs: P): Ctx<P> {
     cal: indexBy(rows(db, 'CALENDAR'), 'clndr_id'),
     rsrc: indexBy(rows(db, 'RSRC'), 'rsrc_id'),
     rsrcByTask: groupBy(rows(db, 'TASKRSRC'), 'task_id'),
-    predsOf: groupBy(logic, 'task_id'),
-    succsOf: groupBy(logic, 'pred_task_id'),
+    predsOf: groupBy(rows(db, 'TASKPRED'), 'task_id'),
+    succsOf: groupBy(rows(db, 'TASKPRED'), 'pred_task_id'),
     taskById: indexBy(tasks, 'task_id'),
     baseline,
     costByTask: groupBy(rows(db, 'PROJCOST'), 'task_id'),

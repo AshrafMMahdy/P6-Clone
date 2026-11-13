@@ -6,11 +6,10 @@ import { rows } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { makeCtx, isCritical } from '../project/ctx.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
-import { projectLoops } from '../xer/validate.ts';
+import { loopGroups, projectLoops } from '../xer/validate.ts';
 import { datesNotCurrent, loopStopsDates, NO_RESOURCE_ASSIGNED, notAssessed as notAssessedNote } from '../notes.ts';
 import { differentDatesNote } from '../analysis/scheduleLog.ts';
 import { constraintsOf, DCMA_HARD, dataDateAssumedNotes, dataDateGaps } from '../analysis/common.ts';
-import { logicRelationships } from '../progress/snapshots.ts';
 
 /** Out-of-sequence progress, the one rule: the activity has started while a finish-to-start predecessor has not finished. */
 export const startedBeforeFsPredecessor = (t: Row, ctx: Pick<ReturnType<typeof makeCtx>, 'predsOf' | 'taskById'>): boolean =>
@@ -31,7 +30,7 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   const dh = dayHours(db, hpd, !!opts.calendarDays); // 44 working days (of each activity's own calendar with calendarDays)
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const live = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
-  const P = logicRelationships(db).filter((r) => open.has(r.proj_id) || open.has(r.pred_proj_id));
+  const P = rows(db, 'TASKPRED').filter((r) => open.has(r.proj_id) || open.has(r.pred_proj_id));
   const name = (t: Row) => `${t.task_code} ${t.task_name}`;
   const checks: Check[] = [];
   const add = (id: string, title: string, list: Row[] | number, of: number, warnAt: number | null, failAt: number | null, limit: string, detail: string, examples: string[] = [], notAssessed = false) => {
@@ -75,9 +74,11 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   const inLoops = projectLoops(db).filter((l) => l.projIds.some((id) => open.has(id))).flatMap((l) => l.tasks.filter((t) => open.has(t.proj_id)));
   add('loops', 'Loops in the logic (P6 cannot calculate the schedule)', inLoops, tasks.length, null, 0, 'none', state.loops.map((l) => loopStopsDates(l.projs, l.loops)).join(' '));
   // saved dates: of the open activities that could be compared (those of a project a loop runs through cannot: with none left, the check is not assessed)
-  const noneJudged = state.judged === 0 && live.length > 0;
+  // (the dates sentence sends the reader to schedule, which calculates every project of the file: a loop in a project outside this review stops it, so it is said with it)
+  const elsewhere = loopGroups(db).filter((l) => !l.projIds.some((id) => open.has(id)));
+  const noneJudged = state.judged === 0 && (live.length > 0 || state.loops.length > 0);
   const why = state.loops.length ? 'a loop in the logic stops the calculation' : state.notStored.length ? 'the open activities have no calculated dates' : 'the schedule cannot be calculated';
-  add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), state.judged, 0, null, 'none', noneJudged ? notAssessedNote('Saved dates P6 would change on F9', why) : stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true)).join(' '), stale.flatMap((x) => x.examples.map((f) => f.message)), noneJudged);
+  add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), state.judged, 0, null, 'none', noneJudged ? notAssessedNote('Saved dates P6 would change on F9', why) : [...stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true)), ...(stale.length ? elsewhere.map((l) => loopStopsDates(l.projs, l.loops)) : [])].join(' '), stale.flatMap((x) => x.examples.map((f) => f.message)), noneJudged);
 
   const grade = checks.some((c) => c.grade === 'fail') ? 'fail' as const : checks.some((c) => c.grade === 'warn') ? 'warn' as const : 'pass' as const;
   return { grade, projects: projs.map((p) => p.proj_short_name), openActivities: live.length, relationships: P.length, checks };

@@ -201,7 +201,7 @@ test('21: each project has its own data date in the calculation; the answers sho
 test('23: a missing baseline is said the same way by every tool, naming the clone\'s own way', async () => {
   const h = await built('2026-01-05', [act('A', 5, { actual_start: '2026-01-05 08:00' }), act('B', 3), rel('A', 'B')]);
   await call('schedule', { handle: h, data_date: '2026-01-08' });
-  const reason = 'no baseline is assigned to P; assign one with edit assign_baseline';
+  const reason = 'no project baseline is assigned to P; assign one with edit assign_baseline';
   const d = await call('dcma_14', { handle: h });
   assert.ok(d.notes.includes(`Missed tasks and Baseline execution index (BEI) not assessed: ${reason}, or pass baseline.`), JSON.stringify(d.notes));
   assert.equal(d.checks.find((c: any) => c.id === 'missed_tasks').result, 'not_assessed');
@@ -273,10 +273,10 @@ test('32, 37: schedule_index says each reason once and without internal words', 
   await call('schedule', { handle: h });
   const si = await call('schedule_index', { handle: h });
   const text = JSON.stringify({ ...si, exported: undefined });
-  assert.equal(count(text, 'no baseline is assigned to P'), 1, 'the baseline reason is said once, in notes');
+  assert.equal(count(text, 'no project baseline is assigned to P'), 1, 'the baseline reason is said once, in notes');
   assert.doesNotMatch(text, /Bellator|the source|healthScore|scheduleRiskIndex|\.ts:\d/);
   assert.equal(si.method, undefined, 'the weights and the logic definitions are in the tool description');
-  assert.deepEqual(si.notes, ['Baseline drift risk not assessed: no baseline is assigned to P; assign one with edit assign_baseline, or pass baseline.', 'Resource risk not assessed: no resource is assigned to an activity.']);
+  assert.deepEqual(si.notes, ['Baseline drift risk not assessed: no project baseline is assigned to P; assign one with edit assign_baseline, or pass baseline.', 'Resource risk not assessed: no resource is assigned to an activity.']);
   assert.deepEqual(si.summary.risk.left_out, ['baseline_drift', 'resource']);
   const e = await call('new_project', { id: 'EMPTY', start: '2026-01-05' });
   const es = await call('schedule_index', { handle: e.handle });

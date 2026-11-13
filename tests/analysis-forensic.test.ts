@@ -326,7 +326,7 @@ test('variance: against another schedule (an as-planned schedule, an earlier upd
   // no baseline in the file: not assessed, with the reason (as dcma_14 words it)
   const nb = F.baselinePairs(scopeOf(B.cleanChain()));
   assert.equal(nb.result, 'not_assessed');
-  assert.match((nb as { note: string }).note, /^no baseline is assigned to CLEAN; assign one with edit assign_baseline, or pass baseline$/);
+  assert.match((nb as { note: string }).note, /^no project baseline is assigned to CLEAN; assign one with edit assign_baseline, or pass baseline$/);
   assert.equal(F.baselinePairs(s, 'bl2').result, 'not_assessed');
 });
 

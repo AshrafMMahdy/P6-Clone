@@ -31,6 +31,10 @@ const TASK_FIELDS: Record<string, { label: string; days?: boolean; number?: bool
   complete_pct_type: { label: 'Percent Complete Type' }, phys_complete_pct: { label: 'Physical % Complete' }, priority_type: { label: 'Leveling Priority' },
   expect_end_date: { label: 'Expected Finish' }, rsrc_id: { label: 'Primary Resource' },
   act_this_per_work_qty: { label: 'Actual This Period Labor Units', number: true }, act_this_per_equip_qty: { label: 'Actual This Period Nonlabor Units', number: true },
+  duration_type: { label: 'Duration Type' }, suspend_date: { label: 'Suspend Date' }, resume_date: { label: 'Resume Date' }, est_wt: { label: 'Est Weight', number: true },
+  target_work_qty: { label: 'Budgeted Labor Units', number: true }, remain_work_qty: { label: 'Remaining Labor Units', number: true }, act_work_qty: { label: 'Actual Labor Units', number: true },
+  target_equip_qty: { label: 'Budgeted Nonlabor Units', number: true }, remain_equip_qty: { label: 'Remaining Nonlabor Units', number: true }, act_equip_qty: { label: 'Actual Nonlabor Units', number: true },
+  auto_compute_act_flag: { label: 'Auto Compute Actuals' },
 };
 /** The fields of the other rows an edit can change, by the name P6 gives them (a column not here is named by its words). */
 const OTHER_FIELDS: Record<string, string> = {
@@ -204,7 +208,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
   const relName = (r: Obj): string => {
     const a = task(text(r.pred_task_id)) ?? gone.get(text(r.pred_task_id)), b = task(text(r.task_id)) ?? gone.get(text(r.task_id));
     const cross = !!a && !!b && a.proj_id !== b.proj_id;
-    const end = (t: Row | undefined) => (t ? `${taskName(t)}${cross && !projects.get(t.proj_id)?._baseline_of ? ` in ${projectId(t.proj_id)}` : ''}` : missing('activity'));
+    const end = (t: Row | undefined) => (t ? `${taskName(t)}${cross && !(projects.get(t.proj_id) ?? goneProjects.get(t.proj_id))?._baseline_of ? ` in ${projectId(t.proj_id)}` : ''}` : missing('activity'));
     return `${end(a)} ${text(r.pred_type || 'PR_FS').slice(3)} ${end(b)}`;
   };
   const inChangedProject = (r: Obj): boolean => {
@@ -267,12 +271,15 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       case 'RSRCROLE': return `${rsrcName(r.rsrc_id)} / ${roleId(r.role_id)}`;
       case 'ROLERATE': return `${roleId(r.role_id)}${text(r.start_date) !== '' ? ` (price from ${text(r.start_date).slice(0, 10)})` : ''}`;
       case 'THRSPARM': return text(r.thresh_parm_name);
+      case 'UMEASURE': return text(r.unit_abbrev || r.unit_name);
+      case 'COSTTYPE': return text(r.cost_type);
+      case 'PROJISSU': return text(r.issue_name);
       // a table no operation of edit names (reached by add_row, set_fields, delete_rows, which name the table themselves): the table and the row's key, as read_table shows them
       default: return `${tbl} ${KEYS[tbl] ? text(r[KEYS[tbl]]) : 'row'}`;
     }
   };
   /** An activity as the agent names it: its Activity ID, and the baseline it is a row of when it is one (an edit reaches a stored baseline's copy, e.g. replace_text). */
-  const taskName = (t: Obj): string => { const p = projects.get(text(t.proj_id)); return p?._baseline_of ? `${text(t.task_code)} in baseline ${p.proj_short_name}` : text(t.task_code); };
+  const taskName = (t: Obj): string => { const p = projects.get(text(t.proj_id)) ?? goneProjects.get(text(t.proj_id)); return p?._baseline_of ? `${text(t.task_code)} in baseline ${p.proj_short_name}` : text(t.task_code); };
   const code = (id: string) => { const t = task(id) ?? gone.get(id); return t ? taskName(t) : missing('activity'); };
   const rsrcName = (id: unknown) => named(resources.get(text(id)) ?? find('RSRC', 'rsrc_id', id), 'rsrc_short_name', 'resource');
   let priceRows: Map<string, number> | null = null;
@@ -288,6 +295,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     // the project's own line (its ID is the name of the row): the project, its schedule options, its root WBS node, its codes and its custom fields
     const itsOwn = kind === 'PROJECT' || kind === 'SCHEDOPTIONS' || kind === 'PROJPCAT' || (kind === 'PROJWBS' && o!.proj_node_flag === 'Y') || (kind === 'UDFVALUE' && find('UDFTYPE', 'udf_type_id', o!.udf_type_id)?.table_name === 'PROJECT');
     if (c.old === c.new) return; // (the file's text changed and the value did not: "450.00" to "450")
+    if (c.id === '' && typeof c.old === 'string') c = { ...c, id: c.old }; // (its name was emptied: it is named by the name it had)
     // a relationship between two projects names the project of each end: it belongs to both, and carries no project of its own
     const twoProjects = kind === 'TASKPRED' && ((a, b) => !!a && !!b && a.proj_id !== b.proj_id)(task(text(o!.pred_task_id)) ?? gone.get(text(o!.pred_task_id)), task(text(o!.task_id)) ?? gone.get(text(o!.task_id)));
     const ch = several && owner && c.project == null && !itsOwn && !twoProjects ? { id: c.id, project: text(owner.proj_short_name), field: c.field, old: c.old, new: c.new } : c;
@@ -374,6 +382,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       if (what !== 'added') return;
       // a project's first saved schedule options (the file held none): each option now saved is said, from nothing saved
       const labels = TABLE_FIELDS.SCHEDOPTIONS, words = TABLE_WORDS.SCHEDOPTIONS, id = projectId(r.proj_id);
+      datesAffected = true;
       if (text(r.sched_retained_logic) !== '' || text(r.sched_progress_override) !== '') out({ id, field: 'When scheduling progressed activities use', old: null, new: logicChoice(text(r.sched_retained_logic), text(r.sched_progress_override)) }, r);
       for (const [k, label] of Object.entries(labels)) { const v = text(r[k]); if (v !== '') out({ id, field: label, old: null, new: k === 'key_activity_for_multiple_longest_paths' ? code(v) : words[k] ? words[k](v) : NUMERIC.test(k) && Number.isFinite(Number(v)) ? Number(v) : v }, r); }
       return;
@@ -400,8 +409,11 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       if (added.has(r)) continue;
       const hpd = dh.task(r as Row);
       for (let i = 0; i < keys.length; i += 2) {
-        const k = keys[i] as string, f = TASK_FIELDS[k];
-        if (!f) continue;
+        const k = keys[i] as string, known = TASK_FIELDS[k];
+        // (not said: the file's own bookkeeping, and the dates and floats the scheduler writes — planned, early, late, remaining — which the sentence about saved dates speaks for)
+        if (!known && (k.startsWith('_') || BOOKKEEPING.test(k) || k === 'task_id' || /(_date\d?$|_float_hr_cnt$|^float_path|^driving_path|_flag$)/.test(k) && !/^(suspend|resume)_date$/.test(k) && !/^(auto_compute_act|lock_plan)_flag$/.test(k))) continue;
+        if (!known) unnamed.add(`TASK.${k}`);
+        const f = known ?? { label: humanize(k), number: NUMERIC.test(k) };
         const was = text(keys[i + 1]), now = text(r[k]);
         if (was === now) continue;
         if (k === 'proj_id' && !projects.has(was) && !goneProjects.has(was)) continue; // its project's internal number changed (said once, on the project): the activity has not moved
@@ -413,6 +425,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       if (added.has(r)) continue; // a relationship made by this edit is said as added
       for (let i = 0; i < keys.length; i += 2) {
         const k = keys[i] as string;
+        if (k === 'task_id' || k === 'pred_task_id') { const was = text(keys[i + 1]); if (was !== text(r[k])) { out({ id: relName(r), field: k === 'task_id' ? 'Successor' : 'Predecessor', old: code(was), new: code(text(r[k])) }, r); datesAffected = true; } continue; }
         if (k !== 'lag_hr_cnt' && k !== 'pred_type') continue;
         const was = text(keys[i + 1]), now = text(r[k]);
         if (was === now) continue;
@@ -436,9 +449,10 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       for (const k of cols) {
         const baselineSlot = tbl === 'PROJECT' ? BASELINE_SLOTS[k] : undefined;
         if (!labels?.[k] && BOOKKEEPING.test(k)) continue; // the file's own bookkeeping (who and when, generated keys): the operation's answer says what it did
-        const label = labels?.[k] ?? (tbl === 'PROJECT' || tbl === 'RSRC' || tbl === 'CALENDAR' || tbl === 'PROJWBS' || tbl === 'RSRCRATE' || tbl === 'TASKRSRC' || tbl === 'PROJCOST' ? OTHER_FIELDS[k] : undefined) ?? nameByKind(tbl, k) ?? undefined;
+        const label = (tbl === 'PROJECT' && k === 'proj_short_name' && r._baseline_of ? 'Baseline Name' : undefined) ?? labels?.[k] ?? (tbl === 'PROJECT' || tbl === 'RSRC' || tbl === 'CALENDAR' || tbl === 'PROJWBS' || tbl === 'RSRCRATE' || tbl === 'TASKRSRC' || tbl === 'PROJCOST' ? OTHER_FIELDS[k] : undefined) ?? nameByKind(tbl, k) ?? undefined;
         // the file's own bookkeeping, and the dates and floats the scheduler works out (a column P6 names for a person is never one of these)
-        if (!baselineSlot && !label && (k.startsWith('_') || BOOKKEEPING.test(k) || k === KEYS[tbl] || /(?:^|_)(?:early|late|total_float|free_float|reend|restart|rem_late|rem_early|scd_)/.test(k))) continue;
+        const restores = tbl === 'PROJECT' && (k === '_baseline_of' || k === 'orig_proj_id');
+        if (!baselineSlot && !label && !restores && (k.startsWith('_') || BOOKKEEPING.test(k) || k === KEYS[tbl] || /(?:^|_)(?:early|late|total_float|free_float|reend|restart|rem_late|rem_early|scd_)/.test(k))) continue;
         if (k === 'proj_id' && tbl !== 'PROJECT') continue; // rows follow their project's internal number: said once, on the project
         if (tbl === 'RSRCROLE' && /^(rsrc|role)_(short_)?name$/.test(k)) continue; // the copy of a resource's or a role's name the file keeps beside their pairing: said on the resource or the role
         const before = keys[keys.findIndex((x, n) => n % 2 === 0 && x === k) + 1];
@@ -447,13 +461,13 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         if (was === now && !(tbl === 'SCHEDOPTIONS' && (k === 'sched_retained_logic' || k === 'sched_progress_override'))) continue;
         // (a text that reads as nothing — an empty HTML body, blanks — is nothing: a change from nothing to nothing is not said)
         const seen = (v: FieldChange['old']): FieldChange['old'] => (typeof v === 'string' && v.trim() === '' ? null : v);
-        const say = (field: string, old: FieldChange['old'], nw: FieldChange['new']) => { const o = seen(old), n = seen(nw); if (o == null && n == null) return; out({ id, field, old: o, new: n }, r); };
+        const say = (field: string, old: FieldChange['old'], nw: FieldChange['new']) => { const o = seen(old), n = seen(nw); if ((o ?? 0) === 0 && (n ?? 0) === 0) return; /* (nothing, and a number from nothing to 0) */ out({ id, field, old: o, new: n }, r); };
         if (baselineSlot) { const bl = (v: string) => (v === '' ? null : projectId(v, 'baseline')); say(baselineSlot, bl(was), bl(now)); continue; }
         // a baseline restored: it is a project again (the file marks a baseline in two columns: both are this one change)
-        if (tbl === 'PROJECT' && (k === '_baseline_of' || k === 'orig_proj_id')) { if (!restoreSaid && was !== '' && now === '') { restoreSaid = true; say('baseline', `baseline of ${projectId(was)}`, 'restored as a project'); datesAffected = true; } continue; }
+        if (restores) { if (!restoreSaid && was !== '' && now === '') { restoreSaid = true; say('baseline', `baseline of ${projectId(was)}`, 'restored as a project'); datesAffected = true; } continue; }
         if (tbl === 'PROJECT' && k === 'proj_id') { say(labels![k], Number(was), Number(now)); continue; }
         if (k === 'critical_drtn_hr_cnt' && tbl === 'PROJECT') { const days = (v: string) => Math.round((Number(v || 0) / hoursPerDay) * 100) / 100; say('Critical activities: Total Float at or below (days)', days(was), days(now)); continue; }
-        if ((tbl === 'PROJECT' && /^(last_recalc_date|plan_start_date|plan_end_date)$/.test(k)) || (tbl === 'CALENDAR' && k === 'clndr_data')) datesAffected = true; // the data date, the planned start, Must Finish By and the work time of a calendar decide the dates F9 gives
+        if ((tbl === 'PROJECT' && /^(last_recalc_date|plan_start_date|plan_end_date)$/.test(k)) || (tbl === 'CALENDAR' && k === 'clndr_data') || (tbl === 'SCHEDOPTIONS' && /^sched_/.test(k))) datesAffected = true; // the data date, the planned start, Must Finish By and the work time of a calendar decide the dates F9 gives
         // P6's one option "When scheduling progressed activities use" is two columns in the file: said once, by its three choices, read as the scheduler reads them (optionsFor in cpm.ts)
         if (tbl === 'SCHEDOPTIONS' && (k === 'sched_retained_logic' || k === 'sched_progress_override')) {
           if (logicSaid) continue;
@@ -465,7 +479,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         if (tbl === 'SCHEDOPTIONS' && k === 'key_activity_for_multiple_longest_paths') { say(labels![k], was === '' ? null : code(was), now === '' ? null : code(now)); continue; }
         if (assignment) {
           // every named value of the assignment that moved is said (the units a day and the totals that follow them alike: P6 shows each as its own column); its dates are the scheduler's
-          if (!label) continue;
+          if (/_date$/.test(k) && !label) continue;
           const t = task(text(r.task_id)), hpd = t ? dh.task(t) : hoursPerDay;
           const num2 = (v: string, f = 1) => (v === '' ? null : Math.round(Number(v) * f * 100) / 100);
           if (/_qty_per_hr$/.test(k)) { say(label, num2(was, hoursPerDay), num2(now, hoursPerDay)); continue; }

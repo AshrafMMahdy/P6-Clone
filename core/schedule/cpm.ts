@@ -8,7 +8,6 @@ import { WorkCalendar, CalendarHorizonError } from '../calendar/calendar.ts';
 import { calendarDefOfRow, hoursPerWeek, inheritExceptions, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
 import { inLoopCheck, loopsOfLinks } from '../xer/validate.ts';
 import { buildScheduleLog } from './log.ts';
-import { logicRelationships } from '../progress/snapshots.ts';
 import { actualAfterDataDate, cstrName, daysText, defaultCalendarWeek, loopNote, minutesToDays, namesText, noDataDateUsed, noDateNoStartInstead, noDateNoStartWrong, outOfSequence, plural, refused } from '../notes.ts';
 
 export type LogicMode = 'retained' | 'override' | 'actual';
@@ -257,7 +256,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
   // Relationships
   const rels: Rel[] = [];
-  for (const row of logicRelationships(db)) {
+  for (const row of rows(db, 'TASKPRED')) {
     const succ = acts.get(row.task_id) ?? null, pred = acts.get(row.pred_task_id) ?? null;
     if (!succ && !pred) continue;
     if (succ && pred && succ === pred) continue;
