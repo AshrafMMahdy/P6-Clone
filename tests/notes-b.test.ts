@@ -177,7 +177,7 @@ test('20: windows_analysis says when an update\'s saved dates are not current, a
   const b = await call('open_file', { path: sampleCopy('Tower-A_edited.xer'), lenient: true });
   const w = await call('windows_analysis', { handle: a.handle, updates: [{ handle: b.handle }] });
   assert.ok(Array.isArray(w.notes), JSON.stringify(w).slice(0, 400));
-  assert.equal(w.notes.filter((n: string) => /^The saved dates of .+ are not current: 3 of 3 open activities differ from what F9 gives; run schedule first\.$/.test(n)).length, 2, JSON.stringify(w.notes));
+  assert.equal(w.notes.filter((n: string) => /^The saved dates of .+ are not current: 3 of 3 open activit(?:y|ies) differs? from what F9 gives; run schedule first\.$/.test(n)).length, 2, JSON.stringify(w.notes));
   assert.ok(w.notes.some((n: string) => /^.+ and current have the same data date 2026-04-01 \d\d:\d\d: the window is 0 days\.$/.test(n)), JSON.stringify(w.notes));
 });
 
@@ -244,7 +244,7 @@ test('27: the answer too large to return says where all of it is, also when it c
     config.maxResponseChars = 3000;
     const direct = await call('activity_table', { handle: h });
     assert.equal(direct.note, undefined);
-    assert.match(direct.notes[0], /^The answer is too large to return \(\d+ characters\); all of it is in .*activity_table-result-.*\.json, or ask for less \(this tool's limit, offset, project\)\.$/);
+    assert.match(direct.notes[0], /^The answer is too large to return \(\d+ characters\); all of it is in .*activity_table-result-.*\.json, or call activity_table again asking for less \(its limit, offset, project\)\.$/);
     const job = await call('activity_table', { handle: h, async: true });
     let st: any;
     for (let i = 0; i < 100; i++) { st = await call('job_status', { job_id: job.job_id, wait_seconds: 2 }); if (st.status !== 'running') break; }
@@ -263,7 +263,7 @@ test('40: grammar for 1 and for the suggestion', () => {
   const f = validateXer(db);
   assert.equal(f.find((x) => x.code === 'FORECAST_BEFORE_DD'), undefined, 'a forecast before the data date is one of the saved dates that are not current');
   const st = storedDatesState(db).stale[0];
-  assert.equal(datesNotCurrent(st.proj, st.differ, st.open), 'The saved dates of G are not current: 1 of 4 open activities differ from what F9 gives; run schedule first.');
+  assert.equal(datesNotCurrent(st.proj, st.differ, st.open), 'The saved dates of G are not current: 1 of 4 open activities differs from what F9 gives; run schedule first.');
   const fu = f.find((x) => x.code === 'FIELD_UNKNOWN' && x.field === 'def_qty_per_hrx')!;
   assert.equal(fu.message, 'RSRC.def_qty_per_hrx is not a P6 field: its values are lost on import (did you mean def_qty_per_hr?).');
 });

@@ -230,7 +230,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
         total_cost: r2(direct - (o.indirectPerDay ?? 0) * days(finish, baseFinish!) - ld * (late(baseFinish!) - late(finish))),
       });
       if (needed(finish) <= 0.005) { stop = 'SUCCESS'; break; }
-      if (target == null && o.targetDays == null && steps.length >= 2 && steps.at(-1)!.total_cost > steps.at(-2)!.total_cost) { stop = 'PLATEAU'; break; }
+      if (target == null && o.targetDays == null && steps.length >= 2 && steps.at(-1)!.total_cost > steps.at(-2)!.total_cost) { stop = 'PLATEAU'; notes.push(`Stopped after step ${steps.length}: the total cost started rising, so crashing further costs more than it saves.`); break; }
     }
   }); } catch (e) { if (!(e instanceof ScheduleFailed)) throw e; return { ok: false as const, error: { code: 'schedule_failed', message: e.message } }; }
   rollback(j);

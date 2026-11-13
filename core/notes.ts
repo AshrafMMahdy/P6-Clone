@@ -120,7 +120,7 @@ export const droppedOnSave = (format: string, kinds: string[]): string => `Not w
 /** A calendar the file does not define. */
 export const defaultCalendarWeek = (name: string): string => `Calendar ${name} has no work week in the file: the default 5-day week (no holidays) is used.`;
 /** The saved dates are not current (a tool that reads them). */
-export const datesNotCurrent = (proj: string, differ: number, open: number): string => `The saved dates of ${proj} are not current: ${differ} of ${open} open activities differ from what F9 gives; run schedule first.`;
+export const datesNotCurrent = (proj: string, differ: number, open: number): string => `The saved dates of ${proj} are not current: ${differ} of ${open} open ${open === 1 ? 'activity' : 'activities'} ${differ === 1 ? 'differs' : 'differ'} from what F9 gives; run schedule first.`;
 /** A loop. */
 export const loopNote = (ids: string[]): string => `Loop: ${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
 /** Resources that are Material: a material is a quantity, not a crew, so its over-allocation is not judged. `ids` are Resource IDs. */

@@ -313,7 +313,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       delete rest.keptNote;
       const answer = { ...rest, ...(kept ? { resume: kept, note: rest.error ? `Stopped after ${rest.scenarios_done} of ${rest.scenarios_requested} scenarios (${String(rest.error).replace(/\.$/, '')}): the result covers those only.` : cancelledAfter(rest.scenarios_done as number, rest.scenarios_requested as number, 'scenarios', false) } : {}), ...(resumed ? { resumed_scenarios: resumed } : {}),
         // kept scenarios that did not check out (a power loss can leave zeros or old bytes), with every one after them: done again, said
-        ...(redone ? { redone_scenarios: redone } : {}), ...(redone || keptNote ? { notes: [...(redone ? [`${redone} kept scenario${redone === 1 ? '' : 's'} did not check out (damaged) and ${redone === 1 ? 'was' : 'were'} run again.`] : []), ...(keptNote ? [keptNote] : [])] } : {}),
+        ...(redone ? { redone_scenarios: redone } : {}), ...(redone || keptNote || rest.best == null ? { notes: [...(rest.best == null ? ['No scenario finishes earlier than the schedule as it stands.'] : []), ...(redone ? [`${redone} kept scenario${redone === 1 ? '' : 's'} did not check out (damaged) and ${redone === 1 ? 'was' : 'were'} run again.`] : []), ...(keptNote ? [keptNote] : [])] } : {}),
         // a finished batch removed its kept file: named, so a copy of it elsewhere (the platform's mirror of the outputs) goes too
         ...(!rest.partial && !keptNote && store.path ? { parts_removed: keptPlace(store.path) } : {}) };
       return files ? { ...answer, exported: files } : answer;

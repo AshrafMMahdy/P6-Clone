@@ -226,3 +226,47 @@ test('12b/c: review and schedule_health count the hard constraints of the DCMA s
   assert.equal(rv.checks.find((c: any) => c.id === 'hard_constraints').count, sh.hard_constraints.count, 'one definition: the DCMA types (Start On, Finish On, Start On or Before, Finish On or Before, Mandatory)');
   assert.equal(sh.hard_constraints.count, 2);
 });
+
+test('13: updates are named by Project ID and data date (never a handle or a temp path); validate names no internal id or table for an empty project; grammar of one', async () => {
+  const a = await built('2026-01-05', [act('A', 5), act('B', 3), rel('A', 'B')], 'UA');
+  const b = await built('2026-01-12', [act('A', 5), act('B', 3), rel('A', 'B')], 'UB');
+  await call('schedule', { handle: a }); await call('schedule', { handle: b });
+  const w = await call('windows_analysis', { handle: b, updates: [{ handle: a }] });
+  const names = (w.updates as { name: string }[]).map((u) => u.name);
+  assert.match(names[0], /^UA at data date 2026-01-05$/);
+  const noFiles = (x: any) => JSON.stringify({ ...x, exported: undefined }); // (the result files are named in `exported`, by design)
+  assert.doesNotMatch(noFiles(w), /h_[A-Za-z0-9_-]{6,}|\/tmp\/|p6-fix3/);
+  const path = join(W, 'upd.xer');
+  await call('save', { handle: a, path, overwrite: true });
+  const w2 = await call('windows_analysis', { handle: b, updates: [{ path }] });
+  assert.match((w2.updates as { name: string }[])[0].name, /^UA at data date 2026-01-05 \(upd\.xer\)$/);
+  assert.doesNotMatch(noFiles(w2), /\/tmp\/|p6-fix3/);
+  const ct = await call('change_tracking', { handle: b, updates: [{ handle: a }] });
+  assert.doesNotMatch(noFiles(ct), /h_[A-Za-z0-9_-]{6,}|\/tmp\/|p6-fix3/);
+  // an empty project: no table or column name, no false advice
+  const e = await call('new_project', { id: 'EMPTY', start: '2026-01-05' });
+  const v = await call('validate', { handle: e.handle });
+  const said = v.findings.map((f: any) => f.message).join(' ');
+  assert.doesNotMatch(said, /TASK|task_id|lenient/);
+  assert.match(said, /The project has no activities\./);
+  // one activity that differs of one open: grammar
+  const one = await built('2026-01-05', [act('A', 5)], 'ONE');
+  await call('schedule', { handle: one });
+  const ed = await call('edit', { handle: one, operations: [{ op: 'update_activity', id: 'A', duration_days: 9 }] });
+  assert.ok((ed.notes as string[]).includes('The saved dates of ONE are not current: 1 of 1 open activity differs from what F9 gives; run schedule first.'), JSON.stringify(ed.notes));
+});
+
+test('14: an unknown argument is told in the job result too; crash_schedule says why it stopped on cost; evaluate_batch says no scenario beats the schedule', async () => {
+  const h = await built('2026-01-05', [act('A', 5), act('B', 5), rel('A', 'B')], 'J');
+  const start = await call('level_resources', { handle: h, dry_run: true, async: true, nonsense: 1 });
+  assert.ok(start.job_id, JSON.stringify(start));
+  let st: any;
+  for (let i = 0; i < 50; i++) { st = await call('job_status', { job_id: start.job_id, wait_seconds: 1 }); if (st.status !== 'running') break; }
+  assert.ok((st.result?.notes ?? []).some((n: string) => /level_resources has no argument "nonsense"/.test(n)), JSON.stringify(st).slice(0, 600));
+  const c = await call('crash_schedule', { handle: h, indirect_cost_per_day: 1, activities: [{ id: 'A', min_days: 1, cost_per_day: 100 }, { id: 'B', min_days: 1, cost_per_day: 100 }] });
+  assert.ok(c.stop, JSON.stringify(c).slice(0, 300));
+  if (c.stop === 'PLATEAU') assert.ok(c.notes.some((n: string) => /^Stopped after step \d+: the total cost started rising/.test(n)), JSON.stringify(c.notes));
+  const b = await call('evaluate_batch', { handle: h, scenarios: [{ name: 'longer', overrides: [{ op: 'update_activity', id: 'A', duration_days: 9 }] }] });
+  assert.equal(b.best, null);
+  assert.ok((b.notes ?? []).includes('No scenario finishes earlier than the schedule as it stands.'), JSON.stringify(b.notes));
+});

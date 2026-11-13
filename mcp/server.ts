@@ -891,7 +891,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         return { saved: path, format: label, repaired: true, changes: repairs.changes.map((c) => ({ table: c.table, row: c.row, key: c.key, field: c.field, old: c.old, new: c.new, reason: c.reason })), changes_total: repairs.changes.length,
           // kept as the customer recorded them (P6 imports them), reported as DCMA's invalid dates
           invalid_dates: repairs.findings, check: { ...brief(g), still_rejected: still },
-          notes: [...notes, still ? `Repaired copy written, but P6 would still refuse it: ${namesText(g.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => x.message.replace(/\.$/, '')))}.` : `Repaired copy written: ${plural(repairs.changes.length, 'repair')} (changes lists them)${clearedActual ? `; ${plural(repairs.changes.filter((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '').length, 'actual date')} cleared: run schedule` : ''}.`] };
+          notes: [...notes, still ? `Repaired copy written, but P6 would still refuse it: ${namesText(g.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => withoutAdvice(x.message).replace(/\.$/, '')))}.` : (repairs.changes.length ? `Repaired copy written: ${plural(repairs.changes.length, 'repair')} (changes lists them)` : 'Copy written: the file needed no repair') + `${clearedActual ? `; ${plural(repairs.changes.filter((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '').length, 'actual date')} cleared: run schedule` : ''}.`] };
       }
       return { saved: path, format: label, ...(notes.length || p6found.length || stillFatal.length ? { notes: [...notes, ...(p6found.length || stillFatal.length ? [`${basename(path)} has ${plural(p6found.length + stillFatal.length, 'fault')} P6 refuses${s.openProblems ? ', already in the file when it was opened' : ''}: ${namesText([...p6found.map((x) => x.message), ...stillFatal].map((m) => withoutAdvice(m).replace(/\.$/, '')))}; save with repair: true fixes it.`] : [])] } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
@@ -1063,6 +1063,12 @@ function withArgumentsNotUsed(name: string, a: Record<string, any>, r: { out: un
   if (!unused.length) return r;
   return { ...r, out: { ...(r.out as object), notes: [...(Array.isArray((r.out as { notes?: unknown }).notes) ? (r.out as { notes: string[] }).notes : []), ...unused.map((k) => argumentNotUsed(name, k, known))] } };
 }
+/** The result of a job (what job_status gives when it is done) says the same: an argument the tool does not have was not used. */
+function jobResultWithArgumentsNotUsed(name: string, a: Record<string, any>, result: unknown): unknown {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+  const r = withArgumentsNotUsed(name, a, { out: result, isError: false });
+  return r.out;
+}
 async function callToolRun(name: string, a: Record<string, any>, sessionCaller?: string, signal?: AbortSignal, progress?: Ctx['progress']): Promise<{ out: unknown; isError: boolean }> {
   ensureCwd(); // (a folder the server was started in may be gone: workers and child processes read it when they start)
   // one abort for the call: the request's cancellation (notifications/cancelled) and cancel_job once it is a job
@@ -1115,14 +1121,14 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
   });
   const asJob = a.async === true && name !== 'job_status';
   try {
-    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; busy.job = job; return work(); }), abort); return { out: { job_id: job.id, status: 'running', notes: [stillWorking(job.id)] }, isError: false }; }
+    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; busy.job = job; return work(); }).then((res) => jobResultWithArgumentsNotUsed(name, a, res)), abort); return { out: { job_id: job.id, status: 'running', notes: [stillWorking(job.id)] }, isError: false }; }
     const p = work();
     const timeout = Symbol('timeout');
     // (the timer is cleared once the call answers: left running, its promise held the race's result - the whole answer, a page of 500 rows - for the soft timeout, call after call)
     let soft: ReturnType<typeof setTimeout> | undefined;
     const r = await Promise.race([p, new Promise((res) => { soft = setTimeout(() => res(timeout), config.softTimeoutMs); soft.unref?.(); })]).finally(() => clearTimeout(soft));
     // (ctx.job too: the tool's progress goes to the job from now on, and a tool that names its job, render_4d's render_busy, finds it)
-    if (r === timeout) { const job = startJob(name, handle, p, abort); ctx.job = job; busy.job = job; return { out: { job_id: job.id, status: 'running', notes: [stillWorking(job.id)] }, isError: false }; }
+    if (r === timeout) { const job = startJob(name, handle, p.then((res) => jobResultWithArgumentsNotUsed(name, a, res)), abort); ctx.job = job; busy.job = job; return { out: { job_id: job.id, status: 'running', notes: [stillWorking(job.id)] }, isError: false }; }
     const o = r as { ok?: boolean; status?: string; error?: Record<string, unknown> } | null;
     // a refusal answered as data (ok: false), and a job that failed or was cancelled, are errors too
     const isError = !!(o && typeof o === 'object' && (o.ok === false || (name === 'job_status' && (o.status === 'failed' || o.status === 'cancelled') && !('result' in o))));

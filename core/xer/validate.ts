@@ -92,7 +92,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   const firstTask = new Map<string, Row>();
   for (const t of T.TASK?.rows ?? []) if (!firstTask.has(t.task_id)) firstTask.set(t.task_id, t);
   const actName = (t: Row) => `${t.task_code || '(no Activity ID)'}${manyProj ? ` (project ${projShort.get(t.proj_id) ?? t.proj_id})` : ''}`;
-  const act = (id: string) => { const t = firstTask.get(id); return t ? actName(t) : `(an activity that is not in the file, internal id ${id})`; };
+  const act = (id: string) => { const t = firstTask.get(id); return t ? actName(t) : '(an activity that is not in the file)'; };
   const dupTaskRows = new Set<Row>(); // TASK rows reported as a repeated key: not reported again as a repeated Activity ID
 
   // Header
@@ -113,9 +113,9 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
     }
     const kf = knownFields(t.name);
     const key = KEYS[t.name];
-    if (key && kf.has(key) && !t.fields.includes(key)) {
+    if (key && kf.has(key) && !t.fields.includes(key) && t.rows.length) { // (a table with no rows has no ids to lack: an empty project is only said to have none)
       const s = suggest(key, t.fields);
-      c.add({ severity: 'fatal', code: 'MISSING_KEY_FIELD', table: t.name, field: key, message: `${t.name} has no ${key} column${s ? ` (found "${s}")` : ''}: P6 refuses the file; open_file lenient: true repairs it.`, p6: '' });
+      c.add({ severity: 'fatal', code: 'MISSING_KEY_FIELD', table: t.name, field: key, message: `The ${wordOf(t.name)} rows have no unique id column${s ? ` (found "${s}" instead)` : ''}: P6 refuses the file; open_file lenient: true repairs it.`, p6: '' });
     }
     for (const f of t.fields) {
       if (kf.size && !kf.has(f) && !f.startsWith('_')) { // _fields are the clone's own, never written to a file
@@ -140,8 +140,8 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
           const same = sameRow(seen.get(k)!, r);
           if (t.name === 'TASK') dupTaskRows.add(r);
           c.add({ severity: 'fatal', code: 'DUP_KEY', table: t.name, row, key: k, field: key, message: t.name === 'TASK'
-            ? (same ? `Activity ${actName(r)} appears twice in TASK (row ${seen.get(k) ? rowOf.get(seen.get(k)!) : '?'} and row ${row}): P6 refuses the file; save with repair: true removes the identical copy.` : `Activity ${actName(r)} appears twice in TASK (row ${seen.get(k) ? rowOf.get(seen.get(k)!) : '?'} and row ${row}) with different contents: P6 refuses the file; save with repair: true gives this one a new key when its Activity ID tells the two apart.`)
-            : `${wordOf(t.name)} ${k} appears twice in ${t.name} (row ${seen.get(k) ? rowOf.get(seen.get(k)!) : '?'} and row ${row}): P6 refuses the file; save with repair: true ${same ? 'removes the identical copy' : 'gives the second a new key when nothing points at it'}.`, p6: 'P6 import fails with a unique constraint error.' });
+            ? (same ? `Activity ${actName(r)} appears twice in the file (rows ${seen.get(k) ? rowOf.get(seen.get(k)!) : '?'} and ${row}): P6 refuses the file; save with repair: true removes the identical copy.` : `Activity ${actName(r)} appears twice in the file (rows ${seen.get(k) ? rowOf.get(seen.get(k)!) : '?'} and ${row}) with different contents: P6 refuses the file; save with repair: true gives this one a new key when its Activity ID tells the two apart.`)
+            : `${wordOf(t.name)} ${k} appears twice in the file (rows ${seen.get(k) ? rowOf.get(seen.get(k)!) : '?'} and ${row}): P6 refuses the file; save with repair: true ${same ? 'removes the identical copy' : 'gives the second a new key when nothing points at it'}.`, p6: 'P6 import fails with a unique constraint error.' });
         } else { seen.set(k, r); rowOf.set(r, row); }
       }
       for (const { f, max, en, ty } of cols) {
@@ -189,7 +189,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
     const what = `${wordOf(target)}${targetKept ? '' : ' (the file has no such table)'}`;
     if (table === 'TASKPRED') {
       const other = f === 'pred_task_id' ? `the successor ${act(r.task_id)}` : `the predecessor ${act(r.pred_task_id)}`;
-      if (f === 'pred_task_id' || f === 'task_id') return `A relationship of ${other} points at an activity that is not in the file (internal id ${v}). ${f === 'task_id' ? 'save {repair: true} removes it.' : 'It is kept as an external link; edit delete_relationship removes it once the activity is known.'}`;
+      if (f === 'pred_task_id' || f === 'task_id') return `A relationship of ${other} points at an activity that is not in the file. ${f === 'task_id' ? 'save {repair: true} removes it.' : 'It is kept as an external link; edit delete_relationship removes it once the activity is known.'}`;
     }
     const owner = table === 'TASK' ? `Activity ${actName(r)}` : `A ${wordOf(table)}${r[KEYS[table]] ? ` (id ${r[KEYS[table]]})` : ''}`;
     return `${owner} points at a ${what} that is not in the file (${f.replace(/_id$/, '').replace(/_/g, ' ')} id ${v}).${table === 'TASK' ? '' : ''}`;
@@ -198,7 +198,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   // Project structure
   const projects = T.PROJECT?.rows ?? [];
   if (!projects.length) c.add({ severity: 'fatal', code: 'NO_PROJECT', message: 'No PROJECT rows.', p6: 'P6 finds no project to import.' });
-  if (!T.TASK?.rows.length) c.add({ severity: 'warning', code: 'NO_TASK', message: 'No TASK rows.', p6: 'P6 imports an empty project.' });
+  if (!T.TASK?.rows.length) c.add({ severity: 'warning', code: 'NO_TASK', message: 'The project has no activities.', p6: 'P6 imports an empty project.' });
   const wbs = T.PROJWBS?.rows ?? [];
   for (const p of projects) {
     const nodes = wbs.filter((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y');

@@ -98,7 +98,7 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
   const anyBaseline = [...bls.values()].some(Boolean);
   const global: { dimension: Dim; weight: number; reason: string }[] = [
     ...(!hasResources ? [{ dimension: 'resources' as Dim, weight: WEIGHTS.resources, reason: 'the file has no resource assignments' }] : []),
-    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which) }] : []),
+    ...(!anyBaseline ? [{ dimension: 'forecast_stability' as Dim, weight: WEIGHTS.forecast_stability, reason: baselineReason(projectsText(s.projs.map((p) => p.proj_short_name)), true, which) }] : []),
     ...(loops.length ? [{ dimension: 'float' as Dim, weight: WEIGHTS.float, reason: loopNote(loops.flatMap((l) => l.activities)).replace(/^Loop: /, '').replace(/\.$/, '') }] : []),
   ];
   const off = new Set(global.map((g) => g.dimension));
