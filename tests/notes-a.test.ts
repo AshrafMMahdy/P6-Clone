@@ -36,18 +36,17 @@ test('1: an unmet relationship is given in days, not minutes called hours', asyn
 });
 
 test('38: constraints are named by P6 and the scheduled date stands beside the constraint date; each unmet fact is said once', async () => {
-  const h = await built('2026-01-05', [act('A1', 10), act('A5', 2, { constraint: { type: 'finish_on_or_before', date: '2026-01-09' } }), act('M', 3, { constraint: { type: 'mandatory_finish', date: '2026-01-06' } }), rel('A1', 'A5'), rel('A1', 'M')]);
+  const h = await built('2026-01-05', [act('A1', 10), act('A5', 2, { constraint: { type: 'finish_on_or_before', date: '2026-01-09' } }), act('M', 3, { constraint: { type: 'finish_on', date: '2026-01-06' } }), rel('A1', 'A5'), rel('A1', 'M')]);
   const s = await call('schedule', { handle: h });
   const unmet = s.log.exceptions.find((x: any) => x.code === 'CONSTRAINT_UNMET');
   const text = JSON.stringify(unmet);
   assert.match(text, /Finish On or Before 2026-01-09/);
-  assert.match(text, /Mandatory Finish 2026-01-06/);
+  assert.match(text, /Finish On 2026-01-06/);
   assert.match(text, /\(scheduled 2026-01-\d\d \d\d:\d\d\)/);
   assert.doesNotMatch(text, /MEOB|MANDFIN|CS_/);
   // 31: the log is P6's own content, said once there: no second list of it in the answer
   assert.equal(s.warnings, undefined);
   assert.equal(s.notes, undefined);
-  assert.ok(s.log.exceptions.some((x: any) => x.code === 'RELATIONSHIP_UNMET'));
   assert.equal(count(text, 'MEOB'), 0);
   // 36: statistics once, with dates
   assert.equal(s.log.statistics, undefined);

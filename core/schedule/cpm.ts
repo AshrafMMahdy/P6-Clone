@@ -1,4 +1,5 @@
 // P6-style CPM scheduler (F9). Works on raw TASK/TASKPRED rows and writes dates back.
+import { laterInWork } from './constraints.ts';
 import { computeFloatPaths, writeFloatPaths } from './floatPaths.ts';
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, memo, parseP6Date, MIN_PER_DAY } from '../dates.ts';
@@ -744,8 +745,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     if (a.status === 'IP') for (const r of a.preds) if (r.pred && r.type === 'FS' && r.pred.status !== 'CO') findings.push({ severity: 'warning', code: 'OUT_OF_SEQUENCE', key: a.code, message: outOfSequence(a.code, r.pred.code), p6: 'Listed in the schedule log under "Out of sequence activities".' });
     if (a.tf != null && a.tf < 0) { const d = minutesToDays(a.tf, a.fcal.hoursPerDay()); findings.push({ severity: 'info', code: 'NEGATIVE_FLOAT', key: a.code, message: `${a.code} has ${d === 0 ? 'negative total float of less than 0.01 day' : `${daysText(d)} of total float`}.`, p6: 'P6 schedules it with negative float (constraint or Must Finish By violated).' }); }
     for (const [ty, c] of cstr(a)) {
-      if ((ty === 'CS_MSO' || ty === 'CS_MSOB') && a.es > c) findings.push({ severity: 'warning', code: 'CONSTRAINT_VIOLATED', key: a.code, message: `${a.code}: ${cstrName(ty)} ${formatP6Date(c).slice(0, 16)} is not met (scheduled start ${formatP6Date(a.es).slice(0, 16)}).`, p6: 'Listed in the schedule log under "Constraints violated".' });
-      if ((ty === 'CS_MEO' || ty === 'CS_MEOB') && a.ef > c) findings.push({ severity: 'warning', code: 'CONSTRAINT_VIOLATED', key: a.code, message: `${a.code}: ${cstrName(ty)} ${formatP6Date(c).slice(0, 16)} is not met (scheduled finish ${formatP6Date(a.ef).slice(0, 16)}).`, p6: 'Listed in the schedule log under "Constraints violated".' });
+      if ((ty === 'CS_MSO' || ty === 'CS_MSOB') && laterInWork(a.cal, a.es, c)) findings.push({ severity: 'warning', code: 'CONSTRAINT_VIOLATED', key: a.code, message: `${a.code}: ${cstrName(ty)} ${formatP6Date(c).slice(0, 16)} is not met (scheduled start ${formatP6Date(a.es).slice(0, 16)}).`, p6: 'Listed in the schedule log under "Constraints violated".' });
+      if ((ty === 'CS_MEO' || ty === 'CS_MEOB') && laterInWork(a.cal, a.ef, c)) findings.push({ severity: 'warning', code: 'CONSTRAINT_VIOLATED', key: a.code, message: `${a.code}: ${cstrName(ty)} ${formatP6Date(c).slice(0, 16)} is not met (scheduled finish ${formatP6Date(a.ef).slice(0, 16)}).`, p6: 'Listed in the schedule log under "Constraints violated".' });
     }
     if (a.as != null && a.as > a.proj.dd || a.af != null && a.af > a.proj.dd) findings.push(actualAfterDd(a, ddText(a)));
   }

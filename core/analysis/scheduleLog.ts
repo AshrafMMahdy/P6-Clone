@@ -6,7 +6,8 @@ import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import type { Finding } from '../findings.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
-import { relationshipFloat, type ScheduleResult } from '../schedule/cpm.ts';
+import { calendarResolver, relationshipFloat, type ScheduleResult } from '../schedule/cpm.ts';
+import { constraintNotMet } from '../schedule/constraints.ts';
 import { dayHours } from '../project/units.ts';
 import { cstrName, daysText, differentDataDates, duplicateRow, LISTED, listCut } from '../notes.ts';
 
@@ -28,7 +29,7 @@ const FROM_F9: [string, string, 'errors' | 'warnings' | 'exceptions'][] = [
 ];
 
 /** Sections P6 prints that are computed from the scheduled dates (shared by the MCP log and the desktop Schedule Log). */
-export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { warnings: LogSection[]; exceptions: LogSection[] } {
+export function extraLogSections(db: Db, projIds: string[], maxIds = 100, leftOut: Row[] = []): { warnings: LogSection[]; exceptions: LogSection[] } {
   const open = new Set(projIds);
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const ctx = makeCtx(db, { hoursPerDay: 8 });
@@ -51,24 +52,22 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
 
   // constraints not met by the scheduled dates (every type), and relationships the dates do not satisfy
   const unmet: { t: Row; detail: string }[] = [];
+  const cals = calendarResolver(db, []), projs = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p]));
+  const calOf = (t: Row) => cals.get(t.clndr_id) ?? cals.fallback(projs.get(t.proj_id)?.clndr_id);
   for (const t of tasks) {
     if (t.act_end_date) continue;
     const es = parseP6Date(t.act_start_date || t.restart_date || t.early_start_date), ef = parseP6Date(t.reend_date || t.early_end_date);
     for (const [ty, d] of [[t.cstr_type, t.cstr_date], [t.cstr_type2, t.cstr_date2]] as const) {
       const c = parseP6Date(d);
       if (!ty || c == null) continue;
-      const bad = (ty === 'CS_MSO' || ty === 'CS_MANDSTART') ? es != null && es !== c && !t.act_start_date
-        : ty === 'CS_MSOB' ? es != null && es > c && !t.act_start_date
-        : ty === 'CS_MSOA' ? es != null && es < c && !t.act_start_date
-        : (ty === 'CS_MEO' || ty === 'CS_MANDFIN') ? ef != null && ef !== c
-        : ty === 'CS_MEOB' ? ef != null && ef > c
-        : ty === 'CS_MEOA' ? ef != null && ef < c : false;
+      const cal = calOf(t), bad = constraintNotMet(cal, ty, c, START_TYPES.has(ty) && t.act_start_date ? null : es, ef);
       if (bad) { const onStart = START_TYPES.has(ty); unmet.push({ t, detail: `${t.task_code}: ${cstrName(ty)} ${formatP6Date(c).slice(0, 16)} is not met (scheduled ${formatP6Date((onStart ? es : ef)!).slice(0, 16)}).` }); }
     }
   }
   const unsatRel: { t: Row; detail: string }[] = [];
+  const gone = new Set(leftOut.map((x) => x.task_pred_id)); // a link left out to break a loop is not in the schedule: it is not unmet
   for (const r of rows(db, 'TASKPRED')) {
-    if (!open.has(r.proj_id)) continue;
+    if (!open.has(r.proj_id) || gone.has(r.task_pred_id)) continue;
     const ff = relFF(r);
     const t = ctx.taskById.get(r.task_id), p = ctx.taskById.get(r.pred_task_id);
     if (ff != null && ff < 0 && t && p && !t.act_end_date) unsatRel.push({ t, detail: `${p.task_code} ${(r.pred_type || 'PR_FS').slice(3)} ${t.task_code} is not met by ${daysText(Math.abs(Math.round((ff / 60 / dh.rel(r)) * 100) / 100))}.` });
@@ -87,7 +86,7 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
 }
 
 /** The whole log as data, from an F9 result. */
-export function scheduleLogReport(db: Db, projIds: string[], res: Pick<ScheduleResult, 'findings' | 'stats'>, maxIds = 100): ScheduleLogReport {
+export function scheduleLogReport(db: Db, projIds: string[], res: Pick<ScheduleResult, 'findings' | 'stats' | 'broken'>, maxIds = 100): ScheduleLogReport {
   const out: ScheduleLogReport = { statistics: res.stats, errors: [], warnings: [], exceptions: [] };
   const byCode = (code: string) => res.findings.filter((f: Finding) => f.code === code);
   const names = new Map(rows(db, 'TASK').filter((t) => projIds.includes(t.proj_id)).map((t) => [t.task_code, t.task_name]));
@@ -96,7 +95,7 @@ export function scheduleLogReport(db: Db, projIds: string[], res: Pick<ScheduleR
     if (!fs.length) continue;
     out[where].push({ code, title, count: fs.length, activities: (maxIds ? fs.slice(0, maxIds) : fs).map((f) => ({ id: f.key ?? '', name: names.get(f.key ?? '') ?? '', detail: f.message })) });
   }
-  const ex = extraLogSections(db, projIds, maxIds);
+  const ex = extraLogSections(db, projIds, maxIds, res.broken);
   out.warnings.push(...ex.warnings.filter((s) => s.count));
   out.exceptions.push(...ex.exceptions.filter((s) => s.count));
   return out;
@@ -119,25 +118,25 @@ export function extraLogText(db: Db, projIds: string[]): string {
 }
 
 /** The links the run left out to break loops, in one sentence (a loop the run did not break is in the log's errors). */
-export const loopLinksLeftOut = (links: string[]): string => `Left out of this schedule to break loops: ${links.join(', ')}; the saved logic is unchanged.`;
+export const loopLinksLeftOut = (links: string[], saves = true): string => `Left out of this schedule to break loops: ${links.join(', ')}${saves ? '; the saved logic is unchanged' : ''}.`;
 
 /** The notes of a `schedule` answer: what the run left out or replaced (a data date, a calendar, links that closed a loop). The log holds what P6's schedule log says (out of sequence, actuals after the
  *  data date, constraints and relationships not met, negative float): none of that is said twice. */
-export function scheduleNotes(res: Pick<ScheduleResult, 'findings'>, noDataDate = true): string[] {
+export function scheduleNotes(res: Pick<ScheduleResult, 'findings'>, noDataDate = true, saves = true): string[] {
   const out: string[] = [];
   for (const f of res.findings) if ((noDataDate && f.code === 'NO_DATA_DATE') || f.code === 'SCHED_CAL_INVALID') out.push(f.message);
   const broken = res.findings.filter((f) => f.code === 'SCHED_LOOP_BROKEN');
-  if (broken.length) out.push(loopLinksLeftOut(broken.map((f) => f.message)));
+  if (broken.length) out.push(loopLinksLeftOut(broken.map((f) => f.message), saves));
   return out;
 }
 
 /** compute_schedule has no log: its notes carry the schedule log's sentences in full, each once, then what the run left out or replaced. */
-export function computeNotes(db: Db, pid: string, res: Pick<ScheduleResult, 'findings'>): string[] {
+export function computeNotes(db: Db, pid: string, res: Pick<ScheduleResult, 'findings' | 'broken'>): string[] {
   const out: string[] = [];
   for (const f of res.findings) if (f.code === 'OUT_OF_SEQUENCE' || f.code === 'ACTUAL_AFTER_DD' || f.code === 'NEGATIVE_FLOAT') out.push(f.message);
-  const ex = extraLogSections(db, [pid], 0);
+  const ex = extraLogSections(db, [pid], 0, res.broken);
   for (const s of ex.exceptions) if (s.code === 'CONSTRAINT_UNMET' || s.code === 'RELATIONSHIP_UNMET') for (const a of s.activities) out.push(a.detail ?? '');
-  return [...out, ...scheduleNotes(res, false)];
+  return [...out, ...scheduleNotes(res, false, false)];
 }
 
 /** One note per Activity ID that two or more TASK rows of these projects carry (the scheduler and the counts take it once). `did`: what was done once ("scheduled", "counted"); at most LISTED sentences, then the cut. */
