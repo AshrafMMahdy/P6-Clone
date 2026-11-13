@@ -128,7 +128,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const notebook = (p: Row) => { const root = rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y'); return root ? rows(db, 'WBSMEMO').filter((m) => m.wbs_id === root.wbs_id).map((m) => ({ topic: topics.get(m.memo_type_id) ?? '', text: plain(m.wbs_memo) })) : []; };
       return {
         projects: projs.map((p) => { const nb = notebook(p); return { id: p.proj_short_name, name: projectName(db, p), data_date: d(p.last_recalc_date), planned_start: d(p.plan_start_date), must_finish_by: d(p.plan_end_date), scheduled_finish: d(p.scd_end_date), ...(nb.length ? { notebook: nb } : {}) }; }),
-        activities: tasks.length,
+        activities: tasks.length, not_started: count('TK_NotStart'), in_progress: count('TK_Active'), completed: count('TK_Complete'),
         ...(() => { const n = tidyNotes([...projs.filter((p) => parseP6Date(p.last_recalc_date) == null).map((p) => noDataDateWouldUse(p.proj_short_name, parseP6Date(p.plan_start_date) != null ? formatP6Date(parseP6Date(p.plan_start_date)!).slice(0, 16) : '(no planned start either)')), ...(tasks.length > new Set(tasks.map((t) => t.task_id)).size ? duplicateRowNotes(db, [...open], 'counted') : [])]); return n.length ? { notes: n } : {}; })(),
         critical: tasks.filter((t) => !t.act_end_date && isCritical(t, ctx)).length,
         negative_float: tasks.filter((t) => !t.act_end_date && Number(t.total_float_hr_cnt) < 0).length,

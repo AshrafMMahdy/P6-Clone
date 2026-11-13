@@ -85,7 +85,7 @@ export const FORENSIC_REGISTRY: ForensicTool[] = [
       const loaded = c.a.updates != null ? c.updates({ includeCurrent: true }) : null;
       try {
         const full = decm(c.s.db, { projIds: c.projIds, hoursPerDay: c.s.hpd, profile: c.a.profile, baseline, statusDate, updates: loaded?.updates });
-        const answer = { ...full, checks: full.checks.map((k) => ({ ...k, activities: c.first(k.activities) })) };
+        const answer = { ...full, checks: full.checks.map((k) => { const { note: _n, ...rest } = k; return { ...(config.screens ? k : rest), activities: c.first(k.activities) }; }) };
         return c.exported(answer, full, [
           { name: 'checks', columns: ['id', 'name', 'guideline', 'result', 'metric', 'unit', 'threshold_op', 'threshold_value', 'threshold_source', 'numerator', 'denominator', 'total_activities', 'note'], rows: full.checks.map(({ activities: _a, ...k }) => (k.threshold == null ? (({ threshold: _t, ...x }) => x)(k) : k)) },
           { name: 'failing_activities', columns: ['check', 'id', 'name', 'project', 'value'], rows: full.checks.flatMap((k) => k.activities.map((x) => ({ check: k.id, ...x }))) },

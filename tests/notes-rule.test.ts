@@ -49,8 +49,8 @@ function walk(tool: string, answer: any): Walked {
         w.problems.push(`${here}: field "${k}" is not a place for notes`);
         continue;
       }
-      if (ROW_KEYS.has(k) && typeof x === 'string' && !inRow && path !== '' && !/(^|\.)(summary|error)(\.|$)/.test(path)) { w.sentences.push(x); continue; }
-      if (ROW_KEYS.has(k) && typeof x === 'string' && inRow) { w.sentences.push(x); continue; }
+      if (ROW_KEYS.has(k) && typeof x === 'string' && !inRow && path !== '' && !/(^|\.)(summary|error)(\.|$)/.test(path)) { continue; }
+      if (ROW_KEYS.has(k) && typeof x === 'string' && inRow) { if (k === 'message' || k === 'detail') w.sentences.push(x); continue; }
       if (ROW_KEYS.has(k) && typeof x === 'string' && path === '' && !isRefusal) { w.problems.push(`${here}: a top-level "${k}" outside a refusal`); continue; }
       if (x && typeof x === 'object') visit(x, here, Array.isArray(x), o);
     }
