@@ -766,7 +766,8 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
   const baselines = (): [Row, string][] => get('PROJECT').flatMap((p) => rows(db, 'PROJECT').filter((x) => x._baseline_of === p.proj_id).map((b): [Row, string] => [b, p.proj_id]));
   // baselines of the exported projects, as P6 writes them with "export baselines"
   const all = (t: string) => rows(db, t);
-  topLevel.push(['Project', () => { for (const p of get('PROJECT')) projectXml('Project', p, get); }], ['BaselineProject', () => { for (const [b, orig] of baselines()) projectXml('BaselineProject', b, all, orig); }]);
+  const asBaseline = new Set(baselines().map(([b]) => b.proj_id)); // (written below as a BaselineProject of its project: not a second time as a Project)
+  topLevel.push(['Project', () => { for (const p of get('PROJECT')) if (!asBaseline.has(p.proj_id)) projectXml('Project', p, get); }], ['BaselineProject', () => { for (const [b, orig] of baselines()) projectXml('BaselineProject', b, all, orig); }]);
   const q = seqOf('APIBusinessObjects');
   for (const [, run] of topLevel.map((l, i) => [l, i] as const).sort((a, b) => ((q.get(a[0][0]) ?? 1e9) - (q.get(b[0][0]) ?? 1e9)) || a[1] - b[1]).map(([l]) => l)) run();
   out.push('</APIBusinessObjects>');

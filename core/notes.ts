@@ -181,6 +181,6 @@ export const stillWorking = (jobId: string): string => `Still working: call job_
 export const tooLarge = (chars: number, file: string | null, ask: string): string => file ? `The answer is too large to return (${chars} characters); all of it is in ${file}${ask}.` : `The answer is too large to return (${chars} characters) and could not be written to a file${ask}.`;
 /** A tool given an argument it does not have. */
 /** A field an edit operation does not have (or did not read in the state it ran in): the operation ran without it. */
-export const fieldNotUsed = (op: string, field: string): string => `${op} has no field "${field}"; the operation ran without it.`;
+export const fieldNotUsed = (op: string, field: string): string => `${op} did not use "${field}": it is not a field of the operation, or this case had no use for it.`;
 export const argumentNotUsed = (tool: string, arg: string, has: string[]): string => `${tool} has no argument "${arg}"; the call ran without it. Its arguments are: ${has.join(', ')}.`;
 

@@ -10,6 +10,7 @@ import { applyOps } from '../core/project/ops.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { readRaw } from '../renderer/io.ts';
+import { writeP6XmlTo } from '../core/xml/p6xml.ts';
 
 const load = (name: string) => parseXer(samples().find((s) => s.name === name)!.bytes).db;
 
@@ -266,7 +267,7 @@ test('a baseline never holds an activity of another project', () => {
   const blA = db.tables.TASK.rows.find((t) => t.task_code === 'A' && t.proj_id !== live()[0])!, b = db.tables.TASK.rows.find((t) => t.task_code === 'B')!;
   db.tables.TASKPRED.rows.push({ task_pred_id: '99', task_id: b.task_id, pred_task_id: blA.task_id, proj_id: b.proj_id, pred_proj_id: blA.proj_id, pred_type: 'PR_FS', lag_hr_cnt: '0' });
   const read = readRaw(writeXer(db, { version: '18.8' }), 'xer');
-  assert.deepEqual(read.findings.filter((f) => f.code === 'BASELINE_TIE_LEFT_OUT').map((f) => f.message), ['1 relationship between a baseline and another project was left out: a baseline is a snapshot of its own project and takes no part in the schedule.']);
+  assert.deepEqual(read.findings.filter((f) => f.code === 'BASELINE_TIE_LEFT_OUT').map((f) => f.message), ['1 relationship that ties a baseline to an activity outside it was left out (A in BL1 FS B in Q): a baseline is a snapshot of its own project and takes no part in the schedule.']);
   assert.deepEqual(read.db.tables.TASKPRED.rows.map((r) => r.task_pred_id), ['1']);
   // (a relationship between two current projects, and one inside a baseline, are untouched: the file read back holds the one tie of P and Q)
   assert.equal(readRaw(writeXer(read.db, { version: '18.8' }), 'xer').findings.filter((f) => f.code === 'BASELINE_TIE_LEFT_OUT').length, 0);
@@ -332,4 +333,36 @@ test('import: baselines keep their own project; update leaves one schedule-optio
   assert.ok(applyOps(fresh, [{ op: 'add_project', id: 'Z', start: '2026-01-05' }]).ok);
   importIntoDb(fresh, src, { ...defaultPlan(src), dict: { ASGNMNTCATTYPE: 'skip', ASGNMNTCATVAL: 'skip' } });
   assert.deepEqual([fresh.tables.ASGNMNTCATTYPE?.rows.length ?? 0, fresh.tables.ASGNMNTCATVAL?.rows.length ?? 0, fresh.tables.ASGNMNTACAT?.rows.length ?? 0, fresh.tables.TASKRSRC.rows.length], [0, 0, 0, 1]);
+});
+
+test('import: a project added into another keeps the target\'s schedule options; a project left out takes its own code values with it; rows the file gives no key are matched, not added again', () => {
+  // (1) add_into: the file's project becomes a WBS node of the target, whose schedule options stay its own
+  const mk = (id: string, logic: string): Db => { const db: Db = { tables: {} }; const r = applyOps(db, [{ op: 'add_project', id, start: '2026-01-05' }, { op: 'add_activity', id: `${id}1`, name: 'x', duration_days: 5 }, { op: 'set_schedule_options', logic }]); assert.ok(r.ok, JSON.stringify(r.error)); return db; };
+  const target = mk('T', 'retained'), src = mk('S', 'override');
+  const before = JSON.stringify(target.tables.SCHEDOPTIONS.rows);
+  importIntoDb(target, src, { projects: [{ srcProjId: src.tables.PROJECT.rows[0].proj_id, action: 'add_into', targetProjId: target.tables.PROJECT.rows[0].proj_id }] });
+  assert.equal(JSON.stringify(target.tables.SCHEDOPTIONS.rows), before);
+  assert.equal(target.tables.TASK.rows.length, 2);
+  // (2) Enppi: one of its two projects imported (the other left out), three times: no activity code value is left pointing at a code that was not brought
+  const enppi = load('Enppi.xer'), into = load('Enppi.xer'), loose = danglingRefs(into).length;
+  const [p1, p2] = enppi.tables.PROJECT.rows.map((p) => p.proj_id);
+  for (let i = 0; i < 3; i++) importIntoDb(into, enppi, { projects: [{ srcProjId: p1, action: 'update', targetProjId: p1 }, { srcProjId: p2, action: 'skip' }] });
+  assert.equal(danglingRefs(into).length, loose);
+  assert.equal(into.tables.ACTVCODE.rows.length, enppi.tables.ACTVCODE.rows.length);
+  // (3) Tower-A (a tool wrote it: its relationship rows have no key column P6 would write): updated from itself twice, it holds each relationship once
+  const tower = readRaw(samples().find((x) => x.name === 'Tower-A.xer')!.bytes, 'xer').db, again = readRaw(samples().find((x) => x.name === 'Tower-A.xer')!.bytes, 'xer').db;
+  const live = tower.tables.PROJECT.rows.find((p) => !p._baseline_of)!.proj_id, n = tower.tables.TASKPRED.rows.length;
+  for (let i = 0; i < 2; i++) importIntoDb(tower, again, { projects: again.tables.PROJECT.rows.map((p) => (p.proj_id === live ? { srcProjId: p.proj_id, action: 'update' as const, targetProjId: live } : { srcProjId: p.proj_id, action: 'skip' as const })) });
+  assert.equal(tower.tables.TASKPRED.rows.length, n);
+});
+
+test('P6 XML: a baseline is written once, and the file written opens', () => {
+  const db: Db = { tables: {} };
+  assert.ok(applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'save_baseline', name: 'BL1', assign_as: 'project' }]).ok);
+  const parts: string[] = []; writeP6XmlTo(db, {}, (c) => parts.push(c));
+  const xml = parts.join('');
+  assert.deepEqual([(xml.match(/<Project>/g) ?? []).length, (xml.match(/<BaselineProject>/g) ?? []).length], [1, 1]);
+  const back = readRaw(new TextEncoder().encode(xml), 'xml');
+  assert.deepEqual(back.findings.filter((f) => f.severity === 'fatal').map((f) => f.message), []);
+  assert.deepEqual(back.db.tables.PROJECT.rows.map((p) => [p.proj_short_name, !!p._baseline_of]), [['P', false], ['BL1', true]]);
 });

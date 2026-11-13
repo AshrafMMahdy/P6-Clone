@@ -32,6 +32,6 @@ export function readXerFile(path: string, encoding?: TextEncodingName | 'auto'):
   const r = parseXerFile(path, { encoding });
   markBaselines(r.db);
   const ties = dropBaselineTies(r.db);
-  if (ties.length) r.findings.push(baselineTiesFinding(ties.length));
+  if (ties.length) r.findings.push(baselineTiesFinding(r.db, ties));
   return r;
 }

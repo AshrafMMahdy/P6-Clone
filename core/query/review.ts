@@ -72,13 +72,13 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   // a loop in the logic: P6 cannot calculate the schedule (F9 stops), so a programme with one fails the review, each loop named
   const state = storedDatesState(db, [...open]), stale = state.stale;
   const inLoops = projectLoops(db).filter((l) => l.projIds.some((id) => open.has(id))).flatMap((l) => l.tasks.filter((t) => open.has(t.proj_id)));
-  add('loops', 'Loops in the logic (P6 cannot calculate the schedule)', inLoops, tasks.length, null, 0, 'none', state.loops.map((l) => loopStopsDates(l.projs, l.loops)).join(' '));
+  add('loops', 'Loops in the logic (P6 cannot calculate the schedule)', inLoops, tasks.length, null, 0, 'none', state.loops.map((l) => loopStopsDates(l.projs, l.loops)).join('\n'));
   // saved dates: of the open activities that could be compared (those of a project a loop runs through cannot: with none left, the check is not assessed)
   // (the dates sentence sends the reader to schedule, which calculates every project of the file: a loop in a project outside this review stops it, so it is said with it)
   const elsewhere = loopGroups(db).filter((l) => !l.projIds.some((id) => open.has(id)));
   const noneJudged = state.judged === 0 && (live.length > 0 || state.loops.length > 0);
   const why = state.loops.length ? 'a loop in the logic stops the calculation' : state.notStored.length ? 'the open activities have no calculated dates' : 'the schedule cannot be calculated';
-  add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), state.judged, 0, null, 'none', noneJudged ? notAssessedNote('Saved dates P6 would change on F9', why) : [...stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true)), ...(stale.length ? elsewhere.map((l) => loopStopsDates(l.projs, l.loops)) : [])].join(' '), stale.flatMap((x) => x.examples.map((f) => f.message)), noneJudged);
+  add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), state.judged, 0, null, 'none', noneJudged ? notAssessedNote('Saved dates P6 would change on F9', why) : [...stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true)), ...(stale.length ? elsewhere.map((l) => loopStopsDates(l.projs, l.loops)) : [])].join('\n'), stale.flatMap((x) => x.examples.map((f) => f.message)), noneJudged);
 
   const grade = checks.some((c) => c.grade === 'fail') ? 'fail' as const : checks.some((c) => c.grade === 'warn') ? 'warn' as const : 'pass' as const;
   return { grade, projects: projs.map((p) => p.proj_short_name), openActivities: live.length, relationships: P.length, checks };

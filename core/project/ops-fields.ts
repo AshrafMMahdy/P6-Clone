@@ -135,7 +135,8 @@ export function applyFields(db: Db, op: Op, h: OpHelpers): unknown {
   /** The rows of T a where (and project) picks; every row only with all: true. */
   const picked = (T: { name: string; fields: string[]; rows: Row[] }) => {
     const where = (op.where && typeof op.where === 'object' ? op.where : {}) as Record<string, unknown>;
-    if (!Object.keys(where).length && op.all !== true) fail('Give where (the rows to change), or all: true for every row of the table.');
+    const every = op.all === true; // (read in every case: all: false beside a where is a field the operation has)
+    if (!Object.keys(where).length && !every) fail('Give where (the rows to change), or all: true for every row of the table.');
     const F = realOf(T.fields);
     for (const f of Object.keys(where)) if (!F.includes(f)) fail(`where: no field "${f}" in ${T.name}.`);
     const { hidden, named } = baselines();

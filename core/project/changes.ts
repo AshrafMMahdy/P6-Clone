@@ -34,7 +34,7 @@ const TASK_FIELDS: Record<string, { label: string; days?: boolean; number?: bool
   duration_type: { label: 'Duration Type' }, suspend_date: { label: 'Suspend Date' }, resume_date: { label: 'Resume Date' }, est_wt: { label: 'Est Weight', number: true },
   target_work_qty: { label: 'Budgeted Labor Units', number: true }, remain_work_qty: { label: 'Remaining Labor Units', number: true }, act_work_qty: { label: 'Actual Labor Units', number: true },
   target_equip_qty: { label: 'Budgeted Nonlabor Units', number: true }, remain_equip_qty: { label: 'Remaining Nonlabor Units', number: true }, act_equip_qty: { label: 'Actual Nonlabor Units', number: true },
-  auto_compute_act_flag: { label: 'Auto Compute Actuals' },
+  auto_compute_act_flag: { label: 'Auto Compute Actuals' }, external_early_start_date: { label: 'External Early Start' }, external_late_end_date: { label: 'External Late Finish' },
 };
 /** The fields of the other rows an edit can change, by the name P6 gives them (a column not here is named by its words). */
 const OTHER_FIELDS: Record<string, string> = {
@@ -58,7 +58,7 @@ const TABLE_FIELDS: Record<string, Record<string, string>> = {
     key_activity_for_multiple_longest_paths: 'Display multiple float paths ending with activity',
   },
   PROJECT: { critical_path_type: 'Define critical activities as', _eps_id: 'EPS', clndr_id: 'Default Calendar', fintmpl_id: 'Financial Period Calendar', last_fin_dates_id: 'Last Financial Period Stored', proj_id: 'Internal project number', act_this_per_link_flag: 'Link actual to date and actual this period units and costs' },
-  TASKRSRC: { curv_id: 'Curve', cost_qty_link_flag: 'Calculate costs from units', target_cost: 'Budgeted Cost', act_reg_cost: 'Actual Regular Cost', act_ot_cost: 'Actual Overtime Cost', remain_cost: 'Remaining Cost', acct_id: 'Cost Account', role_id: 'Role',
+  TASKRSRC: { task_id: 'Activity', rsrc_id: 'Resource', curv_id: 'Curve', cost_qty_link_flag: 'Calculate costs from units', target_cost: 'Budgeted Cost', act_reg_cost: 'Actual Regular Cost', act_ot_cost: 'Actual Overtime Cost', remain_cost: 'Remaining Cost', acct_id: 'Cost Account', role_id: 'Role',
     target_qty: 'Budgeted Units', remain_qty: 'Remaining Units', act_reg_qty: 'Actual Regular Units', act_ot_qty: 'Actual Overtime Units', act_start_date: 'Actual Start', act_end_date: 'Actual Finish',
     target_qty_per_hr: 'Budgeted Units/Time (units a day)', remain_qty_per_hr: 'Remaining Units/Time (units a day)', target_lag_drtn_hr_cnt: 'Original Lag (days)', relag_drtn_hr_cnt: 'Remaining Lag (days)',
     target_drtn_hr_cnt: 'Original Duration (days)', remain_drtn_hr_cnt: 'Remaining Duration (days)', act_this_per_qty: 'Actual This Period Units', act_this_per_cost: 'Actual This Period Cost' },
@@ -135,6 +135,9 @@ const plainText = (html: string): string => html.replace(/<[^>]*>/g, ' ').replac
 /** The fields that decide the dates F9 gives: an edit of one leaves the saved dates not current. */
 const DATE_DRIVING = new Set(['target_drtn_hr_cnt', 'remain_drtn_hr_cnt', 'act_start_date', 'act_end_date', 'status_code', 'task_type', 'clndr_id', 'cstr_type', 'cstr_date', 'cstr_type2', 'cstr_date2', 'lag_hr_cnt', 'pred_type']);
 const text = (v: unknown): string => (v === ABSENT || v == null ? '' : String(v));
+/** The columns of an activity the scheduler writes (its dates, floats and float paths; the planned dates of work not started follow them). */
+const SCHEDULED = new Set(['early_start_date', 'early_end_date', 'late_start_date', 'late_end_date', 'restart_date', 'reend_date', 'rem_late_start_date', 'rem_late_end_date', 'target_start_date', 'target_end_date',
+  'total_float_hr_cnt', 'free_float_hr_cnt', 'float_path', 'float_path_order', 'driving_path_flag']);
 const OLE_DAY0 = 25569; // 1970-01-01 as an OLE serial day
 const dayText = (serial: number): string => new Date((serial - OLE_DAY0) * 86400000).toISOString().slice(0, 10);
 
@@ -157,9 +160,9 @@ function calendarChange(was: string, now: string): { field: string; old: string 
 }
 
 /** The changes a journal holds, and whether any of them can change the dates F9 gives. */
-export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes: FieldChange[]; datesAffected: boolean; /** columns named by their own words: no P6 name is recorded for them */ unnamed: string[] } {
+export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes: FieldChange[]; datesAffected: boolean; /** the edit emptied calculated dates of an activity (a raw edit): the answer then says which projects have none */ datesCleared: boolean; /** columns named by their own words: no P6 name is recorded for them */ unnamed: string[] } {
   const all: FieldChange[] = [], rowOfChange = new Map<FieldChange, unknown>();
-  let datesAffected = false;
+  let datesAffected = false, datesCleared = false;
   const dh = dayHours(db, hoursPerDay, true);
   const tasks = new Map<string, Row>();
   const task = (id: string) => { if (!tasks.size) for (const t of db.tables.TASK?.rows ?? []) tasks.set(t.task_id, t); return tasks.get(id); };
@@ -295,7 +298,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     // the project's own line (its ID is the name of the row): the project, its schedule options, its root WBS node, its codes and its custom fields
     const itsOwn = kind === 'PROJECT' || kind === 'SCHEDOPTIONS' || kind === 'PROJPCAT' || (kind === 'PROJWBS' && o!.proj_node_flag === 'Y') || (kind === 'UDFVALUE' && find('UDFTYPE', 'udf_type_id', o!.udf_type_id)?.table_name === 'PROJECT');
     if (c.old === c.new) return; // (the file's text changed and the value did not: "450.00" to "450")
-    if (c.id === '' && typeof c.old === 'string') c = { ...c, id: c.old }; // (its name was emptied: it is named by the name it had)
+    if (c.id === '') c = { ...c, id: 'a row with no name' };
     // a relationship between two projects names the project of each end: it belongs to both, and carries no project of its own
     const twoProjects = kind === 'TASKPRED' && ((a, b) => !!a && !!b && a.proj_id !== b.proj_id)(task(text(o!.pred_task_id)) ?? gone.get(text(o!.pred_task_id)), task(text(o!.task_id)) ?? gone.get(text(o!.task_id)));
     const ch = several && owner && c.project == null && !itsOwn && !twoProjects ? { id: c.id, project: text(owner.proj_short_name), field: c.field, old: c.old, new: c.new } : c;
@@ -410,15 +413,17 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
       const hpd = dh.task(r as Row);
       for (let i = 0; i < keys.length; i += 2) {
         const k = keys[i] as string, known = TASK_FIELDS[k];
-        // (not said: the file's own bookkeeping, and the dates and floats the scheduler writes — planned, early, late, remaining — which the sentence about saved dates speaks for)
-        if (!known && (k.startsWith('_') || BOOKKEEPING.test(k) || k === 'task_id' || /(_date\d?$|_float_hr_cnt$|^float_path|^driving_path|_flag$)/.test(k) && !/^(suspend|resume)_date$/.test(k) && !/^(auto_compute_act|lock_plan)_flag$/.test(k))) continue;
+        // (not said line by line: the dates and floats the scheduler writes. A change of one leaves the saved dates to be judged again, and the sentence about them speaks for it)
+        if (SCHEDULED.has(k)) { if (text(keys[i + 1]) !== text(r[k])) { datesAffected = true; if (text(r[k]) === '' && (k === 'early_start_date' || k === 'early_end_date')) datesCleared = true; } continue; }
+        if (!known && (k.startsWith('_') || BOOKKEEPING.test(k) || k === 'task_id')) continue;
         if (!known) unnamed.add(`TASK.${k}`);
         const f = known ?? { label: humanize(k), number: NUMERIC.test(k) };
         const was = text(keys[i + 1]), now = text(r[k]);
         if (was === now) continue;
+        if ((f.number || f.days) && Number(was || 0) === 0 && Number(now || 0) === 0) continue;
         if (k === 'proj_id' && !projects.has(was) && !goneProjects.has(was)) continue; // its project's internal number changed (said once, on the project): the activity has not moved
         const name = (v: string) => (v === '' ? null : f.number ? Number(v) : k === 'clndr_id' ? calendarName(v) : k === 'wbs_id' ? wbsCode(v) : k === 'rsrc_id' ? rsrcName(v) : k === 'proj_id' ? projectId(v) : wordOf(k, v));
-        out({ id: taskName(r), field: f.label, old: f.days ? (was === '' ? null : Math.round((Number(was) / hpd) * 100) / 100) : name(was), new: f.days ? Math.round((Number(now) / hpd) * 100) / 100 : name(now) }, r);
+        out({ id: k === 'task_code' && now === '' ? taskName({ ...r, task_code: was }) : taskName(r), field: f.label, old: f.days ? (was === '' ? null : Math.round((Number(was) / hpd) * 100) / 100) : name(was), new: f.days ? Math.round((Number(now) / hpd) * 100) / 100 : name(now) }, r);
         if (DATE_DRIVING.has(k)) datesAffected = true;
       }
     } else if (kindOf(r) === 'TASKPRED') {
@@ -461,7 +466,8 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         if (was === now && !(tbl === 'SCHEDOPTIONS' && (k === 'sched_retained_logic' || k === 'sched_progress_override'))) continue;
         // (a text that reads as nothing — an empty HTML body, blanks — is nothing: a change from nothing to nothing is not said)
         const seen = (v: FieldChange['old']): FieldChange['old'] => (typeof v === 'string' && v.trim() === '' ? null : v);
-        const say = (field: string, old: FieldChange['old'], nw: FieldChange['new']) => { const o = seen(old), n = seen(nw); if ((o ?? 0) === 0 && (n ?? 0) === 0) return; /* (nothing, and a number from nothing to 0) */ out({ id, field, old: o, new: n }, r); };
+        // (nothing to nothing is no change; nor is a quantity, a cost or a count between nothing and 0: P6 shows both as 0. A row whose name this change emptied is named by the name it had)
+        const say = (field: string, old: FieldChange['old'], nw: FieldChange['new']) => { const o = seen(old), n = seen(nw); if (o == null && n == null) return; if (NUMERIC.test(k) && (o ?? 0) === 0 && (n ?? 0) === 0) return; out({ id: id !== '' ? id : rate ? '' : rowId(tbl, { ...r, [k]: was }), field, old: o, new: n }, r); };
         if (baselineSlot) { const bl = (v: string) => (v === '' ? null : projectId(v, 'baseline')); say(baselineSlot, bl(was), bl(now)); continue; }
         // a baseline restored: it is a project again (the file marks a baseline in two columns: both are this one change)
         if (restores) { if (!restoreSaid && was !== '' && now === '') { restoreSaid = true; say('baseline', `baseline of ${projectId(was)}`, 'restored as a project'); datesAffected = true; } continue; }
@@ -497,7 +503,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         if (tbl === '_RISKEST' && /_hr$/.test(k)) { const t = task(text(r.task_id)); const hpd = t ? dh.task(t) : hoursPerDay; say(labels![k], was === '' ? null : Math.round((Number(was) / hpd) * 100) / 100, Math.round((Number(now) / hpd) * 100) / 100); continue; }
         const name = (v: string) => (v === '' ? null
           : k === 'clndr_id' || k === 'base_clndr_id' ? calendarName(v) : k === 'acct_id' || k === 'parent_acct_id' ? accountId(v) : k === 'curv_id' ? curveName(v) : k === 'role_id' || k === 'parent_role_id' ? roleId(v)
-          : k === 'rsrc_id' || k === 'parent_rsrc_id' ? rsrcName(v) : k === 'parent_wbs_id' ? wbsCode(v) : k === 'parent_eps_id' || k === '_eps_id' ? named(find('EPS', 'eps_id', v), 'eps_short_name', 'EPS') : k === 'parent_obs_id' ? named(find('OBS', 'obs_id', v), 'obs_name', 'OBS')
+          : k === 'rsrc_id' || k === 'parent_rsrc_id' ? rsrcName(v) : k === 'task_id' ? code(v) : k === 'parent_wbs_id' ? wbsCode(v) : k === 'parent_eps_id' || k === '_eps_id' ? named(find('EPS', 'eps_id', v), 'eps_short_name', 'EPS') : k === 'parent_obs_id' ? named(find('OBS', 'obs_id', v), 'obs_name', 'OBS')
           : k === 'fintmpl_id' ? named(find('FINTMPL', 'fintmpl_id', v), 'fintmpl_name', 'financial period calendar') : k === 'last_fin_dates_id' ? named(find('FINDATES', 'fin_dates_id', v), 'fin_dates_name', 'financial period')
           : words?.[k] ? words[k](v) : NUMERIC.test(k) && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : /(_descr|_notes)$/.test(k) && /<[a-zA-Z!\/][^>]*>/.test(v) ? plainText(v) || null : wordOf(k, v));
         if (label == null) unnamed.add(`${tbl || '?'}.${k}`);
@@ -520,5 +526,5 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
   }
   // each change once (the same row can be journalled twice, a resource's limit lives on the resource and on its price row)
   const seenChange = new Set<string>(), rowNo = new Map<unknown, number>();
-  return { changes: all.filter((c) => { const r0 = rowOfChange.get(c), r = r0 && typeof r0 === 'object' && ('rsrc_rate_id' in (r0 as Obj) || 'rsrc_short_name' in (r0 as Obj)) ? null : r0; /* a resource's limit lives on the resource and on its price row: one change */ let n = r == null ? 0 : rowNo.get(r); if (r != null && n == null) rowNo.set(r, (n = rowNo.size + 1)); const key = `${n}\u0000${c.id}\u0000${c.project ?? ''}\u0000${c.field}\u0000${c.old}\u0000${c.new}`; if (seenChange.has(key)) return false; seenChange.add(key); return true; }), datesAffected, unnamed: [...unnamed] };
+  return { changes: all.filter((c) => { const r0 = rowOfChange.get(c), r = r0 && typeof r0 === 'object' && ('rsrc_rate_id' in (r0 as Obj) || 'rsrc_short_name' in (r0 as Obj)) ? null : r0; /* a resource's limit lives on the resource and on its price row: one change */ let n = r == null ? 0 : rowNo.get(r); if (r != null && n == null) rowNo.set(r, (n = rowNo.size + 1)); const key = `${n}\u0000${c.id}\u0000${c.project ?? ''}\u0000${c.field}\u0000${c.old}\u0000${c.new}`; if (seenChange.has(key)) return false; seenChange.add(key); return true; }), datesAffected, datesCleared, unnamed: [...unnamed] };
 }

@@ -29,7 +29,7 @@ export interface OpsResult { ok: boolean; applied: number; results: unknown[]; w
  *  allowLoops: relationships that close a loop are added (compute_schedule breaks or reports them), else the edit is
  *  refused at the one that closed it. */
 export interface OpsOptions { hoursPerDay?: number; calendarDays?: boolean; allowLoops?: boolean }
-interface Batch { calDays: boolean; at?: number; added: { pred: string; succ: string; at: number }[] }
+interface Batch { calDays: boolean; at?: number; added: { pred: string; succ: string; at: number }[]; notUsed?: Set<string> }
 
 /** WBS elements by id, root (per project), lower-case path and short name: positions in the real rows, kept for the
  *  edit (db.ts tableCache; a code or parent changed in place: dropIndexes). */
@@ -135,13 +135,7 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
       for (at = 0; at < list.length; at++) {
         batch.at = at;
         // a calendar with no work time is a fact of the data, not a fault of the clone: named (while the change is still in place), with the way out
-        // a field the operation never read is one it does not have: said, never taken in silence (an operation given whole to another counts as read)
-        const given = list[at], read = new Set<PropertyKey>(['op']);
-        const seen = given && typeof given === 'object' && !Array.isArray(given) ? new Proxy(given as object, { get: (t, k, r) => { read.add(k); return Reflect.get(t, k, r); }, has: (t, k) => { read.add(k); return Reflect.has(t, k); }, ownKeys: (t) => { for (const k of Reflect.ownKeys(t)) read.add(k); return Reflect.ownKeys(t); } }) : given;
-        try {
-          results.push(apply(d, seen as Op, hpd, warnings, batch));
-          if (seen !== given) for (const k of Object.keys(given as object)) if (!read.has(k)) warnings.push(fieldNotUsed(String((given as Op).op), k));
-        }
+        try { results.push(apply(d, list[at] as Op, hpd, warnings, batch)); }
         catch (e) { if (e instanceof CalendarHorizonError && calendarsWithNoWork(d).length) fail(`Refused: ${noWorkTimeText(calendarsWithNoWork(d), d)}.`); throw e; }
       }
       // loops: checked once for the whole edit (a check per relationship made a 30,000-link load quadratic); the
@@ -178,7 +172,19 @@ export function expandSelects(db: Db, ops: unknown[]): unknown[] {
   return out;
 }
 
+/** One operation, and what it was given and did not read: said, never taken in silence (a field it does not have, or one the case had no use for).
+ *  An operation handed whole to another (a select, done activity by activity) counts as read; each of those is watched in its turn, and a field is said once. */
 function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): unknown {
+  if (!op || typeof op !== 'object' || Array.isArray(op)) return applyOne(db, op, hpd, warnings, batch);
+  const read = new Set<PropertyKey>(['op']);
+  const all = (t: object) => { for (const k of Reflect.ownKeys(t)) read.add(k); return Reflect.ownKeys(t); };
+  const out = applyOne(db, new Proxy(op, { get: (t, k, r) => { read.add(k); return Reflect.get(t, k, r); }, has: (t, k) => { read.add(k); return Reflect.has(t, k); }, ownKeys: all }) as Op, hpd, warnings, batch);
+  for (const k of Object.keys(op)) if (!read.has(k)) { const note = fieldNotUsed(String(op.op), k); if (!(batch.notUsed ??= new Set()).has(note)) { batch.notUsed.add(note); warnings.push(note); } }
+  return out;
+}
+/** (an operation that stops with nothing to act on has used none of its fields: that is said by its own sentence, not field by field) */
+const nothingToActOn = (op: Op): void => { void Object.keys(op); };
+function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): unknown {
   const calDays = batch.calDays;
   if (!op || typeof op !== 'object' || typeof op.op !== 'string') fail('Each operation needs an "op" name.');
   // in_baseline: the op works on a baseline named by "project" (renaming its activities, WBS and notebooks the way the
@@ -251,7 +257,8 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
   const sel: SelectHelpers = { fail, project, projects, wbsOf, resource };
   const projectId = (t: Row) => projects().find((p) => p.proj_id === t.proj_id)!.proj_short_name;
   /** The activities op.select picks; the op's own "project" limits them when the select names none. */
-  const selected = (dflt = 'id') => selectActivities(db, op.select && typeof op.select === 'object' && op.project != null && (op.select as Row).project == null ? { ...(op.select as object), project: op.project } : op.select, sel, dflt);
+  // (link_activities and renumber_activities take order_by on the operation, as their guide says; one given inside select is the same thing)
+  const selected = (dflt = 'id') => { const s0 = op.select && typeof op.select === 'object' && !Array.isArray(op.select) ? { ...(op.project != null && (op.select as Row).project == null ? { project: op.project } : {}), ...(op.order_by != null && (op.select as Row).order_by == null ? { order_by: op.order_by } : {}), ...(op.select as object) } : op.select; return selectActivities(db, s0, sel, dflt); };
 
   // (expandSelects: what a select picks, in its order, without changing anything)
   if (op.op === '_selected') return selected(String(op.order ?? 'id')).map((t) => t.task_id);
@@ -260,7 +267,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
     const key = SELECT_KEY[op.op] ?? fail(`select works with ${Object.keys(SELECT_KEY).join(', ')}, link_activities and renumber_activities.`);
     if (op[key] != null) fail(`Give ${key} or select, not both.`);
     const picked = selected();
-    if (!picked.length) { warnings.push(`${op.op}: select picked no activity; nothing changed.`); return { selected: 0 }; }
+    if (!picked.length) { nothingToActOn(op); warnings.push(`${op.op}: select picked no activity; nothing changed.`); return { selected: 0 }; }
     // deleting or dissolving them: once for them all (one pass over the tables, not one per activity)
     if (op.op === 'delete_activity') { deleteActivities(db, picked.map((t) => t.task_id)); return { selected: picked.length, deleted: picked.length }; }
     if (op.op === 'dissolve_activity') return { selected: picked.length, dissolved: picked.length, relationships_added: dissolveActivities(db, picked.map((t) => t.task_id)) };
@@ -355,6 +362,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
           def.week[i] = periods(v);
         }
       }
+      if (op.holidays != null && !Array.isArray(op.holidays)) fail('holidays must be a list of dates.');
       for (const h of (Array.isArray(op.holidays) ? op.holidays : [])) def.exceptions.set(ole(date(h, 'holidays[]')), []);
       for (const [k, v] of Object.entries((op.work_exceptions ?? {}) as Record<string, unknown>)) def.exceptions.set(ole(date(k, 'work_exceptions key')), periods(v));
       const C = table(db, 'CALENDAR');
@@ -431,6 +439,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       const have = relationshipsBetween(db, a.task_id, b.task_id);
       const dup = have.find((r) => r.pred_type === type) ?? (onePerPair(db, projects().find((p) => p.proj_id === b.proj_id)) ? have[0] : undefined);
       if (dup) {
+        nothingToActOn(op);
         warnings.push(dup.pred_type === type ? `Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: it already exists.`
           : `Relationship ${a.task_code} -> ${b.task_code} (${type.slice(3)}) skipped: ${a.task_code} -> ${b.task_code} already has a ${dup.pred_type.slice(3)} relationship, and Microsoft Project keeps one per pair of activities.`);
         return { skipped: `${a.task_code} ${type.slice(3)} ${b.task_code}`, existing: `${a.task_code} ${dup.pred_type.slice(3)} ${b.task_code}` };
@@ -510,7 +519,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       // P6's Link Activities: each selected activity to the next, in the layout's order (here order_by, default start)
       if (op.select == null) fail('link_activities needs select: the activities to link, in order.');
       const picked = selected('start');
-      if (picked.length < 2) { warnings.push(`link_activities: select picked ${picked.length} activit${picked.length === 1 ? 'y' : 'ies'}; nothing to link.`); return { selected: picked.length, linked: 0 }; }
+      if (picked.length < 2) { nothingToActOn(op); warnings.push(`link_activities: select picked ${picked.length} activit${picked.length === 1 ? 'y' : 'ies'}; nothing to link.`); return { selected: picked.length, linked: 0 }; }
       let linked = 0, skipped = 0;
       for (let i = 1; i < picked.length; i++) {
         const a = picked[i - 1], b = picked[i];
@@ -524,7 +533,7 @@ function apply(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch): u
       // the Suffix; defaults: the project's Activity ID numbering, else A1000 by 10)
       if (op.select == null) fail('renumber_activities needs select: the activities to renumber.');
       const picked = selected('id');
-      if (!picked.length) { warnings.push('renumber_activities: select picked no activity; nothing changed.'); return { selected: 0 }; }
+      if (!picked.length) { nothingToActOn(op); warnings.push('renumber_activities: select picked no activity; nothing changed.'); return { selected: 0 }; }
       const p = projects().find((x) => x.proj_id === picked[0].proj_id)!;
       const prefix = op.prefix != null ? String(op.prefix) : p.task_code_prefix || 'A';
       const start = op.start != null ? num(op.start, 'start') : Number(p.task_code_base) || 1000;

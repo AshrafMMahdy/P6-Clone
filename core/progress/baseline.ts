@@ -1,6 +1,7 @@
 // Project > Maintain Baselines: a baseline is a copy of the project stored as its own (hidden) project.
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
+import { namesText } from '../notes.ts';
 import { selectRows } from '../xer/write.ts';
 import { importIntoDb, deleteProject } from '../xer/import.ts';
 import { formatP6Date } from '../dates.ts';
@@ -67,8 +68,13 @@ export function dropBaselineTies(db: Db): Row[] {
   if (gone.length) T.rows = T.rows.filter((r) => !tie(r));
   return gone;
 }
-/** The reader's sentence for them. */
-export const baselineTiesFinding = (n: number): Finding => ({ severity: 'warning', code: 'BASELINE_TIE_LEFT_OUT', table: 'TASKPRED', message: `${n} ${n === 1 ? 'relationship' : 'relationships'} between a baseline and another project ${n === 1 ? 'was' : 'were'} left out: a baseline is a snapshot of its own project and takes no part in the schedule.`, p6: '' });
+/** The reader's sentence for them: how many, and which (by the list rule). */
+export function baselineTiesFinding(db: Db, ties: Row[]): Finding {
+  const proj = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name])), task = new Map(rows(db, 'TASK').map((t) => [t.task_id, t]));
+  const end = (id: string) => { const t = task.get(id); return t ? `${t.task_code} in ${proj.get(t.proj_id) ?? 'a project that is not in the file'}` : 'an activity that is not in the file'; };
+  const n = ties.length;
+  return { severity: 'warning', code: 'BASELINE_TIE_LEFT_OUT', table: 'TASKPRED', message: `${n} ${n === 1 ? 'relationship that ties' : 'relationships that tie'} a baseline to an activity outside it ${n === 1 ? 'was' : 'were'} left out (${namesText(ties.map((r) => `${end(r.pred_task_id)} ${(r.pred_type || 'PR_FS').slice(3)} ${end(r.task_id)}`))}): a baseline is a snapshot of its own project and takes no part in the schedule.`, p6: '' };
+}
 
 /** Baselines in an XER: P6 writes each as a PROJECT row whose orig_proj_id names the project it is a baseline of. */
 export function markBaselines(db: Db): void {

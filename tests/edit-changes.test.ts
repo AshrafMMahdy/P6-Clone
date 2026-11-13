@@ -175,7 +175,7 @@ test('every named operation confirms its change in P6’s words: no column name,
   assert.deepEqual(silent, ['set_schedule_options', 'clear_authors']);
   assert.ok(lines.length > 150, 'the checks below read real lines');
   // every field these operations were given is one they have: none is reported as not used
-  assert.deepEqual(answers.flatMap((e) => ((e.notes ?? []) as string[]).filter((n) => /has no field/.test(n))), []);
+  assert.deepEqual(answers.flatMap((e) => ((e.notes ?? []) as string[]).filter((n) => /did not use/.test(n))), []);
   assert.deepEqual(lines.filter((l) => /(: |-> )"\d+"( ->|$)/.test(l) && !/number|Number|Units|Cost|Price|Weight|Hours|days|Duration|Lag|%|Float|paths|Year|Sequence|Limit|Probability|Level/.test(l)), [], 'no bare internal number as a value');
   assert.deepEqual(lines.filter((l) => /^[a-z_]+: \[(\d+|[^\]]* \d{3,})?( @[^\]]*)?\]/.test(l) || /\[(|[^\]]* \/ )\]/.test(l)), [], 'no row named by an internal number, or by nothing');
   assert.deepEqual(lines.filter((l) => { const m = /: ("[^"]*"|[^" ]+) -> ("[^"]*"|[^" ]+)$/.exec(l); return !!m && m[1] === m[2]; }), [], 'no line says a value changed to itself');
@@ -331,7 +331,13 @@ test('a field an operation does not have is said, not taken in silence', async (
   const h = await project();
   const e = await call('edit', { handle: h, operations: [{ op: 'update_resource', id: 'R1', name: 'Crew 2', calendar: 'Six days', price_per_unit: 55 }] });
   assert.ok(!e.error, JSON.stringify(e.error));
-  assert.deepEqual((e.notes as string[]).filter((n) => /has no field/.test(n)), ['update_resource has no field "calendar"; the operation ran without it.', 'update_resource has no field "price_per_unit"; the operation ran without it.']);
+  assert.deepEqual((e.notes as string[]).filter((n) => /did not use/.test(n)), ['update_resource did not use "calendar": it is not a field of the operation, or this case had no use for it.', 'update_resource did not use "price_per_unit": it is not a field of the operation, or this case had no use for it.']);
+  // through a select the same field is said, once for all the activities; an operation with nothing to act on says that, and not field by field
+  const s2 = await call('edit', { handle: h, operations: [{ op: 'update_activity', select: { ids: ['A', 'B'] }, name: 'N', bogus: 1 }, { op: 'update_activity', select: { where: { task_name: 'no such name' } }, name: 'x' }] });
+  assert.deepEqual((s2.notes as string[]).filter((n) => /did not use|picked no/.test(n)), ['update_activity did not use "bogus": it is not a field of the operation, or this case had no use for it.', 'update_activity: select picked no activity; nothing changed.']);
+  // link_activities takes order_by on the operation (its guide says so): the order asked for is the order linked
+  const l = await call('edit', { handle: h, operations: [{ op: 'link_activities', select: { ids: ['A', 'B', 'C'] }, order_by: 'id', type: 'SS' }] });
+  assert.deepEqual(((l.notes ?? []) as string[]).filter((n) => /did not use/.test(n)), []);
   assert.deepEqual(e.changes.map((c: any) => [c.id, c.field, c.new]), [['R1', 'Resource Name', 'Crew 2']]);
 });
 

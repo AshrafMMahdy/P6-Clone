@@ -70,6 +70,7 @@ const NATURAL: Record<string, (r: Row) => string> = {
   ASGNMNTACAT: (r) => `${r.taskrsrc_id}|${r.asgnmnt_catg_type_id}`, // one value per code per assignment
   SCHEDOPTIONS: () => 'the project\u2019s schedule options', // one row per project
 };
+const an = (noun: string): string => `${/^[aeiou]/i.test(noun) ? 'An' : 'A'} ${noun}`;
 /** Shared rows without a key of their own that are ONE value of a resource (or a role): how the value is recognised in the target. */
 const SHARED_NATURAL: Record<string, (r: Row) => string> = {
   RSRCRCAT: (r) => `${r.rsrc_id}|${r.rsrc_catg_type_id}`, RSRCROLE: (r) => `${r.rsrc_id}|${r.role_id}`, UDFVALUE: (r) => `${r.udf_type_id}|${r.fk_id}`,
@@ -210,7 +211,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
             : target === 'PROJWBS' && t === 'TASK' ? rows(db, 'PROJWBS').find((w) => w.proj_id === pid && w.proj_node_flag === 'Y')?.wbs_id ?? '' : '';
           continue;
         }
-        if (nv == null && !quiet && target !== 'PROJECT' && src.tables[target]) findings.push({ severity: 'warning', code: 'IMPORT_UNRESOLVED', table: t, field: f, key: r[k ?? ''] ?? '', message: `A ${wordOf(t)} points at a ${wordOf(target)} that is not in the file (${f.replace(/_id$/, '').replace(/_/g, ' ')} id ${v}); the reference is kept as it is.`, p6: 'P6 would drop or default this reference.' });
+        if (nv == null && !quiet && target !== 'PROJECT' && src.tables[target]) findings.push({ severity: 'warning', code: 'IMPORT_UNRESOLVED', table: t, field: f, key: r[k ?? ''] ?? '', message: `${an(wordOf(t))} points at ${an(wordOf(target)).toLowerCase()} that is not in the file; the reference is kept as it is.`, p6: 'P6 would drop or default this reference.' });
         out[f] = nv ?? (target === 'PROJWBS' && f === 'parent_wbs_id' && r.proj_node_flag === 'Y' ? '' : v);
       } else out[f] = v;
     }
@@ -251,8 +252,11 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
     const k = KEYS[t];
     if (!k || t === 'PROJECT') continue;
     for (const r of src.tables[t].rows) {
-      if (inSkipped(t, r) || !r[k]) continue;
-      if (goneRef(t, r)) { dropped.add(`${t}|${r[k]}`); count(t, 'skipped'); continue; }
+      // (a row of a project that is not imported is left out with what hangs on it: the values of that project's own activity codes)
+      if (inSkipped(t, r)) { if (r[k]) dropped.add(`${t}|${r[k]}`); continue; }
+      if (!r[k]) continue;
+      // (a project added INTO another brings its activities, not its schedule options: the target keeps its own)
+      if (goneRef(t, r) || (t === 'SCHEDOPTIONS' && addInto.has(r.proj_id))) { dropped.add(`${t}|${r[k]}`); count(t, 'skipped'); continue; }
       const dictRow = !isProjectRow(t, r) || (t === 'CALENDAR' && !r.proj_id);
       if (dictRow && MATCH[t]) {
         const name = MATCH[t](r);
@@ -372,13 +376,14 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
           }
           codes.add(nr.task_code);
         }
-      } else if (!k && r.proj_id && merging.has(r.proj_id) && NATURAL[t]) {
-        // a row without its own key (code and UDF values, period figures): matched on update like the rest
+      } else if ((!k || !r[k]) && r.proj_id && merging.has(r.proj_id) && NATURAL[t]) {
+        // a row without its own key (code and UDF values, period figures; a keyed row whose file gives it no key): matched on update like the rest
         const hit = indexOf(t, merging.get(r.proj_id)!, NATURAL[t]).get(NATURAL[t](nr));
         const a = act(t);
         if (hit) { if (a === 'update' || a === 'remove_missing') { Object.assign(hit, nr); count(t, 'updated'); } else count(t, 'kept'); continue; }
         if (a === 'skip') { count(t, 'skipped'); continue; }
       }
+      if (k && !nr[k]) nr[k] = alloc(t); // (a keyed row the file gave no key: it gets one here)
       add.push(nr);
     }
     // attach in one step (one undo record instead of one per row on million-row tables)

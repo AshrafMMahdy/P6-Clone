@@ -174,7 +174,7 @@ const projectIds = (db: Db, id: unknown) => {
  *  installation cannot (no MPXJ, no Java) or the file cannot be read. */
 /** The other side of compare, import_file and transfer_progress: another open project (other_handle) or a file (path),
  *  read for this call only and counted in the memory budget while it is held (C14). */
-async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db; release: () => void; bytes: number; /** what P6 would refuse in the file read (path), as open_file says it */ asGiven?: ReturnType<typeof fileAsGiven>; /** the same, as the one note */ asGivenNote?: string }> {
+async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db; release: () => void; bytes: number; /** what P6 would refuse in the file read (path), as open_file says it */ asGiven?: ReturnType<typeof fileAsGiven>; /** the same, as the one note */ asGivenNote?: string; /** relationships that tied a baseline to an activity outside it, left out as the file was read */ tieNote?: string }> {
   if (a.other_handle) { const o = getSession(a.other_handle); return { db: o.db, release: () => {}, bytes: o.bytes }; }
   if (!a.path) fail('bad_input', 'Give other_handle or path.', `other_handle: another open project; path: a file to ${what}.`);
   const p = pathArg(a.path), bytes = estimateBytes(fileSize(p));
@@ -187,7 +187,9 @@ async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db
     if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to ${what}.`, `Give an XER, P6 XML or Microsoft Project file. If this is the file the user asked about: ${outsideRoute(format, head)}.`);
     // the checks open_file runs on the file read: what P6 would refuse in it, said beside the answer (the call goes on as it always did)
     const fl = importChecks(db, findings, format), gv = fileAsGiven(fl, '');
-    return { db, release, bytes, asGiven: gv, ...(gv.p6_would_reject ? { asGivenNote: `P6 would refuse ${basename(p)} as given (${namesText(fl.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => x.message.replace(/\.$/, '')))}); this call used what could be read.` } : {}) };
+    const tie = findings.find((x) => x.code === 'BASELINE_TIE_LEFT_OUT')?.message; // (said by every tool that reads a file, not only open_file)
+    const rejected = gv.p6_would_reject ? `P6 would refuse ${basename(p)} as given (${namesText(fl.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => x.message.replace(/\.$/, '')))}); this call used what could be read.` : '';
+    return { db, release, bytes, asGiven: gv, ...(rejected ? { asGivenNote: rejected } : {}), ...(tie ? { tieNote: `In ${basename(p)}: ${tie.charAt(0).toLowerCase()}${tie.slice(1)}` } : {}) };
   } catch (e) { release(); throw e; }
 }
 /** A project of this file by Project ID (default: its only non-baseline project). */
@@ -615,7 +617,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const dict = importActions(a.dictionaries, IMPORT_DICT, ['keep', 'update', 'insert', 'skip'] as const, 'dictionaries');
       const target = action === 'new' ? undefined : projectOf(s.db, a.project, 'This file');
       if (target?._baseline_of) fail('bad_input', `${target.proj_short_name} is a baseline.`, 'Import into the project itself.');
-      const { db: src, release, asGiven, asGivenNote } = await readOther(a, 'import');
+      const { db: src, release, asGiven, asGivenNote, tieNote } = await readOther(a, 'import');
       try {
         const theirs = (src.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
         const from = a.from_project != null ? [projectOf(src, a.from_project, 'The file')] : action === 'new' ? theirs : [projectOf(src, undefined, 'The file')];
@@ -627,7 +629,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         }
         const plan: ImportPlan = { projects: from.map((p) => ({ srcProjId: p.proj_id, action: action as ProjectAction, targetProjId: target?.proj_id, wbsId })), dict, data };
         if (action === 'new') for (const b of (src.tables.PROJECT?.rows ?? []).filter((p) => p._baseline_of && from.some((f) => f.proj_id === p._baseline_of))) plan.projects.push({ srcProjId: b.proj_id, action: 'new' }); // their baselines come with them
-        const run = (d: Db) => { const r = importIntoDb(d, src, plan); return { projects: r.projIds.map((id) => d.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), counts: r.counts, notes: [...(asGivenNote ? [asGivenNote] : []), ...r.findings.map((f) => f.message)] }; };
+        const run = (d: Db) => { const r = importIntoDb(d, src, plan); return { projects: r.projIds.map((id) => d.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), counts: r.counts, notes: [...(asGivenNote ? [asGivenNote] : []), ...(tieNote ? [tieNote] : []), ...r.findings.map((f) => f.message)] }; };
         if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...out, ...(asGiven ? { file_as_given: asGiven } : {}) }; }
         const out = change(s, ctx.caller, `Import (${action})`, run);
         regrow(s); // what the project now holds with the imported rows
@@ -647,7 +649,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (a.data_date != null && a.data_date !== 'from' && !dd(a.data_date)) fail('bad_input', 'data_date must be "from" or a date.', 'e.g. "from" or 2026-03-02.');
       const target = projectOf(s.db, a.project, 'This file');
       if (target._baseline_of) fail('bad_input', `${target.proj_short_name} is a baseline.`, 'Transfer onto the project itself.');
-      const { db: src, release, asGiven, asGivenNote } = await readOther(a, 'transfer progress from');
+      const { db: src, release, asGiven, asGivenNote, tieNote } = await readOther(a, 'transfer progress from');
+      const withTie = <T extends object>(o: T) => (tieNote ? { ...o, notes: [...(((o as { notes?: string[] }).notes) ?? []), tieNote] } : o);
       try {
         const from = a.from_project != null ? [projectOf(src, a.from_project, 'Their file')] : (src.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
         const spec: TransferSpec = { from: src, fromProjIds: from.map((p) => p.proj_id), toProjId: target.proj_id, by, codeType: a.code_type, fromCodeType: a.from_code_type, udf: a.udf, fromUdf: a.from_udf, pairs: a.pairs?.map((x: any) => ({ from: String(x?.from ?? ''), to: String(x?.to ?? '') })), include, costs: a.costs, addAssignments: a.add_assignments === true, dataDate: a.data_date == null ? undefined : String(a.data_date) };
@@ -665,8 +668,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           return { ...r, changed_fields: fields, ...changesPage(named, { max_changes: a.max_changes ?? 100, offset: a.offset }), unmatched_from: cap(r.unmatched_from), unmatched_from_count: r.unmatched_from.length, ambiguous: cap(r.ambiguous), ambiguous_count: r.ambiguous.length,
             assignments: { ...r.assignments, unmatched: cap(r.assignments.unmatched), unmatched_count: r.assignments.unmatched.length }, expenses: { ...r.expenses, unmatched: cap(r.expenses.unmatched), unmatched_count: r.expenses.unmatched.length }, steps: { ...r.steps, unmatched: cap(r.steps.unmatched), unmatched_count: r.steps.unmatched.length } };
         };
-        if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...brief(out), ...(asGiven ? { file_as_given: asGiven } : {}) }; }
-        return { ...brief(change(s, ctx.caller, 'Transfer Progress', run)), ...(asGiven ? { file_as_given: asGiven } : {}) };
+        if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return withTie({ dry_run: true, ...brief(out), ...(asGiven ? { file_as_given: asGiven } : {}) }); }
+        return withTie({ ...brief(change(s, ctx.caller, 'Transfer Progress', run)), ...(asGiven ? { file_as_given: asGiven } : {}) });
       } finally { release(); }
     }
     case 'level_resources': {
@@ -818,7 +821,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const full = reviewSchedule(s.db, { hoursPerDay: s.hpd, calendarDays: true, activities: a.export != null, ...(a.project != null && a.project !== '' ? { projIds: projectIds(s.db, a.project) } : {}) });
       // what a check could not assess, the data date the schedule put in and the saved dates that are not current are notes of the answer (said once, in `notes`), not a check's detail
       const noted = (c: { id: string; grade: string; detail?: string }) => !!c.detail && (c.grade === 'not_assessed' || c.id === 'invalid_dates' || c.id === 'saved_dates' || c.id === 'loops');
-      const said = full.checks.filter(noted).map((c) => c.detail!);
+      const said = full.checks.filter(noted).flatMap((c) => c.detail!.split('\n')); // (a check's sentences, one to a line: each is a note of its own)
       const answer = { ...full, checks: full.checks.map(({ activities: _a, ...c }) => { const { detail: _d, ...rest } = c; const k = noted(c) ? rest : c; return k.examples.length > LISTED ? { ...k, examples: k.examples.slice(0, LISTED), examples_total: k.examples.length } : k; }), ...(said.length ? { notes: said } : {}) };
       if (a.export == null) return answer;
       return { ...answer, exported: exportResult('review', a.export, full, [
@@ -972,7 +975,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const sides = (earlier: string, later: string) => `${earlier} (earlier) \u2192 ${later} (later)`;
       // whole: the answer's lists as they are before the answer cuts them (progress_integrity's three lists); the result files hold them whole
       const FINDING = ['id', 'name', 'field', 'a', 'b', 'via'];
-      const compared = <T extends object>(answer: T, changes: object[], columns: string[], only?: { only_in_a: string[]; only_in_b: string[] }, whole?: ProgressIntegrity) => (a.export == null ? answer : { ...answer, exported: exportResult('compare', a.export, { ...answer, ...(whole ? { progress_integrity: { ...whole, retroactive_actuals_total: whole.retroactive_actuals.length, progress_decreases_total: whole.progress_decreases.length, status_regressions_total: whole.status_regressions.length } } : {}), changes, truncated: false, offset: undefined, next_offset: undefined }, [
+      let tieNote: string | undefined; // (set when the other side is a file that held relationships tying a baseline to an activity outside it)
+      const compared = <T extends object>(answer0: T, changes: object[], columns: string[], only?: { only_in_a: string[]; only_in_b: string[] }, whole?: ProgressIntegrity) => { const answer = tieNote ? { ...answer0, notes: [...(((answer0 as { notes?: string[] }).notes) ?? []), tieNote] } : answer0; return compared0(answer, changes, columns, only, whole); };
+      const compared0 = <T extends object>(answer: T, changes: object[], columns: string[], only?: { only_in_a: string[]; only_in_b: string[] }, whole?: ProgressIntegrity) => (a.export == null ? answer : { ...answer, exported: exportResult('compare', a.export, { ...answer, ...(whole ? { progress_integrity: { ...whole, retroactive_actuals_total: whole.retroactive_actuals.length, progress_decreases_total: whole.progress_decreases.length, status_regressions_total: whole.status_regressions.length } } : {}), changes, truncated: false, offset: undefined, next_offset: undefined }, [
         { name: 'changes', columns, rows: changes },
         { name: 'only_in_one', columns: ['id', 'only_in'], rows: only ? [...only.only_in_a.map((id) => ({ id, only_in: 'a' })), ...only.only_in_b.map((id) => ({ id, only_in: 'b' }))] : [] },
         ...(whole ? [{ name: 'retroactive_actuals', columns: FINDING, rows: whole.retroactive_actuals }, { name: 'progress_decreases', columns: FINDING, rows: whole.progress_decreases }, { name: 'status_regressions', columns: FINDING, rows: whole.status_regressions }] : []),
@@ -984,7 +989,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         return compared({ compared: sides(`${cur.proj_short_name} baseline ${bl.name}`, `${cur.proj_short_name} as it is now`), mode: 'computed', baseline: bl.name, ...c, changed: c.changes.length, ...changesPage(c.changes, a) }, c.changes, COMPUTED, c);
       }
       // a file compared against is read for this call only, and counted in the memory budget while it is held (C14)
-      const { db: other, release } = await readOther(a, 'compare with');
+      const { db: other, release, tieNote: tie } = await readOther(a, 'compare with');
+      tieNote = tie;
       try {
       const theSides = sides(`${names(s.db)} (the open project)`, a.other_handle ? `${names(other)} (the other open project)` : `${basename(String(a.path))} (the file)`);
       if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return compared({ compared: theSides, mode: 'computed', changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }, c.changes, COMPUTED, c); }
@@ -1290,9 +1296,9 @@ function writeResultFile(tool: string, text: string, ext = 'json'): string | nul
 function confirmChanges(s: Session): { changes?: FieldChange[]; changes_total?: number; changes_note?: string; stale: string[] } {
   const last = s.history[s.history.length - 1];
   if (!last) return { stale: [] };
-  const { changes, datesAffected } = describeChanges(s.db, last.j, s.hpd);
+  const { changes, datesAffected, datesCleared } = describeChanges(s.db, last.j, s.hpd);
   const state = datesAffected ? storedDatesState(s.db) : null;
-  const stale = state ? [...state.loops.map((l) => loopStopsDates(l.projs, l.loops)), ...state.stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open))] : [];
+  const stale = state ? [...state.loops.map((l) => loopStopsDates(l.projs, l.loops)), ...(datesCleared ? state.notStored.map(datesNotStored) : []), ...state.stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open))] : [];
   if (!changes.length) return { stale };
   if (changes.length <= LISTED) return { changes, stale };
   // (the project column is there when the file has several projects: the same Activity ID can be in more than one)
