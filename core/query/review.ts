@@ -7,6 +7,7 @@ import { parseP6Date } from '../dates.ts';
 import { makeCtx, isCritical } from '../project/ctx.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
 import { datesNotCurrent } from '../notes.ts';
+import { dataDateGaps } from '../analysis/common.ts';
 
 /** Out-of-sequence progress, the one rule: the activity has started while a finish-to-start predecessor has not finished. */
 export const startedBeforeFsPredecessor = (t: Row, ctx: Pick<ReturnType<typeof makeCtx>, 'predsOf' | 'taskById'>): boolean =>
@@ -41,7 +42,6 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   };
   // each project is judged against its own data date (as the scheduler does); a project with none is not judged on it
   const ddOf = new Map(projs.map((p) => [p.proj_id, parseP6Date(p.last_recalc_date)]));
-  const hasDd = projs.some((p) => ddOf.get(p.proj_id) != null);
 
   // a start milestone opening the network and a finish milestone closing it are expected open ends
   const noPred = live.filter((t) => t.task_type !== 'TT_Mile' && !(ctx.predsOf.get(t.task_id) ?? []).length);
@@ -57,7 +57,7 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   add('negative_float', 'Negative total float', live.filter((t) => t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) < 0), live.length, null, 0, 'none', '');
   add('long_durations', 'Long remaining durations (over 44 working days)', live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && Number(t.remain_drtn_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', '');
   const invalid = tasks.filter((t) => { const dd = ddOf.get(t.proj_id); return dd != null && ((!t.act_start_date && t.early_start_date && (parseP6Date(t.early_start_date) ?? Infinity) < dd) || (t.act_start_date && (parseP6Date(t.act_start_date) ?? 0) > dd) || (t.act_end_date && (parseP6Date(t.act_end_date) ?? 0) > dd)); });
-  add('invalid_dates', 'Invalid dates (forecast before the data date, or actuals after it)', invalid, tasks.length, null, 0, 'none', !hasDd ? 'The project has no data date.' : '');
+  add('invalid_dates', 'Invalid dates (forecast before the data date, or actuals after it)', invalid, tasks.length, null, 0, 'none', dataDateGaps(projs, 'invalid dates', null).join(' '));
   const withRsrc = new Set(rows(db, 'TASKRSRC').map((a) => a.task_id));
   const noRes = live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && !withRsrc.has(t.task_id));
   add('resources', 'Activities without resources', noRes, live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile').length, withRsrc.size ? 0 : null, null, 'all resourced (if the schedule is resource-loaded)', withRsrc.size ? '' : 'The schedule carries no resource assignments: not judged.');

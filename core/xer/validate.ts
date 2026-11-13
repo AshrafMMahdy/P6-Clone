@@ -205,7 +205,7 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
     if (!nodes.length) c.add({ severity: 'fatal', code: 'NO_PROJ_NODE', table: 'PROJWBS', key: p.proj_short_name || p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has no root WBS node: P6 refuses the file; save with repair: true adds it.`, p6: 'P6 import fails: every project needs its root WBS node.' });
     if (nodes.length > 1) c.add({ severity: 'error', code: 'MULTI_PROJ_NODE', table: 'PROJWBS', key: p.proj_short_name || p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has ${nodes.length} root WBS elements.`, p6: 'P6 import fails.' });
     if (!p.plan_start_date) c.add({ severity: 'error', code: 'NO_PLAN_START', table: 'PROJECT', key: p.proj_short_name || p.proj_id, field: 'plan_start_date', message: `Project ${p.proj_short_name || p.proj_id} has no planned start.`, p6: 'P6 requires a project planned start.' });
-    if (!p.last_recalc_date) c.add({ severity: 'warning', code: 'NO_DATA_DATE', table: 'PROJECT', key: p.proj_short_name || p.proj_id, field: 'last_recalc_date', message: noDataDateUsed(p.proj_short_name || p.proj_id, p.plan_start_date ? p.plan_start_date.slice(0, 16) : '(none either)'), p6: 'P6 uses the planned start as data date.' });
+    if (!p.last_recalc_date) c.add({ severity: 'warning', code: 'NO_DATA_DATE', table: 'PROJECT', key: p.proj_short_name || p.proj_id, field: 'last_recalc_date', message: noDataDateUsed(p.proj_short_name || p.proj_id, p.plan_start_date ? p.plan_start_date.slice(0, 16) : null), p6: 'P6 uses the planned start as data date.' });
   }
 
   // WBS tree

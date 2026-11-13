@@ -2,7 +2,7 @@
 // overrides (edit operations) are both scheduled with the same data date and options, inside a journal that is rolled
 // back, so nothing is kept and no undo entry is made. Answers the finish of each, the critical set, the activities
 // that became or stopped being critical, and the rows whose computed fields changed.
-import { tidyNotes } from '../notes.ts';
+import { scheduleRefusal, tidyNotes } from '../notes.ts';
 import { differentDatesNote } from '../analysis/scheduleLog.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
@@ -34,7 +34,7 @@ export function computedFields(db: Db, projIds: string[], hpd = 8): Map<string, 
 }
 
 export type EvaluateAnswer = { ok: true; data_date: string | null; data_dates?: Record<string, string | null>; base_finish: string | null; finish: string | null; finish_delta_days: number | null; critical: string[]; became_critical: string[]; no_longer_critical: string[]; changed: Record<string, unknown>[]; changed_total: number; loops: string[][]; notes: string[] }
-  | { ok: false; error: { code: string; message: string; index?: number; loops?: string[][] } };
+  | { ok: false; error: { code: string; message: string; hint?: string; index?: number; loops?: string[][] } };
 
 export function evaluate(db: Db, projIds: string[], o: EvaluateOptions = {}): EvaluateAnswer {
   let answer!: EvaluateAnswer;
@@ -42,7 +42,7 @@ export function evaluate(db: Db, projIds: string[], o: EvaluateOptions = {}): Ev
   const over: Partial<SchedOptions> = { ...(o.options ?? {}), ...(o.dataDate != null ? { dataDate: o.dataDate } : {}) };
   const j = record(db, (d) => {
     const base = scheduleProjects(d, projIds, over);
-    if (!base.ok) { answer = { ok: false, error: { code: 'schedule_failed', message: `Refused: the project as it is cannot be scheduled (${base.findings.filter((f) => f.severity === 'error').map((f) => f.message.replace(/\.$/, '')).join('; ')}).`, ...(base.loops?.length ? { loops: base.loops } : {}) } }; return; }
+    if (!base.ok) { const why = scheduleRefusal('the project as it is cannot be scheduled', base.findings.filter((f) => f.severity === 'error').map((f) => f.message)); answer = { ok: false, error: { code: 'schedule_failed', message: why.message, hint: why.hint ?? 'Fix what the message names, then call evaluate again; nothing was changed.', ...(base.loops?.length ? { loops: base.loops } : {}) } }; return; }
     const before = computedFields(d, projIds, hpd);
     // a started activity is driven by its REMAINING duration: a new original duration alone cannot move its dates, and the answer says so
     const startedNote: string[] = [];
@@ -52,9 +52,9 @@ export function evaluate(db: Db, projIds: string[], o: EvaluateOptions = {}): Ev
       if (t && t.act_start_date && !t.act_end_date) startedNote.push(`${op.id} has started: its remaining duration drives its dates, so the change of original duration has no effect; set remaining_days.`);
     }
     const r = applyOps(d, o.overrides ?? [], { hoursPerDay: hpd, calendarDays: true });
-    if (!r.ok) { answer = { ok: false, error: { code: 'op_failed', message: r.error!.message, index: r.error!.index } }; return; }
+    if (!r.ok) { answer = { ok: false, error: { code: 'op_failed', message: r.error!.message, hint: `Fix override ${r.error!.index + 1} (the message says what is wrong) and call evaluate again; nothing was changed.`, index: r.error!.index } }; return; }
     const s = scheduleProjects(d, projIds, over);
-    if (!s.ok) { answer = { ok: false, error: { code: 'schedule_failed', message: s.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), ...(s.loops?.length ? { loops: s.loops } : {}) } }; return; }
+    if (!s.ok) { const why = scheduleRefusal('the project with the change cannot be scheduled', s.findings.filter((f) => f.severity === 'error').map((f) => f.message)); answer = { ok: false, error: { code: 'schedule_failed', message: why.message, hint: why.hint ?? 'Change the overrides so the schedule can be calculated, then call evaluate again; nothing was changed.', ...(s.loops?.length ? { loops: s.loops } : {}) } }; return; }
     const after = computedFields(d, projIds, hpd);
     const crit = (m: typeof after) => new Set([...m.values()].filter((x) => x.f.critical).map((x) => x.code));
     const cb = crit(before), ca = crit(after);

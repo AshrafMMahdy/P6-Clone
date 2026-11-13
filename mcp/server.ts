@@ -23,7 +23,7 @@ import { NEW_XER_NOTE, NEW_XER_VERSION, writeXer, writeXerTo } from '../core/xer
 import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid, unidentified } from '../core/xer/repair-valid.ts';
-import { argumentNotUsed, cancelledAfter, datesNotCurrent, droppedOnSave, listCut, stillWorking, tooLarge, namesText, notRepaired, openedRepaired, plural } from '../core/notes.ts';
+import { argumentNotUsed, cancelledAfter, cap, dataDateWritten, splitRefusal, datesNotCurrent, droppedOnSave, listCut, stillWorking, tooLarge, namesText, notRepaired, openedRepaired, plural } from '../core/notes.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { mspLossNote } from '../core/msp/shared.ts';
@@ -59,7 +59,7 @@ import { describeChanges, type FieldChange } from '../core/project/changes.ts';
 import { storedDatesState } from '../core/schedule/stored-dates.ts';
 import { tidyNotes } from '../core/notes.ts';
 import { differentDatesNote, duplicateRowNotes, scheduleLogReport, scheduleNotes } from '../core/analysis/scheduleLog.ts';
-import { baselineOf } from '../core/analysis/common.ts';
+import { baselineOf, dataDateUsedNotes } from '../core/analysis/common.ts';
 import { reasonerModelPath, reasonerStatus } from '../core/analysis/hrmRuntime.ts';
 import { record, rollback, rollbackRunning } from '../core/journal.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
@@ -518,6 +518,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (a.overrides != null && !Array.isArray(a.overrides)) fail('bad_input', `"overrides" must be a list of edit operations; received ${typeof a.overrides === 'object' ? `an object with the keys ${Object.keys(a.overrides).map((k) => `"${k}"`).join(', ') || '(none)'}` : `${typeof a.overrides} ${JSON.stringify(a.overrides)}`}.`, 'e.g. [{"op":"update_activity","id":"A1000","duration_days":15}]');
       const ev = evaluate(s.db, a.project != null && a.project !== '' ? projectIds(s.db, a.project) : allIds(s.db), { overrides: a.overrides ?? [], options, dataDate: dd(a.data_date) ?? undefined, hoursPerDay: s.hpd, maxRows: Infinity });
       if (!ev.ok) return ev;
+      const evDates = dataDateUsedNotes(s.db.tables.PROJECT.rows.filter((p: Record<string, string>) => (a.project != null && a.project !== '' ? projectIds(s.db, a.project) : allIds(s.db)).includes(p.proj_id))); // (the data date the run used, when it is the planned start)
+      if (evDates.length) ev.notes = [...evDates, ...(ev.notes ?? [])];
       // the answer lists 25 (LISTED) changed activities, changed_total says how many there are; the files hold every one
       if (a.export == null) return { ...ev, changed: ev.changed.slice(0, LISTED) };
       // (one row per field that changed; an added activity's fields come from nothing, a deleted one is a row of its own)
@@ -562,7 +564,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         if (only && t != null) d.tables.PROJECT.rows.find((p) => p.proj_id === only)!.last_recalc_date = formatP6Date(t);
         const x = scheduleWithLob(d, todo, s.hpd, { ...over, ...(t != null && !only ? { dataDate: t } : {}) }, lobSidecars.get(s.handle)).schedule; if (x.ok) syncAssignmentDates(d); return x;
       });
-      if (!res.ok) { dropLast(s); return { ok: false, loops: res.loops ?? [], error: { code: 'schedule_failed', message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: res.loops?.length ? 'Not scheduled: the logic has loops (loops lists them); fix the logic, or call schedule with break_loops: true. Nothing was changed.' : 'Not scheduled: fix what the message names, then call schedule again. Nothing was changed.' } }; }
+      if (!res.ok) { dropLast(s); return { ok: false, loops: res.loops ?? [], error: { code: 'schedule_failed', ...(res.findings.some((f) => f.code === 'SCHED_NO_DATA_DATE') ? (() => { const w = res.findings.filter((f) => f.code === 'SCHED_NO_DATA_DATE').map((f) => splitRefusal(f.message)); return { message: `Refused: ${w.map((x) => x.wrong).join('; ')}.`, hint: `${cap(w[0].instead)}.` }; })() : { message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: res.loops?.length ? 'Not scheduled: the logic has loops (loops lists them); fix the logic, or call schedule with break_loops: true. Nothing was changed.' : 'Not scheduled: fix what the message names, then call schedule again. Nothing was changed.' }) } }; }
       const code = new Map((s.db.tables.TASK?.rows ?? []).map((x) => [x.task_id, x.task_code]));
       const loopInfo = { loops: res.loops ?? [], ...(over.breakLoops ? { broken_links: (res.broken ?? []).map((x) => ({ pred: code.get(x.pred_task_id) ?? x.pred_task_id, succ: code.get(x.task_id) ?? x.task_id, type: (x.pred_type || 'PR_FS').slice(3) })) } : {}) };
       try { await checkpoint(ctx); } catch (e) { dropLast(s); s.dirty = was; throw e; }
@@ -744,7 +746,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           // a finished run removed its kept file: named, so a copy of it elsewhere (the platform's mirror of the outputs) goes too
           ...(!r.partial && !r.keptNote && store.path ? { parts_removed: keptPlace(store.path) } : {}),
           ...(r.partial ? { note: r.partial.error ? `Stopped after ${r.iterations} of ${r.partial.requested} iterations (${String(r.partial.error).replace(/\.$/, '')}): the result covers those only.` : cancelledAfter(r.iterations, r.partial.requested, 'iterations', false) } : {}),
-          ...(() => { const n = [...(r.redone ? [`${r.redone} kept iteration${r.redone === 1 ? '' : 's'} did not check out (damaged) and ${r.redone === 1 ? 'was' : 'were'} run again.`] : []), ...(!r.partial && r.keptNote ? [r.keptNote] : []), ...(noVariation ? ['No spread: no activity has a three-point estimate and no risk event applies; set estimates with edit set_estimates or pass default_estimates.'] : [])]; return n.length ? { notes: n } : {}; })(),
+          ...(() => { const n = [...dataDateUsedNotes(s.db.tables.PROJECT.rows.filter((p: Record<string, string>) => ids.includes(p.proj_id))), ...(r.redone ? [`${r.redone} kept iteration${r.redone === 1 ? '' : 's'} did not check out (damaged) and ${r.redone === 1 ? 'was' : 'were'} run again.`] : []), ...(!r.partial && r.keptNote ? [r.keptNote] : []), ...(noVariation ? ['No spread: no activity has a three-point estimate and no risk event applies; set estimates with edit set_estimates or pass default_estimates.'] : [])]; return n.length ? { notes: n } : {}; })(),
         };
         if (a.export == null) return answer;
         // the result files: every list whole, every iteration in the order it ran (a resumed run's kept ones first), the engine's own values
@@ -863,6 +865,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       // what P6's XML has no place for, with values in this data: said in the answer, never silent (structured in not_in_p6_xml, plainly in notes)
       let xmlLosses: ReturnType<typeof p6xmlLosses> = [];
       if (fmt === 'p6xml' || fmt === 'xml') { xmlLosses = p6xmlLosses(s.db, projIds); if (xmlLosses.length) notes.push(droppedOnSave('P6 XML', xmlLosses.map((l) => `${l.table}${l.field.startsWith('(') ? '' : `.${l.field}`} (${l.rows})`))); }
+      // a schedule that put the planned start in as the data date: the file now carries it as if it had been there, said once (and no longer assumed: the saved file has it)
+      for (const p of s.db.tables.PROJECT.rows.filter((x: Record<string, string>) => (projIds ?? allIds(s.db)).includes(x.proj_id) && x._dd_assumed && x._dd_assumed === x.last_recalc_date)) { notes.push(dataDateWritten(p.proj_short_name, p.last_recalc_date.slice(0, 16))); p._dd_assumed = ''; }
       // the 4D model, links and rules travel beside the file (<file>.4d.json); XER and P6 XML have no place for them
       const sidecar = fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml' ? save4dSidecar(s.db, path, projIds ?? allIds(s.db), writeOut) : null;
       if (sidecar) notes.push(`4D links are not in ${basename(path)}: they were written to ${basename(sidecar)}; keep it with the file.`);

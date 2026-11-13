@@ -85,6 +85,7 @@ export function describeChanges(db: Db, j: Journal): { changes: FieldChange[]; d
       for (let i = 0; i < keys.length; i += 2) {
         const k = keys[i] as string;
         if (k.startsWith('_') || /(?:^|_)(?:early|late|total_float|free_float|reend|restart|rem_late|rem_early|scd_)/.test(k)) continue;
+        if (('proj_short_name' in r && /^(last_recalc_date|plan_start_date|plan_end_date)$/.test(k)) || ('clndr_name' in r && k === 'clndr_data')) { const a = text(keys[i + 1]), b = text(r[k]); if (a !== b) datesAffected = true; } // the data date, the planned start, Must Finish By and the work time of a calendar decide the dates F9 gives
         if (assignment && /^(target|remain|act)_(qty|cost|equip_qty|drtn|work_qty|ot_qty|reg_qty)|^remain_qty_per_hr$|_per_hr_rate$/.test(k) && k !== 'target_qty_per_hr') continue; // the quantities and costs worked out from the units a day
         const was = text(keys[i + 1]), now = text(r[k]);
         if (was === now) continue;

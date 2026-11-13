@@ -2,7 +2,7 @@
 // activity kinds, baselines, constraint groups, and the result shape every check returns.
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
-import { tidyNotes, differentDataDates, namesText, noDataDateNotAssessed, noDataDateUsed, notAssessed as notAssessedNote } from '../notes.ts';
+import { tidyNotes, differentDataDates, namesText, noDataDateNotAssessed, noDataDateUsed, noDateNoStart, projectsText, notAssessed as notAssessedNote } from '../notes.ts';
 import { makeCtx, type Ctx } from '../project/ctx.ts';
 import { dayHours, type DayHours } from '../project/units.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
@@ -44,12 +44,24 @@ export const constraintsOf = (t: Row) => [t.cstr_type, t.cstr_type2].filter((c):
 
 /** The sentences about projects with no data date of their own: where the planned start stood in for one (said by the schedule that did it), and where there is none at all (`noneNotAssessed`: the checks that need one are not assessed; pass false for a tool that goes on without it). */
 export function dataDateNotes(projs: Row[], noneNotAssessed = true): string[] {
-  const out: string[] = [];
-  for (const p of projs) {
-    if (parseP6Date(p.last_recalc_date) != null && p._dd_assumed && p._dd_assumed === p.last_recalc_date) out.push(noDataDateUsed(p.proj_short_name, formatP6Date(parseP6Date(p.last_recalc_date)!).slice(0, 16)));
-    else if (parseP6Date(p.last_recalc_date) == null && noneNotAssessed) out.push(noDataDateNotAssessed(p.proj_short_name));
-  }
-  return out;
+  return [...dataDateAssumedNotes(projs), ...dataDateGaps(projs, 'checks that need a data date', 'status_date', noneNotAssessed)];
+}
+
+/** The sentence for a project whose data date is the planned start a schedule put in (it is marked `_dd_assumed` until a data date is given): the date that was used. */
+export const dataDateAssumedNotes = (projs: Row[]): string[] =>
+  projs.filter((p) => parseP6Date(p.last_recalc_date) != null && p._dd_assumed && p._dd_assumed === p.last_recalc_date).map((p) => noDataDateUsed(p.proj_short_name, formatP6Date(parseP6Date(p.last_recalc_date)!).slice(0, 16)));
+/** For a tool that CALCULATES from the data date and uses the planned start where there is none: the date that was used (a project with neither is refused by the tool, not noted). */
+export const dataDateUsedNotes = (projs: Row[]): string[] => [
+  ...dataDateAssumedNotes(projs),
+  ...projs.filter((p) => parseP6Date(p.last_recalc_date) == null && parseP6Date(p.plan_start_date) != null).map((p) => noDataDateUsed(p.proj_short_name, formatP6Date(parseP6Date(p.plan_start_date)!).slice(0, 16))),
+];
+
+/** The sentences for projects with no data date (the part that needs one, with `arg` the date argument of the tool, null: it has none): a project with no planned start either gets the state sentence (nothing can be calculated),
+ *  another the part not assessed with the reason (`withPart` false: only the state sentence, for a tool that goes on without it). */
+export function dataDateGaps(projs: Row[], part: string, arg: string | null, withPart = true): string[] {
+  const none = projs.filter((p) => parseP6Date(p.last_recalc_date) == null);
+  const noStart = none.filter((p) => parseP6Date(p.plan_start_date) == null).map((p) => p.proj_short_name), rest = none.filter((p) => parseP6Date(p.plan_start_date) != null).map((p) => p.proj_short_name);
+  return [...(noStart.length ? [noDateNoStart(noStart, arg ?? 'data_date')] : []), ...(rest.length && withPart ? [noDataDateNotAssessed(projectsText(rest), part, arg)] : [])];
 }
 
 /** What an answer that carries a data / status date adds as data: each project's own date when they differ (the answer's single date is the first project's with one). The sentence is in the notes (Scope.dateNotes). */

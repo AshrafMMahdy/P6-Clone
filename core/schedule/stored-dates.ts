@@ -19,7 +19,9 @@ export interface StoredDatesState { proj: string; differ: number; open: number; 
 /** Per project: are the saved dates of the open activities the ones F9 would calculate? `none`: the Project IDs that have open activities but no saved early dates at all.
  *  Reschedules as a dry run; the file does not change. Projects that are current are not listed. */
 export function storedDatesState(db: Db, only?: string[]): { stale: StoredDatesState[]; notStored: string[]; calculable: boolean } {
-  const tasks = (db.tables.TASK?.rows ?? []).filter((t) => !only || only.includes(t.proj_id));
+  // a baseline stored in the file as a project of its own (_baseline_of) is a snapshot: its dates are never "current", and F9 cannot change them, so it is never reported
+  const baselines = new Set((db.tables.PROJECT?.rows ?? []).filter((p) => p._baseline_of).map((p) => p.proj_id));
+  const tasks = (db.tables.TASK?.rows ?? []).filter((t) => !baselines.has(t.proj_id) && (!only || only.includes(t.proj_id)));
   const open = tasks.filter((t) => t.status_code !== 'TK_Complete' && !t.act_end_date);
   const projName = new Map((db.tables.PROJECT?.rows ?? []).map((p) => [p.proj_id, p.proj_short_name || p.proj_id]));
   if (!open.length) return { stale: [], notStored: [], calculable: true };
@@ -28,7 +30,7 @@ export function storedDatesState(db: Db, only?: string[]): { stale: StoredDatesS
   if (notStored.length === ids.length) return { stale: [], notStored, calculable: true };
   // what the scheduler calculates, without writing it (no copy of the file, no undo record)
   const calc = new Map<Row, string[]>();
-  const ok = scheduleProjects(db, (db.tables.PROJECT?.rows ?? []).map((p) => p.proj_id), {}, (row, v) => {
+  const ok = scheduleProjects(db, (db.tables.PROJECT?.rows ?? []).filter((p) => !baselines.has(p.proj_id)).map((p) => p.proj_id), {}, (row, v) => {
     let c = calc.get(row);
     if (!c) calc.set(row, (c = FIELDS.map(([f]) => row[f])));
     FIELDS.forEach(([f], k) => { if (f in v) c[k] = v[f]; });

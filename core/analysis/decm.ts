@@ -4,7 +4,7 @@
 // population is not assessed (the source "skips" it), and so is one the file cannot supply an input for (no baseline, no data date, no earlier update, no SLPP or planning-package activity type in P6), with the reason.
 // The threshold values are the source's, carried over as they are (dcmaDecm.ts:53-58); they have NOT been checked against the DCMA DECM workbook. The profile (default | strict) is the only way to change them.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
-import { baselineReason, loopNote, noDataDateNotAssessed, notAssessed as notAssessedNote } from '../notes.ts';
+import { baselineReason, loopNote, noDataDateReason, projectsText, notAssessed as notAssessedNote } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { startedBeforeFsPredecessor } from '../query/review.ts';
@@ -146,7 +146,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   // 06A506a / b / c: dcma_14 check 9 (dcma.ts invalidDateFlags, the one rule) split in three, over the activities of the projects that have a data date
   {
     const { with_data_date: pop, flagged } = invalidDateFlags(s);
-    if (!pop.length) { const why = noDataDateNotAssessed(namesText(s.projs.map((p) => p.proj_short_name))); na('06A506a', why); na('06A506b', why); na('06A506c', why); }
+    if (!pop.length) { const why = noDataDateReason(projectsText(s.projs.map((p) => p.proj_short_name))); na('06A506a', why); na('06A506b', why); na('06A506c', why); }
     else {
       const w = 'over all activities that are not WBS summaries, in projects with a data date.';
       percent('06A506a', flagged.filter((f) => f.actual_start_after).map((f) => offender(f.task, s, 'actual start after the status date')), pop.length, 'no activity has a data date');

@@ -7,6 +7,7 @@
 import { rows, type Db, type Row } from '../db.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
 import { datesNotCurrent } from '../notes.ts';
+import { dataDateUsedNotes } from './common.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { applyOps } from '../project/ops.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
@@ -147,7 +148,9 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
   const total = wd(ff ? finOf(ff) : null, fl ? finOf(fl) : null);
   // notes on what the figures stand on: an update whose saved dates are not current (a recalculation gives other dates), and two updates with one data date (a window of 0 days)
   const notes: string[] = [];
-  for (const u of list) { const st = storedDatesState(u.db, [u.projId]).stale[0]; if (st) notes.push(datesNotCurrent(`${u.name} (${st.proj})`, st.differ, st.open)); }
+  for (const u of list) { const st = storedDatesState(u.db, [u.projId]).stale[0]; if (st) notes.push(datesNotCurrent(u.name, st.differ, st.open)); }
+  // an update with no data date is dated by its planned start: said once
+  notes.push(...dataDateUsedNotes(list.map((u) => rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId)).filter((p): p is Row => !!p)));
   for (let i = 1; i < list.length; i++) {
     const x = dataDate(list[i - 1]), y = dataDate(list[i]);
     if (x != null && x === y) notes.push(`${list[i - 1].name} and ${list[i].name} have the same data date ${fmt(x)}: the window is 0 days.`);

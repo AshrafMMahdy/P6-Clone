@@ -7,7 +7,7 @@
 // a ratio of 1 for an empty population, a divisor of 1 for no activities) the helper answers `not_assessed` with the reason instead.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
 import { cstrName } from '../notes.ts';
-import { actualAfterDataDate, baselineReason, loopNote, noDataDateNotAssessed, outOfSequence } from '../notes.ts';
+import { actualAfterDataDate, baselineReason, loopNote, noDataDateNotAssessed, noDataDateReason, outOfSequence, projectsText } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentComplete, reportedPercent } from '../cost/rollup.ts';
@@ -258,7 +258,7 @@ export function progressAnomalies(s: Scope): Assessed<ProgressFigures> {
   const pool = s.tasks.filter((t) => !isWbs(t) && !isMilestone(t) && s.dataDate(t.proj_id) != null);
   const asg = groupBy(s.db.tables.TASKRSRC?.rows ?? [], 'task_id');
   const without = noDate.map((p) => p.proj_short_name);
-  if (!pool.length) return notAssessed(noDate.length ? `${namesText(without)} ${without.length === 1 ? 'has' : 'have'} no data date; pass status_date` : 'the project has no activity to examine (WBS summaries and milestones are not examined)');
+  if (!pool.length) return notAssessed(noDate.length ? noDataDateReason(projectsText(without)) : 'the project has no activity to examine (WBS summaries and milestones are not examined)');
   const out: ProgressAnomaly[] = [];
   const add = (rule: ProgressRule, t: Row, message: string, predecessor?: string) => out.push({ rule, severity: PROGRESS_RULES[rule].severity, id: t.task_code, name: t.task_name, ...(s.projs.length > 1 ? { project: s.ctx.proj.get(t.proj_id)?.proj_short_name } : {}), message, ...(predecessor ? { predecessor } : {}) });
   for (const t of pool) {

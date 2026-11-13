@@ -48,7 +48,7 @@ test('13: a file with no data date says the planned start was used, in every ans
   const o = await call('open_file', { path: sampleCopy('Aurora_Tower_Baseline.xer'), lenient: true });
   const used = /^aurora_tower has no data date: the planned start 2026-06-22 08:00 was used\. Set one with schedule data_date\.$/;
   const d0 = await call('dcma_14', { handle: o.handle });
-  assert.ok(d0.notes.includes('Not assessed: aurora_tower has no data date; pass status_date.'), JSON.stringify(d0.notes));
+  assert.ok(d0.notes.some((n: string) => /^Checks that need a data date( and .*)? not assessed: aurora_tower has no data date; pass status_date\.$/.test(n)), JSON.stringify(d0.notes));
   const ps0 = await call('project_summary', { handle: o.handle });
   assert.deepEqual(ps0.notes, ['aurora_tower has no data date: schedule uses the planned start 2026-06-22 08:00. Set one with schedule data_date.']);
   const s = await call('schedule', { handle: o.handle });
@@ -65,7 +65,8 @@ test('13: a file with no data date says the planned start was used, in every ans
   await call('edit', { handle: h, operations: [{ op: 'set_fields', table: 'PROJECT', where: { proj_short_name: 'NODATE' }, fields: { plan_start_date: '', last_recalc_date: '' } }] });
   const r = await call('schedule', { handle: h });
   assert.equal(r.ok, false);
-  assert.equal(r.error.message, 'Refused: NODATE has no data date and no planned start; give a data date (schedule data_date) or set a planned start (edit set_project planned_start).');
+  assert.equal(r.error.message, 'Refused: NODATE has no data date and no planned start: nothing can be calculated.');
+  assert.equal(r.error.hint, 'Set one with edit set_project (planned start) or pass data_date.');
 });
 
 test('16: compute_schedule gives every warning as a note (the first 25, the total, the cut note, the whole list in a file), with negative float, a missed must-finish-by, an unmet mandatory constraint and unmet relationships', async () => {
@@ -80,7 +81,7 @@ test('16: compute_schedule gives every warning as a note (the first 25, the tota
   // a finish past must_finish_by, a mandatory finish that breaks the logic
   const m = await call('compute_schedule', { start: '2026-01-05', must_finish_by: '2026-01-07', activities: [{ id: 'A', duration_days: 5 }, { id: 'D', duration_days: 3, predecessors: [{ id: 'A' }], constraint: { type: 'mandatory_finish', date: '2025-12-31' } }] });
   const w = m.notes.join('\n');
-  assert.match(w, /D: Mandatory Finish 2025-12-31 \d\d:\d\d is not met \(scheduled 2025-12-30 17:00\)\./);
+  assert.doesNotMatch(w, /Mandatory Finish 2025-12-31/); // a bare date is 00:00, the same working moment as 17:00 of the working day before: met
   assert.match(w, /A FS D is not met by 11 days\./);
   assert.match(w, /A has -11 days of total float\./);
   assert.doesNotMatch(w, / h /);

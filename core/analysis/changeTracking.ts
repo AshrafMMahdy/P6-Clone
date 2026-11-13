@@ -9,7 +9,7 @@ import { formatP6Date, parseP6Date } from '../dates.ts';
 import { assignmentChanges, baselineDateChanges, compareSchedules, percentChanges, progressIntegrity, type IntegrityFinding, type ScheduleChange } from '../diff.ts';
 import { dayHours } from '../project/units.ts';
 import type { Update } from './delay.ts';
-import { baselineOf, baselineFinish, makeScope, type Scope } from './common.ts';
+import { baselineOf, baselineFinish, dataDateUsedNotes, makeScope, type Scope } from './common.ts';
 import { referenceStart, updateDate, updateView } from './forensic.ts';
 
 export type Mode = 'latest' | 'all_periods';
@@ -179,7 +179,7 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
   ];
   const status = retro.length || baselineRevised.length ? 'fail' : totals.material ? 'warning' : 'pass';
   const label = (k: Category) => k.replace(/_/g, ' ');
-  const notes = tidyNotes(periods.flatMap((p) => CATEGORIES.flatMap((k) => { const c = p.categories[k]; return c.result === 'not_assessed' && c.note ? [`${cap(label(k))} not assessed in period ${p.from} to ${p.to}: ${c.note}.`] : []; })));
+  const notes = tidyNotes([...dataDateUsedNotes(series.map((u) => rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId)).filter((p): p is Row => !!p)), ...periods.flatMap((p) => CATEGORIES.flatMap((k) => { const c = p.categories[k]; return c.result === 'not_assessed' && c.note ? [`${cap(label(k))} not assessed in period ${p.from} to ${p.to}: ${c.note}.`] : []; }))]);
   const bare = (c: CategoryResult): CategoryResult => { const { note: _n, ...rest } = c; return rest as CategoryResult; };
   const bareCats = (m: Record<Category, CategoryResult>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, bare(v)])) as Record<Category, CategoryResult>;
   return {

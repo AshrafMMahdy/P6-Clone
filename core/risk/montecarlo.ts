@@ -11,7 +11,7 @@
 // risk impacts, runs the normal CPM (`scheduleProjects`) and records the project finish, each activity's
 // early finish and whether it was critical (total float <= 0).
 import { dataDigest, PROJECT_PLACE_FIELDS, rows, type Db, type Row, type Table } from '../db.ts';
-import { DataError } from '../notes.ts';
+import { DataError, scheduleRefusal } from '../notes.ts';
 import { MIN_PER_DAY, parseP6Date } from '../dates.ts';
 import { calendarResolver, optionsFor, scheduleProjects, p6num, type SchedOptions } from '../schedule/cpm.ts';
 import { linkedTasks, riskProbability, riskScheduleHours, risksOf, type RiskPhase } from './register.ts';
@@ -393,8 +393,8 @@ function finishOf(res: ReturnType<typeof scheduleProjects>, projIds: string[]): 
 function scheduleOrThrow(db: Db, projIds: string[], over: Partial<SchedOptions>) {
   const res = scheduleProjects(db, projIds, over);
   if (!res.ok) {
-    const why = res.findings.filter((f) => f.severity === 'error' || f.severity === 'fatal').map((f) => f.message).join('; ');
-    throw new DataError('schedule_failed', `The schedule cannot be calculated${why ? `: ${why}` : '.'}`, 'Fix what the message names (a loop, or a calendar with no work time), then call monte_carlo again; nothing was changed.');
+    const why = scheduleRefusal('the schedule cannot be calculated', res.findings.filter((f) => f.severity === 'error' || f.severity === 'fatal').map((f) => f.message));
+    throw new DataError('schedule_failed', why.message, why.hint ?? 'Fix what the message names, then call monte_carlo again; nothing was changed.');
   }
   return res;
 }

@@ -8,7 +8,7 @@ import { WorkCalendar, CalendarHorizonError } from '../calendar/calendar.ts';
 import { calendarDefOfRow, hoursPerWeek, inheritExceptions, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
 import { inLoopCheck, loopsOfLinks } from '../xer/validate.ts';
 import { buildScheduleLog } from './log.ts';
-import { actualAfterDataDate, cstrName, daysText, loopNote, minutesToDays, namesText, noDataDateUsed, outOfSequence, plural, refused } from '../notes.ts';
+import { actualAfterDataDate, cstrName, daysText, loopNote, minutesToDays, namesText, noDataDateUsed, noDateNoStartInstead, noDateNoStartWrong, outOfSequence, plural, refused } from '../notes.ts';
 
 export type LogicMode = 'retained' | 'override' | 'actual';
 export type FloatType = 'start' | 'finish' | 'smallest';
@@ -204,7 +204,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   }
   const emptyStats: ScheduleStats = { activities: 0, relationships: 0, notStarted: 0, inProgress: 0, completed: 0, finish: null, dataDate: null };
   if (noDate.length) {
-    findings.push({ severity: 'error', code: 'SCHED_NO_DATA_DATE', message: refused(`${namesText(noDate)} ${noDate.length === 1 ? 'has' : 'have'} no data date and no planned start`, 'give a data date (schedule data_date) or set a planned start (edit set_project planned_start)'), p6: 'P6 cannot schedule a project that has no planned start.' });
+    findings.push({ severity: 'error', code: 'SCHED_NO_DATA_DATE', message: refused(noDateNoStartWrong(noDate), noDateNoStartInstead()), p6: 'P6 cannot schedule a project that has no planned start.' });
     return { ok: false, log: '', findings, stats: emptyStats, projects: {} };
   }
   if (!projects.size) {

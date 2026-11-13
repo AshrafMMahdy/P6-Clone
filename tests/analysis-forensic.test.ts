@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rows } from '../core/db.ts';
 import { applyOps } from '../core/project/ops.ts';
@@ -376,7 +376,7 @@ test('loadUpdates: handles, files, baselines and progress updates in the order g
   const s = getSession(cur.handle);
   const before = usedMemory();
   const l = loadUpdates({ updates: [{ handle: other.handle, name: 'Other' }, { path: other.path }, { baseline: 'project' }, { data_date: '2026-01-25', name: 'Progress', progress: [{ op: 'update_activity', id: 'T2', remaining_days: 4 }] }], project: undefined }, s, helpers, { tool: 'windows_analysis', includeCurrent: true });
-  assert.deepEqual(l.updates.map((u) => u.name), ['Other', other.path, 'BL', 'Progress', 'current']);
+  assert.deepEqual(l.updates.map((u) => u.name), ['Other', `CLEAN at data date 2026-01-05 (${basename(other.path)})`, 'BL', 'Progress', 'current']);
   assert.equal(l.updates[0].db, getSession(other.handle).db);
   assert.equal(l.updates.at(-1)!.db, s.db);
   assert.ok(usedMemory() > before, 'the file read and the copy built are held');

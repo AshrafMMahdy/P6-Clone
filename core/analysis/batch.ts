@@ -1,5 +1,6 @@
 // What-ifs in bulk: the project is scheduled once as it is, then each scenario (a list of edit operations) is applied
 // and scheduled on a rolled-back copy, so dozens of candidates cost one call and one F9 each, and nothing is kept.
+import { scheduleRefusal } from '../notes.ts';
 import { dataDigest, PROJECT_PLACE_FIELDS, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
@@ -52,9 +53,9 @@ export function onScratch<T>(db: Db, fn: (d: Db) => T): T {
 }
 
 /** Schedule and read what a scenario is judged by. */
-export function measure(d: Db, projIds: string[], over: Partial<SchedOptions> = {}): { ok: true; m: Measure } | { ok: false; error: string } {
+export function measure(d: Db, projIds: string[], over: Partial<SchedOptions> = {}): { ok: true; m: Measure } | { ok: false; error: string; reasons: string[] } {
   const r = scheduleProjects(d, projIds, over);
-  if (!r.ok) return { ok: false, error: r.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ') || 'The schedule failed.' };
+  if (!r.ok) return { ok: false, error: r.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ') || 'The schedule failed.', reasons: r.findings.filter((f) => f.severity === 'error').map((f) => f.message) };
   const open = new Set(projIds), ctx = makeCtx(d, { hoursPerDay: 8 });
   const tasks = rows(d, 'TASK').filter((t) => open.has(t.proj_id));
   const crit = new Set(tasks.filter((t) => isCritical(t, ctx)).map((t) => t.task_code));
@@ -76,7 +77,7 @@ export function batchData(db: Db, projIds: string[], scenarios: Scenario[], over
 export async function evaluateBatch(db: Db, projIds: string[], scenarios: Scenario[], o: { options?: Partial<SchedOptions>; hoursPerDay?: number; calendarDays?: boolean; top?: number; tick?: Tick; /** each finished scenario row, as it is done */ onRow?: (row: ScenarioResult) => void; store?: RowStore } = {}) {
   const hpd = o.hoursPerDay ?? 8, top = o.top ?? 3;
   const base = onScratch(db, (d) => measure(d, projIds, o.options));
-  if (!base.ok) return { ok: false as const, error: { code: 'schedule_failed', message: `Refused: the project as it is cannot be scheduled (${String(base.error).replace(/\.$/, '')}).` } };
+  if (!base.ok) { const why = scheduleRefusal('the project as it is cannot be scheduled', base.reasons.length ? base.reasons : [base.error]); return { ok: false as const, error: { code: 'schedule_failed', message: why.message, hint: why.hint ?? 'Fix what the message names, then call evaluate_batch again; nothing was changed.' } }; }
   const p0 = rows(db, 'PROJECT').find((p) => p.proj_id === projIds[0]);
   const cal = calendarResolver(db, []).fallback(p0?.clndr_id ?? '');
   const days = (a: number | null, b: number | null) => (a == null || b == null ? null : Math.round((cal.workBetween(a, b) / 60 / (cal.hoursPerDay() || hpd)) * 100) / 100);

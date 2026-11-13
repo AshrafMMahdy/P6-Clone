@@ -11,6 +11,7 @@ import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
 import { financialPeriods, periodCalendar, projectCalendar } from '../progress/period.ts';
 import { dayHours } from '../project/units.ts';
 import { constraintsOf, DCMA_HARD } from '../analysis/common.ts';
+import { dataDateAssumedNotes, dataDateGaps } from '../analysis/common.ts';
 import { baselineLeftOut, currentPlanUsed, datesNotCurrent, differentDataDates, namesText, noDataDateNotAssessed, noDataDateWouldUse, notAssessed, tidyNotes } from '../notes.ts';
 import { duplicateRowNotes } from '../analysis/scheduleLog.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
@@ -129,7 +130,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       return {
         projects: projs.map((p) => { const nb = notebook(p); return { id: p.proj_short_name, name: projectName(db, p), data_date: d(p.last_recalc_date), planned_start: d(p.plan_start_date), must_finish_by: d(p.plan_end_date), scheduled_finish: d(p.scd_end_date), ...(nb.length ? { notebook: nb } : {}) }; }),
         activities: tasks.length, not_started: count('TK_NotStart'), in_progress: count('TK_Active'), completed: count('TK_Complete'),
-        ...(() => { const n = tidyNotes([...projs.filter((p) => parseP6Date(p.last_recalc_date) == null).map((p) => noDataDateWouldUse(p.proj_short_name, parseP6Date(p.plan_start_date) != null ? formatP6Date(parseP6Date(p.plan_start_date)!).slice(0, 16) : '(no planned start either)')), ...(tasks.length > new Set(tasks.map((t) => t.task_id)).size ? duplicateRowNotes(db, [...open], 'counted') : [])]); return n.length ? { notes: n } : {}; })(),
+        ...(() => { const n = tidyNotes([...projs.filter((p) => parseP6Date(p.last_recalc_date) == null).map((p) => noDataDateWouldUse(p.proj_short_name, parseP6Date(p.plan_start_date) != null ? formatP6Date(parseP6Date(p.plan_start_date)!).slice(0, 16) : null)), ...(tasks.length > new Set(tasks.map((t) => t.task_id)).size ? duplicateRowNotes(db, [...open], 'counted') : [])]); return n.length ? { notes: n } : {}; })(),
         critical: tasks.filter((t) => !t.act_end_date && isCritical(t, ctx)).length,
         negative_float: tasks.filter((t) => !t.act_end_date && Number(t.total_float_hr_cnt) < 0).length,
         milestones: tasks.filter((t) => t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile').length,
@@ -266,7 +267,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const limit = Math.max(1, Number(args.limit) || 50);
       const crit = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && (t.driving_path_flag === 'Y' || isCritical(t, ctx))).sort((a, b) => start(a).localeCompare(start(b)));
       const pg = pageOf(crit, args, limit);
-      const stale = storedDatesState(db, [...open]).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open));
+      const stale = [...dataDateGaps([...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean), '', 'data_date', false), ...storedDatesState(db, [...open]).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open))]; // (a project with no data date and no planned start cannot be rescheduled: the saved dates are all there is)
       return { total: crit.length, longest_path_flags_present: tasks.some((t) => t.driving_path_flag === 'Y'), offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map(brief), ...(stale.length ? { notes: stale } : {}) };
     }
     case 'schedule_health': {
@@ -297,7 +298,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         remaining_duration_over_44_days: ex(longDur),
         leads_negative_lag: leads.length, positive_lags: lags.length, relationship_types: types,
         started_out_of_sequence: ex(oos), not_started_but_dated_before_data_date: ex(stale),
-        ...(noDd.length || ddDiffer ? { notes: [...(noDd.length ? [notAssessed('activities dated before the data date', `${namesText(noDd.map((p) => p.proj_short_name))} ${noDd.length === 1 ? 'has' : 'have'} no data date`)] : []), ...(ddDiffer ? [differentDataDates(withDd.map((p) => ({ proj: p.proj_short_name, date: p.last_recalc_date.slice(0, 10) })), 'each project\u2019s own date')] : [])] } : {}),
+        ...(noDd.length || ddDiffer ? { notes: [...dataDateGaps(noDd, 'activities dated before the data date', null), ...(ddDiffer ? [differentDataDates(withDd.map((p) => ({ proj: p.proj_short_name, date: p.last_recalc_date.slice(0, 10) })), 'each project\u2019s own date')] : [])] } : {}),
       };
     }
     case 'trace_logic': {
@@ -345,7 +346,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         worst_schedule_performance: bySpi.slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, spi: round(x.e.spi), sv: round(x.e.sv) })), worst_schedule_performance_total: bySpi.length,
         // (every_activity, an export: each activity with cost, every earned value figure of it)
         ...(args.every_activity === true ? { activities: tasks.filter((t) => t.task_type !== 'TT_WBS' && costs.get(t.task_id)).map((t) => ({ project: ctx.proj.get(t.proj_id)?.proj_short_name, id: t.task_code, name: t.task_name, wbs: wbsPath(t.wbs_id), ...pack(sumLines([costs.get(t.task_id)!])) })) } : {}),
-        ...(() => { const n = tidyNotes([...projects.filter((p) => p.totals.bac === 0).map((p) => notAssessed('SPI, CPI and EAC', `${p.project} carries no costs`)), ...projects.filter((p) => !p.has_baseline).map((p) => currentPlanUsed(p.project ?? ''))]); return n.length ? { notes: n } : {}; })(),
+        ...(() => { const pRows = [...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean); const n = tidyNotes([...dataDateAssumedNotes(pRows), ...dataDateGaps(pRows, 'planned value and earned value at the data date', null), ...projects.filter((p) => p.totals.bac === 0).map((p) => notAssessed('SPI, CPI and EAC', `${p.project} carries no costs`)), ...projects.filter((p) => !p.has_baseline).map((p) => currentPlanUsed(p.project ?? ''))]); return n.length ? { notes: n } : {}; })(),
       };
     }
     case 'resource_summary': {

@@ -53,12 +53,21 @@ export const baselineChosen = (proj: string, baseline: string, which = 'its only
 /** A baseline by its argument value (`project`, `bl1`, a saved name) for the sentences above. */
 export const baselineWord = (which: string): string => (which === 'project' ? 'project baseline' : /^bl\d$/i.test(which) ? `${which.toUpperCase()} baseline` : `baseline ${which}`);
 
-/** No data date: the planned start stood in. */
-export const noDataDateUsed = (proj: string, plannedStart: string): string => `${proj} has no data date: the planned start ${plannedStart} was used. Set one with schedule data_date.`;
+/** No data date and no planned start: nothing can be calculated. The one state sentence for every tool: a refusal where the tool calculates (the two halves below), a note where it only reads. `arg`: the date argument the tool takes. */
+export const noDateNoStartWrong = (ids: string[]): string => `${projectsText(ids)} ${ids.length === 1 ? 'has' : 'have'} no data date and no planned start: nothing can be calculated`;
+export const noDateNoStartInstead = (arg = 'data_date'): string => `set one with edit set_project (planned start) or pass ${arg}`;
+export const noDateNoStart = (ids: string[], arg = 'data_date'): string => `${noDateNoStartWrong(ids)}; ${noDateNoStartInstead(arg)}.`;
+export const noDateNoStartRefusal = (ids: string[], arg = 'data_date'): { message: string; hint: string } => refusal(noDateNoStartWrong(ids), noDateNoStartInstead(arg));
+/** No data date: the planned start stood in (null: there is none either: the state sentence). */
+export const noDataDateUsed = (proj: string, plannedStart: string | null): string => (plannedStart == null ? noDateNoStart([proj]) : `${proj} has no data date: the planned start ${plannedStart} was used. Set one with schedule data_date.`);
 /** No data date, said by a tool that only reports it (the schedule, not this tool, uses the planned start). */
-export const noDataDateWouldUse = (proj: string, plannedStart: string): string => `${proj} has no data date: schedule uses the planned start ${plannedStart}. Set one with schedule data_date.`;
-/** No data date, in a tool that needs one and takes `status_date`: not assessed. The one sentence for every such tool. */
-export const noDataDateNotAssessed = (proj: string): string => `Not assessed: ${proj} has no data date; pass status_date.`;
+export const noDataDateWouldUse = (proj: string, plannedStart: string | null): string => (plannedStart == null ? noDateNoStart([proj]) : `${proj} has no data date: schedule uses the planned start ${plannedStart}. Set one with schedule data_date.`);
+/** A save wrote the planned start a schedule had assumed as the data date. */
+export const dataDateWritten = (proj: string, date: string): string => `${proj} had no data date: ${date} (its planned start) was written as the data date.`;
+/** The reason a part that needs a data date is not assessed. `proj`: the Project IDs, joined as projectsText does. */
+export const noDataDateReason = (proj: string, arg: string | null = 'status_date'): string => `${proj} has no data date; ${arg ? `pass ${arg}` : 'set one with schedule data_date'}`;
+/** No data date, in a tool that needs one and takes `status_date`: the part that is not assessed, with its reason. The one sentence for every such tool. */
+export const noDataDateNotAssessed = (proj: string, part = 'checks that need a data date', arg: string | null = 'status_date'): string => notAssessed(part, noDataDateReason(proj, arg));
 /** Projects with different data dates: which date was used. `dates` is "<Project ID> <date>" pairs. */
 export const differentDataDates = (dates: { proj: string; date: string }[], used: string): string => `${projectsText(dates.map((d) => d.proj))} have different data dates (${namesText(dates.map((d) => d.date))}): ${used} was used; pass project to work on one.`;
 /** Project IDs in a sentence: "A", "A and B", then the list rule (the first LISTED, how many more, the total). */
@@ -70,6 +79,9 @@ export const listCut = (shown: number, total: number | string, file?: string): s
 export function notAssessed(part: string, reason: string): string { return `${cap(part)} not assessed: ${reason.replace(/\.$/, '')}.`; }
 /** The notes of an answer as they are told: each sentence once, and the parts that are not assessed for the same reason in one sentence ("A, B and C not assessed: reason."). */
 export function tidyNotes(list: string[]): string[] {
+  // a project with no data date and no planned start has its state sentence: the "has no data date; pass status_date" reasons of the same project are not said again
+  const stateIds = new Set(list.flatMap((n) => { const m = /^(.+?) (?:has|have) no data date and no planned start: nothing can be calculated; /.exec(n); return m ? [m[1]] : []; }));
+  list = list.filter((n) => { const m = /^.+ not assessed: (.+) has no data date; pass status_date\.$/.exec(n); return !(m && stateIds.has(m[1])); });
   const seen = new Set<string>(), out: (string | { parts: string[]; reason: string })[] = [], by = new Map<string, { parts: string[]; reason: string }>();
   for (const n of list) {
     if (typeof n !== 'string' || !n || seen.has(n)) continue;
@@ -86,6 +98,17 @@ export function tidyNotes(list: string[]): string[] {
 export const refused = (wrong: string, instead: string): string => `Refused: ${wrong}; ${instead}.`;
 /** A refusal as the two halves of an error answer: what is wrong, and what to send instead (said once each). */
 export const refusal = (wrong: string, instead: string): { message: string; hint: string } => ({ message: `Refused: ${wrong}.`, hint: `${cap(instead)}.` });
+/** A refusal sentence ("Refused: wrong; instead." or a plain sentence) taken apart. */
+export function splitRefusal(sentence: string): { wrong: string; instead: string } {
+  const t = sentence.replace(/^Refused: /, '').replace(/\.$/, ''), i = t.indexOf('; ');
+  return i < 0 ? { wrong: t, instead: '' } : { wrong: t.slice(0, i), instead: t.slice(i + 2) };
+}
+/** A refusal because the schedule cannot be calculated: `what` stopped, the reasons are the scheduler's own sentences ("Refused: wrong; instead." or a plain sentence), said once each: what is wrong in the message, what to do in the hint (none: no hint). */
+export function scheduleRefusal(what: string, reasons: string[]): { message: string; hint: string | null } {
+  const parts = reasons.map(splitRefusal);
+  const instead = [...new Set(parts.map((p) => p.instead).filter(Boolean))].join('; ');
+  return { message: `Refused: ${what}: ${parts.map((p) => p.wrong).join('; ')}.`, hint: instead ? `${cap(instead)}.` : null };
+}
 /** A repaired copy opened. */
 export const openedRepaired = (file: string, faults: string): string => `Opened a repaired copy: P6 would refuse ${file} as given (${faults}).`;
 /** A fault the repair did not touch. */

@@ -15,7 +15,7 @@
 // Spreading is linear over each activity's working time. Values are hours (units) or the project currency (cost).
 import { maxOf, minOf } from '../arrays.ts';
 import { andList, projectsText, baselineChosen, cap, currentPlanUsed, notAssessed, refusal, tidyNotes } from '../notes.ts';
-import { baselineOf, namesText } from './common.ts';
+import { baselineOf, dataDateAssumedNotes, dataDateGaps, namesText } from './common.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { activityCosts, earnedValue, percentComplete, plannedShare, sumLines } from '../cost/rollup.ts';
@@ -83,7 +83,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   const lines = activityCosts(db, projIds);
   const dd = minOf(projs.map((p) => parseP6Date(p.last_recalc_date) ?? Infinity));
   const dataDate = Number.isFinite(dd) ? dd : null;
-  const notes: string[] = [];
+  const notes: string[] = [...dataDateAssumedNotes(projs), ...dataDateGaps(projs, 'figures at the data date', null)];
   // baseline counterparts (dates of the planned value)
   const bl = new Map<string, Row>();
   // the project baseline, else the primary user baseline (BL1), as P6 Professional's baseline bars fall back

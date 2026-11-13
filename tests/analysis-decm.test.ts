@@ -241,7 +241,7 @@ test('not assessed, with the reason: SLPP and planning packages (P6 has no such 
   // no data date (the sample): the three status-date checks are not assessed; with a status_date they are
   const aurora = readXerFile(sampleCopy('Aurora_Tower_Baseline.xer')).db;
   const n = by(decm(aurora, {}));
-  for (const id of ['06A506a', '06A506b', '06A506c']) { assert.equal(n[id].result, 'not_assessed', id); assert.match(n[id].note!, /^Not assessed: aurora_tower has no data date; pass status_date\.$/, id); }
+  for (const id of ['06A506a', '06A506b', '06A506c']) { assert.equal(n[id].result, 'not_assessed', id); assert.match(n[id].note!, /^(Actual start after status date|Actual finish after status date|.+) not assessed: aurora_tower has no data date; pass status_date\.$/, id); }
   const w = by(decm(aurora, { statusDate: at('2025-06-01') }));
   for (const id of ['06A506a', '06A506b', '06A506c']) assert.notEqual(w[id].result, 'not_assessed', id);
   assert.equal(decm(aurora, {}).status_date, null);

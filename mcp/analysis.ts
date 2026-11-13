@@ -10,7 +10,7 @@ import type { Db, Row } from '../core/db.ts';
 import { checkSchedule, P6_CHECKS } from '../core/analysis/checkSchedule.ts';
 import { dcma14, DCMA_PROFILES } from '../core/analysis/dcma.ts';
 import { analysisReportHtml } from '../core/analysis/report.ts';
-import { LISTED, namesText } from '../core/analysis/common.ts';
+import { dataDateGaps, LISTED, namesText } from '../core/analysis/common.ts';
 import { cutLintCheck, DEFAULT_LINT_THRESHOLDS, lintScheduleTicked, LINT_CHECKS, resolveLintThresholds } from '../core/analysis/lint.ts';
 import { evaluateBatch, type RowStore } from '../core/analysis/batch.ts';
 import { claimHere, keptPlace, keepWords, ScenarioFile, type Claim } from './keptRuns.ts';
@@ -23,7 +23,7 @@ import { syncAssignmentDates } from '../core/resource/assign.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { nowStamp } from '../core/report/reports.ts';
-import { formatP6Date } from '../core/dates.ts';
+import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { config, countArg, estimateBytes, fail, getSession, pathArg, readCause, reserveMemory, type Session } from './runtime.ts';
 import { between as betweenMax } from './workset.ts';
 import { cutWindow, tiaBaseline, timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
@@ -97,6 +97,12 @@ export const resultExporter = (name: string, a: Record<string, any>, h: Pick<Ana
  *  the same shapes for every tool that takes a series), each as the project of its own schedule, in the order given (the analysis puts them in data-date order), and with includeCurrent
  *  this handle's project as the last one (named currentName, default "current"). Each update read from a file, or built as a copy, is held for the call: counted in the memory
  *  budget (C14), and release() gives it back (the caller calls it when the call ends; a refusal in here has given back what was held). tool names the caller in the memory refusals. */
+/** An update named by what the agent knows it by: its Project ID and data date, and the base name of its file. */
+function updateName(db: Db, projId: string, path?: string): string {
+  const p = rows(db, 'PROJECT').find((x) => x.proj_id === projId);
+  const dd = parseP6Date(p?.last_recalc_date || p?.plan_start_date);
+  return `${p?.proj_short_name ?? projId}${dd != null ? ` at data date ${formatP6Date(dd).slice(0, 10)}` : ''}${path ? ` (${basename(path)})` : ''}`;
+}
 export function loadUpdates(a: Record<string, any>, s: Session, h: Pick<AnalysisHelpers, 'dd'>, o: { tool: string; includeCurrent: boolean; currentName?: unknown }): { updates: Update[]; release: () => void } {
   requireUpdates(a);
   // the project of a schedule in the series. The open file's: the top-level project, else the file's only project. Each update's (a file read for the series, or an as_planned file): the project of its own entry
@@ -124,8 +130,8 @@ export function loadUpdates(a: Record<string, any>, s: Session, h: Pick<Analysis
   try {
     if (o.includeCurrent) current(); // (this project is in the series: a file with several projects is refused before the others are read)
     for (const [i, u] of (a.updates as Record<string, unknown>[]).entries()) {
-      if (u?.handle) { const o = getSession(u.handle); updates.push({ name: String(u.name ?? o.path ?? u.handle), db: o.db, projId: mainProj(o.db, label(i, String(u.name ?? o.path ?? u.handle)), u, asPlanned).proj_id }); }
-      else if (u?.path) { const p = pathArg(u.path); releases.push(reserveMemory(estimateBytes(sizeOf(p)), `Reading ${asPlanned ? 'the as_planned file' : `update ${i + 1}`} (${basename(p)}) for ${o.tool}`, asPlanned ? 'open the file with open_file and pass its handle when there is room' : 'open the updates with open_file and pass their handles when there is room')); let db: Db; try { db = detectFormat(p, headOf(p)) === 'xer' ? readXerFile(p).db : (() => { const b = new Uint8Array(readFileSync(p)); return readRaw(b, detectFormat(p, b)).db; })(); } catch (e) { if (e instanceof Error && /^E[A-Z]+$/.test(String((e as { code?: unknown }).code ?? ''))) return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.', { data: readCause(e) }); return fail('bad_input', `Cannot read ${asPlanned ? 'the as_planned file' : `update ${i + 1}`} (${basename(p)}): ${(e as Error).message}`, 'Give an XER, P6 XML or Microsoft Project XML (.xml) file, or open it with open_file and pass its handle.'); } updates.push({ name: String(u.name ?? p), db, projId: mainProj(db, label(i, basename(p)), u, asPlanned).proj_id }); }
+      if (u?.handle) { const o = getSession(u.handle), pid = mainProj(o.db, label(i, String(u.name ?? o.path ?? 'the open file')), u, asPlanned).proj_id; updates.push({ name: String(u.name ?? updateName(o.db, pid, o.path ?? undefined)), db: o.db, projId: pid }); }
+      else if (u?.path) { const p = pathArg(u.path); releases.push(reserveMemory(estimateBytes(sizeOf(p)), `Reading ${asPlanned ? 'the as_planned file' : `update ${i + 1}`} (${basename(p)}) for ${o.tool}`, asPlanned ? 'open the file with open_file and pass its handle when there is room' : 'open the updates with open_file and pass their handles when there is room')); let db: Db; try { db = detectFormat(p, headOf(p)) === 'xer' ? readXerFile(p).db : (() => { const b = new Uint8Array(readFileSync(p)); return readRaw(b, detectFormat(p, b)).db; })(); } catch (e) { if (e instanceof Error && /^E[A-Z]+$/.test(String((e as { code?: unknown }).code ?? ''))) return fail('file_unreadable', `Cannot read ${p}.`, 'Check the path.', { data: readCause(e) }); return fail('bad_input', `Cannot read ${asPlanned ? 'the as_planned file' : `update ${i + 1}`} (${basename(p)}): ${(e as Error).message}`, 'Give an XER, P6 XML or Microsoft Project XML (.xml) file, or open it with open_file and pass its handle.'); } { const pid = mainProj(db, label(i, basename(p)), u, asPlanned).proj_id; updates.push({ name: String(u.name ?? updateName(db, pid, p)), db, projId: pid }); } }
       else if (u?.baseline) { const cur = current(), bl = baselineOf(s.db, cur, String(u.baseline) as 'project') ?? fail('bad_input', `The project has no ${u.baseline} baseline in this file.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(s.db, [cur.proj_id]).join(', ') || 'none saved'}.`); updates.push({ name: String(u.name ?? bl.name), db: s.db, projId: bl.projId }); }
       else if (u?.data_date && Array.isArray(u.progress)) {
         // built from the last update that is a schedule of its own (a stored baseline is a snapshot, not edited), else the current project
@@ -212,7 +218,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const maxPaths = a.between != null ? betweenMax(a.between) : undefined; // refused, before any work, when it is not a positive whole number
       const opts = { count: countArg(a.count, 'count') ?? 10, endActivity: a.end_activity, method: method as 'free_float' | 'total_float' };
       const r = computeFloatPaths(s.db, projIds, opts);
-      const stale = storedDatesState(s.db, projIds).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open)); // the paths read the saved float
+      const stale = [...dataDateGaps(rows(s.db, 'PROJECT').filter((p) => projIds.includes(p.proj_id)), '', 'data_date', false), ...storedDatesState(s.db, projIds).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open))]; // the paths read the saved float
       if (a.write) h.apply('Float paths', (d) => writeFloatPaths(d, projIds, computeFloatPaths(d, projIds, opts).assign));
       const nearDays = a.near_critical_days != null ? Number(a.near_critical_days) : 10;
       const tasks = (s.db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);

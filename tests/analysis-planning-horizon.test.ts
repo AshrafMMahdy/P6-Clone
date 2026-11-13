@@ -160,7 +160,7 @@ test('not assessed: no data date (no fall back to the earliest start or to 2000-
   const aurora = readXerFile(sampleCopy('Aurora_Tower_Baseline.xer')).db;
   const none = planningHorizon(aurora, {});
   assert.equal(none.result, 'not_assessed');
-  assert.deepEqual(none.notes, ['Not assessed: aurora_tower has no data date; pass status_date.']);
+  assert.deepEqual(none.notes, ['Planning horizon not assessed: aurora_tower has no data date; pass status_date.']);
   assert.equal(none.status_date, null);
   assert.deepEqual(none.bands, []);
   assert.deepEqual(none.summary.projects_without_data_date, ['aurora_tower']);

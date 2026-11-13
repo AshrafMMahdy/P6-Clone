@@ -4,7 +4,8 @@
 // (the source falls back to the earliest start, or to 2000-01-01); a P6 file has no approval field, so readiness is judged on logic, resources, float and forecast stability only; an empty window has
 // no score (the source gives it 100).
 import { groupBy, rows } from '../db.ts';
-import { baselineReason, cap, loopNote, namesText, noDataDateNotAssessed, notAssessed, tidyNotes } from '../notes.ts';
+import { dataDateGaps } from './common.ts';
+import { baselineReason, cap, loopNote, namesText, noDataDateNotAssessed, notAssessed, projectsText, tidyNotes } from '../notes.ts';
 import { formatP6Date } from '../dates.ts';
 import { reportedPercent } from '../cost/rollup.ts';
 import { isCritical } from '../project/ctx.ts';
@@ -84,7 +85,7 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
   const loops = logicLoops(s).map((l) => ({ activities: l }));
   // no anchor, no analysis (the source falls back to the earliest start, or to 2000-01-01)
   if (noDate.length === s.projs.length) {
-    return { ...base, result: 'not_assessed', notes: [noDataDateNotAssessed(namesText(noDate))], summary: empty, loops, bands: [], systemic_issues: [] };
+    return { ...base, result: 'not_assessed', notes: tidyNotes(dataDateGaps(s.projs, 'planning horizon', 'status_date')), summary: empty, loops, bands: [], systemic_issues: [] };
   }
   // file-wide inputs
   const asgRows = rows(s.db, 'TASKRSRC').filter((a) => a.rsrc_id && s.projIds.has(a.proj_id || s.ctx.taskById.get(a.task_id)?.proj_id || ''));

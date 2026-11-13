@@ -3,7 +3,7 @@
 // and relationship types count relationships. Durations and float are in working days of each activity's calendar.
 // The Critical Path Test runs on a scratch copy (a journal that is rolled back); CPLI and BEI use a chosen baseline.
 import { maxOf, minOf } from '../arrays.ts';
-import { baselineReason, cstrName, namesText } from '../notes.ts';
+import { baselineReason, cstrName, namesText, noDataDateReason, projectsText } from '../notes.ts';
 import { type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
@@ -221,7 +221,7 @@ export function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: st
   }
   if (!test) return notAssessed('critical_path_test', name, 'days', null, pick ? `${pick} is not an incomplete task in scope` : s.tasks.some((t) => t.early_start_date) ? 'no incomplete task drives the project finish (every remaining task is complete, a milestone, or level of effort)' : 'the project has no early dates; run schedule first');
   const before = projectFinish(s);
-  let after: number | null = null, ok = true, msg = '';
+  let after: number | null = null, ok = true, msg = '', noDate = false;
   // the delay in hours of the test activity's calendar; the finish shift is measured in the same working time
   const add = slipDays * s.dh.task(test);
   const j = record(s.db, (d) => {
@@ -229,11 +229,11 @@ export function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: st
     t.remain_drtn_hr_cnt = p6num(Number(t.remain_drtn_hr_cnt || 0) + add);
     if (!t.act_start_date) t.target_drtn_hr_cnt = p6num(Number(t.target_drtn_hr_cnt || 0) + add);
     const r = scheduleProjects(d, [...s.projIds], {});
-    if (!r.ok) { ok = false; msg = r.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '); return; }
+    if (!r.ok) { ok = false; noDate = r.findings.some((f) => f.code === 'SCHED_NO_DATA_DATE'); msg = r.findings.filter((f) => f.severity === 'error').map((f) => f.message.replace(/^Refused: /, '').replace(/\.$/, '')).join('; '); return; }
     after = maxOf(d.tables.TASK.rows.filter((x) => s.projIds.has(x.proj_id)).map((x) => forecastFinish(x) ?? -Infinity));
   });
   rollback(j);
-  if (!ok || before == null || after == null) return notAssessed('critical_path_test', name, 'days', null, `the test could not be scheduled (${msg || 'no finish date'})`);
+  if (!ok || before == null || after == null) return notAssessed('critical_path_test', name, 'days', null, noDate ? noDataDateReason(projectsText(s.projs.filter((p) => s.dataDate(p.proj_id) == null).map((p) => p.proj_short_name))) : `the test could not be scheduled: ${msg || 'no finish date'}`);
   const movedHours = s.cal(test).workBetween(before, after) / 60;
   const moved = Math.round((movedHours / s.dh.task(test)) * 100) / 100;
   const pass = Math.abs(movedHours - add) <= s.dh.task(test); // within one day
@@ -253,7 +253,7 @@ function cpli(s: Scope, given: number | null, bls: Map<string, ReturnType<typeof
   const dd = p ? s.dataDate(p.proj_id) : null, fin = projectFinish(s);
   // CPLI is of ONE project (the first in scope): said, so it is not read as the figure of all of them
   const whose = p && s.projs.length > 1 ? `CPLI is of ${p.proj_short_name}, the first of ${s.projs.length} projects in scope; pass project to measure another.` : '';
-  if (!p || dd == null || fin == null) return notAssessed('cpli', name, 'ratio', th, `${p ? p.proj_short_name : 'the project'} has no data date or no forecast finish; run schedule first`);
+  if (!p || dd == null || fin == null) return notAssessed('cpli', name, 'ratio', th, dd == null ? noDataDateReason(p ? p.proj_short_name : 'the project') : `${p!.proj_short_name} has no forecast finish; run schedule first`);
   const cal = s.projCal(p);
   const cpl = s.workDays(cal, dd, fin);
   const contract = given ?? parseP6Date(p.plan_end_date) ?? null;
