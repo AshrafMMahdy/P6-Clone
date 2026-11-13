@@ -181,3 +181,24 @@ test('save as P6 XML: the note says the kinds and names a file that lists every 
   assert.equal(inFile, inNote);
   assert.ok(!('not_in_p6_xml' in s));
 });
+
+test('every analysis that judges from the saved dates says when they are not what a recalculation gives, once, in the sentence that does not order a recalculation; not on a file whose dates are current, and not after schedule', async () => {
+  const TOOLS = ['critical_path', 'float_paths', 'dcma_14', 'check_schedule', 'decm', 'schedule_health', 'lint', 'schedule_index', 'planning_horizon', 'earned_value', 'progress_curves', 'resource_histogram', 'review'];
+  // verify_fidelity_schedule.xer: 6 open activities whose saved early dates are not the ones its own logic gives (a file written by a tool, never calculated in P6)
+  const o = await open('verify_fidelity_schedule.xer'), h = o.handle;
+  const said = 'The saved dates of verify_fidelity are not what a recalculation gives (6 of 6 open activities differ): these figures are of the saved dates; run schedule to recalculate them.';
+  for (const tool of TOOLS) {
+    const a = await call(tool, { handle: h });
+    assert.equal((a.notes ?? []).filter((n: string) => n === said).length, 1, `${tool}: ${JSON.stringify(a.notes)}`);
+    assert.equal(JSON.stringify(a).split('are not what a recalculation gives').length - 1, 1, `${tool}: once in the answer`);
+  }
+  // an edit that leaves the dates not current says the fact and how to recalculate (it has no figures of its own)
+  const e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: '1', duration_days: 9 }] });
+  assert.ok(e.notes.some((n: string) => /^The saved dates of verify_fidelity are not what a recalculation gives \(\d of 6 open activities differ\); run schedule to recalculate them\.$/.test(n)), JSON.stringify(e.notes));
+  // calculated: no tool says it
+  await call('schedule', { handle: h });
+  for (const tool of TOOLS) assert.ok(!JSON.stringify((await call(tool, { handle: h })).notes ?? []).includes('recalculation'), tool);
+  // a real P6 export whose saved dates are its own (Detailed Program): none says it as opened
+  const d = await open('Detailed Program.xer');
+  for (const tool of TOOLS) assert.ok(!JSON.stringify((await call(tool, { handle: d.handle })).notes ?? []).includes('recalculation'), `Detailed Program ${tool}`);
+});

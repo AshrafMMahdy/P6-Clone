@@ -15,7 +15,7 @@ async function project(extra: unknown[] = []) {
   await call('schedule', { handle: p.handle });   // the saved dates are current
   return p.handle as string;
 }
-const STALE = /^The saved dates of EC are not current: \d+ of \d+ open activit(?:y|ies) differs? from what F9 gives; run schedule first\.$/;
+const STALE = /^The saved dates of EC are not what a recalculation gives \(\d+ of \d+ open activit(?:y|ies) differs?\)(?:: these figures are of the saved dates)?; run schedule to recalculate them\.$/;
 
 test('a duration change is old -> new in days; the saved dates are then not current, said once', async () => {
   const h = await project();

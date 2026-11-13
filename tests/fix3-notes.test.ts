@@ -135,10 +135,10 @@ test('7: a stored baseline is never "saved dates not current"; the stale note af
   const stale = (e: any) => (e.notes ?? []).filter((n: string) => /saved dates of/.test(n));
   const ddEdit = await call('edit', { handle: h, operations: [{ op: 'set_project', data_date: '2026-04-08' }] });
   assert.equal(stale(ddEdit).length, 1, JSON.stringify(ddEdit.notes ?? ddEdit).slice(0, 400));
-  assert.match(stale(ddEdit)[0], /^The saved dates of TOWER-A are not current: /);
+  assert.match(stale(ddEdit)[0], /^The saved dates of TOWER-A are not what a recalculation gives \(/);
   await call('schedule', { handle: h });
   const mfb = await call('edit', { handle: h, operations: [{ op: 'set_project', must_finish_by: '2026-06-30' }] });
-  assert.ok(stale(mfb).every((n: string) => /^The saved dates of TOWER-A are not current: /.test(n)), JSON.stringify(mfb.notes));
+  assert.ok(stale(mfb).every((n: string) => /^The saved dates of TOWER-A are not what a recalculation gives \(/.test(n)), JSON.stringify(mfb.notes));
   // the answer of the edit never names the stored baseline
   assert.ok(!JSON.stringify(mfb).includes('TOWER-A-BL1') && !JSON.stringify(ddEdit).includes('TOWER-A-BL1'));
   await call('schedule', { handle: h });
@@ -147,7 +147,7 @@ test('7: a stored baseline is never "saved dates not current"; the stale note af
   await call('schedule', { handle: h });
   const dur = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A1030', duration_days: 60 }] });
   assert.equal(stale(dur).length, 1, JSON.stringify(dur).slice(0, 500));
-  assert.match(stale(dur)[0], /^The saved dates of TOWER-A are not current/);
+  assert.match(stale(dur)[0], /^The saved dates of TOWER-A are not what a recalculation gives/);
 });
 
 test('8: edit changes are named as P6 names them, in the units the operation takes, with the ids the agent uses, each change once', async () => {
@@ -253,7 +253,7 @@ test('13: updates are named by Project ID and data date (never a handle or a tem
   const one = await built('2026-01-05', [act('A', 5)], 'ONE');
   await call('schedule', { handle: one });
   const ed = await call('edit', { handle: one, operations: [{ op: 'update_activity', id: 'A', duration_days: 9 }] });
-  assert.ok((ed.notes as string[]).includes('The saved dates of ONE are not current: 1 of 1 open activity differs from what F9 gives; run schedule first.'), JSON.stringify(ed.notes));
+  assert.ok((ed.notes as string[]).includes('The saved dates of ONE are not what a recalculation gives (1 of 1 open activity differs); run schedule to recalculate them.'), JSON.stringify(ed.notes));
 });
 
 test('14: an unknown argument is told in the job result too; crash_schedule says why it stopped on cost; evaluate_batch says no scenario beats the schedule', async () => {

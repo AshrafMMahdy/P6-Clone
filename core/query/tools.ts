@@ -269,7 +269,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const limit = Math.max(1, Number(args.limit) || 50);
       const crit = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && (t.driving_path_flag === 'Y' || isCritical(t, ctx))).sort((a, b) => start(a).localeCompare(start(b)));
       const pg = pageOf(crit, args, limit);
-      const stale = [...dataDateGaps([...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean), '', 'data_date', false), ...storedDatesState(db, [...open]).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open))]; // (a project with no data date and no planned start cannot be rescheduled: the saved dates are all there is)
+      const stale = [...dataDateGaps([...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean), '', 'data_date', false), ...storedDatesState(db, [...open]).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true))]; // (a project with no data date and no planned start cannot be rescheduled: the saved dates are all there is)
       return { total: crit.length, longest_path_flags_present: tasks.some((t) => t.driving_path_flag === 'Y'), offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map(brief), ...(stale.length ? { notes: stale } : {}) };
     }
     case 'schedule_health': {

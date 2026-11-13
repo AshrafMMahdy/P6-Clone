@@ -69,7 +69,7 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   const crit = live.filter((t) => isCritical(t, ctx));
   add('critical', 'Critical activities', crit, live.length, null, null, 'informational', '');
   const { stale } = storedDatesState(db, [...open]);
-  add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), live.length, 0, null, 'none', stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open)).join(' '), stale.flatMap((x) => x.examples.map((f) => f.message)));
+  add('saved_dates', 'Saved dates P6 would change on F9', stale.reduce((a, x) => a + x.differ, 0), live.length, 0, null, 'none', stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true)).join(' '), stale.flatMap((x) => x.examples.map((f) => f.message)));
 
   const grade = checks.some((c) => c.grade === 'fail') ? 'fail' as const : checks.some((c) => c.grade === 'warn') ? 'warn' as const : 'pass' as const;
   return { grade, projects: projs.map((p) => p.proj_short_name), openActivities: live.length, relationships: P.length, checks };

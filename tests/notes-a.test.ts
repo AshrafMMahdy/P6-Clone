@@ -123,6 +123,7 @@ test('6: a schedule that cannot be calculated stops monte_carlo with a refusal, 
 
 test('7: schedule_health counts the hard constraints of the DCMA set, with no note of its own', async () => {
   const h = await built('2026-01-05', [act('A', 2, { constraint: { type: 'finish_on_or_before', date: '2026-02-01' } }), act('B', 2)]);
+  await call('schedule', { handle: h }); // (calculated first: an analysis of saved dates that are not current says so, which is not what this test is about)
   const r = await call('schedule_health', { handle: h });
   assert.equal(r.hard_constraints.count, 1, 'Finish On or Before counts: it is in the DCMA set the tool description names');
   assert.equal(r.note, undefined);
@@ -137,6 +138,7 @@ test('9: validate does not warn about the clone\'s own in-memory EPS table', asy
 
 test('10 and 34: progress_curves says the current plan was used and "no budgeted cost" once; Earned Schedule says why it is not assessed', async () => {
   const h = await built('2026-03-02', [act('A', 5), act('B', 5), rel('A', 'B')]);
+  await call('schedule', { handle: h }); // (calculated first, as above)
   const c = await call('progress_curves', { handle: h, units: 'cost' });
   const all = JSON.stringify(c);
   assert.equal(count(all, 'No budgeted cost'), 1, 'said once, in notes');

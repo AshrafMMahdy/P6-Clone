@@ -218,7 +218,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const maxPaths = a.between != null ? betweenMax(a.between) : undefined; // refused, before any work, when it is not a positive whole number
       const opts = { count: countArg(a.count, 'count') ?? 10, endActivity: a.end_activity, method: method as 'free_float' | 'total_float' };
       const r = computeFloatPaths(s.db, projIds, opts);
-      const stale = [...dataDateGaps(rows(s.db, 'PROJECT').filter((p) => projIds.includes(p.proj_id)), '', 'data_date', false), ...storedDatesState(s.db, projIds).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open))]; // the paths read the saved float
+      const stale = [...dataDateGaps(rows(s.db, 'PROJECT').filter((p) => projIds.includes(p.proj_id)), '', 'data_date', false), ...storedDatesState(s.db, projIds).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true))]; // the paths read the saved float
       if (a.write) h.apply('Float paths', (d) => writeFloatPaths(d, projIds, computeFloatPaths(d, projIds, opts).assign));
       const nearDays = a.near_critical_days != null ? Number(a.near_critical_days) : 10;
       const tasks = (s.db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);

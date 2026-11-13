@@ -15,7 +15,7 @@ test('a file edited after its last schedule is flagged, without changing the fil
   const before = JSON.stringify(db.tables.TASK.rows);
   const f = checkStoredDates(db);
   assert.equal(f[0].code, 'DATES_NOT_CURRENT');
-  assert.match(f[0].message, /^The saved dates of .+ are not current: 26 of 635 open activit(?:y|ies) differs? from what F9 gives; run schedule first\.$/);
+  assert.match(f[0].message, /^The saved dates of .+ are not what a recalculation gives \(26 of 635 open activities differ\); run schedule to recalculate them\.$/);
   assert.equal(f.filter((x) => x.code === 'DATE_NOT_CURRENT').length, 26); // one example per activity that differs, every one (an answer cuts the list by the list rule)
   assert.equal(JSON.stringify(db.tables.TASK.rows), before);
 });

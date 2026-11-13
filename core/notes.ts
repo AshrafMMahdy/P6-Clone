@@ -129,7 +129,9 @@ export const defaultCalendarWeek = (name: string): string => `Calendar ${name} h
 /** The saved dates are not current (a tool that reads them). */
 /** A project whose open activities carry no calculated dates at all (never scheduled). */
 export const datesNotStored = (proj: string): string => `${proj} has no calculated dates for its open activities; run schedule first.`;
-export const datesNotCurrent = (proj: string, differ: number, open: number): string => `The saved dates of ${proj} are not current: ${differ} of ${open} open ${open === 1 ? 'activity' : 'activities'} ${differ === 1 ? 'differs' : 'differ'} from what F9 gives; run schedule first.`;
+/** The saved dates of a project are not what a recalculation gives (edited since the last calculation, written by another tool, or levelled). The sentence states the fact and how to recalculate; it does not
+ *  order a recalculation, which on a levelled programme throws the levelling away (owner 2026-11-13). `figures`: the answer judges from those dates (an analysis), so it says what its figures are of. */
+export const datesNotCurrent = (proj: string, differ: number, open: number, figures = false): string => `The saved dates of ${proj} are not what a recalculation gives (${differ} of ${open} open ${open === 1 ? 'activity' : 'activities'} ${differ === 1 ? 'differs' : 'differ'})${figures ? ': these figures are of the saved dates' : ''}; run schedule to recalculate them.`;
 /** A loop. */
 export const loopNote = (ids: string[]): string => `${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
 /** Resources that are Material: a material is a quantity, not a crew, so its over-allocation is not judged. `ids` are Resource IDs. */

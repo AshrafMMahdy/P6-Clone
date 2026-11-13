@@ -21,7 +21,7 @@ const TABLE_COLUMN = /\b(?:TASK|TASKPRED|TASKRSRC|PROJWBS|PROJECT|RSRC|RSRCRATE|
 const RAW = /\bh_[A-Za-z0-9_-]{8,}|\/tmp\/|\/var\/folders|\\Temp\\|p6-test-|p6-notes|p6-fix3/;
 /** The family of a sentence and its subject: two sentences of one family about one subject in one answer say one fact twice. A helper per family of core/notes.ts. */
 const FAMILIES: [string, RegExp][] = [
-  ['no-data-date', /^(?:.+ not assessed: )?(.+?) (?:has|have) no data date\b/], ['baseline-not-assigned', /[Nn]o baseline is assigned to (.+?)[:;]/], ['dates-not-current', /^The saved dates of (.+?) are not current/],
+  ['no-data-date', /^(?:.+ not assessed: )?(.+?) (?:has|have) no data date\b/], ['baseline-not-assigned', /[Nn]o baseline is assigned to (.+?)[:;]/], ['dates-not-current', /^The saved dates of (.+?) are not what a recalculation gives/],
   ['root-wbs', /Project (.+?) has no root WBS/], ['material', /^(\d+) resources? (?:is|are) Material/], ['no-limit', /^(\d+) resources? (?:has|have) no Max Units\/Time/], ['loop', /^.+ (?:is|are) (in a loop)\.$/], ['links-left-out', /^(Left out of this schedule)/],
   ['planned-start-used', /^(.+?) has no data date: the planned start .* was used/],
 ];

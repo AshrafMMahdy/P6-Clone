@@ -1087,9 +1087,8 @@ function jobResultWithArgumentsNotUsed(name: string, a: Record<string, any>, res
 }
 /** The analyses that judge from the saved dates and float without calculating them. Their answer says when those dates are not what F9 gives, or are not there:
  *  the judgement is then of other dates than the schedule's own. One dry-run calculation per state of the project, kept until the project changes. */
-// OWNER DECISION PENDING (2026-11-13): the other analyses that judge from the saved dates (dcma_14, check_schedule, decm, schedule_health, lint, schedule_index, planning_horizon, baseline_variance,
-// earned_value, progress_curves, resource_histogram) say nothing when those dates are not current; whether they say it too, and in which words, is his to decide. Until then: the two that said it at the last release.
-const READS_SAVED_DATES = new Set(['critical_path', 'float_paths']);
+// (owner 2026-11-13: every one of them says it, in the sentence that states the fact and does not order a recalculation)
+const READS_SAVED_DATES = new Set(['critical_path', 'float_paths', 'dcma_14', 'check_schedule', 'decm', 'schedule_health', 'lint', 'schedule_index', 'planning_horizon', 'baseline_variance', 'earned_value', 'progress_curves', 'resource_histogram']);
 const savedDatesKept = new WeakMap<Session, { key: string; state: ReturnType<typeof storedDatesState> }>();
 function savedDatesNotes(s: Session, project: unknown): string[] {
   const key = `${s.changedAt ?? 0}|${s.history.length}`;
@@ -1098,7 +1097,7 @@ function savedDatesNotes(s: Session, project: unknown): string[] {
   let ids: string[];
   try { ids = projectIds(s.db, project); } catch { return []; } // (a project the call could not name: the call's own refusal stands)
   const names = new Set((s.db.tables.PROJECT?.rows ?? []).filter((p) => ids.includes(p.proj_id)).map((p) => p.proj_short_name || p.proj_id));
-  return [...k.state.notStored.filter((n) => names.has(n)).map(datesNotStored), ...k.state.stale.filter((x) => names.has(x.proj)).map((x) => datesNotCurrent(x.proj, x.differ, x.open))];
+  return [...k.state.notStored.filter((n) => names.has(n)).map(datesNotStored), ...k.state.stale.filter((x) => names.has(x.proj)).map((x) => datesNotCurrent(x.proj, x.differ, x.open, true))];
 }
 async function callToolRun(name: string, a: Record<string, any>, sessionCaller?: string, signal?: AbortSignal, progress?: Ctx['progress']): Promise<{ out: unknown; isError: boolean }> {
   ensureCwd(); // (a folder the server was started in may be gone: workers and child processes read it when they start)
