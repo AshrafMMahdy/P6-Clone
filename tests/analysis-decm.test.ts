@@ -156,7 +156,7 @@ test('06A501a: an activity not in the baseline, or in it with no start or no fin
   assert.deepEqual(ids(r['06A501a']).sort(), ['D', 'T2']);
   assert.deepEqual([r['06A501a'].numerator, r['06A501a'].denominator], [2, 4]);
   // the baseline argument is read as dcma_14 reads it: one that does not exist is not assessed
-  assert.match(by(decm(b.db, { baseline: 'bl3' }))['06A501a'].note!, /not assessed: no baseline is assigned to/);
+  assert.match(by(decm(b.db, { baseline: 'bl3' }))['06A501a'].note!, /not assessed: no BL3 baseline is assigned to/);
 });
 
 test('06A504a/b: an actual start / finish that differs from the one an earlier update held, over consecutive updates in data-date order', () => {

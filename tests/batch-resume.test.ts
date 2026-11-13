@@ -30,7 +30,7 @@ const chain = async (n: number) => {
 const N = 300;
 const scenarios = Array.from({ length: N }, (_, i) => ({ name: `s${i}`, overrides: [{ op: 'update_activity', id: `A${i % 60}`, duration_days: i === 1 ? 1 : i >= N - 2 ? 2 : 4 + (i % 3) }] }));
 // (the result folder is named by the project and the file it was opened from: the notes that name a file are compared without that folder name)
-const same = (d: any) => { const { resumed_scenarios: _r, redone_scenarios: _d, redone_note: _n, exported: _x, ...rest } = d; return JSON.parse(JSON.stringify(rest).replace(/analysis[\\/][^\\/"]+[\\/]/g, 'analysis/-/')); };
+const same = (d: any) => { const { resumed_scenarios: _r, redone_scenarios: _d, notes: n, exported: _x, ...rest } = d; const kept = (n ?? []).filter((x: string) => !/did not check out/.test(x)); if (kept.length) (rest as any).notes = kept; return JSON.parse(JSON.stringify(rest).replace(/analysis[\\/][^\\/"]+[\\/]/g, 'analysis/-/')); };
 
 /** A batch (a job) cancelled once it has started scenario `at` or later. */
 const stopped = async (h: object, at: number) => {
@@ -51,7 +51,7 @@ test('a batch cancelled part-way is continued from its kept scenarios: the answe
   assert.equal(part.partial, true); assert.equal(part.stopped, 'cancelled');
   assert.ok(part.scenarios_done >= 2 && part.scenarios_done < N - 2, String(part.scenarios_done));
   assert.ok(existsSync(part.resume), JSON.stringify(part).slice(0, 300));
-  assert.equal(part.note, 'Cancelled after 9 of 300 scenarios: the result covers those only.');
+  assert.equal(part.note, `Cancelled after ${part.scenarios_done} of 300 scenarios: the result covers those only.`);
   const resumed = (await call('evaluate_batch', { ...h, scenarios, top: 3, resume: part.resume })).d;
   assert.equal(resumed.resumed_scenarios, part.scenarios_done);
   assert.deepEqual(same(resumed), same(full));
@@ -124,7 +124,7 @@ test('a kept scenario damaged in place is done again, with every one after it, a
   const resumed = (await call('evaluate_batch', { ...h, scenarios, top: 3, resume: part.resume })).d;
   assert.equal(resumed.resumed_scenarios, 1);
   assert.equal(resumed.redone_scenarios, done - 1);
-  console.log('RES', JSON.stringify({ n: resumed.notes, rn: resumed.redone_note }));
+  assert.deepEqual(resumed.notes, [`${done - 1} kept scenarios did not check out (damaged) and were run again.`]);
   assert.deepEqual(same(resumed), same(full));
   await call('close', { ...h, discard: true });
 });

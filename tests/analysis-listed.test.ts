@@ -129,13 +129,13 @@ test('R1: lists of lint fixes, windows, earned value and the other cut lists sho
   assert.deepEqual(m.notes.filter((x: string) => /has no argument/.test(x)).map((x: string) => x.match(/argument "(\w+)"/)![1]), ["top", "buckets", "histogram"]);
   // (no estimates: every run finishes at the same moment, so the chart is one bar holding all 20 runs, and the answer says so)
   assert.equal(m.histogram.length, 1); assert.equal(m.histogram[0].count, 20); assert.equal(m.histogram[0].cum_pct, 100);
-  assert.equal(m.histogram_note, `All 20 runs finish at the same moment (${m.finish.min}), so the chart is one bar holding all of them, not 20. Why they coincide, and what to do about it, is in note.`);
-  // the cause and the advice are said once, in note
-  assert.match(m.note, /^No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule\. To get a spread, set three-point estimates \(edit set_estimates\)/);
-  assert.equal(JSON.stringify(m).split('To get a spread').length - 1, 1);
-  assert.equal(m.notes[0], `monte_carlo has no argument "top": it was not used and the call ran without it. Its arguments are: handle, export, export_name, iterations, resume, events, sampler, re_anchor, deadline, seed, risk_events, project, default_estimates, exact, caller, async.`);
+  // the one reason they coincide is said once, in the notes (no histogram_note, no note)
+  assert.equal(m.histogram_note, undefined); assert.equal(m.note, undefined);
+  assert.deepEqual(m.notes.filter((x: string) => /^No spread/.test(x)), ['No spread: no activity has a three-point estimate and no risk event applies; set estimates with edit set_estimates or pass default_estimates.']);
+  assert.equal(JSON.stringify(m).split('No spread').length - 1, 1);
+  assert.ok(m.notes.includes(`monte_carlo has no argument "top"; the call ran without it. Its arguments are: handle, export, export_name, iterations, resume, events, sampler, re_anchor, deadline, seed, risk_events, project, default_estimates, exact, caller, async.`));
   const ev = (await call('earned_value', { ...h, worst: 1 })).d;
-  assert.match(ev.notes[0], /^earned_value has no argument "worst"/);
+  assert.ok(ev.notes.some((n: string) => /^earned_value has no argument "worst"/.test(n)));
   const sc = (await call('progress_curves', h)).d;
   assert.ok(sc.exported.files.length > 1);
 });

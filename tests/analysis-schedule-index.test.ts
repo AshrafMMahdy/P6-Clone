@@ -377,7 +377,7 @@ test('schedule_index through the server: read-only, summary first, 25 listed wit
   assert.ok(existsSync(csv.path));
   // the weights are in the tool description, not in the answer
   assert.equal(r.d.method, undefined);
-  assert.match(t.description, /float 0\.30, logic 0\.25, baseline drift 0\.20, progress integrity 0\.15, resource 0\.10/);
+  for (const w of [/float 0\.30/, /logic 0\.25/, /baseline drift 0\.20/, /progress integrity 0\.15/, /resource 0\.10/, /0\.40 critical-path density/, /0\.35 float erosion/, /0\.15 structural/, /0\.10 relationship/]) assert.match(t.description, w);
   // refusals: a baseline the file does not have, a date that is not one
   const bad = await call('schedule_index', { handle: h, baseline: 'bl3' });
   assert.equal(bad.err, true);
