@@ -7,7 +7,7 @@ import { parseP6Date } from '../dates.ts';
 import { makeCtx, isCritical } from '../project/ctx.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
 import { datesNotCurrent } from '../notes.ts';
-import { dataDateGaps } from '../analysis/common.ts';
+import { constraintsOf, DCMA_HARD, dataDateGaps } from '../analysis/common.ts';
 
 /** Out-of-sequence progress, the one rule: the activity has started while a finish-to-start predecessor has not finished. */
 export const startedBeforeFsPredecessor = (t: Row, ctx: Pick<ReturnType<typeof makeCtx>, 'predsOf' | 'taskById'>): boolean =>
@@ -50,8 +50,8 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   add('leads', 'Leads (negative lags)', P.filter((r) => Number(r.lag_hr_cnt) < 0).length, P.length, null, 0, 'none', '');
   add('lags', 'Positive lags', P.filter((r) => Number(r.lag_hr_cnt) > 0).length, P.length, 5, null, 'at most 5% of relationships', '');
   add('rel_types', 'Relationships other than finish-to-start', P.filter((r) => r.pred_type !== 'PR_FS').length, P.length, 10, null, 'at most 10%', '');
-  const hard = live.filter((t) => /^(CS_MSO|CS_MEO|CS_MANDSTART|CS_MANDFIN)$/.test(t.cstr_type ?? '') || /^(CS_MANDSTART|CS_MANDFIN)$/.test(t.cstr_type2 ?? ''));
-  add('hard_constraints', 'Hard constraints (Start On, Finish On, Mandatory)', hard, live.length, null, 5, 'at most 5%', '');
+  const hard = live.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c))); // the DCMA set, the one definition (schedule_health counts the same)
+  add('hard_constraints', 'Hard constraints (Start On, Start On or Before, Finish On, Finish On or Before, Mandatory Start, Mandatory Finish)', hard, live.length, null, 5, 'at most 5%', '');
   add('high_float', 'High total float (over 44 working days)', live.filter((t) => Number(t.total_float_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', '');
   add('negative_float', 'Negative total float', live.filter((t) => t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) < 0), live.length, null, 0, 'none', '');
   add('long_durations', 'Long remaining durations (over 44 working days)', live.filter((t) => t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && Number(t.remain_drtn_hr_cnt) / dh.task(t) > 44), live.length, 5, null, 'at most 5%', '');

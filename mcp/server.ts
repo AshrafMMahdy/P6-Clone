@@ -1259,7 +1259,7 @@ export function toolResult(out: unknown, isError: boolean, tool?: string) {
     walk(answer, 0);
     const known = Object.keys(((TOOLS.find((t) => t.name === forTool)?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {});
     const asks = ['limit', 'offset', 'max_rows', 'max_changes', 'project'].filter((k) => known.includes(k));
-    const ask = asks.length ? (via ? `, or call ${via} again asking for less (its ${asks.join(', ')})` : `, or ask for less (this tool's ${asks.join(', ')})`) : '';
+    const ask = asks.length && forTool ? `, or call ${forTool} again asking for less (its ${asks.join(', ')})` : '';
     structured = { truncated: true, size_chars: text.length, ...(saved ? { saved, written: [saved] } : {}),
       ...(answer.exported !== undefined ? { exported: answer.exported } : {}), ...Object.fromEntries(['partial', 'resume', 'next_offset'].filter((k) => answer[k] !== undefined).map((k) => [k, answer[k]])),
       notes: [tooLarge(text.length, saved, ask), ...(typeof answer.note === 'string' ? [answer.note] : []), ...(Array.isArray(answer.notes) ? answer.notes.filter((n): n is string => typeof n === 'string') : []), ...cuts],

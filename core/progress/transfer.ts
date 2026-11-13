@@ -4,7 +4,7 @@
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { p6num } from '../schedule/cpm.ts';
-import { namesText, plural } from '../notes.ts';
+import { namesText, noDataDateReason, plural } from '../notes.ts';
 import { calOf, refreshOwnDates, statusOf } from '../project/edit.ts';
 import { assignResource, recomputeCosts } from '../resource/assign.ts';
 
@@ -202,7 +202,7 @@ export function transferProgress(db: Db, spec: TransferSpec): TransferResult | {
   if (spec.dataDate) {
     const d = spec.dataDate === 'from' ? (theirDataDates.length === 1 ? theirDataDates[0] : theirDataDates.length ? null : '') : formatP6Date(parseP6Date(spec.dataDate) ?? NaN);
     if (d === null) notes.push(`Data date not moved: their projects have different data dates (${theirDataDates.join(', ')}); pass data_date.`);
-    else if (!d || d.includes('NaN')) notes.push('Data date not moved: their schedule has no data date; pass data_date.');
+    else if (!d || d.includes('NaN')) notes.push(`Data date not moved: ${noDataDateReason('their schedule', 'data_date')}.`);
     else { addField(table(db, 'PROJECT'), 'last_recalc_date'); p.last_recalc_date = d; res.data_date = d; }
   }
   const dd = p.last_recalc_date ?? '';

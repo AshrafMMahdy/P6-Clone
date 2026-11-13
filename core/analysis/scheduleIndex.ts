@@ -173,11 +173,11 @@ function resourceRisk(s: Scope): { metric: SubMetric; figures: ResourceFigures |
   const parts: Part[] = [];
   let num = 0, den = 0;
   const add = (part: string, weight: number, value: number | null, note: string) => { parts.push({ part, value: value == null ? null : r3(value), assessed: value != null, weight, ...(value == null ? { note } : {}) }); if (value != null) { num += weight * value; den += weight; } };
-  add('over_allocated_share', RESOURCE.over_allocated, limited.length ? over.length / limited.length : null, 'no resource has a Max Units/Time');
+  add('over_allocated_share', RESOURCE.over_allocated, limited.length ? over.length / limited.length : null, 'no resource is judged for over-allocation');
   add('coverage_gap', RESOURCE.coverage_gap, T.length ? unresourced.length / T.length : null, 'no incomplete work activity');
-  add('critical_path_conflict', RESOURCE.critical_conflict, limited.length ? (over.some((r) => r.on_critical_activity) ? 1 : 0) : null, 'no resource has a Max Units/Time');
+  add('critical_path_conflict', RESOURCE.critical_conflict, limited.length ? (over.some((r) => r.on_critical_activity) ? 1 : 0) : null, 'no resource is judged for over-allocation');
   const figures: ResourceFigures = { resources: resRows, limited: limited.length, over_allocated: over, work_activities: T.length, unresourced };
-  if (!den) return { metric: inactive('resource', 'no resource has a Max Units/Time and there is no incomplete work activity', parts), figures };
+  if (!den) return { metric: inactive('resource', 'no resource is judged for over-allocation and there is no incomplete work activity', parts), figures };
   const score = r1(Math.min(100, (100 * num) / den));
   return { figures, metric: sub('resource', { active: true, score, parts, summary: `${plural(over.length, 'over-allocated resource')} of ${limited.length} with a limit; ${unresourced.length} of ${T.length} work activities without a resource` }) };
 }
@@ -279,7 +279,8 @@ const parts = (m: SubMetric) => m.parts.map((p) => `${p.part}=${p.assessed ? p.v
 
 /** The reasons are in the notes, once: the health and risk carry the names of what was left out, not the sentence. */
 const bareHealth = (h: Health): Health => { const { note: _n, left_out, breakdown, ...rest } = h; return { ...rest, ...(breakdown ? { breakdown: Object.fromEntries(Object.entries(breakdown).map(([k, v]) => { const { reason: _r, ...x } = v; return [k, x]; })) as unknown as Health['breakdown'] } : {}), ...(left_out ? { left_out: left_out.map((l) => l.part) } : {}) } as unknown as Health; };
-const bareRisk = <T extends { note?: string; sub_metrics?: Record<string, SubMetric>; left_out?: { sub_metric: SubKey; reason: string }[] }>(x: T): T => { const { note: _n, ...rest } = x; return { ...rest, ...(x.sub_metrics ? { sub_metrics: Object.fromEntries(Object.entries(x.sub_metrics).map(([k, m]) => { const { reason: _r, ...y } = m; return [k, { ...y, parts: m.parts.map(({ note: _p, ...pp }) => pp) }]; })) } : {}), ...(x.left_out ? { left_out: x.left_out.map((l) => l.sub_metric) } : {}) } as unknown as T; };
+// (a sub-metric that is not assessed has no summary: no empty string where its reason was)
+const bareRisk = <T extends { note?: string; sub_metrics?: Record<string, SubMetric>; left_out?: { sub_metric: SubKey; reason: string }[] }>(x: T): T => { const { note: _n, ...rest } = x; return { ...rest, ...(x.sub_metrics ? { sub_metrics: Object.fromEntries(Object.entries(x.sub_metrics).map(([k, m]) => { const { reason: _r, summary, ...y } = m; return [k, { ...y, ...(summary ? { summary } : {}), parts: m.parts.map(({ note: _p, ...pp }) => pp) }]; })) } : {}), ...(x.left_out ? { left_out: x.left_out.map((l) => l.sub_metric) } : {}) } as unknown as T; };
 
 /** The answer (every list cut by `first`, the true total beside it), the whole result and the tables, in the order the answer reads: summary first. */
 export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) => T[]) {
@@ -301,7 +302,7 @@ export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) =>
   const driverRows = risk.drivers.map((d, i) => ({ ...d, action: risk.recommendations[i].action, expected_score_reduction: risk.recommendations[i].expected_score_reduction, standards_citation: risk.recommendations[i].standards_citation }));
   const whole = {
     report: r.report, summary, ...loopsNote, health: bareHealth(r.health), risk: bareRisk(riskRest),
-    drivers: driverRows, drivers_total: driverRows.length, recommendations: risk.recommendations, recommendations_total: risk.recommendations.length,
+    drivers: driverRows, drivers_total: driverRows.length, // (each driver carries its action, expected reduction and citation: the recommendation of a driver is not listed again)
     logic_findings: findings.map((f) => ({ ...f, activities_total: f.activities.length })),
     progress_summary: r.progress.result === 'assessed' ? { result: 'assessed', examined: r.progress.examined, integrity_score: r.progress.integrity_score, grade: r.progress.grade, by_severity: r.progress.by_severity, by_rule: r.progress.by_rule, projects_without_data_date: r.progress.projects_without_data_date } : { result: 'not_assessed' },
     progress_anomalies: anomalies, progress_anomalies_total: anomalies.length,
@@ -315,7 +316,7 @@ export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) =>
     ...whole,
     summary: { ...summary, ...cutDates },
     // the sub-metric breakdown of the risk stays whole (five entries); the lists are cut to the clone's rule
-    drivers: first(whole.drivers), recommendations: first(whole.recommendations),
+    drivers: first(whole.drivers),
     logic_findings: whole.logic_findings.map((f) => ({ ...f, activities: first(f.activities) })),
     progress_anomalies: first(anomalies), resources: first(resourceRows), unresourced_activities: first(unresourced),
   };

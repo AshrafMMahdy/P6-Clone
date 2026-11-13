@@ -238,7 +238,7 @@ test('resource: no limit set = left out of over-allocation (as the histogram lea
   const tasks = (limit: number) => B.project('LIM', [{ id: 'A', duration_days: 10, resources: ['Crew'] }, { id: 'B', duration_days: 10, resources: ['Crew'] }, { id: 'C', duration_days: 5, predecessors: ['A', 'B'] }], { resources: [{ id: 'Crew', max_units_per_day: limit }] });
   const none = scheduleIndex(tasks(0).db, {}).risk.sub_metrics.resource;
   assert.deepEqual(none.parts.map((p) => [p.part, p.assessed, p.value]), [['over_allocated_share', false, null], ['coverage_gap', true, 0.333], ['critical_path_conflict', false, null]]);
-  assert.equal(none.parts[0].note, 'no resource has a Max Units/Time');
+  assert.equal(none.parts[0].note, 'no resource is judged for over-allocation');
   // only the coverage part is assessed: 35 x 0.333 / 35 x 100 = 33.3 (C has no resource)
   assert.equal(none.score, 33.3);
   // with a limit the same file: 50 + 35 x 0.333 + 15 over 100 = 76.7

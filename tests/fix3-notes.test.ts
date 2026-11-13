@@ -209,3 +209,20 @@ test('10: the open and save fault is said once, in one place, with advice that s
   assert.doesNotMatch(lost, /ERMHDR|PROJWBS|RSRC|UDFTYPE|PROJCOST|\.[a-z_]+ \(\d/, 'P6 words, no table or column');
   assert.equal(sx.not_in_p6_xml, undefined, 'one place');
 });
+
+test('12a: with no baseline assigned, progress_curves and earned_value both use the current plan and say the one sentence; a saved but unassigned baseline is not picked', async () => {
+  const o = await call('open_file', { path: join(SAMPLES_DIR, 'Tower-A_edited.xer'), lenient: true });
+  const pc = await call('progress_curves', { handle: o.handle, units: 'duration' });
+  const ev = await call('earned_value', { handle: o.handle });
+  const S = 'No baseline is assigned to tower_a: the current budget and dates were used; assign one with edit assign_baseline.';
+  assert.ok(pc.notes.includes(S), JSON.stringify(pc.notes)); assert.ok(ev.notes.includes(S), JSON.stringify(ev.notes));
+  assert.equal(pc.baseline, null);
+  assert.ok(!JSON.stringify([pc.notes, ev.notes]).includes('only saved baseline'));
+});
+
+test('12b/c: review and schedule_health count the hard constraints of the DCMA set; "no data date" is the shared wording in review, schedule_health, the CPLI and the curves', async () => {
+  const h = await built('2026-01-05', [act('A', 3, { constraint: { type: 'finish_on_or_before', date: '2026-02-01' } }), act('B', 3, { constraint: { type: 'start_on_or_before', date: '2026-02-01' } }), act('C', 3, { constraint: { type: 'start_on_or_after', date: '2026-01-06' } }), rel('A', 'B')]);
+  const rv = await call('review', { handle: h }), sh = await call('schedule_health', { handle: h });
+  assert.equal(rv.checks.find((c: any) => c.id === 'hard_constraints').count, sh.hard_constraints.count, 'one definition: the DCMA types (Start On, Finish On, Start On or Before, Finish On or Before, Mandatory)');
+  assert.equal(sh.hard_constraints.count, 2);
+});

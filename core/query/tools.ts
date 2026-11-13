@@ -346,7 +346,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         worst_schedule_performance: bySpi.slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, spi: round(x.e.spi), sv: round(x.e.sv) })), worst_schedule_performance_total: bySpi.length,
         // (every_activity, an export: each activity with cost, every earned value figure of it)
         ...(args.every_activity === true ? { activities: tasks.filter((t) => t.task_type !== 'TT_WBS' && costs.get(t.task_id)).map((t) => ({ project: ctx.proj.get(t.proj_id)?.proj_short_name, id: t.task_code, name: t.task_name, wbs: wbsPath(t.wbs_id), ...pack(sumLines([costs.get(t.task_id)!])) })) } : {}),
-        ...(() => { const pRows = [...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean); const n = tidyNotes([...dataDateAssumedNotes(pRows), ...dataDateGaps(pRows, 'planned value and earned value at the data date', null), ...projects.filter((p) => p.totals.bac === 0).map((p) => notAssessed('SPI, CPI and EAC', `${p.project} carries no costs`)), ...projects.filter((p) => !p.has_baseline).map((p) => currentPlanUsed(p.project ?? ''))]); return n.length ? { notes: n } : {}; })(),
+        ...(() => { const pRows = [...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean); const n = tidyNotes([...dataDateAssumedNotes(pRows), ...dataDateGaps(pRows, 'planned value and earned value at the data date', null), ...projects.filter((p) => p.totals.bac === 0).map((p) => notAssessed('SPI, CPI and EAC', `${p.project} carries no costs`)), ...(projects.some((p) => !p.has_baseline) ? [currentPlanUsed(projects.filter((p) => !p.has_baseline).map((p) => p.project ?? ''))] : [])]); return n.length ? { notes: n } : {}; })(),
       };
     }
     case 'resource_summary': {

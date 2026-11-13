@@ -47,7 +47,7 @@ export const baselineReason = (proj: string, argument: boolean, which = 'project
 /** Missing baseline, a check left out. */
 export const baselineLeftOut = (part: string, proj: string, argument: boolean, which = 'project'): string => notAssessed(part, baselineReason(proj, argument, which));
 /** Missing baseline, the current budget and dates stood in. */
-export const currentPlanUsed = (proj: string): string => `No baseline is assigned to ${proj}: the current budget and dates were used.`;
+export const currentPlanUsed = (projs: string[], argument = false): string => `No baseline is assigned to ${projectsText(projs)}: the current budget and dates were used; assign one with edit assign_baseline${argument ? ', or pass baseline' : ''}.`;
 /** Missing baseline, the one saved baseline the engine chose. */
 export const baselineChosen = (proj: string, baseline: string, which = 'its only saved baseline'): string => `No baseline is assigned to ${proj}: ${baseline}, ${which}, was used.`;
 /** A baseline by its argument value (`project`, `bl1`, a saved name) for the sentences above. */

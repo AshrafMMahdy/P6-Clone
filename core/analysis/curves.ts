@@ -14,7 +14,7 @@
 //    late units or cost per period, the limit, over-allocation and its severity.
 // Spreading is linear over each activity's working time. Values are hours (units) or the project currency (cost).
 import { maxOf, minOf } from '../arrays.ts';
-import { andList, projectsText, baselineChosen, cap, currentPlanUsed, notAssessed, refusal, tidyNotes } from '../notes.ts';
+import { noDataDateReason, andList, projectsText, baselineChosen, cap, currentPlanUsed, notAssessed, refusal, tidyNotes } from '../notes.ts';
 import { baselineOf, dataDateAssumedNotes, dataDateGaps, namesText } from './common.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
@@ -88,7 +88,10 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   const bl = new Map<string, Row>();
   // the project baseline, else the primary user baseline (BL1), as P6 Professional's baseline bars fall back
   let blName: string | null = null, blHow = '';
-  for (const p of projs) { const b = baselineOf(db, p, 'project') ?? baselineOf(db, p, 'bl1'); if (b) { blName = b.name; blHow = b.how; for (const t of b.tasks.values()) bl.set(`${p.proj_id}|${t.task_code}`, t); if (!/project baseline$/.test(b.how)) notes.push(baselineChosen(p.proj_short_name, b.name, /^the only baseline/.test(b.how) ? 'its only saved baseline' : b.how)); } else notes.push(currentPlanUsed(p.proj_short_name)); }
+  const noBaseline: string[] = [];
+  // the baseline P6 uses is the one ASSIGNED (the project baseline, else the primary one, BL1): a baseline that is only saved in the file is not picked; with none assigned the current project is its own baseline
+  for (const p of projs) { const b = (p.sum_base_proj_id ? baselineOf(db, p, 'project') : null) ?? baselineOf(db, p, 'bl1'); if (b) { blName = b.name; blHow = b.how; for (const t of b.tasks.values()) bl.set(`${p.proj_id}|${t.task_code}`, t); if (!/project baseline$/.test(b.how)) notes.push(baselineChosen(p.proj_short_name, b.name, b.how)); } else noBaseline.push(p.proj_short_name); }
+  if (noBaseline.length) notes.push(currentPlanUsed(noBaseline));
 
   // the quantities per activity (the planned quantity from the baseline activity when there is one; duration: in working days of the activity's calendar)
   const qOf = (t: Row) => {
@@ -197,7 +200,7 @@ export function progressCurves(db: Db, projIds: string[], o: { period?: 'week' |
   if (!totals.bac) notes.push(units === 'cost' ? `No budgeted cost in ${andList(projs.map((p) => p.proj_short_name))}: pass units: duration or hours, or load costs.` : units === 'duration' ? `No planned duration in ${andList(projs.map((p) => p.proj_short_name))}: every activity is a milestone or has none.` : `No budgeted units in ${andList(projs.map((p) => p.proj_short_name))}: pass units: duration, or load resources.`);
   const sched = earnedSchedule({ g, pv, period, units, baseline: blName, plannedBac, undatedBac, plannedEv, p0, p1, dataDate, cal: projs[0] ? cals.fallback(projs[0].clndr_id) : null });
   const { es_reason: _reason, ...schedFigures } = sched;
-  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, totals: { ...totals, ...schedFigures }, periods, notes: tidyNotes([...notes, ...(sched.es_reason && totals.bac ? [notAssessed('Earned Schedule', sched.es_reason)] : [])]) };
+  return { report: 'Progress Curves', units, period, data_date: dataDate != null ? formatP6Date(dataDate) : null, baseline: blName, ...(blName ? { baseline_how: blHow } : {}), stored_periods: usedFin.size, totals: { ...totals, ...schedFigures }, periods, notes: tidyNotes([...notes, ...(sched.es_reason && totals.bac ? [notAssessed('Earned Schedule', dataDate == null ? noDataDateReason(projectsText(projs.filter((p) => parseP6Date(p.last_recalc_date) == null).map((p) => p.proj_short_name)), null) : sched.es_reason)] : [])]) };
 }
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
