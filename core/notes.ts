@@ -75,6 +75,12 @@ export const dataDateWritten = (proj: string, date: string): string => `${proj} 
 export const noDataDateReason = (proj: string, arg: string | null = 'status_date'): string => `${proj} has no data date; ${arg ? `pass ${arg}` : 'set one with schedule data_date'}`;
 /** No data date, in a tool that needs one and takes `status_date`: the part that is not assessed, with its reason. The one sentence for every such tool. */
 export const noDataDateNotAssessed = (proj: string, part = 'checks that need a data date', arg: string | null = 'status_date'): string => notAssessed(part, noDataDateReason(proj, arg));
+/** CPLI has no remaining critical path length to divide by: the reason, read from the activities (`open` = activities with no actual finish;
+ *  `finish` = the latest finish of the project's rows, actual or forecast). Never "the project is complete" unless every activity is: saved dates
+ *  that were not calculated for this data date give the same zero. The length is working time of the project's default calendar, so that is said. */
+export const noCriticalPathLeft = (proj: string, statusDate: string, finish: string, open: number): string => open
+  ? `the latest finish of ${proj} (${finish}) is not after the status date (${statusDate}) in working time of the project’s default calendar, so there is no remaining critical path to measure; ${open} ${open === 1 ? 'activity is' : 'activities are'} not complete`
+  : `every activity of ${proj} is complete, so there is no remaining critical path to measure`;
 /** Projects with different data dates: which date was used. `dates` is "<Project ID> <date>" pairs. */
 export const differentDataDates = (dates: { proj: string; date: string }[], used: string): string => `${projectsText(dates.map((d) => d.proj))} have different data dates (${namesText(dates.map((d) => d.date))}): ${used} was used; pass project to work on one.`;
 /** Project IDs in a sentence: "A", "A and B", then the list rule (the first LISTED, how many more, the total). */

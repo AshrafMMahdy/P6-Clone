@@ -3,7 +3,7 @@
 // and relationship types count relationships. Durations and float are in working days of each activity's calendar.
 // The Critical Path Test runs on a scratch copy (a journal that is rolled back); CPLI and BEI use a chosen baseline.
 import { maxOf, minOf } from '../arrays.ts';
-import { baselineReason, cstrName, namesText, noDataDateReason, projectsText } from '../notes.ts';
+import { baselineReason, cstrName, namesText, noCriticalPathLeft, noDataDateReason, projectsText } from '../notes.ts';
 import { type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
@@ -198,9 +198,9 @@ export function invalidDateFlags(s: Scope): { activities: Row[]; with_data_date:
   return { activities, with_data_date: dated, flagged };
 }
 
-/** Project forecast finish (latest activity finish) of the scoped projects. */
-function projectFinish(s: Scope): number | null {
-  const f = maxOf(s.tasks.map((t) => forecastFinish(t) ?? -Infinity));
+/** The latest finish (actual, else forecast) of the given rows: by default every row of the projects in scope. */
+function projectFinish(s: Scope, tasks: Row[] = s.tasks): number | null {
+  const f = maxOf(tasks.map((t) => forecastFinish(t) ?? -Infinity));
   return Number.isFinite(f) ? f : null;
 }
 
@@ -220,7 +220,7 @@ export function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: st
     // no logic drives the finish (a constraint on the last activity sets it): the task with the least float
     if (!test && T.length) { test = [...T].sort((a, b) => Number(a.total_float_hr_cnt || 0) - Number(b.total_float_hr_cnt || 0) || (parseP6Date(a.restart_date || a.early_start_date) ?? 0) - (parseP6Date(b.restart_date || b.early_start_date) ?? 0))[0]; heldBy = end?.cstr_type ? end.task_code : null; }
   }
-  if (!test) return notAssessed('critical_path_test', name, 'days', null, pick ? `${pick} is not an incomplete task in scope` : s.tasks.some((t) => t.early_start_date) ? 'no incomplete task drives the project finish (every remaining task is complete, a milestone, or level of effort)' : 'the project has no early dates; run schedule first');
+  if (!test) return notAssessed('critical_path_test', name, 'days', null, pick ? `${pick} is not an incomplete task in scope` : s.tasks.some((t) => t.early_start_date) ? 'there is no incomplete task to test (every activity is complete, a milestone, level of effort or a WBS summary)' : 'the project has no early dates; run schedule first');
   const before = projectFinish(s);
   let after: number | null = null, ok = true, msg = '', noDate = false;
   // the delay in hours of the test activity's calendar; the finish shift is measured in the same working time
@@ -251,10 +251,16 @@ export function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: st
 function cpli(s: Scope, given: number | null, bls: Map<string, ReturnType<typeof baselineOf>>, which: string, th: Threshold | null): CheckResult {
   const name = NAMES.cpli;
   const p = s.projs[0];
-  const dd = p ? s.dataDate(p.proj_id) : null, fin = projectFinish(s);
-  // CPLI is of ONE project (the first in scope): said, so it is not read as the figure of all of them
+  // CPLI is of ONE project (the first in scope): its own activities give its finish and say whether it is complete; said, so it is not read as the figure of all of them
+  const mine = p ? s.tasks.filter((t) => t.proj_id === p.proj_id) : [];
+  const dd = p ? s.dataDate(p.proj_id) : null, fin = projectFinish(s, mine);
   const whose = p && s.projs.length > 1 ? `CPLI is of ${p.proj_short_name}, the first of ${s.projs.length} projects in scope; pass project to measure another.` : '';
-  if (!p || dd == null || fin == null) return notAssessed('cpli', name, 'ratio', th, dd == null ? noDataDateReason(p ? p.proj_short_name : 'the project') : `${p!.proj_short_name} has no forecast finish; run schedule first`);
+  if (!p || dd == null) return notAssessed('cpli', name, 'ratio', th, noDataDateReason(p ? p.proj_short_name : 'the project'));
+  // a part of CPLI that is not assessed says whose it is too, when the scope has several projects (the next step is the same: pass project)
+  const na = (reason: string): CheckResult => { const c = notAssessed('cpli', name, 'ratio', th, reason); return whose ? { ...c, note: `${c.note} ${whose}` } : c; };
+  const acts = mine.filter((t) => !isWbs(t));
+  if (!acts.length) return na(`${p.proj_short_name} has no activities`);
+  if (fin == null) return na(`${p.proj_short_name} has no forecast finish; run schedule first`);
   const cal = s.projCal(p);
   const cpl = s.workDays(cal, dd, fin);
   const contract = given ?? parseP6Date(p.plan_end_date) ?? null;
@@ -263,8 +269,10 @@ function cpli(s: Scope, given: number | null, bls: Map<string, ReturnType<typeof
   const one = (target: number) => { const tf = s.workDays(cal, fin, target); return { target: formatP6Date(target), total_float_days: tf, cpli: cpl > 0 ? Math.round(((cpl + tf) / cpl) * 1000) / 1000 : null }; };
   const vsContract = contract != null ? one(contract) : null, vsBaseline = blFin != null && Number.isFinite(blFin) ? one(blFin) : null;
   const primary = vsContract ?? vsBaseline;
-  if (!primary) return notAssessed('cpli', name, 'ratio', th, `no contract finish (Must Finish By, or target_finish) and no baseline to measure against`);
-  if (cpl <= 0 || primary.cpli == null) return notAssessed('cpli', name, 'ratio', th, `the remaining critical path length is zero (the project is complete at the status date)`);
+  if (!primary) return na(`no contract finish (Must Finish By, or target_finish) and no baseline to measure against`);
+  // no length to divide by. WHY is read from the activities, never assumed: all complete, or open work whose latest finish is not after the status date
+  // (saved dates that were never calculated or are of an earlier data date, or open work with no working time left on the project's calendar)
+  if (cpl <= 0 || primary.cpli == null) return na(noCriticalPathLeft(p.proj_short_name, formatP6Date(dd), formatP6Date(fin), acts.filter((t) => !isDone(t)).length));
   return {
     id: 'cpli', name, unit: 'ratio', metric: primary.cpli, threshold: th, numerator: Math.round((cpl + primary.total_float_days) * 100) / 100, denominator: cpl,
     result: th && !passes((cpl + primary.total_float_days) / cpl, th) ? 'fail' : 'pass', activities: [], total_activities: 0,

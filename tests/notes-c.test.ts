@@ -202,3 +202,63 @@ test('every analysis that judges from the saved dates says when they are not wha
   const d = await open('Detailed Program.xer');
   for (const tool of TOOLS) assert.ok(!JSON.stringify((await call(tool, { handle: d.handle })).notes ?? []).includes('recalculation'), `Detailed Program ${tool}`);
 });
+
+test('dcma_14: a CPLI with no remaining critical path length says why from the activities, and never calls a project complete that has open work; CPLI is of its own project’s finish', async () => {
+  const cpliOf = (d: any) => d.checks.find((c: any) => c.id === 'cpli');
+  const reason = (d: any): string => String((d.notes as string[]).find((n) => /CPLI/.test(n) && /not assessed/.test(n)));
+  const left = (proj: string, finish: string, status: string, open: string) => `Critical path length index (CPLI) not assessed: the latest finish of ${proj} (${finish}) is not after the status date (${status}) in working time of the project’s default calendar, so there is no remaining critical path to measure; ${open} not complete.`;
+  const whose = (proj: string, n: number) => ` CPLI is of ${proj}, the first of ${n} projects in scope; pass project to measure another.`;
+  const made = async (id: string, more: Record<string, unknown>, ops: unknown[]) => { const p = await call('new_project', { id, start: '2026-01-05', ...more }); const e = await call('edit', { handle: p.handle, operations: ops }); assert.ok(!e.error, JSON.stringify(e).slice(0, 300)); return p.handle as string; };
+
+  // verify_fidelity_schedule.xer as opened: open activities whose saved dates were never calculated. From the file's own rows: how many activities
+  // have no actual finish, the latest saved finish, the data date; the saved finish lies before the data date
+  const db = readXerFile(sampleCopy('verify_fidelity_schedule.xer')).db;
+  const rows = db.tables.TASK.rows.filter((t) => t.task_type !== 'TT_WBS');
+  const openRows = rows.filter((t) => !t.act_end_date).length, lastFinish = rows.map((t) => String(t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date || '')).sort().at(-1)!;
+  const dataDate = String(db.tables.PROJECT.rows[0].last_recalc_date);
+  assert.ok(openRows > 1 && lastFinish < dataDate, `${openRows} open, ${lastFinish} before ${dataDate}`);
+  const o = await open('verify_fidelity_schedule.xer'), h = o.handle;
+  const d = await call('dcma_14', { handle: h });
+  assert.equal(cpliOf(d).result, 'not_assessed');
+  assert.equal(reason(d), left('verify_fidelity', lastFinish, dataDate, `${openRows} activities are`));
+  assert.ok(!/is complete/.test(JSON.stringify(d)), 'nothing calls this project complete');
+  // the same file calculated: there is a length, so CPLI is measured
+  await call('schedule', { handle: h });
+  const d2 = await call('dcma_14', { handle: h });
+  assert.ok(cpliOf(d2).denominator > 0 && cpliOf(d2).result !== 'not_assessed', JSON.stringify(cpliOf(d2)));
+  assert.ok(!(d2.notes as string[]).some((n) => /CPLI/.test(n) && /not assessed/.test(n)));
+
+  // every activity has an actual finish: the project IS complete, and only then is that said
+  const done = await made('DONE', { must_finish_by: '2026-01-30' }, [act('A', 2, { actual_start: '2026-01-05 08:00', actual_finish: '2026-01-06 17:00' }), act('B', 3, { actual_start: '2026-01-07 08:00', actual_finish: '2026-01-09 17:00' }), { op: 'set_project', data_date: '2026-01-12' }]);
+  await call('schedule', { handle: done });
+  assert.equal(reason(await call('dcma_14', { handle: done })), 'Critical path length index (CPLI) not assessed: every activity of DONE is complete, so there is no remaining critical path to measure.');
+
+  // ONE activity open, and a status date the caller passes (it replaces the data date): the date printed is the one passed, the count is singular,
+  // and the latest finish (the open activity's, read from the activity table) lies before it
+  const one = await made('ONE', { must_finish_by: '2026-03-31' }, [act('A', 5, { actual_start: '2026-01-05 08:00', actual_finish: '2026-01-09 17:00' }), act('B', 5), { op: 'add_relationship', pred: 'A', succ: 'B' }]);
+  await call('schedule', { handle: one });
+  const tb = await call('activity_table', { handle: one });
+  const bFinish = String(tb.rows.find((r: unknown[]) => r[0] === 'B')[tb.columns.indexOf('finish')]);
+  assert.match(bFinish, /^2026-01-\d\d 17:00$/, 'B, the open activity, finishes in January');
+  assert.equal(reason(await call('dcma_14', { handle: one, status_date: '2026-03-02' })), left('ONE', bFinish, '2026-03-02 00:00', '1 activity is'));
+
+  // a project with nothing but its WBS has no activities: it is neither complete nor waiting for a calculation
+  const empty = await made('EMPTY', { must_finish_by: '2026-01-30' }, []);
+  await call('schedule', { handle: empty });
+  assert.equal(reason(await call('dcma_14', { handle: empty })), 'Critical path length index (CPLI) not assessed: EMPTY has no activities.');
+
+  // two projects in one file. CPLI is of the first, from ITS finish and ITS activities (P2 finishes weeks later; the old code read P2's finish as P1's
+  // forecast: 0.475, fail). 5 working days are left (5 January to 9 January), the Must Finish By date is 30 January
+  const two = await made('P1', { must_finish_by: '2026-01-30' }, [act('A', 5), { op: 'add_project', id: 'P2', start: '2026-01-05' }, { op: 'add_activity', project: 'P2', id: 'X', name: 'X', duration_days: 40 }, { op: 'add_activity', project: 'P2', id: 'Y', name: 'Y', duration_days: 3 }]);
+  await call('schedule', { handle: two });
+  const d4 = await call('dcma_14', { handle: two });
+  assert.match(cpliOf(d4).detail.forecast_finish, /^2026-01-09/, JSON.stringify(cpliOf(d4)));
+  assert.equal(cpliOf(d4).denominator, 5);
+  assert.equal(cpliOf(d4).result, 'pass');
+  assert.ok((d4.notes as string[]).some((n) => n.endsWith(whose('P1', 2).trim())), JSON.stringify(d4.notes));
+  // the first project complete while the second has open work: P1 is complete (P2's two open activities are not counted as P1's), and the answer says whose CPLI it is
+  const e5 = await call('edit', { handle: two, operations: [{ op: 'update_activity', id: 'A', project: 'P1', actual_start: '2026-01-05 08:00', actual_finish: '2026-01-09 17:00' }, { op: 'set_project', project: 'P1', data_date: '2026-01-12' }, { op: 'set_project', project: 'P2', data_date: '2026-01-12' }] });
+  assert.ok(!e5.error, JSON.stringify(e5).slice(0, 300));
+  await call('schedule', { handle: two });
+  assert.equal(reason(await call('dcma_14', { handle: two })), `Critical path length index (CPLI) not assessed: every activity of P1 is complete, so there is no remaining critical path to measure.${whose('P1', 2)}`);
+});
