@@ -281,11 +281,12 @@ test('crash_schedule, float_paths, progress_curves, resource_histogram, tia, lev
   f = files(cmp, 'compare');
   assert.equal(f.csv.changes.length, cmp.changed); assert.equal(f.json.changes.length, cmp.changed); assert.equal(f.json.truncated, false);
   await call('close', { ...h, discard: true });
-  // review: 10 examples per check (examples_total says how many), the export every one
+  // review: 25 examples per check (examples_total says how many), the export every one
   const k = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
   const rv = (await call('review', { handle: k, export: folder() })).d;
-  const many = rv.checks.find((x: any) => x.examples_total > 10);
-  assert.ok(many && many.examples.length === 10);
+  const many = rv.checks.find((x: any) => x.examples_total > 25);
+  assert.ok(many && many.examples.length === 25, JSON.stringify(rv.checks.map((x: any) => [x.id, x.examples_total])));
+  assert.match(many.examples_note, /^25 of \d+ shown; all \d+ in /);
   f = files(rv, 'review');
   assert.equal(f.csv.activities.filter((x) => x.check === many.id).length, many.examples_total);
   assert.equal(f.json.checks.find((x: any) => x.id === many.id).examples.length, many.examples_total);

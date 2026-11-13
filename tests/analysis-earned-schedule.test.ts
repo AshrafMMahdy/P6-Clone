@@ -195,7 +195,7 @@ test('through the tool: units duration is accepted, the answer and the result fi
   assert.ok(r.d.totals.es > 0 && r.d.totals.spi_t > 0);
   const totalsCsv = r.d.exported.files.find((f: any) => f.path.endsWith('-totals.csv'));
   const lines = readFileSync(totalsCsv.path, 'utf8').trim().split(/\r?\n/);
-  assert.equal(lines[0], 'units,data_date,bac,pv,ev,ac,etc,eac,vac,spi,cpi,tcpi,es,at,pd,spi_t,sv_t,es_date,es_days,at_days,sv_t_days,es_note');
+  assert.equal(lines[0], 'units,data_date,bac,pv,ev,ac,etc,eac,vac,spi,cpi,tcpi,es,at,pd,spi_t,sv_t,es_date,es_days,at_days,sv_t_days');
   assert.equal(lines.length, 2);
   const bad = await call('progress_curves', { handle: o.d.handle, units: 'weeks' });
   assert.equal(bad.err, true);
@@ -216,6 +216,7 @@ test('Tower-A (a small real file with progress), duration basis in weeks: Earned
   // PD (to the planned finish Wed 1 Apr 17:00 = 4 + 65 / 168) = 4.33929; SPI(t) = 1.15238 / 4.28571 = 0.26889; SV(t) = 1.15238 - 4.28571 = -3.13333.
   // In working days of the project calendar (Site 5-Day, 8 h): from 2 Mar 08:00 to 10 Mar 09:36 = 5 + 1 + 1.6 / 8 = 6.2 d; to 1 Apr 08:00 = 4 weeks of 5 + 2 = 22 d; SV(t) = 6.2 - 22 = -15.8 d.
   const db = readXerFile(sampleCopy('Tower-A.xer')).db;
+  rows(db, 'PROJECT').find((p) => !p._baseline_of)!.sum_base_proj_id = '11'; // TOWER-A-BL1 assigned as the project baseline (a baseline only saved in the file is not picked)
   const c = progressCurves(db, rows(db, 'PROJECT').filter((p) => !p._baseline_of).map((p) => p.proj_id), { period: 'week', units: 'duration' });
   assert.equal(c.baseline, 'TOWER-A-BL1');
   assert.equal(c.totals.bac, 23);

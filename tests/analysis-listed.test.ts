@@ -260,7 +260,7 @@ test('B2: an answer too large to return still carries exported, every note and a
     // a tool that has limit and offset names them
     const fa = toolResult((await callTool('find_activities', { ...h, limit: 100 })).out, false, 'find_activities').structuredContent as any;
     assert.equal(fa.truncated, true);
-    assert.match(fa.notes.join(' '), /this tool's limit, offset/);
+    assert.match(fa.notes.join(' '), /call find_activities again asking for less \(its limit, offset/);
   } finally { config.maxResponseChars = was; }
 });
 

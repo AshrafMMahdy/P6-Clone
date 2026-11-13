@@ -72,7 +72,7 @@ test('resource histogram: budgeted, actual, remaining early/late, limit and over
   assert.equal(cost.resources[0].severity, 'none');
 });
 
-test('baseline found by its copy link (Tower-A: no sum_base_proj_id); EV of an actual after the data date stays in cum_ev', async () => {
+test('a baseline saved in the file but not assigned (Tower-A: no sum_base_proj_id) is not picked by progress_curves: the current plan is used, as P6 does; EV of an actual after the data date stays in cum_ev', async () => {
   const { readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
   const { detectFormat, readRaw } = await import('../renderer/io.ts');
@@ -81,6 +81,8 @@ test('baseline found by its copy link (Tower-A: no sum_base_proj_id); EV of an a
   const tw = readRaw(b, detectFormat(p, b)).db;
   const main = rows(tw, 'PROJECT').find((x) => !x._baseline_of)!;
   assert.equal(baselineOf(tw, main, 'project')?.name, 'TOWER-A-BL1');
+  assert.ok(progressCurves(tw, [main.proj_id], {}).notes.some((w: string) => /the current budget and dates were used/.test(w)), 'no baseline assigned: the current plan');
+  main.sum_base_proj_id = '11'; // assigned (Project > Assign Baselines): now it is the baseline
   assert.ok(!progressCurves(tw, [main.proj_id], {}).notes.some((w: string) => /the current budget and dates were used/.test(w)));
   // an activity whose actual start and finish are after the data date: its EV is still counted by the data date
   const db: Db = { tables: {} };
