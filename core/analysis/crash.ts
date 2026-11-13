@@ -183,7 +183,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
         if (ineffective.size) { stop = 'PLATEAU'; note = `Crashing the remaining cut sets did not move the finish (tried ${[...ineffective].slice(0, LISTED).map((id) => crit.find((t) => t.task_id === id)?.task_code ?? id).join(', ')}${ineffective.size > LISTED ? ` and ${ineffective.size - LISTED} more` : ''}).`; break; }
         stop = 'EXHAUSTED';
         const stuck = crit.filter((t) => !(limit.has(t.task_id) && capDays(t) > EPS)).sort((a, b) => (b.early_end_date ?? '').localeCompare(a.early_end_date ?? '')).map((t) => t.task_code);
-        note = `${note ? note + ' ' : ''}No path to the finish can be shortened further: it runs through ${stuck.slice(0, LISTED).join(', ')}${stuck.length > LISTED ? ` and ${stuck.length - LISTED} more` : ''} (milestones, locked, without crash data or at their limit).`;
+        note = `${note ? note + ' ' : ''}${stuck.length ? `No path to the finish can be shortened further: it runs through ${stuck.slice(0, LISTED).join(', ')}${stuck.length > LISTED ? ` and ${stuck.length - LISTED} more` : ''} (milestones, locked, without crash data or at their limit).` : 'There is nothing to shorten: no activity drives the finish (the project has no open activities on a path to its finish).'}`;
         break;
       }
       const acts = crit.filter((_, i) => cut.side[2 * i] && !cut.side[2 * i + 1]);
@@ -229,10 +229,15 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
         total_cost: r2(direct - (o.indirectPerDay ?? 0) * days(finish, baseFinish!) - ld * (late(baseFinish!) - late(finish))),
       });
       if (needed(finish) <= 0.005) { stop = 'SUCCESS'; break; }
-      if (target == null && o.targetDays == null && steps.length >= 2 && steps.at(-1)!.total_cost > steps.at(-2)!.total_cost) { stop = 'PLATEAU'; note = 'Total cost started rising.'; break; }
+      if (target == null && o.targetDays == null && steps.length >= 2 && steps.at(-1)!.total_cost > steps.at(-2)!.total_cost) { stop = 'PLATEAU'; note = `Stopped because the total cost started rising: step ${steps.length} took it from ${steps.at(-2)!.total_cost} to ${steps.at(-1)!.total_cost}, so more crashing costs more than it saves. The result is the cheapest finish found: ${r2(days(finish, baseFinish!))} working days gained at a total cost of ${steps.at(-1)!.total_cost}.`; break; }
     }
   }); } catch (e) { if (!(e instanceof ScheduleFailed)) throw e; return { ok: false as const, error: { code: 'schedule_failed', message: e.message } }; }
   rollback(j);
+  // a target that was not reached says so, and by how much
+  if ((target != null || o.targetDays != null) && finish != null && baseFinish != null && stop !== 'SUCCESS' && stop !== 'ALREADY_MET' && stop !== 'CANCELLED') {
+    const miss = target != null ? days(target, finish) : (o.targetDays as number) - days(finish, baseFinish);
+    if (miss > 0.005) note = `${note ? note + ' ' : ''}The target was missed by ${r2(miss)} working days (${r2(days(finish, baseFinish))} gained).`;
+  }
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const ops = [...changed.values()].map((c) => ({ op: 'update_activity', id: c.task.task_code, project: projCode.get(c.task.proj_id), ...(c.started ? { remaining_hours: c.to } : { duration_hours: c.to }), assignments_follow: true }));
   return {

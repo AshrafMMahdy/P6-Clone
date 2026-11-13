@@ -45,6 +45,12 @@ export const HEALTH_METHOD = [
   'structural score = 100 x (1 - open ends / activities); relationship score = FS share / 0.9 x 100, at most 100',
   'near-critical = not critical, 0 < total float <= 5 working days; a signal is raised for a negative-float activity, critical share over 50%, an open end, FS share under 90%',
 ];
+/** What the logic counts of this index take in, said exactly: the other tools count these over other activities, so a difference between tools is explained by it. */
+export const LOGIC_DEFINITIONS = [
+  'open ends: activities that are not WBS summaries, level of effort or milestones (completed activities included) with no predecessor or no successor in the file; an activity with neither counts once',
+  'out of sequence: activities (completed ones included, WBS summaries not) that started while a finish-to-start predecessor had not finished',
+  'hard constraints: Start On, Finish On, Start On or Before, Finish On or Before, Mandatory Start and Mandatory Finish (either constraint of an activity), over the same activities as the open ends',
+];
 export const RISK_METHOD = [
   'risk index = sum of weight x score over the sub-metrics assessed / sum of their weights: float 0.30, logic 0.25, baseline drift 0.20, progress integrity 0.15, resource 0.10',
   'float risk = 100 x (0.5 x negative-float share + 0.3 x near-critical share + 0.2 x critical share), at most 100',
@@ -223,6 +229,8 @@ export interface ScheduleIndexResult {
   report: 'Schedule index';
   /** the data date (or status date) of the projects; null when the projects in scope have different ones (status_dates then says each) */
   status_date: string | null;
+  /** the file has no data date (the planned start stood in for it, or there is none): said once */
+  data_date_note?: string;
   /** each project's data date, given when the scope has more than one project */
   status_dates?: { project: string; status_date: string | null }[];
   baseline: { which: string; name: string; how: string } | null;
@@ -230,7 +238,7 @@ export interface ScheduleIndexResult {
   loops: { activities: string[]; message: string }[];
   health: Health; risk: Risk;
   logic: F.Assessed<F.LogicFigures>; progress: F.Assessed<F.ProgressFigures>; resources: { result: 'assessed' | 'not_assessed'; note?: string } & Partial<ResourceFigures>;
-  method: { health: string[]; risk: string[]; note: string };
+  method: { health: string[]; risk: string[]; logic_definitions: string[]; note: string };
 }
 
 export function scheduleIndex(db: Parameters<typeof makeScope>[0], o: ScheduleIndexOptions = {}): ScheduleIndexResult {
@@ -259,11 +267,11 @@ export function scheduleIndex(db: Parameters<typeof makeScope>[0], o: ScheduleIn
   const dates = s.projs.map((p) => ({ project: p.proj_short_name, status_date: s.dataDate(p.proj_id) != null ? formatP6Date(s.dataDate(p.proj_id)!) : null }));
   const same = new Set(dates.map((d) => d.status_date)).size <= 1;
   return {
-    report: 'Schedule index', status_date: same ? dates[0]?.status_date ?? null : null, ...(dates.length > 1 ? { status_dates: dates } : {}), baseline: drift.baseline,
+    report: 'Schedule index', status_date: same ? dates[0]?.status_date ?? null : null, ...(s.noDataDateNote('give status_date to set one', null) ? { data_date_note: s.noDataDateNote('give status_date to set one', null)! } : {}), ...(dates.length > 1 ? { status_dates: dates } : {}), baseline: drift.baseline,
     loops: loops.map((l) => ({ activities: l, message: F.loopMessage(l) })),
     health: health(float, logic, loops), risk, logic, progress: prog,
     resources: res.figures ? { result: 'assessed', ...res.figures } : { result: 'not_assessed', note: subs.resource.reason },
-    method: { health: HEALTH_METHOD, risk: RISK_METHOD, note: 'The weights and thresholds of this index are fixed, not chosen per file, and are listed here; they are this tool\u2019s own scoring, not a published standard.' },
+    method: { health: HEALTH_METHOD, risk: RISK_METHOD, logic_definitions: LOGIC_DEFINITIONS, note: 'The weights and thresholds of this index are fixed, not chosen per file, and are listed here; they are this tool\u2019s own scoring, not a published standard.' },
   };
 }
 
@@ -300,7 +308,7 @@ export function shapeScheduleIndex(r: ScheduleIndexResult, first: <T>(l: T[]) =>
   const risk = r.risk;
   const { drivers: _drivers, recommendations: _recs, ...riskRest } = risk;
   const summary = {
-    status_date: r.status_date, ...(r.status_dates ? { status_dates: r.status_dates, status_dates_total: r.status_dates.length } : {}), baseline: r.baseline,
+    status_date: r.status_date, ...(r.data_date_note ? { data_date_note: r.data_date_note } : {}), ...(r.status_dates ? { status_dates: r.status_dates, status_dates_total: r.status_dates.length } : {}), baseline: r.baseline,
     // (the reasons are said once, in health.left_out and risk.left_out; the summary names what was left out)
     health: r.health.result === 'assessed' ? { score: r.health.score, grade: r.health.grade } : { result: 'not_assessed' },
     risk: risk.result === 'assessed' ? { score: risk.score, grade: risk.grade, level: risk.level, status: risk.status, sub_metrics_assessed: `${risk.assessed_sub_metrics} of 5`, left_out: risk.left_out.map((l) => l.sub_metric) } : { result: 'not_assessed' },

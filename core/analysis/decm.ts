@@ -11,7 +11,7 @@ import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { compareSchedules, progressIntegrity } from '../diff.ts';
 import { CPT_SLIP_DAYS, criticalPathTest, dcmaPopulations, hardConstraintsCheck, invalidDateFlags, lagsCheck, logicCheck } from './dcma.ts';
 import type { Update } from './delay.ts';
-import { baselineOf, baselineFinish, namesText, isLoe, isWbs, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
+import { baselineOf, baselineFinish, namesText, isLoe, isWbs, dateFields, makeScope, notAssessed, offender, passes, type CheckResult, type Offender, type Threshold } from './common.ts';
 import { loopMessage, logicLoops, referenceStart, updateDate, updateView } from './forensic.ts';
 
 export type DecmId = '06A204b' | '06A205a' | '06A208a' | '06A209a' | '06A210a' | '06A212a' | '06A401a' | '06A501a' | '06A504a' | '06A504b' | '06A505a' | '06A505b' | '06A506a' | '06A506b' | '06A506c' | '08I101a' | '10A303a';
@@ -174,7 +174,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   const dd = s.projs.map((p) => s.dataDate(p.proj_id)).find((x) => x != null) ?? null;
   const first = [...bls.values()].find(Boolean);
   return {
-    report: 'DCMA DECM schedule checks', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, baseline: first ? { which, name: first.name, how: first.how } : null, updates: ordered.map((u) => ({ name: u.name, data_date: updateDate(u) != null ? formatP6Date(updateDate(u)!) : null, open_project: !!u.open })),
+    report: 'DCMA DECM schedule checks', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, ...dateFields(s, 'give status_date to set one'), baseline: first ? { which, name: first.name, how: first.how } : null, updates: ordered.map((u) => ({ name: u.name, data_date: updateDate(u) != null ? formatP6Date(updateDate(u)!) : null, open_project: !!u.open })),
     summary: { passed, failed, not_assessed: out.length - passed - failed, compliance_ratio: passed + failed ? Math.round((passed / (passed + failed)) * 1000) / 1000 : null, overall: passed + failed ? (failed ? 'fail' : 'pass') : null },
     guidelines: gs.map((g) => { const cs = out.filter((c) => c.guideline === g); return { guideline: g, name: GUIDELINES[g] ?? `Guideline ${g}`, checks: cs.map((c) => c.id), passed: cs.filter((c) => c.result === 'pass').length, failed: cs.filter((c) => c.result === 'fail').length, not_assessed: cs.filter((c) => c.result === 'not_assessed').length }; }),
     checks: out, method: DECM_METHOD,

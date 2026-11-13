@@ -509,7 +509,7 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
     if (!succ) continue;
     for (const p of t.preds) {
       if (p.uid === t.uid) continue;
-      if (summaryUids.has(p.uid)) { warn('MSP_SUMMARY_LINK', `Link from summary task ${p.uid} to "${t.name}" dropped (WBS nodes cannot carry logic).`, 'P6 drops relationships on MS Project summary tasks when importing.', { table: 'TASKPRED', key: t.uid }); continue; }
+      if (summaryUids.has(p.uid)) { warn('MSP_SUMMARY_LINK', `Link from summary task "${tasks.find((x) => x.uid === p.uid)?.name ?? p.uid}" (id ${p.uid}) to "${t.name}" dropped (a WBS node cannot carry logic): link its subtasks to "${t.name}" instead.`, 'P6 drops relationships on MS Project summary tasks when importing.', { table: 'TASKPRED', key: t.uid }); continue; }
       const pred = taskRows.get(p.uid);
       if (!pred) { warn('MSP_LINK_UNRESOLVED', `"${t.name}" has a predecessor ${p.uid} that is not in the file; link dropped.`, 'P6 drops links to tasks it does not import.', { table: 'TASKPRED', key: t.uid }); continue; }
       push('TASKPRED', { task_pred_id: String(++relId), task_id: succ.task_id, pred_task_id: pred.task_id, proj_id: pid, pred_proj_id: pid, pred_type: `PR_${p.type}`, lag_hr_cnt: p6num(p.lagHrs), ...(p.lagFile ? { _msp_lag_value: p.lagFile.value, _msp_lag_format: p.lagFile.format, ...(p.lagPct != null ? { _msp_lag_percent: String(p.lagPct) } : {}) } : {}) });
@@ -647,4 +647,19 @@ function taskRow(t: MTask, pid: string, wbsId: string, clndr: string, code: stri
   // the progress it holds for (progressKey)
   if (as && !af) Object.assign(row, { _msp_done: p6num(t.actHrs ?? Math.max(0, dur - rem)), _msp_done_of: progressKey(row) });
   return row;
+}
+
+/** What a save to Microsoft Project (MSPDI or MPX) leaves out of THIS data: each kind of data the format has no place for, with how many there are in the project(s) written.
+ *  One sentence for all of them (every kind once), empty when nothing is lost. UDF values are lost in MPX only (MSPDI writes them as custom fields). */
+export function mspLossNote(db: Db, projIds: string[], format: 'mspdi' | 'mpx'): string | null {
+  const open = new Set(projIds), tasks = new Set(rows(db, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => t.task_id));
+  const n = (table: string, mine: (r: Row) => boolean) => rows(db, table).filter(mine).length;
+  const kinds: [number, string, string][] = [
+    [n('PROJCOST', (r) => open.has(r.proj_id) || tasks.has(r.task_id)), 'expense', 'expenses'],
+    [n('TASKPROC', (r) => tasks.has(r.task_id)), 'step', 'steps'],
+    [format === 'mpx' ? n('UDFVALUE', (r) => tasks.has(r.fk_id) || open.has(r.fk_id)) : 0, 'user-defined field value', 'user-defined field values'],
+    [n('WBSMEMO', (r) => open.has(r.proj_id)) + n('TASKMEMO', (r) => tasks.has(r.task_id)), 'notebook topic', 'notebook topics'],
+  ];
+  const lost = kinds.filter((k) => k[0] > 0).map(([c, one, many]) => `${c} ${c === 1 ? one : many}`);
+  return lost.length ? `Not in the Microsoft Project file (it has no place for them): ${lost.join(', ')}. Save as XER or P6 XML to keep them.` : null;
 }

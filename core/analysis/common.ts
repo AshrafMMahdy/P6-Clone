@@ -1,7 +1,8 @@
 // Shared pieces of the schedule analyses (Check Schedule, DCMA 14-point, lint): the projects and activities in scope,
 // activity kinds, baselines, constraint groups, and the result shape every check returns.
 import { rows, type Db, type Row } from '../db.ts';
-import { parseP6Date } from '../dates.ts';
+import { formatP6Date, parseP6Date } from '../dates.ts';
+import { namesText, noDataDateUsed } from '../notes.ts';
 import { makeCtx, type Ctx } from '../project/ctx.ts';
 import { dayHours, type DayHours } from '../project/units.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
@@ -41,6 +42,22 @@ export const START_CONSTRAINTS = new Set(['CS_MSO', 'CS_MSOB', 'CS_MSOA', 'CS_MA
 /** The activity's constraints (primary and secondary). */
 export const constraintsOf = (t: Row) => [t.cstr_type, t.cstr_type2].filter((c): c is string => !!c);
 
+/** The one sentence about projects with no data date of their own: where the planned start stood in for one (said by the schedule that did it), and where there is none at all (`noneMeans`: what that does to this answer). */
+export function dataDateNote(projs: Row[], how: string, noneMeans: string | null = 'so the checks that need one are not assessed'): string | null {
+  const assumed = projs.filter((p) => parseP6Date(p.last_recalc_date) != null && p._dd_assumed && p._dd_assumed === p.last_recalc_date);
+  const none = projs.filter((p) => parseP6Date(p.last_recalc_date) == null);
+  const say: string[] = [];
+  if (assumed.length) say.push(assumed.map((p) => `${assumed.length > 1 ? `${p.proj_short_name}: ` : ''}${noDataDateUsed(formatP6Date(parseP6Date(p.last_recalc_date)!).slice(0, 16), how)}`).join(' '));
+  if (none.length && noneMeans != null) say.push(`${namesText(none.map((p) => p.proj_short_name))} ${none.length === 1 ? 'has' : 'have'} no data date, ${noneMeans}; ${how}.`);
+  return say.length ? say.join(' ') : null;
+}
+
+/** What an answer that carries a data / status date adds: the sentence about a file with no data date, and each project's own date when they differ (the answer's single date is the first project's). */
+export const dateFields = (s: Scope, how: string, label = 'status_dates'): Record<string, unknown> => {
+  const note = s.noDataDateNote(how), by = s.dataDatesByProject();
+  return { ...(note ? { data_date_note: note } : {}), ...(by ? { [label]: by, [`${label}_note`]: `The projects have different data dates (${label}, by Project ID): each is measured from its own; the single date shown is the first project's with one.` } : {}) };
+};
+
 export interface Scope {
   db: Db; ctx: Ctx; dh: DayHours; hpd: number;
   projs: Row[]; projIds: Set<string>;
@@ -49,6 +66,10 @@ export interface Scope {
   rels: Row[];
   /** the data date (or the status date given) of each project, in minutes */
   dataDate: (projId: string) => number | null;
+  /** the data dates of the projects in scope, by Project ID, when they differ (null when they are all the same or none has one) */
+  dataDatesByProject: () => Record<string, string | null> | null;
+  /** the one sentence about a file with no data date, with the clause that says how to set one in this tool (null: the date is the file's own, or the caller gave one) */
+  noDataDateNote: (how: string, noneMeans?: string | null) => string | null;
   cal: (t: Row) => WorkCalendar;
   projCal: (p: Row) => WorkCalendar;
   /** working days between two times on a calendar (b after a: positive) */
@@ -72,7 +93,12 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
     const m = a <= b ? c.workBetween(a, b) : -c.workBetween(b, a);
     return Math.round((m / 60 / hrs) * 100) / 100;
   };
-  return { db, ctx, dh: dayHours(db, hpd, o.calendarDays ?? true), hpd, projs, projIds, tasks, rels, dataDate: (id) => dd.get(id) ?? null, cal, projCal, workDays };
+  const dataDatesByProject = () => {
+    const by = Object.fromEntries(projs.map((p) => { const d = dd.get(p.proj_id) ?? null; return [p.proj_short_name, d != null ? formatP6Date(d) : null]; }));
+    return projs.length > 1 && new Set(Object.values(by)).size > 1 ? by : null;
+  };
+  const noDataDateNote = (how: string, noneMeans?: string | null) => (o.statusDate != null ? null : dataDateNote(projs, how, noneMeans));
+  return { db, ctx, dh: dayHours(db, hpd, o.calendarDays ?? true), hpd, projs, projIds, tasks, rels, dataDate: (id) => dd.get(id) ?? null, dataDatesByProject, noDataDateNote, cal, projCal, workDays };
 }
 
 /** A project's baseline: the project baseline P6 stores (sum_base_proj_id) or a user baseline BL1-BL3. */

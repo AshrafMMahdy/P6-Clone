@@ -10,7 +10,8 @@ import { statusOf, projectName } from '../project/edit.ts';
 import { activityCosts, earnedValue, sumLines } from '../cost/rollup.ts';
 import { financialPeriods, periodCalendar, projectCalendar } from '../progress/period.ts';
 import { dayHours } from '../project/units.ts';
-import { constraintsOf, DCMA_HARD } from '../analysis/common.ts';
+import { constraintsOf, DCMA_HARD, dataDateNote } from '../analysis/common.ts';
+import { plural } from '../notes.ts';
 
 /** A lookup described for a language model (JSON Schema parameters). */
 export interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
@@ -124,7 +125,8 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const notebook = (p: Row) => { const root = rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y'); return root ? rows(db, 'WBSMEMO').filter((m) => m.wbs_id === root.wbs_id).map((m) => ({ topic: topics.get(m.memo_type_id) ?? '', text: plain(m.wbs_memo) })) : []; };
       return {
         projects: projs.map((p) => { const nb = notebook(p); return { id: p.proj_short_name, name: projectName(db, p), data_date: d(p.last_recalc_date), planned_start: d(p.plan_start_date), must_finish_by: d(p.plan_end_date), scheduled_finish: d(p.scd_end_date), ...(nb.length ? { notebook: nb } : {}) }; }),
-        activities: tasks.length, not_started: count('TK_NotStart'), in_progress: count('TK_Active'), completed: count('TK_Complete'),
+        ...(dataDateNote(projs, 'set one with edit set_project data_date, or schedule with data_date', 'shown blank here; schedule uses the planned start for it') ? { data_date_note: dataDateNote(projs, 'set one with edit set_project data_date, or schedule with data_date', 'shown blank here; schedule uses the planned start for it') } : {}),
+        activities: tasks.length, ...(tasks.length > new Set(tasks.map((t) => t.task_id)).size ? { activities_note: `${plural(tasks.length - new Set(tasks.map((t) => t.task_id)).size, 'activity row')} repeat${tasks.length - new Set(tasks.map((t) => t.task_id)).size === 1 ? 's' : ''} another row\u2019s internal id: schedule merges them and counts ${new Set(tasks.map((t) => t.task_id)).size} activities here. save {repair: true} removes a repeat that is an identical copy.` } : {}), not_started: count('TK_NotStart'), in_progress: count('TK_Active'), completed: count('TK_Complete'),
         critical: tasks.filter((t) => !t.act_end_date && isCritical(t, ctx)).length,
         negative_float: tasks.filter((t) => !t.act_end_date && Number(t.total_float_hr_cnt) < 0).length,
         milestones: tasks.filter((t) => t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile').length,

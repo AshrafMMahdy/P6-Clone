@@ -82,8 +82,8 @@ test('M2: set_fields and add_row refuse an ID used twice, a parent cycle, an act
   const db = load();
   const P = live(db), pn = P.proj_short_name;
   const codes = rows(db, 'TASK').filter((t) => t.proj_id === P.proj_id).map((t) => t.task_code);
-  bad(db, [{ op: 'set_fields', table: 'TASK', project: pn, all: true, fields: { task_code: 'X' } }], /Activity ID "X" would be used by \d+ TASK rows/);
-  bad(db, [{ op: 'set_fields', table: 'TASK', project: pn, where: { task_code: codes[1] }, fields: { task_code: codes[0] } }], /would be used by 2 TASK rows/);
+  bad(db, [{ op: 'set_fields', table: 'TASK', project: pn, all: true, fields: { task_code: 'X' } }], /Activity ID "X" would be used by \d+ activity rows/);
+  bad(db, [{ op: 'set_fields', table: 'TASK', project: pn, where: { task_code: codes[1] }, fields: { task_code: codes[0] } }], /would be used by 2 activity rows/);
   ok(db, [{ op: 'add_activity', id: 'ZA-1', name: 'a' }, { op: 'add_activity', id: 'ZA1', name: 'b' }]);
   bad(db, [{ op: 'set_fields', table: 'TASK', project: pn, where: { task_code: { op: 'starts_with', value: 'ZA' } }, fields: { task_code: { replace: ['-', ''] } } }], /used by/); // codes made equal by an expression
   ok(db, [{ op: 'delete_activity', id: 'ZA-1' }, { op: 'delete_activity', id: 'ZA1' }]);
@@ -109,14 +109,14 @@ test('M2: set_fields and add_row refuse an ID used twice, a parent cycle, an act
   bad(db, [{ op: 'set_fields', table: 'PROJWBS', where: { wbs_id: w1.wbs_id }, fields: { parent_wbs_id: w1.wbs_id } }], /its own ancestor/);
   const [r1, r2] = rows(db, 'RSRC').filter((r) => r.rsrc_short_name === 'R-ONE' || r.rsrc_short_name === 'R-TWO');
   ok(db, [{ op: 'set_fields', table: 'RSRC', where: { rsrc_id: r2.rsrc_id }, fields: { parent_rsrc_id: r1.rsrc_id } }]);
-  bad(db, [{ op: 'set_fields', table: 'RSRC', where: { rsrc_id: r1.rsrc_id }, fields: { parent_rsrc_id: r2.rsrc_id } }], /RSRC\.parent_rsrc_id/);
+  bad(db, [{ op: 'set_fields', table: 'RSRC', where: { rsrc_id: r1.rsrc_id }, fields: { parent_rsrc_id: r2.rsrc_id } }], /The resource R-ONE would be its own ancestor/);
   ok(db, [{ op: 'add_cost_account', id: 'CA1' }, { op: 'add_cost_account', id: 'CA2', parent: 'CA1' }]);
   const a1 = rows(db, 'ACCOUNT').find((a) => a.acct_short_name === 'CA1')!, a2 = rows(db, 'ACCOUNT').find((a) => a.acct_short_name === 'CA2')!;
-  bad(db, [{ op: 'set_fields', table: 'ACCOUNT', where: { acct_id: a1.acct_id }, fields: { parent_acct_id: a2.acct_id } }], /ACCOUNT\.parent_acct_id/);
+  bad(db, [{ op: 'set_fields', table: 'ACCOUNT', where: { acct_id: a1.acct_id }, fields: { parent_acct_id: a2.acct_id } }], /The cost account CA1 would be its own ancestor/);
   ok(db, [{ op: 'add_calendar', name: 'Cal A' }, { op: 'add_calendar', name: 'Cal B' }]);
   const cA = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Cal A')!, cB = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Cal B')!;
   ok(db, [{ op: 'set_fields', table: 'CALENDAR', where: { clndr_id: cB.clndr_id }, fields: { base_clndr_id: cA.clndr_id } }]);
-  bad(db, [{ op: 'set_fields', table: 'CALENDAR', where: { clndr_id: cA.clndr_id }, fields: { base_clndr_id: cB.clndr_id } }], /CALENDAR\.base_clndr_id/);
+  bad(db, [{ op: 'set_fields', table: 'CALENDAR', where: { clndr_id: cA.clndr_id }, fields: { base_clndr_id: cB.clndr_id } }], /would be its own ancestor/);
   // relationships: to itself, and a loop, through TASKPRED edits
   ok(db, [{ op: 'add_activity', project: pn, id: 'L1', name: 'L1' }, { op: 'add_activity', project: pn, id: 'L2', name: 'L2' }, { op: 'add_activity', project: pn, id: 'L3', name: 'L3' }, { op: 'add_relationship', project: pn, pred: 'L1', succ: 'L2' }, { op: 'add_relationship', project: pn, pred: 'L2', succ: 'L3' }]);
   const l1 = task(db, 'L1', P.proj_id), l2 = task(db, 'L2', P.proj_id), l3 = task(db, 'L3', P.proj_id);
@@ -463,12 +463,12 @@ test('an ID the file already had twice may not become three: the edit and the sa
   // a third copy made by set_fields is refused, naming 3
   const no = await call('edit', { ...H, operations: [{ op: 'set_fields', table: 'TASK', project: P.proj_short_name, where: { task_code: third.task_code }, fields: { task_code: dup } }] });
   assert.equal(no.err, true);
-  assert.match(JSON.stringify(no.d), /used by 3 TASK rows/);
+  assert.match(JSON.stringify(no.d), /used by 3 activity rows/);
   // and one made by other means is refused by save
   third.task_code = dup; s.dirty = true;
   const refused = await call('save', { ...H, path: join(dir, 'x.xer') });
   assert.equal(refused.err, true);
-  assert.match(refused.d.error.reason, new RegExp(`Activity ID "${dup}" would be used by 3 TASK rows`));
+  assert.match(refused.d.error.reason, new RegExp(`Activity ID "${dup}" would be used by 3 activity rows`));
   third.task_code = 'BACK-TO-ONE';
   const saved = await call('save', { ...H, path: join(dir, 'y.xer') });
   assert.equal(saved.err, false, JSON.stringify(saved.d).slice(0, 300));
@@ -500,7 +500,7 @@ test('a child added under a cycle the file already had is not blamed on the edit
   void root;
   const refused = await call('save', { ...H, path: join(dir, 'b.xer') });
   assert.equal(refused.err, true);
-  assert.match(refused.d.error.reason, /PROJWBS\.parent_wbs_id: (CC|CD) would be its own ancestor/);
+  assert.match(refused.d.error.reason, /The WBS element (CC|CD) would be its own ancestor/);
   assert.doesNotMatch(refused.d.error.reason, /(CA|CB) would be/, 'the file\'s own cycle is not the reason');
 });
 

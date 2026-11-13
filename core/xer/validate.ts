@@ -6,8 +6,11 @@ import { ENUMS, fieldType, fieldsFor, knownFields, knownTables } from './schema.
 import { hoursAsDays, namesText, noDataDateUsed, plural } from '../notes.ts';
 
 /** What a table's row is called in a message (the Activity, relationship, resource... the planner knows, never the table's name). */
-const WORD: Record<string, string> = { TASK: 'activity', TASKPRED: 'relationship', PROJWBS: 'WBS element', PROJECT: 'project', RSRC: 'resource', TASKRSRC: 'resource assignment', CALENDAR: 'calendar', ACTVCODE: 'activity code value', ACTVTYPE: 'activity code type', UDFTYPE: 'user-defined field', UDFVALUE: 'user-defined field value', TASKACTV: 'activity code assignment', PROJCOST: 'expense', TASKMEMO: 'activity notebook topic', OBS: 'OBS element', CURRTYPE: 'currency', RSRCRATE: 'resource rate' };
-const wordOf = (table: string) => WORD[table] ?? `${table} row`;
+const WORD: Record<string, string> = { TASK: 'activity', TASKPRED: 'relationship', PROJWBS: 'WBS element', PROJECT: 'project', RSRC: 'resource', TASKRSRC: 'resource assignment', CALENDAR: 'calendar', ACTVCODE: 'activity code value', ACTVTYPE: 'activity code type', UDFTYPE: 'user-defined field', UDFVALUE: 'user-defined field value', TASKACTV: 'activity code assignment', PROJCOST: 'expense', TASKMEMO: 'activity notebook topic', OBS: 'OBS element', CURRTYPE: 'currency', RSRCRATE: 'resource rate', ACCOUNT: 'cost account', ROLES: 'role', PCATTYPE: 'project code type', PCATVAL: 'project code value', RCATTYPE: 'resource code type', RCATVAL: 'resource code value', EPS: 'EPS node' };
+export const wordOf = (table: string) => WORD[table] ?? `${table} row`;
+
+/** Two rows that are the same row twice: every field equal. */
+export const sameRow = (a: Row, b: Row): boolean => { const ks = new Set([...Object.keys(a), ...Object.keys(b)]); for (const k of ks) if ((a[k] ?? '') !== (b[k] ?? '')) return false; return true; };
 
 /** The scheduler's rule for loops (one place for it): level of effort and WBS summary activities are not part of a loop, so a chain through one is not a loop. */
 export const inLoopCheck = (taskType: string | undefined): boolean => taskType !== 'TT_LOE' && taskType !== 'TT_WBS';
@@ -91,7 +94,6 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   const actName = (t: Row) => `${t.task_code || '(no Activity ID)'}${manyProj ? ` (project ${projShort.get(t.proj_id) ?? t.proj_id})` : ''}`;
   const act = (id: string) => { const t = firstTask.get(id); return t ? actName(t) : `(an activity that is not in the file, internal id ${id})`; };
   const dupTaskRows = new Set<Row>(); // TASK rows reported as a repeated key: not reported again as a repeated Activity ID
-  const sameRow = (a: Row, b: Row) => { const ks = new Set([...Object.keys(a), ...Object.keys(b)]); for (const k of ks) if ((a[k] ?? '') !== (b[k] ?? '')) return false; return true; };
 
   // Header
   if (db.header) {
@@ -200,10 +202,10 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   const wbs = T.PROJWBS?.rows ?? [];
   for (const p of projects) {
     const nodes = wbs.filter((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y');
-    if (!nodes.length) c.add({ severity: 'fatal', code: 'NO_PROJ_NODE', table: 'PROJWBS', key: p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has no root WBS element. save {repair: true} adds it.`, p6: 'P6 import fails: every project needs its root WBS node.' });
-    if (nodes.length > 1) c.add({ severity: 'error', code: 'MULTI_PROJ_NODE', table: 'PROJWBS', key: p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has ${nodes.length} root WBS elements.`, p6: 'P6 import fails.' });
-    if (!p.plan_start_date) c.add({ severity: 'error', code: 'NO_PLAN_START', table: 'PROJECT', key: p.proj_id, field: 'plan_start_date', message: `Project ${p.proj_short_name || p.proj_id} has no planned start.`, p6: 'P6 requires a project planned start.' });
-    if (!p.last_recalc_date) c.add({ severity: 'warning', code: 'NO_DATA_DATE', table: 'PROJECT', key: p.proj_id, field: 'last_recalc_date', message: `Project ${p.proj_short_name || p.proj_id} has no data date. ${noDataDateUsed(p.plan_start_date ? p.plan_start_date.slice(0, 16) : '(none either)')} Set one with edit set_project data_date, or schedule with data_date.`, p6: 'P6 uses the planned start as data date.' });
+    if (!nodes.length) c.add({ severity: 'fatal', code: 'NO_PROJ_NODE', table: 'PROJWBS', key: p.proj_short_name || p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has no root WBS element. save {repair: true} adds it.`, p6: 'P6 import fails: every project needs its root WBS node.' });
+    if (nodes.length > 1) c.add({ severity: 'error', code: 'MULTI_PROJ_NODE', table: 'PROJWBS', key: p.proj_short_name || p.proj_id, message: `Project ${p.proj_short_name || p.proj_id} has ${nodes.length} root WBS elements.`, p6: 'P6 import fails.' });
+    if (!p.plan_start_date) c.add({ severity: 'error', code: 'NO_PLAN_START', table: 'PROJECT', key: p.proj_short_name || p.proj_id, field: 'plan_start_date', message: `Project ${p.proj_short_name || p.proj_id} has no planned start.`, p6: 'P6 requires a project planned start.' });
+    if (!p.last_recalc_date) c.add({ severity: 'warning', code: 'NO_DATA_DATE', table: 'PROJECT', key: p.proj_short_name || p.proj_id, field: 'last_recalc_date', message: `Project ${p.proj_short_name || p.proj_id} has no data date. ${noDataDateUsed(p.plan_start_date ? p.plan_start_date.slice(0, 16) : '(none either)')} Set one with edit set_project data_date, or schedule with data_date.`, p6: 'P6 uses the planned start as data date.' });
   }
 
   // WBS tree

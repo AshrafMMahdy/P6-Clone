@@ -73,6 +73,8 @@ export interface SystemicIssue { issue: string; dimension: Dim; description: str
 export interface HorizonResult {
   report: 'Planning horizon';
   status_date: string | null;
+  /** the file has no data date (the planned start stood in for it, or there is none): said once */
+  data_date_note?: string;
   result: 'assessed' | 'not_assessed'; note?: string;
   summary: { activities_in_horizon: number; at_risk: number; readiness_score: number | null; status: 'pass' | 'warning' | 'fail' | null; readiness_trend: string | null; dimensions_not_assessed: { dimension: Dim; weight: number; reason: string }[]; projects_without_data_date: string[] };
   loops: { activities: string[]; message: string }[];
@@ -85,7 +87,8 @@ export function planningHorizon(db: Parameters<typeof makeScope>[0], o: { projId
   const s = makeScope(db, { projIds: o.projIds, hoursPerDay: o.hoursPerDay, statusDate: o.statusDate, calendarDays: true });
   const noDate = s.projs.filter((p) => s.dataDate(p.proj_id) == null).map((p) => p.proj_short_name);
   const dd = s.projs.map((p) => s.dataDate(p.proj_id)).find((x) => x != null) ?? null;
-  const base = { report: 'Planning horizon' as const, status_date: dd != null ? formatP6Date(dd) : null };
+  const ddNote = s.noDataDateNote('give status_date to set one', null);
+  const base = { report: 'Planning horizon' as const, status_date: dd != null ? formatP6Date(dd) : null, ...(ddNote ? { data_date_note: ddNote } : {}) };
   const empty = { activities_in_horizon: 0, at_risk: 0, readiness_score: null, status: null, readiness_trend: null, projects_without_data_date: noDate };
   const loops = logicLoops(s).map((l) => ({ activities: l, message: loopMessage(l) }));
   // no anchor, no analysis (the source falls back to the earliest start, or to 2000-01-01)

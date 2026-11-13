@@ -11,7 +11,7 @@ import { noBaseline } from '../notes.ts';
 import { parseP6Date } from '../dates.ts';
 import {
   baselineOf, baselineFinish, constraintsOf, isDone, isLoe, isMilestone, isStarted, isWbs, makeScope, notAssessed, offender,
-  P6_HARD, P6_SOFT, exactPct, pct, percentCheck, relOffender, START_CONSTRAINTS, passes, type CheckResult, type Offender, type Threshold,
+  dateFields, P6_HARD, P6_SOFT, exactPct, pct, percentCheck, relOffender, START_CONSTRAINTS, passes, type CheckResult, type Offender, type Threshold,
 } from './common.ts';
 import { beiFigures } from './forensic.ts';
 
@@ -48,14 +48,14 @@ export interface CheckScheduleOptions {
 export interface CheckScheduleReport {
   report: 'Check Schedule';
   projects: { id: string; name: string; data_date: string | null; activities: number; completed: number; relationships: number; missing_baseline_activities: number | null }[];
-  threshold_hours: number;
+  threshold_days: number;
   summary: { checked: number; failed: number; passed: number; not_assessed: number };
   checks: CheckResult[];
 }
 
 export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckScheduleReport {
   const s = makeScope(db, { projIds: o.projIds, hoursPerDay: o.hoursPerDay, calendarDays: false });
-  const maxIds = o.maxIds ?? 100, thH = o.thresholdHours ?? 44 * s.hpd;
+  const maxIds = o.maxIds ?? 100, thH = o.thresholdHours ?? 44 * s.hpd, thD = Math.round((thH / s.hpd) * 100) / 100, dayOf = (h: number) => `${Math.round((h / s.hpd) * 100) / 100} d`;
   const want = new Set(o.checks?.length ? o.checks : P6_CHECKS.map((c) => c.id));
   const th = (id: string): Threshold => { const d = P6_CHECKS.find((c) => c.id === id)!.th; return o.targets?.[id] != null ? { ...d, value: o.targets[id], source: 'override' } : d; };
   const name = (id: string) => P6_CHECKS.find((c) => c.id === id)!.name;
@@ -71,14 +71,14 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
   add('logic', () => percentCheck('logic', name('logic'), relPop.filter((t) => {
     const needPred = !isStarted(t) && t.task_type !== 'TT_Mile', needSucc = t.task_type !== 'TT_FinMile';
     return (needPred && !preds(t).length) || (needSucc && !succs(t).length);
-  }).map((t) => offender(t, s, !preds(t).length && !succs(t).length ? 'no predecessor, no successor' : !preds(t).length ? 'no predecessor' : 'no successor')), relPop.length, th('logic'), maxIds));
+  }).map((t) => offender(t, s, !preds(t).length && !succs(t).length ? 'no predecessor, no successor' : !preds(t).length ? 'no predecessor' : 'no successor')), relPop.length, th('logic'), maxIds, 'Open ends here: incomplete activities (level of effort included, WBS summaries not) with no predecessor (a started activity or a start milestone needs none) or no successor (a finish milestone needs none).'));
 
   // Lags and relationship types: relationships between two completed activities are not examined.
   const links = s.rels.filter((r) => { const a = task(r.pred_task_id), b = task(r.task_id); return !(a && b && isDone(a) && isDone(b)); });
   const lagOf = (r: Row) => Number(r.lag_hr_cnt || 0);
   add('negative_lags', () => percentCheck('negative_lags', name('negative_lags'), links.filter((r) => lagOf(r) < 0).map((r) => relOffender(r, s)), links.length, th('negative_lags'), maxIds));
   add('lags', () => percentCheck('lags', name('lags'), links.filter((r) => lagOf(r) > 0).map((r) => relOffender(r, s)), links.length, th('lags'), maxIds));
-  add('long_lags', () => percentCheck('long_lags', name('long_lags'), links.filter((r) => lagOf(r) > thH).map((r) => relOffender(r, s)), links.length, th('long_lags'), maxIds, `Lags over ${thH} hours.`));
+  add('long_lags', () => percentCheck('long_lags', name('long_lags'), links.filter((r) => lagOf(r) > thH).map((r) => relOffender(r, s)), links.length, th('long_lags'), maxIds, `Lags over ${thD} days.`));
   add('relationship_types', () => {
     const fs = links.filter((r) => (r.pred_type || 'PR_FS') === 'PR_FS').length;
     const metric = pct(fs, links.length), t = th('relationship_types');
@@ -89,14 +89,14 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
   // Constraints: completed, WBS summary and LOE activities are not examined, nor start constraints on started activities.
   const cPop = s.tasks.filter((t) => !isDone(t) && !isWbs(t) && !isLoe(t));
   const live = (t: Row) => constraintsOf(t).filter((c) => !(isStarted(t) && START_CONSTRAINTS.has(c)));
-  add('hard_constraints', () => percentCheck('hard_constraints', name('hard_constraints'), cPop.filter((t) => live(t).some((c) => P6_HARD.has(c))).map((t) => offender(t, s, live(t).join(', '))), cPop.length, th('hard_constraints'), maxIds, 'Mandatory Start and Mandatory Finish.'));
+  add('hard_constraints', () => percentCheck('hard_constraints', name('hard_constraints'), cPop.filter((t) => live(t).some((c) => P6_HARD.has(c))).map((t) => offender(t, s, live(t).join(', '))), cPop.length, th('hard_constraints'), maxIds, 'Hard constraints here: Mandatory Start and Mandatory Finish only, over the incomplete activities that are not WBS summaries or level of effort (a Start On constraint on an activity that has started is not counted at all).'));
   add('soft_constraints', () => percentCheck('soft_constraints', name('soft_constraints'), cPop.filter((t) => live(t).some((c) => P6_SOFT.has(c))).map((t) => offender(t, s, live(t).join(', '))), cPop.length, th('soft_constraints'), maxIds, 'Start/Finish On, On or Before, On or After, As Late As Possible.'));
 
   // Float and durations: completed, WBS summary and LOE activities are not examined.
   const tf = (t: Row) => (t.total_float_hr_cnt === '' || t.total_float_hr_cnt == null ? null : Number(t.total_float_hr_cnt));
-  add('large_float', () => percentCheck('large_float', name('large_float'), cPop.filter((t) => (tf(t) ?? -Infinity) > thH).map((t) => offender(t, s, `${tf(t)} h`)), cPop.length, th('large_float'), maxIds, `Total float over ${thH} hours.`));
+  add('large_float', () => percentCheck('large_float', name('large_float'), cPop.filter((t) => (tf(t) ?? -Infinity) > thH).map((t) => offender(t, s, dayOf(tf(t)!))), cPop.length, th('large_float'), maxIds, `Total float over ${thD} days.`));
   add('negative_float', () => percentCheck('negative_float', name('negative_float'), cPop.filter((t) => (tf(t) ?? 0) < 0).map((t) => offender(t, s, `${tf(t)} h`)), cPop.length, th('negative_float'), maxIds));
-  add('large_durations', () => percentCheck('large_durations', name('large_durations'), cPop.filter((t) => Number(t.remain_drtn_hr_cnt || 0) > thH).map((t) => offender(t, s, `${Number(t.remain_drtn_hr_cnt)} h`)), cPop.length, th('large_durations'), maxIds, `Remaining duration over ${thH} hours.`));
+  add('large_durations', () => percentCheck('large_durations', name('large_durations'), cPop.filter((t) => Number(t.remain_drtn_hr_cnt || 0) > thH).map((t) => offender(t, s, dayOf(Number(t.remain_drtn_hr_cnt)))), cPop.length, th('large_durations'), maxIds, `Remaining duration over ${thD} days.`));
 
   // Invalid progress dates: not started with a start or remaining start before the data date; in progress with a
   // remaining start before it or an actual start after it; completed with an actual finish after it.
@@ -134,7 +134,7 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
       const f = parseP6Date(t.reend_date || t.early_end_date), bf = baselineFinish(b);
       return f != null && bf != null && f > bf;
     }).map((t) => offender(t, s, bls.get(t.proj_id)?.tasks.get(t.task_code) ? 'finishes after its baseline' : 'not in the baseline'));
-    return percentCheck('late_activities', name('late_activities'), late, pop.length, th('late_activities'), maxIds);
+    return percentCheck('late_activities', name('late_activities'), late, pop.length, th('late_activities'), maxIds, 'Late activities here: incomplete activities (not WBS summaries or level of effort) whose forecast finish is later than their baseline finish, or that are not in the baseline at all (P6 counts those as late too).');
   });
   add('bei', () => {
     if (!anyBaseline) return notAssessed('bei', name('bei'), 'ratio', th('bei'), noBaseline(false));
@@ -153,7 +153,8 @@ export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckSchedu
       const ts = s.tasks.filter((t) => t.proj_id === p.proj_id), b = bls.get(p.proj_id);
       return { id: p.proj_short_name, name: s.ctx.wbs.get(rows(db, 'PROJWBS').find((w) => w.proj_id === p.proj_id && w.proj_node_flag === 'Y')?.wbs_id ?? '')?.wbs_name ?? p.proj_short_name, data_date: p.last_recalc_date?.slice(0, 16) || null, activities: ts.length, completed: ts.filter(isDone).length, relationships: s.rels.filter((r) => r.proj_id === p.proj_id).length, missing_baseline_activities: b ? ts.filter((t) => !b.tasks.has(t.task_code)).length : null };
     }),
-    threshold_hours: thH,
+    ...dateFields(s, 'set one with edit set_project data_date (this tool has no argument for it)', 'data_dates'),
+    threshold_days: thD,
     summary: { checked: out.length, failed: out.filter((c) => c.result === 'fail').length, passed: out.filter((c) => c.result === 'pass').length, not_assessed: out.filter((c) => c.result === 'not_assessed').length },
     checks: out,
   };

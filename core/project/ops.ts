@@ -565,7 +565,7 @@ function updateActivity(db: Db, t: Row, op: Op, dayHours: (t: Row) => number, ca
   const durH = op.duration_days != null ? num(op.duration_days, 'duration_days') * hpd : op.duration_hours != null ? num(op.duration_hours, 'duration_hours') : null;
   if (durH != null) {
     if (durH < 0) fail('Duration cannot be negative.');
-    if ((t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile') && durH > 0) fail('A milestone has zero duration.');
+    if ((t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile') && durH > 0) fail(`${t.task_code} is a milestone, and a milestone has zero duration: leave out duration_days (or give it a task type to have a duration).`);
     t.target_drtn_hr_cnt = p6num(durH);
     if (!t.act_start_date) t.remain_drtn_hr_cnt = p6num(durH);
   }

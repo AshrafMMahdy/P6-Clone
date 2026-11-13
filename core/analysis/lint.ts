@@ -208,7 +208,7 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
     const HARD = new Set(['CS_MANDSTART', 'CS_MANDFIN', 'CS_MSO', 'CS_MEO']);
     const f = live.filter((t) => t.cstr_type || t.cstr_type2).map((t) => offender(t, s, [t.cstr_type, t.cstr_type2].filter(Boolean).map((c) => c.slice(3)).join(', ')));
     const hard = live.filter((t) => HARD.has(t.cstr_type) || HARD.has(t.cstr_type2)).length;
-    out.push(check('constraints', 'Constrained activities (every type)', hard > T.constraints.max_hard ? 'warning' : 'info', f, live.length, hard > T.constraints.max_hard ? 'warn' : 'pass', maxIds, { applied: T.constraints, note: `${hard} hard (Start On, Finish On, Mandatory); constraints should stand for real dates, not replace logic.` }));
+    out.push(check('constraints', 'Constrained activities (every type)', hard > T.constraints.max_hard ? 'warning' : 'info', f, live.length, hard > T.constraints.max_hard ? 'warn' : 'pass', maxIds, { applied: T.constraints, note: `${hard} hard (Start On, Finish On, Mandatory Start, Mandatory Finish; On or Before is not counted here), over the incomplete activities that are not WBS summaries or level of effort. Constraints should stand for real dates, not replace logic.` }));
   }
   if (want('loe_on_critical')) {
     const f = s.tasks.filter((t) => (isLoe(t) || isWbs(t)) && !isDone(t) && isCritical(t, s.ctx)).map((t) => offender(t, s, isLoe(t) ? 'level of effort' : 'WBS summary'));

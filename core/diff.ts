@@ -1,4 +1,5 @@
 import { KEYS, type Db, type Row } from './db.ts';
+import { plural } from './notes.ts';
 import { dayHours } from './project/units.ts';
 
 export interface DiffEntry { table: string; key: string; kind: 'added' | 'removed' | 'changed'; field?: string; a?: string; b?: string }
@@ -172,9 +173,16 @@ export function progressIntegrity(a: Db, b: Db, changes: ScheduleChange[]): Prog
     }
   }
   const clean = !retro.length && !down.length && !back.length;
+  // the note says what changed and by how much (the first of each kind as an example), and what to do with it; the rule (a record an earlier update held was changed or cleared, a % complete went down, a status went back) is the only case it asks for disclosure
+  const ex = (l: IntegrityFinding[], text: (f: IntegrityFinding) => string) => (l.length ? ` e.g. ${text(l[0])}` : '');
+  const part = [
+    retro.length ? `${plural(retro.length, 'actual date')} the earlier update held ${retro.length === 1 ? 'was' : 'were'} changed or cleared (${ex(retro, (f) => `${f.id} ${f.field.replace('_', ' ')} ${f.a} \u2192 ${f.b === '' || f.b == null ? 'cleared' : f.b}`).trim()})` : '',
+    down.length ? `${plural(down.length, 'percent complete')} went down (${ex(down, (f) => `${f.id} ${f.a}% \u2192 ${f.b}%`).trim()})` : '',
+    back.length ? `${plural(back.length, 'status', 'statuses')} went back (${ex(back, (f) => `${f.id} ${f.a} \u2192 ${f.b}`).trim()})` : '',
+  ].filter(Boolean);
   return { retroactive_actuals: retro, progress_decreases: down, status_regressions: back, clean,
     note: clean ? 'no actual date the earlier update held was changed or cleared, no % complete went down, no status went back'
-      : `${retro.length} retroactive actual-date change(s), ${down.length} progress decrease(s), ${back.length} status regression(s) between the updates \u2014 evidence-integrity findings that MUST be disclosed (a claim relies on contemporaneous records)` };
+      : `Between the updates: ${part.join('; ')}. A claim relies on contemporaneous records, so these are disclosed in the report; the lists give every one.` };
 }
 
 /** An activity's % complete (by its own type, percentOf) that differs between an earlier and a later update, activities matched by Activity ID as compareSchedules matches them. A physical % blank on either side is not compared (as progressIntegrity). */

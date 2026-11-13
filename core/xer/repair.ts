@@ -2,9 +2,10 @@
 // save is a file P6 imports. A key column whose name is misspelled is renamed when its values are unique ids; empty,
 // missing and duplicated keys get fresh ids where nothing in the file points at them. What cannot be fixed safely
 // is reported, not touched.
-import { KEYS, refTarget, type Db } from '../db.ts';
+import { KEYS, refTarget, type Db, type Row } from '../db.ts';
 import { knownFields } from './schema.ts';
-import { suggest } from './validate.ts';
+import { sameRow, suggest, wordOf } from './validate.ts';
+import { namesText, plural } from '../notes.ts';
 
 export interface Repairs { repaired: string[]; not_repaired: string[] }
 
@@ -33,14 +34,23 @@ export function repairKeys(db: Db): Repairs {
     let next = t.rows.reduce((m, r) => Math.max(m, Number(r[key]) || 0), 0);
     const seen = new Set<string>();
     let minted = 0, dup = 0;
+    const first = new Map<string, Row>(), ignored: Row[] = [];
     for (const r of t.rows) {
       const v = r[key] ?? '';
-      if (v && !seen.has(v)) { seen.add(v); continue; }
+      if (v && !seen.has(v)) { seen.add(v); first.set(v, r); continue; }
+      // the same row twice (every field equal) is one row: the copy is ignored, nothing is lost
+      if (v && first.has(v) && sameRow(first.get(v)!, r)) { ignored.push(r); continue; }
       if (v && referenced) { dup++; continue; }
       r[key] = String(++next); seen.add(r[key]); minted++;
     }
-    if (minted) out.repaired.push(`${t.name}: ${minted} row(s) with an empty, missing or repeated ${key} given fresh ids.`);
-    if (dup) out.not_repaired.push(`${t.name}: ${dup} row(s) repeat a ${key} that other tables point at; which row is meant cannot be told, so they were left (P6 refuses repeated ids).`);
+    if (ignored.length) {
+      const gone = new Set(ignored);
+      t.rows = t.rows.filter((r) => !gone.has(r));
+      const who = t.name === 'TASK' ? `Activity ${ignored.length === 1 ? 'ID' : 'IDs'} ${namesText(ignored.map((r) => r.task_code || r.task_id))}` : `id ${namesText(ignored.map((r) => r[key]))}`;
+      out.repaired.push(`${plural(ignored.length, `identical duplicate ${wordOf(t.name)} row`)} ${ignored.length === 1 ? 'was' : 'were'} ignored (${who}): the same row twice is one row.`);
+    }
+    if (minted) out.repaired.push(`${plural(minted, wordOf(t.name))} with an empty, missing or repeated id ${minted === 1 ? 'was' : 'were'} given a fresh id.`);
+    if (dup) out.not_repaired.push(`${plural(dup, `${wordOf(t.name)} row`)} ${dup === 1 ? 'repeats' : 'repeat'} an id that other rows point at and ${dup === 1 ? 'differs' : 'differ'} from ${dup === 1 ? 'its' : 'their'} twin, so which row is meant cannot be told: ${dup === 1 ? 'it was' : 'they were'} left (P6 refuses repeated ids). Compare them with read_table, then keep one.`);
   }
   return out;
 }

@@ -10,7 +10,16 @@ import { relationshipFloat, type ScheduleResult } from '../schedule/cpm.ts';
 import { dayHours } from '../project/units.ts';
 import { cstrName, daysText, plural } from '../notes.ts';
 
-export interface LogSection { code: string; title: string; count: number; activities: { id: string; name: string; detail?: string }[] }
+export interface LogSection { code: string; title: string; count: number; /** exactly which activities the section takes in (other tools count the same words over other activities) */ definition?: string; activities: { id: string; name: string; detail?: string }[] }
+
+/** What each section of the log counts, over which activities. */
+const DEFINITION: Record<string, string> = {
+  OPEN_START: 'incomplete activities (milestones included; level of effort and WBS summaries not) with no predecessor',
+  OPEN_FINISH: 'incomplete activities (milestones included; level of effort and WBS summaries not) with no successor',
+  OUT_OF_SEQUENCE: 'one entry for each finish-to-start relationship whose predecessor has not finished although its successor has started (incomplete activities)',
+  ACTUAL_AFTER_DD: 'activities (completed ones included) with an actual start or finish after the data date of their project',
+  NEGATIVE_FLOAT: 'incomplete activities with total float below zero, in days of the activity\u2019s own calendar',
+};
 export interface ScheduleLogReport { statistics: ScheduleResult['stats']; errors: LogSection[]; warnings: LogSection[]; exceptions: LogSection[] }
 
 const START_TYPES = new Set(['CS_MSO', 'CS_MSOB', 'CS_MSOA', 'CS_MANDSTART']);
@@ -36,14 +45,15 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100): { war
 
   // a start milestone has no finish and a finish milestone no start: links that use them are invalid in P6
   const badMs: { t: Row; detail: string }[] = [];
+  const codeOf = (id: string) => ctx.taskById.get(id)?.task_code ?? '(outside the open projects)';
   for (const t of tasks) {
     if (t.task_type === 'TT_Mile') {
-      for (const r of ctx.predsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_SF') badMs.push({ t, detail: `start milestone with a ${r.pred_type.slice(3)} predecessor` });
-      for (const r of ctx.succsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_FS') { if (r.pred_type === 'PR_FF') badMs.push({ t, detail: 'start milestone driving an FF successor' }); }
+      for (const r of ctx.predsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_SF') badMs.push({ t, detail: `start milestone with a ${r.pred_type.slice(3)} predecessor, ${codeOf(r.pred_task_id)}` });
+      for (const r of ctx.succsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_FF' || r.pred_type === 'PR_FS') { if (r.pred_type === 'PR_FF') badMs.push({ t, detail: `start milestone driving an FF successor, ${codeOf(r.task_id)}` }); }
     }
     if (t.task_type === 'TT_FinMile') {
-      for (const r of ctx.succsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_SS' || r.pred_type === 'PR_SF') badMs.push({ t, detail: `finish milestone driving an ${r.pred_type.slice(3)} successor` });
-      for (const r of ctx.predsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_SS') badMs.push({ t, detail: 'finish milestone with an SS predecessor' });
+      for (const r of ctx.succsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_SS' || r.pred_type === 'PR_SF') badMs.push({ t, detail: `finish milestone driving an ${r.pred_type.slice(3)} successor, ${codeOf(r.task_id)}` });
+      for (const r of ctx.predsOf.get(t.task_id) ?? []) if (r.pred_type === 'PR_SS') badMs.push({ t, detail: `finish milestone with an SS predecessor, ${codeOf(r.pred_task_id)}` });
     }
   }
 
@@ -92,7 +102,7 @@ export function scheduleLogReport(db: Db, projIds: string[], res: Pick<ScheduleR
   for (const [code, title, where] of FROM_F9) {
     const fs = byCode(code);
     if (!fs.length) continue;
-    out[where].push({ code, title, count: fs.length, activities: (maxIds ? fs.slice(0, maxIds) : fs).map((f) => ({ id: f.key ?? '', name: names.get(f.key ?? '') ?? '', detail: f.message })) });
+    out[where].push({ code, title, count: fs.length, ...(DEFINITION[code] ? { definition: DEFINITION[code] } : {}), activities: (maxIds ? fs.slice(0, maxIds) : fs).map((f) => ({ id: f.key ?? '', name: names.get(f.key ?? '') ?? '', detail: f.message })) });
   }
   const ex = extraLogSections(db, projIds, maxIds);
   out.warnings.push(...ex.warnings.filter((s) => s.count));

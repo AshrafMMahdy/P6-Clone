@@ -345,6 +345,8 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   const c = context(db, [], hpd, calendarDays);
   const dh = c.dh;
   const warnings: string[] = [];
+  // rows of another project: one cause, said once at the end (never a line for each row)
+  const foreign = { projects: new Set<string>(), n: { activities: 0, relationships: 0, expenses: 0, assignments: 0 } };
   const s: ImportSummary = { activitiesAdded: 0, activitiesUpdated: 0, activitiesDeleted: 0, relationshipsAdded: 0, relationshipsUpdated: 0, relationshipsDeleted: 0, expensesAdded: 0, expensesUpdated: 0, expensesDeleted: 0, resourcesAdded: 0, resourcesUpdated: 0, assignmentsAdded: 0, assignmentsUpdated: 0, assignmentsDeleted: 0, unchanged: 0 };
   const out: { op: Op; ref: RowRef; rank: number; slot?: AsgSlot }[] = [];
   const proj = rows(db, 'PROJECT').find((p) => p.proj_short_name === projectId && !p._baseline_of);
@@ -468,7 +470,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   for (const { r, ref } of taskRecs) {
     const code = str(r.task_code);
     if (!code) continue;
-    if (has(r, 'proj_id') && str(r.proj_id) && str(r.proj_id) !== projectId) { warnings.push(`Activity ${code} belongs to project ${str(r.proj_id)}; skipped.`); continue; }
+    if (has(r, 'proj_id') && str(r.proj_id) && str(r.proj_id) !== projectId) { foreign.projects.add(str(r.proj_id)); foreign.n.activities++; continue; }
     const t = byCode.get(code);
     if (yes(r.delete_record_flag)) { if (t) { emit({ op: 'delete_activity', id: code, ...P }, ref, 3); s.activitiesDeleted++; } continue; }
     const op: Op = { op: t ? 'update_activity' : 'add_activity', id: code, ...P };
@@ -544,7 +546,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
     const pred = str(r.pred_task_id), succ = str(r.task_id);
     if (!pred || !succ) continue;
     const pp = str(r.pred_proj_id), sp = str(r.proj_id);
-    if ((pp && !projByName.has(pp)) || (sp && !projByName.has(sp))) { warnings.push(`Relationship ${pred} -> ${succ}: no project ${pp && !projByName.has(pp) ? pp : sp} in this file; skipped.`); continue; }
+    if ((pp && !projByName.has(pp)) || (sp && !projByName.has(sp))) { foreign.projects.add(pp && !projByName.has(pp) ? pp : sp); foreign.n.relationships++; continue; }
     const type = str(r.pred_type).toUpperCase().replace(/^PR_/, '') || 'FS';
     if (!['FS', 'SS', 'FF', 'SF'].includes(type)) { warnings.push(`Relationship ${pred} -> ${succ}: unknown type "${str(r.pred_type)}"; the accepted values are FS, SS, FF, SF (or PR_FS, PR_SS, PR_FF, PR_SF); the row was skipped. Write the type as one of them.`); continue; }
     // operations name an end in another project by that project (the edit's own project otherwise)
@@ -581,7 +583,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   for (const { r, ref } of costRecs) {
     const act = str(r.task_id), name = str(r.cost_name);
     if (!act || !name) { if (act || name) warnings.push(`Row ${ref.row} of PROJCOST: an expense needs both Activity ID and Expense Item; skipped.`); continue; }
-    if (has(r, 'proj_id') && str(r.proj_id) && str(r.proj_id) !== projectId) { warnings.push(`Expense ${act} / ${name} belongs to project ${str(r.proj_id)}; skipped.`); continue; }
+    if (has(r, 'proj_id') && str(r.proj_id) && str(r.proj_id) !== projectId) { foreign.projects.add(str(r.proj_id)); foreign.n.expenses++; continue; }
     const t = byCode.get(act);
     const mine = t ? (costs.get(t.task_id) ?? []).filter((x) => lc(x.cost_name) === lc(name)) : [];
     if (mine.length > 1) { warnings.push(`Row ${ref.row} of PROJCOST: activity ${act} has several expenses named "${name}"; skipped.`); continue; }
@@ -625,7 +627,7 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   for (const { r, ref } of asgRecs) {
     const act = str(r.task_id), res = str(r.rsrc_id), roleOnly = !res ? str(r.role_id) : '';
     if (!act || (!res && !roleOnly)) continue;
-    if (has(r, 'proj_id') && str(r.proj_id) && str(r.proj_id) !== projectId) { warnings.push(`Assignment ${act} / ${res || roleOnly} belongs to project ${str(r.proj_id)}; skipped.`); continue; }
+    if (has(r, 'proj_id') && str(r.proj_id) && str(r.proj_id) !== projectId) { foreign.projects.add(str(r.proj_id)); foreign.n.assignments++; continue; }
     const t = byCode.get(act), rr = res ? R.get(lc(res)) : undefined;
     const rid = roleOnly ? roleId.get(lc(roleOnly)) : undefined;
     if (roleOnly && rid == null) { warnings.push(`Row ${ref.row} of TASKRSRC: no role "${roleOnly}" in this file; row skipped.`); continue; }
@@ -694,6 +696,12 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
   // resources and activities first, relationships after them, then expenses and assignments, deletions last (a
   // relationship or assignment may name an activity or resource the sheet adds); in sheet order within each
   const order = out.map((_, i) => i).sort((i, j) => out[i].rank - out[j].rank || i - j);
+  const skippedForeign = foreign.n.activities + foreign.n.relationships + foreign.n.expenses + foreign.n.assignments;
+  if (skippedForeign) {
+    const what = Object.entries(foreign.n).filter(([, c]) => c > 0).map(([k, c]) => `${k} ${c}`).join(', ');
+    const others = [...foreign.projects].filter(Boolean);
+    warnings.unshift(`The workbook's Project ID is ${others.map((x) => `"${x}"`).join(', ')} and the open project's is "${projectId}": ${skippedForeign} ${skippedForeign === 1 ? 'row was' : 'rows were'} skipped (${what}). Give project: ${others.length === 1 ? `"${others[0]}"` : 'the Project ID the workbook is from'} if that project is open, or change the Project ID column of the workbook to "${projectId}".`);
+  }
   return { ops: order.map((i) => out[i].op), rows: order.map((i) => out[i].ref), slots: order.map((i) => out[i].slot ?? null), summary: s, warnings };
 }
 

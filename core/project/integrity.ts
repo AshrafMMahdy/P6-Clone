@@ -5,6 +5,8 @@
 // it looks at every row (the check before a save).
 import { KEYS, refTarget, rows, type Db, type Row } from '../db.ts';
 import { realOf } from '../journal.ts';
+import { wordOf } from '../xer/validate.ts';
+import { plural } from '../notes.ts';
 
 /** A problem: its message, and a key that names the thing itself (not its count), so a flaw the file already had can be told from one an edit made. */
 /** count: how many rows share the flaw (a value used by 3 rows is 3); an edit may not raise it. */
@@ -28,7 +30,9 @@ export const UNIQUE: Unique[] = [
   { table: 'UDFTYPE', field: 'udf_type_label', scope: ['table_name'], what: 'User-defined field title' },
 ];
 
-const label = (r: Row, T: string): string => String(r[UNIQUE.find((u) => u.table === T)?.field ?? ''] ?? r[KEYS[T]] ?? '');
+/** A project by its Project ID (never its internal number). */
+const projectName = (db: Db, projId: string): string => rows(db, 'PROJECT').find((p) => p.proj_id === projId)?.proj_short_name || projId;
+const label = (r: Row, T: string): string => String(r[UNIQUE.find((u) => u.table === T)?.field ?? ''] ?? (T === 'CALENDAR' ? r.clndr_name : undefined) ?? r[KEYS[T]] ?? '');
 
 /** The ID problems of the rows of `table` (`only`, else all): a value another row of the same scope also has. */
 export function duplicates(db: Db, table: string, only?: Row[]): Problem[] {
@@ -43,7 +47,7 @@ export function duplicates(db: Db, table: string, only?: Row[]): Problem[] {
       const k = key(r);
       if ((count.get(k) ?? 0) < 2 || seen.has(k)) continue;
       seen.add(k);
-      out.push({ key: `dup|${table}|${u.field}|${k}`, message: `${u.what} "${r[u.field]}" would be used by ${count.get(k)} ${table} rows${u.scope.includes('proj_id') && r.proj_id ? ` in project ${r.proj_id}` : ''}; P6 needs it unique.`, count: count.get(k) ?? 2 });
+      out.push({ key: `dup|${table}|${u.field}|${k}`, message: `${u.what} "${r[u.field]}" would be used by ${plural(count.get(k) ?? 0, `${wordOf(table)} row`)}${u.scope.includes('proj_id') && r.proj_id ? ` in project ${projectName(db, r.proj_id)}` : ''}; P6 needs it unique.`, count: count.get(k) ?? 2 });
     }
   }
   return out;
@@ -63,7 +67,7 @@ export function cycles(db: Db, table: string, only?: Row[]): Problem[] {
       // only a row ON a cycle is its own ancestor; one whose parents lead into a cycle it is not part of (a child under it) is not blamed
       const seen = new Set<string>([r[key]]);
       for (let x: Row | undefined = byId.get(r[f]); x; x = byId.get(x[f])) {
-        if (x[key] === r[key]) { out.push({ key: `cycle|${table}|${f}|${r[key]}`, message: `${table}.${f}: ${label(r, table) || r[key]} would be its own ancestor (a parent cycle); P6 rejects that.`, count: 1 }); break; }
+        if (x[key] === r[key]) { out.push({ key: `cycle|${table}|${f}|${r[key]}`, message: `The ${wordOf(table)} ${label(r, table) || r[key]} would be its own ancestor (a parent cycle); P6 rejects that.`, count: 1 }); break; }
         if (seen.has(x[key])) break;
         seen.add(x[key]);
       }
@@ -74,11 +78,11 @@ export function cycles(db: Db, table: string, only?: Row[]): Problem[] {
 }
 
 /** Relationships from an activity to itself. */
-export const selfLinks = (rs: Row[]): Problem[] => rs.filter((r) => r.task_id && r.task_id === r.pred_task_id).map((r) => ({ key: `self|${r.task_pred_id ?? r.task_id}`, message: `TASKPRED: activity ${r.task_id} would be its own predecessor.`, count: 1 }));
+export const selfLinks = (rs: Row[], db?: Db): Problem[] => rs.filter((r) => r.task_id && r.task_id === r.pred_task_id).map((r) => ({ key: `self|${r.task_pred_id ?? r.task_id}`, message: `Activity ${(db && rows(db, 'TASK').find((t) => t.task_id === r.task_id)?.task_code) || r.task_id} would be its own predecessor.`, count: 1 }));
 
 /** Everything P6 refuses in the rows a call changed. */
 export function problemsIn(db: Db, table: string, only?: Row[]): Problem[] {
-  return [...duplicates(db, table, only), ...cycles(db, table, only), ...(table === 'TASKPRED' ? selfLinks(only ?? realOf(rows(db, 'TASKPRED'))) : [])];
+  return [...duplicates(db, table, only), ...cycles(db, table, only), ...(table === 'TASKPRED' ? selfLinks(only ?? realOf(rows(db, 'TASKPRED')), db) : [])];
 }
 
 /** What P6 would reject in the project(s) to be saved (all of the file when projIds is not given): checked before a changed project is written. */

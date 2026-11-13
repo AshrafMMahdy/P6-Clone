@@ -4,6 +4,7 @@
 // type, status regressions) of core/diff.ts; the assignment diff, the baseline-date diff and the percent diff are small pure functions beside them. Activities are matched by Activity ID as compareSchedules matches them;
 // dates are compared in working days of the activity's calendar. Where an input is absent (an update with no baseline) the category of that period is not assessed, with the reason.
 import { rows, type Db, type Row } from '../db.ts';
+import { plural } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { assignmentChanges, baselineDateChanges, compareSchedules, percentChanges, progressIntegrity, type IntegrityFinding, type ScheduleChange } from '../diff.ts';
 import { dayHours } from '../project/units.ts';
@@ -156,7 +157,7 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
     // the integrity findings of this pair
     const pi = progressIntegrity(va, vb, changes);
     const keep = (f: IntegrityFinding) => both.has(f.id);
-    retro.push(...pi.retroactive_actuals.filter(keep).map((f) => gaming(f, period, from, to, f.b == null || String(f.b).trim() === '' ? 'cleared' : 'changed')));
+    retro.push(...pi.retroactive_actuals.filter(keep).map((f) => gaming(f, period, from, to, f.b == null || String(f.b).trim() === '' ? `${f.field.replace('_', ' ')} ${f.a} was cleared in ${to}` : `${f.field.replace('_', ' ')} changed from ${f.a} to ${f.b}`)));
     down.push(...pi.progress_decreases.filter(keep).map((f) => gaming(f, period, from, to, f.via)));
     back.push(...pi.status_regressions.filter(keep).map((f) => gaming(f, period, from, to)));
     changeRows.push(...actual, ...forecast, ...progress);
@@ -193,7 +194,7 @@ export function changeTracking(o: { updates: Update[]; mode?: Mode; hoursPerDay?
   const status = retro.length || baselineRevised.length ? 'fail' : totals.material ? 'warning' : 'pass';
   return {
     report: 'Change tracking',
-    status, summary: `${totals.changes} change(s) (${totals.material} material) across ${series.length} updates (${periods.length} period${periods.length === 1 ? '' : 's'}); ${flags.length} flag(s) raised`,
+    status, summary: `${plural(totals.changes, 'change')} (${totals.material} material) across ${series.length} updates (${plural(periods.length, 'period')}); ${plural(flags.length, 'flag')} raised`,
     mode, updates: series.map((u) => ({ name: u.name, data_date: text(updateDate(u)), open_project: !!u.open })),
     totals, categories, flags, periods,
     changes: changeRows, logic_changes: logicRows, resource_changes: resourceRows, retroactive_actuals: retro, progress_decreases: down, status_regressions: back,

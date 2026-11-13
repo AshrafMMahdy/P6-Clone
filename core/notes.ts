@@ -28,9 +28,9 @@ export const hoursAsDays = (hours: number, hoursPerDay: number): string => daysT
 export const noBaseline = (argument: boolean, what = 'No project baseline is assigned'): string =>
   `${what}. Assign one with edit assign_baseline${argument ? ', or name a saved baseline in this tool’s baseline argument' : ''}.`;
 
-/** The one sentence for a file with no data date: the planned start stood in for it. `argument` is the tool's own argument that sets one (none: the sentence ends after the date). */
-export const noDataDateUsed = (plannedStart: string, argument?: string): string =>
-  `The file has no data date: the planned start ${plannedStart} was used${argument ? `; give ${argument} to set one` : ''}.`;
+/** The one sentence for a file with no data date: the planned start stood in for it. `how` is the clause that says how to set one in this tool (none: the sentence ends after the date). */
+export const noDataDateUsed = (plannedStart: string, how?: string): string =>
+  `The file has no data date: the planned start ${plannedStart} was used${how ? `; ${how}` : ''}.`;
 
 // AGREED LIMIT (owner, 2026-11-12): 25 — activities and fixes an analysis answer lists per check, and per ranked list of the Monte Carlo answer (criticality, sensitivity, milestones) — fixed, no agent argument — why: enough examples to see the pattern; a round number with no calculation behind it; harmless because the full lists are always written to the result file and named in the answer — arbitrary by agreement.
 // The same constant is also the list size of: the activities and fixes per check of lint, dcma_14 and check_schedule; the resources resource_histogram lists; the changed activities of evaluate and evaluate_batch; the activities per window of windows_analysis; the worst lists of earned_value; the Monte Carlo S-curve points and ranked lists; the activity names in crash_schedule's notes.

@@ -292,7 +292,11 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
   assert.deepEqual([risk.rows, risk.reason], [1, 'P6 XML field exists, its texts are not verified']);
   assert.equal(x.d.not_in_p6_xml.find((l: any) => l.table === 'POBS')?.rows, 2);
   const said = x.d.notes.join('\n');
-  for (const t of ['PROJECT.risk_level 1 value(s)', 'PROJECT.hist_interval 1 value(s)', 'POBS.(whole table) 2 row(s)', 'no element in P6 XML', 'texts are not verified']) assert.ok(said.includes(t), `${t}: ${said}`);
+  // each loss is said once (in not_in_p6_xml, with its reason and count); the notes point to it
+  assert.match(said, /^\d+ kinds of data are not in the P6 XML: not_in_p6_xml lists each with its reason and its count\. Save as XER to keep them\.$/);
+  assert.ok(x.d.not_in_p6_xml.some((l: any) => l.table === 'PROJECT' && l.field === 'risk_level' && l.rows === 1));
+  assert.ok(x.d.not_in_p6_xml.some((l: any) => /no element in P6 XML/.test(l.reason)) && x.d.not_in_p6_xml.some((l: any) => /texts are not verified/.test(l.reason)));
+  assert.doesNotMatch(said, /POBS|risk_level/);
   const r = await call('save', { ...H, path: join(dir, 'a.xer') });
   assert.equal(r.err, false);
   assert.equal(r.d.not_in_p6_xml, undefined, 'an XER keeps every field');

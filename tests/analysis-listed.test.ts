@@ -143,7 +143,10 @@ test('R1: lists of lint fixes, windows, earned value and the other cut lists sho
   assert.deepEqual(m.arguments_not_used.map((x: string) => x.match(/argument "(\w+)"/)![1]), ['top', 'buckets', 'histogram']);
   // (no estimates: every run finishes at the same moment, so the chart is one bar holding all 20 runs, and the answer says so)
   assert.equal(m.histogram.length, 1); assert.equal(m.histogram[0].count, 20); assert.equal(m.histogram[0].cum_pct, 100);
-  assert.equal(m.histogram_note, `All 20 runs finish at the same moment (${m.finish.min}), so the chart is one bar holding all of them, not 20. They coincide because no activity's duration varies: no activity has a three-point estimate and no sampler or default_estimates was given, so every run is the deterministic schedule. To get a spread, set three-point estimates (edit set_estimates), or pass default_estimates ({min_pct, max_pct, dist}), or pass a sampler.`);
+  assert.equal(m.histogram_note, `All 20 runs finish at the same moment (${m.finish.min}), so the chart is one bar holding all of them, not 20. Why they coincide, and what to do about it, is in note.`);
+  // the cause and the advice are said once, in note
+  assert.match(m.note, /^No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule\. To get a spread, set three-point estimates \(edit set_estimates\)/);
+  assert.equal(JSON.stringify(m).split('To get a spread').length - 1, 1);
   assert.equal(m.arguments_not_used[0], `monte_carlo has no argument "top": it was not used and the call ran without it. Its arguments are: handle, export, export_name, iterations, resume, events, sampler, re_anchor, deadline, seed, risk_events, project, default_estimates, exact, caller, async.`);
   const ev = (await call('earned_value', { ...h, worst: 1 })).d;
   assert.match(ev.arguments_not_used[0], /^earned_value has no argument "worst"/);
@@ -290,7 +293,7 @@ test('B6: the Monte Carlo file\'s histogram is the answer\'s chart; with estimat
   assert.deepEqual(one.histogram[0], { start: one.finish.max, end: one.finish.max, count: 15, cum_pct: 100 });
   assert.match(one.histogram_note, /^All 15 runs finish at the same moment/);
   assert.equal(readFileSync(csv(one, 'histogram'), 'utf8').trim().split('\r\n').length, 2);
-  assert.match(one.histogram_note, /no activity's duration varies.*set_estimates.*default_estimates.*sampler/);
+  assert.match(one.histogram_note, /Why they coincide, and what to do about it, is in note\.$/);
   assert.match(one.note, /set_estimates.*default_estimates.*sampler/);
   // durations that vary: no reason given (the runs differ)
   assert.doesNotMatch(r.note ?? '', /no activity/i);
@@ -420,7 +423,7 @@ test('compare mode all carries progress_integrity: retroactive actuals, % comple
   assert.deepEqual(pi.progress_decreases.map((x: any) => [x.id, x.field, x.a, x.b]), [['DUR', 'duration_pct', 20, 10], ['PHY', 'physical_pct', 50, 30], ['UNI', 'units_pct', 50, 25]]);
   assert.deepEqual(pi.status_regressions.map((x: any) => [x.id, x.a, x.b]), [['STA', 'TK_Complete', 'TK_Active']]);
   assert.equal(pi.progress_decreases_total, 3);
-  assert.match(pi.note, /^2 retroactive actual-date change\(s\), 3 progress decrease\(s\), 1 status regression\(s\) between the updates/);
+  assert.match(pi.note, /^Between the updates: 2 actual dates the earlier update held were changed or cleared \(e\.g\. .*\); 3 percent completes went down \(e\.g\. .*\); 1 status went back \(e\.g\. .*\)\. A claim relies on contemporaneous records, so these are disclosed in the report; the lists give every one\.$/);
   // the whole lists are in the result files
   assert.ok(csv(d, 'progress_decreases') && csv(d, 'retroactive_actuals') && csv(d, 'status_regressions'));
   // not given in mode computed

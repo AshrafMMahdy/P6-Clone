@@ -5,6 +5,7 @@
 // rescheduled at the same data date; the delay is impacted less unimpacted completion. All in working days on the
 // first update's project calendar, so the windows add up to the total.
 import { rows, type Db, type Row } from '../db.ts';
+import { checkStoredDates } from '../schedule/stored-dates.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { applyOps } from '../project/ops.ts';
 import { isCritical, makeCtx } from '../project/ctx.ts';
@@ -138,8 +139,23 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
   }
   const fl = finishActivity(list.at(-1)!, o.milestone), ff = finishActivity(first, o.milestone);
   const total = wd(ff ? finOf(ff) : null, fl ? finOf(fl) : null);
+  // notes on what the figures stand on: an update whose saved dates are not current (a recalculation gives other dates), and two updates with one data date (a window of 0 days)
+  const notes: string[] = [];
+  for (const u of list) {
+    const e = finishActivity(u, o.milestone);
+    const stale = checkStoredDates(u.db).some((f) => f.code === 'DATES_NOT_CURRENT');
+    if (stale && e) {
+      let calc: number | null = null;
+      scheduleProjects(u.db, [u.projId], {}, (row, v) => { if (row === e && 'early_end_date' in v) calc = parseP6Date(v.early_end_date); });
+      notes.push(`${u.name}: the dates it saved are not current (a recalculation gives other dates), and the slip here is measured on the saved ones: its finish is saved as ${fmt(finOf(e))}${calc != null && calc !== finOf(e) ? `, a recalculation gives ${fmt(calc)}` : ''}. Schedule it first (schedule) for a slip measured on current dates.`);
+    }
+  }
+  for (let i = 1; i < list.length; i++) {
+    const x = dataDate(list[i - 1]), y = dataDate(list[i]);
+    if (x != null && x === y) notes.push(`Window ${i} (${list[i - 1].name} to ${list[i].name}): both updates have the data date ${fmt(x)}, so the window is 0 days long: its slip is the difference between two versions saved at one date, not progress between dates.`);
+  }
   return {
-    ok: true as const, method: o.method ?? 'contemporaneous', measured: o.milestone ? `milestone ${o.milestone}` : 'project completion', calendar_hours_per_day: hpd,
+    ok: true as const, ...(notes.length ? { notes } : {}), method: o.method ?? 'contemporaneous', measured: o.milestone ? `milestone ${o.milestone}` : 'project completion', calendar_hours_per_day: hpd,
     updates: list.map((u) => ({ name: u.name, data_date: fmt(dataDate(u)), open_project: !!u.open })), windows, total_slip_days: total,
     ...(o.method === 'half_step' ? { total_progress_days: r2(windows.reduce((s, w) => s + (((w.half_step as { progress_days: number | null }).progress_days) ?? 0), 0)), total_revision_days: r2(windows.reduce((s, w) => s + (((w.half_step as { revision_days: number | null }).revision_days) ?? 0), 0)) } : {}),
   };

@@ -57,7 +57,7 @@ test('Check Schedule: each of the 14 P6 Professional checks finds the activities
   assert.deepEqual(ids(c('large_durations')), ['D']);
   assert.equal(c('bei').result, 'not_assessed');
   assert.match(c('bei').note!, /baseline/);
-  assert.equal(r.threshold_hours, 352);
+  assert.equal(r.threshold_days, 44);
   // targets follow P6's defaults and can be overridden
   assert.deepEqual(c('logic').threshold, { op: '<', value: 5, source: 'P6 Professional default (Check Schedule Report)' });
   const o = checkSchedule(db, { checks: ['logic'], targets: { logic: 20 } });

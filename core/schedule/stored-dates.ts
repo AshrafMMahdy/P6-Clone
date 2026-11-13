@@ -44,7 +44,7 @@ export function checkStoredDates(db: Db): Finding[] {
   if (!acts) return [];
   return [{
     severity: 'warning', code: 'DATES_NOT_CURRENT',
-    message: `${acts} of ${open.length} open activities (${values} values) have saved dates or floats that differ from what P6 calculates from this file's own logic, durations and calendars. The file was edited after it was last scheduled, or the tool that wrote it did not calculate its dates the way P6 does.`,
+    message: `${acts} of ${open.length} open activities (${values} values) have saved dates or floats that differ from what P6 calculates from this file's own logic, durations and calendars. The file was edited after it was last scheduled, or the tool that wrote it did not calculate its dates the way P6 does. Call schedule before analysing it, so the analysis reads current dates.`,
     p6: 'P6 imports the file with these dates as they are; the first time you schedule (F9) they change.', table: 'TASK',
   }, ...out];
 }
