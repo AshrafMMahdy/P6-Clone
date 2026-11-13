@@ -173,7 +173,7 @@ export function optimizeNotes(out: Record<string, any>): { changes: string | nul
   return {
     changes: total ? (listed < total ? `Biggest changes against CPM: the first ${listed} of ${total}` : `Biggest changes against CPM: all ${total}`) : null,
     windows: out.model_windows > 1 ? `read in ${out.model_windows} windows of ${REASONER_WINDOW} activities` : null,
-    notes: [out.over_limit_note, out.partial_note, out.note].filter((x): x is string => typeof x === 'string' && x !== ''),
+    notes: (Array.isArray(out.notes) ? out.notes : []).filter((x: unknown): x is string => typeof x === 'string' && x !== ''),
   };
 }
 /** The advice beside Apply: the tool's, in one line. */

@@ -7,16 +7,16 @@ import { applyOps, type Op } from '../project/ops.ts';
 import { scheduleProjects } from '../schedule/cpm.ts';
 import { SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { activityTable, TABLE_GUIDE, type ActivityTable } from './table.ts';
-import { computeWarnings } from '../analysis/scheduleLog.ts';
+import { computeNotes } from '../analysis/scheduleLog.ts';
 import { parseP6Date } from '../dates.ts';
 
 export const COMPUTE_GUIDE = `start (planned start, YYYY-MM-DD), [data_date] (default start), [must_finish_by], [hours_per_day] (default 8: days where a calendar has no day length), [calendar] (default calendar name), `
   + `[calendars [{name, work_week, holidays, work_exceptions}] as add_calendar], activities [{id, [name], [type], [duration_days] or [duration_hours], [calendar], [constraint {type, date}], [secondary_constraint], `
   + `[actual_start], [actual_finish], [remaining_days] or [remaining_hours], [percent_complete], [expected_finish], [predecessors [{id, [type], [lag_days] or [lag_hours]}]]}] (fields as add_activity / update_activity), `
   + `[relationships [{pred, succ, [type], [lag_days] or [lag_hours]}]], [options {${SCHEDULE_OPTIONS_GUIDE}}], [break_loops] (default true: links that close a loop are left out and returned in broken_links; false: a loop fails the call), `
-  + `[offset], [limit], [names]. Answer: finish, data_date, loops [[activity IDs]], broken_links, warnings, and the rows: ${TABLE_GUIDE}`;
+  + `[offset], [limit], [names]. Answer: finish, data_date, loops [[activity IDs]], broken_links, notes, and the rows: ${TABLE_GUIDE}`;
 
-export type ComputeAnswer = ({ ok: true; finish: string | null; data_date: string | null; loops: string[][]; broken_links: { pred: string; succ: string; type: string }[]; warnings: string[] } & ActivityTable)
+export type ComputeAnswer = ({ ok: true; finish: string | null; data_date: string | null; loops: string[][]; broken_links: { pred: string; succ: string; type: string }[]; notes: string[] } & ActivityTable)
   | { ok: false; error: { code: string; message: string; where?: string; loops?: string[][] } };
 
 export function computeSchedule(a: Record<string, any>): ComputeAnswer {
@@ -52,8 +52,8 @@ export function computeSchedule(a: Record<string, any>): ComputeAnswer {
   return {
     ok: true, finish: iso(s.stats.finish), data_date: iso(s.stats.dataDate), loops,
     broken_links: (s.broken ?? []).map((x) => ({ pred: code.get(x.pred_task_id) ?? x.pred_task_id, succ: code.get(x.task_id) ?? x.task_id, type: (x.pred_type || 'PR_FS').slice(3) })),
-    // every warning, whole (the MCP answer lists the first 25 by the list rule and keeps the whole list in a file)
-    warnings: [...(r.warnings ?? []), ...computeWarnings(db, pid, s, parseP6Date(rows(db, 'PROJECT')[0].plan_end_date), s.stats.finish)],
+    // every note, whole (the MCP answer lists the first 25 by the list rule and keeps the whole list in a file)
+    notes: [...(r.warnings ?? []), ...computeNotes(db, pid, s)],
     ...table,
   };
 }

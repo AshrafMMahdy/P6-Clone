@@ -47,7 +47,7 @@ export function repairKeys(db: Db): Repairs {
       const gone = new Set(ignored);
       t.rows = t.rows.filter((r) => !gone.has(r));
       const who = t.name === 'TASK' ? `Activity ${ignored.length === 1 ? 'ID' : 'IDs'} ${namesText(ignored.map((r) => r.task_code || r.task_id))}` : `id ${namesText(ignored.map((r) => r[key]))}`;
-      out.repaired.push(`${plural(ignored.length, `identical duplicate ${wordOf(t.name)} row`)} ${ignored.length === 1 ? 'was' : 'were'} ignored (${who}): the same row twice is one row.`);
+      out.repaired.push(`${plural(ignored.length, `identical duplicate ${wordOf(t.name)} row`)} ${ignored.length === 1 ? 'was' : 'were'} ignored (${who}).`);
     }
     if (minted) out.repaired.push(`${plural(minted, wordOf(t.name))} with an empty, missing or repeated id ${minted === 1 ? 'was' : 'were'} given a fresh id.`);
     if (dup) out.not_repaired.push(`${plural(dup, `${wordOf(t.name)} row`)} ${dup === 1 ? 'repeats' : 'repeat'} an id that other rows point at and ${dup === 1 ? 'differs' : 'differ'} from ${dup === 1 ? 'its' : 'their'} twin, so which row is meant cannot be told: ${dup === 1 ? 'it was' : 'they were'} left (P6 refuses repeated ids). Compare them with read_table, then keep one.`);

@@ -11,6 +11,7 @@
 // exported.error, never a refused call.
 // export_name (owner 2026-11-10): a what-if keeps its own files: <tool>-<name>.json and <tool>-<name>-<table>.csv beside the others, and a
 // re-run with the same name replaces only that name's files.
+import { listCut } from '../core/notes.ts';
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
@@ -207,7 +208,8 @@ function writeExport(tool: string, arg: unknown, full: unknown, tables: Table[],
  *  CUT_LISTS), and the table of the export that holds it whole (table: default the list's name). */
 export interface CutList { list: string; total: string; table?: string; /** the export holds only the list as listed (float_paths between.max: the paths are never all made) */ listedOnly?: true;
   /** the table has more rows than the list has items, because it has one row per this (evaluate: per changed field): the note says so, with the table's row count */ rowsAre?: string;
-  /** the list is a page the caller asked for (compare: max_changes, offset): the note says from where */ paged?: true }
+  /** the list is a page the caller asked for (compare: max_changes, offset): the note says from where */ paged?: true;
+  /** only the list of this name inside the object under this key (planning_horizon: the activities of a systemic issue, not those of a window) */ within?: string }
 /** The cut lists whose names do not follow `<list>_total`, by tool. */
 export const CUT_LISTS: Record<string, CutList[]> = {
   lint: [{ list: 'activities', total: 'total_activities', table: 'findings' }],
@@ -218,6 +220,8 @@ export const CUT_LISTS: Record<string, CutList[]> = {
   evaluate_batch: [{ list: 'changed', total: 'changed_total', table: 'dates_moved' }],
   compare: [{ list: 'changes', total: 'changes_total', table: 'changes', paged: true }],
   float_paths: [{ list: 'paths', total: 'paths_total', table: 'between', listedOnly: true }],
+  schedule_index: [{ list: 'activities', total: 'activities_total', table: 'logic_findings' }],
+  planning_horizon: [{ list: 'activities', total: 'activities_total', table: 'systemic_activities', within: 'systemic_issues' }],
 };
 /** Where the whole of every list this answer cut is, when an export was written: beside each `<list>_total` a `<list>_note`
  *  "25 of 340 shown; all 340 in <the list's table CSV, else <tool>.json>". One place for every tool (callTool applies it to what a tool
@@ -229,24 +233,23 @@ export function noteCuts<T>(answer: T, tool: string): T {
   const failed = (!!ex && !!ex.error) || (!ex && !!answer && typeof answer === 'object' && (answer as { export_error?: unknown }).export_error != null);
   if (!failed && (!ex || !Array.isArray(ex.files) || !ex.files.length)) return answer;
   const extra = CUT_LISTS[tool] ?? [];
-  const where = (table: string) => ex?.files.find((f) => f.path.endsWith(`-${table}.csv`))?.path ?? ex?.files[0]?.path ?? '';
-  const walk = (v: unknown) => {
-    if (Array.isArray(v)) { for (const x of v) if (x && typeof x === 'object') walk(x); return; }
+  // the file that holds the whole list: the CSV of its table, else the result's JSON (which holds every list whole)
+  const where = (table: string) => ex?.files.find((f) => f.path.endsWith(`-${table}.csv`))?.path ?? ex?.files.find((f) => f.path.endsWith('.json'))?.path ?? ex?.files[0]?.path ?? '';
+  const walk = (v: unknown, under = '') => {
+    if (Array.isArray(v)) { for (const x of v) if (x && typeof x === 'object') walk(x, under); return; }
     if (!v || typeof v !== 'object') return;
     const o = v as Record<string, unknown>;
     for (const k of Object.keys(o)) {
       const list = o[k];
       if (k === 'exported') continue;
-      if (!Array.isArray(list)) { if (list && typeof list === 'object') walk(list); continue; }
-      const x = extra.find((e) => e.list === k && e.total in o);
+      if (!Array.isArray(list)) { if (list && typeof list === 'object') walk(list, k); continue; }
+      const x = extra.find((e) => e.list === k && e.total in o && (e.within == null || e.within === under));
       const total = o[x?.total ?? `${k}_total`] ?? o[`total_${k}`];
       if ((typeof total === 'number' || typeof total === 'string') && (typeof total === 'string' ? /^\d+$/.test(total) : Number.isFinite(total) && total > list.length) && !(`${k}_note` in o)) {
-        const shown = list.length, path = where(x?.table ?? k);
-        const rows = x?.rowsAre ? ex?.files.find((f) => f.path.endsWith(`-${x.table ?? k}.csv`))?.rows : undefined;
-        const page = x?.paged ? ` (the page from offset ${typeof o.offset === 'number' ? o.offset : 0})` : '';
-        o[`${k}_note`] = failed ? `${shown} of ${total} shown${page}` : x?.listedOnly ? `${shown} of ${total} shown (the most asked for); the export holds the same ${shown} in ${path}, ask for more to have more` : `${shown} of ${total} shown${page}; all ${total} in ${path}${rows != null ? ` (that file has one row per ${x!.rowsAre}, ${rows} rows)` : ''}`;
+        // the one sentence every list says (core/notes.ts listCut); a list the export holds only as listed names no file
+        o[`${k}_note`] = failed || x?.listedOnly ? listCut(list.length, total) : listCut(list.length, total, where(x?.table ?? k));
       }
-      for (const item of list) if (item && typeof item === 'object') walk(item);
+      for (const item of list) if (item && typeof item === 'object') walk(item, k);
     }
   };
   walk(answer);

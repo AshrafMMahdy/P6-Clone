@@ -7,7 +7,7 @@
 // a ratio of 1 for an empty population, a divisor of 1 for no activities) the helper answers `not_assessed` with the reason instead.
 import { groupBy, rows, type Db, type Row } from '../db.ts';
 import { cstrName } from '../notes.ts';
-import { noBaselineOf } from '../notes.ts';
+import { actualAfterDataDate, baselineReason, loopNote, noDataDateNotAssessed, outOfSequence } from '../notes.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { isCritical } from '../project/ctx.ts';
 import { percentComplete, reportedPercent } from '../cost/rollup.ts';
@@ -16,7 +16,7 @@ import { findLoops } from '../xer/validate.ts';
 import { baselineOf, baselineFinish, namesText, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, offender, type Offender, type Scope } from './common.ts';
 import { matchActivities, type Update } from './delay.ts';
 
-/** What a figure answers: its numbers, or that it could not be worked out and why (as a dcma_14 check does: result not_assessed with a note). */
+/** What a figure answers: its numbers, or that it could not be worked out and why (the reason, in a few words, with no full stop: the notes say "<part> not assessed: <reason>."). */
 export type Assessed<T> = ({ result: 'assessed' } & T) | { result: 'not_assessed'; note: string };
 const notAssessed = (note: string): { result: 'not_assessed'; note: string } => ({ result: 'not_assessed', note });
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -60,7 +60,7 @@ export interface FloatFigures {
 export function floatFigures(s: Scope, nearCriticalDays = NEAR_CRITICAL_DAYS): Assessed<FloatFigures> {
   const open = s.tasks.filter((t) => !isWbs(t) && !isLoe(t) && !isDone(t));
   const T = open.filter((t) => t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
-  if (!T.length) return notAssessed(open.length ? 'No incomplete activity carries a total float: schedule the project (F9) first.' : 'The project has no incomplete activity.');
+  if (!T.length) return notAssessed(open.length ? 'no incomplete activity carries a total float; run schedule first' : 'the project has no incomplete activity');
   let critical = 0, negative = 0, near = 0;
   for (const t of T) {
     const days = Number(t.total_float_hr_cnt) / s.dh.task(t);
@@ -191,7 +191,7 @@ export function redundantLinks(rels: Row[]): Row[] {
 export function logicFigures(s: Scope): Assessed<LogicFigures> {
   const scoped = new Set(s.tasks.map((t) => t.task_id));
   const considered = s.tasks.filter((t) => !isWbs(t) && !isLoe(t));
-  if (!considered.length) return notAssessed('The project has no activity to assess (WBS summaries and level of effort are not assessed).');
+  if (!considered.length) return notAssessed('the project has no activity to assess (WBS summaries and level of effort are not assessed)');
   const preds = (t: Row) => s.ctx.predsOf.get(t.task_id) ?? [], succs = (t: Row) => s.ctx.succsOf.get(t.task_id) ?? [];
   const lag = (r: Row) => Number(r.lag_hr_cnt || 0);
   const mine = s.rels.filter((r) => scoped.has(r.task_id));
@@ -258,24 +258,24 @@ export function progressAnomalies(s: Scope): Assessed<ProgressFigures> {
   const pool = s.tasks.filter((t) => !isWbs(t) && !isMilestone(t) && s.dataDate(t.proj_id) != null);
   const asg = groupBy(s.db.tables.TASKRSRC?.rows ?? [], 'task_id');
   const without = noDate.map((p) => p.proj_short_name);
-  if (!pool.length) return notAssessed(noDate.length ? `No data date in ${namesText(without)}: give a status_date.` : 'The project has no activity to examine (WBS summaries and milestones are not examined).');
+  if (!pool.length) return notAssessed(noDate.length ? `${namesText(without)} ${without.length === 1 ? 'has' : 'have'} no data date; pass status_date` : 'the project has no activity to examine (WBS summaries and milestones are not examined)');
   const out: ProgressAnomaly[] = [];
   const add = (rule: ProgressRule, t: Row, message: string, predecessor?: string) => out.push({ rule, severity: PROGRESS_RULES[rule].severity, id: t.task_code, name: t.task_name, ...(s.projs.length > 1 ? { project: s.ctx.proj.get(t.proj_id)?.proj_short_name } : {}), message, ...(predecessor ? { predecessor } : {}) });
   for (const t of pool) {
     const dd = s.dataDate(t.proj_id)!;
     const as = parseP6Date(t.act_start_date), af = parseP6Date(t.act_end_date);
     const p = reportedPercent(t, asg.get(t.task_id) ?? []);
-    if ((as != null && as > dd) || (af != null && af > dd)) add('future_actuals', t, 'An actual date is after the data date.');
-    if (as != null && af != null && af < as) add('invalid_sequence', t, 'The actual finish is before the actual start.');
-    if (p > 0 && as == null) add('missing_actual_start', t, `The activity is ${Math.round(p * 100)}% complete but has no actual start.`);
+    if ((as != null && as > dd) || (af != null && af > dd)) add('future_actuals', t, actualAfterDataDate(t.task_code, as != null && as > dd && af != null && af > dd ? 'start and finish' : as != null && as > dd ? 'start' : 'finish', [as != null && as > dd ? formatP6Date(as).slice(0, 16) : '', af != null && af > dd ? formatP6Date(af).slice(0, 16) : ''].filter(Boolean).join(' and '), formatP6Date(dd).slice(0, 16)));
+    if (as != null && af != null && af < as) add('invalid_sequence', t, `${t.task_code} has its actual finish before its actual start.`);
+    if (p > 0 && as == null) add('missing_actual_start', t, `${t.task_code} is ${Math.round(p * 100)}% complete but has no actual start.`);
     if (startedBeforeFsPredecessor(t, s.ctx)) {
       const pred = s.ctx.taskById.get((s.ctx.predsOf.get(t.task_id) ?? []).find((r) => r.pred_type === 'PR_FS' && s.ctx.taskById.get(r.pred_task_id) && !s.ctx.taskById.get(r.pred_task_id)!.act_end_date)!.pred_task_id);
-      add('out_of_sequence', t, `Started while the finish-to-start predecessor ${pred?.task_code} has not finished.`, pred?.task_code);
+      add('out_of_sequence', t, outOfSequence(t.task_code, String(pred?.task_code)), pred?.task_code);
     }
     if (percentComplete(t, asg.get(t.task_id) ?? []) < 1) {
       // a started activity's start is its actual start; only the finish is a forecast (the dcma_14 invalid-dates rule)
       const fs = t.act_start_date ? null : parseP6Date(t.restart_date || t.early_start_date), ff = parseP6Date(t.reend_date || t.early_end_date);
-      if ((fs != null && fs < dd) || (ff != null && ff < dd)) add('forecast_in_past', t, 'A forecast date of unfinished work is before the data date.');
+      if ((fs != null && fs < dd) || (ff != null && ff < dd)) add('forecast_in_past', t, `${t.task_code} has a forecast date before the data date ${formatP6Date(dd).slice(0, 16)}.`);
     }
   }
   const bySeverity: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0 }, byRule = { future_actuals: 0, invalid_sequence: 0, missing_actual_start: 0, out_of_sequence: 0, forecast_in_past: 0 };
@@ -341,7 +341,7 @@ export interface ReferencePairs {
 export function baselinePairs(s: Scope, which = 'project'): Assessed<ReferencePairs> {
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(s.db, p, which)]));
   const first = [...bls.values()].find(Boolean);
-  if (!first) return notAssessed(noBaselineOf(which, true));
+  if (!first) return notAssessed(baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which));
   const pairs = new Map<Row, Row | undefined>(s.tasks.filter((t) => !isWbs(t)).map((t) => [t, bls.get(t.proj_id)?.tasks.get(t.task_code)]));
   return { result: 'assessed', name: first.name, how: first.how, pairs, projects_without: s.projs.filter((p) => !bls.get(p.proj_id)).map((p) => p.proj_short_name) };
 }
@@ -349,7 +349,7 @@ export function baselinePairs(s: Scope, which = 'project'): Assessed<ReferencePa
 /** The activities paired with another schedule's (an as-planned schedule, an earlier update): by Activity ID, then by a name unique on both sides (delay.ts matchActivities). */
 export function schedulePairs(s: Scope, other: { name: string; db: Scope['db']; projId: string }): Assessed<ReferencePairs> {
   const theirs = (other.db.tables.TASK?.rows ?? []).filter((t) => t.proj_id === other.projId && !isWbs(t));
-  if (!theirs.length) return notAssessed(`${other.name} has no activity.`);
+  if (!theirs.length) return notAssessed(`${other.name} has no activity`);
   const mine = s.tasks.filter((t) => !isWbs(t));
   const m = matchActivities(mine, theirs);
   return { result: 'assessed', name: other.name, how: 'a schedule of its own, matched by Activity ID, then by a unique name', pairs: new Map(mine.map((t) => [t, m.get(t)])), projects_without: [] };
@@ -372,7 +372,7 @@ export function logicLoops(s: Scope): string[][] {
   return findLoops(succ).map((l) => l.map((id) => s.ctx.taskById.get(id)?.task_code ?? id));
 }
 /** A loop as the scheduler words it (cpm.ts): a set of activities, not a path. */
-export const loopMessage = (loop: string[]): string => `These activities are in a loop: ${namesText(loop)}`;
+export const loopMessage = (loop: string[]): string => loopNote(loop);
 
 export interface BeiFigures { value: number; /** value before rounding: what a threshold is judged on */ exact: number; completed: number; due: number; not_completed: Offender[] }
 export type BeiResult = ({ result: 'assessed' } & BeiFigures) | { result: 'not_assessed'; /** why: no baseline, no data date, or nothing baselined to finish by the date */ reason: 'no_baseline' | 'no_data_date' | 'none_due'; note: string; /** the tasks completed, counted all the same */ completed?: number };
@@ -380,7 +380,7 @@ export type BeiResult = ({ result: 'assessed' } & BeiFigures) | { result: 'not_a
  *  over the tasks baselined to finish by the data date; completed is every completed task, except with `matched` (the other side is another schedule, as_planned): then only the tasks that have a counterpart in it. Not assessed when no project has the baseline, or nothing was due (never 1). `value` is shown (three decimals), `exact` is what a threshold is judged on.
  *  `before`: a task baselined to finish ON the data date is not yet due (check_schedule's rule, "before the data date"); default: due on or before it (dcma_14's rule). */
 export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baselineOf>>, which = 'project', o: { before?: boolean; matched?: boolean } = {}): BeiResult {
-  if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: noBaselineOf(which, true) };
+  if (![...bls.values()].some(Boolean)) return { result: 'not_assessed', reason: 'no_baseline', note: baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which) };
   const ok = (t: Row) => !isWbs(t) && !isLoe(t) && !isMilestone(t);
   // completed: every completed task of the population, as always (a baseline). With `matched` (the other side is another schedule, as_planned) only the tasks that have a counterpart there are counted, so completed and due are over the
   // same activities: an as-planned schedule that holds 18 of 453 activities counts 18, not every completed task of the open project.
@@ -395,7 +395,7 @@ export function beiFigures(s: Scope, bls: Map<string, ReturnType<typeof baseline
       if (ok(bt) && (o.before ? f < dd : f <= dd)) { due++; const c = cur.get(bt.task_code); if (!c || !isDone(c)) dueList.push({ id: bt.task_code, name: bt.task_name, value: c ? 'not completed' : 'not in the current schedule' }); }
     }
   }
-  if (!due) { const none = s.projs.every((p) => s.dataDate(p.proj_id) == null); return { result: 'not_assessed', reason: none ? 'no_data_date' : 'none_due', note: none ? 'The project has no data date: give a status_date.' : 'No task was baselined to finish by the data date.', completed }; }
+  if (!due) { const none = s.projs.every((p) => s.dataDate(p.proj_id) == null); return { result: 'not_assessed', reason: none ? 'no_data_date' : 'none_due', note: none ? noDataDateNotAssessed(namesText(s.projs.map((p) => p.proj_short_name))).replace(/^Not assessed: /, '').replace(/\.$/, '') : 'no task was baselined to finish by the data date', completed }; }
   return { result: 'assessed', value: r3(completed / due), exact: completed / due, completed, due, not_completed: dueList };
 }
 

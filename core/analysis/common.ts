@@ -2,7 +2,7 @@
 // activity kinds, baselines, constraint groups, and the result shape every check returns.
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
-import { namesText, noDataDateUsed } from '../notes.ts';
+import { tidyNotes, differentDataDates, namesText, noDataDateNotAssessed, noDataDateUsed, notAssessed as notAssessedNote } from '../notes.ts';
 import { makeCtx, type Ctx } from '../project/ctx.ts';
 import { dayHours, type DayHours } from '../project/units.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
@@ -42,21 +42,18 @@ export const START_CONSTRAINTS = new Set(['CS_MSO', 'CS_MSOB', 'CS_MSOA', 'CS_MA
 /** The activity's constraints (primary and secondary). */
 export const constraintsOf = (t: Row) => [t.cstr_type, t.cstr_type2].filter((c): c is string => !!c);
 
-/** The one sentence about projects with no data date of their own: where the planned start stood in for one (said by the schedule that did it), and where there is none at all (`noneMeans`: what that does to this answer). */
-export function dataDateNote(projs: Row[], how: string, noneMeans: string | null = 'so the checks that need one are not assessed'): string | null {
-  const assumed = projs.filter((p) => parseP6Date(p.last_recalc_date) != null && p._dd_assumed && p._dd_assumed === p.last_recalc_date);
-  const none = projs.filter((p) => parseP6Date(p.last_recalc_date) == null);
-  const say: string[] = [];
-  if (assumed.length) say.push(assumed.map((p) => `${assumed.length > 1 ? `${p.proj_short_name}: ` : ''}${noDataDateUsed(formatP6Date(parseP6Date(p.last_recalc_date)!).slice(0, 16), how)}`).join(' '));
-  if (none.length && noneMeans != null) say.push(`${namesText(none.map((p) => p.proj_short_name))} ${none.length === 1 ? 'has' : 'have'} no data date, ${noneMeans}; ${how}.`);
-  return say.length ? say.join(' ') : null;
+/** The sentences about projects with no data date of their own: where the planned start stood in for one (said by the schedule that did it), and where there is none at all (`noneNotAssessed`: the checks that need one are not assessed; pass false for a tool that goes on without it). */
+export function dataDateNotes(projs: Row[], noneNotAssessed = true): string[] {
+  const out: string[] = [];
+  for (const p of projs) {
+    if (parseP6Date(p.last_recalc_date) != null && p._dd_assumed && p._dd_assumed === p.last_recalc_date) out.push(noDataDateUsed(p.proj_short_name, formatP6Date(parseP6Date(p.last_recalc_date)!).slice(0, 16)));
+    else if (parseP6Date(p.last_recalc_date) == null && noneNotAssessed) out.push(noDataDateNotAssessed(p.proj_short_name));
+  }
+  return out;
 }
 
-/** What an answer that carries a data / status date adds: the sentence about a file with no data date, and each project's own date when they differ (the answer's single date is the first project's). */
-export const dateFields = (s: Scope, how: string, label = 'status_dates'): Record<string, unknown> => {
-  const note = s.noDataDateNote(how), by = s.dataDatesByProject();
-  return { ...(note ? { data_date_note: note } : {}), ...(by ? { [label]: by, [`${label}_note`]: `The projects have different data dates (${label}, by Project ID): each is measured from its own; the single date shown is the first project's with one.` } : {}) };
-};
+/** What an answer that carries a data / status date adds as data: each project's own date when they differ (the answer's single date is the first project's with one). The sentence is in the notes (Scope.dateNotes). */
+export const dateFields = (s: Scope, label = 'status_dates'): Record<string, unknown> => { const by = s.dataDatesByProject(); return by ? { [label]: by } : {}; };
 
 export interface Scope {
   db: Db; ctx: Ctx; dh: DayHours; hpd: number;
@@ -68,8 +65,8 @@ export interface Scope {
   dataDate: (projId: string) => number | null;
   /** the data dates of the projects in scope, by Project ID, when they differ (null when they are all the same or none has one) */
   dataDatesByProject: () => Record<string, string | null> | null;
-  /** the one sentence about a file with no data date, with the clause that says how to set one in this tool (null: the date is the file's own, or the caller gave one) */
-  noDataDateNote: (how: string, noneMeans?: string | null) => string | null;
+  /** the notes about the data dates: a project with none (the planned start stood in, or the checks that need one are not assessed) and projects with different ones (none when the caller gave a status date) */
+  dateNotes: (noneNotAssessed?: boolean) => string[];
   cal: (t: Row) => WorkCalendar;
   projCal: (p: Row) => WorkCalendar;
   /** working days between two times on a calendar (b after a: positive) */
@@ -97,8 +94,12 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
     const by = Object.fromEntries(projs.map((p) => { const d = dd.get(p.proj_id) ?? null; return [p.proj_short_name, d != null ? formatP6Date(d) : null]; }));
     return projs.length > 1 && new Set(Object.values(by)).size > 1 ? by : null;
   };
-  const noDataDateNote = (how: string, noneMeans?: string | null) => (o.statusDate != null ? null : dataDateNote(projs, how, noneMeans));
-  return { db, ctx, dh: dayHours(db, hpd, o.calendarDays ?? true), hpd, projs, projIds, tasks, rels, dataDate: (id) => dd.get(id) ?? null, dataDatesByProject, noDataDateNote, cal, projCal, workDays };
+  const dateNotes = (noneNotAssessed = true) => {
+    if (o.statusDate != null) return [];
+    const by = dataDatesByProject();
+    return [...dataDateNotes(projs, noneNotAssessed), ...(by ? [differentDataDates(Object.entries(by).filter(([, d]) => d != null).map(([proj, d]) => ({ proj, date: String(d).slice(0, 10) })), 'each project\u2019s own date')] : [])];
+  };
+  return { db, ctx, dh: dayHours(db, hpd, o.calendarDays ?? true), hpd, projs, projIds, tasks, rels, dataDate: (id) => dd.get(id) ?? null, dataDatesByProject, dateNotes, cal, projCal, workDays };
 }
 
 /** A project's baseline: the project baseline P6 stores (sum_base_proj_id) or a user baseline BL1-BL3. */
@@ -146,18 +147,20 @@ export function passes(v: number, th: Threshold): boolean {
 }
 
 /** A percentage check: count of activities (or links) found over a population. */
-export function percentCheck(id: string, name: string, found: Offender[], denominator: number, th: Threshold, maxIds: number, note?: string): CheckResult {
+export function percentCheck(id: string, name: string, found: Offender[], denominator: number, th: Threshold, maxIds: number): CheckResult {
   const metric = pct(found.length, denominator);
   return {
     id, name, unit: '%', metric, threshold: th, numerator: found.length, denominator,
     result: denominator === 0 ? 'pass' : passes(exactPct(found.length, denominator), th) ? 'pass' : 'fail',
     activities: maxIds > 0 ? found.slice(0, maxIds) : found, total_activities: found.length,
-    ...(note ? { note } : {}),
   };
 }
 
-export const notAssessed = (id: string, name: string, unit: CheckResult['unit'], th: Threshold | null, note: string): CheckResult =>
-  ({ id, name, result: 'not_assessed', metric: null, unit, threshold: th, numerator: null, denominator: null, activities: [], total_activities: 0, note });
+/** A check that could not be assessed: its note is the one sentence "<check> not assessed: <reason>." (the same wording in every tool). */
+export const notAssessed = (id: string, name: string, unit: CheckResult['unit'], th: Threshold | null, reason: string): CheckResult =>
+  ({ id, name, result: 'not_assessed', metric: null, unit, threshold: th, numerator: null, denominator: null, activities: [], total_activities: 0, note: notAssessedNote(name.replace(/^\d+[A-Za-z]?\.\s*/, ''), reason) });
+/** The notes of a report of checks: the sentences about the data dates, then the check notes (a part that is not assessed, a test that was run on another activity). The checks keep `note` for the desktop screens; an agent's answer carries these once, in `notes`. */
+export const checkNotes = (s: Scope, checks: CheckResult[], extra: string[] = [], noneNotAssessed = true): string[] => tidyNotes([...s.dateNotes(noneNotAssessed), ...checks.flatMap((c) => (c.note ? [c.note] : [])), ...extra]);
 
 /** A relationship as an offender: "pred -> succ (type lag)". */
 export function relOffender(r: Row, s: Scope): Offender {

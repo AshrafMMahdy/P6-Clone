@@ -8,6 +8,7 @@
 // match activities to the file, and writing Microsoft Project again gives those tasks their original UIDs.
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
+import { droppedOnSave } from '../notes.ts';
 import { selectRows } from '../xer/write.ts';
 import { hoursPerWeek, inheritExceptions, parseClndrData, scheduledCalendarDef, serializeClndrData, standardCalendar, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
@@ -660,6 +661,6 @@ export function mspLossNote(db: Db, projIds: string[], format: 'mspdi' | 'mpx'):
     [format === 'mpx' ? n('UDFVALUE', (r) => tasks.has(r.fk_id) || open.has(r.fk_id)) : 0, 'user-defined field value', 'user-defined field values'],
     [n('WBSMEMO', (r) => open.has(r.proj_id)) + n('TASKMEMO', (r) => tasks.has(r.task_id)), 'notebook topic', 'notebook topics'],
   ];
-  const lost = kinds.filter((k) => k[0] > 0).map(([c, one, many]) => `${c} ${c === 1 ? one : many}`);
-  return lost.length ? `Not in the Microsoft Project file (it has no place for them): ${lost.join(', ')}. Save as XER or P6 XML to keep them.` : null;
+  const lost = kinds.filter((k) => k[0] > 0).map(([c, one, many]) => `${c === 1 ? one : many} (${c})`);
+  return lost.length ? droppedOnSave(format === 'mpx' ? 'MPX' : 'Microsoft Project XML', lost) : null;
 }

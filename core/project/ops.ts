@@ -135,7 +135,7 @@ export function applyOps(db: Db, ops: unknown, o: OpsOptions = {}): OpsResult {
         batch.at = at;
         // a calendar with no work time is a fact of the data, not a fault of the clone: named (while the change is still in place), with the way out
         try { results.push(apply(d, list[at] as Op, hpd, warnings, batch)); }
-        catch (e) { if (e instanceof CalendarHorizonError && calendarsWithNoWork(d).length) fail(noWorkTimeText(calendarsWithNoWork(d))); throw e; }
+        catch (e) { if (e instanceof CalendarHorizonError && calendarsWithNoWork(d).length) fail(`Refused: ${noWorkTimeText(calendarsWithNoWork(d), d)}.`); throw e; }
       }
       // loops: checked once for the whole edit (a check per relationship made a 30,000-link load quadratic); the
       // error names the first relationship of the list that closed one

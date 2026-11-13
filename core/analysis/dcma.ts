@@ -3,8 +3,7 @@
 // and relationship types count relationships. Durations and float are in working days of each activity's calendar.
 // The Critical Path Test runs on a scratch copy (a journal that is rolled back); CPLI and BEI use a chosen baseline.
 import { maxOf, minOf } from '../arrays.ts';
-import { cstrName } from '../notes.ts';
-import { noBaselineOf } from '../notes.ts';
+import { baselineReason, cstrName, namesText } from '../notes.ts';
 import { type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
@@ -13,7 +12,7 @@ import { p6num, scheduleProjects } from '../schedule/cpm.ts';
 import { drivingPath } from './delay.ts';
 import { beiFigures } from './forensic.ts';
 import {
-  baselineOf, baselineFinish, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, dateFields, makeScope, notAssessed,
+  baselineOf, baselineFinish, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, dateFields, checkNotes, makeScope, notAssessed,
   exactPct, offender, passes, pct, percentCheck, relOffender, type CheckResult, type Offender, type Scope, type Threshold,
 } from './common.ts';
 
@@ -70,6 +69,8 @@ export interface DcmaReport {
   limit_days: number; tasks: number; relationships: number;
   summary: { passed: number; failed: number; not_assessed: number };
   checks: CheckResult[];
+  /** every sentence the checks and the data dates have to say, once (the check `note`s are the desktop screens'; an agent's answer drops them) */
+  notes: string[];
 }
 
 export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
@@ -103,21 +104,21 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   const out: CheckResult[] = [];
   const lag = (r: Row) => Number(r.lag_hr_cnt || 0);
   out.push(logicCheck(s, T, th('logic')!, maxIds, new Set(o.exempt ?? [])));
-  out.push(percentCheck('leads', NAMES.leads, L.filter((r) => lag(r) < 0).map((r) => relOffender(r, s)), L.length, th('leads')!, maxIds, 'Relationships with a negative lag.'));
+  out.push(percentCheck('leads', NAMES.leads, L.filter((r) => lag(r) < 0).map((r) => relOffender(r, s)), L.length, th('leads')!, maxIds));
   out.push(lagsCheck(s, L, th('lags')!, maxIds));
   {
     const fs = L.filter((r) => (r.pred_type || 'PR_FS') === 'PR_FS').length, t = th('relationship_types')!;
     const metric = L.length ? pct(fs, L.length) : null;
     const other = L.filter((r) => (r.pred_type || 'PR_FS') !== 'PR_FS').map((r) => relOffender(r, s));
-    out.push({ id: 'relationship_types', name: NAMES.relationship_types, unit: '%', metric, threshold: t, numerator: fs, denominator: L.length, result: !L.length || passes(exactPct(fs, L.length), t) ? 'pass' : 'fail', activities: maxIds ? other.slice(0, maxIds) : other, total_activities: other.length, note: 'Share of finish-to-start relationships; listed are the others.' });
+    out.push({ id: 'relationship_types', name: NAMES.relationship_types, unit: '%', metric, threshold: t, numerator: fs, denominator: L.length, result: !L.length || passes(exactPct(fs, L.length), t) ? 'pass' : 'fail', activities: maxIds ? other.slice(0, maxIds) : other, total_activities: other.length });
   }
   out.push(hardConstraintsCheck(s, T, th('hard_constraints')!, maxIds));
-  out.push(percentCheck('high_float', NAMES.high_float, T.filter((t) => (days(t, t.total_float_hr_cnt) ?? -Infinity) > limit).map((t) => offender(t, s, `${Math.round(days(t, t.total_float_hr_cnt)! * 10) / 10} d`)), T.length, th('high_float')!, maxIds, `Total float over ${limit} working days.`));
+  out.push(percentCheck('high_float', NAMES.high_float, T.filter((t) => (days(t, t.total_float_hr_cnt) ?? -Infinity) > limit).map((t) => offender(t, s, `${Math.round(days(t, t.total_float_hr_cnt)! * 10) / 10} d`)), T.length, th('high_float')!, maxIds));
   out.push(percentCheck('negative_float', NAMES.negative_float, T.filter((t) => (days(t, t.total_float_hr_cnt) ?? 0) < 0).map((t) => offender(t, s, `${Math.round(days(t, t.total_float_hr_cnt)! * 10) / 10} d`)), T.length, th('negative_float')!, maxIds));
   {
     // baseline duration where the activity is in the baseline, else its original duration
     const dur = (t: Row) => { const b = bl(t); return b ? days(b, b.target_drtn_hr_cnt) : days(t, t.target_drtn_hr_cnt); };
-    out.push(percentCheck('high_duration', NAMES.high_duration, T.filter((t) => (dur(t) ?? 0) > limit).map((t) => offender(t, s, `${Math.round(dur(t)! * 10) / 10} d`)), T.length, th('high_duration')!, maxIds, `Baseline duration (original duration when not in the baseline) over ${limit} working days.`));
+    out.push(percentCheck('high_duration', NAMES.high_duration, T.filter((t) => (dur(t) ?? 0) > limit).map((t) => offender(t, s, `${Math.round(dur(t)! * 10) / 10} d`)), T.length, th('high_duration')!, maxIds));
   }
   {
     // actual dates after the status date, or forecast dates before it (invalidDateFlags: the one rule, decm's 06A506a / b / c split it in three)
@@ -127,31 +128,32 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   }
   {
     const loaded = new Set([...s.db.tables.TASKRSRC?.rows ?? [], ...s.db.tables.PROJCOST?.rows ?? []].map((a) => a.task_id));
-    out.push(percentCheck('resources', NAMES.resources, T.filter((t) => !loaded.has(t.task_id)).map((t) => offender(t, s)), T.length, th('resources')!, maxIds, 'Tasks with no resource or expense (hours or cost) loaded.'));
+    out.push(percentCheck('resources', NAMES.resources, T.filter((t) => !loaded.has(t.task_id)).map((t) => offender(t, s)), T.length, th('resources')!, maxIds));
   }
   // missed tasks: of the tasks baselined to finish by the status date, those finishing (actually or forecast) after their baseline finish
-  if (!anyBl) out.push(notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), noBaselineOf(which, true)));
+  if (!anyBl) out.push(notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which)));
   else {
     const due = s.tasks.filter((t) => { const b = bl(t), dd = s.dataDate(t.proj_id); return b && !isWbs(t) && !isLoe(t) && !isMilestone(t) && dd != null && (baselineFinish(b) ?? Infinity) <= dd; });
     const missed = due.filter((t) => (forecastFinish(t) ?? -Infinity) > (baselineFinish(bl(t)) ?? Infinity)).map((t) => offender(t, s, `baseline ${formatP6Date(baselineFinish(bl(t))!).slice(0, 10)}`));
-    out.push(due.length ? percentCheck('missed_tasks', NAMES.missed_tasks, missed, due.length, th('missed_tasks')!, maxIds, 'Tasks baselined to finish by the status date that finished (or will finish) after their baseline finish.') : notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), 'No task was baselined to finish by the status date.'));
+    out.push(due.length ? percentCheck('missed_tasks', NAMES.missed_tasks, missed, due.length, th('missed_tasks')!, maxIds) : notAssessed('missed_tasks', NAMES.missed_tasks, '%', th('missed_tasks'), 'no task was baselined to finish by the status date'));
   }
   out.push(criticalPathTest(s, T, o.cptSlipDays ?? CPT_SLIP_DAYS, o.cptActivity));
   out.push(cpli(s, o.targetFinish ?? null, bls, which, th('cpli')));
   // BEI: tasks completed over tasks baselined to finish by the status date (forensic.ts beiFigures, the clone's one definition; judged on the exact ratio)
   {
     const t = th('bei')!, bei = beiFigures(s, bls, which);
-    if (bei.result === 'not_assessed') out.push(bei.reason === 'no_baseline' ? notAssessed('bei', NAMES.bei, 'ratio', th('bei'), bei.note) : { ...notAssessed('bei', NAMES.bei, 'ratio', t, 'No task was baselined to finish by the status date.'), numerator: bei.completed!, denominator: 0 });
-    else out.push({ id: 'bei', name: NAMES.bei, unit: 'ratio', metric: bei.value, threshold: t, numerator: bei.completed, denominator: bei.due, result: passes(bei.exact, t) ? 'pass' : 'fail', activities: maxIds ? bei.not_completed.slice(0, maxIds) : bei.not_completed, total_activities: bei.not_completed.length, note: 'Tasks completed (including early) over tasks baselined to finish by the status date. Listed: due but not completed.' });
+    if (bei.result === 'not_assessed') out.push(bei.reason === 'no_baseline' ? notAssessed('bei', NAMES.bei, 'ratio', th('bei'), baselineReason(namesText(s.projs.map((p) => p.proj_short_name)), true, which)) : { ...notAssessed('bei', NAMES.bei, 'ratio', t, 'no task was baselined to finish by the status date'), numerator: bei.completed!, denominator: 0 });
+    else out.push({ id: 'bei', name: NAMES.bei, unit: 'ratio', metric: bei.value, threshold: t, numerator: bei.completed, denominator: bei.due, result: passes(bei.exact, t) ? 'pass' : 'fail', activities: maxIds ? bei.not_completed.slice(0, maxIds) : bei.not_completed, total_activities: bei.not_completed.length });
   }
 
   const dd = s.projs.map((p) => s.dataDate(p.proj_id)).find((x) => x != null) ?? null;
   const first = [...bls.values()].find(Boolean);
   return {
-    report: 'DCMA 14-Point Assessment', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, ...dateFields(s, 'give status_date to set one'),
+    report: 'DCMA 14-Point Assessment', profile: profName, status_date: dd != null ? formatP6Date(dd) : null, ...dateFields(s),
     baseline: first ? { which, name: first.name, how: first.how } : null, limit_days: limit, tasks: T.length, relationships: L.length,
     summary: { passed: out.filter((c) => c.result === 'pass').length, failed: out.filter((c) => c.result === 'fail').length, not_assessed: out.filter((c) => c.result === 'not_assessed').length },
     checks: out,
+    notes: checkNotes(s, out),
   };
 }
 
@@ -164,15 +166,15 @@ export function dcmaPopulations(s: Scope): { T: Row[]; L: Row[] } {
 /** DCMA check 1, logic: the tasks missing a predecessor or a successor (exempt: Activity IDs left out). */
 export function logicCheck(s: Scope, T: Row[], th: Threshold, maxIds: number, exempt: Set<string> = new Set()): CheckResult {
   const preds = (t: Row) => s.ctx.predsOf.get(t.task_id) ?? [], succs = (t: Row) => s.ctx.succsOf.get(t.task_id) ?? [];
-  return percentCheck('logic', NAMES.logic, T.filter((t) => !exempt.has(t.task_code) && (!preds(t).length || !succs(t).length)).map((t) => offender(t, s, !preds(t).length && !succs(t).length ? 'no predecessor, no successor' : !preds(t).length ? 'no predecessor' : 'no successor')), T.length, th, maxIds, 'Open ends here: incomplete tasks (not WBS summaries, level of effort or milestones) with no predecessor or no successor; a task with neither counts once.');
+  return percentCheck('logic', NAMES.logic, T.filter((t) => !exempt.has(t.task_code) && (!preds(t).length || !succs(t).length)).map((t) => offender(t, s, !preds(t).length && !succs(t).length ? 'no predecessor, no successor' : !preds(t).length ? 'no predecessor' : 'no successor')), T.length, th, maxIds);
 }
 /** DCMA check 3, lags: the relationships (of incomplete tasks) with a positive lag. */
 export function lagsCheck(s: Scope, L: Row[], th: Threshold, maxIds: number): CheckResult {
-  return percentCheck('lags', NAMES.lags, L.filter((r) => Number(r.lag_hr_cnt || 0) > 0).map((r) => relOffender(r, s)), L.length, th, maxIds, 'Relationships with a positive lag.');
+  return percentCheck('lags', NAMES.lags, L.filter((r) => Number(r.lag_hr_cnt || 0) > 0).map((r) => relOffender(r, s)), L.length, th, maxIds);
 }
 /** DCMA check 5, hard constraints: the tasks with Must Start/Finish On or Start/Finish No Later Than. */
 export function hardConstraintsCheck(s: Scope, T: Row[], th: Threshold, maxIds: number): CheckResult {
-  return percentCheck('hard_constraints', NAMES.hard_constraints, T.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c))).map((t) => offender(t, s, constraintsOf(t).map(cstrName).join(', '))), T.length, th, maxIds, 'Hard constraints here: Start On, Finish On, Start On or Before, Finish On or Before, Mandatory Start and Mandatory Finish (either constraint of an activity), over the incomplete tasks (not WBS summaries, level of effort or milestones).');
+  return percentCheck('hard_constraints', NAMES.hard_constraints, T.filter((t) => constraintsOf(t).some((c) => DCMA_HARD.has(c))).map((t) => offender(t, s, constraintsOf(t).map(cstrName).join(', '))), T.length, th, maxIds);
 }
 
 export interface DateFlags { task: Row; actual_start_after: boolean; actual_finish_after: boolean; forecast_before: boolean }
@@ -217,7 +219,7 @@ export function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: st
     // no logic drives the finish (a constraint on the last activity sets it): the task with the least float
     if (!test && T.length) { test = [...T].sort((a, b) => Number(a.total_float_hr_cnt || 0) - Number(b.total_float_hr_cnt || 0) || (parseP6Date(a.restart_date || a.early_start_date) ?? 0) - (parseP6Date(b.restart_date || b.early_start_date) ?? 0))[0]; heldBy = end?.cstr_type ? end.task_code : null; }
   }
-  if (!test) return notAssessed('critical_path_test', name, 'days', null, pick ? `Activity ${pick} is not an incomplete task in scope.` : s.tasks.some((t) => t.early_start_date) ? 'No incomplete task drives the project finish (every remaining task is complete, a milestone, or level of effort).' : 'The project has no early dates: schedule it (F9) first.');
+  if (!test) return notAssessed('critical_path_test', name, 'days', null, pick ? `${pick} is not an incomplete task in scope` : s.tasks.some((t) => t.early_start_date) ? 'no incomplete task drives the project finish (every remaining task is complete, a milestone, or level of effort)' : 'the project has no early dates; run schedule first');
   const before = projectFinish(s);
   let after: number | null = null, ok = true, msg = '';
   // the delay in hours of the test activity's calendar; the finish shift is measured in the same working time
@@ -231,17 +233,14 @@ export function criticalPathTest(s: Scope, T: Row[], slipDays: number, pick?: st
     after = maxOf(d.tables.TASK.rows.filter((x) => s.projIds.has(x.proj_id)).map((x) => forecastFinish(x) ?? -Infinity));
   });
   rollback(j);
-  if (!ok || before == null || after == null) return notAssessed('critical_path_test', name, 'days', null, `The test could not be scheduled: ${msg || 'no finish date'}.`);
+  if (!ok || before == null || after == null) return notAssessed('critical_path_test', name, 'days', null, `the test could not be scheduled (${msg || 'no finish date'})`);
   const movedHours = s.cal(test).workBetween(before, after) / 60;
   const moved = Math.round((movedHours / s.dh.task(test)) * 100) / 100;
   const pass = Math.abs(movedHours - add) <= s.dh.task(test); // within one day
   return {
     id: 'critical_path_test', name, unit: 'days', metric: moved, threshold: { op: '=', value: slipDays, source: 'DCMA (project finish must move by the delay added)' },
     numerator: null, denominator: null, result: pass ? 'pass' : 'fail', activities: [offender(test, s, `+${slipDays} d`)], total_activities: 1,
-    note: (viaLongest ? `No task is critical by total float, so ${test.task_code}, the first task on the longest path, was tested. ` : !crit.length && !pick ? `No task is critical by total float and no logic drives the finish${heldBy ? ` (a constraint on ${heldBy} sets it)` : ''}, so ${test.task_code}, the task with the least float, was tested. ` : '') + (pass ? `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by the same amount: the critical path is continuous.`
-      : moved <= 0.01 ? `Delaying ${test.task_code} by ${slipDays} working days did not move the project finish: ${test.task_code} is critical by its float but not on the path that drives the finish (a constraint that makes float negative, or an open end), so the critical path is not continuous through it.`
-      : movedHours > add ? `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by ${moved} working days, more than the delay: calendars along the path (non-work periods, a different calendar on a successor or a lag) stretch it, so the finish does not follow the critical path day for day.`
-      : `Delaying ${test.task_code} by ${slipDays} working days moved the project finish by only ${moved} working days: part of the delay is absorbed on the way (a constraint, a missing link, a lag, or start-to-start / finish-to-finish links that let successors start before it finishes).`),
+    ...(viaLongest ? { note: `No activity is critical by total float: ${test.task_code}, the first on the longest path, was tested.` } : !crit.length && !pick ? { note: `No activity is critical by total float: ${test.task_code}, the one with the least float, was tested.` } : {}),
     detail: { finish_before: formatP6Date(before), finish_after: formatP6Date(after) },
   };
 }
@@ -253,8 +252,8 @@ function cpli(s: Scope, given: number | null, bls: Map<string, ReturnType<typeof
   const p = s.projs[0];
   const dd = p ? s.dataDate(p.proj_id) : null, fin = projectFinish(s);
   // CPLI is of ONE project (the first in scope): said, so it is not read as the figure of all of them
-  const whose = p && s.projs.length > 1 ? ` This is project ${p.proj_short_name}'s CPLI (the first of ${s.projs.length} projects in scope): pass project to measure another.` : '';
-  if (!p || dd == null || fin == null) return notAssessed('cpli', name, 'ratio', th, `The project has no data date or no forecast finish (schedule it first).${whose}`);
+  const whose = p && s.projs.length > 1 ? `CPLI is of ${p.proj_short_name}, the first of ${s.projs.length} projects in scope; pass project to measure another.` : '';
+  if (!p || dd == null || fin == null) return notAssessed('cpli', name, 'ratio', th, `${p ? p.proj_short_name : 'the project'} has no data date or no forecast finish; run schedule first`);
   const cal = s.projCal(p);
   const cpl = s.workDays(cal, dd, fin);
   const contract = given ?? parseP6Date(p.plan_end_date) ?? null;
@@ -263,12 +262,12 @@ function cpli(s: Scope, given: number | null, bls: Map<string, ReturnType<typeof
   const one = (target: number) => { const tf = s.workDays(cal, fin, target); return { target: formatP6Date(target), total_float_days: tf, cpli: cpl > 0 ? Math.round(((cpl + tf) / cpl) * 1000) / 1000 : null }; };
   const vsContract = contract != null ? one(contract) : null, vsBaseline = blFin != null && Number.isFinite(blFin) ? one(blFin) : null;
   const primary = vsContract ?? vsBaseline;
-  if (!primary) return notAssessed('cpli', name, 'ratio', th, `No contract finish (Must Finish By, or target_finish) and no baseline: nothing to measure the float against.${whose}`);
-  if (cpl <= 0 || primary.cpli == null) return notAssessed('cpli', name, 'ratio', th, `The remaining critical path length is zero (the project is complete at the status date).${whose}`);
+  if (!primary) return notAssessed('cpli', name, 'ratio', th, `no contract finish (Must Finish By, or target_finish) and no baseline to measure against`);
+  if (cpl <= 0 || primary.cpli == null) return notAssessed('cpli', name, 'ratio', th, `the remaining critical path length is zero (the project is complete at the status date)`);
   return {
     id: 'cpli', name, unit: 'ratio', metric: primary.cpli, threshold: th, numerator: Math.round((cpl + primary.total_float_days) * 100) / 100, denominator: cpl,
     result: th && !passes((cpl + primary.total_float_days) / cpl, th) ? 'fail' : 'pass', activities: [], total_activities: 0,
-    note: `Measured against the ${vsContract ? (given != null ? 'contract finish given' : 'Must Finish By date (contract finish)') : `${which === 'project' ? 'project' : which.toUpperCase()} baseline finish`}. CPLI = (critical path length + total float) / critical path length, in working days from the status date.${whose}`,
+    ...(given == null || whose ? { note: [given == null ? `CPLI measured against ${vsContract ? 'the Must Finish By date' : `the ${which === 'project' ? 'project' : which.toUpperCase()} baseline finish`} of ${p.proj_short_name}, as no contract finish was passed.` : '', whose].filter(Boolean).join(' ') } : {}),
     detail: { critical_path_length_days: cpl, forecast_finish: formatP6Date(fin), decided_by: vsContract ? 'contract' : 'baseline', against_contract: vsContract, against_baseline: vsBaseline },
   };
 }

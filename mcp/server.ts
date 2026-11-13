@@ -23,7 +23,7 @@ import { NEW_XER_NOTE, NEW_XER_VERSION, writeXer, writeXerTo } from '../core/xer
 import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid, unidentified } from '../core/xer/repair-valid.ts';
-import { plural } from '../core/notes.ts';
+import { argumentNotUsed, cancelledAfter, datesNotCurrent, droppedOnSave, listCut, stillWorking, tooLarge, namesText, notRepaired, openedRepaired, plural } from '../core/notes.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { mspLossNote } from '../core/msp/shared.ts';
@@ -55,7 +55,10 @@ import { discardKeptMeshing, FOURD_FILES, FOURD_NAMES, FOURD_TOOLS, load4dSideca
 import { LOB_FILES, LOB_NAMES, LOB_TOOLS, lobSidecars, lobSidecarText, readLobSidecar, runLob, scheduleWithLob } from './lob.ts';
 import { lobGuard } from '../core/lob/view.ts';
 import { loadLobModels } from '../core/lob/store.ts';
-import { computeWarnings, scheduleLogReport, scheduleWarnings } from '../core/analysis/scheduleLog.ts';
+import { describeChanges, type FieldChange } from '../core/project/changes.ts';
+import { storedDatesState } from '../core/schedule/stored-dates.ts';
+import { tidyNotes } from '../core/notes.ts';
+import { differentDatesNote, duplicateRowNotes, scheduleLogReport, scheduleNotes } from '../core/analysis/scheduleLog.ts';
 import { baselineOf } from '../core/analysis/common.ts';
 import { reasonerModelPath, reasonerStatus } from '../core/analysis/hrmRuntime.ts';
 import { record, rollback, rollbackRunning } from '../core/journal.ts';
@@ -119,7 +122,7 @@ const TOOLS = [
   { name: 'level_resources', annotations: edit, description: 'Tools > Level Resources (resources with a Max Units/Time limit): activities are delayed until each leveled resource has room. within_float: only within total float. over_allocation_pct: allowed overallocation (e.g. 10). priority_by: early_start (default), total_float or priority. resources: [resource IDs] to level (default: all with a limit). activity_priority: [activity IDs] placed first, in that order, once their predecessors are placed. dry_run: true answers the leveled dates (moved) and per-resource peaks without changing the project (no undo entry). Answers delayed, moved [{id, from, start, finish}], peaks [{resource, peak, limit, day, overallocated}] (unit-hours in the peak day) and the report.' + exportDoc('level_resources', ['moved', 'peaks']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp, within_float: { type: 'boolean' }, over_allocation_pct: { type: 'number' }, priority_by: { type: 'string' }, resources: { type: 'array', items: { type: 'string' } }, activity_priority: { type: 'array', items: { type: 'string' } }, dry_run: { type: 'boolean' } } }) },
   { name: 'monte_carlo', annotations: ro, description: 'Schedule risk analysis (Monte Carlo) like Primavera Risk Analysis: samples each activity\'s remaining duration from its three-point estimate (set with the set_estimates edit operation; default_estimates applies min/max percentages to activities without one, for this run only) and risk events from the risk register, schedules every iteration. When the run covers more than one project the milestone, criticality and sensitivity rows (and the tables of them in an export) also carry project, the Project ID of the activity, because an Activity ID can be in several. Returns finish percentiles P10-P90, mean, std dev, chance of meeting the deterministic finish, a histogram (always 20 equal date bars from the earliest to the latest simulated finish (one bar when every run finishes at the same moment; histogram_note says so): start, end, count, cum_pct) and cumulative (the S-curve: finish and cum_pct, one point for each distinct finish date, 25 of them shown spread from the first to the last, cumulative_total says how many there are), milestone percentiles, activity criticality index (each row also has milestone, deterministic_finish, mean_finish, p50_finish, p80_finish, sensitivity and min, mean and max remaining hours: the columns of the criticality table of an export), sensitivity ranking and risk-event impact (the milestones, criticality and sensitivity lists show 25 rows each, with milestones_total, criticality_total and sensitivity_total and a _note naming the file that holds all of them; criticality_note says what the 25 shown are, with critical_in_every_run and critical_in_any_run counting the activities critical in every run and in at least one run, over all of them), and the finishes in working days from the data date (working_days, with sigma marks: mean - 3 to + 3 standard deviations as days and dates). events: risk events for this run only, each {name, probability (0-1) or probability_pct, delay_days or delay_hours, activities?: [IDs]}: when it happens the delay is added to each activity named (days of its calendar), or with no activities to the project finish (a project-level delay, project calendar). sampler: a duration ratio per activity and iteration, {type: ratio_normal, mean, std, min_ratio, max_ratio} (default 1.12, 0.28, 0.3, 4) or {type: ratio_empirical, ratios: [..], weight (0-1, default 0.66), normal?: {mean, std, min_ratio, max_ratio}}: with probability weight a ratio drawn uniformly from ratios (only when there are at least 10), else from the normal (the platform\'s slippage sampler; seeded), with scope all (default: instead of three-point estimates) or unestimated. re_anchor: true rescales each three-point estimate so its mean is the remaining duration. deadline (date): the chance of finishing by it. The project is not changed. Big projects: pass async: true (job_status shows the iterations done); notifications/cancelled or cancel_job stops it, and a progressToken gets notifications/progress. Each iteration is kept as it finishes, in a file in the write root (monte_carlo-<fingerprint>-s<seed>.parts/iterations.p6mc: the generator\'s position and everything the statistics need). A run that stops (cancelled, an iteration failed, its worker ended) answers the statistics of the iterations done, marked partial, with resume: the path of that file; to continue, call monte_carlo again with the same arguments and resume: that path, exactly as given (it is never searched for): only the remaining iterations run and the answer is the one an uninterrupted run with that seed gives (resumed_iterations says how many came from the file; redone_iterations how many kept ones did not check out, damaged as a power loss can leave a file or after a damaged one, and were run again). Without a seed the stopped run\'s seed is used. If the schedule, its estimates or risks, or an argument differ from the kept run, the call is refused with resume_mismatch; nothing kept is removed by a refusal. A run whose kept file another monte_carlo call in this server is still working on (a cancelled job answers before it has stopped; the same project open under two handles) is refused as run_busy, naming that job when it is one. A call without resume starts over (it replaces a kept file of the same name). A run that finishes removes its file and names its folder in parts_removed (so a copy of it elsewhere can go too).' + exportDoc('monte_carlo', ['iterations (iteration, finish, finish_days from the data date, each milestone\u2019s finish: the values the statistics come from, a resumed run\u2019s kept iterations too)', 'histogram (the same bars as the answer\u2019s chart)', 'percentiles (the engine\u2019s own P10-P90, mean, min, max, std, deterministic and the chances)', 'sigma', 'criticality (every activity)', 'sensitivity', 'milestones', 'risk_events', 'events']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp, iterations: { type: 'number', description: 'a whole number, default 2000, at least 10; no upper bound (memory decides, with the result files: a run that does not fit is refused up front, before any iteration, saying how many iterations fit)' }, resume: { type: 'string', description: 'the resume path a stopped monte_carlo answered (its kept iterations), to run only the iterations still missing; same arguments as that call' }, events: { type: 'array', items: { type: 'object' } }, sampler: { type: 'object' }, re_anchor: { type: 'boolean' }, deadline: { type: 'string' }, seed: { type: 'number', description: 'same seed, same result' }, risk_events: { type: 'string', description: 'pre (default), post or off' }, project: { type: 'string' }, default_estimates: { type: 'object', description: '{min_pct: 90, max_pct: 125, dist: triangle|uniform|betapert} for activities without an estimate' }, exact: { type: 'boolean', description: 'true: the answer also carries the engine\'s own figures, not rounded, for a caller that shows them (the Risks window): `exact` {std_dev_days, prob_deterministic and prob_deadline as fractions 0-1, risk_events [{id, probability 0-1, hours, triggered_pct}], events}, and the criticality rows\' critical_pct and the sensitivity rows\' correlation unrounded. Leave out for the rounded answer.' } } }) },
   { name: 'validate', annotations: ro, description: 'P6 import diagnostics for the project as it is now (what real P6 would accept, warn about or reject), plus saved dates that P6 would change.', inputSchema: withHandle({ type: 'object', properties: {} }) },
-  { name: 'review', annotations: ro, description: 'Schedule quality review (DCMA-style checks graded pass/warn/fail): missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence, saved dates P6 would change. For the full DCMA 14-point (critical path test, CPLI, BEI, missed tasks, profiles, activity lists) use dcma_14; for the P6 Check Schedule report use check_schedule.' + exportDoc('review', ['checks', 'activities (every activity each check found, by ID and name)', 'saved_dates']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp } }) },
+  { name: 'review', annotations: ro, description: 'Schedule quality review (DCMA-style checks graded pass/warn/fail): missing logic, leads, lags, relationship types, hard constraints, float, long durations, invalid dates, resources, out-of-sequence, saved dates P6 would change. What each counts (open activities: not finished, no WBS summaries or LOE): logic (no predecessor, or no successor; start milestones without predecessors and finish milestones without successors are not counted; at most 5%); leads (relationships with a lag below 0; none); lags (above 0; at most 5%); rel_types (not finish to start; at most 10%); hard_constraints (Start On, Finish On and Mandatory; at most 5%); high_float (total float over 44 working days; at most 5%); negative_float (none); long_durations (remaining duration over 44 working days, no milestones; at most 5%); invalid_dates (forecast start before the data date on work not started, or an actual after it; none); resources (open activities with no resource, no milestones; none when the schedule carries assignments, else not judged); out_of_sequence (started while a finish-to-start predecessor has not finished; none); critical (informational); saved_dates (activities whose saved dates differ from what F9 gives; none). Each project is judged against its own data date. For the full DCMA 14-point (critical path test, CPLI, BEI, missed tasks, profiles, activity lists) use dcma_14; for the P6 Check Schedule report use check_schedule.' + exportDoc('review', ['checks', 'activities (every activity each check found, by ID and name)', 'saved_dates']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp } }) },
   ...ANALYSIS_TOOLS(withHandle),
   ...FORENSIC_TOOLS(withHandle),
   ...FOURD_TOOLS(withHandle),
@@ -134,7 +137,7 @@ const TOOLS = [
   { name: 'export_pdf', annotations: writes, description: 'Print the schedule to a PDF file like P6 prints the Activities layout: every activity on as many pages as needed, the chosen columns and/or the Gantt chart, WBS bands, timescale and column titles on every page, header/footer with page numbers, legend. Path ending in .html writes the same pages as HTML. ' + PRINT_GUIDE + ' Layout options: filter, group_by (wbs, none), sort_by.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, settings: { type: 'object', description: 'Print settings (see description)' }, project: { type: 'string', description: 'Project ID when the file holds several (default: all)' }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' } }, required: ['path'] }) },
   { name: 'export_excel', annotations: writes, description: 'Export to an Excel workbook (.xlsx) like P6 File > Export > Spreadsheet (Oracle\'s XLSX data map): sheets TASK (activities), TASKPRED (relationships), PROJCOST (expenses), RSRC (resources), TASKRSRC (resource assignments); row 1 field names, row 2 titles ("(*)" = calculated, never imported), durations and lags in days, dates as Excel dates. sheets and columns are P6\'s Modify Template: the subject areas, and per sheet the columns (field names; the ones P6 requires are always written). Code and UDF columns: actv_code_<type id>_id, rsrc_catg_<id>_id, asgnmnt_catg_<id>_id, proj_catg_<id>_id (title: the code type), user_field_<udf id> (title: the UDF); "actv_code_*", "user_field_*"... pick every one of a kind, "*" every column of the sheet. describe: true lists every column of every sheet and writes nothing. Edit the workbook and bring it back with import_excel.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID (default: all projects in the file)' }, sheets: { type: 'array', items: { type: 'string' }, description: 'Subject areas to write: TASK, TASKPRED, PROJCOST, RSRC, TASKRSRC (or their titles). Default: all' }, columns: { type: 'object', additionalProperties: { type: 'array', items: { type: 'string' } }, description: 'Per sheet, its columns, e.g. {"TASK": ["task_code", "task_name", "actv_code_*", "user_field_*"]}. A sheet left out gets its default columns' }, describe: { type: 'boolean', description: 'List the columns each sheet can carry (field, title, calc, required) and write nothing' } } }) },
   { name: 'import_excel', annotations: edit, description: 'Update the project from an Excel workbook in the export_excel / P6 spreadsheet layout, as P6\'s spreadsheet import: activities (status, dates, durations, constraints, % complete type, calendar, activity codes, UDFs), relationships, expenses, resources (added and updated: calendar, units, role, unit of measure, contact fields, resource codes, UDFs) and resource assignments (added and updated: units, costs, actuals, dates, durations, role, cost account, curve, assignment codes, UDFs); "Y" in delete_record_flag deletes the row. Calculated columns ("(*)" titles) are ignored; a code value, calendar, role or other dictionary entry the file does not have is skipped with a warning (P6 does not import global data that does not exist). A row P6 would refuse is skipped and listed in refused (sheet, row, message); the rest is applied as one undoable change. dry_run returns the plan only.', inputSchema: withHandle({ type: 'object', properties: { path: { type: 'string' }, project: { type: 'string', description: 'Project ID to update (default: the only project)' }, dry_run: { type: 'boolean' } }, required: ['path'] }) },
-  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger. Which side is which: the open project (handle) is always the EARLIER revision (a in the answer: only_in_a, the a column of the changes) and the other side is the LATER revision (b: only_in_b, the b column), whichever way it is named: other_handle (another open project), path (a file, read for this call only) or baseline (this project\'s own saved baseline, which is then the earlier side and the current project the later: the change is baseline to current). So a positive finish_shift_days (start_shift_days, duration_delta_days, …) means the later revision finishes later than the earlier one (a slip); negative means earlier. The answer names the two sides in compared. What is compared: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days. baseline (project, bl1-bl3 or the name of any saved baseline) compares this project with its baseline stored in the file instead (computed). Activities match by Activity ID, then by a unique name (matched_by_name). mode: computed compares only what the schedule computes, per activity: duration_delta_days, remaining_delta_days, start_shift_days, finish_shift_days, total_float_delta_days (working days), became_critical / no_longer_critical, plus only_in_a / only_in_b. mode all (the default) also answers progress_integrity, the evidence-integrity check from the earlier revision to the later one, over every change (not only the page shown): retroactive_actuals (an actual start or actual finish the earlier revision already held that the later one changes or clears), progress_decreases (a % complete that went down, read from the two revisions\u2019 own figures for each activity\u2019s percent complete type: physical_pct, duration_pct or units_pct, a and b in percent) and status_regressions (complete to under way or not started, under way to not started; an activity counted here is not counted again as a duration or units % decrease), clean (true when all three are empty) and note. Each of the three lists shows at most 25 rows with <list>_total beside it and, in the result file, <list>_note ("25 of N shown; all N in <file>"; the whole lists are in the files compare-retroactive_actuals.csv, compare-progress_decreases.csv, compare-status_regressions.csv). They are findings to disclose; who made the change and why is for the reviewer to ask. Not given with baseline or mode computed.' + exportDoc('compare', ['changes (every change, unpaged)', 'only_in_one (mode computed; empty otherwise)', 'retroactive_actuals, progress_decreases, status_regressions (mode all)']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp, other_handle: { type: 'string', description: 'the LATER revision (b), already open; the open project (handle) is the earlier (a)' }, path: { type: 'string', description: 'or a file holding the LATER revision (b) to compare against' }, mode: { type: 'string', description: 'all (default) or computed' }, baseline: { type: 'string', description: 'project, bl1, bl2, bl3 or a saved baseline name: compare with that baseline in this file: the baseline is the earlier side (a), the current project the later (b)' }, project: { type: 'string' }, max_changes: { type: 'number', description: 'changes a page (default 500; no cap)' }, offset: { type: 'number', description: 'changes to skip: pass next_offset for the next page' } } }) },
+  { name: 'compare', annotations: ro, description: 'Compare this project with another open project (other_handle) or a file (path), like P6\'s Claim Digger. Which side is which: the open project (handle) is always the EARLIER revision (a in the answer: only_in_a, the a column of the changes) and the other side is the LATER revision (b: only_in_b, the b column), whichever way it is named: other_handle (another open project), path (a file, read for this call only) or baseline (this project\'s own saved baseline, which is then the earlier side and the current project the later: the change is baseline to current). So a positive finish_shift_days (start_shift_days, duration_delta_days, …) means the later revision finishes later than the earlier one (a slip); negative means earlier. The answer names the two sides in compared. What is compared: projects by Project ID, WBS by code path, activities by Activity ID, relationships by predecessor, successor and type. Durations, lags and floats in days. baseline (project, bl1-bl3 or the name of any saved baseline) compares this project with its baseline stored in the file instead (computed). Activities match by Activity ID, then by a unique name (matched_by_name). mode: computed compares only what the schedule computes, per activity: duration_delta_days, remaining_delta_days, start_shift_days, finish_shift_days, total_float_delta_days (working days), became_critical / no_longer_critical, plus only_in_a / only_in_b. mode all (the default) also answers progress_integrity, the evidence-integrity check from the earlier revision to the later one, over every change (not only the page shown): retroactive_actuals (an actual start or actual finish the earlier revision already held that the later one changes or clears), progress_decreases (a % complete that went down, read from the two revisions\u2019 own figures for each activity\u2019s percent complete type: physical_pct, duration_pct or units_pct, a and b in percent) and status_regressions (complete to under way or not started, under way to not started; an activity counted here is not counted again as a duration or units % decrease), clean (true when all three are empty). Each of the three lists shows at most 25 rows with <list>_total beside it and, in the result file, <list>_note ("25 of N shown; all N in <file>"; the whole lists are in the files compare-retroactive_actuals.csv, compare-progress_decreases.csv, compare-status_regressions.csv). They are findings to disclose; who made the change and why is for the reviewer to ask. Not given with baseline or mode computed.' + exportDoc('compare', ['changes (every change, unpaged)', 'only_in_one (mode computed; empty otherwise)', 'retroactive_actuals, progress_decreases, status_regressions (mode all)']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp, other_handle: { type: 'string', description: 'the LATER revision (b), already open; the open project (handle) is the earlier (a)' }, path: { type: 'string', description: 'or a file holding the LATER revision (b) to compare against' }, mode: { type: 'string', description: 'all (default) or computed' }, baseline: { type: 'string', description: 'project, bl1, bl2, bl3 or a saved baseline name: compare with that baseline in this file: the baseline is the earlier side (a), the current project the later (b)' }, project: { type: 'string' }, max_changes: { type: 'number', description: 'changes a page (default 500; no cap)' }, offset: { type: 'number', description: 'changes to skip: pass next_offset for the next page' } } }) },
   { name: 'evaluate', annotations: ro, description: 'What-if without changing the project: schedules a scratch state of it (no undo entry, nothing kept) as it is and with overrides (edit operations, e.g. [{"op":"update_activity","id":"A1000","duration_days":15}]), with the same data_date (this call only) and options (as schedule takes them). Answers base_finish, finish, finish_delta_days (working days), critical (activity IDs), became_critical, no_longer_critical, and changed (per activity, each computed field that changed as [before, after]; the first 25, changed_total says how many there are).' + exportDoc('evaluate', ['changed (every changed field of every activity)', 'critical_changes']), inputSchema: withHandle({ type: 'object', properties: { export: exportProp, export_name: exportNameProp, overrides: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, data_date: { type: 'string' }, project: { type: 'string' } } }) },
   { name: 'list_reports', annotations: ro, description: 'Reports available like P6 Tools > Reports: the standard reports by group and reports made with create_report.', inputSchema: withHandle({ type: 'object', properties: {} }) },
   { name: 'run_report', annotations: ro, description: 'Run a report (id or name from list_reports, or an ad-hoc "definition" like create_report takes). Without "path" the rows come back as data; with path it is written as PDF (.pdf), HTML (.html), CSV (.csv/.txt) or Excel (.xlsx).', inputSchema: withHandle({ type: 'object', properties: { report: { type: 'string' }, definition: { type: 'object' }, path: { type: 'string' }, settings: { type: 'object', description: 'print settings for PDF (see export_pdf)' }, project: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks' }, max_rows: { type: 'number', description: 'rows a page without path (default 200; no cap)' }, offset: { type: 'number', description: 'rows to skip: the next_offset of the previous page' } } }) },
@@ -145,7 +148,7 @@ const TOOLS = [
 // ---------------------------------------------------------------- helpers
 const allIds = (db: Db) => (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_id);
 const summary = (s: Session) => runTool('project_summary', {}, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
-const brief = (f: Finding[], o: { fatalListedElsewhere?: string } = {}) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + findingCount(x)), a), {}), ...(o.fatalListedElsewhere && f.some((x) => x.severity === 'fatal') ? { fatal_listed_in: o.fatalListedElsewhere } : {}), findings: f.filter((x) => x.severity !== 'info' && !(o.fatalListedElsewhere && x.severity === 'fatal')).slice(0, 40).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 })) });
+const brief = (f: Finding[], o: { fatalListedElsewhere?: string } = {}) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + findingCount(x)), a), {}), ...(o.fatalListedElsewhere && f.some((x) => x.severity === 'fatal') ? { fatal_listed_in: o.fatalListedElsewhere } : {}), findings: f.filter((x) => x.severity !== 'info' && !(o.fatalListedElsewhere && x.severity === 'fatal')).slice(0, 40).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message })) });
 const dd = (v: unknown) => { if (v == null || v === '') return null; const t = parseP6Date(String(v)); if (t == null) fail('bad_input', `"${v}" is not a date.`, 'Use YYYY-MM-DD or YYYY-MM-DD HH:MM.'); return t; };
 const projectIds = (db: Db, id: unknown) => {
   const ps = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
@@ -158,7 +161,7 @@ const projectIds = (db: Db, id: unknown) => {
  *  installation cannot (no MPXJ, no Java) or the file cannot be read. */
 /** The other side of compare, import_file and transfer_progress: another open project (other_handle) or a file (path),
  *  read for this call only and counted in the memory budget while it is held (C14). */
-async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db; release: () => void; bytes: number; /** what P6 would refuse in the file read (path), as open_file says it */ asGiven?: ReturnType<typeof fileAsGiven> }> {
+async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db; release: () => void; bytes: number; /** what P6 would refuse in the file read (path), as open_file says it */ asGiven?: ReturnType<typeof fileAsGiven>; /** the same, as the one note */ asGivenNote?: string }> {
   if (a.other_handle) { const o = getSession(a.other_handle); return { db: o.db, release: () => {}, bytes: o.bytes }; }
   if (!a.path) fail('bad_input', 'Give other_handle or path.', `other_handle: another open project; path: a file to ${what}.`);
   const p = pathArg(a.path), bytes = estimateBytes(fileSize(p));
@@ -170,7 +173,8 @@ async function readOther(a: Record<string, any>, what: string): Promise<{ db: Db
     else { const b = readBytes(p); format = detectFormat(p, b); ({ db, findings } = format === 'mpp' ? await readMpp(p) : readRaw(b, format)); }
     if (!db.tables.PROJECT?.rows.length) fail('bad_input', `${basename(p)} holds no project to ${what}.`, `Give an XER, P6 XML or Microsoft Project file. If this is the file the user asked about: ${outsideRoute(format, head)}.`);
     // the checks open_file runs on the file read: what P6 would refuse in it, said beside the answer (the call goes on as it always did)
-    return { db, release, bytes, asGiven: fileAsGiven(importChecks(db, findings, format), 'The file as given is one P6 itself would refuse (fatal_kinds); this call used what the clone could read from it: tell the user.') };
+    const fl = importChecks(db, findings, format), gv = fileAsGiven(fl, '');
+    return { db, release, bytes, asGiven: gv, ...(gv.p6_would_reject ? { asGivenNote: `P6 would refuse ${basename(p)} as given (${namesText(fl.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => x.message.replace(/\.$/, '')))}); this call used what could be read.` } : {}) };
   } catch (e) { release(); throw e; }
 }
 /** A project of this file by Project ID (default: its only non-baseline project). */
@@ -219,13 +223,13 @@ export const outsideRoute = (format: string, head?: Uint8Array) => (format === '
   : `the file is text (${TEXT_FORMAT[format] ?? TEXT_FORMAT.xer}): read it with your file-reading tool, do what the user asked from the tables directly (code or a spreadsheet), and tell the user the file is damaged, what is wrong with it, and that the analysis was done outside the P6 engine`);
 /** The fatal findings of a file by kind, with counts, in the order first met. */
 /** Every fatal finding, in words (open_file's refusal lists them all in data.fatal, and a lenient open in file_as_given.fatal). */
-const fatalList = (f: Finding[]) => f.filter((x) => x.severity === 'fatal').map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message, p6: x.p6 }));
+const fatalList = (f: Finding[]) => f.filter((x) => x.severity === 'fatal').map((x) => ({ code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message }));
 /** What P6 would refuse in a file as it was given: said every time a file is read, so the answer to the user can say it. */
 /** The real number of fatal findings (the validator keeps 5 of a kind and a line that says how many more). */
 const fatalTotal = (f: Finding[]) => f.filter((x) => x.severity === 'fatal').reduce((n, x) => n + findingCount(x), 0);
 /** How many fatal findings are listed in words of the real total (a "…and N more" line stands for the rest of its kind). */
 const fatalListed = (f: Finding[]) => f.filter((x) => x.severity === 'fatal' && x.omitted == null).length;
-const fileAsGiven = (f: Finding[], tell: string, o: { list?: boolean } = {}) => { const fatal = worst(f) === 'fatal'; return { p6_would_reject: fatal, ...(fatal ? { fatal_total: fatalTotal(f), fatal_kinds: fatalKinds(f), ...(o.list ? { fatal_listed: fatalListed(f), fatal: fatalList(f) } : {}), tell_the_user: tell } : {}) }; };
+const fileAsGiven = (f: Finding[], tell: string, o: { list?: boolean } = {}) => { const fatal = worst(f) === 'fatal'; return { p6_would_reject: fatal, ...(fatal ? { fatal_total: fatalTotal(f), fatal_kinds: fatalKinds(f), ...(o.list ? { fatal_listed: fatalListed(f), fatal: fatalList(f) } : {}), ...(tell ? { tell_the_user: tell } : {}) } : {}) }; };
 const fatalKinds = (f: Finding[]) => { const m = new Map<string, number>(); for (const x of f) if (x.severity === 'fatal') m.set(x.code, (m.get(x.code) ?? 0) + findingCount(x)); return [...m].map(([code, count]) => ({ code, count })); };
 
 async function readMpp(path: string): Promise<{ db: Db; findings: Finding[] }> {
@@ -367,7 +371,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       for (const t0 = Date.now(); !job.done && Date.now() - t0 < wait;) await new Promise((r) => setTimeout(r, 200));
       return jobView(job);
     }
-    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, note: ['monte_carlo', 'open_file', 'save', 'schedule', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'lint', 'render_4d', 'lob_create', 'lob_edit', 'lob_takt', 'lob_import'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.' }; }
+    case 'cancel_job': { const job = getJob(a.job_id); job.abort?.abort(); return { job_id: job.id, cancel_requested: true, notes: [['monte_carlo', 'open_file', 'save', 'schedule', 'evaluate_batch', 'crash_schedule', 'optimize_schedule', 'windows_analysis', 'lint', 'render_4d', 'lob_create', 'lob_edit', 'lob_takt', 'lob_import'].includes(job.tool) ? 'The job stops at its next step.' : 'This kind of job cannot be interrupted; it will finish its current step.'] }; }
     case 'open_file': {
       const path = pathArg(a.path);
       // an XER is read from its file a chunk at a time; the other formats are read whole (XML trees, MPX)
@@ -395,10 +399,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           // carry on: lenient first when there is a project to repair, else (or if that fails) the file read as text outside the clone
           const bad = f.filter((x) => x.severity === 'fatal'), total = fatalTotal(f), listed = fatalListed(f), kinds = fatalKinds(f), shown = 3;
           const noProject = !allIds(r.db).length, cause = bad.slice(0, shown).map((x) => x.message).join(' ');
-          fail('p6_would_reject', `P6 would reject ${basename(path)}: ${total} fatal finding${total === 1 ? '' : 's'} (${kinds.map((k) => `${k.code} x${k.count}`).join(', ')}). ${cause}${bad.length > shown ? ` (the first ${shown} of ${total}; data.fatal lists ${listed} of the ${total} in words, a \u201c\u2026and N more\u201d line standing for the rest of its kind)` : ''}`,
+          fail('p6_would_reject', `Not opened: P6 would refuse ${basename(path)} (${plural(total, 'fault')}: ${bad.slice(0, shown).map((x) => x.message.replace(/\.$/, '')).join('; ')}${bad.length > shown ? `; and ${total - shown} more` : ''}).`,
             noProject
               ? `The clone could not read a project from this file, so lenient: true cannot open it either. Carry on outside the clone: ${outsideRoute(format, head)}.`
-              : `1. Call open_file again with lenient: true: the clone repairs what it can and opens it, and says what it repaired; work on that (save with repair: true writes a copy P6 imports), and tell the user the file as given is one P6 itself would refuse and why. 2. If it still cannot be opened, ${outsideRoute(format, head)}.`,
+              : `Call open_file again with lenient: true to open a repaired copy.`,
             { data: { cause: 'damaged', fatal_total: total, fatal_kinds: kinds, fatal_listed: listed, fatal: fatalList(f), diagnostics: brief(f, { fatalListedElsewhere: 'fatal' }) } });
         }
         s0.db = r.db; s0.openProblems = openProblemsOf(r.db); s0.format = format; /* (openProblems: what P6 would reject in the file as it is; save refuses only what edits add) */ s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
@@ -416,11 +420,12 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const unreadable = () => {
           const T = r.db.tables.TASK?.rows ?? [], at = new Map(T.map((t, i) => [t, i]));
           const list = [...unidentified(r.db).why].map(([t, why]) => { const i = at.get(t) ?? -1; return { table: 'TASK', row: i + 1, ...(r.meta?.taskLines?.[i] ? { line: r.meta.taskLines[i] } : {}), task_id: t.task_id ?? '', activity_id: String(t.task_code ?? '').slice(0, 60), reason: why }; }).sort((x, y) => x.row - y.row);
-          return list.length ? { unreadable_rows: { total: list.length, rows: list.slice(0, 500), note: 'TASK rows P6 does not load as activities (read_table still lists them as they are in the file); save with repair: true removes them.' } } : {};
+          return list.length ? { unreadable_rows: { total: list.length, rows: list.slice(0, 500) } } : {};
         };
+        const unreadableNote = () => { const u = unreadable().unreadable_rows; return u ? [`${plural(u.total, 'line')} of the file ${u.total === 1 ? 'is' : 'are'} not loaded as ${u.total === 1 ? 'an activity' : 'activities'} (damaged, no Activity ID): rows ${namesText(u.rows.map((x: any) => String(x.row)))}; save with repair: true removes ${u.total === 1 ? 'it' : 'them'}.`] : []; };
         // (a fact of the file a caller must not miss, so it is a field of its own: diagnostics.findings lists the first 40 findings only)
         const noUid = f.some((x) => x.code === 'MPX_NO_UNIQUE_ID') ? { tasks_without_unique_id: true } : {};
-        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0), ...noUid, ...unreadable(), ...lob };
+        if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), summary: summary(s0), ...noUid, ...unreadable(), ...lob, ...(unreadableNote().length ? { notes: unreadableNote() } : {}) };
         // lenient: repair what can be repaired without guessing (key columns, ids), then judge the file again
         const fix = repairKeys(r.db);
         const g = fix.repaired.length ? importChecks(r.db, r.findings, format) : f;
@@ -432,30 +437,30 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         for (const x of g) if (x.severity === 'fatal' || x.severity === 'error') { const l = left.get(x.code); if (l) l.push(x); else left.set(x.code, [x]); }
         // each fatal finding is listed once (file_as_given.fatal); what is left of it says only what to call. Errors that are not fatal are not listed there: they carry their message.
         const SAVE_REPAIRS = new Set(['NO_PROJ_NODE', 'DUP_KEY', 'MISSING_KEY_FIELD', 'EMPTY_KEY', 'WBS_ORPHAN']);
+        const notRepairedNotes: string[] = [...fix.not_repaired];
         for (const [code, xs] of left) {
           const n = xs.reduce((k, x) => k + findingCount(x), 0), fixable = SAVE_REPAIRS.has(code);
-          fix.not_repaired.push(xs[0].severity === 'fatal'
-            ? `${code} x${n} (fatal) ${n === 1 ? 'is' : 'are'} still in the project (listed in file_as_given.fatal): ${fixable ? 'save with repair: true repairs it' : 'no repair fixes it: edit the rows (edit set_fields; read_table shows them)'}.`
-            : `${code} x${n} (${xs[0].severity}) not repaired: ${xs[0].message}${xs[0].p6 ? ` P6: ${xs[0].p6}` : ''}`);
+          notRepairedNotes.push(xs[0].severity === 'fatal'
+            ? notRepaired(n === 1 ? xs[0].message : `${xs[0].message.replace(/\.$/, '')} (${n} of this kind)`, /save with repair/.test(xs[0].message) ? null : fixable ? 'save with repair: true fixes it' : 'no repair fixes it; edit the rows (edit set_fields; read_table shows them)')
+            : notRepaired(xs[0].message, null));
         }
-        const leftCodes = [...left.keys()].filter((c) => left.get(c)![0].severity === 'fatal'), byRepair = leftCodes.filter((c) => SAVE_REPAIRS.has(c)), byEdit = leftCodes.filter((c) => !SAVE_REPAIRS.has(c));
         // the file as given: said every time, so the answer to the user can say it (a repaired copy is not the user's file)
         // (every fatal finding is listed here: diagnostics.findings shows the first 40 findings only)
-        const asGiven = fileAsGiven(f, 'The file as given is one P6 itself would refuse (fatal_kinds, every one in fatal); this project is the clone\'s repaired copy of it (diagnostics.repaired says what was repaired, not_repaired what was left).', { list: true });
+        const asGiven = fileAsGiven(f, '', { list: true });
+        const faults = f.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => x.message.replace(/\.$/, ''));
         return {
           handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still, file_as_given: asGiven,
-          note: (fatal ? 'The file as given is one P6 itself would refuse (file_as_given.fatal says why): tell the user so. ' : '') + (still ? `P6 would still reject this project if it were saved now. ${byRepair.length ? `save with repair: true repairs ${byRepair.join(', ')} and writes a copy P6 imports.` : ''}${byEdit.length ? `${byRepair.length ? ' ' : ''}${byEdit.join(', ')} need${byEdit.length === 1 ? 's' : ''} edit operations (edit set_fields).` : ''}${!byRepair.length && !byEdit.length ? ' diagnostics.not_repaired says what is left.' : ''}`
-            : fix.repaired.length ? 'Opened with repairs (diagnostics.repaired): a save writes a file P6 imports.' : 'Opened; nothing needed repairing.'),
-          diagnostics: { ...brief(g, { fatalListedElsewhere: 'file_as_given.fatal' }), repaired: fix.repaired, not_repaired: fix.not_repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0), ...noUid, ...unreadable(), ...lob,
+          ...(fatal || notRepairedNotes.length || unreadableNote().length ? { notes: [...(fatal ? [openedRepaired(basename(path), namesText(faults))] : []), ...notRepairedNotes, ...unreadableNote()] } : {}),
+          diagnostics: { ...brief(g, { fatalListedElsewhere: 'file_as_given.fatal' }), repaired: fix.repaired, ...(fix.repaired.length ? { before_repairs: { verdict: worst(f) ?? 'clean', counts: brief(f).counts } } : {}) }, summary: summary(s0), ...noUid, ...unreadable(), ...lob,
         };
       } catch (e) { closeSession(s0); throw e; } finally { reading(); }
     }
     case 'compute_schedule': {
       const r = computeSchedule(a);
-      if (r.ok && r.warnings.length > LISTED) {
-        // the list rule: the first 25, the true total, a note, and the whole list in a file
-        const file = writeResultFile('compute_schedule_warnings', JSON.stringify(r.warnings));
-        return { ...r, warnings: r.warnings.slice(0, LISTED), warnings_total: r.warnings.length, warnings_note: `${LISTED} of ${r.warnings.length} shown${file ? `; all ${r.warnings.length} in ${file}` : ''}` };
+      if (r.ok && r.notes.length > LISTED) {
+        // the list rule: the first 25, the true total, a note, and the whole list in a file (one note per line)
+        const file = writeResultFile('compute_schedule_notes', ['note', ...r.notes.map((n) => `"${n.replace(/"/g, '""')}"`)].join('\r\n'), 'csv');
+        return { ...r, notes: r.notes.slice(0, LISTED), notes_total: r.notes.length, notes_note: listCut(LISTED, r.notes.length, file ?? undefined) };
       }
       return r.ok ? r : { ok: false, error: { ...r.error, hint: r.error.code === 'schedule_failed' ? 'Fix the reported problem (or pass break_loops: true for loops) and call again.' : 'Fix that part of the input (where says which) and call again.' } }; }
     case 'new_project': {
@@ -502,7 +507,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       try { change(s, ctx.caller, 'Edit', (d) => { r = applyOps(d, a.operations, { hoursPerDay: s.hpd, calendarDays: true }); if (!r.ok) throw new Error('refused'); }); }
       catch (e) { if (r && !r.ok) return { ok: false, error: { code: 'op_failed', ...r.error, hint: 'Fix that operation (the message says what is wrong) and send the list again; nothing was changed.' } }; throw e; }
       s.history[s.history.length - 1].label = `Edit (${r.applied} operation${r.applied === 1 ? '' : 's'})`;
-      return r;
+      const { warnings: opWarnings, ...applied } = r as typeof r & { warnings?: string[] };
+      const { stale, ...confirmed } = confirmChanges(s);
+      const notes = tidyNotes([...(opWarnings ?? []), ...stale]);
+      return { ...applied, ...confirmed, ...(notes.length ? { notes } : {}) };
     }
     case 'evaluate': {
       let options: ReturnType<typeof parseScheduleOptions> = {};
@@ -540,13 +548,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const name = (id: string) => s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!.proj_short_name;
       const keptMsp = allIds(s.db).filter((id) => (t == null || (only != null && id !== only)) && mspUntouched(s.db, id) === true);
       const todo = allIds(s.db).filter((id) => !keptMsp.includes(id));
-      const kept = keptMsp.length ? { kept_msp_dates: keptMsp.map(name), note: `Not rescheduled: ${keptMsp.map(name).join(', ')} came from Microsoft Project and nothing that drives its dates changed since, so Microsoft Project's own dates stand.` } : {};
+      const kept = keptMsp.length ? { kept_msp_dates: keptMsp.map(name) } : {}, keptNote = keptMsp.length ? [`Not rescheduled: ${keptMsp.map(name).join(', ')} keep${keptMsp.length === 1 ? 's' : ''} the dates Microsoft Project calculated, as nothing that drives them changed.`] : [];
       if (!todo.length) {
         // the same answer shape as a real F9, from the dates Microsoft Project wrote
         const ids = new Set(keptMsp), tasks = (s.db.tables.TASK?.rows ?? []).filter((x) => ids.has(x.proj_id));
         const finish = tasks.reduce((m, x) => Math.max(m, parseP6Date(x.act_end_date || x.early_end_date || x.target_end_date) ?? -Infinity), -Infinity);
         const dataDate = minOf(keptMsp.map((id) => parseP6Date(s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!.last_recalc_date) ?? Infinity));
-        return { ok: true, ...kept, loops: [], data_date: iso(dataDate), finish: iso(finish), stats: { activities: tasks.length, dataDate: iso(dataDate), finish: iso(Number.isFinite(finish) ? finish : null), kept_msp_dates: true }, warnings: [] };
+        return { ok: true, ...kept, loops: [], data_date: iso(dataDate), finish: iso(finish), stats: { activities: tasks.length, dataDate: iso(dataDate), finish: iso(Number.isFinite(finish) ? finish : null), kept_msp_dates: true }, notes: keptNote };
       }
       const was = s.dirty;
       const res = change(s, ctx.caller, 'Schedule', (d) => {
@@ -554,7 +562,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         if (only && t != null) d.tables.PROJECT.rows.find((p) => p.proj_id === only)!.last_recalc_date = formatP6Date(t);
         const x = scheduleWithLob(d, todo, s.hpd, { ...over, ...(t != null && !only ? { dataDate: t } : {}) }, lobSidecars.get(s.handle)).schedule; if (x.ok) syncAssignmentDates(d); return x;
       });
-      if (!res.ok) { dropLast(s); return { ok: false, loops: res.loops ?? [], error: { code: 'schedule_failed', message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: res.loops?.length ? 'The network has loops (loops lists them): fix the logic, or schedule with break_loops: true to leave out the links that close them for this run; nothing was changed.' : 'Fix the reported problem (often a missing calendar) and schedule again; nothing was changed.' } }; }
+      if (!res.ok) { dropLast(s); return { ok: false, loops: res.loops ?? [], error: { code: 'schedule_failed', message: res.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' '), hint: res.loops?.length ? 'Not scheduled: the logic has loops (loops lists them); fix the logic, or call schedule with break_loops: true. Nothing was changed.' : 'Not scheduled: fix what the message names, then call schedule again. Nothing was changed.' } }; }
       const code = new Map((s.db.tables.TASK?.rows ?? []).map((x) => [x.task_id, x.task_code]));
       const loopInfo = { loops: res.loops ?? [], ...(over.breakLoops ? { broken_links: (res.broken ?? []).map((x) => ({ pred: code.get(x.pred_task_id) ?? x.pred_task_id, succ: code.get(x.task_id) ?? x.task_id, type: (x.pred_type || 'PR_FS').slice(3) })) } : {}) };
       try { await checkpoint(ctx); } catch (e) { dropLast(s); s.dirty = was; throw e; }
@@ -567,7 +575,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const ownDates = Object.fromEntries(todo.map((id) => [name(id), iso(res.projects[id]?.dataDate)]));
       const differ = new Set(Object.values(ownDates)).size > 1;
       const fileRows = (s.db.tables.TASK?.rows ?? []).filter((x) => todo.includes(x.proj_id)).length, rowsMerged = Math.max(0, fileRows - res.stats.activities);
-      return { ok: true, ...kept, ...mspChanged, ...loopInfo, ...(only ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === only)!.proj_short_name } : {}), data_date: iso(only ? res.projects[only].dataDate : res.stats.dataDate), ...(differ ? { data_dates: ownDates, data_dates_note: 'The projects have different data dates (data_dates): each is scheduled from its own; data_date is the earliest.' } : {}), finish: iso(res.stats.finish), stats: { ...res.stats, finish: iso(res.stats.finish), dataDate: iso(res.stats.dataDate) }, ...(rowsMerged ? { stats_note: `The file has ${plural(fileRows, 'activity row')}; ${plural(rowsMerged, 'row')} ${rowsMerged === 1 ? 'repeats' : 'repeat'} another row\u2019s internal id and ${rowsMerged === 1 ? 'was' : 'were'} merged, so ${plural(res.stats.activities, 'activity', 'activities')} ${res.stats.activities === 1 ? 'was' : 'were'} scheduled (project_summary counts the rows). save {repair: true} removes a repeat that is an identical copy.` } : {}), log: a.log === false ? undefined : logOnly, warnings: scheduleWarnings(res, report, a.log !== false) };
+      return { ok: true, ...kept, ...mspChanged, ...loopInfo, ...(only ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === only)!.proj_short_name } : {}), data_date: iso(only ? res.projects[only].dataDate : res.stats.dataDate), ...(differ ? { data_dates: ownDates } : {}), finish: iso(res.stats.finish), stats: { ...res.stats, finish: iso(res.stats.finish), dataDate: iso(res.stats.dataDate) }, log: a.log === false ? undefined : logOnly, notes: [...keptNote, ...(differ ? [differentDatesNote(ownDates, 'each project\u2019s own date')!] : []), ...(rowsMerged ? duplicateRowNotes(s.db, todo, 'scheduled') : []), ...scheduleNotes(res)] };
     }
     case 'update_progress': {
       const t = dd(a.data_date) ?? fail('bad_input', 'Give data_date.', 'The new data date, YYYY-MM-DD.');
@@ -579,9 +587,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         // the reschedule's findings, as schedule gives them: the log holds every list, the warnings say each kind once
         const report = x.ok ? scheduleLogReport(d, allIds(d), x, 100) : null;
         const { statistics: _st, ...logOnly } = report ?? { statistics: null };
-        return { ok: x.ok, data_date: iso(t), finish: iso(x.stats.finish), projects: by, ...(report ? { log: logOnly, warnings: scheduleWarnings(x, report, true) } : {}), errors: x.findings.filter((f) => f.severity === 'error').map((f) => f.message) };
+        return { ok: x.ok, data_date: iso(t), finish: iso(x.stats.finish), projects: by, ...(report ? { log: logOnly, notes: [...Object.entries(by).map(([proj, u]) => `Progress updated to data date ${formatP6Date(t).slice(0, 10)} in ${proj}: ${u.started} started, ${u.completed} completed, ${u.updated} updated.`), ...scheduleNotes(x)] } : {}), errors: x.findings.filter((f) => f.severity === 'error').map((f) => f.message) };
       });
-      if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.errors.join(' '), hint: 'Scheduling failed, so the progress update was undone: fix what the message names (a loop, or a calendar with no work time) and call update_progress again.' } }; }
+      if (!res.ok) { dropLast(s); return { ok: false, error: { code: 'schedule_failed', message: res.errors.join(' '), hint: 'Progress not updated: scheduling failed; nothing was changed. Fix what the message names, then call update_progress again.' } }; }
       const { errors: _e, ...answer } = res;
       return answer;
     }
@@ -594,7 +602,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const dict = importActions(a.dictionaries, IMPORT_DICT, ['keep', 'update', 'insert', 'skip'] as const, 'dictionaries');
       const target = action === 'new' ? undefined : projectOf(s.db, a.project, 'This file');
       if (target?._baseline_of) fail('bad_input', `${target.proj_short_name} is a baseline.`, 'Import into the project itself.');
-      const { db: src, release, asGiven } = await readOther(a, 'import');
+      const { db: src, release, asGiven, asGivenNote } = await readOther(a, 'import');
       try {
         const theirs = (src.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
         const from = a.from_project != null ? [projectOf(src, a.from_project, 'The file')] : action === 'new' ? theirs : [projectOf(src, undefined, 'The file')];
@@ -606,7 +614,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         }
         const plan: ImportPlan = { projects: from.map((p) => ({ srcProjId: p.proj_id, action: action as ProjectAction, targetProjId: target?.proj_id, wbsId })), dict, data };
         if (action === 'new') for (const b of (src.tables.PROJECT?.rows ?? []).filter((p) => p._baseline_of && from.some((f) => f.proj_id === p._baseline_of))) plan.projects.push({ srcProjId: b.proj_id, action: 'new' }); // their baselines come with them
-        const run = (d: Db) => { const r = importIntoDb(d, src, plan); return { projects: r.projIds.map((id) => d.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), counts: r.counts, findings: r.findings.map((f) => ({ severity: f.severity, code: f.code, message: f.message })) }; };
+        const run = (d: Db) => { const r = importIntoDb(d, src, plan); return { projects: r.projIds.map((id) => d.tables.PROJECT.rows.find((p) => p.proj_id === id)?.proj_short_name), counts: r.counts, notes: [...(asGivenNote ? [asGivenNote] : []), ...r.findings.map((f) => f.message)] }; };
         if (a.dry_run === true) { let out!: ReturnType<typeof run>; const j = record(s.db, (d) => { out = run(d); }); rollback(j); return { dry_run: true, ...out, ...(asGiven ? { file_as_given: asGiven } : {}) }; }
         const out = change(s, ctx.caller, `Import (${action})`, run);
         regrow(s); // what the project now holds with the imported rows
@@ -626,7 +634,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       if (a.data_date != null && a.data_date !== 'from' && !dd(a.data_date)) fail('bad_input', 'data_date must be "from" or a date.', 'e.g. "from" or 2026-03-02.');
       const target = projectOf(s.db, a.project, 'This file');
       if (target._baseline_of) fail('bad_input', `${target.proj_short_name} is a baseline.`, 'Transfer onto the project itself.');
-      const { db: src, release, asGiven } = await readOther(a, 'transfer progress from');
+      const { db: src, release, asGiven, asGivenNote } = await readOther(a, 'transfer progress from');
       try {
         const from = a.from_project != null ? [projectOf(src, a.from_project, 'Their file')] : (src.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
         const spec: TransferSpec = { from: src, fromProjIds: from.map((p) => p.proj_id), toProjId: target.proj_id, by, codeType: a.code_type, fromCodeType: a.from_code_type, udf: a.udf, fromUdf: a.from_udf, pairs: a.pairs?.map((x: any) => ({ from: String(x?.from ?? ''), to: String(x?.to ?? '') })), include, costs: a.costs, addAssignments: a.add_assignments === true, dataDate: a.data_date == null ? undefined : String(a.data_date) };
@@ -654,7 +662,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const pct = a.over_allocation_pct == null ? undefined : Number(a.over_allocation_pct);
       if (pct != null && !(pct >= 0)) fail('bad_input', 'over_allocation_pct must be 0 or more.', 'e.g. 10 for 10 %.');
       const opts = { withinFloat: !!a.within_float, overAllocPct: pct, priority: by, rsrcIds, first };
-      const answer = (r: ReturnType<typeof levelResources>) => ({ delayed: r.delayed, moved: r.moved.map((m) => ({ id: m.code, from: m.from, start: m.start, finish: m.finish })), peaks: r.peaks.map((p) => ({ resource: p.code, peak: p.peak, limit: p.limit, day: p.day, overallocated: p.overallocated })), report: r.log });
+      const answer = (r: ReturnType<typeof levelResources>) => ({ delayed: r.delayed, moved: r.moved.map((m) => ({ id: m.code, from: m.from, start: m.start, finish: m.finish })), peaks: r.peaks.map((p) => ({ resource: p.code, peak: p.peak, limit: p.limit, day: p.day, overallocated: p.overallocated })), report: r.report, ...(r.notes.length ? { notes: r.notes } : {}) });
       // (leveling for real has changed the project before the export is written: a failure to write it is said beside the result)
       const levelOut = <T extends ReturnType<typeof answer>>(r: T) => {
         if (a.export == null) return r;
@@ -695,7 +703,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         // the chart: MC_BARS equal date bars from the earliest to the latest finish (the desktop screens, config.screens, read the engine's own whole-day bins)
         // (every run finishing at the same moment leaves no range to divide: one bar holds all the runs, and histogram_note says so)
         const oneMoment = lo === hi;
-        const noVariation = !(r.sensitivity.length || r.events.length), MC_VARY = 'To get a spread, set three-point estimates (edit set_estimates), or pass default_estimates ({min_pct, max_pct, dist}), or pass a sampler.';
+        const noVariation = !(r.sensitivity.length || r.events.length);
         const hist = config.screens ? r.histogram.map((b) => ({ start: iso(b.start), end: iso(b.end), count: b.count, cum_pct: b.cumPct })) : oneMoment ? [{ start: iso(lo), end: iso(hi), count: r.finishSamples.length, cum_pct: 100 }] : bins(lo, (hi - lo) / MC_BARS, MC_BARS);
         // more than one project in the run: an Activity ID can be in several, so each row names its project (as the other answers do)
         const multi = ids.length > 1, projOfTask = new Map<string, string>();
@@ -721,7 +729,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           iterations: r.iterations, seed: r.seed, elapsed_seconds: Math.round(r.elapsedMs / 100) / 10, data_date: iso(r.dataDate),
           deterministic_finish: iso(r.deterministicFinish), chance_of_meeting_deterministic: Math.round(r.probDeterministic * 1000) / 10,
           finish: { P10: iso(r.percentiles.P10), P50: iso(r.percentiles.P50), P80: iso(r.percentiles.P80), P90: iso(r.percentiles.P90), mean: iso(r.mean), min: iso(r.min), max: iso(r.max), std_dev_days: Math.round(r.stdDevDays * 10) / 10 },
-          histogram: hist, ...(oneMoment && !config.screens ? { histogram_note: `All ${r.finishSamples.length} runs finish at the same moment (${iso(lo)}), so the chart is one bar holding all of them, not ${MC_BARS}.${noVariation ? ' Why they coincide, and what to do about it, is in note.' : ''}` } : {}), cumulative, ...(config.screens ? {} : { cumulative_total: fullCurve.length }),
+          histogram: hist, cumulative, ...(config.screens ? {} : { cumulative_total: fullCurve.length }),
           // exact: true (the screens pass it): the engine's own figures, not rounded, in its own units (the rows above carry theirs too: critical_pct, correlation)
           ...(a.exact === true ? { exact: { std_dev_days: r.stdDevDays, prob_deterministic: r.probDeterministic, ...(r.probDeadline != null ? { prob_deadline: r.probDeadline } : {}), risk_events: r.risks.map((x) => ({ id: x.code, probability: x.probability, hours: x.hours, triggered_pct: x.triggeredPct })), events: r.events.map((x) => ({ name: x.name, probability: x.probability, triggered_pct: x.triggeredPct })) } } : {}),
           ...listed('milestones', milestones), ...listed('criticality', criticality), ...criticalCounts, ...listed('sensitivity', sensitivity),
@@ -732,10 +740,11 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           ...(r.partial ? { partial: true, stopped: r.partial.stopped, iterations_done: r.iterations, iterations_requested: r.partial.requested, ...(r.partial.error ? { error: r.partial.error } : {}), ...(r.partial.kept ? { resume: r.partial.kept } : {}) } : {}),
           ...(r.resumed ? { resumed_iterations: r.resumed } : {}),
           // kept iterations that did not check out (a power loss can leave zeros or old bytes), with every one after them: run again, said
-          ...(r.redone ? { redone_iterations: r.redone, redone_note: `${r.redone} kept iteration${r.redone === 1 ? '' : 's'} did not check out (damaged, as a power loss can leave a file, or after a damaged one) and ${r.redone === 1 ? 'was' : 'were'} run again.` } : {}),
+          ...(r.redone ? { redone_iterations: r.redone } : {}),
           // a finished run removed its kept file: named, so a copy of it elsewhere (the platform's mirror of the outputs) goes too
           ...(!r.partial && !r.keptNote && store.path ? { parts_removed: keptPlace(store.path) } : {}),
-          note: r.partial ? `Partial: the run ${r.partial.stopped === 'cancelled' ? 'was cancelled' : 'failed'} after ${r.iterations} of ${r.partial.requested} iterations${r.partial.error ? ` (${r.partial.error})` : ''}; these statistics are of the ${r.iterations} that finished.${r.partial.kept ? ` The ${r.iterations} iterations are kept in ${r.partial.kept}: ${keepWords('monte_carlo', r.partial.kept, 'iterations')}` : ''}` : [r.keptNote, noVariation ? `No activity has a three-point estimate and no risk event applies: every iteration equals the deterministic schedule. ${MC_VARY}` : undefined].filter(Boolean).join(' ') || undefined,
+          ...(r.partial ? { note: r.partial.error ? `Stopped after ${r.iterations} of ${r.partial.requested} iterations (${String(r.partial.error).replace(/\.$/, '')}): the result covers those only.` : cancelledAfter(r.iterations, r.partial.requested, 'iterations', false) } : {}),
+          ...(() => { const n = [...(r.redone ? [`${r.redone} kept iteration${r.redone === 1 ? '' : 's'} did not check out (damaged) and ${r.redone === 1 ? 'was' : 'were'} run again.`] : []), ...(!r.partial && r.keptNote ? [r.keptNote] : []), ...(noVariation ? ['No spread: no activity has a three-point estimate and no risk event applies; set estimates with edit set_estimates or pass default_estimates.'] : [])]; return n.length ? { notes: n } : {}; })(),
         };
         if (a.export == null) return answer;
         // the result files: every list whole, every iteration in the order it ran (a resumed run's kept ones first), the engine's own values
@@ -776,7 +785,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         ], writeOutWith, exportOf(a, { partial: !!r.partial }));
         // the notes of the two ranked lists, as the platform's own tool built them (mcNotes.ts): they name the CSV that holds every row, when it was written
         const csv = (table: string) => exp.files.find((f) => f.path.endsWith(`-${table}.csv`))?.path;
-        const cNote = config.screens ? undefined : criticalityNote(criticality.length > LISTED ? LISTED : criticality.length, criticality.length, criticalCounts.critical_in_every_run, criticalCounts.critical_in_any_run, csv('criticality'));
+        const cNote = config.screens ? undefined : criticalityNote(criticality.length > LISTED ? LISTED : criticality.length, criticality.length, csv('criticality'));
         const sNote = config.screens ? undefined : sensitivityNote(Math.min(LISTED, sensitivity.length), sensitivity.length, csv('sensitivity'));
         return { ...answer, ...(cNote ? { criticality_note: cNote } : {}), ...(sNote ? { sensitivity_note: sNote } : {}), exported: exp };
       } catch (e) { if (ctx.signal.aborted) fail('cancelled', 'The Monte Carlo run was cancelled.', 'Start it again when needed.'); throw e; }
@@ -797,9 +806,9 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'undo': {
       if (a.any_caller) requireOwner(s, a.owner_key ?? fail('owner_key_required', 'any_caller undo needs the owner key.', 'Pass owner_key, or undo only your own changes.'), 'Undoing other callers\' changes');
       const r = undo(s, ctx.caller, !!a.any_caller);
-      return r.undone ? { undone: r.undone, by: r.by, your_remaining_changes: s.history.filter((h) => h.caller === ctx.caller).length } : { undone: null, note: a.any_caller ? 'Nothing to undo.' : `You (${ctx.caller}) have no change to undo on this project.` };
+      return r.undone ? { undone: r.undone, by: r.by, your_remaining_changes: s.history.filter((h) => h.caller === ctx.caller).length } : { undone: null, notes: [a.any_caller ? 'Nothing to undo.' : `You (${ctx.caller}) have no change to undo on this project.`] };
     }
-    case 'redo': { const r = redo(s, ctx.caller); return r.redone ? r : { redone: null, note: 'Nothing to redo (redo is cleared when you make a new change).' }; }
+    case 'redo': { const r = redo(s, ctx.caller); return r.redone ? r : { redone: null, notes: ['Nothing to redo.'] }; }
     case 'save': {
       requireOwner(s, a.owner_key, 'Saving');
       const path = a.path ? pathArg(a.path, 'path', 'write') : s.path ?? fail('bad_input', 'Give "path" (this project was created in memory).', 'Pass a file path inside the storage root.');
@@ -826,7 +835,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         p6found = p6Refusals(s.db, projIds);
         const was = s.openProblems;
         const fresh = s.dirty && a.allow_invalid !== true && was ? p6found.filter((x) => !((was.get(x.key) ?? 0) >= x.count)) : [];
-        if (fresh.length) fail('invalid_for_p6', `Not saved: this session's changes left what P6 would reject on import. ${fresh.slice(0, 5).map((x) => x.message).join(' ')}${fresh.length > 5 ? ` (and ${fresh.length - 5} more)` : ''}`, 'Fix those rows (set_fields / update_activity / delete_rows), or save with allow_invalid: true to write it as it is.');
+        if (fresh.length) fail('invalid_for_p6', `Not saved: this session's changes leave faults P6 refuses: ${namesText(fresh.map((x) => x.message.replace(/\.$/, '')))}.`, 'Fix them, or save with allow_invalid: true.');
       }
       // what P6 would still reject in the project as it stands (a root WBS element missing, a parent cycle...): every fatal finding, so a plain save is never silent about it
       const stillFatal = a.repair !== true && (fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml') ? validateXer(s.db).filter((x) => x.severity === 'fatal' && ['NO_PROJ_NODE', 'NO_PROJECT', 'MISSING_KEY_FIELD'].includes(x.code)).map((x) => x.message) /* (duplicate ids and parent cycles are p6Refusals's: not listed twice) */ : [];
@@ -853,13 +862,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       else writeOut(path, bytes);
       // what P6's XML has no place for, with values in this data: said in the answer, never silent (structured in not_in_p6_xml, plainly in notes)
       let xmlLosses: ReturnType<typeof p6xmlLosses> = [];
-      if (fmt === 'p6xml' || fmt === 'xml') { xmlLosses = p6xmlLosses(s.db, projIds); if (xmlLosses.length) notes.push(`${plural(new Set(xmlLosses.map((l) => l.reason)).size, 'kind')} of data ${new Set(xmlLosses.map((l) => l.reason)).size === 1 ? 'is' : 'are'} not in the P6 XML: not_in_p6_xml lists each with its reason and its count. Save as XER to keep them.`); }
+      if (fmt === 'p6xml' || fmt === 'xml') { xmlLosses = p6xmlLosses(s.db, projIds); if (xmlLosses.length) notes.push(droppedOnSave('P6 XML', xmlLosses.map((l) => `${l.table}${l.field.startsWith('(') ? '' : `.${l.field}`} (${l.rows})`))); }
       // the 4D model, links and rules travel beside the file (<file>.4d.json); XER and P6 XML have no place for them
       const sidecar = fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml' ? save4dSidecar(s.db, path, projIds ?? allIds(s.db), writeOut) : null;
-      if (sidecar) notes.push(`4D links saved beside it: ${basename(sidecar)}`);
+      if (sidecar) notes.push(`4D links are not in ${basename(path)}: they were written to ${basename(sidecar)}; keep it with the file.`);
       // the LOB plans travel inside the XER / P6 XML (a notebook); a copy beside it in case P6 damages that notebook
       const lobText = fmt === 'xer' || fmt === 'p6xml' || fmt === 'xml' ? lobSidecarText(s.db, projIds ?? allIds(s.db)) : null;
-      if (lobText) { writeOut(`${path}.lob.json`, lobText); notes.push(`LOB plans also saved beside it: ${basename(path)}.lob.json`); }
+      if (lobText) { writeOut(`${path}.lob.json`, lobText); notes.push(`LOB plans are not in ${basename(path)} as a plan the clone reads back: a copy was written to ${basename(path)}.lob.json; keep it with the file.`); }
       if (!projIds || allIds(s.db).length === 1) { s.dirty = false; s.savedTo = path; }
       if (fmt === 'mspdi' || fmt === 'mpx') { const lost = mspLossNote(s.db, projIds ?? allIds(s.db).slice(0, 1), fmt); if (lost) notes.push(lost); }
       if (repairs) {
@@ -871,10 +880,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const dateField = (f: string) => /_date$/.test(f), clearedDates = repairs.changes.some((c) => dateField(c.field) && c.new === ''), clearedActual = repairs.changes.some((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '');
         return { saved: path, format: label, repaired: true, changes: repairs.changes.map((c) => ({ table: c.table, row: c.row, key: c.key, field: c.field, old: c.old, new: c.new, reason: c.reason })), changes_total: repairs.changes.length,
           // kept as the customer recorded them (P6 imports them), reported as DCMA's invalid dates
-          invalid_dates: repairs.findings, ...(clearedActual ? { cleared_actuals_rule: REFUSED_ACTUALS } : {}), check: { ...brief(g), still_rejected: still },
-          note: still ? 'The repaired copy is still one P6 would reject: check.findings names what is left.' : `The repaired copy is one P6 imports.${clearedDates ? ' Run schedule to recalculate the dates the repair cleared.' : ''} Undo takes the repairs back from the project in memory (the file written stays).` };
+          invalid_dates: repairs.findings, check: { ...brief(g), still_rejected: still },
+          notes: [...notes, still ? `Repaired copy written, but P6 would still refuse it: ${namesText(g.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => x.message.replace(/\.$/, '')))}.` : `Repaired copy written: ${plural(repairs.changes.length, 'repair')} (changes lists them)${clearedActual ? `; ${plural(repairs.changes.filter((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '').length, 'actual date')} cleared: run schedule` : ''}.`] };
       }
-      return { saved: path, format: label, ...(notes.length ? { notes } : {}), ...(xmlLosses.length ? { not_in_p6_xml: xmlLosses } : {}), ...(p6found.length || stillFatal.length ? { p6_would_reject: { total: p6found.length + stillFatal.length, in_the_file_as_opened: s.openProblems ? p6found.filter((x) => (s.openProblems!.get(x.key) ?? 0) >= x.count).length + stillFatal.length : null, findings: [...p6found.map((x) => x.message), ...stillFatal].slice(0, 20), next_step: 'save with repair: true writes a repaired copy P6 imports (it is never written over the original).', note: s.openProblems ? `Not caused by this session: the file already had these when it was opened (they were saved as they were)${rebuilt ? ' (read again from the file it was opened from, as this project was restored without that list)' : ''}. allow_invalid: true is only needed for ones edits add.` : 'This project was restored from a recovery entry written before the list of what the file had when it was opened existed, and the file it was opened from is not available as it was opened (it is missing, or this project was saved over it): nothing could be told apart, so nothing was refused and everything found is listed.' } } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
+      return { saved: path, format: label, ...(notes.length || p6found.length || stillFatal.length ? { notes: [...notes, ...(p6found.length || stillFatal.length ? [`${basename(path)} has ${plural(p6found.length + stillFatal.length, 'fault')} P6 refuses${s.openProblems ? ', already in the file when it was opened' : ''}: ${namesText([...p6found.map((x) => x.message), ...stillFatal].map((m) => m.replace(/\.$/, '')))}; save with repair: true fixes it.`] : [])] } : {}), ...(xmlLosses.length ? { not_in_p6_xml: xmlLosses } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
     case 'close': {
       requireOwner(s, a.owner_key, 'Closing');
@@ -916,18 +925,18 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         let res = undefined as ReturnType<typeof applyImport> | undefined;
         if (plan.ops.length && !lobRefusal) { const j = record(s.db, (d) => { res = applyImport(d, plan, { hoursPerDay: s.hpd, calendarDays: true }); }); rollback(j); }
         const refused = refusedRows((res as ReturnType<typeof applyImport> | undefined)?.refused ?? []);
-        return { applied: false, ...(plan.ops.length ? {} : { note: 'Nothing to change.' }), summary: plan.summary, warnings: plan.warnings, ...(lobRefusal ? { refused_all: lobRefusal } : {}), ...(refused.length ? { refused, refused_note: `${refused.length} row(s) would be refused and skipped by the real run (the same refusals it gives); the rest would be applied. Fix those rows first (a row's next says what to do).` } : {}), operations: plan.ops.slice(0, 200).map((o, i) => ({ ...o, sheet_row: `${plan.rows[i].sheet}!${plan.rows[i].row}` })) };
+        return { applied: false, summary: plan.summary, notes: tidyNotes([...plan.warnings, ...(refused.length ? [`${plural(refused.length, 'row')} would be refused and skipped by the real run; the rest would be applied.`] : [])]), ...(lobRefusal ? { refused_all: lobRefusal } : {}), ...(refused.length ? { refused } : {}), operations: plan.ops.slice(0, 200).map((o, i) => ({ ...o, sheet_row: `${plan.rows[i].sheet}!${plan.rows[i].row}` })) };
       }
       if (lobRefusal) return { ok: false, error: { code: 'op_failed', message: lobRefusal, hint: 'Use lob_edit for an LOB plan\u2019s durations, crews, locations and logic; progress, notes, resources and other codes edit as usual.' } };
       const res = change(s, ctx.caller, `Import ${basename(path)}`, (d) => applyImport(d, plan, { hoursPerDay: s.hpd, calendarDays: true }));
       if (!res.applied) dropLast(s);
       const refused = refusedRows(res.refused);
-      return { applied: res.applied > 0, operations_applied: res.applied, summary: plan.summary, warnings: [...plan.warnings, ...res.warnings], ...(refused.length ? { refused } : {}), note: res.applied ? `Undo with undo (one step).${refused.length ? ` ${refused.length} row(s) were refused and skipped; the rest was applied.` : ''} Run schedule to recalculate dates.` : 'Every row with a change was refused; nothing was changed.' };
+      const { stale, ...confirmed } = res.applied ? confirmChanges(s) : { stale: [] as string[] };
+      return { applied: res.applied > 0, operations_applied: res.applied, summary: plan.summary, ...confirmed, ...(refused.length ? { refused } : {}), notes: tidyNotes([...plan.warnings, ...res.warnings, ...(refused.length ? [`${plural(refused.length, 'row')} ${refused.length === 1 ? 'was' : 'were'} refused and skipped; the rest was applied.`] : []), ...(res.applied ? [] : ['Every row with a change was refused; nothing was changed.']), ...stale]) };
     }
     case 'compare': {
       // the export: every change (the answer pages them, max_changes a page) and the activities on one side only
       const COMPUTED = ['id', 'duration_delta_days', 'remaining_delta_days', 'start_shift_days', 'finish_shift_days', 'total_float_delta_days', 'became_critical', 'no_longer_critical'];
-      const SIGN = 'A positive finish_shift_days (likewise start_shift_days, duration_delta_days, remaining_delta_days, total_float_delta_days) means the later revision is later (longer, more float) than the earlier one; negative means earlier.';
       const names = (d: Db) => (d.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of).map((p) => p.proj_short_name).join(', ');
       const sides = (earlier: string, later: string) => `${earlier} (earlier) \u2192 ${later} (later)`;
       // whole: the answer's lists as they are before the answer cuts them (progress_integrity's three lists); the result files hold them whole
@@ -941,13 +950,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const cur = (s.db.tables.PROJECT?.rows ?? []).find((p) => !p._baseline_of && (a.project == null || p.proj_short_name === a.project)) ?? fail('bad_input', 'No project to compare.', 'Pass project.');
         const bl = baselineOf(s.db, cur, String(a.baseline) as 'project') ?? fail('bad_input', `The project has no ${a.baseline} baseline in this file.`, 'Use project, bl1, bl2, bl3 or the name of a saved baseline.');
         const c = compareComputed(s.db, s.db, s.hpd, { aProjIds: [bl.projId], bProjIds: [cur.proj_id] });
-        return compared({ compared: sides(`${cur.proj_short_name} baseline ${bl.name}`, `${cur.proj_short_name} as it is now`), mode: 'computed', sign_note: SIGN, baseline: bl.name, ...c, changed: c.changes.length, ...changesPage(c.changes, a) }, c.changes, COMPUTED, c);
+        return compared({ compared: sides(`${cur.proj_short_name} baseline ${bl.name}`, `${cur.proj_short_name} as it is now`), mode: 'computed', baseline: bl.name, ...c, changed: c.changes.length, ...changesPage(c.changes, a) }, c.changes, COMPUTED, c);
       }
       // a file compared against is read for this call only, and counted in the memory budget while it is held (C14)
       const { db: other, release } = await readOther(a, 'compare with');
       try {
       const theSides = sides(`${names(s.db)} (the open project)`, a.other_handle ? `${names(other)} (the other open project)` : `${basename(String(a.path))} (the file)`);
-      if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return compared({ compared: theSides, mode: 'computed', sign_note: SIGN, changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }, c.changes, COMPUTED, c); }
+      if (a.mode === 'computed') { const c = compareComputed(s.db, other, s.hpd); return compared({ compared: theSides, mode: 'computed', changed: c.changes.length, ...changesPage(c.changes, a), became_critical: c.became_critical, no_longer_critical: c.no_longer_critical, only_in_a: c.only_in_a, only_in_b: c.only_in_b }, c.changes, COMPUTED, c); }
       if (a.mode != null && a.mode !== 'all') fail('bad_input', 'mode must be all or computed.', 'Leave it out to compare everything.');
       const cs = compareSchedules(s.db, other, s.hpd, true);
       const count = (o: string, k: string) => cs.filter((c) => c.object === o && c.kind === k).length;
@@ -1034,7 +1043,7 @@ function withArgumentsNotUsed(name: string, a: Record<string, any>, r: { out: un
   // (owner_key is the key of the project's handle: callers that hold one send it with every call, and a tool that does not need it simply does not read it, so it is never reported)
   const unused = Object.keys(a).filter((k) => !known.includes(k) && k !== 'owner_key');
   if (!unused.length) return r;
-  return { ...r, out: { ...(r.out as object), arguments_not_used: unused.map((k) => `${name} has no argument "${k}": it was not used and the call ran without it. Its arguments are: ${known.join(', ')}.`) } };
+  return { ...r, out: { ...(r.out as object), notes: [...(Array.isArray((r.out as { notes?: unknown }).notes) ? (r.out as { notes: string[] }).notes : []), ...unused.map((k) => argumentNotUsed(name, k, known))] } };
 }
 async function callToolRun(name: string, a: Record<string, any>, sessionCaller?: string, signal?: AbortSignal, progress?: Ctx['progress']): Promise<{ out: unknown; isError: boolean }> {
   ensureCwd(); // (a folder the server was started in may be gone: workers and child processes read it when they start)
@@ -1076,6 +1085,8 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
     let out = handle != null ? await exclusive(handle, () => withWorkingSet(name, a, handle, () => run(name, a, ctx))) : await run(name, a, ctx);
     const plain = !!out && typeof out === 'object' && !Array.isArray(out);
     if (plain) out = noteCuts(out, name); // where the whole of each cut list is, when an export was written (export.ts)
+    // the notes of the answer as they are told: each sentence once, parts not assessed for one reason in one sentence (core/notes.ts tidyNotes); an answer with none carries no `notes`
+    if (plain && out && typeof out === 'object' && !Array.isArray(out) && Array.isArray((out as { notes?: unknown }).notes)) { const t = tidyNotes((out as { notes: string[] }).notes); if (t.length) (out as { notes: string[] }).notes = t; else delete (out as { notes?: unknown }).notes; }
     // a tool that can change a project says whether that project now has unsaved changes
     const h = handle ?? (plain && typeof (out as { handle?: unknown }).handle === 'string' ? (out as { handle: string }).handle : undefined);
     if (plain && h && MUTATES.has(name) && !(name === 'lob_takt' && a.apply !== true)) { // lob_takt's check reads only (L-9)
@@ -1086,14 +1097,14 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
   });
   const asJob = a.async === true && name !== 'job_status';
   try {
-    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; busy.job = job; return work(); }), abort); return { out: { job_id: job.id, status: 'running', note: 'Call job_status with this job_id for the result.' }, isError: false }; }
+    if (asJob) { const job = startJob(name, handle, Promise.resolve().then(() => { ctx.job = job; busy.job = job; return work(); }), abort); return { out: { job_id: job.id, status: 'running', notes: [stillWorking(job.id)] }, isError: false }; }
     const p = work();
     const timeout = Symbol('timeout');
     // (the timer is cleared once the call answers: left running, its promise held the race's result - the whole answer, a page of 500 rows - for the soft timeout, call after call)
     let soft: ReturnType<typeof setTimeout> | undefined;
     const r = await Promise.race([p, new Promise((res) => { soft = setTimeout(() => res(timeout), config.softTimeoutMs); soft.unref?.(); })]).finally(() => clearTimeout(soft));
     // (ctx.job too: the tool's progress goes to the job from now on, and a tool that names its job, render_4d's render_busy, finds it)
-    if (r === timeout) { const job = startJob(name, handle, p, abort); ctx.job = job; busy.job = job; return { out: { job_id: job.id, status: 'running', note: `Still working after ${config.softTimeoutMs / 1000} s; the work continues as a job. Call job_status with this job_id.` }, isError: false }; }
+    if (r === timeout) { const job = startJob(name, handle, p, abort); ctx.job = job; busy.job = job; return { out: { job_id: job.id, status: 'running', notes: [stillWorking(job.id)] }, isError: false }; }
     const o = r as { ok?: boolean; status?: string; error?: Record<string, unknown> } | null;
     // a refusal answered as data (ok: false), and a job that failed or was cancelled, are errors too
     const isError = !!(o && typeof o === 'object' && (o.ok === false || (name === 'job_status' && (o.status === 'failed' || o.status === 'cancelled') && !('result' in o))));
@@ -1102,7 +1113,7 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
   } catch (e0) {
     const e = asRefusal(e0) as Error;
     if (e instanceof ToolError) return { out: { error: keptNote(contractError({ code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) }), handle) }, isError: true };
-    return { out: { error: contractError({ code: 'internal', message: (e as Error).message, hint: 'This is a bug in the server; the project was not changed by this call. Retry, or report it with the message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') }) }, isError: true };
+    return { out: { error: contractError({ code: 'internal', message: `Not done: the server failed (${(e as Error).message}); the project was not changed by this call.`, hint: 'Report it with this message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') }) }, isError: true };
   }
 }
 
@@ -1183,17 +1194,29 @@ export function shutdown(reason: string): void {
  *  whose path the answer gives, so none of it is out of reach. */
 /** Every answer is compact JSON in the text part (no pretty-printing) beside structuredContent: the MCP spec asks for the serialized result in a text block, and a client that reads only text must not lose the rows. */
 /** A result written whole to a JSON file in the write root (else the storage root, else the system's temporary folder): its path, or null when it cannot be written. */
-function writeResultFile(tool: string, text: string): string | null {
+function writeResultFile(tool: string, text: string, ext = 'json'): string | null {
   try {
     const dir = writeBase() ?? join(tmpdir(), 'p6clone-results');
     mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
     const base = tool.replace(/[^\w-]+/g, '_');
-    let file = join(dir, `${base}-result-${stamp}.json`);
-    for (let i = 2; existsSync(file); i++) file = join(dir, `${base}-result-${stamp}-${i}.json`);
+    let file = join(dir, `${base}-result-${stamp}.${ext}`);
+    for (let i = 2; existsSync(file); i++) file = join(dir, `${base}-result-${stamp}-${i}.${ext}`);
     writeOutWith(file, (put) => { for (let at = 0; at < text.length; at += 1 << 22) put(text.slice(at, at + (1 << 22))); });
     return file;
   } catch { return null; /* the caller still answers */ }
+}
+/** What an edit changed, as the answer says it: each changed field with its old and new value (the first LISTED; all of them in a file when there are more), and, when the edit leaves the saved dates not current, the one shared sentence. */
+function confirmChanges(s: Session): { changes?: FieldChange[]; changes_total?: number; changes_note?: string; stale: string[] } {
+  const last = s.history[s.history.length - 1];
+  if (!last) return { stale: [] };
+  const { changes, datesAffected } = describeChanges(s.db, last.j);
+  const stale = datesAffected ? storedDatesState(s.db).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open)) : [];
+  if (!changes.length) return { stale };
+  if (changes.length <= LISTED) return { changes, stale };
+  const csv = ['id,field,old,new', ...changes.map((c) => [c.id, c.field, c.old ?? '', c.new ?? ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\r\n');
+  const file = writeResultFile('edit_changes', csv, 'csv');
+  return { changes: changes.slice(0, LISTED), changes_total: changes.length, changes_note: listCut(LISTED, changes.length, file ?? undefined), stale };
 }
 export function toolResult(out: unknown, isError: boolean, tool?: string) {
   let text = JSON.stringify(out);
@@ -1207,23 +1230,21 @@ export function toolResult(out: unknown, isError: boolean, tool?: string) {
     // what the caller needs beside the preview: the result files (exported), every <list>_note wherever it is in the answer, and arguments_not_used; and a hint
     // naming only arguments this tool has
     const answer = out && typeof out === 'object' && !Array.isArray(out) ? (out as Record<string, unknown>) : {};
-    const notes: Record<string, string> = {};
-    const walk = (v: unknown, at: string, depth: number) => {
+    const cuts: string[] = []; // every <list>_note wherever it is in the answer (what is cut and where all of it is)
+    const walk = (v: unknown, depth: number) => {
       if (!v || typeof v !== 'object' || depth > 6) return;
       for (const [k, x] of Object.entries(v)) {
-        if (Array.isArray(v) ? false : k === 'exported' || k === 'arguments_not_used') continue;
-        const here = Array.isArray(v) ? `${at}[${k}]` : at ? `${at}.${k}` : k;
-        if (typeof x === 'string') { if (/_note$/.test(k) && !Array.isArray(v)) notes[here] = x; } else walk(x, here, depth + 1);
+        if (Array.isArray(v) ? false : k === 'exported' || k === 'notes') continue;
+        if (typeof x === 'string') { if (/_note$/.test(k) && !Array.isArray(v)) cuts.push(x); } else walk(x, depth + 1);
       }
     };
-    walk(answer, '', 0);
+    walk(answer, 0);
     const known = Object.keys(((TOOLS.find((t) => t.name === forTool)?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {});
     const asks = ['limit', 'offset', 'max_rows', 'max_changes', 'project'].filter((k) => known.includes(k));
     const ask = asks.length ? (via ? `, or call ${via} again asking for less (its ${asks.join(', ')})` : `, or ask for less (this tool's ${asks.join(', ')})`) : '';
     structured = { truncated: true, size_chars: text.length, ...(saved ? { saved, written: [saved] } : {}),
-      ...(answer.exported !== undefined ? { exported: answer.exported } : {}), ...Object.fromEntries(['partial', 'resume', 'next_offset'].filter((k) => answer[k] !== undefined).map((k) => [k, answer[k]])), ...(answer.note !== undefined ? { answer_note: answer.note } : {}), ...(Object.keys(notes).length ? { notes } : {}), ...(answer.arguments_not_used !== undefined ? { arguments_not_used: answer.arguments_not_used } : {}),
-      note: saved ? `The result was too large to return whole (${text.length} characters); all of it is in ${saved} (JSON). Read that file${ask}.`
-        : `The result was too large to return whole and could not be written to a file${ask}; or write it to a file (run_report / export_* with path).`,
+      ...(answer.exported !== undefined ? { exported: answer.exported } : {}), ...Object.fromEntries(['partial', 'resume', 'next_offset'].filter((k) => answer[k] !== undefined).map((k) => [k, answer[k]])),
+      notes: [tooLarge(text.length, saved, ask), ...(typeof answer.note === 'string' ? [answer.note] : []), ...(Array.isArray(answer.notes) ? answer.notes.filter((n): n is string => typeof n === 'string') : []), ...cuts],
       preview: text.slice(0, 20000) };
     text = JSON.stringify(structured);
   }

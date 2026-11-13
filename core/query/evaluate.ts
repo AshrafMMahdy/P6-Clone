@@ -2,6 +2,8 @@
 // overrides (edit operations) are both scheduled with the same data date and options, inside a journal that is rolled
 // back, so nothing is kept and no undo entry is made. Answers the finish of each, the critical set, the activities
 // that became or stopped being critical, and the rows whose computed fields changed.
+import { tidyNotes } from '../notes.ts';
+import { differentDatesNote } from '../analysis/scheduleLog.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { record, rollback } from '../journal.ts';
@@ -31,7 +33,7 @@ export function computedFields(db: Db, projIds: string[], hpd = 8): Map<string, 
   return out;
 }
 
-export type EvaluateAnswer = { ok: true; data_date: string | null; data_dates?: Record<string, string | null>; data_dates_note?: string; base_finish: string | null; finish: string | null; finish_delta_days: number | null; critical: string[]; became_critical: string[]; no_longer_critical: string[]; changed: Record<string, unknown>[]; changed_total: number; loops: string[][]; warnings: string[] }
+export type EvaluateAnswer = { ok: true; data_date: string | null; data_dates?: Record<string, string | null>; base_finish: string | null; finish: string | null; finish_delta_days: number | null; critical: string[]; became_critical: string[]; no_longer_critical: string[]; changed: Record<string, unknown>[]; changed_total: number; loops: string[][]; notes: string[] }
   | { ok: false; error: { code: string; message: string; index?: number; loops?: string[][] } };
 
 export function evaluate(db: Db, projIds: string[], o: EvaluateOptions = {}): EvaluateAnswer {
@@ -40,14 +42,14 @@ export function evaluate(db: Db, projIds: string[], o: EvaluateOptions = {}): Ev
   const over: Partial<SchedOptions> = { ...(o.options ?? {}), ...(o.dataDate != null ? { dataDate: o.dataDate } : {}) };
   const j = record(db, (d) => {
     const base = scheduleProjects(d, projIds, over);
-    if (!base.ok) { answer = { ok: false, error: { code: 'schedule_failed', message: `The project as it is cannot be scheduled: ${base.findings.filter((f) => f.severity === 'error').map((f) => f.message).join(' ')}`, ...(base.loops?.length ? { loops: base.loops } : {}) } }; return; }
+    if (!base.ok) { answer = { ok: false, error: { code: 'schedule_failed', message: `Refused: the project as it is cannot be scheduled (${base.findings.filter((f) => f.severity === 'error').map((f) => f.message.replace(/\.$/, '')).join('; ')}).`, ...(base.loops?.length ? { loops: base.loops } : {}) } }; return; }
     const before = computedFields(d, projIds, hpd);
     // a started activity is driven by its REMAINING duration: a new original duration alone cannot move its dates, and the answer says so
     const startedNote: string[] = [];
     for (const op of (o.overrides ?? []) as Record<string, unknown>[]) {
       if (!op || op.op !== 'update_activity' || (op.duration_days == null && op.duration_hours == null) || op.remaining_days != null || op.remaining_hours != null || typeof op.id !== 'string') continue;
       const t = rows(d, 'TASK').find((x) => x.task_code === op.id && projIds.includes(x.proj_id));
-      if (t && t.act_start_date && !t.act_end_date) startedNote.push(`Activity ${op.id} has started: its remaining duration drives its dates, so a new original duration alone does not move them. Set remaining_days to test a different finish.`);
+      if (t && t.act_start_date && !t.act_end_date) startedNote.push(`${op.id} has started: its remaining duration drives its dates, so the change of original duration has no effect; set remaining_days.`);
     }
     const r = applyOps(d, o.overrides ?? [], { hoursPerDay: hpd, calendarDays: true });
     if (!r.ok) { answer = { ok: false, error: { code: 'op_failed', message: r.error!.message, index: r.error!.index } }; return; }
@@ -70,9 +72,9 @@ export function evaluate(db: Db, projIds: string[], o: EvaluateOptions = {}): Ev
     const pc = calendarResolver(d, []).fallback(p0?.clndr_id ?? '');
     const delta = base.stats.finish != null && s.stats.finish != null ? Math.round((pc.workBetween(base.stats.finish, s.stats.finish) / 60 / dh.cal(p0?.clndr_id)) * 100) / 100 : null;
     answer = {
-      ok: true, data_date: iso(s.stats.dataDate), ...(Object.keys(s.projects).length > 1 && new Set(Object.values(s.projects).map((v) => v.dataDate)).size > 1 ? { data_dates: Object.fromEntries(Object.entries(s.projects).map(([id, v]) => [rows(d, 'PROJECT').find((p) => p.proj_id === id)?.proj_short_name ?? id, iso(v.dataDate)])), data_dates_note: 'The projects have different data dates (data_dates): each is scheduled from its own; data_date is the earliest.' } : {}), base_finish: iso(base.stats.finish), finish: iso(s.stats.finish), finish_delta_days: delta,
+      ok: true, data_date: iso(s.stats.dataDate), ...(Object.keys(s.projects).length > 1 && new Set(Object.values(s.projects).map((v) => v.dataDate)).size > 1 ? { data_dates: Object.fromEntries(Object.entries(s.projects).map(([id, v]) => [rows(d, 'PROJECT').find((p) => p.proj_id === id)?.proj_short_name ?? id, iso(v.dataDate)])) } : {}), base_finish: iso(base.stats.finish), finish: iso(s.stats.finish), finish_delta_days: delta,
       critical: [...ca], became_critical: [...ca].filter((c) => !cb.has(c)), no_longer_critical: [...cb].filter((c) => !ca.has(c)),
-      changed: changed.slice(0, o.maxRows ?? 500), changed_total: changed.length, loops: s.loops ?? [], warnings: [...(r.warnings ?? []), ...startedNote],
+      changed: changed.slice(0, o.maxRows ?? 500), changed_total: changed.length, loops: s.loops ?? [], notes: tidyNotes([...(() => { const own = Object.fromEntries(Object.entries(s.projects).map(([id, v]) => [rows(d, 'PROJECT').find((p) => p.proj_id === id)?.proj_short_name ?? id, iso(v.dataDate)])); const n = Object.keys(own).length > 1 ? differentDatesNote(own, 'each project\u2019s own date') : null; return n ? [n] : []; })(), ...(r.warnings ?? []), ...startedNote]),
     };
   });
   rollback(j);

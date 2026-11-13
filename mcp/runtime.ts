@@ -11,7 +11,7 @@
 //    fence reads (read or write root) and writes (write root) separately, like the craft forks.
 //  - Every failure is a ToolError with a code and a next step.
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
-import { DataError } from '../core/notes.ts';
+import { DataError, stillWorking } from '../core/notes.ts';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { cwdLost } from '../core/cwd.ts';
@@ -670,14 +670,13 @@ export function noteSilence(job: Job, s: Silence): void {
     silent_s: sec(s.silentMs), since: new Date(s.lastProgressAt).toISOString(),
     [basis.kind === 'longest_gap' ? 'longest_gap_before_s' : basis.kind === 'expected' ? 'expected_s' : 'asked_after_s']: sec(basis.ms),
     using_cpu: s.usingCpu, ...(s.cpuMs != null ? { cpu_ms_last_window: Math.round(s.cpuMs) } : {}),
-    note: `${s.step}: no progress for ${sec(s.silentMs)} s (${basis.kind === 'longest_gap' ? `longer than any gap this job has shown, ${sec(basis.ms)} s` : basis.kind === 'expected' ? `longer than its expected ${sec(basis.ms)} s` : `the ${sec(basis.ms)} s you asked for`}), ${s.usingCpu === true ? 'still using the processor' : s.usingCpu === false ? 'and using no processor time' : 'processor time not readable here'}. It is not stopped: cancel it (cancel_job) if that is not expected, or call job_status with wake_after_s to be woken again if it still shows no progress.`,
   } } as unknown as ReturnType<typeof jobView>);
 }
 /** The agent asks to be woken again if the job still shows no progress after `seconds` (counted from now, or from its next progress). */
 export function askWake(job: Job, seconds: number): void { if (seconds > 0 && !job.done) job.wakeAfter = { at: Date.now(), ms: seconds * 1000 }; }
 export function jobView(job: Job) {
   const base = { job_id: job.id, tool: job.tool, handle: job.handle, running_seconds: Math.round(((job.done ?? Date.now()) - job.started) / 1000) };
-  if (!job.done) return { ...base, status: 'running', progress: job.progress, note: 'Call job_status again shortly (pass wait_seconds to wait up to 20 s).' };
+  if (!job.done) return { ...base, status: 'running', progress: job.progress, notes: [stillWorking(job.id)] };
   if (job.error) return { ...base, status: job.error instanceof ToolError && job.error.code === 'cancelled' ? 'cancelled' : 'failed', error: job.error instanceof ToolError ? { ...(job.error.data ?? {}), code: job.error.code, reason: job.error.message, next_step: job.error.hint, message: job.error.message, hint: job.error.hint } : { code: 'internal', reason: job.error.message, message: job.error.message } };
   // a run that stopped part-way (cancel, or a failure) and kept its finished work: the status says how it ended, the result is that work
   if (job.stopped) { const r = job.result as { error?: unknown } | null; return { ...base, status: job.stopped, result: job.result, ...(job.stopped === 'failed' && typeof r?.error === 'string' ? { error: { code: 'partial_failure', reason: r.error, message: r.error } } : {}) }; }

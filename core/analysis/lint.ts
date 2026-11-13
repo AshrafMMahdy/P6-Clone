@@ -36,7 +36,7 @@ export function cutLintCheck(c: LintCheck, max: number): LintCheck {
   }
   return { ...c, activities, ...(c.fixes && c.fixes.length > max ? { fixes: c.fixes.slice(0, max), fixes_total: c.fixes.length } : {}) };
 }
-export interface LintReport { report: 'Schedule Lint'; profile: 'p6' | 'platform'; /** a simulation was cancelled: the check that says so (fs_overlap) holds the part that was done */ partial?: true; stopped?: 'cancelled'; score?: number; grade?: string; /** said when a cancel did not stop the lint short: it arrived when the lint had no further step to stop at, and the result is complete */ note?: string; work_activities: number; relationships: number; checks: LintCheck[]; thresholds: LintThresholds; overridden: string[]; not_used?: string[] }
+export interface LintReport { report: 'Schedule Lint'; profile: 'p6' | 'platform'; /** a simulation was cancelled: the check that says so (fs_overlap) holds the part that was done */ partial?: true; stopped?: 'cancelled'; score?: number; grade?: string; /** said when a cancel did not stop the lint short: it arrived when the lint had no further step to stop at, and the result is complete */ notes?: string[]; work_activities: number; relationships: number; checks: LintCheck[]; thresholds: LintThresholds; overridden: string[]; not_used?: string[] }
 /** What a lint reports to the tick of lintScheduleTicked between units of long work (the days-saved simulations) */
 export interface LintTick { done: number; total: number; message: string }
 export interface LintOptions { projIds?: string[]; hoursPerDay?: number; profile?: 'p6' | 'platform'; checks?: string[]; maxIds?: number; simulate?: boolean; thresholds?: Record<string, unknown> }
@@ -162,7 +162,7 @@ export async function lintScheduleTicked(db: Db, o: LintOptions, tick: (done: nu
   if (steps) return r.value;
   try { await tick(0, 0, 'lint: complete'); } catch (e) {
     if ((e as { code?: unknown })?.code !== 'cancelled') throw e;
-    return { ...r.value, note: 'The call was cancelled while the lint ran, when it had no further step to stop at (no fix simulation to run): the result is complete.' };
+    return { ...r.value, notes: ['Cancel came when the lint had no further step to stop at: the result is complete.'] };
   }
   return r.value;
 }
@@ -182,11 +182,11 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
 
   if (want('dangling_start')) {
     const f = live.filter((t) => !t.act_start_date && preds(t).length && !preds(t).some((r) => type(r) === 'PR_FS' || type(r) === 'PR_SS')).map((t) => offender(t, s, `only ${preds(t).map((r) => type(r).slice(3)).join(', ')} in`));
-    out.push(check('dangling_start', 'Dangling start (no FS or SS predecessor drives the start)', 'warning', f, live.length, upTo(f.length, T.dangling_start.max), maxIds, { applied: T.dangling_start, note: 'Its start floats free of logic: add a finish-to-start or start-to-start predecessor.' }));
+    out.push(check('dangling_start', 'Dangling start (no FS or SS predecessor drives the start)', 'warning', f, live.length, upTo(f.length, T.dangling_start.max), maxIds, { applied: T.dangling_start }));
   }
   if (want('dangling_finish')) {
     const f = live.filter((t) => succs(t).length && !succs(t).some((r) => type(r) === 'PR_FS' || type(r) === 'PR_FF')).map((t) => offender(t, s, `only ${succs(t).map((r) => type(r).slice(3)).join(', ')} out`));
-    out.push(check('dangling_finish', 'Dangling finish (its finish drives no FS or FF successor)', 'warning', f, live.length, upTo(f.length, T.dangling_finish.max), maxIds, { applied: T.dangling_finish, note: 'If it ran late nothing would move: add a finish-to-start or finish-to-finish successor.' }));
+    out.push(check('dangling_finish', 'Dangling finish (its finish drives no FS or FF successor)', 'warning', f, live.length, upTo(f.length, T.dangling_finish.max), maxIds, { applied: T.dangling_finish }));
   }
   if (want('fs_overlap')) out.push(yield* fsOverlap(s, o.simulate !== false, maxIds, T));
   if (want('empty_wbs')) {
@@ -195,7 +195,7 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
     const has = new Set(s.tasks.map((t) => t.wbs_id));
     const any = (id: string, n = 0): boolean => has.has(id) || (n <= kids.size && (kids.get(id) ?? []).some((k) => any(k, n + 1)));
     const f = W2.filter((w) => !any(w.wbs_id)).map((w) => ({ id: w.wbs_short_name, name: w.wbs_name }));
-    out.push(check('empty_wbs', 'WBS elements with no activities', 'warning', f, W2.length, upTo(f.length, T.empty_wbs.max), maxIds, { applied: T.empty_wbs, note: 'WBS elements with no activities under them: scope missing from the schedule, or elements to delete.' }));
+    out.push(check('empty_wbs', 'WBS elements with no activities', 'warning', f, W2.length, upTo(f.length, T.empty_wbs.max), maxIds, { applied: T.empty_wbs }));
   }
   if (want('milestone_duration')) {
     const f: Offender[] = [];
@@ -209,15 +209,15 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
     const HARD = new Set(['CS_MANDSTART', 'CS_MANDFIN', 'CS_MSO', 'CS_MEO']);
     const f = live.filter((t) => t.cstr_type || t.cstr_type2).map((t) => offender(t, s, [t.cstr_type, t.cstr_type2].filter(Boolean).map((c) => cstrName(c)).join(', ')));
     const hard = live.filter((t) => HARD.has(t.cstr_type) || HARD.has(t.cstr_type2)).length;
-    out.push(check('constraints', 'Constrained activities (every type)', hard > T.constraints.max_hard ? 'warning' : 'info', f, live.length, hard > T.constraints.max_hard ? 'warn' : 'pass', maxIds, { applied: T.constraints, note: `${hard} hard (Start On, Finish On, Mandatory Start, Mandatory Finish; On or Before is not counted here), over the incomplete activities that are not WBS summaries or level of effort. Constraints should stand for real dates, not replace logic.` }));
+    out.push(check('constraints', 'Constrained activities (every type)', hard > T.constraints.max_hard ? 'warning' : 'info', f, live.length, hard > T.constraints.max_hard ? 'warn' : 'pass', maxIds, { applied: T.constraints }));
   }
   if (want('loe_on_critical')) {
     const f = s.tasks.filter((t) => (isLoe(t) || isWbs(t)) && !isDone(t) && isCritical(t, s.ctx)).map((t) => offender(t, s, isLoe(t) ? 'level of effort' : 'WBS summary'));
-    out.push(check('loe_on_critical', 'Level of effort or WBS summary activities on the critical path', 'warning', f, null, upTo(f.length, T.loe_on_critical.max), maxIds, { applied: T.loe_on_critical, note: 'Summary activities take their dates from others; on the critical path they hide what really drives the finish.' }));
+    out.push(check('loe_on_critical', 'Level of effort or WBS summary activities on the critical path', 'warning', f, null, upTo(f.length, T.loe_on_critical.max), maxIds, { applied: T.loe_on_critical }));
   }
   if (want('lag_calendar')) {
     const f = s.rels.filter((r) => { const a = task(r.pred_task_id), b = task(r.task_id); return a && b && Number(r.lag_hr_cnt || 0) !== 0 && a.clndr_id !== b.clndr_id; }).map((r) => ({ id: `${task(r.pred_task_id)!.task_code} -> ${task(r.task_id)!.task_code}`, name: `${type(r).slice(3)} lag ${Math.round(Number(r.lag_hr_cnt) / s.dh.task(task(r.pred_task_id)!) * 10) / 10}d`, value: 'different calendars' }));
-    out.push(check('lag_calendar', 'Lags between activities on different calendars', 'info', f, s.rels.length, 'pass', maxIds, { note: 'The lag is counted on the relationship lag calendar (Schedule Options): check it means what was intended.' }));
+    out.push(check('lag_calendar', 'Lags between activities on different calendars', 'info', f, s.rels.length, 'pass', maxIds, {}));
   }
   if (profile === 'platform') out.push(...platformChecks(s, W, maxIds, want, T));
 
@@ -228,7 +228,8 @@ function* lintRun(db: Db, o: LintOptions): Generator<LintTick, LintReport, void>
   const grade = score == null ? undefined : (grades.find(([, min]) => score >= min) ?? grades[grades.length - 1])?.[0];
   for (const c of out) if (c.weight != null) c.applied = { ...c.applied, weight: c.weight };
   const stopped = out.some((c) => c.partial);
-  return { report: 'Schedule Lint', profile, ...(stopped ? { partial: true as const, stopped: 'cancelled' as const } : {}), ...(score != null ? { score, grade } : {}), work_activities: W.length, relationships: s.rels.length, checks: out, thresholds: T, overridden, ...(not_used.length ? { not_used } : {}) };
+  const cut = out.find((c) => c.partial);
+  return { report: 'Schedule Lint', profile, ...(stopped ? { partial: true as const, stopped: 'cancelled' as const, notes: [`Cancelled after ${cut!.ladders_simulated} of ${cut!.ladders_to_simulate} ladder simulations: the fixes of the other ladders have no saves_days.`] } : {}), ...(score != null ? { score, grade } : {}), work_activities: W.length, relationships: s.rels.length, checks: out, thresholds: T, overridden, ...(not_used.length ? { not_used } : {}) };
 }
 
 /** FS links that should overlap: leads (FS with negative lag: use SS plus lag), SS lags as long as the predecessor
@@ -306,7 +307,7 @@ function* fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshol
   }
   top.sort((a, b) => (b.saves_days ?? 0) - (a.saves_days ?? 0));
   for (const l of top.slice(0, maxTargets)) { found.push({ id: l.activities[0], name: l.fix, value: l.saves_days != null ? `saves ${l.saves_days} d` : undefined }); fixes.push(l); }
-  return check('fs_overlap', 'Finish-to-start links that should overlap', 'warning', found, null, found.length ? 'warn' : 'pass', maxIds, { fixes, ladders_total: ladders.length, ...(simulated < toSim.length ? { partial: true as const, ladders_simulated: simulated, ladders_to_simulate: toSim.length } : {}), applied: { ...T.fs_overlap, ladder: L }, note: `${simulated < toSim.length ? `Partial: the call was cancelled after ${simulated} of ${toSim.length} ladder simulations; the ladders after them have no saves_days. ` : ''}Leads hide an overlap inside an FS link; an SS lag as long as the predecessor is really an FS; a ladder of look-alike activities chained FS could run in step. Each fix is a list of edit operations; ladders show the days the fix saves.` });
+  return check('fs_overlap', 'Finish-to-start links that should overlap', 'warning', found, null, found.length ? 'warn' : 'pass', maxIds, { fixes, ladders_total: ladders.length, ...(simulated < toSim.length ? { partial: true as const, ladders_simulated: simulated, ladders_to_simulate: toSim.length } : {}), applied: { ...T.fs_overlap, ladder: L } });
 }
 
 /** White Hat IQ's graded network checks (bands as in its schedule_lint; small networks have wider bands). */
@@ -324,12 +325,12 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
   const cal = p ? s.projCal(p) : null;
   const st = minOf(s.tasks.map((t) => start(t) ?? Infinity)), fi = maxOf(s.tasks.map((t) => finish(t) ?? -Infinity));
   const makespan = cal && Number.isFinite(st) && Number.isFinite(fi) ? s.workDays(cal, st, fi) : 0;
-  const metric = (id: string, name: string, v: number | null, b: Band, note: string, applied: object, found: Offender[] = []): LintCheck => ({ ...check(id, name, 'info', found, null, b, maxIds, { note, weight: WEIGHTS[id], applied }), unit: 'ratio', metric: v == null ? null : Math.round(v * 1000) / 1000, numerator: null, denominator: null });
+  const metric = (id: string, name: string, v: number | null, b: Band, applied: object, found: Offender[] = []): LintCheck => ({ ...check(id, name, 'info', found, null, b, maxIds, { weight: WEIGHTS[id], applied }), unit: 'ratio', metric: v == null ? null : Math.round(v * 1000) / 1000, numerator: null, denominator: null });
 
   if (want('connectivity')) {
     const np = s.tasks.filter((t) => !isWbs(t) && !preds(t).length), ns = s.tasks.filter((t) => !isWbs(t) && !succs(t).length);
     const v = Math.max(0, np.length - 1) + Math.max(0, ns.length - 1);
-    out.push(cutLintCheck({ ...check('connectivity', 'Connectivity (one start, one finish)', 'warning', [...np.map((t) => offender(t, s, 'no predecessor')), ...ns.map((t) => offender(t, s, 'no successor'))], null, v > T.connectivity.max_open_ends ? 'fail' : 'pass', 0, { weight: WEIGHTS.connectivity, applied: T.connectivity, note: `${np.length} activities without predecessors and ${ns.length} without successors; a sound network has one of each.`, no_predecessor_total: np.length, no_successor_total: ns.length }), unit: 'ratio', metric: v }, maxIds));
+    out.push(cutLintCheck({ ...check('connectivity', 'Connectivity (one start, one finish)', 'warning', [...np.map((t) => offender(t, s, 'no predecessor')), ...ns.map((t) => offender(t, s, 'no successor'))], null, v > T.connectivity.max_open_ends ? 'fail' : 'pass', 0, { weight: WEIGHTS.connectivity, applied: T.connectivity, no_predecessor_total: np.length, no_successor_total: ns.length }), unit: 'ratio', metric: v }, maxIds));
   }
   if (want('start_anchored')) {
     const starts = s.tasks.filter((t) => !isWbs(t) && !preds(t).length);
@@ -349,18 +350,18 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
         if (s.workDays(cal, ts, med) >= T.start_anchored.min_peer_gap_days) found.push(offender(t, s, `hung off ${s0.task_code}; its WBS peers start ${Math.round(s.workDays(cal, ts, med))} d later`));
       }
     }
-    out.push(check('start_anchored', 'Disguised orphans (hung off the project start)', 'warning', found, null, found.length === 0 ? 'pass' : found.length <= T.start_anchored.warn_max ? 'warn' : 'fail', maxIds, { weight: WEIGHTS.start_anchored, applied: T.start_anchored, note: `Activities whose only predecessor is the project start, while the rest of their WBS starts ${T.start_anchored.min_peer_gap_days} working days or more later: their real predecessor is missing.` }));
+    out.push(check('start_anchored', 'Disguised orphans (hung off the project start)', 'warning', found, null, found.length === 0 ? 'pass' : found.length <= T.start_anchored.warn_max ? 'warn' : 'fail', maxIds, { weight: WEIGHTS.start_anchored, applied: T.start_anchored }));
   }
   const work = W.reduce((a, t) => a + durD(t), 0);
-  if (want('serialization')) { const v = work ? makespan / work : null; out.push(metric('serialization', 'Serialization index (makespan / total work)', v, v == null ? 'pass' : bandOf(v, sized(T.serialization).pass, sized(T.serialization).warn), 'Near 1: everything in one line; very low: work bunched in parallel.', sized(T.serialization))); }
-  if (want('criticality')) { const c = W.filter((t) => !isDone(t) && isCritical(t, s.ctx)).length, v = W.length ? c / W.length : null; out.push(metric('criticality', 'Criticality ratio (critical work / work)', v, v == null ? 'pass' : bandOf(v, T.criticality.pass, T.criticality.warn), 'Share of work activities on the critical path.', T.criticality)); }
+  if (want('serialization')) { const v = work ? makespan / work : null; out.push(metric('serialization', 'Serialization index (makespan / total work)', v, v == null ? 'pass' : bandOf(v, sized(T.serialization).pass, sized(T.serialization).warn), sized(T.serialization))); }
+  if (want('criticality')) { const c = W.filter((t) => !isDone(t) && isCritical(t, s.ctx)).length, v = W.length ? c / W.length : null; out.push(metric('criticality', 'Criticality ratio (critical work / work)', v, v == null ? 'pass' : bandOf(v, T.criticality.pass, T.criticality.warn), T.criticality)); }
   if (want('single_file') && cal && makespan > 0) {
     const day0 = Math.floor(st / 1440), dayN = Math.floor(fi / 1440), n = dayN - day0 + 1, cnt = new Int32Array(n + 1);
     for (const t of W) { const a = start(t), b = finish(t); if (a == null || b == null) continue; cnt[Math.max(0, Math.floor(a / 1440) - day0)]++; cnt[Math.min(n, Math.floor(b / 1440) - day0 + 1)]--; }
     let run = 0, workDays = 0, single = 0;
     for (let d = 0; d < n; d++) { run += cnt[d]; if (!cal.shiftsOn(day0 + d).length) continue; workDays++; if (run <= 1) single++; }
     const v = workDays ? single / workDays : 0;
-    out.push(metric('single_file', 'Single-file share (working days with at most one activity running)', v, bandOf(v, [0, sized(T.single_file).pass], [0, sized(T.single_file).warn]), 'Days when the job hangs on one activity.', sized(T.single_file)));
+    out.push(metric('single_file', 'Single-file share (working days with at most one activity running)', v, bandOf(v, [0, sized(T.single_file).pass], [0, sized(T.single_file).warn]), sized(T.single_file)));
   }
   if (want('longest_chain')) {
     const ids = s.tasks.filter((t) => !isWbs(t)).map((t) => t.task_id), set = new Set(ids), indeg = new Map(ids.map((i) => [i, 0])), len = new Map(ids.map((i) => [i, 1]));
@@ -368,11 +369,11 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
     const q = ids.filter((i) => indeg.get(i) === 0); let seen = 0, best = 0;
     while (q.length) { const i = q.pop()!; seen++; best = Math.max(best, len.get(i)!); for (const r of s.ctx.succsOf.get(i) ?? []) { if (!set.has(r.task_id)) continue; len.set(r.task_id, Math.max(len.get(r.task_id)!, len.get(i)! + 1)); indeg.set(r.task_id, indeg.get(r.task_id)! - 1); if (!indeg.get(r.task_id)) q.push(r.task_id); } }
     const v = seen === ids.length && ids.length ? best / ids.length : null;
-    out.push(metric('longest_chain', 'Longest chain share (activities in the longest chain / all)', v, v == null ? 'pass' : bandOf(v, [0, sized(T.longest_chain).pass], [0, sized(T.longest_chain).warn]), v == null ? 'The network has loops; not measured.' : `The longest chain has ${best} activities.`, sized(T.longest_chain)));
+    out.push(metric('longest_chain', 'Longest chain share (activities in the longest chain / all)', v, v == null ? 'pass' : bandOf(v, [0, sized(T.longest_chain).pass], [0, sized(T.longest_chain).warn]), sized(T.longest_chain)));
   }
   const links = s.rels.filter((r) => workIds.has(r.pred_task_id) || workIds.has(r.task_id));
-  if (want('non_fs_share')) { const v = links.length ? links.filter((r) => (r.pred_type || 'PR_FS') !== 'PR_FS').length / links.length : null; out.push(metric('non_fs_share', 'Non-FS link share', v, v == null ? 'pass' : bandOf(v, T.non_fs_share.pass, T.non_fs_share.warn), 'Some SS/FF overlap is healthy; too much hides the sequence.', T.non_fs_share)); }
-  if (want('edges_per_activity')) { const v = W.length ? links.length / W.length : null; out.push(metric('edges_per_activity', 'Links per work activity', v, v == null ? 'pass' : bandOf(v, T.edges_per_activity.pass, T.edges_per_activity.warn), 'Too few: logic missing; too many: tangled.', T.edges_per_activity)); }
+  if (want('non_fs_share')) { const v = links.length ? links.filter((r) => (r.pred_type || 'PR_FS') !== 'PR_FS').length / links.length : null; out.push(metric('non_fs_share', 'Non-FS link share', v, v == null ? 'pass' : bandOf(v, T.non_fs_share.pass, T.non_fs_share.warn), T.non_fs_share)); }
+  if (want('edges_per_activity')) { const v = W.length ? links.length / W.length : null; out.push(metric('edges_per_activity', 'Links per work activity', v, v == null ? 'pass' : bandOf(v, T.edges_per_activity.pass, T.edges_per_activity.warn), T.edges_per_activity)); }
   if (want('redundant_links')) {
     // an FS (lag >= 0) link implied by another FS (lag >= 0) path between the same two activities
     const fsOut = new Map<string, Row[]>();
@@ -390,13 +391,13 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
       }
     }
     const v = fsN ? red.length / fsN : 0;
-    out.push({ ...check('redundant_links', 'Redundant FS links', 'info', red, fsN, bandOf(v, [0, T.redundant_links.pass], [0, T.redundant_links.warn]), maxIds, { weight: WEIGHTS.redundant_links, applied: T.redundant_links, note: 'Links already implied by another chain; they clutter the network without adding logic.' }), fixes_total: red.length, fixes: red.slice(0, maxIds || red.length).map((x) => { const [a, b] = x.id.split(' -> '); return { activities: [a, b], fix: `Delete ${a} FS ${b}`, ops: [{ op: 'delete_relationship', pred: a, succ: b, type: 'FS' }] }; }) });
+    out.push({ ...check('redundant_links', 'Redundant FS links', 'info', red, fsN, bandOf(v, [0, T.redundant_links.pass], [0, T.redundant_links.warn]), maxIds, { weight: WEIGHTS.redundant_links, applied: T.redundant_links }), fixes_total: red.length, fixes: red.slice(0, maxIds || red.length).map((x) => { const [a, b] = x.id.split(' -> '); return { activities: [a, b], fix: `Delete ${a} FS ${b}`, ops: [{ op: 'delete_relationship', pred: a, succ: b, type: 'FS' }] }; }) });
   }
   if (want('ss_abuse')) {
     const bad = s.rels.filter((r) => { const a = s.ctx.taskById.get(r.pred_task_id), b = s.ctx.taskById.get(r.task_id); return a && b && (r.pred_type === 'PR_SS' || r.pred_type === 'PR_FF') && nameKey(a) !== nameKey(b) && a.wbs_id !== b.wbs_id; })
       .map((r) => ({ id: `${s.ctx.taskById.get(r.pred_task_id)!.task_code} -> ${s.ctx.taskById.get(r.task_id)!.task_code}`, name: `${r.pred_type.slice(3)} across unrelated work`, value: 'check the overlap is real' }));
     const cap = Math.max(T.ss_abuse.base_cap, Math.ceil(T.ss_abuse.edge_share_cap * s.rels.length));
-    out.push(check('ss_abuse', 'SS/FF links between unrelated work', 'info', bad, s.rels.length, bad.length > cap ? 'warn' : 'pass', maxIds, { applied: { ...T.ss_abuse, cap }, note: `SS/FF links between different kinds of work in different WBS elements (more than ${cap} is a warning): overlaps used as shortcuts instead of real logic.` }));
+    out.push(check('ss_abuse', 'SS/FF links between unrelated work', 'info', bad, s.rels.length, bad.length > cap ? 'warn' : 'pass', maxIds, { applied: { ...T.ss_abuse, cap } }));
   }
   return out;
 }

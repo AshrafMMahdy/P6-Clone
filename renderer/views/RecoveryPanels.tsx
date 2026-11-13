@@ -85,8 +85,7 @@ export function CrashPanel() {
               {changed && <div className="muted">({CHANGED_SINCE}: Apply is refused)</div>}
               {crashStopped(res) && <div><b>{crashStopped(res)}</b></div>}
               <div><b>{res.stop}</b> · {res.days_gained} working days gained · finish {res.base_finish?.slice(0, 10)} → {res.finish?.slice(0, 10)} · direct cost {res.direct_cost.toLocaleString()} · total {res.total_cost.toLocaleString()}</div>
-              {res.note && <div className="muted">{res.note}</div>}
-              {res.warnings.map((w) => <div key={w} className="muted">{w}</div>)}
+              {res.notes.map((w) => <div key={w} className="muted">{w}</div>)}
               <table className="tbl" style={{ marginTop: 4 }}><thead><tr><th>Step</th><th>Activities (days)</th><th>Gained</th><th>Cost</th><th>Finish</th><th>Cum. direct</th><th>Total</th></tr></thead>
                 <tbody>{res.steps.map((s) => <tr key={s.step}><td>{s.step}</td><td>{s.activities.map((a, i) => <span key={a.id}>{i ? ', ' : ''}<Id id={a.id} /> ({a.days})</span>)}</td><td>{s.days_gained}</td><td>{s.cost.toLocaleString()}</td><td>{s.finish?.slice(0, 10)}</td><td>{s.cumulative_direct_cost.toLocaleString()}</td><td>{s.total_cost.toLocaleString()}</td></tr>)}</tbody></table>
             </>}

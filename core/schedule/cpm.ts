@@ -7,7 +7,7 @@ import { WorkCalendar, CalendarHorizonError } from '../calendar/calendar.ts';
 import { calendarDefOfRow, hoursPerWeek, inheritExceptions, standardCalendar, type CalendarDef } from '../calendar/clndr-data.ts';
 import { inLoopCheck, loopsOfLinks } from '../xer/validate.ts';
 import { buildScheduleLog } from './log.ts';
-import { cstrName, daysText, minutesToDays, namesText, noDataDateUsed } from '../notes.ts';
+import { actualAfterDataDate, cstrName, daysText, loopNote, minutesToDays, namesText, noDataDateUsed, outOfSequence, plural, refused } from '../notes.ts';
 
 export type LogicMode = 'retained' | 'override' | 'actual';
 export type FloatType = 'start' | 'finish' | 'smallest';
@@ -111,8 +111,8 @@ export const p6num = memo((n: number): string => {
 /** The finding for an activity whose actual start or actual finish is later than its project's data date (completed activities included). */
 function actualAfterDd(a: Act, dd: string): Finding {
   const f = (t: number | null) => (t != null && t > a.proj.dd ? formatP6Date(t).slice(0, 16) : null);
-  const what = [f(a.as) && `actual start ${f(a.as)}`, f(a.af) && `actual finish ${f(a.af)}`].filter(Boolean).join(' and ');
-  return { severity: 'warning', code: 'ACTUAL_AFTER_DD', key: a.code, message: `${a.code} has an ${what}, after the data date ${dd}: give a later data date (schedule data_date) or correct the actual dates (edit update_activity).`, p6: 'Listed in the schedule log under "Actual dates after data date".' };
+  const s = f(a.as), e = f(a.af);
+  return { severity: 'warning', code: 'ACTUAL_AFTER_DD', key: a.code, message: actualAfterDataDate(a.code, s && e ? 'start and finish' : s ? 'start' : 'finish', [s, e].filter(Boolean).join(' and '), dd), p6: 'Listed in the schedule log under "Actual dates after data date".' };
 }
 
 const relType = (s: string): RelType => (s?.slice(3, 5) as RelType) || 'FS';
@@ -125,10 +125,11 @@ export function calendarsWithNoWork(db: Db): string[] {
   }
   return out;
 }
-/** The sentence for a calendar with no work time: which calendar, why it matters, and the calls that fix it. */
-export function noWorkTimeText(names: string[]): string {
-  const list = names.length ? names.map((n) => `"${n}"`).join(', ') : 'a calendar';
-  return `${list} ${names.length > 1 ? 'have' : 'has'} no work time (its work week has no work hours), so activities on ${names.length > 1 ? 'them' : 'it'} cannot be scheduled. Give ${names.length > 1 ? 'them' : 'it'} work hours (edit add_calendar with a work_week) or move the activities to another calendar (edit update_activity calendar).`;
+/** The sentence for a calendar with no work time: which calendar, the activities on it, and what to do (the same words in every tool; a refusal says nothing was changed). */
+export function noWorkTimeText(names: string[], db?: Db): string {
+  const used = (name: string) => { const id = db ? rows(db, 'CALENDAR').find((c) => c.clndr_name === name)?.clndr_id : undefined; const ids = id && db ? rows(db, 'TASK').filter((t) => t.clndr_id === id).map((t) => t.task_code) : []; return ids.length ? ` (used by ${namesText(ids)})` : ''; };
+  const list = names.length ? names.map((n) => `calendar ${n} has no work time${used(n)}`).join('; ') : 'a calendar has no work time';
+  return `${list}; give ${names.length > 1 ? 'them' : 'it'} work hours or move those activities to another calendar`;
 }
 
 /** Calendar lookup with P6 fallbacks; records parse problems as findings. */
@@ -146,7 +147,7 @@ export function calendarResolver(db: Db, findings: Finding[]) {
     try {
       d = calendarDefOfRow(r); // no calendar data: the week P6 gives it (its hours per day and week)
     } catch (e) {
-      findings.push({ severity: 'warning', code: 'SCHED_CAL_INVALID', table: 'CALENDAR', key: id, message: `Calendar ${r.clndr_name} is invalid (${(e as Error).message}); standard 5-day calendar used.`, p6: 'P6 cannot use the calendar.' });
+      findings.push({ severity: 'warning', code: 'SCHED_CAL_INVALID', table: 'CALENDAR', key: id, message: `Calendar ${r.clndr_name} cannot be read (${(e as Error).message}): the standard 5-day calendar was used for ${plural(db.tables.TASK?.rows.filter((t) => t.clndr_id === id).length ?? 0, 'activity', 'activities')}.`, p6: 'P6 cannot use the calendar.' });
     }
     d ??= standardCalendar();
     // Project and resource calendars inherit holidays from their base calendar.
@@ -194,7 +195,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     if (given == null && startDate == null) { noDate.push(row.proj_short_name); continue; }
     const assumed = opts.dataDate == null && (given == null || (row._dd_assumed != null && row._dd_assumed !== '' && row._dd_assumed === row.last_recalc_date));
     const dd = given ?? startDate!;
-    if (assumed) findings.push({ severity: 'warning', code: 'NO_DATA_DATE', key: row.proj_short_name, message: `${row.proj_short_name}: ${noDataDateUsed(formatP6Date(dd))}`, p6: 'P6 schedules from the project planned start when the project has no data date.' });
+    if (assumed) findings.push({ severity: 'warning', code: 'NO_DATA_DATE', key: row.proj_short_name, message: noDataDateUsed(row.proj_short_name, formatP6Date(dd).slice(0, 16)), p6: 'P6 schedules from the project planned start when the project has no data date.' });
     // Not-started work cannot start before the data date or the project planned start.
     const ps = parseP6Date(row.plan_start_date);
     if (assumed) assumedDd.add(row.proj_id);
@@ -202,7 +203,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   }
   const emptyStats: ScheduleStats = { activities: 0, relationships: 0, notStarted: 0, inProgress: 0, completed: 0, finish: null, dataDate: null };
   if (noDate.length) {
-    findings.push({ severity: 'error', code: 'SCHED_NO_DATA_DATE', message: `${namesText(noDate)} ${noDate.length === 1 ? 'has' : 'have'} no data date and no planned start, so there is no date to schedule from. Give a data date (schedule data_date) or set a planned start (edit set_project planned_start).`, p6: 'P6 cannot schedule a project that has no planned start.' });
+    findings.push({ severity: 'error', code: 'SCHED_NO_DATA_DATE', message: refused(`${namesText(noDate)} ${noDate.length === 1 ? 'has' : 'have'} no data date and no planned start`, 'give a data date (schedule data_date) or set a planned start (edit set_project planned_start)'), p6: 'P6 cannot schedule a project that has no planned start.' });
     return { ok: false, log: '', findings, stats: emptyStats, projects: {} };
   }
   if (!projects.size) {
@@ -296,7 +297,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
       const gone = new Set(broken);
       for (const a of acts.values()) { a.preds = a.preds.filter((r) => !gone.has(r)); a.succs = a.succs.filter((r) => !gone.has(r)); }
       rels.splice(0, rels.length, ...rels.filter((r) => !gone.has(r)));
-      for (const r of broken) findings.push({ severity: 'warning', code: 'SCHED_LOOP_BROKEN', message: `Loop broken: ${r.pred!.code} -> ${r.succ!.code} (${r.type}) left out of this schedule.`, p6: 'P6 stops scheduling on a loop; break_loops schedules without the links that close them.' });
+      for (const r of broken) findings.push({ severity: 'warning', code: 'SCHED_LOOP_BROKEN', message: `${r.pred!.code} ${r.type} ${r.succ!.code}`, p6: 'P6 stops scheduling on a loop; break_loops schedules without the links that close them.' });
     }
   }
 
@@ -317,7 +318,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   }
   if (order.length < main.length) {
     loops = loopsOf();
-    for (const loop of loops) findings.push({ severity: 'error', code: 'SCHED_LOOP', message: `These activities are in a loop: ${namesText(loop)}. Remove a relationship between them (edit delete_relationship) or schedule with break_loops: true.`, p6: 'P6 stops scheduling: "Circular relationship (loop) detected".' });
+    for (const loop of loops) findings.push({ severity: 'error', code: 'SCHED_LOOP', message: loopNote(loop), p6: 'P6 stops scheduling: "Circular relationship (loop) detected".' });
     const log = buildScheduleLog({ projects: [...projects.values()].map((p) => p.row), dataDate: null, opts: [...projects.values()][0].opts, findings, stats: emptyStats, acts: [] });
     return { ok: false, log, findings, stats: emptyStats, projects: {}, loops, broken: [] };
   }
@@ -679,7 +680,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
   } catch (e) {
     if (!(e instanceof CalendarHorizonError)) throw e;
-    findings.push({ severity: 'error', code: 'SCHED_CALENDAR', message: `Scheduling stopped: ${noWorkTimeText(calendarsWithNoWork(db))}`, p6: 'P6 cannot schedule activities on a calendar without work time.' });
+    findings.push({ severity: 'error', code: 'SCHED_CALENDAR', message: `Not scheduled: ${noWorkTimeText(calendarsWithNoWork(db), db)}. Nothing was changed.`, p6: 'P6 cannot schedule activities on a calendar without work time.' });
     return { ok: false, log: '', findings, stats: emptyStats, projects: {} };
   }
 
@@ -740,11 +741,11 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     }
     if (!a.preds.length) findings.push({ severity: 'info', code: 'OPEN_START', key: a.code, message: `${a.code} has no predecessors.`, p6: 'Listed in the schedule log under "Activities without predecessors".' });
     if (!a.succs.length) findings.push({ severity: 'info', code: 'OPEN_FINISH', key: a.code, message: `${a.code} has no successors.`, p6: 'Listed in the schedule log under "Activities without successors".' });
-    if (a.status === 'IP') for (const r of a.preds) if (r.pred && r.type === 'FS' && r.pred.status !== 'CO') findings.push({ severity: 'warning', code: 'OUT_OF_SEQUENCE', key: a.code, message: `${a.code} started before predecessor ${r.pred.code} finished.`, p6: 'Listed in the schedule log under "Out of sequence activities".' });
-    if (a.tf != null && a.tf < 0) { const d = minutesToDays(a.tf, a.fcal.hoursPerDay()); findings.push({ severity: 'info', code: 'NEGATIVE_FLOAT', key: a.code, message: `${a.code} has ${d === 0 ? 'negative total float of less than 0.01 day' : `total float of ${daysText(d)}`}.`, p6: 'P6 schedules it with negative float (constraint or Must Finish By violated).' }); }
+    if (a.status === 'IP') for (const r of a.preds) if (r.pred && r.type === 'FS' && r.pred.status !== 'CO') findings.push({ severity: 'warning', code: 'OUT_OF_SEQUENCE', key: a.code, message: outOfSequence(a.code, r.pred.code), p6: 'Listed in the schedule log under "Out of sequence activities".' });
+    if (a.tf != null && a.tf < 0) { const d = minutesToDays(a.tf, a.fcal.hoursPerDay()); findings.push({ severity: 'info', code: 'NEGATIVE_FLOAT', key: a.code, message: `${a.code} has ${d === 0 ? 'negative total float of less than 0.01 day' : `${daysText(d)} of total float`}.`, p6: 'P6 schedules it with negative float (constraint or Must Finish By violated).' }); }
     for (const [ty, c] of cstr(a)) {
-      if ((ty === 'CS_MSO' || ty === 'CS_MSOB') && a.es > c) findings.push({ severity: 'warning', code: 'CONSTRAINT_VIOLATED', key: a.code, message: `${a.code}: ${cstrName(ty)} ${formatP6Date(c)} cannot be met (early start ${formatP6Date(a.es)}).`, p6: 'Listed in the schedule log under "Constraints violated".' });
-      if ((ty === 'CS_MEO' || ty === 'CS_MEOB') && a.ef > c) findings.push({ severity: 'warning', code: 'CONSTRAINT_VIOLATED', key: a.code, message: `${a.code}: ${cstrName(ty)} ${formatP6Date(c)} cannot be met (early finish ${formatP6Date(a.ef)}).`, p6: 'Listed in the schedule log under "Constraints violated".' });
+      if ((ty === 'CS_MSO' || ty === 'CS_MSOB') && a.es > c) findings.push({ severity: 'warning', code: 'CONSTRAINT_VIOLATED', key: a.code, message: `${a.code}: ${cstrName(ty)} ${formatP6Date(c).slice(0, 16)} is not met (scheduled start ${formatP6Date(a.es).slice(0, 16)}).`, p6: 'Listed in the schedule log under "Constraints violated".' });
+      if ((ty === 'CS_MEO' || ty === 'CS_MEOB') && a.ef > c) findings.push({ severity: 'warning', code: 'CONSTRAINT_VIOLATED', key: a.code, message: `${a.code}: ${cstrName(ty)} ${formatP6Date(c).slice(0, 16)} is not met (scheduled finish ${formatP6Date(a.ef).slice(0, 16)}).`, p6: 'Listed in the schedule log under "Constraints violated".' });
     }
     if (a.as != null && a.as > a.proj.dd || a.af != null && a.af > a.proj.dd) findings.push(actualAfterDd(a, ddText(a)));
   }
