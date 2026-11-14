@@ -148,8 +148,9 @@ else {
   // with P6CLONE_RECORD_WEBM=1 so the page records WebM as Chromium for Testing does)
   const vid = await call('render_4d', { handle: m4.handle, kind: 'video', step: 30, width: 320, height: 180, path: join(dir, '4d-video') });
   if (process.env.P6CLONE_CHROMIUM) {
-    if (vid.rendered !== true || !vid.frames) failures.push(`render_4d video: ${JSON.stringify(vid).slice(0, 300)}`);
-    if (process.env.P6CLONE_FFMPEG && vid.mime !== 'video/mp4') failures.push(`render_4d video as MP4 through ffmpeg: ${JSON.stringify(vid).slice(0, 300)}`);
+    // (the whole answer: on 2026-11-14 the Windows runner failed the MP4 step once and passed on a re-run, and the first 300 characters did not hold the reason)
+    if (vid.rendered !== true || !vid.frames) failures.push(`render_4d video: ${JSON.stringify(vid)}`);
+    if (process.env.P6CLONE_FFMPEG && vid.mime !== 'video/mp4') failures.push(`render_4d video as MP4 through ffmpeg: ${JSON.stringify(vid)}`);
   } else if (vid.rendered !== false || !vid.client_render) failures.push(`render_4d video without Chromium: ${JSON.stringify(vid).slice(0, 200)}`);
   const rel4 = await call('relink_model', { handle: m4.handle, path: ifcFixture, dry_run: true });
   if (rel4.lost !== 0) failures.push(`relink_model: ${JSON.stringify(rel4).slice(0, 200)}`);
