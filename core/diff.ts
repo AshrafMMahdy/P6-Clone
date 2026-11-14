@@ -1,6 +1,7 @@
 import { KEYS, type Db, type Row } from './db.ts';
 import { plural } from './notes.ts';
 import { dayHours } from './project/units.ts';
+import { logicRelationships } from './progress/snapshots.ts';
 
 export interface DiffEntry { table: string; key: string; kind: 'added' | 'removed' | 'changed'; field?: string; a?: string; b?: string }
 
@@ -84,12 +85,12 @@ export function compareSchedules(a: Db, b: Db, hoursPerDay = 8, calendarDays = f
       const acts = new Map(tasks.map((t) => [t.task_code, {
         name: t.task_name ?? '', wbs: path(t.wbs_id), type: t.task_type ?? '', calendar: cal.get(t.clndr_id) ?? '', status: t.status_code ?? '',
         original_duration: days(t.target_drtn_hr_cnt, dh.task(t)), remaining_duration: days(t.remain_drtn_hr_cnt, dh.task(t)),
-        start: t.act_start_date || t.early_start_date || '', finish: t.act_end_date || t.early_end_date || '', total_float: days(t.total_float_hr_cnt, dh.task(t)),
+        start: t.act_start_date || t.restart_date || t.early_start_date || '', finish: t.act_end_date || t.reend_date || t.early_end_date || '', total_float: days(t.total_float_hr_cnt, dh.task(t)),
         actual_start: t.act_start_date ?? '', actual_finish: t.act_end_date ?? '', physical_pct: t.phys_complete_pct ?? '',
         constraint: [t.cstr_type, t.cstr_date].filter(Boolean).join(' '), secondary_constraint: [t.cstr_type2, t.cstr_date2].filter(Boolean).join(' '),
       }]));
       const code = (id: string) => { const t = allTasks.get(id); return t ? (t.proj_id === p.proj_id ? t.task_code : `${t.task_code} (other project)`) : `#${id}`; };
-      const rels = new Map((d.tables.TASKPRED?.rows ?? []).filter((r) => allTasks.get(r.task_id)?.proj_id === p.proj_id)
+      const rels = new Map(logicRelationships(d).filter((r) => allTasks.get(r.task_id)?.proj_id === p.proj_id)
         .map((r) => [`${code(r.pred_task_id)} -> ${code(r.task_id)} ${(r.pred_type ?? '').replace(/^PR_/, '')}`, { name: '', lag: days(r.lag_hr_cnt, dh.rel(r)) }]));
       return { proj, wbs, acts, rels };
     };

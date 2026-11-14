@@ -6,6 +6,7 @@ import type { Db, Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { datesNotCurrent, datesNotStored } from '../notes.ts';
 import { scheduleProjects } from './cpm.ts';
+import { mspUntouched } from '../msp/keep.ts';
 import { loopGroups, projectLoops, type LoopGroup } from '../xer/validate.ts';
 
 const FIELDS: [string, string][] = [
@@ -14,7 +15,8 @@ const FIELDS: [string, string][] = [
 ];
 
 /** One project whose saved dates differ from what F9 gives: how many of its open activities differ, out of how many are open. */
-export interface StoredDatesState { proj: string; differ: number; open: number; values: number; examples: Finding[] }
+/** keptMsp: the project keeps the dates Microsoft Project calculated (a plain schedule leaves them alone). */
+export interface StoredDatesState { proj: string; differ: number; open: number; values: number; examples: Finding[]; keptMsp?: boolean }
 
 /** Per project: are the saved dates of the open activities the ones F9 would calculate? `notStored`: the Project IDs that have open activities but no saved early dates at all.
  *  `loops`: the loops in the logic, grouped by the projects they run through (F9 stops on a file with one: owner 2026-11-13, said by every analysis that reads saved dates).
@@ -49,7 +51,7 @@ export function storedDatesState(db: Db, only?: string[]): { stale: StoredDatesS
     if (!judged.has(t0.proj_id)) continue;
     const t = byId.get(t0.task_id)!, now = calc.get(t);
     if (!t.early_start_date) continue;
-    const st = per.get(t0.proj_id) ?? { proj: projName.get(t0.proj_id) ?? t0.proj_id, differ: 0, open: open.filter((x) => x.proj_id === t0.proj_id).length, values: 0, examples: [] };
+    const st = per.get(t0.proj_id) ?? { proj: projName.get(t0.proj_id) ?? t0.proj_id, differ: 0, open: open.filter((x) => x.proj_id === t0.proj_id).length, values: 0, examples: [], keptMsp: mspUntouched(db, t0.proj_id) === true };
     per.set(t0.proj_id, st);
     let differs = false;
     FIELDS.forEach(([f, label], k) => {
@@ -69,6 +71,6 @@ export function checkStoredDates(db: Db): Finding[] {
   const { stale, notStored } = storedDatesState(db);
   const out: Finding[] = [];
   for (const id of notStored) out.push({ severity: 'info', code: 'DATES_NOT_STORED', message: datesNotStored(id), p6: '', table: 'TASK' });
-  for (const st of stale) out.push({ severity: 'warning', code: 'DATES_NOT_CURRENT', message: datesNotCurrent(st.proj, st.differ, st.open), p6: '', table: 'TASK' }, ...st.examples);
+  for (const st of stale) out.push({ severity: 'warning', code: 'DATES_NOT_CURRENT', message: datesNotCurrent(st.proj, st.differ, st.open, false, st.keptMsp), p6: '', table: 'TASK' }, ...st.examples);
   return out;
 }

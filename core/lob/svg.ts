@@ -32,7 +32,7 @@ export function flowGeometry(db: Db, projId: string, m: LobModel, critical: stri
     for (const c of t.order.slice(t.order.indexOf(g.from), t.order.indexOf(g.to) + 1).filter((x) => d.has(x))) {
       const a = acts.get(activityId(t.code, c));
       if (!a) continue;
-      const s = parseP6Date(a.act_start_date || a.early_start_date), f = parseP6Date(a.act_end_date || a.early_end_date);
+      const s = parseP6Date(a.act_start_date || a.restart_date || a.early_start_date), f = parseP6Date(a.act_end_date || a.reend_date || a.early_end_date);
       if (s == null || f == null) continue;
       const [lo, hi] = span(c);
       points.push([s, lo, hi], [f, lo, hi]); locations.push(c);

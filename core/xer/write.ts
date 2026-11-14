@@ -2,6 +2,7 @@ import { KEYS, refTarget, type Db, type Row } from '../db.ts';
 import { encodeText, encodingLabel, keepOrChoose, type TextEncodingName } from '../encoding.ts';
 import { formatDay } from '../dates.ts';
 import { fieldsFor, variantsFor, tableOrderFor, knownFields, verification } from './schema.ts';
+import { baselineLinks } from '../progress/snapshots.ts';
 
 export interface WriteOptions {
   version: string;
@@ -71,8 +72,9 @@ export function selectRows(db: Db, projIds?: string[]): Map<string, Row[]> {
     if (!t.fields.includes('proj_id')) continue;
     for (const r of t.rows) if (r.proj_id && projs.has(r.proj_id)) keep(t.name, r);
   }
+  const ofBaseline = new Set(baselineLinks(db)); // (a baseline's link is written only with both its ends: without the baseline it would tie an activity to nothing)
   for (const r of db.tables.TASKPRED?.rows ?? []) {
-    if (isKept('TASK', r.task_id) || isKept('TASK', r.pred_task_id)) keep('TASKPRED', r);
+    if (ofBaseline.has(r) ? isKept('TASK', r.task_id) && isKept('TASK', r.pred_task_id) : isKept('TASK', r.task_id) || isKept('TASK', r.pred_task_id)) keep('TASKPRED', r);
   }
   // 2. referenced dictionary rows, to fixpoint
   for (let changed = true; changed; ) {

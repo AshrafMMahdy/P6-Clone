@@ -15,8 +15,8 @@ export interface ReportDef { id: string; title: string; group: string; build: (d
 const days = (h: string | number | undefined, o: ReportOpts, t?: Row) => (h === '' || h == null ? '' : String(Math.round((Number(h) / (t && o.dayHours ? o.dayHours.task(t) : o.hoursPerDay)) * 10) / 10));
 const money = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ratio = (v: number) => (v ? v.toFixed(2) : '');
-const start = (t: Row, o: ReportOpts) => (t.act_start_date ? `${o.fmtDate(t.act_start_date)} A` : o.fmtDate(t.early_start_date || t.target_start_date));
-const finish = (t: Row, o: ReportOpts) => (t.act_end_date ? `${o.fmtDate(t.act_end_date)} A` : o.fmtDate(t.early_end_date || t.target_end_date));
+const start = (t: Row, o: ReportOpts) => (t.act_start_date ? `${o.fmtDate(t.act_start_date)} A` : o.fmtDate(t.restart_date || t.early_start_date || t.target_start_date));
+const finish = (t: Row, o: ReportOpts) => (t.act_end_date ? `${o.fmtDate(t.act_end_date)} A` : o.fmtDate(t.reend_date || t.early_end_date || t.target_end_date));
 const pctTxt = (t: Row, a: Row[]) => `${Math.round(percentComplete(t, a) * 1000) / 10}%`;
 
 function wbsWalk(db: Db, projIds: string[], visit: (w: Row, level: number, path: string) => void): void {
@@ -40,7 +40,7 @@ export const REPORTS: ReportDef[] = [
       const out: Report['rows'] = [];
       wbsWalk(db, projIds, (w, level, path) => {
         out.push({ cells: [w.proj_node_flag === 'Y' ? w.wbs_short_name : path, w.wbs_name, '', '', '', '', '', '', ''], level, bold: true });
-        for (const t of (tasksBy.get(w.wbs_id) ?? []).sort((a, b) => (a.early_start_date || a.act_start_date).localeCompare(b.early_start_date || b.act_start_date)))
+        for (const t of (tasksBy.get(w.wbs_id) ?? []).sort((a, b) => (a.restart_date || a.early_start_date || a.act_start_date).localeCompare(b.restart_date || b.early_start_date || b.act_start_date)))
           out.push({ cells: [t.task_code, t.task_name, days(t.target_drtn_hr_cnt, o, t), days(t.remain_drtn_hr_cnt, o, t), pctTxt(t, asg.get(t.task_id) ?? []), start(t, o), finish(t, o), days(t.total_float_hr_cnt, o, t), t.driving_path_flag === 'Y' ? 'Yes' : ''], level: level + 1 });
       });
       return { title: 'Schedule Report', subtitle: projTitle(db, projIds), columns: ['Activity ID', 'Activity Name', 'Orig Dur', 'Rem Dur', '% Comp', 'Start', 'Finish', 'Total Float', 'Longest Path'], rows: out };
@@ -52,7 +52,7 @@ export const REPORTS: ReportDef[] = [
       const projs = indexBy(rows(db, 'PROJECT'), 'proj_id');
       const ts = rows(db, 'TASK').filter((t) => projIds.includes(t.proj_id) && !t.act_end_date && t.total_float_hr_cnt !== '' &&
         (projs.get(t.proj_id)?.critical_path_type === 'CT_DrivPath' ? t.driving_path_flag === 'Y' : Number(t.total_float_hr_cnt) <= Number(projs.get(t.proj_id)?.critical_drtn_hr_cnt || 0)));
-      ts.sort((a, b) => (a.early_start_date || '').localeCompare(b.early_start_date || ''));
+      ts.sort((a, b) => (a.restart_date || a.early_start_date || '').localeCompare(b.restart_date || b.early_start_date || ''));
       return { title: 'Critical Activities', subtitle: projTitle(db, projIds), columns: ['Activity ID', 'Activity Name', 'Rem Dur', 'Start', 'Finish', 'Total Float'], rows: ts.map((t) => ({ cells: [t.task_code, t.task_name, days(t.remain_drtn_hr_cnt, o, t), start(t, o), finish(t, o), days(t.total_float_hr_cnt, o, t)] })) };
     },
   },
@@ -63,9 +63,9 @@ export const REPORTS: ReportDef[] = [
       const dd = parseP6Date(p?.last_recalc_date) ?? Date.now() / 60000;
       const end = dd + (o.weeks ?? 3) * 7 * MIN_PER_DAY;
       const ts = rows(db, 'TASK').filter((t) => projIds.includes(t.proj_id) && !t.act_end_date).filter((t) => {
-        const s = parseP6Date(t.early_start_date) ?? Infinity;
+        const s = parseP6Date(t.restart_date || t.early_start_date) ?? Infinity;
         return s <= end;
-      }).sort((a, b) => (a.early_start_date || '').localeCompare(b.early_start_date || ''));
+      }).sort((a, b) => (a.restart_date || a.early_start_date || '').localeCompare(b.restart_date || b.early_start_date || ''));
       return { title: `${o.weeks ?? 3}-Week Lookahead`, subtitle: `from data date ${o.fmtDate(dd)} to ${o.fmtDate(end)}`, columns: ['Activity ID', 'Activity Name', 'Status', 'Start', 'Finish', 'Rem Dur', 'Total Float'], rows: ts.map((t) => ({ cells: [t.task_code, t.task_name, t.act_start_date ? 'In Progress' : 'Not Started', start(t, o), finish(t, o), days(t.remain_drtn_hr_cnt, o, t), days(t.total_float_hr_cnt, o, t)] })) };
     },
   },
@@ -79,7 +79,7 @@ export const REPORTS: ReportDef[] = [
         for (const t of rows(db, 'TASK').filter((x) => x.proj_id === pid)) {
           const b = bl.get(t.task_code);
           if (!b && bl.size) (notInBaseline[pid] ??= []).push(t.task_code);
-          const bf = parseP6Date(b?.act_end_date || b?.target_end_date), f = parseP6Date(t.act_end_date || t.early_end_date);
+          const bf = parseP6Date(b?.act_end_date || b?.target_end_date), f = parseP6Date(t.act_end_date || t.reend_date || t.early_end_date);
           out.push({ cells: [t.task_code, t.task_name, b ? o.fmtDate(b.act_start_date || b.target_start_date) : '', b ? o.fmtDate(b.act_end_date || b.target_end_date) : '', start(t, o), finish(t, o), bf != null && f != null ? String(Math.round((bf - f) / MIN_PER_DAY)) : ''] });
         }
       }

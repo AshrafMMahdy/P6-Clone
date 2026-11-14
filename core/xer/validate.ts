@@ -2,12 +2,37 @@ import { KEYS, refTarget, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { sortFindings, type Finding, type Severity } from '../findings.ts';
 import { parseClndrData, hoursPerWeek } from '../calendar/clndr-data.ts';
-import { ENUMS, fieldType, fieldsFor, knownFields, knownTables } from './schema.ts';
+import { ENUMS, fieldType, fieldsFor, knownFields, knownTables, repairedCode } from './schema.ts';
+import { CODE_WORDS } from '../p6words.ts';
+import { unidentified } from './repair-valid.ts';
 import { actualAfterDataDate, defaultCalendarWeek, hoursAsDays, loopNote, namesText, noDataDateUsed, plural } from '../notes.ts';
+import { baselineLinks } from '../progress/snapshots.ts';
 
 /** What a table's row is called in a message (the Activity, relationship, resource... the planner knows, never the table's name). */
 const WORD: Record<string, string> = { TASK: 'activity', TASKPRED: 'relationship', PROJWBS: 'WBS element', PROJECT: 'project', RSRC: 'resource', TASKRSRC: 'resource assignment', CALENDAR: 'calendar', ACTVCODE: 'activity code value', ACTVTYPE: 'activity code type', UDFTYPE: 'user-defined field', UDFVALUE: 'user-defined field value', TASKACTV: 'activity code assignment', PROJCOST: 'expense', TASKMEMO: 'activity notebook topic', OBS: 'OBS element', CURRTYPE: 'currency', RSRCRATE: 'resource rate', ACCOUNT: 'cost account', ROLES: 'role', PCATTYPE: 'project code type', PCATVAL: 'project code value', RCATTYPE: 'resource code type', RCATVAL: 'resource code value', EPS: 'EPS node' };
 export const wordOf = (table: string) => WORD[table] ?? `${table} row`;
+
+/** A value that is not one P6 has (a code, a date, a number, a flag): what P6 itself does with it on import is not established by any source (the file refused, the
+ *  row refused, or the value stored as it is), so the sentence says what the value is and what the repair puts, never that P6 refuses it. */
+const NOT_P6S = 'Not a value P6 writes; what P6 does with it on import is not established.';
+/** The activities the repair removes whole (a row made from a damaged line, its columns shifted; no readable id or WBS), with why: for one of these the
+ *  sentence about a bad value says that, not what the repair would put in the one column. Worked out once per file, when the first bad value of an activity is met. */
+const removedByRepair = new WeakMap<Db, Map<Row, string>>();
+function repairOf(db: Db, table: string, r: Row, own: string): string {
+  if (table !== 'TASK') return own;
+  let why = removedByRepair.get(db);
+  if (!why) removedByRepair.set(db, (why = unidentified(db).why));
+  const gone = why.get(r);
+  return gone ? `removes this activity and what points at it (${gone})` : own;
+}
+const who = (r: Row): string => (r.task_code && r.task_id ? `${r.task_code} ` : '');
+/** What save with repair: true does to a coded column's bad value (the repair's own rules: repair-valid.ts). */
+function codeRepair(table: string, f: string): string {
+  if (table === 'TASK' && f === 'status_code') return 'puts the status the actual dates give';
+  if (table === 'TASK' && /^cstr_type2?$/.test(f)) return 'clears the constraint';
+  const d = repairedCode(`${table}.${f}`), word = CODE_WORDS[f]?.[d];
+  return d ? `puts ${d}${word ? ` (${word})` : ''}, P6's default` : 'empties it';
+}
 
 /** Two rows that are the same row twice: every field equal. */
 export const sameRow = (a: Row, b: Row): boolean => { const ks = new Set([...Object.keys(a), ...Object.keys(b)]); for (const k of ks) if ((a[k] ?? '') !== (b[k] ?? '')) return false; return true; };
@@ -179,16 +204,16 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
             c.add({ severity: 'warning', code: 'LEGACY_REL_TYPE', table: t.name, row, field: f, message: `TASKPRED.pred_type = "${v}" is a legacy numbered code (seen in P6 5.0 exports).`, p6: 'Old P6 builds accept it as the base type; current P6 expects PR_FS/PR_SS/PR_FF/PR_SF.' });
             continue;
           }
-          if (!en.includes(v)) c.add({ severity: 'error', code: 'BAD_ENUM', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name === 'TASK' && r.task_code ? `${r.task_code} ` : ''}${t.name}.${f} is "${v}", not a valid code (valid: ${en.filter(Boolean).join(', ')}): P6 refuses the file.`, p6: 'P6 import fails on an invalid code value.' });
+          if (!en.includes(v)) c.add({ severity: 'error', code: 'BAD_ENUM', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${who(r)}${t.name}.${f} is "${v}", which is not a value P6 has for it (P6's: ${en.filter(Boolean).join(', ')}); save with repair: true ${repairOf(db, t.name, r, codeRepair(t.name, f))}.`, p6: NOT_P6S });
           continue;
         }
         if (ty === 'date') {
-          if (parseP6Date(v) == null) c.add({ severity: 'error', code: 'BAD_DATE', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name === 'TASK' && r.task_code ? `${r.task_code} ` : ''}${t.name}.${f} is "${v}", not a valid date: P6 refuses the file.`, p6: 'P6 import fails on unparseable dates.' });
+          if (parseP6Date(v) == null) c.add({ severity: 'error', code: 'BAD_DATE', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${who(r)}${t.name}.${f} is "${v}", which cannot be read as a date; save with repair: true ${repairOf(db, t.name, r, t.name === 'TASK' && /^cstr_date2?$/.test(f) ? 'clears the constraint' : 'empties it')}.`, p6: NOT_P6S });
           else if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(v)) c.add({ severity: 'warning', code: 'DATE_FORMAT', table: t.name, row, field: f, message: `${t.name}.${f} = "${v}" is not in P6's yyyy-mm-dd hh:mm format.`, p6: 'P6 writes yyyy-mm-dd hh:mm; other forms may be misread.' });
         } else if (ty === 'number' && !/^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(v)) {
-          c.add({ severity: 'error', code: 'BAD_NUMBER', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name === 'TASK' && r.task_code ? `${r.task_code} ` : ''}${t.name}.${f} is "${v}", not a valid number: P6 refuses the file.`, p6: 'P6 import fails on non-numeric values.' });
+          c.add({ severity: 'error', code: 'BAD_NUMBER', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${who(r)}${t.name}.${f} is "${v}", which is not a number; save with repair: true ${repairOf(db, t.name, r, 'replaces it (its changes list what it puts)')}.`, p6: NOT_P6S });
         } else if (ty === 'flag' && v !== 'Y' && v !== 'N') {
-          c.add({ severity: 'error', code: 'BAD_FLAG', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${t.name === 'TASK' && r.task_code ? `${r.task_code} ` : ''}${t.name}.${f} is "${v}", not a valid Y/N: P6 refuses the file.`, p6: 'P6 import fails on invalid flags.' });
+          c.add({ severity: 'error', code: 'BAD_FLAG', table: t.name, row, field: f, key: key ? r[key] : undefined, message: `${who(r)}${t.name}.${f} is "${v}", where P6 has Y or N; save with repair: true ${repairOf(db, t.name, r, 'puts N')}.`, p6: NOT_P6S });
         }
       }
     });
@@ -294,11 +319,17 @@ export function validateXer(db: Db, parseFindings: Finding[] = []): Finding[] {
   // Relationships
   const preds = T.TASKPRED?.rows ?? [];
   const links: [string, string][] = [];
+  const ofBaseline = new Set(baselineLinks(db)); // (a baseline's links are not logic: they close no loop)
   for (const [i, r] of preds.entries()) {
     const row = i + 1;
     if (r.task_id && r.task_id === r.pred_task_id) c.add({ severity: 'error', code: 'REL_SELF', table: 'TASKPRED', row, key: r.task_pred_id, message: `${act(r.task_id)} is linked to itself; P6 drops this relationship on import.`, p6: 'P6 rejects the relationship.' });
     const a1 = firstTask.get(r.pred_task_id), b1 = firstTask.get(r.task_id);
-    if (a1 && b1 && inLoopCheck(a1.task_type) && inLoopCheck(b1.task_type)) links.push([r.pred_task_id, r.task_id]);
+    if (a1 && b1 && !ofBaseline.has(r) && inLoopCheck(a1.task_type) && inLoopCheck(b1.task_type)) links.push([r.pred_task_id, r.task_id]);
+  }
+  if (ofBaseline.size) {
+    const pname = new Map((db.tables.PROJECT?.rows ?? []).map((p) => [p.proj_id, p.proj_short_name])), endOf = (id: string) => { const t = firstTask.get(id); return t ? `${t.task_code} in ${pname.get(t.proj_id) ?? 'a project that is not in the file'}` : 'an activity that is not in the file'; };
+    const n = ofBaseline.size;
+    c.add({ severity: 'warning', code: 'BASELINE_LINKS', table: 'TASKPRED', message: `${n} ${n === 1 ? 'relationship ties' : 'relationships tie'} a baseline to an activity outside it (${namesText([...ofBaseline].map((r) => `${endOf(r.pred_task_id)} ${(r.pred_type || 'PR_FS').slice(3)} ${endOf(r.task_id)}`))}): ${n === 1 ? 'it is the baseline\u2019s and takes' : 'they are the baseline\u2019s and take'} no part in the schedule.`, p6: 'P6 keeps the relationships of a baseline to other projects; they come back as relationships when the baseline is restored.' });
   }
   // loops follow the scheduler's rule (inLoopCheck): a chain through a level of effort or a WBS summary is not a loop, and does not stop scheduling
   for (const loop of loopsOfLinks(links)) {

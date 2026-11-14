@@ -7,6 +7,7 @@
 // written. Import turns the sheets into edit operations (core/project/ops.ts) so they are checked, previewed and applied
 // as one undoable step; a row P6 would refuse is skipped and reported (P6's import log), the rest is applied.
 import { rows, type Db, type Row } from '../db.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { durationPct } from '../progress/update.ts';
 import { applyOps, type Op, type OpsOptions } from '../project/ops.ts';
@@ -105,8 +106,8 @@ function allColumns(db: Db, c: Ctx): Record<SheetName, Col[]> {
   const codeCols = (kind: CodeKind, fk: (r: Row) => string, calc: boolean, keep?: (t: Row) => boolean): Col[] =>
     c.codes(kind, keep).map((ct) => ({ field: ct.field, title: ct.name, calc, get: (r: Row) => { const v = ct.of.get(fk(r)); return v ? ct.path(v) : null; } }));
   const tdh = (t: Row | undefined) => c.dh.task(t);
-  const start = (t: Row | undefined) => date(t && (t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date));
-  const finish = (t: Row | undefined) => date(t && (t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date));
+  const start = (t: Row | undefined) => date(t && (t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date));
+  const finish = (t: Row | undefined) => date(t && (t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date));
   const status = (t: Row | undefined) => (t ? STATUS_LABEL[t.status_code] ?? t.status_code : null);
   const projCodes = codeCols('project', (t) => t.proj_id, true);
   const task: Col[] = [
@@ -289,7 +290,8 @@ export function exportSheets(db: Db, projIds: string[], hpd = 8, calendarDays = 
   const taskIds = new Set(tasks.map((t) => t.task_id));
   const data: Record<SheetName, Row[]> = {
     TASK: tasks,
-    TASKPRED: rows(db, 'TASKPRED').filter((p) => taskIds.has(p.task_id) || taskIds.has(p.pred_task_id)),
+    // (the logic of the activities: a baseline's link to one of them is not a relationship of the project, and the sheet could not say whose it is)
+    TASKPRED: logicRelationships(db).filter((p) => taskIds.has(p.task_id) || taskIds.has(p.pred_task_id)),
     PROJCOST: rows(db, 'PROJCOST').filter((x) => taskIds.has(x.task_id)),
     RSRC: rows(db, 'RSRC'),
     TASKRSRC: rows(db, 'TASKRSRC').filter((a) => taskIds.has(a.task_id)),
@@ -501,8 +503,8 @@ export function planImport(db: Db, sheets: Sheet[], projectId: string, hpd = 8, 
       const want = fromLabel(STATUS_LABEL, st);
       if (!want) warnings.push(`Activity ${code}: unknown status "${st}".`);
       else if (want !== (t?.status_code ?? 'TK_NotStart')) {
-        const start = dateOf(r.start_date) || (t ? (t.early_start_date || t.restart_date || t.target_start_date || '').slice(0, 16) : '');
-        const finish = dateOf(r.end_date) || (t ? (t.early_end_date || t.reend_date || t.target_end_date || '').slice(0, 16) : '');
+        const start = dateOf(r.start_date) || (t ? (t.restart_date || t.early_start_date || t.target_start_date || '').slice(0, 16) : '');
+        const finish = dateOf(r.end_date) || (t ? (t.reend_date || t.early_end_date || t.target_end_date || '').slice(0, 16) : '');
         if (want === 'TK_NotStart') { if (t?.act_end_date) op.actual_finish = null; if (t?.act_start_date) op.actual_start = null; }
         else if (!t?.act_start_date && !start) warnings.push(`Activity ${code}: status "${st}" needs a Start date to take as its actual start; skipped.`);
         else { if (!t?.act_start_date) op.actual_start = start; if (want === 'TK_Complete') op.actual_finish = finish || start; else if (t?.act_end_date) op.actual_finish = null; }

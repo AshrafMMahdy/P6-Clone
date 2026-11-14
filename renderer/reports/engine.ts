@@ -13,6 +13,7 @@ import { dayHours, type DayHours } from '../../core/project/units.ts';
 import { COLUMNS, extraColumns, fmtDate, makeCtx, projectName, type Column, type Ctx } from '../model.ts';
 import type { Prefs } from '../store.ts';
 import { buildActivityRows, FILTERS, userFilters } from '../views/activityRows.ts';
+import { logicRelationships } from '../../core/progress/snapshots.ts';
 
 export type Subject = 'activities' | 'assignments' | 'wbs' | 'resources' | 'relationships';
 export interface ReportSpec {
@@ -195,7 +196,7 @@ export function runSpec(db: Db, projIds: string[], spec: ReportSpec, o: RunOptio
       me.line = sumLines([...own.map((t) => costs.get(t.task_id)!).filter(Boolean), ...children.map((c) => c.line)]);
       me.count = own.length + children.reduce((s, c) => s + c.count, 0);
       for (const t of own) {
-        const s = parseP6Date(t.act_start_date || t.early_start_date || t.restart_date), f = parseP6Date(t.act_end_date || t.early_end_date || t.reend_date);
+        const s = parseP6Date(t.act_start_date || t.restart_date || t.early_start_date), f = parseP6Date(t.act_end_date || t.reend_date || t.early_end_date);
         if (s != null && (me.start == null || s < me.start)) me.start = s;
         if (f != null && (me.finish == null || f > me.finish)) me.finish = f;
         const tf = n(t.total_float_hr_cnt) / env.dh.task(t);
@@ -226,7 +227,7 @@ export function runSpec(db: Db, projIds: string[], spec: ReportSpec, o: RunOptio
   // relationships
   const cols = spec.columns.map((id) => RELATIONSHIP_COLS.find((c) => c.id === id)).filter((c): c is Col<Row> => !!c);
   const inProj = new Set(rows(db, 'TASK').filter((t) => projIds.includes(t.proj_id)).map((t) => t.task_id));
-  let list = rows(db, 'TASKPRED').filter((p) => (inProj.has(p.task_id) || inProj.has(p.pred_task_id)) && (activityOk(p.task_id) || activityOk(p.pred_task_id)));
+  let list = logicRelationships(db).filter((p) => (inProj.has(p.task_id) || inProj.has(p.pred_task_id)) && (activityOk(p.task_id) || activityOk(p.pred_task_id)));
   const c0 = RELATIONSHIP_COLS.find((x) => x.id === (spec.sortBy || 'pred_code'));
   if (c0) list = sortRows(list, (p) => c0.get(p, env), spec.sortDesc);
   if (spec.groupBy === 'pred') for (const [k, ps] of groupRows(list, 'pred_task_id')) { out.push({ cells: cols.map((_, i) => (i === 0 ? `${ctx.taskById.get(k)?.task_code ?? ''}  ${ctx.taskById.get(k)?.task_name ?? ''}` : '')), bold: true }); for (const p of ps) out.push({ cells: cols.map((c) => c.get(p, env)), level: 1 }); }
@@ -300,7 +301,7 @@ export function runReport(db: Db, projIds: string[], idOrName: string, o: RunOpt
 function usageReport(db: Db, projIds: string[], o: RunOptions): Report {
   const tasks = rows(db, 'TASK').filter((t) => projIds.includes(t.proj_id));
   let lo = Infinity, hi = -Infinity;
-  for (const t of tasks) { const s = parseP6Date(t.act_start_date || t.early_start_date || t.restart_date), f = parseP6Date(t.act_end_date || t.early_end_date || t.reend_date); if (s != null && s < lo) lo = s; if (f != null && f > hi) hi = f; }
+  for (const t of tasks) { const s = parseP6Date(t.act_start_date || t.restart_date || t.early_start_date), f = parseP6Date(t.act_end_date || t.reend_date || t.early_end_date); if (s != null && s < lo) lo = s; if (f != null && f > hi) hi = f; }
   if (!Number.isFinite(lo) || hi <= lo) return { title: 'Resource Usage by Month', columns: ['Resource'], rows: [] };
   const u = spreadUsage(db, projIds, { start: lo, end: hi, bucket: 'month' });
   const rsrc = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r]));

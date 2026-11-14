@@ -141,12 +141,12 @@ function Status({ t, ctx }: { t: Row; ctx: Ctx }) {
           <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
             <label><input type="checkbox" checked={!!t.act_start_date} onChange={(e) => updateTask(t.task_id, e.target.checked ? 'Start Activity' : 'Clear Actual Start', (r) => {
               if (!e.target.checked) { if (r.act_end_date) return 'Clear Finished first.'; r.act_start_date = ''; r.remain_drtn_hr_cnt = r.target_drtn_hr_cnt; r.status_code = 'TK_NotStart'; return; }
-              return setActual(r, 'start', r.early_start_date || r.target_start_date || dd);
+              return setActual(r, 'start', r.restart_date || r.early_start_date || r.target_start_date || dd);
             })} /> Started</label>
             <input type="datetime-local" disabled={!t.act_start_date} value={dt(t.act_start_date)} onChange={(e) => updateTask(t.task_id, 'Edit Actual Start', (r) => setActual(r, 'start', fromDt(e.target.value)))} />
             <label><input type="checkbox" checked={!!t.act_end_date} disabled={!t.act_start_date} onChange={(e) => updateTask(t.task_id, e.target.checked ? 'Finish Activity' : 'Clear Actual Finish', (r) => {
               if (!e.target.checked) return setActual(r, 'finish', '');
-              const ef = r.early_end_date && r.early_end_date >= r.act_start_date ? r.early_end_date : r.act_start_date;
+              const cur = r.reend_date || r.early_end_date, ef = cur && cur >= r.act_start_date ? cur : r.act_start_date;
               return setActual(r, 'finish', ef);
             })} /> Finished</label>
             <input type="datetime-local" disabled={!t.act_end_date} value={dt(t.act_end_date)} onChange={(e) => updateTask(t.task_id, 'Edit Actual Finish', (r) => setActual(r, 'finish', fromDt(e.target.value)))} />
@@ -206,8 +206,8 @@ function Rels({ t, ctx, which }: { t: Row; ctx: Ctx; which: 'pred' | 'succ' }) {
                   <td>{o?.task_name}</td>
                   <td><select value={r.pred_type} onChange={(e) => edit(r.task_pred_id, { pred_type: e.target.value }, 'Edit Relationship Type')}>{Object.entries(REL_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
                   <td><input type="number" step="0.5" defaultValue={fmtDur(r.lag_hr_cnt, ctx.prefs)} key={r.lag_hr_cnt} style={{ width: 60 }} onBlur={(e) => { const h = p6num(daysToHours(Number(e.target.value || 0), ctx.prefs)); if (h !== r.lag_hr_cnt) edit(r.task_pred_id, { lag_hr_cnt: h }, 'Edit Lag'); }} /></td>
-                  <td>{o ? fmtDate(o.act_start_date || o.early_start_date, ctx.prefs) + (o.act_start_date ? ' A' : '') : ''}</td>
-                  <td>{o ? fmtDate(o.act_end_date || o.early_end_date, ctx.prefs) + (o.act_end_date ? ' A' : '') : ''}</td>
+                  <td>{o ? fmtDate(o.act_start_date || o.restart_date || o.early_start_date, ctx.prefs) + (o.act_start_date ? ' A' : '') : ''}</td>
+                  <td>{o ? fmtDate(o.act_end_date || o.reend_date || o.early_end_date, ctx.prefs) + (o.act_end_date ? ' A' : '') : ''}</td>
                   <td>{ff == null ? '' : ff === 0 ? 'Yes' : 'No'}</td>
                   <td style={{ textAlign: 'right' }}>{ff == null ? '' : fmtDur(ff / 60, ctx.prefs)}</td>
                   <td>{o && isCritical(o, ctx) ? 'Yes' : 'No'}</td>

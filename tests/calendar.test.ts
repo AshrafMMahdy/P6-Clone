@@ -51,3 +51,11 @@ test('continuous calendar and horizon', () => {
   const none = new WorkCalendar({ week: [[], [], [], [], [], [], []], exceptions: new Map() });
   assert.throws(() => none.nextWorkStart(0), CalendarHorizonError);
 });
+
+test('a date before 1970 has its weekday (a late date levelled back from a Must Finish By can lie there)', () => {
+  // 31 December 1969 is a Wednesday, 28 December 1969 a Sunday
+  assert.equal(f(cal.prevWorkEnd(d('1969-12-31 20:00')!)), '1969-12-31 17:00');
+  assert.equal(f(cal.nextWorkStart(d('1969-12-28 09:00')!)), '1969-12-29 08:00');
+  assert.equal(f(cal.subWork(d('1970-01-01 17:00')!, 16 * 60)), '1969-12-31 08:00');
+  assert.equal(cal.workBetween(d('1969-12-26 08:00')!, d('1969-12-29 17:00')!), 16 * 60);
+});

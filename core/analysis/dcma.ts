@@ -96,7 +96,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
   // high float / high duration limit
   const projLen = (() => {
     const p = s.projs[0]; if (!p) return 0;
-    const st = minOf(s.tasks.map((t) => parseP6Date(t.act_start_date || t.early_start_date || t.target_start_date) ?? Infinity));
+    const st = minOf(s.tasks.map((t) => parseP6Date(t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date) ?? Infinity));
     const fi = maxOf(s.tasks.map((t) => forecastFinish(t) ?? -Infinity));
     return Number.isFinite(st) && Number.isFinite(fi) ? s.workDays(s.projCal(p), st, fi) : 0;
   })();

@@ -11,6 +11,7 @@ import { dayHours } from '../project/units.ts';
 import type { Update } from './delay.ts';
 import { baselineOf, baselineFinish, dataDateUsedNotes, makeScope, type Scope } from './common.ts';
 import { referenceStart, updateDate, updateView } from './forensic.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 export type Mode = 'latest' | 'all_periods';
 /** The two modes of the source (changeTracking.ts:81, :86: `latest` compares the last update with the current one, `all_periods` every consecutive pair); its third value specific_dates is accepted by its schema and does nothing different, so it is not carried over. */
@@ -78,7 +79,7 @@ function logicChanges(changes: ScheduleChange[], a: Db, b: Db, hpd: number, both
   const parse = (id: string) => { const m = /^(.*) -> (.*) (FS|SS|FF|SF)$/.exec(id); return m ? { pred: m[1], succ: m[2], type: m[3] } : null; };
   const lagText = (d: Db, dh: ReturnType<typeof dayHours>) => {
     const tasks = new Map(rows(d, 'TASK').map((t) => [t.task_id, t.task_code]));
-    return new Map(rows(d, 'TASKPRED').map((r) => [`${tasks.get(r.pred_task_id)} -> ${tasks.get(r.task_id)} ${(r.pred_type ?? '').replace(/^PR_/, '')}`, r2(Number(r.lag_hr_cnt || 0) / dh.rel(r))]));
+    return new Map(logicRelationships(d).map((r) => [`${tasks.get(r.pred_task_id)} -> ${tasks.get(r.task_id)} ${(r.pred_type ?? '').replace(/^PR_/, '')}`, r2(Number(r.lag_hr_cnt || 0) / dh.rel(r))]));
   };
   const lagsA = lagText(a, dayHours(a, hpd, true)), lagsB = lagText(b, dayHours(b, hpd, true));
   const show = (type: string, lag: number | undefined) => `${type}${lag ? ` ${lag > 0 ? '+' : ''}${lag}d` : ''}`;

@@ -45,7 +45,7 @@ export async function runSynchroCloud(db: Db, projId: string, a: Record<string, 
   const sid = String(a.schedule_id ?? '') || fail('bad_input', 'schedule_id is needed.', 'list_schedules gives it.');
   const tasks = rows(db, 'TASK').filter((t) => t.proj_id === projId && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
   const iso = (s: string) => { const m = parseP6Date(s); return m == null ? undefined : new Date(m * 60000).toISOString(); };
-  const batch = tasks.map((t) => ({ name: t.task_name || t.task_code, userDefinedId: t.task_code, type: 'Work', plannedStart: iso(t.early_start_date || t.target_start_date), plannedDuration: Math.round(Number(t.target_drtn_hr_cnt || 0) * 3600) }));
+  const batch = tasks.map((t) => ({ name: t.task_name || t.task_code, userDefinedId: t.task_code, type: 'Work', plannedStart: iso(t.restart_date || t.early_start_date || t.target_start_date), plannedDuration: Math.round(Number(t.target_drtn_hr_cnt || 0) * 3600) }));
   const ops: string[] = [];
   for (let i = 0; i < batch.length; i += 200) {
     await tick(i, batch.length, 'pushing tasks to SYNCHRO');

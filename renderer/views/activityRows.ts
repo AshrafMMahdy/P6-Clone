@@ -34,12 +34,12 @@ export const FILTERS: Record<string, [string, (r: Row, c: Ctx) => boolean]> = {
   open: ['Not Completed', (r) => statusOf(r) !== 'TK_Complete'],
   milestones: ['Milestones', (r) => isMilestone(r)],
   negfloat: ['Negative Float', (r) => Number(r.total_float_hr_cnt) < 0 && r.total_float_hr_cnt !== ''],
-  late: ['Late Activities (finish after baseline, or negative float)', (r, c) => { if (r.act_end_date) return false; const b = c.baseline.get(`${r.task_code}|${r.proj_id}`); const f = parseP6Date(r.early_end_date || r.reend_date), bf = b ? parseP6Date(b.act_end_date || b.target_end_date) : null; return f != null && bf != null ? f > bf : Number(r.total_float_hr_cnt) < 0 && r.total_float_hr_cnt !== ''; }],
+  late: ['Late Activities (finish after baseline, or negative float)', (r, c) => { if (r.act_end_date) return false; const b = c.baseline.get(`${r.task_code}|${r.proj_id}`); const f = parseP6Date(r.reend_date || r.early_end_date), bf = b ? parseP6Date(b.act_end_date || b.target_end_date) : null; return f != null && bf != null ? f > bf : Number(r.total_float_hr_cnt) < 0 && r.total_float_hr_cnt !== ''; }],
   constrained: ['Constrained Activities', (r) => !!r.cstr_type || !!r.cstr_type2],
   started30: ['Started in the Last 30 Days', (r, c) => near(r.act_start_date, c, -30, r)],
   finished30: ['Finished in the Last 30 Days', (r, c) => near(r.act_end_date, c, -30, r)],
-  starting30: ['Starting in the Next 30 Days', (r, c) => !r.act_start_date && near(r.early_start_date || r.restart_date, c, 30, r)],
-  finishing30: ['Finishing in the Next 30 Days', (r, c) => !r.act_end_date && near(r.early_end_date || r.reend_date, c, 30, r)],
+  starting30: ['Starting in the Next 30 Days', (r, c) => !r.act_start_date && near(r.restart_date || r.early_start_date, c, 30, r)],
+  finishing30: ['Finishing in the Next 30 Days', (r, c) => !r.act_end_date && near(r.reend_date || r.early_end_date, c, 30, r)],
   nopreds: ['Open Ends (no predecessors/successors)', (r, c) => !r.act_end_date && (!(c.predsOf.get(r.task_id)?.length) || !(c.succsOf.get(r.task_id)?.length))],
 };
 
@@ -86,8 +86,8 @@ export function userFilterTest(f: UserFilter, ctx: Ctx): (r: Row) => boolean {
   return f.any ? (r) => tests.some((t) => t(r)) : (r) => tests.every((t) => t(r));
 }
 
-export const taskStart = (r: Row) => parseP6Date(r.act_start_date) ?? parseP6Date(r.early_start_date || r.restart_date || r.target_start_date);
-export const taskFinish = (r: Row) => parseP6Date(r.act_end_date) ?? parseP6Date(r.early_end_date || r.reend_date || r.target_end_date);
+export const taskStart = (r: Row) => parseP6Date(r.act_start_date) ?? parseP6Date(r.restart_date || r.early_start_date || r.target_start_date);
+export const taskFinish = (r: Row) => parseP6Date(r.act_end_date) ?? parseP6Date(r.reend_date || r.early_end_date || r.target_end_date);
 
 const SORTS: Record<string, (a: Row, b: Row) => number> = {
   '': (a, b) => (taskStart(a) ?? 0) - (taskStart(b) ?? 0) || a.task_code.localeCompare(b.task_code, undefined, { numeric: true }),

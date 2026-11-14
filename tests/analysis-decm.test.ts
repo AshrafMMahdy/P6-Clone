@@ -155,7 +155,7 @@ test('06A501a: an activity not in the baseline, or in it with no start or no fin
   assert.ok(applyOps(b.db, [{ op: 'add_activity', id: 'D', name: 'Added later', duration_days: 3 }], { calendarDays: true }).ok);
   const bl = rows(b.db, 'PROJECT').find((p) => p._baseline_of)!;
   const t2 = rows(b.db, 'TASK').find((t) => t.proj_id === bl.proj_id && t.task_code === 'T2')!;
-  t2.target_end_date = ''; t2.early_end_date = ''; t2.act_end_date = '';
+  t2.target_end_date = ''; t2.early_end_date = ''; t2.reend_date = ''; t2.act_end_date = '';
   const r = by(decm(b.db, {}));
   assert.deepEqual(ids(r['06A501a']).sort(), ['D', 'T2']);
   assert.deepEqual([r['06A501a'].numerator, r['06A501a'].denominator], [2, 4]);

@@ -4,22 +4,16 @@ import { ABSENT, realOf, type Journal } from '../journal.ts';
 import { KEYS, type Db, type Row } from '../db.ts';
 import { dayHours } from './units.ts';
 import { cstrName } from '../notes.ts';
-import { humanizeField, STATUS_WORDS, TABLE_WORD } from '../p6words.ts';
+import { CODE_WORDS, humanizeField, STATUS_WORDS, TABLE_WORD } from '../p6words.ts';
 import { parseClndrDataLeniently } from '../calendar/clndr-data.ts';
 
+/** An activity of a project that no longer has the Activity ID of its activity in a baseline (P6 pairs the two by Activity ID): `id` is the project's, `baselineId` the
+ *  baseline's; `taken`: in the baseline `id` is another activity's, so renaming the baseline's activity to it cannot restore the pair. */
+export interface OffBaseline { id: string; project: string; baseline: string; baselineId: string; taken: boolean }
 export interface FieldChange { id: string; /** the Project ID of the row, given when the file has several projects (an Activity ID can be in more than one) */ project?: string; field: string; old: string | number | null; new: string | number | null }
 type Obj = Record<string, unknown>;
 
-/** P6's words for the coded values an edit can change (the file keeps codes). */
-const WORDS: Record<string, Record<string, string>> = {
-  priority_type: { PT_Top: 'Top', PT_High: 'High', PT_Normal: 'Normal', PT_Low: 'Low', PT_Lowest: 'Lowest' },
-  status_code: STATUS_WORDS,
-  task_type: { TT_Task: 'Task Dependent', TT_Rsrc: 'Resource Dependent', TT_LOE: 'Level of Effort', TT_Mile: 'Start Milestone', TT_FinMile: 'Finish Milestone', TT_WBS: 'WBS Summary' },
-  complete_pct_type: { CP_Drtn: 'Duration', CP_Phys: 'Physical', CP_Units: 'Units' },
-  duration_type: { DT_FixedDUR2: 'Fixed Duration & Units/Time', DT_FixedQty: 'Fixed Units', DT_FixedDrtn: 'Fixed Duration & Units', DT_FixedRate: 'Fixed Units/Time' },
-  pred_type: { PR_FS: 'Finish to Start', PR_SS: 'Start to Start', PR_FF: 'Finish to Finish', PR_SF: 'Start to Finish' },
-  rsrc_type: { RT_Labor: 'Labor', RT_Equip: 'Nonlabor', RT_Mat: 'Material' },
-};
+const WORDS = CODE_WORDS;
 /** The wording of a changed value: P6's words for a code, the constraint by its P6 name. */
 const wordOf = (column: string, v: string): string => (column === 'cstr_type' || column === 'cstr_type2' ? (v === '' ? '' : cstrName(v)) : WORDS[column]?.[v] ?? v);
 
@@ -160,8 +154,9 @@ function calendarChange(was: string, now: string): { field: string; old: string 
 }
 
 /** The changes a journal holds, and whether any of them can change the dates F9 gives. */
-export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes: FieldChange[]; datesAffected: boolean; /** the edit emptied calculated dates of an activity (a raw edit): the answer then says which projects have none */ datesCleared: boolean; /** columns named by their own words: no P6 name is recorded for them */ unnamed: string[] } {
+export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes: FieldChange[]; datesAffected: boolean; /** the edit emptied calculated dates of an activity (a raw edit): the answer then says which projects have none */ datesCleared: boolean; /** columns named by their own words: no P6 name is recorded for them */ unnamed: string[]; /** activities whose Activity ID this edit changed so that they no longer pair with their baseline (or, a baseline's activity, with the project's): P6 pairs the two by Activity ID */ offBaseline: OffBaseline[] } {
   const all: FieldChange[] = [], rowOfChange = new Map<FieldChange, unknown>();
+  const renamed: { row: Obj; was: string; now: string }[] = [], movedIn = new Set<unknown>();
   let datesAffected = false, datesCleared = false;
   const dh = dayHours(db, hoursPerDay, true);
   const tasks = new Map<string, Row>();
@@ -214,6 +209,8 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     const end = (t: Row | undefined) => (t ? `${taskName(t)}${cross && !(projects.get(t.proj_id) ?? goneProjects.get(t.proj_id))?._baseline_of ? ` in ${projectId(t.proj_id)}` : ''}` : missing('activity'));
     return `${end(a)} ${text(r.pred_type || 'PR_FS').slice(3)} ${end(b)}`;
   };
+  /** A relationship between an activity of a baseline and an activity outside that baseline: the baseline's link, which nothing schedules with. */
+  const isBaselineLink = (r: Obj): boolean => { const a = task(text(r.pred_task_id)) ?? gone.get(text(r.pred_task_id)), b = task(text(r.task_id)) ?? gone.get(text(r.task_id)); if (!a || !b || a.proj_id === b.proj_id) return false; return [a, b].some((t) => !!(projects.get(t.proj_id) ?? goneProjects.get(t.proj_id))?._baseline_of); };
   const inChangedProject = (r: Obj): boolean => {
     const changed = (id: string) => madeProjects.has(id) || removedProjects.has(id);
     // a relationship: both its ends (one that ties the project to ANOTHER project is that project's logic too, and is said)
@@ -377,7 +374,7 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
     if (inChangedProject(r)) return;
     const row = (id: string, field: string) => out({ id, field, old: what === 'added' ? null : 'exists', new: what === 'added' ? 'added' : 'deleted' }, r);
     if (tbl === 'TASK') { row(taskName(r), 'activity'); datesAffected = true; return; }
-    if (tbl === 'TASKPRED') { row(relName(r), 'relationship'); datesAffected = true; return; }
+    if (tbl === 'TASKPRED') { const link = isBaselineLink(r); row(relName(r), link ? 'baseline link' : 'relationship'); if (!link) datesAffected = true; return; }
     if (tbl === 'TASKRSRC') { row(assignmentName(r), 'resource assignment'); return; }
     if (tbl === 'RSRC') { row(text(r.rsrc_short_name), 'resource'); return; }
     if (tbl === 'PROJWBS') { row(wbsPath(r), 'WBS'); return; }
@@ -421,6 +418,8 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         const f = known ?? { label: humanize(k), number: NUMERIC.test(k) };
         const was = text(keys[i + 1]), now = text(r[k]);
         if (was === now) continue;
+        if (k === 'task_code') renamed.push({ row: r, was, now });
+        if (k === 'proj_id') movedIn.add(r);
         if ((f.number || f.days) && Number(was || 0) === 0 && Number(now || 0) === 0) continue;
         if (k === 'proj_id' && !projects.has(was) && !goneProjects.has(was)) continue; // its project's internal number changed (said once, on the project): the activity has not moved
         const name = (v: string) => (v === '' ? null : f.number ? Number(v) : k === 'clndr_id' ? calendarName(v) : k === 'wbs_id' ? wbsCode(v) : k === 'rsrc_id' ? rsrcName(v) : k === 'proj_id' ? projectId(v) : wordOf(k, v));
@@ -471,7 +470,12 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
         const say = (field: string, old: FieldChange['old'], nw: FieldChange['new']) => { const o = seen(old), n = seen(nw); if (o == null && n == null) return; if (NUMERIC.test(k) && (o ?? 0) === 0 && (n ?? 0) === 0) return; out({ id: id !== '' ? id : rate ? '' : rowId(tbl, { ...r, [k]: was }), field, old: o, new: n }, r); };
         if (baselineSlot) { const bl = (v: string) => (v === '' ? null : projectId(v, 'baseline')); say(baselineSlot, bl(was), bl(now)); continue; }
         // a baseline restored: it is a project again (the file marks a baseline in two columns: both are this one change)
-        if (restores) { if (!restoreSaid && was !== '' && now === '') { restoreSaid = true; say('baseline', `baseline of ${projectId(was)}`, 'restored as a project'); datesAffected = true; } continue; }
+        if (restores) {
+          if (!restoreSaid && was !== '' && now === '') { restoreSaid = true; say('baseline', `baseline of ${projectId(was)}`, 'restored as a project'); datesAffected = true; }
+          // (a project converted to a baseline: its relationships to other projects are the baseline's from now on, so those projects' dates can move)
+          else if (k === '_baseline_of' && was === '' && now !== '') { say('project', 'a project of its own', `converted to a baseline of ${projectId(now)}`); datesAffected = true; }
+          continue;
+        }
         if (tbl === 'PROJECT' && k === 'proj_id') { say(labels![k], Number(was), Number(now)); continue; }
         if (k === 'critical_drtn_hr_cnt' && tbl === 'PROJECT') { const days = (v: string) => Math.round((Number(v || 0) / hoursPerDay) * 100) / 100; say('Critical activities: Total Float at or below (days)', days(was), days(now)); continue; }
         if ((tbl === 'PROJECT' && /^(last_recalc_date|plan_start_date|plan_end_date)$/.test(k)) || (tbl === 'CALENDAR' && k === 'clndr_data') || (tbl === 'SCHEDOPTIONS' && /^sched_/.test(k))) datesAffected = true; // the data date, the planned start, Must Finish By and the work time of a calendar decide the dates F9 gives
@@ -527,5 +531,28 @@ export function describeChanges(db: Db, j: Journal, hoursPerDay = 8): { changes:
   }
   // each change once (the same row can be journalled twice, a resource's limit lives on the resource and on its price row)
   const seenChange = new Set<string>(), rowNo = new Map<unknown, number>();
-  return { changes: all.filter((c) => { const r0 = rowOfChange.get(c), r = r0 && typeof r0 === 'object' && ('rsrc_rate_id' in (r0 as Obj) || 'rsrc_short_name' in (r0 as Obj)) ? null : r0; /* a resource's limit lives on the resource and on its price row: one change */ let n = r == null ? 0 : rowNo.get(r); if (r != null && n == null) rowNo.set(r, (n = rowNo.size + 1)); const key = `${n}\u0000${c.id}\u0000${c.project ?? ''}\u0000${c.field}\u0000${c.old}\u0000${c.new}`; if (seenChange.has(key)) return false; seenChange.add(key); return true; }), datesAffected, datesCleared, unnamed: [...unnamed] };
+  // Activity IDs changed while a baseline pairs by them (whatever changed them: update_activity, set_fields, a renumbering without the baselines, a rename
+  // inside a baseline). A pair is an activity of the project and the activity of its baseline that had the same Activity ID before the edit; it is broken when
+  // the two no longer have the same ID. Both sides renamed alike keep the pair; an activity new to the project (added, or moved in) was in no pair.
+  const offBaseline: OffBaseline[] = [];
+  if (renamed.length) {
+    const was = new Map<unknown, string>(renamed.map((x) => [x.row, x.was]));
+    const before = (t: Row) => was.get(t) ?? t.task_code;
+    const fresh = (t: Row) => added.has(t) || movedIn.has(t);
+    const byProj = new Map<string, Row[]>();
+    for (const t of db.tables.TASK?.rows ?? []) { const l = byProj.get(t.proj_id); if (l) l.push(t); else byProj.set(t.proj_id, [t]); }
+    const owners = new Set(renamed.map((x) => { const p = projects.get(text(x.row.proj_id)); return p ? text(p._baseline_of) || p.proj_id : ''; }).filter(Boolean));
+    for (const owner of owners) for (const b of projects.values()) {
+      if (b._baseline_of !== owner) continue;
+      const had = new Map<string, Row>(), has = new Map<string, Row>();
+      for (const x of byProj.get(b.proj_id) ?? []) { if (!fresh(x)) had.set(before(x), x); has.set(x.task_code, x); }
+      for (const t of byProj.get(owner) ?? []) {
+        if (fresh(t)) continue;
+        const pair = had.get(before(t));
+        if (!pair || pair.task_code === t.task_code) continue;
+        offBaseline.push({ id: t.task_code, project: text(projects.get(owner)?.proj_short_name), baseline: text(b.proj_short_name), baselineId: pair.task_code, taken: has.has(t.task_code) });
+      }
+    }
+  }
+  return { changes: all.filter((c) => { const r0 = rowOfChange.get(c), r = r0 && typeof r0 === 'object' && ('rsrc_rate_id' in (r0 as Obj) || 'rsrc_short_name' in (r0 as Obj)) ? null : r0; /* a resource's limit lives on the resource and on its price row: one change */ let n = r == null ? 0 : rowNo.get(r); if (r != null && n == null) rowNo.set(r, (n = rowNo.size + 1)); const key = `${n}\u0000${c.id}\u0000${c.project ?? ''}\u0000${c.field}\u0000${c.old}\u0000${c.new}`; if (seenChange.has(key)) return false; seenChange.add(key); return true; }), datesAffected, datesCleared, unnamed: [...unnamed], offBaseline };
 }

@@ -8,7 +8,8 @@ import { addField, dropIndexes, nextId, rowIndex, rows, table, tableCache, withI
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { calendarsWithNoWork, noWorkTimeText, p6num } from '../schedule/cpm.ts';
 import { CalendarHorizonError } from '../calendar/calendar.ts';
-import { fieldNotUsed } from '../notes.ts';
+import { baselineLinks, baselineLinkTest } from '../progress/snapshots.ts';
+import { baselineWouldDuplicate, fieldNotUsed } from '../notes.ts';
 import { findLoops, MAX_LEN } from '../xer/validate.ts';
 import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
@@ -59,7 +60,10 @@ function wbsIndex(raw: Row[]): WbsIndex {
 /** The operation index of the first relationship added in this edit that closes a loop (none: null). Loops the file
  *  had already are not this edit's doing. */
 function firstLoop(db: Db, added: Batch['added']): number | null {
-  const P = realOf(rows(db, 'TASKPRED'));
+  // (the logic only: a baseline's link closes no loop)
+  let projOf: Map<string, string> | undefined;
+  const isLink = baselineLinkTest(db, (id) => (projOf ??= new Map(realOf(rows(db, 'TASK')).map((t) => [t.task_id, t.proj_id]))).get(id));
+  const P = isLink ? realOf(rows(db, 'TASKPRED')).filter((r) => !isLink(r)) : realOf(rows(db, 'TASKPRED'));
   const mine = new Set(added.map((x) => `${x.pred}|${x.succ}`));
   const graph = (k: number) => {
     const ok = new Set(added.slice(0, k + 1).map((x) => `${x.pred}|${x.succ}`));
@@ -106,7 +110,7 @@ export const OP_GUIDE = [
   `update_activity: id, then any add_activity field, plus [new_id], [remaining_days] or [remaining_hours], [assignments_follow] (true: assignments take the new remaining duration, the same remaining units over fewer hours; crash_schedule sets it), [percent_complete], [actual_start], [actual_finish], [expected_finish], [start], [finish], [primary_resource] (a resource assigned to it; "" clears the primary resource)`,
   `delete_activity / dissolve_activity: id`,
   `add_relationship: pred, succ, [type] (FS default, SS, FF, SF), [lag_days] (negative = lead). P6 keeps one relationship per pair and type (an SS and an FF between the same two activities are both kept; a Microsoft Project XML / MPX file one per pair): one already there is skipped and said in notes. A relationship that closes a loop refuses the edit`,
-  `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type]`,
+  `update_relationship: pred, succ, [type], [new_type], [lag_days]; delete_relationship: pred, succ, [type] (a baseline's link, which get_activity lists as baseline_links: name the baseline as pred_project or succ_project)`,
   `set_predecessors: activity, links [{pred, [type], [lag_days] or [lag_hours]}] ([] = none): replaces every predecessor of the activity in one step`,
   `add_resource: id, [name], [type] (labor, nonlabor, material), [units_per_day], [max_units_per_day] or [max_units_per_hour], [price_per_unit], [calendar], [parent]`,
   `assign_resource: activity, resource, [allow_duplicate] (true: assign it again when it is already on the activity, as P6 allows), [units_per_day] or [units], [actual_units], [budgeted_cost], [actual_cost], [remaining_cost] (a cost given is kept as entered: the assignment's cost no longer follows units x price, as in P6), [curve] (resource curve name, see add_resource_curve); unassign_resource: activity, resource or assigned_role (a role assignment with no resource), [nth] (the same resource on the activity more than once: 1 = first); its UDF values, period actuals and assignment codes go with it`,
@@ -300,7 +304,7 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
   switch (op.op) {
     case 'add_project': {
       const id = str(op.id, 'id');
-      if (projects().some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase())) fail(`Project "${id}" already exists.`);
+      if (rows(db, 'PROJECT').some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase())) fail(`A project or baseline "${id}" already exists.`);
       const pid = newProject(db, { id, name: typeof op.name === 'string' ? op.name : id, start: date(op.start, 'start') });
       if (op.must_finish_by) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.plan_end_date = date(op.must_finish_by, 'must_finish_by');
       if (op.calendar) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.clndr_id = calendar(op.calendar).clndr_id;
@@ -317,7 +321,7 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
     case 'copy_project': {
       const from = project(str(op.from, 'from'));
       const id = str(op.id, 'id');
-      if (projects().some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase())) fail(`Project "${id}" already exists.`);
+      if (rows(db, 'PROJECT').some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase())) fail(`A project or baseline "${id}" already exists.`);
       copyProject(db, from.proj_id, { id, name: typeof op.name === 'string' ? op.name : undefined, start: op.start != null ? date(op.start, 'start') : undefined, keepProgress: op.keep_progress === true });
       return { project: id, copied_from: from.proj_short_name, activities: rows(db, 'TASK').filter((t) => t.proj_id === projects().find((p) => p.proj_short_name === id)?.proj_id).length };
     }
@@ -414,6 +418,7 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
       if (op.new_id != null) {
         const code = str(op.new_id, 'new_id');
         if (byCode(code).some((x) => x.task_id !== t.task_id && x.proj_id === t.proj_id)) fail(`Activity ID "${code}" already exists.`);
+        // (P6 pairs an activity with its baseline by Activity ID and says nothing when one is changed: the baselines that hold the old ID are named)
         t.task_code = code;
         dropIndexes(realOf(rows(db, 'TASK'))); // the index by Activity ID no longer holds
       }
@@ -454,7 +459,9 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
       const b = activity(op.activity, op.project);
       const links = Array.isArray(op.links) ? op.links : fail('"links" must be a list of {pred, type, lag_days} ([] removes every predecessor).');
       const sb = b.task_id, P = table(db, 'TASKPRED');
-      const gone = removeWhere(P.rows, (r) => r.task_id === sb);
+      // (its predecessors are its logic: a baseline's link to it is not one of them and stays)
+      const blLinks = new Set(baselineLinks(db).map((r) => r.task_pred_id));
+      const gone = removeWhere(P.rows, (r) => r.task_id === sb && !blLinks.has(r.task_pred_id));
       const out: string[] = [];
       links.forEach((l: any, i: number) => {
         if (!l || typeof l !== 'object') fail(`links[${i}] must be {pred, type, lag_days}.`);
@@ -469,12 +476,25 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
       return { activity: b.task_code, predecessors: out, removed: gone };
     }
     case 'update_relationship': case 'delete_relationship': {
-      const a = activity(op.pred, op.pred_project ?? op.project), b = activity(op.succ, op.succ_project ?? op.project);
+      // (a baseline's link is deleted by naming the baseline as the project of its end: the activity is then the baseline's)
+      const end = (id: unknown, proj: unknown): Row => {
+        const bl = op.op === 'delete_relationship' && proj != null ? rows(db, 'PROJECT').find((p) => p._baseline_of && p.proj_short_name.toLowerCase() === String(proj).toLowerCase()) : undefined;
+        return bl ? byCode(str(id, 'id')).find((t) => t.proj_id === bl.proj_id) ?? fail(`No activity "${id}" in baseline ${bl.proj_short_name}.`) : activity(id, proj);
+      };
+      const a = end(op.pred, op.pred_project ?? op.project), b = end(op.succ, op.succ_project ?? op.project);
+      // (a baseline is named only for its links to other projects: the logic inside a baseline is the baseline's own record and is not edited)
+      if (a.proj_id === b.proj_id && rows(db, 'PROJECT').find((p) => p.proj_id === a.proj_id)?._baseline_of) fail(`${a.task_code} -> ${b.task_code} is a relationship inside baseline ${rows(db, 'PROJECT').find((p) => p.proj_id === a.proj_id)!.proj_short_name}: a baseline's own logic is not changed. Only a baseline's link to an activity of another project is deleted here.`);
       const P = table(db, 'TASKPRED');
       const want = op.type ? REL[String(op.type).toUpperCase()] : null;
       const pa = a.task_id, sb = b.task_id;
       const hits = pick(P.rows, (r) => r.pred_task_id === pa && r.task_id === sb && (!want || r.pred_type === want));
-      if (!hits.length) fail(`No relationship ${a.task_code} -> ${b.task_code}${want ? ` (${want.slice(3)})` : ''}.`);
+      if (!hits.length) {
+        // (the same two Activity IDs joined by a baseline's link: said, with how to name it)
+        const pname = (id: string) => rows(db, 'PROJECT').find((p) => p.proj_id === id);
+        const near = baselineLinks(db).map((r) => ({ p: rows(db, 'TASK').find((t) => t.task_id === r.pred_task_id), s: rows(db, 'TASK').find((t) => t.task_id === r.task_id) })).find((x) => x.p?.task_code === a.task_code && x.s?.task_code === b.task_code);
+        const hint = near ? ` A baseline's link ${a.task_code} -> ${b.task_code} exists (${[near.p!, near.s!].map((t) => `${t.task_code} in ${pname(t.proj_id)?._baseline_of ? 'baseline ' : ''}${pname(t.proj_id)?.proj_short_name}`).join(' -> ')}): name the baseline as pred_project or succ_project to delete it.` : '';
+        fail(`No relationship ${a.task_code} -> ${b.task_code}${want ? ` (${want.slice(3)})` : ''}.${op.op === 'delete_relationship' ? hint : ''}`);
+      }
       if (hits.length > 1) fail(`Several relationships ${a.task_code} -> ${b.task_code}; give "type".`);
       if (op.op === 'delete_relationship') { const gone = realOf(hits[0]); removeWhere(P.rows, (r) => r === gone); return { deleted: `${a.task_code} -> ${b.task_code}` }; }
       if (op.new_type) {
@@ -546,9 +566,27 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
       const moving = new Set(picked.map((t) => t.task_id));
       const clash = picked.flatMap((t, i) => byCode(next[i]).filter((x) => x.proj_id === t.proj_id && !moving.has(x.task_id)).map((x) => `${next[i]} (kept by ${x.task_name})`));
       if (clash.length) fail(`Renumbering would give IDs other activities keep: ${clash.slice(0, 5).join(', ')}${clash.length > 5 ? ` (and ${clash.length - 5} more)` : ''}. Choose another prefix or start.`);
+      // P6's "Renumber Selected Activities in Baselines" (marked by default when the project has baselines): a baseline knows an activity by its Activity ID, so
+      // the same activities get the same new IDs in every baseline. A baseline in which a new ID is another activity's is not renumbered (P6: "does not renumber
+      // activities in baselines where duplicate activity IDs would be created"); P6 then asks whether to go on without it or to cancel: here it is refused unless
+      // skip_baselines_with_duplicates says to go on. Without the baselines (baselines: false) the renumbered activities no longer match them, and that is said.
+      for (const k of ['baselines', 'skip_baselines_with_duplicates']) if (op[k] != null && typeof op[k] !== 'boolean') fail(`${k} must be true or false.`);
+      const withBaselines = op.baselines !== false, goOn = op.skip_baselines_with_duplicates === true;
+      const newOf = new Map(picked.map((t, i) => [`${t.proj_id}|${t.task_code}`, next[i]]));
+      const all = rows(db, 'TASK'), done: string[] = [], left: string[] = [];
+      for (const b of rows(db, 'PROJECT').filter((x) => x._baseline_of && picked.some((t) => t.proj_id === x._baseline_of))) {
+        const mine = all.filter((t) => t.proj_id === b.proj_id), matched = mine.filter((t) => newOf.has(`${b._baseline_of}|${t.task_code}`));
+        if (!matched.length) continue;
+        if (!withBaselines) { left.push(b.proj_short_name); continue; }
+        const staying = new Set(mine.filter((t) => !matched.includes(t)).map((t) => t.task_code));
+        const dup = matched.map((t) => newOf.get(`${b._baseline_of}|${t.task_code}`)!).filter((c) => staying.has(c));
+        if (dup.length) { if (!goOn) fail(baselineWouldDuplicate(b.proj_short_name, dup)); left.push(b.proj_short_name); continue; }
+        for (const t of matched) t.task_code = newOf.get(`${b._baseline_of}|${t.task_code}`)!;
+        done.push(b.proj_short_name);
+      }
       picked.forEach((t, i) => { t.task_code = next[i]; });
       dropIndexes(realOf(rows(db, 'TASK'))); // the index by Activity ID no longer holds
-      return { selected: picked.length, renumbered: picked.length, first: next[0], last: next[next.length - 1] };
+      return { selected: picked.length, renumbered: picked.length, first: next[0], last: next[next.length - 1], ...(done.length ? { baselines_renumbered: done } : {}), ...(left.length ? { baselines_not_renumbered: left } : {}) };
     }
     case 'unassign_resource': {
       // the assignment with its UDF values, period actuals and assignment codes (a role assignment: assigned_role)

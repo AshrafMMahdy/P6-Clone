@@ -6,7 +6,7 @@ import { closeDialog, doUndo, getUi, mutate, openDialog, setUi, toast, useStore,
 import { addField, nextId, rows, table, type Db, type Row, type Table } from '../../core/db.ts';
 import { hoursPerWeek, parseClndrData, serializeClndrData, standardCalendar, type CalendarDef, type Shift } from '../../core/calendar/clndr-data.ts';
 import { formatP6Date, minutesToSerial, parseP6Date, serialToMinutes } from '../../core/dates.ts';
-import { levelResources, type LevelOptions, type LevelResult } from '../../core/level/level.ts';
+import { levelResources, PRIORITY_NAMES, storedLevelOptions, type LevelOptions, type LevelResult } from '../../core/level/level.ts';
 import { FILTERS, FILTER_OPS, parseUserFilter, userFilters, type UserFilter } from '../views/activityRows.ts';
 import { COLUMNS, extraColumns } from '../model.ts';
 import { DEFAULT_BARS } from '../components/Gantt.tsx';
@@ -999,19 +999,21 @@ export function CurrenciesDialog() {
 export function LevelDialog() {
   const ui = useStore((s) => s.ui);
   const db = useStore((s) => s.db);
-  const [withinFloat, setWithinFloat] = useState(false);
-  const [overAlloc, setOverAlloc] = useState('0');
-  const [priority, setPriority] = useState<'es' | 'tf' | 'priority'>('es');
-  const [all, setAll] = useState(true);
-  const selRsrc = ui.selRsrc ? rows(db, 'RSRC').find((r) => r.rsrc_id === ui.selRsrc) : undefined;
+  // the settings the project keeps (Tools > Level Resources), as P6's dialog opens with them
+  const kept = storedLevelOptions(db, ui.openProjects[0] ?? '');
+  const [preserve, setPreserve] = useState(kept.preserve);
+  const [withinFloat, setWithinFloat] = useState(kept.withinFloat);
+  const [minFloat, setMinFloat] = useState(String(kept.minFloatHrs));
+  const [overAlloc, setOverAlloc] = useState(String(kept.overAllocPct));
+  const [priority, setPriority] = useState(kept.priorities[0]?.field ?? 'task_code');
+  const [all, setAll] = useState(kept.allResources);
 
   const level = () => {
     if (!ui.openProjects.length) return toast('Open a project first.');
-    const pct = Number(overAlloc);
-    if (!Number.isFinite(pct) || pct < 0) return toast('Overallocation % must be 0 or more.');
-    if (!all && !selRsrc) return toast('Select a resource in the Resources window, or check "Level all resources".');
-    const opts: LevelOptions = { withinFloat, overAllocPct: pct, priority };
-    if (!all && selRsrc) opts.rsrcIds = [selRsrc.rsrc_id];
+    const pct = Number(overAlloc), hold = Number(minFloat);
+    if (!Number.isFinite(pct) || pct < 0) return toast('Max percent to over-allocate must be 0 or more.');
+    if (!Number.isFinite(hold) || hold < 0) return toast('The float to preserve must be 0 hours or more.');
+    const opts: LevelOptions = { allResources: all, preserve, withinFloat, minFloatHrs: hold, overAllocPct: pct, priorities: priority === kept.priorities[0]?.field ? kept.priorities : priority === 'task_code' ? [] : [{ field: priority }] };
     let res: LevelResult | null = null;
     let err = '';
     mutate('Level Resources', (d) => {
@@ -1037,19 +1039,23 @@ export function LevelDialog() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />Level all resources</label>
         <div className="muted" style={{ whiteSpace: 'normal', marginTop: 3 }}>
           {all
-            ? 'All resources marked for leveling are leveled. Resources with "Level" set to No and material resources are skipped.'
-            : selRsrc ? `Only the selected resource is leveled: ${selRsrc.rsrc_short_name} - ${selRsrc.rsrc_name}.` : 'No resource is selected in the Resources window.'}
+            ? 'Every resource that has a Max Units/Time limit is leveled. Material resources are not.'
+            : 'Only the resources marked to be leveled (the Level column of the Resources window) that have a limit are leveled.'}
         </div>
       </fieldset>
       <fieldset><legend>Options</legend>
         <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
-          <label>Level within float</label>
+          <label>Preserve scheduled early and late dates</label>
+          <input type="checkbox" checked={preserve || withinFloat} disabled={withinFloat} onChange={(e) => setPreserve(e.target.checked)} style={{ justifySelf: 'start' }} />
+          <label>Level resources only within activity Total Float</label>
           <input type="checkbox" checked={withinFloat} onChange={(e) => setWithinFloat(e.target.checked)} style={{ justifySelf: 'start' }} />
-          <label>Max percent to overallocate</label>
-          <input type="number" min={0} value={overAlloc} onChange={(e) => setOverAlloc(e.target.value)} />
+          <label>Preserve minimum float when leveling (h)</label>
+          <input type="number" min={0} value={minFloat} disabled={!withinFloat} onChange={(e) => setMinFloat(e.target.value)} />
+          <label>Max percent to over-allocate resources</label>
+          <input type="number" min={0} value={overAlloc} disabled={!withinFloat} onChange={(e) => setOverAlloc(e.target.value)} />
           <label>Leveling priority</label>
-          <select value={priority} onChange={(e) => setPriority(e.target.value as 'es' | 'tf' | 'priority')}>
-            <option value="es">Early Start</option><option value="tf">Total Float</option><option value="priority">Activity Priority</option>
+          <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+            {Object.entries(PRIORITY_NAMES).map(([field, name]) => <option key={field} value={field}>{name}</option>)}
           </select>
         </div>
       </fieldset>

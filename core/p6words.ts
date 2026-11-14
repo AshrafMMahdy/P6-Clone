@@ -31,6 +31,16 @@ export const udfTypeWord = (ft: string): string => (ft === 'FT_STATICTYPE' ? 'in
 
 /** P6's words for an activity's status (the file keeps codes). */
 export const STATUS_WORDS: Record<string, string> = { TK_NotStart: 'Not Started', TK_Active: 'In Progress', TK_Complete: 'Completed' };
+/** P6's words for the coded values of a column (the file keeps codes), by the column's name. */
+export const CODE_WORDS: Record<string, Record<string, string>> = {
+  priority_type: { PT_Top: 'Top', PT_High: 'High', PT_Normal: 'Normal', PT_Low: 'Low', PT_Lowest: 'Lowest' },
+  status_code: STATUS_WORDS,
+  task_type: { TT_Task: 'Task Dependent', TT_Rsrc: 'Resource Dependent', TT_LOE: 'Level of Effort', TT_Mile: 'Start Milestone', TT_FinMile: 'Finish Milestone', TT_WBS: 'WBS Summary' },
+  complete_pct_type: { CP_Drtn: 'Duration', CP_Phys: 'Physical', CP_Units: 'Units' },
+  duration_type: { DT_FixedDUR2: 'Fixed Duration & Units', DT_FixedQty: 'Fixed Units', DT_FixedDrtn: 'Fixed Duration & Units/Time', DT_FixedRate: 'Fixed Units/Time' },
+  pred_type: { PR_FS: 'Finish to Start', PR_SS: 'Start to Start', PR_FF: 'Finish to Finish', PR_SF: 'Start to Finish' },
+  rsrc_type: { RT_Labor: 'Labor', RT_Equip: 'Nonlabor', RT_Mat: 'Material' },
+};
 /** The progress fields transfer_progress can change, by P6's names (the remaining duration in days of the activity's calendar). */
 export const PROGRESS_FIELDS: Record<string, string> = {
   act_start_date: 'Actual Start', act_end_date: 'Actual Finish', phys_complete_pct: 'Physical % Complete', remain_drtn_hr_cnt: 'Remaining Duration (days)', expect_end_date: 'Expected Finish',

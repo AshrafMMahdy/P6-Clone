@@ -16,6 +16,7 @@ import { isLoe, isMilestone, isWbs, type Tick } from './common.ts';
 import { cancelledAfter, namesText } from '../notes.ts';
 import { lobActivityCodes } from '../lob/view.ts';
 import { fieldChange } from './whiq-fields.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 class ScheduleFailed extends Error {}
 
@@ -141,7 +142,7 @@ export async function crashSchedule(db: Db, projIds: string[], o: CrashOptions) 
     if (finish == null) throw new ScheduleFailed('The project has no finish date to crash.');
     if (needed(finish) <= EPS) { stop = 'ALREADY_MET'; return; }
     const preds = new Map<string, Row[]>();
-    for (const r of rows(d, 'TASKPRED')) (preds.get(r.task_id) ?? preds.set(r.task_id, []).get(r.task_id)!).push(r);
+    for (const r of logicRelationships(d)) (preds.get(r.task_id) ?? preds.set(r.task_id, []).get(r.task_id)!).push(r);
     let direct = 0, stalls = 0, minStep = 0, grown = 0;
     const ineffective = new Set<string>();
     for (let n = 1; ; n++) {

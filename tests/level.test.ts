@@ -31,8 +31,8 @@ test('two parallel activities sharing a one-unit resource are serialised', () =>
   const r = levelResources(db, ['1'], {});
   assert.equal(r.delayed, 1);
   const [A, B] = db.tables.TASK.rows;
-  assert.equal(A.early_start_date, '2024-01-08 08:00');
-  assert.equal(B.early_start_date, '2024-01-10 08:00');
+  // P6's default, "Preserve scheduled early and late dates": the leveled dates are the Remaining Early dates, the early dates stay as scheduled
+  assert.deepEqual([A.restart_date, B.restart_date, B.early_start_date], ['2024-01-08 08:00', '2024-01-10 08:00', '2024-01-08 08:00']);
   assert.match(r.log, /delayed/);
 });
 

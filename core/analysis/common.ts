@@ -8,6 +8,7 @@ import { makeCtx, type Ctx } from '../project/ctx.ts';
 import { dayHours, type DayHours } from '../project/units.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
 import type { WorkCalendar } from '../calendar/calendar.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 export interface Offender { id: string; name: string; project?: string; value?: string | number }
 export interface Threshold { op: '<' | '<=' | '>' | '>=' | '='; value: number; source: string }
@@ -91,7 +92,7 @@ export function makeScope(db: Db, o: { projIds?: string[]; hoursPerDay?: number;
   const projs = rows(db, 'PROJECT').filter((p) => !p._baseline_of && (!o.projIds?.length || o.projIds.includes(p.proj_id)));
   const projIds = new Set(projs.map((p) => p.proj_id));
   const tasks = rows(db, 'TASK').filter((t) => projIds.has(t.proj_id));
-  const rels = rows(db, 'TASKPRED').filter((r) => projIds.has(r.proj_id) || projIds.has(r.pred_proj_id));
+  const rels = logicRelationships(db).filter((r) => projIds.has(r.proj_id) || projIds.has(r.pred_proj_id));
   const ctx = makeCtx(db, { hoursPerDay: hpd });
   const cals = calendarResolver(db, []);
   const projById = new Map(projs.map((p) => [p.proj_id, p]));
@@ -150,7 +151,7 @@ export function baselineOf(db: Db, proj: Row, which: 'project' | 'bl1' | 'bl2' |
 }
 
 /** A baseline activity's finish: its actual finish, else its planned/early finish. */
-export const baselineFinish = (b: Row | undefined) => (b ? parseP6Date(b.act_end_date || b.early_end_date || b.target_end_date) : null);
+export const baselineFinish = (b: Row | undefined) => (b ? parseP6Date(b.act_end_date || b.reend_date || b.early_end_date || b.target_end_date) : null);
 /** An activity's forecast finish: actual finish, else remaining early finish, else early finish. */
 export const forecastFinish = (t: Row) => parseP6Date(t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date);
 

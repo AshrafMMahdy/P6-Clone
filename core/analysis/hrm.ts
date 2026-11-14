@@ -3,7 +3,7 @@
 // (reasonerFeatures.ts, sgs.ts, reasonerOnnx.ts): the features must match training exactly. What changed on the way in:
 // the instance comes from the project's own remaining durations, calendars, assignments and Max Units/Time; the
 // sample count and seed are parameters; the best proposal is then checked with the clone's own P6 leveler, against
-// P6's default leveling, so the answer is in real dates. Inference is passed in (infer), so this file stays pure: the
+// P6's leveling with the project's leveling settings, so the answer is in real dates. Inference is passed in (infer), so this file stays pure: the
 // MCP server and CLI run the model in Node (hrmRuntime.ts), the desktop app through its main process.
 import { maxOf, minOf } from '../arrays.ts';
 import { DataError } from '../notes.ts';
@@ -353,7 +353,7 @@ export function proposalOps(inst: HrmInstance, modes: number[], multi: boolean, 
   return ops;
 }
 
-const finishOf = (d: Db, projIds: string[]) => { const open = new Set(projIds); let f = -Infinity; for (const t of rows(d, 'TASK')) if (open.has(t.proj_id)) { const v = parseP6Date(t.act_end_date || t.early_end_date); if (v != null && v > f) f = v; } return Number.isFinite(f) ? f : null; };
+const finishOf = (d: Db, projIds: string[]) => { const open = new Set(projIds); let f = -Infinity; for (const t of rows(d, 'TASK')) if (open.has(t.proj_id)) { const v = parseP6Date(t.act_end_date || t.reend_date || t.early_end_date); if (v != null && v > f) f = v; } return Number.isFinite(f) ? f : null; };
 
 /** maxPriority: how many of the placement order `priority` lists (default 100; 0 = all); the whole order is in `priority_rows` and `order`. */
 export interface OptimizeOptions { samples?: number; seed?: number; activities?: CrashActivity[]; hoursPerDay?: number; tick?: Tick; maxPriority?: number }
@@ -378,10 +378,10 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   const projCode = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name]));
   const multi = projIds.length > 1;
   const ops = proposalOps(inst, best.modes, multi, projCode, o.hoursPerDay);
-  // real dates: CPM, P6's default leveling (early start priority), and the reasoner's modes and order through the same leveler
+  // real dates: CPM, P6's leveling with the project's own leveling settings, and the reasoner's modes and order through the same leveler
   // (and every activity's dates at each stage: an export lists them side by side)
   const open = new Set(projIds);
-  const datesOf = (d: Db) => new Map(rows(d, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => [t.task_id, [parseP6Date(t.act_start_date || t.early_start_date), parseP6Date(t.act_end_date || t.early_end_date)] as const]));
+  const datesOf = (d: Db) => new Map(rows(d, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => [t.task_id, [parseP6Date(t.act_start_date || t.restart_date || t.early_start_date), parseP6Date(t.act_end_date || t.reend_date || t.early_end_date)] as const]));
   const measureLeveled = (d: Db, first?: string[]) => { const s = scheduleProjects(d, projIds, {}); if (!s.ok) throw new DataError('schedule_failed', 'The schedule cannot be calculated, so the finish after leveling could not be measured.', 'Call schedule to see what stops it (a loop, or a calendar with no work time), fix that, then call again.'); const cpm = finishOf(d, projIds), cpmDates = datesOf(d); if (leveled) levelResources(d, projIds, { first }); return { cpm, leveled: finishOf(d, projIds), cpmDates, dates: datesOf(d) }; };
   const cancelledAt = async (k: number, say: string) => { try { await o.tick?.(k, 3, say); return false; } catch (e) { if ((e as { code?: unknown })?.code !== 'cancelled') throw e; return true; } };
   type Measured = ReturnType<typeof measureLeveled>;
@@ -396,7 +396,7 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
   // (a day: the hours per day of the activity's calendar, as evaluate's shifts take it)
   const cals = calendarResolver(db, []), projCal = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p.clndr_id])), dh = dayHours(db, o.hoursPerDay ?? 8, true);
   const byTask = new Map(inst.acts.map((a) => [a.task.task_id, a]));
-  /** every activity of the projects: its dates under CPM (no leveling), P6's default leveling, and the reasoner's modes and order
+  /** every activity of the projects: its dates under CPM (no leveling), P6's leveling with the project's leveling settings, and the reasoner's modes and order
    *  (minutes; start and finish, actual where it has one) */
   const dates = !p6 || !mine ? [] : rows(db, 'TASK').filter((t) => open.has(t.proj_id)).map((t) => {
     const cpm = p6.cpmDates.get(t.task_id)!, mod = mine.dates.get(t.task_id)!, cal = cals.get(t.clndr_id) ?? cals.fallback(projCal.get(t.proj_id) ?? '');

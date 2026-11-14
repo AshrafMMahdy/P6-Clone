@@ -144,7 +144,9 @@ test('every named operation confirms its change in P6’s words: no column name,
     { op: 'update_baseline', baseline: 'BL1', new_name: 'BL1X', name: 'Baseline X' }, { op: 'update_wbs', code: 'W1', name: 'Area one in baseline', project: 'BL1X', in_baseline: true }, { op: 'update_activity', id: 'C', name: 'C in baseline', project: 'BL1X', in_baseline: true },
     { op: 'copy_project', from: 'Q', id: 'Q2' }, { op: 'copy_activities', activities: [{ id: 'C', new_id: 'C2' }], project: 'P' }, { op: 'move_activity', id: 'C2', to_project: 'Q', project: 'P' },
     { op: 'replace_text', pairs: [{ find: 'Crew', replace: 'Team' }, { find: 'Area', replace: 'Zone' }] }, { op: 'clear_descriptions' }, { op: 'clear_authors', project: 'P' }, { op: 'regenerate_guids', project: 'Q' }, { op: 'clear_udfs', project: 'P' }, { op: 'clear_notebooks', project: 'P' },
-    { op: 'restore_baseline', baseline: 'BL2' }, { op: 'delete_baseline', baseline: 'BL1X' },
+    // (as in P6, an assigned baseline is neither restored nor deleted: its assignment is cleared first)
+    { op: 'assign_baseline', baseline: '', as: 'project', project: 'P' }, { op: 'restore_baseline', baseline: 'BL2' }, { op: 'assign_baseline', baseline: '', as: 'bl1', project: 'P' }, { op: 'delete_baseline', baseline: 'BL1X' },
+    { op: 'convert_to_baseline', project: 'Q2', of: 'P' },
     { op: 'delete_step', activity: 'A', name: 'Step one', project: 'P' }, { op: 'delete_expense', activity: 'A', name: 'Fee', project: 'P' }, { op: 'delete_expenses', project: 'P' },
     { op: 'unassign_resource', activity: 'B', assigned_role: 'RO2', project: 'P' }, { op: 'delete_resource', id: 'R1', clear_references: true }, { op: 'delete_resource_curve', name: 'Front 2' },
     { op: 'delete_udf', udf: 'Zone 2' }, { op: 'delete_code_type', name: 'Stage' }, { op: 'delete_cost_account', id: 'CA2' }, { op: 'add_role', id: 'RO9' }, { op: 'delete_role', id: 'RO9' }, { op: 'delete_obs', name: 'Obs2' }, { op: 'add_eps', id: 'E9' }, { op: 'delete_eps', id: 'E9' },
@@ -241,7 +243,8 @@ test('every named operation confirms its change in P6’s words: no column name,
   said('update_wbs: [W1 in baseline BL1X @P] WBS Name: "Area 1" -> "Area one in baseline"');
   said('update_activity: [C in baseline BL1X @P] Activity Name: "C" -> "C in baseline"');
   said('delete_baseline: [BL1X] baseline: "exists" -> "deleted"');
-  said('delete_baseline: [P] Primary Baseline: "BL1X" -> null');
+  said('assign_baseline: [P] Primary Baseline: "BL1X" -> null');
+  said('convert_to_baseline: [Q2] project: "a project of its own" -> "converted to a baseline of P"');
   assert.equal(lines.filter((l) => l.startsWith('delete_baseline: ') && /activity|relationship|WBS|assignment/.test(l)).length, 0, 'none of the deleted baseline’s rows one by one');
   said('delete_financial_period: [P] Last Financial Period Stored: "Jan 26" -> null');
   said('delete_calendar: [P] Default Calendar: "Six days" -> "Standard 5 Day Workweek"');
@@ -365,4 +368,68 @@ test('a baseline saved in the session and restored says so; schedule options tha
   assert.ok(!e.error, JSON.stringify(e.error));
   e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', project: 'EC', percent_complete: 55 }] });
   assert.match(e.error?.message ?? '', /The activity is complete \(it has an actual finish\)/);
+});
+
+// P6's Renumber Activity IDs dialog: "Renumber Selected Activities in Baselines" is marked by default when the project has baselines; cleared, "all renumbered
+// activities are disconnected from the baselines"; P6 "does not renumber activities in baselines where duplicate activity IDs would be created" and asks.
+test('renumbering carries the baselines as P6 does; without them, and for one Activity ID changed by hand, the answer says which baseline no longer matches', async () => {
+  const fresh = async () => { const h = await project(); const e = await call('edit', { handle: h, operations: [{ op: 'save_baseline', name: 'BL1', assign_as: 'project' }] }); assert.ok(!e.error, JSON.stringify(e.error)); return h; };
+  const ids = (h: string, baseline: boolean) => getSession(h).db.tables.TASK.rows.filter((t) => !!getSession(h).db.tables.PROJECT.rows.find((p) => p.proj_id === t.proj_id)!._baseline_of === baseline).map((t) => t.task_code).sort();
+  const noMatch = (e: any) => ((e.notes ?? []) as string[]).filter((n) => /no longer match/.test(n));
+  // by default: the project and its baseline get the same new IDs, and nothing is lost
+  let h = await fresh();
+  let e = await call('edit', { handle: h, operations: [{ op: 'renumber_activities', select: {}, prefix: 'Z', start: 1, increment: 1 }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual(ids(h, false), ids(h, true));
+  assert.ok(ids(h, false).every((c) => /^Z\d+$/.test(c)), ids(h, false).join(','));
+  assert.deepEqual(noMatch(e), []);
+  // baselines: false: the baseline keeps the old IDs, and the answer says so
+  h = await fresh();
+  const n = ids(h, false).length;
+  e = await call('edit', { handle: h, operations: [{ op: 'renumber_activities', select: {}, prefix: 'Z', start: 1, increment: 1, baselines: false }] });
+  assert.ok(ids(h, true).every((c) => !/^Z\d+$/.test(c)));
+  const many = (k: number) => `${k} activities no longer match baseline BL1 (P6 pairs an activity with its baseline by Activity ID; changes lists the Activity IDs that changed); to keep the match, give each pair one Activity ID again (update_activity with new_id; for the baseline's activity add project: the baseline, in_baseline: true).`;
+  assert.deepEqual(noMatch(e), [many(n)]);
+  // one Activity ID changed by hand: P6 says nothing; here the baseline that knows the old ID is named
+  h = await fresh();
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', new_id: 'A-NEW' }] });
+  const one = (now: string, inBaseline = 'A') => `${now} no longer matches baseline BL1, which has it as ${inBaseline} (P6 pairs an activity with its baseline by Activity ID); to keep the match, give it the same Activity ID there (update_activity id: "${inBaseline}", new_id: "${now}", project: "BL1", in_baseline: true).`;
+  assert.deepEqual(noMatch(e), [one('A-NEW')]);
+  // the steer works as written, and the pair is whole again: nothing more is said
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', new_id: 'A-NEW', project: 'BL1', in_baseline: true }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual(noMatch(e), []);
+  // the same fact however the Activity IDs change: several by hand in one edit (one sentence), a raw set_fields, and an ID changed inside the baseline
+  h = await fresh();
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', new_id: 'A1' }, { op: 'update_activity', id: 'B', new_id: 'B1' }, { op: 'update_activity', id: 'C', new_id: 'C1' }] });
+  assert.deepEqual(noMatch(e), [many(3)]);
+  h = await fresh();
+  e = await call('edit', { handle: h, operations: [{ op: 'set_fields', table: 'TASK', where: { task_code: 'A', proj_id: getSession(h).db.tables.PROJECT.rows.find((p) => !p._baseline_of)!.proj_id }, fields: { task_code: 'A9' } }] });
+  assert.deepEqual(noMatch(e), [one('A9')]);
+  h = await fresh();
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', new_id: 'A7', project: 'BL1', in_baseline: true }] });
+  assert.deepEqual(noMatch(e), [one('A', 'A7')]);
+  // a pair is the same two activities before and after: nothing is said when both sides change alike, and it is said when they change apart
+  h = await fresh();
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A', new_id: 'TMP' }, { op: 'update_activity', id: 'B', new_id: 'A' }, { op: 'update_activity', id: 'TMP', new_id: 'B' },
+    { op: 'update_activity', id: 'A', new_id: 'TMP', project: 'BL1', in_baseline: true }, { op: 'update_activity', id: 'B', new_id: 'A', project: 'BL1', in_baseline: true }, { op: 'update_activity', id: 'TMP', new_id: 'B', project: 'BL1', in_baseline: true }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual(noMatch(e), [], 'A and B swapped in the project and in the baseline alike');
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'C', new_id: 'X' }, { op: 'update_activity', id: 'C', new_id: 'Y', project: 'BL1', in_baseline: true }] });
+  assert.deepEqual(noMatch(e), [one('X', 'Y')], 'renamed apart in one edit');
+  // a renumbering whose new IDs are other activities' old ones (A, B, C become B, C, D) still carries the baseline: nothing to say
+  h = await fresh();
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'C', new_id: 'D' }, { op: 'update_activity', id: 'B', new_id: 'C' }, { op: 'update_activity', id: 'A', new_id: 'B' },
+    { op: 'update_activity', id: 'C', new_id: 'D', project: 'BL1', in_baseline: true }, { op: 'update_activity', id: 'B', new_id: 'C', project: 'BL1', in_baseline: true }, { op: 'update_activity', id: 'A', new_id: 'B', project: 'BL1', in_baseline: true }] });
+  assert.deepEqual(noMatch(e), []);
+  // the duplicate rule on its own: the baseline holds X (the project does not), and the project's A is to become X
+  h = await fresh();
+  e = await call('edit', { handle: h, operations: [{ op: 'update_activity', id: 'B', new_id: 'X1', in_baseline: true, project: 'BL1' }, { op: 'delete_activity', id: 'B' }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  e = await call('edit', { handle: h, operations: [{ op: 'renumber_activities', select: { ids: ['A'] }, prefix: 'X', start: 1, increment: 1 }] });
+  assert.match(e.error?.message ?? '', /^Refused: in baseline BL1 the new Activity ID X1 is another activity’s, so the baseline cannot be renumbered with the project\./);
+  e = await call('edit', { handle: h, operations: [{ op: 'renumber_activities', select: { ids: ['A'] }, prefix: 'X', start: 1, increment: 1, skip_baselines_with_duplicates: true }] });
+  assert.ok(!e.error, JSON.stringify(e.error));
+  assert.deepEqual(noMatch(e), ['X1 no longer matches baseline BL1, which has it as A (P6 pairs an activity with its baseline by Activity ID); in BL1 X1 is another activity\'s ID, so the two cannot be given one Activity ID there without renaming that one first.']);
+  assert.ok(ids(h, false).includes('X1') && ids(h, true).includes('A'));
 });

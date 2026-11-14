@@ -195,13 +195,13 @@ export function OptimizePanel() {
       </div>
       {err && <div style={{ color: "#b00020", whiteSpace: 'pre-wrap' }}>{err}</div>}
       {applyErr && <div style={red}>{applyErr}</div>}
-      {!res && !err && <div className="muted">The White Hat IQ schedule reasoner, a trained model running on this computer: it picks a placement priority (and crashed modes, when crash data exists) so the resource-limited schedule finishes soonest. Its proposal is checked with P6 leveling and compared with P6's default leveling. Resources need a Max Units/Time limit. The reasoner plans work that has not started: a schedule in progress (an actual start or finish, progress above 0, or a data date after the planned start) is refused. To shorten the remaining work use Crashing; to level resources use Level Resources.</div>}
+      {!res && !err && <div className="muted">The White Hat IQ schedule reasoner, a trained model running on this computer: it picks a placement priority (and crashed modes, when crash data exists) so the resource-limited schedule finishes soonest. Its proposal is checked with P6 leveling and compared with P6's leveling with the project's leveling settings. Resources need a Max Units/Time limit. The reasoner plans work that has not started: a schedule in progress (an actual start or finish, progress above 0, or a data date after the planned start) is refused. To shorten the remaining work use Crashing; to level resources use Level Resources.</div>}
       {res && notes && <div style={{ overflow: 'auto', flex: 1 }}>
         {changed && <div className="muted" style={{ marginBottom: 4 }}>({CHANGED_SINCE}: Apply is refused)</div>}
         {notes.notes.map((n) => <div key={n} className="muted" style={{ marginBottom: 4 }}>{n}</div>)}
         <table className="tbl"><tbody>
           <tr><td>Without leveling (F9)</td><td>{res.cpm_finish?.slice(0, 16)}</td></tr>
-          <tr><td>P6 leveling (early start priority)</td><td>{res.p6_leveled_finish?.slice(0, 16)}</td></tr>
+          <tr><td>P6 leveling (the project's leveling settings)</td><td>{res.p6_leveled_finish?.slice(0, 16)}</td></tr>
           <tr><td><b>Reasoner, through the same leveler</b></td><td><b>{res.reasoner_finish?.slice(0, 16)}</b> {res.better_than_p6_leveler ? '(earlier than P6 leveling)' : res.better_than_p6_leveler === false ? '(not earlier than P6 leveling)' : ''}</td></tr>
         </tbody></table>
         <div className="muted">{res.activities} activities · {res.leveled_activities} on limited resources · {res.trajectories} trajectories{res.best_from ? ` · best from ${res.best_from}` : ''}{notes.windows ? ` · ${notes.windows}` : ''}{res.crash_cost ? ` · crash cost ${res.crash_cost.toLocaleString()}` : ''}</div>

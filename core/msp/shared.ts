@@ -373,8 +373,9 @@ function taskFromRow(t: Row, uid: string, id: number, level: number, outline: st
     name: t.task_name ?? '', level, outline, summary: false, milestone: isMile, type: DT_TO_MSP_TYPE[t.duration_type ?? ''] ?? 1,
     durHrs: isMile ? 0 : dur, remHrs: isMile ? 0 : rem,
     pct: done ? 100 : isMile ? (t.act_start_date ? 100 : 0) : dur > 0 ? Math.max(0, Math.min(100, Math.round(((dur - rem) / dur) * 100))) : t.act_start_date ? 50 : 0,
-    start: t.act_start_date || t.early_start_date || t.target_start_date || '',
-    finish: t.act_end_date || t.early_end_date || t.target_end_date || '',
+    // (the task's Start and Finish: actual, else the Remaining Early dates, which are the leveled dates after a leveling that preserved the scheduled ones)
+    start: t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date || '',
+    finish: t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date || '',
     earlyStart: done ? '' : t.early_start_date ?? '', earlyFinish: done ? '' : t.early_end_date ?? '',
     lateStart: done ? '' : t.late_start_date ?? '', lateFinish: done ? '' : t.late_end_date ?? '',
     actualStart: t.act_start_date ?? '', actualFinish: t.act_end_date ?? '',

@@ -133,6 +133,12 @@ export const ENUMS: Record<string, string[]> = {
   'UDFTYPE.logical_data_type': ['FT_TEXT', 'FT_START_DATE', 'FT_END_DATE', 'FT_DATE', 'FT_FLOAT_2_DECIMALS', 'FT_INT', 'FT_MONEY', 'FT_STATICTYPE', 'FT_CODE'],
 };
 
+/** What P6 gives a new one, for the coded columns that cannot be empty (a new activity is Task Dependent, Fixed Duration & Units, Duration percent complete,
+ *  a new relationship Finish to Start; a new resource Labor). */
+const ENUM_DEFAULT: Record<string, string> = { 'TASK.task_type': 'TT_Task', 'TASK.duration_type': 'DT_FixedDUR2', 'TASK.complete_pct_type': 'CP_Drtn', 'TASKPRED.pred_type': 'PR_FS', 'RSRC.rsrc_type': 'RT_Labor', 'CALENDAR.clndr_type': 'CA_Base', 'PROJWBS.status_code': 'WS_Open' };
+/** What the repair puts in a coded column ("TABLE.column") whose value is not one of P6's: nothing where the column may be empty, else P6's default (the validator says the same). */
+export const repairedCode = (key: string): string => { const en = ENUMS[key]; return en.includes('') ? '' : ENUM_DEFAULT[key] ?? en[0]; };
+
 export type FieldType = 'date' | 'flag' | 'number' | 'id' | 'text';
 
 const NUMERIC = /(_hr_cnt|_qty|_cost|_pct|_num|_per_hr|_factor|_value|_cnt|_rate|_amt|_wt)$/;

@@ -25,7 +25,7 @@ export function computedFields(db: Db, projIds: string[], hpd = 8): Map<string, 
   for (const t of rows(db, 'TASK')) {
     if (!projIds.includes(t.proj_id)) continue;
     out.set(t.task_id, { code: t.task_code, f: {
-      start: d(t.act_start_date || t.early_start_date), finish: d(t.act_end_date || t.early_end_date), early_start: d(t.early_start_date), early_finish: d(t.early_end_date),
+      start: d(t.act_start_date || t.restart_date || t.early_start_date), finish: d(t.act_end_date || t.reend_date || t.early_end_date), early_start: d(t.early_start_date), early_finish: d(t.early_end_date),
       late_start: d(t.late_start_date), late_finish: d(t.late_end_date), orig_days: days(t, t.target_drtn_hr_cnt), rem_days: days(t, t.remain_drtn_hr_cnt),
       total_float_days: t.act_end_date ? null : days(t, t.total_float_hr_cnt), free_float_days: t.act_end_date ? null : days(t, t.free_float_hr_cnt), critical: isCritical(t, ctx),
     } });

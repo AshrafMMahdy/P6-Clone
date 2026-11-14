@@ -18,7 +18,7 @@ export const SELECT_KEY: Record<string, string> = {
 export const SELECT_GUIDE = [
   `select (in place of id / activity on ${Object.keys(SELECT_KEY).join(', ')}; required on link_activities and renumber_activities): the activities to work on, as a P6 filter and select-all picks them; one operation then does them all (one undo). Criteria, all applying together: [project], [ids [Activity IDs]], [wbs] (a WBS code or list: those elements and everything under them), [code {type, value or values [..], or empty: true}] (activity code values and their child values; a list of such = all of them), [udf {udf, value} or {udf, op, value} or {udf, empty: true}] (op as in set_fields' where), [resource] (a Resource ID or list: activities it is assigned to), [where {TASK field: value or {op, value}}] (as set_fields' where: task_name icontains, status_code TK_NotStart / TK_Active / TK_Complete, task_type, total_float_hr_cnt <= 0 for critical, early_start_date >= a date...), [exclude {same criteria}] (taken back out), [order_by] (id, start, finish, name, listed: the order activities are done in; default id, or the ids order when ids is given). An empty selection changes nothing and is reported in warnings. The answer gives selected (how many) and the first results`,
   `link_activities: select, [type] (FS default, SS, FF, SF), [lag_days], [order_by] (default start): links each picked activity to the next one in that order, as P6's Link Activities on a selection; a relationship already there is skipped`,
-  `renumber_activities: select, [prefix], [start] (the first number; P6's dialog calls it Suffix), [increment], [order_by] (default id): new Activity IDs prefix + start, prefix + (start + increment)... in that order, as P6's Renumber Activity IDs (defaults: the project's Activity ID prefix, suffix and increment, else A, 1000, 10); refused, nothing changed, when a new ID is one another activity of the project keeps (as P6 warns of a duplicate Activity ID)`,
+  `renumber_activities: select, [prefix], [start] (the first number; P6's dialog calls it Suffix), [increment], [order_by] (default id), [baselines] (default true: the same activities are renumbered in every baseline of the project, as P6's "Renumber Selected Activities in Baselines"; false: the renumbered activities no longer match the baselines, and the answer says so), [skip_baselines_with_duplicates] (default false: refused when a new ID is another activity's in a baseline; true: that baseline is left as it is): new Activity IDs prefix + start, prefix + (start + increment)... in that order, as P6's Renumber Activity IDs (defaults: the project's Activity ID prefix, suffix and increment, else A, 1000, 10); refused, nothing changed, when a new ID is one another activity of the project keeps (as P6 warns of a duplicate Activity ID)`,
 ].join('\n');
 
 export interface SelectHelpers {
@@ -40,8 +40,8 @@ const under = (all: Row[], ids: Set<string>, idF: string, parentF: string) => {
   while (todo.length) for (const k of kids.get(todo.pop()!) ?? []) if (!out.has(k)) { out.add(k); todo.push(k); }
   return out;
 };
-const startOf = (t: Row) => t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date || '';
-const finishOf = (t: Row) => t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date || '';
+const startOf = (t: Row) => t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date || '';
+const finishOf = (t: Row) => t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date || '';
 const ID_ORDER = new Intl.Collator(undefined, { numeric: true }); // one collator: localeCompare with options per pair was slow on 10,000 rows
 const byId = (a: Row, b: Row) => ID_ORDER.compare(String(a.task_code), String(b.task_code));
 

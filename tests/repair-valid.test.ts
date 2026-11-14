@@ -31,7 +31,7 @@ function damaged(): string {
   Object.assign(t('NONE'), { target_drtn_hr_cnt: 'abc', remain_drtn_hr_cnt: 'x1', target_start_date: '', target_end_date: '' });
   // an actual start in 2212, after the data date: P6 imports it, so it is kept and reported as an invalid date
   Object.assign(t('FUTURE'), { act_start_date: '2212-01-05 13:00', status_code: 'TK_Active' });
-  // before 1753, outside what a P6 database stores: P6 refuses it, so it is cleared (not started)
+  // before 1753, outside what a P6 database stores: it is cleared (not started)
   Object.assign(t('ANCIENT'), { act_start_date: '1700-05-01 08:00', status_code: 'TK_Active' });
   // a finish before its start: P6 refuses the actual dates; the finish goes, the start stays (in progress)
   Object.assign(t('ORDER'), { act_start_date: '2026-03-10 08:00', act_end_date: '2026-03-05 17:00', status_code: 'TK_Complete', remain_drtn_hr_cnt: '0' });
@@ -74,7 +74,7 @@ test('save repair: one of each damage, repaired field by field, every change lis
   assert.equal(r.changes.some((c: any) => c.table === 'TASK' && (c.row === rowOf('FUTURE') || c.row === rowOf('NOSTART'))), false, 'FUTURE and NOSTART are not changed');
   assert.deepEqual(r.invalid_dates.map((x: any) => [x.key, x.field, x.code]).sort(), [[id('FUTURE'), 'act_start_date', 'ACTUAL_AFTER_DD'], [id('NOSTART'), 'act_end_date', 'FINISH_WITHOUT_START']].sort());
   assert.deepEqual([ch(id('ANCIENT'), 'act_start_date').new, ch(id('ANCIENT'), 'status_code').new], ['', 'TK_NotStart']);
-  assert.match(ch(id('ANCIENT'), 'act_start_date').reason, /before 1753, outside what a P6 database stores \(P6 refuses it\)/);
+  assert.match(ch(id('ANCIENT'), 'act_start_date').reason, /before 1753, outside what a P6 database stores: an actual cannot be guessed/);
   assert.deepEqual([ch(id('ORDER'), 'act_end_date').new, ch(id('ORDER'), 'status_code').new, ch(id('ORDER'), 'act_start_date')], ['', 'TK_Active', undefined]);
   assert.equal(r.notes.length, 1); assert.match(r.notes[0], /^Repaired copy written: \d+ repairs \(changes lists them\); 3 actual dates cleared: run schedule\.$/);
   assert.deepEqual([ch(id('BADFIN'), 'act_end_date').new, ch(id('BADFIN'), 'status_code').new], ['', 'TK_Active']);

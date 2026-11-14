@@ -184,7 +184,10 @@ test('26: level_resources says when one activity alone needs more than the limit
   await call('edit', { handle: h, operations: [{ op: 'update_assignment', activity: 'A', resource: 'R1', units_per_day: 16 }] });
   await call('schedule', { handle: h });
   const l = await call('level_resources', { handle: h, dry_run: true });
-  assert.match(l.report, /Resource R1 still overallocated by \d+ h on 2026-01-\d\d: activity A alone needs 16 h in a day against the limit of 8 h, so delaying it cannot fix this: lower its assignment \(edit update_assignment\) or raise the limit \(edit update_resource max_units_per_day\)/);
+  // (P6's "Activities that cannot be leveled": the activity is left where it is and listed with the cause; the two ways out are said once, in the notes)
+  assert.deepEqual(l.cannot_be_leveled, [{ id: 'A', why: 'alone it needs 16 h in a day against the limit of 8 h' }]);
+  assert.ok(l.notes.includes('An activity that alone needs more than the limit of its resource cannot be fitted by a delay: lower its assignment (edit update_assignment) or raise the limit (edit update_resource max_units_per_day).'), JSON.stringify(l.notes));
+  assert.match(l.report, /Activities that cannot be leveled\.+1\r\n[^]*Resource R1 still overallocated by \d+ h on 2026-01-\d\d/);
 });
 
 test('said once for the file: earned_value names every project that carries no costs in one sentence; level_resources says when no resource is assigned (and when none of the named ones is)', async () => {

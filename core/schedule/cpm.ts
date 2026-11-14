@@ -9,6 +9,7 @@ import { calendarDefOfRow, hoursPerWeek, inheritExceptions, standardCalendar, ty
 import { inLoopCheck, loopsOfLinks } from '../xer/validate.ts';
 import { buildScheduleLog } from './log.ts';
 import { actualAfterDataDate, cstrName, daysText, defaultCalendarWeek, loopNote, minutesToDays, namesText, noDataDateUsed, noDateNoStartInstead, noDateNoStartWrong, outOfSequence, plural, refused } from '../notes.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 export type LogicMode = 'retained' | 'override' | 'actual';
 export type FloatType = 'start' | 'finish' | 'smallest';
@@ -43,6 +44,8 @@ export interface SchedOptions {
   breakLoops?: boolean;
   /** Schedule Options > Advanced > Calculate multiple float paths: F9 fills Float Path and Float Path Order. */
   floatPaths: { enabled: boolean; method: 'total_float' | 'free_float'; count: number; endActivity?: string };
+  /** Resource leveling: the earliest start (minutes) the leveler gives an activity not started, or the remaining work of one in progress (by task_id). The calculation dates everything else by its own rules. */
+  startFloor?: Map<string, number>;
 }
 
 export interface ScheduleStats { activities: number; relationships: number; notStarted: number; inProgress: number; completed: number; finish: number | null; dataDate: number | null }
@@ -183,6 +186,38 @@ function sameNameProjectCals(db: Db): Map<string, string> {
 
 /** Schedule (F9) and write the dates into the TASK and PROJECT rows. With sink, nothing is written: each activity's
  *  calculated values go to sink instead (a dry run, e.g. to compare with the saved dates without a copy or undo record). */
+/** How the schedule reads an activity's remaining work: the calendar it runs on (`cal`), the activity's own calendar (`taskCal`: floats are measured on it, even for a
+ *  resource dependent activity) and the remaining hours. A resource dependent activity runs on its longest labor / nonlabor assignment's resource calendar, for
+ *  that assignment's remaining units over its units per hour. One rule, read by the scheduler and by the resource leveler. `projCal`: the project's calendar. */
+export function activityWork(db: Db, cals: ReturnType<typeof calendarResolver>): (row: Row, projCal: WorkCalendar) => { cal: WorkCalendar; taskCal: WorkCalendar; hrs: number } {
+  const rsrcCal = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.clndr_id]));
+  const rsrcType = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
+  const firstRsrc = new Map<string, string>();
+  const asgByTask = new Map<string, Row[]>();
+  for (const a of rows(db, 'TASKRSRC')) { if (!firstRsrc.has(a.task_id)) firstRsrc.set(a.task_id, a.rsrc_id); let l = asgByTask.get(a.task_id); if (!l) asgByTask.set(a.task_id, (l = [])); l.push(a); }
+  const sameNameProjectCal = sameNameProjectCals(db);
+  return (row, projCal) => {
+    let cal = cals.get(sameNameProjectCal.get(row.proj_id + '|' + row.clndr_id) ?? row.clndr_id) ?? projCal;
+    const taskCal = cal; // floats are measured on the activity's own calendar (even for resource dependent)
+    let hrs = row.remain_drtn_hr_cnt !== '' && row.remain_drtn_hr_cnt != null ? Number(row.remain_drtn_hr_cnt) : Number(row.target_drtn_hr_cnt || 0);
+    if (row.task_type === 'TT_Rsrc') {
+      // Resource dependent: the longest labor/nonlabor assignment drives, on its resource's calendar,
+      // for remaining units / remaining units per hour.
+      let best = -1, bestCal: WorkCalendar | undefined;
+      for (const a of asgByTask.get(row.task_id) ?? []) {
+        if ((a.rsrc_type || rsrcType.get(a.rsrc_id)) === 'RT_Mat') continue;
+        const rate = Number(a.remain_qty_per_hr || 0);
+        if (!(rate > 0)) continue;
+        const h = Number(a.remain_qty || 0) / rate;
+        if (h > best) { best = h; bestCal = cals.get(rsrcCal.get(a.rsrc_id) ?? ''); }
+      }
+      if (best >= 0) { hrs = best; cal = bestCal ?? cal; }
+      else cal = cals.get(rsrcCal.get(firstRsrc.get(row.task_id) ?? '')) ?? cal;
+    }
+    return { cal, taskCal, hrs };
+  };
+}
+
 export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedOptions> = {}, sink?: (row: Row, values: Row) => void): ScheduleResult {
   const findings: Finding[] = [];
   const cals = calendarResolver(db, findings);
@@ -222,27 +257,13 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
   for (const a of rows(db, 'TASKRSRC')) { let l = asgByTask.get(a.task_id); if (!l) asgByTask.set(a.task_id, (l = [])); l.push(a); }
   const rsrcType = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r.rsrc_type]));
 
+  const work = activityWork(db, cals);
   const acts = new Map<string, Act>();
   for (const row of rows(db, 'TASK')) {
     const proj = projects.get(row.proj_id);
     if (!proj) continue;
-    let cal = cals.get(sameNameProjectCal.get(row.proj_id + '|' + row.clndr_id) ?? row.clndr_id) ?? proj.cal;
-    const taskCal = cal; // floats are measured on the activity's own calendar (even for resource dependent)
-    let hrs = row.remain_drtn_hr_cnt !== '' && row.remain_drtn_hr_cnt != null ? Number(row.remain_drtn_hr_cnt) : Number(row.target_drtn_hr_cnt || 0);
-    if (row.task_type === 'TT_Rsrc') {
-      // Resource dependent: the longest labor/nonlabor assignment drives, on its resource's calendar,
-      // for remaining units / remaining units per hour.
-      let best = -1, bestCal: WorkCalendar | undefined;
-      for (const a of asgByTask.get(row.task_id) ?? []) {
-        if ((a.rsrc_type || rsrcType.get(a.rsrc_id)) === 'RT_Mat') continue;
-        const rate = Number(a.remain_qty_per_hr || 0);
-        if (!(rate > 0)) continue;
-        const h = Number(a.remain_qty || 0) / rate;
-        if (h > best) { best = h; bestCal = cals.get(rsrcCal.get(a.rsrc_id) ?? ''); }
-      }
-      if (best >= 0) { hrs = best; cal = bestCal ?? cal; }
-      else cal = cals.get(rsrcCal.get(firstRsrc.get(row.task_id) ?? '')) ?? cal;
-    }
+    // (the calendar its remaining work runs on, its own calendar for floats, and the remaining hours: activityWork, read by the leveler too)
+    const { cal, taskCal, hrs } = work(row, proj.cal);
     const as = parseP6Date(row.act_start_date), af = parseP6Date(row.act_end_date);
     const status: Status = af != null ? 'CO' : as != null ? 'IP' : 'NS';
     const isMile = row.task_type === 'TT_Mile' || row.task_type === 'TT_FinMile';
@@ -256,7 +277,7 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
 
   // Relationships
   const rels: Rel[] = [];
-  for (const row of rows(db, 'TASKPRED')) {
+  for (const row of logicRelationships(db)) {
     const succ = acts.get(row.task_id) ?? null, pred = acts.get(row.pred_task_id) ?? null;
     if (!succ && !pred) continue;
     if (succ && pred && succ === pred) continue;
@@ -444,6 +465,9 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
         if (ext != null && !a.proj.opts.ignoreExternal && !a.preds.some((r) => !r.pred) && ext > raw) raw = ext;
       }
       let mand: number | null = null;
+      // (a leveling's delay: of an activity not started, or of the remaining work of one in progress)
+      const leveled = a.proj.opts.startFloor?.get(a.id);
+      if (leveled != null && leveled > raw) raw = leveled;
       if (a.status === 'NS') {
         for (const [ty, c0] of cstr(a)) {
           // P6 6.x: a finish constraint on a period start means one minute into the period
@@ -573,7 +597,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     // any successor's early dates (successors already final), never past the activity's own late finish.
     for (let i = order.length - 1; i >= 0; i--) {
       const a = order[i];
-      if (a.status === 'CO' || a.type === 'TT_LOE' || !cstr(a).some(([t]) => t === 'CS_ALAP')) continue;
+      // (not in a leveling: P6 ignores the constraint when it levels)
+      if (a.proj.opts.startFloor || a.status === 'CO' || a.type === 'TT_LOE' || !cstr(a).some(([t]) => t === 'CS_ALAP')) continue;
       let ef = BIG; // successors limit it, not the late finish (negative float stays negative)
       for (const r of a.succs) {
         if (!r.succ || !isMain(r.succ)) continue; // completed successors count with their propagated dates

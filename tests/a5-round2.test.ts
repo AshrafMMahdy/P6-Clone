@@ -121,15 +121,15 @@ test('G-7 level_resources: dry_run answers leveled dates and peaks without a cha
   const h = await crew();
   const changesBefore = (await call('list_open', {})).open.find((x: any) => x.handle === h).changes;
   const dry = await call('level_resources', { handle: h, dry_run: true });
-  assert.deepEqual([dry.dry_run, dry.delayed, dry.moved], [true, 1, [{ id: 'D', from: '2026-03-09 08:00', start: '2026-03-16 08:00', finish: '2026-03-18 17:00' }]]);
+  assert.deepEqual([dry.dry_run, dry.delayed, dry.moved], [true, 1, [{ id: 'D', from: '2026-03-09 08:00', start: '2026-03-16 08:00', finish: '2026-03-18 17:00', delayed_by: 'resource' }]]);
   assert.deepEqual(dry.peaks, [{ resource: 'CREW', peak: 8, limit: 8, day: '2026-03-09', overallocated: false }]);
   assert.equal((await call('get_activity', { handle: h, activity_id: 'D' })).start, '2026-03-09 08:00', 'nothing committed');
   assert.equal((await call('list_open', {})).open.find((x: any) => x.handle === h).changes, changesBefore, 'no undo entry');
   // D first: B (and C after it) wait instead
   assert.deepEqual((await call('level_resources', { handle: h, dry_run: true, activity_priority: ['D'] })).moved.map((m: any) => m.id), ['B', 'C']);
   assert.deepEqual((await call('level_resources', { handle: h, dry_run: true, priority_by: 'total_float' })).moved.map((m: any) => m.id), ['D']);
-  // 100 % overallocation allowed: nothing to move; only CRANE leveled: nothing to move
-  assert.equal((await call('level_resources', { handle: h, dry_run: true, over_allocation_pct: 100 })).delayed, 0);
+  // the percent to over-allocate is used only when leveling within float, as in P6 (tests/level-p6.test.ts has P6's published cases); only CRANE leveled: nothing to move
+  assert.equal((await call('level_resources', { handle: h, dry_run: true, over_allocation_pct: 100 })).delayed, 1);
   assert.equal((await call('level_resources', { handle: h, dry_run: true, resources: ['CRANE'] })).delayed, 0);
   assert.equal((await call('level_resources', { handle: h, dry_run: true, priority_by: 'colour' })).error.code, 'bad_input');
   assert.equal((await call('level_resources', { handle: h, resources: ['NOPE'] })).error.code, 'bad_input');

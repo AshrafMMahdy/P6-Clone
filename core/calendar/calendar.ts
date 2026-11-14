@@ -22,7 +22,7 @@ export class WorkCalendar {
   /** Shifts on a day index (days since 1970-01-01). Not cached: a cache is one more map lookup than it saves, and
    *  float spans of years over many calendars filled it with millions of days. */
   shiftsOn(day: number): Shift[] {
-    return this.def.exceptions.get(day + OLE_OFFSET) ?? this.def.week[(day + 4) % 7];
+    return this.def.exceptions.get(day + OLE_OFFSET) ?? this.def.week[(((day + 4) % 7) + 7) % 7];
   }
 
   isWorkTime(t: number): boolean {

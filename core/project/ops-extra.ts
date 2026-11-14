@@ -12,7 +12,7 @@ import { LOB_UDF } from '../lob/expand.ts';
 import { LOB_FLAG } from '../lob/store.ts';
 import { STEP_FIELDS, syncFromSteps } from './steps.ts';
 import { DISTS, setEstimate, type Dist } from '../risk/montecarlo.ts';
-import { assignBaseline, deleteBaseline, restoreBaseline, saveBaseline } from '../progress/baseline.ts';
+import { assignBaseline, assignedAs, convertToBaseline, deleteBaseline, restoreBaseline, saveBaseline } from '../progress/baseline.ts';
 import { applyFields, FIELD_GUIDE, FIELD_OP_NAMES } from './ops-fields.ts';
 import { cycles, p6Refusals } from './integrity.ts';
 import { compile, isHtml, isTextField, replaceHtml, replacePlain } from './replace-text.ts';
@@ -42,7 +42,7 @@ export interface OpHelpers {
 }
 type Op = Record<string, unknown> & { op: string };
 
-export const EXTRA_OP_NAMES = [...FIELD_OP_NAMES, 'delete_code_type', 'delete_udf', 'delete_cost_account', 'delete_calendar', 'delete_resource_curve', 'clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'replace_text', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve', 'add_financial_periods', 'update_financial_period', 'delete_financial_period', 'store_period_performance', 'add_financial_period_calendar', 'update_financial_period_calendar', 'delete_financial_period_calendar', 'set_period_actuals'];
+export const EXTRA_OP_NAMES = [...FIELD_OP_NAMES, 'delete_code_type', 'delete_udf', 'delete_cost_account', 'delete_calendar', 'delete_resource_curve', 'clear_descriptions', 'add_resource_curve', 'build_baseline', 'update_wbs', 'add_code_type', 'add_code_value', 'assign_code', 'add_udf', 'set_udf', 'set_notebook', 'add_cost_account', 'add_expense', 'update_expense', 'delete_expense', 'add_step', 'update_step', 'delete_step', 'set_estimates', 'save_baseline', 'convert_to_baseline', 'assign_baseline', 'delete_baseline', 'restore_baseline', 'update_baseline', 'clear_notebooks', 'add_eps', 'update_eps', 'delete_eps', 'add_obs', 'update_obs', 'delete_obs', 'update_pobs', 'add_role', 'update_role', 'delete_role', 'update_calendar', 'update_assignment', 'update_resource', 'delete_resource', 'update_code_type', 'update_code_value', 'delete_code_value', 'update_cost_account', 'regenerate_guids', 'clear_authors', 'replace_text', 'clear_udfs', 'delete_expenses', 'update_udf', 'update_resource_curve', 'add_financial_periods', 'update_financial_period', 'delete_financial_period', 'store_period_performance', 'add_financial_period_calendar', 'update_financial_period_calendar', 'delete_financial_period_calendar', 'set_period_actuals'];
 
 export const EXTRA_GUIDE = [
   `update_resource_curve: name, new_name`,
@@ -66,8 +66,9 @@ export const EXTRA_GUIDE = [
   `add_step: activity, name, [weight] (default 1), [percent_complete], [completed], [description]; update_step: activity, name, [new_name], [weight], [percent_complete], [completed], [description]; delete_step: activity, name`,
   `set_estimates: activity, [min_days], [most_likely_days], [max_days], [distribution] (${Object.keys(DISTS).join(', ')}), or clear: true. Three-point remaining durations for monte_carlo (missing values default to the remaining duration)`,
   `save_baseline: [project], [name], [assign_as] (project, bl1, bl2, bl3). Copies the project as a baseline`,
+  `convert_to_baseline: project (the project to convert), of (the project it becomes a baseline of), [assign_as] (project, bl1, bl2, bl3). P6's "Convert another project to a new baseline of the current project": the project itself becomes the baseline, under its own Project ID, and is no longer a project of the file (restore_baseline turns it back); its activities are compared with the other project's by Activity ID. Refused, as in P6, for a project that has baselines of its own`,
   `assign_baseline: baseline (name), [as] (project default = the project baseline P6 stores; bl1, bl2, bl3 = primary/secondary/tertiary user baselines), [project]; "" baseline clears that slot`,
-  `delete_baseline: baseline; restore_baseline: baseline (turns it back into a normal project); update_baseline: baseline, [new_name] (its Project ID, and its root WBS code), [name] (its project name, the root WBS name). A baseline's activities and WBS elements are renamed with update_activity / update_wbs and in_baseline: true, project = the baseline`,
+  `delete_baseline: baseline; restore_baseline: baseline (turns it back into a normal project, with the relationships it holds to other projects). A baseline that is assigned is neither deleted nor restored, as in P6: clear its assignment first (assign_baseline with baseline ""); update_baseline: baseline, [new_name] (its Project ID, and its root WBS code), [name] (its project name, the root WBS name). A baseline's activities and WBS elements are renamed with update_activity / update_wbs and in_baseline: true, project = the baseline`,
   `add_eps / update_eps / delete_eps: id, [name], [parent], [new_id]; projects are put under an EPS with set_project eps`,
   `add_obs / update_obs / delete_obs: name, [parent], [new_name], [description] (update_obs; "" clears it); add_role / update_role / delete_role: id, [name], [parent], [new_id]`,
   `update_pobs: [pobs_id] or [name], [new_name], [description] ("" clears it), [manager] ("" clears it): a row of the performing organisations (POBS, the file's Performing Organization table: pobs_name, pobs_descr, pobs_manager), which add_obs / update_obs do not reach (they edit the OBS). Needs a pobs_id or the row's name (several rows with that name: use pobs_id; list_dictionaries only: pobs lists them); the root row can be renamed but keeps its place (no parent) and a name. clear_descriptions blanks every pobs_descr too`,
@@ -226,6 +227,11 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
   const baseline = (name: unknown) => rows(db, 'PROJECT').find((p) => p._baseline_of && lc(p.proj_short_name) === lc(name)) ?? fail(`No baseline "${name}". Baselines: ${rows(db, 'PROJECT').filter((p) => p._baseline_of).map((p) => p.proj_short_name).join(', ') || 'none yet (save_baseline)'}.`);
   const SLOT: Record<string, string> = { project: 'sum_base_proj_id', bl1: '_bl1', bl2: '_bl2', bl3: '_bl3', primary: '_bl1', secondary: '_bl2', tertiary: '_bl3' };
   const slot = (v: unknown) => SLOT[lc(v ?? 'project')] ?? fail('as / assign_as must be project, bl1, bl2 or bl3.');
+  /** As in P6, a baseline that is assigned is neither restored nor deleted: the answer says where it is assigned and how to clear that. */
+  const notAssigned = (b: Row, done: 'restored' | 'deleted') => {
+    const at = assignedAs(db, b.proj_id);
+    if (at.length) fail(`Baseline "${b.proj_short_name}" is assigned (${at.map((x) => x.words).join(', ')}): as in P6, an assigned baseline is not ${done}; clear the assignment first (${at.map((x) => `assign_baseline baseline: "", as: "${x.slot}", project: "${x.project}"`).join('; ')}), then call this again.`);
+  };
   const assignSlot = (p: Row, f: string, bid: string) => { if (f === 'sum_base_proj_id') { if (bid) assignBaseline(db, p.proj_id, bid); else p.sum_base_proj_id = ''; } else { addField(table(db, 'PROJECT'), f); p[f] = bid; } };
   /** A baseline activity's budgeted cost: its assignments' budgets scaled to it, else one expense line. */
   const setBaselineCost = (b: Row, cost: number) => {
@@ -691,9 +697,20 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       assignSlot(p, f, b.proj_id);
       return { assigned: b.proj_short_name, as: lc(op.as ?? 'project'), project: p.proj_short_name };
     }
+    case 'convert_to_baseline': {
+      // (a baseline is not a project: it is neither converted nor what a project is converted to)
+      for (const [what, v] of [['project', op.project], ['of', op.of]] as const) { const bl = rows(db, 'PROJECT').find((p) => p._baseline_of && lc(p.proj_short_name) === lc(v)); if (bl) fail(`${bl.proj_short_name} is a baseline, not a project: ${what === 'project' ? 'only a project is converted (restore_baseline turns a baseline back into a project first)' : 'a project becomes a baseline of a project, not of a baseline'}.`); }
+      const src = h.project(str(op.project, 'project')), of = h.project(str(op.of, 'of'));
+      if (src.proj_id === of.proj_id) fail(`${src.proj_short_name} cannot be a baseline of itself: give the project to convert (project) and another project it becomes a baseline of (of).`);
+      const own = rows(db, 'PROJECT').filter((x) => x._baseline_of === src.proj_id).map((x) => x.proj_short_name);
+      if (own.length) fail(`${src.proj_short_name} has ${own.length === 1 ? 'a baseline' : 'baselines'} of its own (${own.join(', ')}): as in P6, a project that has baselines is not converted; delete or restore ${own.length === 1 ? 'it' : 'them'} first (delete_baseline, restore_baseline).`);
+      convertToBaseline(db, src.proj_id, of.proj_id);
+      if (op.assign_as != null) assignSlot(of, slot(op.assign_as), src.proj_id);
+      return { baseline: src.proj_short_name, of: of.proj_short_name, assigned_as: op.assign_as ?? null };
+    }
     case 'delete_baseline': {
       const b = baseline(str(op.baseline, 'baseline'));
-      for (const p of rows(db, 'PROJECT')) for (const f of ['_bl1', '_bl2', '_bl3']) if (p[f] === b.proj_id) p[f] = '';
+      notAssigned(b, 'deleted');
       const name = b.proj_short_name;
       deleteBaseline(db, b.proj_id);
       return { deleted: name };
@@ -713,6 +730,7 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
     }
     case 'restore_baseline': {
       const b = baseline(str(op.baseline, 'baseline'));
+      notAssigned(b, 'restored');
       const name = b.proj_short_name;
       restoreBaseline(db, b.proj_id);
       return { restored: name, note: 'It is now a normal project with this Project ID.' };

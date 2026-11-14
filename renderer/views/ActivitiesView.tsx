@@ -264,7 +264,7 @@ function editSpec(t: Row, colId: string, ctx: Ctx): EditorSpec | null {
   if (fin) return { type: 'number', value: String(finStored(ctx.db, fin[1], t.task_id, fin[2])) };
   const raw: Record<string, string> = {
     task_type: t.task_type, duration_type: t.duration_type, pct_type: t.complete_pct_type, cstr_type: t.cstr_type,
-    start: t.act_start_date || t.early_start_date, finish: t.act_end_date || t.early_end_date, act_start: t.act_start_date, act_finish: t.act_end_date, cstr_date: t.cstr_date,
+    start: t.act_start_date || t.restart_date || t.early_start_date, finish: t.act_end_date || t.reend_date || t.early_end_date, act_start: t.act_start_date, act_finish: t.act_end_date, cstr_date: t.cstr_date,
     orig_dur: fmtDur(t.target_drtn_hr_cnt, ctx.prefs), rem_dur: fmtDur(t.remain_drtn_hr_cnt, ctx.prefs), pct: c.get(t, ctx).replace('%', ''), phys_pct: t.phys_complete_pct || '0',
   };
   return { type: c.edit.type, value: raw[colId] ?? c.get(t, ctx), options: c.edit.options };

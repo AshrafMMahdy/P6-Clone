@@ -15,6 +15,7 @@ import { DataError, scheduleRefusal } from '../notes.ts';
 import { MIN_PER_DAY, parseP6Date } from '../dates.ts';
 import { calendarResolver, optionsFor, scheduleProjects, p6num, type SchedOptions } from '../schedule/cpm.ts';
 import { linkedTasks, riskProbability, riskScheduleHours, risksOf, type RiskPhase } from './register.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 export const RISKEST = '_RISKEST';
 export type Dist = 'triangle' | 'betapert' | 'uniform' | 'none';
@@ -362,7 +363,7 @@ function prepare(db: Db, projIds: string[]): Prepared {
   // Tables the scheduler only reads: shallow copies so edits made while the run is in progress do not leak in.
   for (const name of ['CALENDAR', 'TASKPRED', 'SCHEDOPTIONS', 'RSRC', 'TASKRSRC', 'PROJWBS']) {
     const t = db.tables[name];
-    if (t) shared[name] = { name, fields: [...t.fields], rows: t.rows.map((r) => ({ ...r })) };
+    if (t) shared[name] = { name, fields: [...t.fields], rows: (name === 'TASKPRED' ? logicRelationships(db) : t.rows).map((r) => ({ ...r })) };
   }
   const P = db.tables.PROJECT ?? { name: 'PROJECT', fields: [], rows: [] };
   return { base: pos.map((i) => taskRows[i]), pos, taskRows, taskFields: [...T.fields], projRows: P.rows.map((r) => ({ ...r })), projFields: [...P.fields], shared, header: db.header };

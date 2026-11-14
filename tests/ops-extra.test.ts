@@ -116,7 +116,9 @@ test('ops: baselines (project baseline and BL1-BL3), listed by list_dictionaries
   assert.equal(dict.baselines[0].bl1, 'P1 Rev1');
   assert.equal(dict.baselines[0].saved.length, 2);
   assert.ok(p.sum_base_proj_id);
-  ok(db, [{ op: 'delete_baseline', baseline: 'P1 Rev1' }]);
+  // as in P6, an assigned baseline is not deleted: the refusal says where it is assigned and how to clear it
+  assert.equal(applyOps(db, [{ op: 'delete_baseline', baseline: 'P1 Rev1' }]).error!.message, 'Baseline "P1 Rev1" is assigned (Primary Baseline of P1): as in P6, an assigned baseline is not deleted; clear the assignment first (assign_baseline baseline: "", as: "bl1", project: "P1"), then call this again.');
+  ok(db, [{ op: 'assign_baseline', baseline: '', as: 'bl1' }, { op: 'delete_baseline', baseline: 'P1 Rev1' }]);
   assert.equal(rows(db, 'PROJECT').find((x) => x.proj_short_name === 'P1')!._bl1, '');
   bad(db, [{ op: 'assign_baseline', baseline: 'nope' }], /No baseline "nope"/);
   // the open project's edits are not confused with the baseline copy (one T1 outside the baseline)

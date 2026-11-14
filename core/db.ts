@@ -145,7 +145,11 @@ export function nextId(db: Db, tableName: string): number {
   for (let i = c.n; i < raw.length; i++) { const n = Number(raw[i][k]); if (n > c.max) c.max = n; }
   c.n = raw.length; c.last = raw[raw.length - 1];
   idCache?.set(raw, c);
-  return c.max + 1;
+  // (an activity's number: also above every number a relationship names. A relationship kept to an activity outside the file holds that activity's number,
+  // and a new activity given the same number would become its other end.)
+  let max = c.max;
+  if (tableName === 'TASK') for (const r of realOf(rows(db, 'TASKPRED'))) { const a = Number(r.task_id), b = Number(r.pred_task_id); if (a > max) max = a; if (b > max) max = b; }
+  return max + 1;
 }
 
 export function addField(t: Table, f: string): void {

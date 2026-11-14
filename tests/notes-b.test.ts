@@ -50,7 +50,8 @@ test('13: a file with no data date says the planned start was used, in every ans
   const d0 = await call('dcma_14', { handle: o.handle });
   assert.ok(d0.notes.some((n: string) => /^Checks that need a data date( and .*)? not assessed: aurora_tower has no data date; pass status_date\.$/.test(n)), JSON.stringify(d0.notes));
   const ps0 = await call('project_summary', { handle: o.handle });
-  assert.deepEqual(ps0.notes, ['aurora_tower has no data date: schedule uses the planned start 2026-06-22 08:00. Set one with schedule data_date.']);
+  // (the summary gives saved dates: that they are not what a calculation gives is said first, owner 2026-11-14)
+  assert.deepEqual(ps0.notes, ['The saved dates of aurora_tower are not what a recalculation gives (131 of 131 open activities differ): these figures are of the saved dates; run schedule to recalculate them.', 'aurora_tower has no data date: schedule uses the planned start 2026-06-22 08:00. Set one with schedule data_date.']);
   const s = await call('schedule', { handle: o.handle });
   assert.equal(s.notes.filter((w: string) => used.test(w)).length, 1, 'said once');
   for (const tool of ['decm', 'check_schedule']) {
@@ -140,7 +141,7 @@ test('17: the activity count says when duplicate rows were merged', async () => 
   T.push({ ...T[0], task_name: 'A again' }); // two rows with one internal id (not identical)
   const ps = await call('project_summary', { handle: h });
   assert.equal(ps.activities, 3);
-  assert.deepEqual(ps.notes, ['Activity A appears twice in the file; it was counted once; save with repair: true fixes it.']);
+  assert.deepEqual(ps.notes, ['The saved dates of P are not what a recalculation gives (3 of 3 open activities differ): these figures are of the saved dates; run schedule to recalculate them.', 'Activity A appears twice in the file; it was counted once; save with repair: true fixes it.']);
   const sc = await call('schedule', { handle: h });
   assert.equal(sc.stats.activities, 2);
   assert.deepEqual(sc.notes, ['Activity A appears twice in the file; it was scheduled once; save with repair: true fixes it.']);

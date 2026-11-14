@@ -482,8 +482,8 @@ function Assignments({ r, ctx }: { r: Row; ctx: Ctx }) {
     const fin = a.act_end_date || t?.act_end_date;
     return {
       a, t, proj, act,
-      start: start ? `${fmtDate(start, p)} A` : fmtDate(a.restart_date || t?.early_start_date || a.target_start_date || t?.target_start_date, p),
-      finish: fin ? `${fmtDate(fin, p)} A` : fmtDate(a.reend_date || t?.early_end_date || a.target_end_date || t?.target_end_date, p),
+      start: start ? `${fmtDate(start, p)} A` : fmtDate(a.restart_date || t?.restart_date || t?.early_start_date || a.target_start_date || t?.target_start_date, p),
+      finish: fin ? `${fmtDate(fin, p)} A` : fmtDate(a.reend_date || t?.reend_date || t?.early_end_date || a.target_end_date || t?.target_end_date, p),
       sortKey: `${proj?.proj_short_name ?? ''}|${t?.task_code ?? ''}`,
     };
   }).sort((x, y) => x.sortKey.localeCompare(y.sortKey, undefined, { numeric: true }));

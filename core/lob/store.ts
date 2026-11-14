@@ -83,7 +83,7 @@ export function rebuildFromActivities(db: Db, projId: string): { model: LobModel
   const locations: LobLocation[] = all.map((c) => ({ code: c.short_name, name: c.actv_code_name || c.short_name, level: depth(c), parent: byId.get(c.parent_actv_code_id)?.short_name ?? null }));
   const levels = [...Array(Math.max(1, ...locations.map((l) => l.level))).keys()].map((k) => `Level ${k + 1}`);
   const tasks = new Map<string, LobTask>();
-  const acts = rows(db, 'TASK').filter((t) => t.proj_id === projId && val.get('task')!.get(t.task_id)?.text).sort((a, b) => (a.early_start_date || a.target_start_date || '').localeCompare(b.early_start_date || b.target_start_date || ''));
+  const acts = rows(db, 'TASK').filter((t) => t.proj_id === projId && val.get('task')!.get(t.task_id)?.text).sort((a, b) => (a.restart_date || a.early_start_date || a.target_start_date || '').localeCompare(b.restart_date || b.early_start_date || b.target_start_date || ''));
   for (const a of acts) {
     const code = val.get('task')!.get(a.task_id)!.text!, loc = assigned(a.task_id, lt)?.short_name;
     if (!loc) continue;

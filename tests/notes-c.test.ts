@@ -100,10 +100,18 @@ test('review grades a check it could not assess "not_assessed" (not "pass") and 
 
 test('a lenient open: what is not repaired is counted, an invalid code names the valid ones, a cut list of findings names the file that holds them all, a repeated row is said once', async () => {
   const p = await open('PDC1_Baseline_Rev0.xer');
-  const bad = p.notes.find((n: string) => /not a valid code/.test(n));
-  assert.match(bad, /^Not repaired: PROJECT\.def_duration_type is "Fixed Duration & Units", not a valid code \(valid: DT_FixedDUR2, DT_FixedDrtn, DT_FixedQty, DT_FixedRate\): P6 refuses the file \((\d+) of this kind\)\.$/);
-  // counted from the file: every value of a coded column that is not one of P6's codes is one such finding; the note's count is the findings of that kind the answer counts
-  assert.equal(Number(/\((\d+) of this kind\)/.exec(bad)![1]), p.diagnostics.counts.error - 1, 'the invalid codes: every error but the one about the end marker');
+  const bad = p.notes.filter((n: string) => /not a value P6 has/.test(n));
+  // (owner 2026-11-14: the sentence says the value is not one of P6's and what the repair does; that P6 refuses such a file is established by no source, so it is
+  // not said. One sentence per column, with how many values of that column are such: what the repair puts is the column's)
+  assert.deepEqual(bad, [
+    'Not repaired: PROJECT.def_duration_type is "Fixed Duration & Units", which is not a value P6 has for it (P6\'s: DT_FixedDUR2, DT_FixedDrtn, DT_FixedQty, DT_FixedRate); save with repair: true empties it.',
+    'Not repaired: PROJECT.def_qty_type is "Fixed Qty", which is not a value P6 has for it (P6\'s: QT_Hour, QT_Day, QT_Week, QT_Month, QT_Year); save with repair: true empties it.',
+    'Not repaired: PROJWBS.status_code is "Active", which is not a value P6 has for it (P6\'s: WS_Planned, WS_Open, WS_Closed, WS_Whatif, WS_Requested) (13 such values in this column); save with repair: true puts WS_Open, P6\'s default.',
+    'Not repaired: NB_0001 TASK.complete_pct_type is "CP_Start", which is not a value P6 has for it (P6\'s: CP_Drtn, CP_Phys, CP_Units) (248 such values in this column); save with repair: true puts CP_Drtn (Duration), P6\'s default.',
+  ]);
+  assert.ok(!p.notes.concat(p.diagnostics.findings.map((f: any) => f.message)).some((n: string) => /not a value P6 has|not a number|cannot be read as a date|where P6 has Y or N/.test(n) && /P6 refuses/.test(n)));
+  // counted from the file: every such value is one finding; the sentences' counts add up to the errors but the one about the end marker
+  assert.equal(1 + 1 + 13 + 248, p.diagnostics.counts.error - 1, 'the invalid codes: every error but the one about the end marker');
   const m = /^25 of (\d+) shown; all \1 in (.+\.csv)\.$/.exec(p.diagnostics.findings_note);
   assert.ok(m, p.diagnostics.findings_note);
   assert.equal(p.diagnostics.findings.length, 25); assert.equal(p.diagnostics.findings_total, Number(m![1]));
@@ -315,10 +323,15 @@ test('a report that reads the project baseline says when a project has none in t
   const v = await call('run_report', { handle: h, report: 'variance' });
   const at = (r: any, col: string) => r.columns.indexOf(col);
   assert.ok(v.rows.length > 0 && v.rows.every((r: any) => r.cells[at(v, 'BL Start')] === '' && r.cells[at(v, 'BL Finish')] === '' && r.cells[at(v, 'Finish Var (d)')] === ''), 'the baseline columns are empty');
-  assert.deepEqual(v.notes, ['BL Start, BL Finish and Finish Var (d) are empty: no project baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
+  // (a report prints saved dates: when they are not what a calculation gives, its answer says so first, owner 2026-11-14)
+  const stale = 'The saved dates of TOWER-A are not what a recalculation gives (3 of 3 open activities differ): these figures are of the saved dates; run schedule to recalculate them.';
+  assert.deepEqual(v.notes, [stale, 'BL Start, BL Finish and Finish Var (d) are empty: no project baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
   const late = await call('run_report', { handle: h, report: 'std-late' });
-  assert.deepEqual(late.notes, ['BL Project Finish and Variance - BL Project Finish Date are empty and the activities listed are those with negative total float: no project baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
+  assert.deepEqual(late.notes, [stale, 'BL Project Finish and Variance - BL Project Finish Date are empty and the activities listed are those with negative total float: no project baseline is assigned to TOWER-A; TOWER-A-BL1 is saved in the file: assign it with edit assign_baseline.']);
   // a report with no baseline column says nothing of it
+  assert.deepEqual((await call('run_report', { handle: h, report: 'schedule' })).notes, [stale]);
+  // (and with the dates calculated, nothing at all)
+  await call('schedule', { handle: h });
   assert.equal((await call('run_report', { handle: h, report: 'schedule' })).notes, undefined);
   // the baseline assigned: the columns are filled and nothing is said
   const e = await call('edit', { handle: h, operations: [{ op: 'assign_baseline', baseline: 'TOWER-A-BL1' }] });
@@ -394,6 +407,7 @@ test('a report over several projects says whose baseline columns are empty; a PD
   const o = await open('Tower-A.xer'), h = o.handle;
   const e = await call('edit', { handle: h, operations: [{ op: 'assign_baseline', baseline: 'TOWER-A-BL1' }, { op: 'add_project', id: 'NOBL', start: '2026-03-02' }, { op: 'add_activity', project: 'NOBL', id: 'N1', name: 'N1', duration_days: 3 }] });
   assert.ok(!e.error, JSON.stringify(e.error));
+  assert.equal((await call('schedule', { handle: h })).ok, true); // (the dates current: this test is about the baseline sentences)
   const v = await call('run_report', { handle: h, report: 'variance' });
   assert.deepEqual(v.notes, ['For the activities of NOBL, BL Start, BL Finish and Finish Var (d) are empty: no project baseline is assigned to NOBL; assign one with edit assign_baseline.', 'BL Start, BL Finish and Finish Var (d) are empty for 2 activities of TOWER-A that are not in its baseline TOWER-A-BL1: A1030, M1000.']);
   const blFinish = v.columns.indexOf('BL Finish'), id = v.columns.indexOf('Activity ID');

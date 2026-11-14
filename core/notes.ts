@@ -147,7 +147,7 @@ export const defaultCalendarWeek = (name: string): string => `Calendar ${name} h
 export const datesNotStored = (proj: string): string => `${proj} has no calculated dates for its open activities; run schedule first.`;
 /** The saved dates of a project are not what a recalculation gives (edited since the last calculation, written by another tool, or levelled). The sentence states the fact and how to recalculate; it does not
  *  order a recalculation, which on a levelled programme throws the levelling away (owner 2026-11-13). `figures`: the answer judges from those dates (an analysis), so it says what its figures are of. */
-export const datesNotCurrent = (proj: string, differ: number, open: number, figures = false): string => `The saved dates of ${proj} are not what a recalculation gives (${differ} of ${open} open ${open === 1 ? 'activity' : 'activities'} ${differ === 1 ? 'differs' : 'differ'})${figures ? ': these figures are of the saved dates' : ''}; run schedule to recalculate them.`;
+export const datesNotCurrent = (proj: string, differ: number, open: number, figures = false, keptMsp = false): string => `The saved dates of ${proj} are not what a recalculation gives (${differ} of ${open} open ${open === 1 ? 'activity' : 'activities'} ${differ === 1 ? 'differs' : 'differ'})${figures ? ': these figures are of the saved dates' : ''}; ${keptMsp ? 'they are the dates Microsoft Project calculated, which a plain schedule keeps: schedule with data_date recalculates them' : 'run schedule to recalculate them'}.`;
 /** A loop. */
 export const loopNote = (ids: string[]): string => `${namesText(ids)} ${ids.length === 1 ? 'is' : 'are'} in a loop.`;
 /** A loop stops the calculation of a project's dates: said by every analysis that judges from the saved dates (it still answers: owner 2026-11-13, as P6's reports open on a
@@ -180,7 +180,33 @@ export const stillWorking = (jobId: string): string => `Still working: call job_
 /** An answer too large to return whole: where all of it is. */
 export const tooLarge = (chars: number, file: string | null, ask: string): string => file ? `The answer is too large to return (${chars} characters); all of it is in ${file}${ask}.` : `The answer is too large to return (${chars} characters) and could not be written to a file${ask}.`;
 /** A tool given an argument it does not have. */
+/** Activity IDs and baselines (P6 pairs an activity with its baseline activity by Activity ID). `baselines` are baseline names. */
+export interface IdOffBaseline { id: string; project: string; baseline: string; baselineId: string; taken: boolean }
+/** The sentence of an edit after which activities no longer have the Activity ID of their activity in a baseline (P6 pairs the two by Activity ID), with the
+ *  call that gives the pair one ID again. One activity: named, with the ID the baseline has it under. Several: counted; the edit's `changes` hold the IDs. */
+export function offBaselineNotes(off: IdOffBaseline[]): string[] {
+  if (!off.length) return [];
+  const bls = [...new Set(off.map((x) => x.baseline))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), one = bls.length === 1;
+  const acts = [...new Set(off.map((x) => `${x.project}\u0000${x.id}`))];
+  const why = 'P6 pairs an activity with its baseline by Activity ID';
+  if (acts.length > 1) return [`${acts.length} activities no longer match ${one ? 'baseline' : 'baselines'} ${namesText(bls)} (${why}; changes lists the Activity IDs that changed); to keep the match, give each pair one Activity ID again (update_activity with new_id; for the baseline's activity add project: the baseline, in_baseline: true).`];
+  const ids = [...new Set(off.map((x) => x.baselineId))];
+  const knows = ids.length === 1 ? `which ${one ? 'has' : 'have'} it as ${ids[0]}` : `which have it as ${off.map((x) => `${x.baselineId} (${x.baseline})`).join(', ')}`;
+  const taken = off.filter((x) => x.taken).map((x) => x.baseline);
+  const how = taken.length
+    ? `in ${namesText(taken)} ${off[0].id} is another activity's ID, so the two cannot be given one Activity ID there without renaming that one first`
+    : `to keep the match, give it the same Activity ID there (update_activity id: "${ids.length === 1 ? ids[0] : 'its ID in the baseline'}", new_id: "${off[0].id}", project: ${one ? `"${bls[0]}"` : 'the baseline'}, in_baseline: true)`;
+  return [`${off[0].id} no longer matches ${one ? 'baseline' : 'baselines'} ${namesText(bls)}, ${knows} (${why}); ${how}.`];
+}
+export const baselineWouldDuplicate = (baseline: string, ids: string[]): string => `Refused: in baseline ${baseline} ${ids.length === 1 ? 'the new Activity ID' : 'new Activity IDs'} ${namesText(ids)} ${ids.length === 1 ? 'is another activity\u2019s' : 'are other activities\u2019'}, so the baseline cannot be renumbered with the project. Choose another prefix or start, or pass skip_baselines_with_duplicates: true to renumber without that baseline (the renumbered activities then no longer match it).`;
 /** A field an edit operation does not have (or did not read in the state it ran in): the operation ran without it. */
 export const fieldNotUsed = (op: string, field: string): string => `${op} did not use "${field}": it is not a field of the operation, or this case had no use for it.`;
 export const argumentNotUsed = (tool: string, arg: string, has: string[]): string => `${tool} has no argument "${arg}"; the call ran without it. Its arguments are: ${has.join(', ')}.`;
 
+
+/** After a leveling that moved something: where the leveled dates are, in P6's terms. */
+export const leveledDatesNote = (preserve: boolean): string => (preserve
+  ? 'The leveled dates are the activities\' Start and Finish (their Remaining Early dates); Early Start, Early Finish, the late dates and Total Float are as they were before the leveling (Preserve scheduled early and late dates).'
+  : 'Every date and float was recalculated with the leveling in it: the early dates are the leveled dates, and the late dates are brought forward where the resources do not allow them (Preserve scheduled early and late dates is off).');
+/** A schedule calculation works the dates out again from the logic alone: said with every leveling that moved something. */
+export const scheduleRemovesLeveling = 'schedule calculates the dates again without the resources\' limits, which removes this leveling; schedule with level_resources: true levels again after calculating.';

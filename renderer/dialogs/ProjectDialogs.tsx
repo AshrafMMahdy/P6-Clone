@@ -4,7 +4,7 @@ import { closeDialog, getDb, mutate, openDialog, setUi, toast, useStore } from '
 import { addField, nextId, rows, table, type Row } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
 import { deleteProject } from '../../core/xer/import.ts';
-import { saveBaseline, assignBaseline, deleteBaseline, restoreBaseline } from '../../core/progress/baseline.ts';
+import { saveBaseline, assignBaseline, assignedAs, convertToBaseline, deleteBaseline, restoreBaseline } from '../../core/progress/baseline.ts';
 import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, TASK_TYPES, ensureEps, fmtDate, memoHtml, memoText, newProject, projectName } from '../model.ts';
 import { openProjects } from '../views/ProjectsView.tsx';
 
@@ -264,12 +264,19 @@ export function BaselinesDialog(props: { projId?: string }) {
   const [sel, setSel] = useState<string | null>(null);
   if (!p) return <Dialog title="Maintain Baselines" buttons={<button className="btn" onClick={closeDialog}>Close</button>}><p>Open a project first.</p></Dialog>;
   const bls = rows(db, 'PROJECT').filter((x) => x._baseline_of === pid);
+  // as in P6: a project that is open or has baselines of its own is not converted, and an assigned (active) baseline is neither restored nor deleted
+  const convertible = rows(db, 'PROJECT').filter((x) => !x._baseline_of && x.proj_id !== pid && !ui.openProjects.includes(x.proj_id) && !rows(db, 'PROJECT').some((y) => y._baseline_of === x.proj_id));
+  const active = (id: string) => assignedAs(db, id).length > 0;
   return (
     <Dialog title="Maintain Baselines" width={640} height={380} buttons={<>
       <button className="btn" onClick={() => mutate('Add Baseline', (d) => { const id = saveBaseline(d, pid); if (!rows(d, 'PROJECT').find((x) => x.proj_id === pid)!.sum_base_proj_id) assignBaseline(d, pid, id); })}>Add</button>
       <button className="btn" disabled={!sel} onClick={() => sel && mutate('Assign Baseline', (d) => assignBaseline(d, pid, sel))}>Assign as Project Baseline</button>
-      <button className="btn" disabled={!sel} onClick={() => sel && mutate('Restore Baseline', (d) => restoreBaseline(d, sel))}>Restore</button>
-      <button className="btn" disabled={!sel} onClick={async () => { if (sel && (await window.p6.confirm('Delete the selected baseline?', 'The baseline copy of the project is removed from the database.'))) { mutate('Delete Baseline', (d) => deleteBaseline(d, sel)); setSel(null); } }}>Delete</button>
+      <select className="btn" value="" disabled={!convertible.length} title="Convert another project to a new baseline of this project" onChange={(e) => { const id = e.target.value; if (id) mutate('Convert Project to Baseline', (d) => convertToBaseline(d, id, pid)); }}>
+        <option value="">Convert another project...</option>
+        {convertible.map((x) => <option key={x.proj_id} value={x.proj_id}>{x.proj_short_name}</option>)}
+      </select>
+      <button className="btn" disabled={!sel} onClick={() => { if (!sel) return; if (active(sel)) return toast('You cannot restore a baseline that is designated as the active baseline. Clear it in Assign Baselines first.'); mutate('Restore Baseline', (d) => restoreBaseline(d, sel)); setSel(null); }}>Restore</button>
+      <button className="btn" disabled={!sel} onClick={async () => { if (!sel) return; if (active(sel)) return toast('You cannot delete a baseline that is designated as the active baseline. Clear it in Assign Baselines first.'); if (await window.p6.confirm('Delete the selected baseline?', 'The baseline copy of the project is removed from the database.')) { mutate('Delete Baseline', (d) => deleteBaseline(d, sel)); setSel(null); } }}>Delete</button>
       <button className="btn" onClick={closeDialog}>Close</button>
     </>}>
       <p>Project: <b>{p.proj_short_name}</b> · Project baseline: <b>{bls.find((b) => b.proj_id === p.sum_base_proj_id)?.proj_short_name ?? '(none: current project)'}</b></p>

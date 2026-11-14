@@ -765,8 +765,11 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
   };
   const baselines = (): [Row, string][] => get('PROJECT').flatMap((p) => rows(db, 'PROJECT').filter((x) => x._baseline_of === p.proj_id).map((b): [Row, string] => [b, p.proj_id]));
   // baselines of the exported projects, as P6 writes them with "export baselines"
-  const all = (t: string) => rows(db, t);
   const asBaseline = new Set(baselines().map(([b]) => b.proj_id)); // (written below as a BaselineProject of its project: not a second time as a Project)
+  // (a baseline's rows are read from the whole file; a relationship of it is written only when both its ends are: a baseline's link to a project that is not exported is left out, as in the XER)
+  const writtenProjects = new Set([...get('PROJECT').map((p) => p.proj_id), ...asBaseline]);
+  const writtenTasks = new Set(rows(db, 'TASK').filter((t) => writtenProjects.has(t.proj_id)).map((t) => t.task_id));
+  const all = (t: string) => (t === 'TASKPRED' ? rows(db, t).filter((r) => writtenTasks.has(r.task_id) && writtenTasks.has(r.pred_task_id)) : rows(db, t));
   topLevel.push(['Project', () => { for (const p of get('PROJECT')) if (!asBaseline.has(p.proj_id)) projectXml('Project', p, get); }], ['BaselineProject', () => { for (const [b, orig] of baselines()) projectXml('BaselineProject', b, all, orig); }]);
   const q = seqOf('APIBusinessObjects');
   for (const [, run] of topLevel.map((l, i) => [l, i] as const).sort((a, b) => ((q.get(a[0][0]) ?? 1e9) - (q.get(b[0][0]) ?? 1e9)) || a[1] - b[1]).map(([l]) => l)) run();

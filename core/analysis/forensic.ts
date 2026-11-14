@@ -15,6 +15,7 @@ import { startedBeforeFsPredecessor } from '../query/review.ts';
 import { findLoops } from '../xer/validate.ts';
 import { baselineOf, noBaselineReason, baselineFinish, namesText, constraintsOf, DCMA_HARD, forecastFinish, isDone, isLoe, isMilestone, isWbs, offender, type Offender, type Scope } from './common.ts';
 import { matchActivities, type Update } from './delay.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 /** What a figure answers: its numbers, or that it could not be worked out and why (the reason, in a few words, with no full stop: the notes say "<part> not assessed: <reason>."). */
 export type Assessed<T> = ({ result: 'assessed' } & T) | { result: 'not_assessed'; note: string };
@@ -302,9 +303,9 @@ export interface ActivityVariance {
 
 const stamp = (m: number | null) => (m == null ? null : formatP6Date(m));
 /** The activity's current start: actual, else forecast (early), else planned (variance.ts:45 currentStart). */
-export const currentStart = (t: Row) => parseP6Date(t.act_start_date || t.early_start_date || t.target_start_date);
+export const currentStart = (t: Row) => parseP6Date(t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date);
 /** A reference (baseline or as-planned) activity's start: its actual start, else early, else planned (the start counterpart of common.ts baselineFinish). */
-export const referenceStart = (b: Row | undefined) => (b ? parseP6Date(b.act_start_date || b.early_start_date || b.target_start_date) : null);
+export const referenceStart = (b: Row | undefined) => (b ? parseP6Date(b.act_start_date || b.restart_date || b.early_start_date || b.target_start_date) : null);
 
 /** The exact variance of one activity against its reference: working MINUTES of the activity's calendar (positive = later / longer), null when a date is missing; `day` is the minutes of one working day of that calendar. Nothing is rounded here. */
 export interface ExactVariance { start: number | null; finish: number | null; duration: number | null; day: number }
@@ -412,6 +413,6 @@ export function updateView(u: Update): Db {
   const { _baseline_of: _b, ...row } = p;
   const tasks = rows(u.db, 'TASK').filter((t) => t.proj_id === u.projId), ids = new Set(tasks.map((t) => t.task_id));
   const T = u.db.tables;
-  return { tables: { ...T, PROJECT: { ...T.PROJECT, rows: [row] }, TASK: { ...T.TASK, rows: tasks }, TASKPRED: { ...T.TASKPRED, rows: rows(u.db, 'TASKPRED').filter((r) => ids.has(r.task_id)) }, TASKRSRC: { ...T.TASKRSRC, rows: rows(u.db, 'TASKRSRC').filter((r) => ids.has(r.task_id)) }, PROJWBS: { ...T.PROJWBS, rows: rows(u.db, 'PROJWBS').filter((w) => w.proj_id === u.projId) } } as Db['tables'] };
+  return { tables: { ...T, PROJECT: { ...T.PROJECT, rows: [row] }, TASK: { ...T.TASK, rows: tasks }, TASKPRED: { ...T.TASKPRED, rows: logicRelationships(u.db).filter((r) => ids.has(r.task_id)) }, TASKRSRC: { ...T.TASKRSRC, rows: rows(u.db, 'TASKRSRC').filter((r) => ids.has(r.task_id)) }, PROJWBS: { ...T.PROJWBS, rows: rows(u.db, 'PROJWBS').filter((w) => w.proj_id === u.projId) } } as Db['tables'] };
 }
 

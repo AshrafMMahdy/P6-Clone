@@ -167,3 +167,26 @@ export function notJudged(db: Db, ids: Iterable<string>): { material: string[]; 
   }
   return { material: material.sort(), noLimit: noLimit.sort() };
 }
+
+/** The limit of a resource (Max Units/Time, units per hour) in force at a time, read as the usage profile (spreadUsage) reads it: the price row in force then
+ *  that states one (the first such row before any is in force), else the resource's own limit. `changes`: the dated limits of a resource, in date order. Only resources that have a limit (resourceLimits) are judged. */
+export function limitsOverTime(db: Db, cap: Map<string, number> = resourceLimits(db)): ((rsrcId: string, t: number) => number) & { changes: (rsrcId: string) => { at: number; perHour: number }[] } {
+  const dated = new Map<string, { at: number; perHour: number }[]>();
+  for (const rr of rows(db, 'RSRCRATE')) {
+    // (the rows that state a limit, as the usage profile reads them: a row that states 0 from a date is no capacity from that date)
+    const v = Number(rr.max_qty_per_hr);
+    if (rr.max_qty_per_hr === '' || rr.max_qty_per_hr == null || !Number.isFinite(v)) continue;
+    let l = dated.get(rr.rsrc_id);
+    if (!l) dated.set(rr.rsrc_id, (l = []));
+    l.push({ at: parseP6Date(rr.start_date) ?? -Infinity, perHour: v });
+  }
+  for (const l of dated.values()) l.sort((x, y) => x.at - y.at);
+  const at = (rsrcId: string, t: number): number => {
+    const l = dated.get(rsrcId);
+    if (!l) return cap.get(rsrcId) ?? 0;
+    let v = l[0].perHour;
+    for (const x of l) if (x.at <= t) v = x.perHour;
+    return v;
+  };
+  return Object.assign(at, { changes: (rsrcId: string) => dated.get(rsrcId) ?? [] });
+}

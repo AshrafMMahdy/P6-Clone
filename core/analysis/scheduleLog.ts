@@ -10,6 +10,7 @@ import { calendarResolver, relationshipFloat, type ScheduleResult } from '../sch
 import { constraintNotMet } from '../schedule/constraints.ts';
 import { dayHours } from '../project/units.ts';
 import { cstrName, daysText, differentDataDates, duplicateRow, LISTED, listCut } from '../notes.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 export interface LogSection { code: string; title: string; count: number; activities: { id: string; name: string; detail?: string }[] }
 
@@ -66,7 +67,7 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100, leftOu
   }
   const unsatRel: { t: Row; detail: string }[] = [];
   const gone = new Set(leftOut.map((x) => x.task_pred_id)); // a link left out to break a loop is not in the schedule: it is not unmet
-  for (const r of rows(db, 'TASKPRED')) {
+  for (const r of logicRelationships(db)) {
     if (!open.has(r.proj_id) || gone.has(r.task_pred_id)) continue;
     const ff = relFF(r);
     const t = ctx.taskById.get(r.task_id), p = ctx.taskById.get(r.pred_task_id);

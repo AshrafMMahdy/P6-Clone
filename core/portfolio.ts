@@ -169,8 +169,8 @@ export function portfolioSummary(db: Db, projectIds: string[]): PortfolioSummary
     const lines: CostLine[] = [];
     for (const t of ts) {
       if (t.act_end_date) cp++; else if (t.act_start_date) ip++; else ns++;
-      start = minN(start, parseP6Date(t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date));
-      finish = maxN(finish, parseP6Date(t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date));
+      start = minN(start, parseP6Date(t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date));
+      finish = maxN(finish, parseP6Date(t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date));
       if (!t.act_end_date && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null) flt = minN(flt, num(t.total_float_hr_cnt));
       if (isCritical(t, p)) crit++;
       const l = costs.get(t.task_id);

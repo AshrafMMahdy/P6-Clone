@@ -74,6 +74,8 @@ for (const [file, mat, none] of [['Detailed Program.xer', 123, 0], ['130 TRIAL.x
     if (mat != null) { assert.equal(want.material.length, mat); assert.equal(want.noLimit.length, none); }
     const hist = await call('resource_histogram', { handle: o.handle });
     const idx = await call('schedule_index', { handle: o.handle });
+    // (a leveling goes on from calculated dates: on a file whose saved dates are not what the calculation gives it is refused, so the file is scheduled first)
+    assert.equal((await call('schedule', { handle: o.handle, log: false })).ok, true);
     const lev = await call('level_resources', { handle: o.handle, dry_run: true });
     for (const [name, notes] of [['resource_histogram', hist.notes], ['schedule_index', idx.notes], ['level_resources', lev.notes]] as [string, string[]][]) {
       assert.equal(count(notes, MAT), want.material.length, `${name}: Material count`);

@@ -59,7 +59,7 @@ export function measure(d: Db, projIds: string[], over: Partial<SchedOptions> = 
   const open = new Set(projIds), ctx = makeCtx(d, { hoursPerDay: 8 });
   const tasks = rows(d, 'TASK').filter((t) => open.has(t.proj_id));
   const crit = new Set(tasks.filter((t) => isCritical(t, ctx)).map((t) => t.task_code));
-  const dates = new Map(tasks.map((t) => [t.task_code, [(t.act_start_date || t.early_start_date || null)?.slice(0, 16) ?? null, (t.act_end_date || t.early_end_date || null)?.slice(0, 16) ?? null] as [string | null, string | null]]));
+  const dates = new Map(tasks.map((t) => [t.task_code, [(t.act_start_date || t.restart_date || t.early_start_date || null)?.slice(0, 16) ?? null, (t.act_end_date || t.reend_date || t.early_end_date || null)?.slice(0, 16) ?? null] as [string | null, string | null]]));
   return { ok: true, m: { finish: r.stats.finish, critical: crit, negative: tasks.filter((t: Row) => !t.act_end_date && Number(t.total_float_hr_cnt || 0) < 0).length, cost: sumLines(activityCosts(d, projIds).values()).eac, dates } };
 }
 

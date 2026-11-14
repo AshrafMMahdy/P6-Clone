@@ -30,7 +30,7 @@ export function activityTable(db: Db, projIds: string[] | null, opts: { offset?:
   const days = (t: Row, h: string | undefined) => (h === '' || h == null ? null : r2(Number(h) / dh.task(t)));
   const columns: string[] = [...TABLE_COLUMNS.slice(0, 1), ...(opts.names ? ['name'] : []), ...TABLE_COLUMNS.slice(1)];
   const out = page.map((t) => {
-    const start = t.act_start_date || t.early_start_date || t.restart_date || t.target_start_date, finish = t.act_end_date || t.early_end_date || t.reend_date || t.target_end_date;
+    const start = t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date, finish = t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date;
     const row: unknown[] = [t.task_code, t.act_end_date ? 'CO' : t.act_start_date ? 'IP' : 'NS', TYPE[t.task_type] ?? t.task_type, d(start), d(finish), d(t.early_start_date), d(t.early_end_date), d(t.late_start_date), d(t.late_end_date),
       d(t.rem_late_start_date), d(t.rem_late_end_date), days(t, t.target_drtn_hr_cnt), days(t, t.remain_drtn_hr_cnt), t.act_end_date ? null : days(t, t.total_float_hr_cnt), t.act_end_date ? null : days(t, t.free_float_hr_cnt),
       isCritical(t, ctx), t.driving_path_flag === 'Y', wd(t, start), wd(t, finish)];

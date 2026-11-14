@@ -128,8 +128,8 @@ export function evOf(ctx: Ctx): Map<string, EarnedValue> {
 const ev = (k: keyof EarnedValue, fmt: (v: number) => string) => (r: Row, c: Ctx) => { const e = evOf(c).get(r.task_id); return e ? fmt(e[k]) : ''; };
 const idx = (v: number) => (v ? v.toFixed(2) : '');
 const pct1 = (v: number) => `${Math.round(v * 10) / 10}%`;
-const startOf = (r: Row, ctx: Ctx) => (r.act_start_date ? `${fmtDate(r.act_start_date, ctx.prefs)} A` : fmtDate(r.early_start_date || r.restart_date || r.target_start_date, ctx.prefs) + (r.cstr_type && /MSO|MANDSTART/.test(r.cstr_type) ? '*' : ''));
-const finishOf = (r: Row, ctx: Ctx) => (r.act_end_date ? `${fmtDate(r.act_end_date, ctx.prefs)} A` : fmtDate(r.early_end_date || r.reend_date || r.target_end_date, ctx.prefs) + (r.cstr_type && /MEO|MANDFIN/.test(r.cstr_type) ? '*' : ''));
+const startOf = (r: Row, ctx: Ctx) => (r.act_start_date ? `${fmtDate(r.act_start_date, ctx.prefs)} A` : fmtDate(r.restart_date || r.early_start_date || r.target_start_date, ctx.prefs) + (r.cstr_type && /MSO|MANDSTART/.test(r.cstr_type) ? '*' : ''));
+const finishOf = (r: Row, ctx: Ctx) => (r.act_end_date ? `${fmtDate(r.act_end_date, ctx.prefs)} A` : fmtDate(r.reend_date || r.early_end_date || r.target_end_date, ctx.prefs) + (r.cstr_type && /MEO|MANDFIN/.test(r.cstr_type) ? '*' : ''));
 
 /** Activity table columns (View > Columns). */
 export const COLUMNS: Column[] = [
@@ -176,7 +176,7 @@ export const COLUMNS: Column[] = [
   { id: 'var_bl_finish', title: 'Variance - BL Project Finish Date', width: 80, align: 'right', get: (r, c) => {
     const b = c.baseline.get(`${r.task_code}|${r.proj_id}`);
     if (!b) return '';
-    const bf = parseP6Date(b.act_end_date || b.target_end_date), f = parseP6Date(r.act_end_date || r.early_end_date);
+    const bf = parseP6Date(b.act_end_date || b.target_end_date), f = parseP6Date(r.act_end_date || r.reend_date || r.early_end_date);
     return bf == null || f == null ? '' : fmtDur((bf - f) / 60 * (c.prefs.hoursPerDay / 24), c.prefs);
   } },
   { id: 'total_float', title: 'Total Float', width: 56, align: 'right', get: (r, c) => fmtDur(r.total_float_hr_cnt, c.prefs, dayOf(r, c)) },
@@ -190,7 +190,7 @@ export const COLUMNS: Column[] = [
     r.cstr_type = v;
     // like the Status tab: a new constraint starts on the activity's early start (finish constraints: early finish)
     if (!v || v === 'CS_ALAP') r.cstr_date = '';
-    else if (!r.cstr_date) r.cstr_date = (/MEO|FIN/.test(v) ? r.early_end_date || r.target_end_date : r.early_start_date || r.target_start_date) ?? '';
+    else if (!r.cstr_date) r.cstr_date = (/MEO|FIN/.test(v) ? r.reend_date || r.early_end_date || r.target_end_date : r.restart_date || r.early_start_date || r.target_start_date) ?? '';
   } } },
   { id: 'cstr_date', title: 'Primary Constraint Date', width: 82, get: (r, c) => fmtDate(r.cstr_date, c.prefs), edit: { type: 'date', set: (_db, r, v) => { r.cstr_date = v; } } },
   { id: 'cstr_type2', title: 'Secondary Constraint', width: 110, get: (r) => (r.cstr_type2 ? CSTR_TYPES[r.cstr_type2] : '') },

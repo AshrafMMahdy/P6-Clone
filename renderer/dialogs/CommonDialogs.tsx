@@ -68,7 +68,7 @@ export function ImportLogDialog(props: { failed?: boolean }) {
         <div style={{ marginBottom: 6, display: 'flex', gap: 12, alignItems: 'center' }}>
           <span>Show:</span>
           <select value={sev} onChange={(e) => setSev(e.target.value)}><option value="all">All ({findings.length})</option>{['fatal', 'error', 'warning', 'info'].map((s) => <option key={s} value={s}>{s} ({counts[s] ?? 0})</option>)}</select>
-          <span className="muted">fatal = P6 rejects the file · error = P6 import fails or drops data · warning = P6 imports with a substitution · info = harmless difference</span>
+          <span className="muted">fatal = P6 rejects the file · error = not valid in P6 (save with repair fixes most) · warning = P6 imports with a substitution · info = harmless difference</span>
         </div>
         <div className="tblwrap" style={{ height: 'calc(100% - 60px)' }}>
           <table className="tbl" style={{ userSelect: 'text' }}>
@@ -105,7 +105,7 @@ export function AssignDialog(props: { which: 'pred' | 'succ' }) {
       <div className="tblwrap" style={{ height: 360 }}>
         <table className="tbl"><thead><tr><th>Activity ID</th><th>Activity Name</th><th>Start</th><th>Finish</th><th>Project</th></tr></thead><tbody>
           {list.map((t) => <tr key={t.task_id} className={sel.includes(t.task_id) ? 'sel' : ''} onMouseDown={(e) => setSel(e.ctrlKey ? (sel.includes(t.task_id) ? sel.filter((x) => x !== t.task_id) : [...sel, t.task_id]) : [t.task_id])} onDoubleClick={() => { setSel([t.task_id]); }}>
-            <td>{t.task_code}</td><td>{t.task_name}</td><td>{fmtDate(t.act_start_date || t.early_start_date, ui.prefs)}</td><td>{fmtDate(t.act_end_date || t.early_end_date, ui.prefs)}</td><td>{rows(db, 'PROJECT').find((p) => p.proj_id === t.proj_id)?.proj_short_name}</td>
+            <td>{t.task_code}</td><td>{t.task_name}</td><td>{fmtDate(t.act_start_date || t.restart_date || t.early_start_date, ui.prefs)}</td><td>{fmtDate(t.act_end_date || t.reend_date || t.early_end_date, ui.prefs)}</td><td>{rows(db, 'PROJECT').find((p) => p.proj_id === t.proj_id)?.proj_short_name}</td>
           </tr>)}
         </tbody></table>
       </div>

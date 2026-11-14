@@ -11,7 +11,7 @@
 import { addField, KEYS, nextId, refTarget, rows, table, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { calendarResolver, p6num } from '../schedule/cpm.ts';
-import { ENUMS, fieldType, knownFields } from './schema.ts';
+import { ENUMS, fieldType, knownFields, repairedCode } from './schema.ts';
 import { MAX_LEN } from './validate.ts';
 import { realOf, removeWhere } from '../journal.ts';
 
@@ -20,8 +20,9 @@ export interface RepairChange { table: string; row: number; key: string; field: 
 /** Kept as recorded, reported (DCMA check 9, invalid dates): P6 imports it. */
 export interface RepairFinding { table: string; row: number; key: string; field: string; value: string; code: 'ACTUAL_AFTER_DD' | 'FINISH_WITHOUT_START'; message: string }
 
-/** The actual dates P6 refuses on import, so the repair clears them (the clone's validator rates each an error):
- *  - unreadable: not a yyyy-mm-dd hh:mm date, or no such day (BAD_DATE: "P6 import fails on unparseable dates");
+/** The actual dates the repair clears (the clone's validator rates each an error). What P6 itself does with the first two on import is not established
+ *  by any source, so the reasons say what the value is, not that P6 refuses it:
+ *  - unreadable: not a yyyy-mm-dd hh:mm date, or no such day (BAD_DATE);
  *  - outside what a P6 database stores: before 1753-01-01 (SQL Server's datetime, the narrowest P6 database);
  *    after 9999 cannot be written in four digits, so it is unreadable;
  *  - an actual finish before the actual start (ACT_DATES_ORDER: "P6 rejects the actual dates"): the finish goes, the
@@ -33,7 +34,6 @@ const MIN_DB_DATE = parseP6Date('1753-01-01')!;
 
 const ACTUALS = new Set(['act_start_date', 'act_end_date']);
 const COMPUTED = new Set(['early_start_date', 'early_end_date', 'late_start_date', 'late_end_date', 'rem_late_start_date', 'rem_late_end_date', 'restart_date', 'reend_date', 'total_float_hr_cnt', 'free_float_hr_cnt', 'external_early_start_date', 'external_late_end_date', 'float_path', 'float_path_order']);
-const NEUTRAL: Record<string, string> = { 'TASK.task_type': 'TT_Task', 'TASK.duration_type': 'DT_FixedDUR2', 'TASK.complete_pct_type': 'CP_Drtn', 'TASK.priority_type': 'PT_Normal', 'TASKPRED.pred_type': 'PR_FS', 'RSRC.rsrc_type': 'RT_Labor', 'CALENDAR.clndr_type': 'CA_Base', 'PROJWBS.status_code': 'WS_Open' };
 const MAX_HOURS = 20 * 365 * 24; // no activity lasts twenty years of round-the-clock work
 const isNum = (v: string) => /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(v);
 const goodDate = (v: string | undefined) => { const t = v ? parseP6Date(v) : null; return t != null && t >= parseP6Date('1900-01-01')! && t <= parseP6Date('2200-12-31')! ? t : null; };
@@ -176,8 +176,8 @@ export function repairToValid(db: Db): { changes: RepairChange[]; findings: Repa
       const v = t[f];
       if (!v) continue;
       const at = parseP6Date(v);
-      if (at == null) set('TASK', t, f, '', `"${v}" is not a date P6 can read (P6 refuses it): an actual cannot be guessed, so it is cleared`);
-      else if (at < MIN_DB_DATE) set('TASK', t, f, '', `${v.slice(0, 16)} is before 1753, outside what a P6 database stores (P6 refuses it): an actual cannot be guessed, so it is cleared`);
+      if (at == null) set('TASK', t, f, '', `"${v}" cannot be read as a date: an actual cannot be guessed, so it is cleared`);
+      else if (at < MIN_DB_DATE) set('TASK', t, f, '', `${v.slice(0, 16)} is before 1753, outside what a P6 database stores: an actual cannot be guessed, so it is cleared`);
       b.delete(f);
     }
     if (t.act_end_date && t.act_start_date && parseP6Date(t.act_end_date)! < parseP6Date(t.act_start_date)!) set('TASK', t, 'act_end_date', '', 'the actual finish is before the actual start, which P6 refuses: the finish is cleared (the activity stays in progress)');
@@ -231,10 +231,10 @@ export function repairToValid(db: Db): { changes: RepairChange[]; findings: Repa
 
   function generic(table: string, r: Row, f: string) {
     const v = r[f] ?? '', en = ENUMS[`${table}.${f}`], ty = fieldType(f), max = MAX_LEN[`${table}.${f}`];
-    if (en) set(table, r, f, en.includes('') ? '' : NEUTRAL[`${table}.${f}`] ?? en[0], `"${v}" is not a P6 code: P6's default`);
+    if (en) { const d = repairedCode(`${table}.${f}`); set(table, r, f, d, `"${v}" is not a value P6 has for it: ${d ? "P6's default" : 'emptied'}`); }
     else if (ty === 'date') set(table, r, f, '', ACTUALS.has(f) ? `"${v}" is not a date: an actual cannot be guessed, so it is cleared` : COMPUTED.has(f) ? `"${v}" is not a date: F9 computes it` : `"${v}" is not a date: cleared`);
-    else if (ty === 'number') set(table, r, f, COMPUTED.has(f) ? '' : '0', COMPUTED.has(f) ? `"${v}" is not a number: F9 computes it` : `"${v}" is not a number: P6's default (0)`);
-    else if (ty === 'flag') set(table, r, f, 'N', `"${v}" is not Y or N: P6's default (N)`);
+    else if (ty === 'number') set(table, r, f, COMPUTED.has(f) ? '' : '0', COMPUTED.has(f) ? `"${v}" is not a number: F9 computes it` : `"${v}" is not a number: 0`);
+    else if (ty === 'flag') set(table, r, f, 'N', `"${v}" is not Y or N: N`);
     else if (max && v.length > max) set(table, r, f, v.slice(0, max), `longer than P6's ${max} characters: cut, as P6 does`);
   }
 }

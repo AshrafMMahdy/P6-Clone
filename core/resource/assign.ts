@@ -1,6 +1,8 @@
 // Resource assignments (TASKRSRC): P6 duration-type rules and cost = units x price.
 import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
-import { p6num } from '../schedule/cpm.ts';
+import { activityWork, calendarResolver, p6num } from '../schedule/cpm.ts';
+import type { WorkCalendar } from '../calendar/calendar.ts';
+import { formatP6Date, parseP6Date } from '../dates.ts';
 import { pick } from '../journal.ts';
 
 export const ASSIGN_FIELDS = ['taskrsrc_id', 'task_id', 'proj_id', 'cost_qty_link_flag', 'role_id', 'acct_id', 'rsrc_id', 'remain_qty', 'target_qty', 'remain_qty_per_hr', 'target_qty_per_hr', 'act_ot_qty', 'act_reg_qty', 'cost_per_qty', 'target_cost', 'act_reg_cost', 'act_ot_cost', 'remain_cost', 'act_start_date', 'act_end_date', 'restart_date', 'reend_date', 'target_start_date', 'target_end_date', 'rem_late_start_date', 'rem_late_end_date', 'rate_type', 'curv_id', 'rsrc_type', 'cost_per_qty_source_type'];
@@ -100,12 +102,26 @@ export function assignResource(db: Db, task: Row, rsrcId: string, roleId = ''): 
 /** After scheduling, assignment dates follow their activity (linear spread assumption). */
 export function syncAssignmentDates(db: Db, taskIds?: Set<string>): void {
   const tasks = new Map(rows(db, 'TASK').map((t) => [t.task_id, t]));
+  // (the activity's calendar and remaining minutes, read as the calculation reads them; built only when an assignment needs them)
+  let calc: ((t: Row) => { cal: WorkCalendar; dur: number }) | null = null;
+  const calcOf = (t: Row) => {
+    if (!calc) { const cals = calendarResolver(db, []), work = activityWork(db, cals), projs = new Map(rows(db, 'PROJECT').map((p) => [p.proj_id, p])); calc = (x) => { const w = work(x, cals.fallback(projs.get(x.proj_id)?.clndr_id)); return { cal: w.cal, dur: Math.round(w.hrs * 60) }; }; }
+    return calc(t);
+  };
   for (const a of rows(db, 'TASKRSRC')) {
     if (taskIds && !taskIds.has(a.task_id)) continue;
     const t = tasks.get(a.task_id);
     if (!t) continue;
+    // P6: an assignment with no units rate keeps the duration of its own dates when that is longer than its activity's (the calculation reads that span for
+    // the activity's late start): its start follows the activity, its finish keeps the span, so the next calculation, and the file once saved, read the same.
+    let own = 0;
+    if (t.task_type === 'TT_Task' && !t.act_start_date && !t.act_end_date && !(Number(a.remain_qty_per_hr || 0) > 0) && !Number(a.relag_drtn_hr_cnt || 0)) {
+      const s0 = parseP6Date(a.restart_date), f0 = parseP6Date(a.reend_date);
+      if (a.remain_drtn_hr_cnt || (s0 != null && f0 != null)) { const { cal, dur } = calcOf(t); const d = a.remain_drtn_hr_cnt ? Math.round(Number(a.remain_drtn_hr_cnt) * 60) : cal.workBetween(s0!, f0!); if (d > dur) own = d; }
+    }
     a.restart_date = t.act_end_date ? '' : t.restart_date || t.early_start_date || '';
     a.reend_date = t.act_end_date ? '' : t.reend_date || t.early_end_date || '';
+    if (own) { const st = parseP6Date(a.restart_date); if (st != null) { const { cal } = calcOf(t); a.reend_date = formatP6Date(cal.addWork(cal.nextWorkStart(st), own)); } }
     a.rem_late_start_date = t.act_end_date ? '' : t.rem_late_start_date || '';
     a.rem_late_end_date = t.act_end_date ? '' : t.rem_late_end_date || '';
     if (!t.act_start_date) { a.target_start_date = t.target_start_date || a.target_start_date; a.target_end_date = t.target_end_date || a.target_end_date; }

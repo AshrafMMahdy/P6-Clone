@@ -6,6 +6,7 @@ import { p6num, calendarResolver } from '../schedule/cpm.ts';
 import { ENUMS } from '../xer/schema.ts';
 import { pick, realOf, removeWhere } from '../journal.ts';
 import { defaultCalendarId } from '../progress/period.ts';
+import { baselineLinkTest, logicRelationships } from '../progress/snapshots.ts';
 
 export const isMilestone = (r: Row) => r.task_type === 'TT_Mile' || r.task_type === 'TT_FinMile';
 export const statusOf = (r: Row) => (r.act_end_date ? 'TK_Complete' : r.act_start_date ? 'TK_Active' : 'TK_NotStart');
@@ -43,14 +44,16 @@ const CAL_CACHE = new Map<string, ReturnType<ReturnType<typeof calendarResolver>
  */
 export function refreshOwnDates(db: Db, r: Row): void {
   if (r.act_end_date) return;
-  const start = parseP6Date(r.act_start_date ? r.restart_date || r.early_start_date : r.early_start_date || r.restart_date || r.target_start_date);
-  if (start == null) return;
   const cal = calOf(db, r);
   const dur = Number(r.remain_drtn_hr_cnt || 0) * 60;
-  const s = r.task_type === 'TT_FinMile' ? start : cal.nextWorkStart(start);
-  const f = dur > 0 ? cal.addWork(s, dur) : s;
-  if (!r.act_start_date) { r.early_start_date = r.restart_date = r.target_start_date = formatP6Date(s); r.target_end_date = formatP6Date(f); }
-  r.early_end_date = r.reend_date = formatP6Date(f);
+  const span = (v: string | undefined) => { const st = parseP6Date(v); if (st == null) return null; const s = r.task_type === 'TT_FinMile' ? st : cal.nextWorkStart(st); return { s, f: dur > 0 ? cal.addWork(s, dur) : s }; };
+  // Its Start and Finish (the Remaining Early dates: after a leveling that preserved the scheduled dates, the leveled ones) and its Early dates, each pair from
+  // its own start; the planned dates of an activity not started go with its Start.
+  const rem = span(r.restart_date || r.early_start_date || r.target_start_date), early = span(r.early_start_date || r.restart_date || r.target_start_date);
+  if (!rem || !early) return;
+  if (!r.act_start_date) { r.early_start_date = formatP6Date(early.s); r.restart_date = r.target_start_date = formatP6Date(rem.s); r.target_end_date = formatP6Date(rem.f); }
+  r.early_end_date = formatP6Date(early.f);
+  r.reend_date = formatP6Date(rem.f);
 }
 
 /** Typing a start date on a not-started activity moves it there with a Start On or After constraint (P6 behaviour). */
@@ -60,7 +63,7 @@ export function setStart(db: Db, r: Row, v: string): string | void {
   if (r.act_start_date) return setActual(r, 'start', v);
   r.cstr_type = d ? 'CS_MSOA' : '';
   r.cstr_date = d ?? '';
-  if (d) { r.early_start_date = d; refreshOwnDates(db, r); }
+  if (d) { r.early_start_date = r.restart_date = d; refreshOwnDates(db, r); }
 }
 /** Typing a finish date on a not-started activity changes its duration to fit (P6 behaviour; no constraint). */
 export function setFinish(db: Db, r: Row, v: string): string | void {
@@ -68,7 +71,7 @@ export function setFinish(db: Db, r: Row, v: string): string | void {
   if (d == null) return 'Invalid date.';
   if (r.act_end_date) return setActual(r, 'finish', v);
   if (!d) return;
-  const start = parseP6Date(r.act_start_date ? r.restart_date || r.early_start_date : r.early_start_date || r.target_start_date);
+  const start = parseP6Date(r.restart_date || r.early_start_date || r.target_start_date);
   if (start == null) return 'The activity has no start date yet; schedule it first (F9).';
   if (isMilestone(r)) return 'A milestone has no duration; change its start instead.';
   const cal = calOf(db, r);
@@ -273,7 +276,8 @@ export function namedAssignment(db: Db, t: Row, rsrc: Row | null, role: Row | nu
  */
 export function dissolveActivities(db: Db, ids: string[]): number {
   const s = new Set(ids);
-  const P = rows(db, 'TASKPRED');
+  // (the chain is the logic: a baseline's link of a dissolved activity goes with it and is carried nowhere)
+  const P = logicRelationships(db);
   const add: [string, string, string, number][] = [];
   // each link into the removed set is carried to every activity the set leads on to, through chains inside it
   // (a whole floor dissolved at once still joins the floor below to the floor above)
@@ -322,13 +326,17 @@ export function checkRelationship(db: Db, predId: string, succId: string, type =
   if (noLoopCheck) return undefined;
   // P6 refuses links that would create a loop
   const P = realOf(rows(db, 'TASKPRED')), succOf = rowIndex(P, 'pred', (r) => r.pred_task_id);
+  // (a baseline's link is no logic: it closes no loop, and a relationship that is one itself is not checked for one)
+  const TK = realOf(rows(db, 'TASK')), byTask = rowIndex(TK, 'id', (t) => t.task_id);
+  const isLink = baselineLinkTest(db, (id) => { const i = (byTask.get(id) ?? []).find((k) => TK[k].task_id === id); return i == null ? undefined : TK[i].proj_id; });
+  if (isLink?.({ task_id: succId, pred_task_id: predId } as Row)) return undefined;
   const stack = [succId], seen = new Set<string>();
   while (stack.length) {
     const x = stack.pop()!;
     if (x === predId) return LOOP_MESSAGE;
     if (seen.has(x)) continue;
     seen.add(x);
-    for (const i of succOf.get(x) ?? []) if (P[i].pred_task_id === x) stack.push(P[i].task_id);
+    for (const i of succOf.get(x) ?? []) if (P[i].pred_task_id === x && !isLink?.(P[i])) stack.push(P[i].task_id);
   }
   return undefined;
 }

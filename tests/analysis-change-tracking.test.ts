@@ -109,9 +109,9 @@ test('date changes: the working days of the activity\'s calendar, material from 
   assert.equal(PROGRESS_MATERIAL_POINTS, 5);
   const a = B.cleanChain(), b = copyOf(a);
   // forecast finish T2 +12 h (half a day on the 24-hour calendar), T3 +24 h (exactly one day: material), T1 +23 h 59 min is below one day
-  task(b, 'T2').early_end_date = shift(task(a, 'T2').early_end_date, 12);
-  task(b, 'T3').early_end_date = shift(task(a, 'T3').early_end_date, 24);
-  task(b, 'T1').early_end_date = shift(task(a, 'T1').early_end_date, 23.9833333);
+  // (an activity's forecast finish is its Finish: the Remaining Early Finish of one not finished, which a schedule writes with the early finish)
+  const later = (code: string, hours: number) => { task(b, code).early_end_date = task(b, code).reend_date = shift(task(a, code).early_end_date, hours); };
+  later('T2', 12); later('T3', 24); later('T1', 23.9833333);
   const r = changeTracking({ updates: [upd('a', a), upd('b', b)] });
   const f = Object.fromEntries(r.changes.filter((c) => c.category === 'forecast_dates' && c.field === 'forecast_finish').map((c) => [c.id, c]));
   assert.deepEqual([f.T2.change, f.T2.material], [0.5, false]);
@@ -174,8 +174,8 @@ test('baseline dates: the baseline each update carries; a revision is flagged an
   const blOf = (code: string) => rows(a.db, 'TASK').find((t) => t.proj_id === blId && t.task_code === code)!;
   const move = (code: string, col: string, hours: number) => { const t = blTask(code); t[col] = shift(blOf(code)[col], hours); };
   // T2's baseline finish moves 5 days later; T3's baseline start 12 h (below a day)
-  for (const col of ['early_end_date', 'target_end_date']) move('T2', col, 5 * 24);
-  for (const col of ['early_start_date', 'target_start_date']) move('T3', col, 12);
+  for (const col of ['early_end_date', 'reend_date', 'target_end_date']) move('T2', col, 5 * 24);
+  for (const col of ['early_start_date', 'restart_date', 'target_start_date']) move('T3', col, 12);
   const r = changeTracking({ updates: [upd('a', a), upd('b', b)] });
   const bc = r.changes.filter((c) => c.category === 'baseline_dates');
   assert.deepEqual(bc.map((c) => [c.id, c.field, c.change, c.material]), [['T2', 'baseline_finish', 5, true], ['T3', 'baseline_start', 0.5, false]]);
@@ -185,7 +185,7 @@ test('baseline dates: the baseline each update carries; a revision is flagged an
   assert.equal(r.status, 'fail');
   // only an immaterial change: warning is not reached either (a baseline change that is not material is no revision; the date changes are not material: status pass if nothing is material)
   const c = copyOf(a);
-  for (const col of ['early_start_date', 'target_start_date']) { const t = rows(c.db, 'TASK').find((x) => x.proj_id === blId && x.task_code === 'T3')!; t[col] = shift(blOf('T3')[col], 12); }
+  for (const col of ['early_start_date', 'restart_date', 'target_start_date']) { const t = rows(c.db, 'TASK').find((x) => x.proj_id === blId && x.task_code === 'T3')!; t[col] = shift(blOf('T3')[col], 12); }
   const r2 = changeTracking({ updates: [upd('a', a), upd('c', c)] });
   assert.equal(r2.status, 'pass');
   assert.equal(r2.flags.length, 0);

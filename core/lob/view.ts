@@ -35,7 +35,7 @@ export function lobView(db: Db, projId: string, m: LobModel, o: { hoursPerDay: n
   for (const t of m.tasks) {
     const d = locationDurations(m, t);
     const locs = t.order.filter((c) => d.has(c)).map((c) => acts.get(activityId(t.code, c))).filter((a): a is NonNullable<typeof a> => !!a);
-    const start = (a: (typeof locs)[number]) => a.act_start_date || a.early_start_date, finish = (a: (typeof locs)[number]) => a.act_end_date || a.early_end_date;
+    const start = (a: (typeof locs)[number]) => a.act_start_date || a.restart_date || a.early_start_date, finish = (a: (typeof locs)[number]) => a.act_end_date || a.reend_date || a.early_end_date;
     const floats = locs.map((a) => (a.total_float_hr_cnt === '' ? null : Number(a.total_float_hr_cnt) / o.hoursPerDay)).filter((x): x is number => x != null);
     const minFloat = floats.length ? minOf(floats) : null;
     if (minFloat != null && minFloat <= 0) out.critical.push(t.code);

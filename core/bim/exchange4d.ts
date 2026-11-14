@@ -31,8 +31,8 @@ export function items4d(db: Db, projId: string, ix: IfcIndex | null, o: { planne
     if (!ls?.length) continue;
     const role: Role = ls.some((l) => l.role === 'built') ? 'built' : ls[0].role;
     const b = bl?.tasks.get(t.task_code);
-    const start = b ? b.act_start_date || b.early_start_date || b.target_start_date : t.act_start_date || t.early_start_date || t.target_start_date;
-    const finish = b ? b.act_end_date || b.early_end_date || b.target_end_date : t.act_end_date || t.early_end_date || t.target_end_date;
+    const start = b ? b.act_start_date || b.restart_date || b.early_start_date || b.target_start_date : t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date;
+    const finish = b ? b.act_end_date || b.reend_date || b.early_end_date || b.target_end_date : t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date;
     out.push({
       taskId: t.task_id, key: (o.key ? activityValue(db, t, o.key) : undefined) ?? t.task_code, id: t.task_code, name: t.task_name,
       type: role === 'removed' ? 'Demolish' : role === 'temporary' ? 'Temporary' : 'Construct',
@@ -235,7 +235,7 @@ export function ifc4dLines(db: Db, projId: string, t: StepAppend, items: Item4d[
   for (const name of baselines) {
     const bl = baselineOf(db, proj, name);
     if (!bl) throw new Error(`No baseline "${name}".`);
-    const list = items.flatMap((it) => { const row = bl.tasks.get(it.id); return row ? [{ it: { ...it, plannedStart: row.act_start_date || row.early_start_date || row.target_start_date || '', plannedFinish: row.act_end_date || row.early_end_date || row.target_end_date || '' }, row }] : []; });
+    const list = items.flatMap((it) => { const row = bl.tasks.get(it.id); return row ? [{ it: { ...it, plannedStart: row.act_start_date || row.restart_date || row.early_start_date || row.target_start_date || '', plannedFinish: row.act_end_date || row.reend_date || row.early_end_date || row.target_end_date || '' }, row }] : []; });
     const ids = schedule(bl.name, 'BASELINE', list);
     for (const [taskId, id] of ids) add(`IFCRELDEFINESBYOBJECT('${ifcGuid()}',${t.owner},$,$,(${id}),${planned.get(taskId)})`);
   }

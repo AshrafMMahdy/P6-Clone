@@ -6,6 +6,7 @@ import { isLegacyLayout } from '../schedule/cpm.ts';
 import { deleteActivities } from '../project/edit.ts';
 import { defaultCalendarId, financialPeriods } from '../progress/period.ts';
 import { wordOf } from './validate.ts';
+import { baselineLinks } from '../progress/snapshots.ts';
 
 /**
  * P6's import action for a project in the file.
@@ -33,6 +34,8 @@ export interface ImportPlan {
   dict?: Partial<Record<string, DictAction>>;
   /** update / add_into: per project table (TASK, PROJWBS, TASKPRED, TASKRSRC, TASKACTV, UDFVALUE…). Default update. */
   data?: Partial<Record<string, DataAction>>;
+  /** The rows are a copy made inside this file (a baseline saved, a project copied): a reference to a row that is not copied is that same row of the file. */
+  sameFile?: boolean;
 }
 export type ImportCounts = Record<string, { inserted: number; updated: number; kept: number; removed: number; skipped: number }>;
 export interface ImportResult { projIds: string[]; findings: Finding[]; map: Record<string, Record<string, string>>; counts: ImportCounts }
@@ -184,6 +187,19 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
   const udfTable = new Map(rows(src, 'UDFTYPE').map((u) => [u.udf_type_id, u.table_name]));
   const targetCache = new Map<string, string | undefined>(); // table|field -> referenced table (millions of lookups on big files)
   const targetOf = (t: string, f: string) => { const ck = t + '|' + f; let x = targetCache.get(ck); if (x === undefined && !targetCache.has(ck)) targetCache.set(ck, (x = refTarget(f, t))); return x; };
+  // A relationship with an end that is not imported is kept as a relationship to an activity outside the file, under the number the source gave that activity.
+  // Two cases cannot be kept so: a baseline's link (it is the baseline's record of another project, not logic: without that project it would turn into logic),
+  // and a number that is another activity's here (the relationship would point at that activity).
+  const srcLinks = new Set(baselineLinks(src));
+  let taskIdsHere: Set<string> | undefined, lostLinks = 0, lostOfBaseline = 0;
+  const lostEnd = (r: Row): boolean => {
+    if (plan.sameFile) return false;
+    const out = [r.task_id, r.pred_task_id].filter((v) => v && m('TASK')[v] == null);
+    if (!out.length) return false;
+    if (srcLinks.has(r)) { lostOfBaseline++; return true; }
+    taskIdsHere ??= new Set([...rows(db, 'TASK').map((t) => t.task_id), ...Object.values(m('TASK'))]);
+    return out.some((v) => taskIdsHere!.has(v));
+  };
   const goneRef = (t: string, r: Row): boolean => {
     for (const f in r) {
       const v = r[f];
@@ -258,6 +274,7 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
       if (!r[k]) continue;
       // (a project added INTO another brings its activities, not its schedule options: the target keeps its own)
       if (goneRef(t, r) || (t === 'SCHEDOPTIONS' && addInto.has(r.proj_id))) { dropped.add(`${t}|${r[k]}`); count(t, 'skipped'); continue; }
+      if (t === 'TASKPRED' && lostEnd(r)) { dropped.add(`${t}|${r[k]}`); count(t, 'skipped'); lostLinks++; continue; }
       const dictRow = !isProjectRow(t, r) || (t === 'CALENDAR' && !r.proj_id);
       if (dictRow && MATCH[t]) {
         const name = MATCH[t](r);
@@ -393,6 +410,10 @@ export function importIntoDb(db: Db, src: Db, plan: ImportPlan): ImportResult {
     if (add.length) { dst.rows = rawOf(dst.rows).concat(add); count(t, 'inserted', add.length); }
   }
 
+  // (each kind in its own sentence: a baseline's link, and a relationship whose missing end has a number that is another activity's here)
+  const leftOut = (n: number, why: string) => { if (n) findings.push({ severity: 'warning', code: 'IMPORT_LINK_LEFT_OUT', table: 'TASKPRED', message: `${n === 1 ? '1 relationship was' : `${n} relationships were`} left out: ${why}.`, p6: 'P6 drops a relationship whose other activity is not imported.' }); };
+  leftOut(lostOfBaseline, 'a baseline\'s link to an activity of a project that was not imported (a baseline\'s link is kept only with the project it points at)');
+  leftOut(lostLinks - lostOfBaseline, 'the other end is an activity of a project that was not imported, and here its number is another activity\'s (the relationship would have pointed at that activity)');
   for (const [key, n] of unresolved) { const [t, target] = key.split('|'); findings.push({ severity: 'warning', code: 'IMPORT_UNRESOLVED', table: t, message: `${n === 1 ? `${an(wordOf(t)).replace(/^a/, 'A')} points` : `${n} ${wordOf(t).replace(/y$/, 'ie')}s point`} at ${an(wordOf(target))} that is not in the file; ${n === 1 ? 'the reference is kept as it is' : 'the references are kept as they are'}.`, p6: 'P6 would drop or default this reference.' }); }
 
   // Update with remove_missing: what the project has and the file does not is taken out (activities with their own rows)

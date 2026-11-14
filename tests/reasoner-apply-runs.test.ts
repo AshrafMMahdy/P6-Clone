@@ -409,7 +409,7 @@ test('a restored baseline is a project: not in baselineProjectIds, refused by th
   const bl = () => rows(db, 'PROJECT').find((p) => p.proj_short_name === 'BL')!;
   assert.ok(bl().orig_proj_id && baselineProjectIds(db).has(bl().proj_id), 'read from the XER: a baseline');
   const was = { of: bl()._baseline_of, orig: bl().orig_proj_id, slot: rows(db, 'PROJECT').find((p) => p.proj_short_name === 'R')!.sum_base_proj_id };
-  good(db, [{ op: 'restore_baseline', baseline: 'BL' }]);
+  good(db, [{ op: 'assign_baseline', baseline: '', as: 'project', project: 'R' }, { op: 'restore_baseline', baseline: 'BL' }]); // (as in P6, its assignment is cleared first)
   assert.ok(!baselineProjectIds(db).has(bl().proj_id), '(a) not a baseline');
   assert.equal(bl().orig_proj_id, '');
   assert.equal(rows(db, 'PROJECT').find((p) => p.proj_short_name === 'R')!.sum_base_proj_id, '', 'no project names it as its baseline');
@@ -423,7 +423,7 @@ test('a restored baseline is a project: not in baselineProjectIds, refused by th
   // undo: a second copy read from the XER, restored, then rolled back
   let db2 = plan(); good(db2, [{ op: 'save_baseline', project: 'R', name: 'BL', assign_as: 'project' }]); db2 = reopen(db2);
   const b2 = () => rows(db2, 'PROJECT').find((p) => p.proj_short_name === 'BL')!;
-  const j2 = record(db2, (v) => { assert.ok(applyOps(v, [{ op: 'restore_baseline', baseline: 'BL' }] as never, { calendarDays: true }).ok); });
+  const j2 = record(db2, (v) => { assert.ok(applyOps(v, [{ op: 'assign_baseline', baseline: '', as: 'project', project: 'R' }, { op: 'restore_baseline', baseline: 'BL' }] as never, { calendarDays: true }).ok); });
   rollback(j2);
   assert.deepEqual({ of: b2()._baseline_of, orig: b2().orig_proj_id, slot: rows(db2, 'PROJECT').find((p) => p.proj_short_name === 'R')!.sum_base_proj_id }, was);
   assert.ok(baselineProjectIds(db2).has(b2().proj_id), 'undone: a baseline again');

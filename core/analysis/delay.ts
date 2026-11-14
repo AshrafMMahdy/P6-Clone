@@ -14,11 +14,12 @@ import { isCritical, makeCtx } from '../project/ctx.ts';
 import { calendarResolver, relationshipFloat, scheduleProjects } from '../schedule/cpm.ts';
 import { onScratch } from './batch.ts';
 import { isLoe, isWbs, type Tick } from './common.ts';
+import { logicRelationships } from '../progress/snapshots.ts';
 
 export interface Update { name: string; db: Db; projId: string; /** true on the state of the project open in the session (loadUpdates sets it); the analyses that order the series by data date show which one it is */ open?: boolean }
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
-const finOf = (t: Row) => parseP6Date(t.act_end_date || t.early_end_date || t.target_end_date);
+const finOf = (t: Row) => parseP6Date(t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date);
 const tasksOf = (u: Update) => rows(u.db, 'TASK').filter((t) => t.proj_id === u.projId && !isWbs(t));
 const dataDate = (u: Update) => { const p = rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId); return parseP6Date(p?.last_recalc_date || p?.plan_start_date) ?? null; };
 
@@ -37,7 +38,7 @@ function finishActivity(u: Update, milestone?: string): Row | null {
   const T = tasksOf(u);
   if (milestone) return T.find((t) => t.task_code === milestone) ?? T.find((t) => t.task_name.trim().toLowerCase() === milestone.trim().toLowerCase()) ?? null;
   // the latest finish; on a tie, the activity nothing follows (the finish milestone after its last task)
-  const hasSucc = new Set(rows(u.db, 'TASKPRED').map((r) => r.pred_task_id));
+  const hasSucc = new Set(logicRelationships(u.db).map((r) => r.pred_task_id));
   let best: Row | null = null;
   for (const t of T) { const f = finOf(t); if (!isLoe(t) && f != null && (best == null || f > finOf(best)! || (f === finOf(best) && hasSucc.has(best.task_id) && !hasSucc.has(t.task_id)))) best = t; }
   return best;
@@ -65,7 +66,7 @@ export function drivingFloat(d: Db, ctx: ReturnType<typeof makeCtx>): (r: Row) =
 export function drivingPath(u: Update, end: Row): Row[] {
   const ctx = makeCtx(u.db, { hoursPerDay: 8 }), rf = drivingFloat(u.db, ctx);
   const preds = new Map<string, Row[]>();
-  for (const r of rows(u.db, 'TASKPRED')) (preds.get(r.task_id) ?? preds.set(r.task_id, []).get(r.task_id)!).push(r);
+  for (const r of logicRelationships(u.db)) (preds.get(r.task_id) ?? preds.set(r.task_id, []).get(r.task_id)!).push(r);
   const seen = new Set<string>(), out: Row[] = [], stack = [end];
   while (stack.length) {
     const t = stack.pop()!;
@@ -74,11 +75,11 @@ export function drivingPath(u: Update, end: Row): Row[] {
     // LOE and WBS summary activities take their dates from the logic around them, so they never drive it
     for (const r of preds.get(t.task_id) ?? []) { const p = ctx.taskById.get(r.pred_task_id); if (p && p.proj_id === u.projId && !isLoe(p) && rf(r) === 0) stack.push(p); }
   }
-  const st = (t: Row) => parseP6Date(t.act_start_date || t.early_start_date) ?? 0;
+  const st = (t: Row) => parseP6Date(t.act_start_date || t.restart_date || t.early_start_date) ?? 0;
   return out.sort((x, y) => st(x) - st(y) || (finOf(x) ?? 0) - (finOf(y) ?? 0));
 }
 
-const predCodes = (u: Update, t: Row) => { const byId = new Map(tasksOf(u).map((x) => [x.task_id, x.task_code])); return rows(u.db, 'TASKPRED').filter((r) => r.task_id === t.task_id).map((r) => `${byId.get(r.pred_task_id)}:${r.pred_type}:${Number(r.lag_hr_cnt || 0)}`).sort().join(','); };
+const predCodes = (u: Update, t: Row) => { const byId = new Map(tasksOf(u).map((x) => [x.task_id, x.task_code])); return logicRelationships(u.db).filter((r) => r.task_id === t.task_id).map((r) => `${byId.get(r.pred_task_id)}:${r.pred_type}:${Number(r.lag_hr_cnt || 0)}`).sort().join(','); };
 
 const PROGRESS = ['act_start_date', 'act_end_date', 'remain_drtn_hr_cnt', 'phys_complete_pct', 'status_code', 'restart_date', 'reend_date', 'suspend_date', 'resume_date', 'expect_end_date', 'act_work_qty', 'remain_work_qty'];
 
@@ -116,7 +117,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
       const causes: string[] = [];
       if (a.target_drtn_hr_cnt !== b.target_drtn_hr_cnt && !b.act_end_date) causes.push('duration revised');
       if (predCodes(A, a) !== predCodes(B, b)) causes.push('logic revised');
-      const planStart = parseP6Date(a.act_start_date || a.early_start_date), ddB = dataDate(B);
+      const planStart = parseP6Date(a.act_start_date || a.restart_date || a.early_start_date), ddB = dataDate(B);
       if (!a.act_start_date && planStart != null && ddB != null && planStart < ddB && (!b.act_start_date || (parseP6Date(b.act_start_date) ?? 0) > planStart)) causes.push('started late');
       if (!causes.length && (days ?? 0) > 0) {
         // 'progressed slower than planned' only where measured: the activity was under way at the earlier update and its remaining duration fell by less than the working time between the two data dates
@@ -124,7 +125,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
         if (a.act_start_date && elapsedH != null && elapsedH > 0 && remA - remB < elapsedH - 1e-6) causes.push(`progressed slower than planned (remaining ${r2(remA / hpd)} d to ${r2(remB / hpd)} d over ${r2(elapsedH / hpd)} d between the data dates)`);
         else causes.push(`no single cause identified: its finish moved ${days} d with its duration, logic and start unchanged`);
       }
-      return { id: a.task_code, name: a.task_name, ...(b.task_code !== a.task_code ? { now: b.task_code } : {}), lost_days: days, finish_from: a.act_end_date || a.early_end_date || null, finish_to: b.act_end_date || b.early_end_date || null, causes };
+      return { id: a.task_code, name: a.task_name, ...(b.task_code !== a.task_code ? { now: b.task_code } : {}), lost_days: days, finish_from: a.act_end_date || a.reend_date || a.early_end_date || null, finish_to: b.act_end_date || b.reend_date || b.early_end_date || null, causes };
     }).filter((x) => x.lost_days == null || x.lost_days > 0).sort((x, y) => (y.lost_days ?? Infinity) - (x.lost_days ?? Infinity));
     const w: Record<string, unknown> = {
       window: i, from: A.name, to: B.name, data_date_from: fmt(dataDate(A)), data_date_to: fmt(dataDate(B)),
@@ -151,7 +152,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
   const total = wd(ff ? finOf(ff) : null, fl ? finOf(fl) : null);
   // notes on what the figures stand on: an update whose saved dates are not current (a recalculation gives other dates), and two updates with one data date (a window of 0 days)
   const notes: string[] = [...slipNotes];
-  for (const u of list) { const state = storedDatesState(u.db, [u.projId]), st = state.stale[0]; if (st) notes.push(datesNotCurrent(u.name, st.differ, st.open, true)); for (const l of state.loops) notes.push(loopStopsDates([u.name], l.loops, true)); /* (an update is one project of one file: it is named as the update) */ }
+  for (const u of list) { const state = storedDatesState(u.db, [u.projId]), st = state.stale[0]; if (st) notes.push(datesNotCurrent(u.name, st.differ, st.open, true, st.keptMsp)); for (const l of state.loops) notes.push(loopStopsDates([u.name], l.loops, true)); /* (an update is one project of one file: it is named as the update) */ }
   // an update with no data date is dated by its planned start: said once
   notes.push(...dataDateUsedNotes(list.map((u) => rows(u.db, 'PROJECT').find((x) => x.proj_id === u.projId)).filter((p): p is Row => !!p)));
   for (let i = 1; i < list.length; i++) {
@@ -173,8 +174,8 @@ const fmt = (v: number | null | undefined) => (v != null ? formatP6Date(v) : nul
  *  tool and the desktop app's TIA panel both work it out here. */
 export function tiaBaseline(bl: { name: string; tasks: Map<string, Row>; how: string }, milestone: string | undefined, date: (v: string) => number | null): { name: string; finish: number | null; how: string } {
   let f: number | null = null;
-  for (const t of bl.tasks.values()) { const v = date(t.act_end_date || t.early_end_date || t.target_end_date); if (v != null && (f == null || v > f)) f = v; }
-  if (milestone) { const m = bl.tasks.get(milestone); f = m ? date(m.act_end_date || m.early_end_date || m.target_end_date) : null; }
+  for (const t of bl.tasks.values()) { const v = date(t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date); if (v != null && (f == null || v > f)) f = v; }
+  if (milestone) { const m = bl.tasks.get(milestone); f = m ? date(m.act_end_date || m.reend_date || m.early_end_date || m.target_end_date) : null; }
   return { name: bl.name, finish: f, how: bl.how };
 }
 
@@ -209,7 +210,7 @@ export function timeImpact(db: Db, projIds: string[], fragnet: unknown[], o: { d
     const ids = new Set(onPath.map((t) => t.task_code));
     const ctx = makeCtx(d, { hoursPerDay: 8 }), rf = drivingFloat(d, ctx);
     const succ = new Map<string, Row[]>();
-    for (const r2_ of rows(d, 'TASKPRED')) (succ.get(r2_.pred_task_id) ?? succ.set(r2_.pred_task_id, []).get(r2_.pred_task_id)!).push(r2_);
+    for (const r2_ of logicRelationships(d)) (succ.get(r2_.pred_task_id) ?? succ.set(r2_.pred_task_id, []).get(r2_.pred_task_id)!).push(r2_);
     const reach = new Set<string>(), stack = rows(d, 'TASK').filter((t) => projIds.includes(t.proj_id) && seeds.has(t.task_code));
     while (stack.length) { const t = stack.pop()!; if (reach.has(t.task_code)) continue; reach.add(t.task_code); for (const r of succ.get(t.task_id) ?? []) { const s = ctx.taskById.get(r.task_id); if (s && rf(r) === 0) stack.push(s); } }
     const path = onPath.filter((t) => reach.has(t.task_code)).map((t) => t.task_code);

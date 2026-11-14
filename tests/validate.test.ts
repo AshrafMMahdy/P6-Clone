@@ -105,3 +105,31 @@ test('SCHEDOPTIONS FT_Min (P6 code for smallest of start and finish float) is va
   assert.deepEqual(validateXer(r.db, r.findings).filter((f) => f.code === 'BAD_ENUM'), []);
   assert.equal(optionsFor(r.db, r.db.tables.PROJECT.rows[0]).floatType, 'smallest');
 });
+
+test('a value that is not one P6 has: the sentence says so and what the repair puts, never that P6 refuses it; the repair does what it says (owner 2026-11-14)', async () => {
+  const { repairToValid } = await import('../core/xer/repair-valid.ts');
+  const r = parseXer(xer(base({
+    PROJECT: ['proj_id\tproj_short_name\tplan_start_date\tlast_recalc_date\tclndr_id\tdef_duration_type\tstep_complete_flag', '1\tP1\t01/02/2024\t2024-01-01 08:00\t1\tFixed Duration & Units\tyes'],
+    TASK: ['task_id\tproj_id\twbs_id\tclndr_id\ttask_code\ttask_type\tstatus_code\ttarget_drtn_hr_cnt\tact_start_date\tact_end_date\tcomplete_pct_type\tduration_type\tcstr_type\tcstr_date\ttarget_work_qty',
+      '100\t1\t11\t1\tA1\tTT_Task\tStarted\t8\t2024-01-01 08:00\t\tCP_Duration\tFixed\tSNET\t2024-01-03 08:00\t2d', '101\t1\t11\t1\tA2\tTT_Task\tTK_NotStart\t8\t\t\tCP_Drtn\tDT_FixedDUR2\t\t\t0'],
+    TASKPRED: ['task_pred_id\ttask_id\tpred_task_id\tproj_id\tpred_proj_id\tpred_type\tlag_hr_cnt', '1\t101\t100\t1\t1\tFS\t0'],
+  })));
+  const said = validateXer(r.db, r.findings).filter((f) => /^BAD_/.test(f.code)).map((f) => f.message).sort();
+  assert.deepEqual(said, [
+    'A1 TASK.complete_pct_type is "CP_Duration", which is not a value P6 has for it (P6\'s: CP_Drtn, CP_Phys, CP_Units); save with repair: true puts CP_Drtn (Duration), P6\'s default.',
+    'A1 TASK.cstr_type is "SNET", which is not a value P6 has for it (P6\'s: CS_MSO, CS_MSOB, CS_MSOA, CS_MEO, CS_MEOB, CS_MEOA, CS_ALAP, CS_MANDSTART, CS_MANDFIN); save with repair: true clears the constraint.',
+    'A1 TASK.duration_type is "Fixed", which is not a value P6 has for it (P6\'s: DT_FixedDUR2, DT_FixedDrtn, DT_FixedQty, DT_FixedRate); save with repair: true puts DT_FixedDUR2 (Fixed Duration & Units), P6\'s default.',
+    'A1 TASK.status_code is "Started", which is not a value P6 has for it (P6\'s: TK_NotStart, TK_Active, TK_Complete); save with repair: true puts the status the actual dates give.',
+    'A1 TASK.target_work_qty is "2d", which is not a number; save with repair: true replaces it (its changes list what it puts).',
+    'PROJECT.def_duration_type is "Fixed Duration & Units", which is not a value P6 has for it (P6\'s: DT_FixedDUR2, DT_FixedDrtn, DT_FixedQty, DT_FixedRate); save with repair: true empties it.',
+    'PROJECT.plan_start_date is "01/02/2024", which cannot be read as a date; save with repair: true empties it.',
+    'PROJECT.step_complete_flag is "yes", where P6 has Y or N; save with repair: true puts N.',
+    'TASKPRED.pred_type is "FS", which is not a value P6 has for it (P6\'s: PR_FS, PR_SS, PR_FF, PR_SF); save with repair: true puts PR_FS (Finish to Start), P6\'s default.',
+  ]);
+  // the repair, read from the rows it leaves (not from its own list of changes)
+  repairToValid(r.db);
+  const a1 = r.db.tables.TASK.rows[0], p = r.db.tables.PROJECT.rows[0];
+  assert.deepEqual([a1.complete_pct_type, a1.cstr_type, a1.cstr_date, a1.duration_type, a1.status_code, a1.target_work_qty, p.def_duration_type, p.plan_start_date, p.step_complete_flag, r.db.tables.TASKPRED.rows[0].pred_type],
+    ['CP_Drtn', '', '', 'DT_FixedDUR2', 'TK_Active', '0', '', '', 'N', 'PR_FS']);
+  assert.deepEqual(validateXer(r.db).filter((f) => /^BAD_/.test(f.code)), []);
+});

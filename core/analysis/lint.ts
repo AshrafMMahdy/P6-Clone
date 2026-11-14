@@ -297,7 +297,7 @@ function* fsOverlap(s: Scope, simulate: boolean, maxIds: number, T: LintThreshol
       const j = record(s.db, (d) => {
         if (ops.length && !applyOps(d, ops, { hoursPerDay: s.hpd, calendarDays: true }).ok) return;
         const r = scheduleProjects(d, ids, {});
-        if (r.ok) f = maxOf(d.tables.TASK.rows.filter((t) => s.projIds.has(t.proj_id)).map((t) => parseP6Date(t.act_end_date || t.early_end_date) ?? -Infinity));
+        if (r.ok) f = maxOf(d.tables.TASK.rows.filter((t) => s.projIds.has(t.proj_id)).map((t) => parseP6Date(t.act_end_date || t.reend_date || t.early_end_date) ?? -Infinity));
       });
       rollback(j);
       return f;
@@ -325,8 +325,8 @@ function platformChecks(s: Scope, W: Row[], maxIds: number, want: (id: string) =
   const sized = <P,>(x: { pass: P; warn: P; small_pass: P; small_warn: P }): { pass: P; warn: P; small_network?: true } => (small ? { pass: x.small_pass, warn: x.small_warn, small_network: true } : { pass: x.pass, warn: x.warn });
   const workIds = new Set(W.map((t) => t.task_id));
   const preds = (t: Row) => (s.ctx.predsOf.get(t.task_id) ?? []), succs = (t: Row) => (s.ctx.succsOf.get(t.task_id) ?? []);
-  const start = (t: Row) => parseP6Date(t.act_start_date || t.early_start_date || t.target_start_date);
-  const finish = (t: Row) => parseP6Date(t.act_end_date || t.early_end_date || t.target_end_date);
+  const start = (t: Row) => parseP6Date(t.act_start_date || t.restart_date || t.early_start_date || t.target_start_date);
+  const finish = (t: Row) => parseP6Date(t.act_end_date || t.reend_date || t.early_end_date || t.target_end_date);
   const durD = (t: Row) => Number(t.target_drtn_hr_cnt || 0) / s.dh.task(t);
   const p = s.projs[0];
   const cal = p ? s.projCal(p) : null;

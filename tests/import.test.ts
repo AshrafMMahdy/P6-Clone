@@ -10,6 +10,11 @@ import { applyOps } from '../core/project/ops.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { readRaw } from '../renderer/io.ts';
+import { validateXer } from '../core/xer/validate.ts';
+import { reviewSchedule } from '../core/query/review.ts';
+import { makeCtx } from '../core/project/ctx.ts';
+import { makeScope } from '../core/analysis/common.ts';
+import { baselineLinks, logicRelationships } from '../core/progress/snapshots.ts';
 import { writeP6XmlTo } from '../core/xml/p6xml.ts';
 
 const load = (name: string) => parseXer(samples().find((s) => s.name === name)!.bytes).db;
@@ -249,32 +254,48 @@ test('assignment codes are matched by name like the other code kinds; a baseline
   assert.deepEqual([n('ASGNMNTCATTYPE'), n('ASGNMNTCATVAL'), n('RSRCRCAT')], [1, 2, 1]);
 });
 
-// A baseline is a snapshot of its project alone. Saved while its project is tied to another project, it does not take that tie with it:
-// the other project's activity would be held at the baseline's saved dates for good.
-test('a baseline never holds an activity of another project', () => {
+// P6's way (Oracle, "Modify a baseline manually": "When a baseline contains relationships to non-baseline projects, these relationships are maintained and copied when
+// a baseline is restored"): a baseline is a complete copy, its relationship to an activity of another project included. That relationship is the baseline's link:
+// nothing schedules or analyses with it (the other project's activity is not held at the baseline's saved dates), the agent is shown it apart and can delete it,
+// and restoring the baseline makes it a relationship like any other.
+test('a baseline keeps its links to other projects, and nothing schedules or analyses with them until it is restored', () => {
   const db: Db = { tables: {} };
   const ok = (ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); };
   ok([{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 20 }, { op: 'add_project', id: 'Q', start: '2026-01-05' },
     { op: 'add_activity', project: 'Q', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', pred_project: 'P', succ: 'B', project: 'Q' }]);
   const live = () => db.tables.PROJECT.rows.filter((p) => !p._baseline_of).map((p) => p.proj_id);
-  const finishB = () => { assert.ok(scheduleProjects(db, live()).ok); return db.tables.TASK.rows.find((t) => t.task_code === 'B' )!.early_end_date; };
+  const b = db.tables.TASK.rows.find((t) => t.task_code === 'B')!;
+  const finishB = () => { assert.ok(scheduleProjects(db, live()).ok); return b.early_end_date; };
   assert.equal(finishB(), '2026-02-06 17:00');
   ok([{ op: 'save_baseline', project: 'P', name: 'BL1' }]);
-  assert.equal(db.tables.TASKPRED.rows.length, 1, 'the tie to Q stays with P; the baseline has none');
+  // the file: two rows (P's relationship, and the baseline's copy of it, from the baseline's A to the live B)
+  const blA = db.tables.TASK.rows.find((t) => t.task_code === 'A' && !live().includes(t.proj_id))!;
+  assert.deepEqual(db.tables.TASKPRED.rows.map((r) => [r.pred_task_id === blA.task_id, r.task_id === b.task_id]), [[false, true], [true, true]]);
+  // logic: one relationship. The scheduler, an activity's predecessors, the review's count and the analyses' scope all read that one
+  assert.deepEqual([logicRelationships(db).length, baselineLinks(db).length], [1, 1]);
+  assert.equal((makeCtx(db, { hoursPerDay: 8 }).predsOf.get(b.task_id) ?? []).length, 1);
+  assert.equal(reviewSchedule(db).relationships, 1);
+  assert.equal(makeScope(db).rels.length, 1);
   ok([{ op: 'update_activity', project: 'P', id: 'A', duration_days: 2 }]);
   assert.equal(finishB(), '2026-01-13 17:00', 'B follows A, not the baseline of A');
-  // a file that already holds such a tie (this engine made them before; P6 is reported to leave them): read, the file is without it, and the reader says so
-  const blA = db.tables.TASK.rows.find((t) => t.task_code === 'A' && t.proj_id !== live()[0])!, b = db.tables.TASK.rows.find((t) => t.task_code === 'B')!;
-  db.tables.TASKPRED.rows.push({ task_pred_id: '99', task_id: b.task_id, pred_task_id: blA.task_id, proj_id: b.proj_id, pred_proj_id: blA.proj_id, pred_type: 'PR_FS', lag_hr_cnt: '0' });
+  // written and read back, the link is still the baseline's, and the file says so
   const read = readRaw(writeXer(db, { version: '18.8' }), 'xer');
-  assert.deepEqual(read.findings.filter((f) => f.code === 'BASELINE_TIE_LEFT_OUT').map((f) => f.message), ['1 relationship that ties a baseline to an activity outside it was left out (A in BL1 FS B in Q): a baseline is a snapshot of its own project and takes no part in the schedule.']);
-  assert.deepEqual(read.db.tables.TASKPRED.rows.map((r) => r.task_pred_id), ['1']);
-  // (a relationship between two current projects, and one inside a baseline, are untouched: the file read back holds the one tie of P and Q)
-  assert.equal(readRaw(writeXer(read.db, { version: '18.8' }), 'xer').findings.filter((f) => f.code === 'BASELINE_TIE_LEFT_OUT').length, 0);
+  assert.equal(read.db.tables.TASKPRED.rows.length, 2);
+  assert.deepEqual(validateXer(read.db).filter((f) => f.code === 'BASELINE_LINKS').map((f) => f.message), ['1 relationship ties a baseline to an activity outside it (A in BL1 FS B in Q): it is the baseline\u2019s and takes no part in the schedule.']);
+  assert.deepEqual(validateXer(read.db).filter((f) => f.code === 'REL_LOOP'), []);
+  // exported alone, Q does not take the baseline's link with it (its other end would be nowhere)
+  const q = readRaw(writeXer(db, { version: '18.8', projIds: [b.proj_id] }), 'xer');
+  assert.equal(q.db.tables.TASKPRED.rows.filter((r) => r.pred_task_id === blA.task_id).length, 0);
+  // deleted by naming the baseline as the project of its end; undone here by saving it again
+  ok([{ op: 'delete_relationship', pred: 'A', pred_project: 'BL1', succ: 'B', succ_project: 'Q' }]);
+  assert.equal(db.tables.TASKPRED.rows.length, 1);
+  ok([{ op: 'delete_baseline', baseline: 'BL1' }, { op: 'update_activity', project: 'P', id: 'A', duration_days: 20 }, { op: 'save_baseline', project: 'P', name: 'BL1' }, { op: 'update_activity', project: 'P', id: 'A', duration_days: 2 }]);
+  assert.equal(finishB(), '2026-01-13 17:00');
+  // restored, the baseline is a project like any other, and its relationship to B counts (P6: "maintained and copied when a baseline is restored")
+  ok([{ op: 'restore_baseline', baseline: 'BL1' }]);
+  assert.equal(finishB(), '2026-02-06 17:00');
 });
 
-// What a resource carries is one value per code, role and custom field. A file that brings another value for a resource already here does not leave the resource
-// with two: the value here is kept, or replaced when the import is told to update resources.
 test('a second import with other shared values leaves one value per resource: kept, or updated when resources are updated', () => {
   const build = (): Db => {
     const db: Db = { tables: {} };

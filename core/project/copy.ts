@@ -23,7 +23,7 @@ export function copyProject(db: Db, srcProjId: string, o: CopyOptions): string {
     const keep = n === 'PROJECT' ? rs.filter((p) => p.proj_id === srcProjId) : rs;
     src.tables[n] = { name: n, fields: [...(db.tables[n]?.fields ?? Object.keys(keep[0] ?? {}))], rows: keep.map((r) => ({ ...r })) };
   }
-  const res = importIntoDb(db, src, { projects: [{ srcProjId, action: 'new' }] });
+  const res = importIntoDb(db, src, { projects: [{ srcProjId, action: 'new' }], sameFile: true });
   const pid = res.projIds[0];
   const p = rows(db, 'PROJECT').find((x) => x.proj_id === pid)!;
   delete p._baseline_of;

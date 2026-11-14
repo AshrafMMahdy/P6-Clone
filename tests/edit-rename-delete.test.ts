@@ -158,7 +158,11 @@ function anonymiseOps(s: S, baselines: 'rename' | 'delete' = 'rename'): unknown[
   // match, so P6 still compares them; their WBS and notebooks renamed or cleared like the project's)
   const bls = T(s, 'PROJECT').filter((p) => p._baseline_of);
   const bcode = new Map(bls.map((b, j) => [b.proj_id, `${pcode.get(b._baseline_of)} - B${j + 1}`]));
-  if (baselines === 'delete') for (const b of bls) ops.push({ op: 'delete_baseline', baseline: b.proj_short_name });
+  // (as in P6, an assigned baseline is not deleted: every assignment is cleared first)
+  if (baselines === 'delete') {
+    for (const p of projs) for (const [f, as] of [['sum_base_proj_id', 'project'], ['_bl1', 'bl1'], ['_bl2', 'bl2'], ['_bl3', 'bl3']]) if (p[f]) ops.push({ op: 'assign_baseline', baseline: '', as, project: p.proj_short_name });
+    for (const b of bls) ops.push({ op: 'delete_baseline', baseline: b.proj_short_name });
+  }
   else bls.forEach((b, j) => ops.push({ op: 'update_baseline', baseline: b.proj_short_name, new_name: bcode.get(b.proj_id), name: `Baseline ${j + 1}` }));
   projs.forEach((p, i) => ops.push({ op: 'set_project', project: p.proj_short_name, new_id: `P${i + 1}`, name: `Project ${i + 1}`, new_proj_id: String(9000 + i) }));
   T(s, 'PROJWBS').filter((w) => pcode.has(w.proj_id)).forEach((w, i) => ops.push({ op: 'update_wbs', project: pcode.get(w.proj_id), code: `wbs_id:${w.wbs_id}`, new_code: `W${i + 1}`, ...(w.proj_node_flag === 'Y' ? {} : { name: `Area ${i + 1}` }) }));
