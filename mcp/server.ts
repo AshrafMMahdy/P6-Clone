@@ -318,8 +318,10 @@ const openProblemsOf = (db: Db) => new Map(p6Refusals(db).map((x) => [x.key, x.c
 async function rebuildOpenProblems(s: Session): Promise<boolean> {
   try {
     if (!s.path || s.savedTo === s.path || !existsSync(s.path)) return false;
-    const fmt = detectFormat(s.path, readHead(s.path));
-    const r = fmt === 'mpp' ? await readMpp(s.path) : fmt === 'xer' ? readXerFile(s.path, 'auto') : readRaw(readBytes(s.path), fmt, 'auto');
+    const fmt0 = detectFormat(s.path, readHead(s.path));
+    // (an .xml's kind is read from the whole file: its root element may stand beyond the head)
+    const whole = fmt0 === 'xer' || fmt0 === 'mpp' ? null : readBytes(s.path), fmt = whole ? detectFormat(s.path, whole) : fmt0;
+    const r = fmt === 'mpp' ? await readMpp(s.path) : whole ? readRaw(whole, fmt, 'auto') : readXerFile(s.path, 'auto');
     s.openProblems = openProblemsOf(r.db);
     return true;
   } catch { return false; }
@@ -443,8 +445,10 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'open_file': {
       const path = pathArg(a.path);
       // an XER is read from its file a chunk at a time; the other formats are read whole (XML trees, MPX)
-      const head = readHead(path), size = fileSize(path), format0 = detectFormat(path, head);
-      const bytes = format0 === 'xer' ? null : readBytes(path);
+      const head = readHead(path), size = fileSize(path), headFormat = detectFormat(path, head);
+      const bytes = headFormat === 'xer' ? null : readBytes(path);
+      // (an .xml's kind is read from the whole file: its root element may stand beyond the head — a long comment before it)
+      const format0 = bytes ? detectFormat(path, bytes) : headFormat;
       const need = estimateBytes(size);
       // reserve the memory first, so a big file is refused (with a way forward) instead of exhausting the process: the
       // project as it stays in memory, and while it is read the reader's own peak above that (workset.ts READ_PEAK)

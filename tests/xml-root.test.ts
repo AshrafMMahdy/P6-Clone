@@ -27,3 +27,25 @@ test('xmlRootName: the first element after the declaration, comments and a DOCTY
   assert.equal(xmlRootName(big), null);
   assert.ok(Date.now() - t0 < 5000, 'one pass over a file with no element');
 });
+
+// open_file read the kind from the file's first 4,000 bytes only: the same file, opened through the tool.
+test('open_file opens a Microsoft Project XML whose root element stands beyond the first 4,000 bytes', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'p6-xmlroot-'));
+  try {
+    const body = '<Project xmlns="http://schemas.microsoft.com/project"><Name>Far root</Name><StartDate>2026-03-02T08:00:00</StartDate><Tasks><Task><UID>1</UID><ID>1</ID><Name>Dig</Name><Duration>PT40H0M0S</Duration><Start>2026-03-02T08:00:00</Start><Finish>2026-03-06T17:00:00</Finish></Task></Tasks></Project>';
+    const near = join(dir, 'near.xml'), far = join(dir, 'far.xml');
+    writeFileSync(near, `<?xml version="1.0" encoding="UTF-8"?>${body}`);
+    writeFileSync(far, `<?xml version="1.0" encoding="UTF-8"?>${pad}${body}`);
+    const open = async (p: string) => { const r = await callTool('open_file', { path: p }); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+    const a = await open(near), b = await open(far);
+    assert.equal(a.err, false, JSON.stringify(a.d).slice(0, 300));
+    assert.equal(b.err, false, JSON.stringify(b.d).slice(0, 300));
+    assert.equal(b.d.format, a.d.format, 'the same kind as the file with its root at the start');
+    assert.equal(JSON.stringify(b.d.projects ?? b.d.project), JSON.stringify(a.d.projects ?? a.d.project), 'and the same project');
+    for (const x of [a, b]) await callTool('close', { handle: x.d.handle });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
