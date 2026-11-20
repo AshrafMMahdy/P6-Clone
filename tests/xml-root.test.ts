@@ -22,10 +22,22 @@ test('xmlRootName: the first element after the declaration, comments and a DOCTY
   assert.equal(xmlRootName(enc('')), null);
   assert.equal(xmlRootName(enc('<!-- never closed <Project>')), null);
   assert.equal(xmlRootName(new Uint8Array(Buffer.from('<?xml version="1.0" encoding="UTF-16"?><Project/>', 'utf16le'))), 'Project');
-  const big = new Uint8Array(8 * 1024 * 1024).fill(0x20);
-  const t0 = Date.now();
-  assert.equal(xmlRootName(big), null);
-  assert.ok(Date.now() - t0 < 5000, 'one pass over a file with no element');
+  assert.equal(xmlRootName(new Uint8Array(Buffer.from('\ufeff<?xml version="1.0" encoding="UTF-16"?><Project/>', 'utf16le').swap16())), 'Project', 'UTF-16, big end first');
+  assert.equal(xmlRootName(enc('\ufeff<!---><Fake>---><Project a="x>y"/>')), 'Project', 'dashes inside a comment');
+  assert.equal(xmlRootName(enc(`<!DOCTYPE Project [ <?pi it's ?> <!ELEMENT Project (Name)> ]><Project/>`)), 'Project', 'an apostrophe in a processing instruction of the DOCTYPE');
+  assert.equal(xmlRootName(enc('<Project attr="never closed')), 'Project', 'the name is known before the tag ends');
+  assert.equal(xmlRootName(enc('plain text')), null);
+});
+
+// The first reader copied what it had read at every comment of a DOCTYPE: 400,000 of them (10 MB) did not end in five minutes.
+test('xmlRootName is one pass: a DOCTYPE of 400,000 comments, 8 MB of spaces, a 30 MB attribute that never closes', { timeout: 120_000 }, () => {
+  const many = enc(`<?xml version="1.0"?><!DOCTYPE Project [${'<!-- c -->\n'.repeat(400_000)}]><Project xmlns="http://schemas.microsoft.com/project"/>`);
+  assert.ok(many.length > 4_000_000);
+  assert.equal(xmlRootName(many), 'Project');
+  assert.equal(detectFormat('a.xml', many), 'mspdi');
+  assert.equal(xmlRootName(new Uint8Array(8 * 1024 * 1024).fill(0x20)), null);
+  const open = new Uint8Array(30 * 1024 * 1024).fill(0x61); open.set(enc('<!DOCTYPE Project "'), 0);
+  assert.equal(xmlRootName(open), null, 'a quote that never closes: the end is reached, once');
 });
 
 // open_file read the kind from the file's first 4,000 bytes only: the same file, opened through the tool.

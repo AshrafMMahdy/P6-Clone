@@ -15,7 +15,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 test('compare {model}: what changed between the attached model and a revision â€” removed, renamed, the rest unchanged; filters, pages, files', async () => {
   const np = (await call('new_project', { id: 'CM', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
-  const none = await call('compare', { handle: h, model: join(FX, 'Duplex_A_20110907.ifc') });
+  const none = await call('compare', { handle: h, model: join(FX, 'Duplex_A_20110907.ifc'), export: join(tmpdir(), 'p6-cm-none') });
   assert.equal(none.err, true);
   assert.equal(none.d.error.code, 'no_model', 'a project with no model attached says so');
   await call('open_model', { handle: h, owner_key, path: join(FX, 'Duplex_A_20110907.ifc') });
@@ -30,7 +30,7 @@ test('compare {model}: what changed between the attached model and a revision â€
   const rev = join(out, 'Duplex_A_rev2.ifc');
   writeFileSync(rev, text, 'latin1');
 
-  const same = await call('compare', { handle: h, model: join(FX, 'Duplex_A_20110907.ifc') });
+  const same = await call('compare', { handle: h, model: join(FX, 'Duplex_A_20110907.ifc'), export: join(out, 'same') });
   assert.equal(same.err, false, JSON.stringify(same.d).slice(0, 400));
   assert.deepEqual([same.d.summary.added, same.d.summary.removed, same.d.summary.modified, same.d.summary.reidentified, same.d.changed], [0, 0, 0, 0, 0], 'a model against itself: nothing changed');
 
@@ -52,33 +52,60 @@ test('compare {model}: what changed between the attached model and a revision â€
   assert.equal(c.d.by_class[gone.class].delta, -1);
   // the files: every change, as a table and whole
   assert.ok(c.d.exported?.files?.length >= 2, JSON.stringify(c.d.exported).slice(0, 300));
-  const csv = c.d.exported.files.find((f: any) => /compare-changes\.csv$/.test(f.path ?? f.file ?? ''));
-  assert.ok(csv, 'the changes table is written');
-  const csvPath = csv.path ?? csv.file;
+  const files = (r: any) => (r.d.exported.files as { path: string; rows?: number }[]);
+  assert.deepEqual(files(c).map((f) => f.path.split(/[\\/]/).pop()).sort(), ['compare_model-changes.csv', 'compare_model.json'], 'its own two files: no table of a schedule comparison');
+  const csvPath = files(c).find((f) => /compare_model-changes\.csv$/.test(f.path))!.path;
   assert.ok(existsSync(csvPath));
   assert.ok(readFileSync(csvPath, 'utf8').includes(`removed,${gone.guid},`), 'the removed wall is a row of the table');
+  // who exported each revision (the file's own header), and only the classes that moved
+  const header = /FILE_NAME\s*\([^;]*?'([^']*)'\s*,\s*'[^']*'\s*\)\s*;/s.exec(text.slice(0, 4000));
+  assert.ok(c.d.models.a.exported_by && c.d.models.b.exported_by, JSON.stringify(c.d.models));
+  if (header) assert.equal(c.d.models.a.exported_by, header[1], 'the application the IFC header names');
+  assert.deepEqual(Object.keys(c.d.by_class), [gone.class], 'by_class lists the classes whose count moved');
 
   // filters list a part; the totals stay the whole model's
-  const onlyRemoved = await call('compare', { handle: h, model: rev, kind: 'removed' });
+  const onlyRemoved = await call('compare', { handle: h, model: rev, kind: 'removed', export: join(out, 'filtered') });
   assert.equal(onlyRemoved.d.changes.length, 1);
   assert.equal(onlyRemoved.d.listed, 1);
   assert.equal(onlyRemoved.d.changed, 2);
   assert.equal(onlyRemoved.d.summary.modified, 1);
-  const noDoors = await call('compare', { handle: h, model: rev, class: 'IfcDoor' });
+  // the files hold EVERY change whatever the filter and the page, and the JSON holds them as the answer does (not as cells)
+  assert.equal(files(onlyRemoved).find((f) => /changes\.csv$/.test(f.path))!.rows, 2, 'a filtered call writes the whole list');
+  const whole = JSON.parse(readFileSync(files(onlyRemoved).find((f) => /compare_model\.json$/.test(f.path))!.path, 'utf8'));
+  assert.equal(whole.changes.length, 2);
+  const wm = whole.changes.find((x: any) => x.kind === 'modified');
+  assert.deepEqual(wm.what, md.what);
+  assert.deepEqual(wm.detail.name, [renamed.name, 'RENAMED WALL REV 2']);
+  assert.ok(Object.keys(whole.by_class).length > Object.keys(c.d.by_class).length, 'and every class, moved or not');
+  const noDoors = await call('compare', { handle: h, model: rev, class: 'IfcDoor', export: join(out, 'doors') });
   assert.equal(noDoors.d.changes.length, 0);
   // a page
-  const page = await call('compare', { handle: h, model: rev, max_changes: 1 });
+  const page = await call('compare', { handle: h, model: rev, max_changes: 1, export: join(out, 'page') });
+  assert.equal(files(page).find((f) => /changes\.csv$/.test(f.path))!.rows, 2, 'a page of the answer, the whole list in the file');
   assert.equal(page.d.changes.length, 1);
   assert.equal(page.d.changes_total, 2);
   assert.equal(page.d.next_offset, 1);
-  // what is refused, in words
-  const mixed = await call('compare', { handle: h, model: rev, mode: 'computed' });
-  assert.equal(mixed.err, true);
-  assert.match(mixed.d.error.message, /model compares the 3D model/);
-  const badKind = await call('compare', { handle: h, model: rev, kind: 'moved' });
-  assert.equal(badKind.err, true);
-  const badTol = await call('compare', { handle: h, model: rev, tolerance_m: 0 });
-  assert.equal(badTol.err, true);
-  const noFile = await call('compare', { handle: h, model: join(out, 'nowhere.ifc') });
-  assert.equal(noFile.err, true);
+  // what is refused, in words, before any model is read
+  const refused = async (args: Record<string, unknown>, code: string, words: RegExp) => { const r = await call('compare', { handle: h, export: join(out, 'refused'), ...args }); assert.equal(r.err, true, JSON.stringify(args)); assert.equal(r.d.error.code, code, JSON.stringify(r.d.error)); assert.match(String(r.d.error.message), words); };
+  await refused({ model: rev, mode: 'computed' }, 'bad_input', /model compares the 3D model/);
+  await refused({ model: rev, kind: 'moved' }, 'bad_input', /kind must be one of added, removed, modified, reidentified/);
+  await refused({ model: rev, tolerance_m: 0 }, 'bad_input', /tolerance_m must be a length in metres above 0/);
+  await refused({ model: rev, max_changes: -1 }, 'bad_input', /max_changes/);
+  await refused({ model: join(out, 'nowhere.ifc') }, 'model_unreadable', /No file at .*nowhere\.ifc/);
+  assert.ok(!existsSync(join(out, 'refused', 'compare_model.json')), 'a refused call writes nothing');
+  // the attached model is not touched by a comparison
+  assert.equal((await call('list_elements', { handle: h, class: 'IfcWall', limit: 3 })).d.elements[0].guid, gone.guid);
+
+  // what filters a model comparison, sent with a comparison of schedules: said as not used
+  const other = (await call('new_project', { id: 'CM2', start: '2026-03-02' })).d;
+  const sched = await call('compare', { handle: h, other_handle: other.handle, kind: 'removed', export: join(out, 'sched') });
+  assert.equal(sched.err, false, JSON.stringify(sched.d).slice(0, 300));
+  assert.ok((sched.d.notes ?? []).some((x: string) => /kind belongs to a comparison of models \(model\): not used/.test(x)), JSON.stringify(sched.d.notes));
+
+  // two model files and no schedule: open_model with no handle makes a project of its own to compare in
+  const own = await call('open_model', { path: join(FX, 'Duplex_A_20110907.ifc') });
+  assert.equal(own.err, false, JSON.stringify(own.d).slice(0, 300));
+  assert.ok(own.d.handle && own.d.handle !== h);
+  const two = await call('compare', { handle: own.d.handle, model: rev, export: join(out, 'two') });
+  assert.deepEqual([two.d.summary.removed, two.d.summary.modified], [1, 1]);
 });

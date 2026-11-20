@@ -40,41 +40,50 @@ function xmlText(bytes: Uint8Array): string {
 
 /**
  * The name of an XML text's root element (without a namespace prefix): the first element after the declaration, comments, processing
- * instructions and a DOCTYPE. Read a piece at a time and let go as it is passed, so the work follows the distance to the root. null: none.
+ * instructions and a DOCTYPE. One pass over the bytes up to the root, nothing copied: the work is the distance to the root. null: none.
  */
 export function xmlRootName(bytes: Uint8Array): string | null {
-  const PIECE = 64 * 1024; // (the size of one step, not a bound)
-  let at = 0, buf = '';
-  // (bytes read as single letters: a tag's own letters are the same in UTF-8 and UTF-16, and a UTF-16 file's NUL beside each is dropped)
-  const more = (): boolean => { if (at >= bytes.length) return false; const end = Math.min(bytes.length, at + PIECE); let t = ''; for (let i = at; i < end; i++) if (bytes[i] !== 0) t += String.fromCharCode(bytes[i]); buf += t; at = end; return true; };
-  const skipPast = (end: string): boolean => { for (;;) { const i = buf.indexOf(end); if (i >= 0) { buf = buf.slice(i + end.length); return true; } buf = end.length > 1 ? buf.slice(1 - end.length) : ''; if (!more()) return false; } };
-  // from buf[0] = '<' to its closing '>' outside quotes (for a DOCTYPE also outside its [ … ] and the comments in it)
-  const tagEnd = (doctype: boolean): string | null => {
-    let quote = '', depth = 0;
-    for (let i = 1; ; i++) {
-      if (i >= buf.length && !more()) return null;
-      const c = buf[i];
-      if (quote) { if (c === quote) quote = ''; continue; }
-      if (doctype && c === '<' && depth) {
-        while (buf.length < i + 4 && more()) { /* enough to tell a comment */ }
-        if (buf.startsWith('<!--', i)) { const head = buf.slice(0, i); buf = buf.slice(i + 4); if (!skipPast('-->')) return null; buf = head + buf; i--; continue; }
-      }
-      if (c === '"' || c === "'") quote = c;
-      else if (doctype && c === '[') depth++;
-      else if (doctype && c === ']') depth--;
-      else if (c === '>' && depth <= 0) return buf.slice(0, i + 1);
+  const n = bytes.length;
+  // a byte order mark is not a letter (UTF-8's three bytes, UTF-16's two)
+  let i = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : (bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff) ? 2 : 0;
+  // the letter at the place, and the same moving on (a UTF-16 file's NUL beside each letter is passed over: a tag's own letters are one byte in both); -1 at the end
+  const at = (): number => { while (i < n && bytes[i] === 0) i++; return i < n ? bytes[i] : -1; };
+  const next = (): number => { const c = at(); if (c >= 0) i++; return c; };
+  // `word` taken when the letters from here are it (else the place stays)
+  const take = (word: string): boolean => { const from = i; for (let k = 0; k < word.length; k++) if (next() !== word.charCodeAt(k)) { i = from; return false; } return true; };
+  // to just after `end`; false when the text ends first
+  const skipPast = (end: string): boolean => {
+    const L = end.length, last: number[] = [];
+    for (let c = next(), seen = 0; c >= 0; c = next()) {
+      last[seen++ % L] = c;
+      if (seen >= L) { let same = true; for (let k = 0; k < L && same; k++) same = last[(seen - L + k) % L] === end.charCodeAt(k); if (same) return true; }
     }
+    return false;
   };
+  const space = (c: number) => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
   for (;;) {
-    const lt = buf.indexOf('<');
-    if (lt < 0) { buf = ''; if (!more()) return null; continue; }
-    buf = buf.slice(lt);
-    while (buf.length < '<!--'.length && more()) { /* enough to tell what opens here */ }
-    if (buf.startsWith('<?')) { if (!skipPast('?>')) return null; continue; }
-    if (buf.startsWith('<!--')) { if (!skipPast('-->')) return null; continue; }
-    if (buf.startsWith('<!')) { const d = tagEnd(true); if (d === null) return null; buf = buf.slice(d.length); continue; }
-    const name = /^<([^\s/>]+)/.exec(tagEnd(false) ?? '')?.[1];
-    return name ? name.replace(/^.*:/, '') : null;
+    let c = next();
+    while (space(c)) c = next();
+    if (c !== 0x3c) return null; // (the end, or text where an element should be)
+    if (at() === 0x3f) { if (!skipPast('?>')) return null; continue; } // <? … ?>
+    if (at() !== 0x21) { // the root element: its name, up to a space, / or >
+      let name = '';
+      for (let x = at(); x >= 0 && !space(x) && x !== 0x2f && x !== 0x3e; x = at()) { name += String.fromCharCode(x); i++; }
+      return name ? name.slice(name.indexOf(':') + 1) : null;
+    }
+    i++; // <!
+    if (take('--')) { if (!skipPast('-->')) return null; continue; }
+    // a DOCTYPE: to its closing > outside quotes and outside its [ … ]; a comment or a processing instruction inside is passed whole
+    for (let depth = 0, quote = 0; ;) {
+      const x = next();
+      if (x < 0) return null;
+      if (quote) { if (x === quote) quote = 0; }
+      else if (x === 0x22 || x === 0x27) quote = x;
+      else if (x === 0x5b) depth++;
+      else if (x === 0x5d) depth--;
+      else if (x === 0x3c && depth > 0) { if (at() === 0x3f ? !skipPast('?>') : take('!--') && !skipPast('-->')) return null; }
+      else if (x === 0x3e && depth <= 0) break;
+    }
   }
 }
 
