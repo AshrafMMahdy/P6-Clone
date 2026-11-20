@@ -14,3 +14,22 @@ test('a failed job carries its error\'s data (what a render kept and how to resu
   assert.equal(v.error.code, 'render_failed', 'the error\'s own code is never overwritten by its data');
   assert.equal(v.error.next_step, 'Continue with resume.');
 });
+
+// The release of whiq-v0.1.82 failed on a slow runner: a render that failed as a job answered reason = the message, where the
+// same failure of a call that ended in time answers reason = the cause's code (test_failure, webgl_context_lost, disk_full).
+test('a failed job says the same reason as the call would have: the error\'s own, else its message', async () => {
+  const withReason = startJob('render_4d', undefined, Promise.reject(new ToolError('render_failed', 'The page lost its WebGL context.', 'Continue with resume.', { data: { reason: 'webgl_context_lost', frames_done: 6 } })));
+  const without = startJob('render_4d', undefined, Promise.reject(new ToolError('render_failed', 'The page stopped drawing.', 'Continue with resume.')));
+  await new Promise((r) => setTimeout(r, 20));
+  const a = jobView(withReason) as { error: Record<string, unknown> }, b = jobView(without) as { error: Record<string, unknown> };
+  assert.equal(a.error.reason, 'webgl_context_lost');
+  assert.equal(a.error.message, 'The page lost its WebGL context.');
+  assert.equal(b.error.reason, 'The page stopped drawing.');
+  // and through the tool, as an agent reads it
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const r = await callTool('job_status', { job_id: withReason.id });
+  const d = toolResult(r.out, r.isError).structuredContent as { error: Record<string, unknown> };
+  assert.equal(r.isError, true);
+  assert.equal(d.error.reason, 'webgl_context_lost');
+  assert.equal(d.error.code, 'render_failed');
+});
