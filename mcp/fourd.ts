@@ -27,7 +27,7 @@ import { relinkPlan } from '../core/bim/relink.ts';
 import { applyImport as applyImport4d, planImport as planImport4d } from '../core/bim/import4d.ts';
 import { readImport4dWatched } from '../core/bim/read4d.ts';
 import { runSynchroCloud, SYNCHRO_CLOUD_TOOL } from './synchroCloud.ts';
-import { diffIndexes } from '../core/bim/diff.ts';
+import { diffIndexes, type IfcDiff } from '../core/bim/diff.ts';
 import { chromiumPath, ffmpegPath, inChromium, isGpuFailure, noteGpuFailure, planVideo, probeRenderer, RenderFailed, renderPngs, renderRun, webmToMp4, type Renderer, type VideoPlan } from '../core/bim/headless.ts';
 import { aboutMinutes, planRender, renderMinutes } from '../core/bim/renderplan.ts';
 import { fingerprintDiff, foldPath, hashOf, joinSegments, keptPicture, ManifestUnreadable, moveInto, Parts, PartsInUse, verifyVideo } from '../core/bim/renderParts.ts';
@@ -278,6 +278,25 @@ async function modelWithTiles(db: Db, projId: string, tick?: AnalysisHelpers['ti
   if (!existsSync(r.path)) return fail('model_missing', `The model ${r.path} has no display tiles in the cache and its file is gone.`, 'Attach it again with open_model {path}.');
   const g = await readModel(r.path, { geometry: true, tick });
   return g.tiles ? g : noGeometry(g);
+}
+
+/**
+ * compare {model}: the model attached to the project (the EARLIER revision, a) against another revision of it in a file (the LATER, b),
+ * read for this call only as relink_model reads it. Elements are matched by GlobalId, then re-identified by class, name, storey and shape;
+ * geometry is compared within the tolerance, so an exporter's noise is not a change.
+ */
+export async function compareModel(a: Record<string, any>, s: Session, h: Pick<AnalysisHelpers, 'projectIds' | 'allIds' | 'tick'>): Promise<{ a: string; b: string; diff: IfcDiff }> {
+  const ids = a.project != null && a.project !== '' ? h.projectIds(s.db, a.project) : h.allIds(s.db);
+  if (ids.length !== 1) fail('bad_input', `The file holds ${ids.length} projects; say which with project.`, 'Pass project (a Project ID).');
+  const projId = ids[0];
+  const tol = a.tolerance_m == null ? undefined : Number(a.tolerance_m);
+  if (tol != null && !(tol > 0)) fail('bad_input', 'tolerance_m must be a length in metres above 0.', 'Leave it out for 0.005 (5 mm).');
+  const old = (await modelOf(s.db, projId, true, { geometry: true }))!;
+  const path = pathArg(a.model, 'model');
+  let m: Model;
+  try { m = await readModel(path); } catch (e) { if (['memory_budget', 'model_too_large', 'model_unreadable'].includes((e as { code?: string }).code ?? '')) throw e; return fail('model_unreadable', `Cannot read the model: ${(e as Error).message}`, unreadableHint(path)); }
+  await h.tick(1, 2, 'model parsed');
+  return { a: basename(modelRow(s.db, projId)!.path), b: basename(path), diff: diffIndexes(old.index, m.index, tol != null ? { tol } : {}) };
 }
 
 export async function runFourD(name: string, a: Record<string, any>, s: Session, h: AnalysisHelpers): Promise<unknown> {

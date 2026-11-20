@@ -38,6 +38,46 @@ function xmlText(bytes: Uint8Array): string {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
+/**
+ * The name of an XML text's root element (without a namespace prefix): the first element after the declaration, comments, processing
+ * instructions and a DOCTYPE. Read a piece at a time and let go as it is passed, so the work follows the distance to the root. null: none.
+ */
+export function xmlRootName(bytes: Uint8Array): string | null {
+  const PIECE = 64 * 1024; // (the size of one step, not a bound)
+  let at = 0, buf = '';
+  // (bytes read as single letters: a tag's own letters are the same in UTF-8 and UTF-16, and a UTF-16 file's NUL beside each is dropped)
+  const more = (): boolean => { if (at >= bytes.length) return false; const end = Math.min(bytes.length, at + PIECE); let t = ''; for (let i = at; i < end; i++) if (bytes[i] !== 0) t += String.fromCharCode(bytes[i]); buf += t; at = end; return true; };
+  const skipPast = (end: string): boolean => { for (;;) { const i = buf.indexOf(end); if (i >= 0) { buf = buf.slice(i + end.length); return true; } buf = end.length > 1 ? buf.slice(1 - end.length) : ''; if (!more()) return false; } };
+  // from buf[0] = '<' to its closing '>' outside quotes (for a DOCTYPE also outside its [ … ] and the comments in it)
+  const tagEnd = (doctype: boolean): string | null => {
+    let quote = '', depth = 0;
+    for (let i = 1; ; i++) {
+      if (i >= buf.length && !more()) return null;
+      const c = buf[i];
+      if (quote) { if (c === quote) quote = ''; continue; }
+      if (doctype && c === '<' && depth) {
+        while (buf.length < i + 4 && more()) { /* enough to tell a comment */ }
+        if (buf.startsWith('<!--', i)) { const head = buf.slice(0, i); buf = buf.slice(i + 4); if (!skipPast('-->')) return null; buf = head + buf; i--; continue; }
+      }
+      if (c === '"' || c === "'") quote = c;
+      else if (doctype && c === '[') depth++;
+      else if (doctype && c === ']') depth--;
+      else if (c === '>' && depth <= 0) return buf.slice(0, i + 1);
+    }
+  };
+  for (;;) {
+    const lt = buf.indexOf('<');
+    if (lt < 0) { buf = ''; if (!more()) return null; continue; }
+    buf = buf.slice(lt);
+    while (buf.length < '<!--'.length && more()) { /* enough to tell what opens here */ }
+    if (buf.startsWith('<?')) { if (!skipPast('?>')) return null; continue; }
+    if (buf.startsWith('<!--')) { if (!skipPast('-->')) return null; continue; }
+    if (buf.startsWith('<!')) { const d = tagEnd(true); if (d === null) return null; buf = buf.slice(d.length); continue; }
+    const name = /^<([^\s/>]+)/.exec(tagEnd(false) ?? '')?.[1];
+    return name ? name.replace(/^.*:/, '') : null;
+  }
+}
+
 export function detectFormat(name: string, bytes: Uint8Array): Format {
   if (/\.mpp$/i.test(name) || (bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0)) return 'mpp';
   if (/\.mpx$/i.test(name)) return 'mpx';
@@ -46,7 +86,9 @@ export function detectFormat(name: string, bytes: Uint8Array): Format {
   if (/\.xml$/i.test(name) || head.startsWith('<')) {
     if (head.includes('APIBusinessObjects')) return 'xml';
     if (head.includes('schemas.microsoft.com/project') || /<Project[\s>]/.test(head)) return 'mspdi';
-    return 'xml';
+    // Neither in the first 4,000 bytes: the ROOT ELEMENT says which it is, however far in it stands (a long comment or a DOCTYPE before
+    // it — a Microsoft Project file so written was read as P6 XML and refused for its root).
+    return xmlRootName(bytes) === 'Project' ? 'mspdi' : 'xml';
   }
   return 'xer';
 }

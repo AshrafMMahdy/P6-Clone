@@ -53,15 +53,15 @@ The platform has 9 custom 4D tool slots (10 names: `model_history` and `ifc_diff
 | `export_4d_synchro {same as above}` | `set_4d_keys`, then `export_4d {handle, target: synchro, path}` | The schedule is **P6 XML** (`<project>.xml`) carrying the "4D Key" field, not an XER. For an XER, `save {path: "x.xer"}` (the field travels in it). Auto-Matching uses the 4D Key field rather than the task ID. |
 | native IFC 4D (skill step 8: `run_code` + ifcopenshell) | `export_4d {handle, target: ifc4d, path, baselines[]}` | One call; no sandbox. IFC4 models only: an IFC2X3 model is refused (`bad_input`). Result `{target, written, tasks, element_links}`. |
 | `model_history {path}` | none | Stays on the platform (bucket versions). |
-| `ifc_diff {pathA, pathB \| path, versionA, versionB, tolerance_mm, filename}` | `relink_model {handle, path, dry_run: true, tolerance_m}` | Only the summary of the diff (`model_diff`: added, removed, modified, re-identified counts) plus what happens to the links (`kept`, `matched` by name+storey or shape, `lost`). No per-element change list, HTML or JSON report. |
+| `ifc_diff {pathA, pathB \| path, versionA, versionB, tolerance_mm, filename}` | `compare {handle, model, tolerance_m, kind, class, storey, discipline, max_changes, offset}` | The model attached to the project (earlier) against another revision in a file (later): every change per element (kind, what changed, before and after, confidence), the summary, by discipline / storey / class, quantity deltas per class, paged; the whole list in the result files (`compare.json`, `compare-changes.csv`). `relink_model {dry_run: true}` still answers what happens to the links. No HTML report: the agent writes the report the user wants. Two versions of one bucket file: the platform hands each version as a file. |
 | none | `element_info`, `set_4d_keys`, `import_4d`, `compare_4d`, `set_element_status`, `relink_model` | New. |
 
 ## What the platform has that the clone lacks
 
 1. **Model version log** (`model_history`). The clone has no file store; this stays on the platform.
-2. **Full model diff report** (`ifc_diff`): per-element changes (geometry, placement, properties, type, material) by
-   discipline and storey, quantity deltas per class, the exporter's author per change, an HTML and a JSON report. The
-   clone has the same diff code (`core/bim/diff.ts`) but only shows its counts inside `relink_model`.
+2. ~~Full model diff report (`ifc_diff`)~~: in the clone since 2026-11-20 as `compare {model}` (per-element changes by
+   discipline and storey, quantity deltas per class, the exporter's author per change, a JSON and a CSV file); the
+   platform's `ifc_diff` is removed. The HTML report is not carried over (the agent writes the report).
 3. **Takeoff honesty fields** in `bim_takeoff`: `provenance` (authored / derived / missing), `unquantified_elements`,
    the authored-vs-derived volume flag above 10 %, `unit_caveat` and `totals`. `quantities` returns the sums only.
 4. **A reviewable register** for links (`read_register`, `edit_canvas`) with a `rule` and `confidence` per row. The
