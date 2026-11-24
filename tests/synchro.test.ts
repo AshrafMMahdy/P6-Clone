@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readSynchro } from '../core/bim/synchro.ts';
+import { closed } from '../core/bim/meshClosed.mjs';
 
 // study-only SYNCHRO samples (not in the repository); the tests run where they exist
 const dir = join(import.meta.dirname, '..', 'sample 4D', 'synchro');
@@ -63,6 +64,23 @@ test('the world unit: setting 1 is millimetres, 3 metres; another one, or none, 
   assert.throws(() => worldScale(undefined, 60), /no 3D world settings/);
 });
 
+test('a polygon left out takes its holes with it; a shape made in SYNCHRO is its profile extruded, facing outwards', async () => {
+  const { triangulate, prism } = await import('../core/bim/synchroModel.ts');
+  const v = new Float32Array([0, 0, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 1, 1, 0, 3, 1, 0, 3, 3, 0, 1, 3, 0]);
+  const bad = { n: 0 };
+  // the square, then a polygon naming vertex 99 followed by a hole: the hole must not cut the square
+  const t = triangulate(v, Uint32Array.from([4, 0, 1, 2, 3, 3, 0, 1, 99, -4 >>> 0, 4, 7, 6, 5]), bad);
+  assert.equal(bad.n, 2);
+  let area = 0;
+  for (let k = 0; k < t.length; k += 3) area += ((v[t[k + 1] * 3] - v[t[k] * 3]) * (v[t[k + 2] * 3 + 1] - v[t[k] * 3 + 1]) - (v[t[k + 1] * 3 + 1] - v[t[k] * 3 + 1]) * (v[t[k + 2] * 3] - v[t[k] * 3])) / 2;
+  assert.equal(area, 16);
+  // a clockwise L-shaped profile (area 3), extruded from 1 to 3: closed, 6 in volume, enclosed facing out
+  const { v: pv, tri } = prism([0, 0, 0, 2, 1, 2, 1, 1, 2, 1, 2, 0], 1, 3);
+  const pos = Array.from(pv), tr = Array.from(tri);
+  assert.ok(Math.abs(enclosed(pos, tr) - 6) < 1e-9, `volume ${enclosed(pos, tr)}`);
+  assert.deepEqual([box(pos).mn, box(pos).mx], [[0, 0, 1], [2, 2, 3]]);
+});
+
 test('polygons as written: a negative count is a hole in the polygon before it; every triangle faces the way its polygon does', async () => {
   const { triangulate } = await import('../core/bim/synchroModel.ts');
   // a 4 x 4 square (anticlockwise from above: facing +z) with a 2 x 2 hole, and a clockwise triangle (facing -z)
@@ -98,12 +116,14 @@ test('Schependomlaan opened as a model: each of its objects has the box and the 
     // the clone's index is in web-ifc's frame (x, z, -y); SYNCHRO keeps the IFC's own (Z up)
     const { mn, mx } = box(o.positions), t = [mn[0], mn[2], -mx[1], mx[0], mx[2], -mn[1]];
     if (t.every((x, i) => Math.abs(x - e.bbox![i]) < 0.002)) boxes++;
-    if (e.derivedVolumeM3 && e.derivedVolumeM3 > 1e-6) { measured++; if (Math.abs(Math.abs(enclosed(o.positions, o.triangles)) - e.derivedVolumeM3) / e.derivedVolumeM3 < 0.01) volumes++; }
+    // signed: the 5.1 file winds its meshes inwards, and a closed mesh is turned to face outwards; an open one encloses no
+    // volume to compare (the zinc sheets and a vent grille are open in this file, though their IFC solids are closed)
+    if (e.derivedVolumeM3 && e.derivedVolumeM3 > 1e-6 && closed(o.positions, o.triangles)) { measured++; if (Math.abs(enclosed(o.positions, o.triangles) - e.derivedVolumeM3) / e.derivedVolumeM3 < 0.01) volumes++; }
   }
   assert.equal(compared, 3504);
   assert.equal(boxes, compared, 'every box within 2 mm');
-  // the one left over is a vent grille whose mesh in the .sp is open (108 edges with no face on their other side): it encloses no volume to compare
-  assert.ok(volumes >= measured - 1, `${volumes} of ${measured} volumes within 1%`);
+  assert.ok(measured > 3400);
+  assert.equal(volumes, measured, 'every closed object\u2019s volume within 1%, and positive');
 });
 
 test('objects come out the size they are named: 610 x 610mm columns (6.0, millimetres) and a 910x2110mm door with its frame (6.5, metres)', { skip: none, timeout: 300_000 }, async () => {
@@ -143,4 +163,43 @@ test('3D paths: keyframes (share of the task, place, rotation) and the assignmen
   const ex = readSynchro(readFileSync(join(tb, 'SYNCHRO Training Building Completed.sp'))).paths;
   assert.deepEqual(ex.map((x) => [x.name, x.points.length]), [['Foundation Excavation', 4]]);
   assert.deepEqual(ex[0].points[0].position.map((x) => Math.round(x * 100) / 100), [-1.21, -21.65, -0.2]);
+});
+
+test('the loads the crane paths move are drawn: a profile extruded, each where its path starts (3D Paths, 6.0 and 5.4)', { skip: none }, async () => {
+  const { readSynchroModel } = await import('../core/bim/synchroModel.ts');
+  for (const f of ['Challenge Model_3D Paths.sp', 'Challenge Model_3D Paths_Solution.sp']) {
+    const m = readSynchroModel(readFileSync(join(ch, f)));
+    const loads = m.objects.filter((o) => /Load/.test(o.name));
+    assert.deepEqual(loads.map((o) => o.name).sort(), ['Load', 'Load 2', 'Load 3', 'Small Load 1'], f);
+    for (const o of loads) assert.ok(o.triangles.length >= 36 && enclosed(o.positions, o.triangles) > 0, `${o.name} drawn, facing out`);
+    const lift = m.file.paths.find((p) => p.name === 'Crane 2 - Podium Lift')!, mover = m.file.assignments.find((a) => a.path === lift.uuid)!;
+    const load = m.objects.find((o) => o.uuid === mover.resource)!, b = box(load.positions);
+    // SYNCHRO puts a keyframe at the object's centre: the first one, independently of the shape's own numbers
+    assert.deepEqual(b.mn.map((x, a) => Math.round(((x + b.mx[a]) / 2) * 1000)), lift.points[0].position.map((x) => Math.round(x)), f);
+  }
+});
+
+test('an Entities table that stops part-way: what was read before that point is drawn, and said', { skip: !existsSync(schep) && 'Schependomlaan .sp not present', timeout: 300_000 }, async () => {
+  const { readSynchroModel } = await import('../core/bim/synchroModel.ts');
+  const { container, directory } = await import('../core/bim/synchro.ts');
+  const { deflateSync } = await import('node:zlib');
+  const file = readFileSync(schep), head = directory(file)!;
+  const ent = container(file, [], ['Entities'])!.tables.get('Entities')!;
+  // the same file with its Entities table cut at 90% (compressed again, the directory's offsets moved to match)
+  const parts = head.dir.map((t, k) => ({ ...t, bytes: file.subarray(t.at, k + 1 < head.dir.length ? head.dir[k + 1].at : file.length) }));
+  const e = parts.find((t) => t.name === 'Entities')!;
+  const nameLen = e.bytes.indexOf(Buffer.from('Entities', 'latin1')) + 8;
+  e.bytes = Buffer.concat([e.bytes.subarray(0, nameLen), deflateSync(ent.subarray(0, Math.floor(ent.length * 0.9)))]);
+  const start = parts[0].at, dirAt = file.indexOf(Buffer.from(head.dir.find((t) => t.at === start)!.name, 'latin1'), 20);
+  const out = Buffer.from(file.subarray(0, start));
+  let at = start;
+  for (const t of parts) {
+    for (let p = dirAt; p + 48 <= start; p += 48) if (out.readUInt32LE(p + 40) === t.at && out.subarray(p, p + t.name.length).toString('latin1') === t.name) out.writeUInt32LE(at, p + 40);
+    at += t.bytes.length;
+  }
+  const m = readSynchroModel(Buffer.concat([out, ...parts.map((t) => t.bytes)]));
+  const drawn = m.objects.filter((o) => o.triangles.length).length;
+  assert.ok(drawn > 2500 && drawn < 3505, `${drawn} objects drawn`);
+  assert.ok(m.notes.some((n) => /Entities table could not all be read \(the table ends inside an entity\); what was read before that point is drawn/.test(n)), m.notes.join(' | '));
+  assert.ok(m.notes.some((n) => /were not read \(the 3D scene stopped early\)/.test(n)));
 });

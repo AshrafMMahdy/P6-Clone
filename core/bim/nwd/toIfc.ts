@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, openSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
 import type { NwElement } from './elements.ts';
 import { alive } from '../heartbeat.mjs';
+import { closed } from '../meshClosed.mjs';
 
 const CH = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$';
 /** 16 bytes as an IFC GlobalId (22 characters of base 64, big-endian) */
@@ -78,10 +79,11 @@ export function ifcWriter(path: string, o: { name: string; file: string; by?: st
     out(`${p}${tail};\n`);
     return at;
   };
-  /** placed triangles as one triangulated face set */
+  /** placed triangles as one triangulated face set, declared closed only when it is (meshClosed.mjs: the rule the geometry
+   *  worker uses) */
   const body3d = (xyz: ArrayLike<number>, triangles: ArrayLike<number>) => {
     const pts = listed('IFCCARTESIANPOINTLIST3D((', xyz.length / 3, (k) => `(${real(xyz[k * 3])},${real(xyz[k * 3 + 1])},${real(xyz[k * 3 + 2])})`, '))');
-    const fs = listed(`IFCTRIANGULATEDFACESET(#${pts},$,.T.,(`, triangles.length / 3, (k) => `(${triangles[k * 3] + 1},${triangles[k * 3 + 1] + 1},${triangles[k * 3 + 2] + 1})`, '),$)');
+    const fs = listed(`IFCTRIANGULATEDFACESET(#${pts},$,${closed(xyz, triangles) ? '.T.' : '.F.'},(`, triangles.length / 3, (k) => `(${triangles[k * 3] + 1},${triangles[k * 3 + 1] + 1},${triangles[k * 3 + 2] + 1})`, '),$)');
     const rep = add(`IFCSHAPEREPRESENTATION(#${ctx},'Body','Tessellation',(#${fs}))`);
     return add(`IFCPRODUCTDEFINITIONSHAPE($,$,(#${rep}))`);
   };

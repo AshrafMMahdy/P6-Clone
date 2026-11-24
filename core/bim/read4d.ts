@@ -68,8 +68,8 @@ export function xmlText(bytes: Uint8Array): string {
 
 /** A SYNCHRO project as the import format: its work tasks (summaries left out) and the 3D objects assigned to them, each
  *  named two ways: as the object of the .sp opened as the model itself (its resource's GlobalId, synchroModel.ts), and as
- *  the design model element it was made from (the "(#id)" SYNCHRO puts in its name); planImport takes the one that
- *  matches the attached model. */
+ *  the design model element it was made from (the "(#id)" SYNCHRO puts in its name); planImport takes the first when the
+ *  attached model holds those objects, else the second. */
 export function synchroToImport(sp: SynchroFile): Imported4d {
   const work = sp.tasks.filter((t) => !t.isSummary), byUuid = new Map(work.map((t) => [t.uuid, t])), res = new Map(sp.resources.map((r) => [r.uuid, r]));
   const links = new Map<string, { task: string; guids: string[]; expressIds: number[] }>();

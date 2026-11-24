@@ -124,7 +124,7 @@ export function FourDPanel() {
     const plan = planImport(getDb(), projId, imp, m?.index ?? null, { createActivities: true });
     const setSize = new Map(plan.sets.map((s) => [s.name.toLowerCase(), s.guids.length]));
     const n = plan.proposals.reduce((k, p) => k + p.guids.length, 0) + [...plan.forNew.values()].reduce((k, g) => k + g.length, 0) + plan.toCreate.reduce((k, t) => k + (setSize.get((t.attached ?? t.name).trim().toLowerCase()) ?? 0), 0);
-    const msg = `${imp.source}: ${imp.tasks.length} tasks, ${n} element links${plan.toCreate.length ? `, ${plan.toCreate.length} new activities` : ''}${plan.unmatchedTasks.length && !plan.toCreate.length ? `, ${plan.unmatchedTasks.length} tasks match no activity` : ''}${plan.sets.length ? `, ${plan.sets.length} selection sets` : ''}.${imp.notes.length ? `\n\n${imp.notes.slice(0, 5).join('\n')}` : ''}\n\nImport?`;
+    const msg = `${imp.source}: ${imp.tasks.length} tasks, ${n} element links${plan.toCreate.length ? `, ${plan.toCreate.length} new activities` : ''}${plan.unmatchedTasks.length && !plan.toCreate.length ? `, ${plan.unmatchedTasks.length} tasks match no activity` : ''}${plan.sets.length ? `, ${plan.sets.length} selection sets` : ''}.${plan.notes.length ? `\n\n${plan.notes.slice(0, 5).join('\n')}` : ''}\n\nImport?`;
     if (!confirm(msg)) return;
     let r: unknown;
     try { mutate(`Import 4D ${imp.path.split(/[\\/]/).pop()}`, (d) => { r = applyImport(d, projId, plan, m?.index ?? null, { source: imp.path.split(/[\\/]/).pop()!, hoursPerDay: ui.prefs.hoursPerDay, calendarDays: false }); }); } catch (e) { return toast(`Not imported: ${(e as Error).message}`); }
@@ -145,7 +145,7 @@ export function FourDPanel() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, height: '100%', minHeight: 0 }}>
       <div style={bar}>
-        <button onClick={() => void open()}>{row ? 'Replace model…' : 'Open model (IFC, Revit, Navisworks)…'}</button>
+        <button onClick={() => void open()}>{row ? 'Replace model…' : 'Open model (IFC, Revit, Navisworks, SYNCHRO)…'}</button>
         {row && <span className="muted">{row.path.split(/[\\/]/).pop()} · {status?.elements ?? 0} elements · {status?.links ?? 0} links · {status?.linked_elements ?? 0} elements linked</span>}
         {err && <span style={{ color: '#b00' }}>{err}</span>}
       </div>

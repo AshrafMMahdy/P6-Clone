@@ -76,8 +76,20 @@ test('4D: a SYNCHRO project (.sp) opened as the model itself: its 3D objects are
   assert.ok(r.d.notes.some((n: string) => /Load 3 along "Crane 2 - Podium Lift"/.test(n)), 'the 3D path is named');
   const st = (await call('link_status', { handle: h })).d;
   assert.deepEqual([st.links, st.links_to_missing_elements.length], [4, 0]);
-  const load = (await call('list_elements', { handle: h, linked: 'ST00160' })).d.elements.map((e: { name: string }) => e.name);
-  assert.ok(load.includes('Load 3'));
+  const lifted = (await call('list_elements', { handle: h, linked: 'ST00160' })).d.elements as { name: string; guid: string }[];
+  assert.deepEqual(lifted.map((e) => e.name).sort(), ['Load 3', 'Tower Crane 2']);
+  assert.ok((await call('element_info', { handle: h, guids: [lifted.find((e) => e.name === 'Load 3')!.guid] })).d.elements[0].geom, 'the load SYNCHRO made is drawn');
+  assert.equal(om.d.source.without_geometry, 0);
+  // the IFC declares a face set closed only when it is: as many open ones as the clone's own meshing finds
+  const { spToIfc: conv } = await import('../core/bim/synchroModel.ts');
+  assert.equal((readFileSync((await conv(paths3d)).ifc, 'latin1').match(/IFCTRIANGULATEDFACESET\(#\d+,\$,\.F\./g) ?? []).length, om.d.meshed_without_volume);
+  // the model's index as it is found again after a restart names the conversion's IFC, not the .sp: the file's own
+  // objects are what decide the route
+  const { spToIfc } = await import('../core/bim/synchroModel.ts');
+  const np2 = (await call('new_project', { id: 'SPR', start: '2018-07-02' })).d;
+  assert.equal((await call('open_model', { handle: np2.handle, owner_key: np2.owner_key, path: (await spToIfc(paths3d)).ifc, geometry: false })).err, false);
+  const again = await call('import_4d', { handle: np2.handle, owner_key: np2.owner_key, path: paths3d, create_activities: true });
+  assert.equal(again.d.added, 4, JSON.stringify(again.d).slice(0, 300));
 });
 
 test('4D M7 (optional): the SYNCHRO cloud connector stays dormant without Bentley credentials', async () => {

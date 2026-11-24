@@ -386,7 +386,8 @@ through a file on disk, and `open_model`'s `source.peak_memory_mb` says what it 
 an element at a time, only for the `export_4d` targets that deliver one; a mesh that is open (a surface, a
 fitting open at its ends: holes over a thousandth of its surface) gives no derived volume, and `open_model` counts them
 as `meshed_without_volume`; a SYNCHRO project `.sp` (5.1 to 6.5) read without SYNCHRO (`core/bim/synchroModel.ts`) and made
-into IFC4 in the 4D reader's process: its 3D objects with the triangles SYNCHRO keeps for them, placed and in metres (each
+into IFC4 in the 4D reader's process: its 3D objects drawn from what SYNCHRO keeps for them (meshes, and shapes made in
+SYNCHRO itself, a profile extruded), placed, in metres and facing outwards (each
 resource drawn in 3D, with its own GUID as GlobalId so `import_4d` of the same file links its tasks to it, and the parts
 of the scene no resource draws, such as a context model), checked against the design IFC a SYNCHRO project was made from
 (Schependomlaan: 3,504 of 3,504 boxes within 2 mm, the volumes within 1%); the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and

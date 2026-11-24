@@ -26,8 +26,9 @@ export function planImport(db: Db, projId: string, imp: Imported4d, ix: IfcIndex
   const nameOf = new Map(imp.tasks.map((t) => [t.id, t.name]));
   const plan: ImportPlan = { matched: new Set(), proposals: [], forNew: new Map(), unmatchedTasks: [], elementsNotInModel: 0, notes: [], sets: [], toCreate: [], attachedSets: [] };
   // a SYNCHRO task's objects are named both ways (read4d.ts synchroToImport): by their own GlobalIds when the attached
-  // model is a SYNCHRO project itself (open_model of the .sp), else by the express ids of the design model they came from
-  const ownSp = imp.source === 'synchro' && !!ix && /\.sp$/i.test(ix.sourcePath ?? '');
+  // model holds them (it is that SYNCHRO project, opened with open_model), else by the express ids of the design model
+  // they came from
+  const ownSp = imp.source === 'synchro' && !!inModel && imp.links.some((l) => (l.guids ?? []).some((g) => inModel.has(g)));
   plan.notes = [...imp.notes, ...(ownSp ? [] : imp.designModelNotes ?? [])];
   for (const l0 of imp.links) {
     const l = imp.source !== 'synchro' ? l0 : ownSp ? { ...l0, expressIds: [] } : { ...l0, guids: [] };
