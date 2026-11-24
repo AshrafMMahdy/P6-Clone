@@ -270,7 +270,7 @@ function readCompanyRow(c: Cur, id: string): RawRes {
 // ---- the container
 
 const WANTED = ['Tasks', 'Companies', 'Resources', 'Calendars', 'Paths'];
-/** The file's version, schema and the inflated tables it names (WANTED and `extra`). */
+
 
 /** The file's version, schema and the directory of its tables (name and offset, in file order); null when it is not a
  *  SYNCHRO file. b may be the file's start only (the directory follows the header). */
@@ -291,14 +291,15 @@ export function directory(b: Buffer): { version: string; schema: number; dir: { 
   return { version, schema, dir };
 }
 
-export function container(file: Uint8Array, notes: string[], extra: string[] = []): { version: string; schema: number; tables: Map<string, Buffer> } | null {
+/** The file's version, schema and the tables named (inflated; the reader's own by default). */
+export function container(file: Uint8Array, notes: string[], names: string[] = WANTED): { version: string; schema: number; tables: Map<string, Buffer> } | null {
   const b = Buffer.from(file.buffer, file.byteOffset, file.byteLength);
   const head = directory(b);
   if (!head) return null;
   const { version, schema, dir } = head;
   const tables = new Map<string, Buffer>();
   dir.forEach((t, k) => {
-    if (!WANTED.includes(t.name) && !extra.includes(t.name)) return;
+    if (!names.includes(t.name)) return;
     try {
       const tc: Cur = { b, p: t.at, v: 0, bad: 0 };
       if (str(tc) !== t.name) fail('the name at its offset differs');

@@ -69,14 +69,19 @@ export function ifcWriter(path: string, o: { name: string; file: string; by?: st
   const bPl = place(sitePl), building = add(`IFCBUILDING(${esc(madeGuid(`${o.file}:building`))},$,${esc(o.name)},$,$,#${bPl},$,$,.ELEMENT.,$,$,$)`);
   add(`IFCRELAGGREGATES(${esc(madeGuid(`${o.file}:agg1`))},$,$,$,#${project},(#${site}))`);
   add(`IFCRELAGGREGATES(${esc(madeGuid(`${o.file}:agg2`))},$,$,$,#${site},(#${building}))`);
+  /** one entity whose list of numbers is written a piece at a time (a large mesh never becomes one string): head, then
+   *  each item, then tail */
+  const listed = (head: string, n: number, item: (k: number) => string, tail: string) => {
+    const at = ++id;
+    let p = `#${at}=${head}`;
+    for (let k = 0; k < n; k++) { p += `${k ? ',' : ''}${item(k)}`; if (p.length > 1 << 16) { out(p); p = ''; } }
+    out(`${p}${tail};\n`);
+    return at;
+  };
   /** placed triangles as one triangulated face set */
   const body3d = (xyz: ArrayLike<number>, triangles: ArrayLike<number>) => {
-    let p = '';
-    for (let k = 0; k < xyz.length; k += 3) p += `${k ? ',' : ''}(${real(xyz[k])},${real(xyz[k + 1])},${real(xyz[k + 2])})`;
-    const pts = add(`IFCCARTESIANPOINTLIST3D((${p}))`);
-    let t = '';
-    for (let k = 0; k < triangles.length; k += 3) t += `${k ? ',' : ''}(${triangles[k] + 1},${triangles[k + 1] + 1},${triangles[k + 2] + 1})`;
-    const fs = add(`IFCTRIANGULATEDFACESET(#${pts},$,.T.,(${t}),$)`);
+    const pts = listed('IFCCARTESIANPOINTLIST3D((', xyz.length / 3, (k) => `(${real(xyz[k * 3])},${real(xyz[k * 3 + 1])},${real(xyz[k * 3 + 2])})`, '))');
+    const fs = listed(`IFCTRIANGULATEDFACESET(#${pts},$,.T.,(`, triangles.length / 3, (k) => `(${triangles[k * 3] + 1},${triangles[k * 3 + 1] + 1},${triangles[k * 3 + 2] + 1})`, '),$)');
     const rep = add(`IFCSHAPEREPRESENTATION(#${ctx},'Body','Tessellation',(#${fs}))`);
     return add(`IFCPRODUCTDEFINITIONSHAPE($,$,(#${rep}))`);
   };

@@ -339,8 +339,8 @@ export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; 
   // a Revit file is made into an IFC first, by rvt-rs in its own process (revitNeed); reading and meshing the IFC it
   // makes is sized from that IFC (loadNeeds on it, once it is made)
   if (isRevit(path)) { const index = revitNeed(size); return { index, mesh: 0, chunkBytes: 0, total: index }; }
-  // a SYNCHRO project likewise, in the 4D reader's process (synchroNeed: from the size of its geometry tables)
-  if (isSynchro(path)) { const index = synchroNeed(path); return { index, mesh: 0, chunkBytes: 0, total: index }; }
+  // a SYNCHRO project likewise, in the 4D reader's process, its heap held to what it needs (synchroNeed: from the size of its geometry tables)
+  if (isSynchro(path)) { const index = synchroNeed(path).total; return { index, mesh: 0, chunkBytes: 0, total: index }; }
   // a Navisworks model is read as it is, by its own process (its model trees as objects, a model at a time; the geometry
   // a stream at a time), then its index is held here: both, from the sizes of its sections (navisworksNeed)
   if (isNavisworks(path)) { const n = navisworksNeed(path, o.geometry !== false); return { index: n.index, mesh: n.reader, chunkBytes: 0, total: n.index + n.reader }; }

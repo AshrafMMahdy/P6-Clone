@@ -280,7 +280,7 @@ export async function spToIfc(path: string): Promise<{ ifc: string; source: Sync
   }
   const worker = read4dWorkerPath();
   const source = worker
-    ? await inWorker({ script: worker, job: { path, ifc: `${base}.ifc`, file: basename(path) }, what: 'The SYNCHRO reader', tried: 'one pass of the reader over the file in a process of its own', next: 'export the model from SYNCHRO as IFC and open that, with the schedule imported from the .sp' },
+    ? await inWorker({ script: worker, job: { path, ifc: `${base}.ifc`, file: basename(path) }, heapMb: Math.ceil(synchroNeed(path).heap / 1048576), what: 'The SYNCHRO reader', tried: 'one pass of the reader over the file in a process of its own', next: 'export the model from SYNCHRO as IFC and open that, with the schedule imported from the .sp' },
       (d) => JSON.parse(readFileSync(join(d, 'result.json'), 'utf8')) as SynchroSource)
     : writeSynchroIfc(new Uint8Array(readFileSync(path)), `${base}.ifc`, basename(path));
   writeFileSync(`${base}.json`, JSON.stringify(source));
@@ -293,12 +293,14 @@ export async function spCached(path: string): Promise<boolean> {
   return existsSync(`${base}.ifc`) && existsSync(`${base}.json`);
 }
 
-/** The memory the conversion takes (its process): measured with p6clone, Node 22.23, on six SYNCHRO files (5.1 to 6.5):
- *  a peak of 249 to 833 MB, about 210 MB plus 13 times the geometry tables inflated (Entities and IncludeLibrary,
- *  5.5 to 49 MB); those tables inflate to 3.9 to 5.7 times what they take in the file, so the need is taken from the
- *  bytes they take there, at 6 times: 210 MB + 78 x those bytes (every file measured is under it). */
-export const SP_FIXED = 210 * 1048576, SP_PER_STORED_BYTE = 78;
-export function synchroNeed(path: string): number {
+/** The memory the conversion takes (its process), from the bytes the geometry tables (Entities, IncludeLibrary) take in the
+ *  file. Measured with p6clone, Node 22.23, on five SYNCHRO files (5.1 to 6.5, 1.3 to 8.6 MB of those tables): the least
+ *  JavaScript heap each converts in is 48 to 160 MB, about 32 MB + 15 x those bytes, so the process is given 64 MB + 16 x
+ *  (heap); the rest of what it holds (Node itself, the inflated tables, the meshes as typed arrays) came to 145 to 217 MB,
+ *  under 160 MB + 10 x those bytes. The need is both: 224 MB + 26 x those bytes. Checked on all eleven samples run with
+ *  that heap: each converts, its peak 220 to 421 MB, every one under its need (256 to 438 MB). */
+export const SP_HEAP_FIXED = 64 * 1048576, SP_HEAP_PER_BYTE = 16, SP_REST_FIXED = 160 * 1048576, SP_REST_PER_BYTE = 10;
+export function synchroNeed(path: string): { heap: number; total: number } {
   const fd = openSync(path, 'r'), size = fstatSync(fd).size;
   try {
     // the directory ends before the first table: read up to where the first entry says its table is
@@ -310,6 +312,7 @@ export function synchroNeed(path: string): number {
     const dir = directory(b)?.dir ?? [];
     let stored = 0;
     dir.forEach((t, k) => { if (t.name === 'Entities' || t.name === 'IncludeLibrary') stored += (k + 1 < dir.length ? dir[k + 1].at : size) - t.at; });
-    return Math.round(SP_FIXED + stored * SP_PER_STORED_BYTE);
+    const heap = SP_HEAP_FIXED + stored * SP_HEAP_PER_BYTE;
+    return { heap, total: Math.round(heap + SP_REST_FIXED + stored * SP_REST_PER_BYTE) };
   } finally { closeSync(fd); }
 }
