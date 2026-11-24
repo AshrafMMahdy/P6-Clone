@@ -21,9 +21,8 @@ import { ifcWriter } from './nwd/toIfc.ts';
 import { read4dWorkerPath } from './runtime.ts';
 import { container, directory, fail, HDR, level, MAGIC, readSynchro, skip, skipTable, spGlobalId, str, TRL, u32, u8, uuid, type Cur, type SynchroFile } from './synchro.ts';
 
-const ENT = 0x541a2a37, INLINE = 0x304a69b6, REF = 0xd06a30e7, LINES = 0x738472c6, FACES = 0xf2c08b8a, MARK = 0x2e24dd6e, WORLD = 0x5075d933;
+const ENT = 0x541a2a37, INLINE = 0x304a69b6, REF = 0xd06a30e7, LINES = 0x738472c6, FACES = 0xf2c08b8a, MARK = 0x2e24dd6e;
 const PRISM = 0x26ffe974, PRISM_MARK = 0xe12aa0ad, EXTENT = 0x067eb6a9;
-const UNIT: Record<number, number> = { 1: 0.001, 3: 1 };
 
 type Mat = number[];
 interface Mesh { v: Float32Array; tri: Uint32Array; closed: boolean }
@@ -185,15 +184,6 @@ function entRow(c: Cur, all: Map<string, Ent>, odd: Odd, into: Ent[]): void {
   }
 }
 
-/** The world's unit in metres, from the 3D world settings row (its magic, 16 bytes, 8 from 6.0, a GUID, a double, then
- *  the unit setting); a file without it, or with a setting no file read so far has used, is refused. */
-export function worldScale(ws: Buffer | undefined, v: number): number {
-  const at = 4 + (v >= 60 ? 8 : 16) + 16 + 8;
-  if (!ws || ws.length < at + 4 || ws.readUInt32LE(0) !== WORLD) fail('The file has no 3D world settings (its unit), so its geometry cannot be sized.');
-  const code = ws!.readUInt32LE(at);
-  return UNIT[code] ?? fail(`The file's 3D unit is setting ${code}, which no SYNCHRO file read so far has used (1 is millimetres, 3 metres): its geometry is not drawn at a guessed size.`);
-}
-
 /** a · b for row vectors (p · a · b) */
 function mul(a: Mat, b: Mat): Mat {
   const o = new Array<number>(16);
@@ -206,19 +196,17 @@ const IDENTITY: Mat = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
  *  no resource draws (a context model, a file of geometry that was never made into resources), with the scene entities
  *  above it; the triangles it is drawn with (metres, placed). */
 export interface SynchroObject { uuid: string; name: string; resource: boolean; groups: string[]; positions: number[]; triangles: number[] }
-export interface SynchroModel { file: SynchroFile; units: 'mm' | 'm'; objects: SynchroObject[]; notes: string[] }
+export interface SynchroModel { file: SynchroFile; units: SynchroFile['units']; objects: SynchroObject[]; notes: string[] }
 
 /** The 3D objects of a SYNCHRO project, each with its triangles: its resources, then the scene entities no resource draws
  *  (each with only its own meshes: its child entities are objects of their own), so every triangle is drawn once.
  *  onObject is called per object, so a caller can write them out one at a time; objects then comes back empty. */
 export function readSynchroModel(bytes: Uint8Array, onObject?: (o: SynchroObject) => void): SynchroModel {
   const file = readSynchro(bytes), notes: string[] = [];
-  const box = container(bytes, notes, ['Entities', 'IncludeLibrary', '3DWorldSettings']);
+  const box = container(bytes, notes, ['Entities', 'IncludeLibrary']);
   if (!box) fail('Not a SYNCHRO project file (no .sp header).');
   const v = level(box!.version, box!.schema);
-  const ws = box!.tables.get('3DWorldSettings');
-  if (!ws && notes.length) fail(`The file's 3D world settings (its unit) could not be read: ${notes.join(' ')}`);
-  const scale = worldScale(ws, v);
+  const scale = file.scale; // the world unit, or metres assumed (synchro.ts worldUnit: the note is the file's)
   const all = new Map<string, Ent>(), odd: Odd = { polygons: { n: 0 }, shapes: 0, inwards: 0, outwards: 0 }, scene: Ent[] = [];
   let cut = false;
   for (const name of ['IncludeLibrary', 'Entities']) {
@@ -282,7 +270,7 @@ export function readSynchroModel(bytes: Uint8Array, onObject?: (o: SynchroObject
   for (const r of scene) rest(r, IDENTITY, []);
   if (unplaced) notes.push(cut ? `${unplaced} entities that resources name were not read (the 3D scene stopped early); those resources are drawn without them.` : `${unplaced} entities that resources name are not in the file's 3D scene; those resources are drawn without them.`);
   if (missing) notes.push(`${missing} shapes the scene refers to are not in the file's library and were not drawn.`);
-  return { file, units: scale === 1 ? 'm' : 'mm', objects, notes };
+  return { file, units: file.units, objects, notes };
 }
 
 // ---- the model: an IFC4 of the 3D objects, made once per file content (in the 4D reader's own process), then read
@@ -293,7 +281,7 @@ export const SP_FORMAT = 1;
 
 /** What a SYNCHRO model's conversion read (the answer that opens the model says it). */
 export interface SynchroSource {
-  format: 'SYNCHRO'; version: string; units: 'mm' | 'm';
+  format: 'SYNCHRO'; version: string; units: SynchroFile['units'];
   /** resources drawn in 3D (what tasks are assigned) and parts of the scene no resource draws */
   objects: number; resources: number; scene_only: number; without_geometry: number;
   note: string; warnings: string[];
@@ -310,6 +298,8 @@ export function isSynchro(path: string): boolean {
  *  group, or the scene entity, above it) as its storey, with a property set SYNCHRO (Resource: whether tasks can be
  *  assigned it; Group: the groups above it). */
 export function writeSynchroIfc(bytes: Uint8Array, ifcPath: string, file: string): SynchroSource {
+  // in metres; a file whose unit is not known has its numbers taken as metres (its source and notes say assumed), so the
+  // model and the paths import_4d gives agree
   const w = ifcWriter(ifcPath, { name: file.replace(/\.sp$/i, ''), file, by: 'P6 Clone SYNCHRO reader' });
   let k = 0, resources = 0, empty = 0;
   try {

@@ -400,7 +400,8 @@ unquantified; each figure with its kind, unit and source: base quantity and its 
 search sets + TimeLiner CSV, SYNCHRO, IFC4 4D in the Bonsai style, links CSV), `import_4d` (IFC 4D, Navisworks search
 sets, TimeLiner CSV / xlsx, the TimeLiner inside .nwf / .nwd, SYNCHRO .sp 5.1-6.5, read without those programs: a .sp's
 tasks link to its own objects when that .sp is the model, else to the design model by the "(#id)" SYNCHRO names them
-with; its 3D paths, equipment moved along keyframes during a task, are read and named, not animated),
+with; its 3D paths, equipment moved along keyframes during a task, come back in the answer: who follows each in which
+task, each keyframe's share of the task, place and rotation; not animated),
 `simulate_4d` and `compare_4d` (by date, against any saved baseline, with PV / EV by zone), `set_element_status`,
 `render_4d` (a viewer page, PNGs or an MP4 / WebM; the page renders on the GPU of whoever opens it, so a GPU-less
 server needs no Chromium: the platform's client render drives its `WHIQ4D_EXPORT` hooks), `relink_model` (links survive a

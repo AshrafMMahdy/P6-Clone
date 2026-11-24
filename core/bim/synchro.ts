@@ -19,8 +19,9 @@ export interface SynchroResource { uuid: string; name: string; parent: string | 
 /** A 3D path (equipment motion): its keyframes, each at a share of the task's duration (0 to 1), the place the object
  *  is moved to (world units, as the entities) and its rotation (quaternion x, y, z, w); folders of paths are flattened. */
 export interface SynchroPath { uuid: string; name: string; points: { at: number; position: [number, number, number]; rotation: [number, number, number, number] }[] }
-/** path: the 3D path the resource follows during the task (an assignment's own setting) */
-export interface SynchroFile { version: string; tasks: SynchroTask[]; predecessors: SynchroLink[]; resources: SynchroResource[]; assignments: { task: string; resource: string; path?: string }[]; paths: SynchroPath[]; notes: string[] }
+/** path: the 3D path the resource follows during the task (an assignment's own setting). scale: the 3D world's unit in
+ *  metres (worldUnit); units: 'assumed-m' when the file's unit setting is not one read so far. */
+export interface SynchroFile { version: string; tasks: SynchroTask[]; predecessors: SynchroLink[]; resources: SynchroResource[]; assignments: { task: string; resource: string; path?: string }[]; paths: SynchroPath[]; scale: number; units: 'mm' | 'm' | 'assumed-m'; notes: string[] }
 
 export const MAGIC = 'b617671e7af34640a86ed5dc417a2de2';
 
@@ -269,7 +270,7 @@ function readCompanyRow(c: Cur, id: string): RawRes {
 
 // ---- the container
 
-const WANTED = ['Tasks', 'Companies', 'Resources', 'Calendars', 'Paths'];
+const WANTED = ['Tasks', 'Companies', 'Resources', 'Calendars', 'Paths', '3DWorldSettings'];
 
 
 /** The file's version, schema and the directory of its tables (name and offset, in file order); null when it is not a
@@ -313,6 +314,15 @@ export function container(file: Uint8Array, notes: string[], names: string[] = W
 }
 
 /** Format level from the version string, raised by the schema number (the 5.5 Scheduler is laid out like 6.0). */
+/** The 3D world's unit, from the settings row (its magic, 16 bytes, 8 from 6.0, a GUID, a double, then the unit setting):
+ *  1 is millimetres and 3 metres, the only settings seen in files (11 of them, 5.1 to 6.5, each checked against the sizes
+ *  of its objects). Any other setting, or none, is taken as metres and said to be assumed (owner, 2026-11-24). */
+export function worldUnit(ws: Buffer | undefined, v: number): { scale: number; units: 'mm' | 'm' | 'assumed-m'; setting: number | null } {
+  const at = 4 + (v >= 60 ? 8 : 16) + 16 + 8;
+  const setting = ws && ws.length >= at + 4 && ws.readUInt32LE(0) === 0x5075d933 ? ws.readUInt32LE(at) : null;
+  return setting === 1 ? { scale: 0.001, units: 'mm', setting } : setting === 3 ? { scale: 1, units: 'm', setting } : { scale: 1, units: 'assumed-m', setting };
+}
+
 export function level(version: string, schema: number): number {
   const [a, b] = version.split('.').map(Number);
   const fromVersion = a * 10 + (b || 0) || 0;
@@ -325,7 +335,9 @@ export function readSynchro(bytes: Uint8Array): SynchroFile {
   const box = container(bytes, notes);
   if (!box) throw new Error('Not a SYNCHRO project file (no .sp header).');
   const v = level(box.version, box.schema);
-  const out: SynchroFile = { version: box.version, tasks: [], predecessors: [], resources: [], assignments: [], paths: [], notes };
+  const unit = worldUnit(box.tables.get('3DWorldSettings'), v);
+  const out: SynchroFile = { version: box.version, tasks: [], predecessors: [], resources: [], assignments: [], paths: [], scale: unit.scale, units: unit.units, notes };
+  if (unit.units === 'assumed-m') notes.push(`${unit.setting === null ? 'The file\'s 3D world settings (its unit) could not be read' : `The file's 3D unit is setting ${unit.setting}, which no SYNCHRO file read so far has used (1 is millimetres, 3 metres)`}: its 3D numbers are taken as metres (assumed), so say so on any size, quantity or place read from it.`);
   const cur = (name: string): Cur | null => { const b = box.tables.get(name); if (!b) notes.push(`No ${name} table.`); return b ? { b, p: 0, v, bad: 0 } : null; };
   let bad = 0;
 

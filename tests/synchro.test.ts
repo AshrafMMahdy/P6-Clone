@@ -55,13 +55,13 @@ const box = (p: number[]) => { const mn = [Infinity, Infinity, Infinity], mx = [
 /** the volume a closed set of triangles encloses (the divergence theorem), here, independently of the clone's own */
 const enclosed = (p: number[], t: number[]) => { let v = 0; for (let k = 0; k < t.length; k += 3) { const a = t[k] * 3, b = t[k + 1] * 3, c = t[k + 2] * 3; v += p[a] * (p[b + 1] * p[c + 2] - p[b + 2] * p[c + 1]) - p[a + 1] * (p[b] * p[c + 2] - p[b + 2] * p[c]) + p[a + 2] * (p[b] * p[c + 1] - p[b + 1] * p[c]); } return v / 6; };
 
-test('the world unit: setting 1 is millimetres, 3 metres; another one, or none, is refused (not drawn at a guessed size)', async () => {
-  const { worldScale } = await import('../core/bim/synchroModel.ts');
+test('the world unit: setting 1 is millimetres, 3 metres; another one, or none, is metres assumed (owner, 2026-11-24)', async () => {
+  const { worldUnit } = await import('../core/bim/synchro.ts');
   const row = (v: number, code: number) => { const b = Buffer.alloc(4 + (v >= 60 ? 8 : 16) + 16 + 8 + 4); b.writeUInt32LE(0x5075d933, 0); b.writeUInt32LE(code, b.length - 4); return b; };
-  assert.equal(worldScale(row(51, 1), 51), 0.001);
-  assert.equal(worldScale(row(65, 3), 65), 1);
-  assert.throws(() => worldScale(row(60, 2), 60), /setting 2, which no SYNCHRO file read so far has used/);
-  assert.throws(() => worldScale(undefined, 60), /no 3D world settings/);
+  assert.deepEqual(worldUnit(row(51, 1), 51), { scale: 0.001, units: 'mm', setting: 1 });
+  assert.deepEqual(worldUnit(row(65, 3), 65), { scale: 1, units: 'm', setting: 3 });
+  assert.deepEqual(worldUnit(row(60, 2), 60), { scale: 1, units: 'assumed-m', setting: 2 });
+  assert.deepEqual(worldUnit(undefined, 60), { scale: 1, units: 'assumed-m', setting: null });
 });
 
 test('a polygon left out takes its holes with it; a shape made in SYNCHRO is its profile extruded, facing outwards', async () => {
@@ -179,27 +179,70 @@ test('the loads the crane paths move are drawn: a profile extruded, each where i
   }
 });
 
-test('an Entities table that stops part-way: what was read before that point is drawn, and said', { skip: !existsSync(schep) && 'Schependomlaan .sp not present', timeout: 300_000 }, async () => {
-  const { readSynchroModel } = await import('../core/bim/synchroModel.ts');
+/** The same .sp with one table replaced by other inflated bytes (compressed again, the directory's offsets moved to match). */
+async function withTable(file: Buffer, name: string, inflated: (raw: Buffer) => Buffer): Promise<Buffer> {
   const { container, directory } = await import('../core/bim/synchro.ts');
   const { deflateSync } = await import('node:zlib');
-  const file = readFileSync(schep), head = directory(file)!;
-  const ent = container(file, [], ['Entities'])!.tables.get('Entities')!;
-  // the same file with its Entities table cut at 90% (compressed again, the directory's offsets moved to match)
+  const head = directory(file)!, raw = container(file, [], [name])!.tables.get(name)!;
   const parts = head.dir.map((t, k) => ({ ...t, bytes: file.subarray(t.at, k + 1 < head.dir.length ? head.dir[k + 1].at : file.length) }));
-  const e = parts.find((t) => t.name === 'Entities')!;
-  const nameLen = e.bytes.indexOf(Buffer.from('Entities', 'latin1')) + 8;
-  e.bytes = Buffer.concat([e.bytes.subarray(0, nameLen), deflateSync(ent.subarray(0, Math.floor(ent.length * 0.9)))]);
+  const e = parts.find((t) => t.name === name)!;
+  const nameLen = e.bytes.indexOf(Buffer.from(name, 'latin1')) + name.length;
+  // a table read with its 24-byte head (from schema 353) gets it back
+  const whole = file.subarray(e.at + nameLen);
+  const { inflateSync } = await import('node:zlib');
+  const full = inflateSync(whole.subarray(0, e.bytes.length - nameLen));
+  const prefix = full.length - raw.length;
+  e.bytes = Buffer.concat([e.bytes.subarray(0, nameLen), deflateSync(Buffer.concat([full.subarray(0, prefix), inflated(raw)]))]);
   const start = parts[0].at, dirAt = file.indexOf(Buffer.from(head.dir.find((t) => t.at === start)!.name, 'latin1'), 20);
   const out = Buffer.from(file.subarray(0, start));
   let at = start;
   for (const t of parts) {
-    for (let p = dirAt; p + 48 <= start; p += 48) if (out.readUInt32LE(p + 40) === t.at && out.subarray(p, p + t.name.length).toString('latin1') === t.name) out.writeUInt32LE(at, p + 40);
+    for (let q = dirAt; q + 48 <= start; q += 48) if (out.readUInt32LE(q + 40) === t.at && out.subarray(q, q + t.name.length).toString('latin1') === t.name) out.writeUInt32LE(at, q + 40);
     at += t.bytes.length;
   }
-  const m = readSynchroModel(Buffer.concat([out, ...parts.map((t) => t.bytes)]));
+  return Buffer.concat([out, ...parts.map((t) => t.bytes)]);
+}
+
+test('an Entities table that stops part-way: what was read before that point is drawn, and said', { skip: !existsSync(schep) && 'Schependomlaan .sp not present', timeout: 300_000 }, async () => {
+  const { readSynchroModel } = await import('../core/bim/synchroModel.ts');
+  const m = readSynchroModel(await withTable(readFileSync(schep), 'Entities', (raw) => raw.subarray(0, Math.floor(raw.length * 0.9))));
   const drawn = m.objects.filter((o) => o.triangles.length).length;
   assert.ok(drawn > 2500 && drawn < 3505, `${drawn} objects drawn`);
   assert.ok(m.notes.some((n) => /Entities table could not all be read \(the table ends inside an entity\); what was read before that point is drawn/.test(n)), m.notes.join(' | '));
   assert.ok(m.notes.some((n) => /were not read \(the 3D scene stopped early\)/.test(n)));
+});
+
+test('a unit setting no file has shown: the model opens, its numbers taken as metres and said to be assumed (owner, 2026-11-24)', { skip: none, timeout: 600_000 }, async () => {
+  const { readSynchroModel, writeSynchroIfc } = await import('../core/bim/synchroModel.ts');
+  const { loadModel } = await import('../core/bim/model.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  // 3D Paths (millimetres) with its unit setting made 2
+  const f = await withTable(readFileSync(paths3d), '3DWorldSettings', (raw) => { const b = Buffer.from(raw); b.writeUInt32LE(2, 4 + 8 + 16 + 8); return b; });
+  const m = readSynchroModel(f);
+  assert.equal(m.units, 'assumed-m');
+  assert.ok(m.file.notes.some((n) => /setting 2, which no SYNCHRO file read so far has used .*taken as metres \(assumed/.test(n)));
+  const col = m.objects.find((o) => o.name === '610 x 610mm')!;
+  assert.deepEqual(box(col.positions).size.slice(0, 2).map((x) => Math.round(x)), [610, 610], 'the numbers as they are, not scaled');
+  const ifc = join(mkdtempSync(join(tmpdir(), 'sp-unit-')), 'm.ifc');
+  writeSynchroIfc(f, ifc, 'unit2.sp');
+  // the model in those metres: the same sizes as the paths import_4d gives from this file
+  const ix = (await loadModel(ifc, { geometry: true })).index;
+  const c = ix.elements.find((e) => e.name === '610 x 610mm' && e.bbox)!;
+  assert.deepEqual([c.bbox![3] - c.bbox![0], c.bbox![5] - c.bbox![2]].map((x) => Math.round(x)), [610, 610]);
+  const { synchroToImport } = await import('../core/bim/read4d.ts');
+  assert.deepEqual(synchroToImport(readSynchro(f)).paths!.find((p) => p.name === 'Crane 2 - Podium Lift')!.keyframes[0].position_m, [-1818.561, 60624.957, 4996.766]);
+});
+
+test('the paths as the agent reads them (import_4d): who follows each in which task; each keyframe\u2019s share, place in metres, rotation in degrees', { skip: none }, async () => {
+  const { synchroToImport } = await import('../core/bim/read4d.ts');
+  const lift = synchroToImport(readSynchro(readFileSync(paths3d))).paths!.find((p) => p.name === 'Crane 2 - Podium Lift')!;
+  assert.deepEqual(lift.followed_by, [{ resource: 'Load 3', task: 'ST00160' }]);
+  assert.deepEqual(lift.keyframes.map((k) => k.percent_of_task), [0, 17.5, 72.9, 100]);
+  assert.deepEqual(lift.keyframes[0].position_m, [-1.819, 60.625, 4.997]);
+  // the quaternion (0, 0, 0.678, 0.735) is a turn of 2 x atan2(0.678, 0.735) about the vertical
+  assert.deepEqual(lift.keyframes[2].rotation_deg, [0, 0, 85.4]);
+  const ex = synchroToImport(readSynchro(readFileSync(join(tb, 'SYNCHRO Training Building Completed.sp')))).paths!;
+  assert.deepEqual(ex.map((p) => [p.name, p.followed_by[0]?.resource, p.keyframes.length]), [['Foundation Excavation', 'Excavator', 4]]);
+  assert.deepEqual(ex[0].keyframes[0].position_m, [-1.207, -21.652, -0.2], 'a metre file, read as metres');
 });

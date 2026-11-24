@@ -74,6 +74,7 @@ test('4D: a SYNCHRO project (.sp) opened as the model itself: its 3D objects are
   assert.equal(r.d.added, 4, 'the file\u2019s four assignments, each to its own object');
   assert.ok(!r.d.notes.some((n: string) => /\(#id\)/.test(n)), 'the design-model note does not apply to the file opened as its own model');
   assert.ok(r.d.notes.some((n: string) => /Load 3 along "Crane 2 - Podium Lift"/.test(n)), 'the 3D path is named');
+  assert.deepEqual(r.d.paths.find((p: { name: string }) => p.name === 'Crane 2 - Podium Lift').keyframes[1], { percent_of_task: 17.5, position_m: [-1.819, 60.625, 22.63], rotation_deg: [0, 0, 0] }, 'its keyframes are in the answer');
   const st = (await call('link_status', { handle: h })).d;
   assert.deepEqual([st.links, st.links_to_missing_elements.length], [4, 0]);
   const lifted = (await call('list_elements', { handle: h, linked: 'ST00160' })).d.elements as { name: string; guid: string }[];
