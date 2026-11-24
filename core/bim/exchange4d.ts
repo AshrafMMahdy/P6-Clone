@@ -243,7 +243,7 @@ export function ifc4dLines(db: Db, projId: string, t: StepAppend, items: Item4d[
 }
 
 // ── imports ────────────────────────────────────────────────────────────────────────────────────────────────────────
-export interface Imported4d { source: string; tasks: { name: string; id: string; start?: string; finish?: string; actualStart?: string; actualFinish?: string; type?: string; attached?: string }[]; links: { task: string; guids?: string[]; expressIds?: number[]; names?: string[] }[]; sets?: { name: string; conditions: { category: string; property: string; value: string; or: boolean }[]; /** the elements, when the file lists them */ guids?: string[] }[]; notes: string[] }
+export interface Imported4d { source: string; tasks: { name: string; id: string; start?: string; finish?: string; actualStart?: string; actualFinish?: string; type?: string; attached?: string }[]; links: { task: string; guids?: string[]; expressIds?: number[]; names?: string[] }[]; sets?: { name: string; conditions: { category: string; property: string; value: string; or: boolean }[]; /** the elements, when the file lists them */ guids?: string[] }[]; notes: string[]; /** notes that hold only when the links go to a design model (a SYNCHRO project's "(#id)" names), left out when the file is the model itself */ designModelNotes?: string[] }
 
 /** IFC 4D in both styles: Bonsai/IFC4 (IfcRelAssignsToProduct: the task outputs the element) and SYNCHRO/IFC2X3
  *  (IfcRelAssignsToProcess: elements assigned to the task). SYNCHRO renames elements "<name>_(#<id in the source

@@ -10,33 +10,44 @@
 // misread row is stepped over and counted in the notes instead of derailing the file.
 import { maxOf, minOf, pushAll } from '../arrays.ts';
 import { inflateSync } from 'node:zlib';
+import { compressGuid } from './nwd/toIfc.ts';
 
 export interface SynchroTask { uuid: string; id: string; name: string; start: string | null; finish: string | null; actualStart: string | null; actualFinish: string | null; durationHours: number | null; parent: string | null; isSummary: boolean }
 export interface SynchroLink { from: string; to: string; type: 'FS' | 'SS' | 'FF' | 'SF'; lagHours: number }
-export interface SynchroResource { uuid: string; name: string; parent: string | null }
-export interface SynchroFile { version: string; tasks: SynchroTask[]; predecessors: SynchroLink[]; resources: SynchroResource[]; assignments: { task: string; resource: string }[]; notes: string[] }
+/** entities: the GUIDs of the 3D entities the resource is drawn with (synchroModel.ts); none for a resource that is not a 3D object */
+export interface SynchroResource { uuid: string; name: string; parent: string | null; entities: string[] }
+/** A 3D path (equipment motion): its keyframes, each at a share of the task's duration (0 to 1), the place the object
+ *  is moved to (world units, as the entities) and its rotation (quaternion x, y, z, w); folders of paths are flattened. */
+export interface SynchroPath { uuid: string; name: string; points: { at: number; position: [number, number, number]; rotation: [number, number, number, number] }[] }
+/** path: the 3D path the resource follows during the task (an assignment's own setting) */
+export interface SynchroFile { version: string; tasks: SynchroTask[]; predecessors: SynchroLink[]; resources: SynchroResource[]; assignments: { task: string; resource: string; path?: string }[]; paths: SynchroPath[]; notes: string[] }
 
-const MAGIC = 'b617671e7af34640a86ed5dc417a2de2';
-const HDR = 0x39af547a, TRL = 0x6f99e416, BLOCKS = 0x06a1bcd0, NONE = 0x93406fff, DAY = 86400;
-const M = { task: 0x04ec2576, assign: 0x4623d899, pred: 0x04e7e3d1, resource: 0x57a85c31, company: 0x0598bfda, calendar: 0x7fec261d, dayType: 0xc4f4c21d, dayAssign: 0x0d1a3d6c };
+export const MAGIC = 'b617671e7af34640a86ed5dc417a2de2';
+
+/** The GlobalId a SYNCHRO object carries when the file is opened as a model (synchroModel.ts): its resource's (or scene
+ *  entity's) GUID, so the file's own task assignments name it (read4d.ts). */
+export const spGlobalId = (uuid: string) => compressGuid(Buffer.from(uuid.replace(/-/g, ''), 'hex'));
+export const HDR = 0x39af547a, TRL = 0x6f99e416;
+const BLOCKS = 0x06a1bcd0, NONE = 0x93406fff, DAY = 86400;
+const M = { task: 0x04ec2576, assign: 0x4623d899, pred: 0x04e7e3d1, resource: 0x57a85c31, company: 0x0598bfda, calendar: 0x7fec261d, dayType: 0xc4f4c21d, dayAssign: 0x0d1a3d6c, path: 0x04e9f410, keys: 0xe89c1176, key: 0xce1f8699, place: 0x7307de33 };
 const LINK: SynchroLink['type'][] = ['FS', 'FS', 'SF', 'SS', 'FF'];
 
 /** A read position in one inflated table; `v` is the format level (51 for 5.1, 60, 62, 63 ...); `bad` counts skipped rows. */
-interface Cur { b: Buffer; p: number; v: number; bad: number }
+export interface Cur { b: Buffer; p: number; v: number; bad: number }
 
-const u8 = (c: Cur) => c.b.readUInt8(c.p++);
+export const u8 = (c: Cur) => c.b.readUInt8(c.p++);
 const u16 = (c: Cur) => { const x = c.b.readUInt16LE(c.p); c.p += 2; return x; };
-const u32 = (c: Cur) => { const x = c.b.readUInt32LE(c.p); c.p += 4; return x; };
+export const u32 = (c: Cur) => { const x = c.b.readUInt32LE(c.p); c.p += 4; return x; };
 const i32 = (c: Cur) => { const x = c.b.readInt32LE(c.p); c.p += 4; return x; };
-const skip = (c: Cur, n: number) => { if (n < 0 || c.p + n > c.b.length) throw new Error('past the end'); c.p += n; };
-const fail = (what: string): never => { throw new Error(what); };
+export const skip = (c: Cur, n: number) => { if (n < 0 || c.p + n > c.b.length) throw new Error('past the end'); c.p += n; };
+export const fail = (what: string): never => { throw new Error(what); };
 
 /** GUID in the Windows byte order (first three groups little-endian), lower case. */
 const ORDER = [3, 2, 1, 0, -1, 5, 4, -1, 7, 6, -1, 8, 9, -1, 10, 11, 12, 13, 14, 15];
 function guidAt(b: Buffer, p: number): string { return ORDER.map((i) => i < 0 ? '-' : b[p + i].toString(16).padStart(2, '0')).join(''); }
-function uuid(c: Cur): string { skip(c, 16); return guidAt(c.b, c.p - 16); }
+export function uuid(c: Cur): string { skip(c, 16); return guidAt(c.b, c.p - 16); }
 
-function str(c: Cur): string {
+export function str(c: Cur): string {
   const type = u8(c);
   let n = type === 0xff ? 0xff : type === 1 ? u8(c) : fail(`string type byte ${type}`), wide = false;
   if (n === 0xff) {
@@ -67,7 +78,7 @@ function rowEnd(b: Buffer, from: number, magic: number): number {
 }
 
 /** Steps over a whole table (header to matching trailer) without reading its rows. */
-function skipTable(c: Cur): void {
+export function skipTable(c: Cur): void {
   if (u32(c) !== HDR) fail('table header');
   const end = rowEnd(c.b, c.p, -1);
   if (end >= c.b.length) fail('unterminated table');
@@ -145,9 +156,13 @@ function addWork(cal: Cal | undefined, start: number, hours: number): number {
 
 // ---- tasks: each row nests its resource assignments, its predecessors and its child tasks
 
-interface RawTask { uuid: string; id: string; name: string; cal: string; status: number; plannedStart: number | null; plannedFinish: number | null; actualStart: number | null; actualFinish: number | null; estFinish: number | null; dur: number | null; kids: RawTask[]; preds: { uuid: string; type: SynchroLink['type']; lag: number }[]; res: string[] }
+interface RawTask { uuid: string; id: string; name: string; cal: string; status: number; plannedStart: number | null; plannedFinish: number | null; actualStart: number | null; actualFinish: number | null; estFinish: number | null; dur: number | null; kids: RawTask[]; preds: { uuid: string; type: SynchroLink['type']; lag: number }[]; res: { r: string; path: string | null }[] }
 
-function readTaskRow(c: Cur, id: string, resIds: Set<string>): RawTask {
+/** The GUIDs an assignment row may name: the resources, and the 3D paths. */
+interface Known { res: Set<string>; paths: Set<string> }
+
+function readTaskRow(c: Cur, id: string, known: Known): RawTask {
+  const resIds = known.res;
   skip(c, 1);
   const res = table(c, M.assign, (c) => {
     // the resource GUID: right after the row GUID in 5.1; from 5.4 after an unknown block, a double, 10 bytes and a GUID
@@ -155,8 +170,11 @@ function readTaskRow(c: Cur, id: string, resIds: Set<string>): RawTask {
     let r = guidAt(c.b, at + (c.v < 54 ? 0 : (c.v >= 63 ? 69 : 57) + 8 + 10 + 16));
     // otherwise any known resource GUID early in the row
     for (let p = at; !resIds.has(r) && p + 16 <= Math.min(end, at + 240); p++) if (resIds.has(guidAt(c.b, p))) r = guidAt(c.b, p);
+    // the 3D path it follows, when it has one: a path's GUID anywhere in the row
+    let path: string | null = null;
+    if (known.paths.size) for (let p = at; !path && p + 16 <= end; p++) if (known.paths.has(guidAt(c.b, p))) path = guidAt(c.b, p);
     c.p = end;
-    return r;
+    return { r, path };
   });
   skip(c, 4);
   const preds = table(c, M.pred, (c) => {
@@ -173,7 +191,7 @@ function readTaskRow(c: Cur, id: string, resIds: Set<string>): RawTask {
   });
   const cal = uuid(c), name = str(c), plannedStart = date(c), dur = seconds(c);
   skip(c, 4);
-  const kids = u8(c) ? table(c, M.task, (c, k) => readTaskRow(c, k, resIds)) : [];
+  const kids = u8(c) ? table(c, M.task, (c, k) => readTaskRow(c, k, known)) : [];
   skipTableIf(c); // costs
   const actualStart = date(c), plannedFinish = date(c);
   date(c);
@@ -192,33 +210,71 @@ function readTaskRow(c: Cur, id: string, resIds: Set<string>): RawTask {
   return { uuid: id, id: tid, name, cal, status, plannedStart, plannedFinish, actualStart, actualFinish, estFinish, dur: dur === null ? null : dur / 3600, kids, preds, res };
 }
 
+// ---- 3D paths: a tree of paths (folders hold paths); a path with keyframes moves the resource that follows it
+
+/** One path row: its name, a scale, its child paths, then (flag 1) its keyframes: each a GUID, the share of the task at
+ *  which it applies (a u32 of 0x7fffffff), the place (3 float32; doubles from 6.3) and the rotation (4 doubles). */
+function readPathRow(c: Cur, id: string, out: SynchroPath[]): void {
+  const name = str(c);
+  skip(c, 4 + 8);
+  table(c, M.path, (c, k) => readPathRow(c, k, out));
+  if (u8(c)) {
+    // the keyframe list: a header (a GUID; 16 bytes longer before 6.0), its magic, then the table
+    const end = rowEnd(c.b, c.p, M.path);
+    let p = c.p;
+    while (p + 8 <= end && !(c.b.readUInt32LE(p) === M.keys && c.b.readUInt32LE(p + 4) === HDR)) p++;
+    if (p + 8 > end) fail('keyframe list');
+    c.p = p + 4;
+    const points = table(c, M.key, (c) => {
+      skip(c, 4); uuid(c);
+      const at = u32(c) / 0x7fffffff;
+      skip(c, 4);
+      if (u32(c) !== M.place) fail('keyframe place');
+      const f = c.v >= 63 ? 8 : 4, num = () => { const x = f === 8 ? c.b.readDoubleLE(c.p) : c.b.readFloatLE(c.p); c.p += f; return x; };
+      const position: [number, number, number] = [num(), num(), num()];
+      const rotation = [0, 1, 2, 3].map(() => { const x = c.b.readDoubleLE(c.p); c.p += 8; return x; }) as [number, number, number, number];
+      c.p = rowEnd(c.b, c.p, M.key);
+      return { at, position, rotation };
+    }, false);
+    if (points.length) out.push({ uuid: id, name, points });
+  }
+  c.p = rowEnd(c.b, c.p, M.path);
+}
+function readPaths(c: Cur, out: SynchroPath[]): void { table(c, M.path, (c, id) => readPathRow(c, id, out)); }
+
 // ---- resources: a tree; up to 6.1 it hangs under the companies
 
-interface RawRes { uuid: string; name: string; kids: RawRes[] }
+interface RawRes { uuid: string; name: string; entities: string[]; kids: RawRes[] }
 
 function readResourceRow(c: Cur, id: string): RawRes {
   const name = str(c);
   str(c);
   if (i32(c)) str(c); // description, supply reference
-  skip(c, 32); skip(c, u32(c) * 20); skip(c, 12);
+  skip(c, 32);
+  // the 3D entities it is drawn with: each a GUID and 4 bytes
+  const entities: string[] = [];
+  for (let k = u32(c); k > 0; k--) { entities.push(uuid(c)); skip(c, 4); }
+  skip(c, 12);
   const kids = table(c, M.resource, readResourceRow);
   c.p = rowEnd(c.b, c.p, M.resource);
-  return { uuid: id, name, kids };
+  return { uuid: id, name, entities, kids };
 }
 
 function readCompanyRow(c: Cur, id: string): RawRes {
   skip(c, 20);
   const kids = table(c, M.resource, readResourceRow), name = str(c);
   c.p = rowEnd(c.b, c.p, M.company);
-  return { uuid: id, name, kids };
+  return { uuid: id, name, entities: [], kids };
 }
 
 // ---- the container
 
-const WANTED = ['Tasks', 'Companies', 'Resources', 'Calendars'];
+const WANTED = ['Tasks', 'Companies', 'Resources', 'Calendars', 'Paths'];
+/** The file's version, schema and the inflated tables it names (WANTED and `extra`). */
 
-function container(file: Uint8Array, notes: string[]): { version: string; schema: number; tables: Map<string, Buffer> } | null {
-  const b = Buffer.from(file.buffer, file.byteOffset, file.byteLength);
+/** The file's version, schema and the directory of its tables (name and offset, in file order); null when it is not a
+ *  SYNCHRO file. b may be the file's start only (the directory follows the header). */
+export function directory(b: Buffer): { version: string; schema: number; dir: { name: string; at: number }[] } | null {
   if (b.length < 24 || b.subarray(0, 16).toString('hex') !== MAGIC) return null;
   const schema = b.readUInt32LE(16), c: Cur = { b, p: 20, v: 0, bad: 0 };
   let version: string;
@@ -232,22 +288,31 @@ function container(file: Uint8Array, notes: string[]): { version: string; schema
     c.p += 48;
   }
   dir.sort((x, y) => x.at - y.at);
+  return { version, schema, dir };
+}
+
+export function container(file: Uint8Array, notes: string[], extra: string[] = []): { version: string; schema: number; tables: Map<string, Buffer> } | null {
+  const b = Buffer.from(file.buffer, file.byteOffset, file.byteLength);
+  const head = directory(b);
+  if (!head) return null;
+  const { version, schema, dir } = head;
   const tables = new Map<string, Buffer>();
   dir.forEach((t, k) => {
-    if (!WANTED.includes(t.name)) return;
+    if (!WANTED.includes(t.name) && !extra.includes(t.name)) return;
     try {
       const tc: Cur = { b, p: t.at, v: 0, bad: 0 };
       if (str(tc) !== t.name) fail('the name at its offset differs');
       const raw = inflateSync(b.subarray(tc.p, k + 1 < dir.length ? dir[k + 1].at : b.length));
-      // from schema 353 (5.5 Scheduler and 6.x) a table opens with 24 bytes: 8 zero bytes and a GUID
-      tables.set(t.name, raw.readUInt32LE(0) === HDR ? raw : raw.subarray(24));
+      // from schema 353 (5.5 Scheduler and 6.x) a table opens with 24 bytes: 8 zero bytes and a GUID (a single row, such
+      // as the 3D world settings, has neither)
+      tables.set(t.name, raw.readUInt32LE(0) !== HDR && raw.length >= 28 && raw.readUInt32LE(24) === HDR ? raw.subarray(24) : raw);
     } catch (e) { notes.push(`Table ${t.name} could not be read (${(e as Error).message}).`); }
   });
   return { version, schema, tables };
 }
 
 /** Format level from the version string, raised by the schema number (the 5.5 Scheduler is laid out like 6.0). */
-function level(version: string, schema: number): number {
+export function level(version: string, schema: number): number {
   const [a, b] = version.split('.').map(Number);
   const fromVersion = a * 10 + (b || 0) || 0;
   const fromSchema = schema >= 478 ? 65 : schema >= 457 ? 64 : schema >= 434 ? 63 : schema >= 414 ? 62 : schema >= 400 ? 61 : schema >= 353 ? 60 : schema >= 310 ? 54 : 51;
@@ -259,12 +324,12 @@ export function readSynchro(bytes: Uint8Array): SynchroFile {
   const box = container(bytes, notes);
   if (!box) throw new Error('Not a SYNCHRO project file (no .sp header).');
   const v = level(box.version, box.schema);
-  const out: SynchroFile = { version: box.version, tasks: [], predecessors: [], resources: [], assignments: [], notes };
+  const out: SynchroFile = { version: box.version, tasks: [], predecessors: [], resources: [], assignments: [], paths: [], notes };
   const cur = (name: string): Cur | null => { const b = box.tables.get(name); if (!b) notes.push(`No ${name} table.`); return b ? { b, p: 0, v, bad: 0 } : null; };
   let bad = 0;
 
   const resName = v >= 62 ? 'Resources' : 'Companies', rc = cur(resName);
-  const addRes = (r: RawRes, parent: string | null) => { out.resources.push({ uuid: r.uuid, name: r.name, parent }); r.kids.forEach((k) => addRes(k, r.uuid)); };
+  const addRes = (r: RawRes, parent: string | null) => { out.resources.push({ uuid: r.uuid, name: r.name, parent, entities: r.entities }); r.kids.forEach((k) => addRes(k, r.uuid)); };
   if (rc) {
     try { table(rc, v >= 62 ? M.resource : M.company, v >= 62 ? readResourceRow : readCompanyRow).forEach((r) => addRes(r, null)); }
     catch (e) { notes.push(`${resName} table stopped early (${(e as Error).message}).`); }
@@ -279,9 +344,17 @@ export function readSynchro(bytes: Uint8Array): SynchroFile {
     bad += cc.bad;
   }
 
-  const raw: RawTask[] = [], tc = cur('Tasks'), resIds = new Set(out.resources.map((r) => r.uuid));
+  // 3D paths (read before the tasks: an assignment names the path it follows)
+  const pc = box.tables.get('Paths');
+  if (pc) {
+    const c: Cur = { b: pc, p: 0, v, bad: 0 };
+    try { readPaths(c, out.paths); } catch (e) { notes.push(`The 3D paths could not all be read (${(e as Error).message}).`); }
+    bad += c.bad;
+  }
+
+  const raw: RawTask[] = [], tc = cur('Tasks'), resIds = new Set(out.resources.map((r) => r.uuid)), ids: Known = { res: resIds, paths: new Set(out.paths.map((p) => p.uuid)) };
   if (tc) {
-    try { pushAll(raw, table(tc, M.task, (c, id) => readTaskRow(c, id, resIds))); } catch (e) { notes.push(`Tasks table stopped early (${(e as Error).message}).`); }
+    try { pushAll(raw, table(tc, M.task, (c, id) => readTaskRow(c, id, ids))); } catch (e) { notes.push(`Tasks table stopped early (${(e as Error).message}).`); }
     bad += tc.bad;
   }
 
@@ -310,7 +383,7 @@ export function readSynchro(bytes: Uint8Array): SynchroFile {
   let lost = 0, orphan = 0;
   const links = (t: RawTask) => {
     for (const p of t.preds) if (known.has(p.uuid)) out.predecessors.push({ from: p.uuid, to: t.uuid, type: p.type, lagHours: p.lag }); else lost++;
-    for (const r of t.res) { out.assignments.push({ task: t.uuid, resource: r }); if (!resIds.has(r)) orphan++; }
+    for (const { r, path } of t.res) { out.assignments.push({ task: t.uuid, resource: r, ...(path ? { path } : {}) }); if (!resIds.has(r)) orphan++; }
     t.kids.forEach(links);
   };
   raw.forEach(links);

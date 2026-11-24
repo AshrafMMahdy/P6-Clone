@@ -59,6 +59,27 @@ test('4D: a SYNCHRO project (.sp) comes in as activities and their element links
   assert.equal(st.links_to_missing_elements.length, 0);
 });
 
+const paths3d = join(SCHEP, 'synchro', 'bentley-kb-training', 'Challenge Models', 'Challenge Model_3D Paths.sp');
+test('4D: a SYNCHRO project (.sp) opened as the model itself: its 3D objects are the elements, and its own tasks link to them', { skip: !existsSync(paths3d) && 'SYNCHRO training samples not present', timeout: 600_000 }, async () => {
+  const np = (await call('new_project', { id: 'SPM', start: '2018-07-02' })).d;
+  const h = np.handle, owner_key = np.owner_key;
+  const om = await call('open_model', { handle: h, owner_key, path: paths3d });
+  assert.equal(om.err, false, JSON.stringify(om.d).slice(0, 400));
+  assert.equal(om.d.source.format, 'SYNCHRO');
+  assert.deepEqual([om.d.elements, om.d.source.resources, om.d.source.scene_only], [3011, 2975, 36]);
+  assert.equal(om.d.geometry, 'ok');
+  const r = await call('import_4d', { handle: h, owner_key, path: paths3d, create_activities: true });
+  assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
+  assert.deepEqual(r.d.created_activities.map((a: { id: string }) => a.id).sort(), ['ST00160', 'ST00180']);
+  assert.equal(r.d.added, 4, 'the file\u2019s four assignments, each to its own object');
+  assert.ok(!r.d.notes.some((n: string) => /\(#id\)/.test(n)), 'the design-model note does not apply to the file opened as its own model');
+  assert.ok(r.d.notes.some((n: string) => /Load 3 along "Crane 2 - Podium Lift"/.test(n)), 'the 3D path is named');
+  const st = (await call('link_status', { handle: h })).d;
+  assert.deepEqual([st.links, st.links_to_missing_elements.length], [4, 0]);
+  const load = (await call('list_elements', { handle: h, linked: 'ST00160' })).d.elements.map((e: { name: string }) => e.name);
+  assert.ok(load.includes('Load 3'));
+});
+
 test('4D M7 (optional): the SYNCHRO cloud connector stays dormant without Bentley credentials', async () => {
   const saved = [process.env.BENTLEY_CLIENT_ID, process.env.BENTLEY_CLIENT_SECRET];
   delete process.env.BENTLEY_CLIENT_ID; delete process.env.BENTLEY_CLIENT_SECRET;

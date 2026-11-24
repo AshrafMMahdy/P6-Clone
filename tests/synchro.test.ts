@@ -44,3 +44,103 @@ test('every SYNCHRO sample (5.1 to 6.5) parses without throwing', { skip: none }
 test('a file that is not SYNCHRO is refused', () => {
   assert.throws(() => readSynchro(new Uint8Array(64)), /Not a SYNCHRO/);
 });
+
+// ---- a SYNCHRO project as a model (synchroModel.ts) and its 3D paths
+
+const kb = join(dir, 'bentley-kb-training'), ch = join(kb, 'Challenge Models'), tb = join(kb, 'SYNCHRO 4D Training Files', 'SP Files');
+const paths3d = join(ch, 'Challenge Model_3D Paths.sp');
+const schepIfc = join(import.meta.dirname, '..', 'sample 4D', 'ifc-models', 'schependomlaan', 'IFC Schependomlaan.ifc');
+const box = (p: number[]) => { const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity]; for (let k = 0; k < p.length; k += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], p[k + a]); mx[a] = Math.max(mx[a], p[k + a]); } return { mn, mx, size: mx.map((x, a) => x - mn[a]) }; };
+/** the volume a closed set of triangles encloses (the divergence theorem), here, independently of the clone's own */
+const enclosed = (p: number[], t: number[]) => { let v = 0; for (let k = 0; k < t.length; k += 3) { const a = t[k] * 3, b = t[k + 1] * 3, c = t[k + 2] * 3; v += p[a] * (p[b + 1] * p[c + 2] - p[b + 2] * p[c + 1]) - p[a + 1] * (p[b] * p[c + 2] - p[b + 2] * p[c]) + p[a + 2] * (p[b] * p[c + 1] - p[b + 1] * p[c]); } return v / 6; };
+
+test('the world unit: setting 1 is millimetres, 3 metres; another one, or none, is refused (not drawn at a guessed size)', async () => {
+  const { worldScale } = await import('../core/bim/synchroModel.ts');
+  const row = (v: number, code: number) => { const b = Buffer.alloc(4 + (v >= 60 ? 8 : 16) + 16 + 8 + 4); b.writeUInt32LE(0x5075d933, 0); b.writeUInt32LE(code, b.length - 4); return b; };
+  assert.equal(worldScale(row(51, 1), 51), 0.001);
+  assert.equal(worldScale(row(65, 3), 65), 1);
+  assert.throws(() => worldScale(row(60, 2), 60), /setting 2, which no SYNCHRO file read so far has used/);
+  assert.throws(() => worldScale(undefined, 60), /no 3D world settings/);
+});
+
+test('polygons as written: a negative count is a hole in the polygon before it; every triangle faces the way its polygon does', async () => {
+  const { triangulate } = await import('../core/bim/synchroModel.ts');
+  // a 4 x 4 square (anticlockwise from above: facing +z) with a 2 x 2 hole, and a clockwise triangle (facing -z)
+  const v = new Float32Array([0, 0, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 1, 1, 0, 3, 1, 0, 3, 3, 0, 1, 3, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]);
+  const bad = { n: 0 };
+  const t = triangulate(v, Uint32Array.from([4, 0, 1, 2, 3, -4 >>> 0, 4, 7, 6, 5, 3, 8, 9, 10, 4, 0, 1, 99, 2]), bad);
+  assert.equal(bad.n, 1, 'the polygon naming vertex 99 is left out');
+  let up = 0, down = 0, area = 0;
+  for (let k = 0; k < t.length; k += 3) {
+    const [a, b, c] = [t[k], t[k + 1], t[k + 2]].map((i) => [v[i * 3], v[i * 3 + 1]]);
+    const z = ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2;
+    if (k / 3 < t.length / 3 - 1) { area += z; if (z > 0) up++; } else if (z < 0) down++;
+  }
+  assert.equal(area, 16 - 4, 'the square less its hole');
+  assert.equal(up, t.length / 3 - 1, 'the square’s triangles all face up');
+  assert.equal(down, 1, 'the clockwise triangle keeps facing down');
+});
+
+test('Schependomlaan opened as a model: each of its objects has the box and the volume of the design IFC element it was made from', { skip: (!existsSync(schep) || !existsSync(schepIfc)) && 'Schependomlaan .sp or IFC not present', timeout: 900_000 }, async () => {
+  const { readSynchroModel } = await import('../core/bim/synchroModel.ts');
+  const { loadModel } = await import('../core/bim/model.ts');
+  const m = readSynchroModel(readFileSync(schep));
+  assert.equal(m.units, 'mm');
+  assert.equal(m.objects.length, 3569);
+  assert.ok(m.objects.every((o) => o.resource), 'every 3D entity of this file is a resource');
+  const ifc = await loadModel(schepIfc, { geometry: true });
+  const byId = new Map(ifc.index.elements.map((e) => [e.expressId, e]));
+  let boxes = 0, compared = 0, volumes = 0, measured = 0;
+  for (const o of m.objects) {
+    const e = byId.get(Number(/\(#(\d+)\)/.exec(o.name)?.[1]));
+    if (!e?.bbox || !o.positions.length) continue;
+    compared++;
+    // the clone's index is in web-ifc's frame (x, z, -y); SYNCHRO keeps the IFC's own (Z up)
+    const { mn, mx } = box(o.positions), t = [mn[0], mn[2], -mx[1], mx[0], mx[2], -mn[1]];
+    if (t.every((x, i) => Math.abs(x - e.bbox![i]) < 0.002)) boxes++;
+    if (e.derivedVolumeM3 && e.derivedVolumeM3 > 1e-6) { measured++; if (Math.abs(Math.abs(enclosed(o.positions, o.triangles)) - e.derivedVolumeM3) / e.derivedVolumeM3 < 0.01) volumes++; }
+  }
+  assert.equal(compared, 3504);
+  assert.equal(boxes, compared, 'every box within 2 mm');
+  // the one left over is a vent grille whose mesh in the .sp is open (108 edges with no face on their other side): it encloses no volume to compare
+  assert.ok(volumes >= measured - 1, `${volumes} of ${measured} volumes within 1%`);
+});
+
+test('objects come out the size they are named: 610 x 610mm columns (6.0, millimetres) and a 910x2110mm door with its frame (6.5, metres)', { skip: none, timeout: 300_000 }, async () => {
+  const { readSynchroModel } = await import('../core/bim/synchroModel.ts');
+  const cols = readSynchroModel(readFileSync(paths3d)).objects.filter((o) => o.name === '610 x 610mm');
+  assert.ok(cols.length > 50);
+  // the type names the section (the height is each column's own storey's)
+  for (const c of cols) assert.deepEqual(box(c.positions).size.slice(0, 2).map((x) => Math.round(x * 1000)), [610, 610]);
+  const tbm = readSynchroModel(readFileSync(join(tb, 'SYNCHRO Training Building Completed.sp')));
+  assert.equal(tbm.units, 'm');
+  const door = tbm.objects.find((o) => o.groups.at(-1) === '910x2110mm (1)')!;
+  assert.deepEqual(box(door.positions).size.map((x) => Math.round(x * 1000)), [960, 199, 2110]);
+});
+
+test('the same building as resources (Auto Matching) and as a scene no resource draws (Filters, 5.4 and 6.3): the same objects and triangles', { skip: none, timeout: 300_000 }, async () => {
+  const { readSynchroModel } = await import('../core/bim/synchroModel.ts');
+  const sum = (f: string) => { const m = readSynchroModel(readFileSync(join(ch, f))); return { n: m.objects.length, res: m.objects.filter((o) => o.resource).length, tri: m.objects.reduce((k, o) => k + o.triangles.length / 3, 0), ext: box(m.objects.flatMap((o) => box(o.positions).mn.concat(box(o.positions).mx))).size.map((x) => Math.round(x * 1000)) }; };
+  const am = sum('Challenge Model_Auto Matching.sp'), f54 = sum('Challenge Model_Filters.sp'), f63 = sum('Challenge Model_Filters_Solution.sp');
+  assert.deepEqual([am.n, am.res, am.tri], [2539, 2539, 225722]);
+  assert.deepEqual([f54.n, f54.res, f54.tri], [2539, 0, 225722]);
+  assert.deepEqual(f63, f54, 'placements as doubles (6.3) and as floats (5.4) give the same model');
+  assert.deepEqual(f54.ext, am.ext);
+});
+
+test('3D paths: keyframes (share of the task, place, rotation) and the assignment that follows each; 6.3+ places in doubles', { skip: none }, () => {
+  const p = readSynchro(readFileSync(paths3d));
+  const lift = p.paths.find((x) => x.name === 'Crane 2 - Podium Lift')!;
+  assert.deepEqual(lift.points.map((k) => Math.round(k.at * 1000) / 1000), [0, 0.175, 0.729, 1]);
+  assert.deepEqual(lift.points[0].position.map((x) => Math.round(x * 100) / 100), [-1818.56, 60624.96, 4996.77]);
+  assert.deepEqual(lift.points[0].rotation, [0, 0, 0, 1]);
+  assert.ok(Math.abs(Math.hypot(...lift.points[2].rotation) - 1) < 1e-9, 'a unit quaternion');
+  const follows = p.assignments.filter((a) => a.path);
+  assert.equal(follows.length, 1);
+  assert.equal(follows[0].path, lift.uuid);
+  assert.equal(p.resources.find((r) => r.uuid === follows[0].resource)!.name, 'Load 3');
+  assert.equal(readSynchro(readFileSync(join(ch, 'Challenge Model_3D Paths_Solution.sp'))).assignments.filter((a) => a.path).length, 4, 'the solution (5.4) moves all four');
+  const ex = readSynchro(readFileSync(join(tb, 'SYNCHRO Training Building Completed.sp'))).paths;
+  assert.deepEqual(ex.map((x) => [x.name, x.points.length]), [['Foundation Excavation', 4]]);
+  assert.deepEqual(ex[0].points[0].position.map((x) => Math.round(x * 100) / 100), [-1.21, -21.65, -0.2]);
+});

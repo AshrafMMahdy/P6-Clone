@@ -385,7 +385,11 @@ shipped as `ifc/nwdWorker.mjs`), a federated `.nwf`'s models one at a time, the 
 through a file on disk, and `open_model`'s `source.peak_memory_mb` says what it took; an IFC4 of the model is written,
 an element at a time, only for the `export_4d` targets that deliver one; a mesh that is open (a surface, a
 fitting open at its ends: holes over a thousandth of its surface) gives no derived volume, and `open_model` counts them
-as `meshed_without_volume`; the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and
+as `meshed_without_volume`; a SYNCHRO project `.sp` (5.1 to 6.5) read without SYNCHRO (`core/bim/synchroModel.ts`) and made
+into IFC4 in the 4D reader's process: its 3D objects with the triangles SYNCHRO keeps for them, placed and in metres (each
+resource drawn in 3D, with its own GUID as GlobalId so `import_4d` of the same file links its tasks to it, and the parts
+of the scene no resource draws, such as a context model), checked against the design IFC a SYNCHRO project was made from
+(Schependomlaan: 3,504 of 3,504 boxes within 2 mm, the volumes within 1%); the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and
 actual dates and type, their selection sets and explicit selections resolved to the model's elements (an `.nwf` names
 items by path in the models it lists), and `link: false` lists the tasks for review),
 `list_elements`, `element_info`, `quantities` (per group: totals, and for the asked `kind` the elements quantified and
@@ -393,7 +397,9 @@ unquantified; each figure with its kind, unit and source: base quantity and its 
 `link_elements` (built / removed / temporary), `link_by_rules`
 (property, scope and selection-set rules, `dry_run` first), `link_status`, `set_4d_keys`, `export_4d` (Navisworks
 search sets + TimeLiner CSV, SYNCHRO, IFC4 4D in the Bonsai style, links CSV), `import_4d` (IFC 4D, Navisworks search
-sets, TimeLiner CSV / xlsx, the TimeLiner inside .nwf / .nwd, SYNCHRO .sp 5.1-6.5, read without those programs),
+sets, TimeLiner CSV / xlsx, the TimeLiner inside .nwf / .nwd, SYNCHRO .sp 5.1-6.5, read without those programs: a .sp's
+tasks link to its own objects when that .sp is the model, else to the design model by the "(#id)" SYNCHRO names them
+with; its 3D paths, equipment moved along keyframes during a task, are read and named, not animated),
 `simulate_4d` and `compare_4d` (by date, against any saved baseline, with PV / EV by zone), `set_element_status`,
 `render_4d` (a viewer page, PNGs or an MP4 / WebM; the page renders on the GPU of whoever opens it, so a GPU-less
 server needs no Chromium: the platform's client render drives its `WHIQ4D_EXPORT` hooks), `relink_model` (links survive a

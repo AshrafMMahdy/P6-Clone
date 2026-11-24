@@ -51,8 +51,9 @@ export const quantitiesOf = (e: NwElement) => Object.entries(e.quantities).filte
 export type IfcShape = { positions: ArrayLike<number>; triangles: ArrayLike<number> } | null;
 
 /** A writer of the IFC4 at path: add(element k, its pieces drawn as boxes, its triangles) in order, then finish() (the
- *  file is written beside its place and renamed into it: whole or absent; drop() when it is not finished). */
-export function ifcWriter(path: string, o: { name: string; file: string }) {
+ *  file is written beside its place and renamed into it: whole or absent; drop() when it is not finished). by: the
+ *  reader named in the file's header (the Navisworks reader's when not given; the SYNCHRO reader uses it too). */
+export function ifcWriter(path: string, o: { name: string; file: string; by?: string }) {
   const body = `${path}.${process.pid}.body`, fd = openSync(body, 'w');
   let buf = '', id = 0, n = 0;
   const out = (s: string) => { buf += s; if (buf.length > 1 << 22) { writeSync(fd, buf); buf = ''; } };
@@ -130,7 +131,7 @@ export function ifcWriter(path: string, o: { name: string; file: string }) {
       const tmp = `${path}.${process.pid}.tmp`, ofd = openSync(tmp, 'w'), ifd = openSync(body, 'r');
       try {
         const stamp = new Date(0).toISOString().slice(0, 19); // the same file for the same input (cached by content)
-        writeSync(ofd, `ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');\nFILE_NAME(${esc(o.name)},'${stamp}',('P6 Clone'),('P6 Clone'),'P6 Clone Navisworks reader','P6 Clone','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n`);
+        writeSync(ofd, `ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');\nFILE_NAME(${esc(o.name)},'${stamp}',('P6 Clone'),('P6 Clone'),${esc(o.by ?? 'P6 Clone Navisworks reader')},'P6 Clone','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n`);
         const renumber = (line: string) => line.split("'").map((seg, i) => (i % 2 ? seg : seg.replace(/#(E?)(\d+)/g, (_, el: string, d: string) => `#${el ? d : Number(d) + n}`))).join("'");
         const chunk = Buffer.alloc(1 << 22);
         let rest = '', got: number;

@@ -11,6 +11,7 @@ import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, ne
 import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
 import { isRevit, revitNeed, rvtToIfc, type RevitSource } from './rvt.ts';
+import { isSynchro, spToIfc, synchroNeed, type SynchroSource } from './synchroModel.ts';
 import { cacheNavisworks, isNavisworks, navisworksKey, navisworksNeed, nwdToIfc, type NavisworksSource } from './nwd.ts';
 import { readIndex, writeIndex } from './indexFile.ts';
 
@@ -20,8 +21,8 @@ export interface Model {
   tiles: string | null;
   byGuid: Map<string, IfcElement>; bytes: number;
   /** a Revit file (read through IFC) or a Navisworks file (read as it is): what was read */
-  source?: RevitSource | NavisworksSource;
-  /** a Revit model: the base path of its conversion in the cache (<hash>-rvtN; the .ifc and .json beside it), touched with the model's own files whenever the model is in use (liveHit) */
+  source?: RevitSource | NavisworksSource | SynchroSource;
+  /** a Revit or SYNCHRO model: the base path of its conversion in the cache (<hash>-rvtN, <hash>-spN; the .ifc and .json beside it), touched with the model's own files whenever the model is in use (liveHit) */
   conversion?: string;
 }
 
@@ -76,6 +77,7 @@ const inFlight = new Map<string, Promise<Model>>();
 export async function ifcOf(path: string): Promise<string> {
   if (isNavisworks(path)) return (await nwdToIfc(path)).ifc;
   if (isRevit(path)) return (await rvtToIfc(path)).ifc;
+  if (isSynchro(path)) return (await spToIfc(path)).ifc;
   return path;
 }
 
@@ -94,6 +96,13 @@ export async function loadModel(path: string, o: LoadOptions = {}): Promise<Mode
 async function loadModelNow(path: string, o: LoadOptions): Promise<Model> {
   if (!existsSync(path)) throw new Error(`No file at ${path}.`);
   if (isNavisworks(path)) return loadNavisworks(path, o);
+  if (isSynchro(path)) {
+    // a SYNCHRO project: its 3D objects made into IFC4 (synchroModel.ts), then read like any IFC
+    const { ifc, source } = await spToIfc(path);
+    const m = await loadIfc(ifc, { ...o, hash: undefined });
+    m.index.sourcePath = path; m.source = source; m.conversion = ifc.slice(0, -'.ifc'.length);
+    return m;
+  }
   if (!isRevit(path)) return loadIfc(path, o);
   const { ifc, source } = await rvtToIfc(path);
   const m = await loadIfc(ifc, { ...o, hash: undefined });
@@ -143,7 +152,7 @@ async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
 async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   // an IFC is a STEP file with an IFC schema; anything else (an XER, a GLB, an .rvt) is refused before it replaces a model
   const head = (() => { const fd = openSync(path, 'r'); try { const b = Buffer.alloc(65536); return b.subarray(0, readSync(fd, b, 0, 65536, 0)).toString('latin1'); } finally { closeSync(fd); } })();
-  if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit (.rvt / .rfa) and Navisworks (.nwd / .nwc / .nwf) files are read as they are; other formats have to be exported to IFC first.`);
+  if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit (.rvt / .rfa), Navisworks (.nwd / .nwc / .nwf) and SYNCHRO (.sp) files are read as they are; other formats have to be exported to IFC first.`);
   const hash = o.hash ?? await fileHash(path);
   const want = o.geometry !== false;
   const base = join(cacheDir(), cacheName(hash));
@@ -281,9 +290,9 @@ export function cachedModel(hash: string): Model | null {
   if (c) {
     touch(base);
     const m = wrap(hash, c.index, `${base}.tiles`);
-    // a Revit model's index was written from its conversion's IFC (<cache>/<hash>-rvtN.ifc), and keeps that path: after a restart the conversion is found again from it, so it is touched with the model (an index of an IFC opened from anywhere else gives none)
+    // a Revit or SYNCHRO model's index was written from its conversion's IFC (<cache>/<hash>-rvtN.ifc, -spN.ifc), and keeps that path: after a restart the conversion is found again from it, so it is touched with the model (an index of an IFC opened from anywhere else gives none)
     const conv = resolve(c.index.sourcePath);
-    if (dirname(conv) === resolve(cacheDir()) && /-rvt\d+\.ifc$/.test(conv)) { m.conversion = conv.slice(0, -'.ifc'.length); touchConversion(m.conversion); }
+    if (dirname(conv) === resolve(cacheDir()) && /-(rvt|sp)\d+\.ifc$/.test(conv)) { m.conversion = conv.slice(0, -'.ifc'.length); touchConversion(m.conversion); }
     memory.set(cacheName(hash), m);
     return m;
   }
@@ -330,6 +339,8 @@ export function loadNeeds(path: string, o: { geometry?: boolean; free?: number; 
   // a Revit file is made into an IFC first, by rvt-rs in its own process (revitNeed); reading and meshing the IFC it
   // makes is sized from that IFC (loadNeeds on it, once it is made)
   if (isRevit(path)) { const index = revitNeed(size); return { index, mesh: 0, chunkBytes: 0, total: index }; }
+  // a SYNCHRO project likewise, in the 4D reader's process (synchroNeed: from the size of its geometry tables)
+  if (isSynchro(path)) { const index = synchroNeed(path); return { index, mesh: 0, chunkBytes: 0, total: index }; }
   // a Navisworks model is read as it is, by its own process (its model trees as objects, a model at a time; the geometry
   // a stream at a time), then its index is held here: both, from the sizes of its sections (navisworksNeed)
   if (isNavisworks(path)) { const n = navisworksNeed(path, o.geometry !== false); return { index: n.index, mesh: n.reader, chunkBytes: 0, total: n.index + n.reader }; }

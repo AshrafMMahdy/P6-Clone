@@ -10,7 +10,7 @@ import { linkElements, t4d, T4D } from './link4d.ts';
 import { resolveSet, type Imported4d } from './exchange4d.ts';
 import type { IfcIndex } from './parse.ts';
 
-export interface ImportPlan { /** activities a task of the file matched, linked or not */ matched: Set<string>; proposals: { activity: string; guids: string[]; role?: 'removed' | 'temporary' }[]; forNew: Map<string, string[]>; unmatchedTasks: string[]; elementsNotInModel: number; sets: { name: string; guids: string[] }[]; toCreate: Imported4d['tasks']; attachedSets: { name: string; known: boolean }[] }
+export interface ImportPlan { /** activities a task of the file matched, linked or not */ matched: Set<string>; proposals: { activity: string; guids: string[]; role?: 'removed' | 'temporary' }[]; forNew: Map<string, string[]>; unmatchedTasks: string[]; elementsNotInModel: number; /** the file's notes that hold for the attached model */ notes: string[]; sets: { name: string; guids: string[] }[]; toCreate: Imported4d['tasks']; attachedSets: { name: string; known: boolean }[] }
 
 /** TimeLiner's task types as link roles (Construct: built, the default) */
 const roleOf = (type?: string) => (/^demolish$/i.test(type ?? '') ? { role: 'removed' as const } : /^temporary$/i.test(type ?? '') ? { role: 'temporary' as const } : {});
@@ -24,8 +24,13 @@ export function planImport(db: Db, projId: string, imp: Imported4d, ix: IfcIndex
   const inModel = ix ? new Set(ix.elements.map((e) => e.guid)) : null;
   const byExpress = ix ? new Map(ix.elements.map((e) => [e.expressId, e.guid])) : new Map<number, string>();
   const nameOf = new Map(imp.tasks.map((t) => [t.id, t.name]));
-  const plan: ImportPlan = { matched: new Set(), proposals: [], forNew: new Map(), unmatchedTasks: [], elementsNotInModel: 0, sets: [], toCreate: [], attachedSets: [] };
-  for (const l of imp.links) {
+  const plan: ImportPlan = { matched: new Set(), proposals: [], forNew: new Map(), unmatchedTasks: [], elementsNotInModel: 0, notes: [], sets: [], toCreate: [], attachedSets: [] };
+  // a SYNCHRO task's objects are named both ways (read4d.ts synchroToImport): by their own GlobalIds when the attached
+  // model is a SYNCHRO project itself (open_model of the .sp), else by the express ids of the design model they came from
+  const ownSp = imp.source === 'synchro' && !!ix && /\.sp$/i.test(ix.sourcePath ?? '');
+  plan.notes = [...imp.notes, ...(ownSp ? [] : imp.designModelNotes ?? [])];
+  for (const l0 of imp.links) {
+    const l = imp.source !== 'synchro' ? l0 : ownSp ? { ...l0, expressIds: [] } : { ...l0, guids: [] };
     const t = match(l.task, nameOf.get(l.task));
     const guids = [...(l.guids ?? []).filter((g) => !inModel || inModel.has(g) || (plan.elementsNotInModel++, false)), ...(l.expressIds ?? []).flatMap((x) => { const g = byExpress.get(x); if (!g) plan.elementsNotInModel++; return g ? [g] : []; })];
     if (!t) { plan.unmatchedTasks.push(l.task); if (guids.length) plan.forNew.set(l.task, guids); continue; }

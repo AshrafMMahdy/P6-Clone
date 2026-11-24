@@ -146,7 +146,10 @@ Links are saved with the project:
   - Navisworks search-set XML (each set becomes links through its conditions);
   - **SYNCHRO `.sp`**: tasks, links, resources, task–resource assignments and their appearance profiles (decoder
     based on 43 real files; start from the small Scheduler 5.5 files). 3D objects are reached through shared object keys
-    and the source program's IDs (e.g. Revit element numbers), which `import_4d` maps to IFC elements;
+    and the source program's IDs (e.g. Revit element numbers), which `import_4d` maps to IFC elements. Built since: the
+    `.sp` opens as a model of its own (`open_model`, `core/bim/synchroModel.ts`): the scene (table Entities: entities
+    with a placement, meshes and child entities; a mesh drawn in place or a reference to a shape in IncludeLibrary)
+    drawn per resource, and its 3D paths read (keyframes: a share of the task, a place, a rotation), not animated;
   - TimeLiner CSV, and TimeLiner's task grid copied to Excel (Name, Actual Start/End, Planned Start/End, Task Type,
     Attached `Sets-><name>`);
   - **TimeLiner tasks straight from an `.nwf`**, without Navisworks: names, actual and planned dates, task type and the

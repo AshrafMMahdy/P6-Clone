@@ -26,7 +26,7 @@ The supervisor stages the files a call reads into the process's `in/` folder, fr
 
 | Tool | Reads | Opens a document |
 |---|---|---|
-| `open_model` | `path` (the IFC) | no |
+| `open_model` | `path` (the IFC, .rvt / .rfa, .nwd / .nwc / .nwf, SYNCHRO .sp) | no |
 | `import_4d` | `path` (IFC 4D, search-set XML, TimeLiner CSV/xlsx, .nwf/.nwd, SYNCHRO .sp) | no |
 | `relink_model` | `path` (the revised IFC) | no |
 

@@ -1,6 +1,6 @@
 // Reading another tool's 4D file into the import format (Node only: the MCP server and the desktop main process).
 import { parseIfc4d, parseSearchSets, parseTimelinerCsv, sheetToCsv, type Imported4d } from './exchange4d.ts';
-import type { SynchroFile } from './synchro.ts';
+import { spGlobalId, type SynchroFile } from './synchro.ts';
 import { readXlsx } from '../excel/xlsx.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,18 +66,25 @@ export function xmlText(bytes: Uint8Array): string {
   try { return new TextDecoder(decl?.[1] ?? 'utf-8').decode(bytes); } catch { return new TextDecoder('utf-8').decode(bytes); }
 }
 
-/** A SYNCHRO project as the import format: its work tasks (summaries left out) and the 3D objects assigned to them,
- *  matched to the design model by the "(#id)" SYNCHRO puts in their names. */
+/** A SYNCHRO project as the import format: its work tasks (summaries left out) and the 3D objects assigned to them, each
+ *  named two ways: as the object of the .sp opened as the model itself (its resource's GlobalId, synchroModel.ts), and as
+ *  the design model element it was made from (the "(#id)" SYNCHRO puts in its name); planImport takes the one that
+ *  matches the attached model. */
 export function synchroToImport(sp: SynchroFile): Imported4d {
-  const work = sp.tasks.filter((t) => !t.isSummary), byUuid = new Map(work.map((t) => [t.uuid, t])), res = new Map(sp.resources.map((r) => [r.uuid, r.name]));
-  const links = new Map<string, { task: string; expressIds: number[] }>();
-  let unnamed = 0;
+  const work = sp.tasks.filter((t) => !t.isSummary), byUuid = new Map(work.map((t) => [t.uuid, t])), res = new Map(sp.resources.map((r) => [r.uuid, r]));
+  const links = new Map<string, { task: string; guids: string[]; expressIds: number[] }>();
+  const unnamed = new Set<string>(), paths = new Map(sp.paths.map((p) => [p.uuid, p.name])), moved: string[] = [];
   for (const a of sp.assignments) {
-    const t = byUuid.get(a.task), m = /\(#(\d+)\)/.exec(res.get(a.resource) ?? '');
+    const t = byUuid.get(a.task), r = res.get(a.resource);
     if (!t) continue;
-    if (!m) { unnamed++; continue; }
-    (links.get(t.uuid) ?? links.set(t.uuid, { task: t.id || t.name, expressIds: [] }).get(t.uuid)!).expressIds.push(Number(m[1]));
+    const l = links.get(t.uuid) ?? links.set(t.uuid, { task: t.id || t.name, guids: [], expressIds: [] }).get(t.uuid)!;
+    if (r?.entities.length) l.guids.push(spGlobalId(r.uuid));
+    const m = /\(#(\d+)\)/.exec(r?.name ?? '');
+    if (m) l.expressIds.push(Number(m[1])); else unnamed.add(a.resource);
+    if (a.path) moved.push(`${r?.name ?? a.resource} along "${paths.get(a.path) ?? a.path}" during ${t.id || t.name}`);
   }
-  const notes = [...sp.notes, ...(unnamed ? [`${unnamed} assigned resources carry no "(#id)" of a design model element and were not linked.`] : [])];
-  return { source: 'synchro', tasks: work.map((t) => ({ name: t.name, id: t.id || t.name, start: t.start ?? undefined, finish: t.finish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined })), links: [...links.values()], notes };
+  const designModelNotes = unnamed.size ? [`${unnamed.size} assigned resources carry no "(#id)" of a design model element and were not linked to it (opening this .sp itself as the model, open_model, links every one drawn in 3D).`] : [];
+  const notes = [...sp.notes,
+    ...(moved.length ? [`${moved.length} assignment${moved.length === 1 ? ' moves' : 's move'} a resource along a 3D path (${moved.join('; ')}); the clone's 4D view and video show the resource where the model places it, not moving.`] : [])];
+  return { source: 'synchro', tasks: work.map((t) => ({ name: t.name, id: t.id || t.name, start: t.start ?? undefined, finish: t.finish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined })), links: [...links.values()], notes, ...(designModelNotes.length ? { designModelNotes } : {}) };
 }
