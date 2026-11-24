@@ -5,11 +5,11 @@
 import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { realOf } from '../journal.ts';
 import { elementsByGuid, ordinalOf } from './lookup.ts';
-import type { IfcElement, IfcIndex } from './parse.ts';
+import { isLengthUnit, type IfcElement, type IfcIndex, type LengthUnit } from './parse.ts';
 
 export const T4D = { model: '_4D_MODEL', link: '_4D_LINK', rule: '_4D_RULE', set: '_4D_SET', status: '_4D_STATUS', view: '_4D_VIEW' } as const;
 const FIELDS: Record<string, string[]> = {
-  _4D_MODEL: ['model_id', 'proj_id', 'path', 'hash', 'name', 'schema', 'elements', 'length_scale', 'storeys', 'opened'],
+  _4D_MODEL: ['model_id', 'proj_id', 'path', 'hash', 'name', 'schema', 'elements', 'length_scale', 'length_unit', 'storeys', 'opened'],
   _4D_LINK: ['link_id', 'proj_id', 'task_id', 'guid', 'role', 'profile'],
   _4D_RULE: ['rule_id', 'proj_id', 'json'],
   _4D_SET: ['set_id', 'proj_id', 'name', 'guids', 'source'],
@@ -24,6 +24,8 @@ const of = (db: Db, name: string, projId: string) => rows(db, name).filter((r) =
 
 /** The model attached to a project (one per project; a new one replaces it). */
 export function modelRow(db: Db, projId: string): Row | undefined { return of(db, T4D.model, projId)[0]; }
+/** The length unit the model was opened with by its caller (open_model length_unit), to read it again the same way. */
+export const rowLengthUnit = (r: Row | undefined): LengthUnit | undefined => (isLengthUnit(r?.length_unit) ? r.length_unit : undefined);
 
 export function attachModel(db: Db, projId: string, ix: IfcIndex, hash: string): Row {
   const T = t4d(db, T4D.model);
@@ -31,7 +33,7 @@ export function attachModel(db: Db, projId: string, ix: IfcIndex, hash: string):
   const row: Row = {
     model_id: old >= 0 ? T.rows[old].model_id : String(nextId(db, T4D.model)), proj_id: projId, path: ix.sourcePath, hash,
     name: ix.header.project || ix.sourcePath.split(/[\\/]/).pop() || 'model', schema: ix.schema, elements: String(ix.elements.length),
-    length_scale: String(ix.lengthScale), storeys: JSON.stringify(ix.storeys), opened: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    length_scale: String(ix.lengthScale), length_unit: ix.lengthUnit ?? '', storeys: JSON.stringify(ix.storeys), opened: new Date().toISOString().slice(0, 16).replace('T', ' '),
   };
   if (old >= 0) T.rows[old] = row; else T.rows.push(row);
   return row;

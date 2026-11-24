@@ -54,7 +54,8 @@ export type IfcShape = { positions: ArrayLike<number>; triangles: ArrayLike<numb
 /** A writer of the IFC4 at path: add(element k, its pieces drawn as boxes, its triangles) in order, then finish() (the
  *  file is written beside its place and renamed into it: whole or absent; drop() when it is not finished). by: the
  *  reader named in the file's header (the Navisworks reader's when not given; the SYNCHRO reader uses it too). */
-export function ifcWriter(path: string, o: { name: string; file: string; by?: string }) {
+/** lengthUnit: the unit the triangles are in (metres unless said; a SYNCHRO file's millimetres are written as they are) */
+export function ifcWriter(path: string, o: { name: string; file: string; by?: string; lengthUnit?: 'mm' }) {
   const body = `${path}.${process.pid}.body`, fd = openSync(body, 'w');
   let buf = '', id = 0, n = 0;
   const out = (s: string) => { buf += s; if (buf.length > 1 << 22) { writeSync(fd, buf); buf = ''; } };
@@ -62,7 +63,7 @@ export function ifcWriter(path: string, o: { name: string; file: string; by?: st
   const origin = add('IFCCARTESIANPOINT((0.,0.,0.))');
   const axis = add(`IFCAXIS2PLACEMENT3D(#${origin},$,$)`);
   const ctx = add(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#${axis},$)`);
-  const units = [add('IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)'), add('IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.)'), add('IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.)')];
+  const units = [add(`IFCSIUNIT(*,.LENGTHUNIT.,${o.lengthUnit === 'mm' ? '.MILLI.' : '$'},.METRE.)`), add('IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.)'), add('IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.)')];
   const ua = add(`IFCUNITASSIGNMENT((${units.map((u) => `#${u}`).join(',')}))`);
   const project = add(`IFCPROJECT(${esc(madeGuid(`${o.file}:project`))},$,${esc(o.name)},$,$,$,$,(#${ctx}),#${ua})`);
   const place = (rel?: number) => add(`IFCLOCALPLACEMENT(${rel ? `#${rel}` : '$'},#${axis})`);

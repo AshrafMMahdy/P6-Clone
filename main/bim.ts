@@ -6,6 +6,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, join, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cachedModel, loadModel, type Model } from '../core/bim/model.ts';
+import { isLengthUnit } from '../core/bim/parse.ts';
 import { modelFolder, viewerHtml, viewerScriptPath } from '../core/bim/render4d.ts';
 import { placeTiles } from '../core/bim/tiles.ts';
 import { inPage, whileEncoding } from '../core/bim/headless.ts';
@@ -54,8 +55,10 @@ export function registerBim(getWin: () => BrowserWindow | null): void {
     if (!p) { const r = await dialog.showOpenDialog(getWin()!, { title: 'Open model', filters: [{ name: 'Models (IFC, Revit, Navisworks, SYNCHRO)', extensions: ['ifc', 'rvt', 'rfa', 'nwd', 'nwc', 'nwf', 'sp'] }], properties: ['openFile'] }); if (r.canceled || !r.filePaths[0]) return null; p = r.filePaths[0]; }
     try { const m = await loadModel(p); viewerFolder(m); return { ok: true, ...answer(m) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
-  ipcMain.handle('bim:load', async (_e, o: { hash: string; path: string }) => {
-    try { const c = cachedModel(o.hash), m = c && c.index.geometryStatus !== 'skipped' ? c : existsSync(o.path) ? await loadModel(o.path) : c; /* an index cached without geometry (an agent reopened it for links) is meshed for the view */ if (!m) return { ok: false, error: `The model ${o.path} is not cached and the file is gone; open it again.` }; viewerFolder(m); return { ok: true, ...answer(m) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
+  ipcMain.handle('bim:load', async (_e, o: { hash: string; path: string; lengthUnit?: string }) => {
+    // a model an agent opened with a length unit of its own (open_model length_unit) is read again with it
+    const lengthUnit = isLengthUnit(o.lengthUnit) ? o.lengthUnit : undefined;
+    try { const c = cachedModel(o.hash), m = c && c.index.geometryStatus !== 'skipped' ? c : existsSync(o.path) ? await loadModel(o.path, lengthUnit ? { lengthUnit } : {}) : c; /* an index cached without geometry (an agent reopened it for links) is meshed for the view */ if (!m) return { ok: false, error: `The model ${o.path} is not cached and the file is gone; open it again.` }; viewerFolder(m); return { ok: true, ...answer(m) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
   ipcMain.handle('bim:text', (_e, path: string) => readFileSync(path, 'latin1'));
   ipcMain.handle('bim:writeFiles', async (_e, o: { title: string; files: { name: string; data: string | Uint8Array }[] }) => {

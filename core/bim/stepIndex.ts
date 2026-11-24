@@ -25,8 +25,6 @@ const UNIT_KIND: Record<string, QuantityKind> = { LENGTHUNIT: 'length', AREAUNIT
 const MEASURE_KIND: Record<string, QuantityKind> = { LENGTH: 'length', POSITIVELENGTH: 'length', NONNEGATIVELENGTH: 'length', AREA: 'area', VOLUME: 'volume', MASS: 'weight', COUNT: 'count', TIME: 'time' };
 const SI_PREFIX: Record<string, string> = { MILLI: 'm', CENTI: 'c', DECI: 'd', KILO: 'k' };
 const SI_NAME: Record<string, string> = { METRE: 'm', SQUARE_METRE: 'm²', CUBIC_METRE: 'm³', GRAM: 'g', SECOND: 's' };
-/** The SI unit IFC assumes when the project assigns none. */
-const DEFAULT_UNITS: Record<QuantityKind, string> = { length: 'm', area: 'm²', volume: 'm³', count: 'no.', weight: 'kg', time: 's' };
 
 /** A statement without its comments; a comment marker inside a string is text, not a comment. */
 function stripComments(s: string): string {
@@ -381,7 +379,8 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
     classCounts[cls] = (classCounts[cls] ?? 0) + 1;
     elements[k] = new Element(pGuid[j] || `express-${id}`, id, pName[j], authored, x, k);
   }
-  const units: Record<QuantityKind, string> = { ...DEFAULT_UNITS };
+  // only the kinds the project assigns: a kind it assigns none is IFC's SI unit, said by the reader (fourd quantities)
+  const units: Partial<Record<QuantityKind, string>> = {};
   { const assigned = (projectUnits != null ? unitAssignments.get(projectUnits) : undefined) ?? [...unitAssignments.values()][0] ?? [];
     const u = assigned.find((x) => lengthUnits.has(x));
     if (u != null) { lengthScale = lengthUnits.get(u)!; lengthScaleSource = 'unit-assignment'; }

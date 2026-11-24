@@ -21,7 +21,9 @@ export interface SynchroResource { uuid: string; name: string; parent: string | 
 export interface SynchroPath { uuid: string; name: string; points: { at: number; position: [number, number, number]; rotation: [number, number, number, number] }[] }
 /** path: the 3D path the resource follows during the task (an assignment's own setting). scale: the 3D world's unit in
  *  metres (worldUnit); units: 'assumed-m' when the file's unit setting is not one read so far. */
-export interface SynchroFile { version: string; tasks: SynchroTask[]; predecessors: SynchroLink[]; resources: SynchroResource[]; assignments: { task: string; resource: string; path?: string }[]; paths: SynchroPath[]; scale: number; units: 'mm' | 'm' | 'assumed-m'; notes: string[] }
+export interface SynchroFile { version: string; tasks: SynchroTask[]; predecessors: SynchroLink[]; resources: SynchroResource[]; assignments: { task: string; resource: string; path?: string }[]; paths: SynchroPath[]; scale: number; units: 'mm' | 'm' | 'assumed-m'; notes: string[];
+  /** said when the unit is assumed (and not when a caller states the unit: open_model length_unit) */
+  unitNote?: string }
 
 export const MAGIC = 'b617671e7af34640a86ed5dc417a2de2';
 
@@ -337,7 +339,7 @@ export function readSynchro(bytes: Uint8Array): SynchroFile {
   const v = level(box.version, box.schema);
   const unit = worldUnit(box.tables.get('3DWorldSettings'), v);
   const out: SynchroFile = { version: box.version, tasks: [], predecessors: [], resources: [], assignments: [], paths: [], scale: unit.scale, units: unit.units, notes };
-  if (unit.units === 'assumed-m') notes.push(`${unit.setting === null ? 'The file\'s 3D world settings (its unit) could not be read' : `The file's 3D unit is setting ${unit.setting}, which no SYNCHRO file read so far has used (1 is millimetres, 3 metres)`}: its 3D numbers are taken as metres (assumed), so say so on any size, quantity or place read from it.`);
+  if (unit.units === 'assumed-m') out.unitNote = (`${unit.setting === null ? 'The file\'s 3D world settings (its unit) could not be read' : `The file's 3D unit is setting ${unit.setting}, which no SYNCHRO file read so far has used (1 is millimetres, 3 metres)`}: its 3D numbers are taken as metres (assumed), so say so on any size, quantity or place read from it.`);
   const cur = (name: string): Cur | null => { const b = box.tables.get(name); if (!b) notes.push(`No ${name} table.`); return b ? { b, p: 0, v, bad: 0 } : null; };
   let bad = 0;
 

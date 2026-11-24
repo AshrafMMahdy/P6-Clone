@@ -8,6 +8,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileHash } from './model.ts';
+import { unitKey, type LengthUnit } from './parse.ts';
 import { childV8Flags, heartbeatEnv, heartbeatWatcher, StuckError, type StuckInfo } from './liveness.ts';
 import { pushAll } from '../arrays.ts';
 import { openContainer, section } from './nwd/container.ts';
@@ -147,23 +148,23 @@ export async function navisworksKey(path: string): Promise<string> {
 }
 
 /** Read a Navisworks model into the model cache at base (<base>.ndjson, .geom, .tiles; what was read in <base>.nw.json). */
-export async function cacheNavisworks(path: string, base: string, o: { geometry: boolean; tileBytes?: number; onProgress?: Progress }): Promise<NavisworksSource> {
+export async function cacheNavisworks(path: string, base: string, o: { geometry: boolean; tileBytes?: number; lengthUnit?: LengthUnit; onProgress?: Progress }): Promise<NavisworksSource> {
   const { parts, empty } = partsOf(path, 2048 * 1048576);
   const name = basename(path).replace(/\.nw[dcf]$/i, '');
-  const source = await runNavisworks({ kind: 'index', parts, empty, name, file: basename(path), path, base, geometry: o.geometry, ...(o.tileBytes ? { tileBytes: o.tileBytes } : {}) }, o.onProgress);
+  const source = await runNavisworks({ kind: 'index', parts, empty, name, file: basename(path), path, base, geometry: o.geometry, ...(o.tileBytes ? { tileBytes: o.tileBytes } : {}), ...(o.lengthUnit ? { lengthUnit: o.lengthUnit } : {}) }, o.onProgress);
   writeFileSync(`${base}.nw.json`, JSON.stringify(source));
   return source;
 }
 
-/** The IFC4 for a Navisworks file (written once per content, streamed, for the exports that deliver an IFC) and what
- *  was read. */
-export async function nwdToIfc(path: string): Promise<{ ifc: string; source: NavisworksSource }> {
+/** The IFC4 for a Navisworks file (written once per content and caller's unit, streamed, for the exports that deliver an IFC) and what
+ *  was read. lengthUnit: the unit the caller says the models' lengths are in (the IFC is in metres by it). */
+export async function nwdToIfc(path: string, lengthUnit?: LengthUnit): Promise<{ ifc: string; source: NavisworksSource }> {
   const dir = process.env.P6CLONE_MODEL_CACHE || join(tmpdir(), 'p6clone-ifc-cache');
   mkdirSync(dir, { recursive: true });
-  const base = join(dir, `ifc-${await navisworksKey(path)}`); // not "<key>-": setAsideOld moves those of another format
+  const base = join(dir, `ifc-${unitKey(await navisworksKey(path), lengthUnit)}`); // not "<key>-": setAsideOld moves those of another format
   if (!existsSync(`${base}.ifc`) || !existsSync(`${base}.json`)) {
     const { parts, empty } = partsOf(path, 2048 * 1048576);
-    const source = await runNavisworks({ kind: 'ifc', parts, empty, name: basename(path).replace(/\.nw[dcf]$/i, ''), file: basename(path), path, out: `${base}.ifc` });
+    const source = await runNavisworks({ kind: 'ifc', parts, empty, name: basename(path).replace(/\.nw[dcf]$/i, ''), file: basename(path), path, out: `${base}.ifc`, ...(lengthUnit ? { lengthUnit } : {}) });
     writeFileSync(`${base}.json`, JSON.stringify(source));
   }
   return { ifc: `${base}.ifc`, source: JSON.parse(readFileSync(`${base}.json`, 'utf8')) };

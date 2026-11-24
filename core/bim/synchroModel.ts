@@ -19,7 +19,7 @@ import { fileHash } from './model.ts';
 import type { NwElement } from './nwd/elements.ts';
 import { ifcWriter } from './nwd/toIfc.ts';
 import { read4dWorkerPath } from './runtime.ts';
-import { container, directory, fail, HDR, level, MAGIC, readSynchro, skip, skipTable, spGlobalId, str, TRL, u32, u8, uuid, type Cur, type SynchroFile } from './synchro.ts';
+import { container, directory, fail, HDR, level, MAGIC, readSynchro, skip, skipTable, spGlobalId, str, TRL, u32, u8, uuid, worldUnit, type Cur, type SynchroFile } from './synchro.ts';
 
 const ENT = 0x541a2a37, INLINE = 0x304a69b6, REF = 0xd06a30e7, LINES = 0x738472c6, FACES = 0xf2c08b8a, MARK = 0x2e24dd6e;
 const PRISM = 0x26ffe974, PRISM_MARK = 0xe12aa0ad, EXTENT = 0x067eb6a9;
@@ -200,13 +200,14 @@ export interface SynchroModel { file: SynchroFile; units: SynchroFile['units']; 
 
 /** The 3D objects of a SYNCHRO project, each with its triangles: its resources, then the scene entities no resource draws
  *  (each with only its own meshes: its child entities are objects of their own), so every triangle is drawn once.
- *  onObject is called per object, so a caller can write them out one at a time; objects then comes back empty. */
-export function readSynchroModel(bytes: Uint8Array, onObject?: (o: SynchroObject) => void): SynchroModel {
+ *  onObject is called per object, so a caller can write them out one at a time; objects then comes back empty. In metres, or (raw) in
+ *  the file's own unit. */
+export function readSynchroModel(bytes: Uint8Array, onObject?: (o: SynchroObject) => void, o: { raw?: boolean } = {}): SynchroModel {
   const file = readSynchro(bytes), notes: string[] = [];
   const box = container(bytes, notes, ['Entities', 'IncludeLibrary']);
   if (!box) fail('Not a SYNCHRO project file (no .sp header).');
   const v = level(box!.version, box!.schema);
-  const scale = file.scale; // the world unit, or metres assumed (synchro.ts worldUnit: the note is the file's)
+  const scale = o.raw ? 1 : file.scale; // the world unit, or metres assumed (synchro.ts worldUnit: the note is the file's)
   const all = new Map<string, Ent>(), odd: Odd = { polygons: { n: 0 }, shapes: 0, inwards: 0, outwards: 0 }, scene: Ent[] = [];
   let cut = false;
   for (const name of ['IncludeLibrary', 'Entities']) {
@@ -277,11 +278,13 @@ export function readSynchroModel(bytes: Uint8Array, onObject?: (o: SynchroObject
 // like any IFC (as a Revit file's conversion is, rvt.ts)
 
 /** The conversion's format: a change to what it reads or writes bumps it, so older conversions are not reused. */
-export const SP_FORMAT = 1;
+export const SP_FORMAT = 2; // 2: the file's own numbers, its unit stated
 
 /** What a SYNCHRO model's conversion read (the answer that opens the model says it). */
 export interface SynchroSource {
   format: 'SYNCHRO'; version: string; units: SynchroFile['units'];
+  /** the unit is assumed: said on what is read from it (left out when the caller states the unit, open_model length_unit) */
+  unit_note?: string;
   /** resources drawn in 3D (what tasks are assigned) and parts of the scene no resource draws */
   objects: number; resources: number; scene_only: number; without_geometry: number;
   note: string; warnings: string[];
@@ -298,9 +301,12 @@ export function isSynchro(path: string): boolean {
  *  group, or the scene entity, above it) as its storey, with a property set SYNCHRO (Resource: whether tasks can be
  *  assigned it; Group: the groups above it). */
 export function writeSynchroIfc(bytes: Uint8Array, ifcPath: string, file: string): SynchroSource {
-  // in metres; a file whose unit is not known has its numbers taken as metres (its source and notes say assumed), so the
-  // model and the paths import_4d gives agree
-  const w = ifcWriter(ifcPath, { name: file.replace(/\.sp$/i, ''), file, by: 'P6 Clone SYNCHRO reader' });
+  // the file's own numbers, its unit stated (so a unit the caller states in its place, open_model length_unit, scales them as it does any
+  // IFC's); a file whose unit is not known has them taken as metres (its source and notes say assumed), so the model and the paths
+  // import_4d gives agree
+  const box = container(bytes, [], ['3DWorldSettings']);
+  const mm = !!box && worldUnit(box.tables.get('3DWorldSettings'), level(box.version, box.schema)).units === 'mm';
+  const w = ifcWriter(ifcPath, { name: file.replace(/\.sp$/i, ''), file, by: 'P6 Clone SYNCHRO reader', ...(mm ? { lengthUnit: 'mm' as const } : {}) });
   let k = 0, resources = 0, empty = 0;
   try {
     const m = readSynchroModel(bytes, (o) => {
@@ -312,11 +318,11 @@ export function writeSynchroIfc(bytes: Uint8Array, ifcPath: string, file: string
       w.add(e, k++, 0, o.triangles.length ? { positions: o.positions, triangles: o.triangles } : null);
       if (o.resource) resources++;
       if (!o.triangles.length) empty++;
-    });
+    }, { raw: true });
     w.finish();
     return {
-      format: 'SYNCHRO', version: m.file.version, units: m.units, objects: k, resources, scene_only: k - resources, without_geometry: empty,
-      note: 'each object drawn from what SYNCHRO keeps for it (its meshes, and the shapes made in SYNCHRO itself: a profile extruded), placed, in metres, facing outwards; resources carry their own GUID as GlobalId, so import_4d of the same file links its tasks to them',
+      format: 'SYNCHRO', version: m.file.version, units: m.units, ...(m.file.unitNote ? { unit_note: m.file.unitNote } : {}), objects: k, resources, scene_only: k - resources, without_geometry: empty,
+      note: 'each object drawn from what SYNCHRO keeps for it (its meshes, and the shapes made in SYNCHRO itself: a profile extruded), placed, in the file’s own unit (its IFC states it), facing outwards; resources carry their own GUID as GlobalId, so import_4d of the same file links its tasks to them',
       warnings: [...m.file.notes, ...m.notes],
     };
   } catch (e) { w.drop(); throw e; }

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { indexBuilder, readNative, type EachElement, type NativePart } from './native.ts';
 import { ifcWriter } from './toIfc.ts';
-import { absorbRun, meshWith, newRunState } from '../parse.ts';
+import { absorbRun, meshWith, newRunState, LENGTH_UNITS, type LengthUnit } from '../parse.ts';
 import { writeIndex } from '../model.ts';
 import type { NavisworksSource } from '../nwd.ts';
 import { step, tick } from '../heartbeat.mjs';
@@ -27,6 +27,8 @@ export interface NwJob {
   maxBytes?: number;
   /** a .nwf that lists no model */
   empty?: boolean;
+  /** the unit the caller says the models' lengths are in (open_model length_unit), in place of each model's own */
+  lengthUnit?: LengthUnit;
 }
 export type Progress = (done: number, total: number, note: string) => void;
 
@@ -46,7 +48,7 @@ export async function runJob(job: NwJob, progress?: Progress): Promise<Naviswork
       if (writer) writer.add(e, k, boxes, shape?.() ?? null);
       else builder!.add(e, k, boxes);
     };
-    const r = readNative(job.parts, { dir: geometry ? dir : undefined, maxBytes: job.maxBytes, progress, each });
+    const r = readNative(job.parts, { dir: geometry ? dir : undefined, maxBytes: job.maxBytes, ...(job.lengthUnit ? { scale: LENGTH_UNITS[job.lengthUnit] } : {}), progress, each });
     if (!r.files.some((f) => f.read)) throw new Error(r.files.map((f) => `${f.file}: ${f.note}`).join('; ') || 'nothing to read');
     const source: NavisworksSource = {
       format: 'Navisworks', files: r.files, elements: r.elements, with_revit_ids: ids, with_revit_guids: guids,
@@ -61,6 +63,11 @@ export async function runJob(job: NwJob, progress?: Progress): Promise<Naviswork
     } else {
       step('building the model index');
       const index = builder!.finish();
+      if (job.lengthUnit) {
+        // the reader placed the geometry by the caller's unit (readNative scale): what the files state is kept to be said
+        Object.assign(index, { lengthScale: LENGTH_UNITS[job.lengthUnit], lengthScaleSource: 'caller', lengthUnit: job.lengthUnit, meshScale: 1,
+          statedLength: [...new Set(r.files.filter((f) => f.read).map((f) => f.units ?? 'none'))].join('; ') });
+      }
       if (r.geometry) {
         progress?.(job.parts.length, job.parts.length + 1, 'making the display tiles');
         step('making the display tiles (the tiler\u2019s own steps follow)');

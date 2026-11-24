@@ -6,11 +6,11 @@ import { nextId, rows, type Db, type Row } from '../db.ts';
 import { parseP6Date } from '../dates.ts';
 import { applyOps } from '../project/ops.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
-import { linkElements, t4d, T4D } from './link4d.ts';
+import { linkElements, modelRow, rowLengthUnit, t4d, T4D } from './link4d.ts';
 import { resolveSet, type Imported4d } from './exchange4d.ts';
-import type { IfcIndex } from './parse.ts';
+import { LENGTH_UNITS, type IfcIndex } from './parse.ts';
 
-export interface ImportPlan { /** activities a task of the file matched, linked or not */ matched: Set<string>; proposals: { activity: string; guids: string[]; role?: 'removed' | 'temporary' }[]; forNew: Map<string, string[]>; unmatchedTasks: string[]; elementsNotInModel: number; /** the file's notes that hold for the attached model */ notes: string[]; sets: { name: string; guids: string[] }[]; toCreate: Imported4d['tasks']; attachedSets: { name: string; known: boolean }[] }
+export interface ImportPlan { /** activities a task of the file matched, linked or not */ matched: Set<string>; proposals: { activity: string; guids: string[]; role?: 'removed' | 'temporary' }[]; forNew: Map<string, string[]>; unmatchedTasks: string[]; elementsNotInModel: number; /** the file's notes that hold for the attached model */ notes: string[]; /** a SYNCHRO project's 3D paths, placed (metres, to the millimetre) */ paths?: Imported4d['paths']; sets: { name: string; guids: string[] }[]; toCreate: Imported4d['tasks']; attachedSets: { name: string; known: boolean }[] }
 
 /** TimeLiner's task types as link roles (Construct: built, the default) */
 const roleOf = (type?: string) => (/^demolish$/i.test(type ?? '') ? { role: 'removed' as const } : /^temporary$/i.test(type ?? '') ? { role: 'temporary' as const } : {});
@@ -29,7 +29,12 @@ export function planImport(db: Db, projId: string, imp: Imported4d, ix: IfcIndex
   // model holds them (it is that SYNCHRO project, opened with open_model), else by the express ids of the design model
   // they came from
   const ownSp = imp.source === 'synchro' && !!inModel && imp.links.some((l) => (l.guids ?? []).some((g) => inModel.has(g)));
-  plan.notes = [...imp.notes, ...(ownSp ? [] : imp.designModelNotes ?? [])];
+  // the attached model is this SYNCHRO project's own 3D, opened with a unit its caller gave (open_model length_unit): the paths are placed by
+  // that unit, as the model is, and the unit the file is taken to have is not said
+  const row = ownSp ? modelRow(db, projId) : undefined, unit = row && /\.sp$/i.test(row.path) ? rowLengthUnit(row) : undefined;
+  const k = unit && imp.pathScale ? LENGTH_UNITS[unit] / imp.pathScale : 1, mm = (x: number) => Math.round(x * k * 1000) / 1000 || 0;
+  plan.notes = [...imp.notes, ...(imp.unitNote && !unit ? [imp.unitNote] : []), ...(ownSp ? [] : imp.designModelNotes ?? [])];
+  if (imp.paths) plan.paths = imp.paths.map((p) => ({ ...p, keyframes: p.keyframes.map((f) => ({ ...f, position_m: f.position_m.map(mm) })) }));
   for (const l0 of imp.links) {
     const l = imp.source !== 'synchro' ? l0 : ownSp ? { ...l0, expressIds: [] } : { ...l0, guids: [] };
     const t = match(l.task, nameOf.get(l.task));

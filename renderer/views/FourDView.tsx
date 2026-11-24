@@ -27,7 +27,7 @@ function useModel(projId: string | undefined) {
     if (!projId || !row) return setM(null);
     const have = loaded.get(projId);
     if (have?.hash === row.hash) return setM(have);
-    void window.p6.bimLoad({ hash: row.hash, path: row.path }).then((r) => { if (!r.ok) return setErr(r.error); const x = { hash: r.hash, path: r.path, index: r.index, url: r.url }; loaded.set(projId, x); setM(x); });
+    void window.p6.bimLoad({ hash: row.hash, path: row.path, ...(row.length_unit ? { lengthUnit: row.length_unit } : {}) }).then((r) => { if (!r.ok) return setErr(r.error); const x = { hash: r.hash, path: r.path, index: r.index, url: r.url }; loaded.set(projId, x); setM(x); });
   }, [projId, row?.hash]);
   return { m, err, row };
 }

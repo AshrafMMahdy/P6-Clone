@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { chunkBytesOf, keptChunkKey, meshIndex, parseIfc, productIdsOf, INDEX_FORMAT, type IfcElement, type IfcIndex, type KeptChunk } from './parse.ts';
+import { chunkBytesOf, keptChunkKey, meshIndex, parseIfc, productIdsOf, unitKey, INDEX_FORMAT, type IfcElement, type IfcIndex, type KeptChunk, type LengthUnit } from './parse.ts';
 import { compactHeap, Element, ExtrasTable, noVolume, GEOM_STRIDE, geomStore, newGeomStore, type Extras, type GeomStore } from './element.ts';
 import { elementsByGuid } from './lookup.ts';
 import { readManifest, tileBytesOf } from './tiles.ts';
@@ -64,25 +64,26 @@ const wrap = (hash: string, index: IfcIndex, tiles: string | null): Model => {
 };
 
 /** meshNote: said in the geometry note of a meshing this open does (why chunks kept from an earlier meshing were not used). */
-type LoadOptions = { geometry?: boolean; chunkBytes?: number; hash?: string; meshNote?: string; onProgress?: (done: number, total: number, note: string) => void | Promise<void> };
+type LoadOptions = { geometry?: boolean; chunkBytes?: number; hash?: string; meshNote?: string; lengthUnit?: LengthUnit; onProgress?: (done: number, total: number, note: string) => void | Promise<void> };
 /** Parse (or take from the cache) the model at path: an IFC, a Revit file (made into IFC4 first, rvt.ts) or a
  *  Navisworks file (read as it is, nwd.ts). geometry: false skips meshing (faster; no tiles, no derived volumes). A model cached without
  *  geometry is meshed from its cached index when geometry is asked for. hash: the IFC's own content hash, when the
- *  caller has it (never a Revit or Navisworks file's: the IFC made from it is cached under its own). */
+ *  caller has it (never a Revit or Navisworks file's: the IFC made from it is cached under its own). lengthUnit: the unit the caller says
+ *  the file's lengths are in, in place of what it states (open_model length_unit): another model in the cache (unitKey). */
 /** Loads in flight, by file: a second caller waits for the first (two meshing runs of one model would share its tiles
  *  folder and fingerprints), and reads on only when that load did not give it what it asked for. */
 const inFlight = new Map<string, Promise<Model>>();
 /** The IFC a model file is read as: the file itself, or the IFC4 a Revit or Navisworks file was made into (from the
  *  conversion cache, made again if it was pruned). Exports that carry the model's own file stream this one. */
-export async function ifcOf(path: string): Promise<string> {
-  if (isNavisworks(path)) return (await nwdToIfc(path)).ifc;
+export async function ifcOf(path: string, lengthUnit?: LengthUnit): Promise<string> {
+  if (isNavisworks(path)) return (await nwdToIfc(path, lengthUnit)).ifc; // (made in metres by the caller's unit; the others state their own)
   if (isRevit(path)) return (await rvtToIfc(path)).ifc;
   if (isSynchro(path)) return (await spToIfc(path)).ifc;
   return path;
 }
 
 export async function loadModel(path: string, o: LoadOptions = {}): Promise<Model> {
-  const key = resolve(path);
+  const key = `${resolve(path)}|${o.lengthUnit ?? ''}`; // another unit is another model
   for (let p = inFlight.get(key); p; p = inFlight.get(key)) {
     const m = await p.catch(() => null);
     if (m && (o.geometry === false || m.index.geometryStatus !== 'skipped')) return m;
@@ -127,7 +128,7 @@ function liveHit(name: string, base: string): Model | undefined {
 /** A Navisworks model: its index and tiles from the cache, else read from the file (in the reader's own process) into
  *  it; cached by the files' content and the reader's format. */
 async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
-  const hash = await navisworksKey(path), name = cacheName(hash), base = join(cacheDir(), name);
+  const hash = unitKey(await navisworksKey(path), o.lengthUnit), name = cacheName(hash), base = join(cacheDir(), name);
   const want = o.geometry !== false;
   const hit = liveHit(name, base);
   if (hit && (!want || hit.tiles || (hit.index.geometryStatus === 'unavailable' && retried.has(hash)))) { hit.index.sourcePath = path; pruneCache(); return hit; }
@@ -138,7 +139,7 @@ async function loadNavisworks(path: string, o: LoadOptions): Promise<Model> {
   const retry = !!index && want && index.geometryStatus === 'unavailable' && !retried.has(hash);
   if (retry) retried.add(hash);
   if (!index || retry || (want && (index.geometryStatus === 'skipped' || (index.geometryStatus === 'ok' && !readManifest(`${base}.tiles`))))) {
-    await cacheNavisworks(path, base, { geometry: want, onProgress: o.onProgress });
+    await cacheNavisworks(path, base, { geometry: want, ...(o.lengthUnit ? { lengthUnit: o.lengthUnit } : {}), onProgress: o.onProgress });
     index = readIndex(base);
   }
   index.sourcePath = path;
@@ -153,7 +154,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
   // an IFC is a STEP file with an IFC schema; anything else (an XER, a GLB, an .rvt) is refused before it replaces a model
   const head = (() => { const fd = openSync(path, 'r'); try { const b = Buffer.alloc(65536); return b.subarray(0, readSync(fd, b, 0, 65536, 0)).toString('latin1'); } finally { closeSync(fd); } })();
   if (!/^\s*ISO-10303-21\s*;/.test(head) || !/FILE_SCHEMA\s*\(\s*\(\s*'IFC/i.test(head)) throw new Error(`${path} is not an IFC file (an IFC starts with ISO-10303-21 and names an IFC schema). Revit (.rvt / .rfa), Navisworks (.nwd / .nwc / .nwf) and SYNCHRO (.sp) files are read as they are; other formats have to be exported to IFC first.`);
-  const hash = o.hash ?? await fileHash(path);
+  const hash = unitKey(o.hash ?? await fileHash(path), o.lengthUnit);
   const want = o.geometry !== false;
   const base = join(cacheDir(), cacheName(hash));
   const hit = liveHit(cacheName(hash), base);
@@ -185,7 +186,7 @@ async function loadIfc(path: string, o: LoadOptions): Promise<Model> {
     memory.set(cacheName(hash), m);
     return m;
   }
-  const { index } = await parseIfc(path, { geometry: false });
+  const { index } = await parseIfc(path, { geometry: false, ...(o.lengthUnit ? { lengthUnit: o.lengthUnit } : {}) });
   if (want) {
     // the index is cached before the meshing: a meshing that stops leaves it (the next open meshes from it, not indexing again), so the
     // chunks it kept are always of a known product list, matched by their full key before the next meshing is planned (keptChunkSets)

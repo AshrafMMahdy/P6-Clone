@@ -67,7 +67,9 @@ const yUp = (m: number[], scale: number) => { const o = m.map((x, i) => (i % 4 =
 
 /** Read the models (an .nwf's parts, or the one file), one at a time, each element handed to each; their geometry into
  *  dir when it is given. */
-export function readNative(parts: NativePart[], o: { dir?: string; maxBytes?: number; progress?: (done: number, total: number, note: string) => void; each: EachElement }): NativeRead {
+/** scale: the metres of a unit of every model's geometry, the caller's (open_model length_unit), in place of each model's own (Revit's feet,
+ *  others taken as metres). */
+export function readNative(parts: NativePart[], o: { dir?: string; maxBytes?: number; scale?: number; progress?: (done: number, total: number, note: string) => void; each: EachElement }): NativeRead {
   const max = o.maxBytes ?? 2048 * 1048576;
   const files: NativeFile[] = [];
   let count = 0;
@@ -82,7 +84,7 @@ export function readNative(parts: NativePart[], o: { dir?: string; maxBytes?: nu
     try {
       const c = openContainer(p.at), t0 = Date.now();
       m = modelIn(c, p.file, max);
-      if (g && m.tree) { step(`reading ${p.file}: placing the geometry pieces`); shapes = g.model(c, m.tree, m.elements, base, m.revit ? 0.3048 : 1, max); }
+      if (g && m.tree) { step(`reading ${p.file}: placing the geometry pieces`); shapes = g.model(c, m.tree, m.elements, base, o.scale ?? (m.revit ? 0.3048 : 1), max); }
       noteRate('navisworks', Date.now() - t0, statSync(p.at).size); // this job's own rate: the next model's bounds are sized from the slower of it and the benchmark's
     } catch (e) { files.push({ file: p.file, revision: null, elements: 0, read: false, note: (e as Error).message }); continue; }
     step(`reading ${p.file}: handing on the elements`, { total: m.elements.length });
@@ -257,7 +259,8 @@ function geometryOut(dir: string) {
   };
 }
 
-const UNITS: Record<QuantityKind, string> = { length: 'm', area: 'm²', volume: 'm³', count: 'no.', weight: 'kg', time: 's' };
+/** the units of the figures the reader gives (Revit's feet made metres), as the IFC made of them assigns (toIfc.ts) */
+const UNITS: Partial<Record<QuantityKind, string>> = { length: 'm', area: 'm²', volume: 'm³' };
 const KIND: Record<string, QuantityKind> = { NetVolume: 'volume', NetArea: 'area', Length: 'length' };
 
 /** The model index, an element at a time: the records an IFC of the elements gives (writeIfc, then the IFC index,

@@ -66,14 +66,24 @@ export type QuantityKind = 'length' | 'area' | 'volume' | 'count' | 'weight' | '
 export interface IfcIndex {
   sourcePath: string;
   schema: string;
+  /** the model's numbers to metres */
   lengthScale: number;
-  lengthScaleSource: 'unit-assignment' | 'heuristic-mm' | 'assumed-m';
+  /** where lengthScale came from: the file's unit assignment; none, taken as metres; none, millimetre-sized coordinates; the caller (open_model length_unit) */
+  lengthScaleSource: 'unit-assignment' | 'heuristic-mm' | 'assumed-m' | 'caller';
+  /** the caller's length unit (lengthScaleSource caller), the length unit the file itself states then ("none" when it states none), and
+   *  the factor the reader's geometry still takes to be in metres by it (web-ifc gives metres by the file's own unit; the Navisworks reader
+   *  places by the caller's) */
+  lengthUnit?: LengthUnit;
+  statedLength?: string;
+  meshScale?: number;
   elements: IfcElement[];
   storeys: string[];
   classCounts: Record<string, number>;
   geometryFailures: number;
   quantifiedElements: number;
-  /** The unit of each kind of figure the project assigns (IfcUnitAssignment), e.g. {length: "m", area: "m²"}. */
+  /** The unit of each kind of figure the project assigns (IfcUnitAssignment), e.g. {length: "m", area: "m²"}; a kind it assigns none is
+   *  absent (IFC's SI unit then: the reader says so). A caller's length unit is the length's, and the area's and volume's when the file
+   *  assigns none (lengthLabels). */
   units?: Partial<Record<QuantityKind, string>>;
   /** File header: who exported it with what, when. */
   header: { application?: string; author?: string; organization?: string; timestamp?: string; project?: string };
@@ -92,9 +102,37 @@ export type IfcMeshes = Map<number, { positions: number[]; indices: number[] }>;
 
 /** Index format version — bump when the index shape, the parser's selection rules or the display tiles change, so
  *  caches are read again. */
-export const INDEX_FORMAT = 11; // 11: no derived volume for an open mesh. 10: compact index (shared records, fingerprints in a side file), display tiles instead of one GLB. 9: quantity kinds, sets and units, measure-typed properties. 8: models past one web-ifc run meshed in chunks. 7: the length unit the project assigns. 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
+export const INDEX_FORMAT = 12; // 12: units only those the file assigns; a caller's length unit. 11: no derived volume for an open mesh. 10: compact index (shared records, fingerprints in a side file), display tiles instead of one GLB. 9: quantity kinds, sets and units, measure-typed properties. 8: models past one web-ifc run meshed in chunks. 7: the length unit the project assigns. 5: property definitions are not elements; STEP comments skipped. 6: geometry in metres once (millimetre models), products split over lines, conversion-based units
+
+/** The length units a caller can state for a model's numbers (open_model length_unit), in metres. */
+export const LENGTH_UNITS = { mm: 0.001, cm: 0.01, m: 1, in: 0.0254, ft: 0.3048 } as const;
+export type LengthUnit = keyof typeof LENGTH_UNITS;
+export const isLengthUnit = (u: unknown): u is LengthUnit => typeof u === 'string' && Object.hasOwn(LENGTH_UNITS, u);
+/** A model's cache key with the caller's length unit: a model read by another unit is another model (its geometry and tiles differ). */
+export const unitKey = (hash: string, unit?: LengthUnit) => (unit ? `${hash}.${unit}` : hash);
+
+/** Lengths of the model's figures in `label`; areas and volumes in its square and cube unless the file assigns their units itself. */
+export function lengthLabels(index: IfcIndex, label: string): void {
+  const u = index.units ?? (index.units = {});
+  u.length = label;
+  u.area ??= `${label}²`;
+  u.volume ??= `${label}³`;
+}
+
+/** The caller's length unit on an index the IFC reader made (open_model length_unit): it is the model's, in place of what the file states
+ *  (its unit assignment, or none: taken as metres), which is kept to be said. The geometry web-ifc makes is in metres by the file's own unit,
+ *  so it takes the caller's scale over that. */
+export function withLengthUnit(index: IfcIndex, unit: LengthUnit): void {
+  const declared = index.lengthScaleSource === 'unit-assignment';
+  index.statedLength = declared ? index.units?.length ?? `${index.lengthScale} m` : 'none';
+  index.meshScale = LENGTH_UNITS[unit] / (declared ? index.lengthScale : 1);
+  index.lengthScale = LENGTH_UNITS[unit]; index.lengthScaleSource = 'caller'; index.lengthUnit = unit;
+  lengthLabels(index, unit);
+}
 
 export interface ParseIfcOptions {
+  /** the unit the caller says the file's lengths are in, in place of what it states (withLengthUnit) */
+  lengthUnit?: LengthUnit;
   /** Legacy switch — mesh arrays are never returned any more; geometry itself is governed by `geometry`. */
   meshes?: boolean;
   /** Run the geometry worker (fingerprints + optional display tiles). Default true. */
@@ -137,6 +175,7 @@ export async function parseIfc(absIfcPath: string, opts: ParseIfcOptions = {}): 
     ? await inWorker({ script: worker, job: { ifc: absIfcPath }, heapMb: indexHeapMb(), what: 'The IFC indexer', tried: 'one streaming pass over the file in a process of its own, then the index file', next: INDEX_STUCK_NEXT },
       (dir) => { const ix = readIndex(join(dir, 'index')); return { index: ix, productIds: productIdsOf(ix) }; })
     : await stepIndex(absIfcPath);
+  if (opts.lengthUnit) withLengthUnit(index, opts.lengthUnit);
   const meshes: IfcMeshes = new Map();
   if (opts.geometry === false) { index.geometryStatus = 'skipped'; return { index, meshes }; }
   await meshIndex(absIfcPath, index, productIds, opts);
@@ -171,10 +210,10 @@ export async function meshWith(index: IfcIndex, opts: ParseIfcOptions, build: (o
       index.meshedElements = 0;
       return;
     }
-    if (index.lengthScaleSource === 'assumed-m' && run.maxAbsCoord > 2000) { index.lengthScale = 0.001; index.lengthScaleSource = 'heuristic-mm'; }
-    // web-ifc already gives metres when the file declares its unit; only a model with no unit and millimetre-sized
-    // coordinates (the heuristic above) needs scaling here (the tiles carry the scale for the viewer)
-    const S = index.lengthScaleSource === 'heuristic-mm' ? 0.001 : 1;
+    if (index.lengthScaleSource === 'assumed-m' && run.maxAbsCoord > 2000) { index.lengthScale = 0.001; index.lengthScaleSource = 'heuristic-mm'; lengthLabels(index, 'mm'); }
+    // web-ifc already gives metres when the file declares its unit; a model with no unit and millimetre-sized coordinates (the heuristic
+    // above), or one whose unit the caller states, is scaled here (the tiles carry the scale for the viewer)
+    const S = index.meshScale ?? (index.lengthScaleSource === 'heuristic-mm' ? 0.001 : 1);
     if (store) scaleGeometry(store, S);
     index.geometryFailures = run.failures;
     index.meshedElements = run.meshed;

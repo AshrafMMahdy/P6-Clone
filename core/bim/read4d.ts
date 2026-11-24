@@ -86,14 +86,15 @@ export function synchroToImport(sp: SynchroFile): Imported4d {
   const designModelNotes = unnamed.size ? [`${unnamed.size} assigned resources carry no "(#id)" of a design model element and were not linked to it (opening this .sp itself as the model, open_model, links every one drawn in 3D).`] : [];
   const notes = [...sp.notes,
     ...(moved.length ? [`${moved.length} assignment${moved.length === 1 ? ' moves' : 's move'} a resource along a 3D path (${moved.join('; ')}): its keyframes are in paths; the clone's 4D view and video show the resource where the model places it, not moving.`] : [])];
-  // the paths as the agent reads them: each keyframe's share of the task, its place (metres, the model's frame, z up) and
-  // its rotation (degrees about x, y and z, from the quaternion SYNCHRO keeps)
-  const r1 = (x: number) => Math.round(x * 10) / 10 || 0, r3 = (x: number) => Math.round(x * 1000) / 1000 || 0;
+  // the paths as the agent reads them: each keyframe's share of the task, its place (metres, the model's frame, z up: whole here, placed
+  // to the millimetre by planImport, by the unit the attached model was opened with) and its rotation (degrees about x, y and z, from the
+  // quaternion SYNCHRO keeps)
+  const r1 = (x: number) => Math.round(x * 10) / 10 || 0;
   const euler = ([x, y, z, w]: number[]) => [Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)), Math.asin(Math.max(-1, Math.min(1, 2 * (w * y - z * x)))), Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))].map((a) => r1((a * 180) / Math.PI));
   const pathList = sp.paths.map((p) => ({
     name: p.name,
     followed_by: sp.assignments.filter((a) => a.path === p.uuid).map((a) => { const t = allTasks.get(a.task); return { resource: res.get(a.resource)?.name ?? a.resource, task: t ? t.id || t.name : a.task }; }),
-    keyframes: p.points.map((k) => ({ percent_of_task: r1(k.at * 100), position_m: k.position.map((x) => r3(x * sp.scale)), rotation_deg: euler(k.rotation) })),
+    keyframes: p.points.map((k) => ({ percent_of_task: r1(k.at * 100), position_m: k.position.map((x) => x * sp.scale), rotation_deg: euler(k.rotation) })),
   }));
-  return { source: 'synchro', tasks: work.map((t) => ({ name: t.name, id: t.id || t.name, start: t.start ?? undefined, finish: t.finish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined })), links: [...links.values()], notes, ...(designModelNotes.length ? { designModelNotes } : {}), ...(pathList.length ? { paths: pathList } : {}) };
+  return { source: 'synchro', tasks: work.map((t) => ({ name: t.name, id: t.id || t.name, start: t.start ?? undefined, finish: t.finish ?? undefined, actualStart: t.actualStart ?? undefined, actualFinish: t.actualFinish ?? undefined })), links: [...links.values()], notes, ...(designModelNotes.length ? { designModelNotes } : {}), ...(pathList.length ? { paths: pathList, pathScale: sp.scale } : {}), ...(sp.unitNote ? { unitNote: sp.unitNote } : {}) };
 }

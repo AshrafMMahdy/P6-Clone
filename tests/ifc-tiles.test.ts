@@ -86,7 +86,7 @@ test('the streamed packages equal the text ones (tagged IFC, IFC4 4D), byte for 
   const norm = (s: string) => s.replace(/'[0-9A-Za-z_$]{22}'/g, "'G'");
   const text = readFileSync(f, 'latin1');
   const out = join(tmp('p6-st-'), 'tagged.ifc');
-  const r = tagIfcFile(f, out, items);
+  const r = await tagIfcFile(f, out, items);
   const t = tagIfc(text, items);
   assert.deepEqual([r.tasks, r.elements], [t.tasks, t.elements]);
   assert.equal(norm(readFileSync(out, 'latin1')), norm(t.text));
@@ -95,7 +95,7 @@ test('the streamed packages equal the text ones (tagged IFC, IFC4 4D), byte for 
   applyOps(db, [{ op: 'add_project', id: 'P', start: '2027-01-04' }, { op: 'add_activity', id: 'A1', name: 'Walls', duration_days: 5 }]);
   const pid = db.tables.PROJECT.rows[0].proj_id; items[0].taskId = db.tables.TASK.rows[0].task_id;
   const o4 = join(tmp('p6-st-'), '4d.ifc');
-  const a = ifc4dFile(db, pid, f, o4, items), b = ifc4dText(db, pid, text, items);
+  const a = await ifc4dFile(db, pid, f, o4, items), b = ifc4dText(db, pid, text, items);
   assert.deepEqual(a, { tasks: b.tasks, links: b.links });
   // the work schedule's creation time is the clock's: the two may be a second apart
   const clock = (s: string) => norm(s).replace(/'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d'/g, "'T'");

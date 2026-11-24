@@ -14,6 +14,9 @@ function spFiles(d: string): string[] {
   return readdirSync(d).flatMap((n) => { const p = join(d, n); return statSync(p).isDirectory() ? spFiles(p) : n.toLowerCase().endsWith('.sp') ? [p] : []; });
 }
 
+/** a place to the millimetre, as the agent reads it (planImport places the paths so) */
+const mm = (x: number) => Math.round(x * 1000) / 1000 || 0;
+
 test('Schependomlaan (SYNCHRO 5.1): 125 tasks with their ST ids, links, the IFC objects and the 4D assignments', { skip: !existsSync(schep) && 'Schependomlaan .sp not present' }, () => {
   const r = readSynchro(readFileSync(schep));
   assert.equal(r.version, '5.1.1.4');
@@ -221,7 +224,7 @@ test('a unit setting no file has shown: the model opens, its numbers taken as me
   const f = await withTable(readFileSync(paths3d), '3DWorldSettings', (raw) => { const b = Buffer.from(raw); b.writeUInt32LE(2, 4 + 8 + 16 + 8); return b; });
   const m = readSynchroModel(f);
   assert.equal(m.units, 'assumed-m');
-  assert.ok(m.file.notes.some((n) => /setting 2, which no SYNCHRO file read so far has used .*taken as metres \(assumed/.test(n)));
+  assert.match(m.file.unitNote ?? '', /setting 2, which no SYNCHRO file read so far has used .*taken as metres \(assumed/);
   const col = m.objects.find((o) => o.name === '610 x 610mm')!;
   assert.deepEqual(box(col.positions).size.slice(0, 2).map((x) => Math.round(x)), [610, 610], 'the numbers as they are, not scaled');
   const ifc = join(mkdtempSync(join(tmpdir(), 'sp-unit-')), 'm.ifc');
@@ -231,7 +234,7 @@ test('a unit setting no file has shown: the model opens, its numbers taken as me
   const c = ix.elements.find((e) => e.name === '610 x 610mm' && e.bbox)!;
   assert.deepEqual([c.bbox![3] - c.bbox![0], c.bbox![5] - c.bbox![2]].map((x) => Math.round(x)), [610, 610]);
   const { synchroToImport } = await import('../core/bim/read4d.ts');
-  assert.deepEqual(synchroToImport(readSynchro(f)).paths!.find((p) => p.name === 'Crane 2 - Podium Lift')!.keyframes[0].position_m, [-1818.561, 60624.957, 4996.766]);
+  assert.deepEqual(synchroToImport(readSynchro(f)).paths!.find((p) => p.name === 'Crane 2 - Podium Lift')!.keyframes[0].position_m.map(mm), [-1818.561, 60624.957, 4996.766]);
 });
 
 test('the paths as the agent reads them (import_4d): who follows each in which task; each keyframe\u2019s share, place in metres, rotation in degrees', { skip: none }, async () => {
@@ -239,10 +242,46 @@ test('the paths as the agent reads them (import_4d): who follows each in which t
   const lift = synchroToImport(readSynchro(readFileSync(paths3d))).paths!.find((p) => p.name === 'Crane 2 - Podium Lift')!;
   assert.deepEqual(lift.followed_by, [{ resource: 'Load 3', task: 'ST00160' }]);
   assert.deepEqual(lift.keyframes.map((k) => k.percent_of_task), [0, 17.5, 72.9, 100]);
-  assert.deepEqual(lift.keyframes[0].position_m, [-1.819, 60.625, 4.997]);
+  assert.deepEqual(lift.keyframes[0].position_m.map(mm), [-1.819, 60.625, 4.997]);
   // the quaternion (0, 0, 0.678, 0.735) is a turn of 2 x atan2(0.678, 0.735) about the vertical
   assert.deepEqual(lift.keyframes[2].rotation_deg, [0, 0, 85.4]);
   const ex = synchroToImport(readSynchro(readFileSync(join(tb, 'SYNCHRO Training Building Completed.sp')))).paths!;
   assert.deepEqual(ex.map((p) => [p.name, p.followed_by[0]?.resource, p.keyframes.length]), [['Foundation Excavation', 'Excavator', 4]]);
-  assert.deepEqual(ex[0].keyframes[0].position_m, [-1.207, -21.652, -0.2], 'a metre file, read as metres');
+  assert.deepEqual(ex[0].keyframes[0].position_m.map(mm), [-1.207, -21.652, -0.2], 'a metre file, read as metres');
+});
+
+test('length_unit on a SYNCHRO project: its objects and its paths placed by the caller’s unit, the assumed unit no longer said; and in place of the file’s own (owner, 2026-11-24)', { skip: none, timeout: 900_000 }, async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { callTool, toolResult } = await import('../mcp/server.ts');
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
+  // 3D Paths (millimetres) with its unit setting made 2: a unit the reader does not know
+  const unit2 = join(mkdtempSync(join(tmpdir(), 'sp-lu-')), 'unit2.sp');
+  writeFileSync(unit2, await withTable(readFileSync(paths3d), '3DWorldSettings', (raw) => { const b = Buffer.from(raw); b.writeUInt32LE(2, 4 + 8 + 16 + 8); return b; }));
+  const lift = (r: { d: any }) => r.d.paths.find((p: { name: string }) => p.name === 'Crane 2 - Podium Lift').keyframes[0].position_m;
+  const assumed = (r: { d: any }) => r.d.notes.some((n: string) => /taken as metres \(assumed/.test(n));
+  const np = (await call('new_project', { id: 'SLU', start: '2018-07-02' })).d, h = np.handle, owner_key = np.owner_key;
+  // as the file is read: its numbers taken as metres, said
+  const a = await call('open_model', { handle: h, owner_key, path: unit2, geometry: false });
+  assert.equal(a.err, false, JSON.stringify(a.d).slice(0, 400));
+  assert.equal(a.d.length_unit, 'm (assumed: the file states a unit setting the reader does not know)');
+  assert.match(a.d.source.unit_note, /setting 2/);
+  const ia = await call('import_4d', { handle: h, owner_key, path: unit2, link: false });
+  assert.deepEqual(lift(ia), [-1818.561, 60624.957, 4996.766]);
+  assert.ok(assumed(ia));
+  // the caller measured a column (610 x 610 mm): millimetres
+  const b = await call('open_model', { handle: h, owner_key, path: unit2, length_unit: 'mm' });
+  assert.equal(b.err, false, JSON.stringify(b.d).slice(0, 400));
+  assert.equal(b.d.length_unit, 'mm (given by the caller; the file states a unit setting the reader does not know)');
+  assert.equal(b.d.source.unit_note, undefined);
+  const col = (await call('list_elements', { handle: h, where: [{ property: 'name', value: '610 x 610mm' }], limit: 1 })).d.elements[0];
+  const bb = (await call('element_info', { handle: h, guids: [col.guid] })).d.elements[0].bbox;
+  assert.deepEqual([bb[3] - bb[0], bb[5] - bb[2]].map((x: number) => Math.round(x * 1000) / 1000), [0.61, 0.61]);
+  const ib = await call('import_4d', { handle: h, owner_key, path: unit2, link: false });
+  assert.deepEqual(lift(ib), [-1.819, 60.625, 4.997], 'the paths placed by the caller’s unit, as the model is');
+  assert.ok(!assumed(ib));
+  // the file's own unit (millimetres) replaced: metres
+  const c = await call('open_model', { handle: h, owner_key, path: paths3d, length_unit: 'm', geometry: false });
+  assert.equal(c.d.length_unit, 'm (given by the caller; the file states mm)');
+  assert.deepEqual(lift(await call('import_4d', { handle: h, owner_key, path: paths3d, link: false })), [-1818.561, 60624.957, 4996.766]);
 });

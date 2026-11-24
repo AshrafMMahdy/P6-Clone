@@ -387,10 +387,14 @@ an element at a time, only for the `export_4d` targets that deliver one; a mesh 
 fitting open at its ends: holes over a thousandth of its surface) gives no derived volume, and `open_model` counts them
 as `meshed_without_volume`; a SYNCHRO project `.sp` (5.1 to 6.5) read without SYNCHRO (`core/bim/synchroModel.ts`) and made
 into IFC4 in the 4D reader's process: its 3D objects drawn from what SYNCHRO keeps for them (meshes, and shapes made in
-SYNCHRO itself, a profile extruded), placed, in metres and facing outwards (each
+SYNCHRO itself, a profile extruded), placed, in the file's own unit and facing outwards (each
 resource drawn in 3D, with its own GUID as GlobalId so `import_4d` of the same file links its tasks to it, and the parts
 of the scene no resource draws, such as a context model), checked against the design IFC a SYNCHRO project was made from
-(Schependomlaan: 3,504 of 3,504 boxes within 2 mm, the volumes within 1%); the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and
+(Schependomlaan: 3,504 of 3,504 boxes within 2 mm, the volumes within 1%); `length_unit` (mm, cm, m, in, ft): the unit the
+caller says the model's lengths are in, measured from an element of known size, in place of what the file states (none, or
+a wrong one), for any model: the geometry, derived volumes, length labels, 3D view and video, compare and relink, the IFC
+`export_4d` delivers (stated in its copy) and a SYNCHRO project's paths follow it; it is another model in the cache, the
+project's model row keeps it, and `open_model`'s `length_unit` says it was the caller's and what the file states; the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and
 actual dates and type, their selection sets and explicit selections resolved to the model's elements (an `.nwf` names
 items by path in the models it lists), and `link: false` lists the tasks for review),
 `list_elements`, `element_info`, `quantities` (per group: totals, and for the asked `kind` the elements quantified and
