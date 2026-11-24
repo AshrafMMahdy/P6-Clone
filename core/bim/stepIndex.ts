@@ -19,7 +19,6 @@ import { IFC_CLASS_NAMES } from './ifcClasses.ts';
 // ── STEP attribute parser ──────────────────────────────────────────────────────────────────────────
 export type StepValue = string | number | boolean | null | undefined | { ref: number } | { enum: string } | StepValue[];
 
-const CONVERSION: Record<string, number> = { INCH: 0.0254, FOOT: 0.3048, YARD: 0.9144, MILE: 1609.344 };
 const QTY_KIND: Record<string, QuantityKind> = { IFCQUANTITYLENGTH: 'length', IFCQUANTITYAREA: 'area', IFCQUANTITYVOLUME: 'volume', IFCQUANTITYCOUNT: 'count', IFCQUANTITYWEIGHT: 'weight', IFCQUANTITYTIME: 'time' };
 const UNIT_KIND: Record<string, QuantityKind> = { LENGTHUNIT: 'length', AREAUNIT: 'area', VOLUMEUNIT: 'volume', MASSUNIT: 'weight', TIMEUNIT: 'time' };
 const MEASURE_KIND: Record<string, QuantityKind> = { LENGTH: 'length', POSITIVELENGTH: 'length', NONNEGATIVELENGTH: 'length', AREA: 'area', VOLUME: 'volume', MASS: 'weight', COUNT: 'count', TIME: 'time' };
@@ -178,14 +177,17 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
   const lengthUnits = new Map<number, number>();
   const unitAssignments = new Map<number, number[]>();
   let projectUnits: number | undefined;
+  const conversions = new Map<number, number>(), unitMeasures = new Map<number, [number, number | undefined]>();
 
   const onEntity = (id: number, type: string, argText: string): void => {
     switch (type) {
       case 'IFCPROJECT': { const a = parseArgs(argText); projectName = strOf(a[2]); projectUnits = ref(a[8]); return; }
       case 'IFCUNITASSIGNMENT': { const a = parseArgs(argText); unitAssignments.set(id, refs(a[0])); return; }
+      case 'IFCMEASUREWITHUNIT': { const a = parseArgs(argText); if (typeof a[0] === 'number') unitMeasures.set(id, [a[0], ref(a[1])]); return; }
       case 'IFCSIUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const p = strOf(a[2]); lengthUnits.set(id, p === 'MILLI' ? 0.001 : p === 'CENTI' ? 0.01 : p === 'DECI' ? 0.1 : p === 'KILO' ? 1000 : 1); }
         const nm = SI_NAME[strOf(a[3])]; if (nm) unitLabel.set(id, { kind: UNIT_KIND[strOf(a[1])], label: (SI_PREFIX[strOf(a[2])] ?? '') + nm }); return; }
-      case 'IFCCONVERSIONBASEDUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const f = CONVERSION[strOf(a[2]).toUpperCase()]; if (f) lengthUnits.set(id, f); }
+      // a conversion-based length unit is its measure's value in the measure's unit (as web-ifc scales the geometry; its name is a label)
+      case 'IFCCONVERSIONBASEDUNIT': { const a = parseArgs(argText); if (strOf(a[1]) === 'LENGTHUNIT') { const m = ref(a[3]); if (m != null) conversions.set(id, m); }
         if (strOf(a[2])) unitLabel.set(id, { kind: UNIT_KIND[strOf(a[1])], label: strOf(a[2]).toLowerCase() }); return; }
       case 'IFCBUILDINGSTOREY': { const a = parseArgs(argText); storeyName.set(id, strOf(a[2]) || strOf(a[7]) || `#${id}`); return; }
       case 'IFCSITE': case 'IFCBUILDING': case 'IFCSPACE': case 'IFCSPATIALZONE': { const a = parseArgs(argText); spatialName.set(id, strOf(a[2]) || strOf(a[7]) || `#${id}`); break; }
@@ -381,7 +383,10 @@ export async function stepIndex(absIfcPath: string): Promise<StepIndexResult> {
   }
   // only the kinds the project assigns: a kind it assigns none is IFC's SI unit, said by the reader (fourd quantities)
   const units: Partial<Record<QuantityKind, string>> = {};
-  { const assigned = (projectUnits != null ? unitAssignments.get(projectUnits) : undefined) ?? [...unitAssignments.values()][0] ?? [];
+  // the units are those the project names (IfcProject.UnitsInContext), as web-ifc reads them for the geometry: one it does not name is not
+  // in force (IFC's SI units are)
+  for (const [id, m] of conversions) { const x = unitMeasures.get(m); if (x) lengthUnits.set(id, x[0] * (x[1] != null ? lengthUnits.get(x[1]) ?? 1 : 1)); }
+  { const assigned = (projectUnits != null ? unitAssignments.get(projectUnits) : undefined) ?? [];
     const u = assigned.find((x) => lengthUnits.has(x));
     if (u != null) { lengthScale = lengthUnits.get(u)!; lengthScaleSource = 'unit-assignment'; }
     for (const x of assigned) { const l = unitLabel.get(x); if (l?.kind) units[l.kind] = l.label; } }

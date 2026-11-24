@@ -87,8 +87,8 @@ export function synchroToImport(sp: SynchroFile): Imported4d {
   const notes = [...sp.notes,
     ...(moved.length ? [`${moved.length} assignment${moved.length === 1 ? ' moves' : 's move'} a resource along a 3D path (${moved.join('; ')}): its keyframes are in paths; the clone's 4D view and video show the resource where the model places it, not moving.`] : [])];
   // the paths as the agent reads them: each keyframe's share of the task, its place (metres, the model's frame, z up: whole here, placed
-  // to the millimetre by planImport, by the unit the attached model was opened with) and its rotation (degrees about x, y and z, from the
-  // quaternion SYNCHRO keeps)
+  // to the millimetre by planImport, by the unit the attached model was opened with) and its rotation (degrees [x, y, z]: the turn about z, then
+  // y, then x, each about the axes as turned; from the quaternion SYNCHRO keeps)
   const r1 = (x: number) => Math.round(x * 10) / 10 || 0;
   const euler = ([x, y, z, w]: number[]) => [Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)), Math.asin(Math.max(-1, Math.min(1, 2 * (w * y - z * x)))), Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))].map((a) => r1((a * 180) / Math.PI));
   const pathList = sp.paths.map((p) => ({

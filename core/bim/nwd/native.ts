@@ -40,7 +40,7 @@ export function modelIn(c: NwContainer, file: string, max: number): { elements: 
   const tree = decodeTree(lh);
   const elements = elementsOf(tree, guidStore(c, max), file, external);
   const revit = elements.some((e) => e.revitId !== null || /^LcRevit/.test(e.node?.attr?.internal ?? ''));
-  return { elements, revision: c.revision, units: revit ? 'feet (Revit)' : 'metres (taken as such: the file names no unit)', tree, revit };
+  return { elements, revision: c.revision, units: revit ? 'feet (Revit)' : 'metres (assumed: the file names no unit)', tree, revit };
 }
 
 export interface NativePart { file: string; at: string | null; note?: string }

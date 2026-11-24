@@ -43,7 +43,7 @@ const api = {
   /** 4D: models are read in the main process; the viewer is served at p6c4d:// */
   bimOpen: (path?: string): Promise<BimModel | null> => ipcRenderer.invoke('bim:open', path),
   bimLoad: (o: { hash: string; path: string; lengthUnit?: string }): Promise<BimModel> => ipcRenderer.invoke('bim:load', o),
-  bimText: (path: string): Promise<string> => ipcRenderer.invoke('bim:text', path),
+  bimText: (o: { path: string; lengthUnit?: string }): Promise<string> => ipcRenderer.invoke('bim:text', o),
   bimWriteFiles: (o: { title: string; files: { name: string; data: string | Uint8Array }[] }): Promise<string[] | null> => ipcRenderer.invoke('bim:writeFiles', o),
   bimReadImport: (): Promise<(import('../core/bim/exchange4d.ts').Imported4d & { path: string }) | null> => ipcRenderer.invoke('bim:readImport'),
   lobImport: (): Promise<import('./lob.ts').LobImport | { error: string } | null> => ipcRenderer.invoke('lob:import'),

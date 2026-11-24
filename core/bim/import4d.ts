@@ -8,7 +8,8 @@ import { applyOps } from '../project/ops.ts';
 import { calendarResolver } from '../schedule/cpm.ts';
 import { linkElements, modelRow, rowLengthUnit, t4d, T4D } from './link4d.ts';
 import { resolveSet, type Imported4d } from './exchange4d.ts';
-import { LENGTH_UNITS, type IfcIndex } from './parse.ts';
+import type { IfcIndex } from './parse.ts';
+import { LENGTH_UNITS } from './units.ts';
 
 export interface ImportPlan { /** activities a task of the file matched, linked or not */ matched: Set<string>; proposals: { activity: string; guids: string[]; role?: 'removed' | 'temporary' }[]; forNew: Map<string, string[]>; unmatchedTasks: string[]; elementsNotInModel: number; /** the file's notes that hold for the attached model */ notes: string[]; /** a SYNCHRO project's 3D paths, placed (metres, to the millimetre) */ paths?: Imported4d['paths']; sets: { name: string; guids: string[] }[]; toCreate: Imported4d['tasks']; attachedSets: { name: string; known: boolean }[] }
 

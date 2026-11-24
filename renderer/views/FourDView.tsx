@@ -100,12 +100,12 @@ export function FourDPanel() {
     const key = rows(db, 'UDFTYPE').some((u) => u.table_name === 'TASK' && u.udf_type_label === '4D Key') ? '4d_key' : 'activity_id';
     const items = items4d(db, projId, m?.index ?? null, { key });
     if (!items.length && target !== 'csv') return toast('No activity has linked elements yet.');
-    const code = proj.proj_short_name, stem = (row?.path.split(/[\\/]/).pop() ?? code).replace(/\.ifc$/i, '');
+    const code = proj.proj_short_name, stem = (row?.path.split(/[\\/]/).pop() ?? code).replace(/\.(ifc|rvt|rfa|nwd|nwc|nwf|sp)$/i, '');
     const files: { name: string; data: string }[] = [];
     if (target === 'csv') files.push({ name: `${code}-4d-links.csv`, data: linksCsv(db, projId, m?.index ?? null) });
     else {
       if (!row) return toast('Attach a model first.');
-      const text = await window.p6.bimText(row.path).catch(() => null);
+      const text = await window.p6.bimText({ path: row.path, ...(row.length_unit ? { lengthUnit: row.length_unit } : {}) }).catch(() => null);
       if (text == null) return toast(`The model file ${row.path} is gone; open it again.`);
       if (target === 'ifc4d') { try { files.push({ name: `${stem}-4D-IFC4.ifc`, data: ifc4dText(db, projId, text, items, baselinesOf(projId)).text }); } catch (e) { return toast((e as Error).message); } }
       else {

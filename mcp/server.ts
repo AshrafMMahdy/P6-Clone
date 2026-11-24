@@ -1069,20 +1069,20 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         countArg(a.max_changes, 'max_changes'); countArg(a.offset, 'offset'); // (refused before the models are read)
         // (the call's progress and its cancel point while the file is read: the same steps as the tick of the tools further down)
         const tick = async (done: number, total: number, message: string) => { if (ctx.job) ctx.job.progress = message; ctx.progress?.(done, total, message); await checkpoint(ctx); };
-        const { a: sideA, b: sideB, diff: d } = await compareModel(a, s, { projectIds, allIds, tick });
+        const { a: sideA, b: sideB, diff: d, units } = await compareModel(a, s, { projectIds, allIds, tick });
         const low = (v: unknown) => String(v ?? '').toLowerCase();
         const row = (c: (typeof d.changes)[number]) => ({ kind: c.kind, guid: c.guid, ...(c.matchedGuid ? { matched_guid: c.matchedGuid } : {}), class: c.ifcClass, name: c.name, storey: c.storey, discipline: c.discipline, ...(c.system ? { system: c.system } : {}), what: c.what, detail: c.detail, confidence: c.confidence, ...(c.reason ? { reason: c.reason } : {}), ...(c.owner ? { owner: c.owner } : {}) });
         const every = d.changes.map(row);
         const listed = every.filter((c) => (a.kind == null || c.kind === a.kind) && (a.class == null || low(c.class).startsWith(low(a.class))) && (a.storey == null || low(c.storey) === low(a.storey)) && (a.discipline == null || low(c.discipline) === low(a.discipline)));
         const filtered = a.kind != null || a.class != null || a.storey != null || a.discipline != null;
         // who wrote each revision, and when (the file's own header): how a wave of new GlobalIds is told from a redesign
-        const side = (r: typeof d.revA) => ({ schema: r.schema, elements: r.elements, ...(r.header.application ? { exported_by: r.header.application } : {}), ...(r.header.timestamp ? { exported_at: r.header.timestamp } : {}) });
+        const side = (r: typeof d.revA, unit: string) => ({ schema: r.schema, elements: r.elements, length_unit: unit, ...(r.header.application ? { exported_by: r.header.application } : {}), ...(r.header.timestamp ? { exported_at: r.header.timestamp } : {}) });
         // the answer lists what moved; the whole tables (every class, every quantity) are in the result file
         const classesMoved = Object.fromEntries(Object.entries(d.byClass).filter(([, v]) => v.delta !== 0));
         const quantitiesMoved = Object.fromEntries(Object.entries(d.quantities).filter(([, q]) => q.volumeA !== q.volumeB || Object.values(q.authored).some((r) => r.a !== r.b)));
         const head = {
           compared: sides(`${sideA} (the model attached to the project)`, `${sideB} (the file)`), mode: 'model', tolerance: { metres: d.tolerance.metres, volume: d.tolerance.volume },
-          models: { a: side(d.revA), b: side(d.revB) },
+          models: { a: side(d.revA, units.a), b: side(d.revB, units.b) },
           summary: { added: d.summary.added, removed: d.summary.removed, modified: d.summary.modified, reidentified: d.summary.reidentified, unchanged: d.summary.unchanged, low_confidence: d.summary.lowConfidence },
           noise: { within_tolerance: d.noise.withinTolerance, guid_churn: d.noise.guidChurn },
           by_discipline: d.byDiscipline, by_storey: d.byStorey,

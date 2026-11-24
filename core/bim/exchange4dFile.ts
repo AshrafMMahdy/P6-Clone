@@ -2,7 +2,7 @@
 // inside), streamed from the model file to the package file: a model of any size (a 1.7 GB IFC is more than one string
 // can hold) goes through a few MB at a time. Node only; the desktop's renderer uses the text versions (exchange4d.ts).
 import { randomBytes } from 'node:crypto';
-import { closeSync, openSync, readSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { Db } from '../db.ts';
 import { ifc4dLines, linksCsvLines, tagLines, type Item4d, type StepAppend } from './exchange4d.ts';
@@ -62,37 +62,48 @@ const SI_PREFIX: Record<LengthUnit, string | null> = { mm: '.MILLI.', cm: '.CENT
 const CONVERSION: Record<LengthUnit, [string, number] | null> = { mm: null, cm: null, m: null, in: ['INCH', 0.0254], ft: ['FOOT', 0.3048] };
 
 /** The copy's length unit made the caller's (open_model length_unit: the unit the caller says the file's numbers are in), so the program
- *  the package goes to draws it at that size: the length unit the project assigns is written again as the caller's (by its id: whatever
- *  names it now names the caller's), else the caller's is added to the project's unit assignment, else the project is given one. */
+ *  the package goes to draws it at that size: the length unit the project's unit assignment holds is written again as the caller's (by
+ *  its id: whatever names it now names the caller's), else the caller's is added to that assignment, else the project is given one (a
+ *  unit assignment the project does not name is not in force: IFC's SI units are, as web-ifc and the clone read it). */
 export async function lengthUnitEdit(src: string, unit: LengthUnit, t: StepAppend & { end: number }): Promise<StepEdit> {
-  let project: { id: number; args: string } | null = null;
+  let project: number | null = null;
   const assignments = new Map<number, string>(), lengthUnits = new Set<number>();
   await scanEntities(src, (id, type, args) => {
-    if (type === 'IFCPROJECT' && !project) project = { id, args };
+    if (type === 'IFCPROJECT') project ??= id;
     else if (type === 'IFCUNITASSIGNMENT') assignments.set(id, args);
     else if ((type === 'IFCSIUNIT' || type === 'IFCCONVERSIONBASEDUNIT') && /^\s*[^,]*,\s*\.LENGTHUNIT\./.test(args)) lengthUnits.add(id);
   });
-  const p = project as { id: number; args: string } | null;
-  if (!p) throw new Error('The model has no IfcProject, so the length unit it was opened with cannot be stated in the copy.');
+  const p = project as number | null;
+  if (p == null) throw new Error('The model has no IfcProject, so the length unit it was opened with cannot be stated in the copy.');
   const lines: string[] = [];
   const add = (body: string) => { const id = t.nextId(); lines.push(`#${id}=${body};`); return id; };
   const conv = CONVERSION[unit];
   const unitBody = () => conv
     ? `IFCCONVERSIONBASEDUNIT(#${add('IFCDIMENSIONALEXPONENTS(1,0,0,0,0,0,0)')},.LENGTHUNIT.,'${conv[0]}',#${add(`IFCMEASUREWITHUNIT(IFCLENGTHMEASURE(${conv[1]}),#${add('IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)')})`)})`
     : `IFCSIUNIT(*,.LENGTHUNIT.,${SI_PREFIX[unit]},.METRE.)`;
-  // the project's last attribute is its unit assignment (IfcProject.UnitsInContext); one it does not name is the first in the file, as the
-  // reader takes it (stepIndex.ts): then the project is given one of those units, the caller's length unit in place of its own
-  const cut = lastTopLevelComma(p.args), named = Number(/^\s*#(\d+)\s*$/.exec(p.args.slice(cut + 1))?.[1]);
-  const ua = assignments.has(named) ? named : assignments.keys().next().value;
-  const members = ua != null ? [...assignments.get(ua)!.matchAll(/#(\d+)/g)].map((m) => Number(m[1])) : [];
-  const length = members.find((id) => lengthUnits.has(id));
+  const at = (id: number) => statementAt(src, id, t.end) ?? fail(id);
+  // the project as its own bytes (its name may be any text: written back byte for byte); its last attribute is UnitsInContext
+  const ps = at(p), raw = bytesOf(src, ps), open = raw.indexOf('('), close = raw.lastIndexOf(')'), args = raw.slice(open + 1, close);
+  const cut = lastTopLevelComma(args), named = Number(/^\s*#(\d+)\s*$/.exec(args.slice(cut + 1))?.[1]);
+  const members = assignments.has(named) ? [...assignments.get(named)!.matchAll(/#(\d+)/g)].map((m) => Number(m[1])) : null;
+  const length = members?.find((id) => lengthUnits.has(id));
   const list = (ids: number[]) => `IFCUNITASSIGNMENT((${ids.map((x) => `#${x}`).join(',')}))`;
-  const [id, text] = ua === named && length != null ? [length, unitBody()]
-    : ua === named ? [named, list([...members, add(unitBody())])]
-      : [p.id, `IFCPROJECT(${p.args.slice(0, cut)},#${add(list([...members.filter((x) => x !== length), add(unitBody())]))})`];
-  const at = statementAt(src, id, t.end);
-  if (!at) throw new Error(`Statement #${id} (the model's units) was not found where a statement starts, so the length unit it was opened with cannot be stated in the copy.`);
-  return { ...at, text: `#${id}=${text};`, lines };
+  if (members && length != null) return { ...at(length), text: `#${length}=${unitBody()};`, lines };
+  if (members) return { ...at(named), text: `#${named}=${list([...members, add(unitBody())])};`, lines };
+  return { ...ps, text: `${raw.slice(0, open + 1)}${args.slice(0, cut)},#${add(list([add(unitBody())]))}${raw.slice(close)}`, lines };
+}
+const fail = (id: number): never => { throw new Error(`Statement #${id} (the model's units) was not found where a statement starts, so the length unit it was opened with cannot be stated in the copy.`); };
+/** The bytes of a stretch of the file, one character each (latin1: written back as they are). */
+function bytesOf(path: string, r: { at: number; end: number }): string {
+  const fd = openSync(path, 'r'), b = Buffer.alloc(r.end - r.at);
+  try { readSync(fd, b, 0, b.length, r.at); return b.toString('latin1'); } finally { closeSync(fd); }
+}
+
+/** The model file's text (latin1: a character a byte) with its length unit stated as the caller's (lengthUnitEdit): what the desktop's
+ *  4D export (exchange4d.ts, on text) starts from. */
+export async function statedText(src: string, unit: LengthUnit): Promise<string> {
+  const t = stepAppendOf(src), e = await lengthUnitEdit(src, unit, t), text = readFileSync(src, 'latin1');
+  return text.slice(0, e.at) + e.text + text.slice(e.end, t.end) + e.lines.map((l) => l + t.nl).join('') + text.slice(t.end);
 }
 
 /** Where the last top-level comma of an argument list is (strings and nested lists skipped). */

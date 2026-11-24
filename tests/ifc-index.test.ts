@@ -46,6 +46,19 @@ test('the length unit is the one the project assigns, not the last one defined (
   assert.equal((await stepIndex(p)).index.lengthScale, 0.001);
 });
 
+test('a conversion-based length unit is its measure\u2019s value in the measure\u2019s unit, whatever its name (as web-ifc scales the geometry)', async () => {
+  const conv = (name: string, f: string, si: string) => write(ifc(`#5=${si};\n#6=IFCMEASUREWITHUNIT(IFCLENGTHMEASURE(${f}),#5);\n#4=IFCDIMENSIONALEXPONENTS(1,0,0,0,0,0,0);\n#7=IFCCONVERSIONBASEDUNIT(#4,.LENGTHUNIT.,'${name}',#6);`, "#30=IFCWALL('3YvctVUKr0kugbFTf53O9L',$,'W',$,$,$,$,$);\n#31=IFCSLAB('4YvctVUKr0kugbFTf53O9L',$,'S',$,$,$,$,$,.FLOOR.);"));
+  assert.equal((await stepIndex(conv('FEET', '0.3048', 'IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)'))).index.lengthScale, 0.3048, 'a name the reader has no list for');
+  assert.equal((await stepIndex(conv('FOOT', '304.8', 'IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)'))).index.lengthScale, 0.3048, 'the factor in millimetres');
+  assert.equal((await stepIndex(conv('INCH', '1.', 'IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)'))).index.lengthScale, 1, 'the factor, not the name');
+});
+
+test('a unit assignment the project does not name is not in force: IFC\u2019s SI units are (as web-ifc draws it)', async () => {
+  const p = write(ifc('#7=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);', "#30=IFCWALL('3YvctVUKr0kugbFTf53O9L',$,'W',$,$,$,$,$);\n#31=IFCSLAB('4YvctVUKr0kugbFTf53O9L',$,'S',$,$,$,$,$,.FLOOR.);").replace("$,$,$,$,#9);", '$,$,$,$,$);'));
+  const ix = (await stepIndex(p)).index;
+  assert.deepEqual([ix.lengthScale, ix.lengthScaleSource, ix.units?.length], [1, 'assumed-m', undefined]);
+});
+
 const SCHEP = join(import.meta.dirname, '..', 'sample 4D', 'ifc-models', 'schependomlaan', 'IFC Schependomlaan.ifc');
 test('a millimetre model (Schependomlaan): every product, and geometry in metres', { skip: !existsSync(SCHEP) && 'Schependomlaan sample not present', timeout: 600_000 }, async () => {
   const { loadModel } = await import('../core/bim/model.ts');

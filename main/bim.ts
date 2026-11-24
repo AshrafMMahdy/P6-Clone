@@ -5,7 +5,9 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { cachedModel, loadModel, type Model } from '../core/bim/model.ts';
+import { cachedModel, ifcOf, loadModel, type Model } from '../core/bim/model.ts';
+import { statedText } from '../core/bim/exchange4dFile.ts';
+import { isNavisworks } from '../core/bim/nwd.ts';
 import { isLengthUnit } from '../core/bim/parse.ts';
 import { modelFolder, viewerHtml, viewerScriptPath } from '../core/bim/render4d.ts';
 import { placeTiles } from '../core/bim/tiles.ts';
@@ -60,7 +62,12 @@ export function registerBim(getWin: () => BrowserWindow | null): void {
     const lengthUnit = isLengthUnit(o.lengthUnit) ? o.lengthUnit : undefined;
     try { const c = cachedModel(o.hash), m = c && c.index.geometryStatus !== 'skipped' ? c : existsSync(o.path) ? await loadModel(o.path, lengthUnit ? { lengthUnit } : {}) : c; /* an index cached without geometry (an agent reopened it for links) is meshed for the view */ if (!m) return { ok: false, error: `The model ${o.path} is not cached and the file is gone; open it again.` }; viewerFolder(m); return { ok: true, ...answer(m) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
-  ipcMain.handle('bim:text', (_e, path: string) => readFileSync(path, 'latin1'));
+  // the model's IFC as text for the 4D packages: the IFC a Revit, Navisworks or SYNCHRO file was made into, and a unit an agent gave the
+  // model (open_model length_unit) stated in it (a Navisworks model's IFC is made in metres by it)
+  ipcMain.handle('bim:text', async (_e, o: { path: string; lengthUnit?: string }) => {
+    const unit = isLengthUnit(o.lengthUnit) ? o.lengthUnit : undefined, ifc = await ifcOf(o.path, unit);
+    return unit && !isNavisworks(o.path) ? statedText(ifc, unit) : readFileSync(ifc, 'latin1');
+  });
   ipcMain.handle('bim:writeFiles', async (_e, o: { title: string; files: { name: string; data: string | Uint8Array }[] }) => {
     const r = await dialog.showOpenDialog(getWin()!, { title: o.title, properties: ['openDirectory', 'createDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;

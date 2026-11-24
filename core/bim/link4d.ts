@@ -5,7 +5,8 @@
 import { addField, nextId, rows, table, type Db, type Row } from '../db.ts';
 import { realOf } from '../journal.ts';
 import { elementsByGuid, ordinalOf } from './lookup.ts';
-import { isLengthUnit, type IfcElement, type IfcIndex, type LengthUnit } from './parse.ts';
+import type { IfcElement, IfcIndex } from './parse.ts';
+import { isLengthUnit, type LengthUnit } from './units.ts';
 
 export const T4D = { model: '_4D_MODEL', link: '_4D_LINK', rule: '_4D_RULE', set: '_4D_SET', status: '_4D_STATUS', view: '_4D_VIEW' } as const;
 const FIELDS: Record<string, string[]> = {

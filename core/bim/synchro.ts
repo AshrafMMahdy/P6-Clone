@@ -315,7 +315,6 @@ export function container(file: Uint8Array, notes: string[], names: string[] = W
   return { version, schema, tables };
 }
 
-/** Format level from the version string, raised by the schema number (the 5.5 Scheduler is laid out like 6.0). */
 /** The 3D world's unit, from the settings row (its magic, 16 bytes, 8 from 6.0, a GUID, a double, then the unit setting):
  *  1 is millimetres and 3 metres, the only settings seen in files (11 of them, 5.1 to 6.5, each checked against the sizes
  *  of its objects). Any other setting, or none, is taken as metres and said to be assumed (owner, 2026-11-24). */
@@ -325,6 +324,7 @@ export function worldUnit(ws: Buffer | undefined, v: number): { scale: number; u
   return setting === 1 ? { scale: 0.001, units: 'mm', setting } : setting === 3 ? { scale: 1, units: 'm', setting } : { scale: 1, units: 'assumed-m', setting };
 }
 
+/** Format level from the version string, raised by the schema number (the 5.5 Scheduler is laid out like 6.0). */
 export function level(version: string, schema: number): number {
   const [a, b] = version.split('.').map(Number);
   const fromVersion = a * 10 + (b || 0) || 0;

@@ -61,6 +61,16 @@ test('a file that states the wrong unit, read by the caller’s: the sizes, the 
   assert.equal(syn.err, false, JSON.stringify(syn.d).slice(0, 400));
   const copy = syn.d.written.find((f: string) => f.endsWith('-4D.ifc'));
   assert.deepEqual([(await stepIndex(copy)).index.lengthScale, (await stepIndex(copy)).index.lengthScaleSource], [0.001, 'unit-assignment']);
+  // relink_model and compare {model} say the unit each revision is read in
+  const rl = (await call('relink_model', { handle: h, path: ifc, length_unit: 'mm', dry_run: true })).d;
+  assert.deepEqual([rl.length_unit, rl.attached_length_unit, rl.kept], ['mm (given by the caller; the file states m)', 'mm (given by the caller; the file states m)', 1]);
+  const cm = (await call('compare', { handle: h, model: ifc })).d;
+  assert.deepEqual([cm.models.a.length_unit, cm.models.b.length_unit], ['mm (given by the caller; the file states m)', 'm (the file\u2019s own)']);
+  // the desktop's 4D export starts from the model's text with the unit stated
+  const { statedText } = await import('../core/bim/exchange4dFile.ts');
+  const st = join(mkdtempSync(join(tmpdir(), 'p6-unit-s-')), 'stated.ifc');
+  writeFileSync(st, await statedText(ifc, 'in'), 'latin1');
+  assert.deepEqual([(await stepIndex(st)).index.lengthScale, (await stepIndex(st)).index.elements.length], [0.0254, 1]);
   // feet: a conversion-based unit in the copy
   await call('open_model', { handle: h, owner_key, path: ifc, length_unit: 'ft' });
   assert.deepEqual(size((await call('element_info', { handle: h, guids: [guid] })).d.elements[0].bbox), [304.8, 609.6, 914.4]);
@@ -74,17 +84,18 @@ test('a file that states the wrong unit, read by the caller’s: the sizes, the 
 });
 
 test('a file that states no unit (no unit assignment, or one without a length): the caller’s, and the delivered IFC is given it', { timeout: 600_000 }, async () => {
-  // no unit assignment at all: the project names none
-  const none = boxIfc('none.ifc', (t) => t.replace(/(IFCPROJECT\([^\n]*),#\d+\);/, '$1,$);').replace(/^#\d+=IFCUNITASSIGNMENT\(.*\n/m, ''));
+  // no unit assignment at all: the project names none (and its name is UTF-8 text, kept byte for byte in the copy)
+  const utf8Name = Buffer.from('Bâtiment é', 'utf8').toString('latin1');
+  const none = boxIfc('none.ifc', (t) => t.replace(/(IFCPROJECT\([^\n]*),#\d+\);/, '$1,$);').replace(/^#\d+=IFCUNITASSIGNMENT\(.*\n/m, '').replace("$,'Box',$", `$,'${utf8Name}',$`));
   // an assignment with an area and a volume unit, no length unit
   const noLength = boxIfc('nolength.ifc', (t) => t.replace(/IFCUNITASSIGNMENT\(\(#\d+,/, 'IFCUNITASSIGNMENT(('));
-  // an assignment the project does not name (the reader takes the first in the file)
-  const orphan = boxIfc('orphan.ifc', (t) => t.replace(/(IFCPROJECT\([^\n]*),#\d+\);/, '$1,$);'));
+  // an assignment the project does not name: not in force (IFC's SI units are, as web-ifc draws it)
+  const orphan = boxIfc('orphan.ifc', (t) => t.replace(/(IFCPROJECT\([^\n]*),#\d+\);/, '$1,$);').replace('IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)', 'IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)'));
   const cases = [
     // (the box's 3000 is past the 2000 the reader takes for millimetres when a file states no unit)
-    { path: none, unit: 'cm', plain: 'mm (the file states no unit; its coordinates are millimetre-sized)', text: 'cm (given by the caller; the file states no unit)', units: ['cm', 'cm²', 'cm³'] },
+    { path: none, unit: 'cm', plain: 'mm (the file states no unit; its coordinates are millimetre-sized)', text: 'cm (given by the caller; the file states no unit)', units: ['cm', 'm²', 'm³'] },
     { path: noLength, unit: 'mm', plain: 'mm (the file states no unit; its coordinates are millimetre-sized)', text: 'mm (given by the caller; the file states no unit)', units: ['mm', 'm²', 'm³'] },
-    { path: orphan, unit: 'mm', plain: 'm (the file\u2019s own)', text: 'mm (given by the caller; the file states m)', units: ['mm', 'm²', 'm³'] },
+    { path: orphan, unit: 'mm', plain: 'mm (the file states no unit; its coordinates are millimetre-sized)', text: 'mm (given by the caller; the file states no unit)', units: ['mm', 'm²', 'm³'] },
   ];
   for (const { path, unit, plain, text, units } of cases) {
     const np = (await call('new_project', { id: 'NU', start: '2027-01-04' })).d, h = np.handle, owner_key = np.owner_key;
@@ -95,7 +106,7 @@ test('a file that states no unit (no unit assignment, or one without a length): 
     const guid = (await call('list_elements', { handle: h })).d.elements[0].guid;
     assert.deepEqual(size((await call('element_info', { handle: h, guids: [guid] })).d.elements[0].bbox), unit === 'cm' ? [10, 20, 30] : [1, 2, 3]);
     const q = (await call('quantities', { handle: h, kind: 'length' })).d.units;
-    // with no unit assignment the area and volume follow the caller's; with one, they stay what it assigns
+    // the caller's unit is the length's: areas and volumes stay what the file assigns, or IFC's SI unit
     assert.deepEqual([q.length, q.area, q.volume], units, path);
     await call('link_elements', { handle: h, owner_key, links: [{ activity: 'D1', guids: [guid] }] });
     const x = await call('export_4d', { handle: h, target: 'navisworks', path: mkdtempSync(join(tmpdir(), 'p6-unit-n-')) });
@@ -103,6 +114,7 @@ test('a file that states no unit (no unit assignment, or one without a length): 
     const copy = x.d.written.find((f: string) => f.endsWith('-4D.ifc'));
     const ix = (await stepIndex(copy)).index;
     assert.deepEqual([ix.lengthScale, ix.lengthScaleSource], [unit === 'cm' ? 0.01 : 0.001, 'unit-assignment'], path);
+    if (path === none) assert.ok(readFileSync(copy, 'latin1').includes(`'${utf8Name}'`), 'the project\u2019s name as its bytes');
   }
 });
 
