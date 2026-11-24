@@ -114,7 +114,7 @@ export const geomStore = (ix: IfcIndex): GeomStore | null => { const e = ix.elem
 
 /** Room for the fingerprints of n elements (none yet: NaN). */
 export function allocGeometry(st: GeomStore, n: number): void { st.rows = new Float32Array(n * GEOM_STRIDE).fill(Number.NaN); }
-/** One element's fingerprint, in the model's units (scaleGeometry turns millimetres into metres afterwards). The first
+/** One element's fingerprint, in the reader's metres (scaleGeometry applies a caller's unit afterwards). The first
  *  fingerprint fixes the origin: float32 offsets from it keep a tenth of a millimetre over kilometres, where absolute
  *  float32 coordinates of a georeferenced model (500,000 m east) would be centimetres off. */
 export function putGeometry(st: GeomStore, ordinal: number, bbox: ArrayLike<number>, centroid: ArrayLike<number>, volume: number, triangles: number): void {
@@ -124,7 +124,7 @@ export function putGeometry(st: GeomStore, ordinal: number, bbox: ArrayLike<numb
   r[k] = bbox[0] - ox; r[k + 1] = bbox[1] - oy; r[k + 2] = bbox[2] - oz; r[k + 3] = bbox[3] - ox; r[k + 4] = bbox[4] - oy; r[k + 5] = bbox[5] - oz;
   r[k + 6] = centroid[0] - ox; r[k + 7] = centroid[1] - oy; r[k + 8] = centroid[2] - oz; r[k + 9] = volume; r[k + 10] = triangles;
 }
-/** Model units to metres (a model with no unit and millimetre coordinates). */
+/** The reader's metres to the caller's (open_model length_unit: the unit the caller says the file's numbers are in). */
 export function scaleGeometry(st: GeomStore, s: number): void {
   const r = st.rows; if (!r || s === 1) return;
   for (let k = 0; k < r.length; k += GEOM_STRIDE) { if (Number.isNaN(r[k])) continue; for (let j = 0; j < 9; j++) r[k + j] *= s; r[k + 9] *= s ** 3; }

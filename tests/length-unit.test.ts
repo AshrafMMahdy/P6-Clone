@@ -92,10 +92,9 @@ test('a file that states no unit (no unit assignment, or one without a length): 
   // an assignment the project does not name: not in force (IFC's SI units are, as web-ifc draws it)
   const orphan = boxIfc('orphan.ifc', (t) => t.replace(/(IFCPROJECT\([^\n]*),#\d+\);/, '$1,$);').replace('IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)', 'IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)'));
   const cases = [
-    // (the box's 3000 is past the 2000 the reader takes for millimetres when a file states no unit)
-    { path: none, unit: 'cm', plain: 'mm (the file states no unit; its coordinates are millimetre-sized)', text: 'cm (given by the caller; the file states no unit)', units: ['cm', 'm²', 'm³'] },
-    { path: noLength, unit: 'mm', plain: 'mm (the file states no unit; its coordinates are millimetre-sized)', text: 'mm (given by the caller; the file states no unit)', units: ['mm', 'm²', 'm³'] },
-    { path: orphan, unit: 'mm', plain: 'mm (the file states no unit; its coordinates are millimetre-sized)', text: 'mm (given by the caller; the file states no unit)', units: ['mm', 'm²', 'm³'] },
+    { path: none, unit: 'cm', plain: 'm (assumed: the file states no unit)', text: 'cm (given by the caller; the file states no unit)', units: ['cm', 'm²', 'm³'] },
+    { path: noLength, unit: 'mm', plain: 'm (assumed: the file states no unit)', text: 'mm (given by the caller; the file states no unit)', units: ['mm', 'm²', 'm³'] },
+    { path: orphan, unit: 'mm', plain: 'm (assumed: the file states no unit)', text: 'mm (given by the caller; the file states no unit)', units: ['mm', 'm²', 'm³'] },
   ];
   for (const { path, unit, plain, text, units } of cases) {
     const np = (await call('new_project', { id: 'NU', start: '2027-01-04' })).d, h = np.handle, owner_key = np.owner_key;

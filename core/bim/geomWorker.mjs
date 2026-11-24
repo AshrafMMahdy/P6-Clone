@@ -11,7 +11,7 @@
  *   <out>/elems.meta   Float64Array, 13 numbers per meshed element: ordinal, vertices, triangles, volume, bbox (6),
  *                      centroid (3), in model units, from the placed meshes. The volume is NaN when a mesh of the
  *                      element is open (a surface, a pipe without its ends): such a mesh encloses no volume to measure
- *   <out>/geom.json    { elements, placements, meshes, failures, maxAbsCoord, peakRssMb }
+ *   <out>/geom.json    { elements, placements, meshes, failures, peakRssMb }
  * The element ordinal is the product's place in <products.bin> (the sorted express ids of the model's products: the
  * order of the index), so a chunk of the model maps back to the whole.
  * Usage: node geomWorker.mjs <ifc> <outDir> <memoryLimitGB> <products.bin>
@@ -44,7 +44,7 @@ step('meshing products', { expect: work });
 const geomFd = openSync(join(outDir, 'geoms.bin'), 'w');
 const placesFd = openSync(join(outDir, 'places.bin'), 'w');
 const elemsFd = openSync(join(outDir, 'elems.meta'), 'w');
-let offset = 0, elements = 0, placements = 0, failures = 0, maxAbsCoord = 0;
+let offset = 0, elements = 0, placements = 0, failures = 0;
 const meshKey = new Map(); // content key -> mesh number
 const meshMeta = []; // 4 per mesh
 const meshClosed = []; // per mesh
@@ -103,7 +103,6 @@ try {
           const tx = m[0] * x + m[4] * y + m[8] * z + m[12], ty = m[1] * x + m[5] * y + m[9] * z + m[13], tz = m[2] * x + m[6] * y + m[10] * z + m[14];
           w[vi * 3] = tx; w[vi * 3 + 1] = ty; w[vi * 3 + 2] = tz;
           sx += tx; sy += ty; sz += tz;
-          const a = Math.max(Math.abs(tx), Math.abs(ty), Math.abs(tz)); if (a > maxAbsCoord) maxAbsCoord = a;
           if (tx < minx) minx = tx; if (ty < miny) miny = ty; if (tz < minz) minz = tz;
           if (tx > maxx) maxx = tx; if (ty > maxy) maxy = ty; if (tz > maxz) maxz = tz;
         }
@@ -133,6 +132,6 @@ try {
 }
 writeFileSync(join(outDir, 'geoms.meta'), new Uint8Array(new Float64Array(meshMeta).buffer));
 const peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
-writeFileSync(join(outDir, 'geom.json'), JSON.stringify({ elements, placements, meshes: meshMeta.length / 4, failures, maxAbsCoord, geomBytes: offset, peakRssMb }));
+writeFileSync(join(outDir, 'geom.json'), JSON.stringify({ elements, placements, meshes: meshMeta.length / 4, failures, geomBytes: offset, peakRssMb }));
 console.log(`[geomWorker] ${elements} meshed elements, ${placements} placed meshes of ${meshMeta.length / 4} distinct, ${failures} failures, ${Math.round(offset / 1048576)} MB geometry, peak rss ${peakRssMb} MB`);
 process.exit(0);

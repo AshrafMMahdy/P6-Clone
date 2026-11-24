@@ -100,7 +100,7 @@ export function readNative(parts: NativePart[], o: { dir?: string; maxBytes?: nu
 function geometryOut(dir: string) {
   const geoms = join(dir, 'geoms.bin'), gfd = openSync(geoms, 'w+'), pfd = openSync(join(dir, 'places.bin'), 'w+');
   const meta: number[] = [], shut: boolean[] = [];
-  let offset = 0, placements = 0, maxAbsCoord = 0;
+  let offset = 0, placements = 0;
   let acc = new Float64Array(ACC * 1024);
   const boxCount = new Map<number, number>();
   const placeBuf = new Float64Array(PLACE * 4096);
@@ -145,7 +145,6 @@ function geometryOut(dir: string) {
       const tx = m[0] * x + m[4] * y + m[8] * z + m[12], ty = m[1] * x + m[5] * y + m[9] * z + m[13], tz = m[2] * x + m[6] * y + m[10] * z + m[14];
       w[v * 3] = tx; w[v * 3 + 1] = ty; w[v * 3 + 2] = tz;
       acc[a + 9] += tx; acc[a + 10] += ty; acc[a + 11] += tz;
-      const big = Math.max(Math.abs(tx), Math.abs(ty), Math.abs(tz)); if (big > maxAbsCoord) maxAbsCoord = big;
       if (tx < acc[a + 3]) acc[a + 3] = tx; if (ty < acc[a + 4]) acc[a + 4] = ty; if (tz < acc[a + 5]) acc[a + 5] = tz;
       if (tx > acc[a + 6]) acc[a + 6] = tx; if (ty > acc[a + 7]) acc[a + 7] = ty; if (tz > acc[a + 8]) acc[a + 8] = tz;
     }
@@ -253,7 +252,7 @@ function geometryOut(dir: string) {
       }
       writeFileSync(join(dir, 'elems.meta'), new Uint8Array(new Float64Array(rows).buffer));
       const meshed = rows.length / 13;
-      writeFileSync(join(dir, 'geom.json'), JSON.stringify({ elements: meshed, placements, meshes: shut.length, failures: 0, maxAbsCoord, geomBytes: offset }));
+      writeFileSync(join(dir, 'geom.json'), JSON.stringify({ elements: meshed, placements, meshes: shut.length, failures: 0, geomBytes: offset }));
       return meshed;
     },
   };

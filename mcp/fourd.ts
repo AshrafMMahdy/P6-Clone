@@ -104,7 +104,6 @@ function lengthUnitWords(m: Model): string {
       : ix.lengthScaleSource === 'caller' ? (ix.statedLength === 'none' ? 'no unit' : ix.statedLength ?? 'no unit')
         : ix.lengthScaleSource === 'unit-assignment' ? ix.units?.length ?? `${ix.lengthScale} m` : 'no unit';
   if (ix.lengthScaleSource === 'caller') return `${ix.lengthUnit} (given by the caller; the file states ${own})`;
-  if (ix.lengthScaleSource === 'heuristic-mm') return 'mm (the file states no unit; its coordinates are millimetre-sized)';
   if (ix.lengthScaleSource === 'assumed-m' || (src?.format === 'SYNCHRO' && src.units === 'assumed-m')) return `m (assumed: the file states ${own})`;
   return src?.format === 'Navisworks' ? `m (made from each file\u2019s: ${own})` : `${own} (the file\u2019s own)`;
 }

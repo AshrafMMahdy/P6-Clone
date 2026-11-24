@@ -69,8 +69,9 @@ export interface IfcIndex {
   schema: string;
   /** the model's numbers to metres */
   lengthScale: number;
-  /** where lengthScale came from: the file's unit assignment; none, taken as metres; none, millimetre-sized coordinates; the caller (open_model length_unit) */
-  lengthScaleSource: 'unit-assignment' | 'heuristic-mm' | 'assumed-m' | 'caller';
+  /** where lengthScale came from: the file's unit assignment; none, taken as metres (IFC's SI unit: the agent measures and states the
+   *  unit when that is wrong, owner 2026-11-24); the caller (open_model length_unit) */
+  lengthScaleSource: 'unit-assignment' | 'assumed-m' | 'caller';
   /** the caller's length unit (lengthScaleSource caller), the length unit the file itself states then ("none" when it states none), and
    *  the factor the reader's geometry still takes to be in metres by it (web-ifc gives metres by the file's own unit; the Navisworks reader
    *  places by the caller's) */
@@ -199,10 +200,9 @@ export async function meshWith(index: IfcIndex, opts: ParseIfcOptions, build: (o
       index.meshedElements = 0;
       return;
     }
-    if (index.lengthScaleSource === 'assumed-m' && run.maxAbsCoord > 2000) { index.lengthScale = 0.001; index.lengthScaleSource = 'heuristic-mm'; }
-    // web-ifc already gives metres when the file declares its unit; a model with no unit and millimetre-sized coordinates (the heuristic
-    // above), or one whose unit the caller states, is scaled here (the tiles carry the scale for the viewer)
-    const S = index.meshScale ?? (index.lengthScaleSource === 'heuristic-mm' ? 0.001 : 1);
+    // web-ifc already gives metres by the unit the file declares; a model whose unit the caller states is scaled here (the tiles carry
+    // the scale for the viewer)
+    const S = index.meshScale ?? 1;
     if (store) scaleGeometry(store, S);
     index.geometryFailures = run.failures;
     index.meshedElements = run.meshed;
@@ -223,7 +223,7 @@ export async function meshWith(index: IfcIndex, opts: ParseIfcOptions, build: (o
 }
 
 // ── geometry worker ───────────────────────────────────────────────────────────────────────────────────────────
-interface RunSummary { elements: number; placements: number; meshes: number; failures: number; maxAbsCoord: number; geomBytes: number; peakRssMb?: number }
+interface RunSummary { elements: number; placements: number; meshes: number; failures: number; geomBytes: number; peakRssMb?: number }
 
 // a child's own JS heap is small (typed arrays and WASM live outside it); the ceiling only keeps a runaway child from
 // growing past what the machine has
@@ -265,7 +265,7 @@ function workerScript(opts: ParseIfcOptions): string | null {
 }
 
 export type Run = { ok: true; note?: string } | { ok: false; note: string; stuck?: StuckData };
-export type Built = { ok: true; note?: string; meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[]; stuck?: StuckData } | { ok: false; note: string; stuck?: StuckData };
+export type Built = { ok: true; note?: string; meshed: number; failures: number; tiles: TileRecord[]; stuck?: StuckData } | { ok: false; note: string; stuck?: StuckData };
 
 /** IFC bytes one geometry run takes on: the option, else P6CLONE_GEOM_CHUNK_MB (300). */
 export const chunkBytesOf = (opts: ParseIfcOptions = {}) => Math.max(1 << 16, opts.chunkBytes ?? (Number(process.env.P6CLONE_GEOM_CHUNK_MB) || 300) * 1048576);
@@ -379,8 +379,8 @@ const engineDigest = (text: string) => createHash('sha256').update(text).digest(
 /** The engine this installation meshes with (kept.json's engine: a kept chunk of another one is not taken); null without a worker. */
 export function meshEngine(opts: ParseIfcOptions = {}): string | null { const s = workerScript(opts); return s ? engineDigest(engineText(s)) : null; }
 
-export type RunState = { meshed: number; failures: number; maxAbsCoord: number; tiles: TileRecord[]; stuck?: StuckData };
-export const newRunState = (): RunState => ({ meshed: 0, failures: 0, maxAbsCoord: 0, tiles: [] });
+export type RunState = { meshed: number; failures: number; tiles: TileRecord[]; stuck?: StuckData };
+export const newRunState = (): RunState => ({ meshed: 0, failures: 0, tiles: [] });
 
 /** A run's fingerprints (dir: geom.json, elems.meta) into the index, and its counts into the state. */
 function absorbFingerprints(dir: string, index: IfcIndex, state: RunState): void {
@@ -393,7 +393,7 @@ function absorbFingerprints(dir: string, index: IfcIndex, state: RunState): void
     if (store) putGeometry(store, o, rows.subarray(k + 4, k + 10), rows.subarray(k + 10, k + 13), rows[k + 3], rows[k + 2]);
     else { const e = index.elements[o] as IfcElement & { geom: GeomFingerprint | null; derivedVolumeM3: number | null }; if (e) { e.geom = { bbox: [...rows.subarray(k + 4, k + 10)] as GeomFingerprint['bbox'], centroid: [...rows.subarray(k + 10, k + 13)] as GeomFingerprint['centroid'], volume: rows[k + 3], triangles: rows[k + 2] }; e.derivedVolumeM3 = Number.isNaN(rows[k + 3]) ? null : rows[k + 3]; } }
   }
-  state.meshed += sum.elements; state.failures += sum.failures; state.maxAbsCoord = Math.max(state.maxAbsCoord, sum.maxAbsCoord);
+  state.meshed += sum.elements; state.failures += sum.failures;
 }
 
 /** A run in the geometry worker's layout (dir: geom.json, elems.meta, geoms.*, places.bin) taken in: its fingerprints
