@@ -14,7 +14,7 @@ import { baselineWouldDuplicate, fieldNotUsed } from '../notes.ts';
 import { findLoops, MAX_LEN } from '../xer/validate.ts';
 import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
-import { calendarDefOfRow, parseClndrData, scheduledCalendarDef, serializeClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
+import { calendarDefOfRow, inheritExceptions, parseClndrData, scheduledCalendarDef, serializeClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { assignResource, assignmentActuals, fitAssignmentsToDuration, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { copyProject } from './copy.ts';
 import { dayHours as dayHoursOf } from './units.ts';
@@ -313,6 +313,8 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
         try { want = currencyRow(op.currency as CurrencySpec).curr_short_name; } catch (e) { fail((e as Error).message); }
         const had = currencyId(db);
         if (had && had !== want!) fail(`The file's base currency is ${had}: every project of a file keeps its costs in it (P6 has one base currency). Leave currency out, or change it for the whole file with set_currency.`);
+        const n = rows(db, 'CURRTYPE').length;
+        if (!had && n) fail(`The file has ${n} currencies and does not say which is its base one, so it cannot be given ${want!}: leave currency out (the project's costs are in the file's base currency, as every project's are).`);
       }
       const pid = newProject(db, { id, name: typeof op.name === 'string' ? op.name : id, start: date(op.start, 'start'), ...(op.currency != null ? { currency: op.currency as CurrencySpec } : {}) });
       if (op.must_finish_by) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.plan_end_date = date(op.must_finish_by, 'must_finish_by');
@@ -373,7 +375,16 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
       }
       const from = op.copy_from != null ? calendar(op.copy_from) : null;
       let def: CalendarDef = { week: DAYS.map((): Shift[] => []), exceptions: new Map() };
-      if (from) { try { def = calendarDefOfRow(from); } catch (e) { fail(`Calendar "${from.clndr_name}" cannot be copied: its data cannot be read (${(e as Error).message}).`); } }
+      // a project or resource calendar observes the holidays and exceptions of its base calendar too (its own win): the copy, a calendar of
+      // its own with no base, carries all it observes
+      const observed = (r: Row, seen: Set<string>): CalendarDef => {
+        let d!: CalendarDef;
+        try { d = calendarDefOfRow(r); } catch (e) { fail(`Calendar "${from!.clndr_name}" cannot be copied: the data of ${r === from ? 'it' : `its base calendar "${r.clndr_name}"`} cannot be read (${(e as Error).message}).`); }
+        seen.add(r.clndr_id);
+        const b = r.base_clndr_id && !seen.has(r.base_clndr_id) ? rows(db, 'CALENDAR').find((c) => c.clndr_id === r.base_clndr_id) : undefined;
+        return b ? inheritExceptions(d, observed(b, seen)) : d;
+      };
+      if (from) def = observed(from, new Set());
       if (op.work_week != null) {
         if (typeof op.work_week !== 'object') fail('"work_week" must map days (sun..sat) to lists of ["08:00","17:00"] periods.');
         def.week = DAYS.map(() => []);

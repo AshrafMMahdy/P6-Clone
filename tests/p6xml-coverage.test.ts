@@ -509,7 +509,7 @@ test('the ERMHDR line: a currency only the header names is written as the base C
   db.header = { version: '8.4.0', exportDate: '2026-01-02', raw: ['ERMHDR', '8.4.0', '2026-01-02', 'Project', 'jdoe', 'John Doe', 'my--database', 'Project Management', 'EUR'] };
   const xml = writeP6Xml(db, {} as never);
   assert.match(xml, /<Currency><DecimalPlaces>|<Currency>/);
-  assert.ok(xml.includes('<Id>EUR</Id>') && xml.includes('<Name>EUR</Name>') && xml.includes('<IsBaseCurrency>true</IsBaseCurrency>') && xml.includes('<ExchangeRate>1</ExchangeRate>'));
+  assert.ok(xml.includes('<Id>EUR</Id>') && xml.includes('<Name>Euro</Name>') && xml.includes('<IsBaseCurrency>true</IsBaseCurrency>') && xml.includes('<ExchangeRate>1</ExchangeRate>'));
   assert.ok(!/<!--[^>]*--[^>]/.test(xml.replace(/-->/g, '')) , 'no "--" inside the comment');
   const back = parseP6Xml(xml).db;
   assert.deepEqual(back.tables.CURRTYPE.rows.map((r) => [r.curr_short_name, r.base_exch_rate]), [['EUR', '1']]);

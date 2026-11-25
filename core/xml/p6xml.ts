@@ -1,4 +1,5 @@
 // P6 XML (APIBusinessObjects) import/export, mapped onto the same P6 tables the XER layer uses.
+import { baseCurrency } from '../currency.ts';
 import { addField, ermhdrCurrency, ermhdrFields, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { selectRows } from '../xer/write.ts';
@@ -136,6 +137,8 @@ const ENUMS: Record<string, Record<string, string>> = {
   // (UdfHelper: the only types MPXJ knows; FT_FLOAT and FT_FLOAT_2_DECIMALS are both "Double", the second is what a "Double" reads back as)
   udf_data_type: { FT_TEXT: 'Text', FT_START_DATE: 'Start Date', FT_END_DATE: 'Finish Date', FT_FLOAT_2_DECIMALS: 'Double', FT_FLOAT: 'Double', FT_INT: 'Integer', FT_MONEY: 'Cost', FT_STATICTYPE: 'Indicator' },
   code_scope: { AS_Global: 'Global', AS_EPS: 'EPS', AS_Project: 'Project' },
+  // a currency's decimal and grouping symbols (P6's Currencies dialog: a period, a comma or, for grouping, a dash)
+  curr_separator: { '.': 'Period', ',': 'Comma', '-': 'Dash' },
   lag_calendar: { rcal_Predecessor: 'Predecessor Activity Calendar', rcal_Successor: 'Successor Activity Calendar', rcal_ProjDefault: 'Project Default Calendar', rcal_24Hour: '24 Hour Calendar' },
   float_type: { FT_FF: 'Finish Float = Late Finish - Early Finish', FT_SS: 'Start Float = Late Start - Early Start', FT_Min: 'Smallest of Start Float and Finish Float', FT_Smallest: 'Smallest of Start Float and Finish Float' },
 };
@@ -207,7 +210,9 @@ const ACCOUNT_MAP: FieldMap = [['ObjectId', 'acct_id'], ['ParentObjectId', 'pare
 const OBS_MAP: FieldMap = [['ObjectId', 'obs_id'], ['ParentObjectId', 'parent_obs_id'], ['Name', 'obs_name'], ['SequenceNumber', 'seq_num', 'num']];
 const UDFTYPE_MAP: FieldMap = [['ObjectId', 'udf_type_id'], ['SubjectArea', 'table_name', 'enum:udf_table'], ['Title', 'udf_type_label'], ['DataType', 'logical_data_type', 'enum:udf_data_type']];
 const UDFVAL_MAP: FieldMap = [['UDFTypeObjectId', 'udf_type_id'], ['UDFCodeObjectId', 'udf_code_id'], ['TypeObjectId', 'udf_type_id', 'legacy'], ['ForeignObjectId', 'fk_id'], ['ProjectObjectId', 'proj_id'], ['Text', 'udf_text'], ['Double', 'udf_number', 'num'], ['StartDate', 'udf_date', 'date']];
-const CURR_MAP: FieldMap = [['ObjectId', 'curr_id'], ['Id', 'curr_short_name'], ['Name', 'curr_type'], ['Symbol', 'curr_symbol'], ['ExchangeRate', 'base_exch_rate', 'num'], ['DecimalPlaces', 'decimal_digit_cnt', 'num']];
+// (a currency's separators and formats too: P6 writes DecimalSymbol and DigitGroupingSymbol as words, the formats as the XER does — "#1.1", "(#1.1)")
+const CURR_MAP: FieldMap = [['ObjectId', 'curr_id'], ['Id', 'curr_short_name'], ['Name', 'curr_type'], ['Symbol', 'curr_symbol'], ['ExchangeRate', 'base_exch_rate', 'num'], ['DecimalPlaces', 'decimal_digit_cnt', 'num'],
+  ['DecimalSymbol', 'decimal_symbol', 'enum:curr_separator'], ['DigitGroupingSymbol', 'digit_group_symbol', 'enum:curr_separator'], ['PositiveSymbol', 'pos_curr_fmt_type'], ['NegativeSymbol', 'neg_curr_fmt_type']];
 const ROLE_MAP: FieldMap = [['ObjectId', 'role_id'], ['ParentObjectId', 'parent_role_id'], ['Id', 'role_short_name'], ['Name', 'role_name']];
 const MEMO_MAP: FieldMap = [['ObjectId', 'memo_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['NotebookTopicObjectId', 'memo_type_id'], ['Note', 'task_memo']];
 const STEP_MAP: FieldMap = [['ObjectId', 'proc_id'], ['ActivityObjectId', 'task_id'], ['ProjectObjectId', 'proj_id'], ['SequenceNumber', 'seq_num', 'num'], ['Name', 'proc_name'], ['IsCompleted', 'complete_flag', 'bool'], ['Weight', 'proc_wt', 'num'], ['Description', 'proc_descr']];
@@ -290,7 +295,6 @@ OBS_MAP.push(F('Description', 'obs_descr'), F('GUID', 'guid'));
 PCODETYPE_MAP.push(F('Weight', 'proj_catg_type_wt', 'num'), F('MaxCodeValueWeight', 'max_proj_catg_wt', 'num'));
 PCODE_MAP.push(F('Weight', 'proj_catg_wt', 'num'));
 CODE_MAP.push(F('ProjectObjectId', 'proj_id'));
-CURR_MAP.push(F('DecimalSymbol', 'decimal_symbol'), F('DigitGroupingSymbol', 'digit_group_symbol'), F('PositiveSymbol', 'pos_curr_fmt_type'), F('NegativeSymbol', 'neg_curr_fmt_type'));
 PROJECT_MAP.push(F('FiscalYearStartMonth', 'fy_start_month_num', 'num'), F('ActivityDefaultCostAccountObjectId', 'acct_id'), F('SourceProjectObjectId', 'source_proj_id'), F('AddedBy', 'add_by_name'), F('DateAdded', 'add_date', 'date'),
   F('WebSiteRootDirectory', 'web_local_root_path'), F('WebSiteURL', 'proj_url'), F('ExternalCRKey', 'cr_external_key'), F('ActivityIdBasedOnSelectedActivity', 'task_code_prefix_flag', 'bool'), F('AddActualToRemaining', 'add_act_remain_flag', 'bool'),
   F('LinkActualToActualThisPeriod', 'act_this_per_link_flag', 'bool'), F('LinkPercentCompleteWithActual', 'act_pct_link_flag', 'bool'), F('UseProjectBaselineForEarnedValue', 'use_project_baseline_flag', 'bool'),
@@ -699,7 +703,7 @@ export function writeP6XmlTo(db: Db, opts: { projIds?: string[]; version?: strin
     ['Currency', () => {
       for (const r of get('CURRTYPE')) el('Currency', r, CURR_MAP);
       // no CURRTYPE table: the currency the ERMHDR line names is the base currency (the id a resource's curr_id already points at, else 1)
-      if (!get('CURRTYPE').length && hdrCurrency) el('Currency', { curr_id: get('RSRC').find((x) => x.curr_id)?.curr_id ?? '1', curr_short_name: hdrCurrency, curr_type: hdrCurrency, base_exch_rate: '1' }, CURR_MAP, [['IsBaseCurrency', '<IsBaseCurrency>true</IsBaseCurrency>']]);
+      if (!get('CURRTYPE').length && hdrCurrency) el('Currency', { ...(baseCurrency(db) ?? {}), curr_id: get('RSRC').find((x) => x.curr_id)?.curr_id ?? '1', curr_short_name: hdrCurrency, curr_type: baseCurrency(db)?.curr_type ?? hdrCurrency, base_exch_rate: '1' }, CURR_MAP, [['IsBaseCurrency', '<IsBaseCurrency>true</IsBaseCurrency>']]);
     }],
     ['OBS', () => { for (const r of get('OBS')) el('OBS', r, OBS_MAP); }],
     ['CostAccount', () => { for (const r of get('ACCOUNT')) el('CostAccount', r, ACCOUNT_MAP); }],

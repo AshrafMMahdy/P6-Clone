@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { getDb, toast, useStore } from '../store.ts';
 import { rows } from '../../core/db.ts';
+import { formatMoney } from '../../core/currency.ts';
 import type { FieldData } from '../../core/analysis/whiq-fields.ts';
 import type { crashSchedule } from '../../core/analysis/crash.ts';
 import { evaluateBatch, type Scenario } from '../../core/analysis/batch.ts';
@@ -84,10 +85,10 @@ export function CrashPanel() {
             : <>
               {changed && <div className="muted">({CHANGED_SINCE}: Apply is refused)</div>}
               {crashStopped(res) && <div><b>{crashStopped(res)}</b></div>}
-              <div><b>{res.stop}</b> · {res.days_gained} working days gained · finish {res.base_finish?.slice(0, 10)} → {res.finish?.slice(0, 10)} · direct cost {res.direct_cost.toLocaleString()} · total {res.total_cost.toLocaleString()}</div>
+              <div><b>{res.stop}</b> · {res.days_gained} working days gained · finish {res.base_finish?.slice(0, 10)} → {res.finish?.slice(0, 10)} · direct cost {formatMoney(getDb(), res.direct_cost)} · total {formatMoney(getDb(), res.total_cost)}</div>
               {res.notes.map((w) => <div key={w} className="muted">{w}</div>)}
               <table className="tbl" style={{ marginTop: 4 }}><thead><tr><th>Step</th><th>Activities (days)</th><th>Gained</th><th>Cost</th><th>Finish</th><th>Cum. direct</th><th>Total</th></tr></thead>
-                <tbody>{res.steps.map((s) => <tr key={s.step}><td>{s.step}</td><td>{s.activities.map((a, i) => <span key={a.id}>{i ? ', ' : ''}<Id id={a.id} /> ({a.days})</span>)}</td><td>{s.days_gained}</td><td>{s.cost.toLocaleString()}</td><td>{s.finish?.slice(0, 10)}</td><td>{s.cumulative_direct_cost.toLocaleString()}</td><td>{s.total_cost.toLocaleString()}</td></tr>)}</tbody></table>
+                <tbody>{res.steps.map((s) => <tr key={s.step}><td>{s.step}</td><td>{s.activities.map((a, i) => <span key={a.id}>{i ? ', ' : ''}<Id id={a.id} /> ({a.days})</span>)}</td><td>{s.days_gained}</td><td>{formatMoney(getDb(), s.cost)}</td><td>{s.finish?.slice(0, 10)}</td><td>{formatMoney(getDb(), s.cumulative_direct_cost)}</td><td>{formatMoney(getDb(), s.total_cost)}</td></tr>)}</tbody></table>
             </>}
         </div>
       </div>
@@ -132,9 +133,9 @@ export function WhatIfPanel() {
       </div>
       {res && !res.ok && <div style={{ color: "#b00020" }}>{res.error.message}</div>}
       {res?.ok && <div style={{ overflow: 'auto', flex: 1 }}>
-        <div>Project as it is: finish {res.base.finish?.slice(0, 10)}, {res.base.critical} critical, cost {res.base.cost.toLocaleString()}{res.best ? <> · best: <b>{res.best}</b></> : null}</div>
+        <div>Project as it is: finish {res.base.finish?.slice(0, 10)}, {res.base.critical} critical, cost {formatMoney(getDb(), res.base.cost)}{res.best ? <> · best: <b>{res.best}</b></> : null}</div>
         <table className="tbl"><thead><tr><th>Scenario</th><th>Finish</th><th>Δ days</th><th>Critical</th><th>Became critical</th><th>Neg. float</th><th>Δ cost</th></tr></thead>
-          <tbody>{res.scenarios.map((s) => <tr key={s.name}><td>{s.name}</td>{s.ok ? <><td>{s.finish?.slice(0, 10)}</td><td>{s.finish_delta_days}</td><td>{s.critical}</td><td>{s.became_critical!.slice(0, 8).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{s.became_critical!.length > 8 ? '…' : ''}</td><td>{s.negative_float}</td><td>{s.cost_delta?.toLocaleString()}</td></> : <td colSpan={6} style={{ color: "#b00020" }}>{s.error}</td>}</tr>)}</tbody></table>
+          <tbody>{res.scenarios.map((s) => <tr key={s.name}><td>{s.name}</td>{s.ok ? <><td>{s.finish?.slice(0, 10)}</td><td>{s.finish_delta_days}</td><td>{s.critical}</td><td>{s.became_critical!.slice(0, 8).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{s.became_critical!.length > 8 ? '…' : ''}</td><td>{s.negative_float}</td><td>{s.cost_delta == null ? '' : formatMoney(getDb(), s.cost_delta)}</td></> : <td colSpan={6} style={{ color: "#b00020" }}>{s.error}</td>}</tr>)}</tbody></table>
       </div>}
     </div>
   );
@@ -204,7 +205,7 @@ export function OptimizePanel() {
           <tr><td>P6 leveling (the project's leveling settings)</td><td>{res.p6_leveled_finish?.slice(0, 16)}</td></tr>
           <tr><td><b>Reasoner, through the same leveler</b></td><td><b>{res.reasoner_finish?.slice(0, 16)}</b> {res.better_than_p6_leveler ? '(earlier than P6 leveling)' : res.better_than_p6_leveler === false ? '(not earlier than P6 leveling)' : ''}</td></tr>
         </tbody></table>
-        <div className="muted">{res.activities} activities · {res.leveled_activities} on limited resources · {res.trajectories} trajectories{res.best_from ? ` · best from ${res.best_from}` : ''}{notes.windows ? ` · ${notes.windows}` : ''}{res.crash_cost ? ` · crash cost ${res.crash_cost.toLocaleString()}` : ''}</div>
+        <div className="muted">{res.activities} activities · {res.leveled_activities} on limited resources · {res.trajectories} trajectories{res.best_from ? ` · best from ${res.best_from}` : ''}{notes.windows ? ` · ${notes.windows}` : ''}{res.crash_cost ? ` · crash cost ${formatMoney(getDb(), res.crash_cost)}` : ''}</div>
         {res.changes.length > 0 && <div>Crashed: {res.changes.map((c, i) => <span key={c.id}>{i ? ', ' : ''}<Id id={c.id} /> {c.from_days}→{c.to_days} d</span>)}</div>}
         {notes.changes && <>
           <div style={{ marginTop: 6 }}><b>{notes.changes}</b>{res.biggest_changes.length < (res.biggest_changes_total ?? 0) ? ' (the largest shift first; Export… lists all)' : ' (the largest shift first)'}</div>

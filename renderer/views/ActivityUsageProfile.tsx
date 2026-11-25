@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { setUi, useStore } from '../store.ts';
 import { useCtx } from '../hooks.ts';
 import { progressCurves } from '../../core/analysis/curves.ts';
+import { formatMoney } from '../../core/currency.ts';
 
 const SERIES = [
   { key: 'pv', cum: 'cum_pv', label: 'Planned Value', color: '#7a7a7a' },
@@ -21,7 +22,7 @@ export function ActivityUsageProfile({ sheet }: { sheet: boolean }) {
   const [which, setWhich] = useState<'all' | 'selected'>('all');
   const [on, setOn] = useState<Record<string, boolean>>({ pv: true, ev: true, ac: true, remaining_early: true, remaining_late: false });
   const c = useMemo(() => progressCurves(ctx.db, ui.openProjects, { units, period, taskIds: which === 'selected' && ui.selTasks.length ? new Set(ui.selTasks) : undefined }), [ctx, ui.openProjects, units, period, which, ui.selTasks]);
-  const fmt = (v: number | null) => (v == null ? '' : units === 'cost' ? Math.round(v).toLocaleString() : (Math.round(v * 10) / 10).toLocaleString());
+  const fmt = (v: number | null) => (v == null ? '' : units === 'cost' ? formatMoney(ctx.db, v) : (Math.round(v * 10) / 10).toLocaleString());   // (costs in the file's base currency)
   return (
     <div className="details">
       <div className="layoutbar" style={{ color: '#000' }}>

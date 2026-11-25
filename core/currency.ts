@@ -19,42 +19,55 @@ function storedBase(db: Db): Row | null {
     || (rows.length === 1 ? rows[0] : rows.filter((r) => Number(r.base_exch_rate) === 1).length === 1 ? rows.find((r) => Number(r.base_exch_rate) === 1)! : null);
 }
 
-/** The file's base currency: as its CURRTYPE table holds it, else as its ERMHDR line names it (an XER with no CURRTYPE table: the code's own
- *  name and symbol when it is an ISO code, else the ID as P6 shows a currency it has no symbol for); null when the file names none. */
+/** A header's currency as a row, per code (an XER with no CURRTYPE table is read once per cell of a screen: not built again each time). */
+const fromHeader = new Map<string, Row>();
+
+/** The file's base currency: as its CURRTYPE table holds it, else as its ERMHDR line names it (an XER with no CURRTYPE table): an ISO code's own
+ *  name, symbol and places, else the ID alone (nothing is known of it but its name); null when the file names none. */
 export function baseCurrency(db: Db): Row | null {
   const stored = storedBase(db);
   if (stored || db.tables.CURRTYPE?.rows.length) return stored;
   const named = ermhdrCurrency(db.header?.raw);
   if (!named) return null;
-  try { return currencyRow(named); }
-  catch { return { curr_id: '1', curr_short_name: named, curr_type: named, curr_symbol: named, decimal_digit_cnt: '2', decimal_symbol: '.', digit_group_symbol: ',', group_digit_cnt: '3', pos_curr_fmt_type: '1.1 #', neg_curr_fmt_type: '-1.1 #', base_exch_rate: '1' }; }
+  let r = fromHeader.get(named);
+  if (!r) {
+    try { r = currencyRow(named); } catch { r = { curr_short_name: named, curr_type: named }; }
+    fromHeader.set(named, r);
+  }
+  return r;
 }
 
 /** The base currency as an answer names it: its ID (P6's Currency ID, e.g. EUR), or null when the file names none. */
 export const currencyId = (db: Db): string | null => baseCurrency(db)?.curr_short_name || null;
 
-/** An amount as P6 shows it in the base currency (its symbol and formats); with no base currency, the plain number. */
+/** A number as the clone shows one with no currency format to follow: to the hundredth, as its screens and reports showed amounts before. */
+const plain = (v: number): string => String(Math.round(v * 100) / 100);
+
+/** An amount as P6 shows it in the base currency: its symbol, decimal places, separators and positive / negative formats. A currency known by
+ *  its ID alone (no symbol or formats in the file): the number and the ID. No base currency: the number. */
 export function formatMoney(db: Db, n: number): string {
   const c = baseCurrency(db);
   const v = Number.isFinite(n) ? n : 0;
-  if (!c) return String(v);
+  if (!c) return plain(v);
+  if (c.curr_symbol == null || !c.pos_curr_fmt_type || !c.neg_curr_fmt_type || !c.decimal_symbol || c.decimal_digit_cnt == null) return `${plain(v)} ${c.curr_short_name}`;
   const places = Math.max(0, Number.parseInt(c.decimal_digit_cnt, 10) || 0);
-  const group = Math.max(0, Number.parseInt(c.group_digit_cnt || '3', 10) || 0);
+  // (P6 XML carries no grouping count: P6 groups by three — every CURRTYPE row of the sample P6 exports holds 3)
+  const group = Math.max(0, Number.parseInt(c.group_digit_cnt ?? '3', 10) || 0);
   const [int, frac] = Math.abs(v).toFixed(places).split('.');
-  const grouped = group > 0 ? int.replace(new RegExp(`\\B(?=(\\d{${group}})+(?!\\d))`, 'g'), c.digit_group_symbol ?? '') : int;
-  const amount = frac ? `${grouped}${c.decimal_symbol || '.'}${frac}` : grouped;
-  // (a row read without formats — a P6 XML file names none — takes P6's own formats for a new currency)
-  const fmt = v < 0 ? (c.neg_curr_fmt_type || '(#1.1)') : (c.pos_curr_fmt_type || '#1.1');
-  return fmt.replace('1.1', '\u0000').replace('#', c.curr_symbol ?? '').replace('\u0000', amount);
+  const grouped = group > 0 && c.digit_group_symbol ? int.replace(new RegExp(`\\B(?=(\\d{${group}})+(?!\\d))`, 'g'), c.digit_group_symbol) : int;
+  const amount = frac ? `${grouped}${c.decimal_symbol}${frac}` : grouped;
+  return (v < 0 ? c.neg_curr_fmt_type : c.pos_curr_fmt_type).replace('1.1', '\u0000').replace('#', c.curr_symbol).replace('\u0000', amount);
 }
 
 /** What a caller gives for a currency: an ISO 4217 code ("EUR"), or the code with any of P6's other settings of it. */
 export type CurrencySpec = string | { code: string; name?: string; symbol?: string; decimal_places?: number; decimal_symbol?: string; group_symbol?: string };
 
 /**
- * A base currency row from what a caller gave: the code (ISO 4217, upper case; refused when unknown), its English name and symbol as the
- * code defines them (Intl), its usual decimal places — each unless given — and P6's own settings for a new currency for the rest (decimal
- * symbol ".", digit grouping "," every 3 digits, positive "#1.1", negative "(#1.1)": the Currencies dialog's defaults). Throws, in words.
+ * A base currency row from what a caller gave: the code (ISO 4217, upper case; refused when unknown), its English name and symbol as the code
+ * defines them (Intl) unless given, its decimal places (the code's usual ones, at most P6's 2), and the rest as the currencies P6 ships hold
+ * them unless given (decimal symbol ".", digit grouping "," by three, positive "#1.1", negative "(#1.1)": every currency row of the sample P6
+ * exports). P6's Currencies dialog allows a period or a comma as the decimal symbol, a comma, period or dash for grouping, and 0, 1 or 2
+ * decimal places (Oracle, "Appearance tab - Currencies dialog box"): a value outside those is refused. Throws, in words.
  */
 export function currencyRow(spec: CurrencySpec, id = '1'): Row {
   const o = typeof spec === 'string' ? { code: spec } : spec;
@@ -65,9 +78,12 @@ export function currencyRow(spec: CurrencySpec, id = '1'): Row {
   const nf = new Intl.NumberFormat('en', { style: 'currency', currency: code });
   const symbol = o.symbol ?? nf.formatToParts(1).find((p) => p.type === 'currency')?.value ?? code;
   const name = o.name ?? new Intl.DisplayNames(['en'], { type: 'currency' }).of(code) ?? code;
-  const places = o.decimal_places ?? nf.resolvedOptions().maximumFractionDigits ?? 0;   // (Intl names every ISO currency's places; the type allows none)
-  if (!Number.isInteger(places) || places < 0) throw new Error('decimal_places is a whole number, 0 or more.');
-  try { new Intl.NumberFormat('en', { minimumFractionDigits: places, maximumFractionDigits: places }); } catch (e) { throw new Error(`decimal_places: ${(e as Error).message}`); }
+  const usual = nf.resolvedOptions().maximumFractionDigits ?? 0;   // (Intl names every ISO currency's places; the type allows none)
+  const places = o.decimal_places ?? Math.min(usual, 2);   // (a currency of 3, as the Kuwaiti dinar: P6 shows 2 at most)
+  if (![0, 1, 2].includes(places)) throw new Error('decimal_places is 0, 1 or 2: the places P6 shows a currency with.');
+  if (o.decimal_symbol != null && !['.', ','].includes(o.decimal_symbol)) throw new Error('decimal_symbol is "." or ",": the two P6 allows.');
+  if (o.group_symbol != null && ![',', '.', '-'].includes(o.group_symbol)) throw new Error('group_symbol is ",", "." or "-": the three P6 allows.');
+  if ((o.decimal_symbol ?? '.') === (o.group_symbol ?? ',')) throw new Error('decimal_symbol and group_symbol must differ.');
   return {
     curr_id: id, decimal_digit_cnt: String(places), curr_symbol: symbol, decimal_symbol: o.decimal_symbol ?? '.', digit_group_symbol: o.group_symbol ?? ',',
     pos_curr_fmt_type: '#1.1', neg_curr_fmt_type: '(#1.1)', curr_type: name, curr_short_name: code, group_digit_cnt: '3', base_exch_rate: '1',
@@ -84,6 +100,9 @@ export function setBaseCurrency(db: Db, spec: CurrencySpec): { was: string | nul
   const was0 = base ? null : ermhdrCurrency(db.header?.raw) || null;   // (a header-only currency: the row is written now, the header follows)
   if (!base && t.rows.length) throw new Error(`The file has ${t.rows.length} currencies and does not say which is the base one; set_currency cannot tell which to change.`);
   const row = currencyRow(spec, base?.curr_id ?? '1');
+  // P6 keeps one row per Currency ID: a code another currency of the file already has is not given to the base one
+  const other = t.rows.find((r) => r !== base && r.curr_short_name === row.curr_short_name);
+  if (other) throw new Error(`The file already has a currency ${other.curr_short_name} (${other.curr_type || 'no name'}, exchange rate ${other.base_exch_rate || '?'}), and P6 keeps one row per Currency ID: the base currency cannot take its code.`);
   if (base) {
     const was = base.curr_short_name || null;
     const keep = { ...base };
@@ -96,4 +115,23 @@ export function setBaseCurrency(db: Db, spec: CurrencySpec): { was: string | nul
   t.rows.push(row);
   if (was0 && db.header?.raw) db.header.raw[db.header.raw.length - 1] = row.curr_short_name;
   return { was: was0, now: row };
+}
+
+/** The answers that carry the file's base currency: those that give costs (in the variant that gives them), and the open and new file's. One
+ *  rule for both ways a tool is called (the MCP server; the desktop app's embedded agent, renderer/ai/liveBridge.ts). */
+export function namesCurrency(name: string, a: Record<string, unknown>): boolean {
+  switch (name) {
+    case 'open_file': case 'new_project': case 'earned_value': case 'resource_summary': case 'get_activity': case 'evaluate_batch': case 'crash_schedule': case 'run_report': return true;
+    case 'progress_curves': return (a.units ?? 'cost') === 'cost';
+    case 'resource_histogram': return a.cost === true;
+    case 'optimize_schedule': return a.objective === 'min_crash_cost';
+    case 'activity_table': return a.of === 'assignments';
+    default: return false;
+  }
+}
+
+/** An answer with the file's base currency named (`currency`: its ID); a file that names none: null, and said in the answer's notes. */
+export function withCurrency(db: Db, out: Record<string, unknown>): Record<string, unknown> {
+  const c = currencyId(db), own = Array.isArray(out.notes) ? (out.notes as string[]) : [];
+  return { ...out, currency: c, ...(c ? {} : { notes: [...own, 'The file names no base currency: its costs are plain numbers. Set it with edit set_currency (an ISO 4217 code such as "EUR").'] }) };
 }

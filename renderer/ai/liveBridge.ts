@@ -4,6 +4,7 @@
 // saved as a schedule file in its working folder, for its own schedule tools (import_schedule_file and what reads it).
 import { TOOLS, runTool, type ToolDef } from '../../core/query/tools.ts';
 import { rows } from '../../core/db.ts';
+import { namesCurrency, withCurrency } from '../../core/currency.ts';
 import { LIVE_TOOLS, runLive } from './live.ts';
 import { getDb, getUi } from '../store.ts';
 import { makeCtx } from '../model.ts';
@@ -38,7 +39,9 @@ export function initLiveBridge(): () => void {
       const ui = getUi();
       const result = name === 'export_project' ? await exportProject(args ?? {})
         : LIVE_TOOLS.some((t) => t.name === name) ? await runLive(name, args ?? {}) : runTool(name, args ?? {}, getDb(), makeCtx(getDb(), ui.prefs), ui.openProjects, ui.prefs.hoursPerDay);
-      window.p6.liveReply(id, { ok: true, result });
+      // (the file's base currency, where an answer gives costs: as the MCP server's answers name it)
+      const named = result && typeof result === 'object' && !Array.isArray(result) && !(result as { error?: unknown }).error && namesCurrency(name, args ?? {}) ? withCurrency(getDb(), result as Record<string, unknown>) : result;
+      window.p6.liveReply(id, { ok: true, result: named });
     } catch (e) {
       window.p6.liveReply(id, { ok: false, error: (e as Error).message });
     }

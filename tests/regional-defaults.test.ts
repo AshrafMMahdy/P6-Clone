@@ -12,7 +12,10 @@ import { setRoots } from '../mcp/runtime.ts';
 import { applyOps } from '../core/project/ops.ts';
 import { baseCurrency, currencyRow, formatMoney } from '../core/currency.ts';
 import { writeXer } from '../core/xer/write.ts';
-import { parseMspdi } from '../core/msp/mspdi.ts';
+import { parseXerFile } from '../core/xer/parseFile.ts';
+import { parseP6Xml, writeP6Xml } from '../core/xml/p6xml.ts';
+import { writeMpx } from '../core/msp/mpx.ts';
+import { parseMspdi, writeMspdi } from '../core/msp/mspdi.ts';
 import { rows, type Db } from '../core/db.ts';
 
 process.env.P6CLONE_COMPUTE_WORKERS = '0';
@@ -70,7 +73,7 @@ test('currencyRow: the code\'s own name, symbol and decimal places, P6\'s settin
   const eur = currencyRow('eur');
   assert.deepEqual([eur.curr_short_name, eur.curr_type, eur.curr_symbol, eur.decimal_digit_cnt, eur.decimal_symbol, eur.digit_group_symbol, eur.pos_curr_fmt_type, eur.neg_curr_fmt_type], ['EUR', 'Euro', '€', '2', '.', ',', '#1.1', '(#1.1)']);
   assert.equal(currencyRow('JPY').decimal_digit_cnt, '0');
-  assert.equal(currencyRow('KWD').decimal_digit_cnt, '3');
+  assert.equal(currencyRow('KWD').decimal_digit_cnt, '2', 'a currency of three places is shown with two: the most P6 shows');
   assert.equal(currencyRow({ code: 'SAR', symbol: 'SR', decimal_places: 2 }).curr_symbol, 'SR');
   assert.throws(() => currencyRow('EURO'), /not an ISO 4217 currency code/);
   assert.throws(() => currencyRow('XYZ'), /not an ISO 4217 currency code/);
@@ -146,9 +149,9 @@ test('an XER whose header names the currency and has no currency table: that is 
   assert.equal(op.currency, 'USD', JSON.stringify(op).slice(0, 200));
   const db: Db = { tables: {}, header: { version: '12.0', exportDate: '', raw: ['ERMHDR', '12.0', '2026-06-22', 'Project', 'u', 'u', 'db', 'Project Management', 'SAR'] } };
   assert.equal(baseCurrency(db)!.curr_short_name, 'SAR');
-  assert.equal(formatMoney(db, 10), `${currencyRow('SAR').curr_symbol}10.00`);
+  assert.equal(formatMoney(db, 10), 'SAR10.00');
   db.header!.raw[8] = 'Dinars';
-  assert.equal(formatMoney(db, 10), '10.00 Dinars', 'an ID that is no ISO code: shown after the amount');
+  assert.equal(formatMoney(db, 10), '10 Dinars', 'an ID that is no ISO code: the plain amount and the ID after it');
   assert.equal(applyOps(db, [{ op: 'set_currency', code: 'KWD' }]).ok, true);
   assert.equal(db.header!.raw[8], 'KWD', 'the header follows');
   assert.equal(rows(db, 'CURRTYPE').length, 1);
@@ -162,4 +165,86 @@ test('a Microsoft Project file\'s own currency is the converted file\'s base cur
   const odd = parseMspdi(doc('Euros'));
   assert.equal(baseCurrency(odd.db), null);
   assert.ok(odd.findings.some((f) => f.code === 'MSP_CURRENCY' && /Euros/.test(f.message)), JSON.stringify(odd.findings.map((f) => f.code)));
+});
+
+test('a copied project calendar carries the holidays it observes from its base calendar (its own exceptions win); a base loop ends', () => {
+  const db: Db = { tables: {} };
+  assert.equal(applyOps(db, [{ op: 'add_project', id: 'P1', start: '2026-03-01', currency: 'EUR' }, { op: 'add_calendar', name: 'Global', work_week: SIX, holidays: ['2026-03-20', '2026-03-23'] },
+    { op: 'add_calendar', name: 'Project cal', work_week: SIX, work_exceptions: { '2026-03-23': [['07:00', '11:00']] } }]).ok, true);
+  const g = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Global')!, pc = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Project cal')!;
+  Object.assign(pc, { base_clndr_id: g.clndr_id, clndr_type: 'CA_Project' });
+  assert.doesNotMatch(pc.clndr_data, /d\|46101/, 'the project calendar holds no holiday of its own');
+  const r = applyOps(db, [{ op: 'add_calendar', name: 'Copy', copy_from: 'Project cal' }]);
+  assert.equal(r.ok, true, JSON.stringify(r.error));
+  const copy = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Copy')!;
+  assert.equal(copy.base_clndr_id, '');
+  assert.match(copy.clndr_data, /d\|46101\)\(\)/, 'the base calendar\'s holiday (2026-03-20) comes with the copy');
+  assert.match(copy.clndr_data, /d\|46104\)\(\s*\(0\|\|0\(s\|07:00\|f\|11:00\)/, 'the copied calendar\'s own exception wins over the base\'s holiday (2026-03-23)');
+  Object.assign(g, { base_clndr_id: pc.clndr_id });   // (a file whose two calendars name each other as base)
+  assert.equal(applyOps(db, [{ op: 'add_calendar', name: 'Loop copy', copy_from: 'Project cal' }]).ok, true);
+});
+
+test('add_project with a currency on a file of several currencies that does not say which is the base: refused in words', () => {
+  const db: Db = { tables: { CURRTYPE: { name: 'CURRTYPE', fields: [], rows: [{ ...currencyRow('EUR', '1'), base_exch_rate: '0.9' }, { ...currencyRow('GBP', '2'), base_exch_rate: '0.8' }] } } };
+  const r = applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-03-02', currency: 'EUR' }]);
+  assert.equal(r.ok, false);
+  assert.match(r.error!.message, /has 2 currencies and does not say which is its base one, so it cannot be given EUR: leave currency out/);
+  assert.equal(applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-03-02' }]).ok, true, 'without a currency it is made');
+});
+
+test('a P6 file of many currencies (cairo festival city): the base is the row its header names; another currency\'s code is not given to it', () => {
+  const { db } = parseXerFile(join(process.cwd(), 'Sample XERs', 'cairo festival city.xer'));
+  const n = rows(db, 'CURRTYPE').length;
+  assert.ok(n > 5);
+  assert.equal(baseCurrency(db)!.curr_id, '1');
+  const dup = applyOps(db, [{ op: 'set_currency', code: 'ARS' }]);
+  assert.equal(dup.ok, false);
+  assert.match(dup.error!.message, /already has a currency ARS \(Argentine Peso, exchange rate 3\.077\), and P6 keeps one row per Currency ID/);
+  const r = applyOps(db, [{ op: 'set_currency', code: 'EGP' }]);
+  assert.equal(r.ok, true, JSON.stringify(r.error));
+  assert.deepEqual((r.results as any[])[0].was, 'USD');
+  const base = rows(db, 'CURRTYPE').find((c) => c.curr_id === '1')!;
+  assert.deepEqual([base.curr_short_name, base.base_exch_rate, db.header!.raw.at(-1)], ['EGP', '1', 'EGP'], 'edited in place at its rate; the header follows');
+  assert.equal(rows(db, 'CURRTYPE').length, n, 'no row added');
+  assert.equal(rows(db, 'CURRTYPE').find((c) => c.curr_short_name === 'ARS')!.base_exch_rate, '3.077', 'the other currencies untouched');
+});
+
+test('the base currency survives every format the clone writes: P6 XML (separators and formats), Microsoft Project XML (its code), MPX (record 10)', () => {
+  const db: Db = { tables: {} };
+  assert.equal(applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-03-02', currency: 'SAR' }, { op: 'set_currency', code: 'EUR', decimal_symbol: ',', group_symbol: '.' }]).ok, true);
+  const back = baseCurrency(parseP6Xml(writeP6Xml(db, {})).db)!;
+  assert.deepEqual([back.curr_short_name, back.curr_symbol, back.decimal_symbol, back.digit_group_symbol, back.pos_curr_fmt_type, back.neg_curr_fmt_type, back.decimal_digit_cnt],
+    ['EUR', '€', ',', '.', '#1.1', '(#1.1)', '2']);
+  const x = writeMspdi(db);
+  assert.match(x, /<CurrencyCode>EUR<\/CurrencyCode>/);
+  assert.equal(baseCurrency(parseMspdi(x).db)!.curr_short_name, 'EUR', 'opened again: the same currency');
+  assert.match(writeMpx(db), /^10,€,0,2,\.,","\r?$/m, 'MPX record 10: the symbol before the amount, two places, thousands ".", decimal "," (quoted: the delimiter)');
+  const none: Db = { tables: {} };
+  assert.equal(applyOps(none, [{ op: 'add_project', id: 'P', start: '2026-03-02' }]).ok, true);
+  assert.doesNotMatch(writeMpx(none), /^10,/m, 'a file that names none writes no currency record');
+  assert.doesNotMatch(writeMspdi(none), /<CurrencyCode>/);
+});
+
+test('set_currency is undone and redone like any change; compute_schedule says the calendar it ran on; get_activity names the currency', async () => {
+  const np = (await call('new_project', { id: 'UNDO', start: '2026-03-02', currency: 'SAR' })).d;
+  const h = { handle: np.handle, owner_key: np.owner_key };
+  assert.equal((await call('edit', { ...h, operations: [{ op: 'add_activity', id: 'A1', name: 'Dig', duration_days: 2 }] })).err, false);
+  assert.equal((await call('edit', { ...h, operations: [{ op: 'set_currency', code: 'AED' }] })).err, false);
+  assert.equal((await call('undo', h)).err, false);
+  assert.equal((await call('get_activity', { ...h, activity_id: 'A1' })).d.currency, 'SAR', 'undone');
+  assert.equal((await call('redo', h)).err, false);
+  assert.equal((await call('get_activity', { ...h, activity_id: 'A1' })).d.currency, 'AED', 'redone');
+  // a file that had no currency table: set_currency, undone, leaves it with none
+  const path = join(root, 'UndoCur.xml');
+  writeFileSync(path, MSPDI('Euros'));
+  const op = (await call('open_file', { path })).d;
+  const o = { handle: op.handle, owner_key: op.owner_key };
+  await call('edit', { ...o, operations: [{ op: 'set_currency', code: 'EUR' }] });
+  await call('undo', o);
+  const repaired = await call('save', { ...o, path: join(root, 'UndoCur-repaired.xer'), repair: true });
+  assert.equal(repaired.d.error?.code, 'no_currency', 'undone: no currency again, and a repaired copy is refused before any repair is made');
+  assert.equal((await call('redo', o)).err, false, 'the refused save made no change: set_currency is still there to redo');
+  assert.equal((await call('save', { ...o, path: join(root, 'UndoCur.xer') })).err, false, 'redone: written');
+  const c = (await call('compute_schedule', { start: '2026-03-02', activities: [{ id: 'A', duration_days: 3 }] })).d;
+  assert.ok(c.notes.some((n: string) => /^No calendar was named: computed on the default calendar "Standard 5 Day Workweek" \(Mon 8 h, Tue 8 h, Wed 8 h, Thu 8 h, Fri 8 h\)/.test(n)), JSON.stringify(c.notes));
 });

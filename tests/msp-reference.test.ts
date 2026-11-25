@@ -113,7 +113,8 @@ test('an old file of the clone (plain units, no stamp), saved again, is read by 
   if (skipWithoutReference(t)) return;
   const db = sample('130 TRIAL.xer');
   // the file as the clone wrote it before this revision: currency in plain units, no format stamp
-  const old = writeMspdi(db).replace(', format 2</Alias>', '</Alias>').replace(/<(Cost|ActualCost|RemainingCost)>([^<]*)<\/\1>/g, (_x, tag, v) => `<${tag}>${Number(v) / 100}</${tag}>`);
+  // (the old writer wrote no currency elements: a file with them is not one of its)
+  const old = writeMspdi(db).replace(', format 2</Alias>', '</Alias>').replace(/<(Currency(?:Digits|Symbol|Code|SymbolPosition))>[^<]*<\/\1>/g, '').replace(/<(Cost|ActualCost|RemainingCost)>([^<]*)<\/\1>/g, (_x, tag, v) => `<${tag}>${Number(v) / 100}</${tag}>`);
   const opened = parseMspdi(old);
   assert.equal(opened.findings.filter((f) => f.code === 'MSP_OLD_CLONE_FILE').length, 1);
   const { ref } = viaClone(opened.db);

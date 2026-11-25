@@ -30,8 +30,8 @@ export const defaultCtx = (): Ctx => ({ minutesPerDay: 480 });
 const of = (type: ValueType, ...names: string[]): Record<string, ValueType> => Object.fromEntries(names.map((n) => [n, type]));
 export const ELEMENT_TYPES: Record<Entity, Record<string, ValueType>> = {
   Project: {
-    ...of('text', 'Name', 'Title', 'Author', 'CalendarUID', 'DefaultStartTime', 'DefaultFinishTime'),
-    ...of('int', 'SaveVersion', 'MinutesPerDay', 'MinutesPerWeek', 'DaysPerMonth', 'DefaultTaskType', 'DurationFormat', 'WorkFormat', 'WeekStartDay', 'NewTaskStartDate'),
+    ...of('text', 'Name', 'Title', 'Author', 'CalendarUID', 'DefaultStartTime', 'DefaultFinishTime', 'CurrencyCode', 'CurrencySymbol'),
+    ...of('int', 'CurrencyDigits', 'CurrencySymbolPosition', 'SaveVersion', 'MinutesPerDay', 'MinutesPerWeek', 'DaysPerMonth', 'DefaultTaskType', 'DurationFormat', 'WorkFormat', 'WeekStartDay', 'NewTaskStartDate'),
     ...of('flag', 'ScheduleFromStart', 'HonorConstraints', 'MultipleCriticalPaths', 'NewTasksEffortDriven', 'NewTasksEstimated', 'SplitsInProgressTasks', 'MoveRemainingStartsForward'),
     ...of('date', 'CreationDate', 'LastSaved', 'StartDate', 'FinishDate', 'StatusDate'),
     ...of('days', 'CriticalSlackLimit'),

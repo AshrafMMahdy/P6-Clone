@@ -23,6 +23,7 @@
 //     project Keywords carry the P6CLONE marker, so Text fields of other MPX files are left alone.
 //   - Durations are written in hours ("40h"); d/w/mo units are read with record 11's hours per day/week.
 //   - At most three working periods per day exist in MPX; extra P6 shifts are merged into the third period.
+import { baseCurrency } from '../currency.ts';
 import type { Db } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import type { Shift } from '../calendar/clndr-data.ts';
@@ -324,7 +325,11 @@ export function writeMpx(db: Db, opts: { projIds?: string[] } = {}): string {
   const hpd = m.minutesPerDay / 60, hpw = m.minutesPerWeek / 60;
 
   lines.push(['MPX', 'Microsoft Project for Windows', '4.0', 'ANSI'].join(D));
-  rec(10, '$', 1, 2, ',', '.');
+  // record 10, the currency settings (symbol, its position, places, thousands and decimal separators): the file's base currency; a file that names
+  // none writes none (a record MPX allows to be absent)
+  const cur = baseCurrency(db);
+  const at = ({ '#1.1': 0, '1.1#': 1, '# 1.1': 2, '1.1 #': 3 } as Record<string, number>)[cur?.pos_curr_fmt_type ?? ''];
+  if (cur?.curr_symbol && at != null && cur.decimal_digit_cnt != null) rec(10, cur.curr_symbol, at, Number(cur.decimal_digit_cnt), cur.digit_group_symbol ?? '', cur.decimal_symbol ?? '');
   rec(11, 1, 1, 1, p6num(hpd), p6num(hpw), '0/h', '0/h', 1, m.splitsInProgress === false ? 0 : 1);
   rec(12, 2, 1, 480, '/', ':', 'am', 'pm', 20, 20);
 

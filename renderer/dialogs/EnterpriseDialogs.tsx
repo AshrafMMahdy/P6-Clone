@@ -981,8 +981,8 @@ export function CurrenciesDialog() {
                 <td><Cell value={c.curr_type} onCommit={(v) => edit(c, 'curr_type', v)} /></td>
                 <td><Cell value={c.curr_symbol} onCommit={(v) => edit(c, 'curr_symbol', v)} /></td>
                 <td><Cell value={c.base_exch_rate} onCommit={numCommit(c, 'base_exch_rate', 'Exchange rate', (n) => n > 0)} /></td>
-                <td><Cell type="number" value={c.decimal_digit_cnt} onCommit={numCommit(c, 'decimal_digit_cnt', 'Decimal places', (n) => Number.isInteger(n) && n >= 0 && n <= 6)} /></td>
-                <td style={{ textAlign: 'center' }}>{i === 0 ? '✓' : ''}</td>
+                <td><Cell type="number" value={c.decimal_digit_cnt} onCommit={numCommit(c, 'decimal_digit_cnt', 'Decimal places', (n) => [0, 1, 2].includes(n) /* P6 shows a currency with 0, 1 or 2 places */)} /></td>
+                <td style={{ textAlign: 'center' }}>{c.curr_id === baseCurrency(db)?.curr_id ? '✓' : ''}</td>
               </tr>
             ))}
             {!list.length && <tr><td colSpan={6} className="muted">No currencies. Click Add.</td></tr>}

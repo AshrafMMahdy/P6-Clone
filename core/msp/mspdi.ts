@@ -1,5 +1,6 @@
 // Microsoft Project XML (MSPDI, namespace http://schemas.microsoft.com/project) import/export.
 // Elements are written in the order of the MSPDI schema (mspdi_pj12.xsd), which Microsoft Project enforces.
+import { baseCurrency } from '../currency.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { parseClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
@@ -399,7 +400,7 @@ function projectReader(findings: Finding[], src: string | Chunked, opts: { conve
     name: val(p, 'Name'), title: val(p, 'Title'), start: rDate('Project', p, 'StartDate'), finish: rDate('Project', p, 'FinishDate'),
     statusDate: rDate('Project', p, 'StatusDate'), calUid: val(p, 'CalendarUID'), minutesPerDay: ctx.minutesPerDay, minutesPerWeek: ctx.minutesPerWeek!,
     splitsInProgress: rFlag('Project', p, 'SplitsInProgressTasks'), criticalHrs: rNum('Project', p, 'CriticalSlackLimit') ?? 0,
-    ...(val(p, 'CurrencyCode') ? { currency: { code: val(p, 'CurrencyCode'), ...(val(p, 'CurrencySymbol') ? { symbol: val(p, 'CurrencySymbol') } : {}), ...(/^\d+$/.test(val(p, 'CurrencyDigits') ?? '') ? { digits: Number(val(p, 'CurrencyDigits')) } : {}) } } : {}),
+    ...(val(p, 'CurrencyCode') ? { currency: { code: val(p, 'CurrencyCode'), ...(val(p, 'CurrencySymbol') ? { symbol: val(p, 'CurrencySymbol') } : {}), ...(/^\d+$/.test(val(p, 'CurrencyDigits') ?? '') ? { digits: Number(val(p, 'CurrencyDigits')) } : {}), ...(/^[0-3]$/.test(val(p, 'CurrencySymbolPosition') ?? '') ? { position: Number(val(p, 'CurrencySymbolPosition')) } : {}) } } : {}),
     calendars, tasks, resources, assignments, custom,
     keep: { kids: p.children.map((c): [string, string | null] => [c.name, COLLECTIONS.has(c.name) ? null : raw(c)]), ghosts, p6ext: extKey.size > 0, plainCurrency: !!ctx.plainCurrency, cfUsed: [...cfUsed], cfRead: custom.map((c) => c.fieldId) },
     // dates made by P6 (a file the clone wrote from P6): F9 keeps P6's rules; dates made by Microsoft Project: its rule
@@ -497,6 +498,8 @@ export function writeMspdi(db: Db, opts: { projIds?: string[]; report?: string[]
 /** The MSPDI file in pieces, in order, to `put` (a file of any size is never one string): the four collections
  *  (calendars, tasks, resources, assignments) are kept as their elements' pieces and stand in the project's own
  *  element list as a marker until they are written. */
+/** The currency elements are the file's base currency (set_currency changes it): ours replace the ones the file had, when the file names one. */
+const CURRENCY_DEPS = (named: boolean): Record<string, () => boolean> => Object.fromEntries(['CurrencyDigits', 'CurrencySymbol', 'CurrencyCode', 'CurrencySymbolPosition'].map((n) => [n, () => named]));
 export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string[] }, put: (piece: string) => void): void {
   const sections: string[][] = [];
   const section = (pieces: string[]) => { sections.push(pieces); return `\u0001P6C-SECTION:${sections.length - 1}\u0001`; };
@@ -602,6 +605,12 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   dt('StartDate', m.start);
   dt('FinishDate', m.finish || m.start);
   el('CriticalSlackLimit', m.criticalHrs);
+  // the file's base currency, as Microsoft Project names one (its code, symbol, places and where the symbol stands): never one the file did not name
+  const baseCur = baseCurrency(db), curFull = !!baseCur?.curr_symbol && baseCur.decimal_digit_cnt != null;
+  const symbolAt = ({ '#1.1': 0, '1.1#': 1, '# 1.1': 2, '1.1 #': 3 } as Record<string, number>)[baseCur?.pos_curr_fmt_type ?? ''];
+  if (baseCur && curFull) { el('CurrencyDigits', Number(baseCur.decimal_digit_cnt)); el('CurrencySymbol', baseCur.curr_symbol!); }
+  if (baseCur) el('CurrencyCode', baseCur.curr_short_name);
+  if (baseCur && curFull && symbolAt != null) el('CurrencySymbolPosition', symbolAt);
   el('CalendarUID', m.calUid);
   el('DefaultStartTime', '08:00:00');
   el('DefaultFinishTime', '17:00:00');
@@ -852,7 +861,7 @@ export function writeMspdiTo(db: Db, opts: { projIds?: string[]; report?: string
   const notNumber = notNumberNote(cfValue.notNumber);
   if (notNumber) opts.report?.push(notNumber);
   if (followed.length) opts.report?.push(`This file has no WBS code mask, so Microsoft Project's WBS code is the outline number: the WBS of ${followed.length} moved task(s) follows the new place: ${followed.slice(0, 20).join('; ')}.`);
-  const body = m.keep && m.row ? mergeKids(m.keep.kids, proj, { ...PROJECT_DEPS, ExtendedAttributes: () => defsChanged }, changedSince('PROJECT', m.row, k), ORDER.Project) : proj.map((x) => x[1]).join('\n');
+  const body = m.keep && m.row ? mergeKids(m.keep.kids, proj, { ...PROJECT_DEPS, ExtendedAttributes: () => defsChanged, ...CURRENCY_DEPS(!!baseCur) }, changedSince('PROJECT', m.row, k), ORDER.Project) : proj.map((x) => x[1]).join('\n');
   put(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Project xmlns="${MSPDI_NS}">\n`);
   // the project's elements, each collection's pieces where its marker stands (each written once, then let go)
   const re = /\u0001P6C-SECTION:(\d+)\u0001/g;
