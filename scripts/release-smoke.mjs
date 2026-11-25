@@ -143,7 +143,10 @@ else {
   const cmp4 = await call('compare_4d', { handle: m4.handle, against: 'planned' });
   if (!cmp4.totals) failures.push(`compare_4d: ${JSON.stringify(cmp4).slice(0, 200)}`);
   const view4 = await call('render_4d', { handle: m4.handle, kind: 'viewer', path: join(dir, '4d-viewer') });
-  if (!view4.written?.some((f) => f.endsWith('viewer4d.js'))) failures.push(`render_4d viewer: ${JSON.stringify(view4).slice(0, 200)}`);
+  // the page (its viewer script inside it) and its model folder beside it: the manifest and the tiles (docs/4d-tiles-contract.md)
+  const page4 = view4.written?.[0] ?? '', html4 = page4 && existsSync(page4) ? readFileSync(page4, 'utf8') : '';
+  if (!/-4D\.html$/.test(page4) || !/WHIQ_4D viewer/.test(html4) || /<script src=/.test(html4)
+    || !view4.written.some((f) => /model-[0-9a-f]{16}[\\/]manifest\.json$/.test(f)) || !view4.written.some((f) => /model-[0-9a-f]{16}[\\/]tile-\d{5}\.glb$/.test(f))) failures.push(`render_4d viewer: ${JSON.stringify(view4).slice(0, 200)}`);
   // video where the runner has a Chromium (P6CLONE_CHROMIUM); MP4 through ffmpeg where it has one (P6CLONE_FFMPEG,
   // with P6CLONE_RECORD_WEBM=1 so the page records WebM as Chromium for Testing does)
   const vid = await call('render_4d', { handle: m4.handle, kind: 'video', step: 30, width: 320, height: 180, path: join(dir, '4d-video') });
