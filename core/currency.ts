@@ -5,6 +5,7 @@
  */
 import type { Db, Row } from './db.ts';
 import { ermhdrCurrency } from './db.ts';
+import { removeWhere } from './journal.ts';
 
 export const CURRTYPE_FIELDS = ['curr_id', 'decimal_digit_cnt', 'curr_symbol', 'decimal_symbol', 'digit_group_symbol', 'pos_curr_fmt_type', 'neg_curr_fmt_type', 'curr_type', 'curr_short_name', 'group_digit_cnt', 'base_exch_rate'];
 
@@ -90,19 +91,43 @@ export function currencyRow(spec: CurrencySpec, id = '1'): Row {
   };
 }
 
-/** Makes `spec` the file's base currency: the base row's ID, name, symbol and formats are replaced (P6: the base currency is edited in
- *  place; its ID, name and symbol can be changed), amounts are not converted. A file with none gets it as its one currency. Answers the
- *  ID it had (null: none). */
-export function setBaseCurrency(db: Db, spec: CurrencySpec): { was: string | null; now: Row } {
+/** What setBaseCurrency did: the base currency's ID before (null: none), its row now, and the row of the same currency the file listed
+ *  besides the base one, merged into it (null: none). */
+export interface BaseCurrencyChange { was: string | null; now: Row; merged: { id: string; name: string; rate: string; resources: number } | null }
+
+/** The currency settings a caller can give, as the CURRTYPE fields they set. */
+const GIVEN: Array<[keyof Exclude<CurrencySpec, string>, string]> = [['name', 'curr_type'], ['symbol', 'curr_symbol'], ['decimal_places', 'decimal_digit_cnt'], ['decimal_symbol', 'decimal_symbol'], ['group_symbol', 'digit_group_symbol']];
+
+/**
+ * Makes `spec` the file's base currency (P6: Admin > Currencies, the base currency edited in place: its ID, name and symbol can be changed;
+ * amounts are not converted). The file's currency list is P6's database list as the export wrote it, one row per Currency ID: when it
+ * already lists that currency besides the base one, that row becomes the base currency — the base row takes its ID and its own settings
+ * (name, symbol, places, separators, formats; what the caller gives wins), the other row goes, and a resource that named it names the
+ * base (as a P6 user deletes that currency, then edits the base). The rest of the list keeps its exchange rates. A file with none gets
+ * the currency as its one currency. Only this file changes.
+ */
+export function setBaseCurrency(db: Db, spec: CurrencySpec): BaseCurrencyChange {
   const t = (db.tables.CURRTYPE ??= { name: 'CURRTYPE', fields: [...CURRTYPE_FIELDS], rows: [] });
   for (const f of CURRTYPE_FIELDS) if (!t.fields.includes(f)) t.fields.push(f);
   const base = storedBase(db);
   const was0 = base ? null : ermhdrCurrency(db.header?.raw) || null;   // (a header-only currency: the row is written now, the header follows)
   if (!base && t.rows.length) throw new Error(`The file has ${t.rows.length} currencies and does not say which is the base one; set_currency cannot tell which to change.`);
   const row = currencyRow(spec, base?.curr_id ?? '1');
-  // P6 keeps one row per Currency ID: a code another currency of the file already has is not given to the base one
-  const other = t.rows.find((r) => r !== base && r.curr_short_name === row.curr_short_name);
-  if (other) throw new Error(`The file already has a currency ${other.curr_short_name} (${other.curr_type || 'no name'}, exchange rate ${other.base_exch_rate || '?'}), and P6 keeps one row per Currency ID: the base currency cannot take its code.`);
+  const other = base ? t.rows.find((r) => r.curr_id !== base.curr_id && r.curr_short_name === row.curr_short_name) : undefined;
+  let merged: BaseCurrencyChange['merged'] = null;
+  if (base && other) {
+    // the file's own row of that currency: its settings, unless the caller gave them
+    const given: Partial<Exclude<CurrencySpec, string>> = typeof spec === 'string' ? {} : spec;
+    for (const f of ['curr_type', 'curr_symbol', 'decimal_digit_cnt', 'decimal_symbol', 'digit_group_symbol', 'pos_curr_fmt_type', 'neg_curr_fmt_type', 'group_digit_cnt']) {
+      const by = GIVEN.find(([, field]) => field === f)?.[0];
+      if ((by == null || given[by] == null) && other[f] != null && other[f] !== '') row[f] = other[f];
+    }
+    const id = other.curr_id;
+    let resources = 0;
+    for (const r of db.tables.RSRC?.rows ?? []) if (r.curr_id === id) { r.curr_id = base.curr_id; resources++; }
+    merged = { id: other.curr_short_name, name: other.curr_type || '', rate: other.base_exch_rate || '', resources };
+    removeWhere(t.rows, (r) => r.curr_id === id);
+  }
   if (base) {
     const was = base.curr_short_name || null;
     const keep = { ...base };
@@ -110,11 +135,11 @@ export function setBaseCurrency(db: Db, spec: CurrencySpec): { was: string | nul
     if (keep._xml_IsBaseCurrency) base._xml_IsBaseCurrency = keep._xml_IsBaseCurrency;
     // the header names the base currency too: it follows
     if (db.header?.raw && ermhdrCurrency(db.header.raw) === was) db.header.raw[db.header.raw.length - 1] = row.curr_short_name;
-    return { was, now: base };
+    return { was, now: base, merged };
   }
   t.rows.push(row);
   if (was0 && db.header?.raw) db.header.raw[db.header.raw.length - 1] = row.curr_short_name;
-  return { was: was0, now: row };
+  return { was: was0, now: row, merged };
 }
 
 /** The answers that carry the file's base currency: those that give costs (in the variant that gives them), and the open and new file's. One

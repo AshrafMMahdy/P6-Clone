@@ -5,7 +5,7 @@
 // "wbs_id:<id>" (the id add_wbs returns). Days are converted on the activity's own calendar (its hours per day).
 // Used by the command-line `edit` command and the MCP server.
 import { addField, dropIndexes, nextId, rowIndex, rows, table, tableCache, withIdCache, type Db, type Row } from '../db.ts';
-import { currencyId, currencyRow, setBaseCurrency, type CurrencySpec } from '../currency.ts';
+import { baseCurrency, currencyId, currencyRow, setBaseCurrency, type CurrencySpec } from '../currency.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { calendarsWithNoWork, noWorkTimeText, p6num } from '../schedule/cpm.ts';
 import { CalendarHorizonError } from '../calendar/calendar.ts';
@@ -100,7 +100,7 @@ export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_sche
 export const OP_GUIDE = [
   'Operations (JSON objects with "op"; [x] = optional; durations, remaining and lags in days of the activity\'s own calendar (lags: the relationship-lag calendar, by default the predecessor\'s), or *_hours; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant; an activity read from a Microsoft Project file may be named "uid:<task UID>" instead of its ID; a WBS element may be named "wbs_id:<id>" (the id add_wbs returns) instead of its code):',
   `add_project: id, start, [name], [must_finish_by], [calendar], [currency] (the file's base currency, when it has none yet: an ISO 4217 code such as "EUR"; every project of a file shares it)`,
-  `set_currency: code (ISO 4217, e.g. "EUR"), [name], [symbol], [decimal_places], [decimal_symbol], [group_symbol]: the file's base currency, as P6's Admin > Currencies edits it (every cost of the file is in it). Amounts are not converted`,
+  `set_currency: code (ISO 4217, e.g. "EUR"), [name], [symbol], [decimal_places], [decimal_symbol], [group_symbol]: the file's base currency, as P6's Admin > Currencies edits it (every cost of the file is in it); a currency the file already lists besides the base becomes the base one, listed once. Amounts are not converted`,
   `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
   `set_schedule_options: [project], then any of ${SCHEDULE_OPTIONS_GUIDE}. Written to the project (P6's Schedule Options), used by every later schedule`,
   `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [financial_period_calendar] (the calendar of financial periods the project reports on; "" = the default), [eps] (EPS ID), [new_id] (a new Project ID, at most 40 characters; the root WBS node's code follows), [new_proj_id] (a new internal project number, the proj_id the XER carries: a positive whole number no other project has; every reference to the project follows)`,
@@ -416,9 +416,14 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
         ...(op.decimal_places != null ? { decimal_places: Number(op.decimal_places) } : {}), ...(op.decimal_symbol != null ? { decimal_symbol: String(op.decimal_symbol) } : {}), ...(op.group_symbol != null ? { group_symbol: String(op.group_symbol) } : {}) };
       let r!: ReturnType<typeof setBaseCurrency>;
       try { r = setBaseCurrency(db, spec); } catch (e) { fail((e as Error).message); }
-      const now = r.now.curr_short_name;
+      const now = r.now.curr_short_name, m = r.merged, others = rows(db, 'CURRTYPE').length - 1;
+      const notes = [
+        ...(r.was && r.was !== now ? [`Amounts are not converted: every cost keeps its number, now read in ${now} (P6 changes its base currency the same way).`] : []),
+        ...(m ? [`The file already listed ${m.id}${[m.name, m.rate ? `exchange rate ${m.rate} to ${r.was ?? 'the old base'}` : ''].filter(Boolean).length ? ` (${[m.name, m.rate ? `exchange rate ${m.rate} to ${r.was ?? 'the old base'}` : ''].filter(Boolean).join(', ')})` : ''}: that currency is now the base one, with the name, symbol and format the file gave it; it is listed once${m.resources ? `, and the ${m.resources} resource${m.resources === 1 ? '' : 's'} that named it name the base` : ''}.`] : []),
+        ...(r.was && r.was !== now && others > 0 ? [`The file's ${others} other currenc${others === 1 ? 'y keeps its exchange rate' : 'ies keep their exchange rates'} to ${r.was} (P6 does not recalculate them either): they matter only when costs are shown in another currency.`] : []),
+      ];
       return { currency: now, name: r.now.curr_type, symbol: r.now.curr_symbol, decimal_places: Number(r.now.decimal_digit_cnt),
-        ...(r.was && r.was !== now ? { was: r.was, note: `Amounts are not converted: every cost keeps its number, now read in ${now} (P6 changes its base currency the same way).` } : {}) };
+        ...(r.was && r.was !== now ? { was: r.was } : {}), ...(notes.length ? { notes } : {}) };
     }
     case 'add_holidays': {
       const c = calendar(op.calendar);
@@ -559,7 +564,7 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
       const rid = String(nextId(db, 'RSRC'));
       const type = RTYPE[String(op.type ?? 'labor').toLowerCase()] ?? fail('Resource type must be labor, nonlabor or material.');
       const perHr = op.units_per_day != null ? num(op.units_per_day, 'units_per_day') / hpd : 1;
-      R.rows.push({ rsrc_id: rid, parent_rsrc_id: op.parent ? resource(op.parent).rsrc_id : '', clndr_id: cal.clndr_id, rsrc_seq_num: String(R.rows.length + 1), rsrc_name: typeof op.name === 'string' ? op.name : id, rsrc_short_name: id, def_qty_per_hr: p6num(perHr), cost_qty_type: 'QT_Hour', ot_factor: '1', active_flag: 'Y', rsrc_type: type, unit_id: '', curr_id: rows(db, 'CURRTYPE')[0]?.curr_id ?? '' });
+      R.rows.push({ rsrc_id: rid, parent_rsrc_id: op.parent ? resource(op.parent).rsrc_id : '', clndr_id: cal.clndr_id, rsrc_seq_num: String(R.rows.length + 1), rsrc_name: typeof op.name === 'string' ? op.name : id, rsrc_short_name: id, def_qty_per_hr: p6num(perHr), cost_qty_type: 'QT_Hour', ot_factor: '1', active_flag: 'Y', rsrc_type: type, unit_id: '', curr_id: baseCurrency(db)?.curr_id ?? '' });   // (a new resource names the base currency)
       const RR = table(db, 'RSRCRATE');
       for (const f of ['rsrc_rate_id', 'rsrc_id', 'max_qty_per_hr', 'cost_per_qty', 'start_date']) addField(RR, f);
       RR.rows.push({ rsrc_rate_id: String(nextId(db, 'RSRCRATE')), rsrc_id: rid, max_qty_per_hr: p6num(op.max_units_per_hour != null ? num(op.max_units_per_hour, 'max_units_per_hour') : op.max_units_per_day != null ? num(op.max_units_per_day, 'max_units_per_day') / hpd : perHr), cost_per_qty: p6num(op.price_per_unit != null ? num(op.price_per_unit, 'price_per_unit') : 0), start_date: '' });

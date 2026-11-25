@@ -110,7 +110,7 @@ test('new_project needs the base currency; it is the file\'s, named in the answe
   const set = await call('edit', { ...h, operations: [{ op: 'set_currency', code: 'AED' }] });
   const said = set.d.results[0];
   assert.equal(said.currency, 'AED'); assert.equal(said.was, 'SAR');
-  assert.match(said.note, /Amounts are not converted/);
+  assert.match(said.notes[0], /Amounts are not converted/);
   assert.equal((await call('earned_value', h)).d.currency, 'AED');
   const mismatch = await call('edit', { ...h, operations: [{ op: 'add_project', id: 'P2', start: '2026-03-02', currency: 'EUR' }] });
   assert.equal(mismatch.err, true);
@@ -192,21 +192,44 @@ test('add_project with a currency on a file of several currencies that does not 
   assert.equal(applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-03-02' }]).ok, true, 'without a currency it is made');
 });
 
-test('a P6 file of many currencies (cairo festival city): the base is the row its header names; another currency\'s code is not given to it', () => {
+test('a P6 file of many currencies (cairo festival city): the base is the row its header names; a currency it already lists becomes the base, listed once', () => {
   const { db } = parseXerFile(join(process.cwd(), 'Sample XERs', 'cairo festival city.xer'));
   const n = rows(db, 'CURRTYPE').length;
   assert.ok(n > 5);
   assert.equal(baseCurrency(db)!.curr_id, '1');
-  const dup = applyOps(db, [{ op: 'set_currency', code: 'ARS' }]);
-  assert.equal(dup.ok, false);
-  assert.match(dup.error!.message, /already has a currency ARS \(Argentine Peso, exchange rate 3\.077\), and P6 keeps one row per Currency ID/);
-  const r = applyOps(db, [{ op: 'set_currency', code: 'EGP' }]);
+  const eur0 = { ...rows(db, 'CURRTYPE').find((c) => c.curr_short_name === 'EUR')! };
+  const gbp0 = rows(db, 'CURRTYPE').find((c) => c.curr_short_name === 'CHF')!.base_exch_rate;
+  // a resource that named the file's EUR row (none in the sample: one is pointed at it)
+  rows(db, 'RSRC')[0].curr_id = eur0.curr_id;
+  const r = applyOps(db, [{ op: 'set_currency', code: 'EUR' }]);
   assert.equal(r.ok, true, JSON.stringify(r.error));
-  assert.deepEqual((r.results as any[])[0].was, 'USD');
-  const base = rows(db, 'CURRTYPE').find((c) => c.curr_id === '1')!;
-  assert.deepEqual([base.curr_short_name, base.base_exch_rate, db.header!.raw.at(-1)], ['EGP', '1', 'EGP'], 'edited in place at its rate; the header follows');
-  assert.equal(rows(db, 'CURRTYPE').length, n, 'no row added');
-  assert.equal(rows(db, 'CURRTYPE').find((c) => c.curr_short_name === 'ARS')!.base_exch_rate, '3.077', 'the other currencies untouched');
+  const said = (r.results as any[])[0];
+  assert.deepEqual([said.currency, said.was, said.name, said.symbol], ['EUR', 'USD', eur0.curr_type, eur0.curr_symbol], 'the base takes the file\'s own settings of EUR');
+  assert.match(said.notes.join(' '), /already listed EUR \(EURO, exchange rate 0\.739088 to USD\): that currency is now the base one, .* listed once, and the 1 resource that named it name the base/);
+  assert.match(said.notes.join(' '), new RegExp(`other currencies keep their exchange rates to USD`));
+  const cur = rows(db, 'CURRTYPE');
+  assert.equal(cur.length, n - 1, 'listed once');
+  assert.deepEqual(cur.filter((c) => c.curr_short_name === 'EUR').map((c) => [c.curr_id, c.base_exch_rate]), [['1', '1']], 'the base row, at rate 1');
+  assert.equal(db.header!.raw.at(-1), 'EUR', 'the header follows');
+  assert.equal(rows(db, 'RSRC')[0].curr_id, '1', 'the resource names the base');
+  assert.equal(cur.find((c) => c.curr_short_name === 'CHF')!.base_exch_rate, gbp0, 'the other currencies untouched');
+  assert.equal(formatMoney(db, 1234.5), formatMoney({ tables: { CURRTYPE: { name: 'CURRTYPE', fields: [], rows: [{ ...eur0, base_exch_rate: '1' }] } } }, 1234.5));
+  // given settings win over the file's own
+  const { db: db2 } = parseXerFile(join(process.cwd(), 'Sample XERs', 'cairo festival city.xer'));
+  assert.equal(applyOps(db2, [{ op: 'set_currency', code: 'EUR', symbol: 'EUR ', name: 'Euro' }]).ok, true);
+  assert.deepEqual([baseCurrency(db2)!.curr_symbol, baseCurrency(db2)!.curr_type], ['EUR ', 'Euro']);
+  const r2 = applyOps(db2, [{ op: 'set_currency', code: 'EGP' }]);
+  assert.equal(r2.ok, true, JSON.stringify(r2.error));
+  assert.deepEqual([(r2.results as any[])[0].was, baseCurrency(db2)!.curr_short_name, rows(db2, 'CURRTYPE').length], ['EUR', 'EGP', n - 1], 'a currency it does not list: the base edited in place');
+});
+
+test('a new resource names the base currency, not the first of the list (CCA R03: header EGP, USD first)', () => {
+  const { db } = parseXerFile(join(process.cwd(), 'Sample XERs', 'CCA R03 dt 24Oct11SC.xer'));
+  const base = baseCurrency(db)!;
+  assert.equal(base.curr_short_name, 'EGP');
+  assert.notEqual(rows(db, 'CURRTYPE')[0].curr_id, base.curr_id);
+  assert.equal(applyOps(db, [{ op: 'add_resource', id: 'NEWRES', type: 'labor' }]).ok, true);
+  assert.equal(rows(db, 'RSRC').find((x) => x.rsrc_short_name === 'NEWRES')!.curr_id, base.curr_id);
 });
 
 test('the base currency survives every format the clone writes: P6 XML (separators and formats), Microsoft Project XML (its code), MPX (record 10)', () => {
@@ -234,6 +257,19 @@ test('set_currency is undone and redone like any change; compute_schedule says t
   assert.equal((await call('get_activity', { ...h, activity_id: 'A1' })).d.currency, 'SAR', 'undone');
   assert.equal((await call('redo', h)).err, false);
   assert.equal((await call('get_activity', { ...h, activity_id: 'A1' })).d.currency, 'AED', 'redone');
+  // a merge undone: the file's list as it was
+  const cpath = join(root, 'cairo.xer');
+  copyFileSync(join(process.cwd(), 'Sample XERs', 'cairo festival city.xer'), cpath);
+  const co = (await call('open_file', { path: cpath, lenient: true })).d;
+  const k = { handle: co.handle, owner_key: co.owner_key };
+  const merged = await call('edit', { ...k, operations: [{ op: 'set_currency', code: 'EUR' }] });
+  assert.equal(merged.err, false, JSON.stringify(merged.d).slice(0, 300));
+  assert.equal((await call('undo', k)).err, false);
+  const back = await call('save', { ...k, path: join(root, 'cairo-back.xer') });
+  assert.equal(back.err, false, JSON.stringify(back.d).slice(0, 300));
+  const txt = readFileSync(join(root, 'cairo-back.xer'), 'latin1');
+  assert.match(txt.split('\n')[0], /\tUSD\r?$/, 'undone: the header names USD again');
+  assert.equal((txt.split('%T\tCURRTYPE')[1].split('%T')[0].match(/^%R/gm) ?? []).length, (readFileSync(cpath, 'latin1').split('%T\tCURRTYPE')[1].split('%T')[0].match(/^%R/gm) ?? []).length, 'undone: every currency listed again');
   // a file that had no currency table: set_currency, undone, leaves it with none
   const path = join(root, 'UndoCur.xml');
   writeFileSync(path, MSPDI('Euros'));
